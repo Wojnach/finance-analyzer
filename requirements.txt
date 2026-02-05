@@ -1,0 +1,40 @@
+# Core - Freqtrade
+freqtrade
+
+# Technical Analysis
+ta-lib
+pandas-ta
+numpy
+pandas
+
+# ML/AI (FreqAI)
+torch
+scikit-learn
+optuna
+catboost
+lightgbm
+
+# Sentiment Analysis
+transformers
+newspaper3k
+requests
+
+# Web Dashboard
+fastapi
+uvicorn
+python-multipart
+
+# Avanza Integration
+avanza-api
+
+# Telegram
+python-telegram-bot
+
+# Testing
+pytest
+pytest-cov
+pytest-asyncio
+
+# Utilities
+python-dotenv
+pyyaml
