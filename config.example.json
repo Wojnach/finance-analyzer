@@ -1,4 +1,6 @@
 {
+  "strategy": "TABaseStrategy",
+  "strategy_path": "user_data/strategies/",
   "trading_mode": "futures",
   "margin_mode": "isolated",
   "max_open_trades": 3,
@@ -13,6 +15,18 @@
   "exit_profit_only": false,
   "ignore_roi_if_entry_signal": false,
   "timeframe": "5m",
+  "order_types": {
+    "entry": "limit",
+    "exit": "limit",
+    "stoploss": "market",
+    "stoploss_on_exchange": true
+  },
+  "unfilledtimeout": {
+    "entry": 10,
+    "exit": 10,
+    "exit_timeout_count": 0,
+    "unit": "minutes"
+  },
   "exchange": {
     "name": "binance",
     "key": "YOUR_BINANCE_API_KEY",
