@@ -92,7 +92,7 @@ def detect_macd_crossover(macd_line: pd.Series, signal_line: pd.Series) -> pd.Da
         DataFrame with 'bullish' and 'bearish' columns indicating crossovers
     """
     macd_above = macd_line > signal_line
-    macd_above_shifted = macd_above.shift(1)
+    macd_above_shifted = macd_above.shift(1, fill_value=False)
 
     bullish = macd_above & ~macd_above_shifted  # Was below, now above
     bearish = ~macd_above & macd_above_shifted  # Was above, now below
@@ -145,7 +145,7 @@ def detect_ema_crossover(fast_ema: pd.Series, slow_ema: pd.Series) -> pd.DataFra
         DataFrame with 'bullish' and 'bearish' columns indicating crossovers
     """
     fast_above = fast_ema > slow_ema
-    fast_above_shifted = fast_above.shift(1)
+    fast_above_shifted = fast_above.shift(1, fill_value=False)
 
     bullish = fast_above & ~fast_above_shifted  # Was below, now above
     bearish = ~fast_above & fast_above_shifted  # Was above, now below
