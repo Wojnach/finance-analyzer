@@ -14,7 +14,7 @@ fi
 
 exec podman run --rm -it \
     --name ft-dry-run \
-    -p 8080:8080 \
+    --network=host \
     -v "${PROJECT_DIR}/user_data:/freqtrade/user_data" \
     -v "${CONFIG}:/freqtrade/config.json:ro" \
     "$IMAGE" \
