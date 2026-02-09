@@ -29,8 +29,8 @@
   },
   "exchange": {
     "name": "binance",
-    "key": "YOUR_BINANCE_API_KEY",
-    "secret": "YOUR_BINANCE_API_SECRET",
+    "key": "FAKE_KEY_replace_in_config_json",
+    "secret": "FAKE_SECRET_replace_in_config_json",
     "ccxt_config": {},
     "ccxt_async_config": {},
     "pair_whitelist": ["BTC/USDT:USDT", "ETH/USDT:USDT"],
@@ -58,8 +58,8 @@
   ],
   "telegram": {
     "enabled": true,
-    "token": "YOUR_TELEGRAM_BOT_TOKEN",
-    "chat_id": "YOUR_TELEGRAM_CHAT_ID",
+    "token": "FAKE_TOKEN_replace_in_config_json",
+    "chat_id": "FAKE_CHATID_replace_in_config_json",
     "keyboard": [
       ["/daily", "/stats", "/balance", "/profit"],
       ["/status table", "/performance"],
@@ -89,11 +89,11 @@
     "listen_port": 8080,
     "verbosity": "error",
     "enable_openapi": true,
-    "jwt_secret_key": "CHANGE_THIS_TO_A_RANDOM_SECRET",
-    "ws_token": "CHANGE_THIS_TO_A_RANDOM_TOKEN",
+    "jwt_secret_key": "FAKE_JWT_replace_in_config_json",
+    "ws_token": "FAKE_WS_TOKEN_replace_in_config_json",
     "CORS_origins": ["http://localhost:3000"],
     "username": "admin",
-    "password": "CHANGE_THIS_PASSWORD"
+    "password": "FAKE_PASS_replace_in_config_json"
   },
   "bot_name": "finance-analyzer",
   "initial_state": "running",

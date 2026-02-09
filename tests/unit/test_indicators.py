@@ -133,12 +133,12 @@ class TestEMA:
         from user_data.strategies.indicators import calculate_ema, calculate_sma
 
         # Price with sudden jump
-        prices = pd.Series([100] * 20 + [150] * 10)
+        prices = pd.Series([100] * 20 + [150] * 5)
 
         ema = calculate_ema(prices, period=10)
         sma = calculate_sma(prices, period=10)
 
-        # After the jump, EMA should be closer to 150 than SMA
+        # During the transition, EMA should be closer to 150 than SMA
         assert ema.iloc[-1] > sma.iloc[-1]
 
     def test_ema_smoothing(self):
