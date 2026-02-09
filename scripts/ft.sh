@@ -17,6 +17,7 @@ fi
 
 exec podman run --rm -it \
     --name ft-"$$" \
+    --network=host \
     -v "${PROJECT_DIR}/user_data:/freqtrade/user_data" \
     -v "${CONFIG}:/freqtrade/config.json:ro" \
     "$IMAGE" \
