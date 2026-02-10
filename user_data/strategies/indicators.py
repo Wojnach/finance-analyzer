@@ -188,3 +188,29 @@ def detect_volume_spike(
     """
     vol_avg = volumes.rolling(window=lookback).mean()
     return volumes > (vol_avg * threshold)
+
+
+# =============================================================================
+# Bollinger Bands
+# =============================================================================
+
+
+def calculate_bbands(
+    prices: pd.Series, period: int = 20, nbdev: float = 2.0
+) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    Calculate Bollinger Bands.
+
+    Args:
+        prices: Series of closing prices
+        period: SMA period (default 20)
+        nbdev: Number of standard deviations (default 2.0)
+
+    Returns:
+        Tuple of (upper_band, middle_band, lower_band)
+    """
+    middle = prices.rolling(window=period).mean()
+    std = prices.rolling(window=period).std()
+    upper = middle + nbdev * std
+    lower = middle - nbdev * std
+    return upper, middle, lower

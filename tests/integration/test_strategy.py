@@ -116,6 +116,9 @@ def test_populate_indicators():
         "ema_slow",
         "volume_sma",
         "atr",
+        "bb_lower",
+        "bb_middle",
+        "bb_upper",
         "cdl_bullish",
         "cdl_bearish",
     ]:
@@ -221,16 +224,19 @@ def test_trend_filter_blocks_entries_low_adx():
 
 @requires_freqtrade
 @requires_talib
-def test_confidence_scoring():
-    """min_confidence thresholds raw signal sum (max ~4 + patterns)."""
+def test_trigger_guard_params():
+    """Strategy should have trigger+guard params but not confidence params."""
     sys.path.insert(0, "/freqtrade/user_data/strategies")
     from ta_base_strategy import TABaseStrategy
 
     config = _make_config()
     s = TABaseStrategy(config)
 
-    assert s.min_confidence.value >= 0.3
-    assert s.min_confidence.value <= 1.5
+    assert hasattr(s, "rsi_oversold")
+    assert hasattr(s, "volume_spike_mult")
+    assert hasattr(s, "adx_threshold")
+    assert not hasattr(s, "min_confidence")
+    assert not hasattr(s, "pattern_weight")
 
 
 @requires_freqtrade
@@ -324,12 +330,14 @@ def test_hyperoptable_params():
     config = _make_config()
     s = TABaseStrategy(config)
 
-    assert hasattr(s, "pattern_weight")
+    assert hasattr(s, "rsi_oversold")
+    assert hasattr(s, "volume_spike_mult")
     assert hasattr(s, "adx_threshold")
     assert hasattr(s, "max_daily_loss_pct")
     assert hasattr(s, "max_drawdown_pct")
 
-    assert s.pattern_weight.space == "buy"
+    assert s.rsi_oversold.space == "buy"
+    assert s.volume_spike_mult.space == "buy"
     assert s.adx_threshold.space == "buy"
     assert s.max_daily_loss_pct.space == "sell"
     assert s.max_drawdown_pct.space == "sell"

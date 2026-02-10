@@ -73,9 +73,7 @@ class TABaseStrategy(IStrategy):
 
     # --- Hyperoptable: entry ---
     rsi_oversold = IntParameter(25, 45, default=35, space="buy")
-    min_confidence = DecimalParameter(0.3, 1.5, default=0.8, space="buy")
-    volume_spike_mult = DecimalParameter(1.2, 3.0, default=1.5, space="buy")
-    pattern_weight = DecimalParameter(0.0, 0.5, default=0.15, space="buy")
+    volume_spike_mult = DecimalParameter(1.0, 2.5, default=1.5, space="buy")
     adx_threshold = IntParameter(10, 30, default=20, space="buy")
 
     # --- Hyperoptable: exit ---
@@ -116,6 +114,13 @@ class TABaseStrategy(IStrategy):
             dataframe["high"], dataframe["low"], dataframe["close"], timeperiod=14
         )
 
+        bb_upper, bb_middle, bb_lower = talib.BBANDS(
+            dataframe["close"], timeperiod=20, nbdevup=2.0, nbdevdn=2.0, matype=0
+        )
+        dataframe["bb_lower"] = bb_lower
+        dataframe["bb_middle"] = bb_middle
+        dataframe["bb_upper"] = bb_upper
+
         # Candlestick patterns
         o, h, l, c = (
             dataframe["open"],
@@ -134,32 +139,29 @@ class TABaseStrategy(IStrategy):
         return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        rsi_sig = (dataframe["rsi"] < self.rsi_oversold.value).astype(float)
+        rsi_below = dataframe["rsi"] < self.rsi_oversold.value
+        rsi_cross = rsi_below & ~rsi_below.shift(1, fill_value=False)
 
-        macd_bullish = (dataframe["macd"] > dataframe["macd_signal"]).astype(float)
+        macd_hist_pos = dataframe["macd_hist"] > 0
+        macd_hist_cross = macd_hist_pos & ~macd_hist_pos.shift(1, fill_value=False)
 
-        ema_bullish = (dataframe["ema_fast"] > dataframe["ema_slow"]).astype(float)
-
-        vol_spike = (
-            dataframe["volume"] > dataframe["volume_sma"] * self.volume_spike_mult.value
-        ).astype(float)
-
-        cdl_net = (dataframe["cdl_bullish"] - dataframe["cdl_bearish"]).clip(
-            lower=0, upper=2
+        bb_touch = (dataframe["close"] < dataframe["bb_lower"]) & (
+            dataframe["rsi"] < 40
         )
 
-        confidence = (
-            rsi_sig + macd_bullish + ema_bullish + vol_spike
-        ) + cdl_net * self.pattern_weight.value
+        trigger = rsi_cross | macd_hist_cross | bb_touch
 
-        trend_up = dataframe["close_1h"] > dataframe["ema_50_1h"]
-        trend_strong = dataframe["adx_1h"] > self.adx_threshold.value
-        trend_ok = trend_up & trend_strong
+        guards = (
+            (dataframe["ema_fast"] > dataframe["ema_slow"])
+            & (
+                dataframe["volume"]
+                > dataframe["volume_sma"] * self.volume_spike_mult.value
+            )
+            & (dataframe["close_1h"] > dataframe["ema_50_1h"])
+            & (dataframe["adx_1h"] > self.adx_threshold.value)
+        )
 
-        dataframe.loc[
-            (confidence >= self.min_confidence.value) & trend_ok,
-            "enter_long",
-        ] = 1
+        dataframe.loc[trigger & guards, "enter_long"] = 1
         dataframe.loc[dataframe["volume"] <= 0, "enter_long"] = 0
 
         return dataframe

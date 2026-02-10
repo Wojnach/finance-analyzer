@@ -88,17 +88,17 @@ The core entry signals (RSI + MACD + EMA + volume + candlestick patterns + 1h tr
 
 ---
 
-## Phase 4: Claude as Trading Copilot — PREP DONE
+## Phase 4: Claude as Trading Copilot — READY
 
-> Waiting on profitable dry run.
+> MCP servers installed, no API costs. Can start using now.
 
 - [x] Freqtrade-MCP installed (`~/mcp-servers/freqtrade-mcp/`)
 - [x] CCXT MCP installed (`~/mcp-servers/mcp-server-ccxt/`)
 - [x] CoinGecko MCP configured (remote HTTP, no API key)
 - [x] `.mcp.json` in project root (gitignored), `.mcp.example.json` as template
 - [ ] LunarCrush MCP (needs API key from lunarcrush.com)
-- [ ] Weekly Haiku review (~$2/month) — evaluate after 1 month
-- [ ] Use cases: regime analysis, news alerts, anomaly detection
+- [ ] Use copilot for: regime analysis, strategy review, anomaly detection
+- [ ] Optional: automated scheduled analysis (cron + Claude Code)
 
 Full plan: `docs/plans/2026-02-09-llm-trading-research.md`
 

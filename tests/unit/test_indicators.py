@@ -191,3 +191,35 @@ class TestVolume:
 
         # Last SMA should be average of last 3: (300+400+500)/3 = 400
         assert vol_sma.iloc[-1] == 400.0
+
+
+class TestBollingerBands:
+    """Test Bollinger Bands calculations."""
+
+    def test_price_containment(self):
+        """Most prices should fall within the bands."""
+        from user_data.strategies.indicators import calculate_bbands
+
+        np.random.seed(42)
+        prices = pd.Series(100 + np.random.randn(100).cumsum() * 0.5)
+        upper, middle, lower = calculate_bbands(prices, period=20, nbdev=2.0)
+
+        valid = prices.index[~upper.isna()]
+        within = (
+            (prices[valid] <= upper[valid]) & (prices[valid] >= lower[valid])
+        ).mean()
+        assert within > 0.85
+
+    def test_width_increases_with_volatility(self):
+        """Band width should increase when volatility increases."""
+        from user_data.strategies.indicators import calculate_bbands
+
+        calm = pd.Series([100 + np.sin(i / 5) * 0.5 for i in range(50)])
+        volatile = pd.Series([100 + np.sin(i / 5) * 5.0 for i in range(50)])
+
+        u_calm, _, l_calm = calculate_bbands(calm, period=20, nbdev=2.0)
+        u_vol, _, l_vol = calculate_bbands(volatile, period=20, nbdev=2.0)
+
+        calm_width = (u_calm - l_calm).dropna().iloc[-1]
+        vol_width = (u_vol - l_vol).dropna().iloc[-1]
+        assert vol_width > calm_width
