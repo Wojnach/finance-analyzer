@@ -73,7 +73,7 @@ class TABaseStrategy(IStrategy):
 
     # --- Hyperoptable: entry ---
     rsi_oversold = IntParameter(25, 45, default=35, space="buy")
-    volume_spike_mult = DecimalParameter(1.0, 2.5, default=1.5, space="buy")
+    volume_spike_mult = DecimalParameter(0.8, 1.5, default=1.2, space="buy")
     adx_threshold = IntParameter(10, 30, default=20, space="buy")
 
     # --- Hyperoptable: exit ---
@@ -140,16 +140,17 @@ class TABaseStrategy(IStrategy):
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         rsi_below = dataframe["rsi"] < self.rsi_oversold.value
-        rsi_cross = rsi_below & ~rsi_below.shift(1, fill_value=False)
 
-        macd_hist_pos = dataframe["macd_hist"] > 0
-        macd_hist_cross = macd_hist_pos & ~macd_hist_pos.shift(1, fill_value=False)
+        macd_hist_cross = (dataframe["macd_hist"] > 0) & ~(
+            dataframe["macd_hist"].shift(1, fill_value=0) > 0
+        )
+        macd_recent = macd_hist_cross.rolling(5, min_periods=1).max().fillna(0) > 0
 
         bb_touch = (dataframe["close"] < dataframe["bb_lower"]) & (
             dataframe["rsi"] < 40
         )
 
-        trigger = rsi_cross | macd_hist_cross | bb_touch
+        trigger = rsi_below | macd_recent | bb_touch
 
         guards = (
             (dataframe["ema_fast"] > dataframe["ema_slow"])
