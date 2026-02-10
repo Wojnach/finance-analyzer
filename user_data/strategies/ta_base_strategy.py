@@ -73,7 +73,7 @@ class TABaseStrategy(IStrategy):
 
     # --- Hyperoptable: entry ---
     rsi_oversold = IntParameter(25, 45, default=35, space="buy")
-    min_confidence = DecimalParameter(0.5, 2.5, default=1.0, space="buy")
+    min_confidence = DecimalParameter(0.3, 1.5, default=0.8, space="buy")
     volume_spike_mult = DecimalParameter(1.2, 3.0, default=1.5, space="buy")
     pattern_weight = DecimalParameter(0.0, 0.5, default=0.15, space="buy")
     adx_threshold = IntParameter(10, 30, default=20, space="buy")
@@ -136,13 +136,9 @@ class TABaseStrategy(IStrategy):
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         rsi_sig = (dataframe["rsi"] < self.rsi_oversold.value).astype(float)
 
-        macd_above = dataframe["macd"] > dataframe["macd_signal"]
-        macd_bullish = (macd_above & ~macd_above.shift(1, fill_value=False)).astype(
-            float
-        )
+        macd_bullish = (dataframe["macd"] > dataframe["macd_signal"]).astype(float)
 
-        ema_above = dataframe["ema_fast"] > dataframe["ema_slow"]
-        ema_bullish = (ema_above & ~ema_above.shift(1, fill_value=False)).astype(float)
+        ema_bullish = (dataframe["ema_fast"] > dataframe["ema_slow"]).astype(float)
 
         vol_spike = (
             dataframe["volume"] > dataframe["volume_sma"] * self.volume_spike_mult.value

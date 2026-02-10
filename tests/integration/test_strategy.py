@@ -229,8 +229,8 @@ def test_confidence_scoring():
     config = _make_config()
     s = TABaseStrategy(config)
 
-    assert s.min_confidence.value >= 0.5
-    assert s.min_confidence.value <= 2.5
+    assert s.min_confidence.value >= 0.3
+    assert s.min_confidence.value <= 1.5
 
 
 @requires_freqtrade
