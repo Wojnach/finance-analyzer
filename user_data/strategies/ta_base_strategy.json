@@ -20,16 +20,18 @@
       "max_open_trades": 3
     },
     "buy": {
-      "adx_threshold": 28,
-      "rsi_oversold": 41,
-      "volume_spike_mult": 1.433
+      "adx_threshold": 24,
+      "rsi_oversold": 33,
+      "volume_spike_mult": 2.45
     },
     "sell": {
-      "atr_sl_mult": 3.611,
-      "max_trade_candles": 317,
-      "rsi_overbought": 64
+      "atr_sl_mult": 3.952,
+      "max_daily_loss_pct": 0.022,
+      "max_drawdown_pct": 0.119,
+      "max_trade_candles": 314,
+      "rsi_overbought": 63
     }
   },
   "ft_stratparam_v": 1,
-  "export_time": "2026-02-10 17:07:16.106964+00:00"
+  "export_time": "2026-02-10 16:30:51.688000+00:00"
 }
