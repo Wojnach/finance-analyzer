@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "coingecko": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.api.coingecko.com/mcp"]
+    },
+    "ccxt": {
+      "command": "/home/deck/mcp-servers/mcp-server-ccxt/.venv/bin/python",
+      "args": ["-m", "src.server"],
+      "cwd": "/home/deck/mcp-servers/mcp-server-ccxt"
+    },
+    "freqtrade": {
+      "command": "/home/deck/mcp-servers/freqtrade-mcp/.venv/bin/python",
+      "args": ["__main__.py"],
+      "cwd": "/home/deck/mcp-servers/freqtrade-mcp",
+      "env": {
+        "FREQTRADE_API_URL": "http://127.0.0.1:8080",
+        "FREQTRADE_USERNAME": "REPLACE_ME",
+        "FREQTRADE_PASSWORD": "REPLACE_ME"
+      }
+    }
+  }
+}

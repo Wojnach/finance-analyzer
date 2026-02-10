@@ -1,112 +1,102 @@
 # Finance Analyzer — TODO
 
-> **Updated 2026-02-10.** See `docs/plans/` for research docs, `SESSION_PLAN.md` for parallel work.
+> **Updated 2026-02-10.**
 
 ## Phase 1: Foundation + Data Validation — COMPLETE
 
 - [x] Freqtrade in Podman (`freqtradeorg/freqtrade:stable`, v2026.1, `--network=host`)
 - [x] TABaseStrategy — RSI(14), MACD(12/26/9), EMA(9/21), Volume SMA(20), ATR(14), confidence scoring, all hyperoptable
-- [x] Podman wrapper scripts (`scripts/ft*.sh` — backtest, dry-run, hyperopt, download, test, walkforward)
+- [x] Podman wrapper scripts (`scripts/ft*.sh` — backtest, dry-run, hyperopt, download, test, walkforward, health)
 - [x] Config template with labeled fake keys
-- [x] Unit tests 26/26 pass, integration tests 9/9 pass
+- [x] Unit tests 26/26 pass, integration tests 16/16 pass
 - [x] Binance API keys — read-only, in `config.json` (gitignored), API name "Steamdeck2"
 - [x] Telegram bot — @RaanmanFinanceBot, chat ID 8455715091, verified working
 - [x] Download 2yr data (2024-02-10 to present, 5m/1h/4h/1d, ~14MB feather)
 - [x] Hyperopt on 2yr data — confirmed 30-day results were overfit
-- [x] Exit overhaul — ATR trailing stoploss via `custom_stoploss()`, simplified single-signal exit, stale trade timeout via `custom_exit()`
-- [x] Dry run started 2026-02-09 — container running
-
-### Latest Backtest (2026-02-10, 2yr data, post exit overhaul)
-
-- 174 trades over 730 days, 32.8% win rate (57W/117L)
-- -0.30% total profit (-$3.03 on $1000), market was +16.89%
-- Profit factor < 1.0, max drawdown 3.16%
-- Exit reasons: trailing_stop_loss (ATR), exit_signal, stop_loss (floor)
-- **Strategy is not yet profitable — Phase 2 improvements needed**
-
-### Success Criteria
-
-| Metric                     | Target                   | Current           |
-| -------------------------- | ------------------------ | ----------------- |
-| Historical data            | 2 years                  | 2 years ✓         |
-| Backtest trades            | > 100                    | 174 ✓             |
-| Walk-forward profit factor | > 1.0 across all windows | Not yet run       |
-| Backtest max drawdown      | < 20%                    | 3.16% ✓           |
-| Dry run trades (48h)       | > 0                      | Running since 2/9 |
-| Telegram delivery          | 100%                     | Verified ✓        |
+- [x] Exit overhaul — ATR trailing stoploss, simplified single-signal exit, stale trade timeout
+- [x] Dry run started 2026-02-09
 
 ---
 
-## Phase 2: Strategy Hardening — IN PROGRESS
+## Phase 2: Strategy Hardening — BLOCKED
 
-> Two parallel sessions working. See `SESSION_PLAN.md` for division of labor.
+### ~~Step 1 — Exit Logic Overhaul~~ DONE
 
-### ~~Step 1 — Exit Logic Overhaul~~ DONE (2026-02-10)
-
-- [x] `custom_stoploss()` — ATR-based dynamic trailing stop (atr_sl_mult=3.641)
-- [x] `custom_exit()` — simplified single-signal exit + stale trade timeout (max_trade_candles=457)
-- [x] Static trailing stop removed, replaced by ATR-based custom_stoploss
+- [x] `custom_stoploss()` — ATR-based dynamic trailing stop
+- [x] `custom_exit()` — simplified single-signal exit + stale trade timeout
 - [x] Hyperoptable params: atr_sl_mult, max_trade_candles, rsi_overbought
 
-### Step 2 — Multi-Timeframe + Trend Filter (Session A)
+### ~~Step 2 — Multi-Timeframe + Trend Filter~~ DONE
 
-- [ ] Add `informative_pairs()` for 1h timeframe
-- [ ] Merge 1h EMA(50) trend into 5m dataframe
-- [ ] Add **ADX(14)** on 1h — only enter when ADX > 25 (trending market)
-- [ ] Gate entries: require 1h EMA uptrend + ADX > 25
+- [x] `informative_pairs()` for 1h timeframe
+- [x] 1h EMA(50) trend merged into 5m dataframe
+- [x] ADX(14) on 1h — gate entries when ADX > 25 (trending market)
+- [x] Entry gate: require 1h EMA uptrend + ADX > 25
 
-### Step 3 — Candlestick Patterns (Session A)
+### ~~Step 3 — Candlestick Patterns~~ DONE
 
-- [ ] Add top 15 TA-Lib patterns as weighted confidence factor
-- [ ] Hyperoptable pattern weight parameter
-- [ ] Patterns: CDLHAMMER, CDLENGULFING, CDLMORNINGSTAR, CDLEVENINGSTAR, CDL3WHITESOLDIERS, CDL3BLACKCROWS, CDLSHOOTINGSTAR, CDLHANGINGMAN, CDLDOJI, CDLHARAMI, CDLPIERCING, CDLDARKCLOUDCOVER, CDLINVERTEDHAMMER, CDLMARUBOZU, CDLKICKING
+- [x] Top 15 TA-Lib patterns as weighted confidence factor
+- [x] Hyperoptable pattern weight parameter
 
-### Step 4 — Risk Management (Session A)
+### ~~Step 4 — Risk Management~~ DONE
 
-- [ ] ATR-based position sizing via `custom_stake_amount()`
-- [ ] Max daily loss tracking — stop entering after X% daily drawdown
-- [ ] Drawdown kill switch — block new entries + Telegram alert at threshold
+- [x] ATR-based position sizing via `custom_stake_amount()`
+- [x] Max daily loss tracking — stop entering after X% daily drawdown
+- [x] Drawdown kill switch — block new entries + Telegram alert at threshold
 
-### Step 5 — Infrastructure + Validation (Session B)
+### ~~Step 5 — Infrastructure + Validation~~ DONE
 
-- [x] Walk-forward validation script (`scripts/ft-walkforward.py`) — 9 rolling windows, 6mo train / 2mo test
-- [ ] Systemd user service for dry-run persistence across reboots
-- [ ] Health check script with optional Telegram alerts
-- [ ] Run walk-forward validation after Session A merges
+- [x] Walk-forward validation script (`scripts/ft-walkforward.py`)
+- [x] Walk-forward bash wrapper (`scripts/ft-walkforward.sh`)
+- [x] Health check script with optional Telegram alerts (`scripts/ft-health.sh`)
+- [x] Systemd user service for dry-run (`~/.config/systemd/user/ft-dry-run.service`)
+- [x] herc2 setup — Windows-native scripts, all tests pass, dry-run working
 
-### Step 6 — Re-Hyperopt + Final Validation
+### Step 6 — Re-Hyperopt + Final Validation — BLOCKED
 
-- [ ] Re-hyperopt with all new indicators on 2yr data
+- [x] Re-hyperopt 500 epochs on herc2 (14 workers, 11 minutes)
+- [ ] **FIX:** Optimizer converges to "don't trade" (min_confidence=2.494). Sharpe loss rewards low volatility → minimizes trading. Need to either improve signal quality or use a different loss function with minimum trade count.
 - [ ] Walk-forward validate — must show avg profit factor > 1.0
 - [ ] Compare before/after: must beat Phase 1 results
 
-### Deferred
+### Blocker: Strategy Signal Quality
 
-- ~~Elliott Wave~~ — dead library (22 stars, last update 2021)
-- ~~Harmonic Patterns~~ — archived repo
-- ~~Short positions~~ — get longs profitable first
-- ~~All 61 candlestick patterns~~ — reduced to top 15
+The core entry signals (RSI + MACD + EMA + volume + candlestick patterns + 1h trend filter) are not individually predictive enough. When hyperoptimized on 2yr data, the optimizer finds "don't trade at all" as the optimal strategy. Options:
+
+1. **Change loss function** — use profit-based loss with minimum trade count constraint
+2. **Improve signals** — add more predictive indicators (Bollinger Bands, OBV, Ichimoku, etc.)
+3. **Move to ML** — skip to Phase 3, let FreqAI/LightGBM find signal combinations
+4. **Simplify** — strip back to fewer, stronger signals instead of many weak ones
 
 ---
 
-## Phase 3: ML Integration (FreqAI)
+## Phase 3: ML Integration (FreqAI) — PREP DONE
 
-> Only start after Phase 2 is walk-forward validated and profitable in dry run.
+> Waiting on Phase 2 resolution. All infrastructure is ready.
 
-- [ ] FreqAI with CatBoost on Steam Deck CPU
-- [ ] Use Phase 2 indicators as features
+- [x] FreqAI available in Podman (`stable_freqai` image, 1.73GB)
+- [x] LightGBM 4.6.0 + XGBoost 3.1.3 in `stable_freqai` image
+- [x] PyTorch available in `stable_freqaitorch` image (8.87GB)
+- [x] FinBERT downloaded and tested (`~/models/finbert/`, 836MB, CPU, sentiment analysis)
+- [x] Trading-Hero-LLM downloaded and tested (`~/models/trading-hero-llm/`, 419MB, CPU, trading signals)
+- [x] Models venv at `~/models/.venv` (transformers 5.1.0, torch 2.10.0+cpu)
+- [ ] FreqAI strategy with LightGBM (use Phase 2 indicators as features)
 - [ ] A/B test: must beat Phase 2 or don't ship
-- [ ] Sentiment only if reliable crypto data source found
+- [ ] Integrate FinBERT sentiment as FreqAI feature (if crypto news source found)
 
-Full plan: `docs/plans/2026-02-09-phase2-research.md`
+**Note:** CatBoost is NOT in any Freqtrade image. Use LightGBM (default FreqAI backend).
 
 ---
 
-## Phase 4: Claude as Trading Copilot
+## Phase 4: Claude as Trading Copilot — PREP DONE
 
-> Only start after 2+ weeks profitable dry run.
+> Waiting on profitable dry run.
 
-- [ ] Freqtrade-MCP + CCXT MCP setup
+- [x] Freqtrade-MCP installed (`~/mcp-servers/freqtrade-mcp/`)
+- [x] CCXT MCP installed (`~/mcp-servers/mcp-server-ccxt/`)
+- [x] CoinGecko MCP configured (remote HTTP, no API key)
+- [x] `.mcp.json` in project root (gitignored), `.mcp.example.json` as template
+- [ ] LunarCrush MCP (needs API key from lunarcrush.com)
 - [ ] Weekly Haiku review (~$2/month) — evaluate after 1 month
 - [ ] Use cases: regime analysis, news alerts, anomaly detection
 
@@ -131,5 +121,3 @@ Full plan: `docs/plans/2026-02-09-llm-trading-research.md`
 | FinGPT        | 18.5k | Fine-tune financial LLM for $300          | When we need custom sentiment model |
 | FinRL         | 13.9k | RL trading framework                      | When we outgrow Freqtrade           |
 | MAHORAGA      | 480   | Deployed Claude trading bot (Alpaca)      | When we want US stock trading       |
-| Freqtrade-MCP | —     | Claude ↔ Freqtrade bridge                 | Phase 4                             |
-| CCXT MCP      | —     | Claude reads 100+ exchanges               | Phase 4                             |
