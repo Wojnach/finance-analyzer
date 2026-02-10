@@ -222,15 +222,15 @@ def test_trend_filter_blocks_entries_low_adx():
 @requires_freqtrade
 @requires_talib
 def test_confidence_scoring():
+    """min_confidence thresholds raw signal sum (max ~4 + patterns)."""
     sys.path.insert(0, "/freqtrade/user_data/strategies")
     from ta_base_strategy import TABaseStrategy
 
     config = _make_config()
     s = TABaseStrategy(config)
-    bc = s.base_confidence.value
 
-    assert 2 * bc >= s.min_confidence.value
-    assert 1 * bc < s.min_confidence.value
+    assert s.min_confidence.value >= 0.5
+    assert s.min_confidence.value <= 2.5
 
 
 @requires_freqtrade

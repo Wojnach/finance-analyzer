@@ -15,6 +15,6 @@ exec podman run --rm -it \
     --name ft-test-"$$" \
     --entrypoint "" \
     -v "${PROJECT_DIR}:/freqtrade/project:ro" \
-    -v "${PROJECT_DIR}/user_data:/freqtrade/user_data" \
+    -v "${PROJECT_DIR}/user_data:/freqtrade/user_data:U" \
     "$IMAGE" \
     bash -c "pip install -q pytest && python -m pytest --override-ini='addopts=' --rootdir=/freqtrade/project /freqtrade/project/${ARGS[*]}"

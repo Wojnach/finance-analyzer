@@ -1,0 +1,40 @@
+{
+  "strategy_name": "TABaseStrategy",
+  "params": {
+    "roi": {
+      "0": 0.255,
+      "30": 0.1,
+      "47": 0.039,
+      "65": 0
+    },
+    "stoploss": {
+      "stoploss": -0.098
+    },
+    "trailing": {
+      "trailing_stop": true,
+      "trailing_stop_positive": 0.142,
+      "trailing_stop_positive_offset": 0.191,
+      "trailing_only_offset_is_reached": false
+    },
+    "max_open_trades": {
+      "max_open_trades": 3
+    },
+    "buy": {
+      "adx_threshold": 20,
+      "base_confidence": 0.206,
+      "min_confidence": 0.581,
+      "pattern_weight": 0.147,
+      "rsi_oversold": 37,
+      "volume_spike_mult": 2.898
+    },
+    "sell": {
+      "atr_sl_mult": 3.191,
+      "max_daily_loss_pct": 0.078,
+      "max_drawdown_pct": 0.087,
+      "max_trade_candles": 389,
+      "rsi_overbought": 84
+    }
+  },
+  "ft_stratparam_v": 1,
+  "export_time": "2026-02-10 14:36:26.783350+00:00"
+}

@@ -72,12 +72,11 @@ class TABaseStrategy(IStrategy):
     startup_candle_count = 50
 
     # --- Hyperoptable: entry ---
-    rsi_oversold = IntParameter(20, 40, default=30, space="buy")
-    min_confidence = DecimalParameter(0.25, 0.75, default=0.5, space="buy")
-    volume_spike_mult = DecimalParameter(1.5, 3.0, default=2.0, space="buy")
-    base_confidence = DecimalParameter(0.15, 0.35, default=0.25, space="buy")
+    rsi_oversold = IntParameter(25, 45, default=35, space="buy")
+    min_confidence = DecimalParameter(0.5, 2.5, default=1.0, space="buy")
+    volume_spike_mult = DecimalParameter(1.2, 3.0, default=1.5, space="buy")
     pattern_weight = DecimalParameter(0.0, 0.5, default=0.15, space="buy")
-    adx_threshold = IntParameter(15, 35, default=25, space="buy")
+    adx_threshold = IntParameter(10, 30, default=20, space="buy")
 
     # --- Hyperoptable: exit ---
     rsi_overbought = IntParameter(60, 85, default=70, space="sell")
@@ -135,8 +134,6 @@ class TABaseStrategy(IStrategy):
         return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        bc = self.base_confidence.value
-
         rsi_sig = (dataframe["rsi"] < self.rsi_oversold.value).astype(float)
 
         macd_above = dataframe["macd"] > dataframe["macd_signal"]
@@ -156,8 +153,8 @@ class TABaseStrategy(IStrategy):
         )
 
         confidence = (
-            rsi_sig + macd_bullish + ema_bullish + vol_spike * 0.5
-        ) * bc + cdl_net * self.pattern_weight.value
+            rsi_sig + macd_bullish + ema_bullish + vol_spike
+        ) + cdl_net * self.pattern_weight.value
 
         trend_up = dataframe["close_1h"] > dataframe["ema_50_1h"]
         trend_strong = dataframe["adx_1h"] > self.adx_threshold.value
