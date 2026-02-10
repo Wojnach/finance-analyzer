@@ -1,0 +1,13 @@
+# Force LF line endings for all text files
+* text=auto eol=lf
+
+# Ensure shell scripts are always LF (even on Windows checkout)
+*.sh text eol=lf
+
+# Windows scripts can be CRLF
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary data files — don't touch
+*.feather binary
+*.sqlite binary
