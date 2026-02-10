@@ -91,6 +91,7 @@ def test_populate_indicators():
         "ema_fast",
         "ema_slow",
         "volume_sma",
+        "atr",
     ]:
         assert col in result.columns, f"Missing column: {col}"
 
@@ -145,3 +146,44 @@ def test_confidence_scoring():
     assert 2 * bc >= s.min_confidence.value
     # Single signal alone should NOT trigger (0.25 < 0.5)
     assert 1 * bc < s.min_confidence.value
+
+
+@requires_freqtrade
+@requires_talib
+def test_custom_stoploss_exists():
+    sys.path.insert(0, "/freqtrade/user_data/strategies")
+    from ta_base_strategy import TABaseStrategy
+
+    config = {"strategy": "TABaseStrategy"}
+    s = TABaseStrategy(config)
+    assert s.use_custom_stoploss is True
+    assert hasattr(s, "custom_stoploss")
+    assert callable(s.custom_stoploss)
+
+
+@requires_freqtrade
+@requires_talib
+def test_custom_exit_exists():
+    sys.path.insert(0, "/freqtrade/user_data/strategies")
+    from ta_base_strategy import TABaseStrategy
+
+    config = {"strategy": "TABaseStrategy"}
+    s = TABaseStrategy(config)
+    assert hasattr(s, "custom_exit")
+    assert callable(s.custom_exit)
+
+
+@requires_freqtrade
+@requires_talib
+def test_atr_indicator_values():
+    sys.path.insert(0, "/freqtrade/user_data/strategies")
+    from ta_base_strategy import TABaseStrategy
+
+    config = {"strategy": "TABaseStrategy"}
+    s = TABaseStrategy(config)
+    df = _make_ohlcv()
+    result = s.populate_indicators(df, {"pair": "BTC/USDT"})
+
+    valid_atr = result["atr"].dropna()
+    assert len(valid_atr) > 0
+    assert (valid_atr > 0).all()
