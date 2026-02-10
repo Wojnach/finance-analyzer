@@ -15,6 +15,5 @@ exec "$SCRIPT_DIR/ft.sh" hyperopt \
     --strategy-path /freqtrade/user_data/strategies \
     --hyperopt-loss SharpeHyperOptLossDaily \
     --spaces buy sell \
-    --min-trades 1 \
     --epochs "$EPOCHS" \
     "$@"
