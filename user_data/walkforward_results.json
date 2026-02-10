@@ -1,0 +1,96 @@
+[
+  {
+    "trades": 0,
+    "profit_pct": 0.0,
+    "profit_factor": 0.0,
+    "max_dd_pct": 0.0,
+    "win_rate": 0,
+    "sharpe": 0,
+    "window": 1,
+    "train": "20240210-20240808",
+    "test": "20240808-20241007"
+  },
+  {
+    "trades": 3,
+    "profit_pct": -1.1,
+    "profit_factor": 0.25,
+    "max_dd_pct": 1.47,
+    "win_rate": 33.3,
+    "sharpe": -0.68,
+    "window": 2,
+    "train": "20240410-20241007",
+    "test": "20241007-20241206"
+  },
+  {
+    "trades": 1,
+    "profit_pct": 0.19,
+    "profit_factor": 0.0,
+    "max_dd_pct": 0.0,
+    "win_rate": 100.0,
+    "sharpe": -100,
+    "window": 3,
+    "train": "20240609-20241206",
+    "test": "20241206-20250204"
+  },
+  {
+    "trades": 0,
+    "profit_pct": 0.0,
+    "profit_factor": 0.0,
+    "max_dd_pct": 0.0,
+    "win_rate": 0,
+    "sharpe": 0,
+    "window": 4,
+    "train": "20240808-20250204",
+    "test": "20250204-20250405"
+  },
+  {
+    "trades": 0,
+    "profit_pct": 0.0,
+    "profit_factor": 0.0,
+    "max_dd_pct": 0.0,
+    "win_rate": 0,
+    "sharpe": 0,
+    "window": 5,
+    "train": "20241007-20250405",
+    "test": "20250405-20250604"
+  },
+  {
+    "window": 6,
+    "train": "20241206-20250604",
+    "test": "20250604-20250803",
+    "error": "hyperopt_failed"
+  },
+  {
+    "trades": 3,
+    "profit_pct": -0.61,
+    "profit_factor": 0.334,
+    "max_dd_pct": 0.92,
+    "win_rate": 33.3,
+    "sharpe": -0.48,
+    "window": 7,
+    "train": "20250204-20250803",
+    "test": "20250803-20251002"
+  },
+  {
+    "trades": 3,
+    "profit_pct": -0.25,
+    "profit_factor": 0.563,
+    "max_dd_pct": 0.56,
+    "win_rate": 33.3,
+    "sharpe": -0.27,
+    "window": 8,
+    "train": "20250405-20251002",
+    "test": "20251002-20251201"
+  },
+  {
+    "trades": 4,
+    "profit_pct": -1.01,
+    "profit_factor": 0.0,
+    "max_dd_pct": 1.01,
+    "win_rate": 0.0,
+    "sharpe": -2.75,
+    "window": 9,
+    "train": "20250604-20251201",
+    "test": "20251201-20260130"
+  }
+]
