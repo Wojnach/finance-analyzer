@@ -28,6 +28,10 @@ config-*.json
 secrets.yaml
 *_secrets.py
 api_keys.py
+.mcp.json
+
+# Claude Code
+.claude/
 
 # IDE
 .idea/
