@@ -53,6 +53,30 @@ def _make_ohlcv(rows=200):
     )
 
 
+def _make_config():
+    """Minimal config that satisfies @informative decorator requirements."""
+    from freqtrade.enums import CandleType
+
+    return {
+        "strategy": "TABaseStrategy",
+        "stake_currency": "USDT",
+        "trading_mode": "futures",
+        "margin_mode": "isolated",
+        "candle_type_def": CandleType.FUTURES,
+        "exchange": {"name": "binance", "pair_whitelist": ["BTC/USDT:USDT"]},
+    }
+
+
+def _add_1h_columns(df):
+    """Add fake 1h informative columns that the @informative decorator would provide."""
+    import talib
+
+    df["close_1h"] = df["close"]
+    df["ema_50_1h"] = talib.EMA(df["close"], timeperiod=50)
+    df["adx_1h"] = talib.ADX(df["high"], df["low"], df["close"], timeperiod=14)
+    return df
+
+
 @requires_talib
 def test_talib_available():
     import talib
@@ -78,7 +102,7 @@ def test_populate_indicators():
     sys.path.insert(0, "/freqtrade/user_data/strategies")
     from ta_base_strategy import TABaseStrategy
 
-    config = {"strategy": "TABaseStrategy"}
+    config = _make_config()
     s = TABaseStrategy(config)
     df = _make_ohlcv()
     result = s.populate_indicators(df, {"pair": "BTC/USDT"})
@@ -92,12 +116,30 @@ def test_populate_indicators():
         "ema_slow",
         "volume_sma",
         "atr",
+        "cdl_bullish",
+        "cdl_bearish",
     ]:
         assert col in result.columns, f"Missing column: {col}"
 
-    # RSI should be between 0 and 100 (after warmup)
     valid_rsi = result["rsi"].dropna()
     assert (valid_rsi >= 0).all() and (valid_rsi <= 100).all()
+
+
+@requires_freqtrade
+@requires_talib
+def test_candlestick_pattern_scores():
+    sys.path.insert(0, "/freqtrade/user_data/strategies")
+    from ta_base_strategy import TABaseStrategy
+
+    config = _make_config()
+    s = TABaseStrategy(config)
+    df = _make_ohlcv()
+    result = s.populate_indicators(df, {"pair": "BTC/USDT"})
+
+    assert (result["cdl_bullish"] >= 0).all()
+    assert (result["cdl_bearish"] >= 0).all()
+    assert result["cdl_bullish"].max() >= 0
+    assert result["cdl_bearish"].max() >= 0
 
 
 @requires_freqtrade
@@ -106,10 +148,11 @@ def test_populate_entry_trend():
     sys.path.insert(0, "/freqtrade/user_data/strategies")
     from ta_base_strategy import TABaseStrategy
 
-    config = {"strategy": "TABaseStrategy"}
+    config = _make_config()
     s = TABaseStrategy(config)
     df = _make_ohlcv()
     df = s.populate_indicators(df, {"pair": "BTC/USDT"})
+    df = _add_1h_columns(df)
     result = s.populate_entry_trend(df, {"pair": "BTC/USDT"})
 
     assert "enter_long" in result.columns
@@ -121,10 +164,11 @@ def test_populate_exit_trend():
     sys.path.insert(0, "/freqtrade/user_data/strategies")
     from ta_base_strategy import TABaseStrategy
 
-    config = {"strategy": "TABaseStrategy"}
+    config = _make_config()
     s = TABaseStrategy(config)
     df = _make_ohlcv()
     df = s.populate_indicators(df, {"pair": "BTC/USDT"})
+    df = _add_1h_columns(df)
     df = s.populate_entry_trend(df, {"pair": "BTC/USDT"})
     result = s.populate_exit_trend(df, {"pair": "BTC/USDT"})
 
@@ -133,18 +177,59 @@ def test_populate_exit_trend():
 
 @requires_freqtrade
 @requires_talib
-def test_confidence_scoring():
-    """Verify that confidence = signal_count * base_confidence matches signals.py logic."""
+def test_trend_filter_blocks_entries_in_downtrend():
+    """When 1h trend is down, no entries should fire regardless of confidence."""
     sys.path.insert(0, "/freqtrade/user_data/strategies")
     from ta_base_strategy import TABaseStrategy
 
-    config = {"strategy": "TABaseStrategy"}
+    config = _make_config()
+    s = TABaseStrategy(config)
+    df = _make_ohlcv()
+    df = s.populate_indicators(df, {"pair": "BTC/USDT"})
+
+    # Simulate downtrend: close below EMA, low ADX
+    df["close_1h"] = df["close"] * 0.9
+    df["ema_50_1h"] = df["close"]
+    df["adx_1h"] = 15.0
+
+    result = s.populate_entry_trend(df, {"pair": "BTC/USDT"})
+    enter_count = result["enter_long"].fillna(0).sum()
+    assert enter_count == 0, f"Expected 0 entries in downtrend, got {enter_count}"
+
+
+@requires_freqtrade
+@requires_talib
+def test_trend_filter_blocks_entries_low_adx():
+    """When ADX is below threshold (choppy market), no entries should fire."""
+    sys.path.insert(0, "/freqtrade/user_data/strategies")
+    from ta_base_strategy import TABaseStrategy
+
+    config = _make_config()
+    s = TABaseStrategy(config)
+    df = _make_ohlcv()
+    df = s.populate_indicators(df, {"pair": "BTC/USDT"})
+
+    # Simulate uptrend but weak (low ADX)
+    df["close_1h"] = df["close"] * 1.1
+    df["ema_50_1h"] = df["close"]
+    df["adx_1h"] = 10.0
+
+    result = s.populate_entry_trend(df, {"pair": "BTC/USDT"})
+    enter_count = result["enter_long"].fillna(0).sum()
+    assert enter_count == 0, f"Expected 0 entries with low ADX, got {enter_count}"
+
+
+@requires_freqtrade
+@requires_talib
+def test_confidence_scoring():
+    sys.path.insert(0, "/freqtrade/user_data/strategies")
+    from ta_base_strategy import TABaseStrategy
+
+    config = _make_config()
     s = TABaseStrategy(config)
     bc = s.base_confidence.value
 
-    # With default base_confidence=0.25, 2 full signals = 0.5 >= min_confidence
     assert 2 * bc >= s.min_confidence.value
-    # Single signal alone should NOT trigger (0.25 < 0.5)
     assert 1 * bc < s.min_confidence.value
 
 
@@ -154,7 +239,7 @@ def test_custom_stoploss_exists():
     sys.path.insert(0, "/freqtrade/user_data/strategies")
     from ta_base_strategy import TABaseStrategy
 
-    config = {"strategy": "TABaseStrategy"}
+    config = _make_config()
     s = TABaseStrategy(config)
     assert s.use_custom_stoploss is True
     assert hasattr(s, "custom_stoploss")
@@ -167,10 +252,34 @@ def test_custom_exit_exists():
     sys.path.insert(0, "/freqtrade/user_data/strategies")
     from ta_base_strategy import TABaseStrategy
 
-    config = {"strategy": "TABaseStrategy"}
+    config = _make_config()
     s = TABaseStrategy(config)
     assert hasattr(s, "custom_exit")
     assert callable(s.custom_exit)
+
+
+@requires_freqtrade
+@requires_talib
+def test_custom_stake_amount_exists():
+    sys.path.insert(0, "/freqtrade/user_data/strategies")
+    from ta_base_strategy import TABaseStrategy
+
+    config = _make_config()
+    s = TABaseStrategy(config)
+    assert hasattr(s, "custom_stake_amount")
+    assert callable(s.custom_stake_amount)
+
+
+@requires_freqtrade
+@requires_talib
+def test_confirm_trade_entry_exists():
+    sys.path.insert(0, "/freqtrade/user_data/strategies")
+    from ta_base_strategy import TABaseStrategy
+
+    config = _make_config()
+    s = TABaseStrategy(config)
+    assert hasattr(s, "confirm_trade_entry")
+    assert callable(s.confirm_trade_entry)
 
 
 @requires_freqtrade
@@ -179,7 +288,7 @@ def test_atr_indicator_values():
     sys.path.insert(0, "/freqtrade/user_data/strategies")
     from ta_base_strategy import TABaseStrategy
 
-    config = {"strategy": "TABaseStrategy"}
+    config = _make_config()
     s = TABaseStrategy(config)
     df = _make_ohlcv()
     result = s.populate_indicators(df, {"pair": "BTC/USDT"})
@@ -187,3 +296,40 @@ def test_atr_indicator_values():
     valid_atr = result["atr"].dropna()
     assert len(valid_atr) > 0
     assert (valid_atr > 0).all()
+
+
+@requires_freqtrade
+@requires_talib
+def test_1h_informative_method():
+    sys.path.insert(0, "/freqtrade/user_data/strategies")
+    from ta_base_strategy import TABaseStrategy
+
+    config = _make_config()
+    s = TABaseStrategy(config)
+    df = _make_ohlcv()
+    result = s.populate_indicators_1h(df, {"pair": "BTC/USDT"})
+
+    assert "ema_50" in result.columns
+    assert "adx" in result.columns
+    valid_adx = result["adx"].dropna()
+    assert (valid_adx >= 0).all() and (valid_adx <= 100).all()
+
+
+@requires_freqtrade
+@requires_talib
+def test_hyperoptable_params():
+    sys.path.insert(0, "/freqtrade/user_data/strategies")
+    from ta_base_strategy import TABaseStrategy
+
+    config = _make_config()
+    s = TABaseStrategy(config)
+
+    assert hasattr(s, "pattern_weight")
+    assert hasattr(s, "adx_threshold")
+    assert hasattr(s, "max_daily_loss_pct")
+    assert hasattr(s, "max_drawdown_pct")
+
+    assert s.pattern_weight.space == "buy"
+    assert s.adx_threshold.space == "buy"
+    assert s.max_daily_loss_pct.space == "sell"
+    assert s.max_drawdown_pct.space == "sell"

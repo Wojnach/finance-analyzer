@@ -1,13 +1,16 @@
 """
 TABaseStrategy — Multi-indicator confirmation strategy using TA-Lib.
 
-Indicators: RSI(14), MACD(12/26/9), EMA(9/21), Volume SMA(20), ATR(14)
-Entry: Multi-confirmation (RSI oversold + MACD bullish + EMA cross + volume)
+Indicators (5m): RSI(14), MACD(12/26/9), EMA(9/21), Volume SMA(20), ATR(14),
+                 15 candlestick patterns
+Indicators (1h): EMA(50), ADX(14) — trend filter
+Entry: Multi-confirmation confidence scoring, gated by 1h trend filter
 Exit:  Single bearish signal (RSI overbought OR MACD bearish cross)
        + ATR-based trailing stoploss + stale trade timeout
+Risk:  ATR-based position sizing, daily loss limit, drawdown kill switch
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import talib
 import numpy as np
@@ -17,22 +20,48 @@ from freqtrade.strategy import (
     IStrategy,
     IntParameter,
     DecimalParameter,
+    informative,
     stoploss_from_absolute,
     timeframe_to_prev_date,
 )
 from freqtrade.persistence import Trade
+
+BULLISH_PATTERNS = [
+    "CDLHAMMER",
+    "CDLINVERTEDHAMMER",
+    "CDLENGULFING",
+    "CDLMORNINGSTAR",
+    "CDLPIERCING",
+    "CDL3WHITESOLDIERS",
+    "CDLHARAMI",
+    "CDLMARUBOZU",
+    "CDLKICKING",
+    "CDLDOJI",
+]
+
+BEARISH_PATTERNS = [
+    "CDLSHOOTINGSTAR",
+    "CDLHANGINGMAN",
+    "CDLEVENINGSTAR",
+    "CDLDARKCLOUDCOVER",
+    "CDL3BLACKCROWS",
+    "CDLENGULFING",
+    "CDLHARAMI",
+    "CDLMARUBOZU",
+    "CDLKICKING",
+    "CDLDOJI",
+]
 
 
 class TABaseStrategy(IStrategy):
 
     INTERFACE_VERSION = 3
 
-    # --- ROI table: close position at these profit thresholds ---
     minimal_roi = {
-        "0": 0.05,  # 5% immediately
-        "30": 0.03,  # 3% after 30 min
-        "60": 0.02,  # 2% after 60 min
-        "120": 0.01,  # 1% after 120 min
+        "0": 0.05,
+        "30": 0.03,
+        "60": 0.02,
+        "120": 0.01,
     }
 
     stoploss = -0.15
@@ -40,22 +69,36 @@ class TABaseStrategy(IStrategy):
 
     timeframe = "5m"
     process_only_new_candles = True
-    startup_candle_count = 30
+    startup_candle_count = 50
 
-    # --- Hyperoptable parameters ---
+    # --- Hyperoptable: entry ---
     rsi_oversold = IntParameter(20, 40, default=30, space="buy")
-    rsi_overbought = IntParameter(60, 85, default=70, space="sell")
     min_confidence = DecimalParameter(0.25, 0.75, default=0.5, space="buy")
     volume_spike_mult = DecimalParameter(1.5, 3.0, default=2.0, space="buy")
     base_confidence = DecimalParameter(0.15, 0.35, default=0.25, space="buy")
+    pattern_weight = DecimalParameter(0.0, 0.5, default=0.15, space="buy")
+    adx_threshold = IntParameter(15, 35, default=25, space="buy")
+
+    # --- Hyperoptable: exit ---
+    rsi_overbought = IntParameter(60, 85, default=70, space="sell")
     atr_sl_mult = DecimalParameter(1.5, 4.0, default=2.0, space="sell")
     max_trade_candles = IntParameter(100, 500, default=200, space="sell")
 
+    # --- Hyperoptable: risk ---
+    max_daily_loss_pct = DecimalParameter(0.02, 0.10, default=0.05, space="sell")
+    max_drawdown_pct = DecimalParameter(0.05, 0.20, default=0.15, space="sell")
+
+    @informative("1h")
+    def populate_indicators_1h(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        dataframe["ema_50"] = talib.EMA(dataframe["close"], timeperiod=50)
+        dataframe["adx"] = talib.ADX(
+            dataframe["high"], dataframe["low"], dataframe["close"], timeperiod=14
+        )
+        return dataframe
+
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        # RSI
         dataframe["rsi"] = talib.RSI(dataframe["close"], timeperiod=14)
 
-        # MACD
         macd, signal, hist = talib.MACD(
             dataframe["close"], fastperiod=12, slowperiod=26, signalperiod=9
         )
@@ -63,26 +106,37 @@ class TABaseStrategy(IStrategy):
         dataframe["macd_signal"] = signal
         dataframe["macd_hist"] = hist
 
-        # EMA fast/slow
         dataframe["ema_fast"] = talib.EMA(dataframe["close"], timeperiod=9)
         dataframe["ema_slow"] = talib.EMA(dataframe["close"], timeperiod=21)
 
-        # Volume SMA
         dataframe["volume_sma"] = talib.SMA(
             dataframe["volume"].astype(np.float64), timeperiod=20
         )
 
-        # ATR for dynamic stoploss
         dataframe["atr"] = talib.ATR(
             dataframe["high"], dataframe["low"], dataframe["close"], timeperiod=14
         )
+
+        # Candlestick patterns
+        o, h, l, c = (
+            dataframe["open"],
+            dataframe["high"],
+            dataframe["low"],
+            dataframe["close"],
+        )
+        all_patterns = set(BULLISH_PATTERNS + BEARISH_PATTERNS)
+        results = {name: getattr(talib, name)(o, h, l, c) for name in all_patterns}
+
+        bullish_score = sum((results[n] > 0).astype(float) for n in BULLISH_PATTERNS)
+        bearish_score = sum((results[n] < 0).astype(float) for n in BEARISH_PATTERNS)
+        dataframe["cdl_bullish"] = bullish_score
+        dataframe["cdl_bearish"] = bearish_score
 
         return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         bc = self.base_confidence.value
 
-        # Individual signals as float columns (1.0 or 0.0)
         rsi_sig = (dataframe["rsi"] < self.rsi_oversold.value).astype(float)
 
         macd_above = dataframe["macd"] > dataframe["macd_signal"]
@@ -97,10 +151,22 @@ class TABaseStrategy(IStrategy):
             dataframe["volume"] > dataframe["volume_sma"] * self.volume_spike_mult.value
         ).astype(float)
 
-        # Confidence: full signals = 1.0 weight, volume = 0.5 weight
-        confidence = (rsi_sig + macd_bullish + ema_bullish + vol_spike * 0.5) * bc
+        cdl_net = (dataframe["cdl_bullish"] - dataframe["cdl_bearish"]).clip(
+            lower=0, upper=2
+        )
 
-        dataframe.loc[confidence >= self.min_confidence.value, "enter_long"] = 1
+        confidence = (
+            rsi_sig + macd_bullish + ema_bullish + vol_spike * 0.5
+        ) * bc + cdl_net * self.pattern_weight.value
+
+        trend_up = dataframe["close_1h"] > dataframe["ema_50_1h"]
+        trend_strong = dataframe["adx_1h"] > self.adx_threshold.value
+        trend_ok = trend_up & trend_strong
+
+        dataframe.loc[
+            (confidence >= self.min_confidence.value) & trend_ok,
+            "enter_long",
+        ] = 1
         dataframe.loc[dataframe["volume"] <= 0, "enter_long"] = 0
 
         return dataframe
@@ -115,6 +181,33 @@ class TABaseStrategy(IStrategy):
         dataframe.loc[dataframe["volume"] <= 0, "exit_long"] = 0
 
         return dataframe
+
+    def custom_stake_amount(
+        self,
+        pair: str,
+        current_time: datetime,
+        current_rate: float,
+        proposed_stake: float,
+        min_stake: float | None,
+        max_stake: float,
+        leverage: float,
+        entry_tag: str | None,
+        side: str,
+        **kwargs,
+    ) -> float:
+        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        if dataframe.empty:
+            return proposed_stake
+
+        atr = dataframe.iloc[-1]["atr"]
+        if atr is None or np.isnan(atr) or atr <= 0:
+            return proposed_stake
+
+        wallet = self.wallets.get_total_stake_amount()
+        risk_amount = wallet * 0.01
+        position_value = risk_amount / (atr / current_rate)
+
+        return min(position_value, max_stake)
 
     def custom_stoploss(
         self,
@@ -157,9 +250,44 @@ class TABaseStrategy(IStrategy):
             return None
 
         candle_date = dataframe.iloc[-1]["date"]
-        trade_dur = (candle_date - trade_candle).total_seconds() / 300  # 5m candles
+        trade_dur = (candle_date - trade_candle).total_seconds() / 300
 
         if trade_dur >= self.max_trade_candles.value and current_profit < 0.01:
             return "stale_trade_exit"
 
         return None
+
+    def confirm_trade_entry(
+        self,
+        pair: str,
+        order_type: str,
+        amount: float,
+        rate: float,
+        time_in_force: str,
+        current_time: datetime,
+        entry_tag: str | None,
+        side: str,
+        **kwargs,
+    ) -> bool:
+        today_start = current_time.replace(
+            hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc
+        )
+        closed_today = Trade.get_trades_proxy(is_open=False, close_date=today_start)
+
+        if closed_today:
+            wallet = self.wallets.get_total_stake_amount()
+            daily_pnl = sum(t.close_profit_abs or 0.0 for t in closed_today)
+            if (
+                daily_pnl < 0
+                and abs(daily_pnl) >= wallet * self.max_daily_loss_pct.value
+            ):
+                return False
+
+        open_trades = Trade.get_trades_proxy(is_open=True)
+        if open_trades:
+            wallet = self.wallets.get_total_stake_amount()
+            open_pnl = sum(t.close_profit_abs or 0.0 for t in open_trades)
+            if open_pnl < 0 and abs(open_pnl) >= wallet * self.max_drawdown_pct.value:
+                return False
+
+        return True
