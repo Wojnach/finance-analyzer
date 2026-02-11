@@ -61,5 +61,14 @@ data/signal_log.jsonl
 .coverage
 htmlcov/
   
-# ML model artifacts  
-models/*.joblib 
+# ML model artifacts
+models/*.joblib
+
+# LoRA training artifacts
+training/lora/output/
+training/lora/training_data.jsonl
+training/lora/training_progress.json
+training/lora/state.json
+training/lora/logs/
+.venv-train/
+llama.cpp/
