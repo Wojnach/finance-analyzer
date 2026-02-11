@@ -72,6 +72,18 @@ Do NOT send Telegram when:
 - Signals are mixed and you're holding
 - It would be noise rather than signal
 
+**Message format:** Always include a `Decision:` line with your reasoning in 1-2 sentences. The user reads these on iPhone — keep it compact. Example:
+
+```
+*HOLD* — all instruments
+
+Decision: Bearish technicals across all timeframes despite F&G at 11. No signal consensus — waiting for RSI to confirm oversold before entering.
+
+BTC $66,800 | 4/8 mixed | F&G:11
+ETH $1,948 | SELL 75% | F&G:11
+Portfolio: 500,000 SEK (+0.00%)
+```
+
 Use this to send:
 
 ```python
