@@ -1,15 +1,21 @@
+import json
 import time
+from pathlib import Path
+
 import pandas as pd
 import requests
 
 BINANCE_BASE = "https://api.binance.com/api/v3"
+ALPACA_BASE = "https://data.alpaca.markets/v2"
+CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 TICKER_MAP = {
     "BTC-USD": ("binance", "BTCUSDT"),
     "ETH-USD": ("binance", "ETHUSDT"),
-    "MSTR": ("yfinance", "MSTR"),
-    "PLTR": ("yfinance", "PLTR"),
-    "NVDA": ("yfinance", "NVDA"),
+    "MSTR": ("alpaca", "MSTR"),
+    "PLTR": ("alpaca", "PLTR"),
+    "NVDA": ("alpaca", "NVDA"),
 }
+_alpaca_headers = None
 
 _cache = {}
 DXY_TTL = 3600
@@ -81,23 +87,39 @@ def _fetch_klines(ticker):
         for col in ["open", "high", "low", "close", "volume"]:
             df[col] = df[col].astype(float)
         return df
-    elif source_type == "yfinance":
-        import yfinance as yf
-
-        s = yf.Ticker(symbol)
-        df = s.history(period="5d", interval="15m")
-        if df.empty:
+    elif source_type == "alpaca":
+        global _alpaca_headers
+        if _alpaca_headers is None:
+            cfg = json.loads(CONFIG_FILE.read_text())
+            acfg = cfg.get("alpaca", {})
+            _alpaca_headers = {
+                "APCA-API-KEY-ID": acfg.get("api_key", ""),
+                "APCA-API-SECRET-KEY": acfg.get("secret_key", ""),
+            }
+        r = requests.get(
+            f"{ALPACA_BASE}/stocks/{symbol}/bars",
+            params={"timeframe": "15Min", "limit": 100, "feed": "iex"},
+            headers=_alpaca_headers,
+            timeout=10,
+        )
+        r.raise_for_status()
+        bars = r.json().get("bars", [])
+        if not bars:
             return None
+        df = pd.DataFrame(bars)
         df = df.rename(
             columns={
-                "Open": "open",
-                "High": "high",
-                "Low": "low",
-                "Close": "close",
-                "Volume": "volume",
+                "o": "open",
+                "h": "high",
+                "l": "low",
+                "c": "close",
+                "v": "volume",
+                "t": "time",
             }
         )
-        return df.reset_index()
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = df[col].astype(float)
+        return df
     return None
 
 
