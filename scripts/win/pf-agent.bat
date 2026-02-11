@@ -1,11 +1,11 @@
 @echo off
-REM Portfolio Intelligence — Claude Code Trading Agent
-REM Runs Claude Code to analyze market and make trading decisions
-REM Schedule this via Windows Task Scheduler (every 15-30 min)
+REM Portfolio Intelligence — Claude Code Trading Agent (Layer 2)
+REM Invoked by Layer 1 (main.py) when a trigger fires, or manually.
+REM Claude Code auto-loads CLAUDE.md from the project root for full instructions.
 
 cd /d Q:\finance-analyzer
 
-REM Step 1: Collect current market data and signals
+REM Collect fresh data (useful for manual runs; loop already wrote agent_summary.json)
 echo Collecting market data...
 .venv\Scripts\python.exe -u portfolio\collect.py
 if %errorlevel% neq 0 (
@@ -13,6 +13,6 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-REM Step 2: Run Claude Code trading agent
+REM Invoke Claude Code as the trading decision-maker
 echo Running trading agent...
-claude -p "You are the portfolio trading agent for a simulated 500K SEK crypto portfolio. Read data/agent_summary.json for current signals and data/portfolio_state.json for portfolio state. Analyze all 7 signals (RSI, MACD, EMA, BB, Fear&Greed, News sentiment, ML model). If 5+ of 7 agree on BUY or SELL, execute the trade by editing portfolio_state.json (update cash_sek, holdings, append to transactions with timestamp and reason). Then send a Telegram message explaining your decision using: python -c 'import json,requests;c=json.load(open(\"config.json\"));requests.post(f\"https://api.telegram.org/bot{c[\"telegram\"][\"token\"]}/sendMessage\",json={\"chat_id\":c[\"telegram\"][\"chat_id\"],\"text\":\"YOUR_MESSAGE\",\"parse_mode\":\"Markdown\"})'. If signals are mixed (less than 5 agreeing), do nothing — no trade, no message. Be disciplined." --allowedTools "Edit,Read,Bash,Write" --max-turns 10
+claude -p "You are the Layer 2 trading agent. Read data/agent_summary.json (signals, trigger reasons, timeframes) and data/portfolio_state.json (portfolio). Follow the instructions in CLAUDE.md to analyze, decide, and act. If you trade, edit portfolio_state.json and send Telegram. If you hold, only send Telegram if something is noteworthy." --allowedTools "Edit,Read,Bash,Write" --max-turns 10
