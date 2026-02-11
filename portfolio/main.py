@@ -23,7 +23,6 @@ CONFIG_FILE = BASE_DIR / "config.json"
 SYMBOLS = {
     "BTC-USD": {"binance": "BTCUSDT"},
     "ETH-USD": {"binance": "ETHUSDT"},
-    "SOL-USD": {"binance": "SOLUSDT"},
     "MSTR": {"yfinance": "MSTR"},
     "PLTR": {"yfinance": "PLTR"},
     "NVDA": {"yfinance": "NVDA"},

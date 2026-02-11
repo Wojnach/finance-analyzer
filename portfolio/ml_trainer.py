@@ -16,7 +16,6 @@ MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
 PAIRS = [
     ("BTC_USDT_USDT-1h-futures.feather", 0),
     ("ETH_USDT_USDT-1h-futures.feather", 1),
-    ("SOL_USDT_USDT-1h-futures.feather", 2),
 ]
 
 

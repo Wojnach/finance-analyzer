@@ -15,7 +15,6 @@ DATA_DIR = (
 PAIRS = {
     "BTC": "BTCUSDT",
     "ETH": "ETHUSDT",
-    "SOL": "SOLUSDT",
 }
 
 

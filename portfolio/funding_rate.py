@@ -5,7 +5,6 @@ BINANCE_FAPI = "https://fapi.binance.com/fapi/v1"
 SYMBOL_MAP = {
     "BTC-USD": "BTCUSDT",
     "ETH-USD": "ETHUSDT",
-    "SOL-USD": "SOLUSDT",
 }
 
 _cache = {}

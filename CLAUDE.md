@@ -82,7 +82,6 @@ HOLD example:
 
 `BTC  $66,800  SELL 3/9`
 `ETH  $1,952   SELL 3/9`
-`SOL  $128.50  SELL 4/9`
 `MSTR $129.93  HOLD 1/7`
 `PLTR $134.77  HOLD 2/7`
 `NVDA $880.20  HOLD 1/7`
@@ -100,7 +99,6 @@ TRADE example:
 
 `BTC  $66,800  BUY 6/9`
 `ETH  $1,952   HOLD 4/9`
-`SOL  $128.50  BUY 5/9`
 `MSTR $129.93  HOLD 1/7`
 `PLTR $134.77  HOLD 2/7`
 `NVDA $880.20  HOLD 1/7`
@@ -165,7 +163,6 @@ requests.post(
 | ------- | ----------- | ----------------- |
 | BTC-USD | Crypto 24/7 | Binance (BTCUSDT) |
 | ETH-USD | Crypto 24/7 | Binance (ETHUSDT) |
-| SOL-USD | Crypto 24/7 | Binance (SOLUSDT) |
 | MSTR    | NASDAQ      | yfinance          |
 | PLTR    | NASDAQ      | yfinance          |
 | NVDA    | NASDAQ      | yfinance          |

@@ -106,7 +106,6 @@ def get_ml_signal(ticker):
     symbol_map = {
         "BTC-USD": ("BTCUSDT", 0),
         "ETH-USD": ("ETHUSDT", 1),
-        "SOL-USD": ("SOLUSDT", 2),
     }
     if ticker not in symbol_map:
         return None
