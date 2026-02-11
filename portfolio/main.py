@@ -2,6 +2,8 @@
 """Portfolio Intelligence System — Simulated Trading on Binance Real-Time Data"""
 
 import json
+import os
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -15,6 +17,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 DATA_DIR = BASE_DIR / "data"
 STATE_FILE = DATA_DIR / "portfolio_state.json"
+AGENT_SUMMARY_FILE = DATA_DIR / "agent_summary.json"
 CONFIG_FILE = BASE_DIR / "config.json"
 
 SYMBOLS = {
@@ -468,6 +471,95 @@ def save_state(state):
     STATE_FILE.write_text(json.dumps(state, indent=2, default=str))
 
 
+# --- Agent summary + invocation ---
+
+
+def write_agent_summary(
+    signals, prices_usd, fx_rate, state, tf_data, trigger_reasons=None
+):
+    total = portfolio_value(state, prices_usd, fx_rate)
+    pnl_pct = ((total - state["initial_value_sek"]) / state["initial_value_sek"]) * 100
+
+    summary = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "trigger_reasons": trigger_reasons or [],
+        "fx_rate": round(fx_rate, 2),
+        "portfolio": {
+            "total_sek": round(total),
+            "pnl_pct": round(pnl_pct, 2),
+            "cash_sek": round(state["cash_sek"]),
+            "holdings": state.get("holdings", {}),
+            "num_transactions": len(state.get("transactions", [])),
+        },
+        "signals": {},
+        "timeframes": {},
+        "fear_greed": {},
+    }
+
+    for name, sig in signals.items():
+        extra = sig.get("extra", {})
+        ind = sig["indicators"]
+        summary["signals"][name] = {
+            "action": sig["action"],
+            "confidence": sig["confidence"],
+            "price_usd": ind["close"],
+            "rsi": round(ind["rsi"], 1),
+            "macd_hist": round(ind["macd_hist"], 2),
+            "bb_position": ind["price_vs_bb"],
+            "extra": extra,
+        }
+        if "fear_greed" in extra:
+            summary["fear_greed"][name] = {
+                "value": extra["fear_greed"],
+                "classification": extra.get("fear_greed_class", ""),
+            }
+
+        tf_list = []
+        for label, entry in tf_data.get(name, []):
+            if "error" in entry:
+                tf_list.append({"horizon": label, "error": entry["error"]})
+            else:
+                ei = entry["indicators"]
+                tf_list.append(
+                    {
+                        "horizon": label,
+                        "action": entry["action"] if label != "Now" else sig["action"],
+                        "confidence": (
+                            entry["confidence"] if label != "Now" else sig["confidence"]
+                        ),
+                        "rsi": round(ei["rsi"], 1),
+                        "macd_hist": round(ei["macd_hist"], 2),
+                        "ema_bullish": ei["ema9"] > ei["ema21"],
+                        "bb_position": ei["price_vs_bb"],
+                    }
+                )
+        summary["timeframes"][name] = tf_list
+
+    AGENT_SUMMARY_FILE.parent.mkdir(exist_ok=True)
+    AGENT_SUMMARY_FILE.write_text(json.dumps(summary, indent=2, default=str))
+    return summary
+
+
+def invoke_agent(reasons):
+    agent_bat = BASE_DIR / "scripts" / "win" / "pf-agent.bat"
+    if not agent_bat.exists():
+        print(f"  WARNING: Agent script not found at {agent_bat}")
+        return False
+    try:
+        log_file = open(DATA_DIR / "agent.log", "a")
+        subprocess.Popen(
+            ["cmd", "/c", str(agent_bat)],
+            cwd=str(BASE_DIR),
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+        )
+        print(f"  Agent invoked ({', '.join(reasons)})")
+        return True
+    except Exception as e:
+        print(f"  ERROR invoking agent: {e}")
+        return False
+
+
 # --- Trade gating ---
 
 
@@ -691,7 +783,6 @@ def run(force_report=False):
     )
 
     signals = {}
-    trades = []
     prices_usd = {}
     tf_data = {}
 
@@ -745,18 +836,6 @@ def run(force_report=False):
                         f"    {label}: {entry['action']} {entry['confidence']:.0%} | RSI {ei['rsi']:.0f} | MACD {ei['macd_hist']:+.1f}"
                     )
 
-            allowed, reason = should_trade(state, name, action)
-            if allowed:
-                trade = execute_trade(state, name, action, conf, price, fx_rate)
-                if trade:
-                    trades.append(trade)
-                    state.setdefault("last_trade", {})[name] = {
-                        "action": action,
-                        "time": datetime.now(timezone.utc).isoformat(),
-                    }
-                    print(f"    >>> {action} {trade['shares']:.6f} @ ${price:,.2f}")
-            elif action != "HOLD":
-                print(f"    --- {name}: {action} blocked ({reason})")
         except Exception as e:
             print(f"  {name}: ERROR - {e}")
 
@@ -766,9 +845,14 @@ def run(force_report=False):
         f"\n  Portfolio: {total:,.0f} SEK ({pnl_pct:+.2f}%) | Cash: {state['cash_sek']:,.0f} SEK"
     )
 
-    save_state(state)
+    # Ensure portfolio state file exists (first run)
+    if not STATE_FILE.exists():
+        save_state(state)
 
-    # Smart trigger — only alert when something meaningful changed
+    # Write agent_summary.json every cycle (data for Layer 2)
+    write_agent_summary(signals, prices_usd, fx_rate, state, tf_data)
+
+    # Smart trigger — invoke Claude Code agent when something meaningful changed
     from portfolio.trigger import check_triggers
 
     fear_greeds = {}
@@ -785,20 +869,11 @@ def run(force_report=False):
 
     triggered, reasons = check_triggers(signals, prices_usd, fear_greeds, sentiments)
 
-    if triggered or trades or force_report:
-        msg = build_report(state, signals, trades, prices_usd, fx_rate, tf_data)
-        if not force_report and reasons:
-            msg += f"\n_Trigger: {', '.join(reasons)}_"
-        reason = (
-            "forced"
-            if force_report
-            else "trade" if trades else f"trigger: {', '.join(reasons)}"
-        )
-        print(f"\n  Sending Telegram ({reason})...")
-        if send_telegram(msg, config):
-            print("  Sent!")
-        else:
-            print("  FAILED to send!")
+    if triggered or force_report:
+        reasons_list = reasons if reasons else ["startup"]
+        write_agent_summary(signals, prices_usd, fx_rate, state, tf_data, reasons_list)
+        print(f"\n  Trigger: {', '.join(reasons_list)}")
+        invoke_agent(reasons_list)
     else:
         print("\n  No trigger — nothing changed.")
 
