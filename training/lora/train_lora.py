@@ -16,7 +16,7 @@ from transformers import (
     TrainingArguments,
 )
 
-MAX_SEQ_LEN = 2048
+MAX_SEQ_LEN = 512
 SEED = 42
 
 
@@ -153,8 +153,8 @@ def main():
     training_args = TrainingArguments(
         output_dir=str(output_dir),
         num_train_epochs=3,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=8,
+        per_device_train_batch_size=2,
+        gradient_accumulation_steps=4,
         learning_rate=2e-4,
         lr_scheduler_type="cosine",
         warmup_ratio=0.03,
