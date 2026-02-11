@@ -57,7 +57,7 @@ def get_stock_fear_greed() -> dict:
 
 
 def get_fear_greed(ticker=None) -> dict:
-    if ticker is None or ticker.upper().replace("-USD", "") in {"BTC", "ETH"}:
+    if ticker is None or ticker.upper().replace("-USD", "") in CRYPTO_TICKERS:
         return get_crypto_fear_greed()
     return get_stock_fear_greed()
 
