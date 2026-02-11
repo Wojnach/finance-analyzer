@@ -1257,7 +1257,36 @@
           return;
         }
         s.style.display = "";
-        var st = d.state.steps || [],
+        var raw = d.state.steps || {},
+          order = [
+            "setup_env",
+            "generate_data",
+            "download_model",
+            "train",
+            "convert_gguf",
+            "verify",
+            "deploy_shadow",
+          ],
+          labels = {
+            setup_env: "Setup Training Environment",
+            generate_data: "Generate Training Data",
+            download_model: "Download HuggingFace Model",
+            train: "QLoRA Training",
+            convert_gguf: "Convert to GGUF",
+            verify: "Verify GGUF",
+            deploy_shadow: "Deploy Shadow Mode",
+          },
+          st = Array.isArray(raw)
+            ? raw
+            : order
+                .filter(function (k) {
+                  return raw[k];
+                })
+                .map(function (k) {
+                  var o = Object.assign({}, raw[k]);
+                  o.name = labels[k] || k;
+                  return o;
+                }),
           h = '<ul class="ls">';
         st.forEach(function (x) {
           var ic, cl;
@@ -1279,7 +1308,7 @@
             '</span><span class="lin ' +
             cl +
             '">' +
-            eh(x.name) +
+            eh(x.name || "Step") +
             "</span></li>";
         });
         h += "</ul>";
