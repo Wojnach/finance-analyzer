@@ -26,8 +26,9 @@ or sends Telegram on its own.
 │  3. Fetch Fear & Greed Index (cached 5min)                       │
 │  4. Run CryptoBERT / Trading-Hero-LLM sentiment (cached 15min)  │
 │  5. Run Ministral-8B + CryptoTrader-LM LoRA (cached 15min)      │
-│  6. Tally votes → BUY/SELL/HOLD per symbol                      │
-│  7. Save everything to data/agent_summary.json                   │
+│  6. Run ML classifier (HistGradientBoosting, cached 15min)       │
+│  7. Tally votes → BUY/SELL/HOLD per symbol                      │
+│  8. Save everything to data/agent_summary.json                   │
 │                                                                   │
 │  CHANGE DETECTION (trigger.py):                                   │
 │  • Signal flip (HOLD→BUY, BUY→SELL, etc.)                       │
@@ -52,7 +53,7 @@ or sends Telegram on its own.
 │  • Trigger reasons (why was this invocation triggered?)          │
 │                                                                   │
 │  Analyzes:                                                        │
-│  • All 7 signals across all timeframes                           │
+│  • All 8 signals across all timeframes                           │
 │  • Portfolio risk (concentration, drawdown, cash reserves)       │
 │  • Recent trade history (avoid whipsaw, respect patterns)        │
 │  • Market regime (trending vs ranging, volatility)               │
@@ -66,7 +67,7 @@ or sends Telegram on its own.
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## 7 Signals
+## 8 Signals
 
 | #   | Signal          | Source                            | Buy condition                   | Sell condition                   | Cache TTL |
 | --- | --------------- | --------------------------------- | ------------------------------- | -------------------------------- | --------- |
@@ -77,14 +78,15 @@ or sends Telegram on its own.
 | 5   | Fear & Greed    | Crypto→Alternative.me, Stocks→VIX | ≤ 20 (extreme fear, contrarian) | ≥ 80 (extreme greed, contrarian) | 5min      |
 | 6   | Sentiment       | Crypto→CryptoBERT, Stocks→TH-LLM  | Positive (confidence > 0.4)     | Negative (confidence > 0.4)      | 15min     |
 | 7   | CryptoTrader-LM | Ministral-8B + CryptoTrader LoRA  | LLM outputs BUY                 | LLM outputs SELL                 | 15min     |
+| 8   | ML Classifier   | HistGradientBoosting on 1h data   | Model predicts BUY              | Model predicts SELL              | 15min     |
 
-**Vote threshold:** MIN_VOTERS=3 must cast a vote. Majority wins. Signals that don't meet their threshold (e.g., RSI between 30-70) abstain.
+**Vote threshold:** MIN_VOTERS=3 must cast a vote. Majority wins. Signals that don't meet their threshold (e.g., RSI between 30-70) abstain. ML Classifier only available for crypto (BTC, ETH).
 
 ## 7 Timeframes (crypto instruments)
 
 | Horizon | Candle interval | Candles fetched | Cache TTL       | Signal set       |
 | ------- | --------------- | --------------- | --------------- | ---------------- |
-| Now     | 15m             | 100 (~25h)      | 0 (every cycle) | All 7 signals    |
+| Now     | 15m             | 100 (~25h)      | 0 (every cycle) | All 8 signals    |
 | 12h     | 1h              | 100 (~4d)       | 5min            | 4 technical only |
 | 2d      | 4h              | 100 (~17d)      | 15min           | 4 technical only |
 | 7d      | 1d              | 100 (~100d)     | 1hr             | 4 technical only |
@@ -131,6 +133,8 @@ Q:\finance-analyzer\
 │   ├── fear_greed.py        # Fear & Greed (crypto→Alternative.me, stocks→VIX)
 │   ├── sentiment.py         # Sentiment (crypto→CryptoBERT, stocks→TH-LLM)
 │   ├── ministral_signal.py  # Wrapper for Ministral-8B + CryptoTrader-LM LoRA
+│   ├── ml_signal.py         # ML classifier inference (HistGradientBoosting)
+│   ├── ml_trainer.py        # ML model training + walk-forward validation
 │   └── __init__.py
 ├── data\
 │   ├── portfolio_state.json # Live portfolio (cash, holdings, transactions) — edited by Claude Code

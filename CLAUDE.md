@@ -93,7 +93,7 @@ requests.post(
 - Never go all-in on one asset
 - This is SIMULATED money (500K SEK starting) — trade freely to build a track record
 
-## 7 Signals
+## 8 Signals
 
 1. **RSI(14)** — Oversold (<30)=buy, overbought (>70)=sell, else abstains
 2. **MACD(12,26,9)** — Histogram crossover only (neg→pos=buy, pos→neg=sell), else abstains
@@ -102,6 +102,7 @@ requests.post(
 5. **Fear & Greed** — ≤20 contrarian buy, ≥80 contrarian sell, else abstains
 6. **Sentiment** — CryptoBERT (crypto) / Trading-Hero-LLM (stocks), confidence>0.4 to vote
 7. **CryptoTrader-LM** — Ministral-8B + LoRA, full LLM reasoning → BUY/SELL/HOLD
+8. **ML Classifier** — HistGradientBoosting on 1h candles (~20 features), crypto only
 
 ## Instruments
 

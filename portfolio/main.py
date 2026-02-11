@@ -53,6 +53,7 @@ _tool_cache = {}
 FEAR_GREED_TTL = 300  # 5 min
 SENTIMENT_TTL = 900  # 15 min
 MINISTRAL_TTL = 900  # 15 min
+ML_SIGNAL_TTL = 900  # 15 min
 
 
 def _cached(key, ttl, func, *args):
@@ -430,6 +431,22 @@ def generate_signal(ind, ticker=None, config=None):
         except ImportError:
             pass
 
+    # ML Classifier (HistGradientBoosting on BTC/ETH 1h data)
+    if ticker:
+        try:
+            from portfolio.ml_signal import get_ml_signal
+
+            ml = _cached(f"ml_{ticker}", ML_SIGNAL_TTL, get_ml_signal, ticker)
+            if ml:
+                extra_info["ml_action"] = ml["action"]
+                extra_info["ml_confidence"] = ml["confidence"]
+                if ml["action"] == "BUY":
+                    buy += 1
+                elif ml["action"] == "SELL":
+                    sell += 1
+        except ImportError:
+            pass
+
     total = buy + sell
     if total < MIN_VOTERS:
         action = "HOLD"
@@ -705,6 +722,8 @@ def build_report(state, signals, trades, prices_usd, fx_rate, tf_data=None):
             sig_parts.append(f"News:{extra['sentiment']}")
         if "ministral_action" in extra:
             sig_parts.append(f"8B:{extra['ministral_action']}")
+        if "ml_action" in extra:
+            sig_parts.append(f"ML:{extra['ml_action']}")
         if sig_parts:
             parts.append(" | ".join(sig_parts))
         lines.append("  ".join(parts))
@@ -820,6 +839,8 @@ def run(force_report=False):
                     parts.append(f"News:{extra['sentiment']}")
                 if "ministral_action" in extra:
                     parts.append(f"8B:{extra['ministral_action']}")
+                if "ml_action" in extra:
+                    parts.append(f"ML:{extra['ml_action']}")
                 if parts:
                     extra_str = f" | {' '.join(parts)}"
             print(
