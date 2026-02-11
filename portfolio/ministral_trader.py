@@ -11,10 +11,12 @@ import sys
 
 if platform.system() == "Windows":
     MODEL_PATH = r"Q:\models\ministral-8b-gguf\Ministral-8B-Instruct-2410-Q4_K_M.gguf"
+    LORA_PATH = r"Q:\models\cryptotrader-lm\cryptotrader-lm-lora.gguf"
 else:
     MODEL_PATH = (
         "/home/deck/models/ministral-8b-gguf/Ministral-8B-Instruct-2410-Q4_K_M.gguf"
     )
+    LORA_PATH = "/home/deck/models/cryptotrader-lm/cryptotrader-lm-lora.gguf"
 
 _model = None
 
@@ -26,8 +28,9 @@ def load_model():
 
         _model = Llama(
             model_path=MODEL_PATH,
+            lora_path=LORA_PATH,
             n_ctx=4096,
-            n_threads=8,
+            n_gpu_layers=-1,
             verbose=False,
         )
     return _model
@@ -81,7 +84,7 @@ Format: DECISION: [BUY/SELL/HOLD] - [reason][/INST]"""
     return {
         "action": decision,
         "reasoning": text[:200],
-        "model": "Ministral-8B-Q4_K_M",
+        "model": "CryptoTrader-LM",
     }
 
 

@@ -17,7 +17,12 @@ DATA_DIR = BASE_DIR / "data"
 STATE_FILE = DATA_DIR / "portfolio_state.json"
 CONFIG_FILE = BASE_DIR / "config.json"
 
-SYMBOLS = {"BTC-USD": "BTCUSDT", "ETH-USD": "ETHUSDT"}
+SYMBOLS = {
+    "BTC-USD": {"binance": "BTCUSDT"},
+    "ETH-USD": {"binance": "ETHUSDT"},
+    "MSTR": {"yfinance": "MSTR"},
+    "PLTR": {"yfinance": "PLTR"},
+}
 USDSEK_RATE_URL = "https://api.binance.com/api/v3/ticker/price?symbol=USDTSEK"
 
 INITIAL_CASH_SEK = 500_000
@@ -101,6 +106,57 @@ def binance_klines(symbol, interval="5m", limit=100):
         df[col] = df[col].astype(float)
     df["time"] = pd.to_datetime(df["open_time"], unit="ms")
     return df
+
+
+YF_INTERVAL_MAP = {
+    "15m": ("15m", "5d"),
+    "1h": ("1h", "30d"),
+    "4h": ("1h", "60d"),
+    "1d": ("1d", "1y"),
+    "3d": ("1d", "2y"),
+    "1w": ("1wk", "5y"),
+    "1M": ("1mo", "10y"),
+}
+
+
+def yfinance_klines(yf_ticker, interval="1d", limit=100):
+    import yfinance as yf
+
+    yf_interval, period = YF_INTERVAL_MAP.get(interval, ("1d", "1y"))
+    stock = yf.Ticker(yf_ticker)
+    df = stock.history(period=period, interval=yf_interval)
+    if df.empty:
+        raise ValueError(f"No data for {yf_ticker} interval={yf_interval}")
+    df = df.rename(
+        columns={
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
+            "Volume": "volume",
+        }
+    )
+    df = df.reset_index()
+    if "4h" == interval:
+        df = df.set_index("Datetime" if "Datetime" in df.columns else "Date")
+        df = (
+            df.resample("4h")
+            .agg(
+                {
+                    "open": "first",
+                    "high": "max",
+                    "low": "min",
+                    "close": "last",
+                    "volume": "sum",
+                }
+            )
+            .dropna()
+            .reset_index()
+        )
+    df["time"] = (
+        pd.to_datetime(df.iloc[:, 0]) if "time" not in df.columns else df["time"]
+    )
+    return df.tail(limit)
 
 
 _fx_cache = {"rate": None, "time": 0}
@@ -209,17 +265,38 @@ def technical_signal(ind):
     return "HOLD", 0.5
 
 
-def collect_timeframes(symbol):
+def _fetch_klines(source, interval, limit):
+    if "binance" in source:
+        return binance_klines(source["binance"], interval=interval, limit=limit)
+    elif "yfinance" in source:
+        return yfinance_klines(source["yfinance"], interval=interval, limit=limit)
+    raise ValueError(f"Unknown source: {source}")
+
+
+# Stocks use daily+ candles (no intraday without market data subscription)
+STOCK_TIMEFRAMES = [
+    ("Now", "1d", 100, 0),
+    ("7d", "1d", 100, 3600),
+    ("1mo", "1d", 100, 3600),
+    ("3mo", "1w", 100, 43200),
+    ("6mo", "1M", 48, 86400),
+]
+
+
+def collect_timeframes(source):
+    is_stock = "yfinance" in source
+    tfs = STOCK_TIMEFRAMES if is_stock else TIMEFRAMES
+    source_key = source.get("yfinance") or source.get("binance")
     results = []
-    for label, interval, limit, ttl in TIMEFRAMES:
-        cache_key = f"tf_{symbol}_{interval}"
+    for label, interval, limit, ttl in tfs:
+        cache_key = f"tf_{source_key}_{interval}"
         if ttl > 0:
             cached = _tool_cache.get(cache_key)
             if cached and time.time() - cached["time"] < ttl:
                 results.append((label, cached["data"]))
                 continue
         try:
-            df = binance_klines(symbol, interval=interval, limit=limit)
+            df = _fetch_klines(source, interval, limit)
             ind = compute_indicators(df)
             if label == "Now":
                 action, conf = None, None
@@ -457,7 +534,7 @@ def send_telegram(msg, config):
     r = requests.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
         json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
-        timeout=10,
+        timeout=30,
     )
     return r.ok
 
@@ -592,18 +669,18 @@ def run(force_report=False):
     prices_usd = {}
     tf_data = {}
 
-    for name, symbol in SYMBOLS.items():
+    for name, source in SYMBOLS.items():
         try:
-            # Collect all timeframes
-            tfs = collect_timeframes(symbol)
+            tfs = collect_timeframes(source)
             tf_data[name] = tfs
 
-            # "Now" is the first timeframe — use it for trading with all 6 signals
             now_entry = tfs[0][1] if tfs else None
             if now_entry and "indicators" in now_entry:
                 ind = now_entry["indicators"]
             else:
-                df = binance_klines(symbol, interval="15m", limit=100)
+                df = _fetch_klines(
+                    source, interval="15m" if "binance" in source else "1d", limit=100
+                )
                 ind = compute_indicators(df)
 
             price = ind["close"]
@@ -657,12 +734,31 @@ def run(force_report=False):
 
     save_state(state)
 
-    # Send Telegram if high-confidence signal, trade executed, or forced
-    high_conf = any(s["confidence"] >= CONFIDENCE_TELEGRAM for s in signals.values())
-    if high_conf or trades or force_report:
+    # Smart trigger — only alert when something meaningful changed
+    from portfolio.trigger import check_triggers
+
+    fear_greeds = {}
+    sentiments = {}
+    for name, sig in signals.items():
+        extra = sig.get("extra", {})
+        if "fear_greed" in extra:
+            fear_greeds[name] = {
+                "value": extra["fear_greed"],
+                "classification": extra.get("fear_greed_class", ""),
+            }
+        if "sentiment" in extra:
+            sentiments[name] = extra["sentiment"]
+
+    triggered, reasons = check_triggers(signals, prices_usd, fear_greeds, sentiments)
+
+    if triggered or trades or force_report:
         msg = build_report(state, signals, trades, prices_usd, fx_rate, tf_data)
+        if not force_report and reasons:
+            msg += f"\n_Trigger: {', '.join(reasons)}_"
         reason = (
-            "forced" if force_report else "high-confidence" if high_conf else "trade"
+            "forced"
+            if force_report
+            else "trade" if trades else f"trigger: {', '.join(reasons)}"
         )
         print(f"\n  Sending Telegram ({reason})...")
         if send_telegram(msg, config):
@@ -670,7 +766,7 @@ def run(force_report=False):
         else:
             print("  FAILED to send!")
     else:
-        print("\n  No alert needed — low confidence, no trades.")
+        print("\n  No trigger — nothing changed.")
 
 
 def loop(interval=60):

@@ -30,8 +30,8 @@ def collect():
     timeframes = {}
     fear_greeds = {}
 
-    for name, symbol in SYMBOLS.items():
-        tfs = collect_timeframes(symbol)
+    for name, source in SYMBOLS.items():
+        tfs = collect_timeframes(source)
         now_entry = tfs[0][1] if tfs else None
         if now_entry and "indicators" in now_entry:
             ind = now_entry["indicators"]
