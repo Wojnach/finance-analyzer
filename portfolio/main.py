@@ -30,6 +30,7 @@ CONFIDENCE_TELEGRAM = 0.75  # 3/4 signals must agree to alert
 BUY_ALLOC = 0.20  # 20% of cash per buy
 SELL_ALLOC = 0.50  # sell 50% of position per sell
 MIN_TRADE_SEK = 500
+TRADE_COOLDOWN_SECONDS = 3600  # 1 hour between trades on same ticker
 
 BINANCE_BASE = "https://api.binance.com/api/v3"
 
@@ -348,7 +349,7 @@ def generate_signal(ind, ticker=None, config=None):
 
     # --- Extended signals from tools (optional) ---
 
-    # Fear & Greed Index (per-ticker: crypto→alternative.me, stocks→VIX)
+    # Fear & Greed Index (per-ticker: crypto->alternative.me, stocks->VIX)
     try:
         from portfolio.fear_greed import get_fear_greed
 
@@ -364,7 +365,7 @@ def generate_signal(ind, ticker=None, config=None):
     except ImportError:
         pass
 
-    # Sentiment (crypto→CryptoBERT, stocks→Trading-Hero-LLM)
+    # Sentiment (crypto->CryptoBERT, stocks->Trading-Hero-LLM)
     if ticker:
         short_ticker = ticker.replace("-USD", "")
         try:
@@ -465,6 +466,31 @@ def load_state():
 def save_state(state):
     DATA_DIR.mkdir(exist_ok=True)
     STATE_FILE.write_text(json.dumps(state, indent=2, default=str))
+
+
+# --- Trade gating ---
+
+
+def should_trade(state, ticker, action):
+    """Check if trade is allowed. Returns (allowed, reason)."""
+    if action == "HOLD":
+        return False, "HOLD"
+
+    last_trade = state.get("last_trade", {}).get(ticker, {})
+
+    # State-change gating: block repeat actions
+    if last_trade.get("action") == action:
+        return False, f"repeat {action}, no state change"
+
+    # Per-symbol cooldown
+    if last_trade.get("time"):
+        last_time = datetime.fromisoformat(last_trade["time"])
+        elapsed = (datetime.now(timezone.utc) - last_time).total_seconds()
+        if elapsed < TRADE_COOLDOWN_SECONDS:
+            remaining = int(TRADE_COOLDOWN_SECONDS - elapsed)
+            return False, f"cooldown ({remaining}s remaining)"
+
+    return True, ""
 
 
 # --- Trading ---
@@ -719,10 +745,18 @@ def run(force_report=False):
                         f"    {label}: {entry['action']} {entry['confidence']:.0%} | RSI {ei['rsi']:.0f} | MACD {ei['macd_hist']:+.1f}"
                     )
 
-            trade = execute_trade(state, name, action, conf, price, fx_rate)
-            if trade:
-                trades.append(trade)
-                print(f"    >>> {action} {trade['shares']:.6f} @ ${price:,.2f}")
+            allowed, reason = should_trade(state, name, action)
+            if allowed:
+                trade = execute_trade(state, name, action, conf, price, fx_rate)
+                if trade:
+                    trades.append(trade)
+                    state.setdefault("last_trade", {})[name] = {
+                        "action": action,
+                        "time": datetime.now(timezone.utc).isoformat(),
+                    }
+                    print(f"    >>> {action} {trade['shares']:.6f} @ ${price:,.2f}")
+            elif action != "HOLD":
+                print(f"    --- {name}: {action} blocked ({reason})")
         except Exception as e:
             print(f"  {name}: ERROR - {e}")
 

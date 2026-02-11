@@ -51,3 +51,6 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+  
+# ML model artifacts  
+models/*.joblib 

@@ -1,177 +1,217 @@
-# Portfolio Intelligence — Architecture
+# Portfolio Intelligence System — Architecture (Source of Truth)
 
-## Overview
+> **Last updated:** 2026-02-11
+> **Status:** LIVE on herc2 (simulated 500K SEK portfolio)
+> **Canonical doc:** This file is THE source of truth for the system architecture.
+> Other agents, sessions, and memory files should reference this document.
 
-Two-layer autonomous trading system. A Python fast loop runs 24/7 collecting
-data and detecting meaningful changes. When triggered, Claude Code is invoked
-as the decision-maker — it reads all signals, reasons about portfolio state,
-and either acts (trade + Telegram) or passes.
+## Core Principle
 
-## Current State (2026-02-11)
+**The Python fast loop collects data. Claude Code makes all decisions.**
 
-**What exists and works:**
+The fast loop (Layer 1) runs every 60 seconds, fetching prices, computing indicators, and
+running all 7 signal models. It detects when something meaningful changes. When a trigger
+fires, it invokes Claude Code (Layer 2) with the full context. Claude Code analyzes the
+data, decides whether to trade, and sends Telegram messages. The fast loop NEVER trades
+or sends Telegram on its own.
 
-- `main.py --loop 60` — collects data, computes 7 signals, **auto-trades** when 3+ agree
-- `trigger.py` — detects signal flips, 2% price moves, F&G thresholds, sentiment reversals
-- When triggered: sends Telegram report, but does NOT invoke Claude Code
-- `pf-agent.bat` — exists on herc2 with Claude prompt, but is disconnected from the loop
-- `pf` CLI — deployed, works from anywhere via SSH
-
-**What needs to change:**
-
-- main.py must STOP auto-trading
-- When trigger fires → invoke Claude Code instead of just sending Telegram
-- Claude Code reads all data, makes the final BUY/SELL/HOLD decision
-- Only Claude Code executes trades and sends Telegram messages
-
----
-
-## Target Architecture
+## Two-Layer Architecture
 
 ```
-┌──────────────────────────────────────────────────────┐
-│  LAYER 1: PYTHON FAST LOOP (every 60s)               │
-│  Scheduled task: PF-DataLoop on herc2                 │
-│  Script: main.py --loop 60                            │
-│                                                       │
-│  COLLECTS (free, no LLM):                             │
-│  • Binance prices + candles (BTC, ETH)               │
-│  • Yahoo Finance (MSTR, PLTR)                        │
-│  • RSI, MACD, EMA, BB (just math)                    │
-│  • Fear & Greed (Alternative.me / VIX)               │
-│  • CryptoBERT / Trading-Hero-LLM sentiment           │
-│  • CryptoTrader-LM via Ministral-8B LoRA (GPU)       │
-│  • All 7 timeframes per crypto, 5 per stock          │
-│  • Writes: agent_summary.json, trigger_state.json     │
-│                                                       │
-│  DETECTS CHANGES (trigger.py):                        │
-│  • Signal flip (BUY↔SELL↔HOLD)                       │
-│  • Price moved >2% since last trigger                │
-│  • Fear & Greed crossed 20 or 80                     │
-│  • Sentiment reversal (positive↔negative)             │
-│  • 2h cooldown expired (periodic check-in)           │
-│                                                       │
-│  If triggered → invoke Claude Code (Layer 2)          │
-│  If not → log locally, keep looping                   │
-└──────────────┬───────────────────────────────────────┘
-               │ (~20-50 triggers/day, not 1,440)
+┌──────────────────────────────────────────────────────────────────┐
+│  LAYER 1: PYTHON FAST LOOP (every 60s) — FREE, runs 24/7        │
+│                                                                   │
+│  1. Fetch Binance/yfinance prices + candles (7 timeframes)       │
+│  2. Compute indicators: RSI, MACD, EMA, BB                      │
+│  3. Fetch Fear & Greed Index (cached 5min)                       │
+│  4. Run CryptoBERT / Trading-Hero-LLM sentiment (cached 15min)  │
+│  5. Run Ministral-8B + CryptoTrader-LM LoRA (cached 15min)      │
+│  6. Tally votes → BUY/SELL/HOLD per symbol                      │
+│  7. Save everything to data/agent_summary.json                   │
+│                                                                   │
+│  CHANGE DETECTION (trigger.py):                                   │
+│  • Signal flip (HOLD→BUY, BUY→SELL, etc.)                       │
+│  • Price moved >2% since last trigger                            │
+│  • Fear & Greed crossed threshold (20 or 80)                     │
+│  • Sentiment reversal (positive↔negative)                        │
+│  • Cooldown expired (2h max silence)                             │
+│                                                                   │
+│  If trigger fires → invoke Claude Code (Layer 2)                 │
+│  If no trigger → log locally, keep looping                       │
+│                                                                   │
+│  ⚠ NEVER trades. NEVER sends Telegram. Data collection only.    │
+└──────────────┬───────────────────────────────────────────────────┘
+               │ (only when something meaningful changes)
                ▼
-┌──────────────────────────────────────────────────────┐
-│  LAYER 2: CLAUDE CODE (decision-maker)                │
-│  Invoked by: main.py via `claude -p` when triggered   │
-│                                                       │
-│  READS:                                               │
-│  • agent_summary.json (all signals, all timeframes)  │
-│  • portfolio_state.json (cash, holdings, trades)     │
-│  • trigger_state.json (what triggered and why)       │
-│                                                       │
-│  DECIDES:                                             │
-│  • Analyzes all 7 signals + timeframes               │
-│  • Considers portfolio risk, position sizes, P&L     │
-│  • Weighs trigger reasons (why was I called?)        │
-│  • Makes BUY / SELL / HOLD decision with reasoning   │
-│                                                       │
-│  ACTS (only if decision is BUY or SELL):              │
-│  • Edits portfolio_state.json (cash, holdings, txn)  │
-│  • Sends Telegram with reasoning                     │
-│  • If HOLD: sends brief Telegram only if noteworthy  │
-│                                                       │
-│  DOES NOT:                                            │
-│  • Fetch any market data (Layer 1 already did)       │
-│  • Make API calls to Binance/Yahoo/etc               │
-│  • Run any models (signals already computed)          │
-└──────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  LAYER 2: CLAUDE CODE AGENT (invoked ~20-50x/day)               │
+│                                                                   │
+│  Reads:                                                           │
+│  • data/agent_summary.json (all signals, timeframes, indicators) │
+│  • data/portfolio_state.json (cash, holdings, transaction history)│
+│  • Trigger reasons (why was this invocation triggered?)          │
+│                                                                   │
+│  Analyzes:                                                        │
+│  • All 7 signals across all timeframes                           │
+│  • Portfolio risk (concentration, drawdown, cash reserves)       │
+│  • Recent trade history (avoid whipsaw, respect patterns)        │
+│  • Market regime (trending vs ranging, volatility)               │
+│                                                                   │
+│  Decides:                                                         │
+│  • TRADE: Edit portfolio_state.json (update cash, holdings, log) │
+│  • NOTIFY: Send Telegram with reasoning                          │
+│  • HOLD: Do nothing (most common — discipline over action)       │
+│                                                                   │
+│  ⚠ Claude Code is the SOLE decision-maker for trades + Telegram │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-## 7 Signals (Current)
+## 7 Signals
 
-| #   | Signal          | Source               | Buy           | Sell          |
-| --- | --------------- | -------------------- | ------------- | ------------- |
-| 1   | RSI(14)         | Technical (candles)  | < 30          | > 70          |
-| 2   | MACD(12,26,9)   | Technical (candles)  | Histogram > 0 | Histogram < 0 |
-| 3   | EMA(9,21)       | Technical (candles)  | EMA9 > EMA21  | EMA9 < EMA21  |
-| 4   | Bollinger Bands | Technical (candles)  | Price < lower | Price > upper |
-| 5   | Fear & Greed    | Alternative.me / VIX | ≤ 20          | ≥ 80          |
-| 6   | News Sentiment  | CryptoBERT / T-H-LLM | Positive >0.4 | Negative >0.4 |
-| 7   | CryptoTrader-LM | Ministral-8B + LoRA  | BUY output    | SELL output   |
+| #   | Signal          | Source                            | Buy condition                   | Sell condition                   | Cache TTL |
+| --- | --------------- | --------------------------------- | ------------------------------- | -------------------------------- | --------- |
+| 1   | RSI(14)         | Binance 15m klines                | < 30 (oversold)                 | > 70 (overbought)                | 0         |
+| 2   | MACD(12,26,9)   | Binance 15m klines                | Histogram crossover (neg→pos)   | Histogram crossover (pos→neg)    | 0         |
+| 3   | EMA(9,21)       | Binance 15m klines                | Fast > slow (uptrend)           | Fast < slow (downtrend)          | 0         |
+| 4   | BB(20,2)        | Binance 15m klines                | Price below lower band          | Price above upper band           | 0         |
+| 5   | Fear & Greed    | Crypto→Alternative.me, Stocks→VIX | ≤ 20 (extreme fear, contrarian) | ≥ 80 (extreme greed, contrarian) | 5min      |
+| 6   | Sentiment       | Crypto→CryptoBERT, Stocks→TH-LLM  | Positive (confidence > 0.4)     | Negative (confidence > 0.4)      | 15min     |
+| 7   | CryptoTrader-LM | Ministral-8B + CryptoTrader LoRA  | LLM outputs BUY                 | LLM outputs SELL                 | 15min     |
 
-Layer 1 computes all 7 and writes the consensus to agent_summary.json.
-Layer 2 (Claude Code) reads the consensus AND individual signals, then
-makes the final decision. Claude is not bound by the consensus — it can
-override if it has good reason (e.g., extreme F&G contradicts technicals).
+**Vote threshold:** MIN_VOTERS=3 must cast a vote. Majority wins. Signals that don't meet their threshold (e.g., RSI between 30-70) abstain.
 
-## Timeframes
+## 7 Timeframes (crypto instruments)
 
-| Horizon | Crypto interval | Stock interval |
-| ------- | --------------- | -------------- |
-| Now     | 15m             | 1d             |
-| 12h     | 1h              | —              |
-| 2d      | 4h              | —              |
-| 7d      | 1d              | 1d             |
-| 1mo     | 3d              | 1d             |
-| 3mo     | 1w              | 1w             |
-| 6mo     | 1M              | 1M             |
+| Horizon | Candle interval | Candles fetched | Cache TTL       | Signal set       |
+| ------- | --------------- | --------------- | --------------- | ---------------- |
+| Now     | 15m             | 100 (~25h)      | 0 (every cycle) | All 7 signals    |
+| 12h     | 1h              | 100 (~4d)       | 5min            | 4 technical only |
+| 2d      | 4h              | 100 (~17d)      | 15min           | 4 technical only |
+| 7d      | 1d              | 100 (~100d)     | 1hr             | 4 technical only |
+| 1mo     | 3d              | 100 (~300d)     | 4hr             | 4 technical only |
+| 3mo     | 1w              | 100 (~2yr)      | 12hr            | 4 technical only |
+| 6mo     | 1M              | 48 (~4yr)       | 24hr            | 4 technical only |
 
-## Trigger Conditions
+## 5 Timeframes (stock instruments)
 
-Claude Code gets invoked when ANY of these fire:
+| Horizon | Candle interval | Cache TTL |
+| ------- | --------------- | --------- |
+| Now     | 1d              | 0         |
+| 7d      | 1d              | 1hr       |
+| 1mo     | 1d              | 1hr       |
+| 3mo     | 1w              | 12hr      |
+| 6mo     | 1M              | 24hr      |
 
-1. **Signal flip** — any ticker's action changed (HOLD→BUY, BUY→SELL, etc.)
-2. **Price move >2%** — since last trigger
-3. **Fear & Greed threshold** — crossed 20 (extreme fear) or 80 (extreme greed)
-4. **Sentiment reversal** — flipped positive↔negative
-5. **2h cooldown** — no trigger for 2 hours, periodic check-in
+## Instruments
 
-## Trading Rules
+| Name          | Ticker  | Market      | Data source       |
+| ------------- | ------- | ----------- | ----------------- |
+| Bitcoin       | BTC-USD | Crypto 24/7 | Binance (BTCUSDT) |
+| Ethereum      | ETH-USD | Crypto 24/7 | Binance (ETHUSDT) |
+| MicroStrategy | MSTR    | NASDAQ      | yfinance          |
+| Palantir      | PLTR    | NASDAQ      | yfinance          |
 
-- Simulated 500,000 SEK portfolio
-- Instruments: BTC-USD, ETH-USD, MSTR, PLTR
-- Position sizing: max 20% of cash per buy, sell 50% of position per sell
-- Min trade: 500 SEK
-- Min voters to act: 3 signals agreeing
-- Manual trades via `pf buy/sell` bypass Claude (direct to portfolio_state.json)
+## Trading Rules (enforced by Claude Code, Layer 2)
 
-## Key Files on herc2 (Q:\finance-analyzer)
+- BUY: Allocate 20% of cash per trade
+- SELL: Liquidate 50% of position per trade
+- Minimum trade size: 500 SEK
+- Per-symbol cooldown: 1 hour between trades on same ticker
+- State-change gating: Only trade on signal transitions (HOLD→BUY, not BUY→BUY)
+- Claude Code exercises judgment — may override raw signal consensus
 
-| File                            | Purpose                                                |
-| ------------------------------- | ------------------------------------------------------ |
-| `portfolio/main.py`             | Core loop: data collection, signals, trigger check     |
-| `portfolio/trigger.py`          | Change detection (signal flips, price, F&G, sentiment) |
-| `portfolio/collect.py`          | Writes agent_summary.json                              |
-| `portfolio/fear_greed.py`       | Fear & Greed (crypto→Alternative.me, stocks→VIX)       |
-| `portfolio/sentiment.py`        | News sentiment (CryptoBERT, Trading-Hero-LLM)          |
-| `portfolio/ministral_signal.py` | CryptoTrader-LM signal via Ministral-8B LoRA           |
-| `data/portfolio_state.json`     | Portfolio state (cash, holdings, transactions)         |
-| `data/agent_summary.json`       | Latest signals, timeframes, F&G, prices                |
-| `data/trigger_state.json`       | Last trigger state for change detection                |
-| `config.json`                   | Telegram bot token + chat_id                           |
-| `scripts/pf.py`                 | CLI tool for mobile SSH                                |
-| `scripts/win/pf.bat`            | Windows batch wrapper for pf                           |
-| `scripts/win/pf-loop.bat`       | Runs main.py --loop 60                                 |
-| `scripts/win/pf-agent.bat`      | Claude Code agent invocation (to be wired in)          |
+## File Layout on herc2
 
-## Implementation TODO
+```
+Q:\finance-analyzer\
+├── portfolio\
+│   ├── main.py              # Layer 1: Fast loop — data collection + change detection
+│   ├── collect.py           # Aggregates signals into agent_summary.json
+│   ├── trigger.py           # Change detection: signal flips, price moves, F&G, sentiment
+│   ├── fear_greed.py        # Fear & Greed (crypto→Alternative.me, stocks→VIX)
+│   ├── sentiment.py         # Sentiment (crypto→CryptoBERT, stocks→TH-LLM)
+│   ├── ministral_signal.py  # Wrapper for Ministral-8B + CryptoTrader-LM LoRA
+│   └── __init__.py
+├── data\
+│   ├── portfolio_state.json # Live portfolio (cash, holdings, transactions) — edited by Claude Code
+│   ├── agent_summary.json   # Latest signals snapshot — written by fast loop, read by Claude Code
+│   └── trigger_state.json   # Trigger state (last signals, prices, timestamps)
+├── config.json              # Telegram token, chat_id, Binance keys, newsapi_key (gitignored)
+├── CLAUDE.md                # Instructions for Claude Code when invoked as trading agent
+├── docs\
+│   ├── architecture-plan.md # THIS FILE — canonical architecture reference
+│   └── plans\               # Research docs and future plans
+├── scripts\win\
+│   ├── pf-loop.bat          # Starts Layer 1 fast loop
+│   └── pf-agent.bat         # Collects data + invokes Claude Code (Layer 2)
+└── .venv\                   # Python 3.12 venv
+```
 
-1. **Stop auto-trading in main.py** — remove execute_trade() calls from the loop
-2. **On trigger: invoke Claude Code** — `claude -p` with structured prompt + data paths
-3. **Claude Code prompt** — read agent_summary.json + portfolio_state.json, decide, act
-4. **Claude sends Telegram** — with reasoning, not just signal dump
-5. **Test end-to-end** — trigger fires → Claude invoked → decision made → trade + Telegram
+## Models on herc2
 
-## iPhone SSH Pipeline (DONE)
+```
+Q:\models\
+├── ministral-8b-gguf\       # bartowski/Ministral-8B-Instruct-2410 Q4_K_M (4.9GB)
+├── cryptotrader-lm\         # agarkovv/CryptoTrader-LM LoRA adapter (7.7MB GGUF)
+├── cryptobert\              # ElKulako/cryptobert (~500MB) — crypto sentiment
+├── trading-hero-llm\        # fuchenru/Trading-Hero-LLM (419MB) — stock sentiment
+├── .venv-llm\               # Separate venv for llama-cpp-python (CUDA)
+├── ministral_trader.py      # Ministral-8B inference script
+├── cryptobert_infer.py      # CryptoBERT inference script
+└── trading_hero_infer.py    # Trading-Hero-LLM inference script
+```
 
-`pf` CLI deployed on herc2, in PATH. Commands:
+## Scheduled Tasks (Windows Task Scheduler)
 
-- `pf status` / `pf signals` / `pf trades` / `pf log` — read-only
-- `pf report` — force Telegram report
-- `pf buy <ticker> [pct]` / `pf sell <ticker> [pct]` — manual trades
-- `pf pause` / `pf resume` — toggle PF-DataLoop scheduled task
+| Task name       | Script         | Schedule              | Purpose                               |
+| --------------- | -------------- | --------------------- | ------------------------------------- |
+| PF-DataLoop     | `pf-loop.bat`  | On logon (continuous) | Layer 1: 60s data collection loop     |
+| Portfolio-Agent | `pf-agent.bat` | Every 15 min          | Layer 2: Claude Code agent invocation |
 
-## Endgame: Automated Exchange Trading
+## What Needs to Change (Implementation TODO)
 
-Once the two-layer system proves profitable vs buy-and-hold:
+### Bug fix: Remove auto-trading from main.py
 
-1. Add Binance API trading module (authenticated, config.json keys)
-2. Replace portfolio_state.json edits with real API calls
-3. Keep simulated portfolio running in parallel for comparison
-4. Add safety rails: max position size, daily loss limit, kill switch
+Currently `main.py` calls `execute_trade()` inside the loop — this is wrong. The fast loop
+should ONLY collect data and detect triggers. Trading must happen exclusively through Claude Code.
+
+**Changes needed in `main.py`:**
+
+1. Remove `execute_trade()` calls from `run()`
+2. Remove direct `send_telegram()` calls from `run()`
+3. When trigger fires: write `agent_summary.json` with trigger reasons
+4. Add state-change gating: track previous signal per symbol, only trigger on transitions
+5. Add per-symbol cooldown tracking in trigger_state.json
+
+### Smart trigger → Claude Code invocation
+
+When `trigger.py` detects a meaningful change, the fast loop should either:
+
+- **Option A:** Directly invoke `claude -p` from within the Python loop (subprocess)
+- **Option B:** Write a trigger flag file, let `pf-agent.bat` (scheduled every 15min) pick it up
+
+Option A is preferred for lower latency. Option B is simpler and already partially implemented.
+
+### Planned: ML signal (scikit-learn HistGradientBoosting)
+
+Signal #8: A trained classifier using 30+ features from 2yr of 1h candles.
+Walk-forward validated. New files: `portfolio/ml_trainer.py`, `portfolio/ml_signal.py`.
+
+### Planned: Custom LoRA fine-tuning
+
+Train custom LoRA adapter on BTC/ETH trading decisions using hindsight labeling.
+Replace current CryptoTrader-LM LoRA. Plan doc in `docs/plans/`.
+
+## Token Budget (Claude Code usage)
+
+| Scenario             | Invocations/day | Tokens/call | Tokens/day |
+| -------------------- | --------------- | ----------- | ---------- |
+| Fixed 15min interval | 96              | ~6K         | ~576K      |
+| Smart triggers only  | 20-50           | ~6K         | 120-300K   |
+
+## Git & Sync
+
+- **Repo:** `git@github.com:Wojnach/finance-analyzer.git`
+- **herc2:** `Q:\finance-analyzer\` (working copy, runs live)
+- **Steam Deck:** `~/projects/finance-analyzer/` (development copy)
+- Both copies at commit `327646b` as of 2026-02-11
