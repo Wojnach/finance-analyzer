@@ -61,17 +61,8 @@ Edit `data/portfolio_state.json`:
 
 ### 5. Notify via Telegram (if noteworthy)
 
-Send Telegram when:
-
-- You execute a trade (always notify on trades)
-- A significant market event occurred (even if you hold)
-- The periodic check-in has useful insights
-
-Do NOT send Telegram when:
-
-- Nothing meaningful changed
-- Signals are mixed and you're holding
-- It would be noise rather than signal
+**ALWAYS send a Telegram message when you are invoked.** Every invocation means something
+triggered — the user wants to see your analysis every time. No exceptions.
 
 **Message format:** The user reads these on iPhone — keep it scannable. Use the monospace block for the signal grid so columns align. End with 1-2 sentences of your reasoning in plain language (no label needed).
 

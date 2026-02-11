@@ -587,7 +587,18 @@ def write_agent_summary(
     return summary
 
 
+INVOCATIONS_FILE = DATA_DIR / "invocations.jsonl"
+
+
 def invoke_agent(reasons):
+    # Log invocation (Layer 1 side — tracks even if agent crashes)
+    entry = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "reasons": reasons,
+    }
+    with open(INVOCATIONS_FILE, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
     agent_bat = BASE_DIR / "scripts" / "win" / "pf-agent.bat"
     if not agent_bat.exists():
         print(f"  WARNING: Agent script not found at {agent_bat}")
