@@ -31,7 +31,7 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
     for ticker, sig in signals.items():
         old_action = prev_signals.get(ticker, {}).get("action")
         if old_action and old_action != sig["action"]:
-            reasons.append(f"{ticker} flipped {old_action}→{sig['action']}")
+            reasons.append(f"{ticker} flipped {old_action}->{sig['action']}")
 
     # 2. Price move >2% since last trigger
     prev_prices = prev.get("prices", {})
@@ -54,7 +54,7 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
         )
         for threshold in FG_THRESHOLDS:
             if (old_val > threshold) != (val > threshold):
-                reasons.append(f"F&G crossed {threshold} ({old_val}→{val})")
+                reasons.append(f"F&G crossed {threshold} ({old_val}->{val})")
                 break
 
     # 4. Sentiment reversal
@@ -67,7 +67,7 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
             and sent != "neutral"
             and old_sent != "neutral"
         ):
-            reasons.append(f"{ticker} sentiment {old_sent}→{sent}")
+            reasons.append(f"{ticker} sentiment {old_sent}->{sent}")
 
     # 5. Cooldown expired
     last_trigger_time = state.get("last_trigger_time", 0)
