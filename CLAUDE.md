@@ -79,11 +79,12 @@ HOLD example:
 ```
 *HOLD*
 
-`BTC  $66,800  SELL 3/8  F&G 11`
-`ETH  $1,952   SELL 3/8  F&G 11`
-`MSTR $129.93  HOLD 1/8  F&G 62`
-`PLTR $134.77  HOLD 2/8  F&G 62`
+`BTC  $66,800  SELL 3/8`
+`ETH  $1,952   SELL 3/8`
+`MSTR $129.93  HOLD 1/8`
+`PLTR $134.77  HOLD 2/8`
 
+_Crypto F&G: 11 · Stock F&G: 62_
 _500,000 SEK (+0.00%)_
 
 Bearish technicals across all timeframes despite extreme fear. Waiting for RSI divergence before deploying capital.
@@ -94,11 +95,12 @@ TRADE example:
 ```
 *BUY BTC* — 100,000 SEK @ $66,800
 
-`BTC  $66,800  BUY 6/8   F&G 18`
-`ETH  $1,952   HOLD 4/8  F&G 18`
-`MSTR $129.93  HOLD 1/8  F&G 55`
-`PLTR $134.77  HOLD 2/8  F&G 55`
+`BTC  $66,800  BUY 6/8`
+`ETH  $1,952   HOLD 4/8`
+`MSTR $129.93  HOLD 1/8`
+`PLTR $134.77  HOLD 2/8`
 
+_Crypto F&G: 18 · Stock F&G: 55_
 _400,000 SEK (+0.00%) · BTC 0.15_
 
 RSI bullish divergence at extreme fear with 6/8 signal consensus. Multi-timeframe confirmation on 1h through 1w.
