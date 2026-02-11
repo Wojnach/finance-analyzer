@@ -191,9 +191,9 @@ requests.post(
 | ------- | ----------- | ----------------- |
 | BTC-USD | Crypto 24/7 | Binance (BTCUSDT) |
 | ETH-USD | Crypto 24/7 | Binance (ETHUSDT) |
-| MSTR    | NASDAQ      | Alpaca (IEX feed) |
-| PLTR    | NASDAQ      | Alpaca (IEX feed) |
-| NVDA    | NASDAQ      | Alpaca (IEX feed) |
+| MSTR    | NASDAQ      | yfinance          |
+| PLTR    | NASDAQ      | yfinance          |
+| NVDA    | NASDAQ      | yfinance          |
 
 ## Available Tools
 
