@@ -1,7 +1,7 @@
 import requests
 from datetime import datetime, timezone
 
-CRYPTO_TICKERS = {"BTC", "ETH", "BTC-USD", "ETH-USD"}
+CRYPTO_TICKERS = {"BTC", "ETH", "SOL", "BTC-USD", "ETH-USD", "SOL-USD"}
 
 
 def _classify(value):

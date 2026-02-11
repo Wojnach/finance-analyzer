@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import platform
 from pathlib import Path
 
-CRYPTO_TICKERS = {"BTC", "ETH"}
+CRYPTO_TICKERS = {"BTC", "ETH", "SOL"}
 
 if platform.system() == "Windows":
     MODELS_PYTHON = r"Q:\finance-analyzer\.venv\Scripts\python.exe"
@@ -20,8 +20,10 @@ else:
 TICKER_CATEGORIES = {
     "BTC": "BTC",
     "ETH": "ETH",
+    "SOL": "SOL",
     "MSTR": "BTC",
     "PLTR": "TECHNOLOGY",
+    "NVDA": "TECHNOLOGY",
 }
 
 CRYPTOCOMPARE_URL = "https://min-api.cryptocompare.com/data/v2/news/?lang=EN"
