@@ -64,23 +64,38 @@ Edit `data/portfolio_state.json`:
 **ALWAYS send a Telegram message when you are invoked.** Every invocation means something
 triggered — the user wants to see your analysis every time. No exceptions.
 
-**Message format:** The user reads these on iPhone — keep it scannable. Use the monospace block for the signal grid so columns align. End with 1-2 sentences of your reasoning in plain language (no label needed).
+**Message format:** The user reads these on iPhone — keep it scannable. Use monospace (backtick-wrapped) lines for the signal grid and timeframe heatmap so columns align. End with 1-2 sentences of reasoning in plain language.
+
+**Sections (in order):**
+
+1. Action header — `*HOLD*` or `*BUY TICKER*` with trade details
+2. Ticker grid — price + "Now" action + voter count (same as before)
+3. Timeframe heatmap — `B`=BUY `S`=SELL `H`=HOLD from `timeframes` in agent_summary.json. Use `-` for horizons that don't exist (stocks lack 12h and 2d). All tickers in one grid.
+4. F&G + portfolio line
+5. Reasoning (1-2 sentences)
 
 HOLD example:
 
 ```
 *HOLD*
 
-`BTC  $66,800  SELL 3/9`
+`BTC  $66,800  BUY  4/9`
 `ETH  $1,952   SELL 3/9`
 `MSTR $129.93  HOLD 1/7`
 `PLTR $134.77  HOLD 2/7`
 `NVDA $880.20  HOLD 1/7`
 
+`     Now 12h  2d  7d 1mo 3mo 6mo`
+`BTC   B   H   S   S   S   S   H`
+`ETH   H   S   S   S   S   S   S`
+`MSTR  H   -   -   S   S   S   S`
+`PLTR  H   -   -   H   S   S   H`
+`NVDA  H   -   -   H   S   H   H`
+
 _Crypto F&G: 11 · Stock F&G: 62_
 _500,000 SEK (+0.00%)_
 
-Bearish technicals across all timeframes despite extreme fear. Waiting for RSI divergence before deploying capital.
+Short-term BTC buy signal but bearish across all longer timeframes. Extreme fear is tempting but waiting for multi-timeframe confirmation.
 ```
 
 TRADE example:
@@ -94,10 +109,17 @@ TRADE example:
 `PLTR $134.77  HOLD 2/7`
 `NVDA $880.20  HOLD 1/7`
 
+`     Now 12h  2d  7d 1mo 3mo 6mo`
+`BTC   B   B   B   H   S   S   H`
+`ETH   H   H   S   S   S   S   S`
+`MSTR  H   -   -   H   S   S   S`
+`PLTR  H   -   -   H   S   S   H`
+`NVDA  H   -   -   H   S   H   H`
+
 _Crypto F&G: 18 · Stock F&G: 55_
 _400,000 SEK (+0.00%) · BTC 0.15_
 
-RSI bullish divergence at extreme fear with 6/8 signal consensus. Multi-timeframe confirmation on 1h through 1w.
+RSI bullish divergence at extreme fear with 6/9 consensus. BUY confirmed through Now→2d timeframes. Longer TFs still bearish — sized conservatively.
 ```
 
 **Before sending, save the message locally:**
