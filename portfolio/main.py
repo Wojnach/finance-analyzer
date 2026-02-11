@@ -956,6 +956,15 @@ def run(force_report=False):
         reasons_list = reasons if reasons else ["startup"]
         write_agent_summary(signals, prices_usd, fx_rate, state, tf_data, reasons_list)
         print(f"\n  Trigger: {', '.join(reasons_list)}")
+
+        # Log signal snapshot for forward tracking
+        try:
+            from portfolio.outcome_tracker import log_signal_snapshot
+
+            log_signal_snapshot(signals, prices_usd, fx_rate, reasons_list)
+        except Exception as e:
+            print(f"  WARNING: signal logging failed: {e}")
+
         invoke_agent(reasons_list)
     else:
         print("\n  No trigger — nothing changed.")
@@ -978,7 +987,17 @@ def loop(interval=60):
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    if "--retrain" in args:
+    if "--check-outcomes" in args:
+        print("=== Outcome Backfill ===")
+        from portfolio.outcome_tracker import backfill_outcomes
+
+        updated = backfill_outcomes()
+        print(f"Updated {updated} entries")
+    elif "--accuracy" in args:
+        from portfolio.accuracy_stats import print_accuracy_report
+
+        print_accuracy_report()
+    elif "--retrain" in args:
         print("=== ML Retraining ===")
         print("Refreshing data from Binance API...")
         from portfolio.data_refresh import refresh_all

@@ -165,12 +165,24 @@ requests.post(
 # Force a signal report (run Layer 1 once)
 .venv\Scripts\python.exe -u portfolio\main.py --report
 
+# Backfill price outcomes for signal accuracy tracking
+.venv\Scripts\python.exe -u portfolio\main.py --check-outcomes
+
+# Print signal accuracy report (per-signal hit rates)
+.venv\Scripts\python.exe -u portfolio\main.py --accuracy
+
 # Get Fear & Greed
 .venv\Scripts\python.exe -u portfolio\fear_greed.py
 
 # Get sentiment
 .venv\Scripts\python.exe -u portfolio\sentiment.py
 ```
+
+## Forward Tracking
+
+Every trigger invocation is logged to `data/signal_log.jsonl` with all 10 signal votes and
+current prices. A daily outcome checker backfills what actually happened at 1d/3d/5d/10d horizons.
+Use `--accuracy` to see which signals are actually predictive.
 
 ## Key Principles
 

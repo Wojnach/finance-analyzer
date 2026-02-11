@@ -54,6 +54,7 @@ data/agent_summary.json
 data/trigger_state.json
 data/agent.log
 data/invocations.jsonl
+data/signal_log.jsonl
 
 # Test artifacts
 .pytest_cache/
