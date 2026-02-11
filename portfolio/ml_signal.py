@@ -103,7 +103,11 @@ def get_ml_signal(ticker):
     if cached and now - cached["time"] < PRED_TTL:
         return cached["data"]
 
-    symbol_map = {"BTC-USD": ("BTCUSDT", 0), "ETH-USD": ("ETHUSDT", 1)}
+    symbol_map = {
+        "BTC-USD": ("BTCUSDT", 0),
+        "ETH-USD": ("ETHUSDT", 1),
+        "SOL-USD": ("SOLUSDT", 2),
+    }
     if ticker not in symbol_map:
         return None
     binance_sym, sym_flag = symbol_map[ticker]

@@ -47,6 +47,12 @@ Thumbs.db
 *.log
 logs/
 
+# Runtime data
+data/telegram_messages.jsonl
+data/agent_summary.json
+data/trigger_state.json
+data/agent.log
+
 # Test artifacts
 .pytest_cache/
 .coverage

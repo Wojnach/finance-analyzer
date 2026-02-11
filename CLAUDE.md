@@ -30,13 +30,14 @@ The trigger reason is included in the invocation context.
 
 ### 1. Read the data
 
-- `data/agent_summary.json` — all 8 signals, all timeframes, indicators, sentiment, F&G
+- `data/agent_summary.json` — all 9 signals, all timeframes, indicators, sentiment, F&G, macro context
 - `data/portfolio_state.json` — current cash, holdings, transaction history
 - Trigger reasons — why you were invoked this time
 
 ### 2. Analyze
 
-- Review all 8 signals across all timeframes for each instrument
+- Review all 9 signals across all timeframes for each instrument
+- Check macro context: DXY trend (strong dollar = headwind for risk assets)
 - Assess portfolio risk: concentration, drawdown, cash reserves
 - Check recent transaction history: avoid whipsaw trades, respect cooldowns
 - Consider market regime: trending vs ranging, volatility level
@@ -46,7 +47,7 @@ The trigger reason is included in the invocation context.
 
 **Most of the time, do nothing.** Discipline over action. Only act when:
 
-- 5+ of 8 signals agree AND multi-timeframe analysis confirms
+- 5+ of 9 signals agree AND multi-timeframe analysis confirms
 - The trade makes portfolio-level sense (not just signal-level)
 - Sufficient time has passed since last trade on this symbol (1hr minimum)
 
@@ -79,10 +80,12 @@ HOLD example:
 ```
 *HOLD*
 
-`BTC  $66,800  SELL 3/8`
-`ETH  $1,952   SELL 3/8`
-`MSTR $129.93  HOLD 1/8`
-`PLTR $134.77  HOLD 2/8`
+`BTC  $66,800  SELL 3/9`
+`ETH  $1,952   SELL 3/9`
+`SOL  $128.50  SELL 4/9`
+`MSTR $129.93  HOLD 1/7`
+`PLTR $134.77  HOLD 2/7`
+`NVDA $880.20  HOLD 1/7`
 
 _Crypto F&G: 11 · Stock F&G: 62_
 _500,000 SEK (+0.00%)_
@@ -95,10 +98,12 @@ TRADE example:
 ```
 *BUY BTC* — 100,000 SEK @ $66,800
 
-`BTC  $66,800  BUY 6/8`
-`ETH  $1,952   HOLD 4/8`
-`MSTR $129.93  HOLD 1/8`
-`PLTR $134.77  HOLD 2/8`
+`BTC  $66,800  BUY 6/9`
+`ETH  $1,952   HOLD 4/9`
+`SOL  $128.50  BUY 5/9`
+`MSTR $129.93  HOLD 1/7`
+`PLTR $134.77  HOLD 2/7`
+`NVDA $880.20  HOLD 1/7`
 
 _Crypto F&G: 18 · Stock F&G: 55_
 _400,000 SEK (+0.00%) · BTC 0.15_
@@ -137,7 +142,7 @@ requests.post(
 - Never go all-in on one asset
 - This is SIMULATED money (500K SEK starting) — trade freely to build a track record
 
-## 8 Signals
+## 9 Signals
 
 1. **RSI(14)** — Oversold (<30)=buy, overbought (>70)=sell, else abstains
 2. **MACD(12,26,9)** — Histogram crossover only (neg→pos=buy, pos→neg=sell), else abstains
@@ -147,6 +152,12 @@ requests.post(
 6. **Sentiment** — CryptoBERT (crypto) / Trading-Hero-LLM (stocks), confidence>0.4 to vote
 7. **CryptoTrader-LM** — Ministral-8B + LoRA, full LLM reasoning → BUY/SELL/HOLD
 8. **ML Classifier** — HistGradientBoosting on 1h candles (~20 features), crypto only
+9. **Funding Rate** — Binance perpetual futures funding rate, crypto only. >0.03% contrarian sell, <-0.01% contrarian buy
+
+**Non-voting context** (in agent_summary.json for your reasoning):
+
+- **DXY** — Dollar Index trend and 5d change. Strong dollar = headwind for risk assets.
+- **Volume ratio** — Current vs 20-period average. Spikes (>2x) confirm direction.
 
 ## Instruments
 
@@ -154,8 +165,10 @@ requests.post(
 | ------- | ----------- | ----------------- |
 | BTC-USD | Crypto 24/7 | Binance (BTCUSDT) |
 | ETH-USD | Crypto 24/7 | Binance (ETHUSDT) |
+| SOL-USD | Crypto 24/7 | Binance (SOLUSDT) |
 | MSTR    | NASDAQ      | yfinance          |
 | PLTR    | NASDAQ      | yfinance          |
+| NVDA    | NASDAQ      | yfinance          |
 
 ## Available Tools
 

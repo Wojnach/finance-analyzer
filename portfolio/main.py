@@ -23,8 +23,10 @@ CONFIG_FILE = BASE_DIR / "config.json"
 SYMBOLS = {
     "BTC-USD": {"binance": "BTCUSDT"},
     "ETH-USD": {"binance": "ETHUSDT"},
+    "SOL-USD": {"binance": "SOLUSDT"},
     "MSTR": {"yfinance": "MSTR"},
     "PLTR": {"yfinance": "PLTR"},
+    "NVDA": {"yfinance": "NVDA"},
 }
 USDSEK_RATE_URL = "https://api.binance.com/api/v3/ticker/price?symbol=USDTSEK"
 
@@ -54,6 +56,7 @@ FEAR_GREED_TTL = 300  # 5 min
 SENTIMENT_TTL = 900  # 15 min
 MINISTRAL_TTL = 900  # 15 min
 ML_SIGNAL_TTL = 900  # 15 min
+FUNDING_RATE_TTL = 900  # 15 min
 
 
 def _cached(key, ttl, func, *args):
@@ -447,6 +450,24 @@ def generate_signal(ind, ticker=None, config=None):
         except ImportError:
             pass
 
+    # Funding Rate (Binance perpetuals, crypto only — contrarian)
+    if ticker:
+        try:
+            from portfolio.funding_rate import get_funding_rate
+
+            fr = _cached(
+                f"funding_{ticker}", FUNDING_RATE_TTL, get_funding_rate, ticker
+            )
+            if fr:
+                extra_info["funding_rate"] = fr["rate_pct"]
+                extra_info["funding_action"] = fr["action"]
+                if fr["action"] == "BUY":
+                    buy += 1
+                elif fr["action"] == "SELL":
+                    sell += 1
+        except ImportError:
+            pass
+
     total = buy + sell
     if total < MIN_VOTERS:
         action = "HOLD"
@@ -551,6 +572,16 @@ def write_agent_summary(
                     }
                 )
         summary["timeframes"][name] = tf_list
+
+    # Macro context (non-voting, for Claude Code reasoning)
+    try:
+        from portfolio.macro_context import get_dxy
+
+        dxy = _cached("dxy", 3600, get_dxy)
+        if dxy:
+            summary["macro"] = {"dxy": dxy}
+    except (ImportError, Exception):
+        pass
 
     AGENT_SUMMARY_FILE.parent.mkdir(exist_ok=True)
     AGENT_SUMMARY_FILE.write_text(json.dumps(summary, indent=2, default=str))
@@ -841,6 +872,8 @@ def run(force_report=False):
                     parts.append(f"8B:{extra['ministral_action']}")
                 if "ml_action" in extra:
                     parts.append(f"ML:{extra['ml_action']}")
+                if "funding_action" in extra:
+                    parts.append(f"FR:{extra['funding_rate']}%")
                 if parts:
                     extra_str = f" | {' '.join(parts)}"
             print(
@@ -916,7 +949,21 @@ def loop(interval=60):
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    if "--loop" in args:
+    if "--retrain" in args:
+        print("=== ML Retraining ===")
+        print("Refreshing data from Binance API...")
+        from portfolio.data_refresh import refresh_all
+
+        refresh_all(days=365)
+        print("\nTraining model...")
+        from portfolio.ml_trainer import load_data, train_final
+
+        data = load_data()
+        feature_cols = [c for c in data.columns if c not in ("target", "month")]
+        print(f"Dataset: {len(data):,} rows, {len(feature_cols)} features")
+        train_final(data, feature_cols)
+        print("Done.")
+    elif "--loop" in args:
         idx = args.index("--loop")
         interval = int(args[idx + 1]) if idx + 1 < len(args) else 60
         loop(interval=interval)

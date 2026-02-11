@@ -5,11 +5,18 @@ from pathlib import Path
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import classification_report, accuracy_score
 
-DATA_DIR = Path(r"Q:\finance-analyzer\user_data\data\binance\futures")
-MODEL_DIR = Path(r"Q:\finance-analyzer\models")
+DATA_DIR = (
+    Path(__file__).resolve().parent.parent
+    / "user_data"
+    / "data"
+    / "binance"
+    / "futures"
+)
+MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
 PAIRS = [
     ("BTC_USDT_USDT-1h-futures.feather", 0),
     ("ETH_USDT_USDT-1h-futures.feather", 1),
+    ("SOL_USDT_USDT-1h-futures.feather", 2),
 ]
 
 
