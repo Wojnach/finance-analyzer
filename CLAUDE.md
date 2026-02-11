@@ -30,13 +30,13 @@ The trigger reason is included in the invocation context.
 
 ### 1. Read the data
 
-- `data/agent_summary.json` — all 7 signals, all timeframes, indicators, sentiment, F&G
+- `data/agent_summary.json` — all 8 signals, all timeframes, indicators, sentiment, F&G
 - `data/portfolio_state.json` — current cash, holdings, transaction history
 - Trigger reasons — why you were invoked this time
 
 ### 2. Analyze
 
-- Review all 7 signals across all timeframes for each instrument
+- Review all 8 signals across all timeframes for each instrument
 - Assess portfolio risk: concentration, drawdown, cash reserves
 - Check recent transaction history: avoid whipsaw trades, respect cooldowns
 - Consider market regime: trending vs ranging, volatility level
@@ -46,7 +46,7 @@ The trigger reason is included in the invocation context.
 
 **Most of the time, do nothing.** Discipline over action. Only act when:
 
-- 5+ of 7 signals agree AND multi-timeframe analysis confirms
+- 5+ of 8 signals agree AND multi-timeframe analysis confirms
 - The trade makes portfolio-level sense (not just signal-level)
 - Sufficient time has passed since last trade on this symbol (1hr minimum)
 
@@ -72,26 +72,56 @@ Do NOT send Telegram when:
 - Signals are mixed and you're holding
 - It would be noise rather than signal
 
-**Message format:** Always include a `Decision:` line with your reasoning in 1-2 sentences. The user reads these on iPhone — keep it compact. Example:
+**Message format:** The user reads these on iPhone — keep it scannable. Use the monospace block for the signal grid so columns align. End with 1-2 sentences of your reasoning in plain language (no label needed).
+
+HOLD example:
 
 ```
-*HOLD* — all instruments
+*HOLD*
 
-Decision: Bearish technicals across all timeframes despite F&G at 11. No signal consensus — waiting for RSI to confirm oversold before entering.
+`BTC  $66,800  SELL 3/8  F&G 11`
+`ETH  $1,952   SELL 3/8  F&G 11`
+`MSTR $129.93  HOLD 1/8  F&G 62`
+`PLTR $134.77  HOLD 2/8  F&G 62`
 
-BTC $66,800 | 4/8 mixed | F&G:11
-ETH $1,948 | SELL 75% | F&G:11
-Portfolio: 500,000 SEK (+0.00%)
+_500,000 SEK (+0.00%)_
+
+Bearish technicals across all timeframes despite extreme fear. Waiting for RSI divergence before deploying capital.
 ```
 
-Use this to send:
+TRADE example:
+
+```
+*BUY BTC* — 100,000 SEK @ $66,800
+
+`BTC  $66,800  BUY 6/8   F&G 18`
+`ETH  $1,952   HOLD 4/8  F&G 18`
+`MSTR $129.93  HOLD 1/8  F&G 55`
+`PLTR $134.77  HOLD 2/8  F&G 55`
+
+_400,000 SEK (+0.00%) · BTC 0.15_
+
+RSI bullish divergence at extreme fear with 6/8 signal consensus. Multi-timeframe confirmation on 1h through 1w.
+```
+
+**Before sending, save the message locally:**
+
+```python
+import json, datetime, pathlib
+msg = "YOUR_MESSAGE"
+log = pathlib.Path("data/telegram_messages.jsonl")
+with open(log, "a") as f:
+    f.write(json.dumps({"ts": datetime.datetime.now(datetime.timezone.utc).isoformat(), "text": msg}) + "\n")
+```
+
+**Then send:**
 
 ```python
 import json, requests
 config = json.load(open("config.json"))
 requests.post(
     f"https://api.telegram.org/bot{config['telegram']['token']}/sendMessage",
-    json={"chat_id": config["telegram"]["chat_id"], "text": "YOUR_MESSAGE", "parse_mode": "Markdown"}
+    json={"chat_id": config["telegram"]["chat_id"], "text": msg, "parse_mode": "Markdown"}
 )
 ```
 
