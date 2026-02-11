@@ -56,6 +56,7 @@ SENTIMENT_TTL = 900  # 15 min
 MINISTRAL_TTL = 900  # 15 min
 ML_SIGNAL_TTL = 900  # 15 min
 FUNDING_RATE_TTL = 900  # 15 min
+VOLUME_TTL = 300  # 5 min
 
 
 def _cached(key, ttl, func, *args):
@@ -463,6 +464,22 @@ def generate_signal(ind, ticker=None, config=None):
                 if fr["action"] == "BUY":
                     buy += 1
                 elif fr["action"] == "SELL":
+                    sell += 1
+        except ImportError:
+            pass
+
+    # Volume Confirmation (spike + price direction = vote)
+    if ticker:
+        try:
+            from portfolio.macro_context import get_volume_signal
+
+            vs = _cached(f"volume_{ticker}", VOLUME_TTL, get_volume_signal, ticker)
+            if vs:
+                extra_info["volume_ratio"] = vs["ratio"]
+                extra_info["volume_action"] = vs["action"]
+                if vs["action"] == "BUY":
+                    buy += 1
+                elif vs["action"] == "SELL":
                     sell += 1
         except ImportError:
             pass
@@ -884,6 +901,8 @@ def run(force_report=False):
                     parts.append(f"ML:{extra['ml_action']}")
                 if "funding_action" in extra:
                     parts.append(f"FR:{extra['funding_rate']}%")
+                if "volume_action" in extra and extra["volume_action"] != "HOLD":
+                    parts.append(f"Vol:{extra['volume_ratio']}x")
                 if parts:
                     extra_str = f" | {' '.join(parts)}"
             print(

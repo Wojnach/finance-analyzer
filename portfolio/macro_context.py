@@ -1,4 +1,15 @@
 import time
+import pandas as pd
+import requests
+
+BINANCE_BASE = "https://api.binance.com/api/v3"
+TICKER_MAP = {
+    "BTC-USD": ("binance", "BTCUSDT"),
+    "ETH-USD": ("binance", "ETHUSDT"),
+    "MSTR": ("yfinance", "MSTR"),
+    "PLTR": ("yfinance", "PLTR"),
+    "NVDA": ("yfinance", "NVDA"),
+}
 
 _cache = {}
 DXY_TTL = 3600
@@ -40,24 +51,103 @@ def get_dxy():
     return result
 
 
-def get_volume_context(klines_df):
+def _fetch_klines(ticker):
+    source_type, symbol = TICKER_MAP.get(ticker, (None, None))
+    if source_type == "binance":
+        r = requests.get(
+            f"{BINANCE_BASE}/klines",
+            params={"symbol": symbol, "interval": "15m", "limit": 100},
+            timeout=10,
+        )
+        r.raise_for_status()
+        raw = r.json()
+        df = pd.DataFrame(
+            raw,
+            columns=[
+                "open_time",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "close_time",
+                "quote_vol",
+                "trades",
+                "tb",
+                "tq",
+                "ignore",
+            ],
+        )
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = df[col].astype(float)
+        return df
+    elif source_type == "yfinance":
+        import yfinance as yf
+
+        s = yf.Ticker(symbol)
+        df = s.history(period="5d", interval="15m")
+        if df.empty:
+            return None
+        df = df.rename(
+            columns={
+                "Open": "open",
+                "High": "high",
+                "Low": "low",
+                "Close": "close",
+                "Volume": "volume",
+            }
+        )
+        return df.reset_index()
+    return None
+
+
+def get_volume_signal(ticker):
+    now = time.time()
+    cached = _cache.get(f"vol_{ticker}")
+    if cached and now - cached["time"] < VOLUME_TTL:
+        return cached["data"]
+
+    klines_df = _fetch_klines(ticker)
     if klines_df is None or klines_df.empty:
         return None
     vol = klines_df["volume"].astype(float)
-    current = float(vol.iloc[-1])
+    close = klines_df["close"].astype(float)
+    current_vol = float(vol.iloc[-1])
     avg20 = (
         float(vol.rolling(20).mean().iloc[-1]) if len(vol) >= 20 else float(vol.mean())
     )
-    ratio = current / avg20 if avg20 > 0 else 1.0
+    ratio = current_vol / avg20 if avg20 > 0 else 1.0
 
-    return {
-        "current": round(current, 2),
-        "avg20": round(avg20, 2),
+    # Price direction over last 3 candles
+    if len(close) >= 4:
+        price_change = float(close.iloc[-1] / close.iloc[-4] - 1)
+    else:
+        price_change = 0.0
+
+    # Volume spike (>1.5x avg) confirms direction
+    # No spike = abstain (HOLD)
+    if ratio > 1.5:
+        if price_change > 0:
+            action = "BUY"
+        elif price_change < 0:
+            action = "SELL"
+        else:
+            action = "HOLD"
+    else:
+        action = "HOLD"
+
+    result = {
         "ratio": round(ratio, 2),
-        "spike": ratio > 2.0,
+        "spike": ratio > 1.5,
+        "price_change_3": round(price_change * 100, 2),
+        "action": action,
     }
+    _cache[f"vol_{ticker}"] = {"data": result, "time": now}
+    return result
 
 
 if __name__ == "__main__":
     dxy = get_dxy()
     print(f"DXY: {dxy}")
+    for t in ["BTC-USD", "ETH-USD", "MSTR", "PLTR", "NVDA"]:
+        print(f"{t}: {get_volume_signal(t)}")

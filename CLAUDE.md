@@ -30,13 +30,13 @@ The trigger reason is included in the invocation context.
 
 ### 1. Read the data
 
-- `data/agent_summary.json` — all 9 signals, all timeframes, indicators, sentiment, F&G, macro context
+- `data/agent_summary.json` — all 10 signals, all timeframes, indicators, sentiment, F&G, macro context
 - `data/portfolio_state.json` — current cash, holdings, transaction history
 - Trigger reasons — why you were invoked this time
 
 ### 2. Analyze
 
-- Review all 9 signals across all timeframes for each instrument
+- Review all 10 signals across all timeframes for each instrument
 - Check macro context: DXY trend (strong dollar = headwind for risk assets)
 - Assess portfolio risk: concentration, drawdown, cash reserves
 - Check recent transaction history: avoid whipsaw trades, respect cooldowns
@@ -47,7 +47,7 @@ The trigger reason is included in the invocation context.
 
 **Most of the time, do nothing.** Discipline over action. Only act when:
 
-- 5+ of 9 signals agree AND multi-timeframe analysis confirms
+- 5+ of 10 signals agree AND multi-timeframe analysis confirms
 - The trade makes portfolio-level sense (not just signal-level)
 - Sufficient time has passed since last trade on this symbol (1hr minimum)
 
@@ -143,10 +143,11 @@ requests.post(
 8. **ML Classifier** — HistGradientBoosting on 1h candles (~20 features), crypto only
 9. **Funding Rate** — Binance perpetual futures funding rate, crypto only. >0.03% contrarian sell, <-0.01% contrarian buy
 
+10. **Volume Confirmation** — Volume spike (>1.5x 20-period avg) confirms 3-candle price direction. Spike+up=buy, spike+down=sell, no spike=abstains
+
 **Non-voting context** (in agent_summary.json for your reasoning):
 
 - **DXY** — Dollar Index trend and 5d change. Strong dollar = headwind for risk assets.
-- **Volume ratio** — Current vs 20-period average. Spikes (>2x) confirm direction.
 
 ## Instruments
 
