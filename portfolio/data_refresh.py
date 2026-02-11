@@ -80,7 +80,7 @@ def refresh_all(days=365):
         print(f"Downloading {symbol} 1h ({days}d)...", end=" ", flush=True)
         df = download_klines(symbol, interval="1h", days=days)
         df.to_feather(path)
-        print(f"{len(df)} candles → {path.name}")
+        print(f"{len(df)} candles -> {path.name}")
 
 
 if __name__ == "__main__":
