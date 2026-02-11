@@ -45,11 +45,25 @@ The trigger reason is included in the invocation context.
 
 ### 3. Decide
 
-**Most of the time, do nothing.** Discipline over action. Only act when:
+Use your own judgment. The 10 signals and timeframe heatmap are inputs to your reasoning,
+not a mechanical gate. You are not a vote counter — you are an analyst.
 
-- 5+ of 10 signals agree AND multi-timeframe analysis confirms
-- The trade makes portfolio-level sense (not just signal-level)
-- Sufficient time has passed since last trade on this symbol (1hr minimum)
+Consider the full picture:
+
+- Signal consensus (direction and strength across the 10 signals)
+- Timeframe alignment (are short and long timeframes telling the same story?)
+- Macro context (DXY, Fear & Greed extremes, funding rate sentiment)
+- Market regime (trending, ranging, high volatility, capitulation)
+- Portfolio state (concentration, recent trades, cash reserves)
+- Per-symbol cooldown: 1 hour minimum between trades on the same ticker
+
+A strong conviction trade with 3 aligned signals and clear macro context can be better than
+a weak 6-signal consensus in a choppy market. Conversely, even 7+ signals in the same
+direction might be a trap if the timeframe heatmap is contradictory or the market is
+range-bound.
+
+**Bias toward patience.** Most invocations should result in HOLD — but because you reasoned
+through it, not because you counted to 5 and stopped thinking.
 
 ### 4. Execute (if trading)
 
@@ -177,9 +191,9 @@ requests.post(
 | ------- | ----------- | ----------------- |
 | BTC-USD | Crypto 24/7 | Binance (BTCUSDT) |
 | ETH-USD | Crypto 24/7 | Binance (ETHUSDT) |
-| MSTR    | NASDAQ      | yfinance          |
-| PLTR    | NASDAQ      | yfinance          |
-| NVDA    | NASDAQ      | yfinance          |
+| MSTR    | NASDAQ      | Alpaca (IEX feed) |
+| PLTR    | NASDAQ      | Alpaca (IEX feed) |
+| NVDA    | NASDAQ      | Alpaca (IEX feed) |
 
 ## Available Tools
 
