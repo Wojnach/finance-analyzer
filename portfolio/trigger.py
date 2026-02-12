@@ -19,13 +19,13 @@ SUSTAINED_CHECKS = 3  # consecutive cycles a signal must hold before triggering
 
 def _load_state():
     if STATE_FILE.exists():
-        return json.loads(STATE_FILE.read_text())
+        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
     return {}
 
 
 def _save_state(state):
     STATE_FILE.parent.mkdir(exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2, default=str))
+    STATE_FILE.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
 
 
 def check_triggers(signals, prices_usd, fear_greeds, sentiments):

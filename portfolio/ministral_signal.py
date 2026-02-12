@@ -44,7 +44,7 @@ def get_ministral_signal(context):
 
     try:
         if SHADOW_CONFIG.exists():
-            cfg = json.loads(SHADOW_CONFIG.read_text())
+            cfg = json.loads(SHADOW_CONFIG.read_text(encoding="utf-8"))
             if cfg.get("enabled"):
                 custom = _call_model(context, lora_path=cfg["custom_lora"])
                 log_entry = {

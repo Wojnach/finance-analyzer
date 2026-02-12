@@ -13,7 +13,7 @@ TRAINING_DIR = Path(__file__).resolve().parent.parent / "training" / "lora"
 
 def _read_json(path):
     if path.exists():
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     return None
 
 
@@ -21,7 +21,7 @@ def _read_jsonl(path, limit=100):
     if not path.exists():
         return []
     entries = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line:
             entries.append(json.loads(line))

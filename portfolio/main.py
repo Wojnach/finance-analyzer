@@ -573,7 +573,7 @@ def generate_signal(ind, ticker=None, config=None):
 
 def load_state():
     if STATE_FILE.exists():
-        return json.loads(STATE_FILE.read_text())
+        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
     return {
         "cash_sek": INITIAL_CASH_SEK,
         "holdings": {},
@@ -585,7 +585,7 @@ def load_state():
 
 def save_state(state):
     DATA_DIR.mkdir(exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2, default=str))
+    STATE_FILE.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
 
 
 # --- Agent summary + invocation ---
@@ -699,20 +699,29 @@ def write_agent_summary(
         pass
 
     AGENT_SUMMARY_FILE.parent.mkdir(exist_ok=True)
-    AGENT_SUMMARY_FILE.write_text(json.dumps(summary, indent=2, default=str))
+    AGENT_SUMMARY_FILE.write_text(
+        json.dumps(summary, indent=2, default=str), encoding="utf-8"
+    )
     return summary
 
 
 INVOCATIONS_FILE = DATA_DIR / "invocations.jsonl"
 
 
+_agent_proc = None
+
+
 def invoke_agent(reasons):
-    # Log invocation (Layer 1 side — tracks even if agent crashes)
+    global _agent_proc
+    if _agent_proc and _agent_proc.poll() is None:
+        print(f"  Agent still running (pid {_agent_proc.pid}), skipping invocation")
+        return False
+
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "reasons": reasons,
     }
-    with open(INVOCATIONS_FILE, "a") as f:
+    with open(INVOCATIONS_FILE, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
 
     agent_bat = BASE_DIR / "scripts" / "win" / "pf-agent.bat"
@@ -720,14 +729,14 @@ def invoke_agent(reasons):
         print(f"  WARNING: Agent script not found at {agent_bat}")
         return False
     try:
-        log_file = open(DATA_DIR / "agent.log", "a")
-        subprocess.Popen(
+        log_file = open(DATA_DIR / "agent.log", "a", encoding="utf-8")
+        _agent_proc = subprocess.Popen(
             ["cmd", "/c", str(agent_bat)],
             cwd=str(BASE_DIR),
             stdout=log_file,
             stderr=subprocess.STDOUT,
         )
-        print(f"  Agent invoked ({', '.join(reasons)})")
+        print(f"  Agent invoked pid={_agent_proc.pid} ({', '.join(reasons)})")
         return True
     except Exception as e:
         print(f"  ERROR invoking agent: {e}")
@@ -944,7 +953,7 @@ def build_report(state, signals, trades, prices_usd, fx_rate, tf_data=None):
 
 
 def run(force_report=False, active_symbols=None):
-    config = json.loads(CONFIG_FILE.read_text())
+    config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
     state = load_state()
     fx_rate = fetch_usd_sek()
 
@@ -1074,7 +1083,13 @@ def run(force_report=False, active_symbols=None):
 
 def loop(interval=None):
     print("Starting loop with market-aware scheduling. Ctrl+C to stop.")
-    run(force_report=True)
+    try:
+        run(force_report=True)
+    except KeyboardInterrupt:
+        raise
+    except Exception as e:
+        print(f"  ERROR in initial run: {e}")
+        time.sleep(10)
     last_state = None
     while True:
         market_state, active_symbols, sleep_interval = get_market_state()

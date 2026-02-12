@@ -288,8 +288,8 @@ Bold: BUY BTC — 4B consensus + BB expansion + EMA alignment. Structural breako
 import json, datetime, pathlib
 msg = "YOUR_MESSAGE"
 log = pathlib.Path("data/telegram_messages.jsonl")
-with open(log, "a") as f:
-    f.write(json.dumps({"ts": datetime.datetime.now(datetime.timezone.utc).isoformat(), "text": msg}) + "\n")
+with open(log, "a", encoding="utf-8") as f:
+    f.write(json.dumps({"ts": datetime.datetime.now(datetime.timezone.utc).isoformat(), "text": msg}, ensure_ascii=False) + "\n")
 ```
 
 **Then send:**

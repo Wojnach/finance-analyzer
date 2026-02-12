@@ -26,7 +26,7 @@ def load_entries():
     if not SIGNAL_LOG.exists():
         return []
     entries = []
-    with open(SIGNAL_LOG) as f:
+    with open(SIGNAL_LOG, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:

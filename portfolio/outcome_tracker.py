@@ -143,7 +143,7 @@ def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
     }
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(SIGNAL_LOG, "a") as f:
+    with open(SIGNAL_LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
 
     return entry
@@ -177,7 +177,7 @@ def backfill_outcomes():
         return 0
 
     entries = []
-    with open(SIGNAL_LOG) as f:
+    with open(SIGNAL_LOG, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -245,7 +245,7 @@ def backfill_outcomes():
         if entry_updated:
             updated += 1
 
-    with open(SIGNAL_LOG, "w") as f:
+    with open(SIGNAL_LOG, "w", encoding="utf-8") as f:
         for entry in entries:
             f.write(json.dumps(entry) + "\n")
 

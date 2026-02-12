@@ -20,7 +20,7 @@ from portfolio.main import (
 
 
 def collect():
-    config = json.loads(CONFIG_FILE.read_text())
+    config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
     state = load_state()
     fx = fetch_usd_sek()
     prices = {}
