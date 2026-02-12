@@ -1,9 +1,8 @@
 """Smart trigger system — detects meaningful market changes to reduce noise.
 
-Sustained signal filter: signal flips only trigger if the new direction was
-already present in the previous check cycle (held for 2 consecutive checks).
-This filters out noise (BUY→HOLD→BUY chattering) while adding at most 60s
-latency since the loop runs every 60s.
+Sustained signal filter: signal flips only trigger after the new direction
+holds for SUSTAINED_CHECKS consecutive loop cycles. With a 60s loop interval,
+SUSTAINED_CHECKS=3 means a signal must hold for ~3 minutes before triggering.
 """
 
 import json
@@ -15,6 +14,7 @@ STATE_FILE = Path(__file__).resolve().parent.parent / "data" / "trigger_state.js
 COOLDOWN_SECONDS = 7200  # 2 hours max silence
 PRICE_THRESHOLD = 0.02  # 2% move
 FG_THRESHOLDS = (20, 80)  # extreme fear / extreme greed boundaries
+SUSTAINED_CHECKS = 3  # consecutive cycles a signal must hold before triggering
 
 
 def _load_state():
@@ -31,19 +31,27 @@ def _save_state(state):
 def check_triggers(signals, prices_usd, fear_greeds, sentiments):
     state = _load_state()
     prev = state.get("last", {})
-    prev_cycle = state.get("prev_cycle_signals", {})
+    sustained = state.get("sustained_counts", {})
     reasons = []
 
-    # 1. Signal flip — only if sustained (same direction for 2 consecutive checks)
+    # 1. Signal flip — only if sustained for SUSTAINED_CHECKS consecutive cycles
     prev_triggered = prev.get("signals", {})
     for ticker, sig in signals.items():
-        triggered_action = prev_triggered.get(ticker, {}).get("action")
-        prev_cycle_action = prev_cycle.get(ticker, {}).get("action")
         current_action = sig["action"]
+        prev_count = sustained.get(ticker, {})
+        if prev_count.get("action") == current_action:
+            sustained[ticker] = {
+                "action": current_action,
+                "count": prev_count["count"] + 1,
+            }
+        else:
+            sustained[ticker] = {"action": current_action, "count": 1}
+
+        triggered_action = prev_triggered.get(ticker, {}).get("action")
         if (
             triggered_action
             and current_action != triggered_action
-            and current_action == prev_cycle_action
+            and sustained[ticker]["count"] >= SUSTAINED_CHECKS
         ):
             reasons.append(
                 f"{ticker} flipped {triggered_action}->{current_action} (sustained)"
@@ -110,11 +118,7 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
             "time": time.time(),
         }
 
-    # Always save current signals as prev_cycle for next check
-    state["prev_cycle_signals"] = {
-        t: {"action": s["action"], "confidence": s["confidence"]}
-        for t, s in signals.items()
-    }
+    state["sustained_counts"] = sustained
     _save_state(state)
 
     return triggered, reasons

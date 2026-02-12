@@ -18,7 +18,7 @@ timeframe specs, and file layout. That document is the source of truth.
 
 The fast loop calls you when a trigger fires:
 
-- Signal flip sustained for 2 consecutive checks (filters noise from BUY↔HOLD chattering)
+- Signal flip sustained for 3 consecutive checks (~3 min, filters noise from BUY↔HOLD chattering)
 - Price moved >2% since your last invocation
 - Fear & Greed crossed extreme threshold (20 or 80)
 - Sentiment reversal (positive↔negative)
