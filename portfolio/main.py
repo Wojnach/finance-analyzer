@@ -27,6 +27,30 @@ SYMBOLS = {
     "PLTR": {"yfinance": "PLTR"},
     "NVDA": {"yfinance": "NVDA"},
 }
+CRYPTO_SYMBOLS = {"BTC-USD", "ETH-USD"}
+STOCK_SYMBOLS = {"MSTR", "PLTR", "NVDA"}
+
+# Market hours (UTC) — EU open to US close
+MARKET_OPEN_HOUR = 7  # ~Frankfurt/London open
+MARKET_CLOSE_HOUR = 21  # ~NYSE close
+
+# Loop intervals by market state
+INTERVAL_MARKET_OPEN = 60  # 1 min — full speed
+INTERVAL_MARKET_CLOSED = 300  # 5 min — crypto only weekday nights
+INTERVAL_WEEKEND = 600  # 10 min — crypto only weekends
+
+
+def get_market_state():
+    now = datetime.now(timezone.utc)
+    weekday = now.weekday()  # 0=Mon, 6=Sun
+    hour = now.hour
+    if weekday >= 5:
+        return "weekend", CRYPTO_SYMBOLS, INTERVAL_WEEKEND
+    if MARKET_OPEN_HOUR <= hour < MARKET_CLOSE_HOUR:
+        return "open", set(SYMBOLS.keys()), INTERVAL_MARKET_OPEN
+    return "closed", CRYPTO_SYMBOLS, INTERVAL_MARKET_CLOSED
+
+
 USDSEK_RATE_URL = "https://api.binance.com/api/v3/ticker/price?symbol=USDTSEK"
 
 INITIAL_CASH_SEK = 500_000
@@ -880,13 +904,18 @@ def build_report(state, signals, trades, prices_usd, fx_rate, tf_data=None):
 # --- Main ---
 
 
-def run(force_report=False):
+def run(force_report=False, active_symbols=None):
     config = json.loads(CONFIG_FILE.read_text())
     state = load_state()
     fx_rate = fetch_usd_sek()
 
+    market_state, default_symbols, _ = get_market_state()
+    active = active_symbols or default_symbols
+
+    skipped = set(SYMBOLS.keys()) - active
+    skip_note = f" (skipped: {', '.join(sorted(skipped))})" if skipped else ""
     print(
-        f"[{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}] USD/SEK: {fx_rate:.2f}"
+        f"[{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}] USD/SEK: {fx_rate:.2f} | market: {market_state}{skip_note}"
     )
 
     signals = {}
@@ -894,6 +923,8 @@ def run(force_report=False):
     tf_data = {}
 
     for name, source in SYMBOLS.items():
+        if name not in active:
+            continue
         try:
             tfs = collect_timeframes(source)
             tf_data[name] = tfs
@@ -1000,14 +1031,22 @@ def run(force_report=False):
         print("\n  No trigger — nothing changed.")
 
 
-def loop(interval=60):
-    print(f"Starting loop — running every {interval}s. Ctrl+C to stop.")
-    # Send a startup report
+def loop(interval=None):
+    print("Starting loop with market-aware scheduling. Ctrl+C to stop.")
     run(force_report=True)
+    last_state = None
     while True:
-        time.sleep(interval)
+        market_state, active_symbols, sleep_interval = get_market_state()
+        if interval:
+            sleep_interval = interval
+        if market_state != last_state:
+            print(
+                f"\n  Schedule: {market_state} — {len(active_symbols)} instruments, {sleep_interval}s interval"
+            )
+            last_state = market_state
+        time.sleep(sleep_interval)
         try:
-            run(force_report=False)
+            run(force_report=False, active_symbols=active_symbols)
         except KeyboardInterrupt:
             raise
         except Exception as e:
@@ -1043,7 +1082,7 @@ if __name__ == "__main__":
         print("Done.")
     elif "--loop" in args:
         idx = args.index("--loop")
-        interval = int(args[idx + 1]) if idx + 1 < len(args) else 60
-        loop(interval=interval)
+        override = int(args[idx + 1]) if idx + 1 < len(args) else None
+        loop(interval=override)
     else:
         run(force_report="--report" in args)
