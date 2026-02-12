@@ -209,6 +209,8 @@ triggered — the user wants to see your analysis every time. No exceptions.
 4. F&G + portfolio line
 5. Reasoning (1-2 sentences)
 
+**The ticker grid and timeframe heatmap are MANDATORY.** Never send blank lines where the grid should be. Every message must include all 5 tickers with prices and vote counts, and the full 7-column heatmap. If you skip them, the message is useless.
+
 HOLD example:
 
 ```
