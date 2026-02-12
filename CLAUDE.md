@@ -79,6 +79,7 @@ Consider the full picture:
 - Macro context (DXY, treasury yields/curve, FOMC proximity, Fear & Greed, funding rate)
 - Market regime (trending, ranging, high volatility, capitulation)
 - Portfolio state (concentration, recent trades, cash reserves)
+- Fee drag: every round-trip costs ~0.10% (crypto) or ~0.20% (stocks). Don't trade on marginal signals where the expected move is smaller than the fee cost. Check `total_fees_sek` in portfolio state to stay aware of cumulative drag.
 
 A strong conviction trade with 3 aligned signals and clear macro context can be better than
 a weak 6-signal consensus in a choppy market. Conversely, even 7+ signals in the same
