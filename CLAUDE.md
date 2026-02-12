@@ -201,7 +201,6 @@ requests.post(
 - BUY: 20% of cash per trade
 - SELL: 50% of position per trade
 - Minimum trade: 500 SEK
-- State-change only: don't re-buy what you just bought (HOLD→BUY ok, BUY→BUY not ok)
 - Never go all-in on one asset
 - This is SIMULATED money (500K SEK starting) — trade freely to build a track record
 
