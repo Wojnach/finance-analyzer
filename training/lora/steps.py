@@ -267,8 +267,11 @@ def step_verify(state):
         "import json; from llama_cpp import Llama; "
         f"m=Llama(model_path=r'{BASE_GGUF}',lora_path=r'{FINAL_GGUF}',"
         "n_ctx=2048,n_gpu_layers=-1,verbose=False); "
-        "r=m('[INST]Asset:BTC,$67000,RSI:28. BUY/SELL/HOLD?[/INST]',"
-        "max_tokens=50,temperature=0.1); "
+        "r=m('[INST]You are an expert cryptocurrency trader. Based on the following market data, provide a single trading decision: BUY, SELL, or HOLD.\\n\\n"
+        "Market Data:\\n- Asset: BTC\\n- Current Price: $67,000\\n- RSI(14): 28\\n- MACD Histogram: positive\\n- EMA(9) vs EMA(21): Bearish\\n- Fear & Greed Index: 22/100\\n\\n"
+        "Respond with EXACTLY one of: BUY, SELL, or HOLD. Then give a one-sentence reason.\\n"
+        "Format: DECISION: [BUY/SELL/HOLD] - [reason][/INST]',"
+        "max_tokens=150,temperature=0.1); "
         "t=r['choices'][0]['text'].strip(); "
         "print(json.dumps({'out':t,'ok':any(w in t.upper() for w in ['BUY','SELL','HOLD'])}))"
     )
