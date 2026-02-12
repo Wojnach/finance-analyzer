@@ -445,7 +445,7 @@ def generate_signal(ind, ticker=None, config=None):
         except ImportError:
             pass
 
-    # Ministral-8B LLM reasoning
+    # Ministral-8B LLM reasoning (original CryptoTrader-LM + custom LoRA)
     if ticker:
         short_ticker = ticker.replace("-USD", "")
         try:
@@ -471,12 +471,22 @@ def generate_signal(ind, ticker=None, config=None):
                 ctx,
             )
             if ms:
-                extra_info["ministral_action"] = ms["action"]
-                extra_info["ministral_reasoning"] = ms.get("reasoning", "")
-                if ms["action"] == "BUY":
+                orig = ms.get("original") or ms
+                extra_info["ministral_action"] = orig["action"]
+                extra_info["ministral_reasoning"] = orig.get("reasoning", "")
+                if orig["action"] == "BUY":
                     buy += 1
-                elif ms["action"] == "SELL":
+                elif orig["action"] == "SELL":
                     sell += 1
+
+                cust = ms.get("custom")
+                if cust:
+                    extra_info["custom_lora_action"] = cust["action"]
+                    extra_info["custom_lora_reasoning"] = cust.get("reasoning", "")
+                    if cust["action"] == "BUY":
+                        buy += 1
+                    elif cust["action"] == "SELL":
+                        sell += 1
         except ImportError:
             pass
 
@@ -827,6 +837,8 @@ def build_report(state, signals, trades, prices_usd, fx_rate, tf_data=None):
             sig_parts.append(f"News:{extra['sentiment']}")
         if "ministral_action" in extra:
             sig_parts.append(f"8B:{extra['ministral_action']}")
+        if "custom_lora_action" in extra:
+            sig_parts.append(f"LoRA:{extra['custom_lora_action']}")
         if "ml_action" in extra:
             sig_parts.append(f"ML:{extra['ml_action']}")
         if sig_parts:
@@ -951,6 +963,8 @@ def run(force_report=False, active_symbols=None):
                     parts.append(f"News:{extra['sentiment']}")
                 if "ministral_action" in extra:
                     parts.append(f"8B:{extra['ministral_action']}")
+                if "custom_lora_action" in extra:
+                    parts.append(f"LoRA:{extra['custom_lora_action']}")
                 if "ml_action" in extra:
                     parts.append(f"ML:{extra['ml_action']}")
                 if "funding_action" in extra:

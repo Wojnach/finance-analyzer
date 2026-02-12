@@ -17,6 +17,7 @@ SIGNAL_NAMES = [
     "ml",
     "funding",
     "volume",
+    "custom_lora",
 ]
 HORIZONS = ["1d", "3d", "5d", "10d"]
 

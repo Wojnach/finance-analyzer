@@ -253,7 +253,7 @@ requests.post(
 - Never go all-in on one asset
 - This is SIMULATED money (500K SEK starting) — trade freely to build a track record
 
-## 9 Signals
+## 11 Signals
 
 1. **RSI(14)** — Oversold (<30)=buy, overbought (>70)=sell, else abstains
 2. **MACD(12,26,9)** — Histogram crossover only (neg→pos=buy, pos→neg=sell), else abstains
@@ -261,11 +261,11 @@ requests.post(
 4. **BB(20,2)** — Below lower=buy, above upper=sell, else abstains
 5. **Fear & Greed** — ≤20 contrarian buy, ≥80 contrarian sell, else abstains
 6. **Sentiment** — CryptoBERT (crypto) / Trading-Hero-LLM (stocks), confidence>0.4 to vote
-7. **CryptoTrader-LM** — Ministral-8B + LoRA, full LLM reasoning → BUY/SELL/HOLD
+7. **CryptoTrader-LM** — Ministral-8B + original CryptoTrader-LM LoRA, full LLM reasoning → BUY/SELL/HOLD
 8. **ML Classifier** — HistGradientBoosting on 1h candles (~20 features), crypto only
 9. **Funding Rate** — Binance perpetual futures funding rate, crypto only. >0.03% contrarian sell, <-0.01% contrarian buy
-
 10. **Volume Confirmation** — Volume spike (>1.5x 20-period avg) confirms 3-candle price direction. Spike+up=buy, spike+down=sell, no spike=abstains
+11. **Custom LoRA** — Ministral-8B + custom fine-tuned LoRA (trained on labeled 1h candles), independent LLM reasoning → BUY/SELL/HOLD
 
 **Non-voting context** (in agent_summary.json `macro` section for your reasoning):
 
