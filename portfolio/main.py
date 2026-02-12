@@ -445,8 +445,8 @@ def generate_signal(ind, ticker=None, config=None):
         except ImportError:
             pass
 
-    # Ministral-8B LLM reasoning (original CryptoTrader-LM + custom LoRA)
-    if ticker:
+    # Ministral-8B LLM reasoning (original CryptoTrader-LM + custom LoRA, crypto only)
+    if ticker and ticker in CRYPTO_SYMBOLS:
         short_ticker = ticker.replace("-USD", "")
         try:
             from portfolio.ministral_signal import get_ministral_signal
