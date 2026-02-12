@@ -5,39 +5,35 @@ Runs as a subprocess: reads JSON context from stdin, outputs JSON prediction.
 Uses a separate venv (Q:/models/.venv-llm on Windows, ~/.venv-llm on Linux).
 """
 
+import argparse
 import json
 import platform
 import sys
 
 if platform.system() == "Windows":
     MODEL_PATH = r"Q:\models\ministral-8b-gguf\Ministral-8B-Instruct-2410-Q4_K_M.gguf"
-    LORA_PATH = r"Q:\models\cryptotrader-lm\cryptotrader-lm-lora.gguf"
+    DEFAULT_LORA = r"Q:\models\cryptotrader-lm\cryptotrader-lm-lora.gguf"
 else:
     MODEL_PATH = (
         "/home/deck/models/ministral-8b-gguf/Ministral-8B-Instruct-2410-Q4_K_M.gguf"
     )
-    LORA_PATH = "/home/deck/models/cryptotrader-lm/cryptotrader-lm-lora.gguf"
-
-_model = None
+    DEFAULT_LORA = "/home/deck/models/cryptotrader-lm/cryptotrader-lm-lora.gguf"
 
 
-def load_model():
-    global _model
-    if _model is None:
-        from llama_cpp import Llama
+def load_model(lora_path=None):
+    from llama_cpp import Llama
 
-        _model = Llama(
-            model_path=MODEL_PATH,
-            lora_path=LORA_PATH,
-            n_ctx=4096,
-            n_gpu_layers=-1,
-            verbose=False,
-        )
-    return _model
+    return Llama(
+        model_path=MODEL_PATH,
+        lora_path=lora_path or DEFAULT_LORA,
+        n_ctx=4096,
+        n_gpu_layers=-1,
+        verbose=False,
+    )
 
 
-def predict(context):
-    model = load_model()
+def predict(context, lora_path=None):
+    model = load_model(lora_path)
 
     prompt = f"""[INST]You are an expert cryptocurrency trader. Based on the following market data, provide a single trading decision: BUY, SELL, or HOLD.
 
@@ -84,11 +80,17 @@ Format: DECISION: [BUY/SELL/HOLD] - [reason][/INST]"""
     return {
         "action": decision,
         "reasoning": text[:200],
-        "model": "CryptoTrader-LM",
+        "model": "custom-lora" if lora_path else "CryptoTrader-LM",
     }
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--lora", default=None, help="Path to LoRA GGUF (overrides default)"
+    )
+    args = parser.parse_args()
+
     context = json.loads(sys.stdin.read())
-    result = predict(context)
+    result = predict(context, lora_path=args.lora)
     print(json.dumps(result))
