@@ -671,6 +671,33 @@ def write_agent_summary(
     except (ImportError, Exception):
         pass
 
+    try:
+        from portfolio.accuracy_stats import (
+            signal_accuracy,
+            consensus_accuracy,
+            best_worst_signals,
+        )
+
+        sig_acc = signal_accuracy("1d")
+        cons_acc = consensus_accuracy("1d")
+        bw = best_worst_signals("1d")
+        qualified = {k: v for k, v in sig_acc.items() if v["total"] >= 5}
+        if qualified:
+            summary["signal_accuracy_1d"] = {
+                "signals": {
+                    k: {"accuracy": round(v["accuracy"], 3), "samples": v["total"]}
+                    for k, v in qualified.items()
+                },
+                "consensus": {
+                    "accuracy": round(cons_acc["accuracy"], 3),
+                    "samples": cons_acc["total"],
+                },
+                "best": bw.get("best"),
+                "worst": bw.get("worst"),
+            }
+    except Exception:
+        pass
+
     AGENT_SUMMARY_FILE.parent.mkdir(exist_ok=True)
     AGENT_SUMMARY_FILE.write_text(json.dumps(summary, indent=2, default=str))
     return summary

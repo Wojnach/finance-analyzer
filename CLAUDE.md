@@ -331,6 +331,23 @@ requests.post(
 - **Treasury Yields** — 2Y, 10Y, 30Y yields + 2s10s spread. Inverted curve = recession risk. Rising yields = headwind for growth stocks (MSTR, PLTR, NVDA). Falling yields = tailwind.
 - **Fed Calendar** — Next FOMC date and days until. **Patient:** Avoid new positions within 4 hours of announcement; wait for trend confirmation post-event. **Bold:** Do not trade the event itself; watch for post-event breakouts (1–4 hrs after).
 
+## Signal Performance
+
+`agent_summary.json` includes a `signal_accuracy_1d` section with per-signal hit rates
+at the 1-day horizon (when enough data exists). Use this to calibrate your trust in each signal.
+
+**How to use it:**
+
+- Signals with high accuracy and 20+ samples deserve more weight in your reasoning
+- Signals with accuracy near or below 50% are no better than a coin flip — treat them as noise
+- Consensus accuracy matters: if it's low, your independent judgment is more valuable than vote-counting
+- The `best` and `worst` fields tell you which signals are currently most/least reliable
+- This data improves over time as more outcomes are backfilled (3d, 5d, 10d horizons coming)
+
+**Do not blindly follow consensus.** The raw vote count (e.g., "4B/1S/6H") is an input to your
+reasoning, not a trading signal. A 3-signal consensus in a choppy market can be pure noise.
+Your job is to weigh signal quality, timeframe alignment, and macro context — not count votes.
+
 ## Instruments
 
 | Ticker  | Market      | Data source       |
