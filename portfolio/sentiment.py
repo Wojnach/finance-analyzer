@@ -59,19 +59,22 @@ def _fetch_yahoo_headlines(ticker, limit=10):
     news = stock.news or []
     articles = []
     for item in news[:limit]:
-        title = item.get("title", "")
+        content = item.get("content", item)
+        title = content.get("title", "")
         if not title:
             continue
-        published = item.get("providerPublishTime", 0)
+        pub = content.get("pubDate") or content.get("displayTime", "")
+        provider = content.get("provider", {})
+        source = (
+            provider.get("displayName", "Yahoo Finance")
+            if isinstance(provider, dict)
+            else "Yahoo Finance"
+        )
         articles.append(
             {
                 "title": title,
-                "source": item.get("publisher", "Yahoo Finance"),
-                "published": (
-                    datetime.fromtimestamp(published, tz=timezone.utc).isoformat()
-                    if published
-                    else datetime.now(timezone.utc).isoformat()
-                ),
+                "source": source,
+                "published": pub or datetime.now(timezone.utc).isoformat(),
             }
         )
     return articles
