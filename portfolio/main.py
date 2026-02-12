@@ -58,7 +58,6 @@ CONFIDENCE_TELEGRAM = 0.75  # 3/4 signals must agree to alert
 BUY_ALLOC = 0.20  # 20% of cash per buy
 SELL_ALLOC = 0.50  # sell 50% of position per sell
 MIN_TRADE_SEK = 500
-TRADE_COOLDOWN_SECONDS = 3600  # 1 hour between trades on same ticker
 
 BINANCE_BASE = "https://api.binance.com/api/v3"
 
@@ -702,14 +701,6 @@ def should_trade(state, ticker, action):
     # State-change gating: block repeat actions
     if last_trade.get("action") == action:
         return False, f"repeat {action}, no state change"
-
-    # Per-symbol cooldown
-    if last_trade.get("time"):
-        last_time = datetime.fromisoformat(last_trade["time"])
-        elapsed = (datetime.now(timezone.utc) - last_time).total_seconds()
-        if elapsed < TRADE_COOLDOWN_SECONDS:
-            remaining = int(TRADE_COOLDOWN_SECONDS - elapsed)
-            return False, f"cooldown ({remaining}s remaining)"
 
     return True, ""
 

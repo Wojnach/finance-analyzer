@@ -42,7 +42,7 @@ strategy. The comparison builds a track record showing whether patience or boldn
 
 - Trades on 3+ signal consensus (patient needs stronger conviction)
 - Does NOT require multi-timeframe alignment — "Now" timeframe consensus is enough
-- Still respects per-symbol cooldowns (1 hour) and position limits
+- Still respects position limits
 - Willing to buy into extreme fear without waiting for confirmation
 - Trades on momentum: volume spike + directional move = trade
 - Same sizing rules as patient (20% cash per BUY, 50% position per SELL)
@@ -79,7 +79,6 @@ Consider the full picture:
 - Macro context (DXY, treasury yields/curve, FOMC proximity, Fear & Greed, funding rate)
 - Market regime (trending, ranging, high volatility, capitulation)
 - Portfolio state (concentration, recent trades, cash reserves)
-- Per-symbol cooldown: 1 hour minimum between trades on the same ticker
 
 A strong conviction trade with 3 aligned signals and clear macro context can be better than
 a weak 6-signal consensus in a choppy market. Conversely, even 7+ signals in the same
@@ -202,7 +201,6 @@ requests.post(
 - BUY: 20% of cash per trade
 - SELL: 50% of position per trade
 - Minimum trade: 500 SEK
-- Per-symbol cooldown: 1 hour between trades on same ticker
 - State-change only: don't re-buy what you just bought (HOLD→BUY ok, BUY→BUY not ok)
 - Never go all-in on one asset
 - This is SIMULATED money (500K SEK starting) — trade freely to build a track record
