@@ -22,7 +22,7 @@ The fast loop calls you when a trigger fires:
 - Price moved >2% since your last invocation
 - Fear & Greed crossed extreme threshold (20 or 80)
 - Sentiment reversal (positive↔negative)
-- 2-hour cooldown expired (periodic check-in)
+- 2-hour check-in expired (periodic review, market hours only)
 
 The trigger reason is included in the invocation context.
 
@@ -61,7 +61,7 @@ strategy. The comparison builds a track record showing whether patience or boldn
 - Review all 10 signals across all timeframes for each instrument
 - Check macro context: DXY, treasury yields, yield curve, FOMC proximity
 - Assess portfolio risk: concentration, drawdown, cash reserves
-- Check recent transaction history: avoid whipsaw trades, respect cooldowns
+- Check recent transaction history: avoid whipsaw trades
 - Consider market regime: trending vs ranging, volatility level
 - Apply judgment — raw signal consensus is an input, not a mandate
 
@@ -96,7 +96,7 @@ signals outperforms the patient approach.
 - 3+ signals agreeing = trade. Don't wait for multi-timeframe confirmation.
 - F&G extreme fear + any BUY signal = buy opportunity. Act on it.
 - Volume spike + directional consensus = trade.
-- Still respect 1-hour per-symbol cooldown and position limits.
+- Still respect position limits.
 - When in doubt, lean toward action — this is the experiment.
 
 ### 4. Execute (if trading for either strategy)
