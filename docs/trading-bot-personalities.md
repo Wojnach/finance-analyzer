@@ -106,3 +106,56 @@ A suggested split based on the research:
 - Both bots should have a **regime detection layer** that can trigger dormancy when market conditions don't suit their personality. This can be as simple as ATR percentile ranking (high ATR = trending, low ATR = consolidation) combined with ADX for trend strength.
 - **Key difference from v1:** Bold is no longer a momentum chaser. It's a trend follower that enters aggressively at the point of highest conviction (the breakout). This aligns with what actually produces the best long-term returns for active retail traders.
 - Both bots use ATR-based position sizing, which means they automatically adapt to changing volatility without manual intervention.
+
+-----
+
+## Changelog: v1 → v2
+
+### Bold: "The Momentum Hunter" → "The Breakout Trend Rider"
+
+The entire Bold philosophy was reworked. v1 was a momentum chaser — acting on the first signal, chasing volume spikes and MACD crossovers, taking directional bets into FOMC. v2 is a systematic trend follower that enters at breakouts with conviction sizing.
+
+**Key changes:**
+
+| Aspect | v1 (Momentum Hunter) | v2 (Breakout Trend Rider) |
+|---|---|---|
+| **Archetype** | Momentum + Swing + Event-Driven | Aggressive Trend Follower + Breakout |
+| **Entry trigger** | First signal, momentum divergences, volume spikes | Confirmed structural breakout backed by expanding volume |
+| **Position sizing** | 30–50% fixed | 30–50% but ATR-adjusted (adapts to volatility) |
+| **Hold time** | Hours to a few days | Days to weeks (as long as structure holds) |
+| **Stop loss** | Tight fixed % (2–4%) | Structural (below breakout level, ~2–5% via ATR) |
+| **Take profit** | Trailing stop + momentum exhaustion | Chandelier stop (ATR-based) or EMA close |
+| **Win rate** | Low (35–45%) | Moderate (40–50%) |
+| **FOMC behavior** | Actively trades the event, takes directional bets | Does NOT trade the event; waits for post-event breakout |
+| **Dormancy** | None defined | ATR compression + 3 consecutive stop-outs → 48h pause |
+| **Risk per trade** | Not defined | Capped at 2% of total portfolio via ATR sizing |
+
+**Why the change:** v1's momentum chasing leads to getting chopped up in sideways markets and overtrading on noise. Trend following with breakout entries has 100+ years of out-of-sample evidence. The "bold" element is now the sizing conviction, not reckless speed.
+
+### Patient: "The Regime Reader" (refined, not replaced)
+
+Patient kept its core identity but gained significant depth in risk management, entry criteria, and rationale.
+
+**Key changes:**
+
+| Aspect | v1 | v2 |
+|---|---|---|
+| **Archetype** | Trend Follower + Mean Reversion + Value-Aware | Systematic Trend Follower + Mean Reversion (dropped "Value-Aware") |
+| **Intro context** | None | Added paragraph on how Patient complements Bold |
+| **Entry** | Largely the same | Added "enters on the second confirmation, not the first" |
+| **Position sizing** | Same 10–20% | Added pyramiding detail: "adds at first and second pullback" |
+| **Hold time** | Same | Added: "Treats time in the market as an asset, not a risk" |
+| **Stop loss** | 5–8%, structural | Added ATR validation that stops are outside normal noise |
+| **Take profit** | Fibonacci/measured moves | Added partial profit detail: "50% at first target, trail the rest" |
+| **Win rate** | 55–65% | Added reward/risk ratio (1.2–1.8x) |
+| **FOMC behavior** | 30min–2hrs post wait | Expanded to 4 hours; more explicit about not entering pre-event |
+| **New field** | — | "What makes it patient" personality description |
+| **Risk guardrails** | Generic | ATR-based 1% risk cap, -7%/week drawdown rule, dormancy trigger (win rate <40% over 10 trades) |
+| **New section** | — | "Why This Ranks High" rationale |
+
+### New sections added in v2
+
+- **Portfolio Allocation Between Bots** — 60/40, 50/50, 80/20 splits based on regime
+- **"Why This Ranks High"** sections for both personalities — academic/empirical justification
+- **Expanded comparison table** — 7 scenarios (up from 5), more specific descriptions
+- **Implementation notes** — added ATR percentile + ADX for regime detection, note on ATR-based sizing for both bots
