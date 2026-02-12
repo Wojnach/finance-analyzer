@@ -40,6 +40,7 @@ def _call_model(context, lora_path=None):
 
 def get_ministral_signal(context):
     original = _call_model(context)
+    custom = None
 
     try:
         if SHADOW_CONFIG.exists():
@@ -61,4 +62,4 @@ def get_ministral_signal(context):
     except Exception:
         pass
 
-    return original
+    return {"original": original, "custom": custom}
