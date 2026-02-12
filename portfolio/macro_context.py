@@ -146,8 +146,113 @@ def get_volume_signal(ticker):
     return result
 
 
+TREASURY_TTL = 3600
+FOMC_2026 = [
+    "2026-01-28",
+    "2026-01-29",
+    "2026-03-17",
+    "2026-03-18",
+    "2026-05-05",
+    "2026-05-06",
+    "2026-06-16",
+    "2026-06-17",
+    "2026-07-28",
+    "2026-07-29",
+    "2026-09-15",
+    "2026-09-16",
+    "2026-10-27",
+    "2026-10-28",
+    "2026-12-15",
+    "2026-12-16",
+]
+
+
+def get_treasury():
+    now = time.time()
+    cached = _cache.get("treasury")
+    if cached and now - cached["time"] < TREASURY_TTL:
+        return cached["data"]
+
+    import yfinance as yf
+
+    tickers = {"10y": "^TNX", "2y": "2YY=F", "30y": "^TYX"}
+    result = {}
+    for label, sym in tickers.items():
+        try:
+            t = yf.Ticker(sym)
+            h = t.history(period="30d")
+            if h.empty:
+                continue
+            close = h["Close"]
+            current = float(close.iloc[-1])
+            pct_5d = (
+                float((close.iloc[-1] / close.iloc[-5] - 1) * 100)
+                if len(close) >= 5
+                else 0
+            )
+            result[label] = {
+                "yield_pct": round(current, 3),
+                "change_5d": round(pct_5d, 2),
+            }
+        except Exception:
+            pass
+
+    if "10y" in result and "2y" in result:
+        spread = result["10y"]["yield_pct"] - result["2y"]["yield_pct"]
+        result["spread_2s10s"] = round(spread, 3)
+        if spread < 0:
+            result["curve"] = "inverted"
+        elif spread < 0.2:
+            result["curve"] = "flat"
+        else:
+            result["curve"] = "normal"
+
+    if result:
+        _cache["treasury"] = {"data": result, "time": now}
+    return result or None
+
+
+def get_fed_calendar():
+    from datetime import datetime, timedelta
+
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    upcoming = [d for d in FOMC_2026 if d >= today]
+    if not upcoming:
+        return None
+
+    next_date = upcoming[0]
+    days_until = (
+        datetime.strptime(next_date, "%Y-%m-%d") - datetime.strptime(today, "%Y-%m-%d")
+    ).days
+
+    is_meeting_day = today in FOMC_2026
+    is_day_before = any(
+        (datetime.strptime(d, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+        == today
+        for d in FOMC_2026
+    )
+
+    result = {
+        "next_fomc": next_date,
+        "days_until": days_until,
+        "meetings_remaining": len(upcoming) // 2,
+    }
+    if is_meeting_day:
+        result["warning"] = "FOMC meeting TODAY — expect volatility"
+    elif is_day_before:
+        result["warning"] = "FOMC meeting TOMORROW — positioning risk"
+    elif days_until <= 7:
+        result["warning"] = f"FOMC in {days_until} days — pre-meeting drift possible"
+
+    return result
+
+
 if __name__ == "__main__":
     dxy = get_dxy()
     print(f"DXY: {dxy}")
+    treasury = get_treasury()
+    print(f"Treasury: {treasury}")
+    fed = get_fed_calendar()
+    print(f"Fed: {fed}")
     for t in ["BTC-USD", "ETH-USD", "MSTR", "PLTR", "NVDA"]:
         print(f"{t}: {get_volume_signal(t)}")

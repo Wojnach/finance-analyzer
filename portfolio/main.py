@@ -591,11 +591,20 @@ def write_agent_summary(
 
     # Macro context (non-voting, for Claude Code reasoning)
     try:
-        from portfolio.macro_context import get_dxy
+        from portfolio.macro_context import get_dxy, get_fed_calendar, get_treasury
 
+        macro = {}
         dxy = _cached("dxy", 3600, get_dxy)
         if dxy:
-            summary["macro"] = {"dxy": dxy}
+            macro["dxy"] = dxy
+        treasury = _cached("treasury", 3600, get_treasury)
+        if treasury:
+            macro["treasury"] = treasury
+        fed = get_fed_calendar()
+        if fed:
+            macro["fed"] = fed
+        if macro:
+            summary["macro"] = macro
     except (ImportError, Exception):
         pass
 

@@ -37,7 +37,7 @@ The trigger reason is included in the invocation context.
 ### 2. Analyze
 
 - Review all 10 signals across all timeframes for each instrument
-- Check macro context: DXY trend (strong dollar = headwind for risk assets)
+- Check macro context: DXY, treasury yields, yield curve, FOMC proximity
 - Assess portfolio risk: concentration, drawdown, cash reserves
 - Check recent transaction history: avoid whipsaw trades, respect cooldowns
 - Consider market regime: trending vs ranging, volatility level
@@ -52,7 +52,7 @@ Consider the full picture:
 
 - Signal consensus (direction and strength across the 10 signals)
 - Timeframe alignment (are short and long timeframes telling the same story?)
-- Macro context (DXY, Fear & Greed extremes, funding rate sentiment)
+- Macro context (DXY, treasury yields/curve, FOMC proximity, Fear & Greed, funding rate)
 - Market regime (trending, ranging, high volatility, capitulation)
 - Portfolio state (concentration, recent trades, cash reserves)
 - Per-symbol cooldown: 1 hour minimum between trades on the same ticker
@@ -181,9 +181,11 @@ requests.post(
 
 10. **Volume Confirmation** — Volume spike (>1.5x 20-period avg) confirms 3-candle price direction. Spike+up=buy, spike+down=sell, no spike=abstains
 
-**Non-voting context** (in agent_summary.json for your reasoning):
+**Non-voting context** (in agent_summary.json `macro` section for your reasoning):
 
 - **DXY** — Dollar Index trend and 5d change. Strong dollar = headwind for risk assets.
+- **Treasury Yields** — 2Y, 10Y, 30Y yields + 2s10s spread. Inverted curve = recession risk. Rising yields = headwind for growth stocks (MSTR, PLTR, NVDA). Falling yields = tailwind.
+- **Fed Calendar** — Next FOMC date and days until. Warns on meeting day/day before. Avoid new positions within 2 days of FOMC — volatility risk.
 
 ## Instruments
 
