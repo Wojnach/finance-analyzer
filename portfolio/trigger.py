@@ -1,4 +1,10 @@
-"""Smart trigger system — detects meaningful market changes to reduce noise."""
+"""Smart trigger system — detects meaningful market changes to reduce noise.
+
+Sustained signal filter: signal flips only trigger if the new direction was
+already present in the previous check cycle (held for 2 consecutive checks).
+This filters out noise (BUY→HOLD→BUY chattering) while adding at most 60s
+latency since the loop runs every 60s.
+"""
 
 import json
 import time
@@ -24,14 +30,23 @@ def _save_state(state):
 def check_triggers(signals, prices_usd, fear_greeds, sentiments):
     state = _load_state()
     prev = state.get("last", {})
+    prev_cycle = state.get("prev_cycle_signals", {})
     reasons = []
 
-    # 1. Signal flip — any symbol's action changed
-    prev_signals = prev.get("signals", {})
+    # 1. Signal flip — only if sustained (same direction for 2 consecutive checks)
+    prev_triggered = prev.get("signals", {})
     for ticker, sig in signals.items():
-        old_action = prev_signals.get(ticker, {}).get("action")
-        if old_action and old_action != sig["action"]:
-            reasons.append(f"{ticker} flipped {old_action}->{sig['action']}")
+        triggered_action = prev_triggered.get(ticker, {}).get("action")
+        prev_cycle_action = prev_cycle.get(ticker, {}).get("action")
+        current_action = sig["action"]
+        if (
+            triggered_action
+            and current_action != triggered_action
+            and current_action == prev_cycle_action
+        ):
+            reasons.append(
+                f"{ticker} flipped {triggered_action}->{current_action} (sustained)"
+            )
 
     # 2. Price move >2% since last trigger
     prev_prices = prev.get("prices", {})
@@ -78,17 +93,23 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
 
     if triggered:
         state["last_trigger_time"] = time.time()
-    state["last"] = {
-        "signals": {
-            t: {"action": s["action"], "confidence": s["confidence"]}
-            for t, s in signals.items()
-        },
-        "prices": dict(prices_usd),
-        "fear_greeds": {
-            t: fg if isinstance(fg, dict) else {} for t, fg in fear_greeds.items()
-        },
-        "sentiments": dict(sentiments),
-        "time": time.time(),
+        state["last"] = {
+            "signals": {
+                t: {"action": s["action"], "confidence": s["confidence"]}
+                for t, s in signals.items()
+            },
+            "prices": dict(prices_usd),
+            "fear_greeds": {
+                t: fg if isinstance(fg, dict) else {} for t, fg in fear_greeds.items()
+            },
+            "sentiments": dict(sentiments),
+            "time": time.time(),
+        }
+
+    # Always save current signals as prev_cycle for next check
+    state["prev_cycle_signals"] = {
+        t: {"action": s["action"], "confidence": s["confidence"]}
+        for t, s in signals.items()
     }
     _save_state(state)
 
