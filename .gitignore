@@ -55,6 +55,8 @@ data/trigger_state.json
 data/agent.log
 data/invocations.jsonl
 data/signal_log.jsonl
+data/backtest_klines_*.csv
+data/backtest_funding_*.csv
 
 # Test artifacts
 .pytest_cache/

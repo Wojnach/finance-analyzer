@@ -739,6 +739,8 @@
           <div id="mCtx">
             <div class="fgr" id="fgR"></div>
             <div id="dxB"></div>
+            <div id="trB"></div>
+            <div id="fedB"></div>
             <div class="stit" style="font-size: 11px; margin-top: 10px">
               Sentiment
             </div>
@@ -1054,27 +1056,94 @@
             fcl(sfg) +
             "</div></div>";
         fR.innerHTML = fh || '<div class="nd">No F&G data</div>';
-        if (mac && mac.dxy_value != null) {
-          var tr = mac.dxy_trend || "flat";
+        var dx = mac ? mac.dxy : null;
+        if (dx && dx.value != null) {
+          var tr = dx.trend || "flat";
+          var impl =
+            dx.trend === "strong"
+              ? "Strong dollar — headwind for risk assets"
+              : "Weak dollar — tailwind for risk assets";
           dB.innerHTML =
             '<div class="dxb"><div class="dxh"><div><span style="font-size:10px;color:var(--txm)">DXY </span><span class="dxv">' +
-            fn(mac.dxy_value, 2) +
+            fn(dx.value, 2) +
             '</span></div><span class="dxt ' +
             tr +
             '">' +
             tr +
-            (mac.dxy_5d_change != null
+            (dx.change_5d_pct != null
               ? " (" +
-                (mac.dxy_5d_change > 0 ? "+" : "") +
-                fn(mac.dxy_5d_change, 2) +
+                (dx.change_5d_pct > 0 ? "+" : "") +
+                fn(dx.change_5d_pct, 2) +
                 "%)"
               : "") +
-            "</span></div>" +
-            (mac.implication
-              ? '<div class="dxi">' + eh(mac.implication) + "</div>"
-              : "") +
-            "</div>";
+            '</span></div><div class="dxi">' +
+            impl +
+            "</div></div>";
         } else dB.innerHTML = "";
+        var ty = mac ? mac.treasury : null;
+        var trB = document.getElementById("trB");
+        if (ty) {
+          var th =
+            '<div class="dxb" style="margin-top:8px"><div class="dxh"><span style="font-size:10px;color:var(--txm)">YIELDS</span></div><div style="display:flex;gap:12px;margin-top:4px">';
+          if (ty["2y"])
+            th +=
+              '<div><span style="font-size:10px;color:var(--txm)">2Y </span><span class="dxv">' +
+              fn(ty["2y"].yield_pct, 3) +
+              "%</span></div>";
+          if (ty["10y"])
+            th +=
+              '<div><span style="font-size:10px;color:var(--txm)">10Y </span><span class="dxv">' +
+              fn(ty["10y"].yield_pct, 3) +
+              "%</span></div>";
+          if (ty["30y"])
+            th +=
+              '<div><span style="font-size:10px;color:var(--txm)">30Y </span><span class="dxv">' +
+              fn(ty["30y"].yield_pct, 3) +
+              "%</span></div>";
+          th += "</div>";
+          if (ty.spread_2s10s != null) {
+            var cc =
+              ty.curve === "inverted"
+                ? "var(--red)"
+                : ty.curve === "flat"
+                  ? "var(--yel)"
+                  : "var(--grn)";
+            th +=
+              '<div class="dxi">2s10s spread: <span style="color:' +
+              cc +
+              ';font-weight:600">' +
+              fn(ty.spread_2s10s, 3) +
+              "% (" +
+              (ty.curve || "?") +
+              ")</span></div>";
+          }
+          trB.innerHTML = th + "</div>";
+        } else trB.innerHTML = "";
+        var fed = mac ? mac.fed : null;
+        var fedB = document.getElementById("fedB");
+        if (fed) {
+          var wc = fed.warning
+            ? fed.days_until <= 1
+              ? "var(--red)"
+              : "var(--org)"
+            : "var(--txm)";
+          var fh =
+            '<div class="dxb" style="margin-top:8px"><div class="dxh"><span style="font-size:10px;color:var(--txm)">FOMC</span><span style="font-size:12px;color:' +
+            wc +
+            '">' +
+            fed.next_fomc +
+            " (" +
+            fed.days_until +
+            "d)</span></div>";
+          if (fed.warning)
+            fh +=
+              '<div class="dxi" style="color:' +
+              wc +
+              '">' +
+              eh(fed.warning) +
+              "</div>";
+          fedB.innerHTML = fh + "</div>";
+        } else fedB.innerHTML = "";
         var sh = "";
         T.forEach(function (t) {
           var s = sigs ? sigs[t] : null,
