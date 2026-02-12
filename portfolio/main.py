@@ -372,12 +372,12 @@ def generate_signal(ind, ticker=None, config=None):
     except ImportError:
         pass
 
-    # Social media posts (Reddit + Twitter/X) — fetched separately, merged into sentiment
+    # Social media posts (Reddit) — fetched separately, merged into sentiment
     social_posts = []
     if ticker:
         short_ticker = ticker.replace("-USD", "")
         try:
-            from portfolio.social_sentiment import get_reddit_posts, get_twitter_posts
+            from portfolio.social_sentiment import get_reddit_posts
 
             reddit = _cached(
                 f"reddit_{short_ticker}",
@@ -387,17 +387,6 @@ def generate_signal(ind, ticker=None, config=None):
             )
             if reddit:
                 social_posts.extend(reddit)
-            twitter_token = (config or {}).get("twitter", {}).get("bearer_token", "")
-            if twitter_token:
-                tw = _cached(
-                    f"twitter_{short_ticker}",
-                    SENTIMENT_TTL,
-                    get_twitter_posts,
-                    short_ticker,
-                    twitter_token,
-                )
-                if tw:
-                    social_posts.extend(tw)
         except ImportError:
             pass
 

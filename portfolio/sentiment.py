@@ -159,7 +159,6 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None) -> dict:
     sources = {
         "news": len(articles),
         "reddit": sum(1 for p in social if "reddit" in p.get("source", "")),
-        "twitter": sum(1 for p in social if "twitter" in p.get("source", "")),
     }
 
     if not all_articles:
