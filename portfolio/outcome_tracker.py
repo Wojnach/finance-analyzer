@@ -1,6 +1,6 @@
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -54,6 +54,9 @@ def _derive_signal_vote(name, indicators, extra):
         ema9 = indicators.get("ema9")
         ema21 = indicators.get("ema21")
         if ema9 is None or ema21 is None:
+            return "HOLD"
+        ema_gap_pct = abs(ema9 - ema21) / ema21 * 100 if ema21 != 0 else 0
+        if ema_gap_pct < 0.5:
             return "HOLD"
         return "BUY" if ema9 > ema21 else "SELL"
 
@@ -172,6 +175,45 @@ def _fetch_current_price(ticker):
     return None
 
 
+def _fetch_historical_price(ticker, target_ts):
+    if ticker in BINANCE_MAP:
+        symbol = BINANCE_MAP[ticker]
+        start_ms = int(target_ts * 1000)
+        r = requests.get(
+            "https://api.binance.com/api/v3/klines",
+            params={
+                "symbol": symbol,
+                "interval": "1h",
+                "startTime": start_ms,
+                "limit": 1,
+            },
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if not data:
+            return None
+        return float(data[0][4])
+
+    if ticker in YF_MAP:
+        import yfinance as yf
+
+        target_dt = datetime.fromtimestamp(target_ts, tz=timezone.utc)
+        start_date = (target_dt - timedelta(days=5)).strftime("%Y-%m-%d")
+        end_date = (target_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+        t = yf.Ticker(YF_MAP[ticker])
+        h = t.history(start=start_date, end=end_date)
+        if h.empty:
+            return None
+        target_date = target_dt.date()
+        candidates = h[h.index.date <= target_date]
+        if candidates.empty:
+            return float(h["Close"].iloc[0])
+        return float(candidates["Close"].iloc[-1])
+
+    return None
+
+
 def backfill_outcomes():
     if not SIGNAL_LOG.exists():
         return 0
@@ -215,29 +257,35 @@ def backfill_outcomes():
             for h_key, h_seconds in HORIZONS.items():
                 if outcomes[ticker].get(h_key) is not None:
                     continue
-                if now_ts < entry_ts + h_seconds:
+                target_ts = entry_ts + h_seconds
+                if now_ts < target_ts:
                     continue
 
-                if ticker not in price_cache:
+                cache_key = (ticker, int(target_ts // 3600))
+                if cache_key not in price_cache:
                     try:
-                        price_cache[ticker] = _fetch_current_price(ticker)
+                        price_cache[cache_key] = _fetch_historical_price(
+                            ticker, target_ts
+                        )
                     except Exception:
-                        price_cache[ticker] = None
+                        price_cache[cache_key] = None
 
-                current_price = price_cache[ticker]
-                if current_price is None:
+                hist_price = price_cache[cache_key]
+                if hist_price is None:
                     continue
 
                 change_pct = 0.0
                 if base_price and base_price > 0:
                     change_pct = round(
-                        ((current_price - base_price) / base_price) * 100, 2
+                        ((hist_price - base_price) / base_price) * 100, 2
                     )
 
                 outcomes[ticker][h_key] = {
-                    "price_usd": round(current_price, 2),
+                    "price_usd": round(hist_price, 2),
                     "change_pct": change_pct,
-                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "ts": datetime.fromtimestamp(
+                        target_ts, tz=timezone.utc
+                    ).isoformat(),
                 }
                 entry_updated = True
 

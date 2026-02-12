@@ -13,7 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 STATE_FILE = Path(__file__).resolve().parent.parent / "data" / "trigger_state.json"
-COOLDOWN_SECONDS = 7200  # 2 hours max silence
+COOLDOWN_SECONDS = 7200  # 2 hours max silence (market hours)
+OFFHOURS_COOLDOWN = 21600  # 6 hours (nights/weekends, crypto only)
 PRICE_THRESHOLD = 0.02  # 2% move
 FG_THRESHOLDS = (20, 80)  # extreme fear / extreme greed boundaries
 SUSTAINED_CHECKS = 3  # consecutive cycles a signal must hold before triggering
@@ -105,13 +106,17 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
         ):
             reasons.append(f"{ticker} sentiment {old_sent}->{sent}")
 
-    # 5. Cooldown expired (only during market hours on weekdays)
+    # 5. Cooldown expired
+    # Market hours (weekdays 07-21 UTC): 2h cooldown for all instruments
+    # Off-hours (nights/weekends): 6h cooldown for crypto check-ins
     now_utc = datetime.now(timezone.utc)
     market_open = now_utc.weekday() < 5 and 7 <= now_utc.hour < 21
-    if market_open:
-        last_trigger_time = state.get("last_trigger_time", 0)
-        if time.time() - last_trigger_time > COOLDOWN_SECONDS:
-            reasons.append(f"cooldown ({COOLDOWN_SECONDS // 3600}h)")
+    last_trigger_time = state.get("last_trigger_time", 0)
+    elapsed = time.time() - last_trigger_time
+    if market_open and elapsed > COOLDOWN_SECONDS:
+        reasons.append(f"cooldown ({COOLDOWN_SECONDS // 3600}h)")
+    elif not market_open and elapsed > OFFHOURS_COOLDOWN:
+        reasons.append(f"crypto check-in ({OFFHOURS_COOLDOWN // 3600}h)")
 
     triggered = len(reasons) > 0
 

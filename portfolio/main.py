@@ -219,6 +219,8 @@ def fetch_usd_sek():
 
 
 def compute_indicators(df):
+    if len(df) < 26:
+        return None
     close = df["close"]
 
     # RSI(14)
@@ -227,7 +229,8 @@ def compute_indicators(df):
     loss = (-delta).where(delta < 0, 0.0)
     avg_gain = gain.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
-    rs = avg_gain / avg_loss
+    avg_loss_safe = avg_loss.replace(0, np.finfo(float).eps)
+    rs = avg_gain / avg_loss_safe
     rsi = 100 - (100 / (1 + rs))
 
     # MACD(12,26,9)
@@ -332,6 +335,8 @@ def collect_timeframes(source):
         try:
             df = _fetch_klines(source, interval, limit)
             ind = compute_indicators(df)
+            if ind is None:
+                continue
             if label == "Now":
                 action, conf = None, None
             else:
@@ -368,11 +373,13 @@ def generate_signal(ind, ticker=None, config=None):
     elif ind["macd_hist"] < 0 and ind["macd_hist_prev"] >= 0:
         sell += 1
 
-    # EMA trend — always votes
-    if ind["ema9"] > ind["ema21"]:
-        buy += 1
-    else:
-        sell += 1
+    # EMA trend — votes only when gap is meaningful (>0.5%)
+    ema_gap_pct = abs(ind["ema9"] - ind["ema21"]) / ind["ema21"] * 100
+    if ema_gap_pct >= 0.5:
+        if ind["ema9"] > ind["ema21"]:
+            buy += 1
+        else:
+            sell += 1
 
     # Bollinger Bands — only votes at extremes
     if ind["price_vs_bb"] == "below_lower":
@@ -550,8 +557,8 @@ def generate_signal(ind, ticker=None, config=None):
         action = "HOLD"
         conf = 0.0
     else:
-        buy_conf = buy / total_applicable
-        sell_conf = sell / total_applicable
+        buy_conf = buy / active_voters
+        sell_conf = sell / active_voters
         if buy_conf > sell_conf and buy_conf >= 0.5:
             action = "BUY"
             conf = buy_conf
@@ -1017,6 +1024,9 @@ def run(force_report=False, active_symbols=None):
                 )
                 ind = compute_indicators(df)
 
+            if ind is None:
+                print(f"  {name}: insufficient data, skipping")
+                continue
             price = ind["close"]
             prices_usd[name] = price
 

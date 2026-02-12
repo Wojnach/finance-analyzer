@@ -147,7 +147,7 @@ def get_volume_signal(ticker):
 
 
 TREASURY_TTL = 3600
-FOMC_2026 = [
+FOMC_DATES = [
     "2026-01-28",
     "2026-01-29",
     "2026-03-17",
@@ -164,6 +164,22 @@ FOMC_2026 = [
     "2026-10-28",
     "2026-12-15",
     "2026-12-16",
+    "2027-01-26",
+    "2027-01-27",
+    "2027-03-16",
+    "2027-03-17",
+    "2027-04-27",
+    "2027-04-28",
+    "2027-06-08",
+    "2027-06-09",
+    "2027-07-27",
+    "2027-07-28",
+    "2027-09-14",
+    "2027-09-15",
+    "2027-10-26",
+    "2027-10-27",
+    "2027-12-07",
+    "2027-12-08",
 ]
 
 
@@ -213,10 +229,10 @@ def get_treasury():
 
 
 def get_fed_calendar():
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    upcoming = [d for d in FOMC_2026 if d >= today]
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    upcoming = [d for d in FOMC_DATES if d >= today]
     if not upcoming:
         return None
 
@@ -225,11 +241,11 @@ def get_fed_calendar():
         datetime.strptime(next_date, "%Y-%m-%d") - datetime.strptime(today, "%Y-%m-%d")
     ).days
 
-    is_meeting_day = today in FOMC_2026
+    is_meeting_day = today in FOMC_DATES
     is_day_before = any(
         (datetime.strptime(d, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
         == today
-        for d in FOMC_2026
+        for d in FOMC_DATES
     )
 
     result = {
