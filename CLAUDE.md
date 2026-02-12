@@ -167,7 +167,7 @@ triggered — the user wants to see your analysis every time. No exceptions.
 **Sections (in order):**
 
 1. Action header — `*HOLD*` or `*BUY TICKER*` with trade details
-2. Ticker grid — price + "Now" action + `X/N` where X = votes in the action's direction, N = total applicable signals (11 for crypto, 7 for stocks). Read `_buy_count`, `_sell_count`, `_total_applicable` from `extra` in agent_summary.json. Example: `BUY 4/11` means 4 BUY votes out of 11 applicable signals. For HOLD, X = max(buy, sell).
+2. Ticker grid — price + "Now" action + vote breakdown as `XB/YS/ZH` where X=buy votes, Y=sell votes, Z=abstains. Calculate from `_buy_count`, `_sell_count`, `_total_applicable` in `extra` (Z = total_applicable - buy - sell). Example: `BUY 4B/1S/6H` means 4 buy, 1 sell, 6 abstained out of 11.
 3. Timeframe heatmap — `B`=BUY `S`=SELL `H`=HOLD from `timeframes` in agent_summary.json. Use `-` for horizons that don't exist (stocks lack 12h and 2d). All tickers in one grid.
 4. F&G + portfolio line
 5. Reasoning (1-2 sentences)
@@ -177,11 +177,11 @@ HOLD example:
 ```
 *HOLD*
 
-`BTC  $66,800  BUY  4/11`
-`ETH  $1,952   SELL 3/11`
-`MSTR $129.93  HOLD 1/7`
-`PLTR $134.77  HOLD 2/7`
-`NVDA $880.20  HOLD 1/7`
+`BTC  $66,800  BUY  4B/1S/6H`
+`ETH  $1,952   SELL 1B/3S/7H`
+`MSTR $129.93  HOLD 0B/1S/6H`
+`PLTR $134.77  HOLD 1B/1S/5H`
+`NVDA $880.20  HOLD 1B/0S/6H`
 
 `     Now 12h  2d  7d 1mo 3mo 6mo`
 `BTC   B   H   S   S   S   S   H`
@@ -203,11 +203,11 @@ TRADE example (bold trades, patient holds):
 ```
 *BOLD BUY BTC* — 100,000 SEK @ $66,800
 
-`BTC  $66,800  BUY 4/11`
-`ETH  $1,952   HOLD 2/11`
-`MSTR $129.93  HOLD 1/7`
-`PLTR $134.77  HOLD 2/7`
-`NVDA $880.20  HOLD 1/7`
+`BTC  $66,800  BUY  4B/1S/6H`
+`ETH  $1,952   HOLD 2B/1S/8H`
+`MSTR $129.93  HOLD 0B/1S/6H`
+`PLTR $134.77  HOLD 1B/1S/5H`
+`NVDA $880.20  HOLD 1B/0S/6H`
 
 `     Now 12h  2d  7d 1mo 3mo 6mo`
 `BTC   B   H   S   S   S   S   H`
@@ -221,7 +221,7 @@ _Patient: 500,000 SEK (+0.00%) · HOLD_
 _Bold: 400,000 SEK (+0.00%) · BTC 0.15_
 
 Patient: HOLD — BUY only on Now, longer TFs bearish.
-Bold: BUY BTC — 4/11 consensus + extreme fear + EMA bullish. Acting on short-term signal.
+Bold: BUY BTC — 4B consensus + extreme fear + EMA bullish. Acting on short-term signal.
 ```
 
 **Before sending, save the message locally:**
