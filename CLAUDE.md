@@ -162,7 +162,7 @@ Append to `transactions` array:
 **ALWAYS send a Telegram message when you are invoked.** Every invocation means something
 triggered — the user wants to see your analysis every time. No exceptions.
 
-**Message format:** The user reads these on iPhone — keep it scannable. Use monospace (backtick-wrapped) lines for the signal grid and timeframe heatmap so columns align. End with 1-2 sentences of reasoning in plain language.
+**Message format:** The user reads these on iPhone — keep it scannable. Use monospace (backtick-wrapped) lines for the signal grid and timeframe heatmap so columns align. End with 1-2 sentences of reasoning in plain language. You may deviate from the format below if it makes the message clearer for a specific situation — use your judgment.
 
 **Sections (in order):**
 
