@@ -177,8 +177,8 @@ HOLD example:
 ```
 *HOLD*
 
-`BTC  $66,800  BUY  4/9`
-`ETH  $1,952   SELL 3/9`
+`BTC  $66,800  BUY  4/11`
+`ETH  $1,952   SELL 3/11`
 `MSTR $129.93  HOLD 1/7`
 `PLTR $134.77  HOLD 2/7`
 `NVDA $880.20  HOLD 1/7`
@@ -203,8 +203,8 @@ TRADE example (bold trades, patient holds):
 ```
 *BOLD BUY BTC* — 100,000 SEK @ $66,800
 
-`BTC  $66,800  BUY 4/9`
-`ETH  $1,952   HOLD 2/9`
+`BTC  $66,800  BUY 4/11`
+`ETH  $1,952   HOLD 2/11`
 `MSTR $129.93  HOLD 1/7`
 `PLTR $134.77  HOLD 2/7`
 `NVDA $880.20  HOLD 1/7`
@@ -221,7 +221,7 @@ _Patient: 500,000 SEK (+0.00%) · HOLD_
 _Bold: 400,000 SEK (+0.00%) · BTC 0.15_
 
 Patient: HOLD — BUY only on Now, longer TFs bearish.
-Bold: BUY BTC — 4/9 consensus + extreme fear + EMA bullish. Acting on short-term signal.
+Bold: BUY BTC — 4/11 consensus + extreme fear + EMA bullish. Acting on short-term signal.
 ```
 
 **Before sending, save the message locally:**

@@ -540,13 +540,17 @@ def generate_signal(ind, ticker=None, config=None):
         except ImportError:
             pass
 
-    total = buy + sell
-    if total < MIN_VOTERS:
+    # Total applicable signals: crypto has 4 extra (CryptoTrader-LM, Custom LoRA, ML, Funding Rate)
+    is_crypto = ticker in CRYPTO_SYMBOLS
+    total_applicable = 11 if is_crypto else 7
+
+    active_voters = buy + sell
+    if active_voters < MIN_VOTERS:
         action = "HOLD"
         conf = 0.0
     else:
-        buy_conf = buy / total
-        sell_conf = sell / total
+        buy_conf = buy / total_applicable
+        sell_conf = sell / total_applicable
         if buy_conf > sell_conf and buy_conf >= 0.5:
             action = "BUY"
             conf = buy_conf
@@ -557,7 +561,10 @@ def generate_signal(ind, ticker=None, config=None):
             action = "HOLD"
             conf = max(buy_conf, sell_conf)
 
-    extra_info["_voters"] = total
+    extra_info["_voters"] = active_voters
+    extra_info["_total_applicable"] = total_applicable
+    extra_info["_buy_count"] = buy
+    extra_info["_sell_count"] = sell
     return action, conf, extra_info
 
 

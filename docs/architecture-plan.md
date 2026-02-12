@@ -80,7 +80,7 @@ or sends Telegram on its own.
 | 7   | CryptoTrader-LM | Ministral-8B + CryptoTrader LoRA  | LLM outputs BUY                 | LLM outputs SELL                 | 15min     |
 | 8   | ML Classifier   | HistGradientBoosting on 1h data   | Model predicts BUY              | Model predicts SELL              | 15min     |
 
-**Vote threshold:** MIN_VOTERS=3 must cast a vote. Majority wins. Signals that don't meet their threshold (e.g., RSI between 30-70) abstain. ML Classifier only available for crypto (BTC, ETH).
+**Vote threshold:** MIN_VOTERS=3 must cast a vote. Confidence is calculated against total applicable signals (11 crypto, 7 stocks), not just active voters. Majority (≥50% of applicable) needed for BUY/SELL consensus. Signals that don't meet their threshold (e.g., RSI between 30-70) abstain but still count in the denominator. ML Classifier only available for crypto (BTC, ETH).
 
 ## 7 Timeframes (crypto instruments)
 
