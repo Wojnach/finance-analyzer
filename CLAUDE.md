@@ -101,12 +101,60 @@ signals outperforms the patient approach.
 
 ### 4. Execute (if trading for either strategy)
 
-For each strategy that trades, edit its respective file:
+Edit `data/portfolio_state.json` (patient) or `data/portfolio_state_bold.json` (bold).
 
-- `data/portfolio_state.json` (patient) or `data/portfolio_state_bold.json` (bold)
-- Update `cash_sek` (subtract for BUY, add for SELL)
-- Update `holdings` (add shares for BUY, reduce for SELL)
-- Append to `transactions` with: timestamp, ticker, action, shares, price_usd, price_sek, confidence, fx_rate, reason
+**CRITICAL: Follow this math exactly. Do NOT approximate or round holdings.**
+
+#### BUY execution
+
+```
+alloc = cash_sek * 0.20                          # 20% of cash
+fee_rate = 0.0005 if crypto else 0.001            # 0.05% crypto, 0.10% stocks
+fee = alloc * fee_rate
+net_alloc = alloc - fee                           # fee comes out of the allocation
+shares_bought = net_alloc / price_sek
+new_shares = existing_shares + shares_bought      # ADD to existing holdings
+avg_cost = weighted average of old + new shares
+cash_sek -= alloc                                 # full alloc deducted from cash
+```
+
+#### SELL execution
+
+```
+sell_shares = existing_shares * 0.50              # sell 50% of position
+proceeds = sell_shares * price_sek
+fee = proceeds * fee_rate
+net_proceeds = proceeds - fee                     # fee comes out of proceeds
+remaining_shares = existing_shares - sell_shares  # SUBTRACT from holdings
+cash_sek += net_proceeds
+```
+
+**Holdings rules:**
+
+- NEVER set holdings to `{}` unless every ticker has 0 shares
+- After a 50% sell, the ticker MUST remain in holdings with the remaining shares
+- Always preserve `avg_cost_usd` on partial sells (it doesn't change)
+- Only remove a ticker from holdings when shares reach 0
+
+#### Transaction record
+
+Append to `transactions` array:
+
+```json
+{
+  "timestamp": "ISO-8601 UTC",
+  "ticker": "BTC-USD",
+  "action": "BUY|SELL",
+  "shares": <shares_bought_or_sold>,
+  "price_usd": <current_price>,
+  "price_sek": <price_usd * fx_rate>,
+  "total_sek": <alloc for BUY | net_proceeds for SELL>,
+  "fee_sek": <fee>,
+  "confidence": <0.0-1.0>,
+  "fx_rate": <USD/SEK rate>,
+  "reason": "Brief explanation"
+}
+```
 
 ### 5. Notify via Telegram (if noteworthy)
 
