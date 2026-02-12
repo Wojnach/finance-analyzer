@@ -250,6 +250,10 @@ def run_model(contexts, lora_path, model_name):
             print(f"    {i+1}/{total}  ({rate:.1f}/s, ETA {eta:.0f}s)")
 
     del model
+    import gc
+
+    gc.collect()
+    time.sleep(2)
     return predictions
 
 
