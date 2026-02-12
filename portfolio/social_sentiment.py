@@ -1,7 +1,6 @@
-"""Social media sentiment — Reddit and Twitter/X headline fetchers.
+"""Social media sentiment — Reddit headline fetcher.
 
-Reddit: uses public JSON API, no authentication needed.
-Twitter/X: requires Bearer Token (Basic tier $200/mo). Gracefully skips if not configured.
+Uses Reddit's public JSON API, no authentication needed.
 """
 
 import json
@@ -126,58 +125,6 @@ def get_reddit_posts(ticker, limit=20):
 
     posts.sort(key=lambda p: p.get("score", 0), reverse=True)
     return posts[:limit]
-
-
-def get_twitter_posts(ticker, bearer_token, limit=20):
-    """Fetch recent tweets. Requires X API Basic tier ($200/mo) bearer token."""
-    if not bearer_token:
-        return []
-    short = ticker.upper().replace("-USD", "")
-    keywords = TICKER_KEYWORDS.get(short, [short])
-    cashtag = f"${short}"
-    parts = [f'"{cashtag}"'] + [f'"{kw}"' for kw in keywords[:2]]
-    query = f"({' OR '.join(parts)}) -is:retweet lang:en"
-
-    try:
-        params = urllib.parse.urlencode(
-            {
-                "query": query,
-                "max_results": min(max(limit, 10), 100),
-                "tweet.fields": "created_at,public_metrics",
-            }
-        )
-        url = f"https://api.twitter.com/2/tweets/search/recent?{params}"
-        req = urllib.request.Request(
-            url,
-            headers={
-                "Authorization": f"Bearer {bearer_token}",
-                "User-Agent": USER_AGENT,
-            },
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read())
-        tweets = data.get("data", [])
-        posts = []
-        for tweet in tweets[:limit]:
-            text = tweet.get("text", "").strip()
-            if not text:
-                continue
-            metrics = tweet.get("public_metrics", {})
-            posts.append(
-                {
-                    "title": text[:280],
-                    "source": "twitter/x",
-                    "published": tweet.get(
-                        "created_at", datetime.now(timezone.utc).isoformat()
-                    ),
-                    "score": metrics.get("like_count", 0)
-                    + metrics.get("retweet_count", 0),
-                }
-            )
-        return posts
-    except Exception as e:
-        print(f"    [Twitter/X] error: {e}")
-        return []
 
 
 if __name__ == "__main__":
