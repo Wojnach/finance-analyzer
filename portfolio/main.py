@@ -372,7 +372,36 @@ def generate_signal(ind, ticker=None, config=None):
     except ImportError:
         pass
 
-    # Sentiment (crypto->CryptoBERT, stocks->Trading-Hero-LLM)
+    # Social media posts (Reddit + Twitter/X) — fetched separately, merged into sentiment
+    social_posts = []
+    if ticker:
+        short_ticker = ticker.replace("-USD", "")
+        try:
+            from portfolio.social_sentiment import get_reddit_posts, get_twitter_posts
+
+            reddit = _cached(
+                f"reddit_{short_ticker}",
+                SENTIMENT_TTL,
+                get_reddit_posts,
+                short_ticker,
+            )
+            if reddit:
+                social_posts.extend(reddit)
+            twitter_token = (config or {}).get("twitter", {}).get("bearer_token", "")
+            if twitter_token:
+                tw = _cached(
+                    f"twitter_{short_ticker}",
+                    SENTIMENT_TTL,
+                    get_twitter_posts,
+                    short_ticker,
+                    twitter_token,
+                )
+                if tw:
+                    social_posts.extend(tw)
+        except ImportError:
+            pass
+
+    # Sentiment (crypto->CryptoBERT, stocks->Trading-Hero-LLM) — includes social posts
     if ticker:
         short_ticker = ticker.replace("-USD", "")
         try:
@@ -385,11 +414,14 @@ def generate_signal(ind, ticker=None, config=None):
                 get_sentiment,
                 short_ticker,
                 newsapi_key or None,
+                social_posts or None,
             )
             if sent and sent.get("num_articles", 0) > 0:
                 extra_info["sentiment"] = sent["overall_sentiment"]
                 extra_info["sentiment_conf"] = sent["confidence"]
                 extra_info["sentiment_model"] = sent.get("model", "unknown")
+                if sent.get("sources"):
+                    extra_info["sentiment_sources"] = sent["sources"]
                 if sent["overall_sentiment"] == "positive" and sent["confidence"] > 0.4:
                     buy += 1
                 elif (

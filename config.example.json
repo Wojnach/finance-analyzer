@@ -95,6 +95,10 @@
     "username": "admin",
     "password": "FAKE_PASS_replace_in_config_json"
   },
+  "newsapi_key": "",
+  "twitter": {
+    "bearer_token": ""
+  },
   "bot_name": "finance-analyzer",
   "initial_state": "running",
   "force_entry_enable": true,

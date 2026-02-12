@@ -141,7 +141,7 @@ def _aggregate_sentiments(sentiments):
     return overall, avg
 
 
-def get_sentiment(ticker="BTC", newsapi_key=None) -> dict:
+def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None) -> dict:
     short = ticker.upper().replace("-USD", "")
     is_crypto = _is_crypto(short)
 
@@ -154,22 +154,31 @@ def get_sentiment(ticker="BTC", newsapi_key=None) -> dict:
         model_script = TRADING_HERO_SCRIPT
         model_name = "Trading-Hero-LLM"
 
-    if not articles:
+    social = social_posts or []
+    all_articles = articles + social
+    sources = {
+        "news": len(articles),
+        "reddit": sum(1 for p in social if "reddit" in p.get("source", "")),
+        "twitter": sum(1 for p in social if "twitter" in p.get("source", "")),
+    }
+
+    if not all_articles:
         return {
             "overall_sentiment": "unknown",
             "confidence": 0.0,
             "num_articles": 0,
             "model": model_name,
+            "sources": sources,
             "details": [],
         }
 
-    titles = [a["title"] for a in articles]
+    titles = [a["title"] for a in all_articles]
     sentiments = _run_model(model_script, titles)
 
     overall, avg = _aggregate_sentiments(sentiments)
 
     details = []
-    for article, sent in zip(articles, sentiments):
+    for article, sent in zip(all_articles, sentiments):
         details.append(
             {
                 "title": article["title"],
@@ -187,6 +196,7 @@ def get_sentiment(ticker="BTC", newsapi_key=None) -> dict:
         "num_articles": len(sentiments),
         "avg_scores": {k: round(v, 4) for k, v in avg.items()},
         "model": model_name,
+        "sources": sources,
         "details": details,
     }
 
