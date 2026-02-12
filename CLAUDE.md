@@ -48,7 +48,6 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 
 - **BUY size:** 30% of cash per trade. **SELL size:** 100% of position (full exit).
 - **Prefer max 3 concurrent positions.** Concentration is your edge — spread too thin and you lose it.
-- **Daily loss limit:** If today's realized losses exceed 25,000 SEK (5% of 500K starting capital), strongly prefer HOLD for the rest of the day. Sum `fee_sek + (loss on sells)` from today's transactions to check.
 - **Hold time:** Hours to a few days. Rarely more than a week.
 - **Strongly avoid averaging down.** If already holding a ticker and price dropped, your instinct should be to cut, not add.
 - Read the raw signals in `agent_summary.json` — don't just follow Layer 1 consensus.
@@ -118,7 +117,7 @@ Apply the Momentum Hunter personality defined above. Think like that trader — 
 philosophy shape your analysis, not just gate your actions.
 
 - **Bias toward action.** When in doubt, trade — this is the experiment.
-- **Before any BUY:** Consider position count, today's P&L, and whether you already hold that ticker. The pre-trade checks below encode your default instincts.
+- **Before any BUY:** Consider position count and whether you already hold that ticker. The pre-trade checks below encode your default instincts.
 - **SELLs are full exits** (100% of position). When you decide to sell, commit fully.
 
 ### 4. Execute (if trading for either strategy)
@@ -134,11 +133,6 @@ Edit `data/portfolio_state.json` (patient) or `data/portfolio_state_bold.json` (
 current_positions = count of tickers in holdings with shares > 0
 if bold and current_positions >= 3: strongly prefer skipping BUY
 if patient and current_positions >= 5: strongly prefer skipping BUY
-
-# Daily loss limit (Bold only)
-if bold:
-    today_losses = sum of realized losses from today's SELL transactions
-    if today_losses > 25000: strongly prefer HOLD for rest of day
 
 # Averaging down
 if bold and ticker already in holdings: strongly prefer skipping BUY
@@ -290,7 +284,7 @@ requests.post(
 
 ## Trading Rules
 
-- **Bold:** BUY 30% of cash, SELL 100% of position (full exit), max 3 positions, 25K SEK daily loss limit
+- **Bold:** BUY 30% of cash, SELL 100% of position (full exit), max 3 positions
 - **Patient:** BUY 15% of cash, SELL 50% of position (partial exit), max 5 positions, no daily loss limit
 - Minimum trade: 500 SEK
 - Never go all-in on one asset
