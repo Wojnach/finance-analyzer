@@ -236,7 +236,15 @@ def step_convert_gguf(state):
 
     FINAL_GGUF.parent.mkdir(parents=True, exist_ok=True)
     rc = _run(
-        [VENV_PYTHON, convert_script, LORA_OUTPUT, "--outfile", FINAL_GGUF],
+        [
+            VENV_PYTHON,
+            convert_script,
+            LORA_OUTPUT,
+            "--outfile",
+            FINAL_GGUF,
+            "--base",
+            HF_MODEL_DIR,
+        ],
         log,
         timeout=600,
     )
