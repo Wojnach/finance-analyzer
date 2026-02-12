@@ -167,7 +167,7 @@ triggered — the user wants to see your analysis every time. No exceptions.
 **Sections (in order):**
 
 1. Action header — `*HOLD*` or `*BUY TICKER*` with trade details
-2. Ticker grid — price + "Now" action + voter count (same as before)
+2. Ticker grid — price + "Now" action + `X/N` where X = votes in the action's direction, N = total applicable signals (11 for crypto, 7 for stocks). Read `_buy_count`, `_sell_count`, `_total_applicable` from `extra` in agent_summary.json. Example: `BUY 4/11` means 4 BUY votes out of 11 applicable signals. For HOLD, X = max(buy, sell).
 3. Timeframe heatmap — `B`=BUY `S`=SELL `H`=HOLD from `timeframes` in agent_summary.json. Use `-` for horizons that don't exist (stocks lack 12h and 2d). All tickers in one grid.
 4. F&G + portfolio line
 5. Reasoning (1-2 sentences)
