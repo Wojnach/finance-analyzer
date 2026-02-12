@@ -8,6 +8,7 @@ latency since the loop runs every 60s.
 
 import json
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 STATE_FILE = Path(__file__).resolve().parent.parent / "data" / "trigger_state.json"
@@ -84,10 +85,13 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
         ):
             reasons.append(f"{ticker} sentiment {old_sent}->{sent}")
 
-    # 5. Cooldown expired
-    last_trigger_time = state.get("last_trigger_time", 0)
-    if time.time() - last_trigger_time > COOLDOWN_SECONDS:
-        reasons.append(f"cooldown ({COOLDOWN_SECONDS // 3600}h)")
+    # 5. Cooldown expired (only during market hours on weekdays)
+    now_utc = datetime.now(timezone.utc)
+    market_open = now_utc.weekday() < 5 and 7 <= now_utc.hour < 21
+    if market_open:
+        last_trigger_time = state.get("last_trigger_time", 0)
+        if time.time() - last_trigger_time > COOLDOWN_SECONDS:
+            reasons.append(f"cooldown ({COOLDOWN_SECONDS // 3600}h)")
 
     triggered = len(reasons) > 0
 
