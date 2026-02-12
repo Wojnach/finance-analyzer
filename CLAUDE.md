@@ -153,6 +153,7 @@ shares_bought = net_alloc / price_sek
 new_shares = existing_shares + shares_bought      # ADD to existing holdings
 avg_cost = weighted average of old + new shares
 cash_sek -= alloc                                 # full alloc deducted from cash
+total_fees_sek += fee                              # accumulate in portfolio state (init to 0 if null)
 ```
 
 #### SELL execution
@@ -164,6 +165,7 @@ fee = proceeds * fee_rate
 net_proceeds = proceeds - fee                     # fee comes out of proceeds
 remaining_shares = existing_shares - sell_shares  # SUBTRACT from holdings
 cash_sek += net_proceeds
+total_fees_sek += fee                              # accumulate in portfolio state (init to 0 if null)
 # Bold: remaining_shares = 0 → remove ticker from holdings
 # Patient: remaining_shares > 0 → keep ticker in holdings
 ```
@@ -175,6 +177,21 @@ cash_sek += net_proceeds
 - **Bold:** After a 100% sell, remove the ticker from holdings (shares = 0)
 - Always preserve `avg_cost_usd` on partial sells (it doesn't change)
 - Only remove a ticker from holdings when shares reach 0
+
+#### Post-trade validation (do this EVERY time you edit portfolio state)
+
+```
+# 1. Fee total: if total_fees_sek is null, set it to 0 first, then add fee
+if total_fees_sek is None: total_fees_sek = 0
+
+# 2. Holdings integrity: sum all SELL shares for each ticker in transactions.
+#    Compare against BUY shares. remaining = total_bought - total_sold.
+#    Holdings must match. If holdings shows 0 but math says shares remain,
+#    you have a bug — fix it before saving.
+
+# 3. Cash check: starting_cash - sum(BUY allocs) + sum(SELL net_proceeds) = cash_sek
+#    If it doesn't match, find the error before saving.
+```
 
 #### Transaction record
 
