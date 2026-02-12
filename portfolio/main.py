@@ -58,6 +58,8 @@ CONFIDENCE_TELEGRAM = 0.75  # 3/4 signals must agree to alert
 BUY_ALLOC = 0.20  # 20% of cash per buy
 SELL_ALLOC = 0.50  # sell 50% of position per sell
 MIN_TRADE_SEK = 500
+FEE_CRYPTO = 0.0005  # 0.05% taker fee (Binance futures)
+FEE_STOCK = 0.001  # 0.10% (typical broker commission)
 
 BINANCE_BASE = "https://api.binance.com/api/v3"
 
@@ -713,13 +715,16 @@ def execute_trade(state, ticker, action, confidence, price_usd, fx_rate):
         return None
 
     price_sek = price_usd * fx_rate
+    fee_rate = FEE_CRYPTO if ticker in CRYPTO_SYMBOLS else FEE_STOCK
     holdings = state.setdefault("holdings", {})
 
     if action == "BUY":
         alloc = state["cash_sek"] * BUY_ALLOC
         if alloc < MIN_TRADE_SEK:
             return None
-        shares = alloc / price_sek
+        fee = alloc * fee_rate
+        net_alloc = alloc - fee
+        shares = net_alloc / price_sek
         cur = holdings.get(ticker, {"shares": 0, "avg_cost_usd": 0})
         total = cur["shares"] + shares
         avg = (
@@ -736,6 +741,8 @@ def execute_trade(state, ticker, action, confidence, price_usd, fx_rate):
             return None
         sell_shares = cur["shares"] * SELL_ALLOC
         proceeds = sell_shares * price_sek
+        fee = proceeds * fee_rate
+        proceeds -= fee
         cur["shares"] -= sell_shares
         holdings[ticker] = cur
         state["cash_sek"] += proceeds
@@ -750,8 +757,10 @@ def execute_trade(state, ticker, action, confidence, price_usd, fx_rate):
         "price_sek": price_sek,
         "confidence": confidence,
         "fx_rate": fx_rate,
+        "fee_sek": round(fee, 2),
     }
     state.setdefault("transactions", []).append(trade)
+    state["total_fees_sek"] = round(state.get("total_fees_sek", 0) + fee, 2)
     return trade
 
 
