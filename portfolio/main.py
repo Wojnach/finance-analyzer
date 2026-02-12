@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -583,9 +584,23 @@ def load_state():
     }
 
 
+def _atomic_write_json(path, data):
+    path.parent.mkdir(exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, default=str)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def save_state(state):
-    DATA_DIR.mkdir(exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+    _atomic_write_json(STATE_FILE, state)
 
 
 # --- Agent summary + invocation ---
@@ -698,10 +713,7 @@ def write_agent_summary(
     except Exception:
         pass
 
-    AGENT_SUMMARY_FILE.parent.mkdir(exist_ok=True)
-    AGENT_SUMMARY_FILE.write_text(
-        json.dumps(summary, indent=2, default=str), encoding="utf-8"
-    )
+    _atomic_write_json(AGENT_SUMMARY_FILE, summary)
     return summary
 
 
@@ -709,13 +721,31 @@ INVOCATIONS_FILE = DATA_DIR / "invocations.jsonl"
 
 
 _agent_proc = None
+_agent_log = None
+_agent_start = 0
+AGENT_TIMEOUT = 600
 
 
 def invoke_agent(reasons):
-    global _agent_proc
+    global _agent_proc, _agent_log, _agent_start
     if _agent_proc and _agent_proc.poll() is None:
-        print(f"  Agent still running (pid {_agent_proc.pid}), skipping invocation")
-        return False
+        elapsed = time.time() - _agent_start
+        if elapsed > AGENT_TIMEOUT:
+            print(f"  Agent pid={_agent_proc.pid} timed out ({elapsed:.0f}s), killing")
+            _agent_proc.kill()
+            _agent_proc.wait()
+            if _agent_log:
+                _agent_log.close()
+                _agent_log = None
+        else:
+            print(
+                f"  Agent still running (pid {_agent_proc.pid}, {elapsed:.0f}s), skipping"
+            )
+            return False
+
+    if _agent_log:
+        _agent_log.close()
+        _agent_log = None
 
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
@@ -729,13 +759,14 @@ def invoke_agent(reasons):
         print(f"  WARNING: Agent script not found at {agent_bat}")
         return False
     try:
-        log_file = open(DATA_DIR / "agent.log", "a", encoding="utf-8")
+        _agent_log = open(DATA_DIR / "agent.log", "a", encoding="utf-8")
         _agent_proc = subprocess.Popen(
             ["cmd", "/c", str(agent_bat)],
             cwd=str(BASE_DIR),
-            stdout=log_file,
+            stdout=_agent_log,
             stderr=subprocess.STDOUT,
         )
+        _agent_start = time.time()
         print(f"  Agent invoked pid={_agent_proc.pid} ({', '.join(reasons)})")
         return True
     except Exception as e:
@@ -1043,9 +1074,6 @@ def run(force_report=False, active_symbols=None):
     if not STATE_FILE.exists():
         save_state(state)
 
-    # Write agent_summary.json every cycle (data for Layer 2)
-    write_agent_summary(signals, prices_usd, fx_rate, state, tf_data)
-
     # Smart trigger — invoke Claude Code agent when something meaningful changed
     from portfolio.trigger import check_triggers
 
@@ -1078,6 +1106,7 @@ def run(force_report=False, active_symbols=None):
 
         invoke_agent(reasons_list)
     else:
+        write_agent_summary(signals, prices_usd, fx_rate, state, tf_data)
         print("\n  No trigger — nothing changed.")
 
 

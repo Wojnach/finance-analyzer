@@ -6,6 +6,8 @@ SUSTAINED_CHECKS=3 means a signal must hold for ~3 minutes before triggering.
 """
 
 import json
+import os
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,7 +27,17 @@ def _load_state():
 
 def _save_state(state):
     STATE_FILE.parent.mkdir(exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+    fd, tmp = tempfile.mkstemp(dir=STATE_FILE.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, default=str)
+        os.replace(tmp, STATE_FILE)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def check_triggers(signals, prices_usd, fear_greeds, sentiments):

@@ -57,9 +57,9 @@ def get_ministral_signal(context):
                 log_file = Path(
                     cfg.get("log_file", REPO_DIR / "data" / "ab_test_log.jsonl")
                 )
-                with open(log_file, "a") as f:
+                with open(log_file, "a", encoding="utf-8") as f:
                     f.write(json.dumps(log_entry) + "\n")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"    [shadow LoRA] error: {e}")
 
     return {"original": original, "custom": custom}
