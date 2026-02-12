@@ -697,13 +697,6 @@ def should_trade(state, ticker, action):
     """Check if trade is allowed. Returns (allowed, reason)."""
     if action == "HOLD":
         return False, "HOLD"
-
-    last_trade = state.get("last_trade", {}).get(ticker, {})
-
-    # State-change gating: block repeat actions
-    if last_trade.get("action") == action:
-        return False, f"repeat {action}, no state change"
-
     return True, ""
 
 
