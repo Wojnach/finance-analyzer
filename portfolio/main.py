@@ -338,7 +338,7 @@ def collect_timeframes(source):
     source_key = source.get("alpaca") or source.get("binance")
     results = []
     for label, interval, limit, ttl in tfs:
-        cache_key = f"tf_{source_key}_{interval}"
+        cache_key = f"tf_{source_key}_{label}"
         if ttl > 0:
             cached = _tool_cache.get(cache_key)
             if cached and time.time() - cached["time"] < ttl:
