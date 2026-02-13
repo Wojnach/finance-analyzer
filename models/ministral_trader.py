@@ -43,15 +43,15 @@ Market Data:
 - Current Price: ${context['price_usd']:,.2f}
 - 24h Change: {context.get('change_24h', 'N/A')}
 
-Technical Indicators (15-minute candles):
+Technical Indicators (1-hour candles):
 - RSI(14): {context.get('rsi', 'N/A')}
 - MACD Histogram: {context.get('macd_hist', 'N/A')}
-- EMA(9) vs EMA(21): {'Bullish (9 > 21)' if context.get('ema_bullish') else 'Bearish (9 < 21)'}
+- EMA(9) vs EMA(21): {'Bullish (9 > 21)' if context.get('ema_bullish') else 'Bearish (9 < 21)'} (gap: {context.get('ema_gap_pct', 'N/A')}%)
 - Bollinger Bands: Price is {context.get('bb_position', 'N/A')}
 
 Market Sentiment:
 - Fear & Greed Index: {context.get('fear_greed', 'N/A')}/100 ({context.get('fear_greed_class', '')})
-- News Sentiment: {context.get('news_sentiment', 'N/A')}
+- News Sentiment: {context.get('news_sentiment', 'N/A')} (confidence: {context.get('sentiment_confidence', 'N/A')})
 
 Multi-timeframe Analysis:
 {context.get('timeframe_summary', 'N/A')}

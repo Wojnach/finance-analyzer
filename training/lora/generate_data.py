@@ -6,71 +6,42 @@ from pathlib import Path
 
 import pandas as pd
 
-BUY_TEMPLATES = [
-    "DECISION: BUY - RSI at {rsi:.1f} shows oversold conditions with bullish EMA crossover, suggesting upward momentum.",
-    "DECISION: BUY - Price near lower Bollinger Band at extreme readings with RSI divergence indicating potential reversal.",
-    "DECISION: BUY - Bearish exhaustion shown by RSI below {rsi:.1f} combined with MACD histogram turning positive at {macd_hist:.2f}.",
-    "DECISION: BUY - Strong bullish divergence with EMA(9) crossing above EMA(21) and RSI recovering from {rsi:.1f}.",
-    "DECISION: BUY - Price at ${price:,.2f} testing lower Bollinger Band with MACD histogram inflecting upward at {macd_hist:.2f}.",
-    "DECISION: BUY - Momentum shift detected: MACD histogram at {macd_hist:.2f} turning positive while price holds support.",
-    "DECISION: BUY - Oversold RSI at {rsi:.1f} with price compressing near lower Bollinger Band suggests accumulation phase.",
-    "DECISION: BUY - Bullish EMA alignment confirmed with RSI at {rsi:.1f} bouncing off oversold territory and positive MACD crossover.",
-    "DECISION: BUY - {ticker} showing capitulation signal with RSI at {rsi:.1f} and price below lower Bollinger Band, reversal likely.",
-    "DECISION: BUY - Technical confluence: EMA bullish cross, MACD histogram flipping positive at {macd_hist:.2f}, RSI recovering from {rsi:.1f}.",
+FG_CLASSES = [
+    (0, 20, "Extreme Fear"),
+    (21, 40, "Fear"),
+    (41, 60, "Neutral"),
+    (61, 80, "Greed"),
+    (81, 100, "Extreme Greed"),
 ]
 
-SELL_TEMPLATES = [
-    "DECISION: SELL - RSI at {rsi:.1f} in overbought territory with bearish EMA crossover signaling distribution.",
-    "DECISION: SELL - Price extended above upper Bollinger Band with negative MACD divergence at {macd_hist:.2f}.",
-    "DECISION: SELL - Overbought RSI at {rsi:.1f} combined with MACD histogram declining to {macd_hist:.2f} indicates exhaustion.",
-    "DECISION: SELL - Bearish EMA crossover with EMA(9) dropping below EMA(21) while RSI rolls over from {rsi:.1f}.",
-    "DECISION: SELL - Price at ${price:,.2f} rejected at upper Bollinger Band with bearish momentum building.",
-    "DECISION: SELL - Distribution pattern: RSI at {rsi:.1f} falling from overbought, MACD histogram negative at {macd_hist:.2f}.",
-    "DECISION: SELL - {ticker} showing toppy price action above upper Bollinger Band with RSI divergence at {rsi:.1f}.",
-    "DECISION: SELL - Momentum fading: MACD histogram at {macd_hist:.2f} declining sharply with bearish EMA alignment.",
-    "DECISION: SELL - Bearish technical confluence with RSI at {rsi:.1f} rolling over and price losing EMA(21) support.",
-    "DECISION: SELL - Overextended rally with RSI at {rsi:.1f} and price stretched above upper Bollinger Band, mean reversion expected.",
-]
+SENTIMENTS = ["positive", "negative", "neutral"]
 
-HOLD_TEMPLATES = [
-    "DECISION: HOLD - Indicators show mixed signals with RSI neutral at {rsi:.1f} and no clear directional momentum.",
-    "DECISION: HOLD - Price consolidating within Bollinger Bands, waiting for breakout confirmation.",
-    "DECISION: HOLD - RSI at {rsi:.1f} in neutral territory with MACD histogram near zero at {macd_hist:.2f}, no edge.",
-    "DECISION: HOLD - EMA signals conflicting with RSI and Bollinger Band readings, staying flat until clarity emerges.",
-    "DECISION: HOLD - {ticker} range-bound at ${price:,.2f} with no decisive technical signal across indicators.",
-    "DECISION: HOLD - MACD histogram at {macd_hist:.2f} shows indecision, RSI at {rsi:.1f} mid-range, no trade warranted.",
-    "DECISION: HOLD - Price inside Bollinger Bands with flat EMAs, waiting for volatility expansion to trigger entry.",
-    "DECISION: HOLD - Neutral RSI at {rsi:.1f} and tight Bollinger Band squeeze suggest imminent move but direction unclear.",
-    "DECISION: HOLD - No conviction: EMA(9) and EMA(21) converging with RSI at {rsi:.1f} and muted MACD at {macd_hist:.2f}.",
-    "DECISION: HOLD - Choppy price action with conflicting signals, preserving capital until trend establishes.",
-]
-
-PROMPT_TEMPLATE = """[INST]You are an expert cryptocurrency trader. Based on the following market data, provide a single trading decision: BUY, SELL, or HOLD.
+PROMPT_TEMPLATE = """You are an expert cryptocurrency trader. Based on the following market data, provide a single trading decision: BUY, SELL, or HOLD.
 
 Market Data:
 - Asset: {ticker}
 - Current Price: ${price:,.2f}
 - 24h Change: {change_24h:+.2f}%
 
-Technical Indicators (15-minute candles):
+Technical Indicators (1-hour candles):
 - RSI(14): {rsi:.1f}
 - MACD Histogram: {macd_hist:.2f}
-- EMA(9) vs EMA(21): {ema_direction}
+- EMA(9) vs EMA(21): {ema_direction} (gap: {ema_gap_pct:.1f}%)
 - Bollinger Bands: Price is {bb_position}
 
 Market Sentiment:
-- Fear & Greed Index: N/A
-- News Sentiment: N/A
+- Fear & Greed Index: {fear_greed}/100 ({fear_greed_class})
+- News Sentiment: {news_sentiment} (confidence: {sentiment_confidence:.2f})
 
 Multi-timeframe Analysis:
-N/A
+{timeframe_summary}
 
 Recent Headlines:
-N/A
+{headlines}
 
 Respond with EXACTLY one of: BUY, SELL, or HOLD.
 Then give a one-sentence reason.
-Format: DECISION: [BUY/SELL/HOLD] - [reason][/INST]"""
+Format: DECISION: [BUY/SELL/HOLD] - [reason]"""
 
 
 def compute_indicators(df):
@@ -118,13 +89,50 @@ def label_candles(df, threshold=0.02, lookahead=12):
     return df
 
 
-def build_prompt(row, ticker):
+def _sample_fear_greed():
+    value = random.randint(5, 95)
+    for lo, hi, cls in FG_CLASSES:
+        if lo <= value <= hi:
+            return value, cls
+    return value, "Neutral"
+
+
+def _sample_sentiment():
+    sent = random.choice(SENTIMENTS)
+    conf = round(random.uniform(0.25, 0.92), 2)
+    return sent, conf
+
+
+def _build_timeframe_summary(df, idx):
+    horizons = [("12h", 12), ("2d", 48), ("7d", 168)]
+    parts = []
+    for label, offset in horizons:
+        ref_idx = idx - offset
+        if ref_idx < 26:
+            continue
+        ref_rsi = df["rsi"].iloc[ref_idx]
+        if pd.isna(ref_rsi):
+            continue
+        if ref_rsi < 30:
+            action = "BUY"
+        elif ref_rsi > 70:
+            action = "SELL"
+        else:
+            action = "HOLD"
+        parts.append(f"{label}: {action} (RSI={ref_rsi:.0f})")
+    return " | ".join(parts) if parts else "N/A"
+
+
+def build_prompt(row, ticker, df_idx, df):
     change_24h = 0.0
     if pd.notna(row.get("change_24h")):
         change_24h = row["change_24h"]
 
     ema_direction = (
         "Bullish (9 > 21)" if row["ema9"] > row["ema21"] else "Bearish (9 < 21)"
+    )
+    ema_gap_pct = (
+        abs(row["ema9"] - row["ema21"]) / row["ema21"] * 100 if row["ema21"] != 0 else 0
     )
 
     if row["close"] < row["bb_lower"]:
@@ -134,6 +142,10 @@ def build_prompt(row, ticker):
     else:
         bb_position = "inside bands"
 
+    fg_value, fg_class = _sample_fear_greed()
+    sentiment, sent_conf = _sample_sentiment()
+    tf_summary = _build_timeframe_summary(df, df_idx)
+
     return PROMPT_TEMPLATE.format(
         ticker=ticker,
         price=row["close"],
@@ -141,19 +153,59 @@ def build_prompt(row, ticker):
         rsi=row["rsi"],
         macd_hist=row["macd_hist"],
         ema_direction=ema_direction,
+        ema_gap_pct=ema_gap_pct,
         bb_position=bb_position,
+        fear_greed=fg_value,
+        fear_greed_class=fg_class,
+        news_sentiment=sentiment,
+        sentiment_confidence=sent_conf,
+        timeframe_summary=tf_summary,
+        headlines="N/A",
     )
 
 
 def build_completion(row, ticker, label):
-    templates = {"BUY": BUY_TEMPLATES, "SELL": SELL_TEMPLATES, "HOLD": HOLD_TEMPLATES}
-    template = random.choice(templates[label])
-    return template.format(
-        rsi=row["rsi"],
-        macd_hist=row["macd_hist"],
-        price=row["close"],
-        ticker=ticker,
-    )
+    rsi = row["rsi"]
+    macd = row["macd_hist"]
+    ema_bull = row["ema9"] > row["ema21"]
+
+    reasons = []
+    if label == "BUY":
+        if rsi < 40:
+            reasons.append(f"RSI at {rsi:.1f} approaching oversold territory")
+        if macd > 0:
+            reasons.append(f"MACD histogram positive at {macd:.2f} showing momentum")
+        if ema_bull:
+            reasons.append("bullish EMA(9) > EMA(21) alignment")
+        if row["close"] < row["bb_lower"]:
+            reasons.append("price near lower Bollinger Band suggesting accumulation")
+        if not reasons:
+            reasons.append(
+                f"emerging bullish momentum with MACD at {macd:.2f} and RSI at {rsi:.1f}"
+            )
+    elif label == "SELL":
+        if rsi > 60:
+            reasons.append(f"RSI at {rsi:.1f} approaching overbought territory")
+        if macd < 0:
+            reasons.append(
+                f"MACD histogram negative at {macd:.2f} showing bearish momentum"
+            )
+        if not ema_bull:
+            reasons.append("bearish EMA(9) < EMA(21) alignment")
+        if row["close"] > row["bb_upper"]:
+            reasons.append("price above upper Bollinger Band suggesting overextension")
+        if not reasons:
+            reasons.append(
+                f"bearish pressure building with MACD at {macd:.2f} and RSI at {rsi:.1f}"
+            )
+    else:
+        reasons.append(f"RSI at {rsi:.1f} in neutral territory")
+        if abs(macd) < 1:
+            reasons.append(f"MACD histogram near zero at {macd:.2f}")
+        reasons.append("no clear directional edge")
+
+    reason_text = ", ".join(reasons[:3])
+    return f"DECISION: {label} - {reason_text.capitalize()}."
 
 
 def process_asset(feather_path, ticker):
@@ -193,9 +245,9 @@ def process_asset(feather_path, ticker):
     print(f"  {ticker}: {len(valid)} valid candles out of {len(df)} total")
 
     examples = []
-    for _, row in valid.iterrows():
+    for idx, row in valid.iterrows():
         label = row["label"]
-        prompt = build_prompt(row, ticker)
+        prompt = build_prompt(row, ticker, idx, df)
         completion = build_completion(row, ticker, label)
         examples.append(
             {
