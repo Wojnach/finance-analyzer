@@ -95,6 +95,10 @@
     "username": "admin",
     "password": "FAKE_PASS_replace_in_config_json"
   },
+  "alpaca": {
+    "key": "FAKE_KEY_replace_in_config_json",
+    "secret": "FAKE_SECRET_replace_in_config_json"
+  },
   "newsapi_key": "",
   "bot_name": "finance-analyzer",
   "initial_state": "running",

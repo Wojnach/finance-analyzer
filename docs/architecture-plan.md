@@ -21,7 +21,7 @@ or sends Telegram on its own.
 ┌──────────────────────────────────────────────────────────────────┐
 │  LAYER 1: PYTHON FAST LOOP (every 60s) — FREE, runs 24/7        │
 │                                                                   │
-│  1. Fetch Binance/yfinance prices + candles (7 timeframes)       │
+│  1. Fetch Binance/Alpaca prices + candles (7 timeframes)         │
 │  2. Compute indicators: RSI, MACD, EMA, BB                      │
 │  3. Fetch Fear & Greed Index (cached 5min)                       │
 │  4. Run CryptoBERT / Trading-Hero-LLM sentiment (cached 15min)  │
@@ -121,15 +121,17 @@ See `docs/trading-bot-personalities.md` for full personality definitions.
 | 3mo     | 1w              | 100 (~2yr)      | 12hr            | 4 technical only |
 | 6mo     | 1M              | 48 (~4yr)       | 24hr            | 4 technical only |
 
-## 5 Timeframes (stock instruments)
+## 7 Timeframes (stock instruments — Alpaca IEX feed)
 
-| Horizon | Candle interval | Cache TTL |
-| ------- | --------------- | --------- |
-| Now     | 1d              | 0         |
-| 7d      | 1d              | 1hr       |
-| 1mo     | 1d              | 1hr       |
-| 3mo     | 1w              | 12hr      |
-| 6mo     | 1M              | 24hr      |
+| Horizon | Candle interval | Candles fetched | Cache TTL       | Signal set       |
+| ------- | --------------- | --------------- | --------------- | ---------------- |
+| Now     | 15m             | 100 (~25h)      | 0 (every cycle) | All 7 signals    |
+| 12h     | 1h              | 100 (~4d)       | 5min            | 4 technical only |
+| 2d      | 4h              | 100 (~17d)      | 15min           | 4 technical only |
+| 7d      | 1d              | 100 (~100d)     | 1hr             | 4 technical only |
+| 1mo     | 1d              | 100 (~100d)     | 1hr             | 4 technical only |
+| 3mo     | 1w              | 100 (~2yr)      | 12hr            | 4 technical only |
+| 6mo     | 1M              | 48 (~4yr)       | 24hr            | 4 technical only |
 
 ## Instruments
 
@@ -137,9 +139,9 @@ See `docs/trading-bot-personalities.md` for full personality definitions.
 | ------------- | ------- | ----------- | ----------------- |
 | Bitcoin       | BTC-USD | Crypto 24/7 | Binance (BTCUSDT) |
 | Ethereum      | ETH-USD | Crypto 24/7 | Binance (ETHUSDT) |
-| MicroStrategy | MSTR    | NASDAQ      | yfinance          |
-| Palantir      | PLTR    | NASDAQ      | yfinance          |
-| NVIDIA        | NVDA    | NASDAQ      | yfinance          |
+| MicroStrategy | MSTR    | NASDAQ      | Alpaca (IEX feed) |
+| Palantir      | PLTR    | NASDAQ      | Alpaca (IEX feed) |
+| NVIDIA        | NVDA    | NASDAQ      | Alpaca (IEX feed) |
 
 ## Trading Rules (enforced by Claude Code, Layer 2)
 

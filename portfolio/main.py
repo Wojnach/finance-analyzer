@@ -25,9 +25,9 @@ CONFIG_FILE = BASE_DIR / "config.json"
 SYMBOLS = {
     "BTC-USD": {"binance": "BTCUSDT"},
     "ETH-USD": {"binance": "ETHUSDT"},
-    "MSTR": {"yfinance": "MSTR"},
-    "PLTR": {"yfinance": "PLTR"},
-    "NVDA": {"yfinance": "NVDA"},
+    "MSTR": {"alpaca": "MSTR"},
+    "PLTR": {"alpaca": "PLTR"},
+    "NVDA": {"alpaca": "NVDA"},
 }
 CRYPTO_SYMBOLS = {"BTC-USD", "ETH-USD"}
 STOCK_SYMBOLS = {"MSTR", "PLTR", "NVDA"}
@@ -143,54 +143,63 @@ def binance_klines(symbol, interval="5m", limit=100):
     return df
 
 
-YF_INTERVAL_MAP = {
-    "15m": ("15m", "5d"),
-    "1h": ("1h", "30d"),
-    "4h": ("1h", "60d"),
-    "1d": ("1d", "1y"),
-    "3d": ("1d", "2y"),
-    "1w": ("1wk", "5y"),
-    "1M": ("1mo", "10y"),
+ALPACA_BASE = "https://data.alpaca.markets/v2"
+ALPACA_INTERVAL_MAP = {
+    "15m": ("15Min", 5),
+    "1h": ("1Hour", 10),
+    "4h": ("4Hour", 30),
+    "1d": ("1Day", 365),
+    "1w": ("1Week", 730),
+    "1M": ("1Month", 1825),
 }
 
 
-def yfinance_klines(yf_ticker, interval="1d", limit=100):
-    import yfinance as yf
+def _get_alpaca_headers():
+    cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    acfg = cfg.get("alpaca", {})
+    return {
+        "APCA-API-KEY-ID": acfg.get("key", ""),
+        "APCA-API-SECRET-KEY": acfg.get("secret", ""),
+    }
 
-    yf_interval, period = YF_INTERVAL_MAP.get(interval, ("1d", "1y"))
-    stock = yf.Ticker(yf_ticker)
-    df = stock.history(period=period, interval=yf_interval)
-    if df.empty:
-        raise ValueError(f"No data for {yf_ticker} interval={yf_interval}")
+
+def alpaca_klines(ticker, interval="1d", limit=100):
+    if interval not in ALPACA_INTERVAL_MAP:
+        raise ValueError(f"Unsupported Alpaca interval: {interval}")
+    alpaca_tf, lookback_days = ALPACA_INTERVAL_MAP[interval]
+    end = datetime.now(timezone.utc)
+    start = end - pd.Timedelta(days=lookback_days)
+    r = requests.get(
+        f"{ALPACA_BASE}/stocks/{ticker}/bars",
+        headers=_get_alpaca_headers(),
+        params={
+            "timeframe": alpaca_tf,
+            "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "end": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "limit": limit,
+            "feed": "iex",
+            "adjustment": "split",
+        },
+        timeout=10,
+    )
+    r.raise_for_status()
+    bars = r.json().get("bars") or []
+    if not bars:
+        raise ValueError(f"No Alpaca data for {ticker} interval={interval}")
+    df = pd.DataFrame(bars)
     df = df.rename(
         columns={
-            "Open": "open",
-            "High": "high",
-            "Low": "low",
-            "Close": "close",
-            "Volume": "volume",
+            "o": "open",
+            "h": "high",
+            "l": "low",
+            "c": "close",
+            "v": "volume",
+            "t": "time",
         }
     )
-    df = df.reset_index()
-    if "4h" == interval:
-        df = df.set_index("Datetime" if "Datetime" in df.columns else "Date")
-        df = (
-            df.resample("4h")
-            .agg(
-                {
-                    "open": "first",
-                    "high": "max",
-                    "low": "min",
-                    "close": "last",
-                    "volume": "sum",
-                }
-            )
-            .dropna()
-            .reset_index()
-        )
-    df["time"] = (
-        pd.to_datetime(df.iloc[:, 0]) if "time" not in df.columns else df["time"]
-    )
+    for col in ["open", "high", "low", "close", "volume"]:
+        df[col] = df[col].astype(float)
+    df["time"] = pd.to_datetime(df["time"])
     return df.tail(limit)
 
 
@@ -202,15 +211,16 @@ def fetch_usd_sek():
     if _fx_cache["rate"] and now - _fx_cache["time"] < 3600:
         return _fx_cache["rate"]
     try:
-        import yfinance as yf
-
-        t = yf.Ticker("USDSEK=X")
-        h = t.history(period="5d")
-        if not h.empty:
-            rate = float(h["Close"].iloc[-1])
-            _fx_cache["rate"] = rate
-            _fx_cache["time"] = now
-            return rate
+        r = requests.get(
+            "https://api.frankfurter.app/latest",
+            params={"from": "USD", "to": "SEK"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        rate = float(r.json()["rates"]["SEK"])
+        _fx_cache["rate"] = rate
+        _fx_cache["time"] = now
+        return rate
     except Exception:
         pass
     return _fx_cache["rate"] or 10.50
@@ -306,14 +316,15 @@ def technical_signal(ind):
 def _fetch_klines(source, interval, limit):
     if "binance" in source:
         return binance_klines(source["binance"], interval=interval, limit=limit)
-    elif "yfinance" in source:
-        return yfinance_klines(source["yfinance"], interval=interval, limit=limit)
+    elif "alpaca" in source:
+        return alpaca_klines(source["alpaca"], interval=interval, limit=limit)
     raise ValueError(f"Unknown source: {source}")
 
 
-# Stocks use daily+ candles (no intraday without market data subscription)
 STOCK_TIMEFRAMES = [
-    ("Now", "1d", 100, 0),
+    ("Now", "15m", 100, 0),
+    ("12h", "1h", 100, 300),
+    ("2d", "4h", 100, 900),
     ("7d", "1d", 100, 3600),
     ("1mo", "1d", 100, 3600),
     ("3mo", "1w", 100, 43200),
@@ -322,9 +333,9 @@ STOCK_TIMEFRAMES = [
 
 
 def collect_timeframes(source):
-    is_stock = "yfinance" in source
+    is_stock = "alpaca" in source
     tfs = STOCK_TIMEFRAMES if is_stock else TIMEFRAMES
-    source_key = source.get("yfinance") or source.get("binance")
+    source_key = source.get("alpaca") or source.get("binance")
     results = []
     for label, interval, limit, ttl in tfs:
         cache_key = f"tf_{source_key}_{interval}"
@@ -1058,9 +1069,7 @@ def run(force_report=False, active_symbols=None):
             if now_entry and "indicators" in now_entry:
                 ind = now_entry["indicators"]
             else:
-                df = _fetch_klines(
-                    source, interval="15m" if "binance" in source else "1d", limit=100
-                )
+                df = _fetch_klines(source, interval="15m", limit=100)
                 ind = compute_indicators(df)
 
             if ind is None:

@@ -14,6 +14,10 @@ from portfolio.main import (
     technical_signal,
     generate_signal,
     TIMEFRAMES,
+    STOCK_TIMEFRAMES,
+    ALPACA_INTERVAL_MAP,
+    alpaca_klines,
+    fetch_usd_sek,
     MIN_VOTERS,
 )
 from portfolio.sentiment import _aggregate_sentiments, _fetch_crypto_headlines
@@ -536,6 +540,131 @@ class TestTriggerSystem:
         check_triggers(sigs, prices, {}, {"BTC-USD": "positive"})
         triggered, reasons = check_triggers(sigs, prices, {}, {"BTC-USD": "neutral"})
         assert not triggered
+
+
+# --- Alpaca klines ---
+
+
+class TestAlpacaKlines:
+    def test_parses_bars_response(self):
+        import unittest.mock as mock
+
+        fake_bars = {
+            "bars": [
+                {
+                    "t": "2026-02-13T14:00:00Z",
+                    "o": 130.0,
+                    "h": 131.5,
+                    "l": 129.5,
+                    "c": 131.0,
+                    "v": 50000,
+                    "n": 200,
+                    "vw": 130.8,
+                },
+                {
+                    "t": "2026-02-13T14:15:00Z",
+                    "o": 131.0,
+                    "h": 132.0,
+                    "l": 130.5,
+                    "c": 131.5,
+                    "v": 45000,
+                    "n": 180,
+                    "vw": 131.2,
+                },
+            ]
+        }
+        fake_resp = mock.MagicMock()
+        fake_resp.json.return_value = fake_bars
+        fake_resp.raise_for_status = mock.MagicMock()
+
+        fake_config = json.dumps({"alpaca": {"key": "PK_TEST", "secret": "SK_TEST"}})
+        with mock.patch("requests.get", return_value=fake_resp), mock.patch(
+            "portfolio.main.CONFIG_FILE"
+        ) as mock_cfg:
+            mock_cfg.read_text.return_value = fake_config
+            df = alpaca_klines("MSTR", interval="15m", limit=100)
+
+        assert list(df.columns) >= ["open", "high", "low", "close", "volume", "time"]
+        assert len(df) == 2
+        assert df["close"].dtype == float
+        assert df["volume"].dtype == float
+
+    def test_empty_bars_raises(self):
+        import unittest.mock as mock
+
+        fake_resp = mock.MagicMock()
+        fake_resp.json.return_value = {"bars": None}
+        fake_resp.raise_for_status = mock.MagicMock()
+
+        fake_config = json.dumps({"alpaca": {"key": "PK_TEST", "secret": "SK_TEST"}})
+        with mock.patch("requests.get", return_value=fake_resp), mock.patch(
+            "portfolio.main.CONFIG_FILE"
+        ) as mock_cfg:
+            mock_cfg.read_text.return_value = fake_config
+            with pytest.raises(ValueError, match="No Alpaca data"):
+                alpaca_klines("MSTR", interval="15m", limit=100)
+
+    def test_unsupported_interval_raises(self):
+        with pytest.raises(ValueError, match="Unsupported Alpaca interval"):
+            alpaca_klines("MSTR", interval="3d", limit=100)
+
+
+# --- USD/SEK via frankfurter.app ---
+
+
+class TestFetchUsdSek:
+    def test_parses_frankfurter_response(self):
+        import unittest.mock as mock
+        from portfolio.main import _fx_cache
+
+        _fx_cache["rate"] = None
+        _fx_cache["time"] = 0
+
+        fake_resp = mock.MagicMock()
+        fake_resp.json.return_value = {"rates": {"SEK": 10.85}}
+        fake_resp.raise_for_status = mock.MagicMock()
+
+        with mock.patch("portfolio.main.requests.get", return_value=fake_resp):
+            rate = fetch_usd_sek()
+
+        assert rate == 10.85
+
+    def test_fallback_on_error(self):
+        import unittest.mock as mock
+        from portfolio.main import _fx_cache
+
+        _fx_cache["rate"] = None
+        _fx_cache["time"] = 0
+
+        with mock.patch(
+            "portfolio.main.requests.get", side_effect=Exception("timeout")
+        ):
+            rate = fetch_usd_sek()
+
+        assert rate == 10.50
+
+
+# --- Stock timeframes config ---
+
+
+class TestStockTimeframes:
+    def test_seven_horizons(self):
+        assert len(STOCK_TIMEFRAMES) == 7
+
+    def test_now_uses_15m(self):
+        assert STOCK_TIMEFRAMES[0][0] == "Now"
+        assert STOCK_TIMEFRAMES[0][1] == "15m"
+
+    def test_has_12h_and_2d(self):
+        labels = [tf[0] for tf in STOCK_TIMEFRAMES]
+        assert "12h" in labels
+        assert "2d" in labels
+
+    def test_all_intervals_in_alpaca_map(self):
+        for _, interval, _, _ in STOCK_TIMEFRAMES:
+            assert (
+                interval in ALPACA_INTERVAL_MAP
+            ), f"{interval} not in ALPACA_INTERVAL_MAP"
 
 
 # --- Integration tests (run on herc2 with: pytest -m integration) ---

@@ -225,7 +225,7 @@ triggered — the user wants to see your analysis every time. No exceptions.
 
 1. Action header — `*HOLD*` or `*BUY TICKER*` with trade details
 2. Ticker grid — price + "Now" action + vote breakdown as `XB/YS/ZH` where X=buy votes, Y=sell votes, Z=abstains. Calculate from `_buy_count`, `_sell_count`, `_total_applicable` in `extra` (Z = total_applicable - buy - sell). Example: `BUY 4B/1S/6H` means 4 buy, 1 sell, 6 abstained out of 11.
-3. Timeframe heatmap — `B`=BUY `S`=SELL `H`=HOLD from `timeframes` in agent_summary.json. Use `-` for horizons that don't exist (stocks lack 12h and 2d). All tickers in one grid.
+3. Timeframe heatmap — `B`=BUY `S`=SELL `H`=HOLD from `timeframes` in agent_summary.json. All 5 tickers have all 7 horizons (stocks use Alpaca intraday data). All tickers in one grid.
 4. F&G + portfolio line
 5. Reasoning (1-2 sentences)
 
@@ -245,9 +245,9 @@ HOLD example:
 `     Now 12h  2d  7d 1mo 3mo 6mo`
 `BTC   B   H   S   S   S   S   H`
 `ETH   H   S   S   S   S   S   S`
-`MSTR  H   -   -   S   S   S   S`
-`PLTR  H   -   -   H   S   S   H`
-`NVDA  H   -   -   H   S   H   H`
+`MSTR  H   S   H   S   S   S   S`
+`PLTR  H   H   S   H   S   S   H`
+`NVDA  H   H   H   H   S   H   H`
 
 _Crypto F&G: 11 · Stock F&G: 62_
 _Patient: 500,000 SEK (+0.00%)_
@@ -271,9 +271,9 @@ TRADE example (bold trades, patient holds):
 `     Now 12h  2d  7d 1mo 3mo 6mo`
 `BTC   B   H   S   S   S   S   H`
 `ETH   H   S   S   S   S   S   S`
-`MSTR  H   -   -   S   S   S   S`
-`PLTR  H   -   -   H   S   S   H`
-`NVDA  H   -   -   H   S   H   H`
+`MSTR  H   S   H   S   S   S   S`
+`PLTR  H   H   S   H   S   S   H`
+`NVDA  H   H   H   H   S   H   H`
 
 _Crypto F&G: 11 · Stock F&G: 62_
 _Patient: 500,000 SEK (+0.00%) · HOLD_
@@ -366,9 +366,9 @@ Your job is to weigh signal quality, timeframe alignment, and macro context — 
 | ------- | ----------- | ----------------- |
 | BTC-USD | Crypto 24/7 | Binance (BTCUSDT) |
 | ETH-USD | Crypto 24/7 | Binance (ETHUSDT) |
-| MSTR    | NASDAQ      | yfinance          |
-| PLTR    | NASDAQ      | yfinance          |
-| NVDA    | NASDAQ      | yfinance          |
+| MSTR    | NASDAQ      | Alpaca (IEX feed) |
+| PLTR    | NASDAQ      | Alpaca (IEX feed) |
+| NVDA    | NASDAQ      | Alpaca (IEX feed) |
 
 ## Available Tools
 
