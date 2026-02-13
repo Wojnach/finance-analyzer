@@ -336,13 +336,19 @@ requests.post(
 `agent_summary.json` includes a `signal_accuracy_1d` section with per-signal hit rates
 at the 1-day horizon (when enough data exists). Use this to calibrate your trust in each signal.
 
+**Data quality note:** Prior accuracy data (before Feb 2026) was corrupted by a backfill bug
+that used current prices instead of historical prices at the horizon timestamp. All outcomes
+have been re-backfilled with correct historical prices. Treat accuracy numbers with <50 clean
+samples as preliminary — they will stabilize over the next 2-4 weeks.
+
 **How to use it:**
 
-- Signals with high accuracy and 20+ samples deserve more weight in your reasoning
+- Signals with high accuracy and 50+ samples deserve more weight in your reasoning
 - Signals with accuracy near or below 50% are no better than a coin flip — treat them as noise
 - Consensus accuracy matters: if it's low, your independent judgment is more valuable than vote-counting
 - The `best` and `worst` fields tell you which signals are currently most/least reliable
 - This data improves over time as more outcomes are backfilled (3d, 5d, 10d horizons coming)
+- Until sample sizes grow, rely more on your own multi-timeframe reasoning than on accuracy numbers
 
 **Do not blindly follow consensus.** The raw vote count (e.g., "4B/1S/6H") is an input to your
 reasoning, not a trading signal. A 3-signal consensus in a choppy market can be pure noise.
