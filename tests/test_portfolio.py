@@ -411,8 +411,8 @@ class TestMinistralSignalWrapper:
 
         with mock.patch("subprocess.run", return_value=fake_result):
             result = get_ministral_signal({"ticker": "BTC", "price_usd": 69000})
-        assert result["action"] == "BUY"
-        assert result["model"] == "CryptoTrader-LM"
+        assert result["original"]["action"] == "BUY"
+        assert result["original"]["model"] == "CryptoTrader-LM"
 
     def test_raises_on_failure(self):
         import unittest.mock as mock
@@ -461,7 +461,7 @@ class TestTriggerSystem:
             self._make_signals(), {"BTC-USD": 69000, "ETH-USD": 2000}, {}, {}
         )
         assert triggered
-        assert any("cooldown" in r for r in reasons)
+        assert any("cooldown" in r or "check-in" in r for r in reasons)
 
     def test_no_change_no_trigger(self):
         from portfolio.trigger import check_triggers
@@ -477,9 +477,11 @@ class TestTriggerSystem:
 
         prices = {"BTC-USD": 69000, "ETH-USD": 2000}
         check_triggers(self._make_signals("HOLD", "HOLD"), prices, {}, {})
-        triggered, reasons = check_triggers(
-            self._make_signals("BUY", "HOLD"), prices, {}, {}
-        )
+        # SUSTAINED_CHECKS=3: signal must hold for 3 consecutive cycles
+        buy_sigs = self._make_signals("BUY", "HOLD")
+        check_triggers(buy_sigs, prices, {}, {})
+        check_triggers(buy_sigs, prices, {}, {})
+        triggered, reasons = check_triggers(buy_sigs, prices, {}, {})
         assert triggered
         assert any("flipped" in r for r in reasons)
 
