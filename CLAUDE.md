@@ -23,6 +23,7 @@ The fast loop calls you when a trigger fires:
 - Fear & Greed crossed extreme threshold (20 or 80)
 - Sentiment reversal (positive↔negative)
 - 2-hour check-in expired (periodic review, market hours only)
+- 6-hour check-in expired (nights/weekends, crypto only)
 
 The trigger reason is included in the invocation context.
 
@@ -56,7 +57,7 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 - Read the raw signals in `agent_summary.json` — don't just follow Layer 1 consensus.
 - Volume expansion + directional signals = breakout confirmation. BB expansion is a breakout indicator.
 - EMA alignment across timeframes confirms trend health.
-- Floor: never trade when zero signals agree (at least 2 must point the same way).
+- Floor: never trade when fewer than 3 signals agree (Layer 1 consensus requires MIN_VOTERS=3).
 - **FOMC:** Do not trade the event itself. Watch for breakouts that form _after_ the event settles (1–4 hours post). Events create the volatility that forms new trends — catch the trend, not the noise.
 - **Go dormant** when no breakout setups are forming — low-volatility sideways compression with all signals abstaining. Your market is the transition from consolidation to trend.
 
@@ -315,7 +316,7 @@ requests.post(
 
 1. **RSI(14)** — Oversold (<30)=buy, overbought (>70)=sell, else abstains
 2. **MACD(12,26,9)** — Histogram crossover only (neg→pos=buy, pos→neg=sell), else abstains
-3. **EMA(9,21)** — Fast>slow=buy, else sell (always votes)
+3. **EMA(9,21)** — Fast>slow=buy, fast<slow=sell. Abstains when gap <0.5% (deadband filters weak trends)
 4. **BB(20,2)** — Below lower=buy, above upper=sell, else abstains
 5. **Fear & Greed** — ≤20 contrarian buy, ≥80 contrarian sell, else abstains
 6. **Sentiment** — CryptoBERT (crypto) / Trading-Hero-LLM (stocks), confidence>0.4 to vote
@@ -349,6 +350,11 @@ samples as preliminary — they will stabilize over the next 2-4 weeks.
 - The `best` and `worst` fields tell you which signals are currently most/least reliable
 - This data improves over time as more outcomes are backfilled (3d, 5d, 10d horizons coming)
 - Until sample sizes grow, rely more on your own multi-timeframe reasoning than on accuracy numbers
+
+**Consensus formula:** Layer 1 computes consensus using active voters (signals that voted BUY
+or SELL) as the denominator, not total applicable signals. MIN_VOTERS=3: fewer than 3 active
+votes forces HOLD. Example: 2B/1S out of 11 applicable = BUY at 67% confidence (2/3 active
+voters), not 18% (2/11). The confidence reflects agreement among voters, not coverage.
 
 **Do not blindly follow consensus.** The raw vote count (e.g., "4B/1S/6H") is an input to your
 reasoning, not a trading signal. A 3-signal consensus in a choppy market can be pure noise.

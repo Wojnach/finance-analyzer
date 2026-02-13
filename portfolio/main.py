@@ -3,6 +3,7 @@
 
 import json
 import os
+import platform
 import subprocess
 import sys
 import tempfile
@@ -374,7 +375,9 @@ def generate_signal(ind, ticker=None, config=None):
         sell += 1
 
     # EMA trend — votes only when gap is meaningful (>0.5%)
-    ema_gap_pct = abs(ind["ema9"] - ind["ema21"]) / ind["ema21"] * 100
+    ema_gap_pct = (
+        abs(ind["ema9"] - ind["ema21"]) / ind["ema21"] * 100 if ind["ema21"] != 0 else 0
+    )
     if ema_gap_pct >= 0.5:
         if ind["ema9"] > ind["ema21"]:
             buy += 1
@@ -739,8 +742,17 @@ def invoke_agent(reasons):
         elapsed = time.time() - _agent_start
         if elapsed > AGENT_TIMEOUT:
             print(f"  Agent pid={_agent_proc.pid} timed out ({elapsed:.0f}s), killing")
-            _agent_proc.kill()
-            _agent_proc.wait()
+            if platform.system() == "Windows":
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(_agent_proc.pid)],
+                    capture_output=True,
+                )
+            else:
+                _agent_proc.kill()
+            try:
+                _agent_proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
             if _agent_log:
                 _agent_log.close()
                 _agent_log = None
