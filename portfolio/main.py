@@ -357,7 +357,7 @@ def collect_timeframes(source):
 MIN_VOTERS = 3  # need at least 3 signals voting to act
 
 
-def generate_signal(ind, ticker=None, config=None):
+def generate_signal(ind, ticker=None, config=None, timeframes=None):
     buy = 0
     sell = 0
     extra_info = {}
@@ -456,51 +456,6 @@ def generate_signal(ind, ticker=None, config=None):
         except ImportError:
             pass
 
-    # Ministral-8B LLM reasoning (original CryptoTrader-LM + custom LoRA, crypto only)
-    if ticker and ticker in CRYPTO_SYMBOLS:
-        short_ticker = ticker.replace("-USD", "")
-        try:
-            from portfolio.ministral_signal import get_ministral_signal
-
-            ctx = {
-                "ticker": short_ticker,
-                "price_usd": ind["close"],
-                "rsi": round(ind["rsi"], 1),
-                "macd_hist": round(ind["macd_hist"], 2),
-                "ema_bullish": ind["ema9"] > ind["ema21"],
-                "bb_position": ind["price_vs_bb"],
-                "fear_greed": extra_info.get("fear_greed", "N/A"),
-                "fear_greed_class": extra_info.get("fear_greed_class", ""),
-                "news_sentiment": extra_info.get("sentiment", "N/A"),
-                "timeframe_summary": "",
-                "headlines": "",
-            }
-            ms = _cached(
-                f"ministral_{short_ticker}",
-                MINISTRAL_TTL,
-                get_ministral_signal,
-                ctx,
-            )
-            if ms:
-                orig = ms.get("original") or ms
-                extra_info["ministral_action"] = orig["action"]
-                extra_info["ministral_reasoning"] = orig.get("reasoning", "")
-                if orig["action"] == "BUY":
-                    buy += 1
-                elif orig["action"] == "SELL":
-                    sell += 1
-
-                cust = ms.get("custom")
-                if cust:
-                    extra_info["custom_lora_action"] = cust["action"]
-                    extra_info["custom_lora_reasoning"] = cust.get("reasoning", "")
-                    if cust["action"] == "BUY":
-                        buy += 1
-                    elif cust["action"] == "SELL":
-                        sell += 1
-        except ImportError:
-            pass
-
     # ML Classifier (HistGradientBoosting on BTC/ETH 1h data)
     if ticker:
         try:
@@ -548,6 +503,78 @@ def generate_signal(ind, ticker=None, config=None):
                     buy += 1
                 elif vs["action"] == "SELL":
                     sell += 1
+        except ImportError:
+            pass
+
+    # Ministral-8B LLM reasoning (original CryptoTrader-LM + custom LoRA, crypto only)
+    # Runs AFTER all other signals so it can include their results in its context
+    if ticker and ticker in CRYPTO_SYMBOLS:
+        short_ticker = ticker.replace("-USD", "")
+        try:
+            from portfolio.ministral_signal import get_ministral_signal
+
+            tf_summary = ""
+            if timeframes:
+                parts = []
+                for label, entry in timeframes:
+                    if (
+                        isinstance(entry, dict)
+                        and "action" in entry
+                        and entry["action"]
+                    ):
+                        ti = entry.get("indicators", {})
+                        parts.append(
+                            f"{label}: {entry['action']} (RSI={ti.get('rsi', 0):.0f})"
+                        )
+                if parts:
+                    tf_summary = " | ".join(parts)
+
+            ema_gap = (
+                abs(ind["ema9"] - ind["ema21"]) / ind["ema21"] * 100
+                if ind["ema21"] != 0
+                else 0
+            )
+
+            ctx = {
+                "ticker": short_ticker,
+                "price_usd": ind["close"],
+                "rsi": round(ind["rsi"], 1),
+                "macd_hist": round(ind["macd_hist"], 2),
+                "ema_bullish": ind["ema9"] > ind["ema21"],
+                "ema_gap_pct": round(ema_gap, 2),
+                "bb_position": ind["price_vs_bb"],
+                "fear_greed": extra_info.get("fear_greed", "N/A"),
+                "fear_greed_class": extra_info.get("fear_greed_class", ""),
+                "news_sentiment": extra_info.get("sentiment", "N/A"),
+                "sentiment_confidence": extra_info.get("sentiment_conf", "N/A"),
+                "volume_ratio": extra_info.get("volume_ratio", "N/A"),
+                "funding_rate": extra_info.get("funding_action", "N/A"),
+                "timeframe_summary": tf_summary,
+                "headlines": "",
+            }
+            ms = _cached(
+                f"ministral_{short_ticker}",
+                MINISTRAL_TTL,
+                get_ministral_signal,
+                ctx,
+            )
+            if ms:
+                orig = ms.get("original") or ms
+                extra_info["ministral_action"] = orig["action"]
+                extra_info["ministral_reasoning"] = orig.get("reasoning", "")
+                if orig["action"] == "BUY":
+                    buy += 1
+                elif orig["action"] == "SELL":
+                    sell += 1
+
+                cust = ms.get("custom")
+                if cust:
+                    extra_info["custom_lora_action"] = cust["action"]
+                    extra_info["custom_lora_reasoning"] = cust.get("reasoning", "")
+                    if cust["action"] == "BUY":
+                        buy += 1
+                    elif cust["action"] == "SELL":
+                        sell += 1
         except ImportError:
             pass
 
@@ -1042,7 +1069,9 @@ def run(force_report=False, active_symbols=None):
             price = ind["close"]
             prices_usd[name] = price
 
-            action, conf, extra = generate_signal(ind, ticker=name, config=config)
+            action, conf, extra = generate_signal(
+                ind, ticker=name, config=config, timeframes=tfs
+            )
             signals[name] = {
                 "action": action,
                 "confidence": conf,
