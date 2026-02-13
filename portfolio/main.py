@@ -176,7 +176,6 @@ def alpaca_klines(ticker, interval="1d", limit=100):
             "timeframe": alpaca_tf,
             "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "end": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "limit": limit,
             "feed": "iex",
             "adjustment": "split",
         },

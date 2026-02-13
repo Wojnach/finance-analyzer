@@ -108,7 +108,6 @@ def _fetch_klines(ticker):
                 "timeframe": "15Min",
                 "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "end": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "limit": 100,
                 "feed": "iex",
             },
             timeout=10,
