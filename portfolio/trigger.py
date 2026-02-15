@@ -14,7 +14,7 @@ from pathlib import Path
 
 STATE_FILE = Path(__file__).resolve().parent.parent / "data" / "trigger_state.json"
 COOLDOWN_SECONDS = 7200  # 2 hours max silence (market hours)
-OFFHOURS_COOLDOWN = 21600  # 6 hours (nights/weekends, crypto only)
+OFFHOURS_COOLDOWN = 3600  # 1 hour (nights/weekends, crypto only)
 PRICE_THRESHOLD = 0.02  # 2% move
 FG_THRESHOLDS = (20, 80)  # extreme fear / extreme greed boundaries
 SUSTAINED_CHECKS = 3  # consecutive cycles a signal must hold before triggering
@@ -108,7 +108,7 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
 
     # 5. Cooldown expired
     # Market hours (weekdays 07-21 UTC): 2h cooldown for all instruments
-    # Off-hours (nights/weekends): 6h cooldown for crypto check-ins
+    # Off-hours (nights/weekends): 1h cooldown for crypto check-ins
     now_utc = datetime.now(timezone.utc)
     market_open = now_utc.weekday() < 5 and 7 <= now_utc.hour < 21
     last_trigger_time = state.get("last_trigger_time", 0)

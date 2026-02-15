@@ -107,7 +107,9 @@ See `docs/trading-bot-personalities.md` for full personality definitions.
 - Treasury Yields — 2Y, 10Y, 30Y + 2s10s spread
 - Fed Calendar — Next FOMC date and days until
 
-**Vote threshold:** MIN_VOTERS=3 must cast a vote. Confidence is calculated against total applicable signals (11 crypto, 7 stocks), not just active voters. Majority (≥50% of applicable) needed for BUY/SELL consensus. Signals that don't meet their threshold abstain but still count in the denominator. ML Classifier and Funding Rate are crypto-only (BTC, ETH).
+**Vote threshold:** MIN_VOTERS varies by asset class — crypto requires 3, stocks require 2. Stocks only have 7 applicable signals with ~71% abstention rate, so requiring 3 voters would structurally prevent consensus. Confidence is calculated using active voters (BUY + SELL) as the denominator, not total applicable signals. A majority (≥50% of active voters) is needed for BUY/SELL consensus. Signals that don't meet their threshold abstain. ML Classifier, Funding Rate, CryptoTrader-LM, and Custom LoRA are crypto-only (BTC, ETH).
+
+**Sentiment hysteresis:** When sentiment flips direction (e.g., positive→negative), the confidence threshold increases from 0.40 to 0.55. This prevents rapid oscillation from models returning ~50% confidence, which previously caused 46 false triggers in 97 minutes for MSTR.
 
 ## 7 Timeframes (crypto instruments)
 

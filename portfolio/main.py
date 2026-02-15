@@ -364,7 +364,48 @@ def collect_timeframes(source):
 # --- Signal (full 7-signal for "Now" timeframe) ---
 
 
-MIN_VOTERS = 3  # need at least 3 signals voting to act
+MIN_VOTERS_CRYPTO = 3  # crypto has 11 signals — need 3 active voters
+MIN_VOTERS_STOCK = 2  # stocks have 7 signals (~71% abstention) — 2 suffices
+
+# Sentiment hysteresis — prevents rapid flip spam from ~50% confidence oscillation
+_prev_sentiment = {}  # in-memory cache; seeded from trigger_state.json on first call
+_prev_sentiment_loaded = False
+
+
+def _load_prev_sentiments():
+    global _prev_sentiment, _prev_sentiment_loaded
+    if _prev_sentiment_loaded:
+        return
+    try:
+        ts_file = DATA_DIR / "trigger_state.json"
+        if ts_file.exists():
+            ts = json.loads(ts_file.read_text(encoding="utf-8"))
+            _prev_sentiment = ts.get("prev_sentiment", {})
+    except Exception:
+        pass
+    _prev_sentiment_loaded = True
+
+
+def _get_prev_sentiment(ticker):
+    _load_prev_sentiments()
+    return _prev_sentiment.get(ticker)
+
+
+def _set_prev_sentiment(ticker, direction):
+    _load_prev_sentiments()
+    _prev_sentiment[ticker] = direction
+    # Persist to trigger_state.json alongside other trigger state
+    try:
+        ts_file = DATA_DIR / "trigger_state.json"
+        ts = json.loads(ts_file.read_text(encoding="utf-8")) if ts_file.exists() else {}
+        ts["prev_sentiment"] = _prev_sentiment
+        import tempfile as _tmp, os as _os
+        fd, tmp = _tmp.mkstemp(dir=ts_file.parent, suffix=".tmp")
+        with _os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(ts, f, indent=2, default=str)
+        _os.replace(tmp, ts_file)
+    except Exception:
+        pass
 
 
 def generate_signal(ind, ticker=None, config=None, timeframes=None):
@@ -437,6 +478,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None):
             pass
 
     # Sentiment (crypto->CryptoBERT, stocks->Trading-Hero-LLM) — includes social posts
+    # Hysteresis: flipping direction requires confidence > 0.55, same direction > 0.40
     if ticker:
         short_ticker = ticker.replace("-USD", "")
         try:
@@ -457,12 +499,23 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None):
                 extra_info["sentiment_model"] = sent.get("model", "unknown")
                 if sent.get("sources"):
                     extra_info["sentiment_sources"] = sent["sources"]
-                if sent["overall_sentiment"] == "positive" and sent["confidence"] > 0.4:
+
+                # Determine confidence threshold with hysteresis
+                prev_sent_dir = _get_prev_sentiment(ticker)
+                current_dir = sent["overall_sentiment"]
+                if prev_sent_dir and current_dir != prev_sent_dir and current_dir != "neutral":
+                    sent_threshold = 0.55  # flipping direction — higher bar
+                else:
+                    sent_threshold = 0.40  # same direction or first reading
+
+                if sent["overall_sentiment"] == "positive" and sent["confidence"] > sent_threshold:
                     buy += 1
+                    _set_prev_sentiment(ticker, "positive")
                 elif (
-                    sent["overall_sentiment"] == "negative" and sent["confidence"] > 0.4
+                    sent["overall_sentiment"] == "negative" and sent["confidence"] > sent_threshold
                 ):
                     sell += 1
+                    _set_prev_sentiment(ticker, "negative")
         except ImportError:
             pass
 
@@ -593,7 +646,8 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None):
     total_applicable = 11 if is_crypto else 7
 
     active_voters = buy + sell
-    if active_voters < MIN_VOTERS:
+    min_voters = MIN_VOTERS_STOCK if ticker in STOCK_SYMBOLS else MIN_VOTERS_CRYPTO
+    if active_voters < min_voters:
         action = "HOLD"
         conf = 0.0
     else:

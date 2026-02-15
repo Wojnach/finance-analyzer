@@ -18,7 +18,8 @@ from portfolio.main import (
     ALPACA_INTERVAL_MAP,
     alpaca_klines,
     fetch_usd_sek,
-    MIN_VOTERS,
+    MIN_VOTERS_CRYPTO,
+    MIN_VOTERS_STOCK,
 )
 from portfolio.sentiment import _aggregate_sentiments, _fetch_crypto_headlines
 
@@ -173,7 +174,7 @@ class TestGenerateSignal:
         )
         action, conf, extra = generate_signal(ind)
         assert action == "HOLD"
-        assert extra["_voters"] < MIN_VOTERS
+        assert extra["_voters"] < MIN_VOTERS_CRYPTO
 
     def test_buy_on_rsi_oversold_ema_up(self):
         ind = make_indicators(
