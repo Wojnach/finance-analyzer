@@ -400,6 +400,7 @@ def _set_prev_sentiment(ticker, direction):
         ts = json.loads(ts_file.read_text(encoding="utf-8")) if ts_file.exists() else {}
         ts["prev_sentiment"] = _prev_sentiment
         import tempfile as _tmp, os as _os
+
         fd, tmp = _tmp.mkstemp(dir=ts_file.parent, suffix=".tmp")
         with _os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(ts, f, indent=2, default=str)
@@ -503,16 +504,24 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None):
                 # Determine confidence threshold with hysteresis
                 prev_sent_dir = _get_prev_sentiment(ticker)
                 current_dir = sent["overall_sentiment"]
-                if prev_sent_dir and current_dir != prev_sent_dir and current_dir != "neutral":
+                if (
+                    prev_sent_dir
+                    and current_dir != prev_sent_dir
+                    and current_dir != "neutral"
+                ):
                     sent_threshold = 0.55  # flipping direction — higher bar
                 else:
                     sent_threshold = 0.40  # same direction or first reading
 
-                if sent["overall_sentiment"] == "positive" and sent["confidence"] > sent_threshold:
+                if (
+                    sent["overall_sentiment"] == "positive"
+                    and sent["confidence"] > sent_threshold
+                ):
                     buy += 1
                     _set_prev_sentiment(ticker, "positive")
                 elif (
-                    sent["overall_sentiment"] == "negative" and sent["confidence"] > sent_threshold
+                    sent["overall_sentiment"] == "negative"
+                    and sent["confidence"] > sent_threshold
                 ):
                     sell += 1
                     _set_prev_sentiment(ticker, "negative")
@@ -973,6 +982,61 @@ def send_telegram(msg, config):
     return r.ok
 
 
+BOLD_STATE_FILE = DATA_DIR / "portfolio_state_bold.json"
+_COOLDOWN_PREFIXES = ("cooldown", "crypto check-in", "startup")
+
+
+def _maybe_send_alert(config, signals, prices_usd, fx_rate, state, reasons, tf_data):
+    significant = [r for r in reasons if not r.startswith(_COOLDOWN_PREFIXES)]
+    if not significant:
+        return
+    headline = significant[0]
+    lines = [f"*ALERT: {headline}*", ""]
+    for ticker in SYMBOLS:
+        sig = signals.get(ticker)
+        if not sig:
+            continue
+        price = prices_usd.get(ticker, 0)
+        extra = sig.get("extra", {})
+        b = extra.get("_buy_count", 0)
+        s = extra.get("_sell_count", 0)
+        total = extra.get("_total_applicable", 0)
+        h = total - b - s
+        action = sig["action"]
+        if price >= 1000:
+            p_str = f"${price:,.0f}"
+        else:
+            p_str = f"${price:,.2f}"
+        lines.append(f"`{ticker:<7} {p_str:>9}  {action:<4} {b}B/{s}S/{h}H`")
+    fg_val = ""
+    for ticker, sig in signals.items():
+        extra = sig.get("extra", {})
+        if "fear_greed" in extra:
+            fg_val = f"{extra['fear_greed']} ({extra.get('fear_greed_class', '')})"
+            break
+    patient_total = portfolio_value(state, prices_usd, fx_rate)
+    patient_pnl = (
+        (patient_total - state["initial_value_sek"]) / state["initial_value_sek"]
+    ) * 100
+    lines.append("")
+    if fg_val:
+        lines.append(f"_F&G: {fg_val}_")
+    lines.append(f"_Patient: {patient_total:,.0f} SEK ({patient_pnl:+.1f}%)_")
+    if BOLD_STATE_FILE.exists():
+        bold = json.loads(BOLD_STATE_FILE.read_text(encoding="utf-8"))
+        bold_total = portfolio_value(bold, prices_usd, fx_rate)
+        bold_pnl = (
+            (bold_total - bold["initial_value_sek"]) / bold["initial_value_sek"]
+        ) * 100
+        lines.append(f"_Bold: {bold_total:,.0f} SEK ({bold_pnl:+.1f}%)_")
+    msg = "\n".join(lines)
+    try:
+        send_telegram(msg, config)
+        print(f"  Alert sent: {headline}")
+    except Exception as e:
+        print(f"  WARNING: alert send failed: {e}")
+
+
 def _rsi_arrow(rsi):
     if rsi < 30:
         return "oversold"
@@ -1217,7 +1281,14 @@ def run(force_report=False, active_symbols=None):
         except Exception as e:
             print(f"  WARNING: signal logging failed: {e}")
 
-        invoke_agent(reasons_list)
+        layer2_cfg = config.get("layer2", {})
+        if layer2_cfg.get("enabled", True):
+            invoke_agent(reasons_list)
+        else:
+            print("  Layer 2 disabled — skipping agent invocation")
+            _maybe_send_alert(
+                config, signals, prices_usd, fx_rate, state, reasons_list, tf_data
+            )
     else:
         write_agent_summary(signals, prices_usd, fx_rate, state, tf_data)
         print("\n  No trigger — nothing changed.")
