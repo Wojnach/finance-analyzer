@@ -12,6 +12,7 @@ import requests
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 STATE_FILE = DATA_DIR / "bigbet_state.json"
+TOTAL_CONDITIONS = 6  # RSI, BB, F&G, Volume, MACD, 24h price change
 
 
 def _load_state():
@@ -136,7 +137,7 @@ def _format_alert(ticker, direction, conditions, prices_usd, fx_rate, extra_info
     emoji = "\U0001f535" if direction == "BULL" else "\U0001f534"
     price = prices_usd.get(ticker, 0)
     n = len(conditions)
-    total = 6
+    total = TOTAL_CONDITIONS
 
     if n >= 5:
         confidence = "HIGH"
@@ -226,7 +227,7 @@ def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
                     ticker, "BULL", bull_conds, prices_usd, fx_rate, extra_info
                 )
                 print(
-                    f"  BIG BET ALERT: BULL {ticker} ({len(bull_conds)}/{6} conditions)"
+                    f"  BIG BET ALERT: BULL {ticker} ({len(bull_conds)}/{TOTAL_CONDITIONS} conditions)"
                 )
                 try:
                     _send_telegram(msg, config)
@@ -237,7 +238,7 @@ def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
             else:
                 remaining = cooldown_hours * 3600 - (now - last_alert)
                 print(
-                    f"  Big Bet: BULL {ticker} ({len(bull_conds)}/6) — cooldown ({remaining/60:.0f}m left)"
+                    f"  Big Bet: BULL {ticker} ({len(bull_conds)}/{TOTAL_CONDITIONS}) — cooldown ({remaining/60:.0f}m left)"
                 )
 
         # Check BEAR alert
@@ -249,7 +250,7 @@ def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
                     ticker, "BEAR", bear_conds, prices_usd, fx_rate, extra_info
                 )
                 print(
-                    f"  BIG BET ALERT: BEAR {ticker} ({len(bear_conds)}/{6} conditions)"
+                    f"  BIG BET ALERT: BEAR {ticker} ({len(bear_conds)}/{TOTAL_CONDITIONS} conditions)"
                 )
                 try:
                     _send_telegram(msg, config)
@@ -260,7 +261,7 @@ def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
             else:
                 remaining = cooldown_hours * 3600 - (now - last_alert)
                 print(
-                    f"  Big Bet: BEAR {ticker} ({len(bear_conds)}/6) — cooldown ({remaining/60:.0f}m left)"
+                    f"  Big Bet: BEAR {ticker} ({len(bear_conds)}/{TOTAL_CONDITIONS}) — cooldown ({remaining/60:.0f}m left)"
                 )
 
     if changed:

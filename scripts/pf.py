@@ -25,8 +25,12 @@ TICKER_ALIASES = {
     "eth-usd": "ETH-USD",
     "mstr": "MSTR",
     "pltr": "PLTR",
+    "nvda": "NVDA",
 }
 
+CRYPTO_SYMBOLS = {"BTC-USD", "ETH-USD"}
+FEE_CRYPTO = 0.0005
+FEE_STOCK = 0.001
 MIN_TRADE_SEK = 500
 W = 80
 
@@ -37,6 +41,23 @@ def load_json(path):
     except (FileNotFoundError, json.JSONDecodeError) as e:
         print(f"Error reading {path.name}: {e}")
         sys.exit(1)
+
+
+def _atomic_write_json(path, data):
+    import os, tempfile
+
+    path.parent.mkdir(exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, default=str)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def normalize_ticker(raw):
@@ -229,7 +250,7 @@ def cmd_trades(args):
         return
 
     for t in reversed(recent):
-        ts = t.get("time", "")
+        ts = t.get("timestamp") or t.get("time", "")
         try:
             dt = datetime.fromisoformat(ts)
             date_str = dt.strftime("%m-%d %H:%M")
@@ -336,7 +357,10 @@ def cmd_buy(args):
         return
 
     price_sek = price_usd * fx
-    shares = alloc_sek / price_sek
+    fee_rate = FEE_CRYPTO if ticker in CRYPTO_SYMBOLS else FEE_STOCK
+    fee = alloc_sek * fee_rate
+    net_alloc = alloc_sek - fee
+    shares = net_alloc / price_sek
 
     cur = state.setdefault("holdings", {}).get(ticker, {"shares": 0, "avg_cost_usd": 0})
     total_shares = cur["shares"] + shares
@@ -351,23 +375,28 @@ def cmd_buy(args):
         "avg_cost_usd": avg_cost,
     }
     state["cash_sek"] -= alloc_sek
+    state["total_fees_sek"] = round(state.get("total_fees_sek", 0) + fee, 2)
 
     trade = {
-        "time": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "ticker": ticker,
         "action": "BUY",
         "shares": shares,
         "price_usd": price_usd,
         "price_sek": price_sek,
+        "total_sek": alloc_sek,
+        "fee_sek": round(fee, 2),
         "confidence": 0,
         "fx_rate": fx,
         "source": "manual",
     }
     state.setdefault("transactions", []).append(trade)
-    STATE_FILE.write_text(json.dumps(state, indent=2, default=str))
+    _atomic_write_json(STATE_FILE, state)
 
     print(f"BUY  {ticker}  {fmt_shares(shares)} @ {fmt_usd(price_usd)}")
-    print(f"     {fmt_sek(alloc_sek)} SEK  ({pct*100:.0f}% of cash)")
+    print(
+        f"     {fmt_sek(alloc_sek)} SEK  ({pct*100:.0f}% of cash, fee {fmt_sek(fee)})"
+    )
     print(f"     Cash remaining: {fmt_sek(state['cash_sek'])} SEK")
 
     msg = (
@@ -403,30 +432,38 @@ def cmd_sell(args):
 
     price_usd = signals[ticker]["price_usd"]
     price_sek = price_usd * fx
+    fee_rate = FEE_CRYPTO if ticker in CRYPTO_SYMBOLS else FEE_STOCK
     cur = holdings[ticker]
     sell_shares = cur["shares"] * pct
     proceeds = sell_shares * price_sek
+    fee = proceeds * fee_rate
+    net_proceeds = proceeds - fee
 
     cur["shares"] -= sell_shares
     state["holdings"][ticker] = cur
-    state["cash_sek"] += proceeds
+    state["cash_sek"] += net_proceeds
+    state["total_fees_sek"] = round(state.get("total_fees_sek", 0) + fee, 2)
 
     trade = {
-        "time": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "ticker": ticker,
         "action": "SELL",
         "shares": sell_shares,
         "price_usd": price_usd,
         "price_sek": price_sek,
+        "total_sek": net_proceeds,
+        "fee_sek": round(fee, 2),
         "confidence": 0,
         "fx_rate": fx,
         "source": "manual",
     }
     state.setdefault("transactions", []).append(trade)
-    STATE_FILE.write_text(json.dumps(state, indent=2, default=str))
+    _atomic_write_json(STATE_FILE, state)
 
     print(f"SELL {ticker}  {fmt_shares(sell_shares)} @ {fmt_usd(price_usd)}")
-    print(f"     {fmt_sek(proceeds)} SEK  ({pct*100:.0f}% of position)")
+    print(
+        f"     {fmt_sek(net_proceeds)} SEK  ({pct*100:.0f}% of position, fee {fmt_sek(fee)})"
+    )
     print(f"     Cash now: {fmt_sek(state['cash_sek'])} SEK")
 
     msg = (

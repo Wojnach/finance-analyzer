@@ -137,15 +137,19 @@ def get_volume_signal(ticker):
         return None
     vol = klines_df["volume"].astype(float)
     close = klines_df["close"].astype(float)
-    current_vol = float(vol.iloc[-1])
+    if len(vol) < 2:
+        return None
+    last_vol = float(vol.iloc[-2])
     avg20 = (
-        float(vol.rolling(20).mean().iloc[-1]) if len(vol) >= 20 else float(vol.mean())
+        float(vol.iloc[:-1].rolling(20).mean().iloc[-1])
+        if len(vol) >= 22
+        else float(vol.iloc[:-1].mean())
     )
-    ratio = current_vol / avg20 if avg20 > 0 else 1.0
+    ratio = last_vol / avg20 if avg20 > 0 else 1.0
 
-    # Price direction over last 3 candles
-    if len(close) >= 4:
-        price_change = float(close.iloc[-1] / close.iloc[-4] - 1)
+    # Price direction over last 3 completed candles
+    if len(close) >= 5:
+        price_change = float(close.iloc[-2] / close.iloc[-5] - 1)
     else:
         price_change = 0.0
 

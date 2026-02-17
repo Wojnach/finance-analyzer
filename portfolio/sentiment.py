@@ -186,7 +186,7 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None) -> dict:
                 "title": article["title"],
                 "source": article["source"],
                 "published": article["published"],
-                "sentiment": sent["sentiment"],
+                "sentiment": sent.get("sentiment") or sent.get("label", "unknown"),
                 "confidence": sent["confidence"],
                 "scores": sent["scores"],
             }

@@ -24,7 +24,10 @@ def _read_jsonl(path, limit=100):
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line:
-            entries.append(json.loads(line))
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
     return entries[-limit:]
 
 
@@ -44,6 +47,14 @@ def api_signals():
 @app.route("/api/portfolio")
 def api_portfolio():
     data = _read_json(DATA_DIR / "portfolio_state.json")
+    if not data:
+        return jsonify({"error": "no data"}), 404
+    return jsonify(data)
+
+
+@app.route("/api/portfolio-bold")
+def api_portfolio_bold():
+    data = _read_json(DATA_DIR / "portfolio_state_bold.json")
     if not data:
         return jsonify({"error": "no data"}), 404
     return jsonify(data)

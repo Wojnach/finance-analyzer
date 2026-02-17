@@ -293,9 +293,20 @@ def backfill_outcomes():
         if entry_updated:
             updated += 1
 
-    with open(SIGNAL_LOG, "w", encoding="utf-8") as f:
-        for entry in entries:
-            f.write(json.dumps(entry) + "\n")
+    import os, tempfile
+
+    fd, tmp = tempfile.mkstemp(dir=SIGNAL_LOG.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            for entry in entries:
+                f.write(json.dumps(entry) + "\n")
+        os.replace(tmp, SIGNAL_LOG)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
     return updated
 

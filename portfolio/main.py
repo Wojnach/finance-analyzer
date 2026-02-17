@@ -53,13 +53,7 @@ def get_market_state():
     return "closed", CRYPTO_SYMBOLS, INTERVAL_MARKET_CLOSED
 
 
-USDSEK_RATE_URL = "https://api.binance.com/api/v3/ticker/price?symbol=USDTSEK"
-
 INITIAL_CASH_SEK = 500_000
-CONFIDENCE_TELEGRAM = 0.75  # 3/4 signals must agree to alert
-BUY_ALLOC = 0.20  # 20% of cash per buy
-SELL_ALLOC = 0.50  # sell 50% of position per sell
-MIN_TRADE_SEK = 500
 FEE_CRYPTO = 0.0005  # 0.05% taker fee (Binance futures)
 FEE_STOCK = 0.001  # 0.10% (typical broker commission)
 
@@ -86,6 +80,9 @@ FUNDING_RATE_TTL = 900  # 15 min
 VOLUME_TTL = 300  # 5 min
 
 
+_RETRY_COOLDOWN = 60
+
+
 def _cached(key, ttl, func, *args):
     now = time.time()
     if key in _tool_cache and now - _tool_cache[key]["time"] < ttl:
@@ -97,19 +94,12 @@ def _cached(key, ttl, func, *args):
     except Exception as e:
         print(f"    [{key}] error: {e}")
         if key in _tool_cache:
+            _tool_cache[key]["time"] = now - ttl + _RETRY_COOLDOWN
             return _tool_cache[key]["data"]
         return None
 
 
 # --- Binance API ---
-
-
-def binance_price(symbol):
-    r = requests.get(
-        f"{BINANCE_BASE}/ticker/price", params={"symbol": symbol}, timeout=5
-    )
-    r.raise_for_status()
-    return float(r.json()["price"])
 
 
 def binance_klines(symbol, interval="5m", limit=100):
@@ -147,7 +137,6 @@ ALPACA_BASE = "https://data.alpaca.markets/v2"
 ALPACA_INTERVAL_MAP = {
     "15m": ("15Min", 5),
     "1h": ("1Hour", 10),
-    "4h": ("4Hour", 30),
     "1d": ("1Day", 365),
     "1w": ("1Week", 730),
     "1M": ("1Month", 1825),
@@ -323,7 +312,7 @@ def _fetch_klines(source, interval, limit):
 STOCK_TIMEFRAMES = [
     ("Now", "15m", 100, 0),
     ("12h", "1h", 100, 300),
-    ("2d", "4h", 100, 900),
+    ("2d", "1h", 48, 900),
     ("7d", "1d", 30, 3600),
     ("1mo", "1d", 100, 3600),
     ("3mo", "1w", 100, 43200),
@@ -901,73 +890,6 @@ def invoke_agent(reasons):
         return False
 
 
-# --- Trade gating ---
-
-
-def should_trade(state, ticker, action):
-    """Check if trade is allowed. Returns (allowed, reason)."""
-    if action == "HOLD":
-        return False, "HOLD"
-    return True, ""
-
-
-# --- Trading ---
-
-
-def execute_trade(state, ticker, action, confidence, price_usd, fx_rate):
-    if action == "HOLD":
-        return None
-
-    price_sek = price_usd * fx_rate
-    fee_rate = FEE_CRYPTO if ticker in CRYPTO_SYMBOLS else FEE_STOCK
-    holdings = state.setdefault("holdings", {})
-
-    if action == "BUY":
-        alloc = state["cash_sek"] * BUY_ALLOC
-        if alloc < MIN_TRADE_SEK:
-            return None
-        fee = alloc * fee_rate
-        net_alloc = alloc - fee
-        shares = net_alloc / price_sek
-        cur = holdings.get(ticker, {"shares": 0, "avg_cost_usd": 0})
-        total = cur["shares"] + shares
-        avg = (
-            (cur["shares"] * cur["avg_cost_usd"] + shares * price_usd) / total
-            if total > 0
-            else price_usd
-        )
-        holdings[ticker] = {"shares": total, "avg_cost_usd": avg}
-        state["cash_sek"] -= alloc
-
-    elif action == "SELL":
-        cur = holdings.get(ticker, {"shares": 0, "avg_cost_usd": 0})
-        if cur["shares"] <= 0:
-            return None
-        sell_shares = cur["shares"] * SELL_ALLOC
-        proceeds = sell_shares * price_sek
-        fee = proceeds * fee_rate
-        proceeds -= fee
-        cur["shares"] -= sell_shares
-        holdings[ticker] = cur
-        state["cash_sek"] += proceeds
-        shares = sell_shares
-
-    trade = {
-        "time": datetime.now(timezone.utc).isoformat(),
-        "ticker": ticker,
-        "action": action,
-        "shares": shares,
-        "price_usd": price_usd,
-        "price_sek": price_sek,
-        "confidence": confidence,
-        "fx_rate": fx_rate,
-        "fee_sek": round(fee, 2),
-    }
-    state.setdefault("transactions", []).append(trade)
-    state["total_fees_sek"] = round(state.get("total_fees_sek", 0) + fee, 2)
-    return trade
-
-
 def portfolio_value(state, prices_usd, fx_rate):
     total = state["cash_sek"]
     for ticker, h in state.get("holdings", {}).items():
@@ -1043,123 +965,6 @@ def _maybe_send_alert(config, signals, prices_usd, fx_rate, state, reasons, tf_d
         print(f"  Alert sent: {headline}")
     except Exception as e:
         print(f"  WARNING: alert send failed: {e}")
-
-
-def _rsi_arrow(rsi):
-    if rsi < 30:
-        return "oversold"
-    if rsi < 45:
-        return "low"
-    if rsi > 70:
-        return "overbought"
-    if rsi > 55:
-        return "high"
-    return ""
-
-
-def build_report(state, signals, trades, prices_usd, fx_rate, tf_data=None):
-    total = portfolio_value(state, prices_usd, fx_rate)
-    pnl = total - state["initial_value_sek"]
-    pnl_pct = (pnl / state["initial_value_sek"]) * 100
-    lines = []
-
-    # --- Lead with the action ---
-    if trades:
-        for t in trades:
-            amt_sek = t["shares"] * t["price_sek"]
-            lines.append(
-                f"*{t['action']} {t['ticker']}* — {t['shares']:.6f} @ ${t['price_usd']:,.2f} ({amt_sek:,.0f} SEK)"
-            )
-    else:
-        for ticker, sig in signals.items():
-            voters = sig.get("extra", {}).get("_voters", 0)
-            lines.append(
-                f"*{sig['action']} {ticker}* ({sig['confidence']:.0%}, {voters} voting)"
-            )
-
-    lines.append("")
-
-    # --- Per-instrument compact breakdown ---
-    for ticker, sig in signals.items():
-        extra = sig.get("extra", {})
-        now_ind = sig["indicators"]
-
-        # Header: ticker + price + signals summary
-        parts = [f"*{ticker}*  ${now_ind['close']:,.2f}"]
-        sig_parts = []
-        if "fear_greed" in extra:
-            sig_parts.append(f"F&G:{extra['fear_greed']}")
-        if "sentiment" in extra:
-            sig_parts.append(f"News:{extra['sentiment']}")
-        if "ministral_action" in extra:
-            sig_parts.append(f"8B:{extra['ministral_action']}")
-        if "custom_lora_action" in extra:
-            sig_parts.append(f"LoRA:{extra['custom_lora_action']}")
-        if "ml_action" in extra:
-            sig_parts.append(f"ML:{extra['ml_action']}")
-        if sig_parts:
-            parts.append(" | ".join(sig_parts))
-        lines.append("  ".join(parts))
-
-        # Timeframe table — compact
-        ticker_tfs = tf_data.get(ticker, []) if tf_data else []
-        for label, entry in ticker_tfs:
-            if "error" in entry:
-                continue
-            ind = entry["indicators"]
-            rsi = ind["rsi"]
-            macd_dir = "+" if ind["macd_hist"] > 0 else "-"
-            ema_dir = "+" if ind["ema9"] > ind["ema21"] else "-"
-            rsi_note = _rsi_arrow(rsi)
-
-            if label == "Now":
-                action = sig["action"]
-                conf = sig["confidence"]
-            else:
-                action = entry["action"]
-                conf = entry["confidence"]
-
-            rsi_str = f"{rsi:.0f}"
-            if rsi_note:
-                rsi_str += f"({rsi_note})"
-            lines.append(
-                f"  {label:<4} *{action}* {conf:.0%} R{rsi_str} M{macd_dir} E{ema_dir}"
-            )
-
-        # Ministral reasoning — truncate to last full sentence
-        reasoning = extra.get("ministral_reasoning", "")
-        if reasoning:
-            if len(reasoning) > 120:
-                cut = reasoning[:120]
-                last_stop = max(cut.rfind("."), cut.rfind("!"), cut.rfind(";"))
-                if last_stop > 40:
-                    reasoning = cut[: last_stop + 1]
-                else:
-                    reasoning = cut.rstrip() + "..."
-            lines.append(f"  _8B: {reasoning}_")
-        lines.append("")
-
-    # --- Portfolio ---
-    lines.append(f"Portfolio: *{total:,.0f} SEK* ({pnl_pct:+.2f}%)")
-
-    holdings_parts = []
-    for ticker, h in state.get("holdings", {}).items():
-        if h["shares"] > 0:
-            val = h["shares"] * prices_usd.get(ticker, 0) * fx_rate
-            cost = h["avg_cost_usd"]
-            cur = prices_usd.get(ticker, cost)
-            ticker_pnl = ((cur - cost) / cost * 100) if cost > 0 else 0
-            holdings_parts.append(f"{ticker}: {val:,.0f} SEK ({ticker_pnl:+.1f}%)")
-    if holdings_parts:
-        lines.append(" | ".join(holdings_parts))
-
-    lines.append(f"Cash: {state['cash_sek']:,.0f} SEK")
-
-    # --- Date at bottom ---
-    lines.append("")
-    lines.append(f"_{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_")
-
-    return "\n".join(lines)
 
 
 # --- Main ---

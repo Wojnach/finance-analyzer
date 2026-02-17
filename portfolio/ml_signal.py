@@ -37,13 +37,14 @@ def compute_features(df, symbol_flag=0):
     delta = close.diff()
     gain = delta.where(delta > 0, 0.0)
     loss = (-delta).where(delta < 0, 0.0)
+    eps = np.finfo(float).eps
     avg_gain = gain.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
-    feats["rsi14"] = 100 - (100 / (1 + avg_gain / avg_loss))
+    feats["rsi14"] = 100 - (100 / (1 + avg_gain / avg_loss.replace(0, eps)))
 
     avg_gain7 = gain.ewm(alpha=1 / 7, min_periods=7, adjust=False).mean()
     avg_loss7 = loss.ewm(alpha=1 / 7, min_periods=7, adjust=False).mean()
-    feats["rsi7"] = 100 - (100 / (1 + avg_gain7 / avg_loss7))
+    feats["rsi7"] = 100 - (100 / (1 + avg_gain7 / avg_loss7.replace(0, eps)))
 
     ema12 = close.ewm(span=12, adjust=False).mean()
     ema26 = close.ewm(span=26, adjust=False).mean()

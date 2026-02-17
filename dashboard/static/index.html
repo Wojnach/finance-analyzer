@@ -701,7 +701,7 @@
       <div class="hdr-r">
         <div class="ps" id="pSum">
           <div class="st">
-            <div class="sl">Total</div>
+            <div class="sl">Patient</div>
             <div class="sv" id="tvl">--</div>
           </div>
           <div class="st">
@@ -711,6 +711,10 @@
           <div class="st">
             <div class="sl">Cash</div>
             <div class="sv" id="csh">--</div>
+          </div>
+          <div class="st" id="boldSum" style="display: none">
+            <div class="sl">Bold</div>
+            <div class="sv">--</div>
           </div>
         </div>
         <div class="rf">
@@ -771,7 +775,6 @@
       var T = ["BTC-USD", "ETH-USD", "MSTR", "PLTR", "NVDA"],
         CR = new Set(["BTC-USD", "ETH-USD"]),
         ATF = ["Now", "12h", "2d", "7d", "1mo", "3mo", "6mo"],
-        STF = new Set(["Now", "7d", "1mo", "3mo", "6mo"]),
         cdv = 30,
         cdi;
       function ac(a) {
@@ -869,11 +872,21 @@
             n: "RSI",
             a: sig.rsi >= 70 ? "SELL" : sig.rsi <= 30 ? "BUY" : "HOLD",
           });
-        if (sig.macd_hist != null)
+        if (ex.macd_action)
+          v.push({ n: "MACD", a: ex.macd_action.toUpperCase() });
+        else if (sig.macd_hist != null) {
+          var mh = sig.macd_hist,
+            mp = ex.macd_hist_prev;
           v.push({
             n: "MACD",
-            a: sig.macd_hist > 0 ? "BUY" : sig.macd_hist < 0 ? "SELL" : "HOLD",
+            a:
+              mh > 0 && mp != null && mp <= 0
+                ? "BUY"
+                : mh < 0 && mp != null && mp >= 0
+                  ? "SELL"
+                  : "HOLD",
           });
+        }
         if (sig.bb_position)
           v.push({
             n: "BB",
@@ -887,23 +900,28 @@
           v.push({
             n: "F&G",
             a:
-              ex.fear_greed <= 25
+              ex.fear_greed <= 20
                 ? "BUY"
-                : ex.fear_greed >= 75
+                : ex.fear_greed >= 80
                   ? "SELL"
                   : "HOLD",
           });
-        if (ex.sentiment)
+        if (ex.sentiment) {
+          var sConf = ex.sentiment_conf || 0;
           v.push({
             n: "Sent",
-            a: /bullish|positive/i.test(ex.sentiment)
-              ? "BUY"
-              : /bearish|negative/i.test(ex.sentiment)
-                ? "SELL"
-                : "HOLD",
+            a:
+              /positive/i.test(ex.sentiment) && sConf > 0.4
+                ? "BUY"
+                : /negative/i.test(ex.sentiment) && sConf > 0.4
+                  ? "SELL"
+                  : "HOLD",
           });
+        }
         if (ex.ministral_action)
           v.push({ n: "LLM", a: ex.ministral_action.toUpperCase() });
+        if (ex.custom_lora_action)
+          v.push({ n: "LoRA", a: ex.custom_lora_action.toUpperCase() });
         if (ex.ml_action) v.push({ n: "ML", a: ex.ml_action.toUpperCase() });
         if (ex.funding_action)
           v.push({ n: "Fund", a: ex.funding_action.toUpperCase() });
@@ -991,13 +1009,8 @@
             tfs.forEach(function (f) {
               tm[f.horizon] = f;
             });
-          var ic = CR.has(t);
           tb += "<tr><td>" + t + "</td>";
           ATF.forEach(function (h) {
-            if (!ic && !STF.has(h)) {
-              tb += '<td class="cN">-</td>';
-              return;
-            }
             var f = tm[h];
             if (f) {
               var a = (f.action || "HOLD").toUpperCase(),
@@ -1184,7 +1197,7 @@
                 : "var(--gry)";
           h +=
             "<tr><td>" +
-            ft(x.timestamp) +
+            ft(x.timestamp || x.time) +
             '</td><td style="font-weight:600">' +
             eh(x.ticker || "") +
             '</td><td style="color:' +
@@ -1437,10 +1450,40 @@
           return null;
         }
       }
+      function rBoldSummary(bold, sig) {
+        var el = document.getElementById("boldSum");
+        if (!bold || !sig) {
+          if (el) el.style.display = "none";
+          return;
+        }
+        var fx = sig.fx_rate || 1,
+          sigs = sig.signals || {};
+        var total = bold.cash_sek || 0;
+        var hld = bold.holdings || {};
+        for (var t in hld) {
+          if (hld[t].shares > 0 && sigs[t])
+            total += hld[t].shares * sigs[t].price_usd * fx;
+        }
+        var init = bold.initial_value_sek || 500000;
+        var pnl = ((total - init) / init) * 100;
+        if (el) {
+          el.style.display = "";
+          var lbl = el.querySelector(".sl");
+          var val = el.querySelector(".sv");
+          if (lbl) lbl.textContent = "Bold";
+          if (val) {
+            val.textContent =
+              fs(total) + " (" + (pnl >= 0 ? "+" : "") + fn(pnl, 2) + "%)";
+            val.style.color =
+              pnl > 0 ? "var(--grn)" : pnl < 0 ? "var(--red)" : "var(--tx)";
+          }
+        }
+      }
       async function refresh() {
-        var [sig, port, tel, acc, lor] = await Promise.all([
+        var [sig, port, portBold, tel, acc, lor] = await Promise.all([
           fj("/api/signals"),
           fj("/api/portfolio"),
+          fj("/api/portfolio-bold"),
           fj("/api/telegrams"),
           fj("/api/accuracy"),
           fj("/api/lora-status"),
@@ -1461,6 +1504,7 @@
           rCards(sig.signals);
           rHeat(sig.timeframes);
           rMkt(sig.signals, sig.macro);
+          rBoldSummary(portBold, sig);
         }
         rTrades(port);
         rAcc(acc);

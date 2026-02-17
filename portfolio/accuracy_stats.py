@@ -74,6 +74,7 @@ def signal_accuracy(horizon="1d"):
             "correct": s["correct"],
             "total": s["total"],
             "accuracy": acc,
+            "pct": round(acc * 100, 1),
         }
     return result
 
@@ -102,7 +103,12 @@ def consensus_accuracy(horizon="1d"):
                 correct += 1
 
     acc = correct / total if total > 0 else 0.0
-    return {"correct": correct, "total": total, "accuracy": acc}
+    return {
+        "correct": correct,
+        "total": total,
+        "accuracy": acc,
+        "pct": round(acc * 100, 1),
+    }
 
 
 def per_ticker_accuracy(horizon="1d"):
@@ -130,7 +136,12 @@ def per_ticker_accuracy(horizon="1d"):
     result = {}
     for ticker, s in stats.items():
         acc = s["correct"] / s["total"] if s["total"] > 0 else 0.0
-        result[ticker] = {"correct": s["correct"], "total": s["total"], "accuracy": acc}
+        result[ticker] = {
+            "correct": s["correct"],
+            "total": s["total"],
+            "accuracy": acc,
+            "pct": round(acc * 100, 1),
+        }
     return result
 
 
