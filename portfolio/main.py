@@ -1293,6 +1293,16 @@ def run(force_report=False, active_symbols=None):
         write_agent_summary(signals, prices_usd, fx_rate, state, tf_data)
         print("\n  No trigger — nothing changed.")
 
+    # Big Bet detection (runs every cycle, alerts on extreme setups)
+    bigbet_cfg = config.get("bigbet", {})
+    if bigbet_cfg.get("enabled", False):
+        try:
+            from portfolio.bigbet import check_bigbet
+
+            check_bigbet(signals, prices_usd, fx_rate, tf_data, config)
+        except Exception as e:
+            print(f"  WARNING: Big Bet check failed: {e}")
+
 
 def loop(interval=None):
     print("Starting loop with market-aware scheduling. Ctrl+C to stop.")
