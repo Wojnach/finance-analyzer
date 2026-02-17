@@ -249,6 +249,22 @@ def compute_indicators(df):
     bb_upper = bb_mid + 2 * bb_std
     bb_lower = bb_mid - 2 * bb_std
 
+    # ATR(14) — Average True Range for volatility measurement
+    tr = pd.concat(
+        [
+            df["high"] - df["low"],
+            (df["high"] - close.shift(1)).abs(),
+            (df["low"] - close.shift(1)).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    atr14 = tr.ewm(span=14, adjust=False).mean().iloc[-1]
+
+    # RSI rolling percentiles for adaptive thresholds
+    rsi_series = rsi
+    rsi_p20 = rsi_series.rolling(100, min_periods=20).quantile(0.2).iloc[-1]
+    rsi_p80 = rsi_series.rolling(100, min_periods=20).quantile(0.8).iloc[-1]
+
     return {
         "close": float(close.iloc[-1]),
         "rsi": float(rsi.iloc[-1]),
@@ -268,7 +284,31 @@ def compute_indicators(df):
                 else "inside"
             )
         ),
+        "atr": float(atr14),
+        "atr_pct": float(atr14 / close.iloc[-1]) * 100,
+        "rsi_p20": float(rsi_p20) if not pd.isna(rsi_p20) else 30.0,
+        "rsi_p80": float(rsi_p80) if not pd.isna(rsi_p80) else 70.0,
     }
+
+
+def detect_regime(indicators, is_crypto=True):
+    atr_pct = indicators.get("atr_pct", 0)
+    ema9 = indicators.get("ema9", 0)
+    ema21 = indicators.get("ema21", 0)
+    rsi = indicators.get("rsi", 50)
+
+    high_vol_threshold = 4.0 if is_crypto else 3.0
+    if atr_pct > high_vol_threshold:
+        return "high-vol"
+
+    ema_gap_pct = abs(ema9 - ema21) / ema21 * 100 if ema21 != 0 else 0
+    if ema_gap_pct > 1.0:
+        if ema9 > ema21 and rsi > 45:
+            return "trending-up"
+        if ema9 < ema21 and rsi < 55:
+            return "trending-down"
+
+    return "ranging"
 
 
 # --- Technical-only signal (for longer timeframes) ---
@@ -398,42 +438,110 @@ def _set_prev_sentiment(ticker, direction):
         pass
 
 
+REGIME_WEIGHTS = {
+    "trending-up": {"ema": 1.5, "macd": 1.3, "rsi": 0.7, "bb": 0.7},
+    "trending-down": {"ema": 1.5, "macd": 1.3, "rsi": 0.7, "bb": 0.7},
+    "ranging": {"rsi": 1.5, "bb": 1.5, "ema": 0.5, "macd": 0.5},
+    "high-vol": {"bb": 1.5, "volume": 1.3, "funding": 1.3, "ema": 0.5},
+}
+
+
+def _weighted_consensus(votes, accuracy_data, regime):
+    buy_weight = 0.0
+    sell_weight = 0.0
+    regime_mults = REGIME_WEIGHTS.get(regime, {})
+    for signal_name, vote in votes.items():
+        if vote == "HOLD":
+            continue
+        stats = accuracy_data.get(signal_name, {})
+        acc = stats.get("accuracy", 0.5)
+        samples = stats.get("total", 0)
+        weight = acc if samples >= 20 else 0.5
+        weight *= regime_mults.get(signal_name, 1.0)
+        if vote == "BUY":
+            buy_weight += weight
+        elif vote == "SELL":
+            sell_weight += weight
+    total_weight = buy_weight + sell_weight
+    if total_weight == 0:
+        return "HOLD", 0.0
+    buy_conf = buy_weight / total_weight
+    sell_conf = sell_weight / total_weight
+    if buy_conf > sell_conf and buy_conf >= 0.5:
+        return "BUY", round(buy_conf, 4)
+    if sell_conf > buy_conf and sell_conf >= 0.5:
+        return "SELL", round(sell_conf, 4)
+    return "HOLD", round(max(buy_conf, sell_conf), 4)
+
+
+def _confluence_score(votes, indicators):
+    active = {k: v for k, v in votes.items() if v != "HOLD"}
+    if not active:
+        return 0.0
+    buy_count = sum(1 for v in active.values() if v == "BUY")
+    sell_count = sum(1 for v in active.values() if v == "SELL")
+    majority = max(buy_count, sell_count)
+    score = majority / len(active)
+    if indicators.get("volume_action") in ("BUY", "SELL"):
+        vol_dir = indicators.get("volume_action")
+        majority_dir = "BUY" if buy_count >= sell_count else "SELL"
+        if vol_dir == majority_dir:
+            score += 0.1
+    return min(round(score, 4), 1.0)
+
+
+def _time_of_day_factor():
+    hour = datetime.now(timezone.utc).hour
+    if 2 <= hour <= 6:
+        return 0.8
+    return 1.0
+
+
 def generate_signal(ind, ticker=None, config=None, timeframes=None):
-    buy = 0
-    sell = 0
+    votes = {}
     extra_info = {}
 
-    # RSI — only votes at extremes
-    if ind["rsi"] < 30:
-        buy += 1
-    elif ind["rsi"] > 70:
-        sell += 1
+    # RSI — only votes at extremes (adaptive thresholds from rolling percentiles)
+    rsi_lower = ind.get("rsi_p20", 30)
+    rsi_upper = ind.get("rsi_p80", 70)
+    rsi_lower = max(rsi_lower, 15)
+    rsi_upper = min(rsi_upper, 85)
+    if ind["rsi"] < rsi_lower:
+        votes["rsi"] = "BUY"
+    elif ind["rsi"] > rsi_upper:
+        votes["rsi"] = "SELL"
+    else:
+        votes["rsi"] = "HOLD"
 
     # MACD — only votes on crossover
     if ind["macd_hist"] > 0 and ind["macd_hist_prev"] <= 0:
-        buy += 1
+        votes["macd"] = "BUY"
     elif ind["macd_hist"] < 0 and ind["macd_hist_prev"] >= 0:
-        sell += 1
+        votes["macd"] = "SELL"
+    else:
+        votes["macd"] = "HOLD"
 
     # EMA trend — votes only when gap is meaningful (>0.5%)
     ema_gap_pct = (
         abs(ind["ema9"] - ind["ema21"]) / ind["ema21"] * 100 if ind["ema21"] != 0 else 0
     )
     if ema_gap_pct >= 0.5:
-        if ind["ema9"] > ind["ema21"]:
-            buy += 1
-        else:
-            sell += 1
+        votes["ema"] = "BUY" if ind["ema9"] > ind["ema21"] else "SELL"
+    else:
+        votes["ema"] = "HOLD"
 
     # Bollinger Bands — only votes at extremes
     if ind["price_vs_bb"] == "below_lower":
-        buy += 1
+        votes["bb"] = "BUY"
     elif ind["price_vs_bb"] == "above_upper":
-        sell += 1
+        votes["bb"] = "SELL"
+    else:
+        votes["bb"] = "HOLD"
 
     # --- Extended signals from tools (optional) ---
 
     # Fear & Greed Index (per-ticker: crypto->alternative.me, stocks->VIX)
+    votes["fear_greed"] = "HOLD"
     try:
         from portfolio.fear_greed import get_fear_greed
 
@@ -443,9 +551,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None):
             extra_info["fear_greed"] = fg["value"]
             extra_info["fear_greed_class"] = fg["classification"]
             if fg["value"] <= 20:
-                buy += 1
+                votes["fear_greed"] = "BUY"
             elif fg["value"] >= 80:
-                sell += 1
+                votes["fear_greed"] = "SELL"
     except ImportError:
         pass
 
@@ -469,6 +577,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None):
 
     # Sentiment (crypto->CryptoBERT, stocks->Trading-Hero-LLM) — includes social posts
     # Hysteresis: flipping direction requires confidence > 0.55, same direction > 0.40
+    votes["sentiment"] = "HOLD"
     if ticker:
         short_ticker = ticker.replace("-USD", "")
         try:
@@ -490,7 +599,6 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None):
                 if sent.get("sources"):
                     extra_info["sentiment_sources"] = sent["sources"]
 
-                # Determine confidence threshold with hysteresis
                 prev_sent_dir = _get_prev_sentiment(ticker)
                 current_dir = sent["overall_sentiment"]
                 if (
@@ -498,26 +606,27 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None):
                     and current_dir != prev_sent_dir
                     and current_dir != "neutral"
                 ):
-                    sent_threshold = 0.55  # flipping direction — higher bar
+                    sent_threshold = 0.55
                 else:
-                    sent_threshold = 0.40  # same direction or first reading
+                    sent_threshold = 0.40
 
                 if (
                     sent["overall_sentiment"] == "positive"
                     and sent["confidence"] > sent_threshold
                 ):
-                    buy += 1
+                    votes["sentiment"] = "BUY"
                     _set_prev_sentiment(ticker, "positive")
                 elif (
                     sent["overall_sentiment"] == "negative"
                     and sent["confidence"] > sent_threshold
                 ):
-                    sell += 1
+                    votes["sentiment"] = "SELL"
                     _set_prev_sentiment(ticker, "negative")
         except ImportError:
             pass
 
     # ML Classifier (HistGradientBoosting on BTC/ETH 1h data)
+    votes["ml"] = "HOLD"
     if ticker:
         try:
             from portfolio.ml_signal import get_ml_signal
@@ -526,14 +635,12 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None):
             if ml:
                 extra_info["ml_action"] = ml["action"]
                 extra_info["ml_confidence"] = ml["confidence"]
-                if ml["action"] == "BUY":
-                    buy += 1
-                elif ml["action"] == "SELL":
-                    sell += 1
+                votes["ml"] = ml["action"]
         except ImportError:
             pass
 
     # Funding Rate (Binance perpetuals, crypto only — contrarian)
+    votes["funding"] = "HOLD"
     if ticker:
         try:
             from portfolio.funding_rate import get_funding_rate
@@ -544,14 +651,12 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None):
             if fr:
                 extra_info["funding_rate"] = fr["rate_pct"]
                 extra_info["funding_action"] = fr["action"]
-                if fr["action"] == "BUY":
-                    buy += 1
-                elif fr["action"] == "SELL":
-                    sell += 1
+                votes["funding"] = fr["action"]
         except ImportError:
             pass
 
     # Volume Confirmation (spike + price direction = vote)
+    votes["volume"] = "HOLD"
     if ticker:
         try:
             from portfolio.macro_context import get_volume_signal
@@ -560,15 +665,13 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None):
             if vs:
                 extra_info["volume_ratio"] = vs["ratio"]
                 extra_info["volume_action"] = vs["action"]
-                if vs["action"] == "BUY":
-                    buy += 1
-                elif vs["action"] == "SELL":
-                    sell += 1
+                votes["volume"] = vs["action"]
         except ImportError:
             pass
 
     # Ministral-8B LLM reasoning (original CryptoTrader-LM + custom LoRA, crypto only)
-    # Runs AFTER all other signals so it can include their results in its context
+    votes["ministral"] = "HOLD"
+    votes["custom_lora"] = "HOLD"
     if ticker and ticker in CRYPTO_SYMBOLS:
         short_ticker = ticker.replace("-USD", "")
         try:
@@ -623,21 +726,19 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None):
                 orig = ms.get("original") or ms
                 extra_info["ministral_action"] = orig["action"]
                 extra_info["ministral_reasoning"] = orig.get("reasoning", "")
-                if orig["action"] == "BUY":
-                    buy += 1
-                elif orig["action"] == "SELL":
-                    sell += 1
+                votes["ministral"] = orig["action"]
 
                 cust = ms.get("custom")
                 if cust:
                     extra_info["custom_lora_action"] = cust["action"]
                     extra_info["custom_lora_reasoning"] = cust.get("reasoning", "")
-                    if cust["action"] == "BUY":
-                        buy += 1
-                    elif cust["action"] == "SELL":
-                        sell += 1
+                    votes["custom_lora"] = cust["action"]
         except ImportError:
             pass
+
+    # Derive buy/sell counts from named votes
+    buy = sum(1 for v in votes.values() if v == "BUY")
+    sell = sum(1 for v in votes.values() if v == "SELL")
 
     # Total applicable signals: crypto has 4 extra (CryptoTrader-LM, Custom LoRA, ML, Funding Rate)
     is_crypto = ticker in CRYPTO_SYMBOLS
@@ -661,10 +762,38 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None):
             action = "HOLD"
             conf = max(buy_conf, sell_conf)
 
+    # Weighted consensus using accuracy data and regime
+    regime = detect_regime(ind, is_crypto=ticker in CRYPTO_SYMBOLS)
+    accuracy_data = {}
+    try:
+        from portfolio.accuracy_stats import load_cached_accuracy, signal_accuracy
+
+        cached = load_cached_accuracy("1d")
+        if cached:
+            accuracy_data = cached
+        else:
+            accuracy_data = signal_accuracy("1d")
+    except Exception:
+        pass
+    weighted_action, weighted_conf = _weighted_consensus(votes, accuracy_data, regime)
+
+    # Confluence score
+    confluence = _confluence_score(votes, extra_info)
+
+    # Time-of-day confidence adjustment
+    tod_factor = _time_of_day_factor()
+    conf *= tod_factor
+    weighted_conf *= tod_factor
+
     extra_info["_voters"] = active_voters
     extra_info["_total_applicable"] = total_applicable
     extra_info["_buy_count"] = buy
     extra_info["_sell_count"] = sell
+    extra_info["_votes"] = votes
+    extra_info["_regime"] = regime
+    extra_info["_weighted_action"] = weighted_action
+    extra_info["_weighted_confidence"] = weighted_conf
+    extra_info["_confluence_score"] = confluence
     return action, conf, extra_info
 
 
@@ -702,6 +831,26 @@ def save_state(state):
     _atomic_write_json(STATE_FILE, state)
 
 
+def _cross_asset_signals(all_signals):
+    btc = all_signals.get("BTC-USD", {})
+    btc_action = btc.get("action", "HOLD")
+    if btc_action == "HOLD":
+        return {}
+
+    followers = {"ETH-USD": "BTC-USD", "MSTR": "BTC-USD"}
+    leads = {}
+    for follower, leader in followers.items():
+        f_data = all_signals.get(follower, {})
+        f_action = f_data.get("action", "HOLD")
+        if f_action == "HOLD" and btc_action != "HOLD":
+            leads[follower] = {
+                "leader": leader,
+                "leader_action": btc_action,
+                "note": f"{leader} is {btc_action} but {follower} hasn't moved yet",
+            }
+    return leads
+
+
 # --- Agent summary + invocation ---
 
 
@@ -733,10 +882,15 @@ def write_agent_summary(
         summary["signals"][name] = {
             "action": sig["action"],
             "confidence": sig["confidence"],
+            "weighted_confidence": extra.get("_weighted_confidence", 0.0),
+            "confluence_score": extra.get("_confluence_score", 0.0),
             "price_usd": ind["close"],
             "rsi": round(ind["rsi"], 1),
             "macd_hist": round(ind["macd_hist"], 2),
             "bb_position": ind["price_vs_bb"],
+            "atr": round(ind.get("atr", 0), 4),
+            "atr_pct": round(ind.get("atr_pct", 0), 2),
+            "regime": detect_regime(ind, is_crypto=name in CRYPTO_SYMBOLS),
             "extra": extra,
         }
         if "fear_greed" in extra:
@@ -811,6 +965,10 @@ def write_agent_summary(
             }
     except Exception:
         pass
+
+    cross_leads = _cross_asset_signals(signals)
+    if cross_leads:
+        summary["cross_asset_leads"] = cross_leads
 
     _atomic_write_json(AGENT_SUMMARY_FILE, summary)
     return summary

@@ -1,10 +1,13 @@
 import json
+import time
 from collections import defaultdict
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 SIGNAL_LOG = DATA_DIR / "signal_log.jsonl"
+ACCURACY_CACHE_FILE = DATA_DIR / "accuracy_cache.json"
+ACCURACY_CACHE_TTL = 3600
 
 SIGNAL_NAMES = [
     "rsi",
@@ -157,6 +160,31 @@ def best_worst_signals(horizon="1d"):
         "best": (best_name, qualified[best_name]["accuracy"]),
         "worst": (worst_name, qualified[worst_name]["accuracy"]),
     }
+
+
+def load_cached_accuracy(horizon="1d"):
+    if ACCURACY_CACHE_FILE.exists():
+        try:
+            cache = json.loads(ACCURACY_CACHE_FILE.read_text(encoding="utf-8"))
+            if time.time() - cache.get("time", 0) < ACCURACY_CACHE_TTL:
+                cached = cache.get(horizon)
+                if cached:
+                    return cached
+        except (json.JSONDecodeError, KeyError):
+            pass
+    return None
+
+
+def write_accuracy_cache(horizon, data):
+    cache = {}
+    if ACCURACY_CACHE_FILE.exists():
+        try:
+            cache = json.loads(ACCURACY_CACHE_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, KeyError):
+            pass
+    cache[horizon] = data
+    cache["time"] = time.time()
+    ACCURACY_CACHE_FILE.write_text(json.dumps(cache, indent=2), encoding="utf-8")
 
 
 def _count_entries_with_outcomes(entries, horizon):

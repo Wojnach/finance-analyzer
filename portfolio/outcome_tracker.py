@@ -114,16 +114,16 @@ def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
         extra = sig_data.get("extra", {})
         price = prices_usd.get(ticker, indicators.get("close"))
 
-        signals = {}
-        buy_count = 0
-        sell_count = 0
-        for name in SIGNAL_NAMES:
-            vote = _derive_signal_vote(name, indicators, extra)
-            signals[name] = vote
-            if vote == "BUY":
-                buy_count += 1
-            elif vote == "SELL":
-                sell_count += 1
+        passed_votes = extra.get("_votes")
+        if passed_votes:
+            signals = {name: passed_votes.get(name, "HOLD") for name in SIGNAL_NAMES}
+        else:
+            signals = {}
+            for name in SIGNAL_NAMES:
+                signals[name] = _derive_signal_vote(name, indicators, extra)
+
+        buy_count = sum(1 for v in signals.values() if v == "BUY")
+        sell_count = sum(1 for v in signals.values() if v == "SELL")
 
         consensus = sig_data.get("action", "HOLD")
         total_voters = buy_count + sell_count

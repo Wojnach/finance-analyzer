@@ -80,6 +80,21 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 - Check recent transaction history: avoid whipsaw trades
 - Consider market regime: trending vs ranging, volatility level
 - Apply judgment — raw signal consensus is an input, not a mandate
+- **ATR-based exits:** Check `atr_pct` in agent_summary.json. Use 2x ATR as a stop-loss guide.
+  If a position has moved against you by more than 2x ATR since entry, strongly consider
+  exiting. ATR% > 4% (crypto) or > 3% (stocks) = high volatility — tighten stops.
+- **Volatility-scaled sizing:** When ATR% is above average (>3% crypto, >2% stocks),
+  consider reducing position size by 30-50%. High volatility means the same % allocation
+  carries more risk.
+- **Regime context:** The `regime` field in agent_summary tells you the detected market
+  regime (trending-up/down, ranging, high-vol). In trending regimes, trust trend signals
+  (EMA, MACD) more. In ranging regimes, trust mean-reversion signals (RSI, BB) more.
+  Signal weights have already been adjusted — but your independent judgment still matters.
+- **Cross-asset leads:** Check `cross_asset_leads` — if BTC is buying but ETH/MSTR hasn't
+  moved, consider whether the follower will catch up. This is a lead indicator, not a signal.
+- **Weighted confidence:** The `weighted_confidence` field reflects accuracy-weighted
+  consensus. Compare it with the old `confidence` to see if proven signals agree with the
+  raw vote count.
 
 ### 3. Decide (for EACH strategy independently)
 

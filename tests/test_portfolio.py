@@ -75,6 +75,10 @@ class TestComputeIndicators:
             "bb_lower",
             "bb_mid",
             "price_vs_bb",
+            "atr",
+            "atr_pct",
+            "rsi_p20",
+            "rsi_p80",
         }
         assert expected == set(ind.keys())
 
