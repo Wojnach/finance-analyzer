@@ -31,7 +31,8 @@ api_keys.py
 .mcp.json
 
 # Claude Code
-.claude/
+.claude/*
+!.claude/settings.json
 
 # IDE
 .idea/
