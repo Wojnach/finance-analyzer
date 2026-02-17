@@ -721,6 +721,7 @@ class TestIntegrationHerc2:
             capture_output=True,
             text=True,
             timeout=300,
+            errors="replace",
         )
         assert result.returncode == 0
         assert "Portfolio:" in result.stdout

@@ -21,6 +21,11 @@ from portfolio.main import (
 )
 
 
+def _null_cached(key, ttl, func, *args):
+    """Mock _cached that blocks all external calls, returning None."""
+    return None
+
+
 def make_indicators(**overrides):
     base = {
         "close": 130.0,
@@ -58,7 +63,8 @@ class TestMinVotersConstants:
 class TestStockConsensus:
     """Stocks with MIN_VOTERS=2 should reach consensus with just 2 active voters."""
 
-    def test_stock_buy_with_2_voters(self):
+    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    def test_stock_buy_with_2_voters(self, _mock):
         """RSI oversold + MACD crossover = 2 BUY voters → should be BUY for stocks."""
         ind = make_indicators(
             rsi=25,  # oversold → BUY vote
@@ -75,7 +81,8 @@ class TestStockConsensus:
         assert action == "BUY"
         assert conf == 1.0
 
-    def test_stock_sell_with_2_voters(self):
+    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    def test_stock_sell_with_2_voters(self, _mock):
         """RSI overbought + MACD cross down = 2 SELL voters → should be SELL for stocks."""
         ind = make_indicators(
             rsi=75,  # overbought → SELL vote
@@ -90,7 +97,8 @@ class TestStockConsensus:
         assert extra["_voters"] == 2
         assert action == "SELL"
 
-    def test_stock_hold_with_1_voter(self):
+    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    def test_stock_hold_with_1_voter(self, _mock):
         """Only 1 active voter → should still be HOLD for stocks (need 2)."""
         ind = make_indicators(
             rsi=25,  # oversold → BUY vote (1 voter)
@@ -104,7 +112,8 @@ class TestStockConsensus:
         assert extra["_voters"] == 1
         assert action == "HOLD"
 
-    def test_all_stock_tickers_use_lower_threshold(self):
+    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    def test_all_stock_tickers_use_lower_threshold(self, _mock):
         """All 3 stock tickers should reach consensus with 2 voters."""
         for ticker in STOCK_SYMBOLS:
             ind = make_indicators(
@@ -119,7 +128,8 @@ class TestStockConsensus:
 class TestCryptoConsensus:
     """Crypto with MIN_VOTERS=3 still requires 3 active voters."""
 
-    def test_crypto_hold_with_2_voters(self):
+    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    def test_crypto_hold_with_2_voters(self, _mock):
         """2 BUY voters → HOLD for crypto (needs 3)."""
         ind = make_indicators(
             rsi=25,  # oversold → BUY vote
@@ -135,7 +145,8 @@ class TestCryptoConsensus:
         assert extra["_voters"] == 2
         assert action == "HOLD"
 
-    def test_crypto_buy_with_3_voters(self):
+    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    def test_crypto_buy_with_3_voters(self, _mock):
         """3 BUY voters → BUY for crypto."""
         ind = make_indicators(
             rsi=25,  # oversold → BUY vote
@@ -157,6 +168,7 @@ class TestSentimentHysteresis:
     def setup_method(self):
         """Reset sentiment state between tests."""
         import portfolio.main as pm
+
         pm._prev_sentiment.clear()
         pm._prev_sentiment_loaded = True  # prevent file reads in tests
 
@@ -172,9 +184,11 @@ class TestSentimentHysteresis:
             "num_articles": 5,
             "model": "test",
         }
-        with mock.patch("portfolio.main._cached", side_effect=lambda k, t, f, *a: mock_sent if "sentiment" in k else None):
-            with mock.patch("portfolio.main.get_fear_greed", side_effect=ImportError):
-                action, conf, extra = generate_signal(ind, ticker="MSTR", config={})
+        with mock.patch(
+            "portfolio.main._cached",
+            side_effect=lambda k, t, f, *a: mock_sent if "sentiment" in k else None,
+        ):
+            action, conf, extra = generate_signal(ind, ticker="MSTR", config={})
 
         # 0.45 > 0.40 threshold → should vote
         assert extra.get("sentiment") == "positive"
@@ -182,6 +196,7 @@ class TestSentimentHysteresis:
     def test_same_direction_uses_low_threshold(self):
         """Same direction as previous uses 0.40 threshold."""
         import portfolio.main as pm
+
         pm._prev_sentiment["MSTR"] = "positive"
 
         ind = make_indicators()
@@ -191,9 +206,11 @@ class TestSentimentHysteresis:
             "num_articles": 5,
             "model": "test",
         }
-        with mock.patch("portfolio.main._cached", side_effect=lambda k, t, f, *a: mock_sent if "sentiment" in k else None):
-            with mock.patch("portfolio.main.get_fear_greed", side_effect=ImportError):
-                action, conf, extra = generate_signal(ind, ticker="MSTR", config={})
+        with mock.patch(
+            "portfolio.main._cached",
+            side_effect=lambda k, t, f, *a: mock_sent if "sentiment" in k else None,
+        ):
+            action, conf, extra = generate_signal(ind, ticker="MSTR", config={})
 
         # Same direction, 0.45 > 0.40 → should vote
         assert extra.get("sentiment") == "positive"
@@ -201,6 +218,7 @@ class TestSentimentHysteresis:
     def test_flip_direction_requires_higher_threshold(self):
         """Flipping direction requires confidence > 0.55."""
         import portfolio.main as pm
+
         pm._prev_sentiment["MSTR"] = "positive"
 
         ind = make_indicators()
@@ -213,14 +231,14 @@ class TestSentimentHysteresis:
         }
 
         original_cached = None
+
         def mock_cached_fn(k, t, f, *a):
             if "sentiment" in k:
                 return mock_sent
             return None
 
         with mock.patch("portfolio.main._cached", side_effect=mock_cached_fn):
-            with mock.patch("portfolio.main.get_fear_greed", side_effect=ImportError):
-                action, conf, extra = generate_signal(ind, ticker="MSTR", config={})
+            action, conf, extra = generate_signal(ind, ticker="MSTR", config={})
 
         # 0.50 < 0.55 flip threshold → should NOT add a vote
         assert extra.get("sentiment") == "negative"  # still reported
@@ -232,6 +250,7 @@ class TestSentimentHysteresis:
     def test_flip_direction_above_threshold_votes(self):
         """Flipping direction with confidence > 0.55 should vote."""
         import portfolio.main as pm
+
         pm._prev_sentiment["MSTR"] = "positive"
 
         ind = make_indicators()
@@ -248,8 +267,7 @@ class TestSentimentHysteresis:
             return None
 
         with mock.patch("portfolio.main._cached", side_effect=mock_cached_fn):
-            with mock.patch("portfolio.main.get_fear_greed", side_effect=ImportError):
-                action, conf, extra = generate_signal(ind, ticker="MSTR", config={})
+            action, conf, extra = generate_signal(ind, ticker="MSTR", config={})
 
         # 0.60 > 0.55 flip threshold → should count as a sell vote
         assert extra["_sell_count"] >= 1
@@ -258,17 +276,20 @@ class TestSentimentHysteresis:
 class TestStockSignalVoteCounts:
     """Stock signal generation produces correct total_applicable counts."""
 
-    def test_stock_total_applicable_is_7(self):
+    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    def test_stock_total_applicable_is_7(self, _mock):
         ind = make_indicators()
         _, _, extra = generate_signal(ind, ticker="MSTR")
         assert extra["_total_applicable"] == 7
 
-    def test_crypto_total_applicable_is_11(self):
+    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    def test_crypto_total_applicable_is_11(self, _mock):
         ind = make_indicators(close=69000.0)
         _, _, extra = generate_signal(ind, ticker="BTC-USD")
         assert extra["_total_applicable"] == 11
 
-    def test_stock_max_technical_voters_is_4(self):
+    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    def test_stock_max_technical_voters_is_4(self, _mock):
         """All 4 technical signals vote → 4 active voters for stocks."""
         ind = make_indicators(
             rsi=25,  # oversold → BUY
