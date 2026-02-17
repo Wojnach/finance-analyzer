@@ -873,6 +873,14 @@ def invoke_agent(reasons):
     with open(INVOCATIONS_FILE, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
 
+    try:
+        from portfolio.journal import write_context
+
+        n = write_context()
+        print(f"  Layer 2 context: {n} journal entries")
+    except Exception as e:
+        print(f"  WARNING: journal context failed: {e}")
+
     agent_bat = BASE_DIR / "scripts" / "win" / "pf-agent.bat"
     if not agent_bat.exists():
         print(f"  WARNING: Agent script not found at {agent_bat}")

@@ -65,6 +65,7 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 
 ### 1. Read the data
 
+- `data/layer2_context.md` — **read this first.** Your memory from previous invocations: theses, regime, prices, watchlist
 - `data/agent_summary.json` — all 11 signals, all timeframes, indicators, sentiment, F&G, macro context
 - `data/portfolio_state.json` — Patient strategy: current cash, holdings, transaction history
 - `data/portfolio_state_bold.json` — Bold strategy: current cash, holdings, transaction history
@@ -72,6 +73,7 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 
 ### 2. Analyze
 
+- **Use your memory:** Compare previous thesis prices with current prices — were you right? Check if watchlist conditions were met. Notice regime shifts. If you just traded, don't reverse on noise.
 - Review all 11 signals across all timeframes for each instrument
 - Check macro context: DXY, treasury yields, yield curve, FOMC proximity
 - Assess portfolio risk: concentration, drawdown, cash reserves
@@ -214,7 +216,44 @@ Append to `transactions` array:
 }
 ```
 
-### 5. Notify via Telegram (if noteworthy)
+### 5. Write Journal Entry (before Telegram — do this EVERY invocation)
+
+Append one JSON line to `data/layer2_journal.jsonl`:
+
+```python
+import json, datetime, pathlib
+entry = {
+    "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "trigger": "THE_TRIGGER_REASON",
+    "regime": "REGIME",                     # trending-up|trending-down|range-bound|high-vol|breakout|capitulation
+    "decisions": {
+        "patient": {"action": "HOLD", "reasoning": "Brief reason"},
+        "bold": {"action": "HOLD", "reasoning": "Brief reason"}
+    },
+    "tickers": {
+        "BTC-USD": {"outlook": "neutral", "thesis": "", "levels": []},
+        "ETH-USD": {"outlook": "neutral", "thesis": "", "levels": []},
+        "MSTR": {"outlook": "neutral", "thesis": "", "levels": []},
+        "PLTR": {"outlook": "neutral", "thesis": "", "levels": []},
+        "NVDA": {"outlook": "neutral", "thesis": "", "levels": []}
+    },
+    "watchlist": ["Conditions you are watching for"],
+    "prices": {"BTC-USD": 0, "ETH-USD": 0, "MSTR": 0, "PLTR": 0, "NVDA": 0}
+}
+with open("data/layer2_journal.jsonl", "a", encoding="utf-8") as f:
+    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+```
+
+**Field guidance:**
+
+- `regime`: Use exactly one of: `trending-up`, `trending-down`, `range-bound`, `high-vol`, `breakout`, `capitulation`
+- `outlook`: `bullish`, `bearish`, or `neutral` — only set non-neutral when you have a thesis
+- `levels`: `[support, resistance]` — only when you identify specific price levels
+- `prices`: Copy current USD prices from agent_summary.json so the next invocation can compare
+- `watchlist`: 1-3 specific conditions you are watching for (e.g., "BTC breakout above 67.2K")
+- `thesis`: Brief statement of your view — the next invocation will compare this against what happened
+
+### 6. Notify via Telegram (if noteworthy)
 
 **ALWAYS send a Telegram message when you are invoked.** Every invocation means something
 triggered — the user wants to see your analysis every time. No exceptions.
