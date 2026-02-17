@@ -8,7 +8,8 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -983,6 +984,16 @@ _agent_start = 0
 AGENT_TIMEOUT = 600
 
 
+def _log_trigger(reasons, status):
+    entry = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "reasons": reasons,
+        "status": status,
+    }
+    with open(INVOCATIONS_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
 def invoke_agent(reasons):
     global _agent_proc, _agent_log, _agent_start
     if _agent_proc and _agent_proc.poll() is None:
@@ -1012,13 +1023,6 @@ def invoke_agent(reasons):
     if _agent_log:
         _agent_log.close()
         _agent_log = None
-
-    entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "reasons": reasons,
-    }
-    with open(INVOCATIONS_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
 
     try:
         from portfolio.journal import write_context
@@ -1123,6 +1127,111 @@ def _maybe_send_alert(config, signals, prices_usd, fx_rate, state, reasons, tf_d
         print(f"  Alert sent: {headline}")
     except Exception as e:
         print(f"  WARNING: alert send failed: {e}")
+
+
+# --- 12h Digest ---
+
+DIGEST_INTERVAL = 43200  # 12 hours
+
+
+def _get_last_digest_time():
+    try:
+        state = json.loads(
+            (DATA_DIR / "trigger_state.json").read_text(encoding="utf-8")
+        )
+        return state.get("last_digest_time", 0)
+    except Exception:
+        return 0
+
+
+def _set_last_digest_time(t):
+    path = DATA_DIR / "trigger_state.json"
+    state = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    state["last_digest_time"] = t
+    _atomic_write_json(path, state)
+
+
+def _build_digest_message():
+    from portfolio.stats import load_jsonl
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=12)
+
+    entries = load_jsonl(INVOCATIONS_FILE)
+    recent = [e for e in entries if datetime.fromisoformat(e["ts"]) >= cutoff]
+    reason_counts = Counter()
+    status_counts = Counter()
+    for e in recent:
+        status_counts[e.get("status", "invoked")] += 1
+        for r in e.get("reasons", []):
+            if "flipped" in r:
+                reason_counts["signal_flip"] += 1
+            elif "moved" in r:
+                reason_counts["price_move"] += 1
+            elif "F&G" in r:
+                reason_counts["fear_greed"] += 1
+            elif "sentiment" in r:
+                reason_counts["sentiment"] += 1
+            elif "cooldown" in r or "check-in" in r:
+                reason_counts["check_in"] += 1
+            else:
+                reason_counts["other"] += 1
+
+    summary = json.loads(AGENT_SUMMARY_FILE.read_text(encoding="utf-8"))
+    fx_rate = summary.get("fx_rate", 10.5)
+    prices_usd = {t: s["price_usd"] for t, s in summary.get("signals", {}).items()}
+
+    state = load_state()
+    p_total = portfolio_value(state, prices_usd, fx_rate)
+    p_pnl = ((p_total - state["initial_value_sek"]) / state["initial_value_sek"]) * 100
+    p_holdings = [
+        t for t, h in state.get("holdings", {}).items() if h.get("shares", 0) > 0
+    ]
+
+    lines = ["*12H DIGEST*", ""]
+    lines.append(
+        f"_{cutoff.strftime('%H:%M')} → {now.strftime('%H:%M UTC')} ({now.strftime('%b %d')})_"
+    )
+    lines.append(f"_Triggers: {len(recent)}_")
+    for reason, count in reason_counts.most_common():
+        lines.append(f"`{reason:<14} {count}`")
+
+    lines.append("")
+    lines.append(
+        f"_Patient: {p_total:,.0f} SEK ({p_pnl:+.1f}%) · {', '.join(p_holdings) or 'cash'}_"
+    )
+
+    if BOLD_STATE_FILE.exists():
+        bold = json.loads(BOLD_STATE_FILE.read_text(encoding="utf-8"))
+        b_total = portfolio_value(bold, prices_usd, fx_rate)
+        b_pnl = (
+            (b_total - bold["initial_value_sek"]) / bold["initial_value_sek"]
+        ) * 100
+        b_holdings = [
+            t for t, h in bold.get("holdings", {}).items() if h.get("shares", 0) > 0
+        ]
+        lines.append(
+            f"_Bold: {b_total:,.0f} SEK ({b_pnl:+.1f}%) · {', '.join(b_holdings) or 'cash'}_"
+        )
+
+    invoked = status_counts.get("invoked", 0)
+    skipped = status_counts.get("skipped_busy", 0)
+    lines.append(f"_Agent: {invoked} runs, {skipped} skipped_")
+
+    return "\n".join(lines)
+
+
+def _maybe_send_digest(config):
+    last = _get_last_digest_time()
+    if last and (time.time() - last) < DIGEST_INTERVAL:
+        return
+    try:
+        msg = _build_digest_message()
+        send_telegram(msg, config)
+        _set_last_digest_time(time.time())
+        print("  12h digest sent")
+    except Exception as e:
+        print(f"  WARNING: digest failed: {e}")
 
 
 # --- Main ---
@@ -1254,12 +1363,14 @@ def run(force_report=False, active_symbols=None):
 
         layer2_cfg = config.get("layer2", {})
         if layer2_cfg.get("enabled", True):
-            invoke_agent(reasons_list)
+            result = invoke_agent(reasons_list)
+            _log_trigger(reasons_list, "invoked" if result else "skipped_busy")
         else:
             print("  Layer 2 disabled — skipping agent invocation")
             _maybe_send_alert(
                 config, signals, prices_usd, fx_rate, state, reasons_list, tf_data
             )
+            _log_trigger(reasons_list, "alert_only")
     else:
         write_agent_summary(signals, prices_usd, fx_rate, state, tf_data)
         print("\n  No trigger — nothing changed.")
@@ -1276,9 +1387,11 @@ def run(force_report=False, active_symbols=None):
 
 
 def loop(interval=None):
+    config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
     print("Starting loop with market-aware scheduling. Ctrl+C to stop.")
     try:
         run(force_report=True)
+        _maybe_send_digest(config)
     except KeyboardInterrupt:
         raise
     except Exception as e:
@@ -1297,6 +1410,7 @@ def loop(interval=None):
         time.sleep(sleep_interval)
         try:
             run(force_report=False, active_symbols=active_symbols)
+            _maybe_send_digest(config)
         except KeyboardInterrupt:
             raise
         except Exception as e:
