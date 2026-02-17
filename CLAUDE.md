@@ -73,7 +73,7 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 
 ### 2. Analyze
 
-- **Use your memory:** Compare previous thesis prices with current prices — were you right? Check if watchlist conditions were met. Notice regime shifts. If you just traded, don't reverse on noise.
+- **Use your memory:** Compare previous thesis prices with current prices — were you right? Write your assessment in the `reflection` field. Check if watchlist conditions were met. Notice regime shifts. If you just traded, don't reverse on noise. Check the Warnings section for contradictions and whipsaws.
 - Review all 11 signals across all timeframes for each instrument
 - Check macro context: DXY, treasury yields, yield curve, FOMC proximity
 - Assess portfolio risk: concentration, drawdown, cash reserves
@@ -226,16 +226,18 @@ entry = {
     "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     "trigger": "THE_TRIGGER_REASON",
     "regime": "REGIME",                     # trending-up|trending-down|range-bound|high-vol|breakout|capitulation
+    "reflection": "",                       # 1-2 sentence assessment: was your previous thesis right?
+    "continues": None,                      # ISO-8601 ts of prior entry this updates, or null
     "decisions": {
         "patient": {"action": "HOLD", "reasoning": "Brief reason"},
         "bold": {"action": "HOLD", "reasoning": "Brief reason"}
     },
     "tickers": {
-        "BTC-USD": {"outlook": "neutral", "thesis": "", "levels": []},
-        "ETH-USD": {"outlook": "neutral", "thesis": "", "levels": []},
-        "MSTR": {"outlook": "neutral", "thesis": "", "levels": []},
-        "PLTR": {"outlook": "neutral", "thesis": "", "levels": []},
-        "NVDA": {"outlook": "neutral", "thesis": "", "levels": []}
+        "BTC-USD": {"outlook": "neutral", "thesis": "", "conviction": 0.0, "levels": []},
+        "ETH-USD": {"outlook": "neutral", "thesis": "", "conviction": 0.0, "levels": []},
+        "MSTR": {"outlook": "neutral", "thesis": "", "conviction": 0.0, "levels": []},
+        "PLTR": {"outlook": "neutral", "thesis": "", "conviction": 0.0, "levels": []},
+        "NVDA": {"outlook": "neutral", "thesis": "", "conviction": 0.0, "levels": []}
     },
     "watchlist": ["Conditions you are watching for"],
     "prices": {"BTC-USD": 0, "ETH-USD": 0, "MSTR": 0, "PLTR": 0, "NVDA": 0}
@@ -247,7 +249,10 @@ with open("data/layer2_journal.jsonl", "a", encoding="utf-8") as f:
 **Field guidance:**
 
 - `regime`: Use exactly one of: `trending-up`, `trending-down`, `range-bound`, `high-vol`, `breakout`, `capitulation`
+- `reflection`: 1-2 sentence assessment of your previous thesis vs what happened. Compare prices from your last entry against current prices. Was your outlook correct? Did watchlist conditions trigger? Leave empty on first invocation or when nothing to reflect on.
+- `continues`: ISO-8601 timestamp of a prior entry this one updates. Copy exactly from the prior entry's `ts`. Use when you're continuing/revising a thesis from a previous invocation. Set to `null` if this is a fresh assessment.
 - `outlook`: `bullish`, `bearish`, or `neutral` — only set non-neutral when you have a thesis
+- `conviction`: 0.0-1.0 confidence in your outlook. 0.0=neutral/no view, 0.3=slight lean, 0.5=moderate, 0.7=confident, 0.9+=very high conviction. Leave at 0.0 for neutral outlook.
 - `levels`: `[support, resistance]` — only when you identify specific price levels
 - `prices`: Copy current USD prices from agent_summary.json so the next invocation can compare
 - `watchlist`: 1-3 specific conditions you are watching for (e.g., "BTC breakout above 67.2K")
