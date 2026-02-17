@@ -24,8 +24,20 @@ def _load_state():
 
 
 def _save_state(state):
+    import os, tempfile
+
     DATA_DIR.mkdir(exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+    fd, tmp = tempfile.mkstemp(dir=DATA_DIR, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, default=str)
+        os.replace(tmp, str(STATE_FILE))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _evaluate_conditions(ticker, signals, prices_usd, tf_data):
@@ -107,19 +119,15 @@ def _evaluate_conditions(ticker, signals, prices_usd, tf_data):
             bull_conditions.append(f"{vol_detail} (capitulation)")
         elif vol_action == "BUY":
             bear_conditions.append(f"{vol_detail} (euphoria)")
-        else:
-            # Volume spike without clear direction — add to both
-            bull_conditions.append(f"{vol_detail} (spike)")
-            bear_conditions.append(f"{vol_detail} (spike)")
+        # HOLD = non-directional spike — not evidence for either direction
 
-    # 6. MACD divergence — price new low + MACD higher low (bull),
-    #    price new high + MACD lower high (bear)
+    # 6. MACD momentum shift — histogram turning while RSI extreme
     macd_hist = ind.get("macd_hist", 0)
     macd_hist_prev = ind.get("macd_hist_prev", 0)
     if macd_hist > macd_hist_prev and rsi_now < 35:
-        bull_conditions.append(f"MACD divergence (hist rising while oversold)")
+        bull_conditions.append(f"MACD turning up while oversold")
     if macd_hist < macd_hist_prev and rsi_now > 70:
-        bear_conditions.append(f"MACD divergence (hist falling while overbought)")
+        bear_conditions.append(f"MACD turning down while overbought")
 
     return bull_conditions, bear_conditions, {"fg": fg, "fg_class": fg_class}
 
