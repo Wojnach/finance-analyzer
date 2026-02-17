@@ -51,3 +51,13 @@ Using polling (not webhook) — works on Steam Deck with no public IP.
 - `data/iskbets_state.json` — active trade state, exit plan
 - `portfolio/iskbets.py` — monitoring logic (or extend existing main.py)
 - `portfolio/telegram_poller.py` — background process, polls getUpdates every 5s, parses commands
+
+## Dashboard (Todo #7)
+
+Add ISKBETS section to the web dashboard:
+
+- Enable/disable toggle + ticker selector + SEK amount input
+- Visual indicator when ISKBETS is active (pulsing / highlighted panel)
+- Live position view: entry price, current price, P&L, stop-loss / profit target levels
+- History of past ISKBETS trades
+- Writes to `data/iskbets_config.json` to control the feature
