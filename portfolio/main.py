@@ -1131,7 +1131,7 @@ def _maybe_send_alert(config, signals, prices_usd, fx_rate, state, reasons, tf_d
 
 # --- 12h Digest ---
 
-DIGEST_INTERVAL = 43200  # 12 hours
+DIGEST_INTERVAL = 14400  # 4 hours
 
 
 def _get_last_digest_time():
@@ -1201,7 +1201,7 @@ def _build_digest_message():
         t for t, h in state.get("holdings", {}).items() if h.get("shares", 0) > 0
     ]
 
-    lines = ["*12H DIGEST*", ""]
+    lines = ["*4H DIGEST*", ""]
     lines.append(
         f"_{cutoff.strftime('%H:%M')} - {now.strftime('%H:%M UTC')} ({now.strftime('%b %d')})_"
     )
