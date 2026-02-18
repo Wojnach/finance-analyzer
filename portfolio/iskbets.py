@@ -535,9 +535,13 @@ def format_entry_alert(ticker, price, conditions, atr, iskbets_cfg, signals=None
     stop_pct = ((stop - price) / price) * 100
     stage1_pct = ((stage1 - price) / price) * 100
 
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
     short_ticker = ticker.replace("-USD", "")
     lines = [
         f"\U0001f7e1 *ISKBETS BUY {short_ticker}* @ ${price:,.2f}",
+        f"_Signal time: {now.strftime('%H:%M')} UTC_",
         "",
     ]
 

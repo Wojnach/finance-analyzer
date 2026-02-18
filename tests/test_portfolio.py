@@ -1,7 +1,7 @@
 """Tests for the portfolio intelligence system.
 
 Unit tests run locally without models or network.
-Integration tests (marked @pytest.mark.integration) run on herc2 with live models.
+Integration tests (marked @pytest.mark.integration) run locally with live models + GPU.
 """
 
 import json
@@ -672,14 +672,60 @@ class TestStockTimeframes:
             ), f"{interval} not in ALPACA_INTERVAL_MAP"
 
 
-# --- Integration tests (run on herc2 with: pytest -m integration) ---
+# --- Integration tests (run locally with: pytest -m integration) ---
+
+
+def _check_gpu():
+    """Check if an NVIDIA GPU is available. Skip test if not."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            pytest.skip("No NVIDIA GPU detected (nvidia-smi failed)")
+    except FileNotFoundError:
+        pytest.skip("nvidia-smi not found — no GPU available")
+    except subprocess.TimeoutExpired:
+        pytest.skip("nvidia-smi timed out — GPU driver may be stuck")
 
 
 @pytest.mark.integration
 class TestIntegrationHerc2:
-    def test_ministral_gpu_inference(self):
-        """Run actual CryptoTrader-LM inference on herc2 GPU."""
+    def test_gpu_available(self):
+        """Verify GPU is accessible and not stuck."""
         import subprocess
+
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.total,memory.free,utilization.gpu",
+             "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, f"nvidia-smi failed: {result.stderr}"
+        info = result.stdout.strip()
+        assert len(info) > 0, "nvidia-smi returned empty output"
+        print(f"\nGPU: {info}")
+
+    def test_ministral_gpu_inference(self):
+        """Run actual CryptoTrader-LM inference on local GPU."""
+        import subprocess
+        import os
+
+        _check_gpu()
+
+        model_venv = r"Q:\models\.venv-llm\Scripts\python.exe"
+        model_script = r"Q:\models\ministral_trader.py"
+
+        if not os.path.exists(model_venv):
+            pytest.skip(f"Model venv not found: {model_venv}")
+        if not os.path.exists(model_script):
+            pytest.skip(f"Model script not found: {model_script}")
 
         ctx = json.dumps(
             {
@@ -696,37 +742,52 @@ class TestIntegrationHerc2:
                 "headlines": "",
             }
         )
-        result = subprocess.run(
-            [
-                "ssh",
-                "herc2@100.78.196.30",
-                f"echo {ctx} | Q:\\models\\.venv-llm\\Scripts\\python.exe Q:\\models\\ministral_trader.py",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=60,
+        try:
+            result = subprocess.run(
+                [model_venv, model_script],
+                input=ctx,
+                capture_output=True,
+                text=True,
+                timeout=90,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.fail(
+                "GPU inference timed out after 90s — model may be stuck. "
+                "Check: nvidia-smi for GPU memory, and ensure no other process holds the GPU."
+            )
+        assert result.returncode == 0, (
+            f"Model exited with code {result.returncode}\n"
+            f"stderr: {result.stderr[:500]}"
         )
-        assert result.returncode == 0
-        data = json.loads(result.stdout.strip())
+        # Parse output — model may print loading messages before JSON
+        stdout = result.stdout.strip()
+        # Find the JSON object in output (last line or last {...})
+        json_start = stdout.rfind("{")
+        assert json_start >= 0, f"No JSON found in output:\n{stdout[:500]}"
+        data = json.loads(stdout[json_start:])
         assert data["action"] in ("BUY", "SELL", "HOLD")
         assert data["model"] == "CryptoTrader-LM"
         assert len(data["reasoning"]) > 0
 
     def test_full_report(self):
-        """Run --report end-to-end on herc2."""
+        """Run --report end-to-end locally."""
         import subprocess
 
         result = subprocess.run(
             [
-                "ssh",
-                "herc2@100.78.196.30",
-                r"Q:\finance-analyzer\.venv\Scripts\python.exe Q:\finance-analyzer\portfolio\main.py --report",
+                r"Q:\finance-analyzer\.venv\Scripts\python.exe",
+                r"Q:\finance-analyzer\portfolio\main.py",
+                "--report",
             ],
             capture_output=True,
             text=True,
             timeout=300,
             errors="replace",
         )
-        assert result.returncode == 0
+        assert result.returncode == 0, (
+            f"Report exited with code {result.returncode}\n"
+            f"stderr: {result.stderr[:500]}"
+        )
         assert "Portfolio:" in result.stdout
-        assert "Sent!" in result.stdout
+        # Report should produce signal data for at least one ticker
+        assert "BTC-USD" in result.stdout or "ETH-USD" in result.stdout

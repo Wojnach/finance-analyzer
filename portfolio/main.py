@@ -1412,33 +1412,29 @@ def run(force_report=False, active_symbols=None):
         except Exception as e:
             print(f"  WARNING: Big Bet check failed: {e}")
 
-    # ISKBETS monitoring (runs every cycle when enabled)
-    iskbets_cfg = config.get("iskbets", {})
-    if iskbets_cfg.get("enabled", False):
-        try:
-            from portfolio.iskbets import check_iskbets
+    # ISKBETS monitoring (runs every cycle; session config is the on/off switch)
+    try:
+        from portfolio.iskbets import check_iskbets
 
-            check_iskbets(signals, prices_usd, fx_rate, tf_data, config)
-        except Exception as e:
-            print(f"  WARNING: ISKBETS check failed: {e}")
+        check_iskbets(signals, prices_usd, fx_rate, tf_data, config)
+    except Exception as e:
+        print(f"  WARNING: ISKBETS check failed: {e}")
 
 
 def loop(interval=None):
     config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
     print("Starting loop with market-aware scheduling. Ctrl+C to stop.")
 
-    # Start Telegram poller for ISKBETS commands
-    iskbets_cfg = config.get("iskbets", {})
-    if iskbets_cfg.get("enabled", False):
-        try:
-            from portfolio.telegram_poller import TelegramPoller
-            from portfolio.iskbets import handle_command
+    # Start Telegram poller for ISKBETS commands (lightweight daemon, no-ops when idle)
+    try:
+        from portfolio.telegram_poller import TelegramPoller
+        from portfolio.iskbets import handle_command
 
-            poller = TelegramPoller(config, on_command=handle_command)
-            poller.start()
-            print("  ISKBETS Telegram poller started")
-        except Exception as e:
-            print(f"  WARNING: ISKBETS poller failed to start: {e}")
+        poller = TelegramPoller(config, on_command=handle_command)
+        poller.start()
+        print("  ISKBETS Telegram poller started")
+    except Exception as e:
+        print(f"  WARNING: ISKBETS poller failed to start: {e}")
 
     try:
         run(force_report=True)

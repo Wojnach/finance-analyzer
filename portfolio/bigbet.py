@@ -134,10 +134,13 @@ def _evaluate_conditions(ticker, signals, prices_usd, tf_data):
 
 
 def _format_alert(ticker, direction, conditions, prices_usd, fx_rate, extra_info):
+    from datetime import datetime, timezone
+
     emoji = "\U0001f535" if direction == "BULL" else "\U0001f534"
     price = prices_usd.get(ticker, 0)
     n = len(conditions)
     total = TOTAL_CONDITIONS
+    now = datetime.now(timezone.utc)
 
     if n >= 5:
         confidence = "HIGH"
@@ -158,6 +161,7 @@ def _format_alert(ticker, direction, conditions, prices_usd, fx_rate, extra_info
         price_parts.append(f"F&G: {fg}")
     lines.append(" | ".join(price_parts))
     lines.append(f"Confidence: {confidence} ({n}/{total})")
+    lines.append(f"_Signal time: {now.strftime('%H:%M')} UTC_")
 
     lines.append("")
     if direction == "BULL":

@@ -106,6 +106,13 @@ def api_accuracy():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/iskbets")
+def api_iskbets():
+    config = _read_json(DATA_DIR / "iskbets_config.json")
+    state = _read_json(DATA_DIR / "iskbets_state.json")
+    return jsonify({"config": config, "state": state})
+
+
 @app.route("/api/lora-status")
 def api_lora_status():
     state = _read_json(TRAINING_DIR / "state.json")
