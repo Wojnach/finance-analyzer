@@ -161,12 +161,14 @@ def _format_alert(ticker, direction, conditions, prices_usd, fx_rate, extra_info
 
     lines.append("")
     if direction == "BULL":
-        lines.append(f"_Suggested: BULL warrant, ~10x leverage_")
-        lines.append(f"_Expected bounce: 5-15%_")
+        lo = price * 1.05
+        hi = price * 1.15
+        lines.append(f"_Expected bounce: 5-15% (${lo:,.0f}–${hi:,.0f})_")
     else:
-        lines.append(f"_Suggested: BEAR warrant if available_")
-        lines.append(f"_Expected pullback: 5-10%_")
-    lines.append(f"_Hold: hours to 1-2 days max_")
+        lo = price * 0.90
+        hi = price * 0.95
+        lines.append(f"_Expected pullback: 5-10% (${hi:,.0f}–${lo:,.0f})_")
+    lines.append(f"_Hold: 3-5h max_")
 
     return "\n".join(lines)
 
