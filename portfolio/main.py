@@ -1158,7 +1158,7 @@ def _build_digest_message():
     from portfolio.stats import load_jsonl
 
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(hours=12)
+    cutoff = now - timedelta(seconds=DIGEST_INTERVAL)
 
     entries = load_jsonl(INVOCATIONS_FILE)
     recent = [e for e in entries if datetime.fromisoformat(e["ts"]) >= cutoff]
