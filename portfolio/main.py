@@ -1129,7 +1129,7 @@ def _maybe_send_alert(config, signals, prices_usd, fx_rate, state, reasons, tf_d
         print(f"  WARNING: alert send failed: {e}")
 
 
-# --- 12h Digest ---
+# --- 4h Digest ---
 
 DIGEST_INTERVAL = 14400  # 4 hours
 
@@ -1256,7 +1256,7 @@ def _maybe_send_digest(config):
         msg = _build_digest_message()
         send_telegram(msg, config)
         _set_last_digest_time(time.time())
-        print("  12h digest sent")
+        print("  4h digest sent")
     except Exception as e:
         print(f"  WARNING: digest failed: {e}")
 
