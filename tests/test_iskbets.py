@@ -2,6 +2,7 @@
 
 import json
 import os
+import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,7 @@ from portfolio.iskbets import (
     _evaluate_entry,
     _load_config,
     _load_state,
+    _parse_gate_response,
     _save_config,
     _save_state,
     check_exits,
@@ -26,6 +28,7 @@ from portfolio.iskbets import (
     format_exit_alert,
     format_position_status,
     handle_command,
+    invoke_layer2_gate,
 )
 from portfolio.telegram_poller import TelegramPoller
 
@@ -543,8 +546,7 @@ class TestPnL:
             entry_time=datetime.now(timezone.utc).isoformat(),
             fx_rate=10.0,
         )
-        assert "EXIT" in msg
-        assert "MSTR" in msg
+        assert "SELL MSTR" in msg
         assert "+3.8%" in msg or "+3.9%" in msg  # ~3.85%
 
 
@@ -695,10 +697,10 @@ class TestFormatting:
             },
         )
         assert "ISKBETS" in msg
-        assert "BTC-USD" in msg
+        assert "BTC" in msg
         assert "66,000" in msg
-        assert "Stop" in msg
-        assert "Stage 1" in msg
+        assert "Stop" in msg or "stop" in msg.lower()
+        assert "Target #1" in msg
 
     def test_exit_alert_format(self):
         msg = format_exit_alert(
@@ -710,8 +712,7 @@ class TestFormatting:
             entry_time=datetime.now(timezone.utc).isoformat(),
             fx_rate=10.5,
         )
-        assert "EXIT" in msg
-        assert "BTC-USD" in msg
+        assert "SELL BTC" in msg
         assert "Hard stop" in msg
 
     def test_status_format(self):
@@ -721,3 +722,116 @@ class TestFormatting:
         assert "BTC-USD" in msg
         assert "Entry" in msg
         assert "Stop" in msg
+
+    def test_entry_alert_with_l2_reasoning(self):
+        """format_entry_alert includes Claude reasoning when provided."""
+        msg = format_entry_alert(
+            ticker="BTC-USD",
+            price=66000,
+            conditions=["RSI 25 (oversold)"],
+            atr=1500,
+            iskbets_cfg={"hard_stop_atr_mult": 2.0, "stage1_atr_mult": 1.5},
+            l2_reasoning="Clean breakout with volume confirmation",
+        )
+        assert "Claude: Clean breakout" in msg
+
+    def test_entry_alert_no_l2_reasoning(self):
+        """format_entry_alert omits Claude line when reasoning is empty."""
+        msg = format_entry_alert(
+            ticker="BTC-USD",
+            price=66000,
+            conditions=["RSI 25 (oversold)"],
+            atr=1500,
+            iskbets_cfg={"hard_stop_atr_mult": 2.0, "stage1_atr_mult": 1.5},
+            l2_reasoning="",
+        )
+        assert "Claude:" not in msg
+
+
+# ── Tests: Layer 2 Gate ──────────────────────────────────────────────────
+
+
+class TestLayer2Gate:
+    @patch("portfolio.iskbets.subprocess.run")
+    def test_gate_approved(self, mock_run, tmp_data_dir):
+        """Claude approves → returns (True, reasoning)."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="DECISION: APPROVE\nREASONING: Clean setup with volume expansion.",
+        )
+        approved, reasoning = invoke_layer2_gate(
+            "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500,
+            {"layer2_gate": True}, {},
+        )
+        assert approved is True
+        assert "Clean setup" in reasoning
+        mock_run.assert_called_once()
+
+    @patch("portfolio.iskbets.subprocess.run")
+    def test_gate_skipped(self, mock_run, tmp_data_dir):
+        """Claude skips → returns (False, reasoning)."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="DECISION: SKIP\nREASONING: All long TFs opposing, chasing.",
+        )
+        approved, reasoning = invoke_layer2_gate(
+            "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500,
+            {"layer2_gate": True}, {},
+        )
+        assert approved is False
+        assert "opposing" in reasoning
+
+    @patch("portfolio.iskbets.subprocess.run")
+    def test_gate_timeout_fallback(self, mock_run, tmp_data_dir):
+        """Timeout → fallback to approve."""
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=30)
+        approved, reasoning = invoke_layer2_gate(
+            "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500,
+            {"layer2_gate": True}, {},
+        )
+        assert approved is True
+        assert reasoning == ""
+
+    def test_gate_disabled(self, tmp_data_dir):
+        """layer2_gate=False → approve without subprocess call."""
+        approved, reasoning = invoke_layer2_gate(
+            "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500,
+            {"layer2_gate": False}, {},
+        )
+        assert approved is True
+        assert reasoning == ""
+
+    @patch("portfolio.iskbets.subprocess.run")
+    def test_gate_parse_failure(self, mock_run, tmp_data_dir):
+        """Garbage output → fallback to approve."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="I'm not sure what to do here, this is random text.",
+        )
+        approved, reasoning = invoke_layer2_gate(
+            "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500,
+            {"layer2_gate": True}, {},
+        )
+        assert approved is True
+        assert reasoning == ""
+
+
+class TestParseGateResponse:
+    def test_approve(self):
+        approved, reasoning = _parse_gate_response(
+            "DECISION: APPROVE\nREASONING: Looks good."
+        )
+        assert approved is True
+        assert reasoning == "Looks good."
+
+    def test_skip(self):
+        approved, reasoning = _parse_gate_response(
+            "DECISION: SKIP\nREASONING: All TFs bearish."
+        )
+        assert approved is False
+        assert "bearish" in reasoning
+
+    def test_empty(self):
+        approved, reasoning = _parse_gate_response("")
+        assert approved is True
+        assert reasoning == ""

@@ -17,12 +17,17 @@ depend on Claude being available.
 Main loop (60s)
 ├── Normal signal run (existing)
 ├── bigbet.check_bigbet() (existing)
-└── iskbets.check_iskbets() (NEW, if config enabled)
+└── iskbets.check_iskbets() (if config enabled)
         │
         ├── [No active position] → scan all target tickers
         │       ├── Threshold not met → log, do nothing
-        │       └── Threshold met on ticker(s) → invoke Layer 2 for entry judgment
-        │               └── Layer 2 sends Telegram alert
+        │       └── Threshold met on ticker(s):
+        │               ├── Layer 2 gate disabled → send Telegram alert immediately
+        │               └── Layer 2 gate enabled (iskbets.layer2_gate=true):
+        │                       ├── invoke `claude -p` with APPROVE/SKIP prompt (30s timeout)
+        │                       ├── APPROVE → send Telegram alert with Claude reasoning
+        │                       ├── SKIP → log, continue scanning other tickers
+        │                       └── Timeout/error → fallback to APPROVE (mechanical alert)
         │
         └── [Active position] → check exit conditions every cycle
                 ├── Hard stop hit → send exit alert immediately (Layer 1 only)
@@ -86,6 +91,25 @@ Both gates must pass:
 2. **Main signal grid**: ≥3 buy votes on the ticker
 
 No entry alerts after **14:30 ET**. No entry during FOMC or major scheduled events.
+
+## Layer 2 Entry Gate (Optional)
+
+When `iskbets.layer2_gate` is `true` in `config.json`, entries that pass both mechanical gates
+are sent to Claude for a fast APPROVE/SKIP decision before the Telegram alert fires.
+
+**Flow:** `_evaluate_entry()` passes → `invoke_layer2_gate()` calls `claude -p` with
+`--max-turns 1` → Claude responds with `DECISION: APPROVE|SKIP` + `REASONING: ...`
+
+- **APPROVE**: Entry alert is sent with Claude's reasoning appended (`_Claude: ..._`)
+- **SKIP**: Entry is suppressed, scanning continues to the next ticker
+- **Timeout/error**: Defaults to APPROVE — the gate is additive, never blocking
+
+The prompt is minimal (~300 tokens): ticker, price, conditions, signal votes, key indicators
+(RSI/MACD/BB), timeframe heatmap row, F&G, and FOMC proximity.
+
+Gate decisions are logged to `data/iskbets_gate_log.jsonl`.
+
+Set `iskbets.layer2_gate: false` (default) to bypass the gate entirely.
 
 ## Exit Strategy (research-backed)
 
@@ -159,6 +183,38 @@ System  → "📊 ISKBETS closed. MSTR +1,500 SEK (+1.5%) in 2h 10min"
 | `dashboard/static/index.html` | Add ISKBETS panel                                        |
 | `config.json`                 | Add `iskbets` section (min_conditions, etc.)             |
 | `data/.gitignore`             | Add `iskbets_config.json`, `iskbets_state.json`          |
+
+## Activation UX
+
+### Single-gate architecture
+
+ISKBETS activation is controlled solely by the per-session config file `data/iskbets_config.json`.
+The `config.json` `iskbets` section contains only tuning parameters (ATR multipliers, vote
+thresholds, etc.) — no `enabled` flag. The main loop always calls `check_iskbets()` and always
+starts the Telegram poller; both no-op when no session config exists.
+
+### CLI — `scripts/iskbet.py`
+
+```bash
+python scripts/iskbet.py btc 8h             # BTC-USD, 8h window, default 100K SEK
+python scripts/iskbet.py mstr pltr 4h        # multiple tickers
+python scripts/iskbet.py btc 8h 50000        # custom amount (SEK)
+python scripts/iskbet.py off                  # disable session
+python scripts/iskbet.py status               # show current state
+```
+
+Arguments are order-independent: tickers are resolved via aliases (`btc` → `BTC-USD`),
+duration is detected by the `\d+[hmd]` pattern, and a bare number is treated as the SEK amount.
+
+The script:
+1. Writes `data/iskbets_config.json` with `{enabled, tickers, amount_sek, expiry}`
+2. Sends a Telegram notification confirming activation
+3. Warns if `agent_summary.json` is stale (>5 min) — loop may be down
+4. Warns if replacing an existing active session
+
+### Dashboard API
+
+`GET /api/iskbets` returns `{"config": ..., "state": ...}` for the dashboard panel.
 
 ## Research References
 

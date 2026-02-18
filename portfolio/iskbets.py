@@ -7,6 +7,7 @@ and confirms via Telegram replies.
 
 import json
 import os
+import subprocess
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -295,6 +296,160 @@ def _past_time_exit(time_exit_str):
     )
 
 
+# ── Layer 2 Gate ─────────────────────────────────────────────────────────
+
+
+GATE_LOG_FILE = DATA_DIR / "iskbets_gate_log.jsonl"
+
+
+def _build_gate_prompt(ticker, price, conditions, signals, tf_data, atr, config):
+    """Build a minimal prompt for the Layer 2 APPROVE/SKIP gate."""
+    sig = signals.get(ticker, {})
+    extra = sig.get("extra", {})
+    ind = sig.get("indicators", {})
+
+    buy_c = extra.get("_buy_count", 0)
+    sell_c = extra.get("_sell_count", 0)
+    hold_c = extra.get("_total_applicable", 11) - buy_c - sell_c
+
+    rsi = ind.get("rsi", "N/A")
+    macd = ind.get("macd_hist", "N/A")
+    bb = ind.get("price_vs_bb", "N/A")
+    atr_pct = (atr / price * 100) if price > 0 else 0
+
+    fg = extra.get("fear_greed", "N/A")
+
+    # Build TF heatmap row for this ticker
+    tf_row = ""
+    tf_list = tf_data.get(ticker, [])
+    if tf_list:
+        labels = []
+        actions = []
+        for label, td in tf_list:
+            labels.append(label)
+            a = td.get("action")
+            if a == "BUY":
+                actions.append("B")
+            elif a == "SELL":
+                actions.append("S")
+            else:
+                actions.append("H")
+        tf_row = "/".join(labels) + ": " + " ".join(actions)
+
+    # FOMC proximity from agent_summary if available
+    fomc_days = "N/A"
+    try:
+        summary_file = DATA_DIR / "agent_summary.json"
+        if summary_file.exists():
+            summary = json.loads(summary_file.read_text(encoding="utf-8"))
+            macro = summary.get("macro", {})
+            fomc_days = macro.get("fomc_days_until", "N/A")
+    except Exception:
+        pass
+
+    cond_str = "\n".join(f"- {c}" for c in conditions)
+
+    return (
+        f"You are a fast entry gate for ISKBETS (intraday trading).\n\n"
+        f"Layer 1 conditions PASSED for {ticker} at ${price:,.2f}:\n"
+        f"{cond_str}\n\n"
+        f"Signals: {buy_c}B/{sell_c}S/{hold_c}H\n"
+        f"RSI {rsi} | MACD {macd} | BB {bb} | ATR ${atr:,.2f} ({atr_pct:.1f}%)\n\n"
+        f"Timeframes ({tf_row})\n\n"
+        f"F&G: {fg} | FOMC: {fomc_days}d away\n\n"
+        f"Respond EXACTLY:\n"
+        f"DECISION: APPROVE or SKIP\n"
+        f"REASONING: One sentence.\n\n"
+        f"APPROVE if setup is clean. SKIP only for clear red flags (all long TFs opposing, "
+        f"chasing end of move, imminent FOMC). Default to APPROVE when uncertain."
+    )
+
+
+def _parse_gate_response(output):
+    """Parse DECISION: APPROVE|SKIP and REASONING: ... from gate output.
+
+    Returns (approved: bool, reasoning: str). Defaults to (True, "") on parse failure.
+    """
+    approved = True
+    reasoning = ""
+
+    for line in output.strip().splitlines():
+        line = line.strip()
+        upper = line.upper()
+        if upper.startswith("DECISION:"):
+            val = line.split(":", 1)[1].strip().upper()
+            if "SKIP" in val:
+                approved = False
+            # APPROVE is the default, so only SKIP changes it
+        elif upper.startswith("REASONING:"):
+            reasoning = line.split(":", 1)[1].strip()
+
+    return approved, reasoning
+
+
+def invoke_layer2_gate(ticker, price, conditions, signals, tf_data, atr, iskbets_cfg, config):
+    """Invoke Claude CLI for a fast APPROVE/SKIP decision on an ISKBETS entry.
+
+    Returns (approved: bool, reasoning: str).
+    Defaults to (True, "") on any failure — Layer 2 is additive, never blocking.
+    """
+    if not iskbets_cfg.get("layer2_gate", False):
+        return True, ""
+
+    prompt = _build_gate_prompt(ticker, price, conditions, signals, tf_data, atr, config)
+
+    t0 = time.time()
+    approved = True
+    reasoning = ""
+
+    try:
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--max-turns", "1"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        elapsed = time.time() - t0
+        output = result.stdout.strip()
+
+        if result.returncode == 0 and output:
+            approved, reasoning = _parse_gate_response(output)
+        else:
+            print(f"  ISKBETS L2 GATE: claude returned code {result.returncode}")
+    except subprocess.TimeoutExpired:
+        elapsed = time.time() - t0
+        print(f"  ISKBETS L2 GATE: timeout after {elapsed:.1f}s")
+    except FileNotFoundError:
+        elapsed = time.time() - t0
+        print("  ISKBETS L2 GATE: claude not found in PATH")
+    except Exception as e:
+        elapsed = time.time() - t0
+        print(f"  ISKBETS L2 GATE: error — {e}")
+
+    # Log decision
+    try:
+        GATE_LOG_FILE.parent.mkdir(exist_ok=True)
+        with open(GATE_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "ticker": ticker,
+                        "price": price,
+                        "approved": approved,
+                        "reasoning": reasoning,
+                        "elapsed_s": round(time.time() - t0, 2),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+
+    return approved, reasoning
+
+
 # ── Exit Checks ──────────────────────────────────────────────────────────
 
 
@@ -373,35 +528,75 @@ def check_exits(state, prices_usd, signals, tf_data, iskbets_cfg):
 # ── Alert Formatting ─────────────────────────────────────────────────────
 
 
-def format_entry_alert(ticker, price, conditions, atr, iskbets_cfg):
+def format_entry_alert(ticker, price, conditions, atr, iskbets_cfg, signals=None, l2_reasoning=""):
     """Format Telegram entry alert message."""
     hard_stop_mult = iskbets_cfg.get("hard_stop_atr_mult", 2.0)
     stage1_mult = iskbets_cfg.get("stage1_atr_mult", 1.5)
-    cutoff = iskbets_cfg.get("entry_cutoff_et", "14:30")
 
     stop = price - (hard_stop_mult * atr)
     stage1 = price + (stage1_mult * atr)
     stop_pct = ((stop - price) / price) * 100
     stage1_pct = ((stage1 - price) / price) * 100
 
+    short_ticker = ticker.replace("-USD", "")
     lines = [
-        f"\U0001f7e1 *ISKBETS: Entry alert — {ticker} ${price:,.2f}*",
+        f"\U0001f7e1 *ISKBETS BUY {short_ticker}* @ ${price:,.2f}",
         "",
     ]
-    for c in conditions:
-        lines.append(f"\u2022 {c}")
+
+    # Signal votes grid
+    if signals and ticker in signals:
+        sig = signals[ticker]
+        extra = sig.get("extra", {})
+        votes = extra.get("_votes", {})
+        buy_c = extra.get("_buy_count", 0)
+        sell_c = extra.get("_sell_count", 0)
+        hold_c = extra.get("_total_applicable", 11) - buy_c - sell_c
+
+        buy_names = [k.upper() for k, v in votes.items() if v == "BUY"]
+        sell_names = [k.upper() for k, v in votes.items() if v == "SELL"]
+
+        lines.append(f"`Signals: {buy_c}B/{sell_c}S/{hold_c}H`")
+        if buy_names:
+            lines.append(f"`BUY:  {', '.join(buy_names)}`")
+        if sell_names:
+            lines.append(f"`SELL: {', '.join(sell_names)}`")
+
+        # Key indicator values
+        ind = sig.get("indicators", {})
+        rsi = ind.get("rsi")
+        macd = ind.get("macd_hist")
+        bb = ind.get("price_vs_bb", "")
+        if rsi is not None:
+            lines.append(f"`RSI {rsi:.0f} | MACD {macd:+.0f} | BB {bb}`")
+        lines.append("")
+
+    # Why this entry triggered
+    if conditions:
+        lines.append("_Why:_")
+        for c in conditions:
+            lines.append(f"  \u2022 {c}")
+        lines.append("")
+
+    # Layer 2 reasoning (if gate was invoked)
+    if l2_reasoning:
+        lines.append(f"_Claude: {l2_reasoning}_")
+        lines.append("")
+
+    # Price levels — the key info
+    lines.append(f"*If you buy:*")
+    lines.append(f"`Stop loss:  ${stop:,.0f} ({stop_pct:+.1f}%)`")
+    lines.append(f"`Target #1:  ${stage1:,.0f} ({stage1_pct:+.1f}%)`")
+    lines.append(f"_After target #1, stop moves to breakeven._")
+    lines.append(f"_Then trailing stop locks in profit._")
     lines.append("")
-    lines.append(
-        f"Stop: ${stop:,.2f} ({stop_pct:+.1f}%) | Stage 1: ${stage1:,.2f} ({stage1_pct:+.1f}%)"
-    )
-    lines.append(f"ATR(15m): ${atr:,.2f} | No entry after {cutoff} ET")
-    lines.append("")
-    lines.append("_Reply: `bought TICKER PRICE AMOUNT`_")
+    lines.append(f"_Bought? Reply:_ `bought {short_ticker} PRICE AMOUNT`")
+    lines.append(f"_Example:_ `bought {short_ticker} {price:.0f} 100000`")
 
     return "\n".join(lines)
 
 
-def format_exit_alert(ticker, price, exit_type, entry_price, amount_sek, entry_time, fx_rate):
+def format_exit_alert(ticker, price, exit_type, entry_price, amount_sek, entry_time, fx_rate, exit_time=None):
     """Format Telegram exit alert message."""
     pnl_pct = ((price - entry_price) / entry_price) * 100
     shares = amount_sek / (entry_price * fx_rate)
@@ -410,7 +605,8 @@ def format_exit_alert(ticker, price, exit_type, entry_price, amount_sek, entry_t
     # Duration
     try:
         entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
-        duration = datetime.now(timezone.utc) - entry_dt
+        now = exit_time if exit_time else datetime.now(timezone.utc)
+        duration = now - entry_dt
         hours = int(duration.total_seconds() // 3600)
         mins = int((duration.total_seconds() % 3600) // 60)
         dur_str = f"{hours}h {mins}min"
@@ -435,20 +631,33 @@ def format_exit_alert(ticker, price, exit_type, entry_price, amount_sek, entry_t
     }
     label = type_labels.get(exit_type, exit_type)
 
+    short_ticker = ticker.replace("-USD", "")
+
     if exit_type == "stage1_hit":
         lines = [
-            f"{emoji} *Stage 1 hit — {ticker} ${price:,.2f} ({pnl_pct:+.1f}%)*",
+            f"{emoji} *{short_ticker} hit target #1* @ ${price:,.2f}",
             "",
-            f"Stop moved to breakeven ${entry_price:,.2f}. Trailing from here.",
+            f"`Entry:  ${entry_price:,.2f}`",
+            f"`Now:    ${price:,.2f} ({pnl_pct:+.1f}%)`",
+            "",
+            f"Your stop just moved to *breakeven* (${entry_price:,.2f}).",
+            f"You can't lose money on this trade anymore.",
+            f"Trailing stop will now lock in profit as price rises.",
+            "",
+            f"_No action needed — hold and let it run._",
         ]
     else:
         lines = [
-            f"{emoji} *EXIT — {ticker} ${price:,.2f} ({pnl_pct:+.1f}%)*",
+            f"{emoji} *SELL {short_ticker}* @ ${price:,.2f}",
             "",
-            f"{label}. Consider selling.",
-            f"P&L: {pnl_sek:+,.0f} SEK ({pnl_pct:+.1f}%) in {dur_str}",
+            f"`Entry:  ${entry_price:,.2f}`",
+            f"`Exit:   ${price:,.2f}`",
+            f"`P&L:    {pnl_sek:+,.0f} SEK ({pnl_pct:+.1f}%)`",
+            f"`Held:   {dur_str}`",
             "",
-            "_Reply: `sold` to close tracking_",
+            f"_{label}. Sell now on Avanza._",
+            "",
+            f"_Sold? Reply:_ `sold`",
         ]
 
     return "\n".join(lines)
@@ -497,8 +706,6 @@ def check_iskbets(signals, prices_usd, fx_rate, tf_data, config):
     Scans for entries or monitors active position exits.
     """
     iskbets_cfg = config.get("iskbets", {})
-    if not iskbets_cfg.get("enabled", False):
-        return
 
     session_cfg = _load_config()
     if not session_cfg:
@@ -556,7 +763,15 @@ def check_iskbets(signals, prices_usd, fx_rate, tf_data, config):
                     print(f"  ISKBETS: ATR computation failed for {ticker}: {e}")
                     continue
 
-                msg = format_entry_alert(ticker, price, conditions, atr, iskbets_cfg)
+                # Layer 2 gate — APPROVE/SKIP decision
+                approved, l2_reasoning = invoke_layer2_gate(
+                    ticker, price, conditions, signals, tf_data, atr, iskbets_cfg, config
+                )
+                if not approved:
+                    print(f"  ISKBETS L2 GATE: SKIP {ticker} — {l2_reasoning}")
+                    continue  # keep scanning other tickers
+
+                msg = format_entry_alert(ticker, price, conditions, atr, iskbets_cfg, signals=signals, l2_reasoning=l2_reasoning)
                 _log_telegram(msg)
                 try:
                     _send_telegram(msg, config)
