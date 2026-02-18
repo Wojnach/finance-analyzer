@@ -61,6 +61,8 @@ data/invocations.jsonl
 data/signal_log.jsonl
 data/layer2_journal.jsonl
 data/layer2_context.md
+data/iskbets_config.json
+data/iskbets_state.json
 data/backtest_klines_*.csv
 data/backtest_funding_*.csv
 

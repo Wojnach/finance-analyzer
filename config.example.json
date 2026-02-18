@@ -100,6 +100,16 @@
     "secret": "FAKE_SECRET_replace_in_config_json"
   },
   "newsapi_key": "",
+  "iskbets": {
+    "enabled": false,
+    "min_bigbet_conditions": 2,
+    "min_buy_votes": 3,
+    "entry_cutoff_et": "14:30",
+    "hard_stop_atr_mult": 2.0,
+    "stage1_atr_mult": 1.5,
+    "trailing_atr_mult": 1.0,
+    "time_exit_et": "15:50"
+  },
   "bot_name": "finance-analyzer",
   "initial_state": "running",
   "force_entry_enable": true,
