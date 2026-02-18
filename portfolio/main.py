@@ -1151,6 +1151,9 @@ def _set_last_digest_time(t):
     _atomic_write_json(path, state)
 
 
+JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
+
+
 def _build_digest_message():
     from portfolio.stats import load_jsonl
 
@@ -1177,6 +1180,16 @@ def _build_digest_message():
             else:
                 reason_counts["other"] += 1
 
+    # Count Layer 2 decisions from journal
+    journal = load_jsonl(JOURNAL_FILE)
+    recent_journal = [e for e in journal if datetime.fromisoformat(e["ts"]) >= cutoff]
+    l2_decisions = {"patient": Counter(), "bold": Counter()}
+    for e in recent_journal:
+        decisions = e.get("decisions", {})
+        for strat in ("patient", "bold"):
+            action = decisions.get(strat, {}).get("action", "HOLD")
+            l2_decisions[strat][action] += 1
+
     summary = json.loads(AGENT_SUMMARY_FILE.read_text(encoding="utf-8"))
     fx_rate = summary.get("fx_rate", 10.5)
     prices_usd = {t: s["price_usd"] for t, s in summary.get("signals", {}).items()}
@@ -1190,8 +1203,26 @@ def _build_digest_message():
 
     lines = ["*12H DIGEST*", ""]
     lines.append(
-        f"_{cutoff.strftime('%H:%M')} → {now.strftime('%H:%M UTC')} ({now.strftime('%b %d')})_"
+        f"_{cutoff.strftime('%H:%M')} - {now.strftime('%H:%M UTC')} ({now.strftime('%b %d')})_"
     )
+
+    # Layer 2 (Claude) activity
+    invoked = status_counts.get("invoked", 0)
+    skipped = status_counts.get("skipped_busy", 0)
+    l2_total = len(recent_journal)
+    lines.append(
+        f"_Layer 2: {invoked} invoked, {l2_total} decisions, {skipped} skipped_"
+    )
+    for strat in ("patient", "bold"):
+        counts = l2_decisions[strat]
+        if counts:
+            parts = []
+            for action in ("HOLD", "BUY", "SELL"):
+                if counts[action]:
+                    parts.append(f"{counts[action]} {action}")
+            lines.append(f"`  {strat:<8} {', '.join(parts)}`")
+
+    lines.append("")
     lines.append(f"_Triggers: {len(recent)}_")
     for reason, count in reason_counts.most_common():
         lines.append(f"`{reason:<14} {count}`")
@@ -1213,10 +1244,6 @@ def _build_digest_message():
         lines.append(
             f"_Bold: {b_total:,.0f} SEK ({b_pnl:+.1f}%) · {', '.join(b_holdings) or 'cash'}_"
         )
-
-    invoked = status_counts.get("invoked", 0)
-    skipped = status_counts.get("skipped_busy", 0)
-    lines.append(f"_Agent: {invoked} runs, {skipped} skipped_")
 
     return "\n".join(lines)
 
