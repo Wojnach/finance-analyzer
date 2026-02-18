@@ -34,6 +34,9 @@ api_keys.py
 .claude/*
 !.claude/settings.json
 
+# Git worktrees
+.worktrees/
+
 # IDE
 .idea/
 .vscode/
