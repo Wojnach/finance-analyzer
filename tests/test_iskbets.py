@@ -760,8 +760,7 @@ class TestLayer2Gate:
             stdout="DECISION: APPROVE\nREASONING: Clean setup with volume expansion.",
         )
         approved, reasoning = invoke_layer2_gate(
-            "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500,
-            {"layer2_gate": True}, {},
+            "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500, {}, {},
         )
         assert approved is True
         assert "Clean setup" in reasoning
@@ -775,8 +774,7 @@ class TestLayer2Gate:
             stdout="DECISION: SKIP\nREASONING: All long TFs opposing, chasing.",
         )
         approved, reasoning = invoke_layer2_gate(
-            "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500,
-            {"layer2_gate": True}, {},
+            "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500, {}, {},
         )
         assert approved is False
         assert "opposing" in reasoning
@@ -786,17 +784,7 @@ class TestLayer2Gate:
         """Timeout → fallback to approve."""
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=30)
         approved, reasoning = invoke_layer2_gate(
-            "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500,
-            {"layer2_gate": True}, {},
-        )
-        assert approved is True
-        assert reasoning == ""
-
-    def test_gate_disabled(self, tmp_data_dir):
-        """layer2_gate=False → approve without subprocess call."""
-        approved, reasoning = invoke_layer2_gate(
-            "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500,
-            {"layer2_gate": False}, {},
+            "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500, {}, {},
         )
         assert approved is True
         assert reasoning == ""
@@ -809,8 +797,7 @@ class TestLayer2Gate:
             stdout="I'm not sure what to do here, this is random text.",
         )
         approved, reasoning = invoke_layer2_gate(
-            "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500,
-            {"layer2_gate": True}, {},
+            "BTC-USD", 66000, ["RSI oversold"], {}, {}, 1500, {}, {},
         )
         assert approved is True
         assert reasoning == ""

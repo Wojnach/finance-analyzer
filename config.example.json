@@ -107,8 +107,7 @@
     "hard_stop_atr_mult": 2.0,
     "stage1_atr_mult": 1.5,
     "trailing_atr_mult": 1.0,
-    "time_exit_et": "15:50",
-    "layer2_gate": false
+    "time_exit_et": "15:50"
   },
   "bot_name": "finance-analyzer",
   "initial_state": "running",

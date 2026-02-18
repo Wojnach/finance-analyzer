@@ -22,12 +22,10 @@ Main loop (60s)
         ├── [No active position] → scan all target tickers
         │       ├── Threshold not met → log, do nothing
         │       └── Threshold met on ticker(s):
-        │               ├── Layer 2 gate disabled → send Telegram alert immediately
-        │               └── Layer 2 gate enabled (iskbets.layer2_gate=true):
-        │                       ├── invoke `claude -p` with APPROVE/SKIP prompt (30s timeout)
-        │                       ├── APPROVE → send Telegram alert with Claude reasoning
-        │                       ├── SKIP → log, continue scanning other tickers
-        │                       └── Timeout/error → fallback to APPROVE (mechanical alert)
+        │               ├── invoke `claude -p` with APPROVE/SKIP prompt (30s timeout)
+        │               ├── APPROVE → send Telegram alert with Claude reasoning
+        │               ├── SKIP → log, continue scanning other tickers
+        │               └── Timeout/error → fallback to APPROVE (mechanical alert)
         │
         └── [Active position] → check exit conditions every cycle
                 ├── Hard stop hit → send exit alert immediately (Layer 1 only)
@@ -92,10 +90,10 @@ Both gates must pass:
 
 No entry alerts after **14:30 ET**. No entry during FOMC or major scheduled events.
 
-## Layer 2 Entry Gate (Optional)
+## Layer 2 Entry Gate
 
-When `iskbets.layer2_gate` is `true` in `config.json`, entries that pass both mechanical gates
-are sent to Claude for a fast APPROVE/SKIP decision before the Telegram alert fires.
+Every entry that passes both mechanical gates is sent to Claude for a fast APPROVE/SKIP
+decision before the Telegram alert fires.
 
 **Flow:** `_evaluate_entry()` passes → `invoke_layer2_gate()` calls `claude -p` with
 `--max-turns 1` → Claude responds with `DECISION: APPROVE|SKIP` + `REASONING: ...`
@@ -108,8 +106,6 @@ The prompt is minimal (~300 tokens): ticker, price, conditions, signal votes, ke
 (RSI/MACD/BB), timeframe heatmap row, F&G, and FOMC proximity.
 
 Gate decisions are logged to `data/iskbets_gate_log.jsonl`.
-
-Set `iskbets.layer2_gate: false` (default) to bypass the gate entirely.
 
 ## Exit Strategy (research-backed)
 

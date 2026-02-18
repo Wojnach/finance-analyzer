@@ -570,13 +570,11 @@ def run_replay(ticker, symbol, start_dt, hours, speed, fg_value, config,
                     if atr is None:
                         atr = price * 0.02
 
-                    # Layer 2 gate (optional)
+                    # Layer 2 gate (optional — controlled by --layer2-gate flag)
                     l2_reasoning = ""
                     if layer2_gate:
-                        gate_cfg = dict(iskbets_cfg)
-                        gate_cfg["layer2_gate"] = True
                         approved, l2_reasoning = invoke_layer2_gate(
-                            ticker, price, conditions, signals, tf_data, atr, gate_cfg, config
+                            ticker, price, conditions, signals, tf_data, atr, iskbets_cfg, config
                         )
                         if not approved:
                             print(f"  L2 GATE: SKIP — {l2_reasoning}")

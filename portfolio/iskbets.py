@@ -393,9 +393,6 @@ def invoke_layer2_gate(ticker, price, conditions, signals, tf_data, atr, iskbets
     Returns (approved: bool, reasoning: str).
     Defaults to (True, "") on any failure — Layer 2 is additive, never blocking.
     """
-    if not iskbets_cfg.get("layer2_gate", False):
-        return True, ""
-
     prompt = _build_gate_prompt(ticker, price, conditions, signals, tf_data, atr, config)
 
     t0 = time.time()
