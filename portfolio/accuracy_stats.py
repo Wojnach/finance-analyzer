@@ -21,6 +21,21 @@ SIGNAL_NAMES = [
     "funding",
     "volume",
     "custom_lora",
+    # Enhanced composite signals
+    "trend",
+    "momentum",
+    "volume_flow",
+    "volatility_sig",
+    "candlestick",
+    "structure",
+    "fibonacci",
+    "smart_money",
+    "oscillators",
+    "heikin_ashi",
+    "mean_reversion",
+    "calendar",
+    "macro_regime",
+    "momentum_factors",
 ]
 HORIZONS = ["1d", "3d", "5d", "10d"]
 

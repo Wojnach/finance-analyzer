@@ -245,7 +245,7 @@ def build_signals(indicators, tf_data_list, ticker, fg_value=8):
     # Count votes
     buy = sum(1 for v in votes.values() if v == "BUY")
     sell = sum(1 for v in votes.values() if v == "SELL")
-    total_applicable = 11  # crypto
+    total_applicable = 25  # crypto (11 original + 14 enhanced)
 
     extra["_buy_count"] = buy
     extra["_sell_count"] = sell

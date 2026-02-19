@@ -104,7 +104,7 @@ def _build_analysis_prompt(ticker, summary):
     vol = f"{vol_raw:.2f}" if isinstance(vol_raw, (int, float)) else "N/A"
     buy_c = extra.get("_buy_count", 0)
     sell_c = extra.get("_sell_count", 0)
-    total = extra.get("_total_applicable", 11)
+    total = extra.get("_total_applicable", 21)
     hold_c = total - buy_c - sell_c
     w_conf = sig.get("weighted_confidence", 0)
     confluence = sig.get("confluence_score", 0)
@@ -457,7 +457,7 @@ def _build_watch_prompt(positions, summary, elapsed_mins):
         vol = f"{vol_raw:.2f}" if isinstance(vol_raw, (int, float)) else "N/A"
         buy_c = extra.get("_buy_count", 0)
         sell_c = extra.get("_sell_count", 0)
-        total = extra.get("_total_applicable", 11)
+        total = extra.get("_total_applicable", 21)
         hold_c = total - buy_c - sell_c
         w_conf = sig.get("weighted_confidence", 0)
 

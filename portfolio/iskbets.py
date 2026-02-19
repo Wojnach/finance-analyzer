@@ -359,7 +359,7 @@ def _build_gate_prompt(ticker, price, conditions, signals, tf_data, atr, config)
 
     buy_c = extra.get("_buy_count", 0)
     sell_c = extra.get("_sell_count", 0)
-    hold_c = extra.get("_total_applicable", 11) - buy_c - sell_c
+    hold_c = extra.get("_total_applicable", 21) - buy_c - sell_c
 
     rsi = ind.get("rsi", "N/A")
     macd = ind.get("macd_hist", "N/A")
@@ -602,7 +602,7 @@ def format_entry_alert(ticker, price, conditions, atr, iskbets_cfg, signals=None
         votes = extra.get("_votes", {})
         buy_c = extra.get("_buy_count", 0)
         sell_c = extra.get("_sell_count", 0)
-        hold_c = extra.get("_total_applicable", 11) - buy_c - sell_c
+        hold_c = extra.get("_total_applicable", 21) - buy_c - sell_c
 
         buy_names = [k.upper() for k, v in votes.items() if v == "BUY"]
         sell_names = [k.upper() for k, v in votes.items() if v == "SELL"]

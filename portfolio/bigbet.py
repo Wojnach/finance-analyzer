@@ -54,7 +54,7 @@ def _build_eval_prompt(ticker, direction, conditions, signals, tf_data, prices_u
 
     buy_c = extra.get("_buy_count", 0)
     sell_c = extra.get("_sell_count", 0)
-    hold_c = extra.get("_total_applicable", 11) - buy_c - sell_c
+    hold_c = extra.get("_total_applicable", 21) - buy_c - sell_c
 
     rsi = ind.get("rsi", "N/A")
     macd = ind.get("macd_hist", "N/A")
