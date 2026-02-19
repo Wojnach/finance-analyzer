@@ -5,7 +5,9 @@ Does NOT trade. User manually trades turbo warrants on Avanza.
 """
 
 import json
+import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -39,6 +41,175 @@ def _save_state(state):
         except OSError:
             pass
         raise
+
+
+EVAL_LOG_FILE = DATA_DIR / "bigbet_gate_log.jsonl"
+
+
+def _build_eval_prompt(ticker, direction, conditions, signals, tf_data, prices_usd):
+    """Build a focused prompt for Claude to evaluate a big bet setup."""
+    sig = signals.get(ticker, {})
+    extra = sig.get("extra", {})
+    ind = sig.get("indicators", {})
+
+    buy_c = extra.get("_buy_count", 0)
+    sell_c = extra.get("_sell_count", 0)
+    hold_c = extra.get("_total_applicable", 11) - buy_c - sell_c
+
+    rsi = ind.get("rsi", "N/A")
+    macd = ind.get("macd_hist", "N/A")
+    bb = ind.get("price_vs_bb", "N/A")
+    vol = extra.get("volume_ratio", "N/A")
+    atr_pct = ind.get("atr_pct", "N/A")
+
+    # Build TF heatmap row
+    tf_row = "N/A"
+    tf_list = tf_data.get(ticker, [])
+    if tf_list:
+        labels = []
+        actions = []
+        for label, td in tf_list:
+            labels.append(label)
+            a = td.get("action")
+            actions.append("B" if a == "BUY" else "S" if a == "SELL" else "H")
+        tf_row = "/".join(labels) + ": " + " ".join(actions)
+
+    fg = extra.get("fear_greed", "N/A")
+
+    # Macro context from agent_summary
+    dxy = "N/A"
+    dxy_trend = ""
+    yield_10y = "N/A"
+    fomc_days = "N/A"
+    try:
+        summary_file = DATA_DIR / "agent_summary.json"
+        if summary_file.exists():
+            summary = json.loads(summary_file.read_text(encoding="utf-8"))
+            macro = summary.get("macro", {})
+            dxy_info = macro.get("dxy", {})
+            dxy = dxy_info.get("price", "N/A")
+            dxy_trend = dxy_info.get("change_5d", "")
+            yields = macro.get("treasury_yields", {})
+            yield_10y = yields.get("10y", "N/A")
+            fomc_days = macro.get("fomc_days_until", "N/A")
+    except Exception:
+        pass
+
+    cond_str = "\n".join(f"- {c}" for c in conditions)
+
+    return (
+        f"You are evaluating a BIG BET alert for {ticker} ({direction}).\n\n"
+        f"This is a mean-reversion bounce/pullback trade using 5x warrants.\n"
+        f"Hold time: 3-5 hours. The user trades BULL warrants for bounces, "
+        f"BEAR warrants for pullbacks.\n\n"
+        f"{len(conditions)}/{TOTAL_CONDITIONS} conditions triggered:\n"
+        f"{cond_str}\n\n"
+        f"Signals: {buy_c}B/{sell_c}S/{hold_c}H\n"
+        f"RSI {rsi} | MACD {macd} | BB {bb} | Volume {vol}x\n"
+        f"ATR: {atr_pct}%\n\n"
+        f"Timeframes ({tf_row})\n\n"
+        f"F&G: {fg} | DXY: {dxy} ({dxy_trend}) | 10Y: {yield_10y}% | FOMC: {fomc_days}d\n\n"
+        f"Respond EXACTLY:\n"
+        f"PROBABILITY: X/10\n"
+        f"REASONING: 1-2 sentences on why this is or isn't a good setup.\n\n"
+        f"Consider: Is this a genuine capitulation/euphoria or just noise? "
+        f"Are the TFs aligned for a bounce/pullback? Is volume confirming? "
+        f"Any macro headwinds? Rate 1-3 as poor, 4-6 as marginal, 7-8 as good, "
+        f"9-10 as excellent."
+    )
+
+
+def _parse_eval_response(output):
+    """Parse PROBABILITY: X/10 and REASONING: ... from eval output.
+
+    Returns (probability: int|None, reasoning: str).
+    Defaults to (None, "") on parse failure.
+    """
+    probability = None
+    reasoning = ""
+
+    for line in output.strip().splitlines():
+        line = line.strip()
+        upper = line.upper()
+        if upper.startswith("PROBABILITY:"):
+            val = line.split(":", 1)[1].strip()
+            # Extract number from "X/10" or just "X"
+            num_str = val.split("/")[0].strip()
+            try:
+                probability = int(num_str)
+                probability = max(1, min(10, probability))
+            except (ValueError, IndexError):
+                pass
+        elif upper.startswith("REASONING:"):
+            reasoning = line.split(":", 1)[1].strip()
+
+    return probability, reasoning
+
+
+def invoke_layer2_eval(ticker, direction, conditions, signals, tf_data, prices_usd, config):
+    """Invoke Claude CLI to evaluate a big bet setup.
+
+    Returns (probability: int|None, reasoning: str).
+    Never blocks — returns (None, "") on any failure.
+    """
+    import os
+
+    if os.environ.get("NO_TELEGRAM"):
+        return None, ""
+
+    prompt = _build_eval_prompt(ticker, direction, conditions, signals, tf_data, prices_usd)
+
+    t0 = time.time()
+    probability = None
+    reasoning = ""
+
+    try:
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--max-turns", "1"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        elapsed = time.time() - t0
+        output = result.stdout.strip()
+
+        if result.returncode == 0 and output:
+            probability, reasoning = _parse_eval_response(output)
+            print(f"  BIG BET L2: {ticker} {direction} — {probability}/10 ({elapsed:.1f}s)")
+        else:
+            print(f"  BIG BET L2: claude returned code {result.returncode}")
+    except subprocess.TimeoutExpired:
+        elapsed = time.time() - t0
+        print(f"  BIG BET L2: timeout after {elapsed:.1f}s")
+    except FileNotFoundError:
+        elapsed = time.time() - t0
+        print("  BIG BET L2: claude not found in PATH")
+    except Exception as e:
+        elapsed = time.time() - t0
+        print(f"  BIG BET L2: error — {e}")
+
+    # Log evaluation
+    try:
+        EVAL_LOG_FILE.parent.mkdir(exist_ok=True)
+        with open(EVAL_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "ticker": ticker,
+                        "direction": direction,
+                        "probability": probability,
+                        "reasoning": reasoning,
+                        "elapsed_s": round(time.time() - t0, 2),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+
+    return probability, reasoning
 
 
 def _evaluate_conditions(ticker, signals, prices_usd, tf_data):
@@ -133,9 +304,8 @@ def _evaluate_conditions(ticker, signals, prices_usd, tf_data):
     return bull_conditions, bear_conditions, {"fg": fg, "fg_class": fg_class}
 
 
-def _format_alert(ticker, direction, conditions, prices_usd, fx_rate, extra_info):
-    from datetime import datetime, timezone
-
+def _format_alert(ticker, direction, conditions, prices_usd, fx_rate, extra_info,
+                   probability=None, l2_reasoning=""):
     emoji = "\U0001f535" if direction == "BULL" else "\U0001f534"
     price = prices_usd.get(ticker, 0)
     n = len(conditions)
@@ -173,6 +343,9 @@ def _format_alert(ticker, direction, conditions, prices_usd, fx_rate, extra_info
         hi = price * 0.95
         lines.append(f"_Expected pullback: 5-10% (${hi:,.0f}–${lo:,.0f})_")
     lines.append(f"_Hold: 3-5h max_")
+
+    if probability is not None:
+        lines.append(f"_Claude: {probability}/10 — {l2_reasoning}_")
 
     return "\n".join(lines)
 
@@ -229,8 +402,12 @@ def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
             cd_key = f"{ticker}_BULL"
             last_alert = cooldowns.get(cd_key, 0)
             if now - last_alert > cooldown_hours * 3600:
+                probability, l2_reasoning = invoke_layer2_eval(
+                    ticker, "BULL", bull_conds, signals, tf_data, prices_usd, config
+                )
                 msg = _format_alert(
-                    ticker, "BULL", bull_conds, prices_usd, fx_rate, extra_info
+                    ticker, "BULL", bull_conds, prices_usd, fx_rate, extra_info,
+                    probability=probability, l2_reasoning=l2_reasoning,
                 )
                 print(
                     f"  BIG BET ALERT: BULL {ticker} ({len(bull_conds)}/{TOTAL_CONDITIONS} conditions)"
@@ -252,8 +429,12 @@ def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
             cd_key = f"{ticker}_BEAR"
             last_alert = cooldowns.get(cd_key, 0)
             if now - last_alert > cooldown_hours * 3600:
+                probability, l2_reasoning = invoke_layer2_eval(
+                    ticker, "BEAR", bear_conds, signals, tf_data, prices_usd, config
+                )
                 msg = _format_alert(
-                    ticker, "BEAR", bear_conds, prices_usd, fx_rate, extra_info
+                    ticker, "BEAR", bear_conds, prices_usd, fx_rate, extra_info,
+                    probability=probability, l2_reasoning=l2_reasoning,
                 )
                 print(
                     f"  BIG BET ALERT: BEAR {ticker} ({len(bear_conds)}/{TOTAL_CONDITIONS} conditions)"
