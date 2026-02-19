@@ -53,6 +53,7 @@ logs/
 
 # Runtime data
 data/portfolio_state.json
+data/portfolio_state_bold.json
 data/telegram_messages.jsonl
 data/agent_summary.json
 data/trigger_state.json
@@ -63,8 +64,27 @@ data/layer2_journal.jsonl
 data/layer2_context.md
 data/iskbets_config.json
 data/iskbets_state.json
+data/iskbets_state_replay.json
+data/iskbets_gate_log.jsonl
+data/bigbet_state.json
+data/ab_test_log.jsonl
+data/analysis_log.jsonl
+data/watch_log.jsonl
+data/accuracy_cache.json
+data/lora_backtest_results.json
+data/shadow_lora_config.json
+data/loop_out.txt
+data/loop_err.txt
+data/loop_err.log
+data/loop.log
 data/backtest_klines_*.csv
 data/backtest_funding_*.csv
+data/_test_*
+data/_tmp_*
+
+# Scratch/debug scripts
+_*.py
+_*.ps1
 
 # Test artifacts
 .pytest_cache/
