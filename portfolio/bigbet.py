@@ -277,6 +277,11 @@ def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
 
 
 def _send_telegram(msg, config):
+    import os
+
+    if os.environ.get("NO_TELEGRAM"):
+        print("  [NO_TELEGRAM] Skipping send")
+        return
     token = config["telegram"]["token"]
     chat_id = config["telegram"]["chat_id"]
     r = requests.post(

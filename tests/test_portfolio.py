@@ -770,9 +770,11 @@ class TestIntegrationHerc2:
         assert len(data["reasoning"]) > 0
 
     def test_full_report(self):
-        """Run --report end-to-end locally."""
+        """Run --report end-to-end locally (no Telegram)."""
         import subprocess
+        import os
 
+        env = {**os.environ, "NO_TELEGRAM": "1"}
         result = subprocess.run(
             [
                 r"Q:\finance-analyzer\.venv\Scripts\python.exe",
@@ -783,6 +785,7 @@ class TestIntegrationHerc2:
             text=True,
             timeout=300,
             errors="replace",
+            env=env,
         )
         assert result.returncode == 0, (
             f"Report exited with code {result.returncode}\n"

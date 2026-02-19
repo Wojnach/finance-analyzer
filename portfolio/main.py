@@ -1064,6 +1064,9 @@ def portfolio_value(state, prices_usd, fx_rate):
 
 
 def send_telegram(msg, config):
+    if os.environ.get("NO_TELEGRAM"):
+        print("  [NO_TELEGRAM] Skipping send")
+        return True
     token = config["telegram"]["token"]
     chat_id = config["telegram"]["chat_id"]
     r = requests.post(
@@ -1389,7 +1392,10 @@ def run(force_report=False, active_symbols=None):
             print(f"  WARNING: signal logging failed: {e}")
 
         layer2_cfg = config.get("layer2", {})
-        if layer2_cfg.get("enabled", True):
+        if os.environ.get("NO_TELEGRAM"):
+            print("  [NO_TELEGRAM] Skipping agent invocation")
+            _log_trigger(reasons_list, "skipped_test")
+        elif layer2_cfg.get("enabled", True):
             result = invoke_agent(reasons_list)
             _log_trigger(reasons_list, "invoked" if result else "skipped_busy")
         else:
