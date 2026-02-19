@@ -1497,6 +1497,25 @@ if __name__ == "__main__":
         print(f"Dataset: {len(data):,} rows, {len(feature_cols)} features")
         train_final(data, feature_cols)
         print("Done.")
+    elif "--analyze" in args:
+        idx = args.index("--analyze")
+        if idx + 1 >= len(args):
+            print("Usage: --analyze TICKER (e.g. --analyze ETH-USD)")
+            sys.exit(1)
+        ticker = args[idx + 1].upper()
+        from portfolio.analyze import run_analysis
+
+        run_analysis(ticker)
+    elif "--watch" in args:
+        idx = args.index("--watch")
+        pos_args = args[idx + 1 :]
+        if not pos_args:
+            print("Usage: --watch TICKER:ENTRY [TICKER:ENTRY ...]")
+            print("Example: --watch BTC:66500 ETH:1920 MSTR:125")
+            sys.exit(1)
+        from portfolio.analyze import watch_positions
+
+        watch_positions(pos_args)
     elif "--loop" in args:
         idx = args.index("--loop")
         override = int(args[idx + 1]) if idx + 1 < len(args) else None
