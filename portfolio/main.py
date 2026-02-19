@@ -1516,6 +1516,15 @@ if __name__ == "__main__":
         from portfolio.analyze import watch_positions
 
         watch_positions(pos_args)
+    elif "--avanza-status" in args:
+        from portfolio.avanza_client import get_positions, get_portfolio_value
+
+        positions = get_positions()
+        value = get_portfolio_value()
+        print(f"Portfolio value: {value:,.0f} SEK")
+        if positions:
+            for p in positions:
+                print(f"  {p}")
     elif "--loop" in args:
         idx = args.index("--loop")
         override = int(args[idx + 1]) if idx + 1 < len(args) else None
