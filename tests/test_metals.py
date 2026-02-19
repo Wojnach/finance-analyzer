@@ -178,8 +178,8 @@ class TestMetalsMarketState:
 class TestMetalsSignalConfig:
     """Tests for metals-specific signal configuration."""
 
-    def test_metals_total_applicable_is_5(self):
-        """Metals should have 5 applicable signals (RSI, MACD, EMA, BB, Volume)."""
+    def test_metals_total_applicable(self):
+        """Metals should have 21 applicable signals (7 original + 14 enhanced)."""
         from portfolio.main import generate_signal, METALS_SYMBOLS
         # Create minimal indicators
         ind = {
@@ -199,10 +199,10 @@ class TestMetalsSignalConfig:
             "atr_pct": 0.57,
         }
         action, conf, extra = generate_signal(ind, ticker="XAU-USD")
-        assert extra["_total_applicable"] == 5
+        assert extra["_total_applicable"] == 21
 
-    def test_stocks_total_applicable_unchanged(self):
-        """Stocks should still have 7 applicable signals."""
+    def test_stocks_total_applicable(self):
+        """Stocks should have 21 applicable signals (7 original + 14 enhanced)."""
         from portfolio.main import generate_signal
         ind = {
             "close": 130.0,
@@ -221,10 +221,10 @@ class TestMetalsSignalConfig:
             "atr_pct": 2.3,
         }
         action, conf, extra = generate_signal(ind, ticker="MSTR")
-        assert extra["_total_applicable"] == 7
+        assert extra["_total_applicable"] == 21
 
-    def test_crypto_total_applicable_unchanged(self):
-        """Crypto should still have 11 applicable signals."""
+    def test_crypto_total_applicable(self):
+        """Crypto should have 25 applicable signals (11 original + 14 enhanced)."""
         from portfolio.main import generate_signal
         ind = {
             "close": 67000.0,
@@ -243,4 +243,4 @@ class TestMetalsSignalConfig:
             "atr_pct": 2.24,
         }
         action, conf, extra = generate_signal(ind, ticker="BTC-USD")
-        assert extra["_total_applicable"] == 11
+        assert extra["_total_applicable"] == 25

@@ -10,8 +10,19 @@ DATA_DIR = BASE_DIR / "data"
 SIGNAL_LOG = DATA_DIR / "signal_log.jsonl"
 
 HORIZONS = {"1d": 86400, "3d": 259200, "5d": 432000, "10d": 864000}
-BINANCE_MAP = {"BTC-USD": "BTCUSDT", "ETH-USD": "ETHUSDT"}
-YF_MAP = {"MSTR": "MSTR", "PLTR": "PLTR", "NVDA": "NVDA"}
+BINANCE_SPOT_MAP = {"BTC-USD": "BTCUSDT", "ETH-USD": "ETHUSDT"}
+BINANCE_FAPI_MAP = {"XAU-USD": "XAUUSDT", "XAG-USD": "XAGUSDT"}
+# Combined for backward compat (used by _derive_signal_vote)
+BINANCE_MAP = {**BINANCE_SPOT_MAP, **BINANCE_FAPI_MAP}
+YF_MAP = {
+    "MSTR": "MSTR", "PLTR": "PLTR", "NVDA": "NVDA",
+    "AMD": "AMD", "BABA": "BABA", "GOOGL": "GOOGL", "AMZN": "AMZN",
+    "AAPL": "AAPL", "AVGO": "AVGO", "AI": "AI", "GRRR": "GRRR",
+    "IONQ": "IONQ", "MRVL": "MRVL", "META": "META", "MU": "MU",
+    "PONY": "PONY", "RXRX": "RXRX", "SOUN": "SOUN", "SMCI": "SMCI",
+    "TSM": "TSM", "TTWO": "TTWO", "TEM": "TEM", "UPST": "UPST",
+    "VERI": "VERI", "VRT": "VRT", "QQQ": "QQQ", "LMT": "LMT",
+}
 
 SIGNAL_NAMES = [
     "rsi",
@@ -25,6 +36,21 @@ SIGNAL_NAMES = [
     "funding",
     "volume",
     "custom_lora",
+    # Enhanced composite signals
+    "trend",
+    "momentum",
+    "volume_flow",
+    "volatility_sig",
+    "candlestick",
+    "structure",
+    "fibonacci",
+    "smart_money",
+    "oscillators",
+    "heikin_ashi",
+    "mean_reversion",
+    "calendar",
+    "macro_regime",
+    "momentum_factors",
 ]
 
 
@@ -153,8 +179,18 @@ def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
 
 
 def _fetch_current_price(ticker):
-    if ticker in BINANCE_MAP:
-        symbol = BINANCE_MAP[ticker]
+    if ticker in BINANCE_FAPI_MAP:
+        symbol = BINANCE_FAPI_MAP[ticker]
+        r = requests.get(
+            "https://fapi.binance.com/fapi/v1/ticker/price",
+            params={"symbol": symbol},
+            timeout=5,
+        )
+        r.raise_for_status()
+        return float(r.json()["price"])
+
+    if ticker in BINANCE_SPOT_MAP:
+        symbol = BINANCE_SPOT_MAP[ticker]
         r = requests.get(
             "https://api.binance.com/api/v3/ticker/price",
             params={"symbol": symbol},
@@ -176,8 +212,27 @@ def _fetch_current_price(ticker):
 
 
 def _fetch_historical_price(ticker, target_ts):
-    if ticker in BINANCE_MAP:
-        symbol = BINANCE_MAP[ticker]
+    if ticker in BINANCE_FAPI_MAP:
+        symbol = BINANCE_FAPI_MAP[ticker]
+        start_ms = int(target_ts * 1000)
+        r = requests.get(
+            "https://fapi.binance.com/fapi/v1/klines",
+            params={
+                "symbol": symbol,
+                "interval": "1h",
+                "startTime": start_ms,
+                "limit": 1,
+            },
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if not data:
+            return None
+        return float(data[0][4])
+
+    if ticker in BINANCE_SPOT_MAP:
+        symbol = BINANCE_SPOT_MAP[ticker]
         start_ms = int(target_ts * 1000)
         r = requests.get(
             "https://api.binance.com/api/v3/klines",

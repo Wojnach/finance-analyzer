@@ -28,11 +28,38 @@ ALPACA_BASE = "https://data.alpaca.markets/v2"
 TICKER_SOURCES = {
     "BTC-USD": {"binance": "BTCUSDT"},
     "ETH-USD": {"binance": "ETHUSDT"},
+    "XAU-USD": {"binance_fapi": "XAUUSDT"},
+    "XAG-USD": {"binance_fapi": "XAGUSDT"},
     "MSTR": {"alpaca": "MSTR"},
     "PLTR": {"alpaca": "PLTR"},
     "NVDA": {"alpaca": "NVDA"},
+    "AMD": {"alpaca": "AMD"},
+    "BABA": {"alpaca": "BABA"},
+    "GOOGL": {"alpaca": "GOOGL"},
+    "AMZN": {"alpaca": "AMZN"},
+    "AAPL": {"alpaca": "AAPL"},
+    "AVGO": {"alpaca": "AVGO"},
+    "AI": {"alpaca": "AI"},
+    "GRRR": {"alpaca": "GRRR"},
+    "IONQ": {"alpaca": "IONQ"},
+    "MRVL": {"alpaca": "MRVL"},
+    "META": {"alpaca": "META"},
+    "MU": {"alpaca": "MU"},
+    "PONY": {"alpaca": "PONY"},
+    "RXRX": {"alpaca": "RXRX"},
+    "SOUN": {"alpaca": "SOUN"},
+    "SMCI": {"alpaca": "SMCI"},
+    "TSM": {"alpaca": "TSM"},
+    "TTWO": {"alpaca": "TTWO"},
+    "TEM": {"alpaca": "TEM"},
+    "UPST": {"alpaca": "UPST"},
+    "VERI": {"alpaca": "VERI"},
+    "VRT": {"alpaca": "VRT"},
+    "QQQ": {"alpaca": "QQQ"},
+    "LMT": {"alpaca": "LMT"},
 }
 CRYPTO_TICKERS = {"BTC-USD", "ETH-USD"}
+METALS_TICKERS = {"XAU-USD", "XAG-USD"}
 
 
 # ── State I/O ────────────────────────────────────────────────────────────
@@ -155,7 +182,29 @@ def compute_atr_15m(ticker, config):
     if not source:
         raise ValueError(f"Unknown ticker: {ticker}")
 
-    if "binance" in source:
+    if "binance_fapi" in source:
+        r = requests.get(
+            f"https://fapi.binance.com/fapi/v1/klines",
+            params={
+                "symbol": source["binance_fapi"],
+                "interval": "15m",
+                "limit": 20,
+            },
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json()
+        df = pd.DataFrame(
+            data,
+            columns=[
+                "open_time", "open", "high", "low", "close", "volume",
+                "close_time", "quote_vol", "trades", "taker_buy_vol",
+                "taker_buy_quote_vol", "ignore",
+            ],
+        )
+        for col in ["open", "high", "low", "close"]:
+            df[col] = df[col].astype(float)
+    elif "binance" in source:
         r = requests.get(
             f"{BINANCE_BASE}/klines",
             params={
@@ -343,7 +392,8 @@ def _build_gate_prompt(ticker, price, conditions, signals, tf_data, atr, config)
         if summary_file.exists():
             summary = json.loads(summary_file.read_text(encoding="utf-8"))
             macro = summary.get("macro", {})
-            fomc_days = macro.get("fomc_days_until", "N/A")
+            fed_info = macro.get("fed", {})
+            fomc_days = fed_info.get("days_until", "N/A")
     except Exception:
         pass
 
@@ -813,6 +863,10 @@ def _handle_bought(args, config):
         return "Usage: `bought TICKER PRICE AMOUNT`"
 
     ticker = parts[0].upper()
+    # Normalize short names: "BTC" → "BTC-USD", "ETH" → "ETH-USD", etc.
+    SHORT_TO_FULL = {k.replace("-USD", ""): k for k in TICKER_SOURCES if "-USD" in k}
+    if ticker in SHORT_TO_FULL:
+        ticker = SHORT_TO_FULL[ticker]
     try:
         price_usd = float(parts[1])
         amount_sek = float(parts[2])

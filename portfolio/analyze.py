@@ -32,8 +32,15 @@ CONFIG_FILE = BASE_DIR / "config.json"
 ANALYSIS_LOG_FILE = DATA_DIR / "analysis_log.jsonl"
 WATCH_LOG_FILE = DATA_DIR / "watch_log.jsonl"
 
-KNOWN_TICKERS = {"BTC-USD", "ETH-USD", "MSTR", "PLTR", "NVDA"}
+KNOWN_TICKERS = {
+    "BTC-USD", "ETH-USD", "XAU-USD", "XAG-USD",
+    "MSTR", "PLTR", "NVDA", "AMD", "BABA", "GOOGL", "AMZN", "AAPL",
+    "AVGO", "AI", "GRRR", "IONQ", "MRVL", "META", "MU", "PONY",
+    "RXRX", "SOUN", "SMCI", "TSM", "TTWO", "TEM", "UPST", "VERI",
+    "VRT", "QQQ", "LMT",
+}
 CRYPTO_TICKERS = {"BTC-USD", "ETH-USD"}
+METALS_TICKERS = {"XAU-USD", "XAG-USD"}
 
 # Position watch exit thresholds
 STOP_PCT = -2.0       # hard stop
@@ -333,7 +340,7 @@ def run_analysis(ticker):
 # Position watchdog (--watch) — Claude-powered scalp exit monitor
 # ---------------------------------------------------------------------------
 
-SHORT_MAP = {"BTC": "BTC-USD", "ETH": "ETH-USD"}
+SHORT_MAP = {"BTC": "BTC-USD", "ETH": "ETH-USD", "XAU": "XAU-USD", "XAG": "XAG-USD"}
 
 # Claude analysis triggers
 CLAUDE_INTERVAL_MINS = 15       # max time between Claude calls

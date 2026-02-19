@@ -24,16 +24,48 @@ AGENT_SUMMARY_FILE = DATA_DIR / "agent_summary.json"
 CONFIG_FILE = BASE_DIR / "config.json"
 
 SYMBOLS = {
+    # Crypto (Binance spot)
     "BTC-USD": {"binance": "BTCUSDT"},
     "ETH-USD": {"binance": "ETHUSDT"},
+    # Metals (Binance futures)
+    "XAU-USD": {"binance_fapi": "XAUUSDT"},
+    "XAG-USD": {"binance_fapi": "XAGUSDT"},
+    # US Equities (Alpaca IEX)
     "MSTR": {"alpaca": "MSTR"},
     "PLTR": {"alpaca": "PLTR"},
     "NVDA": {"alpaca": "NVDA"},
-    "XAU-USD": {"binance_fapi": "XAUUSDT"},
-    "XAG-USD": {"binance_fapi": "XAGUSDT"},
+    "AMD": {"alpaca": "AMD"},
+    "BABA": {"alpaca": "BABA"},
+    "GOOGL": {"alpaca": "GOOGL"},
+    "AMZN": {"alpaca": "AMZN"},
+    "AAPL": {"alpaca": "AAPL"},
+    "AVGO": {"alpaca": "AVGO"},
+    "AI": {"alpaca": "AI"},
+    "GRRR": {"alpaca": "GRRR"},
+    "IONQ": {"alpaca": "IONQ"},
+    "MRVL": {"alpaca": "MRVL"},
+    "META": {"alpaca": "META"},
+    "MU": {"alpaca": "MU"},
+    "PONY": {"alpaca": "PONY"},
+    "RXRX": {"alpaca": "RXRX"},
+    "SOUN": {"alpaca": "SOUN"},
+    "SMCI": {"alpaca": "SMCI"},
+    "TSM": {"alpaca": "TSM"},
+    "TTWO": {"alpaca": "TTWO"},
+    "TEM": {"alpaca": "TEM"},
+    "UPST": {"alpaca": "UPST"},
+    "VERI": {"alpaca": "VERI"},
+    "VRT": {"alpaca": "VRT"},
+    "QQQ": {"alpaca": "QQQ"},
+    "LMT": {"alpaca": "LMT"},
 }
 CRYPTO_SYMBOLS = {"BTC-USD", "ETH-USD"}
-STOCK_SYMBOLS = {"MSTR", "PLTR", "NVDA"}
+STOCK_SYMBOLS = {
+    "MSTR", "PLTR", "NVDA", "AMD", "BABA", "GOOGL", "AMZN", "AAPL",
+    "AVGO", "AI", "GRRR", "IONQ", "MRVL", "META", "MU", "PONY",
+    "RXRX", "SOUN", "SMCI", "TSM", "TTWO", "TEM", "UPST", "VERI",
+    "VRT", "QQQ", "LMT",
+}
 METALS_SYMBOLS = {"XAU-USD", "XAG-USD"}
 
 # Market hours (UTC) — EU open to US close
@@ -78,6 +110,33 @@ TIMEFRAMES = [
 # Tool cache — avoid re-running expensive tools every cycle
 _tool_cache = {}
 FEAR_GREED_TTL = 300  # 5 min
+
+# --- Rate limiter — space out API calls to stay under provider limits ---
+import threading
+
+class _RateLimiter:
+    """Token-bucket rate limiter. Sleeps when calls exceed rate."""
+    def __init__(self, max_per_minute, name=""):
+        self.interval = 60.0 / max_per_minute  # min seconds between calls
+        self.last_call = 0.0
+        self.name = name
+        self._lock = threading.Lock()
+
+    def wait(self):
+        with self._lock:
+            now = time.time()
+            elapsed = now - self.last_call
+            if elapsed < self.interval:
+                wait_time = self.interval - elapsed
+                time.sleep(wait_time)
+            self.last_call = time.time()
+
+# Alpaca IEX: 200 req/min → target 150/min to leave headroom
+_alpaca_limiter = _RateLimiter(150, "alpaca")
+# Binance: 1200 weight/min → very generous, but space out slightly
+_binance_limiter = _RateLimiter(600, "binance")
+# Yahoo Finance (yfinance): no official limit, but be polite — 30/min
+_yfinance_limiter = _RateLimiter(30, "yfinance")
 SENTIMENT_TTL = 900  # 15 min
 MINISTRAL_TTL = 900  # 15 min
 ML_SIGNAL_TTL = 900  # 15 min
@@ -371,10 +430,13 @@ def technical_signal(ind):
 
 def _fetch_klines(source, interval, limit):
     if "binance_fapi" in source:
+        _binance_limiter.wait()
         return binance_fapi_klines(source["binance_fapi"], interval=interval, limit=limit)
     elif "binance" in source:
+        _binance_limiter.wait()
         return binance_klines(source["binance"], interval=interval, limit=limit)
     elif "alpaca" in source:
+        _alpaca_limiter.wait()
         return alpaca_klines(source["alpaca"], interval=interval, limit=limit)
     raise ValueError(f"Unknown source: {source}")
 
@@ -412,6 +474,8 @@ def collect_timeframes(source):
             else:
                 action, conf = technical_signal(ind)
             entry = {"indicators": ind, "action": action, "confidence": conf}
+            if label == "Now":
+                entry["_df"] = df  # preserve raw DataFrame for enhanced signals
             if ttl > 0:
                 _tool_cache[cache_key] = {"data": entry, "time": time.time()}
             results.append((label, entry))
@@ -423,8 +487,8 @@ def collect_timeframes(source):
 # --- Signal (full 7-signal for "Now" timeframe) ---
 
 
-MIN_VOTERS_CRYPTO = 3  # crypto has 11 signals — need 3 active voters
-MIN_VOTERS_STOCK = 2  # stocks have 7 signals (~71% abstention) — 2 suffices
+MIN_VOTERS_CRYPTO = 3  # crypto has 25 signals (11 original + 14 enhanced) — need 3 active voters
+MIN_VOTERS_STOCK = 2  # stocks have 21 signals (7 original + 14 enhanced) — 2 suffices
 
 # Sentiment hysteresis — prevents rapid flip spam from ~50% confidence oscillation
 _prev_sentiment = {}  # in-memory cache; seeded from trigger_state.json on first call
@@ -527,7 +591,7 @@ def _time_of_day_factor():
     return 1.0
 
 
-def generate_signal(ind, ticker=None, config=None, timeframes=None):
+def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     votes = {}
     extra_info = {}
 
@@ -766,19 +830,92 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None):
         except ImportError:
             pass
 
+    # --- Enhanced signal modules (composite indicators computed from raw OHLCV) ---
+    _enhanced_modules = [
+        ("trend", "portfolio.signals.trend", "compute_trend_signal"),
+        ("momentum", "portfolio.signals.momentum", "compute_momentum_signal"),
+        ("volume_flow", "portfolio.signals.volume_flow", "compute_volume_flow_signal"),
+        ("volatility_sig", "portfolio.signals.volatility", "compute_volatility_signal"),
+        ("candlestick", "portfolio.signals.candlestick", "compute_candlestick_signal"),
+        ("structure", "portfolio.signals.structure", "compute_structure_signal"),
+        ("fibonacci", "portfolio.signals.fibonacci", "compute_fibonacci_signal"),
+        ("smart_money", "portfolio.signals.smart_money", "compute_smart_money_signal"),
+        ("oscillators", "portfolio.signals.oscillators", "compute_oscillator_signal"),
+        ("heikin_ashi", "portfolio.signals.heikin_ashi", "compute_heikin_ashi_signal"),
+        ("mean_reversion", "portfolio.signals.mean_reversion", "compute_mean_reversion_signal"),
+        ("calendar", "portfolio.signals.calendar_seasonal", "compute_calendar_signal"),
+        ("momentum_factors", "portfolio.signals.momentum_factors", "compute_momentum_factors_signal"),
+    ]
+    # macro_regime is special — it takes an extra macro dict parameter
+    _macro_regime_module = ("macro_regime", "portfolio.signals.macro_regime", "compute_macro_regime_signal")
+
+    if df is not None and isinstance(df, pd.DataFrame) and len(df) >= 26:
+        for sig_name, module_path, func_name in _enhanced_modules:
+            try:
+                import importlib
+                mod = importlib.import_module(module_path)
+                compute_fn = getattr(mod, func_name)
+                result = compute_fn(df)
+                if result and isinstance(result, dict):
+                    votes[sig_name] = result.get("action", "HOLD")
+                    extra_info[f"{sig_name}_action"] = result.get("action", "HOLD")
+                    extra_info[f"{sig_name}_confidence"] = result.get("confidence", 0.0)
+                    extra_info[f"{sig_name}_sub_signals"] = result.get("sub_signals", {})
+                else:
+                    votes[sig_name] = "HOLD"
+            except Exception:
+                votes[sig_name] = "HOLD"
+
+        # macro_regime gets macro context from cache if available
+        try:
+            import importlib
+            macro_data = None
+            try:
+                from portfolio.macro_context import get_dxy, get_fed_calendar, get_treasury
+                macro_data = {}
+                dxy = _cached("dxy", 3600, get_dxy)
+                if dxy:
+                    macro_data["dxy"] = dxy
+                treasury = _cached("treasury", 3600, get_treasury)
+                if treasury:
+                    macro_data["treasury"] = treasury
+                fed = get_fed_calendar()
+                if fed:
+                    macro_data["fed"] = fed
+            except Exception:
+                pass
+            mr_name, mr_path, mr_func = _macro_regime_module
+            mod = importlib.import_module(mr_path)
+            compute_fn = getattr(mod, mr_func)
+            result = compute_fn(df, macro=macro_data or None)
+            if result and isinstance(result, dict):
+                votes[mr_name] = result.get("action", "HOLD")
+                extra_info[f"{mr_name}_action"] = result.get("action", "HOLD")
+                extra_info[f"{mr_name}_confidence"] = result.get("confidence", 0.0)
+                extra_info[f"{mr_name}_sub_signals"] = result.get("sub_signals", {})
+            else:
+                votes[mr_name] = "HOLD"
+        except Exception:
+            votes[_macro_regime_module[0]] = "HOLD"
+    else:
+        for sig_name, _, _ in _enhanced_modules:
+            votes[sig_name] = "HOLD"
+        votes[_macro_regime_module[0]] = "HOLD"
+
     # Derive buy/sell counts from named votes
     buy = sum(1 for v in votes.values() if v == "BUY")
     sell = sum(1 for v in votes.values() if v == "SELL")
 
-    # Total applicable signals: crypto has 4 extra (CryptoTrader-LM, Custom LoRA, ML, Funding Rate)
+    # Total applicable signals: crypto has extra (CryptoTrader-LM, Custom LoRA, ML, Funding Rate)
+    # Enhanced signals add 14 more for all asset classes
     is_crypto = ticker in CRYPTO_SYMBOLS
     is_metal = ticker in METALS_SYMBOLS
     if is_crypto:
-        total_applicable = 11
+        total_applicable = 25  # 11 original + 14 enhanced
     elif is_metal:
-        total_applicable = 5  # RSI, MACD, EMA, BB, Volume
+        total_applicable = 21  # 7 original + 14 enhanced
     else:
-        total_applicable = 7
+        total_applicable = 21  # 7 original + 14 enhanced
 
     active_voters = buy + sell
     if ticker in STOCK_SYMBOLS:
@@ -814,6 +951,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None):
             accuracy_data = cached
         else:
             accuracy_data = signal_accuracy("1d")
+            if accuracy_data:
+                from portfolio.accuracy_stats import write_accuracy_cache
+                write_accuracy_cache("1d", accuracy_data)
     except Exception:
         pass
     weighted_action, weighted_conf = _weighted_consensus(votes, accuracy_data, regime)
@@ -920,6 +1060,19 @@ def write_agent_summary(
     for name, sig in signals.items():
         extra = sig.get("extra", {})
         ind = sig["indicators"]
+        # Collect enhanced signal summaries (compact, no sub_signals detail in top-level)
+        enhanced = {}
+        for esig_name in ("trend", "momentum", "volume_flow", "volatility_sig",
+                          "candlestick", "structure", "fibonacci", "smart_money",
+                          "oscillators", "heikin_ashi", "mean_reversion", "calendar",
+                          "macro_regime", "momentum_factors"):
+            eaction = extra.get(f"{esig_name}_action", "HOLD")
+            econf = extra.get(f"{esig_name}_confidence", 0.0)
+            enhanced[esig_name] = {"action": eaction, "confidence": econf}
+
+        # Strip bulky sub_signals from extra to keep agent_summary.json lean
+        extra_clean = {k: v for k, v in extra.items() if not k.endswith("_sub_signals")}
+
         summary["signals"][name] = {
             "action": sig["action"],
             "confidence": sig["confidence"],
@@ -932,7 +1085,8 @@ def write_agent_summary(
             "atr": round(ind.get("atr", 0), 4),
             "atr_pct": round(ind.get("atr_pct", 0), 2),
             "regime": detect_regime(ind, is_crypto=name in CRYPTO_SYMBOLS),
-            "extra": extra,
+            "enhanced_signals": enhanced,
+            "extra": extra_clean,
         }
         if "fear_greed" in extra:
             summary["fear_greed"][name] = {
@@ -1010,6 +1164,15 @@ def write_agent_summary(
     cross_leads = _cross_asset_signals(signals)
     if cross_leads:
         summary["cross_asset_leads"] = cross_leads
+
+    # Avanza-tracked instruments (Tier 2: Nordic equities, Tier 3: warrants)
+    try:
+        from portfolio.avanza_tracker import fetch_avanza_prices
+        avanza_prices = fetch_avanza_prices()
+        if avanza_prices:
+            summary["avanza_instruments"] = avanza_prices
+    except Exception:
+        pass
 
     _atomic_write_json(AGENT_SUMMARY_FILE, summary)
     return summary
@@ -1127,22 +1290,29 @@ def _maybe_send_alert(config, signals, prices_usd, fx_rate, state, reasons, tf_d
         return
     headline = significant[0]
     lines = [f"*ALERT: {headline}*", ""]
+    # Actionable-only: show BUY/SELL tickers, compress HOLDs
+    hold_count = 0
     for ticker in SYMBOLS:
         sig = signals.get(ticker)
         if not sig:
+            continue
+        action = sig["action"]
+        if action == "HOLD":
+            hold_count += 1
             continue
         price = prices_usd.get(ticker, 0)
         extra = sig.get("extra", {})
         b = extra.get("_buy_count", 0)
         s = extra.get("_sell_count", 0)
         total = extra.get("_total_applicable", 0)
-        h = total - b - s
-        action = sig["action"]
+        h = max(0, total - b - s)
         if price >= 1000:
             p_str = f"${price:,.0f}"
         else:
             p_str = f"${price:,.2f}"
         lines.append(f"`{ticker:<7} {p_str:>9}  {action:<4} {b}B/{s}S/{h}H`")
+    if hold_count > 0:
+        lines.append(f"_+ {hold_count} HOLD_")
     fg_val = ""
     for ticker, sig in signals.items():
         extra = sig.get("extra", {})
@@ -1333,11 +1503,13 @@ def run(force_report=False, active_symbols=None):
             tf_data[name] = tfs
 
             now_entry = tfs[0][1] if tfs else None
+            now_df = None
             if now_entry and "indicators" in now_entry:
                 ind = now_entry["indicators"]
+                now_df = now_entry.get("_df")  # raw DataFrame from collect_timeframes
             else:
-                df = _fetch_klines(source, interval="15m", limit=100)
-                ind = compute_indicators(df)
+                now_df = _fetch_klines(source, interval="15m", limit=100)
+                ind = compute_indicators(now_df)
 
             if ind is None:
                 print(f"  {name}: insufficient data, skipping")
@@ -1346,7 +1518,7 @@ def run(force_report=False, active_symbols=None):
             prices_usd[name] = price
 
             action, conf, extra = generate_signal(
-                ind, ticker=name, config=config, timeframes=tfs
+                ind, ticker=name, config=config, timeframes=tfs, df=now_df
             )
             signals[name] = {
                 "action": action,
@@ -1374,8 +1546,19 @@ def run(force_report=False, active_symbols=None):
                     parts.append(f"Vol:{extra['volume_ratio']}x")
                 if parts:
                     extra_str = f" | {' '.join(parts)}"
+            # Enhanced signals summary
+            enh_parts = []
+            for esig in ("trend", "momentum", "volume_flow", "volatility_sig",
+                         "candlestick", "structure", "fibonacci", "smart_money",
+                         "oscillators", "heikin_ashi", "mean_reversion", "calendar",
+                         "macro_regime", "momentum_factors"):
+                ea = extra.get(f"{esig}_action", "HOLD")
+                if ea != "HOLD":
+                    enh_parts.append(f"{esig[:4].title()}:{ea[0]}")
+            enh_str = f" | Enh: {' '.join(enh_parts)}" if enh_parts else ""
+
             print(
-                f"  {name}: ${price:,.2f} | RSI {ind['rsi']:.0f} | MACD {ind['macd_hist']:+.1f}{extra_str} | {action} ({conf:.0%})"
+                f"  {name}: ${price:,.2f} | RSI {ind['rsi']:.0f} | MACD {ind['macd_hist']:+.1f}{extra_str}{enh_str} | {action} ({conf:.0%})"
             )
 
             # Print multi-timeframe summary

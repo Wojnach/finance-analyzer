@@ -277,16 +277,16 @@ class TestStockSignalVoteCounts:
     """Stock signal generation produces correct total_applicable counts."""
 
     @mock.patch("portfolio.main._cached", side_effect=_null_cached)
-    def test_stock_total_applicable_is_7(self, _mock):
+    def test_stock_total_applicable_is_21(self, _mock):
         ind = make_indicators()
         _, _, extra = generate_signal(ind, ticker="MSTR")
-        assert extra["_total_applicable"] == 7
+        assert extra["_total_applicable"] == 21  # 7 original + 14 enhanced
 
     @mock.patch("portfolio.main._cached", side_effect=_null_cached)
-    def test_crypto_total_applicable_is_11(self, _mock):
+    def test_crypto_total_applicable_is_25(self, _mock):
         ind = make_indicators(close=69000.0)
         _, _, extra = generate_signal(ind, ticker="BTC-USD")
-        assert extra["_total_applicable"] == 11
+        assert extra["_total_applicable"] == 25  # 11 original + 14 enhanced
 
     @mock.patch("portfolio.main._cached", side_effect=_null_cached)
     def test_stock_max_technical_voters_is_4(self, _mock):

@@ -12,11 +12,35 @@ BINANCE_FAPI_BASE = "https://fapi.binance.com/fapi/v1"
 TICKER_MAP = {
     "BTC-USD": ("binance", "BTCUSDT"),
     "ETH-USD": ("binance", "ETHUSDT"),
+    "XAU-USD": ("binance_fapi", "XAUUSDT"),
+    "XAG-USD": ("binance_fapi", "XAGUSDT"),
     "MSTR": ("alpaca", "MSTR"),
     "PLTR": ("alpaca", "PLTR"),
     "NVDA": ("alpaca", "NVDA"),
-    "XAU-USD": ("binance_fapi", "XAUUSDT"),
-    "XAG-USD": ("binance_fapi", "XAGUSDT"),
+    "AMD": ("alpaca", "AMD"),
+    "BABA": ("alpaca", "BABA"),
+    "GOOGL": ("alpaca", "GOOGL"),
+    "AMZN": ("alpaca", "AMZN"),
+    "AAPL": ("alpaca", "AAPL"),
+    "AVGO": ("alpaca", "AVGO"),
+    "AI": ("alpaca", "AI"),
+    "GRRR": ("alpaca", "GRRR"),
+    "IONQ": ("alpaca", "IONQ"),
+    "MRVL": ("alpaca", "MRVL"),
+    "META": ("alpaca", "META"),
+    "MU": ("alpaca", "MU"),
+    "PONY": ("alpaca", "PONY"),
+    "RXRX": ("alpaca", "RXRX"),
+    "SOUN": ("alpaca", "SOUN"),
+    "SMCI": ("alpaca", "SMCI"),
+    "TSM": ("alpaca", "TSM"),
+    "TTWO": ("alpaca", "TTWO"),
+    "TEM": ("alpaca", "TEM"),
+    "UPST": ("alpaca", "UPST"),
+    "VERI": ("alpaca", "VERI"),
+    "VRT": ("alpaca", "VRT"),
+    "QQQ": ("alpaca", "QQQ"),
+    "LMT": ("alpaca", "LMT"),
 }
 
 
@@ -73,6 +97,7 @@ def _fetch_klines(ticker):
     source_type, symbol = TICKER_MAP.get(ticker, (None, None))
     if source_type in ("binance", "binance_fapi"):
         base_url = BINANCE_FAPI_BASE if source_type == "binance_fapi" else BINANCE_BASE
+        time.sleep(0.1)  # rate limit: space out Binance calls
         r = requests.get(
             f"{base_url}/klines",
             params={"symbol": symbol, "interval": "15m", "limit": 100},
@@ -103,6 +128,7 @@ def _fetch_klines(ticker):
     elif source_type == "alpaca":
         from datetime import datetime, timezone
 
+        time.sleep(0.4)  # rate limit: space out Alpaca calls (150/min target)
         end = datetime.now(timezone.utc)
         start = end - pd.Timedelta(days=5)
         r = requests.get(
@@ -303,5 +329,5 @@ if __name__ == "__main__":
     print(f"Treasury: {treasury}")
     fed = get_fed_calendar()
     print(f"Fed: {fed}")
-    for t in ["BTC-USD", "ETH-USD", "MSTR", "PLTR", "NVDA"]:
+    for t in list(TICKER_MAP.keys()):
         print(f"{t}: {get_volume_signal(t)}")

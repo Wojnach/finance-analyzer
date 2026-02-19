@@ -10,7 +10,13 @@ CONTEXT_FILE = DATA_DIR / "layer2_context.md"
 PORTFOLIO_FILE = DATA_DIR / "portfolio_state.json"
 BOLD_FILE = DATA_DIR / "portfolio_state_bold.json"
 
-TICKERS = ["BTC-USD", "ETH-USD", "MSTR", "PLTR", "NVDA"]
+TICKERS = [
+    "BTC-USD", "ETH-USD", "XAU-USD", "XAG-USD",
+    "MSTR", "PLTR", "NVDA", "AMD", "BABA", "GOOGL", "AMZN", "AAPL",
+    "AVGO", "AI", "GRRR", "IONQ", "MRVL", "META", "MU", "PONY",
+    "RXRX", "SOUN", "SMCI", "TSM", "TTWO", "TEM", "UPST", "VERI",
+    "VRT", "QQQ", "LMT",
+]
 
 TIER_FULL = 2
 TIER_COMPACT = 4

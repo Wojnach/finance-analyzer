@@ -248,14 +248,17 @@ entry = {
         "bold": {"action": "HOLD", "reasoning": "Brief reason"}
     },
     "tickers": {
+        # Include entries for all tickers with BUY/SELL signals or active positions.
+        # Omit tickers where outlook is neutral and no position is held.
         "BTC-USD": {"outlook": "neutral", "thesis": "", "conviction": 0.0, "levels": []},
         "ETH-USD": {"outlook": "neutral", "thesis": "", "conviction": 0.0, "levels": []},
-        "MSTR": {"outlook": "neutral", "thesis": "", "conviction": 0.0, "levels": []},
-        "PLTR": {"outlook": "neutral", "thesis": "", "conviction": 0.0, "levels": []},
-        "NVDA": {"outlook": "neutral", "thesis": "", "conviction": 0.0, "levels": []}
+        # ... add any ticker that has a non-neutral outlook or active position ...
     },
     "watchlist": ["Conditions you are watching for"],
-    "prices": {"BTC-USD": 0, "ETH-USD": 0, "MSTR": 0, "PLTR": 0, "NVDA": 0}
+    "prices": {
+        # Copy current USD prices from agent_summary.json for ALL tickers
+        # so the next invocation can compare. Use ticker keys from agent_summary.
+    }
 }
 with open("data/layer2_journal.jsonl", "a", encoding="utf-8") as f:
     f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -283,60 +286,60 @@ triggered — the user wants to see your analysis every time. No exceptions.
 **Sections (in order):**
 
 1. Action header — `*HOLD*` or `*BUY TICKER*` with trade details
-2. Ticker grid — price + "Now" action + vote breakdown as `XB/YS/ZH` where X=buy votes, Y=sell votes, Z=abstains. Calculate from `_buy_count`, `_sell_count`, `_total_applicable` in `extra` (Z = total_applicable - buy - sell). Example: `BUY 4B/1S/6H` means 4 buy, 1 sell, 6 abstained out of 11.
-3. Timeframe heatmap — `B`=BUY `S`=SELL `H`=HOLD from `timeframes` in agent_summary.json. All 5 tickers have all 7 horizons (stocks use Alpaca intraday data). All tickers in one grid.
-4. F&G + portfolio line
-5. Reasoning (1-2 sentences)
+2. Ticker grid — **actionable tickers only** (BUY or SELL consensus, or held positions). Show price + "Now" action + vote breakdown as `XB/YS/ZH` where X=buy votes, Y=sell votes, Z=abstains. Calculate from `_buy_count`, `_sell_count`, `_total_applicable` in `extra` (Z = total_applicable - buy - sell).
+3. `_+ N HOLD_` line — count of remaining tickers that are all HOLD
+4. Timeframe heatmap — only for tickers shown in the grid. `B`=BUY `S`=SELL `H`=HOLD from `timeframes` in agent_summary.json.
+5. F&G + portfolio line
+6. Reasoning (1-2 sentences)
 
-**The ticker grid and timeframe heatmap are MANDATORY.** Never send blank lines where the grid should be. Every message must include all 5 tickers with prices and vote counts, and the full 7-column heatmap. If you skip them, the message is useless.
+**Actionable-only rules (30+ tickers — must stay under Telegram's 4096 char limit):**
+- Always show tickers with BUY or SELL consensus in the grid
+- Always show tickers with active positions (in either portfolio) in the grid
+- Show `_+ N HOLD_` for the rest (count of HOLD tickers not shown)
+- Timeframe heatmap only for shown tickers
+- If ALL tickers are HOLD and no positions, show the top 3-5 most interesting (closest to flipping BUY or SELL — highest conviction or most non-abstaining voters)
 
-HOLD example:
+HOLD example (all hold, show top interesting):
 
 ```
 *HOLD*
 
 `BTC  $66,800  BUY  4B/1S/6H`
-`ETH  $1,952   SELL 1B/3S/7H`
-`MSTR $129.93  HOLD 0B/1S/6H`
-`PLTR $134.77  HOLD 1B/1S/5H`
-`NVDA $880.20  HOLD 1B/0S/6H`
+`SMCI $42.30   SELL 2B/3S/2H`
+`IONQ $28.15   BUY  3B/0S/4H`
+_+ 27 HOLD_
 
 `     Now 12h  2d  7d 1mo 3mo 6mo`
 `BTC   B   H   S   S   S   S   H`
-`ETH   H   S   S   S   S   S   S`
-`MSTR  H   S   H   S   S   S   S`
-`PLTR  H   H   S   H   S   S   H`
-`NVDA  H   H   H   H   S   H   H`
+`SMCI  S   S   H   S   S   H   H`
+`IONQ  B   B   H   H   S   H   H`
 
 _Crypto F&G: 11 · Stock F&G: 62_
 _Patient: 500,000 SEK (+0.00%)_
-_Bold: 500,000 SEK (+0.00%)_
+_Bold: 464,535 SEK (-7.09%)_
 
-Patient: HOLD — waiting for multi-TF confirmation.
-Bold: HOLD — no 3+ consensus on any ticker.
+Patient: HOLD — no multi-TF alignment.
+Bold: HOLD — SMCI SELL interesting but no breakout confirmation.
 ```
 
 TRADE example (bold trades, patient holds):
 
 ```
-*BOLD BUY BTC* — 150,000 SEK @ $66,800
+*BOLD BUY BTC* — 139,361 SEK @ $66,800
 
 `BTC  $66,800  BUY  4B/1S/6H`
-`ETH  $1,952   HOLD 2B/1S/8H`
-`MSTR $129.93  HOLD 0B/1S/6H`
-`PLTR $134.77  HOLD 1B/1S/5H`
-`NVDA $880.20  HOLD 1B/0S/6H`
+`ETH  $1,952   SELL 1B/3S/7H`
+`SMCI $42.30   SELL 2B/3S/2H`
+_+ 27 HOLD_
 
 `     Now 12h  2d  7d 1mo 3mo 6mo`
 `BTC   B   H   S   S   S   S   H`
-`ETH   H   S   S   S   S   S   S`
-`MSTR  H   S   H   S   S   S   S`
-`PLTR  H   H   S   H   S   S   H`
-`NVDA  H   H   H   H   S   H   H`
+`ETH   S   S   S   S   S   S   S`
+`SMCI  S   S   H   S   S   H   H`
 
 _Crypto F&G: 11 · Stock F&G: 62_
 _Patient: 500,000 SEK (+0.00%) · HOLD_
-_Bold: 350,000 SEK (+0.00%) · BTC 0.22_
+_Bold: 325,174 SEK (-7.09%) · BTC 0.19_
 
 Patient: HOLD — BUY only on Now, longer TFs bearish.
 Bold: BUY BTC — 4B consensus + BB expansion + EMA alignment. Structural breakout with volume.
@@ -388,7 +391,7 @@ requests.post(
 **Non-voting context** (in agent_summary.json `macro` section for your reasoning):
 
 - **DXY** — Dollar Index trend and 5d change. Strong dollar = headwind for risk assets.
-- **Treasury Yields** — 2Y, 10Y, 30Y yields + 2s10s spread. Inverted curve = recession risk. Rising yields = headwind for growth stocks (MSTR, PLTR, NVDA). Falling yields = tailwind.
+- **Treasury Yields** — 2Y, 10Y, 30Y yields + 2s10s spread. Inverted curve = recession risk. Rising yields = headwind for growth/tech stocks. Falling yields = tailwind.
 - **Fed Calendar** — Next FOMC date and days until. **Patient:** Avoid new positions within 4 hours of announcement; wait for trend confirmation post-event. **Bold:** Do not trade the event itself; watch for post-event breakouts (1–4 hrs after).
 
 ## Signal Performance
@@ -412,7 +415,7 @@ samples as preliminary — they will stabilize over the next 2-4 weeks.
 
 **Consensus formula:** Layer 1 computes consensus using active voters (signals that voted BUY
 or SELL) as the denominator, not total applicable signals. MIN_VOTERS varies by asset class:
-stocks (MSTR, PLTR, NVDA) require MIN_VOTERS=2, crypto (BTC, ETH) requires MIN_VOTERS=3.
+stocks and metals require MIN_VOTERS=2, crypto (BTC, ETH) requires MIN_VOTERS=3.
 Stocks only have 7 applicable signals with ~71% abstention rate, so requiring 3 voters would
 structurally prevent any consensus. Example: 2B/0S out of 7 applicable = BUY at 100%
 confidence (2/2 active voters). The confidence reflects agreement among voters, not coverage.
@@ -421,20 +424,73 @@ confidence (2/2 active voters). The confidence reflects agreement among voters, 
 reasoning, not a trading signal. A 3-signal consensus in a choppy market can be pure noise.
 Your job is to weigh signal quality, timeframe alignment, and macro context — not count votes.
 
-**Stock reasoning requirement:** For each stock (MSTR, PLTR, NVDA) that shows BUY or SELL
-signals on any timeframe, briefly state why you are holding or trading in your Telegram
-message reasoning. Stocks reach consensus more easily (MIN_VOTERS=2) so your judgment as
-a filter is especially important.
+**Stock reasoning requirement:** For each stock that shows BUY or SELL consensus, briefly
+state why you are holding or trading in your Telegram message reasoning. Stocks reach
+consensus more easily (MIN_VOTERS=2) so your judgment as a filter is especially important.
+With 26 stocks tracked, focus your reasoning on the ones with actual signals — don't
+enumerate every HOLD ticker.
 
 ## Instruments
 
-| Ticker  | Market      | Data source       |
-| ------- | ----------- | ----------------- |
-| BTC-USD | Crypto 24/7 | Binance (BTCUSDT) |
-| ETH-USD | Crypto 24/7 | Binance (ETHUSDT) |
-| MSTR    | NASDAQ      | Alpaca (IEX feed) |
-| PLTR    | NASDAQ      | Alpaca (IEX feed) |
-| NVDA    | NASDAQ      | Alpaca (IEX feed) |
+### Tier 1: Full signals (11 signals, 7 timeframes)
+
+| Ticker  | Market      | Data source        |
+| ------- | ----------- | ------------------ |
+| BTC-USD | Crypto 24/7 | Binance (BTCUSDT)  |
+| ETH-USD | Crypto 24/7 | Binance (ETHUSDT)  |
+| XAU-USD | Metals 24/7 | Binance FAPI       |
+| XAG-USD | Metals 24/7 | Binance FAPI       |
+| MSTR    | NASDAQ      | Alpaca (IEX feed)  |
+| PLTR    | NASDAQ      | Alpaca (IEX feed)  |
+| NVDA    | NASDAQ      | Alpaca (IEX feed)  |
+| AMD     | NASDAQ      | Alpaca (IEX feed)  |
+| BABA    | NYSE        | Alpaca (IEX feed)  |
+| GOOGL   | NASDAQ      | Alpaca (IEX feed)  |
+| AMZN    | NASDAQ      | Alpaca (IEX feed)  |
+| AAPL    | NASDAQ      | Alpaca (IEX feed)  |
+| AVGO    | NASDAQ      | Alpaca (IEX feed)  |
+| AI      | NYSE        | Alpaca (IEX feed)  |
+| GRRR    | NASDAQ      | Alpaca (IEX feed)  |
+| IONQ    | NYSE        | Alpaca (IEX feed)  |
+| MRVL    | NASDAQ      | Alpaca (IEX feed)  |
+| META    | NASDAQ      | Alpaca (IEX feed)  |
+| MU      | NASDAQ      | Alpaca (IEX feed)  |
+| PONY    | NASDAQ      | Alpaca (IEX feed)  |
+| RXRX    | NASDAQ      | Alpaca (IEX feed)  |
+| SOUN    | NASDAQ      | Alpaca (IEX feed)  |
+| SMCI    | NASDAQ      | Alpaca (IEX feed)  |
+| TSM     | NYSE        | Alpaca (IEX feed)  |
+| TTWO    | NASDAQ      | Alpaca (IEX feed)  |
+| TEM     | NASDAQ      | Alpaca (IEX feed)  |
+| UPST    | NASDAQ      | Alpaca (IEX feed)  |
+| VERI    | NASDAQ      | Alpaca (IEX feed)  |
+| VRT     | NYSE        | Alpaca (IEX feed)  |
+| QQQ     | NASDAQ      | Alpaca (IEX feed)  |
+| LMT     | NYSE        | Alpaca (IEX feed)  |
+
+### Tier 2: Avanza price-only (Nordic stocks — no signals)
+
+| Name               | Config key  | Notes                           |
+| ------------------ | ----------- | ------------------------------- |
+| SAAB B             | SAAB-B      | Price + P&L only via Avanza API |
+| SEB C              | SEB-C       | Price + P&L only via Avanza API |
+| K33                | K33         | Price + P&L only via Avanza API |
+| H100 Group         | H100        | Price + P&L only via Avanza API |
+| B Treasury Cap B   | BTCAP-B     | Price + P&L only via Avanza API |
+
+### Tier 3: Warrants (Avanza price + underlying's signals)
+
+| Name                     | Config key     | Underlying |
+| ------------------------ | -------------- | ---------- |
+| BULL NASDAQ X3 AVA 1     | BULL-NDX3X     | QQQ        |
+| CoinShares XBT Tracker   | XBT-TRACKER    | BTC-USD    |
+| CoinShares ETH Tracker   | ETH-TRACKER    | ETH-USD    |
+| MINI L SILVER AVA 140    | MINI-SILVER    | XAG-USD    |
+| MINI L TSMC AVA 19       | MINI-TSMC      | TSM        |
+
+Warrants: use the **underlying's signals** for decision-making. The warrant's own price is
+tracked via Avanza for P&L. When the underlying has actionable signals, mention the warrant
+position in your reasoning.
 
 ## Available Tools
 

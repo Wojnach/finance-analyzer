@@ -132,13 +132,14 @@ class TestNamedVotes:
             assert votes[name] in ("BUY", "SELL", "HOLD")
 
     @mock.patch("portfolio.main._cached", side_effect=_null_cached)
-    def test_votes_dict_crypto_has_all_11(self, _mock):
+    def test_votes_dict_crypto_has_all_25(self, _mock):
         ind = make_indicators(close=69000.0)
         _, _, extra = generate_signal(ind, ticker="BTC-USD")
         votes = extra["_votes"]
         assert "ministral" in votes
         assert "custom_lora" in votes
-        assert len(votes) == 11
+        # 11 original + 14 enhanced composite signals
+        assert len(votes) == 25
 
     @mock.patch("portfolio.main._cached", side_effect=_null_cached)
     def test_buy_count_matches_votes(self, _mock):

@@ -87,11 +87,12 @@ def _build_eval_prompt(ticker, direction, conditions, signals, tf_data, prices_u
             summary = json.loads(summary_file.read_text(encoding="utf-8"))
             macro = summary.get("macro", {})
             dxy_info = macro.get("dxy", {})
-            dxy = dxy_info.get("price", "N/A")
-            dxy_trend = dxy_info.get("change_5d", "")
-            yields = macro.get("treasury_yields", {})
+            dxy = dxy_info.get("value", "N/A")
+            dxy_trend = dxy_info.get("change_5d_pct", "")
+            yields = macro.get("treasury", {})
             yield_10y = yields.get("10y", "N/A")
-            fomc_days = macro.get("fomc_days_until", "N/A")
+            fed_info = macro.get("fed", {})
+            fomc_days = fed_info.get("days_until", "N/A")
     except Exception:
         pass
 
