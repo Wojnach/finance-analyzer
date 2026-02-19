@@ -29,9 +29,12 @@ SYMBOLS = {
     "MSTR": {"alpaca": "MSTR"},
     "PLTR": {"alpaca": "PLTR"},
     "NVDA": {"alpaca": "NVDA"},
+    "XAU-USD": {"binance_fapi": "XAUUSDT"},
+    "XAG-USD": {"binance_fapi": "XAGUSDT"},
 }
 CRYPTO_SYMBOLS = {"BTC-USD", "ETH-USD"}
 STOCK_SYMBOLS = {"MSTR", "PLTR", "NVDA"}
+METALS_SYMBOLS = {"XAU-USD", "XAG-USD"}
 
 # Market hours (UTC) — EU open to US close
 MARKET_OPEN_HOUR = 7  # ~Frankfurt/London open
@@ -48,10 +51,10 @@ def get_market_state():
     weekday = now.weekday()  # 0=Mon, 6=Sun
     hour = now.hour
     if weekday >= 5:
-        return "weekend", CRYPTO_SYMBOLS, INTERVAL_WEEKEND
+        return "weekend", CRYPTO_SYMBOLS | METALS_SYMBOLS, INTERVAL_WEEKEND
     if MARKET_OPEN_HOUR <= hour < MARKET_CLOSE_HOUR:
         return "open", set(SYMBOLS.keys()), INTERVAL_MARKET_OPEN
-    return "closed", CRYPTO_SYMBOLS, INTERVAL_MARKET_CLOSED
+    return "closed", CRYPTO_SYMBOLS | METALS_SYMBOLS, INTERVAL_MARKET_CLOSED
 
 
 INITIAL_CASH_SEK = 500_000
@@ -59,6 +62,7 @@ FEE_CRYPTO = 0.0005  # 0.05% taker fee (Binance futures)
 FEE_STOCK = 0.001  # 0.10% (typical broker commission)
 
 BINANCE_BASE = "https://api.binance.com/api/v3"
+BINANCE_FAPI_BASE = "https://fapi.binance.com/fapi/v1"
 
 # Multi-timeframe analysis — (label, binance_interval, num_candles, cache_ttl_seconds)
 TIMEFRAMES = [
@@ -126,6 +130,29 @@ def binance_klines(symbol, interval="5m", limit=100):
             "taker_buy_vol",
             "taker_buy_quote_vol",
             "ignore",
+        ],
+    )
+    for col in ["open", "high", "low", "close", "volume"]:
+        df[col] = df[col].astype(float)
+    df["time"] = pd.to_datetime(df["open_time"], unit="ms")
+    return df
+
+
+def binance_fapi_klines(symbol, interval="5m", limit=100):
+    """Fetch klines from Binance Futures API (for metals like XAUUSDT, XAGUSDT)."""
+    r = requests.get(
+        f"{BINANCE_FAPI_BASE}/klines",
+        params={"symbol": symbol, "interval": interval, "limit": limit},
+        timeout=10,
+    )
+    r.raise_for_status()
+    data = r.json()
+    df = pd.DataFrame(
+        data,
+        columns=[
+            "open_time", "open", "high", "low", "close", "volume",
+            "close_time", "quote_vol", "trades", "taker_buy_vol",
+            "taker_buy_quote_vol", "ignore",
         ],
     )
     for col in ["open", "high", "low", "close", "volume"]:
@@ -343,7 +370,9 @@ def technical_signal(ind):
 
 
 def _fetch_klines(source, interval, limit):
-    if "binance" in source:
+    if "binance_fapi" in source:
+        return binance_fapi_klines(source["binance_fapi"], interval=interval, limit=limit)
+    elif "binance" in source:
         return binance_klines(source["binance"], interval=interval, limit=limit)
     elif "alpaca" in source:
         return alpaca_klines(source["alpaca"], interval=interval, limit=limit)
@@ -364,7 +393,7 @@ STOCK_TIMEFRAMES = [
 def collect_timeframes(source):
     is_stock = "alpaca" in source
     tfs = STOCK_TIMEFRAMES if is_stock else TIMEFRAMES
-    source_key = source.get("alpaca") or source.get("binance")
+    source_key = source.get("alpaca") or source.get("binance") or source.get("binance_fapi")
     results = []
     for label, interval, limit, ttl in tfs:
         cache_key = f"tf_{source_key}_{label}"
@@ -743,10 +772,21 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None):
 
     # Total applicable signals: crypto has 4 extra (CryptoTrader-LM, Custom LoRA, ML, Funding Rate)
     is_crypto = ticker in CRYPTO_SYMBOLS
-    total_applicable = 11 if is_crypto else 7
+    is_metal = ticker in METALS_SYMBOLS
+    if is_crypto:
+        total_applicable = 11
+    elif is_metal:
+        total_applicable = 5  # RSI, MACD, EMA, BB, Volume
+    else:
+        total_applicable = 7
 
     active_voters = buy + sell
-    min_voters = MIN_VOTERS_STOCK if ticker in STOCK_SYMBOLS else MIN_VOTERS_CRYPTO
+    if ticker in STOCK_SYMBOLS:
+        min_voters = MIN_VOTERS_STOCK
+    elif ticker in METALS_SYMBOLS:
+        min_voters = MIN_VOTERS_STOCK  # metals also need only 2 voters (5 signals, high abstention)
+    else:
+        min_voters = MIN_VOTERS_CRYPTO
     if active_voters < min_voters:
         action = "HOLD"
         conf = 0.0

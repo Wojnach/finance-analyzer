@@ -8,12 +8,15 @@ import requests
 BINANCE_BASE = "https://api.binance.com/api/v3"
 ALPACA_BASE = "https://data.alpaca.markets/v2"
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
+BINANCE_FAPI_BASE = "https://fapi.binance.com/fapi/v1"
 TICKER_MAP = {
     "BTC-USD": ("binance", "BTCUSDT"),
     "ETH-USD": ("binance", "ETHUSDT"),
     "MSTR": ("alpaca", "MSTR"),
     "PLTR": ("alpaca", "PLTR"),
     "NVDA": ("alpaca", "NVDA"),
+    "XAU-USD": ("binance_fapi", "XAUUSDT"),
+    "XAG-USD": ("binance_fapi", "XAGUSDT"),
 }
 
 
@@ -68,9 +71,10 @@ def get_dxy():
 
 def _fetch_klines(ticker):
     source_type, symbol = TICKER_MAP.get(ticker, (None, None))
-    if source_type == "binance":
+    if source_type in ("binance", "binance_fapi"):
+        base_url = BINANCE_FAPI_BASE if source_type == "binance_fapi" else BINANCE_BASE
         r = requests.get(
-            f"{BINANCE_BASE}/klines",
+            f"{base_url}/klines",
             params={"symbol": symbol, "interval": "15m", "limit": 100},
             timeout=10,
         )
