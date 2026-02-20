@@ -5,6 +5,11 @@ REM Claude Code auto-loads CLAUDE.md from the project root for full instructions
 
 cd /d Q:\finance-analyzer
 
+REM Clear Claude Code session markers — prevents "nested session" error when launched from
+REM a process tree that already has Claude Code running (e.g. Task Scheduler inheriting env)
+set CLAUDECODE=
+set CLAUDE_CODE_ENTRYPOINT=
+
 REM Invoke Claude Code as the trading decision-maker
 REM Layer 1 already wrote fresh agent_summary.json — no need to re-collect
 echo Running trading agent...

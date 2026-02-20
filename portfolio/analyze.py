@@ -32,15 +32,11 @@ CONFIG_FILE = BASE_DIR / "config.json"
 ANALYSIS_LOG_FILE = DATA_DIR / "analysis_log.jsonl"
 WATCH_LOG_FILE = DATA_DIR / "watch_log.jsonl"
 
-KNOWN_TICKERS = {
-    "BTC-USD", "ETH-USD", "XAU-USD", "XAG-USD",
-    "MSTR", "PLTR", "NVDA", "AMD", "BABA", "GOOGL", "AMZN", "AAPL",
-    "AVGO", "AI", "GRRR", "IONQ", "MRVL", "META", "MU", "PONY",
-    "RXRX", "SOUN", "SMCI", "TSM", "TTWO", "TEM", "UPST", "VERI",
-    "VRT", "QQQ", "LMT",
-}
-CRYPTO_TICKERS = {"BTC-USD", "ETH-USD"}
-METALS_TICKERS = {"XAU-USD", "XAG-USD"}
+from portfolio.tickers import (
+    ALL_TICKERS as KNOWN_TICKERS,
+    CRYPTO_SYMBOLS as CRYPTO_TICKERS,
+    METALS_SYMBOLS as METALS_TICKERS,
+)
 
 # Position watch exit thresholds
 STOP_PCT = -2.0       # hard stop

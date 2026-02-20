@@ -4,24 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Portfolio Intelligence</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
+      /* ================================================================
+         CSS Variables — Dark Mode (default) and Light Mode
+         ================================================================ */
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+
       :root {
-        --bg: #0a0e17;
-        --card: #111827;
-        --card2: #1a2236;
-        --hover: #1e293b;
-        --bdr: #1e293b;
-        --bdr2: #2d3a4f;
-        --tx: #e2e8f0;
-        --txd: #94a3b8;
-        --txm: #64748b;
-        --grn: #22c55e;
-        --red: #ef4444;
+        --bg: #1a1a2e;
+        --bg2: #16213e;
+        --card: #1e2746;
+        --card2: #253255;
+        --hover: #2a3a5c;
+        --bdr: #2a3a5c;
+        --bdr2: #3a4f7a;
+        --tx: #e0e0e0;
+        --txd: #a0aec0;
+        --txm: #718096;
+        --grn: #00ff88;
+        --red: #ff4444;
         --gry: #6b7280;
         --yel: #eab308;
         --org: #f97316;
@@ -29,15 +31,41 @@
         --cyn: #06b6d4;
         --r: 8px;
       }
+
+      html.light {
+        --bg: #f0f2f5;
+        --bg2: #e2e8f0;
+        --card: #ffffff;
+        --card2: #f7fafc;
+        --hover: #edf2f7;
+        --bdr: #e2e8f0;
+        --bdr2: #cbd5e0;
+        --tx: #1a202c;
+        --txd: #4a5568;
+        --txm: #718096;
+        --grn: #059669;
+        --red: #dc2626;
+        --gry: #6b7280;
+        --yel: #d69e2e;
+        --org: #dd6b20;
+        --blu: #3b82f6;
+        --cyn: #0891b2;
+      }
+
       body {
-        font-family: "Segoe UI", system-ui, sans-serif;
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
         background: var(--bg);
         color: var(--tx);
         line-height: 1.5;
         overflow-x: hidden;
+        transition: background 0.3s, color 0.3s;
       }
+
+      /* ================================================================
+         Header
+         ================================================================ */
       .hdr {
-        background: linear-gradient(180deg, #111827, #0d1321);
+        background: var(--bg2);
         border-bottom: 1px solid var(--bdr);
         padding: 10px 20px;
         display: flex;
@@ -46,650 +74,369 @@
         position: sticky;
         top: 0;
         z-index: 100;
+        flex-wrap: wrap;
+        gap: 8px;
       }
-      .hdr-l {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-      }
+      .hdr-l { display: flex; align-items: center; gap: 14px; }
       .hdr-t {
-        font-size: 19px;
-        font-weight: 700;
-        letter-spacing: -0.5px;
-        background: linear-gradient(135deg, #e2e8f0, #94a3b8);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        font-size: 19px; font-weight: 700; letter-spacing: -0.5px;
+        color: var(--tx);
       }
       .hdr-s {
-        font-size: 10px;
-        color: var(--txm);
-        text-transform: uppercase;
-        letter-spacing: 1.5px;
+        font-size: 10px; color: var(--txm);
+        text-transform: uppercase; letter-spacing: 1.5px;
       }
-      .hdr-r {
-        display: flex;
-        align-items: center;
-        gap: 16px;
-      }
-      .rf {
-        font-size: 12px;
-        color: var(--txm);
-        display: flex;
-        align-items: center;
-        gap: 5px;
-      }
+      .hdr-r { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+      .hdr-controls { display: flex; align-items: center; gap: 8px; }
+
+      .ps { display: flex; gap: 18px; }
+      .ps .st { text-align: right; }
+      .ps .sl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--txm); }
+      .ps .sv { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+      /* Auto-refresh indicator */
+      .rf { font-size: 12px; color: var(--txm); display: flex; align-items: center; gap: 5px; }
       .rf-dot {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: var(--grn);
-        animation: pulse 2s infinite;
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--grn); animation: pulse 2s infinite;
       }
-      @keyframes pulse {
-        0%,
-        100% {
-          opacity: 1;
-        }
-        50% {
-          opacity: 0.3;
-        }
+      .rf-dot.paused { background: var(--yel); animation: none; }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+      .cd { font-variant-numeric: tabular-nums; min-width: 24px; text-align: right; }
+
+      /* Theme & pause buttons */
+      .icon-btn {
+        background: var(--card); border: 1px solid var(--bdr); border-radius: 6px;
+        color: var(--txd); cursor: pointer; padding: 4px 8px; font-size: 14px;
+        transition: background 0.2s, border-color 0.2s;
+        display: inline-flex; align-items: center; justify-content: center;
       }
-      .cd {
-        font-variant-numeric: tabular-nums;
-        min-width: 24px;
-        text-align: right;
+      .icon-btn:hover { background: var(--hover); border-color: var(--bdr2); }
+      .icon-btn.active { color: var(--cyn); border-color: var(--cyn); }
+
+      .last-updated { font-size: 11px; color: var(--txm); }
+
+      /* ================================================================
+         Navigation tabs
+         ================================================================ */
+      .nav-tabs {
+        display: flex; gap: 0; background: var(--bg2); border-bottom: 1px solid var(--bdr);
+        padding: 0 20px; overflow-x: auto;
       }
-      .ps {
-        display: flex;
-        gap: 18px;
+      .nav-tab {
+        padding: 10px 18px; font-size: 12px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.8px;
+        cursor: pointer; color: var(--txm); border-bottom: 2px solid transparent;
+        transition: color 0.2s, border-color 0.2s; white-space: nowrap;
       }
-      .ps .st {
-        text-align: right;
-      }
-      .ps .sl {
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-        color: var(--txm);
-      }
-      .ps .sv {
-        font-size: 15px;
-        font-weight: 600;
-        font-variant-numeric: tabular-nums;
-      }
-      .ct {
-        max-width: 1600px;
-        margin: 0 auto;
-        padding: 14px 20px 36px;
-      }
+      .nav-tab:hover { color: var(--txd); }
+      .nav-tab.active { color: var(--cyn); border-bottom-color: var(--cyn); }
+
+      .tab-content { display: none; }
+      .tab-content.active { display: block; }
+
+      /* ================================================================
+         Content container
+         ================================================================ */
+      .ct { max-width: 1600px; margin: 0 auto; padding: 14px 20px 36px; }
+
       .err {
-        background: rgba(239, 68, 68, 0.1);
-        border: 1px solid rgba(239, 68, 68, 0.3);
-        border-radius: 6px;
-        padding: 8px 14px;
-        color: var(--red);
-        font-size: 12px;
-        margin-bottom: 10px;
-        display: none;
+        background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3);
+        border-radius: 6px; padding: 8px 14px; color: var(--red);
+        font-size: 12px; margin-bottom: 10px; display: none;
       }
-      .sc {
-        display: grid;
-        grid-template-columns: repeat(5, 1fr);
-        gap: 10px;
-        margin-bottom: 14px;
-      }
+
+      /* ================================================================
+         Signal cards grid
+         ================================================================ */
+      .sc { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; margin-bottom: 14px; }
       .scard {
-        background: var(--card);
-        border: 1px solid var(--bdr);
-        border-radius: var(--r);
-        padding: 12px;
+        background: var(--card); border: 1px solid var(--bdr);
+        border-radius: var(--r); padding: 12px;
         transition: border-color 0.2s;
       }
-      .scard:hover {
-        border-color: var(--bdr2);
+      .scard:hover { border-color: var(--bdr2); }
+      .ch { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+      .tn { font-size: 14px; font-weight: 700; }
+      .tp { font-size: 11px; color: var(--txd); margin-top: 1px; }
+      .ab { padding: 2px 9px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; }
+      .ab-BUY { background: rgba(0, 255, 136, 0.15); color: var(--grn); border: 1px solid rgba(0, 255, 136, 0.3); }
+      .ab-SELL { background: rgba(255, 68, 68, 0.15); color: var(--red); border: 1px solid rgba(255, 68, 68, 0.3); }
+      .ab-HOLD { background: rgba(107, 114, 128, 0.15); color: var(--gry); border: 1px solid rgba(107, 114, 128, 0.3); }
+      .vt { font-size: 10px; color: var(--txm); margin-bottom: 7px; }
+      .inds { display: flex; gap: 10px; margin-bottom: 8px; }
+      .ind { flex: 1; }
+      .ind-l { font-size: 9px; color: var(--txm); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+      .ind-v { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+      .rbar { height: 3px; background: var(--bdr); border-radius: 2px; margin-top: 2px; overflow: hidden; }
+      .rfill { height: 100%; border-radius: 2px; transition: width 0.5s; }
+
+      /* Timeframe heatmap inline on cards */
+      .tf-row { display: flex; gap: 3px; margin-top: 6px; }
+      .tf-cell {
+        flex: 1; text-align: center; padding: 2px 0; border-radius: 3px;
+        font-size: 9px; font-weight: 700;
       }
-      .ch {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        margin-bottom: 8px;
-      }
-      .tn {
-        font-size: 14px;
-        font-weight: 700;
-      }
-      .tp {
-        font-size: 11px;
-        color: var(--txd);
-        margin-top: 1px;
-      }
-      .ab {
-        padding: 2px 9px;
-        border-radius: 4px;
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.5px;
-      }
-      .ab-BUY {
-        background: rgba(34, 197, 94, 0.15);
-        color: var(--grn);
-        border: 1px solid rgba(34, 197, 94, 0.3);
-      }
-      .ab-SELL {
-        background: rgba(239, 68, 68, 0.15);
-        color: var(--red);
-        border: 1px solid rgba(239, 68, 68, 0.3);
-      }
-      .ab-HOLD {
-        background: rgba(107, 114, 128, 0.15);
-        color: var(--gry);
-        border: 1px solid rgba(107, 114, 128, 0.3);
-      }
-      .vt {
-        font-size: 10px;
-        color: var(--txm);
-        margin-bottom: 7px;
-      }
-      .inds {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 8px;
-      }
-      .ind {
-        flex: 1;
-      }
-      .ind-l {
-        font-size: 9px;
-        color: var(--txm);
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 2px;
-      }
-      .ind-v {
-        font-size: 13px;
-        font-weight: 600;
-        font-variant-numeric: tabular-nums;
-      }
-      .rbar {
-        height: 3px;
-        background: #1e293b;
-        border-radius: 2px;
-        margin-top: 2px;
-        overflow: hidden;
-      }
-      .rfill {
-        height: 100%;
-        border-radius: 2px;
-        transition: width 0.5s;
-      }
-      .sdots {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 3px;
-      }
+      .tf-label { font-size: 8px; color: var(--txm); text-align: center; }
+
+      .sdots { display: flex; flex-wrap: wrap; gap: 3px; }
       .sd {
-        display: inline-flex;
-        padding: 1px 5px;
-        border-radius: 3px;
-        font-size: 9px;
-        font-weight: 600;
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        display: inline-flex; padding: 1px 5px; border-radius: 3px;
+        font-size: 9px; font-weight: 600;
+        background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08);
       }
-      .sd.buy {
-        color: var(--grn);
-        border-color: rgba(34, 197, 94, 0.25);
-      }
-      .sd.sell {
-        color: var(--red);
-        border-color: rgba(239, 68, 68, 0.25);
-      }
-      .sd.hold {
-        color: var(--gry);
-        border-color: rgba(107, 114, 128, 0.2);
-      }
+      .sd.buy { color: var(--grn); border-color: rgba(0, 255, 136, 0.25); }
+      .sd.sell { color: var(--red); border-color: rgba(255, 68, 68, 0.25); }
+      .sd.hold { color: var(--gry); border-color: rgba(107, 114, 128, 0.2); }
+
+      /* ================================================================
+         Section titles
+         ================================================================ */
       .stit {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--txd);
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 8px;
-        display: flex;
-        align-items: center;
-        gap: 7px;
+        font-size: 13px; font-weight: 600; color: var(--txd);
+        text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;
+        display: flex; align-items: center; gap: 7px;
       }
       .stit::before {
-        content: "";
-        display: block;
-        width: 3px;
-        height: 13px;
-        background: var(--cyn);
-        border-radius: 2px;
+        content: ""; display: block; width: 3px; height: 13px;
+        background: var(--cyn); border-radius: 2px;
       }
+
+      /* ================================================================
+         Heatmap tables
+         ================================================================ */
       .ht {
-        width: 100%;
-        border-collapse: separate;
-        border-spacing: 2px;
-        background: var(--card);
-        border-radius: var(--r);
-        padding: 8px;
-        border: 1px solid var(--bdr);
-        margin-bottom: 14px;
+        width: 100%; border-collapse: separate; border-spacing: 2px;
+        background: var(--card); border-radius: var(--r); padding: 8px;
+        border: 1px solid var(--bdr); margin-bottom: 14px;
       }
       .ht th {
-        font-size: 10px;
-        color: var(--txm);
-        font-weight: 500;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        padding: 5px 7px;
-        text-align: center;
+        font-size: 10px; color: var(--txm); font-weight: 500;
+        text-transform: uppercase; letter-spacing: 0.5px;
+        padding: 5px 7px; text-align: center; white-space: nowrap;
       }
-      .ht th:first-child {
-        text-align: left;
-      }
+      .ht th:first-child { text-align: left; }
       .ht td {
-        text-align: center;
-        padding: 5px 7px;
-        border-radius: 4px;
-        font-size: 12px;
-        font-weight: 700;
-        min-width: 44px;
+        text-align: center; padding: 5px 7px; border-radius: 4px;
+        font-size: 12px; font-weight: 700; min-width: 44px;
       }
       .ht td:first-child {
-        text-align: left;
-        font-weight: 600;
-        font-size: 12px;
-        color: var(--tx);
-        background: transparent !important;
+        text-align: left; font-weight: 600; font-size: 12px;
+        color: var(--tx); background: transparent !important;
       }
-      .cB {
-        background: rgba(34, 197, 94, 0.2);
-        color: var(--grn);
+      .cB { background: rgba(0, 255, 136, 0.2); color: var(--grn); }
+      .cS { background: rgba(255, 68, 68, 0.2); color: var(--red); }
+      .cH { background: rgba(107, 114, 128, 0.15); color: var(--gry); }
+      .cN { background: rgba(30, 41, 59, 0.5); color: var(--txm); }
+      .csub { font-size: 8px; font-weight: 400; color: var(--txm); display: block; }
+
+      /* Signal heatmap table — scrollable */
+      .sig-heatmap-wrap {
+        overflow-x: auto; background: var(--card); border: 1px solid var(--bdr);
+        border-radius: var(--r); padding: 8px; margin-bottom: 14px;
       }
-      .cS {
-        background: rgba(239, 68, 68, 0.2);
-        color: var(--red);
+      .sig-heatmap {
+        border-collapse: separate; border-spacing: 2px; white-space: nowrap;
       }
-      .cH {
-        background: rgba(107, 114, 128, 0.15);
-        color: var(--gry);
-      }
-      .cN {
-        background: rgba(30, 41, 59, 0.5);
-        color: var(--txm);
-      }
-      .csub {
-        font-size: 8px;
-        font-weight: 400;
-        color: var(--txm);
-        display: block;
-      }
-      .twocol {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 14px;
-        margin-bottom: 14px;
-      }
-      .pnl {
+      .sig-heatmap th {
+        font-size: 9px; color: var(--txm); font-weight: 500;
+        text-transform: uppercase; letter-spacing: 0.3px;
+        padding: 4px 5px; text-align: center; position: sticky; top: 0;
         background: var(--card);
-        border: 1px solid var(--bdr);
-        border-radius: var(--r);
-        padding: 14px;
+      }
+      .sig-heatmap th:first-child { text-align: left; position: sticky; left: 0; z-index: 2; }
+      .sig-heatmap td {
+        text-align: center; padding: 4px 5px; border-radius: 3px;
+        font-size: 10px; font-weight: 700; min-width: 32px;
+      }
+      .sig-heatmap td:first-child {
+        text-align: left; font-weight: 600; font-size: 11px;
+        color: var(--tx); background: var(--card) !important;
+        position: sticky; left: 0; z-index: 1;
+      }
+
+      /* ================================================================
+         Two-column layout
+         ================================================================ */
+      .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+      .pnl {
+        background: var(--card); border: 1px solid var(--bdr);
+        border-radius: var(--r); padding: 14px;
       }
       .pt {
-        font-size: 12px;
-        font-weight: 600;
-        color: var(--txd);
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-        margin-bottom: 10px;
-        padding-bottom: 7px;
-        border-bottom: 1px solid var(--bdr);
+        font-size: 12px; font-weight: 600; color: var(--txd);
+        text-transform: uppercase; letter-spacing: 0.8px;
+        margin-bottom: 10px; padding-bottom: 7px; border-bottom: 1px solid var(--bdr);
       }
-      .fgr {
-        display: flex;
-        gap: 14px;
-        margin-bottom: 10px;
-      }
-      .fgi {
-        flex: 1;
-        text-align: center;
-      }
-      .fgl {
-        font-size: 10px;
-        color: var(--txm);
-        margin-bottom: 3px;
-      }
-      .fgv {
-        font-size: 26px;
-        font-weight: 700;
-        font-variant-numeric: tabular-nums;
-      }
-      .fgc {
-        font-size: 10px;
-      }
-      .dxb {
-        margin-bottom: 10px;
-        padding: 8px;
-        background: var(--card2);
-        border-radius: 6px;
-      }
-      .dxh {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 3px;
-      }
-      .dxv {
-        font-size: 17px;
-        font-weight: 700;
-      }
-      .dxt {
-        font-size: 11px;
-        font-weight: 600;
-        padding: 2px 7px;
-        border-radius: 3px;
-      }
-      .dxt.rising {
-        background: rgba(239, 68, 68, 0.15);
-        color: var(--red);
-      }
-      .dxt.falling {
-        background: rgba(34, 197, 94, 0.15);
-        color: var(--grn);
-      }
-      .dxt.flat {
-        background: rgba(107, 114, 128, 0.15);
-        color: var(--gry);
-      }
-      .dxi {
-        font-size: 11px;
-        color: var(--txd);
-        margin-top: 3px;
-      }
-      .sg {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-        gap: 6px;
-      }
-      .si {
-        padding: 7px;
-        background: var(--card2);
-        border-radius: 6px;
-        text-align: center;
-      }
-      .sit {
-        font-size: 11px;
-        font-weight: 600;
-        margin-bottom: 1px;
-      }
-      .siv {
-        font-size: 10px;
-        font-weight: 600;
-      }
-      .sic {
-        font-size: 9px;
-        color: var(--txm);
-      }
-      .tt {
-        width: 100%;
-        font-size: 11px;
-        border-collapse: collapse;
-      }
+
+      /* Fear & Greed */
+      .fgr { display: flex; gap: 14px; margin-bottom: 10px; }
+      .fgi { flex: 1; text-align: center; }
+      .fgl { font-size: 10px; color: var(--txm); margin-bottom: 3px; }
+      .fgv { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+      .fgc { font-size: 10px; }
+
+      /* DXY / macro boxes */
+      .dxb { margin-bottom: 10px; padding: 8px; background: var(--card2); border-radius: 6px; }
+      .dxh { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
+      .dxv { font-size: 17px; font-weight: 700; }
+      .dxt { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 3px; }
+      .dxt.rising { background: rgba(255, 68, 68, 0.15); color: var(--red); }
+      .dxt.falling { background: rgba(0, 255, 136, 0.15); color: var(--grn); }
+      .dxt.flat { background: rgba(107, 114, 128, 0.15); color: var(--gry); }
+      .dxt.strong { background: rgba(255, 68, 68, 0.15); color: var(--red); }
+      .dxi { font-size: 11px; color: var(--txd); margin-top: 3px; }
+
+      /* Sentiment grid */
+      .sg { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px; }
+      .si { padding: 7px; background: var(--card2); border-radius: 6px; text-align: center; }
+      .sit { font-size: 11px; font-weight: 600; margin-bottom: 1px; }
+      .siv { font-size: 10px; font-weight: 600; }
+      .sic { font-size: 9px; color: var(--txm); }
+
+      /* Trade table */
+      .tt { width: 100%; font-size: 11px; border-collapse: collapse; }
       .tt th {
-        text-align: left;
-        font-size: 9px;
-        color: var(--txm);
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        padding: 5px 6px;
-        border-bottom: 1px solid var(--bdr);
+        text-align: left; font-size: 9px; color: var(--txm);
+        text-transform: uppercase; letter-spacing: 0.5px;
+        padding: 5px 6px; border-bottom: 1px solid var(--bdr);
       }
       .tt td {
-        padding: 5px 6px;
-        border-bottom: 1px solid rgba(30, 41, 59, 0.5);
+        padding: 5px 6px; border-bottom: 1px solid rgba(30, 41, 59, 0.5);
         font-variant-numeric: tabular-nums;
       }
-      .tt tbody tr:hover {
-        background: var(--hover);
-      }
-      .nd {
-        color: var(--txm);
-        font-size: 12px;
-        padding: 16px;
-        text-align: center;
-      }
-      .col {
-        margin-bottom: 14px;
-      }
+      .tt tbody tr:hover { background: var(--hover); }
+
+      .nd { color: var(--txm); font-size: 12px; padding: 16px; text-align: center; }
+
+      /* ================================================================
+         Collapsible sections
+         ================================================================ */
+      .col { margin-bottom: 14px; }
       .colt {
-        width: 100%;
-        background: var(--card);
-        border: 1px solid var(--bdr);
-        border-radius: var(--r);
-        padding: 10px 14px;
-        cursor: pointer;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        color: var(--tx);
-        font-size: 12px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-        transition: background 0.2s;
+        width: 100%; background: var(--card); border: 1px solid var(--bdr);
+        border-radius: var(--r); padding: 10px 14px; cursor: pointer;
+        display: flex; justify-content: space-between; align-items: center;
+        color: var(--tx); font-size: 12px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.8px; transition: background 0.2s;
       }
-      .colt:hover {
-        background: var(--hover);
-      }
-      .colt::after {
-        content: "\25BC";
-        font-size: 9px;
-        color: var(--txm);
-        transition: transform 0.2s;
-      }
-      .colt.open::after {
-        transform: rotate(180deg);
-      }
+      .colt:hover { background: var(--hover); }
+      .colt::after { content: "\25BC"; font-size: 9px; color: var(--txm); transition: transform 0.2s; }
+      .colt.open::after { transform: rotate(180deg); }
       .colc {
-        background: var(--card);
-        border: 1px solid var(--bdr);
-        border-top: none;
-        border-radius: 0 0 var(--r) var(--r);
-        padding: 14px;
-        display: none;
+        background: var(--card); border: 1px solid var(--bdr); border-top: none;
+        border-radius: 0 0 var(--r) var(--r); padding: 14px; display: none;
       }
-      .colc.open {
-        display: block;
-      }
-      .atabs {
-        display: flex;
-        gap: 3px;
-        margin-bottom: 10px;
-      }
+      .colc.open { display: block; }
+
+      /* Accuracy tabs */
+      .atabs { display: flex; gap: 3px; margin-bottom: 10px; }
       .atab {
-        padding: 3px 10px;
-        border-radius: 4px;
-        font-size: 11px;
-        font-weight: 600;
-        cursor: pointer;
-        background: var(--card2);
-        color: var(--txm);
-        border: 1px solid var(--bdr);
-        transition: all 0.2s;
+        padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 600;
+        cursor: pointer; background: var(--card2); color: var(--txm);
+        border: 1px solid var(--bdr); transition: all 0.2s;
       }
-      .atab.active {
-        background: var(--cyn);
-        color: #0a0e17;
-        border-color: var(--cyn);
-      }
-      .abr {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin-bottom: 5px;
-      }
-      .abl {
-        font-size: 10px;
-        color: var(--txd);
-        width: 70px;
-        text-align: right;
-        flex-shrink: 0;
-      }
-      .abt {
-        flex: 1;
-        height: 14px;
-        background: var(--card2);
-        border-radius: 3px;
-        overflow: hidden;
-      }
+      .atab.active { background: var(--cyn); color: #0a0e17; border-color: var(--cyn); }
+
+      .abr { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+      .abl { font-size: 10px; color: var(--txd); width: 70px; text-align: right; flex-shrink: 0; }
+      .abt { flex: 1; height: 14px; background: var(--card2); border-radius: 3px; overflow: hidden; }
       .abf {
-        height: 100%;
-        border-radius: 3px;
-        transition: width 0.5s;
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-        padding-right: 3px;
-        font-size: 8px;
-        font-weight: 700;
-        min-width: 26px;
+        height: 100%; border-radius: 3px; transition: width 0.5s;
+        display: flex; align-items: center; justify-content: flex-end;
+        padding-right: 3px; font-size: 8px; font-weight: 700; min-width: 26px;
       }
-      .abc {
-        font-size: 9px;
-        color: var(--txm);
-        width: 45px;
-        flex-shrink: 0;
-      }
-      .ls {
-        list-style: none;
-      }
-      .lsi {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 5px 0;
-        border-bottom: 1px solid rgba(30, 41, 59, 0.3);
-      }
-      .lsi:last-child {
-        border-bottom: none;
-      }
-      .lic {
-        width: 18px;
-        height: 18px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 13px;
-        flex-shrink: 0;
-      }
-      .lic.done {
-        color: var(--grn);
-      }
-      .lic.running {
-        color: var(--cyn);
-        animation: spin 1s linear infinite;
-      }
-      .lic.pending {
-        color: var(--txm);
-      }
-      @keyframes spin {
-        from {
-          transform: rotate(0);
-        }
-        to {
-          transform: rotate(360deg);
-        }
-      }
-      .lin {
-        font-size: 12px;
-        flex: 1;
-      }
-      .lin.done {
-        color: var(--txd);
-      }
-      .lin.running {
-        color: var(--tx);
-        font-weight: 600;
-      }
-      .lin.pending {
-        color: var(--txm);
-      }
-      .lpg {
-        margin-top: 8px;
-        padding: 8px;
-        background: var(--card2);
-        border-radius: 6px;
-      }
-      .lpb {
-        height: 7px;
-        background: #1e293b;
-        border-radius: 4px;
-        overflow: hidden;
-        margin: 5px 0;
-      }
-      .lpf {
-        height: 100%;
-        background: linear-gradient(90deg, var(--cyn), var(--blu));
-        border-radius: 4px;
-        transition: width 0.5s;
-      }
-      .lps {
-        display: flex;
-        gap: 14px;
-        font-size: 10px;
-        color: var(--txd);
-      }
-      .tl {
-        max-height: 280px;
-        overflow-y: auto;
-        scrollbar-width: thin;
-        scrollbar-color: var(--bdr) transparent;
-      }
+      .abc { font-size: 9px; color: var(--txm); width: 45px; flex-shrink: 0; }
+
+      /* LoRA status */
+      .ls { list-style: none; }
+      .lsi { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid rgba(30, 41, 59, 0.3); }
+      .lsi:last-child { border-bottom: none; }
+      .lic { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; }
+      .lic.done { color: var(--grn); }
+      .lic.running { color: var(--cyn); animation: spin 1s linear infinite; }
+      .lic.pending { color: var(--txm); }
+      @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+      .lin { font-size: 12px; flex: 1; }
+      .lin.done { color: var(--txd); }
+      .lin.running { color: var(--tx); font-weight: 600; }
+      .lin.pending { color: var(--txm); }
+      .lpg { margin-top: 8px; padding: 8px; background: var(--card2); border-radius: 6px; }
+      .lpb { height: 7px; background: var(--bdr); border-radius: 4px; overflow: hidden; margin: 5px 0; }
+      .lpf { height: 100%; background: linear-gradient(90deg, var(--cyn), var(--blu)); border-radius: 4px; transition: width 0.5s; }
+      .lps { display: flex; gap: 14px; font-size: 10px; color: var(--txd); }
+
+      /* Telegram messages */
+      .tl { max-height: 280px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--bdr) transparent; }
       .tm {
-        padding: 7px 9px;
-        border-left: 2px solid var(--bdr2);
-        margin-bottom: 5px;
-        font-size: 11px;
-        line-height: 1.6;
-        color: var(--txd);
-        white-space: pre-wrap;
-        word-break: break-word;
+        padding: 7px 9px; border-left: 2px solid var(--bdr2); margin-bottom: 5px;
+        font-size: 11px; line-height: 1.6; color: var(--txd);
+        white-space: pre-wrap; word-break: break-word;
         font-family: "Cascadia Code", "Fira Code", monospace;
       }
-      .tm code {
-        background: rgba(255, 255, 255, 0.08);
-        padding: 1px 3px;
-        border-radius: 3px;
-        font-size: 10px;
+      .tm code { background: rgba(255, 255, 255, 0.08); padding: 1px 3px; border-radius: 3px; font-size: 10px; }
+      .tts { font-size: 9px; color: var(--txm); margin-bottom: 1px; }
+
+      /* ================================================================
+         Trigger timeline
+         ================================================================ */
+      .trig-list { max-height: 400px; overflow-y: auto; }
+      .trig-item {
+        display: flex; gap: 10px; align-items: flex-start;
+        padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
       }
-      .tts {
-        font-size: 9px;
-        color: var(--txm);
-        margin-bottom: 1px;
+      .trig-item:last-child { border-bottom: none; }
+      .trig-ts { font-size: 10px; color: var(--txm); min-width: 110px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+      .trig-reasons { font-size: 11px; color: var(--txd); }
+      .trig-reason-tag {
+        display: inline-block; padding: 1px 6px; border-radius: 3px;
+        font-size: 10px; font-weight: 600; margin: 1px 2px;
+        background: var(--card2); border: 1px solid var(--bdr);
       }
+      .trig-reason-tag.buy { color: var(--grn); border-color: rgba(0, 255, 136, 0.3); }
+      .trig-reason-tag.sell { color: var(--red); border-color: rgba(255, 68, 68, 0.3); }
+
+      /* ================================================================
+         Equity curve chart
+         ================================================================ */
+      .chart-wrap {
+        background: var(--card); border: 1px solid var(--bdr);
+        border-radius: var(--r); padding: 14px; margin-bottom: 14px;
+      }
+      .chart-canvas { width: 100% !important; max-height: 350px; }
+
+      /* ================================================================
+         Responsive
+         ================================================================ */
       @media (max-width: 1200px) {
-        .sc {
-          grid-template-columns: repeat(3, 1fr);
-        }
-        .twocol {
-          grid-template-columns: 1fr;
-        }
+        .twocol { grid-template-columns: 1fr; }
       }
       @media (max-width: 800px) {
-        .sc {
-          grid-template-columns: 1fr 1fr;
-        }
-        .hdr {
-          flex-wrap: wrap;
-          gap: 6px;
-        }
+        .hdr { padding: 8px 12px; }
+        .hdr-l { gap: 8px; }
+        .hdr-t { font-size: 16px; }
+        .ps { gap: 10px; }
+        .ps .sv { font-size: 13px; }
+        .ct { padding: 10px 12px 24px; }
+        .sc { grid-template-columns: 1fr; }
+        .nav-tabs { padding: 0 10px; }
+        .nav-tab { padding: 8px 12px; font-size: 11px; }
+        .ht { overflow-x: auto; display: block; }
+        .sig-heatmap-wrap { overflow-x: auto; }
+        .twocol { grid-template-columns: 1fr; }
+        .fgr { flex-direction: column; gap: 8px; }
+      }
+      @media (max-width: 480px) {
+        .hdr-r { width: 100%; justify-content: space-between; }
+        .ps { flex-wrap: wrap; gap: 8px; }
+        .tt { font-size: 10px; }
+        .tt th, .tt td { padding: 4px; }
       }
     </style>
   </head>
   <body>
+    <!-- Header -->
     <div class="hdr">
       <div class="hdr-l">
         <div>
@@ -697,7 +444,7 @@
           <div class="hdr-s">Autonomous Trading System</div>
         </div>
       </div>
-      <div style="font-size: 12px; color: var(--txd)" id="lastUp">--</div>
+      <div class="last-updated" id="lastUp">--</div>
       <div class="hdr-r">
         <div class="ps" id="pSum">
           <div class="st">
@@ -712,817 +459,882 @@
             <div class="sl">Cash</div>
             <div class="sv" id="csh">--</div>
           </div>
-          <div class="st" id="boldSum" style="display: none">
+          <div class="st" id="boldSum" style="display:none">
             <div class="sl">Bold</div>
             <div class="sv">--</div>
           </div>
         </div>
-        <div class="rf">
-          <div class="rf-dot" id="rfd"></div>
-          <span id="cdv" class="cd">30</span>s
+        <div class="hdr-controls">
+          <div class="rf">
+            <div class="rf-dot" id="rfd"></div>
+            <span id="cdv" class="cd">60</span>s
+          </div>
+          <button class="icon-btn" id="pauseBtn" onclick="togglePause()" title="Pause/Resume auto-refresh">||</button>
+          <button class="icon-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle dark/light mode">L</button>
         </div>
       </div>
     </div>
+
+    <!-- Navigation tabs -->
+    <div class="nav-tabs" id="navTabs">
+      <div class="nav-tab active" data-tab="overview" onclick="switchTab('overview')">Overview</div>
+      <div class="nav-tab" data-tab="signals" onclick="switchTab('signals')">Signal Heatmap</div>
+      <div class="nav-tab" data-tab="equity" onclick="switchTab('equity')">Equity Curve</div>
+      <div class="nav-tab" data-tab="triggers" onclick="switchTab('triggers')">Trigger Timeline</div>
+      <div class="nav-tab" data-tab="accuracy" onclick="switchTab('accuracy')">Accuracy</div>
+    </div>
+
     <div class="ct">
       <div class="err" id="errB"></div>
-      <div class="sc" id="sCards"></div>
-      <div>
-        <div class="stit">Multi-Timeframe Heatmap</div>
-        <table class="ht" id="hmT">
-          <thead>
-            <tr>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <div class="twocol">
-        <div class="pnl">
-          <div class="pt">Market Context</div>
-          <div id="mCtx">
-            <div class="fgr" id="fgR"></div>
-            <div id="dxB"></div>
-            <div id="trB"></div>
-            <div id="fedB"></div>
-            <div class="stit" style="font-size: 11px; margin-top: 10px">
-              Sentiment
-            </div>
-            <div class="sg" id="sG"></div>
+
+      <!-- ============================================================
+           TAB: Overview
+           ============================================================ -->
+      <div class="tab-content active" id="tab-overview">
+        <div class="sc" id="sCards"></div>
+
+        <div>
+          <div class="stit">Multi-Timeframe Heatmap</div>
+          <div style="overflow-x:auto">
+            <table class="ht" id="hmT">
+              <thead><tr><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
           </div>
         </div>
-        <div class="pnl">
-          <div class="pt">Trade History</div>
-          <div id="tH"></div>
+
+        <div class="twocol">
+          <div class="pnl">
+            <div class="pt">Market Context</div>
+            <div id="mCtx">
+              <div class="fgr" id="fgR"></div>
+              <div id="dxB"></div>
+              <div id="trB"></div>
+              <div id="fedB"></div>
+              <div class="stit" style="font-size:11px;margin-top:10px">Sentiment</div>
+              <div class="sg" id="sG"></div>
+            </div>
+          </div>
+          <div class="pnl">
+            <div class="pt">Trade History</div>
+            <div id="tH"></div>
+          </div>
+        </div>
+
+        <div class="col" id="lorS" style="display:none">
+          <button class="colt" onclick="tog('lor')">LoRA Training Status</button>
+          <div class="colc" id="lorC"></div>
+        </div>
+        <div class="col">
+          <button class="colt" onclick="tog('tel')">Recent Telegram Messages</button>
+          <div class="colc" id="telC"></div>
         </div>
       </div>
-      <div class="col" id="accS" style="display: none">
-        <button class="colt" onclick="tog('acc')">Signal Accuracy</button>
-        <div class="colc" id="accC"></div>
+
+      <!-- ============================================================
+           TAB: Signal Heatmap (25 signals x tickers)
+           ============================================================ -->
+      <div class="tab-content" id="tab-signals">
+        <div class="stit">25-Signal Heatmap (All Tickers)</div>
+        <div class="sig-heatmap-wrap" id="sigHeatWrap">
+          <div class="nd">Loading signal heatmap...</div>
+        </div>
       </div>
-      <div class="col" id="lorS" style="display: none">
-        <button class="colt" onclick="tog('lor')">LoRA Training Status</button>
-        <div class="colc" id="lorC"></div>
+
+      <!-- ============================================================
+           TAB: Equity Curve
+           ============================================================ -->
+      <div class="tab-content" id="tab-equity">
+        <div class="stit">P&L Equity Curve</div>
+        <div class="chart-wrap">
+          <canvas id="equityChart" class="chart-canvas"></canvas>
+          <div class="nd" id="eqNoData" style="display:none">No equity curve data available yet. Data will appear as portfolio_value_history.jsonl is populated.</div>
+        </div>
       </div>
-      <div class="col">
-        <button class="colt" onclick="tog('tel')">
-          Recent Telegram Messages
-        </button>
-        <div class="colc" id="telC"></div>
+
+      <!-- ============================================================
+           TAB: Trigger Timeline
+           ============================================================ -->
+      <div class="tab-content" id="tab-triggers">
+        <div class="stit">Recent Trigger Activity (Last 50)</div>
+        <div class="pnl">
+          <div class="trig-list" id="trigList">
+            <div class="nd">Loading triggers...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           TAB: Accuracy
+           ============================================================ -->
+      <div class="tab-content" id="tab-accuracy">
+        <div class="stit">Signal Accuracy</div>
+        <div class="pnl" id="accC">
+          <div class="nd">Loading accuracy data...</div>
+        </div>
       </div>
     </div>
+
     <script>
-      var T = ["BTC-USD", "ETH-USD", "MSTR", "PLTR", "NVDA"],
-        CR = new Set(["BTC-USD", "ETH-USD"]),
-        ATF = ["Now", "12h", "2d", "7d", "1mo", "3mo", "6mo"],
-        cdv = 30,
-        cdi;
+      /* ================================================================
+         Global state
+         ================================================================ */
+      var CR = new Set(["BTC-USD", "ETH-USD"]);
+      var ATF = ["Now", "12h", "2d", "7d", "1mo", "3mo", "6mo"];
+      var cdv = 60;
+      var cdi = null;
+      var paused = false;
+      var lastRefreshTime = null;
+      var equityChartInstance = null;
+
+      // Tickers: populated dynamically from data
+      var T = [];
+
+      /* ================================================================
+         Utility functions
+         ================================================================ */
       function ac(a) {
         a = (a || "").toUpperCase();
         return a === "BUY" ? "buy" : a === "SELL" ? "sell" : "hold";
       }
       function fn(n, d) {
-        return n == null || isNaN(n)
-          ? "--"
-          : Number(n).toFixed(d != null ? d : 2);
+        return (n == null || isNaN(n)) ? "--" : Number(n).toFixed(d != null ? d : 2);
       }
       function fs(n) {
-        return n == null
-          ? "--"
-          : Number(n).toLocaleString("sv-SE", { maximumFractionDigits: 0 }) +
-              " SEK";
+        return n == null ? "--" : Number(n).toLocaleString("sv-SE", { maximumFractionDigits: 0 }) + " SEK";
       }
       function fp(n) {
-        return n == null
-          ? "--"
-          : "$" +
-              Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
+        return n == null ? "--" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
       }
       function ft(s) {
         if (!s) return "--";
         var d = new Date(s);
-        return d.toLocaleString("sv-SE", {
-          month: "short",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-        });
+        return d.toLocaleString("sv-SE", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
       }
-      function rc(v) {
-        return v >= 70 ? "var(--red)" : v <= 30 ? "var(--grn)" : "var(--yel)";
+      function ftFull(s) {
+        if (!s) return "--";
+        var d = new Date(s);
+        return d.toLocaleString("sv-SE", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
       }
+      function rc(v) { return v >= 70 ? "var(--red)" : v <= 30 ? "var(--grn)" : "var(--yel)"; }
       function fc(v) {
-        return v <= 25
-          ? "var(--red)"
-          : v <= 45
-            ? "var(--org)"
-            : v <= 55
-              ? "var(--yel)"
-              : "var(--grn)";
+        return v <= 25 ? "var(--red)" : v <= 45 ? "var(--org)" : v <= 55 ? "var(--yel)" : "var(--grn)";
       }
       function fcl(v) {
-        return v <= 25
-          ? "Extreme Fear"
-          : v <= 45
-            ? "Fear"
-            : v <= 55
-              ? "Neutral"
-              : v <= 75
-                ? "Greed"
-                : "Extreme Greed";
+        return v <= 25 ? "Extreme Fear" : v <= 45 ? "Fear" : v <= 55 ? "Neutral" : v <= 75 ? "Greed" : "Extreme Greed";
       }
       function sc(s) {
         s = (s || "").toLowerCase();
-        return s === "bullish" || s === "positive"
-          ? "var(--grn)"
-          : s === "bearish" || s === "negative"
-            ? "var(--red)"
-            : "var(--gry)";
+        return (s === "bullish" || s === "positive") ? "var(--grn)" : (s === "bearish" || s === "negative") ? "var(--red)" : "var(--gry)";
       }
       function eh(s) {
-        return s
-          ? String(s)
-              .replace(/&/g, "&amp;")
-              .replace(/</g, "&lt;")
-              .replace(/>/g, "&gt;")
-              .replace(/"/g, "&quot;")
-          : "";
+        return s ? String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;") : "";
       }
+
+      /* ================================================================
+         Theme toggle
+         ================================================================ */
+      function initTheme() {
+        var saved = localStorage.getItem("pi-theme");
+        if (saved === "light") {
+          document.documentElement.classList.add("light");
+          document.getElementById("themeBtn").textContent = "D";
+        }
+      }
+      function toggleTheme() {
+        var html = document.documentElement;
+        html.classList.toggle("light");
+        var isLight = html.classList.contains("light");
+        localStorage.setItem("pi-theme", isLight ? "light" : "dark");
+        document.getElementById("themeBtn").textContent = isLight ? "D" : "L";
+        // Re-render equity chart with correct colors
+        if (equityChartInstance) {
+          updateChartColors();
+        }
+      }
+
+      /* ================================================================
+         Auto-refresh pause/resume
+         ================================================================ */
+      function togglePause() {
+        paused = !paused;
+        var btn = document.getElementById("pauseBtn");
+        var dot = document.getElementById("rfd");
+        if (paused) {
+          btn.textContent = ">";
+          btn.classList.add("active");
+          dot.classList.add("paused");
+        } else {
+          btn.textContent = "||";
+          btn.classList.remove("active");
+          dot.classList.remove("paused");
+          cdv = 60;
+        }
+      }
+
+      function updateLastUpdatedDisplay() {
+        if (!lastRefreshTime) return;
+        var now = Date.now();
+        var ago = Math.floor((now - lastRefreshTime) / 1000);
+        var txt;
+        if (ago < 60) txt = ago + "s ago";
+        else if (ago < 3600) txt = Math.floor(ago / 60) + "m ago";
+        else txt = Math.floor(ago / 3600) + "h ago";
+        document.getElementById("lastUp").textContent = "Last updated: " + txt;
+      }
+
+      /* ================================================================
+         Tab navigation
+         ================================================================ */
+      function switchTab(name) {
+        document.querySelectorAll(".nav-tab").forEach(function (t) {
+          t.classList.toggle("active", t.dataset.tab === name);
+        });
+        document.querySelectorAll(".tab-content").forEach(function (c) {
+          c.classList.toggle("active", c.id === "tab-" + name);
+        });
+        // Load data for lazy tabs
+        if (name === "signals") loadSignalHeatmap();
+        if (name === "equity") loadEquityCurve();
+        if (name === "triggers") loadTriggers();
+        if (name === "accuracy") loadAccuracy();
+      }
+
+      /* ================================================================
+         Collapsible toggle
+         ================================================================ */
       function tog(n) {
-        var m = {
-          acc: ["accS", "accC"],
-          lor: ["lorS", "lorC"],
-          tel: ["tel", "telC"],
-        };
-        var p =
-          n === "tel"
-            ? document.querySelector(".col:last-child .colt")
-            : document.querySelector("#" + m[n][0] + " .colt");
-        var c = document.getElementById(m[n][1]);
-        if (p && c) {
-          p.classList.toggle("open");
-          c.classList.toggle("open");
+        var m = { lor: ["lorS", "lorC"], tel: ["tel", "telC"] };
+        var p, c;
+        if (n === "tel") {
+          p = document.querySelector("#tab-overview .col:last-child .colt");
+          c = document.getElementById("telC");
+        } else {
+          p = document.querySelector("#" + m[n][0] + " .colt");
+          c = document.getElementById(m[n][1]);
         }
+        if (p && c) { p.classList.toggle("open"); c.classList.toggle("open"); }
       }
+
+      /* ================================================================
+         Signal vote extraction
+         ================================================================ */
       function votes(sig) {
-        var v = [],
-          ex = sig.extra || {};
+        var v = [], ex = sig.extra || {};
         if (sig.rsi != null)
-          v.push({
-            n: "RSI",
-            a: sig.rsi >= 70 ? "SELL" : sig.rsi <= 30 ? "BUY" : "HOLD",
-          });
-        if (ex.macd_action)
-          v.push({ n: "MACD", a: ex.macd_action.toUpperCase() });
+          v.push({ n: "RSI", a: sig.rsi >= 70 ? "SELL" : sig.rsi <= 30 ? "BUY" : "HOLD" });
+        if (ex.macd_action) v.push({ n: "MACD", a: ex.macd_action.toUpperCase() });
         else if (sig.macd_hist != null) {
-          var mh = sig.macd_hist,
-            mp = ex.macd_hist_prev;
-          v.push({
-            n: "MACD",
-            a:
-              mh > 0 && mp != null && mp <= 0
-                ? "BUY"
-                : mh < 0 && mp != null && mp >= 0
-                  ? "SELL"
-                  : "HOLD",
-          });
+          var mh = sig.macd_hist, mp = ex.macd_hist_prev;
+          v.push({ n: "MACD", a: mh > 0 && mp != null && mp <= 0 ? "BUY" : mh < 0 && mp != null && mp >= 0 ? "SELL" : "HOLD" });
         }
-        if (sig.bb_position)
-          v.push({
-            n: "BB",
-            a: sig.bb_position.toLowerCase().includes("below")
-              ? "BUY"
-              : sig.bb_position.toLowerCase().includes("above")
-                ? "SELL"
-                : "HOLD",
-          });
-        if (ex.fear_greed != null)
-          v.push({
-            n: "F&G",
-            a:
-              ex.fear_greed <= 20
-                ? "BUY"
-                : ex.fear_greed >= 80
-                  ? "SELL"
-                  : "HOLD",
-          });
+        if (sig.bb_position) v.push({ n: "BB", a: sig.bb_position.toLowerCase().includes("below") ? "BUY" : sig.bb_position.toLowerCase().includes("above") ? "SELL" : "HOLD" });
+        if (ex.fear_greed != null) v.push({ n: "F&G", a: ex.fear_greed <= 20 ? "BUY" : ex.fear_greed >= 80 ? "SELL" : "HOLD" });
         if (ex.sentiment) {
           var sConf = ex.sentiment_conf || 0;
-          v.push({
-            n: "Sent",
-            a:
-              /positive/i.test(ex.sentiment) && sConf > 0.4
-                ? "BUY"
-                : /negative/i.test(ex.sentiment) && sConf > 0.4
-                  ? "SELL"
-                  : "HOLD",
-          });
+          v.push({ n: "Sent", a: /positive/i.test(ex.sentiment) && sConf > 0.4 ? "BUY" : /negative/i.test(ex.sentiment) && sConf > 0.4 ? "SELL" : "HOLD" });
         }
-        if (ex.ministral_action)
-          v.push({ n: "LLM", a: ex.ministral_action.toUpperCase() });
-        if (ex.custom_lora_action)
-          v.push({ n: "LoRA", a: ex.custom_lora_action.toUpperCase() });
+        if (ex.ministral_action) v.push({ n: "LLM", a: ex.ministral_action.toUpperCase() });
+        if (ex.custom_lora_action) v.push({ n: "LoRA", a: ex.custom_lora_action.toUpperCase() });
         if (ex.ml_action) v.push({ n: "ML", a: ex.ml_action.toUpperCase() });
-        if (ex.funding_action)
-          v.push({ n: "Fund", a: ex.funding_action.toUpperCase() });
-        if (ex.volume_action)
-          v.push({ n: "Vol", a: ex.volume_action.toUpperCase() });
+        if (ex.funding_action) v.push({ n: "Fund", a: ex.funding_action.toUpperCase() });
+        if (ex.volume_action) v.push({ n: "Vol", a: ex.volume_action.toUpperCase() });
         return v;
       }
-      function rCards(sigs) {
+
+      /* ================================================================
+         Render: Signal cards (with inline timeframe heatmap)
+         ================================================================ */
+      function rCards(sigs, timeframes) {
         var el = document.getElementById("sCards");
         if (!sigs || !Object.keys(sigs).length) {
-          el.innerHTML =
-            '<div class="nd" style="grid-column:1/-1">No signal data</div>';
+          el.innerHTML = '<div class="nd" style="grid-column:1/-1">No signal data</div>';
           return;
         }
+        // Update global tickers list
+        T = Object.keys(sigs);
+
         var h = "";
         T.forEach(function (t) {
           var s = sigs[t];
           if (!s) return;
-          var ex = s.extra || {},
-            vt = votes(s),
-            rp = s.rsi != null ? Math.min(100, Math.max(0, s.rsi)) : 0;
-          h +=
-            '<div class="scard"><div class="ch"><div><div class="tn">' +
-            t +
-            '</div><div class="tp">' +
-            fp(s.price_usd) +
-            '</div></div><span class="ab ab-' +
-            (s.action || "HOLD") +
-            '">' +
-            (s.action || "HOLD") +
-            "</span></div>";
-          h +=
-            '<div class="vt">' +
-            (ex._voters != null ? ex._voters : vt.length) +
-            "/" +
-            vt.length +
-            " voters</div>";
-          h +=
-            '<div class="inds"><div class="ind"><div class="ind-l">RSI</div><div class="ind-v" style="color:' +
-            rc(s.rsi) +
-            '">' +
-            fn(s.rsi, 1) +
-            '</div><div class="rbar"><div class="rfill" style="width:' +
-            rp +
-            "%;background:" +
-            rc(s.rsi) +
-            '"></div></div></div>';
-          h +=
-            '<div class="ind"><div class="ind-l">MACD</div><div class="ind-v" style="color:' +
-            (s.macd_hist > 0
-              ? "var(--grn)"
-              : s.macd_hist < 0
-                ? "var(--red)"
-                : "var(--gry)") +
-            '">' +
-            fn(s.macd_hist, 2) +
-            "</div></div>";
+          var ex = s.extra || {}, vt = votes(s);
+          var rp = s.rsi != null ? Math.min(100, Math.max(0, s.rsi)) : 0;
+          var buyC = ex._buy_count || 0, sellC = ex._sell_count || 0, totalA = ex._total_applicable || 0;
+          var holdC = totalA - buyC - sellC;
+
+          h += '<div class="scard"><div class="ch"><div><div class="tn">' + t +
+            '</div><div class="tp">' + fp(s.price_usd) + '</div></div><span class="ab ab-' +
+            (s.action || "HOLD") + '">' + (s.action || "HOLD") + '</span></div>';
+
+          h += '<div class="vt">' + buyC + 'B/' + sellC + 'S/' + holdC + 'H &middot; ' +
+            (ex._voters != null ? ex._voters : vt.length) + ' active voters</div>';
+
+          h += '<div class="inds"><div class="ind"><div class="ind-l">RSI</div><div class="ind-v" style="color:' +
+            rc(s.rsi) + '">' + fn(s.rsi, 1) +
+            '</div><div class="rbar"><div class="rfill" style="width:' + rp + '%;background:' +
+            rc(s.rsi) + '"></div></div></div>';
+
+          h += '<div class="ind"><div class="ind-l">MACD</div><div class="ind-v" style="color:' +
+            (s.macd_hist > 0 ? "var(--grn)" : s.macd_hist < 0 ? "var(--red)" : "var(--gry)") +
+            '">' + fn(s.macd_hist, 2) + '</div></div>';
+
           if (ex.fear_greed != null)
-            h +=
-              '<div class="ind"><div class="ind-l">F&G</div><div class="ind-v" style="color:' +
-              fc(ex.fear_greed) +
-              '">' +
-              ex.fear_greed +
-              "</div></div>";
+            h += '<div class="ind"><div class="ind-l">F&G</div><div class="ind-v" style="color:' +
+              fc(ex.fear_greed) + '">' + ex.fear_greed + '</div></div>';
+
+          if (s.atr_pct != null)
+            h += '<div class="ind"><div class="ind-l">ATR%</div><div class="ind-v">' + fn(s.atr_pct, 2) + '%</div></div>';
+
           h += '</div><div class="sdots">';
-          vt.forEach(function (v) {
-            h += '<span class="sd ' + ac(v.a) + '">' + v.n + "</span>";
-          });
-          h += "</div></div>";
+          vt.forEach(function (v) { h += '<span class="sd ' + ac(v.a) + '">' + v.n + '</span>'; });
+          h += '</div>';
+
+          // Inline timeframe alignment
+          var tfs = timeframes ? timeframes[t] : null;
+          if (tfs && tfs.length) {
+            var tm = {};
+            tfs.forEach(function (f) { tm[f.horizon] = f; });
+            h += '<div style="margin-top:8px"><div class="tf-row">';
+            ATF.forEach(function (hz) { h += '<div class="tf-label">' + hz + '</div>'; });
+            h += '</div><div class="tf-row">';
+            ATF.forEach(function (hz) {
+              var f = tm[hz];
+              if (f) {
+                var a = (f.action || "HOLD").toUpperCase();
+                var l = a === "BUY" ? "B" : a === "SELL" ? "S" : "H";
+                var cls = a === "BUY" ? "cB" : a === "SELL" ? "cS" : "cH";
+                h += '<div class="tf-cell ' + cls + '">' + l + '</div>';
+              } else {
+                h += '<div class="tf-cell cN">-</div>';
+              }
+            });
+            h += '</div></div>';
+          }
+
+          h += '</div>';
         });
         el.innerHTML = h;
       }
+
+      /* ================================================================
+         Render: Multi-timeframe heatmap table
+         ================================================================ */
       function rHeat(tf) {
-        var tbl = document.getElementById("hmT"),
-          th = "<tr><th>Ticker</th>";
-        ATF.forEach(function (c) {
-          th += "<th>" + c + "</th>";
-        });
+        var tbl = document.getElementById("hmT");
+        var th = "<tr><th>Ticker</th>";
+        ATF.forEach(function (c) { th += "<th>" + c + "</th>"; });
         tbl.querySelector("thead").innerHTML = th + "</tr>";
         var tb = "";
         T.forEach(function (t) {
-          var tfs = tf ? tf[t] : null,
-            tm = {};
-          if (tfs)
-            tfs.forEach(function (f) {
-              tm[f.horizon] = f;
-            });
+          var tfs = tf ? tf[t] : null, tm = {};
+          if (tfs) tfs.forEach(function (f) { tm[f.horizon] = f; });
           tb += "<tr><td>" + t + "</td>";
-          ATF.forEach(function (h) {
-            var f = tm[h];
+          ATF.forEach(function (hz) {
+            var f = tm[hz];
             if (f) {
-              var a = (f.action || "HOLD").toUpperCase(),
-                l = a === "BUY" ? "B" : a === "SELL" ? "S" : "H",
-                cf =
-                  f.confidence != null
-                    ? '<span class="csub">' +
-                      fn(f.confidence * 100, 0) +
-                      "%</span>"
-                    : "";
-              tb += '<td class="c' + l[0] + '">' + l + cf + "</td>";
-            } else tb += '<td class="cN">-</td>';
+              var a = (f.action || "HOLD").toUpperCase();
+              var l = a === "BUY" ? "B" : a === "SELL" ? "S" : "H";
+              var cf = f.confidence != null ? '<span class="csub">' + fn(f.confidence * 100, 0) + '%</span>' : "";
+              tb += '<td class="c' + l[0] + '">' + l + cf + '</td>';
+            } else {
+              tb += '<td class="cN">-</td>';
+            }
           });
           tb += "</tr>";
         });
         tbl.querySelector("tbody").innerHTML = tb;
       }
+
+      /* ================================================================
+         Render: Market context
+         ================================================================ */
       function rMkt(sigs, mac) {
-        var fR = document.getElementById("fgR"),
-          dB = document.getElementById("dxB"),
-          sG = document.getElementById("sG");
-        var cfg = null,
-          sfg = null,
-          cfgc = null;
+        var fR = document.getElementById("fgR"), dB = document.getElementById("dxB"), sG = document.getElementById("sG");
+        var cfg = null, sfg = null, cfgc = null;
         T.forEach(function (t) {
-          var s = sigs ? sigs[t] : null,
-            ex = s ? s.extra || {} : {};
-          if (CR.has(t) && ex.fear_greed != null && cfg == null) {
-            cfg = ex.fear_greed;
-            cfgc = ex.fear_greed_class || fcl(cfg);
-          }
-          if (!CR.has(t) && ex.fear_greed != null && sfg == null)
-            sfg = ex.fear_greed;
+          var s = sigs ? sigs[t] : null, ex = s ? s.extra || {} : {};
+          if (CR.has(t) && ex.fear_greed != null && cfg == null) { cfg = ex.fear_greed; cfgc = ex.fear_greed_class || fcl(cfg); }
+          if (!CR.has(t) && ex.fear_greed != null && sfg == null) sfg = ex.fear_greed;
         });
         var fh = "";
         if (cfg != null)
-          fh +=
-            '<div class="fgi"><div class="fgl">Crypto F&G</div><div class="fgv" style="color:' +
-            fc(cfg) +
-            '">' +
-            cfg +
-            '</div><div class="fgc" style="color:' +
-            fc(cfg) +
-            '">' +
-            cfgc +
-            "</div></div>";
+          fh += '<div class="fgi"><div class="fgl">Crypto F&G</div><div class="fgv" style="color:' + fc(cfg) + '">' + cfg + '</div><div class="fgc" style="color:' + fc(cfg) + '">' + cfgc + '</div></div>';
         if (sfg != null)
-          fh +=
-            '<div class="fgi"><div class="fgl">Stock F&G</div><div class="fgv" style="color:' +
-            fc(sfg) +
-            '">' +
-            sfg +
-            '</div><div class="fgc" style="color:' +
-            fc(sfg) +
-            '">' +
-            fcl(sfg) +
-            "</div></div>";
+          fh += '<div class="fgi"><div class="fgl">Stock F&G</div><div class="fgv" style="color:' + fc(sfg) + '">' + sfg + '</div><div class="fgc" style="color:' + fc(sfg) + '">' + fcl(sfg) + '</div></div>';
         fR.innerHTML = fh || '<div class="nd">No F&G data</div>';
+
         var dx = mac ? mac.dxy : null;
         if (dx && dx.value != null) {
           var tr = dx.trend || "flat";
-          var impl =
-            dx.trend === "strong"
-              ? "Strong dollar — headwind for risk assets"
-              : "Weak dollar — tailwind for risk assets";
-          dB.innerHTML =
-            '<div class="dxb"><div class="dxh"><div><span style="font-size:10px;color:var(--txm)">DXY </span><span class="dxv">' +
-            fn(dx.value, 2) +
-            '</span></div><span class="dxt ' +
-            tr +
-            '">' +
-            tr +
-            (dx.change_5d_pct != null
-              ? " (" +
-                (dx.change_5d_pct > 0 ? "+" : "") +
-                fn(dx.change_5d_pct, 2) +
-                "%)"
-              : "") +
-            '</span></div><div class="dxi">' +
-            impl +
-            "</div></div>";
+          var impl = dx.trend === "strong" ? "Strong dollar -- headwind for risk assets" : "Weak dollar -- tailwind for risk assets";
+          dB.innerHTML = '<div class="dxb"><div class="dxh"><div><span style="font-size:10px;color:var(--txm)">DXY </span><span class="dxv">' + fn(dx.value, 2) + '</span></div><span class="dxt ' + tr + '">' + tr + (dx.change_5d_pct != null ? " (" + (dx.change_5d_pct > 0 ? "+" : "") + fn(dx.change_5d_pct, 2) + "%)" : "") + '</span></div><div class="dxi">' + impl + '</div></div>';
         } else dB.innerHTML = "";
+
         var ty = mac ? mac.treasury : null;
         var trB = document.getElementById("trB");
         if (ty) {
-          var th =
-            '<div class="dxb" style="margin-top:8px"><div class="dxh"><span style="font-size:10px;color:var(--txm)">YIELDS</span></div><div style="display:flex;gap:12px;margin-top:4px">';
-          if (ty["2y"])
-            th +=
-              '<div><span style="font-size:10px;color:var(--txm)">2Y </span><span class="dxv">' +
-              fn(ty["2y"].yield_pct, 3) +
-              "%</span></div>";
-          if (ty["10y"])
-            th +=
-              '<div><span style="font-size:10px;color:var(--txm)">10Y </span><span class="dxv">' +
-              fn(ty["10y"].yield_pct, 3) +
-              "%</span></div>";
-          if (ty["30y"])
-            th +=
-              '<div><span style="font-size:10px;color:var(--txm)">30Y </span><span class="dxv">' +
-              fn(ty["30y"].yield_pct, 3) +
-              "%</span></div>";
-          th += "</div>";
+          var thx = '<div class="dxb" style="margin-top:8px"><div class="dxh"><span style="font-size:10px;color:var(--txm)">YIELDS</span></div><div style="display:flex;gap:12px;margin-top:4px">';
+          if (ty["2y"]) thx += '<div><span style="font-size:10px;color:var(--txm)">2Y </span><span class="dxv">' + fn(ty["2y"].yield_pct, 3) + '%</span></div>';
+          if (ty["10y"]) thx += '<div><span style="font-size:10px;color:var(--txm)">10Y </span><span class="dxv">' + fn(ty["10y"].yield_pct, 3) + '%</span></div>';
+          if (ty["30y"]) thx += '<div><span style="font-size:10px;color:var(--txm)">30Y </span><span class="dxv">' + fn(ty["30y"].yield_pct, 3) + '%</span></div>';
+          thx += '</div>';
           if (ty.spread_2s10s != null) {
-            var cc =
-              ty.curve === "inverted"
-                ? "var(--red)"
-                : ty.curve === "flat"
-                  ? "var(--yel)"
-                  : "var(--grn)";
-            th +=
-              '<div class="dxi">2s10s spread: <span style="color:' +
-              cc +
-              ';font-weight:600">' +
-              fn(ty.spread_2s10s, 3) +
-              "% (" +
-              (ty.curve || "?") +
-              ")</span></div>";
+            var cc = ty.curve === "inverted" ? "var(--red)" : ty.curve === "flat" ? "var(--yel)" : "var(--grn)";
+            thx += '<div class="dxi">2s10s spread: <span style="color:' + cc + ';font-weight:600">' + fn(ty.spread_2s10s, 3) + '% (' + (ty.curve || "?") + ')</span></div>';
           }
-          trB.innerHTML = th + "</div>";
+          trB.innerHTML = thx + '</div>';
         } else trB.innerHTML = "";
+
         var fed = mac ? mac.fed : null;
         var fedB = document.getElementById("fedB");
         if (fed) {
-          var wc = fed.warning
-            ? fed.days_until <= 1
-              ? "var(--red)"
-              : "var(--org)"
-            : "var(--txm)";
-          var fh =
-            '<div class="dxb" style="margin-top:8px"><div class="dxh"><span style="font-size:10px;color:var(--txm)">FOMC</span><span style="font-size:12px;color:' +
-            wc +
-            '">' +
-            fed.next_fomc +
-            " (" +
-            fed.days_until +
-            "d)</span></div>";
-          if (fed.warning)
-            fh +=
-              '<div class="dxi" style="color:' +
-              wc +
-              '">' +
-              eh(fed.warning) +
-              "</div>";
-          fedB.innerHTML = fh + "</div>";
+          var wc = fed.warning ? (fed.days_until <= 1 ? "var(--red)" : "var(--org)") : "var(--txm)";
+          var fhx = '<div class="dxb" style="margin-top:8px"><div class="dxh"><span style="font-size:10px;color:var(--txm)">FOMC</span><span style="font-size:12px;color:' + wc + '">' + fed.next_fomc + ' (' + fed.days_until + 'd)</span></div>';
+          if (fed.warning) fhx += '<div class="dxi" style="color:' + wc + '">' + eh(fed.warning) + '</div>';
+          fedB.innerHTML = fhx + '</div>';
         } else fedB.innerHTML = "";
+
         var sh = "";
         T.forEach(function (t) {
-          var s = sigs ? sigs[t] : null,
-            ex = s ? s.extra || {} : {};
+          var s = sigs ? sigs[t] : null, ex = s ? s.extra || {} : {};
           if (ex.sentiment)
-            sh +=
-              '<div class="si"><div class="sit">' +
-              t +
-              '</div><div class="siv" style="color:' +
-              sc(ex.sentiment) +
-              '">' +
-              eh(ex.sentiment) +
-              '</div><div class="sic">' +
-              (ex.sentiment_model || "") +
-              " " +
-              (ex.sentiment_conf != null
-                ? fn(ex.sentiment_conf * 100, 1) + "%"
-                : "") +
-              "</div></div>";
+            sh += '<div class="si"><div class="sit">' + t + '</div><div class="siv" style="color:' + sc(ex.sentiment) + '">' + eh(ex.sentiment) + '</div><div class="sic">' + (ex.sentiment_model || "") + ' ' + (ex.sentiment_conf != null ? fn(ex.sentiment_conf * 100, 1) + '%' : "") + '</div></div>';
         });
         sG.innerHTML = sh || '<div class="nd">No sentiment data</div>';
       }
-      function rTrades(p) {
+
+      /* ================================================================
+         Render: Trade history
+         ================================================================ */
+      function rTrades(p, pBold) {
         var el = document.getElementById("tH");
-        if (!p || !p.transactions || !p.transactions.length) {
-          el.innerHTML = '<div class="nd">No trades yet</div>';
-          return;
-        }
-        var tx = p.transactions.slice().reverse().slice(0, 50),
-          h =
-            '<div style="max-height:280px;overflow-y:auto"><table class="tt"><thead><tr><th>Time</th><th>Ticker</th><th>Action</th><th>Shares</th><th>Price</th><th>SEK</th><th>Reason</th></tr></thead><tbody>';
+        var allTx = [];
+        if (p && p.transactions) p.transactions.forEach(function (x) { x._strat = "Patient"; allTx.push(x); });
+        if (pBold && pBold.transactions) pBold.transactions.forEach(function (x) { x._strat = "Bold"; allTx.push(x); });
+        if (!allTx.length) { el.innerHTML = '<div class="nd">No trades yet</div>'; return; }
+        allTx.sort(function (a, b) { return (b.timestamp || "").localeCompare(a.timestamp || ""); });
+        var tx = allTx.slice(0, 50);
+        var h = '<div style="max-height:280px;overflow-y:auto"><table class="tt"><thead><tr><th>Time</th><th>Strat</th><th>Ticker</th><th>Action</th><th>Shares</th><th>Price</th><th>SEK</th><th>Reason</th></tr></thead><tbody>';
         tx.forEach(function (x) {
-          var c =
-            x.action === "BUY"
-              ? "var(--grn)"
-              : x.action === "SELL"
-                ? "var(--red)"
-                : "var(--gry)";
-          h +=
-            "<tr><td>" +
-            ft(x.timestamp || x.time) +
-            '</td><td style="font-weight:600">' +
-            eh(x.ticker || "") +
-            '</td><td style="color:' +
-            c +
-            ';font-weight:600">' +
-            eh(x.action || "") +
-            "</td><td>" +
-            fn(x.shares, 6) +
-            "</td><td>" +
-            fp(x.price_usd) +
-            "</td><td>" +
-            fs(x.price_sek) +
-            '</td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' +
-            eh(x.reason || "") +
-            '">' +
-            eh(x.reason || "") +
-            "</td></tr>";
+          var c = x.action === "BUY" ? "var(--grn)" : x.action === "SELL" ? "var(--red)" : "var(--gry)";
+          var sc2 = x._strat === "Bold" ? "var(--org)" : "var(--cyn)";
+          h += '<tr><td>' + ft(x.timestamp || x.time) +
+            '</td><td style="color:' + sc2 + ';font-weight:600;font-size:10px">' + x._strat +
+            '</td><td style="font-weight:600">' + eh(x.ticker || "") +
+            '</td><td style="color:' + c + ';font-weight:600">' + eh(x.action || "") +
+            '</td><td>' + fn(x.shares, 6) +
+            '</td><td>' + fp(x.price_usd) +
+            '</td><td>' + fs(x.total_sek) +
+            '</td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + eh(x.reason || "") + '">' + eh(x.reason || "") +
+            '</td></tr>';
         });
-        el.innerHTML = h + "</tbody></table></div>";
+        el.innerHTML = h + '</tbody></table></div>';
       }
-      function rAcc(d) {
-        var s = document.getElementById("accS"),
-          c = document.getElementById("accC");
-        if (!d || d.error) {
-          s.style.display = "none";
-          return;
-        }
-        var ks = Object.keys(d);
-        if (!ks.length) {
-          s.style.display = "none";
-          return;
-        }
-        s.style.display = "";
-        var h = '<div class="atabs">';
-        ks.forEach(function (k, i) {
-          h +=
-            '<div class="atab' +
-            (i === 0 ? " active" : "") +
-            '" onclick="satab(this,\'' +
-            k +
-            "')\">" +
-            k +
-            "</div>";
-        });
-        h += "</div>";
-        ks.forEach(function (k, i) {
-          h +=
-            '<div class="apnl" data-h="' +
-            k +
-            '" style="' +
-            (i > 0 ? "display:none" : "") +
-            '">';
-          var hd = d[k];
-          if (hd.consensus)
-            h +=
-              '<div style="margin-bottom:8px;font-size:12px;color:var(--txd)">Consensus: <strong style="color:var(--tx)">' +
-              fn(hd.consensus.pct, 1) +
-              "%</strong> (" +
-              hd.consensus.correct +
-              "/" +
-              hd.consensus.total +
-              ")</div>";
-          if (hd.signals) {
-            h += '<div style="margin-bottom:10px">';
-            Object.keys(hd.signals).forEach(function (n) {
-              var sd = hd.signals[n],
-                p = sd.pct || 0,
-                bc =
-                  p >= 55
-                    ? "var(--grn)"
-                    : p >= 45
-                      ? "var(--yel)"
-                      : "var(--red)";
-              h +=
-                '<div class="abr"><div class="abl">' +
-                n +
-                '</div><div class="abt"><div class="abf" style="width:' +
-                p +
-                "%;background:" +
-                bc +
-                '">' +
-                fn(p, 0) +
-                '%</div></div><div class="abc">' +
-                sd.correct +
-                "/" +
-                sd.total +
-                "</div></div>";
-            });
-            h += "</div>";
-          }
-          if (hd.per_ticker) {
-            h +=
-              '<div style="font-size:10px;color:var(--txm);margin-bottom:5px">PER TICKER</div>';
-            Object.keys(hd.per_ticker).forEach(function (t) {
-              var td = hd.per_ticker[t],
-                p = td.pct || 0,
-                bc =
-                  p >= 55
-                    ? "var(--grn)"
-                    : p >= 45
-                      ? "var(--yel)"
-                      : "var(--red)";
-              h +=
-                '<div class="abr"><div class="abl">' +
-                t +
-                '</div><div class="abt"><div class="abf" style="width:' +
-                p +
-                "%;background:" +
-                bc +
-                '">' +
-                fn(p, 0) +
-                '%</div></div><div class="abc">' +
-                td.correct +
-                "/" +
-                td.total +
-                "</div></div>";
-            });
-          }
-          h += "</div>";
-        });
-        c.innerHTML = h;
-      }
-      function satab(el, h) {
-        el.parentNode.querySelectorAll(".atab").forEach(function (t) {
-          t.classList.remove("active");
-        });
-        el.classList.add("active");
-        el.closest(".colc")
-          .querySelectorAll(".apnl")
-          .forEach(function (p) {
-            p.style.display = p.dataset.h === h ? "" : "none";
-          });
-      }
-      function rLora(d) {
-        var s = document.getElementById("lorS"),
-          c = document.getElementById("lorC");
-        if (!d || !d.state) {
-          s.style.display = "none";
-          return;
-        }
-        s.style.display = "";
-        var raw = d.state.steps || {},
-          order = [
-            "setup_env",
-            "generate_data",
-            "download_model",
-            "train",
-            "convert_gguf",
-            "verify",
-            "deploy_shadow",
-          ],
-          labels = {
-            setup_env: "Setup Training Environment",
-            generate_data: "Generate Training Data",
-            download_model: "Download HuggingFace Model",
-            train: "QLoRA Training",
-            convert_gguf: "Convert to GGUF",
-            verify: "Verify GGUF",
-            deploy_shadow: "Deploy Shadow Mode",
-          },
-          st = Array.isArray(raw)
-            ? raw
-            : order
-                .filter(function (k) {
-                  return raw[k];
-                })
-                .map(function (k) {
-                  var o = Object.assign({}, raw[k]);
-                  o.name = labels[k] || k;
-                  return o;
-                }),
-          h = '<ul class="ls">';
-        st.forEach(function (x) {
-          var ic, cl;
-          if (x.status === "done") {
-            ic = "\u2713";
-            cl = "done";
-          } else if (x.status === "running") {
-            ic = "\u21BB";
-            cl = "running";
-          } else {
-            ic = "\u25CB";
-            cl = "pending";
-          }
-          h +=
-            '<li class="lsi"><span class="lic ' +
-            cl +
-            '">' +
-            ic +
-            '</span><span class="lin ' +
-            cl +
-            '">' +
-            eh(x.name || "Step") +
-            "</span></li>";
-        });
-        h += "</ul>";
-        var tp = d.training_progress;
-        if (tp)
-          h +=
-            '<div class="lpg"><div style="font-size:11px;font-weight:600;margin-bottom:3px">Training Progress</div><div class="lpb"><div class="lpf" style="width:' +
-            (tp.percent || 0) +
-            '%"></div></div><div class="lps"><span>Step ' +
-            (tp.step || 0) +
-            "/" +
-            (tp.total_steps || 0) +
-            "</span><span>Epoch " +
-            fn(tp.epoch, 1) +
-            "</span><span>Loss " +
-            fn(tp.loss, 4) +
-            "</span><span>" +
-            fn(tp.percent, 1) +
-            "%</span></div></div>";
-        c.innerHTML = h;
-      }
-      function rTel(msgs) {
-        var c = document.getElementById("telC");
-        if (!msgs || !msgs.length) {
-          c.innerHTML = '<div class="nd">No messages</div>';
-          return;
-        }
-        var r = msgs.slice(-10).reverse(),
-          h = '<div class="tl">';
-        r.forEach(function (m) {
-          var tx = eh(m.text || "")
-            .replace(/`([^`]+)`/g, "<code>$1</code>")
-            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-          h +=
-            '<div class="tm"><div class="tts">' +
-            ft(m.ts) +
-            "</div>" +
-            tx +
-            "</div>";
-        });
-        c.innerHTML = h + "</div>";
-      }
-      function showErr(m) {
-        var e = document.getElementById("errB");
-        e.textContent = m;
-        e.style.display = "block";
-        setTimeout(function () {
-          e.style.display = "none";
-        }, 10000);
-      }
-      async function fj(u) {
-        try {
-          var r = await fetch(u);
-          if (!r.ok) return null;
-          return await r.json();
-        } catch (e) {
-          return null;
-        }
-      }
+
+      /* ================================================================
+         Render: Bold summary in header
+         ================================================================ */
       function rBoldSummary(bold, sig) {
         var el = document.getElementById("boldSum");
-        if (!bold || !sig) {
-          if (el) el.style.display = "none";
-          return;
-        }
-        var fx = sig.fx_rate || 1,
-          sigs = sig.signals || {};
+        if (!bold || !sig) { if (el) el.style.display = "none"; return; }
+        var fx = sig.fx_rate || 1, sigs = sig.signals || {};
         var total = bold.cash_sek || 0;
         var hld = bold.holdings || {};
         for (var t in hld) {
-          if (hld[t].shares > 0 && sigs[t])
-            total += hld[t].shares * sigs[t].price_usd * fx;
+          if (hld[t].shares > 0 && sigs[t]) total += hld[t].shares * sigs[t].price_usd * fx;
         }
         var init = bold.initial_value_sek || 500000;
-        var pnl = ((total - init) / init) * 100;
+        var pnlVal = ((total - init) / init) * 100;
         if (el) {
           el.style.display = "";
           var lbl = el.querySelector(".sl");
           var val = el.querySelector(".sv");
           if (lbl) lbl.textContent = "Bold";
           if (val) {
-            val.textContent =
-              fs(total) + " (" + (pnl >= 0 ? "+" : "") + fn(pnl, 2) + "%)";
-            val.style.color =
-              pnl > 0 ? "var(--grn)" : pnl < 0 ? "var(--red)" : "var(--tx)";
+            val.textContent = fs(total) + " (" + (pnlVal >= 0 ? "+" : "") + fn(pnlVal, 2) + "%)";
+            val.style.color = pnlVal > 0 ? "var(--grn)" : pnlVal < 0 ? "var(--red)" : "var(--tx)";
           }
         }
       }
+
+      /* ================================================================
+         Render: LoRA status
+         ================================================================ */
+      function rLora(d) {
+        var s = document.getElementById("lorS"), c = document.getElementById("lorC");
+        if (!d || !d.state) { s.style.display = "none"; return; }
+        s.style.display = "";
+        var raw = d.state.steps || {};
+        var order = ["setup_env", "generate_data", "download_model", "train", "convert_gguf", "verify", "deploy_shadow"];
+        var labels = { setup_env: "Setup Training Environment", generate_data: "Generate Training Data", download_model: "Download HuggingFace Model", train: "QLoRA Training", convert_gguf: "Convert to GGUF", verify: "Verify GGUF", deploy_shadow: "Deploy Shadow Mode" };
+        var st = Array.isArray(raw) ? raw : order.filter(function (k) { return raw[k]; }).map(function (k) { var o = Object.assign({}, raw[k]); o.name = labels[k] || k; return o; });
+        var h = '<ul class="ls">';
+        st.forEach(function (x) {
+          var ic, cl;
+          if (x.status === "done") { ic = "\u2713"; cl = "done"; }
+          else if (x.status === "running") { ic = "\u21BB"; cl = "running"; }
+          else { ic = "\u25CB"; cl = "pending"; }
+          h += '<li class="lsi"><span class="lic ' + cl + '">' + ic + '</span><span class="lin ' + cl + '">' + eh(x.name || "Step") + '</span></li>';
+        });
+        h += '</ul>';
+        var tp = d.training_progress;
+        if (tp) h += '<div class="lpg"><div style="font-size:11px;font-weight:600;margin-bottom:3px">Training Progress</div><div class="lpb"><div class="lpf" style="width:' + (tp.percent || 0) + '%"></div></div><div class="lps"><span>Step ' + (tp.step || 0) + '/' + (tp.total_steps || 0) + '</span><span>Epoch ' + fn(tp.epoch, 1) + '</span><span>Loss ' + fn(tp.loss, 4) + '</span><span>' + fn(tp.percent, 1) + '%</span></div></div>';
+        c.innerHTML = h;
+      }
+
+      /* ================================================================
+         Render: Telegram messages
+         ================================================================ */
+      function rTel(msgs) {
+        var c = document.getElementById("telC");
+        if (!msgs || !msgs.length) { c.innerHTML = '<div class="nd">No messages</div>'; return; }
+        var r = msgs.slice(-10).reverse(), h = '<div class="tl">';
+        r.forEach(function (m) {
+          var tx = eh(m.text || "").replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+          h += '<div class="tm"><div class="tts">' + ft(m.ts) + '</div>' + tx + '</div>';
+        });
+        c.innerHTML = h + '</div>';
+      }
+
+      /* ================================================================
+         Signal heatmap (25 signals x tickers)
+         ================================================================ */
+      async function loadSignalHeatmap() {
+        var wrap = document.getElementById("sigHeatWrap");
+        var data = await fj("/api/signal-heatmap");
+        if (!data || data.error) {
+          wrap.innerHTML = '<div class="nd">No signal heatmap data available</div>';
+          return;
+        }
+        var tickers = data.tickers || [];
+        var signals = data.signals || [];
+        var core = data.core_signals || [];
+        var enhanced = data.enhanced_signals || [];
+        var hm = data.heatmap || {};
+
+        if (!tickers.length) {
+          wrap.innerHTML = '<div class="nd">No tickers in data</div>';
+          return;
+        }
+
+        var h = '<table class="sig-heatmap"><thead><tr><th>Signal</th>';
+        tickers.forEach(function (t) { h += '<th>' + t + '</th>'; });
+        h += '</tr></thead><tbody>';
+
+        // Group: core signals
+        h += '<tr><td colspan="' + (tickers.length + 1) + '" style="font-size:9px;color:var(--cyn);padding:6px 4px 2px;background:transparent !important;font-weight:700;text-transform:uppercase;letter-spacing:1px">Core Signals (1-11)</td></tr>';
+        core.forEach(function (sig) {
+          h += '<tr><td>' + sig + '</td>';
+          tickers.forEach(function (t) {
+            var v = hm[t] ? (hm[t][sig] || "HOLD") : "HOLD";
+            var cls = v === "BUY" ? "cB" : v === "SELL" ? "cS" : "cH";
+            var label = v === "BUY" ? "B" : v === "SELL" ? "S" : "H";
+            h += '<td class="' + cls + '">' + label + '</td>';
+          });
+          h += '</tr>';
+        });
+
+        // Group: enhanced signals
+        h += '<tr><td colspan="' + (tickers.length + 1) + '" style="font-size:9px;color:var(--cyn);padding:6px 4px 2px;background:transparent !important;font-weight:700;text-transform:uppercase;letter-spacing:1px">Enhanced Composite Signals (12-25)</td></tr>';
+        enhanced.forEach(function (sig) {
+          h += '<tr><td>' + sig + '</td>';
+          tickers.forEach(function (t) {
+            var v = hm[t] ? (hm[t][sig] || "HOLD") : "HOLD";
+            var cls = v === "BUY" ? "cB" : v === "SELL" ? "cS" : "cH";
+            var label = v === "BUY" ? "B" : v === "SELL" ? "S" : "H";
+            h += '<td class="' + cls + '">' + label + '</td>';
+          });
+          h += '</tr>';
+        });
+
+        h += '</tbody></table>';
+        wrap.innerHTML = h;
+      }
+
+      /* ================================================================
+         Equity curve chart (Chart.js)
+         ================================================================ */
+      function getChartColors() {
+        var isLight = document.documentElement.classList.contains("light");
+        return {
+          gridColor: isLight ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.06)",
+          textColor: isLight ? "#4a5568" : "#a0aec0",
+          patientColor: "#06b6d4",
+          boldColor: "#f97316",
+        };
+      }
+
+      function updateChartColors() {
+        if (!equityChartInstance) return;
+        var c = getChartColors();
+        equityChartInstance.options.scales.x.ticks.color = c.textColor;
+        equityChartInstance.options.scales.x.grid.color = c.gridColor;
+        equityChartInstance.options.scales.y.ticks.color = c.textColor;
+        equityChartInstance.options.scales.y.grid.color = c.gridColor;
+        equityChartInstance.update("none");
+      }
+
+      async function loadEquityCurve() {
+        var data = await fj("/api/equity-curve");
+        var canvas = document.getElementById("equityChart");
+        var noData = document.getElementById("eqNoData");
+
+        if (!data || !data.length) {
+          canvas.style.display = "none";
+          noData.style.display = "";
+          return;
+        }
+
+        canvas.style.display = "";
+        noData.style.display = "none";
+
+        var labels = [];
+        var patientVals = [];
+        var boldVals = [];
+
+        data.forEach(function (entry) {
+          labels.push(entry.ts || entry.timestamp || "");
+          patientVals.push(entry.patient_total_sek || entry.patient || null);
+          boldVals.push(entry.bold_total_sek || entry.bold || null);
+        });
+
+        // Format labels
+        var fmtLabels = labels.map(function (l) {
+          if (!l) return "";
+          var d = new Date(l);
+          return d.toLocaleDateString("sv-SE", { month: "short", day: "numeric" });
+        });
+
+        var c = getChartColors();
+
+        if (equityChartInstance) equityChartInstance.destroy();
+
+        equityChartInstance = new Chart(canvas, {
+          type: "line",
+          data: {
+            labels: fmtLabels,
+            datasets: [
+              {
+                label: "Patient (SEK)",
+                data: patientVals,
+                borderColor: c.patientColor,
+                backgroundColor: c.patientColor + "20",
+                fill: false,
+                tension: 0.3,
+                pointRadius: 1,
+                borderWidth: 2,
+              },
+              {
+                label: "Bold (SEK)",
+                data: boldVals,
+                borderColor: c.boldColor,
+                backgroundColor: c.boldColor + "20",
+                fill: false,
+                tension: 0.3,
+                pointRadius: 1,
+                borderWidth: 2,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            plugins: {
+              legend: { labels: { color: c.textColor, font: { size: 11 } } },
+              tooltip: {
+                callbacks: {
+                  label: function (ctx) {
+                    return ctx.dataset.label + ": " + (ctx.parsed.y != null ? Number(ctx.parsed.y).toLocaleString("sv-SE", { maximumFractionDigits: 0 }) + " SEK" : "--");
+                  },
+                },
+              },
+            },
+            scales: {
+              x: {
+                ticks: { color: c.textColor, font: { size: 10 }, maxTicksLimit: 20 },
+                grid: { color: c.gridColor },
+              },
+              y: {
+                ticks: {
+                  color: c.textColor,
+                  font: { size: 10 },
+                  callback: function (v) { return Number(v).toLocaleString("sv-SE", { maximumFractionDigits: 0 }); },
+                },
+                grid: { color: c.gridColor },
+              },
+            },
+          },
+        });
+      }
+
+      /* ================================================================
+         Trigger timeline
+         ================================================================ */
+      async function loadTriggers() {
+        var el = document.getElementById("trigList");
+        var data = await fj("/api/triggers");
+        if (!data || !data.length) {
+          el.innerHTML = '<div class="nd">No trigger events recorded</div>';
+          return;
+        }
+        var items = data.slice().reverse();
+        var h = "";
+        items.forEach(function (item) {
+          h += '<div class="trig-item">';
+          h += '<div class="trig-ts">' + ftFull(item.ts) + '</div>';
+          h += '<div class="trig-reasons">';
+          var reasons = item.reasons || [];
+          reasons.forEach(function (r) {
+            var cls = "";
+            if (/BUY/i.test(r)) cls = " buy";
+            else if (/SELL/i.test(r)) cls = " sell";
+            h += '<span class="trig-reason-tag' + cls + '">' + eh(r) + '</span>';
+          });
+          if (item.action) {
+            h += '<div style="margin-top:3px;font-size:10px;color:var(--txd)">Action: ' + eh(item.action) + '</div>';
+          }
+          h += '</div></div>';
+        });
+        el.innerHTML = h;
+      }
+
+      /* ================================================================
+         Accuracy panel
+         ================================================================ */
+      async function loadAccuracy() {
+        var c = document.getElementById("accC");
+        var d = await fj("/api/accuracy");
+        if (!d || d.error || !Object.keys(d).length) {
+          c.innerHTML = '<div class="nd">No accuracy data available</div>';
+          return;
+        }
+        var ks = Object.keys(d);
+        var h = '<div class="atabs">';
+        ks.forEach(function (k, i) {
+          h += '<div class="atab' + (i === 0 ? ' active' : '') + '" onclick="satab(this,\'' + k + '\')">' + k + '</div>';
+        });
+        h += '</div>';
+        ks.forEach(function (k, i) {
+          h += '<div class="apnl" data-h="' + k + '" style="' + (i > 0 ? 'display:none' : '') + '">';
+          var hd = d[k];
+          if (hd.consensus)
+            h += '<div style="margin-bottom:8px;font-size:12px;color:var(--txd)">Consensus: <strong style="color:var(--tx)">' + fn(hd.consensus.pct, 1) + '%</strong> (' + hd.consensus.correct + '/' + hd.consensus.total + ')</div>';
+          if (hd.signals) {
+            h += '<div style="margin-bottom:10px">';
+            Object.keys(hd.signals).forEach(function (n) {
+              var sd = hd.signals[n], p = sd.pct || 0;
+              var bc = p >= 55 ? "var(--grn)" : p >= 45 ? "var(--yel)" : "var(--red)";
+              h += '<div class="abr"><div class="abl">' + n + '</div><div class="abt"><div class="abf" style="width:' + p + '%;background:' + bc + '">' + fn(p, 0) + '%</div></div><div class="abc">' + sd.correct + '/' + sd.total + '</div></div>';
+            });
+            h += '</div>';
+          }
+          if (hd.per_ticker) {
+            h += '<div style="font-size:10px;color:var(--txm);margin-bottom:5px">PER TICKER</div>';
+            Object.keys(hd.per_ticker).forEach(function (t) {
+              var td = hd.per_ticker[t], p = td.pct || 0;
+              var bc = p >= 55 ? "var(--grn)" : p >= 45 ? "var(--yel)" : "var(--red)";
+              h += '<div class="abr"><div class="abl">' + t + '</div><div class="abt"><div class="abf" style="width:' + p + '%;background:' + bc + '">' + fn(p, 0) + '%</div></div><div class="abc">' + td.correct + '/' + td.total + '</div></div>';
+            });
+          }
+          h += '</div>';
+        });
+        c.innerHTML = h;
+      }
+
+      function satab(el, h) {
+        el.parentNode.querySelectorAll(".atab").forEach(function (t) { t.classList.remove("active"); });
+        el.classList.add("active");
+        var pnl = el.closest(".pnl") || el.closest(".colc");
+        if (pnl) pnl.querySelectorAll(".apnl").forEach(function (p) { p.style.display = p.dataset.h === h ? "" : "none"; });
+      }
+
+      /* ================================================================
+         Error display
+         ================================================================ */
+      function showErr(m) {
+        var e = document.getElementById("errB");
+        e.textContent = m;
+        e.style.display = "block";
+        setTimeout(function () { e.style.display = "none"; }, 10000);
+      }
+
+      /* ================================================================
+         Fetch helper
+         ================================================================ */
+      async function fj(u) {
+        try {
+          var r = await fetch(u);
+          if (r.status === 401) {
+            showErr("Unauthorized: invalid or missing token. Add ?token=XXX to URL.");
+            return null;
+          }
+          if (!r.ok) return null;
+          return await r.json();
+        } catch (e) { return null; }
+      }
+
+      /* ================================================================
+         Main refresh (uses /api/summary for single fetch)
+         ================================================================ */
       async function refresh() {
-        var [sig, port, portBold, tel, acc, lor] = await Promise.all([
-          fj("/api/signals"),
-          fj("/api/portfolio"),
-          fj("/api/portfolio-bold"),
-          fj("/api/telegrams"),
-          fj("/api/accuracy"),
-          fj("/api/lora-status"),
-        ]);
-        if (!sig && !port) showErr("Failed to fetch data. Retrying in 30s...");
+        var d = await fj("/api/summary");
+        if (!d) {
+          showErr("Failed to fetch data. Retrying in 60s...");
+          return;
+        }
+
+        lastRefreshTime = Date.now();
+        var sig = d.signals;
+        var port = d.portfolio;
+        var portBold = d.portfolio_bold;
+        var tel = d.telegrams;
+
         if (sig) {
-          document.getElementById("lastUp").textContent =
-            "Updated: " + ft(sig.timestamp);
           var p = sig.portfolio || {};
           document.getElementById("tvl").textContent = fs(p.total_sek);
           var pe = document.getElementById("pnl");
           var pv = p.pnl_pct;
-          pe.textContent =
-            pv != null ? (pv >= 0 ? "+" : "") + fn(pv, 2) + "%" : "--";
-          pe.style.color =
-            pv > 0 ? "var(--grn)" : pv < 0 ? "var(--red)" : "var(--tx)";
+          pe.textContent = pv != null ? (pv >= 0 ? "+" : "") + fn(pv, 2) + "%" : "--";
+          pe.style.color = pv > 0 ? "var(--grn)" : pv < 0 ? "var(--red)" : "var(--tx)";
           document.getElementById("csh").textContent = fs(p.cash_sek);
-          rCards(sig.signals);
+
+          rCards(sig.signals, sig.timeframes);
           rHeat(sig.timeframes);
           rMkt(sig.signals, sig.macro);
           rBoldSummary(portBold, sig);
         }
-        rTrades(port);
-        rAcc(acc);
+        rTrades(port, portBold);
+
+        // Lazy-load LoRA
+        var lor = await fj("/api/lora-status");
         rLora(lor);
         rTel(tel);
       }
+
+      /* ================================================================
+         Countdown timer
+         ================================================================ */
       function startCd() {
-        cdv = 30;
+        cdv = 60;
         if (cdi) clearInterval(cdi);
         cdi = setInterval(function () {
+          updateLastUpdatedDisplay();
+          if (paused) return;
           cdv--;
           document.getElementById("cdv").textContent = cdv;
           if (cdv <= 0) {
-            cdv = 30;
+            cdv = 60;
             refresh();
           }
         }, 1000);
       }
+
+      /* ================================================================
+         Init
+         ================================================================ */
+      initTheme();
       refresh();
       startCd();
     </script>

@@ -130,7 +130,7 @@ def _yield_curve(macro: dict | None) -> tuple[str, dict]:
     """
     indicators: dict = {"yield_curve_2s10s": np.nan}
 
-    spread = _safe_get(macro, "treasury", "2s10s")
+    spread = _safe_get(macro, "treasury", "spread_2s10s")
     if spread is None:
         return "HOLD", indicators
 
@@ -178,9 +178,14 @@ def _yield_10y_momentum(macro: dict | None) -> tuple[str, dict]:
 def _fomc_proximity(macro: dict | None) -> tuple[str, dict]:
     """FOMC Proximity.
 
-    Within 3 days of FOMC = HOLD (uncertainty).
-    More than 14 days until FOMC = weak BUY (favorable for risk).
-    3-14 days = HOLD.
+    Within 3 days of FOMC = HOLD (uncertainty, caution).
+    1-2 days *after* FOMC (days_until is large but warning indicates
+    recent meeting) = potential opportunity — but we only know days_until
+    here, so we rely on the fed calendar's ``warning`` field for post-event.
+    More than 3 days away = HOLD (no informational value either way).
+
+    Note: The old logic voted BUY when >14 days away (~3 out of every
+    6 weeks), creating a permanent BUY bias with no predictive value.
     """
     indicators: dict = {"fomc_days_until": np.nan}
 
@@ -195,10 +200,10 @@ def _fomc_proximity(macro: dict | None) -> tuple[str, dict]:
 
     indicators["fomc_days_until"] = days_until
 
+    # Only express a view when FOMC is imminent (caution zone)
+    # All other distances: HOLD (no actionable edge)
     if days_until <= 3:
         return "HOLD", indicators
-    if days_until > 14:
-        return "BUY", indicators
     return "HOLD", indicators
 
 

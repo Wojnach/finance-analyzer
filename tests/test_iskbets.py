@@ -240,7 +240,8 @@ class TestExitChecks:
         assert result is not None
         assert result[0] == "hard_stop"
 
-    def test_hard_stop_not_hit(self, iskbets_cfg, sample_signals):
+    @patch("portfolio.iskbets._past_time_exit", return_value=False)
+    def test_hard_stop_not_hit(self, mock_time, iskbets_cfg, sample_signals):
         """Price above hard stop → no exit."""
         pos = _make_position(entry_price=66000, atr=1500)
         state = {"active_position": pos}

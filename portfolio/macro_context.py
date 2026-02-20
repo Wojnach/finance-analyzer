@@ -1,56 +1,45 @@
 import json
+import threading
 import time
 from pathlib import Path
 
 import pandas as pd
 import requests
 
+from portfolio.api_utils import get_alpaca_headers, load_config
+
 BINANCE_BASE = "https://api.binance.com/api/v3"
 ALPACA_BASE = "https://data.alpaca.markets/v2"
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 BINANCE_FAPI_BASE = "https://fapi.binance.com/fapi/v1"
-TICKER_MAP = {
-    "BTC-USD": ("binance", "BTCUSDT"),
-    "ETH-USD": ("binance", "ETHUSDT"),
-    "XAU-USD": ("binance_fapi", "XAUUSDT"),
-    "XAG-USD": ("binance_fapi", "XAGUSDT"),
-    "MSTR": ("alpaca", "MSTR"),
-    "PLTR": ("alpaca", "PLTR"),
-    "NVDA": ("alpaca", "NVDA"),
-    "AMD": ("alpaca", "AMD"),
-    "BABA": ("alpaca", "BABA"),
-    "GOOGL": ("alpaca", "GOOGL"),
-    "AMZN": ("alpaca", "AMZN"),
-    "AAPL": ("alpaca", "AAPL"),
-    "AVGO": ("alpaca", "AVGO"),
-    "AI": ("alpaca", "AI"),
-    "GRRR": ("alpaca", "GRRR"),
-    "IONQ": ("alpaca", "IONQ"),
-    "MRVL": ("alpaca", "MRVL"),
-    "META": ("alpaca", "META"),
-    "MU": ("alpaca", "MU"),
-    "PONY": ("alpaca", "PONY"),
-    "RXRX": ("alpaca", "RXRX"),
-    "SOUN": ("alpaca", "SOUN"),
-    "SMCI": ("alpaca", "SMCI"),
-    "TSM": ("alpaca", "TSM"),
-    "TTWO": ("alpaca", "TTWO"),
-    "TEM": ("alpaca", "TEM"),
-    "UPST": ("alpaca", "UPST"),
-    "VERI": ("alpaca", "VERI"),
-    "VRT": ("alpaca", "VRT"),
-    "QQQ": ("alpaca", "QQQ"),
-    "LMT": ("alpaca", "LMT"),
-}
+
+from portfolio.tickers import TICKER_SOURCE_MAP as TICKER_MAP
+
+
+# --- Rate limiter for yfinance calls (no official limit, be polite — 30/min) ---
+class _RateLimiter:
+    """Token-bucket rate limiter. Sleeps when calls exceed rate."""
+    def __init__(self, max_per_minute, name=""):
+        self.interval = 60.0 / max_per_minute
+        self.last_call = 0.0
+        self.name = name
+        self._lock = threading.Lock()
+
+    def wait(self):
+        with self._lock:
+            now = time.time()
+            elapsed = now - self.last_call
+            if elapsed < self.interval:
+                wait_time = self.interval - elapsed
+                time.sleep(wait_time)
+            self.last_call = time.time()
+
+
+_yfinance_limiter = _RateLimiter(30, "yfinance")
 
 
 def _alpaca_headers():
-    cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-    acfg = cfg.get("alpaca", {})
-    return {
-        "APCA-API-KEY-ID": acfg.get("key", ""),
-        "APCA-API-SECRET-KEY": acfg.get("secret", ""),
-    }
+    return get_alpaca_headers()
 
 
 _cache = {}
@@ -66,6 +55,7 @@ def get_dxy():
 
     import yfinance as yf
 
+    _yfinance_limiter.wait()
     t = yf.Ticker("DX-Y.NYB")
     h = t.history(period="30d")
     if h.empty:
@@ -206,40 +196,8 @@ def get_volume_signal(ticker):
 
 
 TREASURY_TTL = 3600
-FOMC_DATES = [
-    "2026-01-28",
-    "2026-01-29",
-    "2026-03-17",
-    "2026-03-18",
-    "2026-05-05",
-    "2026-05-06",
-    "2026-06-16",
-    "2026-06-17",
-    "2026-07-28",
-    "2026-07-29",
-    "2026-09-15",
-    "2026-09-16",
-    "2026-10-27",
-    "2026-10-28",
-    "2026-12-15",
-    "2026-12-16",
-    "2027-01-26",
-    "2027-01-27",
-    "2027-03-16",
-    "2027-03-17",
-    "2027-04-27",
-    "2027-04-28",
-    "2027-06-08",
-    "2027-06-09",
-    "2027-07-27",
-    "2027-07-28",
-    "2027-09-14",
-    "2027-09-15",
-    "2027-10-26",
-    "2027-10-27",
-    "2027-12-07",
-    "2027-12-08",
-]
+
+from portfolio.fomc_dates import FOMC_DATES_ISO as FOMC_DATES
 
 
 def get_treasury():
@@ -254,6 +212,7 @@ def get_treasury():
     result = {}
     for label, sym in tickers.items():
         try:
+            _yfinance_limiter.wait()
             t = yf.Ticker(sym)
             h = t.history(period="30d")
             if h.empty:

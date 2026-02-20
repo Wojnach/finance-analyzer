@@ -243,4 +243,4 @@ class TestMetalsSignalConfig:
             "atr_pct": 2.24,
         }
         action, conf, extra = generate_signal(ind, ticker="BTC-USD")
-        assert extra["_total_applicable"] == 25
+        assert extra["_total_applicable"] == 24  # custom_lora disabled

@@ -485,12 +485,13 @@ class TestTriggerSystem:
         from portfolio.trigger import check_triggers
 
         prices = {"BTC-USD": 69000, "ETH-USD": 2000}
-        check_triggers(self._make_signals("HOLD", "HOLD"), prices, {}, {})
-        # SUSTAINED_CHECKS=3: signal must hold for 3 consecutive cycles
-        buy_sigs = self._make_signals("BUY", "HOLD")
-        check_triggers(buy_sigs, prices, {}, {})
-        check_triggers(buy_sigs, prices, {}, {})
-        triggered, reasons = check_triggers(buy_sigs, prices, {}, {})
+        # Seed with BUY → triggers on cooldown+consensus, saves BUY as triggered action
+        check_triggers(self._make_signals("BUY", "HOLD"), prices, {}, {})
+        # SUSTAINED_CHECKS=3: flip from BUY→HOLD must sustain 3 consecutive cycles
+        hold_sigs = self._make_signals("HOLD", "HOLD")
+        check_triggers(hold_sigs, prices, {}, {})
+        check_triggers(hold_sigs, prices, {}, {})
+        triggered, reasons = check_triggers(hold_sigs, prices, {}, {})
         assert triggered
         assert any("flipped" in r for r in reasons)
 

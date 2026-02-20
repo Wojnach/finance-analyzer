@@ -309,18 +309,18 @@ class TestYieldCurve:
     """Yield curve inverted triggers SELL."""
 
     def test_inverted_curve_triggers_sell(self):
-        macro = {"treasury": {"2s10s": -0.5}}
+        macro = {"treasury": {"spread_2s10s": -0.5}}
         action, indicators = _yield_curve(macro)
         assert action == "SELL"
         assert indicators["yield_curve_2s10s"] == -0.5
 
     def test_normal_curve_triggers_buy(self):
-        macro = {"treasury": {"2s10s": 1.0}}
+        macro = {"treasury": {"spread_2s10s": 1.0}}
         action, indicators = _yield_curve(macro)
         assert action == "BUY"
 
     def test_watch_zone_triggers_hold(self):
-        macro = {"treasury": {"2s10s": 0.3}}
+        macro = {"treasury": {"spread_2s10s": 0.3}}
         action, indicators = _yield_curve(macro)
         assert action == "HOLD"
 
@@ -330,7 +330,7 @@ class TestYieldCurve:
 
     def test_exactly_zero_triggers_hold(self):
         """2s10s at exactly 0 is between 0 and 0.5, so HOLD."""
-        macro = {"treasury": {"2s10s": 0.0}}
+        macro = {"treasury": {"spread_2s10s": 0.0}}
         action, indicators = _yield_curve(macro)
         assert action == "HOLD"
 
@@ -372,10 +372,10 @@ class TestFOMCProximity:
         action, indicators = _fomc_proximity(macro)
         assert action == "HOLD"
 
-    def test_far_from_fomc_triggers_buy(self):
+    def test_far_from_fomc_triggers_hold(self):
         macro = {"fed": {"days_until": 30}}
         action, indicators = _fomc_proximity(macro)
-        assert action == "BUY"
+        assert action == "HOLD"
 
     def test_medium_distance_triggers_hold(self):
         macro = {"fed": {"days_until": 10}}
@@ -459,7 +459,7 @@ class TestVotingLogic:
         df = _make_golden_cross_df()
         macro = {
             "dxy": {"value": 99.0, "change_5d_pct": -1.0},   # BUY
-            "treasury": {"2s10s": 1.0, "10y": 3.0},           # BUY, BUY
+            "treasury": {"spread_2s10s": 1.0, "10y": 3.0},           # BUY, BUY
             "fed": {"days_until": 30},                          # BUY
         }
         result = compute_macro_regime_signal(df, macro=macro)
@@ -474,7 +474,7 @@ class TestVotingLogic:
         df = _make_df(n=5)  # Not enough for SMA signals -> both SMA subs = HOLD
         macro = {
             "dxy": {"value": 105.0, "change_5d_pct": 1.5},   # SELL
-            "treasury": {"2s10s": 1.0, "10y": 4.2},           # yield_curve=BUY, 10y=HOLD
+            "treasury": {"spread_2s10s": 1.0, "10y": 4.2},           # yield_curve=BUY, 10y=HOLD
             "fed": {"days_until": 10},                          # HOLD
         }
         result = compute_macro_regime_signal(df, macro=macro)
@@ -488,7 +488,7 @@ class TestVotingLogic:
         df = _make_death_cross_df()  # sma200=SELL, gdc=SELL
         macro = {
             "dxy": {"value": 106.0, "change_5d_pct": 2.0},   # SELL
-            "treasury": {"2s10s": -0.5, "10y": 5.5},          # SELL, SELL
+            "treasury": {"spread_2s10s": -0.5, "10y": 5.5},          # SELL, SELL
             "fed": {"days_until": 2},                           # HOLD
         }
         result = compute_macro_regime_signal(df, macro=macro)

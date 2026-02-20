@@ -321,12 +321,19 @@ class TestJanuaryEffect:
 
 
 class TestPreHolidayEffect:
-    """Friday (3-day weekend) approximates pre-holiday."""
+    """Day before a US market holiday triggers BUY."""
 
     def test_friday_pre_holiday(self):
-        action, indicators = _pre_holiday_effect(date(2026, 2, 20))  # Friday
+        # July 3 2026 is Friday, July 4 is Independence Day (US holiday)
+        action, indicators = _pre_holiday_effect(date(2026, 7, 3))
         assert action == "BUY"
         assert indicators["is_pre_holiday"] is True
+
+    def test_regular_friday_no_holiday(self):
+        # Regular Friday (no holiday next day) → HOLD
+        action, indicators = _pre_holiday_effect(date(2026, 2, 20))
+        assert action == "HOLD"
+        assert indicators["is_pre_holiday"] is False
 
     def test_wednesday_no_holiday(self):
         action, indicators = _pre_holiday_effect(date(2026, 2, 18))  # Wednesday

@@ -9,7 +9,7 @@ import sys
 import tempfile
 import time
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -23,59 +23,58 @@ STATE_FILE = DATA_DIR / "portfolio_state.json"
 AGENT_SUMMARY_FILE = DATA_DIR / "agent_summary.json"
 CONFIG_FILE = BASE_DIR / "config.json"
 
-SYMBOLS = {
-    # Crypto (Binance spot)
-    "BTC-USD": {"binance": "BTCUSDT"},
-    "ETH-USD": {"binance": "ETHUSDT"},
-    # Metals (Binance futures)
-    "XAU-USD": {"binance_fapi": "XAUUSDT"},
-    "XAG-USD": {"binance_fapi": "XAGUSDT"},
-    # US Equities (Alpaca IEX)
-    "MSTR": {"alpaca": "MSTR"},
-    "PLTR": {"alpaca": "PLTR"},
-    "NVDA": {"alpaca": "NVDA"},
-    "AMD": {"alpaca": "AMD"},
-    "BABA": {"alpaca": "BABA"},
-    "GOOGL": {"alpaca": "GOOGL"},
-    "AMZN": {"alpaca": "AMZN"},
-    "AAPL": {"alpaca": "AAPL"},
-    "AVGO": {"alpaca": "AVGO"},
-    "AI": {"alpaca": "AI"},
-    "GRRR": {"alpaca": "GRRR"},
-    "IONQ": {"alpaca": "IONQ"},
-    "MRVL": {"alpaca": "MRVL"},
-    "META": {"alpaca": "META"},
-    "MU": {"alpaca": "MU"},
-    "PONY": {"alpaca": "PONY"},
-    "RXRX": {"alpaca": "RXRX"},
-    "SOUN": {"alpaca": "SOUN"},
-    "SMCI": {"alpaca": "SMCI"},
-    "TSM": {"alpaca": "TSM"},
-    "TTWO": {"alpaca": "TTWO"},
-    "TEM": {"alpaca": "TEM"},
-    "UPST": {"alpaca": "UPST"},
-    "VERI": {"alpaca": "VERI"},
-    "VRT": {"alpaca": "VRT"},
-    "QQQ": {"alpaca": "QQQ"},
-    "LMT": {"alpaca": "LMT"},
-}
-CRYPTO_SYMBOLS = {"BTC-USD", "ETH-USD"}
-STOCK_SYMBOLS = {
-    "MSTR", "PLTR", "NVDA", "AMD", "BABA", "GOOGL", "AMZN", "AAPL",
-    "AVGO", "AI", "GRRR", "IONQ", "MRVL", "META", "MU", "PONY",
-    "RXRX", "SOUN", "SMCI", "TSM", "TTWO", "TEM", "UPST", "VERI",
-    "VRT", "QQQ", "LMT",
-}
-METALS_SYMBOLS = {"XAU-USD", "XAG-USD"}
+from portfolio.tickers import SYMBOLS, CRYPTO_SYMBOLS, STOCK_SYMBOLS, METALS_SYMBOLS
 
-# Market hours (UTC) — EU open to US close
+# --- Config caching (delegates to shared api_utils for mtime-based caching) ---
+from portfolio.api_utils import load_config as _load_config
+
+
+# Market hours (UTC) — EU open to US close, DST-aware for NYSE
+# EU open is always ~07:00 UTC (CET/CEST difference is small for our purposes).
+# NYSE close shifts: EST (Nov-Mar) = 21:00 UTC, EDT (Mar-Nov) = 20:00 UTC.
 MARKET_OPEN_HOUR = 7  # ~Frankfurt/London open
-MARKET_CLOSE_HOUR = 21  # ~NYSE close
 
 # Loop intervals by market state
 INTERVAL_MARKET_OPEN = 60  # 1 min — full speed
 INTERVAL_MARKET_CLOSED = 300  # 5 min — crypto only weekday nights
 INTERVAL_WEEKEND = 600  # 10 min — crypto only weekends
+
+
+def _is_us_dst(dt):
+    """Check if a UTC datetime falls within US Eastern Daylight Time (EDT).
+
+    US DST rule (since 2007):
+      Starts: second Sunday of March at 02:00 local (07:00 UTC)
+      Ends:   first Sunday of November at 02:00 local (06:00 UTC)
+
+    Returns True during EDT (Mar-Nov), False during EST (Nov-Mar).
+    """
+    year = dt.year
+
+    # Second Sunday of March
+    mar1_wd = date(year, 3, 1).weekday()  # 0=Mon..6=Sun
+    first_sun_mar = 1 + (6 - mar1_wd) % 7
+    second_sun_mar = first_sun_mar + 7
+    dst_start = datetime(year, 3, second_sun_mar, 7, 0, tzinfo=timezone.utc)  # 02:00 ET = 07:00 UTC
+
+    # First Sunday of November
+    nov1_wd = date(year, 11, 1).weekday()
+    first_sun_nov = 1 + (6 - nov1_wd) % 7
+    dst_end = datetime(year, 11, first_sun_nov, 6, 0, tzinfo=timezone.utc)  # 02:00 ET = 06:00 UTC (still EDT)
+
+    return dst_start <= dt < dst_end
+
+
+def _market_close_hour_utc(dt):
+    """Return the NYSE close hour in UTC, adjusted for DST.
+
+    NYSE closes at 16:00 ET.
+    EDT (Mar-Nov): 16:00 ET = 20:00 UTC
+    EST (Nov-Mar): 16:00 ET = 21:00 UTC
+    """
+    if _is_us_dst(dt):
+        return 20
+    return 21
 
 
 def get_market_state():
@@ -84,7 +83,8 @@ def get_market_state():
     hour = now.hour
     if weekday >= 5:
         return "weekend", CRYPTO_SYMBOLS | METALS_SYMBOLS, INTERVAL_WEEKEND
-    if MARKET_OPEN_HOUR <= hour < MARKET_CLOSE_HOUR:
+    close_hour = _market_close_hour_utc(now)
+    if MARKET_OPEN_HOUR <= hour < close_hour:
         return "open", set(SYMBOLS.keys()), INTERVAL_MARKET_OPEN
     return "closed", CRYPTO_SYMBOLS | METALS_SYMBOLS, INTERVAL_MARKET_CLOSED
 
@@ -230,8 +230,10 @@ ALPACA_INTERVAL_MAP = {
 }
 
 
+# NOTE: Shared Alpaca header logic is available in portfolio.api_utils.get_alpaca_headers().
+# This local copy is kept to avoid a large refactor of main.py config loading path.
 def _get_alpaca_headers():
-    cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    cfg = _load_config()
     acfg = cfg.get("alpaca", {})
     return {
         "APCA-API-KEY-ID": acfg.get("key", ""),
@@ -279,11 +281,16 @@ def alpaca_klines(ticker, interval="1d", limit=100):
 
 
 _fx_cache = {"rate": None, "time": 0}
+_FX_STALE_THRESHOLD = 7200  # 2 hours — warn if FX rate hasn't been refreshed
 
 
 def fetch_usd_sek():
     now = time.time()
     if _fx_cache["rate"] and now - _fx_cache["time"] < 3600:
+        # Check staleness even when returning cached value
+        age_secs = now - _fx_cache["time"]
+        if age_secs > _FX_STALE_THRESHOLD:
+            print(f"  WARNING: FX rate is stale ({age_secs / 3600:.1f}h old)")
         return _fx_cache["rate"]
     try:
         r = requests.get(
@@ -296,9 +303,37 @@ def fetch_usd_sek():
         _fx_cache["rate"] = rate
         _fx_cache["time"] = now
         return rate
+    except Exception as e:
+        print(f"  WARNING: FX rate fetch failed: {e}")
+    if _fx_cache["rate"]:
+        age_secs = now - _fx_cache["time"]
+        if age_secs > _FX_STALE_THRESHOLD:
+            print(f"  WARNING: Using stale FX rate ({age_secs / 3600:.1f}h old)")
+            _fx_alert_telegram(age_secs)
+        return _fx_cache["rate"]
+    # Last resort: hardcoded fallback
+    print("  WARNING: Using hardcoded FX fallback rate 10.50 SEK — no cached or live rate available")
+    _fx_alert_telegram(None)
+    return 10.50
+
+
+def _fx_alert_telegram(age_secs):
+    """Send a one-shot Telegram alert about FX rate issues. Fires at most once per 4h."""
+    global _fx_cache
+    last_alert = _fx_cache.get("_last_fx_alert", 0)
+    now = time.time()
+    if now - last_alert < 14400:  # 4h cooldown between alerts
+        return
+    try:
+        config = _load_config()
+        if age_secs is not None:
+            msg = f"_FX WARNING: USD/SEK rate is {age_secs / 3600:.1f}h stale. API may be down._"
+        else:
+            msg = "_FX WARNING: Using hardcoded fallback rate 10.50 SEK. No live or cached rate available._"
+        send_telegram(msg, config)
+        _fx_cache["_last_fx_alert"] = now
     except Exception:
-        pass
-    return _fx_cache["rate"] or 10.50
+        pass  # non-critical
 
 
 # --- Indicators ---
@@ -378,7 +413,24 @@ def compute_indicators(df):
     }
 
 
+# Cycle counter — incremented at the start of each run() to invalidate per-cycle caches
+_run_cycle_id = 0
+
+_regime_cache = {}
+_regime_cache_cycle = 0
+
+
 def detect_regime(indicators, is_crypto=True):
+    global _regime_cache, _regime_cache_cycle
+    # Invalidate cache on new cycle
+    if _run_cycle_id != _regime_cache_cycle:
+        _regime_cache = {}
+        _regime_cache_cycle = _run_cycle_id
+    # Cache key: use id of the indicators dict + is_crypto flag
+    cache_key = (id(indicators), is_crypto)
+    if cache_key in _regime_cache:
+        return _regime_cache[cache_key]
+
     atr_pct = indicators.get("atr_pct", 0)
     ema9 = indicators.get("ema9", 0)
     ema21 = indicators.get("ema21", 0)
@@ -386,16 +438,19 @@ def detect_regime(indicators, is_crypto=True):
 
     high_vol_threshold = 4.0 if is_crypto else 3.0
     if atr_pct > high_vol_threshold:
-        return "high-vol"
-
-    ema_gap_pct = abs(ema9 - ema21) / ema21 * 100 if ema21 != 0 else 0
-    if ema_gap_pct > 1.0:
+        result = "high-vol"
+    elif ema21 != 0 and abs(ema9 - ema21) / ema21 * 100 > 1.0:
         if ema9 > ema21 and rsi > 45:
-            return "trending-up"
-        if ema9 < ema21 and rsi < 55:
-            return "trending-down"
+            result = "trending-up"
+        elif ema9 < ema21 and rsi < 55:
+            result = "trending-down"
+        else:
+            result = "ranging"
+    else:
+        result = "ranging"
 
-    return "ranging"
+    _regime_cache[cache_key] = result
+    return result
 
 
 # --- Technical-only signal (for longer timeframes) ---
@@ -540,18 +595,31 @@ REGIME_WEIGHTS = {
 }
 
 
-def _weighted_consensus(votes, accuracy_data, regime):
+def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None):
+    """Compute weighted consensus using accuracy, regime, and activation frequency.
+
+    Weight per signal = accuracy_weight * regime_mult * normalized_weight
+    where normalized_weight = rarity_bonus * bias_penalty (from activation rates).
+    Rare, balanced signals get more weight; noisy/biased signals get less.
+    """
     buy_weight = 0.0
     sell_weight = 0.0
     regime_mults = REGIME_WEIGHTS.get(regime, {})
+    activation_rates = activation_rates or {}
     for signal_name, vote in votes.items():
         if vote == "HOLD":
             continue
+        # Accuracy weight
         stats = accuracy_data.get(signal_name, {})
         acc = stats.get("accuracy", 0.5)
         samples = stats.get("total", 0)
         weight = acc if samples >= 20 else 0.5
+        # Regime adjustment
         weight *= regime_mults.get(signal_name, 1.0)
+        # Activation frequency normalization (rarity * bias correction)
+        act_data = activation_rates.get(signal_name, {})
+        norm_weight = act_data.get("normalized_weight", 1.0)
+        weight *= norm_weight
         if vote == "BUY":
             buy_weight += weight
         elif vote == "SELL":
@@ -826,7 +894,12 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 if cust:
                     extra_info["custom_lora_action"] = cust["action"]
                     extra_info["custom_lora_reasoning"] = cust.get("reasoning", "")
-                    votes["custom_lora"] = cust["action"]
+                    # DISABLED: custom_lora has 20.9% accuracy with 97% SELL bias.
+                    # Worse than random — actively hurts consensus. Keep running
+                    # the model for shadow/A-B testing but force vote to HOLD so
+                    # it doesn't influence the consensus.
+                    # votes["custom_lora"] = cust["action"]  # disabled
+                    votes["custom_lora"] = "HOLD"
         except ImportError:
             pass
 
@@ -908,10 +981,12 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
 
     # Total applicable signals: crypto has extra (CryptoTrader-LM, Custom LoRA, ML, Funding Rate)
     # Enhanced signals add 14 more for all asset classes
+    # NOTE: custom_lora is disabled (forced HOLD) due to 20.9% accuracy / 97% SELL bias,
+    # so subtract 1 from crypto's applicable count (was 25, now 24).
     is_crypto = ticker in CRYPTO_SYMBOLS
     is_metal = ticker in METALS_SYMBOLS
     if is_crypto:
-        total_applicable = 25  # 11 original + 14 enhanced
+        total_applicable = 24  # 11 original - 1 disabled (custom_lora) + 14 enhanced
     elif is_metal:
         total_applicable = 21  # 7 original + 14 enhanced
     else:
@@ -940,11 +1015,15 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             action = "HOLD"
             conf = max(buy_conf, sell_conf)
 
-    # Weighted consensus using accuracy data and regime
+    # Weighted consensus using accuracy data, regime, and activation frequency
     regime = detect_regime(ind, is_crypto=ticker in CRYPTO_SYMBOLS)
     accuracy_data = {}
+    activation_rates = {}
     try:
-        from portfolio.accuracy_stats import load_cached_accuracy, signal_accuracy
+        from portfolio.accuracy_stats import (
+            load_cached_accuracy, signal_accuracy, write_accuracy_cache,
+            load_cached_activation_rates,
+        )
 
         cached = load_cached_accuracy("1d")
         if cached:
@@ -952,11 +1031,13 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
         else:
             accuracy_data = signal_accuracy("1d")
             if accuracy_data:
-                from portfolio.accuracy_stats import write_accuracy_cache
                 write_accuracy_cache("1d", accuracy_data)
+        activation_rates = load_cached_activation_rates()
     except Exception:
         pass
-    weighted_action, weighted_conf = _weighted_consensus(votes, accuracy_data, regime)
+    weighted_action, weighted_conf = _weighted_consensus(
+        votes, accuracy_data, regime, activation_rates
+    )
 
     # Confluence score
     confluence = _confluence_score(votes, extra_info)
@@ -1161,6 +1242,23 @@ def write_agent_summary(
     except Exception:
         pass
 
+    # Signal activation rates (normalized weights for Layer 2 reference)
+    try:
+        from portfolio.accuracy_stats import load_cached_activation_rates
+        act_rates = load_cached_activation_rates()
+        if act_rates:
+            summary["signal_weights"] = {
+                name: {
+                    "activation_rate": d["activation_rate"],
+                    "normalized_weight": d["normalized_weight"],
+                    "bias": d["bias"],
+                }
+                for name, d in act_rates.items()
+                if d.get("samples", 0) > 0
+            }
+    except Exception:
+        pass
+
     cross_leads = _cross_asset_signals(signals)
     if cross_leads:
         summary["cross_asset_leads"] = cross_leads
@@ -1173,6 +1271,21 @@ def write_agent_summary(
             summary["avanza_instruments"] = avanza_prices
     except Exception:
         pass
+
+    # Preserve stale data for instruments not in current cycle (e.g. stocks off-hours)
+    # so Layer 2 always sees all instruments
+    if AGENT_SUMMARY_FILE.exists():
+        try:
+            prev = json.loads(AGENT_SUMMARY_FILE.read_text(encoding="utf-8"))
+            for section in ("signals", "timeframes", "fear_greed"):
+                prev_section = prev.get(section, {})
+                for ticker, data in prev_section.items():
+                    if ticker not in summary[section]:
+                        if section == "signals" and isinstance(data, dict):
+                            data["stale"] = True
+                        summary[section][ticker] = data
+        except Exception:
+            pass
 
     _atomic_write_json(AGENT_SUMMARY_FILE, summary)
     return summary
@@ -1241,14 +1354,30 @@ def invoke_agent(reasons):
         return False
     try:
         _agent_log = open(DATA_DIR / "agent.log", "a", encoding="utf-8")
+        # Strip Claude Code session markers to avoid "nested session" error
+        # when the parent process tree has Claude Code running
+        agent_env = os.environ.copy()
+        agent_env.pop("CLAUDECODE", None)
+        agent_env.pop("CLAUDE_CODE_ENTRYPOINT", None)
         _agent_proc = subprocess.Popen(
             ["cmd", "/c", str(agent_bat)],
             cwd=str(BASE_DIR),
             stdout=_agent_log,
             stderr=subprocess.STDOUT,
+            env=agent_env,
         )
         _agent_start = time.time()
         print(f"  Agent invoked pid={_agent_proc.pid} ({', '.join(reasons)})")
+        # Send brief Telegram notification that Layer 2 was triggered
+        try:
+            config = _load_config()
+            reason_str = escape_markdown_v1(", ".join(reasons[:3]))
+            if len(reasons) > 3:
+                reason_str += f" (+{len(reasons) - 3} more)"
+            notify_msg = f"_Layer 2 invoked: {reason_str}_"
+            send_telegram(notify_msg, config)
+        except Exception:
+            pass  # non-critical
         return True
     except Exception as e:
         print(f"  ERROR invoking agent: {e}")
@@ -1265,6 +1394,23 @@ def portfolio_value(state, prices_usd, fx_rate):
 
 # --- Telegram ---
 
+import re
+
+# Characters that can break Telegram Markdown v1 parsing when used in dynamic content.
+# Markdown v1 interprets _ * ` [ as formatting. We escape them in dynamic strings
+# (ticker names, prices, reasons) but NOT in our own formatting (bold/italic wrappers).
+_MD_V1_SPECIAL = re.compile(r'([_*`\[\]])')
+
+
+def escape_markdown_v1(text):
+    """Escape special Markdown v1 characters in dynamic content to prevent parse failures.
+
+    Use this on user-facing dynamic strings (ticker names, error messages, reason text)
+    that are inserted into Markdown-formatted Telegram messages. Do NOT apply to the
+    entire message — it would break intentional formatting like *bold* and _italic_.
+    """
+    return _MD_V1_SPECIAL.sub(r'\\\1', str(text))
+
 
 def send_telegram(msg, config):
     if os.environ.get("NO_TELEGRAM"):
@@ -1277,7 +1423,25 @@ def send_telegram(msg, config):
         json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
         timeout=30,
     )
-    return r.ok
+    if r.ok:
+        return True
+    # Markdown parse failure (HTTP 400) — retry without parse_mode so the message
+    # still arrives (unformatted) rather than being silently lost.
+    if r.status_code == 400:
+        err_desc = ""
+        try:
+            err_desc = r.json().get("description", "")
+        except Exception:
+            pass
+        if "parse" in err_desc.lower() or "markdown" in err_desc.lower() or "entity" in err_desc.lower():
+            print(f"  WARNING: Telegram Markdown parse failed ({err_desc}), resending without formatting")
+            r2 = requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": msg},
+                timeout=30,
+            )
+            return r2.ok
+    return False
 
 
 BOLD_STATE_FILE = DATA_DIR / "portfolio_state_bold.json"
@@ -1288,7 +1452,7 @@ def _maybe_send_alert(config, signals, prices_usd, fx_rate, state, reasons, tf_d
     significant = [r for r in reasons if not r.startswith(_COOLDOWN_PREFIXES)]
     if not significant:
         return
-    headline = significant[0]
+    headline = escape_markdown_v1(significant[0])
     lines = [f"*ALERT: {headline}*", ""]
     # Actionable-only: show BUY/SELL tickers, compress HOLDs
     hold_count = 0
@@ -1317,7 +1481,8 @@ def _maybe_send_alert(config, signals, prices_usd, fx_rate, state, reasons, tf_d
     for ticker, sig in signals.items():
         extra = sig.get("extra", {})
         if "fear_greed" in extra:
-            fg_val = f"{extra['fear_greed']} ({extra.get('fear_greed_class', '')})"
+            fg_class = escape_markdown_v1(extra.get("fear_greed_class", ""))
+            fg_val = f"{extra['fear_greed']} ({fg_class})"
             break
     patient_total = portfolio_value(state, prices_usd, fx_rate)
     patient_pnl = (
@@ -1441,8 +1606,9 @@ def _build_digest_message():
         lines.append(f"`{reason:<14} {count}`")
 
     lines.append("")
+    p_holdings_str = escape_markdown_v1(', '.join(p_holdings)) if p_holdings else 'cash'
     lines.append(
-        f"_Patient: {p_total:,.0f} SEK ({p_pnl:+.1f}%) · {', '.join(p_holdings) or 'cash'}_"
+        f"_Patient: {p_total:,.0f} SEK ({p_pnl:+.1f}%) · {p_holdings_str}_"
     )
 
     if BOLD_STATE_FILE.exists():
@@ -1454,8 +1620,9 @@ def _build_digest_message():
         b_holdings = [
             t for t, h in bold.get("holdings", {}).items() if h.get("shares", 0) > 0
         ]
+        b_holdings_str = escape_markdown_v1(', '.join(b_holdings)) if b_holdings else 'cash'
         lines.append(
-            f"_Bold: {b_total:,.0f} SEK ({b_pnl:+.1f}%) · {', '.join(b_holdings) or 'cash'}_"
+            f"_Bold: {b_total:,.0f} SEK ({b_pnl:+.1f}%) · {b_holdings_str}_"
         )
 
     return "\n".join(lines)
@@ -1478,7 +1645,10 @@ def _maybe_send_digest(config):
 
 
 def run(force_report=False, active_symbols=None):
-    config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    global _run_cycle_id
+    _run_cycle_id += 1
+
+    config = _load_config()
     state = load_state()
     fx_rate = fetch_usd_sek()
 
@@ -1650,8 +1820,27 @@ def run(force_report=False, active_symbols=None):
         print(f"  WARNING: ISKBETS check failed: {e}")
 
 
+def _crash_alert(error_msg):
+    """Send Telegram alert on loop crash."""
+    try:
+        import json, requests
+        config_path = Path(__file__).resolve().parent.parent / "config.json"
+        config = json.load(open(config_path))
+        token = config.get("telegram", {}).get("token", "")
+        chat_id = config.get("telegram", {}).get("chat_id", "")
+        if token and chat_id:
+            text = f"LOOP CRASH\n\n{error_msg[:3000]}"
+            requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": text},
+                timeout=10
+            )
+    except Exception:
+        pass  # Can't alert about alert failure
+
+
 def loop(interval=None):
-    config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    config = _load_config()
     print("Starting loop with market-aware scheduling. Ctrl+C to stop.")
 
     # Start Telegram poller for ISKBETS commands (lightweight daemon, no-ops when idle)
@@ -1671,6 +1860,8 @@ def loop(interval=None):
     except KeyboardInterrupt:
         raise
     except Exception as e:
+        import traceback
+        _crash_alert(traceback.format_exc())
         print(f"  ERROR in initial run: {e}")
         time.sleep(10)
     last_state = None
@@ -1690,8 +1881,15 @@ def loop(interval=None):
         except KeyboardInterrupt:
             raise
         except Exception as e:
+            import traceback
+            _crash_alert(traceback.format_exc())
             print(f"  ERROR in run: {e}")
             time.sleep(10)
+        # Touch heartbeat file after each cycle
+        try:
+            (DATA_DIR / "heartbeat.txt").write_text(datetime.now(timezone.utc).isoformat())
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

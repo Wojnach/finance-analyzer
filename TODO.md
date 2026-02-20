@@ -1,6 +1,6 @@
 # Finance Analyzer — TODO
 
-> **Updated 2026-02-10.**
+> **Updated 2026-02-20.**
 
 ## Phase 1: Foundation + Data Validation — COMPLETE
 
@@ -88,17 +88,26 @@ The core entry signals (RSI + MACD + EMA + volume + candlestick patterns + 1h tr
 
 ---
 
-## Phase 4: Claude as Trading Copilot — READY
+## Phase 4: Claude as Trading Copilot — COMPLETE
 
-> MCP servers installed, no API costs. Can start using now.
+> Claude Code is operational as Layer 2 decision-maker. Two-layer architecture live since 2026-02-11.
 
 - [x] Freqtrade-MCP installed (`~/mcp-servers/freqtrade-mcp/`)
 - [x] CCXT MCP installed (`~/mcp-servers/mcp-server-ccxt/`)
 - [x] CoinGecko MCP configured (remote HTTP, no API key)
 - [x] `.mcp.json` in project root (gitignored), `.mcp.example.json` as template
-- [ ] LunarCrush MCP (needs API key from lunarcrush.com)
-- [ ] Use copilot for: regime analysis, strategy review, anomaly detection
-- [ ] Optional: automated scheduled analysis (cron + Claude Code)
+- [x] Two-layer architecture: Python fast loop (Layer 1) + Claude Code agent (Layer 2)
+- [x] 25 signal models (11 core + 14 enhanced composite, ~85 sub-indicators)
+- [x] Dual portfolio strategy: Patient (conservative) + Bold (aggressive breakout)
+- [x] Trigger-based invocation (consensus, sustained flips, price moves, F&G, sentiment, cooldowns)
+- [x] Telegram notifications with signal grid, timeframe heatmap, reasoning
+- [x] Signal accuracy tracking with outcome backfilling (1d/3d/5d/10d horizons)
+- [x] Weighted consensus (accuracy + regime + activation frequency)
+- [x] 31 Tier 1 tickers (2 crypto, 2 metals, 27 US equities)
+- [x] Tier 2 (Avanza Nordic stocks) + Tier 3 (warrants with underlying signals)
+- [x] Flask dashboard (port 5055) with signal heatmap, equity curve, accuracy views
+- [x] Layer 2 journal system (theses, reflections, watchlist, price tracking)
+- [ ] LunarCrush MCP (needs API key from lunarcrush.com) — deprioritized
 
 Full plan: `docs/plans/2026-02-09-llm-trading-research.md`
 
@@ -110,6 +119,40 @@ Full plan: `docs/plans/2026-02-09-llm-trading-research.md`
 - [ ] Pair expansion (SOL, XRP — one at a time)
 - [ ] Classic chart patterns (if needed)
 - [ ] Daily automated reports
+
+---
+
+## Phase 6: System Hardening — IN PROGRESS
+
+> Improve reliability, signal quality, and operational resilience.
+
+### Signal Quality
+
+- [ ] **Fix custom_lora bias:** 97% SELL rate, 20.9% accuracy — either retrain on balanced data or disable entirely
+- [ ] **Fix calendar signal bias:** 100% BUY activation rate — calendar_seasonal.py votes BUY almost every invocation, weight already penalized to 0.07
+- [ ] **Fix macro_regime dead signal:** 0% activation rate — most sub-signals vote HOLD permanently (FOMC proximity always HOLD, DXY/yields require external data that may be stale)
+- [ ] **Improve consensus accuracy:** Currently 43.7% — worse than a coin flip. Weighted consensus may help, but signal pruning may be needed
+- [ ] **Extend ML/Ministral to stocks:** Currently crypto-only (signals 7, 8, 9, 11). Stocks have only 21 of 25 signals
+
+### Infrastructure
+
+- [x] Add log rotation utility (prevent unbounded growth of JSONL files)
+- [ ] Add HTTP retry with exponential backoff (Binance/Alpaca API calls fail silently on timeouts)
+- [ ] Migrate signal_log.jsonl to SQLite (JSONL files grow unbounded, slow to query for accuracy)
+- [ ] Add health check endpoint to dashboard (Layer 1 heartbeat, last trigger time, error counts)
+
+### Dashboard Improvements
+
+- [ ] Real-time WebSocket updates (currently requires manual refresh or polling)
+- [ ] Signal accuracy charts (per-signal hit rate over time)
+- [ ] Trade annotation on equity curve (mark BUY/SELL points)
+- [ ] Mobile-responsive layout improvements
+
+### Operational
+
+- [ ] Telegram alert on Layer 1 crash (currently silent — only discoverable via loop_out.txt)
+- [ ] Automated Layer 2 health monitoring (detect "silent agent" — no invocation for >2 hours during market hours)
+- [ ] Structured error logging (replace print() with proper logging framework)
 
 ---
 

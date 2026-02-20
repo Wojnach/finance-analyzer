@@ -17,6 +17,8 @@ import numpy as np
 import pandas as pd
 import requests
 
+from portfolio.api_utils import get_alpaca_headers
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 CONFIG_FILE = DATA_DIR / "iskbets_config.json"
 STATE_FILE = DATA_DIR / "iskbets_state.json"
@@ -24,42 +26,12 @@ STATE_FILE = DATA_DIR / "iskbets_state.json"
 BINANCE_BASE = "https://api.binance.com/api/v3"
 ALPACA_BASE = "https://data.alpaca.markets/v2"
 
-# Ticker → source mapping (mirrors main.py SYMBOLS)
-TICKER_SOURCES = {
-    "BTC-USD": {"binance": "BTCUSDT"},
-    "ETH-USD": {"binance": "ETHUSDT"},
-    "XAU-USD": {"binance_fapi": "XAUUSDT"},
-    "XAG-USD": {"binance_fapi": "XAGUSDT"},
-    "MSTR": {"alpaca": "MSTR"},
-    "PLTR": {"alpaca": "PLTR"},
-    "NVDA": {"alpaca": "NVDA"},
-    "AMD": {"alpaca": "AMD"},
-    "BABA": {"alpaca": "BABA"},
-    "GOOGL": {"alpaca": "GOOGL"},
-    "AMZN": {"alpaca": "AMZN"},
-    "AAPL": {"alpaca": "AAPL"},
-    "AVGO": {"alpaca": "AVGO"},
-    "AI": {"alpaca": "AI"},
-    "GRRR": {"alpaca": "GRRR"},
-    "IONQ": {"alpaca": "IONQ"},
-    "MRVL": {"alpaca": "MRVL"},
-    "META": {"alpaca": "META"},
-    "MU": {"alpaca": "MU"},
-    "PONY": {"alpaca": "PONY"},
-    "RXRX": {"alpaca": "RXRX"},
-    "SOUN": {"alpaca": "SOUN"},
-    "SMCI": {"alpaca": "SMCI"},
-    "TSM": {"alpaca": "TSM"},
-    "TTWO": {"alpaca": "TTWO"},
-    "TEM": {"alpaca": "TEM"},
-    "UPST": {"alpaca": "UPST"},
-    "VERI": {"alpaca": "VERI"},
-    "VRT": {"alpaca": "VRT"},
-    "QQQ": {"alpaca": "QQQ"},
-    "LMT": {"alpaca": "LMT"},
-}
-CRYPTO_TICKERS = {"BTC-USD", "ETH-USD"}
-METALS_TICKERS = {"XAU-USD", "XAG-USD"}
+# Ticker → source mapping (imported from shared tickers module)
+from portfolio.tickers import (
+    SYMBOLS as TICKER_SOURCES,
+    CRYPTO_SYMBOLS as CRYPTO_TICKERS,
+    METALS_SYMBOLS as METALS_TICKERS,
+)
 
 
 # ── State I/O ────────────────────────────────────────────────────────────
@@ -169,11 +141,7 @@ def _log_telegram(msg):
 
 
 def _get_alpaca_headers(config):
-    acfg = config.get("alpaca", {})
-    return {
-        "APCA-API-KEY-ID": acfg.get("key", ""),
-        "APCA-API-SECRET-KEY": acfg.get("secret", ""),
-    }
+    return get_alpaca_headers()
 
 
 def compute_atr_15m(ticker, config):
@@ -1041,11 +1009,7 @@ def _get_current_price(ticker, config):
             return float(r.json()["price"])
         else:
             # Alpaca snapshot
-            acfg = config.get("alpaca", {})
-            headers = {
-                "APCA-API-KEY-ID": acfg.get("key", ""),
-                "APCA-API-SECRET-KEY": acfg.get("secret", ""),
-            }
+            headers = get_alpaca_headers()
             r = requests.get(
                 f"{ALPACA_BASE}/stocks/{source['alpaca']}/snapshot",
                 headers=headers,

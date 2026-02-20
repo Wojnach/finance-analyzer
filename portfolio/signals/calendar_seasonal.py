@@ -25,30 +25,12 @@ import numpy as np
 import pandas as pd
 
 # ---------------------------------------------------------------------------
-# FOMC meeting dates for 2026 (two-day meetings: first day is start)
+# FOMC meeting dates — imported from shared constant
 # ---------------------------------------------------------------------------
-_FOMC_DATES_2026 = [
-    date(2026, 1, 28), date(2026, 1, 29),
-    date(2026, 3, 17), date(2026, 3, 18),
-    date(2026, 4, 28), date(2026, 4, 29),
-    date(2026, 6, 16), date(2026, 6, 17),
-    date(2026, 7, 28), date(2026, 7, 29),
-    date(2026, 9, 15), date(2026, 9, 16),
-    date(2026, 10, 27), date(2026, 10, 28),
-    date(2026, 12, 8), date(2026, 12, 9),
-]
-
-# Unique announcement dates (second day of each two-day meeting)
-_FOMC_ANNOUNCEMENT_DATES = [
-    date(2026, 1, 29),
-    date(2026, 3, 18),
-    date(2026, 4, 29),
-    date(2026, 6, 17),
-    date(2026, 7, 29),
-    date(2026, 9, 16),
-    date(2026, 10, 28),
-    date(2026, 12, 9),
-]
+from portfolio.fomc_dates import (
+    FOMC_DATES_2026 as _FOMC_DATES_2026,
+    FOMC_ANNOUNCEMENT_DATES as _FOMC_ANNOUNCEMENT_DATES,
+)
 
 # Maximum confidence for any calendar signal
 _MAX_CONFIDENCE = 0.6
@@ -152,7 +134,9 @@ def _sell_in_may(last_date: date) -> tuple[str, dict]:
     """Sell in May and go away / Halloween indicator.
 
     May through October = historically weaker (SELL bias).
-    November through April = historically stronger (BUY bias).
+    Only historically *strong* months vote BUY: Nov, Dec, Jan, Apr.
+    Transitional months (Feb, Mar) = HOLD — they are not consistently
+    strong enough to justify a standing BUY vote.
 
     Parameters
     ----------
@@ -166,11 +150,14 @@ def _sell_in_may(last_date: date) -> tuple[str, dict]:
     """
     month = last_date.month
     is_weak_period = 5 <= month <= 10
+    is_strong_month = month in (1, 4, 11, 12)  # Jan, Apr, Nov, Dec
     indicators = {"month": month, "is_weak_period": is_weak_period}
 
     if is_weak_period:
         return "SELL", indicators
-    return "BUY", indicators
+    if is_strong_month:
+        return "BUY", indicators
+    return "HOLD", indicators
 
 
 def _january_effect(last_date: date) -> tuple[str, dict]:
@@ -199,9 +186,10 @@ def _january_effect(last_date: date) -> tuple[str, dict]:
 def _pre_holiday_effect(last_date: date) -> tuple[str, dict]:
     """Trading day before a market holiday tends to be bullish.
 
-    Approximate check: if the last bar is a Friday (next trading day is
-    Monday, 3-day gap) or if the next calendar day is Saturday and there
-    is an extended weekend, signal BUY.  This is a rough heuristic.
+    Checks for days preceding US market holidays (approximate).
+    Regular Fridays are NOT counted here — that is already handled by
+    ``_day_of_week_effect``.  Only true pre-holiday sessions (the
+    trading day before a market closure beyond the normal weekend) vote.
 
     Parameters
     ----------
@@ -213,10 +201,23 @@ def _pre_holiday_effect(last_date: date) -> tuple[str, dict]:
     tuple[str, dict]
         Vote and indicators.
     """
-    dow = last_date.weekday()
-    # Friday = 3-day weekend (approximate pre-holiday)
-    is_pre_holiday = dow == 4
-    indicators = {"is_pre_holiday": is_pre_holiday, "day_of_week": dow}
+    # Major US market holidays (month, day) — approximate, does not handle
+    # observed-date shifts (e.g., July 4 on Saturday → Friday off).
+    _US_HOLIDAYS = [
+        (1, 1),    # New Year's Day
+        (1, 20),   # MLK Day (approx — 3rd Monday)
+        (2, 17),   # Presidents' Day (approx — 3rd Monday)
+        (5, 26),   # Memorial Day (approx — last Monday)
+        (6, 19),   # Juneteenth
+        (7, 4),    # Independence Day
+        (9, 1),    # Labor Day (approx — 1st Monday)
+        (11, 27),  # Thanksgiving (approx — 4th Thursday)
+        (12, 25),  # Christmas
+    ]
+
+    next_day = last_date + timedelta(days=1)
+    is_pre_holiday = (next_day.month, next_day.day) in _US_HOLIDAYS
+    indicators = {"is_pre_holiday": is_pre_holiday, "day_of_week": last_date.weekday()}
 
     if is_pre_holiday:
         return "BUY", indicators

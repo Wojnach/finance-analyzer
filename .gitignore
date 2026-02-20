@@ -81,10 +81,17 @@ data/backtest_klines_*.csv
 data/backtest_funding_*.csv
 data/_test_*
 data/_tmp_*
+data/backups/
 
 # Scratch/debug scripts
 _*.py
 _*.ps1
+send_telegram.py
+/test_digest.py
+data/tmp_*.py
+data/activation_analysis.py
+data/activation_cache.json
+data/bigbet_gate_log.jsonl
 
 # Test artifacts
 .pytest_cache/

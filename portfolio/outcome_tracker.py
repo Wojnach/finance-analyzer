@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -6,52 +7,39 @@ from pathlib import Path
 import requests
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+# --- Rate limiter for yfinance calls (no official limit, be polite — 30/min) ---
+class _RateLimiter:
+    """Token-bucket rate limiter. Sleeps when calls exceed rate."""
+    def __init__(self, max_per_minute, name=""):
+        self.interval = 60.0 / max_per_minute
+        self.last_call = 0.0
+        self.name = name
+        self._lock = threading.Lock()
+
+    def wait(self):
+        with self._lock:
+            now = time.time()
+            elapsed = now - self.last_call
+            if elapsed < self.interval:
+                wait_time = self.interval - elapsed
+                time.sleep(wait_time)
+            self.last_call = time.time()
+
+
+_yfinance_limiter = _RateLimiter(30, "yfinance")
 DATA_DIR = BASE_DIR / "data"
 SIGNAL_LOG = DATA_DIR / "signal_log.jsonl"
 
 HORIZONS = {"1d": 86400, "3d": 259200, "5d": 432000, "10d": 864000}
-BINANCE_SPOT_MAP = {"BTC-USD": "BTCUSDT", "ETH-USD": "ETHUSDT"}
-BINANCE_FAPI_MAP = {"XAU-USD": "XAUUSDT", "XAG-USD": "XAGUSDT"}
-# Combined for backward compat (used by _derive_signal_vote)
-BINANCE_MAP = {**BINANCE_SPOT_MAP, **BINANCE_FAPI_MAP}
-YF_MAP = {
-    "MSTR": "MSTR", "PLTR": "PLTR", "NVDA": "NVDA",
-    "AMD": "AMD", "BABA": "BABA", "GOOGL": "GOOGL", "AMZN": "AMZN",
-    "AAPL": "AAPL", "AVGO": "AVGO", "AI": "AI", "GRRR": "GRRR",
-    "IONQ": "IONQ", "MRVL": "MRVL", "META": "META", "MU": "MU",
-    "PONY": "PONY", "RXRX": "RXRX", "SOUN": "SOUN", "SMCI": "SMCI",
-    "TSM": "TSM", "TTWO": "TTWO", "TEM": "TEM", "UPST": "UPST",
-    "VERI": "VERI", "VRT": "VRT", "QQQ": "QQQ", "LMT": "LMT",
-}
-
-SIGNAL_NAMES = [
-    "rsi",
-    "macd",
-    "ema",
-    "bb",
-    "fear_greed",
-    "sentiment",
-    "ministral",
-    "ml",
-    "funding",
-    "volume",
-    "custom_lora",
-    # Enhanced composite signals
-    "trend",
-    "momentum",
-    "volume_flow",
-    "volatility_sig",
-    "candlestick",
-    "structure",
-    "fibonacci",
-    "smart_money",
-    "oscillators",
-    "heikin_ashi",
-    "mean_reversion",
-    "calendar",
-    "macro_regime",
-    "momentum_factors",
-]
+from portfolio.tickers import (
+    BINANCE_SPOT_MAP,
+    BINANCE_FAPI_MAP,
+    BINANCE_MAP,
+    YF_MAP,
+    SIGNAL_NAMES,
+)
 
 
 def _derive_signal_vote(name, indicators, extra):
@@ -202,6 +190,7 @@ def _fetch_current_price(ticker):
     if ticker in YF_MAP:
         import yfinance as yf
 
+        _yfinance_limiter.wait()
         t = yf.Ticker(YF_MAP[ticker])
         h = t.history(period="5d")
         if h.empty:
@@ -253,6 +242,7 @@ def _fetch_historical_price(ticker, target_ts):
     if ticker in YF_MAP:
         import yfinance as yf
 
+        _yfinance_limiter.wait()
         target_dt = datetime.fromtimestamp(target_ts, tz=timezone.utc)
         start_date = (target_dt - timedelta(days=5)).strftime("%Y-%m-%d")
         end_date = (target_dt + timedelta(days=1)).strftime("%Y-%m-%d")
