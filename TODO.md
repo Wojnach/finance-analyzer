@@ -128,11 +128,11 @@ Full plan: `docs/plans/2026-02-09-llm-trading-research.md`
 
 ### Signal Quality
 
-- [ ] **Fix custom_lora bias:** 97% SELL rate, 20.9% accuracy — either retrain on balanced data or disable entirely
-- [ ] **Fix calendar signal bias:** 100% BUY activation rate — calendar_seasonal.py votes BUY almost every invocation, weight already penalized to 0.07
-- [ ] **Fix macro_regime dead signal:** 0% activation rate — most sub-signals vote HOLD permanently (FOMC proximity always HOLD, DXY/yields require external data that may be stale)
-- [ ] **Improve consensus accuracy:** Currently 43.7% — worse than a coin flip. Weighted consensus may help, but signal pruning may be needed
-- [ ] **Extend ML/Ministral to stocks:** Currently crypto-only (signals 7, 8, 9, 11). Stocks have only 21 of 25 signals
+- [x] **Fix custom_lora bias:** Fully disabled — model no longer invoked, removed from votes/core. Saves ~60s GPU per crypto check. (Feb 20)
+- [x] **Fix calendar signal bias:** Added quorum (min 2 active votes in winning direction). Re-enabled as voting signal. (Feb 20)
+- [x] **Fix macro_regime dead signal:** Adaptive SMA (50-200), FOMC ≤2d=SELL, DXY ±0.3%, 10Y change direction ±1.5%, golden/death cross 20/50 fallback. Now activates. (Feb 20)
+- [ ] **Improve consensus accuracy:** Currently 43.7% — worse than a coin flip. Three broken signals now fixed; monitor if accuracy improves over next week
+- [ ] **Extend ML/Ministral to stocks:** Currently crypto-only (signals 7, 8, 9). Stocks have only 21 of 24 signals
 
 ### Infrastructure
 
