@@ -56,6 +56,7 @@ data/portfolio_state.json
 data/portfolio_state_bold.json
 data/telegram_messages.jsonl
 data/agent_summary.json
+data/agent_summary_compact.json
 data/trigger_state.json
 data/agent.log
 data/invocations.jsonl

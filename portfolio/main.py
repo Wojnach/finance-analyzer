@@ -21,6 +21,7 @@ sys.path.insert(0, str(BASE_DIR))
 DATA_DIR = BASE_DIR / "data"
 STATE_FILE = DATA_DIR / "portfolio_state.json"
 AGENT_SUMMARY_FILE = DATA_DIR / "agent_summary.json"
+COMPACT_SUMMARY_FILE = DATA_DIR / "agent_summary_compact.json"
 CONFIG_FILE = BASE_DIR / "config.json"
 
 from portfolio.tickers import SYMBOLS, CRYPTO_SYMBOLS, STOCK_SYMBOLS, METALS_SYMBOLS
@@ -1329,7 +1330,53 @@ def write_agent_summary(
             pass
 
     _atomic_write_json(AGENT_SUMMARY_FILE, summary)
+    _write_compact_summary(summary)
     return summary
+
+
+def _write_compact_summary(summary):
+    """Write a stripped version of agent_summary for Layer 2 (<25K tokens).
+
+    Removes enhanced_signals (already in extra._votes) and verbose extra fields,
+    keeping only the essentials Layer 2 needs for decision-making.
+    """
+    import copy
+
+    KEEP_EXTRA = {
+        "fear_greed", "fear_greed_class",
+        "sentiment", "sentiment_conf",
+        "ml_action", "ml_confidence",
+        "funding_rate", "funding_action",
+        "volume_ratio", "volume_action",
+        "ministral_action", "custom_lora_action",
+        "_voters", "_total_applicable", "_buy_count", "_sell_count",
+        "_votes", "_weighted_action", "_weighted_confidence",
+        "_confluence_score",
+    }
+
+    compact = copy.deepcopy(summary)
+
+    for ticker_data in compact.get("signals", {}).values():
+        ticker_data.pop("enhanced_signals", None)
+        if "extra" in ticker_data:
+            ticker_data["extra"] = {
+                k: v for k, v in ticker_data["extra"].items()
+                if k in KEEP_EXTRA
+            }
+
+    # Compact timeframes: keep only horizon + action (indicators duplicate top-level)
+    for ticker, tf_list in compact.get("timeframes", {}).items():
+        compact["timeframes"][ticker] = [
+            {"horizon": tf["horizon"], "action": tf.get("action", "HOLD")}
+            if "error" not in tf else {"horizon": tf["horizon"], "error": tf["error"]}
+            for tf in tf_list
+        ]
+
+    # Remove sections redundant in compact (already in per-ticker extra or baked in)
+    compact.pop("fear_greed", None)      # in extra.fear_greed per ticker
+    compact.pop("signal_weights", None)  # already applied in _weighted_confidence
+
+    _atomic_write_json(COMPACT_SUMMARY_FILE, compact)
 
 
 INVOCATIONS_FILE = DATA_DIR / "invocations.jsonl"
