@@ -543,7 +543,7 @@ def collect_timeframes(source):
 
 
 MIN_VOTERS_CRYPTO = 3  # crypto has 25 signals (11 original + 14 enhanced) — need 3 active voters
-MIN_VOTERS_STOCK = 2  # stocks have 21 signals (7 original + 14 enhanced) — 2 suffices
+MIN_VOTERS_STOCK = 3  # stocks have 21 signals (7 original + 14 enhanced) — need 3 active voters
 
 # Sentiment hysteresis — prevents rapid flip spam from ~50% confidence oscillation
 _prev_sentiment = {}  # in-memory cache; seeded from trigger_state.json on first call
@@ -922,6 +922,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     # macro_regime is special — it takes an extra macro dict parameter
     _macro_regime_module = ("macro_regime", "portfolio.signals.macro_regime", "compute_macro_regime_signal")
 
+    # Calendar signal is excluded from voting (100% BUY bias, no predictive value)
+    # but still computed and stored in extra for informational purposes.
+    _NON_VOTING_ENHANCED = {"calendar"}
+
     if df is not None and isinstance(df, pd.DataFrame) and len(df) >= 26:
         for sig_name, module_path, func_name in _enhanced_modules:
             try:
@@ -930,14 +934,20 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 compute_fn = getattr(mod, func_name)
                 result = compute_fn(df)
                 if result and isinstance(result, dict):
-                    votes[sig_name] = result.get("action", "HOLD")
                     extra_info[f"{sig_name}_action"] = result.get("action", "HOLD")
                     extra_info[f"{sig_name}_confidence"] = result.get("confidence", 0.0)
                     extra_info[f"{sig_name}_sub_signals"] = result.get("sub_signals", {})
+                    if sig_name in _NON_VOTING_ENHANCED:
+                        # Store in extra only, do NOT add to votes
+                        pass
+                    else:
+                        votes[sig_name] = result.get("action", "HOLD")
                 else:
-                    votes[sig_name] = "HOLD"
+                    if sig_name not in _NON_VOTING_ENHANCED:
+                        votes[sig_name] = "HOLD"
             except Exception:
-                votes[sig_name] = "HOLD"
+                if sig_name not in _NON_VOTING_ENHANCED:
+                    votes[sig_name] = "HOLD"
 
         # macro_regime gets macro context from cache if available
         try:
@@ -972,34 +982,50 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             votes[_macro_regime_module[0]] = "HOLD"
     else:
         for sig_name, _, _ in _enhanced_modules:
-            votes[sig_name] = "HOLD"
+            if sig_name not in _NON_VOTING_ENHANCED:
+                votes[sig_name] = "HOLD"
         votes[_macro_regime_module[0]] = "HOLD"
 
     # Derive buy/sell counts from named votes
     buy = sum(1 for v in votes.values() if v == "BUY")
     sell = sum(1 for v in votes.values() if v == "SELL")
 
+    # Core signal gate: at least 1 core signal must be active for non-HOLD consensus.
+    # Enhanced signals can strengthen/weaken a consensus but never create one alone.
+    CORE_SIGNAL_NAMES = {
+        "rsi", "macd", "ema", "bb", "fear_greed", "sentiment",
+        "ml", "funding", "volume", "ministral", "custom_lora"
+    }
+    core_buy = sum(1 for s in CORE_SIGNAL_NAMES if votes.get(s) == "BUY")
+    core_sell = sum(1 for s in CORE_SIGNAL_NAMES if votes.get(s) == "SELL")
+    core_active = core_buy + core_sell
+
     # Total applicable signals: crypto has extra (CryptoTrader-LM, Custom LoRA, ML, Funding Rate)
-    # Enhanced signals add 14 more for all asset classes
+    # Enhanced signals add 13 more (14 minus calendar which is non-voting)
     # NOTE: custom_lora is disabled (forced HOLD) due to 20.9% accuracy / 97% SELL bias,
-    # so subtract 1 from crypto's applicable count (was 25, now 24).
+    # so subtract 1 from crypto's applicable count.
     is_crypto = ticker in CRYPTO_SYMBOLS
     is_metal = ticker in METALS_SYMBOLS
     if is_crypto:
-        total_applicable = 24  # 11 original - 1 disabled (custom_lora) + 14 enhanced
+        total_applicable = 23  # 11 original - 1 disabled (custom_lora) + 14 enhanced - 1 non-voting (calendar)
     elif is_metal:
-        total_applicable = 21  # 7 original + 14 enhanced
+        total_applicable = 20  # 7 original + 14 enhanced - 1 non-voting (calendar)
     else:
-        total_applicable = 21  # 7 original + 14 enhanced
+        total_applicable = 20  # 7 original + 14 enhanced - 1 non-voting (calendar)
 
     active_voters = buy + sell
     if ticker in STOCK_SYMBOLS:
         min_voters = MIN_VOTERS_STOCK
     elif ticker in METALS_SYMBOLS:
-        min_voters = MIN_VOTERS_STOCK  # metals also need only 2 voters (5 signals, high abstention)
+        min_voters = MIN_VOTERS_STOCK  # metals use same threshold
     else:
         min_voters = MIN_VOTERS_CRYPTO
-    if active_voters < min_voters:
+
+    # Core gate: if no core signal is active, force HOLD regardless of enhanced votes
+    if core_active == 0:
+        action = "HOLD"
+        conf = 0.0
+    elif active_voters < min_voters:
         action = "HOLD"
         conf = 0.0
     else:
@@ -1039,6 +1065,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
         votes, accuracy_data, regime, activation_rates
     )
 
+    # Apply core gate to weighted consensus too — no core signal active = HOLD
+    if core_active == 0:
+        weighted_action = "HOLD"
+        weighted_conf = 0.0
+
     # Confluence score
     confluence = _confluence_score(votes, extra_info)
 
@@ -1047,15 +1078,25 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     conf *= tod_factor
     weighted_conf *= tod_factor
 
+    # Store raw consensus in extra for debugging, then use weighted as primary
+    extra_info["_raw_action"] = action
+    extra_info["_raw_confidence"] = conf
     extra_info["_voters"] = active_voters
     extra_info["_total_applicable"] = total_applicable
     extra_info["_buy_count"] = buy
     extra_info["_sell_count"] = sell
+    extra_info["_core_buy"] = core_buy
+    extra_info["_core_sell"] = core_sell
+    extra_info["_core_active"] = core_active
     extra_info["_votes"] = votes
     extra_info["_regime"] = regime
     extra_info["_weighted_action"] = weighted_action
     extra_info["_weighted_confidence"] = weighted_conf
     extra_info["_confluence_score"] = confluence
+
+    # Primary action = weighted consensus (accounts for accuracy + bias penalties)
+    action = weighted_action
+    conf = weighted_conf
     return action, conf, extra_info
 
 

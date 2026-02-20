@@ -125,8 +125,7 @@ def _donchian_breakout(df: pd.DataFrame, period: int = 55) -> tuple[str, dict]:
 def _rsi_centerline(df: pd.DataFrame) -> tuple[str, dict]:
     """RSI(14) centerline cross.
 
-    BUY when RSI crosses above 50 (with a 2-point dead zone: 48-52 = HOLD).
-    SELL when RSI crosses below 50.
+    BUY when RSI > 60, SELL when RSI < 40 (wide deadband to filter noise).
     """
     indicators: dict = {"rsi": np.nan}
 
@@ -141,9 +140,9 @@ def _rsi_centerline(df: pd.DataFrame) -> tuple[str, dict]:
     if np.isnan(rsi_val):
         return "HOLD", indicators
 
-    if rsi_val > 52.0:
+    if rsi_val > 60.0:
         return "BUY", indicators
-    if rsi_val < 48.0:
+    if rsi_val < 40.0:
         return "SELL", indicators
     return "HOLD", indicators
 
