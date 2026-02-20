@@ -891,9 +891,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
         except ImportError:
             pass
 
-    # Ministral-8B LLM reasoning (original CryptoTrader-LM + custom LoRA, crypto only)
+    # Ministral-8B LLM reasoning (original CryptoTrader-LM, crypto only)
+    # custom_lora fully disabled: 20.9% accuracy, 97% SELL bias (worse than random).
+    # Model no longer invoked. Shadow A/B testing data preserved in ab_test_log.jsonl.
     votes["ministral"] = "HOLD"
-    votes["custom_lora"] = "HOLD"
     if ticker and ticker in CRYPTO_SYMBOLS:
         short_ticker = ticker.replace("-USD", "")
         try:
@@ -950,16 +951,8 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 extra_info["ministral_reasoning"] = orig.get("reasoning", "")
                 votes["ministral"] = orig["action"]
 
-                cust = ms.get("custom")
-                if cust:
-                    extra_info["custom_lora_action"] = cust["action"]
-                    extra_info["custom_lora_reasoning"] = cust.get("reasoning", "")
-                    # DISABLED: custom_lora has 20.9% accuracy with 97% SELL bias.
-                    # Worse than random — actively hurts consensus. Keep running
-                    # the model for shadow/A-B testing but force vote to HOLD so
-                    # it doesn't influence the consensus.
-                    # votes["custom_lora"] = cust["action"]  # disabled
-                    votes["custom_lora"] = "HOLD"
+                # custom_lora fully disabled — not even stored in extra.
+                # Shadow A/B data preserved in data/ab_test_log.jsonl.
         except ImportError:
             pass
 
@@ -982,9 +975,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     # macro_regime is special — it takes an extra macro dict parameter
     _macro_regime_module = ("macro_regime", "portfolio.signals.macro_regime", "compute_macro_regime_signal")
 
-    # Calendar signal is excluded from voting (100% BUY bias, no predictive value)
-    # but still computed and stored in extra for informational purposes.
-    _NON_VOTING_ENHANCED = {"calendar"}
+    # Calendar signal re-enabled: quorum fix (min 2 active votes) eliminates
+    # the old 100% BUY bias from single-sub-signal noise.
+    _NON_VOTING_ENHANCED = set()
 
     if df is not None and isinstance(df, pd.DataFrame) and len(df) >= 26:
         for sig_name, module_path, func_name in _enhanced_modules:
@@ -1054,24 +1047,24 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     # Enhanced signals can strengthen/weaken a consensus but never create one alone.
     CORE_SIGNAL_NAMES = {
         "rsi", "macd", "ema", "bb", "fear_greed", "sentiment",
-        "ml", "funding", "volume", "ministral", "custom_lora"
+        "ml", "funding", "volume", "ministral",
     }
     core_buy = sum(1 for s in CORE_SIGNAL_NAMES if votes.get(s) == "BUY")
     core_sell = sum(1 for s in CORE_SIGNAL_NAMES if votes.get(s) == "SELL")
     core_active = core_buy + core_sell
 
-    # Total applicable signals: crypto has extra (CryptoTrader-LM, Custom LoRA, ML, Funding Rate)
-    # Enhanced signals add 13 more (14 minus calendar which is non-voting)
-    # NOTE: custom_lora is disabled (forced HOLD) due to 20.9% accuracy / 97% SELL bias,
-    # so subtract 1 from crypto's applicable count.
+    # Total applicable signals:
+    # Crypto: 10 core (11 original - custom_lora removed) + 14 enhanced (all voting) = 24
+    # Metals: 7 core + 14 enhanced = 21
+    # Stocks: 7 core + 14 enhanced = 21
     is_crypto = ticker in CRYPTO_SYMBOLS
     is_metal = ticker in METALS_SYMBOLS
     if is_crypto:
-        total_applicable = 23  # 11 original - 1 disabled (custom_lora) + 14 enhanced - 1 non-voting (calendar)
+        total_applicable = 24  # 10 core + 14 enhanced
     elif is_metal:
-        total_applicable = 20  # 7 original + 14 enhanced - 1 non-voting (calendar)
+        total_applicable = 21  # 7 core + 14 enhanced
     else:
-        total_applicable = 20  # 7 original + 14 enhanced - 1 non-voting (calendar)
+        total_applicable = 21  # 7 core + 14 enhanced
 
     active_voters = buy + sell
     if ticker in STOCK_SYMBOLS:
@@ -1411,7 +1404,7 @@ def _write_compact_summary(summary):
         "ml_action", "ml_confidence",
         "funding_rate", "funding_action",
         "volume_ratio", "volume_action",
-        "ministral_action", "custom_lora_action",
+        "ministral_action",
         "_voters", "_total_applicable", "_buy_count", "_sell_count",
         "_votes", "_weighted_action", "_weighted_confidence",
         "_confluence_score",
@@ -1858,8 +1851,6 @@ def run(force_report=False, active_symbols=None):
                     parts.append(f"News:{extra['sentiment']}")
                 if "ministral_action" in extra:
                     parts.append(f"8B:{extra['ministral_action']}")
-                if "custom_lora_action" in extra:
-                    parts.append(f"LoRA:{extra['custom_lora_action']}")
                 if "ml_action" in extra:
                     parts.append(f"ML:{extra['ml_action']}")
                 if "funding_action" in extra:

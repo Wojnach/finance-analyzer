@@ -1,17 +1,14 @@
 """Wrapper to call Ministral-8B trading model via subprocess.
 
-Supports A/B shadow testing: runs both original and custom LoRA,
-logs both results, returns original's decision as the production signal.
+Only runs the original CryptoTrader-LM LoRA.  The custom LoRA has been
+fully disabled (20.9% accuracy, 97% SELL bias — worse than random).
+Shadow A/B testing data is preserved in data/ab_test_log.jsonl.
 """
 
 import json
 import platform
 import subprocess
-from datetime import datetime, timezone
 from pathlib import Path
-
-REPO_DIR = Path(__file__).resolve().parent.parent
-SHADOW_CONFIG = REPO_DIR / "data" / "shadow_lora_config.json"
 
 
 def _call_model(context, lora_path=None):
@@ -40,26 +37,4 @@ def _call_model(context, lora_path=None):
 
 def get_ministral_signal(context):
     original = _call_model(context)
-    custom = None
-
-    try:
-        if SHADOW_CONFIG.exists():
-            cfg = json.loads(SHADOW_CONFIG.read_text(encoding="utf-8"))
-            if cfg.get("enabled"):
-                custom = _call_model(context, lora_path=cfg["custom_lora"])
-                log_entry = {
-                    "ts": datetime.now(timezone.utc).isoformat(),
-                    "ticker": context.get("ticker", "?"),
-                    "original": original,
-                    "custom": custom,
-                    "agree": original["action"] == custom["action"],
-                }
-                log_file = Path(
-                    cfg.get("log_file", REPO_DIR / "data" / "ab_test_log.jsonl")
-                )
-                with open(log_file, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(log_entry) + "\n")
-    except Exception as e:
-        print(f"    [shadow LoRA] error: {e}")
-
-    return {"original": original, "custom": custom}
+    return {"original": original, "custom": None}

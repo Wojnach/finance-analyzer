@@ -444,7 +444,13 @@ def compute_calendar_signal(df: pd.DataFrame) -> dict:
     result["indicators"].update(fomc_ind)
     result["indicators"].update(santa_ind)
 
-    # ---- Majority vote ----
+    # ---- Majority vote with quorum ----
+    # Require at least 2 active votes in the winning direction to emit a signal.
+    # Without this quorum, a single BUY sub-signal (e.g., just month_end or
+    # pre_holiday) beats 0 SELL and creates a permanent BUY bias — most
+    # calendar sub-signals are structurally BUY-only by design.
+    _MIN_WINNING_VOTES = 2
+
     votes = [
         dow_action, tt_action, me_action, sim_action,
         jan_action, ph_action, fomc_action, santa_action,
@@ -454,17 +460,16 @@ def compute_calendar_signal(df: pd.DataFrame) -> dict:
     active_votes = buy_count + sell_count  # non-HOLD votes
 
     if active_votes == 0:
-        # All sub-signals abstain
         result["action"] = "HOLD"
         result["confidence"] = 0.0
-    elif buy_count > sell_count:
+    elif buy_count > sell_count and buy_count >= _MIN_WINNING_VOTES:
         result["action"] = "BUY"
         result["confidence"] = min(round(buy_count / active_votes, 2), _MAX_CONFIDENCE)
-    elif sell_count > buy_count:
+    elif sell_count > buy_count and sell_count >= _MIN_WINNING_VOTES:
         result["action"] = "SELL"
         result["confidence"] = min(round(sell_count / active_votes, 2), _MAX_CONFIDENCE)
     else:
-        # Tied between BUY and SELL -- no clear direction
+        # Quorum not met or tied
         result["action"] = "HOLD"
         result["confidence"] = 0.0
 

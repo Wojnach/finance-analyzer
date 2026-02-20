@@ -137,9 +137,10 @@ class TestNamedVotes:
         _, _, extra = generate_signal(ind, ticker="BTC-USD")
         votes = extra["_votes"]
         assert "ministral" in votes
-        assert "custom_lora" in votes
-        # 11 original + 14 enhanced composite signals
-        assert len(votes) == 25
+        # custom_lora fully disabled (20.9% accuracy, 97% SELL bias)
+        assert "custom_lora" not in votes
+        # 10 core (11 - custom_lora) + 14 enhanced composite signals = 24
+        assert len(votes) == 24
 
     @mock.patch("portfolio.main._cached", side_effect=_null_cached)
     def test_buy_count_matches_votes(self, _mock):
