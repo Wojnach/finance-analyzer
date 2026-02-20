@@ -81,12 +81,13 @@ def get_market_state():
     now = datetime.now(timezone.utc)
     weekday = now.weekday()  # 0=Mon, 6=Sun
     hour = now.hour
+    all_symbols = set(SYMBOLS.keys())
     if weekday >= 5:
-        return "weekend", CRYPTO_SYMBOLS | METALS_SYMBOLS, INTERVAL_WEEKEND
+        return "weekend", all_symbols, INTERVAL_WEEKEND
     close_hour = _market_close_hour_utc(now)
     if MARKET_OPEN_HOUR <= hour < close_hour:
-        return "open", set(SYMBOLS.keys()), INTERVAL_MARKET_OPEN
-    return "closed", CRYPTO_SYMBOLS | METALS_SYMBOLS, INTERVAL_MARKET_CLOSED
+        return "open", all_symbols, INTERVAL_MARKET_OPEN
+    return "closed", all_symbols, INTERVAL_MARKET_CLOSED
 
 
 INITIAL_CASH_SEK = 500_000
@@ -280,6 +281,58 @@ def alpaca_klines(ticker, interval="1d", limit=100):
     return df.tail(limit)
 
 
+# yfinance interval mapping: our interval → (yf_interval, yf_period)
+_YF_INTERVAL_MAP = {
+    "15m": ("15m", "5d"),       # yfinance max for intraday <=60d
+    "1h": ("1h", "30d"),
+    "1d": ("1d", "365d"),
+    "1w": ("1wk", "730d"),
+    "1M": ("1mo", "1825d"),
+}
+
+
+def yfinance_klines(ticker, interval="1d", limit=100):
+    """Fetch candles via yfinance with extended-hours data (prepost=True).
+
+    Returns a DataFrame matching alpaca_klines() format:
+    columns: open, high, low, close, volume, time
+    """
+    import yfinance as yf
+    from portfolio.tickers import YF_MAP
+
+    yf_ticker = YF_MAP.get(ticker, ticker)
+    if interval not in _YF_INTERVAL_MAP:
+        raise ValueError(f"Unsupported yfinance interval: {interval}")
+    yf_interval, yf_period = _YF_INTERVAL_MAP[interval]
+
+    df = yf.download(
+        yf_ticker,
+        period=yf_period,
+        interval=yf_interval,
+        prepost=True,
+        progress=False,
+        auto_adjust=True,
+    )
+    if df is None or df.empty:
+        raise ValueError(f"No yfinance data for {yf_ticker} interval={interval}")
+
+    # yfinance returns MultiIndex columns when downloading single ticker too
+    # (e.g. ('Close', 'NVDA')); flatten them
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    df = df.rename(columns={
+        "Open": "open", "High": "high", "Low": "low",
+        "Close": "close", "Volume": "volume",
+    })
+    for col in ["open", "high", "low", "close", "volume"]:
+        if col in df.columns:
+            df[col] = df[col].astype(float)
+    df["time"] = df.index
+    df = df.reset_index(drop=True)
+    return df.tail(limit)
+
+
 _fx_cache = {"rate": None, "time": 0}
 _FX_STALE_THRESHOLD = 7200  # 2 hours — warn if FX rate hasn't been refreshed
 
@@ -415,6 +468,8 @@ def compute_indicators(df):
 
 # Cycle counter — incremented at the start of each run() to invalidate per-cycle caches
 _run_cycle_id = 0
+# Current market state — updated each run() cycle, used by _fetch_klines for yfinance fallback
+_current_market_state = "open"
 
 _regime_cache = {}
 _regime_cache_cycle = 0
@@ -491,8 +546,12 @@ def _fetch_klines(source, interval, limit):
         _binance_limiter.wait()
         return binance_klines(source["binance"], interval=interval, limit=limit)
     elif "alpaca" in source:
+        ticker = source["alpaca"]
+        if _current_market_state in ("closed", "weekend"):
+            _yfinance_limiter.wait()
+            return yfinance_klines(ticker, interval=interval, limit=limit)
         _alpaca_limiter.wait()
-        return alpaca_klines(source["alpaca"], interval=interval, limit=limit)
+        return alpaca_klines(ticker, interval=interval, limit=limit)
     raise ValueError(f"Unknown source: {source}")
 
 
@@ -1195,7 +1254,7 @@ def write_agent_summary(
         # Strip bulky sub_signals from extra to keep agent_summary.json lean
         extra_clean = {k: v for k, v in extra.items() if not k.endswith("_sub_signals")}
 
-        summary["signals"][name] = {
+        sig_entry = {
             "action": sig["action"],
             "confidence": sig["confidence"],
             "weighted_confidence": extra.get("_weighted_confidence", 0.0),
@@ -1210,6 +1269,10 @@ def write_agent_summary(
             "enhanced_signals": enhanced,
             "extra": extra_clean,
         }
+        # Mark extended-hours data for stocks (yfinance prepost during off-hours)
+        if name in STOCK_SYMBOLS and _current_market_state in ("closed", "weekend"):
+            sig_entry["extended_hours"] = True
+        summary["signals"][name] = sig_entry
         if "fear_greed" in extra:
             summary["fear_greed"][name] = {
                 "value": extra["fear_greed"],
@@ -1686,7 +1749,7 @@ def _maybe_send_digest(config):
 
 
 def run(force_report=False, active_symbols=None):
-    global _run_cycle_id
+    global _run_cycle_id, _current_market_state
     _run_cycle_id += 1
 
     config = _load_config()
@@ -1694,6 +1757,7 @@ def run(force_report=False, active_symbols=None):
     fx_rate = fetch_usd_sek()
 
     market_state, default_symbols, _ = get_market_state()
+    _current_market_state = market_state
     active = active_symbols or default_symbols
 
     skipped = set(SYMBOLS.keys()) - active
