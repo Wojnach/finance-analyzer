@@ -77,38 +77,37 @@ class TestTreasuryKeyAlignment:
 
     def test_yield_10y_key(self):
         """macro_regime reads treasury.10y via _safe_get(macro, 'treasury', '10y').
-        In macro_context, get_treasury() returns nested dict:
-        treasury['10y']['yield_pct']. But macro_regime reads
-        _safe_get(macro, 'treasury', '10y') which gets the whole dict, not a float.
-
-        Actually, looking at the code: macro_regime uses
-        _safe_get(macro, 'treasury', '10y') which returns the dict
-        {'yield_pct': 4.5, 'change_5d': -0.2}, then tries float() on it,
-        which would fail. Let's verify the actual behavior.
+        Now uses _safe_get(macro, 'treasury', '10y', 'change_5d') to read
+        the 5d change direction instead of absolute level.
         """
         from portfolio.signals.macro_regime import _yield_10y_momentum
 
         # Simulate what main.py passes: macro["treasury"] = get_treasury()
-        # get_treasury() returns {"10y": {"yield_pct": 4.5, ...}, ...}
         treasury_output = {
             "10y": {"yield_pct": 4.5, "change_5d": -0.2},
         }
         macro = {"treasury": treasury_output}
-        # _safe_get(macro, "treasury", "10y") returns {"yield_pct": 4.5, ...}
-        # float() on a dict will fail -> returns HOLD
+        # change_5d = -0.2 is between -1.5 and +1.5 → HOLD
         action, indicators = _yield_10y_momentum(macro)
-        # The dict can't be cast to float, so it should return HOLD
         assert action == "HOLD"
+        assert indicators["treasury_10y"] == 4.5
+        assert indicators["treasury_10y_change_5d"] == -0.2
 
-    def test_yield_10y_with_raw_float(self):
-        """When 10y is passed as a raw float, macro_regime should work."""
+    def test_yield_10y_with_change_direction(self):
+        """10Y uses 5d change direction, not absolute level."""
         from portfolio.signals.macro_regime import _yield_10y_momentum
 
-        # Direct float value works
-        macro = {"treasury": {"10y": 5.5}}
+        # Rising yields sharply → SELL
+        macro = {"treasury": {"10y": {"yield_pct": 4.5, "change_5d": 2.0}}}
         action, indicators = _yield_10y_momentum(macro)
         assert action == "SELL"
-        assert indicators["treasury_10y"] == 5.5
+        assert indicators["treasury_10y"] == 4.5
+        assert indicators["treasury_10y_change_5d"] == 2.0
+
+        # Falling yields sharply → BUY
+        macro = {"treasury": {"10y": {"yield_pct": 4.0, "change_5d": -2.0}}}
+        action, indicators = _yield_10y_momentum(macro)
+        assert action == "BUY"
 
     def test_spread_2s10s_not_2s10s_key(self):
         """Verify that the key is 'spread_2s10s' not just '2s10s'.
@@ -280,22 +279,21 @@ class TestFOMCProximity:
         assert isinstance(result["days_until"], int)
         assert result["days_until"] > 0
 
-    def test_fomc_proximity_within_3_days_is_hold(self):
-        """macro_regime: within 3 days of FOMC should be HOLD."""
+    def test_fomc_proximity_within_2_days_is_sell(self):
+        """macro_regime: within 2 days of FOMC should be SELL (risk-off)."""
         from portfolio.signals.macro_regime import _fomc_proximity
 
         macro = {"fed": {"days_until": 2}}
         action, indicators = _fomc_proximity(macro)
-        assert action == "HOLD"
+        assert action == "SELL"
         assert indicators["fomc_days_until"] == 2.0
 
     def test_fomc_proximity_far_away_is_hold(self):
-        """macro_regime: > 3 days from FOMC is also HOLD (no edge)."""
+        """macro_regime: > 2 days from FOMC is HOLD (no edge)."""
         from portfolio.signals.macro_regime import _fomc_proximity
 
         macro = {"fed": {"days_until": 30}}
         action, indicators = _fomc_proximity(macro)
-        # The current code returns HOLD for all distances (bias fix)
         assert action == "HOLD"
 
     def test_fomc_proximity_no_fed_data(self):
@@ -377,7 +375,7 @@ class TestFullPipelineIntegration:
             "dxy": {"value": 99.0, "change_5d_pct": -0.8},
             "treasury": {
                 "spread_2s10s": 1.0,
-                "10y": 3.0,
+                "10y": {"yield_pct": 3.0, "change_5d": -2.0},
             },
             "fed": {"days_until": 30},
         }
@@ -398,7 +396,7 @@ class TestFullPipelineIntegration:
             "dxy": {"value": 105.0, "change_5d_pct": 1.5},   # SELL
             "treasury": {
                 "spread_2s10s": 1.0,    # BUY
-                "10y": 4.2,             # HOLD
+                "10y": {"yield_pct": 4.2, "change_5d": 0.5},  # HOLD
             },
             "fed": {"days_until": 10},                         # HOLD
         }

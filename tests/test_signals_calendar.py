@@ -481,39 +481,21 @@ class TestCompositeVoting:
         assert result["sub_signals"]["day_of_week"] == "SELL"
         assert result["sub_signals"]["sell_in_may"] == "SELL"
 
-    def test_tie_produces_hold(self):
-        """When BUY and SELL votes are equal, action should be HOLD."""
-        # We need a date where BUY count == SELL count
-        # Monday in December: day_of_week=SELL, sell_in_may=BUY(Dec is Nov-Apr),
-        # january_effect=SELL(Dec), month_end depends, pre_holiday=HOLD,
-        # fomc_drift=depends, santa_claus=depends, turnaround=HOLD
-        # Dec 14, 2026 is a Monday, mid-month, not near FOMC (Dec 9 is past)
-        # day_of_week: SELL (Mon)
-        # turnaround: HOLD
-        # month_end: HOLD (14th)
-        # sell_in_may: BUY (Dec = Nov-Apr)
-        # january_effect: SELL (Dec)
-        # pre_holiday: HOLD (Mon)
-        # fomc_drift: HOLD (Dec 9 passed, too far)
-        # santa_claus: HOLD (14th)
-        # => 1 BUY, 2 SELL => SELL, not a tie
-        # Let's try a date that gives 1 BUY, 1 SELL:
-        # Tuesday Oct 6, 2026 (not after red Monday)
-        # day_of_week: HOLD (Tue)
-        # turnaround: HOLD (Tue but prior not red)
-        # month_end: HOLD (6th)
-        # sell_in_may: SELL (Oct)
-        # january_effect: HOLD (Oct)
-        # pre_holiday: HOLD (Tue)
-        # fomc_drift: HOLD (no FOMC near Oct 6)
-        # santa_claus: HOLD
-        # => 0 BUY, 1 SELL => SELL, not a tie either
-        # Hard to construct a natural tie. Test the voting logic directly:
-        # If we get 1 BUY and 1 SELL with 6 HOLD, that's a tie => HOLD
-        # We'll just verify that when there's a clear SELL majority, it works
+    def test_single_vote_below_quorum_produces_hold(self):
+        """Single sub-signal vote is below quorum (2) — produces HOLD."""
+        # Oct 6, 2026 (Tuesday): only sell_in_may=SELL (1 vote)
+        # With quorum=2, single SELL is not enough → HOLD
         df = _make_df_on_date("2026-10-06", n=10)
         result = compute_calendar_signal(df)
-        # sell_in_may = SELL is the only active voter => SELL
+        assert result["sub_signals"]["sell_in_may"] == "SELL"
+        assert result["action"] == "HOLD"
+
+    def test_quorum_met_produces_signal(self):
+        """When 2+ sub-signals agree, quorum is met — produces signal."""
+        # Dec 14, 2026 (Monday): day_of_week=SELL, sell_in_may=BUY,
+        # january_effect=SELL → 1 BUY, 2 SELL, quorum met for SELL
+        df = _make_df_on_date("2026-12-14", n=10)
+        result = compute_calendar_signal(df)
         assert result["action"] == "SELL"
 
     def test_string_time_column_parsed(self):
