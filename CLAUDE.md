@@ -67,7 +67,8 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 ### 1. Read the data
 
 - `data/layer2_context.md` — **read this first.** Your memory from previous invocations: theses, regime, prices, watchlist
-- `data/agent_summary.json` — all 25 signals (11 core + 14 enhanced composite), all timeframes, indicators, sentiment, F&G, macro context
+- `data/agent_summary_compact.json` — all 25 signals, timeframes, indicators, macro context (compact version, readable in one shot)
+- `data/agent_summary.json` — full version with enhanced signal details (too large for single read; use compact instead)
 - `data/portfolio_state.json` — Patient strategy: current cash, holdings, transaction history
 - `data/portfolio_state_bold.json` — Bold strategy: current cash, holdings, transaction history
 - Trigger reasons — why you were invoked this time
