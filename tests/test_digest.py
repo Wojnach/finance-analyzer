@@ -221,8 +221,8 @@ class TestSendDigest:
             result = send_digest("test message")
         assert result is None
 
-    @patch("portfolio.weekly_digest.requests.post")
-    def test_sends_with_valid_config(self, mock_post, tmp_path):
+    @patch("portfolio.telegram_notifications.send_telegram")
+    def test_sends_with_valid_config(self, mock_send, tmp_path):
         config_file = tmp_path / "config.json"
         config_file.write_text(json.dumps({
             "telegram": {"token": "fake-token", "chat_id": "12345"}
@@ -233,19 +233,18 @@ class TestSendDigest:
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_post.return_value = mock_resp
+        mock_send.return_value = mock_resp
 
         with patch("portfolio.weekly_digest.CONFIG_FILE", config_file), \
              patch("portfolio.weekly_digest.DATA_DIR", data_dir):
             result = send_digest("test message")
 
         assert result is not None
-        mock_post.assert_called_once()
+        mock_send.assert_called_once()
         assert telegram_log.exists()
 
-    @patch("portfolio.weekly_digest.requests.post")
-    def test_handles_network_error(self, mock_post, tmp_path):
-        import requests as req
+    @patch("portfolio.telegram_notifications.send_telegram")
+    def test_handles_network_error(self, mock_send, tmp_path):
         config_file = tmp_path / "config.json"
         config_file.write_text(json.dumps({
             "telegram": {"token": "fake", "chat_id": "123"}
@@ -253,7 +252,7 @@ class TestSendDigest:
         data_dir = tmp_path / "data"
         data_dir.mkdir()
 
-        mock_post.side_effect = req.RequestException("Connection failed")
+        mock_send.side_effect = Exception("Connection failed")
 
         with patch("portfolio.weekly_digest.CONFIG_FILE", config_file), \
              patch("portfolio.weekly_digest.DATA_DIR", data_dir):

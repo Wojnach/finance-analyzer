@@ -15,8 +15,11 @@ Configuration lives in config.json under "avanza.instruments":
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger("portfolio.avanza_tracker")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_FILE = BASE_DIR / "config.json"
@@ -68,7 +71,7 @@ def fetch_avanza_prices() -> dict[str, dict[str, Any]]:
                 "underlying": cfg.get("underlying"),
             }
         except Exception as e:
-            print(f"  [avanza_tracker] Price fetch failed for {key}: {e}")
+            logger.warning(f"Price fetch failed for {key}: {e}")
     return results
 
 

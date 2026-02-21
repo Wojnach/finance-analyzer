@@ -68,7 +68,7 @@ def _get_summary_price(ticker: str) -> Optional[float]:
         if not AGENT_SUMMARY_FILE.exists():
             return None
         summary = json.loads(AGENT_SUMMARY_FILE.read_text(encoding="utf-8"))
-        ticker_data = summary.get(ticker, {})
+        ticker_data = summary.get("signals", {}).get(ticker, {})
         price = ticker_data.get("price_usd")
         if price is not None:
             return float(price)

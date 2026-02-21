@@ -85,8 +85,6 @@ from portfolio.portfolio_mgr import (  # noqa: E402, F401
     load_state, save_state, _atomic_write_json, portfolio_value,
     STATE_FILE, INITIAL_CASH_SEK,
 )
-FEE_CRYPTO = 0.0005
-FEE_STOCK = 0.001
 
 # Reporting re-exports
 from portfolio.reporting import (  # noqa: E402, F401

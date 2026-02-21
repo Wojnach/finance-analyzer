@@ -9,8 +9,6 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import requests
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 CONFIG_FILE = BASE_DIR / "config.json"
@@ -218,15 +216,12 @@ def send_regime_alert(ticker, old_regime, new_regime):
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
 
-    # Send
+    # Send via shared module
     try:
-        resp = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
-            timeout=30,
-        )
-        return resp
-    except requests.RequestException as e:
+        from portfolio.telegram_notifications import send_telegram
+        result = send_telegram(msg, config)
+        return result
+    except Exception as e:
         print(f"ERROR sending regime alert: {e}")
         return None
 

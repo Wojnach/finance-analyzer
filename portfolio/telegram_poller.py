@@ -10,6 +10,8 @@ import time
 
 import requests
 
+from portfolio.http_retry import fetch_with_retry
+
 
 class TelegramPoller:
     def __init__(self, config, on_command):
@@ -46,12 +48,12 @@ class TelegramPoller:
         if self.offset:
             params["offset"] = self.offset
 
-        r = requests.get(
+        r = fetch_with_retry(
             f"https://api.telegram.org/bot{self.token}/getUpdates",
             params=params,
             timeout=10,
         )
-        if not r.ok:
+        if r is None or not r.ok:
             return []
 
         data = r.json()
@@ -112,16 +114,17 @@ class TelegramPoller:
     def _send_reply(self, text):
         """Send a reply to the user."""
         try:
-            r = requests.post(
+            r = fetch_with_retry(
                 f"https://api.telegram.org/bot{self.token}/sendMessage",
-                json={
+                method="POST",
+                json_body={
                     "chat_id": self.chat_id,
                     "text": text,
                     "parse_mode": "Markdown",
                 },
                 timeout=30,
             )
-            if not r.ok:
+            if r is not None and not r.ok:
                 print(f"  Poller reply error: {r.status_code} {r.text[:200]}")
         except Exception as e:
             print(f"  Poller reply failed: {e}")

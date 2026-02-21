@@ -18,6 +18,8 @@ import pandas as pd
 import requests
 
 from portfolio.api_utils import get_alpaca_headers
+from portfolio.http_retry import fetch_with_retry
+from portfolio.telegram_notifications import send_telegram as _shared_send_telegram
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 CONFIG_FILE = DATA_DIR / "iskbets_config.json"
@@ -109,16 +111,8 @@ def _save_state(state):
 
 
 def _send_telegram(msg, config):
-    """Send a Telegram message."""
-    token = config["telegram"]["token"]
-    chat_id = config["telegram"]["chat_id"]
-    r = requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
-        timeout=30,
-    )
-    if not r.ok:
-        print(f"  ISKBETS Telegram error: {r.status_code} {r.text[:200]}")
+    """Send a Telegram message via shared module."""
+    _shared_send_telegram(msg, config)
 
 
 def _log_telegram(msg):
@@ -151,8 +145,8 @@ def compute_atr_15m(ticker, config):
         raise ValueError(f"Unknown ticker: {ticker}")
 
     if "binance_fapi" in source:
-        r = requests.get(
-            f"https://fapi.binance.com/fapi/v1/klines",
+        r = fetch_with_retry(
+            "https://fapi.binance.com/fapi/v1/klines",
             params={
                 "symbol": source["binance_fapi"],
                 "interval": "15m",
@@ -160,6 +154,8 @@ def compute_atr_15m(ticker, config):
             },
             timeout=10,
         )
+        if r is None:
+            raise ValueError(f"Failed to fetch Binance FAPI data for {ticker}")
         r.raise_for_status()
         data = r.json()
         df = pd.DataFrame(
@@ -173,7 +169,7 @@ def compute_atr_15m(ticker, config):
         for col in ["open", "high", "low", "close"]:
             df[col] = df[col].astype(float)
     elif "binance" in source:
-        r = requests.get(
+        r = fetch_with_retry(
             f"{BINANCE_BASE}/klines",
             params={
                 "symbol": source["binance"],
@@ -182,6 +178,8 @@ def compute_atr_15m(ticker, config):
             },
             timeout=10,
         )
+        if r is None:
+            raise ValueError(f"Failed to fetch Binance data for {ticker}")
         r.raise_for_status()
         data = r.json()
         df = pd.DataFrame(
@@ -198,7 +196,7 @@ def compute_atr_15m(ticker, config):
         # Alpaca stocks
         end = datetime.now(timezone.utc)
         start = end - pd.Timedelta(days=2)
-        r = requests.get(
+        r = fetch_with_retry(
             f"{ALPACA_BASE}/stocks/{source['alpaca']}/bars",
             headers=_get_alpaca_headers(config),
             params={
@@ -210,6 +208,8 @@ def compute_atr_15m(ticker, config):
             },
             timeout=10,
         )
+        if r is None:
+            raise ValueError(f"Failed to fetch Alpaca data for {ticker}")
         r.raise_for_status()
         bars = r.json().get("bars") or []
         if not bars:
@@ -1000,22 +1000,26 @@ def _get_current_price(ticker, config):
         return None
     try:
         if "binance" in source:
-            r = requests.get(
+            r = fetch_with_retry(
                 f"{BINANCE_BASE}/ticker/price",
                 params={"symbol": source["binance"]},
                 timeout=5,
             )
+            if r is None:
+                return None
             r.raise_for_status()
             return float(r.json()["price"])
         else:
             # Alpaca snapshot
             headers = get_alpaca_headers()
-            r = requests.get(
+            r = fetch_with_retry(
                 f"{ALPACA_BASE}/stocks/{source['alpaca']}/snapshot",
                 headers=headers,
                 params={"feed": "iex"},
                 timeout=5,
             )
+            if r is None:
+                return None
             r.raise_for_status()
             return float(r.json()["latestTrade"]["p"])
     except Exception:

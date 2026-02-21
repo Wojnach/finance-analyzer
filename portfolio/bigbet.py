@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import requests
+from portfolio.telegram_notifications import send_telegram as _shared_send_telegram
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 STATE_FILE = DATA_DIR / "bigbet_state.json"
@@ -459,17 +459,4 @@ def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
 
 
 def _send_telegram(msg, config):
-    import os
-
-    if os.environ.get("NO_TELEGRAM"):
-        print("  [NO_TELEGRAM] Skipping send")
-        return
-    token = config["telegram"]["token"]
-    chat_id = config["telegram"]["chat_id"]
-    r = requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
-        timeout=30,
-    )
-    if not r.ok:
-        print(f"  Telegram error: {r.status_code} {r.text[:200]}")
+    _shared_send_telegram(msg, config)

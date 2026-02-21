@@ -262,34 +262,26 @@ class TestSentimentAggregation:
 class TestCryptoCompareAPI:
     def test_empty_dict_response_handled(self):
         """CryptoCompare sometimes returns Data:{} instead of Data:[]"""
-        import portfolio.sentiment as sm
         import unittest.mock as mock
 
-        fake_response = json.dumps({"Data": {}, "Type": 100}).encode()
-        m = mock.MagicMock()
-        m.read.return_value = fake_response
-        m.__enter__ = lambda s: s
-        m.__exit__ = mock.MagicMock(return_value=False)
+        mock_resp = mock.MagicMock()
+        mock_resp.json.return_value = {"Data": {}, "Type": 100}
 
-        with mock.patch("urllib.request.urlopen", return_value=m):
+        with mock.patch("portfolio.sentiment.fetch_with_retry", return_value=mock_resp):
             result = _fetch_crypto_headlines("BTC")
         assert result == []
 
     def test_normal_list_response(self):
-        import portfolio.sentiment as sm
         import unittest.mock as mock
 
         fake_articles = [
             {"title": "BTC pumps", "source": "Test", "published_on": 1700000000},
             {"title": "ETH dips", "source": "Test", "published_on": 1700001000},
         ]
-        fake_response = json.dumps({"Data": fake_articles, "Type": 100}).encode()
-        m = mock.MagicMock()
-        m.read.return_value = fake_response
-        m.__enter__ = lambda s: s
-        m.__exit__ = mock.MagicMock(return_value=False)
+        mock_resp = mock.MagicMock()
+        mock_resp.json.return_value = {"Data": fake_articles, "Type": 100}
 
-        with mock.patch("urllib.request.urlopen", return_value=m):
+        with mock.patch("portfolio.sentiment.fetch_with_retry", return_value=mock_resp):
             result = _fetch_crypto_headlines("BTC", limit=5)
         assert len(result) == 2
         assert result[0]["title"] == "BTC pumps"

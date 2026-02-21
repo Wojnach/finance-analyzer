@@ -14,8 +14,6 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import requests
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 CONFIG_FILE = BASE_DIR / "config.json"
@@ -305,16 +303,13 @@ def send_digest(msg):
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    # Send via Telegram
+    # Send via shared module
     try:
-        resp = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
-            timeout=30,
-        )
-        print(f"Telegram response: {resp.status_code}")
-        return resp
-    except requests.RequestException as e:
+        from portfolio.telegram_notifications import send_telegram
+        result = send_telegram(msg, config)
+        print(f"Telegram sent: {result}")
+        return result
+    except Exception as e:
         print(f"ERROR sending Telegram: {e}")
         return None
 

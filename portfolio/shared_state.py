@@ -17,11 +17,19 @@ _tool_cache = {}
 _RETRY_COOLDOWN = 60
 
 
+_CACHE_MAX_SIZE = 256  # evict expired entries when cache exceeds this size
+
+
 def _cached(key, ttl, func, *args):
     """Cache-through helper: returns cached data if fresh, else calls func."""
     now = time.time()
     if key in _tool_cache and now - _tool_cache[key]["time"] < ttl:
         return _tool_cache[key]["data"]
+    # Evict expired entries when cache grows too large
+    if len(_tool_cache) > _CACHE_MAX_SIZE:
+        expired = [k for k, v in _tool_cache.items() if now - v["time"] > 3600]
+        for k in expired:
+            del _tool_cache[k]
     try:
         data = func(*args)
         _tool_cache[key] = {"data": data, "time": now}

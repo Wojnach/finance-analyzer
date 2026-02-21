@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import requests
+from portfolio.telegram_notifications import send_telegram as _shared_send_telegram
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -132,9 +132,7 @@ def _build_analysis_prompt(ticker, summary):
     if ticker in CRYPTO_TICKERS:
         lines.append(f"  ML: {_vote_str('ml')} | Funding: {_vote_str('funding')}")
         m_reason = extra.get("ministral_reasoning", "")
-        l_reason = extra.get("custom_lora_reasoning", "")
         lines.append(f"  Ministral: {votes.get('ministral', 'HOLD')} — \"{m_reason}\"")
-        lines.append(f"  LoRA: {votes.get('custom_lora', 'HOLD')} — \"{l_reason}\"")
 
     # Timeframes
     tf_list = summary.get("timeframes", {}).get(ticker, [])
@@ -245,18 +243,7 @@ def _log_analysis(ticker, output, elapsed):
 
 
 def _send_telegram(msg, config):
-    if os.environ.get("NO_TELEGRAM"):
-        print("[NO_TELEGRAM] Skipping send")
-        return
-    token = config["telegram"]["token"]
-    chat_id = config["telegram"]["chat_id"]
-    r = requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
-        timeout=30,
-    )
-    if not r.ok:
-        print(f"Telegram error: {r.status_code} {r.text[:200]}")
+    _shared_send_telegram(msg, config)
 
 
 def run_analysis(ticker):
@@ -474,15 +461,12 @@ def _build_watch_prompt(positions, summary, elapsed_mins):
 
         if ticker in CRYPTO_TICKERS:
             m_reason = extra.get("ministral_reasoning", "")[:80]
-            l_reason = extra.get("custom_lora_reasoning", "")[:80]
             lines.append(
                 f"  ML:{_vote_str('ml')} Fund:{_vote_str('funding')} "
-                f"Ministral:{votes.get('ministral','HOLD')} LoRA:{votes.get('custom_lora','HOLD')}"
+                f"Ministral:{votes.get('ministral','HOLD')}"
             )
             if m_reason:
                 lines.append(f"  Ministral says: \"{m_reason}\"")
-            if l_reason:
-                lines.append(f"  LoRA says: \"{l_reason}\"")
 
         # Timeframes
         tfs = summary.get("timeframes", {}).get(ticker, [])

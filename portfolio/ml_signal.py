@@ -2,8 +2,9 @@ import time
 import joblib
 import numpy as np
 import pandas as pd
-import requests
 from pathlib import Path
+
+from portfolio.http_retry import fetch_with_retry
 
 MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "ml_classifier.joblib"
 FEATURES_PATH = (
@@ -114,11 +115,13 @@ def get_ml_signal(ticker):
         return None
     binance_sym, sym_flag = symbol_map[ticker]
 
-    r = requests.get(
+    r = fetch_with_retry(
         f"{BINANCE_BASE}/klines",
         params={"symbol": binance_sym, "interval": "1h", "limit": 100},
         timeout=10,
     )
+    if r is None:
+        return None
     r.raise_for_status()
     raw = r.json()
 

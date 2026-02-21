@@ -5,6 +5,7 @@ from pathlib import Path
 
 import requests
 
+from portfolio.http_retry import fetch_with_retry
 from portfolio.shared_state import _RateLimiter
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -158,21 +159,25 @@ def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
 def _fetch_current_price(ticker):
     if ticker in BINANCE_FAPI_MAP:
         symbol = BINANCE_FAPI_MAP[ticker]
-        r = requests.get(
+        r = fetch_with_retry(
             "https://fapi.binance.com/fapi/v1/ticker/price",
             params={"symbol": symbol},
             timeout=5,
         )
+        if r is None:
+            return None
         r.raise_for_status()
         return float(r.json()["price"])
 
     if ticker in BINANCE_SPOT_MAP:
         symbol = BINANCE_SPOT_MAP[ticker]
-        r = requests.get(
+        r = fetch_with_retry(
             "https://api.binance.com/api/v3/ticker/price",
             params={"symbol": symbol},
             timeout=5,
         )
+        if r is None:
+            return None
         r.raise_for_status()
         return float(r.json()["price"])
 
@@ -193,7 +198,7 @@ def _fetch_historical_price(ticker, target_ts):
     if ticker in BINANCE_FAPI_MAP:
         symbol = BINANCE_FAPI_MAP[ticker]
         start_ms = int(target_ts * 1000)
-        r = requests.get(
+        r = fetch_with_retry(
             "https://fapi.binance.com/fapi/v1/klines",
             params={
                 "symbol": symbol,
@@ -203,6 +208,8 @@ def _fetch_historical_price(ticker, target_ts):
             },
             timeout=10,
         )
+        if r is None:
+            return None
         r.raise_for_status()
         data = r.json()
         if not data:
@@ -212,7 +219,7 @@ def _fetch_historical_price(ticker, target_ts):
     if ticker in BINANCE_SPOT_MAP:
         symbol = BINANCE_SPOT_MAP[ticker]
         start_ms = int(target_ts * 1000)
-        r = requests.get(
+        r = fetch_with_retry(
             "https://api.binance.com/api/v3/klines",
             params={
                 "symbol": symbol,
@@ -222,6 +229,8 @@ def _fetch_historical_price(ticker, target_ts):
             },
             timeout=10,
         )
+        if r is None:
+            return None
         r.raise_for_status()
         data = r.json()
         if not data:

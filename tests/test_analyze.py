@@ -177,10 +177,9 @@ class TestBuildPrompt:
         assert "S" in row_text  # All timeframes are SELL -> S
 
     def test_build_prompt_crypto_has_ministral(self):
-        """Crypto ticker prompt includes Ministral and LoRA lines."""
+        """Crypto ticker prompt includes Ministral line."""
         prompt = _build_analysis_prompt("ETH-USD", SAMPLE_SUMMARY)
         assert "Ministral:" in prompt
-        assert "LoRA:" in prompt
 
     def test_build_prompt_stock_no_ministral(self):
         """Stock ticker prompt does NOT include Ministral or LoRA lines."""
@@ -403,7 +402,6 @@ class TestBuildWatchPrompt:
         positions = {"ETH-USD": 1900.0}
         prompt = _build_watch_prompt(positions, SAMPLE_SUMMARY, elapsed_mins=10)
         assert "Ministral" in prompt
-        assert "LoRA" in prompt
 
     def test_watch_prompt_stock_no_ministral(self):
         positions = {"NVDA": 185.0}

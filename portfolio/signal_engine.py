@@ -393,10 +393,6 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     # macro_regime is special — it takes an extra macro dict parameter
     _macro_regime_module = ("macro_regime", "portfolio.signals.macro_regime", "compute_macro_regime_signal")
 
-    # Calendar signal re-enabled: quorum fix (min 2 active votes) eliminates
-    # the old 100% BUY bias from single-sub-signal noise.
-    _NON_VOTING_ENHANCED = set()
-
     if df is not None and isinstance(df, pd.DataFrame) and len(df) >= 26:
         for sig_name, module_path, func_name in _enhanced_modules:
             try:
@@ -410,17 +406,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                     extra_info[f"{sig_name}_action"] = result.get("action", "HOLD")
                     extra_info[f"{sig_name}_confidence"] = result.get("confidence", 0.0)
                     extra_info[f"{sig_name}_sub_signals"] = result.get("sub_signals", {})
-                    if sig_name in _NON_VOTING_ENHANCED:
-                        # Store in extra only, do NOT add to votes
-                        pass
-                    else:
-                        votes[sig_name] = result.get("action", "HOLD")
+                    votes[sig_name] = result.get("action", "HOLD")
                 else:
-                    if sig_name not in _NON_VOTING_ENHANCED:
-                        votes[sig_name] = "HOLD"
-            except Exception:
-                if sig_name not in _NON_VOTING_ENHANCED:
                     votes[sig_name] = "HOLD"
+            except Exception:
+                votes[sig_name] = "HOLD"
 
         # macro_regime gets macro context from cache if available
         try:
@@ -457,8 +447,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             votes[_macro_regime_module[0]] = "HOLD"
     else:
         for sig_name, _, _ in _enhanced_modules:
-            if sig_name not in _NON_VOTING_ENHANCED:
-                votes[sig_name] = "HOLD"
+            votes[sig_name] = "HOLD"
         votes[_macro_regime_module[0]] = "HOLD"
 
     # Derive buy/sell counts from named votes
