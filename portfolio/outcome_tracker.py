@@ -1,32 +1,13 @@
 import json
-import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
 
+from portfolio.shared_state import _RateLimiter
+
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-
-# --- Rate limiter for yfinance calls (no official limit, be polite — 30/min) ---
-class _RateLimiter:
-    """Token-bucket rate limiter. Sleeps when calls exceed rate."""
-    def __init__(self, max_per_minute, name=""):
-        self.interval = 60.0 / max_per_minute
-        self.last_call = 0.0
-        self.name = name
-        self._lock = threading.Lock()
-
-    def wait(self):
-        with self._lock:
-            now = time.time()
-            elapsed = now - self.last_call
-            if elapsed < self.interval:
-                wait_time = self.interval - elapsed
-                time.sleep(wait_time)
-            self.last_call = time.time()
-
 
 _yfinance_limiter = _RateLimiter(30, "yfinance")
 DATA_DIR = BASE_DIR / "data"

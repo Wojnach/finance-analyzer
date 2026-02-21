@@ -11,7 +11,7 @@ REQUIRED_KEYS = {
 }
 
 OPTIONAL_KEYS = {
-    "alpaca": {"key_id": str, "secret_key": str},
+    "alpaca": {"key": str, "secret": str},
     "dashboard_token": str,
 }
 

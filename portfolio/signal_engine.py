@@ -16,6 +16,8 @@ logger = logging.getLogger("portfolio.signal_engine")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
+_enhanced_signal_modules = {}  # cache for importlib.import_module results
+
 # --- Signal (full 25-signal for "Now" timeframe) ---
 
 MIN_VOTERS_CRYPTO = 3  # crypto has 24 signals (10 core + 14 enhanced, custom_lora removed) — need 3 active voters
@@ -399,7 +401,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
         for sig_name, module_path, func_name in _enhanced_modules:
             try:
                 import importlib
-                mod = importlib.import_module(module_path)
+                if module_path not in _enhanced_signal_modules:
+                    _enhanced_signal_modules[module_path] = importlib.import_module(module_path)
+                mod = _enhanced_signal_modules[module_path]
                 compute_fn = getattr(mod, func_name)
                 result = compute_fn(df)
                 if result and isinstance(result, dict):
@@ -437,7 +441,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             except Exception:
                 pass
             mr_name, mr_path, mr_func = _macro_regime_module
-            mod = importlib.import_module(mr_path)
+            if mr_path not in _enhanced_signal_modules:
+                _enhanced_signal_modules[mr_path] = importlib.import_module(mr_path)
+            mod = _enhanced_signal_modules[mr_path]
             compute_fn = getattr(mod, mr_func)
             result = compute_fn(df, macro=macro_data or None)
             if result and isinstance(result, dict):

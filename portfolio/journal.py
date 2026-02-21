@@ -4,19 +4,13 @@ from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+from portfolio.tickers import ALL_TICKERS
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
 CONTEXT_FILE = DATA_DIR / "layer2_context.md"
 PORTFOLIO_FILE = DATA_DIR / "portfolio_state.json"
 BOLD_FILE = DATA_DIR / "portfolio_state_bold.json"
-
-TICKERS = [
-    "BTC-USD", "ETH-USD", "XAU-USD", "XAG-USD",
-    "MSTR", "PLTR", "NVDA", "AMD", "BABA", "GOOGL", "AMZN", "AAPL",
-    "AVGO", "AI", "GRRR", "IONQ", "MRVL", "META", "MU", "PONY",
-    "RXRX", "SOUN", "SMCI", "TSM", "TTWO", "TEM", "UPST", "VERI",
-    "VRT", "QQQ", "LMT",
-]
 
 TIER_FULL = 2
 TIER_COMPACT = 4
@@ -363,7 +357,7 @@ def build_context(entries, portfolio_data=None, now=None):
         lines.append("### Prices at Last Entry")
         lines.append("")
         parts = []
-        for t in TICKERS:
+        for t in sorted(ALL_TICKERS):
             p = prices.get(t)
             if p is not None:
                 parts.append(f"{t}: ${p:,.2f}" if p >= 100 else f"{t}: ${p:,.4f}")

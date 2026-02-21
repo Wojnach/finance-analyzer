@@ -337,7 +337,7 @@ def api_signal_heatmap():
     # Core signal names (extracted from _votes in extra)
     core_signals = [
         "rsi", "macd", "ema", "bb", "fear_greed", "sentiment",
-        "ministral", "ml", "funding", "volume", "custom_lora"
+        "ministral", "ml", "funding", "volume"
     ]
     # Enhanced composite signal names
     enhanced_signals = [

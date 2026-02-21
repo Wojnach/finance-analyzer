@@ -5,40 +5,13 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+from portfolio.tickers import SIGNAL_NAMES
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 SIGNAL_LOG = DATA_DIR / "signal_log.jsonl"
 ACCURACY_CACHE_FILE = DATA_DIR / "accuracy_cache.json"
 ACCURACY_CACHE_TTL = 3600
-
-SIGNAL_NAMES = [
-    "rsi",
-    "macd",
-    "ema",
-    "bb",
-    "fear_greed",
-    "sentiment",
-    "ministral",
-    "ml",
-    "funding",
-    "volume",
-    # custom_lora removed — disabled signal
-    # Enhanced composite signals
-    "trend",
-    "momentum",
-    "volume_flow",
-    "volatility_sig",
-    "candlestick",
-    "structure",
-    "fibonacci",
-    "smart_money",
-    "oscillators",
-    "heikin_ashi",
-    "mean_reversion",
-    "calendar",
-    "macro_regime",
-    "momentum_factors",
-]
 HORIZONS = ["1d", "3d", "5d", "10d"]
 
 

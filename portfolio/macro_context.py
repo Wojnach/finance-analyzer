@@ -1,5 +1,4 @@
 import json
-import threading
 import time
 from pathlib import Path
 
@@ -8,6 +7,7 @@ import requests
 
 from portfolio.api_utils import get_alpaca_headers, load_config
 from portfolio.http_retry import fetch_with_retry
+from portfolio.shared_state import _RateLimiter
 
 BINANCE_BASE = "https://api.binance.com/api/v3"
 ALPACA_BASE = "https://data.alpaca.markets/v2"
@@ -15,26 +15,6 @@ CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 BINANCE_FAPI_BASE = "https://fapi.binance.com/fapi/v1"
 
 from portfolio.tickers import TICKER_SOURCE_MAP as TICKER_MAP
-
-
-# --- Rate limiter for yfinance calls (no official limit, be polite — 30/min) ---
-class _RateLimiter:
-    """Token-bucket rate limiter. Sleeps when calls exceed rate."""
-    def __init__(self, max_per_minute, name=""):
-        self.interval = 60.0 / max_per_minute
-        self.last_call = 0.0
-        self.name = name
-        self._lock = threading.Lock()
-
-    def wait(self):
-        with self._lock:
-            now = time.time()
-            elapsed = now - self.last_call
-            if elapsed < self.interval:
-                wait_time = self.interval - elapsed
-                time.sleep(wait_time)
-            self.last_call = time.time()
-
 
 _yfinance_limiter = _RateLimiter(30, "yfinance")
 

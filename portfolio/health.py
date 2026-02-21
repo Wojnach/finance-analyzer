@@ -1,6 +1,8 @@
 """Health monitoring for the finance-analyzer Layer 1 loop."""
 
 import json
+import os
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,9 +29,17 @@ def update_health(cycle_count: int, signals_ok: int, signals_failed: int,
         ]
         state["error_count"] = state.get("error_count", 0) + 1
     # Atomic write
-    tmp = HEALTH_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
-    tmp.replace(HEALTH_FILE)
+    fd, tmp_path = tempfile.mkstemp(dir=str(HEALTH_FILE.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp_path, str(HEALTH_FILE))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def load_health() -> dict:

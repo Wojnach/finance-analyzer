@@ -358,7 +358,7 @@ class TestApiSignalHeatmap:
         assert data["heatmap"]["BTC-USD"]["rsi"] == "BUY"
         assert data["heatmap"]["BTC-USD"]["macd"] == "SELL"
         assert data["heatmap"]["BTC-USD"]["bb"] == "HOLD"  # None → "HOLD"
-        assert len(data["signals"]) == 25
+        assert len(data["signals"]) == 24
 
     def test_404_when_no_summary(self, client, tmp_data):
         with _no_auth():
