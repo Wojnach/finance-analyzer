@@ -54,7 +54,7 @@ def compute_features(df, symbol_flag=0):
     # EMA ratio & crossover
     ema9 = close.ewm(span=9, adjust=False).mean()
     ema21 = close.ewm(span=21, adjust=False).mean()
-    feats["ema_ratio"] = ema9 / ema21
+    feats["ema_ratio"] = ema9 / ema21.replace(0, np.nan)
     feats["ema_cross"] = (ema9 > ema21).astype(int)
 
     # Bollinger Bands
@@ -62,8 +62,9 @@ def compute_features(df, symbol_flag=0):
     bb_std = close.rolling(20).std()
     bb_upper = bb_mid + 2 * bb_std
     bb_lower = bb_mid - 2 * bb_std
-    feats["bb_pctb"] = (close - bb_lower) / (bb_upper - bb_lower)
-    feats["bb_width"] = (bb_upper - bb_lower) / bb_mid
+    bb_range = (bb_upper - bb_lower).replace(0, np.nan)
+    feats["bb_pctb"] = (close - bb_lower) / bb_range
+    feats["bb_width"] = (bb_upper - bb_lower) / bb_mid.replace(0, np.nan)
 
     # ATR%
     tr = pd.concat(
@@ -75,21 +76,22 @@ def compute_features(df, symbol_flag=0):
         axis=1,
     ).max(axis=1)
     atr14 = tr.ewm(span=14, adjust=False).mean()
-    feats["atr_pct"] = atr14 / close * 100
+    feats["atr_pct"] = atr14 / close.replace(0, np.nan) * 100
 
     # Returns
     for n in [1, 3, 6, 12, 24]:
         feats[f"ret_{n}"] = close.pct_change(n)
 
     # Volume ratio
-    feats["vol_ratio"] = volume / volume.rolling(20).mean()
+    feats["vol_ratio"] = volume / volume.rolling(20).mean().replace(0, np.nan)
 
     # Candle shape
     body_top = pd.concat([opn, close], axis=1).max(axis=1)
     body_bot = pd.concat([opn, close], axis=1).min(axis=1)
-    feats["upper_wick_pct"] = (high - body_top) / close * 100
-    feats["lower_wick_pct"] = (body_bot - low) / close * 100
-    feats["range_pct"] = (high - low) / close * 100
+    close_safe = close.replace(0, np.nan)
+    feats["upper_wick_pct"] = (high - body_top) / close_safe * 100
+    feats["lower_wick_pct"] = (body_bot - low) / close_safe * 100
+    feats["range_pct"] = (high - low) / close_safe * 100
 
     # Hour of day
     dt = pd.to_datetime(df["date"])

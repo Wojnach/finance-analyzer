@@ -61,7 +61,7 @@ def _bb_squeeze(close: pd.Series, bb_upper: pd.Series, bb_lower: pd.Series,
     On release (width expands back) + price above upper => BUY,
     price below lower => SELL.  During squeeze => HOLD.
     """
-    bb_width = (bb_upper - bb_lower) / bb_middle
+    bb_width = (bb_upper - bb_lower) / bb_middle.replace(0, np.nan)
     current_width = bb_width.iloc[-1]
 
     # Use up to 120 periods for the average; fall back to whatever is available

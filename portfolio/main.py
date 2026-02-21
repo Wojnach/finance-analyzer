@@ -625,7 +625,7 @@ def collect_timeframes(source):
 # --- Signal (full 7-signal for "Now" timeframe) ---
 
 
-MIN_VOTERS_CRYPTO = 3  # crypto has 25 signals (11 original + 14 enhanced) — need 3 active voters
+MIN_VOTERS_CRYPTO = 3  # crypto has 24 signals (10 core + 14 enhanced, custom_lora removed) — need 3 active voters
 MIN_VOTERS_STOCK = 3  # stocks have 21 signals (7 original + 14 enhanced) — need 3 active voters
 
 # Sentiment hysteresis — prevents rapid flip spam from ~50% confidence oscillation
@@ -1141,8 +1141,8 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
         votes, accuracy_data, regime, activation_rates
     )
 
-    # Apply core gate to weighted consensus too — no core signal active = HOLD
-    if core_active == 0:
+    # Apply core gate AND MIN_VOTERS gate to weighted consensus too
+    if core_active == 0 or active_voters < min_voters:
         weighted_action = "HOLD"
         weighted_conf = 0.0
 

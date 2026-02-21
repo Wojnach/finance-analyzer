@@ -22,7 +22,7 @@ SIGNAL_NAMES = [
     "ml",
     "funding",
     "volume",
-    "custom_lora",
+    # custom_lora removed — disabled signal
     # Enhanced composite signals
     "trend",
     "momentum",

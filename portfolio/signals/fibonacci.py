@@ -60,6 +60,8 @@ def _detect_trend(close: pd.Series, period: int = 20) -> str:
         return "flat"
 
     # Linear slope over the SMA values in the window
+    if recent_sma.iloc[0] == 0:
+        return "flat"
     slope = (recent_sma.iloc[-1] - recent_sma.iloc[0]) / recent_sma.iloc[0]
 
     if slope > 0.005:   # >0.5% rise over window

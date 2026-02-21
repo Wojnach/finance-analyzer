@@ -113,8 +113,7 @@ def _derive_signal_vote(name, indicators, extra):
     if name == "volume":
         return extra.get("volume_action", "HOLD")
 
-    if name == "custom_lora":
-        return extra.get("custom_lora_action", "HOLD")
+    # custom_lora removed — signal disabled, no longer tracked
 
     return "HOLD"
 

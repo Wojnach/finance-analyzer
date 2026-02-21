@@ -92,7 +92,9 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
     reasons = []
 
     now_utc = datetime.now(timezone.utc)
-    market_open = now_utc.weekday() < 5 and 7 <= now_utc.hour < 21
+    from portfolio.main import _market_close_hour_utc
+    close_hour = _market_close_hour_utc(now_utc)
+    market_open = now_utc.weekday() < 5 and 7 <= now_utc.hour < close_hour
 
     # 0. Trade reset — if Layer 2 made a trade, reset cooldown
     if _check_recent_trade(state):
