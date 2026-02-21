@@ -90,6 +90,8 @@ _*.ps1
 send_telegram.py
 /test_digest.py
 data/tmp_*.py
+data/tmp*.tmp
+data/heartbeat.txt
 data/activation_analysis.py
 data/activation_cache.json
 data/bigbet_gate_log.jsonl
