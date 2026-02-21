@@ -78,6 +78,29 @@ def _market_close_hour_utc(dt):
     return 21
 
 
+def _is_agent_window(now=None):
+    """Check if current time is within the Layer 2 invocation window.
+
+    Window: 1h before EU market open through 1h after US market close.
+    EU open (Frankfurt): 08:00 CET / 07:00 UTC  -> start 06:00 UTC
+    US close (NYSE):     16:00 ET
+      EST (Nov-Mar): 21:00 UTC  -> end 22:00 UTC
+      EDT (Mar-Nov): 20:00 UTC  -> end 21:00 UTC
+    Weekends: no agent invocation.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if now.weekday() >= 5:
+        return False
+    current_minutes = now.hour * 60 + now.minute
+    start = 6 * 60  # 06:00 UTC (1h before Frankfurt 07:00)
+    if _is_us_dst(now):
+        end = 21 * 60  # 21:00 UTC (1h after NYSE 20:00 EDT)
+    else:
+        end = 22 * 60  # 22:00 UTC (1h after NYSE 21:00 EST)
+    return start <= current_minutes < end
+
+
 def get_market_state():
     now = datetime.now(timezone.utc)
     weekday = now.weekday()  # 0=Mon, 6=Sun
@@ -1932,8 +1955,12 @@ def run(force_report=False, active_symbols=None):
             print("  [NO_TELEGRAM] Skipping agent invocation")
             _log_trigger(reasons_list, "skipped_test")
         elif layer2_cfg.get("enabled", True):
-            result = invoke_agent(reasons_list)
-            _log_trigger(reasons_list, "invoked" if result else "skipped_busy")
+            if _is_agent_window():
+                result = invoke_agent(reasons_list)
+                _log_trigger(reasons_list, "invoked" if result else "skipped_busy")
+            else:
+                print("  Layer 2: outside market window (1h before open to 1h after close), skipping")
+                _log_trigger(reasons_list, "skipped_offhours")
         else:
             print("  Layer 2 disabled — skipping agent invocation")
             _maybe_send_alert(
