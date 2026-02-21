@@ -278,73 +278,69 @@ with open("data/layer2_journal.jsonl", "a", encoding="utf-8") as f:
 - `watchlist`: 1-3 specific conditions you are watching for (e.g., "BTC breakout above 67.2K")
 - `thesis`: Brief statement of your view — the next invocation will compare this against what happened
 
-### 6. Notify via Telegram (if noteworthy)
+### 6. Notify via Telegram
 
 **ALWAYS send a Telegram message when you are invoked.** Every invocation means something
 triggered — the user wants to see your analysis every time. No exceptions.
 
-**Message format:** The user reads these on iPhone — keep it scannable. Use monospace (backtick-wrapped) lines for the signal grid and timeframe heatmap so columns align. End with 1-2 sentences of reasoning in plain language. You may deviate from the section layout if it makes the message clearer — but the vote format (`XB/YS/ZH`) is mandatory, do not invent alternatives.
+**Apple Watch:** The first line is the notification preview (~60 chars on wrist). Pack it
+with: action, top 1-2 movers (by vote count), F&G. The user decides whether to pull out
+their phone based on this line alone.
+
+**Message format:** The user reads on iPhone — keep it scannable. Use monospace
+(backtick-wrapped) lines for the merged ticker grid. The vote format (`XB/YS/ZH`) is
+mandatory, do not invent alternatives. Must stay under Telegram's 4096 char limit.
 
 **Sections (in order):**
 
-1. Action header — `*HOLD*` or `*BUY TICKER*` with trade details
-2. Ticker grid — **actionable tickers only** (BUY or SELL consensus, or held positions). Show price + "Now" action + vote breakdown as `XB/YS/ZH` where X=buy votes, Y=sell votes, Z=abstains. Calculate from `_buy_count`, `_sell_count`, `_total_applicable` in `extra` (Z = total_applicable - buy - sell).
-3. `_+ N HOLD_` line — count of remaining tickers that are all HOLD
-4. Timeframe heatmap — only for tickers shown in the grid. `B`=BUY `S`=SELL `H`=HOLD from `timeframes` in agent_summary.json.
-5. F&G + portfolio line
-6. Reasoning (1-2 sentences)
+1. **First line** — Apple Watch glance
+   - HOLD: `*HOLD* · SMCI 12B MU 10B · F&G 7/48` (action + top 1-2 movers by vote count + F&G crypto/stock)
+   - TRADE: `*BOLD BUY SMCI* $32.17 · 139K SEK` (action + price + cost)
+2. **Merged ticker grid** — one monospace line per ticker, price + votes + heatmap combined
+   - Heatmap: 7 chars = 7 timeframes (Now→6mo, left to right). `B`=BUY `S`=SELL `·`=HOLD (middle dot makes B/S pop)
+   - Prices rounded aggressively: `$68K`, `$426`, `$32`, `$1,949`
+   - Vote breakdown as `XB/YS/ZH` (X=buy, Y=sell, Z=abstain)
+3. **Summary line** — `_+N hold · M sell_` (count of remaining tickers not shown, with sell count if any)
+4. **Context line** — portfolio + macro in one italic line
+   - `_P:500K · B:465K(-7%) · DXY 98↑ · 10Y 4.05↓_`
+   - `P:` = Patient, `B:` = Bold. Arrows: `↑` rising, `↓` falling (from 5d change)
+   - When holding positions: `_P:500K · B:361K(-7%) SMCI 43sh · DXY 98↑_`
+5. **Reasoning** — 1-2 sentences. Combine both strategies. When both HOLD, skip "Patient: / Bold:" labels.
 
-**Actionable-only rules (30+ tickers — must stay under Telegram's 4096 char limit):**
-- Always show tickers with BUY or SELL consensus in the grid
-- Always show tickers with active positions (in either portfolio) in the grid
-- Show `_+ N HOLD_` for the rest (count of HOLD tickers not shown)
-- Timeframe heatmap only for shown tickers
-- If ALL tickers are HOLD and no positions, show the top 3-5 most interesting (closest to flipping BUY or SELL — highest conviction or most non-abstaining voters)
+**Actionable-only rules (30+ tickers):**
+- Always show tickers with BUY or SELL consensus
+- Always show tickers with active positions (in either portfolio)
+- If ALL tickers are HOLD and no positions, show the top 3-5 most interesting (highest non-abstaining voter count)
+- Summary line counts remaining HOLD tickers and any additional SELL tickers not shown
 
-HOLD example (all hold, show top interesting):
-
-```
-*HOLD*
-
-`BTC  $66,800  BUY  4B/1S/6H`
-`SMCI $42.30   SELL 2B/3S/2H`
-`IONQ $28.15   BUY  3B/0S/4H`
-_+ 27 HOLD_
-
-`     Now 12h  2d  7d 1mo 3mo 6mo`
-`BTC   B   H   S   S   S   S   H`
-`SMCI  S   S   H   S   S   H   H`
-`IONQ  B   B   H   H   S   H   H`
-
-_Crypto F&G: 11 · Stock F&G: 62_
-_Patient: 500,000 SEK (+0.00%)_
-_Bold: 464,535 SEK (-7.09%)_
-
-Patient: HOLD — no multi-TF alignment.
-Bold: HOLD — SMCI SELL interesting but no breakout confirmation.
-```
-
-TRADE example (bold trades, patient holds):
+HOLD example:
 
 ```
-*BOLD BUY BTC* — 139,361 SEK @ $66,800
+*HOLD* · SMCI 12B MU 10B · F&G 7/48
 
-`BTC  $66,800  BUY  4B/1S/6H`
-`ETH  $1,952   SELL 1B/3S/7H`
-`SMCI $42.30   SELL 2B/3S/2H`
-_+ 27 HOLD_
+`SMCI $32   BUY  12B/4S/4H BBB·SSS`
+`MU   $426  BUY  10B/2S/8H BBB··BB`
+`BABA $153  SELL  2B/5S/13H SSSSSHB`
+`BTC  $68K  BUY   4B/2S/17H BB·SSH·`
+_+26 hold · 1 sell_
 
-`     Now 12h  2d  7d 1mo 3mo 6mo`
-`BTC   B   H   S   S   S   S   H`
-`ETH   S   S   S   S   S   S   S`
-`SMCI  S   S   H   S   S   H   H`
+_P:500K · B:465K(-7%) · DXY 98↑ · 10Y 4.05↓_
+SMCI 12B but RSI 69 overbought. MU 5/7 TFs but at upper BB. No clean entry.
+```
 
-_Crypto F&G: 11 · Stock F&G: 62_
-_Patient: 500,000 SEK (+0.00%) · HOLD_
-_Bold: 325,174 SEK (-7.09%) · BTC 0.19_
+TRADE example:
 
-Patient: HOLD — BUY only on Now, longer TFs bearish.
-Bold: BUY BTC — 4B consensus + BB expansion + EMA alignment. Structural breakout with volume.
+```
+*BOLD BUY SMCI* $32.17 · 139K SEK
+
+`SMCI $32   BUY  12B/4S/4H BBB·SSS`
+`MU   $426  BUY  10B/2S/8H BBB··BB`
+`BABA $153  SELL  2B/5S/13H SSSSSHB`
+_+27 hold_
+
+_P:500K · B:326K(-7%) SMCI 43sh · DXY 98↑_
+Bold: Structural breakout — 12B, vol 2x, BB above upper. Entry confirmed.
+Patient: HOLD — need multi-TF confirmation.
 ```
 
 **Before sending, save the message locally:**
@@ -375,6 +371,7 @@ requests.post(
 - Minimum trade: 500 SEK
 - Never go all-in on one asset
 - This is SIMULATED money (500K SEK starting) — trade freely to build a track record
+- **Near close (<1h to market close):** Do not open new positions on stocks or warrants. For existing positions, flag that close is imminent — the user needs to decide now (take profit or close flat). Crypto is exempt (24/7). US market closes 21:00 CET (15:00 ET).
 
 ## 25 Signals (11 Core + 14 Enhanced Composite)
 
