@@ -5,11 +5,15 @@ Does NOT trade. User manually trades turbo warrants on Avanza.
 """
 
 import json
+import logging
 import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+logger = logging.getLogger("portfolio.bigbet")
+
+from portfolio.file_utils import atomic_write_json
 from portfolio.telegram_notifications import send_telegram as _shared_send_telegram
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -27,20 +31,7 @@ def _load_state():
 
 
 def _save_state(state):
-    import os, tempfile
-
-    DATA_DIR.mkdir(exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=DATA_DIR, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2, default=str)
-        os.replace(tmp, str(STATE_FILE))
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    atomic_write_json(STATE_FILE, state)
 
 
 EVAL_LOG_FILE = DATA_DIR / "bigbet_gate_log.jsonl"
@@ -176,18 +167,18 @@ def invoke_layer2_eval(ticker, direction, conditions, signals, tf_data, prices_u
 
         if result.returncode == 0 and output:
             probability, reasoning = _parse_eval_response(output)
-            print(f"  BIG BET L2: {ticker} {direction} — {probability}/10 ({elapsed:.1f}s)")
+            logger.info("BIG BET L2: %s %s — %s/10 (%.1fs)", ticker, direction, probability, elapsed)
         else:
-            print(f"  BIG BET L2: claude returned code {result.returncode}")
+            logger.warning("BIG BET L2: claude returned code %s", result.returncode)
     except subprocess.TimeoutExpired:
         elapsed = time.time() - t0
-        print(f"  BIG BET L2: timeout after {elapsed:.1f}s")
+        logger.warning("BIG BET L2: timeout after %.1fs", elapsed)
     except FileNotFoundError:
         elapsed = time.time() - t0
-        print("  BIG BET L2: claude not found in PATH")
+        logger.warning("BIG BET L2: claude not found in PATH")
     except Exception as e:
         elapsed = time.time() - t0
-        print(f"  BIG BET L2: error — {e}")
+        logger.warning("BIG BET L2: error — %s", e)
 
     # Log evaluation
     try:
@@ -410,20 +401,16 @@ def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
                     ticker, "BULL", bull_conds, prices_usd, fx_rate, extra_info,
                     probability=probability, l2_reasoning=l2_reasoning,
                 )
-                print(
-                    f"  BIG BET ALERT: BULL {ticker} ({len(bull_conds)}/{TOTAL_CONDITIONS} conditions)"
-                )
+                logger.info("BIG BET ALERT: BULL %s (%d/%d conditions)", ticker, len(bull_conds), TOTAL_CONDITIONS)
                 try:
                     _send_telegram(msg, config)
                 except Exception as e:
-                    print(f"  WARNING: Big Bet telegram failed: {e}")
+                    logger.warning("Big Bet telegram failed: %s", e)
                 cooldowns[cd_key] = now
                 changed = True
             else:
                 remaining = cooldown_hours * 3600 - (now - last_alert)
-                print(
-                    f"  Big Bet: BULL {ticker} ({len(bull_conds)}/{TOTAL_CONDITIONS}) — cooldown ({remaining/60:.0f}m left)"
-                )
+                logger.info("Big Bet: BULL %s (%d/%d) — cooldown (%.0fm left)", ticker, len(bull_conds), TOTAL_CONDITIONS, remaining / 60)
 
         # Check BEAR alert
         if len(bear_conds) >= min_conditions:
@@ -437,20 +424,16 @@ def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
                     ticker, "BEAR", bear_conds, prices_usd, fx_rate, extra_info,
                     probability=probability, l2_reasoning=l2_reasoning,
                 )
-                print(
-                    f"  BIG BET ALERT: BEAR {ticker} ({len(bear_conds)}/{TOTAL_CONDITIONS} conditions)"
-                )
+                logger.info("BIG BET ALERT: BEAR %s (%d/%d conditions)", ticker, len(bear_conds), TOTAL_CONDITIONS)
                 try:
                     _send_telegram(msg, config)
                 except Exception as e:
-                    print(f"  WARNING: Big Bet telegram failed: {e}")
+                    logger.warning("Big Bet telegram failed: %s", e)
                 cooldowns[cd_key] = now
                 changed = True
             else:
                 remaining = cooldown_hours * 3600 - (now - last_alert)
-                print(
-                    f"  Big Bet: BEAR {ticker} ({len(bear_conds)}/{TOTAL_CONDITIONS}) — cooldown ({remaining/60:.0f}m left)"
-                )
+                logger.info("Big Bet: BEAR %s (%d/%d) — cooldown (%.0fm left)", ticker, len(bear_conds), TOTAL_CONDITIONS, remaining / 60)
 
     if changed:
         state["cooldowns"] = cooldowns

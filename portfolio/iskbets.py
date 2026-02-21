@@ -6,18 +6,18 @@ and confirms via Telegram replies.
 """
 
 import json
-import os
+import logging
 import subprocess
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
-import requests
+
+logger = logging.getLogger("portfolio.iskbets")
 
 from portfolio.api_utils import get_alpaca_headers
+from portfolio.file_utils import atomic_write_json
 from portfolio.http_retry import fetch_with_retry
 from portfolio.telegram_notifications import send_telegram as _shared_send_telegram
 
@@ -58,7 +58,7 @@ def _load_config():
                 # Auto-disable
                 cfg["enabled"] = False
                 _save_config(cfg)
-                print("  ISKBETS: Session expired, auto-disabled")
+                logger.info("ISKBETS: Session expired, auto-disabled")
                 return None
         except (ValueError, TypeError):
             pass
@@ -67,18 +67,7 @@ def _load_config():
 
 def _save_config(cfg):
     """Atomic write of iskbets config."""
-    DATA_DIR.mkdir(exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=DATA_DIR, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=2, default=str)
-        os.replace(tmp, str(CONFIG_FILE))
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    atomic_write_json(CONFIG_FILE, cfg)
 
 
 def _load_state():
@@ -93,18 +82,7 @@ def _load_state():
 
 def _save_state(state):
     """Atomic write of ISKBETS state."""
-    DATA_DIR.mkdir(exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=DATA_DIR, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2, default=str)
-        os.replace(tmp, str(STATE_FILE))
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    atomic_write_json(STATE_FILE, state)
 
 
 # ── Telegram ─────────────────────────────────────────────────────────────
@@ -132,10 +110,6 @@ def _log_telegram(msg):
 
 
 # ── ATR Computation ──────────────────────────────────────────────────────
-
-
-def _get_alpaca_headers(config):
-    return get_alpaca_headers()
 
 
 def compute_atr_15m(ticker, config):
@@ -198,7 +172,7 @@ def compute_atr_15m(ticker, config):
         start = end - pd.Timedelta(days=2)
         r = fetch_with_retry(
             f"{ALPACA_BASE}/stocks/{source['alpaca']}/bars",
-            headers=_get_alpaca_headers(config),
+            headers=get_alpaca_headers(),
             params={
                 "timeframe": "15Min",
                 "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -430,16 +404,16 @@ def invoke_layer2_gate(ticker, price, conditions, signals, tf_data, atr, iskbets
         if result.returncode == 0 and output:
             approved, reasoning = _parse_gate_response(output)
         else:
-            print(f"  ISKBETS L2 GATE: claude returned code {result.returncode}")
+            logger.warning("ISKBETS L2 GATE: claude returned code %s", result.returncode)
     except subprocess.TimeoutExpired:
         elapsed = time.time() - t0
-        print(f"  ISKBETS L2 GATE: timeout after {elapsed:.1f}s")
+        logger.warning("ISKBETS L2 GATE: timeout after %.1fs", elapsed)
     except FileNotFoundError:
         elapsed = time.time() - t0
-        print("  ISKBETS L2 GATE: claude not found in PATH")
+        logger.warning("ISKBETS L2 GATE: claude not found in PATH")
     except Exception as e:
         elapsed = time.time() - t0
-        print(f"  ISKBETS L2 GATE: error — {e}")
+        logger.warning("ISKBETS L2 GATE: error — %s", e)
 
     # Log decision
     try:
@@ -751,12 +725,12 @@ def check_iskbets(signals, prices_usd, fx_rate, tf_data, config):
             try:
                 _send_telegram(msg, config)
             except Exception as e:
-                print(f"  ISKBETS: Telegram send failed: {e}")
+                logger.warning("ISKBETS: Telegram send failed: %s", e)
 
             if exit_type != "stage1_hit":
-                print(f"  ISKBETS EXIT: {exit_type} — {ticker} ${price:,.2f}")
+                logger.info("ISKBETS EXIT: %s — %s $%.2f", exit_type, ticker, price)
             else:
-                print(f"  ISKBETS: Stage 1 hit — {ticker}, stop moved to breakeven")
+                logger.info("ISKBETS: Stage 1 hit — %s, stop moved to breakeven", ticker)
 
             changed = True
         else:
@@ -779,7 +753,7 @@ def check_iskbets(signals, prices_usd, fx_rate, tf_data, config):
                 try:
                     atr = compute_atr_15m(ticker, config)
                 except Exception as e:
-                    print(f"  ISKBETS: ATR computation failed for {ticker}: {e}")
+                    logger.warning("ISKBETS: ATR computation failed for %s: %s", ticker, e)
                     continue
 
                 # Layer 2 gate — APPROVE/SKIP decision
@@ -787,7 +761,7 @@ def check_iskbets(signals, prices_usd, fx_rate, tf_data, config):
                     ticker, price, conditions, signals, tf_data, atr, iskbets_cfg, config
                 )
                 if not approved:
-                    print(f"  ISKBETS L2 GATE: SKIP {ticker} — {l2_reasoning}")
+                    logger.info("ISKBETS L2 GATE: SKIP %s — %s", ticker, l2_reasoning)
                     continue  # keep scanning other tickers
 
                 msg = format_entry_alert(ticker, price, conditions, atr, iskbets_cfg, signals=signals, l2_reasoning=l2_reasoning)
@@ -795,9 +769,9 @@ def check_iskbets(signals, prices_usd, fx_rate, tf_data, config):
                 try:
                     _send_telegram(msg, config)
                 except Exception as e:
-                    print(f"  ISKBETS: Telegram send failed: {e}")
+                    logger.warning("ISKBETS: Telegram send failed: %s", e)
 
-                print(f"  ISKBETS ENTRY ALERT: {ticker} ${price:,.2f} ({len(conditions)} conditions)")
+                logger.info("ISKBETS ENTRY ALERT: %s $%.2f (%d conditions)", ticker, price, len(conditions))
                 # Don't auto-set position — user must confirm via "bought" command
                 break  # One alert at a time
 
@@ -846,7 +820,7 @@ def _handle_bought(args, config):
 
     # Load FX rate
     try:
-        from portfolio.main import fetch_usd_sek
+        from portfolio.fx_rates import fetch_usd_sek
         fx_rate = fetch_usd_sek()
     except Exception:
         fx_rate = 10.5  # Fallback
@@ -858,7 +832,7 @@ def _handle_bought(args, config):
         atr = compute_atr_15m(ticker, config)
     except Exception as e:
         atr = price_usd * 0.02  # Fallback: 2% of price
-        print(f"  ISKBETS: ATR fallback used: {e}")
+        logger.warning("ISKBETS: ATR fallback used: %s", e)
 
     hard_stop_mult = iskbets_cfg.get("hard_stop_atr_mult", 2.0)
     stage1_mult = iskbets_cfg.get("stage1_atr_mult", 1.5)
@@ -980,7 +954,7 @@ def _handle_status(config):
 
     # Try to get current price
     try:
-        from portfolio.main import fetch_usd_sek
+        from portfolio.fx_rates import fetch_usd_sek
         fx_rate = fetch_usd_sek()
     except Exception:
         fx_rate = pos.get("fx_rate", 10.5)

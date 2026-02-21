@@ -10,6 +10,7 @@ from portfolio.shared_state import _cached
 from portfolio.indicators import detect_regime
 from portfolio.portfolio_mgr import _atomic_write_json, portfolio_value
 from portfolio.tickers import CRYPTO_SYMBOLS, STOCK_SYMBOLS
+from portfolio.signal_registry import get_enhanced_signals
 
 import portfolio.shared_state as _ss
 
@@ -68,10 +69,7 @@ def write_agent_summary(
         ind = sig["indicators"]
         # Collect enhanced signal summaries (compact, no sub_signals detail in top-level)
         enhanced = {}
-        for esig_name in ("trend", "momentum", "volume_flow", "volatility_sig",
-                          "candlestick", "structure", "fibonacci", "smart_money",
-                          "oscillators", "heikin_ashi", "mean_reversion", "calendar",
-                          "macro_regime", "momentum_factors"):
+        for esig_name in get_enhanced_signals():
             eaction = extra.get(f"{esig_name}_action", "HOLD")
             econf = extra.get(f"{esig_name}_confidence", 0.0)
             enhanced[esig_name] = {"action": eaction, "confidence": econf}

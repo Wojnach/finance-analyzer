@@ -13,11 +13,11 @@ reassess the new portfolio state promptly.
 """
 
 import json
-import os
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from portfolio.file_utils import atomic_write_json
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATE_FILE = BASE_DIR / "data" / "trigger_state.json"
@@ -38,18 +38,7 @@ def _load_state():
 
 
 def _save_state(state):
-    STATE_FILE.parent.mkdir(exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=STATE_FILE.parent, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2, default=str)
-        os.replace(tmp, STATE_FILE)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    atomic_write_json(STATE_FILE, state)
 
 
 def _check_recent_trade(state):

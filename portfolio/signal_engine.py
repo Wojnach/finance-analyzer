@@ -11,12 +11,11 @@ import pandas as pd
 from portfolio.shared_state import _cached, FEAR_GREED_TTL, SENTIMENT_TTL, MINISTRAL_TTL, ML_SIGNAL_TTL, FUNDING_RATE_TTL, VOLUME_TTL
 from portfolio.indicators import detect_regime
 from portfolio.tickers import CRYPTO_SYMBOLS, STOCK_SYMBOLS, METALS_SYMBOLS
+from portfolio.signal_registry import get_enhanced_signals, load_signal_func
 
 logger = logging.getLogger("portfolio.signal_engine")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-
-_enhanced_signal_modules = {}  # cache for importlib.import_module results
 
 # --- Signal (full 25-signal for "Now" timeframe) ---
 
@@ -375,47 +374,14 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             pass
 
     # --- Enhanced signal modules (composite indicators computed from raw OHLCV) ---
-    _enhanced_modules = [
-        ("trend", "portfolio.signals.trend", "compute_trend_signal"),
-        ("momentum", "portfolio.signals.momentum", "compute_momentum_signal"),
-        ("volume_flow", "portfolio.signals.volume_flow", "compute_volume_flow_signal"),
-        ("volatility_sig", "portfolio.signals.volatility", "compute_volatility_signal"),
-        ("candlestick", "portfolio.signals.candlestick", "compute_candlestick_signal"),
-        ("structure", "portfolio.signals.structure", "compute_structure_signal"),
-        ("fibonacci", "portfolio.signals.fibonacci", "compute_fibonacci_signal"),
-        ("smart_money", "portfolio.signals.smart_money", "compute_smart_money_signal"),
-        ("oscillators", "portfolio.signals.oscillators", "compute_oscillator_signal"),
-        ("heikin_ashi", "portfolio.signals.heikin_ashi", "compute_heikin_ashi_signal"),
-        ("mean_reversion", "portfolio.signals.mean_reversion", "compute_mean_reversion_signal"),
-        ("calendar", "portfolio.signals.calendar_seasonal", "compute_calendar_signal"),
-        ("momentum_factors", "portfolio.signals.momentum_factors", "compute_momentum_factors_signal"),
-    ]
-    # macro_regime is special — it takes an extra macro dict parameter
-    _macro_regime_module = ("macro_regime", "portfolio.signals.macro_regime", "compute_macro_regime_signal")
+    # Loaded from signal_registry — no hardcoded list needed here.
+    _enhanced_entries = get_enhanced_signals()
 
     if df is not None and isinstance(df, pd.DataFrame) and len(df) >= 26:
-        for sig_name, module_path, func_name in _enhanced_modules:
-            try:
-                import importlib
-                if module_path not in _enhanced_signal_modules:
-                    _enhanced_signal_modules[module_path] = importlib.import_module(module_path)
-                mod = _enhanced_signal_modules[module_path]
-                compute_fn = getattr(mod, func_name)
-                result = compute_fn(df)
-                if result and isinstance(result, dict):
-                    extra_info[f"{sig_name}_action"] = result.get("action", "HOLD")
-                    extra_info[f"{sig_name}_confidence"] = result.get("confidence", 0.0)
-                    extra_info[f"{sig_name}_sub_signals"] = result.get("sub_signals", {})
-                    votes[sig_name] = result.get("action", "HOLD")
-                else:
-                    votes[sig_name] = "HOLD"
-            except Exception:
-                votes[sig_name] = "HOLD"
-
-        # macro_regime gets macro context from cache if available
-        try:
-            import importlib
-            macro_data = None
+        # Fetch macro context once for any signal that requires it
+        macro_data = None
+        has_macro_signals = any(e.get("requires_macro") for e in _enhanced_entries.values())
+        if has_macro_signals:
             try:
                 from portfolio.macro_context import get_dxy, get_fed_calendar, get_treasury
                 macro_data = {}
@@ -430,25 +396,29 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                     macro_data["fed"] = fed
             except Exception:
                 pass
-            mr_name, mr_path, mr_func = _macro_regime_module
-            if mr_path not in _enhanced_signal_modules:
-                _enhanced_signal_modules[mr_path] = importlib.import_module(mr_path)
-            mod = _enhanced_signal_modules[mr_path]
-            compute_fn = getattr(mod, mr_func)
-            result = compute_fn(df, macro=macro_data or None)
-            if result and isinstance(result, dict):
-                votes[mr_name] = result.get("action", "HOLD")
-                extra_info[f"{mr_name}_action"] = result.get("action", "HOLD")
-                extra_info[f"{mr_name}_confidence"] = result.get("confidence", 0.0)
-                extra_info[f"{mr_name}_sub_signals"] = result.get("sub_signals", {})
-            else:
-                votes[mr_name] = "HOLD"
-        except Exception:
-            votes[_macro_regime_module[0]] = "HOLD"
+
+        for sig_name, entry in _enhanced_entries.items():
+            try:
+                compute_fn = load_signal_func(entry)
+                if compute_fn is None:
+                    votes[sig_name] = "HOLD"
+                    continue
+                if entry.get("requires_macro"):
+                    result = compute_fn(df, macro=macro_data or None)
+                else:
+                    result = compute_fn(df)
+                if result and isinstance(result, dict):
+                    extra_info[f"{sig_name}_action"] = result.get("action", "HOLD")
+                    extra_info[f"{sig_name}_confidence"] = result.get("confidence", 0.0)
+                    extra_info[f"{sig_name}_sub_signals"] = result.get("sub_signals", {})
+                    votes[sig_name] = result.get("action", "HOLD")
+                else:
+                    votes[sig_name] = "HOLD"
+            except Exception:
+                votes[sig_name] = "HOLD"
     else:
-        for sig_name, _, _ in _enhanced_modules:
+        for sig_name in _enhanced_entries:
             votes[sig_name] = "HOLD"
-        votes[_macro_regime_module[0]] = "HOLD"
 
     # Derive buy/sell counts from named votes
     buy = sum(1 for v in votes.values() if v == "BUY")

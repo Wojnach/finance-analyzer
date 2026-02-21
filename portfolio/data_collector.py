@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from portfolio.http_retry import fetch_with_retry
-from portfolio.api_utils import load_config as _load_config
+from portfolio.api_utils import load_config as _load_config, get_alpaca_headers
 from portfolio.indicators import compute_indicators, technical_signal
 import portfolio.shared_state as _ss
 
@@ -119,17 +119,6 @@ def binance_fapi_klines(symbol, interval="5m", limit=100):
 # --- Alpaca API ---
 
 
-# NOTE: Shared Alpaca header logic is available in portfolio.api_utils.get_alpaca_headers().
-# This local copy is kept to avoid a large refactor of main.py config loading path.
-def _get_alpaca_headers():
-    cfg = _load_config()
-    acfg = cfg.get("alpaca", {})
-    return {
-        "APCA-API-KEY-ID": acfg.get("key", ""),
-        "APCA-API-SECRET-KEY": acfg.get("secret", ""),
-    }
-
-
 def alpaca_klines(ticker, interval="1d", limit=100):
     if interval not in ALPACA_INTERVAL_MAP:
         raise ValueError(f"Unsupported Alpaca interval: {interval}")
@@ -138,7 +127,7 @@ def alpaca_klines(ticker, interval="1d", limit=100):
     start = end - pd.Timedelta(days=lookback_days)
     r = fetch_with_retry(
         f"{ALPACA_BASE}/stocks/{ticker}/bars",
-        headers=_get_alpaca_headers(),
+        headers=get_alpaca_headers(),
         params={
             "timeframe": alpaca_tf,
             "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),

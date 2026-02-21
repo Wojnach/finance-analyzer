@@ -575,11 +575,8 @@ class TestAlpacaKlines:
         fake_resp.json.return_value = fake_bars
         fake_resp.raise_for_status = mock.MagicMock()
 
-        fake_config = json.dumps({"alpaca": {"key": "PK_TEST", "secret": "SK_TEST"}})
-        with mock.patch("requests.get", return_value=fake_resp), mock.patch(
-            "portfolio.main.CONFIG_FILE"
-        ) as mock_cfg:
-            mock_cfg.read_text.return_value = fake_config
+        with mock.patch("portfolio.data_collector.fetch_with_retry", return_value=fake_resp), \
+             mock.patch("portfolio.data_collector.get_alpaca_headers", return_value={"APCA-API-KEY-ID": "PK_TEST", "APCA-API-SECRET-KEY": "SK_TEST"}):
             df = alpaca_klines("MSTR", interval="15m", limit=100)
 
         assert list(df.columns) >= ["open", "high", "low", "close", "volume", "time"]
@@ -594,11 +591,8 @@ class TestAlpacaKlines:
         fake_resp.json.return_value = {"bars": None}
         fake_resp.raise_for_status = mock.MagicMock()
 
-        fake_config = json.dumps({"alpaca": {"key": "PK_TEST", "secret": "SK_TEST"}})
-        with mock.patch("requests.get", return_value=fake_resp), mock.patch(
-            "portfolio.main.CONFIG_FILE"
-        ) as mock_cfg:
-            mock_cfg.read_text.return_value = fake_config
+        with mock.patch("portfolio.data_collector.fetch_with_retry", return_value=fake_resp), \
+             mock.patch("portfolio.data_collector.get_alpaca_headers", return_value={"APCA-API-KEY-ID": "PK_TEST", "APCA-API-SECRET-KEY": "SK_TEST"}):
             with pytest.raises(ValueError, match="No Alpaca data"):
                 alpaca_klines("MSTR", interval="15m", limit=100)
 

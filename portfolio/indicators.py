@@ -87,7 +87,14 @@ def detect_regime(indicators, is_crypto=True):
         _ss._regime_cache = {}
         _ss._regime_cache_cycle = _ss._run_cycle_id
 
-    cache_key = (id(indicators), is_crypto)
+    cache_key = (
+        round(indicators.get("close", 0), 4),
+        round(indicators.get("atr_pct", 0), 4),
+        round(indicators.get("ema9", 0), 4),
+        round(indicators.get("ema21", 0), 4),
+        round(indicators.get("rsi", 50), 4),
+        is_crypto,
+    )
     if cache_key in _ss._regime_cache:
         return _ss._regime_cache[cache_key]
 

@@ -1,30 +1,15 @@
 """Portfolio state management — load, save, atomic writes, value calculation."""
 
 import json
-import os
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+from portfolio.file_utils import atomic_write_json as _atomic_write_json
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 STATE_FILE = DATA_DIR / "portfolio_state.json"
 INITIAL_CASH_SEK = 500_000
-
-
-def _atomic_write_json(path, data):
-    path.parent.mkdir(exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, default=str)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
 
 
 def load_state():

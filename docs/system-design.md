@@ -1,7 +1,7 @@
 # Portfolio Intelligence -- System Design
 
 A practical engineering reference for the finance-analyzer trading system.
-Last updated: 2026-02-21.
+Last updated: 2026-02-21 (audit v2: signal registry, file_utils, bug fixes).
 
 ---
 
@@ -569,6 +569,8 @@ Q:/finance-analyzer/
 |   +-- digest.py                 # 4-hour digest builder
 |   +-- agent_invocation.py       # Layer 2 Claude Code subprocess invocation
 |   +-- logging_config.py         # Structured logging with RotatingFileHandler
+|   +-- signal_registry.py       # Plugin-style signal registration system (NEW v2)
+|   +-- file_utils.py            # Shared atomic_write_json utility (NEW v2)
 |   +-- signal_db.py              # SQLite storage for signal snapshots
 |   +-- migrate_signal_log.py     # One-time JSONL → SQLite migration script
 |   +-- trigger.py                # Trigger detection (202 lines)
@@ -808,15 +810,33 @@ interval check.
 | Issue | Impact | Effort |
 |-------|--------|--------|
 | ~~`main.py` is 2,124 lines monolithic~~ | **RESOLVED** — extracted 12 modules, main.py is ~435 lines | Feb 21 |
-| `http_retry.py` exists but NOT integrated into any API calls | Retries are ad-hoc or missing | Medium (wire into all `requests.*` calls) |
+| ~~`http_retry.py` exists but NOT integrated into any API calls~~ | **RESOLVED** — integrated into all API calls (Feb 21 audit) | Done |
 | `signal_log.jsonl` grows unbounded | Disk usage, slow accuracy scans | Add rotation (log_rotation.py exists but may not cover this) |
+
+### New Modules (Feb 21 Audit v2)
+
+| Module | Purpose |
+|--------|---------|
+| `portfolio/signal_registry.py` | Plugin-style signal registration; signals register at import, signal_engine discovers from registry instead of hardcoded lists |
+| `portfolio/file_utils.py` | Shared `atomic_write_json()` extracted from 6 modules (portfolio_mgr, trigger, bigbet, iskbets, health, accuracy_stats) |
+
+### Bug Fixes (Feb 21 Audit v2)
+
+| Bug | Fix |
+|-----|-----|
+| `indicators.py` regime cache used `id()` as key (memory address reuse → stale cache) | Changed to hashable tuple of indicator values |
+| `health.py` hardcoded market hours (7-21 UTC, not DST-aware) | Uses `market_timing.get_market_state()` now |
+| `iskbets.py` circular import via `from portfolio.main import fetch_usd_sek` | Changed to `from portfolio.fx_rates import fetch_usd_sek` |
+| `data_collector.py` duplicated Alpaca headers (local `_get_alpaca_headers()`) | Replaced with `api_utils.get_alpaca_headers()` import |
+| `bigbet.py` + `iskbets.py` used `print()` instead of structured logger | Converted to `logging.getLogger()` calls |
+| `tickers.py` had 4 redundant mappings (TICKER_SOURCE_MAP, YF_MAP, BINANCE_MAP) | Derived from SYMBOLS dict |
+| `iskbets.py` had unused imports (`requests`, `numpy`) | Removed |
 
 ### Testing Gaps
 
 | Area | Current State |
 |------|---------------|
 | `test_digest.py` | 0 tests |
-| Dashboard (`app.py`) | No tests |
 | Enhanced signal modules | Untested individually |
 | Trigger system | No unit tests |
 

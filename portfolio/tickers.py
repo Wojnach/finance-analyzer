@@ -57,61 +57,30 @@ STOCK_SYMBOLS = {
 # All known tickers (union of all subsets)
 ALL_TICKERS = CRYPTO_SYMBOLS | METALS_SYMBOLS | STOCK_SYMBOLS
 
-# ── Binance symbol mappings (used by outcome_tracker, macro_context) ─────
+# ── Derived mappings (all from SYMBOLS — single source of truth) ─────────
 
-BINANCE_SPOT_MAP = {"BTC-USD": "BTCUSDT", "ETH-USD": "ETHUSDT"}
-BINANCE_FAPI_MAP = {"XAU-USD": "XAUUSDT", "XAG-USD": "XAGUSDT"}
+BINANCE_SPOT_MAP = {
+    t: sym for t, src in SYMBOLS.items()
+    for k, sym in src.items() if k == "binance"
+}
+BINANCE_FAPI_MAP = {
+    t: sym for t, src in SYMBOLS.items()
+    for k, sym in src.items() if k == "binance_fapi"
+}
 BINANCE_MAP = {**BINANCE_SPOT_MAP, **BINANCE_FAPI_MAP}
 
-# ── Ticker → (source_type, symbol) mapping (used by macro_context) ───────
-
+# Ticker -> (source_type, symbol) mapping (used by macro_context)
 TICKER_SOURCE_MAP = {
-    "BTC-USD": ("binance", "BTCUSDT"),
-    "ETH-USD": ("binance", "ETHUSDT"),
-    "XAU-USD": ("binance_fapi", "XAUUSDT"),
-    "XAG-USD": ("binance_fapi", "XAGUSDT"),
-    "MSTR": ("alpaca", "MSTR"),
-    "PLTR": ("alpaca", "PLTR"),
-    "NVDA": ("alpaca", "NVDA"),
-    "AMD": ("alpaca", "AMD"),
-    "BABA": ("alpaca", "BABA"),
-    "GOOGL": ("alpaca", "GOOGL"),
-    "AMZN": ("alpaca", "AMZN"),
-    "AAPL": ("alpaca", "AAPL"),
-    "AVGO": ("alpaca", "AVGO"),
-    "AI": ("alpaca", "AI"),
-    "GRRR": ("alpaca", "GRRR"),
-    "IONQ": ("alpaca", "IONQ"),
-    "MRVL": ("alpaca", "MRVL"),
-    "META": ("alpaca", "META"),
-    "MU": ("alpaca", "MU"),
-    "PONY": ("alpaca", "PONY"),
-    "RXRX": ("alpaca", "RXRX"),
-    "SOUN": ("alpaca", "SOUN"),
-    "SMCI": ("alpaca", "SMCI"),
-    "TSM": ("alpaca", "TSM"),
-    "TTWO": ("alpaca", "TTWO"),
-    "TEM": ("alpaca", "TEM"),
-    "UPST": ("alpaca", "UPST"),
-    "VERI": ("alpaca", "VERI"),
-    "VRT": ("alpaca", "VRT"),
-    "QQQ": ("alpaca", "QQQ"),
-    "LMT": ("alpaca", "LMT"),
+    t: next(iter(src.items())) for t, src in SYMBOLS.items()
 }
 
-# ── Yahoo Finance symbol mapping (used by outcome_tracker) ───────────────
-
-YF_MAP = {
-    "MSTR": "MSTR", "PLTR": "PLTR", "NVDA": "NVDA",
-    "AMD": "AMD", "BABA": "BABA", "GOOGL": "GOOGL", "AMZN": "AMZN",
-    "AAPL": "AAPL", "AVGO": "AVGO", "AI": "AI", "GRRR": "GRRR",
-    "IONQ": "IONQ", "MRVL": "MRVL", "META": "META", "MU": "MU",
-    "PONY": "PONY", "RXRX": "RXRX", "SOUN": "SOUN", "SMCI": "SMCI",
-    "TSM": "TSM", "TTWO": "TTWO", "TEM": "TEM", "UPST": "UPST",
-    "VERI": "VERI", "VRT": "VRT", "QQQ": "QQQ", "LMT": "LMT",
-}
+# Yahoo Finance symbol mapping — stock tickers map to themselves
+YF_MAP = {t: t for t in STOCK_SYMBOLS}
 
 # ── Signal names (used by outcome_tracker, accuracy_stats) ───────────────
+# Canonical source is portfolio.signal_registry.get_signal_names().
+# This static list is kept for backward compatibility with modules that
+# import SIGNAL_NAMES directly (outcome_tracker, accuracy_stats).
 
 SIGNAL_NAMES = [
     "rsi",

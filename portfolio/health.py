@@ -1,11 +1,11 @@
 """Health monitoring for the finance-analyzer Layer 1 loop."""
 
 import json
-import os
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from portfolio.file_utils import atomic_write_json
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 HEALTH_FILE = DATA_DIR / "health_state.json"
@@ -28,18 +28,7 @@ def update_health(cycle_count: int, signals_ok: int, signals_failed: int,
             {"ts": datetime.now(timezone.utc).isoformat(), "error": error}
         ]
         state["error_count"] = state.get("error_count", 0) + 1
-    # Atomic write
-    fd, tmp_path = tempfile.mkstemp(dir=str(HEALTH_FILE.parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2)
-        os.replace(tmp_path, str(HEALTH_FILE))
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+    atomic_write_json(HEALTH_FILE, state)
 
 
 def load_health() -> dict:
@@ -101,8 +90,10 @@ def check_agent_silence(max_market_seconds: int = 7200,
     now = datetime.now(timezone.utc)
     age = (now - last).total_seconds()
 
-    # Determine market hours (weekday 07:00-21:00 UTC simplified)
-    market_open = now.weekday() < 5 and 7 <= now.hour < 21
+    # DST-aware market hours check
+    from portfolio.market_timing import get_market_state
+    market_state, _, _ = get_market_state()
+    market_open = (market_state == "open")
     threshold = max_market_seconds if market_open else max_offhours_seconds
 
     return {

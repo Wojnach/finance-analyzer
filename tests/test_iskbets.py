@@ -365,8 +365,8 @@ class TestExitChecks:
 
 
 class TestATR:
-    @patch("portfolio.iskbets.requests.get")
-    def test_compute_atr_binance(self, mock_get, app_config):
+    @patch("portfolio.iskbets.fetch_with_retry")
+    def test_compute_atr_binance(self, mock_fetch, app_config):
         """ATR from Binance 15m candles."""
         # Simulate 20 candles with known values
         candles = []
@@ -381,7 +381,7 @@ class TestATR:
         mock_resp.ok = True
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = candles
-        mock_get.return_value = mock_resp
+        mock_fetch.return_value = mock_resp
 
         atr = compute_atr_15m("BTC-USD", app_config)
         assert atr > 0
