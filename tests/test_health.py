@@ -19,6 +19,7 @@ from portfolio.health import (
     update_health,
     load_health,
     check_staleness,
+    check_agent_silence,
     get_health_summary,
 )
 
@@ -265,3 +266,53 @@ class TestGetHealthSummary:
         assert len(summary["recent_errors"]) == 5
         # Should return the last 5
         assert summary["recent_errors"][-1]["error"] == "err9"
+
+    def test_includes_agent_silence_fields(self, tmp_path):
+        hf = tmp_path / "health_state.json"
+        now = datetime.now(timezone.utc).isoformat()
+        hf.write_text(json.dumps({
+            "start_time": time.time(),
+            "cycle_count": 1,
+            "error_count": 0,
+            "errors": [],
+            "last_heartbeat": now,
+            "signals_ok": 10,
+            "signals_failed": 0,
+        }), encoding="utf-8")
+        with patch("portfolio.health.HEALTH_FILE", hf):
+            summary = get_health_summary()
+        assert "agent_silent" in summary
+        assert "agent_silence_seconds" in summary
+
+
+class TestCheckAgentSilence:
+    def test_silent_when_no_invocations_file(self, tmp_path):
+        with patch("portfolio.health.DATA_DIR", tmp_path):
+            result = check_agent_silence()
+        assert result["silent"] is True
+        assert result["age_seconds"] == float("inf")
+
+    def test_not_silent_with_recent_invocation(self, tmp_path):
+        inv_file = tmp_path / "invocations.jsonl"
+        now = datetime.now(timezone.utc).isoformat()
+        inv_file.write_text(
+            json.dumps({"ts": now, "reasons": ["test"], "status": "invoked"}) + "\n",
+            encoding="utf-8",
+        )
+        with patch("portfolio.health.DATA_DIR", tmp_path):
+            result = check_agent_silence()
+        assert result["silent"] is False
+        assert result["age_seconds"] < 5
+
+    def test_silent_with_old_invocation(self, tmp_path):
+        inv_file = tmp_path / "invocations.jsonl"
+        old = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+        inv_file.write_text(
+            json.dumps({"ts": old, "reasons": ["test"], "status": "invoked"}) + "\n",
+            encoding="utf-8",
+        )
+        # Use short thresholds so 3h old invocation triggers silence regardless of market state
+        with patch("portfolio.health.DATA_DIR", tmp_path):
+            result = check_agent_silence(max_market_seconds=3600, max_offhours_seconds=3600)
+        assert result["silent"] is True
+        assert result["age_seconds"] > 3600

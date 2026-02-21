@@ -52,6 +52,7 @@ Thumbs.db
 logs/
 
 # Runtime data
+data/portfolio.log
 data/portfolio_state.json
 data/portfolio_state_bold.json
 data/telegram_messages.jsonl
@@ -96,6 +97,9 @@ data/heartbeat.txt
 data/activation_analysis.py
 data/activation_cache.json
 data/bigbet_gate_log.jsonl
+data/signal_log.db
+data/accuracy_snapshots.jsonl
+data/portfolio_value_history.jsonl
 
 # Test artifacts
 .pytest_cache/

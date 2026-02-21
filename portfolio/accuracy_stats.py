@@ -60,6 +60,19 @@ def _atomic_write_json(path, data):
 
 
 def load_entries():
+    """Load signal log entries. Prefers SQLite if available, falls back to JSONL."""
+    try:
+        from portfolio.signal_db import SignalDB
+        db = SignalDB()
+        count = db.snapshot_count()
+        if count > 0:
+            entries = db.load_entries()
+            db.close()
+            return entries
+        db.close()
+    except Exception:
+        pass
+    # Fallback to JSONL
     if not SIGNAL_LOG.exists():
         return []
     entries = []

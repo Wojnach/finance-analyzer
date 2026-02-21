@@ -30,10 +30,10 @@ class TestBinanceFapiKlines:
         mock_response.json.return_value = [_make_mock_kline_row() for _ in range(30)]
         mock_response.raise_for_status = MagicMock()
 
-        with patch("portfolio.main.requests.get", return_value=mock_response) as mock_get:
+        with patch("portfolio.data_collector.fetch_with_retry", return_value=mock_response) as mock_fetch:
             df = binance_fapi_klines("XAUUSDT", interval="1h", limit=30)
-            mock_get.assert_called_once()
-            call_url = mock_get.call_args[0][0]
+            mock_fetch.assert_called_once()
+            call_url = mock_fetch.call_args[0][0]
             assert "fapi.binance.com" in call_url
             assert len(df) == 30
             assert "close" in df.columns
@@ -44,7 +44,7 @@ class TestBinanceFapiKlines:
         mock_response.json.return_value = [_make_mock_kline_row() for _ in range(30)]
         mock_response.raise_for_status = MagicMock()
 
-        with patch("portfolio.main.requests.get", return_value=mock_response):
+        with patch("portfolio.data_collector.fetch_with_retry", return_value=mock_response):
             df = binance_fapi_klines("XAUUSDT")
             assert df["close"].dtype == float
             assert df["volume"].dtype == float
@@ -55,7 +55,7 @@ class TestBinanceFapiKlines:
         mock_response.json.return_value = [_make_mock_kline_row() for _ in range(5)]
         mock_response.raise_for_status = MagicMock()
 
-        with patch("portfolio.main.requests.get", return_value=mock_response):
+        with patch("portfolio.data_collector.fetch_with_retry", return_value=mock_response):
             df = binance_fapi_klines("XAGUSDT", interval="5m", limit=5)
             assert "time" in df.columns
             assert len(df) == 5
@@ -66,10 +66,10 @@ class TestBinanceFapiKlines:
         mock_response.json.return_value = [_make_mock_kline_row() for _ in range(10)]
         mock_response.raise_for_status = MagicMock()
 
-        with patch("portfolio.main.requests.get", return_value=mock_response) as mock_get:
+        with patch("portfolio.data_collector.fetch_with_retry", return_value=mock_response) as mock_fetch:
             binance_fapi_klines("XAUUSDT", interval="4h", limit=50)
-            call_kwargs = mock_get.call_args
-            params = call_kwargs[1]["params"] if "params" in call_kwargs[1] else call_kwargs.kwargs["params"]
+            call_kwargs = mock_fetch.call_args
+            params = call_kwargs[1]["params"]
             assert params["symbol"] == "XAUUSDT"
             assert params["interval"] == "4h"
             assert params["limit"] == 50
@@ -80,21 +80,23 @@ class TestFetchKlinesMetals:
 
     def test_fetch_klines_routes_binance_fapi(self):
         """_fetch_klines routes binance_fapi source correctly."""
-        with patch("portfolio.main.binance_fapi_klines") as mock_fapi:
+        with patch("portfolio.data_collector.binance_fapi_klines") as mock_fapi:
             mock_fapi.return_value = pd.DataFrame({"close": [100.0]})
             result = _fetch_klines({"binance_fapi": "XAUUSDT"}, "1h", 100)
             mock_fapi.assert_called_once_with("XAUUSDT", interval="1h", limit=100)
 
     def test_fetch_klines_binance_still_works(self):
         """Regular binance source still works after adding binance_fapi."""
-        with patch("portfolio.main.binance_klines") as mock_binance:
+        with patch("portfolio.data_collector.binance_klines") as mock_binance:
             mock_binance.return_value = pd.DataFrame({"close": [100.0]})
             result = _fetch_klines({"binance": "BTCUSDT"}, "1h", 100)
             mock_binance.assert_called_once_with("BTCUSDT", interval="1h", limit=100)
 
     def test_fetch_klines_alpaca_still_works(self):
         """Alpaca source still works after adding binance_fapi."""
-        with patch("portfolio.main.alpaca_klines") as mock_alpaca:
+        import portfolio.shared_state as _ss
+        _ss._current_market_state = "open"
+        with patch("portfolio.data_collector.alpaca_klines") as mock_alpaca:
             mock_alpaca.return_value = pd.DataFrame({"close": [100.0]})
             result = _fetch_klines({"alpaca": "MSTR"}, "1d", 100)
             mock_alpaca.assert_called_once_with("MSTR", interval="1d", limit=100)
@@ -140,7 +142,7 @@ class TestMetalsMarketState:
         from portfolio.main import get_market_state
         from datetime import datetime, timezone
         # Saturday 12:00 UTC
-        with patch("portfolio.main.datetime") as mock_dt:
+        with patch("portfolio.market_timing.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 2, 21, 12, 0, tzinfo=timezone.utc)
             mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
             state, symbols, interval = get_market_state()
@@ -153,7 +155,7 @@ class TestMetalsMarketState:
         from portfolio.main import get_market_state
         from datetime import datetime, timezone
         # Wednesday 3:00 UTC (market closed)
-        with patch("portfolio.main.datetime") as mock_dt:
+        with patch("portfolio.market_timing.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 2, 18, 3, 0, tzinfo=timezone.utc)
             mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
             state, symbols, interval = get_market_state()
@@ -166,7 +168,7 @@ class TestMetalsMarketState:
         from portfolio.main import get_market_state
         from datetime import datetime, timezone
         # Wednesday 14:00 UTC (market open)
-        with patch("portfolio.main.datetime") as mock_dt:
+        with patch("portfolio.market_timing.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 2, 18, 14, 0, tzinfo=timezone.utc)
             mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
             state, symbols, interval = get_market_state()

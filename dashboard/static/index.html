@@ -482,6 +482,7 @@
       <div class="nav-tab" data-tab="equity" onclick="switchTab('equity')">Equity Curve</div>
       <div class="nav-tab" data-tab="triggers" onclick="switchTab('triggers')">Trigger Timeline</div>
       <div class="nav-tab" data-tab="accuracy" onclick="switchTab('accuracy')">Accuracy</div>
+      <div class="nav-tab" data-tab="health" onclick="switchTab('health')">Health</div>
     </div>
 
     <div class="ct">
@@ -571,6 +572,13 @@
         <div class="stit">Signal Accuracy</div>
         <div class="pnl" id="accC">
           <div class="nd">Loading accuracy data...</div>
+        </div>
+      </div>
+
+      <div class="tab-content" id="tab-health">
+        <div class="stit">System Health</div>
+        <div class="pnl" id="healthC">
+          <div class="nd">Loading health data...</div>
         </div>
       </div>
     </div>
@@ -698,6 +706,7 @@
         if (name === "equity") loadEquityCurve();
         if (name === "triggers") loadTriggers();
         if (name === "accuracy") loadAccuracy();
+        if (name === "health") loadHealth();
       }
 
       /* ================================================================
@@ -1240,6 +1249,49 @@
           }
           h += '</div>';
         });
+        c.innerHTML = h;
+      }
+
+      async function loadHealth() {
+        var c = document.getElementById("healthC");
+        var d = await fj("/api/health");
+        if (!d || d.error) {
+          c.innerHTML = '<div class="nd">No health data available</div>';
+          return;
+        }
+        var sc = d.status === "healthy" ? "var(--grn)" : "var(--red)";
+        var ac = d.agent_silent ? "var(--red)" : "var(--grn)";
+        var h = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:16px">';
+        h += '<div style="background:var(--card2);padding:12px;border-radius:var(--r);border-left:3px solid ' + sc + '">';
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">Loop Status</div>';
+        h += '<div style="font-size:18px;font-weight:700;color:' + sc + '">' + d.status.toUpperCase() + '</div>';
+        h += '<div style="font-size:11px;color:var(--txd)">Heartbeat: ' + fn(d.heartbeat_age_seconds, 0) + 's ago</div>';
+        h += '</div>';
+        h += '<div style="background:var(--card2);padding:12px;border-radius:var(--r);border-left:3px solid ' + ac + '">';
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">Agent Status</div>';
+        h += '<div style="font-size:18px;font-weight:700;color:' + ac + '">' + (d.agent_silent ? "SILENT" : "ACTIVE") + '</div>';
+        h += '<div style="font-size:11px;color:var(--txd)">Last invocation: ' + fn(d.agent_silence_seconds / 60, 0) + ' min ago</div>';
+        h += '</div>';
+        h += '<div style="background:var(--card2);padding:12px;border-radius:var(--r);border-left:3px solid var(--blu)">';
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">Cycles</div>';
+        h += '<div style="font-size:18px;font-weight:700">' + d.cycle_count + '</div>';
+        h += '<div style="font-size:11px;color:var(--txd)">Signals: ' + d.signals_ok + ' ok / ' + d.signals_failed + ' failed</div>';
+        h += '</div>';
+        h += '<div style="background:var(--card2);padding:12px;border-radius:var(--r);border-left:3px solid ' + (d.error_count > 0 ? "var(--org)" : "var(--grn)") + '">';
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">Errors</div>';
+        h += '<div style="font-size:18px;font-weight:700">' + d.error_count + '</div>';
+        h += '<div style="font-size:11px;color:var(--txd)">Last trigger: ' + (d.last_trigger || "none") + '</div>';
+        h += '</div>';
+        h += '</div>';
+        if (d.recent_errors && d.recent_errors.length > 0) {
+          h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase;margin-bottom:6px">Recent Errors</div>';
+          d.recent_errors.forEach(function (e) {
+            h += '<div style="background:var(--card2);padding:8px 12px;margin-bottom:4px;border-radius:var(--r);font-size:12px;border-left:3px solid var(--red)">';
+            h += '<span style="color:var(--txm)">' + (e.ts || "").substring(0, 19) + '</span> ';
+            h += '<span style="color:var(--tx)">' + (e.error || "") + '</span>';
+            h += '</div>';
+          });
+        }
         c.innerHTML = h;
       }
 

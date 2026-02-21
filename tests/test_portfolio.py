@@ -630,7 +630,7 @@ class TestFetchUsdSek:
         fake_resp.json.return_value = {"rates": {"SEK": 10.85}}
         fake_resp.raise_for_status = mock.MagicMock()
 
-        with mock.patch("portfolio.main.requests.get", return_value=fake_resp):
+        with mock.patch("portfolio.fx_rates.fetch_with_retry", return_value=fake_resp):
             rate = fetch_usd_sek()
 
         assert rate == 10.85
@@ -643,7 +643,7 @@ class TestFetchUsdSek:
         _fx_cache["time"] = 0
 
         with mock.patch(
-            "portfolio.main.requests.get", side_effect=Exception("timeout")
+            "portfolio.fx_rates.fetch_with_retry", side_effect=Exception("timeout")
         ):
             rate = fetch_usd_sek()
 

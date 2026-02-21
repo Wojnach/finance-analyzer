@@ -78,7 +78,7 @@ Layer 2 is the sole authority on both.
 
 ## Layer 1: Python Fast Loop
 
-**Entry point:** `portfolio/main.py --loop` (2,124 lines)
+**Entry point:** `portfolio/main.py --loop` (thin orchestrator, ~435 lines; logic in 12 extracted modules)
 
 ### Loop Lifecycle
 
@@ -556,13 +556,28 @@ SELL:
 Q:/finance-analyzer/
 |
 +-- portfolio/                    # Layer 1 core
-|   +-- main.py                   # Orchestrator: loop, signals, agent invocation (2,124 lines)
+|   +-- main.py                   # Thin orchestrator: loop, run, CLI entry (~435 lines)
+|   +-- shared_state.py           # Mutable globals, caching, rate limiters
+|   +-- market_timing.py          # DST-aware market hours, agent window
+|   +-- fx_rates.py               # USD/SEK exchange rate with caching
+|   +-- indicators.py             # compute_indicators, detect_regime, technical_signal
+|   +-- data_collector.py         # Binance/Alpaca/yfinance kline fetchers, multi-TF collector
+|   +-- signal_engine.py          # 25-signal voting system, generate_signal (~570 lines)
+|   +-- portfolio_mgr.py          # Portfolio state load/save/value, atomic writes
+|   +-- reporting.py              # agent_summary.json builder, compact summary
+|   +-- telegram_notifications.py # Telegram send/escape/alert
+|   +-- digest.py                 # 4-hour digest builder
+|   +-- agent_invocation.py       # Layer 2 Claude Code subprocess invocation
+|   +-- logging_config.py         # Structured logging with RotatingFileHandler
+|   +-- signal_db.py              # SQLite storage for signal snapshots
+|   +-- migrate_signal_log.py     # One-time JSONL → SQLite migration script
 |   +-- trigger.py                # Trigger detection (202 lines)
 |   +-- journal.py                # Layer 2 memory/context builder (407 lines)
 |   +-- accuracy_stats.py         # Signal accuracy computation (563 lines)
 |   +-- outcome_tracker.py        # Outcome backfilling for signal_log (360 lines)
 |   +-- tickers.py                # Single source of truth for all ticker lists
-|   +-- http_retry.py             # HTTP retry with exponential backoff (56 lines) [NOT INTEGRATED]
+|   +-- http_retry.py             # HTTP retry with exponential backoff (integrated into all API calls)
+|   +-- health.py                 # Health monitoring: heartbeat, error tracking, agent silence
 |   +-- fear_greed.py             # Fear & Greed fetcher
 |   +-- sentiment.py              # CryptoBERT / Trading-Hero-LLM sentiment
 |   +-- social_sentiment.py       # Reddit scraper for social posts
@@ -792,7 +807,7 @@ interval check.
 
 | Issue | Impact | Effort |
 |-------|--------|--------|
-| `main.py` is 2,124 lines monolithic | Hard to test, modify, review | Large refactor |
+| ~~`main.py` is 2,124 lines monolithic~~ | **RESOLVED** — extracted 12 modules, main.py is ~435 lines | Feb 21 |
 | `http_retry.py` exists but NOT integrated into any API calls | Retries are ad-hoc or missing | Medium (wire into all `requests.*` calls) |
 | `signal_log.jsonl` grows unbounded | Disk usage, slow accuracy scans | Add rotation (log_rotation.py exists but may not cover this) |
 

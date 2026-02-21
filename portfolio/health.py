@@ -55,10 +55,59 @@ def check_staleness(max_age_seconds: int = 300) -> tuple:
     return age > max_age_seconds, age, state
 
 
+def check_agent_silence(max_market_seconds: int = 7200,
+                        max_offhours_seconds: int = 14400) -> dict:
+    """Detect silent Layer 2 agent (no invocation for too long).
+
+    Args:
+        max_market_seconds: Max allowed silence during market hours (default 2h).
+        max_offhours_seconds: Max allowed silence outside market hours (default 4h).
+
+    Returns:
+        dict with keys: silent (bool), age_seconds (float), threshold (int), market_open (bool)
+    """
+    invocations_file = DATA_DIR / "invocations.jsonl"
+    if not invocations_file.exists():
+        return {"silent": True, "age_seconds": float("inf"), "threshold": max_market_seconds, "market_open": False}
+
+    # Find last invocation timestamp
+    last_ts = None
+    for line in invocations_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+            ts = entry.get("ts")
+            if ts:
+                last_ts = ts
+        except json.JSONDecodeError:
+            continue
+
+    if not last_ts:
+        return {"silent": True, "age_seconds": float("inf"), "threshold": max_market_seconds, "market_open": False}
+
+    last = datetime.fromisoformat(last_ts)
+    now = datetime.now(timezone.utc)
+    age = (now - last).total_seconds()
+
+    # Determine market hours (weekday 07:00-21:00 UTC simplified)
+    market_open = now.weekday() < 5 and 7 <= now.hour < 21
+    threshold = max_market_seconds if market_open else max_offhours_seconds
+
+    return {
+        "silent": age > threshold,
+        "age_seconds": round(age, 1),
+        "threshold": threshold,
+        "market_open": market_open,
+    }
+
+
 def get_health_summary() -> dict:
     """Return a summary dict suitable for API/dashboard consumption."""
     state = load_health()
     is_stale, age, _ = check_staleness()
+    agent_silence = check_agent_silence()
     return {
         "status": "stale" if is_stale else "healthy",
         "heartbeat_age_seconds": round(age, 1),
@@ -69,4 +118,6 @@ def get_health_summary() -> dict:
         "recent_errors": state.get("errors", [])[-5:],
         "signals_ok": state.get("signals_ok", 0),
         "signals_failed": state.get("signals_failed", 0),
+        "agent_silent": agent_silence["silent"],
+        "agent_silence_seconds": agent_silence["age_seconds"],
     }

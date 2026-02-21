@@ -63,7 +63,7 @@ class TestMinVotersConstants:
 class TestStockConsensus:
     """Stocks with MIN_VOTERS=3 require 3 active voters for consensus."""
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_hold_with_2_voters(self, _mock):
         """RSI oversold + MACD crossover = 2 BUY voters → HOLD (need 3 for stocks)."""
         ind = make_indicators(
@@ -80,7 +80,7 @@ class TestStockConsensus:
         assert extra["_voters"] == 2
         assert action == "HOLD"  # 2 < MIN_VOTERS_STOCK(3)
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_buy_with_3_voters(self, _mock):
         """RSI + MACD + EMA = 3 BUY voters → BUY for stocks."""
         ind = make_indicators(
@@ -95,7 +95,7 @@ class TestStockConsensus:
         assert extra["_buy_count"] >= 3
         assert action == "BUY"
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_sell_with_3_voters(self, _mock):
         """RSI overbought + MACD down + EMA down = 3 SELL voters → SELL for stocks."""
         ind = make_indicators(
@@ -110,7 +110,7 @@ class TestStockConsensus:
         assert extra["_sell_count"] >= 3
         assert action == "SELL"
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_hold_with_1_voter(self, _mock):
         """Only 1 active voter → HOLD for stocks (need 3)."""
         ind = make_indicators(
@@ -125,7 +125,7 @@ class TestStockConsensus:
         assert extra["_voters"] == 1
         assert action == "HOLD"
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_all_stock_tickers_use_3_voter_threshold(self, _mock):
         """All stock tickers need 3+ voters for consensus."""
         for ticker in STOCK_SYMBOLS:
@@ -143,7 +143,7 @@ class TestStockConsensus:
 class TestCryptoConsensus:
     """Crypto with MIN_VOTERS=3 still requires 3 active voters."""
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_hold_with_2_voters(self, _mock):
         """2 BUY voters → HOLD for crypto (needs 3)."""
         ind = make_indicators(
@@ -160,7 +160,7 @@ class TestCryptoConsensus:
         assert extra["_voters"] == 2
         assert action == "HOLD"
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_buy_with_3_voters(self, _mock):
         """3 BUY voters → BUY for crypto."""
         ind = make_indicators(
@@ -182,14 +182,14 @@ class TestSentimentHysteresis:
 
     def setup_method(self):
         """Reset sentiment state between tests."""
-        import portfolio.main as pm
+        import portfolio.signal_engine as pse
 
-        pm._prev_sentiment.clear()
-        pm._prev_sentiment_loaded = True  # prevent file reads in tests
+        pse._prev_sentiment.clear()
+        pse._prev_sentiment_loaded = True  # prevent file reads in tests
 
     def test_first_sentiment_uses_low_threshold(self):
         """First reading with no previous direction uses 0.40 threshold."""
-        import portfolio.main as pm
+        import portfolio.signal_engine as pse
 
         ind = make_indicators()
         # Mock sentiment returning positive with 0.45 confidence
@@ -200,7 +200,7 @@ class TestSentimentHysteresis:
             "model": "test",
         }
         with mock.patch(
-            "portfolio.main._cached",
+            "portfolio.signal_engine._cached",
             side_effect=lambda k, t, f, *a: mock_sent if "sentiment" in k else None,
         ):
             action, conf, extra = generate_signal(ind, ticker="MSTR", config={})
@@ -210,9 +210,9 @@ class TestSentimentHysteresis:
 
     def test_same_direction_uses_low_threshold(self):
         """Same direction as previous uses 0.40 threshold."""
-        import portfolio.main as pm
+        import portfolio.signal_engine as pse
 
-        pm._prev_sentiment["MSTR"] = "positive"
+        pse._prev_sentiment["MSTR"] = "positive"
 
         ind = make_indicators()
         mock_sent = {
@@ -222,7 +222,7 @@ class TestSentimentHysteresis:
             "model": "test",
         }
         with mock.patch(
-            "portfolio.main._cached",
+            "portfolio.signal_engine._cached",
             side_effect=lambda k, t, f, *a: mock_sent if "sentiment" in k else None,
         ):
             action, conf, extra = generate_signal(ind, ticker="MSTR", config={})
@@ -232,9 +232,9 @@ class TestSentimentHysteresis:
 
     def test_flip_direction_requires_higher_threshold(self):
         """Flipping direction requires confidence > 0.55."""
-        import portfolio.main as pm
+        import portfolio.signal_engine as pse
 
-        pm._prev_sentiment["MSTR"] = "positive"
+        pse._prev_sentiment["MSTR"] = "positive"
 
         ind = make_indicators()
         # Sentiment flips to negative with 0.50 confidence (< 0.55 threshold)
@@ -252,7 +252,7 @@ class TestSentimentHysteresis:
                 return mock_sent
             return None
 
-        with mock.patch("portfolio.main._cached", side_effect=mock_cached_fn):
+        with mock.patch("portfolio.signal_engine._cached", side_effect=mock_cached_fn):
             action, conf, extra = generate_signal(ind, ticker="MSTR", config={})
 
         # 0.50 < 0.55 flip threshold → should NOT add a vote
@@ -264,9 +264,9 @@ class TestSentimentHysteresis:
 
     def test_flip_direction_above_threshold_votes(self):
         """Flipping direction with confidence > 0.55 should vote."""
-        import portfolio.main as pm
+        import portfolio.signal_engine as pse
 
-        pm._prev_sentiment["MSTR"] = "positive"
+        pse._prev_sentiment["MSTR"] = "positive"
 
         ind = make_indicators()
         mock_sent = {
@@ -281,7 +281,7 @@ class TestSentimentHysteresis:
                 return mock_sent
             return None
 
-        with mock.patch("portfolio.main._cached", side_effect=mock_cached_fn):
+        with mock.patch("portfolio.signal_engine._cached", side_effect=mock_cached_fn):
             action, conf, extra = generate_signal(ind, ticker="MSTR", config={})
 
         # 0.60 > 0.55 flip threshold → should count as a sell vote
@@ -291,19 +291,19 @@ class TestSentimentHysteresis:
 class TestStockSignalVoteCounts:
     """Stock signal generation produces correct total_applicable counts."""
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_total_applicable_is_21(self, _mock):
         ind = make_indicators()
         _, _, extra = generate_signal(ind, ticker="MSTR")
         assert extra["_total_applicable"] == 21  # 7 original + 14 enhanced
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_total_applicable_is_25(self, _mock):
         ind = make_indicators(close=69000.0)
         _, _, extra = generate_signal(ind, ticker="BTC-USD")
         assert extra["_total_applicable"] == 24  # 10 original + 14 enhanced (custom_lora disabled)
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_max_technical_voters_is_4(self, _mock):
         """All 4 technical signals vote → 4 active voters for stocks."""
         ind = make_indicators(

@@ -1,0 +1,264 @@
+"""Agent summary reporting — builds JSON summaries for Layer 2 consumption."""
+
+import copy
+import json
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+
+from portfolio.shared_state import _cached
+from portfolio.indicators import detect_regime
+from portfolio.portfolio_mgr import _atomic_write_json, portfolio_value
+from portfolio.tickers import CRYPTO_SYMBOLS, STOCK_SYMBOLS
+
+import portfolio.shared_state as _ss
+
+logger = logging.getLogger("portfolio.reporting")
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = BASE_DIR / "data"
+AGENT_SUMMARY_FILE = DATA_DIR / "agent_summary.json"
+COMPACT_SUMMARY_FILE = DATA_DIR / "agent_summary_compact.json"
+
+
+def _cross_asset_signals(all_signals):
+    btc = all_signals.get("BTC-USD", {})
+    btc_action = btc.get("action", "HOLD")
+    if btc_action == "HOLD":
+        return {}
+
+    followers = {"ETH-USD": "BTC-USD", "MSTR": "BTC-USD"}
+    leads = {}
+    for follower, leader in followers.items():
+        f_data = all_signals.get(follower, {})
+        f_action = f_data.get("action", "HOLD")
+        if f_action == "HOLD" and btc_action != "HOLD":
+            leads[follower] = {
+                "leader": leader,
+                "leader_action": btc_action,
+                "note": f"{leader} is {btc_action} but {follower} hasn't moved yet",
+            }
+    return leads
+
+
+def write_agent_summary(
+    signals, prices_usd, fx_rate, state, tf_data, trigger_reasons=None
+):
+    total = portfolio_value(state, prices_usd, fx_rate)
+    pnl_pct = ((total - state["initial_value_sek"]) / state["initial_value_sek"]) * 100
+
+    summary = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "trigger_reasons": trigger_reasons or [],
+        "fx_rate": round(fx_rate, 2),
+        "portfolio": {
+            "total_sek": round(total),
+            "pnl_pct": round(pnl_pct, 2),
+            "cash_sek": round(state["cash_sek"]),
+            "holdings": state.get("holdings", {}),
+            "num_transactions": len(state.get("transactions", [])),
+        },
+        "signals": {},
+        "timeframes": {},
+        "fear_greed": {},
+    }
+
+    for name, sig in signals.items():
+        extra = sig.get("extra", {})
+        ind = sig["indicators"]
+        # Collect enhanced signal summaries (compact, no sub_signals detail in top-level)
+        enhanced = {}
+        for esig_name in ("trend", "momentum", "volume_flow", "volatility_sig",
+                          "candlestick", "structure", "fibonacci", "smart_money",
+                          "oscillators", "heikin_ashi", "mean_reversion", "calendar",
+                          "macro_regime", "momentum_factors"):
+            eaction = extra.get(f"{esig_name}_action", "HOLD")
+            econf = extra.get(f"{esig_name}_confidence", 0.0)
+            enhanced[esig_name] = {"action": eaction, "confidence": econf}
+
+        # Strip bulky sub_signals from extra to keep agent_summary.json lean
+        extra_clean = {k: v for k, v in extra.items() if not k.endswith("_sub_signals")}
+
+        sig_entry = {
+            "action": sig["action"],
+            "confidence": sig["confidence"],
+            "weighted_confidence": extra.get("_weighted_confidence", 0.0),
+            "confluence_score": extra.get("_confluence_score", 0.0),
+            "price_usd": ind["close"],
+            "rsi": round(ind["rsi"], 1),
+            "macd_hist": round(ind["macd_hist"], 2),
+            "bb_position": ind["price_vs_bb"],
+            "atr": round(ind.get("atr", 0), 4),
+            "atr_pct": round(ind.get("atr_pct", 0), 2),
+            "regime": detect_regime(ind, is_crypto=name in CRYPTO_SYMBOLS),
+            "enhanced_signals": enhanced,
+            "extra": extra_clean,
+        }
+        # Mark extended-hours data for stocks (yfinance prepost during off-hours)
+        if name in STOCK_SYMBOLS and _ss._current_market_state in ("closed", "weekend"):
+            sig_entry["extended_hours"] = True
+        summary["signals"][name] = sig_entry
+        if "fear_greed" in extra:
+            summary["fear_greed"][name] = {
+                "value": extra["fear_greed"],
+                "classification": extra.get("fear_greed_class", ""),
+            }
+
+        tf_list = []
+        for label, entry in tf_data.get(name, []):
+            if "error" in entry:
+                tf_list.append({"horizon": label, "error": entry["error"]})
+            else:
+                ei = entry["indicators"]
+                tf_list.append(
+                    {
+                        "horizon": label,
+                        "action": entry["action"] if label != "Now" else sig["action"],
+                        "confidence": (
+                            entry["confidence"] if label != "Now" else sig["confidence"]
+                        ),
+                        "rsi": round(ei["rsi"], 1),
+                        "macd_hist": round(ei["macd_hist"], 2),
+                        "ema_bullish": ei["ema9"] > ei["ema21"],
+                        "bb_position": ei["price_vs_bb"],
+                    }
+                )
+        summary["timeframes"][name] = tf_list
+
+    # Macro context (non-voting, for Claude Code reasoning)
+    try:
+        from portfolio.macro_context import get_dxy, get_fed_calendar, get_treasury
+
+        macro = {}
+        dxy = _cached("dxy", 3600, get_dxy)
+        if dxy:
+            macro["dxy"] = dxy
+        treasury = _cached("treasury", 3600, get_treasury)
+        if treasury:
+            macro["treasury"] = treasury
+        fed = get_fed_calendar()
+        if fed:
+            macro["fed"] = fed
+        if macro:
+            summary["macro"] = macro
+    except (ImportError, Exception):
+        pass
+
+    try:
+        from portfolio.accuracy_stats import (
+            signal_accuracy,
+            consensus_accuracy,
+            best_worst_signals,
+        )
+
+        sig_acc = signal_accuracy("1d")
+        cons_acc = consensus_accuracy("1d")
+        bw = best_worst_signals("1d")
+        qualified = {k: v for k, v in sig_acc.items() if v["total"] >= 5}
+        if qualified:
+            summary["signal_accuracy_1d"] = {
+                "signals": {
+                    k: {"accuracy": round(v["accuracy"], 3), "samples": v["total"]}
+                    for k, v in qualified.items()
+                },
+                "consensus": {
+                    "accuracy": round(cons_acc["accuracy"], 3),
+                    "samples": cons_acc["total"],
+                },
+                "best": bw.get("best"),
+                "worst": bw.get("worst"),
+            }
+    except Exception:
+        pass
+
+    # Signal activation rates (normalized weights for Layer 2 reference)
+    try:
+        from portfolio.accuracy_stats import load_cached_activation_rates
+        act_rates = load_cached_activation_rates()
+        if act_rates:
+            summary["signal_weights"] = {
+                name: {
+                    "activation_rate": d["activation_rate"],
+                    "normalized_weight": d["normalized_weight"],
+                    "bias": d["bias"],
+                }
+                for name, d in act_rates.items()
+                if d.get("samples", 0) > 0
+            }
+    except Exception:
+        pass
+
+    cross_leads = _cross_asset_signals(signals)
+    if cross_leads:
+        summary["cross_asset_leads"] = cross_leads
+
+    # Avanza-tracked instruments (Tier 2: Nordic equities, Tier 3: warrants)
+    try:
+        from portfolio.avanza_tracker import fetch_avanza_prices
+        avanza_prices = fetch_avanza_prices()
+        if avanza_prices:
+            summary["avanza_instruments"] = avanza_prices
+    except Exception:
+        pass
+
+    # Preserve stale data for instruments not in current cycle (e.g. stocks off-hours)
+    # so Layer 2 always sees all instruments
+    if AGENT_SUMMARY_FILE.exists():
+        try:
+            prev = json.loads(AGENT_SUMMARY_FILE.read_text(encoding="utf-8"))
+            for section in ("signals", "timeframes", "fear_greed"):
+                prev_section = prev.get(section, {})
+                for ticker, data in prev_section.items():
+                    if ticker not in summary[section]:
+                        if section == "signals" and isinstance(data, dict):
+                            data["stale"] = True
+                        summary[section][ticker] = data
+        except Exception:
+            pass
+
+    _atomic_write_json(AGENT_SUMMARY_FILE, summary)
+    _write_compact_summary(summary)
+    return summary
+
+
+def _write_compact_summary(summary):
+    """Write a stripped version of agent_summary for Layer 2 (<25K tokens).
+
+    Removes enhanced_signals (already in extra._votes) and verbose extra fields,
+    keeping only the essentials Layer 2 needs for decision-making.
+    """
+    KEEP_EXTRA = {
+        "fear_greed", "fear_greed_class",
+        "sentiment", "sentiment_conf",
+        "ml_action", "ml_confidence",
+        "funding_rate", "funding_action",
+        "volume_ratio", "volume_action",
+        "ministral_action",
+        "_voters", "_total_applicable", "_buy_count", "_sell_count",
+        "_votes", "_weighted_action", "_weighted_confidence",
+        "_confluence_score",
+    }
+
+    compact = copy.deepcopy(summary)
+
+    for ticker_data in compact.get("signals", {}).values():
+        ticker_data.pop("enhanced_signals", None)
+        if "extra" in ticker_data:
+            ticker_data["extra"] = {
+                k: v for k, v in ticker_data["extra"].items()
+                if k in KEEP_EXTRA
+            }
+
+    # Compact timeframes: keep only horizon + action (indicators duplicate top-level)
+    for ticker, tf_list in compact.get("timeframes", {}).items():
+        compact["timeframes"][ticker] = [
+            {"horizon": tf["horizon"], "action": tf.get("action", "HOLD")}
+            if "error" not in tf else {"horizon": tf["horizon"], "error": tf["error"]}
+            for tf in tf_list
+        ]
+
+    # Remove sections redundant in compact (already in per-ticker extra or baked in)
+    compact.pop("fear_greed", None)      # in extra.fear_greed per ticker
+    compact.pop("signal_weights", None)  # already applied in _weighted_confidence
+
+    _atomic_write_json(COMPACT_SUMMARY_FILE, compact)

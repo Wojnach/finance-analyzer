@@ -92,7 +92,7 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
     reasons = []
 
     now_utc = datetime.now(timezone.utc)
-    from portfolio.main import _market_close_hour_utc
+    from portfolio.market_timing import _market_close_hour_utc
     close_hour = _market_close_hour_utc(now_utc)
     market_open = now_utc.weekday() < 5 and 7 <= now_utc.hour < close_hour
 

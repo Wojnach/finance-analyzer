@@ -162,6 +162,15 @@ def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
     with open(SIGNAL_LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
 
+    # Dual-write to SQLite
+    try:
+        from portfolio.signal_db import SignalDB
+        db = SignalDB()
+        db.insert_snapshot(entry)
+        db.close()
+    except Exception:
+        pass  # SQLite write is best-effort; JSONL is the primary
+
     return entry
 
 
@@ -324,14 +333,27 @@ def backfill_outcomes():
                         ((hist_price - base_price) / base_price) * 100, 2
                     )
 
+                outcome_ts_str = datetime.fromtimestamp(
+                    target_ts, tz=timezone.utc
+                ).isoformat()
                 outcomes[ticker][h_key] = {
                     "price_usd": round(hist_price, 2),
                     "change_pct": change_pct,
-                    "ts": datetime.fromtimestamp(
-                        target_ts, tz=timezone.utc
-                    ).isoformat(),
+                    "ts": outcome_ts_str,
                 }
                 entry_updated = True
+
+                # Dual-write outcome to SQLite
+                try:
+                    from portfolio.signal_db import SignalDB
+                    _db = SignalDB()
+                    _db.update_outcome(
+                        entry["ts"], ticker, h_key,
+                        round(hist_price, 2), change_pct, outcome_ts_str,
+                    )
+                    _db.close()
+                except Exception:
+                    pass
 
         entry["outcomes"] = outcomes
         if entry_updated:

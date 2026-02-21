@@ -383,5 +383,18 @@ def api_triggers():
     return jsonify(entries)
 
 
+@app.route("/api/health")
+@require_auth
+def api_health():
+    """Return system health summary (loop heartbeat, errors, agent silence)."""
+    try:
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from portfolio.health import get_health_summary
+        return jsonify(get_health_summary())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5055, debug=False)

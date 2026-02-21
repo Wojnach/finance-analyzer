@@ -112,7 +112,7 @@ class TestComputeIndicatorsATR:
 
 
 class TestNamedVotes:
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_votes_dict_has_signal_names(self, _mock):
         ind = make_indicators()
         _, _, extra = generate_signal(ind, ticker="MSTR")
@@ -131,7 +131,7 @@ class TestNamedVotes:
             assert name in votes
             assert votes[name] in ("BUY", "SELL", "HOLD")
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_votes_dict_crypto_has_all_25(self, _mock):
         ind = make_indicators(close=69000.0)
         _, _, extra = generate_signal(ind, ticker="BTC-USD")
@@ -142,7 +142,7 @@ class TestNamedVotes:
         # 10 core (11 - custom_lora) + 14 enhanced composite signals = 24
         assert len(votes) == 24
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_buy_count_matches_votes(self, _mock):
         ind = make_indicators(rsi=25, macd_hist=1.0, macd_hist_prev=-1.0)
         _, _, extra = generate_signal(ind, ticker="MSTR")
@@ -186,8 +186,9 @@ class TestLogSignalSnapshotUsesPassedVotes:
 
 
 class TestAgentSummaryATR:
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
-    def test_atr_in_agent_summary(self, _mock):
+    @mock.patch("portfolio.reporting._atomic_write_json")
+    @mock.patch("portfolio.reporting._cached", side_effect=_null_cached)
+    def test_atr_in_agent_summary(self, _mock_cached, _mock_write):
         ind = make_indicators()
         signals = {
             "MSTR": {
@@ -356,14 +357,14 @@ class TestConfluenceScore:
 
 
 class TestAdaptiveRSI:
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_uses_percentiles(self, _mock):
         # RSI at 25, but adaptive lower bound is 20 → should NOT trigger BUY
         ind = make_indicators(rsi=25, rsi_p20=20.0, rsi_p80=75.0)
         _, _, extra = generate_signal(ind, ticker="MSTR")
         assert extra["_votes"]["rsi"] == "HOLD"
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_fallback_when_insufficient_data(self, _mock):
         # rsi_p20 defaults to 30 when not available
         ind = make_indicators(rsi=25)
@@ -373,7 +374,7 @@ class TestAdaptiveRSI:
         # Falls back to 30/70, RSI 25 < 30 → BUY
         assert extra["_votes"]["rsi"] == "BUY"
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_floor_ceiling_enforced(self, _mock):
         # Even if percentile says lower=10, we clamp to 15
         ind = make_indicators(rsi=14, rsi_p20=10.0, rsi_p80=90.0)
@@ -384,7 +385,7 @@ class TestAdaptiveRSI:
 
 class TestTimeOfDayFactor:
     def test_quiet_hours(self):
-        with mock.patch("portfolio.main.datetime") as mock_dt:
+        with mock.patch("portfolio.signal_engine.datetime") as mock_dt:
             mock_now = mock.MagicMock()
             mock_now.hour = 3
             mock_dt.now.return_value = mock_now
@@ -393,7 +394,7 @@ class TestTimeOfDayFactor:
             assert factor == 0.8
 
     def test_active_hours(self):
-        with mock.patch("portfolio.main.datetime") as mock_dt:
+        with mock.patch("portfolio.signal_engine.datetime") as mock_dt:
             mock_now = mock.MagicMock()
             mock_now.hour = 14
             mock_dt.now.return_value = mock_now
@@ -437,8 +438,9 @@ class TestCrossAssetSignals:
 
 
 class TestAgentSummaryAllFields:
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
-    def test_includes_all_new_fields(self, _mock):
+    @mock.patch("portfolio.reporting._atomic_write_json")
+    @mock.patch("portfolio.reporting._cached", side_effect=_null_cached)
+    def test_includes_all_new_fields(self, _mock_cached, _mock_write):
         ind = make_indicators()
         signals = {
             "BTC-USD": {

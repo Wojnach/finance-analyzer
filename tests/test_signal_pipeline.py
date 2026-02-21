@@ -78,7 +78,7 @@ def make_ohlcv_df(n=100, base_price=100.0, trend=0.0):
 class TestGenerateSignalStructure:
     """Verify generate_signal returns the expected structure for all ticker types."""
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_signal_structure(self, _mock):
         """Crypto ticker returns all expected keys."""
         ind = make_indicators()
@@ -96,7 +96,7 @@ class TestGenerateSignalStructure:
         assert "_weighted_action" in extra
         assert "_weighted_confidence" in extra
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_signal_structure(self, _mock):
         """Stock ticker returns all expected keys."""
         ind = make_indicators(close=130.0)
@@ -107,7 +107,7 @@ class TestGenerateSignalStructure:
         assert "_total_applicable" in extra
         assert "_votes" in extra
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_metal_signal_structure(self, _mock):
         """Metal ticker returns all expected keys."""
         ind = make_indicators(close=2000.0)
@@ -125,7 +125,7 @@ class TestGenerateSignalStructure:
 class TestVoteCountIntegrity:
     """Verify _buy_count + _sell_count + holds = _total_applicable."""
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_vote_counts(self, _mock):
         """For crypto, total applicable = 24 (with custom_lora disabled)."""
         ind = make_indicators()
@@ -148,7 +148,7 @@ class TestVoteCountIntegrity:
         assert buy_count == sum(1 for v in votes.values() if v == "BUY")
         assert sell_count == sum(1 for v in votes.values() if v == "SELL")
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_vote_counts(self, _mock):
         """For stocks, total applicable = 21."""
         ind = make_indicators(close=130.0)
@@ -157,7 +157,7 @@ class TestVoteCountIntegrity:
 
         assert extra["_total_applicable"] == 21
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_metal_vote_counts(self, _mock):
         """For metals, total applicable = 21."""
         ind = make_indicators(close=2000.0)
@@ -166,7 +166,7 @@ class TestVoteCountIntegrity:
 
         assert extra["_total_applicable"] == 21
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_all_stock_symbols_have_21_applicable(self, _mock):
         """Every stock symbol should have exactly 21 total applicable signals."""
         ind = make_indicators(close=100.0)
@@ -183,7 +183,7 @@ class TestVoteCountIntegrity:
 # ---------------------------------------------------------------------------
 
 class TestVoteConsistency:
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_buy_count_matches_votes(self, _mock):
         """_buy_count should exactly match number of BUY votes."""
         ind = make_indicators(
@@ -196,7 +196,7 @@ class TestVoteConsistency:
         actual_buys = sum(1 for v in extra["_votes"].values() if v == "BUY")
         assert extra["_buy_count"] == actual_buys
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_sell_count_matches_votes(self, _mock):
         """_sell_count should exactly match number of SELL votes."""
         ind = make_indicators(
@@ -209,7 +209,7 @@ class TestVoteConsistency:
         actual_sells = sum(1 for v in extra["_votes"].values() if v == "SELL")
         assert extra["_sell_count"] == actual_sells
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_voters_equals_buy_plus_sell(self, _mock):
         """_voters should equal _buy_count + _sell_count."""
         ind = make_indicators()
@@ -224,7 +224,7 @@ class TestVoteConsistency:
 # ---------------------------------------------------------------------------
 
 class TestConsensusThresholds:
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_needs_3_voters(self, _mock):
         """Crypto needs MIN_VOTERS=3 active voters to reach consensus."""
         # Only 2 voters: RSI + MACD
@@ -236,7 +236,7 @@ class TestConsensusThresholds:
         assert extra["_voters"] == 2
         assert action == "HOLD"
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_needs_3_voters(self, _mock):
         """Stocks need MIN_VOTERS=3 active voters to reach consensus."""
         # Only 2 voters: RSI + MACD → HOLD (need 3)
@@ -248,7 +248,7 @@ class TestConsensusThresholds:
         assert extra["_voters"] == 2
         assert action == "HOLD"  # 2 < MIN_VOTERS_STOCK(3)
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_metal_needs_3_voters(self, _mock):
         """Metals need MIN_VOTERS=3 active voters to reach consensus."""
         # Only 2 voters: RSI + MACD → HOLD (need 3)
@@ -266,7 +266,7 @@ class TestConsensusThresholds:
 # ---------------------------------------------------------------------------
 
 class TestWeightedConsensus:
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_weighted_confidence_in_range(self, _mock):
         """Weighted confidence should be between 0.0 and 1.0."""
         ind = make_indicators(
@@ -279,7 +279,7 @@ class TestWeightedConsensus:
         wc = extra["_weighted_confidence"]
         assert 0.0 <= wc <= 1.0
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_weighted_action_is_valid(self, _mock):
         """Weighted action should be BUY, SELL, or HOLD."""
         ind = make_indicators()
@@ -294,7 +294,7 @@ class TestWeightedConsensus:
 # ---------------------------------------------------------------------------
 
 class TestEnhancedSignals:
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_enhanced_signals_present_with_df(self, _mock):
         """Enhanced signal modules should produce votes when df is provided."""
         ind = make_indicators()
@@ -311,7 +311,7 @@ class TestEnhancedSignals:
             assert name in extra["_votes"], f"Missing enhanced signal: {name}"
             assert extra["_votes"][name] in ("BUY", "SELL", "HOLD")
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_enhanced_signals_hold_without_df(self, _mock):
         """Without df, enhanced signals should all be HOLD."""
         ind = make_indicators()
@@ -327,7 +327,7 @@ class TestEnhancedSignals:
             assert extra["_votes"][name] == "HOLD", \
                 f"{name} should be HOLD without df, got {extra['_votes'][name]}"
 
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_enhanced_signals_hold_with_short_df(self, _mock):
         """With df shorter than 26 rows, enhanced signals should be HOLD."""
         ind = make_indicators()
@@ -343,7 +343,7 @@ class TestEnhancedSignals:
 # ---------------------------------------------------------------------------
 
 class TestRegimeDetection:
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_regime_field_present(self, _mock):
         """Regime should be present in extra info."""
         ind = make_indicators()
@@ -361,7 +361,7 @@ class TestRegimeDetection:
 # ---------------------------------------------------------------------------
 
 class TestConfluenceScore:
-    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_confluence_score_present(self, _mock):
         """Confluence score should be present in extra."""
         ind = make_indicators()
@@ -406,7 +406,7 @@ class TestWriteAgentSummary:
         }
         tf_data = {"BTC-USD": []}
 
-        with mock.patch("portfolio.main._cached", side_effect=_null_cached):
+        with mock.patch("portfolio.reporting._cached", side_effect=_null_cached):
             # Capture the summary by patching _atomic_write_json
             captured = {}
             original_write = None
@@ -414,7 +414,7 @@ class TestWriteAgentSummary:
                 from portfolio.main import _atomic_write_json, AGENT_SUMMARY_FILE
                 def capture_write(path, data):
                     captured["data"] = data
-                with mock.patch("portfolio.main._atomic_write_json", side_effect=capture_write):
+                with mock.patch("portfolio.reporting._atomic_write_json", side_effect=capture_write):
                     write_agent_summary(signals, prices_usd, fx_rate, state, tf_data)
             except Exception:
                 pass
@@ -454,8 +454,8 @@ class TestWriteAgentSummary:
         def capture_write(path, data):
             captured["data"] = data
 
-        with mock.patch("portfolio.main._cached", side_effect=_null_cached), \
-             mock.patch("portfolio.main._atomic_write_json", side_effect=capture_write):
+        with mock.patch("portfolio.reporting._cached", side_effect=_null_cached), \
+             mock.patch("portfolio.reporting._atomic_write_json", side_effect=capture_write):
             write_agent_summary(signals, {"BTC-USD": 69000.0}, 10.50, state,
                               {"BTC-USD": []})
 

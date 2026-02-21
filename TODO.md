@@ -139,8 +139,8 @@ Full plan: `docs/plans/2026-02-09-llm-trading-research.md`
 - [x] Add log rotation utility (prevent unbounded growth of JSONL files)
 - [x] **Integrate HTTP retry:** `http_retry.py` existed but was never wired in. Now integrated into all API calls (Binance, Alpaca, FX, macro). (Feb 21)
 - [x] **Add health monitoring:** New `portfolio/health.py` — heartbeat tracking, error counts, staleness detection. (Feb 21)
-- [ ] Migrate signal_log.jsonl to SQLite (JSONL files grow unbounded, slow to query for accuracy)
-- [ ] Add /api/health endpoint to dashboard (use health.py data)
+- [x] **Migrate signal_log to SQLite:** New `portfolio/signal_db.py` — WAL-mode SQLite with dual-write from JSONL. Accuracy queries now use SQLite-first with JSONL fallback. Migration script: `portfolio/migrate_signal_log.py`. 979 entries migrated. (Feb 21)
+- [x] **Add /api/health endpoint:** Dashboard `/api/health` route + Health tab with loop/agent status, cycle counts, error tracking. (Feb 21)
 
 ### Code Quality
 
@@ -148,9 +148,9 @@ Full plan: `docs/plans/2026-02-09-llm-trading-research.md`
 - [x] **Add health tests:** New `test_health.py` for health monitoring module. (Feb 21)
 - [x] **Update README.md:** Was outdated (Freqtrade references). Now reflects two-layer architecture. (Feb 21)
 - [x] **Write system design doc:** New `docs/system-design.md` — comprehensive engineering reference. (Feb 21)
-- [ ] **Modularize main.py:** Currently 2,124 lines. Extract signal_engine.py, data_collector.py
+- [x] **Modularize main.py:** Extracted 10 modules (shared_state, market_timing, fx_rates, indicators, data_collector, signal_engine, portfolio_mgr, reporting, telegram_notifications, digest, agent_invocation, logging_config). main.py reduced from 2,124 → ~435 lines. Full backwards-compatible re-exports. (Feb 21)
 - [ ] Add test_http_retry.py for retry integration
-- [ ] Add dashboard tests (currently 0)
+- [x] **Add dashboard tests:** New `tests/test_dashboard.py` — 43 tests covering all API routes, auth middleware, portfolio validation. (Feb 21)
 - [ ] Add performance/stress tests for 7TF x 31 ticker scale
 
 ### Dashboard Improvements
@@ -163,8 +163,8 @@ Full plan: `docs/plans/2026-02-09-llm-trading-research.md`
 ### Operational
 
 - [ ] Telegram alert on Layer 1 crash (currently silent — only discoverable via loop_out.txt)
-- [ ] Automated Layer 2 health monitoring (detect "silent agent" — no invocation for >2 hours during market hours)
-- [ ] Structured error logging (replace print() with proper logging framework)
+- [x] **Automated Layer 2 health monitoring:** `check_agent_silence()` in health.py detects silent agent (>2h market hours, >4h off-hours). Exposed via `/api/health` and Health dashboard tab. (Feb 21)
+- [x] **Structured error logging:** New `portfolio/logging_config.py` — RotatingFileHandler (10MB, 3 backups) + StreamHandler. ~40 print() calls replaced with logger.info/warning/error. (Feb 21)
 
 ---
 
