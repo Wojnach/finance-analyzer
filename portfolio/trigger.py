@@ -6,7 +6,7 @@ Layer 1 runs every minute during market hours. Layer 2 is invoked when:
 - Price moved >2% since last trigger
 - Fear & Greed crossed extreme threshold (20 or 80)
 - Sentiment reversal (positive↔negative)
-- Cooldown expired (30 min market hours, 1h off-hours)
+- Cooldown expired (1 min market hours, 2h off-hours)
 
 After a trade (BUY/SELL), the cooldown timer is reset so the agent can
 reassess the new portfolio state promptly.
@@ -24,8 +24,8 @@ STATE_FILE = BASE_DIR / "data" / "trigger_state.json"
 PORTFOLIO_FILE = BASE_DIR / "data" / "portfolio_state.json"
 PORTFOLIO_BOLD_FILE = BASE_DIR / "data" / "portfolio_state_bold.json"
 
-COOLDOWN_SECONDS = 1800  # 30 min max silence (market hours)
-OFFHOURS_COOLDOWN = 3600  # 1 hour (nights/weekends, crypto only)
+COOLDOWN_SECONDS = 60  # 1 min max silence (market hours)
+OFFHOURS_COOLDOWN = 7200  # 2 hours (nights/weekends, crypto only)
 PRICE_THRESHOLD = 0.02  # 2% move
 FG_THRESHOLDS = (20, 80)  # extreme fear / extreme greed boundaries
 SUSTAINED_CHECKS = 3  # consecutive cycles a signal must hold before triggering

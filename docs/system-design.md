@@ -319,8 +319,8 @@ check_triggers(signals, prices_usd, fear_greeds, sentiments)
       +-> 5. Sentiment reversal: positive <-> negative
       |
       +-> 6. Cooldown expired:
-      |      30 min (market hours) -- max silence
-      |      60 min (nights/weekends) -- crypto-only check-ins
+      |      1 min (market hours) -- max silence
+      |      120 min (nights/weekends) -- crypto-only check-ins
       |
       +-> return (triggered: bool, reasons: list[str])
 ```

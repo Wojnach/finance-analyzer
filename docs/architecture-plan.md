@@ -43,7 +43,7 @@ messages. The fast loop NEVER trades or sends Telegram on its own.
 │  • Price moved >2% since last trigger                            │
 │  • Fear & Greed crossed threshold (20 or 80)                     │
 │  • Sentiment reversal (positive↔negative)                        │
-│  • Cooldown expired (30min market hours, 1hr off-hours)          │
+│  • Cooldown expired (1min market hours, 2hr off-hours)           │
 │  • Post-trade: cooldown resets after BUY/SELL for reassessment   │
 │                                                                   │
 │  If trigger fires → invoke Claude Code (Layer 2) via subprocess  │

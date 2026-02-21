@@ -385,7 +385,7 @@ class TestMarketHoursBoundary(TriggerTestBase):
 
             triggered, reasons = check_triggers(sigs, prices, {}, {})
 
-        # Market hours cooldown reason (30min interval)
+        # Market hours cooldown reason (1min interval)
         if triggered:
             assert any("cooldown" in r for r in reasons)
 
@@ -513,11 +513,11 @@ class TestMultipleTriggerReasons(TriggerTestBase):
 # ---------------------------------------------------------------------------
 
 class TestCooldownConstants:
-    def test_market_hours_cooldown_is_30_min(self):
-        assert COOLDOWN_SECONDS == 1800
+    def test_market_hours_cooldown_is_1_min(self):
+        assert COOLDOWN_SECONDS == 60
 
-    def test_offhours_cooldown_is_1_hour(self):
-        assert OFFHOURS_COOLDOWN == 3600
+    def test_offhours_cooldown_is_2_hours(self):
+        assert OFFHOURS_COOLDOWN == 7200
 
     def test_price_threshold_is_2_pct(self):
         assert PRICE_THRESHOLD == 0.02
