@@ -321,6 +321,10 @@ def loop(interval=None):
     from portfolio.logging_config import setup_logging
     setup_logging()
 
+    # Validate config on startup (fail fast if misconfigured)
+    from portfolio.config_validator import validate_config_file
+    validate_config_file()
+
     # Check if previous loop crashed (stale heartbeat)
     heartbeat_file = DATA_DIR / "heartbeat.txt"
     if heartbeat_file.exists():

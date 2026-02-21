@@ -1,7 +1,7 @@
 # Portfolio Intelligence -- System Design
 
 A practical engineering reference for the finance-analyzer trading system.
-Last updated: 2026-02-21 (audit v2: signal registry, file_utils, bug fixes).
+Last updated: 2026-02-22 (audit v3: + circuit breaker, config validator, Telegram consolidation).
 
 ---
 
@@ -571,6 +571,8 @@ Q:/finance-analyzer/
 |   +-- logging_config.py         # Structured logging with RotatingFileHandler
 |   +-- signal_registry.py       # Plugin-style signal registration system (NEW v2)
 |   +-- file_utils.py            # Shared atomic_write_json utility (NEW v2)
+|   +-- circuit_breaker.py       # Circuit breaker for data source APIs (NEW v3)
+|   +-- config_validator.py      # Startup config.json validation (NEW v3)
 |   +-- signal_db.py              # SQLite storage for signal snapshots
 |   +-- migrate_signal_log.py     # One-time JSONL → SQLite migration script
 |   +-- trigger.py                # Trigger detection (202 lines)
@@ -813,12 +815,14 @@ interval check.
 | ~~`http_retry.py` exists but NOT integrated into any API calls~~ | **RESOLVED** — integrated into all API calls (Feb 21 audit) | Done |
 | `signal_log.jsonl` grows unbounded | Disk usage, slow accuracy scans | Add rotation (log_rotation.py exists but may not cover this) |
 
-### New Modules (Feb 21 Audit v2)
+### New Modules (Feb 21-22 Audit)
 
 | Module | Purpose |
 |--------|---------|
 | `portfolio/signal_registry.py` | Plugin-style signal registration; signals register at import, signal_engine discovers from registry instead of hardcoded lists |
 | `portfolio/file_utils.py` | Shared `atomic_write_json()` extracted from 6 modules (portfolio_mgr, trigger, bigbet, iskbets, health, accuracy_stats) |
+| `portfolio/circuit_breaker.py` | Circuit breaker for data source APIs (Binance spot/fapi, Alpaca). CLOSED→OPEN after 5 failures, OPEN→HALF_OPEN after 60s recovery timeout |
+| `portfolio/config_validator.py` | Startup validation of config.json. Checks required keys (telegram, alpaca), warns on missing optional keys. Called once in `main.loop()` |
 
 ### Bug Fixes (Feb 21 Audit v2)
 

@@ -1,55 +1,75 @@
-"""Validates config.json structure at startup."""
+"""Config validation for portfolio system startup.
+
+Validates config.json has all required keys before the main loop starts.
+"""
 
 import json
-import pathlib
+import logging
+from pathlib import Path
 
-BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
+logger = logging.getLogger("portfolio.config_validator")
 
-REQUIRED_KEYS = {
-    "telegram": {"token": str, "chat_id": (str, int)},
-    "exchange": {"apiKey": str, "secret": str},
-}
+CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 
-OPTIONAL_KEYS = {
-    "alpaca": {"key": str, "secret": str},
-    "dashboard_token": str,
-}
+# Required: missing any of these is a fatal error
+REQUIRED_KEYS = [
+    ("telegram", "token"),
+    ("telegram", "chat_id"),
+    ("alpaca", "key"),
+    ("alpaca", "secret"),
+]
+
+# Optional: missing these produces a warning but isn't fatal
+OPTIONAL_KEYS = [
+    ("mistral_api_key",),
+    ("iskbets",),
+]
 
 
-def validate_config(config_path=None):
-    """Validate config.json structure. Returns list of error strings."""
-    if config_path is None:
-        config_path = BASE_DIR / "config.json"
-
+def validate_config(config: dict) -> list[str]:
+    """Validate config dict. Returns list of error strings (empty = valid)."""
     errors = []
-
-    try:
-        with open(config_path) as f:
-            config = json.load(f)
-    except FileNotFoundError:
-        return ["config.json not found"]
-    except json.JSONDecodeError as e:
-        return [f"config.json is not valid JSON: {e}"]
-
-    for section, keys in REQUIRED_KEYS.items():
-        if section not in config:
-            errors.append(f"Missing required section: {section}")
-            continue
-        if isinstance(keys, dict):
-            for key, expected_type in keys.items():
-                if key not in config[section]:
-                    errors.append(f"Missing required key: {section}.{key}")
-                elif not config[section][key]:
-                    errors.append(f"Empty required key: {section}.{key}")
-
+    for key_path in REQUIRED_KEYS:
+        obj = config
+        for key in key_path:
+            if not isinstance(obj, dict) or key not in obj:
+                errors.append(f"missing required key: {'.'.join(key_path)}")
+                break
+            obj = obj[key]
+        else:
+            # Key exists — check it's not empty/placeholder
+            if isinstance(obj, str) and not obj.strip():
+                errors.append(f"empty value for required key: {'.'.join(key_path)}")
     return errors
 
 
-if __name__ == "__main__":
-    errors = validate_config()
+def validate_config_file() -> dict:
+    """Load config.json, validate, and return it.
+
+    Logs warnings for missing optional keys.
+    Raises ValueError if required keys are missing.
+    """
+    if not CONFIG_FILE.exists():
+        raise ValueError(f"config.json not found at {CONFIG_FILE}")
+
+    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+        config = json.load(f)
+
+    # Check optional keys and warn
+    for key_path in OPTIONAL_KEYS:
+        obj = config
+        for key in key_path:
+            if not isinstance(obj, dict) or key not in obj:
+                logger.warning(f"optional config key missing: {'.'.join(key_path)}")
+                break
+            obj = obj[key]
+
+    # Check required keys
+    errors = validate_config(config)
     if errors:
-        print("Config validation errors:")
-        for e in errors:
-            print(f"  - {e}")
-    else:
-        print("Config validation passed.")
+        for err in errors:
+            logger.error(f"config validation: {err}")
+        raise ValueError(f"config.json validation failed: {'; '.join(errors)}")
+
+    logger.info("config.json validated successfully")
+    return config

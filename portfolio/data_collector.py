@@ -1,14 +1,24 @@
 """Data collection — Binance, Alpaca, yfinance kline fetchers + multi-timeframe collector."""
 
+import logging
 import time
 from datetime import datetime, timezone
 
 import pandas as pd
 
+from portfolio.circuit_breaker import CircuitBreaker
 from portfolio.http_retry import fetch_with_retry
 from portfolio.api_utils import load_config as _load_config, get_alpaca_headers
 from portfolio.indicators import compute_indicators, technical_signal
 import portfolio.shared_state as _ss
+
+logger = logging.getLogger("portfolio.data_collector")
+
+# --- Circuit breakers for each data source ---
+
+binance_spot_cb = CircuitBreaker("binance_spot", failure_threshold=5, recovery_timeout=60)
+binance_fapi_cb = CircuitBreaker("binance_fapi", failure_threshold=5, recovery_timeout=60)
+alpaca_cb = CircuitBreaker("alpaca", failure_threshold=5, recovery_timeout=60)
 
 # --- Constants ---
 
@@ -59,61 +69,77 @@ STOCK_TIMEFRAMES = [
 
 
 def binance_klines(symbol, interval="5m", limit=100):
-    r = fetch_with_retry(
-        f"{BINANCE_BASE}/klines",
-        params={"symbol": symbol, "interval": interval, "limit": limit},
-        timeout=10,
-    )
-    if r is None:
-        raise ConnectionError(f"Binance klines request failed for {symbol}")
-    r.raise_for_status()
-    data = r.json()
-    df = pd.DataFrame(
-        data,
-        columns=[
-            "open_time",
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume",
-            "close_time",
-            "quote_vol",
-            "trades",
-            "taker_buy_vol",
-            "taker_buy_quote_vol",
-            "ignore",
-        ],
-    )
-    for col in ["open", "high", "low", "close", "volume"]:
-        df[col] = df[col].astype(float)
-    df["time"] = pd.to_datetime(df["open_time"], unit="ms")
-    return df
+    if not binance_spot_cb.allow_request():
+        logger.warning("Binance spot circuit OPEN — skipping %s", symbol)
+        raise ConnectionError(f"Binance spot circuit open for {symbol}")
+    try:
+        r = fetch_with_retry(
+            f"{BINANCE_BASE}/klines",
+            params={"symbol": symbol, "interval": interval, "limit": limit},
+            timeout=10,
+        )
+        if r is None:
+            raise ConnectionError(f"Binance klines request failed for {symbol}")
+        r.raise_for_status()
+        data = r.json()
+        df = pd.DataFrame(
+            data,
+            columns=[
+                "open_time",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "close_time",
+                "quote_vol",
+                "trades",
+                "taker_buy_vol",
+                "taker_buy_quote_vol",
+                "ignore",
+            ],
+        )
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = df[col].astype(float)
+        df["time"] = pd.to_datetime(df["open_time"], unit="ms")
+        binance_spot_cb.record_success()
+        return df
+    except Exception:
+        binance_spot_cb.record_failure()
+        raise
 
 
 def binance_fapi_klines(symbol, interval="5m", limit=100):
     """Fetch klines from Binance Futures API (for metals like XAUUSDT, XAGUSDT)."""
-    r = fetch_with_retry(
-        f"{BINANCE_FAPI_BASE}/klines",
-        params={"symbol": symbol, "interval": interval, "limit": limit},
-        timeout=10,
-    )
-    if r is None:
-        raise ConnectionError(f"Binance FAPI klines request failed for {symbol}")
-    r.raise_for_status()
-    data = r.json()
-    df = pd.DataFrame(
-        data,
-        columns=[
-            "open_time", "open", "high", "low", "close", "volume",
-            "close_time", "quote_vol", "trades", "taker_buy_vol",
-            "taker_buy_quote_vol", "ignore",
-        ],
-    )
-    for col in ["open", "high", "low", "close", "volume"]:
-        df[col] = df[col].astype(float)
-    df["time"] = pd.to_datetime(df["open_time"], unit="ms")
-    return df
+    if not binance_fapi_cb.allow_request():
+        logger.warning("Binance FAPI circuit OPEN — skipping %s", symbol)
+        raise ConnectionError(f"Binance FAPI circuit open for {symbol}")
+    try:
+        r = fetch_with_retry(
+            f"{BINANCE_FAPI_BASE}/klines",
+            params={"symbol": symbol, "interval": interval, "limit": limit},
+            timeout=10,
+        )
+        if r is None:
+            raise ConnectionError(f"Binance FAPI klines request failed for {symbol}")
+        r.raise_for_status()
+        data = r.json()
+        df = pd.DataFrame(
+            data,
+            columns=[
+                "open_time", "open", "high", "low", "close", "volume",
+                "close_time", "quote_vol", "trades", "taker_buy_vol",
+                "taker_buy_quote_vol", "ignore",
+            ],
+        )
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = df[col].astype(float)
+        df["time"] = pd.to_datetime(df["open_time"], unit="ms")
+        binance_fapi_cb.record_success()
+        return df
+    except Exception:
+        binance_fapi_cb.record_failure()
+        raise
 
 
 # --- Alpaca API ---
@@ -122,42 +148,50 @@ def binance_fapi_klines(symbol, interval="5m", limit=100):
 def alpaca_klines(ticker, interval="1d", limit=100):
     if interval not in ALPACA_INTERVAL_MAP:
         raise ValueError(f"Unsupported Alpaca interval: {interval}")
-    alpaca_tf, lookback_days = ALPACA_INTERVAL_MAP[interval]
-    end = datetime.now(timezone.utc)
-    start = end - pd.Timedelta(days=lookback_days)
-    r = fetch_with_retry(
-        f"{ALPACA_BASE}/stocks/{ticker}/bars",
-        headers=get_alpaca_headers(),
-        params={
-            "timeframe": alpaca_tf,
-            "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "end": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "feed": "iex",
-            "adjustment": "split",
-        },
-        timeout=10,
-    )
-    if r is None:
-        raise ConnectionError(f"Alpaca request failed for {ticker}")
-    r.raise_for_status()
-    bars = r.json().get("bars") or []
-    if not bars:
-        raise ValueError(f"No Alpaca data for {ticker} interval={interval}")
-    df = pd.DataFrame(bars)
-    df = df.rename(
-        columns={
-            "o": "open",
-            "h": "high",
-            "l": "low",
-            "c": "close",
-            "v": "volume",
-            "t": "time",
-        }
-    )
-    for col in ["open", "high", "low", "close", "volume"]:
-        df[col] = df[col].astype(float)
-    df["time"] = pd.to_datetime(df["time"])
-    return df.tail(limit)
+    if not alpaca_cb.allow_request():
+        logger.warning("Alpaca circuit OPEN — skipping %s", ticker)
+        raise ConnectionError(f"Alpaca circuit open for {ticker}")
+    try:
+        alpaca_tf, lookback_days = ALPACA_INTERVAL_MAP[interval]
+        end = datetime.now(timezone.utc)
+        start = end - pd.Timedelta(days=lookback_days)
+        r = fetch_with_retry(
+            f"{ALPACA_BASE}/stocks/{ticker}/bars",
+            headers=get_alpaca_headers(),
+            params={
+                "timeframe": alpaca_tf,
+                "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "end": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "feed": "iex",
+                "adjustment": "split",
+            },
+            timeout=10,
+        )
+        if r is None:
+            raise ConnectionError(f"Alpaca request failed for {ticker}")
+        r.raise_for_status()
+        bars = r.json().get("bars") or []
+        if not bars:
+            raise ValueError(f"No Alpaca data for {ticker} interval={interval}")
+        df = pd.DataFrame(bars)
+        df = df.rename(
+            columns={
+                "o": "open",
+                "h": "high",
+                "l": "low",
+                "c": "close",
+                "v": "volume",
+                "t": "time",
+            }
+        )
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = df[col].astype(float)
+        df["time"] = pd.to_datetime(df["time"])
+        alpaca_cb.record_success()
+        return df.tail(limit)
+    except Exception:
+        alpaca_cb.record_failure()
+        raise
 
 
 # --- yfinance API ---
