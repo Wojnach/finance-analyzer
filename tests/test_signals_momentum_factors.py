@@ -239,8 +239,8 @@ class TestHighProximity:
 
     def test_near_high_buy(self):
         """Price near the period high should trigger BUY."""
-        # Create data where the current close is the highest value
-        closes = [100.0] * 250 + [105.0]  # new high
+        # _high_proximity requires >= 500 data points
+        closes = [100.0] * 500 + [105.0]  # new high
         close = pd.Series(closes)
         val, sig = _high_proximity(close)
         assert sig == "BUY"
@@ -248,8 +248,8 @@ class TestHighProximity:
 
     def test_far_from_high_sell(self):
         """Price far below period high should trigger SELL."""
-        # Close was 200 at the peak, now at 150 (25% below)
-        closes = list(range(100, 201)) + list(range(200, 149, -1))
+        # Need >= 500 points. Peak at 200 within lookback, current at 150 (25% below)
+        closes = [150.0] * 400 + [200.0] * 50 + [150.0] * 51
         close = pd.Series([float(c) for c in closes])
         val, sig = _high_proximity(close)
         assert sig == "SELL"
@@ -257,8 +257,8 @@ class TestHighProximity:
 
     def test_mid_range_hold(self):
         """Price in the middle range should HOLD."""
-        # Peak at 100, current at 90 (10% below) -> between 0.80 and 0.95
-        closes = [100.0] * 50 + [90.0]
+        # Need >= 500 points. Peak at 100, current at 90 (10% below)
+        closes = [100.0] * 500 + [90.0]
         close = pd.Series(closes)
         val, sig = _high_proximity(close)
         assert sig == "HOLD"

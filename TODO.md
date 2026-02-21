@@ -1,6 +1,6 @@
 # Finance Analyzer — TODO
 
-> **Updated 2026-02-20.**
+> **Updated 2026-02-21.**
 
 ## Phase 1: Foundation + Data Validation — COMPLETE
 
@@ -137,9 +137,21 @@ Full plan: `docs/plans/2026-02-09-llm-trading-research.md`
 ### Infrastructure
 
 - [x] Add log rotation utility (prevent unbounded growth of JSONL files)
-- [ ] Add HTTP retry with exponential backoff (Binance/Alpaca API calls fail silently on timeouts)
+- [x] **Integrate HTTP retry:** `http_retry.py` existed but was never wired in. Now integrated into all API calls (Binance, Alpaca, FX, macro). (Feb 21)
+- [x] **Add health monitoring:** New `portfolio/health.py` — heartbeat tracking, error counts, staleness detection. (Feb 21)
 - [ ] Migrate signal_log.jsonl to SQLite (JSONL files grow unbounded, slow to query for accuracy)
-- [ ] Add health check endpoint to dashboard (Layer 1 heartbeat, last trigger time, error counts)
+- [ ] Add /api/health endpoint to dashboard (use health.py data)
+
+### Code Quality
+
+- [x] **Add digest tests:** `test_digest.py` was a standalone script with 0 tests. Rewritten as proper pytest module (13 tests). (Feb 21)
+- [x] **Add health tests:** New `test_health.py` for health monitoring module. (Feb 21)
+- [x] **Update README.md:** Was outdated (Freqtrade references). Now reflects two-layer architecture. (Feb 21)
+- [x] **Write system design doc:** New `docs/system-design.md` — comprehensive engineering reference. (Feb 21)
+- [ ] **Modularize main.py:** Currently 2,124 lines. Extract signal_engine.py, data_collector.py
+- [ ] Add test_http_retry.py for retry integration
+- [ ] Add dashboard tests (currently 0)
+- [ ] Add performance/stress tests for 7TF x 31 ticker scale
 
 ### Dashboard Improvements
 

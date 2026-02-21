@@ -1,6 +1,8 @@
 import time
 import requests
 
+from portfolio.http_retry import fetch_with_retry
+
 BINANCE_FAPI = "https://fapi.binance.com/fapi/v1"
 SYMBOL_MAP = {
     "BTC-USD": "BTCUSDT",
@@ -21,11 +23,13 @@ def get_funding_rate(ticker):
         return cached["data"]
 
     symbol = SYMBOL_MAP[ticker]
-    r = requests.get(
+    r = fetch_with_retry(
         f"{BINANCE_FAPI}/premiumIndex",
         params={"symbol": symbol},
         timeout=10,
     )
+    if r is None:
+        return None
     r.raise_for_status()
     data = r.json()
 

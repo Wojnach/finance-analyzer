@@ -7,6 +7,7 @@ import pandas as pd
 import requests
 
 from portfolio.api_utils import get_alpaca_headers, load_config
+from portfolio.http_retry import fetch_with_retry
 
 BINANCE_BASE = "https://api.binance.com/api/v3"
 ALPACA_BASE = "https://data.alpaca.markets/v2"
@@ -88,11 +89,13 @@ def _fetch_klines(ticker):
     if source_type in ("binance", "binance_fapi"):
         base_url = BINANCE_FAPI_BASE if source_type == "binance_fapi" else BINANCE_BASE
         time.sleep(0.1)  # rate limit: space out Binance calls
-        r = requests.get(
+        r = fetch_with_retry(
             f"{base_url}/klines",
             params={"symbol": symbol, "interval": "15m", "limit": 100},
             timeout=10,
         )
+        if r is None:
+            return None
         r.raise_for_status()
         raw = r.json()
         df = pd.DataFrame(
@@ -121,7 +124,7 @@ def _fetch_klines(ticker):
         time.sleep(0.4)  # rate limit: space out Alpaca calls (150/min target)
         end = datetime.now(timezone.utc)
         start = end - pd.Timedelta(days=5)
-        r = requests.get(
+        r = fetch_with_retry(
             f"{ALPACA_BASE}/stocks/{symbol}/bars",
             headers=_alpaca_headers(),
             params={
@@ -132,6 +135,8 @@ def _fetch_klines(ticker):
             },
             timeout=10,
         )
+        if r is None:
+            return None
         r.raise_for_status()
         bars = r.json().get("bars") or []
         if not bars:

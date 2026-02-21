@@ -72,6 +72,7 @@ data/ab_test_log.jsonl
 data/analysis_log.jsonl
 data/watch_log.jsonl
 data/accuracy_cache.json
+data/health_state.json
 data/lora_backtest_results.json
 data/shadow_lora_config.json
 data/loop_out.txt

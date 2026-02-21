@@ -1,6 +1,8 @@
 import requests
 from datetime import datetime, timezone
 
+from portfolio.http_retry import fetch_with_retry
+
 CRYPTO_TICKERS = {"BTC", "ETH", "BTC-USD", "ETH-USD"}
 
 
@@ -17,7 +19,9 @@ def _classify(value):
 
 
 def get_crypto_fear_greed() -> dict:
-    resp = requests.get("https://api.alternative.me/fng/", timeout=10)
+    resp = fetch_with_retry("https://api.alternative.me/fng/", timeout=10)
+    if resp is None:
+        return None
     resp.raise_for_status()
     data = resp.json()["data"][0]
     return {

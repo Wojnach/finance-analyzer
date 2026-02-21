@@ -237,27 +237,28 @@ class TestConsensusThresholds:
         assert action == "HOLD"
 
     @mock.patch("portfolio.main._cached", side_effect=_null_cached)
-    def test_stock_needs_2_voters(self, _mock):
-        """Stocks need MIN_VOTERS=2 active voters to reach consensus."""
-        # Only 2 voters: RSI + MACD
+    def test_stock_needs_3_voters(self, _mock):
+        """Stocks need MIN_VOTERS=3 active voters to reach consensus."""
+        # Only 2 voters: RSI + MACD → HOLD (need 3)
         ind = make_indicators(
             rsi=25, macd_hist=1.0, macd_hist_prev=-1.0,
             ema9=130, ema21=130, price_vs_bb="inside", close=130.0,
         )
         action, conf, extra = generate_signal(ind, ticker="MSTR")
         assert extra["_voters"] == 2
-        assert action == "BUY"
+        assert action == "HOLD"  # 2 < MIN_VOTERS_STOCK(3)
 
     @mock.patch("portfolio.main._cached", side_effect=_null_cached)
-    def test_metal_needs_2_voters(self, _mock):
-        """Metals need MIN_VOTERS=2 active voters to reach consensus."""
+    def test_metal_needs_3_voters(self, _mock):
+        """Metals need MIN_VOTERS=3 active voters to reach consensus."""
+        # Only 2 voters: RSI + MACD → HOLD (need 3)
         ind = make_indicators(
             rsi=25, macd_hist=1.0, macd_hist_prev=-1.0,
             ema9=2000, ema21=2000, price_vs_bb="inside", close=2000.0,
         )
         action, conf, extra = generate_signal(ind, ticker="XAU-USD")
         assert extra["_voters"] == 2
-        assert action == "BUY"
+        assert action == "HOLD"  # 2 < MIN_VOTERS_STOCK(3)
 
 
 # ---------------------------------------------------------------------------

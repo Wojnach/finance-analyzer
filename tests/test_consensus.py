@@ -1,8 +1,8 @@
 """Tests for stock consensus threshold and sentiment hysteresis.
 
 Covers:
-- MIN_VOTERS=2 for stocks allows consensus with 2 active voters
-- MIN_VOTERS=3 for crypto still requires 3 active voters
+- MIN_VOTERS=3 for stocks requires 3 active voters for consensus
+- MIN_VOTERS=3 for crypto requires 3 active voters for consensus
 - Sentiment hysteresis prevents rapid direction flips
 - Stock signal generation produces correct vote counts
 """
@@ -44,8 +44,8 @@ def make_indicators(**overrides):
 
 
 class TestMinVotersConstants:
-    def test_stock_threshold_is_2(self):
-        assert MIN_VOTERS_STOCK == 2
+    def test_stock_threshold_is_3(self):
+        assert MIN_VOTERS_STOCK == 3
 
     def test_crypto_threshold_is_3(self):
         assert MIN_VOTERS_CRYPTO == 3
@@ -61,11 +61,11 @@ class TestMinVotersConstants:
 
 
 class TestStockConsensus:
-    """Stocks with MIN_VOTERS=2 should reach consensus with just 2 active voters."""
+    """Stocks with MIN_VOTERS=3 require 3 active voters for consensus."""
 
     @mock.patch("portfolio.main._cached", side_effect=_null_cached)
-    def test_stock_buy_with_2_voters(self, _mock):
-        """RSI oversold + MACD crossover = 2 BUY voters → should be BUY for stocks."""
+    def test_stock_hold_with_2_voters(self, _mock):
+        """RSI oversold + MACD crossover = 2 BUY voters → HOLD (need 3 for stocks)."""
         ind = make_indicators(
             rsi=25,  # oversold → BUY vote
             macd_hist=1.0,
@@ -78,28 +78,41 @@ class TestStockConsensus:
         assert extra["_buy_count"] == 2
         assert extra["_sell_count"] == 0
         assert extra["_voters"] == 2
-        assert action == "BUY"
-        assert conf == 1.0
+        assert action == "HOLD"  # 2 < MIN_VOTERS_STOCK(3)
 
     @mock.patch("portfolio.main._cached", side_effect=_null_cached)
-    def test_stock_sell_with_2_voters(self, _mock):
-        """RSI overbought + MACD cross down = 2 SELL voters → should be SELL for stocks."""
+    def test_stock_buy_with_3_voters(self, _mock):
+        """RSI + MACD + EMA = 3 BUY voters → BUY for stocks."""
+        ind = make_indicators(
+            rsi=25,  # oversold → BUY vote
+            macd_hist=1.0,
+            macd_hist_prev=-1.0,  # crossover → BUY vote
+            ema9=135.0,
+            ema21=130.0,  # >0.5% gap → BUY vote
+            price_vs_bb="inside",  # inside → abstains
+        )
+        action, conf, extra = generate_signal(ind, ticker="MSTR")
+        assert extra["_buy_count"] >= 3
+        assert action == "BUY"
+
+    @mock.patch("portfolio.main._cached", side_effect=_null_cached)
+    def test_stock_sell_with_3_voters(self, _mock):
+        """RSI overbought + MACD down + EMA down = 3 SELL voters → SELL for stocks."""
         ind = make_indicators(
             rsi=75,  # overbought → SELL vote
             macd_hist=-1.0,
             macd_hist_prev=1.0,  # cross down → SELL vote
-            ema9=130.0,
-            ema21=130.0,  # no gap → abstains
+            ema9=125.0,
+            ema21=130.0,  # fast < slow → SELL vote
             price_vs_bb="inside",  # inside → abstains
         )
         action, conf, extra = generate_signal(ind, ticker="PLTR")
-        assert extra["_sell_count"] == 2
-        assert extra["_voters"] == 2
+        assert extra["_sell_count"] >= 3
         assert action == "SELL"
 
     @mock.patch("portfolio.main._cached", side_effect=_null_cached)
     def test_stock_hold_with_1_voter(self, _mock):
-        """Only 1 active voter → should still be HOLD for stocks (need 2)."""
+        """Only 1 active voter → HOLD for stocks (need 3)."""
         ind = make_indicators(
             rsi=25,  # oversold → BUY vote (1 voter)
             macd_hist=1.0,
@@ -113,16 +126,18 @@ class TestStockConsensus:
         assert action == "HOLD"
 
     @mock.patch("portfolio.main._cached", side_effect=_null_cached)
-    def test_all_stock_tickers_use_lower_threshold(self, _mock):
-        """All 3 stock tickers should reach consensus with 2 voters."""
+    def test_all_stock_tickers_use_3_voter_threshold(self, _mock):
+        """All stock tickers need 3+ voters for consensus."""
         for ticker in STOCK_SYMBOLS:
             ind = make_indicators(
                 rsi=25,
                 macd_hist=1.0,
                 macd_hist_prev=-1.0,
+                ema9=135.0,
+                ema21=130.0,  # 3 voters: RSI + MACD + EMA
             )
             action, conf, extra = generate_signal(ind, ticker=ticker)
-            assert action == "BUY", f"{ticker} should reach BUY consensus with 2 voters"
+            assert action == "BUY", f"{ticker} should reach BUY consensus with 3 voters"
 
 
 class TestCryptoConsensus:

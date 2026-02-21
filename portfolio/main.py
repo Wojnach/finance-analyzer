@@ -24,6 +24,7 @@ AGENT_SUMMARY_FILE = DATA_DIR / "agent_summary.json"
 COMPACT_SUMMARY_FILE = DATA_DIR / "agent_summary_compact.json"
 CONFIG_FILE = BASE_DIR / "config.json"
 
+from portfolio.http_retry import fetch_with_retry
 from portfolio.tickers import SYMBOLS, CRYPTO_SYMBOLS, STOCK_SYMBOLS, METALS_SYMBOLS
 
 # --- Config caching (delegates to shared api_utils for mtime-based caching) ---
@@ -192,11 +193,13 @@ def _cached(key, ttl, func, *args):
 
 
 def binance_klines(symbol, interval="5m", limit=100):
-    r = requests.get(
+    r = fetch_with_retry(
         f"{BINANCE_BASE}/klines",
         params={"symbol": symbol, "interval": interval, "limit": limit},
         timeout=10,
     )
+    if r is None:
+        raise ConnectionError(f"Binance klines request failed for {symbol}")
     r.raise_for_status()
     data = r.json()
     df = pd.DataFrame(
@@ -224,11 +227,13 @@ def binance_klines(symbol, interval="5m", limit=100):
 
 def binance_fapi_klines(symbol, interval="5m", limit=100):
     """Fetch klines from Binance Futures API (for metals like XAUUSDT, XAGUSDT)."""
-    r = requests.get(
+    r = fetch_with_retry(
         f"{BINANCE_FAPI_BASE}/klines",
         params={"symbol": symbol, "interval": interval, "limit": limit},
         timeout=10,
     )
+    if r is None:
+        raise ConnectionError(f"Binance FAPI klines request failed for {symbol}")
     r.raise_for_status()
     data = r.json()
     df = pd.DataFrame(
@@ -272,7 +277,7 @@ def alpaca_klines(ticker, interval="1d", limit=100):
     alpaca_tf, lookback_days = ALPACA_INTERVAL_MAP[interval]
     end = datetime.now(timezone.utc)
     start = end - pd.Timedelta(days=lookback_days)
-    r = requests.get(
+    r = fetch_with_retry(
         f"{ALPACA_BASE}/stocks/{ticker}/bars",
         headers=_get_alpaca_headers(),
         params={
@@ -284,6 +289,8 @@ def alpaca_klines(ticker, interval="1d", limit=100):
         },
         timeout=10,
     )
+    if r is None:
+        raise ConnectionError(f"Alpaca request failed for {ticker}")
     r.raise_for_status()
     bars = r.json().get("bars") or []
     if not bars:
@@ -370,11 +377,13 @@ def fetch_usd_sek():
             print(f"  WARNING: FX rate is stale ({age_secs / 3600:.1f}h old)")
         return _fx_cache["rate"]
     try:
-        r = requests.get(
+        r = fetch_with_retry(
             "https://api.frankfurter.app/latest",
             params={"from": "USD", "to": "SEK"},
             timeout=10,
         )
+        if r is None:
+            raise ConnectionError("FX rate request failed after retries")
         r.raise_for_status()
         rate = float(r.json()["rates"]["SEK"])
         _fx_cache["rate"] = rate
@@ -1585,11 +1594,14 @@ def send_telegram(msg, config):
         return True
     token = config["telegram"]["token"]
     chat_id = config["telegram"]["chat_id"]
-    r = requests.post(
+    r = fetch_with_retry(
         f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
+        method="POST",
+        json_body={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
         timeout=30,
     )
+    if r is None:
+        return False
     if r.ok:
         return True
     # Markdown parse failure (HTTP 400) — retry without parse_mode so the message
@@ -1602,12 +1614,13 @@ def send_telegram(msg, config):
             pass
         if "parse" in err_desc.lower() or "markdown" in err_desc.lower() or "entity" in err_desc.lower():
             print(f"  WARNING: Telegram Markdown parse failed ({err_desc}), resending without formatting")
-            r2 = requests.post(
+            r2 = fetch_with_retry(
                 f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": msg},
+                method="POST",
+                json_body={"chat_id": chat_id, "text": msg},
                 timeout=30,
             )
-            return r2.ok
+            return r2 is not None and r2.ok
     return False
 
 
@@ -1993,17 +2006,18 @@ def run(force_report=False, active_symbols=None):
 def _crash_alert(error_msg):
     """Send Telegram alert on loop crash."""
     try:
-        import json, requests
+        import json
         config_path = Path(__file__).resolve().parent.parent / "config.json"
         config = json.load(open(config_path))
         token = config.get("telegram", {}).get("token", "")
         chat_id = config.get("telegram", {}).get("chat_id", "")
         if token and chat_id:
             text = f"LOOP CRASH\n\n{error_msg[:3000]}"
-            requests.post(
+            fetch_with_retry(
                 f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": text},
-                timeout=10
+                method="POST",
+                json_body={"chat_id": chat_id, "text": text},
+                timeout=10,
             )
     except Exception:
         pass  # Can't alert about alert failure

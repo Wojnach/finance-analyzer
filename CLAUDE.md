@@ -58,7 +58,7 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 - Read the raw signals in `agent_summary.json` — don't just follow Layer 1 consensus.
 - Volume expansion + directional signals = breakout confirmation. BB expansion is a breakout indicator.
 - EMA alignment across timeframes confirms trend health.
-- Floor: never trade when fewer than MIN_VOTERS signals agree (MIN_VOTERS=2 for stocks, 3 for crypto).
+- Floor: never trade when fewer than MIN_VOTERS signals agree (MIN_VOTERS=3 for all asset classes).
 - **FOMC:** Do not trade the event itself. Watch for breakouts that form _after_ the event settles (1–4 hours post). Events create the volatility that forms new trends — catch the trend, not the noise.
 - **Go dormant** when no breakout setups are forming — low-volatility sideways compression with all signals abstaining. Your market is the transition from consolidation to trend.
 
@@ -435,7 +435,7 @@ samples as preliminary — they will stabilize over the next 2-4 weeks.
 
 **Consensus formula:** Layer 1 computes consensus using active voters (signals that voted BUY
 or SELL) as the denominator, not total applicable signals. MIN_VOTERS varies by asset class:
-stocks and metals require MIN_VOTERS=2, crypto (BTC, ETH) requires MIN_VOTERS=3.
+all asset classes (stocks, metals, crypto) require MIN_VOTERS=3.
 Stocks have 21 applicable signals (7 core + 14 enhanced), crypto has 25 (11 core + 14 enhanced).
 Example: 2B/0S out of 21 applicable = BUY at 100% confidence (2/2 active voters).
 The confidence reflects agreement among voters, not coverage.
@@ -446,7 +446,7 @@ Your job is to weigh signal quality, timeframe alignment, and macro context — 
 
 **Stock reasoning requirement:** For each stock that shows BUY or SELL consensus, briefly
 state why you are holding or trading in your Telegram message reasoning. Stocks reach
-consensus more easily (MIN_VOTERS=2) so your judgment as a filter is especially important.
+consensus relatively easily so your judgment as a filter is especially important.
 With 26 stocks tracked, focus your reasoning on the ones with actual signals — don't
 enumerate every HOLD ticker.
 
