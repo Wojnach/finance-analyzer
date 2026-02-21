@@ -1,6 +1,6 @@
 # Finance Analyzer — TODO
 
-> **Updated 2026-02-21.**
+> **Updated 2026-02-22.**
 
 ## Phase 1: Foundation + Data Validation — COMPLETE
 
@@ -149,20 +149,20 @@ Full plan: `docs/plans/2026-02-09-llm-trading-research.md`
 - [x] **Update README.md:** Was outdated (Freqtrade references). Now reflects two-layer architecture. (Feb 21)
 - [x] **Write system design doc:** New `docs/system-design.md` — comprehensive engineering reference. (Feb 21)
 - [x] **Modularize main.py:** Extracted 10 modules (shared_state, market_timing, fx_rates, indicators, data_collector, signal_engine, portfolio_mgr, reporting, telegram_notifications, digest, agent_invocation, logging_config). main.py reduced from 2,124 → ~435 lines. Full backwards-compatible re-exports. (Feb 21)
-- [ ] Add test_http_retry.py for retry integration
-- [x] **Add dashboard tests:** New `tests/test_dashboard.py` — 43 tests covering all API routes, auth middleware, portfolio validation. (Feb 21)
+- [x] **Add test_http_retry.py:** 60 tests covering retry logic, backoff, transient errors, timeouts. (Feb 21)
+- [x] **Add dashboard tests:** New `tests/test_dashboard.py` — 48 tests covering all API routes, auth middleware, portfolio validation, accuracy history, trades. (Feb 21)
 - [ ] Add performance/stress tests for 7TF x 31 ticker scale
 
 ### Dashboard Improvements
 
 - [ ] Real-time WebSocket updates (currently requires manual refresh or polling)
-- [ ] Signal accuracy charts (per-signal hit rate over time)
-- [ ] Trade annotation on equity curve (mark BUY/SELL points)
-- [ ] Mobile-responsive layout improvements
+- [x] **Signal accuracy charts:** Per-signal accuracy trend chart (Chart.js) in Accuracy tab, reading `accuracy_snapshots.jsonl`. Top 8 signals by sample size. (Feb 21)
+- [x] **Trade annotations on equity curve:** BUY (green triangle) and SELL (red diamond) markers overlaid on equity curve chart. Trade timeline table fallback when no equity data. `/api/trades` endpoint. (Feb 21)
+- [x] **Mobile-responsive layout improvements:** Larger touch targets (44px min), better font scaling at 480px, improved header stacking, smooth scroll on heatmaps. (Feb 21)
 
 ### Operational
 
-- [ ] Telegram alert on Layer 1 crash (currently silent — only discoverable via loop_out.txt)
+- [x] **Telegram alert on Layer 1 crash:** Loop startup checks heartbeat staleness (>5min → likely crash). Sends `_LOOP RESTARTED_` Telegram alert with age. `_crash_alert()` function sends Telegram on unhandled exceptions. (Feb 21)
 - [x] **Automated Layer 2 health monitoring:** `check_agent_silence()` in health.py detects silent agent (>2h market hours, >4h off-hours). Exposed via `/api/health` and Health dashboard tab. (Feb 21)
 - [x] **Structured error logging:** New `portfolio/logging_config.py` — RotatingFileHandler (10MB, 3 backups) + StreamHandler. ~40 print() calls replaced with logger.info/warning/error. (Feb 21)
 

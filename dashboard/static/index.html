@@ -420,18 +420,28 @@
         .ps .sv { font-size: 13px; }
         .ct { padding: 10px 12px 24px; }
         .sc { grid-template-columns: 1fr; }
-        .nav-tabs { padding: 0 10px; }
-        .nav-tab { padding: 8px 12px; font-size: 11px; }
+        .nav-tabs { padding: 0 10px; -webkit-overflow-scrolling: touch; }
+        .nav-tab { padding: 10px 14px; font-size: 11px; min-height: 44px; }
         .ht { overflow-x: auto; display: block; }
-        .sig-heatmap-wrap { overflow-x: auto; }
+        .sig-heatmap-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
         .twocol { grid-template-columns: 1fr; }
         .fgr { flex-direction: column; gap: 8px; }
+        .icon-btn { min-width: 36px; min-height: 36px; font-size: 16px; }
+        .chart-canvas { max-height: 260px; }
+        .atab { padding: 6px 12px; min-height: 36px; }
       }
       @media (max-width: 480px) {
+        .hdr { flex-direction: column; align-items: flex-start; }
         .hdr-r { width: 100%; justify-content: space-between; }
         .ps { flex-wrap: wrap; gap: 8px; }
+        .ps .sv { font-size: 12px; }
         .tt { font-size: 10px; }
         .tt th, .tt td { padding: 4px; }
+        .scard { padding: 10px; }
+        .tn { font-size: 13px; }
+        .nav-tab { padding: 8px 10px; font-size: 10px; letter-spacing: 0.5px; }
+        .stit { font-size: 12px; }
+        .chart-canvas { max-height: 220px; }
       }
     </style>
   </head>
@@ -569,7 +579,11 @@
            TAB: Accuracy
            ============================================================ -->
       <div class="tab-content" id="tab-accuracy">
-        <div class="stit">Signal Accuracy</div>
+        <div class="stit">Signal Accuracy Trend</div>
+        <div class="chart-wrap" id="accChartWrap" style="display:none">
+          <canvas id="accChart" class="chart-canvas"></canvas>
+        </div>
+        <div class="stit">Signal Accuracy (Current)</div>
         <div class="pnl" id="accC">
           <div class="nd">Loading accuracy data...</div>
         </div>
@@ -594,6 +608,7 @@
       var paused = false;
       var lastRefreshTime = null;
       var equityChartInstance = null;
+      var accChartInstance = null;
 
       // Tickers: populated dynamically from data
       var T = [];
@@ -705,7 +720,7 @@
         if (name === "signals") loadSignalHeatmap();
         if (name === "equity") loadEquityCurve();
         if (name === "triggers") loadTriggers();
-        if (name === "accuracy") loadAccuracy();
+        if (name === "accuracy") { loadAccuracy(); loadAccuracyHistory(); }
         if (name === "health") loadHealth();
       }
 
@@ -1086,12 +1101,15 @@
 
       async function loadEquityCurve() {
         var data = await fj("/api/equity-curve");
+        var trades = await fj("/api/trades");
         var canvas = document.getElementById("equityChart");
         var noData = document.getElementById("eqNoData");
 
         if (!data || !data.length) {
           canvas.style.display = "none";
           noData.style.display = "";
+          // Even without equity data, show trade timeline if trades exist
+          if (trades && trades.length) renderTradeTimeline(trades);
           return;
         }
 
@@ -1116,36 +1134,83 @@
         });
 
         var c = getChartColors();
+        var datasets = [
+          {
+            label: "Patient (SEK)",
+            data: patientVals,
+            borderColor: c.patientColor,
+            backgroundColor: c.patientColor + "20",
+            fill: false,
+            tension: 0.3,
+            pointRadius: 1,
+            borderWidth: 2,
+          },
+          {
+            label: "Bold (SEK)",
+            data: boldVals,
+            borderColor: c.boldColor,
+            backgroundColor: c.boldColor + "20",
+            fill: false,
+            tension: 0.3,
+            pointRadius: 1,
+            borderWidth: 2,
+          },
+        ];
+
+        // Overlay trade annotations as scatter points
+        if (trades && trades.length) {
+          var buyPts = [], sellPts = [];
+          trades.forEach(function (tx) {
+            if (!tx.ts) return;
+            var txDate = new Date(tx.ts);
+            var txLabel = txDate.toLocaleDateString("sv-SE", { month: "short", day: "numeric" });
+            // Find the nearest index in labels
+            var bestIdx = -1, bestDist = Infinity;
+            for (var i = 0; i < labels.length; i++) {
+              var d = Math.abs(new Date(labels[i]).getTime() - txDate.getTime());
+              if (d < bestDist) { bestDist = d; bestIdx = i; }
+            }
+            if (bestIdx < 0) return;
+            var yVal = tx.strategy === "bold" ? boldVals[bestIdx] : patientVals[bestIdx];
+            if (yVal == null) yVal = patientVals[bestIdx] || boldVals[bestIdx];
+            var pt = { x: bestIdx, y: yVal, ticker: tx.ticker, action: tx.action, strategy: tx.strategy, sek: tx.total_sek };
+            if (tx.action === "BUY") buyPts.push(pt);
+            else sellPts.push(pt);
+          });
+
+          if (buyPts.length) {
+            datasets.push({
+              label: "BUY",
+              data: buyPts,
+              type: "scatter",
+              pointRadius: 7,
+              pointStyle: "triangle",
+              backgroundColor: "rgba(0, 255, 136, 0.8)",
+              borderColor: "#00ff88",
+              borderWidth: 2,
+              showLine: false,
+            });
+          }
+          if (sellPts.length) {
+            datasets.push({
+              label: "SELL",
+              data: sellPts,
+              type: "scatter",
+              pointRadius: 7,
+              pointStyle: "rectRot",
+              backgroundColor: "rgba(255, 68, 68, 0.8)",
+              borderColor: "#ff4444",
+              borderWidth: 2,
+              showLine: false,
+            });
+          }
+        }
 
         if (equityChartInstance) equityChartInstance.destroy();
 
         equityChartInstance = new Chart(canvas, {
           type: "line",
-          data: {
-            labels: fmtLabels,
-            datasets: [
-              {
-                label: "Patient (SEK)",
-                data: patientVals,
-                borderColor: c.patientColor,
-                backgroundColor: c.patientColor + "20",
-                fill: false,
-                tension: 0.3,
-                pointRadius: 1,
-                borderWidth: 2,
-              },
-              {
-                label: "Bold (SEK)",
-                data: boldVals,
-                borderColor: c.boldColor,
-                backgroundColor: c.boldColor + "20",
-                fill: false,
-                tension: 0.3,
-                pointRadius: 1,
-                borderWidth: 2,
-              },
-            ],
-          },
+          data: { labels: fmtLabels, datasets: datasets },
           options: {
             responsive: true,
             maintainAspectRatio: false,
@@ -1155,7 +1220,12 @@
               tooltip: {
                 callbacks: {
                   label: function (ctx) {
-                    return ctx.dataset.label + ": " + (ctx.parsed.y != null ? Number(ctx.parsed.y).toLocaleString("sv-SE", { maximumFractionDigits: 0 }) + " SEK" : "--");
+                    var ds = ctx.dataset;
+                    if (ds.type === "scatter") {
+                      var raw = ctx.raw;
+                      return (raw.strategy === "bold" ? "Bold" : "Patient") + " " + raw.action + " " + raw.ticker + " (" + fs(raw.sek) + ")";
+                    }
+                    return ds.label + ": " + (ctx.parsed.y != null ? Number(ctx.parsed.y).toLocaleString("sv-SE", { maximumFractionDigits: 0 }) + " SEK" : "--");
                   },
                 },
               },
@@ -1176,6 +1246,26 @@
             },
           },
         });
+      }
+
+      function renderTradeTimeline(trades) {
+        // Show trades as a simple list below the equity chart when no equity data exists
+        var wrap = document.querySelector("#tab-equity .chart-wrap");
+        var existing = document.getElementById("tradeTimeline");
+        if (existing) existing.remove();
+        if (!trades || !trades.length) return;
+        var div = document.createElement("div");
+        div.id = "tradeTimeline";
+        div.style.marginTop = "14px";
+        var h = '<div class="stit">Trade History</div><div style="max-height:300px;overflow-y:auto"><table class="tt"><thead><tr><th>Time</th><th>Strategy</th><th>Action</th><th>Ticker</th><th>Amount</th></tr></thead><tbody>';
+        trades.slice().reverse().forEach(function (tx) {
+          var ac2 = tx.action === "BUY" ? "var(--grn)" : "var(--red)";
+          var sc2 = tx.strategy === "bold" ? "var(--org)" : "var(--cyn)";
+          h += '<tr><td>' + ft(tx.ts) + '</td><td style="color:' + sc2 + ';font-weight:600">' + tx.strategy + '</td><td style="color:' + ac2 + ';font-weight:600">' + tx.action + '</td><td>' + tx.ticker + '</td><td>' + fs(tx.total_sek) + '</td></tr>';
+        });
+        h += '</tbody></table></div>';
+        div.innerHTML = h;
+        wrap.parentNode.appendChild(div);
       }
 
       /* ================================================================
@@ -1293,6 +1383,88 @@
           });
         }
         c.innerHTML = h;
+      }
+
+      /* ================================================================
+         Accuracy history chart (per-signal accuracy over time)
+         ================================================================ */
+      async function loadAccuracyHistory() {
+        var wrap = document.getElementById("accChartWrap");
+        var canvas = document.getElementById("accChart");
+        var data = await fj("/api/accuracy-history");
+        if (!data || !data.length || data.length < 2) {
+          wrap.style.display = "none";
+          return;
+        }
+        wrap.style.display = "";
+
+        // Pick top signals by total sample size (most meaningful)
+        var lastEntry = data[data.length - 1];
+        var sigs = lastEntry.signals || {};
+        var sigNames = Object.keys(sigs)
+          .filter(function (n) { return sigs[n].total > 10; })
+          .sort(function (a, b) { return (sigs[b].total || 0) - (sigs[a].total || 0); })
+          .slice(0, 8);
+
+        if (!sigNames.length) { wrap.style.display = "none"; return; }
+
+        var labels = data.map(function (e) {
+          var d = new Date(e.ts);
+          return d.toLocaleDateString("sv-SE", { month: "short", day: "numeric" });
+        });
+
+        var palette = ["#06b6d4", "#f97316", "#00ff88", "#ff4444", "#eab308", "#3b82f6", "#a78bfa", "#f472b6"];
+        var datasets = sigNames.map(function (name, i) {
+          return {
+            label: name,
+            data: data.map(function (e) {
+              var s = (e.signals || {})[name];
+              return s ? +(s.accuracy * 100).toFixed(1) : null;
+            }),
+            borderColor: palette[i % palette.length],
+            backgroundColor: palette[i % palette.length] + "20",
+            fill: false,
+            tension: 0.3,
+            pointRadius: 2,
+            borderWidth: 2,
+          };
+        });
+
+        // Add 50% reference line
+        datasets.push({
+          label: "50% baseline",
+          data: data.map(function () { return 50; }),
+          borderColor: "rgba(107, 114, 128, 0.4)",
+          borderDash: [5, 5],
+          fill: false,
+          pointRadius: 0,
+          borderWidth: 1,
+        });
+
+        var c = getChartColors();
+        if (accChartInstance) accChartInstance.destroy();
+
+        accChartInstance = new Chart(canvas, {
+          type: "line",
+          data: { labels: labels, datasets: datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            plugins: {
+              legend: { labels: { color: c.textColor, font: { size: 10 }, boxWidth: 12, padding: 8 }, position: "bottom" },
+              tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ": " + (ctx.parsed.y != null ? ctx.parsed.y + "%" : "--"); } } },
+            },
+            scales: {
+              x: { ticks: { color: c.textColor, font: { size: 10 }, maxTicksLimit: 15 }, grid: { color: c.gridColor } },
+              y: {
+                min: 0, max: 100,
+                ticks: { color: c.textColor, font: { size: 10 }, callback: function (v) { return v + "%"; } },
+                grid: { color: c.gridColor },
+              },
+            },
+          },
+        });
       }
 
       function satab(el, h) {

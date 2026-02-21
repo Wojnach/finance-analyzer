@@ -383,6 +383,45 @@ def api_triggers():
     return jsonify(entries)
 
 
+@app.route("/api/accuracy-history")
+@require_auth
+def api_accuracy_history():
+    """Return accuracy snapshots over time for charting trend lines."""
+    entries = _read_jsonl(DATA_DIR / "accuracy_snapshots.jsonl", limit=500)
+    return jsonify(entries)
+
+
+@app.route("/api/trades")
+@require_auth
+def api_trades():
+    """Return combined transactions from both portfolio states for chart annotations."""
+    patient = _read_json(DATA_DIR / "portfolio_state.json")
+    bold = _read_json(DATA_DIR / "portfolio_state_bold.json")
+    trades = []
+    if patient and patient.get("transactions"):
+        for tx in patient["transactions"]:
+            trades.append({
+                "ts": tx.get("timestamp", ""),
+                "ticker": tx.get("ticker", ""),
+                "action": tx.get("action", ""),
+                "total_sek": tx.get("total_sek", 0),
+                "price_usd": tx.get("price_usd", 0),
+                "strategy": "patient",
+            })
+    if bold and bold.get("transactions"):
+        for tx in bold["transactions"]:
+            trades.append({
+                "ts": tx.get("timestamp", ""),
+                "ticker": tx.get("ticker", ""),
+                "action": tx.get("action", ""),
+                "total_sek": tx.get("total_sek", 0),
+                "price_usd": tx.get("price_usd", 0),
+                "strategy": "bold",
+            })
+    trades.sort(key=lambda t: t.get("ts", ""))
+    return jsonify(trades)
+
+
 @app.route("/api/health")
 @require_auth
 def api_health():

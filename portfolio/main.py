@@ -323,6 +323,27 @@ def loop(interval=None):
     from portfolio.logging_config import setup_logging
     setup_logging()
 
+    # Check if previous loop crashed (stale heartbeat)
+    heartbeat_file = DATA_DIR / "heartbeat.txt"
+    if heartbeat_file.exists():
+        try:
+            last_beat = datetime.fromisoformat(heartbeat_file.read_text().strip())
+            age_seconds = (datetime.now(timezone.utc) - last_beat).total_seconds()
+            if age_seconds > 300:  # 5 minutes — previous loop likely crashed
+                age_min = int(age_seconds // 60)
+                msg = f"_LOOP RESTARTED_ — previous heartbeat was {age_min}m ago. Possible crash."
+                logger.warning(msg)
+                try:
+                    config = _load_config()
+                    from portfolio.telegram_notifications import send_telegram
+                    send_telegram(msg, config)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"Failed to check heartbeat staleness: {e}")
+
+    logger.info("Loop started")
+
     config = _load_config()
     logger.info("Starting loop with market-aware scheduling. Ctrl+C to stop.")
 

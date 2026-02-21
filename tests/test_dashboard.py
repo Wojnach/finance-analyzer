@@ -366,6 +366,73 @@ class TestApiSignalHeatmap:
         assert resp.status_code == 404
 
 
+class TestApiAccuracyHistory:
+    def test_returns_history_entries(self, client, tmp_data):
+        entry = json.dumps({
+            "ts": "2026-02-20T00:00:00+00:00",
+            "signals": {"rsi": {"accuracy": 0.5, "total": 100}},
+        })
+        (tmp_data / "accuracy_snapshots.jsonl").write_text(
+            entry + "\n", encoding="utf-8"
+        )
+        with _no_auth():
+            resp = client.get("/api/accuracy-history")
+        data = resp.get_json()
+        assert len(data) == 1
+        assert data[0]["signals"]["rsi"]["accuracy"] == 0.5
+
+    def test_empty_when_missing(self, client, tmp_data):
+        with _no_auth():
+            resp = client.get("/api/accuracy-history")
+        assert resp.get_json() == []
+
+
+class TestApiTrades:
+    def test_returns_combined_trades(self, client, tmp_data):
+        patient = {
+            "cash_sek": 425000,
+            "transactions": [
+                {"timestamp": "2026-02-15T10:00:00Z", "ticker": "MU", "action": "BUY",
+                 "total_sek": 75000, "price_usd": 420}
+            ],
+        }
+        bold = {
+            "cash_sek": 350000,
+            "transactions": [
+                {"timestamp": "2026-02-14T10:00:00Z", "ticker": "NVDA", "action": "BUY",
+                 "total_sek": 100000, "price_usd": 180}
+            ],
+        }
+        (tmp_data / "portfolio_state.json").write_text(
+            json.dumps(patient), encoding="utf-8"
+        )
+        (tmp_data / "portfolio_state_bold.json").write_text(
+            json.dumps(bold), encoding="utf-8"
+        )
+        with _no_auth():
+            resp = client.get("/api/trades")
+        data = resp.get_json()
+        assert len(data) == 2
+        # Sorted by timestamp: NVDA first (Feb 14), then MU (Feb 15)
+        assert data[0]["ticker"] == "NVDA"
+        assert data[0]["strategy"] == "bold"
+        assert data[1]["ticker"] == "MU"
+        assert data[1]["strategy"] == "patient"
+
+    def test_empty_when_no_files(self, client, tmp_data):
+        with _no_auth():
+            resp = client.get("/api/trades")
+        assert resp.get_json() == []
+
+    def test_empty_when_no_transactions(self, client, tmp_data):
+        (tmp_data / "portfolio_state.json").write_text(
+            '{"cash_sek": 500000}', encoding="utf-8"
+        )
+        with _no_auth():
+            resp = client.get("/api/trades")
+        assert resp.get_json() == []
+
+
 class TestApiHealth:
     def test_returns_health_data(self, client):
         mock_health = {
