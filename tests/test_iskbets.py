@@ -387,10 +387,10 @@ class TestATR:
         assert atr > 0
         assert isinstance(atr, float)
 
-    def test_unknown_ticker_raises(self, app_config):
-        """Unknown ticker raises ValueError."""
-        with pytest.raises(ValueError, match="Unknown ticker"):
-            compute_atr_15m("FAKE-COIN", app_config)
+    def test_unknown_ticker_returns_none(self, app_config):
+        """Unknown ticker returns None (error swallowed by _cached wrapper)."""
+        result = compute_atr_15m("FAKE-COIN", app_config)
+        assert result is None
 
 
 # ── Tests: Stage 1 → Breakeven ───────────────────────────────────────────

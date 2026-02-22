@@ -19,6 +19,7 @@ logger = logging.getLogger("portfolio.iskbets")
 from portfolio.api_utils import get_alpaca_headers
 from portfolio.file_utils import atomic_write_json
 from portfolio.http_retry import fetch_with_retry
+from portfolio.shared_state import _cached
 from portfolio.telegram_notifications import send_telegram as _shared_send_telegram
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -113,7 +114,16 @@ def _log_telegram(msg):
 
 
 def compute_atr_15m(ticker, config):
-    """Fetch 15-min candles and compute ATR(14). Returns ATR value in USD."""
+    """Fetch 15-min candles and compute ATR(14). Returns ATR value in USD.
+
+    Results are cached for 5 minutes via shared_state._cached() to avoid
+    redundant API calls when called per ticker per entry check.
+    """
+    return _cached(f"atr_15m_{ticker}", 300, _compute_atr_15m_impl, ticker, config)
+
+
+def _compute_atr_15m_impl(ticker, config):
+    """Implementation: fetch 15-min candles and compute ATR(14)."""
     source = TICKER_SOURCES.get(ticker)
     if not source:
         raise ValueError(f"Unknown ticker: {ticker}")

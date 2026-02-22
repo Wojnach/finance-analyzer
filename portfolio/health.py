@@ -23,6 +23,9 @@ def update_health(cycle_count: int, signals_ok: int, signals_failed: int,
     if last_trigger_reason:
         state["last_trigger_reason"] = last_trigger_reason
         state["last_trigger_time"] = datetime.now(timezone.utc).isoformat()
+        # Cache the invocation timestamp so check_agent_silence() can avoid
+        # re-parsing invocations.jsonl on every call.
+        state["last_invocation_ts"] = state["last_trigger_time"]
     if error:
         state["errors"] = state.get("errors", [])[-19:] + [
             {"ts": datetime.now(timezone.utc).isoformat(), "error": error}
@@ -65,23 +68,29 @@ def check_agent_silence(max_market_seconds: int = 7200,
     Returns:
         dict with keys: silent (bool), age_seconds (float), threshold (int), market_open (bool)
     """
-    invocations_file = DATA_DIR / "invocations.jsonl"
-    if not invocations_file.exists():
-        return {"silent": True, "age_seconds": float("inf"), "threshold": max_market_seconds, "market_open": False}
-
-    # Find last invocation timestamp
+    # Try cached timestamp from health_state first (avoids re-parsing invocations.jsonl)
     last_ts = None
-    for line in invocations_file.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-            ts = entry.get("ts")
-            if ts:
-                last_ts = ts
-        except json.JSONDecodeError:
-            continue
+    state = load_health()
+    last_ts = state.get("last_invocation_ts")
+
+    # Fall back to parsing invocations.jsonl if health_state doesn't have the timestamp
+    if not last_ts:
+        invocations_file = DATA_DIR / "invocations.jsonl"
+        if not invocations_file.exists():
+            return {"silent": True, "age_seconds": float("inf"), "threshold": max_market_seconds, "market_open": False}
+
+        with open(invocations_file, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    ts = entry.get("ts")
+                    if ts:
+                        last_ts = ts
+                except json.JSONDecodeError:
+                    continue
 
     if not last_ts:
         return {"silent": True, "age_seconds": float("inf"), "threshold": max_market_seconds, "market_open": False}

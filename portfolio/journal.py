@@ -21,17 +21,18 @@ def load_recent(max_entries=10, max_age_hours=8):
         return []
     cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
     entries = []
-    for line in JOURNAL_FILE.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-            ts = datetime.fromisoformat(entry["ts"])
-            if ts >= cutoff:
-                entries.append(entry)
-        except (json.JSONDecodeError, KeyError, ValueError):
-            continue
+    with open(JOURNAL_FILE, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                ts = datetime.fromisoformat(entry["ts"])
+                if ts >= cutoff:
+                    entries.append(entry)
+            except (json.JSONDecodeError, KeyError, ValueError):
+                continue
     return entries[-max_entries:]
 
 
