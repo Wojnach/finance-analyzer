@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from portfolio.api_utils import load_config as _load_config
+from portfolio.file_utils import atomic_append_jsonl
 from portfolio.telegram_notifications import send_telegram, escape_markdown_v1
 
 logger = logging.getLogger("portfolio.agent")
@@ -30,8 +31,7 @@ def _log_trigger(reasons, status):
         "reasons": reasons,
         "status": status,
     }
-    with open(INVOCATIONS_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
+    atomic_append_jsonl(INVOCATIONS_FILE, entry)
 
 
 def invoke_agent(reasons):
