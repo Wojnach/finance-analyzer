@@ -3,7 +3,6 @@ import time
 from pathlib import Path
 
 import pandas as pd
-import requests
 
 from portfolio.api_utils import get_alpaca_headers, load_config
 from portfolio.http_retry import fetch_with_retry

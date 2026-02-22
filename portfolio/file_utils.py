@@ -11,7 +11,7 @@ def atomic_write_json(path, data, indent=2):
     Ensures the file is never left in a partially-written state.
     """
     path = Path(path)
-    path.parent.mkdir(exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
