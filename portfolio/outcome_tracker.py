@@ -271,6 +271,14 @@ def backfill_outcomes():
     price_cache = {}
     updated = 0
 
+    # Open SignalDB once for all dual-writes (avoids per-outcome open/close)
+    _db = None
+    try:
+        from portfolio.signal_db import SignalDB
+        _db = SignalDB()
+    except Exception:
+        pass
+
     for entry in entries:
         entry_ts = datetime.fromisoformat(entry["ts"]).timestamp()
         tickers = entry.get("tickers", {})
@@ -332,20 +340,24 @@ def backfill_outcomes():
                 entry_updated = True
 
                 # Dual-write outcome to SQLite
-                try:
-                    from portfolio.signal_db import SignalDB
-                    _db = SignalDB()
-                    _db.update_outcome(
-                        entry["ts"], ticker, h_key,
-                        round(hist_price, 2), change_pct, outcome_ts_str,
-                    )
-                    _db.close()
-                except Exception:
-                    pass
+                if _db is not None:
+                    try:
+                        _db.update_outcome(
+                            entry["ts"], ticker, h_key,
+                            round(hist_price, 2), change_pct, outcome_ts_str,
+                        )
+                    except Exception:
+                        pass
 
         entry["outcomes"] = outcomes
         if entry_updated:
             updated += 1
+
+    if _db is not None:
+        try:
+            _db.close()
+        except Exception:
+            pass
 
     import os, tempfile
 

@@ -123,86 +123,18 @@ def compute_atr_15m(ticker, config):
 
 
 def _compute_atr_15m_impl(ticker, config):
-    """Implementation: fetch 15-min candles and compute ATR(14)."""
+    """Implementation: fetch 15-min candles and compute ATR(14).
+
+    Delegates kline fetching to data_collector._fetch_klines to avoid
+    duplicating Binance/Alpaca/yfinance API code.
+    """
+    from portfolio.data_collector import _fetch_klines
+
     source = TICKER_SOURCES.get(ticker)
     if not source:
         raise ValueError(f"Unknown ticker: {ticker}")
 
-    if "binance_fapi" in source:
-        r = fetch_with_retry(
-            "https://fapi.binance.com/fapi/v1/klines",
-            params={
-                "symbol": source["binance_fapi"],
-                "interval": "15m",
-                "limit": 20,
-            },
-            timeout=10,
-        )
-        if r is None:
-            raise ValueError(f"Failed to fetch Binance FAPI data for {ticker}")
-        r.raise_for_status()
-        data = r.json()
-        df = pd.DataFrame(
-            data,
-            columns=[
-                "open_time", "open", "high", "low", "close", "volume",
-                "close_time", "quote_vol", "trades", "taker_buy_vol",
-                "taker_buy_quote_vol", "ignore",
-            ],
-        )
-        for col in ["open", "high", "low", "close"]:
-            df[col] = df[col].astype(float)
-    elif "binance" in source:
-        r = fetch_with_retry(
-            f"{BINANCE_BASE}/klines",
-            params={
-                "symbol": source["binance"],
-                "interval": "15m",
-                "limit": 20,
-            },
-            timeout=10,
-        )
-        if r is None:
-            raise ValueError(f"Failed to fetch Binance data for {ticker}")
-        r.raise_for_status()
-        data = r.json()
-        df = pd.DataFrame(
-            data,
-            columns=[
-                "open_time", "open", "high", "low", "close", "volume",
-                "close_time", "quote_vol", "trades", "taker_buy_vol",
-                "taker_buy_quote_vol", "ignore",
-            ],
-        )
-        for col in ["open", "high", "low", "close"]:
-            df[col] = df[col].astype(float)
-    else:
-        # Alpaca stocks
-        end = datetime.now(timezone.utc)
-        start = end - pd.Timedelta(days=2)
-        r = fetch_with_retry(
-            f"{ALPACA_BASE}/stocks/{source['alpaca']}/bars",
-            headers=get_alpaca_headers(),
-            params={
-                "timeframe": "15Min",
-                "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "end": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "feed": "iex",
-                "adjustment": "split",
-            },
-            timeout=10,
-        )
-        if r is None:
-            raise ValueError(f"Failed to fetch Alpaca data for {ticker}")
-        r.raise_for_status()
-        bars = r.json().get("bars") or []
-        if not bars:
-            raise ValueError(f"No Alpaca 15m data for {ticker}")
-        df = pd.DataFrame(bars)
-        df = df.rename(columns={"o": "open", "h": "high", "l": "low", "c": "close"})
-        for col in ["open", "high", "low", "close"]:
-            df[col] = df[col].astype(float)
-        df = df.tail(20)
+    df = _fetch_klines(source, interval="15m", limit=20)
 
     close = df["close"]
     high = df["high"]

@@ -5,10 +5,13 @@ and delegates to iskbets.handle_command().
 """
 
 import json
+import logging
 import threading
 import time
 
 from portfolio.http_retry import fetch_with_retry
+
+logger = logging.getLogger("portfolio.telegram_poller")
 
 
 class TelegramPoller:
@@ -37,7 +40,7 @@ class TelegramPoller:
                 for update in updates:
                     self._handle_update(update)
             except Exception as e:
-                print(f"  Poller error: {e}")
+                logger.warning("Poller error: %s", e)
             time.sleep(5)
 
     def _get_updates(self):
@@ -123,6 +126,6 @@ class TelegramPoller:
                 timeout=30,
             )
             if r is not None and not r.ok:
-                print(f"  Poller reply error: {r.status_code} {r.text[:200]}")
+                logger.warning("Poller reply error: %s %s", r.status_code, r.text[:200])
         except Exception as e:
-            print(f"  Poller reply failed: {e}")
+            logger.warning("Poller reply failed: %s", e)

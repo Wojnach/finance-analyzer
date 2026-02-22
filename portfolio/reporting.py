@@ -147,9 +147,16 @@ def write_agent_summary(
             signal_accuracy,
             consensus_accuracy,
             best_worst_signals,
+            load_cached_accuracy,
+            write_accuracy_cache,
         )
 
-        sig_acc = signal_accuracy("1d")
+        # Use cached accuracy to avoid redundant full-log scans
+        sig_acc = load_cached_accuracy("1d")
+        if not sig_acc:
+            sig_acc = signal_accuracy("1d")
+            if sig_acc:
+                write_accuracy_cache("1d", sig_acc)
         cons_acc = consensus_accuracy("1d")
         bw = best_worst_signals("1d")
         qualified = {k: v for k, v in sig_acc.items() if v["total"] >= 5}

@@ -165,9 +165,6 @@ def api_signal_log():
 @require_auth
 def api_accuracy():
     try:
-        import sys
-
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         from portfolio.accuracy_stats import (
             signal_accuracy,
             consensus_accuracy,
@@ -215,93 +212,22 @@ def api_lora_status():
 def api_validate_portfolio():
     """Validate a portfolio JSON for integrity.
 
-    Checks:
-      - cash_sek is non-negative
-      - All share counts are non-negative
-      - Transaction math: starting cash - BUY allocs + SELL proceeds = cash_sek
-      - Holdings integrity: total bought - total sold = current shares per ticker
+    Delegates to portfolio_validator.validate_portfolio() which performs
+    comprehensive checks: cash, holdings, fees, transactions, avg_cost.
     """
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"valid": False, "errors": ["No JSON body provided"]}), 400
 
-    errors = []
-
-    # Check cash non-negative
-    cash = data.get("cash_sek")
-    if cash is None:
-        errors.append("Missing cash_sek field")
-    elif cash < 0:
-        errors.append(f"cash_sek is negative: {cash}")
-
-    # Check shares non-negative
-    holdings = data.get("holdings", {})
-    for ticker, info in holdings.items():
-        shares = info.get("shares", 0) if isinstance(info, dict) else 0
-        if shares < 0:
-            errors.append(f"Negative shares for {ticker}: {shares}")
-
-    # Check transaction math
-    initial = data.get("initial_value_sek", 500000)
-    transactions = data.get("transactions", [])
-    computed_cash = initial
-    ticker_bought = {}
-    ticker_sold = {}
-
-    for i, tx in enumerate(transactions):
-        action = tx.get("action", "").upper()
-        ticker = tx.get("ticker", "unknown")
-        shares = tx.get("shares", 0)
-        total = tx.get("total_sek", 0)
-        fee = tx.get("fee_sek", 0)
-
-        if action == "BUY":
-            # BUY: full alloc deducted from cash
-            computed_cash -= total
-            ticker_bought.setdefault(ticker, 0)
-            ticker_bought[ticker] += shares
-        elif action == "SELL":
-            # SELL: net proceeds added to cash
-            computed_cash += total
-            ticker_sold.setdefault(ticker, 0)
-            ticker_sold[ticker] += shares
-
-    # Cash reconciliation (allow small float tolerance)
-    if cash is not None:
-        diff = abs(computed_cash - cash)
-        if diff > 1.0:  # 1 SEK tolerance for float rounding
-            errors.append(
-                f"Cash mismatch: computed {computed_cash:.2f} vs recorded {cash:.2f} "
-                f"(diff {diff:.2f} SEK)"
-            )
-
-    # Holdings reconciliation
-    all_tickers = set(list(ticker_bought.keys()) + list(ticker_sold.keys()))
-    for ticker in all_tickers:
-        bought = ticker_bought.get(ticker, 0)
-        sold = ticker_sold.get(ticker, 0)
-        expected_remaining = bought - sold
-
-        actual = 0
-        if ticker in holdings:
-            h = holdings[ticker]
-            actual = h.get("shares", 0) if isinstance(h, dict) else 0
-
-        diff = abs(expected_remaining - actual)
-        if diff > 0.0001:  # tolerance for float precision
-            errors.append(
-                f"Holdings mismatch for {ticker}: bought {bought:.6f} - sold {sold:.6f} "
-                f"= expected {expected_remaining:.6f}, actual {actual:.6f}"
-            )
+    try:
+        from portfolio.portfolio_validator import validate_portfolio
+        errors = validate_portfolio(data)
+    except Exception as e:
+        return jsonify({"valid": False, "errors": [f"Validation error: {e}"]}), 500
 
     return jsonify({
         "valid": len(errors) == 0,
         "errors": errors,
-        "computed_cash": round(computed_cash, 2),
-        "ticker_balances": {
-            t: round(ticker_bought.get(t, 0) - ticker_sold.get(t, 0), 6)
-            for t in all_tickers
-        },
     })
 
 
@@ -478,8 +404,6 @@ def api_decisions():
 def api_health():
     """Return system health summary (loop heartbeat, errors, agent silence)."""
     try:
-        import sys
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         from portfolio.health import get_health_summary
         return jsonify(get_health_summary())
     except Exception as e:
