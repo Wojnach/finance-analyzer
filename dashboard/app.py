@@ -2,6 +2,7 @@
 
 import json
 import functools
+from collections import deque
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -26,15 +27,17 @@ def _read_json(path):
 def _read_jsonl(path, limit=100):
     if not path.exists():
         return []
-    entries = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
+    entries = deque(maxlen=limit)
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
             try:
                 entries.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
-    return entries[-limit:]
+    return list(entries)
 
 
 def _get_config():
@@ -420,6 +423,54 @@ def api_trades():
             })
     trades.sort(key=lambda t: t.get("ts", ""))
     return jsonify(trades)
+
+
+@app.route("/api/decisions")
+@require_auth
+def api_decisions():
+    """Return Layer 2 decision history with optional filtering.
+
+    Query params:
+      - limit: max entries (default 50, max 500)
+      - ticker: filter by ticker (e.g., BTC-USD)
+      - action: filter by action (BUY, SELL, HOLD)
+      - strategy: filter by strategy (patient, bold)
+    """
+    try:
+        limit = min(int(request.args.get("limit", 50)), 500)
+    except (ValueError, TypeError):
+        limit = 50
+    ticker_filter = request.args.get("ticker", "").upper()
+    action_filter = request.args.get("action", "").upper()
+    strategy_filter = request.args.get("strategy", "").lower()
+
+    raw = _read_jsonl(DATA_DIR / "layer2_journal.jsonl", limit=1000)
+
+    results = []
+    for entry in reversed(raw):  # newest first
+        # Apply action/strategy filters
+        if action_filter or strategy_filter:
+            decisions = entry.get("decisions", {})
+            matched = False
+            for strat, dec in decisions.items():
+                if strategy_filter and strat != strategy_filter:
+                    continue
+                if action_filter and dec.get("action", "").upper() != action_filter:
+                    continue
+                matched = True
+            if not matched:
+                continue
+
+        if ticker_filter:
+            tickers = entry.get("tickers", {})
+            if ticker_filter not in tickers:
+                continue
+
+        results.append(entry)
+        if len(results) >= limit:
+            break
+
+    return jsonify(results)
 
 
 @app.route("/api/health")

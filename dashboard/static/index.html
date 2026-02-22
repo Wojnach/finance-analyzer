@@ -491,6 +491,7 @@
       <div class="nav-tab" data-tab="signals" onclick="switchTab('signals')">Signal Heatmap</div>
       <div class="nav-tab" data-tab="equity" onclick="switchTab('equity')">Equity Curve</div>
       <div class="nav-tab" data-tab="triggers" onclick="switchTab('triggers')">Trigger Timeline</div>
+      <div class="nav-tab" data-tab="decisions" onclick="switchTab('decisions')">Decisions</div>
       <div class="nav-tab" data-tab="accuracy" onclick="switchTab('accuracy')">Accuracy</div>
       <div class="nav-tab" data-tab="health" onclick="switchTab('health')">Health</div>
     </div>
@@ -572,6 +573,58 @@
           <div class="trig-list" id="trigList">
             <div class="nd">Loading triggers...</div>
           </div>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           TAB: Decisions (Layer 2 Journal)
+           ============================================================ -->
+      <div class="tab-content" id="tab-decisions">
+        <div class="stit">Layer 2 Decision History</div>
+        <div class="pnl" style="margin-bottom:14px">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+            <label style="font-size:11px;color:var(--txm)">Ticker:
+              <select id="decFilterTicker" onchange="loadDecisions()" style="background:var(--card2);color:var(--tx);border:1px solid var(--bdr);border-radius:4px;padding:3px 6px;font-size:11px">
+                <option value="">All</option>
+              </select>
+            </label>
+            <label style="font-size:11px;color:var(--txm)">Action:
+              <select id="decFilterAction" onchange="loadDecisions()" style="background:var(--card2);color:var(--tx);border:1px solid var(--bdr);border-radius:4px;padding:3px 6px;font-size:11px">
+                <option value="">All</option>
+                <option value="BUY">BUY</option>
+                <option value="SELL">SELL</option>
+                <option value="HOLD">HOLD</option>
+              </select>
+            </label>
+            <label style="font-size:11px;color:var(--txm)">Strategy:
+              <select id="decFilterStrategy" onchange="loadDecisions()" style="background:var(--card2);color:var(--tx);border:1px solid var(--bdr);border-radius:4px;padding:3px 6px;font-size:11px">
+                <option value="">All</option>
+                <option value="patient">Patient</option>
+                <option value="bold">Bold</option>
+              </select>
+            </label>
+          </div>
+          <div style="max-height:600px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--bdr) transparent">
+            <table class="tt" id="decTable">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Trigger</th>
+                  <th>Regime</th>
+                  <th>Patient</th>
+                  <th>Bold</th>
+                  <th>Reasoning</th>
+                </tr>
+              </thead>
+              <tbody id="decBody">
+                <tr><td colspan="6" class="nd">Loading decisions...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="pnl" id="decDetail" style="display:none">
+          <div class="pt">Decision Detail</div>
+          <div id="decDetailContent"></div>
         </div>
       </div>
 
@@ -720,6 +773,7 @@
         if (name === "signals") loadSignalHeatmap();
         if (name === "equity") loadEquityCurve();
         if (name === "triggers") loadTriggers();
+        if (name === "decisions") loadDecisions();
         if (name === "accuracy") { loadAccuracy(); loadAccuracyHistory(); }
         if (name === "health") loadHealth();
       }
@@ -1472,6 +1526,165 @@
         el.classList.add("active");
         var pnl = el.closest(".pnl") || el.closest(".colc");
         if (pnl) pnl.querySelectorAll(".apnl").forEach(function (p) { p.style.display = p.dataset.h === h ? "" : "none"; });
+      }
+
+      /* ================================================================
+         Decisions (Layer 2 journal)
+         ================================================================ */
+      var decData = [];
+      var decRefreshTimer = null;
+
+      async function loadDecisions() {
+        var ticker = document.getElementById("decFilterTicker").value;
+        var action = document.getElementById("decFilterAction").value;
+        var strategy = document.getElementById("decFilterStrategy").value;
+        var params = "?limit=100";
+        if (ticker) params += "&ticker=" + encodeURIComponent(ticker);
+        if (action) params += "&action=" + encodeURIComponent(action);
+        if (strategy) params += "&strategy=" + encodeURIComponent(strategy);
+
+        var data = await fj("/api/decisions" + params);
+        if (!data) {
+          document.getElementById("decBody").innerHTML = '<tr><td colspan="6" class="nd">Failed to load decisions</td></tr>';
+          return;
+        }
+        decData = data;
+
+        // Populate ticker filter dropdown (only on first load or when empty)
+        var sel = document.getElementById("decFilterTicker");
+        if (sel.options.length <= 1 && data.length > 0) {
+          var tickers = {};
+          data.forEach(function (e) {
+            Object.keys(e.tickers || {}).forEach(function (t) { tickers[t] = true; });
+          });
+          Object.keys(tickers).sort().forEach(function (t) {
+            var opt = document.createElement("option");
+            opt.value = t; opt.textContent = t;
+            sel.appendChild(opt);
+          });
+        }
+
+        renderDecisions(data);
+
+        // Auto-refresh every 60s
+        if (decRefreshTimer) clearTimeout(decRefreshTimer);
+        decRefreshTimer = setTimeout(function () {
+          if (document.getElementById("tab-decisions").classList.contains("active")) {
+            loadDecisions();
+          }
+        }, 60000);
+      }
+
+      function renderDecisions(data) {
+        var body = document.getElementById("decBody");
+        if (!data || !data.length) {
+          body.innerHTML = '<tr><td colspan="6" class="nd">No decisions found</td></tr>';
+          document.getElementById("decDetail").style.display = "none";
+          return;
+        }
+        var h = "";
+        data.forEach(function (entry, idx) {
+          var dec = entry.decisions || {};
+          var patDec = dec.patient || {};
+          var boldDec = dec.bold || {};
+          var patAction = patDec.action || "HOLD";
+          var boldAction = boldDec.action || "HOLD";
+          var patColor = patAction === "BUY" ? "var(--grn)" : patAction === "SELL" ? "var(--red)" : "var(--gry)";
+          var boldColor = boldAction === "BUY" ? "var(--grn)" : boldAction === "SELL" ? "var(--red)" : "var(--gry)";
+          var reasoning = patDec.reasoning || boldDec.reasoning || "";
+          if (patDec.reasoning && boldDec.reasoning && patDec.reasoning !== boldDec.reasoning) {
+            reasoning = "P: " + patDec.reasoning + " | B: " + boldDec.reasoning;
+          }
+          var regimeColor = "var(--txd)";
+          if ((entry.regime || "").indexOf("up") >= 0 || entry.regime === "breakout") regimeColor = "var(--grn)";
+          else if ((entry.regime || "").indexOf("down") >= 0 || entry.regime === "capitulation") regimeColor = "var(--red)";
+          else if (entry.regime === "high-vol") regimeColor = "var(--org)";
+
+          h += '<tr style="cursor:pointer" onclick="showDecDetail(' + idx + ')">';
+          h += '<td style="white-space:nowrap">' + ft(entry.ts) + '</td>';
+          h += '<td><span class="trig-reason-tag">' + eh(entry.trigger || "--") + '</span></td>';
+          h += '<td style="color:' + regimeColor + ';font-weight:600;font-size:10px">' + eh(entry.regime || "--") + '</td>';
+          h += '<td style="color:' + patColor + ';font-weight:700">' + patAction + '</td>';
+          h += '<td style="color:' + boldColor + ';font-weight:700">' + boldAction + '</td>';
+          h += '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + eh(reasoning) + '">' + eh(reasoning) + '</td>';
+          h += '</tr>';
+        });
+        body.innerHTML = h;
+      }
+
+      function showDecDetail(idx) {
+        var entry = decData[idx];
+        if (!entry) return;
+        var detail = document.getElementById("decDetail");
+        var content = document.getElementById("decDetailContent");
+        detail.style.display = "";
+
+        var h = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">';
+
+        // Left: metadata
+        h += '<div>';
+        h += '<div style="font-size:11px;color:var(--txm);margin-bottom:4px">TIMESTAMP</div>';
+        h += '<div style="font-size:13px;margin-bottom:10px">' + ftFull(entry.ts) + '</div>';
+        h += '<div style="font-size:11px;color:var(--txm);margin-bottom:4px">TRIGGER</div>';
+        h += '<div style="font-size:13px;margin-bottom:10px">' + eh(entry.trigger || "--") + '</div>';
+        h += '<div style="font-size:11px;color:var(--txm);margin-bottom:4px">REGIME</div>';
+        h += '<div style="font-size:13px;margin-bottom:10px">' + eh(entry.regime || "--") + '</div>';
+        if (entry.reflection) {
+          h += '<div style="font-size:11px;color:var(--txm);margin-bottom:4px">REFLECTION</div>';
+          h += '<div style="font-size:12px;color:var(--txd);margin-bottom:10px;font-style:italic">' + eh(entry.reflection) + '</div>';
+        }
+        h += '</div>';
+
+        // Right: decisions
+        h += '<div>';
+        var dec = entry.decisions || {};
+        ["patient", "bold"].forEach(function (strat) {
+          var d = dec[strat] || {};
+          var ac2 = (d.action || "HOLD").toUpperCase();
+          var cl = ac2 === "BUY" ? "var(--grn)" : ac2 === "SELL" ? "var(--red)" : "var(--gry)";
+          var label = strat.charAt(0).toUpperCase() + strat.slice(1);
+          h += '<div style="margin-bottom:10px;padding:8px;background:var(--card2);border-radius:6px;border-left:3px solid ' + cl + '">';
+          h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">' + label + '</div>';
+          h += '<div style="font-size:16px;font-weight:700;color:' + cl + '">' + ac2 + '</div>';
+          if (d.reasoning) h += '<div style="font-size:11px;color:var(--txd);margin-top:4px">' + eh(d.reasoning) + '</div>';
+          h += '</div>';
+        });
+        h += '</div>';
+        h += '</div>';
+
+        // Tickers
+        var tickers = entry.tickers || {};
+        var tickerKeys = Object.keys(tickers);
+        if (tickerKeys.length > 0) {
+          h += '<div style="font-size:11px;color:var(--txm);text-transform:uppercase;margin-bottom:6px">Ticker Outlooks</div>';
+          h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-bottom:14px">';
+          tickerKeys.forEach(function (t) {
+            var tk = tickers[t];
+            var olColor = tk.outlook === "bullish" ? "var(--grn)" : tk.outlook === "bearish" ? "var(--red)" : "var(--gry)";
+            h += '<div style="background:var(--card2);padding:8px;border-radius:6px">';
+            h += '<div style="font-weight:600;font-size:12px">' + eh(t) + '</div>';
+            h += '<div style="font-size:11px;color:' + olColor + ';font-weight:600">' + eh(tk.outlook || "neutral") + '</div>';
+            if (tk.conviction > 0) h += '<div style="font-size:10px;color:var(--txm)">Conviction: ' + fn(tk.conviction * 100, 0) + '%</div>';
+            if (tk.thesis) h += '<div style="font-size:10px;color:var(--txd);margin-top:2px">' + eh(tk.thesis) + '</div>';
+            if (tk.levels && tk.levels.length >= 2) h += '<div style="font-size:10px;color:var(--txm)">S: ' + fn(tk.levels[0], 2) + ' / R: ' + fn(tk.levels[1], 2) + '</div>';
+            h += '</div>';
+          });
+          h += '</div>';
+        }
+
+        // Watchlist
+        var watchlist = entry.watchlist || [];
+        if (watchlist.length > 0) {
+          h += '<div style="font-size:11px;color:var(--txm);text-transform:uppercase;margin-bottom:6px">Watchlist</div>';
+          h += '<div style="margin-bottom:14px">';
+          watchlist.forEach(function (w) {
+            h += '<div style="font-size:11px;color:var(--txd);padding:3px 0">&bull; ' + eh(w) + '</div>';
+          });
+          h += '</div>';
+        }
+
+        content.innerHTML = h;
+        detail.scrollIntoView({ behavior: "smooth", block: "start" });
       }
 
       /* ================================================================

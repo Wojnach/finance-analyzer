@@ -568,3 +568,235 @@ class TestApiValidatePortfolio:
         data = resp.get_json()
         assert data["valid"] is False
         assert any("Missing cash_sek" in e for e in data["errors"])
+
+
+# ---------------------------------------------------------------------------
+# _read_jsonl streaming (deque-based)
+# ---------------------------------------------------------------------------
+
+
+class TestReadJsonlStreaming:
+    """Verify that _read_jsonl streams line-by-line using deque."""
+
+    def test_uses_deque_limit(self, tmp_path):
+        """Deque maxlen limits entries to last N without loading all into memory."""
+        f = tmp_path / "stream.jsonl"
+        lines = [json.dumps({"i": i}) for i in range(200)]
+        f.write_text("\n".join(lines), encoding="utf-8")
+        result = _read_jsonl(f, limit=5)
+        assert len(result) == 5
+        # Should be the last 5 entries
+        assert result[0]["i"] == 195
+        assert result[4]["i"] == 199
+
+    def test_limit_larger_than_file(self, tmp_path):
+        """When file has fewer entries than limit, return all entries."""
+        f = tmp_path / "small.jsonl"
+        lines = [json.dumps({"i": i}) for i in range(3)]
+        f.write_text("\n".join(lines), encoding="utf-8")
+        result = _read_jsonl(f, limit=100)
+        assert len(result) == 3
+
+    def test_returns_list_not_deque(self, tmp_path):
+        """Result must be a list, not a deque."""
+        f = tmp_path / "type.jsonl"
+        f.write_text('{"a":1}\n', encoding="utf-8")
+        result = _read_jsonl(f)
+        assert isinstance(result, list)
+
+
+# ---------------------------------------------------------------------------
+# /api/decisions
+# ---------------------------------------------------------------------------
+
+
+def _sample_journal_entry(
+    ts="2026-02-22T10:00:00+00:00",
+    trigger="cooldown",
+    regime="range-bound",
+    patient_action="HOLD",
+    bold_action="HOLD",
+    patient_reasoning="No setup",
+    bold_reasoning="No breakout",
+    tickers=None,
+):
+    """Build a sample layer2_journal.jsonl entry."""
+    return {
+        "ts": ts,
+        "trigger": trigger,
+        "regime": regime,
+        "reflection": "",
+        "continues": None,
+        "decisions": {
+            "patient": {"action": patient_action, "reasoning": patient_reasoning},
+            "bold": {"action": bold_action, "reasoning": bold_reasoning},
+        },
+        "tickers": tickers or {},
+        "watchlist": [],
+        "prices": {},
+    }
+
+
+class TestApiDecisions:
+    def _write_journal(self, tmp_data, entries):
+        lines = [json.dumps(e) for e in entries]
+        (tmp_data / "layer2_journal.jsonl").write_text(
+            "\n".join(lines) + "\n", encoding="utf-8"
+        )
+
+    def test_returns_json_array(self, client, tmp_data):
+        self._write_journal(tmp_data, [_sample_journal_entry()])
+        with _no_auth():
+            resp = client.get("/api/decisions")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert isinstance(data, list)
+        assert len(data) == 1
+
+    def test_empty_journal_returns_empty(self, client, tmp_data):
+        with _no_auth():
+            resp = client.get("/api/decisions")
+        assert resp.status_code == 200
+        assert resp.get_json() == []
+
+    def test_newest_first(self, client, tmp_data):
+        entries = [
+            _sample_journal_entry(ts="2026-02-22T08:00:00+00:00"),
+            _sample_journal_entry(ts="2026-02-22T10:00:00+00:00"),
+            _sample_journal_entry(ts="2026-02-22T12:00:00+00:00"),
+        ]
+        self._write_journal(tmp_data, entries)
+        with _no_auth():
+            resp = client.get("/api/decisions")
+        data = resp.get_json()
+        assert len(data) == 3
+        # Newest first (reversed)
+        assert data[0]["ts"] == "2026-02-22T12:00:00+00:00"
+        assert data[2]["ts"] == "2026-02-22T08:00:00+00:00"
+
+    def test_filter_by_ticker(self, client, tmp_data):
+        entries = [
+            _sample_journal_entry(
+                ts="2026-02-22T08:00:00+00:00",
+                tickers={"BTC-USD": {"outlook": "bullish", "thesis": "test", "conviction": 0.5, "levels": []}},
+            ),
+            _sample_journal_entry(
+                ts="2026-02-22T09:00:00+00:00",
+                tickers={"ETH-USD": {"outlook": "bearish", "thesis": "test", "conviction": 0.3, "levels": []}},
+            ),
+            _sample_journal_entry(
+                ts="2026-02-22T10:00:00+00:00",
+                tickers={
+                    "BTC-USD": {"outlook": "neutral", "thesis": "", "conviction": 0.0, "levels": []},
+                    "ETH-USD": {"outlook": "neutral", "thesis": "", "conviction": 0.0, "levels": []},
+                },
+            ),
+        ]
+        self._write_journal(tmp_data, entries)
+        with _no_auth():
+            resp = client.get("/api/decisions?ticker=BTC-USD")
+        data = resp.get_json()
+        assert len(data) == 2
+        # All returned entries should contain BTC-USD in tickers
+        for entry in data:
+            assert "BTC-USD" in entry["tickers"]
+
+    def test_filter_by_action(self, client, tmp_data):
+        entries = [
+            _sample_journal_entry(patient_action="BUY", bold_action="HOLD"),
+            _sample_journal_entry(patient_action="HOLD", bold_action="SELL"),
+            _sample_journal_entry(patient_action="HOLD", bold_action="HOLD"),
+        ]
+        self._write_journal(tmp_data, entries)
+        with _no_auth():
+            resp = client.get("/api/decisions?action=BUY")
+        data = resp.get_json()
+        assert len(data) == 1
+        assert data[0]["decisions"]["patient"]["action"] == "BUY"
+
+    def test_filter_by_action_sell(self, client, tmp_data):
+        entries = [
+            _sample_journal_entry(patient_action="HOLD", bold_action="SELL"),
+            _sample_journal_entry(patient_action="HOLD", bold_action="HOLD"),
+        ]
+        self._write_journal(tmp_data, entries)
+        with _no_auth():
+            resp = client.get("/api/decisions?action=SELL")
+        data = resp.get_json()
+        assert len(data) == 1
+        assert data[0]["decisions"]["bold"]["action"] == "SELL"
+
+    def test_filter_by_strategy(self, client, tmp_data):
+        entries = [
+            _sample_journal_entry(patient_action="BUY", bold_action="HOLD"),
+            _sample_journal_entry(patient_action="HOLD", bold_action="BUY"),
+        ]
+        self._write_journal(tmp_data, entries)
+        with _no_auth():
+            resp = client.get("/api/decisions?strategy=bold&action=BUY")
+        data = resp.get_json()
+        # Only the entry where bold=BUY should match
+        assert len(data) == 1
+        assert data[0]["decisions"]["bold"]["action"] == "BUY"
+
+    def test_filter_by_strategy_only(self, client, tmp_data):
+        entries = [
+            _sample_journal_entry(patient_action="BUY", bold_action="HOLD"),
+            _sample_journal_entry(patient_action="HOLD", bold_action="HOLD"),
+        ]
+        self._write_journal(tmp_data, entries)
+        with _no_auth():
+            # strategy=patient with no action filter: should match all entries
+            # since patient strategy exists in all entries
+            resp = client.get("/api/decisions?strategy=patient")
+        data = resp.get_json()
+        assert len(data) == 2
+
+    def test_limit_parameter(self, client, tmp_data):
+        entries = [
+            _sample_journal_entry(ts="2026-02-22T0{}:00:00+00:00".format(i))
+            for i in range(9)
+        ]
+        self._write_journal(tmp_data, entries)
+        with _no_auth():
+            resp = client.get("/api/decisions?limit=3")
+        data = resp.get_json()
+        assert len(data) == 3
+
+    def test_limit_max_500(self, client, tmp_data):
+        """Limit is capped at 500 even if a larger value is requested."""
+        self._write_journal(tmp_data, [_sample_journal_entry()])
+        with _no_auth():
+            resp = client.get("/api/decisions?limit=9999")
+        # Should not error; just caps at 500
+        assert resp.status_code == 200
+
+    def test_invalid_limit_uses_default(self, client, tmp_data):
+        self._write_journal(tmp_data, [_sample_journal_entry()])
+        with _no_auth():
+            resp = client.get("/api/decisions?limit=abc")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data) == 1
+
+    def test_combined_filters(self, client, tmp_data):
+        entries = [
+            _sample_journal_entry(
+                ts="2026-02-22T08:00:00+00:00",
+                patient_action="BUY",
+                bold_action="HOLD",
+                tickers={"BTC-USD": {"outlook": "bullish", "thesis": "", "conviction": 0.5, "levels": []}},
+            ),
+            _sample_journal_entry(
+                ts="2026-02-22T09:00:00+00:00",
+                patient_action="BUY",
+                bold_action="HOLD",
+                tickers={"ETH-USD": {"outlook": "bullish", "thesis": "", "conviction": 0.5, "levels": []}},
+            ),
+        ]
+        self._write_journal(tmp_data, entries)
+        with _no_auth():
+            resp = client.get("/api/decisions?action=BUY&strategy=patient&ticker=BTC-USD")
+        data = resp.get_json()
+        assert len(data) == 1
+        assert data[0]["ts"] == "2026-02-22T08:00:00+00:00"
