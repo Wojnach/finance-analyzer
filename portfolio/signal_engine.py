@@ -37,7 +37,7 @@ def _load_prev_sentiments():
             ts = json.loads(ts_file.read_text(encoding="utf-8"))
             _prev_sentiment = ts.get("prev_sentiment", {})
     except Exception:
-        pass
+        logger.debug("Failed to load prev sentiments", exc_info=True)
     _prev_sentiment_loaded = True
 
 
@@ -57,7 +57,7 @@ def _set_prev_sentiment(ticker, direction):
         ts["prev_sentiment"] = _prev_sentiment
         atomic_write_json(ts_file, ts)
     except Exception:
-        pass
+        logger.debug("Failed to persist sentiment", exc_info=True)
 
 
 REGIME_WEIGHTS = {
@@ -391,7 +391,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 if fed:
                     macro_data["fed"] = fed
             except Exception:
-                pass
+                logger.warning("Macro context fetch failed", exc_info=True)
 
         for sig_name, entry in _enhanced_entries.items():
             try:
@@ -410,7 +410,8 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                     votes[sig_name] = result.get("action", "HOLD")
                 else:
                     votes[sig_name] = "HOLD"
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Signal {sig_name} failed: {e}")
                 votes[sig_name] = "HOLD"
     else:
         for sig_name in _enhanced_entries:
@@ -490,7 +491,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 write_accuracy_cache("1d", accuracy_data)
         activation_rates = load_cached_activation_rates()
     except Exception:
-        pass
+        logger.warning("Accuracy stats load failed", exc_info=True)
     weighted_action, weighted_conf = _weighted_consensus(
         votes, accuracy_data, regime, activation_rates
     )
