@@ -15,6 +15,7 @@ from portfolio.bigbet import (
     _format_window_closed,
     _parse_eval_response,
     _resolve_cooldown_minutes,
+    _update_streak,
     check_bigbet,
     invoke_layer2_eval,
 )
@@ -26,7 +27,7 @@ def _make_signals_orig(ticker="BTC-USD"):
     return {
         ticker: {
             "indicators": {
-                "rsi": 22.0,
+                "rsi": 18.0,
                 "macd_hist": -5.0,
                 "price_vs_bb": "below_lower",
                 "atr_pct": 3.2,
@@ -36,7 +37,7 @@ def _make_signals_orig(ticker="BTC-USD"):
                 "_sell_count": 1,
                 "_total_applicable": 11,
                 "fear_greed": 8,
-                "volume_ratio": 2.5,
+                "volume_ratio": 3.0,
             },
         }
     }
@@ -50,7 +51,7 @@ def _make_tf_data_orig(ticker="BTC-USD"):
 
 PRICES = {"BTC-USD": 65000.0}
 CONFIG = {"telegram": {"token": "fake", "chat_id": "123"}}
-CONDITIONS = ["RSI 22 (oversold) on 15m", "Below lower BB on Now, 12h", "F&G: 8 (Extreme Fear)"]
+CONDITIONS = ["RSI 18 (oversold) on 15m", "Below lower BB on Now, 12h", "F&G: 8 (Extreme Fear)"]
 
 
 # --- _parse_eval_response tests ---
@@ -142,7 +143,7 @@ def test_build_eval_prompt_content():
     assert "BULL" in prompt
     assert "4B/1S/6H" in prompt
     assert "PROBABILITY:" in prompt
-    assert "RSI 22" in prompt
+    assert "RSI 18" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -192,13 +193,14 @@ def _make_tf_data(ticker, bb_positions=None):
 def _bull_setup(ticker="BTC-USD"):
     """Create signals + tf_data that produce >= 3 bull conditions.
 
-    Conditions triggered:
-      1. RSI 20 oversold
+    Conditions triggered (using margin-buffered thresholds):
+      1. RSI 18 oversold (< 22)
       2. Below lower BB on Now, 12h (2 TFs)
-      3. F&G 10
+      3. F&G 8 (≤ 12)
+      4. MACD turning up while oversold (RSI 18 < 33)
     """
     signals = _make_signals(
-        ticker, rsi=20, fear_greed=10, fear_greed_class="Extreme Fear",
+        ticker, rsi=18, fear_greed=8, fear_greed_class="Extreme Fear",
         macd_hist=-5, macd_hist_prev=-10,  # MACD turning up while oversold
     )
     tf_data = _make_tf_data(ticker, [
@@ -277,9 +279,14 @@ class TestCheckBigbetCooldown:
     @patch("portfolio.bigbet.invoke_layer2_eval", return_value=(7, "Looks good"))
     @patch("portfolio.bigbet._send_telegram")
     @patch("portfolio.bigbet._save_state")
-    @patch("portfolio.bigbet._load_state", return_value={"cooldowns": {}, "price_history": {}, "active_bets": {}})
+    @patch("portfolio.bigbet._load_state")
     def test_alert_fires_when_cooldown_expired(self, mock_load, mock_save, mock_tg, mock_eval):
-        """Alert fires when no prior cooldown exists."""
+        """Alert fires when no prior cooldown exists and persistence met."""
+        now = time.time()
+        mock_load.return_value = {
+            "cooldowns": {}, "price_history": {}, "active_bets": {},
+            "condition_streaks": {"BTC-USD_BULL": [1, now - 30]},  # 1 prior check
+        }
         signals, tf_data, prices_usd = _bull_setup()
         config = {}
 
@@ -302,6 +309,7 @@ class TestCheckBigbetCooldown:
             "cooldowns": {"BTC-USD_BULL": now - 300},
             "price_history": {},
             "active_bets": {},
+            "condition_streaks": {"BTC-USD_BULL": [5, now - 30]},
         }
         signals, tf_data, prices_usd = _bull_setup()
         config = {}
@@ -311,18 +319,19 @@ class TestCheckBigbetCooldown:
         # invoke_layer2_eval should NOT be called (blocked by cooldown)
         mock_eval.assert_not_called()
 
-    @patch("portfolio.bigbet.invoke_layer2_eval", return_value=(None, ""))
+    @patch("portfolio.bigbet.invoke_layer2_eval", return_value=(7, "Looks good"))
     @patch("portfolio.bigbet._send_telegram")
     @patch("portfolio.bigbet._save_state")
     @patch("portfolio.bigbet._load_state")
     def test_alert_fires_after_cooldown_expires(self, mock_load, mock_save, mock_tg, mock_eval):
-        """Alert fires when cooldown has elapsed (>10min ago)."""
+        """Alert fires when cooldown has elapsed (>10min ago) and persistence met."""
         now = time.time()
         # Last alert was 11 minutes ago -- outside 10-min cooldown
         mock_load.return_value = {
             "cooldowns": {"BTC-USD_BULL": now - 660},
             "price_history": {},
             "active_bets": {},
+            "condition_streaks": {"BTC-USD_BULL": [3, now - 30]},
         }
         signals, tf_data, prices_usd = _bull_setup()
         config = {}
@@ -345,6 +354,7 @@ class TestCheckBigbetCooldown:
             "cooldowns": {"BTC-USD_BULL": now - 1800},
             "price_history": {},
             "active_bets": {},
+            "condition_streaks": {"BTC-USD_BULL": [5, now - 30]},
         }
         signals, tf_data, prices_usd = _bull_setup()
         config = {"bigbet": {"cooldown_hours": 1}}
@@ -365,9 +375,14 @@ class TestActiveBetTracking:
     @patch("portfolio.bigbet.invoke_layer2_eval", return_value=(7, "Looks good"))
     @patch("portfolio.bigbet._send_telegram")
     @patch("portfolio.bigbet._save_state")
-    @patch("portfolio.bigbet._load_state", return_value={"cooldowns": {}, "price_history": {}, "active_bets": {}})
+    @patch("portfolio.bigbet._load_state")
     def test_alert_creates_active_bet(self, mock_load, mock_save, mock_tg, mock_eval):
         """When alert fires, an active bet entry is created in state."""
+        now = time.time()
+        mock_load.return_value = {
+            "cooldowns": {}, "price_history": {}, "active_bets": {},
+            "condition_streaks": {"BTC-USD_BULL": [1, now - 30]},
+        }
         signals, tf_data, prices_usd = _bull_setup()
         config = {}
 
@@ -467,10 +482,11 @@ class TestActiveBetTracking:
             "active_bets": {
                 "BTC-USD_BULL": {
                     "triggered_at": now - 300,
-                    "conditions": ["RSI 20 oversold", "Below lower BB", "F&G: 10"],
+                    "conditions": ["RSI 18 oversold", "Below lower BB", "F&G: 8"],
                     "price_at_trigger": 65000,
                 }
             },
+            "condition_streaks": {"BTC-USD_BULL": [5, now - 30]},
         }
         # Conditions still met
         signals, tf_data, prices_usd = _bull_setup()
@@ -529,7 +545,7 @@ class TestEdgeCases:
     @patch("portfolio.bigbet._send_telegram")
     @patch("portfolio.bigbet._save_state")
     @patch("portfolio.bigbet._load_state", return_value={"cooldowns": {}, "price_history": {}})
-    def test_no_crash_on_missing_active_bets_key(self, mock_load, mock_save, mock_tg, mock_eval):
+    def test_no_crash_on_missing_active_bets_and_streaks_keys(self, mock_load, mock_save, mock_tg, mock_eval):
         """State without active_bets key doesn't crash."""
         signals, tf_data, prices_usd = _neutral_setup()
         config = {}
@@ -591,3 +607,265 @@ class TestEdgeCases:
         close_msg = mock_tg.call_args_list[0][0][0]
         assert "GONE-USD" in close_msg
         assert "BIG BET CLOSED" in close_msg
+
+
+# ---------------------------------------------------------------------------
+# _update_streak
+# ---------------------------------------------------------------------------
+
+class TestUpdateStreak:
+    def test_first_occurrence(self):
+        streaks = {}
+        now = time.time()
+        count = _update_streak(streaks, "BTC-USD_BULL", True, now)
+        assert count == 1
+        assert streaks["BTC-USD_BULL"] == [1, now]
+
+    def test_consecutive_increments(self):
+        now = time.time()
+        streaks = {"BTC-USD_BULL": [2, now - 30]}
+        count = _update_streak(streaks, "BTC-USD_BULL", True, now)
+        assert count == 3
+
+    def test_reset_on_not_met(self):
+        now = time.time()
+        streaks = {"BTC-USD_BULL": [5, now - 30]}
+        count = _update_streak(streaks, "BTC-USD_BULL", False, now)
+        assert count == 0
+        assert "BTC-USD_BULL" not in streaks
+
+    def test_stale_streak_resets(self):
+        """Streak older than MAX_STREAK_AGE_S (5 min) starts fresh."""
+        now = time.time()
+        streaks = {"BTC-USD_BULL": [10, now - 600]}  # 10 min old
+        count = _update_streak(streaks, "BTC-USD_BULL", True, now)
+        assert count == 1  # reset to fresh start
+
+    def test_not_stale_within_window(self):
+        now = time.time()
+        streaks = {"BTC-USD_BULL": [3, now - 60]}  # 1 min old
+        count = _update_streak(streaks, "BTC-USD_BULL", True, now)
+        assert count == 4
+
+
+# ---------------------------------------------------------------------------
+# Persistence gating
+# ---------------------------------------------------------------------------
+
+class TestPersistenceGating:
+    @patch("portfolio.bigbet.invoke_layer2_eval", return_value=(7, "Good"))
+    @patch("portfolio.bigbet._send_telegram")
+    @patch("portfolio.bigbet._save_state")
+    @patch("portfolio.bigbet._load_state")
+    def test_first_check_does_not_fire(self, mock_load, mock_save, mock_tg, mock_eval):
+        """First time conditions are met, alert does NOT fire (streak=1 < 2)."""
+        mock_load.return_value = {
+            "cooldowns": {}, "price_history": {}, "active_bets": {},
+            "condition_streaks": {},  # fresh — no prior streak
+        }
+        signals, tf_data, prices_usd = _bull_setup()
+        config = {}
+
+        check_bigbet(signals, prices_usd, 10.5, tf_data, config)
+
+        mock_eval.assert_not_called()
+        mock_tg.assert_not_called()
+        # But streak should be saved
+        saved_state = mock_save.call_args[0][0]
+        assert saved_state["condition_streaks"]["BTC-USD_BULL"][0] == 1
+
+    @patch("portfolio.bigbet.invoke_layer2_eval", return_value=(7, "Good"))
+    @patch("portfolio.bigbet._send_telegram")
+    @patch("portfolio.bigbet._save_state")
+    @patch("portfolio.bigbet._load_state")
+    def test_fires_after_persistence_met(self, mock_load, mock_save, mock_tg, mock_eval):
+        """Alert fires when streak reaches min_persistence (default 2)."""
+        now = time.time()
+        mock_load.return_value = {
+            "cooldowns": {}, "price_history": {}, "active_bets": {},
+            "condition_streaks": {"BTC-USD_BULL": [1, now - 30]},
+        }
+        signals, tf_data, prices_usd = _bull_setup()
+        config = {}
+
+        check_bigbet(signals, prices_usd, 10.5, tf_data, config)
+
+        mock_eval.assert_called_once()
+        mock_tg.assert_called()
+        assert "BIG BET" in mock_tg.call_args[0][0]
+
+    @patch("portfolio.bigbet.invoke_layer2_eval", return_value=(7, "Good"))
+    @patch("portfolio.bigbet._send_telegram")
+    @patch("portfolio.bigbet._save_state")
+    @patch("portfolio.bigbet._load_state")
+    def test_custom_min_persistence(self, mock_load, mock_save, mock_tg, mock_eval):
+        """With min_persistence=3, streak of 2 does not fire."""
+        now = time.time()
+        mock_load.return_value = {
+            "cooldowns": {}, "price_history": {}, "active_bets": {},
+            "condition_streaks": {"BTC-USD_BULL": [1, now - 30]},
+        }
+        signals, tf_data, prices_usd = _bull_setup()
+        config = {"bigbet": {"min_persistence": 3}}
+
+        check_bigbet(signals, prices_usd, 10.5, tf_data, config)
+
+        # streak becomes 2, but min_persistence is 3 — should NOT fire
+        mock_eval.assert_not_called()
+
+    @patch("portfolio.bigbet.invoke_layer2_eval", return_value=(7, "Good"))
+    @patch("portfolio.bigbet._send_telegram")
+    @patch("portfolio.bigbet._save_state")
+    @patch("portfolio.bigbet._load_state")
+    def test_streak_resets_when_conditions_fade(self, mock_load, mock_save, mock_tg, mock_eval):
+        """When conditions drop below min, streak resets to 0."""
+        now = time.time()
+        mock_load.return_value = {
+            "cooldowns": {}, "price_history": {}, "active_bets": {},
+            "condition_streaks": {"BTC-USD_BULL": [5, now - 30]},
+        }
+        # Neutral setup — conditions NOT met
+        signals, tf_data, prices_usd = _neutral_setup()
+        config = {}
+
+        check_bigbet(signals, prices_usd, 10.5, tf_data, config)
+
+        mock_eval.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Probability gating
+# ---------------------------------------------------------------------------
+
+class TestProbabilityGating:
+    @patch("portfolio.bigbet.invoke_layer2_eval", return_value=(3, "Weak setup"))
+    @patch("portfolio.bigbet._send_telegram")
+    @patch("portfolio.bigbet._save_state")
+    @patch("portfolio.bigbet._load_state")
+    def test_low_probability_blocks_alert(self, mock_load, mock_save, mock_tg, mock_eval):
+        """Probability below threshold (default 5) blocks alert."""
+        now = time.time()
+        mock_load.return_value = {
+            "cooldowns": {}, "price_history": {}, "active_bets": {},
+            "condition_streaks": {"BTC-USD_BULL": [1, now - 30]},
+        }
+        signals, tf_data, prices_usd = _bull_setup()
+        config = {}
+
+        check_bigbet(signals, prices_usd, 10.5, tf_data, config)
+
+        mock_eval.assert_called_once()
+        # Telegram should NOT be called — probability 3 < 5
+        alert_calls = [
+            c for c in mock_tg.call_args_list if "BIG BET:" in c[0][0]
+        ]
+        assert len(alert_calls) == 0
+
+    @patch("portfolio.bigbet.invoke_layer2_eval", return_value=(None, ""))
+    @patch("portfolio.bigbet._send_telegram")
+    @patch("portfolio.bigbet._save_state")
+    @patch("portfolio.bigbet._load_state")
+    def test_null_probability_blocks_alert(self, mock_load, mock_save, mock_tg, mock_eval):
+        """Failed eval (probability=None) blocks alert."""
+        now = time.time()
+        mock_load.return_value = {
+            "cooldowns": {}, "price_history": {}, "active_bets": {},
+            "condition_streaks": {"BTC-USD_BULL": [1, now - 30]},
+        }
+        signals, tf_data, prices_usd = _bull_setup()
+        config = {}
+
+        check_bigbet(signals, prices_usd, 10.5, tf_data, config)
+
+        mock_eval.assert_called_once()
+        alert_calls = [
+            c for c in mock_tg.call_args_list if "BIG BET:" in c[0][0]
+        ]
+        assert len(alert_calls) == 0
+
+    @patch("portfolio.bigbet.invoke_layer2_eval", return_value=(5, "Marginal"))
+    @patch("portfolio.bigbet._send_telegram")
+    @patch("portfolio.bigbet._save_state")
+    @patch("portfolio.bigbet._load_state")
+    def test_exact_threshold_passes(self, mock_load, mock_save, mock_tg, mock_eval):
+        """Probability exactly at threshold (5) passes the gate."""
+        now = time.time()
+        mock_load.return_value = {
+            "cooldowns": {}, "price_history": {}, "active_bets": {},
+            "condition_streaks": {"BTC-USD_BULL": [1, now - 30]},
+        }
+        signals, tf_data, prices_usd = _bull_setup()
+        config = {}
+
+        check_bigbet(signals, prices_usd, 10.5, tf_data, config)
+
+        mock_eval.assert_called_once()
+        mock_tg.assert_called()
+        assert "BIG BET" in mock_tg.call_args[0][0]
+
+    @patch("portfolio.bigbet.invoke_layer2_eval", return_value=(3, "Weak"))
+    @patch("portfolio.bigbet._send_telegram")
+    @patch("portfolio.bigbet._save_state")
+    @patch("portfolio.bigbet._load_state")
+    def test_custom_min_probability(self, mock_load, mock_save, mock_tg, mock_eval):
+        """Custom min_probability=3 allows score of 3."""
+        now = time.time()
+        mock_load.return_value = {
+            "cooldowns": {}, "price_history": {}, "active_bets": {},
+            "condition_streaks": {"BTC-USD_BULL": [1, now - 30]},
+        }
+        signals, tf_data, prices_usd = _bull_setup()
+        config = {"bigbet": {"min_probability": 3}}
+
+        check_bigbet(signals, prices_usd, 10.5, tf_data, config)
+
+        mock_tg.assert_called()
+        assert "BIG BET" in mock_tg.call_args[0][0]
+
+
+# ---------------------------------------------------------------------------
+# Margin-buffered thresholds
+# ---------------------------------------------------------------------------
+
+class TestMarginBufferedThresholds:
+    def test_rsi_at_old_threshold_no_longer_triggers(self):
+        """RSI 24 (was < 25) no longer triggers with new threshold of 22."""
+        signals = _make_signals("BTC-USD", rsi=24)
+        tf_data = _make_tf_data("BTC-USD")
+        bull, bear, _ = _evaluate_conditions("BTC-USD", signals, {}, tf_data)
+        assert not any("RSI" in c for c in bull)
+
+    def test_rsi_below_new_threshold_triggers(self):
+        """RSI 20 (< 22) triggers with new threshold."""
+        signals = _make_signals("BTC-USD", rsi=20)
+        tf_data = _make_tf_data("BTC-USD")
+        bull, bear, _ = _evaluate_conditions("BTC-USD", signals, {}, tf_data)
+        assert any("RSI" in c for c in bull)
+
+    def test_volume_at_old_threshold_no_longer_triggers(self):
+        """Volume 2.2x (was >= 2.0) no longer triggers with new threshold 2.5."""
+        signals = _make_signals("BTC-USD", volume_ratio=2.2, volume_action="SELL")
+        tf_data = _make_tf_data("BTC-USD")
+        bull, bear, _ = _evaluate_conditions("BTC-USD", signals, {}, tf_data)
+        assert not any("Volume" in c for c in bull)
+
+    def test_volume_above_new_threshold_triggers(self):
+        """Volume 3.0x (>= 2.5) triggers with new threshold."""
+        signals = _make_signals("BTC-USD", volume_ratio=3.0, volume_action="SELL")
+        tf_data = _make_tf_data("BTC-USD")
+        bull, bear, _ = _evaluate_conditions("BTC-USD", signals, {}, tf_data)
+        assert any("Volume" in c for c in bull)
+
+    def test_fg_at_old_threshold_no_longer_triggers(self):
+        """F&G 14 (was <= 15) no longer triggers with new threshold 12."""
+        signals = _make_signals("BTC-USD", fear_greed=14)
+        tf_data = _make_tf_data("BTC-USD")
+        bull, bear, _ = _evaluate_conditions("BTC-USD", signals, {}, tf_data)
+        assert not any("F&G" in c for c in bull)
+
+    def test_fg_below_new_threshold_triggers(self):
+        """F&G 10 (<= 12) triggers with new threshold."""
+        signals = _make_signals("BTC-USD", fear_greed=10, fear_greed_class="Extreme Fear")
+        tf_data = _make_tf_data("BTC-USD")
+        bull, bear, _ = _evaluate_conditions("BTC-USD", signals, {}, tf_data)
+        assert any("F&G" in c for c in bull)

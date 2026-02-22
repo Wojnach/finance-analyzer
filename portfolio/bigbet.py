@@ -20,6 +20,19 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 STATE_FILE = DATA_DIR / "bigbet_state.json"
 TOTAL_CONDITIONS = 6  # RSI, BB, F&G, Volume, MACD, 24h price change
 
+# Margin-buffered thresholds — tighter than raw indicator levels to filter
+# ephemeral boundary crossings that revert within 1-2 cycles.
+RSI_OVERSOLD = 22          # was 25: 3-point buffer
+RSI_OVERBOUGHT = 82        # was 80: 2-point buffer
+RSI_MACD_OVERSOLD = 33     # was 35: 2-point buffer
+RSI_MACD_OVERBOUGHT = 72   # was 70: 2-point buffer
+VOL_SPIKE_MIN = 2.5        # was 2.0: 0.5x buffer
+FG_EXTREME_FEAR = 12       # was 15: 3-point buffer
+FG_EXTREME_GREED = 88      # was 85: 3-point buffer
+
+# Max age for condition streak entries — streaks older than this are stale
+MAX_STREAK_AGE_S = 300     # 5 minutes
+
 
 def _load_state():
     if STATE_FILE.exists():
@@ -224,14 +237,14 @@ def _evaluate_conditions(ticker, signals, prices_usd, tf_data):
             rsi_1h = entry["indicators"].get("rsi", 50)
             break
 
-    if rsi_now < 25:
+    if rsi_now < RSI_OVERSOLD:
         detail = f"RSI {rsi_now:.0f} (oversold) on 15m"
-        if rsi_1h is not None and rsi_1h < 25:
+        if rsi_1h is not None and rsi_1h < RSI_OVERSOLD:
             detail += f" + next TF ({rsi_1h:.0f})"
         bull_conditions.append(detail)
-    if rsi_now > 80:
+    if rsi_now > RSI_OVERBOUGHT:
         detail = f"RSI {rsi_now:.0f} (overbought) on 15m"
-        if rsi_1h is not None and rsi_1h > 80:
+        if rsi_1h is not None and rsi_1h > RSI_OVERBOUGHT:
             detail += f" + next TF ({rsi_1h:.0f})"
         bear_conditions.append(detail)
 
@@ -261,9 +274,9 @@ def _evaluate_conditions(ticker, signals, prices_usd, tf_data):
     fg = extra.get("fear_greed")
     fg_class = extra.get("fear_greed_class", "")
     if fg is not None:
-        if fg <= 15:
+        if fg <= FG_EXTREME_FEAR:
             bull_conditions.append(f"F&G: {fg} ({fg_class})")
-        if fg >= 85:
+        if fg >= FG_EXTREME_GREED:
             bear_conditions.append(f"F&G: {fg} ({fg_class})")
 
     # 4. 24h price change (calculated from stored history)
@@ -274,7 +287,7 @@ def _evaluate_conditions(ticker, signals, prices_usd, tf_data):
     if (
         vol_ratio is not None
         and isinstance(vol_ratio, (int, float))
-        and vol_ratio >= 2.0
+        and vol_ratio >= VOL_SPIKE_MIN
     ):
         # Volume spike — direction depends on price action
         vol_detail = f"Volume {vol_ratio:.1f}x avg"
@@ -289,9 +302,9 @@ def _evaluate_conditions(ticker, signals, prices_usd, tf_data):
     macd_hist = ind.get("macd_hist")
     macd_hist_prev = ind.get("macd_hist_prev")
     if macd_hist is not None and macd_hist_prev is not None:
-        if macd_hist > macd_hist_prev and rsi_now < 35:
+        if macd_hist > macd_hist_prev and rsi_now < RSI_MACD_OVERSOLD:
             bull_conditions.append("MACD turning up while oversold")
-        if macd_hist < macd_hist_prev and rsi_now > 70:
+        if macd_hist < macd_hist_prev and rsi_now > RSI_MACD_OVERBOUGHT:
             bear_conditions.append("MACD turning down while overbought")
 
     return bull_conditions, bear_conditions, {"fg": fg, "fg_class": fg_class}
@@ -377,9 +390,29 @@ def _resolve_cooldown_minutes(bigbet_cfg):
     return 10  # default: 10 minutes
 
 
+def _update_streak(condition_streaks, key, met, now):
+    """Increment or reset a condition streak. Returns current count.
+
+    Streaks auto-expire if the last update was > MAX_STREAK_AGE_S ago.
+    """
+    if met:
+        entry = condition_streaks.get(key)
+        if entry and (now - entry[1]) <= MAX_STREAK_AGE_S:
+            count = entry[0] + 1
+        else:
+            count = 1  # fresh or stale — start at 1
+        condition_streaks[key] = [count, now]
+        return count
+    # Not met — reset
+    condition_streaks.pop(key, None)
+    return 0
+
+
 def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
     bigbet_cfg = config.get("bigbet", {})
     min_conditions = bigbet_cfg.get("min_conditions", 3)
+    min_persistence = bigbet_cfg.get("min_persistence", 2)
+    min_probability = bigbet_cfg.get("min_probability", 5)
     cooldown_minutes = _resolve_cooldown_minutes(bigbet_cfg)
     cooldown_seconds = cooldown_minutes * 60
 
@@ -387,6 +420,7 @@ def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
     cooldowns = state.get("cooldowns", {})
     price_history = state.get("price_history", {})
     active_bets = state.get("active_bets", {})
+    condition_streaks = state.get("condition_streaks", {})
     now = time.time()
     changed = False
 
@@ -507,68 +541,72 @@ def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
             price_history[ticker] = hist
             changed = True
 
-        # Check BULL alert
-        if len(bull_conds) >= min_conditions:
-            cd_key = f"{ticker}_BULL"
-            last_alert = cooldowns.get(cd_key, 0)
-            if now - last_alert > cooldown_seconds:
-                probability, l2_reasoning = invoke_layer2_eval(
-                    ticker, "BULL", bull_conds, signals, tf_data, prices_usd, config
-                )
-                msg = _format_alert(
-                    ticker, "BULL", bull_conds, prices_usd, fx_rate, extra_info,
-                    probability=probability, l2_reasoning=l2_reasoning,
-                )
-                logger.info("BIG BET ALERT: BULL %s (%d/%d conditions)", ticker, len(bull_conds), TOTAL_CONDITIONS)
-                try:
-                    _send_telegram(msg, config)
-                except Exception as e:
-                    logger.warning("Big Bet telegram failed: %s", e)
-                cooldowns[cd_key] = now
-                # Track active bet
-                active_bets[cd_key] = {
-                    "triggered_at": now,
-                    "conditions": list(bull_conds),
-                    "price_at_trigger": price,
-                }
-                changed = True
-            else:
-                remaining = cooldown_seconds - (now - last_alert)
-                logger.info("Big Bet: BULL %s (%d/%d) — cooldown (%.0fm left)", ticker, len(bull_conds), TOTAL_CONDITIONS, remaining / 60)
+        # Check BULL and BEAR alerts with persistence + probability gating
+        for direction, conds in [("BULL", bull_conds), ("BEAR", bear_conds)]:
+            cd_key = f"{ticker}_{direction}"
+            met = len(conds) >= min_conditions
+            streak = _update_streak(condition_streaks, cd_key, met, now)
 
-        # Check BEAR alert
-        if len(bear_conds) >= min_conditions:
-            cd_key = f"{ticker}_BEAR"
-            last_alert = cooldowns.get(cd_key, 0)
-            if now - last_alert > cooldown_seconds:
-                probability, l2_reasoning = invoke_layer2_eval(
-                    ticker, "BEAR", bear_conds, signals, tf_data, prices_usd, config
+            if not met:
+                continue
+
+            if streak < min_persistence:
+                logger.info(
+                    "Big Bet: %s %s (%d/%d) — persistence %d/%d",
+                    direction, ticker, len(conds), TOTAL_CONDITIONS,
+                    streak, min_persistence,
                 )
-                msg = _format_alert(
-                    ticker, "BEAR", bear_conds, prices_usd, fx_rate, extra_info,
-                    probability=probability, l2_reasoning=l2_reasoning,
-                )
-                logger.info("BIG BET ALERT: BEAR %s (%d/%d conditions)", ticker, len(bear_conds), TOTAL_CONDITIONS)
-                try:
-                    _send_telegram(msg, config)
-                except Exception as e:
-                    logger.warning("Big Bet telegram failed: %s", e)
-                cooldowns[cd_key] = now
-                # Track active bet
-                active_bets[cd_key] = {
-                    "triggered_at": now,
-                    "conditions": list(bear_conds),
-                    "price_at_trigger": price,
-                }
                 changed = True
-            else:
+                continue
+
+            last_alert = cooldowns.get(cd_key, 0)
+            if now - last_alert <= cooldown_seconds:
                 remaining = cooldown_seconds - (now - last_alert)
-                logger.info("Big Bet: BEAR %s (%d/%d) — cooldown (%.0fm left)", ticker, len(bear_conds), TOTAL_CONDITIONS, remaining / 60)
+                logger.info(
+                    "Big Bet: %s %s (%d/%d) — cooldown (%.0fm left)",
+                    direction, ticker, len(conds), TOTAL_CONDITIONS,
+                    remaining / 60,
+                )
+                continue
+
+            probability, l2_reasoning = invoke_layer2_eval(
+                ticker, direction, conds, signals, tf_data, prices_usd, config
+            )
+
+            # Probability gate — require eval to succeed and meet threshold
+            if probability is None or probability < min_probability:
+                logger.info(
+                    "Big Bet: %s %s (%d/%d) — blocked by probability (%s < %d)",
+                    direction, ticker, len(conds), TOTAL_CONDITIONS,
+                    probability, min_probability,
+                )
+                continue
+
+            msg = _format_alert(
+                ticker, direction, conds, prices_usd, fx_rate, extra_info,
+                probability=probability, l2_reasoning=l2_reasoning,
+            )
+            logger.info(
+                "BIG BET ALERT: %s %s (%d/%d conditions, %d/10 prob)",
+                direction, ticker, len(conds), TOTAL_CONDITIONS, probability,
+            )
+            try:
+                _send_telegram(msg, config)
+            except Exception as e:
+                logger.warning("Big Bet telegram failed: %s", e)
+            cooldowns[cd_key] = now
+            active_bets[cd_key] = {
+                "triggered_at": now,
+                "conditions": list(conds),
+                "price_at_trigger": price,
+            }
+            changed = True
 
     if changed:
         state["cooldowns"] = cooldowns
         state["price_history"] = price_history
         state["active_bets"] = active_bets
+        state["condition_streaks"] = condition_streaks
         _save_state(state)
 
 
