@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from portfolio.signal_utils import ema, rma, roc, rsi, safe_float, sma, true_range, wma
+from portfolio.signals.fibonacci import _near_level
 
 
 # ---------------------------------------------------------------------------
@@ -279,3 +280,27 @@ class TestRoc:
         result = roc(s, 1)
         # ROC(1) at index 1: 100 * (90 - 100) / 100 = -10.0
         assert result.iloc[1] == pytest.approx(-10.0)
+
+
+# ---------------------------------------------------------------------------
+# Fibonacci _near_level edge cases
+# ---------------------------------------------------------------------------
+
+class TestFibNearLevel:
+    """Tests for the _near_level helper in fibonacci.py."""
+
+    def test_level_zero_returns_false(self):
+        """When level == 0, must return False without dividing by zero."""
+        assert _near_level(100.0, 0) is False
+        assert _near_level(0.0, 0) is False
+
+    def test_price_near_level(self):
+        """When price is within tolerance of a non-zero level, return True."""
+        # 1% tolerance (default): 100 +/- 1 => True
+        assert _near_level(100.5, 100.0) is True
+        assert _near_level(99.5, 100.0) is True
+
+    def test_price_far_from_level(self):
+        """When price is outside tolerance, return False."""
+        assert _near_level(110.0, 100.0) is False
+        assert _near_level(90.0, 100.0) is False

@@ -454,6 +454,20 @@ class TestVotingLogic:
         assert result["action"] == "HOLD"
         assert result["confidence"] == 0.0
 
+    def test_sma_val_zero_returns_hold(self):
+        """When all close values are zero, SMA is zero -- must not divide by zero."""
+        n = 250
+        df = pd.DataFrame({
+            "open": np.zeros(n),
+            "high": np.zeros(n),
+            "low": np.zeros(n),
+            "close": np.zeros(n),
+            "volume": np.ones(n) * 1000,
+        })
+        action, indicators = _sma_regime(df)
+        assert action == "HOLD"
+        # Ensure no ZeroDivisionError was raised
+
     def test_sell_majority(self):
         df = _make_death_cross_df()
         macro = {
