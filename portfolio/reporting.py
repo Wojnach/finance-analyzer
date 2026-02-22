@@ -1,6 +1,5 @@
 """Agent summary reporting — builds JSON summaries for Layer 2 consumption."""
 
-import copy
 import json
 import logging
 from datetime import datetime, timezone
@@ -158,7 +157,7 @@ def write_agent_summary(
             if sig_acc:
                 write_accuracy_cache("1d", sig_acc)
         cons_acc = consensus_accuracy("1d")
-        bw = best_worst_signals("1d")
+        bw = best_worst_signals("1d", acc=sig_acc)
         qualified = {k: v for k, v in sig_acc.items() if v["total"] >= 5}
         if qualified:
             summary["signal_accuracy_1d"] = {
@@ -244,26 +243,23 @@ def _write_compact_summary(summary):
         "_confluence_score",
     }
 
-    compact = copy.deepcopy(summary)
+    # Build compact version without full deep copy — only copy sub-dicts we modify
+    compact = {k: v for k, v in summary.items()
+               if k not in ("signals", "timeframes", "fear_greed", "signal_weights")}
 
-    for ticker_data in compact.get("signals", {}).values():
-        ticker_data.pop("enhanced_signals", None)
-        if "extra" in ticker_data:
-            ticker_data["extra"] = {
-                k: v for k, v in ticker_data["extra"].items()
-                if k in KEEP_EXTRA
-            }
+    compact["signals"] = {}
+    for ticker, ticker_data in summary.get("signals", {}).items():
+        td = {k: v for k, v in ticker_data.items() if k != "enhanced_signals"}
+        if "extra" in td:
+            td["extra"] = {k: v for k, v in td["extra"].items() if k in KEEP_EXTRA}
+        compact["signals"][ticker] = td
 
-    # Compact timeframes: keep only horizon + action (indicators duplicate top-level)
-    for ticker, tf_list in compact.get("timeframes", {}).items():
+    compact["timeframes"] = {}
+    for ticker, tf_list in summary.get("timeframes", {}).items():
         compact["timeframes"][ticker] = [
             {"horizon": tf["horizon"], "action": tf.get("action", "HOLD")}
             if "error" not in tf else {"horizon": tf["horizon"], "error": tf["error"]}
             for tf in tf_list
         ]
-
-    # Remove sections redundant in compact (already in per-ticker extra or baked in)
-    compact.pop("fear_greed", None)      # in extra.fear_greed per ticker
-    compact.pop("signal_weights", None)  # already applied in _weighted_confidence
 
     _atomic_write_json(COMPACT_SUMMARY_FILE, compact)

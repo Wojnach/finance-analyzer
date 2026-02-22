@@ -3,12 +3,11 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from portfolio.api_utils import BINANCE_BASE, BINANCE_FAPI_BASE
 from portfolio.http_retry import fetch_with_retry
-from portfolio.shared_state import _RateLimiter
+from portfolio.shared_state import _yfinance_limiter
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-_yfinance_limiter = _RateLimiter(30, "yfinance")
 DATA_DIR = BASE_DIR / "data"
 SIGNAL_LOG = DATA_DIR / "signal_log.jsonl"
 
@@ -158,7 +157,7 @@ def _fetch_current_price(ticker):
     if ticker in BINANCE_FAPI_MAP:
         symbol = BINANCE_FAPI_MAP[ticker]
         r = fetch_with_retry(
-            "https://fapi.binance.com/fapi/v1/ticker/price",
+            f"{BINANCE_FAPI_BASE}/ticker/price",
             params={"symbol": symbol},
             timeout=5,
         )
@@ -170,7 +169,7 @@ def _fetch_current_price(ticker):
     if ticker in BINANCE_SPOT_MAP:
         symbol = BINANCE_SPOT_MAP[ticker]
         r = fetch_with_retry(
-            "https://api.binance.com/api/v3/ticker/price",
+            f"{BINANCE_BASE}/ticker/price",
             params={"symbol": symbol},
             timeout=5,
         )
@@ -197,7 +196,7 @@ def _fetch_historical_price(ticker, target_ts):
         symbol = BINANCE_FAPI_MAP[ticker]
         start_ms = int(target_ts * 1000)
         r = fetch_with_retry(
-            "https://fapi.binance.com/fapi/v1/klines",
+            f"{BINANCE_FAPI_BASE}/klines",
             params={
                 "symbol": symbol,
                 "interval": "1h",
@@ -218,7 +217,7 @@ def _fetch_historical_price(ticker, target_ts):
         symbol = BINANCE_SPOT_MAP[ticker]
         start_ms = int(target_ts * 1000)
         r = fetch_with_retry(
-            "https://api.binance.com/api/v3/klines",
+            f"{BINANCE_BASE}/klines",
             params={
                 "symbol": symbol,
                 "interval": "1h",

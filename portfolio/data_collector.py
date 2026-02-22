@@ -8,7 +8,7 @@ import pandas as pd
 
 from portfolio.circuit_breaker import CircuitBreaker
 from portfolio.http_retry import fetch_with_retry
-from portfolio.api_utils import load_config as _load_config, get_alpaca_headers
+from portfolio.api_utils import load_config as _load_config, get_alpaca_headers, BINANCE_BASE, BINANCE_FAPI_BASE, ALPACA_BASE
 from portfolio.indicators import compute_indicators, technical_signal
 import portfolio.shared_state as _ss
 
@@ -19,13 +19,6 @@ logger = logging.getLogger("portfolio.data_collector")
 binance_spot_cb = CircuitBreaker("binance_spot", failure_threshold=5, recovery_timeout=60)
 binance_fapi_cb = CircuitBreaker("binance_fapi", failure_threshold=5, recovery_timeout=60)
 alpaca_cb = CircuitBreaker("alpaca", failure_threshold=5, recovery_timeout=60)
-
-# --- Constants ---
-
-BINANCE_BASE = "https://api.binance.com/api/v3"
-BINANCE_FAPI_BASE = "https://fapi.binance.com/fapi/v1"
-
-ALPACA_BASE = "https://data.alpaca.markets/v2"
 ALPACA_INTERVAL_MAP = {
     "15m": ("15Min", 5),
     "1h": ("1Hour", 10),

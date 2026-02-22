@@ -14,6 +14,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from portfolio.file_utils import load_json, load_jsonl
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 CONFIG_FILE = BASE_DIR / "config.json"
@@ -24,38 +26,24 @@ JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
 
 
 def _load_json(path):
-    """Load a JSON file, returning empty dict on failure."""
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, ValueError):
-        return {}
+    return load_json(path, default={})
 
 
 def _load_jsonl(path, since=None):
     """Load JSONL file, optionally filtering entries since a datetime."""
-    if not path.exists():
-        return []
-    entries = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    entries = load_jsonl(path)
+    if since is None:
+        return entries
+    filtered = []
+    for entry in entries:
+        ts_str = entry.get("ts", "")
         try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
+            ts = datetime.fromisoformat(ts_str)
+            if ts >= since:
+                filtered.append(entry)
+        except (ValueError, TypeError):
             continue
-        if since is not None:
-            ts_str = entry.get("ts", "")
-            try:
-                ts = datetime.fromisoformat(ts_str)
-                if ts < since:
-                    continue
-            except (ValueError, TypeError):
-                continue
-        entries.append(entry)
-    return entries
+    return filtered
 
 
 def _portfolio_summary(state, label):

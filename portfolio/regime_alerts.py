@@ -9,6 +9,8 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from portfolio.file_utils import load_json, load_jsonl
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 CONFIG_FILE = BASE_DIR / "config.json"
@@ -26,29 +28,11 @@ VALID_REGIMES = {
 
 
 def _load_json(path):
-    """Load a JSON file, returning empty dict on failure."""
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, ValueError):
-        return {}
+    return load_json(path, default={})
 
 
 def _load_jsonl(path):
-    """Load all entries from a JSONL file."""
-    if not path.exists():
-        return []
-    entries = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entries.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return entries
+    return load_jsonl(path)
 
 
 def _get_last_regime(ticker):

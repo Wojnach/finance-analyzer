@@ -1,22 +1,12 @@
-import json
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from portfolio.file_utils import load_jsonl
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 INVOCATIONS_FILE = DATA_DIR / "invocations.jsonl"
 TELEGRAMS_FILE = DATA_DIR / "telegram_messages.jsonl"
-
-
-def load_jsonl(path):
-    if not path.exists():
-        return []
-    entries = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            entries.append(json.loads(line))
-    return entries
 
 
 def invocation_stats():
