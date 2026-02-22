@@ -343,17 +343,134 @@ def _format_alert(ticker, direction, conditions, prices_usd, fx_rate, extra_info
     return "\n".join(lines)
 
 
+MAX_ACTIVE_BET_SECONDS = 6 * 3600  # 6 hours — auto-expire stale bets
+
+
+def _format_window_closed(ticker, direction, price_at_trigger, current_price, elapsed_minutes):
+    """Format a 'window closed' notification for an expired active bet."""
+    if price_at_trigger and price_at_trigger > 0:
+        pct = ((current_price - price_at_trigger) / price_at_trigger) * 100
+        price_line = (
+            f"Entry price: ${price_at_trigger:,.2f} \u2192 Current: "
+            f"${current_price:,.2f} ({pct:+.1f}%)"
+        )
+    else:
+        price_line = f"Current: ${current_price:,.2f}"
+
+    return (
+        f"\u26aa *BIG BET CLOSED: {direction} {ticker}*\n\n"
+        f"Setup expired after {elapsed_minutes:.0f}m. Conditions no longer met.\n"
+        f"{price_line}"
+    )
+
+
+def _resolve_cooldown_minutes(bigbet_cfg):
+    """Resolve cooldown in minutes from config, with backwards compatibility.
+
+    Checks ``cooldown_minutes`` first (new key, default 10).
+    Falls back to ``cooldown_hours`` (legacy key) converted to minutes.
+    """
+    if "cooldown_minutes" in bigbet_cfg:
+        return bigbet_cfg["cooldown_minutes"]
+    if "cooldown_hours" in bigbet_cfg:
+        return bigbet_cfg["cooldown_hours"] * 60
+    return 10  # default: 10 minutes
+
+
 def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
     bigbet_cfg = config.get("bigbet", {})
     min_conditions = bigbet_cfg.get("min_conditions", 3)
-    cooldown_hours = bigbet_cfg.get("cooldown_hours", 4)
+    cooldown_minutes = _resolve_cooldown_minutes(bigbet_cfg)
+    cooldown_seconds = cooldown_minutes * 60
 
     state = _load_state()
     cooldowns = state.get("cooldowns", {})
     price_history = state.get("price_history", {})
+    active_bets = state.get("active_bets", {})
     now = time.time()
     changed = False
 
+    # --- Phase 1: Check existing active bets for expiry ---
+    expired_keys = []
+    for bet_key, bet_info in list(active_bets.items()):
+        triggered_at = bet_info.get("triggered_at", 0)
+        elapsed = now - triggered_at
+
+        # Auto-expire after MAX_ACTIVE_BET_SECONDS (6h)
+        if elapsed > MAX_ACTIVE_BET_SECONDS:
+            expired_keys.append(bet_key)
+            # Parse ticker and direction from key
+            parts = bet_key.rsplit("_", 1)
+            if len(parts) == 2:
+                ticker_k, direction_k = parts
+            else:
+                continue
+            current_price = prices_usd.get(ticker_k, 0)
+            elapsed_min = elapsed / 60
+            msg = _format_window_closed(
+                ticker_k, direction_k,
+                bet_info.get("price_at_trigger", 0),
+                current_price, elapsed_min,
+            )
+            logger.info("BIG BET EXPIRED (6h): %s", bet_key)
+            try:
+                _send_telegram(msg, config)
+            except Exception as e:
+                logger.warning("Big Bet telegram failed: %s", e)
+            changed = True
+            continue
+
+        # Re-evaluate conditions to see if setup is still active
+        parts = bet_key.rsplit("_", 1)
+        if len(parts) != 2:
+            expired_keys.append(bet_key)
+            continue
+        ticker_k, direction_k = parts
+
+        if ticker_k not in signals:
+            # Ticker no longer in signals — expire
+            expired_keys.append(bet_key)
+            current_price = prices_usd.get(ticker_k, 0)
+            elapsed_min = elapsed / 60
+            msg = _format_window_closed(
+                ticker_k, direction_k,
+                bet_info.get("price_at_trigger", 0),
+                current_price, elapsed_min,
+            )
+            logger.info("BIG BET CLOSED (ticker gone): %s", bet_key)
+            try:
+                _send_telegram(msg, config)
+            except Exception as e:
+                logger.warning("Big Bet telegram failed: %s", e)
+            changed = True
+            continue
+
+        bull_conds, bear_conds, _ = _evaluate_conditions(
+            ticker_k, signals, prices_usd, tf_data
+        )
+        relevant_conds = bull_conds if direction_k == "BULL" else bear_conds
+
+        if len(relevant_conds) < min_conditions:
+            # Conditions no longer met — send window closed
+            expired_keys.append(bet_key)
+            current_price = prices_usd.get(ticker_k, 0)
+            elapsed_min = elapsed / 60
+            msg = _format_window_closed(
+                ticker_k, direction_k,
+                bet_info.get("price_at_trigger", 0),
+                current_price, elapsed_min,
+            )
+            logger.info("BIG BET CLOSED (conditions faded): %s after %.0fm", bet_key, elapsed_min)
+            try:
+                _send_telegram(msg, config)
+            except Exception as e:
+                logger.warning("Big Bet telegram failed: %s", e)
+            changed = True
+
+    for key in expired_keys:
+        active_bets.pop(key, None)
+
+    # --- Phase 2: Evaluate new alerts ---
     for ticker in signals:
         price = prices_usd.get(ticker, 0)
         if price <= 0:
@@ -394,7 +511,7 @@ def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
         if len(bull_conds) >= min_conditions:
             cd_key = f"{ticker}_BULL"
             last_alert = cooldowns.get(cd_key, 0)
-            if now - last_alert > cooldown_hours * 3600:
+            if now - last_alert > cooldown_seconds:
                 probability, l2_reasoning = invoke_layer2_eval(
                     ticker, "BULL", bull_conds, signals, tf_data, prices_usd, config
                 )
@@ -408,16 +525,22 @@ def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
                 except Exception as e:
                     logger.warning("Big Bet telegram failed: %s", e)
                 cooldowns[cd_key] = now
+                # Track active bet
+                active_bets[cd_key] = {
+                    "triggered_at": now,
+                    "conditions": list(bull_conds),
+                    "price_at_trigger": price,
+                }
                 changed = True
             else:
-                remaining = cooldown_hours * 3600 - (now - last_alert)
+                remaining = cooldown_seconds - (now - last_alert)
                 logger.info("Big Bet: BULL %s (%d/%d) — cooldown (%.0fm left)", ticker, len(bull_conds), TOTAL_CONDITIONS, remaining / 60)
 
         # Check BEAR alert
         if len(bear_conds) >= min_conditions:
             cd_key = f"{ticker}_BEAR"
             last_alert = cooldowns.get(cd_key, 0)
-            if now - last_alert > cooldown_hours * 3600:
+            if now - last_alert > cooldown_seconds:
                 probability, l2_reasoning = invoke_layer2_eval(
                     ticker, "BEAR", bear_conds, signals, tf_data, prices_usd, config
                 )
@@ -431,14 +554,21 @@ def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
                 except Exception as e:
                     logger.warning("Big Bet telegram failed: %s", e)
                 cooldowns[cd_key] = now
+                # Track active bet
+                active_bets[cd_key] = {
+                    "triggered_at": now,
+                    "conditions": list(bear_conds),
+                    "price_at_trigger": price,
+                }
                 changed = True
             else:
-                remaining = cooldown_hours * 3600 - (now - last_alert)
+                remaining = cooldown_seconds - (now - last_alert)
                 logger.info("Big Bet: BEAR %s (%d/%d) — cooldown (%.0fm left)", ticker, len(bear_conds), TOTAL_CONDITIONS, remaining / 60)
 
     if changed:
         state["cooldowns"] = cooldowns
         state["price_history"] = price_history
+        state["active_bets"] = active_bets
         _save_state(state)
 
 
