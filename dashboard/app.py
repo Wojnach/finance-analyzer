@@ -2,7 +2,6 @@
 
 import json
 import functools
-from collections import deque
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -13,31 +12,21 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 TRAINING_DIR = Path(__file__).resolve().parent.parent / "training" / "lora"
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from portfolio.file_utils import load_json as _load_json_impl, load_jsonl as _load_jsonl_impl
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def _read_json(path):
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
-    return None
+    return _load_json_impl(path)
 
 
 def _read_jsonl(path, limit=100):
-    if not path.exists():
-        return []
-    entries = deque(maxlen=limit)
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return list(entries)
+    return _load_jsonl_impl(path, limit=limit)
 
 
 def _get_config():

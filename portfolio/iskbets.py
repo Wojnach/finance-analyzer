@@ -16,7 +16,7 @@ import pandas as pd
 
 logger = logging.getLogger("portfolio.iskbets")
 
-from portfolio.api_utils import get_alpaca_headers
+from portfolio.api_utils import get_alpaca_headers, BINANCE_BASE, ALPACA_BASE
 from portfolio.file_utils import atomic_write_json
 from portfolio.http_retry import fetch_with_retry
 from portfolio.shared_state import _cached
@@ -25,9 +25,6 @@ from portfolio.telegram_notifications import send_telegram as _shared_send_teleg
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 CONFIG_FILE = DATA_DIR / "iskbets_config.json"
 STATE_FILE = DATA_DIR / "iskbets_state.json"
-
-BINANCE_BASE = "https://api.binance.com/api/v3"
-ALPACA_BASE = "https://data.alpaca.markets/v2"
 
 # Ticker → source mapping (imported from shared tickers module)
 from portfolio.tickers import (

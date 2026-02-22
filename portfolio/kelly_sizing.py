@@ -6,8 +6,9 @@ Uses signal accuracy as win probability and historical trade outcomes for avg_wi
 Returns recommended position size as fraction of portfolio.
 """
 
-import json
 from pathlib import Path
+
+from portfolio.file_utils import load_json
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -17,13 +18,7 @@ AGENT_SUMMARY_FILE = DATA_DIR / "agent_summary.json"
 
 
 def _load_json(path):
-    """Load a JSON file, returning empty dict on failure."""
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, ValueError):
-        return {}
+    return load_json(path, default={})
 
 
 def kelly_fraction(win_prob, avg_win_pct, avg_loss_pct):

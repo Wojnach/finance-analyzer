@@ -1,8 +1,7 @@
 import time
 
+from portfolio.api_utils import BINANCE_FAPI_BASE as BINANCE_FAPI
 from portfolio.http_retry import fetch_with_retry
-
-BINANCE_FAPI = "https://fapi.binance.com/fapi/v1"
 SYMBOL_MAP = {
     "BTC-USD": "BTCUSDT",
     "ETH-USD": "ETHUSDT",

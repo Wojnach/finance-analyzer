@@ -4,13 +4,13 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
+from portfolio.api_utils import BINANCE_BASE
 from portfolio.http_retry import fetch_with_retry
 
 MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "ml_classifier.joblib"
 FEATURES_PATH = (
     Path(__file__).resolve().parent.parent / "models" / "ml_feature_names.joblib"
 )
-BINANCE_BASE = "https://api.binance.com/api/v3"
 LABEL_MAP = {0: "HOLD", 1: "BUY", 2: "SELL"}
 
 _model_cache = {"model": None, "mtime": 0}
