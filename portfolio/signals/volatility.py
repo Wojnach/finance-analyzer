@@ -17,6 +17,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from portfolio.signal_utils import ema, sma, true_range
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -26,28 +28,10 @@ logger = logging.getLogger(__name__)
 MIN_ROWS = 50
 
 
-def _ema(series: pd.Series, span: int) -> pd.Series:
-    """Exponential moving average."""
-    return series.ewm(span=span, adjust=False).mean()
-
-
 def _atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int) -> pd.Series:
-    """Average True Range (Wilder)."""
-    prev_close = close.shift(1)
-    tr = pd.concat(
-        [
-            high - low,
-            (high - prev_close).abs(),
-            (low - prev_close).abs(),
-        ],
-        axis=1,
-    ).max(axis=1)
+    """Average True Range (EMA-smoothed)."""
+    tr = true_range(high, low, close)
     return tr.ewm(span=period, adjust=False).mean()
-
-
-def _sma(series: pd.Series, period: int) -> pd.Series:
-    """Simple moving average."""
-    return series.rolling(window=period, min_periods=period).mean()
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +97,7 @@ def _atr_expansion(close: pd.Series, high: pd.Series, low: pd.Series) -> tuple[s
     Expansion + price up => BUY, expansion + price down => SELL.
     """
     atr_series = _atr(high, low, close, 14)
-    atr_avg = _sma(atr_series, 20)
+    atr_avg = sma(atr_series, 20)
 
     current_atr = atr_series.iloc[-1]
     current_avg = atr_avg.iloc[-1]
@@ -142,7 +126,7 @@ def _keltner_channel(close: pd.Series, high: pd.Series,
 
     Price above upper => BUY, below lower => SELL.
     """
-    middle = _ema(close, 20)
+    middle = ema(close, 20)
     atr_10 = _atr(high, low, close, 10)
     upper = middle + 1.5 * atr_10
     lower = middle - 1.5 * atr_10
@@ -289,7 +273,7 @@ def compute_volatility_signal(df: pd.DataFrame) -> dict[str, Any]:
     # -- Bollinger Bands (shared by squeeze + breakout) -----------------------
     bb_period = 20
     bb_std = 2.0
-    bb_middle = _sma(close, bb_period)
+    bb_middle = sma(close, bb_period)
     rolling_std = close.rolling(window=bb_period, min_periods=bb_period).std()
     bb_upper = bb_middle + bb_std * rolling_std
     bb_lower = bb_middle - bb_std * rolling_std

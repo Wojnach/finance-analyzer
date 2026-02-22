@@ -21,6 +21,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from portfolio.signal_utils import rsi, safe_float, sma
+
 # ---------------------------------------------------------------------------
 # Minimum rows required for reliable computation.  The longest lookback is
 # the Bollinger Band (20-period SMA + 2-std), so we require 20 bars.
@@ -28,35 +30,6 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 MIN_ROWS_BB = 20
 MIN_ROWS_RSI2 = 3
-
-
-# ---- helpers ---------------------------------------------------------------
-
-def _sma(series: pd.Series, period: int) -> pd.Series:
-    """Simple moving average."""
-    return series.rolling(window=period, min_periods=period).mean()
-
-
-def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
-    """Wilder-smoothed RSI."""
-    delta = close.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    return 100.0 - (100.0 / (1.0 + rs))
-
-
-def _safe_float(val) -> float:
-    """Convert to float, returning NaN for non-finite values."""
-    if val is None or (isinstance(val, float) and np.isnan(val)):
-        return float("nan")
-    try:
-        f = float(val)
-        return f if np.isfinite(f) else float("nan")
-    except (TypeError, ValueError):
-        return float("nan")
 
 
 # ---- sub-indicator 1: RSI(2) Mean Reversion --------------------------------
@@ -72,7 +45,7 @@ def _rsi2_mean_reversion(close: pd.Series) -> tuple[float, str]:
     if len(close) < MIN_ROWS_RSI2:
         return float("nan"), "HOLD"
 
-    rsi2 = _rsi(close, period=2)
+    rsi2 = rsi(close, period=2)
     val = rsi2.iloc[-1]
 
     if np.isnan(val):
@@ -99,7 +72,7 @@ def _rsi3_mean_reversion(close: pd.Series) -> tuple[float, str]:
     if len(close) < 4:
         return float("nan"), "HOLD"
 
-    rsi3 = _rsi(close, period=3)
+    rsi3 = rsi(close, period=3)
     val = rsi3.iloc[-1]
 
     if np.isnan(val):
@@ -223,17 +196,17 @@ def _gap_fill(open_prices: pd.Series, close: pd.Series,
     gap_distance = today_open - prev_close
 
     if abs(gap_pct) < gap_threshold:
-        return _safe_float(gap_pct), 0.0, "HOLD"
+        return safe_float(gap_pct), 0.0, "HOLD"
 
     # How much of the gap has been filled?
     # For a gap up, price needs to move down toward prev_close.
     # For a gap down, price needs to move up toward prev_close.
     today_close = float(close.iloc[-1])
     if np.isnan(today_close):
-        return _safe_float(gap_pct), 0.0, "HOLD"
+        return safe_float(gap_pct), 0.0, "HOLD"
 
     if gap_distance == 0:
-        return _safe_float(gap_pct), 0.0, "HOLD"
+        return safe_float(gap_pct), 0.0, "HOLD"
 
     # Fill amount: how much of the gap has been retraced
     fill_amount = today_open - today_close  # positive if price moved down from open
@@ -241,17 +214,17 @@ def _gap_fill(open_prices: pd.Series, close: pd.Series,
 
     if fill_pct < 0.3:
         # Gap not filling yet
-        return _safe_float(gap_pct), _safe_float(fill_pct), "HOLD"
+        return safe_float(gap_pct), safe_float(fill_pct), "HOLD"
 
     # Gap up + filling (price falling back) = SELL
     if gap_pct > 0:
-        return _safe_float(gap_pct), _safe_float(fill_pct), "SELL"
+        return safe_float(gap_pct), safe_float(fill_pct), "SELL"
 
     # Gap down + filling (price rising back) = BUY
     if gap_pct < 0:
-        return _safe_float(gap_pct), _safe_float(fill_pct), "BUY"
+        return safe_float(gap_pct), safe_float(fill_pct), "BUY"
 
-    return _safe_float(gap_pct), _safe_float(fill_pct), "HOLD"
+    return safe_float(gap_pct), safe_float(fill_pct), "HOLD"
 
 
 # ---- sub-indicator 6: Bollinger Band %B Mean Reversion ----------------------
@@ -270,11 +243,11 @@ def _bb_pct_b(close: pd.Series, period: int = 20,
     if len(close) < period:
         return float("nan"), "HOLD"
 
-    sma = _sma(close, period)
+    sma_val = sma(close, period)
     std = close.rolling(window=period, min_periods=period).std()
 
-    bb_upper = sma + num_std * std
-    bb_lower = sma - num_std * std
+    bb_upper = sma_val + num_std * std
+    bb_lower = sma_val - num_std * std
 
     upper = bb_upper.iloc[-1]
     lower = bb_lower.iloc[-1]
@@ -327,20 +300,20 @@ def _ibs_rsi2_combined(high: pd.Series, low: pd.Series,
     ibs = (c - l) / bar_range
 
     # RSI(2)
-    rsi2 = _rsi(close, period=2)
+    rsi2 = rsi(close, period=2)
     rsi2_val = rsi2.iloc[-1]
 
     if np.isnan(rsi2_val):
-        return _safe_float(ibs), float("nan"), "HOLD"
+        return safe_float(ibs), float("nan"), "HOLD"
 
     rsi2_val = float(rsi2_val)
 
     if ibs < 0.2 and rsi2_val < 10:
-        return _safe_float(ibs), rsi2_val, "BUY"
+        return safe_float(ibs), rsi2_val, "BUY"
     if ibs > 0.8 and rsi2_val > 90:
-        return _safe_float(ibs), rsi2_val, "SELL"
+        return safe_float(ibs), rsi2_val, "SELL"
 
-    return _safe_float(ibs), rsi2_val, "HOLD"
+    return safe_float(ibs), rsi2_val, "HOLD"
 
 
 # ---- majority vote ---------------------------------------------------------
@@ -443,7 +416,7 @@ def compute_mean_reversion_signal(df: pd.DataFrame) -> dict:
     try:
         rsi2_val, rsi2_sig = _rsi2_mean_reversion(close)
         sub_signals["rsi2_mr"] = rsi2_sig
-        indicators["rsi2"] = _safe_float(rsi2_val)
+        indicators["rsi2"] = safe_float(rsi2_val)
     except Exception:
         sub_signals["rsi2_mr"] = "HOLD"
         indicators["rsi2"] = float("nan")
@@ -452,7 +425,7 @@ def compute_mean_reversion_signal(df: pd.DataFrame) -> dict:
     try:
         rsi3_val, rsi3_sig = _rsi3_mean_reversion(close)
         sub_signals["rsi3_mr"] = rsi3_sig
-        indicators["rsi3"] = _safe_float(rsi3_val)
+        indicators["rsi3"] = safe_float(rsi3_val)
     except Exception:
         sub_signals["rsi3_mr"] = "HOLD"
         indicators["rsi3"] = float("nan")
@@ -461,7 +434,7 @@ def compute_mean_reversion_signal(df: pd.DataFrame) -> dict:
     try:
         ibs_val, ibs_sig = _internal_bar_strength(high, low, close)
         sub_signals["ibs"] = ibs_sig
-        indicators["ibs"] = _safe_float(ibs_val)
+        indicators["ibs"] = safe_float(ibs_val)
     except Exception:
         sub_signals["ibs"] = "HOLD"
         indicators["ibs"] = float("nan")
@@ -481,8 +454,8 @@ def compute_mean_reversion_signal(df: pd.DataFrame) -> dict:
             open_prices, close, high, low
         )
         sub_signals["gap_fill"] = gap_sig
-        indicators["gap_pct"] = _safe_float(gap_pct_val)
-        indicators["gap_fill_pct"] = _safe_float(fill_pct_val)
+        indicators["gap_pct"] = safe_float(gap_pct_val)
+        indicators["gap_fill_pct"] = safe_float(fill_pct_val)
     except Exception:
         sub_signals["gap_fill"] = "HOLD"
         indicators["gap_pct"] = 0.0
@@ -493,7 +466,7 @@ def compute_mean_reversion_signal(df: pd.DataFrame) -> dict:
         if len(df) >= MIN_ROWS_BB:
             pct_b_val, pct_b_sig = _bb_pct_b(close)
             sub_signals["bb_pct_b"] = pct_b_sig
-            indicators["bb_pct_b"] = _safe_float(pct_b_val)
+            indicators["bb_pct_b"] = safe_float(pct_b_val)
         else:
             sub_signals["bb_pct_b"] = "HOLD"
             indicators["bb_pct_b"] = float("nan")
@@ -505,8 +478,8 @@ def compute_mean_reversion_signal(df: pd.DataFrame) -> dict:
     try:
         comb_ibs, comb_rsi2, comb_sig = _ibs_rsi2_combined(high, low, close)
         sub_signals["ibs_rsi2_combined"] = comb_sig
-        indicators["combined_ibs"] = _safe_float(comb_ibs)
-        indicators["combined_rsi2"] = _safe_float(comb_rsi2)
+        indicators["combined_ibs"] = safe_float(comb_ibs)
+        indicators["combined_rsi2"] = safe_float(comb_rsi2)
     except Exception:
         sub_signals["ibs_rsi2_combined"] = "HOLD"
         indicators["combined_ibs"] = float("nan")

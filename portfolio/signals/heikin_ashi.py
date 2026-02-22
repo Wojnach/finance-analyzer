@@ -40,20 +40,7 @@ _HA_STREAK_LEN = 3      # consecutive candles for strong trend
 # Moving average helpers
 # ---------------------------------------------------------------------------
 
-def _wma(series: pd.Series, period: int) -> pd.Series:
-    """Weighted Moving Average with linearly increasing weights.
-
-    Weight_i = i+1 for i in 0..period-1, so the most recent bar has the
-    highest weight.
-    """
-    weights = np.arange(1, period + 1, dtype=float)
-
-    def _apply(window: np.ndarray) -> float:
-        return np.dot(window, weights) / weights.sum()
-
-    return series.rolling(window=period, min_periods=period).apply(
-        _apply, raw=True,
-    )
+from portfolio.signal_utils import ema, rma, safe_float, sma, true_range, wma
 
 
 def _hma(series: pd.Series, period: int) -> pd.Series:
@@ -64,43 +51,11 @@ def _hma(series: pd.Series, period: int) -> pd.Series:
     half_period = max(int(round(period / 2)), 1)
     sqrt_period = max(int(round(math.sqrt(period))), 1)
 
-    wma_half = _wma(series, half_period)
-    wma_full = _wma(series, period)
+    wma_half = wma(series, half_period)
+    wma_full = wma(series, period)
 
     raw = 2.0 * wma_half - wma_full
-    return _wma(raw, sqrt_period)
-
-
-def _smma(series: pd.Series, period: int) -> pd.Series:
-    """Smoothed Moving Average (SMMA / RMA / Wilder's smoothing).
-
-    Equivalent to EMA with alpha = 1/period.
-    """
-    alpha = 1.0 / period
-    return series.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
-
-
-def _ema(series: pd.Series, period: int) -> pd.Series:
-    """Standard Exponential Moving Average."""
-    return series.ewm(span=period, min_periods=period, adjust=False).mean()
-
-
-def _sma(series: pd.Series, period: int) -> pd.Series:
-    """Simple Moving Average."""
-    return series.rolling(window=period, min_periods=period).mean()
-
-
-def _safe_float(val) -> float:
-    """Convert to float, returning NaN for non-finite / NA values."""
-    if val is None or (isinstance(val, float) and math.isnan(val)):
-        return float("nan")
-    try:
-        result = float(val)
-        if math.isnan(result) or math.isinf(result):
-            return float("nan")
-        return result
-    except (ValueError, TypeError):
-        return float("nan")
+    return wma(raw, sqrt_period)
 
 
 # ---------------------------------------------------------------------------
@@ -352,9 +307,9 @@ def _alligator_signal(close: pd.Series) -> tuple[str, float, float, float]:
 
     Returns (signal, lips, teeth, jaw).
     """
-    jaw_raw = _smma(close, 13)
-    teeth_raw = _smma(close, 8)
-    lips_raw = _smma(close, 5)
+    jaw_raw = rma(close, 13)
+    teeth_raw = rma(close, 8)
+    lips_raw = rma(close, 5)
 
     # Shift forward (the Alligator projects lines into the future)
     jaw = jaw_raw.shift(8)
@@ -396,11 +351,11 @@ def _elder_impulse_signal(close: pd.Series) -> tuple[str, str]:
 
     Returns (signal, elder_color).
     """
-    ema13 = _ema(close, 13)
+    ema13 = ema(close, 13)
 
     # MACD: fast EMA(12) - slow EMA(26)
-    macd_line = _ema(close, 12) - _ema(close, 26)
-    macd_signal = _ema(macd_line, 9)
+    macd_line = ema(close, 12) - ema(close, 26)
+    macd_signal = ema(macd_line, 9)
     macd_hist = macd_line - macd_signal
 
     if len(ema13.dropna()) < 2 or len(macd_hist.dropna()) < 2:
@@ -458,15 +413,15 @@ def _ttm_squeeze_signal(
     Returns (signal, squeeze_on, momentum).
     """
     # Bollinger Bands
-    bb_mid = _sma(close, bb_period)
+    bb_mid = sma(close, bb_period)
     bb_std = close.rolling(window=bb_period, min_periods=bb_period).std()
     bb_upper = bb_mid + bb_mult * bb_std
     bb_lower = bb_mid - bb_mult * bb_std
 
     # Keltner Channels (using ATR)
-    tr = _true_range(high, low, close)
-    atr = _ema(tr, kc_period)
-    kc_mid = _ema(close, kc_period)
+    tr = true_range(high, low, close)
+    atr = ema(tr, kc_period)
+    kc_mid = ema(close, kc_period)
     kc_upper = kc_mid + kc_mult * atr
     kc_lower = kc_mid - kc_mult * atr
 
@@ -484,7 +439,7 @@ def _ttm_squeeze_signal(
     donchian_high = high.rolling(window=bb_period, min_periods=bb_period).max()
     donchian_low = low.rolling(window=bb_period, min_periods=bb_period).min()
     donchian_mid = (donchian_high + donchian_low) / 2.0
-    sma_mid = _sma(close, bb_period)
+    sma_mid = sma(close, bb_period)
     # TTM-style momentum: close - average(Donchian_mid, SMA)
     momentum = close - (donchian_mid + sma_mid) / 2.0
 
@@ -506,18 +461,6 @@ def _ttm_squeeze_signal(
 
     return "HOLD", False, mom_f
 
-
-# ---------------------------------------------------------------------------
-# Helper: True Range (for TTM Squeeze Keltner Channel)
-# ---------------------------------------------------------------------------
-
-def _true_range(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.Series:
-    """Wilder's True Range."""
-    prev_close = close.shift(1)
-    tr1 = high - low
-    tr2 = (high - prev_close).abs()
-    tr3 = (low - prev_close).abs()
-    return pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
 
 
 # ---------------------------------------------------------------------------
@@ -702,14 +645,14 @@ def compute_heikin_ashi_signal(df: pd.DataFrame) -> dict:
     indicators = {
         "ha_color": ha_color,
         "ha_streak": ha_streak,
-        "hull_fast": _safe_float(hull_fast),
-        "hull_slow": _safe_float(hull_slow),
-        "alligator_lips": _safe_float(lips_val),
-        "alligator_teeth": _safe_float(teeth_val),
-        "alligator_jaw": _safe_float(jaw_val),
+        "hull_fast": safe_float(hull_fast),
+        "hull_slow": safe_float(hull_slow),
+        "alligator_lips": safe_float(lips_val),
+        "alligator_teeth": safe_float(teeth_val),
+        "alligator_jaw": safe_float(jaw_val),
         "elder_color": elder_color,
         "ttm_squeeze_on": squeeze_on,
-        "ttm_momentum": _safe_float(ttm_momentum),
+        "ttm_momentum": safe_float(ttm_momentum),
     }
 
     # --- Majority vote -------------------------------------------------

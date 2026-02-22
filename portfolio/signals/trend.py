@@ -19,6 +19,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from portfolio.signal_utils import rma, safe_float, sma, true_range
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -26,38 +28,6 @@ import pandas as pd
 _MIN_ROWS_FULL = 200       # ideal minimum for SMA200
 _MIN_ROWS_BASIC = 30       # absolute minimum to attempt any calculation
 _NUM_SUB_SIGNALS = 7
-
-
-# ---------------------------------------------------------------------------
-# Helper: simple moving average
-# ---------------------------------------------------------------------------
-
-def _sma(series: pd.Series, period: int) -> pd.Series:
-    """Simple moving average, returning NaN where insufficient data."""
-    return series.rolling(window=period, min_periods=period).mean()
-
-
-# ---------------------------------------------------------------------------
-# Helper: true range (for ATR-based indicators)
-# ---------------------------------------------------------------------------
-
-def _true_range(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.Series:
-    """Wilder's True Range."""
-    prev_close = close.shift(1)
-    tr1 = high - low
-    tr2 = (high - prev_close).abs()
-    tr3 = (low - prev_close).abs()
-    return pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-
-
-# ---------------------------------------------------------------------------
-# Helper: Wilder's smoothed moving average (RMA)
-# ---------------------------------------------------------------------------
-
-def _rma(series: pd.Series, period: int) -> pd.Series:
-    """Wilder's smoothed moving average (exponential with alpha=1/period)."""
-    alpha = 1.0 / period
-    return series.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
 
 
 # ---------------------------------------------------------------------------
@@ -69,8 +39,8 @@ def _golden_cross(close: pd.Series) -> str:
 
     Returns BUY on golden cross, SELL on death cross, HOLD otherwise.
     """
-    sma50 = _sma(close, 50)
-    sma200 = _sma(close, 200)
+    sma50 = sma(close, 50)
+    sma200 = sma(close, 200)
 
     if sma50.iloc[-1] is np.nan or sma200.iloc[-1] is np.nan:
         return "HOLD"
@@ -101,7 +71,7 @@ def _ma_ribbon(close: pd.Series) -> str:
     periods = [10, 20, 50, 100, 200]
     values = []
     for p in periods:
-        s = _sma(close, p)
+        s = sma(close, p)
         val = s.iloc[-1]
         if pd.isna(val):
             return "HOLD"
@@ -122,7 +92,7 @@ def _ma_ribbon(close: pd.Series) -> str:
 
 def _price_vs_ma200(close: pd.Series) -> str:
     """Bullish if price > SMA200, bearish if below."""
-    sma200 = _sma(close, 200)
+    sma200 = sma(close, 200)
     val = sma200.iloc[-1]
     if pd.isna(val):
         return "HOLD"
@@ -146,8 +116,8 @@ def _supertrend(high: pd.Series, low: pd.Series, close: pd.Series,
         (supertrend_line, direction) where direction is +1 (uptrend/BUY)
         or -1 (downtrend/SELL).
     """
-    tr = _true_range(high, low, close)
-    atr = _rma(tr, period)
+    tr = true_range(high, low, close)
+    atr = rma(tr, period)
 
     hl2 = (high + low) / 2.0
     upper_basic = hl2 + multiplier * atr
@@ -362,7 +332,7 @@ def _ichimoku_signal(high: pd.Series, low: pd.Series,
     kijun_val = kijun.iloc[-1]
 
     if pd.isna(span_a) or pd.isna(span_b):
-        return "HOLD", _safe_float(tenkan_val), _safe_float(kijun_val)
+        return "HOLD", safe_float(tenkan_val), safe_float(kijun_val)
 
     price = close.iloc[-1]
     cloud_top = max(span_a, span_b)
@@ -375,7 +345,7 @@ def _ichimoku_signal(high: pd.Series, low: pd.Series,
     else:
         signal = "HOLD"
 
-    return signal, _safe_float(tenkan_val), _safe_float(kijun_val)
+    return signal, safe_float(tenkan_val), safe_float(kijun_val)
 
 
 def _rolling_high(series: pd.Series, period: int) -> pd.Series:
@@ -385,12 +355,6 @@ def _rolling_high(series: pd.Series, period: int) -> pd.Series:
 def _rolling_low(series: pd.Series, period: int) -> pd.Series:
     return series.rolling(window=period, min_periods=period).min()
 
-
-def _safe_float(val) -> float:
-    """Convert to float, returning NaN for non-finite values."""
-    if pd.isna(val):
-        return float("nan")
-    return float(val)
 
 
 # ---------------------------------------------------------------------------
@@ -425,12 +389,12 @@ def _adx_di(high: pd.Series, low: pd.Series,
     plus_dm_s = pd.Series(plus_dm, index=close.index)
     minus_dm_s = pd.Series(minus_dm, index=close.index)
 
-    tr = _true_range(high, low, close)
+    tr = true_range(high, low, close)
 
     # Wilder smoothing
-    atr = _rma(tr, period)
-    smooth_plus_dm = _rma(plus_dm_s, period)
-    smooth_minus_dm = _rma(minus_dm_s, period)
+    atr = rma(tr, period)
+    smooth_plus_dm = rma(plus_dm_s, period)
+    smooth_minus_dm = rma(minus_dm_s, period)
 
     plus_di = 100.0 * smooth_plus_dm / atr
     minus_di = 100.0 * smooth_minus_dm / atr
@@ -439,7 +403,7 @@ def _adx_di(high: pd.Series, low: pd.Series,
     di_sum = plus_di + minus_di
     di_diff = (plus_di - minus_di).abs()
     dx = 100.0 * di_diff / di_sum.replace(0, np.nan)
-    adx = _rma(dx, period)
+    adx = rma(dx, period)
 
     adx_val = adx.iloc[-1]
     pdi_val = plus_di.iloc[-1]
@@ -603,12 +567,12 @@ def compute_trend_signal(df: pd.DataFrame) -> dict:
     adx_signal, adx_val, pdi_val, mdi_val = _adx_di(high, low, close)
 
     # --- Indicator values for output ----------------------------------
-    sma50_val = _sma(close, 50).iloc[-1]
-    sma200_val = _sma(close, 200).iloc[-1]
+    sma50_val = sma(close, 50).iloc[-1]
+    sma200_val = sma(close, 200).iloc[-1]
 
     indicators = {
-        "sma50": _safe_float(sma50_val),
-        "sma200": _safe_float(sma200_val),
+        "sma50": safe_float(sma50_val),
+        "sma200": safe_float(sma200_val),
         "supertrend": st_value,
         "supertrend_direction": st_dir,
         "sar": sar_value,

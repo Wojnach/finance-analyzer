@@ -22,39 +22,14 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from portfolio.signal_utils import ema, rsi, sma
+
 # ---------------------------------------------------------------------------
 # Minimum rows required for reliable computation.  The longest lookback chain
 # is PPO (26-period EMA warm-up + 9-period signal line) which needs ~35 bars,
 # but we ask for 50 to give every indicator a reasonable warm-up.
 # ---------------------------------------------------------------------------
 MIN_ROWS = 50
-
-
-# ---- helper: exponential moving average ------------------------------------
-
-def _ema(series: pd.Series, span: int) -> pd.Series:
-    """Exponential moving average using pandas ewm."""
-    return series.ewm(span=span, adjust=False).mean()
-
-
-# ---- helper: simple moving average -----------------------------------------
-
-def _sma(series: pd.Series, period: int) -> pd.Series:
-    """Simple moving average."""
-    return series.rolling(window=period).mean()
-
-
-# ---- helper: RSI -----------------------------------------------------------
-
-def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
-    """Wilder-smoothed RSI."""
-    delta = close.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    return 100.0 - (100.0 / (1.0 + rs))
 
 
 # ---- sub-indicator implementations ----------------------------------------
@@ -68,7 +43,7 @@ def _rsi_divergence(close: pd.Series, lookback: int = 14) -> str:
     We compare the first and second halves of the lookback window to identify
     two local swing points.
     """
-    rsi = _rsi(close)
+    rsi = rsi(close)
     if rsi.isna().all() or len(close) < lookback * 2:
         return "HOLD"
 
@@ -142,14 +117,14 @@ def _stochastic(high: pd.Series, low: pd.Series, close: pd.Series,
     return k_val, d_val, "HOLD"
 
 
-def _stochastic_rsi(close: pd.Series, period: int = 14) -> tuple[float, str]:
+def _stochasticrsi(close: pd.Series, period: int = 14) -> tuple[float, str]:
     """Stochastic RSI.
 
     Returns (stoch_rsi_value, signal).
     StochRSI > 0.8 = overbought (SELL).
     StochRSI < 0.2 = oversold (BUY).
     """
-    rsi = _rsi(close, period)
+    rsi = rsi(close, period)
     rsi_min = rsi.rolling(window=period).min()
     rsi_max = rsi.rolling(window=period).max()
     denom = rsi_max - rsi_min
@@ -175,7 +150,7 @@ def _cci(high: pd.Series, low: pd.Series, close: pd.Series,
     CCI < -100 = oversold (BUY).
     """
     tp = (high + low + close) / 3.0
-    tp_sma = _sma(tp, period)
+    tp_sma = sma(tp, period)
     mean_dev = tp.rolling(window=period).apply(
         lambda x: np.mean(np.abs(x - x.mean())), raw=True
     )
@@ -252,10 +227,10 @@ def _ppo(close: pd.Series, fast: int = 12, slow: int = 26,
     PPO crosses above signal = BUY.
     PPO crosses below signal = SELL.
     """
-    ema_fast = _ema(close, fast)
-    ema_slow = _ema(close, slow)
+    ema_fast = ema(close, fast)
+    ema_slow = ema(close, slow)
     ppo_line = 100.0 * (ema_fast - ema_slow) / ema_slow.replace(0, np.nan)
-    signal_line = _ema(ppo_line, signal_period)
+    signal_line = ema(ppo_line, signal_period)
 
     ppo_val = ppo_line.iloc[-1]
     sig_val = signal_line.iloc[-1]
@@ -291,7 +266,7 @@ def _bull_bear_power(high: pd.Series, low: pd.Series, close: pd.Series,
     Returns (bull_power, bear_power, signal).
     Both positive = BUY.  Both negative = SELL.
     """
-    ema_val = _ema(close, period)
+    ema_val = ema(close, period)
     bull = high - ema_val
     bear = low - ema_val
 
@@ -396,7 +371,7 @@ def compute_momentum_signal(df: pd.DataFrame) -> dict:
 
     # 3. Stochastic RSI
     try:
-        srsi_val, srsi_sig = _stochastic_rsi(close)
+        srsi_val, srsi_sig = _stochasticrsi(close)
         sub_signals["stochastic_rsi"] = srsi_sig
         indicators["stoch_rsi"] = round(srsi_val, 4) if not np.isnan(srsi_val) else float("nan")
     except Exception:

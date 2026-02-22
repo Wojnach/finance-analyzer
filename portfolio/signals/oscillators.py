@@ -22,6 +22,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from portfolio.signal_utils import ema, roc, safe_float, sma, true_range, wma
+
 # ---------------------------------------------------------------------------
 # Minimum rows required for reliable computation.  The longest lookback chain
 # is the Coppock Curve (ROC-14 needs 14 bars + WMA-10 needs 10 more = 24)
@@ -29,56 +31,6 @@ import pandas as pd
 # to give every indicator a reasonable warm-up.
 # ---------------------------------------------------------------------------
 MIN_ROWS = 50
-
-
-# ---- helpers ---------------------------------------------------------------
-
-def _sma(series: pd.Series, period: int) -> pd.Series:
-    """Simple moving average."""
-    return series.rolling(window=period, min_periods=period).mean()
-
-
-def _ema(series: pd.Series, span: int) -> pd.Series:
-    """Exponential moving average using pandas ewm."""
-    return series.ewm(span=span, adjust=False).mean()
-
-
-def _wma(series: pd.Series, period: int) -> pd.Series:
-    """Weighted moving average (linearly weighted)."""
-    weights = np.arange(1, period + 1, dtype=float)
-
-    def _apply_wma(x: np.ndarray) -> float:
-        return np.dot(x, weights) / weights.sum()
-
-    return series.rolling(window=period, min_periods=period).apply(
-        _apply_wma, raw=True,
-    )
-
-
-def _roc(series: pd.Series, period: int) -> pd.Series:
-    """Rate of change: 100 * (current - n_periods_ago) / n_periods_ago."""
-    shifted = series.shift(period)
-    return 100.0 * (series - shifted) / shifted.replace(0, np.nan)
-
-
-def _true_range(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.Series:
-    """Wilder's True Range."""
-    prev_close = close.shift(1)
-    tr1 = high - low
-    tr2 = (high - prev_close).abs()
-    tr3 = (low - prev_close).abs()
-    return pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-
-
-def _safe_float(val) -> float:
-    """Convert to float, returning NaN for non-finite values."""
-    if val is None or (isinstance(val, float) and np.isnan(val)):
-        return float("nan")
-    try:
-        f = float(val)
-        return f if np.isfinite(f) else float("nan")
-    except (TypeError, ValueError):
-        return float("nan")
 
 
 # ---- sub-indicator 1: Awesome Oscillator -----------------------------------
@@ -93,7 +45,7 @@ def _awesome_oscillator(high: pd.Series, low: pd.Series) -> tuple[float, str]:
     Returns (ao_value, signal).
     """
     median_price = (high + low) / 2.0
-    ao = _sma(median_price, 5) - _sma(median_price, 34)
+    ao = sma(median_price, 5) - sma(median_price, 34)
 
     val = ao.iloc[-1]
     if np.isnan(val):
@@ -101,17 +53,17 @@ def _awesome_oscillator(high: pd.Series, low: pd.Series) -> tuple[float, str]:
 
     # Need at least 2 values for crossover detection
     if len(ao.dropna()) < 2:
-        return _safe_float(val), "HOLD"
+        return safe_float(val), "HOLD"
 
     prev = ao.dropna().iloc[-2]
     if np.isnan(prev):
-        return _safe_float(val), "HOLD"
+        return safe_float(val), "HOLD"
 
     # Zero-line crossover
     if prev <= 0 and val > 0:
-        return _safe_float(val), "BUY"
+        return safe_float(val), "BUY"
     if prev >= 0 and val < 0:
-        return _safe_float(val), "SELL"
+        return safe_float(val), "SELL"
 
     # Twin peaks (saucer) detection: AO below zero, look for two local
     # minima in recent history where second dip is higher (less negative).
@@ -130,9 +82,9 @@ def _awesome_oscillator(high: pd.Series, low: pd.Series) -> tuple[float, str]:
             second_dip = recent[minima_indices[-1]]
             # Second dip is higher (less negative) = bullish saucer
             if second_dip > first_dip and val > second_dip:
-                return _safe_float(val), "BUY"
+                return safe_float(val), "BUY"
 
-    return _safe_float(val), "HOLD"
+    return safe_float(val), "HOLD"
 
 
 # ---- sub-indicator 2: Aroon Oscillator (25) --------------------------------
@@ -190,7 +142,7 @@ def _vortex_indicator(high: pd.Series, low: pd.Series, close: pd.Series,
 
     vm_plus = (high - low.shift(1)).abs()
     vm_minus = (low - high.shift(1)).abs()
-    tr = _true_range(high, low, close)
+    tr = true_range(high, low, close)
 
     vm_plus_sum = vm_plus.rolling(window=period, min_periods=period).sum()
     vm_minus_sum = vm_minus.rolling(window=period, min_periods=period).sum()
@@ -275,37 +227,37 @@ def _know_sure_thing(close: pd.Series) -> tuple[float, float, str]:
 
     kst_line = pd.Series(0.0, index=close.index)
     for roc_p, sma_p, w in zip(roc_periods, sma_periods, weights):
-        roc_val = _roc(close, roc_p)
-        smoothed = _sma(roc_val, sma_p)
+        roc_val = roc(close, roc_p)
+        smoothed = sma(roc_val, sma_p)
         kst_line = kst_line + w * smoothed
 
-    signal_line = _sma(kst_line, 9)
+    signal_line = sma(kst_line, 9)
 
     kst_val = kst_line.iloc[-1]
     sig_val = signal_line.iloc[-1]
 
     if np.isnan(kst_val) or np.isnan(sig_val):
-        return _safe_float(kst_val), _safe_float(sig_val), "HOLD"
+        return safe_float(kst_val), safe_float(sig_val), "HOLD"
 
     # Need prior values for crossover detection
     if len(kst_line.dropna()) < 2 or len(signal_line.dropna()) < 2:
-        return _safe_float(kst_val), _safe_float(sig_val), "HOLD"
+        return safe_float(kst_val), safe_float(sig_val), "HOLD"
 
     kst_prev = kst_line.dropna().iloc[-2]
     sig_prev = signal_line.dropna().iloc[-2]
 
     if np.isnan(kst_prev) or np.isnan(sig_prev):
-        return _safe_float(kst_val), _safe_float(sig_val), "HOLD"
+        return safe_float(kst_val), safe_float(sig_val), "HOLD"
 
     # Bullish cross: KST crosses above signal
     if kst_prev <= sig_prev and kst_val > sig_val:
-        return _safe_float(kst_val), _safe_float(sig_val), "BUY"
+        return safe_float(kst_val), safe_float(sig_val), "BUY"
 
     # Bearish cross: KST crosses below signal
     if kst_prev >= sig_prev and kst_val < sig_val:
-        return _safe_float(kst_val), _safe_float(sig_val), "SELL"
+        return safe_float(kst_val), safe_float(sig_val), "SELL"
 
-    return _safe_float(kst_val), _safe_float(sig_val), "HOLD"
+    return safe_float(kst_val), safe_float(sig_val), "HOLD"
 
 
 # ---- sub-indicator 6: Schaff Trend Cycle (23, 50) --------------------------
@@ -329,7 +281,7 @@ def _schaff_trend_cycle(close: pd.Series, fast: int = 23,
         return float("nan"), "HOLD"
 
     # Step 1: MACD line
-    macd = _ema(close, fast) - _ema(close, slow)
+    macd = ema(close, fast) - ema(close, slow)
 
     # Step 2: First stochastic of MACD
     macd_low = macd.rolling(window=cycle, min_periods=cycle).min()
@@ -337,7 +289,7 @@ def _schaff_trend_cycle(close: pd.Series, fast: int = 23,
     denom1 = macd_high - macd_low
     stoch1 = ((macd - macd_low) / denom1.replace(0, np.nan)) * 100.0
     # Smooth with EMA (half-cycle)
-    pf = _ema(stoch1, max(cycle // 2, 1))
+    pf = ema(stoch1, max(cycle // 2, 1))
 
     # Step 3: Second stochastic of PF
     pf_low = pf.rolling(window=cycle, min_periods=cycle).min()
@@ -345,7 +297,7 @@ def _schaff_trend_cycle(close: pd.Series, fast: int = 23,
     denom2 = pf_high - pf_low
     stoch2 = ((pf - pf_low) / denom2.replace(0, np.nan)) * 100.0
     # Smooth again
-    stc = _ema(stoch2, max(cycle // 2, 1))
+    stc = ema(stoch2, max(cycle // 2, 1))
 
     val = stc.iloc[-1]
     if np.isnan(val):
@@ -386,13 +338,13 @@ def _trix(close: pd.Series, period: int = 15,
 
     Returns (trix_value, signal).
     """
-    ema1 = _ema(close, period)
-    ema2 = _ema(ema1, period)
-    ema3 = _ema(ema2, period)
+    ema1 = ema(close, period)
+    ema2 = ema(ema1, period)
+    ema3 = ema(ema2, period)
 
     # Rate of change of triple-smoothed EMA (percentage)
     trix_line = 100.0 * (ema3 - ema3.shift(1)) / ema3.shift(1).replace(0, np.nan)
-    signal_line = _sma(trix_line, signal_period)
+    signal_line = sma(trix_line, signal_period)
 
     val = trix_line.iloc[-1]
     sig_val = signal_line.iloc[-1]
@@ -447,10 +399,10 @@ def _coppock_curve(close: pd.Series, roc_long: int = 14, roc_short: int = 11,
     if len(close) < min_needed:
         return float("nan"), "HOLD"
 
-    roc_l = _roc(close, roc_long)
-    roc_s = _roc(close, roc_short)
+    roc_l = roc(close, roc_long)
+    roc_s = roc(close, roc_short)
     combined = roc_l + roc_s
-    cc = _wma(combined, wma_period)
+    cc = wma(combined, wma_period)
 
     val = cc.iloc[-1]
     if np.isnan(val):
@@ -600,8 +552,8 @@ def compute_oscillator_signal(df: pd.DataFrame) -> dict:
     try:
         vip, vim, vortex_sig = _vortex_indicator(high, low, close)
         sub_signals["vortex"] = vortex_sig
-        indicators["vi_plus"] = _safe_float(vip)
-        indicators["vi_minus"] = _safe_float(vim)
+        indicators["vi_plus"] = safe_float(vip)
+        indicators["vi_minus"] = safe_float(vim)
     except Exception:
         sub_signals["vortex"] = "HOLD"
         indicators["vi_plus"] = float("nan")
@@ -611,7 +563,7 @@ def compute_oscillator_signal(df: pd.DataFrame) -> dict:
     try:
         cmo_val, cmo_sig = _chande_momentum(close)
         sub_signals["chande"] = cmo_sig
-        indicators["cmo"] = _safe_float(cmo_val)
+        indicators["cmo"] = safe_float(cmo_val)
     except Exception:
         sub_signals["chande"] = "HOLD"
         indicators["cmo"] = float("nan")
@@ -631,7 +583,7 @@ def compute_oscillator_signal(df: pd.DataFrame) -> dict:
     try:
         stc_val, stc_sig = _schaff_trend_cycle(close)
         sub_signals["schaff"] = stc_sig
-        indicators["schaff"] = _safe_float(stc_val)
+        indicators["schaff"] = safe_float(stc_val)
     except Exception:
         sub_signals["schaff"] = "HOLD"
         indicators["schaff"] = float("nan")
@@ -640,7 +592,7 @@ def compute_oscillator_signal(df: pd.DataFrame) -> dict:
     try:
         trix_val, trix_sig = _trix(close)
         sub_signals["trix"] = trix_sig
-        indicators["trix"] = _safe_float(trix_val)
+        indicators["trix"] = safe_float(trix_val)
     except Exception:
         sub_signals["trix"] = "HOLD"
         indicators["trix"] = float("nan")
@@ -649,7 +601,7 @@ def compute_oscillator_signal(df: pd.DataFrame) -> dict:
     try:
         cc_val, cc_sig = _coppock_curve(close)
         sub_signals["coppock"] = cc_sig
-        indicators["coppock"] = _safe_float(cc_val)
+        indicators["coppock"] = safe_float(cc_val)
     except Exception:
         sub_signals["coppock"] = "HOLD"
         indicators["coppock"] = float("nan")

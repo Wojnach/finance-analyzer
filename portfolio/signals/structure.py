@@ -16,6 +16,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from portfolio.signal_utils import rsi
+
 # ---------------------------------------------------------------------------
 # Minimum data lengths for each sub-indicator
 # ---------------------------------------------------------------------------
@@ -23,22 +25,6 @@ _MIN_BARS_RSI = 15       # RSI(14) needs at least 15 bars
 _MIN_BARS_MACD = 35      # MACD(12,26,9): 26 + 9 warm-up
 _MIN_BARS_DONCHIAN = 56  # Donchian(55) needs 56 to have two values
 _MIN_BARS_HIGHLOW = 20   # Bare minimum for period high/low to be meaningful
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
-    """Wilder-smoothed RSI."""
-    delta = close.diff()
-    gain = delta.where(delta > 0, 0.0)
-    loss = (-delta).where(delta < 0, 0.0)
-    eps = np.finfo(float).eps
-    avg_gain = gain.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, eps)
-    return 100.0 - (100.0 / (1.0 + rs))
 
 
 def _macd_histogram(close: pd.Series,
@@ -133,7 +119,7 @@ def _rsi_centerline(df: pd.DataFrame) -> tuple[str, dict]:
     if len(df) < _MIN_BARS_RSI:
         return "HOLD", indicators
 
-    rsi_series = _rsi(close)
+    rsi_series = rsi(close)
     rsi_val = rsi_series.iloc[-1]
     indicators["rsi"] = float(rsi_val)
 

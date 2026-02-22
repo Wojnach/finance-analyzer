@@ -20,6 +20,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from portfolio.signal_utils import sma
+
 # ---------------------------------------------------------------------------
 # Minimum rows required.  Fibonacci retracement uses up to 100 bars for
 # swing detection; 50 is the bare minimum to get meaningful swings.
@@ -36,15 +38,6 @@ _SWING_LOOKBACK = 100
 _PEAK_WINDOW = 5
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _sma(series: pd.Series, period: int) -> pd.Series:
-    """Simple moving average."""
-    return series.rolling(window=period).mean()
-
-
 def _detect_trend(close: pd.Series, period: int = 20) -> str:
     """Determine trend direction using slope of SMA(20) over last 20 bars.
 
@@ -53,8 +46,8 @@ def _detect_trend(close: pd.Series, period: int = 20) -> str:
     if len(close) < period + 1:
         return "flat"
 
-    sma = _sma(close, period)
-    recent_sma = sma.iloc[-period:].dropna()
+    sma_val = sma(close, period)
+    recent_sma = sma_val.iloc[-period:].dropna()
 
     if len(recent_sma) < 2:
         return "flat"
