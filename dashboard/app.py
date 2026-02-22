@@ -165,9 +165,6 @@ def api_signal_log():
 @require_auth
 def api_accuracy():
     try:
-        import sys
-
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         from portfolio.accuracy_stats import (
             signal_accuracy,
             consensus_accuracy,
@@ -407,8 +404,6 @@ def api_decisions():
 def api_health():
     """Return system health summary (loop heartbeat, errors, agent silence)."""
     try:
-        import sys
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         from portfolio.health import get_health_summary
         return jsonify(get_health_summary())
     except Exception as e:
