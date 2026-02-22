@@ -270,10 +270,11 @@ def collect_timeframes(source):
     for label, interval, limit, ttl in tfs:
         cache_key = f"tf_{source_key}_{label}"
         if ttl > 0:
-            cached = _ss._tool_cache.get(cache_key)
-            if cached and time.time() - cached["time"] < ttl:
-                results.append((label, cached["data"]))
-                continue
+            with _ss._cache_lock:
+                cached = _ss._tool_cache.get(cache_key)
+                if cached and time.time() - cached["time"] < ttl:
+                    results.append((label, cached["data"]))
+                    continue
         try:
             df = _fetch_klines(source, interval, limit)
             ind = compute_indicators(df)
@@ -287,7 +288,8 @@ def collect_timeframes(source):
             if label == "Now":
                 entry["_df"] = df  # preserve raw DataFrame for enhanced signals
             if ttl > 0:
-                _ss._tool_cache[cache_key] = {"data": entry, "time": time.time()}
+                with _ss._cache_lock:
+                    _ss._tool_cache[cache_key] = {"data": entry, "time": time.time()}
             results.append((label, entry))
         except Exception as e:
             results.append((label, {"error": str(e)}))
