@@ -123,23 +123,42 @@ def detect_regime(indicators, is_crypto=True):
 def technical_signal(ind):
     buy = 0
     sell = 0
-    if ind["rsi"] < 50:
+    total = 0
+    # RSI: BUY when < 30 (oversold), SELL when > 70 (overbought), else neutral
+    if ind["rsi"] < 30:
         buy += 1
-    else:
+        total += 1
+    elif ind["rsi"] > 70:
         sell += 1
-    if ind["macd_hist"] > 0:
+        total += 1
+    # MACD: histogram crossover (neg->pos = BUY, pos->neg = SELL)
+    macd_hist = ind["macd_hist"]
+    macd_hist_prev = ind.get("macd_hist_prev", 0.0)
+    if macd_hist > 0 and macd_hist_prev <= 0:
         buy += 1
-    else:
+        total += 1
+    elif macd_hist < 0 and macd_hist_prev >= 0:
         sell += 1
-    if ind["ema9"] > ind["ema21"]:
+        total += 1
+    # EMA: with deadband — only signal when gap > 0.5%
+    ema9 = ind["ema9"]
+    ema21 = ind["ema21"]
+    ema_gap_pct = abs(ema9 - ema21) / ema21 * 100 if ema21 != 0 else 0
+    if ema_gap_pct >= 0.5:
+        if ema9 > ema21:
+            buy += 1
+        else:
+            sell += 1
+        total += 1
+    # BB: below lower = BUY, above upper = SELL
+    if ind["price_vs_bb"] == "below_lower":
         buy += 1
-    else:
+        total += 1
+    elif ind["price_vs_bb"] == "above_upper":
         sell += 1
-    if ind["close"] > ind["bb_mid"]:
-        buy += 1
-    else:
-        sell += 1
-    total = buy + sell
+        total += 1
+    if total == 0:
+        return "HOLD", 0.0
     if buy > sell:
         return "BUY", buy / total
     elif sell > buy:

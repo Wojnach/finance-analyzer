@@ -128,40 +128,51 @@ class TestComputeIndicators:
 
 class TestTechnicalSignal:
     def test_strong_buy(self):
+        # RSI < 30 (BUY), MACD crossover neg->pos (BUY), EMA gap > 0.5% bullish (BUY), BB below_lower (BUY)
         ind = make_indicators(
-            rsi=30, macd_hist=5.0, ema9=70000, ema21=69000, close=70000, bb_mid=69000
+            rsi=25, macd_hist=5.0, macd_hist_prev=-1.0,
+            ema9=70000, ema21=69000, price_vs_bb="below_lower",
         )
         action, conf = technical_signal(ind)
         assert action == "BUY"
         assert conf == 1.0
 
     def test_strong_sell(self):
+        # RSI > 70 (SELL), MACD crossover pos->neg (SELL), EMA gap > 0.5% bearish (SELL), BB above_upper (SELL)
         ind = make_indicators(
-            rsi=70, macd_hist=-5.0, ema9=68000, ema21=69000, close=68000, bb_mid=69000
+            rsi=75, macd_hist=-5.0, macd_hist_prev=1.0,
+            ema9=68000, ema21=69000, price_vs_bb="above_upper",
         )
         action, conf = technical_signal(ind)
         assert action == "SELL"
         assert conf == 1.0
 
     def test_mixed_hold(self):
+        # RSI=50 (neutral), MACD no crossover (neutral), EMA gap < 0.5% (neutral), BB inside (neutral)
+        # All signals abstain -> HOLD with 0.0 confidence
         ind = make_indicators(
-            rsi=30, macd_hist=5.0, ema9=68000, ema21=69000, close=68000, bb_mid=69000
+            rsi=50, macd_hist=5.0, macd_hist_prev=4.0,
+            ema9=69000, ema21=69000, price_vs_bb="inside",
         )
         action, conf = technical_signal(ind)
         assert action == "HOLD"
-        assert conf == 0.5
+        assert conf == 0.0
 
     def test_three_buy_one_sell(self):
+        # RSI < 30 (BUY), MACD crossover neg->pos (BUY), EMA gap > 0.5% bearish (SELL), BB below_lower (BUY)
         ind = make_indicators(
-            rsi=30, macd_hist=5.0, ema9=70000, ema21=69000, close=68000, bb_mid=69000
+            rsi=25, macd_hist=5.0, macd_hist_prev=-1.0,
+            ema9=68000, ema21=69000, price_vs_bb="below_lower",
         )
         action, conf = technical_signal(ind)
         assert action == "BUY"
         assert conf == 0.75
 
     def test_confidence_is_ratio(self):
+        # RSI > 70 (SELL), MACD crossover pos->neg (SELL), EMA gap > 0.5% bullish (BUY), BB above_upper (SELL)
         ind = make_indicators(
-            rsi=70, macd_hist=-5.0, ema9=68000, ema21=69000, close=70000, bb_mid=69000
+            rsi=75, macd_hist=-5.0, macd_hist_prev=1.0,
+            ema9=70000, ema21=69000, price_vs_bb="above_upper",
         )
         action, conf = technical_signal(ind)
         assert action == "SELL"

@@ -286,12 +286,13 @@ def _evaluate_conditions(ticker, signals, prices_usd, tf_data):
         # HOLD = non-directional spike — not evidence for either direction
 
     # 6. MACD momentum shift — histogram turning while RSI extreme
-    macd_hist = ind.get("macd_hist", 0)
-    macd_hist_prev = ind.get("macd_hist_prev", 0)
-    if macd_hist > macd_hist_prev and rsi_now < 35:
-        bull_conditions.append(f"MACD turning up while oversold")
-    if macd_hist < macd_hist_prev and rsi_now > 70:
-        bear_conditions.append(f"MACD turning down while overbought")
+    macd_hist = ind.get("macd_hist")
+    macd_hist_prev = ind.get("macd_hist_prev")
+    if macd_hist is not None and macd_hist_prev is not None:
+        if macd_hist > macd_hist_prev and rsi_now < 35:
+            bull_conditions.append("MACD turning up while oversold")
+        if macd_hist < macd_hist_prev and rsi_now > 70:
+            bear_conditions.append("MACD turning down while overbought")
 
     return bull_conditions, bear_conditions, {"fg": fg, "fg_class": fg_class}
 

@@ -18,27 +18,31 @@ _RETRY_COOLDOWN = 60
 
 
 _CACHE_MAX_SIZE = 256  # evict expired entries when cache exceeds this size
+_cache_lock = threading.Lock()
 
 
 def _cached(key, ttl, func, *args):
     """Cache-through helper: returns cached data if fresh, else calls func."""
     now = time.time()
-    if key in _tool_cache and now - _tool_cache[key]["time"] < ttl:
-        return _tool_cache[key]["data"]
-    # Evict expired entries when cache grows too large
-    if len(_tool_cache) > _CACHE_MAX_SIZE:
-        expired = [k for k, v in _tool_cache.items() if now - v["time"] > 3600]
-        for k in expired:
-            del _tool_cache[k]
+    with _cache_lock:
+        if key in _tool_cache and now - _tool_cache[key]["time"] < ttl:
+            return _tool_cache[key]["data"]
+        # Evict expired entries when cache grows too large
+        if len(_tool_cache) > _CACHE_MAX_SIZE:
+            expired = [k for k, v in _tool_cache.items() if now - v["time"] > 3600]
+            for k in expired:
+                del _tool_cache[k]
     try:
         data = func(*args)
-        _tool_cache[key] = {"data": data, "time": now}
+        with _cache_lock:
+            _tool_cache[key] = {"data": data, "time": now}
         return data
     except Exception as e:
         logger.warning(f"[{key}] error: {e}")
-        if key in _tool_cache:
-            _tool_cache[key]["time"] = now - ttl + _RETRY_COOLDOWN
-            return _tool_cache[key]["data"]
+        with _cache_lock:
+            if key in _tool_cache:
+                _tool_cache[key]["time"] = now - ttl + _RETRY_COOLDOWN
+                return _tool_cache[key]["data"]
         return None
 
 
