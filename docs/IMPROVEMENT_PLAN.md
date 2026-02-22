@@ -1,136 +1,107 @@
-# Improvement Plan — Auto Session 2026-02-22 (Fresh)
+# Improvement Plan — Auto Session 2026-02-22 (Phase 3)
 
 > Based on deep reading of all ~90 Python files, 1101 passing tests.
-> Prior session completed: signal_utils extraction, div-by-zero fixes,
-> bigbet cooldown, dashboard decisions, LoRA assessment. This plan covers NEW work.
+> Prior sessions completed: signal_utils extraction, thread-safe cache writes,
+> DB connection reuse, cached accuracy, kline dedup, dashboard validation dedup,
+> structured logging, bigbet improvements. This plan covers NEW work.
 
-## Priority 1: Bugs & Correctness Issues
+## Priority 1: Bugs & Correctness
 
-### B1. `collect_timeframes` cache writes are not thread-safe
-**File:** `portfolio/data_collector.py:273-290`
-**Bug:** Direct `_ss._tool_cache[cache_key] = ...` writes bypass the
-`_cache_lock` in `shared_state.py`. The `_cached()` helper properly
-locks, but `collect_timeframes()` manages its own cache entries directly.
-If the TelegramPoller thread or any future concurrent path touches
-the same cache dict, this is a data race.
-**Fix:** Use `_cached()` helper or wrap direct writes with `_cache_lock`.
-**Impact:** Low probability today (single main thread writes), but a
-latent race condition waiting to happen. Low risk fix.
+### B1. Triple yfinance rate limiter (not coordinating)
+**Files:** `shared_state.py:85`, `macro_context.py:18`, `outcome_tracker.py:11`
+**Bug:** Three separate `_RateLimiter(30, "yfinance")` instances. Each allows
+30 req/min independently, so yfinance could be hit at 90 req/min (3×30).
+**Fix:** Delete local instances in macro_context.py and outcome_tracker.py,
+import from shared_state.py instead.
+**Impact:** Prevents yfinance rate limit violations.
 
-### B2. `outcome_tracker.backfill_outcomes` opens SignalDB per-outcome
-**File:** `portfolio/outcome_tracker.py:336-344`
-**Bug:** Inside a tight loop over every ticker and every horizon,
-the code does `_db = SignalDB(); _db.update_outcome(...); _db.close()`.
-This opens and closes the SQLite connection for EVERY outcome write.
-For 31 tickers × 4 horizons × N entries, that's thousands of open/close
-cycles. Each `close()` forces a WAL checkpoint.
-**Fix:** Open SignalDB once before the loop, use it for all writes,
-close once after. Same pattern for the `log_signal_snapshot` function
-at line 147-152.
-**Impact:** Performance improvement for `--check-outcomes`. No logic change.
+### B2. `_crash_alert()` opens config.json without encoding
+**File:** `main.py:305`
+**Bug:** `json.load(open(config_path))` — no `encoding="utf-8"`. On Windows,
+defaults to system locale, could fail on non-ASCII config values.
+**Fix:** Add `encoding="utf-8"` to the open() call.
+**Impact:** Trivial fix, prevents crash-handler crash.
 
-### B3. `accuracy_stats.signal_accuracy` reloads ALL entries on every call
-**File:** `portfolio/accuracy_stats.py:50-84`
-**Bug:** `signal_accuracy()` calls `load_entries()` which reads the
-full signal log from SQLite or JSONL every time. This function is
-called multiple times per cycle: once in `signal_engine.py` (via
-`load_cached_accuracy`), once in `reporting.py` (for agent_summary),
-and once in `print_accuracy_report()`. The cache in `load_cached_accuracy`
-helps for the first case, but `write_agent_summary` calls `signal_accuracy`
-directly (line 152), bypassing the cache.
-**Fix:** Have `write_agent_summary` use `load_cached_accuracy` too.
-**Impact:** Performance — avoids redundant full-log scans. No logic change.
+### B3. `best_worst_signals()` redundantly calls `signal_accuracy()`
+**File:** `accuracy_stats.py:153-164`, called from `reporting.py:161`
+**Bug:** `reporting.py` computes `sig_acc = signal_accuracy("1d")` on line ~157,
+then calls `best_worst_signals("1d")` which internally calls `signal_accuracy()`
+again. Loads and filters the entire signal log twice.
+**Fix:** Add optional `acc=None` parameter; if provided, skip internal call.
+Update reporting.py to pass pre-computed data.
+**Impact:** Avoids redundant full-log scan per cycle.
 
-### B4. `health.check_agent_silence` scans entire invocations.jsonl
-**File:** `portfolio/health.py:77-93`
-**Bug:** When `last_invocation_ts` is not in health_state, the fallback
-reads the entire `invocations.jsonl` line by line to find the last
-timestamp. This file only grows over time. The fallback iterates
-forward and keeps overwriting `last_ts` — it should read from the end.
-**Fix:** Read the last non-empty line (seek to end, scan backward).
-Or better, ensure `last_invocation_ts` is always written so the
-fallback never triggers.
-**Impact:** Low — the cached path works. But the fallback is O(n).
+### B4. Unused `import sys` in analyze.py
+**File:** `analyze.py:11`
+**Bug:** `import sys` is never used.
+**Fix:** Remove the import.
+**Impact:** Trivial cleanup.
 
-### B5. `telegram_poller._poll_loop` uses `print()` instead of logger
-**File:** `portfolio/telegram_poller.py:40,126,128`
-**Bug:** The poller thread uses `print()` for error output, bypassing
-the structured logging system. These messages go to stdout only and
-are invisible in the rotating log files.
-**Fix:** Replace `print()` with `logger.warning()`.
-**Impact:** Trivial fix, improves debuggability.
+## Priority 2: Architecture & Deduplication
 
-### B6. Dashboard `api_accuracy` does `sys.path.insert` every request
-**File:** `dashboard/app.py:168-170`
-**Bug:** Every call to `/api/accuracy` inserts the project root into
-`sys.path`. This is redundant (it's already there from app startup)
-and modifies global state on every request.
-**Fix:** Remove the `sys.path.insert` calls (same at line 482).
-The imports work without them since the app runs from the project root.
-**Impact:** Trivial cleanup. No behavior change.
+### A1. Duplicate JSON/JSONL loading helpers (7+ copies)
+**Files:** kelly_sizing.py, regime_alerts.py, risk_management.py, stats.py,
+weekly_digest.py, dashboard/app.py
+**Bug:** ~230 lines of identical `_load_json()` / `_load_jsonl()` functions.
+**Fix:** Add `load_json()` and `load_jsonl()` to `file_utils.py`. Update all
+modules to import from there.
+**Impact:** Reduces duplication, ensures consistent encoding/error handling.
 
-## Priority 2: Architecture Improvements
+### A2. Binance/Alpaca API URL duplication (4+ files)
+**Files:** data_collector.py, iskbets.py, macro_context.py, ml_signal.py,
+outcome_tracker.py, data_refresh.py, funding_rate.py
+**Bug:** `BINANCE_BASE`, `BINANCE_FAPI_BASE`, `ALPACA_BASE` defined
+independently in multiple files.
+**Fix:** Define canonical URL constants in `api_utils.py` (already has
+config/header helpers). Update all modules to import from there.
+**Impact:** Single source of truth for API endpoints.
 
-### A1. Duplicate kline-fetching code in iskbets.py
-**File:** `portfolio/iskbets.py:125-221`
-**Bug:** `_compute_atr_15m_impl` reimplements Binance spot, Binance FAPI,
-and Alpaca kline fetching — exact duplicates of `data_collector.py`'s
-`binance_klines`, `binance_fapi_klines`, `alpaca_klines`. 100+ lines
-of redundant code. Any fix to data_collector (e.g., error handling,
-header changes) must be duplicated here.
-**Fix:** Replace with calls to `data_collector._fetch_klines()`.
-**Impact:** Medium — reduces duplication by ~100 lines. Must verify
-ATR computation gives same results.
+## Priority 3: Performance
 
-### A2. Duplicate portfolio validation in dashboard vs portfolio_validator
-**File:** `dashboard/app.py:213-305` vs `portfolio/portfolio_validator.py`
-**Bug:** The dashboard's `/api/validate-portfolio` endpoint reimplements
-portfolio validation from scratch (~90 lines), duplicating the logic
-in `portfolio_validator.py` (294 lines, more thorough). The dashboard
-version is less complete (missing fee reconciliation, avg_cost checks).
-**Fix:** Have the dashboard endpoint call `portfolio_validator.validate_portfolio()`.
-**Impact:** Reduces code duplication, dashboard gets more thorough validation.
+### P1. `copy.deepcopy` in reporting.py
+**File:** `reporting.py:247`
+**Bug:** `copy.deepcopy(summary)` copies the entire agent_summary dict
+(30+ tickers × 7 timeframes). Only top-level fields are modified.
+**Fix:** Shallow copy the dict, deep copy only the `signals` sub-dict
+(which gets mutated).
+**Impact:** Reduces CPU/memory cost per reporting cycle.
 
-### A3. Signal vote derivation duplicated in outcome_tracker
-**File:** `portfolio/outcome_tracker.py:25-98`
-**Bug:** `_derive_signal_vote()` reimplements signal logic from
-`signal_engine.py` (RSI thresholds, MACD crossover, EMA deadband, etc.).
-Any change to signal logic must be duplicated here. The function exists
-because older signal log entries didn't store individual votes.
-**Fix:** Since newer entries include `_votes` in extra (line 110-112
-already checks for this), the derivation fallback is for legacy data only.
-Add a comment clarifying this, and consider deprecating for entries
-after a certain date.
-**Impact:** Low risk — adding documentation. No behavior change.
+### P2. `backfill_outcomes()` loads entire JSONL into memory
+**File:** `outcome_tracker.py:262-267`
+**Bug:** Reads all entries into a list before processing. File grows
+monotonically.
+**Fix:** Stream entries and process in-place, or use SQLite query
+(SignalDB already has the data).
+**Impact:** Reduces memory spikes during daily backfill.
 
-## Priority 3: Code Quality
+## Priority 4: Robustness
 
-### Q1. Replace print() with logger in telegram_poller.py
-Part of B5. Trivial.
-
-### Q2. Remove redundant sys.path.insert in dashboard
-Part of B6. Trivial.
-
-### Q3. Add `__all__` exports to key modules
-Several modules export internal functions that tests import by path.
-Adding `__all__` would clarify the public API surface.
-Not urgent — deferring.
+### R1. `_log_trigger()` non-atomic append
+**File:** `agent_invocation.py:33`
+**Bug:** Regular `open("a")` append. If two processes race, JSONL lines
+could interleave and corrupt.
+**Fix:** Use `file_utils.atomic_append_jsonl()` (to be added in A1).
+**Impact:** Low probability (single writer normally), but cheap to fix.
 
 ## Execution Order
 
-### Batch 1: Thread-safety & performance fixes (B1, B2, B3)
-Files: data_collector.py, outcome_tracker.py, reporting.py
-- Fix cache writes thread-safety in collect_timeframes
-- Open SignalDB once in backfill loop
-- Use cached accuracy in reporting.py
+### Batch 1: Rate limiter + encoding + accuracy fix (B1, B2, B3, B4)
+Files: shared_state.py, macro_context.py, outcome_tracker.py, main.py,
+accuracy_stats.py, reporting.py, analyze.py
+- Consolidate yfinance rate limiter to shared_state.py
+- Fix encoding in _crash_alert
+- Add pre-computed data param to best_worst_signals
+- Remove unused import
 
-### Batch 2: Code deduplication (A1, A2)
-Files: iskbets.py, dashboard/app.py
-- Replace kline fetching in iskbets with data_collector calls
-- Replace dashboard validation with portfolio_validator call
+### Batch 2: Deduplication (A1, A2)
+Files: file_utils.py, kelly_sizing.py, regime_alerts.py, risk_management.py,
+stats.py, weekly_digest.py, dashboard/app.py, api_utils.py, data_collector.py,
+iskbets.py, macro_context.py, ml_signal.py, outcome_tracker.py
+- Extract shared JSON helpers to file_utils.py
+- Centralize API URLs in api_utils.py
 
-### Batch 3: Logging & cleanup (B5, B6, B4)
-Files: telegram_poller.py, dashboard/app.py, health.py
-- Replace print() with logger
-- Remove sys.path.insert
-- Optimize health.py fallback (or ensure cached path always works)
+### Batch 3: Performance + robustness (P1, P2, R1)
+Files: reporting.py, outcome_tracker.py, agent_invocation.py, file_utils.py
+- Optimize deepcopy in reporting
+- Stream backfill_outcomes
+- Add atomic JSONL append to file_utils, use in agent_invocation
