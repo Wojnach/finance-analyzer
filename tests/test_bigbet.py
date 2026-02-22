@@ -743,7 +743,7 @@ class TestProbabilityGating:
     @patch("portfolio.bigbet._save_state")
     @patch("portfolio.bigbet._load_state")
     def test_low_probability_blocks_alert(self, mock_load, mock_save, mock_tg, mock_eval):
-        """Probability below threshold (default 5) blocks alert."""
+        """Probability below threshold (default 6) blocks alert."""
         now = time.time()
         mock_load.return_value = {
             "cooldowns": {}, "price_history": {}, "active_bets": {},
@@ -755,7 +755,7 @@ class TestProbabilityGating:
         check_bigbet(signals, prices_usd, 10.5, tf_data, config)
 
         mock_eval.assert_called_once()
-        # Telegram should NOT be called — probability 3 < 5
+        # Telegram should NOT be called — probability 3 < 6
         alert_calls = [
             c for c in mock_tg.call_args_list if "BIG BET:" in c[0][0]
         ]
@@ -783,12 +783,12 @@ class TestProbabilityGating:
         ]
         assert len(alert_calls) == 0
 
-    @patch("portfolio.bigbet.invoke_layer2_eval", return_value=(5, "Marginal"))
+    @patch("portfolio.bigbet.invoke_layer2_eval", return_value=(6, "Decent"))
     @patch("portfolio.bigbet._send_telegram")
     @patch("portfolio.bigbet._save_state")
     @patch("portfolio.bigbet._load_state")
     def test_exact_threshold_passes(self, mock_load, mock_save, mock_tg, mock_eval):
-        """Probability exactly at threshold (5) passes the gate."""
+        """Probability exactly at threshold (6) passes the gate."""
         now = time.time()
         mock_load.return_value = {
             "cooldowns": {}, "price_history": {}, "active_bets": {},

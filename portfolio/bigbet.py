@@ -412,7 +412,7 @@ def check_bigbet(signals, prices_usd, fx_rate, tf_data, config):
     bigbet_cfg = config.get("bigbet", {})
     min_conditions = bigbet_cfg.get("min_conditions", 3)
     min_persistence = bigbet_cfg.get("min_persistence", 2)
-    min_probability = bigbet_cfg.get("min_probability", 5)
+    min_probability = bigbet_cfg.get("min_probability", 6)
     cooldown_minutes = _resolve_cooldown_minutes(bigbet_cfg)
     cooldown_seconds = cooldown_minutes * 60
 
