@@ -20,7 +20,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from portfolio.signal_utils import sma
+from portfolio.signal_utils import majority_vote, sma
 
 # ---------------------------------------------------------------------------
 # Minimum rows required.  Fibonacci retracement uses up to 100 bars for
@@ -518,27 +518,11 @@ def compute_fibonacci_signal(df: pd.DataFrame) -> dict:
 
     # -- Majority vote -----------------------------------------------------
     votes = list(sub_signals.values())
-    buy_count = votes.count("BUY")
-    sell_count = votes.count("SELL")
-    active_votes = buy_count + sell_count  # non-HOLD votes
-
-    if active_votes == 0:
-        action = "HOLD"
-        confidence = 0.0
-    elif buy_count > sell_count:
-        action = "BUY"
-        confidence = buy_count / active_votes
-    elif sell_count > buy_count:
-        action = "SELL"
-        confidence = sell_count / active_votes
-    else:
-        # Tied between BUY and SELL — no clear direction
-        action = "HOLD"
-        confidence = 0.0
+    action, confidence = majority_vote(votes)
 
     return {
         "action": action,
-        "confidence": round(confidence, 4),
+        "confidence": confidence,
         "sub_signals": sub_signals,
         "indicators": indicators,
     }

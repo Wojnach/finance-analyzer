@@ -8,7 +8,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from portfolio.signal_utils import ema, rma, roc, rsi, safe_float, sma, true_range, wma
+from portfolio.signal_utils import (
+    ema, majority_vote, rma, roc, rsi, safe_float, sma, true_range, wma,
+)
 from portfolio.signals.fibonacci import _near_level
 
 
@@ -304,3 +306,71 @@ class TestFibNearLevel:
         """When price is outside tolerance, return False."""
         assert _near_level(110.0, 100.0) is False
         assert _near_level(90.0, 100.0) is False
+
+
+# ---------------------------------------------------------------------------
+# majority_vote
+# ---------------------------------------------------------------------------
+
+class TestMajorityVote:
+    """Tests for the majority_vote function in signal_utils."""
+
+    def test_all_buy(self):
+        action, conf = majority_vote(["BUY", "BUY", "BUY"])
+        assert action == "BUY"
+        assert conf == pytest.approx(1.0)
+
+    def test_all_sell(self):
+        action, conf = majority_vote(["SELL", "SELL", "SELL"])
+        assert action == "SELL"
+        assert conf == pytest.approx(1.0)
+
+    def test_all_hold(self):
+        action, conf = majority_vote(["HOLD", "HOLD", "HOLD"])
+        assert action == "HOLD"
+        assert conf == pytest.approx(0.0)
+
+    def test_mixed_count_hold_false(self):
+        """3B/1S/2H with count_hold=False => BUY, confidence = 3/4 = 0.75."""
+        action, conf = majority_vote(
+            ["BUY", "BUY", "BUY", "SELL", "HOLD", "HOLD"],
+            count_hold=False,
+        )
+        assert action == "BUY"
+        assert conf == pytest.approx(0.75)
+
+    def test_mixed_count_hold_true(self):
+        """3B/1S/2H with count_hold=True => BUY, confidence = 3/6 = 0.5."""
+        action, conf = majority_vote(
+            ["BUY", "BUY", "BUY", "SELL", "HOLD", "HOLD"],
+            count_hold=True,
+        )
+        assert action == "BUY"
+        assert conf == pytest.approx(0.5)
+
+    def test_tie_buy_sell(self):
+        """2B/2S/1H => HOLD, confidence = 0.0 (tie between buy and sell)."""
+        action, conf = majority_vote(
+            ["BUY", "BUY", "SELL", "SELL", "HOLD"],
+        )
+        assert action == "HOLD"
+        assert conf == pytest.approx(0.0)
+
+    def test_empty_list(self):
+        action, conf = majority_vote([])
+        assert action == "HOLD"
+        assert conf == pytest.approx(0.0)
+
+    def test_single_buy(self):
+        """Single BUY vote with no HOLD => BUY with confidence 1.0."""
+        action, conf = majority_vote(["BUY"])
+        assert action == "BUY"
+        assert conf == pytest.approx(1.0)
+
+    def test_buy_less_than_hold(self):
+        """2B/0S/5H => HOLD (BUY does not exceed HOLD count)."""
+        action, conf = majority_vote(
+            ["BUY", "BUY", "HOLD", "HOLD", "HOLD", "HOLD", "HOLD"],
+        )
+        assert action == "HOLD"
+        assert conf == pytest.approx(0.0)

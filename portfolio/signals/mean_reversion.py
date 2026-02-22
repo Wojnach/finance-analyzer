@@ -21,7 +21,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from portfolio.signal_utils import rsi, safe_float, sma
+from portfolio.signal_utils import majority_vote, rsi, safe_float, sma
 
 # ---------------------------------------------------------------------------
 # Minimum rows required for reliable computation.  The longest lookback is
@@ -316,31 +316,6 @@ def _ibs_rsi2_combined(high: pd.Series, low: pd.Series,
     return safe_float(ibs), rsi2_val, "HOLD"
 
 
-# ---- majority vote ---------------------------------------------------------
-
-def _majority_vote(signals: list[str]) -> tuple[str, float]:
-    """Majority voting among sub-signals.
-
-    Returns (action, confidence) where confidence is
-    majority_count / total_voting (non-HOLD count).
-    If all HOLD, confidence = 0.0.
-    """
-    buy_count = signals.count("BUY")
-    sell_count = signals.count("SELL")
-    total_voting = buy_count + sell_count
-
-    if total_voting == 0:
-        return "HOLD", 0.0
-
-    if buy_count > sell_count:
-        return "BUY", round(buy_count / total_voting, 4)
-    if sell_count > buy_count:
-        return "SELL", round(sell_count / total_voting, 4)
-
-    # Tie between BUY and SELL — HOLD
-    return "HOLD", 0.0
-
-
 # ---- public API ------------------------------------------------------------
 
 def compute_mean_reversion_signal(df: pd.DataFrame) -> dict:
@@ -487,7 +462,7 @@ def compute_mean_reversion_signal(df: pd.DataFrame) -> dict:
 
     # -- Majority vote -----------------------------------------------------
     votes = list(sub_signals.values())
-    action, confidence = _majority_vote(votes)
+    action, confidence = majority_vote(votes)
 
     return {
         "action": action,

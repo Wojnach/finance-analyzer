@@ -22,7 +22,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from portfolio.signal_utils import ema, rsi, sma
+from portfolio.signal_utils import ema, majority_vote, rsi, sma
 
 # ---------------------------------------------------------------------------
 # Minimum rows required for reliable computation.  The longest lookback chain
@@ -429,24 +429,11 @@ def compute_momentum_signal(df: pd.DataFrame) -> dict:
 
     # -- Majority vote -----------------------------------------------------
     votes = list(sub_signals.values())
-    buy_count = votes.count("BUY")
-    sell_count = votes.count("SELL")
-    hold_count = votes.count("HOLD")
-    total = len(votes)  # always 8
-
-    if buy_count > sell_count and buy_count > hold_count:
-        action = "BUY"
-        confidence = buy_count / total
-    elif sell_count > buy_count and sell_count > hold_count:
-        action = "SELL"
-        confidence = sell_count / total
-    else:
-        action = "HOLD"
-        confidence = hold_count / total
+    action, confidence = majority_vote(votes)
 
     return {
         "action": action,
-        "confidence": round(confidence, 4),
+        "confidence": confidence,
         "sub_signals": sub_signals,
         "indicators": indicators,
     }

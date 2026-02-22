@@ -16,7 +16,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from portfolio.signal_utils import rsi
+from portfolio.signal_utils import majority_vote, rsi
 
 # ---------------------------------------------------------------------------
 # Minimum data lengths for each sub-indicator
@@ -247,23 +247,6 @@ def compute_structure_signal(df: pd.DataFrame) -> dict:
 
     # ---- Majority vote ----
     votes = [hl_action, dc_action, rsi_action, macd_action]
-    buy_count = votes.count("BUY")
-    sell_count = votes.count("SELL")
-    active_votes = buy_count + sell_count  # non-HOLD votes
-
-    if active_votes == 0:
-        # All sub-indicators abstain
-        result["action"] = "HOLD"
-        result["confidence"] = 0.0
-    elif buy_count > sell_count:
-        result["action"] = "BUY"
-        result["confidence"] = round(buy_count / active_votes, 2)
-    elif sell_count > buy_count:
-        result["action"] = "SELL"
-        result["confidence"] = round(sell_count / active_votes, 2)
-    else:
-        # Tied between BUY and SELL -- no clear direction
-        result["action"] = "HOLD"
-        result["confidence"] = 0.0
+    result["action"], result["confidence"] = majority_vote(votes)
 
     return result

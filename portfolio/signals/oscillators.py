@@ -22,7 +22,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from portfolio.signal_utils import ema, roc, safe_float, sma, true_range, wma
+from portfolio.signal_utils import ema, majority_vote, roc, safe_float, sma, true_range, wma
 
 # ---------------------------------------------------------------------------
 # Minimum rows required for reliable computation.  The longest lookback chain
@@ -429,35 +429,6 @@ def _coppock_curve(close: pd.Series, roc_long: int = 14, roc_short: int = 11,
     return val, "HOLD"
 
 
-# ---- majority vote ---------------------------------------------------------
-
-def _majority_vote(signals: list[str]) -> tuple[str, float]:
-    """Majority voting across sub-signals.
-
-    Returns (action, confidence) where confidence is the proportion of
-    sub-signals agreeing with the winning direction.
-    """
-    buy_count = signals.count("BUY")
-    sell_count = signals.count("SELL")
-    hold_count = signals.count("HOLD")
-    total = len(signals)
-
-    if total == 0:
-        return "HOLD", 0.0
-
-    if buy_count > sell_count and buy_count > hold_count:
-        return "BUY", round(buy_count / total, 4)
-    if sell_count > buy_count and sell_count > hold_count:
-        return "SELL", round(sell_count / total, 4)
-
-    # Ties: if BUY == SELL (and both > HOLD), default to HOLD
-    # If HOLD ties with either direction, default to HOLD
-    if buy_count == sell_count and buy_count > hold_count:
-        return "HOLD", round(hold_count / total, 4) if hold_count > 0 else 0.0
-
-    return "HOLD", round(max(buy_count, sell_count, hold_count) / total, 4)
-
-
 # ---- public API ------------------------------------------------------------
 
 def compute_oscillator_signal(df: pd.DataFrame) -> dict:
@@ -608,7 +579,7 @@ def compute_oscillator_signal(df: pd.DataFrame) -> dict:
 
     # -- Majority vote -----------------------------------------------------
     votes = list(sub_signals.values())
-    action, confidence = _majority_vote(votes)
+    action, confidence = majority_vote(votes)
 
     return {
         "action": action,

@@ -87,6 +87,42 @@ def wma(series: pd.Series, period: int) -> pd.Series:
     )
 
 
+def majority_vote(votes: list, count_hold: bool = False) -> tuple:
+    """Compute majority vote from a list of BUY/SELL/HOLD strings.
+
+    Args:
+        votes: List of "BUY", "SELL", or "HOLD" strings
+        count_hold: If False (default), confidence = winner / active_voters (BUY+SELL only).
+                    If True, confidence = winner / total_votes (including HOLD).
+
+    Returns:
+        (action, confidence) tuple where action is "BUY", "SELL", or "HOLD"
+    """
+    buy = sum(1 for v in votes if v == "BUY")
+    sell = sum(1 for v in votes if v == "SELL")
+    hold = sum(1 for v in votes if v == "HOLD")
+
+    active = buy + sell
+    total = buy + sell + hold
+
+    if total == 0:
+        return "HOLD", 0.0
+
+    if active == 0:
+        return "HOLD", 0.0
+
+    denom = total if count_hold else active
+
+    if buy > sell and buy > hold:
+        return "BUY", round(buy / denom, 4) if denom > 0 else 0.0
+    elif sell > buy and sell > hold:
+        return "SELL", round(sell / denom, 4) if denom > 0 else 0.0
+    elif buy == sell and buy > 0:
+        return "HOLD", 0.0  # tie between buy and sell
+    else:
+        return "HOLD", round(hold / denom, 4) if denom > 0 and count_hold else 0.0
+
+
 def roc(series: pd.Series, period: int) -> pd.Series:
     """Rate of Change: ``100 * (current - n_periods_ago) / n_periods_ago``."""
     shifted = series.shift(period)

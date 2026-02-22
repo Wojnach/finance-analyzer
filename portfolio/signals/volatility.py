@@ -17,7 +17,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from portfolio.signal_utils import ema, sma, true_range
+from portfolio.signal_utils import ema, majority_vote, sma, true_range
 
 logger = logging.getLogger(__name__)
 
@@ -338,24 +338,11 @@ def compute_volatility_signal(df: pd.DataFrame) -> dict[str, Any]:
 
     # -- Majority vote --------------------------------------------------------
     votes = list(sub_signals.values())
-    buy_count = votes.count("BUY")
-    sell_count = votes.count("SELL")
-    hold_count = votes.count("HOLD")
-    total = len(votes)
-
-    if buy_count > sell_count and buy_count > hold_count:
-        composite_action = "BUY"
-        confidence = buy_count / total
-    elif sell_count > buy_count and sell_count > hold_count:
-        composite_action = "SELL"
-        confidence = sell_count / total
-    else:
-        composite_action = "HOLD"
-        confidence = hold_count / total
+    composite_action, confidence = majority_vote(votes)
 
     return {
         "action": composite_action,
-        "confidence": round(confidence, 4),
+        "confidence": confidence,
         "sub_signals": sub_signals,
         "indicators": indicators,
     }

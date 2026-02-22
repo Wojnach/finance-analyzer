@@ -21,6 +21,8 @@ from typing import Any, Dict
 import numpy as np
 import pandas as pd
 
+from portfolio.signal_utils import majority_vote
+
 logger = logging.getLogger(__name__)
 
 MIN_ROWS = 50
@@ -296,25 +298,11 @@ def compute_volume_flow_signal(df: pd.DataFrame) -> Dict[str, Any]:
 
         # --- Majority vote ---------------------------------------------
         votes = list(sub_signals.values())
-        buy_count = votes.count("BUY")
-        sell_count = votes.count("SELL")
-        hold_count = votes.count("HOLD")
-        total = len(votes)  # always 6
-
-        if buy_count > sell_count and buy_count > hold_count:
-            action = "BUY"
-            confidence = buy_count / total
-        elif sell_count > buy_count and sell_count > hold_count:
-            action = "SELL"
-            confidence = sell_count / total
-        else:
-            # Tie or HOLD majority -> HOLD
-            action = "HOLD"
-            confidence = hold_count / total
+        action, confidence = majority_vote(votes)
 
         return {
             "action": action,
-            "confidence": round(confidence, 4),
+            "confidence": confidence,
             "sub_signals": sub_signals,
             "indicators": indicators,
         }
