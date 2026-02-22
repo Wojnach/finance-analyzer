@@ -8,8 +8,6 @@ import json
 import threading
 import time
 
-import requests
-
 from portfolio.http_retry import fetch_with_retry
 
 

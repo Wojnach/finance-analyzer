@@ -3,8 +3,6 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import requests
-
 from portfolio.http_retry import fetch_with_retry
 from portfolio.shared_state import _RateLimiter
 

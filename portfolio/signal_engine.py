@@ -51,15 +51,11 @@ def _set_prev_sentiment(ticker, direction):
     _prev_sentiment[ticker] = direction
     # Persist to trigger_state.json alongside other trigger state
     try:
+        from portfolio.file_utils import atomic_write_json
         ts_file = DATA_DIR / "trigger_state.json"
         ts = json.loads(ts_file.read_text(encoding="utf-8")) if ts_file.exists() else {}
         ts["prev_sentiment"] = _prev_sentiment
-        import tempfile as _tmp, os as _os
-
-        fd, tmp = _tmp.mkstemp(dir=ts_file.parent, suffix=".tmp")
-        with _os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(ts, f, indent=2, default=str)
-        _os.replace(tmp, ts_file)
+        atomic_write_json(ts_file, ts)
     except Exception:
         pass
 

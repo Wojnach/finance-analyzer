@@ -1,10 +1,9 @@
 import json
-import os
-import tempfile
 import time
 from collections import defaultdict
 from pathlib import Path
 
+from portfolio.file_utils import atomic_write_json as _atomic_write_json
 from portfolio.tickers import SIGNAL_NAMES
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -13,23 +12,6 @@ SIGNAL_LOG = DATA_DIR / "signal_log.jsonl"
 ACCURACY_CACHE_FILE = DATA_DIR / "accuracy_cache.json"
 ACCURACY_CACHE_TTL = 3600
 HORIZONS = ["1d", "3d", "5d", "10d"]
-
-
-def _atomic_write_json(path, data):
-    """Write JSON atomically using tempfile + os.replace to prevent corruption on crash."""
-    path = Path(path)
-    path.parent.mkdir(exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, default=str)
-        os.replace(tmp, str(path))
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
 
 
 def load_entries():

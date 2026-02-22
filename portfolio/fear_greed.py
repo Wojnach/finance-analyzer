@@ -1,4 +1,3 @@
-import requests
 from datetime import datetime, timezone
 
 from portfolio.http_retry import fetch_with_retry
