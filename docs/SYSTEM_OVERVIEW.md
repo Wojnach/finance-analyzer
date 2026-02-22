@@ -30,7 +30,7 @@ Two-layer system: Python fast loop (Layer 1) collects data every 60s, computes 2
 | `http_retry.py` | ~70 | Exponential backoff, max 5 retries, no retry on 4xx |
 | `circuit_breaker.py` | 91 | CLOSED/OPEN/HALF_OPEN per data source (Binance, Alpaca) |
 | `fx_rates.py` | ~60 | USD/SEK via ECB, cached 1hr |
-| `api_utils.py` | ~100 | Config loading, Alpaca header helper |
+| `api_utils.py` | ~100 | Config loading, Alpaca headers, canonical API URLs |
 | `config_validator.py` | ~76 | Startup config.json validation |
 | `tickers.py` | 113 | Single source of truth: SYMBOLS dict → all derived mappings |
 
@@ -106,7 +106,18 @@ Binance/Alpaca/yfinance APIs
 
 ## Recent Improvements (Feb 22)
 
-### Phase 2 (current session)
+### Phase 3 (latest session)
+- **Bug fix**: Consolidated 3 independent `_yfinance_limiter` instances → single shared instance in `shared_state.py`. macro_context.py and outcome_tracker.py now import instead of creating their own (was allowing 90 req/min instead of 30).
+- **Bug fix**: `_crash_alert()` in main.py now opens config.json with `encoding="utf-8"` (prevented crash-handler crash on Windows).
+- **Performance**: `best_worst_signals()` accepts pre-computed accuracy data; `reporting.py` passes it to avoid redundant full-log scan.
+- **Deduplication**: Extracted `load_json()`, `load_jsonl()`, `atomic_append_jsonl()` to `file_utils.py`. Updated 7 modules (kelly_sizing, regime_alerts, stats, weekly_digest, dashboard/app) to delegate to shared helpers (~230 lines removed).
+- **Deduplication**: Centralized `BINANCE_BASE`, `BINANCE_FAPI_BASE`, `ALPACA_BASE` in `api_utils.py`. Updated 7 modules (data_collector, iskbets, ml_signal, funding_rate, data_refresh, outcome_tracker, macro_context) to import from canonical source.
+- **Performance**: `_write_compact_summary()` in reporting.py uses selective dict comprehensions instead of `copy.deepcopy(summary)` — avoids copying entire 30+ ticker × 7 timeframe dict.
+- **Robustness**: `agent_invocation._log_trigger()` uses `atomic_append_jsonl()` instead of raw `open("a")` append.
+- **Cleanup**: Removed unused `import sys` from analyze.py, unused `import copy` from reporting.py.
+- **Tests**: Added 21 tests for `load_json`, `load_jsonl`, `atomic_append_jsonl` (1164 total passing).
+
+### Phase 2 (prior session)
 - **Thread-safety**: `collect_timeframes()` cache reads/writes now use `_cache_lock`
 - **Performance**: `backfill_outcomes()` opens SignalDB once instead of per-outcome
 - **Performance**: `write_agent_summary()` uses cached accuracy stats (avoids redundant log scans)
@@ -116,7 +127,7 @@ Binance/Alpaca/yfinance APIs
 - **Cleanup**: Removed redundant `sys.path.insert` calls from dashboard endpoints
 - **Performance**: health.py reads last 4KB of invocations.jsonl instead of full scan
 
-### Phase 1 (prior session)
+### Phase 1 (initial session)
 - Extracted `signal_utils.py` with 8 shared helpers from 10+ signal modules (~230 lines removed)
 - Added error logging to 5 bare `except: pass` blocks in signal_engine.py
 - Added threading lock to shared_state.py cache eviction
@@ -129,6 +140,7 @@ Binance/Alpaca/yfinance APIs
 1. **architecture-plan.md**: Still references "Custom LoRA" as signal #11 but it's disabled
 2. **outcome_tracker._derive_signal_vote**: Duplicates signal logic for legacy entries (documented, no fix needed)
 3. **Enhanced signal coverage**: 10/14 enhanced signal modules lack dedicated unit tests
+4. **backfill_outcomes()**: Still loads entire JSONL into memory for read-modify-write. Future: migrate to SQLite-only reads.
 
 ## LoRA Status (assessed Feb 22)
 
@@ -154,7 +166,7 @@ For comparison, the best signals are: funding (96.4%), fear_greed (67.7%), ML cl
 
 ## Test Coverage
 
-**1101 tests passing** (15 integration tests deselected: ta_base_strategy import).
+**1164 tests passing** (15 integration tests deselected: ta_base_strategy import).
 
 ### Well-covered modules
 - signal_utils.py, signal_engine.py, accuracy_stats.py, risk_management.py, kelly_sizing.py
