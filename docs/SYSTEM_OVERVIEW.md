@@ -122,13 +122,27 @@ Binance/Alpaca/yfinance APIs
 4. **Dashboard**: No Layer 2 decision history view
 5. **Big bet cooldown**: 4h is too long for a mean-reversion alert system
 
-## LoRA Status
+## LoRA Status (assessed Feb 22)
 
-**Custom LoRA:** Disabled (20.9% accuracy, 97% SELL bias — worse than random). Shadow A/B test data preserved in `data/ab_test_log.jsonl`.
+### Accuracy Data (1,743 A/B entries, Feb 12-20)
 
-**CryptoTrader-LM LoRA (Original):** Still active via `ministral_signal.py`. Calls Ministral-8B with the original CryptoTrader-LM LoRA adapter for crypto-only BUY/SELL/HOLD signals. Accuracy: ~58% (Ministral base) — LoRA-specific accuracy not yet broken out separately.
+| Model | 1d Accuracy | Action Distribution | Status |
+|-------|-------------|---------------------|--------|
+| **CryptoTrader-LM LoRA** | 44.0% (1,632 samples) | 62% SELL, 29% HOLD, 9% BUY | Active but underperforming |
+| **Custom LoRA** | 20.9% (disabled) | 77% SELL, 15% BUY, 8% HOLD | Disabled Feb 20 |
+| Agreement rate | 60.4% | Both heavily SELL-biased | — |
 
-**Recommendation:** The original LoRA needs accuracy tracking separate from base Ministral to determine if the adapter actually helps. If base Ministral without LoRA is equivalent or better, the LoRA should be disabled too.
+### Analysis
+
+Both LoRA adapters have a severe SELL bias. The original CryptoTrader-LM LoRA at **44% accuracy is worse than a coin flip** — it's anti-predictive. At 3d horizon it drops to 40.4%. The model outputs SELL 62% of the time regardless of market conditions.
+
+For comparison, the best signals are: funding (96.4%), fear_greed (67.7%), ML classifier (66.2%), calendar (64.4%). The LoRA is the 4th worst signal overall.
+
+### Recommendation
+
+1. **Short-term:** Consider disabling the original LoRA too, or inverting its signal (if it says SELL, treat as weak BUY evidence)
+2. **Medium-term:** Run base Ministral without any LoRA adapter to establish a baseline — the LoRA may be making the base model worse
+3. **Long-term:** If retraining, need a much more balanced training set (current training data is likely SELL-heavy, producing SELL-biased outputs)
 
 ## Test Coverage
 
