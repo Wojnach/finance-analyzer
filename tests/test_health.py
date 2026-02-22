@@ -287,7 +287,8 @@ class TestGetHealthSummary:
 
 class TestCheckAgentSilence:
     def test_silent_when_no_invocations_file(self, tmp_path):
-        with patch("portfolio.health.DATA_DIR", tmp_path):
+        with patch("portfolio.health.DATA_DIR", tmp_path), \
+             patch("portfolio.health.HEALTH_FILE", tmp_path / "health_state.json"):
             result = check_agent_silence()
         assert result["silent"] is True
         assert result["age_seconds"] == float("inf")
@@ -299,7 +300,8 @@ class TestCheckAgentSilence:
             json.dumps({"ts": now, "reasons": ["test"], "status": "invoked"}) + "\n",
             encoding="utf-8",
         )
-        with patch("portfolio.health.DATA_DIR", tmp_path):
+        with patch("portfolio.health.DATA_DIR", tmp_path), \
+             patch("portfolio.health.HEALTH_FILE", tmp_path / "health_state.json"):
             result = check_agent_silence()
         assert result["silent"] is False
         assert result["age_seconds"] < 5
@@ -312,7 +314,8 @@ class TestCheckAgentSilence:
             encoding="utf-8",
         )
         # Use short thresholds so 3h old invocation triggers silence regardless of market state
-        with patch("portfolio.health.DATA_DIR", tmp_path):
+        with patch("portfolio.health.DATA_DIR", tmp_path), \
+             patch("portfolio.health.HEALTH_FILE", tmp_path / "health_state.json"):
             result = check_agent_silence(max_market_seconds=3600, max_offhours_seconds=3600)
         assert result["silent"] is True
         assert result["age_seconds"] > 3600
