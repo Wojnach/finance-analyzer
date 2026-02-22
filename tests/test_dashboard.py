@@ -455,10 +455,17 @@ class TestApiHealth:
 
 
 class TestApiValidatePortfolio:
+    """Tests for /api/validate-portfolio endpoint.
+
+    Uses portfolio_validator.validate_portfolio() which performs comprehensive
+    checks including cash, holdings, fees, and transaction field completeness.
+    """
+
     def test_valid_portfolio_no_trades(self, client):
         portfolio = {
             "cash_sek": 500000,
             "initial_value_sek": 500000,
+            "total_fees_sek": 0,
             "holdings": {},
             "transactions": [],
         }
@@ -476,16 +483,20 @@ class TestApiValidatePortfolio:
         portfolio = {
             "cash_sek": 425000,
             "initial_value_sek": 500000,
+            "total_fees_sek": 37.5,
             "holdings": {
                 "BTC-USD": {"shares": 0.1, "avg_cost_usd": 65000}
             },
             "transactions": [
                 {
+                    "timestamp": "2026-02-20T12:00:00+00:00",
                     "action": "BUY",
                     "ticker": "BTC-USD",
                     "shares": 0.1,
+                    "price_usd": 65000,
                     "total_sek": 75000,
                     "fee_sek": 37.5,
+                    "reason": "Test buy",
                 }
             ],
         }
@@ -502,6 +513,7 @@ class TestApiValidatePortfolio:
         portfolio = {
             "cash_sek": -100,
             "initial_value_sek": 500000,
+            "total_fees_sek": 0,
             "holdings": {},
             "transactions": [],
         }
@@ -513,15 +525,25 @@ class TestApiValidatePortfolio:
             )
         data = resp.get_json()
         assert data["valid"] is False
-        assert any("negative" in e for e in data["errors"])
+        assert any("negative" in e.lower() for e in data["errors"])
 
     def test_cash_mismatch_detected(self, client):
         portfolio = {
             "cash_sek": 500000,  # should be 425000 after a 75K buy
             "initial_value_sek": 500000,
-            "holdings": {"BTC-USD": {"shares": 0.1}},
+            "total_fees_sek": 37.5,
+            "holdings": {"BTC-USD": {"shares": 0.1, "avg_cost_usd": 65000}},
             "transactions": [
-                {"action": "BUY", "ticker": "BTC-USD", "shares": 0.1, "total_sek": 75000, "fee_sek": 37.5}
+                {
+                    "timestamp": "2026-02-20T12:00:00+00:00",
+                    "action": "BUY",
+                    "ticker": "BTC-USD",
+                    "shares": 0.1,
+                    "price_usd": 65000,
+                    "total_sek": 75000,
+                    "fee_sek": 37.5,
+                    "reason": "Test buy",
+                }
             ],
         }
         with _no_auth():
@@ -532,15 +554,25 @@ class TestApiValidatePortfolio:
             )
         data = resp.get_json()
         assert data["valid"] is False
-        assert any("Cash mismatch" in e for e in data["errors"])
+        assert any("cash" in e.lower() for e in data["errors"])
 
     def test_holdings_mismatch_detected(self, client):
         portfolio = {
             "cash_sek": 425000,
             "initial_value_sek": 500000,
-            "holdings": {"BTC-USD": {"shares": 0.5}},  # should be 0.1
+            "total_fees_sek": 37.5,
+            "holdings": {"BTC-USD": {"shares": 0.5, "avg_cost_usd": 65000}},  # should be 0.1
             "transactions": [
-                {"action": "BUY", "ticker": "BTC-USD", "shares": 0.1, "total_sek": 75000, "fee_sek": 37.5}
+                {
+                    "timestamp": "2026-02-20T12:00:00+00:00",
+                    "action": "BUY",
+                    "ticker": "BTC-USD",
+                    "shares": 0.1,
+                    "price_usd": 65000,
+                    "total_sek": 75000,
+                    "fee_sek": 37.5,
+                    "reason": "Test buy",
+                }
             ],
         }
         with _no_auth():
@@ -551,7 +583,7 @@ class TestApiValidatePortfolio:
             )
         data = resp.get_json()
         assert data["valid"] is False
-        assert any("Holdings mismatch" in e for e in data["errors"])
+        assert any("mismatch" in e.lower() for e in data["errors"])
 
     def test_no_json_body(self, client):
         with _no_auth():
@@ -562,12 +594,12 @@ class TestApiValidatePortfolio:
         with _no_auth():
             resp = client.post(
                 "/api/validate-portfolio",
-                data=json.dumps({"holdings": {}, "transactions": []}),
+                data=json.dumps({"holdings": {}, "transactions": [], "total_fees_sek": 0}),
                 content_type="application/json",
             )
         data = resp.get_json()
         assert data["valid"] is False
-        assert any("Missing cash_sek" in e for e in data["errors"])
+        assert any("cash_sek" in e for e in data["errors"])
 
 
 # ---------------------------------------------------------------------------
