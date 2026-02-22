@@ -1,6 +1,6 @@
 # System Overview — Portfolio Intelligence Trading Agent
 
-> Generated: 2026-02-22 | Auto-improvement session
+> Updated: 2026-02-22 | Auto-improvement session (Phase 2)
 > See also: `docs/system-design.md` (detailed reference), `docs/architecture-plan.md` (canonical architecture)
 
 ## Architecture
@@ -39,8 +39,9 @@ Two-layer system: Python fast loop (Layer 1) collects data every 60s, computes 2
 |--------|-------|---------|
 | `signal_engine.py` | 564 | 25-signal voting, weighted consensus, sentiment hysteresis |
 | `signal_registry.py` | 113 | Plugin-style registration for enhanced signal modules |
+| `signal_utils.py` | 94 | Shared helpers: sma, ema, rsi, true_range, safe_float, rma, wma, roc |
 | `indicators.py` | 140 | RSI, MACD, EMA, BB, ATR, regime detection |
-| `signals/*.py` (14) | ~2500 | Enhanced composite signals (trend, momentum, etc.) |
+| `signals/*.py` (14) | ~6700 | Enhanced composite signals (trend, momentum, etc.) |
 | `fear_greed.py` | ~60 | alternative.me API for crypto F&G |
 | `sentiment.py` | 268 | CryptoBERT + Trading-Hero-LLM inference |
 | `ministral_signal.py` | ~100 | Ministral-8B + LoRA wrapper |
@@ -103,12 +104,41 @@ Binance/Alpaca/yfinance APIs
     → Layer 2 reads agent_summary.json, decides, edits portfolio, sends Telegram
 ```
 
-## Key Discrepancies Found vs Existing Docs
+## Recent Improvements (Feb 22)
 
-1. ~~**system-design.md line 843**: Says "test_digest.py — 0 tests"~~ **FIXED** — corrected to reflect actual tests
-2. ~~**system-design.md line 845**: Says "Trigger system — No unit tests"~~ **FIXED** — corrected to reflect 40+ tests
-3. **architecture-plan.md**: Still references "Custom LoRA" as signal #11 but it's disabled
-4. ~~**system-design.md line 756**: Says "no proactive health monitoring"~~ **FIXED** — corrected to describe `health.py`
-5. ~~**accuracy_stats.py**: Local `_atomic_write_json`~~ **FIXED** — now uses shared `file_utils`
-6. ~~**signal_engine.py**: Inline atomic write~~ **FIXED** — now uses shared `file_utils`
-7. **outcome_tracker.py line 354**: Inline mkstemp for JSONL (intentionally kept — different format from JSON)
+### Phase 1 (prior session)
+- Extracted `signal_utils.py` with 8 shared helpers from 10+ signal modules (~230 lines removed)
+- Added error logging to 5 bare `except: pass` blocks in signal_engine.py
+- Added threading lock to shared_state.py cache eviction
+- Fixed MACD edge case in bigbet.py (missing macd_hist_prev)
+- Fixed technical_signal() thresholds in indicators.py (RSI 30/70, EMA deadband)
+- Streaming reads in journal.py, cached invocation time in health.py, ATR caching in iskbets.py
+- Added 142 new tests (933 → 1075): signal_utils, risk_management, kelly_sizing, equity_curve
+
+### Known Issues
+1. **architecture-plan.md**: Still references "Custom LoRA" as signal #11 but it's disabled
+2. **Confidence inconsistency**: mean_reversion/momentum_factors use active voters, others use total signals
+3. **Division by zero**: macro_regime.py:93 and fibonacci.py `_near_level()` lack zero guards
+4. **Dashboard**: No Layer 2 decision history view
+5. **Big bet cooldown**: 4h is too long for a mean-reversion alert system
+
+## LoRA Status
+
+**Custom LoRA:** Disabled (20.9% accuracy, 97% SELL bias — worse than random). Shadow A/B test data preserved in `data/ab_test_log.jsonl`.
+
+**CryptoTrader-LM LoRA (Original):** Still active via `ministral_signal.py`. Calls Ministral-8B with the original CryptoTrader-LM LoRA adapter for crypto-only BUY/SELL/HOLD signals. Accuracy: ~58% (Ministral base) — LoRA-specific accuracy not yet broken out separately.
+
+**Recommendation:** The original LoRA needs accuracy tracking separate from base Ministral to determine if the adapter actually helps. If base Ministral without LoRA is equivalent or better, the LoRA should be disabled too.
+
+## Test Coverage
+
+**1075 tests passing** (1 known timeout: `test_full_report` subprocess integration test).
+
+### Well-covered modules
+- signal_utils.py, signal_engine.py, accuracy_stats.py, risk_management.py, kelly_sizing.py
+- equity_curve.py, portfolio_mgr.py, http_retry.py, trigger.py, file_utils.py, signal_registry.py
+
+### Coverage gaps (no dedicated tests)
+- 10/14 enhanced signal modules (trend, momentum, volume_flow, volatility, candlestick, structure, fibonacci, smart_money, oscillators, heikin_ashi)
+- dashboard/app.py (48 tests in test_dashboard.py but no sub-indicator edge cases)
+- bigbet.py, iskbets.py, journal.py context formatting

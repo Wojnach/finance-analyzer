@@ -1,57 +1,91 @@
-# Improvement Plan — Auto Session 2026-02-22
+# Improvement Plan — Auto Session 2026-02-22 (Phase 2)
 
-## Priority 1: Bugs & Consistency Issues
+> Previous session: extracted signal_utils.py, added error logging, cache thread-safety,
+> performance improvements, 142 new tests (933 → 1075). This plan covers remaining work.
 
-### B1. Remaining inline atomic writes (3 files) -- DONE
-**Files:** `signal_engine.py:57-62`, `accuracy_stats.py:18-32`, `outcome_tracker.py:354`
-**Fix:** Replaced signal_engine and accuracy_stats with `from portfolio.file_utils import atomic_write_json`. outcome_tracker kept as-is (JSONL format, different pattern).
+## Priority 1: Bug Fixes
 
-### B2. `data_refresh.py` uses raw `requests.get` -- DONE
-**Fix:** Replaced with `fetch_with_retry`.
+### B1. Division by zero — macro_regime.py
+**File:** `portfolio/signals/macro_regime.py:93`
+**Bug:** `pct_diff = (current_close - sma_val) / sma_val` — no guard for `sma_val == 0`
+**Fix:** Add `if sma_val == 0: return "HOLD", {}` before the division
+**Impact:** Low risk, isolated to one sub-indicator in macro_regime
 
-### B3. Stale doc claims in system-design.md -- DONE
-**Fix:** Corrected test_digest.py claim, trigger system claim, and health monitoring claim.
+### B2. Division by zero — fibonacci.py
+**File:** `portfolio/signals/fibonacci.py` — `_near_level()` function
+**Bug:** `abs(price - level) / abs(level)` — ZeroDivisionError when `level == 0`
+**Fix:** Add `if level == 0: return False` guard
+**Impact:** Low risk, isolated helper function
 
-## Priority 2: Dead Code Removal
+### B3. Confidence calculation inconsistency across signal modules
+**Bug:** mean_reversion.py and momentum_factors.py calculate confidence as `winner / active_voters` (excludes HOLD), while trend.py, momentum.py, oscillators.py etc. use `winner / total` (includes HOLD). Same vote pattern → different confidence values.
+**Fix:** Extract `majority_vote()` to `signal_utils.py` and standardize on excluding HOLD (active voters as denominator) — matches how consensus is calculated in signal_engine.
+**Files:** 10 signal modules + signal_utils.py
+**Impact:** Medium — changes confidence values reported by enhanced signals. Does not change BUY/SELL/HOLD decisions, only the confidence number.
 
-### D1. Remove never-imported modules -- PARTIALLY DONE
-**Deleted:** `collect.py`, `avanza_watch.py` (confirmed zero imports).
-**Kept:** `stats.py` (used by `digest.py` via lazy import), `social_sentiment.py` (used by `signal_engine.py` via lazy import). Initial grep missed these because they're inside function bodies.
+## Priority 2: User-Requested Features
 
-### D2. Remove stale data/ Python files -- N/A
-Files don't exist in worktree (already cleaned up or runtime-only artifacts).
+### F1. Big bet cooldown: 4h → 10min + stale notifications
+**File:** `portfolio/bigbet.py`
+**Current:** `cooldown_hours` defaults to 4 in config.json and bigbet.py
+**Changes:**
+1. Change default cooldown from 4h to 10min (0.167h or use `cooldown_minutes` key)
+2. Track when a big bet condition set becomes active (window opens)
+3. Send notification when conditions are no longer met (window closes / bet goes stale)
+4. State tracking: store active conditions per ticker, compare each cycle
+**Impact:** bigbet.py only, config.json default change. No other modules affected.
 
-## Priority 3: Architecture Improvements
+### F2. Dashboard: Layer 2 decisions history with filtering
+**Files:** `dashboard/app.py`, `dashboard/static/index.html` (or new JS)
+**Current:** Dashboard has no Layer 2 decision view. Journal entries (`layer2_journal.jsonl`) contain all decisions but aren't exposed.
+**Changes:**
+1. New API endpoint: `GET /api/decisions?limit=50&ticker=BTC-USD&action=BUY`
+2. Reads `layer2_journal.jsonl`, supports filtering by ticker, action, date range
+3. Frontend: scrollable log table with filter dropdowns
+**Impact:** Dashboard only, read-only, no risk to core system.
 
-### A1. Consolidate atomic writes -- DONE (part of B1)
+### F3. LoRA accuracy assessment
+**Action:** Research only — check accuracy data for LoRA vs base Ministral.
+**Current state:** Custom LoRA disabled (20.9% accuracy, 97% SELL bias). Original CryptoTrader-LM LoRA still active via ministral_signal.py.
+**Files to check:** accuracy data via `--accuracy`, `data/ab_test_log.jsonl`
+**Deliverable:** Summary of LoRA vs Ministral accuracy in SYSTEM_OVERVIEW.md. Recommendation for next steps.
 
-### A2. signal_engine._set_prev_sentiment -- DONE
-Now uses `file_utils.atomic_write_json`.
+## Priority 3: Code Quality
 
-### A3. Unused `requests` imports -- DONE
-Removed from: `funding_rate.py`, `fear_greed.py`, `macro_context.py`, `outcome_tracker.py`, `telegram_poller.py`.
+### Q1. Extract majority_vote to signal_utils.py
+**Part of B3** — standardize and deduplicate voting logic across 10 modules.
+**Estimated savings:** ~150 lines of duplication removed.
 
-## Priority 4: Test Improvements
+### Q2. Dashboard _read_jsonl loads entire file
+**File:** `dashboard/app.py:26-37`
+**Bug:** `path.read_text().splitlines()` loads entire JSONL into memory (same issue fixed in journal.py).
+**Fix:** Stream line-by-line, collect only the last N entries using a deque.
+**Impact:** Dashboard only, performance improvement for large log files.
 
-### T1. Add tests for new modules -- DONE
-- `tests/test_file_utils.py` — 14 tests
-- `tests/test_signal_registry.py` — 17 tests
+## Execution Order
 
-### T2. Verify test stability -- DONE
-933 tests passing. No flaky tests identified.
+### Batch 1: Bug fixes (B1, B2)
+- Fix division by zero in macro_regime.py and fibonacci.py
+- Add tests for the edge cases
+- Files: macro_regime.py, fibonacci.py, test_signals_macro_regime.py, test_signal_utils.py
 
-## Bug Found During Testing
+### Batch 2: Majority vote extraction + confidence fix (B3, Q1)
+- Add `majority_vote()` to signal_utils.py
+- Update 10 signal modules to use it
+- Standardize confidence calculation
+- Files: signal_utils.py, 10 signal modules, test_signal_utils.py
 
-### file_utils.py mkdir missing parents=True -- FIXED
-`atomic_write_json` used `path.parent.mkdir(exist_ok=True)` which fails for nested dirs. Fixed to `mkdir(parents=True, exist_ok=True)`. Discovered by test_creates_parent_dirs.
+### Batch 3: Big bet improvements (F1)
+- Change cooldown to 10min default
+- Add stale bet tracking and notifications
+- Files: bigbet.py, tests/test_bigbet.py
 
-## Final Results
+### Batch 4: Dashboard decisions endpoint (F2, Q2)
+- Add /api/decisions endpoint with filtering
+- Fix _read_jsonl streaming
+- Add frontend decisions panel
+- Files: dashboard/app.py, dashboard/static/
 
-| Metric | Before | After |
-|--------|--------|-------|
-| Tests passing | 902 | 933 (+31) |
-| Dead imports removed | 0 | 6 (`requests` from 5 files + data_refresh converted) |
-| Dead modules removed | 0 | 2 (collect.py, avanza_watch.py) |
-| Inline atomic writes | 3 | 1 (outcome_tracker JSONL intentionally kept) |
-| Bugs fixed | 0 | 1 (file_utils mkdir parents) |
-| Doc errors fixed | 0 | 3 (system-design.md) |
+### Batch 5: LoRA assessment (F3)
+- Run accuracy report, analyze data
+- Document findings in SYSTEM_OVERVIEW.md
