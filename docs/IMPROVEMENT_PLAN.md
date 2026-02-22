@@ -1,91 +1,136 @@
-# Improvement Plan — Auto Session 2026-02-22 (Phase 2)
+# Improvement Plan — Auto Session 2026-02-22 (Fresh)
 
-> Previous session: extracted signal_utils.py, added error logging, cache thread-safety,
-> performance improvements, 142 new tests (933 → 1075). This plan covers remaining work.
+> Based on deep reading of all ~90 Python files, 1101 passing tests.
+> Prior session completed: signal_utils extraction, div-by-zero fixes,
+> bigbet cooldown, dashboard decisions, LoRA assessment. This plan covers NEW work.
 
-## Priority 1: Bug Fixes
+## Priority 1: Bugs & Correctness Issues
 
-### B1. Division by zero — macro_regime.py
-**File:** `portfolio/signals/macro_regime.py:93`
-**Bug:** `pct_diff = (current_close - sma_val) / sma_val` — no guard for `sma_val == 0`
-**Fix:** Add `if sma_val == 0: return "HOLD", {}` before the division
-**Impact:** Low risk, isolated to one sub-indicator in macro_regime
+### B1. `collect_timeframes` cache writes are not thread-safe
+**File:** `portfolio/data_collector.py:273-290`
+**Bug:** Direct `_ss._tool_cache[cache_key] = ...` writes bypass the
+`_cache_lock` in `shared_state.py`. The `_cached()` helper properly
+locks, but `collect_timeframes()` manages its own cache entries directly.
+If the TelegramPoller thread or any future concurrent path touches
+the same cache dict, this is a data race.
+**Fix:** Use `_cached()` helper or wrap direct writes with `_cache_lock`.
+**Impact:** Low probability today (single main thread writes), but a
+latent race condition waiting to happen. Low risk fix.
 
-### B2. Division by zero — fibonacci.py
-**File:** `portfolio/signals/fibonacci.py` — `_near_level()` function
-**Bug:** `abs(price - level) / abs(level)` — ZeroDivisionError when `level == 0`
-**Fix:** Add `if level == 0: return False` guard
-**Impact:** Low risk, isolated helper function
+### B2. `outcome_tracker.backfill_outcomes` opens SignalDB per-outcome
+**File:** `portfolio/outcome_tracker.py:336-344`
+**Bug:** Inside a tight loop over every ticker and every horizon,
+the code does `_db = SignalDB(); _db.update_outcome(...); _db.close()`.
+This opens and closes the SQLite connection for EVERY outcome write.
+For 31 tickers × 4 horizons × N entries, that's thousands of open/close
+cycles. Each `close()` forces a WAL checkpoint.
+**Fix:** Open SignalDB once before the loop, use it for all writes,
+close once after. Same pattern for the `log_signal_snapshot` function
+at line 147-152.
+**Impact:** Performance improvement for `--check-outcomes`. No logic change.
 
-### B3. Confidence calculation inconsistency across signal modules
-**Bug:** mean_reversion.py and momentum_factors.py calculate confidence as `winner / active_voters` (excludes HOLD), while trend.py, momentum.py, oscillators.py etc. use `winner / total` (includes HOLD). Same vote pattern → different confidence values.
-**Fix:** Extract `majority_vote()` to `signal_utils.py` and standardize on excluding HOLD (active voters as denominator) — matches how consensus is calculated in signal_engine.
-**Files:** 10 signal modules + signal_utils.py
-**Impact:** Medium — changes confidence values reported by enhanced signals. Does not change BUY/SELL/HOLD decisions, only the confidence number.
+### B3. `accuracy_stats.signal_accuracy` reloads ALL entries on every call
+**File:** `portfolio/accuracy_stats.py:50-84`
+**Bug:** `signal_accuracy()` calls `load_entries()` which reads the
+full signal log from SQLite or JSONL every time. This function is
+called multiple times per cycle: once in `signal_engine.py` (via
+`load_cached_accuracy`), once in `reporting.py` (for agent_summary),
+and once in `print_accuracy_report()`. The cache in `load_cached_accuracy`
+helps for the first case, but `write_agent_summary` calls `signal_accuracy`
+directly (line 152), bypassing the cache.
+**Fix:** Have `write_agent_summary` use `load_cached_accuracy` too.
+**Impact:** Performance — avoids redundant full-log scans. No logic change.
 
-## Priority 2: User-Requested Features
+### B4. `health.check_agent_silence` scans entire invocations.jsonl
+**File:** `portfolio/health.py:77-93`
+**Bug:** When `last_invocation_ts` is not in health_state, the fallback
+reads the entire `invocations.jsonl` line by line to find the last
+timestamp. This file only grows over time. The fallback iterates
+forward and keeps overwriting `last_ts` — it should read from the end.
+**Fix:** Read the last non-empty line (seek to end, scan backward).
+Or better, ensure `last_invocation_ts` is always written so the
+fallback never triggers.
+**Impact:** Low — the cached path works. But the fallback is O(n).
 
-### F1. Big bet cooldown: 4h → 10min + stale notifications
-**File:** `portfolio/bigbet.py`
-**Current:** `cooldown_hours` defaults to 4 in config.json and bigbet.py
-**Changes:**
-1. Change default cooldown from 4h to 10min (0.167h or use `cooldown_minutes` key)
-2. Track when a big bet condition set becomes active (window opens)
-3. Send notification when conditions are no longer met (window closes / bet goes stale)
-4. State tracking: store active conditions per ticker, compare each cycle
-**Impact:** bigbet.py only, config.json default change. No other modules affected.
+### B5. `telegram_poller._poll_loop` uses `print()` instead of logger
+**File:** `portfolio/telegram_poller.py:40,126,128`
+**Bug:** The poller thread uses `print()` for error output, bypassing
+the structured logging system. These messages go to stdout only and
+are invisible in the rotating log files.
+**Fix:** Replace `print()` with `logger.warning()`.
+**Impact:** Trivial fix, improves debuggability.
 
-### F2. Dashboard: Layer 2 decisions history with filtering
-**Files:** `dashboard/app.py`, `dashboard/static/index.html` (or new JS)
-**Current:** Dashboard has no Layer 2 decision view. Journal entries (`layer2_journal.jsonl`) contain all decisions but aren't exposed.
-**Changes:**
-1. New API endpoint: `GET /api/decisions?limit=50&ticker=BTC-USD&action=BUY`
-2. Reads `layer2_journal.jsonl`, supports filtering by ticker, action, date range
-3. Frontend: scrollable log table with filter dropdowns
-**Impact:** Dashboard only, read-only, no risk to core system.
+### B6. Dashboard `api_accuracy` does `sys.path.insert` every request
+**File:** `dashboard/app.py:168-170`
+**Bug:** Every call to `/api/accuracy` inserts the project root into
+`sys.path`. This is redundant (it's already there from app startup)
+and modifies global state on every request.
+**Fix:** Remove the `sys.path.insert` calls (same at line 482).
+The imports work without them since the app runs from the project root.
+**Impact:** Trivial cleanup. No behavior change.
 
-### F3. LoRA accuracy assessment
-**Action:** Research only — check accuracy data for LoRA vs base Ministral.
-**Current state:** Custom LoRA disabled (20.9% accuracy, 97% SELL bias). Original CryptoTrader-LM LoRA still active via ministral_signal.py.
-**Files to check:** accuracy data via `--accuracy`, `data/ab_test_log.jsonl`
-**Deliverable:** Summary of LoRA vs Ministral accuracy in SYSTEM_OVERVIEW.md. Recommendation for next steps.
+## Priority 2: Architecture Improvements
+
+### A1. Duplicate kline-fetching code in iskbets.py
+**File:** `portfolio/iskbets.py:125-221`
+**Bug:** `_compute_atr_15m_impl` reimplements Binance spot, Binance FAPI,
+and Alpaca kline fetching — exact duplicates of `data_collector.py`'s
+`binance_klines`, `binance_fapi_klines`, `alpaca_klines`. 100+ lines
+of redundant code. Any fix to data_collector (e.g., error handling,
+header changes) must be duplicated here.
+**Fix:** Replace with calls to `data_collector._fetch_klines()`.
+**Impact:** Medium — reduces duplication by ~100 lines. Must verify
+ATR computation gives same results.
+
+### A2. Duplicate portfolio validation in dashboard vs portfolio_validator
+**File:** `dashboard/app.py:213-305` vs `portfolio/portfolio_validator.py`
+**Bug:** The dashboard's `/api/validate-portfolio` endpoint reimplements
+portfolio validation from scratch (~90 lines), duplicating the logic
+in `portfolio_validator.py` (294 lines, more thorough). The dashboard
+version is less complete (missing fee reconciliation, avg_cost checks).
+**Fix:** Have the dashboard endpoint call `portfolio_validator.validate_portfolio()`.
+**Impact:** Reduces code duplication, dashboard gets more thorough validation.
+
+### A3. Signal vote derivation duplicated in outcome_tracker
+**File:** `portfolio/outcome_tracker.py:25-98`
+**Bug:** `_derive_signal_vote()` reimplements signal logic from
+`signal_engine.py` (RSI thresholds, MACD crossover, EMA deadband, etc.).
+Any change to signal logic must be duplicated here. The function exists
+because older signal log entries didn't store individual votes.
+**Fix:** Since newer entries include `_votes` in extra (line 110-112
+already checks for this), the derivation fallback is for legacy data only.
+Add a comment clarifying this, and consider deprecating for entries
+after a certain date.
+**Impact:** Low risk — adding documentation. No behavior change.
 
 ## Priority 3: Code Quality
 
-### Q1. Extract majority_vote to signal_utils.py
-**Part of B3** — standardize and deduplicate voting logic across 10 modules.
-**Estimated savings:** ~150 lines of duplication removed.
+### Q1. Replace print() with logger in telegram_poller.py
+Part of B5. Trivial.
 
-### Q2. Dashboard _read_jsonl loads entire file
-**File:** `dashboard/app.py:26-37`
-**Bug:** `path.read_text().splitlines()` loads entire JSONL into memory (same issue fixed in journal.py).
-**Fix:** Stream line-by-line, collect only the last N entries using a deque.
-**Impact:** Dashboard only, performance improvement for large log files.
+### Q2. Remove redundant sys.path.insert in dashboard
+Part of B6. Trivial.
+
+### Q3. Add `__all__` exports to key modules
+Several modules export internal functions that tests import by path.
+Adding `__all__` would clarify the public API surface.
+Not urgent — deferring.
 
 ## Execution Order
 
-### Batch 1: Bug fixes (B1, B2)
-- Fix division by zero in macro_regime.py and fibonacci.py
-- Add tests for the edge cases
-- Files: macro_regime.py, fibonacci.py, test_signals_macro_regime.py, test_signal_utils.py
+### Batch 1: Thread-safety & performance fixes (B1, B2, B3)
+Files: data_collector.py, outcome_tracker.py, reporting.py
+- Fix cache writes thread-safety in collect_timeframes
+- Open SignalDB once in backfill loop
+- Use cached accuracy in reporting.py
 
-### Batch 2: Majority vote extraction + confidence fix (B3, Q1)
-- Add `majority_vote()` to signal_utils.py
-- Update 10 signal modules to use it
-- Standardize confidence calculation
-- Files: signal_utils.py, 10 signal modules, test_signal_utils.py
+### Batch 2: Code deduplication (A1, A2)
+Files: iskbets.py, dashboard/app.py
+- Replace kline fetching in iskbets with data_collector calls
+- Replace dashboard validation with portfolio_validator call
 
-### Batch 3: Big bet improvements (F1)
-- Change cooldown to 10min default
-- Add stale bet tracking and notifications
-- Files: bigbet.py, tests/test_bigbet.py
-
-### Batch 4: Dashboard decisions endpoint (F2, Q2)
-- Add /api/decisions endpoint with filtering
-- Fix _read_jsonl streaming
-- Add frontend decisions panel
-- Files: dashboard/app.py, dashboard/static/
-
-### Batch 5: LoRA assessment (F3)
-- Run accuracy report, analyze data
-- Document findings in SYSTEM_OVERVIEW.md
+### Batch 3: Logging & cleanup (B5, B6, B4)
+Files: telegram_poller.py, dashboard/app.py, health.py
+- Replace print() with logger
+- Remove sys.path.insert
+- Optimize health.py fallback (or ensure cached path always works)
