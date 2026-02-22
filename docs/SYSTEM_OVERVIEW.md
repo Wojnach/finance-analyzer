@@ -106,6 +106,16 @@ Binance/Alpaca/yfinance APIs
 
 ## Recent Improvements (Feb 22)
 
+### Phase 2 (current session)
+- **Thread-safety**: `collect_timeframes()` cache reads/writes now use `_cache_lock`
+- **Performance**: `backfill_outcomes()` opens SignalDB once instead of per-outcome
+- **Performance**: `write_agent_summary()` uses cached accuracy stats (avoids redundant log scans)
+- **Deduplication**: iskbets `_compute_atr_15m_impl` now calls `data_collector._fetch_klines()` (-100 lines)
+- **Deduplication**: dashboard `/api/validate-portfolio` delegates to `portfolio_validator` (-70 lines)
+- **Logging**: telegram_poller.py uses structured `logger.warning()` instead of `print()`
+- **Cleanup**: Removed redundant `sys.path.insert` calls from dashboard endpoints
+- **Performance**: health.py reads last 4KB of invocations.jsonl instead of full scan
+
 ### Phase 1 (prior session)
 - Extracted `signal_utils.py` with 8 shared helpers from 10+ signal modules (~230 lines removed)
 - Added error logging to 5 bare `except: pass` blocks in signal_engine.py
@@ -117,10 +127,8 @@ Binance/Alpaca/yfinance APIs
 
 ### Known Issues
 1. **architecture-plan.md**: Still references "Custom LoRA" as signal #11 but it's disabled
-2. **Confidence inconsistency**: mean_reversion/momentum_factors use active voters, others use total signals
-3. **Division by zero**: macro_regime.py:93 and fibonacci.py `_near_level()` lack zero guards
-4. **Dashboard**: No Layer 2 decision history view
-5. **Big bet cooldown**: 4h is too long for a mean-reversion alert system
+2. **outcome_tracker._derive_signal_vote**: Duplicates signal logic for legacy entries (documented, no fix needed)
+3. **Enhanced signal coverage**: 10/14 enhanced signal modules lack dedicated unit tests
 
 ## LoRA Status (assessed Feb 22)
 
@@ -146,7 +154,7 @@ For comparison, the best signals are: funding (96.4%), fear_greed (67.7%), ML cl
 
 ## Test Coverage
 
-**1075 tests passing** (1 known timeout: `test_full_report` subprocess integration test).
+**1101 tests passing** (15 integration tests deselected: ta_base_strategy import).
 
 ### Well-covered modules
 - signal_utils.py, signal_engine.py, accuracy_stats.py, risk_management.py, kelly_sizing.py
