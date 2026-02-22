@@ -302,7 +302,7 @@ def _crash_alert(error_msg):
     """Send Telegram alert on loop crash."""
     try:
         config_path = Path(__file__).resolve().parent.parent / "config.json"
-        config = json.load(open(config_path))
+        config = json.load(open(config_path, encoding="utf-8"))
         token = config.get("telegram", {}).get("token", "")
         chat_id = config.get("telegram", {}).get("chat_id", "")
         if token and chat_id:

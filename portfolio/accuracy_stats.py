@@ -150,8 +150,9 @@ def per_ticker_accuracy(horizon="1d"):
     return result
 
 
-def best_worst_signals(horizon="1d"):
-    acc = signal_accuracy(horizon)
+def best_worst_signals(horizon="1d", acc=None):
+    if acc is None:
+        acc = signal_accuracy(horizon)
     qualified = {k: v for k, v in acc.items() if v["total"] >= 5}
     if not qualified:
         return {"best": None, "worst": None}

@@ -4,11 +4,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from portfolio.http_retry import fetch_with_retry
-from portfolio.shared_state import _RateLimiter
+from portfolio.shared_state import _yfinance_limiter
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-_yfinance_limiter = _RateLimiter(30, "yfinance")
 DATA_DIR = BASE_DIR / "data"
 SIGNAL_LOG = DATA_DIR / "signal_log.jsonl"
 

@@ -6,7 +6,7 @@ import pandas as pd
 
 from portfolio.api_utils import get_alpaca_headers, load_config
 from portfolio.http_retry import fetch_with_retry
-from portfolio.shared_state import _RateLimiter
+from portfolio.shared_state import _yfinance_limiter
 
 BINANCE_BASE = "https://api.binance.com/api/v3"
 ALPACA_BASE = "https://data.alpaca.markets/v2"
@@ -14,8 +14,6 @@ CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 BINANCE_FAPI_BASE = "https://fapi.binance.com/fapi/v1"
 
 from portfolio.tickers import TICKER_SOURCE_MAP as TICKER_MAP
-
-_yfinance_limiter = _RateLimiter(30, "yfinance")
 
 
 def _alpaca_headers():
