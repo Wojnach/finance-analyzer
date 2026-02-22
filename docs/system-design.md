@@ -752,9 +752,10 @@ def _crash_alert(error_msg):
     # Called from loop() except handler
 ```
 
-Loop errors print to stdout only (captured in `loop_out.txt`). There is no
-proactive health monitoring that alerts on silence -- if the loop dies silently,
-it requires manual investigation.
+Loop errors print to stdout only (captured in `loop_out.txt`). Proactive health
+monitoring via `health.py` detects agent silence (`check_agent_silence()`) and
+sends Telegram alerts when the agent hasn't been invoked within expected windows
+(2h market hours, 4h off-hours).
 
 ---
 
@@ -840,9 +841,9 @@ interval check.
 
 | Area | Current State |
 |------|---------------|
-| `test_digest.py` | 0 tests |
+| `test_digest.py` | Has tests (digest formatting, interval logic) |
 | Enhanced signal modules | Untested individually |
-| Trigger system | No unit tests |
+| Trigger system | 40+ tests in `test_trigger_edge_cases.py` |
 
 ### Signal Quality
 

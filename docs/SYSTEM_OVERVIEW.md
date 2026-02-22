@@ -79,13 +79,17 @@ Two-layer system: Python fast loop (Layer 1) collects data every 60s, computes 2
 | `regime_alerts.py` | 258 | Regime change alerts |
 | `telegram_poller.py` | ~100 | Incoming Telegram command handler |
 
-### Likely Dead Code (never imported)
-| Module | Evidence |
+### Removed Dead Code
+| Module | Status |
+|--------|--------|
+| `collect.py` | Deleted — old data collector, confirmed zero imports |
+| `avanza_watch.py` | Deleted — confirmed zero imports |
+
+### Initially Flagged but Active (lazy imports)
+| Module | Used By |
 |--------|---------|
-| `collect.py` | Old data collector, no imports found anywhere |
-| `stats.py` | Unused stats utility, no imports found |
-| `social_sentiment.py` | No imports found |
-| `avanza_watch.py` | No imports found |
+| `stats.py` | `digest.py` — `from portfolio.stats import load_jsonl` (lazy import) |
+| `social_sentiment.py` | `signal_engine.py` — `from portfolio.social_sentiment import get_reddit_posts` (lazy import) |
 
 ## Data Flow
 
@@ -101,10 +105,10 @@ Binance/Alpaca/yfinance APIs
 
 ## Key Discrepancies Found vs Existing Docs
 
-1. **system-design.md line 843**: Says "test_digest.py — 0 tests" but `tests/test_digest.py` exists with tests
-2. **system-design.md line 845**: Says "Trigger system — No unit tests" but `tests/test_trigger_edge_cases.py` has 40+ tests
+1. ~~**system-design.md line 843**: Says "test_digest.py — 0 tests"~~ **FIXED** — corrected to reflect actual tests
+2. ~~**system-design.md line 845**: Says "Trigger system — No unit tests"~~ **FIXED** — corrected to reflect 40+ tests
 3. **architecture-plan.md**: Still references "Custom LoRA" as signal #11 but it's disabled
-4. **system-design.md line 756**: Says "no proactive health monitoring that alerts on silence" but `health.py` has `check_agent_silence()`
-5. **accuracy_stats.py**: Still has local `_atomic_write_json` instead of shared `file_utils`
-6. **signal_engine.py**: Inline tempfile/os atomic write in `_set_prev_sentiment()` instead of `file_utils`
-7. **outcome_tracker.py line 354**: Inline mkstemp instead of `file_utils`
+4. ~~**system-design.md line 756**: Says "no proactive health monitoring"~~ **FIXED** — corrected to describe `health.py`
+5. ~~**accuracy_stats.py**: Local `_atomic_write_json`~~ **FIXED** — now uses shared `file_utils`
+6. ~~**signal_engine.py**: Inline atomic write~~ **FIXED** — now uses shared `file_utils`
+7. **outcome_tracker.py line 354**: Inline mkstemp for JSONL (intentionally kept — different format from JSON)
