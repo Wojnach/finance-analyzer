@@ -24,7 +24,7 @@ STATE_FILE = BASE_DIR / "data" / "trigger_state.json"
 PORTFOLIO_FILE = BASE_DIR / "data" / "portfolio_state.json"
 PORTFOLIO_BOLD_FILE = BASE_DIR / "data" / "portfolio_state_bold.json"
 
-COOLDOWN_SECONDS = 60  # 1 min max silence (market hours)
+COOLDOWN_SECONDS = 600  # 10 min max silence (market hours)
 OFFHOURS_COOLDOWN = 7200  # 2 hours (nights/weekends, crypto only)
 PRICE_THRESHOLD = 0.02  # 2% move
 FG_THRESHOLDS = (20, 80)  # extreme fear / extreme greed boundaries

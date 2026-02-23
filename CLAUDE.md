@@ -23,7 +23,7 @@ Layer 1 runs every minute during market hours. You (Layer 2) are invoked when a 
 - **Price move:** >2% since your last invocation
 - **Fear & Greed:** crossed extreme threshold (20 or 80)
 - **Sentiment reversal:** positive↔negative
-- **Cooldown:** 1-minute max silence (market hours), 2-hour (nights/weekends, crypto only)
+- **Cooldown:** 10-minute max silence (market hours), 2-hour (nights/weekends, crypto only)
 - **Post-trade:** After a BUY or SELL trade, the cooldown resets so you reassess the new state
 
 The trigger reason is included in the invocation context.
