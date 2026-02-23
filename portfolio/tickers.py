@@ -23,7 +23,6 @@ SYMBOLS = {
     "AMZN": {"alpaca": "AMZN"},
     "AAPL": {"alpaca": "AAPL"},
     "AVGO": {"alpaca": "AVGO"},
-    "AI": {"alpaca": "AI"},
     "GRRR": {"alpaca": "GRRR"},
     "IONQ": {"alpaca": "IONQ"},
     "MRVL": {"alpaca": "MRVL"},
@@ -49,7 +48,7 @@ CRYPTO_SYMBOLS = {"BTC-USD", "ETH-USD"}
 METALS_SYMBOLS = {"XAU-USD", "XAG-USD"}
 STOCK_SYMBOLS = {
     "MSTR", "PLTR", "NVDA", "AMD", "BABA", "GOOGL", "AMZN", "AAPL",
-    "AVGO", "AI", "GRRR", "IONQ", "MRVL", "META", "MU", "PONY",
+    "AVGO", "GRRR", "IONQ", "MRVL", "META", "MU", "PONY",
     "RXRX", "SOUN", "SMCI", "TSM", "TTWO", "TEM", "UPST", "VERI",
     "VRT", "QQQ", "LMT",
 }

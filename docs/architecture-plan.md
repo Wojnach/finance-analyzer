@@ -203,7 +203,6 @@ signals get less.
 | AMZN   | Amazon          | NASDAQ   | 21      |
 | AAPL   | Apple           | NASDAQ   | 21      |
 | AVGO   | Broadcom        | NASDAQ   | 21      |
-| AI     | C3.ai           | NYSE     | 21      |
 | GRRR   | Gorilla Tech    | NASDAQ   | 21      |
 | IONQ   | IonQ            | NYSE     | 21      |
 | MRVL   | Marvell         | NASDAQ   | 21      |

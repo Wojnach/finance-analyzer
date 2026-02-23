@@ -60,7 +60,7 @@ class TriggerTestBase:
 ALL_TICKERS = [
     "BTC-USD", "ETH-USD", "XAU-USD", "XAG-USD",
     "MSTR", "PLTR", "NVDA", "AMD", "BABA", "GOOGL",
-    "AMZN", "AAPL", "AVGO", "AI", "GRRR", "IONQ",
+    "AMZN", "AAPL", "AVGO", "GRRR", "IONQ",
     "MRVL", "META", "MU", "PONY", "RXRX", "SOUN",
     "SMCI", "TSM", "TTWO", "TEM", "UPST", "VERI",
     "VRT", "QQQ",
@@ -83,9 +83,9 @@ def _make_prices(tickers=None, base_price=100.0):
 # ---------------------------------------------------------------------------
 
 class TestSimultaneousConsensusChanges(TriggerTestBase):
-    def test_30_tickers_all_flip_to_buy(self):
-        """When all 30 tickers simultaneously reach BUY consensus."""
-        tickers = ALL_TICKERS[:30]
+    def test_all_tickers_flip_to_buy(self):
+        """When all tickers simultaneously reach BUY consensus."""
+        tickers = ALL_TICKERS
         prices = _make_prices(tickers)
 
         # First run: all HOLD (seeds the state)
@@ -99,12 +99,13 @@ class TestSimultaneousConsensusChanges(TriggerTestBase):
         assert triggered
         # Should have a consensus reason for each ticker that flipped
         consensus_reasons = [r for r in reasons if "consensus" in r]
-        assert len(consensus_reasons) == 30
+        assert len(consensus_reasons) == len(tickers)
 
-    def test_30_tickers_mixed_flip(self):
-        """15 tickers flip to BUY, 15 flip to SELL simultaneously."""
-        tickers = ALL_TICKERS[:30]
+    def test_all_tickers_mixed_flip(self):
+        """Half tickers flip to BUY, half flip to SELL simultaneously."""
+        tickers = ALL_TICKERS
         prices = _make_prices(tickers)
+        half = len(tickers) // 2
 
         sigs_hold = _make_signals(tickers, "HOLD")
         check_triggers(sigs_hold, prices, {}, {})
@@ -112,15 +113,15 @@ class TestSimultaneousConsensusChanges(TriggerTestBase):
         # Mix of BUY and SELL
         sigs_mixed = {}
         for i, t in enumerate(tickers):
-            action = "BUY" if i < 15 else "SELL"
+            action = "BUY" if i < half else "SELL"
             sigs_mixed[t] = {"action": action, "confidence": 0.7}
 
         triggered, reasons = check_triggers(sigs_mixed, prices, {}, {})
         assert triggered
         buy_reasons = [r for r in reasons if "BUY" in r]
         sell_reasons = [r for r in reasons if "SELL" in r]
-        assert len(buy_reasons) == 15
-        assert len(sell_reasons) == 15
+        assert len(buy_reasons) == half
+        assert len(sell_reasons) == len(tickers) - half
 
 
 # ---------------------------------------------------------------------------

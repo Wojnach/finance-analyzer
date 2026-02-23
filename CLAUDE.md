@@ -469,7 +469,6 @@ enumerate every HOLD ticker.
 | AMZN    | NASDAQ      | Alpaca (IEX feed)  |
 | AAPL    | NASDAQ      | Alpaca (IEX feed)  |
 | AVGO    | NASDAQ      | Alpaca (IEX feed)  |
-| AI      | NYSE        | Alpaca (IEX feed)  |
 | GRRR    | NASDAQ      | Alpaca (IEX feed)  |
 | IONQ    | NYSE        | Alpaca (IEX feed)  |
 | MRVL    | NASDAQ      | Alpaca (IEX feed)  |

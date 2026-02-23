@@ -18,7 +18,7 @@ TELEGRAM_MAX_LENGTH = 4096
 ALL_TICKERS = [
     "BTC-USD", "ETH-USD", "XAU-USD", "XAG-USD",
     "MSTR", "PLTR", "NVDA", "AMD", "BABA", "GOOGL",
-    "AMZN", "AAPL", "AVGO", "AI", "GRRR", "IONQ",
+    "AMZN", "AAPL", "AVGO", "GRRR", "IONQ",
     "MRVL", "META", "MU", "PONY", "RXRX", "SOUN",
     "SMCI", "TSM", "TTWO", "TEM", "UPST", "VERI",
     "VRT", "QQQ", "LMT",
@@ -217,8 +217,8 @@ class TestTickerLineFormatting:
         assert line.endswith("`")
 
     def test_short_ticker(self):
-        line = format_ticker_line("AI", 28.15, "HOLD", 1, 0, 21)
-        assert "AI" in line
+        line = format_ticker_line("MU", 428.18, "HOLD", 1, 0, 21)
+        assert "MU" in line
 
     def test_ticker_with_hyphen(self):
         """Tickers like BTC-USD should not break Markdown."""
