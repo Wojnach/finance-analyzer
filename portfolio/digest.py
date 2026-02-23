@@ -147,4 +147,4 @@ def _maybe_send_digest(config):
         _set_last_digest_time(time.time())
         logger.info("4h digest sent")
     except Exception as e:
-        logger.warning(f"digest failed: {e}")
+        logger.warning("digest failed: %s", e)

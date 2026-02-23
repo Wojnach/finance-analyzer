@@ -25,10 +25,6 @@ SIGNAL_LOG = DATA_DIR / "signal_log.jsonl"
 JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
 
 
-def _load_json(path):
-    return load_json(path, default={})
-
-
 def _load_jsonl(path, since=None):
     """Load JSONL file, optionally filtering entries since a datetime."""
     entries = load_jsonl(path)
@@ -140,8 +136,8 @@ def generate_weekly_digest():
     week_ago = now - timedelta(days=7)
 
     # Load portfolio states
-    patient_state = _load_json(PATIENT_FILE)
-    bold_state = _load_json(BOLD_FILE)
+    patient_state = load_json(PATIENT_FILE, default={})
+    bold_state = load_json(BOLD_FILE, default={})
     patient = _portfolio_summary(patient_state, "Patient")
     bold = _portfolio_summary(bold_state, "Bold")
 
@@ -273,7 +269,7 @@ def send_digest(msg):
     Returns:
         requests.Response or None on error.
     """
-    config = _load_json(CONFIG_FILE)
+    config = load_json(CONFIG_FILE, default={})
     token = config.get("telegram", {}).get("token")
     chat_id = config.get("telegram", {}).get("chat_id")
 

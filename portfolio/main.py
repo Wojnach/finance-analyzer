@@ -148,7 +148,7 @@ def run(force_report=False, active_symbols=None):
 
     skipped = set(SYMBOLS.keys()) - active
     skip_note = f" (skipped: {', '.join(sorted(skipped))})" if skipped else ""
-    logger.info(f"USD/SEK: {fx_rate:.2f} | market: {market_state}{skip_note}")
+    logger.info("USD/SEK: %.2f | market: %s%s", fx_rate, market_state, skip_note)
 
     signals_ok = 0
     signals_failed = 0
@@ -173,7 +173,7 @@ def run(force_report=False, active_symbols=None):
                 ind = compute_indicators(now_df)
 
             if ind is None:
-                logger.info(f"{name}: insufficient data, skipping")
+                logger.info("%s: insufficient data, skipping", name)
                 signals_failed += 1
                 continue
             price = ind["close"]
@@ -217,26 +217,28 @@ def run(force_report=False, active_symbols=None):
             enh_str = f" | Enh: {' '.join(enh_parts)}" if enh_parts else ""
 
             logger.info(
-                f"{name}: ${price:,.2f} | RSI {ind['rsi']:.0f} | MACD {ind['macd_hist']:+.1f}{extra_str}{enh_str} | {action} ({conf:.0%})"
+                "%s: $%s | RSI %.0f | MACD %+.1f%s%s | %s (%.0f%%)",
+                name, "{:,.2f}".format(price), ind['rsi'], ind['macd_hist'], extra_str, enh_str, action, conf * 100
             )
             signals_ok += 1
 
             for label, entry in tfs[1:]:
                 if "error" in entry:
-                    logger.warning(f"{label}: {entry['error']}")
+                    logger.warning("%s: %s", label, entry['error'])
                 else:
                     ei = entry["indicators"]
                     logger.info(
-                        f"{label}: {entry['action']} {entry['confidence']:.0%} | RSI {ei['rsi']:.0f} | MACD {ei['macd_hist']:+.1f}"
+                        "%s: %s %.0f%% | RSI %.0f | MACD %+.1f",
+                        label, entry['action'], entry['confidence'] * 100, ei['rsi'], ei['macd_hist']
                     )
 
         except Exception as e:
             signals_failed += 1
-            logger.error(f"{name}: {e}")
+            logger.error("%s: %s", name, e)
 
     total = portfolio_value(state, prices_usd, fx_rate)
     pnl_pct = ((total - state["initial_value_sek"]) / state["initial_value_sek"]) * 100
-    logger.info(f"Portfolio: {total:,.0f} SEK ({pnl_pct:+.2f}%) | Cash: {state['cash_sek']:,.0f} SEK")
+    logger.info("Portfolio: %s SEK (%+.2f%%) | Cash: %s SEK", "{:,.0f}".format(total), pnl_pct, "{:,.0f}".format(state['cash_sek']))
 
     if not STATE_FILE.exists():
         save_state(state)
@@ -261,7 +263,7 @@ def run(force_report=False, active_symbols=None):
     if triggered or force_report:
         reasons_list = reasons if reasons else ["startup"]
         summary = write_agent_summary(signals, prices_usd, fx_rate, state, tf_data, reasons_list)
-        logger.info(f"Trigger: {', '.join(reasons_list)}")
+        logger.info("Trigger: %s", ', '.join(reasons_list))
 
         # Classify tier and write tier-specific context
         from portfolio.trigger import classify_tier, update_tier_state
@@ -270,13 +272,13 @@ def run(force_report=False, active_symbols=None):
         triggered_tickers = _extract_triggered_tickers(reasons_list)
         write_tiered_summary(summary, tier, triggered_tickers)
         update_tier_state(tier)
-        logger.info(f"Tier: T{tier} ({TIER_CONFIG.get(tier, {}).get('label', 'UNKNOWN')})")
+        logger.info("Tier: T%d (%s)", tier, TIER_CONFIG.get(tier, {}).get('label', 'UNKNOWN'))
 
         try:
             from portfolio.outcome_tracker import log_signal_snapshot
             log_signal_snapshot(signals, prices_usd, fx_rate, reasons_list)
         except Exception as e:
-            logger.warning(f"signal logging failed: {e}")
+            logger.warning("signal logging failed: %s", e)
 
         layer2_cfg = config.get("layer2", {})
         if os.environ.get("NO_TELEGRAM"):
@@ -306,21 +308,21 @@ def run(force_report=False, active_symbols=None):
             from portfolio.bigbet import check_bigbet
             check_bigbet(signals, prices_usd, fx_rate, tf_data, config)
         except Exception as e:
-            logger.warning(f"Big Bet check failed: {e}")
+            logger.warning("Big Bet check failed: %s", e)
 
     # ISKBETS monitoring
     try:
         from portfolio.iskbets import check_iskbets
         check_iskbets(signals, prices_usd, fx_rate, tf_data, config)
     except Exception as e:
-        logger.warning(f"ISKBETS check failed: {e}")
+        logger.warning("ISKBETS check failed: %s", e)
 
     # Avanza pending order confirmations
     try:
         from portfolio.avanza_orders import check_pending_orders
         check_pending_orders(config)
     except Exception as e:
-        logger.warning(f"Avanza order check failed: {e}")
+        logger.warning("Avanza order check failed: %s", e)
 
     # Health update
     try:
@@ -333,7 +335,7 @@ def run(force_report=False, active_symbols=None):
             last_trigger_reason=trigger_reason,
         )
     except Exception as e:
-        logger.warning(f"health update failed: {e}")
+        logger.warning("health update failed: %s", e)
 
 
 def _crash_alert(error_msg):
@@ -380,7 +382,7 @@ def loop(interval=None):
                 except Exception:
                     pass
         except Exception as e:
-            logger.warning(f"Failed to check heartbeat staleness: {e}")
+            logger.warning("Failed to check heartbeat staleness: %s", e)
 
     logger.info("Loop started")
 
@@ -394,7 +396,7 @@ def loop(interval=None):
         poller.start()
         logger.info("ISKBETS Telegram poller started")
     except Exception as e:
-        logger.warning(f"ISKBETS poller failed to start: {e}")
+        logger.warning("ISKBETS poller failed to start: %s", e)
 
     try:
         run(force_report=True)
@@ -404,7 +406,7 @@ def loop(interval=None):
     except Exception as e:
         import traceback
         _crash_alert(traceback.format_exc())
-        logger.error(f"in initial run: {e}")
+        logger.error("in initial run: %s", e)
         time.sleep(10)
 
     last_state = None
@@ -414,7 +416,8 @@ def loop(interval=None):
             sleep_interval = interval
         if market_state != last_state:
             logger.info(
-                f"Schedule: {market_state} — {len(active_symbols)} instruments, {sleep_interval}s interval"
+                "Schedule: %s — %d instruments, %ds interval",
+                market_state, len(active_symbols), sleep_interval
             )
             last_state = market_state
         time.sleep(sleep_interval)
@@ -426,7 +429,7 @@ def loop(interval=None):
         except Exception as e:
             import traceback
             _crash_alert(traceback.format_exc())
-            logger.error(f"in run: {e}")
+            logger.error("in run: %s", e)
             try:
                 from portfolio.health import update_health
                 update_health(cycle_count=_ss._run_cycle_id, signals_ok=0, signals_failed=0,

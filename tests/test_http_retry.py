@@ -357,11 +357,12 @@ class TestMaxRetriesExhausted:
 
 class TestExponentialBackoff:
     def test_backoff_doubles_each_retry(self):
-        """With backoff=1.0 and factor=2.0, sleeps should be 1.0, 2.0, 4.0."""
+        """With backoff=1.0 and factor=2.0, sleeps should be ~1.0, ~2.0, ~4.0 (plus jitter)."""
         fail_resp = _mock_response(503)
 
         with patch("portfolio.http_retry.requests") as mock_req, \
-             patch("portfolio.http_retry.time.sleep") as mock_sleep:
+             patch("portfolio.http_retry.time.sleep") as mock_sleep, \
+             patch("portfolio.http_retry.random.uniform", return_value=0):
             mock_req.get.return_value = fail_resp
             fetch_with_retry(
                 "https://api.example.com/data",
@@ -373,11 +374,12 @@ class TestExponentialBackoff:
         assert sleep_times == pytest.approx([1.0, 2.0, 4.0])
 
     def test_backoff_with_custom_base(self):
-        """With backoff=0.5 and factor=2.0, sleeps should be 0.5, 1.0, 2.0."""
+        """With backoff=0.5 and factor=2.0, sleeps should be ~0.5, ~1.0, ~2.0."""
         fail_resp = _mock_response(500)
 
         with patch("portfolio.http_retry.requests") as mock_req, \
-             patch("portfolio.http_retry.time.sleep") as mock_sleep:
+             patch("portfolio.http_retry.time.sleep") as mock_sleep, \
+             patch("portfolio.http_retry.random.uniform", return_value=0):
             mock_req.get.return_value = fail_resp
             fetch_with_retry(
                 "https://api.example.com/data",
@@ -388,11 +390,12 @@ class TestExponentialBackoff:
         assert sleep_times == pytest.approx([0.5, 1.0, 2.0])
 
     def test_backoff_with_factor_3(self):
-        """With backoff=1.0 and factor=3.0, sleeps should be 1.0, 3.0, 9.0."""
+        """With backoff=1.0 and factor=3.0, sleeps should be ~1.0, ~3.0, ~9.0."""
         fail_resp = _mock_response(502)
 
         with patch("portfolio.http_retry.requests") as mock_req, \
-             patch("portfolio.http_retry.time.sleep") as mock_sleep:
+             patch("portfolio.http_retry.time.sleep") as mock_sleep, \
+             patch("portfolio.http_retry.random.uniform", return_value=0):
             mock_req.get.return_value = fail_resp
             fetch_with_retry(
                 "https://api.example.com/data",
@@ -405,7 +408,8 @@ class TestExponentialBackoff:
     def test_backoff_on_connection_error(self):
         """Backoff timing also applies to connection error retries."""
         with patch("portfolio.http_retry.requests") as mock_req, \
-             patch("portfolio.http_retry.time.sleep") as mock_sleep:
+             patch("portfolio.http_retry.time.sleep") as mock_sleep, \
+             patch("portfolio.http_retry.random.uniform", return_value=0):
             mock_req.ConnectionError = requests.ConnectionError
             mock_req.Timeout = requests.Timeout
             mock_req.get.side_effect = requests.ConnectionError("fail")

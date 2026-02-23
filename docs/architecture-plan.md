@@ -1,6 +1,6 @@
 # Portfolio Intelligence System — Architecture (Source of Truth)
 
-> **Last updated:** 2026-02-20
+> **Last updated:** 2026-02-23
 > **Status:** LIVE on herc2 (simulated 500K SEK dual portfolio)
 > **Canonical doc:** This file is THE source of truth for the system architecture.
 > Other agents, sessions, and memory files should reference this document.
@@ -10,7 +10,7 @@
 **The Python fast loop collects data. Claude Code makes all decisions.**
 
 The fast loop (Layer 1) runs every 60 seconds, fetching prices, computing indicators, and
-running all 25 signal models (11 core + 14 enhanced composite). It detects when something
+running all 27 signal models (11 core + 16 enhanced composite). It detects when something
 meaningful changes. When a trigger fires, it invokes Claude Code (Layer 2) with the full
 context. Claude Code analyzes the data, decides whether to trade, and sends Telegram
 messages. The fast loop NEVER trades or sends Telegram on its own.
@@ -31,9 +31,9 @@ messages. The fast loop NEVER trades or sends Telegram on its own.
 │  8. Run ML classifier (HistGradientBoosting, cached 15min)       │
 │  9. Fetch Binance funding rate (cached 15min)                    │
 │ 10. Check volume confirmation (>1.5x avg)                        │
-│ 11. Run 14 enhanced composite signal modules (from raw OHLCV)   │
+│ 11. Run 16 enhanced composite signal modules (from raw OHLCV)   │
 │ 12. Fetch macro context: DXY, treasury yields, Fed calendar      │
-│ 13. Tally votes → BUY/SELL/HOLD per symbol (25 signals)         │
+│ 13. Tally votes → BUY/SELL/HOLD per symbol (27 signals)         │
 │ 14. Compute weighted consensus (accuracy + regime + activation)  │
 │ 15. Save everything to data/agent_summary.json                   │
 │                                                                   │
@@ -43,7 +43,7 @@ messages. The fast loop NEVER trades or sends Telegram on its own.
 │  • Price moved >2% since last trigger                            │
 │  • Fear & Greed crossed threshold (20 or 80)                     │
 │  • Sentiment reversal (positive↔negative)                        │
-│  • Cooldown expired (1min market hours, 2hr off-hours)           │
+│  • Cooldown expired (10min market hours, 2hr off-hours)          │
 │  • Post-trade: cooldown resets after BUY/SELL for reassessment   │
 │                                                                   │
 │  If trigger fires → invoke Claude Code (Layer 2) via subprocess  │
@@ -64,7 +64,7 @@ messages. The fast loop NEVER trades or sends Telegram on its own.
 │  • Trigger reasons (why was this invocation triggered?)          │
 │                                                                   │
 │  Analyzes:                                                        │
-│  • All 25 signals across all timeframes                          │
+│  • All 27 signals across all timeframes                          │
 │  • Macro context (DXY, yields, FOMC proximity)                   │
 │  • Portfolio risk (concentration, drawdown, cash reserves)       │
 │  • Recent trade history (avoid whipsaw, respect patterns)        │
@@ -92,7 +92,7 @@ Two independent simulated portfolios, both starting at 500K SEK:
 
 See `docs/trading-bot-personalities.md` for full personality definitions.
 
-## 25 Signals (11 Core + 14 Enhanced Composite)
+## 27 Signals (11 Core + 16 Enhanced Composite)
 
 ### Core Signals (1-11)
 
@@ -110,7 +110,7 @@ See `docs/trading-bot-personalities.md` for full personality definitions.
 | 10  | Volume Confirm. | Binance/Alpaca 15m klines             | Spike + price up                | Spike + price down               | 5min      |
 | 11  | Custom LoRA     | Ministral-8B + custom fine-tuned LoRA | LLM outputs BUY                 | LLM outputs SELL                 | 15min     |
 
-### Enhanced Composite Signals (12-25)
+### Enhanced Composite Signals (12-27)
 
 Each composite module runs 4-8 sub-indicators internally on raw OHLCV data and produces
 one BUY/SELL/HOLD vote via majority voting. All modules live in `portfolio/signals/`.
@@ -132,8 +132,10 @@ See `docs/enhanced-signals.md` for full documentation of each module.
 | 23  | Calendar          | `signals/calendar_seasonal.py` | 8       | Day-of-Week, Turnaround Tuesday, Month-End, Sell in May, January Effect, Pre-Holiday, FOMC Drift, Santa Rally |
 | 24  | Macro Regime      | `signals/macro_regime.py`| 6              | 200-SMA Filter, DXY vs Risk, Yield Curve, 10Y Momentum, FOMC Proximity, Golden/Death Cross |
 | 25  | Momentum Factors  | `signals/momentum_factors.py` | 7        | Time-Series Momentum, ROC-20, 52-Week High/Low, Consecutive Bars, Acceleration, Vol-Weighted |
+| 26  | News Event        | `signals/news_event.py`  | 5              | Headline velocity, keyword severity, sentiment shift, source credibility, sector impact |
+| 27  | Econ Calendar     | `signals/econ_calendar.py`| 5             | Event proximity risk-off, event type classification, pre-event binary, sector exposure, FOMC/CPI/NFP |
 
-**Total sub-indicators across all 14 enhanced modules: ~85**
+**Total sub-indicators across all 16 enhanced modules: ~95**
 
 **Non-voting context** (macro section in agent_summary.json):
 
@@ -141,7 +143,7 @@ See `docs/enhanced-signals.md` for full documentation of each module.
 - Treasury Yields — 2Y, 10Y, 30Y + 2s10s spread
 - Fed Calendar — Next FOMC date and days until
 
-**Vote threshold:** MIN_VOTERS varies by asset class — crypto requires 3, stocks and metals require 2. Crypto has 25 applicable signals (11 core + 14 enhanced), stocks and metals have 21 (7 core + 14 enhanced). CryptoTrader-LM, Custom LoRA, ML Classifier, and Funding Rate are crypto-only. Confidence is calculated using active voters (BUY + SELL) as the denominator, not total applicable signals. A majority (>=50% of active voters) is needed for BUY/SELL consensus.
+**Vote threshold:** MIN_VOTERS=3 for all asset classes (crypto, stocks, and metals). Crypto has 27 applicable signals (11 core + 16 enhanced), stocks and metals have 23 (7 core + 16 enhanced). CryptoTrader-LM, Custom LoRA, ML Classifier, and Funding Rate are crypto-only. Confidence is calculated using active voters (BUY + SELL) as the denominator, not total applicable signals. A majority (>=50% of active voters) is needed for BUY/SELL consensus.
 
 **Weighted consensus:** In addition to raw vote counting, Layer 1 computes a weighted
 consensus using per-signal accuracy data, market regime adjustments, and activation
@@ -154,7 +156,7 @@ signals get less.
 
 | Horizon | Candle interval | Candles fetched | Cache TTL       | Signal set                     |
 | ------- | --------------- | --------------- | --------------- | ------------------------------ |
-| Now     | 15m             | 100 (~25h)      | 0 (every cycle) | All 25 signals (11+14 enhanced)|
+| Now     | 15m             | 100 (~25h)      | 0 (every cycle) | All 27 signals (11+16 enhanced)|
 | 12h     | 1h              | 100 (~4d)       | 5min            | 4 technical only               |
 | 2d      | 4h              | 100 (~17d)      | 15min           | 4 technical only               |
 | 7d      | 1d              | 100 (~100d)     | 1hr             | 4 technical only               |
@@ -166,7 +168,7 @@ signals get less.
 
 | Horizon | Candle interval | Candles fetched | Cache TTL       | Signal set                     |
 | ------- | --------------- | --------------- | --------------- | ------------------------------ |
-| Now     | 15m             | 100 (~25h)      | 0 (every cycle) | All 21 signals (7+14 enhanced) |
+| Now     | 15m             | 100 (~25h)      | 0 (every cycle) | All 23 signals (7+16 enhanced) |
 | 12h     | 1h              | 100 (~4d)       | 5min            | 4 technical only               |
 | 2d      | 1h              | 48 (~2d)        | 15min           | 4 technical only               |
 | 7d      | 1d              | 30 (~30d)       | 1hr             | 4 technical only               |
@@ -180,46 +182,46 @@ signals get less.
 
 | Ticker  | Name     | Data source       | Signals |
 | ------- | -------- | ----------------- | ------- |
-| BTC-USD | Bitcoin  | Binance (BTCUSDT) | 25 (11 core + 14 enhanced) |
-| ETH-USD | Ethereum | Binance (ETHUSDT) | 25 (11 core + 14 enhanced) |
+| BTC-USD | Bitcoin  | Binance (BTCUSDT) | 27 (11 core + 16 enhanced) |
+| ETH-USD | Ethereum | Binance (ETHUSDT) | 27 (11 core + 16 enhanced) |
 
 ### Metals (2) — 24/7, Binance futures
 
 | Ticker  | Name   | Data source        | Signals |
 | ------- | ------ | ------------------ | ------- |
-| XAU-USD | Gold   | Binance FAPI (XAUUSDT) | 21 (7 core + 14 enhanced) |
-| XAG-USD | Silver | Binance FAPI (XAGUSDT) | 21 (7 core + 14 enhanced) |
+| XAU-USD | Gold   | Binance FAPI (XAUUSDT) | 23 (7 core + 16 enhanced) |
+| XAG-USD | Silver | Binance FAPI (XAGUSDT) | 23 (7 core + 16 enhanced) |
 
 ### US Equities (27) — Market hours, Alpaca IEX
 
 | Ticker | Name            | Exchange | Signals |
 | ------ | --------------- | -------- | ------- |
-| MSTR   | MicroStrategy   | NASDAQ   | 21      |
-| PLTR   | Palantir        | NASDAQ   | 21      |
-| NVDA   | NVIDIA          | NASDAQ   | 21      |
-| AMD    | AMD             | NASDAQ   | 21      |
-| BABA   | Alibaba         | NYSE     | 21      |
-| GOOGL  | Alphabet        | NASDAQ   | 21      |
-| AMZN   | Amazon          | NASDAQ   | 21      |
-| AAPL   | Apple           | NASDAQ   | 21      |
-| AVGO   | Broadcom        | NASDAQ   | 21      |
-| GRRR   | Gorilla Tech    | NASDAQ   | 21      |
-| IONQ   | IonQ            | NYSE     | 21      |
-| MRVL   | Marvell         | NASDAQ   | 21      |
-| META   | Meta            | NASDAQ   | 21      |
-| MU     | Micron          | NASDAQ   | 21      |
-| PONY   | Pony AI         | NASDAQ   | 21      |
-| RXRX   | Recursion       | NASDAQ   | 21      |
-| SOUN   | SoundHound      | NASDAQ   | 21      |
-| SMCI   | Super Micro     | NASDAQ   | 21      |
-| TSM    | TSMC            | NYSE     | 21      |
-| TTWO   | Take-Two        | NASDAQ   | 21      |
-| TEM    | Tempus AI       | NASDAQ   | 21      |
-| UPST   | Upstart         | NASDAQ   | 21      |
-| VERI   | Veritone        | NASDAQ   | 21      |
-| VRT    | Vertiv          | NYSE     | 21      |
-| QQQ    | QQQ ETF         | NASDAQ   | 21      |
-| LMT    | Lockheed Martin | NYSE     | 21      |
+| MSTR   | MicroStrategy   | NASDAQ   | 23      |
+| PLTR   | Palantir        | NASDAQ   | 23      |
+| NVDA   | NVIDIA          | NASDAQ   | 23      |
+| AMD    | AMD             | NASDAQ   | 23      |
+| BABA   | Alibaba         | NYSE     | 23      |
+| GOOGL  | Alphabet        | NASDAQ   | 23      |
+| AMZN   | Amazon          | NASDAQ   | 23      |
+| AAPL   | Apple           | NASDAQ   | 23      |
+| AVGO   | Broadcom        | NASDAQ   | 23      |
+| GRRR   | Gorilla Tech    | NASDAQ   | 23      |
+| IONQ   | IonQ            | NYSE     | 23      |
+| MRVL   | Marvell         | NASDAQ   | 23      |
+| META   | Meta            | NASDAQ   | 23      |
+| MU     | Micron          | NASDAQ   | 23      |
+| PONY   | Pony AI         | NASDAQ   | 23      |
+| RXRX   | Recursion       | NASDAQ   | 23      |
+| SOUN   | SoundHound      | NASDAQ   | 23      |
+| SMCI   | Super Micro     | NASDAQ   | 23      |
+| TSM    | TSMC            | NYSE     | 23      |
+| TTWO   | Take-Two        | NASDAQ   | 23      |
+| TEM    | Tempus AI       | NASDAQ   | 23      |
+| UPST   | Upstart         | NASDAQ   | 23      |
+| VERI   | Veritone        | NASDAQ   | 23      |
+| VRT    | Vertiv          | NYSE     | 23      |
+| QQQ    | QQQ ETF         | NASDAQ   | 23      |
+| LMT    | Lockheed Martin | NYSE     | 23      |
 
 ### Tier 2: Avanza Price-Only (Nordic stocks, no signals)
 
@@ -278,8 +280,25 @@ Q:\finance-analyzer\
 │   ├── iskbets.py           # ISKBETS monitoring system
 │   ├── telegram_poller.py   # Telegram command listener
 │   ├── fomc_dates.py        # FOMC calendar constants
+│   ├── econ_dates.py        # Full economic calendar (FOMC, CPI, NFP) 2026-2027
+│   ├── news_keywords.py     # Keyword severity/sector mapping for news signal
 │   ├── analyze.py           # Standalone analysis tool (--analyze, --watch)
-│   ├── signals\             # Enhanced composite signal modules (14 modules)
+│   ├── signal_utils.py      # Shared helpers: sma, ema, rsi, true_range, majority_vote
+│   ├── signal_registry.py   # Dynamic signal registration and discovery
+│   ├── signal_db.py         # SQLite WAL-mode signal log (dual-write with JSONL)
+│   ├── file_utils.py        # load_json, load_jsonl, atomic file I/O helpers
+│   ├── http_retry.py        # HTTP retry with exponential backoff + jitter
+│   ├── api_utils.py         # Config loading, API URL centralization
+│   ├── config_validator.py  # Config.json validation at startup
+│   ├── health.py            # Heartbeat, error tracking, silence detection
+│   ├── shared_state.py      # Thread-safe cache, global state management
+│   ├── logging_config.py    # Structured logging with rotating file handler
+│   ├── kelly_sizing.py      # Kelly Criterion position sizing
+│   ├── regime_alerts.py     # Market regime change alerting
+│   ├── risk_management.py   # Portfolio risk metrics and alerts
+│   ├── weekly_digest.py     # Weekly performance digest
+│   ├── forecast_signal.py   # Prophet + Chronos GPU forecast signal
+│   ├── signals\             # Enhanced composite signal modules (16 modules)
 │   │   ├── __init__.py
 │   │   ├── trend.py         # #12: 7 sub-indicators (Golden Cross, MA Ribbon, Supertrend, etc.)
 │   │   ├── momentum.py      # #13: 8 sub-indicators (RSI Divergence, Stochastic, CCI, etc.)
@@ -294,7 +313,9 @@ Q:\finance-analyzer\
 │   │   ├── mean_reversion.py# #22: 7 sub-indicators (RSI(2), RSI(3), IBS, Gap Fade, BB %B, etc.)
 │   │   ├── calendar_seasonal.py # #23: 8 sub-indicators (Day-of-Week, FOMC Drift, etc.)
 │   │   ├── macro_regime.py  # #24: 6 sub-indicators (200-SMA, DXY, Yield Curve, etc.)
-│   │   └── momentum_factors.py  # #25: 7 sub-indicators (TS Momentum, ROC-20, etc.)
+│   │   ├── momentum_factors.py  # #25: 7 sub-indicators (TS Momentum, ROC-20, etc.)
+│   │   ├── news_event.py       # #26: 5 sub-indicators (headline velocity, keyword severity, etc.)
+│   │   └── econ_calendar.py    # #27: 5 sub-indicators (event proximity, type, sector exposure, etc.)
 │   └── __init__.py
 ├── data\
 │   ├── portfolio_state.json      # Patient strategy (cash, holdings, transactions)
@@ -306,6 +327,9 @@ Q:\finance-analyzer\
 │   ├── layer2_context.md         # Layer 2 memory (written by journal.py before invocation)
 │   ├── telegram_messages.jsonl   # All sent Telegram messages
 │   ├── invocations.jsonl         # Layer 2 invocation log (when/why triggered)
+│   ├── agent_summary_compact.json # Compact signals snapshot for tiered invocation
+│   ├── agent_context_t1.json     # Tier 1 (Quick Check) context
+│   ├── agent_context_t2.json     # Tier 2 (Signal Analysis) context
 │   ├── agent.log                 # Layer 2 stdout/stderr log
 │   └── loop_out.txt              # Layer 1 stdout (for debugging silent failures)
 ├── training\lora\
@@ -320,7 +344,7 @@ Q:\finance-analyzer\
 ├── CLAUDE.md                # Layer 2 instructions: trading rules, personalities, execution formulas
 ├── docs\
 │   ├── architecture-plan.md # THIS FILE
-│   ├── enhanced-signals.md  # Detailed documentation of all 14 enhanced signal modules
+│   ├── enhanced-signals.md  # Detailed documentation of all 16 enhanced signal modules
 │   ├── operational-runbook.md # Operations guide: restart, debug, monitoring
 │   ├── dashboard-api.md     # Dashboard API endpoint documentation
 │   └── trading-bot-personalities.md  # Bold/Patient personality definitions (v2)
@@ -356,7 +380,7 @@ Q:\models\
 
 ## Forward Tracking
 
-Every trigger invocation is logged to `data/signal_log.jsonl` with all 25 signal votes and
+Every trigger invocation is logged to `data/signal_log.jsonl` with all 27 signal votes and
 current prices per ticker. The daily `PF-OutcomeCheck` task backfills what actually happened
 at 1d/3d/5d/10d horizons. Use `--accuracy` to see per-signal hit rates.
 

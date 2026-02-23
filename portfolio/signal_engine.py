@@ -416,7 +416,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 else:
                     votes[sig_name] = "HOLD"
             except Exception as e:
-                logger.warning(f"Signal {sig_name} failed: {e}")
+                logger.warning("Signal %s failed: %s", sig_name, e)
                 votes[sig_name] = "HOLD"
     else:
         for sig_name in _enhanced_entries:

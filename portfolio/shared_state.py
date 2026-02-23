@@ -38,7 +38,7 @@ def _cached(key, ttl, func, *args):
             _tool_cache[key] = {"data": data, "time": now}
         return data
     except Exception as e:
-        logger.warning(f"[{key}] error: {e}")
+        logger.warning("[%s] error: %s", key, e)
         with _cache_lock:
             if key in _tool_cache:
                 _tool_cache[key]["time"] = now - ttl + _RETRY_COOLDOWN

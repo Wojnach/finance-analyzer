@@ -51,7 +51,7 @@ def _load_candles(ticker, periods=168):
             if df is not None and len(df) > 30:
                 return df["close"].values.tolist()
     except Exception as e:
-        logger.debug(f"Candle fetch failed for {ticker}: {e}")
+        logger.debug("Candle fetch failed for %s: %s", ticker, e)
 
     return None
 
@@ -67,7 +67,7 @@ def _get_chronos_pipeline():
         from chronos import ChronosPipeline
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info(f"Loading Chronos model on {device}...")
+        logger.info("Loading Chronos model on %s...", device)
         _chronos_pipeline = ChronosPipeline.from_pretrained(
             "amazon/chronos-t5-small",
             device_map=device,
@@ -76,7 +76,7 @@ def _get_chronos_pipeline():
         logger.info("Chronos model loaded")
         return _chronos_pipeline
     except Exception as e:
-        logger.warning(f"Failed to load Chronos: {e}")
+        logger.warning("Failed to load Chronos: %s", e)
         return None
 
 
@@ -145,7 +145,7 @@ def forecast_chronos(ticker, prices, horizons=(1, 24)):
 
         return results
     except Exception as e:
-        logger.warning(f"Chronos forecast failed for {ticker}: {e}")
+        logger.warning("Chronos forecast failed for %s: %s", ticker, e)
         return None
 
 
@@ -223,7 +223,7 @@ def forecast_prophet(ticker, prices, horizons=(1, 24)):
 
         return results
     except Exception as e:
-        logger.warning(f"Prophet forecast failed for {ticker}: {e}")
+        logger.warning("Prophet forecast failed for %s: %s", ticker, e)
         return None
 
 
@@ -247,7 +247,7 @@ def run_forecasts(tickers=None):
     for ticker in tickers:
         prices = _load_candles(ticker)
         if not prices or len(prices) < 50:
-            logger.debug(f"Skipping {ticker}: insufficient candle data ({len(prices) if prices else 0})")
+            logger.debug("Skipping %s: insufficient candle data (%d)", ticker, len(prices) if prices else 0)
             continue
 
         current_price = prices[-1]
@@ -282,7 +282,7 @@ def run_forecasts(tickers=None):
         with open(PREDICTIONS_FILE, "a", encoding="utf-8") as f:
             for entry in results:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        logger.info(f"Logged {len(results)} forecast predictions")
+        logger.info("Logged %d forecast predictions", len(results))
 
     return results
 

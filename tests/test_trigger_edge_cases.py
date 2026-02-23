@@ -522,8 +522,8 @@ class TestMultipleTriggerReasons(TriggerTestBase):
 # ---------------------------------------------------------------------------
 
 class TestCooldownConstants:
-    def test_market_hours_cooldown_is_1_min(self):
-        assert COOLDOWN_SECONDS == 60
+    def test_market_hours_cooldown_is_10_min(self):
+        assert COOLDOWN_SECONDS == 600
 
     def test_offhours_cooldown_is_2_hours(self):
         assert OFFHOURS_COOLDOWN == 7200

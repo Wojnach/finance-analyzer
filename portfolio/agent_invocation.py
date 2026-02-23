@@ -89,7 +89,7 @@ def invoke_agent(reasons, tier=3):
     if _agent_proc and _agent_proc.poll() is None:
         elapsed = time.time() - _agent_start
         if elapsed > AGENT_TIMEOUT:
-            logger.info(f"Agent pid={_agent_proc.pid} timed out ({elapsed:.0f}s), killing")
+            logger.info("Agent pid=%s timed out (%.0fs), killing", _agent_proc.pid, elapsed)
             if platform.system() == "Windows":
                 subprocess.run(
                     ["taskkill", "/F", "/T", "/PID", str(_agent_proc.pid)],
@@ -118,9 +118,9 @@ def invoke_agent(reasons, tier=3):
         from portfolio.journal import write_context
 
         n = write_context()
-        logger.info(f"Layer 2 context: {n} journal entries")
+        logger.info("Layer 2 context: %d journal entries", n)
     except Exception as e:
-        logger.warning(f"journal context failed: {e}")
+        logger.warning("journal context failed: %s", e)
 
     prompt = _build_tier_prompt(tier, reasons)
     max_turns = tier_cfg["max_turns"]
@@ -137,10 +137,10 @@ def invoke_agent(reasons, tier=3):
         # Fallback: use pf-agent.bat (always Tier 3)
         agent_bat = BASE_DIR / "scripts" / "win" / "pf-agent.bat"
         if not agent_bat.exists():
-            logger.warning(f"Agent script not found at {agent_bat}")
+            logger.warning("Agent script not found at %s", agent_bat)
             return False
         cmd = ["cmd", "/c", str(agent_bat)]
-        logger.info(f"claude not on PATH, falling back to pf-agent.bat (T3)")
+        logger.info("claude not on PATH, falling back to pf-agent.bat (T3)")
 
     try:
         _agent_log = open(DATA_DIR / "agent.log", "a", encoding="utf-8")
@@ -176,5 +176,5 @@ def invoke_agent(reasons, tier=3):
             pass  # non-critical
         return True
     except Exception as e:
-        logger.error(f"invoking agent: {e}")
+        logger.error("invoking agent: %s", e)
         return False

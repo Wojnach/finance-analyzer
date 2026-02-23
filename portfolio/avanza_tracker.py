@@ -71,7 +71,7 @@ def fetch_avanza_prices() -> dict[str, dict[str, Any]]:
                 "underlying": cfg.get("underlying"),
             }
         except Exception as e:
-            logger.warning(f"Price fetch failed for {key}: {e}")
+            logger.warning("Price fetch failed for %s: %s", key, e)
     return results
 
 

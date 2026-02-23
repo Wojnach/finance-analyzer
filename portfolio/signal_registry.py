@@ -83,7 +83,7 @@ def load_signal_func(entry: dict) -> Optional[Callable]:
         entry["func"] = func
         return func
     except Exception as e:
-        logger.warning(f"Failed to load signal {entry['name']}: {e}")
+        logger.warning("Failed to load signal %s: %s", entry['name'], e)
         return None
 
 

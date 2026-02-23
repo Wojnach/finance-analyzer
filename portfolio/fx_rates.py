@@ -17,7 +17,7 @@ def fetch_usd_sek():
     if _fx_cache["rate"] and now - _fx_cache["time"] < 3600:
         age_secs = now - _fx_cache["time"]
         if age_secs > _FX_STALE_THRESHOLD:
-            logger.warning(f"FX rate is stale ({age_secs / 3600:.1f}h old)")
+            logger.warning("FX rate is stale (%.1fh old)", age_secs / 3600)
         return _fx_cache["rate"]
     try:
         r = fetch_with_retry(
@@ -33,11 +33,11 @@ def fetch_usd_sek():
         _fx_cache["time"] = now
         return rate
     except Exception as e:
-        logger.warning(f"FX rate fetch failed: {e}")
+        logger.warning("FX rate fetch failed: %s", e)
     if _fx_cache["rate"]:
         age_secs = now - _fx_cache["time"]
         if age_secs > _FX_STALE_THRESHOLD:
-            logger.warning(f"Using stale FX rate ({age_secs / 3600:.1f}h old)")
+            logger.warning("Using stale FX rate (%.1fh old)", age_secs / 3600)
             _fx_alert_telegram(age_secs)
         return _fx_cache["rate"]
     # Last resort: hardcoded fallback
