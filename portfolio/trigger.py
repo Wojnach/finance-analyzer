@@ -219,11 +219,11 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
             "time": time.time(),
         }
 
-    state["sustained_counts"] = sustained
-    _save_state(state)
-
     # Track today_date for first-of-day detection
     state["today_date"] = _today_str()
+
+    state["sustained_counts"] = sustained
+    _save_state(state)
 
     return triggered, reasons
 
