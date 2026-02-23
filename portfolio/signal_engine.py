@@ -1,4 +1,4 @@
-"""Signal generation engine — 25-signal voting system with weighted consensus."""
+"""Signal generation engine — 27-signal voting system with weighted consensus."""
 
 import json
 import logging
@@ -19,8 +19,8 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 # --- Signal (full 25-signal for "Now" timeframe) ---
 
-MIN_VOTERS_CRYPTO = 3  # crypto has 24 signals (10 core + 14 enhanced, custom_lora removed) — need 3 active voters
-MIN_VOTERS_STOCK = 3  # stocks have 21 signals (7 original + 14 enhanced) — need 3 active voters
+MIN_VOTERS_CRYPTO = 3  # crypto has 26 signals (10 core + 16 enhanced, custom_lora removed) — need 3 active voters
+MIN_VOTERS_STOCK = 3  # stocks have 23 signals (7 original + 16 enhanced) — need 3 active voters
 
 # Sentiment hysteresis — prevents rapid flip spam from ~50% confidence oscillation
 _prev_sentiment = {}  # in-memory cache; seeded from trigger_state.json on first call
@@ -393,13 +393,18 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             except Exception:
                 logger.warning("Macro context fetch failed", exc_info=True)
 
+        # Build context data once for signals that need it
+        context_data = {"ticker": ticker, "config": config or {}, "macro": macro_data}
+
         for sig_name, entry in _enhanced_entries.items():
             try:
                 compute_fn = load_signal_func(entry)
                 if compute_fn is None:
                     votes[sig_name] = "HOLD"
                     continue
-                if entry.get("requires_macro"):
+                if entry.get("requires_context"):
+                    result = compute_fn(df, context=context_data)
+                elif entry.get("requires_macro"):
                     result = compute_fn(df, macro=macro_data or None)
                 else:
                     result = compute_fn(df)
@@ -432,17 +437,17 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     core_active = core_buy + core_sell
 
     # Total applicable signals:
-    # Crypto: 10 core (11 original - custom_lora removed) + 14 enhanced (all voting) = 24
-    # Metals: 7 core + 14 enhanced = 21
-    # Stocks: 7 core + 14 enhanced = 21
+    # Crypto: 10 core (11 original - custom_lora removed) + 16 enhanced = 26
+    # Metals: 7 core + 16 enhanced = 23
+    # Stocks: 7 core + 16 enhanced = 23
     is_crypto = ticker in CRYPTO_SYMBOLS
     is_metal = ticker in METALS_SYMBOLS
     if is_crypto:
-        total_applicable = 24  # 10 core + 14 enhanced
+        total_applicable = 26  # 10 core + 16 enhanced
     elif is_metal:
-        total_applicable = 21  # 7 core + 14 enhanced
+        total_applicable = 23  # 7 core + 16 enhanced
     else:
-        total_applicable = 21  # 7 core + 14 enhanced
+        total_applicable = 23  # 7 core + 16 enhanced
 
     active_voters = buy + sell
     if ticker in STOCK_SYMBOLS:

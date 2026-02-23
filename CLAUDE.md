@@ -84,7 +84,7 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 ### 1. Read the data
 
 - `data/layer2_context.md` — **read this first.** Your memory from previous invocations: theses, regime, prices, watchlist
-- `data/agent_summary_compact.json` — all 25 signals, timeframes, indicators, macro context (compact version, readable in one shot)
+- `data/agent_summary_compact.json` — all 27 signals, timeframes, indicators, macro context (compact version, readable in one shot)
 - `data/agent_summary.json` — full version with enhanced signal details (too large for single read; use compact instead)
 - `data/portfolio_state.json` — Patient strategy: current cash, holdings, transaction history
 - `data/portfolio_state_bold.json` — Bold strategy: current cash, holdings, transaction history
@@ -93,7 +93,7 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 ### 2. Analyze
 
 - **Use your memory:** Compare previous thesis prices with current prices — were you right? Write your assessment in the `reflection` field. Check if watchlist conditions were met. Notice regime shifts. If you just traded, don't reverse on noise. Check the Warnings section for contradictions and whipsaws.
-- Review all 25 signals across all timeframes for each instrument
+- Review all 27 signals across all timeframes for each instrument
 - Check macro context: DXY, treasury yields, yield curve, FOMC proximity
 - Assess portfolio risk: concentration, drawdown, cash reserves
 - Check recent transaction history: avoid whipsaw trades
@@ -119,7 +119,7 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 
 #### Patient strategy — "The Regime Reader" (`portfolio_state.json`)
 
-Use your own judgment. The 25 signals and timeframe heatmap are inputs to your reasoning,
+Use your own judgment. The 27 signals and timeframe heatmap are inputs to your reasoning,
 not a mechanical gate. You are not a vote counter — you are an analyst.
 
 **These are your guiding principles, not mechanical constraints.** Internalize this personality
@@ -135,7 +135,7 @@ are free to act outside these norms. Just state why.
 
 Consider the full picture:
 
-- Signal consensus (direction and strength across the 25 signals)
+- Signal consensus (direction and strength across the 27 signals)
 - Timeframe alignment (are short and long timeframes telling the same story?)
 - Macro context (DXY, treasury yields/curve, FOMC proximity, Fear & Greed, funding rate)
 - Market regime (trending, ranging, high volatility, capitulation)
@@ -390,7 +390,7 @@ requests.post(
 - This is SIMULATED money (500K SEK starting) — trade freely to build a track record
 - **Near close (<1h to market close):** Do not open new positions on stocks or warrants. For existing positions, flag that close is imminent — the user needs to decide now (take profit or close flat). Crypto is exempt (24/7). US market closes 21:00 CET (15:00 ET).
 
-## 25 Signals (11 Core + 14 Enhanced Composite)
+## 27 Signals (11 Core + 16 Enhanced Composite)
 
 ### Core Signals (1-11)
 
@@ -399,14 +399,14 @@ requests.post(
 3. **EMA(9,21)** — Fast>slow=buy, fast<slow=sell. Abstains when gap <0.5% (deadband filters weak trends)
 4. **BB(20,2)** — Below lower=buy, above upper=sell, else abstains
 5. **Fear & Greed** — ≤20 contrarian buy, ≥80 contrarian sell, else abstains
-6. **Sentiment** — CryptoBERT (crypto) / Trading-Hero-LLM (stocks), confidence>0.4 to vote
+6. **Sentiment** — CryptoBERT (crypto) / Trading-Hero-LLM (stocks), confidence>0.4 to vote. Now keyword-weighted: tariff/war/crash headlines get 2-3x amplification.
 7. **CryptoTrader-LM** — Ministral-8B + original CryptoTrader-LM LoRA, full LLM reasoning → BUY/SELL/HOLD
 8. **ML Classifier** — HistGradientBoosting on 1h candles (~20 features), crypto only
 9. **Funding Rate** — Binance perpetual futures funding rate, crypto only. >0.03% contrarian sell, <-0.01% contrarian buy
 10. **Volume Confirmation** — Volume spike (>1.5x 20-period avg) confirms 3-candle price direction. Spike+up=buy, spike+down=sell, no spike=abstains
 11. **Custom LoRA** — Ministral-8B + custom fine-tuned LoRA (trained on labeled 1h candles), independent LLM reasoning → BUY/SELL/HOLD
 
-### Enhanced Composite Signals (12-25)
+### Enhanced Composite Signals (12-27)
 
 Each composite module runs 4-8 sub-indicators internally and produces one BUY/SELL/HOLD vote via majority voting. Details in `agent_summary.json` → `enhanced_signals` per ticker.
 
@@ -424,6 +424,8 @@ Each composite module runs 4-8 sub-indicators internally and produces one BUY/SE
 23. **Calendar** — Day-of-Week, Turnaround Tuesday, Month-End, Sell in May, January Effect, Pre-Holiday, FOMC Drift, Santa Rally
 24. **Macro Regime** — 200-SMA filter, DXY vs Risk, Yield Curve, 10Y Momentum, FOMC Proximity, Golden/Death Cross
 25. **Momentum Factors** — Time-Series Momentum, ROC-20, 52-Week High/Low, Consecutive Bars, Acceleration, Vol-Weighted
+26. **News Event** — Headline velocity spike, keyword severity (tariff/war/crash=critical), sentiment shift, credible source amplification (Reuters/Bloomberg/WSJ 1.5x), sector-specific impact mapping (e.g., tariff→semiconductor SELL, tariff→metals BUY). Max confidence 0.7.
+27. **Econ Calendar** — Event proximity risk-off (<4h of FOMC/CPI/NFP = SELL), event type classification, pre-event binary risk-off, sector exposure mapping (FOMC→crypto/metals, CPI→crypto/metals, NFP→ETF/big_tech). Uses hard-coded 2026-2027 economic calendar. Max confidence 0.7.
 
 **Non-voting context** (in agent_summary.json `macro` section for your reasoning):
 
@@ -453,7 +455,7 @@ samples as preliminary — they will stabilize over the next 2-4 weeks.
 **Consensus formula:** Layer 1 computes consensus using active voters (signals that voted BUY
 or SELL) as the denominator, not total applicable signals. MIN_VOTERS varies by asset class:
 all asset classes (stocks, metals, crypto) require MIN_VOTERS=3.
-Stocks have 21 applicable signals (7 core + 14 enhanced), crypto has 25 (11 core + 14 enhanced).
+Stocks have 23 applicable signals (7 core + 16 enhanced), crypto has 27 (11 core + 16 enhanced).
 Example: 2B/0S out of 21 applicable = BUY at 100% confidence (2/2 active voters).
 The confidence reflects agreement among voters, not coverage.
 
@@ -469,7 +471,7 @@ enumerate every HOLD ticker.
 
 ## Instruments
 
-### Tier 1: Full signals (25 signals, 7 timeframes)
+### Tier 1: Full signals (27 signals, 7 timeframes)
 
 | Ticker  | Market      | Data source        |
 | ------- | ----------- | ------------------ |
@@ -549,7 +551,7 @@ position in your reasoning.
 
 ## Forward Tracking
 
-Every trigger invocation is logged to `data/signal_log.jsonl` with all 25 signal votes and
+Every trigger invocation is logged to `data/signal_log.jsonl` with all 27 signal votes and
 current prices. A daily outcome checker backfills what actually happened at 1d/3d/5d/10d horizons.
 Use `--accuracy` to see which signals are actually predictive.
 

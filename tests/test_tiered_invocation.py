@@ -267,7 +267,7 @@ def _make_summary(held_tickers=None, triggered_tickers=None):
                 "_buy_count": buy_count,
                 "_sell_count": sell_count,
                 "_voters": buy_count + sell_count,
-                "_total_applicable": 21,
+                "_total_applicable": 23,
                 "_weighted_action": action,
                 "_weighted_confidence": 0.6,
                 "_votes": {f"signal_{j}": "BUY" if j < buy_count else "SELL"

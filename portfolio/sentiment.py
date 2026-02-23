@@ -167,12 +167,30 @@ def _run_model(script, texts):
     return json.loads(proc.stdout)
 
 
-def _aggregate_sentiments(sentiments):
-    pos_sum = sum(s["scores"]["positive"] for s in sentiments)
-    neg_sum = sum(s["scores"]["negative"] for s in sentiments)
-    neu_sum = sum(s["scores"]["neutral"] for s in sentiments)
-    n = len(sentiments)
-    avg = {"positive": pos_sum / n, "negative": neg_sum / n, "neutral": neu_sum / n}
+def _aggregate_sentiments(sentiments, headlines=None):
+    """Aggregate sentiment scores, optionally weighted by headline keywords.
+
+    When headlines are provided, each sentiment score is multiplied by the
+    keyword weight from news_keywords.score_headline(). High-impact keywords
+    (tariff, war, crash) get 2-3x amplification.
+
+    Backward-compatible: headlines=None preserves original equal-weight behavior.
+    """
+    if headlines and len(headlines) == len(sentiments):
+        from portfolio.news_keywords import score_headline
+        weights = []
+        for h in headlines:
+            title = h.get("title", "") if isinstance(h, dict) else str(h)
+            w, _ = score_headline(title)
+            weights.append(w)
+    else:
+        weights = [1.0] * len(sentiments)
+
+    pos_sum = sum(s["scores"]["positive"] * w for s, w in zip(sentiments, weights))
+    neg_sum = sum(s["scores"]["negative"] * w for s, w in zip(sentiments, weights))
+    neu_sum = sum(s["scores"]["neutral"] * w for s, w in zip(sentiments, weights))
+    total_w = sum(weights)
+    avg = {"positive": pos_sum / total_w, "negative": neg_sum / total_w, "neutral": neu_sum / total_w}
     overall = max(avg, key=avg.get)
     return overall, avg
 
@@ -210,7 +228,7 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None) -> dict:
     titles = [a["title"] for a in all_articles]
     sentiments = _run_model(model_script, titles)
 
-    overall, avg = _aggregate_sentiments(sentiments)
+    overall, avg = _aggregate_sentiments(sentiments, headlines=all_articles)
 
     details = []
     for article, sent in zip(all_articles, sentiments):

@@ -47,7 +47,8 @@ def register_signal(name: str, signal_type: str = "enhanced",
 
 
 def register_enhanced(name: str, module_path: str, func_name: str,
-                      requires_macro: bool = False):
+                      requires_macro: bool = False,
+                      requires_context: bool = False):
     """Programmatically register an enhanced signal module."""
     _ENHANCED_SIGNALS[name] = {
         "name": name,
@@ -55,6 +56,7 @@ def register_enhanced(name: str, module_path: str, func_name: str,
         "module_path": module_path,
         "func_name": func_name,
         "requires_macro": requires_macro,
+        "requires_context": requires_context,
         "func": None,  # lazy-loaded
     }
 
@@ -108,6 +110,11 @@ def _register_defaults():
     # macro_regime is special — requires_macro=True
     register_enhanced("macro_regime", "portfolio.signals.macro_regime",
                       "compute_macro_regime_signal", requires_macro=True)
+    # news_event and econ_calendar require context (ticker, config)
+    register_enhanced("news_event", "portfolio.signals.news_event",
+                      "compute_news_event_signal", requires_context=True)
+    register_enhanced("econ_calendar", "portfolio.signals.econ_calendar",
+                      "compute_econ_calendar_signal", requires_context=True)
 
 
 _register_defaults()

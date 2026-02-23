@@ -283,7 +283,7 @@ class TestMessageLength:
                 "action": action,
                 "buy_count": 2 if action == "BUY" else 0,
                 "sell_count": 2 if action == "SELL" else 0,
-                "total_applicable": 21 if ticker not in ("BTC-USD", "ETH-USD") else 25,
+                "total_applicable": 23 if ticker not in ("BTC-USD", "ETH-USD") else 26,
                 "voter_count": 4 if action != "HOLD" else 0,
                 "has_position": False,
                 "timeframes": {
