@@ -16,7 +16,6 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from portfolio.weekly_digest import (
-    _load_json,
     _load_jsonl,
     _portfolio_summary,
     _trades_this_week,

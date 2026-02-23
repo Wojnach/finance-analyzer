@@ -27,13 +27,6 @@ VALID_REGIMES = {
 }
 
 
-def _load_json(path):
-    return load_json(path, default={})
-
-
-def _load_jsonl(path):
-    return load_jsonl(path)
-
 
 def _get_last_regime(ticker):
     """Get the most recent regime for a ticker from history.
@@ -44,7 +37,7 @@ def _get_last_regime(ticker):
     Returns:
         str or None: Last known regime, or None if no history.
     """
-    entries = _load_jsonl(REGIME_HISTORY_FILE)
+    entries = load_jsonl(REGIME_HISTORY_FILE)
     for entry in reversed(entries):
         if entry.get("ticker") == ticker:
             return entry.get("new_regime")
@@ -117,7 +110,7 @@ def get_regime_distribution(ticker, days=7):
         dict: Mapping regime -> percentage of transitions in window.
               Empty dict if no data.
     """
-    entries = _load_jsonl(REGIME_HISTORY_FILE)
+    entries = load_jsonl(REGIME_HISTORY_FILE)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     regime_list = []
@@ -150,7 +143,7 @@ def get_regime_history(ticker, limit=20):
     Returns:
         list[dict]: Recent regime change entries, most recent last.
     """
-    entries = _load_jsonl(REGIME_HISTORY_FILE)
+    entries = load_jsonl(REGIME_HISTORY_FILE)
     ticker_entries = [e for e in entries if e.get("ticker") == ticker]
     return ticker_entries[-limit:]
 
@@ -182,7 +175,7 @@ def send_regime_alert(ticker, old_regime, new_regime):
         for regime, pct in dist.items():
             msg += f"\n  `{regime:<16} {pct:>5.1f}%`"
 
-    config = _load_json(CONFIG_FILE)
+    config = load_json(CONFIG_FILE, default={})
     token = config.get("telegram", {}).get("token")
     chat_id = config.get("telegram", {}).get("chat_id")
 

@@ -17,9 +17,6 @@ BOLD_FILE = DATA_DIR / "portfolio_state_bold.json"
 AGENT_SUMMARY_FILE = DATA_DIR / "agent_summary.json"
 
 
-def _load_json(path):
-    return load_json(path, default={})
-
 
 def kelly_fraction(win_prob, avg_win_pct, avg_loss_pct):
     """Compute Kelly criterion fraction.
@@ -233,13 +230,13 @@ def recommended_size(ticker, portfolio_path=None, agent_summary=None, strategy="
     # Load portfolio
     if portfolio_path is None:
         portfolio_path = BOLD_FILE if strategy == "bold" else PATIENT_FILE
-    portfolio = _load_json(portfolio_path)
+    portfolio = load_json(portfolio_path, default={})
     cash_sek = portfolio.get("cash_sek", 0)
     transactions = portfolio.get("transactions", [])
 
     # Load agent summary
     if agent_summary is None:
-        agent_summary = _load_json(AGENT_SUMMARY_FILE)
+        agent_summary = load_json(AGENT_SUMMARY_FILE, default={})
 
     # Max allocation per strategy rules
     alloc_frac = 0.30 if strategy == "bold" else 0.15
@@ -308,7 +305,7 @@ def print_sizing_report(tickers=None, strategy="patient"):
         tickers: List of ticker symbols. If None, uses all from agent_summary.
         strategy: "patient" or "bold".
     """
-    agent_summary = _load_json(AGENT_SUMMARY_FILE)
+    agent_summary = load_json(AGENT_SUMMARY_FILE, default={})
     if tickers is None:
         tickers = list(agent_summary.get("signals", {}).keys())
 

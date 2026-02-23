@@ -1,7 +1,10 @@
 import json
+import logging
 import time
 from collections import defaultdict
 from pathlib import Path
+
+logger = logging.getLogger("portfolio.accuracy_stats")
 
 from portfolio.file_utils import atomic_write_json as _atomic_write_json
 from portfolio.tickers import SIGNAL_NAMES
@@ -25,8 +28,8 @@ def load_entries():
             db.close()
             return entries
         db.close()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("SQLite signal_db unavailable, falling back to JSONL: %s", e)
     # Fallback to JSONL
     if not SIGNAL_LOG.exists():
         return []
@@ -249,12 +252,12 @@ def load_cached_activation_rates():
             if time.time() - cache.get("time", 0) < ACTIVATION_CACHE_TTL:
                 return cache.get("rates", {})
         except (json.JSONDecodeError, KeyError):
-            pass
+            logger.debug("Activation rates cache corrupted, regenerating")
     rates = signal_activation_rates()
     try:
         _atomic_write_json(cache_file, {"rates": rates, "time": time.time()})
     except Exception:
-        pass
+        logger.warning("Failed to write activation rates cache", exc_info=True)
     return rates
 
 
@@ -267,7 +270,7 @@ def load_cached_accuracy(horizon="1d"):
                 if cached:
                     return cached
         except (json.JSONDecodeError, KeyError):
-            pass
+            logger.debug("Accuracy cache corrupted or missing horizon %s", horizon)
     return None
 
 
@@ -277,7 +280,7 @@ def write_accuracy_cache(horizon, data):
         try:
             cache = json.loads(ACCURACY_CACHE_FILE.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, KeyError):
-            pass
+            logger.debug("Accuracy cache corrupted, starting fresh")
     cache[horizon] = data
     cache["time"] = time.time()
     _atomic_write_json(ACCURACY_CACHE_FILE, cache)

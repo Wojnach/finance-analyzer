@@ -8,19 +8,15 @@ Provides:
 - Transaction cost analysis
 """
 
-import json
 import datetime
+import json
 import pathlib
+
+from portfolio.file_utils import load_json
 
 DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 
 INITIAL_VALUE_DEFAULT = 500_000  # SEK
-
-
-def _load_json(path: str | pathlib.Path) -> dict:
-    """Load a JSON file and return its contents."""
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
 
 
 def _compute_portfolio_value(portfolio: dict, agent_summary: dict) -> float:
@@ -72,7 +68,7 @@ def check_drawdown(portfolio_path: str, max_drawdown_pct: float = 20.0,
             - current_value: float -- current portfolio value in SEK
             - initial_value: float -- starting portfolio value
     """
-    portfolio = _load_json(portfolio_path)
+    portfolio = load_json(portfolio_path, default={})
     initial_value = portfolio.get("initial_value_sek", INITIAL_VALUE_DEFAULT)
 
     if agent_summary_path is None:
@@ -82,10 +78,10 @@ def check_drawdown(portfolio_path: str, max_drawdown_pct: float = 20.0,
     if not portfolio.get("holdings"):
         current_value = portfolio.get("cash_sek", initial_value)
     else:
-        try:
-            summary = _load_json(agent_summary_path)
+        summary = load_json(agent_summary_path, default={})
+        if summary:
             current_value = _compute_portfolio_value(portfolio, summary)
-        except (FileNotFoundError, json.JSONDecodeError):
+        else:
             # Fallback: cash only (conservative estimate)
             current_value = portfolio.get("cash_sek", initial_value)
 
@@ -296,13 +292,9 @@ def log_portfolio_value(patient_path: str | None = None,
     if agent_summary_path is None:
         agent_summary_path = str(DATA_DIR / "agent_summary.json")
 
-    patient = _load_json(patient_path)
-    bold = _load_json(bold_path)
-
-    try:
-        summary = _load_json(agent_summary_path)
-    except (FileNotFoundError, json.JSONDecodeError):
-        summary = {"signals": {}, "fx_rate": 1.0}
+    patient = load_json(patient_path, default={})
+    bold = load_json(bold_path, default={})
+    summary = load_json(agent_summary_path, default={"signals": {}, "fx_rate": 1.0})
 
     patient_value = _compute_portfolio_value(patient, summary)
     bold_value = _compute_portfolio_value(bold, summary)
