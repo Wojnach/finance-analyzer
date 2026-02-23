@@ -52,7 +52,7 @@ def send_telegram(msg, config):
         except Exception:
             pass
         if "parse" in err_desc.lower() or "markdown" in err_desc.lower() or "entity" in err_desc.lower():
-            logger.warning(f"Telegram Markdown parse failed ({err_desc}), resending without formatting")
+            logger.warning("Telegram Markdown parse failed (%s), resending without formatting", err_desc)
             r2 = fetch_with_retry(
                 f"https://api.telegram.org/bot{token}/sendMessage",
                 method="POST",
@@ -119,6 +119,6 @@ def _maybe_send_alert(config, signals, prices_usd, fx_rate, state, reasons, tf_d
     msg = "\n".join(lines)
     try:
         send_telegram(msg, config)
-        logger.info(f"Alert sent: {headline}")
+        logger.info("Alert sent: %s", headline)
     except Exception as e:
-        logger.warning(f"alert send failed: {e}")
+        logger.warning("alert send failed: %s", e)

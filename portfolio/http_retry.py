@@ -1,5 +1,6 @@
 """HTTP retry utility with exponential backoff for finance-analyzer API calls."""
 
+import random
 import time
 import requests
 import logging
@@ -37,20 +38,28 @@ def fetch_with_retry(url, method="GET", retries=DEFAULT_RETRIES,
 
             if attempt < retries:
                 wait = backoff * (backoff_factor ** attempt)
-                logger.warning(f"HTTP {resp.status_code} from {url}, retry {attempt+1}/{retries} in {wait:.1f}s")
+                jitter = random.uniform(0, wait * 0.1)
+                wait += jitter
+                logger.warning("HTTP %s from %s, retry %d/%d in %.1fs",
+                               resp.status_code, url, attempt + 1, retries, wait)
                 time.sleep(wait)
             else:
-                logger.error(f"HTTP {resp.status_code} from {url} after {retries} retries")
+                logger.error("HTTP %s from %s after %d retries",
+                             resp.status_code, url, retries)
                 return resp
 
         except (requests.ConnectionError, requests.Timeout) as e:
             last_exc = e
             if attempt < retries:
                 wait = backoff * (backoff_factor ** attempt)
-                logger.warning(f"Request error {e.__class__.__name__} from {url}, retry {attempt+1}/{retries} in {wait:.1f}s")
+                jitter = random.uniform(0, wait * 0.1)
+                wait += jitter
+                logger.warning("%s from %s, retry %d/%d in %.1fs",
+                               e.__class__.__name__, url, attempt + 1, retries, wait)
                 time.sleep(wait)
             else:
-                logger.error(f"Request failed after {retries} retries: {url} - {e}")
+                logger.error("Request failed after %d retries: %s - %s",
+                             retries, url, e)
                 return None
 
     return None

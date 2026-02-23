@@ -62,7 +62,7 @@ def _fetch_headlines(ticker: str, config: dict) -> list[dict]:
                 newsapi_key or None,
             ) or []
     except Exception:
-        logger.debug(f"Failed to fetch headlines for {ticker}", exc_info=True)
+        logger.debug("Failed to fetch headlines for %s", ticker, exc_info=True)
         return []
 
 

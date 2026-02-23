@@ -60,7 +60,7 @@ def validate_config_file() -> dict:
         obj = config
         for key in key_path:
             if not isinstance(obj, dict) or key not in obj:
-                logger.warning(f"optional config key missing: {'.'.join(key_path)}")
+                logger.warning("optional config key missing: %s", '.'.join(key_path))
                 break
             obj = obj[key]
 
@@ -68,7 +68,7 @@ def validate_config_file() -> dict:
     errors = validate_config(config)
     if errors:
         for err in errors:
-            logger.error(f"config validation: {err}")
+            logger.error("config validation: %s", err)
         raise ValueError(f"config.json validation failed: {'; '.join(errors)}")
 
     logger.info("config.json validated successfully")
