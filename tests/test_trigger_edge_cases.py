@@ -472,20 +472,28 @@ class TestMultipleTriggerReasons(TriggerTestBase):
         assert any("moved" in r for r in reasons)
 
     def test_consensus_plus_fg_plus_sentiment(self):
-        """Signal consensus + F&G threshold + sentiment reversal."""
+        """Signal consensus + F&G threshold + sustained sentiment reversal."""
         sigs_hold = _make_signals(["BTC-USD"], "HOLD")
         prices = {"BTC-USD": 69000}
         fg = {"BTC-USD": {"value": 25}}
-        sent = {"BTC-USD": "positive"}
+        sent_pos = {"BTC-USD": "positive"}
 
-        check_triggers(sigs_hold, prices, fg, sent)
+        # Seed state with positive sentiment sustained (so stable_sentiment is set)
+        for _ in range(SUSTAINED_CHECKS):
+            check_triggers(sigs_hold, prices, fg, sent_pos)
 
-        # Multiple changes at once
+        sent_neg = {"BTC-USD": "negative"}
+
+        # Sustain negative sentiment for SUSTAINED_CHECKS cycles so it triggers
+        # First SUSTAINED_CHECKS-1 cycles: sentiment not yet sustained
+        for _ in range(SUSTAINED_CHECKS - 1):
+            check_triggers(sigs_hold, prices, fg, sent_neg)
+
+        # Final cycle: consensus + F&G + sustained sentiment all fire
         sigs_buy = _make_signals(["BTC-USD"], "BUY")
         fg_extreme = {"BTC-USD": {"value": 18}}  # crossed 20
-        sent_flip = {"BTC-USD": "negative"}
 
-        triggered, reasons = check_triggers(sigs_buy, prices, fg_extreme, sent_flip)
+        triggered, reasons = check_triggers(sigs_buy, prices, fg_extreme, sent_neg)
 
         assert triggered
         assert any("consensus" in r for r in reasons)

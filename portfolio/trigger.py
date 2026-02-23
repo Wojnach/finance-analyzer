@@ -1,11 +1,11 @@
 """Smart trigger system — detects meaningful market changes to reduce noise.
 
 Layer 1 runs every minute during market hours. Layer 2 is invoked when:
-- Signal consensus: any ticker has BUY or SELL consensus (signals agree)
+- Signal consensus: any ticker NEWLY reaches BUY or SELL from HOLD
 - Signal flip sustained for SUSTAINED_CHECKS consecutive cycles (~3 min)
 - Price moved >2% since last trigger
 - Fear & Greed crossed extreme threshold (20 or 80)
-- Sentiment reversal (positive↔negative)
+- Sentiment reversal: sustained for SUSTAINED_CHECKS cycles (filters oscillation)
 - Cooldown expired (1 min market hours, 2h off-hours)
 
 After a trade (BUY/SELL), the cooldown timer is reset so the agent can
@@ -90,16 +90,27 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
         state["last_trigger_time"] = 0  # reset cooldown
         reasons.append("post-trade reassessment")
 
-    # 1. Signal consensus — trigger when a ticker newly reaches BUY or SELL
-    #    Only fires when consensus is different from the last triggered state
-    prev_triggered = prev.get("signals", {})
+    # 1. Signal consensus — trigger ONLY when a ticker first reaches BUY/SELL
+    #    from HOLD. BUY↔SELL direction flips are handled by the sustained flip
+    #    trigger (#2). Uses persistent triggered_consensus that is NOT wiped
+    #    when unrelated triggers (sentiment, cooldown) fire.
+    triggered_consensus = state.get("triggered_consensus", {})
     for ticker, sig in signals.items():
         action = sig["action"]
-        if action in ("BUY", "SELL"):
-            prev_action = prev_triggered.get(ticker, {}).get("action", "HOLD")
-            if action != prev_action:
-                conf = sig.get("confidence", 0)
-                reasons.append(f"{ticker} consensus {action} ({conf:.0%})")
+        last_tc = triggered_consensus.get(ticker, "HOLD")
+        if action in ("BUY", "SELL") and last_tc == "HOLD":
+            # New consensus from HOLD — trigger immediately
+            conf = sig.get("confidence", 0)
+            reasons.append(f"{ticker} consensus {action} ({conf:.0%})")
+            triggered_consensus[ticker] = action
+        elif action == "HOLD" and last_tc != "HOLD":
+            # Consensus cleared — reset so next BUY/SELL is "new"
+            triggered_consensus[ticker] = "HOLD"
+        elif action in ("BUY", "SELL") and action != last_tc:
+            # Direction flip (BUY↔SELL) — update baseline silently,
+            # let sustained flip trigger (#2) handle it
+            triggered_consensus[ticker] = action
+    state["triggered_consensus"] = triggered_consensus
 
     # 2. Signal flip — only if sustained for SUSTAINED_CHECKS consecutive cycles
     prev_triggered = prev.get("signals", {})
@@ -148,17 +159,36 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
                 reasons.append(f"F&G crossed {threshold} ({old_val}->{val})")
                 break
 
-    # 5. Sentiment reversal
-    prev_sent = prev.get("sentiments", {})
+    # 5. Sentiment reversal — sustained for SUSTAINED_CHECKS cycles
+    #    Prevents rapid oscillation (e.g. RXRX flipping every cycle) from
+    #    triggering. Only fires when sentiment is stable in the new direction
+    #    for SUSTAINED_CHECKS consecutive cycles.
+    sustained_sent = state.get("sustained_sentiment", {})
+    stable_sent = state.get("stable_sentiment", {})
     for ticker, sent in sentiments.items():
-        old_sent = prev_sent.get(ticker)
-        if (
-            old_sent
-            and old_sent != sent
-            and sent != "neutral"
-            and old_sent != "neutral"
-        ):
-            reasons.append(f"{ticker} sentiment {old_sent}->{sent}")
+        prev_sc = sustained_sent.get(ticker, {})
+        if prev_sc.get("value") == sent:
+            sustained_sent[ticker] = {
+                "value": sent,
+                "count": prev_sc.get("count", 0) + 1,
+            }
+        else:
+            sustained_sent[ticker] = {"value": sent, "count": 1}
+
+        if sustained_sent[ticker]["count"] >= SUSTAINED_CHECKS:
+            last_stable = stable_sent.get(ticker)
+            if (
+                last_stable
+                and last_stable != sent
+                and sent != "neutral"
+                and last_stable != "neutral"
+            ):
+                reasons.append(
+                    f"{ticker} sentiment {last_stable}->{sent} (sustained)"
+                )
+            stable_sent[ticker] = sent
+    state["sustained_sentiment"] = sustained_sent
+    state["stable_sentiment"] = stable_sent
 
     # 6. Cooldown expired — safety net to ensure periodic check-ins
     last_trigger_time = state.get("last_trigger_time", 0)
