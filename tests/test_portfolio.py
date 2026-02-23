@@ -532,12 +532,16 @@ class TestTriggerSystem:
         assert any("F&G" in r for r in reasons)
 
     def test_sentiment_reversal_triggers(self):
-        from portfolio.trigger import check_triggers
+        from portfolio.trigger import check_triggers, SUSTAINED_CHECKS
 
         sigs = self._make_signals()
         prices = {"BTC-USD": 69000, "ETH-USD": 2000}
-        check_triggers(sigs, prices, {}, {"BTC-USD": "positive"})
-        triggered, reasons = check_triggers(sigs, prices, {}, {"BTC-USD": "negative"})
+        # Sustain "positive" for SUSTAINED_CHECKS cycles to establish stable baseline
+        for _ in range(SUSTAINED_CHECKS):
+            check_triggers(sigs, prices, {}, {"BTC-USD": "positive"})
+        # Sustain "negative" for SUSTAINED_CHECKS cycles to trigger reversal
+        for _ in range(SUSTAINED_CHECKS):
+            triggered, reasons = check_triggers(sigs, prices, {}, {"BTC-USD": "negative"})
         assert triggered
         assert any("sentiment" in r for r in reasons)
 
