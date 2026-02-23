@@ -225,13 +225,30 @@ def write_agent_summary(
     return summary
 
 
-def _write_compact_summary(summary):
-    """Write a stripped version of agent_summary for Layer 2 (<25K tokens).
+def _get_held_tickers():
+    """Return set of tickers held in either Patient or Bold portfolio."""
+    held = set()
+    for fname in ("portfolio_state.json", "portfolio_state_bold.json"):
+        try:
+            state = json.loads((DATA_DIR / fname).read_text(encoding="utf-8"))
+            for ticker, pos in state.get("holdings", {}).items():
+                if pos.get("shares", 0) > 0:
+                    held.add(ticker)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+    return held
 
-    Removes enhanced_signals (already in extra._votes) and verbose extra fields,
-    keeping only the essentials Layer 2 needs for decision-making.
+
+def _write_compact_summary(summary):
+    """Write a stripped version of agent_summary for Layer 2 (<15K tokens).
+
+    Full detail (including per-signal _votes) only for "interesting" tickers:
+      - Non-HOLD consensus (action != "HOLD")
+      - Active position in either portfolio
+    HOLD tickers with no position get a minimal entry (no _votes dict,
+    no per-signal extras) to save ~25 lines each.
     """
-    KEEP_EXTRA = {
+    KEEP_EXTRA_FULL = {
         "fear_greed", "fear_greed_class",
         "sentiment", "sentiment_conf",
         "ml_action", "ml_confidence",
@@ -242,6 +259,17 @@ def _write_compact_summary(summary):
         "_votes", "_weighted_action", "_weighted_confidence",
         "_confluence_score",
     }
+    # Minimal extra for HOLD-no-position tickers (just counts, no per-signal votes)
+    KEEP_EXTRA_MINIMAL = {
+        "_voters", "_total_applicable", "_buy_count", "_sell_count",
+        "_weighted_action", "_weighted_confidence",
+    }
+    # Minimal top-level fields for HOLD-no-position tickers
+    KEEP_TICKER_MINIMAL = {
+        "action", "confidence", "price_usd", "rsi", "regime", "extra",
+    }
+
+    held_tickers = _get_held_tickers()
 
     # Build compact version without full deep copy — only copy sub-dicts we modify
     compact = {k: v for k, v in summary.items()
@@ -249,17 +277,49 @@ def _write_compact_summary(summary):
 
     compact["signals"] = {}
     for ticker, ticker_data in summary.get("signals", {}).items():
-        td = {k: v for k, v in ticker_data.items() if k != "enhanced_signals"}
-        if "extra" in td:
-            td["extra"] = {k: v for k, v in td["extra"].items() if k in KEEP_EXTRA}
+        action = ticker_data.get("action", "HOLD")
+        is_held = ticker in held_tickers
+        is_interesting = action != "HOLD" or is_held
+
+        if is_interesting:
+            # Keep all fields except enhanced_signals
+            td = {k: v for k, v in ticker_data.items() if k != "enhanced_signals"}
+            if "extra" in td:
+                extra = {k: v for k, v in td["extra"].items()
+                         if k in KEEP_EXTRA_FULL}
+                # For non-held tickers, collapse _votes dict into a compact string
+                # to save ~23 lines per ticker while preserving the info
+                if not is_held and "_votes" in extra:
+                    votes = extra["_votes"]
+                    buys = [s for s, v in votes.items() if v == "BUY"]
+                    sells = [s for s, v in votes.items() if v == "SELL"]
+                    parts = []
+                    if buys:
+                        parts.append("B:" + ",".join(buys))
+                    if sells:
+                        parts.append("S:" + ",".join(sells))
+                    extra["_vote_detail"] = " | ".join(parts) if parts else "none"
+                    del extra["_votes"]
+                td["extra"] = extra
+        else:
+            # Minimal — just enough to know price and that it's HOLD
+            td = {k: v for k, v in ticker_data.items()
+                  if k in KEEP_TICKER_MINIMAL and k != "extra"}
+            if "extra" in ticker_data:
+                td["extra"] = {k: v for k, v in ticker_data["extra"].items()
+                               if k in KEEP_EXTRA_MINIMAL}
+
         compact["signals"][ticker] = td
 
+    # Only include timeframes for interesting tickers
     compact["timeframes"] = {}
     for ticker, tf_list in summary.get("timeframes", {}).items():
-        compact["timeframes"][ticker] = [
-            {"horizon": tf["horizon"], "action": tf.get("action", "HOLD")}
-            if "error" not in tf else {"horizon": tf["horizon"], "error": tf["error"]}
-            for tf in tf_list
-        ]
+        action = summary.get("signals", {}).get(ticker, {}).get("action", "HOLD")
+        if action != "HOLD" or ticker in held_tickers:
+            compact["timeframes"][ticker] = [
+                {"horizon": tf["horizon"], "action": tf.get("action", "HOLD")}
+                if "error" not in tf else {"horizon": tf["horizon"], "error": tf["error"]}
+                for tf in tf_list
+            ]
 
     _atomic_write_json(COMPACT_SUMMARY_FILE, compact)

@@ -22,7 +22,7 @@ INVOCATIONS_FILE = DATA_DIR / "invocations.jsonl"
 _agent_proc = None
 _agent_log = None
 _agent_start = 0
-AGENT_TIMEOUT = 600
+AGENT_TIMEOUT = 900
 
 
 def _log_trigger(reasons, status):
