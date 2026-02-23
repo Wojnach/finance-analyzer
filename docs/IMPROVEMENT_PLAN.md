@@ -1,107 +1,89 @@
-# Improvement Plan — Auto Session 2026-02-22 (Phase 3)
+# Improvement Plan — Auto Session 2026-02-23
 
-> Based on deep reading of all ~90 Python files, 1101 passing tests.
-> Prior sessions completed: signal_utils extraction, thread-safe cache writes,
-> DB connection reuse, cached accuracy, kline dedup, dashboard validation dedup,
-> structured logging, bigbet improvements. This plan covers NEW work.
+> Based on deep exploration of all ~76 Python files, 1332 passing tests.
+> Previous session (Feb 22) completed: signal_utils extraction, thread-safe cache,
+> DB connection reuse, cached accuracy, kline dedup, API URL centralization,
+> atomic JSONL appends, encoding fixes, accuracy param optimization.
 
-## Priority 1: Bugs & Correctness
+## Priority 1: Bugs & Stale Tests
 
-### B1. Triple yfinance rate limiter (not coordinating)
-**Files:** `shared_state.py:85`, `macro_context.py:18`, `outcome_tracker.py:11`
-**Bug:** Three separate `_RateLimiter(30, "yfinance")` instances. Each allows
-30 req/min independently, so yfinance could be hit at 90 req/min (3×30).
-**Fix:** Delete local instances in macro_context.py and outcome_tracker.py,
-import from shared_state.py instead.
-**Impact:** Prevents yfinance rate limit violations.
+### B1. Stale cooldown test assertion
+**File:** `tests/test_trigger_edge_cases.py:526`
+**Bug:** `assert COOLDOWN_SECONDS == 60` but actual value is `600` (changed to 10min).
+**Fix:** Update assertion to `assert COOLDOWN_SECONDS == 600` and rename test.
+**Impact:** Eliminates 1 of 2 failing tests.
 
-### B2. `_crash_alert()` opens config.json without encoding
-**File:** `main.py:305`
-**Bug:** `json.load(open(config_path))` — no `encoding="utf-8"`. On Windows,
-defaults to system locale, could fail on non-ASCII config values.
-**Fix:** Add `encoding="utf-8"` to the open() call.
-**Impact:** Trivial fix, prevents crash-handler crash.
+### B2. Sentiment reversal test doesn't respect SUSTAINED_CHECKS
+**File:** `tests/test_portfolio.py:534-542`
+**Bug:** Test calls `check_triggers` only twice, but sentiment reversal requires
+`SUSTAINED_CHECKS = 3` consecutive cycles to fire. Test was written before the
+sustained-check requirement was added.
+**Fix:** Call check_triggers 3+ times with consistent sentiment to satisfy sustained
+check, THEN flip to trigger the reversal.
+**Impact:** Eliminates the other pre-existing test failure.
 
-### B3. `best_worst_signals()` redundantly calls `signal_accuracy()`
-**File:** `accuracy_stats.py:153-164`, called from `reporting.py:161`
-**Bug:** `reporting.py` computes `sig_acc = signal_accuracy("1d")` on line ~157,
-then calls `best_worst_signals("1d")` which internally calls `signal_accuracy()`
-again. Loads and filters the entire signal log twice.
-**Fix:** Add optional `acc=None` parameter; if provided, skip internal call.
-Update reporting.py to pass pre-computed data.
-**Impact:** Avoids redundant full-log scan per cycle.
+### B3. Silent exception swallowing in accuracy_stats.py
+**File:** `accuracy_stats.py` lines 28-29, 251-252, 256-257
+**Bug:** Three `except: pass` patterns silently swallow errors. SQLite failures,
+cache corruption, and cache write failures go unlogged.
+**Fix:** Add `logger.debug()` or `logger.warning()` to each catch.
+**Impact:** Makes debugging accuracy issues possible.
 
-### B4. Unused `import sys` in analyze.py
-**File:** `analyze.py:11`
-**Bug:** `import sys` is never used.
-**Fix:** Remove the import.
-**Impact:** Trivial cleanup.
+## Priority 2: Code Quality & Deduplication
 
-## Priority 2: Architecture & Deduplication
+### A1. Duplicate _load_json/_load_jsonl helpers (4+2 copies)
+**Files:** `kelly_sizing.py:20`, `regime_alerts.py:30,34`, `risk_management.py:20`,
+`weekly_digest.py:28,32`
+**Bug:** Each reimplements a wrapper around `file_utils.load_json()`.
+**Fix:** Replace all with direct import from `file_utils.py`. For `weekly_digest._load_jsonl`
+which adds a `since` time filter, inline the filtering at the call site.
+**Impact:** ~40 lines of duplicated code removed.
 
-### A1. Duplicate JSON/JSONL loading helpers (7+ copies)
-**Files:** kelly_sizing.py, regime_alerts.py, risk_management.py, stats.py,
-weekly_digest.py, dashboard/app.py
-**Bug:** ~230 lines of identical `_load_json()` / `_load_jsonl()` functions.
-**Fix:** Add `load_json()` and `load_jsonl()` to `file_utils.py`. Update all
-modules to import from there.
-**Impact:** Reduces duplication, ensures consistent encoding/error handling.
+### A2. f-string formatting in logger calls (25+ instances)
+**Files:** `http_retry.py`, `shared_state.py`, `signal_engine.py`, `main.py`,
+`forecast_signal.py`, `agent_invocation.py`, `telegram_notifications.py`, `news_event.py`
+**Bug:** `logger.warning(f"...")` does eager string formatting even when the log
+level is filtered out. Should use `logger.warning("...", arg1, arg2)`.
+**Fix:** Convert to %-style formatting in all logger calls.
+**Impact:** Minor performance improvement, follows Python logging best practices.
 
-### A2. Binance/Alpaca API URL duplication (4+ files)
-**Files:** data_collector.py, iskbets.py, macro_context.py, ml_signal.py,
-outcome_tracker.py, data_refresh.py, funding_rate.py
-**Bug:** `BINANCE_BASE`, `BINANCE_FAPI_BASE`, `ALPACA_BASE` defined
-independently in multiple files.
-**Fix:** Define canonical URL constants in `api_utils.py` (already has
-config/header helpers). Update all modules to import from there.
-**Impact:** Single source of truth for API endpoints.
+## Priority 3: Robustness
 
-## Priority 3: Performance
+### R1. HTTP retry without jitter
+**File:** `http_retry.py:38-41, 48-51`
+**Bug:** Pure exponential backoff (1s, 2s, 4s) with no randomization. Multiple
+clients retrying simultaneously will all hit the server at the same moment.
+**Fix:** Add `random.uniform(0, wait * 0.1)` jitter (10% of wait time).
+**Impact:** Prevents thundering herd on API failures.
 
-### P1. `copy.deepcopy` in reporting.py
-**File:** `reporting.py:247`
-**Bug:** `copy.deepcopy(summary)` copies the entire agent_summary dict
-(30+ tickers × 7 timeframes). Only top-level fields are modified.
-**Fix:** Shallow copy the dict, deep copy only the `signals` sub-dict
-(which gets mutated).
-**Impact:** Reduces CPU/memory cost per reporting cycle.
-
-### P2. `backfill_outcomes()` loads entire JSONL into memory
-**File:** `outcome_tracker.py:262-267`
-**Bug:** Reads all entries into a list before processing. File grows
-monotonically.
-**Fix:** Stream entries and process in-place, or use SQLite query
-(SignalDB already has the data).
-**Impact:** Reduces memory spikes during daily backfill.
-
-## Priority 4: Robustness
-
-### R1. `_log_trigger()` non-atomic append
-**File:** `agent_invocation.py:33`
-**Bug:** Regular `open("a")` append. If two processes race, JSONL lines
-could interleave and corrupt.
-**Fix:** Use `file_utils.atomic_append_jsonl()` (to be added in A1).
-**Impact:** Low probability (single writer normally), but cheap to fix.
+### R2. Architecture doc drift
+**File:** `docs/architecture-plan.md`
+**Bug:** Says 25 signals, 1min cooldown, MIN_VOTERS=2 for stocks. All stale.
+**Fix:** Update to reflect current reality: 27 signals, 10min cooldown, MIN_VOTERS=3.
+**Impact:** Keeps documentation truthful.
 
 ## Execution Order
 
-### Batch 1: Rate limiter + encoding + accuracy fix (B1, B2, B3, B4)
-Files: shared_state.py, macro_context.py, outcome_tracker.py, main.py,
-accuracy_stats.py, reporting.py, analyze.py
-- Consolidate yfinance rate limiter to shared_state.py
-- Fix encoding in _crash_alert
-- Add pre-computed data param to best_worst_signals
-- Remove unused import
+### Batch 1: Fix failing tests (B1, B2) — 2 files
+- `tests/test_trigger_edge_cases.py` — Update cooldown assertion
+- `tests/test_portfolio.py` — Fix sentiment reversal test
 
-### Batch 2: Deduplication (A1, A2)
-Files: file_utils.py, kelly_sizing.py, regime_alerts.py, risk_management.py,
-stats.py, weekly_digest.py, dashboard/app.py, api_utils.py, data_collector.py,
-iskbets.py, macro_context.py, ml_signal.py, outcome_tracker.py
-- Extract shared JSON helpers to file_utils.py
-- Centralize API URLs in api_utils.py
+### Batch 2: Silent exceptions + deduplication (B3, A1) — 6 files
+- `accuracy_stats.py` — Add logging to silent catches
+- `kelly_sizing.py` — Replace _load_json with file_utils.load_json
+- `regime_alerts.py` — Replace _load_json/_load_jsonl
+- `risk_management.py` — Replace _load_json
+- `weekly_digest.py` — Replace _load_json/_load_jsonl
 
-### Batch 3: Performance + robustness (P1, P2, R1)
-Files: reporting.py, outcome_tracker.py, agent_invocation.py, file_utils.py
-- Optimize deepcopy in reporting
-- Stream backfill_outcomes
-- Add atomic JSONL append to file_utils, use in agent_invocation
+### Batch 3: Logger formatting + jitter (A2, R1) — 9 files
+- `http_retry.py` — Add jitter + fix f-string loggers
+- `shared_state.py` — Fix f-string logger
+- `signal_engine.py` — Fix f-string logger
+- `main.py` — Fix f-string loggers (18+ instances)
+- `forecast_signal.py` — Fix f-string loggers
+- `agent_invocation.py` — Fix f-string logger
+- `telegram_notifications.py` — Fix f-string logger
+- `signals/news_event.py` — Fix f-string logger
+
+### Batch 4: Documentation (R2) — 1 file
+- `docs/architecture-plan.md` — Update stale values
