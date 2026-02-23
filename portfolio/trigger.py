@@ -31,6 +31,10 @@ FG_THRESHOLDS = (20, 80)  # extreme fear / extreme greed boundaries
 SUSTAINED_CHECKS = 3  # consecutive cycles a signal must hold before triggering
 
 
+def _today_str():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
 def _load_state():
     if STATE_FILE.exists():
         return json.loads(STATE_FILE.read_text(encoding="utf-8"))
@@ -218,4 +222,64 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
     state["sustained_counts"] = sustained
     _save_state(state)
 
+    # Track today_date for first-of-day detection
+    state["today_date"] = _today_str()
+
     return triggered, reasons
+
+
+# ---------------------------------------------------------------------------
+# Tier classification
+# ---------------------------------------------------------------------------
+
+# Full review interval: 2h during market hours, 4h off-hours
+_FULL_REVIEW_MARKET_HOURS = 2
+_FULL_REVIEW_OFF_HOURS = 4
+
+
+def classify_tier(reasons, state=None):
+    """Classify trigger reasons into invocation tier (1=quick, 2=signal, 3=full).
+
+    Tier 3 (Full Review): periodic review, F&G extreme, first of day.
+    Tier 2 (Signal Analysis): new consensus, price moves, post-trade, signal flips.
+    Tier 1 (Quick Check): cooldowns, sentiment noise, repeated triggers.
+    """
+    if state is None:
+        state = _load_state()
+
+    # Tier 3: periodic full review
+    last_full = state.get("last_full_review_time", 0)
+    hours_since = (time.time() - last_full) / 3600
+
+    now_utc = datetime.now(timezone.utc)
+    from portfolio.market_timing import _market_close_hour_utc
+    close_hour = _market_close_hour_utc(now_utc)
+    market_open = now_utc.weekday() < 5 and 7 <= now_utc.hour < close_hour
+
+    if market_open and hours_since >= _FULL_REVIEW_MARKET_HOURS:
+        return 3
+    if not market_open and hours_since >= _FULL_REVIEW_OFF_HOURS:
+        return 3
+    if any("F&G crossed" in r for r in reasons):
+        return 3
+    if state.get("today_date") != _today_str():
+        return 3  # first invocation of the day
+
+    # Tier 2: new actionable signals
+    tier2_patterns = ["consensus", "moved", "post-trade", "flipped"]
+    if any(p in r for r in reasons for p in tier2_patterns):
+        return 2
+
+    # Tier 1: cooldowns, sentiment noise, repeated triggers
+    return 1
+
+
+def update_tier_state(tier):
+    """Update trigger state after a tier classification.
+
+    Called by the main loop after classify_tier() to persist tier-specific state.
+    """
+    state = _load_state()
+    if tier == 3:
+        state["last_full_review_time"] = time.time()
+    _save_state(state)

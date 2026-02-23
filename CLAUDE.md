@@ -28,6 +28,23 @@ Layer 1 runs every minute during market hours. You (Layer 2) are invoked when a 
 
 The trigger reason is included in the invocation context.
 
+## Invocation Tiers
+
+You may be invoked at different tiers depending on the trigger importance:
+
+**Tier 1 (Quick Check):** Read `data/layer2_context.md` then `data/agent_context_t1.json`.
+Confirm held positions are OK (check ATR stops). Write brief journal + short Telegram.
+Do NOT analyze all tickers — focus only on held positions and macro headline.
+
+**Tier 2 (Signal Analysis):** Read `data/layer2_context.md`, then `data/agent_context_t2.json`
++ portfolio states. Analyze triggered tickers and held positions. Full journal + Telegram.
+
+**Tier 3 (Full Review):** Read `data/agent_summary_compact.json` + portfolio states.
+Full cross-asset analysis of all 30+ instruments. This is the default behavior described below.
+
+Your prompt tells you which tier this is. Follow the tier-appropriate behavior — lower tiers
+should complete faster by reading less data and writing shorter analysis.
+
 ## Dual Strategy Mode
 
 You manage TWO independent simulated portfolios in a single invocation:

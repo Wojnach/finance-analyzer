@@ -101,13 +101,35 @@ from portfolio.telegram_notifications import (  # noqa: E402, F401
 # Agent invocation re-exports
 from portfolio.agent_invocation import (  # noqa: E402, F401
     invoke_agent, _log_trigger,
-    INVOCATIONS_FILE, AGENT_TIMEOUT,
+    INVOCATIONS_FILE, AGENT_TIMEOUT, TIER_CONFIG,
 )
 
 # Digest re-exports
 from portfolio.digest import _maybe_send_digest  # noqa: E402, F401
 
 CONFIG_FILE = BASE_DIR / "config.json"
+
+
+# --- Helpers ---
+
+import re as _re
+
+def _extract_triggered_tickers(reasons):
+    """Parse ticker names from trigger reason strings.
+
+    Examples:
+        "MU consensus BUY (79%)" -> "MU"
+        "BTC-USD moved 3.1% up" -> "BTC-USD"
+        "ETH-USD flipped SELL->BUY (sustained)" -> "ETH-USD"
+    """
+    tickers = set()
+    # Known ticker patterns: uppercase letters/digits optionally followed by -USD
+    ticker_pat = _re.compile(r'^([A-Z][A-Z0-9]*(?:-[A-Z]+)?)\s+(?:consensus|moved|flipped)')
+    for reason in reasons:
+        m = ticker_pat.match(reason)
+        if m:
+            tickers.add(m.group(1))
+    return tickers
 
 
 # --- Main orchestrator ---
@@ -238,8 +260,17 @@ def run(force_report=False, active_symbols=None):
 
     if triggered or force_report:
         reasons_list = reasons if reasons else ["startup"]
-        write_agent_summary(signals, prices_usd, fx_rate, state, tf_data, reasons_list)
+        summary = write_agent_summary(signals, prices_usd, fx_rate, state, tf_data, reasons_list)
         logger.info(f"Trigger: {', '.join(reasons_list)}")
+
+        # Classify tier and write tier-specific context
+        from portfolio.trigger import classify_tier, update_tier_state
+        from portfolio.reporting import write_tiered_summary
+        tier = classify_tier(reasons_list)
+        triggered_tickers = _extract_triggered_tickers(reasons_list)
+        write_tiered_summary(summary, tier, triggered_tickers)
+        update_tier_state(tier)
+        logger.info(f"Tier: T{tier} ({TIER_CONFIG.get(tier, {}).get('label', 'UNKNOWN')})")
 
         try:
             from portfolio.outcome_tracker import log_signal_snapshot
@@ -250,20 +281,20 @@ def run(force_report=False, active_symbols=None):
         layer2_cfg = config.get("layer2", {})
         if os.environ.get("NO_TELEGRAM"):
             logger.info("[NO_TELEGRAM] Skipping agent invocation")
-            _log_trigger(reasons_list, "skipped_test")
+            _log_trigger(reasons_list, "skipped_test", tier=tier)
         elif layer2_cfg.get("enabled", True):
             if _is_agent_window():
-                result = invoke_agent(reasons_list)
-                _log_trigger(reasons_list, "invoked" if result else "skipped_busy")
+                result = invoke_agent(reasons_list, tier=tier)
+                _log_trigger(reasons_list, "invoked" if result else "skipped_busy", tier=tier)
             else:
                 logger.info("Layer 2: outside market window, skipping")
-                _log_trigger(reasons_list, "skipped_offhours")
+                _log_trigger(reasons_list, "skipped_offhours", tier=tier)
         else:
             logger.info("Layer 2 disabled — skipping agent invocation")
             _maybe_send_alert(
                 config, signals, prices_usd, fx_rate, state, reasons_list, tf_data
             )
-            _log_trigger(reasons_list, "alert_only")
+            _log_trigger(reasons_list, "alert_only", tier=tier)
     else:
         write_agent_summary(signals, prices_usd, fx_rate, state, tf_data)
         logger.info("No trigger.")

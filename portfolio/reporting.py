@@ -19,6 +19,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 AGENT_SUMMARY_FILE = DATA_DIR / "agent_summary.json"
 COMPACT_SUMMARY_FILE = DATA_DIR / "agent_summary_compact.json"
+TIER1_FILE = DATA_DIR / "agent_context_t1.json"
+TIER2_FILE = DATA_DIR / "agent_context_t2.json"
 
 
 def _cross_asset_signals(all_signals):
@@ -323,3 +325,231 @@ def _write_compact_summary(summary):
             ]
 
     _atomic_write_json(COMPACT_SUMMARY_FILE, compact)
+
+
+# ---------------------------------------------------------------------------
+# Tiered summary generators (T1 quick-check, T2 signal-analysis)
+# T3 uses the existing compact summary unchanged.
+# ---------------------------------------------------------------------------
+
+def write_tiered_summary(summary, tier, triggered_tickers=None):
+    """Write a tier-specific context file for Layer 2 invocation.
+
+    Args:
+        summary: Full agent_summary dict (from write_agent_summary).
+        tier: 1, 2, or 3.
+        triggered_tickers: Set of tickers that caused the trigger (for T2 filtering).
+    """
+    if tier == 1:
+        _write_tier1_summary(summary)
+    elif tier == 2:
+        _write_tier2_summary(summary, triggered_tickers)
+    # Tier 3 uses existing agent_summary_compact.json — no extra file needed
+
+
+def _portfolio_snapshot(state_file):
+    """Load a portfolio state file and return a compact snapshot dict."""
+    try:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+        cash = state.get("cash_sek", 0)
+        initial = state.get("initial_value_sek", 500000)
+        pnl_pct = round(((cash - initial) / initial) * 100, 2) if initial else 0
+        return {
+            "cash_sek": round(cash),
+            "total_sek": round(cash),  # approximate — no live prices in snapshot
+            "pnl_pct": pnl_pct,
+        }
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"cash_sek": 0, "total_sek": 0, "pnl_pct": 0}
+
+
+def _macro_headline(summary):
+    """Build a one-line macro headline from summary data."""
+    parts = []
+    macro = summary.get("macro", {})
+    dxy = macro.get("dxy", {})
+    if dxy:
+        val = dxy.get("value", dxy.get("close"))
+        change_5d = dxy.get("change_5d_pct", 0)
+        arrow = "↑" if change_5d > 0 else "↓" if change_5d < 0 else ""
+        if val:
+            parts.append(f"DXY {val:.0f}{arrow}" if val > 10 else f"DXY {val}{arrow}")
+
+    treasury = macro.get("treasury", {})
+    y10 = treasury.get("10y")
+    if y10:
+        change_5d = treasury.get("10y_change_5d_pct", 0)
+        arrow = "↑" if change_5d > 0 else "↓" if change_5d < 0 else ""
+        parts.append(f"10Y {y10}{arrow}")
+
+    # F&G: try to get crypto and stock values
+    fg = summary.get("fear_greed", {})
+    fg_vals = []
+    for ticker in ("BTC-USD", "ETH-USD"):
+        v = fg.get(ticker, {}).get("value")
+        if v is not None:
+            fg_vals.append(str(v))
+            break
+    # Use first stock F&G if available
+    for ticker, fgd in fg.items():
+        if ticker not in ("BTC-USD", "ETH-USD") and isinstance(fgd, dict):
+            v = fgd.get("value")
+            if v is not None:
+                fg_vals.append(str(v))
+                break
+    if fg_vals:
+        parts.append(f"F&G {'/'.join(fg_vals)}")
+
+    fed = macro.get("fed", {})
+    days = fed.get("days_until")
+    if days is not None:
+        parts.append(f"FOMC {days}d")
+
+    return " · ".join(parts) if parts else ""
+
+
+def _write_tier1_summary(summary):
+    """Tier 1: Quick check — held positions only + macro headline + all prices."""
+    held_tickers = _get_held_tickers()
+    signals = summary.get("signals", {})
+    timeframes = summary.get("timeframes", {})
+
+    t1 = {
+        "tier": 1,
+        "timestamp": summary.get("timestamp", ""),
+        "trigger_reasons": summary.get("trigger_reasons", []),
+        "fx_rate": summary.get("fx_rate", 0),
+        "held_positions": {},
+        "portfolio_patient": _portfolio_snapshot(DATA_DIR / "portfolio_state.json"),
+        "portfolio_bold": _portfolio_snapshot(DATA_DIR / "portfolio_state_bold.json"),
+        "macro_headline": _macro_headline(summary),
+        "all_prices": {},
+    }
+
+    # Held positions with actionable detail
+    for ticker in held_tickers:
+        sig = signals.get(ticker, {})
+        extra = sig.get("extra", {})
+        entry = {
+            "price_usd": sig.get("price_usd", 0),
+            "action": sig.get("action", "HOLD"),
+            "confidence": sig.get("confidence", 0),
+            "rsi": sig.get("rsi", 0),
+            "regime": sig.get("regime", "unknown"),
+            "atr_pct": sig.get("atr_pct", 0),
+            "votes": f"{extra.get('_buy_count', 0)}B/{extra.get('_sell_count', 0)}S/{extra.get('_voters', 0) - extra.get('_buy_count', 0) - extra.get('_sell_count', 0)}H",
+        }
+        # Compact timeframe heatmap
+        tf_list = timeframes.get(ticker, [])
+        if tf_list:
+            heatmap = ""
+            for tf in tf_list:
+                a = tf.get("action", "HOLD")
+                heatmap += "B" if a == "BUY" else "S" if a == "SELL" else "·"
+            entry["timeframes"] = heatmap
+        t1["held_positions"][ticker] = entry
+
+    # All prices for context comparison
+    for ticker, sig in signals.items():
+        t1["all_prices"][ticker] = round(sig.get("price_usd", 0), 2)
+
+    _atomic_write_json(TIER1_FILE, t1)
+
+
+def _write_tier2_summary(summary, triggered_tickers=None):
+    """Tier 2: Signal analysis — triggered + held + top 5 interesting tickers."""
+    held_tickers = _get_held_tickers()
+    triggered_tickers = triggered_tickers or set()
+    signals = summary.get("signals", {})
+    timeframes = summary.get("timeframes", {})
+
+    KEEP_EXTRA_FULL = {
+        "fear_greed", "fear_greed_class",
+        "sentiment", "sentiment_conf",
+        "ml_action", "ml_confidence",
+        "funding_rate", "funding_action",
+        "volume_ratio", "volume_action",
+        "ministral_action",
+        "_voters", "_total_applicable", "_buy_count", "_sell_count",
+        "_votes", "_weighted_action", "_weighted_confidence",
+        "_confluence_score",
+    }
+
+    # Categorize tickers
+    full_detail_tickers = held_tickers | triggered_tickers
+    remaining = []
+    for ticker, sig in signals.items():
+        if ticker not in full_detail_tickers:
+            buy_count = sig.get("extra", {}).get("_buy_count", 0) or 0
+            sell_count = sig.get("extra", {}).get("_sell_count", 0) or 0
+            active = buy_count + sell_count
+            remaining.append((ticker, active, sig))
+
+    # Top 5 non-triggered non-held by active voter count
+    remaining.sort(key=lambda x: x[1], reverse=True)
+    medium_tickers = {t for t, _, _ in remaining[:5]}
+
+    t2 = {
+        "tier": 2,
+        "timestamp": summary.get("timestamp", ""),
+        "trigger_reasons": summary.get("trigger_reasons", []),
+        "fx_rate": summary.get("fx_rate", 0),
+        "signals": {},
+        "timeframes": {},
+    }
+
+    for ticker, sig in signals.items():
+        if ticker in full_detail_tickers:
+            # Full detail — same as compact summary for held/interesting tickers
+            td = {k: v for k, v in sig.items() if k != "enhanced_signals"}
+            if "extra" in td:
+                td["extra"] = {k: v for k, v in td["extra"].items()
+                               if k in KEEP_EXTRA_FULL}
+            t2["signals"][ticker] = td
+            # Include timeframes
+            tf_list = timeframes.get(ticker, [])
+            if tf_list:
+                t2["timeframes"][ticker] = [
+                    {"horizon": tf["horizon"], "action": tf.get("action", "HOLD")}
+                    if "error" not in tf else {"horizon": tf["horizon"], "error": tf["error"]}
+                    for tf in tf_list
+                ]
+        elif ticker in medium_tickers:
+            # Medium detail — vote detail string + timeframes, no full _votes
+            td = {k: v for k, v in sig.items() if k != "enhanced_signals"}
+            if "extra" in td:
+                extra = {k: v for k, v in td["extra"].items() if k in KEEP_EXTRA_FULL}
+                if "_votes" in extra:
+                    votes = extra["_votes"]
+                    buys = [s for s, v in votes.items() if v == "BUY"]
+                    sells = [s for s, v in votes.items() if v == "SELL"]
+                    parts = []
+                    if buys:
+                        parts.append("B:" + ",".join(buys))
+                    if sells:
+                        parts.append("S:" + ",".join(sells))
+                    extra["_vote_detail"] = " | ".join(parts) if parts else "none"
+                    del extra["_votes"]
+                td["extra"] = extra
+            t2["signals"][ticker] = td
+            tf_list = timeframes.get(ticker, [])
+            if tf_list:
+                t2["timeframes"][ticker] = [
+                    {"horizon": tf["horizon"], "action": tf.get("action", "HOLD")}
+                    if "error" not in tf else {"horizon": tf["horizon"], "error": tf["error"]}
+                    for tf in tf_list
+                ]
+        else:
+            # Price-only one-liner
+            t2["signals"][ticker] = {
+                "action": sig.get("action", "HOLD"),
+                "price_usd": sig.get("price_usd", 0),
+            }
+
+    # Include macro, accuracy, portfolio sections from full summary
+    for key in ("macro", "signal_accuracy_1d", "cross_asset_leads",
+                "avanza_instruments", "portfolio"):
+        if key in summary:
+            t2[key] = summary[key]
+
+    _atomic_write_json(TIER2_FILE, t2)
