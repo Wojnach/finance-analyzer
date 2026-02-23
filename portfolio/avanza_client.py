@@ -1,4 +1,4 @@
-"""Avanza API client for portfolio monitoring.
+"""Avanza API client for portfolio monitoring and trading.
 
 Uses the avanza-api library to authenticate and interact with Avanza's
 trading platform. Credentials are read from config.json under the 'avanza' key.
@@ -12,8 +12,12 @@ Required config.json entry:
 """
 
 import json
+import logging
+from datetime import date
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger("portfolio.avanza_client")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_FILE = BASE_DIR / "config.json"
@@ -146,3 +150,131 @@ def get_portfolio_value() -> float:
     for account in overview.get("accounts", []):
         total += account.get("totalValue", 0)
     return total
+
+
+# --- Account ID ---
+
+_account_id: Optional[str] = None
+
+
+def get_account_id() -> str:
+    """Get ISK account ID from Avanza overview (cached after first call).
+
+    Scans all accounts and returns the first one whose type contains 'ISK'.
+
+    Returns:
+        Account ID string
+
+    Raises:
+        RuntimeError: if no ISK account is found
+    """
+    global _account_id
+    if _account_id is not None:
+        return _account_id
+    client = get_client()
+    overview = client.get_overview()
+    for account in overview.get("accounts", []):
+        atype = account.get("accountType", "")
+        if "ISK" in atype.upper():
+            _account_id = str(account["accountId"])
+            logger.info("Found ISK account: %s", _account_id)
+            return _account_id
+    raise RuntimeError(
+        "No ISK account found in Avanza overview. "
+        f"Account types: {[a.get('accountType') for a in overview.get('accounts', [])]}"
+    )
+
+
+# --- Trading functions ---
+
+
+def place_buy_order(
+    orderbook_id: str,
+    price: float,
+    volume: int,
+    valid_until: Optional[date] = None,
+) -> dict:
+    """Place a limit BUY order on Avanza.
+
+    Args:
+        orderbook_id: Avanza orderbook ID for the instrument
+        price: Limit price in SEK
+        volume: Number of shares (must be int >= 1)
+        valid_until: Order expiry date. Defaults to today (day order).
+
+    Returns:
+        Dict with orderId, orderRequestStatus, message
+    """
+    from avanza.constants import OrderType
+    return _place_order(orderbook_id, OrderType.BUY, price, volume, valid_until)
+
+
+def place_sell_order(
+    orderbook_id: str,
+    price: float,
+    volume: int,
+    valid_until: Optional[date] = None,
+) -> dict:
+    """Place a limit SELL order on Avanza.
+
+    Args:
+        orderbook_id: Avanza orderbook ID for the instrument
+        price: Limit price in SEK
+        volume: Number of shares (must be int >= 1)
+        valid_until: Order expiry date. Defaults to today (day order).
+
+    Returns:
+        Dict with orderId, orderRequestStatus, message
+    """
+    from avanza.constants import OrderType
+    return _place_order(orderbook_id, OrderType.SELL, price, volume, valid_until)
+
+
+def _place_order(orderbook_id, order_type, price, volume, valid_until):
+    """Internal: place an order via the Avanza API."""
+    if volume < 1:
+        raise ValueError(f"Volume must be >= 1, got {volume}")
+    if price <= 0:
+        raise ValueError(f"Price must be > 0, got {price}")
+
+    client = get_client()
+    account_id = get_account_id()
+    expiry = valid_until or date.today()
+
+    logger.info(
+        "Placing %s order: orderbook=%s price=%.2f vol=%d until=%s account=%s",
+        order_type.value, orderbook_id, price, volume, expiry, account_id,
+    )
+    result = client.place_order(
+        account_id=account_id,
+        order_book_id=orderbook_id,
+        order_type=order_type,
+        price=price,
+        valid_until=expiry,
+        volume=volume,
+    )
+    logger.info("Order result: %s", result)
+    return result
+
+
+def get_order_status(order_id: str) -> dict:
+    """Check the status of an order by ID.
+
+    Returns:
+        Order dict with state, price, volume, etc.
+    """
+    client = get_client()
+    account_id = get_account_id()
+    return client.get_order(account_id, order_id)
+
+
+def delete_order(order_id: str) -> dict:
+    """Cancel a pending order.
+
+    Returns:
+        Dict with orderId, orderRequestStatus, messages
+    """
+    client = get_client()
+    account_id = get_account_id()
+    logger.info("Deleting order %s on account %s", order_id, account_id)
+    return client.delete_order(account_id, order_id)

@@ -284,6 +284,13 @@ def run(force_report=False, active_symbols=None):
     except Exception as e:
         logger.warning(f"ISKBETS check failed: {e}")
 
+    # Avanza pending order confirmations
+    try:
+        from portfolio.avanza_orders import check_pending_orders
+        check_pending_orders(config)
+    except Exception as e:
+        logger.warning(f"Avanza order check failed: {e}")
+
     # Health update
     try:
         from portfolio.health import update_health
