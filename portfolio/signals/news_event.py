@@ -40,13 +40,19 @@ _MAX_CONFIDENCE = 0.7
 
 
 def _fetch_headlines(ticker: str, config: dict) -> list[dict]:
-    """Fetch headlines for a ticker using existing sentiment.py infrastructure."""
+    """Fetch headlines for a ticker + sector peers.
+
+    Fetches ticker-specific headlines, then merges sector-wide headlines
+    from a representative peer. This ensures that "tariff" news hitting NVDA
+    also propagates to MU, TSM, AMD, etc.
+    """
     short = ticker.upper().replace("-USD", "")
     from portfolio.sentiment import _is_crypto, _fetch_crypto_headlines, _fetch_stock_headlines
 
+    articles = []
     try:
         if _is_crypto(short):
-            return _cached(
+            articles = _cached(
                 f"news_headlines_crypto_{short}",
                 _HEADLINE_TTL,
                 _fetch_crypto_headlines,
@@ -54,7 +60,7 @@ def _fetch_headlines(ticker: str, config: dict) -> list[dict]:
             ) or []
         else:
             newsapi_key = config.get("newsapi_key", "")
-            return _cached(
+            articles = _cached(
                 f"news_headlines_stock_{short}",
                 _HEADLINE_TTL,
                 _fetch_stock_headlines,
@@ -63,7 +69,44 @@ def _fetch_headlines(ticker: str, config: dict) -> list[dict]:
             ) or []
     except Exception:
         logger.debug("Failed to fetch headlines for %s", ticker, exc_info=True)
-        return []
+
+    # Merge sector-peer headlines: fetch from a representative ticker per sector
+    # so "tariff" news appearing in NVDA headlines also reaches MU, TSM, AMD, etc.
+    # Each sector has one representative whose headlines are shared with all members.
+    _SECTOR_REP_TICKER = {
+        "semiconductor": "NVDA",
+        "china": "BABA",
+        "big_tech": "AAPL",
+        "ai": "NVDA",
+        "defense": "LMT",
+        "metals": None,   # metals use Binance FAPI, not Yahoo
+        "crypto": None,   # crypto uses CryptoCompare categories (already shared)
+    }
+    try:
+        from portfolio.news_keywords import TICKER_SECTORS
+        seen_titles = {a.get("title", "").lower() for a in articles}
+        ticker_secs = TICKER_SECTORS.get(ticker, set())
+        for sec in ticker_secs:
+            rep = _SECTOR_REP_TICKER.get(sec)
+            if not rep or rep == short:
+                continue  # skip if no rep, or if this IS the rep
+            newsapi_key = config.get("newsapi_key", "")
+            peer_articles = _cached(
+                f"news_headlines_stock_{rep}",
+                _HEADLINE_TTL,
+                _fetch_stock_headlines,
+                rep,
+                newsapi_key or None,
+            ) or []
+            for a in peer_articles:
+                title_lower = a.get("title", "").lower()
+                if title_lower and title_lower not in seen_titles:
+                    articles.append(a)
+                    seen_titles.add(title_lower)
+    except Exception:
+        logger.debug("Failed to fetch sector headlines for %s", ticker, exc_info=True)
+
+    return articles
 
 
 def _headline_velocity(headlines: list[dict]) -> tuple[str, dict]:
