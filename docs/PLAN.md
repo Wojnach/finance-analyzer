@@ -55,8 +55,9 @@ The system processes ~31 tickers × 25 signals × 7 timeframes per minute.
 **Bottleneck analysis:**
 - **I/O (API calls)**: ~80% of cycle time. Fetching from Binance, Alpaca, news APIs.
   GPU cannot help here.
-- **LLM inference (Ministral)**: Runs on external model server or Ollama. Already uses
-  GPU if available via transformers/llama.cpp. Separate from this venv.
+- **LLM inference (Ministral)**: ✅ CONFIRMED using RTX 3080 via llama-cpp-python CUDA.
+  Runs from separate venv (`Q:/models/.venv-llm`). `n_gpu_layers=-1` = full GPU offload.
+  This is the one component where GPU matters, and it's already accelerated.
 - **TA calculations**: numpy-based indicator math. ~31 tickers × ~20 indicators each.
   Small dataset (~600 calculations). GPU overhead > compute savings at this scale.
 - **ML classifier**: sklearn HistGradientBoosting. No CUDA backend. Would need
@@ -70,10 +71,13 @@ The system processes ~31 tickers × 25 signals × 7 timeframes per minute.
 - CuPy/RAPIDS ecosystem on Windows is fragile and poorly supported
 
 ### What IS Worth Doing
-1. **Verify Ministral/LoRA inference uses GPU** — check if Ollama or the LLM server
-   is using the RTX 3080 for model inference (this is the one place GPU matters)
-2. **Document the finding** — save GPU specs and viability assessment for future reference
-3. **Identify future trigger** — GPU would become viable at ~500+ tickers or if we add
+1. ✅ **Verified Ministral inference uses GPU** — Confirmed: llama-cpp-python CUDA loads
+   Ministral-8B onto RTX 3080. `ggml_cuda_init: found 1 CUDA devices: Device 0: NVIDIA
+   GeForce RTX 3080, compute capability 8.6, VMM: yes`
+2. **Optional: Upgrade main venv PyTorch to CUDA** — Sentiment models (CryptoBERT,
+   TradingHero, FinBERT) use `torch 2.10.0+cpu`. Upgrading would save ~1-2s per cycle
+   but adds 4GB disk and compatibility risk. Low priority.
+3. **Future trigger** — GPU would become more valuable at ~500+ tickers or if we add
    real-time backtesting with historical data replay
 
 ### Deliverables
