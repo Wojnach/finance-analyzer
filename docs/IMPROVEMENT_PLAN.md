@@ -53,3 +53,50 @@ Added pruning in `_save_state()` for tickers no longer in current signals.
 | New test files | 0 | 3 |
 | Bugs fixed | 0 | 3 (1 critical) |
 | Files modified | 0 | 6 production + 3 test |
+
+---
+
+# Improvement Plan — Telegram Message Routing & Dashboard Integration
+
+**Session:** 2026-02-24 (telegram routing)
+**Branch:** `improve/auto-session-2026-02-24-telegram`
+**Status: COMPLETED**
+
+## Goal
+
+Disable most Telegram sending while preserving message generation. Route messages by category:
+- **Always send to Telegram:** ISKBETS, BIG BET, simulated trades (Patient/Bold BUY/SELL), 4-hourly digest
+- **Save only (no Telegram):** Analysis/HOLD messages, Layer 2 invocation notifications, regime alerts, FX warnings, errors
+
+All messages saved to `data/telegram_messages.jsonl` with category metadata for dashboard viewing.
+
+## Architecture
+
+### Message Categories
+
+| Category     | Source                    | Send to Telegram | Description                          |
+|-------------|--------------------------|-----------------|--------------------------------------|
+| `trade`     | Layer 2 agent (CLAUDE.md)| YES             | Simulated BUY/SELL executions        |
+| `iskbets`   | iskbets.py               | YES             | Intraday entry/exit alerts           |
+| `bigbet`    | bigbet.py                | YES             | Mean-reversion BIG BET alerts        |
+| `digest`    | digest.py                | YES             | 4-hourly activity report             |
+| `analysis`  | Layer 2 agent (CLAUDE.md)| NO              | HOLD analysis, market commentary     |
+| `invocation`| agent_invocation.py      | NO              | "Layer 2 T2 invoked" notifications   |
+| `regime`    | regime_alerts.py         | NO              | Regime shift alerts                  |
+| `fx_alert`  | fx_rates.py              | NO              | FX rate staleness warnings           |
+| `error`     | main.py                  | NO              | Loop crash notifications             |
+
+### Files Modified
+
+- `portfolio/message_store.py` (NEW) — central message routing
+- `portfolio/bigbet.py` — category "bigbet"
+- `portfolio/iskbets.py` — category "iskbets"
+- `portfolio/agent_invocation.py` — category "invocation"
+- `portfolio/regime_alerts.py` — category "regime"
+- `portfolio/fx_rates.py` — category "fx_alert"
+- `portfolio/main.py` — category "error"
+- `portfolio/digest.py` — category "digest" + enhanced stats
+- `CLAUDE.md` — trade/analysis conditional sending
+- `data/layer2_invoke.py`, `layer2_action.py`, `layer2_exec.py` — updated examples
+- `dashboard/app.py` — enhanced /api/telegrams with filtering
+- `dashboard/static/index.html` — Messages tab with category chips
