@@ -139,8 +139,33 @@ def api_invocations():
 @app.route("/api/telegrams")
 @require_auth
 def api_telegrams():
-    entries = _read_jsonl(DATA_DIR / "telegram_messages.jsonl", limit=50)
-    return jsonify(entries)
+    """Return telegram messages with optional filtering.
+
+    Query params:
+      - limit: max entries (default 200, max 2000)
+      - category: filter by category (trade, analysis, iskbets, bigbet, digest, etc.)
+      - search: text search in message body
+    """
+    try:
+        limit = min(int(request.args.get("limit", 200)), 2000)
+    except (ValueError, TypeError):
+        limit = 200
+    category_filter = request.args.get("category", "").strip().lower()
+    search_filter = request.args.get("search", "").strip().lower()
+
+    raw = _read_jsonl(DATA_DIR / "telegram_messages.jsonl", limit=5000)
+
+    results = []
+    for entry in reversed(raw):  # newest first
+        if category_filter and entry.get("category", "") != category_filter:
+            continue
+        if search_filter and search_filter not in (entry.get("text", "") or "").lower():
+            continue
+        results.append(entry)
+        if len(results) >= limit:
+            break
+
+    return jsonify(results)
 
 
 @app.route("/api/signal-log")

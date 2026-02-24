@@ -310,6 +310,36 @@
 
       .nd { color: var(--txm); font-size: 12px; padding: 16px; text-align: center; }
 
+      /* Message filter chips */
+      .msg-chip {
+        padding: 5px 12px; border-radius: 14px; font-size: 11px; font-weight: 600;
+        cursor: pointer; border: 1px solid var(--bdr); background: var(--card);
+        color: var(--txd); transition: all 0.2s; text-transform: uppercase; letter-spacing: 0.5px;
+      }
+      .msg-chip:hover { background: var(--hover); color: var(--tx); }
+      .msg-chip.active { background: var(--cyn); color: #000; border-color: var(--cyn); }
+      .msg-cat { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 9px;
+        font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 6px; }
+      .msg-cat.trade { background: #059669; color: #fff; }
+      .msg-cat.analysis { background: #3b82f6; color: #fff; }
+      .msg-cat.iskbets { background: #f97316; color: #fff; }
+      .msg-cat.bigbet { background: #dc2626; color: #fff; }
+      .msg-cat.digest { background: #8b5cf6; color: #fff; }
+      .msg-cat.invocation { background: #6b7280; color: #fff; }
+      .msg-cat.regime { background: #eab308; color: #000; }
+      .msg-cat.error { background: #ef4444; color: #fff; }
+      .msg-cat.fx_alert { background: #f59e0b; color: #000; }
+      .msg-sent { font-size: 9px; margin-left: 4px; }
+      .msg-sent.yes { color: var(--grn); }
+      .msg-sent.no { color: var(--txm); }
+      .msg-item { padding: 10px 12px; border-bottom: 1px solid var(--bdr); font-size: 12px; }
+      .msg-item:last-child { border-bottom: none; }
+      .msg-hdr { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+      .msg-ts { font-size: 10px; color: var(--txm); }
+      .msg-body { font-family: "Cascadia Code", "Fira Code", monospace; font-size: 11px;
+        white-space: pre-wrap; word-break: break-word; line-height: 1.5; color: var(--tx); }
+      .msg-body code { background: var(--card2); padding: 1px 4px; border-radius: 3px; font-size: 10px; }
+
       /* ================================================================
          Collapsible sections
          ================================================================ */
@@ -492,6 +522,7 @@
       <div class="nav-tab" data-tab="equity" onclick="switchTab('equity')">Equity Curve</div>
       <div class="nav-tab" data-tab="triggers" onclick="switchTab('triggers')">Trigger Timeline</div>
       <div class="nav-tab" data-tab="decisions" onclick="switchTab('decisions')">Decisions</div>
+      <div class="nav-tab" data-tab="messages" onclick="switchTab('messages')">Messages</div>
       <div class="nav-tab" data-tab="accuracy" onclick="switchTab('accuracy')">Accuracy</div>
       <div class="nav-tab" data-tab="health" onclick="switchTab('health')">Health</div>
     </div>
@@ -642,6 +673,30 @@
         </div>
       </div>
 
+      <!-- ============================================================
+           TAB: Messages
+           ============================================================ -->
+      <div class="tab-content" id="tab-messages">
+        <div class="stit">Message Log</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px" id="msgFilters">
+          <button class="msg-chip active" data-cat="" onclick="filterMsgs('')">All</button>
+          <button class="msg-chip" data-cat="trade" onclick="filterMsgs('trade')">Trade</button>
+          <button class="msg-chip" data-cat="analysis" onclick="filterMsgs('analysis')">Analysis</button>
+          <button class="msg-chip" data-cat="iskbets" onclick="filterMsgs('iskbets')">ISKBETS</button>
+          <button class="msg-chip" data-cat="bigbet" onclick="filterMsgs('bigbet')">Big Bet</button>
+          <button class="msg-chip" data-cat="digest" onclick="filterMsgs('digest')">Digest</button>
+          <button class="msg-chip" data-cat="invocation" onclick="filterMsgs('invocation')">Invocation</button>
+          <button class="msg-chip" data-cat="regime" onclick="filterMsgs('regime')">Regime</button>
+          <button class="msg-chip" data-cat="error" onclick="filterMsgs('error')">Error</button>
+        </div>
+        <div style="margin-bottom:12px">
+          <input type="text" id="msgSearch" placeholder="Search messages..." onkeyup="searchMsgsDebounce()" style="width:100%;max-width:400px;padding:8px 12px;background:var(--card);border:1px solid var(--bdr);border-radius:var(--r);color:var(--tx);font-size:13px;outline:none" />
+        </div>
+        <div class="pnl" id="msgC">
+          <div class="nd">Loading messages...</div>
+        </div>
+      </div>
+
       <div class="tab-content" id="tab-health">
         <div class="stit">System Health</div>
         <div class="pnl" id="healthC">
@@ -775,6 +830,7 @@
         if (name === "triggers") loadTriggers();
         if (name === "decisions") loadDecisions();
         if (name === "accuracy") { loadAccuracy(); loadAccuracyHistory(); }
+        if (name === "messages") loadMessages();
         if (name === "health") loadHealth();
       }
 
@@ -1391,6 +1447,60 @@
               h += '<div class="abr"><div class="abl">' + t + '</div><div class="abt"><div class="abf" style="width:' + p + '%;background:' + bc + '">' + fn(p, 0) + '%</div></div><div class="abc">' + td.correct + '/' + td.total + '</div></div>';
             });
           }
+          h += '</div>';
+        });
+        c.innerHTML = h;
+      }
+
+      /* ================================================================
+         Messages tab — filterable message log
+         ================================================================ */
+      var _msgCat = "";
+      var _msgSearchTimer = null;
+
+      function filterMsgs(cat) {
+        _msgCat = cat;
+        document.querySelectorAll(".msg-chip").forEach(function (c) {
+          c.classList.toggle("active", c.dataset.cat === cat);
+        });
+        loadMessages();
+      }
+
+      function searchMsgsDebounce() {
+        clearTimeout(_msgSearchTimer);
+        _msgSearchTimer = setTimeout(loadMessages, 300);
+      }
+
+      async function loadMessages() {
+        var c = document.getElementById("msgC");
+        var search = (document.getElementById("msgSearch") || {}).value || "";
+        var url = "/api/telegrams?limit=200";
+        if (_msgCat) url += "&category=" + encodeURIComponent(_msgCat);
+        if (search) url += "&search=" + encodeURIComponent(search);
+
+        var data = await fj(url);
+        if (!data || !data.length) {
+          c.innerHTML = '<div class="nd">No messages found</div>';
+          return;
+        }
+
+        var h = '';
+        data.forEach(function (m) {
+          var cat = m.category || "unknown";
+          var sent = m.sent;
+          var sentLabel = sent ? '<span class="msg-sent yes">SENT</span>' : '<span class="msg-sent no">saved</span>';
+          var tx = eh(m.text || "")
+            .replace(/`([^`]+)`/g, "<code>$1</code>")
+            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+            .replace(/\*([^*]+)\*/g, "<strong>$1</strong>")
+            .replace(/\n/g, "<br>");
+          h += '<div class="msg-item">';
+          h += '<div class="msg-hdr">';
+          h += '<span class="msg-cat ' + cat + '">' + cat + '</span>';
+          h += '<span class="msg-ts">' + ftFull(m.ts) + '</span>';
+          h += sentLabel;
+          h += '</div>';
+          h += '<div class="msg-body">' + tx + '</div>';
           h += '</div>';
         });
         c.innerHTML = h;
