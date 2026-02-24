@@ -181,7 +181,7 @@ class TestMetalsSignalConfig:
     """Tests for metals-specific signal configuration."""
 
     def test_metals_total_applicable(self):
-        """Metals should have 23 applicable signals (7 original + 16 enhanced)."""
+        """Metals should have 25 applicable signals (7 original + 18 enhanced)."""
         from portfolio.main import generate_signal, METALS_SYMBOLS
         # Create minimal indicators
         ind = {
@@ -201,10 +201,10 @@ class TestMetalsSignalConfig:
             "atr_pct": 0.57,
         }
         action, conf, extra = generate_signal(ind, ticker="XAU-USD")
-        assert extra["_total_applicable"] == 24  # 7 original + 17 enhanced (incl. forecast)
+        assert extra["_total_applicable"] == 25  # 7 original + 18 enhanced
 
     def test_stocks_total_applicable(self):
-        """Stocks should have 24 applicable signals (7 original + 17 enhanced)."""
+        """Stocks should have 25 applicable signals (7 original + 18 enhanced)."""
         from portfolio.main import generate_signal
         ind = {
             "close": 130.0,
@@ -223,10 +223,10 @@ class TestMetalsSignalConfig:
             "atr_pct": 2.3,
         }
         action, conf, extra = generate_signal(ind, ticker="MSTR")
-        assert extra["_total_applicable"] == 24  # 7 original + 17 enhanced (incl. forecast)
+        assert extra["_total_applicable"] == 25  # 7 original + 18 enhanced
 
     def test_crypto_total_applicable(self):
-        """Crypto should have 25 applicable signals (8 core + 17 enhanced)."""
+        """Crypto should have 26 applicable signals (8 core + 18 enhanced)."""
         from portfolio.main import generate_signal
         ind = {
             "close": 67000.0,
@@ -245,4 +245,4 @@ class TestMetalsSignalConfig:
             "atr_pct": 2.24,
         }
         action, conf, extra = generate_signal(ind, ticker="BTC-USD")
-        assert extra["_total_applicable"] == 25  # 8 core + 17 enhanced (incl. forecast; custom_lora, ml, funding disabled)
+        assert extra["_total_applicable"] == 26  # 8 core + 18 enhanced (custom_lora, ml, funding disabled)

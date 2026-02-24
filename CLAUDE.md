@@ -84,7 +84,7 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 ### 1. Read the data
 
 - `data/layer2_context.md` — **read this first.** Your memory from previous invocations: theses, regime, prices, watchlist
-- `data/agent_summary_compact.json` — all 24 signals, timeframes, indicators, macro context (compact version, readable in one shot)
+- `data/agent_summary_compact.json` — all 26 signals, timeframes, indicators, macro context (compact version, readable in one shot)
 - `data/agent_summary.json` — full version with enhanced signal details (too large for single read; use compact instead)
 - `data/portfolio_state.json` — Patient strategy: current cash, holdings, transaction history
 - `data/portfolio_state_bold.json` — Bold strategy: current cash, holdings, transaction history
@@ -93,7 +93,7 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 ### 2. Analyze
 
 - **Use your memory:** Compare previous thesis prices with current prices — were you right? Write your assessment in the `reflection` field. Check if watchlist conditions were met. Notice regime shifts. If you just traded, don't reverse on noise. Check the Warnings section for contradictions and whipsaws.
-- Review all 24 signals across all timeframes for each instrument
+- Review all 26 signals across all timeframes for each instrument
 - Check macro context: DXY, treasury yields, yield curve, FOMC proximity
 - Assess portfolio risk: concentration, drawdown, cash reserves
 - Check recent transaction history: avoid whipsaw trades
@@ -406,7 +406,7 @@ requests.post(
 - This is SIMULATED money (500K SEK starting) — trade freely to build a track record
 - **Near close (<1h to market close):** Do not open new positions on stocks or warrants. For existing positions, flag that close is imminent — the user needs to decide now (take profit or close flat). Crypto is exempt (24/7). US market closes 21:00 CET (15:00 ET).
 
-## 24 Signals (8 Core + 16 Enhanced Composite)
+## 26 Signals (8 Core + 18 Enhanced Composite)
 
 ### Core Signals (1-8 active, 3 disabled)
 
@@ -429,7 +429,7 @@ currently affects: fear_greed, MACD, trend, momentum, oscillators, fibonacci, se
 **Recency weighting:** Accuracy is blended 70% recent (7-day) + 30% all-time, so signals
 that recently degraded get penalized faster.
 
-### Enhanced Composite Signals (12-27)
+### Enhanced Composite Signals (12-29)
 
 Each composite module runs 4-8 sub-indicators internally and produces one BUY/SELL/HOLD vote via majority voting. Details in `agent_summary.json` → `enhanced_signals` per ticker.
 
@@ -449,6 +449,8 @@ Each composite module runs 4-8 sub-indicators internally and produces one BUY/SE
 25. **Momentum Factors** — Time-Series Momentum, ROC-20, 52-Week High/Low, Consecutive Bars, Acceleration, Vol-Weighted
 26. **News Event** — Headline velocity spike, keyword severity (tariff/war/crash=critical), sentiment shift, credible source amplification (Reuters/Bloomberg/WSJ 1.5x), sector-specific impact mapping (e.g., tariff→semiconductor SELL, tariff→metals BUY). Max confidence 0.7.
 27. **Econ Calendar** — Event proximity risk-off (<4h of FOMC/CPI/NFP = SELL), event type classification, pre-event binary risk-off, sector exposure mapping (FOMC→crypto/metals, CPI→crypto/metals, NFP→ETF/big_tech). Uses hard-coded 2026-2027 economic calendar. Max confidence 0.7.
+28. **Forecast** — Kronos + Chronos price direction prediction, time-series foundation models.
+29. **Claude Fundamental** — Three-tier LLM cascade (Haiku 1min / Sonnet 10min / Opus 30min) for fundamental analysis. Five sub-signals: fundamental_quality, sector_positioning, valuation, catalyst_assessment, macro_sensitivity. Highest-tier fresh analysis wins (Opus > Sonnet > Haiku). Provides business-quality, earnings, moat, and catalyst knowledge that technical signals cannot see. Max confidence 0.7. Contrarian flags when fundamentals strongly disagree with technical consensus.
 
 **Non-voting context** (in agent_summary.json `macro` section for your reasoning):
 
@@ -478,7 +480,7 @@ samples as preliminary — they will stabilize over the next 2-4 weeks.
 **Consensus formula:** Layer 1 computes consensus using active voters (signals that voted BUY
 or SELL) as the denominator, not total applicable signals. MIN_VOTERS varies by asset class:
 all asset classes (stocks, metals, crypto) require MIN_VOTERS=3.
-Stocks have 23 applicable signals (7 core + 16 enhanced), crypto has 24 (8 core + 16 enhanced).
+Stocks have 25 applicable signals (7 core + 18 enhanced), crypto has 26 (8 core + 18 enhanced).
 Example: 2B/0S out of 21 applicable = BUY at 100% confidence (2/2 active voters).
 The confidence reflects agreement among voters, not coverage.
 
@@ -574,7 +576,7 @@ position in your reasoning.
 
 ## Forward Tracking
 
-Every trigger invocation is logged to `data/signal_log.jsonl` with all 27 signal votes and
+Every trigger invocation is logged to `data/signal_log.jsonl` with all 29 signal votes and
 current prices. A daily outcome checker backfills what actually happened at 1d/3d/5d/10d horizons.
 Use `--accuracy` to see which signals are actually predictive.
 

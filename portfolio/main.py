@@ -7,7 +7,7 @@ This is the orchestrator module. All logic has been extracted to:
 - fx_rates.py — USD/SEK exchange rate fetching
 - indicators.py — compute_indicators, detect_regime, technical_signal
 - data_collector.py — Binance/Alpaca/yfinance kline fetchers
-- signal_engine.py — 27-signal voting system, generate_signal
+- signal_engine.py — 29-signal voting system, generate_signal
 - portfolio_mgr.py — portfolio state load/save/value
 - reporting.py — agent_summary.json builder
 - telegram_notifications.py — Telegram send/escape/alert

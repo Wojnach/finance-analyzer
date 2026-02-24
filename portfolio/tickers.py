@@ -4,7 +4,7 @@ Every module that needs ticker definitions should import from here instead
 of maintaining its own copy.
 """
 
-# ── Tier 1: Full signals (27 signals, 7 timeframes) ──────────────────────
+# ── Tier 1: Full signals (29 signals, 7 timeframes) ──────────────────────
 
 SYMBOLS = {
     # Crypto (Binance spot)
@@ -111,4 +111,5 @@ SIGNAL_NAMES = [
     "news_event",
     "econ_calendar",
     "forecast",
+    "claude_fundamental",
 ]

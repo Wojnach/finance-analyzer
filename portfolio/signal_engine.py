@@ -1,4 +1,4 @@
-"""Signal generation engine — 27-signal voting system with weighted consensus."""
+"""Signal generation engine — 29-signal voting system with weighted consensus."""
 
 import json
 import logging
@@ -17,10 +17,10 @@ logger = logging.getLogger("portfolio.signal_engine")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
-# --- Signal (full 27-signal for "Now" timeframe) ---
+# --- Signal (full 29-signal for "Now" timeframe) ---
 
-MIN_VOTERS_CRYPTO = 3  # crypto has 25 signals (8 core + 17 enhanced; custom_lora, ml, funding disabled) — need 3
-MIN_VOTERS_STOCK = 3  # stocks have 24 signals (7 core + 17 enhanced) — need 3 active voters
+MIN_VOTERS_CRYPTO = 3  # crypto has 26 signals (8 core + 18 enhanced; custom_lora, ml, funding disabled) — need 3
+MIN_VOTERS_STOCK = 3  # stocks have 25 signals (7 core + 18 enhanced) — need 3 active voters
 
 # Sentiment hysteresis — prevents rapid flip spam from ~50% confidence oscillation
 _prev_sentiment = {}  # in-memory cache; seeded from trigger_state.json on first call
@@ -423,25 +423,25 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     # ml and funding removed — disabled due to <30% accuracy.
     CORE_SIGNAL_NAMES = {
         "rsi", "macd", "ema", "bb", "fear_greed", "sentiment",
-        "volume", "ministral",
+        "volume", "ministral", "claude_fundamental",
     }
     core_buy = sum(1 for s in CORE_SIGNAL_NAMES if votes.get(s) == "BUY")
     core_sell = sum(1 for s in CORE_SIGNAL_NAMES if votes.get(s) == "SELL")
     core_active = core_buy + core_sell
 
     # Total applicable signals:
-    # Crypto: 8 core (11 original - custom_lora, ml, funding disabled) + 17 enhanced = 25
-    # Metals: 7 core + 17 enhanced = 24
-    # Stocks: 7 core + 17 enhanced = 24
-    # (enhanced: 16 original + 1 forecast)
+    # Crypto: 8 core (11 original - custom_lora, ml, funding disabled) + 18 enhanced = 26
+    # Metals: 7 core + 18 enhanced = 25
+    # Stocks: 7 core + 18 enhanced = 25
+    # (enhanced: 16 original + forecast + claude_fundamental)
     is_crypto = ticker in CRYPTO_SYMBOLS
     is_metal = ticker in METALS_SYMBOLS
     if is_crypto:
-        total_applicable = 25  # 8 core + 17 enhanced
+        total_applicable = 26  # 8 core + 18 enhanced
     elif is_metal:
-        total_applicable = 24  # 7 core + 17 enhanced
+        total_applicable = 25  # 7 core + 18 enhanced
     else:
-        total_applicable = 24  # 7 core + 17 enhanced
+        total_applicable = 25  # 7 core + 18 enhanced
 
     active_voters = buy + sell
     if ticker in STOCK_SYMBOLS:

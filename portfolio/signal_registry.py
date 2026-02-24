@@ -118,6 +118,9 @@ def _register_defaults():
     # forecast signal — Kronos + Chronos price direction prediction
     register_enhanced("forecast", "portfolio.signals.forecast",
                       "compute_forecast_signal", requires_context=True)
+    # Claude fundamental — three-tier LLM cascade (requires context for ticker + config)
+    register_enhanced("claude_fundamental", "portfolio.signals.claude_fundamental",
+                      "compute_claude_fundamental_signal", requires_context=True)
 
 
 _register_defaults()
