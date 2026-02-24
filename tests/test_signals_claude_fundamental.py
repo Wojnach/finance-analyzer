@@ -1,6 +1,7 @@
 """Tests for portfolio.signals.claude_fundamental — three-tier LLM cascade."""
 
 import json
+import subprocess
 import time
 
 import pytest
@@ -16,6 +17,7 @@ from portfolio.signals.claude_fundamental import (
     _parse_opus_response,
     _extract_json,
     _get_best_result,
+    _call_claude_cli,
     _cache,
     _lock,
     _MAX_CONFIDENCE,
@@ -408,3 +410,66 @@ class TestContrarianFlag:
         result = compute_claude_fundamental_signal(df, context=ctx)
         assert result["indicators"]["contrarian_flag"] is True
         assert result["indicators"]["_tier"] == "opus"
+
+
+# --- CLI subprocess layer ---
+
+class TestCallClaudeCli:
+    @mock.patch("portfolio.signals.claude_fundamental.subprocess.run")
+    def test_success(self, mock_run):
+        """Successful CLI call returns stdout."""
+        mock_run.return_value = mock.Mock(
+            returncode=0,
+            stdout='{"BTC-USD": {"action": "BUY", "confidence": 0.6}}',
+            stderr="",
+        )
+        result = _call_claude_cli("haiku", "test prompt", timeout=30)
+        assert "BTC-USD" in result
+        mock_run.assert_called_once()
+        # Verify prompt sent via stdin
+        call_kwargs = mock_run.call_args
+        assert call_kwargs.kwargs["input"] == "test prompt"
+
+    @mock.patch("portfolio.signals.claude_fundamental.subprocess.run")
+    def test_claudecode_env_stripped(self, mock_run):
+        """CLAUDECODE env var should be removed to prevent nested session error."""
+        import os
+        mock_run.return_value = mock.Mock(returncode=0, stdout="{}", stderr="")
+        # Temporarily set CLAUDECODE in os.environ
+        old = os.environ.get("CLAUDECODE")
+        os.environ["CLAUDECODE"] = "1"
+        try:
+            _call_claude_cli("haiku", "test", timeout=30)
+        finally:
+            if old is None:
+                os.environ.pop("CLAUDECODE", None)
+            else:
+                os.environ["CLAUDECODE"] = old
+        # The env passed to subprocess should NOT contain CLAUDECODE
+        call_kwargs = mock_run.call_args
+        assert "CLAUDECODE" not in call_kwargs.kwargs["env"]
+
+    @mock.patch("portfolio.signals.claude_fundamental.subprocess.run")
+    def test_nonzero_exit_raises(self, mock_run):
+        """Non-zero exit code should raise RuntimeError."""
+        mock_run.return_value = mock.Mock(
+            returncode=1, stdout="", stderr="Error: model not found"
+        )
+        with pytest.raises(RuntimeError, match="claude CLI failed"):
+            _call_claude_cli("haiku", "test", timeout=30)
+
+    @mock.patch("portfolio.signals.claude_fundamental.subprocess.run")
+    def test_timeout_propagated(self, mock_run):
+        """Timeout should be passed to subprocess.run."""
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=30)
+        with pytest.raises(subprocess.TimeoutExpired):
+            _call_claude_cli("haiku", "test", timeout=30)
+
+    @mock.patch("portfolio.signals.claude_fundamental.subprocess.run")
+    def test_model_passed_to_cli(self, mock_run):
+        """Model alias should be passed via --model flag."""
+        mock_run.return_value = mock.Mock(returncode=0, stdout="{}", stderr="")
+        _call_claude_cli("sonnet", "test", timeout=60)
+        cmd = mock_run.call_args.args[0]
+        idx = cmd.index("--model")
+        assert cmd[idx + 1] == "sonnet"

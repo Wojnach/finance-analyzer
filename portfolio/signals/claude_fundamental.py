@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -52,19 +53,6 @@ _DEFAULT_HOLD = {
 }
 
 
-def _get_client(config):
-    """Get Anthropic client, with API key from config or env."""
-    import anthropic
-
-    api_key = (
-        config.get("claude_fundamental", {}).get("api_key")
-        or os.environ.get("ANTHROPIC_API_KEY")
-    )
-    if not api_key:
-        raise ValueError("No ANTHROPIC_API_KEY found in config or environment")
-    return anthropic.Anthropic(api_key=api_key)
-
-
 def _get_cooldowns(config):
     """Get per-tier cooldowns from config with defaults."""
     cf = config.get("claude_fundamental", {})
@@ -76,12 +64,22 @@ def _get_cooldowns(config):
 
 
 def _get_models(config):
-    """Get per-tier model IDs from config with defaults."""
+    """Get per-tier model aliases from config with defaults."""
     cf = config.get("claude_fundamental", {})
     return {
-        "haiku":  cf.get("haiku_model", "claude-haiku-4-5-20251001"),
-        "sonnet": cf.get("sonnet_model", "claude-sonnet-4-6-20250514"),
-        "opus":   cf.get("opus_model", "claude-opus-4-6-20250514"),
+        "haiku":  cf.get("haiku_model", "haiku"),
+        "sonnet": cf.get("sonnet_model", "sonnet"),
+        "opus":   cf.get("opus_model", "opus"),
+    }
+
+
+def _get_timeouts(config):
+    """Get per-tier CLI timeouts from config with defaults."""
+    cf = config.get("claude_fundamental", {})
+    return {
+        "haiku":  cf.get("haiku_timeout", 30),
+        "sonnet": cf.get("sonnet_timeout", 60),
+        "opus":   cf.get("opus_timeout", 120),
     }
 
 
@@ -284,14 +282,36 @@ Rules:
 """
 
 
-def _call_api(client, model, prompt, max_tokens=2048):
-    """Call Claude API and return text response."""
-    response = client.messages.create(
-        model=model,
-        max_tokens=max_tokens,
-        messages=[{"role": "user", "content": prompt}],
+def _call_claude_cli(model, prompt, timeout=60):
+    """Call claude CLI and return text response.
+
+    Uses Claude Code Max subscription via ``claude -p``.
+    """
+    env = os.environ.copy()
+    env.pop("CLAUDECODE", None)  # prevent nested session error
+
+    cmd = [
+        "claude", "-p",
+        "--model", model,
+        "--output-format", "text",
+        "--no-session-persistence",
+    ]
+
+    result = subprocess.run(
+        cmd,
+        input=prompt,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env,
     )
-    return response.content[0].text
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"claude CLI failed (rc={result.returncode}): {result.stderr[:500]}"
+        )
+
+    return result.stdout
 
 
 def _extract_json(text):
@@ -417,10 +437,10 @@ def _parse_opus_response(text):
 
 
 def _refresh_tier(tier, context):
-    """Refresh one tier's cache by calling the Claude API."""
+    """Refresh one tier's cache by calling the claude CLI."""
     config = context.get("config", {})
     models = _get_models(config)
-    client = _get_client(config)
+    timeouts = _get_timeouts(config)
 
     # Read the compact summary
     summary_path = DATA_DIR / "agent_summary_compact.json"
@@ -435,11 +455,11 @@ def _refresh_tier(tier, context):
 
     if tier == "haiku":
         prompt = _build_haiku_prompt(summary, macro)
-        raw = _call_api(client, models["haiku"], prompt, max_tokens=1024)
+        raw = _call_claude_cli(models["haiku"], prompt, timeout=timeouts["haiku"])
         results = _parse_haiku_response(raw)
     elif tier == "sonnet":
         prompt = _build_sonnet_prompt(summary, macro)
-        raw = _call_api(client, models["sonnet"], prompt, max_tokens=2048)
+        raw = _call_claude_cli(models["sonnet"], prompt, timeout=timeouts["sonnet"])
         results = _parse_sonnet_response(raw)
     else:  # opus
         portfolios = {}
@@ -448,7 +468,7 @@ def _refresh_tier(tier, context):
             if pf_path.exists():
                 portfolios[pf] = json.loads(pf_path.read_text(encoding="utf-8"))
         prompt = _build_opus_prompt(summary, macro, portfolios)
-        raw = _call_api(client, models["opus"], prompt, max_tokens=3072)
+        raw = _call_claude_cli(models["opus"], prompt, timeout=timeouts["opus"])
         results = _parse_opus_response(raw)
 
     with _lock:
