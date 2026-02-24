@@ -42,6 +42,14 @@ def _load_state():
 
 
 def _save_state(state):
+    # Prune triggered_consensus entries for tickers not in current signals
+    # to prevent unbounded growth when tickers are removed from tracking
+    tc = state.get("triggered_consensus", {})
+    current_tickers = state.get("_current_tickers", set())
+    if current_tickers and len(tc) > len(current_tickers) + 10:
+        pruned = {k: v for k, v in tc.items() if k in current_tickers}
+        state["triggered_consensus"] = pruned
+    state.pop("_current_tickers", None)  # don't persist internal field
     atomic_write_json(STATE_FILE, state)
 
 
@@ -80,6 +88,7 @@ def _check_recent_trade(state):
 
 def check_triggers(signals, prices_usd, fear_greeds, sentiments):
     state = _load_state()
+    state["_current_tickers"] = set(signals.keys())  # for pruning in _save_state
     prev = state.get("last", {})
     sustained = state.get("sustained_counts", {})
     reasons = []

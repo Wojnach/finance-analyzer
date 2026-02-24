@@ -25,6 +25,8 @@ import math
 import numpy as np
 import pandas as pd
 
+from portfolio.signal_utils import majority_vote
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -468,30 +470,8 @@ def _ttm_squeeze_signal(
 # ---------------------------------------------------------------------------
 
 def _majority_vote(signals: list[str]) -> tuple[str, float]:
-    """Majority voting across sub-signals.
-
-    Returns (action, confidence) where confidence is the proportion of
-    sub-signals agreeing with the winning direction.
-    """
-    buy_count = signals.count("BUY")
-    sell_count = signals.count("SELL")
-    hold_count = signals.count("HOLD")
-    total = len(signals)
-
-    if total == 0:
-        return "HOLD", 0.0
-
-    if buy_count > sell_count and buy_count > hold_count:
-        return "BUY", round(buy_count / total, 4)
-    if sell_count > buy_count and sell_count > hold_count:
-        return "SELL", round(sell_count / total, 4)
-
-    # Ties: BUY == SELL with both > HOLD => HOLD (conflicting)
-    if buy_count == sell_count and buy_count > hold_count:
-        return "HOLD", 0.0
-
-    # HOLD wins or is tied with a directional signal
-    return "HOLD", round(max(buy_count, sell_count, hold_count) / total, 4)
+    """Majority voting — delegates to signal_utils.majority_vote(count_hold=True)."""
+    return majority_vote(signals, count_hold=True)
 
 
 # ---------------------------------------------------------------------------

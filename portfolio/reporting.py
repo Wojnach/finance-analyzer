@@ -209,6 +209,7 @@ def write_agent_summary(
 
     # Preserve stale data for instruments not in current cycle (e.g. stocks off-hours)
     # so Layer 2 always sees all instruments
+    now_iso = datetime.now(timezone.utc).isoformat()
     if AGENT_SUMMARY_FILE.exists():
         try:
             prev = json.loads(AGENT_SUMMARY_FILE.read_text(encoding="utf-8"))
@@ -218,6 +219,10 @@ def write_agent_summary(
                     if ticker not in summary[section]:
                         if section == "signals" and isinstance(data, dict):
                             data["stale"] = True
+                            # Track when data first became stale so Layer 2
+                            # can judge how old it is
+                            if "stale_since" not in data:
+                                data["stale_since"] = now_iso
                         summary[section][ticker] = data
         except Exception:
             pass
