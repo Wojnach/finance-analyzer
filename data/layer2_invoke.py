@@ -59,16 +59,20 @@ _+6 buy \u00b7 15 hold \u00b7 2 sell_
 _P:500K(+0%) MU 19sh \u00b7 B:465K(-7%) MU+NVDA \u00b7 DXY 98\u2191 \u00b7 10Y 4.09\u2191_
 Fri extended hrs \u2014 no action. AAPL 8B/vol 3.3x strongest but needs Mon regular session. MU/NVDA flat, holding."""
 
-# Save message locally
+# Save message locally — category: "analysis" (HOLD) or "trade" (BUY/SELL)
+category = "analysis"  # HOLD message — saved only, not sent to Telegram
 log = pathlib.Path("data/telegram_messages.jsonl")
 with open(log, "a", encoding="utf-8") as f:
-    f.write(json.dumps({"ts": ts, "text": msg}, ensure_ascii=False) + "\n")
+    f.write(json.dumps({"ts": ts, "text": msg, "category": category, "sent": category == "trade"}, ensure_ascii=False) + "\n")
 print("Telegram message saved")
 
-# Send via Telegram
-config = json.load(open("config.json"))
-resp = requests.post(
-    f"https://api.telegram.org/bot{config['telegram']['token']}/sendMessage",
-    json={"chat_id": config["telegram"]["chat_id"], "text": msg, "parse_mode": "Markdown"}
-)
-print(f"Telegram response: {resp.status_code} {resp.json().get('ok', False)}")
+# Only send to Telegram if a trade was executed
+if category == "trade":
+    config = json.load(open("config.json"))
+    resp = requests.post(
+        f"https://api.telegram.org/bot{config['telegram']['token']}/sendMessage",
+        json={"chat_id": config["telegram"]["chat_id"], "text": msg, "parse_mode": "Markdown"}
+    )
+    print(f"Telegram response: {resp.status_code} {resp.json().get('ok', False)}")
+else:
+    print("HOLD message — saved to JSONL only, not sent to Telegram")
