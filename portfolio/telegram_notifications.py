@@ -27,6 +27,9 @@ def escape_markdown_v1(text):
     return _MD_V1_SPECIAL.sub(r'\\\1', str(text))
 
 
+_TELEGRAM_MAX_LENGTH = 4096  # Telegram API rejects messages exceeding this
+
+
 def send_telegram(msg, config):
     if os.environ.get("NO_TELEGRAM"):
         logger.info("[NO_TELEGRAM] Skipping send")
@@ -36,6 +39,10 @@ def send_telegram(msg, config):
     if not config.get("telegram", {}).get("layer1_messages", False):
         logger.debug("[layer1_messages=false] Skipping Layer 1 send")
         return True
+    # Truncate to Telegram's max message length to avoid silent 400 errors
+    if len(msg) > _TELEGRAM_MAX_LENGTH:
+        logger.warning("Telegram message truncated from %d to %d chars", len(msg), _TELEGRAM_MAX_LENGTH)
+        msg = msg[:_TELEGRAM_MAX_LENGTH - 20] + "\n...(truncated)"
     token = config["telegram"]["token"]
     chat_id = config["telegram"]["chat_id"]
     r = fetch_with_retry(

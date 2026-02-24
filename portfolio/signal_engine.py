@@ -17,7 +17,7 @@ logger = logging.getLogger("portfolio.signal_engine")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
-# --- Signal (full 25-signal for "Now" timeframe) ---
+# --- Signal (full 27-signal for "Now" timeframe) ---
 
 MIN_VOTERS_CRYPTO = 3  # crypto has 26 signals (10 core + 16 enhanced, custom_lora removed) — need 3 active voters
 MIN_VOTERS_STOCK = 3  # stocks have 23 signals (7 original + 16 enhanced) — need 3 active voters

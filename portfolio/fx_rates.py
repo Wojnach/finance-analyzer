@@ -41,9 +41,9 @@ def fetch_usd_sek():
             _fx_alert_telegram(age_secs)
         return _fx_cache["rate"]
     # Last resort: hardcoded fallback
-    logger.warning("Using hardcoded FX fallback rate 10.50 SEK — no cached or live rate available")
+    logger.warning("Using hardcoded FX fallback rate 10.85 SEK — no cached or live rate available")
     _fx_alert_telegram(None)
-    return 10.50
+    return 10.85
 
 
 def _fx_alert_telegram(age_secs):
@@ -58,7 +58,7 @@ def _fx_alert_telegram(age_secs):
         if age_secs is not None:
             msg = f"_FX WARNING: USD/SEK rate is {age_secs / 3600:.1f}h stale. API may be down._"
         else:
-            msg = "_FX WARNING: Using hardcoded fallback rate 10.50 SEK. No live or cached rate available._"
+            msg = "_FX WARNING: Using hardcoded fallback rate 10.85 SEK. No live or cached rate available._"
         # Import send_telegram late to avoid circular imports
         from portfolio.telegram_notifications import send_telegram
         send_telegram(msg, config)

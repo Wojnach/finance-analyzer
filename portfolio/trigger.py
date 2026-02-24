@@ -6,7 +6,7 @@ Layer 1 runs every minute during market hours. Layer 2 is invoked when:
 - Price moved >2% since last trigger
 - Fear & Greed crossed extreme threshold (20 or 80)
 - Sentiment reversal: sustained for SUSTAINED_CHECKS cycles (filters oscillation)
-- Cooldown expired (1 min market hours, 2h off-hours)
+- Cooldown expired (10 min market hours, 2h off-hours)
 
 After a trade (BUY/SELL), the cooldown timer is reset so the agent can
 reassess the new portfolio state promptly.
