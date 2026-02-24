@@ -31,6 +31,11 @@ def send_telegram(msg, config):
     if os.environ.get("NO_TELEGRAM"):
         logger.info("[NO_TELEGRAM] Skipping send")
         return True
+    # Layer 1 messages disabled — only Layer 2 (Claude Code) sends Telegram
+    # via direct requests.post. To re-enable, set telegram.layer1_messages: true.
+    if not config.get("telegram", {}).get("layer1_messages", False):
+        logger.debug("[layer1_messages=false] Skipping Layer 1 send")
+        return True
     token = config["telegram"]["token"]
     chat_id = config["telegram"]["chat_id"]
     r = fetch_with_retry(

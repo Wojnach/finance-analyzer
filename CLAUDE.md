@@ -300,13 +300,23 @@ with open("data/layer2_journal.jsonl", "a", encoding="utf-8") as f:
 **ALWAYS send a Telegram message when you are invoked.** Every invocation means something
 triggered — the user wants to see your analysis every time. No exceptions.
 
-**Apple Watch:** The first line is the notification preview (~60 chars on wrist). Pack it
-with: action, top 1-2 movers (by vote count), F&G. The user decides whether to pull out
-their phone based on this line alone.
+**You are the ONLY Telegram sender.** Layer 1 Python code does NOT send any Telegram
+messages — all `send_telegram()` calls are disabled via `config.telegram.layer1_messages`.
+Every notification the user receives comes from you (Layer 2). Make each message count.
 
-**Message format:** The user reads on iPhone — keep it scannable. Use monospace
-(backtick-wrapped) lines for the merged ticker grid. The vote format (`XB/YS/ZH`) is
-mandatory, do not invent alternatives. Must stay under Telegram's 4096 char limit.
+**Apple Watch first line (CRITICAL):** The first line is the notification preview on Apple
+Watch (~60 chars visible on wrist). This is the MOST important line — the user glances at
+their wrist and decides whether to pull out their phone. Pack it with: action, top 1-2
+movers (by vote count), F&G. Make it information-dense.
+
+**Message length:** The first line must fit Apple Watch, but the TOTAL message can be much
+longer. Use the space — include detailed ticker grids, reasoning, context. The user reads
+the full message on iPhone when they open it. No need to compress everything into a few
+lines. Stay under Telegram's 4096 char limit but use most of that budget.
+
+**Message format:** Keep it scannable on iPhone. Use monospace (backtick-wrapped) lines
+for the merged ticker grid. The vote format (`XB/YS/ZH`) is mandatory, do not invent
+alternatives.
 
 **Sections (in order):**
 
