@@ -340,20 +340,13 @@ def run(force_report=False, active_symbols=None):
 
 
 def _crash_alert(error_msg):
-    """Send Telegram alert on loop crash."""
+    """Save crash alert to message log (not sent to Telegram)."""
     try:
         config_path = Path(__file__).resolve().parent.parent / "config.json"
         config = json.load(open(config_path, encoding="utf-8"))
-        token = config.get("telegram", {}).get("token", "")
-        chat_id = config.get("telegram", {}).get("chat_id", "")
-        if token and chat_id:
-            text = f"LOOP CRASH\n\n{error_msg[:3000]}"
-            fetch_with_retry(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                method="POST",
-                json_body={"chat_id": chat_id, "text": text},
-                timeout=10,
-            )
+        text = f"LOOP CRASH\n\n{error_msg[:3000]}"
+        from portfolio.message_store import send_or_store
+        send_or_store(text, config, category="error")
     except Exception:
         pass
 
@@ -378,8 +371,8 @@ def loop(interval=None):
                 logger.warning(msg)
                 try:
                     config = _load_config()
-                    from portfolio.telegram_notifications import send_telegram
-                    send_telegram(msg, config)
+                    from portfolio.message_store import send_or_store
+                    send_or_store(msg, config, category="error")
                 except Exception:
                     pass
         except Exception as e:

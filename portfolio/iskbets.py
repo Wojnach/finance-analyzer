@@ -20,7 +20,7 @@ from portfolio.api_utils import get_alpaca_headers, BINANCE_BASE, ALPACA_BASE
 from portfolio.file_utils import atomic_write_json
 from portfolio.http_retry import fetch_with_retry
 from portfolio.shared_state import _cached
-from portfolio.telegram_notifications import send_telegram as _shared_send_telegram
+from portfolio.message_store import send_or_store
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 CONFIG_FILE = DATA_DIR / "iskbets_config.json"
@@ -87,24 +87,14 @@ def _save_state(state):
 
 
 def _send_telegram(msg, config):
-    """Send a Telegram message via shared module."""
-    _shared_send_telegram(msg, config)
+    """Send a Telegram message via central routing (category: iskbets → always sent)."""
+    send_or_store(msg, config, category="iskbets")
 
 
 def _log_telegram(msg):
-    """Append message to telegram log."""
-    log = DATA_DIR / "telegram_messages.jsonl"
-    try:
-        with open(log, "a", encoding="utf-8") as f:
-            f.write(
-                json.dumps(
-                    {"ts": datetime.now(timezone.utc).isoformat(), "text": msg},
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
+    """Append message to telegram log (legacy — new messages use send_or_store)."""
+    from portfolio.message_store import log_message
+    log_message(msg, category="iskbets", sent=False)
 
 
 # ── ATR Computation ──────────────────────────────────────────────────────
