@@ -59,9 +59,9 @@ def _fx_alert_telegram(age_secs):
             msg = f"_FX WARNING: USD/SEK rate is {age_secs / 3600:.1f}h stale. API may be down._"
         else:
             msg = "_FX WARNING: Using hardcoded fallback rate 10.85 SEK. No live or cached rate available._"
-        # Import send_telegram late to avoid circular imports
-        from portfolio.telegram_notifications import send_telegram
-        send_telegram(msg, config)
+        # Route via message store (fx_alert → save-only, not sent to Telegram)
+        from portfolio.message_store import send_or_store
+        send_or_store(msg, config, category="fx_alert")
         _fx_cache["_last_fx_alert"] = now
     except Exception:
         pass  # non-critical

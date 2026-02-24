@@ -12,7 +12,8 @@ from pathlib import Path
 
 from portfolio.api_utils import load_config as _load_config
 from portfolio.file_utils import atomic_append_jsonl
-from portfolio.telegram_notifications import send_telegram, escape_markdown_v1
+from portfolio.message_store import send_or_store
+from portfolio.telegram_notifications import escape_markdown_v1
 
 logger = logging.getLogger("portfolio.agent")
 
@@ -164,7 +165,7 @@ def invoke_agent(reasons, tier=3):
             tier, _agent_proc.pid, max_turns, timeout,
             ", ".join(reasons[:3]),
         )
-        # Send brief Telegram notification that Layer 2 was triggered
+        # Save Layer 2 invocation notification (save-only, not sent to Telegram)
         try:
             config = _load_config()
             reason_str = escape_markdown_v1(", ".join(reasons[:3]))
@@ -172,7 +173,7 @@ def invoke_agent(reasons, tier=3):
                 reason_str += f" (+{len(reasons) - 3} more)"
             tier_label = tier_cfg["label"]
             notify_msg = f"_Layer 2 T{tier} ({tier_label}): {reason_str}_"
-            send_telegram(notify_msg, config)
+            send_or_store(notify_msg, config, category="invocation")
         except Exception:
             pass  # non-critical
         return True

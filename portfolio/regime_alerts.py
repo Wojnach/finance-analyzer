@@ -176,31 +176,15 @@ def send_regime_alert(ticker, old_regime, new_regime):
             msg += f"\n  `{regime:<16} {pct:>5.1f}%`"
 
     config = load_json(CONFIG_FILE, default={})
-    token = config.get("telegram", {}).get("token")
-    chat_id = config.get("telegram", {}).get("chat_id")
 
-    if not token or not chat_id:
-        print(f"REGIME ALERT (no Telegram config): {ticker} {old_regime} -> {new_regime}")
-        return None
-
-    # Save locally
-    log_file = DATA_DIR / "telegram_messages.jsonl"
-    log_entry = {
-        "ts": now.isoformat(),
-        "text": msg,
-        "type": "regime_alert",
-    }
-    with open(log_file, "a", encoding="utf-8") as f:
-        f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-
-    # Send via shared module
+    # Route via message store (regime → save-only, not sent to Telegram)
     try:
-        from portfolio.telegram_notifications import send_telegram
-        result = send_telegram(msg, config)
-        return result
+        from portfolio.message_store import send_or_store
+        send_or_store(msg, config, category="regime")
     except Exception as e:
-        print(f"ERROR sending regime alert: {e}")
+        print(f"ERROR saving regime alert: {e}")
         return None
+    return True
 
 
 def check_and_alert(current_regime, ticker):
