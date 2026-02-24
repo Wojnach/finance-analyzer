@@ -1,7 +1,7 @@
 @echo off
 REM ============================================================
 REM  PF-AutoImprove — Daily autonomous improvement session
-REM  Scheduled: 06:00 CET daily via Task Scheduler (2h before EU market open)
+REM  Scheduled: 09:00 CET daily via Task Scheduler
 REM  Logs to: data\auto-improve-log.jsonl
 REM  Progress: data\auto-improve-progress.json (written by Claude during session)
 REM ============================================================
@@ -53,22 +53,25 @@ set SUCCESS_COUNT=0
 set FAIL_COUNT=0
 if exist Q:\finance-analyzer\data\auto-improve-log.jsonl (
     for /f %%N in ('powershell -NoProfile -Command ^
-      "(Select-String -Path 'Q:\finance-analyzer\data\auto-improve-log.jsonl' -Pattern '\"event\":\"success\"' -SimpleMatch).Count"') do set SUCCESS_COUNT=%%N
+      "$m = Select-String -Path 'Q:\finance-analyzer\data\auto-improve-log.jsonl' -Pattern '\"event\":\"success\"' -SimpleMatch; if($m){$m.Count}else{0}"') do set SUCCESS_COUNT=%%N
     for /f %%N in ('powershell -NoProfile -Command ^
-      "(Select-String -Path 'Q:\finance-analyzer\data\auto-improve-log.jsonl' -Pattern '\"event\":\"failed\"' -SimpleMatch).Count"') do set FAIL_COUNT=%%N
+      "$m = Select-String -Path 'Q:\finance-analyzer\data\auto-improve-log.jsonl' -Pattern '\"event\":\"failed\"' -SimpleMatch; if($m){$m.Count}else{0}"') do set FAIL_COUNT=%%N
 )
 
 REM --- Log result with phase info ---
-if %EXIT_CODE%==0 (
-    set /a NEW_SUCCESS=%SUCCESS_COUNT%+1
-    powershell -NoProfile -Command ^
-      "Add-Content -Path 'Q:\finance-analyzer\data\auto-improve-log.jsonl' -Value ('{\"ts\":\"%TS_END%\",\"event\":\"success\",\"exit_code\":0,\"duration_s\":%DURATION%,\"last_phase\":\"%LAST_PHASE%\",\"phases_done\":%PHASES_DONE%,\"total_success\":' + '%NEW_SUCCESS%' + ',\"total_failed\":%FAIL_COUNT%}')"
-    echo [%TS_END%] SUCCESS in %DURATION%s ^| last_phase=%LAST_PHASE% ^| phases_done=%PHASES_DONE% ^| (total: %NEW_SUCCESS% ok, %FAIL_COUNT% failed)
-) else (
-    set /a NEW_FAIL=%FAIL_COUNT%+1
-    powershell -NoProfile -Command ^
-      "Add-Content -Path 'Q:\finance-analyzer\data\auto-improve-log.jsonl' -Value ('{\"ts\":\"%TS_END%\",\"event\":\"failed\",\"exit_code\":%EXIT_CODE%,\"duration_s\":%DURATION%,\"last_phase\":\"%LAST_PHASE%\",\"phases_done\":%PHASES_DONE%,\"total_success\":%SUCCESS_COUNT%,\"total_failed\":' + '%NEW_FAIL%' + '}')"
-    echo [%TS_END%] FAILED exit=%EXIT_CODE% in %DURATION%s ^| last_phase=%LAST_PHASE% ^| phases_done=%PHASES_DONE% ^| (total: %SUCCESS_COUNT% ok, %NEW_FAIL% failed)
-)
+if not %EXIT_CODE%==0 goto :log_failed
 
+set /a NEW_SUCCESS=%SUCCESS_COUNT%+1
+powershell -NoProfile -Command ^
+  "Add-Content -Path 'Q:\finance-analyzer\data\auto-improve-log.jsonl' -Value ('{\"ts\":\"%TS_END%\",\"event\":\"success\",\"exit_code\":0,\"duration_s\":%DURATION%,\"last_phase\":\"%LAST_PHASE%\",\"phases_done\":%PHASES_DONE%,\"total_success\":%NEW_SUCCESS%,\"total_failed\":%FAIL_COUNT%}')"
+echo [%TS_END%] SUCCESS in %DURATION%s ^| last_phase=%LAST_PHASE% ^| phases_done=%PHASES_DONE% ^| (total: %NEW_SUCCESS% ok, %FAIL_COUNT% failed)
+goto :done
+
+:log_failed
+set /a NEW_FAIL=%FAIL_COUNT%+1
+powershell -NoProfile -Command ^
+  "Add-Content -Path 'Q:\finance-analyzer\data\auto-improve-log.jsonl' -Value ('{\"ts\":\"%TS_END%\",\"event\":\"failed\",\"exit_code\":%EXIT_CODE%,\"duration_s\":%DURATION%,\"last_phase\":\"%LAST_PHASE%\",\"phases_done\":%PHASES_DONE%,\"total_success\":%SUCCESS_COUNT%,\"total_failed\":%NEW_FAIL%}')"
+echo [%TS_END%] FAILED exit=%EXIT_CODE% in %DURATION%s ^| last_phase=%LAST_PHASE% ^| phases_done=%PHASES_DONE% ^| (total: %SUCCESS_COUNT% ok, %NEW_FAIL% failed)
+
+:done
 exit /b %EXIT_CODE%
