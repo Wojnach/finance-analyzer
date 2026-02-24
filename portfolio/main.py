@@ -7,7 +7,7 @@ This is the orchestrator module. All logic has been extracted to:
 - fx_rates.py — USD/SEK exchange rate fetching
 - indicators.py — compute_indicators, detect_regime, technical_signal
 - data_collector.py — Binance/Alpaca/yfinance kline fetchers
-- signal_engine.py — 25-signal voting system, generate_signal
+- signal_engine.py — 27-signal voting system, generate_signal
 - portfolio_mgr.py — portfolio state load/save/value
 - reporting.py — agent_summary.json builder
 - telegram_notifications.py — Telegram send/escape/alert
@@ -101,7 +101,7 @@ from portfolio.telegram_notifications import (  # noqa: E402, F401
 # Agent invocation re-exports
 from portfolio.agent_invocation import (  # noqa: E402, F401
     invoke_agent, _log_trigger,
-    INVOCATIONS_FILE, AGENT_TIMEOUT, TIER_CONFIG,
+    INVOCATIONS_FILE, TIER_CONFIG,
 )
 
 # Digest re-exports

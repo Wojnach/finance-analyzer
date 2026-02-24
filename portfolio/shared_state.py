@@ -21,8 +21,15 @@ _CACHE_MAX_SIZE = 256  # evict expired entries when cache exceeds this size
 _cache_lock = threading.Lock()
 
 
+_MAX_STALE_FACTOR = 5  # return None if cached data is older than TTL * this factor
+
+
 def _cached(key, ttl, func, *args):
-    """Cache-through helper: returns cached data if fresh, else calls func."""
+    """Cache-through helper: returns cached data if fresh, else calls func.
+
+    On error, returns stale data if it's less than TTL * _MAX_STALE_FACTOR old.
+    Beyond that, returns None to prevent trading on dangerously old data.
+    """
     now = time.time()
     with _cache_lock:
         if key in _tool_cache and now - _tool_cache[key]["time"] < ttl:
@@ -41,6 +48,14 @@ def _cached(key, ttl, func, *args):
         logger.warning("[%s] error: %s", key, e)
         with _cache_lock:
             if key in _tool_cache:
+                age = now - _tool_cache[key]["time"]
+                max_stale = ttl * _MAX_STALE_FACTOR
+                if age > max_stale:
+                    logger.warning(
+                        "[%s] stale data too old (%.0fs > %.0fs max), returning None",
+                        key, age, max_stale,
+                    )
+                    return None
                 _tool_cache[key]["time"] = now - ttl + _RETRY_COOLDOWN
                 return _tool_cache[key]["data"]
         return None

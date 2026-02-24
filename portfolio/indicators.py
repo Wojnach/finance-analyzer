@@ -106,7 +106,7 @@ def detect_regime(indicators, is_crypto=True):
     high_vol_threshold = 4.0 if is_crypto else 3.0
     if atr_pct > high_vol_threshold:
         result = "high-vol"
-    elif ema21 != 0 and abs(ema9 - ema21) / ema21 * 100 > 1.0:
+    elif ema21 != 0 and abs(ema9 - ema21) / ema21 * 100 >= 0.5:
         if ema9 > ema21 and rsi > 45:
             result = "trending-up"
         elif ema9 < ema21 and rsi < 55:
