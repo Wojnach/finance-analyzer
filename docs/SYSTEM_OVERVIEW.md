@@ -1,13 +1,13 @@
 # System Overview — Portfolio Intelligence Trading Agent
 
-> **Generated:** 2026-02-23 by autonomous improvement session
-> **Codebase snapshot:** branch `improve/auto-session-2026-02-23` (from `881c084`)
+> **Generated:** 2026-02-24 by autonomous improvement session
+> **Codebase snapshot:** branch `improve/auto-session-2026-02-24` (from `472424c`)
 
 ## 1. Architecture Summary
 
 A two-layer event-driven trading system:
 
-- **Layer 1 (Python fast loop):** Runs every 60s, collects market data from Binance/Alpaca/yfinance, computes 27 signals across 7 timeframes for 30+ instruments, detects meaningful changes via a trigger system, and invokes Layer 2 when something matters.
+- **Layer 1 (Python fast loop):** Runs every 60s, collects market data from Binance/Alpaca/yfinance, computes 27 signals across 7 timeframes for 31+ instruments, detects meaningful changes via a trigger system, and invokes Layer 2 when something matters.
 - **Layer 2 (Claude Code agent):** Invoked as a subprocess when triggers fire. Reads signal snapshots, portfolio state, and its own memory. Makes independent BUY/SELL/HOLD decisions for two simulated portfolios (Patient & Bold, 500K SEK each). Sends analysis via Telegram.
 
 ### Data Flow
@@ -89,7 +89,7 @@ Each module runs 4-8 sub-indicators and produces one BUY/SELL/HOLD via majority 
 | 24 | Macro Regime | `macro_regime.py` | 6 |
 | 25 | Momentum Factors | `momentum_factors.py` | 7 |
 | 26 | News Event | `news_event.py` | 5 |
-| 27 | Econ Calendar | `econ_calendar.py` | 4 |
+| 27 | Econ Calendar | `econ_calendar.py` | 5 |
 
 ### Support Modules (20+ modules)
 
@@ -107,10 +107,6 @@ Each module runs 4-8 sub-indicators and produces one BUY/SELL/HOLD via majority 
 | `health.py` | Heartbeat, error tracking, agent silence detection |
 | `macro_context.py` | DXY, treasury yields, Fed calendar + volume signal |
 | `tickers.py` | Single source of truth for symbols and signal names |
-| `avanza_client.py` / `avanza_tracker.py` / `avanza_orders.py` | Avanza integration |
-| `bigbet.py` | Extreme setup alerts |
-| `iskbets.py` | ISKBETS monitoring |
-| `forecast_signal.py` | Prophet + Chronos GPU forecast |
 | `outcome_tracker.py` | Backfill price outcomes at 1d/3d/5d/10d horizons |
 | `kelly_sizing.py` | Kelly criterion position sizing |
 | `risk_management.py` | Risk metrics and limits |
@@ -128,16 +124,13 @@ Each module runs 4-8 sub-indicators and produces one BUY/SELL/HOLD via majority 
 ## 4. Test Infrastructure
 
 - **Framework:** pytest
-- **Baseline:** 1334 passing, 0 known failures (2 pre-existing failures fixed in this session)
 - **47 test files** across `tests/`, `tests/unit/`, `tests/integration/`
 
-## 5. Changes Made (auto-improve session 2026-02-23)
+## 5. Discrepancies Found (vs existing docs and code)
 
-All discrepancies between code and documentation have been resolved:
-
-1. **Test fixes:** Cooldown test updated to assert 600s, sentiment reversal test now sustains checks
-2. **Silent exceptions:** 5 bare `except: pass` in accuracy_stats.py now log via `logger.debug/warning`
-3. **Deduplication:** 4 copies of `_load_json` removed from kelly_sizing, regime_alerts, risk_management, weekly_digest
-4. **Logger formatting:** 33+ f-string logger calls converted to lazy %-style across 13 modules
-5. **HTTP jitter:** Exponential backoff in http_retry.py now includes 10% random jitter
-6. **Architecture doc:** Updated to 27 signals, 10min cooldown, MIN_VOTERS=3 for all, file layout expanded
+1. **Dashboard heatmap missing 2 signals:** `app.py` signal-heatmap endpoint lists only 24 signals (missing `news_event` and `econ_calendar` added in recent PRs).
+2. **Agent tier timeout unused:** `agent_invocation.py` computes `AGENT_TIMEOUT_DYNAMIC` per tier but the actual timeout check always uses the global `AGENT_TIMEOUT = 900`.
+3. **Stale comments:** `signal_engine.py` line 20 says "25-signal" but system has 27. `trigger.py` docstring says "1 min cooldown" but code uses 600s (10 min).
+4. **FX fallback outdated:** Hardcoded 10.50 SEK in `fx_rates.py` — actual rate is ~10.8-11.0 as of Feb 2026.
+5. **Logger formatting:** `agent_invocation.py` lines 109, 162-164 still use f-string loggers instead of %-style (project convention established in prior session).
+6. **BB NaN edge case:** `indicators.py` — if all prices in the 20-period window are identical, `bb_std` is 0 (not NaN), but `bb_upper == bb_lower == bb_mid == close`, so `price_vs_bb` will always be "inside". Not a crash bug but worth guarding.
