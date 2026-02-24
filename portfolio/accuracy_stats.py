@@ -87,6 +87,52 @@ def signal_accuracy(horizon="1d"):
     return result
 
 
+def signal_accuracy_recent(horizon="1d", days=7):
+    """Compute per-signal accuracy using only the last N days of data.
+
+    Returns same format as signal_accuracy() but filtered by time window.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    entries = load_entries()
+    stats = {s: {"correct": 0, "total": 0} for s in SIGNAL_NAMES}
+
+    for entry in entries:
+        if entry.get("ts", "") < cutoff:
+            continue
+        outcomes = entry.get("outcomes", {})
+        tickers = entry.get("tickers", {})
+
+        for ticker, tdata in tickers.items():
+            outcome = outcomes.get(ticker, {}).get(horizon)
+            if not outcome:
+                continue
+
+            change_pct = outcome.get("change_pct", 0)
+            signals = tdata.get("signals", {})
+
+            for sig_name in SIGNAL_NAMES:
+                vote = signals.get(sig_name, "HOLD")
+                if vote == "HOLD":
+                    continue
+                stats[sig_name]["total"] += 1
+                if _vote_correct(vote, change_pct):
+                    stats[sig_name]["correct"] += 1
+
+    result = {}
+    for sig_name in SIGNAL_NAMES:
+        s = stats[sig_name]
+        acc = s["correct"] / s["total"] if s["total"] > 0 else 0.0
+        result[sig_name] = {
+            "correct": s["correct"],
+            "total": s["total"],
+            "accuracy": acc,
+            "pct": round(acc * 100, 1),
+        }
+    return result
+
+
 def consensus_accuracy(horizon="1d"):
     entries = load_entries()
     correct = 0

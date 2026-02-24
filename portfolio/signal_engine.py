@@ -19,8 +19,8 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 # --- Signal (full 27-signal for "Now" timeframe) ---
 
-MIN_VOTERS_CRYPTO = 3  # crypto has 26 signals (10 core + 16 enhanced, custom_lora removed) — need 3 active voters
-MIN_VOTERS_STOCK = 3  # stocks have 23 signals (7 original + 16 enhanced) — need 3 active voters
+MIN_VOTERS_CRYPTO = 3  # crypto has 24 signals (8 core + 16 enhanced; custom_lora, ml, funding disabled) — need 3
+MIN_VOTERS_STOCK = 3  # stocks have 23 signals (7 core + 16 enhanced) — need 3 active voters
 
 # Sentiment hysteresis — prevents rapid flip spam from ~50% confidence oscillation
 _prev_sentiment = {}  # in-memory cache; seeded from trigger_state.json on first call
@@ -74,6 +74,10 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None):
     Weight per signal = accuracy_weight * regime_mult * normalized_weight
     where normalized_weight = rarity_bonus * bias_penalty (from activation rates).
     Rare, balanced signals get more weight; noisy/biased signals get less.
+
+    Signals with accuracy below 50% (with >=20 samples) are **inverted**: a 30%
+    accurate BUY signal becomes a 70% accurate SELL signal. This turns consistently
+    wrong signals into useful contrarian indicators.
     """
     buy_weight = 0.0
     sell_weight = 0.0
@@ -82,20 +86,28 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None):
     for signal_name, vote in votes.items():
         if vote == "HOLD":
             continue
-        # Accuracy weight
+        # Accuracy weight — invert signals below 50%
         stats = accuracy_data.get(signal_name, {})
         acc = stats.get("accuracy", 0.5)
         samples = stats.get("total", 0)
-        weight = acc if samples >= 20 else 0.5
+        if samples < 20:
+            weight = 0.5
+            invert = False
+        else:
+            invert = acc < 0.5
+            weight = (1.0 - acc) if invert else acc
         # Regime adjustment
         weight *= regime_mults.get(signal_name, 1.0)
         # Activation frequency normalization (rarity * bias correction)
         act_data = activation_rates.get(signal_name, {})
         norm_weight = act_data.get("normalized_weight", 1.0)
         weight *= norm_weight
-        if vote == "BUY":
+        effective_vote = vote
+        if invert:
+            effective_vote = "SELL" if vote == "BUY" else "BUY"
+        if effective_vote == "BUY":
             buy_weight += weight
-        elif vote == "SELL":
+        elif effective_vote == "SELL":
             sell_weight += weight
     total_weight = buy_weight + sell_weight
     if total_weight == 0:
@@ -260,35 +272,15 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
         except ImportError:
             pass
 
-    # ML Classifier (HistGradientBoosting on BTC/ETH 1h data)
+    # ML Classifier — disabled: 28.2% accuracy (1,027 samples, 1d horizon).
+    # Worse than coin flip; actively harmful to consensus. Still tracked for
+    # accuracy monitoring but never votes.
     votes["ml"] = "HOLD"
-    if ticker:
-        try:
-            from portfolio.ml_signal import get_ml_signal
 
-            ml = _cached(f"ml_{ticker}", ML_SIGNAL_TTL, get_ml_signal, ticker)
-            if ml:
-                extra_info["ml_action"] = ml["action"]
-                extra_info["ml_confidence"] = ml["confidence"]
-                votes["ml"] = ml["action"]
-        except ImportError:
-            pass
-
-    # Funding Rate (Binance perpetuals, crypto only — contrarian)
+    # Funding Rate — disabled: 27.0% accuracy (512 samples, 1d horizon).
+    # Contrarian logic consistently wrong in current regime. Still tracked for
+    # accuracy monitoring but never votes.
     votes["funding"] = "HOLD"
-    if ticker:
-        try:
-            from portfolio.funding_rate import get_funding_rate
-
-            fr = _cached(
-                f"funding_{ticker}", FUNDING_RATE_TTL, get_funding_rate, ticker
-            )
-            if fr:
-                extra_info["funding_rate"] = fr["rate_pct"]
-                extra_info["funding_action"] = fr["action"]
-                votes["funding"] = fr["action"]
-        except ImportError:
-            pass
 
     # Volume Confirmation (spike + price direction = vote)
     votes["volume"] = "HOLD"
@@ -428,22 +420,23 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
 
     # Core signal gate: at least 1 core signal must be active for non-HOLD consensus.
     # Enhanced signals can strengthen/weaken a consensus but never create one alone.
+    # ml and funding removed — disabled due to <30% accuracy.
     CORE_SIGNAL_NAMES = {
         "rsi", "macd", "ema", "bb", "fear_greed", "sentiment",
-        "ml", "funding", "volume", "ministral",
+        "volume", "ministral",
     }
     core_buy = sum(1 for s in CORE_SIGNAL_NAMES if votes.get(s) == "BUY")
     core_sell = sum(1 for s in CORE_SIGNAL_NAMES if votes.get(s) == "SELL")
     core_active = core_buy + core_sell
 
     # Total applicable signals:
-    # Crypto: 10 core (11 original - custom_lora removed) + 16 enhanced = 26
+    # Crypto: 8 core (11 original - custom_lora, ml, funding disabled) + 16 enhanced = 24
     # Metals: 7 core + 16 enhanced = 23
     # Stocks: 7 core + 16 enhanced = 23
     is_crypto = ticker in CRYPTO_SYMBOLS
     is_metal = ticker in METALS_SYMBOLS
     if is_crypto:
-        total_applicable = 26  # 10 core + 16 enhanced
+        total_applicable = 24  # 8 core + 16 enhanced
     elif is_metal:
         total_applicable = 23  # 7 core + 16 enhanced
     else:
@@ -483,17 +476,50 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     activation_rates = {}
     try:
         from portfolio.accuracy_stats import (
-            load_cached_accuracy, signal_accuracy, write_accuracy_cache,
-            load_cached_activation_rates,
+            load_cached_accuracy, signal_accuracy, signal_accuracy_recent,
+            write_accuracy_cache, load_cached_activation_rates,
         )
 
-        cached = load_cached_accuracy("1d")
-        if cached:
-            accuracy_data = cached
-        else:
-            accuracy_data = signal_accuracy("1d")
-            if accuracy_data:
-                write_accuracy_cache("1d", accuracy_data)
+        # Load all-time accuracy
+        alltime = load_cached_accuracy("1d")
+        if not alltime:
+            alltime = signal_accuracy("1d")
+            if alltime:
+                write_accuracy_cache("1d", alltime)
+
+        # Load recent accuracy (7d window) — more responsive to regime changes
+        recent = load_cached_accuracy("1d_recent")
+        if not recent:
+            recent = signal_accuracy_recent("1d", days=7)
+            if recent:
+                write_accuracy_cache("1d_recent", recent)
+
+        # Blend: 70% recent + 30% all-time (prefer recent performance)
+        if alltime and recent:
+            accuracy_data = {}
+            for sig_name in alltime:
+                at = alltime.get(sig_name, {})
+                rc = recent.get(sig_name, {})
+                at_acc = at.get("accuracy", 0.5)
+                rc_acc = rc.get("accuracy", 0.5)
+                rc_samples = rc.get("total", 0)
+                at_samples = at.get("total", 0)
+                # Only blend if recent has enough data; otherwise use all-time
+                if rc_samples >= 50:
+                    blended = 0.7 * rc_acc + 0.3 * at_acc
+                else:
+                    blended = at_acc
+                accuracy_data[sig_name] = {
+                    "accuracy": blended,
+                    "total": max(at_samples, rc_samples),
+                    "correct": at.get("correct", 0),
+                    "pct": round(blended * 100, 1),
+                }
+        elif alltime:
+            accuracy_data = alltime
+        elif recent:
+            accuracy_data = recent
+
         activation_rates = load_cached_activation_rates()
     except Exception:
         logger.warning("Accuracy stats load failed", exc_info=True)

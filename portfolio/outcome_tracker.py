@@ -270,6 +270,9 @@ def backfill_outcomes():
     price_cache = {}
     updated = 0
 
+    # Tickers we can actually fetch prices for — skip unknown/removed tickers
+    known_tickers = set(BINANCE_SPOT_MAP) | set(BINANCE_FAPI_MAP) | set(YF_MAP)
+
     # Open SignalDB once for all dual-writes (avoids per-outcome open/close)
     _db = None
     try:
@@ -298,6 +301,8 @@ def backfill_outcomes():
 
         entry_updated = False
         for ticker in tickers:
+            if ticker not in known_tickers:
+                continue  # skip removed/unknown tickers (e.g. AI)
             if ticker not in outcomes:
                 outcomes[ticker] = {"1d": None, "3d": None, "5d": None, "10d": None}
 
