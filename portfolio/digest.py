@@ -1,4 +1,8 @@
-"""4-hour digest message builder and sender."""
+"""4-hour digest message builder and sender.
+
+Sends via message_store with category "digest" (always delivered to Telegram).
+Enhanced with: invocation count, success/failure, consensus breakdown, L1→L2 triggers.
+"""
 
 import json
 import logging
@@ -8,7 +12,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from portfolio.portfolio_mgr import _atomic_write_json, portfolio_value, load_state
-from portfolio.telegram_notifications import send_telegram, escape_markdown_v1
+from portfolio.message_store import send_or_store
+from portfolio.telegram_notifications import escape_markdown_v1
 
 logger = logging.getLogger("portfolio.digest")
 
@@ -17,6 +22,7 @@ DATA_DIR = BASE_DIR / "data"
 INVOCATIONS_FILE = DATA_DIR / "invocations.jsonl"
 AGENT_SUMMARY_FILE = DATA_DIR / "agent_summary.json"
 BOLD_STATE_FILE = DATA_DIR / "portfolio_state_bold.json"
+SIGNAL_LOG_FILE = DATA_DIR / "signal_log.jsonl"
 
 DIGEST_INTERVAL = 14400  # 4 hours
 
@@ -47,6 +53,7 @@ def _build_digest_message():
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=DIGEST_INTERVAL)
 
+    # --- Invocations (Layer 1 trigger → Layer 2) ---
     entries = load_jsonl(INVOCATIONS_FILE)
     recent = [e for e in entries if datetime.fromisoformat(e["ts"]) >= cutoff]
     reason_counts = Counter()
@@ -64,10 +71,14 @@ def _build_digest_message():
                 reason_counts["sentiment"] += 1
             elif "cooldown" in r or "check-in" in r:
                 reason_counts["check_in"] += 1
+            elif "consensus" in r:
+                reason_counts["consensus"] += 1
+            elif "post-trade" in r:
+                reason_counts["post_trade"] += 1
             else:
                 reason_counts["other"] += 1
 
-    # Count Layer 2 decisions from journal
+    # --- Layer 2 decisions from journal ---
     journal = load_jsonl(JOURNAL_FILE)
     recent_journal = [e for e in journal if datetime.fromisoformat(e["ts"]) >= cutoff]
     l2_decisions = {"patient": Counter(), "bold": Counter()}
@@ -75,8 +86,20 @@ def _build_digest_message():
         decisions = e.get("decisions", {})
         for strat in ("patient", "bold"):
             action = decisions.get(strat, {}).get("action", "HOLD")
-            l2_decisions[strat][action] += 1
+            # Normalize: "BUY SMCI" → "BUY", "SELL BTC-USD" → "SELL"
+            action_key = action.split()[0] if action else "HOLD"
+            l2_decisions[strat][action_key] += 1
 
+    # --- Signal consensus breakdown from signal_log ---
+    signal_entries = load_jsonl(SIGNAL_LOG_FILE)
+    recent_signals = [e for e in signal_entries if datetime.fromisoformat(e.get("ts", "2000-01-01")) >= cutoff]
+    consensus_counts = Counter()
+    for e in recent_signals:
+        for ticker_data in e.get("signals", {}).values():
+            action = ticker_data.get("action", "HOLD")
+            consensus_counts[action] += 1
+
+    # --- Portfolio values ---
     summary = json.loads(AGENT_SUMMARY_FILE.read_text(encoding="utf-8"))
     fx_rate = summary.get("fx_rate", 10.5)
     prices_usd = {t: s["price_usd"] for t, s in summary.get("signals", {}).items()}
@@ -88,32 +111,60 @@ def _build_digest_message():
         t for t, h in state.get("holdings", {}).items() if h.get("shares", 0) > 0
     ]
 
+    # --- Build message ---
     lines = ["*4H DIGEST*", ""]
     lines.append(
         f"_{cutoff.strftime('%H:%M')} - {now.strftime('%H:%M UTC')} ({now.strftime('%b %d')})_"
     )
 
-    # Layer 2 (Claude) activity
+    # Layer 2 (Claude Code) activity — invocations, success, failures
     invoked = status_counts.get("invoked", 0)
-    skipped = status_counts.get("skipped_busy", 0)
-    l2_total = len(recent_journal)
-    lines.append(
-        f"_Layer 2: {invoked} invoked, {l2_total} decisions, {skipped} skipped_"
-    )
+    skipped_busy = status_counts.get("skipped_busy", 0)
+    skipped_offhours = status_counts.get("skipped_offhours", 0)
+    l2_analyses = len(recent_journal)
+    l2_failures = max(0, invoked - l2_analyses)  # invoked but no journal = failure
+
+    lines.append("")
+    lines.append("*Claude Code Activity*")
+    lines.append(f"`Invoked:    {invoked}`")
+    lines.append(f"`Succeeded:  {l2_analyses}`")
+    if l2_failures > 0:
+        lines.append(f"`Failed:     {l2_failures}`")
+    if skipped_busy > 0:
+        lines.append(f"`Skipped:    {skipped_busy} (busy)`")
+    if skipped_offhours > 0:
+        lines.append(f"`Off-hours:  {skipped_offhours}`")
+
+    # Layer 2 decisions per strategy
     for strat in ("patient", "bold"):
         counts = l2_decisions[strat]
         if counts:
             parts = []
             for action in ("HOLD", "BUY", "SELL"):
                 if counts[action]:
-                    parts.append(f"{counts[action]} {action}")
-            lines.append(f"`  {strat:<8} {', '.join(parts)}`")
+                    parts.append(f"{counts[action]}{action[0]}")
+            lines.append(f"`  {strat:<8} {'/'.join(parts)}`")
 
+    # Layer 1 triggers → Layer 2 count
+    l1_to_l2 = len(recent)  # total trigger events that reached Layer 2 decision
     lines.append("")
-    lines.append(f"_Triggers: {len(recent)}_")
-    for reason, count in reason_counts.most_common():
+    lines.append(f"*L1 Triggers: {l1_to_l2}*")
+    for reason, count in reason_counts.most_common(6):
         lines.append(f"`{reason:<14} {count}`")
 
+    # Signal consensus breakdown (across all tickers in period)
+    if consensus_counts:
+        total_signals = sum(consensus_counts.values())
+        buy_pct = consensus_counts.get("BUY", 0) / total_signals * 100 if total_signals else 0
+        sell_pct = consensus_counts.get("SELL", 0) / total_signals * 100 if total_signals else 0
+        hold_pct = consensus_counts.get("HOLD", 0) / total_signals * 100 if total_signals else 0
+        lines.append("")
+        lines.append(
+            f"_Consensus: {consensus_counts.get('BUY', 0)}B/{consensus_counts.get('SELL', 0)}S/{consensus_counts.get('HOLD', 0)}H "
+            f"({buy_pct:.0f}/{sell_pct:.0f}/{hold_pct:.0f}%)_"
+        )
+
+    # Portfolio summaries
     lines.append("")
     p_holdings_str = escape_markdown_v1(', '.join(p_holdings)) if p_holdings else 'cash'
     lines.append(
@@ -143,7 +194,7 @@ def _maybe_send_digest(config):
         return
     try:
         msg = _build_digest_message()
-        send_telegram(msg, config)
+        send_or_store(msg, config, category="digest")
         _set_last_digest_time(time.time())
         logger.info("4h digest sent")
     except Exception as e:
