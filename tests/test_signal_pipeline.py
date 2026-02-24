@@ -150,32 +150,32 @@ class TestVoteCountIntegrity:
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_vote_counts(self, _mock):
-        """For stocks, total applicable = 23."""
+        """For stocks, total applicable = 24 (7 core + 17 enhanced incl. forecast)."""
         ind = make_indicators(close=130.0)
         df = make_ohlcv_df(n=250, base_price=130.0)
         _, _, extra = generate_signal(ind, ticker="NVDA", df=df)
 
-        assert extra["_total_applicable"] == 23
+        assert extra["_total_applicable"] == 24
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_metal_vote_counts(self, _mock):
-        """For metals, total applicable = 23."""
+        """For metals, total applicable = 24 (7 core + 17 enhanced incl. forecast)."""
         ind = make_indicators(close=2000.0)
         df = make_ohlcv_df(n=250, base_price=2000.0)
         _, _, extra = generate_signal(ind, ticker="XAU-USD", df=df)
 
-        assert extra["_total_applicable"] == 23
+        assert extra["_total_applicable"] == 24
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
-    def test_all_stock_symbols_have_23_applicable(self, _mock):
-        """Every stock symbol should have exactly 23 total applicable signals."""
+    def test_all_stock_symbols_have_24_applicable(self, _mock):
+        """Every stock symbol should have exactly 24 total applicable signals."""
         ind = make_indicators(close=100.0)
         df = make_ohlcv_df(n=250, base_price=100.0)
 
         for ticker in list(STOCK_SYMBOLS)[:5]:  # test a sample
             _, _, extra = generate_signal(ind, ticker=ticker, df=df)
-            assert extra["_total_applicable"] == 23, \
-                f"{ticker} has {extra['_total_applicable']} total applicable, expected 23"
+            assert extra["_total_applicable"] == 24, \
+                f"{ticker} has {extra['_total_applicable']} total applicable, expected 24"
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ from portfolio.news_keywords import (
     keyword_severity,
     is_credible_source,
     get_sector_impact,
+    dissemination_score,
     KEYWORD_SECTOR_IMPACT,
 )
 from portfolio.signal_utils import majority_vote
@@ -285,6 +286,43 @@ def _sector_impact_vote(headlines: list[dict], ticker: str) -> tuple[str, dict]:
     return "HOLD", indicators
 
 
+def _dissemination_vote(headlines: list[dict]) -> tuple[str, dict]:
+    """Dissemination-aware news spread scoring (FinGPT pattern).
+
+    High dissemination (score >= 2.0) amplifies the dominant sentiment direction.
+    Uses source diversity, credible source presence, and time clustering.
+    """
+    score = dissemination_score(headlines)
+    indicators = {"dissemination_score": score}
+
+    if score < 1.5:
+        return "HOLD", indicators
+
+    # High dissemination — determine direction from headline keywords
+    neg = 0
+    pos = 0
+    for h in headlines:
+        sev = keyword_severity(h.get("title", ""))
+        if sev in ("critical", "high"):
+            neg += 1
+        elif sev == "moderate":
+            title_lower = h.get("title", "").lower()
+            if any(kw in title_lower for kw in ("beat", "upgrade", "approval", "approved",
+                                                  "raise", "buyback", "split")):
+                pos += 1
+            else:
+                neg += 1
+
+    indicators["dissemination_neg"] = neg
+    indicators["dissemination_pos"] = pos
+
+    if neg > pos and neg >= 2:
+        return "SELL", indicators
+    if pos > neg and pos >= 2:
+        return "BUY", indicators
+    return "HOLD", indicators
+
+
 def compute_news_event_signal(df: pd.DataFrame, context: dict = None) -> dict:
     """Compute the composite news/event detection signal.
 
@@ -309,6 +347,7 @@ def compute_news_event_signal(df: pd.DataFrame, context: dict = None) -> dict:
             "sentiment_shift": "HOLD",
             "source_weight": "HOLD",
             "sector_impact": "HOLD",
+            "dissemination": "HOLD",
         },
         "indicators": {},
     }
@@ -353,22 +392,29 @@ def compute_news_event_signal(df: pd.DataFrame, context: dict = None) -> dict:
     except Exception:
         sec_action, sec_ind = "HOLD", {}
 
+    try:
+        dis_action, dis_ind = _dissemination_vote(headlines)
+    except Exception:
+        dis_action, dis_ind = "HOLD", {}
+
     # Populate result
     result["sub_signals"]["headline_velocity"] = vel_action
     result["sub_signals"]["keyword_severity"] = sev_action
     result["sub_signals"]["sentiment_shift"] = shift_action
     result["sub_signals"]["source_weight"] = src_action
     result["sub_signals"]["sector_impact"] = sec_action
+    result["sub_signals"]["dissemination"] = dis_action
 
     result["indicators"].update({f"velocity_{k}": v for k, v in vel_ind.items()})
     result["indicators"].update({f"severity_{k}": v for k, v in sev_ind.items()})
     result["indicators"].update({f"shift_{k}": v for k, v in shift_ind.items()})
     result["indicators"].update({f"source_{k}": v for k, v in src_ind.items()})
     result["indicators"].update({f"sector_{k}": v for k, v in sec_ind.items()})
+    result["indicators"].update({f"dissemination_{k}": v for k, v in dis_ind.items()})
     result["indicators"]["total_headlines"] = len(headlines)
 
     # Majority vote
-    votes = [vel_action, sev_action, shift_action, src_action, sec_action]
+    votes = [vel_action, sev_action, shift_action, src_action, sec_action, dis_action]
     result["action"], result["confidence"] = majority_vote(votes)
 
     # Cap confidence

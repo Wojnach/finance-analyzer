@@ -115,6 +115,9 @@ def _register_defaults():
                       "compute_news_event_signal", requires_context=True)
     register_enhanced("econ_calendar", "portfolio.signals.econ_calendar",
                       "compute_econ_calendar_signal", requires_context=True)
+    # forecast signal — Kronos + Chronos price direction prediction
+    register_enhanced("forecast", "portfolio.signals.forecast",
+                      "compute_forecast_signal", requires_context=True)
 
 
 _register_defaults()

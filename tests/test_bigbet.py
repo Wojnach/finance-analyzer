@@ -170,7 +170,7 @@ def _make_signals(ticker, rsi=50, macd_hist=0, macd_hist_prev=0,
                 "fear_greed_class": fear_greed_class,
                 "_buy_count": 0,
                 "_sell_count": 0,
-                "_total_applicable": 23,
+                "_total_applicable": 24,
             },
         }
     }

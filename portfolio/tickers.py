@@ -110,4 +110,5 @@ SIGNAL_NAMES = [
     "momentum_factors",
     "news_event",
     "econ_calendar",
+    "forecast",
 ]

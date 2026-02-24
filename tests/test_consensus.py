@@ -295,13 +295,13 @@ class TestStockSignalVoteCounts:
     def test_stock_total_applicable_is_21(self, _mock):
         ind = make_indicators()
         _, _, extra = generate_signal(ind, ticker="MSTR")
-        assert extra["_total_applicable"] == 23  # 7 original + 16 enhanced
+        assert extra["_total_applicable"] == 24  # 7 original + 17 enhanced (incl. forecast)
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_total_applicable_is_24(self, _mock):
         ind = make_indicators(close=69000.0)
         _, _, extra = generate_signal(ind, ticker="BTC-USD")
-        assert extra["_total_applicable"] == 24  # 8 core + 16 enhanced (custom_lora, ml, funding disabled)
+        assert extra["_total_applicable"] == 25  # 8 core + 17 enhanced (incl. forecast; custom_lora, ml, funding disabled)
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_max_technical_voters_is_4(self, _mock):

@@ -19,8 +19,8 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 # --- Signal (full 27-signal for "Now" timeframe) ---
 
-MIN_VOTERS_CRYPTO = 3  # crypto has 24 signals (8 core + 16 enhanced; custom_lora, ml, funding disabled) — need 3
-MIN_VOTERS_STOCK = 3  # stocks have 23 signals (7 core + 16 enhanced) — need 3 active voters
+MIN_VOTERS_CRYPTO = 3  # crypto has 25 signals (8 core + 17 enhanced; custom_lora, ml, funding disabled) — need 3
+MIN_VOTERS_STOCK = 3  # stocks have 24 signals (7 core + 17 enhanced) — need 3 active voters
 
 # Sentiment hysteresis — prevents rapid flip spam from ~50% confidence oscillation
 _prev_sentiment = {}  # in-memory cache; seeded from trigger_state.json on first call
@@ -430,17 +430,18 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     core_active = core_buy + core_sell
 
     # Total applicable signals:
-    # Crypto: 8 core (11 original - custom_lora, ml, funding disabled) + 16 enhanced = 24
-    # Metals: 7 core + 16 enhanced = 23
-    # Stocks: 7 core + 16 enhanced = 23
+    # Crypto: 8 core (11 original - custom_lora, ml, funding disabled) + 17 enhanced = 25
+    # Metals: 7 core + 17 enhanced = 24
+    # Stocks: 7 core + 17 enhanced = 24
+    # (enhanced: 16 original + 1 forecast)
     is_crypto = ticker in CRYPTO_SYMBOLS
     is_metal = ticker in METALS_SYMBOLS
     if is_crypto:
-        total_applicable = 24  # 8 core + 16 enhanced
+        total_applicable = 25  # 8 core + 17 enhanced
     elif is_metal:
-        total_applicable = 23  # 7 core + 16 enhanced
+        total_applicable = 24  # 7 core + 17 enhanced
     else:
-        total_applicable = 23  # 7 core + 16 enhanced
+        total_applicable = 24  # 7 core + 17 enhanced
 
     active_voters = buy + sell
     if ticker in STOCK_SYMBOLS:

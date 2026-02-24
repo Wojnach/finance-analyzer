@@ -180,6 +180,76 @@ def is_credible_source(source: str) -> bool:
     return any(cs in lower for cs in CREDIBLE_SOURCES)
 
 
+def dissemination_score(articles: list[dict]) -> float:
+    """Score how widely news has spread (FinGPT dissemination-aware pattern).
+
+    Factors:
+    1. Unique source count — more sources = wider spread
+    2. Source diversity — credible sources (Reuters, Bloomberg) weight more
+    3. Time clustering — articles within 1h of each other = breaking news
+
+    Returns:
+        Float multiplier (1.0 = normal, up to 3.0 for breaking news with wide coverage).
+        Used to amplify headline weights in sentiment aggregation.
+    """
+    if not articles or len(articles) < 2:
+        return 1.0
+
+    # Factor 1: Unique source count
+    sources = set()
+    for a in articles:
+        src = a.get("source", "unknown").lower().strip()
+        if src:
+            sources.add(src)
+    source_count = len(sources)
+    # 1 source = 1.0, 3+ sources = 1.5, 5+ = 2.0
+    source_factor = min(1.0 + (source_count - 1) * 0.25, 2.0)
+
+    # Factor 2: Source diversity — credible source presence
+    credible_count = sum(1 for s in sources if any(cs in s for cs in CREDIBLE_SOURCES))
+    diversity_factor = 1.0
+    if credible_count >= 2:
+        diversity_factor = 1.5
+    elif credible_count >= 1:
+        diversity_factor = 1.25
+
+    # Factor 3: Time clustering — articles within 1h of each other
+    from datetime import datetime, timezone
+    timestamps = []
+    for a in articles:
+        pub = a.get("published", "")
+        if not pub:
+            continue
+        try:
+            if isinstance(pub, (int, float)):
+                ts = datetime.fromtimestamp(pub, tz=timezone.utc)
+            else:
+                # Try ISO format
+                pub_str = str(pub).replace("Z", "+00:00")
+                ts = datetime.fromisoformat(pub_str)
+            timestamps.append(ts.timestamp())
+        except (ValueError, TypeError, OSError):
+            continue
+
+    clustering_factor = 1.0
+    if len(timestamps) >= 3:
+        timestamps.sort()
+        # Check if most articles appeared within a 1-hour window
+        window = 3600  # 1 hour
+        max_cluster = 1
+        for i in range(len(timestamps)):
+            cluster = sum(1 for t in timestamps if abs(t - timestamps[i]) <= window)
+            max_cluster = max(max_cluster, cluster)
+        # If 60%+ of articles are in a 1h cluster, it's breaking news
+        cluster_ratio = max_cluster / len(timestamps)
+        if cluster_ratio >= 0.6:
+            clustering_factor = 1.5
+
+    # Combined score (multiplicative, capped at 3.0)
+    score = source_factor * diversity_factor * clustering_factor
+    return min(round(score, 2), 3.0)
+
+
 def get_sector_impact(keyword: str, ticker: str) -> str | None:
     """Get the directional impact of a keyword on a specific ticker.
 
