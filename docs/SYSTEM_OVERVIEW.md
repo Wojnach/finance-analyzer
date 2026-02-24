@@ -126,11 +126,16 @@ Each module runs 4-8 sub-indicators and produces one BUY/SELL/HOLD via majority 
 - **Framework:** pytest
 - **47 test files** across `tests/`, `tests/unit/`, `tests/integration/`
 
-## 5. Discrepancies Found (vs existing docs and code)
+## 5. Changes Made (auto-improve session 2026-02-24)
 
-1. **Dashboard heatmap missing 2 signals:** `app.py` signal-heatmap endpoint lists only 24 signals (missing `news_event` and `econ_calendar` added in recent PRs).
-2. **Agent tier timeout unused:** `agent_invocation.py` computes `AGENT_TIMEOUT_DYNAMIC` per tier but the actual timeout check always uses the global `AGENT_TIMEOUT = 900`.
-3. **Stale comments:** `signal_engine.py` line 20 says "25-signal" but system has 27. `trigger.py` docstring says "1 min cooldown" but code uses 600s (10 min).
-4. **FX fallback outdated:** Hardcoded 10.50 SEK in `fx_rates.py` — actual rate is ~10.8-11.0 as of Feb 2026.
-5. **Logger formatting:** `agent_invocation.py` lines 109, 162-164 still use f-string loggers instead of %-style (project convention established in prior session).
-6. **BB NaN edge case:** `indicators.py` — if all prices in the 20-period window are identical, `bb_std` is 0 (not NaN), but `bb_upper == bb_lower == bb_mid == close`, so `price_vs_bb` will always be "inside". Not a crash bug but worth guarding.
+All discrepancies found during exploration have been resolved:
+
+1. **Dashboard heatmap:** Added `news_event` and `econ_calendar` to signal heatmap endpoint (was 24 signals, now 26 enhanced = complete).
+2. **Agent tier timeout:** Replaced global `AGENT_TIMEOUT = 900` with per-invocation `_agent_timeout` set from tier config (T1=120s, T2=300s, T3=900s). Removed unused `AGENT_TIMEOUT_DYNAMIC`.
+3. **Stale comments:** Fixed "25-signal" → "27-signal" in `signal_engine.py` and "1 min cooldown" → "10 min" in `trigger.py`.
+4. **FX fallback:** Updated hardcoded fallback from 10.50 → 10.85 SEK in `fx_rates.py`.
+5. **Logger formatting:** Converted remaining f-string loggers in `agent_invocation.py` to %-style.
+6. **Telegram truncation:** Added 4096-char message length guard in `send_telegram()` to prevent silent HTTP 400 failures.
+
+### Known non-blocking items (deferred)
+- **BB NaN edge case:** `indicators.py` — if all prices in the 20-period window are identical, `bb_std` is 0, so `price_vs_bb` will always be "inside". Not a crash bug, effectively a HOLD signal, which is correct behavior for a flat market.
