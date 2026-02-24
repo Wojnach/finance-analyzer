@@ -137,5 +137,15 @@ All discrepancies found during exploration have been resolved:
 5. **Logger formatting:** Converted remaining f-string loggers in `agent_invocation.py` to %-style.
 6. **Telegram truncation:** Added 4096-char message length guard in `send_telegram()` to prevent silent HTTP 400 failures.
 
+### Session 2 changes (2026-02-24)
+
+7. **AGENT_TIMEOUT import:** Removed stale `AGENT_TIMEOUT` re-export from `main.py` that crashed on import (left over from Session 1's per-tier timeout migration).
+8. **Cache staleness guard:** `_cached()` now returns `None` when data exceeds 5x TTL during errors, preventing hours-old prices from being used.
+9. **Regime/EMA alignment:** `detect_regime()` EMA gap threshold lowered from 1.0% to 0.5% to match signal engine's EMA deadband.
+10. **Heikin-Ashi voting:** Replaced local `_majority_vote()` with canonical `signal_utils.majority_vote()`.
+11. **Stale data timestamps:** Preserved data in agent_summary.json now includes `stale_since` ISO timestamp.
+12. **Trigger state pruning:** `triggered_consensus` entries older than 7 days are auto-pruned.
+13. **New tests:** `test_shared_state.py`, `test_market_timing.py`, `test_trigger_core.py` — 40+ new tests covering cache, DST, triggers.
+
 ### Known non-blocking items (deferred)
 - **BB NaN edge case:** `indicators.py` — if all prices in the 20-period window are identical, `bb_std` is 0, so `price_vs_bb` will always be "inside". Not a crash bug, effectively a HOLD signal, which is correct behavior for a flat market.
