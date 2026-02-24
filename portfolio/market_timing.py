@@ -1,17 +1,8 @@
 """Market timing utilities — DST-aware NYSE hours, market state detection."""
 
-import logging
-import subprocess
-import time
 from datetime import date, datetime, timezone
 
 from portfolio.tickers import SYMBOLS
-
-logger = logging.getLogger(__name__)
-
-# Sleep watchdog: check every 10 minutes, not every loop cycle
-_last_sleep_check = 0.0
-_SLEEP_CHECK_INTERVAL = 600  # seconds
 
 # Market hours (UTC)
 MARKET_OPEN_HOUR = 7  # ~Frankfurt/London open
@@ -89,41 +80,3 @@ def get_market_state():
     if MARKET_OPEN_HOUR <= hour < close_hour:
         return "open", all_symbols, INTERVAL_MARKET_OPEN
     return "closed", all_symbols, INTERVAL_MARKET_CLOSED
-
-
-def ensure_no_idle_sleep():
-    """Watchdog: ensure standby-timeout-ac is 0 (never idle-sleep).
-
-    Called from the main loop every cycle, but self-throttles to run the
-    actual check at most once per 10 minutes.  On Windows, queries
-    powercfg to read the current AC standby timeout and forces it to 0
-    if something changed it.
-    """
-    global _last_sleep_check
-    now = time.time()
-    if now - _last_sleep_check < _SLEEP_CHECK_INTERVAL:
-        return
-    _last_sleep_check = now
-
-    try:
-        result = subprocess.run(
-            ["powercfg", "/query", "SCHEME_CURRENT", "SUB_SLEEP", "STANDBYIDLE"],
-            capture_output=True, text=True, timeout=10
-        )
-        for line in result.stdout.splitlines():
-            if "Current AC Power Setting Index" in line:
-                # e.g. "    Current AC Power Setting Index: 0x00001c20"
-                hex_val = line.strip().split(":")[-1].strip()
-                timeout_sec = int(hex_val, 16)
-                if timeout_sec != 0:
-                    logger.warning(
-                        "Sleep watchdog: standby-timeout-ac was %ds, forcing to 0",
-                        timeout_sec
-                    )
-                    subprocess.run(
-                        ["powercfg", "-change", "standby-timeout-ac", "0"],
-                        capture_output=True, timeout=10
-                    )
-                break
-    except Exception as e:
-        logger.debug("Sleep watchdog error: %s", e)
