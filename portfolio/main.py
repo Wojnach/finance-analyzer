@@ -422,6 +422,8 @@ def loop(interval=None):
             last_state = market_state
         time.sleep(sleep_interval)
         try:
+            from portfolio.market_timing import ensure_no_idle_sleep
+            ensure_no_idle_sleep()
             run(force_report=False, active_symbols=active_symbols)
             _maybe_send_digest(config)
         except KeyboardInterrupt:
