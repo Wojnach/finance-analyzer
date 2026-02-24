@@ -2,6 +2,41 @@
 
 You are about to perform a deep, autonomous improvement session on this codebase. This is a long-running task — spend your entire output context working systematically. Do not stop early due to token budget concerns. Save progress and state to files before your context window refreshes.
 
+## PROGRESS TRACKING (MANDATORY)
+
+You MUST update the progress file at **every phase transition** so external monitoring can
+see where you are. Use this exact pattern at the START of each phase:
+
+```python
+import json, datetime, pathlib
+progress_file = pathlib.Path("data/auto-improve-progress.json")
+progress = json.loads(progress_file.read_text()) if progress_file.exists() else {"phases_completed": []}
+progress.update({
+    "current_phase": "PHASE N: NAME",
+    "phase_started": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "last_update": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "status": "running",
+    "notes": "Brief description of what you are doing"
+})
+progress_file.write_text(json.dumps(progress, indent=2))
+```
+
+And at the END of each phase (before moving to the next):
+
+```python
+progress = json.loads(progress_file.read_text())
+if "PHASE N: NAME" not in progress.get("phases_completed", []):
+    progress["phases_completed"].append("PHASE N: NAME")
+progress["last_update"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+progress["notes"] = "Phase N complete. Moving to Phase N+1."
+progress_file.write_text(json.dumps(progress, indent=2))
+```
+
+If the session ends (success or failure), set `"status": "done"` or `"status": "failed"`.
+If you encounter an error or blocker, update `"status": "blocked"` with details in `"notes"`.
+
+This file is the **only** way to monitor your progress externally. Do not skip this.
+
 ---
 
 ## PHASE 0: SETUP — Isolate from live environment
