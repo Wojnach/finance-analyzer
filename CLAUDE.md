@@ -377,26 +377,37 @@ Bold: Structural breakout — 12B, vol 2x, BB above upper. Entry confirmed.
 Patient: HOLD — need multi-TF confirmation.
 ```
 
-**Before sending, save the message locally:**
+**ALWAYS save the message locally** (with category — `"trade"` for BUY/SELL, `"analysis"` for HOLD):
 
 ```python
 import json, datetime, pathlib
 msg = "YOUR_MESSAGE"
+# Set category: "trade" if you executed a BUY or SELL, "analysis" for HOLD/commentary
+category = "trade"  # or "analysis"
 log = pathlib.Path("data/telegram_messages.jsonl")
 with open(log, "a", encoding="utf-8") as f:
-    f.write(json.dumps({"ts": datetime.datetime.now(datetime.timezone.utc).isoformat(), "text": msg}, ensure_ascii=False) + "\n")
+    f.write(json.dumps({
+        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "text": msg,
+        "category": category,
+        "sent": category == "trade",
+    }, ensure_ascii=False) + "\n")
 ```
 
-**Then send:**
+**Only send to Telegram if you executed a trade** (BUY or SELL for either Patient or Bold):
 
 ```python
-import json, requests
-config = json.load(open("config.json"))
-requests.post(
-    f"https://api.telegram.org/bot{config['telegram']['token']}/sendMessage",
-    json={"chat_id": config["telegram"]["chat_id"], "text": msg, "parse_mode": "Markdown"}
-)
+if category == "trade":
+    import requests
+    config = json.load(open("config.json"))
+    requests.post(
+        f"https://api.telegram.org/bot{config['telegram']['token']}/sendMessage",
+        json={"chat_id": config["telegram"]["chat_id"], "text": msg, "parse_mode": "Markdown"}
+    )
 ```
+
+**Do NOT send HOLD/analysis messages to Telegram.** They are saved to the JSONL file and
+viewable on the dashboard. Only trade executions go to Telegram.
 
 ## Trading Rules
 
