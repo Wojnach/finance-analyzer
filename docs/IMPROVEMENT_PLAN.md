@@ -1,77 +1,65 @@
-# Improvement Plan — Auto Session 2026-02-24
+# Improvement Plan — Telegram Message Routing & Dashboard Integration
 
-> Based on deep exploration of all ~76 Python files, 47 test files.
-> Previous sessions completed: signal_utils extraction, thread-safe cache,
-> DB connection reuse, cached accuracy, kline dedup, API URL centralization,
-> atomic JSONL appends, encoding fixes, accuracy param optimization,
-> f-string logger cleanup (13 modules), HTTP jitter, silent exception logging,
-> helper deduplication, test fixes, architecture doc update.
+**Session:** 2026-02-24 (telegram routing)
+**Branch:** `improve/auto-session-2026-02-24-telegram`
 
-## Priority 1: Bugs
+## Goal
 
-### B1. Dashboard heatmap missing news_event and econ_calendar signals
-**File:** `dashboard/app.py` lines 261-266
-**Bug:** `enhanced_signals` list has 14 entries but system has 16 enhanced signals. Missing: `news_event`, `econ_calendar`.
-**Impact:** Heatmap grid shows incomplete data for 2 of the newest signals.
-**Fix:** Add `"news_event"` and `"econ_calendar"` to the `enhanced_signals` list.
+Disable most Telegram sending while preserving message generation. Route messages by category:
+- **Always send to Telegram:** ISKBETS, BIG BET, simulated trades (Patient/Bold BUY/SELL), 4-hourly digest
+- **Save only (no Telegram):** Analysis/HOLD messages, Layer 2 invocation notifications, regime alerts, FX warnings, errors
 
-### B2. Agent tier-specific timeout is computed but never used
-**File:** `agent_invocation.py` line 160
-**Bug:** `AGENT_TIMEOUT_DYNAMIC = timeout` is assigned but the timeout check (line 91) always reads the global `AGENT_TIMEOUT = 900`. T1 agents (120s timeout) run for up to 900s before being killed.
-**Impact:** Quick-check agents monopolize resources 7.5x longer than intended.
-**Fix:** Store tier timeout in module-level `_agent_timeout` alongside `_agent_start` and use it in the kill check.
+All messages saved to `data/telegram_messages.jsonl` with category metadata for dashboard viewing.
 
-### B3. FX rate hardcoded fallback is stale
-**File:** `fx_rates.py` line 46
-**Bug:** Fallback rate `10.50` is outdated — actual USD/SEK is ~10.8-11.0.
-**Impact:** Portfolio valuation off by ~3-5% if API is down and no cached rate exists.
-**Fix:** Update to `10.85` (closer to current rate).
+## Architecture
 
-### B4. Stale comments referencing wrong signal count and cooldown
-**File:** `signal_engine.py` line 20, `trigger.py` line 9
-**Bug:** Comments say "25-signal" (should be 27) and "1 min cooldown" (should be 10 min).
-**Impact:** Developer confusion; misleading documentation.
-**Fix:** Update comments to match code.
+### Message Categories
 
-### B5. f-string logger calls in agent_invocation.py
-**File:** `agent_invocation.py` lines 109, 162-164
-**Bug:** Prior session converted all f-string loggers to %-style across 13 modules but missed these 2 in agent_invocation.py.
-**Impact:** Inconsistency with project convention; string formatting happens even when log level is disabled.
-**Fix:** Convert to %-style logging.
+| Category     | Source                    | Send to Telegram | Description                          |
+|-------------|--------------------------|-----------------|--------------------------------------|
+| `trade`     | Layer 2 agent (CLAUDE.md)| YES             | Simulated BUY/SELL executions        |
+| `iskbets`   | iskbets.py               | YES             | Intraday entry/exit alerts           |
+| `bigbet`    | bigbet.py                | YES             | Mean-reversion BIG BET alerts        |
+| `digest`    | digest.py                | YES             | 4-hourly activity report             |
+| `analysis`  | Layer 2 agent (CLAUDE.md)| NO              | HOLD analysis, market commentary     |
+| `invocation`| agent_invocation.py      | NO              | "Layer 2 T2 invoked" notifications   |
+| `regime`    | regime_alerts.py         | NO              | Regime shift alerts                  |
+| `fx_alert`  | fx_rates.py              | NO              | FX rate staleness warnings           |
+| `error`     | main.py                  | NO              | Loop crash notifications             |
 
-## Priority 2: Architecture Improvements
+### JSONL Format (enhanced)
 
-### A1. Telegram message truncation guard
-**File:** `telegram_notifications.py`
-**Why:** Telegram API rejects messages over 4096 characters with HTTP 400. Currently no enforcement — long messages silently fail or trigger the Markdown-fallback retry path.
-**Fix:** Add truncation before sending, with a warning log if truncated.
-**Impact assessment:** Low risk. Only affects edge-case long messages.
+```json
+{"ts": "ISO-8601", "text": "message", "category": "trade", "sent": true}
+```
 
-## Priority 3: Features
+## Batches
 
-*None proposed this session. The system is mature and well-functioning.*
+### Batch 1: Core routing infrastructure
 
-## Priority 4: Refactoring TODOs
+**Files:** `portfolio/message_store.py` (NEW), `portfolio/telegram_notifications.py`
 
-*Covered by B2 fix (remove unused `AGENT_TIMEOUT_DYNAMIC` variable).*
+1. Create `portfolio/message_store.py`:
+   - `SEND_CATEGORIES = {"trade", "iskbets", "bigbet", "digest"}`
+   - `log_message(text, category, sent=False)` — append to JSONL with metadata
+   - `send_or_store(msg, config, category)` — routes: if category in SEND_CATEGORIES, send + log; else log only
+   - `_do_send_telegram(msg, config)` — actual API call extracted from send_telegram
 
-## Execution Order
+2. Modify `portfolio/telegram_notifications.py`:
+   - Keep existing functions for backwards compatibility
 
-### Batch 1 (5 files — bug fixes, low risk, no cross-dependencies)
+### Batch 2: Update Layer 1 senders
 
-| File | Change | Risk |
-|------|--------|------|
-| `dashboard/app.py` | B1: Add missing signal names to heatmap | None — additive only |
-| `agent_invocation.py` | B2: Use tier timeout; B5: fix f-string loggers | Low — affects agent kill timing |
-| `fx_rates.py` | B3: Update fallback rate | None — only affects fallback path |
-| `signal_engine.py` | B4: Fix stale comment | None — comment only |
-| `trigger.py` | B4: Fix stale comment | None — comment only |
+**Files:** `bigbet.py`, `iskbets.py`, `agent_invocation.py`, `regime_alerts.py`, `fx_rates.py`, `main.py`
 
-### Batch 2 (1 file — defensive improvement)
+### Batch 3: CLAUDE.md — Update Layer 2 agent instructions
 
-| File | Change | Risk |
-|------|--------|------|
-| `telegram_notifications.py` | A1: Add message length truncation | Very low — only truncates >4096 chars |
+**File:** `CLAUDE.md`
 
-**Total files modified:** 6
-**Estimated risk:** Low. All changes are additive, defensive, or comment-only. No logic flow changes to the core signal engine or portfolio management.
+### Batch 4: Dashboard — API endpoint + Messages tab
+
+**Files:** `dashboard/app.py`, `dashboard/static/index.html`
+
+### Batch 5: Enhanced 4-hourly digest
+
+**File:** `portfolio/digest.py`
