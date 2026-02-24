@@ -262,7 +262,7 @@ def api_signal_heatmap():
         "trend", "momentum", "volume_flow", "volatility_sig",
         "candlestick", "structure", "fibonacci", "smart_money",
         "oscillators", "heikin_ashi", "mean_reversion", "calendar",
-        "macro_regime", "momentum_factors"
+        "macro_regime", "momentum_factors", "news_event", "econ_calendar"
     ]
     all_signals = core_signals + enhanced_signals
 

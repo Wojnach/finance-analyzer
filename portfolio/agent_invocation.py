@@ -23,7 +23,7 @@ INVOCATIONS_FILE = DATA_DIR / "invocations.jsonl"
 _agent_proc = None
 _agent_log = None
 _agent_start = 0
-AGENT_TIMEOUT = 900
+_agent_timeout = 900  # per-invocation timeout (set from tier config)
 
 # Per-tier configuration
 TIER_CONFIG = {
@@ -81,14 +81,14 @@ def _log_trigger(reasons, status, tier=None):
 
 
 def invoke_agent(reasons, tier=3):
-    global _agent_proc, _agent_log, _agent_start
+    global _agent_proc, _agent_log, _agent_start, _agent_timeout
 
     tier_cfg = TIER_CONFIG.get(tier, TIER_CONFIG[3])
     timeout = tier_cfg["timeout"]
 
     if _agent_proc and _agent_proc.poll() is None:
         elapsed = time.time() - _agent_start
-        if elapsed > AGENT_TIMEOUT:
+        if elapsed > _agent_timeout:
             logger.info("Agent pid=%s timed out (%.0fs), killing", _agent_proc.pid, elapsed)
             if platform.system() == "Windows":
                 subprocess.run(
@@ -106,7 +106,8 @@ def invoke_agent(reasons, tier=3):
                 _agent_log = None
         else:
             logger.info(
-                f"Agent still running (pid {_agent_proc.pid}, {elapsed:.0f}s), skipping"
+                "Agent still running (pid %s, %.0fs), skipping",
+                _agent_proc.pid, elapsed,
             )
             return False
 
@@ -157,11 +158,11 @@ def invoke_agent(reasons, tier=3):
             env=agent_env,
         )
         _agent_start = time.time()
-        AGENT_TIMEOUT_DYNAMIC = timeout  # noqa: N806 — use tier-specific timeout
+        _agent_timeout = timeout
         logger.info(
-            f"Agent T{tier} invoked pid={_agent_proc.pid} "
-            f"max_turns={max_turns} timeout={timeout}s "
-            f"({', '.join(reasons[:3])})"
+            "Agent T%d invoked pid=%s max_turns=%d timeout=%ds (%s)",
+            tier, _agent_proc.pid, max_turns, timeout,
+            ", ".join(reasons[:3]),
         )
         # Send brief Telegram notification that Layer 2 was triggered
         try:
