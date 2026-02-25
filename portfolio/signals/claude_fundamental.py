@@ -133,6 +133,94 @@ def _build_macro_block(macro):
     return " | ".join(parts) if parts else "Macro data unavailable."
 
 
+def _build_fundamentals_block(ticker, fundamentals, tier="haiku"):
+    """Build a fundamentals data string for a ticker based on tier detail level.
+
+    Args:
+        ticker: Stock ticker symbol
+        fundamentals: Dict of all fundamentals from alpha_vantage cache
+        tier: "haiku" (one-liner), "sonnet"/"opus" (detailed block)
+
+    Returns:
+        Formatted string with fundamentals data, or empty string if none available.
+    """
+    fund = fundamentals.get(ticker) if fundamentals else None
+    if not fund:
+        return ""
+
+    if tier == "haiku":
+        # One-liner: key metrics only
+        parts = [ticker + ":"]
+        pe = fund.get("pe_ratio")
+        if pe is not None:
+            parts.append(f"PE={pe:.1f}")
+        rev_growth = fund.get("revenue_growth_yoy")
+        if rev_growth is not None:
+            parts.append(f"RevGrowth={rev_growth:+.0%}")
+        target = fund.get("analyst_target")
+        if target is not None:
+            parts.append(f"Target=${target:.0f}")
+        margin = fund.get("profit_margin")
+        if margin is not None:
+            parts.append(f"Margin={margin:.0%}")
+        return " ".join(parts) if len(parts) > 1 else ""
+
+    # Sonnet/Opus: detailed block
+    lines = [f"  {ticker} Fundamentals:"]
+    pe = fund.get("pe_ratio")
+    fpe = fund.get("forward_pe")
+    peg = fund.get("peg_ratio")
+    if pe is not None or fpe is not None:
+        pe_str = f"PE={pe:.1f}" if pe else "PE=N/A"
+        fpe_str = f"FwdPE={fpe:.1f}" if fpe else "FwdPE=N/A"
+        peg_str = f"PEG={peg:.2f}" if peg else ""
+        lines.append(f"    Valuation: {pe_str} {fpe_str} {peg_str}".rstrip())
+    eps = fund.get("eps")
+    margin = fund.get("profit_margin")
+    rev_growth = fund.get("revenue_growth_yoy")
+    earn_growth = fund.get("earnings_growth_yoy")
+    if eps is not None or margin is not None:
+        eps_str = f"EPS=${eps:.2f}" if eps else ""
+        margin_str = f"Margin={margin:.1%}" if margin else ""
+        rg_str = f"RevGrowth={rev_growth:+.1%}" if rev_growth is not None else ""
+        eg_str = f"EarnGrowth={earn_growth:+.1%}" if earn_growth is not None else ""
+        lines.append(f"    Earnings: {eps_str} {margin_str} {rg_str} {eg_str}".rstrip())
+    target = fund.get("analyst_target")
+    ratings = fund.get("analyst_ratings", {})
+    if target is not None or ratings:
+        t_str = f"Target=${target:.2f}" if target else ""
+        sb = ratings.get("strong_buy", 0)
+        b = ratings.get("buy", 0)
+        h = ratings.get("hold", 0)
+        s = ratings.get("sell", 0)
+        ss = ratings.get("strong_sell", 0)
+        r_str = f"Analysts={sb}SB/{b}B/{h}H/{s}S/{ss}SS" if any([sb, b, h, s, ss]) else ""
+        lines.append(f"    Consensus: {t_str} {r_str}".rstrip())
+    w52h = fund.get("w52_high")
+    w52l = fund.get("w52_low")
+    beta = fund.get("beta")
+    if w52h is not None or w52l is not None:
+        range_str = f"52W=${w52l:.2f}-${w52h:.2f}" if w52l and w52h else ""
+        beta_str = f"Beta={beta:.2f}" if beta else ""
+        lines.append(f"    Range: {range_str} {beta_str}".rstrip())
+    sector = fund.get("sector")
+    industry = fund.get("industry")
+    if sector:
+        ind_str = f"/{industry}" if industry else ""
+        lines.append(f"    Sector: {sector}{ind_str}")
+
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
+def _get_fundamentals_data():
+    """Load fundamentals from alpha_vantage cache (returns empty dict on failure)."""
+    try:
+        from portfolio.alpha_vantage import get_all_fundamentals
+        return get_all_fundamentals()
+    except Exception:
+        return {}
+
+
 def _build_haiku_prompt(summary, macro):
     """Build Haiku prompt for quick directional pulse."""
     from datetime import datetime, timezone
@@ -141,6 +229,17 @@ def _build_haiku_prompt(summary, macro):
     macro_line = _build_macro_block(macro)
     ticker_grid = _build_ticker_grid(summary)
 
+    # Add one-liner fundamentals for each ticker
+    fundamentals = _get_fundamentals_data()
+    fund_lines = []
+    tickers = summary.get("tickers", {})
+    for ticker in tickers:
+        line = _build_fundamentals_block(ticker, fundamentals, tier="haiku")
+        if line:
+            fund_lines.append(line)
+    fund_section = "\n".join(fund_lines) if fund_lines else ""
+    fund_prompt = f"\n\nReal-time fundamentals (Alpha Vantage):\n{fund_section}" if fund_section else ""
+
     return f"""You are a fast fundamental screener for a trading system.
 Date: {date_str}. {macro_line}
 
@@ -148,9 +247,9 @@ For each ticker below, give a quick fundamental directional read.
 Focus ONLY on: business quality, sector momentum, and obvious valuation.
 Do NOT duplicate technical analysis — other signals handle RSI, MACD, etc.
 
-Use your knowledge of each company's fundamentals, earnings trajectory,
-competitive position, and sector dynamics. This is what makes you valuable —
-technical signals cannot see business quality or upcoming catalysts.
+Use the real fundamental data provided below (P/E, revenue growth, analyst targets)
+combined with your knowledge of each company's competitive position and sector dynamics.
+{fund_prompt}
 
 Tickers:
 {ticker_grid}
@@ -174,6 +273,17 @@ def _build_sonnet_prompt(summary, macro):
     macro_line = _build_macro_block(macro)
     ticker_grid = _build_ticker_grid(summary)
 
+    # Add detailed fundamentals per ticker
+    fundamentals = _get_fundamentals_data()
+    fund_blocks = []
+    tickers = summary.get("tickers", {})
+    for ticker in tickers:
+        block = _build_fundamentals_block(ticker, fundamentals, tier="sonnet")
+        if block:
+            fund_blocks.append(block)
+    fund_section = "\n".join(fund_blocks) if fund_blocks else ""
+    fund_prompt = f"\n\nReal fundamental data (Alpha Vantage — use these numbers, not estimates):\n{fund_section}" if fund_section else ""
+
     return f"""You are a fundamental analyst signal for a trading system.
 Date: {date_str}. {macro_line}
 
@@ -187,6 +297,7 @@ For each ticker, evaluate 5 fundamental dimensions:
 Do NOT duplicate technical analysis. Your value is FUNDAMENTAL knowledge that
 candlestick patterns cannot capture — business quality, competitive dynamics,
 earnings trajectory, sector rotation, and macro sensitivity per name.
+{fund_prompt}
 
 Tickers:
 {ticker_grid}
@@ -235,11 +346,23 @@ def _build_opus_prompt(summary, macro, portfolios):
         portfolio_lines.append(f"{label}: {cash:.0f} SEK cash | Holdings: {held}")
     portfolio_ctx = "\n".join(portfolio_lines) if portfolio_lines else "No portfolio data."
 
+    # Add detailed fundamentals + cross-sector comparison for Opus
+    fundamentals = _get_fundamentals_data()
+    fund_blocks = []
+    tickers = summary.get("tickers", {})
+    for ticker in tickers:
+        block = _build_fundamentals_block(ticker, fundamentals, tier="opus")
+        if block:
+            fund_blocks.append(block)
+    fund_section = "\n".join(fund_blocks) if fund_blocks else ""
+    fund_prompt = f"\n\nReal fundamental data (Alpha Vantage — use these numbers, not estimates):\n{fund_section}" if fund_section else ""
+
     return f"""You are a deep fundamental conviction analyst for a trading system.
 Date: {date_str}. {macro_line}
 
 Portfolio context:
 {portfolio_ctx}
+{fund_prompt}
 
 For each ticker, evaluate 5 fundamental dimensions:
 1. fundamental_quality — earnings trajectory, margins, competitive moat, revenue growth
@@ -252,6 +375,7 @@ ADDITIONALLY, provide:
 - Cross-asset reasoning: if BTC breaks down, how does MSTR follow? If semis rally, which names lead?
 - Contrarian flags: where do fundamentals STRONGLY disagree with the technical consensus?
 - Portfolio-aware sizing: are we too concentrated in one sector?
+- Cross-sector valuation comparison using the real P/E, PEG, and margin data above
 
 Do NOT duplicate technical analysis. Focus on what you know that charts cannot show.
 

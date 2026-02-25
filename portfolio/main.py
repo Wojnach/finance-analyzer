@@ -43,8 +43,9 @@ from portfolio.shared_state import (  # noqa: E402, F401
     _tool_cache, _cached, _run_cycle_id, _current_market_state,
     _regime_cache, _regime_cache_cycle,
     _RateLimiter, _alpaca_limiter, _binance_limiter, _yfinance_limiter,
-    FEAR_GREED_TTL, SENTIMENT_TTL, MINISTRAL_TTL, ML_SIGNAL_TTL,
-    FUNDING_RATE_TTL, VOLUME_TTL, _RETRY_COOLDOWN,
+    _alpha_vantage_limiter,
+    FUNDAMENTALS_TTL, FEAR_GREED_TTL, SENTIMENT_TTL, MINISTRAL_TTL,
+    ML_SIGNAL_TTL, FUNDING_RATE_TTL, VOLUME_TTL, _RETRY_COOLDOWN,
 )
 import portfolio.shared_state as _ss
 
@@ -386,6 +387,13 @@ def loop(interval=None):
 
     logger.info("Loop started")
 
+    # Load Alpha Vantage fundamentals cache from disk
+    try:
+        from portfolio.alpha_vantage import load_persistent_cache
+        load_persistent_cache()
+    except Exception as e:
+        logger.warning("Failed to load fundamentals cache: %s", e)
+
     config = _load_config()
     logger.info("Starting loop with market-aware scheduling. Ctrl+C to stop.")
 
@@ -424,6 +432,13 @@ def loop(interval=None):
         try:
             run(force_report=False, active_symbols=active_symbols)
             _maybe_send_digest(config)
+            # Alpha Vantage fundamentals batch refresh (off-hours only)
+            try:
+                from portfolio.alpha_vantage import should_batch_refresh, refresh_fundamentals_batch
+                if should_batch_refresh(config):
+                    refresh_fundamentals_batch(config)
+            except Exception as e_av:
+                logger.warning("Alpha Vantage refresh failed: %s", e_av)
         except KeyboardInterrupt:
             raise
         except Exception as e:

@@ -100,7 +100,12 @@ _binance_limiter = _RateLimiter(600, "binance")
 _yfinance_limiter = _RateLimiter(30, "yfinance")
 
 
+# Alpha Vantage: 5 req/min free tier
+_alpha_vantage_limiter = _RateLimiter(5, "alpha_vantage")
+
+
 # TTL constants for tool caching
+FUNDAMENTALS_TTL = 86400  # 24 hours
 FEAR_GREED_TTL = 300     # 5 min
 SENTIMENT_TTL = 900      # 15 min
 MINISTRAL_TTL = 900      # 15 min

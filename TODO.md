@@ -168,6 +168,12 @@ Full plan: `docs/plans/2026-02-09-llm-trading-research.md`
 
 ---
 
+## Pending
+
+- [ ] **Get Alpha Vantage API key:** Sign up at https://www.alphavantage.co/support/#api-key (free tier, 25 req/day). Add key to `config.json` → `alpha_vantage.api_key`. Module is ready and integrated — just needs the key to start fetching.
+
+---
+
 ## Watch List
 
 | Project       | Stars | What                                      | Revisit When                        |

@@ -194,6 +194,15 @@ def write_agent_summary(
     except Exception:
         pass
 
+    # Alpha Vantage fundamentals (stocks only, daily refresh)
+    try:
+        from portfolio.alpha_vantage import get_all_fundamentals
+        all_funds = get_all_fundamentals()
+        if all_funds:
+            summary["fundamentals"] = all_funds
+    except Exception:
+        pass
+
     cross_leads = _cross_asset_signals(signals)
     if cross_leads:
         summary["cross_asset_leads"] = cross_leads
@@ -328,6 +337,27 @@ def _write_compact_summary(summary):
                 if "error" not in tf else {"horizon": tf["horizon"], "error": tf["error"]}
                 for tf in tf_list
             ]
+
+    # Add condensed fundamentals for interesting tickers
+    all_funds = summary.get("fundamentals", {})
+    if all_funds:
+        condensed = {}
+        for ticker in compact["signals"]:
+            fund = all_funds.get(ticker)
+            if fund is None:
+                continue
+            action = compact["signals"][ticker].get("action", "HOLD")
+            is_held = ticker in held_tickers
+            if action != "HOLD" or is_held:
+                condensed[ticker] = {
+                    k: fund[k] for k in (
+                        "pe_ratio", "forward_pe", "revenue_growth_yoy",
+                        "profit_margin", "sector", "analyst_target",
+                        "w52_high", "w52_low",
+                    ) if fund.get(k) is not None
+                }
+        if condensed:
+            compact["fundamentals"] = condensed
 
     _atomic_write_json(COMPACT_SUMMARY_FILE, compact)
 
