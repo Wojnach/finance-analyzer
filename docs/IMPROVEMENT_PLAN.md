@@ -1,58 +1,124 @@
-# Improvement Plan — Auto Session 2026-02-24 (Session 2)
+# Improvement Plan — Auto-Session 2026-02-25
 
-> Deep dive following Session 1's bug fixes. Focus: breaking import bug,
-> test coverage for critical untested modules, stale data safety, voting
-> consistency across signal modules.
->
-> **Status: ALL ITEMS COMPLETED** — see commits on `improve/auto-session-2026-02-24`.
+## 1. Bugs & Problems Found
 
-## Priority 1: Critical Bugs — DONE
+### BUG-1: atomic_append_jsonl missing fsync (data corruption risk)
+- **File:** portfolio/file_utils.py:66-76
+- **Problem:** f.write(line) without f.flush() + os.fsync(). If OS crashes mid-write,
+  JSONL file may have partial line. All JSONL consumers handle parse errors gracefully
+  via continue, but partial writes still corrupt data integrity.
+- **Impact:** Low probability but high severity: corrupted signal_log.jsonl loses accuracy data.
+- **Fix:** Add flush+fsync after write.
+- **Affected:** signal_log.jsonl, layer2_journal.jsonl, invocations.jsonl, telegram_messages.jsonl
 
-### B1. AGENT_TIMEOUT import breaks main.py ✅
-**Commit:** `c98a0a3`
-Removed stale `AGENT_TIMEOUT` re-export from `main.py`. Fixed docstring "25-signal" → "27-signal".
+### BUG-2: Sentiment state write races with trigger state
+- **File:** portfolio/signal_engine.py (_set_prev_sentiment) and portfolio/trigger.py (_save_state)
+- **Problem:** Both write to data/trigger_state.json independently via atomic_write_json.
+  One write can overwrite the other's changes.
+- **Impact:** Sentiment state may be lost, causing false triggers or missed flips.
+- **Fix:** Move prev_sentiment out of trigger_state.json into signal_engine's own state file.
 
-### B2. Stale data returned indefinitely on cache errors ✅
-**Commit:** `c98a0a3`
-Added `_MAX_STALE_FACTOR = 5` guard to `_cached()`. Returns `None` with warning when cached data exceeds 5x TTL.
+### BUG-3: Agent log file descriptor leak on timeout
+- **File:** portfolio/agent_invocation.py
+- **Problem:** When agent times out, log file handle may not be properly closed in all paths.
+- **Impact:** File descriptor leak over many invocations.
+- **Fix:** Use context manager for log file handle.
 
-### B3. Regime detection uses 1.0% EMA gap vs signal engine's 0.5% ✅
-**Commit:** `c98a0a3`
-Aligned `detect_regime()` to use `>= 0.5%` (was `> 1.0%`), matching signal_engine's EMA deadband.
+### BUG-4: Stale tickers accumulate in agent_summary.json
+- **File:** portfolio/reporting.py (stale data preservation logic)
+- **Problem:** Off-hours stock data preserved with stale=True but never pruned.
+- **Impact:** Gradually increases file size and Layer 2 context consumption.
+- **Fix:** Prune stale entries older than 24 hours.
 
-## Priority 2: Architecture & Safety — DONE
+## 2. Architecture Improvements
 
-### A1. heikin_ashi.py duplicate majority_vote ✅
-**Commit:** `5e9c659`
-Replaced local `_majority_vote()` with `signal_utils.majority_vote(count_hold=True)`.
+### ARCH-1: Consolidate trigger_state writes (resolves BUG-2)
+- **Why:** Three different writers to the same JSON file creates race conditions.
+- **What:** Extract sentiment persistence into data/sentiment_state.json.
+  Keep trigger_state.json for trigger-specific state only.
+- **Enables:** Clean separation of concerns, eliminates BUG-2.
+- **Impact:** signal_engine.py, trigger.py: state path changes.
 
-### A2. Stale data missing timestamps ✅
-**Commit:** `5e9c659`
-Added `stale_since` ISO timestamp to preserved data in `reporting.py`.
+### ARCH-2: Add pyproject.toml for Python packaging and tooling
+- **Why:** No linter, formatter, or standardized build commands. requirements.txt stale.
+- **What:** Create pyproject.toml with dependencies, dev deps (pytest, ruff), and tool config.
+- **Enables:** Automated code quality, CI/CD readiness, reproducible environments.
+- **Impact:** Additive only, no code changes needed.
 
-### A3. triggered_consensus unbounded growth ✅
-**Commit:** `5e9c659`
-Added pruning in `_save_state()` for tickers no longer in current signals.
+### ARCH-3: Expand conftest.py with shared test fixtures
+- **Why:** 45 test files reimplement helpers (~500 lines of duplication).
+- **What:** Add shared fixtures: sample_indicators, sample_ohlcv_df, sample_config, tmp_data_dir.
+- **Enables:** Faster test writing, reduced maintenance, consistent test data.
+- **Impact:** Test files only.
 
-## Priority 3: Test Coverage — DONE
+## 3. Useful Features
 
-### T1. Trigger core tests ✅
-**Commit:** `07f76ff` — 64 tests in `tests/test_trigger_core.py`
+### FEAT-1: Update architecture-plan.md to reflect actual state (29 signals)
+- **Why:** Doc says 27 signals, actual is 29. Signal counts and file layout need updating.
+- **Impact:** Documentation only, zero code risk.
 
-### T2. Market timing DST tests ✅
-**Commit:** `07f76ff` — 100 tests in `tests/test_market_timing.py`
+### FEAT-2: Add ruff linting configuration
+- **Why:** No automated code quality checking exists.
+- **What:** Add ruff config to pyproject.toml, run initial pass.
+- **Impact:** Config only, optional fixes.
 
-### T3. Shared state cache tests ✅
-**Commit:** `07f76ff` — 49 tests in `tests/test_shared_state.py`
+## 4. Refactoring TODOs
 
-## Summary
+### REF-1: Remove disabled signals from accuracy tracking
+- **Files:** portfolio/signal_engine.py, portfolio/accuracy_stats.py
+- **What:** ML, Funding Rate, Custom LoRA disabled but still in accuracy stats.
+- **Why:** Confuses Layer 2 reading reports.
+
+### REF-2: Clean up stale requirements.txt
+- **File:** requirements.txt
+- **What:** References Freqtrade and other outdated deps. Replace with actual.
+
+## 5. Implementation Batches (ordered)
+
+### Batch 1: Foundation fixes (file I/O, state management)
+**Files:** portfolio/file_utils.py, portfolio/signal_engine.py
+- BUG-1: Add fsync to atomic_append_jsonl
+- ARCH-1 + BUG-2: Extract sentiment persistence from trigger_state.json
+
+### Batch 2: Reporting and invocation fixes
+**Files:** portfolio/reporting.py, portfolio/agent_invocation.py
+- BUG-3: Fix agent log file descriptor with context manager
+- BUG-4: Add stale ticker pruning in reporting.py
+
+### Batch 3: Documentation and tooling
+**Files:** docs/architecture-plan.md, pyproject.toml, tests/conftest.py, requirements.txt
+- FEAT-1: Update architecture doc
+- ARCH-2: Add pyproject.toml
+- ARCH-3: Expand conftest.py
+- REF-2: Update requirements.txt
+
+### Batch 4: Code quality and cleanup
+**Files:** pyproject.toml, portfolio/accuracy_stats.py, portfolio/signal_engine.py
+- FEAT-2: Add ruff config
+- REF-1: Clean up disabled signal references
+
+## Risk Assessment
+
+| Change | Risk | Mitigation |
+|--------|------|------------|
+| BUG-1 (fsync) | Very low: additive | Test that write still works |
+| ARCH-1 (sentiment state) | Medium: changes read/write paths | Test sentiment hysteresis |
+| BUG-3 (log fd) | Low: cleanup only | Test agent timeout path |
+| BUG-4 (stale pruning) | Low: additive logic | Verify threshold |
+| FEAT-1 (doc update) | None: documentation | Review accuracy |
+| ARCH-2 (pyproject.toml) | None: new file | Verify pytest runs |
+| ARCH-3 (conftest.py) | Low: additive fixtures | Run test suite |
+| FEAT-2 (ruff) | None: config only | No auto-fix |
+| REF-1 (disabled signals) | Low: signals already HOLD | Test accuracy reporting |
+
+## 6. Results
 
 | Metric | Before | After |
 |--------|--------|-------|
-| Tests passing | 1333 | 1546 |
-| New test files | 0 | 3 |
-| Bugs fixed | 0 | 3 (1 critical) |
-| Files modified | 0 | 6 production + 3 test |
+| Tests passing | 1546 | 1594 |
+| Bugs fixed | 0 | 4 |
+| Files modified | 0 | 11 production + 1 test |
+| New files | 0 | 3 (pyproject.toml, SYSTEM_OVERVIEW.md, progress.json) |
 
 ---
 
