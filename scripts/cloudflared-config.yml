@@ -1,0 +1,19 @@
+# Cloudflare Tunnel configuration for finance-analyzer dashboard
+# This file is generated/updated by setup_tunnel.bat
+#
+# Location: %USERPROFILE%\.cloudflared\config.yml
+# Docs: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
+
+tunnel: TUNNEL_ID_HERE
+credentials-file: CREDENTIALS_PATH_HERE
+
+ingress:
+  # Route bets.raanman.lol to the Flask dashboard
+  - hostname: bets.raanman.lol
+    service: http://localhost:5055
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 30s
+
+  # Catch-all: return 404 for unmatched hostnames
+  - service: http_status:404
