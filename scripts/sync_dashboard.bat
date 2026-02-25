@@ -10,5 +10,5 @@ REM
 REM  For Task Scheduler: use --loop mode, or schedule single runs
 REM ============================================================
 
-cd /d Q:\CaludesRoom\finance-analyzer
+cd /d Q:\finance-analyzer
 .venv\Scripts\python.exe scripts\sync_dashboard.py %* >> logs\sync_dashboard.log 2>&1
