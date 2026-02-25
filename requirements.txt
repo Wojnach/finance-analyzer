@@ -1,40 +1,20 @@
-# Core - Freqtrade
-freqtrade
-
-# Technical Analysis
-ta-lib
-pandas-ta
-numpy
+# Core runtime
 pandas
-
-# ML/AI (FreqAI)
-torch
-scikit-learn
-optuna
-catboost
-lightgbm
-
-# Sentiment Analysis
-transformers
-newspaper3k
+numpy
 requests
 
+# Machine Learning
+scikit-learn
+joblib
+
 # Web Dashboard
-fastapi
-uvicorn
-python-multipart
-
-# Avanza Integration
-avanza-api
-
-# Telegram
-python-telegram-bot
+flask
 
 # Testing
 pytest
-pytest-cov
-pytest-asyncio
 
-# Utilities
-python-dotenv
-pyyaml
+# Optional: LLM fine-tuning (install separately in training venv)
+# torch
+# transformers
+# datasets
+# peft
