@@ -86,8 +86,13 @@ All messages saved to `data/telegram_messages.jsonl` with category metadata for 
 | `fx_alert`  | fx_rates.py              | NO              | FX rate staleness warnings           |
 | `error`     | main.py                  | NO              | Loop crash notifications             |
 
-### Files Modified
+### JSONL Format
 
+```json
+{"ts": "ISO-8601", "text": "message", "category": "trade", "sent": true}
+```
+
+### Files Modified
 - `portfolio/message_store.py` (NEW) — central message routing
 - `portfolio/bigbet.py` — category "bigbet"
 - `portfolio/iskbets.py` — category "iskbets"
