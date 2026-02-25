@@ -23,8 +23,10 @@ MIN_VOTERS_CRYPTO = 3  # crypto has 26 signals (8 core + 18 enhanced; custom_lor
 MIN_VOTERS_STOCK = 3  # stocks have 25 signals (7 core + 18 enhanced) — need 3 active voters
 
 # Sentiment hysteresis — prevents rapid flip spam from ~50% confidence oscillation
-_prev_sentiment = {}  # in-memory cache; seeded from trigger_state.json on first call
+_prev_sentiment = {}  # in-memory cache; seeded from sentiment_state.json on first call
 _prev_sentiment_loaded = False
+
+_SENTIMENT_STATE_FILE = DATA_DIR / "sentiment_state.json"
 
 
 def _load_prev_sentiments():
@@ -32,10 +34,16 @@ def _load_prev_sentiments():
     if _prev_sentiment_loaded:
         return
     try:
-        ts_file = DATA_DIR / "trigger_state.json"
-        if ts_file.exists():
-            ts = json.loads(ts_file.read_text(encoding="utf-8"))
-            _prev_sentiment = ts.get("prev_sentiment", {})
+        # Primary: own state file (no race with trigger.py)
+        if _SENTIMENT_STATE_FILE.exists():
+            data = json.loads(_SENTIMENT_STATE_FILE.read_text(encoding="utf-8"))
+            _prev_sentiment = data.get("prev_sentiment", {})
+        else:
+            # Migration: read from trigger_state.json if sentiment_state.json doesn't exist yet
+            ts_file = DATA_DIR / "trigger_state.json"
+            if ts_file.exists():
+                ts = json.loads(ts_file.read_text(encoding="utf-8"))
+                _prev_sentiment = ts.get("prev_sentiment", {})
     except Exception:
         logger.debug("Failed to load prev sentiments", exc_info=True)
     _prev_sentiment_loaded = True
@@ -49,13 +57,10 @@ def _get_prev_sentiment(ticker):
 def _set_prev_sentiment(ticker, direction):
     _load_prev_sentiments()
     _prev_sentiment[ticker] = direction
-    # Persist to trigger_state.json alongside other trigger state
+    # Persist to own state file (avoids racing with trigger.py on trigger_state.json)
     try:
         from portfolio.file_utils import atomic_write_json
-        ts_file = DATA_DIR / "trigger_state.json"
-        ts = json.loads(ts_file.read_text(encoding="utf-8")) if ts_file.exists() else {}
-        ts["prev_sentiment"] = _prev_sentiment
-        atomic_write_json(ts_file, ts)
+        atomic_write_json(_SENTIMENT_STATE_FILE, {"prev_sentiment": _prev_sentiment})
     except Exception:
         logger.debug("Failed to persist sentiment", exc_info=True)
 

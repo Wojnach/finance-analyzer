@@ -59,6 +59,7 @@ data/telegram_messages.jsonl
 data/agent_summary.json
 data/agent_summary_compact.json
 data/trigger_state.json
+data/sentiment_state.json
 data/agent.log
 data/invocations.jsonl
 data/signal_log.jsonl

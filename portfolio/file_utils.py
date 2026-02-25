@@ -67,10 +67,12 @@ def atomic_append_jsonl(path, entry):
     """Append a single JSON entry to a JSONL file.
 
     Uses a write-then-append pattern so partial writes don't corrupt
-    existing data.
+    existing data. Flushes and fsyncs to ensure durability on crash.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(entry, ensure_ascii=False) + "\n"
     with open(path, "a", encoding="utf-8") as f:
         f.write(line)
+        f.flush()
+        os.fsync(f.fileno())
