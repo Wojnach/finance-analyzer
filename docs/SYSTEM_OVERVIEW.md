@@ -82,36 +82,28 @@ with 29 signals across 7 timeframes, dual simulated portfolios (Patient + Bold, 
 
 ## Discrepancies vs Architecture Doc
 
-The canonical docs/architecture-plan.md (last updated 2026-02-23) has drift:
+As of the Feb 25 improvement session, the architecture doc is current:
 
-1. **Signal count**: Doc says 27 (11 core + 16 enhanced). Actual: 29 (11 core + 18 enhanced).
-   Missing: forecast (#28) and claude_fundamental (#29), added Feb 24.
-
-2. **Applicable signal counts**: Doc says crypto=27, stocks=23. Actual: crypto=26, stocks=25.
-   Three disabled signals reduce crypto from 29 to 26.
-   Forecast + claude_fundamental added to stocks, raising from 23 to 25.
-
-3. **File layout**: Doc missing forecast.py, claude_fundamental.py in signals/,
-   and alpha_vantage.py in portfolio/.
-
-4. **Scheduled tasks**: PF-ForceSleep/PF-WakeUp/PF-AutoImprove tasks not documented.
+1. ~~Signal count drift~~ — **FIXED**: Doc now correctly shows 29 signals (11 core + 18 enhanced).
+2. ~~Applicable counts wrong~~ — **FIXED**: crypto=26, stocks/metals=25.
+3. ~~Missing files~~ — **FIXED**: forecast.py, claude_fundamental.py, alpha_vantage.py all documented.
+4. **Scheduled tasks**: PF-ForceSleep/PF-WakeUp/PF-AutoImprove tasks not yet in arch doc (low priority).
 
 ## Known Issues Summary
 
-### High Priority
-- atomic_append_jsonl missing fsync (JSONL corruption risk on OS crash)
-- Stale data accumulation in agent_summary.json (deleted tickers never pruned)
+### Fixed (Feb 25 improvement session)
+- ~~atomic_append_jsonl missing fsync~~ — Added flush+fsync (BUG-1)
+- ~~Sentiment state race with trigger.py~~ — Extracted to own state file (BUG-2/ARCH-1)
+- ~~Agent log fd leak on timeout~~ — Ownership transfer pattern (BUG-3)
+- ~~Stale ticker accumulation~~ — 24h pruning in reporting.py (BUG-4)
+- ~~Disabled signals in accuracy reports~~ — Tagged (OFF), filtered from agent summary (REF-1)
+- ~~requirements.txt stale~~ — Updated to actual dependencies (REF-2)
+- ~~No linter/formatter config~~ — pyproject.toml with ruff config (FEAT-2)
+- ~~conftest.py minimal~~ — Expanded with shared fixtures (ARCH-3)
+- ~~Architecture doc drift~~ — Signal counts updated to 29 (FEAT-1)
+
+### Remaining
 - Post-trade detection reads portfolio JSON without coordination (race with Layer 2 writes)
-
-### Medium Priority
-- Sentiment state persisted to trigger_state.json races with trigger.py writes
-- Disabled signals still appear in accuracy stats (confuses Layer 2)
-- Tier 3 fallback hardcoded in pf-agent.bat (loses tiering)
-- Agent invocation log file descriptor may leak on timeout
-
-### Low Priority
 - No cache hit/miss metrics
 - Market timing has no US holiday support
-- requirements.txt stale (references Freqtrade)
-- No linter/formatter/type checker configuration
-- conftest.py minimal (no shared test fixtures)
+- Tier 3 fallback hardcoded in pf-agent.bat (loses tiering)
