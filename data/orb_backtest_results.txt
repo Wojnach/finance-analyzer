@@ -1,0 +1,114 @@
+Fetching 10 batches of XAGUSDT 15m data from Binance...
+Fetched 4743 candles
+Valid trading days: 35
+
+--- Running walk-forward backtest (direction filter) ---
+================================================================================
+  ORB BACKTEST REPORT — Walk-forward (direction filter)
+================================================================================
+
+  Days tested:         25
+  Avg training sample: 12.8 days
+
+--- Prediction Accuracy ---
+  High within band:     44.0%  (actual high in [conservative, aggressive])
+  Low within band:      60.0%  (actual low in [aggressive, conservative])
+  Both within band:     40.0%
+  Directional:          52.0%  (morning direction predicts extension side)
+
+--- Prediction Error (MAE) ---
+  High MAE:            $1.4586  (1.580%)
+  Low MAE:             $2.6491  (3.209%)
+
+--- Simulated Trading (buy@low_median, sell@high_median, 0.05% fee/side) ---
+  Trades executed:     13  (buy target hit)
+  Winning trades:      2  (both targets hit)
+  Win rate:             15.4%
+  Total P&L:           $+15.8894
+  P&L % of capital:    +1.337%
+  Avg P&L per trade:   $+1.2223
+
+--------------------------------------------------------------------------------
+  PER-DAY DETAILS
+--------------------------------------------------------------------------------
+
+  Date       | Dir | Pred High (C/M/A)        | Act High | Pred Low (C/M/A)         | Act Low  | Buy? Sell?
+  ----------------------------------------------------------------------------------------------------------------------
+  2026-01-22 | down |    94.66    96.27    96.87 |    96.64 |    93.50    92.43    90.54 |    92.93 |  .    Y
+  2026-01-23 | down |    99.06   100.74   101.38 |   103.40 |    97.52    96.93    94.43 |    97.52 |  .    Y
+  2026-01-26 | up   |   110.73   112.62   113.33 |   118.33 |   108.22   106.98   104.79 |   102.65 |  Y    Y
+  2026-01-27 | down |   114.28   115.95   117.15 |   113.23 |   110.27   109.60   106.77 |   105.03 |  Y    .
+  2026-01-28 | down |   115.49   117.90   119.13 |   117.80 |   112.15   110.87   107.83 |   110.53 |  Y    .
+  2026-01-29 | down |   120.12   121.09   121.21 |   121.74 |   115.36   114.66   113.69 |   107.33 |  Y    Y
+  2026-01-30 | down |   108.73   109.72   110.20 |   107.14 |    95.51    94.13    90.97 |    76.55 |  Y    .
+  2026-02-02 | up   |    82.91    84.64    85.52 |    84.54 |    75.60    74.72    72.69 |    75.58 |  .    .
+  2026-02-03 | up   |    88.21    89.94    90.99 |    89.26 |    85.82    84.84    82.51 |    82.72 |  Y    .
+  2026-02-04 | down |    90.54    92.63    93.13 |    92.31 |    88.24    86.97    82.10 |    83.65 |  Y    .
+  2026-02-05 | down |    82.30    82.97    83.42 |    81.10 |    77.25    74.03    72.31 |    70.33 |  Y    .
+  2026-02-06 | up   |    75.42    76.43    77.32 |    78.25 |    71.63    70.81    68.89 |    71.65 |  .    Y
+  2026-02-09 | up   |    82.96    84.07    85.05 |    83.99 |    80.98    80.05    78.05 |    78.70 |  Y    .
+  2026-02-10 | up   |    83.57    84.68    85.67 |    83.03 |    81.28    80.33    78.34 |    79.89 |  Y    .
+  2026-02-11 | up   |    85.25    86.84    87.93 |    86.36 |    83.34    82.37    80.33 |    82.65 |  .    .
+  2026-02-12 | up   |    84.82    85.87    86.95 |    84.04 |    83.21    82.26    80.22 |    74.57 |  Y    .
+  2026-02-13 | up   |    79.62    80.97    81.48 |    79.38 |    77.86    76.97    75.07 |    76.11 |  Y    .
+  2026-02-16 | up   |    77.66    79.00    79.49 |    77.44 |    76.58    75.29    73.83 |    75.76 |  .    .
+  2026-02-17 | down |    75.51    76.99    77.33 |    75.51 |    73.63    70.56    68.92 |    72.04 |  .    .
+  2026-02-18 | down |    76.11    77.60    77.94 |    78.33 |    75.07    71.94    70.27 |    75.31 |  .    Y
+  2026-02-19 | down |    79.50    81.05    81.77 |    79.50 |    78.12    76.19    72.90 |    77.10 |  .    .
+  2026-02-20 | up   |    81.28    82.59    83.44 |    84.81 |    78.75    77.85    75.92 |    78.77 |  .    Y
+  2026-02-23 | up   |    87.05    88.55    89.82 |    89.14 |    85.60    84.62    82.53 |    85.60 |  .    Y
+  2026-02-24 | up   |    88.57    90.09    90.69 |    88.61 |    87.61    86.63    84.85 |    85.38 |  Y    .
+  2026-02-25 | up   |    91.33    92.91    93.52 |    91.28 |    90.31    89.28    87.47 |    89.44 |  .    .
+
+================================================================================
+
+--- Running filter comparison ---
+
+================================================================================
+  FILTER COMPARISON
+================================================================================
+
+  Config                       |  Days | HiHit% | LoHit% | HiMAE% | LoMAE% | Trades |  Win% |     P&L$
+  ----------------------------------------------------------------------------------------------------
+  No filters                   |    25 |  56.0% |  56.0% | 1.569% | 3.190% |     14 | 14.3% | +15.5715
+  Direction filter             |    25 |  44.0% |  60.0% | 1.580% | 3.209% |     13 | 15.4% | +15.8894
+  Range filter                 |    25 |  40.0% |  56.0% | 1.617% | 3.553% |     11 | 27.3% | +16.3397
+  Direction + Range filters    |    25 |  36.0% |  64.0% | 1.572% | 3.261% |     14 | 21.4% | +16.8266
+
+
+--- Running leave-5-out cross-validation (20 iterations) ---
+================================================================================
+  ORB BACKTEST REPORT — leave-5-out x20
+================================================================================
+
+  Days tested:         100
+  Avg training sample: 11.8 days
+
+--- Prediction Accuracy ---
+  High within band:     45.0%  (actual high in [conservative, aggressive])
+  Low within band:      65.0%  (actual low in [aggressive, conservative])
+  Both within band:     44.0%
+  Directional:          60.0%  (morning direction predicts extension side)
+
+--- Prediction Error (MAE) ---
+  High MAE:            $1.5912  (1.662%)
+  Low MAE:             $2.7657  (3.272%)
+
+--- Simulated Trading (buy@low_median, sell@high_median, 0.05% fee/side) ---
+  Trades executed:     48  (buy target hit)
+  Winning trades:      12  (both targets hit)
+  Win rate:             25.0%
+  Total P&L:           $+72.4070
+  P&L % of capital:    +1.591%
+  Avg P&L per trade:   $+1.5085
+
+================================================================================
+
+--- Dataset Summary ---
+  Total valid days: 35
+  Up mornings: 23  |  Down mornings: 12
+  Morning range: mean 2.232%, median 1.495%
+  Upside ext: mean 1.747%, median 1.612%, max 7.183%
+  Downside ext: mean 2.824%, median 1.444%, max 19.851%
+  Day high in morning range: 28.6%
+  Day low in morning range: 25.7%
