@@ -160,7 +160,11 @@ def write_agent_summary(
                 write_accuracy_cache("1d", sig_acc)
         cons_acc = consensus_accuracy("1d")
         bw = best_worst_signals("1d", acc=sig_acc)
-        qualified = {k: v for k, v in sig_acc.items() if v["total"] >= 5}
+        from portfolio.tickers import DISABLED_SIGNALS as _DISABLED
+        qualified = {
+            k: v for k, v in sig_acc.items()
+            if v["total"] >= 5 and k not in _DISABLED
+        }
         if qualified:
             summary["signal_accuracy_1d"] = {
                 "signals": {

@@ -7,7 +7,7 @@ from pathlib import Path
 logger = logging.getLogger("portfolio.accuracy_stats")
 
 from portfolio.file_utils import atomic_write_json as _atomic_write_json
-from portfolio.tickers import SIGNAL_NAMES
+from portfolio.tickers import DISABLED_SIGNALS, SIGNAL_NAMES
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -376,8 +376,9 @@ def print_accuracy_report():
             s = sig_acc[sig_name]
             if s["total"] == 0:
                 continue
+            disabled_tag = " (OFF)" if sig_name in DISABLED_SIGNALS else ""
             print(
-                f"{sig_name:<16}{s['correct']:>7}  {s['total']:>5}  {s['accuracy']*100:>7.1f}%"
+                f"{sig_name:<16}{s['correct']:>7}  {s['total']:>5}  {s['accuracy']*100:>7.1f}%{disabled_tag}"
             )
 
         cons = consensus_accuracy(h)

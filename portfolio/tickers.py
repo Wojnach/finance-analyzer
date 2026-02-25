@@ -81,6 +81,10 @@ YF_MAP = {t: t for t in STOCK_SYMBOLS}
 # This static list is kept for backward compatibility with modules that
 # import SIGNAL_NAMES directly (outcome_tracker, accuracy_stats).
 
+# Signals that are force-HOLD (disabled due to poor accuracy).
+# Kept in SIGNAL_NAMES for historical tracking but excluded from active reports.
+DISABLED_SIGNALS = {"ml", "funding"}
+
 SIGNAL_NAMES = [
     "rsi",
     "macd",
