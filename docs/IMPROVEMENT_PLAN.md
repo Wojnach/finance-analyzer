@@ -63,3 +63,19 @@ All messages saved to `data/telegram_messages.jsonl` with category metadata for 
 ### Batch 5: Enhanced 4-hourly digest
 
 **File:** `portfolio/digest.py`
+
+## Status: COMPLETED
+
+All 5 batches implemented and committed. Files modified:
+- `portfolio/message_store.py` (NEW) — central message routing
+- `portfolio/bigbet.py` — category "bigbet"
+- `portfolio/iskbets.py` — category "iskbets"
+- `portfolio/agent_invocation.py` — category "invocation"
+- `portfolio/regime_alerts.py` — category "regime"
+- `portfolio/fx_rates.py` — category "fx_alert"
+- `portfolio/main.py` — category "error"
+- `portfolio/digest.py` — category "digest" + enhanced stats
+- `CLAUDE.md` — trade/analysis conditional sending
+- `data/layer2_invoke.py`, `layer2_action.py`, `layer2_exec.py` — updated examples
+- `dashboard/app.py` — enhanced /api/telegrams with filtering
+- `dashboard/static/index.html` — Messages tab with category chips
