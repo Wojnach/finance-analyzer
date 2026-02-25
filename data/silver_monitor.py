@@ -11,7 +11,12 @@ Run: .venv/Scripts/python.exe -u data/silver_monitor.py
 """
 import json, time, datetime, requests, sys, os, subprocess, shutil, platform
 from collections import deque
+from dataclasses import asdict
 from pathlib import Path
+
+# Add project root to path for portfolio imports
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from portfolio.orb_predictor import ORBPredictor, Prediction
 
 # === Config ===
 REFERENCE_PRICE = 90.55
@@ -45,6 +50,11 @@ with open(BASE_DIR / "config.json") as f:
 TG_TOKEN = cfg["telegram"]["token"]
 TG_CHAT = cfg["telegram"]["chat_id"]
 
+# === ORB Config ===
+ORB_MORNING_START_UTC = 8   # 09:00 CET = 08:00 UTC
+ORB_MORNING_END_UTC = 10    # 11:00 CET = 10:00 UTC
+ORB_PREDICTIONS_PATH = DATA_DIR / "orb_predictions_today.json"
+
 # === State ===
 price_history = deque(maxlen=VELOCITY_WINDOW)
 session_prices = []              # ALL prices this session (for trend context)
@@ -57,6 +67,84 @@ start_time = None
 consecutive_down = 0
 prev_price = None
 analysis_count = 0
+
+# ORB state
+orb_predictor = ORBPredictor()
+orb_prediction: Prediction | None = None
+orb_historical_days = None
+
+
+def get_orb_phase() -> str:
+    """Determine current ORB phase based on UTC time.
+
+    Returns:
+        "pre_orb"           -- before 08:00 UTC (09:00 CET)
+        "gathering"         -- 08:00-10:00 UTC (09:00-11:00 CET), collecting morning range
+        "prediction_active" -- after 10:00 UTC (11:00 CET), predictions available
+    """
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    hour = now_utc.hour
+    if hour < ORB_MORNING_START_UTC:
+        return "pre_orb"
+    elif hour < ORB_MORNING_END_UTC:
+        return "gathering"
+    else:
+        return "prediction_active"
+
+
+def generate_orb_prediction():
+    """Fetch historical data and generate today's ORB prediction.
+
+    Called once after 10:00 UTC. Stores prediction in module-level state
+    and saves to data/orb_predictions_today.json.
+    """
+    global orb_prediction, orb_historical_days
+
+    try:
+        print("  [ORB] Fetching historical klines for prediction...")
+        klines = orb_predictor.fetch_klines(num_batches=5)
+        days = orb_predictor.group_by_day(klines, weekdays_only=True)
+        orb_historical_days = orb_predictor.calculate_all_days(klines)
+        print(f"  [ORB] Got {len(orb_historical_days)} valid historical days")
+
+        # Get today's date and candles
+        today_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+        today_candles = days.get(today_str, [])
+
+        if not today_candles:
+            print(f"  [ORB] No candles found for today ({today_str})")
+            return
+
+        morning = orb_predictor.calculate_morning_range(today_candles)
+        if morning is None:
+            print("  [ORB] Insufficient morning data for prediction")
+            return
+
+        prediction = orb_predictor.predict_daily_range(
+            morning, orb_historical_days,
+            use_direction_filter=True,
+            use_range_filter=False,
+        )
+        if prediction is None:
+            print("  [ORB] Not enough historical data for prediction")
+            return
+
+        orb_prediction = prediction
+
+        # Save to file
+        pred_dict = asdict(prediction)
+        pred_dict["generated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with open(ORB_PREDICTIONS_PATH, "w", encoding="utf-8") as f:
+            json.dump(pred_dict, f, indent=2, ensure_ascii=False)
+
+        print(f"  [ORB] Prediction generated for {prediction.date}")
+        print(f"  [ORB] Morning: HIGH ${morning.high:.2f} LOW ${morning.low:.2f} DIR={morning.direction}")
+        print(f"  [ORB] Predicted HIGH (med): ${prediction.predicted_high_median:.2f}")
+        print(f"  [ORB] Predicted LOW  (med): ${prediction.predicted_low_median:.2f}")
+        print(f"  [ORB] Sample: {prediction.sample_size} days, Filters: {prediction.filters_applied}")
+
+    except Exception as e:
+        print(f"  [ORB] Error generating prediction: {e}")
 
 
 def fetch_price():
@@ -235,6 +323,45 @@ def gather_analysis_data(price):
     if "gold_price" in data["context"] and price > 0:
         data["context"]["gold_silver_ratio"] = round(data["context"]["gold_price"] / price, 2)
 
+    # ORB prediction data
+    orb_phase = get_orb_phase()
+    data["orb"] = {"phase": orb_phase}
+    if orb_prediction is not None:
+        pred = orb_prediction
+        data["orb"]["prediction"] = {
+            "morning_high": pred.morning_high,
+            "morning_low": pred.morning_low,
+            "morning_direction": pred.morning_direction,
+            "morning_range_pct": round(pred.morning_range_pct, 3),
+            "predicted_high_conservative": round(pred.predicted_high_conservative, 2),
+            "predicted_high_median": round(pred.predicted_high_median, 2),
+            "predicted_high_aggressive": round(pred.predicted_high_aggressive, 2),
+            "predicted_low_conservative": round(pred.predicted_low_conservative, 2),
+            "predicted_low_median": round(pred.predicted_low_median, 2),
+            "predicted_low_aggressive": round(pred.predicted_low_aggressive, 2),
+            "sample_size": pred.sample_size,
+            "filters": pred.filters_applied,
+        }
+        # Add proximity to predicted levels
+        data["orb"]["proximity"] = {
+            "pct_from_pred_high": round((price - pred.predicted_high_median) / pred.predicted_high_median * 100, 3),
+            "pct_from_pred_low": round((price - pred.predicted_low_median) / pred.predicted_low_median * 100, 3),
+            "in_buy_zone": price <= pred.predicted_low_conservative,
+            "in_sell_zone": price >= pred.predicted_high_conservative,
+        }
+        # Warrant translations for predicted targets
+        buy_wt = orb_predictor.translate_to_warrant(
+            pred.predicted_low_median, REFERENCE_PRICE, LEVERAGE, POSITION_SEK)
+        sell_wt = orb_predictor.translate_to_warrant(
+            pred.predicted_high_median, REFERENCE_PRICE, LEVERAGE, POSITION_SEK)
+        data["orb"]["warrant_targets"] = {
+            "buy_target_price": round(pred.predicted_low_median, 2),
+            "buy_warrant_pnl_sek": round(buy_wt.warrant_sek_pnl, 0),
+            "sell_target_price": round(pred.predicted_high_median, 2),
+            "sell_warrant_pnl_sek": round(sell_wt.warrant_sek_pnl, 0),
+            "spread_sek": round(sell_wt.warrant_sek_pnl - buy_wt.warrant_sek_pnl, 0),
+        }
+
     return data
 
 
@@ -245,9 +372,30 @@ def invoke_claude_analysis(data_path):
         print("  [!] claude not found on PATH, skipping analysis")
         return False
 
+    # Build ORB context for prompt
+    orb_prompt_section = ""
+    if orb_prediction is not None:
+        pred = orb_prediction
+        orb_prompt_section = (
+            f"\n\nORB PREDICTION (Opening Range Breakout):\n"
+            f"Morning range (9-11 CET): HIGH ${pred.morning_high:.2f} LOW ${pred.morning_low:.2f} DIR={pred.morning_direction}\n"
+            f"Predicted day HIGH (median): ${pred.predicted_high_median:.2f} (conservative: ${pred.predicted_high_conservative:.2f}, aggressive: ${pred.predicted_high_aggressive:.2f})\n"
+            f"Predicted day LOW (median): ${pred.predicted_low_median:.2f} (conservative: ${pred.predicted_low_conservative:.2f}, aggressive: ${pred.predicted_low_aggressive:.2f})\n"
+            f"Based on {pred.sample_size} historical days. Filters: {pred.filters_applied or 'none'}.\n"
+            f"Use these levels as additional context: if price is near predicted high, consider profit-taking risk. "
+            f"If near predicted low, it may be a support zone.\n"
+        )
+    else:
+        phase = get_orb_phase()
+        if phase == "pre_orb":
+            orb_prompt_section = "\n\nORB: Pre-market phase (before 09:00 CET). No prediction yet.\n"
+        elif phase == "gathering":
+            orb_prompt_section = "\n\nORB: Gathering morning range (09:00-11:00 CET). Prediction available after 11:00 CET.\n"
+
     prompt = (
         "Read data/silver_analysis.json. This is a live silver LONG position (MINI L SILVER AVA 301, 150K SEK, 4.76x leverage, holding a few hours).\n\n"
-        "Look at RSI across 1m/5m/15m/1h, MACD deltas, BB position, volume ratios, and price momentum.\n\n"
+        "Look at RSI across 1m/5m/15m/1h, MACD deltas, BB position, volume ratios, and price momentum.\n"
+        f"{orb_prompt_section}\n"
         "Decide: HOLD, WARNING, or EXIT.\n"
         "- HOLD = trend OK, no danger. Do NOT send any Telegram.\n"
         "- WARNING = signs of reversal (RSI rolling, momentum fading, volume dying). Send Telegram.\n"
@@ -359,12 +507,25 @@ def main():
             if session_high is None or price > session_high:
                 session_high = price
 
+            # === ORB Phase Detection & Prediction ===
+            orb_phase = get_orb_phase()
+            if orb_phase == "prediction_active" and orb_prediction is None:
+                generate_orb_prediction()
+
             # Status line
             ts = now.strftime("%H:%M:%S")
             next_analysis = max(0, ANALYSIS_INTERVAL - (time.time() - last_analysis_ts))
+            orb_tag = ""
+            if orb_phase == "gathering":
+                orb_tag = " [ORB:gathering]"
+            elif orb_phase == "prediction_active" and orb_prediction is not None:
+                dist_high = (price - orb_prediction.predicted_high_median) / orb_prediction.predicted_high_median * 100
+                dist_low = (price - orb_prediction.predicted_low_median) / orb_prediction.predicted_low_median * 100
+                orb_tag = f" [ORB:H{dist_high:+.1f}%|L{dist_low:+.1f}%]"
             print(f"[{ts}] ${price:.2f} ({pct_change:+.2f}%) W:{warrant_pct:+.1f}% ({warrant_sek:+,.0f}) "
                   f"Lo:{session_low:.2f} Hi:{session_high:.2f} "
-                  f"{'v' + str(consecutive_down) if consecutive_down >= 3 else ''} "
+                  f"{'v' + str(consecutive_down) if consecutive_down >= 3 else ''}"
+                  f"{orb_tag} "
                   f"[next analysis: {next_analysis:.0f}s]")
 
             # === Mechanical threshold alerts (instant, no Claude needed) ===
