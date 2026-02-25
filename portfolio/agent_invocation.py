@@ -144,8 +144,9 @@ def invoke_agent(reasons, tier=3):
         cmd = ["cmd", "/c", str(agent_bat)]
         logger.info("claude not on PATH, falling back to pf-agent.bat (T3)")
 
+    log_fh = None
     try:
-        _agent_log = open(DATA_DIR / "agent.log", "a", encoding="utf-8")
+        log_fh = open(DATA_DIR / "agent.log", "a", encoding="utf-8")
         # Strip Claude Code session markers to avoid "nested session" error
         # when the parent process tree has Claude Code running
         agent_env = os.environ.copy()
@@ -154,10 +155,12 @@ def invoke_agent(reasons, tier=3):
         _agent_proc = subprocess.Popen(
             cmd,
             cwd=str(BASE_DIR),
-            stdout=_agent_log,
+            stdout=log_fh,
             stderr=subprocess.STDOUT,
             env=agent_env,
         )
+        _agent_log = log_fh  # transfer ownership on success
+        log_fh = None  # prevent cleanup below from closing it
         _agent_start = time.time()
         _agent_timeout = timeout
         logger.info(
@@ -179,4 +182,6 @@ def invoke_agent(reasons, tier=3):
         return True
     except Exception as e:
         logger.error("invoking agent: %s", e)
+        if log_fh is not None:
+            log_fh.close()
         return False

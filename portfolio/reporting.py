@@ -217,8 +217,10 @@ def write_agent_summary(
         pass
 
     # Preserve stale data for instruments not in current cycle (e.g. stocks off-hours)
-    # so Layer 2 always sees all instruments
-    now_iso = datetime.now(timezone.utc).isoformat()
+    # so Layer 2 always sees all instruments. Prune entries stale for >24h.
+    now_utc = datetime.now(timezone.utc)
+    now_iso = now_utc.isoformat()
+    _STALE_MAX_HOURS = 24
     if AGENT_SUMMARY_FILE.exists():
         try:
             prev = json.loads(AGENT_SUMMARY_FILE.read_text(encoding="utf-8"))
@@ -227,9 +229,17 @@ def write_agent_summary(
                 for ticker, data in prev_section.items():
                     if ticker not in summary[section]:
                         if section == "signals" and isinstance(data, dict):
+                            # Prune entries that have been stale for too long
+                            stale_since = data.get("stale_since")
+                            if stale_since:
+                                try:
+                                    stale_dt = datetime.fromisoformat(stale_since)
+                                    hours_stale = (now_utc - stale_dt).total_seconds() / 3600
+                                    if hours_stale > _STALE_MAX_HOURS:
+                                        continue  # drop this ticker — too old
+                                except (ValueError, TypeError):
+                                    pass
                             data["stale"] = True
-                            # Track when data first became stale so Layer 2
-                            # can judge how old it is
                             if "stale_since" not in data:
                                 data["stale_since"] = now_iso
                         summary[section][ticker] = data
