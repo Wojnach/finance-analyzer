@@ -50,11 +50,23 @@ def _vote_correct(vote, change_pct):
     return False
 
 
-def signal_accuracy(horizon="1d"):
+def signal_accuracy(horizon="1d", since=None):
+    """Compute per-signal accuracy, optionally filtered to entries after `since`.
+
+    Args:
+        horizon: Outcome horizon to evaluate ("1d", "3d", "5d", "10d").
+        since: Optional ISO-8601 string cutoff. Only entries with ts >= since
+               are included. None means all entries (no time filter).
+
+    Returns:
+        dict: {signal_name: {correct, total, accuracy, pct}} for each signal.
+    """
     entries = load_entries()
     stats = {s: {"correct": 0, "total": 0} for s in SIGNAL_NAMES}
 
     for entry in entries:
+        if since and entry.get("ts", "") < since:
+            continue
         outcomes = entry.get("outcomes", {})
         tickers = entry.get("tickers", {})
 
@@ -90,47 +102,12 @@ def signal_accuracy(horizon="1d"):
 def signal_accuracy_recent(horizon="1d", days=7):
     """Compute per-signal accuracy using only the last N days of data.
 
-    Returns same format as signal_accuracy() but filtered by time window.
+    Thin wrapper around signal_accuracy() with a time cutoff.
     """
     from datetime import datetime, timedelta, timezone
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    entries = load_entries()
-    stats = {s: {"correct": 0, "total": 0} for s in SIGNAL_NAMES}
-
-    for entry in entries:
-        if entry.get("ts", "") < cutoff:
-            continue
-        outcomes = entry.get("outcomes", {})
-        tickers = entry.get("tickers", {})
-
-        for ticker, tdata in tickers.items():
-            outcome = outcomes.get(ticker, {}).get(horizon)
-            if not outcome:
-                continue
-
-            change_pct = outcome.get("change_pct", 0)
-            signals = tdata.get("signals", {})
-
-            for sig_name in SIGNAL_NAMES:
-                vote = signals.get(sig_name, "HOLD")
-                if vote == "HOLD":
-                    continue
-                stats[sig_name]["total"] += 1
-                if _vote_correct(vote, change_pct):
-                    stats[sig_name]["correct"] += 1
-
-    result = {}
-    for sig_name in SIGNAL_NAMES:
-        s = stats[sig_name]
-        acc = s["correct"] / s["total"] if s["total"] > 0 else 0.0
-        result[sig_name] = {
-            "correct": s["correct"],
-            "total": s["total"],
-            "accuracy": acc,
-            "pct": round(acc * 100, 1),
-        }
-    return result
+    return signal_accuracy(horizon, since=cutoff)
 
 
 def consensus_accuracy(horizon="1d"):
