@@ -462,6 +462,39 @@ def _get_current_market_state():
         return None
 
 
+def _append_vector_memory_section(md, config, market_state, bm25_entries):
+    """Append semantic memory results to context markdown if enabled."""
+    vm_cfg = config.get("vector_memory", {})
+    if not vm_cfg.get("enabled", False):
+        return md
+    try:
+        from portfolio.vector_memory import get_semantic_context
+        bm25_ts = {e.get("ts", "") for e in bm25_entries} if bm25_entries else set()
+        top_k = vm_cfg.get("top_k", 5)
+        collection = vm_cfg.get("collection", "trade_journal")
+        results = get_semantic_context(
+            market_state, bm25_timestamps=bm25_ts,
+            top_k=top_k, collection_name=collection,
+        )
+        if not results:
+            return md
+        lines = [md.rstrip(), "", "### Semantic Memory", ""]
+        for r in results:
+            ts = r.get("ts", "unknown")
+            regime = r.get("regime", "")
+            dist = r.get("distance", 0)
+            # Show first 200 chars of the matched text
+            text_preview = r.get("text", "")[:200]
+            if len(r.get("text", "")) > 200:
+                text_preview += "..."
+            lines.append(f"**{ts}** (regime: {regime}, dist: {dist:.3f})")
+            lines.append(text_preview)
+            lines.append("")
+        return "\n".join(lines)
+    except Exception:
+        return md
+
+
 def _append_reflection_section(md, config):
     """Append recent reflection to context markdown if available."""
     if not config.get("reflection", {}).get("enabled", False):
@@ -510,6 +543,7 @@ def write_context():
                     portfolio_data = _load_portfolio_pnl()
                     md = build_context(entries, portfolio_data=portfolio_data)
                     md = _append_reflection_section(md, config)
+                    md = _append_vector_memory_section(md, config, market_state, entries)
                     CONTEXT_FILE.write_text(md, encoding="utf-8")
                     return len(entries)
         except Exception:
@@ -520,5 +554,6 @@ def write_context():
     portfolio_data = _load_portfolio_pnl()
     md = build_context(entries, portfolio_data=portfolio_data)
     md = _append_reflection_section(md, config)
+    md = _append_vector_memory_section(md, config, None, entries)
     CONTEXT_FILE.write_text(md, encoding="utf-8")
     return len(entries)
