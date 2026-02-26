@@ -343,7 +343,7 @@ def _crash_alert(error_msg):
     """Save crash alert to message log (not sent to Telegram)."""
     try:
         config_path = Path(__file__).resolve().parent.parent / "config.json"
-        config = json.load(open(config_path, encoding="utf-8"))
+        config = json.loads(config_path.read_text(encoding="utf-8"))
         text = f"LOOP CRASH\n\n{error_msg[:3000]}"
         from portfolio.message_store import send_or_store
         send_or_store(text, config, category="error")

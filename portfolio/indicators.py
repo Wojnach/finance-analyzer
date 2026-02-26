@@ -75,7 +75,7 @@ def compute_indicators(df):
             )
         ),
         "atr": float(atr14),
-        "atr_pct": float(atr14 / close.iloc[-1]) * 100,
+        "atr_pct": float(atr14 / close.iloc[-1] * 100) if close.iloc[-1] != 0 else 0.0,
         "rsi_p20": float(rsi_p20) if not pd.isna(rsi_p20) else 30.0,
         "rsi_p80": float(rsi_p80) if not pd.isna(rsi_p80) else 70.0,
     }

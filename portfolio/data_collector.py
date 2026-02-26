@@ -245,6 +245,7 @@ def _fetch_klines(source, interval, limit):
     elif "alpaca" in source:
         ticker = source["alpaca"]
         if _ss._current_market_state in ("closed", "weekend"):
+            logger.debug("%s: using yfinance (market %s)", ticker, _ss._current_market_state)
             _ss._yfinance_limiter.wait()
             return yfinance_klines(ticker, interval=interval, limit=limit)
         _ss._alpaca_limiter.wait()

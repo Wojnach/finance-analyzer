@@ -422,9 +422,8 @@ def save_accuracy_snapshot():
             for name, data in acc.items()
         },
     }
-    DATA_DIR.mkdir(exist_ok=True)
-    with open(ACCURACY_SNAPSHOTS_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(snapshot, ensure_ascii=False) + "\n")
+    from portfolio.file_utils import atomic_append_jsonl
+    atomic_append_jsonl(ACCURACY_SNAPSHOTS_FILE, snapshot)
     return snapshot
 
 

@@ -140,7 +140,7 @@ def write_agent_summary(
             macro["fed"] = fed
         if macro:
             summary["macro"] = macro
-    except (ImportError, Exception):
+    except Exception:
         pass
 
     try:
@@ -441,18 +441,43 @@ def write_tiered_summary(summary, tier, triggered_tickers=None):
     # Tier 3 uses existing agent_summary_compact.json — no extra file needed
 
 
-def _portfolio_snapshot(state_file):
-    """Load a portfolio state file and return a compact snapshot dict."""
+def _portfolio_snapshot(state_file, prices_usd=None, fx_rate=None):
+    """Load a portfolio state file and return a compact snapshot dict.
+
+    When prices_usd and fx_rate are provided, computes accurate total_sek
+    including holdings value. Otherwise falls back to cash-only estimate.
+    """
     try:
         state = json.loads(state_file.read_text(encoding="utf-8"))
         cash = state.get("cash_sek", 0)
         initial = state.get("initial_value_sek", 500000)
-        pnl_pct = round(((cash - initial) / initial) * 100, 2) if initial else 0
-        return {
+        holdings = state.get("holdings", {})
+
+        # Compute total including holdings if we have price data
+        total = cash
+        holdings_summary = []
+        if prices_usd and fx_rate:
+            for ticker, h in holdings.items():
+                shares = h.get("shares", 0)
+                if shares > 0 and ticker in prices_usd:
+                    value = shares * prices_usd[ticker] * fx_rate
+                    total += value
+                    holdings_summary.append(f"{ticker} {shares:.1f}sh")
+        else:
+            # Fallback: count holdings but can't price them
+            for ticker, h in holdings.items():
+                if h.get("shares", 0) > 0:
+                    holdings_summary.append(ticker)
+
+        pnl_pct = round(((total - initial) / initial) * 100, 2) if initial else 0
+        result = {
             "cash_sek": round(cash),
-            "total_sek": round(cash),  # approximate — no live prices in snapshot
+            "total_sek": round(total),
             "pnl_pct": pnl_pct,
         }
+        if holdings_summary:
+            result["holdings"] = holdings_summary
+        return result
     except (FileNotFoundError, json.JSONDecodeError):
         return {"cash_sek": 0, "total_sek": 0, "pnl_pct": 0}
 
@@ -508,14 +533,18 @@ def _write_tier1_summary(summary):
     signals = summary.get("signals", {})
     timeframes = summary.get("timeframes", {})
 
+    # Extract prices for accurate portfolio valuation
+    prices_usd = {t: s.get("price_usd", 0) for t, s in signals.items() if s.get("price_usd")}
+    fx_rate = summary.get("fx_rate", 0)
+
     t1 = {
         "tier": 1,
         "timestamp": summary.get("timestamp", ""),
         "trigger_reasons": summary.get("trigger_reasons", []),
-        "fx_rate": summary.get("fx_rate", 0),
+        "fx_rate": fx_rate,
         "held_positions": {},
-        "portfolio_patient": _portfolio_snapshot(DATA_DIR / "portfolio_state.json"),
-        "portfolio_bold": _portfolio_snapshot(DATA_DIR / "portfolio_state_bold.json"),
+        "portfolio_patient": _portfolio_snapshot(DATA_DIR / "portfolio_state.json", prices_usd, fx_rate),
+        "portfolio_bold": _portfolio_snapshot(DATA_DIR / "portfolio_state_bold.json", prices_usd, fx_rate),
         "macro_headline": _macro_headline(summary),
         "all_prices": {},
     }
