@@ -345,6 +345,13 @@ def run(force_report=False, active_symbols=None):
     except Exception as e:
         logger.warning("health update failed: %s", e)
 
+    # Log portfolio equity snapshot for dashboard chart
+    try:
+        from portfolio.risk_management import log_portfolio_value
+        log_portfolio_value()
+    except Exception as e:
+        logger.warning("equity snapshot failed: %s", e)
+
 
 def _crash_alert(error_msg):
     """Save crash alert to message log (not sent to Telegram)."""
