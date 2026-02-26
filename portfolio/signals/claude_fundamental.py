@@ -617,6 +617,14 @@ def _get_best_result(ticker):
     return None
 
 
+def _bg_refresh(tier, context):
+    """Background refresh — runs in a daemon thread, never blocks the loop."""
+    try:
+        _refresh_tier(tier, context)
+    except Exception as e:
+        logger.warning("Claude fundamental %s bg-refresh failed: %s", tier, e)
+
+
 def compute_claude_fundamental_signal(df: pd.DataFrame, context: dict = None) -> dict:
     """Signal entry point — called once per ticker by signal_engine.
 
@@ -637,15 +645,19 @@ def compute_claude_fundamental_signal(df: pd.DataFrame, context: dict = None) ->
 
     cooldowns = _get_cooldowns(config)
 
-    # Refresh any tier whose cooldown has expired (double-check locking)
+    # Refresh in background thread — never block the signal loop.
+    # Fundamentals change on a hours/days timescale, not minutes.
     for tier in ("haiku", "sonnet", "opus"):
         if _needs_refresh(tier, cooldowns):
             with _lock:
                 if _needs_refresh(tier, cooldowns):
-                    try:
-                        _refresh_tier(tier, context)
-                    except Exception as e:
-                        logger.warning("Claude fundamental %s failed: %s", tier, e)
+                    # Mark as refreshing to prevent duplicate spawns
+                    _cache[tier]["ts"] = time.time()
+                    t = threading.Thread(
+                        target=_bg_refresh, args=(tier, context),
+                        daemon=True, name=f"cf-{tier}",
+                    )
+                    t.start()
 
     # Cascade lookup for this ticker
     ticker = context.get("ticker", "")
