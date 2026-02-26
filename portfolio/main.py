@@ -325,6 +325,13 @@ def run(force_report=False, active_symbols=None):
     except Exception as e:
         logger.warning("Avanza order check failed: %s", e)
 
+    # Periodic trade reflection
+    try:
+        from portfolio.reflection import maybe_reflect
+        maybe_reflect(config)
+    except Exception as e:
+        logger.warning("reflection check failed: %s", e)
+
     # Health update
     try:
         from portfolio.health import update_health

@@ -462,6 +462,34 @@ def _get_current_market_state():
         return None
 
 
+def _append_reflection_section(md, config):
+    """Append recent reflection to context markdown if available."""
+    if not config.get("reflection", {}).get("enabled", False):
+        return md
+    try:
+        from portfolio.reflection import load_latest_reflection
+        ref = load_latest_reflection()
+        if not ref:
+            return md
+        lines = [md.rstrip(), "", "### Recent Reflection", ""]
+        for label in ("patient", "bold"):
+            m = ref.get(label, {})
+            trades = m.get("trades", 0)
+            win_rate = m.get("win_rate")
+            total_pnl = m.get("total_pnl_pct", 0)
+            wr_str = f"{win_rate:.0%}" if win_rate is not None else "n/a"
+            lines.append(f"**{label.title()}:** {trades} trades, win rate {wr_str}, PnL {total_pnl:+.1f}%")
+        insights = ref.get("insights", [])
+        if insights:
+            lines.append("")
+            for insight in insights:
+                lines.append(f"- {insight}")
+        lines.append("")
+        return "\n".join(lines)
+    except Exception:
+        return md
+
+
 def write_context():
     config = _load_config()
     smart = config.get("journal", {}).get("smart_retrieval", True)
@@ -481,6 +509,7 @@ def write_context():
                 if entries:
                     portfolio_data = _load_portfolio_pnl()
                     md = build_context(entries, portfolio_data=portfolio_data)
+                    md = _append_reflection_section(md, config)
                     CONTEXT_FILE.write_text(md, encoding="utf-8")
                     return len(entries)
         except Exception:
@@ -490,5 +519,6 @@ def write_context():
     entries = load_recent()
     portfolio_data = _load_portfolio_pnl()
     md = build_context(entries, portfolio_data=portfolio_data)
+    md = _append_reflection_section(md, config)
     CONTEXT_FILE.write_text(md, encoding="utf-8")
     return len(entries)
