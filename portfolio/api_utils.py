@@ -10,6 +10,7 @@ BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 # Canonical API endpoint URLs — import these instead of hardcoding
 BINANCE_BASE = "https://api.binance.com/api/v3"
 BINANCE_FAPI_BASE = "https://fapi.binance.com/fapi/v1"
+BINANCE_FUTURES_DATA = "https://fapi.binance.com/futures/data"
 ALPACA_BASE = "https://data.alpaca.markets/v2"
 
 # Config cache (thread-safe)

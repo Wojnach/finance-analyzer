@@ -139,8 +139,8 @@ class TestNamedVotes:
         assert "ministral" in votes
         # custom_lora fully disabled (20.9% accuracy, 97% SELL bias)
         assert "custom_lora" not in votes
-        # 10 core (11 - custom_lora) + 18 enhanced composite signals (incl. forecast + claude_fundamental) = 28
-        assert len(votes) == 28
+        # 10 core (11 - custom_lora) + 19 enhanced composite signals (incl. forecast + claude_fundamental + futures_flow) = 29
+        assert len(votes) == 29
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_buy_count_matches_votes(self, _mock):

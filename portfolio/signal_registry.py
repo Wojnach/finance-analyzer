@@ -121,6 +121,9 @@ def _register_defaults():
     # Claude fundamental — three-tier LLM cascade (requires context for ticker + config)
     register_enhanced("claude_fundamental", "portfolio.signals.claude_fundamental",
                       "compute_claude_fundamental_signal", requires_context=True)
+    # Futures flow — OI, LS ratios, funding history (crypto only, requires context)
+    register_enhanced("futures_flow", "portfolio.signals.futures_flow",
+                      "compute_futures_flow_signal", requires_context=True)
 
 
 _register_defaults()
