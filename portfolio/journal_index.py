@@ -169,6 +169,14 @@ def _tokenize_entry(entry):
         if conviction >= 0.7:
             tokens.append(f"{ticker.lower()}_high_conviction")
 
+        # Debate fields (bull/bear/synthesis)
+        debate = info.get("debate")
+        if debate and isinstance(debate, dict):
+            for field in ("bull", "bear", "synthesis"):
+                text = debate.get(field, "")
+                if text:
+                    tokens.extend(_clean_words(text))
+
     # Price buckets
     prices = entry.get("prices", {})
     for ticker, price in prices.items():

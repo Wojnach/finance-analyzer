@@ -118,6 +118,28 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 
 ### 3. Decide (for EACH strategy independently)
 
+#### Structured Debate (for each ticker you consider trading)
+
+Before committing to a BUY or SELL, argue both sides. For each ticker where you are
+considering a trade (not for HOLD tickers), write a brief adversarial debate:
+
+- **Bull case:** What supports the trade? (signal consensus, breakout structure, macro tailwind, etc.)
+- **Bear case:** What argues against? (overbought RSI, macro headwind, low volume, pattern failure, etc.)
+- **Synthesis:** Weigh both sides — which is stronger and why? This is your final judgment.
+
+Record the debate in your journal entry under the ticker's `debate` field:
+
+```json
+"debate": {
+  "bull": "12B consensus, volume 2x expansion, BB breakout above upper band, EMA aligned all TFs",
+  "bear": "RSI 72 overbought, DXY rising (+0.5% 5d), FOMC in 3 days, prior breakout at this level failed",
+  "synthesis": "Breakout is structural but entry risky at current RSI. Wait for pullback to BB midline."
+}
+```
+
+The debate is optional for HOLD decisions but **mandatory for any BUY or SELL.** Keep each
+case to 1-2 sentences. The synthesis should directly inform your action.
+
 #### Patient strategy — "The Regime Reader" (`portfolio_state.json`)
 
 Use your own judgment. The 24 signals and timeframe heatmap are inputs to your reasoning,

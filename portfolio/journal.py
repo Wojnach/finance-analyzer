@@ -99,6 +99,18 @@ def _append_entry(lines, entry):
         conv_str = f" [{int(conviction * 100)}%]" if conviction else ""
         lines.append(f"{ticker}: {outlook}{conv_str} — {thesis}{level_str}")
 
+        debate = info.get("debate")
+        if debate and isinstance(debate, dict):
+            bull = debate.get("bull", "")
+            bear = debate.get("bear", "")
+            synthesis = debate.get("synthesis", "")
+            if bull:
+                lines.append(f"  Bull: {bull}")
+            if bear:
+                lines.append(f"  Bear: {bear}")
+            if synthesis:
+                lines.append(f"  Synthesis: {synthesis}")
+
     lines.append("")
 
 
