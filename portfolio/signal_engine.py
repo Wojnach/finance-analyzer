@@ -1,4 +1,4 @@
-"""Signal generation engine — 29-signal voting system with weighted consensus."""
+"""Signal generation engine — 30-signal voting system with weighted consensus."""
 
 import json
 import logging
@@ -20,9 +20,9 @@ logger = logging.getLogger("portfolio.signal_engine")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
-# --- Signal (full 29-signal for "Now" timeframe) ---
+# --- Signal (full 30-signal for "Now" timeframe) ---
 
-MIN_VOTERS_CRYPTO = 3  # crypto has 26 signals (8 core + 18 enhanced; custom_lora, ml, funding disabled) — need 3
+MIN_VOTERS_CRYPTO = 3  # crypto has 27 signals (8 core + 19 enhanced; custom_lora, ml, funding disabled) — need 3
 MIN_VOTERS_STOCK = 3  # stocks have 25 signals (7 core + 18 enhanced) — need 3 active voters
 
 # Sentiment hysteresis — prevents rapid flip spam from ~50% confidence oscillation
@@ -573,14 +573,14 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     core_active = core_buy + core_sell
 
     # Total applicable signals:
-    # Crypto: 8 core (11 original - custom_lora, ml, funding disabled) + 18 enhanced = 26
-    # Metals: 7 core + 18 enhanced = 25
+    # Crypto: 8 core (11 original - custom_lora, ml, funding disabled) + 19 enhanced = 27
+    # Metals: 7 core + 18 enhanced = 25 (futures_flow only applies to crypto)
     # Stocks: 7 core + 18 enhanced = 25
-    # (enhanced: 16 original + forecast + claude_fundamental)
+    # (enhanced: 16 original + forecast + claude_fundamental + futures_flow[crypto only])
     is_crypto = ticker in CRYPTO_SYMBOLS
     is_metal = ticker in METALS_SYMBOLS
     if is_crypto:
-        total_applicable = 26  # 8 core + 18 enhanced
+        total_applicable = 27  # 8 core + 19 enhanced
     elif is_metal:
         total_applicable = 25  # 7 core + 18 enhanced
     else:

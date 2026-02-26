@@ -207,6 +207,45 @@ def write_agent_summary(
     except Exception:
         pass
 
+    # Binance FAPI futures data (crypto only — OI, LS ratios, funding)
+    try:
+        from portfolio.futures_data import get_all_futures_data
+        from portfolio.tickers import CRYPTO_SYMBOLS as _CRYPTO
+        futures_section = {}
+        for ticker in _CRYPTO:
+            fdata = get_all_futures_data(ticker)
+            if fdata is None:
+                continue
+            entry = {}
+            oi = fdata.get("open_interest")
+            if oi:
+                entry["open_interest"] = oi.get("oi")
+            oi_hist = fdata.get("oi_history")
+            if oi_hist:
+                entry["oi_value_usdt"] = oi_hist[-1].get("oi_usdt")
+            ls = fdata.get("ls_ratio")
+            if ls:
+                latest = ls[-1]
+                entry["ls_ratio"] = round(latest["longShortRatio"], 3)
+                entry["long_pct"] = round(latest["longAccount"] * 100, 1)
+                entry["short_pct"] = round(latest["shortAccount"] * 100, 1)
+            top = fdata.get("top_position_ratio")
+            if top:
+                entry["top_trader_ls_ratio"] = round(top[-1]["longShortRatio"], 3)
+            funding = fdata.get("funding_history")
+            if funding:
+                entry["funding_rate"] = funding[-1]["fundingRate"]
+                entry["funding_rate_pct"] = round(funding[-1]["fundingRate"] * 100, 4)
+                if len(funding) >= 3:
+                    recent = [d["fundingRate"] for d in funding[-3:]]
+                    entry["funding_3period_avg"] = round(sum(recent) / len(recent) * 100, 4)
+            if entry:
+                futures_section[ticker] = entry
+        if futures_section:
+            summary["futures_data"] = futures_section
+    except Exception:
+        pass
+
     cross_leads = _cross_asset_signals(signals)
     if cross_leads:
         summary["cross_asset_leads"] = cross_leads
@@ -417,6 +456,11 @@ def _write_compact_summary(summary):
                 }
         if condensed:
             compact["fundamentals"] = condensed
+
+    # Propagate futures_data to compact (crypto only, already small)
+    futures_data = summary.get("futures_data")
+    if futures_data:
+        compact["futures_data"] = futures_data
 
     _atomic_write_json(COMPACT_SUMMARY_FILE, compact)
 

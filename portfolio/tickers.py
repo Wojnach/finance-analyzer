@@ -116,4 +116,5 @@ SIGNAL_NAMES = [
     "econ_calendar",
     "forecast",
     "claude_fundamental",
+    "futures_flow",
 ]
