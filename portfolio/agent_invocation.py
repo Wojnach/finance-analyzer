@@ -124,6 +124,17 @@ def invoke_agent(reasons, tier=3):
     except Exception as e:
         logger.warning("journal context failed: %s", e)
 
+    # Perception gate: skip low-value invocations
+    try:
+        from portfolio.perception_gate import should_invoke as _should_invoke
+        should, gate_reason = _should_invoke(reasons, tier)
+        if not should:
+            logger.info("Perception gate skipped: %s", gate_reason)
+            _log_trigger(reasons, "skipped_gate", tier=tier)
+            return False
+    except Exception as e:
+        logger.warning("perception gate error (passing through): %s", e)
+
     prompt = _build_tier_prompt(tier, reasons)
     max_turns = tier_cfg["max_turns"]
 
