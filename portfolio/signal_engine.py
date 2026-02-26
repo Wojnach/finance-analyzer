@@ -8,10 +8,13 @@ from pathlib import Path
 
 import pandas as pd
 
+import numpy as np
+
 from portfolio.shared_state import _cached, FEAR_GREED_TTL, SENTIMENT_TTL, MINISTRAL_TTL, ML_SIGNAL_TTL, FUNDING_RATE_TTL, VOLUME_TTL
 from portfolio.indicators import detect_regime
 from portfolio.tickers import CRYPTO_SYMBOLS, STOCK_SYMBOLS, METALS_SYMBOLS
 from portfolio.signal_registry import get_enhanced_signals, load_signal_func
+from portfolio.signal_utils import true_range
 
 logger = logging.getLogger("portfolio.signal_engine")
 
@@ -147,6 +150,141 @@ def _time_of_day_factor():
     if 2 <= hour <= 6:
         return 0.8
     return 1.0
+
+
+def _compute_adx(df, period=14):
+    """Compute ADX (Average Directional Index) from a DataFrame with high/low/close.
+
+    Returns the latest ADX value, or None if insufficient data.
+    """
+    if df is None or not isinstance(df, pd.DataFrame) or len(df) < period * 2:
+        return None
+    try:
+        high = df["high"]
+        low = df["low"]
+        close = df["close"]
+
+        tr = true_range(high, low, close)
+
+        plus_dm = high.diff()
+        minus_dm = -low.diff()
+        plus_dm = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0.0)
+        minus_dm = minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0.0)
+
+        alpha = 1.0 / period
+        atr_smooth = tr.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
+        plus_di = 100 * plus_dm.ewm(alpha=alpha, min_periods=period, adjust=False).mean() / atr_smooth.replace(0, np.nan)
+        minus_di = 100 * minus_dm.ewm(alpha=alpha, min_periods=period, adjust=False).mean() / atr_smooth.replace(0, np.nan)
+
+        dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+        adx = dx.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
+
+        val = adx.iloc[-1]
+        return float(val) if pd.notna(val) and np.isfinite(val) else None
+    except Exception:
+        return None
+
+
+def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df, config):
+    """Apply a 4-stage multiplicative confidence penalty cascade.
+
+    Stages:
+      1. Regime penalty — dampens confidence in choppy/volatile markets
+      2. Volume/ADX gate — rejects low-conviction signals
+      3. Trap detection — catches bull/bear traps (price vs volume divergence)
+      4. Dynamic MIN_VOTERS — raises the bar in uncertain markets
+
+    Returns (action, conf, penalty_log) where penalty_log is a list of applied penalties.
+    """
+    cfg = (config or {}).get("confidence_penalties", {})
+    if cfg.get("enabled") is False:
+        return action, conf, []
+
+    penalty_log = []
+
+    # --- Stage 1: Regime penalties ---
+    if regime == "ranging":
+        conf *= 0.75
+        penalty_log.append({"stage": "regime", "regime": "ranging", "mult": 0.75})
+    elif regime == "high-vol":
+        conf *= 0.80
+        penalty_log.append({"stage": "regime", "regime": "high-vol", "mult": 0.80})
+    elif regime in ("trending-up", "trending-down"):
+        # Bonus only if action aligns with trend direction
+        trending_buy = regime == "trending-up" and action == "BUY"
+        trending_sell = regime == "trending-down" and action == "SELL"
+        if trending_buy or trending_sell:
+            conf *= 1.10
+            penalty_log.append({"stage": "regime", "regime": regime, "aligned": True, "mult": 1.10})
+
+    # --- Stage 2: Volume/ADX gate ---
+    volume_ratio = extra_info.get("volume_ratio")
+    adx = _compute_adx(df)
+    extra_info["_adx"] = adx
+
+    if volume_ratio is not None and action != "HOLD":
+        if volume_ratio < 0.5:
+            # Very low volume — force HOLD
+            penalty_log.append({"stage": "volume_gate", "rvol": volume_ratio, "effect": "force_hold"})
+            action = "HOLD"
+            conf = 0.0
+        elif volume_ratio < 0.8 and (adx is not None and adx < 20) and conf < 0.65:
+            # Low volume + weak trend + marginal confidence — force HOLD
+            penalty_log.append({
+                "stage": "volume_adx_gate", "rvol": volume_ratio,
+                "adx": round(adx, 1), "conf": round(conf, 4), "effect": "force_hold",
+            })
+            action = "HOLD"
+            conf = 0.0
+        elif volume_ratio > 1.5:
+            # High volume — slight confidence boost
+            conf *= 1.15
+            penalty_log.append({"stage": "volume_boost", "rvol": volume_ratio, "mult": 1.15})
+
+    # --- Stage 3: Trap detection ---
+    if action != "HOLD" and df is not None and isinstance(df, pd.DataFrame) and len(df) >= 5:
+        try:
+            recent_close = df["close"].iloc[-5:]
+            recent_vol = df["volume"].iloc[-5:] if "volume" in df.columns else None
+            price_up = recent_close.iloc[-1] > recent_close.iloc[0]
+            price_down = recent_close.iloc[-1] < recent_close.iloc[0]
+
+            if recent_vol is not None and len(recent_vol) >= 5:
+                vol_declining = recent_vol.iloc[-1] < recent_vol.iloc[0] * 0.8
+
+                if action == "BUY" and price_up and vol_declining:
+                    conf *= 0.5
+                    penalty_log.append({"stage": "trap", "type": "bull_trap", "mult": 0.5})
+                elif action == "SELL" and price_down and vol_declining:
+                    conf *= 0.5
+                    penalty_log.append({"stage": "trap", "type": "bear_trap", "mult": 0.5})
+        except Exception:
+            pass
+
+    # --- Stage 4: Dynamic MIN_VOTERS ---
+    active_voters = extra_info.get("_voters", 0)
+    buy_count = extra_info.get("_buy_count", 0)
+    sell_count = extra_info.get("_sell_count", 0)
+
+    if regime in ("trending-up", "trending-down"):
+        dynamic_min = 3
+    elif regime == "high-vol":
+        dynamic_min = 4
+    else:  # ranging or unknown
+        dynamic_min = 5
+
+    if action != "HOLD" and active_voters < dynamic_min:
+        penalty_log.append({
+            "stage": "dynamic_min_voters", "regime": regime,
+            "required": dynamic_min, "actual": active_voters, "effect": "force_hold",
+        })
+        action = "HOLD"
+        conf = 0.0
+
+    # Clamp confidence to [0, 1]
+    conf = max(0.0, min(1.0, conf))
+
+    return action, conf, penalty_log
 
 
 def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
@@ -565,4 +703,12 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     # Primary action = weighted consensus (accounts for accuracy + bias penalties)
     action = weighted_action
     conf = weighted_conf
+
+    # Apply confidence penalty cascade (regime, volume/ADX, trap, dynamic min_voters)
+    action, conf, penalty_log = apply_confidence_penalties(
+        action, conf, regime, ind, extra_info, ticker, df, config
+    )
+    if penalty_log:
+        extra_info["_penalty_log"] = penalty_log
+
     return action, conf, extra_info

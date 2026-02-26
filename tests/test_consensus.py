@@ -26,6 +26,10 @@ def _null_cached(key, ttl, func, *args):
     return None
 
 
+# Disable confidence penalty cascade so base consensus tests are isolated
+_NO_PENALTIES = {"confidence_penalties": {"enabled": False}}
+
+
 def make_indicators(**overrides):
     base = {
         "close": 130.0,
@@ -91,7 +95,9 @@ class TestStockConsensus:
             ema21=130.0,  # >0.5% gap → BUY vote
             price_vs_bb="inside",  # inside → abstains
         )
-        action, conf, extra = generate_signal(ind, ticker="MSTR")
+        action, conf, extra = generate_signal(
+            ind, ticker="MSTR", config=_NO_PENALTIES,
+        )
         assert extra["_buy_count"] >= 3
         assert action == "BUY"
 
@@ -106,7 +112,9 @@ class TestStockConsensus:
             ema21=130.0,  # fast < slow → SELL vote
             price_vs_bb="inside",  # inside → abstains
         )
-        action, conf, extra = generate_signal(ind, ticker="PLTR")
+        action, conf, extra = generate_signal(
+            ind, ticker="PLTR", config=_NO_PENALTIES,
+        )
         assert extra["_sell_count"] >= 3
         assert action == "SELL"
 
@@ -136,7 +144,9 @@ class TestStockConsensus:
                 ema9=135.0,
                 ema21=130.0,  # 3 voters: RSI + MACD + EMA
             )
-            action, conf, extra = generate_signal(ind, ticker=ticker)
+            action, conf, extra = generate_signal(
+                ind, ticker=ticker, config=_NO_PENALTIES,
+            )
             assert action == "BUY", f"{ticker} should reach BUY consensus with 3 voters"
 
 
@@ -172,7 +182,9 @@ class TestCryptoConsensus:
             price_vs_bb="inside",
             close=70000.0,
         )
-        action, conf, extra = generate_signal(ind, ticker="BTC-USD")
+        action, conf, extra = generate_signal(
+            ind, ticker="BTC-USD", config=_NO_PENALTIES,
+        )
         assert extra["_buy_count"] >= 3
         assert action == "BUY"
 

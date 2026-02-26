@@ -418,3 +418,287 @@ def transaction_cost_analysis(portfolio: dict) -> dict:
         "pnl_sek": round(pnl, 2),
         "pnl_note": pnl_note,
     }
+
+
+# ---------------------------------------------------------------------------
+# Risk Audit Flags — pre-trade risk checks for Layer 2
+# ---------------------------------------------------------------------------
+
+# Hard-coded correlation pairs based on known relationships
+CORRELATED_PAIRS = {
+    "ETH-USD": ["BTC-USD", "MSTR"],
+    "BTC-USD": ["ETH-USD", "MSTR"],
+    "MSTR": ["BTC-USD", "ETH-USD"],
+    "XAG-USD": ["XAU-USD"],
+    "XAU-USD": ["XAG-USD"],
+    "NVDA": ["AMD", "AVGO", "TSM"],
+    "AMD": ["NVDA", "AVGO", "TSM"],
+    "AVGO": ["NVDA", "AMD", "TSM"],
+    "TSM": ["NVDA", "AMD", "AVGO"],
+    "GOOGL": ["META", "AMZN"],
+    "META": ["GOOGL", "AMZN"],
+    "AMZN": ["GOOGL", "META"],
+    "AAPL": ["GOOGL", "META", "AMZN"],
+}
+
+
+def check_concentration_risk(ticker, action, portfolio, agent_summary, strategy="patient"):
+    """Check if a new BUY would create excessive concentration.
+
+    Args:
+        ticker: Instrument to potentially buy.
+        action: "BUY" or "SELL".
+        portfolio: Portfolio state dict.
+        agent_summary: Parsed agent_summary dict.
+        strategy: "patient" or "bold".
+
+    Returns:
+        dict with flag info, or None if no risk.
+    """
+    if action != "BUY":
+        return None
+
+    cash = portfolio.get("cash_sek", 0)
+    holdings = portfolio.get("holdings", {})
+    fx_rate = agent_summary.get("fx_rate", 1.0)
+    signals = agent_summary.get("signals", {})
+
+    # Compute current portfolio value
+    total_value = cash
+    for t, pos in holdings.items():
+        shares = pos.get("shares", 0)
+        if shares <= 0:
+            continue
+        price = signals.get(t, {}).get("price_usd", pos.get("avg_cost_usd", 0))
+        total_value += shares * price * fx_rate
+
+    if total_value <= 0:
+        return None
+
+    # Compute proposed position value
+    alloc_pct = 0.30 if strategy == "bold" else 0.15
+    proposed_alloc = cash * alloc_pct
+
+    # Existing position value for this ticker
+    existing = holdings.get(ticker, {})
+    existing_shares = existing.get("shares", 0)
+    existing_price = signals.get(ticker, {}).get("price_usd", existing.get("avg_cost_usd", 0))
+    existing_value = existing_shares * existing_price * fx_rate
+
+    new_position_value = existing_value + proposed_alloc
+    concentration_pct = (new_position_value / total_value) * 100
+
+    if concentration_pct > 40:
+        return {
+            "flag": "concentration",
+            "severity": "warning",
+            "ticker": ticker,
+            "strategy": strategy,
+            "concentration_pct": round(concentration_pct, 1),
+            "message": (
+                f"{ticker} would be {concentration_pct:.1f}% of {strategy} portfolio "
+                f"(>{40}% threshold)"
+            ),
+        }
+    return None
+
+
+def check_regime_mismatch(ticker, action, agent_summary):
+    """Check if trade direction contradicts the market regime.
+
+    BUY in trending-down (without volume confirmation) or
+    SELL in trending-up is a regime mismatch.
+
+    Returns:
+        dict with flag info, or None if no mismatch.
+    """
+    if action == "HOLD":
+        return None
+
+    sig = agent_summary.get("signals", {}).get(ticker, {})
+    regime = sig.get("regime", "ranging")
+    extra = sig.get("extra", {})
+    volume_ratio = extra.get("volume_ratio")
+
+    mismatch = False
+    reason = ""
+
+    if action == "BUY" and regime == "trending-down":
+        # BUY against downtrend — only OK with strong volume (breakout reversal)
+        if volume_ratio is None or volume_ratio < 1.5:
+            mismatch = True
+            vol_str = f"RVOL={volume_ratio:.1f}" if volume_ratio else "no volume data"
+            reason = f"BUY in trending-down regime ({vol_str}, need >1.5x for reversal)"
+    elif action == "SELL" and regime == "trending-up":
+        if volume_ratio is None or volume_ratio < 1.5:
+            mismatch = True
+            vol_str = f"RVOL={volume_ratio:.1f}" if volume_ratio else "no volume data"
+            reason = f"SELL in trending-up regime ({vol_str}, need >1.5x for reversal)"
+
+    if mismatch:
+        return {
+            "flag": "regime_mismatch",
+            "severity": "warning",
+            "ticker": ticker,
+            "regime": regime,
+            "action": action,
+            "message": f"{ticker}: {reason}",
+        }
+    return None
+
+
+def check_correlation_risk(ticker, action, portfolio, strategy="patient"):
+    """Check if BUY would add correlated exposure to an existing position.
+
+    Returns:
+        dict with flag info, or None if no correlation risk.
+    """
+    if action != "BUY":
+        return None
+
+    correlated = CORRELATED_PAIRS.get(ticker, [])
+    if not correlated:
+        return None
+
+    holdings = portfolio.get("holdings", {})
+    held_correlated = []
+    for t in correlated:
+        pos = holdings.get(t, {})
+        if pos.get("shares", 0) > 0:
+            held_correlated.append(t)
+
+    if held_correlated:
+        return {
+            "flag": "correlation",
+            "severity": "warning",
+            "ticker": ticker,
+            "strategy": strategy,
+            "correlated_held": held_correlated,
+            "message": (
+                f"{ticker}: correlated with held position(s) {', '.join(held_correlated)} "
+                f"in {strategy} portfolio"
+            ),
+        }
+    return None
+
+
+def check_atr_stop_proximity(ticker, action, portfolio, agent_summary):
+    """Check if current price is within 1x ATR of the computed stop level.
+
+    This flags positions that are dangerously close to their stop-loss.
+
+    Returns:
+        dict with flag info, or None if no proximity risk.
+    """
+    if action == "HOLD":
+        return None
+
+    holdings = portfolio.get("holdings", {})
+    pos = holdings.get(ticker, {})
+    shares = pos.get("shares", 0)
+    if shares <= 0:
+        return None
+
+    entry_price = pos.get("avg_cost_usd", 0)
+    if entry_price <= 0:
+        return None
+
+    sig = agent_summary.get("signals", {}).get(ticker, {})
+    current_price = sig.get("price_usd", 0)
+    atr_pct = sig.get("atr_pct", 0)
+
+    if current_price <= 0 or atr_pct <= 0:
+        return None
+
+    # 2x ATR stop level
+    stop_price = entry_price * (1 - 2 * atr_pct / 100)
+    # Distance from current price to stop (in ATR units)
+    atr_value = current_price * atr_pct / 100
+    if atr_value <= 0:
+        return None
+
+    distance_to_stop = current_price - stop_price
+    distance_in_atr = distance_to_stop / atr_value
+
+    if distance_in_atr < 1.0:
+        return {
+            "flag": "atr_stop_proximity",
+            "severity": "warning",
+            "ticker": ticker,
+            "current_price": round(current_price, 4),
+            "stop_price": round(stop_price, 4),
+            "distance_atr": round(distance_in_atr, 2),
+            "message": (
+                f"{ticker}: price ${current_price:.2f} is {distance_in_atr:.1f}x ATR "
+                f"from stop ${stop_price:.2f} (danger zone < 1.0x ATR)"
+            ),
+        }
+    return None
+
+
+def compute_all_risk_flags(signals, patient_pf, bold_pf, agent_summary, config=None):
+    """Compute all risk audit flags for all tickers.
+
+    Args:
+        signals: Dict of ticker -> signal data (from agent_summary).
+        patient_pf: Patient portfolio state dict.
+        bold_pf: Bold portfolio state dict.
+        agent_summary: Full agent_summary dict.
+        config: Optional config dict.
+
+    Returns:
+        dict with:
+            - flags: list of flag dicts
+            - summary: str (human-readable summary)
+    """
+    cfg = (config or {}).get("risk_audit", {})
+    if cfg.get("enabled") is False:
+        return {"flags": [], "summary": "Risk audit disabled"}
+
+    all_flags = []
+
+    for ticker, sig in signals.items():
+        action = sig.get("action", "HOLD")
+        if action == "HOLD":
+            # Still check ATR proximity for held positions
+            for strategy, pf in [("patient", patient_pf), ("bold", bold_pf)]:
+                flag = check_atr_stop_proximity(ticker, "CHECK", pf, agent_summary)
+                if flag:
+                    flag["strategy"] = strategy
+                    all_flags.append(flag)
+            continue
+
+        for strategy, pf in [("patient", patient_pf), ("bold", bold_pf)]:
+            # Concentration
+            flag = check_concentration_risk(ticker, action, pf, agent_summary, strategy)
+            if flag:
+                all_flags.append(flag)
+
+            # Correlation
+            flag = check_correlation_risk(ticker, action, pf, strategy)
+            if flag:
+                all_flags.append(flag)
+
+            # ATR stop proximity
+            flag = check_atr_stop_proximity(ticker, action, pf, agent_summary)
+            if flag:
+                flag["strategy"] = strategy
+                all_flags.append(flag)
+
+        # Regime mismatch (independent of strategy)
+        flag = check_regime_mismatch(ticker, action, agent_summary)
+        if flag:
+            all_flags.append(flag)
+
+    summary_parts = []
+    if all_flags:
+        by_flag = {}
+        for f in all_flags:
+            by_flag.setdefault(f["flag"], []).append(f)
+        for flag_name, flags in by_flag.items():
+            summary_parts.append(f"{flag_name}: {len(flags)}")
+
+    return {
+        "flags": all_flags,
+        "summary": "; ".join(summary_parts) if summary_parts else "All clear",
+    }

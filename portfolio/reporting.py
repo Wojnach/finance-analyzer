@@ -211,6 +211,51 @@ def write_agent_summary(
     if cross_leads:
         summary["cross_asset_leads"] = cross_leads
 
+    # Load portfolios once for trade guards + risk audit
+    _patient_pf = {}
+    _bold_pf = {}
+    try:
+        _patient_pf = json.loads((DATA_DIR / "portfolio_state.json").read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    try:
+        _bold_pf = json.loads((DATA_DIR / "portfolio_state_bold.json").read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+
+    # Trade guard warnings (overtrading prevention)
+    try:
+        from portfolio.trade_guards import get_all_guard_warnings
+        guard_result = get_all_guard_warnings(signals, _patient_pf, _bold_pf)
+        if guard_result.get("warnings"):
+            summary["trade_guard_warnings"] = guard_result
+    except Exception:
+        logger.debug("Trade guard warnings failed", exc_info=True)
+
+    # Risk audit flags (concentration, regime mismatch, correlation, ATR proximity)
+    try:
+        from portfolio.risk_management import compute_all_risk_flags
+        risk_result = compute_all_risk_flags(signals, _patient_pf, _bold_pf, summary)
+        if risk_result.get("flags"):
+            summary["risk_warnings"] = risk_result
+    except Exception:
+        logger.debug("Risk audit flags failed", exc_info=True)
+
+    # Portfolio trade metrics (per-trade performance)
+    try:
+        from portfolio.equity_curve import compute_trade_metrics
+        metrics = {}
+        for label, pf in [("patient", _patient_pf), ("bold", _bold_pf)]:
+            txns = pf.get("transactions", [])
+            if txns:
+                m = compute_trade_metrics(txns, pf.get("initial_value_sek", 500000))
+                if m.get("round_trips", 0) > 0:
+                    metrics[label] = m
+        if metrics:
+            summary["portfolio_metrics"] = metrics
+    except Exception:
+        logger.debug("Portfolio metrics failed", exc_info=True)
+
     # Avanza-tracked instruments (Tier 2: Nordic equities, Tier 3: warrants)
     try:
         from portfolio.avanza_tracker import fetch_avanza_prices

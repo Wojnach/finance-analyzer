@@ -394,7 +394,87 @@ def build_context(entries, portfolio_data=None, now=None):
     return "\n".join(lines)
 
 
+def _load_config():
+    """Load config.json for smart retrieval setting."""
+    config_file = DATA_DIR.parent / "config.json"
+    try:
+        return json.loads(config_file.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _get_current_market_state():
+    """Load current signals, held tickers, regime, and prices for smart retrieval."""
+    try:
+        summary_file = DATA_DIR / "agent_summary_compact.json"
+        if not summary_file.exists():
+            summary_file = DATA_DIR / "agent_summary.json"
+        if not summary_file.exists():
+            return None
+        summary = json.loads(summary_file.read_text(encoding="utf-8"))
+        signals = summary.get("signals", {})
+
+        # Detect held tickers
+        held = set()
+        for fname in ("portfolio_state.json", "portfolio_state_bold.json"):
+            try:
+                pf = json.loads((DATA_DIR / fname).read_text(encoding="utf-8"))
+                for t, pos in pf.get("holdings", {}).items():
+                    if pos.get("shares", 0) > 0:
+                        held.add(t)
+            except (FileNotFoundError, json.JSONDecodeError):
+                pass
+
+        # Detect dominant regime
+        regimes = []
+        for sig in signals.values():
+            r = sig.get("regime")
+            if r:
+                regimes.append(r)
+        regime = max(set(regimes), key=regimes.count) if regimes else ""
+
+        # Prices
+        prices = {}
+        for ticker, sig in signals.items():
+            p = sig.get("price_usd")
+            if p:
+                prices[ticker] = p
+
+        return {
+            "signals": signals,
+            "held_tickers": list(held),
+            "regime": regime,
+            "prices": prices,
+        }
+    except Exception:
+        return None
+
+
 def write_context():
+    config = _load_config()
+    smart = config.get("journal", {}).get("smart_retrieval", True)
+
+    if smart:
+        try:
+            from portfolio.journal_index import retrieve_relevant_entries
+            market_state = _get_current_market_state()
+            if market_state:
+                entries = retrieve_relevant_entries(
+                    signals=market_state["signals"],
+                    held_tickers=market_state["held_tickers"],
+                    regime=market_state["regime"],
+                    prices=market_state["prices"],
+                    k=8,
+                )
+                if entries:
+                    portfolio_data = _load_portfolio_pnl()
+                    md = build_context(entries, portfolio_data=portfolio_data)
+                    CONTEXT_FILE.write_text(md, encoding="utf-8")
+                    return len(entries)
+        except Exception:
+            pass  # Fall through to chronological
+
+    # Fallback: chronological (original behavior)
     entries = load_recent()
     portfolio_data = _load_portfolio_pnl()
     md = build_context(entries, portfolio_data=portfolio_data)

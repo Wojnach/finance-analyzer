@@ -317,6 +317,247 @@ def get_latest_values(curve: list[dict]) -> dict | None:
     }
 
 
+def _pair_round_trips(transactions):
+    """Match BUY and SELL transactions into round-trip pairs.
+
+    Uses FIFO matching: each SELL is paired with the earliest available BUY
+    shares for that ticker.
+
+    Args:
+        transactions: List of transaction dicts from portfolio state.
+
+    Returns:
+        list of round-trip dicts, each with:
+            - ticker: str
+            - buy_ts: str (ISO-8601)
+            - sell_ts: str (ISO-8601)
+            - buy_price_sek: float (per share)
+            - sell_price_sek: float (per share)
+            - shares: float
+            - pnl_pct: float
+            - pnl_sek: float
+            - hold_hours: float
+            - fee_sek: float (total fees for this round trip)
+    """
+    from collections import defaultdict
+
+    # Group BUYs by ticker — maintain FIFO order
+    buy_queues = defaultdict(list)
+    for tx in transactions:
+        if tx.get("action") == "BUY":
+            ticker = tx.get("ticker", "")
+            shares = tx.get("shares", 0)
+            total_sek = tx.get("total_sek", 0)
+            fee = tx.get("fee_sek", 0) or 0
+            if shares > 0:
+                price_per_share = total_sek / shares
+                buy_queues[ticker].append({
+                    "ts": tx.get("timestamp", ""),
+                    "remaining_shares": shares,
+                    "price_per_share": price_per_share,
+                    "fee_sek": fee,
+                })
+
+    round_trips = []
+
+    for tx in transactions:
+        if tx.get("action") != "SELL":
+            continue
+        ticker = tx.get("ticker", "")
+        sell_shares = tx.get("shares", 0)
+        sell_total = tx.get("total_sek", 0)
+        sell_fee = tx.get("fee_sek", 0) or 0
+        sell_ts = tx.get("timestamp", "")
+
+        if sell_shares <= 0 or ticker not in buy_queues:
+            continue
+
+        sell_price_per_share = sell_total / sell_shares if sell_shares > 0 else 0
+        shares_to_match = sell_shares
+
+        while shares_to_match > 0 and buy_queues[ticker]:
+            buy = buy_queues[ticker][0]
+            matched = min(shares_to_match, buy["remaining_shares"])
+
+            # Compute hold time
+            hold_hours = 0
+            try:
+                buy_dt = datetime.datetime.fromisoformat(buy["ts"])
+                sell_dt = datetime.datetime.fromisoformat(sell_ts)
+                if buy_dt.tzinfo is None:
+                    buy_dt = buy_dt.replace(tzinfo=datetime.timezone.utc)
+                if sell_dt.tzinfo is None:
+                    sell_dt = sell_dt.replace(tzinfo=datetime.timezone.utc)
+                hold_hours = (sell_dt - buy_dt).total_seconds() / 3600
+            except (ValueError, TypeError):
+                pass
+
+            buy_price = buy["price_per_share"]
+            pnl_pct = ((sell_price_per_share - buy_price) / buy_price * 100) if buy_price > 0 else 0
+            pnl_sek = (sell_price_per_share - buy_price) * matched
+
+            # Proportional fees
+            buy_fee_share = (buy["fee_sek"] * matched / buy["remaining_shares"]) if buy["remaining_shares"] > 0 else 0
+            sell_fee_share = (sell_fee * matched / sell_shares) if sell_shares > 0 else 0
+
+            round_trips.append({
+                "ticker": ticker,
+                "buy_ts": buy["ts"],
+                "sell_ts": sell_ts,
+                "buy_price_sek": round(buy_price, 4),
+                "sell_price_sek": round(sell_price_per_share, 4),
+                "shares": round(matched, 8),
+                "pnl_pct": round(pnl_pct, 4),
+                "pnl_sek": round(pnl_sek, 2),
+                "hold_hours": round(hold_hours, 2),
+                "fee_sek": round(buy_fee_share + sell_fee_share, 2),
+            })
+
+            buy["remaining_shares"] -= matched
+            shares_to_match -= matched
+
+            if buy["remaining_shares"] <= 1e-10:
+                buy_queues[ticker].pop(0)
+
+    return round_trips
+
+
+def compute_trade_metrics(transactions, initial_value=INITIAL_VALUE):
+    """Compute per-trade performance metrics from transaction history.
+
+    Args:
+        transactions: List of transaction dicts from portfolio state.
+        initial_value: Starting portfolio value in SEK.
+
+    Returns:
+        dict with:
+            - profit_factor: gross_profit / gross_loss (None if no losses)
+            - avg_hold_hours: average hold time per round trip
+            - trade_frequency_per_week: trades per 7 calendar days
+            - win_loss_ratio: avg_win_pct / avg_loss_pct (None if no losses)
+            - max_consecutive_wins: longest win streak
+            - max_consecutive_losses: longest loss streak
+            - expectancy_pct: (win_rate * avg_win) - (loss_rate * avg_loss)
+            - calmar_ratio: annualized_return / max_drawdown (None if insufficient data)
+            - round_trips: int (number of paired trades)
+            - total_pnl_sek: float (sum of round-trip P&L)
+    """
+    trips = _pair_round_trips(transactions)
+
+    result = {
+        "profit_factor": None,
+        "avg_hold_hours": 0,
+        "trade_frequency_per_week": 0,
+        "win_loss_ratio": None,
+        "max_consecutive_wins": 0,
+        "max_consecutive_losses": 0,
+        "expectancy_pct": 0,
+        "calmar_ratio": None,
+        "round_trips": len(trips),
+        "total_pnl_sek": 0,
+    }
+
+    if not trips:
+        return result
+
+    # Gross profit/loss
+    gross_profit = sum(t["pnl_sek"] for t in trips if t["pnl_sek"] > 0)
+    gross_loss = abs(sum(t["pnl_sek"] for t in trips if t["pnl_sek"] < 0))
+
+    if gross_loss > 0:
+        result["profit_factor"] = round(gross_profit / gross_loss, 4)
+
+    # Average hold time
+    hold_hours = [t["hold_hours"] for t in trips if t["hold_hours"] > 0]
+    if hold_hours:
+        result["avg_hold_hours"] = round(sum(hold_hours) / len(hold_hours), 2)
+
+    # Trade frequency
+    try:
+        timestamps = []
+        for t in trips:
+            ts_str = t.get("sell_ts") or t.get("buy_ts")
+            if ts_str:
+                timestamps.append(datetime.datetime.fromisoformat(ts_str))
+        if len(timestamps) >= 2:
+            span_days = (max(timestamps) - min(timestamps)).total_seconds() / 86400
+            if span_days > 0:
+                result["trade_frequency_per_week"] = round(len(trips) / span_days * 7, 2)
+    except (ValueError, TypeError):
+        pass
+
+    # Win/loss stats
+    wins = [t for t in trips if t["pnl_pct"] > 0]
+    losses = [t for t in trips if t["pnl_pct"] <= 0]
+    win_count = len(wins)
+    loss_count = len(losses)
+    total_count = len(trips)
+
+    avg_win_pct = sum(t["pnl_pct"] for t in wins) / win_count if wins else 0
+    avg_loss_pct = abs(sum(t["pnl_pct"] for t in losses) / loss_count) if losses else 0
+
+    if avg_loss_pct > 0:
+        result["win_loss_ratio"] = round(avg_win_pct / avg_loss_pct, 4)
+
+    # Streaks
+    max_wins = 0
+    max_losses = 0
+    current_wins = 0
+    current_losses = 0
+    for t in trips:
+        if t["pnl_pct"] > 0:
+            current_wins += 1
+            current_losses = 0
+            max_wins = max(max_wins, current_wins)
+        else:
+            current_losses += 1
+            current_wins = 0
+            max_losses = max(max_losses, current_losses)
+
+    result["max_consecutive_wins"] = max_wins
+    result["max_consecutive_losses"] = max_losses
+
+    # Expectancy
+    win_rate = win_count / total_count if total_count > 0 else 0
+    loss_rate = loss_count / total_count if total_count > 0 else 0
+    result["expectancy_pct"] = round(
+        (win_rate * avg_win_pct) - (loss_rate * avg_loss_pct), 4
+    )
+
+    # Total P&L
+    result["total_pnl_sek"] = round(sum(t["pnl_sek"] for t in trips), 2)
+
+    # Calmar ratio (annualized return / max drawdown)
+    # Compute a mini equity curve from round-trip PnLs
+    if initial_value > 0 and len(trips) >= 2:
+        equity = [initial_value]
+        for t in trips:
+            equity.append(equity[-1] + t["pnl_sek"])
+
+        peak = equity[0]
+        max_dd = 0
+        for val in equity:
+            if val > peak:
+                peak = val
+            dd = (peak - val) / peak if peak > 0 else 0
+            if dd > max_dd:
+                max_dd = dd
+
+        total_return = (equity[-1] - equity[0]) / equity[0] if equity[0] > 0 else 0
+        try:
+            first_ts = datetime.datetime.fromisoformat(trips[0]["buy_ts"])
+            last_ts = datetime.datetime.fromisoformat(trips[-1]["sell_ts"])
+            days = (last_ts - first_ts).total_seconds() / 86400
+            if days >= 1 and max_dd > 0:
+                years = days / 365.25
+                annualized = (1 + total_return) ** (1 / years) - 1 if years > 0 else 0
+                result["calmar_ratio"] = round(annualized / max_dd, 4)
+        except (ValueError, TypeError):
+            pass
+
+    return result
+
+
 if __name__ == "__main__":
     curve = load_equity_curve()
     if not curve:
