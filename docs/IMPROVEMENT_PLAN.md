@@ -1,5 +1,24 @@
 # Improvement Plan — Auto-Session 2026-02-26
 
+## Session Results
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Tests passing | ~1809 | ~2015 (+206) |
+| Bugs fixed | 0 | 5 |
+| Files modified | 0 | 6 production |
+| New files | 0 | 4 test files |
+| Refactors | 0 | 1 (DRY accuracy_stats) |
+| Features | 0 | 1 (yfinance fallback logging) |
+
+### Commits
+1. `2ebc4a2` — fix: Batch 1 — 5 bug fixes + 1 feature
+2. `e4a57d0` — test: Batch 2 — 138 tests for indicators.py + signal_engine.py
+3. `9139e4e` — refactor: DRY accuracy_stats (ARCH-6)
+4. `6519114` — test: Batch 4 — 68 tests for portfolio_mgr.py + trigger.py
+
+---
+
 ## 1. Bugs & Problems Found
 
 ### BUG-5: Unclosed file handle in `_crash_alert()`
