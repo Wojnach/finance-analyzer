@@ -1,117 +1,135 @@
-# Improvement Plan — Auto-Session 2026-02-25
+# Improvement Plan — Auto-Session 2026-02-26
 
 ## 1. Bugs & Problems Found
 
-### BUG-1: atomic_append_jsonl missing fsync (data corruption risk)
-- **File:** portfolio/file_utils.py:66-76
-- **Problem:** f.write(line) without f.flush() + os.fsync(). If OS crashes mid-write,
-  JSONL file may have partial line. All JSONL consumers handle parse errors gracefully
-  via continue, but partial writes still corrupt data integrity.
-- **Impact:** Low probability but high severity: corrupted signal_log.jsonl loses accuracy data.
-- **Fix:** Add flush+fsync after write.
-- **Affected:** signal_log.jsonl, layer2_journal.jsonl, invocations.jsonl, telegram_messages.jsonl
+### BUG-5: Unclosed file handle in `_crash_alert()`
+- **File:** portfolio/main.py:346
+- **Problem:** `json.load(open(config_path, encoding="utf-8"))` creates an fd that is never
+  closed. Should use `with` statement.
+- **Impact:** File descriptor leak on every crash. Not frequent, but a real resource leak.
+- **Fix:** Replace with `Path.read_text()` + `json.loads()`.
 
-### BUG-2: Sentiment state write races with trigger state
-- **File:** portfolio/signal_engine.py (_set_prev_sentiment) and portfolio/trigger.py (_save_state)
-- **Problem:** Both write to data/trigger_state.json independently via atomic_write_json.
-  One write can overwrite the other's changes.
-- **Impact:** Sentiment state may be lost, causing false triggers or missed flips.
-- **Fix:** Move prev_sentiment out of trigger_state.json into signal_engine's own state file.
+### BUG-6: `save_accuracy_snapshot()` uses raw write instead of `atomic_append_jsonl()`
+- **File:** portfolio/accuracy_stats.py:426-428
+- **Problem:** Uses `f.write()` without fsync. All other JSONL appends in the codebase use
+  `atomic_append_jsonl()` which includes flush+fsync for durability. This was missed in
+  the Feb 25 session's BUG-1 fix.
+- **Impact:** Accuracy snapshot data could be lost on crash. Low frequency (daily snapshot).
+- **Fix:** Replace with `atomic_append_jsonl()`.
 
-### BUG-3: Agent log file descriptor leak on timeout
-- **File:** portfolio/agent_invocation.py
-- **Problem:** When agent times out, log file handle may not be properly closed in all paths.
-- **Impact:** File descriptor leak over many invocations.
-- **Fix:** Use context manager for log file handle.
+### BUG-7: `_portfolio_snapshot()` computes total_sek from cash only, ignores holdings
+- **File:** portfolio/reporting.py:450-455
+- **Problem:** Tier 1/2 context files show `total_sek = cash_sek` and `pnl_pct` calculated
+  from `cash - initial`. When holdings exist, this is wildly inaccurate. Example: Patient
+  holds MU worth ~8K SEK, but snapshot shows 425K as total (should be ~433K).
+- **Impact:** Layer 2 receives incorrect portfolio values for Tier 1/2 invocations.
+- **Fix:** Load prices from agent_summary.json and compute `portfolio_value()` properly,
+  or at minimum include holdings count as context.
 
-### BUG-4: Stale tickers accumulate in agent_summary.json
-- **File:** portfolio/reporting.py (stale data preservation logic)
-- **Problem:** Off-hours stock data preserved with stale=True but never pruned.
-- **Impact:** Gradually increases file size and Layer 2 context consumption.
-- **Fix:** Prune stale entries older than 24 hours.
+### BUG-8: Division by zero possible in `indicators.py:78` for `atr_pct`
+- **File:** portfolio/indicators.py:78
+- **Problem:** `atr_pct = atr14 / close.iloc[-1] * 100` — if the last close price is 0
+  (corrupted data, delisted stock, test edge case), this raises ZeroDivisionError.
+- **Impact:** Would crash the entire signal pipeline for that ticker. Unlikely with real data
+  but testable edge case.
+- **Fix:** Add guard: `atr_pct = (atr14 / close.iloc[-1] * 100) if close.iloc[-1] != 0 else 0.0`
+
+### BUG-9: Redundant exception catch in reporting.py
+- **File:** portfolio/reporting.py:143
+- **Problem:** `except (ImportError, Exception)` is equivalent to `except Exception` since
+  ImportError is a subclass of Exception. Not a bug per se, but misleading.
+- **Fix:** Simplify to `except Exception`.
 
 ## 2. Architecture Improvements
 
-### ARCH-1: Consolidate trigger_state writes (resolves BUG-2)
-- **Why:** Three different writers to the same JSON file creates race conditions.
-- **What:** Extract sentiment persistence into data/sentiment_state.json.
-  Keep trigger_state.json for trigger-specific state only.
-- **Enables:** Clean separation of concerns, eliminates BUG-2.
-- **Impact:** signal_engine.py, trigger.py: state path changes.
+### ARCH-4: Test coverage for indicators.py (CRITICAL)
+- **Why:** Zero tests for the module computing RSI, MACD, EMA, BB, ATR, regime detection.
+  These calculations underpin all 29 signals. A regression here breaks everything silently.
+- **What:** Add tests/test_indicators.py with ~40 tests covering compute_indicators(),
+  detect_regime(), technical_signal(), edge cases.
+- **Enables:** Safe refactoring of indicator logic, regression protection.
 
-### ARCH-2: Add pyproject.toml for Python packaging and tooling
-- **Why:** No linter, formatter, or standardized build commands. requirements.txt stale.
-- **What:** Create pyproject.toml with dependencies, dev deps (pytest, ruff), and tool config.
-- **Enables:** Automated code quality, CI/CD readiness, reproducible environments.
-- **Impact:** Additive only, no code changes needed.
+### ARCH-5: Test coverage for signal_engine.py (CRITICAL)
+- **Why:** Zero tests for the 29-signal voting system, weighted consensus, confidence
+  penalties. This is the most complex module in the codebase.
+- **What:** Add tests/test_signal_engine_core.py with ~30 tests covering generate_signal(),
+  _weighted_consensus(), apply_confidence_penalties(), core signal gate, MIN_VOTERS.
+- **Enables:** Safe evolution of consensus algorithm.
 
-### ARCH-3: Expand conftest.py with shared test fixtures
-- **Why:** 45 test files reimplement helpers (~500 lines of duplication).
-- **What:** Add shared fixtures: sample_indicators, sample_ohlcv_df, sample_config, tmp_data_dir.
-- **Enables:** Faster test writing, reduced maintenance, consistent test data.
-- **Impact:** Test files only.
+### ARCH-6: DRY up accuracy_stats.py duplicate functions
+- **Why:** `signal_accuracy()` (lines 53-87) and `signal_accuracy_recent()` (lines 90-133)
+  are 90% identical. The only difference is a time cutoff filter.
+- **What:** Merge into single function with optional `since` datetime parameter.
+- **Enables:** Reduced maintenance burden, single point of logic for accuracy calculation.
+
+### ARCH-7: Test coverage for portfolio_mgr.py and trigger.py
+- **Why:** Both are critical modules with zero dedicated tests.
+- **What:** Add basic unit tests for load_state/save_state/portfolio_value and
+  check_triggers/classify_tier.
+- **Enables:** Regression protection for portfolio state management and trigger logic.
 
 ## 3. Useful Features
 
-### FEAT-1: Update architecture-plan.md to reflect actual state (29 signals)
-- **Why:** Doc says 27 signals, actual is 29. Signal counts and file layout need updating.
-- **Impact:** Documentation only, zero code risk.
-
-### FEAT-2: Add ruff linting configuration
-- **Why:** No automated code quality checking exists.
-- **What:** Add ruff config to pyproject.toml, run initial pass.
-- **Impact:** Config only, optional fixes.
+### FEAT-3: Log message when yfinance fallback is activated
+- **File:** portfolio/data_collector.py:247-249
+- **Why:** Silent Alpaca→yfinance switch when market closed makes debugging data quality
+  issues difficult. A log.info() message would help trace data source changes.
+- **Impact:** Logging only, zero code risk.
 
 ## 4. Refactoring TODOs
 
-### REF-1: Remove disabled signals from accuracy tracking
-- **Files:** portfolio/signal_engine.py, portfolio/accuracy_stats.py
-- **What:** ML, Funding Rate, Custom LoRA disabled but still in accuracy stats.
-- **Why:** Confuses Layer 2 reading reports.
-
-### REF-2: Clean up stale requirements.txt
-- **File:** requirements.txt
-- **What:** References Freqtrade and other outdated deps. Replace with actual.
+### REF-3: Simplify exception handling in reporting.py
+- **File:** portfolio/reporting.py:143
+- **What:** Replace `except (ImportError, Exception)` with `except Exception`.
+- **Why:** Clearer intent, same behavior.
 
 ## 5. Implementation Batches (ordered)
 
-### Batch 1: Foundation fixes (file I/O, state management)
-**Files:** portfolio/file_utils.py, portfolio/signal_engine.py
-- BUG-1: Add fsync to atomic_append_jsonl
-- ARCH-1 + BUG-2: Extract sentiment persistence from trigger_state.json
+### Batch 1: Critical Bug Fixes
+**Files:** portfolio/main.py, portfolio/accuracy_stats.py, portfolio/indicators.py,
+portfolio/reporting.py, portfolio/data_collector.py
+- BUG-5: Fix unclosed file in _crash_alert()
+- BUG-6: Use atomic_append_jsonl() in save_accuracy_snapshot()
+- BUG-7: Fix _portfolio_snapshot() to include holdings context
+- BUG-8: Add zero-division guard in indicators.py
+- BUG-9 / REF-3: Simplify exception in reporting.py
+- FEAT-3: Add yfinance fallback log message
 
-### Batch 2: Reporting and invocation fixes
-**Files:** portfolio/reporting.py, portfolio/agent_invocation.py
-- BUG-3: Fix agent log file descriptor with context manager
-- BUG-4: Add stale ticker pruning in reporting.py
+### Batch 2: Test Coverage for indicators.py + signal_engine.py
+**Files:** tests/test_indicators.py (NEW), tests/test_signal_engine_core.py (NEW)
+- ARCH-4: Add ~40 indicator tests
+- ARCH-5: Add ~30 signal engine tests
 
-### Batch 3: Documentation and tooling
-**Files:** docs/architecture-plan.md, pyproject.toml, tests/conftest.py, requirements.txt
-- FEAT-1: Update architecture doc
-- ARCH-2: Add pyproject.toml
-- ARCH-3: Expand conftest.py
-- REF-2: Update requirements.txt
+### Batch 3: Code Quality — DRY accuracy_stats.py
+**Files:** portfolio/accuracy_stats.py
+- ARCH-6: Merge signal_accuracy() and signal_accuracy_recent()
 
-### Batch 4: Code quality and cleanup
-**Files:** pyproject.toml, portfolio/accuracy_stats.py, portfolio/signal_engine.py
-- FEAT-2: Add ruff config
-- REF-1: Clean up disabled signal references
+### Batch 4: Test Coverage for portfolio_mgr.py + trigger.py
+**Files:** tests/test_portfolio_mgr.py (NEW), tests/test_trigger_full.py (NEW)
+- ARCH-7: Add basic tests for portfolio state management and trigger logic
 
 ## Risk Assessment
 
 | Change | Risk | Mitigation |
 |--------|------|------------|
-| BUG-1 (fsync) | Very low: additive | Test that write still works |
-| ARCH-1 (sentiment state) | Medium: changes read/write paths | Test sentiment hysteresis |
-| BUG-3 (log fd) | Low: cleanup only | Test agent timeout path |
-| BUG-4 (stale pruning) | Low: additive logic | Verify threshold |
-| FEAT-1 (doc update) | None: documentation | Review accuracy |
-| ARCH-2 (pyproject.toml) | None: new file | Verify pytest runs |
-| ARCH-3 (conftest.py) | Low: additive fixtures | Run test suite |
-| FEAT-2 (ruff) | None: config only | No auto-fix |
-| REF-1 (disabled signals) | Low: signals already HOLD | Test accuracy reporting |
+| BUG-5 (crash_alert fd) | Very low: error path only | Code review |
+| BUG-6 (accuracy fsync) | Very low: additive | Test snapshot append |
+| BUG-7 (snapshot pnl) | Low: reporting only | Verify T1/T2 output |
+| BUG-8 (atr zero div) | Very low: guard only | Add test with zero price |
+| BUG-9 (except cleanup) | None: same behavior | Trivial |
+| ARCH-4 (indicator tests) | None: additive tests | Run full suite |
+| ARCH-5 (signal tests) | None: additive tests | Run full suite |
+| ARCH-6 (DRY accuracy) | Low: refactor | Run accuracy tests |
+| ARCH-7 (trigger/portfolio tests) | None: additive tests | Run full suite |
+| FEAT-3 (log message) | None: logging only | Visual inspection |
 
-## 6. Results
+---
+
+# Improvement Plan — Auto-Session 2026-02-25
+
+> Previous session results preserved below. See Session 2026-02-26 for current work.
+
+## Previous Session Results (Feb 25)
 
 | Metric | Before | After |
 |--------|--------|-------|
