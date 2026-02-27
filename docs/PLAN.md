@@ -1,96 +1,64 @@
-# Session Plan — Feb 23, 2026
+# Focus Mode: Silver + BTC Probability System — Implementation Plan
 
-## Task 2: Monday Market Analysis (PRIORITY — time-sensitive)
+**Date:** Feb 27, 2026
 
-### What
-Comprehensive analysis of all 31 instruments for Monday Feb 24 open. Categorized into
-long-term holds, short-term swing plays, and day-trade bets with specific price levels.
+## What
 
-### Data Sources (already read)
-- `agent_summary_compact.json` — all 25 signals, 7 timeframes, macro context (00:47 UTC snapshot)
-- `portfolio_state.json` — Patient: 425K cash, MU 19.45sh @ $423.42
-- `portfolio_state_bold.json` — Bold: 227.6K cash, MU 36.13sh + NVDA 56.56sh
-- `layer2_context.md` + recent journal entries — theses, watchlist, regime
-- Macro: DXY 97.42 (above SMA20), 10Y 4.086% (rising), FOMC 22d, F&G crypto=5/stocks=55
+Replace BUY/SELL labels with directional probabilities + accuracy context for focus instruments (XAG-USD, BTC-USD). The existing 31-ticker system stays running (Mode A). The new probability format is Mode B, switchable via config.
 
-### Key Findings (pre-analysis)
-- **TSM**: Strongest setup — BUY 100%, 3B/0S, 5/5 short TFs BUY. $370.77
-- **GRRR**: 5B/0S BUY but long TFs all SELL — day-trade only
-- **PLTR**: Below lower BB, BUY 100%, 3B/0S — mean-reversion bounce
-- **VRT**: Thesis FLIPPED from 7/7 TFs BUY → Now SELL, 3mo+6mo SELL. Skip watchlist.
-- **NVDA** (held): SELL signal on Now TF. RSI approaching overbought. Watch closely.
-- **MU** (held): HOLD with 1B/0S. 4/7 mid-term TFs BUY. Stable.
+## Why
 
-### Deliverables
-1. `docs/MARKET_ANALYSIS_MONDAY.md` — full analysis with price levels
-2. Telegram message — condensed phone-scannable version
-3. Commit
+- XAG-USD signals are 71-83% accurate, BTC-USD is 44-54%
+- Silver gained 19% spot / ~96% on 5x warrant over 9 days while the system sent 73 HOLDs
+- Focus on instruments where we actually have edge, with accuracy-calibrated probabilities
 
-### Risk
-- Weekend signal data is stale for stocks (last traded Fri close)
-- Crypto signals are live but volatile (BTC below lower BB, F&G=5)
-- VRT thesis flip needs Monday confirmation before acting
+## What Could Break
 
----
-
-## Task 1: CUDA GPU Acceleration
-
-### What
-Research and potentially implement GPU acceleration using the RTX 3080.
-
-### Hardware Found
-- **GPU**: NVIDIA GeForce RTX 3080, 10GB VRAM, 8704 CUDA cores
-- **Driver**: 591.74, CUDA 13.1
-- **Toolkit**: nvcc 13.1 installed at `C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/`
-- **cuDNN**: Not found in lib directory
-
-### Python Environment Status
-- **PyTorch**: 2.10.0+cpu — **CPU-only build, no CUDA support**
-- **CuPy**: Not installed
-- **cuDF/RAPIDS**: Not installed
-
-### Viability Assessment
-The system processes ~31 tickers × 25 signals × 7 timeframes per minute.
-
-**Bottleneck analysis:**
-- **I/O (API calls)**: ~80% of cycle time. Fetching from Binance, Alpaca, news APIs.
-  GPU cannot help here.
-- **LLM inference (Ministral)**: ✅ CONFIRMED using RTX 3080 via llama-cpp-python CUDA.
-  Runs from separate venv (`Q:/models/.venv-llm`). `n_gpu_layers=-1` = full GPU offload.
-  This is the one component where GPU matters, and it's already accelerated.
-- **TA calculations**: numpy-based indicator math. ~31 tickers × ~20 indicators each.
-  Small dataset (~600 calculations). GPU overhead > compute savings at this scale.
-- **ML classifier**: sklearn HistGradientBoosting. No CUDA backend. Would need
-  cuML (RAPIDS) or XGBoost-GPU to accelerate. Training is weekly, inference is fast.
-
-### Honest Assessment
-**GPU acceleration is NOT worth the effort for the current system scale.**
-- Data volume is too small (31 tickers, ~600 data points) for GPU to outperform CPU
-- The real bottleneck is I/O (API latency), not compute
-- Installing PyTorch-CUDA would add ~4GB to the venv for minimal benefit
-- CuPy/RAPIDS ecosystem on Windows is fragile and poorly supported
-
-### What IS Worth Doing
-1. ✅ **Verified Ministral inference uses GPU** — Confirmed: llama-cpp-python CUDA loads
-   Ministral-8B onto RTX 3080. `ggml_cuda_init: found 1 CUDA devices: Device 0: NVIDIA
-   GeForce RTX 3080, compute capability 8.6, VMM: yes`
-2. **Optional: Upgrade main venv PyTorch to CUDA** — Sentiment models (CryptoBERT,
-   TradingHero, FinBERT) use `torch 2.10.0+cpu`. Upgrading would save ~1-2s per cycle
-   but adds 4GB disk and compatibility risk. Low priority.
-3. **Future trigger** — GPU would become more valuable at ~500+ tickers or if we add
-   real-time backtesting with historical data replay
-
-### Deliverables
-1. GPU availability and viability documented in this plan
-2. Check Ministral inference GPU usage
-3. Update MEMORY.md with GPU findings
-
----
+- `outcome_tracker.py` change (adding 3h horizon) — could slow backfill if not gated
+- `reporting.py` changes — must not break existing compact summary format
+- `main.py` changes — must not slow the main loop (hourly snapshots are lightweight)
+- Config changes — must default to "signals" mode so Mode A is untouched
 
 ## Execution Order
-1. ✅ Write this plan → commit
-2. Write `docs/MARKET_ANALYSIS_MONDAY.md`
-3. Send Telegram market report
-4. Verify Ministral GPU usage
-5. Update memory with GPU findings
-6. Commit all deliverables
+
+### Batch 1: Phase 1 Core Modules (NEW files only — zero regression risk)
+1. `portfolio/ticker_accuracy.py` — per-ticker accuracy + probability engine
+2. `portfolio/cumulative_tracker.py` — hourly price snapshots + rolling changes
+3. `portfolio/warrant_portfolio.py` — warrant state + leverage-aware P&L
+4. `data/portfolio_state_warrants.json` — default empty state
+
+### Batch 2: Phase 1 Tests
+5. `tests/test_ticker_accuracy.py` — ~50 tests
+6. `tests/test_cumulative_tracker.py` — ~30 tests
+7. `tests/test_warrant_portfolio.py` — ~30 tests
+→ Run tests, verify all pass
+
+### Batch 3: Phase 1 Modifications (existing files, minimal changes)
+8. `portfolio/outcome_tracker.py` — add "3h" horizon
+
+### Batch 4: Phase 2 — Reporting Integration
+9. `portfolio/reporting.py` — add focus_probabilities, cumulative_gains, warrant_portfolio to compact summary
+10. `portfolio/journal.py` — warrant positions in context
+11. `portfolio/main.py` — hourly snapshot call
+→ Run tests, verify no regressions
+
+### Batch 5: Phase 3 — Notifications
+12. `portfolio/daily_digest.py` — morning daily digest (new, separate from existing 4h digest)
+13. `portfolio/message_throttle.py` — analysis message cooldown
+14. `tests/test_daily_digest.py`
+15. `tests/test_message_throttle.py`
+16. `portfolio/message_store.py` — add "daily_digest" to SEND_CATEGORIES
+→ Run tests
+
+### Batch 6: Phase 4 — Config & Docs
+17. `config.json` — notification config section
+18. `portfolio/telegram_poller.py` — /mode command
+19. `CLAUDE.md` — Mode B format spec
+→ Final test suite run
+
+## Decisions
+
+- ticker_accuracy.py uses existing load_entries() from accuracy_stats rather than duplicating SQLite access — keeps the single-source pattern
+- 3h horizon added to HORIZONS dict in outcome_tracker — only fetches when entry is 3h+ old, no extra API calls for recent entries
+- Warrant portfolio is separate from Patient/Bold portfolios — tracks real Avanza positions, not simulated
+- Daily digest is a NEW module (daily_digest.py), not modifying existing digest.py — avoids breaking the 4h digest
