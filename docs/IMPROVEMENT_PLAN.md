@@ -1,5 +1,23 @@
 # Improvement Plan — Auto-Session 2026-02-27
 
+## Session Results
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Tests passing | 2127 | 2235 (+108) |
+| Test files added | 0 | 2 |
+| Bugs fixed | 0 | 2 (BUG-11 doc drift, BUG-12 silent skip) |
+| Refactors | 0 | 1 (REF-4 Binance dedup) |
+| Pre-existing fixes | 0 | 1 (FX fallback test) |
+
+### Commits
+1. `0a3daff` — docs: SYSTEM_OVERVIEW.md and IMPROVEMENT_PLAN.md
+2. `9e43158` — fix: Batch 1 — Binance dedup, skip logging, signal count 30
+3. `26fd715` — test: Batch 2 — 48 tests for data_collector.py
+4. `65069fd` — test: Batch 3 — 60 tests for agent_invocation.py
+
+---
+
 ## 1. Bugs & Problems Found
 
 ### BUG-10: Sentiment hysteresis doesn't persist neutral direction

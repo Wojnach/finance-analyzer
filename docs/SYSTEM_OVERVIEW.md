@@ -132,8 +132,7 @@ main.py (orchestrator — loop, run, CLI dispatch)
 
 ## Discrepancies vs Architecture Doc
 
-1. **Signal count drift**: Architecture doc says 29 signals, code has 30 (futures_flow #30 added Feb 26).
-   Applicable counts: crypto=27 (not 26), stocks/metals=25.
+1. ~~Signal count drift~~ — **FIXED** (Feb 27): Architecture doc updated to 30 signals.
 2. **CLAUDE.md says "27 signals"** in several places but refers to 30 signal modules — the number
    refers to applicable per-asset-class, not total.
 3. **Scheduled tasks**: PF-ForceSleep/PF-WakeUp/PF-AutoImprove not in arch doc.
@@ -145,10 +144,14 @@ main.py (orchestrator — loop, run, CLI dispatch)
 - Portfolio snapshot now includes holdings value, zero-division guard in indicators
 - accuracy_stats DRY refactored, test coverage added for indicators/signal_engine/portfolio_mgr/trigger
 
+### Fixed (Feb 27 session)
+- Architecture doc signal count updated (29→30, applicable counts corrected)
+- Binance kline functions deduplicated (shared `_binance_fetch()`)
+- `collect_timeframes()` now logs when skipping timeframes with insufficient data
+- FX fallback test fixed (10.50→10.85)
+- Test coverage added: data_collector.py (48 tests), agent_invocation.py (60 tests)
+
 ### Remaining
-- Sentiment hysteresis doesn't persist neutral direction (false threshold elevation possible)
-- No test coverage for `data_collector.py` (data fetching core)
-- No test coverage for `agent_invocation.py` (Layer 2 subprocess)
-- Architecture doc signal count stale (29 → should be 30)
+- Sentiment hysteresis: neutral direction not persisted (design decision, not a bug — see IMPROVEMENT_PLAN.md)
 - Config example missing keys for 5+ features (perception_gate, reflection, etc.)
 - `_cached()` in shared_state.py allows duplicate concurrent calls for same key (inefficient, not unsafe)
