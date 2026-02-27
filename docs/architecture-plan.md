@@ -1,6 +1,6 @@
 # Portfolio Intelligence System — Architecture (Source of Truth)
 
-> **Last updated:** 2026-02-23
+> **Last updated:** 2026-02-27
 > **Status:** LIVE on herc2 (simulated 500K SEK dual portfolio)
 > **Canonical doc:** This file is THE source of truth for the system architecture.
 > Other agents, sessions, and memory files should reference this document.
@@ -10,7 +10,7 @@
 **The Python fast loop collects data. Claude Code makes all decisions.**
 
 The fast loop (Layer 1) runs every 60 seconds, fetching prices, computing indicators, and
-running all 29 signal models (11 core + 18 enhanced composite). It detects when something
+running all 30 signal models (11 core + 19 enhanced composite). It detects when something
 meaningful changes. When a trigger fires, it invokes Claude Code (Layer 2) with the full
 context. Claude Code analyzes the data, decides whether to trade, and sends Telegram
 messages. The fast loop NEVER trades or sends Telegram on its own.
@@ -31,9 +31,9 @@ messages. The fast loop NEVER trades or sends Telegram on its own.
 │  8. Run ML classifier (HistGradientBoosting, cached 15min)       │
 │  9. Fetch Binance funding rate (cached 15min)                    │
 │ 10. Check volume confirmation (>1.5x avg)                        │
-│ 11. Run 16 enhanced composite signal modules (from raw OHLCV)   │
+│ 11. Run 19 enhanced composite signal modules (from raw OHLCV)   │
 │ 12. Fetch macro context: DXY, treasury yields, Fed calendar      │
-│ 13. Tally votes → BUY/SELL/HOLD per symbol (29 signals)         │
+│ 13. Tally votes → BUY/SELL/HOLD per symbol (30 signals)         │
 │ 14. Compute weighted consensus (accuracy + regime + activation)  │
 │ 15. Save everything to data/agent_summary.json                   │
 │                                                                   │
@@ -64,7 +64,7 @@ messages. The fast loop NEVER trades or sends Telegram on its own.
 │  • Trigger reasons (why was this invocation triggered?)          │
 │                                                                   │
 │  Analyzes:                                                        │
-│  • All 29 signals across all timeframes                          │
+│  • All 30 signals across all timeframes                          │
 │  • Macro context (DXY, yields, FOMC proximity)                   │
 │  • Portfolio risk (concentration, drawdown, cash reserves)       │
 │  • Recent trade history (avoid whipsaw, respect patterns)        │
@@ -92,7 +92,7 @@ Two independent simulated portfolios, both starting at 500K SEK:
 
 See `docs/trading-bot-personalities.md` for full personality definitions.
 
-## 29 Signals (11 Core + 18 Enhanced Composite)
+## 30 Signals (11 Core + 19 Enhanced Composite)
 
 ### Core Signals (1-11)
 
@@ -110,7 +110,7 @@ See `docs/trading-bot-personalities.md` for full personality definitions.
 | 10  | Volume Confirm. | Binance/Alpaca 15m klines             | Spike + price up                | Spike + price down               | 5min      |
 | 11  | Custom LoRA     | Ministral-8B + custom fine-tuned LoRA | LLM outputs BUY                 | LLM outputs SELL                 | 15min     |
 
-### Enhanced Composite Signals (12-29)
+### Enhanced Composite Signals (12-30)
 
 Each composite module runs 4-8 sub-indicators internally on raw OHLCV data and produces
 one BUY/SELL/HOLD vote via majority voting. All modules live in `portfolio/signals/`.
@@ -136,8 +136,9 @@ See `docs/enhanced-signals.md` for full documentation of each module.
 | 27  | Econ Calendar     | `signals/econ_calendar.py`| 5             | Event proximity risk-off, event type classification, pre-event binary, sector exposure, FOMC/CPI/NFP |
 | 28  | Forecast          | `signals/forecast.py`    | 4              | Kronos 1h/24h, Chronos 1h/24h — time-series foundation model predictions |
 | 29  | Claude Fundamental| `signals/claude_fundamental.py`| 5         | Three-tier LLM cascade: fundamental quality, sector positioning, valuation, catalysts, macro sensitivity |
+| 30  | Futures Flow      | `signals/futures_flow.py`| 6              | OI Trend, OI/Price Divergence, LS Ratio Extreme, Top Trader vs Crowd, Funding Rate Trend, OI Acceleration (crypto only) |
 
-**Total sub-indicators across all 18 enhanced modules: ~103**
+**Total sub-indicators across all 19 enhanced modules: ~109**
 
 **Non-voting context** (macro section in agent_summary.json):
 
@@ -145,7 +146,7 @@ See `docs/enhanced-signals.md` for full documentation of each module.
 - Treasury Yields — 2Y, 10Y, 30Y + 2s10s spread
 - Fed Calendar — Next FOMC date and days until
 
-**Vote threshold:** MIN_VOTERS=3 for all asset classes (crypto, stocks, and metals). Crypto has 26 applicable signals (8 active core + 18 enhanced; ML, Funding Rate, Custom LoRA disabled), stocks and metals have 25 (7 core + 18 enhanced). CryptoTrader-LM is crypto-only. Signals with <50% accuracy are auto-inverted (contrarian). Confidence is calculated using active voters (BUY + SELL) as the denominator, not total applicable signals. A majority (>=50% of active voters) is needed for BUY/SELL consensus.
+**Vote threshold:** MIN_VOTERS=3 for all asset classes (crypto, stocks, and metals). Crypto has 27 applicable signals (8 active core + 19 enhanced; ML, Funding Rate, Custom LoRA disabled), stocks and metals have 25 (7 core + 18 enhanced; futures_flow is crypto-only). CryptoTrader-LM is crypto-only. Signals with <50% accuracy are auto-inverted (contrarian). Confidence is calculated using active voters (BUY + SELL) as the denominator, not total applicable signals. A majority (>=50% of active voters) is needed for BUY/SELL consensus.
 
 **Weighted consensus:** In addition to raw vote counting, Layer 1 computes a weighted
 consensus using per-signal accuracy data, market regime adjustments, and activation
@@ -158,7 +159,7 @@ signals get less.
 
 | Horizon | Candle interval | Candles fetched | Cache TTL       | Signal set                     |
 | ------- | --------------- | --------------- | --------------- | ------------------------------ |
-| Now     | 15m             | 100 (~25h)      | 0 (every cycle) | All 29 signals (11+18 enhanced)|
+| Now     | 15m             | 100 (~25h)      | 0 (every cycle) | All 30 signals (11+19 enhanced)|
 | 12h     | 1h              | 100 (~4d)       | 5min            | 4 technical only               |
 | 2d      | 4h              | 100 (~17d)      | 15min           | 4 technical only               |
 | 7d      | 1d              | 100 (~100d)     | 1hr             | 4 technical only               |
@@ -170,7 +171,7 @@ signals get less.
 
 | Horizon | Candle interval | Candles fetched | Cache TTL       | Signal set                     |
 | ------- | --------------- | --------------- | --------------- | ------------------------------ |
-| Now     | 15m             | 100 (~25h)      | 0 (every cycle) | All 23 signals (7+16 enhanced) |
+| Now     | 15m             | 100 (~25h)      | 0 (every cycle) | All 25 signals (7+18 enhanced) |
 | 12h     | 1h              | 100 (~4d)       | 5min            | 4 technical only               |
 | 2d      | 1h              | 48 (~2d)        | 15min           | 4 technical only               |
 | 7d      | 1d              | 30 (~30d)       | 1hr             | 4 technical only               |
@@ -184,46 +185,46 @@ signals get less.
 
 | Ticker  | Name     | Data source       | Signals |
 | ------- | -------- | ----------------- | ------- |
-| BTC-USD | Bitcoin  | Binance (BTCUSDT) | 26 (8 active core + 18 enhanced) |
-| ETH-USD | Ethereum | Binance (ETHUSDT) | 26 (8 active core + 18 enhanced) |
+| BTC-USD | Bitcoin  | Binance (BTCUSDT) | 27 (8 active core + 19 enhanced) |
+| ETH-USD | Ethereum | Binance (ETHUSDT) | 27 (8 active core + 19 enhanced) |
 
 ### Metals (2) — 24/7, Binance futures
 
 | Ticker  | Name   | Data source        | Signals |
 | ------- | ------ | ------------------ | ------- |
-| XAU-USD | Gold   | Binance FAPI (XAUUSDT) | 23 (7 core + 16 enhanced) |
-| XAG-USD | Silver | Binance FAPI (XAGUSDT) | 23 (7 core + 16 enhanced) |
+| XAU-USD | Gold   | Binance FAPI (XAUUSDT) | 25 (7 core + 18 enhanced) |
+| XAG-USD | Silver | Binance FAPI (XAGUSDT) | 25 (7 core + 18 enhanced) |
 
 ### US Equities (27) — Market hours, Alpaca IEX
 
 | Ticker | Name            | Exchange | Signals |
 | ------ | --------------- | -------- | ------- |
-| MSTR   | MicroStrategy   | NASDAQ   | 23      |
-| PLTR   | Palantir        | NASDAQ   | 23      |
-| NVDA   | NVIDIA          | NASDAQ   | 23      |
-| AMD    | AMD             | NASDAQ   | 23      |
-| BABA   | Alibaba         | NYSE     | 23      |
-| GOOGL  | Alphabet        | NASDAQ   | 23      |
-| AMZN   | Amazon          | NASDAQ   | 23      |
-| AAPL   | Apple           | NASDAQ   | 23      |
-| AVGO   | Broadcom        | NASDAQ   | 23      |
-| GRRR   | Gorilla Tech    | NASDAQ   | 23      |
-| IONQ   | IonQ            | NYSE     | 23      |
-| MRVL   | Marvell         | NASDAQ   | 23      |
-| META   | Meta            | NASDAQ   | 23      |
-| MU     | Micron          | NASDAQ   | 23      |
-| PONY   | Pony AI         | NASDAQ   | 23      |
-| RXRX   | Recursion       | NASDAQ   | 23      |
-| SOUN   | SoundHound      | NASDAQ   | 23      |
-| SMCI   | Super Micro     | NASDAQ   | 23      |
-| TSM    | TSMC            | NYSE     | 23      |
-| TTWO   | Take-Two        | NASDAQ   | 23      |
-| TEM    | Tempus AI       | NASDAQ   | 23      |
-| UPST   | Upstart         | NASDAQ   | 23      |
-| VERI   | Veritone        | NASDAQ   | 23      |
-| VRT    | Vertiv          | NYSE     | 23      |
-| QQQ    | QQQ ETF         | NASDAQ   | 23      |
-| LMT    | Lockheed Martin | NYSE     | 23      |
+| MSTR   | MicroStrategy   | NASDAQ   | 25      |
+| PLTR   | Palantir        | NASDAQ   | 25      |
+| NVDA   | NVIDIA          | NASDAQ   | 25      |
+| AMD    | AMD             | NASDAQ   | 25      |
+| BABA   | Alibaba         | NYSE     | 25      |
+| GOOGL  | Alphabet        | NASDAQ   | 25      |
+| AMZN   | Amazon          | NASDAQ   | 25      |
+| AAPL   | Apple           | NASDAQ   | 25      |
+| AVGO   | Broadcom        | NASDAQ   | 25      |
+| GRRR   | Gorilla Tech    | NASDAQ   | 25      |
+| IONQ   | IonQ            | NYSE     | 25      |
+| MRVL   | Marvell         | NASDAQ   | 25      |
+| META   | Meta            | NASDAQ   | 25      |
+| MU     | Micron          | NASDAQ   | 25      |
+| PONY   | Pony AI         | NASDAQ   | 25      |
+| RXRX   | Recursion       | NASDAQ   | 25      |
+| SOUN   | SoundHound      | NASDAQ   | 25      |
+| SMCI   | Super Micro     | NASDAQ   | 25      |
+| TSM    | TSMC            | NYSE     | 25      |
+| TTWO   | Take-Two        | NASDAQ   | 25      |
+| TEM    | Tempus AI       | NASDAQ   | 25      |
+| UPST   | Upstart         | NASDAQ   | 25      |
+| VERI   | Veritone        | NASDAQ   | 25      |
+| VRT    | Vertiv          | NYSE     | 25      |
+| QQQ    | QQQ ETF         | NASDAQ   | 25      |
+| LMT    | Lockheed Martin | NYSE     | 25      |
 
 ### Tier 2: Avanza Price-Only (Nordic stocks, no signals)
 

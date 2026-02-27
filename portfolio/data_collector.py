@@ -60,79 +60,46 @@ STOCK_TIMEFRAMES = [
 
 # --- Binance API ---
 
+_BINANCE_KLINE_COLS = [
+    "open_time", "open", "high", "low", "close", "volume",
+    "close_time", "quote_vol", "trades", "taker_buy_vol",
+    "taker_buy_quote_vol", "ignore",
+]
 
-def binance_klines(symbol, interval="5m", limit=100):
-    if not binance_spot_cb.allow_request():
-        logger.warning("Binance spot circuit OPEN — skipping %s", symbol)
-        raise ConnectionError(f"Binance spot circuit open for {symbol}")
+
+def _binance_fetch(base_url, cb, label, symbol, interval="5m", limit=100):
+    """Shared Binance kline fetcher for spot and FAPI endpoints."""
+    if not cb.allow_request():
+        logger.warning("Binance %s circuit OPEN — skipping %s", label, symbol)
+        raise ConnectionError(f"Binance {label} circuit open for {symbol}")
     try:
         r = fetch_with_retry(
-            f"{BINANCE_BASE}/klines",
+            f"{base_url}/klines",
             params={"symbol": symbol, "interval": interval, "limit": limit},
             timeout=10,
         )
         if r is None:
-            raise ConnectionError(f"Binance klines request failed for {symbol}")
+            raise ConnectionError(f"Binance {label} klines request failed for {symbol}")
         r.raise_for_status()
         data = r.json()
-        df = pd.DataFrame(
-            data,
-            columns=[
-                "open_time",
-                "open",
-                "high",
-                "low",
-                "close",
-                "volume",
-                "close_time",
-                "quote_vol",
-                "trades",
-                "taker_buy_vol",
-                "taker_buy_quote_vol",
-                "ignore",
-            ],
-        )
+        df = pd.DataFrame(data, columns=_BINANCE_KLINE_COLS)
         for col in ["open", "high", "low", "close", "volume"]:
             df[col] = df[col].astype(float)
         df["time"] = pd.to_datetime(df["open_time"], unit="ms")
-        binance_spot_cb.record_success()
+        cb.record_success()
         return df
     except Exception:
-        binance_spot_cb.record_failure()
+        cb.record_failure()
         raise
+
+
+def binance_klines(symbol, interval="5m", limit=100):
+    return _binance_fetch(BINANCE_BASE, binance_spot_cb, "spot", symbol, interval, limit)
 
 
 def binance_fapi_klines(symbol, interval="5m", limit=100):
     """Fetch klines from Binance Futures API (for metals like XAUUSDT, XAGUSDT)."""
-    if not binance_fapi_cb.allow_request():
-        logger.warning("Binance FAPI circuit OPEN — skipping %s", symbol)
-        raise ConnectionError(f"Binance FAPI circuit open for {symbol}")
-    try:
-        r = fetch_with_retry(
-            f"{BINANCE_FAPI_BASE}/klines",
-            params={"symbol": symbol, "interval": interval, "limit": limit},
-            timeout=10,
-        )
-        if r is None:
-            raise ConnectionError(f"Binance FAPI klines request failed for {symbol}")
-        r.raise_for_status()
-        data = r.json()
-        df = pd.DataFrame(
-            data,
-            columns=[
-                "open_time", "open", "high", "low", "close", "volume",
-                "close_time", "quote_vol", "trades", "taker_buy_vol",
-                "taker_buy_quote_vol", "ignore",
-            ],
-        )
-        for col in ["open", "high", "low", "close", "volume"]:
-            df[col] = df[col].astype(float)
-        df["time"] = pd.to_datetime(df["open_time"], unit="ms")
-        binance_fapi_cb.record_success()
-        return df
-    except Exception:
-        binance_fapi_cb.record_failure()
-        raise
+    return _binance_fetch(BINANCE_FAPI_BASE, binance_fapi_cb, "FAPI", symbol, interval, limit)
 
 
 # --- Alpaca API ---
@@ -273,6 +240,8 @@ def collect_timeframes(source):
             df = _fetch_klines(source, interval, limit)
             ind = compute_indicators(df)
             if ind is None:
+                logger.debug("%s/%s: insufficient data (%d rows), skipping",
+                             source_key, label, len(df) if df is not None else 0)
                 continue
             if label == "Now":
                 action, conf = None, None
