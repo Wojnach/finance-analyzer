@@ -23,10 +23,26 @@ from portfolio.signals.forecast import (
 
 @pytest.fixture(autouse=True)
 def _reset_breakers():
-    """Reset circuit breakers before and after each test."""
+    """Reset circuit breakers and enable Kronos before and after each test."""
+    import portfolio.signals.forecast as mod
+    orig = mod._KRONOS_ENABLED
+    mod._KRONOS_ENABLED = True
     reset_circuit_breakers()
     yield
     reset_circuit_breakers()
+    mod._KRONOS_ENABLED = orig
+
+
+# --- Kronos disabled by default ---
+
+class TestKronosDisabled:
+    def test_kronos_disabled_returns_none(self):
+        """When _KRONOS_ENABLED is False, _run_kronos returns None immediately."""
+        import portfolio.signals.forecast as mod
+        mod._KRONOS_ENABLED = False
+        result = _run_kronos([{"close": 100}] * 50)
+        assert result is None
+        assert not _kronos_circuit_open()  # should NOT trip breaker
 
 
 # --- Kronos circuit breaker ---

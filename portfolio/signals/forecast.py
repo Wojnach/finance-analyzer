@@ -35,6 +35,11 @@ _FORECAST_TTL = 300  # 5 minutes
 _MAX_CONFIDENCE = 0.7
 
 # Kronos inference script
+# DISABLED: Kronos model has a DatetimeIndex bug and only returns statistical
+# fallback (linear regression), which is noise. Disable until the model is fixed
+# and verified to produce real predictions. Re-enable by setting _KRONOS_ENABLED = True.
+_KRONOS_ENABLED = False
+
 if platform.system() == "Windows":
     _KRONOS_PYTHON = r"Q:\finance-analyzer\.venv\Scripts\python.exe"
     _KRONOS_SCRIPT = r"Q:\models\kronos_infer.py"
@@ -124,6 +129,8 @@ def _load_candles_ohlcv(ticker: str, periods: int = 168) -> list[dict] | None:
 
 def _run_kronos(candles: list[dict], horizons: tuple = (1, 24)) -> dict | None:
     """Run Kronos inference via subprocess."""
+    if not _KRONOS_ENABLED:
+        return None
     if _kronos_circuit_open():
         return None
     try:
