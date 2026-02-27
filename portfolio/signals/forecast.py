@@ -34,6 +34,12 @@ _FORECAST_TTL = 300  # 5 minutes
 # Confidence cap (same as news_event, econ_calendar)
 _MAX_CONFIDENCE = 0.7
 
+# ALL FORECAST MODELS DISABLED: Kronos has a DatetimeIndex bug (returns linear
+# regression fallback = noise), Chronos GPU (RTX 3080) is in corrupted CUDA state
+# (every call fails after ~5.8s). Early-return in compute_forecast_signal() skips
+# all candle loading, caching, and model calls. Re-enable by setting to False.
+_FORECAST_MODELS_DISABLED = True
+
 # Kronos inference script
 # DISABLED: Kronos model has a DatetimeIndex bug and only returns statistical
 # fallback (linear regression), which is noise. Disable until the model is fixed
@@ -156,7 +162,7 @@ def _run_kronos(candles: list[dict], horizons: tuple = (1, 24)) -> dict | None:
             return None
         return result
     except Exception as e:
-        logger.warning("Kronos inference error: %s", e)
+        logger.warning("Kronos subprocess error (v2): %s", e)
         _trip_kronos()
         return None
 
@@ -212,6 +218,11 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
         },
         "indicators": {},
     }
+
+    # Bulletproof early return — skip ALL work when models are disabled
+    if _FORECAST_MODELS_DISABLED:
+        result["indicators"]["models_disabled"] = True
+        return result
 
     ticker = (context or {}).get("ticker", "")
     if not ticker:

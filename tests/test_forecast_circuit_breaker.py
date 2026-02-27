@@ -18,19 +18,23 @@ from portfolio.signals.forecast import (
     reset_circuit_breakers,
     compute_forecast_signal,
     _CIRCUIT_BREAKER_TTL,
+    _FORECAST_MODELS_DISABLED,
 )
 
 
 @pytest.fixture(autouse=True)
 def _reset_breakers():
-    """Reset circuit breakers and enable Kronos before and after each test."""
+    """Reset circuit breakers, enable Kronos, and disable models_disabled before and after each test."""
     import portfolio.signals.forecast as mod
-    orig = mod._KRONOS_ENABLED
+    orig_kronos = mod._KRONOS_ENABLED
+    orig_disabled = mod._FORECAST_MODELS_DISABLED
     mod._KRONOS_ENABLED = True
+    mod._FORECAST_MODELS_DISABLED = False
     reset_circuit_breakers()
     yield
     reset_circuit_breakers()
-    mod._KRONOS_ENABLED = orig
+    mod._KRONOS_ENABLED = orig_kronos
+    mod._FORECAST_MODELS_DISABLED = orig_disabled
 
 
 # --- Kronos disabled by default ---
@@ -184,3 +188,30 @@ class TestResetCircuitBreakers:
         reset_circuit_breakers()
         assert not _kronos_circuit_open()
         assert not _chronos_circuit_open()
+
+
+# --- Forecast models disabled (top-level kill switch) ---
+
+class TestForecastModelsDisabled:
+    def test_returns_hold_immediately_when_disabled(self):
+        """When _FORECAST_MODELS_DISABLED is True, returns HOLD with no model work."""
+        import portfolio.signals.forecast as mod
+        mod._FORECAST_MODELS_DISABLED = True
+        df = pd.DataFrame({"close": [100.0] * 60})
+        result = compute_forecast_signal(df, context={"ticker": "BTC-USD"})
+        assert result["action"] == "HOLD"
+        assert result["confidence"] == 0.0
+        assert result["indicators"]["models_disabled"] is True
+        # Sub-signals should all be HOLD (default)
+        for v in result["sub_signals"].values():
+            assert v == "HOLD"
+
+    @patch("portfolio.signals.forecast._load_candles_ohlcv")
+    def test_no_candle_fetch_when_disabled(self, mock_candles):
+        """When disabled, should not even attempt to load candles."""
+        import portfolio.signals.forecast as mod
+        mod._FORECAST_MODELS_DISABLED = True
+        df = pd.DataFrame({"close": [100.0] * 60})
+        result = compute_forecast_signal(df, context={"ticker": "BTC-USD"})
+        mock_candles.assert_not_called()
+        assert result["indicators"]["models_disabled"] is True
