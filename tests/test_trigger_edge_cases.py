@@ -2,7 +2,7 @@
 
 Covers:
 - 30-ticker simultaneous consensus changes
-- Post-trade cooldown reset (both portfolios)
+- Post-trade reassessment (both portfolios)
 - Rapid signal oscillation (BUY->HOLD->BUY in 3 cycles)
 - Sustained flip detection (3 consecutive checks)
 - Market hours boundary (just before/after 7:00 and 21:00 UTC)
@@ -19,8 +19,6 @@ import pytest
 
 from portfolio.trigger import (
     STATE_FILE,
-    COOLDOWN_SECONDS,
-    OFFHOURS_COOLDOWN,
     PRICE_THRESHOLD,
     FG_THRESHOLDS,
     SUSTAINED_CHECKS,
@@ -345,37 +343,12 @@ class TestSustainedFlipDetection(TriggerTestBase):
 # ---------------------------------------------------------------------------
 
 class TestMarketHoursBoundary(TriggerTestBase):
-    def test_just_before_7_utc_is_offhours(self):
-        """6:59 UTC on a weekday is off-hours."""
+    def test_no_trigger_on_silence_market_hours(self):
+        """During market hours with HOLD signals, no trigger fires (no cooldown)."""
         sigs = _make_signals(["BTC-USD"], "HOLD")
         prices = {"BTC-USD": 69000}
 
-        # Mock datetime to be 6:59 UTC on a Monday
-        fake_now = datetime(2026, 2, 16, 6, 59, 0, tzinfo=timezone.utc)
-        with mock.patch("portfolio.trigger.datetime") as mock_dt:
-            mock_dt.now.return_value = fake_now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-
-            # Set last_trigger_time far in the past to ensure cooldown triggers
-            state = _load_state()
-            state["last_trigger_time"] = 0
-            _save_state(state)
-
-            triggered, reasons = check_triggers(sigs, prices, {}, {})
-
-        # Off-hours cooldown reason (1h interval)
-        cooldown_reasons = [r for r in reasons if "check-in" in r or "cooldown" in r
-                           or "crypto" in r]
-        # Should use off-hours cooldown
-        if triggered:
-            assert any("crypto" in r or "check-in" in r for r in reasons)
-
-    def test_just_at_7_utc_is_market_hours(self):
-        """7:00 UTC on a weekday is market hours."""
-        sigs = _make_signals(["BTC-USD"], "HOLD")
-        prices = {"BTC-USD": 69000}
-
-        fake_now = datetime(2026, 2, 16, 7, 0, 0, tzinfo=timezone.utc)
+        fake_now = datetime(2026, 2, 16, 12, 0, 0, tzinfo=timezone.utc)
         with mock.patch("portfolio.trigger.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
@@ -386,16 +359,15 @@ class TestMarketHoursBoundary(TriggerTestBase):
 
             triggered, reasons = check_triggers(sigs, prices, {}, {})
 
-        # Market hours cooldown reason (1min interval)
-        if triggered:
-            assert any("cooldown" in r for r in reasons)
+        cooldown_reasons = [r for r in reasons if "cooldown" in r or "check-in" in r]
+        assert len(cooldown_reasons) == 0
 
-    def test_just_before_21_utc_is_market_hours(self):
-        """20:59 UTC on a weekday is still market hours."""
+    def test_no_trigger_on_silence_offhours(self):
+        """During off-hours with HOLD signals, no trigger fires (no cooldown)."""
         sigs = _make_signals(["BTC-USD"], "HOLD")
         prices = {"BTC-USD": 69000}
 
-        fake_now = datetime(2026, 2, 16, 20, 59, 0, tzinfo=timezone.utc)
+        fake_now = datetime(2026, 2, 16, 23, 0, 0, tzinfo=timezone.utc)
         with mock.patch("portfolio.trigger.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
@@ -406,30 +378,11 @@ class TestMarketHoursBoundary(TriggerTestBase):
 
             triggered, reasons = check_triggers(sigs, prices, {}, {})
 
-        if triggered:
-            assert any("cooldown" in r for r in reasons)
+        cooldown_reasons = [r for r in reasons if "cooldown" in r or "crypto" in r or "check-in" in r]
+        assert len(cooldown_reasons) == 0
 
-    def test_just_at_21_utc_is_offhours(self):
-        """21:00 UTC on a weekday is off-hours."""
-        sigs = _make_signals(["BTC-USD"], "HOLD")
-        prices = {"BTC-USD": 69000}
-
-        fake_now = datetime(2026, 2, 16, 21, 0, 0, tzinfo=timezone.utc)
-        with mock.patch("portfolio.trigger.datetime") as mock_dt:
-            mock_dt.now.return_value = fake_now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-
-            state = _load_state()
-            state["last_trigger_time"] = 0
-            _save_state(state)
-
-            triggered, reasons = check_triggers(sigs, prices, {}, {})
-
-        if triggered:
-            assert any("crypto" in r or "check-in" in r for r in reasons)
-
-    def test_weekend_is_offhours(self):
-        """Saturday/Sunday should be off-hours regardless of time."""
+    def test_no_trigger_on_weekend_silence(self):
+        """Weekend with HOLD signals, no trigger fires (no cooldown)."""
         sigs = _make_signals(["BTC-USD"], "HOLD")
         prices = {"BTC-USD": 69000}
 
@@ -445,8 +398,8 @@ class TestMarketHoursBoundary(TriggerTestBase):
 
             triggered, reasons = check_triggers(sigs, prices, {}, {})
 
-        if triggered:
-            assert any("crypto" in r or "check-in" in r for r in reasons)
+        cooldown_reasons = [r for r in reasons if "cooldown" in r or "crypto" in r or "check-in" in r]
+        assert len(cooldown_reasons) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -456,10 +409,16 @@ class TestMarketHoursBoundary(TriggerTestBase):
 class TestMultipleTriggerReasons(TriggerTestBase):
     def test_consensus_plus_price_move(self):
         """Signal consensus change + 2% price move = both reasons."""
-        sigs_hold = _make_signals(["BTC-USD", "ETH-USD"], "HOLD")
         prices = {"BTC-USD": 69000, "ETH-USD": 2000}
 
-        check_triggers(sigs_hold, prices, {}, {})
+        # Seed with a BUY consensus to establish baseline prices in state["last"]
+        sigs_seed = {"BTC-USD": {"action": "BUY", "confidence": 0.6},
+                     "ETH-USD": {"action": "HOLD", "confidence": 0.5}}
+        check_triggers(sigs_seed, prices, {}, {})
+
+        # Reset BTC to HOLD so next BUY is a new consensus trigger
+        check_triggers({"BTC-USD": {"action": "HOLD", "confidence": 0.5},
+                        "ETH-USD": {"action": "HOLD", "confidence": 0.5}}, prices, {}, {})
 
         # Both consensus flip AND price move
         sigs_buy = {"BTC-USD": {"action": "BUY", "confidence": 0.8},
@@ -503,12 +462,13 @@ class TestMultipleTriggerReasons(TriggerTestBase):
 
     def test_post_trade_plus_price_move(self):
         """Post-trade reset + price move simultaneously."""
-        sigs = _make_signals(["BTC-USD"], "HOLD")
         prices = {"BTC-USD": 69000}
 
-        check_triggers(sigs, prices, {}, {})
+        # Seed with consensus trigger to establish baseline prices
+        check_triggers({"BTC-USD": {"action": "BUY", "confidence": 0.8}}, prices, {}, {})
 
         with mock.patch("portfolio.trigger._check_recent_trade", return_value=True):
+            sigs = _make_signals(["BTC-USD"], "HOLD")
             new_prices = {"BTC-USD": 72000}  # 4.3% move
             triggered, reasons = check_triggers(sigs, new_prices, {}, {})
 
@@ -518,16 +478,10 @@ class TestMultipleTriggerReasons(TriggerTestBase):
 
 
 # ---------------------------------------------------------------------------
-# Test: Cooldown constants
+# Test: Trigger constants
 # ---------------------------------------------------------------------------
 
-class TestCooldownConstants:
-    def test_market_hours_cooldown_is_10_min(self):
-        assert COOLDOWN_SECONDS == 600
-
-    def test_offhours_cooldown_is_2_hours(self):
-        assert OFFHOURS_COOLDOWN == 7200
-
+class TestTriggerConstants:
     def test_price_threshold_is_2_pct(self):
         assert PRICE_THRESHOLD == 0.02
 

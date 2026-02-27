@@ -9,16 +9,14 @@ Covers the fundamental trigger behaviors:
 6.  Price move: <2% does not fire
 7.  Fear & Greed: crosses 20 or 80 threshold fires
 8.  Fear & Greed: stays on same side does not fire
-9.  Cooldown: 600s elapsed since last trigger fires (market hours)
-10. Cooldown: off-hours uses 7200s
-11. Post-trade cooldown reset: recent trade resets timer
-12. classify_tier: consensus trigger -> Tier 2
-13. classify_tier: cooldown trigger -> Tier 1
-14. classify_tier: F&G extreme -> Tier 3
-15. classify_tier: first-of-day -> Tier 3
-16. classify_tier: price move -> Tier 2
-17. classify_tier: post-trade -> Tier 2
-18. classify_tier: periodic full review -> Tier 3
+9.  Post-trade: recent trade triggers reassessment
+10. classify_tier: consensus trigger -> Tier 2
+11. classify_tier: sentiment trigger -> Tier 1
+12. classify_tier: F&G extreme -> Tier 3
+13. classify_tier: first-of-day -> Tier 3
+14. classify_tier: price move -> Tier 2
+15. classify_tier: post-trade -> Tier 2
+16. classify_tier: periodic full review -> Tier 3
 
 Uses tmp_path to isolate state files; never touches real data.
 """
@@ -33,8 +31,6 @@ import pytest
 
 import portfolio.trigger as trigger_mod
 from portfolio.trigger import (
-    COOLDOWN_SECONDS,
-    OFFHOURS_COOLDOWN,
     PRICE_THRESHOLD,
     FG_THRESHOLDS,
     SUSTAINED_CHECKS,
@@ -343,9 +339,8 @@ class TestPriceMoveAboveThreshold:
     def test_price_up_more_than_2pct_triggers(self, isolate_state_files):
         """A >2% upward price move since last trigger should fire."""
         prices_initial = {"BTC-USD": 68000}
-        check_triggers({"BTC-USD": _sig("HOLD")}, prices_initial, {}, {})
-
-        _suppress_cooldown(isolate_state_files["state_file"])
+        # Use consensus trigger to seed state["last"] with baseline prices
+        check_triggers({"BTC-USD": _sig("BUY", 0.8)}, prices_initial, {}, {})
 
         # 3% move up
         prices_moved = {"BTC-USD": 70040}  # 68000 * 1.03 = 70040
@@ -359,9 +354,8 @@ class TestPriceMoveAboveThreshold:
     def test_price_down_more_than_2pct_triggers(self, isolate_state_files):
         """A >2% downward price move since last trigger should fire."""
         prices_initial = {"BTC-USD": 68000}
-        check_triggers({"BTC-USD": _sig("HOLD")}, prices_initial, {}, {})
-
-        _suppress_cooldown(isolate_state_files["state_file"])
+        # Use consensus trigger to seed state["last"] with baseline prices
+        check_triggers({"BTC-USD": _sig("BUY", 0.8)}, prices_initial, {}, {})
 
         # 3% move down
         prices_moved = {"BTC-USD": 65960}  # 68000 * 0.97 = 65960
@@ -375,9 +369,8 @@ class TestPriceMoveAboveThreshold:
     def test_exactly_2pct_triggers(self, isolate_state_files):
         """Exactly 2% move should trigger (threshold is >=)."""
         prices_initial = {"BTC-USD": 50000}
-        check_triggers({"BTC-USD": _sig("HOLD")}, prices_initial, {}, {})
-
-        _suppress_cooldown(isolate_state_files["state_file"])
+        # Use consensus trigger to seed state["last"] with baseline prices
+        check_triggers({"BTC-USD": _sig("BUY", 0.8)}, prices_initial, {}, {})
 
         prices_moved = {"BTC-USD": 51000}  # exactly 2%
         triggered, reasons = check_triggers({"BTC-USD": _sig("HOLD")}, prices_moved, {}, {})
@@ -394,9 +387,8 @@ class TestPriceMoveBelowThreshold:
     def test_price_move_1pct_no_trigger(self, isolate_state_files):
         """A 1% price move should NOT trigger."""
         prices_initial = {"BTC-USD": 68000}
-        check_triggers({"BTC-USD": _sig("HOLD")}, prices_initial, {}, {})
-
-        _suppress_cooldown(isolate_state_files["state_file"])
+        # Use consensus trigger to seed state["last"] with baseline prices
+        check_triggers({"BTC-USD": _sig("BUY", 0.8)}, prices_initial, {}, {})
 
         # 1% move
         prices_moved = {"BTC-USD": 68680}  # 68000 * 1.01
@@ -408,9 +400,8 @@ class TestPriceMoveBelowThreshold:
     def test_price_unchanged_no_trigger(self, isolate_state_files):
         """Zero price movement should not trigger."""
         prices = {"BTC-USD": 68000}
-        check_triggers({"BTC-USD": _sig("HOLD")}, prices, {}, {})
-
-        _suppress_cooldown(isolate_state_files["state_file"])
+        # Use consensus trigger to seed state["last"] with baseline prices
+        check_triggers({"BTC-USD": _sig("BUY", 0.8)}, prices, {}, {})
 
         triggered, reasons = check_triggers({"BTC-USD": _sig("HOLD")}, prices, {}, {})
 
@@ -420,9 +411,8 @@ class TestPriceMoveBelowThreshold:
     def test_just_below_2pct_no_trigger(self, isolate_state_files):
         """1.99% price move should NOT trigger."""
         prices_initial = {"BTC-USD": 50000}
-        check_triggers({"BTC-USD": _sig("HOLD")}, prices_initial, {}, {})
-
-        _suppress_cooldown(isolate_state_files["state_file"])
+        # Use consensus trigger to seed state["last"] with baseline prices
+        check_triggers({"BTC-USD": _sig("BUY", 0.8)}, prices_initial, {}, {})
 
         # 1.99%
         prices_moved = {"BTC-USD": 50995}
@@ -535,38 +525,18 @@ class TestFearGreedNoThresholdCross:
 
 
 # ---------------------------------------------------------------------------
-# 9. Cooldown: 600s elapsed since last trigger fires (market hours)
+# 9. No cooldown triggers — Layer 2 only fires on real triggers
 # ---------------------------------------------------------------------------
 
-class TestCooldownMarketHours:
-    def test_cooldown_triggers_after_600s(self, isolate_state_files, market_hours_context):
-        """After 600s of silence during market hours, cooldown triggers."""
+class TestNoCooldownTrigger:
+    def test_no_cooldown_trigger_market_hours(self, isolate_state_files, market_hours_context):
+        """Even after long silence during market hours, no cooldown fires."""
         prices = {"BTC-USD": 68000}
 
         m = market_hours_context()
         try:
             now = time.time()
-            # Set last trigger 601 seconds ago
-            _set_trigger_time(isolate_state_files["state_file"], now - 601)
-
-            triggered, reasons = check_triggers({"BTC-USD": _sig("HOLD")}, prices, {}, {})
-
-            assert triggered
-            cooldown_reasons = [r for r in reasons if "cooldown" in r]
-            assert len(cooldown_reasons) == 1
-            assert "10min" in cooldown_reasons[0]
-        finally:
-            m.stop()
-
-    def test_no_cooldown_within_600s(self, isolate_state_files, market_hours_context):
-        """Within 600s of last trigger, cooldown should NOT fire."""
-        prices = {"BTC-USD": 68000}
-
-        m = market_hours_context()
-        try:
-            now = time.time()
-            # Set last trigger 300 seconds ago (5 min, well within 10 min)
-            _set_trigger_time(isolate_state_files["state_file"], now - 300)
+            _set_trigger_time(isolate_state_files["state_file"], now - 7200)
 
             triggered, reasons = check_triggers({"BTC-USD": _sig("HOLD")}, prices, {}, {})
 
@@ -575,37 +545,14 @@ class TestCooldownMarketHours:
         finally:
             m.stop()
 
-
-# ---------------------------------------------------------------------------
-# 10. Off-hours cooldown uses 7200s
-# ---------------------------------------------------------------------------
-
-class TestCooldownOffHours:
-    def test_offhours_cooldown_triggers_after_7200s(self, isolate_state_files, offhours_context):
-        """After 7200s of silence during off-hours, crypto check-in triggers."""
+    def test_no_cooldown_trigger_offhours(self, isolate_state_files, offhours_context):
+        """Even after long silence during off-hours, no cooldown fires."""
         prices = {"BTC-USD": 68000}
 
         m = offhours_context()
         try:
             now = time.time()
-            _set_trigger_time(isolate_state_files["state_file"], now - 7201)
-
-            triggered, reasons = check_triggers({"BTC-USD": _sig("HOLD")}, prices, {}, {})
-
-            assert triggered
-            offhours_reasons = [r for r in reasons if "crypto" in r or "check-in" in r]
-            assert len(offhours_reasons) == 1
-        finally:
-            m.stop()
-
-    def test_offhours_no_trigger_within_7200s(self, isolate_state_files, offhours_context):
-        """Within 7200s during off-hours, cooldown should NOT fire."""
-        prices = {"BTC-USD": 68000}
-
-        m = offhours_context()
-        try:
-            now = time.time()
-            _set_trigger_time(isolate_state_files["state_file"], now - 3600)  # 1 hour
+            _set_trigger_time(isolate_state_files["state_file"], now - 86400)
 
             triggered, reasons = check_triggers({"BTC-USD": _sig("HOLD")}, prices, {}, {})
 
@@ -614,26 +561,9 @@ class TestCooldownOffHours:
         finally:
             m.stop()
 
-    def test_market_hours_cooldown_not_used_offhours(self, isolate_state_files, offhours_context):
-        """During off-hours, the 600s market-hours cooldown should NOT apply."""
-        prices = {"BTC-USD": 68000}
-
-        m = offhours_context()
-        try:
-            now = time.time()
-            # 601s ago would trigger market-hours cooldown but NOT off-hours
-            _set_trigger_time(isolate_state_files["state_file"], now - 601)
-
-            triggered, reasons = check_triggers({"BTC-USD": _sig("HOLD")}, prices, {}, {})
-
-            cooldown_reasons = [r for r in reasons if "cooldown" in r]
-            assert len(cooldown_reasons) == 0
-        finally:
-            m.stop()
-
 
 # ---------------------------------------------------------------------------
-# 11. Post-trade cooldown reset
+# 10. Post-trade reassessment
 # ---------------------------------------------------------------------------
 
 class TestPostTradeCooldownReset:
@@ -740,27 +670,7 @@ class TestClassifyTierConsensus:
 # 13. classify_tier: cooldown trigger -> Tier 1
 # ---------------------------------------------------------------------------
 
-class TestClassifyTierCooldown:
-    def test_cooldown_reason_returns_tier_1(self):
-        """A cooldown-only trigger should classify as Tier 1."""
-        state = {
-            "last_full_review_time": time.time(),
-            "today_date": trigger_mod._today_str(),
-        }
-        reasons = ["cooldown (10min)"]
-        tier = classify_tier(reasons, state=state)
-        assert tier == 1
-
-    def test_crypto_checkin_reason_returns_tier_1(self):
-        """A crypto check-in reason (off-hours cooldown) should classify as Tier 1."""
-        state = {
-            "last_full_review_time": time.time(),
-            "today_date": trigger_mod._today_str(),
-        }
-        reasons = ["crypto check-in (2h)"]
-        tier = classify_tier(reasons, state=state)
-        assert tier == 1
-
+class TestClassifyTierSentiment:
     def test_sentiment_reason_returns_tier_1(self):
         """A sentiment-only trigger should classify as Tier 1 (noise)."""
         state = {
@@ -919,13 +829,13 @@ class TestClassifyTierPriority:
         tier = classify_tier(reasons, state=state)
         assert tier == 3
 
-    def test_consensus_plus_cooldown_returns_tier_2(self):
-        """consensus (Tier 2) + cooldown (Tier 1) together should return Tier 2."""
+    def test_consensus_plus_sentiment_returns_tier_2(self):
+        """consensus (Tier 2) + sentiment (Tier 1) together should return Tier 2."""
         state = {
             "last_full_review_time": time.time(),
             "today_date": trigger_mod._today_str(),
         }
-        reasons = ["BTC-USD consensus BUY (80%)", "cooldown (10min)"]
+        reasons = ["BTC-USD consensus BUY (80%)", "BTC-USD sentiment positive->negative (sustained)"]
         tier = classify_tier(reasons, state=state)
         assert tier == 2
 
@@ -1005,9 +915,9 @@ class TestStatePersistence:
         sf = isolate_state_files["state_file"]
         prices = {"BTC-USD": 68000, "ETH-USD": 2000}
 
-        # Will trigger (first run with no state -> cooldown fires)
+        # Use consensus trigger to cause a trigger and save prices
         check_triggers(
-            {"BTC-USD": _sig("HOLD"), "ETH-USD": _sig("HOLD")},
+            {"BTC-USD": _sig("BUY", 0.8), "ETH-USD": _sig("BUY", 0.7)},
             prices, {}, {}
         )
 
@@ -1020,15 +930,14 @@ class TestStatePersistence:
         sf = isolate_state_files["state_file"]
         prices = {"BTC-USD": 68000}
 
-        # First call triggers (cooldown from t=0)
-        check_triggers({"BTC-USD": _sig("HOLD")}, prices, {}, {})
-        _suppress_cooldown(sf)
+        # First call triggers via consensus
+        check_triggers({"BTC-USD": _sig("BUY", 0.8)}, prices, {}, {})
 
         state_after_first = json.loads(sf.read_text(encoding="utf-8"))
         saved_time = state_after_first["last"]["time"]
 
-        # Second call should NOT trigger (everything is same, cooldown suppressed)
-        check_triggers({"BTC-USD": _sig("HOLD")}, prices, {}, {})
+        # Second call should NOT trigger (BUY->BUY doesn't re-trigger consensus)
+        check_triggers({"BTC-USD": _sig("BUY", 0.8)}, prices, {}, {})
 
         state_after_second = json.loads(sf.read_text(encoding="utf-8"))
         # last.time should be unchanged

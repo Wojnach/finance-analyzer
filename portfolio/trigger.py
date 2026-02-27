@@ -6,10 +6,12 @@ Layer 1 runs every minute during market hours. Layer 2 is invoked when:
 - Price moved >2% since last trigger
 - Fear & Greed crossed extreme threshold (20 or 80)
 - Sentiment reversal: sustained for SUSTAINED_CHECKS cycles (filters oscillation)
-- Cooldown expired (10 min market hours, 2h off-hours)
+- Post-trade reassessment: after a BUY/SELL trade
 
-After a trade (BUY/SELL), the cooldown timer is reset so the agent can
-reassess the new portfolio state promptly.
+No periodic cooldown — Layer 2 is only invoked when Layer 1 detects a
+meaningful change. The Tier 3 periodic full review (every 2h market / 4h
+off-hours) provides the "heartbeat" via classify_tier(), but only when
+another trigger has already fired.
 """
 
 import json
@@ -24,8 +26,6 @@ STATE_FILE = BASE_DIR / "data" / "trigger_state.json"
 PORTFOLIO_FILE = BASE_DIR / "data" / "portfolio_state.json"
 PORTFOLIO_BOLD_FILE = BASE_DIR / "data" / "portfolio_state_bold.json"
 
-COOLDOWN_SECONDS = 600  # 10 min max silence (market hours)
-OFFHOURS_COOLDOWN = 7200  # 2 hours (nights/weekends, crypto only)
 PRICE_THRESHOLD = 0.02  # 2% move
 FG_THRESHOLDS = (20, 80)  # extreme fear / extreme greed boundaries
 SUSTAINED_CHECKS = 3  # consecutive cycles a signal must hold before triggering
@@ -56,7 +56,6 @@ def _save_state(state):
 def _check_recent_trade(state):
     """Check if Layer 2 executed a trade since our last trigger.
 
-    If so, reset the cooldown so the agent can reassess promptly.
     Returns True if a recent trade was detected.
     """
     last_trigger = state.get("last_trigger_time", 0)
@@ -93,20 +92,15 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
     sustained = state.get("sustained_counts", {})
     reasons = []
 
-    now_utc = datetime.now(timezone.utc)
-    from portfolio.market_timing import _market_close_hour_utc
-    close_hour = _market_close_hour_utc(now_utc)
-    market_open = now_utc.weekday() < 5 and 7 <= now_utc.hour < close_hour
-
-    # 0. Trade reset — if Layer 2 made a trade, reset cooldown
+    # 0. Trade reset — if Layer 2 made a trade, trigger reassessment
     if _check_recent_trade(state):
-        state["last_trigger_time"] = 0  # reset cooldown
+        state["last_trigger_time"] = 0
         reasons.append("post-trade reassessment")
 
     # 1. Signal consensus — trigger ONLY when a ticker first reaches BUY/SELL
     #    from HOLD. BUY↔SELL direction flips are handled by the sustained flip
     #    trigger (#2). Uses persistent triggered_consensus that is NOT wiped
-    #    when unrelated triggers (sentiment, cooldown) fire.
+    #    when unrelated triggers (sentiment, etc.) fire.
     triggered_consensus = state.get("triggered_consensus", {})
     for ticker, sig in signals.items():
         action = sig["action"]
@@ -203,14 +197,6 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
     state["sustained_sentiment"] = sustained_sent
     state["stable_sentiment"] = stable_sent
 
-    # 6. Cooldown expired — safety net to ensure periodic check-ins
-    last_trigger_time = state.get("last_trigger_time", 0)
-    elapsed = time.time() - last_trigger_time
-    if market_open and elapsed > COOLDOWN_SECONDS:
-        reasons.append(f"cooldown ({COOLDOWN_SECONDS // 60}min)")
-    elif not market_open and elapsed > OFFHOURS_COOLDOWN:
-        reasons.append(f"crypto check-in ({OFFHOURS_COOLDOWN // 3600}h)")
-
     triggered = len(reasons) > 0
 
     if triggered:
@@ -251,7 +237,7 @@ def classify_tier(reasons, state=None):
 
     Tier 3 (Full Review): periodic review, F&G extreme, first of day.
     Tier 2 (Signal Analysis): new consensus, price moves, post-trade, signal flips.
-    Tier 1 (Quick Check): cooldowns, sentiment noise, repeated triggers.
+    Tier 1 (Quick Check): sentiment noise, repeated triggers.
     """
     if state is None:
         state = _load_state()

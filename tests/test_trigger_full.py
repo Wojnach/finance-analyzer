@@ -10,7 +10,7 @@ Tests organized by function:
       no last_full_review_time in state, boundary thresholds (exactly 2h/4h),
       just under thresholds, missing today_date in state, empty state dict
     - Tier 2: "flipped" pattern, mixed tier2+tier1 reasons, all four tier2 patterns
-    - Tier 1: pure sentiment, empty reasons list, cooldown only
+    - Tier 1: pure sentiment, empty reasons list
     - Priority: tier 3 beats tier 2, tier 2 beats tier 1
 
   update_tier_state (5 tests):
@@ -129,7 +129,7 @@ class TestClassifyTierThree:
         """F&G crossing mixed with other reasons should still return tier 3."""
         state = _base_state()
         reasons = [
-            "cooldown (10min)",
+            "BTC-USD sentiment negative->positive (sustained)",
             "F&G crossed 20 (30->15)",
             "BTC-USD sentiment positive->negative (sustained)",
         ]
@@ -143,7 +143,7 @@ class TestClassifyTierThree:
                 "last_full_review_time": time.time() - 7200,  # exactly 2h ago
                 "today_date": trigger_mod._today_str(),
             }
-            reasons = ["cooldown (10min)"]
+            reasons = ["BTC-USD sentiment positive->negative (sustained)"]
             assert classify_tier(reasons, state=state) == 3
         finally:
             m.stop()
@@ -156,7 +156,7 @@ class TestClassifyTierThree:
                 "last_full_review_time": time.time() - 7190,  # 10s short of 2h
                 "today_date": trigger_mod._today_str(),
             }
-            reasons = ["cooldown (10min)"]
+            reasons = ["BTC-USD sentiment positive->negative (sustained)"]
             assert classify_tier(reasons, state=state) == 1
         finally:
             m.stop()
@@ -169,7 +169,7 @@ class TestClassifyTierThree:
                 "last_full_review_time": time.time() - 14400,  # exactly 4h
                 "today_date": trigger_mod._today_str(),
             }
-            reasons = ["crypto check-in (2h)"]
+            reasons = ["BTC-USD sentiment positive->negative (sustained)"]
             assert classify_tier(reasons, state=state) == 3
         finally:
             m.stop()
@@ -182,7 +182,7 @@ class TestClassifyTierThree:
                 "last_full_review_time": time.time() - 14390,  # 10s short of 4h
                 "today_date": trigger_mod._today_str(),
             }
-            reasons = ["crypto check-in (2h)"]
+            reasons = ["BTC-USD sentiment positive->negative (sustained)"]
             assert classify_tier(reasons, state=state) == 1
         finally:
             m.stop()
@@ -190,7 +190,7 @@ class TestClassifyTierThree:
     def test_first_of_day_missing_today_date_in_state(self):
         """When state has no today_date key, it should be treated as first-of-day -> tier 3."""
         state = {"last_full_review_time": time.time()}
-        reasons = ["cooldown (10min)"]
+        reasons = ["BTC-USD sentiment positive->negative (sustained)"]
         assert classify_tier(reasons, state=state) == 3
 
     def test_first_of_day_yesterday_date(self):
@@ -199,7 +199,7 @@ class TestClassifyTierThree:
             "last_full_review_time": time.time(),
             "today_date": "2020-01-01",
         }
-        reasons = ["cooldown (10min)"]
+        reasons = ["BTC-USD sentiment positive->negative (sustained)"]
         assert classify_tier(reasons, state=state) == 3
 
     def test_no_last_full_review_time_defaults_to_zero(self):
@@ -210,7 +210,7 @@ class TestClassifyTierThree:
         m, _ = _mock_market_hours()
         try:
             state = {"today_date": trigger_mod._today_str()}
-            reasons = ["cooldown (10min)"]
+            reasons = ["BTC-USD sentiment positive->negative (sustained)"]
             assert classify_tier(reasons, state=state) == 3
         finally:
             m.stop()
@@ -219,7 +219,7 @@ class TestClassifyTierThree:
         """Empty state dict triggers tier 3 (no last_full_review_time, no today_date)."""
         m, _ = _mock_market_hours()
         try:
-            assert classify_tier(["cooldown (10min)"], state={}) == 3
+            assert classify_tier(["BTC-USD sentiment positive->negative (sustained)"], state={}) == 3
         finally:
             m.stop()
 
@@ -252,7 +252,7 @@ class TestClassifyTierTwo:
         """When reasons contain both tier 2 and tier 1 patterns, tier 2 wins."""
         state = _base_state()
         reasons = [
-            "cooldown (10min)",
+            "BTC-USD sentiment negative->positive (sustained)",
             "BTC-USD consensus BUY (80%)",
             "ETH-USD sentiment positive->negative (sustained)",
         ]
@@ -269,17 +269,7 @@ class TestClassifyTierTwo:
 
 
 class TestClassifyTierOne:
-    """Tier 1 classification: cooldown, sentiment, and other noise."""
-
-    def test_cooldown_only_returns_tier_1(self):
-        state = _base_state()
-        reasons = ["cooldown (10min)"]
-        assert classify_tier(reasons, state=state) == 1
-
-    def test_crypto_checkin_returns_tier_1(self):
-        state = _base_state()
-        reasons = ["crypto check-in (2h)"]
-        assert classify_tier(reasons, state=state) == 1
+    """Tier 1 classification: sentiment and other noise."""
 
     def test_sentiment_reason_returns_tier_1(self):
         state = _base_state()
@@ -311,10 +301,10 @@ class TestClassifyTierPriority:
         assert classify_tier(reasons, state=state) == 3
 
     def test_tier_2_beats_tier_1(self):
-        """Consensus (tier 2) combined with cooldown (tier 1) should return tier 2."""
+        """Consensus (tier 2) combined with sentiment (tier 1) should return tier 2."""
         state = _base_state()
         reasons = [
-            "cooldown (10min)",
+            "BTC-USD sentiment positive->negative (sustained)",
             "BTC-USD consensus SELL (70%)",
         ]
         assert classify_tier(reasons, state=state) == 2
@@ -351,7 +341,7 @@ class TestClassifyTierStateFromFile:
         m, _ = _mock_market_hours()
         try:
             # state_file does not exist -> _load_state() returns {}
-            reasons = ["cooldown (10min)"]
+            reasons = ["BTC-USD sentiment positive->negative (sustained)"]
             assert classify_tier(reasons, state=None) == 3
         finally:
             m.stop()
