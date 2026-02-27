@@ -1,13 +1,115 @@
-# Improvement Plan — Auto-Session 2026-02-26
+# Improvement Plan — Auto-Session 2026-02-27
 
-## Session Results
+## 1. Bugs & Problems Found
 
-| Metric | Before | After |
-|--------|--------|-------|
-| Tests passing | ~1809 | ~2015 (+206) |
-| Bugs fixed | 0 | 5 |
-| Files modified | 0 | 6 production |
-| New files | 0 | 4 test files |
+### BUG-10: Sentiment hysteresis doesn't persist neutral direction
+- **File:** portfolio/signal_engine.py:392-414
+- **Problem:** `_set_prev_sentiment()` is only called when sentiment is "positive" or "negative".
+  When sentiment becomes "neutral", the previous direction is retained. Next cycle, if sentiment
+  returns to the same direction (e.g., positive→neutral→positive), the code sees a "flip" and
+  raises the threshold from 0.40 to 0.55 — even though the sentiment didn't actually reverse.
+- **Impact:** False threshold elevation causing missed sentiment signals.
+- **Fix:** After the voting block, always update prev_sentiment for non-neutral sentiments.
+  This is already the behavior, but we should also clear prev_sentiment on sustained neutral
+  to prevent stale direction from causing threshold elevation later.
+
+### BUG-11: Architecture doc says 29 signals, code has 30
+- **File:** docs/architecture-plan.md, CLAUDE.md
+- **Problem:** futures_flow signal #30 was added Feb 26 but architecture doc still says 29.
+  Applicable counts also need updating: crypto=27, stocks/metals=25.
+- **Impact:** Documentation drift — Layer 2 reads CLAUDE.md which correctly says 27/30 but
+  architecture doc is the "source of truth" and it's wrong.
+- **Fix:** Update architecture-plan.md signal count and applicable counts.
+
+### BUG-12: `collect_timeframes()` silently skips timeframes with insufficient data
+- **File:** portfolio/data_collector.py:274-276
+- **Problem:** When `compute_indicators(df)` returns None (insufficient data), the timeframe
+  is silently skipped with `continue`. No logging, no indication to the caller.
+- **Impact:** If a data source consistently returns too few rows for a timeframe, the signal
+  pipeline silently degrades. Debugging data quality issues becomes harder.
+- **Fix:** Add `logger.debug()` when skipping a timeframe.
+
+### BUG-13: `_fetch_klines` Alpaca fallback doesn't check yfinance failures
+- **File:** portfolio/data_collector.py:247-250
+- **Problem:** When market is closed and yfinance is used as fallback, if yfinance raises an
+  exception, it's caught by the outer try/except in `collect_timeframes()` line 288. But
+  the circuit breaker `alpaca_cb` doesn't record a failure since we never tried Alpaca.
+  Conversely, no yfinance circuit breaker exists to prevent repeated failed calls.
+- **Impact:** Low — yfinance failures are rare and the error is logged. But repeated failures
+  would cause unnecessary API calls without circuit breaker protection.
+- **Fix:** Document as TODO. Adding a yfinance circuit breaker is low priority since failures
+  are rare and the fallback itself is a backup path.
+
+## 2. Architecture Improvements
+
+### ARCH-8: Test coverage for data_collector.py
+- **Why:** The data fetching module has zero dedicated tests. It's the foundation of the
+  entire pipeline — bad data silently corrupts all downstream signals.
+- **What:** Add tests/test_data_collector.py with mocked API responses for binance_klines(),
+  alpaca_klines(), yfinance_klines(), _fetch_klines() dispatch, and collect_timeframes().
+- **Enables:** Safe evolution of data fetching logic, regression protection.
+
+### ARCH-9: Test coverage for agent_invocation.py
+- **Why:** Layer 2 subprocess management has no tests. This is the most critical integration
+  point — if invocation fails, all Layer 2 analysis stops (as seen in the 34h outage).
+- **What:** Add tests/test_agent_invocation.py testing invoke_agent(), _log_trigger(),
+  subprocess timeout handling, tier-specific context.
+- **Enables:** Faster debugging of Layer 2 invocation failures.
+
+### ARCH-10: Config example missing feature keys
+- **Why:** Five features (perception_gate, reflection, trade_guards, risk_audit,
+  confidence_penalties) are referenced in code but not documented in config.example.json.
+  New users/deployments won't discover these features.
+- **What:** Add all missing config keys to config.example.json with defaults and comments.
+- **Enables:** Self-documenting configuration.
+
+## 3. Refactoring TODOs
+
+### REF-4: Deduplicate binance_klines and binance_fapi_klines
+- **File:** portfolio/data_collector.py:64-135
+- **Problem:** These two functions are ~90% identical. The only difference is the base URL
+  and circuit breaker instance. Both could be a single function parameterized by source.
+- **Impact:** Low — the duplication is harmless but increases maintenance burden.
+- **Fix:** Extract shared logic into `_binance_fetch(base_url, cb, symbol, interval, limit)`.
+
+## 4. Implementation Batches (ordered)
+
+### Batch 1: Bug Fixes + Doc Updates
+**Files:** portfolio/signal_engine.py, portfolio/data_collector.py, docs/architecture-plan.md
+- BUG-10: Fix sentiment hysteresis neutral gap
+- BUG-12: Add logging when timeframe is skipped
+- BUG-11: Update architecture doc signal count (29→30)
+
+### Batch 2: Test Coverage — data_collector.py
+**Files:** tests/test_data_collector.py (NEW)
+- ARCH-8: ~30 tests for data fetching with mocked API responses
+
+### Batch 3: Test Coverage — agent_invocation.py
+**Files:** tests/test_agent_invocation.py (NEW)
+- ARCH-9: ~20 tests for Layer 2 subprocess management
+
+### Batch 4: Refactoring + Config Docs
+**Files:** portfolio/data_collector.py, config.example.json
+- REF-4: Deduplicate Binance kline functions
+- ARCH-10: Add missing config keys to example
+
+## 5. Risk Assessment
+
+| Change | Risk | Mitigation |
+|--------|------|------------|
+| BUG-10 (sentiment neutral) | Very low: only affects threshold logic | Test with mock sentiments |
+| BUG-12 (log on skip) | None: logging only | Visual inspection |
+| BUG-11 (doc update) | None: documentation only | Review |
+| ARCH-8 (data collector tests) | None: additive tests | Run full suite |
+| ARCH-9 (agent invocation tests) | None: additive tests | Run full suite |
+| REF-4 (Binance dedup) | Low: refactoring tested paths | Run existing + new tests |
+| ARCH-10 (config example) | None: documentation only | Review |
+
+---
+
+# Previous Session Results
+
+## Auto-Session 2026-02-26
 | Refactors | 0 | 1 (DRY accuracy_stats) |
 | Features | 0 | 1 (yfinance fallback logging) |
 
