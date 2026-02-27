@@ -215,3 +215,78 @@ class TestForecastModelsDisabled:
         result = compute_forecast_signal(df, context={"ticker": "BTC-USD"})
         mock_candles.assert_not_called()
         assert result["indicators"]["models_disabled"] is True
+
+
+class TestForecastFullPathEnabled:
+    """Verify that when models are enabled, the full code path runs (candles + both models)."""
+
+    @staticmethod
+    def _bypass_cache(key, ttl, fn, *args):
+        """Bypass _cached so mocks are called directly."""
+        return fn(*args)
+
+    @patch("portfolio.signals.forecast._cached")
+    @patch("portfolio.signals.forecast._run_chronos")
+    @patch("portfolio.signals.forecast._run_kronos")
+    @patch("portfolio.signals.forecast._load_candles_ohlcv")
+    def test_full_path_loads_candles_and_calls_models(self, mock_candles, mock_kronos, mock_chronos, mock_cached):
+        """With _FORECAST_MODELS_DISABLED=False, candles are loaded and both models called."""
+        mock_cached.side_effect = self._bypass_cache
+        mock_candles.return_value = [{"close": float(100 + i)} for i in range(80)]
+        mock_kronos.return_value = {
+            "method": "kronos",
+            "results": {
+                "1h": {"direction": "up", "pct_move": 0.3, "confidence": 0.6},
+                "24h": {"direction": "down", "pct_move": -0.5, "confidence": 0.5},
+            },
+        }
+        mock_chronos.return_value = {
+            "1h": {"action": "BUY", "pct_move": 0.4, "confidence": 0.55},
+            "24h": {"action": "SELL", "pct_move": -0.6, "confidence": 0.5},
+        }
+        df = pd.DataFrame({"close": [100.0] * 80})
+        result = compute_forecast_signal(df, context={"ticker": "BTC-USD"})
+
+        # Candles should have been loaded
+        mock_candles.assert_called_once_with("BTC-USD")
+        # Both models should have been invoked
+        mock_kronos.assert_called_once()
+        mock_chronos.assert_called_once()
+        # models_disabled should NOT be in indicators
+        assert "models_disabled" not in result["indicators"]
+        # Sub-signals should reflect model outputs
+        assert result["sub_signals"]["kronos_1h"] == "BUY"
+        assert result["sub_signals"]["kronos_24h"] == "SELL"
+        assert result["sub_signals"]["chronos_1h"] == "BUY"
+        assert result["sub_signals"]["chronos_24h"] == "SELL"
+        # 2 BUY + 2 SELL = HOLD
+        assert result["action"] == "HOLD"
+
+    @patch("portfolio.signals.forecast._cached")
+    @patch("portfolio.signals.forecast._run_chronos")
+    @patch("portfolio.signals.forecast._run_kronos")
+    @patch("portfolio.signals.forecast._load_candles_ohlcv")
+    def test_full_path_majority_buy(self, mock_candles, mock_kronos, mock_chronos, mock_cached):
+        """When 3/4 sub-signals are BUY, composite action should be BUY."""
+        mock_cached.side_effect = self._bypass_cache
+        mock_candles.return_value = [{"close": float(100 + i)} for i in range(80)]
+        mock_kronos.return_value = {
+            "method": "kronos",
+            "results": {
+                "1h": {"direction": "up", "pct_move": 0.3, "confidence": 0.6},
+                "24h": {"direction": "up", "pct_move": 0.5, "confidence": 0.5},
+            },
+        }
+        mock_chronos.return_value = {
+            "1h": {"action": "BUY", "pct_move": 0.4, "confidence": 0.55},
+            "24h": {"action": "SELL", "pct_move": -0.2, "confidence": 0.3},
+        }
+        df = pd.DataFrame({"close": [100.0] * 80})
+        result = compute_forecast_signal(df, context={"ticker": "BTC-USD"})
+
+        assert result["action"] == "BUY"
+        assert result["confidence"] <= 0.7  # capped
+        assert result["sub_signals"]["kronos_1h"] == "BUY"
+        assert result["sub_signals"]["kronos_24h"] == "BUY"
+        assert result["sub_signals"]["chronos_1h"] == "BUY"
+        assert result["sub_signals"]["chronos_24h"] == "SELL"

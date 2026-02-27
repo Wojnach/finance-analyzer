@@ -34,17 +34,12 @@ _FORECAST_TTL = 300  # 5 minutes
 # Confidence cap (same as news_event, econ_calendar)
 _MAX_CONFIDENCE = 0.7
 
-# ALL FORECAST MODELS DISABLED: Kronos has a DatetimeIndex bug (returns linear
-# regression fallback = noise), Chronos GPU (RTX 3080) is in corrupted CUDA state
-# (every call fails after ~5.8s). Early-return in compute_forecast_signal() skips
-# all candle loading, caching, and model calls. Re-enable by setting to False.
-_FORECAST_MODELS_DISABLED = True
+# Forecast models master switch. Set to True to disable all model calls (early-return HOLD).
+# Circuit breakers remain as secondary protection — auto-trip on failure, 5min TTL.
+_FORECAST_MODELS_DISABLED = False
 
-# Kronos inference script
-# DISABLED: Kronos model has a DatetimeIndex bug and only returns statistical
-# fallback (linear regression), which is noise. Disable until the model is fixed
-# and verified to produce real predictions. Re-enable by setting _KRONOS_ENABLED = True.
-_KRONOS_ENABLED = False
+# Kronos inference script — runs via subprocess calling Q:/models/kronos_infer.py
+_KRONOS_ENABLED = True
 
 if platform.system() == "Windows":
     _KRONOS_PYTHON = r"Q:\finance-analyzer\.venv\Scripts\python.exe"
