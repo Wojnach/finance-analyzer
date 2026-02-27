@@ -51,6 +51,7 @@ else:
 # Prediction log
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 _PREDICTIONS_FILE = _DATA_DIR / "forecast_predictions.jsonl"
+_HEALTH_FILE = _DATA_DIR / "forecast_health.jsonl"
 
 # Circuit breaker — after first failure, skip remaining tickers in this loop cycle.
 # Prevents 27 x 6s GPU timeouts when CUDA is broken.
@@ -84,6 +85,24 @@ def reset_circuit_breakers():
     global _kronos_tripped_until, _chronos_tripped_until
     _kronos_tripped_until = 0.0
     _chronos_tripped_until = 0.0
+
+
+def _log_health(model: str, ticker: str, success: bool, duration_ms: int, error: str = ""):
+    """Append a line to forecast_health.jsonl for persistent success/failure tracking."""
+    try:
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "model": model,
+            "ticker": ticker,
+            "ok": success,
+            "ms": duration_ms,
+        }
+        if error:
+            entry["error"] = error[:200]
+        with open(_HEALTH_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass  # health logging must never break the signal
 
 
 def _load_candles_ohlcv(ticker: str, periods: int = 168) -> list[dict] | None:
@@ -128,12 +147,13 @@ def _load_candles_ohlcv(ticker: str, periods: int = 168) -> list[dict] | None:
     return None
 
 
-def _run_kronos(candles: list[dict], horizons: tuple = (1, 24)) -> dict | None:
+def _run_kronos(candles: list[dict], horizons: tuple = (1, 24), _ticker: str = "") -> dict | None:
     """Run Kronos inference via subprocess."""
     if not _KRONOS_ENABLED:
         return None
     if _kronos_circuit_open():
         return None
+    t0 = time.time()
     try:
         input_data = json.dumps({
             "candles": candles,
@@ -147,33 +167,47 @@ def _run_kronos(candles: list[dict], horizons: tuple = (1, 24)) -> dict | None:
             text=True,
             timeout=120,
         )
+        ms = round((time.time() - t0) * 1000)
         if proc.returncode != 0:
-            logger.warning("Kronos subprocess failed: %s", proc.stderr[:200])
+            err = proc.stderr[:200]
+            logger.warning("Kronos subprocess failed: %s", err)
+            _log_health("kronos", _ticker, False, ms, err)
             _trip_kronos()
             return None
         result = json.loads(proc.stdout)
         if not result or not result.get("results"):
+            _log_health("kronos", _ticker, False, ms, "empty_results")
             _trip_kronos()
             return None
+        _log_health("kronos", _ticker, True, ms)
         return result
     except Exception as e:
+        ms = round((time.time() - t0) * 1000)
         logger.warning("Kronos subprocess error (v2): %s", e)
+        _log_health("kronos", _ticker, False, ms, str(e)[:200])
         _trip_kronos()
         return None
 
 
-def _run_chronos(prices: list[float], horizons: tuple = (1, 24)) -> dict | None:
+def _run_chronos(prices: list[float], horizons: tuple = (1, 24), _ticker: str = "") -> dict | None:
     """Run Chronos forecast (in-process, lazy-loaded)."""
     if _chronos_circuit_open():
         return None
+    t0 = time.time()
     try:
         from portfolio.forecast_signal import forecast_chronos
         result = forecast_chronos("", prices, horizons=horizons)
+        ms = round((time.time() - t0) * 1000)
         if result is None:
+            _log_health("chronos", _ticker, False, ms, "returned_none")
             _trip_chronos()
+        else:
+            _log_health("chronos", _ticker, True, ms)
         return result
     except Exception as e:
+        ms = round((time.time() - t0) * 1000)
         logger.warning("Chronos failed: %s", e)
+        _log_health("chronos", _ticker, False, ms, str(e)[:200])
         _trip_chronos()
         return None
 
@@ -246,7 +280,7 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
     # Run Kronos (skip entirely if circuit breaker is open)
     t0 = time.time()
     kronos_key = f"kronos_forecast_{ticker}"
-    kronos = _cached(kronos_key, _FORECAST_TTL, _run_kronos, candles or [], (1, 24))
+    kronos = _cached(kronos_key, _FORECAST_TTL, _run_kronos, candles or [], (1, 24), ticker)
     kronos_ms = round((time.time() - t0) * 1000)
     result["indicators"]["kronos_time_ms"] = kronos_ms
 
@@ -267,7 +301,7 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
     # Run Chronos (skip entirely if circuit breaker is open)
     t0 = time.time()
     chronos_key = f"chronos_forecast_{ticker}"
-    chronos = _cached(chronos_key, _FORECAST_TTL, _run_chronos, close_prices, (1, 24))
+    chronos = _cached(chronos_key, _FORECAST_TTL, _run_chronos, close_prices, (1, 24), ticker)
     chronos_ms = round((time.time() - t0) * 1000)
     result["indicators"]["chronos_time_ms"] = chronos_ms
 
