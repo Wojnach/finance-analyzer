@@ -46,6 +46,39 @@ else:
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 _PREDICTIONS_FILE = _DATA_DIR / "forecast_predictions.jsonl"
 
+# Circuit breaker — after first failure, skip remaining tickers in this loop cycle.
+# Prevents 27 x 6s GPU timeouts when CUDA is broken.
+_CIRCUIT_BREAKER_TTL = 300  # 5 minutes before retry
+_kronos_tripped_until = 0.0  # monotonic timestamp when breaker resets
+_chronos_tripped_until = 0.0
+
+
+def _kronos_circuit_open() -> bool:
+    return time.monotonic() < _kronos_tripped_until
+
+
+def _trip_kronos():
+    global _kronos_tripped_until
+    _kronos_tripped_until = time.monotonic() + _CIRCUIT_BREAKER_TTL
+    logger.warning("Kronos circuit breaker TRIPPED — skipping for %ds", _CIRCUIT_BREAKER_TTL)
+
+
+def _chronos_circuit_open() -> bool:
+    return time.monotonic() < _chronos_tripped_until
+
+
+def _trip_chronos():
+    global _chronos_tripped_until
+    _chronos_tripped_until = time.monotonic() + _CIRCUIT_BREAKER_TTL
+    logger.warning("Chronos circuit breaker TRIPPED — skipping for %ds", _CIRCUIT_BREAKER_TTL)
+
+
+def reset_circuit_breakers():
+    """Reset both circuit breakers (for testing or manual recovery)."""
+    global _kronos_tripped_until, _chronos_tripped_until
+    _kronos_tripped_until = 0.0
+    _chronos_tripped_until = 0.0
+
 
 def _load_candles_ohlcv(ticker: str, periods: int = 168) -> list[dict] | None:
     """Load recent 1h OHLCV candles as list of dicts.
@@ -91,6 +124,8 @@ def _load_candles_ohlcv(ticker: str, periods: int = 168) -> list[dict] | None:
 
 def _run_kronos(candles: list[dict], horizons: tuple = (1, 24)) -> dict | None:
     """Run Kronos inference via subprocess."""
+    if _kronos_circuit_open():
+        return None
     try:
         input_data = json.dumps({
             "candles": candles,
@@ -106,20 +141,32 @@ def _run_kronos(candles: list[dict], horizons: tuple = (1, 24)) -> dict | None:
         )
         if proc.returncode != 0:
             logger.warning("Kronos subprocess failed: %s", proc.stderr[:200])
+            _trip_kronos()
             return None
-        return json.loads(proc.stdout)
+        result = json.loads(proc.stdout)
+        if not result or not result.get("results"):
+            _trip_kronos()
+            return None
+        return result
     except Exception as e:
         logger.warning("Kronos inference error: %s", e)
+        _trip_kronos()
         return None
 
 
 def _run_chronos(prices: list[float], horizons: tuple = (1, 24)) -> dict | None:
     """Run Chronos forecast (in-process, lazy-loaded)."""
+    if _chronos_circuit_open():
+        return None
     try:
         from portfolio.forecast_signal import forecast_chronos
-        return forecast_chronos("", prices, horizons=horizons)
+        result = forecast_chronos("", prices, horizons=horizons)
+        if result is None:
+            _trip_chronos()
+        return result
     except Exception as e:
-        logger.debug("Chronos not available: %s", e)
+        logger.warning("Chronos failed: %s", e)
+        _trip_chronos()
         return None
 
 
@@ -180,6 +227,8 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
     current_price = close_prices[-1]
     result["indicators"]["current_price"] = current_price
     result["indicators"]["candle_count"] = len(close_prices)
+    result["indicators"]["kronos_circuit_open"] = _kronos_circuit_open()
+    result["indicators"]["chronos_circuit_open"] = _chronos_circuit_open()
 
     # Run Kronos
     t0 = time.time()
