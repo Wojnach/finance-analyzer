@@ -103,3 +103,31 @@ def get_all_underlyings() -> dict[str, str]:
         for key, cfg in instruments.items()
         if cfg.get("type") == "warrant" and cfg.get("underlying")
     }
+
+
+def check_session_expiry() -> str | None:
+    """Check if Avanza BankID session is expired or expiring soon.
+
+    Returns:
+        Warning message string if session needs refresh, None if OK.
+    """
+    try:
+        from portfolio.avanza_session import (
+            is_session_expiring_soon,
+            session_remaining_minutes,
+        )
+    except ImportError:
+        return None
+
+    remaining = session_remaining_minutes()
+    if remaining is None:
+        return "Avanza session not found. Run: python scripts/avanza_login.py"
+    if remaining <= 0:
+        return "Avanza session expired. Run: python scripts/avanza_login.py"
+    if is_session_expiring_soon(threshold_minutes=60.0):
+        mins = int(remaining)
+        return (
+            f"Avanza session expires in {mins}min. "
+            "Run: python scripts/avanza_login.py"
+        )
+    return None
