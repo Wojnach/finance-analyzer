@@ -12,6 +12,8 @@ This is the orchestrator module. All logic has been extracted to:
 - reporting.py — agent_summary.json builder
 - telegram_notifications.py — Telegram send/escape/alert
 - digest.py — 4-hour digest builder
+- daily_digest.py — morning daily digest (focus instruments + movers)
+- message_throttle.py — analysis message rate limiting
 - agent_invocation.py — Layer 2 Claude Code subprocess
 - logging_config.py — structured logging setup
 """
@@ -442,6 +444,18 @@ def loop(interval=None):
     try:
         run(force_report=True)
         _maybe_send_digest(config)
+        # Daily morning digest (separate from 4h digest)
+        try:
+            from portfolio.daily_digest import maybe_send_daily_digest
+            maybe_send_daily_digest(config)
+        except Exception as e_dd:
+            logger.warning("daily digest failed: %s", e_dd)
+        # Flush throttled analysis messages
+        try:
+            from portfolio.message_throttle import flush_and_send
+            flush_and_send(config)
+        except Exception as e_mt:
+            logger.warning("message throttle flush failed: %s", e_mt)
     except KeyboardInterrupt:
         raise
     except Exception as e:
@@ -465,6 +479,18 @@ def loop(interval=None):
         try:
             run(force_report=False, active_symbols=active_symbols)
             _maybe_send_digest(config)
+            # Daily morning digest (separate from 4h digest)
+            try:
+                from portfolio.daily_digest import maybe_send_daily_digest
+                maybe_send_daily_digest(config)
+            except Exception as e_dd:
+                logger.warning("daily digest failed: %s", e_dd)
+            # Flush throttled analysis messages
+            try:
+                from portfolio.message_throttle import flush_and_send
+                flush_and_send(config)
+            except Exception as e_mt:
+                logger.warning("message throttle flush failed: %s", e_mt)
             # Alpha Vantage fundamentals batch refresh (off-hours only)
             try:
                 from portfolio.alpha_vantage import should_batch_refresh, refresh_fundamentals_batch
