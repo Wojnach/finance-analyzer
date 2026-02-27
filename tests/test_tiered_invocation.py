@@ -91,7 +91,7 @@ class TestClassifyTier(TriggerTestBase):
     def test_sentiment_returns_tier1(self):
         """Sentiment triggers should be Tier 1."""
         state = self._make_state()
-        reasons = ["RXRX sentiment positive->negative (sustained)"]
+        reasons = ["SOUN sentiment positive->negative (sustained)"]
         assert classify_tier(reasons, state=state) == 1
 
     def test_consensus_returns_tier2(self):

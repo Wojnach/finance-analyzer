@@ -86,13 +86,13 @@ _KEYWORD_PATTERNS = [
 # ---------------------------------------------------------------------------
 
 SECTOR_MAP = {
-    "semiconductor": {"NVDA", "AMD", "MU", "AVGO", "MRVL", "TSM", "SMCI", "IONQ"},
+    "semiconductor": {"NVDA", "AMD", "MU", "AVGO", "TSM", "SMCI", "IONQ"},
     "crypto": {"BTC-USD", "ETH-USD", "MSTR"},
     "china": {"BABA", "TSM"},
     "defense": {"LMT"},
     "big_tech": {"GOOGL", "AMZN", "AAPL", "META"},
-    "ai": {"NVDA", "AMD", "GOOGL", "META", "PLTR", "SOUN", "IONQ", "MRVL", "AVGO"},
-    "software": {"PLTR", "UPST", "RXRX", "VERI", "PONY", "GRRR", "TEM"},
+    "ai": {"NVDA", "AMD", "GOOGL", "META", "PLTR", "SOUN", "IONQ", "AVGO"},
+    "software": {"PLTR", "UPST", "VERI", "GRRR", "TEM"},
     "gaming": {"TTWO"},
     "infrastructure": {"VRT"},
     "metals": {"XAU-USD", "XAG-USD"},

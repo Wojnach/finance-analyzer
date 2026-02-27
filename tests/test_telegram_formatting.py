@@ -19,7 +19,7 @@ ALL_TICKERS = [
     "BTC-USD", "ETH-USD", "XAU-USD", "XAG-USD",
     "MSTR", "PLTR", "NVDA", "AMD", "BABA", "GOOGL",
     "AMZN", "AAPL", "AVGO", "GRRR", "IONQ",
-    "MRVL", "META", "MU", "PONY", "RXRX", "SOUN",
+    "META", "MU", "SOUN",
     "SMCI", "TSM", "TTWO", "TEM", "UPST", "VERI",
     "VRT", "QQQ", "LMT",
 ]

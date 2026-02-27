@@ -53,20 +53,17 @@ def _market_close_hour_utc(dt):
 def _is_agent_window(now=None):
     """Check if current time is within the Layer 2 invocation window.
 
-    Window: 1h before EU market open through 1h after US market close.
+    Window: EU market open (07:00 UTC) through US market close.
+    EDT (Mar-Nov): 07:00–20:00 UTC
+    EST (Nov-Mar): 07:00–21:00 UTC
     Weekends: no agent invocation.
     """
     if now is None:
         now = datetime.now(timezone.utc)
     if now.weekday() >= 5:
         return False
-    current_minutes = now.hour * 60 + now.minute
-    start = 6 * 60  # 06:00 UTC (1h before Frankfurt 07:00)
-    if _is_us_dst(now):
-        end = 21 * 60  # 21:00 UTC (1h after NYSE 20:00 EDT)
-    else:
-        end = 22 * 60  # 22:00 UTC (1h after NYSE 21:00 EST)
-    return start <= current_minutes < end
+    close_hour = _market_close_hour_utc(now)
+    return MARKET_OPEN_HOUR <= now.hour < close_hour
 
 
 def get_market_state():

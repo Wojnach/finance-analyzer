@@ -416,20 +416,17 @@ with open(log, "a", encoding="utf-8") as f:
     }, ensure_ascii=False) + "\n")
 ```
 
-**Only send to Telegram if you executed a trade** (BUY or SELL for either Patient or Bold):
+**ALWAYS send your analysis to Telegram** — both trades AND HOLD decisions. The user
+monitors Layer 2 activity via Telegram and wants to see every decision you make.
 
 ```python
-if category == "trade":
-    import requests
-    config = json.load(open("config.json"))
-    requests.post(
-        f"https://api.telegram.org/bot{config['telegram']['token']}/sendMessage",
-        json={"chat_id": config["telegram"]["chat_id"], "text": msg, "parse_mode": "Markdown"}
-    )
+import requests
+config = json.load(open("config.json"))
+requests.post(
+    f"https://api.telegram.org/bot{config['telegram']['token']}/sendMessage",
+    json={"chat_id": config["telegram"]["chat_id"], "text": msg, "parse_mode": "Markdown"}
+)
 ```
-
-**Do NOT send HOLD/analysis messages to Telegram.** They are saved to the JSONL file and
-viewable on the dashboard. Only trade executions go to Telegram.
 
 ## Trading Rules
 
@@ -550,11 +547,8 @@ enumerate every HOLD ticker.
 | AVGO    | NASDAQ      | Alpaca (IEX feed)  |
 | GRRR    | NASDAQ      | Alpaca (IEX feed)  |
 | IONQ    | NYSE        | Alpaca (IEX feed)  |
-| MRVL    | NASDAQ      | Alpaca (IEX feed)  |
 | META    | NASDAQ      | Alpaca (IEX feed)  |
 | MU      | NASDAQ      | Alpaca (IEX feed)  |
-| PONY    | NASDAQ      | Alpaca (IEX feed)  |
-| RXRX    | NASDAQ      | Alpaca (IEX feed)  |
 | SOUN    | NASDAQ      | Alpaca (IEX feed)  |
 | SMCI    | NASDAQ      | Alpaca (IEX feed)  |
 | TSM     | NYSE        | Alpaca (IEX feed)  |

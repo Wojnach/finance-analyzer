@@ -267,11 +267,11 @@ class TestMarketCloseHourUtc:
 
 
 # ===========================================================================
-# 6. _is_agent_window() — within window (weekday, 06:00-21/22:00 UTC)
+# 6. _is_agent_window() — within window (weekday, 07:00-20/21:00 UTC)
 # ===========================================================================
 
 class TestIsAgentWindowInside:
-    """Times that should be within the agent window."""
+    """Times that should be within the agent window (EU open through US close)."""
 
     def test_monday_midday(self):
         # Monday 12:00 UTC
@@ -279,8 +279,8 @@ class TestIsAgentWindowInside:
         assert _is_agent_window(now) is True
 
     def test_wednesday_morning_edge(self):
-        # Wednesday 06:00 UTC (exactly the start)
-        now = datetime(2026, 2, 25, 6, 0, tzinfo=timezone.utc)  # Wednesday
+        # Wednesday 07:00 UTC (exactly the start = EU market open)
+        now = datetime(2026, 2, 25, 7, 0, tzinfo=timezone.utc)  # Wednesday
         assert _is_agent_window(now) is True
 
     def test_friday_afternoon(self):
@@ -289,30 +289,30 @@ class TestIsAgentWindowInside:
         assert _is_agent_window(now) is True
 
     def test_tuesday_late_evening_est(self):
-        # In EST (winter), window extends to 22:00 UTC
-        # Tuesday 21:30 UTC in February (EST)
-        now = datetime(2026, 2, 24, 21, 30, tzinfo=timezone.utc)  # Tuesday
+        # In EST (winter), window extends to 21:00 UTC (NYSE close)
+        # Tuesday 20:30 UTC in February (EST)
+        now = datetime(2026, 2, 24, 20, 30, tzinfo=timezone.utc)  # Tuesday
         assert _is_agent_window(now) is True
 
     def test_tuesday_late_evening_edt(self):
-        # In EDT (summer), window extends to 21:00 UTC
-        # Tuesday 20:30 UTC in July (EDT)
-        now = datetime(2026, 7, 7, 20, 30, tzinfo=timezone.utc)  # Tuesday
+        # In EDT (summer), window extends to 20:00 UTC (NYSE close)
+        # Tuesday 19:30 UTC in July (EDT)
+        now = datetime(2026, 7, 7, 19, 30, tzinfo=timezone.utc)  # Tuesday
         assert _is_agent_window(now) is True
 
-    def test_thursday_at_0600(self):
-        # Exactly at 06:00 (inclusive start)
-        now = datetime(2026, 2, 26, 6, 0, tzinfo=timezone.utc)  # Thursday
+    def test_thursday_at_0700(self):
+        # Exactly at 07:00 (inclusive start = EU market open)
+        now = datetime(2026, 2, 26, 7, 0, tzinfo=timezone.utc)  # Thursday
         assert _is_agent_window(now) is True
 
     def test_monday_one_minute_before_end_est(self):
-        # In EST, end = 22:00 UTC, so 21:59 is still inside
-        now = datetime(2026, 1, 5, 21, 59, tzinfo=timezone.utc)  # Monday
+        # In EST, end = 21:00 UTC, so 20:59 is still inside
+        now = datetime(2026, 1, 5, 20, 59, tzinfo=timezone.utc)  # Monday
         assert _is_agent_window(now) is True
 
     def test_monday_one_minute_before_end_edt(self):
-        # In EDT, end = 21:00 UTC, so 20:59 is still inside
-        now = datetime(2026, 6, 1, 20, 59, tzinfo=timezone.utc)  # Monday
+        # In EDT, end = 20:00 UTC, so 19:59 is still inside
+        now = datetime(2026, 6, 1, 19, 59, tzinfo=timezone.utc)  # Monday
         assert _is_agent_window(now) is True
 
 
@@ -332,8 +332,8 @@ class TestIsAgentWindowOutside:
         assert _is_agent_window(now) is False
 
     def test_weekday_too_early(self):
-        # Monday 05:59 UTC (before 06:00)
-        now = datetime(2026, 2, 23, 5, 59, tzinfo=timezone.utc)  # Monday
+        # Monday 06:59 UTC (before 07:00)
+        now = datetime(2026, 2, 23, 6, 59, tzinfo=timezone.utc)  # Monday
         assert _is_agent_window(now) is False
 
     def test_weekday_midnight(self):
@@ -341,13 +341,13 @@ class TestIsAgentWindowOutside:
         assert _is_agent_window(now) is False
 
     def test_weekday_too_late_est(self):
-        # In EST (winter), window ends at 22:00 UTC
-        now = datetime(2026, 1, 5, 22, 0, tzinfo=timezone.utc)  # Monday
+        # In EST (winter), window ends at 21:00 UTC (NYSE close)
+        now = datetime(2026, 1, 5, 21, 0, tzinfo=timezone.utc)  # Monday
         assert _is_agent_window(now) is False
 
     def test_weekday_too_late_edt(self):
-        # In EDT (summer), window ends at 21:00 UTC
-        now = datetime(2026, 6, 1, 21, 0, tzinfo=timezone.utc)  # Monday
+        # In EDT (summer), window ends at 20:00 UTC (NYSE close)
+        now = datetime(2026, 6, 1, 20, 0, tzinfo=timezone.utc)  # Monday
         assert _is_agent_window(now) is False
 
     def test_weekday_23_utc(self):
@@ -632,36 +632,36 @@ class TestConstants:
 # ===========================================================================
 
 class TestAgentWindowDstBoundary:
-    """The agent window end changes from 22:00 to 21:00 when DST starts."""
+    """The agent window end changes from 21:00 to 20:00 when DST starts."""
 
-    def test_est_window_end_at_2159(self):
-        # EST (Feb): window ends at 22:00. 21:59 is inside.
-        now = datetime(2026, 2, 24, 21, 59, tzinfo=timezone.utc)  # Tuesday
+    def test_est_window_end_at_2059(self):
+        # EST (Feb): window ends at 21:00 (NYSE close). 20:59 is inside.
+        now = datetime(2026, 2, 24, 20, 59, tzinfo=timezone.utc)  # Tuesday
         assert _is_agent_window(now) is True
 
-    def test_est_window_end_at_2200(self):
-        # EST (Feb): window ends at 22:00. 22:00 is outside.
-        now = datetime(2026, 2, 24, 22, 0, tzinfo=timezone.utc)  # Tuesday
+    def test_est_window_end_at_2100(self):
+        # EST (Feb): window ends at 21:00. 21:00 is outside.
+        now = datetime(2026, 2, 24, 21, 0, tzinfo=timezone.utc)  # Tuesday
         assert _is_agent_window(now) is False
 
-    def test_edt_window_end_at_2059(self):
-        # EDT (Jul): window ends at 21:00. 20:59 is inside.
-        now = datetime(2026, 7, 7, 20, 59, tzinfo=timezone.utc)  # Tuesday
+    def test_edt_window_end_at_1959(self):
+        # EDT (Jul): window ends at 20:00 (NYSE close). 19:59 is inside.
+        now = datetime(2026, 7, 7, 19, 59, tzinfo=timezone.utc)  # Tuesday
         assert _is_agent_window(now) is True
 
-    def test_edt_window_end_at_2100(self):
-        # EDT (Jul): window ends at 21:00. 21:00 is outside.
-        now = datetime(2026, 7, 7, 21, 0, tzinfo=timezone.utc)  # Tuesday
+    def test_edt_window_end_at_2000(self):
+        # EDT (Jul): window ends at 20:00. 20:00 is outside.
+        now = datetime(2026, 7, 7, 20, 0, tzinfo=timezone.utc)  # Tuesday
         assert _is_agent_window(now) is False
 
-    def test_edt_2130_would_be_inside_est_but_outside_edt(self):
-        # 21:30 in summer (EDT): outside (window ends 21:00)
-        now = datetime(2026, 7, 7, 21, 30, tzinfo=timezone.utc)  # Tuesday
+    def test_edt_2030_would_be_inside_est_but_outside_edt(self):
+        # 20:30 in summer (EDT): outside (window ends 20:00)
+        now = datetime(2026, 7, 7, 20, 30, tzinfo=timezone.utc)  # Tuesday
         assert _is_agent_window(now) is False
 
-    def test_est_2130_inside(self):
-        # 21:30 in winter (EST): inside (window ends 22:00)
-        now = datetime(2026, 1, 6, 21, 30, tzinfo=timezone.utc)  # Tuesday
+    def test_est_2030_inside(self):
+        # 20:30 in winter (EST): inside (window ends 21:00)
+        now = datetime(2026, 1, 6, 20, 30, tzinfo=timezone.utc)  # Tuesday
         assert _is_agent_window(now) is True
 
 

@@ -157,11 +157,16 @@ def run(force_report=False, active_symbols=None):
     prices_usd = {}
     tf_data = {}
 
+    import time as _time
+    _run_start = _time.monotonic()
+
     for name, source in SYMBOLS.items():
         if name not in active:
             continue
         try:
+            _ticker_start = _time.monotonic()
             tfs = collect_timeframes(source)
+            _tf_elapsed = _time.monotonic() - _ticker_start
             tf_data[name] = tfs
 
             now_entry = tfs[0][1] if tfs else None
@@ -180,8 +185,15 @@ def run(force_report=False, active_symbols=None):
             price = ind["close"]
             prices_usd[name] = price
 
+            _sig_start = _time.monotonic()
             action, conf, extra = generate_signal(
                 ind, ticker=name, config=config, timeframes=tfs, df=now_df
+            )
+            _sig_elapsed = _time.monotonic() - _sig_start
+            _ticker_elapsed = _time.monotonic() - _ticker_start
+            logger.info(
+                "%s: timing: tf=%.1fs sig=%.1fs total=%.1fs",
+                name, _tf_elapsed, _sig_elapsed, _ticker_elapsed,
             )
             signals[name] = {
                 "action": action,
@@ -236,6 +248,13 @@ def run(force_report=False, active_symbols=None):
         except Exception as e:
             signals_failed += 1
             logger.error("%s: %s", name, e)
+
+    _run_elapsed = _time.monotonic() - _run_start
+    logger.info(
+        "Signal loop done: %d OK, %d failed in %.1fs (%.1fs/ticker avg)",
+        signals_ok, signals_failed, _run_elapsed,
+        _run_elapsed / max(signals_ok + signals_failed, 1),
+    )
 
     total = portfolio_value(state, prices_usd, fx_rate)
     pnl_pct = ((total - state["initial_value_sek"]) / state["initial_value_sek"]) * 100

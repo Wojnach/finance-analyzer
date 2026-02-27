@@ -31,7 +31,7 @@ MESSAGES_FILE = BASE_DIR / "data" / "telegram_messages.jsonl"
 _TELEGRAM_MAX_LENGTH = 4096
 
 # Categories whose messages should be sent to Telegram in addition to being saved.
-SEND_CATEGORIES = {"trade", "iskbets", "bigbet", "digest"}
+SEND_CATEGORIES = {"trade", "iskbets", "bigbet", "digest", "invocation", "analysis"}
 
 
 def log_message(text, category="analysis", sent=False):

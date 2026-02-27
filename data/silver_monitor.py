@@ -11,12 +11,7 @@ Run: .venv/Scripts/python.exe -u data/silver_monitor.py
 """
 import json, time, datetime, requests, sys, os, subprocess, shutil, platform
 from collections import deque
-from dataclasses import asdict
 from pathlib import Path
-
-# Add project root to path for portfolio imports
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from portfolio.orb_predictor import ORBPredictor, Prediction
 
 # === Config ===
 REFERENCE_PRICE = 90.55
@@ -44,16 +39,26 @@ ALERT_LEVELS = [
     (-12.5, "EMERGENCY"),    # warrant -59.5%, -89K SEK — instant TG
 ]
 
+# US market open pattern (from 22 trading days of 15m data, Jan 25 - Feb 25 2026)
+# US open = 14:30 UTC (15:30 CET winter time)
+US_OPEN_HOUR_UTC = 14
+US_OPEN_MIN_UTC = 30
+US_OPEN_STATS = {
+    "pre_open_mean_pct": -0.125,     # 13:30-14:30 UTC avg move
+    "post_open_mean_pct": -0.692,    # 14:30-15:30 UTC avg move — bearish lean
+    "post_open_up_pct": 45,          # 45% of days silver goes up post-open
+    "post_open_down_pct": 55,        # 55% of days silver goes down post-open
+    "post_open_avg_range_pct": 3.537, # avg high-low range in first hour
+    "post_open_max_range_pct": 12.895,# worst-case range
+    "volume_spike_avg": 3.2,         # volume multiplier vs EU session
+    "sample_days": 22,
+}
+
 # Load Telegram config
 with open(BASE_DIR / "config.json") as f:
     cfg = json.load(f)
 TG_TOKEN = cfg["telegram"]["token"]
 TG_CHAT = cfg["telegram"]["chat_id"]
-
-# === ORB Config ===
-ORB_MORNING_START_UTC = 8   # 09:00 CET = 08:00 UTC
-ORB_MORNING_END_UTC = 10    # 11:00 CET = 10:00 UTC
-ORB_PREDICTIONS_PATH = DATA_DIR / "orb_predictions_today.json"
 
 # === State ===
 price_history = deque(maxlen=VELOCITY_WINDOW)
@@ -67,84 +72,6 @@ start_time = None
 consecutive_down = 0
 prev_price = None
 analysis_count = 0
-
-# ORB state
-orb_predictor = ORBPredictor()
-orb_prediction: Prediction | None = None
-orb_historical_days = None
-
-
-def get_orb_phase() -> str:
-    """Determine current ORB phase based on UTC time.
-
-    Returns:
-        "pre_orb"           -- before 08:00 UTC (09:00 CET)
-        "gathering"         -- 08:00-10:00 UTC (09:00-11:00 CET), collecting morning range
-        "prediction_active" -- after 10:00 UTC (11:00 CET), predictions available
-    """
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
-    hour = now_utc.hour
-    if hour < ORB_MORNING_START_UTC:
-        return "pre_orb"
-    elif hour < ORB_MORNING_END_UTC:
-        return "gathering"
-    else:
-        return "prediction_active"
-
-
-def generate_orb_prediction():
-    """Fetch historical data and generate today's ORB prediction.
-
-    Called once after 10:00 UTC. Stores prediction in module-level state
-    and saves to data/orb_predictions_today.json.
-    """
-    global orb_prediction, orb_historical_days
-
-    try:
-        print("  [ORB] Fetching historical klines for prediction...")
-        klines = orb_predictor.fetch_klines(num_batches=5)
-        days = orb_predictor.group_by_day(klines, weekdays_only=True)
-        orb_historical_days = orb_predictor.calculate_all_days(klines)
-        print(f"  [ORB] Got {len(orb_historical_days)} valid historical days")
-
-        # Get today's date and candles
-        today_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
-        today_candles = days.get(today_str, [])
-
-        if not today_candles:
-            print(f"  [ORB] No candles found for today ({today_str})")
-            return
-
-        morning = orb_predictor.calculate_morning_range(today_candles)
-        if morning is None:
-            print("  [ORB] Insufficient morning data for prediction")
-            return
-
-        prediction = orb_predictor.predict_daily_range(
-            morning, orb_historical_days,
-            use_direction_filter=True,
-            use_range_filter=False,
-        )
-        if prediction is None:
-            print("  [ORB] Not enough historical data for prediction")
-            return
-
-        orb_prediction = prediction
-
-        # Save to file
-        pred_dict = asdict(prediction)
-        pred_dict["generated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with open(ORB_PREDICTIONS_PATH, "w", encoding="utf-8") as f:
-            json.dump(pred_dict, f, indent=2, ensure_ascii=False)
-
-        print(f"  [ORB] Prediction generated for {prediction.date}")
-        print(f"  [ORB] Morning: HIGH ${morning.high:.2f} LOW ${morning.low:.2f} DIR={morning.direction}")
-        print(f"  [ORB] Predicted HIGH (med): ${prediction.predicted_high_median:.2f}")
-        print(f"  [ORB] Predicted LOW  (med): ${prediction.predicted_low_median:.2f}")
-        print(f"  [ORB] Sample: {prediction.sample_size} days, Filters: {prediction.filters_applied}")
-
-    except Exception as e:
-        print(f"  [ORB] Error generating prediction: {e}")
 
 
 def fetch_price():
@@ -222,7 +149,18 @@ def calc_warrant(price):
     return pct, wpct, wsek
 
 
+def _is_market_hours():
+    """Check if current time is within EU+US market hours (07:00-21:00 UTC weekdays)."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if now.weekday() >= 5:  # weekend
+        return False
+    return 7 <= now.hour < 21
+
+
 def send_telegram(msg):
+    if not _is_market_hours():
+        print("  >> TG SKIPPED (outside EU+US market hours)")
+        return False
     try:
         r = requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
@@ -323,104 +261,156 @@ def gather_analysis_data(price):
     if "gold_price" in data["context"] and price > 0:
         data["context"]["gold_silver_ratio"] = round(data["context"]["gold_price"] / price, 2)
 
-    # ORB prediction data
-    orb_phase = get_orb_phase()
-    data["orb"] = {"phase": orb_phase}
-    if orb_prediction is not None:
-        pred = orb_prediction
-        data["orb"]["prediction"] = {
-            "morning_high": pred.morning_high,
-            "morning_low": pred.morning_low,
-            "morning_direction": pred.morning_direction,
-            "morning_range_pct": round(pred.morning_range_pct, 3),
-            "predicted_high_conservative": round(pred.predicted_high_conservative, 2),
-            "predicted_high_median": round(pred.predicted_high_median, 2),
-            "predicted_high_aggressive": round(pred.predicted_high_aggressive, 2),
-            "predicted_low_conservative": round(pred.predicted_low_conservative, 2),
-            "predicted_low_median": round(pred.predicted_low_median, 2),
-            "predicted_low_aggressive": round(pred.predicted_low_aggressive, 2),
-            "sample_size": pred.sample_size,
-            "filters": pred.filters_applied,
-        }
-        # Add proximity to predicted levels
-        data["orb"]["proximity"] = {
-            "pct_from_pred_high": round((price - pred.predicted_high_median) / pred.predicted_high_median * 100, 3),
-            "pct_from_pred_low": round((price - pred.predicted_low_median) / pred.predicted_low_median * 100, 3),
-            "in_buy_zone": price <= pred.predicted_low_conservative,
-            "in_sell_zone": price >= pred.predicted_high_conservative,
-        }
-        # Warrant translations for predicted targets
-        buy_wt = orb_predictor.translate_to_warrant(
-            pred.predicted_low_median, REFERENCE_PRICE, LEVERAGE, POSITION_SEK)
-        sell_wt = orb_predictor.translate_to_warrant(
-            pred.predicted_high_median, REFERENCE_PRICE, LEVERAGE, POSITION_SEK)
-        data["orb"]["warrant_targets"] = {
-            "buy_target_price": round(pred.predicted_low_median, 2),
-            "buy_warrant_pnl_sek": round(buy_wt.warrant_sek_pnl, 0),
-            "sell_target_price": round(pred.predicted_high_median, 2),
-            "sell_warrant_pnl_sek": round(sell_wt.warrant_sek_pnl, 0),
-            "spread_sek": round(sell_wt.warrant_sek_pnl - buy_wt.warrant_sek_pnl, 0),
+    # US market open proximity context
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    us_open_today = now_utc.replace(hour=US_OPEN_HOUR_UTC, minute=US_OPEN_MIN_UTC, second=0, microsecond=0)
+    minutes_to_open = (us_open_today - now_utc).total_seconds() / 60
+    if minutes_to_open < -120:  # more than 2h past open, not relevant
+        us_open_phase = "post_open_settled"
+    elif minutes_to_open < -60:
+        us_open_phase = "post_open_late"
+    elif minutes_to_open < 0:
+        us_open_phase = "post_open_active"  # first hour after open — high risk
+    elif minutes_to_open < 60:
+        us_open_phase = "pre_open"  # within 1h of open — positioning happening
+    else:
+        us_open_phase = "not_near_open"
+
+    data["us_market_open"] = {
+        "phase": us_open_phase,
+        "minutes_to_open": round(minutes_to_open, 0),
+        "historical_stats": US_OPEN_STATS,
+        "risk_note": (
+            "CAUTION: US open in <60 min. Historically silver drops -0.69% avg in the first hour "
+            "post-open (55% down days), with 3.5% avg range (=16.8% warrant swing) and 3.2x volume spike. "
+            "Consider tightening risk or exiting before the volatility hits."
+            if us_open_phase == "pre_open" else
+            "HIGH VOLATILITY WINDOW: US market just opened. First hour averages 3.5% range "
+            "(=16.8% warrant swing). Historical bias is -0.69% (bearish lean). Watch for volume-driven "
+            "moves — this is where big drops happen."
+            if us_open_phase == "post_open_active" else
+            None
+        ),
+    }
+
+    # Session context — price history and previous decisions
+    if session_prices:
+        prices_only = [p for _, p in session_prices]
+        s_low, s_high = min(prices_only), max(prices_only)
+        s_range_pct = round((s_high - s_low) / s_low * 100, 3) if s_low > 0 else 0
+        # Last 30 min of prices for recent trajectory
+        cutoff_30m = time.time() - 1800
+        recent = [p for t, p in session_prices if t >= cutoff_30m]
+        r_low, r_high = (min(recent), max(recent)) if recent else (price, price)
+        r_range_pct = round((r_high - r_low) / r_low * 100, 3) if r_low > 0 else 0
+        # Trend: compare first vs last quarter of recent prices
+        if len(recent) >= 4:
+            q1_avg = sum(recent[:len(recent)//4]) / (len(recent)//4)
+            q4_avg = sum(recent[-len(recent)//4:]) / (len(recent)//4)
+            trend = "rising" if q4_avg > q1_avg + 0.01 else "falling" if q4_avg < q1_avg - 0.01 else "flat"
+        else:
+            trend = "insufficient_data"
+        data["session_context"] = {
+            "session_duration_min": round((time.time() - session_prices[0][0]) / 60, 1),
+            "total_ticks": len(session_prices),
+            "session_low": s_low,
+            "session_high": s_high,
+            "session_range_pct": s_range_pct,
+            "last_30m_low": r_low,
+            "last_30m_high": r_high,
+            "last_30m_range_pct": r_range_pct,
+            "last_30m_trend": trend,
+            "previous_analyses": [
+                {"cycle": h["cycle"], "decision": h["decision"], "price": h["price"]}
+                for h in analysis_history[-5:]
+            ],
         }
 
     return data
 
 
 def invoke_claude_analysis(data_path):
-    """Invoke Claude Code to analyze silver data and send Telegram."""
+    """Invoke Claude Code for deep silver analysis with news research."""
     claude_cmd = shutil.which("claude")
     if not claude_cmd:
         print("  [!] claude not found on PATH, skipping analysis")
         return False
 
-    # Build ORB context for prompt
-    orb_prompt_section = ""
-    if orb_prediction is not None:
-        pred = orb_prediction
-        orb_prompt_section = (
-            f"\n\nORB PREDICTION (Opening Range Breakout):\n"
-            f"Morning range (9-11 CET): HIGH ${pred.morning_high:.2f} LOW ${pred.morning_low:.2f} DIR={pred.morning_direction}\n"
-            f"Predicted day HIGH (median): ${pred.predicted_high_median:.2f} (conservative: ${pred.predicted_high_conservative:.2f}, aggressive: ${pred.predicted_high_aggressive:.2f})\n"
-            f"Predicted day LOW (median): ${pred.predicted_low_median:.2f} (conservative: ${pred.predicted_low_conservative:.2f}, aggressive: ${pred.predicted_low_aggressive:.2f})\n"
-            f"Based on {pred.sample_size} historical days. Filters: {pred.filters_applied or 'none'}.\n"
-            f"Use these levels as additional context: if price is near predicted high, consider profit-taking risk. "
-            f"If near predicted low, it may be a support zone.\n"
-        )
-    else:
-        phase = get_orb_phase()
-        if phase == "pre_orb":
-            orb_prompt_section = "\n\nORB: Pre-market phase (before 09:00 CET). No prediction yet.\n"
-        elif phase == "gathering":
-            orb_prompt_section = "\n\nORB: Gathering morning range (09:00-11:00 CET). Prediction available after 11:00 CET.\n"
+    prompt = """You are a silver market analyst monitoring a live LONG position (MINI L SILVER AVA 301, 150K SEK, 4.76x leverage, intraday hold).
 
-    prompt = (
-        "Read data/silver_analysis.json. This is a live silver LONG position (MINI L SILVER AVA 301, 150K SEK, 4.76x leverage, holding a few hours).\n\n"
-        "Look at RSI across 1m/5m/15m/1h, MACD deltas, BB position, volume ratios, and price momentum.\n"
-        f"{orb_prompt_section}\n"
-        "Decide: HOLD, WARNING, or EXIT.\n"
-        "- HOLD = trend OK, no danger. Do NOT send any Telegram.\n"
-        "- WARNING = signs of reversal (RSI rolling, momentum fading, volume dying). Send Telegram.\n"
-        "- EXIT = clear reversal or overbought breakdown. Send Telegram.\n\n"
-        "Write and execute data/silver_tg_send.py:\n"
-        "```python\n"
-        "import json, datetime, requests\n"
-        "decision = 'HOLD'  # or 'WARNING' or 'EXIT' -- set based on your analysis\n"
-        "bold = '...'  # 1 sentence: breakout continuation or exhaustion?\n"
-        "patient = '...'  # 1 sentence: risk assessment\n"
-        "price = ...  # from silver_analysis.json\n"
-        "warrant_pct = ...  # from silver_analysis.json\n"
-        "warrant_sek = ...  # from silver_analysis.json\n"
-        "msg = f'*XAG {decision}: ${price:.2f}*\\n`W: {warrant_pct:+.1f}% = {warrant_sek:+,.0f} SEK`\\nBold: {bold}\\nPatient: {patient}'\n"
-        "config = json.load(open('config.json'))\n"
-        "entry = {'ts': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'text': msg, 'category': 'analysis', 'decision': decision, 'sent': decision != 'HOLD'}\n"
-        "with open('data/telegram_messages.jsonl', 'a') as f: f.write(json.dumps(entry) + '\\n')\n"
-        "if decision != 'HOLD':\n"
-        "    requests.post(f\"https://api.telegram.org/bot{config['telegram']['token']}/sendMessage\", json={'chat_id': config['telegram']['chat_id'], 'text': msg, 'parse_mode': 'Markdown'})\n"
-        "    print(f'Telegram sent: {decision}')\n"
-        "else:\n"
-        "    print(f'HOLD -- no Telegram')\n"
-        "```\n"
-        "Adjust the decision, bold, patient, and values based on your analysis. Then run it."
-    )
+## Step 1: Read your previous research
+Read data/silver_research.md — this is YOUR persistent memory. It contains your previous thesis, news findings, risk factors, and analysis log from prior cycles. Use this to maintain continuity.
+
+## Step 2: Read technical data
+Read data/silver_analysis.json for current technicals (RSI, MACD, BB, volume across 1m/5m/15m/1h), session context, and US market open proximity.
+
+## Step 3: News & macro research
+Search the web for recent silver-moving news. Focus on:
+- "silver price today" — what's driving the current move?
+- "gold silver ratio" — is the ratio compressing or expanding?
+- "US dollar DXY today" — dollar strength is silver's biggest headwind
+- "COMEX silver" or "silver futures" — any unusual positioning?
+- "tariff silver" or "trade war metals" — tariffs directly impact silver demand
+- "Fed rate decision" or "FOMC" — rate expectations move precious metals
+- "silver industrial demand" — solar/EV/electronics demand news
+- Any breaking geopolitical news (wars, sanctions) that affects safe-haven flows
+
+Do 2-3 targeted web searches. Focus on news from the last 24 hours that could move the price TODAY.
+
+## Step 4: Synthesize analysis
+Combine technicals + news + your previous thesis into a decision. Consider:
+
+**Session context rules:**
+- If session_range_pct < 0.5% and last_30m_range_pct < 0.3%, price is just oscillating — do NOT warn on stale overbought/oversold readings.
+- If previous analyses already decided WARNING for the same condition and price hasn't worsened, decide HOLD.
+
+**US market open rules:**
+- Check `us_market_open.phase` and `risk_note`. Historical data (22 days): silver averages -0.69% in first hour post-open, 55% down days, 3.5% avg range (=16.8% warrant swing), 3.2x volume spike.
+- Pre-open phase (<60 min): warn about incoming volatility.
+- Post-open active (first 60 min): danger zone — if price falling with volume, strongly consider EXIT.
+
+**News impact assessment:**
+- Tariff announcements or trade war escalation: HIGH impact on silver (can be +/- 3-5%)
+- Fed/FOMC hawkish surprise: NEGATIVE for silver (dollar up = silver down)
+- Geopolitical tension: POSITIVE for silver (safe haven)
+- Dollar weakness: POSITIVE for silver
+- Industrial demand news: moderate impact, directional
+
+## Step 5: Update your research document
+Edit data/silver_research.md to update:
+- **Current Thesis**: Your updated view (1-2 sentences)
+- **Key News & Catalysts**: What you found from web searches (keep last 5 items, remove stale ones)
+- **Price Drivers Today**: What's moving silver right now
+- **Risk Factors**: What could cause a sudden move against our position
+- **Analysis Log**: Append a 1-line entry with timestamp, price, decision, and key reason. Keep only the last 10 entries — delete older ones to prevent the file from growing.
+
+## Step 6: Decide and execute
+Decide: HOLD, WARNING, or EXIT.
+- HOLD = technicals OK, no threatening news, range-bound. Do NOT send Telegram.
+- WARNING = genuine new risk (bearish news, technical breakdown, US open danger). Send Telegram.
+- EXIT = clear and present danger (major news, confirmed reversal, big volume sell-off). Send Telegram.
+
+Write and execute data/silver_tg_send.py:
+```python
+import json, datetime, requests
+decision = 'HOLD'  # or 'WARNING' or 'EXIT'
+# For WARNING/EXIT, include the NEWS REASON in the message
+news_factor = '...'  # 1 sentence: key news/catalyst driving the decision (or 'No news catalyst' for technical-only)
+technical = '...'  # 1 sentence: technical assessment
+price = ...  # from silver_analysis.json
+warrant_pct = ...  # from silver_analysis.json
+warrant_sek = ...  # from silver_analysis.json
+msg = f'*XAG {decision}: ${price:.2f}*\\n`W: {warrant_pct:+.1f}% = {warrant_sek:+,.0f} SEK`\\nNews: {news_factor}\\nTech: {technical}'
+config = json.load(open('config.json'))
+entry = {'ts': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'text': msg, 'category': 'analysis', 'decision': decision, 'sent': decision != 'HOLD'}
+with open('data/telegram_messages.jsonl', 'a') as f: f.write(json.dumps(entry) + '\\n')
+if decision != 'HOLD':
+    requests.post(f"https://api.telegram.org/bot{config['telegram']['token']}/sendMessage", json={'chat_id': config['telegram']['chat_id'], 'text': msg, 'parse_mode': 'Markdown'})
+    print(f'Telegram sent: {decision}')
+else:
+    print(f'HOLD -- no Telegram')
+```
+Adjust all values based on your analysis. Then run it."""
 
     env = os.environ.copy()
     env.pop("CLAUDECODE", None)
@@ -432,16 +422,16 @@ def invoke_claude_analysis(data_path):
         with open(log_path, "a", encoding="utf-8") as log_fh:
             proc = subprocess.Popen(
                 [claude_cmd, "-p", prompt,
-                 "--allowedTools", "Read,Bash,Write",
-                 "--model", "haiku",
-                 "--max-turns", "15"],
+                 "--allowedTools", "Read,Edit,Bash,Write,WebSearch,WebFetch",
+                 "--model", "sonnet",
+                 "--max-turns", "20"],
                 cwd=str(BASE_DIR),
                 env=env,
                 stdout=log_fh,
                 stderr=subprocess.STDOUT,
             )
-            # Wait up to 120s
-            proc.wait(timeout=120)
+            # Wait up to 180s (Sonnet + web research takes longer)
+            proc.wait(timeout=180)
             print(f"  -> Claude finished (exit {proc.returncode})")
             return proc.returncode == 0
     except subprocess.TimeoutExpired:
@@ -501,31 +491,19 @@ def main():
             prev_price = price
 
             price_history.append(price)
+            session_prices.append((time.time(), price))
 
             if session_low is None or price < session_low:
                 session_low = price
             if session_high is None or price > session_high:
                 session_high = price
 
-            # === ORB Phase Detection & Prediction ===
-            orb_phase = get_orb_phase()
-            if orb_phase == "prediction_active" and orb_prediction is None:
-                generate_orb_prediction()
-
             # Status line
             ts = now.strftime("%H:%M:%S")
             next_analysis = max(0, ANALYSIS_INTERVAL - (time.time() - last_analysis_ts))
-            orb_tag = ""
-            if orb_phase == "gathering":
-                orb_tag = " [ORB:gathering]"
-            elif orb_phase == "prediction_active" and orb_prediction is not None:
-                dist_high = (price - orb_prediction.predicted_high_median) / orb_prediction.predicted_high_median * 100
-                dist_low = (price - orb_prediction.predicted_low_median) / orb_prediction.predicted_low_median * 100
-                orb_tag = f" [ORB:H{dist_high:+.1f}%|L{dist_low:+.1f}%]"
             print(f"[{ts}] ${price:.2f} ({pct_change:+.2f}%) W:{warrant_pct:+.1f}% ({warrant_sek:+,.0f}) "
                   f"Lo:{session_low:.2f} Hi:{session_high:.2f} "
-                  f"{'v' + str(consecutive_down) if consecutive_down >= 3 else ''}"
-                  f"{orb_tag} "
+                  f"{'v' + str(consecutive_down) if consecutive_down >= 3 else ''} "
                   f"[next analysis: {next_analysis:.0f}s]")
 
             # === Mechanical threshold alerts (instant, no Claude needed) ===
@@ -581,6 +559,22 @@ def main():
 
                 # Invoke Claude
                 success = invoke_claude_analysis(analysis_path)
+                # Record this analysis cycle for session context
+                analysis_history.append({
+                    "cycle": analysis_count,
+                    "price": price,
+                    "decision": "unknown",  # updated below if we can read it
+                    "ts": time.time(),
+                })
+                # Try to read back the decision Claude made
+                try:
+                    tg_lines = open(DATA_DIR / "telegram_messages.jsonl", "r", encoding="utf-8").readlines()
+                    if tg_lines:
+                        last = json.loads(tg_lines[-1])
+                        if last.get("category") == "analysis":
+                            analysis_history[-1]["decision"] = last.get("decision", "unknown")
+                except Exception:
+                    pass
                 if not success:
                     # Log locally only — no Telegram on fallback
                     t = data.get("technicals", {})

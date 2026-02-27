@@ -283,7 +283,7 @@ class TestClassifyTierOne:
 
     def test_sentiment_reason_returns_tier_1(self):
         state = _base_state()
-        reasons = ["RXRX sentiment negative->positive (sustained)"]
+        reasons = ["SOUN sentiment negative->positive (sustained)"]
         assert classify_tier(reasons, state=state) == 1
 
     def test_empty_reasons_returns_tier_1(self):

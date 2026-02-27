@@ -533,6 +533,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
 
         for sig_name, entry in _enhanced_entries.items():
             try:
+                _sig_t0 = time.monotonic()
                 compute_fn = load_signal_func(entry)
                 if compute_fn is None:
                     votes[sig_name] = "HOLD"
@@ -543,6 +544,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                     result = compute_fn(df, macro=macro_data or None)
                 else:
                     result = compute_fn(df)
+                _sig_dt = time.monotonic() - _sig_t0
+                if _sig_dt > 1.0:
+                    logger.info("[SLOW] %s/%s: %.1fs", ticker, sig_name, _sig_dt)
                 if result and isinstance(result, dict):
                     extra_info[f"{sig_name}_action"] = result.get("action", "HOLD")
                     extra_info[f"{sig_name}_confidence"] = result.get("confidence", 0.0)

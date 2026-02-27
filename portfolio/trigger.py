@@ -173,7 +173,7 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
                 break
 
     # 5. Sentiment reversal — sustained for SUSTAINED_CHECKS cycles
-    #    Prevents rapid oscillation (e.g. RXRX flipping every cycle) from
+    #    Prevents rapid oscillation (e.g. a ticker flipping every cycle) from
     #    triggering. Only fires when sentiment is stable in the new direction
     #    for SUSTAINED_CHECKS consecutive cycles.
     sustained_sent = state.get("sustained_sentiment", {})

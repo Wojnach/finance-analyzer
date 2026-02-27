@@ -148,26 +148,27 @@ def _git_sync():
             **kwargs,
         )
 
-    # 1. Pull latest (avoid conflicts from manual edits)
-    result = _run(["git", "pull", "--rebase", "origin", "master"])
-    if result.returncode != 0:
-        # If rebase fails, abort and bail
-        _run(["git", "rebase", "--abort"])
-        log.error("git pull --rebase failed: %s", result.stderr.strip())
-        return False
-
-    # 2. Stage only data files
+    # 1. Stage data files first (before pull, to avoid unstaged changes error)
     _run(["git", "add", "bets/data/"])
 
-    # 3. Check if anything changed
+    # 2. Check if anything changed
     result = _run(["git", "diff", "--cached", "--quiet"])
     if result.returncode == 0:
         log.info("No data changes — skipping commit")
         return True
 
-    # 4. Commit
+    # 3. Commit locally
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     _run(["git", "commit", "-m", f"sync: dashboard data {ts}"])
+
+    # 4. Stash any leftover unstaged changes, pull, then drop stash
+    _run(["git", "stash", "--include-untracked"])
+    result = _run(["git", "pull", "--rebase", "origin", "master"])
+    _run(["git", "stash", "pop"])  # restore stashed changes (ok if nothing stashed)
+    if result.returncode != 0:
+        _run(["git", "rebase", "--abort"])
+        log.error("git pull --rebase failed: %s", result.stderr.strip())
+        return False
 
     # 5. Push
     result = _run(["git", "push", "origin", "master"])

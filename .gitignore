@@ -118,3 +118,4 @@ training/lora/state.json
 training/lora/logs/
 .venv-train/
 llama.cpp/
+nul
