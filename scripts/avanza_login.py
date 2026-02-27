@@ -20,21 +20,30 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 SESSION_FILE = DATA_DIR / "avanza_session.json"
 
-LOGIN_URL = "https://www.avanza.se/logga-in"
-# After successful BankID login, Avanza redirects to the start page
-POST_LOGIN_URLS = ("/start", "/hem", "/min-ekonomi", "/mina-sidor")
+START_URL = "https://www.avanza.se"
+# Known login page paths (we wait until user leaves these)
+LOGIN_PATHS = ("/logga-in", "/login")
 # API base for test calls
 API_BASE = "https://www.avanza.se"
 
 
-def _is_logged_in(url: str) -> bool:
-    """Check if the current URL indicates successful login."""
-    from urllib.parse import urlparse
-    path = urlparse(url).path
-    # Logged in if NOT on login page and on a known authenticated route
-    if "/logga-in" in path:
-        return False
-    return any(path.startswith(p) for p in POST_LOGIN_URLS) or path == "/"
+def _is_logged_in(captured_tokens: dict, cookies=None) -> bool:
+    """Check if user has authenticated via BankID.
+
+    Requires strong evidence: customer_id from auth response, or
+    csid+cstoken cookies (only set after BankID authentication).
+    The x-securitytoken header alone is NOT enough — it appears
+    in pre-login analytics responses too.
+    """
+    # Strong signal: customer_id captured from auth API response
+    if "customer_id" in captured_tokens:
+        return True
+    # Strong signal: csid + cstoken cookies (only set after BankID)
+    if cookies:
+        cookie_names = {c["name"] for c in cookies}
+        if "csid" in cookie_names and "cstoken" in cookie_names:
+            return True
+    return False
 
 
 def run_login():
@@ -49,7 +58,9 @@ def run_login():
     captured_tokens = {}
 
     print("Launching Chromium browser...")
-    print("Please log in with BankID when the browser opens.")
+    print("1. Click 'Logga in' on the Avanza page")
+    print("2. Authenticate with BankID on your phone")
+    print("3. The script will detect login automatically and save your session")
     print()
 
     with sync_playwright() as p:
@@ -60,30 +71,59 @@ def run_login():
         )
         page = context.new_page()
 
-        # Intercept API responses to capture security tokens
+        # Intercept both requests AND responses to capture auth flow
+        def handle_request(request):
+            url = request.url
+            if "avanza.se" in url and "_api" in url:
+                headers = request.headers
+                # Log request auth headers (what the browser SENDS)
+                auth_headers = {
+                    k: v for k, v in headers.items()
+                    if any(t in k.lower() for t in ("securi", "auth", "token", "session", "csrf", "cookie"))
+                }
+                if auth_headers:
+                    print(f"  [REQ] {url[:100]}")
+                    for k, v in auth_headers.items():
+                        val = v[:120] if len(v) < 200 else v[:120] + "..."
+                        print(f"    >> {k}: {val}")
+                        # Capture request headers as the "real" auth tokens
+                        kl = k.lower()
+                        if kl == "x-securitytoken":
+                            captured_tokens["security_token"] = v
+                        elif kl in ("x-authenticationsession", "x-authenticationssession"):
+                            captured_tokens["authentication_session"] = v
+
         def handle_response(response):
             url = response.url
-            # Avanza returns auth tokens in response headers of API calls
             headers = response.headers
-            if "x-securitytoken" in headers:
-                captured_tokens["security_token"] = headers["x-securitytoken"]
-            if "x-authenticationSession" in headers:
-                captured_tokens["authentication_session"] = headers[
-                    "x-authenticationSession"
+
+            # Debug: log API response status
+            if "avanza.se" in url and "_api" in url:
+                print(f"  [RES] {response.status} {url[:100]}")
+
+            # Capture tokens from response headers
+            lower_headers = {k.lower(): v for k, v in headers.items()}
+            # Only set from response if not already set from request
+            if "x-securitytoken" in lower_headers and "security_token" not in captured_tokens:
+                captured_tokens["security_token"] = lower_headers["x-securitytoken"]
+            if "x-authenticationsession" in lower_headers and "authentication_session" not in captured_tokens:
+                captured_tokens["authentication_session"] = lower_headers[
+                    "x-authenticationsession"
                 ]
-            # Also check response body for auth session info
-            if "/_api/authentication" in url or "/authentication/sessions" in url:
+
+            # Check response body for auth session info
+            if "_api" in url and ("auth" in url.lower() or "session" in url.lower()):
                 try:
                     body = response.json()
                     if isinstance(body, dict):
-                        if "authenticationSession" in body:
-                            captured_tokens["authentication_session"] = body[
-                                "authenticationSession"
-                            ]
+                        for key in ("authenticationSession", "authentication_session"):
+                            if key in body:
+                                captured_tokens["authentication_session"] = body[key]
                         if "customerId" in body:
                             captured_tokens["customer_id"] = str(body["customerId"])
-                        if "securityToken" in body:
-                            captured_tokens["security_token"] = body["securityToken"]
+                        for key in ("securityToken", "security_token"):
+                            if key in body:
+                                captured_tokens["security_token"] = body[key]
                         if "maxInactiveMinutes" in body:
                             captured_tokens["max_inactive_minutes"] = body[
                                 "maxInactiveMinutes"
@@ -91,22 +131,44 @@ def run_login():
                 except Exception:
                     pass
 
+        page.on("request", handle_request)
         page.on("response", handle_response)
 
-        # Navigate to login page
-        page.goto(LOGIN_URL, wait_until="domcontentloaded")
-        print("Browser opened at Avanza login page.")
-        print("Waiting for BankID authentication...")
-        print("(This script will detect login automatically)")
+        # Navigate to Avanza main page (user clicks login themselves)
+        page.goto(START_URL, wait_until="domcontentloaded")
+        time.sleep(2)
+
+        # Try to dismiss cookie consent banner
+        for selector in [
+            "button:has-text('Acceptera')",
+            "button:has-text('acceptera')",
+            "button:has-text('Godkänn')",
+            "[data-testid='cookie-accept']",
+            "#onetrust-accept-btn-handler",
+        ]:
+            try:
+                btn = page.locator(selector).first
+                if btn.is_visible(timeout=1000):
+                    btn.click()
+                    print("Dismissed cookie banner.")
+                    break
+            except Exception:
+                continue
+
+        print("Browser opened. Click 'Logga in' and authenticate with BankID.")
+        print("Waiting for login...")
         print()
 
-        # Wait for login — poll URL changes
+        # Wait for login — check captured tokens + URL changes
         max_wait = 300  # 5 minutes
         start = time.time()
         while time.time() - start < max_wait:
             current_url = page.url
-            if _is_logged_in(current_url):
-                print(f"Login detected! Redirected to: {current_url}")
+            cookies_now = context.cookies()
+            if _is_logged_in(captured_tokens, cookies_now):
+                print(f"Login detected! URL: {current_url}")
+                if captured_tokens:
+                    print(f"  Captured tokens: {list(captured_tokens.keys())}")
                 break
             time.sleep(1)
         else:
@@ -127,6 +189,23 @@ def run_login():
                 f"{API_BASE}/min-ekonomi/konton", wait_until="domcontentloaded"
             )
             time.sleep(3)
+
+        # Save Playwright storage state (cookies + localStorage)
+        # This can be reloaded in a headless browser for API calls
+        STORAGE_FILE = DATA_DIR / "avanza_storage_state.json"
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        context.storage_state(path=str(STORAGE_FILE))
+        print(f"Browser storage state saved to {STORAGE_FILE}")
+
+        # Also make a test API call from the browser to verify auth works
+        print("Verifying API access from browser...")
+        test_resp = context.request.get(
+            f"{API_BASE}/_api/position-data/positions"
+        )
+        if test_resp.ok:
+            print(f"  API test OK! Status: {test_resp.status}")
+        else:
+            print(f"  API test failed: {test_resp.status} {test_resp.text[:200]}")
 
         # Extract cookies from the browser context
         cookies = context.cookies()

@@ -1,7 +1,8 @@
 """Avanza session management — load, validate, and use BankID-captured sessions.
 
-Provides a lightweight requests.Session wrapper that uses cookies + security
-token from a BankID browser login (saved by scripts/avanza_login.py).
+Uses Playwright's saved storage state to make authenticated API calls via a
+headless browser context. This ensures cookies and TLS session match what
+Avanza expects (replaying cookies via requests library causes 401s).
 
 This is the preferred auth method until TOTP credentials are configured.
 """
@@ -12,17 +13,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-import requests
-
 logger = logging.getLogger("portfolio.avanza_session")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 SESSION_FILE = DATA_DIR / "avanza_session.json"
+STORAGE_STATE_FILE = DATA_DIR / "avanza_storage_state.json"
 API_BASE = "https://www.avanza.se"
 
 # Minimum remaining session life before we consider it expired (minutes)
 EXPIRY_BUFFER_MINUTES = 30
+
+# Module-level Playwright context (lazy-initialized, reused across calls)
+_pw_instance = None
+_pw_browser = None
+_pw_context = None
 
 
 class AvanzaSessionError(Exception):
@@ -30,10 +35,10 @@ class AvanzaSessionError(Exception):
 
 
 def load_session() -> dict:
-    """Load saved BankID session from disk.
+    """Load saved BankID session metadata from disk.
 
     Returns:
-        Session dict with cookies, security_token, etc.
+        Session dict with expiry info, customer_id, etc.
 
     Raises:
         AvanzaSessionError: if file missing, unreadable, or expired.
@@ -63,8 +68,11 @@ def load_session() -> dict:
         except ValueError:
             pass  # Can't parse expiry, proceed anyway
 
-    if not data.get("cookies"):
-        raise AvanzaSessionError("Session file has no cookies.")
+    if not STORAGE_STATE_FILE.exists():
+        raise AvanzaSessionError(
+            f"No storage state file at {STORAGE_STATE_FILE}. "
+            "Run: python scripts/avanza_login.py"
+        )
 
     return data
 
@@ -94,133 +102,141 @@ def is_session_expiring_soon(threshold_minutes: float = 60.0) -> bool:
     return remaining < threshold_minutes
 
 
-def create_requests_session(session_data: Optional[dict] = None) -> requests.Session:
-    """Create a requests.Session pre-loaded with Avanza cookies and headers.
+def _get_playwright_context():
+    """Get or create a headless Playwright browser context with saved auth state."""
+    global _pw_instance, _pw_browser, _pw_context
 
-    Args:
-        session_data: Pre-loaded session dict. If None, loads from file.
+    if _pw_context is not None:
+        return _pw_context
 
-    Returns:
-        Configured requests.Session ready for API calls.
+    # Validate session first
+    load_session()
 
-    Raises:
-        AvanzaSessionError: if session can't be loaded or is expired.
-    """
-    if session_data is None:
-        session_data = load_session()
+    from playwright.sync_api import sync_playwright
 
-    s = requests.Session()
-
-    # Load cookies
-    for cookie in session_data.get("cookies", []):
-        s.cookies.set(
-            cookie["name"],
-            cookie["value"],
-            domain=cookie.get("domain", ".avanza.se"),
-            path=cookie.get("path", "/"),
-        )
-
-    # Set security token header if available
-    security_token = session_data.get("security_token")
-    if security_token:
-        s.headers["X-SecurityToken"] = security_token
-
-    # Set auth session header if available
-    auth_session = session_data.get("authentication_session")
-    if auth_session:
-        s.headers["X-AuthenticationSession"] = auth_session
-
-    # Common headers
-    s.headers["Accept"] = "application/json"
-    s.headers["User-Agent"] = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    _pw_instance = sync_playwright().start()
+    _pw_browser = _pw_instance.chromium.launch(headless=True)
+    _pw_context = _pw_browser.new_context(
+        storage_state=str(STORAGE_STATE_FILE),
+        locale="sv-SE",
     )
+    return _pw_context
 
-    return s
+
+def close_playwright():
+    """Clean up Playwright resources."""
+    global _pw_instance, _pw_browser, _pw_context
+    if _pw_context:
+        try:
+            _pw_context.close()
+        except Exception:
+            pass
+        _pw_context = None
+    if _pw_browser:
+        try:
+            _pw_browser.close()
+        except Exception:
+            pass
+        _pw_browser = None
+    if _pw_instance:
+        try:
+            _pw_instance.stop()
+        except Exception:
+            pass
+        _pw_instance = None
 
 
-def verify_session(session: Optional[requests.Session] = None) -> bool:
+def verify_session() -> bool:
     """Verify that the session is valid by making a lightweight API call.
-
-    Args:
-        session: Existing session to verify. If None, creates one from file.
 
     Returns:
         True if session is valid, False otherwise.
     """
     try:
-        if session is None:
-            session = create_requests_session()
-        resp = session.get(
-            f"{API_BASE}/_api/position-data/positions",
-            timeout=10,
-        )
-        return resp.status_code == 200
+        ctx = _get_playwright_context()
+        resp = ctx.request.get(f"{API_BASE}/_api/position-data/positions")
+        return resp.ok
     except Exception as e:
         logger.warning("Session verification failed: %s", e)
+        close_playwright()
         return False
 
 
 # --- API convenience functions ---
 
 
-def api_get(path: str, session: Optional[requests.Session] = None, **kwargs) -> Any:
+def api_get(path: str, **kwargs) -> Any:
     """Make an authenticated GET request to Avanza API.
 
     Args:
         path: API path (e.g., "/_api/position-data/positions")
-        session: Pre-created session. If None, creates from file.
-        **kwargs: Additional kwargs passed to requests.get
 
     Returns:
         Parsed JSON response.
 
     Raises:
         AvanzaSessionError: if session is invalid.
-        requests.HTTPError: on non-2xx response.
     """
-    if session is None:
-        session = create_requests_session()
-    kwargs.setdefault("timeout", 15)
+    ctx = _get_playwright_context()
     url = f"{API_BASE}{path}" if path.startswith("/") else path
-    resp = session.get(url, **kwargs)
-    if resp.status_code == 401:
+    resp = ctx.request.get(url)
+    if resp.status == 401:
+        close_playwright()
         raise AvanzaSessionError(
             "Session returned 401 Unauthorized. "
             "Run: python scripts/avanza_login.py"
         )
-    resp.raise_for_status()
+    if not resp.ok:
+        raise RuntimeError(f"Avanza API error {resp.status}: {resp.text()[:500]}")
     return resp.json()
 
 
-def get_positions(session: Optional[requests.Session] = None) -> list[dict]:
+def get_positions() -> list[dict]:
     """Get all positions via session-based auth.
 
     Returns:
         List of position dicts with name, value, profit, etc.
     """
-    data = api_get("/_api/position-data/positions", session=session)
+    data = api_get("/_api/position-data/positions")
     positions = []
-    for category in data.get("withOrderbook", []):
-        for instrument in category.get("instruments", [category]):
-            positions.append({
-                "name": instrument.get("name", ""),
-                "orderbook_id": str(instrument.get("orderbookId", "")),
-                "volume": instrument.get("volume", 0),
-                "value": instrument.get("value", 0),
-                "profit": instrument.get("profit", 0),
-                "profit_percent": instrument.get("profitPercent", 0),
-                "currency": instrument.get("currency", "SEK"),
-                "last_price": instrument.get("lastPrice", 0),
-                "change_percent": instrument.get("changePercent", 0),
-            })
+    for entry in data.get("withOrderbook", []):
+        inst = entry.get("instrument", {})
+        orderbook = inst.get("orderbook", {})
+        quote = orderbook.get("quote", {})
+        volume_obj = entry.get("volume", {})
+        value_obj = entry.get("value", {})
+        acquired_obj = entry.get("acquiredValue", {})
+        perf = entry.get("lastTradingDayPerformance", {})
+        account = entry.get("account", {})
+
+        vol = volume_obj.get("value", 0) if isinstance(volume_obj, dict) else volume_obj
+        val = value_obj.get("value", 0) if isinstance(value_obj, dict) else value_obj
+        acq = acquired_obj.get("value", 0) if isinstance(acquired_obj, dict) else acquired_obj
+        latest = quote.get("latest", {})
+        last_price = latest.get("value", 0) if isinstance(latest, dict) else latest
+        change_pct_obj = quote.get("changePercent", {})
+        change_pct = change_pct_obj.get("value", 0) if isinstance(change_pct_obj, dict) else change_pct_obj
+
+        positions.append({
+            "name": inst.get("name", orderbook.get("name", "")),
+            "orderbook_id": str(orderbook.get("id", "")),
+            "instrument_id": str(inst.get("id", "")),
+            "type": inst.get("type", orderbook.get("type", "")),
+            "volume": vol,
+            "value": val,
+            "acquired_value": acq,
+            "profit": val - acq if val and acq else 0,
+            "profit_percent": ((val - acq) / acq * 100) if acq else 0,
+            "currency": inst.get("currency", "SEK"),
+            "last_price": last_price,
+            "change_percent": change_pct,
+            "account_id": account.get("id", ""),
+            "account_type": account.get("type", ""),
+        })
     return positions
 
 
-def get_instrument_price(
-    orderbook_id: str, session: Optional[requests.Session] = None
-) -> dict[str, Any]:
+def get_instrument_price(orderbook_id: str) -> dict[str, Any]:
     """Get price info for a specific instrument.
 
     Args:
@@ -234,11 +250,10 @@ def get_instrument_price(
         try:
             data = api_get(
                 f"/_api/market-guide/{instrument_type}/{orderbook_id}",
-                session=session,
             )
             return data
         except Exception:
             continue
 
     # Fallback: generic orderbook endpoint
-    return api_get(f"/_api/orderbook/{orderbook_id}", session=session)
+    return api_get(f"/_api/orderbook/{orderbook_id}")

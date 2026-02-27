@@ -230,10 +230,16 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
     result["indicators"]["kronos_circuit_open"] = _kronos_circuit_open()
     result["indicators"]["chronos_circuit_open"] = _chronos_circuit_open()
 
-    # Run Kronos
+    # Run Kronos (skip entirely if circuit breaker is open)
     t0 = time.time()
     kronos_key = f"kronos_forecast_{ticker}"
-    kronos = _cached(kronos_key, _FORECAST_TTL, _run_kronos, candles or [], (1, 24))
+    if _kronos_circuit_open():
+        kronos = None
+    else:
+        kronos = _cached(kronos_key, _FORECAST_TTL, _run_kronos, candles or [], (1, 24))
+        if kronos is None and not _kronos_circuit_open():
+            # _run_kronos returned None but didn't trip — force trip
+            _trip_kronos()
     kronos_ms = round((time.time() - t0) * 1000)
     result["indicators"]["kronos_time_ms"] = kronos_ms
 
@@ -251,10 +257,15 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
             result["indicators"]["kronos_24h_pct"] = kr["24h"].get("pct_move", 0)
             result["indicators"]["kronos_24h_conf"] = kr["24h"].get("confidence", 0)
 
-    # Run Chronos
+    # Run Chronos (skip entirely if circuit breaker is open)
     t0 = time.time()
     chronos_key = f"chronos_forecast_{ticker}"
-    chronos = _cached(chronos_key, _FORECAST_TTL, _run_chronos, close_prices, (1, 24))
+    if _chronos_circuit_open():
+        chronos = None
+    else:
+        chronos = _cached(chronos_key, _FORECAST_TTL, _run_chronos, close_prices, (1, 24))
+        if chronos is None and not _chronos_circuit_open():
+            _trip_chronos()
     chronos_ms = round((time.time() - t0) * 1000)
     result["indicators"]["chronos_time_ms"] = chronos_ms
 
