@@ -88,6 +88,7 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 - `data/fundamentals_cache.json` — Alpha Vantage OVERVIEW data for stocks (P/E, revenue growth, analyst targets, sector). Refreshed daily, stocks only (not crypto/metals). Available in `agent_summary_compact.json` → `fundamentals` section for held/interesting tickers.
 - `data/portfolio_state.json` — Patient strategy: current cash, holdings, transaction history
 - `data/portfolio_state_bold.json` — Bold strategy: current cash, holdings, transaction history
+- `data/portfolio_state_warrants.json` — Warrant holdings with leverage (MINI-SILVER 5x, etc.)
 - Trigger reasons — why you were invoked this time
 
 ### 2. Analyze
@@ -336,11 +337,17 @@ longer. Use the space — include detailed ticker grids, reasoning, context. The
 the full message on iPhone when they open it. No need to compress everything into a few
 lines. Stay under Telegram's 4096 char limit but use most of that budget.
 
-**Message format:** Keep it scannable on iPhone. Use monospace (backtick-wrapped) lines
-for the merged ticker grid. The vote format (`XB/YS/ZH`) is mandatory, do not invent
-alternatives.
+**Notification modes:** Check `config.json → notification.mode`:
+- `"signals"` (Mode A, default): Use the BUY/SELL ticker grid format below (unchanged)
+- `"probability"` (Mode B): Use the probability format for focus instruments (see below)
 
-**Sections (in order):**
+The mode can be switched via Telegram command: `/mode probability` or `/mode signals`.
+
+**Message format (Mode A — signals):** Keep it scannable on iPhone. Use monospace
+(backtick-wrapped) lines for the merged ticker grid. The vote format (`XB/YS/ZH`) is
+mandatory, do not invent alternatives.
+
+**Sections (in order, Mode A):**
 
 1. **First line** — Apple Watch glance
    - HOLD: `*HOLD* · SMCI 12B MU 10B · F&G 7/48` (action + top 1-2 movers by vote count + F&G crypto/stock)
@@ -397,6 +404,46 @@ _P:500K · B:326K(-7%) SMCI 43sh · DXY 98↑_
 Bold: Structural breakout — 12B, vol 2x, BB above upper. Entry confirmed.
 Patient: HOLD — need multi-TF confirmation.
 ```
+
+#### Mode B — Probability Format (Focus Instruments)
+
+When `config.notification.mode` is `"probability"`, use this format for focus instruments
+(`config.notification.focus_tickers`, default: `["XAG-USD", "BTC-USD"]`).
+
+**Focus instruments get rich format.** Non-focus tickers stay as compact grid (price + 7d change only).
+
+**Data sources for Mode B:**
+- `agent_summary_compact.json → focus_probabilities` — per-ticker directional probabilities at 3h/1d/3d
+- `agent_summary_compact.json → cumulative_gains` — rolling 1d/3d/7d price changes
+- `agent_summary_compact.json → warrant_portfolio` — warrant positions with leverage P&L
+- `data/portfolio_state_warrants.json` — warrant holdings (read list)
+
+Mode B HOLD example:
+
+```
+*PROB* · XAG ↑72% 3h · BTC ↓58% 3h
+
+`XAG  $89.5  ↑72% 3h  ↑68% 1d  ↑55% 3d`
+`  acc: 71% 1d (89 sam) | 7d: +12.4%`
+`  -> MINI-SILVER 5x: +40% (+38K SEK)`
+`  Claude: BUY (breakout, 5/7 TFs)`
+`BTC  $67K   ↓58% 3h  ↑52% 1d  ↑61% 3d`
+`  acc: 54% 1d (201 sam) | 7d: -3.2%`
+`  -> XBT Tracker: -3.2% (-1.6K SEK)`
+`  Claude: HOLD (ranging, no edge)`
+
+_P:497K MU 10sh · B:458K · W:MINI-SILVER +38K_
+Silver: strongest mover, 71% accuracy at 1d — high-conviction uptrend.
+BTC: coin-flip accuracy, don't trade on signals alone.
+```
+
+**Key Mode B differences from Mode A:**
+- First line shows `↑/↓` probability not BUY/SELL vote counts
+- Per-ticker accuracy + sample count on every message
+- Warrant P&L shown when positions held (from `warrant_portfolio`)
+- Cumulative 7d trend visible
+- Your BUY/HOLD/SELL call is secondary (supplementary interpretation)
+- Only focus instruments get the rich format (rest stays as compact grid)
 
 **ALWAYS save the message locally** (with category — `"trade"` for BUY/SELL, `"analysis"` for HOLD):
 
@@ -601,6 +648,23 @@ position in your reasoning.
 # Get sentiment
 .venv\Scripts\python.exe -u portfolio\sentiment.py
 ```
+
+## Notification Config
+
+```json
+// config.json → notification section:
+{
+  "notification": {
+    "mode": "probability",               // "signals" (Mode A) or "probability" (Mode B)
+    "focus_tickers": ["XAG-USD", "BTC-USD"],  // Mode B rich format instruments
+    "analysis_cooldown_seconds": 10800,   // 3h analysis message throttle
+    "daily_digest_hour_utc": 6,           // Daily digest at 06:00 UTC (07:00 CET)
+    "mover_thresholds": {"3d_pct": 5.0, "7d_pct": 10.0}  // Daily digest mover filter
+  }
+}
+```
+
+Switch mode via Telegram: `/mode probability` or `/mode signals`.
 
 ## Forward Tracking
 

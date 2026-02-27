@@ -1,7 +1,8 @@
-"""Telegram Poller — Background thread for ISKBETS commands.
+"""Telegram Poller — Background thread for ISKBETS + system commands.
 
 Polls getUpdates every 5 seconds. Parses bought/sold/cancel/status commands
-and delegates to iskbets.handle_command().
+and delegates to iskbets.handle_command(). Also handles /mode command for
+switching notification format (signals vs probability).
 """
 
 import json
@@ -91,16 +92,23 @@ class TelegramPoller:
         if cmd is None:
             return
 
-        # Delegate to handler
+        # Handle system commands internally
+        if cmd == "mode":
+            response = self._handle_mode_command(args)
+            if response:
+                self._send_reply(response)
+            return
+
+        # Delegate ISKBETS commands to handler
         response = self.on_command(cmd, args, self.config)
         if response:
             self._send_reply(response)
 
     def _parse_command(self, text):
-        """Parse ISKBETS commands from message text.
+        """Parse ISKBETS and system commands from message text.
 
         Returns (cmd, args) or (None, None) for non-commands.
-        Recognized: bought, sold, cancel, status
+        Recognized: bought, sold, cancel, status, /mode
         """
         text_lower = text.lower().strip()
         parts = text.split(None, 1)
@@ -110,7 +118,55 @@ class TelegramPoller:
         if first_word in ("bought", "sold", "cancel", "status"):
             return first_word, rest
 
+        # /mode command — switch notification format
+        if first_word in ("/mode", "mode"):
+            return "mode", rest.strip().lower()
+
         return None, None
+
+    def _handle_mode_command(self, mode_arg):
+        """Handle /mode command — switch notification format.
+
+        Args:
+            mode_arg: "signals" or "probability" (or empty to query current mode)
+
+        Returns:
+            Reply text for the user.
+        """
+        import json
+        from pathlib import Path
+        from portfolio.file_utils import atomic_write_json
+
+        config_path = Path(__file__).resolve().parent.parent / "config.json"
+
+        if not mode_arg:
+            # Query current mode
+            current = self.config.get("notification", {}).get("mode", "signals")
+            return f"Current notification mode: *{current}*"
+
+        if mode_arg not in ("signals", "probability"):
+            return "Usage: `/mode signals` or `/mode probability`"
+
+        # Update config.json
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            cfg = {}
+
+        if "notification" not in cfg:
+            cfg["notification"] = {}
+        cfg["notification"]["mode"] = mode_arg
+
+        atomic_write_json(config_path, cfg)
+
+        # Update in-memory config
+        if "notification" not in self.config:
+            self.config["notification"] = {}
+        self.config["notification"]["mode"] = mode_arg
+
+        logger.info("Notification mode changed to: %s", mode_arg)
+        return f"Notification mode set to *{mode_arg}*"
 
     def _send_reply(self, text):
         """Send a reply to the user."""
