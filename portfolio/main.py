@@ -263,6 +263,13 @@ def run(force_report=False, active_symbols=None):
     if not STATE_FILE.exists():
         save_state(state)
 
+    # Log hourly price snapshot for cumulative tracking
+    try:
+        from portfolio.cumulative_tracker import maybe_log_hourly_snapshot
+        maybe_log_hourly_snapshot(prices_usd)
+    except Exception as e:
+        logger.warning("hourly snapshot failed: %s", e)
+
     # Smart trigger
     from portfolio.trigger import check_triggers
 

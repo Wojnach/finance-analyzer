@@ -395,6 +395,24 @@ def build_context(entries, portfolio_data=None, now=None):
             )
         lines.append("")
 
+    # Warrant positions
+    try:
+        from portfolio.warrant_portfolio import load_warrant_state
+        w_state = load_warrant_state()
+        w_holdings = w_state.get("holdings", {})
+        if w_holdings:
+            lines.append("### Warrant Positions")
+            lines.append("")
+            for key, h in w_holdings.items():
+                name = h.get("name", key)
+                underlying = h.get("underlying", "?")
+                leverage = h.get("leverage", 1)
+                units = h.get("units", 0)
+                lines.append(f"**{name}** ({underlying} {leverage}x): {units} units")
+            lines.append("")
+    except Exception:
+        pass
+
     warns = _detect_warnings(entries)
     if warns:
         lines.append("### Warnings")

@@ -304,6 +304,37 @@ def write_agent_summary(
     except Exception:
         pass
 
+    # Focus probabilities (Mode B — directional probabilities for focus tickers)
+    try:
+        from portfolio.api_utils import load_config as _load_cfg
+        _cfg = _load_cfg()
+        focus_tickers = _cfg.get("notification", {}).get("focus_tickers", [])
+        if focus_tickers:
+            from portfolio.ticker_accuracy import get_focus_probabilities
+            focus_probs = get_focus_probabilities(focus_tickers, signals)
+            if focus_probs:
+                summary["focus_probabilities"] = focus_probs
+    except Exception:
+        logger.debug("Focus probabilities failed", exc_info=True)
+
+    # Cumulative price changes (rolling 1d/3d/7d)
+    try:
+        from portfolio.cumulative_tracker import get_cumulative_summary
+        cumulative = get_cumulative_summary()
+        if cumulative and cumulative.get("ticker_changes"):
+            summary["cumulative_gains"] = cumulative
+    except Exception:
+        logger.debug("Cumulative gains failed", exc_info=True)
+
+    # Warrant portfolio summary
+    try:
+        from portfolio.warrant_portfolio import get_warrant_summary
+        warrant_summary = get_warrant_summary(prices_usd, fx_rate)
+        if warrant_summary and warrant_summary.get("positions"):
+            summary["warrant_portfolio"] = warrant_summary
+    except Exception:
+        logger.debug("Warrant portfolio failed", exc_info=True)
+
     # Preserve stale data for instruments not in current cycle (e.g. stocks off-hours)
     # so Layer 2 always sees all instruments. Prune entries stale for >24h.
     now_utc = datetime.now(timezone.utc)
@@ -461,6 +492,12 @@ def _write_compact_summary(summary):
     futures_data = summary.get("futures_data")
     if futures_data:
         compact["futures_data"] = futures_data
+
+    # Propagate focus mode sections to compact (small, relevant to Layer 2)
+    for section_key in ("focus_probabilities", "cumulative_gains", "warrant_portfolio"):
+        section_data = summary.get(section_key)
+        if section_data:
+            compact[section_key] = section_data
 
     _atomic_write_json(COMPACT_SUMMARY_FILE, compact)
 
