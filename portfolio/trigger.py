@@ -15,6 +15,7 @@ another trigger has already fired.
 """
 
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +30,12 @@ PORTFOLIO_BOLD_FILE = BASE_DIR / "data" / "portfolio_state_bold.json"
 PRICE_THRESHOLD = 0.02  # 2% move
 FG_THRESHOLDS = (20, 80)  # extreme fear / extreme greed boundaries
 SUSTAINED_CHECKS = 3  # consecutive cycles a signal must hold before triggering
+
+# Startup grace period — after a restart, the first loop iteration updates the
+# baseline without triggering Layer 2. This prevents spurious T3 full reviews
+# every time the loop is restarted for a code update.
+_GRACE_PERIOD_KEY = "last_loop_pid"  # stored in trigger_state.json
+_startup_grace_active = True  # True until first check_triggers call completes
 
 
 def _today_str():
@@ -86,8 +93,47 @@ def _check_recent_trade(state):
 
 
 def check_triggers(signals, prices_usd, fear_greeds, sentiments):
+    global _startup_grace_active
     state = _load_state()
     state["_current_tickers"] = set(signals.keys())  # for pruning in _save_state
+
+    # Startup grace period: on the first iteration after a restart, update the
+    # baseline (prices, signals, consensus) WITHOUT triggering Layer 2.
+    # This lets the loop restart for code updates without spurious T3 reviews.
+    current_pid = os.getpid()
+    saved_pid = state.get(_GRACE_PERIOD_KEY)
+    if _startup_grace_active and saved_pid != current_pid:
+        import logging
+        _logger = logging.getLogger("portfolio.trigger")
+        _logger.info(
+            "Startup grace period: updating baseline without triggering "
+            "(pid %s -> %s)", saved_pid, current_pid,
+        )
+        state[_GRACE_PERIOD_KEY] = current_pid
+        # Update baselines so next iteration compares from NOW
+        state["last"] = {
+            "signals": {
+                t: {"action": s["action"], "confidence": s["confidence"]}
+                for t, s in signals.items()
+            },
+            "prices": dict(prices_usd),
+            "fear_greeds": {
+                t: fg if isinstance(fg, dict) else {} for t, fg in fear_greeds.items()
+            },
+            "sentiments": dict(sentiments),
+            "time": time.time(),
+        }
+        # Update triggered_consensus baseline to current state
+        tc = state.get("triggered_consensus", {})
+        for ticker, sig in signals.items():
+            tc[ticker] = sig["action"]
+        state["triggered_consensus"] = tc
+        state["today_date"] = _today_str()
+        _startup_grace_active = False
+        _save_state(state)
+        return False, []
+
+    _startup_grace_active = False
     prev = state.get("last", {})
     sustained = state.get("sustained_counts", {})
     reasons = []
