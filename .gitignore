@@ -28,6 +28,10 @@ config-*.json
 secrets.yaml
 *_secrets.py
 api_keys.py
+
+# Avanza session data (auth tokens, cookies, credentials)
+data/avanza_session.json
+data/avanza_storage_state.json
 .mcp.json
 
 # Claude Code
