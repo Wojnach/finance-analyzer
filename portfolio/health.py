@@ -123,6 +123,23 @@ def check_agent_silence(max_market_seconds: int = 7200,
     }
 
 
+def update_module_failures(failures: list):
+    """Record which reporting modules failed in the current cycle.
+
+    Called by reporting.py after generating the agent summary.
+    Persists module names + timestamp in health_state.json so the dashboard
+    and monitoring scripts can see per-module status without parsing logs.
+    """
+    if not failures:
+        return
+    state = load_health()
+    state["last_module_failures"] = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "modules": list(failures),
+    }
+    atomic_write_json(HEALTH_FILE, state)
+
+
 def get_health_summary() -> dict:
     """Return a summary dict suitable for API/dashboard consumption."""
     state = load_health()
@@ -140,4 +157,5 @@ def get_health_summary() -> dict:
         "signals_failed": state.get("signals_failed", 0),
         "agent_silent": agent_silence["silent"],
         "agent_silence_seconds": agent_silence["age_seconds"],
+        "module_failures": state.get("last_module_failures"),
     }

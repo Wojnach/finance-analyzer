@@ -384,6 +384,9 @@ def write_agent_summary(
     # Surface module warnings to Layer 2 so it knows what context is missing
     if _module_warnings:
         summary["_module_warnings"] = _module_warnings
+        # Persist to health state for dashboard/monitoring visibility
+        from portfolio.health import update_module_failures
+        update_module_failures(_module_warnings)
 
     _atomic_write_json(AGENT_SUMMARY_FILE, summary)
     _write_compact_summary(summary)

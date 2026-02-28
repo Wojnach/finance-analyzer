@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 from portfolio.health import (
     update_health,
+    update_module_failures,
     load_health,
     check_staleness,
     check_agent_silence,
@@ -319,3 +320,87 @@ class TestCheckAgentSilence:
             result = check_agent_silence(max_market_seconds=3600, max_offhours_seconds=3600)
         assert result["silent"] is True
         assert result["age_seconds"] > 3600
+
+
+class TestUpdateModuleFailures:
+    def test_records_failures(self, tmp_path):
+        hf = tmp_path / "health_state.json"
+        hf.write_text(json.dumps({
+            "start_time": time.time(), "cycle_count": 1,
+            "error_count": 0, "errors": [],
+        }), encoding="utf-8")
+        with patch("portfolio.health.HEALTH_FILE", hf):
+            update_module_failures(["macro_context", "alpha_vantage"])
+        state = json.loads(hf.read_text(encoding="utf-8"))
+        mf = state["last_module_failures"]
+        assert mf["modules"] == ["macro_context", "alpha_vantage"]
+        assert "ts" in mf
+
+    def test_empty_list_is_noop(self, tmp_path):
+        hf = tmp_path / "health_state.json"
+        hf.write_text(json.dumps({
+            "start_time": time.time(), "cycle_count": 1,
+            "error_count": 0, "errors": [],
+        }), encoding="utf-8")
+        with patch("portfolio.health.HEALTH_FILE", hf):
+            update_module_failures([])
+        state = json.loads(hf.read_text(encoding="utf-8"))
+        assert "last_module_failures" not in state
+
+    def test_overwrites_previous_failures(self, tmp_path):
+        hf = tmp_path / "health_state.json"
+        hf.write_text(json.dumps({
+            "start_time": time.time(), "cycle_count": 1,
+            "error_count": 0, "errors": [],
+        }), encoding="utf-8")
+        with patch("portfolio.health.HEALTH_FILE", hf):
+            update_module_failures(["macro_context"])
+            update_module_failures(["alpha_vantage", "futures_data"])
+        state = json.loads(hf.read_text(encoding="utf-8"))
+        assert state["last_module_failures"]["modules"] == ["alpha_vantage", "futures_data"]
+
+    def test_preserves_other_health_fields(self, tmp_path):
+        hf = tmp_path / "health_state.json"
+        hf.write_text(json.dumps({
+            "start_time": 1000.0, "cycle_count": 42,
+            "error_count": 3, "errors": [{"ts": "t", "error": "e"}],
+            "last_heartbeat": "2026-02-28T12:00:00+00:00",
+        }), encoding="utf-8")
+        with patch("portfolio.health.HEALTH_FILE", hf):
+            update_module_failures(["equity_curve"])
+        state = json.loads(hf.read_text(encoding="utf-8"))
+        assert state["cycle_count"] == 42
+        assert state["error_count"] == 3
+        assert state["last_heartbeat"] == "2026-02-28T12:00:00+00:00"
+        assert state["last_module_failures"]["modules"] == ["equity_curve"]
+
+    def test_summary_includes_module_failures(self, tmp_path):
+        hf = tmp_path / "health_state.json"
+        now = datetime.now(timezone.utc).isoformat()
+        hf.write_text(json.dumps({
+            "start_time": time.time(), "cycle_count": 10,
+            "error_count": 0, "errors": [],
+            "last_heartbeat": now,
+            "signals_ok": 20, "signals_failed": 0,
+            "last_module_failures": {
+                "ts": now,
+                "modules": ["macro_context", "alpha_vantage"],
+            },
+        }), encoding="utf-8")
+        with patch("portfolio.health.HEALTH_FILE", hf):
+            summary = get_health_summary()
+        assert summary["module_failures"] is not None
+        assert summary["module_failures"]["modules"] == ["macro_context", "alpha_vantage"]
+
+    def test_summary_module_failures_none_when_absent(self, tmp_path):
+        hf = tmp_path / "health_state.json"
+        now = datetime.now(timezone.utc).isoformat()
+        hf.write_text(json.dumps({
+            "start_time": time.time(), "cycle_count": 10,
+            "error_count": 0, "errors": [],
+            "last_heartbeat": now,
+            "signals_ok": 20, "signals_failed": 0,
+        }), encoding="utf-8")
+        with patch("portfolio.health.HEALTH_FILE", hf):
+            summary = get_health_summary()
+        assert summary["module_failures"] is None
