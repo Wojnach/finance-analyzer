@@ -1,137 +1,184 @@
-# Improvement Plan — Auto-Session 2026-02-28
+# Improvement Plan — Auto-Session #3 (2026-02-28)
 
 ## Priority: Critical Bugs > Architecture > Features > Polish
+
+Previous sessions fixed BUG-13 through BUG-17, ARCH-1/2, FEAT-1, REF-5/6/7.
+This session continues from BUG-18 onward.
 
 ---
 
 ## 1. Bugs & Problems Found
 
-### BUG-13: test_avanza_session.py imports nonexistent function
-- **File:** `tests/test_avanza_session.py:15`
-- **Severity:** HIGH (prevents test collection, masks 39 tests)
-- **Issue:** Imports `create_requests_session` from `portfolio.avanza_session`, but that function doesn't exist.
-- **Fix:** Remove the import and any tests that reference it, or stub the function.
-- **Impact:** Test-only fix, no production code affected.
+### BUG-18: futures_flow.py majority_vote() called with dict — signal NEVER works
+- **File:** `portfolio/signals/futures_flow.py:~265`
+- **Severity:** CRITICAL (signal #30 always returns HOLD with 0.0 confidence)
+- **Issue:** `majority_vote(sub)` is called where `sub` is a dict mapping names→votes. `majority_vote()` iterates keys (strings like `"oi_trend"`), not values (`"BUY"`/`"SELL"`). No key equals "BUY"/"SELL"/"HOLD", so the function always returns `("HOLD", 0.0)`.
+- **Fix:** Change to `majority_vote(list(sub.values()))`.
+- **Impact:** Futures flow signal will start producing real votes for BTC-USD and ETH-USD. This changes consensus math for crypto tickers.
 
-### BUG-14: reporting.py has 7 bare `except Exception: pass` blocks
-- **File:** `portfolio/reporting.py` lines 143, 181, 198, 207, 246, 305, 365
-- **Severity:** MEDIUM (silent data loss — Layer 2 operates without critical context)
-- **Issue:** When optional modules fail (macro_context, accuracy_stats, alpha_vantage, futures_data, avanza), the exception is silently swallowed. Layer 2 doesn't know context is missing.
-- **Fix:** Replace `pass` with `logger.warning(...)` including the module name and exc_info. Add a `_warnings` list to agent_summary that Layer 2 can check.
-- **Impact:** Reporting only. No behavior change for working modules.
+### BUG-19: momentum.py variable shadowing — RSI Divergence and StochRSI never work
+- **File:** `portfolio/signals/momentum.py:~46, ~127`
+- **Severity:** CRITICAL (2 of 8 sub-signals silently produce HOLD always)
+- **Issue:** `rsi = rsi(close)` assigns to a local variable named `rsi`, which shadows the imported `rsi` function. Python sees the local assignment and treats `rsi` as a local variable throughout the function body — so `rsi(close)` on the right side raises `UnboundLocalError` (trying to read before assignment). The `try/except Exception` wrapper silently returns HOLD.
+- **Fix:** Rename local variable to `rsi_values = rsi(close)`.
+- **Impact:** RSI Divergence and StochRSI sub-signals will start voting in momentum composite signal.
 
-### BUG-15: shared_state.py stale cache allows 5x TTL fallback
-- **File:** `portfolio/shared_state.py:24` (`_MAX_STALE_FACTOR = 5`)
-- **Severity:** MEDIUM-LOW (stale F&G/sentiment data could influence signals)
-- **Issue:** If a data source fails, cached data up to 5x the TTL is returned. For a 5-minute TTL, this means 25-minute-old data. For a 1-hour TTL (FX rate), 5 hours.
-- **Fix:** Reduce to `_MAX_STALE_FACTOR = 3` and add a `_stale_warnings` counter that's surfaced in health state.
-- **Impact:** Slightly more aggressive cache expiry. Functions returning `None` must be handled by callers (already the case).
+### BUG-20: momentum_factors.py 500-bar requirement — two sub-signals permanently HOLD
+- **File:** `portfolio/signals/momentum_factors.py:~123, ~140`
+- **Severity:** HIGH (2 of 7 sub-signals permanently inactive)
+- **Issue:** `_high_proximity` and `_low_reversal` require `len(close) >= 500` bars. Even the 6mo timeframe typically has ~180 daily bars. These sub-signals never generate BUY/SELL votes.
+- **Fix:** Reduce to 252 (1 trading year) for stocks, keep 365 for crypto. Use `len(close)` as the lookback when data is shorter.
+- **Impact:** High/low proximity sub-signals will start voting when sufficient data exists.
 
-### BUG-16: trigger.py triggered_consensus has lazy pruning
-- **File:** `portfolio/trigger.py:56`
-- **Severity:** LOW (memory leak, not functional)
-- **Issue:** Orphaned entries for removed tickers accumulate until the dict exceeds current_tickers + 10. Buffer allows up to 10 orphaned entries indefinitely.
-- **Fix:** Always prune entries not in `current_tickers` (remove the +10 buffer).
-- **Impact:** trigger_state.json stays cleaner. No functional change.
+### BUG-21: heikin_ashi.py count_hold=True — systematically lower confidence
+- **File:** `portfolio/signals/heikin_ashi.py:~480`
+- **Severity:** HIGH (weighted consensus treats heikin_ashi as less confident than it actually is)
+- **Issue:** Uses `majority_vote(signals, count_hold=True)` while ALL other signal modules use the default `count_hold=False`. With `count_hold=True`, HOLD votes are in the denominator: 4B/1S/2H → confidence 4/7=0.57 instead of 4/5=0.80. This makes heikin_ashi signal confidence systematically 20-40% lower than equivalent conviction in other signals.
+- **Fix:** Remove `count_hold=True` to match all other modules.
+- **Impact:** Heikin-ashi confidence values increase. If heikin-ashi has good accuracy, this strengthens its influence in weighted consensus.
 
-### BUG-17: reporting.py debug-level exception logging (6 blocks)
-- **File:** `portfolio/reporting.py` lines 271, 280, 295, 317, 326, 335
-- **Severity:** LOW (exceptions logged at debug level, invisible in production)
-- **Issue:** Trade guard, risk audit, portfolio metrics, probabilities, cumulative gains, and warrant portfolio failures log at `debug` level. Production log level is `INFO`, so these are invisible.
-- **Fix:** Change `logger.debug(...)` to `logger.warning(...)` for these blocks.
-- **Impact:** More visible logging only.
+### BUG-22: trend.py `is np.nan` identity comparison
+- **File:** `portfolio/signals/trend.py:45`
+- **Severity:** MEDIUM (can silently skip MA200 sub-signal when data is valid)
+- **Issue:** `sma50.iloc[-1] is np.nan` uses Python identity check. NaN objects from pandas operations are not guaranteed to be the same object as `np.nan`. The check can fail to detect NaN or false-positive on valid values.
+- **Fix:** Replace with `pd.isna(sma50.iloc[-1])`.
+- **Impact:** MA200 sub-signal reliability improves.
+
+### BUG-23: fx_rates.py staleness check unreachable
+- **File:** `portfolio/fx_rates.py:~19`
+- **Severity:** MEDIUM (stale FX data never triggers a warning)
+- **Issue:** The stale check (`age_secs > _FX_STALE_THRESHOLD`) is inside the TTL guard (`now - _fx_cache["time"] < 3600`). Data within the 1h TTL cannot be >2h stale, so the warning never fires.
+- **Fix:** Move stale check outside the TTL guard, check on every return of cached data.
+- **Impact:** Users get warned when FX data is stale. No functional change.
+
+### BUG-24: health.py uptime_seconds inherits previous session
+- **File:** `portfolio/health.py:22`
+- **Severity:** MEDIUM (uptime reported incorrectly after restart)
+- **Issue:** `state["uptime_seconds"] = time.time() - state.get("start_time", time.time())`. If the loop restarts, `start_time` from the previous session is inherited, making uptime appear continuous.
+- **Fix:** Reset `start_time` at loop startup (in `main.py` or `health.py` init).
+- **Impact:** Health reporting accuracy. No functional impact.
+
+### BUG-25: reporting.py KeyError on old portfolio state files
+- **File:** `portfolio/reporting.py:50`
+- **Severity:** MEDIUM (crash if portfolio state was saved before `initial_value_sek` was added)
+- **Issue:** `state["initial_value_sek"]` accessed without `.get()` guard. Old state files may not have this field.
+- **Fix:** Use `state.get("initial_value_sek", 500000)` (matches pattern on line 300).
+- **Impact:** Prevents crash on legacy state files.
+
+### BUG-26: trigger.py hardcoded market open hour
+- **File:** `portfolio/trigger.py:298`
+- **Severity:** LOW-MEDIUM (silent drift if market_timing.py is updated)
+- **Issue:** `7 <= now_utc.hour < close_hour` hardcodes 7 instead of importing `MARKET_OPEN_HOUR` from `market_timing.py`.
+- **Fix:** Import and use the constant.
+- **Impact:** trigger.py stays in sync with market_timing.py.
+
+### BUG-27: trend.py Ichimoku dead code
+- **File:** `portfolio/signals/trend.py:319-323`
+- **Severity:** LOW (wasted computation, no incorrect behavior)
+- **Issue:** `tenkan = _midline(close, 9)` computed on line 319, then immediately overwritten on line 322. Same for `kijun`.
+- **Fix:** Remove the dead `_midline()` calls.
+- **Impact:** Minor performance improvement. No behavioral change.
+
+### BUG-28: signal_engine.py CORE_SIGNAL_NAMES recreated on every call
+- **File:** `portfolio/signal_engine.py:571-574`
+- **Severity:** LOW (unnecessary allocation per signal computation)
+- **Issue:** `CORE_SIGNAL_NAMES` set is defined inside `generate_signal()` body, recreated thousands of times per day.
+- **Fix:** Hoist to module-level constant.
+- **Impact:** Minor memory/CPU improvement.
+
+### BUG-29: smart_money.py O(n²) FVG scan without break
+- **File:** `portfolio/signals/smart_money.py:~290`
+- **Severity:** LOW (performance only, no incorrect behavior)
+- **Issue:** Inner FVG fill-check loop continues scanning after gap is filled (no `break`).
+- **Fix:** Add `break` after `filled = True`.
+- **Impact:** Faster FVG computation for large datasets.
 
 ---
 
 ## 2. Architecture Improvements
 
-### ARCH-1: Surface module failure warnings to Layer 2
-- **Files:** `portfolio/reporting.py`
-- **Why:** Layer 2 currently has no way to know when critical modules failed. If accuracy_stats fails, weighted consensus silently degrades to raw voting. This is the single largest source of potential hidden failures.
-- **Change:** Add a `warnings` list to agent_summary.json (and compact variant). Populate it with module names that failed during report generation.
-- **Impact:** reporting.py changes only. Layer 2 sees warnings in its context.
-- **Depends on:** BUG-14
+### ARCH-3: Eliminate redundant disk I/O in trigger path
+- **Files:** `portfolio/trigger.py`, `portfolio/main.py`
+- **Why:** trigger_state.json is read 3x and written 2x per triggered cycle (check_triggers, classify_tier, update_tier_state). Wasteful and adds latency.
+- **Change:** Return state dict from `check_triggers()`, pass to `classify_tier()` and `update_tier_state()`. Add `state` parameter to `update_tier_state()`.
+- **Impact:** trigger.py, main.py. Saves 2 disk reads per triggered cycle.
 
-### ARCH-2: Reduce stale fallback aggressiveness
-- **Files:** `portfolio/shared_state.py`
-- **Why:** 5x stale factor is too generous for a system making financial decisions. A 25-minute-old Fear & Greed value could cause wrong signals.
-- **Change:** Reduce `_MAX_STALE_FACTOR` from 5 to 3. Track stale-hit count in health state.
-- **Impact:** `_cached()` callers. All callers already handle None returns.
-- **Depends on:** BUG-15
+### ARCH-4: Deduplicate reporting.py constants
+- **Files:** `portfolio/reporting.py`
+- **Why:** `KEEP_EXTRA_FULL` set defined identically on lines 419 and 693. If one is updated without the other, tiered summary generation diverges.
+- **Change:** Extract to module-level `_KEEP_EXTRA_FULL` constant.
+- **Impact:** reporting.py only.
+
+### ARCH-5: Extract post-run hooks in main.py
+- **Files:** `portfolio/main.py`
+- **Why:** Digest/hook code is copy-pasted in two `loop()` paths (~15 lines each). DRY violation.
+- **Change:** Extract into `_post_run_hooks(config)` helper.
+- **Impact:** main.py only.
 
 ---
 
-## 3. Useful Features
+## 3. Refactoring TODOs
 
-### FEAT-1: Health endpoint for module status
-- **Files:** `portfolio/health.py`, `portfolio/reporting.py`
-- **Why:** Currently no way to check which modules failed in the last cycle. The dashboard health tab shows heartbeat but not per-module status.
-- **Change:** Track `last_module_failures` dict in health_state.json. Report module names and timestamps of last failure. Surface in `/api/health`.
-- **Impact:** health.py + reporting.py. Dashboard reads it passively.
+### REF-8: Fix candlestick.py unused import
+- **File:** `portfolio/signals/candlestick.py`
+- **Why:** `majority_vote` imported but never called (module uses custom confidence formula).
+- **Change:** Remove unused import.
+- **Impact:** candlestick.py only.
+
+### REF-9: Remove redundant defaultdict import in equity_curve.py
+- **File:** `portfolio/equity_curve.py:~344`
+- **Why:** `from collections import defaultdict` appears both at module level and inside `_pair_round_trips`.
+- **Change:** Remove the inner import.
+- **Impact:** equity_curve.py only.
+
+### REF-10: Remove redundant double-import in heikin_ashi.py
+- **File:** `portfolio/signals/heikin_ashi.py:28,45`
+- **Why:** Two separate import lines from `signal_utils`.
+- **Change:** Merge into single import statement.
+- **Impact:** heikin_ashi.py only.
 
 ---
 
-## 4. Refactoring TODOs
+## 4. Items NOT Planned (Justified)
 
-### REF-5: Fix test_avanza_session.py collection error
-- **Files:** `tests/test_avanza_session.py`
-- **Why:** Prevents 39 tests from running. Masks potential regressions.
-- **Change:** Remove or fix the `create_requests_session` import and associated tests.
-- **Impact:** Test-only.
-- **Depends on:** BUG-13
-
-### REF-6: Standardize exception logging in reporting.py
-- **Files:** `portfolio/reporting.py`
-- **Why:** Inconsistent — some blocks use `pass`, some use `logger.debug()`, some use `logger.warning()`. Should be consistently `logger.warning()` with the module name.
-- **Change:** All `except Exception` blocks in reporting.py get `logger.warning(f"[reporting] {module_name} failed", exc_info=True)`.
-- **Impact:** Logging only.
-- **Depends on:** BUG-14, BUG-17
-
-### REF-7: Clean trigger state pruning
-- **Files:** `portfolio/trigger.py`
-- **Why:** The +10 buffer is unnecessary complexity. Just prune orphans every save.
-- **Change:** Remove the `len(tc) > len(current_tickers) + 10` guard.
-- **Impact:** Slightly more frequent dict operations on save. Negligible.
-- **Depends on:** BUG-16
+1. **journal_index.py 4h half-life** — Changing this affects journal retrieval for all Layer 2 invocations. Needs analysis of how Layer 2 actually uses retrieved entries. Too risky without validation data.
+2. **outcome_tracker.py yfinance daily close for stocks** — The intraday resolution issue (3h/1d horizons identical) is real but requires a new data source. yfinance free tier doesn't support intraday historical. Would need Alpaca historical bars API.
+3. **calendar_seasonal.py holiday date accuracy** — Approximated holidays are off by 1-2 days. Fixing requires a proper holiday calendar library (e.g., `holidays` package). Not worth adding a dependency for ±1 day accuracy.
+4. **trade_guards.py disk I/O per check** — 54 disk reads per cycle is wasteful but the state file is tiny (<1KB). Adding an in-memory cache adds complexity for negligible wall-clock benefit.
+5. **smart_money.py supply/demand margin formula** — The `proximity_pct / 0.005` factor is a no-op at current config but would break if config changes. Documenting rather than fixing because the current behavior is correct.
+6. **digest.py signal_log format mismatch** — The digest reads `signals` key but newer entries use `tickers`. Fixing requires understanding the full schema evolution. Documenting for manual review.
+7. **forecast.py Kronos candle fallback** — The fallback path never works as designed. But Kronos typically receives candles from the primary path. Low-priority dead-code fix.
 
 ---
 
 ## 5. Dependency/Ordering — Implementation Batches
 
-### Batch 1: Test infrastructure fix (1 file) — DONE ✓
-**Files:** `tests/test_avanza_session.py`
-**Changes:** REF-5 (fix import error)
-**Result:** Rewrote entire test file for Playwright-based auth. 31 tests passing (was 0 due to ImportError).
-**Commit:** `2646baa`
+### Batch 1: Critical signal fixes (3 files)
+**Files:** `portfolio/signals/futures_flow.py`, `portfolio/signals/momentum.py`, `portfolio/signals/momentum_factors.py`
+**Changes:** BUG-18, BUG-19, BUG-20
+**Tests needed:** Verify each signal produces non-HOLD votes with valid data
+**Risk:** LOW — these signals are currently producing no useful data; fixing them can only improve accuracy
 
-### Batch 2: Reporting robustness (1 file) — DONE ✓
-**Files:** `portfolio/reporting.py`
-**Changes:** BUG-14, BUG-17, REF-6, ARCH-1
-**Result:** Replaced 13 silent exception handlers with `logger.warning()` + `_module_warnings` list. 95 related tests pass.
-**Commit:** `91b06a8`
+### Batch 2: Signal confidence/correctness (3 files)
+**Files:** `portfolio/signals/heikin_ashi.py`, `portfolio/signals/trend.py`, `portfolio/signals/smart_money.py`
+**Changes:** BUG-21, BUG-22, BUG-27, BUG-29, REF-10
+**Tests needed:** heikin_ashi confidence matches expected pattern; trend NaN handling
+**Risk:** LOW — heikin_ashi confidence change is most impactful (weighted consensus)
 
-### Batch 3: Cache and state cleanup (2 files) — DONE ✓
-**Files:** `portfolio/shared_state.py`, `portfolio/trigger.py`, `tests/test_shared_state.py`
-**Changes:** BUG-15, BUG-16, ARCH-2, REF-7
-**Result:** Reduced `_MAX_STALE_FACTOR` 5→3, removed +10 pruning buffer, updated 5 test assertions. 90 tests pass.
-**Commit:** `1187f4e`
+### Batch 3: Core infrastructure fixes (4 files)
+**Files:** `portfolio/fx_rates.py`, `portfolio/health.py`, `portfolio/reporting.py`, `portfolio/signal_engine.py`
+**Changes:** BUG-23, BUG-24, BUG-25, BUG-28
+**Tests needed:** fx_rates staleness warning fires; health uptime resets; reporting handles missing initial_value_sek
+**Risk:** LOW — all fixes are defensive guards or performance improvements
 
-### Batch 4: Health module status tracking (2 files) — DONE ✓
-**Files:** `portfolio/health.py`, `portfolio/reporting.py`, `tests/test_health.py`
-**Changes:** FEAT-1
-**Result:** Added `update_module_failures()`, wired from reporting.py, surfaced in `get_health_summary()`. 7 new tests (29 total health tests pass).
-**Commit:** `c08378e`
+### Batch 4: Architecture cleanup (3 files)
+**Files:** `portfolio/trigger.py`, `portfolio/main.py`, `portfolio/reporting.py`
+**Changes:** BUG-26, ARCH-3, ARCH-4, ARCH-5
+**Tests needed:** trigger uses MARKET_OPEN_HOUR; state threading doesn't break existing trigger tests
+**Risk:** MEDIUM — main.py and trigger.py changes touch the hot path; must verify all trigger tests pass
 
----
-
-## Items NOT Planned (Justified)
-
-These were considered during exploration but intentionally excluded:
-
-1. **Moving hardcoded thresholds to config.json** — Too broad, would touch 10+ files. The current values are well-tuned. Save for a dedicated configuration session.
-2. **Concurrency safety for sentiment_state.json** — Layer 1 is single-threaded. The theoretical race condition requires concurrent L1/L2 writes, which doesn't happen in practice.
-3. **Circuit breaker Telegram alerts** — Nice-to-have but would require notification infrastructure changes. The health module already detects staleness.
-4. **Parallel ticker processing in main.py** — Sequential processing is a feature (predictable, debuggable). Parallelizing would add complexity for marginal speed gains on a 60s cycle.
-5. **Calendar signal quorum inconsistency** — Quorum=2 is intentional design (documented). Changing it affects signal accuracy baselines.
-6. **Sub-signal correlation across composite signals** — Would require a complete redesign of the voting architecture. The current system works well enough; accuracy tracking compensates.
-7. **Equity curve Sharpe ratio for crypto (365d)** — Minor accuracy improvement. Not worth the complexity of dual calculation paths.
+### Batch 5: Minor cleanup (2 files)
+**Files:** `portfolio/signals/candlestick.py`, `portfolio/equity_curve.py`
+**Changes:** REF-8, REF-9
+**Tests needed:** None (import-only changes)
+**Risk:** NONE
