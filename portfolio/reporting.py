@@ -65,6 +65,9 @@ def write_agent_summary(
         "fear_greed": {},
     }
 
+    # Track module failures so Layer 2 knows what context is missing
+    _module_warnings = []
+
     for name, sig in signals.items():
         extra = sig.get("extra", {})
         ind = sig["indicators"]
@@ -141,7 +144,8 @@ def write_agent_summary(
         if macro:
             summary["macro"] = macro
     except Exception:
-        pass
+        logger.warning("[reporting] macro_context failed", exc_info=True)
+        _module_warnings.append("macro_context")
 
     try:
         from portfolio.accuracy_stats import (
@@ -179,7 +183,8 @@ def write_agent_summary(
                 "worst": bw.get("worst"),
             }
     except Exception:
-        pass
+        logger.warning("[reporting] accuracy_stats failed", exc_info=True)
+        _module_warnings.append("accuracy_stats")
 
     # Signal activation rates (normalized weights for Layer 2 reference)
     try:
@@ -196,7 +201,8 @@ def write_agent_summary(
                 if d.get("samples", 0) > 0
             }
     except Exception:
-        pass
+        logger.warning("[reporting] signal_weights failed", exc_info=True)
+        _module_warnings.append("signal_weights")
 
     # Alpha Vantage fundamentals (stocks only, daily refresh)
     try:
@@ -205,7 +211,8 @@ def write_agent_summary(
         if all_funds:
             summary["fundamentals"] = all_funds
     except Exception:
-        pass
+        logger.warning("[reporting] alpha_vantage failed", exc_info=True)
+        _module_warnings.append("alpha_vantage")
 
     # Binance FAPI futures data (crypto only — OI, LS ratios, funding)
     try:
@@ -244,7 +251,8 @@ def write_agent_summary(
         if futures_section:
             summary["futures_data"] = futures_section
     except Exception:
-        pass
+        logger.warning("[reporting] futures_data failed", exc_info=True)
+        _module_warnings.append("futures_data")
 
     cross_leads = _cross_asset_signals(signals)
     if cross_leads:
@@ -269,7 +277,8 @@ def write_agent_summary(
         if guard_result.get("warnings"):
             summary["trade_guard_warnings"] = guard_result
     except Exception:
-        logger.debug("Trade guard warnings failed", exc_info=True)
+        logger.warning("[reporting] trade_guards failed", exc_info=True)
+        _module_warnings.append("trade_guards")
 
     # Risk audit flags (concentration, regime mismatch, correlation, ATR proximity)
     try:
@@ -278,7 +287,8 @@ def write_agent_summary(
         if risk_result.get("flags"):
             summary["risk_warnings"] = risk_result
     except Exception:
-        logger.debug("Risk audit flags failed", exc_info=True)
+        logger.warning("[reporting] risk_management failed", exc_info=True)
+        _module_warnings.append("risk_management")
 
     # Portfolio trade metrics (per-trade performance)
     try:
@@ -293,7 +303,8 @@ def write_agent_summary(
         if metrics:
             summary["portfolio_metrics"] = metrics
     except Exception:
-        logger.debug("Portfolio metrics failed", exc_info=True)
+        logger.warning("[reporting] equity_curve metrics failed", exc_info=True)
+        _module_warnings.append("equity_curve")
 
     # Avanza-tracked instruments (Tier 2: Nordic equities, Tier 3: warrants)
     try:
@@ -302,7 +313,8 @@ def write_agent_summary(
         if avanza_prices:
             summary["avanza_instruments"] = avanza_prices
     except Exception:
-        pass
+        logger.warning("[reporting] avanza_tracker failed", exc_info=True)
+        _module_warnings.append("avanza_tracker")
 
     # Focus probabilities (Mode B — directional probabilities for focus tickers)
     try:
@@ -315,7 +327,8 @@ def write_agent_summary(
             if focus_probs:
                 summary["focus_probabilities"] = focus_probs
     except Exception:
-        logger.debug("Focus probabilities failed", exc_info=True)
+        logger.warning("[reporting] focus_probabilities failed", exc_info=True)
+        _module_warnings.append("focus_probabilities")
 
     # Cumulative price changes (rolling 1d/3d/7d)
     try:
@@ -324,7 +337,8 @@ def write_agent_summary(
         if cumulative and cumulative.get("ticker_changes"):
             summary["cumulative_gains"] = cumulative
     except Exception:
-        logger.debug("Cumulative gains failed", exc_info=True)
+        logger.warning("[reporting] cumulative_tracker failed", exc_info=True)
+        _module_warnings.append("cumulative_tracker")
 
     # Warrant portfolio summary
     try:
@@ -333,7 +347,8 @@ def write_agent_summary(
         if warrant_summary and warrant_summary.get("positions"):
             summary["warrant_portfolio"] = warrant_summary
     except Exception:
-        logger.debug("Warrant portfolio failed", exc_info=True)
+        logger.warning("[reporting] warrant_portfolio failed", exc_info=True)
+        _module_warnings.append("warrant_portfolio")
 
     # Preserve stale data for instruments not in current cycle (e.g. stocks off-hours)
     # so Layer 2 always sees all instruments. Prune entries stale for >24h.
@@ -363,7 +378,12 @@ def write_agent_summary(
                                 data["stale_since"] = now_iso
                         summary[section][ticker] = data
         except Exception:
-            pass
+            logger.warning("[reporting] stale data preservation failed", exc_info=True)
+            _module_warnings.append("stale_preservation")
+
+    # Surface module warnings to Layer 2 so it knows what context is missing
+    if _module_warnings:
+        summary["_module_warnings"] = _module_warnings
 
     _atomic_write_json(AGENT_SUMMARY_FILE, summary)
     _write_compact_summary(summary)
