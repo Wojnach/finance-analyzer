@@ -1,6 +1,6 @@
 # Portfolio Intelligence System — System Overview
 
-> **Updated:** 2026-02-27 (auto-improvement session)
+> **Updated:** 2026-02-28 (auto-improvement session #2)
 > **Canonical architecture doc:** docs/architecture-plan.md
 > **Layer 2 instructions:** CLAUDE.md
 
@@ -17,40 +17,44 @@ with 30 signals across 7 timeframes, dual simulated portfolios (Patient + Bold, 
 ## Module Dependency Graph
 
 ```
-main.py (orchestrator — loop, run, CLI dispatch)
-├── shared_state.py        (global caches, rate limiters, locks)
-├── market_timing.py       (DST-aware market hours, agent window)
-├── fx_rates.py            (USD/SEK caching via Frankfurter API)
-├── indicators.py          (RSI, MACD, EMA, BB, ATR, regime detection)
-├── data_collector.py      (kline fetching + multi-timeframe collector)
-│   ├── http_retry.py      (retry with exponential backoff)
+main.py (orchestrator — loop, run, CLI dispatch)  [572 lines]
+├── shared_state.py        (global caches, rate limiters, locks)  [114 lines]
+├── market_timing.py       (DST-aware market hours, agent window)  [79 lines]
+├── fx_rates.py            (USD/SEK caching via Frankfurter API)  [67 lines]
+├── indicators.py          (RSI, MACD, EMA, BB, ATR, regime detection)  [166 lines]
+├── data_collector.py      (kline fetching + multi-timeframe collector)  [259 lines]
+│   ├── http_retry.py      (retry with exponential backoff)  [65 lines]
 │   ├── circuit_breaker.py (per-source failure tracking)
 │   └── api_utils.py       (config loading, Alpaca headers, API URLs)
-├── signal_engine.py       (30-signal voting + weighted consensus)
-│   ├── signal_registry.py (enhanced signal plugin registry)
-│   ├── signal_utils.py    (shared helpers: SMA, EMA, RSI, majority_vote)
+├── signal_engine.py       (30-signal voting + weighted consensus)  [718 lines]
+│   ├── signal_registry.py (enhanced signal plugin registry)  [130 lines]
+│   ├── signal_utils.py    (shared helpers: SMA, EMA, RSI, majority_vote)  [130 lines]
 │   ├── macro_context.py   (DXY, yields, FOMC, volume signal)
-│   ├── accuracy_stats.py  (signal performance tracking, SQLite)
-│   └── signals/           (19 enhanced signal modules)
-├── portfolio_mgr.py       (state load/save, portfolio_value)
+│   ├── accuracy_stats.py  (signal performance tracking, SQLite)  [559 lines]
+│   └── signals/           (19 enhanced signal modules, ~8,400 lines total)
+├── portfolio_mgr.py       (state load/save, portfolio_value)  [36 lines]
 │   └── file_utils.py      (atomic JSON I/O)
-├── reporting.py           (agent_summary.json, tiered context)
-│   ├── equity_curve.py    (FIFO trade metrics, profit factor)
-│   ├── trade_guards.py    (cooldown, consecutive-loss escalation)
-│   ├── risk_management.py (concentration, correlation, ATR stops)
-│   ├── journal_index.py   (BM25 journal retrieval)
-│   ├── futures_data.py    (Binance FAPI OI/LS data)
+├── reporting.py           (agent_summary.json, tiered context)  [759 lines]
+│   ├── equity_curve.py    (FIFO trade metrics, profit factor)  [596 lines]
+│   ├── trade_guards.py    (cooldown, consecutive-loss escalation)  [266 lines]
+│   ├── risk_management.py (concentration, correlation, ATR stops)  [704 lines]
+│   ├── journal_index.py   (BM25 journal retrieval)  [399 lines]
+│   ├── futures_data.py    (Binance FAPI OI/LS data)  [240 lines]
 │   ├── avanza_tracker.py  (Nordic equity price tracking)
-│   └── alpha_vantage.py   (stock fundamentals)
-├── trigger.py             (6 trigger conditions, tier classification)
-├── agent_invocation.py    (Claude subprocess management)
+│   └── alpha_vantage.py   (stock fundamentals)  [329 lines]
+├── trigger.py             (6 trigger conditions, tier classification)  [326 lines]
+├── agent_invocation.py    (Claude subprocess management)  [198 lines]
+│   ├── perception_gate.py (pre-invocation signal filter)  [98 lines]
 │   ├── message_store.py   (save-only notifications)
-│   └── telegram_notifications.py (Telegram sends)
-├── digest.py              (4-hour summary builder)
-└── health.py              (heartbeat + error tracking)
+│   └── telegram_notifications.py (Telegram sends)  [136 lines]
+├── digest.py              (4-hour summary builder)  [201 lines]
+├── reflection.py          (periodic strategy metrics)  [242 lines]
+└── health.py              (heartbeat + error tracking)  [143 lines]
 ```
 
-## Signal Modules (30 total: 11 core + 19 enhanced)
+**Total:** ~97 Python modules, ~15,000+ lines of production code.
+
+## Signal Architecture (30 total: 11 core + 19 enhanced)
 
 **Core signals** (in signal_engine.py):
 1. RSI(14), 2. MACD(12,26,9), 3. EMA(9,21), 4. BB(20,2), 5. Fear & Greed,
@@ -69,11 +73,18 @@ main.py (orchestrator — loop, run, CLI dispatch)
 - Metals (XAU, XAG): 25 signals (7 core + 18 enhanced; no futures_flow)
 - Stocks (27 tickers): 25 signals (7 core + 18 enhanced; no ministral, no futures_flow)
 
+**Signal consensus flow:**
+1. Each of 30 signals votes BUY/SELL/HOLD per ticker
+2. Disabled signals (<50% accuracy) auto-inverted in weighted consensus
+3. Confidence penalty cascade: regime→volume gate→trap detection→dynamic MIN_VOTERS
+4. Raw consensus + weighted consensus both reported to Layer 2
+5. Layer 2 uses both as inputs to independent judgment
+
 ## Global State Inventory
 
 | Location | Variable | Purpose | Thread-Safe |
 |----------|----------|---------|-------------|
-| shared_state.py | `_tool_cache` | Per-cycle data cache | Yes (`_cache_lock`) |
+| shared_state.py | `_tool_cache` | Per-cycle data cache (256 max) | Yes (`_cache_lock`) |
 | shared_state.py | `_run_cycle_id` | Cycle counter (regime cache invalidation) | No (single-threaded loop) |
 | shared_state.py | `_current_market_state` | "open"/"closed"/"weekend" | No (written by main loop only) |
 | shared_state.py | `_regime_cache` | Per-cycle regime detection cache | No (invalidated by cycle_id) |
@@ -112,7 +123,7 @@ main.py (orchestrator — loop, run, CLI dispatch)
 | portfolio_state.json | L2 | L1, Dashboard | Patient holdings + transactions |
 | portfolio_state_bold.json | L2 | L1, Dashboard | Bold holdings + transactions |
 | trigger_state.json | L1 | L1 | Consensus, sustained counts, sentiment |
-| sentiment_state.json | L1 | L1 | Sentiment hysteresis state (extracted from trigger_state) |
+| sentiment_state.json | L1 | L1 | Sentiment hysteresis state |
 | layer2_journal.jsonl | L2 | L1 (digest), Dashboard | Decisions, theses, reflections |
 | layer2_context.md | L1 | L2 | Memory built from journal entries |
 | signal_log.jsonl + SQLite | L1 | Accuracy tracker | All signal votes per cycle |
@@ -121,6 +132,14 @@ main.py (orchestrator — loop, run, CLI dispatch)
 | telegram_messages.jsonl | L2 | Dashboard | All sent Telegram messages |
 | fundamentals_cache.json | L1 | L1 (enrichment) | Alpha Vantage stock data |
 | trade_guard_state.json | L1 | L1 | Per-ticker cooldowns, loss tracking |
+
+## Test Suite
+
+- **73 test files**, ~2,350 tests passing, 18 pre-existing failures
+- Pre-existing failures: 15 integration (missing `ta_base_strategy`), 2 trigger tests, 1 subprocess test
+- 1 collection error: `test_avanza_session.py` imports nonexistent `create_requests_session`
+- Coverage is excellent across all core modules (signal_engine, trigger, data_collector, reporting)
+- Test configuration: pytest + pyproject.toml, ruff linting (line length 120)
 
 ## Deployment
 
@@ -132,26 +151,8 @@ main.py (orchestrator — loop, run, CLI dispatch)
 
 ## Discrepancies vs Architecture Doc
 
-1. ~~Signal count drift~~ — **FIXED** (Feb 27): Architecture doc updated to 30 signals.
-2. **CLAUDE.md says "27 signals"** in several places but refers to 30 signal modules — the number
-   refers to applicable per-asset-class, not total.
-3. **Scheduled tasks**: PF-ForceSleep/PF-WakeUp/PF-AutoImprove not in arch doc.
-
-## Known Issues
-
-### Fixed (previous sessions)
-- atomic_append_jsonl fsync, sentiment state race, agent log fd leak, stale ticker accumulation
-- Portfolio snapshot now includes holdings value, zero-division guard in indicators
-- accuracy_stats DRY refactored, test coverage added for indicators/signal_engine/portfolio_mgr/trigger
-
-### Fixed (Feb 27 session)
-- Architecture doc signal count updated (29→30, applicable counts corrected)
-- Binance kline functions deduplicated (shared `_binance_fetch()`)
-- `collect_timeframes()` now logs when skipping timeframes with insufficient data
-- FX fallback test fixed (10.50→10.85)
-- Test coverage added: data_collector.py (48 tests), agent_invocation.py (60 tests)
-
-### Remaining
-- Sentiment hysteresis: neutral direction not persisted (design decision, not a bug — see IMPROVEMENT_PLAN.md)
-- Config example missing keys for 5+ features (perception_gate, reflection, etc.)
-- `_cached()` in shared_state.py allows duplicate concurrent calls for same key (inefficient, not unsafe)
+1. **Architecture doc lists MRVL, PONY, RXRX** as tickers; CLAUDE.md does not. Possible ticker rotation.
+2. **Architecture doc says "Cooldown expired"** as a trigger type; cooldown was REMOVED Feb 27 per MEMORY.md.
+3. **Architecture doc says 11 core signals** but 3 are disabled; effective core count is 8.
+4. **Architecture doc file tree** omits several modules added since (perception_gate, reflection, vector_memory, trade_guards, equity_curve, journal_index, futures_flow signal).
+5. **Scheduled tasks**: PF-ForceSleep/PF-WakeUp/PF-AutoImprove not in arch doc.
