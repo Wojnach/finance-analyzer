@@ -1,6 +1,6 @@
 # Portfolio Intelligence System — System Overview
 
-> **Updated:** 2026-02-28 (auto-improvement session #2)
+> **Updated:** 2026-02-28 (auto-improvement session #3)
 > **Canonical architecture doc:** docs/architecture-plan.md
 > **Layer 2 instructions:** CLAUDE.md
 
@@ -135,13 +135,28 @@ main.py (orchestrator — loop, run, CLI dispatch)  [572 lines]
 
 ## Test Suite
 
-- **73 test files**, ~2,388 tests passing, 18 pre-existing failures
+- **74 test files**, ~2,399 tests passing, 18 pre-existing failures
 - Pre-existing failures: 15 integration (missing `ta_base_strategy`), 2 trigger tests, 1 subprocess test
 - Collection error fixed: `test_avanza_session.py` rewritten for Playwright-based auth (31 tests)
 - Coverage is excellent across all core modules (signal_engine, trigger, data_collector, reporting)
 - Test configuration: pytest + pyproject.toml, ruff linting (line length 120)
 
-## Recent Improvements (Session #2, 2026-02-28)
+## Recent Improvements (Session #3, 2026-02-28)
+
+- **3 broken signal modules repaired:** futures_flow (#30) passed dict to majority_vote (always HOLD); momentum RSI Divergence/StochRSI had variable shadowing (always HOLD); momentum_factors high/low proximity required 500 bars (unreachable, always HOLD). All now produce real votes.
+- **Heikin-ashi confidence corrected:** Used `count_hold=True` unlike all other signals, making confidence 20-40% lower. Now matches standard behavior.
+- **Trend signal NaN check fixed:** `is np.nan` identity comparison replaced with `pd.isna()`.
+- **Trend Ichimoku dead code removed:** Duplicate tenkan/kijun computation cleaned up.
+- **FX staleness guard fixed:** Unreachable stale-data warning now fires correctly.
+- **Health uptime reset:** `reset_session_start()` prevents uptime from inheriting previous session.
+- **Reporting KeyError guard:** `initial_value_sek` accessed with `.get()` default.
+- **Signal engine constant hoisted:** `CORE_SIGNAL_NAMES` moved to module-level frozenset.
+- **Trigger market hour constant:** Hardcoded `7` replaced with `MARKET_OPEN_HOUR` import.
+- **Trigger state threading:** `update_tier_state()` accepts optional `state` param (saves disk read).
+- **Reporting constants deduplicated:** `KEEP_EXTRA_FULL` extracted to module-level `_KEEP_EXTRA_FULL` frozenset.
+- **11 new regression tests** in `tests/test_signal_bug_fixes.py`.
+
+### Session #2 (earlier same day)
 
 - **Reporting robustness:** 13 silent `except: pass` blocks replaced with `logger.warning()` + `_module_warnings` list surfaced to Layer 2
 - **Stale cache reduced:** `_MAX_STALE_FACTOR` 5→3 (max 3x TTL fallback for failed data sources)
