@@ -125,7 +125,7 @@ class TestCachedStaleDataOnError:
         _cached("k1", 60, lambda: "good")
 
         # TTL expired, func raises
-        mock_time.time.return_value = 1100.0  # 100s old, max stale = 60*5 = 300s
+        mock_time.time.return_value = 1100.0  # 100s old, max stale = 60*3 = 180s
         result = _cached("k1", 60, self._failing_func)
         assert result == "good"
 
@@ -135,8 +135,8 @@ class TestCachedStaleDataOnError:
         mock_time.time.return_value = 1000.0
         _cached("k1", 60, lambda: "ok")
 
-        # age = 299s, max_stale = 300s  →  should still return stale
-        mock_time.time.return_value = 1299.0
+        # age = 179s, max_stale = 180s  →  should still return stale
+        mock_time.time.return_value = 1179.0
         result = _cached("k1", 60, self._failing_func)
         assert result == "ok"
 
@@ -146,8 +146,8 @@ class TestCachedStaleDataOnError:
         mock_time.time.return_value = 1000.0
         _cached("k1", 60, lambda: "old")
 
-        # age = 301s, max_stale = 300s  →  None
-        mock_time.time.return_value = 1301.0
+        # age = 181s, max_stale = 180s  →  None
+        mock_time.time.return_value = 1181.0
         result = _cached("k1", 60, self._failing_func)
         assert result is None
 
@@ -157,8 +157,8 @@ class TestCachedStaleDataOnError:
         mock_time.time.return_value = 1000.0
         _cached("k1", 60, lambda: "val")
 
-        # age = 300s, max_stale = 300s  →  age > max_stale is False → returns stale
-        mock_time.time.return_value = 1300.0
+        # age = 180s, max_stale = 180s  →  age > max_stale is False → returns stale
+        mock_time.time.return_value = 1180.0
         result = _cached("k1", 60, self._failing_func)
         assert result == "val"
 
@@ -556,7 +556,7 @@ class TestModuleState:
         assert shared_state._RETRY_COOLDOWN == 60
 
     def test_max_stale_factor(self):
-        assert shared_state._MAX_STALE_FACTOR == 5
+        assert shared_state._MAX_STALE_FACTOR == 3
 
     def test_run_cycle_id_initial(self):
         assert isinstance(shared_state._run_cycle_id, int)

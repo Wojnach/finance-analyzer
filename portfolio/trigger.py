@@ -53,7 +53,7 @@ def _save_state(state):
     # to prevent unbounded growth when tickers are removed from tracking
     tc = state.get("triggered_consensus", {})
     current_tickers = state.get("_current_tickers", set())
-    if current_tickers and len(tc) > len(current_tickers) + 10:
+    if current_tickers:
         pruned = {k: v for k, v in tc.items() if k in current_tickers}
         state["triggered_consensus"] = pruned
     state.pop("_current_tickers", None)  # don't persist internal field

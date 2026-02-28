@@ -21,7 +21,7 @@ _CACHE_MAX_SIZE = 256  # evict expired entries when cache exceeds this size
 _cache_lock = threading.Lock()
 
 
-_MAX_STALE_FACTOR = 5  # return None if cached data is older than TTL * this factor
+_MAX_STALE_FACTOR = 3  # return None if cached data is older than TTL * this factor
 
 
 def _cached(key, ttl, func, *args):
