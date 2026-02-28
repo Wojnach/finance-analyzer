@@ -261,8 +261,8 @@ def compute_futures_flow_signal(df: pd.DataFrame, context: dict = None) -> dict:
         "oi_acceleration": _oi_acceleration(oi_history, df),
     }
 
-    # Majority vote
-    action, confidence = majority_vote(sub)
+    # Majority vote — pass list of vote strings, not the dict
+    action, confidence = majority_vote(list(sub.values()))
     confidence = min(confidence, _MAX_CONFIDENCE)
 
     # Build indicators dict for reporting

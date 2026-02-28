@@ -120,7 +120,7 @@ def _high_proximity(close: pd.Series) -> tuple[float, str]:
 
     Returns (proximity_ratio, signal).
     """
-    if len(close) < 500:
+    if len(close) < MIN_ROWS:
         return float("nan"), "HOLD"
 
     lookback = min(len(close), 252)

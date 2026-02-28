@@ -43,13 +43,13 @@ def _rsi_divergence(close: pd.Series, lookback: int = 14) -> str:
     We compare the first and second halves of the lookback window to identify
     two local swing points.
     """
-    rsi = rsi(close)
-    if rsi.isna().all() or len(close) < lookback * 2:
+    rsi_values = rsi(close)
+    if rsi_values.isna().all() or len(close) < lookback * 2:
         return "HOLD"
 
     # Last 2*lookback bars, split into two halves to find swing points.
     price_window = close.iloc[-(lookback * 2):]
-    rsi_window = rsi.iloc[-(lookback * 2):]
+    rsi_window = rsi_values.iloc[-(lookback * 2):]
 
     first_half_price = price_window.iloc[:lookback]
     second_half_price = price_window.iloc[lookback:]
@@ -124,11 +124,11 @@ def _stochasticrsi(close: pd.Series, period: int = 14) -> tuple[float, str]:
     StochRSI > 0.8 = overbought (SELL).
     StochRSI < 0.2 = oversold (BUY).
     """
-    rsi = rsi(close, period)
-    rsi_min = rsi.rolling(window=period).min()
-    rsi_max = rsi.rolling(window=period).max()
+    rsi_values = rsi(close, period)
+    rsi_min = rsi_values.rolling(window=period).min()
+    rsi_max = rsi_values.rolling(window=period).max()
     denom = rsi_max - rsi_min
-    stoch_rsi = (rsi - rsi_min) / denom.replace(0, np.nan)
+    stoch_rsi = (rsi_values - rsi_min) / denom.replace(0, np.nan)
 
     val = stoch_rsi.iloc[-1]
     if np.isnan(val):
