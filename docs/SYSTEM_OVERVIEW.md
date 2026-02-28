@@ -135,11 +135,18 @@ main.py (orchestrator — loop, run, CLI dispatch)  [572 lines]
 
 ## Test Suite
 
-- **73 test files**, ~2,350 tests passing, 18 pre-existing failures
+- **73 test files**, ~2,388 tests passing, 18 pre-existing failures
 - Pre-existing failures: 15 integration (missing `ta_base_strategy`), 2 trigger tests, 1 subprocess test
-- 1 collection error: `test_avanza_session.py` imports nonexistent `create_requests_session`
+- Collection error fixed: `test_avanza_session.py` rewritten for Playwright-based auth (31 tests)
 - Coverage is excellent across all core modules (signal_engine, trigger, data_collector, reporting)
 - Test configuration: pytest + pyproject.toml, ruff linting (line length 120)
+
+## Recent Improvements (Session #2, 2026-02-28)
+
+- **Reporting robustness:** 13 silent `except: pass` blocks replaced with `logger.warning()` + `_module_warnings` list surfaced to Layer 2
+- **Stale cache reduced:** `_MAX_STALE_FACTOR` 5→3 (max 3x TTL fallback for failed data sources)
+- **Trigger state cleanup:** Orphaned ticker entries pruned every save cycle (was lazy +10 buffer)
+- **Health module failures:** `update_module_failures()` tracks which modules failed per cycle in `health_state.json`
 
 ## Deployment
 

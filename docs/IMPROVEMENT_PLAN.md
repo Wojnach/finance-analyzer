@@ -98,32 +98,29 @@
 
 ## 5. Dependency/Ordering — Implementation Batches
 
-### Batch 1: Test infrastructure fix (1 file)
+### Batch 1: Test infrastructure fix (1 file) — DONE ✓
 **Files:** `tests/test_avanza_session.py`
 **Changes:** REF-5 (fix import error)
-**Tests:** Run collection to verify 39 tests collected
-**Risk:** None — test-only
+**Result:** Rewrote entire test file for Playwright-based auth. 31 tests passing (was 0 due to ImportError).
+**Commit:** `2646baa`
 
-### Batch 2: Reporting robustness (1 file)
+### Batch 2: Reporting robustness (1 file) — DONE ✓
 **Files:** `portfolio/reporting.py`
 **Changes:** BUG-14, BUG-17, REF-6, ARCH-1
-**Tests:** Existing reporting tests + verify warnings list populated on module failure
-**Risk:** Low — logging changes only affect reporting output format
-**Depends on:** Batch 1 (clean test baseline)
+**Result:** Replaced 13 silent exception handlers with `logger.warning()` + `_module_warnings` list. 95 related tests pass.
+**Commit:** `91b06a8`
 
-### Batch 3: Cache and state cleanup (2 files)
-**Files:** `portfolio/shared_state.py`, `portfolio/trigger.py`
+### Batch 3: Cache and state cleanup (2 files) — DONE ✓
+**Files:** `portfolio/shared_state.py`, `portfolio/trigger.py`, `tests/test_shared_state.py`
 **Changes:** BUG-15, BUG-16, ARCH-2, REF-7
-**Tests:** Existing shared_state and trigger tests (142 tests)
-**Risk:** Low — stale factor change could cause more None returns, but callers handle it
-**Depends on:** Batch 2 (clean reporting)
+**Result:** Reduced `_MAX_STALE_FACTOR` 5→3, removed +10 pruning buffer, updated 5 test assertions. 90 tests pass.
+**Commit:** `1187f4e`
 
-### Batch 4: Health module status tracking (2 files)
-**Files:** `portfolio/health.py`, `portfolio/reporting.py`
+### Batch 4: Health module status tracking (2 files) — DONE ✓
+**Files:** `portfolio/health.py`, `portfolio/reporting.py`, `tests/test_health.py`
 **Changes:** FEAT-1
-**Tests:** Add tests for module failure tracking
-**Risk:** Low — additive feature, no existing behavior changed
-**Depends on:** Batch 2 (reporting warnings infrastructure)
+**Result:** Added `update_module_failures()`, wired from reporting.py, surfaced in `get_health_summary()`. 7 new tests (29 total health tests pass).
+**Commit:** `c08378e`
 
 ---
 
