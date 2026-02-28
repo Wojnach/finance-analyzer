@@ -293,9 +293,9 @@ def classify_tier(reasons, state=None):
     hours_since = (time.time() - last_full) / 3600
 
     now_utc = datetime.now(timezone.utc)
-    from portfolio.market_timing import _market_close_hour_utc
+    from portfolio.market_timing import _market_close_hour_utc, MARKET_OPEN_HOUR
     close_hour = _market_close_hour_utc(now_utc)
-    market_open = now_utc.weekday() < 5 and 7 <= now_utc.hour < close_hour
+    market_open = now_utc.weekday() < 5 and MARKET_OPEN_HOUR <= now_utc.hour < close_hour
 
     if market_open and hours_since >= _FULL_REVIEW_MARKET_HOURS:
         return 3
@@ -315,12 +315,14 @@ def classify_tier(reasons, state=None):
     return 1
 
 
-def update_tier_state(tier):
+def update_tier_state(tier, state=None):
     """Update trigger state after a tier classification.
 
     Called by the main loop after classify_tier() to persist tier-specific state.
+    Accepts an optional state dict to avoid re-reading trigger_state.json.
     """
-    state = _load_state()
+    if state is None:
+        state = _load_state()
     if tier == 3:
         state["last_full_review_time"] = time.time()
     _save_state(state)

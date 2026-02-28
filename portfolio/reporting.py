@@ -22,6 +22,20 @@ COMPACT_SUMMARY_FILE = DATA_DIR / "agent_summary_compact.json"
 TIER1_FILE = DATA_DIR / "agent_context_t1.json"
 TIER2_FILE = DATA_DIR / "agent_context_t2.json"
 
+# Extra keys to preserve per-ticker in compact/tiered summaries.
+# Defined once to prevent drift between _write_compact_summary and _write_tier2_summary.
+_KEEP_EXTRA_FULL = frozenset({
+    "fear_greed", "fear_greed_class",
+    "sentiment", "sentiment_conf",
+    "ml_action", "ml_confidence",
+    "funding_rate", "funding_action",
+    "volume_ratio", "volume_action",
+    "ministral_action",
+    "_voters", "_total_applicable", "_buy_count", "_sell_count",
+    "_votes", "_weighted_action", "_weighted_confidence",
+    "_confluence_score",
+})
+
 
 def _cross_asset_signals(all_signals):
     btc = all_signals.get("BTC-USD", {})
@@ -417,17 +431,6 @@ def _write_compact_summary(summary):
     HOLD tickers with no position get a minimal entry (no _votes dict,
     no per-signal extras) to save ~25 lines each.
     """
-    KEEP_EXTRA_FULL = {
-        "fear_greed", "fear_greed_class",
-        "sentiment", "sentiment_conf",
-        "ml_action", "ml_confidence",
-        "funding_rate", "funding_action",
-        "volume_ratio", "volume_action",
-        "ministral_action",
-        "_voters", "_total_applicable", "_buy_count", "_sell_count",
-        "_votes", "_weighted_action", "_weighted_confidence",
-        "_confluence_score",
-    }
     # Minimal extra for HOLD-no-position tickers (just counts, no per-signal votes)
     KEEP_EXTRA_MINIMAL = {
         "_voters", "_total_applicable", "_buy_count", "_sell_count",
@@ -455,7 +458,7 @@ def _write_compact_summary(summary):
             td = {k: v for k, v in ticker_data.items() if k != "enhanced_signals"}
             if "extra" in td:
                 extra = {k: v for k, v in td["extra"].items()
-                         if k in KEEP_EXTRA_FULL}
+                         if k in _KEEP_EXTRA_FULL}
                 # For non-held tickers, collapse _votes dict into a compact string
                 # to save ~23 lines per ticker while preserving the info
                 if not is_held and "_votes" in extra:
@@ -691,18 +694,6 @@ def _write_tier2_summary(summary, triggered_tickers=None):
     signals = summary.get("signals", {})
     timeframes = summary.get("timeframes", {})
 
-    KEEP_EXTRA_FULL = {
-        "fear_greed", "fear_greed_class",
-        "sentiment", "sentiment_conf",
-        "ml_action", "ml_confidence",
-        "funding_rate", "funding_action",
-        "volume_ratio", "volume_action",
-        "ministral_action",
-        "_voters", "_total_applicable", "_buy_count", "_sell_count",
-        "_votes", "_weighted_action", "_weighted_confidence",
-        "_confluence_score",
-    }
-
     # Categorize tickers
     full_detail_tickers = held_tickers | triggered_tickers
     remaining = []
@@ -732,7 +723,7 @@ def _write_tier2_summary(summary, triggered_tickers=None):
             td = {k: v for k, v in sig.items() if k != "enhanced_signals"}
             if "extra" in td:
                 td["extra"] = {k: v for k, v in td["extra"].items()
-                               if k in KEEP_EXTRA_FULL}
+                               if k in _KEEP_EXTRA_FULL}
             t2["signals"][ticker] = td
             # Include timeframes
             tf_list = timeframes.get(ticker, [])
@@ -746,7 +737,7 @@ def _write_tier2_summary(summary, triggered_tickers=None):
             # Medium detail — vote detail string + timeframes, no full _votes
             td = {k: v for k, v in sig.items() if k != "enhanced_signals"}
             if "extra" in td:
-                extra = {k: v for k, v in td["extra"].items() if k in KEEP_EXTRA_FULL}
+                extra = {k: v for k, v in td["extra"].items() if k in _KEEP_EXTRA_FULL}
                 if "_votes" in extra:
                     votes = extra["_votes"]
                     buys = [s for s, v in votes.items() if v == "BUY"]
