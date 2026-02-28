@@ -174,6 +174,10 @@ def _run_kronos(candles: list[dict], horizons: tuple = (1, 24), _ticker: str = "
             _log_health("kronos", _ticker, False, ms, err)
             _trip_kronos()
             return None
+        if not proc.stdout or not proc.stdout.strip():
+            _log_health("kronos", _ticker, False, ms, "empty_stdout")
+            _trip_kronos()
+            return None
         result = json.loads(proc.stdout)
         if not result or not result.get("results"):
             _log_health("kronos", _ticker, False, ms, "empty_results")
@@ -210,6 +214,27 @@ def _run_chronos(prices: list[float], horizons: tuple = (1, 24), _ticker: str = 
         _log_health("chronos", _ticker, False, ms, str(e)[:200])
         _trip_chronos()
         return None
+
+
+def _health_weighted_vote(sub_signals, kronos_ok, chronos_ok):
+    """Vote only using sub-signals from healthy (working) models.
+
+    When Kronos is dead (99.5% failure rate), its 2 permanent HOLD votes
+    dilute the 4-vote majority and make the signal always return HOLD.
+    This function excludes dead models from the vote.
+    """
+    alive_votes = []
+    if kronos_ok:
+        alive_votes.append(sub_signals.get("kronos_1h", "HOLD"))
+        alive_votes.append(sub_signals.get("kronos_24h", "HOLD"))
+    if chronos_ok:
+        alive_votes.append(sub_signals.get("chronos_1h", "HOLD"))
+        alive_votes.append(sub_signals.get("chronos_24h", "HOLD"))
+
+    if not alive_votes:
+        return "HOLD", 0.0
+
+    return majority_vote(alive_votes)
 
 
 def _direction_to_action(direction: str) -> str:
@@ -316,9 +341,14 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
             result["indicators"]["chronos_24h_pct"] = chronos["24h"].get("pct_move", 0)
             result["indicators"]["chronos_24h_conf"] = chronos["24h"].get("confidence", 0)
 
-    # Majority vote across sub-signals
-    votes = list(result["sub_signals"].values())
-    result["action"], result["confidence"] = majority_vote(votes)
+    # Health-weighted vote — exclude dead models from majority vote
+    kronos_ok = kronos is not None and bool(kronos.get("results"))
+    chronos_ok = chronos is not None
+    result["indicators"]["kronos_ok"] = kronos_ok
+    result["indicators"]["chronos_ok"] = chronos_ok
+    result["action"], result["confidence"] = _health_weighted_vote(
+        result["sub_signals"], kronos_ok, chronos_ok
+    )
 
     # Cap confidence
     result["confidence"] = min(result["confidence"], _MAX_CONFIDENCE)

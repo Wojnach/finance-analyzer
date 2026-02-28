@@ -330,6 +330,49 @@ def write_agent_summary(
         logger.warning("[reporting] focus_probabilities failed", exc_info=True)
         _module_warnings.append("focus_probabilities")
 
+    # Forecast accuracy (model health + sub-signal accuracy for focus tickers)
+    try:
+        from portfolio.forecast_accuracy import get_forecast_accuracy_summary
+        try:
+            _fa_focus = focus_tickers if focus_tickers else None
+        except NameError:
+            _fa_focus = None
+        fa_summary = get_forecast_accuracy_summary(
+            focus_tickers=_fa_focus,
+            days=7,
+        )
+        if fa_summary and (fa_summary.get("health") or fa_summary.get("accuracy")):
+            summary["forecast_accuracy"] = fa_summary
+    except Exception:
+        logger.warning("[reporting] forecast_accuracy failed", exc_info=True)
+        _module_warnings.append("forecast_accuracy")
+
+    # Forecast signals (Chronos pct_move + confidence for all tickers with forecasts)
+    try:
+        _forecast_signals = {}
+        for t_name, t_data in signals.items():
+            extra = t_data.get("extra", {})
+            # Forecast indicators are stored as forecast_indicators in extra by signal_engine
+            f_ind = extra.get("forecast_indicators", {})
+            if not f_ind:
+                continue
+            chronos_ok = f_ind.get("chronos_ok", False)
+            if chronos_ok or f_ind.get("chronos_1h_pct") is not None:
+                _forecast_signals[t_name] = {
+                    "action": extra.get("forecast_action", "HOLD"),
+                    "chronos_1h_pct": round(f_ind.get("chronos_1h_pct", 0) or 0, 3),
+                    "chronos_1h_conf": round(f_ind.get("chronos_1h_conf", 0) or 0, 3),
+                    "chronos_24h_pct": round(f_ind.get("chronos_24h_pct", 0) or 0, 3),
+                    "chronos_24h_conf": round(f_ind.get("chronos_24h_conf", 0) or 0, 3),
+                    "kronos_ok": f_ind.get("kronos_ok", False),
+                    "chronos_ok": chronos_ok,
+                }
+        if _forecast_signals:
+            summary["forecast_signals"] = _forecast_signals
+    except Exception:
+        logger.warning("[reporting] forecast_signals failed", exc_info=True)
+        _module_warnings.append("forecast_signals")
+
     # Cumulative price changes (rolling 1d/3d/7d)
     try:
         from portfolio.cumulative_tracker import get_cumulative_summary
@@ -349,6 +392,22 @@ def write_agent_summary(
     except Exception:
         logger.warning("[reporting] warrant_portfolio failed", exc_info=True)
         _module_warnings.append("warrant_portfolio")
+
+    # Prophecy/belief context for Layer 2
+    try:
+        from portfolio.prophecy import get_context_for_layer2, evaluate_checkpoints
+        # Evaluate checkpoints against current prices
+        triggered_cps = evaluate_checkpoints(prices_usd)
+        if triggered_cps:
+            logger.info("Prophecy checkpoints triggered: %s",
+                        [f"{cp['belief_id']}:{cp['condition']}" for cp in triggered_cps])
+        # Build compact context
+        prophecy_ctx = get_context_for_layer2(prices_usd)
+        if prophecy_ctx and prophecy_ctx.get("total_active", 0) > 0:
+            summary["prophecy"] = prophecy_ctx
+    except Exception:
+        logger.warning("[reporting] prophecy failed", exc_info=True)
+        _module_warnings.append("prophecy")
 
     # Preserve stale data for instruments not in current cycle (e.g. stocks off-hours)
     # so Layer 2 always sees all instruments. Prune entries stale for >24h.
@@ -517,7 +576,8 @@ def _write_compact_summary(summary):
         compact["futures_data"] = futures_data
 
     # Propagate focus mode sections to compact (small, relevant to Layer 2)
-    for section_key in ("focus_probabilities", "cumulative_gains", "warrant_portfolio"):
+    for section_key in ("focus_probabilities", "cumulative_gains", "warrant_portfolio",
+                        "prophecy", "forecast_accuracy", "forecast_signals"):
         section_data = summary.get(section_key)
         if section_data:
             compact[section_key] = section_data

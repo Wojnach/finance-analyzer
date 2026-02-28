@@ -17,6 +17,7 @@ from portfolio.signals.forecast import (
     _chronos_circuit_open,
     reset_circuit_breakers,
     compute_forecast_signal,
+    _health_weighted_vote,
     _CIRCUIT_BREAKER_TTL,
     _FORECAST_MODELS_DISABLED,
 )
@@ -290,3 +291,60 @@ class TestForecastFullPathEnabled:
         assert result["sub_signals"]["kronos_24h"] == "BUY"
         assert result["sub_signals"]["chronos_1h"] == "BUY"
         assert result["sub_signals"]["chronos_24h"] == "SELL"
+
+
+# --- Health-weighted vote (excludes dead models) ---
+
+class TestHealthWeightedVote:
+    """Test _health_weighted_vote — the core fix for the HOLD-always bug.
+
+    When Kronos is dead, its 2 permanent HOLD sub-signals dilute the
+    4-vote majority. _health_weighted_vote excludes dead models.
+    """
+
+    def test_chronos_only_buy(self):
+        """When Kronos dead, Chronos 2 BUY -> BUY."""
+        sub = {"kronos_1h": "HOLD", "kronos_24h": "HOLD",
+               "chronos_1h": "BUY", "chronos_24h": "BUY"}
+        action, conf = _health_weighted_vote(sub, kronos_ok=False, chronos_ok=True)
+        assert action == "BUY"
+        assert conf > 0
+
+    def test_chronos_only_sell(self):
+        """When Kronos dead, Chronos 2 SELL -> SELL."""
+        sub = {"kronos_1h": "HOLD", "kronos_24h": "HOLD",
+               "chronos_1h": "SELL", "chronos_24h": "SELL"}
+        action, conf = _health_weighted_vote(sub, kronos_ok=False, chronos_ok=True)
+        assert action == "SELL"
+        assert conf > 0
+
+    def test_chronos_only_split(self):
+        """When Kronos dead, Chronos BUY+SELL -> HOLD (tie)."""
+        sub = {"kronos_1h": "HOLD", "kronos_24h": "HOLD",
+               "chronos_1h": "BUY", "chronos_24h": "SELL"}
+        action, conf = _health_weighted_vote(sub, kronos_ok=False, chronos_ok=True)
+        assert action == "HOLD"
+
+    def test_both_alive_majority(self):
+        """Both alive, 3 BUY 1 SELL -> BUY."""
+        sub = {"kronos_1h": "BUY", "kronos_24h": "BUY",
+               "chronos_1h": "BUY", "chronos_24h": "SELL"}
+        action, conf = _health_weighted_vote(sub, kronos_ok=True, chronos_ok=True)
+        assert action == "BUY"
+        assert conf > 0
+
+    def test_both_dead(self):
+        """Both dead -> HOLD with 0 confidence."""
+        sub = {"kronos_1h": "BUY", "kronos_24h": "BUY",
+               "chronos_1h": "BUY", "chronos_24h": "BUY"}
+        action, conf = _health_weighted_vote(sub, kronos_ok=False, chronos_ok=False)
+        assert action == "HOLD"
+        assert conf == 0.0
+
+    def test_kronos_only(self):
+        """Chronos dead, Kronos 2 BUY -> BUY."""
+        sub = {"kronos_1h": "BUY", "kronos_24h": "BUY",
+               "chronos_1h": "HOLD", "chronos_24h": "HOLD"}
+        action, conf = _health_weighted_vote(sub, kronos_ok=True, chronos_ok=False)
+        assert action == "BUY"
+        assert conf > 0

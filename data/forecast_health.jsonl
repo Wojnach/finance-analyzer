@@ -1,0 +1,28 @@
+{"ts": "2026-02-28T22:09:59.823984+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 0, "error": "CUDA error"}
+{"ts": "2026-02-28T22:09:59.831811+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 0, "error": "timed out"}
+{"ts": "2026-02-28T22:09:59.838628+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 0, "error": "empty_results"}
+{"ts": "2026-02-28T22:09:59.844731+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "timed out"}
+{"ts": "2026-02-28T22:09:59.851283+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-02-28T22:09:59.885129+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 0, "error": "CUDA error"}
+{"ts": "2026-02-28T22:12:27.033122+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "CUDA error"}
+{"ts": "2026-02-28T22:12:27.040303+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 0, "error": "timed out"}
+{"ts": "2026-02-28T22:12:27.046311+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 0, "error": "empty_results"}
+{"ts": "2026-02-28T22:12:27.052930+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 0, "error": "timed out"}
+{"ts": "2026-02-28T22:12:27.059248+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-02-28T22:12:27.092433+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 0, "error": "CUDA error"}
+{"ts": "2026-02-28T22:21:31.612614+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "CUDA error"}
+{"ts": "2026-02-28T22:21:31.619238+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 0, "error": "timed out"}
+{"ts": "2026-02-28T22:21:31.625918+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 0, "error": "empty_results"}
+{"ts": "2026-02-28T22:21:31.632762+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 0, "error": "timed out"}
+{"ts": "2026-02-28T22:21:31.638366+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 0}
+{"ts": "2026-02-28T22:21:31.672521+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 0, "error": "CUDA error"}
+{"ts": "2026-02-28T22:22:24.014820+00:00", "model": "kronos", "ticker": "BTC-USD", "ok": false, "ms": 21151, "error": "Expecting value: line 1 column 1 (char 0)"}
+{"ts": "2026-02-28T22:22:51.764768+00:00", "model": "chronos", "ticker": "BTC-USD", "ok": true, "ms": 27749}
+{"ts": "2026-02-28T22:23:01.146373+00:00", "model": "chronos", "ticker": "MSTR", "ok": true, "ms": 1459}
+{"ts": "2026-02-28T22:23:04.018994+00:00", "model": "chronos", "ticker": "XAU-USD", "ok": true, "ms": 1418}
+{"ts": "2026-02-28T22:23:06.188697+00:00", "model": "chronos", "ticker": "NVDA", "ok": true, "ms": 1439}
+{"ts": "2026-02-28T22:23:08.435344+00:00", "model": "chronos", "ticker": "IONQ", "ok": true, "ms": 1496}
+{"ts": "2026-02-28T22:23:10.255169+00:00", "model": "chronos", "ticker": "AAPL", "ok": true, "ms": 1433}
+{"ts": "2026-02-28T22:23:12.103604+00:00", "model": "chronos", "ticker": "AMZN", "ok": true, "ms": 1441}
+{"ts": "2026-02-28T22:23:14.081520+00:00", "model": "chronos", "ticker": "SMCI", "ok": true, "ms": 1559}
+{"ts": "2026-02-28T22:23:15.860718+00:00", "model": "chronos", "ticker": "PLTR", "ok": true, "ms": 1369}

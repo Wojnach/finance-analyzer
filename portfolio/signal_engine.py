@@ -551,6 +551,8 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                     extra_info[f"{sig_name}_action"] = result.get("action", "HOLD")
                     extra_info[f"{sig_name}_confidence"] = result.get("confidence", 0.0)
                     extra_info[f"{sig_name}_sub_signals"] = result.get("sub_signals", {})
+                    if result.get("indicators"):
+                        extra_info[f"{sig_name}_indicators"] = result["indicators"]
                     votes[sig_name] = result.get("action", "HOLD")
                 else:
                     votes[sig_name] = "HOLD"

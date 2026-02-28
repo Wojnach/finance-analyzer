@@ -572,6 +572,42 @@ consensus relatively easily so your judgment as a filter is especially important
 With 26 stocks tracked, focus your reasoning on the ones with actual signals — don't
 enumerate every HOLD ticker.
 
+## Forecast Health & Accuracy
+
+The forecast signal (#28) uses health-weighted voting: only sub-signals from working models
+count toward the majority vote. When Kronos is dead (which is most of the time -- 0.5% success
+rate), only Chronos votes are used instead of injecting 2 permanent HOLDs.
+
+- `agent_summary_compact.json -> forecast_accuracy` -- per-model health rates + per-sub-signal accuracy
+- `agent_summary_compact.json -> forecast_signals` -- Chronos pct_move + confidence per ticker
+- CLI: `python portfolio/main.py --forecast-accuracy` -- print forecast accuracy report
+
+**Chronos accuracy (as of Feb 2026):**
+- XAG-USD 24h: ~76% accurate (strongest forecast signal)
+- BTC-USD 24h: ~54% (near coin-flip)
+- Use forecast probabilities to supplement signal-based probabilities
+
+## Prophecy / Belief System
+
+Persistent macro convictions stored in `data/prophecy.json`. Read every invocation to maintain
+strategic context. Each belief has:
+- Thesis, direction, conviction (0-1), target price, timeframe
+- Supporting and opposing evidence
+- Checkpoints with dates/conditions that auto-evaluate against live prices
+
+**Key beliefs (seeded):**
+- `silver_bull_2026`: XAG-USD bullish, target $120, conviction 0.8
+- `btc_range_2026`: BTC-USD neutral, range $60K-$75K
+- `eth_follows_btc`: ETH-USD neutral, follows BTC
+
+The `prophecy` section in `agent_summary_compact.json` shows active beliefs with progress
+toward targets and checkpoint status. Use this to:
+- Compare technical signals against fundamental convictions
+- Identify when signals contradict or confirm a belief
+- Track whether beliefs are on track
+
+CLI: `python portfolio/main.py --prophecy-review` -- print belief review
+
 ## Instruments
 
 ### Tier 1: Full signals (24 signals, 7 timeframes)

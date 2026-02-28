@@ -323,6 +323,89 @@ def _dissemination_vote(headlines: list[dict]) -> tuple[str, dict]:
     return "HOLD", indicators
 
 
+def _thesis_alignment_vote(headlines: list[dict], ticker: str, config: dict) -> tuple[str, dict]:
+    """Thesis alignment with prophecy beliefs (config-gated).
+
+    If news headlines align with an active prophecy belief's direction,
+    boost that direction. Only active when config.prophecy.news_alignment is true.
+
+    Parameters
+    ----------
+    headlines : list[dict]
+        Recent headlines for the ticker.
+    ticker : str
+        Instrument ticker.
+    config : dict
+        Full config dict.
+
+    Returns
+    -------
+    tuple[str, dict]
+        (action, indicators)
+    """
+    indicators = {"enabled": False, "belief_id": None, "alignment": "none"}
+
+    # Config gate
+    prophecy_cfg = config.get("prophecy", {})
+    if not prophecy_cfg.get("news_alignment", False):
+        return "HOLD", indicators
+
+    indicators["enabled"] = True
+
+    # Get active beliefs for this ticker
+    try:
+        from portfolio.prophecy import get_active_beliefs
+        beliefs = get_active_beliefs(ticker=ticker)
+    except Exception:
+        return "HOLD", indicators
+
+    if not beliefs:
+        return "HOLD", indicators
+
+    # Use highest-conviction belief
+    belief = max(beliefs, key=lambda b: b.get("conviction", 0))
+    indicators["belief_id"] = belief.get("id", "")
+    indicators["belief_direction"] = belief.get("direction", "neutral")
+    indicators["belief_conviction"] = belief.get("conviction", 0)
+
+    direction = belief.get("direction", "neutral")
+    if direction == "neutral":
+        return "HOLD", indicators
+
+    # Check if headlines support the belief direction
+    pos_count = 0
+    neg_count = 0
+    for h in headlines:
+        title = h.get("title", "").lower()
+        sev = keyword_severity(h.get("title", ""))
+        if sev != "normal":
+            if any(kw in title for kw in ("beat", "upgrade", "approval", "bullish",
+                                           "raise", "buyback", "rally", "surge")):
+                pos_count += 1
+            else:
+                neg_count += 1
+
+    indicators["pos_headlines"] = pos_count
+    indicators["neg_headlines"] = neg_count
+
+    # Alignment: does news direction match belief direction?
+    if direction == "bullish" and pos_count > neg_count and pos_count >= 2:
+        indicators["alignment"] = "confirmed"
+        return "BUY", indicators
+    elif direction == "bearish" and neg_count > pos_count and neg_count >= 2:
+        indicators["alignment"] = "confirmed"
+        return "SELL", indicators
+    elif direction == "bullish" and neg_count > pos_count and neg_count >= 2:
+        indicators["alignment"] = "contradicted"
+        # Don't vote against belief -- just HOLD (news temporarily counter to thesis)
+        return "HOLD", indicators
+    elif direction == "bearish" and pos_count > neg_count and pos_count >= 2:
+        indicators["alignment"] = "contradicted"
+        return "HOLD", indicators
+
+    return "HOLD", indicators
+
+
 def compute_news_event_signal(df: pd.DataFrame, context: dict = None) -> dict:
     """Compute the composite news/event detection signal.
 
@@ -348,6 +431,7 @@ def compute_news_event_signal(df: pd.DataFrame, context: dict = None) -> dict:
             "source_weight": "HOLD",
             "sector_impact": "HOLD",
             "dissemination": "HOLD",
+            "thesis_alignment": "HOLD",
         },
         "indicators": {},
     }
@@ -397,6 +481,12 @@ def compute_news_event_signal(df: pd.DataFrame, context: dict = None) -> dict:
     except Exception:
         dis_action, dis_ind = "HOLD", {}
 
+    # Thesis alignment (config-gated -- only votes when prophecy.news_alignment is true)
+    try:
+        thesis_action, thesis_ind = _thesis_alignment_vote(headlines, ticker, config)
+    except Exception:
+        thesis_action, thesis_ind = "HOLD", {"enabled": False}
+
     # Populate result
     result["sub_signals"]["headline_velocity"] = vel_action
     result["sub_signals"]["keyword_severity"] = sev_action
@@ -404,6 +494,7 @@ def compute_news_event_signal(df: pd.DataFrame, context: dict = None) -> dict:
     result["sub_signals"]["source_weight"] = src_action
     result["sub_signals"]["sector_impact"] = sec_action
     result["sub_signals"]["dissemination"] = dis_action
+    result["sub_signals"]["thesis_alignment"] = thesis_action
 
     result["indicators"].update({f"velocity_{k}": v for k, v in vel_ind.items()})
     result["indicators"].update({f"severity_{k}": v for k, v in sev_ind.items()})
@@ -411,10 +502,13 @@ def compute_news_event_signal(df: pd.DataFrame, context: dict = None) -> dict:
     result["indicators"].update({f"source_{k}": v for k, v in src_ind.items()})
     result["indicators"].update({f"sector_{k}": v for k, v in sec_ind.items()})
     result["indicators"].update({f"dissemination_{k}": v for k, v in dis_ind.items()})
+    result["indicators"].update({f"thesis_{k}": v for k, v in thesis_ind.items()})
     result["indicators"]["total_headlines"] = len(headlines)
 
-    # Majority vote
+    # Majority vote (include thesis alignment only if it was enabled and voted)
     votes = [vel_action, sev_action, shift_action, src_action, sec_action, dis_action]
+    if thesis_ind.get("enabled") and thesis_action != "HOLD":
+        votes.append(thesis_action)
     result["action"], result["confidence"] = majority_vote(votes)
 
     # Cap confidence

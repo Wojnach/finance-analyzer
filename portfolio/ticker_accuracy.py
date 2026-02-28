@@ -166,6 +166,83 @@ def direction_probability(ticker, current_votes, horizon="1d", days=7, min_sampl
     }
 
 
+def direction_probability_with_forecast(ticker, current_votes, forecast_data=None,
+                                        horizon="1d", days=7, min_samples=5):
+    """Enhanced probability with Chronos forecast blending.
+
+    Takes the base signal-accuracy probability and blends in Chronos forecast
+    predictions, weighted by Chronos's per-ticker accuracy.
+
+    Args:
+        ticker: Instrument ticker.
+        current_votes: dict {signal_name: vote} for current cycle.
+        forecast_data: dict from forecast signal indicators, e.g.:
+            {"chronos_24h_pct": 0.5, "chronos_24h_conf": 0.6,
+             "chronos_1h_pct": 0.3, "chronos_1h_conf": 0.55,
+             "chronos_ok": True}
+        horizon: Outcome horizon.
+        days: Lookback window.
+        min_samples: Minimum samples for signal accuracy.
+
+    Returns:
+        dict: Same as direction_probability() but with added fields:
+            "forecast_pct_move": float (Chronos predicted % move)
+            "forecast_confidence": float (Chronos confidence)
+            "forecast_blended": bool (whether forecast was blended in)
+    """
+    base = direction_probability(ticker, current_votes, horizon=horizon,
+                                 days=days, min_samples=min_samples)
+
+    # Add forecast data if available
+    if not forecast_data or not forecast_data.get("chronos_ok"):
+        base["forecast_blended"] = False
+        return base
+
+    # Map horizon to chronos key
+    horizon_map = {"1h": "1h", "3h": "1h", "1d": "24h", "3d": "24h", "24h": "24h"}
+    chronos_h = horizon_map.get(horizon, "24h")
+
+    pct_key = f"chronos_{chronos_h}_pct"
+    conf_key = f"chronos_{chronos_h}_conf"
+
+    pct_move = forecast_data.get(pct_key, 0) or 0
+    confidence = forecast_data.get(conf_key, 0) or 0
+
+    base["forecast_pct_move"] = round(pct_move, 3) if pct_move else 0
+    base["forecast_confidence"] = round(confidence, 3) if confidence else 0
+
+    # Blend forecast into probability if we have meaningful data
+    if abs(pct_move) > 0.1 and confidence > 0.1:
+        # Convert Chronos prediction to P(up): positive pct = higher P(up)
+        forecast_p_up = 0.5 + min(max(pct_move * 0.1, -0.3), 0.3)  # scale, cap at 0.2-0.8
+
+        # Weight by confidence (scaled down since forecast is one input among many)
+        forecast_weight = confidence * 2.0  # comparable to sqrt(samples) for ~4 samples
+
+        # Blend with existing probability
+        existing_weight = sum(d.get("weight", 0) for d in base.get("signal_details", []))
+        total_weight = existing_weight + forecast_weight
+
+        if total_weight > 0:
+            blended_p = (base["probability"] * existing_weight +
+                         forecast_p_up * forecast_weight) / total_weight
+            base["probability"] = round(blended_p, 3)
+
+            # Update direction
+            if blended_p > 0.52:
+                base["direction"] = "up"
+            elif blended_p < 0.48:
+                base["direction"] = "down"
+            else:
+                base["direction"] = "neutral"
+
+        base["forecast_blended"] = True
+    else:
+        base["forecast_blended"] = False
+
+    return base
+
+
 def get_focus_probabilities(tickers, current_data, horizons=None, days=7):
     """Compute probabilities for focus instruments across multiple horizons.
 

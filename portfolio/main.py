@@ -524,9 +524,28 @@ if __name__ == "__main__":
         from portfolio.outcome_tracker import backfill_outcomes
         updated = backfill_outcomes()
         print(f"Updated {updated} entries")
+        # Also backfill forecast outcomes
+        print("\n=== Forecast Outcome Backfill ===")
+        try:
+            from portfolio.forecast_accuracy import backfill_forecast_outcomes
+            fc_updated = backfill_forecast_outcomes()
+            print(f"Updated {fc_updated} forecast entries")
+        except Exception as e:
+            print(f"Forecast backfill failed: {e}")
     elif "--accuracy" in args:
         from portfolio.accuracy_stats import print_accuracy_report
         print_accuracy_report()
+    elif "--forecast-accuracy" in args:
+        from portfolio.forecast_accuracy import print_forecast_accuracy_report
+        print_forecast_accuracy_report()
+    elif "--prophecy-review" in args:
+        from portfolio.prophecy import print_prophecy_review
+        print_prophecy_review()
+    elif "--forecast-outcomes" in args:
+        print("=== Forecast Outcome Backfill ===")
+        from portfolio.forecast_accuracy import backfill_forecast_outcomes
+        updated = backfill_forecast_outcomes()
+        print(f"Updated {updated} forecast entries with actual outcomes")
     elif "--retrain" in args:
         print("=== ML Retraining ===")
         print("Refreshing data from Binance API...")

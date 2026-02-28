@@ -1,0 +1,169 @@
+{
+  "beliefs": [
+    {
+      "id": "silver_bull_2026",
+      "ticker": "XAG-USD",
+      "thesis": "Silver to $120 — war premium (Ukraine/Middle East), industrial demand (solar/EV/AI data centers), gold-silver ratio compression from 90 to 50, central bank diversification away from USD",
+      "direction": "bullish",
+      "conviction": 0.8,
+      "target_price": 120.0,
+      "target_timeframe": "2026-2027",
+      "entry_price": 31.50,
+      "created_at": "2026-02-28T00:00:00+00:00",
+      "updated_at": "2026-02-28T00:00:00+00:00",
+      "status": "active",
+      "supporting_evidence": [
+        "Gold-silver ratio at 90 (historically compresses to 50-60 in bull markets)",
+        "Industrial demand: solar panels, EVs, AI data centers all rising",
+        "Geopolitical premium: Ukraine/Russia, Middle East conflicts ongoing",
+        "Central banks buying gold at record pace — silver follows gold moves with leverage",
+        "Supply deficit: silver mine output declining while demand rising"
+      ],
+      "opposing_evidence": [
+        "Strong USD could suppress metals",
+        "Recession risk reduces industrial demand",
+        "Central bank tightening dampens all commodities"
+      ],
+      "checkpoints": [
+        {
+          "id": "cp_0",
+          "condition": "XAG breaks above $35 (near-term resistance)",
+          "target_value": 35.0,
+          "comparison": "above",
+          "deadline": "2026-06-30T00:00:00+00:00",
+          "status": "pending",
+          "triggered_at": null,
+          "created_at": "2026-02-28T00:00:00+00:00"
+        },
+        {
+          "id": "cp_1",
+          "condition": "XAG breaks above $50 (2011 high retest)",
+          "target_value": 50.0,
+          "comparison": "above",
+          "deadline": "2026-12-31T00:00:00+00:00",
+          "status": "pending",
+          "triggered_at": null,
+          "created_at": "2026-02-28T00:00:00+00:00"
+        },
+        {
+          "id": "cp_2",
+          "condition": "Gold-silver ratio drops below 70",
+          "target_value": 70.0,
+          "comparison": "below",
+          "deadline": "2026-12-31T00:00:00+00:00",
+          "status": "pending",
+          "triggered_at": null,
+          "created_at": "2026-02-28T00:00:00+00:00"
+        },
+        {
+          "id": "cp_3",
+          "condition": "XAG reaches $80 (halfway to target)",
+          "target_value": 80.0,
+          "comparison": "above",
+          "deadline": "2027-06-30T00:00:00+00:00",
+          "status": "pending",
+          "triggered_at": null,
+          "created_at": "2026-02-28T00:00:00+00:00"
+        },
+        {
+          "id": "cp_4",
+          "condition": "XAG reaches $120 (full target)",
+          "target_value": 120.0,
+          "comparison": "above",
+          "deadline": "2027-12-31T00:00:00+00:00",
+          "status": "pending",
+          "triggered_at": null,
+          "created_at": "2026-02-28T00:00:00+00:00"
+        }
+      ],
+      "tags": ["metals", "macro", "geopolitical", "industrial"],
+      "notes": "Core conviction. User holds MINI-SILVER 5x warrant. Silver is the trade."
+    },
+    {
+      "id": "btc_range_2026",
+      "ticker": "BTC-USD",
+      "thesis": "BTC range-bound $60K-$75K until macro catalyst. No clear trend — halving supply shock priced in, ETF inflows steady but not accelerating. Waiting for Fed pivot or geopolitical shock.",
+      "direction": "neutral",
+      "conviction": 0.5,
+      "target_price": null,
+      "target_timeframe": "2026-H1",
+      "entry_price": 67600.0,
+      "created_at": "2026-02-28T00:00:00+00:00",
+      "updated_at": "2026-02-28T00:00:00+00:00",
+      "status": "active",
+      "supporting_evidence": [
+        "ETF inflows stabilized — no longer accelerating",
+        "Halving supply shock already priced in",
+        "Macro uncertainty: Fed path unclear"
+      ],
+      "opposing_evidence": [
+        "Could break out on unexpected positive catalyst",
+        "Historical post-halving cycles suggest higher"
+      ],
+      "checkpoints": [
+        {
+          "id": "cp_0",
+          "condition": "BTC breaks above $75K (range breakout)",
+          "target_value": 75000.0,
+          "comparison": "above",
+          "deadline": "2026-06-30T00:00:00+00:00",
+          "status": "pending",
+          "triggered_at": null,
+          "created_at": "2026-02-28T00:00:00+00:00"
+        },
+        {
+          "id": "cp_1",
+          "condition": "BTC drops below $60K (range breakdown)",
+          "target_value": 60000.0,
+          "comparison": "below",
+          "deadline": "2026-06-30T00:00:00+00:00",
+          "status": "pending",
+          "triggered_at": null,
+          "created_at": "2026-02-28T00:00:00+00:00"
+        }
+      ],
+      "tags": ["crypto", "macro"],
+      "notes": "No strong conviction either way. Watch for range break."
+    },
+    {
+      "id": "eth_follows_btc",
+      "ticker": "ETH-USD",
+      "thesis": "ETH follows BTC with beta. No independent catalyst until Pectra upgrade delivers meaningful improvements. ETH/BTC ratio trending down.",
+      "direction": "neutral",
+      "conviction": 0.4,
+      "target_price": null,
+      "target_timeframe": "2026-H1",
+      "entry_price": 1996.0,
+      "created_at": "2026-02-28T00:00:00+00:00",
+      "updated_at": "2026-02-28T00:00:00+00:00",
+      "status": "active",
+      "supporting_evidence": [
+        "ETH/BTC ratio declining — underperforming",
+        "No major catalyst until Pectra",
+        "L2 ecosystem fragmenting value"
+      ],
+      "opposing_evidence": [
+        "ETH staking yield remains attractive",
+        "Institutional adoption still growing"
+      ],
+      "checkpoints": [
+        {
+          "id": "cp_0",
+          "condition": "ETH breaks above $2,500 (independent strength)",
+          "target_value": 2500.0,
+          "comparison": "above",
+          "deadline": "2026-06-30T00:00:00+00:00",
+          "status": "pending",
+          "triggered_at": null,
+          "created_at": "2026-02-28T00:00:00+00:00"
+        }
+      ],
+      "tags": ["crypto"],
+      "notes": "Low conviction. Just a BTC follower for now."
+    }
+  ],
+  "metadata": {
+    "version": 1,
+    "last_review": "2026-02-28T00:00:00+00:00"
+  }
+}
