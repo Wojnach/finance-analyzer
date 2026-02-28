@@ -420,6 +420,10 @@ def loop(interval=None):
         except Exception as e:
             logger.warning("Failed to check heartbeat staleness: %s", e)
 
+    # Reset session start_time so uptime_seconds is accurate for this session
+    from portfolio.health import reset_session_start
+    reset_session_start()
+
     logger.info("Loop started")
 
     # Load Alpha Vantage fundamentals cache from disk

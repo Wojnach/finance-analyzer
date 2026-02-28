@@ -47,7 +47,8 @@ def write_agent_summary(
     signals, prices_usd, fx_rate, state, tf_data, trigger_reasons=None
 ):
     total = portfolio_value(state, prices_usd, fx_rate)
-    pnl_pct = ((total - state["initial_value_sek"]) / state["initial_value_sek"]) * 100
+    initial = state.get("initial_value_sek", 500000)
+    pnl_pct = ((total - initial) / initial) * 100
 
     summary = {
         "timestamp": datetime.now(timezone.utc).isoformat(),

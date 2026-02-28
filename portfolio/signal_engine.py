@@ -25,6 +25,13 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 MIN_VOTERS_CRYPTO = 3  # crypto has 27 signals (8 core + 19 enhanced; custom_lora, ml, funding disabled) — need 3
 MIN_VOTERS_STOCK = 3  # stocks have 25 signals (7 core + 18 enhanced) — need 3 active voters
 
+# Core signals that must have at least 1 active voter for non-HOLD consensus.
+# Enhanced signals can strengthen/weaken but never create consensus alone.
+CORE_SIGNAL_NAMES = frozenset({
+    "rsi", "macd", "ema", "bb", "fear_greed", "sentiment",
+    "volume", "ministral", "claude_fundamental",
+})
+
 # Sentiment hysteresis — prevents rapid flip spam from ~50% confidence oscillation
 _prev_sentiment = {}  # in-memory cache; seeded from sentiment_state.json on first call
 _prev_sentiment_loaded = False
@@ -567,11 +574,6 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
 
     # Core signal gate: at least 1 core signal must be active for non-HOLD consensus.
     # Enhanced signals can strengthen/weaken a consensus but never create one alone.
-    # ml and funding removed — disabled due to <30% accuracy.
-    CORE_SIGNAL_NAMES = {
-        "rsi", "macd", "ema", "bb", "fear_greed", "sentiment",
-        "volume", "ministral", "claude_fundamental",
-    }
     core_buy = sum(1 for s in CORE_SIGNAL_NAMES if votes.get(s) == "BUY")
     core_sell = sum(1 for s in CORE_SIGNAL_NAMES if votes.get(s) == "SELL")
     core_active = core_buy + core_sell

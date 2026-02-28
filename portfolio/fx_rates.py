@@ -15,9 +15,6 @@ _FX_STALE_THRESHOLD = 7200  # 2 hours — warn if FX rate hasn't been refreshed
 def fetch_usd_sek():
     now = time.time()
     if _fx_cache["rate"] and now - _fx_cache["time"] < 3600:
-        age_secs = now - _fx_cache["time"]
-        if age_secs > _FX_STALE_THRESHOLD:
-            logger.warning("FX rate is stale (%.1fh old)", age_secs / 3600)
         return _fx_cache["rate"]
     try:
         r = fetch_with_retry(
