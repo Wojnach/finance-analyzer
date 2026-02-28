@@ -42,7 +42,7 @@ def _golden_cross(close: pd.Series) -> str:
     sma50 = sma(close, 50)
     sma200 = sma(close, 200)
 
-    if sma50.iloc[-1] is np.nan or sma200.iloc[-1] is np.nan:
+    if pd.isna(sma50.iloc[-1]) or pd.isna(sma200.iloc[-1]):
         return "HOLD"
     if len(sma50.dropna()) < 2 or len(sma200.dropna()) < 2:
         return "HOLD"
@@ -316,10 +316,7 @@ def _ichimoku_signal(high: pd.Series, low: pd.Series,
     if len(close) < 78:
         return "HOLD", float("nan"), float("nan")
 
-    tenkan = _midline(close, 9)       # Using close for simplicity (some use high/low)
-    kijun = _midline(close, 26)
-
-    # More accurate: use high/low for Tenkan and Kijun
+    # Use high/low for Tenkan and Kijun (standard Ichimoku computation)
     tenkan = (_rolling_high(high, 9) + _rolling_low(low, 9)) / 2.0
     kijun = (_rolling_high(high, 26) + _rolling_low(low, 26)) / 2.0
 

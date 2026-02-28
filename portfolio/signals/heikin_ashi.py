@@ -25,7 +25,9 @@ import math
 import numpy as np
 import pandas as pd
 
-from portfolio.signal_utils import majority_vote
+from portfolio.signal_utils import (
+    ema, majority_vote, rma, safe_float, sma, true_range, wma,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -36,13 +38,6 @@ _MIN_ROWS_BASIC = 10    # absolute minimum to attempt any calculation
 _NUM_SUB_SIGNALS = 7
 _DOJI_BODY_PCT = 0.10   # body < 10% of range = doji
 _HA_STREAK_LEN = 3      # consecutive candles for strong trend
-
-
-# ---------------------------------------------------------------------------
-# Moving average helpers
-# ---------------------------------------------------------------------------
-
-from portfolio.signal_utils import ema, rma, safe_float, sma, true_range, wma
 
 
 def _hma(series: pd.Series, period: int) -> pd.Series:
@@ -470,8 +465,12 @@ def _ttm_squeeze_signal(
 # ---------------------------------------------------------------------------
 
 def _majority_vote(signals: list[str]) -> tuple[str, float]:
-    """Majority voting — delegates to signal_utils.majority_vote(count_hold=True)."""
-    return majority_vote(signals, count_hold=True)
+    """Majority voting — delegates to signal_utils.majority_vote.
+
+    Uses count_hold=False (default) to match all other signal modules.
+    Confidence = winner / active_voters (BUY+SELL), not total.
+    """
+    return majority_vote(signals)
 
 
 # ---------------------------------------------------------------------------
