@@ -157,6 +157,18 @@ def _is_market_hours():
     return 7 <= now.hour < 21
 
 
+def _is_analysis_window():
+    """Check if Claude analysis should run: 1h before EU open to 1h after US close, weekdays only.
+
+    EU open  07:00 UTC -> analysis from 06:00 UTC
+    US close 21:00 UTC -> analysis until 22:00 UTC
+    """
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if now.weekday() >= 5:  # weekend
+        return False
+    return 6 <= now.hour < 22
+
+
 def send_telegram(msg):
     if not _is_market_hours():
         print("  >> TG SKIPPED (outside EU+US market hours)")
@@ -542,7 +554,14 @@ def main():
                         last_analysis_ts = 0  # trigger Claude analysis
                         print()
 
-            # === Claude Analysis Cycle (every 10 min) ===
+            # === Claude Analysis Cycle (every 5 min) ===
+            # Only invoke Claude during analysis window (06:00-22:00 UTC weekdays)
+            # Price loop still runs 24/7 for mechanical alerts
+            if not _is_analysis_window():
+                if time.time() - last_analysis_ts >= ANALYSIS_INTERVAL:
+                    last_analysis_ts = time.time()
+                    print(f"  [off-hours] Skipping Claude analysis (outside 06-22 UTC weekdays)")
+                continue
             if time.time() - last_analysis_ts >= ANALYSIS_INTERVAL:
                 last_analysis_ts = time.time()
                 analysis_count += 1
