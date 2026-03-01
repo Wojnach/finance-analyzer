@@ -24,7 +24,7 @@
 | Passing | 3,142 |
 | Pre-existing failures | 26 |
 | Sequential runtime | **16 min 12 sec** |
-| Parallel runtime (`-n auto`) | **~4-5 min** (estimated) |
+| Parallel runtime (`-n auto`) | **5 min 34 sec** (2.9x speedup, 8 workers) |
 | Test files | ~85 |
 
 ## Pre-existing Failures (26 — not regressions)
@@ -44,8 +44,18 @@ These failures existed before the current session and are not caused by recent c
 
 `pytest-xdist` is installed. Use `-n auto` to run across all CPU cores.
 
-**Important**: Tests that write to shared files (e.g., `_PREDICTIONS_FILE`, `signal_log.jsonl`)
-must use `tmp_path` fixture for isolation. Most tests already do this.
+**Important**: Tests that write to shared files (e.g., `_PREDICTIONS_FILE`,
+`signal_log.jsonl`, `trigger_state.json`) must use `tmp_path` fixture for
+isolation. Tests using module-level state (like `trigger.STATE_FILE`) should
+patch those paths to `tmp_path` via an `autouse` fixture. See
+`test_trigger_edge_cases.py` for the pattern:
+
+```python
+@pytest.fixture(autouse=True)
+def _isolate_state(tmp_path):
+    with mock.patch("portfolio.trigger.STATE_FILE", tmp_path / "state.json"):
+        yield
+```
 
 ```bash
 # Auto-detect CPU cores
@@ -56,15 +66,6 @@ must use `tmp_path` fixture for isolation. Most tests already do this.
 
 # Parallel with verbose output
 .venv\Scripts\python.exe -m pytest -n auto -v --tb=short
-```
-
-**Known issue**: On Windows with Git Bash, `pytest -n auto` may fail with
-"bringing up nodes... no tests ran" if the working directory has path issues.
-Run from cmd.exe or PowerShell if this happens:
-
-```cmd
-cd Q:\finance-analyzer
-.venv\Scripts\python.exe -m pytest -n auto --tb=short -q
 ```
 
 ## Test Organization

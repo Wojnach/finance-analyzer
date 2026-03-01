@@ -7,6 +7,9 @@ Covers:
 - Sustained flip detection (3 consecutive checks)
 - Market hours boundary (just before/after 7:00 and 21:00 UTC)
 - Multiple trigger reasons in one cycle
+
+All tests use isolated temp files for trigger state so they are safe
+for parallel execution with pytest-xdist (-n auto).
 """
 
 import json
@@ -18,16 +21,12 @@ from unittest import mock
 import pytest
 
 from portfolio.trigger import (
-    STATE_FILE,
     PRICE_THRESHOLD,
     FG_THRESHOLDS,
     SUSTAINED_CHECKS,
     check_triggers,
     _load_state,
     _save_state,
-    _check_recent_trade,
-    PORTFOLIO_FILE,
-    PORTFOLIO_BOLD_FILE,
 )
 
 
@@ -35,20 +34,15 @@ from portfolio.trigger import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
-class TriggerTestBase:
-    """Base class that backs up and restores trigger state between tests."""
-
-    def setup_method(self):
-        self._backup = None
-        if STATE_FILE.exists():
-            self._backup = STATE_FILE.read_text(encoding="utf-8")
-            STATE_FILE.unlink()
-
-    def teardown_method(self):
-        if self._backup is not None:
-            STATE_FILE.write_text(self._backup, encoding="utf-8")
-        elif STATE_FILE.exists():
-            STATE_FILE.unlink()
+@pytest.fixture(autouse=True)
+def _isolate_trigger_state(tmp_path):
+    """Redirect trigger state to a temp file per test for xdist safety."""
+    tmp_state = tmp_path / "trigger_state.json"
+    with (
+        mock.patch("portfolio.trigger.STATE_FILE", tmp_state),
+        mock.patch("portfolio.trigger._startup_grace_active", False),
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +74,7 @@ def _make_prices(tickers=None, base_price=100.0):
 # Test: 30-ticker simultaneous consensus changes
 # ---------------------------------------------------------------------------
 
-class TestSimultaneousConsensusChanges(TriggerTestBase):
+class TestSimultaneousConsensusChanges:
     def test_all_tickers_flip_to_buy(self):
         """When all tickers simultaneously reach BUY consensus."""
         tickers = ALL_TICKERS
@@ -126,7 +120,7 @@ class TestSimultaneousConsensusChanges(TriggerTestBase):
 # Test: Post-trade cooldown reset
 # ---------------------------------------------------------------------------
 
-class TestPostTradeCooldownReset(TriggerTestBase):
+class TestPostTradeCooldownReset:
     def test_patient_trade_resets_cooldown(self):
         """A trade in patient portfolio should reset the cooldown timer."""
         sigs = _make_signals(["BTC-USD"], "HOLD")
@@ -173,7 +167,7 @@ class TestPostTradeCooldownReset(TriggerTestBase):
 # Test: Rapid signal oscillation (BUY->HOLD->BUY in 3 cycles)
 # ---------------------------------------------------------------------------
 
-class TestRapidSignalOscillation(TriggerTestBase):
+class TestRapidSignalOscillation:
     def test_buy_hold_buy_does_not_trigger_flip(self):
         """BUY->HOLD->BUY should NOT trigger a sustained flip because
         the HOLD in the middle resets the counter."""
@@ -218,22 +212,14 @@ class TestRapidSignalOscillation(TriggerTestBase):
         assert any("consensus" in r for r in reasons1)
 
         # Now switch to HOLD for 3 consecutive cycles.
-        # HOLD does NOT trigger consensus (only BUY/SELL do), so the
-        # triggered state stays BUY.  After 3 HOLD cycles, sustained flip fires.
-        # Note: cycles 1 and 2 may still trigger for cooldown reasons, which
-        # would update last_trigger_time but NOT change last.signals (HOLD is
-        # stored only when triggered==True, but signals still get written).
-        # Actually, if cooldown fires, state["last"]["signals"] is updated to
-        # HOLD.  We need to suppress cooldown by setting last_trigger_time
-        # to recent.
+        # Suppress cooldown by setting last_trigger_time far in the future.
         import portfolio.trigger as trig
         state = trig._load_state()
-        state["last_trigger_time"] = time.time() + 9999  # suppress cooldown
+        state["last_trigger_time"] = time.time() + 9999
         trig._save_state(state)
 
         # Cycle 1: HOLD, no trigger (cooldown suppressed, no consensus)
         t1, r1 = check_triggers(sigs_hold, prices, {}, {})
-        # If no trigger, state["last"] is NOT updated -> triggered action stays BUY
         if not t1:
             pass  # good, state preserved
 
@@ -259,7 +245,7 @@ class TestRapidSignalOscillation(TriggerTestBase):
 # Test: Sustained flip detection
 # ---------------------------------------------------------------------------
 
-class TestSustainedFlipDetection(TriggerTestBase):
+class TestSustainedFlipDetection:
     def _suppress_cooldown(self):
         """Set last_trigger_time far in the future to suppress cooldown triggers."""
         import portfolio.trigger as trig
@@ -342,7 +328,7 @@ class TestSustainedFlipDetection(TriggerTestBase):
 # Test: Market hours boundary
 # ---------------------------------------------------------------------------
 
-class TestMarketHoursBoundary(TriggerTestBase):
+class TestMarketHoursBoundary:
     def test_no_trigger_on_silence_market_hours(self):
         """During market hours with HOLD signals, no trigger fires (no cooldown)."""
         sigs = _make_signals(["BTC-USD"], "HOLD")
@@ -406,7 +392,7 @@ class TestMarketHoursBoundary(TriggerTestBase):
 # Test: Multiple trigger reasons in one cycle
 # ---------------------------------------------------------------------------
 
-class TestMultipleTriggerReasons(TriggerTestBase):
+class TestMultipleTriggerReasons:
     def test_consensus_plus_price_move(self):
         """Signal consensus change + 2% price move = both reasons."""
         prices = {"BTC-USD": 69000, "ETH-USD": 2000}
