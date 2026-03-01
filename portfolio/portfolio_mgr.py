@@ -9,23 +9,43 @@ from portfolio.file_utils import atomic_write_json as _atomic_write_json
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 STATE_FILE = DATA_DIR / "portfolio_state.json"
+BOLD_STATE_FILE = DATA_DIR / "portfolio_state_bold.json"
 INITIAL_CASH_SEK = 500_000
+
+_DEFAULT_STATE = {
+    "cash_sek": INITIAL_CASH_SEK,
+    "holdings": {},
+    "transactions": [],
+    "initial_value_sek": INITIAL_CASH_SEK,
+}
 
 
 def load_state():
     if STATE_FILE.exists():
         return json.loads(STATE_FILE.read_text(encoding="utf-8"))
     return {
-        "cash_sek": INITIAL_CASH_SEK,
-        "holdings": {},
-        "transactions": [],
+        **_DEFAULT_STATE,
         "start_date": datetime.now(timezone.utc).isoformat(),
-        "initial_value_sek": INITIAL_CASH_SEK,
     }
 
 
 def save_state(state):
     _atomic_write_json(STATE_FILE, state)
+
+
+def load_bold_state():
+    """Load Bold portfolio state, returning defaults if missing."""
+    if BOLD_STATE_FILE.exists():
+        return json.loads(BOLD_STATE_FILE.read_text(encoding="utf-8"))
+    return {
+        **_DEFAULT_STATE,
+        "start_date": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def save_bold_state(state):
+    """Save Bold portfolio state atomically."""
+    _atomic_write_json(BOLD_STATE_FILE, state)
 
 
 def portfolio_value(state, prices_usd, fx_rate):

@@ -541,8 +541,18 @@ def write_agent_summary(
     return summary
 
 
+_held_tickers_cache = {"cycle_id": -1, "tickers": set()}
+
+
 def _get_held_tickers():
-    """Return set of tickers held in either Patient or Bold portfolio."""
+    """Return set of tickers held in either Patient or Bold portfolio.
+
+    Cached per cycle (via _run_cycle_id) to avoid repeated disk reads.
+    """
+    from portfolio.shared_state import _run_cycle_id
+    if _held_tickers_cache["cycle_id"] == _run_cycle_id:
+        return _held_tickers_cache["tickers"]
+
     held = set()
     for fname in ("portfolio_state.json", "portfolio_state_bold.json"):
         try:
@@ -552,6 +562,8 @@ def _get_held_tickers():
                     held.add(ticker)
         except (FileNotFoundError, json.JSONDecodeError):
             pass
+    _held_tickers_cache["cycle_id"] = _run_cycle_id
+    _held_tickers_cache["tickers"] = held
     return held
 
 
