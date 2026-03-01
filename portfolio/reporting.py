@@ -343,6 +343,33 @@ def write_agent_summary(
         logger.warning("[reporting] risk_management failed", exc_info=True)
         _module_warnings.append("risk_management")
 
+    # Monte Carlo simulation (price bands, stop probability, portfolio VaR)
+    try:
+        from portfolio.api_utils import load_config as _load_mc_cfg
+        _mc_cfg = _load_mc_cfg().get("monte_carlo", {})
+        if _mc_cfg.get("enabled", True):
+            from portfolio.monte_carlo import simulate_all
+            from portfolio.monte_carlo_risk import compute_portfolio_var
+
+            mc_n_paths = _mc_cfg.get("n_paths", 10000)
+            mc_results = simulate_all(summary, n_paths=mc_n_paths)
+            if mc_results:
+                summary["monte_carlo"] = mc_results
+
+            # Portfolio VaR for each strategy
+            mc_var = {}
+            for label, pf in [("patient", _patient_pf), ("bold", _bold_pf)]:
+                holdings = pf.get("holdings", {})
+                if any(h.get("shares", 0) > 0 for h in holdings.values()):
+                    var_result = compute_portfolio_var(pf, summary, n_paths=mc_n_paths)
+                    if var_result.get("n_positions", 0) > 0:
+                        mc_var[label] = var_result
+            if mc_var:
+                summary["portfolio_var"] = mc_var
+    except Exception:
+        logger.warning("[reporting] monte_carlo failed", exc_info=True)
+        _module_warnings.append("monte_carlo")
+
     # Portfolio trade metrics (per-trade performance)
     try:
         from portfolio.equity_curve import compute_trade_metrics
