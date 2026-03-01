@@ -1,5 +1,9 @@
 # Improvement Plan — Auto-Session #4 (2026-03-01)
 
+## Status: COMPLETE
+
+All planned items implemented, tested, and committed. 4 commits on `main`.
+
 ## Priority: Critical Bugs > Architecture > Tests > Features > Polish
 
 Previous sessions fixed BUG-13 through BUG-28, ARCH-1/2/3/4, REF-5/6/7/10.

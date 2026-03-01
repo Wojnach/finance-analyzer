@@ -1,12 +1,12 @@
 # Portfolio Intelligence System — System Overview
 
-> **Updated:** 2026-02-28 (auto-improvement session #3)
+> **Updated:** 2026-03-01 (auto-improvement session #4)
 > **Canonical architecture doc:** docs/architecture-plan.md
 > **Layer 2 instructions:** CLAUDE.md
 
 ## Architecture Summary
 
-Two-layer autonomous trading system managing 31 instruments (2 crypto, 2 metals, 27 US equities)
+Two-layer autonomous trading system managing 19 instruments (2 crypto, 2 metals, 15 US equities)
 with 30 signals across 7 timeframes, dual simulated portfolios (Patient + Bold, 500K SEK each).
 
 | Layer | Role | Runs | Decides |
@@ -32,7 +32,7 @@ main.py (orchestrator — loop, run, CLI dispatch)  [572 lines]
 │   ├── macro_context.py   (DXY, yields, FOMC, volume signal)
 │   ├── accuracy_stats.py  (signal performance tracking, SQLite)  [559 lines]
 │   └── signals/           (19 enhanced signal modules, ~8,400 lines total)
-├── portfolio_mgr.py       (state load/save, portfolio_value)  [36 lines]
+├── portfolio_mgr.py       (state load/save, portfolio_value, bold state)  [~60 lines]
 │   └── file_utils.py      (atomic JSON I/O)
 ├── reporting.py           (agent_summary.json, tiered context)  [759 lines]
 │   ├── equity_curve.py    (FIFO trade metrics, profit factor)  [596 lines]
@@ -71,7 +71,7 @@ main.py (orchestrator — loop, run, CLI dispatch)  [572 lines]
 **Signal applicability:**
 - Crypto (BTC, ETH): 27 signals (8 active core + 19 enhanced)
 - Metals (XAU, XAG): 25 signals (7 core + 18 enhanced; no futures_flow)
-- Stocks (27 tickers): 25 signals (7 core + 18 enhanced; no ministral, no futures_flow)
+- Stocks (15 tickers): 25 signals (7 core + 18 enhanced; no ministral, no futures_flow)
 
 **Signal consensus flow:**
 1. Each of 30 signals votes BUY/SELL/HOLD per ticker
@@ -135,13 +135,22 @@ main.py (orchestrator — loop, run, CLI dispatch)  [572 lines]
 
 ## Test Suite
 
-- **74 test files**, ~2,399 tests passing, 18 pre-existing failures
+- **~79 test files**, ~2,750+ tests passing, 18 pre-existing failures
 - Pre-existing failures: 15 integration (missing `ta_base_strategy`), 2 trigger tests, 1 subprocess test
 - Collection error fixed: `test_avanza_session.py` rewritten for Playwright-based auth (31 tests)
 - Coverage is excellent across all core modules (signal_engine, trigger, data_collector, reporting)
 - Test configuration: pytest + pyproject.toml, ruff linting (line length 120)
 
-## Recent Improvements (Session #3, 2026-02-28)
+## Recent Improvements (Session #4, 2026-03-01)
+
+- **6 bugs fixed (BUG-30 to BUG-35):** Dashboard heatmap missing 3 signals (forecast, claude_fundamental, futures_flow); digest.py reading wrong key from signal_log; http_retry returning response instead of None on retryable exhaust; message_store SEND_CATEGORIES including "invocation"; journal_index XAG price buckets capped at $35 (expanded to $120); alpha_vantage importing from portfolio_mgr instead of file_utils.
+- **Bold portfolio loader centralized (ARCH-6):** `load_bold_state()`/`save_bold_state()` added to `portfolio_mgr.py`. Direct JSON reads across 4+ modules can now use the canonical loader.
+- **Held tickers cache (BUG-36):** `_get_held_tickers()` in reporting.py cached per cycle via `_run_cycle_id`, saving 4 redundant disk reads per triggered cycle.
+- **Heikin-ashi refactored (REF-11):** Removed unnecessary `_majority_vote` wrapper; direct `majority_vote()` call from signal_utils.
+- **334 new signal module tests:** Dedicated test files for volume_flow (96), oscillators (70), smart_money (68), heikin_ashi (100). Plus 18 regression tests for bug fixes.
+- **Ticker cleanup:** Removed 12 instruments (MSTR, BABA, GRRR, IONQ, TEM, UPST, VERI, QQQ, K33, H100, BTCAP-B, BULL-NDX3X). Added INVE-B. Tier 1: 27→19 (15 stocks + 2 crypto + 2 metals).
+
+## Session #3 (2026-02-28)
 
 - **3 broken signal modules repaired:** futures_flow (#30) passed dict to majority_vote (always HOLD); momentum RSI Divergence/StochRSI had variable shadowing (always HOLD); momentum_factors high/low proximity required 500 bars (unreachable, always HOLD). All now produce real votes.
 - **Heikin-ashi confidence corrected:** Used `count_hold=True` unlike all other signals, making confidence 20-40% lower. Now matches standard behavior.

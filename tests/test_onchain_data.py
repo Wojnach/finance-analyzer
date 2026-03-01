@@ -121,9 +121,11 @@ class TestFetchOnchainData:
 class TestGetOnchainData:
     """Tests for the main data aggregation function."""
 
+    @patch("portfolio.onchain_data._load_onchain_cache")
     @patch("portfolio.onchain_data._load_config_token")
-    def test_no_token_returns_none(self, mock_token):
+    def test_no_token_returns_none(self, mock_token, mock_cache):
         mock_token.return_value = None
+        mock_cache.return_value = None
         from portfolio.onchain_data import get_onchain_data
         result = get_onchain_data()
         assert result is None
