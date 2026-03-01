@@ -28,18 +28,22 @@ from portfolio.signals.forecast import (
 
 
 @pytest.fixture(autouse=True)
-def _reset():
+def _reset(tmp_path):
     import portfolio.signals.forecast as mod
     orig_kronos = mod._KRONOS_ENABLED
     orig_disabled = mod._FORECAST_MODELS_DISABLED
+    orig_pred_file = mod._PREDICTIONS_FILE
     mod._KRONOS_ENABLED = False
     mod._FORECAST_MODELS_DISABLED = False
     mod._last_prediction_ts.clear()
+    # Isolate predictions file per test (avoids cross-worker conflicts in parallel)
+    mod._PREDICTIONS_FILE = tmp_path / "forecast_predictions.jsonl"
     reset_circuit_breakers()
     yield
     reset_circuit_breakers()
     mod._KRONOS_ENABLED = orig_kronos
     mod._FORECAST_MODELS_DISABLED = orig_disabled
+    mod._PREDICTIONS_FILE = orig_pred_file
     mod._last_prediction_ts.clear()
 
 
