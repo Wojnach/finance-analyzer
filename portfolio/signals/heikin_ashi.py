@@ -464,13 +464,8 @@ def _ttm_squeeze_signal(
 # Majority vote
 # ---------------------------------------------------------------------------
 
-def _majority_vote(signals: list[str]) -> tuple[str, float]:
-    """Majority voting — delegates to signal_utils.majority_vote.
 
-    Uses count_hold=False (default) to match all other signal modules.
-    Confidence = winner / active_voters (BUY+SELL), not total.
-    """
-    return majority_vote(signals)
+# _majority_vote wrapper removed (REF-11) — use majority_vote() directly
 
 
 # ---------------------------------------------------------------------------
@@ -636,7 +631,7 @@ def compute_heikin_ashi_signal(df: pd.DataFrame) -> dict:
 
     # --- Majority vote -------------------------------------------------
     sub_list = list(sub_signals.values())
-    action, confidence = _majority_vote(sub_list)
+    action, confidence = majority_vote(sub_list)
 
     return {
         "action": action,
