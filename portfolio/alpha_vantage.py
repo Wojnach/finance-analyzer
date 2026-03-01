@@ -53,10 +53,10 @@ def load_persistent_cache():
 def _save_persistent_cache():
     """Write current cache to disk atomically."""
     try:
-        from portfolio.portfolio_mgr import _atomic_write_json
+        from portfolio.file_utils import atomic_write_json
         with _cache_lock:
             snapshot = dict(_cache)
-        _atomic_write_json(CACHE_FILE, snapshot)
+        atomic_write_json(CACHE_FILE, snapshot)
     except Exception as e:
         logger.warning("Failed to save fundamentals cache: %s", e)
 

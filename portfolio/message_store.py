@@ -6,8 +6,10 @@ Categories that are ALWAYS sent to Telegram:
   - bigbet:  mean-reversion BIG BET alerts
   - digest:  4-hourly activity report
 
+Categories that are SENT to Telegram:
+  - analysis:   HOLD analysis, market commentary (Layer 2 — sole Telegram sender)
+
 Categories that are SAVED ONLY (viewable on dashboard / via file):
-  - analysis:   HOLD analysis, market commentary (Layer 2)
   - invocation:  "Layer 2 Tx invoked" notifications
   - regime:      regime shift alerts
   - fx_alert:    FX rate staleness warnings
@@ -31,7 +33,7 @@ MESSAGES_FILE = BASE_DIR / "data" / "telegram_messages.jsonl"
 _TELEGRAM_MAX_LENGTH = 4096
 
 # Categories whose messages should be sent to Telegram in addition to being saved.
-SEND_CATEGORIES = {"trade", "iskbets", "bigbet", "digest", "daily_digest", "invocation", "analysis"}
+SEND_CATEGORIES = {"trade", "iskbets", "bigbet", "digest", "daily_digest", "analysis"}
 
 
 def log_message(text, category="analysis", sent=False):

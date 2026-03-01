@@ -282,12 +282,13 @@ def api_signal_heatmap():
         "rsi", "macd", "ema", "bb", "fear_greed", "sentiment",
         "ministral", "ml", "funding", "volume"
     ]
-    # Enhanced composite signal names
+    # Enhanced composite signal names (19 modules, signals #12-#30)
     enhanced_signals = [
         "trend", "momentum", "volume_flow", "volatility_sig",
         "candlestick", "structure", "fibonacci", "smart_money",
         "oscillators", "heikin_ashi", "mean_reversion", "calendar",
-        "macro_regime", "momentum_factors", "news_event", "econ_calendar"
+        "macro_regime", "momentum_factors", "news_event", "econ_calendar",
+        "forecast", "claude_fundamental", "futures_flow"
     ]
     all_signals = core_signals + enhanced_signals
 
@@ -299,7 +300,7 @@ def api_signal_heatmap():
         extra = sig.get("extra", {})
         votes = extra.get("_votes", {})
 
-        # _votes contains all 25 signal keys (core + enhanced)
+        # _votes contains all 30 signal keys (core + enhanced)
         row = {}
         for s in all_signals:
             row[s] = (votes.get(s, "HOLD") or "HOLD").upper()

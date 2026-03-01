@@ -95,8 +95,8 @@ def _build_digest_message():
     recent_signals = [e for e in signal_entries if datetime.fromisoformat(e.get("ts", "2000-01-01")) >= cutoff]
     consensus_counts = Counter()
     for e in recent_signals:
-        for ticker_data in e.get("signals", {}).values():
-            action = ticker_data.get("action", "HOLD")
+        for ticker_data in e.get("tickers", {}).values():
+            action = ticker_data.get("consensus", "HOLD")
             consensus_counts[action] += 1
 
     # --- Portfolio values ---

@@ -5,7 +5,7 @@ Covers:
 - Retry on transient errors (ConnectionError, Timeout)
 - Retry on 5xx status codes (and 429)
 - No retry on 4xx status codes (400, 401, 403, 404)
-- Max retries exhausted returns None (exceptions) or last response (status codes)
+- Max retries exhausted returns None (both exceptions and retryable status codes)
 - Exponential backoff timing (mock sleep)
 - POST method support (json_body parameter)
 - Custom headers passed through
@@ -311,8 +311,8 @@ class TestMaxRetriesExhausted:
         assert result is None
         assert mock_req.get.call_count == 4  # initial + 3 retries
 
-    def test_returns_last_response_when_retryable_status_exhausts_retries(self):
-        """When all retries get retryable status, return the last response (not None)."""
+    def test_returns_none_when_retryable_status_exhausts_retries(self):
+        """When all retries get retryable status, return None (BUG-32 fix)."""
         fail_resp = _mock_response(503)
 
         with patch("portfolio.http_retry.requests") as mock_req, \
@@ -320,8 +320,7 @@ class TestMaxRetriesExhausted:
             mock_req.get.return_value = fail_resp
             result = fetch_with_retry("https://api.example.com/data", retries=2, backoff=0.01)
 
-        assert result is not None
-        assert result.status_code == 503
+        assert result is None
         assert mock_req.get.call_count == 3
 
     def test_returns_none_with_zero_retries_on_exception(self):
@@ -337,8 +336,8 @@ class TestMaxRetriesExhausted:
         assert mock_req.get.call_count == 1
         assert mock_sleep.call_count == 0  # no sleep with 0 retries
 
-    def test_returns_retryable_response_with_zero_retries(self):
-        """With retries=0, a retryable status code returns the response immediately."""
+    def test_returns_none_with_zero_retries_on_retryable_status(self):
+        """With retries=0, a retryable status code returns None immediately (BUG-32 fix)."""
         fail_resp = _mock_response(500)
 
         with patch("portfolio.http_retry.requests") as mock_req, \
@@ -346,7 +345,7 @@ class TestMaxRetriesExhausted:
             mock_req.get.return_value = fail_resp
             result = fetch_with_retry("https://api.example.com/data", retries=0, backoff=0.01)
 
-        assert result.status_code == 500
+        assert result is None
         assert mock_req.get.call_count == 1
         assert mock_sleep.call_count == 0
 

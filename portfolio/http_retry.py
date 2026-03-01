@@ -46,7 +46,7 @@ def fetch_with_retry(url, method="GET", retries=DEFAULT_RETRIES,
             else:
                 logger.error("HTTP %s from %s after %d retries",
                              resp.status_code, url, retries)
-                return resp
+                return None
 
         except (requests.ConnectionError, requests.Timeout) as e:
             last_exc = e
