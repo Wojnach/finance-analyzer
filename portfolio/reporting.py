@@ -317,6 +317,7 @@ def write_agent_summary(
         _module_warnings.append("avanza_tracker")
 
     # Focus probabilities (Mode B — directional probabilities for focus tickers)
+    focus_tickers = []
     try:
         from portfolio.api_utils import load_config as _load_cfg
         _cfg = _load_cfg()
@@ -335,10 +336,7 @@ def write_agent_summary(
         from portfolio.forecast_accuracy import (
             get_forecast_accuracy_summary, get_all_ticker_accuracies,
         )
-        try:
-            _fa_focus = focus_tickers if focus_tickers else None
-        except NameError:
-            _fa_focus = None
+        _fa_focus = focus_tickers if focus_tickers else None
         fa_summary = get_forecast_accuracy_summary(
             focus_tickers=_fa_focus,
             days=7,

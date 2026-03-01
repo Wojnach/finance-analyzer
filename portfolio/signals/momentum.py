@@ -19,10 +19,13 @@ and at least 50 rows of data.
 
 from __future__ import annotations
 
+import logging
 import numpy as np
 import pandas as pd
 
 from portfolio.signal_utils import ema, majority_vote, rsi, sma
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Minimum rows required for reliable computation.  The longest lookback chain
@@ -43,13 +46,13 @@ def _rsi_divergence(close: pd.Series, lookback: int = 14) -> str:
     We compare the first and second halves of the lookback window to identify
     two local swing points.
     """
-    rsi = rsi(close)
-    if rsi.isna().all() or len(close) < lookback * 2:
+    rsi_values = rsi(close)
+    if rsi_values.isna().all() or len(close) < lookback * 2:
         return "HOLD"
 
     # Last 2*lookback bars, split into two halves to find swing points.
     price_window = close.iloc[-(lookback * 2):]
-    rsi_window = rsi.iloc[-(lookback * 2):]
+    rsi_window = rsi_values.iloc[-(lookback * 2):]
 
     first_half_price = price_window.iloc[:lookback]
     second_half_price = price_window.iloc[lookback:]
@@ -124,11 +127,11 @@ def _stochasticrsi(close: pd.Series, period: int = 14) -> tuple[float, str]:
     StochRSI > 0.8 = overbought (SELL).
     StochRSI < 0.2 = oversold (BUY).
     """
-    rsi = rsi(close, period)
-    rsi_min = rsi.rolling(window=period).min()
-    rsi_max = rsi.rolling(window=period).max()
+    rsi_vals = rsi(close, period)
+    rsi_min = rsi_vals.rolling(window=period).min()
+    rsi_max = rsi_vals.rolling(window=period).max()
     denom = rsi_max - rsi_min
-    stoch_rsi = (rsi - rsi_min) / denom.replace(0, np.nan)
+    stoch_rsi = (rsi_vals - rsi_min) / denom.replace(0, np.nan)
 
     val = stoch_rsi.iloc[-1]
     if np.isnan(val):
@@ -356,6 +359,7 @@ def compute_momentum_signal(df: pd.DataFrame) -> dict:
     try:
         sub_signals["rsi_divergence"] = _rsi_divergence(close)
     except Exception:
+        logger.warning("[momentum] rsi_divergence failed", exc_info=True)
         sub_signals["rsi_divergence"] = "HOLD"
 
     # 2. Stochastic Oscillator
@@ -375,6 +379,7 @@ def compute_momentum_signal(df: pd.DataFrame) -> dict:
         sub_signals["stochastic_rsi"] = srsi_sig
         indicators["stoch_rsi"] = round(srsi_val, 4) if not np.isnan(srsi_val) else float("nan")
     except Exception:
+        logger.warning("[momentum] stochastic_rsi failed", exc_info=True)
         sub_signals["stochastic_rsi"] = "HOLD"
         indicators["stoch_rsi"] = float("nan")
 
