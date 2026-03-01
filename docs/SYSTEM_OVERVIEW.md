@@ -1,6 +1,6 @@
 # Portfolio Intelligence System — System Overview
 
-> **Updated:** 2026-02-28 (auto-improvement session #2)
+> **Updated:** 2026-03-01 (auto-improvement session #3)
 > **Canonical architecture doc:** docs/architecture-plan.md
 > **Layer 2 instructions:** CLAUDE.md
 
@@ -135,13 +135,20 @@ main.py (orchestrator — loop, run, CLI dispatch)  [572 lines]
 
 ## Test Suite
 
-- **73 test files**, ~2,388 tests passing, 18 pre-existing failures
+- **75 test files**, ~2,668 tests passing, 21 pre-existing failures
 - Pre-existing failures: 15 integration (missing `ta_base_strategy`), 2 trigger tests, 1 subprocess test
 - Collection error fixed: `test_avanza_session.py` rewritten for Playwright-based auth (31 tests)
 - Coverage is excellent across all core modules (signal_engine, trigger, data_collector, reporting)
 - Test configuration: pytest + pyproject.toml, ruff linting (line length 120)
 
-## Recent Improvements (Session #2, 2026-02-28)
+## Recent Improvements (Session #3, 2026-03-01)
+
+- **BUG-18 (CRITICAL):** momentum.py `_rsi_divergence` and `_stochasticrsi` crashed with `UnboundLocalError` due to `rsi = rsi(close)` variable shadowing. These two sub-signals were permanently dead — momentum composite ran on 6/8 sub-signals since inception. Fixed by renaming locals. Added warning logs to exception handlers.
+- **BUG-19:** trend.py `_golden_cross` used `sma.iloc[-1] is np.nan` which never catches NaN (pandas NaN are float64 objects, not the np.nan singleton). Changed to `pd.isna()`.
+- **BUG-20:** reporting.py `focus_tickers` was only defined inside a try-block but referenced outside. Initialized before try-block, removed defensive `NameError` catch.
+- **18 new tests** (13 momentum fix + 5 trend NaN guard), 0 regressions.
+
+## Previous Improvements (Session #2, 2026-02-28)
 
 - **Reporting robustness:** 13 silent `except: pass` blocks replaced with `logger.warning()` + `_module_warnings` list surfaced to Layer 2
 - **Stale cache reduced:** `_MAX_STALE_FACTOR` 5→3 (max 3x TTL fallback for failed data sources)
