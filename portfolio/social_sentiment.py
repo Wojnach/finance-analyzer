@@ -14,7 +14,6 @@ USER_AGENT = "finance-analyzer/1.0 (portfolio intelligence bot)"
 TICKER_SUBREDDITS = {
     "BTC": [("Bitcoin", True), ("CryptoCurrency", False)],
     "ETH": [("ethereum", True), ("CryptoCurrency", False)],
-    "MSTR": [("wallstreetbets", False), ("stocks", False)],
     "PLTR": [("PLTR", True), ("wallstreetbets", False)],
     "NVDA": [("wallstreetbets", False), ("stocks", False)],
 }
@@ -22,7 +21,6 @@ TICKER_SUBREDDITS = {
 TICKER_KEYWORDS = {
     "BTC": ["bitcoin", "btc"],
     "ETH": ["ethereum", "eth"],
-    "MSTR": ["microstrategy", "mstr", "saylor"],
     "PLTR": ["palantir", "pltr"],
     "NVDA": ["nvidia", "nvda"],
 }

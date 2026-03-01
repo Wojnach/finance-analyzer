@@ -57,11 +57,11 @@ class TriggerTestBase:
 
 ALL_TICKERS = [
     "BTC-USD", "ETH-USD", "XAU-USD", "XAG-USD",
-    "MSTR", "PLTR", "NVDA", "AMD", "BABA", "GOOGL",
-    "AMZN", "AAPL", "AVGO", "GRRR", "IONQ",
+    "PLTR", "NVDA", "AMD", "GOOGL",
+    "AMZN", "AAPL", "AVGO",
     "META", "MU", "SOUN",
-    "SMCI", "TSM", "TTWO", "TEM", "UPST", "VERI",
-    "VRT", "QQQ",
+    "SMCI", "TSM", "TTWO",
+    "VRT", "LMT",
 ]
 
 def _make_signals(tickers=None, action="HOLD", confidence=0.5):

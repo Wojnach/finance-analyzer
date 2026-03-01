@@ -29,7 +29,7 @@ def _cross_asset_signals(all_signals):
     if btc_action == "HOLD":
         return {}
 
-    followers = {"ETH-USD": "BTC-USD", "MSTR": "BTC-USD"}
+    followers = {"ETH-USD": "BTC-USD"}
     leads = {}
     for follower, leader in followers.items():
         f_data = all_signals.get(follower, {})

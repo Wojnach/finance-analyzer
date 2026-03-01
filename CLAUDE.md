@@ -39,7 +39,7 @@ Do NOT analyze all tickers — focus only on held positions and macro headline.
 + portfolio states. Analyze triggered tickers and held positions. Full journal + Telegram.
 
 **Tier 3 (Full Review):** Read `data/agent_summary_compact.json` + portfolio states.
-Full cross-asset analysis of all 30+ instruments. This is the default behavior described below.
+Full cross-asset analysis of all 19+ instruments. This is the default behavior described below.
 
 Your prompt tells you which tier this is. Follow the tier-appropriate behavior — lower tiers
 should complete faster by reading less data and writing shorter analysis.
@@ -369,7 +369,7 @@ during US market hours (15:30–22:00 CET). When US markets are closed, lead wit
 metals — those are the only things the user can act on right now. Mention stock setups as
 "pre-market watch" items, not as actionable trades.
 
-**Actionable-only rules (30+ tickers):**
+**Actionable-only rules (19+ tickers):**
 - Always show tickers with BUY or SELL consensus
 - Always show tickers with active positions (in either portfolio)
 - If ALL tickers are HOLD and no positions, show the top 3-5 most interesting (highest non-abstaining voter count)
@@ -569,7 +569,7 @@ Your job is to weigh signal quality, timeframe alignment, and macro context — 
 **Stock reasoning requirement:** For each stock that shows BUY or SELL consensus, briefly
 state why you are holding or trading in your Telegram message reasoning. Stocks reach
 consensus relatively easily so your judgment as a filter is especially important.
-With 26 stocks tracked, focus your reasoning on the ones with actual signals — don't
+With 15 stocks tracked, focus your reasoning on the ones with actual signals — don't
 enumerate every HOLD ticker.
 
 ## Forecast Health & Accuracy
@@ -618,28 +618,20 @@ CLI: `python portfolio/main.py --prophecy-review` -- print belief review
 | ETH-USD | Crypto 24/7 | Binance (ETHUSDT)  |
 | XAU-USD | Metals 24/7 | Binance FAPI       |
 | XAG-USD | Metals 24/7 | Binance FAPI       |
-| MSTR    | NASDAQ      | Alpaca (IEX feed)  |
 | PLTR    | NASDAQ      | Alpaca (IEX feed)  |
 | NVDA    | NASDAQ      | Alpaca (IEX feed)  |
 | AMD     | NASDAQ      | Alpaca (IEX feed)  |
-| BABA    | NYSE        | Alpaca (IEX feed)  |
 | GOOGL   | NASDAQ      | Alpaca (IEX feed)  |
 | AMZN    | NASDAQ      | Alpaca (IEX feed)  |
 | AAPL    | NASDAQ      | Alpaca (IEX feed)  |
 | AVGO    | NASDAQ      | Alpaca (IEX feed)  |
-| GRRR    | NASDAQ      | Alpaca (IEX feed)  |
-| IONQ    | NYSE        | Alpaca (IEX feed)  |
 | META    | NASDAQ      | Alpaca (IEX feed)  |
 | MU      | NASDAQ      | Alpaca (IEX feed)  |
 | SOUN    | NASDAQ      | Alpaca (IEX feed)  |
 | SMCI    | NASDAQ      | Alpaca (IEX feed)  |
 | TSM     | NYSE        | Alpaca (IEX feed)  |
 | TTWO    | NASDAQ      | Alpaca (IEX feed)  |
-| TEM     | NASDAQ      | Alpaca (IEX feed)  |
-| UPST    | NASDAQ      | Alpaca (IEX feed)  |
-| VERI    | NASDAQ      | Alpaca (IEX feed)  |
 | VRT     | NYSE        | Alpaca (IEX feed)  |
-| QQQ     | NASDAQ      | Alpaca (IEX feed)  |
 | LMT     | NYSE        | Alpaca (IEX feed)  |
 
 ### Tier 2: Avanza price-only (Nordic stocks — no signals)
@@ -648,15 +640,12 @@ CLI: `python portfolio/main.py --prophecy-review` -- print belief review
 | ------------------ | ----------- | ------------------------------- |
 | SAAB B             | SAAB-B      | Price + P&L only via Avanza API |
 | SEB C              | SEB-C       | Price + P&L only via Avanza API |
-| K33                | K33         | Price + P&L only via Avanza API |
-| H100 Group         | H100        | Price + P&L only via Avanza API |
-| B Treasury Cap B   | BTCAP-B     | Price + P&L only via Avanza API |
+| Investor B         | INVE-B      | Price + P&L only via Avanza API |
 
 ### Tier 3: Warrants (Avanza price + underlying's signals)
 
 | Name                     | Config key     | Underlying |
 | ------------------------ | -------------- | ---------- |
-| BULL NASDAQ X3 AVA 1     | BULL-NDX3X     | QQQ        |
 | CoinShares XBT Tracker   | XBT-TRACKER    | BTC-USD    |
 | CoinShares ETH Tracker   | ETH-TRACKER    | ETH-USD    |
 | MINI L SILVER AVA 140    | MINI-SILVER    | XAG-USD    |

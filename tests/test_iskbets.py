@@ -462,14 +462,14 @@ class TestCommandParsing:
     @patch("portfolio.iskbets.compute_atr_15m", return_value=3.5)
     @patch("portfolio.main.fetch_usd_sek", return_value=10.5)
     def test_bought_command(self, mock_fx, mock_atr, tmp_data_dir, app_config):
-        """'bought MSTR 129.50 100000' sets active position."""
-        result = handle_command("bought", "MSTR 129.50 100000", app_config)
+        """'bought NVDA 129.50 100000' sets active position."""
+        result = handle_command("bought", "NVDA 129.50 100000", app_config)
         assert "\u2705" in result
         assert "Position tracked" in result
 
         state = _load_state()
         pos = state["active_position"]
-        assert pos["ticker"] == "MSTR"
+        assert pos["ticker"] == "NVDA"
         assert pos["entry_price_usd"] == 129.50
         assert pos["amount_sek"] == 100000
 

@@ -426,9 +426,8 @@ def transaction_cost_analysis(portfolio: dict) -> dict:
 
 # Hard-coded correlation pairs based on known relationships
 CORRELATED_PAIRS = {
-    "ETH-USD": ["BTC-USD", "MSTR"],
-    "BTC-USD": ["ETH-USD", "MSTR"],
-    "MSTR": ["BTC-USD", "ETH-USD"],
+    "ETH-USD": ["BTC-USD"],
+    "BTC-USD": ["ETH-USD"],
     "XAG-USD": ["XAU-USD"],
     "XAU-USD": ["XAG-USD"],
     "NVDA": ["AMD", "AVGO", "TSM"],

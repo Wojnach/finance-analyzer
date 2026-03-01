@@ -17,11 +17,11 @@ TELEGRAM_MAX_LENGTH = 4096
 
 ALL_TICKERS = [
     "BTC-USD", "ETH-USD", "XAU-USD", "XAG-USD",
-    "MSTR", "PLTR", "NVDA", "AMD", "BABA", "GOOGL",
-    "AMZN", "AAPL", "AVGO", "GRRR", "IONQ",
+    "PLTR", "NVDA", "AMD", "GOOGL",
+    "AMZN", "AAPL", "AVGO",
     "META", "MU", "SOUN",
-    "SMCI", "TSM", "TTWO", "TEM", "UPST", "VERI",
-    "VRT", "QQQ", "LMT",
+    "SMCI", "TSM", "TTWO",
+    "VRT", "LMT",
 ]
 
 

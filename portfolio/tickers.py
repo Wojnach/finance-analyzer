@@ -14,28 +14,20 @@ SYMBOLS = {
     "XAU-USD": {"binance_fapi": "XAUUSDT"},
     "XAG-USD": {"binance_fapi": "XAGUSDT"},
     # US Equities (Alpaca IEX)
-    "MSTR": {"alpaca": "MSTR"},
     "PLTR": {"alpaca": "PLTR"},
     "NVDA": {"alpaca": "NVDA"},
     "AMD": {"alpaca": "AMD"},
-    "BABA": {"alpaca": "BABA"},
     "GOOGL": {"alpaca": "GOOGL"},
     "AMZN": {"alpaca": "AMZN"},
     "AAPL": {"alpaca": "AAPL"},
     "AVGO": {"alpaca": "AVGO"},
-    "GRRR": {"alpaca": "GRRR"},
-    "IONQ": {"alpaca": "IONQ"},
     "META": {"alpaca": "META"},
     "MU": {"alpaca": "MU"},
     "SOUN": {"alpaca": "SOUN"},
     "SMCI": {"alpaca": "SMCI"},
     "TSM": {"alpaca": "TSM"},
     "TTWO": {"alpaca": "TTWO"},
-    "TEM": {"alpaca": "TEM"},
-    "UPST": {"alpaca": "UPST"},
-    "VERI": {"alpaca": "VERI"},
     "VRT": {"alpaca": "VRT"},
-    "QQQ": {"alpaca": "QQQ"},
     "LMT": {"alpaca": "LMT"},
 }
 
@@ -44,10 +36,10 @@ SYMBOLS = {
 CRYPTO_SYMBOLS = {"BTC-USD", "ETH-USD"}
 METALS_SYMBOLS = {"XAU-USD", "XAG-USD"}
 STOCK_SYMBOLS = {
-    "MSTR", "PLTR", "NVDA", "AMD", "BABA", "GOOGL", "AMZN", "AAPL",
-    "AVGO", "GRRR", "IONQ", "META", "MU",
-    "SOUN", "SMCI", "TSM", "TTWO", "TEM", "UPST", "VERI",
-    "VRT", "QQQ", "LMT",
+    "PLTR", "NVDA", "AMD", "GOOGL", "AMZN", "AAPL",
+    "AVGO", "META", "MU",
+    "SOUN", "SMCI", "TSM", "TTWO",
+    "VRT", "LMT",
 }
 
 # All known tickers (union of all subsets)

@@ -195,35 +195,24 @@ signals get less.
 | XAU-USD | Gold   | Binance FAPI (XAUUSDT) | 25 (7 core + 18 enhanced) |
 | XAG-USD | Silver | Binance FAPI (XAGUSDT) | 25 (7 core + 18 enhanced) |
 
-### US Equities (27) — Market hours, Alpaca IEX
+### US Equities (15) — Market hours, Alpaca IEX
 
 | Ticker | Name            | Exchange | Signals |
 | ------ | --------------- | -------- | ------- |
-| MSTR   | MicroStrategy   | NASDAQ   | 25      |
 | PLTR   | Palantir        | NASDAQ   | 25      |
 | NVDA   | NVIDIA          | NASDAQ   | 25      |
 | AMD    | AMD             | NASDAQ   | 25      |
-| BABA   | Alibaba         | NYSE     | 25      |
 | GOOGL  | Alphabet        | NASDAQ   | 25      |
 | AMZN   | Amazon          | NASDAQ   | 25      |
 | AAPL   | Apple           | NASDAQ   | 25      |
 | AVGO   | Broadcom        | NASDAQ   | 25      |
-| GRRR   | Gorilla Tech    | NASDAQ   | 25      |
-| IONQ   | IonQ            | NYSE     | 25      |
-| MRVL   | Marvell         | NASDAQ   | 25      |
 | META   | Meta            | NASDAQ   | 25      |
 | MU     | Micron          | NASDAQ   | 25      |
-| PONY   | Pony AI         | NASDAQ   | 25      |
-| RXRX   | Recursion       | NASDAQ   | 25      |
 | SOUN   | SoundHound      | NASDAQ   | 25      |
 | SMCI   | Super Micro     | NASDAQ   | 25      |
 | TSM    | TSMC            | NYSE     | 25      |
 | TTWO   | Take-Two        | NASDAQ   | 25      |
-| TEM    | Tempus AI       | NASDAQ   | 25      |
-| UPST   | Upstart         | NASDAQ   | 25      |
-| VERI   | Veritone        | NASDAQ   | 25      |
 | VRT    | Vertiv          | NYSE     | 25      |
-| QQQ    | QQQ ETF         | NASDAQ   | 25      |
 | LMT    | Lockheed Martin | NYSE     | 25      |
 
 ### Tier 2: Avanza Price-Only (Nordic stocks, no signals)
@@ -232,15 +221,12 @@ signals get less.
 | ---------------- | ---------- | ------------------------------- |
 | SAAB B           | SAAB-B     | Price + P&L only via Avanza API |
 | SEB C            | SEB-C      | Price + P&L only via Avanza API |
-| K33              | K33        | Price + P&L only via Avanza API |
-| H100 Group       | H100       | Price + P&L only via Avanza API |
-| B Treasury Cap B | BTCAP-B    | Price + P&L only via Avanza API |
+| Investor B       | INVE-B     | Price + P&L only via Avanza API |
 
 ### Tier 3: Warrants (Avanza price + underlying's signals)
 
 | Name                   | Config key   | Underlying |
 | ---------------------- | ------------ | ---------- |
-| BULL NASDAQ X3 AVA 1   | BULL-NDX3X   | QQQ        |
 | CoinShares XBT Tracker | XBT-TRACKER  | BTC-USD    |
 | CoinShares ETH Tracker | ETH-TRACKER  | ETH-USD    |
 | MINI L SILVER AVA 140  | MINI-SILVER  | XAG-USD    |

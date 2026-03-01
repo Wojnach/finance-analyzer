@@ -418,15 +418,13 @@ class TestCrossAssetSignals:
         assert leads["ETH-USD"]["leader"] == "BTC-USD"
         assert leads["ETH-USD"]["leader_action"] == "BUY"
 
-    def test_btc_leads_mstr(self):
+    def test_btc_leads_eth(self):
         signals = {
             "BTC-USD": {"action": "SELL"},
-            "ETH-USD": {"action": "SELL"},
-            "MSTR": {"action": "HOLD"},
+            "ETH-USD": {"action": "HOLD"},
         }
         leads = _cross_asset_signals(signals)
-        assert "MSTR" in leads
-        assert "ETH-USD" not in leads  # ETH already moved
+        assert "ETH-USD" in leads
 
     def test_no_lead_when_btc_hold(self):
         signals = {

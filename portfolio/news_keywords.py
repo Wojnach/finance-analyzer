@@ -86,17 +86,15 @@ _KEYWORD_PATTERNS = [
 # ---------------------------------------------------------------------------
 
 SECTOR_MAP = {
-    "semiconductor": {"NVDA", "AMD", "MU", "AVGO", "TSM", "SMCI", "IONQ"},
-    "crypto": {"BTC-USD", "ETH-USD", "MSTR"},
-    "china": {"BABA", "TSM"},
+    "semiconductor": {"NVDA", "AMD", "MU", "AVGO", "TSM", "SMCI"},
+    "crypto": {"BTC-USD", "ETH-USD"},
     "defense": {"LMT"},
     "big_tech": {"GOOGL", "AMZN", "AAPL", "META"},
-    "ai": {"NVDA", "AMD", "GOOGL", "META", "PLTR", "SOUN", "IONQ", "AVGO"},
-    "software": {"PLTR", "UPST", "VERI", "GRRR", "TEM"},
+    "ai": {"NVDA", "AMD", "GOOGL", "META", "PLTR", "SOUN", "AVGO"},
+    "software": {"PLTR"},
     "gaming": {"TTWO"},
     "infrastructure": {"VRT"},
     "metals": {"XAU-USD", "XAG-USD"},
-    "etf": {"QQQ"},
 }
 
 # Reverse map: ticker -> set of sectors
@@ -107,18 +105,18 @@ for _sector, _tickers in SECTOR_MAP.items():
 
 # Keywords that imply directional impact on specific sectors
 KEYWORD_SECTOR_IMPACT = {
-    "tariff": {"semiconductor": "SELL", "china": "SELL", "metals": "BUY"},
-    "tariffs": {"semiconductor": "SELL", "china": "SELL", "metals": "BUY"},
-    "trade war": {"semiconductor": "SELL", "china": "SELL", "metals": "BUY"},
-    "sanctions": {"china": "SELL", "crypto": "SELL"},
-    "sanction": {"china": "SELL", "crypto": "SELL"},
-    "ban": {"crypto": "SELL", "china": "SELL"},
-    "banned": {"crypto": "SELL", "china": "SELL"},
+    "tariff": {"semiconductor": "SELL", "metals": "BUY"},
+    "tariffs": {"semiconductor": "SELL", "metals": "BUY"},
+    "trade war": {"semiconductor": "SELL", "metals": "BUY"},
+    "sanctions": {"crypto": "SELL"},
+    "sanction": {"crypto": "SELL"},
+    "ban": {"crypto": "SELL"},
+    "banned": {"crypto": "SELL"},
     "hack": {"crypto": "SELL"},
     "hacked": {"crypto": "SELL"},
     "rate hike": {"big_tech": "SELL", "crypto": "SELL", "metals": "SELL"},
     "rate cut": {"big_tech": "BUY", "crypto": "BUY", "metals": "BUY"},
-    "recession": {"etf": "SELL", "big_tech": "SELL", "defense": "BUY"},
+    "recession": {"big_tech": "SELL", "defense": "BUY"},
     "inflation": {"metals": "BUY", "crypto": "BUY"},
     "etf approval": {"crypto": "BUY"},
     "etf approved": {"crypto": "BUY"},

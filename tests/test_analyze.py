@@ -333,8 +333,8 @@ class TestParsePositions:
     """Tests for _parse_positions."""
 
     def test_parse_valid_positions(self):
-        result = _parse_positions(["BTC:66500", "ETH:1920", "MSTR:125"])
-        assert result == {"BTC-USD": 66500.0, "ETH-USD": 1920.0, "MSTR": 125.0}
+        result = _parse_positions(["BTC:66500", "ETH:1920", "NVDA:125"])
+        assert result == {"BTC-USD": 66500.0, "ETH-USD": 1920.0, "NVDA": 125.0}
 
     def test_parse_normalizes_short_names(self):
         result = _parse_positions(["btc:66500"])
