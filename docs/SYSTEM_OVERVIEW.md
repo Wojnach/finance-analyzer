@@ -38,6 +38,8 @@ main.py (orchestrator — loop, run, CLI dispatch)  [572 lines]
 │   ├── equity_curve.py    (FIFO trade metrics, profit factor)  [596 lines]
 │   ├── trade_guards.py    (cooldown, consecutive-loss escalation)  [266 lines]
 │   ├── risk_management.py (concentration, correlation, ATR stops)  [704 lines]
+│   ├── monte_carlo.py    (GBM price simulation, antithetic variates)  [401 lines]
+│   ├── monte_carlo_risk.py (t-copula portfolio VaR/CVaR)  [350 lines]
 │   ├── journal_index.py   (BM25 journal retrieval)  [399 lines]
 │   ├── futures_data.py    (Binance FAPI OI/LS data)  [240 lines]
 │   ├── avanza_tracker.py  (Nordic equity price tracking)
@@ -140,6 +142,13 @@ main.py (orchestrator — loop, run, CLI dispatch)  [572 lines]
 - Collection error fixed: `test_avanza_session.py` rewritten for Playwright-based auth (31 tests)
 - Coverage is excellent across all core modules (signal_engine, trigger, data_collector, reporting)
 - Test configuration: pytest + pyproject.toml, ruff linting (line length 120)
+
+## Monte Carlo Simulation (Session #5, 2026-03-01)
+
+- **Core GBM engine** (`portfolio/monte_carlo.py`): Geometric Brownian Motion with antithetic variates (50-75% variance reduction). Converts directional probability P(up) into drift via inverse normal CDF. Computes price quantile bands (p5/p25/p50/p75/p95), stop-loss hit probability, and expected return distribution (mean/std/skew). Horizons: 1d, 3d.
+- **Portfolio VaR** (`portfolio/monte_carlo_risk.py`): Student-t copula (df=4) for correlated multi-position simulation. Captures tail dependence (lambda ~0.18) that Gaussian copula misses. VaR/CVaR at 95%/99%, drawdown probability. Correlation from empirical returns or hardcoded priors from CORRELATED_PAIRS.
+- **Reporting integration**: `monte_carlo` and `portfolio_var` sections in `agent_summary_compact.json`. Config: `monte_carlo.enabled` (default true), `n_paths` (10K), `horizons` ([1,3]). Graceful degradation on failure.
+- **71 tests**, all passing in ~6s. Covers GBM statistics, antithetic variance reduction, quantile ordering, probability boundary conditions, t-copula correlation preservation, fat tails, VaR/CVaR ordering, correlated crash scenarios, diversification benefit, edge cases, and performance.
 
 ## Recent Improvements (Session #4, 2026-03-01)
 
