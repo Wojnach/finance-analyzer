@@ -106,6 +106,7 @@ _alpha_vantage_limiter = _RateLimiter(5, "alpha_vantage")
 
 # TTL constants for tool caching
 FUNDAMENTALS_TTL = 86400  # 24 hours
+ONCHAIN_TTL = 43200      # 12 hours (on-chain data updates slowly)
 FEAR_GREED_TTL = 300     # 5 min
 SENTIMENT_TTL = 900      # 15 min
 MINISTRAL_TTL = 900      # 15 min
