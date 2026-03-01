@@ -542,6 +542,80 @@ def format_accuracy_alerts(alerts):
     return lines
 
 
+def accuracy_by_ticker_signal(horizon="1d", min_samples=0):
+    """Compute per-ticker per-signal accuracy cross-tabulation.
+
+    Returns nested dict: {ticker: {signal_name: {correct, total, accuracy, pct}}}
+    Only includes signals that voted BUY or SELL (HOLD excluded).
+
+    Args:
+        horizon: Outcome horizon ("1d", "3d", "5d", "10d").
+        min_samples: Minimum votes required to include a signal for a ticker.
+    """
+    entries = load_entries()
+    # {ticker: {signal: {correct, total}}}
+    stats = defaultdict(lambda: defaultdict(lambda: {"correct": 0, "total": 0}))
+
+    for entry in entries:
+        outcomes = entry.get("outcomes", {})
+        tickers = entry.get("tickers", {})
+
+        for ticker, tdata in tickers.items():
+            outcome = outcomes.get(ticker, {}).get(horizon)
+            if not outcome:
+                continue
+
+            change_pct = outcome.get("change_pct", 0)
+            signals = tdata.get("signals", {})
+
+            for sig_name, vote in signals.items():
+                if vote == "HOLD":
+                    continue
+                stats[ticker][sig_name]["total"] += 1
+                if _vote_correct(vote, change_pct):
+                    stats[ticker][sig_name]["correct"] += 1
+
+    result = {}
+    for ticker, sig_stats in stats.items():
+        ticker_result = {}
+        for sig_name, s in sig_stats.items():
+            if s["total"] < min_samples:
+                continue
+            acc = s["correct"] / s["total"] if s["total"] > 0 else 0.0
+            ticker_result[sig_name] = {
+                "correct": s["correct"],
+                "total": s["total"],
+                "accuracy": acc,
+                "pct": round(acc * 100, 1),
+            }
+        if ticker_result:
+            result[ticker] = ticker_result
+
+    return result
+
+
+def top_signals_for_ticker(ticker, horizon="1d", min_samples=5):
+    """Return ranked list of signals for a specific ticker, sorted by accuracy.
+
+    Args:
+        ticker: Ticker symbol (e.g. "BTC-USD").
+        horizon: Outcome horizon.
+        min_samples: Minimum votes to qualify.
+
+    Returns:
+        list[dict]: Sorted by accuracy descending. Each dict has:
+            signal, correct, total, accuracy, pct.
+    """
+    all_data = accuracy_by_ticker_signal(horizon, min_samples=min_samples)
+    ticker_data = all_data.get(ticker, {})
+    ranked = [
+        {"signal": sig, **data}
+        for sig, data in ticker_data.items()
+    ]
+    ranked.sort(key=lambda x: x["accuracy"], reverse=True)
+    return ranked
+
+
 if __name__ == "__main__":
     print_accuracy_report()
 

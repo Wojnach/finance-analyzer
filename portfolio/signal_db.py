@@ -332,3 +332,48 @@ class SignalDB:
                 "pct": round(acc * 100, 1),
             }
         return result
+
+    def ticker_signal_accuracy(self, horizon="1d", min_samples=0):
+        """Per-ticker per-signal accuracy cross-tabulation via SQL.
+
+        Returns: {ticker: {signal_name: {correct, total, accuracy, pct}}}
+        """
+        conn = self._get_conn()
+        rows = conn.execute(
+            """SELECT ts2.ticker, ts2.signals, o.change_pct
+               FROM ticker_signals ts2
+               JOIN outcomes o ON ts2.snapshot_id = o.snapshot_id AND ts2.ticker = o.ticker
+               WHERE o.horizon = ? AND o.change_pct IS NOT NULL""",
+            (horizon,),
+        ).fetchall()
+
+        from collections import defaultdict
+        stats = defaultdict(lambda: defaultdict(lambda: {"correct": 0, "total": 0}))
+
+        for row in rows:
+            signals = json.loads(row["signals"]) if row["signals"] else {}
+            change_pct = row["change_pct"]
+            ticker = row["ticker"]
+            for sig_name, vote in signals.items():
+                if vote == "HOLD":
+                    continue
+                stats[ticker][sig_name]["total"] += 1
+                if (vote == "BUY" and change_pct > 0) or (vote == "SELL" and change_pct < 0):
+                    stats[ticker][sig_name]["correct"] += 1
+
+        result = {}
+        for ticker, sig_stats in stats.items():
+            ticker_result = {}
+            for sig_name, s in sig_stats.items():
+                if s["total"] < min_samples:
+                    continue
+                acc = s["correct"] / s["total"] if s["total"] > 0 else 0.0
+                ticker_result[sig_name] = {
+                    "correct": s["correct"],
+                    "total": s["total"],
+                    "accuracy": acc,
+                    "pct": round(acc * 100, 1),
+                }
+            if ticker_result:
+                result[ticker] = ticker_result
+        return result
