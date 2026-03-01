@@ -76,10 +76,15 @@ def _load_onchain_cache(max_age_seconds=ONCHAIN_TTL):
 # ---------------------------------------------------------------------------
 
 def _api_get(endpoint, token, params=None):
-    """Make authenticated GET request to BGeometrics API."""
+    """Make authenticated GET request to BGeometrics API.
+
+    Uses fetch_with_retry but skips retries on 429 (rate limit) since
+    retrying just burns more of the 8 req/hour free tier budget.
+    """
     url = f"{API_BASE}{endpoint}"
     headers = {"Authorization": f"Bearer {token}"}
-    resp = fetch_with_retry(url, headers=headers, params=params, timeout=15)
+    resp = fetch_with_retry(url, headers=headers, params=params, timeout=15,
+                            retries=0)  # No retries — rate limit is tight
     if resp is None or resp.status_code != 200:
         status = resp.status_code if resp else "no response"
         logger.warning("BGeometrics %s returned %s", endpoint, status)
@@ -151,8 +156,21 @@ def _fetch_liquidations(token):
 # Main aggregator
 # ---------------------------------------------------------------------------
 
+def _safe_float(val):
+    """Convert API value to float, handling strings and None."""
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
+
 def _fetch_all_onchain(token):
-    """Fetch all 6 on-chain metrics and aggregate into a single dict."""
+    """Fetch all 6 on-chain metrics and aggregate into a single dict.
+
+    Adds 1s delay between requests to respect free tier rate limits (8 req/hr).
+    """
     result = {"ts": time.time()}
 
     fetchers = [
@@ -165,11 +183,15 @@ def _fetch_all_onchain(token):
     ]
 
     any_success = False
-    for name, fetcher in fetchers:
+    for i, (name, fetcher) in enumerate(fetchers):
+        if i > 0:
+            time.sleep(1)  # Rate limit: space out requests
         try:
             data = fetcher(token)
             if data:
-                result.update(data)
+                # Convert string values to float
+                result.update({k: _safe_float(v) if k != "ts" else v
+                              for k, v in data.items()})
                 any_success = True
         except Exception:
             logger.warning("BGeometrics %s fetch failed", name, exc_info=True)
@@ -214,7 +236,7 @@ def interpret_onchain(data):
     interp = {}
 
     # MVRV Z-Score zones
-    zscore = data.get("mvrv_zscore")
+    zscore = _safe_float(data.get("mvrv_zscore"))
     if zscore is not None:
         if zscore < 1:
             interp["mvrv_zone"] = "undervalued"
@@ -224,7 +246,7 @@ def interpret_onchain(data):
             interp["mvrv_zone"] = "neutral"
 
     # SOPR zones
-    sopr = data.get("sopr")
+    sopr = _safe_float(data.get("sopr"))
     if sopr is not None:
         if sopr < 0.97:
             interp["sopr_zone"] = "capitulation"
@@ -234,7 +256,7 @@ def interpret_onchain(data):
             interp["sopr_zone"] = "neutral"
 
     # NUPL zones
-    nupl = data.get("nupl")
+    nupl = _safe_float(data.get("nupl"))
     if nupl is not None:
         if nupl < 0:
             interp["nupl_zone"] = "capitulation"
@@ -248,7 +270,7 @@ def interpret_onchain(data):
             interp["nupl_zone"] = "hope"
 
     # Exchange netflow
-    netflow = data.get("netflow")
+    netflow = _safe_float(data.get("netflow"))
     if netflow is not None:
         if netflow < 0:
             interp["netflow_signal"] = "accumulation"

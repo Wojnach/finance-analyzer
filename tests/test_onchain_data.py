@@ -240,6 +240,21 @@ class TestInterpretOnchain:
         interp = interpret_onchain({"netflow": 5000})
         assert interp["netflow_signal"] == "distribution"
 
+    def test_interpret_string_values_from_api(self):
+        """API returns strings like '1.2198' not floats — must handle."""
+        from portfolio.onchain_data import interpret_onchain
+        interp = interpret_onchain({
+            "mvrv": "1.2198",
+            "mvrv_zscore": "0.5",
+            "sopr": "0.9942906309504044",
+            "nupl": "0.17031848382061546",
+            "netflow": "-1234.5",
+        })
+        assert interp["mvrv_zone"] == "undervalued"
+        assert interp["sopr_zone"] == "neutral"
+        assert interp["nupl_zone"] == "hope"
+        assert interp["netflow_signal"] == "accumulation"
+
     def test_interpret_empty_data(self):
         from portfolio.onchain_data import interpret_onchain
         interp = interpret_onchain({})
