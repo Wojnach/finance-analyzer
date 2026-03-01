@@ -46,9 +46,20 @@ _KRONOS_TIMEOUT = 30
 _FORECAST_MODELS_DISABLED = False
 
 # Kronos inference script — runs via subprocess calling Q:/models/kronos_infer.py
-# Disabled by default: 1.9% success rate, wastes 120s timeout per call.
-# Re-enable via config.json → forecast.kronos_enabled = true
+# Enable via config.json → forecast.kronos_enabled = true
 _KRONOS_ENABLED = False
+
+def _init_kronos_enabled():
+    """Read kronos_enabled from config.json at import time."""
+    global _KRONOS_ENABLED
+    try:
+        import json as _json
+        _cfg = _json.load(open(Path(__file__).resolve().parent.parent.parent / "config.json"))
+        _KRONOS_ENABLED = bool(_cfg.get("forecast", {}).get("kronos_enabled", False))
+    except Exception:
+        pass
+
+_init_kronos_enabled()
 
 if platform.system() == "Windows":
     _KRONOS_PYTHON = r"Q:\finance-analyzer\.venv\Scripts\python.exe"
