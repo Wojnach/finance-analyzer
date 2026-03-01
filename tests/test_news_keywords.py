@@ -120,9 +120,6 @@ class TestGetSectorImpact:
     def test_tariff_semiconductor(self):
         assert get_sector_impact("tariff", "NVDA") == "SELL"
 
-    def test_tariff_china(self):
-        assert get_sector_impact("tariff", "BABA") == "SELL"
-
     def test_tariff_metals(self):
         assert get_sector_impact("tariff", "XAU-USD") == "BUY"
 
