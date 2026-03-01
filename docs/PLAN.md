@@ -1,60 +1,60 @@
-# Plan: Remove Unused Instruments
+# Plan: On-Chain Data + Per-Ticker Signal Accuracy
 
 **Date:** Mar 1, 2026
+**Branch:** `feat/onchain-accuracy`
 
 ## Goal
-Remove 12 instruments the user no longer holds/tracks, add 1 new Nordic stock (Investor B).
+Implement two high-priority TODO items:
+1. Per-ticker per-signal accuracy cross-tabulation
+2. BGeometrics on-chain data integration for BTC
 
-## Tickers to REMOVE
+## Feature 1: Per-Ticker Per-Signal Accuracy
 
-| Ticker | Type | Reason |
-|--------|------|--------|
-| MSTR | Tier 1 Stock | Not in user's current portfolio |
-| BABA | Tier 1 Stock | Not in user's current portfolio |
-| GRRR | Tier 1 Stock | Not in user's current portfolio |
-| IONQ | Tier 1 Stock | Not in user's current portfolio |
-| TEM | Tier 1 Stock | Not in user's current portfolio |
-| UPST | Tier 1 Stock | Not in user's current portfolio |
-| VERI | Tier 1 Stock | Not in user's current portfolio |
-| QQQ | Tier 1 ETF | Not in user's current portfolio |
-| K33 | Tier 2 Nordic | Not in user's current portfolio |
-| H100 | Tier 2 Nordic | Not in user's current portfolio |
-| BTCAP-B | Tier 2 Nordic | Not in user's current portfolio |
-| BULL-NDX3X | Tier 3 Warrant | Underlying QQQ removed, user didn't list it |
+**Why:** We know "RSI is 57% overall" and "XAG is 76% overall" but NOT "RSI for XAG is 85%".
+This cross-tabulation lets Layer 2 trust the right signals per ticker.
 
-## Tickers to ADD
+**Data source:** SQLite `data/signal_log.db` — ~45K ticker_signals rows + ~158K outcomes.
 
-| Ticker | Type | Notes |
-|--------|------|-------|
-| INVE-B | Tier 2 Nordic | Investor AB class B, Stockholm Exchange |
+**What could break:** Nothing — purely additive.
 
-## Tickers KEPT (no changes)
+### Files:
+- `portfolio/accuracy_stats.py` — add `accuracy_by_ticker_signal()`
+- `portfolio/signal_db.py` — add SQL-optimized `ticker_signal_accuracy()`
+- `portfolio/reporting.py` — surface as `signal_reliability` in compact summary
+- `tests/test_ticker_signal_accuracy.py` (NEW)
 
-- **Tier 1 Stocks (15):** AMD, GOOGL, AMZN, AAPL, AVGO, LMT, META, MU, NVDA, PLTR, SOUN, SMCI, TSM, TTWO, VRT
-- **Tier 1 Crypto (2):** BTC-USD, ETH-USD (underlyings for XBT-TRACKER, ETH-TRACKER)
-- **Tier 1 Metals (2):** XAU-USD, XAG-USD (XAG underlying for MINI-SILVER; XAU for macro/correlation)
-- **Tier 2 Nordic (2+1):** SAAB-B, SEB-C, INVE-B (new)
-- **Tier 3 Warrants (4):** XBT-TRACKER, ETH-TRACKER, MINI-SILVER, MINI-TSMC
+## Feature 2: BGeometrics On-Chain Data
 
-## What could break
+**Why:** BTC/ETH decisions have zero on-chain context. MVRV, SOPR, realized price are what
+distinguish "RSI oversold" from "below realized price — generational buy."
 
-- Tests hardcoding removed tickers (MSTR especially, used heavily in tests) — update test data
-- Portfolio state files may reference removed tickers in transaction history — leave history intact
-- Signal log / accuracy data has historical entries for removed tickers — leave intact
-- BULL-NDX3X removal cascades: QQQ was its underlying, both go
+**API:** bitcoin-data.com — free tier 8 req/hr, 15/day. Token auth (`?token=XXX`).
+**Budget:** 6 metrics × 2/day = 12 req (fits 15/day). Cache 12h.
+**Endpoints:** `/v1/mvrv/{last}`, `/v1/sopr/{last}`, `/v1/nupl/{last}`,
+`/v1/realized-price/{last}`, `/v1/exchange-netflow`, `/v1/btc-liquidations`
 
-## Execution Order (2 batches)
+**What could break:** Nothing — additive. Missing token → graceful None.
 
-### Batch 1: Core config + source-of-truth (5 files)
-1. `portfolio/tickers.py` — remove 8 tickers from SYMBOLS + STOCK_SYMBOLS
-2. `config.json` — remove K33, H100, BTCAP-B, BULL-NDX3X; add INVE-B
-3. `portfolio/sentiment.py` — remove from TICKER_CATEGORIES
-4. `portfolio/social_sentiment.py` — remove MSTR entries
-5. `portfolio/news_keywords.py` — remove from SECTOR_MAP
+### Files:
+- `portfolio/onchain_data.py` (NEW) — fetcher with 12h cache
+- `portfolio/shared_state.py` — add TTL + rate limiter
+- `portfolio/reporting.py` — surface `onchain` section in compact summary
+- `config.json` — add `bgeometrics` block (TODO: MANUAL REVIEW for token)
+- `tests/test_onchain_data.py` (NEW)
 
-### Batch 2: Secondary refs + docs (5 files)
-6. `portfolio/reporting.py` — remove MSTR from cross-asset followers
-7. `portfolio/risk_management.py` — remove MSTR from CORRELATED_PAIRS
-8. `CLAUDE.md` — update instrument tables (Tier 1/2/3)
-9. `docs/architecture-plan.md` — update instrument tables
-10. Test files — update hardcoded ticker references to use kept tickers
+## Execution Batches
+
+### Batch 1: Per-ticker accuracy core + tests
+Files: `accuracy_stats.py`, `signal_db.py`, `tests/test_ticker_signal_accuracy.py`
+
+### Batch 2: Surface accuracy in reporting
+Files: `reporting.py`
+
+### Batch 3: On-chain data module + tests
+Files: `onchain_data.py` (NEW), `shared_state.py`, `tests/test_onchain_data.py`
+
+### Batch 4: Surface on-chain in reporting + config
+Files: `reporting.py`, `config.json`
+
+### Batch 5: Docs + cleanup
+Files: `memory/todo.md`, `docs/SESSION_PROGRESS.md`
