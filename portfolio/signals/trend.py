@@ -316,10 +316,7 @@ def _ichimoku_signal(high: pd.Series, low: pd.Series,
     if len(close) < 78:
         return "HOLD", float("nan"), float("nan")
 
-    tenkan = _midline(close, 9)       # Using close for simplicity (some use high/low)
-    kijun = _midline(close, 26)
-
-    # More accurate: use high/low for Tenkan and Kijun
+    # Use high/low for Tenkan and Kijun (standard Ichimoku computation)
     tenkan = (_rolling_high(high, 9) + _rolling_low(low, 9)) / 2.0
     kijun = (_rolling_high(high, 26) + _rolling_low(low, 26)) / 2.0
 
