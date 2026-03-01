@@ -74,6 +74,49 @@ _PREDICTION_DEDUP_TTL = 60  # seconds — don't re-log within this window
 _last_prediction_ts: dict[str, float] = {}  # ticker -> monotonic timestamp
 
 
+def _extract_json_from_stdout(stdout: str | None) -> dict | None:
+    """Extract JSON from potentially contaminated subprocess stdout.
+
+    HuggingFace's from_pretrained() prints to stdout during model loading,
+    which contaminates the subprocess output before the JSON result.
+    This function handles that by finding the first '{' and parsing from there.
+
+    Returns parsed dict on success, None on failure.
+    """
+    if not stdout:
+        return None
+
+    text = stdout.strip()
+    if not text:
+        return None
+
+    # Fast path: stdout starts with '{' — clean JSON
+    if text.startswith("{"):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+    # Slow path: find first '{' and try parsing from there
+    brace_idx = text.find("{")
+    if brace_idx > 0:
+        try:
+            return json.loads(text[brace_idx:])
+        except json.JSONDecodeError:
+            pass
+
+    # Last resort: scan lines in reverse for a JSON line
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+    return None
+
+
 def _kronos_circuit_open() -> bool:
     return time.monotonic() < _kronos_tripped_until
 
@@ -192,7 +235,14 @@ def _run_kronos(candles: list[dict], horizons: tuple = (1, 24), _ticker: str = "
             _log_health("kronos", _ticker, False, ms, "empty_stdout")
             _trip_kronos()
             return None
-        result = json.loads(proc.stdout)
+        result = _extract_json_from_stdout(proc.stdout)
+        if result is None:
+            # JSON extraction failed — log actual stdout for diagnostics
+            preview = repr(proc.stdout[:200])
+            logger.warning("Kronos stdout not valid JSON for %s: %s", _ticker, preview)
+            _log_health("kronos", _ticker, False, ms, f"json_extract_failed: {preview[:150]}")
+            _trip_kronos()
+            return None
         if not result or not result.get("results"):
             _log_health("kronos", _ticker, False, ms, "empty_results")
             _trip_kronos()
