@@ -201,6 +201,28 @@ def write_agent_summary(
         logger.warning("[reporting] accuracy_stats failed", exc_info=True)
         _module_warnings.append("accuracy_stats")
 
+    # Per-ticker per-signal accuracy (cross-tabulation for Layer 2)
+    try:
+        from portfolio.accuracy_stats import accuracy_by_ticker_signal
+        ticker_sig_acc = accuracy_by_ticker_signal("1d", min_samples=10)
+        if ticker_sig_acc:
+            # Compact: only top 5 and bottom 3 signals per ticker, with accuracy + samples
+            compact_reliability = {}
+            for ticker, sig_data in ticker_sig_acc.items():
+                sorted_sigs = sorted(
+                    sig_data.items(), key=lambda x: x[1]["accuracy"], reverse=True
+                )
+                top = sorted_sigs[:5]
+                bottom = [s for s in sorted_sigs[-3:] if s not in top]
+                compact_reliability[ticker] = {
+                    "best": {k: {"pct": v["pct"], "n": v["total"]} for k, v in top},
+                    "worst": {k: {"pct": v["pct"], "n": v["total"]} for k, v in bottom},
+                }
+            summary["signal_reliability"] = compact_reliability
+    except Exception:
+        logger.warning("[reporting] signal_reliability failed", exc_info=True)
+        _module_warnings.append("signal_reliability")
+
     # Signal activation rates (normalized weights for Layer 2 reference)
     try:
         from portfolio.accuracy_stats import load_cached_activation_rates
@@ -615,6 +637,11 @@ def _write_compact_summary(summary):
     if futures_data:
         compact["futures_data"] = futures_data
 
+    # Propagate signal_reliability to compact (per-ticker signal accuracy)
+    signal_rel = summary.get("signal_reliability")
+    if signal_rel:
+        compact["signal_reliability"] = signal_rel
+
     # Propagate focus mode sections to compact (small, relevant to Layer 2)
     for section_key in ("focus_probabilities", "cumulative_gains", "warrant_portfolio",
                         "prophecy", "forecast_accuracy", "forecast_signals",
@@ -863,8 +890,8 @@ def _write_tier2_summary(summary, triggered_tickers=None):
             }
 
     # Include macro, accuracy, portfolio sections from full summary
-    for key in ("macro", "signal_accuracy_1d", "cross_asset_leads",
-                "avanza_instruments", "portfolio"):
+    for key in ("macro", "signal_accuracy_1d", "signal_reliability",
+                "cross_asset_leads", "avanza_instruments", "portfolio"):
         if key in summary:
             t2[key] = summary[key]
 
