@@ -251,6 +251,22 @@ def write_agent_summary(
         logger.warning("[reporting] alpha_vantage failed", exc_info=True)
         _module_warnings.append("alpha_vantage")
 
+    # BGeometrics on-chain data (BTC only, 12h cache)
+    try:
+        from portfolio.onchain_data import get_onchain_data, interpret_onchain
+        onchain = get_onchain_data()
+        if onchain:
+            interp = interpret_onchain(onchain)
+            summary["onchain"] = {
+                k: v for k, v in onchain.items()
+                if k != "ts" and v is not None
+            }
+            if interp:
+                summary["onchain"]["interpretation"] = interp
+    except Exception:
+        logger.warning("[reporting] onchain_data failed", exc_info=True)
+        _module_warnings.append("onchain_data")
+
     # Binance FAPI futures data (crypto only — OI, LS ratios, funding)
     try:
         from portfolio.futures_data import get_all_futures_data
@@ -642,6 +658,11 @@ def _write_compact_summary(summary):
     if signal_rel:
         compact["signal_reliability"] = signal_rel
 
+    # Propagate on-chain data to compact (BTC only, small)
+    onchain = summary.get("onchain")
+    if onchain:
+        compact["onchain"] = onchain
+
     # Propagate focus mode sections to compact (small, relevant to Layer 2)
     for section_key in ("focus_probabilities", "cumulative_gains", "warrant_portfolio",
                         "prophecy", "forecast_accuracy", "forecast_signals",
@@ -890,7 +911,7 @@ def _write_tier2_summary(summary, triggered_tickers=None):
             }
 
     # Include macro, accuracy, portfolio sections from full summary
-    for key in ("macro", "signal_accuracy_1d", "signal_reliability",
+    for key in ("macro", "signal_accuracy_1d", "signal_reliability", "onchain",
                 "cross_asset_leads", "avanza_instruments", "portfolio"):
         if key in summary:
             t2[key] = summary[key]
