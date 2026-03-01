@@ -55,9 +55,9 @@ class TestMinVotersConstants:
         assert MIN_VOTERS_CRYPTO == 3
 
     def test_stock_symbols_defined(self):
-        assert "MSTR" in STOCK_SYMBOLS
         assert "PLTR" in STOCK_SYMBOLS
         assert "NVDA" in STOCK_SYMBOLS
+        assert "AMD" in STOCK_SYMBOLS
 
     def test_crypto_symbols_defined(self):
         assert "BTC-USD" in CRYPTO_SYMBOLS
