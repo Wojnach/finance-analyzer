@@ -14,6 +14,12 @@
 
 6. **VERIFY & SHIP.** Run full test suite + linters. Review your git log. Merge, push, restart if needed.
 
+## TESTING
+
+- **Run tests in parallel when possible.** Use `pytest -n auto` (pytest-xdist) to distribute tests across all CPU cores. This is significantly faster for the 2600+ test suite.
+- For targeted test runs (single file or module), sequential is fine: `pytest tests/test_foo.py -v`.
+- Run tests in the background (`run_in_background`) when you have other work to do in parallel.
+
 ## RULES
 
 - Use a git worktree or branch to isolate work from the live environment.
