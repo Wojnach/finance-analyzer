@@ -480,3 +480,132 @@ class TestComputePortfolioVar:
             result["var_95_usd"] * 10.5,
             decimal=0,
         )
+
+
+# ---------------------------------------------------------------------------
+# Additional edge cases (Batch 4)
+# ---------------------------------------------------------------------------
+
+class TestAdditionalEdgeCases:
+    """Additional edge cases: correlation priors, large portfolios, etc."""
+
+    def test_correlation_priors_used(self):
+        """Known correlated pairs should get non-zero correlation from priors."""
+        from portfolio.monte_carlo_risk import build_correlation_matrix
+        tickers = ["BTC-USD", "ETH-USD"]
+        corr = build_correlation_matrix(tickers)
+        assert corr[0, 1] > 0.5  # BTC-ETH should be ~0.75
+
+    def test_uncorrelated_priors(self):
+        """Unknown pairs should get zero correlation from priors."""
+        from portfolio.monte_carlo_risk import build_correlation_matrix
+        tickers = ["BTC-USD", "LMT"]
+        corr = build_correlation_matrix(tickers)
+        assert corr[0, 1] == 0.0
+
+    def test_large_portfolio_5_positions(self):
+        """5-position portfolio should work without numerical issues."""
+        n = 5
+        positions = {
+            f"T{i}": {"shares": 10, "price_usd": 100, "volatility": 0.20, "drift": 0.0}
+            for i in range(n)
+        }
+        corr = np.eye(n)
+        # Add some mild cross-correlation
+        for i in range(n):
+            for j in range(i + 1, n):
+                corr[i, j] = corr[j, i] = 0.3
+        sim = PortfolioRiskSimulator(
+            positions=positions, correlation_matrix=corr,
+            horizon_days=1, n_paths=5000, df=4, seed=42,
+        )
+        sim.simulate_correlated_returns()
+        var95 = sim.var(0.95)
+        assert var95 < 0
+        # Diversification: 5 positions should have less per-dollar VaR than 1
+        single_sim = PortfolioRiskSimulator(
+            positions={"T0": {"shares": 50, "price_usd": 100, "volatility": 0.20, "drift": 0.0}},
+            correlation_matrix=np.array([[1.0]]),
+            horizon_days=1, n_paths=5000, df=4, seed=42,
+        )
+        single_sim.simulate_correlated_returns()
+        # Diversified VaR should be less negative than concentrated
+        assert var95 > single_sim.var(0.95)
+
+    def test_very_low_df_extreme_tails(self):
+        """df=2 (extreme fat tails) should still produce valid results."""
+        positions = {
+            "A": {"shares": 10, "price_usd": 100, "volatility": 0.20, "drift": 0.0},
+        }
+        corr = np.array([[1.0]])
+        sim = PortfolioRiskSimulator(
+            positions=positions, correlation_matrix=corr,
+            horizon_days=1, n_paths=5000, df=2, seed=42,
+        )
+        returns = sim.simulate_correlated_returns()
+        assert returns.shape == (5000, 1)
+        # VaR should still work (might be very large with df=2)
+        var95 = sim.var(0.95)
+        assert np.isfinite(var95)
+
+    def test_multi_position_compute_portfolio_var(self):
+        """compute_portfolio_var with multiple held positions."""
+        portfolio_state = {
+            "holdings": {
+                "BTC-USD": {"shares": 0.5, "avg_cost_usd": 65000},
+                "ETH-USD": {"shares": 10, "avg_cost_usd": 1900},
+            },
+            "cash_sek": 300000,
+        }
+        agent_summary = {
+            "signals": {
+                "BTC-USD": {
+                    "price_usd": 67000,
+                    "extra": {"atr_pct": 3.5, "_votes": {}},
+                    "regime": "ranging",
+                },
+                "ETH-USD": {
+                    "price_usd": 2000,
+                    "extra": {"atr_pct": 4.0, "_votes": {}},
+                    "regime": "trending-up",
+                },
+            },
+            "fx_rate": 10.0,
+        }
+        result = compute_portfolio_var(portfolio_state, agent_summary, n_paths=2000)
+        assert result["n_positions"] == 2
+        assert result["total_exposure_usd"] > 0
+        assert result["var_95_usd"] < 0
+        # Drawdown probabilities should be valid
+        assert 0.0 <= result["drawdown_1pct_prob"] <= 1.0
+        assert 0.0 <= result["drawdown_5pct_prob"] <= 1.0
+
+
+class TestRiskPerformance:
+    """Performance tests for portfolio VaR."""
+
+    def test_var_10k_paths_under_2s(self):
+        """Portfolio VaR with 3 positions should complete in <2s."""
+        import time
+        positions = {
+            f"T{i}": {"shares": 10, "price_usd": 100, "volatility": 0.25, "drift": 0.0}
+            for i in range(3)
+        }
+        corr = np.array([
+            [1.0, 0.6, 0.3],
+            [0.6, 1.0, 0.4],
+            [0.3, 0.4, 1.0],
+        ])
+        start = time.perf_counter()
+        sim = PortfolioRiskSimulator(
+            positions=positions, correlation_matrix=corr,
+            horizon_days=1, n_paths=10000, df=4, seed=42,
+        )
+        sim.simulate_correlated_returns()
+        sim.portfolio_pnl()
+        sim.var(0.95)
+        sim.var(0.99)
+        sim.cvar(0.95)
+        sim.drawdown_probability(5.0)
+        elapsed = time.perf_counter() - start
+        assert elapsed < 2.0, f"Portfolio VaR took {elapsed:.2f}s (should be <2s)"

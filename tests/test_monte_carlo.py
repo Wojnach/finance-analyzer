@@ -297,3 +297,151 @@ class TestSimulateTicker:
         result = simulate_ticker("XAG-USD", summary)
         bands = result["price_bands_1d"]
         assert bands[5] < bands[25] < bands[50] < bands[75] < bands[95]
+
+
+class TestEdgeCases:
+    """Edge cases and degenerate inputs."""
+
+    def test_zero_price_returns_none(self):
+        from portfolio.monte_carlo import simulate_ticker
+        summary = {
+            "signals": {"X": {"price_usd": 0, "extra": {"atr_pct": 2.0, "_votes": {}}}},
+            "fx_rate": 10.0,
+        }
+        assert simulate_ticker("X", summary) is None
+
+    def test_negative_price_returns_none(self):
+        from portfolio.monte_carlo import simulate_ticker
+        summary = {
+            "signals": {"X": {"price_usd": -5, "extra": {"atr_pct": 2.0, "_votes": {}}}},
+            "fx_rate": 10.0,
+        }
+        assert simulate_ticker("X", summary) is None
+
+    def test_extreme_volatility(self):
+        from portfolio.monte_carlo import MonteCarloEngine
+        mc = MonteCarloEngine(price=100.0, volatility=2.0, drift=0.0,
+                              horizon_days=1, n_paths=1000, seed=42)
+        paths = mc.simulate_paths()
+        assert all(p > 0 for p in paths)  # GBM guarantees positive prices
+        assert paths.shape == (1000,)
+
+    def test_very_short_horizon(self):
+        from portfolio.monte_carlo import MonteCarloEngine
+        # 3 hours = 0.125 days
+        mc = MonteCarloEngine(price=100.0, volatility=0.20, drift=0.0,
+                              horizon_days=0.125, n_paths=1000, seed=42)
+        paths = mc.simulate_paths()
+        # Very short horizon → prices cluster near spot
+        assert abs(np.mean(paths) - 100.0) < 1.0
+
+    def test_single_path(self):
+        from portfolio.monte_carlo import MonteCarloEngine
+        mc = MonteCarloEngine(price=100.0, volatility=0.20, drift=0.0,
+                              horizon_days=1, n_paths=1, seed=42)
+        paths = mc.simulate_paths()
+        assert paths.shape == (1,)
+        assert paths[0] > 0
+
+    def test_odd_n_paths(self):
+        from portfolio.monte_carlo import MonteCarloEngine
+        mc = MonteCarloEngine(price=100.0, volatility=0.20, drift=0.0,
+                              horizon_days=1, n_paths=999, seed=42)
+        paths = mc.simulate_paths()
+        assert paths.shape == (999,)
+
+    def test_simulate_all_with_mixed_tickers(self):
+        from portfolio.monte_carlo import simulate_all
+        summary = {
+            "signals": {
+                "BTC-USD": {
+                    "price_usd": 86000.0,
+                    "extra": {"atr_pct": 3.5, "_votes": {}},
+                    "regime": "ranging",
+                    "action": "BUY",
+                },
+                "ETH-USD": {
+                    "price_usd": 2000.0,
+                    "extra": {"atr_pct": 4.0, "_votes": {}},
+                    "regime": "trending-up",
+                    "action": "HOLD",
+                },
+            },
+            "fx_rate": 10.5,
+            "focus_tickers": ["BTC-USD"],
+        }
+        results = simulate_all(summary, n_paths=500, seed=42)
+        assert "BTC-USD" in results  # BUY action → interesting
+        assert "price_bands_1d" in results["BTC-USD"]
+
+    def test_config_disabled_returns_empty(self):
+        """When monte_carlo.enabled=false, simulate_all still works (caller decides)."""
+        from portfolio.monte_carlo import simulate_all
+        # simulate_all itself doesn't check config — reporting.py does
+        result = simulate_all({"signals": {}, "fx_rate": 10.0}, n_paths=100)
+        assert result == {}
+
+    def test_focus_probabilities_used_for_drift(self):
+        """When focus_probabilities present, they should drive drift."""
+        from portfolio.monte_carlo import simulate_ticker
+        summary = {
+            "signals": {
+                "XAG-USD": {
+                    "price_usd": 32.5,
+                    "extra": {"atr_pct": 2.0, "_votes": {}},
+                    "regime": "trending-up",
+                }
+            },
+            "fx_rate": 10.5,
+            "focus_probabilities": {
+                "XAG-USD": {
+                    "1d": {"probability": 0.72, "accuracy": 0.71, "samples": 89},
+                }
+            },
+        }
+        result = simulate_ticker("XAG-USD", summary, n_paths=5000, seed=42)
+        assert result is not None
+        # p_up=0.72 → positive drift → mean should be above spot
+        assert result["p_up"] == 0.72
+        assert result["drift_annual"] > 0
+
+
+class TestPerformance:
+    """Verify MC completes within reasonable time."""
+
+    def test_10k_paths_under_1s(self):
+        """10K paths for a single ticker should complete quickly."""
+        import time
+        from portfolio.monte_carlo import MonteCarloEngine
+        start = time.perf_counter()
+        mc = MonteCarloEngine(price=100.0, volatility=0.20, drift=0.05,
+                              horizon_days=1, n_paths=10000, seed=42)
+        mc.simulate_paths()
+        mc.price_quantiles()
+        mc.probability_below(90.0)
+        mc.expected_return()
+        elapsed = time.perf_counter() - start
+        assert elapsed < 1.0, f"Single ticker MC took {elapsed:.2f}s (should be <1s)"
+
+    def test_batch_5_tickers_under_5s(self):
+        """Simulating 5 tickers with 10K paths each should complete in <5s."""
+        import time
+        from portfolio.monte_carlo import simulate_all
+        summary = {
+            "signals": {
+                f"TICKER-{i}": {
+                    "price_usd": 100.0 * (i + 1),
+                    "extra": {"atr_pct": 2.0 + i * 0.5, "_votes": {}},
+                    "regime": "ranging",
+                    "action": "BUY",
+                }
+                for i in range(5)
+            },
+            "fx_rate": 10.0,
+            "focus_tickers": [f"TICKER-{i}" for i in range(5)],
+        }
+        start = time.perf_counter()
+        results = simulate_all(summary, n_paths=10000, seed=42)
+        elapsed = time.perf_counter() - start
+        assert len(results) == 5
+        assert elapsed < 5.0, f"5-ticker batch MC took {elapsed:.2f}s (should be <5s)"
