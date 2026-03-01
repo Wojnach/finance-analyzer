@@ -1,60 +1,97 @@
-# Plan: On-Chain Data + Per-Ticker Signal Accuracy
+# Monte Carlo Simulation Integration Plan
 
 **Date:** Mar 1, 2026
-**Branch:** `feat/onchain-accuracy`
+**Branch:** `feat/monte-carlo`
 
-## Goal
-Implement two high-priority TODO items:
-1. Per-ticker per-signal accuracy cross-tabulation
-2. BGeometrics on-chain data integration for BTC
+## Motivation
 
-## Feature 1: Per-Ticker Per-Signal Accuracy
+The system has strong accuracy-driven probability foundations (30 signals, 43K+ outcomes,
+`direction_probability()` engine) but lacks **stochastic simulation**. From the quant desk
+article, these techniques fill specific gaps in the current system:
 
-**Why:** We know "RSI is 57% overall" and "XAG is 76% overall" but NOT "RSI for XAG is 85%".
-This cross-tabulation lets Layer 2 trust the right signals per ticker.
+| Current capability | Gap MC fills |
+|---|---|
+| P(up) = 72% point estimate | **Price quantile bands**: 95% CI = $87.2-$93.5 |
+| ATR stop at 2x ATR distance | **Stop-loss hit probability**: 15% chance of hit in 24h |
+| Kelly fraction from point accuracy | **Expected trade P&L distribution**: full histogram |
+| Per-position risk flags | **Portfolio VaR/CVaR**: joint correlated loss at 95% |
 
-**Data source:** SQLite `data/signal_log.db` — ~45K ticker_signals rows + ~158K outcomes.
+## What We Skip (Low Value for This System)
 
-**What could break:** Nothing — purely additive.
+| Technique | Why skip |
+|---|---|
+| Particle filter (article Part IV) | System recalculates every minute — same effect |
+| Agent-based simulation (Part VII) | We make directional bets, not market-making |
+| Vine copulas | Simple t-copula is enough for 19 instruments |
+| Importance sampling (Part III) | Standard MC with 10K paths is fine (>1% events) |
+| GARCH stochastic volatility | ATR already captures recent vol; marginal gain |
 
-### Files:
-- `portfolio/accuracy_stats.py` — add `accuracy_by_ticker_signal()`
-- `portfolio/signal_db.py` — add SQL-optimized `ticker_signal_accuracy()`
-- `portfolio/reporting.py` — surface as `signal_reliability` in compact summary
-- `tests/test_ticker_signal_accuracy.py` (NEW)
+## Implementation Batches
 
-## Feature 2: BGeometrics On-Chain Data
+### Batch 1: Core GBM Engine + Tests (test-first)
+**Files:** `tests/test_monte_carlo.py`, `portfolio/monte_carlo.py`
 
-**Why:** BTC/ETH decisions have zero on-chain context. MVRV, SOPR, realized price are what
-distinguish "RSI oversold" from "below realized price — generational buy."
+Tests first:
+- GBM path shape and statistics
+- Quantile extraction matches analytical solution
+- Antithetic variates reduce variance vs. crude MC
+- Stop-loss probability computation
+- Drift from directional probability
 
-**API:** bitcoin-data.com — free tier 8 req/hr, 15/day. Token auth (`?token=XXX`).
-**Budget:** 6 metrics × 2/day = 12 req (fits 15/day). Cache 12h.
-**Endpoints:** `/v1/mvrv/{last}`, `/v1/sopr/{last}`, `/v1/nupl/{last}`,
-`/v1/realized-price/{last}`, `/v1/exchange-netflow`, `/v1/btc-liquidations`
+Then implement `MonteCarloEngine`:
+- `simulate_paths()` — GBM with antithetic variates
+- `price_quantiles()` — percentile bands at horizon
+- `probability_below(threshold)` / `probability_above(threshold)`
+- `expected_return()` — mean, std, skew of return distribution
+- `simulate_ticker(ticker, agent_summary)` — convenience function
 
-**What could break:** Nothing — additive. Missing token → graceful None.
+Key formulas:
+```
+S_T = S0 * exp((mu - 0.5*sigma^2)*T + sigma*sqrt(T)*Z)
+mu = (p_up - 0.5) * sigma * sqrt(252)   # drift from directional probability
+sigma = atr_pct / 100 * sqrt(252/14)    # annualize 14-period ATR
+```
 
-### Files:
-- `portfolio/onchain_data.py` (NEW) — fetcher with 12h cache
-- `portfolio/shared_state.py` — add TTL + rate limiter
-- `portfolio/reporting.py` — surface `onchain` section in compact summary
-- `config.json` — add `bgeometrics` block (TODO: MANUAL REVIEW for token)
-- `tests/test_onchain_data.py` (NEW)
+Antithetic variates: for each Z, also simulate -Z (free 50-75% variance reduction).
+N_paths = 10,000 (5K pairs). Horizons: 1d, 3d.
 
-## Execution Batches
+### Batch 2: Portfolio VaR with t-Copula + Tests (test-first)
+**Files:** `tests/test_monte_carlo_risk.py`, `portfolio/monte_carlo_risk.py`
 
-### Batch 1: Per-ticker accuracy core + tests
-Files: `accuracy_stats.py`, `signal_db.py`, `tests/test_ticker_signal_accuracy.py`
+Tests first:
+- t-copula produces correlated returns
+- VaR/CVaR computation correct for known distribution
+- Single vs multi-position portfolios
+- Correlated crash probability > independent crash probability
 
-### Batch 2: Surface accuracy in reporting
-Files: `reporting.py`
+Then implement `PortfolioRiskSimulator`:
+- `simulate_correlated_returns()` — t-copula (v=4) with correlation matrix
+- `portfolio_pnl()` — aggregate position-level P&L
+- `var(confidence)` / `cvar(confidence)` — Value-at-Risk / Expected Shortfall
+- `drawdown_probability(threshold_pct)`
+- `compute_portfolio_var(portfolio_state, agent_summary)` — convenience function
 
-### Batch 3: On-chain data module + tests
-Files: `onchain_data.py` (NEW), `shared_state.py`, `tests/test_onchain_data.py`
+Correlation from existing `CORRELATED_PAIRS` in risk_management.py + ATR volatilities.
 
-### Batch 4: Surface on-chain in reporting + config
-Files: `reporting.py`, `config.json`
+### Batch 3: Reporting Integration
+**Files:** `portfolio/reporting.py`, `config.json`
 
-### Batch 5: Docs + cleanup
-Files: `memory/todo.md`, `docs/SESSION_PROGRESS.md`
+- Add `monte_carlo` section to compact + tier2 summaries
+- Config flag: `monte_carlo.enabled` (default true)
+- Config: `monte_carlo.n_paths` (default 10000), `monte_carlo.horizons` ([1, 3])
+- Only compute for held positions + focus tickers (not all 19)
+- Graceful degradation on failure
+
+### Batch 4: Edge Case Tests + Performance
+**Files:** `tests/test_monte_carlo.py` (additions), `tests/test_monte_carlo_risk.py` (additions)
+
+- Zero volatility, single position, no positions, extreme prices
+- Config disabled → no MC in summary
+- Reporting integration test
+- Performance: MC completes in <5s for all tickers
+
+### Batch 5: Docs + Cleanup
+**Files:** `docs/SYSTEM_OVERVIEW.md`, `memory/todo.md`
+
+- Document MC module
+- Final test suite run
