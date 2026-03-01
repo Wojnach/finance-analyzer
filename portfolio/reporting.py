@@ -332,7 +332,9 @@ def write_agent_summary(
 
     # Forecast accuracy (model health + sub-signal accuracy for focus tickers)
     try:
-        from portfolio.forecast_accuracy import get_forecast_accuracy_summary
+        from portfolio.forecast_accuracy import (
+            get_forecast_accuracy_summary, get_all_ticker_accuracies,
+        )
         try:
             _fa_focus = focus_tickers if focus_tickers else None
         except NameError:
@@ -343,11 +345,39 @@ def write_agent_summary(
         )
         if fa_summary and (fa_summary.get("health") or fa_summary.get("accuracy")):
             summary["forecast_accuracy"] = fa_summary
+
+        # Per-ticker gating summary — shows what action the forecast signal takes
+        # for each ticker (raw, held, insufficient_data)
+        try:
+            from portfolio.signals.forecast import (
+                _HOLD_THRESHOLD, _MIN_SAMPLES,
+            )
+            all_acc = get_all_ticker_accuracies(horizon="24h", days=7)
+            if all_acc:
+                gating = {}
+                for t, tdata in all_acc.items():
+                    acc = tdata["accuracy"]
+                    samp = tdata["samples"]
+                    if samp < _MIN_SAMPLES:
+                        action = "insufficient_data"
+                    elif acc < _HOLD_THRESHOLD:
+                        action = "held"
+                    else:
+                        action = "raw"
+                    gating[t] = {
+                        "accuracy": acc,
+                        "samples": samp,
+                        "action": action,
+                    }
+                if gating:
+                    summary["forecast_gating"] = gating
+        except Exception:
+            logger.debug("[reporting] forecast_gating failed", exc_info=True)
     except Exception:
         logger.warning("[reporting] forecast_accuracy failed", exc_info=True)
         _module_warnings.append("forecast_accuracy")
 
-    # Forecast signals (Chronos pct_move + confidence for all tickers with forecasts)
+    # Forecast signals (Chronos pct_move + confidence + gating for all tickers with forecasts)
     try:
         _forecast_signals = {}
         for t_name, t_data in signals.items():
@@ -358,7 +388,7 @@ def write_agent_summary(
                 continue
             chronos_ok = f_ind.get("chronos_ok", False)
             if chronos_ok or f_ind.get("chronos_1h_pct") is not None:
-                _forecast_signals[t_name] = {
+                entry = {
                     "action": extra.get("forecast_action", "HOLD"),
                     "chronos_1h_pct": round(f_ind.get("chronos_1h_pct", 0) or 0, 3),
                     "chronos_1h_conf": round(f_ind.get("chronos_1h_conf", 0) or 0, 3),
@@ -367,6 +397,14 @@ def write_agent_summary(
                     "kronos_ok": f_ind.get("kronos_ok", False),
                     "chronos_ok": chronos_ok,
                 }
+                # Per-ticker accuracy gating metadata
+                gating = f_ind.get("forecast_gating")
+                if gating:
+                    entry["gating"] = gating
+                    entry["accuracy"] = f_ind.get("forecast_accuracy")
+                    entry["samples"] = f_ind.get("forecast_samples", 0)
+                    entry["inverted"] = f_ind.get("forecast_inverted", False)
+                _forecast_signals[t_name] = entry
         if _forecast_signals:
             summary["forecast_signals"] = _forecast_signals
     except Exception:
@@ -577,7 +615,8 @@ def _write_compact_summary(summary):
 
     # Propagate focus mode sections to compact (small, relevant to Layer 2)
     for section_key in ("focus_probabilities", "cumulative_gains", "warrant_portfolio",
-                        "prophecy", "forecast_accuracy", "forecast_signals"):
+                        "prophecy", "forecast_accuracy", "forecast_signals",
+                        "forecast_gating"):
         section_data = summary.get(section_key)
         if section_data:
             compact[section_key] = section_data

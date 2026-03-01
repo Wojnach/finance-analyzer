@@ -22,6 +22,10 @@ PREDICTIONS_FILE = DATA_DIR / "forecast_predictions.jsonl"
 AGENT_SUMMARY_FILE = DATA_DIR / "agent_summary.json"
 
 # Chronos model — loaded lazily on first use
+# Configurable via config.json → forecast.chronos_model
+# Options: "amazon/chronos-t5-tiny", "amazon/chronos-t5-small",
+#          "amazon/chronos-t5-base", "amazon/chronos-t5-large"
+_CHRONOS_MODEL = "amazon/chronos-t5-small"
 _chronos_pipeline = None
 _prophet_cache = {}  # ticker -> last fit time, to avoid refitting every minute
 
@@ -56,6 +60,15 @@ def _load_candles(ticker, periods=168):
     return None
 
 
+def set_chronos_model(model_name: str):
+    """Override the Chronos model (e.g. from config). Resets cached pipeline."""
+    global _CHRONOS_MODEL, _chronos_pipeline
+    if model_name and model_name != _CHRONOS_MODEL:
+        _CHRONOS_MODEL = model_name
+        _chronos_pipeline = None  # force reload on next call
+        logger.info("Chronos model set to %s", model_name)
+
+
 def _get_chronos_pipeline():
     """Lazy-load Chronos pipeline with GPU if available."""
     global _chronos_pipeline
@@ -67,16 +80,16 @@ def _get_chronos_pipeline():
         from chronos import ChronosPipeline
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info("Loading Chronos model on %s...", device)
+        logger.info("Loading Chronos model %s on %s...", _CHRONOS_MODEL, device)
         _chronos_pipeline = ChronosPipeline.from_pretrained(
-            "amazon/chronos-t5-small",
+            _CHRONOS_MODEL,
             device_map=device,
             dtype=torch.float32,
         )
-        logger.info("Chronos model loaded")
+        logger.info("Chronos model loaded: %s", _CHRONOS_MODEL)
         return _chronos_pipeline
     except Exception as e:
-        logger.warning("Failed to load Chronos: %s", e)
+        logger.warning("Failed to load Chronos (%s): %s", _CHRONOS_MODEL, e)
         return None
 
 
@@ -101,7 +114,7 @@ def forecast_chronos(ticker, prices, horizons=(1, 24)):
         max_h = max(horizons)
 
         # Generate forecast samples
-        forecast = pipeline.predict(context, max_h, num_samples=20)
+        forecast = pipeline.predict(context, max_h, num_samples=100)
         # forecast shape: (1, num_samples, max_h)
         samples = forecast[0].numpy()  # (num_samples, max_h)
 

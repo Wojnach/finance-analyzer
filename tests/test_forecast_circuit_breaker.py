@@ -260,8 +260,8 @@ class TestForecastFullPathEnabled:
         assert result["sub_signals"]["kronos_24h"] == "SELL"
         assert result["sub_signals"]["chronos_1h"] == "BUY"
         assert result["sub_signals"]["chronos_24h"] == "SELL"
-        # 2 BUY + 2 SELL = HOLD
-        assert result["action"] == "HOLD"
+        # 1h gets 2x weight: [BUY,BUY,SELL, BUY,BUY,SELL] → 4 BUY vs 2 SELL → BUY
+        assert result["action"] == "BUY"
 
     @patch("portfolio.signals.forecast._cached")
     @patch("portfolio.signals.forecast._run_chronos")
@@ -319,11 +319,12 @@ class TestHealthWeightedVote:
         assert conf > 0
 
     def test_chronos_only_split(self):
-        """When Kronos dead, Chronos BUY+SELL -> HOLD (tie)."""
+        """When Kronos dead, Chronos BUY+SELL -> BUY (1h gets 2x weight)."""
         sub = {"kronos_1h": "HOLD", "kronos_24h": "HOLD",
                "chronos_1h": "BUY", "chronos_24h": "SELL"}
         action, conf = _health_weighted_vote(sub, kronos_ok=False, chronos_ok=True)
-        assert action == "HOLD"
+        # 1h gets 2x weight: [BUY, BUY, SELL] → BUY wins
+        assert action == "BUY"
 
     def test_both_alive_majority(self):
         """Both alive, 3 BUY 1 SELL -> BUY."""

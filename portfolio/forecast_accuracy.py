@@ -161,6 +161,66 @@ def compute_forecast_accuracy(ticker=None, horizon="24h", days=None,
     return result
 
 
+def get_ticker_accuracy(ticker, horizon="24h", days=7, predictions_file=None):
+    """Get forecast accuracy for a single ticker.
+
+    Lightweight wrapper around compute_forecast_accuracy filtered to one ticker.
+
+    Returns:
+        dict: {"accuracy": float, "samples": int} or None if no data.
+    """
+    result = compute_forecast_accuracy(
+        ticker=ticker, horizon=horizon, days=days,
+        predictions_file=predictions_file,
+    )
+    # Aggregate across all sub-signals for this ticker's horizon
+    total_correct = 0
+    total_count = 0
+    for sub_name, stats in result.items():
+        # Only include sub-signals matching the requested horizon
+        if "_" in sub_name and sub_name.split("_", 1)[1] == horizon:
+            total_correct += stats["correct"]
+            total_count += stats["total"]
+
+    if total_count == 0:
+        return None
+
+    return {
+        "accuracy": round(total_correct / total_count, 3),
+        "samples": total_count,
+    }
+
+
+def get_all_ticker_accuracies(horizon="24h", days=7, predictions_file=None):
+    """Get per-ticker forecast accuracy for all tickers.
+
+    Returns:
+        dict: {ticker: {"accuracy": float, "samples": int}}
+    """
+    result = compute_forecast_accuracy(
+        horizon=horizon, days=days, predictions_file=predictions_file,
+    )
+
+    # Aggregate per-ticker across sub-signals
+    ticker_stats = defaultdict(lambda: {"correct": 0, "total": 0})
+    for sub_name, stats in result.items():
+        # Only include sub-signals matching the requested horizon
+        if "_" not in sub_name or sub_name.split("_", 1)[1] != horizon:
+            continue
+        for t, t_data in stats.get("by_ticker", {}).items():
+            ticker_stats[t]["correct"] += t_data["correct"]
+            ticker_stats[t]["total"] += t_data["total"]
+
+    return {
+        t: {
+            "accuracy": round(s["correct"] / s["total"], 3) if s["total"] else 0.0,
+            "samples": s["total"],
+        }
+        for t, s in ticker_stats.items()
+        if s["total"] > 0
+    }
+
+
 def backfill_forecast_outcomes(max_entries=500, predictions_file=None,
                                snapshot_file=None):
     """Backfill actual price outcomes into forecast predictions.
