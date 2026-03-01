@@ -173,28 +173,35 @@ def _log_health(model: str, ticker: str, success: bool, duration_ms: int, error:
         pass  # health logging must never break the signal
 
 
-def _load_candles_ohlcv(ticker: str, periods: int = 168) -> list[dict] | None:
-    """Load recent 1h OHLCV candles as list of dicts.
+def _load_candles_ohlcv(ticker: str, periods: int = 168,
+                        interval: str = "1h") -> list[dict] | None:
+    """Load recent OHLCV candles as list of dicts.
 
-    Reuses data sources from forecast_signal._load_candles but returns
-    full OHLCV dicts instead of just close prices.
+    Args:
+        ticker: Instrument ticker (e.g., "BTC-USD")
+        periods: Number of candles to fetch
+        interval: Candle interval ("1h", "5m", "15m", etc.)
     """
     from portfolio.tickers import SYMBOLS
 
     source_info = SYMBOLS.get(ticker, {})
+    # Map interval to Alpaca format if needed
+    alpaca_map = {"5m": "5Min", "15m": "15Min", "1h": "1Hour", "1d": "1Day"}
+    alpaca_interval = alpaca_map.get(interval, "1Hour")
+
     try:
         if "binance" in source_info:
             from portfolio.data_collector import binance_klines
             symbol = source_info["binance"]
-            df = binance_klines(symbol, interval="1h", limit=periods)
+            df = binance_klines(symbol, interval=interval, limit=periods)
         elif "binance_fapi" in source_info:
             from portfolio.data_collector import binance_fapi_klines
             symbol = source_info["binance_fapi"]
-            df = binance_fapi_klines(symbol, interval="1h", limit=periods)
+            df = binance_fapi_klines(symbol, interval=interval, limit=periods)
         elif "alpaca" in source_info:
             from portfolio.data_collector import alpaca_klines
             symbol = source_info["alpaca"]
-            df = alpaca_klines(symbol, interval="1h", limit=periods)
+            df = alpaca_klines(symbol, interval=alpaca_interval, limit=periods)
         else:
             return None
 
@@ -210,22 +217,38 @@ def _load_candles_ohlcv(ticker: str, periods: int = 168) -> list[dict] | None:
                 })
             return candles
     except Exception as e:
-        logger.debug("OHLCV fetch failed for %s: %s", ticker, e)
+        logger.debug("OHLCV fetch failed for %s (interval=%s): %s", ticker, interval, e)
 
     return None
 
 
 def _run_kronos(candles: list[dict], horizons: tuple = (1, 24), _ticker: str = "") -> dict | None:
-    """Run Kronos inference via subprocess."""
+    """Run Kronos inference via subprocess.
+
+    Reads optimal parameters from config.json → forecast section:
+    - kronos_temperature: sampling temperature (default 1.0, lower = sharper)
+    - kronos_top_p: nucleus sampling threshold (default 0.9)
+    - kronos_samples: number of parallel samples (default 3)
+    """
     if not _KRONOS_ENABLED:
         return None
     if _kronos_circuit_open():
         return None
     t0 = time.time()
     try:
+        # Read tunable params from config
+        try:
+            cfg = json.load(open(Path(__file__).resolve().parent.parent.parent / "config.json"))
+            fc = cfg.get("forecast", {})
+        except Exception:
+            fc = {}
+
         input_data = json.dumps({
             "candles": candles,
             "prices_close": [c["close"] for c in candles],
+            "temperature": fc.get("kronos_temperature", 1.0),
+            "top_p": fc.get("kronos_top_p", 0.9),
+            "sample_count": fc.get("kronos_samples", 3),
         })
         proc = subprocess.run(
             [_KRONOS_PYTHON, _KRONOS_SCRIPT,
@@ -557,9 +580,22 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
         except Exception:
             pass
 
-    # Load candles
+    config_forecast = (context or {}).get("config", {}).get("forecast", {})
+
+    # Load candles (1h for Chronos, optionally 5m for Kronos)
     cache_key = f"forecast_candles_{ticker}"
     candles = _cached(cache_key, _FORECAST_TTL, _load_candles_ohlcv, ticker)
+
+    # Load 5m candles for Kronos if configured (more granular context)
+    kronos_interval = config_forecast.get("kronos_interval", "1h")
+    if kronos_interval != "1h" and _KRONOS_ENABLED:
+        kronos_periods = config_forecast.get("kronos_periods", 500)
+        kronos_cache_key = f"forecast_candles_{ticker}_{kronos_interval}"
+        kronos_candles = _cached(kronos_cache_key, _FORECAST_TTL,
+                                  _load_candles_ohlcv, ticker, kronos_periods,
+                                  kronos_interval)
+    else:
+        kronos_candles = None
 
     if not candles or len(candles) < 50:
         # Fallback to df close prices if available
@@ -577,10 +613,13 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
     result["indicators"]["kronos_circuit_open"] = _kronos_circuit_open()
     result["indicators"]["chronos_circuit_open"] = _chronos_circuit_open()
 
-    # Run Kronos (skip entirely if circuit breaker is open)
+    # Run Kronos — use 5m candles if available, otherwise 1h
     t0 = time.time()
     kronos_key = f"kronos_forecast_{ticker}"
-    kronos = _cached(kronos_key, _FORECAST_TTL, _run_kronos, candles or [], (1, 24), ticker)
+    kronos_input = kronos_candles if kronos_candles and len(kronos_candles) >= 50 else (candles or [])
+    kronos = _cached(kronos_key, _FORECAST_TTL, _run_kronos, kronos_input, (1, 24), ticker)
+    if kronos_candles and len(kronos_candles) >= 50:
+        result["indicators"]["kronos_interval"] = kronos_interval
     kronos_ms = round((time.time() - t0) * 1000)
     result["indicators"]["kronos_time_ms"] = kronos_ms
 
@@ -626,7 +665,6 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
     atr_pct = _compute_atr_pct(close_prices)
     result["indicators"]["forecast_atr_pct"] = round(atr_pct, 4) if atr_pct else None
 
-    config_forecast = (context or {}).get("config", {}).get("forecast", {})
     regime = (context or {}).get("regime", "")
     result["action"], result["confidence"], gating_info = _accuracy_weighted_vote(
         result["sub_signals"], kronos_ok, chronos_ok,
