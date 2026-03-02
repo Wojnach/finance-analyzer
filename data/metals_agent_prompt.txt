@@ -77,6 +77,8 @@ that run every 5 minutes on our GPU:
 - **Low accuracy (<55%)**: Near coin-flip — ignore or use as contrarian indicator
 - The `accuracy` dict shows per-model hit rates and sample counts
 - Models with <10 samples are still learning — weight = 0.5 (neutral)
+- **In Telegram: do NOT show Chronos accuracy/sample lines when samples < 10.**
+  Instead write: `Chronos: learning (X samples)`. Don't show a % accuracy for <10 samples — it's noise.
 
 **In your decision, factor the weighted consensus:**
 - If LLM consensus says BUY with >70% confidence AND accuracy >60%: strong bullish signal
