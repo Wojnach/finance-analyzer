@@ -1,6 +1,6 @@
 # Portfolio Intelligence System — System Overview
 
-> **Updated:** 2026-03-01 (auto-improvement session #4)
+> **Updated:** 2026-03-02 (auto-improvement session)
 > **Canonical architecture doc:** docs/architecture-plan.md
 > **Layer 2 instructions:** CLAUDE.md
 
@@ -17,41 +17,44 @@ with 30 signals across 7 timeframes, dual simulated portfolios (Patient + Bold, 
 ## Module Dependency Graph
 
 ```
-main.py (orchestrator — loop, run, CLI dispatch)  [572 lines]
-├── shared_state.py        (global caches, rate limiters, locks)  [114 lines]
-├── market_timing.py       (DST-aware market hours, agent window)  [79 lines]
-├── fx_rates.py            (USD/SEK caching via Frankfurter API)  [67 lines]
-├── indicators.py          (RSI, MACD, EMA, BB, ATR, regime detection)  [166 lines]
-├── data_collector.py      (kline fetching + multi-timeframe collector)  [259 lines]
-│   ├── http_retry.py      (retry with exponential backoff)  [65 lines]
+main.py (orchestrator — loop, run, CLI dispatch)  [~596 lines]
+├── shared_state.py        (global caches, rate limiters, locks)  [116 lines]
+├── market_timing.py       (DST-aware market hours, agent window)  [80 lines]
+├── fx_rates.py            (USD/SEK caching via Frankfurter API)  [65 lines]
+├── indicators.py          (RSI, MACD, EMA, BB, ATR, regime detection)  [167 lines]
+├── data_collector.py      (kline fetching + multi-timeframe collector)  [260 lines]
+│   ├── http_retry.py      (retry with exponential backoff + jitter)  [66 lines]
 │   ├── circuit_breaker.py (per-source failure tracking)
 │   └── api_utils.py       (config loading, Alpaca headers, API URLs)
-├── signal_engine.py       (30-signal voting + weighted consensus)  [718 lines]
+├── signal_engine.py       (30-signal voting + weighted consensus)  [~700 lines]
 │   ├── signal_registry.py (enhanced signal plugin registry)  [130 lines]
 │   ├── signal_utils.py    (shared helpers: SMA, EMA, RSI, majority_vote)  [130 lines]
 │   ├── macro_context.py   (DXY, yields, FOMC, volume signal)
-│   ├── accuracy_stats.py  (signal performance tracking, SQLite)  [559 lines]
+│   ├── accuracy_stats.py  (signal performance tracking, SQLite)  [633 lines]
 │   └── signals/           (19 enhanced signal modules, ~8,400 lines total)
-├── portfolio_mgr.py       (state load/save, portfolio_value, bold state)  [~60 lines]
+├── portfolio_mgr.py       (state load/save, portfolio_value)  [57 lines]
 │   └── file_utils.py      (atomic JSON I/O)
-├── reporting.py           (agent_summary.json, tiered context)  [759 lines]
-│   ├── equity_curve.py    (FIFO trade metrics, profit factor)  [596 lines]
-│   ├── trade_guards.py    (cooldown, consecutive-loss escalation)  [266 lines]
+├── reporting.py           (agent_summary.json, tiered context)  [~760 lines]
+│   ├── equity_curve.py    (FIFO trade metrics, profit factor)  [597 lines]
+│   ├── trade_guards.py    (cooldown, consecutive-loss escalation)  [267 lines]
 │   ├── risk_management.py (concentration, correlation, ATR stops)  [704 lines]
-│   ├── monte_carlo.py    (GBM price simulation, antithetic variates)  [401 lines]
-│   ├── monte_carlo_risk.py (t-copula portfolio VaR/CVaR)  [350 lines]
-│   ├── journal_index.py   (BM25 journal retrieval)  [399 lines]
-│   ├── futures_data.py    (Binance FAPI OI/LS data)  [240 lines]
+│   ├── monte_carlo.py     (GBM price simulation, antithetic variates)  [~400 lines]
+│   ├── monte_carlo_risk.py (t-copula portfolio VaR/CVaR)  [~350 lines]
+│   ├── journal_index.py   (BM25 journal retrieval)  [400 lines]
+│   ├── futures_data.py    (Binance FAPI OI/LS data)  [241 lines]
 │   ├── avanza_tracker.py  (Nordic equity price tracking)
-│   └── alpha_vantage.py   (stock fundamentals)  [329 lines]
-├── trigger.py             (6 trigger conditions, tier classification)  [326 lines]
-├── agent_invocation.py    (Claude subprocess management)  [198 lines]
-│   ├── perception_gate.py (pre-invocation signal filter)  [98 lines]
-│   ├── message_store.py   (save-only notifications)
-│   └── telegram_notifications.py (Telegram sends)  [136 lines]
-├── digest.py              (4-hour summary builder)  [201 lines]
-├── reflection.py          (periodic strategy metrics)  [242 lines]
-└── health.py              (heartbeat + error tracking)  [143 lines]
+│   └── alpha_vantage.py   (stock fundamentals)  [330 lines]
+├── trigger.py             (6 trigger conditions, tier classification)  [~330 lines]
+├── agent_invocation.py    (Claude subprocess management)  [~200 lines]
+│   ├── perception_gate.py (pre-invocation signal filter)  [99 lines]
+│   ├── message_store.py   (save-only notifications)  [144 lines]
+│   └── telegram_notifications.py (Telegram sends)  [137 lines]
+├── digest.py              (4-hour summary builder)  [202 lines]
+├── daily_digest.py        (morning daily digest — focus instruments + movers)
+├── message_throttle.py    (analysis message rate limiting)
+├── reflection.py          (periodic strategy metrics)  [243 lines]
+├── health.py              (heartbeat + error tracking)  [173 lines]
+└── logging_config.py      (structured RotatingFileHandler)  [48 lines]
 ```
 
 **Total:** ~97 Python modules, ~15,000+ lines of production code.
@@ -61,7 +64,7 @@ main.py (orchestrator — loop, run, CLI dispatch)  [572 lines]
 **Core signals** (in signal_engine.py):
 1. RSI(14), 2. MACD(12,26,9), 3. EMA(9,21), 4. BB(20,2), 5. Fear & Greed,
 6. Sentiment, 7. CryptoTrader-LM (Ministral-8B), 8. Volume Confirmation
-- Disabled: ML Classifier (#8, 28.2%), Funding Rate (#9, 27.0%), Custom LoRA (#11, 20.9%)
+- Disabled: ML Classifier (#9, 28.2%), Funding Rate (#10, 27.0%), Custom LoRA (#11, 20.9%)
 
 **Enhanced composite signals** (portfolio/signals/, each 4-8 sub-indicators via majority vote):
 12-trend, 13-momentum, 14-volume_flow, 15-volatility, 16-candlestick, 17-structure,
@@ -103,11 +106,12 @@ main.py (orchestrator — loop, run, CLI dispatch)  [572 lines]
 |------------|---------|------------|
 | Binance Spot API | Crypto OHLCV (BTC, ETH) | 600/min |
 | Binance FAPI | Metals OHLCV + futures data | 600/min |
-| Alpaca IEX v2 | US stock OHLCV (27 tickers) | 150/min |
+| Alpaca IEX v2 | US stock OHLCV (15 tickers) | 150/min |
 | yfinance | Stock fallback (extended hours) | 30/min |
 | Alternative.me | Crypto Fear & Greed | 5min cache |
 | Frankfurter API | USD/SEK exchange rate | 1h cache |
 | Alpha Vantage | Stock fundamentals (P/E, revenue) | 5/min, 25/day |
+| BGeometrics | BTC on-chain data | 8/hr, 15/day |
 | Telegram Bot API | Notifications | Unbounded |
 | Ministral-8B (local GPU) | CryptoTrader-LM signal | 15min cache |
 | Claude Code CLI | Layer 2 agent | On trigger |
@@ -134,52 +138,16 @@ main.py (orchestrator — loop, run, CLI dispatch)  [572 lines]
 | telegram_messages.jsonl | L2 | Dashboard | All sent Telegram messages |
 | fundamentals_cache.json | L1 | L1 (enrichment) | Alpha Vantage stock data |
 | trade_guard_state.json | L1 | L1 | Per-ticker cooldowns, loss tracking |
+| onchain_cache.json | L1 | L1 | BGeometrics BTC on-chain data |
+| forecast_predictions.jsonl | L1 | Accuracy tracker | Kronos/Chronos predictions |
 
 ## Test Suite
 
-- **~79 test files**, ~2,750+ tests passing, 18 pre-existing failures
-- Pre-existing failures: 15 integration (missing `ta_base_strategy`), 2 trigger tests, 1 subprocess test
-- Collection error fixed: `test_avanza_session.py` rewritten for Playwright-based auth (31 tests)
-- Coverage is excellent across all core modules (signal_engine, trigger, data_collector, reporting)
-- Test configuration: pytest + pyproject.toml, ruff linting (line length 120)
-
-## Monte Carlo Simulation (Session #5, 2026-03-01)
-
-- **Core GBM engine** (`portfolio/monte_carlo.py`): Geometric Brownian Motion with antithetic variates (50-75% variance reduction). Converts directional probability P(up) into drift via inverse normal CDF. Computes price quantile bands (p5/p25/p50/p75/p95), stop-loss hit probability, and expected return distribution (mean/std/skew). Horizons: 1d, 3d.
-- **Portfolio VaR** (`portfolio/monte_carlo_risk.py`): Student-t copula (df=4) for correlated multi-position simulation. Captures tail dependence (lambda ~0.18) that Gaussian copula misses. VaR/CVaR at 95%/99%, drawdown probability. Correlation from empirical returns or hardcoded priors from CORRELATED_PAIRS.
-- **Reporting integration**: `monte_carlo` and `portfolio_var` sections in `agent_summary_compact.json`. Config: `monte_carlo.enabled` (default true), `n_paths` (10K), `horizons` ([1,3]). Graceful degradation on failure.
-- **71 tests**, all passing in ~6s. Covers GBM statistics, antithetic variance reduction, quantile ordering, probability boundary conditions, t-copula correlation preservation, fat tails, VaR/CVaR ordering, correlated crash scenarios, diversification benefit, edge cases, and performance.
-
-## Recent Improvements (Session #4, 2026-03-01)
-
-- **6 bugs fixed (BUG-30 to BUG-35):** Dashboard heatmap missing 3 signals (forecast, claude_fundamental, futures_flow); digest.py reading wrong key from signal_log; http_retry returning response instead of None on retryable exhaust; message_store SEND_CATEGORIES including "invocation"; journal_index XAG price buckets capped at $35 (expanded to $120); alpha_vantage importing from portfolio_mgr instead of file_utils.
-- **Bold portfolio loader centralized (ARCH-6):** `load_bold_state()`/`save_bold_state()` added to `portfolio_mgr.py`. Direct JSON reads across 4+ modules can now use the canonical loader.
-- **Held tickers cache (BUG-36):** `_get_held_tickers()` in reporting.py cached per cycle via `_run_cycle_id`, saving 4 redundant disk reads per triggered cycle.
-- **Heikin-ashi refactored (REF-11):** Removed unnecessary `_majority_vote` wrapper; direct `majority_vote()` call from signal_utils.
-- **334 new signal module tests:** Dedicated test files for volume_flow (96), oscillators (70), smart_money (68), heikin_ashi (100). Plus 18 regression tests for bug fixes.
-- **Ticker cleanup:** Removed 12 instruments (MSTR, BABA, GRRR, IONQ, TEM, UPST, VERI, QQQ, K33, H100, BTCAP-B, BULL-NDX3X). Added INVE-B. Tier 1: 27→19 (15 stocks + 2 crypto + 2 metals).
-
-## Session #3 (2026-02-28)
-
-- **3 broken signal modules repaired:** futures_flow (#30) passed dict to majority_vote (always HOLD); momentum RSI Divergence/StochRSI had variable shadowing (always HOLD); momentum_factors high/low proximity required 500 bars (unreachable, always HOLD). All now produce real votes.
-- **Heikin-ashi confidence corrected:** Used `count_hold=True` unlike all other signals, making confidence 20-40% lower. Now matches standard behavior.
-- **Trend signal NaN check fixed:** `is np.nan` identity comparison replaced with `pd.isna()`.
-- **Trend Ichimoku dead code removed:** Duplicate tenkan/kijun computation cleaned up.
-- **FX staleness guard fixed:** Unreachable stale-data warning now fires correctly.
-- **Health uptime reset:** `reset_session_start()` prevents uptime from inheriting previous session.
-- **Reporting KeyError guard:** `initial_value_sek` accessed with `.get()` default.
-- **Signal engine constant hoisted:** `CORE_SIGNAL_NAMES` moved to module-level frozenset.
-- **Trigger market hour constant:** Hardcoded `7` replaced with `MARKET_OPEN_HOUR` import.
-- **Trigger state threading:** `update_tier_state()` accepts optional `state` param (saves disk read).
-- **Reporting constants deduplicated:** `KEEP_EXTRA_FULL` extracted to module-level `_KEEP_EXTRA_FULL` frozenset.
-- **11 new regression tests** in `tests/test_signal_bug_fixes.py`.
-
-### Session #2 (earlier same day)
-
-- **Reporting robustness:** 13 silent `except: pass` blocks replaced with `logger.warning()` + `_module_warnings` list surfaced to Layer 2
-- **Stale cache reduced:** `_MAX_STALE_FACTOR` 5→3 (max 3x TTL fallback for failed data sources)
-- **Trigger state cleanup:** Orphaned ticker entries pruned every save cycle (was lazy +10 buffer)
-- **Health module failures:** `update_module_failures()` tracks which modules failed per cycle in `health_state.json`
+- **~94 test files**, ~3,133 tests, 26 pre-existing failures (documented)
+- Pre-existing failures: 15 integration (missing `ta_base_strategy`), 4 consensus MIN_VOTERS, 2 forecast config, 3 portfolio signal/trigger, 1 subprocess, 1 forecast gating
+- Sequential runtime: ~16 min. Parallel (`-n auto` via pytest-xdist): ~5:34 (2.9x speedup)
+- Configuration: pytest + pyproject.toml, ruff linting (line length 120)
+- Test isolation: `tmp_path` + `monkeypatch` autouse fixtures for module-level file paths
 
 ## Deployment
 
@@ -191,8 +159,9 @@ main.py (orchestrator — loop, run, CLI dispatch)  [572 lines]
 
 ## Discrepancies vs Architecture Doc
 
-1. **Architecture doc lists MRVL, PONY, RXRX** as tickers; CLAUDE.md does not. Possible ticker rotation.
-2. **Architecture doc says "Cooldown expired"** as a trigger type; cooldown was REMOVED Feb 27 per MEMORY.md.
-3. **Architecture doc says 11 core signals** but 3 are disabled; effective core count is 8.
-4. **Architecture doc file tree** omits several modules added since (perception_gate, reflection, vector_memory, trade_guards, equity_curve, journal_index, futures_flow signal).
-5. **Scheduled tasks**: PF-ForceSleep/PF-WakeUp/PF-AutoImprove not in arch doc.
+1. **architecture-plan.md still lists "Cooldown expired"** as a trigger type; cooldown was REMOVED Feb 27.
+2. **architecture-plan.md says 11 core signals** but 3 are disabled; effective core count is 8.
+3. **architecture-plan.md file tree** omits modules added since Feb 27: perception_gate, reflection, vector_memory, trade_guards, equity_curve, journal_index, futures_flow, monte_carlo, monte_carlo_risk, daily_digest, message_throttle, cumulative_tracker, warrant_portfolio, prophecy, ticker_accuracy, forecast_accuracy, forecast_signal.
+4. **architecture-plan.md still lists removed tickers** (MSTR, BABA, GRRR, IONQ, TEM, UPST, VERI, QQQ, etc.) — removed Mar 1.
+5. **Scheduled tasks** (PF-ForceSleep, PF-WakeUp, PF-AutoImprove) not in arch doc.
+6. **Alpaca ticker count** says 27 but actual is 15 stocks.
