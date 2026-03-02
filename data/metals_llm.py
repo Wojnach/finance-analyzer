@@ -469,7 +469,9 @@ def _run_inference_cycle(signal_data, underlying_prices, chronos_only=False):
                 if chronos_result:
                     for h_key, h_data in chronos_result.items():
                         if isinstance(h_data, dict):
-                            direction = h_data.get("direction", "neutral")
+                            # forecast_chronos returns "action" (BUY/SELL/HOLD), map to direction
+                            action = h_data.get("action", "HOLD")
+                            direction = "up" if action == "BUY" else ("down" if action == "SELL" else "flat")
                             pct_move = h_data.get("pct_move", 0)
                             conf = h_data.get("confidence", 0)
 
@@ -484,10 +486,10 @@ def _run_inference_cycle(signal_data, underlying_prices, chronos_only=False):
                             # Log prediction for accuracy tracking
                             if direction in ("up", "down"):
                                 log_horizon = "1h" if h_key in ("1", "1h") else "3h"
-                                _log_prediction(f"chronos", ticker, direction,
+                                _log_prediction("chronos", ticker, direction,
                                                 conf, current_price, log_horizon)
 
-                    _log(f"Chronos {ticker}: {json.dumps({k: v.get('direction', '?') for k, v in chronos_result.items() if isinstance(v, dict)})}")
+                    _log(f"Chronos {ticker}: {json.dumps({k: h_data.get('action', '?') for k, h_data in chronos_result.items() if isinstance(h_data, dict)})}")
         except Exception as e:
             _log(f"Chronos {ticker} failed: {e}")
 
