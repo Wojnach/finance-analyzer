@@ -81,8 +81,8 @@ TIER_CONFIG = {
     3: {"model": None,     "timeout": 300,  "max_turns": 20, "label": "CRITICAL"},
 }
 
-# --- POSITIONS ---
-POSITIONS = {
+# --- POSITIONS (defaults — overridden by persisted state on startup) ---
+POSITIONS_DEFAULTS = {
     "gold": {
         "name": "BULL GULD X8 N", "ob_id": "856394", "api_type": "certificate",
         "units": 5, "entry": 972.4, "stop": 900.0, "active": True,
@@ -96,6 +96,129 @@ POSITIONS = {
         "units": 240, "entry": 20.70, "stop": 18.69, "active": True,
     },
 }
+POSITIONS_STATE_FILE = "data/metals_positions_state.json"
+
+def _load_positions():
+    """Load position state from disk, falling back to defaults."""
+    import copy
+    positions = copy.deepcopy(POSITIONS_DEFAULTS)
+    try:
+        if os.path.exists(POSITIONS_STATE_FILE):
+            with open(POSITIONS_STATE_FILE, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            for key, state in saved.items():
+                if key in positions:
+                    # Restore persisted active/sold status
+                    positions[key]["active"] = state.get("active", True)
+                    # Restore updated units/entry/stop if they were modified
+                    if "units" in state:
+                        positions[key]["units"] = state["units"]
+                    if "entry" in state:
+                        positions[key]["entry"] = state["entry"]
+                    if "stop" in state:
+                        positions[key]["stop"] = state["stop"]
+                    # Preserve sell metadata
+                    if "sold_ts" in state:
+                        positions[key]["sold_ts"] = state["sold_ts"]
+                    if "sold_price" in state:
+                        positions[key]["sold_price"] = state["sold_price"]
+                    if "sold_reason" in state:
+                        positions[key]["sold_reason"] = state["sold_reason"]
+            log(f"Position state loaded from {POSITIONS_STATE_FILE}")
+    except Exception as e:
+        log(f"Position state load failed (using defaults): {e}")
+    return positions
+
+def _save_positions(positions):
+    """Persist position state to disk (survives restarts)."""
+    state = {}
+    for key, pos in positions.items():
+        state[key] = {
+            "active": pos.get("active", True),
+            "units": pos.get("units"),
+            "entry": pos.get("entry"),
+            "stop": pos.get("stop"),
+        }
+        # Include sell metadata if present
+        for field in ("sold_ts", "sold_price", "sold_reason"):
+            if field in pos:
+                state[key][field] = pos[field]
+    try:
+        with open(POSITIONS_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log(f"Position state save failed: {e}")
+
+def _verify_position_holdings(page, positions):
+    """At startup, verify actual Avanza holdings match our position state.
+
+    Uses the Avanza account positions API to check if we actually hold each
+    instrument. Falls back to price check if positions API fails.
+    """
+    # Try to get actual account holdings via positions API
+    held_ob_ids = set()
+    try:
+        result = page.evaluate("""async (accountId) => {
+            const resp = await fetch(
+                'https://www.avanza.se/_api/account-overview/overview/categorizedAccountPositions/' + accountId,
+                {credentials: 'include'}
+            );
+            if (resp.status !== 200) return {error: resp.status};
+            const data = await resp.json();
+            // Extract all held instrument orderbook IDs
+            const ids = [];
+            for (const cat of (data.withOrderbook || [])) {
+                for (const pos of (cat.positions || [])) {
+                    if (pos.orderbookId) ids.push(String(pos.orderbookId));
+                }
+            }
+            return {ids: ids};
+        }""", ACCOUNT_ID)
+
+        if result and "ids" in result:
+            held_ob_ids = set(result["ids"])
+            log(f"  Avanza account has {len(held_ob_ids)} positions")
+
+            for key, pos in positions.items():
+                if not pos.get("active"):
+                    log(f"  {key}: already inactive (sold)")
+                    continue
+                if pos["ob_id"] in held_ob_ids:
+                    log(f"  {key}: confirmed held on Avanza")
+                else:
+                    log(f"  {key}: NOT found in Avanza holdings — deactivating")
+                    pos["active"] = False
+                    pos["sold_reason"] = "startup_verify_not_held"
+                    pos["sold_ts"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            return
+        else:
+            log(f"  Positions API returned: {result}")
+    except Exception as e:
+        log(f"  Positions API failed ({e}), falling back to price check")
+
+    # Fallback: just verify prices exist (can't check holdings)
+    for key, pos in positions.items():
+        if not pos.get("active"):
+            log(f"  {key}: already inactive")
+            continue
+        try:
+            data = fetch_price(page, pos["ob_id"], pos["api_type"])
+            if data is None:
+                log(f"  {key}: API returned null — possibly delisted")
+                continue
+            bid = data.get("bid") or data.get("last") or 0
+            if bid <= 0:
+                log(f"  {key}: bid=0, last=0 — instrument may be dead, deactivating")
+                pos["active"] = False
+                pos["sold_reason"] = "startup_verify_no_price"
+                pos["sold_ts"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            else:
+                log(f"  {key}: bid={bid} (holdings unverified, keeping active)")
+        except Exception as e:
+            log(f"  {key}: verify failed ({e}), keeping current state")
+
+# Load positions (persisted state overrides defaults)
+POSITIONS = _load_positions()
 
 SHORT_INSTRUMENTS = {
     "bear_silver_x5": {
@@ -269,7 +392,11 @@ def read_decision_history(n=5):
         return []
 
 def emergency_sell(page, key, pos, bid):
-    """L3 emergency auto-sell via Avanza API."""
+    """L3 emergency auto-sell via Avanza API.
+
+    Returns True if position was successfully sold or confirmed already sold.
+    Returns False if sell failed and position may still be active.
+    """
     log(f"!!! L3 EMERGENCY SELL: {key} at {bid} (entry: {pos['entry']}, stop: {pos['stop']})")
     send_telegram(f"*L3 EMERGENCY SELL* {pos['name']}\nBid: {bid} | Entry: {pos['entry']}\nAuto-selling {pos['units']} units")
 
@@ -284,8 +411,9 @@ def emergency_sell(page, key, pos, bid):
 
         if not csrf:
             log("EMERGENCY SELL FAILED: no CSRF token")
-            return
+            return False
 
+        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
         result = page.evaluate("""async (args) => {
             const [payload, token] = args;
             const resp = await fetch('https://www.avanza.se/_api/trading-critical/rest/order/new', {
@@ -301,16 +429,16 @@ def emergency_sell(page, key, pos, bid):
             "side": "SELL",
             "condition": "NORMAL",
             "price": bid,
-            "validUntil": (datetime.datetime.now() + datetime.timedelta(days=1)).strftime("%Y-%m-%d"),
+            "validUntil": today_str,
             "volume": pos["units"],
         }, csrf])
 
         log(f"Emergency sell result: {result}")
-        send_telegram(f"*L3 SELL RESULT*: status={result.get('status')}")
 
         # Log trade
+        now_ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
         trade = {
-            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "ts": now_ts,
             "action": "EMERGENCY_SELL",
             "position": key,
             "name": pos["name"],
@@ -323,14 +451,56 @@ def emergency_sell(page, key, pos, bid):
         with open("data/metals_trades.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(trade, ensure_ascii=False) + "\n")
 
-        # Record in trade guards
-        if RISK_AVAILABLE:
-            record_metals_trade(key, "SELL", pnl_pct_value=pnl_pct(bid, pos["entry"]))
+        # Parse API response to determine outcome
+        body_str = result.get("body", "")
+        try:
+            body = json.loads(body_str)
+        except (json.JSONDecodeError, TypeError):
+            body = {}
 
-        pos["active"] = False
+        order_status = body.get("orderRequestStatus", "")
+        message_code = body.get("messageCode", "")
+
+        if order_status == "SUCCESS":
+            # Sell order placed successfully
+            send_telegram(f"*L3 SELL OK* {pos['name']} — order placed")
+            pos["active"] = False
+            pos["sold_ts"] = now_ts
+            pos["sold_price"] = bid
+            pos["sold_reason"] = "L3_emergency"
+            _save_positions(POSITIONS)
+
+            # Record in trade guards
+            if RISK_AVAILABLE:
+                record_metals_trade(key, "SELL", pnl_pct_value=pnl_pct(bid, pos["entry"]))
+            return True
+
+        elif "short.sell.not.allowed" in message_code:
+            # "Short sell not allowed" means we tried to sell more than we hold.
+            # This happens when: (a) position already sold by stop-loss on Avanza,
+            # (b) position was sold in a previous emergency_sell this session, or
+            # (c) we never held this position on this account.
+            # In all cases, deactivate — we clearly don't hold it.
+            log(f"  {key}: short-sell-not-allowed — position already sold or not held, deactivating")
+            send_telegram(f"*L3* {pos['name']}: not held (already sold?), deactivating")
+            pos["active"] = False
+            pos["sold_ts"] = now_ts
+            pos["sold_price"] = bid
+            pos["sold_reason"] = "L3_already_sold"
+            _save_positions(POSITIONS)
+            return True
+
+        else:
+            # Other error — keep position active, may need manual intervention
+            error_msg = body.get("message", body_str[:100])
+            log(f"  {key}: sell failed with: {error_msg}")
+            send_telegram(f"*L3 SELL FAILED* {pos['name']}: {error_msg}")
+            return False
+
     except Exception as e:
         log(f"Emergency sell FAILED: {e}")
         send_telegram(f"*L3 SELL FAILED*: {e}")
+        return False
 
 def _get_csrf(page):
     """Extract CSRF token from Avanza cookies."""
@@ -921,6 +1091,21 @@ def main():
         page.wait_for_timeout(2000)
         log("Avanza session loaded")
 
+        # Verify actual holdings at startup (detect already-sold positions)
+        log("Verifying position holdings...")
+        _verify_position_holdings(page, POSITIONS)
+        # Persist any corrections from verification
+        _save_positions(POSITIONS)
+
+        # Log position summary
+        active_count = sum(1 for p in POSITIONS.values() if p["active"])
+        sold_count = sum(1 for p in POSITIONS.values() if not p["active"])
+        log(f"  Positions: {active_count} active, {sold_count} sold/inactive")
+        if active_count == 0:
+            log("All positions already sold — nothing to monitor. Exiting.")
+            send_telegram("*METALS LOOP* All positions already sold. Not starting.")
+            return
+
         # Initialize peaks and last-invoke prices
         for key, pos in POSITIONS.items():
             if pos["active"]:
@@ -974,12 +1159,19 @@ def main():
         else:
             log("Risk module: NOT available (import failed)")
 
+        # Build dynamic positions summary
+        pos_parts = []
+        for key, pos in POSITIONS.items():
+            status = "ACTIVE" if pos["active"] else "SOLD"
+            pos_parts.append(f"{key}({status})")
+        pos_summary = ", ".join(pos_parts)
+
         send_telegram(f"""*METALS LOOP v6 STARTED*
 Tiered: T1=haiku T2=sonnet T3=opus
-LLM: {"Ministral+Chronos (5min)" if LLM_AVAILABLE else "DISABLED"}
+LLM: {"Ministral+Chronos (60s)" if LLM_AVAILABLE else "DISABLED"}
 Risk: {"MC+Guards+Drawdown+DailyRanges" if RISK_AVAILABLE else "DISABLED"}
 Spike: {"P" + str(SPIKE_PERCENTILE) + " " + str(SPIKE_PARTIAL_PCT) + "% @15:15-16:30" if SPIKE_ENABLED else "OFF"}
-Positions: gold(8x), silver79(5x), silver301(4.3x)""")
+Positions: {pos_summary}""")
 
         try:
             while True:
@@ -1104,6 +1296,7 @@ Positions: gold(8x), silver79(5x), silver301(4.3x)""")
                                                         pnl_pct_value=spike_st["targets"][fk].get("target_pnl_pct", 0))
                             if filled:
                                 save_spike_state(spike_st)
+                                _save_positions(POSITIONS)  # persist after spike fills
 
                     # Phase 3: Cancel unfilled at 16:30 CET
                     if spike_st["placed"] and not spike_st["cancelled"] and h_now >= SPIKE_CANCEL_CET:
@@ -1136,6 +1329,7 @@ Positions: gold(8x), silver79(5x), silver301(4.3x)""")
                             dist = ((bid - pos["stop"]) / bid * 100) if bid > 0 else 999
                             if dist < STOP_L3_PCT:
                                 emergency_sell(page, key, pos, bid)
+                        # State already persisted inside emergency_sell()
                         break
 
                 # Log status (every 3rd check)
