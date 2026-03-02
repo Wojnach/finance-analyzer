@@ -221,7 +221,7 @@ def refresh_fundamentals_batch(config):
 
     daily_budget = av_config.get("daily_budget", 25)
     max_stale_days = av_config.get("max_stale_days", 5)
-    skip_tickers = set(av_config.get("skip_tickers", ["QQQ"]))
+    skip_tickers = set(av_config.get("skip_tickers", []))
     cache_ttl_hours = av_config.get("cache_ttl_hours", 24)
 
     # Check circuit breaker
@@ -320,7 +320,7 @@ def should_batch_refresh(config):
 
     # Check if any stock ticker needs refresh
     for ticker in STOCK_SYMBOLS:
-        if ticker in set(av_config.get("skip_tickers", ["QQQ"])):
+        if ticker in set(av_config.get("skip_tickers", [])):
             continue
         age = _cache_age_hours(ticker)
         if age is None or age > cache_ttl_hours:

@@ -3,7 +3,7 @@
 
 Usage:
     python scripts/iskbet.py btc 8h             # BTC-USD, 8h, default 100K SEK
-    python scripts/iskbet.py mstr pltr 4h        # multiple tickers
+    python scripts/iskbet.py nvda pltr 4h        # multiple tickers
     python scripts/iskbet.py btc 8h 50000        # custom amount
     python scripts/iskbet.py off                  # disable
     python scripts/iskbet.py status               # show state
@@ -25,6 +25,9 @@ ISKBETS_CONFIG = DATA_DIR / "iskbets_config.json"
 ISKBETS_STATE = DATA_DIR / "iskbets_state.json"
 SUMMARY_FILE = DATA_DIR / "agent_summary.json"
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from portfolio.tickers import ALL_TICKERS
+
 TICKER_ALIASES = {
     "btc": "BTC-USD",
     "btcusd": "BTC-USD",
@@ -32,12 +35,26 @@ TICKER_ALIASES = {
     "eth": "ETH-USD",
     "ethusd": "ETH-USD",
     "eth-usd": "ETH-USD",
-    "mstr": "MSTR",
     "pltr": "PLTR",
     "nvda": "NVDA",
+    "amd": "AMD",
+    "googl": "GOOGL",
+    "amzn": "AMZN",
+    "aapl": "AAPL",
+    "avgo": "AVGO",
+    "meta": "META",
+    "mu": "MU",
+    "soun": "SOUN",
+    "smci": "SMCI",
+    "tsm": "TSM",
+    "ttwo": "TTWO",
+    "vrt": "VRT",
+    "lmt": "LMT",
+    "xau": "XAU-USD",
+    "xag": "XAG-USD",
 }
 
-VALID_TICKERS = {"BTC-USD", "ETH-USD", "MSTR", "PLTR", "NVDA"}
+VALID_TICKERS = set(ALL_TICKERS)
 
 DURATION_RE = re.compile(r"^(\d+)([hmd])$", re.IGNORECASE)
 

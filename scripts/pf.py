@@ -16,6 +16,9 @@ SUMMARY_FILE = DATA_DIR / "agent_summary.json"
 TRIGGER_FILE = DATA_DIR / "trigger_state.json"
 CONFIG_FILE = BASE_DIR / "config.json"
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from portfolio.tickers import CRYPTO_SYMBOLS as _CRYPTO_SYMBOLS
+
 TICKER_ALIASES = {
     "btc": "BTC-USD",
     "btcusd": "BTC-USD",
@@ -23,12 +26,26 @@ TICKER_ALIASES = {
     "eth": "ETH-USD",
     "ethusd": "ETH-USD",
     "eth-usd": "ETH-USD",
-    "mstr": "MSTR",
     "pltr": "PLTR",
     "nvda": "NVDA",
+    "amd": "AMD",
+    "googl": "GOOGL",
+    "amzn": "AMZN",
+    "aapl": "AAPL",
+    "avgo": "AVGO",
+    "meta": "META",
+    "mu": "MU",
+    "soun": "SOUN",
+    "smci": "SMCI",
+    "tsm": "TSM",
+    "ttwo": "TTWO",
+    "vrt": "VRT",
+    "lmt": "LMT",
+    "xau": "XAU-USD",
+    "xag": "XAG-USD",
 }
 
-CRYPTO_SYMBOLS = {"BTC-USD", "ETH-USD"}
+CRYPTO_SYMBOLS = _CRYPTO_SYMBOLS
 FEE_CRYPTO = 0.0005
 FEE_STOCK = 0.001
 MIN_TRADE_SEK = 500

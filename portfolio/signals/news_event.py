@@ -76,10 +76,12 @@ def _fetch_headlines(ticker: str, config: dict) -> list[dict]:
     # Each sector has one representative whose headlines are shared with all members.
     _SECTOR_REP_TICKER = {
         "semiconductor": "NVDA",
-        "china": "BABA",
         "big_tech": "AAPL",
         "ai": "NVDA",
         "defense": "LMT",
+        "software": "PLTR",
+        "gaming": "TTWO",
+        "infrastructure": "VRT",
         "metals": None,   # metals use Binance FAPI, not Yahoo
         "crypto": None,   # crypto uses CryptoCompare categories (already shared)
     }
