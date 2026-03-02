@@ -354,6 +354,7 @@ def _pair_round_trips(transactions):
                 buy_queues[ticker].append({
                     "ts": tx.get("timestamp", ""),
                     "remaining_shares": shares,
+                    "original_shares": shares,
                     "price_per_share": price_per_share,
                     "fee_sek": fee,
                 })
@@ -396,8 +397,9 @@ def _pair_round_trips(transactions):
             pnl_pct = ((sell_price_per_share - buy_price) / buy_price * 100) if buy_price > 0 else 0
             pnl_sek = (sell_price_per_share - buy_price) * matched
 
-            # Proportional fees
-            buy_fee_share = (buy["fee_sek"] * matched / buy["remaining_shares"]) if buy["remaining_shares"] > 0 else 0
+            # Proportional fees — use original buy quantity as denominator
+            # to avoid inflating fee allocation on subsequent partial matches
+            buy_fee_share = (buy["fee_sek"] * matched / buy["original_shares"]) if buy["original_shares"] > 0 else 0
             sell_fee_share = (sell_fee * matched / sell_shares) if sell_shares > 0 else 0
 
             round_trips.append({

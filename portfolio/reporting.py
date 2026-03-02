@@ -37,22 +37,26 @@ _KEEP_EXTRA_FULL = frozenset({
 })
 
 
-def _cross_asset_signals(all_signals):
-    btc = all_signals.get("BTC-USD", {})
-    btc_action = btc.get("action", "HOLD")
-    if btc_action == "HOLD":
-        return {}
+_CROSS_ASSET_PAIRS = {
+    "ETH-USD": "BTC-USD",
+    "XAG-USD": "XAU-USD",
+}
 
-    followers = {"ETH-USD": "BTC-USD"}
+
+def _cross_asset_signals(all_signals):
     leads = {}
-    for follower, leader in followers.items():
+    for follower, leader in _CROSS_ASSET_PAIRS.items():
+        leader_data = all_signals.get(leader, {})
+        leader_action = leader_data.get("action", "HOLD")
+        if leader_action == "HOLD":
+            continue
         f_data = all_signals.get(follower, {})
         f_action = f_data.get("action", "HOLD")
-        if f_action == "HOLD" and btc_action != "HOLD":
+        if f_action == "HOLD":
             leads[follower] = {
                 "leader": leader,
-                "leader_action": btc_action,
-                "note": f"{leader} is {btc_action} but {follower} hasn't moved yet",
+                "leader_action": leader_action,
+                "note": f"{leader} is {leader_action} but {follower} hasn't moved yet",
             }
     return leads
 
