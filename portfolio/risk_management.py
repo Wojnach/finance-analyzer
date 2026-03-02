@@ -10,9 +10,12 @@ Provides:
 
 import datetime
 import json
+import logging
 import pathlib
 
 from portfolio.file_utils import load_json
+
+logger = logging.getLogger(__name__)
 
 DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 
@@ -177,8 +180,11 @@ def compute_stop_levels(holdings: dict, agent_summary: dict) -> dict:
         current_price = sig.get("price_usd", 0)
         atr_pct = sig.get("atr_pct", 0)
 
-        # 2x ATR stop-loss
+        # 2x ATR stop-loss (floor at 1% of entry to prevent negative stops)
         stop_price = entry_price * (1 - 2 * atr_pct / 100)
+        if stop_price <= 0:
+            logger.warning("%s: ATR %.1f%% exceeds 50%%, stop floored to 1%% of entry", ticker, atr_pct)
+            stop_price = entry_price * 0.01
 
         # Distance from current price to stop
         if stop_price > 0:

@@ -314,7 +314,7 @@ class TestKronosBacktestFeb27:
         return results
 
     @pytest.mark.slow
-    def test_btc_default_params(self, feb27_btc_5m, kronos_predictor):
+    def test_btc_default_params(self, feb27_btc_5m, kronos_predictor, tmp_path):
         """BTC backtest with default parameters (T=1.0, top_p=0.9, samples=3)."""
         results = self._run_sliding_backtest(
             feb27_btc_5m, kronos_predictor, "BTC-USD",
@@ -334,7 +334,7 @@ class TestKronosBacktestFeb27:
             print(f"  Avg prediction time: {avg_elapsed:.1f}s")
 
         # Save results
-        out_path = Path("data/kronos_backtest_btc_default.json")
+        out_path = tmp_path / "kronos_backtest_btc_default.json"
         out_path.write_text(json.dumps({
             "ticker": "BTC-USD",
             "params": {"T": 1.0, "top_p": 0.9, "sample_count": 3},
@@ -348,7 +348,7 @@ class TestKronosBacktestFeb27:
         assert total > 0, "No valid predictions were made"
 
     @pytest.mark.slow
-    def test_btc_low_temperature(self, feb27_btc_5m, kronos_predictor):
+    def test_btc_low_temperature(self, feb27_btc_5m, kronos_predictor, tmp_path):
         """BTC backtest with lower temperature (sharper predictions)."""
         results = self._run_sliding_backtest(
             feb27_btc_5m, kronos_predictor, "BTC-USD",
@@ -363,7 +363,7 @@ class TestKronosBacktestFeb27:
 
         print(f"\nBTC T=0.5: {correct}/{total} = {accuracy:.1f}% direction accuracy")
 
-        out_path = Path("data/kronos_backtest_btc_lowT.json")
+        out_path = tmp_path / "kronos_backtest_btc_lowT.json"
         out_path.write_text(json.dumps({
             "ticker": "BTC-USD",
             "params": {"T": 0.5, "top_p": 0.9, "sample_count": 3},
@@ -376,7 +376,7 @@ class TestKronosBacktestFeb27:
         assert total > 0
 
     @pytest.mark.slow
-    def test_btc_high_samples(self, feb27_btc_5m, kronos_predictor):
+    def test_btc_high_samples(self, feb27_btc_5m, kronos_predictor, tmp_path):
         """BTC backtest with more samples (better averaging)."""
         results = self._run_sliding_backtest(
             feb27_btc_5m, kronos_predictor, "BTC-USD",
@@ -391,7 +391,7 @@ class TestKronosBacktestFeb27:
 
         print(f"\nBTC T=0.7/p=0.85/s=5: {correct}/{total} = {accuracy:.1f}% direction accuracy")
 
-        out_path = Path("data/kronos_backtest_btc_highsamples.json")
+        out_path = tmp_path / "kronos_backtest_btc_highsamples.json"
         out_path.write_text(json.dumps({
             "ticker": "BTC-USD",
             "params": {"T": 0.7, "top_p": 0.85, "sample_count": 5},
@@ -404,7 +404,7 @@ class TestKronosBacktestFeb27:
         assert total > 0
 
     @pytest.mark.slow
-    def test_eth_default_params(self, feb27_eth_5m, kronos_predictor):
+    def test_eth_default_params(self, feb27_eth_5m, kronos_predictor, tmp_path):
         """ETH backtest with default parameters."""
         results = self._run_sliding_backtest(
             feb27_eth_5m, kronos_predictor, "ETH-USD",
@@ -419,7 +419,7 @@ class TestKronosBacktestFeb27:
 
         print(f"\nETH default params: {correct}/{total} = {accuracy:.1f}% direction accuracy")
 
-        out_path = Path("data/kronos_backtest_eth_default.json")
+        out_path = tmp_path / "kronos_backtest_eth_default.json"
         out_path.write_text(json.dumps({
             "ticker": "ETH-USD",
             "params": {"T": 1.0, "top_p": 0.9, "sample_count": 3},
@@ -432,7 +432,7 @@ class TestKronosBacktestFeb27:
         assert total > 0
 
     @pytest.mark.slow
-    def test_xag_default_params(self, feb27_xag_5m, kronos_predictor):
+    def test_xag_default_params(self, feb27_xag_5m, kronos_predictor, tmp_path):
         """XAG (silver) backtest with default parameters."""
         results = self._run_sliding_backtest(
             feb27_xag_5m, kronos_predictor, "XAG-USD",
@@ -447,7 +447,7 @@ class TestKronosBacktestFeb27:
 
         print(f"\nXAG default params: {correct}/{total} = {accuracy:.1f}% direction accuracy")
 
-        out_path = Path("data/kronos_backtest_xag_default.json")
+        out_path = tmp_path / "kronos_backtest_xag_default.json"
         out_path.write_text(json.dumps({
             "ticker": "XAG-USD",
             "params": {"T": 1.0, "top_p": 0.9, "sample_count": 3},
@@ -464,7 +464,7 @@ class TestKronosParamSweep:
     """Parameter sweep to find optimal Kronos settings."""
 
     @pytest.mark.slow
-    def test_param_sweep_btc(self, feb27_btc_5m, kronos_predictor):
+    def test_param_sweep_btc(self, feb27_btc_5m, kronos_predictor, tmp_path):
         """Sweep T and sample_count to find best BTC accuracy."""
         param_combos = [
             {"T": 0.3, "top_p": 0.9, "sample_count": 3},
@@ -508,7 +508,7 @@ class TestKronosParamSweep:
         print(f"  T={best['params']['T']}, top_p={best['params']['top_p']}, "
               f"sample_count={best['params']['sample_count']}: {best['accuracy']:.1f}%")
 
-        out_path = Path("data/kronos_param_sweep.json")
+        out_path = tmp_path / "kronos_param_sweep.json"
         out_path.write_text(json.dumps(sweep_results, indent=2))
         print(f"  Sweep results saved to {out_path}")
 

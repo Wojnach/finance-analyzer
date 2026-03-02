@@ -54,6 +54,11 @@ def _load_prev_sentiments():
             if ts_file.exists():
                 ts = json.loads(ts_file.read_text(encoding="utf-8"))
                 _prev_sentiment = ts.get("prev_sentiment", {})
+        # Prune entries for removed tickers
+        from portfolio.tickers import ALL_TICKERS
+        removed = [k for k in _prev_sentiment if k not in ALL_TICKERS]
+        for k in removed:
+            del _prev_sentiment[k]
     except Exception:
         logger.debug("Failed to load prev sentiments", exc_info=True)
     _prev_sentiment_loaded = True

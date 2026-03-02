@@ -1,144 +1,134 @@
-# Improvement Plan — Auto-Session #4 (2026-03-01)
+# Improvement Plan — Auto-Session #5 (2026-03-02)
 
 ## Status: COMPLETE
 
-All planned items implemented, tested, and committed. 4 commits on `main`.
-
 ## Priority: Critical Bugs > Architecture > Tests > Features > Polish
 
-Previous sessions fixed BUG-13 through BUG-28, ARCH-1/2/3/4, REF-5/6/7/10.
-This session continues from BUG-30 onward.
+Previous sessions fixed BUG-13 through BUG-36, ARCH-1/2/3/4/6/7, REF-5/6/7/10/11, TEST-1/2/3/4.
+This session continues from BUG-37 onward.
 
 ---
 
 ## 1. Bugs & Problems Found
 
-### BUG-30: dashboard signal heatmap missing 3 signals
-- **File:** `dashboard/app.py:286-291`
-- **Severity:** MEDIUM (dashboard shows incomplete data)
-- **Issue:** `/api/signal-heatmap` hardcodes 16 enhanced signal names. Missing: `forecast` (#28), `claude_fundamental` (#29), `futures_flow` (#30). Also, the core_signals list includes disabled `ml` and `funding` which always show HOLD.
-- **Fix:** Add the 3 missing enhanced signals. Keep disabled signals visible (they serve as documentation).
-- **Impact:** Dashboard only. No functional change to trading.
+### BUG-37: equity_curve FIFO fee double-counting on multi-partial sells
+- **File:** `portfolio/equity_curve.py:400`
+- **Severity:** MEDIUM (inflates round-trip fee metrics)
+- **Issue:** Proportional buy-fee allocation uses `buy["remaining_shares"]` as denominator:
+  ```python
+  buy_fee_share = (buy["fee_sek"] * matched / buy["remaining_shares"])
+  ```
+  On the FIRST partial match, this is correct (e.g., `fee * 50/100 = 0.5*fee`). But after
+  `remaining_shares` is decremented on line 416, the SECOND partial match uses the smaller
+  denominator: `fee * 50/50 = 1.0*fee`. Total allocated: 1.5x the actual fee.
+- **Fix:** Track the original buy quantity separately. Use it as the fee-allocation denominator
+  instead of `remaining_shares`.
+- **Impact:** `equity_curve.py` only. Fixes profit factor and round-trip P&L accuracy.
 
-### BUG-31: digest.py reads wrong key from signal_log entries
-- **File:** `portfolio/digest.py:98`
-- **Severity:** MEDIUM (consensus breakdown in digest is always 0/0/0)
-- **Issue:** `e.get("signals", {}).values()` looks for a top-level `signals` key, but `signal_log.jsonl` entries use `e["tickers"][ticker_name]` as the structure (written by `outcome_tracker.py:132-136`). The digest never finds any signal data.
-- **Fix:** Change to iterate `e.get("tickers", {}).values()`, then access `ticker_data.get("consensus", "HOLD")` for each ticker's consensus.
-- **Impact:** `digest.py` only. Fixes the 4h digest consensus breakdown.
+### BUG-38: trigger.py _save_state skips pruning when current_tickers is empty set
+- **File:** `portfolio/trigger.py:56`
+- **Severity:** LOW (edge case: only when all data sources fail simultaneously)
+- **Issue:** `if current_tickers:` evaluates to `False` for an empty set. If a cycle runs with
+  zero signals (all APIs down), pruning of removed tickers from `triggered_consensus` is skipped.
+  State entries for removed tickers persist until a non-empty cycle happens.
+- **Fix:** Change to `if current_tickers is not None:` — explicit None check instead of truthiness.
+- **Impact:** `trigger.py` only. Prevents stale ticker state from accumulating.
 
-### BUG-32: http_retry returns response on final retryable failure
-- **File:** `portfolio/http_retry.py:49`
-- **Severity:** LOW-MEDIUM (callers may parse error responses as data)
-- **Issue:** When all retries are exhausted on a retryable status code (429, 503), the function returns the error response object. Connection-error path returns `None`. Callers checking `if resp is None` will incorrectly process a 429 response body.
-- **Fix:** Return `None` after final retryable failure, consistent with exception branch.
-- **Impact:** `http_retry.py` and all callers. Callers that already check `resp.ok` are unaffected. Risk: callers that relied on getting the response object back (unlikely since the behavior was undocumented).
+### BUG-39: risk_management ATR stop price can go negative without warning
+- **File:** `portfolio/risk_management.py:181`
+- **Severity:** LOW (handled but not logged)
+- **Issue:** `stop_price = entry_price * (1 - 2 * atr_pct / 100)`. When `atr_pct > 50`,
+  stop price becomes negative. Code handles this (sets `distance_to_stop_pct = inf`) but
+  doesn't log the extreme ATR condition.
+- **Fix:** Add a floor at 1% of entry price and log a warning when ATR exceeds 50%.
+- **Impact:** `risk_management.py` only. Improves debugging visibility.
 
-### BUG-33: message_store SEND_CATEGORIES includes invocation
-- **File:** `portfolio/message_store.py:34`
-- **Severity:** LOW-MEDIUM (noisy Telegram notifications)
-- **Issue:** `SEND_CATEGORIES` includes `"invocation"` and `"analysis"`, but the module docstring (lines 9-14) says these are save-only. This sends Layer 2 invocation messages and analysis messages to Telegram — the invocation messages are the brief "Layer 2 Tx invoked: reason" lines that outnumber full analyses because many Layer 2 sessions fail before completing.
-- **Fix:** Remove `"invocation"` from `SEND_CATEGORIES`. Keep `"analysis"` since Layer 2 is the SOLE Telegram sender per CLAUDE.md — analysis messages from Layer 2 should be sent. Update docstring.
-- **Impact:** Reduces Telegram noise. Layer 2 trade/analysis messages still sent.
+### BUG-40: _prev_sentiment dict never pruned for removed tickers
+- **File:** `portfolio/signal_engine.py:36`
+- **Severity:** LOW (dict is small, ~19 entries currently)
+- **Issue:** `_prev_sentiment` accumulates entries for every ticker that has ever been
+  tracked. After the Mar 1 ticker cleanup (27→19), the dict still holds entries for
+  removed tickers (MSTR, BABA, GRRR, etc.). These persist in `sentiment_state.json`.
+- **Fix:** Prune `_prev_sentiment` against configured tickers on load.
+- **Impact:** `signal_engine.py` only. Keeps state files clean.
 
-### BUG-34: journal_index XAG price buckets capped at $35
-- **File:** `portfolio/journal_index.py:114`
-- **Severity:** LOW-MEDIUM (BM25 journal retrieval loses price context for silver)
-- **Issue:** `_PRICE_BUCKETS["XAG-USD"] = [20, 25, 30, 35]`. Silver is currently trading ~$89+, prophecy target $120. All prices above $35 map to `"XAG-USD_above_35"` — no price-level discrimination for current/future silver prices.
-- **Fix:** Expand to `[25, 30, 35, 50, 75, 100, 120]` covering prophecy target range.
-- **Impact:** `journal_index.py` only. Improves journal retrieval relevance for silver analysis.
-
-### BUG-35: alpha_vantage imports from portfolio_mgr instead of file_utils
-- **File:** `portfolio/alpha_vantage.py:55`
-- **Severity:** LOW (fragile import chain, not a crash)
-- **Issue:** `from portfolio.portfolio_mgr import _atomic_write_json` — uses a private re-export from portfolio_mgr. Every other module imports from the canonical source `portfolio.file_utils`. If portfolio_mgr removes the re-export, alpha_vantage breaks.
-- **Fix:** Change to `from portfolio.file_utils import atomic_write_json`.
-- **Impact:** `alpha_vantage.py` only.
-
-### BUG-36: _get_held_tickers() reads disk 6x per reporting cycle
-- **File:** `portfolio/reporting.py:506-517, 539, 737, 789`
-- **Severity:** LOW (unnecessary I/O, no incorrect behavior)
-- **Issue:** `_get_held_tickers()` reads both portfolio JSON files from disk on every call. Called 3x per triggered cycle (compact summary, T1 summary, T2 summary) = 6 disk reads of portfolio files.
-- **Fix:** Add a per-cycle cache parameter — compute once in `write_agent_summary()` and pass to callees.
-- **Impact:** `reporting.py` only. Saves 4 disk reads per triggered cycle.
+### BUG-41: _cross_asset_signals only checks BTC→ETH
+- **File:** `portfolio/reporting.py:40-57`
+- **Severity:** LOW (missing lead-lag detection for metals)
+- **Issue:** `followers = {"ETH-USD": "BTC-USD"}` is hardcoded. No XAU→XAG or semiconductor
+  lead-lag pairs. These could provide useful cross-asset context for Layer 2.
+- **Fix:** Expand followers dict to include `{"ETH-USD": "BTC-USD", "XAG-USD": "XAU-USD"}`.
+- **Impact:** `reporting.py` only. Adds metals cross-asset context.
 
 ---
 
 ## 2. Architecture Improvements
 
-### ARCH-6: Centralize Bold portfolio loader
-- **Files:** `portfolio/portfolio_mgr.py`, `portfolio/digest.py`, `portfolio/reporting.py`, `portfolio/trigger.py`
-- **Why:** Bold portfolio (`portfolio_state_bold.json`) is read directly via `json.loads()` in 4+ modules without going through a centralized loader like Patient has. No validation, no fallback handling, inconsistent error handling.
-- **Change:** Add `load_bold_state()` and `save_bold_state()` to `portfolio_mgr.py`. Replace all direct reads.
-- **Impact:** All modules that read Bold state. Safer, consistent.
+### ARCH-8: Deduplicate test fixtures across test files
+- **Files:** `tests/test_consensus.py:33`, `tests/test_portfolio.py:43`, `tests/test_signal_pipeline.py:37`, `tests/test_signal_improvements.py:68`
+- **Why:** 4 test files define their own `make_indicators()` fixture instead of using `conftest.py`. `test_portfolio.py:29` also duplicates `make_candles()`, and `test_signal_pipeline.py:59` duplicates `make_ohlcv_df()`. Maintenance burden: changes to conftest fixtures don't propagate.
+- **Change:** Remove duplicate fixtures from test files. Import from conftest.py instead. Where defaults differ (e.g., `close=130.0` vs `close=69000.0`), use the conftest fixture with overrides.
+- **Impact:** 4 test files. Reduces duplication, improves consistency.
 
-### ARCH-7: Deduplicate Telegram Markdown fallback
-- **Files:** `portfolio/telegram_notifications.py`, `portfolio/message_store.py`
-- **Why:** Both implement identical Markdown fallback logic (try Markdown, retry with plain text on 400). DRY violation with divergence risk.
-- **Change:** Extract shared `_send_telegram_message(token, chat_id, text)` to `telegram_notifications.py`. Have `message_store.py` call it instead of duplicating.
-- **Impact:** Both files. Reduces code duplication by ~15 lines.
+### ARCH-9: Fix test_kronos_backtest_feb27.py hardcoded file paths
+- **File:** `tests/test_kronos_backtest_feb27.py`
+- **Why:** 6 writes to hardcoded `data/` paths (lines 337, 367, 395, 423, 451, 512). Breaks under `pytest -n auto` (parallel execution) due to file conflicts between test workers.
+- **Change:** Use `tmp_path` fixture for all JSON writes.
+- **Impact:** 1 test file. Enables safe parallel execution.
 
 ---
 
 ## 3. Test Coverage Improvements
 
-### TEST-1: volume_flow.py dedicated tests
-- **File:** `tests/test_signals_volume_flow.py` (new)
-- **Why:** Only smoke-tested via `test_enhanced_signals.py`. 6 sub-indicators (OBV, VWAP, A/D Line, CMF, MFI, Volume RSI) have no dedicated edge-case tests.
+### TEST-5: equity_curve FIFO round-trip regression tests
+- **File:** `tests/test_equity_curve_fifo.py` (new)
+- **Why:** BUG-37 (fee double-counting) needs regression coverage. Also test: multiple partial sells from one buy batch, zero-share edge case, round-trip metrics accuracy, empty transaction list.
 
-### TEST-2: oscillators.py dedicated tests
-- **File:** `tests/test_signals_oscillators.py` (new)
-- **Why:** Only smoke-tested. 8 sub-indicators (Awesome, Aroon, Vortex, Chande, KST, Schaff, TRIX, Coppock) untested individually.
+### TEST-6: trigger.py edge case tests
+- **File:** `tests/test_trigger_pruning.py` (new)
+- **Why:** BUG-38 (empty-set pruning). Test: empty signals pruning, removed ticker cleanup, sustained count reset after restart.
 
-### TEST-3: smart_money.py dedicated tests
-- **File:** `tests/test_signals_smart_money.py` (new)
-- **Why:** Only smoke-tested. 5 sub-indicators (BOS, CHoCH, FVG, Liquidity Sweeps, Supply/Demand) have complex logic with no direct tests.
-
-### TEST-4: heikin_ashi.py dedicated tests
-- **File:** `tests/test_signals_heikin_ashi.py` (new)
-- **Why:** Only smoke-tested. 7 sub-indicators untested individually. The `_majority_vote` wrapper is also unnecessary.
+### TEST-7: risk_management ATR stop edge case tests
+- **File:** augment existing `tests/test_risk_management.py`
+- **Why:** BUG-39 (negative stop price). Test: extreme ATR (>50%), zero ATR, normal ATR range.
 
 ---
 
 ## 4. Refactoring
 
-### REF-11: Remove heikin_ashi _majority_vote wrapper
-- **File:** `portfolio/signals/heikin_ashi.py`
-- **Why:** `_majority_vote(votes)` is a one-line passthrough to `signal_utils.majority_vote(votes)`. Unnecessary indirection.
-- **Fix:** Replace all `_majority_vote()` calls with direct `majority_vote()` calls. Remove the wrapper.
-- **Impact:** `heikin_ashi.py` only.
+### REF-12: Simplify _cross_asset_signals config
+- **File:** `portfolio/reporting.py:40-57`
+- **Why:** Hardcoded `followers` dict should be a module-level constant, not buried in a function.
+- **Fix:** Extract to `_CROSS_ASSET_PAIRS = {"ETH-USD": "BTC-USD", "XAG-USD": "XAU-USD"}`.
+- **Impact:** `reporting.py` only. Cleaner, easier to extend.
 
 ---
 
 ## 5. Items NOT Planned (Justified)
 
-1. **`econ_dates.py` event time inaccuracy** — CPI/NFP actually release at 8:30 AM ET, not 14:00 UTC. The 30-60min difference doesn't change the 4h proximity window meaningfully. Would need DST-aware logic for marginal benefit.
-2. **`forecast_signal.py` Prophet cache** — `_prophet_cache` is unused and Prophet refits every call. However, Prophet is only called when forecast signal runs (cached 5min), and the forecast signal is gated by config. Low frequency + low impact.
-3. **`vector_memory.py` MD5 collision** — Two journal entries with same timestamp could collide in ChromaDB. Module is disabled by default and rare edge case.
-4. **`agent.log` rotation** — No size limit. Adding RotatingFileHandler would require changes to agent_invocation.py subprocess stdout/stderr redirection. Low priority since logs are rarely inspected manually.
-5. **`load_jsonl()` full file read** — Loads entire file into memory before applying limit. For signal_log.jsonl (growing unbounded), this is a concern. But the primary read path is now SQLite. JSONL reads are fallback only.
-6. **`reflection.py` PnL mismatch vs equity_curve.py** — Both compute PnL differently (avg-cost vs FIFO). Unifying on FIFO is the right call but touches two modules with different consumers. Document for manual review.
+1. **Dashboard accuracy endpoint caching** — Underlying `accuracy_stats` functions already cache (1h TTL). Adding endpoint-level caching would add complexity for marginal benefit.
+2. **Sentiment I/O on every update** — Hysteresis in `_set_prev_sentiment()` prevents excessive writes. Each cycle only writes if sentiment actually changes (not on every call).
+3. **REGIME_WEIGHTS missing "breakout"/"capitulation"** — NOT a bug. `detect_regime()` only returns 4 values (high-vol, trending-up, trending-down, ranging). "breakout" and "capitulation" are Layer 2 journal labels, not Layer 1 regime values.
+4. **Untested utility modules** (log_rotation, backup, ml_trainer, migrate_signal_log, etc.) — These are scripts/utilities, not core trading logic. Testing them has low ROI.
+5. **FX hardcoded fallback rate 10.85** — Only used when API is down AND no cache exists (cold start scenario). Rate drift (10.85 vs ~10.3) causes ~5% error, acceptable for the rare case. Not worth adding config complexity.
 
 ---
 
 ## 6. Dependency/Ordering — Implementation Batches
 
-### Batch 1: Bug fixes (5 files, BUG-30 through BUG-35)
-**Files:** `dashboard/app.py`, `portfolio/digest.py`, `portfolio/http_retry.py`, `portfolio/message_store.py`, `portfolio/journal_index.py`, `portfolio/alpha_vantage.py`
-**Changes:** BUG-30, BUG-31, BUG-32, BUG-33, BUG-34, BUG-35
-**Tests needed:** Verify existing tests pass. Add regression tests for BUG-31 (digest key), BUG-32 (http_retry None).
+### Batch 1: Bug fixes (5 files, BUG-37 through BUG-41) — DONE
+**Files:** `portfolio/equity_curve.py`, `portfolio/trigger.py`, `portfolio/risk_management.py`, `portfolio/signal_engine.py`, `portfolio/reporting.py`
+**Changes:** BUG-37, BUG-38, BUG-39, BUG-40, BUG-41
+**Tests:** TEST-5 (38 FIFO regression), TEST-6 (11 trigger pruning), TEST-7 (7 ATR stops). All 56 pass.
+**Commit:** `ba2d9ad` — fix: 5 bugs + 56 regression tests
 
-### Batch 2: Architecture + reporting optimization (3 files, ARCH-6, ARCH-7, BUG-36)
-**Files:** `portfolio/portfolio_mgr.py`, `portfolio/reporting.py`, `portfolio/telegram_notifications.py`, `portfolio/message_store.py`
-**Changes:** ARCH-6 (Bold loader), ARCH-7 (Telegram dedup), BUG-36 (held tickers cache)
-**Tests needed:** Verify portfolio_mgr tests pass. Add tests for bold state load/save.
+### Batch 2: Test infrastructure (ARCH-8, ARCH-9) — DONE
+**Files:** `tests/test_consensus.py`, `tests/test_portfolio.py`, `tests/test_signal_pipeline.py`, `tests/test_signal_improvements.py`, `tests/test_kronos_backtest_feb27.py`, `pyproject.toml`
+**Changes:** ARCH-8 (deduplicate fixtures — 116 lines removed, 45 added), ARCH-9 (6 hardcoded paths → tmp_path)
+**Tests:** All affected tests pass. 1 pre-existing failure in test_portfolio.py (trigger cooldown) unchanged.
+**Commit:** `8fd7b02` — refactor: deduplicate test fixtures + fix hardcoded paths
 
-### Batch 3: Signal module tests (4 new test files)
-**Files:** `tests/test_signals_volume_flow.py`, `tests/test_signals_oscillators.py`, `tests/test_signals_smart_money.py`, `tests/test_signals_heikin_ashi.py`
-**Changes:** TEST-1 through TEST-4
-**Dependencies:** None — purely additive.
-
-### Batch 4: Refactoring (1 file, REF-11)
-**Files:** `portfolio/signals/heikin_ashi.py`
-**Changes:** REF-11
-**Dependencies:** Batch 3 (heikin_ashi tests must exist first).
+### Batch 3: Refactoring (REF-12) — DONE (merged into Batch 1)
+**Files:** `portfolio/reporting.py`
+**Changes:** REF-12 (cross-asset constant extracted to `_CROSS_ASSET_PAIRS` module-level dict)
+**Note:** Implemented alongside BUG-41 since they modify the same code.

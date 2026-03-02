@@ -575,3 +575,127 @@ class TestTransactionCostAnalysis:
         )
         result = transaction_cost_analysis(pf)
         assert "exact" in result["pnl_note"]
+
+
+# ===================================================================
+# BUG-39 regression: compute_stop_levels ATR edge cases
+# ===================================================================
+
+class TestComputeStopLevelsAtrEdgeCases:
+    """Regression tests for BUG-39: extreme ATR values in compute_stop_levels.
+
+    The 2x ATR stop formula is: stop = entry * (1 - 2 * atr_pct / 100).
+    When atr_pct >= 50%, stop becomes zero or negative.  The fix floors the
+    stop price at 1% of entry so it never goes negative.
+    """
+
+    def test_extreme_atr_over_50_pct_stop_floored(self):
+        """BUG-39: ATR > 50% should floor stop at 1% of entry, not go negative."""
+        holdings = {
+            "BTC-USD": {"shares": 1, "avg_cost_usd": 60_000},
+        }
+        summary = _make_summary(signals={
+            "BTC-USD": {"price_usd": 55_000, "atr_pct": 75.0},
+        })
+
+        result = compute_stop_levels(holdings, summary)
+        r = result["BTC-USD"]
+        # Without the floor: stop = 60000 * (1 - 2*75/100) = 60000 * -0.5 = -30000
+        # With floor: stop = 60000 * 0.01 = 600
+        assert r["stop_price_usd"] == 600.0
+        assert r["stop_price_usd"] > 0, "Stop price must always be positive"
+
+    def test_normal_atr_3_pct(self):
+        """Normal ATR (3%) should compute standard 2x ATR stop."""
+        holdings = {
+            "ETH-USD": {"shares": 10, "avg_cost_usd": 2000},
+        }
+        summary = _make_summary(signals={
+            "ETH-USD": {"price_usd": 2100, "atr_pct": 3.0},
+        })
+
+        result = compute_stop_levels(holdings, summary)
+        r = result["ETH-USD"]
+        # stop = 2000 * (1 - 2*3/100) = 2000 * 0.94 = 1880
+        assert r["stop_price_usd"] == 1880.0
+        assert r["triggered"] is False  # 2100 > 1880
+        assert r["pnl_pct"] == 5.0  # (2100-2000)/2000 * 100
+
+    def test_zero_atr_stop_equals_entry(self):
+        """ATR = 0 means stop equals entry price exactly."""
+        holdings = {
+            "XAG-USD": {"shares": 100, "avg_cost_usd": 30.0},
+        }
+        summary = _make_summary(signals={
+            "XAG-USD": {"price_usd": 31.0, "atr_pct": 0.0},
+        })
+
+        result = compute_stop_levels(holdings, summary)
+        r = result["XAG-USD"]
+        # stop = 30 * (1 - 0) = 30.0
+        assert r["stop_price_usd"] == 30.0
+        assert r["triggered"] is False  # 31 > 30
+
+    def test_ticker_not_in_signals_market_closed(self):
+        """Ticker missing from signals (market closed) returns note, no stop."""
+        holdings = {
+            "NVDA": {"shares": 50, "avg_cost_usd": 185.0},
+        }
+        summary = _make_summary(signals={})  # empty signals — market closed
+
+        result = compute_stop_levels(holdings, summary)
+        r = result["NVDA"]
+        assert r["current_price_usd"] is None
+        assert r["stop_price_usd"] is None
+        assert r["atr_pct"] is None
+        assert r["triggered"] is False
+        assert "note" in r
+        assert "No live data" in r["note"]
+
+    def test_atr_exactly_50_pct_boundary(self):
+        """ATR exactly at 50% produces stop = 0, which should be floored to 1%."""
+        holdings = {
+            "BTC-USD": {"shares": 0.5, "avg_cost_usd": 40_000},
+        }
+        summary = _make_summary(signals={
+            "BTC-USD": {"price_usd": 35_000, "atr_pct": 50.0},
+        })
+
+        result = compute_stop_levels(holdings, summary)
+        r = result["BTC-USD"]
+        # Without floor: stop = 40000 * (1 - 2*50/100) = 40000 * 0 = 0
+        # 0 <= 0 triggers the floor: stop = 40000 * 0.01 = 400
+        assert r["stop_price_usd"] == 400.0
+        assert r["stop_price_usd"] > 0, "Stop at 50% boundary must be floored positive"
+
+    def test_extreme_atr_100_pct(self):
+        """ATR = 100% (theoretical max absurdity) should still floor correctly."""
+        holdings = {
+            "ETH-USD": {"shares": 5, "avg_cost_usd": 2000},
+        }
+        summary = _make_summary(signals={
+            "ETH-USD": {"price_usd": 1500, "atr_pct": 100.0},
+        })
+
+        result = compute_stop_levels(holdings, summary)
+        r = result["ETH-USD"]
+        # Without floor: stop = 2000 * (1 - 2*100/100) = 2000 * -1 = -2000
+        # Floor: stop = 2000 * 0.01 = 20
+        assert r["stop_price_usd"] == 20.0
+        assert r["stop_price_usd"] > 0
+
+    def test_atr_just_below_50_pct_no_floor(self):
+        """ATR at 49% should NOT trigger the floor — stop is barely positive."""
+        holdings = {
+            "XAU-USD": {"shares": 2, "avg_cost_usd": 2000},
+        }
+        summary = _make_summary(signals={
+            "XAU-USD": {"price_usd": 2100, "atr_pct": 49.0},
+        })
+
+        result = compute_stop_levels(holdings, summary)
+        r = result["XAU-USD"]
+        # stop = 2000 * (1 - 2*49/100) = 2000 * 0.02 = 40.0
+        # 40 > 0, so no floor applied
+        assert r["stop_price_usd"] == 40.0
+        assert r["triggered"] is False  # 2100 > 40
