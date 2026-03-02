@@ -49,6 +49,16 @@ except ImportError as e:
     print(f"[WARN] metals_risk import failed: {e}", flush=True)
     RISK_AVAILABLE = False
 
+try:
+    from metals_signal_tracker import (
+        log_snapshot, backfill_outcomes, get_accuracy_report,
+        get_accuracy_summary, get_accuracy_for_context, get_snapshot_count,
+    )
+    TRACKER_AVAILABLE = True
+except ImportError as e:
+    print(f"[WARN] metals_signal_tracker import failed: {e}", flush=True)
+    TRACKER_AVAILABLE = False
+
 # --- CONFIG ---
 CHECK_INTERVAL = 90           # seconds between price checks
 TRIGGER_PRICE_MOVE = 2.0      # % move from last invocation to trigger
@@ -1190,6 +1200,13 @@ def write_context(prices, trigger_reason, tier=2):
         except Exception as e:
             ctx["risk"] = {"error": str(e)}
 
+    # Signal accuracy tracking
+    if TRACKER_AVAILABLE:
+        try:
+            ctx["signal_accuracy"] = get_accuracy_for_context()
+        except Exception as e:
+            ctx["signal_accuracy"] = {"error": str(e)}
+
     total_val = 0
     total_inv = 0
 
@@ -1614,6 +1631,15 @@ def main():
         else:
             log("Risk module: NOT available (import failed)")
 
+        if TRACKER_AVAILABLE:
+            snap_count = get_snapshot_count()
+            log(f"Signal tracker: active ({snap_count} existing snapshots)")
+            if snap_count > 0:
+                acc_summary = get_accuracy_summary()
+                log(f"  Accuracy: {acc_summary}")
+        else:
+            log("Signal tracker: NOT available (import failed)")
+
         # Build dynamic positions summary
         pos_parts = []
         for key, pos in POSITIONS.items():
@@ -1625,6 +1651,7 @@ def main():
 Tiered: T1=haiku T2=sonnet T3=opus
 LLM: {"Ministral+Chronos (60s)" if LLM_AVAILABLE else "DISABLED"}
 Risk: {"MC+Guards+Drawdown+DailyRanges" if RISK_AVAILABLE else "DISABLED"}
+Tracker: {"ON (" + str(get_snapshot_count()) + " snaps)" if TRACKER_AVAILABLE else "OFF"}
 Spike: {"P" + str(SPIKE_PERCENTILE) + " " + str(SPIKE_PARTIAL_PCT) + "% @15:15-16:30" if SPIKE_ENABLED else "OFF"}
 Stops: {"3x cascaded + trailing + momentum" if STOP_ORDER_ENABLED else "L3 only"}
 Positions: {pos_summary}""")
@@ -1873,7 +1900,14 @@ Positions: {pos_summary}""")
                             risk_tag = f" DD:{dd.get('current_pnl_pct', 0):+.1f}%"
                         except Exception:
                             pass
-                    log(f"#{check_count} [{cet}] {' | '.join(parts)}{llm_tag}{risk_tag}" +
+                    # Add signal accuracy tag (every 12th check to avoid spam)
+                    acc_tag = ""
+                    if TRACKER_AVAILABLE and check_count % 12 == 0:
+                        try:
+                            acc_tag = f" ACC:[{get_accuracy_summary()}]"
+                        except Exception:
+                            pass
+                    log(f"#{check_count} [{cet}] {' | '.join(parts)}{llm_tag}{risk_tag}{acc_tag}" +
                         (f" [TRIGGER: {reasons[0]}]" if triggered else ""))
 
                 # Invoke Claude if triggered
@@ -1911,6 +1945,33 @@ Positions: {pos_summary}""")
                                 log(f"Last trade: {last_trade.get('action','')} {last_trade.get('name','')}")
                         except (json.JSONDecodeError, IOError) as e:
                             log(f"Trade log read error: {e}")
+
+                # --- SIGNAL TRACKER: log snapshot + backfill accuracy ---
+                if TRACKER_AVAILABLE:
+                    try:
+                        llm_sigs = get_llm_signals() if LLM_AVAILABLE else {}
+                        log_snapshot(
+                            check_count, prices, POSITIONS,
+                            last_signal_data, llm_sigs,
+                            triggered, reasons if triggered else [],
+                        )
+                    except Exception as e:
+                        log(f"Signal tracker log error: {e}")
+
+                    # Backfill outcomes every 10th check
+                    if check_count % 10 == 0:
+                        try:
+                            und_prices = {}
+                            for key, p in prices.items():
+                                if isinstance(p, dict) and p.get("underlying"):
+                                    if "silver" in key.lower():
+                                        und_prices["XAG-USD"] = p["underlying"]
+                                    elif "gold" in key.lower():
+                                        und_prices["XAU-USD"] = p["underlying"]
+                            if und_prices:
+                                backfill_outcomes(und_prices)
+                        except Exception as e:
+                            log(f"Signal tracker backfill error: {e}")
 
                 time.sleep(CHECK_INTERVAL)
 

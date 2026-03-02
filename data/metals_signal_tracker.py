@@ -1,0 +1,469 @@
+"""
+Metals Signal Tracker — per-loop accuracy logging.
+
+Logs a full signal snapshot every loop iteration to data/metals_signal_log.jsonl.
+Backfills outcomes at 1h/3h horizons to track accuracy of each signal source.
+Provides rolling accuracy stats for the loop status display and Claude context.
+
+Usage from metals_loop.py:
+    from metals_signal_tracker import log_snapshot, backfill_outcomes, get_accuracy_report, get_accuracy_summary
+
+    # Every loop iteration:
+    log_snapshot(check_count, prices, positions, signal_data, llm_signals, triggered, reasons)
+
+    # Every 10th check:
+    backfill_outcomes(current_underlying_prices)
+
+    # For status display:
+    summary = get_accuracy_summary()  # "main_XAG:72%(18) chrono_XAG_1h:55%(11)"
+"""
+
+import json
+import os
+import time
+import datetime
+import threading
+
+SIGNAL_LOG = "data/metals_signal_log.jsonl"
+ACCURACY_CACHE_FILE = "data/metals_signal_accuracy.json"
+
+# Horizons for outcome checking (seconds)
+HORIZONS = {
+    "1h": 3600,
+    "3h": 10800,
+}
+
+# Rolling window for accuracy calculation
+ACCURACY_WINDOW = 200
+
+# Max entries to scan during backfill (keeps I/O bounded)
+BACKFILL_SCAN_LIMIT = 400
+
+# Thread safety
+_lock = threading.Lock()
+_accuracy_cache = {}  # last computed accuracy stats
+
+
+def log_snapshot(check_count, prices, positions, signal_data, llm_signals,
+                 triggered, trigger_reasons, llm_accuracy=None):
+    """Log a full signal snapshot for this loop iteration.
+
+    Args:
+        check_count: current loop check number
+        prices: {position_key: {bid, ask, underlying, ...}}
+        positions: {position_key: {entry, stop, active, units, ...}}
+        signal_data: dict from read_signal_data() — main loop signals
+        llm_signals: dict from get_llm_signals() — Chronos/Ministral
+        triggered: bool — whether triggers fired this check
+        trigger_reasons: list of trigger reason strings
+        llm_accuracy: dict from get_llm_accuracy() — optional
+    """
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    entry = {
+        "ts": now.isoformat(),
+        "check": check_count,
+        "prices": {},
+        "signals": {},
+        "llm": {},
+        "positions": {},
+        "triggered": triggered,
+        "trigger_reasons": trigger_reasons[:5] if trigger_reasons else [],
+    }
+
+    # Prices: warrant bids + underlying USD
+    for key, p in (prices or {}).items():
+        if isinstance(p, dict):
+            entry["prices"][key] = round(p.get("bid", 0), 4)
+            und = p.get("underlying")
+            if und and und > 0:
+                entry["prices"][f"{key}_und"] = round(und, 4)
+                # Map to standard ticker names for backfill matching
+                if "silver" in key.lower():
+                    entry["prices"]["XAG-USD"] = round(und, 4)
+                elif "gold" in key.lower():
+                    entry["prices"]["XAU-USD"] = round(und, 4)
+
+    # Main loop signals (from agent_summary.json)
+    if signal_data:
+        for ticker in ["XAG-USD", "XAU-USD"]:
+            if ticker in signal_data:
+                s = signal_data[ticker]
+                entry["signals"][ticker] = {
+                    "action": s.get("action", "?"),
+                    "confidence": round(s.get("confidence", 0), 3),
+                    "w_confidence": round(s.get("weighted_confidence", 0), 3),
+                    "buy_count": s.get("buy_count", 0),
+                    "sell_count": s.get("sell_count", 0),
+                    "voters": s.get("voters", 0),
+                    "rsi": s.get("rsi"),
+                    "regime": s.get("regime", "?"),
+                }
+
+    # LLM signals (Chronos/Ministral)
+    if llm_signals:
+        for ticker, data in llm_signals.items():
+            llm_entry = {}
+            consensus = data.get("consensus", {})
+            if consensus:
+                llm_entry["consensus_dir"] = consensus.get("direction", "flat")
+                llm_entry["consensus_conf"] = round(consensus.get("confidence", 0), 3)
+                llm_entry["consensus_action"] = consensus.get("weighted_action", "HOLD")
+
+            # Individual model predictions
+            if data.get("ministral"):
+                llm_entry["ministral"] = data["ministral"].get("action", "HOLD")
+            for h in ["1h", "3h"]:
+                key = f"chronos_{h}"
+                if data.get(key):
+                    llm_entry[f"chronos_{h}"] = data[key].get("direction", "flat")
+                    llm_entry[f"chronos_{h}_conf"] = round(data[key].get("confidence", 0), 3)
+
+            if llm_entry:
+                entry["llm"][ticker] = llm_entry
+
+    # Position state
+    for key, pos in (positions or {}).items():
+        p = (prices or {}).get(key, {})
+        bid = p.get("bid", 0) if isinstance(p, dict) else 0
+        pos_entry = {
+            "active": pos.get("active", False),
+        }
+        if pos.get("active") and bid > 0:
+            pos_entry["pnl_pct"] = round(((bid - pos["entry"]) / pos["entry"]) * 100, 2)
+            dist_stop = ((bid - pos["stop"]) / bid * 100) if bid > 0 else 999
+            pos_entry["dist_stop_pct"] = round(dist_stop, 2)
+            pos_entry["bid"] = round(bid, 4)
+        entry["positions"][key] = pos_entry
+
+    # Write to log
+    try:
+        with open(SIGNAL_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"[TRACKER] log_snapshot error: {e}", flush=True)
+
+
+def backfill_outcomes(current_underlying_prices):
+    """Check past snapshots against current prices at 1h/3h horizons.
+
+    For each unresolved snapshot, if enough time has passed:
+    - Compare main-loop signal action vs actual price direction
+    - Compare LLM consensus direction vs actual price direction
+    - Mark as resolved with outcome
+
+    Args:
+        current_underlying_prices: {"XAG-USD": float, "XAU-USD": float}
+    """
+    if not current_underlying_prices:
+        return
+
+    now = time.time()
+
+    try:
+        if not os.path.exists(SIGNAL_LOG):
+            return
+
+        # Read recent entries (capped for performance)
+        entries = []
+        with open(SIGNAL_LOG, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        # Only scan last BACKFILL_SCAN_LIMIT entries
+        start_idx = max(0, len(lines) - BACKFILL_SCAN_LIMIT)
+        for i, line in enumerate(lines):
+            if i < start_idx:
+                entries.append(None)  # placeholder to maintain indices
+                continue
+            try:
+                entries.append(json.loads(line.strip()))
+            except json.JSONDecodeError:
+                entries.append(None)
+
+        updated = False
+
+        for i in range(start_idx, len(entries)):
+            entry = entries[i]
+            if entry is None:
+                continue
+
+            # Parse timestamp
+            try:
+                ts = datetime.datetime.fromisoformat(entry["ts"])
+                epoch = ts.timestamp()
+            except (KeyError, ValueError):
+                continue
+
+            # Check each horizon
+            for h_key, h_secs in HORIZONS.items():
+                outcome_key = f"outcomes_{h_key}"
+
+                # Skip if already resolved
+                if entry.get(outcome_key) is not None:
+                    continue
+
+                # Not enough time elapsed yet
+                elapsed = now - epoch
+                if elapsed < h_secs * 0.9:  # 10% tolerance
+                    continue
+
+                # Resolve outcomes
+                outcomes = {}
+
+                # Get prices at prediction time
+                entry_prices = entry.get("prices", {})
+
+                for ticker in ["XAG-USD", "XAU-USD"]:
+                    current_price = current_underlying_prices.get(ticker, 0)
+                    if current_price <= 0:
+                        continue
+
+                    # Find the underlying price at snapshot time
+                    # Try direct ticker key, then position-derived keys
+                    pred_price = entry_prices.get(ticker, 0)
+                    if pred_price <= 0:
+                        # Try to get from position underlying
+                        for pk, pv in entry_prices.items():
+                            if pk.endswith("_und") and ticker.lower().startswith("xag") and "silver" in pk:
+                                pred_price = pv
+                                break
+                            elif pk.endswith("_und") and ticker.lower().startswith("xau") and "gold" in pk:
+                                pred_price = pv
+                                break
+
+                    if pred_price <= 0:
+                        continue
+
+                    actual_dir = "up" if current_price > pred_price else "down"
+                    move_pct = ((current_price - pred_price) / pred_price) * 100
+
+                    outcome = {
+                        "price_then": round(pred_price, 4),
+                        "price_now": round(current_price, 4),
+                        "actual_dir": actual_dir,
+                        "move_pct": round(move_pct, 3),
+                    }
+
+                    # Check main signal accuracy
+                    signal_info = entry.get("signals", {}).get(ticker, {})
+                    main_action = signal_info.get("action", "?")
+                    if main_action in ("BUY", "SELL"):
+                        predicted_dir = "up" if main_action == "BUY" else "down"
+                        outcome["main_predicted"] = main_action
+                        outcome["main_correct"] = (predicted_dir == actual_dir)
+
+                    # Check LLM consensus accuracy
+                    llm_info = entry.get("llm", {}).get(ticker, {})
+                    llm_dir = llm_info.get("consensus_dir", "flat")
+                    if llm_dir in ("up", "down"):
+                        outcome["llm_predicted"] = llm_dir
+                        outcome["llm_correct"] = (llm_dir == actual_dir)
+
+                    # Check individual LLM models
+                    for model in ["chronos_1h", "chronos_3h"]:
+                        m_dir = llm_info.get(model, "flat")
+                        if m_dir in ("up", "down"):
+                            outcome[f"{model}_predicted"] = m_dir
+                            outcome[f"{model}_correct"] = (m_dir == actual_dir)
+
+                    ministral_action = llm_info.get("ministral", "HOLD")
+                    if ministral_action in ("BUY", "SELL"):
+                        m_dir = "up" if ministral_action == "BUY" else "down"
+                        outcome["ministral_predicted"] = m_dir
+                        outcome["ministral_correct"] = (m_dir == actual_dir)
+
+                    outcomes[ticker] = outcome
+
+                if outcomes:
+                    entry[outcome_key] = outcomes
+                    updated = True
+
+        # Write back if anything changed
+        if updated:
+            with open(SIGNAL_LOG, "w", encoding="utf-8") as f:
+                for i, entry in enumerate(entries):
+                    if entry is None:
+                        # Write back original line
+                        f.write(lines[i])
+                    else:
+                        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+        # Recompute accuracy stats
+        _recompute_accuracy(entries, start_idx)
+
+    except Exception as e:
+        print(f"[TRACKER] backfill error: {e}", flush=True)
+
+
+def _recompute_accuracy(entries, start_idx):
+    """Recompute accuracy stats from resolved entries."""
+    global _accuracy_cache
+
+    # Collect all resolved outcomes
+    stats = {}  # {signal_key: {correct: int, total: int}}
+
+    resolved_count = 0
+    for i in range(start_idx, len(entries) if entries else 0):
+        entry = entries[i] if entries else None
+        if entry is None:
+            continue
+
+        for h_key in HORIZONS:
+            outcomes = entry.get(f"outcomes_{h_key}")
+            if not outcomes:
+                continue
+
+            for ticker, outcome in outcomes.items():
+                resolved_count += 1
+                short_ticker = ticker.split("-")[0]  # XAG, XAU
+
+                # Main signal accuracy
+                if "main_correct" in outcome:
+                    key = f"main_{short_ticker}_{h_key}"
+                    if key not in stats:
+                        stats[key] = {"correct": 0, "total": 0}
+                    stats[key]["total"] += 1
+                    if outcome["main_correct"]:
+                        stats[key]["correct"] += 1
+
+                # LLM consensus accuracy
+                if "llm_correct" in outcome:
+                    key = f"llm_{short_ticker}_{h_key}"
+                    if key not in stats:
+                        stats[key] = {"correct": 0, "total": 0}
+                    stats[key]["total"] += 1
+                    if outcome["llm_correct"]:
+                        stats[key]["correct"] += 1
+
+                # Individual models
+                for model in ["chronos_1h", "chronos_3h", "ministral"]:
+                    correct_key = f"{model}_correct"
+                    if correct_key in outcome:
+                        key = f"{model}_{short_ticker}_{h_key}"
+                        if key not in stats:
+                            stats[key] = {"correct": 0, "total": 0}
+                        stats[key]["total"] += 1
+                        if outcome[correct_key]:
+                            stats[key]["correct"] += 1
+
+    # Compute percentages
+    result = {}
+    for key, s in stats.items():
+        total = min(s["total"], ACCURACY_WINDOW)
+        if total > 0:
+            result[key] = {
+                "correct": s["correct"],
+                "total": s["total"],
+                "accuracy": round(s["correct"] / s["total"], 3),
+            }
+
+    with _lock:
+        _accuracy_cache = result
+
+    # Persist to disk for cross-session continuity
+    try:
+        with open(ACCURACY_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump({
+                "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "resolved_snapshots": resolved_count,
+                "stats": result,
+            }, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def get_accuracy_report():
+    """Get full accuracy report dict.
+
+    Returns:
+        {signal_key: {correct, total, accuracy}} e.g.
+        {"main_XAG_1h": {"correct": 13, "total": 18, "accuracy": 0.722}, ...}
+    """
+    with _lock:
+        if _accuracy_cache:
+            return dict(_accuracy_cache)
+
+    # Try loading from disk
+    try:
+        if os.path.exists(ACCURACY_CACHE_FILE):
+            with open(ACCURACY_CACHE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("stats", {})
+    except Exception:
+        pass
+
+    return {}
+
+
+def get_accuracy_summary():
+    """Get a one-line summary string for status display.
+
+    Returns e.g.: "main_XAG_1h:72%(18) chrono_1h_XAG_1h:55%(11)"
+    """
+    report = get_accuracy_report()
+    if not report:
+        return "no data"
+
+    parts = []
+    # Sort by total samples descending
+    for key in sorted(report.keys(), key=lambda k: -report[k]["total"]):
+        s = report[key]
+        if s["total"] >= 5:  # only show meaningful samples
+            pct = int(s["accuracy"] * 100)
+            parts.append(f"{key}:{pct}%({s['total']})")
+
+    if not parts:
+        return "< 5 samples"
+
+    return " | ".join(parts[:6])  # top 6 to keep it readable
+
+
+def get_accuracy_for_context():
+    """Get accuracy data formatted for metals_context.json (Claude consumption).
+
+    Returns dict suitable for inclusion in context file.
+    """
+    report = get_accuracy_report()
+    if not report:
+        return {"status": "no_data", "stats": {}}
+
+    # Group by signal source
+    by_source = {}
+    for key, stats in report.items():
+        parts = key.rsplit("_", 1)  # split off horizon
+        if len(parts) == 2:
+            source = parts[0]
+            horizon = parts[1]
+        else:
+            source = key
+            horizon = "?"
+
+        if source not in by_source:
+            by_source[source] = {}
+        by_source[source][horizon] = {
+            "accuracy": stats["accuracy"],
+            "samples": stats["total"],
+        }
+
+    # Find best/worst
+    best_key = max(report.keys(), key=lambda k: report[k]["accuracy"]) if report else None
+    worst_key = min(report.keys(), key=lambda k: report[k]["accuracy"]) if report else None
+
+    return {
+        "status": "active",
+        "total_signals_tracked": sum(s["total"] for s in report.values()),
+        "by_source": by_source,
+        "best": {"signal": best_key, **report[best_key]} if best_key else None,
+        "worst": {"signal": worst_key, **report[worst_key]} if worst_key else None,
+    }
+
+
+def get_snapshot_count():
+    """Get total number of snapshots logged."""
+    try:
+        if not os.path.exists(SIGNAL_LOG):
+            return 0
+        with open(SIGNAL_LOG, "r", encoding="utf-8") as f:
+            return sum(1 for _ in f)
+    except Exception:
+        return 0
