@@ -1,8 +1,9 @@
 """
 Local LLM inference for metals trading loop.
 
-Runs Ministral-8B (metals-adapted prompt) and Chronos (time-series forecast)
-every 5 minutes in a background thread. Tracks prediction accuracy at 1h and 3h
+Runs Ministral-8B (metals-adapted prompt) every 5 minutes and Chronos (time-series
+forecast) every 60 seconds in a background thread. Separate timers let Chronos
+build accuracy samples ~5x faster. Tracks prediction accuracy at 1h and 3h
 horizons. Weights model signals by their proven accuracy.
 
 Usage from metals_loop.py:
@@ -28,7 +29,8 @@ os.chdir(r"Q:/finance-analyzer")
 import requests
 
 # --- CONFIG ---
-LLM_INTERVAL = 300       # run models every 5 minutes
+LLM_INTERVAL = 300       # run Ministral every 5 minutes
+CHRONOS_INTERVAL = 60    # run Chronos every 60 seconds (builds samples ~5x faster)
 ACCURACY_WINDOW = 50     # rolling window for accuracy calculation
 PREDICTION_LOG = "data/metals_llm_predictions.jsonl"
 
@@ -395,57 +397,67 @@ def _build_signal_context(signal_data, ticker):
     return ctx
 
 
-def _run_inference_cycle(signal_data, underlying_prices):
+def _run_inference_cycle(signal_data, underlying_prices, chronos_only=False):
     """Run one complete inference cycle for all metals tickers.
 
     Args:
         signal_data: dict from read_signal_data() in metals_loop
         underlying_prices: {"XAG-USD": float, "XAU-USD": float}
+        chronos_only: if True, skip Ministral and only run Chronos (faster cycle)
     """
     global _llm_signals, _llm_accuracy, _llm_last_run
 
-    results = {}
+    # Preserve existing signals in chronos_only mode (keep Ministral data)
+    with _lock:
+        results = dict(_llm_signals) if chronos_only else {}
 
     for ticker, binance_sym in METALS_SYMBOLS.items():
         current_price = underlying_prices.get(ticker, 0)
         if current_price <= 0:
             continue
 
-        ticker_result = {
-            "ticker": ticker,
-            "price": current_price,
-            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "ministral": None,
-            "chronos_1h": None,
-            "chronos_3h": None,
-            "consensus": {"direction": "flat", "confidence": 0, "weighted_action": "HOLD"},
-        }
+        if chronos_only and ticker in results:
+            # Preserve existing Ministral data, just update price/timestamp
+            ticker_result = results[ticker]
+            ticker_result["price"] = current_price
+            ticker_result["ts"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        else:
+            ticker_result = {
+                "ticker": ticker,
+                "price": current_price,
+                "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "ministral": None,
+                "chronos_1h": None,
+                "chronos_3h": None,
+                "consensus": {"direction": "flat", "confidence": 0, "weighted_action": "HOLD"},
+            }
 
-        # --- Ministral inference ---
-        try:
-            ctx = _build_signal_context(signal_data, ticker)
-            ctx["price_usd"] = current_price
-            # Add 24h change from klines if we can
-            ministral_result = _run_ministral_metals(ctx)
-            if ministral_result:
-                action = ministral_result["action"]
-                direction = "up" if action == "BUY" else ("down" if action == "SELL" else "flat")
-                ticker_result["ministral"] = {
-                    "action": action,
-                    "direction": direction,
-                    "reasoning": ministral_result.get("reasoning", ""),
-                    "confidence": ministral_result.get("confidence", 0.5),
-                }
-                if direction != "flat":
-                    _log_prediction("ministral", ticker, direction,
-                                    ministral_result.get("confidence", 0.5),
-                                    current_price, "1h")
-                    _log_prediction("ministral", ticker, direction,
-                                    ministral_result.get("confidence", 0.5),
-                                    current_price, "3h")
-                _log(f"Ministral {ticker}: {action} — {ministral_result.get('reasoning', '')[:60]}")
-        except Exception as e:
-            _log(f"Ministral {ticker} failed: {e}")
+        # --- Ministral inference (skip in chronos_only mode) ---
+        if not chronos_only:
+            try:
+                ctx = _build_signal_context(signal_data, ticker)
+                ctx["price_usd"] = current_price
+                # Add 24h change from klines if we can
+                ministral_result = _run_ministral_metals(ctx)
+                if ministral_result:
+                    action = ministral_result["action"]
+                    direction = "up" if action == "BUY" else ("down" if action == "SELL" else "flat")
+                    ticker_result["ministral"] = {
+                        "action": action,
+                        "direction": direction,
+                        "reasoning": ministral_result.get("reasoning", ""),
+                        "confidence": ministral_result.get("confidence", 0.5),
+                    }
+                    if direction != "flat":
+                        _log_prediction("ministral", ticker, direction,
+                                        ministral_result.get("confidence", 0.5),
+                                        current_price, "1h")
+                        _log_prediction("ministral", ticker, direction,
+                                        ministral_result.get("confidence", 0.5),
+                                        current_price, "3h")
+                    _log(f"Ministral {ticker}: {action} — {ministral_result.get('reasoning', '')[:60]}")
+            except Exception as e:
+                _log(f"Ministral {ticker} failed: {e}")
 
         # --- Chronos inference ---
         try:
@@ -552,29 +564,42 @@ def _run_inference_cycle(signal_data, underlying_prices):
 
 
 def _llm_worker(signal_data_fn, underlying_prices_fn):
-    """Background worker that runs inference on a schedule.
+    """Background worker that runs inference on separate schedules.
+
+    Ministral runs every LLM_INTERVAL (5 min) — heavier GPU load, needs signal context.
+    Chronos runs every CHRONOS_INTERVAL (60s) — fast subprocess, builds samples ~5x faster.
 
     Args:
         signal_data_fn: callable that returns signal data dict
         underlying_prices_fn: callable that returns {"XAG-USD": float, "XAU-USD": float}
     """
     _log("LLM worker started")
+    last_ministral = 0
+    last_chronos = 0
+
     while not _llm_stop.is_set():
         try:
-            signal_data = signal_data_fn()
+            now = time.time()
             prices = underlying_prices_fn()
-            if prices:
-                _run_inference_cycle(signal_data, prices)
-            else:
+
+            if not prices:
                 _log("No underlying prices available, skipping")
+            elif now - last_ministral >= LLM_INTERVAL:
+                # Full cycle: Ministral + Chronos
+                signal_data = signal_data_fn()
+                _run_inference_cycle(signal_data, prices, chronos_only=False)
+                last_ministral = time.time()
+                last_chronos = time.time()  # Chronos ran too
+            elif now - last_chronos >= CHRONOS_INTERVAL:
+                # Chronos-only fast cycle
+                _run_inference_cycle({}, prices, chronos_only=True)
+                last_chronos = time.time()
         except Exception as e:
             _log(f"LLM worker error: {e}")
             traceback.print_exc()
 
-        # Wait for next cycle (check stop event every 10s)
-        for _ in range(LLM_INTERVAL // 10):
-            if _llm_stop.is_set():
-                break
+        # Poll every 10s (responsive to stop events, short enough for 60s Chronos interval)
+        if not _llm_stop.is_set():
             time.sleep(10)
 
     _log("LLM worker stopped")
@@ -600,7 +625,7 @@ def start_llm_thread(signal_data_fn, underlying_prices_fn):
         name="metals-llm-worker",
     )
     _llm_thread.start()
-    _log("LLM background thread started (interval: {}s)".format(LLM_INTERVAL))
+    _log("LLM background thread started (Ministral: {}s, Chronos: {}s)".format(LLM_INTERVAL, CHRONOS_INTERVAL))
 
 
 def stop_llm_thread():

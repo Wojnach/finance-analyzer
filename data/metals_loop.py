@@ -956,7 +956,7 @@ def main():
                 return result
 
             start_llm_thread(_get_signal_data, _get_underlying_prices)
-            log("LLM thread: Ministral + Chronos running every 5min")
+            log("LLM thread: Ministral every 5min, Chronos every 60s")
         else:
             log("LLM thread: NOT available (import failed)")
 
