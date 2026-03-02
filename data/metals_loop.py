@@ -32,8 +32,8 @@ EOD_HOUR_UTC = 16             # 17:00 CET = 16:00 UTC
 # Tier config: model, timeout, max_turns
 # Matches the main loop's tiered approach
 TIER_CONFIG = {
-    1: {"model": "haiku",  "timeout": 60,   "max_turns": 8,  "label": "HEARTBEAT"},
-    2: {"model": "sonnet", "timeout": 180,  "max_turns": 15, "label": "TRIGGER"},
+    1: {"model": "haiku",  "timeout": 60,   "max_turns": 8,  "label": "QUICK"},
+    2: {"model": "sonnet", "timeout": 180,  "max_turns": 15, "label": "ANALYSIS"},
     3: {"model": None,     "timeout": 300,  "max_turns": 20, "label": "CRITICAL"},
 }
 
@@ -287,21 +287,24 @@ def write_context(prices, trigger_reason, tier=2):
     return ctx
 
 def classify_tier(reasons):
-    """Classify trigger into tier (1=cheap heartbeat, 2=moderate, 3=critical).
+    """Classify trigger into tier (1=cheap workhorse, 2=deeper analysis, 3=critical).
 
-    Matches the main loop's tiered approach from agent_invocation.py.
+    Haiku handles the bulk of invocations (price moves, trailing, heartbeats).
+    Sonnet only for multi-trigger events or large moves needing deeper analysis.
+    Opus reserved for critical decisions (stop proximity, profit targets, EOD).
     """
-    # Tier 3 (Critical — Opus): stop proximity, profit target, EOD, signal flip
+    # Tier 3 (Critical — Opus): stop proximity, profit target, EOD
     critical_patterns = ["stop-loss", "end_of_day", "profit target"]
     if any(p in r for r in reasons for p in critical_patterns):
         return 3
 
-    # Tier 2 (Moderate — Sonnet): price moves, trailing stops, signal changes
-    moderate_patterns = ["moved", "dropped", "signal"]
-    if any(p in r for r in reasons for p in moderate_patterns):
+    # Tier 2 (Deeper — Sonnet): only when multiple triggers fire simultaneously,
+    # or very large moves that need more careful analysis
+    if len(reasons) >= 2:
         return 2
 
-    # Tier 1 (Cheap — Haiku): heartbeat, routine checks
+    # Tier 1 (Workhorse — Haiku): single triggers, heartbeats, routine
+    # This handles: price moves, trailing drops, signal flips, heartbeats
     return 1
 
 def check_triggers(prices):
@@ -424,15 +427,22 @@ def invoke_claude(trigger_reasons, tier=2):
     tier_label = tier_cfg["label"]
     prompt = f"{base_prompt}\n\n## This Invocation\nTier: {tier} ({tier_label})\nTrigger: {reason_str}\nTime: {datetime.datetime.now().strftime('%H:%M CET')}\nCheck #{check_count}, Invocation #{invoke_count + 1}"
 
-    # Tier 1 (heartbeat) gets a shorter, cheaper prompt
+    # Tier 1 (Haiku workhorse) gets a focused prompt — reads full context but
+    # keeps analysis brief. Can recommend trades but prefers HOLD.
     if tier == 1:
         prompt = (
-            "You are the metals intraday trading agent (QUICK CHECK).\n"
-            "Read data/metals_context.json — check if positions are OK.\n"
-            "If all positions are within normal range (no stop proximity, no profit target), "
-            "send a brief Telegram: current P&L per position, 1 line each.\n"
-            "Do NOT execute trades on heartbeat unless urgent.\n"
-            f"\nTrigger: {reason_str}\nTime: {datetime.datetime.now().strftime('%H:%M CET')}"
+            "You are the metals intraday trading agent (QUICK ASSESSMENT).\n"
+            "Read data/metals_context.json — analyze the trigger and current positions.\n"
+            "Read data/metals_decisions.jsonl — check your last 3 decisions for continuity.\n"
+            "Read memory/trading_rules.md — follow the mandatory checklist.\n\n"
+            "For EACH position: assess P&L from ENTRY, distance from peak, distance from stop.\n"
+            "If a position is in danger (near stop, big drop from peak), flag it clearly.\n"
+            "If everything is stable, confirm HOLD with brief reasoning.\n\n"
+            "Strategic thesis: Silver bull 2026, target ATH. Bias HOLD. Only sell on structure break.\n\n"
+            "ALWAYS: (1) Log decision to data/metals_decisions.jsonl, (2) Send Telegram with P&L per position.\n"
+            "Keep it concise — you are Haiku, optimize for speed.\n"
+            f"\nTrigger: {reason_str}\nTime: {datetime.datetime.now().strftime('%H:%M CET')}\n"
+            f"Check #{check_count}, Invocation #{invoke_count + 1}"
         )
 
     # Find claude executable
@@ -499,6 +509,7 @@ def invoke_claude(trigger_reasons, tier=2):
 
 def main():
     global check_count, last_signal_data, last_invoke_prices, startup_grace
+    global claude_proc, claude_log_fh, claude_start, claude_timeout
 
     log("Starting metals trading loop (v2 — tiered invocation)...")
     log(f"Check interval: {CHECK_INTERVAL}s | Heartbeat: every {HEARTBEAT_CHECKS} checks (~{HEARTBEAT_CHECKS*CHECK_INTERVAL//60}min)")
@@ -531,11 +542,11 @@ def main():
 
         # Estimate daily token budget
         # At 90s intervals over 8.5h market day: ~340 checks
-        # Heartbeat every 20 checks = ~17 heartbeats (T1 haiku, ~1K tokens each = ~17K)
-        # Real triggers: ~5-10 per day (T2 sonnet, ~5K tokens each = ~50K)
-        # Critical: ~1-2 per day (T3 opus, ~20K tokens = ~40K)
-        # Total: ~100K tokens/day — well within Max subscription budget
-        log("Token budget estimate: ~100K tokens/day (17 haiku + 10 sonnet + 2 opus)")
+        # Most triggers: T1 haiku (~25/day, ~1K tokens each = ~25K)
+        # Multi-trigger events: T2 sonnet (~3-5/day, ~5K tokens each = ~20K)
+        # Critical decisions: T3 opus (~1-2/day, ~20K tokens = ~30K)
+        # Total: ~75K tokens/day — well within Max subscription budget
+        log("Token budget estimate: ~75K tokens/day (25 haiku + 4 sonnet + 1 opus)")
 
         send_telegram(f"""*METALS LOOP v2 STARTED*
 Tiered invocation: T1=haiku(30min) T2=sonnet(triggers) T3=opus(critical)

@@ -29,13 +29,17 @@ metals_loop.py (Layer 1)           Claude Code (Layer 2)
 
 ### Token Cost Management (Claude Max subscription)
 
-Tiered model selection to stay within daily budget (~100K tokens/day):
+Tiered model selection to stay within daily budget (~75K tokens/day):
 
-| Tier | Model  | Timeout | Max Turns | Use Case                    | Frequency   |
-|------|--------|---------|-----------|-----------------------------| ------------|
-| T1   | Haiku  | 60s     | 8         | Heartbeat: "positions OK?"  | Every 30min |
-| T2   | Sonnet | 180s    | 15        | Price moves, trailing stops | On trigger  |
-| T3   | Opus   | 300s    | 20        | Stop proximity, profit, EOD | Rare        |
+| Tier | Model  | Timeout | Max Turns | Use Case                              | Frequency   |
+|------|--------|---------|-----------|---------------------------------------| ------------|
+| T1   | Haiku  | 60s     | 8         | Workhorse: price moves, trails, beats | ~25/day     |
+| T2   | Sonnet | 180s    | 15        | Multi-trigger: 2+ triggers at once    | ~4/day      |
+| T3   | Opus   | 300s    | 20        | Critical: stop proximity, profit, EOD | ~1-2/day    |
+
+Haiku is the cheapest and handles the bulk of invocations. Sonnet only fires when
+multiple triggers coincide (requiring deeper analysis). Opus reserved for decisions
+that affect real money (stop zones, profit targets, end-of-day).
 
 Guards:
 - **Never invoke if already running** (poll check)
@@ -44,13 +48,14 @@ Guards:
 - **Signal flip requires sustained change** (not single-check noise)
 
 ### Trigger Conditions (invoke Claude)
-1. Price moved >2% from last invocation → T2 (sonnet)
-2. Trailing stop: bid dropped 3%+ from session peak → T2 (sonnet)
+1. Price moved >2% from last invocation → T1 (haiku)
+2. Trailing stop: bid dropped 3%+ from session peak → T1 (haiku)
 3. Profit target: any position +4%+ from entry → T3 (opus)
-4. Signal consensus flip (XAG or XAU changed) → T2 (sonnet)
+4. Signal consensus flip (XAG or XAU changed) → T1 (haiku)
 5. Periodic heartbeat (every ~30 min) → T1 (haiku)
 6. End-of-day (17:00 CET) → T3 (opus)
 7. Hard stop proximity (within 5% of stop-loss) → T3 (opus)
+8. Multiple triggers simultaneously → T2 (sonnet)
 
 ### Decision History: `data/metals_decisions.jsonl`
 Every Claude invocation appends a JSON line with:
