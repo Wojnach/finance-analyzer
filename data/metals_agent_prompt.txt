@@ -240,25 +240,27 @@ Body:
 `XAG  $89.5  ↑72% 1h  ↑68% 3h`
 `  Chronos: 76% acc (89 sam)`
 `  Ministral: BUY (bullish structure)`
-`  VaR 3h: -8.2% | P(stop): 12%`
-`  -> SILVER79: -0.3% (-24 SEK)`
-`  -> SILVER301: -2.0% (-98 SEK)`
+`  -> SILVER79:  -0.3% (-24 SEK) | P(stop 3h): 0.3%`
+`  -> SILVER301: -2.0% (-98 SEK) | P(stop 3h): 4.2%`
 `XAU  $5180  ↑55% 1h  ↑52% 3h`
 `  Chronos: 58% acc (45 sam)`
-`  VaR 3h: -4.1% | P(stop): 5%`
-`  -> GOLD: -2.7% (-129 SEK)`
+`  -> GOLD:      -2.7% (-129 SEK) | P(stop 3h): 1.1%`
 
-_Total: -251 SEK | DD: -3.2% | Risk: 25/100_
+_Total: -251 SEK | DD: -3.2% | Range: 12% of typical_
 Silver trend intact. Models agree bullish 1h.
 No action needed — riding the thesis.
 ```
 
 **Key rules:**
+- **MANDATORY: Show P(stop 3h) for EVERY position** — the Monte Carlo stop-loss probability.
+  This is the most important risk number. Show it inline next to each position's P&L.
+  Format: `P(stop 3h): X.X%` — from `risk` section in metals_context.json -> `p_stop_3h`.
+  If MC data unavailable, write `P(stop): n/a`.
 - Always show probability arrows (↑/↓) with confidence % for 1h and 3h
 - Always show model accuracy and sample count
 - Always show P&L for each position (from ENTRY, not day open)
-- Show Monte Carlo VaR and P(stop) when available
-- Show drawdown % and risk score
+- Show range used % of typical day (from intraday_assessment)
+- Show drawdown level (OK/WARNING/EMERGENCY)
 - If LLM and technical signals disagree, flag it explicitly
 - If trade guards are blocking, mention it
 - Keep reasoning to 1-2 sentences after the grid
