@@ -1,63 +1,80 @@
-# Plan: Dashboard Auto-Improvement Session
+# Plan: Metals Loop v7 — Cascading Stop-Loss + Derivative Exit
 
-## Problems Found
+## Post-Mortem (Mar 2)
+- Claude Layer 2 said HOLD 43 times, never SELL, even 2.27% from stop
+- Monte Carlo P(stop) was static 0.42% — never updated — actual probability was 100%
+- No rate-of-change detection — accelerating selloff went undetected
+- Emergency sells failed for gold (Avanza "short sell not allowed" — already sold by broker stop)
+- Chronos was blind all session (field mismatch bug, now fixed)
 
-### Bugs (Critical)
-1. **BUG-1: Signal count labels stale** — Heatmap tab says "25-Signal" but system has 30 signals. Enhanced group header says "(12-25)" should be "(12-30)".
-2. **BUG-2: Core signals list incomplete** — `app.py` `core_signals` list missing `custom_lora`. Has 10 items, should have 11.
-3. **BUG-3: Disabled signals shown as dots** — Overview cards show ML, LoRA, Funding as signal dots even though they are DISABLED (always HOLD). Adds visual noise.
+## Changes
 
-### Missing Features (High Value)
-4. **FEAT-1: No warrant portfolio display** — Warrant holdings (`portfolio_state_warrants.json`) not visible. User holds leveraged products (MINI-SILVER 5x) — critical P&L visibility gap.
-5. **FEAT-2: No Monte Carlo risk display** — Price bands, stop-loss probability, VaR/CVaR computed but not surfaced.
-6. **FEAT-3: No weighted confidence shown** — `weighted_confidence` (accuracy-adjusted) not displayed on cards. Only raw vote counts visible.
-7. **FEAT-4: No regime badge on cards** — `regime` field available per ticker but not shown.
-8. **FEAT-5: Module failures not in Health tab** — `get_health_summary()` returns `module_failures` but Health tab ignores it.
-9. **FEAT-6: No holdings in header** — Header shows Patient value + cash but not what's held at a glance.
+### Batch 1: 3x Cascading Stop-Loss Orders (data/metals_loop.py)
 
-## Changes (4 batches, 2 files + tests)
+Place 3 independent sell limit orders per position at startup, spread across 3 levels:
+- S1 (33% of units): at configured stop price
+- S2 (33% of units): at stop - 1% of stop
+- S3 (remaining units): at stop - 2% of stop
 
-### Batch 1: Fix bugs in app.py + index.html (BUG-1,2,3) + FEAT-3,4
-**Files:** `dashboard/app.py`, `dashboard/static/index.html`
+This handles gap-through: if price gaps below S1, S2 and S3 may still fill.
 
-1. `app.py` line 290: Add `custom_lora` to `core_signals` list
-2. `app.py` line 279 comment: Fix "25-signal" → "30-signal"
-3. `index.html` line 581: Fix "25-Signal Heatmap" → "30-Signal Heatmap"
-4. `index.html` line 1160: Fix "(1-11)" core signals label
-5. `index.html` line 1173: Fix "(12-25)" → "(12-30)" for enhanced signals
-6. `index.html` votes() function: Skip disabled signals (ml, funding, custom_lora)
-7. `index.html` signal cards: Add weighted_confidence display + regime badge
+Functions:
+- `place_stop_loss_orders(page, positions)` — places 3 orders per active position
+- `check_stop_order_fills(page, stop_state)` — monitors for fills
+- `update_trailing_stops(page, positions, stop_state, prices)` — ratchets up when positions gain
+- Stop order state persisted to `data/metals_stop_orders.json`
 
-### Batch 2: Add warrant API + display + header holdings (FEAT-1, FEAT-6)
-**Files:** `dashboard/app.py`, `dashboard/static/index.html`
+Trailing logic:
+- When bid > entry * (1 + trail_start_pct), move stops up
+- New S1 = max(current_S1, bid * (1 - trail_distance_pct))
+- Minimum move of 1% to avoid excessive API calls
+- Cancel old orders, place new ones at higher levels
 
-1. `app.py`: Add `/api/warrants` endpoint reading `portfolio_state_warrants.json`
-2. `index.html`: Add warrant holdings panel in Overview tab
-3. `index.html`: Show current holdings in header next to portfolio values
+### Batch 2: Derivative-Based Momentum Exit (data/metals_loop.py)
 
-### Batch 3: Add risk display + health module failures (FEAT-2, FEAT-5)
-**Files:** `dashboard/app.py`, `dashboard/static/index.html`
+Monitor rate-of-change acceleration. When conditions met, auto-sell immediately:
 
-1. `app.py`: Add `/api/risk` endpoint reading Monte Carlo + VaR data from `agent_summary_compact.json`
-2. `index.html`: Add risk panel to Overview tab (price bands, stop probability, VaR)
-3. `index.html`: Show module_failures in Health tab
+Detection:
+- Track price_history (already exists, 120-entry circular buffer)
+- Compute: velocity = (bid_now - bid_N_checks_ago) / N  (1st derivative)
+- Compute: acceleration = velocity_now - velocity_prev  (2nd derivative)
+- If acceleration < threshold AND velocity < 0 AND abs(velocity) > min_velocity:
+  → MOMENTUM EXIT: auto-sell via API
 
-### Batch 4: Tests + verify
-**Files:** `tests/test_dashboard.py`
+Parameters:
+- `MOMENTUM_LOOKBACK = 5` (5 checks = ~7.5 min)
+- `MOMENTUM_MIN_VELOCITY = -0.5` (must be dropping at least 0.5% per check)
+- `MOMENTUM_ACCELERATION_THRESHOLD = -0.1` (must be accelerating)
+- Only triggers when position is already L1+ (>8% from peak or <8% from stop)
 
-1. Add tests for `/api/warrants` endpoint
-2. Add tests for `/api/risk` endpoint
-3. Run full test suite, merge, push, restart
+### Batch 3: L2 Auto-Exit Override (data/metals_loop.py)
 
-## What could break
+When position is <3% from stop, auto-sell instead of deferring to Claude.
+Change: L2 ALERT (<5%) now triggers auto-sell when:
+- Price trend is downward (last 3 bids declining)
+- Position has been in L1+ zone for 5+ checks
 
-- All existing endpoints unchanged — pure additions
-- Warrant/risk displays handle missing data gracefully (show "no data")
-- Adding `custom_lora` to core signals list won't break heatmap (already in `_votes` dict)
+This prevents the "43 HOLDs while approaching stop" pattern.
 
-## Execution order
+### Batch 4: Get Positions from Avanza API
 
-1. Batch 1: Bug fixes + weighted confidence + regime
-2. Batch 2: Warrants + header holdings
-3. Batch 3: Risk + health module failures
-4. Batch 4: Tests + merge + push + restart
+Use `/_api/position-data/positions` endpoint to:
+- Get actual holdings at startup (units, entry, P&L)
+- Detect when broker stop-loss triggers independently
+
+### Batch 5: Dynamic Monte Carlo
+
+- Recalculate MC stop probability every 10 checks
+- Use recent price_history volatility, not just historical daily ranges
+
+## Files Changed
+- `data/metals_loop.py` — main implementation (batches 1-4)
+- `data/metals_risk.py` — dynamic MC updates (batch 5)
+- `data/metals_stop_orders.json` — new, stop order tracking
+
+## Execution Order
+1. Batch 1 (stop orders) — highest priority, hardware protection
+2. Batch 2 (momentum exit) — software early warning
+3. Batch 3 (L2 override) — prevent Claude HOLD paralysis
+4. Batch 4 (Avanza positions) — better state management
+5. Batch 5 (dynamic MC) — better risk estimates

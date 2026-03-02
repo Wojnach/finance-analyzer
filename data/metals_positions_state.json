@@ -1,0 +1,14 @@
+{
+  "gold": {
+    "active": true,
+    "units": 4,
+    "entry": 907.5,
+    "stop": 780.0
+  },
+  "silver301": {
+    "active": true,
+    "units": 130,
+    "entry": 15.36,
+    "stop": 12.50
+  }
+}
