@@ -2,7 +2,7 @@
 
 Usage:
   python main.py --analyze ETH-USD
-  python main.py --watch BTC-USD:66500 ETH-USD:1920 MSTR:125
+  python main.py --watch BTC-USD:66500 ETH-USD:1920 AMD:150
 """
 
 import json

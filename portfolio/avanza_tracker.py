@@ -8,7 +8,7 @@ Configuration lives in config.json under "avanza.instruments":
         "avanza": {
             "instruments": {
                 "SAAB-B": {"orderbook_id": "5533", "type": "equity", "name": "SAAB B"},
-                "BULL-NDX3X": {"orderbook_id": "1234", "type": "warrant", "name": "BULL NASDAQ X3", "underlying": "QQQ"}
+                "MINI-SILVER": {"orderbook_id": "2345", "type": "warrant", "name": "MINI L SILVER AVA 140", "underlying": "XAG-USD"}
             }
         }
     }
@@ -79,10 +79,10 @@ def get_warrant_underlying(config_key: str) -> str | None:
     """Get the underlying ticker for a warrant instrument.
 
     Args:
-        config_key: The config key (e.g., "BULL-NDX3X")
+        config_key: The config key (e.g., "MINI-SILVER")
 
     Returns:
-        Underlying ticker (e.g., "QQQ") or None if not a warrant.
+        Underlying ticker (e.g., "XAG-USD") or None if not a warrant.
     """
     instruments = load_avanza_instruments()
     cfg = instruments.get(config_key, {})

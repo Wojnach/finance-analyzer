@@ -110,7 +110,7 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
   regime (trending-up/down, ranging, high-vol). In trending regimes, trust trend signals
   (EMA, MACD) more. In ranging regimes, trust mean-reversion signals (RSI, BB) more.
   Signal weights have already been adjusted — but your independent judgment still matters.
-- **Cross-asset leads:** Check `cross_asset_leads` — if BTC is buying but ETH/MSTR hasn't
+- **Cross-asset leads:** Check `cross_asset_leads` — if BTC is buying but ETH hasn't
   moved, consider whether the follower will catch up. This is a lead indicator, not a signal.
 - **Weighted confidence:** The `weighted_confidence` field reflects accuracy-weighted
   consensus. Compare it with the old `confidence` to see if proven signals agree with the
@@ -382,9 +382,9 @@ HOLD example:
 
 `SMCI $32   BUY  12B/4S/4H BBB·SSS`
 `MU   $426  BUY  10B/2S/8H BBB··BB`
-`BABA $153  SELL  2B/5S/13H SSSSSHB`
+`NVDA $185  SELL  2B/5S/13H SSSSSHB`
 `BTC  $68K  BUY   4B/2S/17H BB·SSH·`
-_+26 hold · 1 sell_
+_+15 hold · 1 sell_
 
 _P:500K · B:465K(-7%) · DXY 98↑ · 10Y 4.05↓_
 SMCI 12B but RSI 69 overbought. MU 5/7 TFs but at upper BB. No clean entry.
@@ -397,8 +397,8 @@ TRADE example:
 
 `SMCI $32   BUY  12B/4S/4H BBB·SSS`
 `MU   $426  BUY  10B/2S/8H BBB··BB`
-`BABA $153  SELL  2B/5S/13H SSSSSHB`
-_+27 hold_
+`NVDA $185  SELL  2B/5S/13H SSSSSHB`
+_+16 hold_
 
 _P:500K · B:326K(-7%) SMCI 43sh · DXY 98↑_
 Bold: Structural breakout — 12B, vol 2x, BB above upper. Entry confirmed.

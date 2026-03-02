@@ -122,7 +122,7 @@ def find_instrument(query: str) -> list[dict]:
     """Search for instruments by name or ticker.
 
     Args:
-        query: Search string (e.g., 'Bitcoin', 'MSTR', 'Nvidia')
+        query: Search string (e.g., 'Bitcoin', 'NVDA', 'Silver')
 
     Returns:
         List of matching instruments with id, name, and type

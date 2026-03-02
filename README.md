@@ -1,6 +1,6 @@
 # Portfolio Intelligence — Trading Agent
 
-Two-layer automated trading intelligence system. Layer 1 (Python) collects market data and computes 25 signals every 60 seconds. Layer 2 (Claude Code) makes trading decisions when meaningful changes are detected.
+Two-layer automated trading intelligence system. Layer 1 (Python) collects market data and computes 30 signals every 60 seconds. Layer 2 (Claude Code) makes trading decisions when meaningful changes are detected.
 
 ## Architecture
 
@@ -8,7 +8,7 @@ Two-layer automated trading intelligence system. Layer 1 (Python) collects marke
 ┌──────────────────────────────────────────────────────────────────┐
 │  LAYER 1: PYTHON FAST LOOP (every 60s)                          │
 │                                                                   │
-│  Fetch prices → Compute 25 signals → Detect triggers             │
+│  Fetch prices → Compute 30 signals → Detect triggers             │
 │  Binance (crypto) · Alpaca (stocks) · Avanza (Nordic)            │
 │                                                                   │
 │  NEVER trades. NEVER sends Telegram. Data collection only.       │
@@ -24,27 +24,30 @@ Two-layer automated trading intelligence system. Layer 1 (Python) collects marke
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## Instruments (31 Tier 1 + 5 Tier 2 + 5 Tier 3)
+## Instruments (19 Tier 1 + 3 Tier 2 + 4 Tier 3)
 
-- **Crypto**: BTC-USD, ETH-USD (Binance, 25 signals, 24/7)
-- **Metals**: XAU-USD, XAG-USD (Binance FAPI, 21 signals)
-- **US Stocks**: 27 tickers via Alpaca IEX (NVDA, AMD, AAPL, GOOGL, META, TSM, etc.)
-- **Nordic**: SAAB-B, SEB-C, K33, H100, BTCAP-B (Avanza, price-only)
-- **Warrants**: BULL-NDX3X, XBT-TRACKER, etc. (Avanza price + underlying's signals)
+- **Crypto**: BTC-USD, ETH-USD (Binance, 30 signals, 24/7)
+- **Metals**: XAU-USD, XAG-USD (Binance FAPI, 30 signals)
+- **US Stocks**: 15 tickers via Alpaca IEX (NVDA, AMD, AAPL, GOOGL, META, TSM, PLTR, AMZN, AVGO, MU, SOUN, SMCI, TTWO, VRT, LMT)
+- **Nordic**: SAAB-B, SEB-C, INVE-B (Avanza, price-only)
+- **Warrants**: XBT-TRACKER, ETH-TRACKER, MINI-SILVER, MINI-TSMC (Avanza price + underlying's signals)
 
-## 25 Signals
+## 30 Signals (8 Core + 19 Enhanced + 3 AI)
 
 | # | Signal | Type | Notes |
 |---|--------|------|-------|
 | 1-4 | RSI, MACD, EMA, BB | Core TA | Classic indicators |
 | 5 | Fear & Greed | Core | alternative.me (crypto), VIX (stocks) |
 | 6 | Sentiment | Core | CryptoBERT / Trading-Hero-LLM |
-| 7 | ML Classifier | Core | HistGradientBoosting, crypto only |
-| 8 | Funding Rate | Core | Binance perps, crypto only |
+| 7 | ML Classifier | Core | **DISABLED** (28.2% accuracy) |
+| 8 | Funding Rate | Core | **DISABLED** (27.0% accuracy) |
 | 9 | Volume | Core | Spike >1.5x + direction |
 | 10 | Ministral-8B | Core | LLM reasoning, crypto only |
 | 11 | Custom LoRA | Core | **DISABLED** (20.9% accuracy) |
-| 12-25 | Enhanced Composite | 14 modules | Trend, Momentum, Smart Money, etc. |
+| 12-27 | Enhanced Composite | 16 modules | Trend, Momentum, Smart Money, News, Econ Calendar, etc. |
+| 28 | Forecast | AI | Kronos + Chronos time-series models |
+| 29 | Claude Fundamental | AI | Three-tier LLM cascade (Haiku/Sonnet/Opus) |
+| 30 | Futures Flow | AI | Binance FAPI futures structure (crypto only) |
 
 ## Dual Portfolio Strategy
 

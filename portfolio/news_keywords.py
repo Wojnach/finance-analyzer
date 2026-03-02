@@ -122,8 +122,8 @@ KEYWORD_SECTOR_IMPACT = {
     "etf approved": {"crypto": "BUY"},
     "regulation": {"crypto": "SELL"},
     "regulatory": {"crypto": "SELL"},
-    "war": {"defense": "BUY", "metals": "BUY", "etf": "SELL"},
-    "invasion": {"defense": "BUY", "metals": "BUY", "etf": "SELL"},
+    "war": {"defense": "BUY", "metals": "BUY", "big_tech": "SELL"},
+    "invasion": {"defense": "BUY", "metals": "BUY", "big_tech": "SELL"},
 }
 
 # Credible financial news sources (weight 1.5x)

@@ -575,7 +575,7 @@ if __name__ == "__main__":
         pos_args = args[idx + 1:]
         if not pos_args:
             print("Usage: --watch TICKER:ENTRY [TICKER:ENTRY ...]")
-            print("Example: --watch BTC:66500 ETH:1920 MSTR:125")
+            print("Example: --watch BTC:66500 ETH:1920 AMD:150")
             sys.exit(1)
         from portfolio.analyze import watch_positions
         watch_positions(pos_args)

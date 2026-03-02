@@ -372,7 +372,7 @@ For each ticker, evaluate 5 fundamental dimensions:
 5. macro_sensitivity — how DXY/yields/FOMC specifically affect THIS name
 
 ADDITIONALLY, provide:
-- Cross-asset reasoning: if BTC breaks down, how does MSTR follow? If semis rally, which names lead?
+- Cross-asset reasoning: if BTC breaks down, how does ETH follow? If semis rally, which names lead?
 - Contrarian flags: where do fundamentals STRONGLY disagree with the technical consensus?
 - Portfolio-aware sizing: are we too concentrated in one sector?
 - Cross-sector valuation comparison using the real P/E, PEG, and margin data above
