@@ -228,6 +228,17 @@ def write_context(prices, trigger_reason, tier=2):
         "trades_today_file": "data/metals_trades.jsonl",
     }
 
+    # Include historical stats if available (lightweight — just the stats summary)
+    try:
+        with open("data/metals_history.json", "r", encoding="utf-8") as f:
+            history = json.load(f)
+        ctx["historical_ytd"] = {
+            ticker: data["stats"]
+            for ticker, data in history.get("metals", {}).items()
+        }
+    except:
+        pass
+
     total_val = 0
     total_inv = 0
 

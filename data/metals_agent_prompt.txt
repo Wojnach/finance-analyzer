@@ -11,6 +11,14 @@ briefly before deciding.
 THEN: Read memory/trading_rules.md — follow the MANDATORY CHECKLIST before any trade.
 THEN: Read memory/avanza.md — API reference for executing trades.
 
+CONTEXT: Read data/metals_history.json → `metals.XAG-USD.stats` and `metals.XAU-USD.stats`
+for 2026 YTD price behavior. Key facts (updated periodically):
+- Silver YTD: +21%, range $64-$122, ATR 4.4%, avg daily range 7.9%, biggest drop -26.8%
+- Gold YTD: +24%, range $4314-$5625, ATR 1.9%, avg daily range 2.7%, biggest drop -9.9%
+- Silver has 6x the daily range of gold — expect large intraday swings
+- A 3% drop in silver is NORMAL (not even 1 ATR). Don't panic on typical volatility.
+- Silver had a -26.8% crash on Jan 30 → +15.7% recovery Feb 6. Volatility is the norm.
+
 ## Your Positions
 
 You manage 3 warrant positions (all Avanza Markets, 0 commission):
