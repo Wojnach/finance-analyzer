@@ -8,6 +8,15 @@ from flask import Flask, jsonify, request, send_from_directory
 
 app = Flask(__name__, static_folder="static")
 
+
+@app.after_request
+def add_cors_headers(response):
+    """Allow same-network browser access (e.g. phone on LAN)."""
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return response
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 TRAINING_DIR = Path(__file__).resolve().parent.parent / "training" / "lora"
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"

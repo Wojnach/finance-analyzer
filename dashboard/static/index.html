@@ -1232,8 +1232,8 @@
 
         data.forEach(function (entry) {
           labels.push(entry.ts || entry.timestamp || "");
-          patientVals.push(entry.patient_total_sek || entry.patient || null);
-          boldVals.push(entry.bold_total_sek || entry.bold || null);
+          patientVals.push(entry.patient_value_sek || entry.patient_total_sek || entry.patient || null);
+          boldVals.push(entry.bold_value_sek || entry.bold_total_sek || entry.bold || null);
         });
 
         // Format labels
@@ -1817,9 +1817,15 @@
             showErr("Unauthorized: invalid or missing token. Add ?token=XXX to URL.");
             return null;
           }
-          if (!r.ok) return null;
+          if (!r.ok) {
+            console.error("API error:", u, r.status, r.statusText);
+            return null;
+          }
           return await r.json();
-        } catch (e) { return null; }
+        } catch (e) {
+          console.error("Fetch failed:", u, e.message || e);
+          return null;
+        }
       }
 
       /* ================================================================
