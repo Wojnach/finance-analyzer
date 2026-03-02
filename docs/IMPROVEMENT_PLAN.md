@@ -1,6 +1,6 @@
 # Improvement Plan — Auto-Session #5 (2026-03-02)
 
-## Status: IN PROGRESS
+## Status: COMPLETE
 
 ## Priority: Critical Bugs > Architecture > Tests > Features > Polish
 
@@ -116,17 +116,19 @@ This session continues from BUG-37 onward.
 
 ## 6. Dependency/Ordering — Implementation Batches
 
-### Batch 1: Bug fixes (5 files, BUG-37 through BUG-41)
+### Batch 1: Bug fixes (5 files, BUG-37 through BUG-41) — DONE
 **Files:** `portfolio/equity_curve.py`, `portfolio/trigger.py`, `portfolio/risk_management.py`, `portfolio/signal_engine.py`, `portfolio/reporting.py`
 **Changes:** BUG-37, BUG-38, BUG-39, BUG-40, BUG-41
-**Tests needed:** TEST-5 (FIFO regression), TEST-6 (trigger pruning), TEST-7 (ATR stops). Add regression tests alongside each fix.
+**Tests:** TEST-5 (38 FIFO regression), TEST-6 (11 trigger pruning), TEST-7 (7 ATR stops). All 56 pass.
+**Commit:** `ba2d9ad` — fix: 5 bugs + 56 regression tests
 
-### Batch 2: Test infrastructure (ARCH-8, ARCH-9)
-**Files:** `tests/test_consensus.py`, `tests/test_portfolio.py`, `tests/test_signal_pipeline.py`, `tests/test_signal_improvements.py`, `tests/test_kronos_backtest_feb27.py`, `tests/conftest.py`
-**Changes:** ARCH-8 (deduplicate fixtures), ARCH-9 (hardcoded paths)
-**Tests needed:** Run full test suite to verify no regressions from fixture changes.
+### Batch 2: Test infrastructure (ARCH-8, ARCH-9) — DONE
+**Files:** `tests/test_consensus.py`, `tests/test_portfolio.py`, `tests/test_signal_pipeline.py`, `tests/test_signal_improvements.py`, `tests/test_kronos_backtest_feb27.py`, `pyproject.toml`
+**Changes:** ARCH-8 (deduplicate fixtures — 116 lines removed, 45 added), ARCH-9 (6 hardcoded paths → tmp_path)
+**Tests:** All affected tests pass. 1 pre-existing failure in test_portfolio.py (trigger cooldown) unchanged.
+**Commit:** `8fd7b02` — refactor: deduplicate test fixtures + fix hardcoded paths
 
-### Batch 3: Refactoring (REF-12)
+### Batch 3: Refactoring (REF-12) — DONE (merged into Batch 1)
 **Files:** `portfolio/reporting.py`
-**Changes:** REF-12 (cross-asset constant)
-**Dependencies:** Batch 1 (BUG-41 must be done first since it modifies the same code).
+**Changes:** REF-12 (cross-asset constant extracted to `_CROSS_ASSET_PAIRS` module-level dict)
+**Note:** Implemented alongside BUG-41 since they modify the same code.
