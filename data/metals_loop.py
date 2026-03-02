@@ -74,6 +74,27 @@ STOP_L1_PCT = 8.0   # L1: warning — log + flag in context
 STOP_L2_PCT = 5.0   # L2: alert — Telegram + force Claude invocation
 STOP_L3_PCT = 2.0   # L3: emergency — auto-sell immediately
 
+# Cascading stop-loss orders (hardware protection via Avanza limit orders)
+STOP_ORDER_ENABLED = True
+STOP_ORDER_LEVELS = 3          # number of stop orders per position
+STOP_ORDER_SPREAD_PCT = 1.0    # spread between levels (1% of stop price)
+STOP_ORDER_FILE = "data/metals_stop_orders.json"
+
+# Trailing stop config
+TRAIL_START_PCT = 2.0           # start trailing after 2% gain from entry
+TRAIL_DISTANCE_PCT = 3.0        # trail 3% below current bid
+TRAIL_MIN_MOVE_PCT = 1.0        # minimum move to update (avoid excessive API calls)
+
+# Momentum exit (derivative-based early exit)
+MOMENTUM_ENABLED = True
+MOMENTUM_LOOKBACK = 5           # checks (5 * 90s = ~7.5 min)
+MOMENTUM_MIN_VELOCITY = -0.5    # must be dropping at least 0.5%/check
+MOMENTUM_ACCEL_THRESHOLD = -0.1 # acceleration must be negative (accelerating decline)
+MOMENTUM_REQUIRE_L1 = True      # only trigger if already in L1+ danger zone
+
+# Auto-exit override (prevent Claude HOLD paralysis)
+AUTO_EXIT_L2_CHECKS = 5         # auto-sell after position in L2+ zone for N checks
+
 # Tier config: model, timeout, max_turns
 TIER_CONFIG = {
     1: {"model": "haiku",  "timeout": 60,   "max_turns": 8,  "label": "QUICK"},
@@ -248,6 +269,7 @@ invoke_count = 0
 startup_grace = True      # skip first check to establish baseline
 short_prices = {}         # latest prices for short instruments
 daily_range_stats = {}    # historical daily range percentiles (computed at startup)
+l2_zone_checks = {}           # tracks how many consecutive checks each position has been in L2+ zone
 
 def send_telegram(msg):
     try:
@@ -508,6 +530,369 @@ def _get_csrf(page):
         if c["name"] == "AZACSRF":
             return c["value"]
     return None
+
+
+def _load_stop_orders():
+    """Load stop order state from disk."""
+    try:
+        if os.path.exists(STOP_ORDER_FILE):
+            with open(STOP_ORDER_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        log(f"Stop order state load failed: {e}")
+    return {}
+
+def _save_stop_orders(state):
+    """Save stop order state to disk."""
+    try:
+        with open(STOP_ORDER_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log(f"Stop order state save failed: {e}")
+
+def place_stop_loss_orders(page, positions):
+    """Place cascading stop-loss orders for all active positions.
+
+    Places STOP_ORDER_LEVELS orders per position, spread across levels:
+    - S1 (1/3 units): at stop price
+    - S2 (1/3 units): at stop - STOP_ORDER_SPREAD_PCT%
+    - S3 (remaining): at stop - 2*STOP_ORDER_SPREAD_PCT%
+
+    Returns stop order state dict.
+    """
+    csrf = _get_csrf(page)
+    if not csrf:
+        log("Stop orders: no CSRF token")
+        return {}
+
+    state = _load_stop_orders()
+    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+
+    for key, pos in positions.items():
+        if not pos.get("active"):
+            continue
+
+        # Skip if orders already placed today for this position at current stop level
+        existing = state.get(key, {})
+        if (existing.get("date") == today_str and
+            existing.get("stop_base") == pos["stop"] and
+            existing.get("orders")):
+            log(f"  Stop orders already placed for {key} today")
+            continue
+
+        # Cancel any existing orders first
+        if existing.get("orders"):
+            _cancel_stop_orders(page, key, existing, csrf)
+
+        units = pos["units"]
+        stop_base = pos["stop"]
+        orders = []
+
+        for level in range(STOP_ORDER_LEVELS):
+            # Calculate price for this level
+            spread = level * STOP_ORDER_SPREAD_PCT / 100.0
+            price = round(stop_base * (1 - spread), 2)
+
+            # Calculate units for this level (split evenly, last gets remainder)
+            if level < STOP_ORDER_LEVELS - 1:
+                level_units = units // STOP_ORDER_LEVELS
+            else:
+                level_units = units - (units // STOP_ORDER_LEVELS) * (STOP_ORDER_LEVELS - 1)
+
+            if level_units <= 0:
+                continue
+
+            try:
+                result = page.evaluate("""async (args) => {
+                    const [payload, token] = args;
+                    const resp = await fetch('https://www.avanza.se/_api/trading-critical/rest/order/new', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
+                        credentials: 'include',
+                        body: JSON.stringify(payload),
+                    });
+                    return {status: resp.status, body: await resp.text()};
+                }""", [{
+                    "accountId": ACCOUNT_ID,
+                    "orderbookId": pos["ob_id"],
+                    "side": "SELL",
+                    "condition": "NORMAL",
+                    "price": price,
+                    "validUntil": today_str,
+                    "volume": level_units,
+                }, csrf])
+
+                body_str = result.get("body", "")
+                try:
+                    body = json.loads(body_str)
+                except:
+                    body = {}
+
+                order_status = body.get("orderRequestStatus", "")
+                order_id = body.get("orderId", "")
+
+                if order_status == "SUCCESS":
+                    orders.append({
+                        "level": level + 1,
+                        "order_id": order_id,
+                        "price": price,
+                        "units": level_units,
+                        "status": "placed",
+                    })
+                    log(f"  Stop S{level+1} placed: {key} {level_units}u @ {price} [order {order_id}]")
+                else:
+                    error_msg = body.get("message", body_str[:100])
+                    log(f"  Stop S{level+1} FAILED: {key} — {error_msg}")
+                    orders.append({
+                        "level": level + 1,
+                        "price": price,
+                        "units": level_units,
+                        "status": "failed",
+                        "error": error_msg,
+                    })
+            except Exception as e:
+                log(f"  Stop S{level+1} error: {key} — {e}")
+
+        state[key] = {
+            "date": today_str,
+            "stop_base": stop_base,
+            "orders": orders,
+            "placed_ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+
+    _save_stop_orders(state)
+    return state
+
+
+def _cancel_stop_orders(page, key, order_state, csrf=None):
+    """Cancel existing stop orders for a position."""
+    if not csrf:
+        csrf = _get_csrf(page)
+    if not csrf:
+        return
+
+    for order in order_state.get("orders", []):
+        order_id = order.get("order_id")
+        if not order_id or order.get("status") != "placed":
+            continue
+        try:
+            result = page.evaluate("""async (args) => {
+                const [accountId, orderId, token] = args;
+                const resp = await fetch(
+                    'https://www.avanza.se/_api/trading-critical/rest/order/' + accountId + '/' + orderId,
+                    {method: 'DELETE', headers: {'Content-Type': 'application/json', 'X-SecurityToken': token}, credentials: 'include'}
+                );
+                return {status: resp.status};
+            }""", [ACCOUNT_ID, order_id, csrf])
+            log(f"  Cancel stop S{order['level']} {key}: status={result.get('status')}")
+            order["status"] = "cancelled"
+        except Exception as e:
+            log(f"  Cancel stop error {key} S{order['level']}: {e}")
+
+
+def check_stop_order_fills(page, stop_state, positions):
+    """Check if any stop-loss orders were filled. Returns list of filled keys."""
+    csrf = _get_csrf(page)
+    if not csrf:
+        return []
+
+    filled_keys = []
+
+    for key, state in stop_state.items():
+        if key not in positions or not positions[key].get("active"):
+            continue
+
+        any_filled = False
+        total_filled_units = 0
+
+        for order in state.get("orders", []):
+            order_id = order.get("order_id")
+            if not order_id or order.get("status") != "placed":
+                continue
+
+            try:
+                result = page.evaluate("""async (args) => {
+                    const [accountId, orderId, token] = args;
+                    const resp = await fetch(
+                        'https://www.avanza.se/_api/trading-critical/rest/order/' + accountId + '/' + orderId,
+                        {method: 'GET', headers: {'Content-Type': 'application/json', 'X-SecurityToken': token}, credentials: 'include'}
+                    );
+                    if (resp.status !== 200) return {status: resp.status};
+                    return {status: 200, body: await resp.json()};
+                }""", [ACCOUNT_ID, order_id, csrf])
+
+                if result.get("status") == 200:
+                    body = result.get("body", {})
+                    order_state_str = (body.get("state") or "").upper()
+                    if order_state_str in ("FILLED", "EXECUTED", "DONE"):
+                        order["status"] = "filled"
+                        total_filled_units += order["units"]
+                        any_filled = True
+                        log(f"STOP FILLED: {key} S{order['level']} {order['units']}u @ {order['price']}")
+            except Exception as e:
+                log(f"Stop check error {key} S{order['level']}: {e}")
+
+        if any_filled:
+            filled_keys.append(key)
+            pos = positions[key]
+            remaining = pos["units"] - total_filled_units
+
+            send_telegram(
+                f"*STOP FILLED* {pos['name']}\n"
+                f"Sold {total_filled_units}u (stop orders)\n"
+                f"Remaining: {remaining}u"
+            )
+
+            # Log the trade
+            trade = {
+                "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "action": "STOP_ORDER_SELL",
+                "position": key,
+                "name": pos["name"],
+                "units": total_filled_units,
+                "price": state["stop_base"],
+                "entry": pos["entry"],
+                "pnl_pct": round(pnl_pct(state["stop_base"], pos["entry"]), 2),
+            }
+            with open("data/metals_trades.jsonl", "a", encoding="utf-8") as f:
+                f.write(json.dumps(trade, ensure_ascii=False) + "\n")
+
+            if remaining <= 0:
+                pos["active"] = False
+                pos["sold_ts"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                pos["sold_price"] = state["stop_base"]
+                pos["sold_reason"] = "stop_order_filled"
+            else:
+                pos["units"] = remaining
+
+            _save_positions(positions)
+
+    if filled_keys:
+        _save_stop_orders(stop_state)
+
+    return filled_keys
+
+
+def update_trailing_stops(page, positions, stop_state, prices):
+    """Update stop-loss orders when positions gain — ratchet stops higher.
+
+    Only updates when:
+    1. Position has gained >= TRAIL_START_PCT from entry
+    2. New stop would be >= TRAIL_MIN_MOVE_PCT higher than current stop
+    """
+    updated = False
+
+    for key, pos in positions.items():
+        if not pos.get("active") or key not in prices:
+            continue
+
+        bid = prices[key].get("bid") or 0
+        if bid <= 0:
+            continue
+
+        gain_pct = pnl_pct(bid, pos["entry"])
+        if gain_pct < TRAIL_START_PCT:
+            continue
+
+        # Calculate new trailing stop
+        new_stop = round(bid * (1 - TRAIL_DISTANCE_PCT / 100.0), 2)
+        current_stop = pos["stop"]
+
+        # Only move stop UP (never down)
+        if new_stop <= current_stop:
+            continue
+
+        # Check minimum move threshold
+        move_pct = ((new_stop - current_stop) / current_stop) * 100
+        if move_pct < TRAIL_MIN_MOVE_PCT:
+            continue
+
+        log(f"TRAILING STOP: {key} raising stop {current_stop} -> {new_stop} "
+            f"(bid={bid}, gain={gain_pct:+.1f}%, move={move_pct:.1f}%)")
+
+        # Cancel old orders and place new ones at higher level
+        if key in stop_state and stop_state[key].get("orders"):
+            csrf = _get_csrf(page)
+            if csrf:
+                _cancel_stop_orders(page, key, stop_state[key], csrf)
+
+        # Update position stop level
+        pos["stop"] = new_stop
+        _save_positions(positions)
+
+        # Place new stop orders at higher level
+        updated = True
+        send_telegram(
+            f"*TRAILING STOP* {pos['name']}\n"
+            f"Stop raised: {current_stop} -> {new_stop}\n"
+            f"Bid: {bid} | Gain: {gain_pct:+.1f}%"
+        )
+
+    if updated:
+        # Re-place all stop orders with new levels
+        place_stop_loss_orders(page, positions)
+
+    return updated
+
+
+def check_momentum_exit(positions, prices, price_history_buf):
+    """Check for accelerating price decline (derivative-based exit).
+
+    Returns list of (key, reason) tuples for positions that should be sold immediately.
+    """
+    if not MOMENTUM_ENABLED or len(price_history_buf) < MOMENTUM_LOOKBACK + 2:
+        return []
+
+    exits = []
+
+    for key, pos in positions.items():
+        if not pos.get("active"):
+            continue
+
+        bid = prices.get(key, {}).get("bid") or 0
+        if bid <= 0:
+            continue
+
+        # Check if in L1+ danger zone (if required)
+        if MOMENTUM_REQUIRE_L1:
+            dist_stop = ((bid - pos["stop"]) / bid * 100) if bid > 0 else 999
+            if dist_stop >= STOP_L1_PCT:
+                continue
+
+        # Get price history for this position
+        recent = []
+        for snap in price_history_buf[-(MOMENTUM_LOOKBACK + 2):]:
+            p = snap.get(key, 0)
+            if p > 0:
+                recent.append(p)
+
+        if len(recent) < MOMENTUM_LOOKBACK + 1:
+            continue
+
+        # Calculate velocity (1st derivative): % change per check
+        velocities = []
+        for i in range(1, len(recent)):
+            v = ((recent[i] - recent[i-1]) / recent[i-1]) * 100
+            velocities.append(v)
+
+        if len(velocities) < 2:
+            continue
+
+        current_velocity = velocities[-1]
+        prev_velocity = velocities[-2]
+
+        # Calculate acceleration (2nd derivative)
+        acceleration = current_velocity - prev_velocity
+
+        # Check momentum exit conditions
+        if (current_velocity < MOMENTUM_MIN_VELOCITY and
+            acceleration < MOMENTUM_ACCEL_THRESHOLD):
+            reason = (f"MOMENTUM EXIT: {key} velocity={current_velocity:.2f}%/check, "
+                      f"accel={acceleration:.2f}, declining and accelerating")
+            exits.append((key, reason))
+            log(f"!!! {reason}")
+
+    return exits
 
 
 def place_spike_orders(page, positions, prices, targets):
@@ -869,8 +1254,19 @@ def check_triggers(prices):
             reasons.append(f"{key} L3 EMERGENCY: {dist_stop:.1f}% from stop")
         elif 0 < dist_stop < STOP_L2_PCT:
             reasons.append(f"{key} L2 ALERT: {dist_stop:.1f}% from stop-loss")
+            # Track L2+ zone checks for auto-exit override
+            l2_zone_checks[key] = l2_zone_checks.get(key, 0) + 1
+            if l2_zone_checks[key] >= AUTO_EXIT_L2_CHECKS:
+                # Check if price trend is downward (last 3 bids declining)
+                recent_bids = [s.get(key, 0) for s in price_history[-3:] if s.get(key, 0) > 0]
+                if len(recent_bids) >= 3 and recent_bids[-1] < recent_bids[-2] < recent_bids[-3]:
+                    reasons.append(f"{key} AUTO-EXIT: L2+ for {l2_zone_checks[key]} checks, declining trend")
         elif 0 < dist_stop < STOP_L1_PCT:
             reasons.append(f"{key} L1 WARNING: {dist_stop:.1f}% from stop-loss")
+
+        # Reset L2 counter when not in danger zone
+        if dist_stop >= STOP_L1_PCT:
+            l2_zone_checks.pop(key, None)
 
     # Signal flip detection
     if last_signal_data:
@@ -1106,6 +1502,17 @@ def main():
             send_telegram("*METALS LOOP* All positions already sold. Not starting.")
             return
 
+        # Place cascading stop-loss orders
+        stop_order_state = {}
+        if STOP_ORDER_ENABLED:
+            log("Placing cascading stop-loss orders...")
+            stop_order_state = place_stop_loss_orders(page, POSITIONS)
+            placed_count = sum(
+                len([o for o in s.get("orders", []) if o.get("status") == "placed"])
+                for s in stop_order_state.values()
+            )
+            log(f"  {placed_count} stop orders placed across {len(stop_order_state)} positions")
+
         # Initialize peaks and last-invoke prices
         for key, pos in POSITIONS.items():
             if pos["active"]:
@@ -1171,6 +1578,7 @@ Tiered: T1=haiku T2=sonnet T3=opus
 LLM: {"Ministral+Chronos (60s)" if LLM_AVAILABLE else "DISABLED"}
 Risk: {"MC+Guards+Drawdown+DailyRanges" if RISK_AVAILABLE else "DISABLED"}
 Spike: {"P" + str(SPIKE_PERCENTILE) + " " + str(SPIKE_PARTIAL_PCT) + "% @15:15-16:30" if SPIKE_ENABLED else "OFF"}
+Stops: {"3x cascaded + trailing + momentum" if STOP_ORDER_ENABLED else "L3 only"}
 Positions: {pos_summary}""")
 
         try:
@@ -1314,6 +1722,26 @@ Positions: {pos_summary}""")
                     time.sleep(CHECK_INTERVAL)
                     continue
 
+                # Check stop order fills (every 2nd check)
+                if STOP_ORDER_ENABLED and stop_order_state and check_count % 2 == 0:
+                    filled = check_stop_order_fills(page, stop_order_state, POSITIONS)
+                    if filled:
+                        log(f"Stop orders filled for: {', '.join(filled)}")
+
+                # Check momentum exit
+                momentum_exits = check_momentum_exit(POSITIONS, prices, price_history)
+                for mkey, mreason in momentum_exits:
+                    if POSITIONS[mkey].get("active"):
+                        mbid = prices.get(mkey, {}).get("bid") or 0
+                        if mbid > 0:
+                            log(f"!!! MOMENTUM SELL: {mkey} at {mbid}")
+                            send_telegram(f"*MOMENTUM EXIT* {POSITIONS[mkey]['name']}\nBid: {mbid} | Accelerating decline detected")
+                            emergency_sell(page, mkey, POSITIONS[mkey], mbid)
+
+                # Trailing stop updates (every 5th check)
+                if STOP_ORDER_ENABLED and check_count % 5 == 0:
+                    update_trailing_stops(page, POSITIONS, stop_order_state, prices)
+
                 # Check triggers
                 triggered, reasons = check_triggers(prices)
 
@@ -1330,6 +1758,22 @@ Positions: {pos_summary}""")
                             if dist < STOP_L3_PCT:
                                 emergency_sell(page, key, pos, bid)
                         # State already persisted inside emergency_sell()
+                        break
+
+                # AUTO-EXIT: sell positions stuck in L2 zone with declining trend
+                for r in reasons[:]:
+                    if "AUTO-EXIT" in r:
+                        for key, pos in POSITIONS.items():
+                            if not pos["active"] or key not in prices:
+                                continue
+                            bid = prices[key].get('bid') or 0
+                            if bid <= 0:
+                                continue
+                            dist = ((bid - pos["stop"]) / bid * 100) if bid > 0 else 999
+                            if dist < STOP_L2_PCT:
+                                log(f"!!! AUTO-EXIT SELL: {key} at {bid} (L2+ for {l2_zone_checks.get(key, 0)} checks)")
+                                send_telegram(f"*AUTO-EXIT* {pos['name']}\nBid: {bid} | L2 zone {l2_zone_checks.get(key, 0)} checks, declining")
+                                emergency_sell(page, key, pos, bid)
                         break
 
                 # Log status (every 3rd check)
