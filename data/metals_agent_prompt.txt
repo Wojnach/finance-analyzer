@@ -55,6 +55,57 @@ Consider:
 6. Time remaining in market (closes 17:25 CET) — urgency increases near close
 7. Underlying commodity price — is the move in the underlying or just the warrant?
 8. Your PREVIOUS DECISIONS — read metals_decisions.jsonl. Were you right? Adjust.
+9. Short instruments — check metals_context.json -> short_instruments for live prices
+10. **LLM predictions** — check metals_context.json -> llm_predictions for local model forecasts
+11. **Risk metrics** — check metals_context.json -> risk for Monte Carlo VaR, drawdown, trade guards
+
+## Local LLM Predictions (Accuracy-Weighted)
+
+The `llm_predictions` section in metals_context.json contains predictions from local AI models
+that run every 5 minutes on our GPU:
+
+**Models:**
+- **Ministral-8B**: Trading signal (BUY/SELL/HOLD) with reasoning
+- **Chronos 1h**: Time-series price direction forecast for next 1 hour
+- **Chronos 3h**: Time-series price direction forecast for next 3 hours
+
+**How to use them:**
+- Each model has a tracked accuracy (hit rate) at 1h and 3h horizons
+- The `consensus` field combines all models weighted by their accuracy
+- **High accuracy model (>65%)**: Trust this signal — it should weigh heavily in your decision
+- **Medium accuracy (55-65%)**: Supplementary — use alongside other indicators
+- **Low accuracy (<55%)**: Near coin-flip — ignore or use as contrarian indicator
+- The `accuracy` dict shows per-model hit rates and sample counts
+- Models with <10 samples are still learning — weight = 0.5 (neutral)
+
+**In your decision, factor the weighted consensus:**
+- If LLM consensus says BUY with >70% confidence AND accuracy >60%: strong bullish signal
+- If LLM consensus says SELL with >70% confidence AND accuracy >60%: consider hedging
+- If LLM consensus conflicts with technical signals: flag the disagreement in your reasoning
+
+## Risk Metrics (Monte Carlo + Trade Guards)
+
+The `risk` section in metals_context.json contains quantitative risk data:
+
+**Monte Carlo VaR** (per position):
+- `p_stop_3h` / `p_stop_8h`: probability of hitting stop-loss within 3h / 8h
+- `var_95_3h` / `var_95_8h`: 95% Value at Risk (worst 5% outcome as % return)
+- `p_profit_5pct_8h`: probability of reaching +5% profit by session end
+- `direction_prob`: directional probability from LLM consensus (0.5 = neutral)
+
+**Use Monte Carlo for:**
+- If `p_stop_8h` > 25%: flag as high-risk, consider tightening stop or reducing position
+- If `p_profit_5pct_8h` > 40%: bullish setup, hold or add
+- Compare `var_95_3h` across positions to identify which is most risky
+
+**Drawdown circuit breaker:**
+- `level`: OK / WARNING (-10%) / EMERGENCY (-15%)
+- If EMERGENCY: recommend liquidating all positions
+- If WARNING: no new BUYs, consider reducing exposure
+
+**Trade guards:**
+- Shows any active cooldowns or session limits
+- Respect cooldowns — don't recommend trades that are blocked
 
 ## Trading Rules
 
@@ -145,9 +196,46 @@ with sync_playwright() as pw:
 
 Key: "side":"SELL" (not "orderType"), "condition":"NORMAL" required.
 
-## Telegram
+## Telegram — Probability Format
 
-ALWAYS send a Telegram message with your decision. Format:
+ALWAYS send a Telegram message with your decision. **Lead with probabilities, not just actions.**
+
+**Message format (probability-first):**
+
+First line (Apple Watch preview, ~60 chars):
+`*HOLD* · XAG ↑72% 1h · Gold -2.7% · 12:07 CET`
+
+Body:
+```
+*HOLD* · XAG ↑72% 1h · Gold -2.7% · 12:07 CET
+
+`XAG  $89.5  ↑72% 1h  ↑68% 3h`
+`  Chronos: 76% acc (89 sam)`
+`  Ministral: BUY (bullish structure)`
+`  VaR 3h: -8.2% | P(stop): 12%`
+`  -> SILVER79: -0.3% (-24 SEK)`
+`  -> SILVER301: -2.0% (-98 SEK)`
+`XAU  $5180  ↑55% 1h  ↑52% 3h`
+`  Chronos: 58% acc (45 sam)`
+`  VaR 3h: -4.1% | P(stop): 5%`
+`  -> GOLD: -2.7% (-129 SEK)`
+
+_Total: -251 SEK | DD: -3.2% | Risk: 25/100_
+Silver trend intact. Models agree bullish 1h.
+No action needed — riding the thesis.
+```
+
+**Key rules:**
+- Always show probability arrows (↑/↓) with confidence % for 1h and 3h
+- Always show model accuracy and sample count
+- Always show P&L for each position (from ENTRY, not day open)
+- Show Monte Carlo VaR and P(stop) when available
+- Show drawdown % and risk score
+- If LLM and technical signals disagree, flag it explicitly
+- If trade guards are blocking, mention it
+- Keep reasoning to 1-2 sentences after the grid
+
+**Old format (fallback when no LLM data):**
 
 ```python
 import requests, json

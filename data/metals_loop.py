@@ -1,15 +1,18 @@
 """
-Metals Intraday Trading Loop (Layer 1).
+Metals Intraday Trading Loop v5 (Layer 1).
 Collects price data every 60-90 seconds from Avanza.
 When trigger conditions are met, invokes Claude Code (Layer 2) for trading decisions.
 Claude reads data/metals_context.json and decides to buy/sell/hold.
 
-Token cost management:
-- Heartbeat (every 30 min): uses Haiku model (cheapest, ~2s)
-- Price/trailing triggers: uses Sonnet model (moderate, ~10s)
-- Critical triggers (stop proximity, profit target, EOD): uses Opus (full, ~60s)
-- Minimum 5 min cooldown between invocations
-- Never invokes if previous invocation still running
+Features:
+- Tiered Claude invocation (Haiku/Sonnet/Opus)
+- Local LLM inference (Ministral-8B + Chronos, 5min cycle)
+- Monte Carlo VaR for leveraged warrants
+- Trade guards (cooldowns, session limits, loss escalation)
+- Drawdown circuit breaker (-15% emergency liquidation)
+- Multi-level stop-loss (L1 warn / L2 alert / L3 emergency auto-sell)
+- Short instrument tracking (BEAR SILVER X5)
+- Time server (timeapi.io) for accurate CET
 
 Run: .venv/Scripts/python.exe data/metals_loop.py
 """
@@ -18,6 +21,28 @@ os.chdir(r"Q:/finance-analyzer")
 
 import requests
 from playwright.sync_api import sync_playwright
+
+# --- Optional modules (graceful fallback) ---
+try:
+    sys.path.insert(0, "data")
+    from metals_llm import (
+        start_llm_thread, stop_llm_thread, get_llm_signals,
+        get_llm_accuracy, get_llm_summary, get_llm_age,
+    )
+    LLM_AVAILABLE = True
+except ImportError as e:
+    print(f"[WARN] metals_llm import failed: {e}", flush=True)
+    LLM_AVAILABLE = False
+
+try:
+    from metals_risk import (
+        get_risk_summary, log_portfolio_value, check_portfolio_drawdown,
+        check_trade_guard, record_metals_trade, simulate_all_positions,
+    )
+    RISK_AVAILABLE = True
+except ImportError as e:
+    print(f"[WARN] metals_risk import failed: {e}", flush=True)
+    RISK_AVAILABLE = False
 
 # --- CONFIG ---
 CHECK_INTERVAL = 90           # seconds between price checks
@@ -29,8 +54,12 @@ HEARTBEAT_CHECKS = 20         # invoke every N checks (~30 min at 90s)
 MIN_INVOKE_INTERVAL = 300     # minimum 5 min between invocations
 EOD_HOUR_UTC = 16             # 17:00 CET = 16:00 UTC
 
+# Stop levels (distance from barrier as % of bid)
+STOP_L1_PCT = 8.0   # L1: warning — log + flag in context
+STOP_L2_PCT = 5.0   # L2: alert — Telegram + force Claude invocation
+STOP_L3_PCT = 2.0   # L3: emergency — auto-sell immediately
+
 # Tier config: model, timeout, max_turns
-# Matches the main loop's tiered approach
 TIER_CONFIG = {
     1: {"model": "haiku",  "timeout": 60,   "max_turns": 8,  "label": "QUICK"},
     2: {"model": "sonnet", "timeout": 180,  "max_turns": 15, "label": "ANALYSIS"},
@@ -53,8 +82,10 @@ POSITIONS = {
     },
 }
 
-SHORT_INSTRUMENT = {
-    "name": "BEAR SILVER X5 AVA 12", "ob_id": "2286417", "api_type": "certificate",
+SHORT_INSTRUMENTS = {
+    "bear_silver_x5": {
+        "name": "BEAR SILVER X5 AVA 12", "ob_id": "2286417", "api_type": "certificate",
+    },
 }
 
 ACCOUNT_ID = "1625505"
@@ -77,6 +108,7 @@ claude_start = 0
 claude_timeout = 300
 invoke_count = 0
 startup_grace = True      # skip first check to establish baseline
+short_prices = {}         # latest prices for short instruments
 
 def send_telegram(msg):
     try:
@@ -96,15 +128,40 @@ def pnl_pct(current, entry):
     if entry == 0: return 0
     return ((current - entry) / entry) * 100
 
-def is_market_hours():
+def get_cet_time():
+    """Get current CET/CEST time from timeapi.io, fallback to UTC+1."""
+    try:
+        r = requests.get(
+            "http://timeapi.io/api/time/current/zone?timeZone=Europe/Stockholm",
+            timeout=3
+        )
+        if r.status_code == 200:
+            data = r.json()
+            h = data["hour"]
+            m = data["minute"]
+            return h + m / 60, f"{h:02d}:{m:02d} CET", "timeapi"
+    except:
+        pass
+    # Fallback: UTC+1 (doesn't handle DST)
     now = datetime.datetime.now(datetime.timezone.utc)
-    hour_utc = now.hour + now.minute / 60
-    weekday = now.weekday()
-    return weekday < 5 and 8.0 <= hour_utc <= 16.42
+    h = (now.hour + 1) % 24
+    m = now.minute
+    return h + m / 60, f"{h:02d}:{m:02d} CET", "system_utc+1"
 
 def cet_hour():
+    h, _, _ = get_cet_time()
+    return h
+
+def cet_time_str():
+    _, ts, _ = get_cet_time()
+    return ts
+
+def is_market_hours():
+    """Check if Avanza warrant market is open (Mon-Fri 09:00-17:25 CET)."""
     now = datetime.datetime.now(datetime.timezone.utc)
-    return now.hour + 1 + now.minute / 60
+    weekday = now.weekday()
+    h = cet_hour()
+    return weekday < 5 and 9.0 <= h <= 17.42
 
 def fetch_price(page, ob_id, api_type):
     result = page.evaluate("""async (args) => {
@@ -127,7 +184,6 @@ def fetch_price(page, ob_id, api_type):
 def read_signal_data():
     """Read XAG/XAU signal data from the main loop's agent_summary.json."""
     try:
-        # Try the full summary first (has per-ticker data)
         path = "data/agent_summary.json"
         if not os.path.exists(path):
             path = "data/agent_summary_compact.json"
@@ -142,13 +198,8 @@ def read_signal_data():
 
         result = {"age_min": round(age_min, 1)}
 
-        # agent_summary.json has tickers at top level
         tickers = data.get("tickers", {})
         if not tickers:
-            # compact format: look for signal data in different structure
-            # The compact JSON has forecast_signals, cumulative_gains, etc.
-            # but ticker-level signals are in the full JSON only
-            # Fall back to using whatever we can find
             for key in ["forecast_signals", "cumulative_gains"]:
                 if key in data:
                     result[key] = data[key]
@@ -173,7 +224,6 @@ def read_signal_data():
                     "vote_detail": extra.get("_vote_detail", ""),
                 }
 
-        # Timeframe heatmap
         timeframes = data.get("timeframe_heatmap", {})
         for ticker in ["XAG-USD", "XAU-USD"]:
             if ticker in timeframes and ticker in result:
@@ -185,7 +235,7 @@ def read_signal_data():
         return {}
 
 def read_decision_history(n=5):
-    """Read the last N decisions from metals_decisions.jsonl for context."""
+    """Read the last N decisions from metals_decisions.jsonl."""
     try:
         path = "data/metals_decisions.jsonl"
         if not os.path.exists(path):
@@ -202,11 +252,76 @@ def read_decision_history(n=5):
     except:
         return []
 
+def emergency_sell(page, key, pos, bid):
+    """L3 emergency auto-sell via Avanza API."""
+    log(f"!!! L3 EMERGENCY SELL: {key} at {bid} (entry: {pos['entry']}, stop: {pos['stop']})")
+    send_telegram(f"*L3 EMERGENCY SELL* {pos['name']}\nBid: {bid} | Entry: {pos['entry']}\nAuto-selling {pos['units']} units")
+
+    try:
+        # Get CSRF token
+        cookies = page.context.cookies()
+        csrf = None
+        for c in cookies:
+            if c["name"] == "AZACSRF":
+                csrf = c["value"]
+                break
+
+        if not csrf:
+            log("EMERGENCY SELL FAILED: no CSRF token")
+            return
+
+        result = page.evaluate("""async (args) => {
+            const [payload, token] = args;
+            const resp = await fetch('https://www.avanza.se/_api/trading-critical/rest/order/new', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
+                credentials: 'include',
+                body: JSON.stringify(payload),
+            });
+            return {status: resp.status, body: await resp.text()};
+        }""", [{
+            "accountId": ACCOUNT_ID,
+            "orderbookId": pos["ob_id"],
+            "side": "SELL",
+            "condition": "NORMAL",
+            "price": bid,
+            "validUntil": (datetime.datetime.now() + datetime.timedelta(days=1)).strftime("%Y-%m-%d"),
+            "volume": pos["units"],
+        }, csrf])
+
+        log(f"Emergency sell result: {result}")
+        send_telegram(f"*L3 SELL RESULT*: status={result.get('status')}")
+
+        # Log trade
+        trade = {
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "action": "EMERGENCY_SELL",
+            "position": key,
+            "name": pos["name"],
+            "units": pos["units"],
+            "price": bid,
+            "entry": pos["entry"],
+            "pnl_pct": round(pnl_pct(bid, pos["entry"]), 2),
+            "result": result,
+        }
+        with open("data/metals_trades.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(trade, ensure_ascii=False) + "\n")
+
+        # Record in trade guards
+        if RISK_AVAILABLE:
+            record_metals_trade(key, "SELL", pnl_pct_value=pnl_pct(bid, pos["entry"]))
+
+        pos["active"] = False
+    except Exception as e:
+        log(f"Emergency sell FAILED: {e}")
+        send_telegram(f"*L3 SELL FAILED*: {e}")
+
 def write_context(prices, trigger_reason, tier=2):
     """Write context JSON for Claude Layer 2."""
     now = datetime.datetime.now(datetime.timezone.utc)
     ctx = {
         "timestamp": now.isoformat(),
+        "cet_time": cet_time_str(),
         "check_count": check_count,
         "invoke_count": invoke_count,
         "trigger_reason": trigger_reason,
@@ -219,16 +334,25 @@ def write_context(prices, trigger_reason, tier=2):
         "price_history_recent": price_history[-10:] if price_history else [],
         "signals": last_signal_data,
         "recent_decisions": read_decision_history(5),
-        "short_instrument": {
-            "name": SHORT_INSTRUMENT["name"],
-            "ob_id": SHORT_INSTRUMENT["ob_id"],
-            "api_type": SHORT_INSTRUMENT["api_type"],
-            "note": "5x short silver certificate, available for hedging",
-        },
+        "short_instruments": {},
+        "llm_predictions": {},
+        "risk": {},
         "trades_today_file": "data/metals_trades.jsonl",
     }
 
-    # Include historical stats if available (lightweight — just the stats summary)
+    # Short instrument prices
+    for sk, si in SHORT_INSTRUMENTS.items():
+        sp = short_prices.get(sk, {})
+        ctx["short_instruments"][sk] = {
+            "name": si["name"],
+            "ob_id": si["ob_id"],
+            "api_type": si["api_type"],
+            "bid": sp.get("bid"),
+            "ask": sp.get("ask"),
+            "note": "5x short silver certificate, available for hedging",
+        }
+
+    # Historical stats
     try:
         with open("data/metals_history.json", "r", encoding="utf-8") as f:
             history = json.load(f)
@@ -238,6 +362,21 @@ def write_context(prices, trigger_reason, tier=2):
         }
     except:
         pass
+
+    # LLM predictions
+    if LLM_AVAILABLE:
+        try:
+            ctx["llm_predictions"] = get_llm_summary()
+        except Exception:
+            pass
+
+    # Risk summary (Monte Carlo + drawdown + guards)
+    if RISK_AVAILABLE:
+        try:
+            llm_sigs = get_llm_signals() if LLM_AVAILABLE else None
+            ctx["risk"] = get_risk_summary(POSITIONS, prices, last_signal_data, llm_sigs)
+        except Exception as e:
+            ctx["risk"] = {"error": str(e)}
 
     total_val = 0
     total_inv = 0
@@ -249,7 +388,7 @@ def write_context(prices, trigger_reason, tier=2):
         val = bid * pos["units"]
         peak = peak_bids.get(key, 0)
         from_peak = pnl_pct(bid, peak) if peak > 0 and bid > 0 else 0
-        dist_stop = pnl_pct(bid, pos["stop"]) if bid > 0 else 999
+        dist_stop = ((bid - pos["stop"]) / bid * 100) if bid > 0 else 999
         invested = pos["entry"] * pos["units"]
 
         ctx["positions"][key] = {
@@ -276,9 +415,9 @@ def write_context(prices, trigger_reason, tier=2):
 
         if p.get('underlying'):
             if 'silver' in key.lower():
-                ctx["underlying"]["silver"] = p['underlying']
+                ctx["underlying"]["silver"] = {"price": p['underlying'], "bid": p.get('bid'), "ask": p.get('ask')}
             elif 'gold' in key.lower():
-                ctx["underlying"]["gold"] = p['underlying']
+                ctx["underlying"]["gold"] = {"price": p['underlying'], "bid": p.get('bid'), "ask": p.get('ask')}
 
         if pos["active"]:
             total_val += val
@@ -298,24 +437,19 @@ def write_context(prices, trigger_reason, tier=2):
     return ctx
 
 def classify_tier(reasons):
-    """Classify trigger into tier (1=cheap workhorse, 2=deeper analysis, 3=critical).
-
-    Haiku handles the bulk of invocations (price moves, trailing, heartbeats).
-    Sonnet only for multi-trigger events or large moves needing deeper analysis.
-    Opus reserved for critical decisions (stop proximity, profit targets, EOD).
-    """
-    # Tier 3 (Critical — Opus): stop proximity, profit target, EOD
-    critical_patterns = ["stop-loss", "end_of_day", "profit target"]
+    """Classify trigger into tier (1=cheap workhorse, 2=deeper analysis, 3=critical)."""
+    critical_patterns = ["stop-loss", "end_of_day", "profit target", "L2 ALERT", "L3 EMERGENCY",
+                         "drawdown", "EMERGENCY"]
     if any(p in r for r in reasons for p in critical_patterns):
         return 3
 
-    # Tier 2 (Deeper — Sonnet): only when multiple triggers fire simultaneously,
-    # or very large moves that need more careful analysis
+    # LLM high-confidence triggers get T2
+    if any("LLM consensus" in r for r in reasons):
+        return 2
+
     if len(reasons) >= 2:
         return 2
 
-    # Tier 1 (Workhorse — Haiku): single triggers, heartbeats, routine
-    # This handles: price moves, trailing drops, signal flips, heartbeats
     return 1
 
 def check_triggers(prices):
@@ -350,12 +484,16 @@ def check_triggers(prices):
         if pnl >= TRIGGER_PROFIT:
             reasons.append(f"{key} profit target zone +{pnl:.1f}%")
 
-        # Near stop-loss
+        # Multi-level stop proximity
         dist_stop = ((bid - pos["stop"]) / bid * 100) if bid > 0 else 999
-        if 0 < dist_stop < TRIGGER_STOP_NEAR:
-            reasons.append(f"{key} {dist_stop:.1f}% from stop-loss")
+        if 0 < dist_stop < STOP_L3_PCT:
+            reasons.append(f"{key} L3 EMERGENCY: {dist_stop:.1f}% from stop")
+        elif 0 < dist_stop < STOP_L2_PCT:
+            reasons.append(f"{key} L2 ALERT: {dist_stop:.1f}% from stop-loss")
+        elif 0 < dist_stop < STOP_L1_PCT:
+            reasons.append(f"{key} L1 WARNING: {dist_stop:.1f}% from stop-loss")
 
-    # Signal flip detection (sustained — check if action changed from previous)
+    # Signal flip detection
     if last_signal_data:
         for ticker in ["XAG-USD", "XAU-USD"]:
             if ticker in last_signal_data:
@@ -364,6 +502,36 @@ def check_triggers(prices):
                 if prev_action and current_action != prev_action and current_action in ("BUY", "SELL"):
                     reasons.append(f"signal flip {ticker}: {prev_action}->{current_action}")
                 prev_signal_actions[ticker] = current_action
+
+    # LLM consensus trigger (high confidence + proven accuracy)
+    if LLM_AVAILABLE and check_count > 5:
+        try:
+            llm_sigs = get_llm_signals()
+            llm_acc = get_llm_accuracy()
+            for ticker, data in llm_sigs.items():
+                consensus = data.get("consensus", {})
+                direction = consensus.get("direction", "flat")
+                confidence = consensus.get("confidence", 0)
+                has_accuracy = any(
+                    v.get("total", 0) >= 10 and v.get("accuracy", 0) >= 0.6
+                    for k, v in llm_acc.items()
+                )
+                if direction in ("up", "down") and confidence >= 0.7 and has_accuracy:
+                    action = "BUY" if direction == "up" else "SELL"
+                    reasons.append(f"LLM consensus {ticker}: {action} ({confidence:.0%})")
+        except Exception:
+            pass
+
+    # Drawdown circuit breaker
+    if RISK_AVAILABLE and check_count % 10 == 0 and check_count > 0:
+        try:
+            dd = check_portfolio_drawdown(POSITIONS, prices)
+            if dd.get("breached"):
+                reasons.append(f"EMERGENCY drawdown breached: {dd['current_drawdown_pct']:.1f}%")
+            elif dd.get("level") == "WARNING":
+                reasons.append(f"drawdown warning: {dd['current_drawdown_pct']:.1f}%")
+        except Exception:
+            pass
 
     # Heartbeat (every ~30 min)
     if check_count > 0 and check_count % HEARTBEAT_CHECKS == 0:
@@ -417,7 +585,7 @@ def invoke_claude(trigger_reasons, tier=2):
             log(f"Claude still running ({elapsed:.0f}s), skipping invocation")
             return False
 
-    # Guard 2: Cooldown — minimum interval between invocations
+    # Guard 2: Cooldown
     since_last = time.time() - last_invoke_time
     if last_invoke_time > 0 and since_last < MIN_INVOKE_INTERVAL:
         remaining = MIN_INVOKE_INTERVAL - since_last
@@ -433,13 +601,11 @@ def invoke_claude(trigger_reasons, tier=2):
         log(f"Cannot read {prompt_file}")
         return False
 
-    # Add trigger context and tier instruction to prompt
     reason_str = "; ".join(trigger_reasons[:5])
     tier_label = tier_cfg["label"]
-    prompt = f"{base_prompt}\n\n## This Invocation\nTier: {tier} ({tier_label})\nTrigger: {reason_str}\nTime: {datetime.datetime.now().strftime('%H:%M CET')}\nCheck #{check_count}, Invocation #{invoke_count + 1}"
+    prompt = f"{base_prompt}\n\n## This Invocation\nTier: {tier} ({tier_label})\nTrigger: {reason_str}\nTime: {cet_time_str()}\nCheck #{check_count}, Invocation #{invoke_count + 1}"
 
-    # Tier 1 (Haiku workhorse) gets a focused prompt — reads full context but
-    # keeps analysis brief. Can recommend trades but prefers HOLD.
+    # Tier 1 (Haiku) gets focused prompt
     if tier == 1:
         prompt = (
             "You are the metals intraday trading agent (QUICK ASSESSMENT).\n"
@@ -447,16 +613,17 @@ def invoke_claude(trigger_reasons, tier=2):
             "Read data/metals_decisions.jsonl — check your last 3 decisions for continuity.\n"
             "Read memory/trading_rules.md — follow the mandatory checklist.\n\n"
             "For EACH position: assess P&L from ENTRY, distance from peak, distance from stop.\n"
+            "Check the `risk` section for Monte Carlo VaR and drawdown status.\n"
+            "Check `llm_predictions` for model consensus and accuracy.\n"
             "If a position is in danger (near stop, big drop from peak), flag it clearly.\n"
             "If everything is stable, confirm HOLD with brief reasoning.\n\n"
             "Strategic thesis: Silver bull 2026, target ATH. Bias HOLD. Only sell on structure break.\n\n"
             "ALWAYS: (1) Log decision to data/metals_decisions.jsonl, (2) Send Telegram with P&L per position.\n"
             "Keep it concise — you are Haiku, optimize for speed.\n"
-            f"\nTrigger: {reason_str}\nTime: {datetime.datetime.now().strftime('%H:%M CET')}\n"
+            f"\nTrigger: {reason_str}\nTime: {cet_time_str()}\n"
             f"Check #{check_count}, Invocation #{invoke_count + 1}"
         )
 
-    # Find claude executable
     claude_cmd = shutil.which("claude")
     if not claude_cmd:
         log("claude not found on PATH!")
@@ -467,8 +634,6 @@ def invoke_claude(trigger_reasons, tier=2):
         "--allowedTools", "Edit,Read,Bash,Write",
         "--max-turns", str(tier_cfg["max_turns"]),
     ]
-
-    # Add model flag for cheaper tiers
     if tier_cfg["model"]:
         cmd.extend(["--model", tier_cfg["model"]])
 
@@ -483,7 +648,6 @@ def invoke_claude(trigger_reasons, tier=2):
         log_fh.write(f"Trigger: {reason_str}\n")
         log_fh.write(f"{'='*60}\n")
 
-        # Strip Claude Code session markers to avoid nested session error
         agent_env = os.environ.copy()
         agent_env.pop("CLAUDECODE", None)
         agent_env.pop("CLAUDE_CODE_ENTRYPOINT", None)
@@ -504,7 +668,6 @@ def invoke_claude(trigger_reasons, tier=2):
         log(f"Claude T{tier} invoked (pid={claude_proc.pid}, model={tier_cfg['model'] or 'opus'}, "
             f"max_turns={tier_cfg['max_turns']}, timeout={tier_cfg['timeout']}s)")
 
-        # Brief Telegram notification (skip for heartbeats to reduce noise)
         if tier >= 2:
             send_telegram(f"_Metals L2 T{tier} ({tier_label}): {reason_str}_")
 
@@ -521,12 +684,18 @@ def invoke_claude(trigger_reasons, tier=2):
 def main():
     global check_count, last_signal_data, last_invoke_prices, startup_grace
     global claude_proc, claude_log_fh, claude_start, claude_timeout
+    global short_prices
 
-    log("Starting metals trading loop (v2 — tiered invocation)...")
+    # Probe time server on startup
+    h, ts, src = get_cet_time()
+    log(f"Starting metals trading loop (v5 — LLM + Monte Carlo + Trade Guards)...")
+    log(f"Time: {ts} (source: {src})")
     log(f"Check interval: {CHECK_INTERVAL}s | Heartbeat: every {HEARTBEAT_CHECKS} checks (~{HEARTBEAT_CHECKS*CHECK_INTERVAL//60}min)")
-    log(f"Triggers: price>{TRIGGER_PRICE_MOVE}% | trail>{TRIGGER_TRAILING}% | profit>{TRIGGER_PROFIT}% | stop<{TRIGGER_STOP_NEAR}%")
+    log(f"Triggers: price>{TRIGGER_PRICE_MOVE}% | trail>{TRIGGER_TRAILING}% | profit>{TRIGGER_PROFIT}%")
+    log(f"Stop levels: L1(warn)<{STOP_L1_PCT}% | L2(alert)<{STOP_L2_PCT}% | L3(emergency)<{STOP_L3_PCT}%")
     log(f"Cooldown: {MIN_INVOKE_INTERVAL}s between invocations")
     log(f"Tiers: T1=haiku(8t,60s) | T2=sonnet(15t,180s) | T3=opus(20t,300s)")
+    log(f"Short instruments: {', '.join(v['name'] for v in SHORT_INSTRUMENTS.values())}")
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
@@ -551,18 +720,41 @@ def main():
         if last_signal_data:
             log(f"  Signal data loaded (age: {last_signal_data.get('age_min', '?')}min)")
 
-        # Estimate daily token budget
-        # At 90s intervals over 8.5h market day: ~340 checks
-        # Most triggers: T1 haiku (~25/day, ~1K tokens each = ~25K)
-        # Multi-trigger events: T2 sonnet (~3-5/day, ~5K tokens each = ~20K)
-        # Critical decisions: T3 opus (~1-2/day, ~20K tokens = ~30K)
-        # Total: ~75K tokens/day — well within Max subscription budget
         log("Token budget estimate: ~75K tokens/day (25 haiku + 4 sonnet + 1 opus)")
 
-        send_telegram(f"""*METALS LOOP v2 STARTED*
-Tiered invocation: T1=haiku(30min) T2=sonnet(triggers) T3=opus(critical)
-Cooldown: {MIN_INVOKE_INTERVAL//60}min between invocations
-Positions: gold(5x), silver79(1.3x), silver301(4.3x)""")
+        # Start local LLM background thread
+        if LLM_AVAILABLE:
+            def _get_signal_data():
+                return last_signal_data
+
+            def _get_underlying_prices():
+                result = {}
+                if price_history:
+                    snap = price_history[-1]
+                    silver_und = snap.get("silver79_und") or snap.get("silver301_und")
+                    gold_und = snap.get("gold_und")
+                    if silver_und and silver_und > 0:
+                        result["XAG-USD"] = silver_und
+                    if gold_und and gold_und > 0:
+                        result["XAU-USD"] = gold_und
+                return result
+
+            start_llm_thread(_get_signal_data, _get_underlying_prices)
+            log("LLM thread: Ministral + Chronos running every 5min")
+        else:
+            log("LLM thread: NOT available (import failed)")
+
+        if RISK_AVAILABLE:
+            log("Risk module: Monte Carlo + Trade Guards + Drawdown active")
+        else:
+            log("Risk module: NOT available (import failed)")
+
+        send_telegram(f"""*METALS LOOP v5 STARTED*
+Tiered: T1=haiku T2=sonnet T3=opus
+LLM: {"Ministral+Chronos (5min)" if LLM_AVAILABLE else "DISABLED"}
+Risk: {"MC+Guards+Drawdown" if RISK_AVAILABLE else "DISABLED"}
+Cooldown: {MIN_INVOKE_INTERVAL//60}min
+Positions: gold(8x), silver79(5x), silver301(4.3x)""")
 
         try:
             while True:
@@ -589,7 +781,6 @@ Positions: gold(5x), silver79(1.3x), silver301(4.3x)""")
                             p = fetch_price(page, pos["ob_id"], pos["api_type"])
                             if p:
                                 prices[key] = p
-                                # Update peak
                                 bid = p.get('bid') or 0
                                 if bid > peak_bids.get(key, 0):
                                     peak_bids[key] = bid
@@ -597,6 +788,16 @@ Positions: gold(5x), silver79(1.3x), silver301(4.3x)""")
                     log(f"Price error: {e}")
                     time.sleep(CHECK_INTERVAL)
                     continue
+
+                # Fetch short instrument prices (every 4th check)
+                if check_count % 4 == 0:
+                    for sk, si in SHORT_INSTRUMENTS.items():
+                        try:
+                            sp = fetch_price(page, si["ob_id"], si["api_type"])
+                            if sp:
+                                short_prices[sk] = sp
+                        except Exception:
+                            pass
 
                 # Read signal data periodically (every ~6 min)
                 if check_count % 4 == 0:
@@ -615,7 +816,14 @@ Positions: gold(5x), silver79(1.3x), silver301(4.3x)""")
                 if len(price_history) > 120:
                     price_history.pop(0)
 
-                # Startup grace: first check establishes baseline without triggering
+                # Log portfolio value for drawdown tracking (every 10th check)
+                if RISK_AVAILABLE and check_count % 10 == 0:
+                    try:
+                        log_portfolio_value(POSITIONS, prices)
+                    except Exception:
+                        pass
+
+                # Startup grace
                 if startup_grace:
                     startup_grace = False
                     log(f"#{check_count} Baseline established (grace period)")
@@ -625,6 +833,20 @@ Positions: gold(5x), silver79(1.3x), silver301(4.3x)""")
                 # Check triggers
                 triggered, reasons = check_triggers(prices)
 
+                # L3 EMERGENCY: auto-sell positions near barrier
+                for r in reasons[:]:
+                    if "L3 EMERGENCY" in r:
+                        for key, pos in POSITIONS.items():
+                            if not pos["active"] or key not in prices:
+                                continue
+                            bid = prices[key].get('bid') or 0
+                            if bid <= 0:
+                                continue
+                            dist = ((bid - pos["stop"]) / bid * 100) if bid > 0 else 999
+                            if dist < STOP_L3_PCT:
+                                emergency_sell(page, key, pos, bid)
+                        break
+
                 # Log status (every 3rd check)
                 if check_count % 3 == 0:
                     parts = []
@@ -633,21 +855,37 @@ Positions: gold(5x), silver79(1.3x), silver301(4.3x)""")
                             bid = prices[key].get('bid', 0)
                             pnl = pnl_pct(bid, pos["entry"])
                             parts.append(f"{key}:{bid}({pnl:+.1f}%)")
-                    log(f"#{check_count} {' | '.join(parts)}" +
+                    cet = cet_time_str()
+                    # Add LLM consensus tag
+                    llm_tag = ""
+                    if LLM_AVAILABLE:
+                        try:
+                            llm_sigs = get_llm_signals()
+                            for t, d in llm_sigs.items():
+                                c = d.get("consensus", {})
+                                if c.get("direction") in ("up", "down"):
+                                    short_t = t.split("-")[0]
+                                    llm_tag += f" {short_t}={'UP' if c['direction']=='up' else 'DN'}({c.get('confidence',0):.0%})"
+                        except Exception:
+                            pass
+                    # Add risk score
+                    risk_tag = ""
+                    if RISK_AVAILABLE:
+                        try:
+                            dd = check_portfolio_drawdown(POSITIONS, prices)
+                            risk_tag = f" DD:{dd.get('current_pnl_pct', 0):+.1f}%"
+                        except Exception:
+                            pass
+                    log(f"#{check_count} [{cet}] {' | '.join(parts)}{llm_tag}{risk_tag}" +
                         (f" [TRIGGER: {reasons[0]}]" if triggered else ""))
 
                 # Invoke Claude if triggered
                 if triggered:
                     tier = classify_tier(reasons)
-
-                    # Write fresh context
                     write_context(prices, "; ".join(reasons), tier=tier)
-
-                    # Update last-invoke prices
                     for key in prices:
                         if prices[key].get('bid'):
                             last_invoke_prices[key] = prices[key]['bid']
-
                     invoke_claude(reasons, tier=tier)
 
                 # Check if Claude finished (non-blocking)
@@ -683,6 +921,11 @@ Positions: gold(5x), silver79(1.3x), silver301(4.3x)""")
             send_telegram(f"*METALS LOOP CRASH*: {e}")
         finally:
             _kill_claude()
+            if LLM_AVAILABLE:
+                try:
+                    stop_llm_thread()
+                except:
+                    pass
             browser.close()
             log(f"Loop stopped: {check_count} checks, {invoke_count} invocations")
 
