@@ -503,6 +503,10 @@
             <div class="sl">Bold</div>
             <div class="sv">--</div>
           </div>
+          <div class="st" id="holdingsSum" style="display:none">
+            <div class="sl">Holdings</div>
+            <div class="sv" id="holdingsLabel" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">--</div>
+          </div>
         </div>
         <div class="hdr-controls">
           <div class="rf">
@@ -564,6 +568,18 @@
           </div>
         </div>
 
+        <!-- Warrant + Risk panels -->
+        <div class="twocol">
+          <div class="pnl">
+            <div class="pt">Warrant Portfolio</div>
+            <div id="warrantC"><div class="nd">Loading warrants...</div></div>
+          </div>
+          <div class="pnl">
+            <div class="pt">Risk Overview (Monte Carlo)</div>
+            <div id="riskC"><div class="nd">Loading risk data...</div></div>
+          </div>
+        </div>
+
         <div class="col" id="lorS" style="display:none">
           <button class="colt" onclick="tog('lor')">LoRA Training Status</button>
           <div class="colc" id="lorC"></div>
@@ -575,10 +591,10 @@
       </div>
 
       <!-- ============================================================
-           TAB: Signal Heatmap (25 signals x tickers)
+           TAB: Signal Heatmap (30 signals x tickers)
            ============================================================ -->
       <div class="tab-content" id="tab-signals">
-        <div class="stit">25-Signal Heatmap (All Tickers)</div>
+        <div class="stit">30-Signal Heatmap (All Tickers)</div>
         <div class="sig-heatmap-wrap" id="sigHeatWrap">
           <div class="nd">Loading signal heatmap...</div>
         </div>
@@ -869,9 +885,7 @@
           v.push({ n: "Sent", a: /positive/i.test(ex.sentiment) && sConf > 0.4 ? "BUY" : /negative/i.test(ex.sentiment) && sConf > 0.4 ? "SELL" : "HOLD" });
         }
         if (ex.ministral_action) v.push({ n: "LLM", a: ex.ministral_action.toUpperCase() });
-        if (ex.custom_lora_action) v.push({ n: "LoRA", a: ex.custom_lora_action.toUpperCase() });
-        if (ex.ml_action) v.push({ n: "ML", a: ex.ml_action.toUpperCase() });
-        if (ex.funding_action) v.push({ n: "Fund", a: ex.funding_action.toUpperCase() });
+        // Skip disabled signals: ML (28.2%), Funding (27.0%), Custom LoRA (20.9%)
         if (ex.volume_action) v.push({ n: "Vol", a: ex.volume_action.toUpperCase() });
         return v;
       }
@@ -901,8 +915,24 @@
             '</div><div class="tp">' + fp(s.price_usd) + '</div></div><span class="ab ab-' +
             (s.action || "HOLD") + '">' + (s.action || "HOLD") + '</span></div>';
 
+          // Regime badge
+          var regime = s.regime || "";
+          var regBadge = "";
+          if (regime) {
+            var regCls = regime.indexOf("up") >= 0 || regime === "breakout" ? "var(--grn)" : regime.indexOf("down") >= 0 || regime === "capitulation" ? "var(--red)" : regime === "high-vol" ? "var(--org)" : "var(--txm)";
+            regBadge = ' <span style="font-size:9px;padding:1px 5px;border-radius:3px;background:' + regCls + '20;color:' + regCls + ';font-weight:600;border:1px solid ' + regCls + '40">' + eh(regime) + '</span>';
+          }
+
           h += '<div class="vt">' + buyC + 'B/' + sellC + 'S/' + holdC + 'H &middot; ' +
-            (ex._voters != null ? ex._voters : vt.length) + ' active voters</div>';
+            (ex._voters != null ? ex._voters : vt.length) + ' active voters' + regBadge + '</div>';
+
+          // Weighted confidence bar (accuracy-adjusted)
+          var wc = s.weighted_confidence;
+          if (wc != null && wc > 0) {
+            var wcPct = (wc * 100).toFixed(0);
+            var wcColor = wc >= 0.6 ? "var(--grn)" : wc >= 0.4 ? "var(--yel)" : "var(--red)";
+            h += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="font-size:9px;color:var(--txm);min-width:52px">W.Conf</span><div style="flex:1;height:4px;background:var(--bdr);border-radius:2px;overflow:hidden"><div style="height:100%;width:' + wcPct + '%;background:' + wcColor + ';border-radius:2px"></div></div><span style="font-size:9px;color:' + wcColor + ';font-weight:600">' + wcPct + '%</span></div>';
+          }
 
           h += '<div class="inds"><div class="ind"><div class="ind-l">RSI</div><div class="ind-v" style="color:' +
             rc(s.rsi) + '">' + fn(s.rsi, 1) +
@@ -1170,7 +1200,7 @@
         });
 
         // Group: enhanced signals
-        h += '<tr><td colspan="' + (tickers.length + 1) + '" style="font-size:9px;color:var(--cyn);padding:6px 4px 2px;background:transparent !important;font-weight:700;text-transform:uppercase;letter-spacing:1px">Enhanced Composite Signals (12-25)</td></tr>';
+        h += '<tr><td colspan="' + (tickers.length + 1) + '" style="font-size:9px;color:var(--cyn);padding:6px 4px 2px;background:transparent !important;font-weight:700;text-transform:uppercase;letter-spacing:1px">Enhanced Composite Signals (12-30)</td></tr>';
         enhanced.forEach(function (sig) {
           h += '<tr><td>' + sig + '</td>';
           tickers.forEach(function (t) {
@@ -1537,6 +1567,18 @@
         h += '<div style="font-size:11px;color:var(--txd)">Last trigger: ' + (d.last_trigger || "none") + '</div>';
         h += '</div>';
         h += '</div>';
+        // Module failures
+        var mf = d.module_failures;
+        if (mf && mf.modules && mf.modules.length > 0) {
+          h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase;margin-bottom:6px">Module Failures</div>';
+          h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">';
+          mf.modules.forEach(function (mod) {
+            h += '<span style="font-size:10px;padding:3px 8px;border-radius:4px;background:rgba(255,68,68,0.15);color:var(--red);border:1px solid rgba(255,68,68,0.3);font-weight:600">' + eh(mod) + '</span>';
+          });
+          h += '</div>';
+          if (mf.ts) h += '<div style="font-size:9px;color:var(--txm);margin-bottom:8px">Last failure: ' + ftFull(mf.ts) + '</div>';
+        }
+
         if (d.recent_errors && d.recent_errors.length > 0) {
           h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase;margin-bottom:6px">Recent Errors</div>';
           d.recent_errors.forEach(function (e) {
@@ -1829,6 +1871,118 @@
       }
 
       /* ================================================================
+         Render: Warrant portfolio
+         ================================================================ */
+      async function loadWarrants() {
+        var c = document.getElementById("warrantC");
+        var data = await fj("/api/warrants");
+        if (!data || !data.holdings || !Object.keys(data.holdings).length) {
+          c.innerHTML = '<div class="nd">No warrant positions</div>';
+          return;
+        }
+        var h = '<table class="tt"><thead><tr><th>Warrant</th><th>Units</th><th>Entry</th><th>Underlying</th><th>Leverage</th></tr></thead><tbody>';
+        for (var key in data.holdings) {
+          var w = data.holdings[key];
+          h += '<tr><td style="font-weight:600">' + eh(w.name || key) + '</td>';
+          h += '<td>' + (w.units || 0) + '</td>';
+          h += '<td>' + fn(w.entry_price_sek, 2) + ' SEK</td>';
+          h += '<td>' + eh(w.underlying || "--") + '</td>';
+          h += '<td style="color:var(--org);font-weight:600">' + (w.leverage || 1) + 'x</td>';
+          h += '</tr>';
+        }
+        h += '</tbody></table>';
+        c.innerHTML = h;
+      }
+
+      /* ================================================================
+         Render: Risk panel (Monte Carlo + VaR)
+         ================================================================ */
+      async function loadRisk() {
+        var c = document.getElementById("riskC");
+        var data = await fj("/api/risk");
+        if (!data) { c.innerHTML = '<div class="nd">No risk data</div>'; return; }
+
+        var h = "";
+        // Portfolio VaR summary
+        var pvar = data.portfolio_var || {};
+        if (pvar.patient || pvar.bold) {
+          h += '<div style="margin-bottom:10px">';
+          ["patient", "bold"].forEach(function (strat) {
+            var v = pvar[strat];
+            if (!v) return;
+            var label = strat.charAt(0).toUpperCase() + strat.slice(1);
+            var sc2 = strat === "bold" ? "var(--org)" : "var(--cyn)";
+            h += '<div style="display:flex;gap:10px;align-items:center;margin-bottom:4px">';
+            h += '<span style="font-size:10px;color:' + sc2 + ';font-weight:600;min-width:50px">' + label + '</span>';
+            h += '<span style="font-size:10px;color:var(--txm)">VaR95:</span><span style="font-size:11px;color:var(--red);font-weight:600">' + (v.var_95_usd != null ? '$' + Math.abs(v.var_95_usd).toFixed(0) : '--') + '</span>';
+            h += '<span style="font-size:10px;color:var(--txm)">CVaR95:</span><span style="font-size:11px;color:var(--red);font-weight:600">' + (v.cvar_95_usd != null ? '$' + Math.abs(v.cvar_95_usd).toFixed(0) : '--') + '</span>';
+            h += '<span style="font-size:9px;color:var(--txm)">' + (v.n_positions || 0) + ' pos</span>';
+            h += '</div>';
+          });
+          h += '</div>';
+        }
+
+        // Monte Carlo top tickers (show held or highest stop probability)
+        var mc = data.monte_carlo || {};
+        var mcKeys = Object.keys(mc).slice(0, 6);
+        if (mcKeys.length) {
+          h += '<div style="font-size:9px;color:var(--txm);text-transform:uppercase;margin-bottom:4px">Price Bands (1d)</div>';
+          mcKeys.forEach(function (ticker) {
+            var m = mc[ticker];
+            if (!m || !m.price_bands_1d) return;
+            var pb = m.price_bands_1d;
+            var price = m.price_usd || 0;
+            var stopP = m.p_stop_hit_1d;
+            var ret = m.expected_return_1d;
+            h += '<div style="margin-bottom:6px;padding:4px 6px;background:var(--card2);border-radius:4px">';
+            h += '<div style="display:flex;justify-content:space-between;align-items:center">';
+            h += '<span style="font-size:11px;font-weight:600">' + ticker + '</span>';
+            if (stopP != null) {
+              var spColor = stopP > 0.3 ? "var(--red)" : stopP > 0.15 ? "var(--org)" : "var(--grn)";
+              h += '<span style="font-size:9px;color:' + spColor + '">Stop: ' + (stopP * 100).toFixed(0) + '%</span>';
+            }
+            h += '</div>';
+            // Price band bar
+            h += '<div style="display:flex;gap:4px;font-size:9px;color:var(--txm);margin-top:2px">';
+            h += '<span>p5:' + fp(pb.p5) + '</span>';
+            h += '<span>p50:' + fp(pb.p50) + '</span>';
+            h += '<span>p95:' + fp(pb.p95) + '</span>';
+            if (ret) h += '<span style="color:' + (ret.mean_pct >= 0 ? "var(--grn)" : "var(--red)") + '">E[r]:' + (ret.mean_pct >= 0 ? "+" : "") + ret.mean_pct.toFixed(2) + '%</span>';
+            h += '</div></div>';
+          });
+        }
+
+        c.innerHTML = h || '<div class="nd">No risk data available</div>';
+      }
+
+      /* ================================================================
+         Render: Header holdings summary
+         ================================================================ */
+      function rHoldings(port, portBold, sig) {
+        var el = document.getElementById("holdingsSum");
+        var lbl = document.getElementById("holdingsLabel");
+        if (!el || !lbl) return;
+        var parts = [];
+        var fx = sig ? (sig.fx_rate || 1) : 1;
+        [port, portBold].forEach(function (p) {
+          if (!p || !p.holdings) return;
+          for (var t in p.holdings) {
+            var h = p.holdings[t];
+            if (h.shares > 0) {
+              parts.push(t.replace("-USD", "") + " " + (h.shares < 1 ? h.shares.toFixed(4) : h.shares.toFixed(1)));
+            }
+          }
+        });
+        if (parts.length > 0) {
+          el.style.display = "";
+          lbl.textContent = parts.join(", ");
+          lbl.title = parts.join(", ");
+        } else {
+          el.style.display = "none";
+        }
+      }
+
+      /* ================================================================
          Main refresh (uses /api/summary for single fetch)
          ================================================================ */
       async function refresh() {
@@ -1857,13 +2011,16 @@
           rHeat(sig.timeframes);
           rMkt(sig.signals, sig.macro);
           rBoldSummary(portBold, sig);
+          rHoldings(port, portBold, sig);
         }
         rTrades(port, portBold);
 
-        // Lazy-load LoRA
+        // Lazy-load LoRA + warrants + risk
         var lor = await fj("/api/lora-status");
         rLora(lor);
         rTel(tel);
+        loadWarrants();
+        loadRisk();
       }
 
       /* ================================================================

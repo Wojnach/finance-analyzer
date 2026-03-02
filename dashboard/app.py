@@ -270,13 +270,13 @@ def api_equity_curve():
 
 
 # ---------------------------------------------------------------------------
-# New: Signal heatmap (25 signals x all tickers)
+# New: Signal heatmap (30 signals x all tickers)
 # ---------------------------------------------------------------------------
 
 @app.route("/api/signal-heatmap")
 @require_auth
 def api_signal_heatmap():
-    """Return the full 25-signal x all-tickers grid.
+    """Return the full 30-signal x all-tickers grid.
 
     Each cell is BUY/SELL/HOLD. Built from agent_summary.json signals + enhanced_signals.
     """
@@ -286,10 +286,10 @@ def api_signal_heatmap():
 
     signals_data = summary.get("signals", {})
 
-    # Core signal names (extracted from _votes in extra)
+    # Core signal names (11 total: 8 active + 3 disabled)
     core_signals = [
         "rsi", "macd", "ema", "bb", "fear_greed", "sentiment",
-        "ministral", "ml", "funding", "volume"
+        "ministral", "volume", "ml", "funding", "custom_lora"
     ]
     # Enhanced composite signal names (19 modules, signals #12-#30)
     enhanced_signals = [
@@ -432,6 +432,43 @@ def api_health():
         return jsonify(get_health_summary())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# New: Warrant portfolio
+# ---------------------------------------------------------------------------
+
+@app.route("/api/warrants")
+@require_auth
+def api_warrants():
+    """Return warrant holdings with leverage P&L.
+
+    Reads data/portfolio_state_warrants.json. Returns empty structure if missing.
+    """
+    data = _read_json(DATA_DIR / "portfolio_state_warrants.json")
+    if not data:
+        return jsonify({"holdings": {}, "transactions": []})
+    return jsonify(data)
+
+
+# ---------------------------------------------------------------------------
+# New: Risk data (Monte Carlo + VaR)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/risk")
+@require_auth
+def api_risk():
+    """Return Monte Carlo price bands and Portfolio VaR from compact summary.
+
+    Reads monte_carlo and portfolio_var sections from agent_summary_compact.json.
+    """
+    compact = _read_json(DATA_DIR / "agent_summary_compact.json")
+    if not compact:
+        return jsonify({"monte_carlo": {}, "portfolio_var": {}})
+    return jsonify({
+        "monte_carlo": compact.get("monte_carlo", {}),
+        "portfolio_var": compact.get("portfolio_var", {}),
+    })
 
 
 if __name__ == "__main__":

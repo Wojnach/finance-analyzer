@@ -358,7 +358,7 @@ class TestApiSignalHeatmap:
         assert data["heatmap"]["BTC-USD"]["rsi"] == "BUY"
         assert data["heatmap"]["BTC-USD"]["macd"] == "SELL"
         assert data["heatmap"]["BTC-USD"]["bb"] == "HOLD"  # None → "HOLD"
-        assert len(data["signals"]) == 29  # 10 core + 19 enhanced
+        assert len(data["signals"]) == 30  # 11 core + 19 enhanced
 
     def test_404_when_no_summary(self, client, tmp_data):
         with _no_auth():
@@ -832,3 +832,141 @@ class TestApiDecisions:
         data = resp.get_json()
         assert len(data) == 1
         assert data[0]["ts"] == "2026-02-22T08:00:00+00:00"
+
+
+# ---------------------------------------------------------------------------
+# Warrant endpoint
+# ---------------------------------------------------------------------------
+
+class TestApiWarrants:
+    def test_returns_warrant_data(self, client, tmp_data):
+        data = {
+            "holdings": {
+                "MINI-SILVER": {
+                    "units": 100,
+                    "entry_price_sek": 340.50,
+                    "underlying": "XAG-USD",
+                    "leverage": 5,
+                    "name": "MINI L SILVER AVA 140",
+                }
+            },
+            "transactions": [],
+        }
+        (tmp_data / "portfolio_state_warrants.json").write_text(
+            json.dumps(data), encoding="utf-8"
+        )
+        with _no_auth():
+            resp = client.get("/api/warrants")
+        assert resp.status_code == 200
+        result = resp.get_json()
+        assert "MINI-SILVER" in result["holdings"]
+        assert result["holdings"]["MINI-SILVER"]["leverage"] == 5
+
+    def test_returns_empty_when_missing(self, client, tmp_data):
+        with _no_auth():
+            resp = client.get("/api/warrants")
+        assert resp.status_code == 200
+        result = resp.get_json()
+        assert result["holdings"] == {}
+
+    def test_returns_empty_holdings(self, client, tmp_data):
+        (tmp_data / "portfolio_state_warrants.json").write_text(
+            json.dumps({"holdings": {}, "transactions": []}), encoding="utf-8"
+        )
+        with _no_auth():
+            resp = client.get("/api/warrants")
+        result = resp.get_json()
+        assert result["holdings"] == {}
+
+    def test_requires_auth_when_configured(self, client, tmp_data):
+        with patch("dashboard.app._get_dashboard_token", return_value="secret"):
+            resp = client.get("/api/warrants")
+        assert resp.status_code == 401
+
+    def test_auth_with_token(self, client, tmp_data):
+        (tmp_data / "portfolio_state_warrants.json").write_text(
+            json.dumps({"holdings": {"X": {"units": 1}}, "transactions": []}),
+            encoding="utf-8",
+        )
+        with patch("dashboard.app._get_dashboard_token", return_value="secret"):
+            resp = client.get("/api/warrants?token=secret")
+        assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Risk endpoint
+# ---------------------------------------------------------------------------
+
+class TestApiRisk:
+    def test_returns_risk_data(self, client, tmp_data):
+        data = {
+            "monte_carlo": {
+                "BTC-USD": {
+                    "price_usd": 65000,
+                    "price_bands_1d": {"p5": 63000, "p25": 64000, "p50": 65000, "p75": 66000, "p95": 67000},
+                    "p_stop_hit_1d": 0.12,
+                    "expected_return_1d": {"mean_pct": 0.3, "std_pct": 2.0, "skew": -0.1},
+                }
+            },
+            "portfolio_var": {
+                "patient": {"var_95_usd": -1200, "cvar_95_usd": -1500, "n_positions": 1},
+                "bold": {"var_95_usd": -800, "cvar_95_usd": -1100, "n_positions": 1},
+            },
+        }
+        (tmp_data / "agent_summary_compact.json").write_text(
+            json.dumps(data), encoding="utf-8"
+        )
+        with _no_auth():
+            resp = client.get("/api/risk")
+        assert resp.status_code == 200
+        result = resp.get_json()
+        assert "BTC-USD" in result["monte_carlo"]
+        assert result["portfolio_var"]["patient"]["var_95_usd"] == -1200
+
+    def test_returns_empty_when_missing(self, client, tmp_data):
+        with _no_auth():
+            resp = client.get("/api/risk")
+        assert resp.status_code == 200
+        result = resp.get_json()
+        assert result["monte_carlo"] == {}
+        assert result["portfolio_var"] == {}
+
+    def test_returns_empty_when_no_mc_section(self, client, tmp_data):
+        (tmp_data / "agent_summary_compact.json").write_text(
+            json.dumps({"signals": {}}), encoding="utf-8"
+        )
+        with _no_auth():
+            resp = client.get("/api/risk")
+        result = resp.get_json()
+        assert result["monte_carlo"] == {}
+
+    def test_requires_auth_when_configured(self, client, tmp_data):
+        with patch("dashboard.app._get_dashboard_token", return_value="secret"):
+            resp = client.get("/api/risk")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Signal heatmap — verify updated signal lists
+# ---------------------------------------------------------------------------
+
+class TestSignalHeatmapUpdated:
+    def test_core_signals_includes_custom_lora(self, client, tmp_data):
+        summary = {
+            "signals": {
+                "BTC-USD": {
+                    "extra": {
+                        "_votes": {"rsi": "BUY", "custom_lora": "HOLD", "trend": "SELL"}
+                    }
+                }
+            }
+        }
+        (tmp_data / "agent_summary.json").write_text(
+            json.dumps(summary), encoding="utf-8"
+        )
+        with _no_auth():
+            resp = client.get("/api/signal-heatmap")
+        result = resp.get_json()
+        assert "custom_lora" in result["core_signals"]
+        assert len(result["core_signals"]) == 11
+        assert len(result["enhanced_signals"]) == 19

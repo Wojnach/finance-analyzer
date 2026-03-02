@@ -1,106 +1,63 @@
-# Plan: Metals Intraday Trader with Claude Decision-Making
+# Plan: Dashboard Auto-Improvement Session
 
-**Date:** Mar 2, 2026 (updated)
+## Problems Found
 
-## Goal
+### Bugs (Critical)
+1. **BUG-1: Signal count labels stale** — Heatmap tab says "25-Signal" but system has 30 signals. Enhanced group header says "(12-25)" should be "(12-30)".
+2. **BUG-2: Core signals list incomplete** — `app.py` `core_signals` list missing `custom_lora`. Has 10 items, should have 11.
+3. **BUG-3: Disabled signals shown as dots** — Overview cards show ML, LoRA, Funding as signal dots even though they are DISABLED (always HOLD). Adds visual noise.
 
-Build a Layer 1/Layer 2 system for intraday metals warrant trading on Avanza.
-Layer 1 (Python) collects price data every 90 seconds. When conditions warrant,
-it invokes Claude Code (Layer 2) which analyzes the full context and decides
-whether to buy/sell/hold, then executes trades via the Avanza API.
+### Missing Features (High Value)
+4. **FEAT-1: No warrant portfolio display** — Warrant holdings (`portfolio_state_warrants.json`) not visible. User holds leveraged products (MINI-SILVER 5x) — critical P&L visibility gap.
+5. **FEAT-2: No Monte Carlo risk display** — Price bands, stop-loss probability, VaR/CVaR computed but not surfaced.
+6. **FEAT-3: No weighted confidence shown** — `weighted_confidence` (accuracy-adjusted) not displayed on cards. Only raw vote counts visible.
+7. **FEAT-4: No regime badge on cards** — `regime` field available per ticker but not shown.
+8. **FEAT-5: Module failures not in Health tab** — `get_health_summary()` returns `module_failures` but Health tab ignores it.
+9. **FEAT-6: No holdings in header** — Header shows Patient value + cash but not what's held at a glance.
 
-## Architecture
+## Changes (4 batches, 2 files + tests)
 
-```
-metals_loop.py (Layer 1)           Claude Code (Layer 2)
-+---------------------+           +----------------------+
-| Every 90s:          |  trigger  | Reads metals_context  |
-| - Fetch 3 prices    |---------->| + metals_decisions    |
-| - Track peaks/lows  |           | Analyzes:             |
-| - Read main signals |           |  - P&L from ENTRY     |
-| - Detect triggers   |  tier 1-3 |  - Signal consensus   |
-| - Write context JSON|---------->|  - Previous decisions  |
-| - Classify tier     |           |  - ATH thesis          |
-|                     |<----------| Decides: BUY/SELL/HOLD|
-|                     |  results  | Logs decision history |
-+---------------------+           | Sends Telegram        |
-                                  +----------------------+
-```
+### Batch 1: Fix bugs in app.py + index.html (BUG-1,2,3) + FEAT-3,4
+**Files:** `dashboard/app.py`, `dashboard/static/index.html`
 
-### Token Cost Management (Claude Max subscription)
+1. `app.py` line 290: Add `custom_lora` to `core_signals` list
+2. `app.py` line 279 comment: Fix "25-signal" → "30-signal"
+3. `index.html` line 581: Fix "25-Signal Heatmap" → "30-Signal Heatmap"
+4. `index.html` line 1160: Fix "(1-11)" core signals label
+5. `index.html` line 1173: Fix "(12-25)" → "(12-30)" for enhanced signals
+6. `index.html` votes() function: Skip disabled signals (ml, funding, custom_lora)
+7. `index.html` signal cards: Add weighted_confidence display + regime badge
 
-Tiered model selection to stay within daily budget (~75K tokens/day):
+### Batch 2: Add warrant API + display + header holdings (FEAT-1, FEAT-6)
+**Files:** `dashboard/app.py`, `dashboard/static/index.html`
 
-| Tier | Model  | Timeout | Max Turns | Use Case                              | Frequency   |
-|------|--------|---------|-----------|---------------------------------------| ------------|
-| T1   | Haiku  | 60s     | 8         | Workhorse: price moves, trails, beats | ~25/day     |
-| T2   | Sonnet | 180s    | 15        | Multi-trigger: 2+ triggers at once    | ~4/day      |
-| T3   | Opus   | 300s    | 20        | Critical: stop proximity, profit, EOD | ~1-2/day    |
+1. `app.py`: Add `/api/warrants` endpoint reading `portfolio_state_warrants.json`
+2. `index.html`: Add warrant holdings panel in Overview tab
+3. `index.html`: Show current holdings in header next to portfolio values
 
-Haiku is the cheapest and handles the bulk of invocations. Sonnet only fires when
-multiple triggers coincide (requiring deeper analysis). Opus reserved for decisions
-that affect real money (stop zones, profit targets, end-of-day).
+### Batch 3: Add risk display + health module failures (FEAT-2, FEAT-5)
+**Files:** `dashboard/app.py`, `dashboard/static/index.html`
 
-Guards:
-- **Never invoke if already running** (poll check)
-- **5 min minimum cooldown** between invocations
-- **Startup grace period** — first check establishes baseline without triggering
-- **Signal flip requires sustained change** (not single-check noise)
+1. `app.py`: Add `/api/risk` endpoint reading Monte Carlo + VaR data from `agent_summary_compact.json`
+2. `index.html`: Add risk panel to Overview tab (price bands, stop probability, VaR)
+3. `index.html`: Show module_failures in Health tab
 
-### Trigger Conditions (invoke Claude)
-1. Price moved >2% from last invocation → T1 (haiku)
-2. Trailing stop: bid dropped 3%+ from session peak → T1 (haiku)
-3. Profit target: any position +4%+ from entry → T3 (opus)
-4. Signal consensus flip (XAG or XAU changed) → T1 (haiku)
-5. Periodic heartbeat (every ~30 min) → T1 (haiku)
-6. End-of-day (17:00 CET) → T3 (opus)
-7. Hard stop proximity (within 5% of stop-loss) → T3 (opus)
-8. Multiple triggers simultaneously → T2 (sonnet)
+### Batch 4: Tests + verify
+**Files:** `tests/test_dashboard.py`
 
-### Decision History: `data/metals_decisions.jsonl`
-Every Claude invocation appends a JSON line with:
-- Current prices and P&L
-- Action taken per position (HOLD/SELL)
-- Reflection on previous decision accuracy
-- Prediction (direction, confidence, horizon) for future accuracy tracking
+1. Add tests for `/api/warrants` endpoint
+2. Add tests for `/api/risk` endpoint
+3. Run full test suite, merge, push, restart
 
-The next invocation reads the last 5 entries to inform its decision.
+## What could break
 
-### Strategic Thesis
-Silver bull 2026: target $120/oz ATH. Bias toward HOLD. Only sell on structure break.
+- All existing endpoints unchanged — pure additions
+- Warrant/risk displays handle missing data gracefully (show "no data")
+- Adding `custom_lora` to core signals list won't break heatmap (already in `_votes` dict)
 
-### Context File: `data/metals_context.json`
-Written by Layer 1, read by Layer 2 Claude. Contains all data needed for decision,
-including recent_decisions (last 5 from metals_decisions.jsonl).
+## Execution order
 
-## Files
-
-| File | Status | Purpose |
-|------|--------|---------|
-| `data/metals_loop.py` | DONE | Layer 1: data collection, triggers, tiered invocation |
-| `data/metals_agent_prompt.txt` | DONE | Layer 2: decision prompt with history + ATH thesis |
-| `data/metals_context.json` | Auto-generated | Written by L1, read by L2 |
-| `data/metals_decisions.jsonl` | Auto-generated | Decision history + accuracy tracking |
-| `data/metals_agent.log` | Auto-generated | Claude subprocess output log |
-| `data/metals_trades.jsonl` | Auto-generated | Trade execution log |
-| `data/metals_monitor_v2.py` | Running | Passive price alerter (independent) |
-| `docs/PLAN.md` | This file | Architecture plan |
-
-## What NOT to modify
-- metals_monitor_v2.py (keep running as passive monitor)
-- portfolio/main.py or any core portfolio modules
-- config.json
-
-## Risks & Mitigations
-- **Nested session**: strip CLAUDECODE env var (same fix as agent_invocation.py) ✅
-- **Session expiry**: BankID valid ~24h. Monitor for 401s.
-- **Token budget**: Tiered models + 5min cooldown + heartbeat at 30min ✅
-- **Double invoke**: Poll check + cooldown guard ✅
-- **Double trading**: This system only touches warrants, main system only simulated
-- **Decision drift**: Decision history + reflection loop ✅
-
-## Next Steps
-1. ✅ Dry-run test (prices, session, claude CLI all verified)
-2. Launch metals_loop.py as background process
-3. Monitor first few invocations via agent.log
-4. Build accuracy review script (compare predictions vs outcomes)
+1. Batch 1: Bug fixes + weighted confidence + regime
+2. Batch 2: Warrants + header holdings
+3. Batch 3: Risk + health module failures
+4. Batch 4: Tests + merge + push + restart
