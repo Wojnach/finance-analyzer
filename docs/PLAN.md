@@ -1,97 +1,101 @@
-# Monte Carlo Simulation Integration Plan
+# Plan: Metals Intraday Trader with Claude Decision-Making
 
-**Date:** Mar 1, 2026
-**Branch:** `feat/monte-carlo`
+**Date:** Mar 2, 2026 (updated)
 
-## Motivation
+## Goal
 
-The system has strong accuracy-driven probability foundations (30 signals, 43K+ outcomes,
-`direction_probability()` engine) but lacks **stochastic simulation**. From the quant desk
-article, these techniques fill specific gaps in the current system:
+Build a Layer 1/Layer 2 system for intraday metals warrant trading on Avanza.
+Layer 1 (Python) collects price data every 90 seconds. When conditions warrant,
+it invokes Claude Code (Layer 2) which analyzes the full context and decides
+whether to buy/sell/hold, then executes trades via the Avanza API.
 
-| Current capability | Gap MC fills |
-|---|---|
-| P(up) = 72% point estimate | **Price quantile bands**: 95% CI = $87.2-$93.5 |
-| ATR stop at 2x ATR distance | **Stop-loss hit probability**: 15% chance of hit in 24h |
-| Kelly fraction from point accuracy | **Expected trade P&L distribution**: full histogram |
-| Per-position risk flags | **Portfolio VaR/CVaR**: joint correlated loss at 95% |
+## Architecture
 
-## What We Skip (Low Value for This System)
-
-| Technique | Why skip |
-|---|---|
-| Particle filter (article Part IV) | System recalculates every minute — same effect |
-| Agent-based simulation (Part VII) | We make directional bets, not market-making |
-| Vine copulas | Simple t-copula is enough for 19 instruments |
-| Importance sampling (Part III) | Standard MC with 10K paths is fine (>1% events) |
-| GARCH stochastic volatility | ATR already captures recent vol; marginal gain |
-
-## Implementation Batches
-
-### Batch 1: Core GBM Engine + Tests (test-first)
-**Files:** `tests/test_monte_carlo.py`, `portfolio/monte_carlo.py`
-
-Tests first:
-- GBM path shape and statistics
-- Quantile extraction matches analytical solution
-- Antithetic variates reduce variance vs. crude MC
-- Stop-loss probability computation
-- Drift from directional probability
-
-Then implement `MonteCarloEngine`:
-- `simulate_paths()` — GBM with antithetic variates
-- `price_quantiles()` — percentile bands at horizon
-- `probability_below(threshold)` / `probability_above(threshold)`
-- `expected_return()` — mean, std, skew of return distribution
-- `simulate_ticker(ticker, agent_summary)` — convenience function
-
-Key formulas:
 ```
-S_T = S0 * exp((mu - 0.5*sigma^2)*T + sigma*sqrt(T)*Z)
-mu = (p_up - 0.5) * sigma * sqrt(252)   # drift from directional probability
-sigma = atr_pct / 100 * sqrt(252/14)    # annualize 14-period ATR
+metals_loop.py (Layer 1)           Claude Code (Layer 2)
++---------------------+           +----------------------+
+| Every 90s:          |  trigger  | Reads metals_context  |
+| - Fetch 3 prices    |---------->| + metals_decisions    |
+| - Track peaks/lows  |           | Analyzes:             |
+| - Read main signals |           |  - P&L from ENTRY     |
+| - Detect triggers   |  tier 1-3 |  - Signal consensus   |
+| - Write context JSON|---------->|  - Previous decisions  |
+| - Classify tier     |           |  - ATH thesis          |
+|                     |<----------| Decides: BUY/SELL/HOLD|
+|                     |  results  | Logs decision history |
++---------------------+           | Sends Telegram        |
+                                  +----------------------+
 ```
 
-Antithetic variates: for each Z, also simulate -Z (free 50-75% variance reduction).
-N_paths = 10,000 (5K pairs). Horizons: 1d, 3d.
+### Token Cost Management (Claude Max subscription)
 
-### Batch 2: Portfolio VaR with t-Copula + Tests (test-first)
-**Files:** `tests/test_monte_carlo_risk.py`, `portfolio/monte_carlo_risk.py`
+Tiered model selection to stay within daily budget (~100K tokens/day):
 
-Tests first:
-- t-copula produces correlated returns
-- VaR/CVaR computation correct for known distribution
-- Single vs multi-position portfolios
-- Correlated crash probability > independent crash probability
+| Tier | Model  | Timeout | Max Turns | Use Case                    | Frequency   |
+|------|--------|---------|-----------|-----------------------------| ------------|
+| T1   | Haiku  | 60s     | 8         | Heartbeat: "positions OK?"  | Every 30min |
+| T2   | Sonnet | 180s    | 15        | Price moves, trailing stops | On trigger  |
+| T3   | Opus   | 300s    | 20        | Stop proximity, profit, EOD | Rare        |
 
-Then implement `PortfolioRiskSimulator`:
-- `simulate_correlated_returns()` — t-copula (v=4) with correlation matrix
-- `portfolio_pnl()` — aggregate position-level P&L
-- `var(confidence)` / `cvar(confidence)` — Value-at-Risk / Expected Shortfall
-- `drawdown_probability(threshold_pct)`
-- `compute_portfolio_var(portfolio_state, agent_summary)` — convenience function
+Guards:
+- **Never invoke if already running** (poll check)
+- **5 min minimum cooldown** between invocations
+- **Startup grace period** — first check establishes baseline without triggering
+- **Signal flip requires sustained change** (not single-check noise)
 
-Correlation from existing `CORRELATED_PAIRS` in risk_management.py + ATR volatilities.
+### Trigger Conditions (invoke Claude)
+1. Price moved >2% from last invocation → T2 (sonnet)
+2. Trailing stop: bid dropped 3%+ from session peak → T2 (sonnet)
+3. Profit target: any position +4%+ from entry → T3 (opus)
+4. Signal consensus flip (XAG or XAU changed) → T2 (sonnet)
+5. Periodic heartbeat (every ~30 min) → T1 (haiku)
+6. End-of-day (17:00 CET) → T3 (opus)
+7. Hard stop proximity (within 5% of stop-loss) → T3 (opus)
 
-### Batch 3: Reporting Integration
-**Files:** `portfolio/reporting.py`, `config.json`
+### Decision History: `data/metals_decisions.jsonl`
+Every Claude invocation appends a JSON line with:
+- Current prices and P&L
+- Action taken per position (HOLD/SELL)
+- Reflection on previous decision accuracy
+- Prediction (direction, confidence, horizon) for future accuracy tracking
 
-- Add `monte_carlo` section to compact + tier2 summaries
-- Config flag: `monte_carlo.enabled` (default true)
-- Config: `monte_carlo.n_paths` (default 10000), `monte_carlo.horizons` ([1, 3])
-- Only compute for held positions + focus tickers (not all 19)
-- Graceful degradation on failure
+The next invocation reads the last 5 entries to inform its decision.
 
-### Batch 4: Edge Case Tests + Performance
-**Files:** `tests/test_monte_carlo.py` (additions), `tests/test_monte_carlo_risk.py` (additions)
+### Strategic Thesis
+Silver bull 2026: target $120/oz ATH. Bias toward HOLD. Only sell on structure break.
 
-- Zero volatility, single position, no positions, extreme prices
-- Config disabled → no MC in summary
-- Reporting integration test
-- Performance: MC completes in <5s for all tickers
+### Context File: `data/metals_context.json`
+Written by Layer 1, read by Layer 2 Claude. Contains all data needed for decision,
+including recent_decisions (last 5 from metals_decisions.jsonl).
 
-### Batch 5: Docs + Cleanup
-**Files:** `docs/SYSTEM_OVERVIEW.md`, `memory/todo.md`
+## Files
 
-- Document MC module
-- Final test suite run
+| File | Status | Purpose |
+|------|--------|---------|
+| `data/metals_loop.py` | DONE | Layer 1: data collection, triggers, tiered invocation |
+| `data/metals_agent_prompt.txt` | DONE | Layer 2: decision prompt with history + ATH thesis |
+| `data/metals_context.json` | Auto-generated | Written by L1, read by L2 |
+| `data/metals_decisions.jsonl` | Auto-generated | Decision history + accuracy tracking |
+| `data/metals_agent.log` | Auto-generated | Claude subprocess output log |
+| `data/metals_trades.jsonl` | Auto-generated | Trade execution log |
+| `data/metals_monitor_v2.py` | Running | Passive price alerter (independent) |
+| `docs/PLAN.md` | This file | Architecture plan |
+
+## What NOT to modify
+- metals_monitor_v2.py (keep running as passive monitor)
+- portfolio/main.py or any core portfolio modules
+- config.json
+
+## Risks & Mitigations
+- **Nested session**: strip CLAUDECODE env var (same fix as agent_invocation.py) ✅
+- **Session expiry**: BankID valid ~24h. Monitor for 401s.
+- **Token budget**: Tiered models + 5min cooldown + heartbeat at 30min ✅
+- **Double invoke**: Poll check + cooldown guard ✅
+- **Double trading**: This system only touches warrants, main system only simulated
+- **Decision drift**: Decision history + reflection loop ✅
+
+## Next Steps
+1. ✅ Dry-run test (prices, session, claude CLI all verified)
+2. Launch metals_loop.py as background process
+3. Monitor first few invocations via agent.log
+4. Build accuracy review script (compare predictions vs outcomes)
