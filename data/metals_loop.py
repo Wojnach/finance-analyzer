@@ -1,5 +1,5 @@
 """
-Metals Intraday Trading Loop v5 (Layer 1).
+Metals Intraday Trading Loop v6 (Layer 1).
 Collects price data every 60-90 seconds from Avanza.
 When trigger conditions are met, invokes Claude Code (Layer 2) for trading decisions.
 Claude reads data/metals_context.json and decides to buy/sell/hold.
@@ -13,6 +13,9 @@ Features:
 - Multi-level stop-loss (L1 warn / L2 alert / L3 emergency auto-sell)
 - Short instrument tracking (BEAR SILVER X5)
 - Time server (timeapi.io) for accurate CET
+- Daily range analysis (historical percentiles + intraday assessment)
+- Spike catcher (limit sell orders before US open)
+- Invocation logging (tier/model/trigger tracking)
 
 Run: .venv/Scripts/python.exe data/metals_loop.py
 """
@@ -38,6 +41,8 @@ try:
     from metals_risk import (
         get_risk_summary, log_portfolio_value, check_portfolio_drawdown,
         check_trade_guard, record_metals_trade, simulate_all_positions,
+        compute_daily_range_stats, compute_intraday_assessment,
+        compute_spike_targets, load_spike_state, save_spike_state,
     )
     RISK_AVAILABLE = True
 except ImportError as e:
@@ -53,6 +58,16 @@ TRIGGER_STOP_NEAR = 5.0       # % from stop-loss to trigger
 HEARTBEAT_CHECKS = 20         # invoke every N checks (~30 min at 90s)
 MIN_INVOKE_INTERVAL = 300     # minimum 5 min between invocations
 EOD_HOUR_UTC = 16             # 17:00 CET = 16:00 UTC
+
+# Spike catcher config (US open limit sell orders)
+SPIKE_ENABLED = True
+SPIKE_PLACE_CET = 15.25       # 15:15 CET — place orders before US open (15:30)
+SPIKE_CANCEL_CET = 16.5       # 16:30 CET — cancel unfilled orders
+SPIKE_PERCENTILE = 75          # P75 of daily open_to_high as target
+SPIKE_PARTIAL_PCT = 50         # sell 50% of position to capture spike profit
+
+# Invocation log
+INVOCATION_LOG = "data/metals_invocations.jsonl"
 
 # Stop levels (distance from barrier as % of bid)
 STOP_L1_PCT = 8.0   # L1: warning — log + flag in context
@@ -109,6 +124,7 @@ claude_timeout = 300
 invoke_count = 0
 startup_grace = True      # skip first check to establish baseline
 short_prices = {}         # latest prices for short instruments
+daily_range_stats = {}    # historical daily range percentiles (computed at startup)
 
 def send_telegram(msg):
     try:
@@ -316,6 +332,189 @@ def emergency_sell(page, key, pos, bid):
         log(f"Emergency sell FAILED: {e}")
         send_telegram(f"*L3 SELL FAILED*: {e}")
 
+def _get_csrf(page):
+    """Extract CSRF token from Avanza cookies."""
+    for c in page.context.cookies():
+        if c["name"] == "AZACSRF":
+            return c["value"]
+    return None
+
+
+def place_spike_orders(page, positions, prices, targets):
+    """Place limit sell orders for US open spike capture.
+
+    Returns dict of {position_key: order_id} for placed orders.
+    """
+    csrf = _get_csrf(page)
+    if not csrf:
+        log("Spike: no CSRF token, skipping")
+        return {}
+
+    placed = {}
+    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+
+    for key, target in targets.items():
+        pos = positions.get(key)
+        if not pos or not pos.get("active"):
+            continue
+
+        try:
+            payload = {
+                "accountId": ACCOUNT_ID,
+                "orderbookId": pos["ob_id"],
+                "side": "SELL",
+                "condition": "NORMAL",
+                "price": target["target_price"],
+                "validUntil": today_str,
+                "volume": target["units_to_sell"],
+            }
+
+            result = page.evaluate("""async (args) => {
+                const [payload, token] = args;
+                const resp = await fetch('https://www.avanza.se/_api/trading-critical/rest/order/new', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
+                    credentials: 'include',
+                    body: JSON.stringify(payload),
+                });
+                return {status: resp.status, body: await resp.text()};
+            }""", [payload, csrf])
+
+            status = result.get("status", 0)
+            body = result.get("body", "")
+
+            if status == 200 or status == 201:
+                # Try to parse orderId from response
+                try:
+                    resp_data = json.loads(body)
+                    order_id = resp_data.get("orderId", "")
+                except Exception:
+                    order_id = ""
+
+                placed[key] = order_id
+                log(f"Spike SELL placed: {pos['name']} {target['units_to_sell']}u @ {target['target_price']} "
+                    f"(+{target['target_pnl_pct']:.1f}% from entry) [order: {order_id}]")
+            else:
+                log(f"Spike SELL failed for {key}: status={status}, body={body[:200]}")
+
+        except Exception as e:
+            log(f"Spike order error for {key}: {e}")
+
+    return placed
+
+
+def cancel_spike_orders(page, spike_state):
+    """Cancel all unfilled spike orders."""
+    csrf = _get_csrf(page)
+    if not csrf:
+        log("Spike cancel: no CSRF token")
+        return
+
+    orders = spike_state.get("orders", {})
+    for key, order_id in list(orders.items()):
+        if not order_id:
+            continue
+
+        try:
+            result = page.evaluate("""async (args) => {
+                const [accountId, orderId, token] = args;
+                const resp = await fetch(
+                    'https://www.avanza.se/_api/trading-critical/rest/order/' + accountId + '/' + orderId,
+                    {
+                        method: 'DELETE',
+                        headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
+                        credentials: 'include',
+                    }
+                );
+                return {status: resp.status, body: await resp.text()};
+            }""", [ACCOUNT_ID, order_id, csrf])
+
+            log(f"Spike cancel {key}: status={result.get('status')}")
+        except Exception as e:
+            log(f"Spike cancel error {key}: {e}")
+
+
+def check_spike_fills(page, spike_state, positions):
+    """Check if any spike orders were filled. Returns list of filled position keys."""
+    csrf = _get_csrf(page)
+    if not csrf:
+        return []
+
+    filled = []
+    orders = spike_state.get("orders", {})
+
+    for key, order_id in orders.items():
+        if not order_id:
+            continue
+
+        try:
+            result = page.evaluate("""async (args) => {
+                const [accountId, orderId, token] = args;
+                const resp = await fetch(
+                    'https://www.avanza.se/_api/trading-critical/rest/order/' + accountId + '/' + orderId,
+                    {
+                        method: 'GET',
+                        headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
+                        credentials: 'include',
+                    }
+                );
+                if (resp.status !== 200) return {status: resp.status};
+                return {status: 200, body: await resp.json()};
+            }""", [ACCOUNT_ID, order_id, csrf])
+
+            if result.get("status") == 200:
+                body = result.get("body", {})
+                state = body.get("state", "").upper()
+                if state in ("FILLED", "EXECUTED", "DONE"):
+                    filled.append(key)
+                    target = spike_state.get("targets", {}).get(key, {})
+                    pnl = target.get("target_pnl_pct", 0)
+                    log(f"SPIKE FILLED: {key} sold at target (+{pnl:.1f}% from entry)")
+                    send_telegram(
+                        f"*SPIKE FILLED* {positions.get(key, {}).get('name', key)}\n"
+                        f"Sold {target.get('units_to_sell', '?')}u at {target.get('target_price', '?')}\n"
+                        f"P&L from entry: +{pnl:.1f}%"
+                    )
+
+                    # Log the trade
+                    trade = {
+                        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "action": "SPIKE_SELL",
+                        "position": key,
+                        "units": target.get("units_to_sell"),
+                        "price": target.get("target_price"),
+                        "entry": positions.get(key, {}).get("entry"),
+                        "pnl_pct": pnl,
+                        "reason": target.get("reason", "US open spike capture"),
+                    }
+                    with open("data/metals_trades.jsonl", "a", encoding="utf-8") as f:
+                        f.write(json.dumps(trade, ensure_ascii=False) + "\n")
+
+        except Exception as e:
+            log(f"Spike check error {key}: {e}")
+
+    return filled
+
+
+def log_invocation(tier, model, trigger, check_num, invoke_num, elapsed_s=None, rc=None):
+    """Log a Claude invocation to the invocations JSONL file."""
+    entry = {
+        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "tier": tier,
+        "model": model or "opus",
+        "trigger": trigger,
+        "check_count": check_num,
+        "invoke_count": invoke_num,
+        "elapsed_s": round(elapsed_s, 1) if elapsed_s is not None else None,
+        "return_code": rc,
+    }
+    try:
+        with open(INVOCATION_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 def write_context(prices, trigger_reason, tier=2):
     """Write context JSON for Claude Layer 2."""
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -362,6 +561,16 @@ def write_context(prices, trigger_reason, tier=2):
         }
     except:
         pass
+
+    # Daily range analysis — historical percentiles + today vs typical
+    if RISK_AVAILABLE and daily_range_stats:
+        ctx["daily_ranges"] = daily_range_stats
+        try:
+            ctx["intraday_assessment"] = compute_intraday_assessment(
+                POSITIONS, prices, price_history, daily_range_stats
+            )
+        except Exception as e:
+            ctx["intraday_assessment"] = {"error": str(e)}
 
     # LLM predictions
     if LLM_AVAILABLE:
@@ -668,6 +877,9 @@ def invoke_claude(trigger_reasons, tier=2):
         log(f"Claude T{tier} invoked (pid={claude_proc.pid}, model={tier_cfg['model'] or 'opus'}, "
             f"max_turns={tier_cfg['max_turns']}, timeout={tier_cfg['timeout']}s)")
 
+        # Log invocation start
+        log_invocation(tier, tier_cfg["model"], reason_str, check_count, invoke_count)
+
         if tier >= 2:
             send_telegram(f"_Metals L2 T{tier} ({tier_label}): {reason_str}_")
 
@@ -684,11 +896,11 @@ def invoke_claude(trigger_reasons, tier=2):
 def main():
     global check_count, last_signal_data, last_invoke_prices, startup_grace
     global claude_proc, claude_log_fh, claude_start, claude_timeout
-    global short_prices
+    global short_prices, daily_range_stats
 
     # Probe time server on startup
     h, ts, src = get_cet_time()
-    log(f"Starting metals trading loop (v5 — LLM + Monte Carlo + Trade Guards)...")
+    log(f"Starting metals trading loop (v6 — LLM + Monte Carlo + Daily Ranges + Spike Catcher)...")
     log(f"Time: {ts} (source: {src})")
     log(f"Check interval: {CHECK_INTERVAL}s | Heartbeat: every {HEARTBEAT_CHECKS} checks (~{HEARTBEAT_CHECKS*CHECK_INTERVAL//60}min)")
     log(f"Triggers: price>{TRIGGER_PRICE_MOVE}% | trail>{TRIGGER_TRAILING}% | profit>{TRIGGER_PROFIT}%")
@@ -696,6 +908,10 @@ def main():
     log(f"Cooldown: {MIN_INVOKE_INTERVAL}s between invocations")
     log(f"Tiers: T1=haiku(8t,60s) | T2=sonnet(15t,180s) | T3=opus(20t,300s)")
     log(f"Short instruments: {', '.join(v['name'] for v in SHORT_INSTRUMENTS.values())}")
+    if SPIKE_ENABLED:
+        log(f"Spike catcher: place@{SPIKE_PLACE_CET:.2f} cancel@{SPIKE_CANCEL_CET:.2f} "
+            f"P{SPIKE_PERCENTILE} {SPIKE_PARTIAL_PCT}% partial")
+    log(f"Invocation log: {INVOCATION_LOG}")
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
@@ -746,14 +962,23 @@ def main():
 
         if RISK_AVAILABLE:
             log("Risk module: Monte Carlo + Trade Guards + Drawdown active")
+            # Compute daily range stats at startup
+            daily_range_stats.update(compute_daily_range_stats())
+            if daily_range_stats:
+                for ticker, rs in daily_range_stats.items():
+                    dr = rs.get("daily_range", {})
+                    log(f"  {ticker} daily range: P50={dr.get('p50',0)}% P90={dr.get('p90',0)}% "
+                        f"({rs.get('trading_days',0)} days)")
+            else:
+                log("  Daily range stats: no data available")
         else:
             log("Risk module: NOT available (import failed)")
 
-        send_telegram(f"""*METALS LOOP v5 STARTED*
+        send_telegram(f"""*METALS LOOP v6 STARTED*
 Tiered: T1=haiku T2=sonnet T3=opus
 LLM: {"Ministral+Chronos (5min)" if LLM_AVAILABLE else "DISABLED"}
-Risk: {"MC+Guards+Drawdown" if RISK_AVAILABLE else "DISABLED"}
-Cooldown: {MIN_INVOKE_INTERVAL//60}min
+Risk: {"MC+Guards+Drawdown+DailyRanges" if RISK_AVAILABLE else "DISABLED"}
+Spike: {"P" + str(SPIKE_PERCENTILE) + " " + str(SPIKE_PARTIAL_PCT) + "% @15:15-16:30" if SPIKE_ENABLED else "OFF"}
 Positions: gold(8x), silver79(5x), silver301(4.3x)""")
 
         try:
@@ -822,6 +1047,72 @@ Positions: gold(8x), silver79(5x), silver301(4.3x)""")
                         log_portfolio_value(POSITIONS, prices)
                     except Exception:
                         pass
+
+                # --- SPIKE CATCHER: US open limit sell orders ---
+                if SPIKE_ENABLED and RISK_AVAILABLE and daily_range_stats and check_count > 3:
+                    h_now = cet_hour()
+                    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+                    spike_st = load_spike_state()
+
+                    # Reset state on new day
+                    if spike_st.get("date") != today_str:
+                        spike_st = {"orders": {}, "targets": {}, "date": today_str,
+                                    "placed": False, "cancelled": False}
+                        save_spike_state(spike_st)
+
+                    # Phase 1: Place orders at 15:15 CET
+                    if (not spike_st["placed"] and SPIKE_PLACE_CET <= h_now < SPIKE_CANCEL_CET):
+                        targets = compute_spike_targets(
+                            POSITIONS, prices, daily_range_stats,
+                            percentile=SPIKE_PERCENTILE, partial_pct=SPIKE_PARTIAL_PCT)
+                        if targets:
+                            log(f"Spike catcher: placing {len(targets)} limit sell orders")
+                            for k, t in targets.items():
+                                log(f"  {k}: sell {t['units_to_sell']}u @ {t['target_price']} "
+                                    f"(+{t['target_pnl_pct']:.1f}%)")
+                            placed = place_spike_orders(page, POSITIONS, prices, targets)
+                            spike_st["orders"] = placed
+                            spike_st["targets"] = targets
+                            spike_st["placed"] = True
+                            save_spike_state(spike_st)
+                            send_telegram(
+                                f"*SPIKE CATCHER*\n"
+                                + "\n".join(f"`{k}: SELL {t['units_to_sell']}u @ {t['target_price']} "
+                                           f"(+{t['target_pnl_pct']:.1f}%)`"
+                                           for k, t in targets.items())
+                                + f"\n_P{SPIKE_PERCENTILE} target, cancels at 16:30_"
+                            )
+                        else:
+                            log("Spike catcher: no eligible positions for spike targets")
+                            spike_st["placed"] = True  # don't retry
+                            save_spike_state(spike_st)
+
+                    # Phase 2: Check for fills (every 2nd check while orders active)
+                    if spike_st["placed"] and not spike_st["cancelled"] and check_count % 2 == 0:
+                        if spike_st.get("orders"):
+                            filled = check_spike_fills(page, spike_st, POSITIONS)
+                            for fk in filled:
+                                spike_st["orders"].pop(fk, None)
+                                # Update position units if partial sell
+                                if fk in POSITIONS and SPIKE_PARTIAL_PCT < 100:
+                                    sold = spike_st.get("targets", {}).get(fk, {}).get("units_to_sell", 0)
+                                    POSITIONS[fk]["units"] = max(0, POSITIONS[fk]["units"] - sold)
+                                    if POSITIONS[fk]["units"] == 0:
+                                        POSITIONS[fk]["active"] = False
+                                if RISK_AVAILABLE and fk in spike_st.get("targets", {}):
+                                    record_metals_trade(fk, "SELL",
+                                                        pnl_pct_value=spike_st["targets"][fk].get("target_pnl_pct", 0))
+                            if filled:
+                                save_spike_state(spike_st)
+
+                    # Phase 3: Cancel unfilled at 16:30 CET
+                    if spike_st["placed"] and not spike_st["cancelled"] and h_now >= SPIKE_CANCEL_CET:
+                        if spike_st.get("orders"):
+                            log(f"Spike catcher: cancelling {len(spike_st['orders'])} unfilled orders")
+                            cancel_spike_orders(page, spike_st)
+                            send_telegram("_Spike orders cancelled (16:30 CET, unfilled)_")
+                        spike_st["cancelled"] = True
+                        save_spike_state(spike_st)
 
                 # Startup grace
                 if startup_grace:
@@ -893,6 +1184,9 @@ Positions: gold(8x), silver79(5x), silver301(4.3x)""")
                     elapsed = time.time() - claude_start
                     retcode = claude_proc.returncode
                     log(f"Claude finished (rc={retcode}, {elapsed:.0f}s)")
+                    # Log completion with elapsed time and return code
+                    log_invocation(0, None, "completed", check_count, invoke_count,
+                                   elapsed_s=elapsed, rc=retcode)
                     claude_proc = None
                     if claude_log_fh:
                         try:

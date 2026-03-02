@@ -1,4 +1,4 @@
-"""Metals risk management: Monte Carlo VaR, trade guards, drawdown circuit breaker.
+"""Metals risk management: Monte Carlo VaR, trade guards, drawdown circuit breaker, daily ranges.
 
 Standalone module for the metals intraday loop. Adapts portfolio/monte_carlo.py,
 portfolio/trade_guards.py, and portfolio/risk_management.py for warrant trading.
@@ -6,7 +6,9 @@ portfolio/trade_guards.py, and portfolio/risk_management.py for warrant trading.
 Usage from metals_loop.py:
     from metals_risk import (
         simulate_warrant_risk, check_trade_guard, record_metals_trade,
-        check_portfolio_drawdown, get_risk_summary
+        check_portfolio_drawdown, get_risk_summary,
+        compute_daily_range_stats, compute_intraday_assessment,
+        compute_spike_targets,
     )
 """
 
@@ -528,3 +530,339 @@ def get_risk_summary(positions, prices, signal_data=None, llm_signals=None):
     result["risk_score"] = min(score, 100)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Daily Range Analysis — Historical Percentile Ranges
+# ---------------------------------------------------------------------------
+
+def _percentile(sorted_list, p):
+    """Compute p-th percentile from a pre-sorted list."""
+    if not sorted_list:
+        return 0.0
+    k = (len(sorted_list) - 1) * p / 100.0
+    f = int(k)
+    c = min(f + 1, len(sorted_list) - 1)
+    if f == c:
+        return sorted_list[f]
+    return sorted_list[f] * (c - k) + sorted_list[c] * (k - f)
+
+
+def compute_daily_range_stats(history_path="data/metals_history.json"):
+    """Compute daily range percentile statistics from historical OHLCV data.
+
+    Returns dict keyed by underlying ticker (XAG-USD, XAU-USD) with:
+    - daily_range: P25/P50/P75/P90/P95 of (high-low)/open %
+    - open_to_high: percentiles of max intraday gain from open
+    - open_to_low: percentiles of max intraday drop from open
+    - close_change: percentiles of close-to-close daily change
+    - recent_5d: last 5 days' ranges for context
+    - trading_days: number of days in sample
+    """
+    try:
+        with open(history_path, "r", encoding="utf-8") as f:
+            hist = json.load(f)
+    except Exception as e:
+        logger.warning(f"Cannot load metals_history.json: {e}")
+        return {}
+
+    result = {}
+
+    for metal_key in ["XAG-USD", "XAU-USD"]:
+        data = hist.get("metals", {}).get(metal_key)
+        if not data or "daily_ohlcv" not in data:
+            continue
+
+        candles = data["daily_ohlcv"]
+        if len(candles) < 5:
+            continue
+
+        daily_ranges = []
+        open_to_high = []
+        open_to_low = []
+        close_changes = []
+
+        prev_close = None
+        for c in candles:
+            o, h, lo, cl = c["open"], c["high"], c["low"], c["close"]
+            if o <= 0:
+                continue
+
+            daily_ranges.append((h - lo) / o * 100)
+            open_to_high.append((h - o) / o * 100)
+            open_to_low.append((o - lo) / o * 100)
+
+            if prev_close is not None and prev_close > 0:
+                close_changes.append((cl - prev_close) / prev_close * 100)
+            prev_close = cl
+
+        daily_ranges.sort()
+        open_to_high.sort()
+        open_to_low.sort()
+        close_changes.sort()
+
+        pctiles = [25, 50, 75, 90, 95]
+
+        stats_entry = {
+            "trading_days": len(candles),
+            "daily_range": {f"p{p}": round(_percentile(daily_ranges, p), 2) for p in pctiles},
+            "open_to_high": {f"p{p}": round(_percentile(open_to_high, p), 2) for p in pctiles},
+            "open_to_low": {f"p{p}": round(_percentile(open_to_low, p), 2) for p in pctiles},
+            "close_change": {f"p{p}": round(_percentile(close_changes, p), 2) for p in [5, 10, 25, 50, 75, 90, 95]},
+        }
+
+        # Recent 5 days
+        recent = candles[-5:]
+        stats_entry["recent_5d"] = []
+        for c in recent:
+            o, h, lo, cl = c["open"], c["high"], c["low"], c["close"]
+            stats_entry["recent_5d"].append({
+                "date": c["date"],
+                "range_pct": round((h - lo) / o * 100, 2) if o > 0 else 0,
+                "change_pct": round((cl - o) / o * 100, 2) if o > 0 else 0,
+            })
+
+        result[metal_key] = stats_entry
+
+    return result
+
+
+def compute_intraday_assessment(positions, prices, price_history, range_stats):
+    """Assess today's session against historical daily range distributions.
+
+    Returns dict with:
+    - Per position: today's range used so far, remaining potential, stop safety
+    - EU session estimates (40% of 24h range)
+    """
+    EU_SESSION_FACTOR = 0.40  # EU session captures ~40% of 24h range
+
+    assessment = {}
+
+    # Extract underlying prices from today's price history
+    for underlying_key, ticker in [("gold", "XAU-USD"), ("silver", "XAG-USD")]:
+        stats = range_stats.get(ticker)
+        if not stats:
+            continue
+
+        # Get today's underlying range from price history
+        und_prices = []
+        for snap in price_history:
+            # Try gold_und or silver79_und / silver301_und
+            if underlying_key == "gold":
+                p = snap.get("gold_und", 0)
+            else:
+                p = snap.get("silver79_und") or snap.get("silver301_und") or 0
+            if p > 0:
+                und_prices.append(p)
+
+        if not und_prices:
+            continue
+
+        open_price = und_prices[0]
+        current_price = und_prices[-1]
+        session_high = max(und_prices)
+        session_low = min(und_prices)
+        session_range_pct = (session_high - session_low) / open_price * 100 if open_price > 0 else 0
+
+        median_range = stats["daily_range"]["p50"]
+        p90_range = stats["daily_range"]["p90"]
+
+        # How much of typical daily range has been consumed
+        range_used_pct = (session_range_pct / median_range * 100) if median_range > 0 else 0
+        remaining_range_pct = max(0, median_range - session_range_pct)
+
+        underlying_assessment = {
+            "ticker": ticker,
+            "open": round(open_price, 2),
+            "current": round(current_price, 2),
+            "session_high": round(session_high, 2),
+            "session_low": round(session_low, 2),
+            "session_range_pct": round(session_range_pct, 3),
+            "typical_daily_range_pct": median_range,
+            "range_used_of_typical_pct": round(range_used_pct, 0),
+            "remaining_range_pct": round(remaining_range_pct, 2),
+            "eu_session_typical_range_pct": round(median_range * EU_SESSION_FACTOR, 2),
+            "eu_session_bad_range_pct": round(p90_range * EU_SESSION_FACTOR, 2),
+        }
+
+        # Per-position warrant impact
+        warrant_impact = {}
+        for key, pos in positions.items():
+            if not pos.get("active"):
+                continue
+            is_silver = "silver" in key
+            is_gold = "gold" in key
+            if (is_silver and underlying_key != "silver") or (is_gold and underlying_key != "gold"):
+                continue
+
+            leverage = LEVERAGE_MAP.get(key, 1.0)
+            bid = prices.get(key, {}).get("bid", 0)
+            stop = pos.get("stop", 0)
+            dist_stop_pct = ((bid - stop) / bid * 100) if bid > 0 else 999
+
+            # Expected warrant moves based on underlying range
+            median_drop = stats["open_to_low"]["p50"]
+            p90_drop = stats["open_to_low"]["p90"]
+            p95_drop = stats["open_to_low"]["p95"]
+
+            median_gain = stats["open_to_high"]["p50"]
+            p90_gain = stats["open_to_high"]["p90"]
+
+            # EU session adjusted (40% of 24h)
+            eu_typical_drop = median_drop * EU_SESSION_FACTOR * leverage
+            eu_bad_drop = p90_drop * EU_SESSION_FACTOR * leverage
+
+            # Remaining potential warrant move
+            remaining_warrant = remaining_range_pct * leverage
+
+            # Stop safety: can a P90 bad day hit the stop?
+            p90_warrant_drop = p90_drop * leverage
+            stop_safe = dist_stop_pct > eu_bad_drop
+            stop_warning = not stop_safe and dist_stop_pct > eu_typical_drop
+            stop_danger = dist_stop_pct <= eu_typical_drop
+
+            warrant_impact[key] = {
+                "leverage": leverage,
+                "dist_to_stop_pct": round(dist_stop_pct, 1),
+                "typical_day_swing_pct": round(median_range * leverage, 1),
+                "typical_day_drop_pct": round(median_drop * leverage, 1),
+                "bad_day_drop_pct": round(p90_drop * leverage, 1),
+                "worst_day_drop_pct": round(p95_drop * leverage, 1),
+                "eu_typical_drop_pct": round(eu_typical_drop, 1),
+                "eu_bad_drop_pct": round(eu_bad_drop, 1),
+                "remaining_potential_pct": round(remaining_warrant, 1),
+                "stop_safety": "SAFE" if stop_safe else ("WARNING" if stop_warning else "DANGER"),
+                "stop_note": (
+                    f"Stop {dist_stop_pct:.1f}% away vs EU P90 drop {eu_bad_drop:.1f}%"
+                    if not stop_safe else
+                    f"Stop {dist_stop_pct:.1f}% away, EU P90 drop {eu_bad_drop:.1f}% — adequate"
+                ),
+            }
+
+        assessment[underlying_key] = {
+            "underlying": underlying_assessment,
+            "warrants": warrant_impact,
+        }
+
+    return assessment
+
+
+# ---------------------------------------------------------------------------
+# Spike Catcher — US Open Limit Sell Orders
+# ---------------------------------------------------------------------------
+
+SPIKE_STATE_FILE = "data/metals_spike_state.json"
+
+
+def compute_spike_targets(positions, prices, range_stats, percentile=75, partial_pct=50):
+    """Compute limit sell target prices for each position based on historical daily gain.
+
+    Uses the P-th percentile of open_to_high to estimate how high the price might
+    spike during the US open session (15:30 CET). Places sell targets at that level.
+
+    Args:
+        positions: POSITIONS dict from metals_loop
+        prices: current price dict {key: {bid, ask, underlying, ...}}
+        range_stats: output from compute_daily_range_stats()
+        percentile: which percentile to target (75 = capture P75 spikes)
+        partial_pct: what % of position to sell (50 = half, 100 = all)
+
+    Returns:
+        dict: {position_key: {target_price, target_pnl_pct, underlying_target,
+               current_bid, units_to_sell, reason}}
+    """
+    targets = {}
+
+    for key, pos in positions.items():
+        if not pos.get("active"):
+            continue
+
+        p = prices.get(key)
+        if not p or not p.get("bid") or p["bid"] <= 0:
+            continue
+
+        bid = p["bid"]
+        entry = pos["entry"]
+        current_pnl = ((bid / entry) - 1) * 100 if entry > 0 else 0
+
+        # Don't place spike orders if losing more than 3%
+        if current_pnl < -3.0:
+            continue
+
+        # Get underlying ticker and leverage
+        is_silver = "silver" in key
+        ticker = "XAG-USD" if is_silver else "XAU-USD"
+        leverage = LEVERAGE_MAP.get(key, 1.0)
+
+        stats = range_stats.get(ticker)
+        if not stats:
+            continue
+
+        # Get the target underlying gain (P-th percentile of open_to_high)
+        pkey = f"p{percentile}"
+        underlying_gain_pct = stats.get("open_to_high", {}).get(pkey, 0)
+        if underlying_gain_pct <= 0:
+            continue
+
+        # EU session gets ~40% of the 24h range, but US open gets the lion's share
+        # Use 60% of the full-day gain as the US session spike target (more aggressive)
+        us_session_gain_pct = underlying_gain_pct * 0.60
+
+        # Warrant target = current + (underlying gain * leverage)
+        warrant_gain_pct = us_session_gain_pct * leverage
+        target_price = bid * (1 + warrant_gain_pct / 100)
+
+        # Round to reasonable price precision
+        if target_price >= 100:
+            target_price = round(target_price, 1)
+        elif target_price >= 10:
+            target_price = round(target_price, 2)
+        else:
+            target_price = round(target_price, 2)
+
+        # Don't place if target is below entry (would be selling at a loss)
+        if target_price <= entry:
+            continue
+
+        target_pnl = ((target_price / entry) - 1) * 100
+
+        # Calculate units to sell
+        total_units = pos["units"]
+        units_to_sell = max(1, int(total_units * partial_pct / 100))
+
+        targets[key] = {
+            "target_price": target_price,
+            "target_pnl_pct": round(target_pnl, 1),
+            "current_bid": bid,
+            "current_pnl_pct": round(current_pnl, 1),
+            "underlying_gain_target_pct": round(us_session_gain_pct, 2),
+            "warrant_gain_target_pct": round(warrant_gain_pct, 1),
+            "units_to_sell": units_to_sell,
+            "total_units": total_units,
+            "leverage": leverage,
+            "percentile_used": percentile,
+            "reason": (f"P{percentile} spike target: +{warrant_gain_pct:.1f}% "
+                       f"(underlying +{us_session_gain_pct:.2f}% * {leverage}x)"),
+        }
+
+    return targets
+
+
+def load_spike_state():
+    """Load spike order state from file."""
+    if os.path.exists(SPIKE_STATE_FILE):
+        try:
+            with open(SPIKE_STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"orders": {}, "date": None, "placed": False, "cancelled": False}
+
+
+def save_spike_state(state):
+    """Persist spike order state."""
+    try:
+        with open(SPIKE_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.warning(f"Failed to save spike state: {e}")

@@ -107,6 +107,34 @@ The `risk` section in metals_context.json contains quantitative risk data:
 - Shows any active cooldowns or session limits
 - Respect cooldowns — don't recommend trades that are blocked
 
+## Daily Range Analysis (Historical + Today)
+
+The `daily_ranges` section in metals_context.json contains historical daily range percentiles
+from YTD 2026 data (55+ trading days). The `intraday_assessment` section compares today's
+session to those historical distributions.
+
+**Key fields in `daily_ranges` (per underlying XAG-USD, XAU-USD):**
+- `daily_range.p50/p75/p90/p95`: percentiles of (high-low)/open % — how much the price typically moves
+- `open_to_low.p50/p90/p95`: max intraday drop from open (worst case scenarios)
+- `open_to_high.p50/p90`: max intraday gain from open
+- `recent_5d`: last 5 days' actual ranges for recency context
+
+**Key fields in `intraday_assessment` (per position):**
+- `session_range_pct`: today's underlying range so far
+- `range_used_of_typical_pct`: how much of a typical day's range has been consumed (e.g., 10% = most of the move is still ahead)
+- `remaining_potential_pct`: remaining underlying range, leveraged for each warrant
+- `eu_typical_drop_pct` / `eu_bad_drop_pct`: expected EU session drop (typical and P90 bad day), already leverage-adjusted
+- `stop_safety`: SAFE / WARNING / DANGER — whether the stop can survive a P90 bad day during EU hours
+- `stop_note`: human-readable safety assessment
+
+**How to use this:**
+- If `range_used_of_typical_pct` < 30%: most of the daily move is still ahead — be cautious about large moves coming
+- If `range_used_of_typical_pct` > 80%: today's range is mostly done — remaining moves likely small
+- If `stop_safety` = DANGER: the stop is too close for typical EU session volatility — flag urgently
+- If `stop_safety` = WARNING: stop could be hit on a bad day — mention in reasoning
+- Always mention the remaining potential warrant move in your Telegram message
+- Use P90 bad day numbers to contextualize stop-loss adequacy
+
 ## Trading Rules
 
 - Take profit: consider selling at +5% from entry (partial only — keep exposure for ATH)
