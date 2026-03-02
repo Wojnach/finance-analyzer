@@ -1,5 +1,5 @@
 """
-Metals Intraday Trading Loop v6 (Layer 1).
+Metals Intraday Trading Loop v7 (Layer 1).
 Collects price data every 60-90 seconds from Avanza.
 When trigger conditions are met, invokes Claude Code (Layer 2) for trading decisions.
 Claude reads data/metals_context.json and decides to buy/sell/hold.
@@ -57,7 +57,7 @@ TRIGGER_PROFIT = 4.0          # % profit from entry to trigger
 TRIGGER_STOP_NEAR = 5.0       # % from stop-loss to trigger
 HEARTBEAT_CHECKS = 20         # invoke every N checks (~30 min at 90s)
 MIN_INVOKE_INTERVAL = 300     # minimum 5 min between invocations
-EOD_HOUR_UTC = 16             # 17:00 CET = 16:00 UTC
+EOD_HOUR_CET = 17.0           # 17:00 CET (DST-safe via cet_hour())
 
 # Spike catcher config (US open limit sell orders)
 SPIKE_ENABLED = True
@@ -94,6 +94,9 @@ MOMENTUM_REQUIRE_L1 = True      # only trigger if already in L1+ danger zone
 
 # Auto-exit override (prevent Claude HOLD paralysis)
 AUTO_EXIT_L2_CHECKS = 5         # auto-sell after position in L2+ zone for N checks
+
+# Periodic holdings verification (detect broker-triggered stop-losses)
+HOLDINGS_CHECK_INTERVAL = 20    # verify Avanza holdings every N checks (~30 min at 90s)
 
 # Tier config: model, timeout, max_turns
 TIER_CONFIG = {
@@ -141,9 +144,9 @@ def _load_positions():
                         positions[key]["sold_price"] = state["sold_price"]
                     if "sold_reason" in state:
                         positions[key]["sold_reason"] = state["sold_reason"]
-            log(f"Position state loaded from {POSITIONS_STATE_FILE}")
+            print(f"Position state loaded from {POSITIONS_STATE_FILE}", flush=True)
     except Exception as e:
-        log(f"Position state load failed (using defaults): {e}")
+        print(f"Position state load failed (using defaults): {e}", flush=True)
     return positions
 
 def _save_positions(positions):
@@ -169,39 +172,53 @@ def _save_positions(positions):
 def _verify_position_holdings(page, positions):
     """At startup, verify actual Avanza holdings match our position state.
 
-    Uses the Avanza account positions API to check if we actually hold each
-    instrument. Falls back to price check if positions API fails.
+    Uses the canonical positions API: /_api/position-data/positions
+    Response has withOrderbook[] where each item has:
+      - account.id
+      - instrument.orderbook.id  (the orderbook ID we match on)
+      - volume.value             (units held)
+    All numeric fields are wrapped in {"value": N, "unit": "..."} objects.
+    Falls back to price check if positions API fails.
     """
-    # Try to get actual account holdings via positions API
     held_ob_ids = set()
     try:
         result = page.evaluate("""async (accountId) => {
             const resp = await fetch(
-                'https://www.avanza.se/_api/account-overview/overview/categorizedAccountPositions/' + accountId,
+                'https://www.avanza.se/_api/position-data/positions',
                 {credentials: 'include'}
             );
             if (resp.status !== 200) return {error: resp.status};
             const data = await resp.json();
-            // Extract all held instrument orderbook IDs
             const ids = [];
-            for (const cat of (data.withOrderbook || [])) {
-                for (const pos of (cat.positions || [])) {
-                    if (pos.orderbookId) ids.push(String(pos.orderbookId));
+            for (const item of (data.withOrderbook || [])) {
+                if (item.account && String(item.account.id) === accountId) {
+                    const obId = item.instrument && item.instrument.orderbook
+                        ? String(item.instrument.orderbook.id) : null;
+                    if (obId) {
+                        const vol = item.volume && item.volume.value != null
+                            ? item.volume.value : 0;
+                        ids.push({id: obId, units: vol});
+                    }
                 }
             }
-            return {ids: ids};
+            return {positions: ids};
         }""", ACCOUNT_ID)
 
-        if result and "ids" in result:
-            held_ob_ids = set(result["ids"])
-            log(f"  Avanza account has {len(held_ob_ids)} positions")
+        if result and "positions" in result:
+            held_map = {p["id"]: p["units"] for p in result["positions"]}
+            held_ob_ids = set(held_map.keys())
+            log(f"  Avanza account {ACCOUNT_ID} has {len(held_ob_ids)} positions")
 
             for key, pos in positions.items():
                 if not pos.get("active"):
                     log(f"  {key}: already inactive (sold)")
                     continue
                 if pos["ob_id"] in held_ob_ids:
-                    log(f"  {key}: confirmed held on Avanza")
+                    api_units = held_map[pos["ob_id"]]
+                    log(f"  {key}: confirmed held on Avanza ({api_units}u)")
+                    if api_units != pos["units"]:
+                        log(f"  {key}: units mismatch — state={pos['units']}, Avanza={api_units}, updating")
+                        pos["units"] = api_units
                 else:
                     log(f"  {key}: NOT found in Avanza holdings — deactivating")
                     pos["active"] = False
@@ -245,7 +262,12 @@ SHORT_INSTRUMENTS = {
 
 ACCOUNT_ID = "1625505"
 
-config = json.load(open("config.json"))
+try:
+    with open("config.json", "r", encoding="utf-8") as _cf:
+        config = json.load(_cf)
+except (FileNotFoundError, json.JSONDecodeError) as e:
+    print(f"[FATAL] Cannot load config.json: {e}", flush=True)
+    sys.exit(1)
 TG_TOKEN = config["telegram"]["token"]
 TG_CHAT = config["telegram"]["chat_id"]
 
@@ -274,8 +296,8 @@ def send_telegram(msg):
             json={"chat_id": TG_CHAT, "text": msg, "parse_mode": "Markdown"},
             timeout=10
         )
-    except:
-        pass
+    except Exception as e:
+        print(f"[TG ERROR] {e}", flush=True)
 
 def log(msg):
     ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -286,7 +308,7 @@ def pnl_pct(current, entry):
     return ((current - entry) / entry) * 100
 
 def get_cet_time():
-    """Get current CET/CEST time from timeapi.io, fallback to UTC+1."""
+    """Get current CET/CEST time from timeapi.io, fallback to zoneinfo (DST-safe)."""
     try:
         r = requests.get(
             "http://timeapi.io/api/time/current/zone?timeZone=Europe/Stockholm",
@@ -297,13 +319,21 @@ def get_cet_time():
             h = data["hour"]
             m = data["minute"]
             return h + m / 60, f"{h:02d}:{m:02d} CET", "timeapi"
-    except:
-        pass
-    # Fallback: UTC+1 (doesn't handle DST)
-    now = datetime.datetime.now(datetime.timezone.utc)
-    h = (now.hour + 1) % 24
-    m = now.minute
-    return h + m / 60, f"{h:02d}:{m:02d} CET", "system_utc+1"
+    except Exception as e:
+        print(f"[WARN] timeapi.io failed: {e}", flush=True)
+    # Fallback: zoneinfo handles DST correctly (CET/CEST)
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.datetime.now(ZoneInfo("Europe/Stockholm"))
+        h = now.hour
+        m = now.minute
+        return h + m / 60, f"{h:02d}:{m:02d} CET", "zoneinfo"
+    except ImportError:
+        # Last resort: UTC+1 (wrong during summer DST)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        h = (now.hour + 1) % 24
+        m = now.minute
+        return h + m / 60, f"{h:02d}:{m:02d} CET", "system_utc+1"
 
 def cet_hour():
     h, _, _ = get_cet_time()
@@ -326,14 +356,16 @@ def fetch_price(page, ob_id, api_type):
         const resp = await fetch('https://www.avanza.se/_api/market-guide/' + type + '/' + id, {credentials:'include'});
         if (resp.status !== 200) return null;
         const d = await resp.json();
+        // Helper: unwrap {"value": N} objects (Avanza wraps some fields)
+        const v = (x) => (x && typeof x === 'object' && 'value' in x) ? x.value : x;
         return {
-            bid: d.quote?.buy, ask: d.quote?.sell, last: d.quote?.last,
-            change_pct: d.quote?.changePercent,
-            high: d.quote?.highest, low: d.quote?.lowest,
-            underlying: d.underlying?.quote?.last,
+            bid: v(d.quote?.buy), ask: v(d.quote?.sell), last: v(d.quote?.last),
+            change_pct: v(d.quote?.changePercent),
+            high: v(d.quote?.highest), low: v(d.quote?.lowest),
+            underlying: v(d.underlying?.quote?.last),
             underlying_name: d.underlying?.name,
-            leverage: d.keyIndicators?.leverage,
-            barrier: d.keyIndicators?.barrierLevel,
+            leverage: v(d.keyIndicators?.leverage),
+            barrier: v(d.keyIndicators?.barrierLevel),
         };
     }""", [ob_id, api_type])
     return result
@@ -403,10 +435,11 @@ def read_decision_history(n=5):
         for line in lines[-n:]:
             try:
                 entries.append(json.loads(line.strip()))
-            except:
+            except json.JSONDecodeError:
                 pass
         return entries
-    except:
+    except Exception as e:
+        log(f"Decision history read error: {e}")
         return []
 
 def emergency_sell(page, key, pos, bid):
@@ -487,6 +520,8 @@ def emergency_sell(page, key, pos, bid):
             pos["sold_price"] = bid
             pos["sold_reason"] = "L3_emergency"
             _save_positions(POSITIONS)
+            # Cancel any remaining stop orders for this position
+            _cleanup_stop_orders_for(page, key)
 
             # Record in trade guards
             if RISK_AVAILABLE:
@@ -506,6 +541,8 @@ def emergency_sell(page, key, pos, bid):
             pos["sold_price"] = bid
             pos["sold_reason"] = "L3_already_sold"
             _save_positions(POSITIONS)
+            # Cancel any remaining stop orders for this position
+            _cleanup_stop_orders_for(page, key)
             return True
 
         else:
@@ -526,6 +563,21 @@ def _get_csrf(page):
         if c["name"] == "AZACSRF":
             return c["value"]
     return None
+
+
+def _cleanup_stop_orders_for(page, key):
+    """Cancel any remaining stop orders for a sold position and clean up state."""
+    try:
+        stop_state = _load_stop_orders()
+        if key in stop_state and stop_state[key].get("orders"):
+            csrf = _get_csrf(page)
+            if csrf:
+                _cancel_stop_orders(page, key, stop_state[key], csrf)
+                log(f"  Cancelled stale stop orders for {key} (position sold)")
+            del stop_state[key]
+            _save_stop_orders(stop_state)
+    except Exception as e:
+        log(f"  Stop order cleanup error for {key}: {e}")
 
 
 def _load_stop_orders():
@@ -621,7 +673,7 @@ def place_stop_loss_orders(page, positions):
                 body_str = result.get("body", "")
                 try:
                     body = json.loads(body_str)
-                except:
+                except (json.JSONDecodeError, TypeError):
                     body = {}
 
                 order_status = body.get("orderRequestStatus", "")
@@ -1077,7 +1129,7 @@ def write_context(prices, trigger_reason, tier=2):
         "trigger_reason": trigger_reason,
         "tier": tier,
         "market_close_cet": "17:25",
-        "hours_remaining": round(max(0, 16.42 - (now.hour + now.minute/60)), 1),
+        "hours_remaining": round(max(0, EOD_HOUR_CET + 25/60 - cet_hour()), 1),
         "positions": {},
         "underlying": {},
         "totals": {},
@@ -1110,8 +1162,8 @@ def write_context(prices, trigger_reason, tier=2):
             ticker: data["stats"]
             for ticker, data in history.get("metals", {}).items()
         }
-    except:
-        pass
+    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+        log(f"  Historical stats load failed: {e}")
 
     # Daily range analysis — historical percentiles + today vs typical
     if RISK_AVAILABLE and daily_range_stats:
@@ -1260,8 +1312,8 @@ def check_triggers(prices):
         elif 0 < dist_stop < STOP_L1_PCT:
             reasons.append(f"{key} L1 WARNING: {dist_stop:.1f}% from stop-loss")
 
-        # Reset L2 counter when not in danger zone
-        if dist_stop >= STOP_L1_PCT:
+        # Reset L2 counter when not in L2 danger zone
+        if dist_stop >= STOP_L2_PCT:
             l2_zone_checks.pop(key, None)
 
     # Signal flip detection
@@ -1309,9 +1361,9 @@ def check_triggers(prices):
         if not reasons:
             reasons.append("periodic heartbeat")
 
-    # End of day
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
-    if now_utc.hour == EOD_HOUR_UTC and now_utc.minute < 3 and check_count > 10:
+    # End of day (CET-based)
+    h_cet = cet_hour()
+    if int(h_cet) == int(EOD_HOUR_CET) and (h_cet % 1) < 0.05 and check_count > 10:
         reasons.append("end_of_day_summary")
 
     return len(reasons) > 0, reasons
@@ -1329,14 +1381,14 @@ def _kill_claude():
             claude_proc.kill()
         try:
             claude_proc.wait(timeout=10)
-        except:
-            pass
+        except (subprocess.TimeoutExpired, OSError) as e:
+            print(f"[WARN] claude_proc.wait failed: {e}", flush=True)
     claude_proc = None
     if claude_log_fh:
         try:
             claude_log_fh.close()
-        except:
-            pass
+        except OSError as e:
+            print(f"[WARN] claude_log_fh close failed: {e}", flush=True)
         claude_log_fh = None
 
 def invoke_claude(trigger_reasons, tier=2):
@@ -1368,8 +1420,8 @@ def invoke_claude(trigger_reasons, tier=2):
     try:
         with open(prompt_file, "r", encoding="utf-8") as f:
             base_prompt = f.read()
-    except:
-        log(f"Cannot read {prompt_file}")
+    except (FileNotFoundError, IOError) as e:
+        log(f"Cannot read {prompt_file}: {e}")
         return False
 
     reason_str = "; ".join(trigger_reasons[:5])
@@ -1451,7 +1503,7 @@ def invoke_claude(trigger_reasons, tier=2):
         if log_fh:
             try:
                 log_fh.close()
-            except:
+            except OSError:
                 pass
         return False
 
@@ -1462,7 +1514,7 @@ def main():
 
     # Probe time server on startup
     h, ts, src = get_cet_time()
-    log(f"Starting metals trading loop (v6 — LLM + Monte Carlo + Daily Ranges + Spike Catcher)...")
+    log(f"Starting metals trading loop (v7 — LLM + MC + Ranges + Spikes + Cascading Stops)...")
     log(f"Time: {ts} (source: {src})")
     log(f"Check interval: {CHECK_INTERVAL}s | Heartbeat: every {HEARTBEAT_CHECKS} checks (~{HEARTBEAT_CHECKS*CHECK_INTERVAL//60}min)")
     log(f"Triggers: price>{TRIGGER_PRICE_MOVE}% | trail>{TRIGGER_TRAILING}% | profit>{TRIGGER_PROFIT}%")
@@ -1569,7 +1621,7 @@ def main():
             pos_parts.append(f"{key}({status})")
         pos_summary = ", ".join(pos_parts)
 
-        send_telegram(f"""*METALS LOOP v6 STARTED*
+        send_telegram(f"""*METALS LOOP v7 STARTED*
 Tiered: T1=haiku T2=sonnet T3=opus
 LLM: {"Ministral+Chronos (60s)" if LLM_AVAILABLE else "DISABLED"}
 Risk: {"MC+Guards+Drawdown+DailyRanges" if RISK_AVAILABLE else "DISABLED"}
@@ -1724,6 +1776,26 @@ Positions: {pos_summary}""")
                     if filled:
                         log(f"Stop orders filled for: {', '.join(filled)}")
 
+                # Periodic holdings verification (detect broker-triggered sells)
+                if check_count % HOLDINGS_CHECK_INTERVAL == 0:
+                    active_before = sum(1 for p in POSITIONS.values() if p["active"])
+                    if active_before > 0:
+                        _verify_position_holdings(page, POSITIONS)
+                        active_after = sum(1 for p in POSITIONS.values() if p["active"])
+                        if active_after < active_before:
+                            lost = active_before - active_after
+                            log(f"Holdings check: {lost} position(s) no longer held on Avanza")
+                            _save_positions(POSITIONS)
+                            # Clean up stop orders for deactivated positions
+                            for key, pos in POSITIONS.items():
+                                if not pos["active"] and pos.get("sold_reason", "").startswith("startup_verify"):
+                                    _cleanup_stop_orders_for(page, key)
+                            send_telegram(f"_Holdings check: {lost} position(s) sold by broker_")
+                            if active_after == 0:
+                                log("All positions sold — exiting loop")
+                                send_telegram("*METALS LOOP* All positions sold by broker. Stopping.")
+                                return
+
                 # Check momentum exit
                 momentum_exits = check_momentum_exit(POSITIONS, prices, price_history)
                 for mkey, mreason in momentum_exits:
@@ -1825,8 +1897,9 @@ Positions: {pos_summary}""")
                     if claude_log_fh:
                         try:
                             claude_log_fh.close()
-                        except:
+                        except OSError:
                             pass
+                        claude_log_fh = None
 
                     # Re-read trade log in case Claude executed a trade
                     if os.path.exists("data/metals_trades.jsonl"):
@@ -1836,8 +1909,8 @@ Positions: {pos_summary}""")
                             if lines:
                                 last_trade = json.loads(lines[-1])
                                 log(f"Last trade: {last_trade.get('action','')} {last_trade.get('name','')}")
-                        except:
-                            pass
+                        except (json.JSONDecodeError, IOError) as e:
+                            log(f"Trade log read error: {e}")
 
                 time.sleep(CHECK_INTERVAL)
 
@@ -1852,8 +1925,8 @@ Positions: {pos_summary}""")
             if LLM_AVAILABLE:
                 try:
                     stop_llm_thread()
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[WARN] LLM thread stop failed: {e}", flush=True)
             browser.close()
             log(f"Loop stopped: {check_count} checks, {invoke_count} invocations")
 
