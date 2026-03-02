@@ -529,6 +529,7 @@
       <div class="nav-tab" data-tab="messages" onclick="switchTab('messages')">Messages</div>
       <div class="nav-tab" data-tab="accuracy" onclick="switchTab('accuracy')">Accuracy</div>
       <div class="nav-tab" data-tab="health" onclick="switchTab('health')">Health</div>
+      <div class="nav-tab" data-tab="metals" onclick="switchTab('metals')">Metals</div>
     </div>
 
     <div class="ct">
@@ -719,6 +720,47 @@
           <div class="nd">Loading health data...</div>
         </div>
       </div>
+
+      <!-- ============================================================
+           TAB: Metals Monitoring
+           ============================================================ -->
+      <div class="tab-content" id="tab-metals">
+        <!-- 1. Portfolio Summary Banner -->
+        <div class="pnl" id="metalsSummary">
+          <div class="nd">Loading metals data...</div>
+        </div>
+
+        <!-- 2. Position Cards -->
+        <div class="sc" id="metalsPositions"></div>
+
+        <!-- 3. Two-Column: Risk & Signals | Silver Technicals -->
+        <div class="twocol">
+          <div class="pnl" id="metalsRisk">
+            <div class="pt">Risk & Signals</div>
+            <div id="metalsRiskContent"><div class="nd">--</div></div>
+          </div>
+          <div class="pnl" id="metalsTechnicals">
+            <div class="pt">Silver Technicals</div>
+            <div id="metalsTechContent"><div class="nd">--</div></div>
+          </div>
+        </div>
+
+        <!-- 4. Recent Decisions -->
+        <div class="pnl">
+          <div class="pt">Recent Decisions</div>
+          <div style="overflow-x:auto;max-height:400px;overflow-y:auto" id="metalsDecisions">
+            <div class="nd">--</div>
+          </div>
+        </div>
+
+        <!-- 5. Intraday Price Chart -->
+        <div class="pnl">
+          <div class="pt">Intraday Prices</div>
+          <div class="chart-wrap" style="height:300px">
+            <canvas id="metalsPriceChart"></canvas>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script>
@@ -733,6 +775,7 @@
       var lastRefreshTime = null;
       var equityChartInstance = null;
       var accChartInstance = null;
+      var metalsPriceChartInstance = null;
 
       // Tickers: populated dynamically from data
       var T = [];
@@ -848,6 +891,7 @@
         if (name === "accuracy") { loadAccuracy(); loadAccuracyHistory(); }
         if (name === "messages") loadMessages();
         if (name === "health") loadHealth();
+        if (name === "metals") loadMetals();
       }
 
       /* ================================================================
@@ -1592,6 +1636,375 @@
       }
 
       /* ================================================================
+         Metals monitoring tab
+         ================================================================ */
+      async function loadMetals() {
+        var d = await fj("/api/metals");
+        if (!d || !d.context) {
+          document.getElementById("metalsSummary").innerHTML = '<div class="nd">No metals data available</div>';
+          document.getElementById("metalsPositions").innerHTML = "";
+          document.getElementById("metalsRiskContent").innerHTML = '<div class="nd">--</div>';
+          document.getElementById("metalsTechContent").innerHTML = '<div class="nd">--</div>';
+          document.getElementById("metalsDecisions").innerHTML = '<div class="nd">--</div>';
+          return;
+        }
+        renderMetalsSummary(d.context);
+        renderMetalsPositionCards(d.context);
+        renderMetalsRisk(d.context);
+        renderMetalsTechnicals(d.technicals, d.context);
+        renderMetalsDecisions(d.decisions);
+        renderMetalsPriceChart(d.context);
+      }
+
+      function renderMetalsSummary(ctx) {
+        var t = ctx.totals || {};
+        var u = ctx.underlying || {};
+        var pnlColor = (t.pnl_pct || 0) >= 0 ? "var(--grn)" : "var(--red)";
+        var h = '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4px 0">';
+        h += '<div style="text-align:center">';
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">P&L</div>';
+        h += '<div style="font-size:28px;font-weight:700;color:' + pnlColor + '">' + fn(t.pnl_pct, 2) + '%</div>';
+        h += '<div style="font-size:13px;color:' + pnlColor + '">' + (t.profit_sek >= 0 ? "+" : "") + fn(t.profit_sek, 0) + ' SEK</div>';
+        h += '</div>';
+        h += '<div style="text-align:center">';
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">Value / Invested</div>';
+        h += '<div style="font-size:18px;font-weight:600">' + fn(t.current, 0) + ' / ' + fn(t.invested, 0) + ' SEK</div>';
+        h += '</div>';
+        h += '<div style="text-align:center">';
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">Gold (USD)</div>';
+        h += '<div style="font-size:18px;font-weight:600;color:var(--yel)">$' + fn(u.gold ? u.gold.price : null, 1) + '</div>';
+        h += '</div>';
+        h += '<div style="text-align:center">';
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">Silver (USD)</div>';
+        h += '<div style="font-size:18px;font-weight:600;color:var(--txd)">$' + fn(u.silver ? u.silver.price : null, 2) + '</div>';
+        h += '</div>';
+        h += '<div style="text-align:center">';
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">Session</div>';
+        h += '<div style="font-size:13px;color:var(--txd)">Check #' + (ctx.check_count || "--") + ' / Invoke #' + (ctx.invoke_count || "--") + '</div>';
+        h += '<div style="font-size:11px;color:var(--txm)">' + (ctx.cet_time || "--") + ' | ' + fn(ctx.hours_remaining, 1) + 'h to close</div>';
+        h += '</div>';
+        h += '</div>';
+        document.getElementById("metalsSummary").innerHTML = h;
+      }
+
+      function renderMetalsPositionCards(ctx) {
+        var pos = ctx.positions || {};
+        var keys = Object.keys(pos);
+        if (!keys.length) {
+          document.getElementById("metalsPositions").innerHTML = '<div class="nd">No positions</div>';
+          return;
+        }
+        var h = '';
+        keys.forEach(function(k) {
+          var p = pos[k];
+          var pnlColor = (p.pnl_pct || 0) >= 0 ? "var(--grn)" : "var(--red)";
+          var stopDist = p.dist_to_stop_pct || 0;
+          var stopColor = stopDist < 5 ? "var(--red)" : stopDist < 7 ? "var(--org)" : stopDist < 10 ? "var(--yel)" : "var(--grn)";
+          var stopBarW = Math.min(stopDist / 15 * 100, 100);
+          var levBadge = p.leverage ? '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:var(--card2);color:var(--cyn);border:1px solid var(--cyn);margin-left:6px">' + p.leverage + 'x</span>' : '';
+
+          h += '<div class="card" style="min-width:220px;flex:1">';
+          h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+          h += '<div style="font-weight:700;font-size:14px;color:var(--tx)">' + eh(p.name || k) + levBadge + '</div>';
+          h += '<div style="font-size:16px;font-weight:700;color:' + pnlColor + '">' + fn(p.pnl_pct, 2) + '%</div>';
+          h += '</div>';
+          h += '<div style="font-size:12px;color:' + pnlColor + ';margin-bottom:8px">' + (p.profit_sek >= 0 ? "+" : "") + fn(p.profit_sek, 1) + ' SEK</div>';
+
+          h += '<div style="display:flex;gap:16px;font-size:11px;color:var(--txd);margin-bottom:8px">';
+          h += '<span>Bid: <b style="color:var(--tx)">' + fn(p.bid, 2) + '</b></span>';
+          h += '<span>Entry: <b style="color:var(--tx)">' + fn(p.entry, 2) + '</b></span>';
+          h += '<span>Value: <b style="color:var(--tx)">' + fn(p.value_sek, 0) + '</b></span>';
+          h += '</div>';
+
+          // Stop-loss distance bar
+          h += '<div style="font-size:10px;color:var(--txm);margin-bottom:3px">Stop distance: <span style="color:' + stopColor + ';font-weight:600">' + fn(stopDist, 1) + '%</span> (stop: ' + fn(p.stop, 2) + ')</div>';
+          h += '<div style="background:var(--card2);border-radius:3px;height:6px;overflow:hidden">';
+          h += '<div style="width:' + stopBarW + '%;height:100%;background:' + stopColor + ';border-radius:3px"></div>';
+          h += '</div>';
+
+          h += '<div style="display:flex;gap:12px;font-size:10px;color:var(--txm);margin-top:6px">';
+          h += '<span>From peak: ' + fn(p.from_peak_pct, 1) + '%</span>';
+          if (p.barrier != null) h += '<span>Barrier: ' + fn(p.barrier, 2) + '</span>';
+          h += '<span>Day: ' + fn(p.day_change_pct, 1) + '%</span>';
+          h += '</div>';
+          h += '</div>';
+        });
+        document.getElementById("metalsPositions").innerHTML = h;
+      }
+
+      function renderMetalsRisk(ctx) {
+        var risk = ctx.risk || {};
+        var dd = risk.drawdown || {};
+        var mc = risk.monte_carlo || {};
+        var tg = risk.trade_guards || {};
+        var sig = ctx.signals || {};
+        var llm = ctx.llm_predictions || {};
+
+        var ddLevel = (dd.level || "OK").toUpperCase();
+        var ddColor = ddLevel === "OK" ? "var(--grn)" : ddLevel === "WARNING" ? "var(--org)" : "var(--red)";
+
+        var h = '';
+        // Drawdown badge
+        h += '<div style="display:inline-block;padding:4px 12px;border-radius:4px;background:' + ddColor + '22;color:' + ddColor + ';font-weight:700;font-size:12px;border:1px solid ' + ddColor + '44;margin-bottom:10px">';
+        h += 'Drawdown: ' + ddLevel + ' (' + fn(dd.current_drawdown_pct, 1) + '%)';
+        h += '</div>';
+
+        // Monte Carlo stop probabilities
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase;margin:8px 0 4px">Monte Carlo Stop Probabilities</div>';
+        h += '<table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:10px">';
+        h += '<tr style="color:var(--txm)"><th style="text-align:left;padding:3px 6px">Position</th><th style="padding:3px 6px">P(stop 3h)</th><th style="padding:3px 6px">P(stop 8h)</th><th style="padding:3px 6px">VaR-95 3h</th></tr>';
+        ["gold", "silver79", "silver301"].forEach(function(k) {
+          var m = mc[k] || {};
+          h += '<tr><td style="padding:3px 6px;color:var(--tx)">' + k + '</td>';
+          h += '<td style="padding:3px 6px;text-align:center;color:' + ((m.p_stop_3h || 0) > 0.05 ? "var(--red)" : "var(--grn)") + '">' + fn((m.p_stop_3h || 0) * 100, 1) + '%</td>';
+          h += '<td style="padding:3px 6px;text-align:center;color:' + ((m.p_stop_8h || 0) > 0.1 ? "var(--org)" : "var(--grn)") + '">' + fn((m.p_stop_8h || 0) * 100, 1) + '%</td>';
+          h += '<td style="padding:3px 6px;text-align:center;color:var(--red)">' + fn(m.var_95_3h, 1) + '%</td>';
+          h += '</tr>';
+        });
+        h += '</table>';
+
+        // Pipeline signals
+        var fs = sig.forecast_signals || {};
+        var xagFs = fs["XAG-USD"] || {};
+        var xauFs = fs["XAU-USD"] || {};
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase;margin:8px 0 4px">Pipeline Signals</div>';
+        h += '<div style="font-size:11px;color:var(--txd);margin-bottom:4px">XAG: <span class="' + ac(xagFs.action) + '" style="font-weight:600">' + (xagFs.action || "N/A") + '</span>';
+        if (xagFs.chronos_1h_pct != null) h += ' | Chronos 1h: ' + fn(xagFs.chronos_1h_pct, 3) + '%';
+        h += '</div>';
+        h += '<div style="font-size:11px;color:var(--txd);margin-bottom:8px">XAU: <span class="' + ac(xauFs.action) + '" style="font-weight:600">' + (xauFs.action || "N/A") + '</span>';
+        if (xauFs.chronos_1h_pct != null) h += ' | Chronos 1h: ' + fn(xauFs.chronos_1h_pct, 3) + '%';
+        h += '</div>';
+
+        // LLM consensus
+        var preds = llm.predictions || {};
+        var xagPred = preds["XAG-USD"] || {};
+        var xauPred = preds["XAU-USD"] || {};
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase;margin:8px 0 4px">LLM Consensus</div>';
+        if (xagPred.consensus) {
+          h += '<div style="font-size:11px;color:var(--txd)">XAG: <span style="color:var(--tx);font-weight:600">' + (xagPred.consensus.weighted_action || xagPred.consensus.direction || "--") + '</span>';
+          if (xagPred.ministral) h += ' | Ministral: ' + (xagPred.ministral.action || "--");
+          if (xagPred.chronos_1h) h += ' | Chronos: ' + fn(xagPred.chronos_1h.pct_move, 2) + '%';
+          h += '</div>';
+        }
+        if (xauPred.consensus) {
+          h += '<div style="font-size:11px;color:var(--txd)">XAU: <span style="color:var(--tx);font-weight:600">' + (xauPred.consensus.weighted_action || xauPred.consensus.direction || "--") + '</span>';
+          if (xauPred.ministral) h += ' | Ministral: ' + (xauPred.ministral.action || "--");
+          h += '</div>';
+        }
+
+        // Trade guard status
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase;margin:10px 0 4px">Trade Guards</div>';
+        var tgStatus = (tg.status || "unknown").replace(/_/g, " ");
+        var tgColor = tgStatus === "all clear" ? "var(--grn)" : "var(--org)";
+        h += '<div style="font-size:11px;color:' + tgColor + ';font-weight:600">' + tgStatus.toUpperCase() + '</div>';
+
+        document.getElementById("metalsRiskContent").innerHTML = h;
+      }
+
+      function renderMetalsTechnicals(tech, ctx) {
+        if (!tech || !tech.technicals) {
+          document.getElementById("metalsTechContent").innerHTML = '<div class="nd">No technicals data</div>';
+          return;
+        }
+        var u = ctx.underlying || {};
+        var silver = u.silver || {};
+
+        var h = '';
+        // Silver price + range
+        h += '<div style="font-size:14px;font-weight:700;color:var(--tx);margin-bottom:4px">XAG $' + fn(silver.price, 2) + '</div>';
+        if (tech.price) {
+          h += '<div style="font-size:11px;color:var(--txd);margin-bottom:8px">';
+          h += 'Session: $' + fn(tech.price.session_low, 2) + ' - $' + fn(tech.price.session_high, 2);
+          if (tech.warrant) h += ' | Warrant P&L: <span style="color:' + ((tech.warrant.pct_change || 0) >= 0 ? "var(--grn)" : "var(--red)") + '">' + fn(tech.warrant.pct_change, 1) + '%</span>';
+          h += '</div>';
+        }
+
+        // Technicals table
+        var tfs = ["1m", "5m", "15m", "1h"];
+        var techs = tech.technicals || {};
+        h += '<table style="width:100%;font-size:11px;border-collapse:collapse">';
+        h += '<tr style="color:var(--txm);border-bottom:1px solid var(--bdr)">';
+        h += '<th style="text-align:left;padding:4px 6px">TF</th>';
+        h += '<th style="padding:4px 6px">RSI</th>';
+        h += '<th style="padding:4px 6px">MACD</th>';
+        h += '<th style="padding:4px 6px">BB</th>';
+        h += '<th style="padding:4px 6px">Vol</th>';
+        h += '<th style="padding:4px 6px">Chg%</th>';
+        h += '</tr>';
+        tfs.forEach(function(tf) {
+          var t = techs[tf];
+          if (!t) return;
+          var rsiColor = t.rsi > 70 ? "var(--red)" : t.rsi < 30 ? "var(--grn)" : "var(--txd)";
+          var macdColor = (t.macd_line || 0) > 0 ? "var(--grn)" : "var(--red)";
+          var volColor = (t.volume_ratio || 0) > 1.5 ? "var(--yel)" : "var(--txd)";
+          var chg = t.price_changes_pct ? t.price_changes_pct.last_5 : null;
+          var chgColor = chg > 0 ? "var(--grn)" : chg < 0 ? "var(--red)" : "var(--txd)";
+          var bbText = (t.bb_position || "inside").replace("_", " ");
+          var bbColor = bbText === "below lower" ? "var(--grn)" : bbText === "above upper" ? "var(--red)" : "var(--txd)";
+
+          h += '<tr style="border-bottom:1px solid var(--bdr)">';
+          h += '<td style="padding:4px 6px;font-weight:600;color:var(--tx)">' + tf + '</td>';
+          h += '<td style="padding:4px 6px;text-align:center;color:' + rsiColor + '">' + fn(t.rsi, 1) + '</td>';
+          h += '<td style="padding:4px 6px;text-align:center;color:' + macdColor + '">' + fn(t.macd_line, 4) + '</td>';
+          h += '<td style="padding:4px 6px;text-align:center;color:' + bbColor + ';font-size:10px">' + bbText + '</td>';
+          h += '<td style="padding:4px 6px;text-align:center;color:' + volColor + '">' + fn(t.volume_ratio, 2) + 'x</td>';
+          h += '<td style="padding:4px 6px;text-align:center;color:' + chgColor + '">' + fn(chg, 2) + '%</td>';
+          h += '</tr>';
+        });
+        h += '</table>';
+        document.getElementById("metalsTechContent").innerHTML = h;
+      }
+
+      function renderMetalsDecisions(decisions) {
+        if (!decisions || !decisions.length) {
+          document.getElementById("metalsDecisions").innerHTML = '<div class="nd">No decisions yet</div>';
+          return;
+        }
+        var h = '<table style="width:100%;font-size:11px;border-collapse:collapse">';
+        h += '<tr style="color:var(--txm);border-bottom:1px solid var(--bdr)">';
+        h += '<th style="text-align:left;padding:4px 6px">Time</th>';
+        h += '<th style="padding:4px 6px">Tier</th>';
+        h += '<th style="padding:4px 6px">Gold</th>';
+        h += '<th style="padding:4px 6px">Silver79</th>';
+        h += '<th style="padding:4px 6px">Silver301</th>';
+        h += '<th style="padding:4px 6px">Prediction</th>';
+        h += '<th style="text-align:left;padding:4px 6px">Reasoning</th>';
+        h += '</tr>';
+        var shown = Math.min(decisions.length, 30);
+        for (var i = 0; i < shown; i++) {
+          var d = decisions[i];
+          var pos = d.positions || {};
+          var pred = d.prediction || {};
+          var tierColor = d.tier === 1 ? "var(--txm)" : d.tier === 2 ? "var(--org)" : "var(--red)";
+
+          h += '<tr style="border-bottom:1px solid var(--bdr)">';
+          h += '<td style="padding:4px 6px;color:var(--txd);white-space:nowrap">' + ft(d.ts) + '</td>';
+          h += '<td style="padding:4px 6px;text-align:center"><span style="color:' + tierColor + ';font-weight:700">T' + (d.tier || "?") + '</span></td>';
+
+          // Position action cells
+          ["gold", "silver79", "silver301"].forEach(function(k) {
+            var p = pos[k] || {};
+            var act = (p.action || "HOLD").toUpperCase();
+            var actColor = act === "BUY" ? "var(--grn)" : act === "SELL" ? "var(--red)" : "var(--gry)";
+            h += '<td style="padding:4px 6px;text-align:center">';
+            h += '<span style="color:' + actColor + ';font-weight:600">' + act + '</span>';
+            if (p.pnl_pct != null) h += '<br><span style="font-size:9px;color:var(--txm)">' + fn(p.pnl_pct, 1) + '%</span>';
+            h += '</td>';
+          });
+
+          // Prediction
+          h += '<td style="padding:4px 6px;text-align:center;color:var(--txd)">';
+          if (pred.direction) {
+            var predColor = pred.direction === "up" ? "var(--grn)" : pred.direction === "down" ? "var(--red)" : "var(--gry)";
+            h += '<span style="color:' + predColor + '">' + pred.direction + '</span>';
+            if (pred.confidence) h += ' <span style="font-size:9px">(' + fn(pred.confidence * 100, 0) + '%)</span>';
+          } else {
+            h += '--';
+          }
+          h += '</td>';
+
+          // Reasoning (truncated)
+          var reason = d.reasoning || d.reflection || "";
+          if (reason.length > 80) reason = reason.substring(0, 80) + "...";
+          h += '<td style="padding:4px 6px;color:var(--txd);max-width:250px;overflow:hidden;text-overflow:ellipsis">' + eh(reason) + '</td>';
+          h += '</tr>';
+        }
+        h += '</table>';
+        document.getElementById("metalsDecisions").innerHTML = h;
+      }
+
+      function renderMetalsPriceChart(ctx) {
+        var priceHistory = ctx.price_history_recent || [];
+        if (!priceHistory.length) return;
+
+        var labels = priceHistory.map(function(p) {
+          var d = new Date(p.ts);
+          return d.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+        });
+        var goldBid = priceHistory.map(function(p) { return p.gold; });
+        var silverUnd = priceHistory.map(function(p) { return p.silver79_und || p.silver301_und; });
+        var silver79 = priceHistory.map(function(p) { return p.silver79; });
+        var silver301 = priceHistory.map(function(p) { return p.silver301; });
+
+        if (metalsPriceChartInstance) {
+          metalsPriceChartInstance.destroy();
+          metalsPriceChartInstance = null;
+        }
+
+        var canvas = document.getElementById("metalsPriceChart");
+        metalsPriceChartInstance = new Chart(canvas.getContext("2d"), {
+          type: "line",
+          data: {
+            labels: labels,
+            datasets: [
+              {
+                label: "Gold bid (SEK)",
+                data: goldBid,
+                borderColor: "#eab308",
+                backgroundColor: "rgba(234,179,8,0.1)",
+                borderWidth: 2,
+                pointRadius: 2,
+                yAxisID: "y"
+              },
+              {
+                label: "Silver (USD)",
+                data: silverUnd,
+                borderColor: "#9ca3af",
+                backgroundColor: "rgba(156,163,175,0.1)",
+                borderWidth: 2,
+                pointRadius: 2,
+                yAxisID: "y1"
+              },
+              {
+                label: "Silver79 bid",
+                data: silver79,
+                borderColor: "#06b6d4",
+                borderDash: [5, 3],
+                borderWidth: 1.5,
+                pointRadius: 1,
+                yAxisID: "y"
+              },
+              {
+                label: "Silver301 bid",
+                data: silver301,
+                borderColor: "#f97316",
+                borderDash: [5, 3],
+                borderWidth: 1.5,
+                pointRadius: 1,
+                yAxisID: "y"
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            plugins: {
+              legend: { labels: { color: "#a0aec0", font: { size: 10 } } }
+            },
+            scales: {
+              x: {
+                ticks: { color: "#718096", font: { size: 9 } },
+                grid: { color: "rgba(255,255,255,0.05)" }
+              },
+              y: {
+                position: "left",
+                title: { display: true, text: "Warrant bids (SEK)", color: "#718096", font: { size: 10 } },
+                ticks: { color: "#a0aec0", font: { size: 9 } },
+                grid: { color: "rgba(255,255,255,0.05)" }
+              },
+              y1: {
+                position: "right",
+                title: { display: true, text: "Underlying (USD)", color: "#718096", font: { size: 10 } },
+                ticks: { color: "#9ca3af", font: { size: 9 } },
+                grid: { drawOnChartArea: false }
+              }
+            }
+          }
+        });
+      }
+
+      /* ================================================================
          Accuracy history chart (per-signal accuracy over time)
          ================================================================ */
       async function loadAccuracyHistory() {
@@ -1852,7 +2265,23 @@
       /* ================================================================
          Fetch helper
          ================================================================ */
+      /* Static-mode fallback: when the live Flask API is unavailable (e.g. on
+         GitHub Pages), remap /api/<name> to ./api-data/<name>.json.
+         Detection: first fj() call probes the live API; on failure it sets
+         _staticMode = true so subsequent calls go straight to the static files. */
+      var _staticMode = null; // null = unknown, true/false after first probe
+
+      function _staticUrl(apiUrl) {
+        // /api/equity-curve?foo=1 → ./api-data/equity-curve.json
+        var path = apiUrl.replace(/^\/api\//, "").replace(/\?.*$/, "");
+        return "./api-data/" + path + ".json";
+      }
+
       async function fj(u) {
+        // If we already know we're in static mode, skip the live fetch
+        if (_staticMode === true) {
+          return _fjStatic(u);
+        }
         try {
           var r = await fetch(u);
           if (r.status === 401) {
@@ -1861,11 +2290,31 @@
           }
           if (!r.ok) {
             console.error("API error:", u, r.status, r.statusText);
+            // Try static fallback on non-401 errors
+            if (_staticMode === null) _staticMode = true;
+            return _fjStatic(u);
+          }
+          if (_staticMode === null) _staticMode = false;
+          return await r.json();
+        } catch (e) {
+          console.error("Fetch failed:", u, e.message || e);
+          // Network error — no Flask backend, switch to static mode
+          if (_staticMode === null) _staticMode = true;
+          return _fjStatic(u);
+        }
+      }
+
+      async function _fjStatic(u) {
+        var su = _staticUrl(u);
+        try {
+          var r = await fetch(su);
+          if (!r.ok) {
+            console.error("Static fallback also failed:", su, r.status);
             return null;
           }
           return await r.json();
         } catch (e) {
-          console.error("Fetch failed:", u, e.message || e);
+          console.error("Static fetch failed:", su, e.message || e);
           return null;
         }
       }

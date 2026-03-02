@@ -950,6 +950,105 @@ class TestApiRisk:
 # Signal heatmap — verify updated signal lists
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Metals endpoint
+# ---------------------------------------------------------------------------
+
+class TestApiMetals:
+    def test_returns_combined_metals_data(self, client, tmp_data):
+        ctx = {
+            "timestamp": "2026-03-02T13:31:41+00:00",
+            "positions": {
+                "gold": {"name": "BULL GULD X8 N", "bid": 979.9, "entry": 972.4, "pnl_pct": 0.77},
+                "silver79": {"name": "MINI L SILVER AVA 79", "bid": 64.19, "pnl_pct": -1.44},
+                "silver301": {"name": "MINI L SILVER AVA 301", "bid": 19.47, "pnl_pct": -5.94},
+            },
+            "totals": {"invested": 14910, "current": 14579, "pnl_pct": -2.22},
+            "underlying": {"gold": {"price": 5413.1}, "silver": {"price": 94.29}},
+            "risk": {"drawdown": {"level": "OK", "current_drawdown_pct": -2.22}},
+        }
+        dec = {"ts": "2026-03-02T10:52:58+00:00", "tier": 1, "decision": "HOLD"}
+        hist = {"period": "2026-01-01 to 2026-03-02", "metals": {}}
+        tech = {"technicals": {"1m": {"rsi": 46.2, "macd_line": -0.14}}}
+
+        (tmp_data / "metals_context.json").write_text(json.dumps(ctx), encoding="utf-8")
+        (tmp_data / "metals_decisions.jsonl").write_text(json.dumps(dec) + "\n", encoding="utf-8")
+        (tmp_data / "metals_history.json").write_text(json.dumps(hist), encoding="utf-8")
+        (tmp_data / "silver_analysis.json").write_text(json.dumps(tech), encoding="utf-8")
+
+        with _no_auth():
+            resp = client.get("/api/metals")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "context" in data
+        assert "decisions" in data
+        assert "history" in data
+        assert "technicals" in data
+        assert data["context"]["totals"]["pnl_pct"] == -2.22
+        assert data["context"]["positions"]["gold"]["bid"] == 979.9
+
+    def test_returns_nulls_when_no_files(self, client, tmp_data):
+        with _no_auth():
+            resp = client.get("/api/metals")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["context"] is None
+        assert data["decisions"] == []
+        assert data["history"] is None
+        assert data["technicals"] is None
+
+    def test_decisions_newest_first(self, client, tmp_data):
+        lines = [
+            json.dumps({"ts": "2026-03-02T10:00:00+00:00", "tier": 1}),
+            json.dumps({"ts": "2026-03-02T11:00:00+00:00", "tier": 2}),
+            json.dumps({"ts": "2026-03-02T12:00:00+00:00", "tier": 3}),
+        ]
+        (tmp_data / "metals_decisions.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        # Provide empty context so endpoint returns 200
+        (tmp_data / "metals_context.json").write_text("{}", encoding="utf-8")
+
+        with _no_auth():
+            resp = client.get("/api/metals")
+        data = resp.get_json()
+        # newest first
+        assert data["decisions"][0]["ts"] == "2026-03-02T12:00:00+00:00"
+        assert data["decisions"][2]["ts"] == "2026-03-02T10:00:00+00:00"
+
+    def test_requires_auth_when_configured(self, client, tmp_data):
+        with patch("dashboard.app._get_dashboard_token", return_value="secret"):
+            resp = client.get("/api/metals")
+        assert resp.status_code == 401
+
+    def test_auth_with_token(self, client, tmp_data):
+        (tmp_data / "metals_context.json").write_text('{"positions": {}}', encoding="utf-8")
+        with patch("dashboard.app._get_dashboard_token", return_value="secret"):
+            resp = client.get("/api/metals?token=secret")
+        assert resp.status_code == 200
+
+    def test_partial_data_graceful(self, client, tmp_data):
+        """Only context file exists, others missing — should still return 200."""
+        ctx = {"positions": {"gold": {"bid": 950}}, "totals": {"pnl_pct": -1.0}}
+        (tmp_data / "metals_context.json").write_text(json.dumps(ctx), encoding="utf-8")
+        with _no_auth():
+            resp = client.get("/api/metals")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["context"]["positions"]["gold"]["bid"] == 950
+        assert data["decisions"] == []
+        assert data["history"] is None
+        assert data["technicals"] is None
+
+    def test_decisions_limit_50(self, client, tmp_data):
+        """Only last 50 decisions are returned."""
+        lines = [json.dumps({"ts": f"2026-03-02T{i:02d}:00:00+00:00", "tier": 1}) for i in range(60)]
+        (tmp_data / "metals_decisions.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        (tmp_data / "metals_context.json").write_text("{}", encoding="utf-8")
+        with _no_auth():
+            resp = client.get("/api/metals")
+        data = resp.get_json()
+        assert len(data["decisions"]) == 50
+
+
 class TestSignalHeatmapUpdated:
     def test_core_signals_includes_custom_lora(self, client, tmp_data):
         summary = {

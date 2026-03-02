@@ -471,5 +471,33 @@ def api_risk():
     })
 
 
+# ---------------------------------------------------------------------------
+# New: Metals monitoring
+# ---------------------------------------------------------------------------
+
+@app.route("/api/metals")
+@require_auth
+def api_metals():
+    """Return combined metals monitoring data.
+
+    Reads:
+      - data/metals_context.json — live positions, P&L, risk, signals, prices
+      - data/metals_decisions.jsonl — decision log (newest first, last 50)
+      - data/metals_history.json — YTD stats + daily OHLCV
+      - data/silver_analysis.json — multi-TF technicals
+    """
+    context = _read_json(DATA_DIR / "metals_context.json")
+    decisions = _read_jsonl(DATA_DIR / "metals_decisions.jsonl", limit=50)
+    decisions.reverse()  # newest first
+    history = _read_json(DATA_DIR / "metals_history.json")
+    technicals = _read_json(DATA_DIR / "silver_analysis.json")
+    return jsonify({
+        "context": context,
+        "decisions": decisions,
+        "history": history,
+        "technicals": technicals,
+    })
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5055, debug=False)
