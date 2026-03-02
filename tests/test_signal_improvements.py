@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from conftest import make_indicators as _make_indicators_base
 from portfolio.main import (
     CRYPTO_SYMBOLS,
     STOCK_SYMBOLS,
@@ -65,25 +66,17 @@ def make_df(n=100, close_base=100.0, volatility=2.0):
     )
 
 
+# Stock-price defaults for signal improvement tests
+_STOCK_DEFAULTS = dict(
+    close=130.0, ema9=130.0, ema21=130.0,
+    bb_upper=135.0, bb_lower=125.0, bb_mid=130.0,
+    atr=3.0, atr_pct=2.3, rsi_p20=30.0, rsi_p80=70.0,
+)
+
+
 def make_indicators(**overrides):
-    base = {
-        "close": 130.0,
-        "rsi": 50.0,
-        "macd_hist": 0.0,
-        "macd_hist_prev": 0.0,
-        "ema9": 130.0,
-        "ema21": 130.0,
-        "bb_upper": 135.0,
-        "bb_lower": 125.0,
-        "bb_mid": 130.0,
-        "price_vs_bb": "inside",
-        "atr": 3.0,
-        "atr_pct": 2.3,
-        "rsi_p20": 30.0,
-        "rsi_p80": 70.0,
-    }
-    base.update(overrides)
-    return base
+    merged = {**_STOCK_DEFAULTS, **overrides}
+    return _make_indicators_base(**merged)
 
 
 # --- Phase 1 Tests ---

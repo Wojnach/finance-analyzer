@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from conftest import make_indicators as _make_indicators_base, make_ohlcv_df
 from portfolio.main import (
     generate_signal,
     CRYPTO_SYMBOLS,
@@ -35,40 +36,10 @@ def _null_cached(key, ttl, func, *args):
 
 
 def make_indicators(**overrides):
-    """Create a valid indicator dict for testing."""
-    base = {
-        "close": 69000.0,
-        "rsi": 50.0,
-        "macd_hist": 0.0,
-        "macd_hist_prev": 0.0,
-        "ema9": 69000.0,
-        "ema21": 69000.0,
-        "bb_upper": 70000.0,
-        "bb_lower": 68000.0,
-        "bb_mid": 69000.0,
-        "price_vs_bb": "inside",
-        "atr": 100.0,
-        "atr_pct": 0.15,
-        "rsi_p20": 30,
-        "rsi_p80": 70,
-    }
-    base.update(overrides)
-    return base
-
-
-def make_ohlcv_df(n=100, base_price=100.0, trend=0.0):
-    """Create a synthetic OHLCV DataFrame."""
-    np.random.seed(42)
-    close = base_price + np.cumsum(np.random.randn(n) * 0.5) + np.arange(n) * trend
-    close = np.maximum(close, 1.0)
-    return pd.DataFrame({
-        "open": close + np.random.randn(n) * 0.2,
-        "high": close + np.abs(np.random.randn(n)),
-        "low": close - np.abs(np.random.randn(n)),
-        "close": close,
-        "volume": np.random.randint(100, 10000, n).astype(float),
-        "time": pd.date_range("2024-01-01", periods=n, freq="1h"),
-    })
+    """Create a valid indicator dict for pipeline tests (low-ATR defaults)."""
+    defaults = {"atr": 100.0, "atr_pct": 0.15, "rsi_p20": 30, "rsi_p80": 70}
+    merged = {**defaults, **overrides}
+    return _make_indicators_base(**merged)
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +71,7 @@ class TestGenerateSignalStructure:
     def test_stock_signal_structure(self, _mock):
         """Stock ticker returns all expected keys."""
         ind = make_indicators(close=130.0)
-        df = make_ohlcv_df(n=250, base_price=130.0)
+        df = make_ohlcv_df(n=250, close_base=130.0)
         action, conf, extra = generate_signal(ind, ticker="MSTR", df=df)
 
         assert action in ("BUY", "SELL", "HOLD")
@@ -111,7 +82,7 @@ class TestGenerateSignalStructure:
     def test_metal_signal_structure(self, _mock):
         """Metal ticker returns all expected keys."""
         ind = make_indicators(close=2000.0)
-        df = make_ohlcv_df(n=250, base_price=2000.0)
+        df = make_ohlcv_df(n=250, close_base=2000.0)
         action, conf, extra = generate_signal(ind, ticker="XAU-USD", df=df)
 
         assert action in ("BUY", "SELL", "HOLD")
@@ -152,7 +123,7 @@ class TestVoteCountIntegrity:
     def test_stock_vote_counts(self, _mock):
         """For stocks, total applicable = 25 (7 core + 18 enhanced)."""
         ind = make_indicators(close=130.0)
-        df = make_ohlcv_df(n=250, base_price=130.0)
+        df = make_ohlcv_df(n=250, close_base=130.0)
         _, _, extra = generate_signal(ind, ticker="NVDA", df=df)
 
         assert extra["_total_applicable"] == 25
@@ -161,7 +132,7 @@ class TestVoteCountIntegrity:
     def test_metal_vote_counts(self, _mock):
         """For metals, total applicable = 25 (7 core + 18 enhanced)."""
         ind = make_indicators(close=2000.0)
-        df = make_ohlcv_df(n=250, base_price=2000.0)
+        df = make_ohlcv_df(n=250, close_base=2000.0)
         _, _, extra = generate_signal(ind, ticker="XAU-USD", df=df)
 
         assert extra["_total_applicable"] == 25
@@ -170,7 +141,7 @@ class TestVoteCountIntegrity:
     def test_all_stock_symbols_have_25_applicable(self, _mock):
         """Every stock symbol should have exactly 25 total applicable signals."""
         ind = make_indicators(close=100.0)
-        df = make_ohlcv_df(n=250, base_price=100.0)
+        df = make_ohlcv_df(n=250, close_base=100.0)
 
         for ticker in list(STOCK_SYMBOLS)[:5]:  # test a sample
             _, _, extra = generate_signal(ind, ticker=ticker, df=df)

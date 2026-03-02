@@ -9,6 +9,7 @@ import pytest
 import numpy as np
 import pandas as pd
 
+from conftest import make_indicators, make_candles
 from portfolio.main import (
     compute_indicators,
     technical_signal,
@@ -22,39 +23,6 @@ from portfolio.main import (
     MIN_VOTERS_STOCK,
 )
 from portfolio.sentiment import _aggregate_sentiments, _fetch_crypto_headlines
-
-# --- Helpers ---
-
-
-def make_candles(prices, volume=100.0):
-    n = len(prices)
-    return pd.DataFrame(
-        {
-            "open": prices,
-            "high": [p * 1.01 for p in prices],
-            "low": [p * 0.99 for p in prices],
-            "close": prices,
-            "volume": [volume] * n,
-            "time": pd.date_range("2026-01-01", periods=n, freq="15min"),
-        }
-    )
-
-
-def make_indicators(**overrides):
-    base = {
-        "close": 69000.0,
-        "rsi": 50.0,
-        "macd_hist": 0.0,
-        "macd_hist_prev": 0.0,
-        "ema9": 69000.0,
-        "ema21": 69000.0,
-        "bb_upper": 70000.0,
-        "bb_lower": 68000.0,
-        "bb_mid": 69000.0,
-        "price_vs_bb": "inside",
-    }
-    base.update(overrides)
-    return base
 
 
 # --- compute_indicators ---

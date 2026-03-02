@@ -11,6 +11,7 @@ import json
 import pytest
 import unittest.mock as mock
 
+from conftest import make_indicators as _make_indicators
 from portfolio.main import (
     generate_signal,
     MIN_VOTERS_CRYPTO,
@@ -30,21 +31,16 @@ def _null_cached(key, ttl, func, *args):
 _NO_PENALTIES = {"confidence_penalties": {"enabled": False}}
 
 
+# Stock-price defaults for consensus tests (conftest defaults to crypto prices)
+_STOCK_DEFAULTS = dict(
+    close=130.0, ema9=130.0, ema21=130.0,
+    bb_upper=135.0, bb_lower=125.0, bb_mid=130.0,
+)
+
+
 def make_indicators(**overrides):
-    base = {
-        "close": 130.0,
-        "rsi": 50.0,
-        "macd_hist": 0.0,
-        "macd_hist_prev": 0.0,
-        "ema9": 130.0,
-        "ema21": 130.0,
-        "bb_upper": 135.0,
-        "bb_lower": 125.0,
-        "bb_mid": 130.0,
-        "price_vs_bb": "inside",
-    }
-    base.update(overrides)
-    return base
+    merged = {**_STOCK_DEFAULTS, **overrides}
+    return _make_indicators(**merged)
 
 
 class TestMinVotersConstants:
