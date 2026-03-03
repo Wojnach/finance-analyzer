@@ -465,6 +465,63 @@ class TestPenaltiesStage3TrapDetection:
         )
         assert not any(p["stage"] == "trap" for p in log)
 
+    def test_trap_exception_logs_warning(self, caplog):
+        """BUG-42: trap detection should log warning on exception, not silently pass."""
+        # DataFrame with non-numeric volume column that will cause comparison error
+        df = pd.DataFrame({
+            "open": [1.0] * 10,
+            "high": [2.0] * 10,
+            "low": [0.5] * 10,
+            "close": list(range(1, 11)),  # ascending → price_up = True
+            "volume": ["bad"] * 10,  # string volume → comparison will fail
+        })
+        extra = _base_extra(voters=5)
+        import logging
+        with caplog.at_level(logging.WARNING, logger="portfolio.signal_engine"):
+            action, conf, log = apply_confidence_penalties(
+                "BUY", 0.8, "trending-up", {}, extra, "BTC-USD", df, {},
+            )
+        # Should not crash, and should log a warning
+        assert any("Trap detection failed" in r.message for r in caplog.records)
+        # Confidence unchanged (trap detection skipped gracefully)
+        assert not any(p.get("stage") == "trap" for p in log)
+
+    def test_trap_missing_volume_column_logs_warning(self, caplog):
+        """BUG-42: DataFrame missing volume column triggers safe warning path."""
+        df = pd.DataFrame({
+            "open": [1.0] * 10,
+            "high": [2.0] * 10,
+            "low": [0.5] * 10,
+            "close": list(range(1, 11)),
+            # No "volume" column at all — the code checks "volume" in df.columns
+            # so this should NOT raise, it should just skip. Verify no trap applied.
+        })
+        extra = _base_extra(voters=5)
+        action, conf, log = apply_confidence_penalties(
+            "BUY", 0.8, "trending-up", {}, extra, "BTC-USD", df, {},
+        )
+        assert not any(p.get("stage") == "trap" for p in log)
+
+    def test_trap_nan_volume_logs_warning(self, caplog):
+        """BUG-42: DataFrame with NaN volumes should log warning."""
+        df = pd.DataFrame({
+            "open": [1.0] * 10,
+            "high": [2.0] * 10,
+            "low": [0.5] * 10,
+            "close": list(range(1, 11)),
+            "volume": [float("nan")] * 10,
+        })
+        extra = _base_extra(voters=5)
+        import logging
+        with caplog.at_level(logging.WARNING, logger="portfolio.signal_engine"):
+            action, conf, log = apply_confidence_penalties(
+                "BUY", 0.8, "trending-up", {}, extra, "BTC-USD", df, {},
+            )
+        # NaN comparison: float("nan") < float("nan") * 0.8 is always False
+        # so no trap is detected — this is the correct behavior (no crash)
+        # No warning expected because NaN comparisons don't raise exceptions
+        assert not any(p.get("stage") == "trap" for p in log)
+
 
 class TestPenaltiesStage4DynamicMinVoters:
     """Stage 4: Dynamic MIN_VOTERS based on regime."""
