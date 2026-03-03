@@ -117,6 +117,9 @@ CONFIG_FILE = BASE_DIR / "config.json"
 
 import re as _re
 
+_TICKER_PAT = _re.compile(r'^([A-Z][A-Z0-9]*(?:-[A-Z]+)?)\s+(?:consensus|moved|flipped)')
+
+
 def _extract_triggered_tickers(reasons):
     """Parse ticker names from trigger reason strings.
 
@@ -126,13 +129,32 @@ def _extract_triggered_tickers(reasons):
         "ETH-USD flipped SELL->BUY (sustained)" -> "ETH-USD"
     """
     tickers = set()
-    # Known ticker patterns: uppercase letters/digits optionally followed by -USD
-    ticker_pat = _re.compile(r'^([A-Z][A-Z0-9]*(?:-[A-Z]+)?)\s+(?:consensus|moved|flipped)')
     for reason in reasons:
-        m = ticker_pat.match(reason)
+        m = _TICKER_PAT.match(reason)
         if m:
             tickers.add(m.group(1))
     return tickers
+
+
+def _run_post_cycle(config):
+    """Post-cycle housekeeping: digest, daily digest, message throttle flush, AV refresh."""
+    _maybe_send_digest(config)
+    try:
+        from portfolio.daily_digest import maybe_send_daily_digest
+        maybe_send_daily_digest(config)
+    except Exception as e_dd:
+        logger.warning("daily digest failed: %s", e_dd)
+    try:
+        from portfolio.message_throttle import flush_and_send
+        flush_and_send(config)
+    except Exception as e_mt:
+        logger.warning("message throttle flush failed: %s", e_mt)
+    try:
+        from portfolio.alpha_vantage import should_batch_refresh, refresh_fundamentals_batch
+        if should_batch_refresh(config):
+            refresh_fundamentals_batch(config)
+    except Exception as e_av:
+        logger.warning("Alpha Vantage refresh failed: %s", e_av)
 
 
 # --- Main orchestrator ---
@@ -447,19 +469,7 @@ def loop(interval=None):
 
     try:
         run(force_report=True)
-        _maybe_send_digest(config)
-        # Daily morning digest (separate from 4h digest)
-        try:
-            from portfolio.daily_digest import maybe_send_daily_digest
-            maybe_send_daily_digest(config)
-        except Exception as e_dd:
-            logger.warning("daily digest failed: %s", e_dd)
-        # Flush throttled analysis messages
-        try:
-            from portfolio.message_throttle import flush_and_send
-            flush_and_send(config)
-        except Exception as e_mt:
-            logger.warning("message throttle flush failed: %s", e_mt)
+        _run_post_cycle(config)
     except KeyboardInterrupt:
         raise
     except Exception as e:
@@ -482,26 +492,7 @@ def loop(interval=None):
         time.sleep(sleep_interval)
         try:
             run(force_report=False, active_symbols=active_symbols)
-            _maybe_send_digest(config)
-            # Daily morning digest (separate from 4h digest)
-            try:
-                from portfolio.daily_digest import maybe_send_daily_digest
-                maybe_send_daily_digest(config)
-            except Exception as e_dd:
-                logger.warning("daily digest failed: %s", e_dd)
-            # Flush throttled analysis messages
-            try:
-                from portfolio.message_throttle import flush_and_send
-                flush_and_send(config)
-            except Exception as e_mt:
-                logger.warning("message throttle flush failed: %s", e_mt)
-            # Alpha Vantage fundamentals batch refresh (off-hours only)
-            try:
-                from portfolio.alpha_vantage import should_batch_refresh, refresh_fundamentals_batch
-                if should_batch_refresh(config):
-                    refresh_fundamentals_batch(config)
-            except Exception as e_av:
-                logger.warning("Alpha Vantage refresh failed: %s", e_av)
+            _run_post_cycle(config)
         except KeyboardInterrupt:
             raise
         except Exception as e:
