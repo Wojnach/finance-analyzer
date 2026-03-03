@@ -266,7 +266,7 @@ def _build_gate_prompt(ticker, price, conditions, signals, tf_data, atr, config)
             fed_info = macro.get("fed", {})
             fomc_days = fed_info.get("days_until", "N/A")
     except Exception:
-        pass
+        logger.warning("Failed to load macro context for iskbets %s", ticker, exc_info=True)
 
     cond_str = "\n".join(f"- {c}" for c in conditions)
 
@@ -363,7 +363,7 @@ def invoke_layer2_gate(ticker, price, conditions, signals, tf_data, atr, iskbets
                 + "\n"
             )
     except Exception:
-        pass
+        logger.warning("Failed to append iskbets gate log", exc_info=True)
 
     return approved, reasoning
 

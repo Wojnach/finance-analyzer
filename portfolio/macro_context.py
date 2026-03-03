@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from pathlib import Path
 
@@ -7,6 +8,8 @@ import pandas as pd
 from portfolio.api_utils import get_alpaca_headers, load_config, BINANCE_BASE, BINANCE_FAPI_BASE, ALPACA_BASE
 from portfolio.http_retry import fetch_with_retry
 from portfolio.shared_state import _yfinance_limiter
+
+logger = logging.getLogger("portfolio.macro_context")
 
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 
@@ -208,7 +211,7 @@ def get_treasury():
                 "change_5d": round(pct_5d, 2),
             }
         except Exception:
-            pass
+            logger.warning("Treasury fetch failed for %s", label, exc_info=True)
 
     if "10y" in result and "2y" in result:
         spread = result["10y"]["yield_pct"] - result["2y"]["yield_pct"]

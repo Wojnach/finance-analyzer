@@ -410,7 +410,7 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None) -> dict:
         from portfolio.news_keywords import dissemination_score
         diss_mult = dissemination_score(all_articles)
     except Exception:
-        pass
+        logger.debug("Dissemination score failed, using default 1.0", exc_info=True)
 
     # --- Primary model (votes in consensus) ---
     sentiments = _run_model(model_script, titles)

@@ -271,7 +271,7 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
                     conf *= 0.5
                     penalty_log.append({"stage": "trap", "type": "bear_trap", "mult": 0.5})
         except Exception:
-            pass
+            logger.warning("Trap detection failed for %s", ticker, exc_info=True)
 
     # --- Stage 4: Dynamic MIN_VOTERS ---
     active_voters = extra_info.get("_voters", 0)

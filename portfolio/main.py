@@ -249,7 +249,7 @@ def run(force_report=False, active_symbols=None):
 
         except Exception as e:
             signals_failed += 1
-            logger.error("%s: %s", name, e)
+            logger.error("%s: %s", name, e, exc_info=True)
 
     _run_elapsed = _time.monotonic() - _run_start
     logger.info(

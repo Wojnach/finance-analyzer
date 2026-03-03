@@ -98,7 +98,7 @@ def _build_eval_prompt(ticker, direction, conditions, signals, tf_data, prices_u
             fed_info = macro.get("fed", {})
             fomc_days = fed_info.get("days_until", "N/A")
     except Exception:
-        pass
+        logger.warning("Failed to load macro context for bigbet %s", ticker, exc_info=True)
 
     cond_str = "\n".join(f"- {c}" for c in conditions)
 
@@ -212,7 +212,7 @@ def invoke_layer2_eval(ticker, direction, conditions, signals, tf_data, prices_u
                 + "\n"
             )
     except Exception:
-        pass
+        logger.warning("Failed to append bigbet gate log", exc_info=True)
 
     return probability, reasoning
 
