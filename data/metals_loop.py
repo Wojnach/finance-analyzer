@@ -85,12 +85,12 @@ from metals_avanza_helpers import (
 
 # --- CONFIG ---
 CHECK_INTERVAL = 90           # seconds between price checks
-TRIGGER_PRICE_MOVE = 2.0      # % move from last invocation to trigger
-TRIGGER_TRAILING = 3.0        # % drop from peak to trigger
+TRIGGER_PRICE_MOVE = 5.0      # % move from last invocation to trigger (was 2.0)
+TRIGGER_TRAILING = 8.0        # % drop from peak to trigger (was 3.0)
 TRIGGER_PROFIT = 4.0          # % profit from entry to trigger
 TRIGGER_STOP_NEAR = 5.0       # % from stop-loss to trigger
-HEARTBEAT_CHECKS = 20         # invoke every N checks (~30 min at 90s)
-MIN_INVOKE_INTERVAL = 300     # minimum 5 min between invocations
+HEARTBEAT_CHECKS = 80         # invoke every N checks (~2h at 90s) (was 20)
+MIN_INVOKE_INTERVAL = 1800    # minimum 30 min between invocations (was 300)
 EOD_HOUR_CET = 17.0           # 17:00 CET (DST-safe via cet_hour())
 
 # Spike catcher config (US open limit sell orders)
@@ -1694,19 +1694,20 @@ def write_context(prices, trigger_reason, tier=2):
     return ctx
 
 def classify_tier(reasons):
-    """Classify trigger into tier (1=cheap workhorse, 2=deeper analysis, 3=critical)."""
-    critical_patterns = ["stop-loss", "end_of_day", "profit target", "L2 ALERT", "L3 EMERGENCY",
-                         "drawdown", "EMERGENCY"]
-    if any(p in r for r in reasons for p in critical_patterns):
+    """Classify trigger into tier (1=cheap workhorse, 2=deeper analysis, 3=critical).
+
+    Cost optimization: only genuine emergencies get T3 (Opus). Everything else is T1 (Haiku).
+    """
+    # T3 only for genuine emergencies — exact string matches, not substrings
+    if any("L3 EMERGENCY" in r or "L2 ALERT" in r or "EMERGENCY drawdown" in r
+           or "AUTO-EXIT" in r for r in reasons):
         return 3
 
-    # LLM high-confidence triggers get T2
-    if any("LLM consensus" in r for r in reasons):
+    # T2 for end-of-day or profit target (needs deeper analysis)
+    if any("end_of_day" in r or "profit target" in r for r in reasons):
         return 2
 
-    if len(reasons) >= 2:
-        return 2
-
+    # Everything else is T1 (Haiku) — price moves, trailing, heartbeat, LLM consensus
     return 1
 
 def check_triggers(prices):
@@ -1755,7 +1756,8 @@ def check_triggers(prices):
                 if len(recent_bids) >= 3 and recent_bids[-1] < recent_bids[-2] < recent_bids[-3]:
                     reasons.append(f"{key} AUTO-EXIT: L2+ for {l2_zone_checks[key]} checks, declining trend")
         elif 0 < dist_stop < STOP_L1_PCT:
-            reasons.append(f"{key} L1 WARNING: {dist_stop:.1f}% from stop-loss")
+            # L1 is log-only — does NOT trigger Claude invocation (cost optimization)
+            log(f"L1 WARNING: {key} {dist_stop:.1f}% from stop (log only, no invocation)")
 
         # Reset L2 counter when not in L2 danger zone
         if dist_stop >= STOP_L2_PCT:
@@ -1964,8 +1966,9 @@ def main():
     log(f"Check interval: {CHECK_INTERVAL}s | Heartbeat: every {HEARTBEAT_CHECKS} checks (~{HEARTBEAT_CHECKS*CHECK_INTERVAL//60}min)")
     log(f"Triggers: price>{TRIGGER_PRICE_MOVE}% | trail>{TRIGGER_TRAILING}% | profit>{TRIGGER_PROFIT}%")
     log(f"Stop levels: L1(warn)<{STOP_L1_PCT}% | L2(alert)<{STOP_L2_PCT}% | L3(emergency)<{STOP_L3_PCT}%")
-    log(f"Cooldown: {MIN_INVOKE_INTERVAL}s between invocations")
+    log(f"Cooldown: {MIN_INVOKE_INTERVAL}s ({MIN_INVOKE_INTERVAL//60}min) between invocations")
     log(f"Tiers: T1=haiku(8t,60s) | T2=sonnet(15t,180s) | T3=opus(20t,300s)")
+    log(f"L1 WARNING: log-only (no Claude invocation). Only L2/L3 invoke Claude.")
     log(f"Short instruments: {', '.join(v['name'] for v in SHORT_INSTRUMENTS.values())}")
     if SPIKE_ENABLED:
         log(f"Spike catcher: place@{SPIKE_PLACE_CET:.2f} cancel@{SPIKE_CANCEL_CET:.2f} "
