@@ -470,7 +470,7 @@ class TestGetMarketStateClosed:
 
         state, _, interval = get_market_state()
         assert state == "closed"
-        assert interval == 300
+        assert interval == 120
 
     @patch("portfolio.market_timing.datetime")
     def test_weekday_after_close_est(self, mock_dt):
@@ -481,7 +481,7 @@ class TestGetMarketStateClosed:
 
         state, _, interval = get_market_state()
         assert state == "closed"
-        assert interval == 300
+        assert interval == 120
 
     @patch("portfolio.market_timing.datetime")
     def test_weekday_at_midnight(self, mock_dt):
@@ -512,7 +512,7 @@ class TestGetMarketStateClosed:
 
         state, _, interval = get_market_state()
         assert state == "closed"
-        assert interval == 300
+        assert interval == 120
 
 
 # ===========================================================================
@@ -621,7 +621,7 @@ class TestConstants:
         assert INTERVAL_MARKET_OPEN == 60
 
     def test_interval_market_closed(self):
-        assert INTERVAL_MARKET_CLOSED == 300
+        assert INTERVAL_MARKET_CLOSED == 120
 
     def test_interval_weekend(self):
         assert INTERVAL_WEEKEND == 600

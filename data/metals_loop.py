@@ -85,12 +85,12 @@ from metals_avanza_helpers import (
 
 # --- CONFIG ---
 CLAUDE_ENABLED = False        # Master switch: set True to re-enable Claude invocations
-CHECK_INTERVAL = 90           # seconds between price checks
+CHECK_INTERVAL = 60           # seconds between price checks
 TRIGGER_PRICE_MOVE = 5.0      # % move from last invocation to trigger (was 2.0)
 TRIGGER_TRAILING = 8.0        # % drop from peak to trigger (was 3.0)
 TRIGGER_PROFIT = 4.0          # % profit from entry to trigger
 TRIGGER_STOP_NEAR = 5.0       # % from stop-loss to trigger
-HEARTBEAT_CHECKS = 80         # invoke every N checks (~2h at 90s) (was 20)
+HEARTBEAT_CHECKS = 120        # invoke every N checks (~2h at 60s) (was 80 at 90s)
 # Per-tier cooldowns (seconds) — replaces flat MIN_INVOKE_INTERVAL
 TIER_COOLDOWNS = {
     1: 120,    # Haiku: 2 min cooldown

@@ -9,7 +9,7 @@ MARKET_OPEN_HOUR = 7  # ~Frankfurt/London open
 
 # Loop intervals by market state
 INTERVAL_MARKET_OPEN = 60     # 1 min — full speed
-INTERVAL_MARKET_CLOSED = 300  # 5 min — crypto only weekday nights
+INTERVAL_MARKET_CLOSED = 120  # 2 min — crypto only weekday nights
 INTERVAL_WEEKEND = 600        # 10 min — crypto only weekends
 
 

@@ -6,6 +6,7 @@ import os
 import re
 
 from portfolio.http_retry import fetch_with_retry
+from portfolio.message_store import send_or_store
 from portfolio.tickers import SYMBOLS
 
 logger = logging.getLogger("portfolio.telegram")
@@ -130,7 +131,7 @@ def _maybe_send_alert(config, signals, prices_usd, fx_rate, state, reasons, tf_d
         lines.append(f"_Bold: {bold_total:,.0f} SEK ({bold_pnl:+.1f}%)_")
     msg = "\n".join(lines)
     try:
-        send_telegram(msg, config)
+        send_or_store(msg, config, category="analysis")
         logger.info("Alert sent: %s", headline)
     except Exception as e:
         logger.warning("alert send failed: %s", e)
