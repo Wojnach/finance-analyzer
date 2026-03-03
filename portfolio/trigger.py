@@ -20,7 +20,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from portfolio.file_utils import atomic_write_json
+from portfolio.file_utils import atomic_write_json, load_json
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATE_FILE = BASE_DIR / "data" / "trigger_state.json"
@@ -43,9 +43,7 @@ def _today_str():
 
 
 def _load_state():
-    if STATE_FILE.exists():
-        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    return {}
+    return load_json(STATE_FILE, default={})
 
 
 def _save_state(state):

@@ -403,16 +403,53 @@ def run(force_report=False, active_symbols=None):
         logger.warning("equity snapshot failed: %s", e)
 
 
+_consecutive_crashes = 0
+_MAX_CRASH_ALERTS = 5  # stop sending alerts after this many consecutive crashes
+_MAX_CRASH_BACKOFF = 300  # max sleep between crashes (5 min)
+
+
 def _crash_alert(error_msg):
-    """Save crash alert to message log (not sent to Telegram)."""
+    """Save crash alert to message log with crash-loop protection.
+
+    After _MAX_CRASH_ALERTS consecutive crashes, stops sending alerts
+    to prevent Telegram spam.  Sleep backoff is handled by the caller.
+    """
+    global _consecutive_crashes
+    _consecutive_crashes += 1
+
+    if _consecutive_crashes > _MAX_CRASH_ALERTS:
+        # Silently log — don't spam Telegram
+        logger.error(
+            "Crash #%d (alerts suppressed after %d): %s",
+            _consecutive_crashes, _MAX_CRASH_ALERTS, error_msg[:200],
+        )
+        return
+
     try:
         config_path = Path(__file__).resolve().parent.parent / "config.json"
         config = json.loads(config_path.read_text(encoding="utf-8"))
-        text = f"LOOP CRASH\n\n{error_msg[:3000]}"
+        text = f"LOOP CRASH #{_consecutive_crashes}\n\n{error_msg[:3000]}"
+        if _consecutive_crashes == _MAX_CRASH_ALERTS:
+            text += "\n\n_Further crash alerts suppressed until recovery._"
         from portfolio.message_store import send_or_store
         send_or_store(text, config, category="error")
     except Exception:
         pass
+
+
+def _crash_sleep():
+    """Exponential backoff sleep for consecutive crashes."""
+    delay = min(10 * (2 ** (_consecutive_crashes - 1)), _MAX_CRASH_BACKOFF)
+    logger.info("Crash backoff: sleeping %ds (crash #%d)", delay, _consecutive_crashes)
+    time.sleep(delay)
+
+
+def _reset_crash_counter():
+    """Reset crash counter after a successful run cycle."""
+    global _consecutive_crashes
+    if _consecutive_crashes > 0:
+        logger.info("Recovered after %d consecutive crashes", _consecutive_crashes)
+        _consecutive_crashes = 0
 
 
 def loop(interval=None):
@@ -470,13 +507,14 @@ def loop(interval=None):
     try:
         run(force_report=True)
         _run_post_cycle(config)
+        _reset_crash_counter()
     except KeyboardInterrupt:
         raise
     except Exception as e:
         import traceback
         _crash_alert(traceback.format_exc())
         logger.error("in initial run: %s", e)
-        time.sleep(10)
+        _crash_sleep()
 
     last_state = None
     while True:
@@ -493,6 +531,7 @@ def loop(interval=None):
         try:
             run(force_report=False, active_symbols=active_symbols)
             _run_post_cycle(config)
+            _reset_crash_counter()
         except KeyboardInterrupt:
             raise
         except Exception as e:
@@ -505,7 +544,7 @@ def loop(interval=None):
                               error=str(e))
             except Exception:
                 pass
-            time.sleep(10)
+            _crash_sleep()
         try:
             (DATA_DIR / "heartbeat.txt").write_text(datetime.now(timezone.utc).isoformat())
         except Exception:

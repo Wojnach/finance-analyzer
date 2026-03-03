@@ -84,6 +84,16 @@ def _log_trigger(reasons, status, tier=None):
 def invoke_agent(reasons, tier=3):
     global _agent_proc, _agent_log, _agent_start, _agent_timeout
 
+    # Check if Layer 2 is enabled — allows running data loop without Claude quota
+    try:
+        config = _load_config()
+        l2_cfg = config.get("layer2", {})
+        if not l2_cfg.get("enabled", True):
+            logger.info("Layer 2 disabled (config.layer2.enabled=false), skipping")
+            return False
+    except Exception:
+        pass  # if config fails to load, default to enabled
+
     tier_cfg = TIER_CONFIG.get(tier, TIER_CONFIG[3])
     timeout = tier_cfg["timeout"]
 
