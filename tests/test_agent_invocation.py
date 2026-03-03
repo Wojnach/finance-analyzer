@@ -580,9 +580,10 @@ class TestClaudeCodeEnvCleanup:
 
 class TestPerceptionGate:
 
+    @patch("portfolio.agent_invocation._load_config", return_value={"layer2": {"enabled": True}})
     @patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude")
     @patch("portfolio.agent_invocation.subprocess.Popen")
-    def test_skipped_when_gate_rejects(self, mock_popen_cls, mock_which):
+    def test_skipped_when_gate_rejects(self, mock_popen_cls, mock_which, mock_cfg):
         """invoke_agent returns False when perception gate rejects."""
         mock_popen_cls.return_value = MagicMock(pid=1)
 
@@ -820,9 +821,10 @@ class TestInvokeAgentPopenFailure:
 
         assert result is False
 
+    @patch("portfolio.agent_invocation._load_config", return_value={"layer2": {"enabled": True}})
     @patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude")
     @patch("portfolio.agent_invocation.subprocess.Popen")
-    def test_closes_log_on_popen_failure(self, mock_popen_cls, mock_which):
+    def test_closes_log_on_popen_failure(self, mock_popen_cls, mock_which, mock_cfg):
         """Log file handle is closed when Popen raises (not transferred)."""
         mock_popen_cls.side_effect = OSError("command not found")
 
