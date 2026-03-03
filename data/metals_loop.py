@@ -1066,10 +1066,22 @@ def place_stop_loss_orders(page, positions):
         stop_base = pos["stop"]
         orders = []
 
+        # Safety: fetch current bid to verify stop is not too close
+        cur_price_data = fetch_price(page, pos["ob_id"], pos.get("api_type", "warrant"))
+        cur_bid = (cur_price_data or {}).get("bid", 0)
+        if cur_bid > 0:
+            distance_pct = (cur_bid - stop_base) / cur_bid * 100
+            if distance_pct < 3.0:
+                log(f"  SKIP stop for {key}: trigger {stop_base} is only {distance_pct:.1f}% "
+                    f"below bid {cur_bid} — too close, would trigger immediately")
+                continue
+
         for level in range(STOP_ORDER_LEVELS):
-            # Calculate price for this level
+            # Calculate trigger price for this level
             spread = level * STOP_ORDER_SPREAD_PCT / 100.0
-            price = round(stop_base * (1 - spread), 2)
+            trigger_price = round(stop_base * (1 - spread), 2)
+            # Sell price slightly below trigger (1% slippage buffer)
+            sell_price = round(trigger_price * 0.99, 2)
 
             # Calculate units for this level (split evenly, last gets remainder)
             if level < STOP_ORDER_LEVELS - 1:
@@ -1080,53 +1092,37 @@ def place_stop_loss_orders(page, positions):
             if level_units <= 0:
                 continue
 
+            # Use the CORRECT stop-loss API (not regular order API!)
+            # Regular order API places immediate sell orders; stop-loss API
+            # uses triggerPrice to only activate when price drops to that level.
             try:
-                result = page.evaluate("""async (args) => {
-                    const [payload, token] = args;
-                    const resp = await fetch('https://www.avanza.se/_api/trading-critical/rest/order/new', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
-                        credentials: 'include',
-                        body: JSON.stringify(payload),
-                    });
-                    return {status: resp.status, body: await resp.text()};
-                }""", [{
-                    "accountId": ACCOUNT_ID,
-                    "orderbookId": pos["ob_id"],
-                    "side": "SELL",
-                    "condition": "NORMAL",
-                    "price": price,
-                    "validUntil": today_str,
-                    "volume": level_units,
-                }, csrf])
+                ok, stop_id = place_stop_loss(
+                    page, ACCOUNT_ID, pos["ob_id"],
+                    trigger_price=trigger_price,
+                    sell_price=sell_price,
+                    volume=level_units,
+                    valid_days=8,
+                )
 
-                body_str = result.get("body", "")
-                try:
-                    body = json.loads(body_str)
-                except (json.JSONDecodeError, TypeError):
-                    body = {}
-
-                order_status = body.get("orderRequestStatus", "")
-                order_id = body.get("orderId", "")
-
-                if order_status == "SUCCESS":
+                if ok:
                     orders.append({
                         "level": level + 1,
-                        "order_id": order_id,
-                        "price": price,
+                        "order_id": stop_id,
+                        "trigger": trigger_price,
+                        "sell": sell_price,
                         "units": level_units,
                         "status": "placed",
                     })
-                    log(f"  Stop S{level+1} placed: {key} {level_units}u @ {price} [order {order_id}]")
+                    log(f"  Stop S{level+1} placed: {key} {level_units}u trigger={trigger_price} "
+                        f"sell={sell_price} [stoploss {stop_id}]")
                 else:
-                    error_msg = body.get("message", body_str[:100])
-                    log(f"  Stop S{level+1} FAILED: {key} — {error_msg}")
+                    log(f"  Stop S{level+1} FAILED: {key} trigger={trigger_price}")
                     orders.append({
                         "level": level + 1,
-                        "price": price,
+                        "trigger": trigger_price,
+                        "sell": sell_price,
                         "units": level_units,
                         "status": "failed",
-                        "error": error_msg,
                     })
             except Exception as e:
                 log(f"  Stop S{level+1} error: {key} — {e}")
@@ -1154,14 +1150,23 @@ def _cancel_stop_orders(page, key, order_state, csrf=None):
         if not order_id or order.get("status") != "placed":
             continue
         try:
+            # Try stop-loss cancel endpoint first, fall back to regular order cancel
             result = page.evaluate("""async (args) => {
-                const [accountId, orderId, token] = args;
-                const resp = await fetch(
-                    'https://www.avanza.se/_api/trading-critical/rest/order/' + accountId + '/' + orderId,
+                const [orderId, token] = args;
+                // Stop-loss cancel endpoint
+                let resp = await fetch(
+                    'https://www.avanza.se/_api/trading/stoploss/' + orderId,
                     {method: 'DELETE', headers: {'Content-Type': 'application/json', 'X-SecurityToken': token}, credentials: 'include'}
                 );
+                if (resp.status === 404) {
+                    // Fall back to regular order cancel
+                    resp = await fetch(
+                        'https://www.avanza.se/_api/trading-critical/rest/order/delete/' + orderId,
+                        {method: 'DELETE', headers: {'Content-Type': 'application/json', 'X-SecurityToken': token}, credentials: 'include'}
+                    );
+                }
                 return {status: resp.status};
-            }""", [ACCOUNT_ID, order_id, csrf])
+            }""", [order_id, csrf])
             log(f"  Cancel stop S{order['level']} {key}: status={result.get('status')}")
             order["status"] = "cancelled"
         except Exception as e:
