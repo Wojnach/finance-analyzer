@@ -44,6 +44,7 @@ Key implications:
 ## Decision Framework
 
 For EACH active position, decide: HOLD, SELL (close), or adjust stop-loss.
+For NEW entries: decide BUY when criteria are met (see Swing Trade Entry below).
 For shorts: decide if hedging is needed (only if longs are at risk).
 
 Consider:
@@ -183,48 +184,82 @@ a track record showing how accurate our decisions are.
 The `reflection` field: compare your last entry's prediction/prices with current reality.
 Were you right? This creates a feedback loop that improves our decisions over time.
 
-## Execution
+## Execution — Trade Queue
 
-If you decide to trade, write a Python script to data/_metals_exec.py and run it.
-Use Playwright with the saved Avanza session. Template:
+You do NOT execute trades directly. Instead, write your trade intent to `data/metals_trade_queue.json`.
+The metals loop (Layer 1) reads this file after you exit, validates the order, and executes it using
+its already-warm Playwright session. This avoids BankID session issues.
+
+**When you decide to BUY or SELL, write the queue file:**
 
 ```python
-import json, os, datetime
-os.chdir(r"Q:/finance-analyzer")
-from playwright.sync_api import sync_playwright
+import json, uuid, datetime
 
-with sync_playwright() as pw:
-    browser = pw.chromium.launch(headless=True)
-    ctx = browser.new_context(storage_state="data/avanza_storage_state.json")
-    page = ctx.new_page()
-    page.goto("https://www.avanza.se/min-ekonomi/oversikt.html", wait_until="domcontentloaded")
-    page.wait_for_timeout(2000)
+queue = {
+    "version": 1,
+    "orders": [
+        {
+            "id": str(uuid.uuid4()),
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "action": "BUY",           # BUY or SELL
+            "underlying": "XAG-USD",
+            "warrant_key": "MINI_L_SILVER_AVA_301",  # key from warrant_catalog in context
+            "ob_id": "2334960",        # from warrant_catalog
+            "api_type": "warrant",     # from warrant_catalog
+            "warrant_name": "MINI L SILVER AVA 301",
+            "price": 16.50,            # current ask (BUY) or bid (SELL) from warrant_catalog
+            "volume": 200,             # number of units to buy/sell
+            "total_sek": 3300.0,       # price * volume
+            "stop_trigger": 14.85,     # warrant price that triggers stop-loss (BUY only)
+            "stop_sell": 14.70,        # sell price when stop triggers (slightly below trigger)
+            "reasoning": "5B signals + RSI 55 + bull thesis intact",
+            "agent_tier": 2,           # your current tier
+            "status": "pending",
+            "result": None,
+            "executed_ts": None
+        }
+    ]
+}
 
-    # Get CSRF token
-    csrf = None
-    for c in ctx.cookies():
-        if c['name'] == 'AZACSRF':
-            csrf = c['value']
-            break
-
-    # SELL example:
-    result = page.evaluate("""async (args) => {
-        const [payload, token] = args;
-        const resp = await fetch('https://www.avanza.se/_api/trading-critical/rest/order/new', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
-            credentials: 'include',
-            body: JSON.stringify(payload),
-        });
-        return {status: resp.status, body: await resp.text()};
-    }""", [{"accountId":"1625505", "orderbookId":"OB_ID", "side":"SELL",
-            "condition":"NORMAL", "price":BID_PRICE, "validUntil":"2026-03-02",
-            "volume":UNITS}, csrf])
-
-    browser.close()
+with open("data/metals_trade_queue.json", "w", encoding="utf-8") as f:
+    json.dump(queue, f, indent=2, ensure_ascii=False)
 ```
 
-Key: "side":"SELL" (not "orderType"), "condition":"NORMAL" required.
+**Safety notes:**
+- The loop expires orders older than 5 minutes (stale price protection)
+- The loop re-checks live price before executing; rejects if market moved > 2% from queued price
+- Only queue ONE order per invocation (no multi-order batches)
+- For SELL: use the bid price, volume = position's current units
+- For BUY: use the ask price from warrant_catalog
+
+## Swing Trade Entry (BUY Criteria)
+
+When ALL of the following are met, **queue the order — do not just log "consider buying"**:
+
+1. **Signal consensus**: XAG-USD has >= 3 BUY voters (from signals section)
+2. **Timeframe alignment**: >= 3 of 7 timeframes show BUY
+3. **RSI**: Between 35-68 (not overbought)
+4. **MACD**: Improving (histogram rising) for >= 2 consecutive checks
+5. **Bull thesis intact**: Silver trending up or consolidating (not breaking support)
+6. **Buying power**: Account has >= 5,000 SEK available (from context -> account)
+
+**Warrant selection** (from `warrant_catalog` in metals_context.json):
+- Prefer ~5x leverage (user preference)
+- Barrier distance > 15% from current underlying price
+- Bid-ask spread < 1.5%
+- If multiple warrants qualify, pick the one closest to 5x leverage
+
+**Position sizing:**
+- Allocate 30% of `account.buying_power`
+- Minimum trade: 500 SEK
+- Volume = floor(allocation / ask_price) — whole units only
+
+**Stop-loss calculation (include in queue):**
+- Underlying stop: current underlying price - (2.5% × underlying price)
+- Warrant stop: estimate using leverage ratio
+  - `stop_trigger` = current warrant price × (1 - 2.5% × leverage)
+  - `stop_sell` = stop_trigger × 0.99 (1% below trigger for execution margin)
+  - Round to 2 decimal places
 
 ## Telegram — Probability Format
 

@@ -66,6 +66,14 @@ except ImportError as e:
     print(f"[WARN] swing trader import failed: {e}", flush=True)
     SWING_TRADER_AVAILABLE = False
 
+try:
+    from metals_swing_config import WARRANT_CATALOG
+    CATALOG_AVAILABLE = True
+except ImportError as e:
+    print(f"[WARN] metals_swing_config import failed: {e}", flush=True)
+    WARRANT_CATALOG = {}
+    CATALOG_AVAILABLE = False
+
 # --- CONFIG ---
 CHECK_INTERVAL = 90           # seconds between price checks
 TRIGGER_PRICE_MOVE = 2.0      # % move from last invocation to trigger
@@ -96,6 +104,12 @@ STOP_ORDER_ENABLED = True
 STOP_ORDER_LEVELS = 3          # number of stop orders per position
 STOP_ORDER_SPREAD_PCT = 1.0    # spread between levels (1% of stop price)
 STOP_ORDER_FILE = "data/metals_stop_orders.json"
+
+# Trade queue (Layer 2 writes intent, Layer 1 executes)
+TRADE_QUEUE_ENABLED = True
+TRADE_QUEUE_FILE = "data/metals_trade_queue.json"
+TRADE_QUEUE_MAX_AGE_S = 300     # expire orders older than 5 min
+TRADE_QUEUE_MAX_SLIPPAGE = 2.0  # reject if price moved > 2% from queued
 
 # Trailing stop config
 TRAIL_START_PCT = 2.0           # start trailing after 2% gain from entry
@@ -305,6 +319,8 @@ startup_grace = True      # skip first check to establish baseline
 short_prices = {}         # latest prices for short instruments
 daily_range_stats = {}    # historical daily range percentiles (computed at startup)
 l2_zone_checks = {}           # tracks how many consecutive checks each position has been in L2+ zone
+cached_account_data = {}      # latest account buying power (refreshed periodically)
+cached_warrant_catalog = {}   # warrant catalog with live prices (refreshed periodically)
 
 def send_telegram(msg):
     try:
@@ -614,6 +630,492 @@ def _save_stop_orders(state):
             json.dump(state, f, indent=2, ensure_ascii=False)
     except Exception as e:
         log(f"Stop order state save failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Trade queue — Layer 2 writes intent, Layer 1 executes
+# ---------------------------------------------------------------------------
+
+def _fetch_account_cash(page):
+    """Fetch ISK buying power from Avanza accounts API."""
+    try:
+        result = page.evaluate("""async (accountId) => {
+            const resp = await fetch(
+                'https://www.avanza.se/_api/account-overview/overview/categorizedAccounts',
+                {credentials: 'include'}
+            );
+            if (resp.status !== 200) return null;
+            const data = await resp.json();
+            for (const cat of (data.categorizedAccounts || [])) {
+                for (const acc of (cat.accounts || [])) {
+                    if (String(acc.accountId) === accountId) {
+                        const v = (x) => (x && typeof x === 'object' && 'value' in x) ? x.value : x;
+                        return {
+                            buying_power: v(acc.buyingPower),
+                            total_value: v(acc.totalValue),
+                            own_capital: v(acc.ownCapital),
+                        };
+                    }
+                }
+            }
+            return null;
+        }""", ACCOUNT_ID)
+        return result
+    except Exception as e:
+        log(f"Account cash fetch error: {e}")
+        return None
+
+
+def _check_session_health(page):
+    """Quick 401 check — returns True if Avanza session is alive."""
+    try:
+        result = page.evaluate("""async () => {
+            const resp = await fetch(
+                'https://www.avanza.se/_api/account-overview/overview/categorizedAccounts',
+                {credentials: 'include'}
+            );
+            return resp.status;
+        }""")
+        return result == 200
+    except Exception:
+        return False
+
+
+def _fetch_warrant_catalog_prices(page):
+    """Fetch live bid/ask for all warrants in WARRANT_CATALOG."""
+    catalog_with_prices = {}
+    for wkey, winfo in WARRANT_CATALOG.items():
+        try:
+            p = fetch_price(page, winfo["ob_id"], winfo["api_type"])
+            entry = dict(winfo)  # copy static metadata
+            if p:
+                entry["bid"] = p.get("bid")
+                entry["ask"] = p.get("ask")
+                entry["last"] = p.get("last")
+                entry["underlying_price"] = p.get("underlying")
+                entry["current_leverage"] = p.get("leverage") or winfo.get("leverage")
+                # Compute barrier distance
+                und = p.get("underlying") or 0
+                barrier = winfo.get("barrier") or 0
+                if und > 0 and barrier > 0:
+                    entry["barrier_distance_pct"] = round((und - barrier) / und * 100, 1)
+                else:
+                    entry["barrier_distance_pct"] = None
+                # Spread %
+                bid = p.get("bid") or 0
+                ask = p.get("ask") or 0
+                if bid > 0 and ask > 0:
+                    entry["spread_pct"] = round((ask - bid) / bid * 100, 2)
+                else:
+                    entry["spread_pct"] = None
+            catalog_with_prices[wkey] = entry
+        except Exception as e:
+            log(f"  Warrant catalog price error for {wkey}: {e}")
+            catalog_with_prices[wkey] = dict(winfo)
+    return catalog_with_prices
+
+
+def _load_trade_queue():
+    """Load trade queue from disk."""
+    try:
+        if os.path.exists(TRADE_QUEUE_FILE):
+            with open(TRADE_QUEUE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        log(f"Trade queue load error: {e}")
+    return {"version": 1, "orders": []}
+
+
+def _save_trade_queue(queue):
+    """Save trade queue to disk."""
+    try:
+        with open(TRADE_QUEUE_FILE, "w", encoding="utf-8") as f:
+            json.dump(queue, f, indent=2, ensure_ascii=False)
+    except IOError as e:
+        log(f"Trade queue save error: {e}")
+
+
+def _execute_order(page, order):
+    """Execute a single BUY or SELL order via Avanza API.
+
+    Returns (success: bool, result: dict).
+    """
+    csrf = _get_csrf(page)
+    if not csrf:
+        return False, {"error": "no CSRF token"}
+
+    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    payload = {
+        "accountId": ACCOUNT_ID,
+        "orderbookId": order["ob_id"],
+        "side": order["action"],
+        "condition": "NORMAL",
+        "price": order["price"],
+        "validUntil": today_str,
+        "volume": order["volume"],
+    }
+
+    try:
+        result = page.evaluate("""async (args) => {
+            const [payload, token] = args;
+            const resp = await fetch('https://www.avanza.se/_api/trading-critical/rest/order/new', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
+                credentials: 'include',
+                body: JSON.stringify(payload),
+            });
+            return {status: resp.status, body: await resp.text()};
+        }""", [payload, csrf])
+
+        body = {}
+        try:
+            body = json.loads(result.get("body", ""))
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        success = body.get("orderRequestStatus") == "SUCCESS"
+        order_id = body.get("orderId", "")
+        return success, {"http_status": result.get("status"), "parsed": body, "order_id": order_id}
+    except Exception as e:
+        return False, {"error": str(e)}
+
+
+def _place_hardware_stop(page, ob_id, trigger_price, sell_price, volume):
+    """Place a hardware stop-loss via the Avanza stop-loss API (NOT regular order API).
+
+    Returns (success: bool, stop_id: str).
+    """
+    csrf = _get_csrf(page)
+    if not csrf:
+        return False, ""
+
+    valid_until = (datetime.datetime.now() + datetime.timedelta(days=8)).strftime("%Y-%m-%d")
+    payload = {
+        "parentStopLossId": "0",
+        "accountId": ACCOUNT_ID,
+        "orderBookId": ob_id,
+        "stopLossTrigger": {
+            "type": "LESS_OR_EQUAL",
+            "value": trigger_price,
+            "validUntil": valid_until,
+            "valueType": "MONETARY",
+            "triggerOnMarketMakerQuote": True,
+        },
+        "stopLossOrderEvent": {
+            "type": "SELL",
+            "price": sell_price,
+            "volume": volume,
+            "validDays": 8,
+            "priceType": "MONETARY",
+            "shortSellingAllowed": False,
+        },
+    }
+
+    try:
+        result = page.evaluate("""async (args) => {
+            const [payload, token] = args;
+            const resp = await fetch('https://www.avanza.se/_api/trading/stoploss/new', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
+                credentials: 'include',
+                body: JSON.stringify(payload),
+            });
+            return {status: resp.status, body: await resp.text()};
+        }""", [payload, csrf])
+
+        body = {}
+        try:
+            body = json.loads(result.get("body", ""))
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        success = body.get("status") == "SUCCESS"
+        stop_id = body.get("stoplossOrderId", "")
+        if success:
+            log(f"  Hardware stop placed: trigger={trigger_price}, sell={sell_price}, vol={volume}, id={stop_id}")
+        else:
+            log(f"  Hardware stop FAILED: {body}")
+        return success, stop_id
+    except Exception as e:
+        log(f"  Hardware stop error: {e}")
+        return False, ""
+
+
+def process_trade_queue(page):
+    """Process pending orders from the trade queue file.
+
+    Called after Claude exits and on each loop cycle.
+    For each pending order:
+      1. Check session health
+      2. Check order age (expire > 5 min)
+      3. Re-fetch live price, reject if slippage > 2%
+      4. Execute via Avanza API
+      5. On BUY: add to POSITIONS, place hardware stop-loss, log trade
+      6. On SELL: deactivate position, cancel stops, log trade
+      7. Send Telegram confirmation
+    """
+    global POSITIONS
+
+    if not TRADE_QUEUE_ENABLED:
+        return
+
+    queue = _load_trade_queue()
+    orders = queue.get("orders", [])
+    if not orders:
+        return
+
+    pending = [o for o in orders if o.get("status") == "pending"]
+    if not pending:
+        return
+
+    log(f"Trade queue: {len(pending)} pending order(s)")
+
+    # Session health check (once per batch)
+    if not _check_session_health(page):
+        log("Trade queue: Avanza session unhealthy (401), skipping execution")
+        send_telegram("*TRADE QUEUE* Session expired — cannot execute orders. Re-login needed.")
+        # Mark all pending as failed
+        for order in pending:
+            order["status"] = "failed"
+            order["result"] = {"error": "session_unhealthy"}
+            order["executed_ts"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        _save_trade_queue(queue)
+        return
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    for order in pending:
+        order_id_short = order.get("id", "?")[:8]
+        action = order.get("action", "?")
+        warrant_name = order.get("warrant_name", order.get("warrant_key", "?"))
+
+        # --- Age check ---
+        try:
+            order_ts = datetime.datetime.fromisoformat(order["timestamp"])
+            if order_ts.tzinfo is None:
+                order_ts = order_ts.replace(tzinfo=datetime.timezone.utc)
+            age_s = (now - order_ts).total_seconds()
+        except (ValueError, KeyError):
+            age_s = 9999
+
+        if age_s > TRADE_QUEUE_MAX_AGE_S:
+            log(f"  Order {order_id_short} expired ({age_s:.0f}s old)")
+            order["status"] = "expired"
+            order["result"] = {"error": f"expired ({age_s:.0f}s > {TRADE_QUEUE_MAX_AGE_S}s)"}
+            order["executed_ts"] = now.isoformat()
+            send_telegram(f"_Trade queue: {action} {warrant_name} expired ({age_s:.0f}s old)_")
+            continue
+
+        # --- Deduplicate: same ob_id + action within 5 min ---
+        already_done = False
+        for other in orders:
+            if (other is not order and
+                other.get("ob_id") == order.get("ob_id") and
+                other.get("action") == action and
+                other.get("status") in ("filled", "executed")):
+                try:
+                    other_ts = datetime.datetime.fromisoformat(other["executed_ts"])
+                    if other_ts.tzinfo is None:
+                        other_ts = other_ts.replace(tzinfo=datetime.timezone.utc)
+                    if (now - other_ts).total_seconds() < 300:
+                        already_done = True
+                        break
+                except (ValueError, KeyError):
+                    pass
+        if already_done:
+            log(f"  Order {order_id_short} deduplicated (same {action} recently filled)")
+            order["status"] = "deduplicated"
+            order["executed_ts"] = now.isoformat()
+            continue
+
+        # --- Re-fetch live price ---
+        live_price_data = fetch_price(page, order["ob_id"], order.get("api_type", "warrant"))
+        if not live_price_data:
+            log(f"  Order {order_id_short}: cannot fetch live price, skipping")
+            order["status"] = "failed"
+            order["result"] = {"error": "live_price_fetch_failed"}
+            order["executed_ts"] = now.isoformat()
+            continue
+
+        if action == "BUY":
+            live_price = live_price_data.get("ask") or live_price_data.get("last") or 0
+        else:
+            live_price = live_price_data.get("bid") or live_price_data.get("last") or 0
+
+        queued_price = order.get("price", 0)
+        if queued_price > 0 and live_price > 0:
+            slippage = abs(live_price - queued_price) / queued_price * 100
+            if slippage > TRADE_QUEUE_MAX_SLIPPAGE:
+                log(f"  Order {order_id_short}: slippage {slippage:.1f}% > {TRADE_QUEUE_MAX_SLIPPAGE}% "
+                    f"(queued={queued_price}, live={live_price})")
+                order["status"] = "rejected_slippage"
+                order["result"] = {"error": f"slippage {slippage:.1f}%", "queued": queued_price, "live": live_price}
+                order["executed_ts"] = now.isoformat()
+                send_telegram(f"_Trade queue: {action} {warrant_name} rejected — "
+                              f"price moved {slippage:.1f}% (queued {queued_price}, now {live_price})_")
+                continue
+            # Use live price for execution (better fill)
+            exec_price = live_price
+        else:
+            exec_price = queued_price
+
+        # Update order price to live price for execution
+        order["price"] = exec_price
+        if order.get("volume", 0) > 0:
+            order["total_sek"] = round(exec_price * order["volume"], 2)
+
+        # --- Execute ---
+        log(f"  Executing {action} {warrant_name}: {order['volume']}u @ {exec_price}")
+        success, result = _execute_order(page, order)
+        order["result"] = result
+        order["executed_ts"] = now.isoformat()
+
+        if success:
+            order["status"] = "filled"
+            log(f"  Order {order_id_short} FILLED: {action} {order['volume']}u @ {exec_price}")
+
+            # Log trade
+            trade_entry = {
+                "ts": now.isoformat(),
+                "action": action,
+                "queue_id": order.get("id"),
+                "warrant_key": order.get("warrant_key"),
+                "name": warrant_name,
+                "ob_id": order.get("ob_id"),
+                "units": order["volume"],
+                "price": exec_price,
+                "total_sek": order.get("total_sek", 0),
+                "reasoning": order.get("reasoning", ""),
+                "result": result,
+            }
+            try:
+                with open("data/metals_trades.jsonl", "a", encoding="utf-8") as f:
+                    f.write(json.dumps(trade_entry, ensure_ascii=False) + "\n")
+            except IOError as e:
+                log(f"  Trade log write error: {e}")
+
+            if action == "BUY":
+                _handle_buy_fill(page, order, exec_price, live_price_data)
+            elif action == "SELL":
+                _handle_sell_fill(page, order, exec_price)
+
+            send_telegram(
+                f"*TRADE FILLED* {action} {warrant_name}\n"
+                f"Volume: {order['volume']}u @ {exec_price} SEK\n"
+                f"Total: {order.get('total_sek', 0):.0f} SEK\n"
+                f"_{order.get('reasoning', '')}_"
+            )
+        else:
+            order["status"] = "failed"
+            error_msg = result.get("error", result.get("parsed", {}).get("message", "unknown"))
+            log(f"  Order {order_id_short} FAILED: {error_msg}")
+            send_telegram(
+                f"*TRADE FAILED* {action} {warrant_name}\n"
+                f"Error: {error_msg}\n"
+                f"_{order.get('reasoning', '')}_"
+            )
+
+    _save_trade_queue(queue)
+
+
+def _handle_buy_fill(page, order, exec_price, price_data):
+    """After a BUY fill: add position to POSITIONS, place hardware stop-loss."""
+    global POSITIONS
+
+    wkey = order.get("warrant_key", "")
+    pos_key = wkey.lower().replace("_", "")  # e.g. "minilsilverava301"
+    # Use a more readable key
+    if "silver" in wkey.lower():
+        # Find a unique silver key
+        idx = sum(1 for k in POSITIONS if "silver" in k.lower() and POSITIONS[k].get("active"))
+        pos_key = f"silver_q{idx}" if idx > 0 else "silver_queue"
+        # If the ob_id already matches an existing position, use that key
+        for k, p in POSITIONS.items():
+            if p.get("ob_id") == order.get("ob_id"):
+                pos_key = k
+                break
+    elif "gold" in wkey.lower():
+        pos_key = "gold_queue"
+        for k, p in POSITIONS.items():
+            if p.get("ob_id") == order.get("ob_id"):
+                pos_key = k
+                break
+
+    # Check if position already exists (add to existing)
+    if pos_key in POSITIONS and POSITIONS[pos_key].get("active"):
+        existing = POSITIONS[pos_key]
+        old_units = existing["units"]
+        old_entry = existing["entry"]
+        new_units = order["volume"]
+        # Weighted average entry price
+        total_units = old_units + new_units
+        avg_entry = (old_units * old_entry + new_units * exec_price) / total_units
+        existing["units"] = total_units
+        existing["entry"] = round(avg_entry, 4)
+        log(f"  Added to existing position {pos_key}: {old_units}+{new_units}={total_units}u, "
+            f"avg entry {old_entry}->{avg_entry:.4f}")
+    else:
+        # New position
+        catalog_info = WARRANT_CATALOG.get(wkey, {})
+        POSITIONS[pos_key] = {
+            "name": order.get("warrant_name", wkey),
+            "ob_id": order.get("ob_id"),
+            "api_type": order.get("api_type", "warrant"),
+            "units": order["volume"],
+            "entry": exec_price,
+            "stop": order.get("stop_trigger", exec_price * 0.85),  # fallback: 15% below
+            "active": True,
+            "swing": True,  # mark as swing trade from queue
+            "bought_ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        peak_bids[pos_key] = exec_price
+        last_invoke_prices[pos_key] = exec_price
+        log(f"  New position added: {pos_key} = {order['volume']}u @ {exec_price}")
+
+    _save_positions(POSITIONS)
+
+    # Place hardware stop-loss
+    stop_trigger = order.get("stop_trigger")
+    stop_sell = order.get("stop_sell")
+    if stop_trigger and stop_sell and order["volume"] > 0:
+        vol = POSITIONS[pos_key]["units"]  # use total units (may have added to existing)
+        ok, stop_id = _place_hardware_stop(page, order["ob_id"], stop_trigger, stop_sell, vol)
+        if ok:
+            log(f"  Stop-loss placed for {pos_key}: trigger={stop_trigger}, sell={stop_sell}")
+        else:
+            log(f"  Stop-loss FAILED for {pos_key} — manual intervention needed")
+            send_telegram(f"*WARNING* Stop-loss failed for {POSITIONS[pos_key]['name']} — set manually!")
+
+
+def _handle_sell_fill(page, order, exec_price):
+    """After a SELL fill: deactivate position, cancel stop-losses."""
+    global POSITIONS
+
+    ob_id = order.get("ob_id")
+    sold_key = None
+    for k, p in POSITIONS.items():
+        if p.get("ob_id") == ob_id and p.get("active"):
+            sold_key = k
+            break
+
+    if sold_key:
+        pos = POSITIONS[sold_key]
+        entry = pos.get("entry", 0)
+        pnl = pnl_pct(exec_price, entry) if entry > 0 else 0
+        pos["active"] = False
+        pos["sold_ts"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        pos["sold_price"] = exec_price
+        pos["sold_reason"] = "trade_queue_sell"
+        _save_positions(POSITIONS)
+        _cleanup_stop_orders_for(page, sold_key)
+
+        if RISK_AVAILABLE:
+            record_metals_trade(sold_key, "SELL", pnl_pct_value=pnl)
+
+        log(f"  Position {sold_key} sold: {exec_price} (entry={entry}, PnL={pnl:+.1f}%)")
+    else:
+        log(f"  SELL fill but no matching active position for ob_id={ob_id}")
+
 
 def place_stop_loss_orders(page, positions):
     """Place cascading stop-loss orders for all active positions.
@@ -1214,6 +1716,14 @@ def write_context(prices, trigger_reason, tier=2):
         except Exception as e:
             ctx["signal_accuracy"] = {"error": str(e)}
 
+    # Account data (buying power) — for trade sizing
+    if cached_account_data:
+        ctx["account"] = cached_account_data
+
+    # Warrant catalog with live prices — for BUY warrant selection
+    if TRADE_QUEUE_ENABLED and cached_warrant_catalog:
+        ctx["warrant_catalog"] = cached_warrant_catalog
+
     total_val = 0
     total_inv = 0
 
@@ -1569,8 +2079,8 @@ def main():
         active_count = sum(1 for p in POSITIONS.values() if p["active"])
         sold_count = sum(1 for p in POSITIONS.values() if not p["active"])
         log(f"  Positions: {active_count} active, {sold_count} sold/inactive")
-        if active_count == 0 and not SWING_TRADER_AVAILABLE:
-            log("All positions already sold and no swing trader — nothing to monitor. Exiting.")
+        if active_count == 0 and not SWING_TRADER_AVAILABLE and not TRADE_QUEUE_ENABLED:
+            log("All positions already sold and no swing trader / trade queue — nothing to monitor. Exiting.")
             send_telegram("*METALS LOOP* All positions already sold. Not starting.")
             return
 
@@ -1660,6 +2170,36 @@ def main():
         else:
             log("Swing trader: NOT available (import failed)")
 
+        # Initialize trade queue: fetch account data + warrant catalog
+        if TRADE_QUEUE_ENABLED:
+            log("Trade queue: ENABLED")
+            try:
+                acct = _fetch_account_cash(page)
+                if acct:
+                    cached_account_data.update(acct)
+                    log(f"  Account: buying_power={acct.get('buying_power')} SEK")
+                else:
+                    log("  Account data: fetch returned None")
+            except Exception as e:
+                log(f"  Account data fetch error: {e}")
+            if CATALOG_AVAILABLE:
+                try:
+                    cat = _fetch_warrant_catalog_prices(page)
+                    if cat:
+                        cached_warrant_catalog.update(cat)
+                        log(f"  Warrant catalog: {len(cat)} instruments loaded")
+                        for wk, wi in cat.items():
+                            log(f"    {wk}: bid={wi.get('bid')}, ask={wi.get('ask')}, "
+                                f"lev={wi.get('current_leverage')}, barrier_dist={wi.get('barrier_distance_pct')}%")
+                    else:
+                        log("  Warrant catalog: empty")
+                except Exception as e:
+                    log(f"  Warrant catalog fetch error: {e}")
+            else:
+                log("  Warrant catalog: NOT available (import failed)")
+        else:
+            log("Trade queue: DISABLED")
+
         # Build dynamic positions summary
         pos_parts = []
         for key, pos in POSITIONS.items():
@@ -1675,6 +2215,7 @@ Tracker: {"ON (" + str(get_snapshot_count()) + " snaps)" if TRACKER_AVAILABLE el
 Spike: {"P" + str(SPIKE_PERCENTILE) + " " + str(SPIKE_PARTIAL_PCT) + "% @15:15-16:30" if SPIKE_ENABLED else "OFF"}
 Stops: {"3x cascaded + trailing + momentum" if STOP_ORDER_ENABLED else "L3 only"}
 Swing: {"ACTIVE (DRY_RUN)" if swing_trader else "OFF"}
+TradeQ: {"ENABLED" if TRADE_QUEUE_ENABLED else "OFF"}
 Positions: {pos_summary}""")
 
         try:
@@ -1689,8 +2230,8 @@ Positions: {pos_summary}""")
 
                 # Check if all positions closed (keep running if swing trader is active)
                 active = sum(1 for p in POSITIONS.values() if p["active"])
-                if active == 0 and not swing_trader:
-                    log("All positions closed and no swing trader.")
+                if active == 0 and not swing_trader and not TRADE_QUEUE_ENABLED:
+                    log("All positions closed and no swing trader / trade queue.")
                     send_telegram("*METALS LOOP* All positions closed. Loop exiting.")
                     break
 
@@ -1723,6 +2264,24 @@ Positions: {pos_summary}""")
                 # Read signal data periodically (every ~6 min)
                 if check_count % 4 == 0:
                     last_signal_data = read_signal_data()
+
+                # Refresh account data + warrant catalog (every 10th check ~15 min)
+                if TRADE_QUEUE_ENABLED and check_count % 10 == 0:
+                    try:
+                        acct = _fetch_account_cash(page)
+                        if acct:
+                            cached_account_data.clear()
+                            cached_account_data.update(acct)
+                    except Exception as e:
+                        log(f"Account data fetch error: {e}")
+                    if CATALOG_AVAILABLE:
+                        try:
+                            cat = _fetch_warrant_catalog_prices(page)
+                            if cat:
+                                cached_warrant_catalog.clear()
+                                cached_warrant_catalog.update(cat)
+                        except Exception as e:
+                            log(f"Warrant catalog fetch error: {e}")
 
                 # Store price snapshot
                 snap = {
@@ -1839,7 +2398,7 @@ Positions: {pos_summary}""")
                                 if not pos["active"] and pos.get("sold_reason", "").startswith("startup_verify"):
                                     _cleanup_stop_orders_for(page, key)
                             send_telegram(f"_Holdings check: {lost} position(s) sold by broker_")
-                            if active_after == 0 and not swing_trader:
+                            if active_after == 0 and not swing_trader and not TRADE_QUEUE_ENABLED:
                                 log("All positions sold — exiting loop")
                                 send_telegram("*METALS LOOP* All positions sold by broker. Stopping.")
                                 return
@@ -1962,6 +2521,14 @@ Positions: {pos_summary}""")
                         except OSError:
                             pass
                         claude_log_fh = None
+
+                    # Process trade queue (Layer 2 may have written orders)
+                    if TRADE_QUEUE_ENABLED:
+                        try:
+                            process_trade_queue(page)
+                        except Exception as e:
+                            log(f"Trade queue processing error: {e}")
+                            traceback.print_exc()
 
                     # Re-read trade log in case Claude executed a trade
                     if os.path.exists("data/metals_trades.jsonl"):
