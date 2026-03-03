@@ -1,0 +1,10 @@
+{
+  "cash_sek": 0,
+  "positions": {},
+  "consecutive_losses": 0,
+  "last_buy_ts": null,
+  "total_trades": 0,
+  "total_pnl_sek": 0,
+  "session_trades": 0,
+  "macd_history": {}
+}

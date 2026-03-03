@@ -59,6 +59,13 @@ except ImportError as e:
     print(f"[WARN] metals_signal_tracker import failed: {e}", flush=True)
     TRACKER_AVAILABLE = False
 
+try:
+    from metals_swing_trader import SwingTrader
+    SWING_TRADER_AVAILABLE = True
+except ImportError as e:
+    print(f"[WARN] swing trader import failed: {e}", flush=True)
+    SWING_TRADER_AVAILABLE = False
+
 # --- CONFIG ---
 CHECK_INTERVAL = 90           # seconds between price checks
 TRIGGER_PRICE_MOVE = 2.0      # % move from last invocation to trigger
@@ -1562,8 +1569,8 @@ def main():
         active_count = sum(1 for p in POSITIONS.values() if p["active"])
         sold_count = sum(1 for p in POSITIONS.values() if not p["active"])
         log(f"  Positions: {active_count} active, {sold_count} sold/inactive")
-        if active_count == 0:
-            log("All positions already sold — nothing to monitor. Exiting.")
+        if active_count == 0 and not SWING_TRADER_AVAILABLE:
+            log("All positions already sold and no swing trader — nothing to monitor. Exiting.")
             send_telegram("*METALS LOOP* All positions already sold. Not starting.")
             return
 
@@ -1640,6 +1647,19 @@ def main():
         else:
             log("Signal tracker: NOT available (import failed)")
 
+        # Initialize swing trader
+        swing_trader = None
+        if SWING_TRADER_AVAILABLE:
+            try:
+                swing_trader = SwingTrader(page)
+                log(f"Swing trader: ACTIVE (cash={swing_trader.state['cash_sek']:.0f} SEK, "
+                    f"DRY_RUN={swing_trader.state.get('_dry', 'see config')})")
+            except Exception as e:
+                log(f"Swing trader init failed: {e}")
+                swing_trader = None
+        else:
+            log("Swing trader: NOT available (import failed)")
+
         # Build dynamic positions summary
         pos_parts = []
         for key, pos in POSITIONS.items():
@@ -1654,6 +1674,7 @@ Risk: {"MC+Guards+Drawdown+DailyRanges" if RISK_AVAILABLE else "DISABLED"}
 Tracker: {"ON (" + str(get_snapshot_count()) + " snaps)" if TRACKER_AVAILABLE else "OFF"}
 Spike: {"P" + str(SPIKE_PERCENTILE) + " " + str(SPIKE_PARTIAL_PCT) + "% @15:15-16:30" if SPIKE_ENABLED else "OFF"}
 Stops: {"3x cascaded + trailing + momentum" if STOP_ORDER_ENABLED else "L3 only"}
+Swing: {"ACTIVE (DRY_RUN)" if swing_trader else "OFF"}
 Positions: {pos_summary}""")
 
         try:
@@ -1666,10 +1687,10 @@ Positions: {pos_summary}""")
                     time.sleep(CHECK_INTERVAL)
                     continue
 
-                # Check if all positions closed
+                # Check if all positions closed (keep running if swing trader is active)
                 active = sum(1 for p in POSITIONS.values() if p["active"])
-                if active == 0:
-                    log("All positions closed.")
+                if active == 0 and not swing_trader:
+                    log("All positions closed and no swing trader.")
                     send_telegram("*METALS LOOP* All positions closed. Loop exiting.")
                     break
 
@@ -1818,7 +1839,7 @@ Positions: {pos_summary}""")
                                 if not pos["active"] and pos.get("sold_reason", "").startswith("startup_verify"):
                                     _cleanup_stop_orders_for(page, key)
                             send_telegram(f"_Holdings check: {lost} position(s) sold by broker_")
-                            if active_after == 0:
+                            if active_after == 0 and not swing_trader:
                                 log("All positions sold — exiting loop")
                                 send_telegram("*METALS LOOP* All positions sold by broker. Stopping.")
                                 return
@@ -1836,6 +1857,13 @@ Positions: {pos_summary}""")
                 # Trailing stop updates (every 5th check)
                 if STOP_ORDER_ENABLED and check_count % 5 == 0:
                     update_trailing_stops(page, POSITIONS, stop_order_state, prices)
+
+                # Swing trader: autonomous BUY/SELL evaluation
+                if swing_trader:
+                    try:
+                        swing_trader.evaluate_and_execute(prices, last_signal_data)
+                    except Exception as e:
+                        log(f"Swing trader error: {e}")
 
                 # Check triggers
                 triggered, reasons = check_triggers(prices)
