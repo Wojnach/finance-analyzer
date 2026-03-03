@@ -31,6 +31,13 @@ from metals_swing_config import (
     TELEGRAM_SUMMARY_INTERVAL,
     STATE_FILE, DECISIONS_LOG, TRADES_LOG,
 )
+from metals_avanza_helpers import (
+    get_csrf,
+    fetch_price,
+    fetch_account_cash,
+    place_order,
+    place_stop_loss,
+)
 
 
 def _log(msg):
@@ -89,170 +96,9 @@ def _save_state(state):
         _log(f"State save error: {e}")
 
 
-# ---------------------------------------------------------------------------
-# Avanza API helpers
-# ---------------------------------------------------------------------------
-
-def _get_csrf(page):
-    """Extract CSRF token from Avanza cookies."""
-    for c in page.context.cookies():
-        if c["name"] == "AZACSRF":
-            return c["value"]
-    return None
-
-
-def _fetch_price(page, ob_id, api_type):
-    """Fetch live price from Avanza market-guide API."""
-    try:
-        result = page.evaluate("""async (args) => {
-            const [id, type] = args;
-            const resp = await fetch('https://www.avanza.se/_api/market-guide/' + type + '/' + id,
-                {credentials:'include'});
-            if (resp.status !== 200) return null;
-            const d = await resp.json();
-            const v = (x) => (x && typeof x === 'object' && 'value' in x) ? x.value : x;
-            return {
-                bid: v(d.quote?.buy), ask: v(d.quote?.sell), last: v(d.quote?.last),
-                change_pct: v(d.quote?.changePercent),
-                high: v(d.quote?.highest), low: v(d.quote?.lowest),
-                underlying: v(d.underlying?.quote?.last),
-                leverage: v(d.keyIndicators?.leverage),
-                barrier: v(d.keyIndicators?.barrierLevel),
-            };
-        }""", [ob_id, api_type])
-        return result
-    except Exception as e:
-        _log(f"Fetch price error ({ob_id}): {e}")
-        return None
-
-
-def _fetch_account_cash(page):
-    """Fetch ISK buying power from Avanza positions API."""
-    try:
-        result = page.evaluate("""async (accountId) => {
-            const resp = await fetch(
-                'https://www.avanza.se/_api/account-overview/overview/categorizedAccounts',
-                {credentials: 'include'}
-            );
-            if (resp.status !== 200) return null;
-            const data = await resp.json();
-            for (const cat of (data.categorizedAccounts || [])) {
-                for (const acc of (cat.accounts || [])) {
-                    if (String(acc.accountId) === accountId) {
-                        const v = (x) => (x && typeof x === 'object' && 'value' in x) ? x.value : x;
-                        return {
-                            buying_power: v(acc.buyingPower),
-                            total_value: v(acc.totalValue),
-                            own_capital: v(acc.ownCapital),
-                        };
-                    }
-                }
-            }
-            return null;
-        }""", ACCOUNT_ID)
-        return result
-    except Exception as e:
-        _log(f"Account cash fetch error: {e}")
-        return None
-
-
-def _place_order(page, ob_id, side, price, volume):
-    """Place a BUY or SELL order on Avanza. Returns (success, result_dict)."""
-    csrf = _get_csrf(page)
-    if not csrf:
-        return False, {"error": "no CSRF token"}
-
-    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    payload = {
-        "accountId": ACCOUNT_ID,
-        "orderbookId": ob_id,
-        "side": side,
-        "condition": "NORMAL",
-        "price": price,
-        "validUntil": today_str,
-        "volume": volume,
-    }
-
-    try:
-        result = page.evaluate("""async (args) => {
-            const [payload, token] = args;
-            const resp = await fetch('https://www.avanza.se/_api/trading-critical/rest/order/new', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
-                credentials: 'include',
-                body: JSON.stringify(payload),
-            });
-            return {status: resp.status, body: await resp.text()};
-        }""", [payload, csrf])
-
-        body = {}
-        try:
-            body = json.loads(result.get("body", ""))
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-        success = body.get("orderRequestStatus") == "SUCCESS"
-        return success, {**result, "parsed": body}
-    except Exception as e:
-        return False, {"error": str(e)}
-
-
-def _place_stop_loss(page, ob_id, trigger_price, sell_price, volume):
-    """Place hardware stop-loss via Avanza stop-loss API (NOT regular order API)."""
-    csrf = _get_csrf(page)
-    if not csrf:
-        return False, {"error": "no CSRF token"}
-
-    valid_until = (datetime.datetime.now() + datetime.timedelta(days=STOP_LOSS_VALID_DAYS)).strftime("%Y-%m-%d")
-    payload = {
-        "parentStopLossId": "0",
-        "accountId": ACCOUNT_ID,
-        "orderBookId": ob_id,
-        "stopLossTrigger": {
-            "type": "LESS_OR_EQUAL",
-            "value": trigger_price,
-            "validUntil": valid_until,
-            "valueType": "MONETARY",
-            "triggerOnMarketMakerQuote": True,
-        },
-        "stopLossOrderEvent": {
-            "type": "SELL",
-            "price": sell_price,
-            "volume": volume,
-            "validDays": STOP_LOSS_VALID_DAYS,
-            "priceType": "MONETARY",
-            "shortSellingAllowed": False,
-        },
-    }
-
-    try:
-        result = page.evaluate("""async (args) => {
-            const [payload, token] = args;
-            const resp = await fetch('https://www.avanza.se/_api/trading/stoploss/new', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
-                credentials: 'include',
-                body: JSON.stringify(payload),
-            });
-            return {status: resp.status, body: await resp.text()};
-        }""", [payload, csrf])
-
-        body = {}
-        try:
-            body = json.loads(result.get("body", ""))
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-        success = body.get("status") == "SUCCESS"
-        stop_id = body.get("stoplossOrderId", "")
-        return success, {**result, "parsed": body, "stop_id": stop_id}
-    except Exception as e:
-        return False, {"error": str(e)}
-
-
 def _delete_stop_loss(page, stop_id):
     """Delete a stop-loss order by ID."""
-    csrf = _get_csrf(page)
+    csrf = get_csrf(page)
     if not csrf:
         return False
 
@@ -345,7 +191,7 @@ class SwingTrader:
 
     def _sync_cash(self):
         """Fetch real ISK buying power from Avanza and update state."""
-        acc = _fetch_account_cash(self.page)
+        acc = fetch_account_cash(self.page, ACCOUNT_ID)
         if acc and acc.get("buying_power") is not None:
             self.state["cash_sek"] = float(acc["buying_power"])
             _save_state(self.state)
@@ -499,7 +345,7 @@ class SwingTrader:
             if w["underlying"] != underlying or w["direction"] != direction:
                 continue
 
-            data = _fetch_price(self.page, w["ob_id"], w["api_type"])
+            data = fetch_price(self.page, w["ob_id"], w["api_type"])
             if not data or not data.get("bid") or not data.get("ask"):
                 continue
 
@@ -584,7 +430,7 @@ class SwingTrader:
             _log(f"  [DRY RUN] Would place BUY order: {units}u @ {ask_price}")
             trade_record["result"] = "DRY_RUN"
         else:
-            success, result = _place_order(self.page, warrant["ob_id"], "BUY", ask_price, units)
+            success, result = place_order(self.page, ACCOUNT_ID, warrant["ob_id"], "BUY", ask_price, units)
             trade_record["result"] = result
             if not success:
                 _log(f"  BUY FAILED: {result}")
@@ -675,16 +521,17 @@ class SwingTrader:
             _save_state(self.state)
             return
 
-        success, result = _place_stop_loss(
-            self.page, pos["ob_id"], trigger_price, sell_price, pos["units"]
+        success, stop_id = place_stop_loss(
+            self.page, ACCOUNT_ID, pos["ob_id"], trigger_price, sell_price,
+            pos["units"], valid_days=STOP_LOSS_VALID_DAYS,
         )
         if success:
-            pos["stop_order_id"] = result.get("stop_id", "")
+            pos["stop_order_id"] = stop_id
             _save_state(self.state)
-            _log(f"  Stop-loss placed: {pos['stop_order_id']}")
+            _log(f"  Stop-loss placed: {stop_id}")
         else:
-            _log(f"  Stop-loss FAILED: {result}")
-            _send_telegram(f"_SWING: stop-loss failed for {pos['warrant_name']}: {str(result)[:80]}_")
+            _log(f"  Stop-loss FAILED")
+            _send_telegram(f"_SWING: stop-loss failed for {pos['warrant_name']}_")
 
     # -------------------------------------------------------------------
     # Exit logic
@@ -718,7 +565,7 @@ class SwingTrader:
             from_peak_pct = (underlying_price - peak_und) / peak_und * 100 if peak_und > 0 else 0
 
             # Get current warrant price for P&L
-            warrant_data = _fetch_price(self.page, pos["ob_id"], pos["api_type"])
+            warrant_data = fetch_price(self.page, pos["ob_id"], pos["api_type"])
             current_bid = warrant_data.get("bid", 0) if warrant_data else 0
 
             exit_reason = None
@@ -819,7 +666,7 @@ class SwingTrader:
             _log(f"  [DRY RUN] Would place SELL order: {units}u @ {current_bid}")
             trade_record["result"] = "DRY_RUN"
         else:
-            success, result = _place_order(self.page, pos["ob_id"], "SELL", current_bid, units)
+            success, result = place_order(self.page, ACCOUNT_ID, pos["ob_id"], "SELL", current_bid, units)
             trade_record["result"] = result
             if not success:
                 _log(f"  SELL FAILED: {result}")
@@ -917,7 +764,7 @@ class SwingTrader:
                     return p["underlying"]
 
         # Fallback: fetch warrant price and extract underlying
-        data = _fetch_price(self.page, pos["ob_id"], pos["api_type"])
+        data = fetch_price(self.page, pos["ob_id"], pos["api_type"])
         if data and data.get("underlying"):
             return data["underlying"]
 
@@ -977,7 +824,7 @@ class SwingTrader:
         else:
             lines = [f"*SWING #{self.check_count}* {len(positions)} position(s)"]
             for pid, pos in positions.items():
-                data = _fetch_price(self.page, pos["ob_id"], pos["api_type"])
+                data = fetch_price(self.page, pos["ob_id"], pos["api_type"])
                 bid = data.get("bid", 0) if data else 0
                 pnl = ((bid / pos["entry_price"]) - 1) * 100 if pos["entry_price"] > 0 else 0
                 held = (_now_utc() - datetime.datetime.fromisoformat(pos["entry_ts"])).total_seconds() / 3600

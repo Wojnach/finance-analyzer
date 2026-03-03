@@ -74,6 +74,15 @@ except ImportError as e:
     WARRANT_CATALOG = {}
     CATALOG_AVAILABLE = False
 
+from metals_avanza_helpers import (
+    get_csrf,
+    fetch_price,
+    fetch_account_cash,
+    place_order,
+    place_stop_loss,
+    check_session_alive,
+)
+
 # --- CONFIG ---
 CHECK_INTERVAL = 90           # seconds between price checks
 TRIGGER_PRICE_MOVE = 2.0      # % move from last invocation to trigger
@@ -391,26 +400,6 @@ def is_market_hours():
     h = cet_hour()
     return weekday < 5 and 9.0 <= h <= 17.42
 
-def fetch_price(page, ob_id, api_type):
-    result = page.evaluate("""async (args) => {
-        const [id, type] = args;
-        const resp = await fetch('https://www.avanza.se/_api/market-guide/' + type + '/' + id, {credentials:'include'});
-        if (resp.status !== 200) return null;
-        const d = await resp.json();
-        // Helper: unwrap {"value": N} objects (Avanza wraps some fields)
-        const v = (x) => (x && typeof x === 'object' && 'value' in x) ? x.value : x;
-        return {
-            bid: v(d.quote?.buy), ask: v(d.quote?.sell), last: v(d.quote?.last),
-            change_pct: v(d.quote?.changePercent),
-            high: v(d.quote?.highest), low: v(d.quote?.lowest),
-            underlying: v(d.underlying?.quote?.last),
-            underlying_name: d.underlying?.name,
-            leverage: v(d.keyIndicators?.leverage),
-            barrier: v(d.keyIndicators?.barrierLevel),
-        };
-    }""", [ob_id, api_type])
-    return result
-
 def read_signal_data():
     """Read XAG/XAU signal data from the main loop's agent_summary.json."""
     try:
@@ -598,20 +587,12 @@ def emergency_sell(page, key, pos, bid):
         send_telegram(f"*L3 SELL FAILED*: {e}")
         return False
 
-def _get_csrf(page):
-    """Extract CSRF token from Avanza cookies."""
-    for c in page.context.cookies():
-        if c["name"] == "AZACSRF":
-            return c["value"]
-    return None
-
-
 def _cleanup_stop_orders_for(page, key):
     """Cancel any remaining stop orders for a sold position and clean up state."""
     try:
         stop_state = _load_stop_orders()
         if key in stop_state and stop_state[key].get("orders"):
-            csrf = _get_csrf(page)
+            csrf = get_csrf(page)
             if csrf:
                 _cancel_stop_orders(page, key, stop_state[key], csrf)
                 log(f"  Cancelled stale stop orders for {key} (position sold)")
@@ -644,51 +625,6 @@ def _save_stop_orders(state):
 # Trade queue — Layer 2 writes intent, Layer 1 executes
 # ---------------------------------------------------------------------------
 
-def _fetch_account_cash(page):
-    """Fetch ISK buying power from Avanza accounts API."""
-    try:
-        result = page.evaluate("""async (accountId) => {
-            const resp = await fetch(
-                'https://www.avanza.se/_api/account-overview/overview/categorizedAccounts',
-                {credentials: 'include'}
-            );
-            if (resp.status !== 200) return null;
-            const data = await resp.json();
-            for (const cat of (data.categorizedAccounts || [])) {
-                for (const acc of (cat.accounts || [])) {
-                    if (String(acc.accountId) === accountId) {
-                        const v = (x) => (x && typeof x === 'object' && 'value' in x) ? x.value : x;
-                        return {
-                            buying_power: v(acc.buyingPower),
-                            total_value: v(acc.totalValue),
-                            own_capital: v(acc.ownCapital),
-                        };
-                    }
-                }
-            }
-            return null;
-        }""", ACCOUNT_ID)
-        return result
-    except Exception as e:
-        log(f"Account cash fetch error: {e}")
-        return None
-
-
-def _check_session_health(page):
-    """Quick 401 check — returns True if Avanza session is alive."""
-    try:
-        result = page.evaluate("""async () => {
-            const resp = await fetch(
-                'https://www.avanza.se/_api/account-overview/overview/categorizedAccounts',
-                {credentials: 'include'}
-            );
-            return resp.status;
-        }""")
-        return result == 200
-    except Exception:
-        return False
-
-
 def _check_session_and_alert(page):
     """Periodic session health check with Telegram alerting.
 
@@ -702,7 +638,7 @@ def _check_session_and_alert(page):
     global session_healthy, session_alert_sent, session_expiry_warned
 
     # --- 1. Live health check ---
-    alive = _check_session_health(page)
+    alive = check_session_alive(page)
 
     if alive and not session_healthy:
         # Session recovered
@@ -809,112 +745,6 @@ def _save_trade_queue(queue):
         log(f"Trade queue save error: {e}")
 
 
-def _execute_order(page, order):
-    """Execute a single BUY or SELL order via Avanza API.
-
-    Returns (success: bool, result: dict).
-    """
-    csrf = _get_csrf(page)
-    if not csrf:
-        return False, {"error": "no CSRF token"}
-
-    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    payload = {
-        "accountId": ACCOUNT_ID,
-        "orderbookId": order["ob_id"],
-        "side": order["action"],
-        "condition": "NORMAL",
-        "price": order["price"],
-        "validUntil": today_str,
-        "volume": order["volume"],
-    }
-
-    try:
-        result = page.evaluate("""async (args) => {
-            const [payload, token] = args;
-            const resp = await fetch('https://www.avanza.se/_api/trading-critical/rest/order/new', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
-                credentials: 'include',
-                body: JSON.stringify(payload),
-            });
-            return {status: resp.status, body: await resp.text()};
-        }""", [payload, csrf])
-
-        body = {}
-        try:
-            body = json.loads(result.get("body", ""))
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-        success = body.get("orderRequestStatus") == "SUCCESS"
-        order_id = body.get("orderId", "")
-        return success, {"http_status": result.get("status"), "parsed": body, "order_id": order_id}
-    except Exception as e:
-        return False, {"error": str(e)}
-
-
-def _place_hardware_stop(page, ob_id, trigger_price, sell_price, volume):
-    """Place a hardware stop-loss via the Avanza stop-loss API (NOT regular order API).
-
-    Returns (success: bool, stop_id: str).
-    """
-    csrf = _get_csrf(page)
-    if not csrf:
-        return False, ""
-
-    valid_until = (datetime.datetime.now() + datetime.timedelta(days=8)).strftime("%Y-%m-%d")
-    payload = {
-        "parentStopLossId": "0",
-        "accountId": ACCOUNT_ID,
-        "orderBookId": ob_id,
-        "stopLossTrigger": {
-            "type": "LESS_OR_EQUAL",
-            "value": trigger_price,
-            "validUntil": valid_until,
-            "valueType": "MONETARY",
-            "triggerOnMarketMakerQuote": True,
-        },
-        "stopLossOrderEvent": {
-            "type": "SELL",
-            "price": sell_price,
-            "volume": volume,
-            "validDays": 8,
-            "priceType": "MONETARY",
-            "shortSellingAllowed": False,
-        },
-    }
-
-    try:
-        result = page.evaluate("""async (args) => {
-            const [payload, token] = args;
-            const resp = await fetch('https://www.avanza.se/_api/trading/stoploss/new', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
-                credentials: 'include',
-                body: JSON.stringify(payload),
-            });
-            return {status: resp.status, body: await resp.text()};
-        }""", [payload, csrf])
-
-        body = {}
-        try:
-            body = json.loads(result.get("body", ""))
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-        success = body.get("status") == "SUCCESS"
-        stop_id = body.get("stoplossOrderId", "")
-        if success:
-            log(f"  Hardware stop placed: trigger={trigger_price}, sell={sell_price}, vol={volume}, id={stop_id}")
-        else:
-            log(f"  Hardware stop FAILED: {body}")
-        return success, stop_id
-    except Exception as e:
-        log(f"  Hardware stop error: {e}")
-        return False, ""
-
-
 def process_trade_queue(page):
     """Process pending orders from the trade queue file.
 
@@ -945,7 +775,7 @@ def process_trade_queue(page):
     log(f"Trade queue: {len(pending)} pending order(s)")
 
     # Session health check (once per batch)
-    if not _check_session_health(page):
+    if not check_session_alive(page):
         log("Trade queue: Avanza session unhealthy (401), skipping execution")
         send_telegram("*TRADE QUEUE* Session expired — cannot execute orders. Re-login needed.")
         # Mark all pending as failed
@@ -1040,7 +870,10 @@ def process_trade_queue(page):
 
         # --- Execute ---
         log(f"  Executing {action} {warrant_name}: {order['volume']}u @ {exec_price}")
-        success, result = _execute_order(page, order)
+        success, result = place_order(
+            page, ACCOUNT_ID, order["ob_id"], order["action"],
+            order["price"], order["volume"],
+        )
         order["result"] = result
         order["executed_ts"] = now.isoformat()
 
@@ -1153,7 +986,7 @@ def _handle_buy_fill(page, order, exec_price, price_data):
     stop_sell = order.get("stop_sell")
     if stop_trigger and stop_sell and order["volume"] > 0:
         vol = POSITIONS[pos_key]["units"]  # use total units (may have added to existing)
-        ok, stop_id = _place_hardware_stop(page, order["ob_id"], stop_trigger, stop_sell, vol)
+        ok, stop_id = place_stop_loss(page, ACCOUNT_ID, order["ob_id"], stop_trigger, stop_sell, vol)
         if ok:
             log(f"  Stop-loss placed for {pos_key}: trigger={stop_trigger}, sell={stop_sell}")
         else:
@@ -1201,7 +1034,7 @@ def place_stop_loss_orders(page, positions):
 
     Returns stop order state dict.
     """
-    csrf = _get_csrf(page)
+    csrf = get_csrf(page)
     if not csrf:
         log("Stop orders: no CSRF token")
         return {}
@@ -1308,7 +1141,7 @@ def place_stop_loss_orders(page, positions):
 def _cancel_stop_orders(page, key, order_state, csrf=None):
     """Cancel existing stop orders for a position."""
     if not csrf:
-        csrf = _get_csrf(page)
+        csrf = get_csrf(page)
     if not csrf:
         return
 
@@ -1333,7 +1166,7 @@ def _cancel_stop_orders(page, key, order_state, csrf=None):
 
 def check_stop_order_fills(page, stop_state, positions):
     """Check if any stop-loss orders were filled. Returns list of filled keys."""
-    csrf = _get_csrf(page)
+    csrf = get_csrf(page)
     if not csrf:
         return []
 
@@ -1453,7 +1286,7 @@ def update_trailing_stops(page, positions, stop_state, prices):
 
         # Cancel old orders and place new ones at higher level
         if key in stop_state and stop_state[key].get("orders"):
-            csrf = _get_csrf(page)
+            csrf = get_csrf(page)
             if csrf:
                 _cancel_stop_orders(page, key, stop_state[key], csrf)
 
@@ -1541,7 +1374,7 @@ def place_spike_orders(page, positions, prices, targets):
 
     Returns dict of {position_key: order_id} for placed orders.
     """
-    csrf = _get_csrf(page)
+    csrf = get_csrf(page)
     if not csrf:
         log("Spike: no CSRF token, skipping")
         return {}
@@ -1601,7 +1434,7 @@ def place_spike_orders(page, positions, prices, targets):
 
 def cancel_spike_orders(page, spike_state):
     """Cancel all unfilled spike orders."""
-    csrf = _get_csrf(page)
+    csrf = get_csrf(page)
     if not csrf:
         log("Spike cancel: no CSRF token")
         return
@@ -1632,7 +1465,7 @@ def cancel_spike_orders(page, spike_state):
 
 def check_spike_fills(page, spike_state, positions):
     """Check if any spike orders were filled. Returns list of filled position keys."""
-    csrf = _get_csrf(page)
+    csrf = get_csrf(page)
     if not csrf:
         return []
 
@@ -2252,7 +2085,7 @@ def main():
         if TRADE_QUEUE_ENABLED:
             log("Trade queue: ENABLED")
             try:
-                acct = _fetch_account_cash(page)
+                acct = fetch_account_cash(page, ACCOUNT_ID)
                 if acct:
                     cached_account_data.update(acct)
                     log(f"  Account: buying_power={acct.get('buying_power')} SEK")
@@ -2347,7 +2180,7 @@ Positions: {pos_summary}""")
                 # Refresh account data + warrant catalog (every 10th check ~15 min)
                 if TRADE_QUEUE_ENABLED and check_count % 10 == 0:
                     try:
-                        acct = _fetch_account_cash(page)
+                        acct = fetch_account_cash(page, ACCOUNT_ID)
                         if acct:
                             cached_account_data.clear()
                             cached_account_data.update(acct)
