@@ -5,7 +5,7 @@ When trigger conditions are met, invokes Claude Code (Layer 2) for trading decis
 Claude reads data/metals_context.json and decides to buy/sell/hold.
 
 Features:
-- Tiered Claude invocation (Haiku/Sonnet/Opus)
+- Tiered Claude invocation (Haiku/Sonnet, no Opus)
 - Local LLM inference (Ministral-8B + Chronos, 5min cycle)
 - Monte Carlo VaR for leveraged warrants
 - Trade guards (cooldowns, session limits, loss escalation)
@@ -84,13 +84,19 @@ from metals_avanza_helpers import (
 )
 
 # --- CONFIG ---
+CLAUDE_ENABLED = False        # Master switch: set True to re-enable Claude invocations
 CHECK_INTERVAL = 90           # seconds between price checks
 TRIGGER_PRICE_MOVE = 5.0      # % move from last invocation to trigger (was 2.0)
 TRIGGER_TRAILING = 8.0        # % drop from peak to trigger (was 3.0)
 TRIGGER_PROFIT = 4.0          # % profit from entry to trigger
 TRIGGER_STOP_NEAR = 5.0       # % from stop-loss to trigger
 HEARTBEAT_CHECKS = 80         # invoke every N checks (~2h at 90s) (was 20)
-MIN_INVOKE_INTERVAL = 1800    # minimum 30 min between invocations (was 300)
+# Per-tier cooldowns (seconds) — replaces flat MIN_INVOKE_INTERVAL
+TIER_COOLDOWNS = {
+    1: 120,    # Haiku: 2 min cooldown
+    2: 600,    # Sonnet: 10 min cooldown
+    3: 0,      # Critical: no cooldown (immediate)
+}
 EOD_HOUR_CET = 17.0           # 17:00 CET (DST-safe via cet_hour())
 
 # Spike catcher config (US open limit sell orders)
@@ -143,11 +149,11 @@ AUTO_EXIT_L2_CHECKS = 5         # auto-sell after position in L2+ zone for N che
 # Periodic holdings verification (detect broker-triggered stop-losses)
 HOLDINGS_CHECK_INTERVAL = 20    # verify Avanza holdings every N checks (~30 min at 90s)
 
-# Tier config: model, timeout, max_turns
+# Tier config: model, timeout, max_turns (no Opus — Sonnet handles critical too)
 TIER_CONFIG = {
     1: {"model": "haiku",  "timeout": 60,   "max_turns": 8,  "label": "QUICK"},
     2: {"model": "sonnet", "timeout": 180,  "max_turns": 15, "label": "ANALYSIS"},
-    3: {"model": None,     "timeout": 300,  "max_turns": 20, "label": "CRITICAL"},
+    3: {"model": "sonnet", "timeout": 180,  "max_turns": 15, "label": "CRITICAL"},
 }
 
 # --- POSITIONS (defaults — overridden by persisted state on startup) ---
@@ -323,7 +329,7 @@ TG_CHAT = config["telegram"]["chat_id"]
 # --- STATE ---
 check_count = 0
 last_invoke_prices = {}   # prices at last Claude invocation
-last_invoke_time = 0      # timestamp of last invocation
+last_invoke_times = {1: 0.0, 2: 0.0, 3: 0.0}  # per-tier last invocation timestamps
 peak_bids = {}            # session peak for trailing stop
 price_history = []        # circular buffer of snapshots
 last_signal_data = {}
@@ -340,6 +346,8 @@ l2_zone_checks = {}           # tracks how many consecutive checks each position
 cached_account_data = {}      # latest account buying power (refreshed periodically)
 cached_warrant_catalog = {}   # warrant catalog with live prices (refreshed periodically)
 session_healthy = True            # tracks Avanza session health
+_last_auto_telegram = 0           # timestamp of last autonomous Telegram (for throttling)
+AUTO_TELEGRAM_COOLDOWN = 1800     # 30 min between routine autonomous HOLD messages
 session_alert_sent = False        # debounce: only send one alert per outage
 session_expiry_warned = False     # debounce: only warn once about approaching expiry
 
@@ -1539,7 +1547,7 @@ def log_invocation(tier, model, trigger, check_num, invoke_num, elapsed_s=None, 
     entry = {
         "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "tier": tier,
-        "model": model or "opus",
+        "model": model or "sonnet",
         "trigger": trigger,
         "check_count": check_num,
         "invoke_count": invoke_num,
@@ -1843,10 +1851,332 @@ def _kill_claude():
             print(f"[WARN] claude_log_fh close failed: {e}", flush=True)
         claude_log_fh = None
 
+def _make_autonomous_prediction(signals_data, llm_data):
+    """Generate an autonomous prediction from signals + LLM for accuracy tracking."""
+    directions = []  # (direction, weight)
+
+    for ticker, sig in signals_data.items():
+        action = sig.get("action", "HOLD")
+        buy_count = sig.get("buy_count", 0)
+        sell_count = sig.get("sell_count", 0)
+        total = buy_count + sell_count
+        if total == 0:
+            continue
+        if action == "BUY":
+            directions.append(("up", buy_count / total))
+        elif action == "SELL":
+            directions.append(("down", sell_count / total))
+
+    for ticker, data in llm_data.items():
+        if ticker.startswith("_"):
+            continue
+        consensus_dir = data.get("consensus")
+        consensus_conf = data.get("consensus_conf", 0)
+        if consensus_dir in ("BUY", "SELL"):
+            directions.append(("up" if consensus_dir == "BUY" else "down", consensus_conf))
+        # Chronos 3h
+        chr_dir = data.get("chronos_3h")
+        if chr_dir in ("up", "down"):
+            directions.append((chr_dir, abs(data.get("chronos_3h_pct", 0)) * 10))
+
+    if not directions:
+        return {"action": "HOLD", "direction": "flat", "confidence": 0.0, "horizon": "3h"}
+
+    up_w = sum(w for d, w in directions if d == "up")
+    down_w = sum(w for d, w in directions if d == "down")
+    total_w = up_w + down_w
+    if total_w < 0.1:
+        return {"action": "HOLD", "direction": "flat", "confidence": 0.0, "horizon": "3h"}
+
+    if up_w > down_w:
+        direction, confidence = "up", round(up_w / total_w, 2)
+    else:
+        direction, confidence = "down", round(down_w / total_w, 2)
+
+    action = "HOLD"
+    if confidence >= 0.7:
+        action = "BUY" if direction == "up" else "SELL"
+
+    return {
+        "action": action, "direction": direction,
+        "confidence": confidence, "horizon": "3h",
+        "up_weight": round(up_w, 2), "down_weight": round(down_w, 2),
+    }
+
+
+def _assess_thesis(positions_data, signals_data, trigger_reasons):
+    """Assess whether the strategic thesis (silver bull 2026) is intact."""
+    threats, supports = [], []
+
+    for key, pos in positions_data.items():
+        if pos["pnl_pct"] < -15:
+            threats.append(f"{key} deep drawdown {pos['pnl_pct']:+.1f}%")
+        if pos["dist_stop_pct"] < 5:
+            threats.append(f"{key} near stop ({pos['dist_stop_pct']:.1f}%)")
+        if pos["pnl_pct"] > 5:
+            supports.append(f"{key} profitable")
+
+    xag = signals_data.get("XAG-USD", {})
+    if xag.get("action") == "SELL" and xag.get("sell_count", 0) >= 4:
+        threats.append(f"XAG strong SELL ({xag['sell_count']}S)")
+    elif xag.get("action") == "BUY" and xag.get("buy_count", 0) >= 3:
+        supports.append(f"XAG BUY ({xag['buy_count']}B)")
+
+    if any("EMERGENCY" in r or "AUTO-EXIT" in r for r in trigger_reasons):
+        threats.append("Emergency trigger")
+
+    if threats and not supports:
+        return "THREATENED"
+    elif threats:
+        return "MIXED"
+    elif supports:
+        return "INTACT"
+    return "NEUTRAL"
+
+
+def _build_autonomous_telegram(trigger_reasons, tier, positions_data, signals_data,
+                                llm_data, risk_data, prediction, thesis_status,
+                                cet_str, is_emergency):
+    """Build a rich Telegram message for autonomous mode."""
+    action_str = prediction.get("action", "HOLD")
+    reason_short = trigger_reasons[0][:40] if trigger_reasons else "periodic"
+    emergency_tag = " EMG" if is_emergency else ""
+
+    # First line: Apple Watch
+    xag_bid = ""
+    for key, pos in positions_data.items():
+        if "silver" in key.lower():
+            xag_bid = f"bid:{pos['bid']}"
+            break
+    first_line = f"*AUTO {action_str}{emergency_tag}* · {xag_bid} · {thesis_status}"
+
+    # Position lines
+    pos_lines = []
+    for key, pos in positions_data.items():
+        short_key = key[:6].upper()
+        mc_key = f"{key}_mc_pstop3h"
+        mc_tag = f" MC:{risk_data[mc_key]:.1f}%" if mc_key in risk_data else ""
+        pos_lines.append(
+            f"`{short_key} {pos['units']}u  e:{pos['entry']}  b:{pos['bid']}  "
+            f"{pos['pnl_pct']:+.1f}%  pk:{pos['from_peak_pct']:+.1f}%`"
+        )
+        pos_lines.append(f"`  stop:{pos['stop']} ({pos['dist_stop_pct']:.1f}%){mc_tag}`")
+
+    # Signal line
+    sig_parts = []
+    for ticker, sig in signals_data.items():
+        short_t = ticker.split("-")[0]
+        sig_parts.append(f"{short_t} {sig['action']} {sig.get('buy_count',0)}B/{sig.get('sell_count',0)}S")
+    sig_line = f"Signals: {' | '.join(sig_parts)}" if sig_parts else ""
+
+    # LLM line
+    llm_parts = []
+    for ticker, data in llm_data.items():
+        if ticker.startswith("_"):
+            continue
+        if "ministral" in data:
+            conf = data.get("ministral_conf", 0)
+            llm_parts.append(f"min {data['ministral']} {conf:.0%}")
+        if "chronos_3h" in data:
+            arrow = "^" if data["chronos_3h"] == "up" else "v"
+            pct = data.get("chronos_3h_pct", 0)
+            llm_parts.append(f"chr {arrow}{abs(pct):.1f}% 3h")
+    llm_line = f"LLM: {' | '.join(llm_parts)}" if llm_parts else ""
+
+    # Risk line
+    risk_parts = []
+    dd_pct = risk_data.get("drawdown_pct")
+    if dd_pct is not None:
+        risk_parts.append(f"DD {dd_pct:+.1f}%")
+    risk_line = f"Risk: {' | '.join(risk_parts)}" if risk_parts else ""
+
+    # Assemble
+    lines = [first_line, ""]
+    if pos_lines:
+        lines.extend(pos_lines)
+        lines.append("")
+    if sig_line:
+        lines.append(sig_line)
+    if llm_line:
+        lines.append(llm_line)
+    if risk_line:
+        lines.append(risk_line)
+    lines.append("")
+    lines.append(f"_Autonomous T{tier} · #{check_count} · {cet_str}_")
+
+    return "\n".join(lines)
+
+
+def _autonomous_decision(trigger_reasons, blocked_tier):
+    """Handle triggers autonomously when Claude cooldown is active.
+
+    Uses position state, signal data, LLM predictions, and risk metrics to
+    produce a decision log entry and compact Telegram notification.
+    Does NOT trade — only the SwingTrader or Claude can execute trades.
+    """
+    # Emergency bypass: escalate to Claude T3 if enabled, otherwise Layer 1 handles it
+    EMERGENCY_PATTERNS = ["L3 EMERGENCY", "EMERGENCY drawdown", "AUTO-EXIT"]
+    is_emergency = any(p in r for r in trigger_reasons for p in EMERGENCY_PATTERNS)
+    if is_emergency:
+        if CLAUDE_ENABLED:
+            log("EMERGENCY detected during cooldown — bypassing to T3")
+            invoke_claude(trigger_reasons, tier=3)
+            return
+        else:
+            # Layer 1 already handles L3 auto-sell, drawdown breaker, AUTO-EXIT
+            # directly in main() before invoke_claude() is called — just log here
+            log("EMERGENCY in autonomous mode — Layer 1 handles execution, logging assessment")
+            # Fall through to rich assessment below
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    reason_str = "; ".join(trigger_reasons[:5])
+    cet_str = cet_time_str()
+
+    # --- 1. Gather position P&L ---
+    positions_data = {}
+    for key, pos in POSITIONS.items():
+        if not pos["active"]:
+            continue
+        bid = 0
+        if price_history:
+            bid = price_history[-1].get(key, 0)
+        if bid <= 0:
+            continue
+        entry = pos["entry"]
+        stop = pos["stop"]
+        pnl = pnl_pct(bid, entry)
+        peak = peak_bids.get(key, bid)
+        from_peak = pnl_pct(bid, peak) if peak > 0 else 0
+        dist_stop = ((bid - stop) / bid) * 100 if bid > 0 else 0
+        positions_data[key] = {
+            "bid": bid, "entry": entry, "stop": stop,
+            "units": pos["units"],
+            "pnl_pct": round(pnl, 2),
+            "from_peak_pct": round(from_peak, 2),
+            "dist_stop_pct": round(dist_stop, 1),
+        }
+
+    # --- 2. Gather signal consensus ---
+    signals_data = {}
+    if last_signal_data:
+        for ticker in ["XAG-USD", "XAU-USD"]:
+            if ticker in last_signal_data:
+                s = last_signal_data[ticker]
+                signals_data[ticker] = {
+                    "action": s.get("action", "?"),
+                    "buy_count": s.get("buy_count", 0),
+                    "sell_count": s.get("sell_count", 0),
+                    "rsi": s.get("rsi"),
+                    "macd_hist": s.get("macd_hist"),
+                    "regime": s.get("regime", "?"),
+                }
+
+    # --- 3. Gather LLM predictions ---
+    llm_data = {}
+    if LLM_AVAILABLE:
+        try:
+            llm_sigs = get_llm_signals()
+            for ticker, data in llm_sigs.items():
+                llm_entry = {}
+                if isinstance(data, dict):
+                    if data.get("ministral") and isinstance(data["ministral"], dict):
+                        m = data["ministral"]
+                        llm_entry["ministral"] = m.get("action", "?")
+                        llm_entry["ministral_conf"] = round(m.get("confidence", 0), 2)
+                    for h in ["1h", "3h"]:
+                        ckey = f"chronos_{h}"
+                        if data.get(ckey) and isinstance(data[ckey], dict):
+                            c = data[ckey]
+                            llm_entry[ckey] = c.get("direction", "?")
+                            llm_entry[f"{ckey}_pct"] = round(c.get("pct_move", 0), 3)
+                    if data.get("consensus") and isinstance(data["consensus"], dict):
+                        llm_entry["consensus"] = data["consensus"].get("weighted_action", "?")
+                        llm_entry["consensus_conf"] = round(data["consensus"].get("confidence", 0), 2)
+                if llm_entry:
+                    llm_data[ticker] = llm_entry
+        except Exception:
+            pass
+
+    # --- 4. Gather risk metrics ---
+    risk_data = {}
+    if RISK_AVAILABLE:
+        try:
+            prices_for_risk = {k: {"bid": v["bid"]} for k, v in positions_data.items()}
+            mc = simulate_all_positions(POSITIONS, prices_for_risk)
+            if mc:
+                for key, sim in mc.items():
+                    risk_data[f"{key}_mc_pstop3h"] = round(sim.get("prob_stop_3h", 0), 1)
+        except Exception:
+            pass
+        try:
+            prices_for_dd = {k: {"bid": v["bid"]} for k, v in positions_data.items()}
+            dd = check_portfolio_drawdown(POSITIONS, prices_for_dd)
+            if dd:
+                risk_data["drawdown_pct"] = round(dd.get("current_drawdown_pct", 0), 1)
+                risk_data["drawdown_level"] = dd.get("level", "?")
+        except Exception:
+            pass
+
+    # --- 5. Autonomous prediction (for accuracy tracking) ---
+    prediction = _make_autonomous_prediction(signals_data, llm_data)
+
+    # --- 6. Thesis assessment ---
+    thesis_status = _assess_thesis(positions_data, signals_data, trigger_reasons)
+
+    # --- 7. Build Telegram message ---
+    msg = _build_autonomous_telegram(
+        trigger_reasons, blocked_tier, positions_data, signals_data,
+        llm_data, risk_data, prediction, thesis_status, cet_str, is_emergency,
+    )
+
+    # --- 8. Log decision ---
+    decision = {
+        "ts": now.isoformat(),
+        "source": "autonomous",
+        "check_count": check_count,
+        "tier": blocked_tier,
+        "trigger": reason_str,
+        "action": prediction.get("action", "HOLD"),
+        "positions": positions_data,
+        "signals": signals_data,
+        "llm": llm_data,
+        "risk": risk_data,
+        "prediction": prediction,
+        "thesis_status": thesis_status,
+    }
+    try:
+        with open("data/metals_decisions.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(decision, ensure_ascii=False) + "\n")
+    except Exception as e:
+        log(f"Autonomous decision log error: {e}")
+
+    # --- 9. Send Telegram (throttled for routine HOLDs) ---
+    global _last_auto_telegram
+    is_routine = prediction.get("action") == "HOLD" and thesis_status in ("INTACT", "NEUTRAL")
+    should_send = True
+    if is_routine and not is_emergency:
+        since_last_tg = time.time() - _last_auto_telegram
+        if since_last_tg < AUTO_TELEGRAM_COOLDOWN:
+            should_send = False
+            log(f"Autonomous T{blocked_tier}: Telegram throttled ({since_last_tg:.0f}s < {AUTO_TELEGRAM_COOLDOWN}s)")
+
+    if should_send:
+        send_telegram(msg)
+        _last_auto_telegram = time.time()
+
+    log(f"Autonomous T{blocked_tier}: {prediction.get('action', 'HOLD')} | {thesis_status} | {reason_str[:50]}")
+
+
 def invoke_claude(trigger_reasons, tier=2):
     """Invoke Claude Code as Layer 2 trading agent with tier-based model selection."""
     global claude_proc, claude_log_fh, claude_start, claude_timeout
-    global invoke_count, last_invoke_time
+    global invoke_count, last_invoke_times
+
+    # Guard 0: Claude disabled — route everything to autonomous handler
+    if not CLAUDE_ENABLED:
+        log(f"Claude disabled — routing T{tier} trigger to autonomous")
+        _autonomous_decision(trigger_reasons, tier)
+        return False
 
     tier_cfg = TIER_CONFIG.get(tier, TIER_CONFIG[2])
 
@@ -1860,11 +2190,13 @@ def invoke_claude(trigger_reasons, tier=2):
             log(f"Claude still running ({elapsed:.0f}s), skipping invocation")
             return False
 
-    # Guard 2: Cooldown
-    since_last = time.time() - last_invoke_time
-    if last_invoke_time > 0 and since_last < MIN_INVOKE_INTERVAL:
-        remaining = MIN_INVOKE_INTERVAL - since_last
-        log(f"Cooldown: {remaining:.0f}s remaining, skipping (tier {tier})")
+    # Guard 2: Per-tier cooldown
+    cooldown = TIER_COOLDOWNS.get(tier, 600)
+    since_last = time.time() - last_invoke_times.get(tier, 0)
+    if cooldown > 0 and since_last < cooldown:
+        remaining = cooldown - since_last
+        log(f"T{tier} cooldown: {remaining:.0f}s remaining, falling back to autonomous")
+        _autonomous_decision(trigger_reasons, tier)
         return False
 
     # Read prompt template
@@ -1917,7 +2249,7 @@ def invoke_claude(trigger_reasons, tier=2):
         log_fh.write(f"\n{'='*60}\n")
         log_fh.write(f"Invocation #{invoke_count + 1} | T{tier} ({tier_label}) | "
                       f"{datetime.datetime.now().isoformat()}\n")
-        log_fh.write(f"Model: {tier_cfg['model'] or 'default (opus)'} | "
+        log_fh.write(f"Model: {tier_cfg['model'] or 'default (sonnet)'} | "
                       f"Max turns: {tier_cfg['max_turns']} | "
                       f"Timeout: {tier_cfg['timeout']}s\n")
         log_fh.write(f"Trigger: {reason_str}\n")
@@ -1938,9 +2270,9 @@ def invoke_claude(trigger_reasons, tier=2):
         claude_start = time.time()
         claude_timeout = tier_cfg["timeout"]
         invoke_count += 1
-        last_invoke_time = time.time()
+        last_invoke_times[tier] = time.time()
 
-        log(f"Claude T{tier} invoked (pid={claude_proc.pid}, model={tier_cfg['model'] or 'opus'}, "
+        log(f"Claude T{tier} invoked (pid={claude_proc.pid}, model={tier_cfg['model'] or 'sonnet'}, "
             f"max_turns={tier_cfg['max_turns']}, timeout={tier_cfg['timeout']}s)")
 
         # Log invocation start
@@ -1971,8 +2303,12 @@ def main():
     log(f"Check interval: {CHECK_INTERVAL}s | Heartbeat: every {HEARTBEAT_CHECKS} checks (~{HEARTBEAT_CHECKS*CHECK_INTERVAL//60}min)")
     log(f"Triggers: price>{TRIGGER_PRICE_MOVE}% | trail>{TRIGGER_TRAILING}% | profit>{TRIGGER_PROFIT}%")
     log(f"Stop levels: L1(warn)<{STOP_L1_PCT}% | L2(alert)<{STOP_L2_PCT}% | L3(emergency)<{STOP_L3_PCT}%")
-    log(f"Cooldown: {MIN_INVOKE_INTERVAL}s ({MIN_INVOKE_INTERVAL//60}min) between invocations")
-    log(f"Tiers: T1=haiku(8t,60s) | T2=sonnet(15t,180s) | T3=opus(20t,300s)")
+    if not CLAUDE_ENABLED:
+        log("*** AUTONOMOUS MODE — Claude Code invocations DISABLED ***")
+        log("*** All triggers handled by _autonomous_decision() + SwingTrader ***")
+    else:
+        log(f"Cooldowns: T1={TIER_COOLDOWNS[1]}s | T2={TIER_COOLDOWNS[2]}s | T3=immediate")
+        log(f"Tiers: T1=haiku(8t,60s) | T2=sonnet(15t,180s) | T3=sonnet-critical(15t,180s)")
     log(f"L1 WARNING: log-only (no Claude invocation). Only L2/L3 invoke Claude.")
     log(f"Short instruments: {', '.join(v['name'] for v in SHORT_INSTRUMENTS.values())}")
     if SPIKE_ENABLED:
@@ -2033,7 +2369,10 @@ def main():
         if last_signal_data:
             log(f"  Signal data loaded (age: {last_signal_data.get('age_min', '?')}min)")
 
-        log("Token budget estimate: ~75K tokens/day (25 haiku + 4 sonnet + 1 opus)")
+        if CLAUDE_ENABLED:
+            log("Token budget: REDUCED — no Opus, T1 2min cooldown, T2 10min cooldown")
+        else:
+            log("Token budget: ZERO — Claude disabled, all autonomous")
 
         # Start local LLM background thread
         if LLM_AVAILABLE:
@@ -2130,8 +2469,9 @@ def main():
             pos_parts.append(f"{key}({status})")
         pos_summary = ", ".join(pos_parts)
 
+        _mode = "AUTONOMOUS (no Claude)" if not CLAUDE_ENABLED else "T1=haiku T2=sonnet T3=sonnet-critical"
         send_telegram(f"""*METALS LOOP v7 STARTED*
-Tiered: T1=haiku T2=sonnet T3=opus
+Mode: {_mode}
 LLM: {"Ministral+Chronos (60s)" if LLM_AVAILABLE else "DISABLED"}
 Risk: {"MC+Guards+Drawdown+DailyRanges" if RISK_AVAILABLE else "DISABLED"}
 Tracker: {"ON (" + str(get_snapshot_count()) + " snaps)" if TRACKER_AVAILABLE else "OFF"}
@@ -2425,10 +2765,11 @@ Positions: {pos_summary}""")
                     log(f"#{check_count} [{cet}] {' | '.join(parts)}{llm_tag}{risk_tag}{acc_tag}" +
                         (f" [TRIGGER: {reasons[0]}]" if triggered else ""))
 
-                # Invoke Claude if triggered
+                # Invoke Claude (or autonomous handler) if triggered
                 if triggered:
                     tier = classify_tier(reasons)
-                    write_context(prices, "; ".join(reasons), tier=tier)
+                    if CLAUDE_ENABLED:
+                        write_context(prices, "; ".join(reasons), tier=tier)
                     for key in prices:
                         if prices[key].get('bid'):
                             last_invoke_prices[key] = prices[key]['bid']
