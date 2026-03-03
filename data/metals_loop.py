@@ -111,6 +111,11 @@ TRADE_QUEUE_FILE = "data/metals_trade_queue.json"
 TRADE_QUEUE_MAX_AGE_S = 300     # expire orders older than 5 min
 TRADE_QUEUE_MAX_SLIPPAGE = 2.0  # reject if price moved > 2% from queued
 
+# Session health monitoring
+SESSION_HEALTH_CHECK_INTERVAL = 20   # check every N loops (~30 min at 90s)
+SESSION_EXPIRY_WARNING_H = 20        # warn when storage state is >20h old (session lasts ~24h)
+SESSION_STORAGE_FILE = "data/avanza_storage_state.json"
+
 # Trailing stop config
 TRAIL_START_PCT = 2.0           # start trailing after 2% gain from entry
 TRAIL_DISTANCE_PCT = 3.0        # trail 3% below current bid
@@ -321,6 +326,9 @@ daily_range_stats = {}    # historical daily range percentiles (computed at star
 l2_zone_checks = {}           # tracks how many consecutive checks each position has been in L2+ zone
 cached_account_data = {}      # latest account buying power (refreshed periodically)
 cached_warrant_catalog = {}   # warrant catalog with live prices (refreshed periodically)
+session_healthy = True            # tracks Avanza session health
+session_alert_sent = False        # debounce: only send one alert per outage
+session_expiry_warned = False     # debounce: only warn once about approaching expiry
 
 def send_telegram(msg):
     try:
@@ -679,6 +687,72 @@ def _check_session_health(page):
         return result == 200
     except Exception:
         return False
+
+
+def _check_session_and_alert(page):
+    """Periodic session health check with Telegram alerting.
+
+    Checks two things:
+    1. Live 401 check — is the session actually dead?
+    2. Storage state file age — is it approaching the ~24h expiry?
+
+    Sends Telegram alert on failure (once per outage, not spam).
+    Sends recovery alert when session comes back.
+    """
+    global session_healthy, session_alert_sent, session_expiry_warned
+
+    # --- 1. Live health check ---
+    alive = _check_session_health(page)
+
+    if alive and not session_healthy:
+        # Session recovered
+        session_healthy = True
+        session_alert_sent = False
+        log("Avanza session recovered")
+        send_telegram("*METALS SESSION* Avanza session recovered — API responding normally.")
+    elif alive and session_healthy:
+        # All good, reset alert flag if it was set
+        if session_alert_sent:
+            session_alert_sent = False
+    elif not alive and session_healthy:
+        # Session just died
+        session_healthy = False
+        log("WARNING: Avanza session is DEAD (401)")
+        if not session_alert_sent:
+            session_alert_sent = True
+            send_telegram(
+                "*AVANZA SESSION EXPIRED*\n"
+                "API returning 401 — BankID session is dead.\n"
+                "Price fetching and trade execution will FAIL.\n\n"
+                "*Action needed:* Run `scripts/avanza_login.py` to re-authenticate via BankID, "
+                "then restart the metals loop."
+            )
+    elif not alive and not session_healthy:
+        # Still dead — don't spam, already alerted
+        pass
+
+    # --- 2. Proactive expiry warning (file age) ---
+    try:
+        if os.path.exists(SESSION_STORAGE_FILE):
+            mtime = os.path.getmtime(SESSION_STORAGE_FILE)
+            age_h = (time.time() - mtime) / 3600
+            if age_h >= SESSION_EXPIRY_WARNING_H and not session_expiry_warned:
+                session_expiry_warned = True
+                log(f"WARNING: Avanza storage state is {age_h:.1f}h old (session expires ~24h)")
+                send_telegram(
+                    f"*AVANZA SESSION WARNING*\n"
+                    f"Storage state is *{age_h:.1f}h* old (expires at ~24h).\n"
+                    f"Session will die in ~{24 - age_h:.1f}h.\n\n"
+                    f"*Renew soon:* Run `scripts/avanza_login.py` to refresh BankID session."
+                )
+            elif age_h < SESSION_EXPIRY_WARNING_H and session_expiry_warned:
+                # File was renewed — reset warning
+                session_expiry_warned = False
+                log("Avanza storage state renewed")
+    except Exception as e:
+        log(f"Session age check error: {e}")
+
+    return alive
 
 
 def _fetch_warrant_catalog_prices(page):
@@ -2069,6 +2143,10 @@ def main():
         page.wait_for_timeout(2000)
         log("Avanza session loaded")
 
+        # Check session health at startup
+        if not _check_session_and_alert(page):
+            log("WARNING: Avanza session is DEAD at startup! Continuing but trades will fail.")
+
         # Verify actual holdings at startup (detect already-sold positions)
         log("Verifying position holdings...")
         _verify_position_holdings(page, POSITIONS)
@@ -2216,6 +2294,7 @@ Spike: {"P" + str(SPIKE_PERCENTILE) + " " + str(SPIKE_PARTIAL_PCT) + "% @15:15-1
 Stops: {"3x cascaded + trailing + momentum" if STOP_ORDER_ENABLED else "L3 only"}
 Swing: {"ACTIVE (DRY_RUN)" if swing_trader else "OFF"}
 TradeQ: {"ENABLED" if TRADE_QUEUE_ENABLED else "OFF"}
+Session: {"ALIVE" if session_healthy else "DEAD — re-login needed!"}
 Positions: {pos_summary}""")
 
         try:
@@ -2282,6 +2361,10 @@ Positions: {pos_summary}""")
                                 cached_warrant_catalog.update(cat)
                         except Exception as e:
                             log(f"Warrant catalog fetch error: {e}")
+
+                # Session health check (~every 30 min)
+                if check_count % SESSION_HEALTH_CHECK_INTERVAL == 0:
+                    _check_session_and_alert(page)
 
                 # Store price snapshot
                 snap = {
