@@ -1,80 +1,96 @@
-# Plan: Metals Loop v7 — Cascading Stop-Loss + Derivative Exit
+# Plan: Deduplicate Avanza Helpers in metals_loop.py
 
-## Post-Mortem (Mar 2)
-- Claude Layer 2 said HOLD 43 times, never SELL, even 2.27% from stop
-- Monte Carlo P(stop) was static 0.42% — never updated — actual probability was 100%
-- No rate-of-change detection — accelerating selloff went undetected
-- Emergency sells failed for gold (Avanza "short sell not allowed" — already sold by broker stop)
-- Chronos was blind all session (field mismatch bug, now fixed)
+## Problem
 
-## Changes
+`metals_loop.py` (the metals monitoring loop) contains 6 functions that are near-identical
+copies of functions already in `metals_swing_trader.py`. Both files operate on a shared
+Playwright `page` object, but neither imports from the other's helpers. This duplication
+means bug fixes in one copy don't reach the other (e.g., the stop-loss API endpoint fix
+on Mar 2 had to be applied twice).
 
-### Batch 1: 3x Cascading Stop-Loss Orders (data/metals_loop.py)
+## Duplication Map
 
-Place 3 independent sell limit orders per position at startup, spread across 3 levels:
-- S1 (33% of units): at configured stop price
-- S2 (33% of units): at stop - 1% of stop
-- S3 (remaining units): at stop - 2% of stop
+| Function in metals_loop.py | Line | Original in metals_swing_trader.py | Line | Match % |
+|---|---|---|---|---|
+| `_get_csrf(page)` | 601 | `_get_csrf(page)` | 96 | 100% |
+| `fetch_price(page, ob_id, api_type)` | 394 | `_fetch_price(page, ob_id, api_type)` | 104 | 95% (extra `underlying_name` field) |
+| `_fetch_account_cash(page)` | 647 | `_fetch_account_cash(page)` | 129 | 100% |
+| `_execute_order(page, order)` | 812 | `_place_order(page, ob_id, side, price, volume)` | 159 | 95% (different arg shape) |
+| `_place_hardware_stop(page, ...)` | 857 | `_place_stop_loss(page, ...)` | 200 | 98% (hardcoded vs config days) |
+| `_check_session_health(page)` | 677 | `avanza_session.verify_session()` | 149 | partial (different impl) |
 
-This handles gap-through: if price gaps below S1, S2 and S3 may still fill.
+Additionally, `portfolio/avanza_session.py` has `session_remaining_minutes()` and
+`is_session_expiring_soon()` which overlap with the file-age-based expiry warning
+in `_check_session_and_alert()`.
 
-Functions:
-- `place_stop_loss_orders(page, positions)` — places 3 orders per active position
-- `check_stop_order_fills(page, stop_state)` — monitors for fills
-- `update_trailing_stops(page, positions, stop_state, prices)` — ratchets up when positions gain
-- Stop order state persisted to `data/metals_stop_orders.json`
+## What We'll Do
 
-Trailing logic:
-- When bid > entry * (1 + trail_start_pct), move stops up
-- New S1 = max(current_S1, bid * (1 - trail_distance_pct))
-- Minimum move of 1% to avoid excessive API calls
-- Cancel old orders, place new ones at higher levels
+**Create `data/metals_avanza_helpers.py`** — a single shared module with the canonical
+versions of all Avanza Playwright helpers used by both `metals_loop.py` and
+`metals_swing_trader.py`.
 
-### Batch 2: Derivative-Based Momentum Exit (data/metals_loop.py)
+### Why a new file instead of importing from metals_swing_trader.py?
 
-Monitor rate-of-change acceleration. When conditions met, auto-sell immediately:
+`metals_swing_trader.py` is a monolithic class-based trader (the `SwingTrader` class). Its
+helpers are module-level functions but tightly coupled to its constants (`ACCOUNT_ID`,
+`STOP_LOSS_VALID_DAYS`). Extracting them into a standalone helper module is cleaner than
+making metals_loop.py import from the trader.
 
-Detection:
-- Track price_history (already exists, 120-entry circular buffer)
-- Compute: velocity = (bid_now - bid_N_checks_ago) / N  (1st derivative)
-- Compute: acceleration = velocity_now - velocity_prev  (2nd derivative)
-- If acceleration < threshold AND velocity < 0 AND abs(velocity) > min_velocity:
-  → MOMENTUM EXIT: auto-sell via API
+### Why not use portfolio/avanza_session.py?
 
-Parameters:
-- `MOMENTUM_LOOKBACK = 5` (5 checks = ~7.5 min)
-- `MOMENTUM_MIN_VELOCITY = -0.5` (must be dropping at least 0.5% per check)
-- `MOMENTUM_ACCELERATION_THRESHOLD = -0.1` (must be accelerating)
-- Only triggers when position is already L1+ (>8% from peak or <8% from stop)
+`avanza_session.py` manages its OWN Playwright instance (module-level `_pw_context`).
+`metals_loop.py` and `metals_swing_trader.py` each pass a `page` argument from their own
+Playwright sessions. The API pattern is fundamentally different — session.py creates its own
+browser, while the loop/trader pass an existing page. Merging would require a large refactor
+with high breakage risk. Instead, we'll note the overlap and unify later (TODO).
 
-### Batch 3: L2 Auto-Exit Override (data/metals_loop.py)
+## What Could Break
 
-When position is <3% from stop, auto-sell instead of deferring to Claude.
-Change: L2 ALERT (<5%) now triggers auto-sell when:
-- Price trend is downward (last 3 bids declining)
-- Position has been in L1+ zone for 5+ checks
-
-This prevents the "43 HOLDs while approaching stop" pattern.
-
-### Batch 4: Get Positions from Avanza API
-
-Use `/_api/position-data/positions` endpoint to:
-- Get actual holdings at startup (units, entry, P&L)
-- Detect when broker stop-loss triggers independently
-
-### Batch 5: Dynamic Monte Carlo
-
-- Recalculate MC stop probability every 10 checks
-- Use recent price_history volatility, not just historical daily ranges
-
-## Files Changed
-- `data/metals_loop.py` — main implementation (batches 1-4)
-- `data/metals_risk.py` — dynamic MC updates (batch 5)
-- `data/metals_stop_orders.json` — new, stop order tracking
+1. **Import paths**: Both consumers must import from the new module correctly.
+2. **Argument shape differences**: `_execute_order(page, order)` vs `_place_order(page, ob_id, side, price, volume)` — need to support both call patterns or standardize.
+3. **Constant differences**: Loop hardcodes `days=8` for stop-loss, swing trader uses `STOP_LOSS_VALID_DAYS` config. Helper must accept it as a parameter.
+4. **Return value differences**: `_place_order` returns `{**result, "parsed": body}`, `_execute_order` returns `{"http_status": ..., "parsed": body, "order_id": ...}`. Callers depend on specific keys.
+5. **Logging**: Loop uses `log()`, swing trader uses `_log()`. Helper should accept a logger.
+6. **`_check_session_and_alert`**: This is unique to the loop (Telegram alerting, global state). NOT a duplicate — keep it in metals_loop.py.
 
 ## Execution Order
-1. Batch 1 (stop orders) — highest priority, hardware protection
-2. Batch 2 (momentum exit) — software early warning
-3. Batch 3 (L2 override) — prevent Claude HOLD paralysis
-4. Batch 4 (Avanza positions) — better state management
-5. Batch 5 (dynamic MC) — better risk estimates
+
+### Batch 1: Create shared helpers module
+
+1. Create `data/metals_avanza_helpers.py` with:
+   - `get_csrf(page)` — extract CSRF token
+   - `fetch_price(page, ob_id, api_type)` — fetch live price (superset of both versions)
+   - `fetch_account_cash(page, account_id)` — fetch buying power
+   - `place_order(page, account_id, ob_id, side, price, volume)` — place BUY/SELL
+   - `place_stop_loss(page, account_id, ob_id, trigger_price, sell_price, volume, valid_days=8)` — place hardware stop
+   - `check_session_alive(page)` — quick 401 health check
+
+2. Each function takes explicit arguments (no module-level constants), returns consistent shapes.
+
+### Batch 2: Update metals_loop.py
+
+1. Import from `metals_avanza_helpers`
+2. Delete duplicated functions: `_get_csrf`, `fetch_price`, `_fetch_account_cash`, `_execute_order`, `_place_hardware_stop`, `_check_session_health`
+3. Update all callers to use new import names
+4. Keep `_check_session_and_alert` (unique logic), update to call `check_session_alive()`
+
+### Batch 3: Update metals_swing_trader.py
+
+1. Import from `metals_avanza_helpers`
+2. Delete: `_get_csrf`, `_fetch_price`, `_fetch_account_cash`, `_place_order`, `_place_stop_loss`
+3. Keep: `_delete_stop_loss` (unique to swing trader)
+4. Update all callers, adapting to new return value shapes if needed
+
+### Batch 4: Verify & commit
+
+1. Search for any remaining callers of old function names
+2. Run a syntax check (python -c "import data.metals_avanza_helpers")
+3. Verify metals_loop.py and metals_swing_trader.py both import correctly
+4. Commit, merge to main, push
+
+## Decisions
+
+- **Name convention**: Drop leading underscore — these are now public module-level functions.
+- **Account ID**: Passed as argument, not imported from config (keeps module dependency-free).
+- **Logging**: Functions use `print()` by default; callers wrap in their own logger if needed. Or accept optional `log_fn` parameter. Keep it simple.
+- **Return values**: Standardize on `(success: bool, result: dict)` for order functions. Both callers will need minor adaptation.
