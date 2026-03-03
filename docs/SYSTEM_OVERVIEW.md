@@ -1,6 +1,6 @@
 # Portfolio Intelligence System — System Overview
 
-> **Updated:** 2026-03-02 (auto-improvement session)
+> **Updated:** 2026-03-03 (auto-improvement session #6)
 > **Canonical architecture doc:** docs/architecture-plan.md
 > **Layer 2 instructions:** CLAUDE.md
 
@@ -17,7 +17,7 @@ with 30 signals across 7 timeframes, dual simulated portfolios (Patient + Bold, 
 ## Module Dependency Graph
 
 ```
-main.py (orchestrator — loop, run, CLI dispatch)  [~596 lines]
+main.py (orchestrator — loop, run, CLI dispatch)  [~575 lines]
 ├── shared_state.py        (global caches, rate limiters, locks)  [116 lines]
 ├── market_timing.py       (DST-aware market hours, agent window)  [80 lines]
 ├── fx_rates.py            (USD/SEK caching via Frankfurter API)  [65 lines]
@@ -29,7 +29,7 @@ main.py (orchestrator — loop, run, CLI dispatch)  [~596 lines]
 ├── signal_engine.py       (30-signal voting + weighted consensus)  [~700 lines]
 │   ├── signal_registry.py (enhanced signal plugin registry)  [130 lines]
 │   ├── signal_utils.py    (shared helpers: SMA, EMA, RSI, majority_vote)  [130 lines]
-│   ├── macro_context.py   (DXY, yields, FOMC, volume signal)
+│   ├── macro_context.py   (DXY, yields, FOMC, volume signal)  [+logger]
 │   ├── accuracy_stats.py  (signal performance tracking, SQLite)  [633 lines]
 │   └── signals/           (19 enhanced signal modules, ~8,400 lines total)
 ├── portfolio_mgr.py       (state load/save, portfolio_value)  [57 lines]
@@ -143,8 +143,9 @@ main.py (orchestrator — loop, run, CLI dispatch)  [~596 lines]
 
 ## Test Suite
 
-- **~94 test files**, ~3,133 tests, 26 pre-existing failures (documented)
+- **~95 test files**, ~3,175 tests, 26 pre-existing failures (documented)
 - Pre-existing failures: 15 integration (missing `ta_base_strategy`), 4 consensus MIN_VOTERS, 2 forecast config, 3 portfolio signal/trigger, 1 subprocess, 1 forecast gating
+- Session #6 added: 3 trap detection logging tests (test_signal_engine_core), 17 _extract_triggered_tickers + _run_post_cycle tests (test_main_helpers)
 - Sequential runtime: ~16 min. Parallel (`-n auto` via pytest-xdist): ~5:34 (2.9x speedup)
 - Configuration: pytest + pyproject.toml, ruff linting (line length 120)
 - Test isolation: `tmp_path` + `monkeypatch` autouse fixtures for module-level file paths
