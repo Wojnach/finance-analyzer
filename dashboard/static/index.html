@@ -521,13 +521,13 @@
 
     <!-- Navigation tabs -->
     <div class="nav-tabs" id="navTabs">
-      <div class="nav-tab active" data-tab="overview" onclick="switchTab('overview')">Overview</div>
+      <div class="nav-tab active" data-tab="accuracy" onclick="switchTab('accuracy')">Accuracy</div>
+      <div class="nav-tab" data-tab="overview" onclick="switchTab('overview')">Overview</div>
       <div class="nav-tab" data-tab="signals" onclick="switchTab('signals')">Signal Heatmap</div>
       <div class="nav-tab" data-tab="equity" onclick="switchTab('equity')">Equity Curve</div>
       <div class="nav-tab" data-tab="triggers" onclick="switchTab('triggers')">Trigger Timeline</div>
       <div class="nav-tab" data-tab="decisions" onclick="switchTab('decisions')">Decisions</div>
       <div class="nav-tab" data-tab="messages" onclick="switchTab('messages')">Messages</div>
-      <div class="nav-tab" data-tab="accuracy" onclick="switchTab('accuracy')">Accuracy</div>
       <div class="nav-tab" data-tab="health" onclick="switchTab('health')">Health</div>
       <div class="nav-tab" data-tab="metals" onclick="switchTab('metals')">Metals</div>
     </div>
@@ -538,7 +538,7 @@
       <!-- ============================================================
            TAB: Overview
            ============================================================ -->
-      <div class="tab-content active" id="tab-overview">
+      <div class="tab-content" id="tab-overview">
         <div class="sc" id="sCards"></div>
 
         <div>
@@ -679,14 +679,31 @@
       <!-- ============================================================
            TAB: Accuracy
            ============================================================ -->
-      <div class="tab-content" id="tab-accuracy">
-        <div class="stit">Signal Accuracy Trend</div>
-        <div class="chart-wrap" id="accChartWrap" style="display:none">
-          <canvas id="accChart" class="chart-canvas"></canvas>
+      <div class="tab-content active" id="tab-accuracy">
+        <!-- Sub-tabs: Portfolio Loop vs Metals Loop -->
+        <div style="display:flex;gap:6px;margin-bottom:12px">
+          <button class="msg-chip active" data-accview="portfolio" onclick="switchAccView('portfolio')">Portfolio Loop</button>
+          <button class="msg-chip" data-accview="metals" onclick="switchAccView('metals')">Metals Loop</button>
         </div>
-        <div class="stit">Signal Accuracy (Current)</div>
-        <div class="pnl" id="accC">
-          <div class="nd">Loading accuracy data...</div>
+
+        <!-- Portfolio Loop Accuracy -->
+        <div id="accView-portfolio">
+          <div class="stit">Signal Accuracy Trend</div>
+          <div class="chart-wrap" id="accChartWrap" style="display:none">
+            <canvas id="accChart" class="chart-canvas"></canvas>
+          </div>
+          <div class="stit">Signal Accuracy (Current)</div>
+          <div class="pnl" id="accC">
+            <div class="nd">Loading accuracy data...</div>
+          </div>
+        </div>
+
+        <!-- Metals Loop Accuracy -->
+        <div id="accView-metals" style="display:none">
+          <div class="stit">Metals Loop Signal Accuracy (1h / 3h horizons)</div>
+          <div class="pnl" id="metalsAccC">
+            <div class="nd">Loading metals accuracy data...</div>
+          </div>
         </div>
       </div>
 
@@ -2094,6 +2111,74 @@
       }
 
       /* ================================================================
+         Accuracy sub-view switcher (Portfolio Loop vs Metals Loop)
+         ================================================================ */
+      function switchAccView(view) {
+        document.querySelectorAll("[data-accview]").forEach(function (b) {
+          b.classList.toggle("active", b.dataset.accview === view);
+        });
+        document.getElementById("accView-portfolio").style.display = view === "portfolio" ? "" : "none";
+        document.getElementById("accView-metals").style.display = view === "metals" ? "" : "none";
+        if (view === "metals") loadMetalsAccuracy();
+      }
+
+      var _metalsAccLoaded = false;
+      async function loadMetalsAccuracy() {
+        if (_metalsAccLoaded) return;
+        var c = document.getElementById("metalsAccC");
+        var d = await fj("/api/metals-accuracy");
+        if (!d || d.error || !d.stats || !Object.keys(d.stats).length) {
+          c.innerHTML = '<div class="nd">No metals accuracy data available</div>';
+          return;
+        }
+        _metalsAccLoaded = true;
+
+        var stats = d.stats;
+        var h = '';
+
+        // Summary header
+        h += '<div style="margin-bottom:12px;font-size:12px;color:var(--txd)">';
+        h += 'Resolved snapshots: <strong style="color:var(--tx)">' + (d.resolved_snapshots || 0) + '</strong>';
+        if (d.ts) h += ' &middot; Updated: ' + new Date(d.ts).toLocaleString("sv-SE");
+        h += '</div>';
+
+        // Group by source type (main, llm, chronos, ministral)
+        var groups = {};
+        Object.keys(stats).forEach(function (key) {
+          // key format: "main_XAG_1h", "chronos_1h_XAG_1h", "ministral_XAG_1h", "llm_XAG_1h"
+          var parts = key.split("_");
+          var source = parts[0]; // main, llm, chronos, ministral
+          if (!groups[source]) groups[source] = {};
+          groups[source][key] = stats[key];
+        });
+
+        var sourceLabels = {
+          main: "Main Loop Signals (XAG/XAU consensus)",
+          llm: "LLM Consensus",
+          chronos: "Chronos Forecasts",
+          ministral: "Ministral LLM"
+        };
+
+        Object.keys(groups).forEach(function (source) {
+          var items = groups[source];
+          var label = sourceLabels[source] || source;
+          h += '<div style="font-size:11px;color:var(--txm);margin:12px 0 5px;text-transform:uppercase;letter-spacing:0.5px">' + label + '</div>';
+          // Sort by total samples descending
+          var keys = Object.keys(items).sort(function (a, b) { return items[b].total - items[a].total; });
+          keys.forEach(function (key) {
+            var sd = items[key];
+            var p = Math.round(sd.accuracy * 100);
+            var bc = p >= 55 ? "var(--grn)" : p >= 45 ? "var(--yel)" : "var(--red)";
+            // Friendlier label: "main_XAG_1h" -> "XAG 1h"
+            var shortLabel = key.replace(source + "_", "").replace(/_/g, " ");
+            h += '<div class="abr"><div class="abl">' + shortLabel + '</div><div class="abt"><div class="abf" style="width:' + p + '%;background:' + bc + '">' + p + '%</div></div><div class="abc">' + sd.correct + '/' + sd.total + '</div></div>';
+          });
+        });
+
+        c.innerHTML = h;
+      }
+
+      /* ================================================================
          Decisions (Layer 2 journal)
          ================================================================ */
       var decData = [];
@@ -2495,6 +2580,8 @@
          ================================================================ */
       initTheme();
       refresh();
+      loadAccuracy();
+      loadAccuracyHistory();
       startCd();
     </script>
   </body>

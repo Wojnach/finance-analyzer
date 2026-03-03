@@ -344,6 +344,16 @@ def api_accuracy_history():
     return jsonify(entries)
 
 
+@app.route("/api/metals-accuracy")
+@require_auth
+def api_metals_accuracy():
+    """Return metals loop signal accuracy (1h/3h horizons)."""
+    data = _read_json(DATA_DIR / "metals_signal_accuracy.json")
+    if not data:
+        return jsonify({"error": "no data", "stats": {}})
+    return jsonify(data)
+
+
 @app.route("/api/trades")
 @require_auth
 def api_trades():
