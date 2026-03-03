@@ -160,6 +160,10 @@ POSITIONS_DEFAULTS = {
         "name": "MINI L SILVER AVA 301", "ob_id": "2334960", "api_type": "warrant",
         "units": 130, "entry": 15.36, "stop": 12.50, "active": True,
     },
+    "silver_sg": {
+        "name": "MINI L SILVER SG", "ob_id": "2043157", "api_type": "warrant",
+        "units": 441, "entry": 52.0, "stop": 46.0, "active": True,
+    },
 }
 POSITIONS_STATE_FILE = "data/metals_positions_state.json"
 

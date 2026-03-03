@@ -1,14 +1,25 @@
 {
   "gold": {
-    "active": true,
+    "active": false,
     "units": 4,
     "entry": 907.5,
-    "stop": 780.0
+    "stop": 720.0,
+    "sold_ts": "2026-03-02T18:42:06.216273+00:00",
+    "sold_reason": "startup_verify_not_held"
   },
   "silver301": {
-    "active": true,
-    "units": 130,
+    "active": false,
+    "units": 292,
     "entry": 15.36,
-    "stop": 12.50
+    "stop": 15.73,
+    "sold_ts": "2026-03-02T20:49:34.549620+00:00",
+    "sold_price": 16,
+    "sold_reason": "L3_emergency"
+  },
+  "silver_sg": {
+    "active": true,
+    "units": 441,
+    "entry": 52.0,
+    "stop": 46.0
   }
 }
