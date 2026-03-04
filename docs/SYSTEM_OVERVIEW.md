@@ -1,6 +1,6 @@
 # Portfolio Intelligence System — System Overview
 
-> **Updated:** 2026-03-03 (auto-improvement session #6)
+> **Updated:** 2026-03-04 (auto-improvement session #8)
 > **Canonical architecture doc:** docs/architecture-plan.md
 > **Layer 2 instructions:** CLAUDE.md
 
@@ -18,7 +18,7 @@ with 30 signals across 7 timeframes, dual simulated portfolios (Patient + Bold, 
 
 ```
 main.py (orchestrator — loop, run, CLI dispatch)  [~575 lines]
-├── shared_state.py        (global caches, rate limiters, locks)  [116 lines]
+├── shared_state.py        (global caches + LRU eviction, rate limiters, locks)  [122 lines]
 ├── market_timing.py       (DST-aware market hours, agent window)  [80 lines]
 ├── fx_rates.py            (USD/SEK caching via Frankfurter API)  [65 lines]
 ├── indicators.py          (RSI, MACD, EMA, BB, ATR, regime detection)  [167 lines]
@@ -33,7 +33,7 @@ main.py (orchestrator — loop, run, CLI dispatch)  [~575 lines]
 │   ├── accuracy_stats.py  (signal performance tracking, SQLite)  [633 lines]
 │   └── signals/           (19 enhanced signal modules, ~8,400 lines total)
 ├── portfolio_mgr.py       (state load/save, portfolio_value)  [57 lines]
-│   └── file_utils.py      (atomic JSON I/O)
+│   └── file_utils.py      (atomic JSON I/O, JSONL pruning)
 ├── reporting.py           (agent_summary.json, tiered context)  [~760 lines]
 │   ├── equity_curve.py    (FIFO trade metrics, profit factor)  [597 lines]
 │   ├── trade_guards.py    (cooldown, consecutive-loss escalation)  [267 lines]
@@ -143,9 +143,9 @@ main.py (orchestrator — loop, run, CLI dispatch)  [~575 lines]
 
 ## Test Suite
 
-- **~95 test files**, ~3,175 tests, 26 pre-existing failures (documented)
+- **~98 test files**, ~3,220+ tests, 26 pre-existing failures (documented)
 - Pre-existing failures: 15 integration (missing `ta_base_strategy`), 4 consensus MIN_VOTERS, 2 forecast config, 3 portfolio signal/trigger, 1 subprocess, 1 forecast gating
-- Session #6 added: 3 trap detection logging tests (test_signal_engine_core), 17 _extract_triggered_tickers + _run_post_cycle tests (test_main_helpers)
+- Session #8 added: 9 cache eviction tests, 11 circuit breaker reset tests, 9 JSONL pruning tests, signal registry isolation fix (47 tests total)
 - Sequential runtime: ~16 min. Parallel (`-n auto` via pytest-xdist): ~5:34 (2.9x speedup)
 - Configuration: pytest + pyproject.toml, ruff linting (line length 120)
 - Test isolation: `tmp_path` + `monkeypatch` autouse fixtures for module-level file paths
