@@ -1,8 +1,8 @@
 """
-Metals Intraday Trading Loop v7 (Layer 1).
-Collects price data every 60-90 seconds from Avanza.
-When trigger conditions are met, invokes Claude Code (Layer 2) for trading decisions.
-Claude reads data/metals_context.json and decides to buy/sell/hold.
+Metals Intraday Trading Loop v8 (Layer 1 — Autonomous).
+Runs every 30s, fully autonomous without Claude Code dependency.
+Core features: probability-focused Telegram, momentum-aware trailing stops,
+auto-detect holdings, Binance FAPI underlying prices 24/7, per-signal accuracy.
 
 Features:
 - Tiered Claude invocation (Haiku/Sonnet, no Opus)
@@ -85,12 +85,12 @@ from metals_avanza_helpers import (
 
 # --- CONFIG ---
 CLAUDE_ENABLED = False        # Master switch: set True to re-enable Claude invocations
-CHECK_INTERVAL = 60           # seconds between price checks
+CHECK_INTERVAL = 30           # seconds between price checks (was 60 — faster for autonomous)
 TRIGGER_PRICE_MOVE = 5.0      # % move from last invocation to trigger (was 2.0)
 TRIGGER_TRAILING = 8.0        # % drop from peak to trigger (was 3.0)
 TRIGGER_PROFIT = 4.0          # % profit from entry to trigger
 TRIGGER_STOP_NEAR = 5.0       # % from stop-loss to trigger
-HEARTBEAT_CHECKS = 120        # invoke every N checks (~2h at 60s) (was 80 at 90s)
+HEARTBEAT_CHECKS = 60         # invoke every N checks (~30min at 30s)
 # Per-tier cooldowns (seconds) — replaces flat MIN_INVOKE_INTERVAL
 TIER_COOLDOWNS = {
     1: 120,    # Haiku: 2 min cooldown
@@ -131,10 +131,12 @@ SESSION_HEALTH_CHECK_INTERVAL = 20   # check every N loops (~30 min at 90s)
 SESSION_EXPIRY_WARNING_H = 20        # warn when storage state is >20h old (session lasts ~24h)
 SESSION_STORAGE_FILE = "data/avanza_storage_state.json"
 
-# Trailing stop config
-TRAIL_START_PCT = 2.0           # start trailing after 2% gain from entry
-TRAIL_DISTANCE_PCT = 3.0        # trail 3% below current bid
-TRAIL_MIN_MOVE_PCT = 1.0        # minimum move to update (avoid excessive API calls)
+# Trailing stop config — smart momentum-aware
+TRAIL_START_PCT = 1.0           # start trailing after 1% gain from entry (was 2%)
+TRAIL_DISTANCE_PCT = 5.0        # trail 5% below current bid (was 3% — user wants 5% safety)
+TRAIL_MIN_MOVE_PCT = 0.5        # minimum move to update (was 1% — more responsive)
+TRAIL_TIGHTEN_MOMENTUM = 3.0    # tighten to 3% when momentum negative
+TRAIL_TIGHTEN_ACCEL = 2.0       # tighten to 2% when acceleration is negative (fast decline)
 
 # Momentum exit (derivative-based early exit)
 MOMENTUM_ENABLED = True
@@ -146,8 +148,8 @@ MOMENTUM_REQUIRE_L1 = True      # only trigger if already in L1+ danger zone
 # Auto-exit override (prevent Claude HOLD paralysis)
 AUTO_EXIT_L2_CHECKS = 5         # auto-sell after position in L2+ zone for N checks
 
-# Periodic holdings verification (detect broker-triggered stop-losses)
-HOLDINGS_CHECK_INTERVAL = 20    # verify Avanza holdings every N checks (~30 min at 90s)
+# Periodic holdings verification — high frequency for auto-detect
+HOLDINGS_CHECK_INTERVAL = 4     # verify Avanza holdings every N checks (~2 min at 30s)
 
 # Tier config: model, timeout, max_turns (no Opus — Sonnet handles critical too)
 TIER_CONFIG = {
@@ -347,7 +349,9 @@ cached_account_data = {}      # latest account buying power (refreshed periodica
 cached_warrant_catalog = {}   # warrant catalog with live prices (refreshed periodically)
 session_healthy = True            # tracks Avanza session health
 _last_auto_telegram = 0           # timestamp of last autonomous Telegram (for throttling)
-AUTO_TELEGRAM_COOLDOWN = 1800     # 30 min between routine autonomous HOLD messages
+AUTO_TELEGRAM_COOLDOWN = 600      # 10 min between routine autonomous messages (was 30 min)
+PROB_REPORT_INTERVAL = 5          # compute probability report every N checks (~2.5 min)
+PROB_TELEGRAM_INTERVAL = 20       # send probability telegram every N checks (~10 min)
 session_alert_sent = False        # debounce: only send one alert per outage
 session_expiry_warned = False     # debounce: only warn once about approaching expiry
 
@@ -406,11 +410,15 @@ def cet_time_str():
     return ts
 
 def is_market_hours():
-    """Check if Avanza warrant market is open (Mon-Fri 09:00-17:25 CET)."""
+    """Check if Avanza commodity warrant market is open (Mon-Fri 08:15-21:55 CET)."""
     now = datetime.datetime.now(datetime.timezone.utc)
     weekday = now.weekday()
     h = cet_hour()
-    return weekday < 5 and 9.0 <= h <= 17.42
+    return weekday < 5 and 8.25 <= h <= 21.92
+
+def is_avanza_open():
+    """Check if Avanza warrant market is open for trading."""
+    return is_market_hours()
 
 def read_signal_data():
     """Read XAG/XAU signal data from the main loop's agent_summary.json."""
@@ -464,6 +472,727 @@ def read_signal_data():
     except Exception as e:
         log(f"Signal read error: {e}")
         return {}
+
+# ---------------------------------------------------------------------------
+# Binance FAPI underlying price fetch (always-on, no dependency on positions)
+# ---------------------------------------------------------------------------
+BINANCE_FAPI_TICKER = "https://fapi.binance.com/fapi/v1/ticker/price"
+BINANCE_FAPI_KLINES = "https://fapi.binance.com/fapi/v1/klines"
+UNDERLYING_SYMBOLS = {"XAG-USD": "XAGUSDT", "XAU-USD": "XAUUSDT"}
+_underlying_prices = {}  # always-fresh: {"XAG-USD": float, "XAU-USD": float}
+_underlying_history = {"XAG-USD": [], "XAU-USD": []}  # rolling price history for momentum
+_underlying_klines_cache = {}  # {"XAG-USD": {"ts": float, "klines": [...]}}
+
+def fetch_underlying_from_binance():
+    """Fetch current XAG/XAU prices from Binance FAPI (24/7, no Avanza dependency)."""
+    global _underlying_prices
+    prices = {}
+    for ticker, symbol in UNDERLYING_SYMBOLS.items():
+        try:
+            r = requests.get(
+                f"{BINANCE_FAPI_TICKER}?symbol={symbol}", timeout=5
+            )
+            if r.status_code == 200:
+                data = r.json()
+                prices[ticker] = float(data["price"])
+        except Exception as e:
+            log(f"Binance FAPI {ticker} error: {e}")
+    if prices:
+        _underlying_prices.update(prices)
+        # Update rolling history (keep last 120 = ~1 hour at 30s)
+        for ticker, price in prices.items():
+            hist = _underlying_history.setdefault(ticker, [])
+            hist.append({"ts": time.time(), "price": price})
+            if len(hist) > 120:
+                hist.pop(0)
+    return prices
+
+def fetch_underlying_klines(ticker, interval="1h", limit=100):
+    """Fetch OHLCV klines from Binance FAPI for a ticker. Cached 5 min."""
+    symbol = UNDERLYING_SYMBOLS.get(ticker)
+    if not symbol:
+        return None
+    cache = _underlying_klines_cache.get(ticker)
+    if cache and time.time() - cache["ts"] < 300:
+        return cache["klines"]
+    try:
+        r = requests.get(
+            BINANCE_FAPI_KLINES,
+            params={"symbol": symbol, "interval": interval, "limit": limit},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            klines = [
+                {"open": float(k[1]), "high": float(k[2]),
+                 "low": float(k[3]), "close": float(k[4]),
+                 "volume": float(k[5])}
+                for k in data
+            ]
+            _underlying_klines_cache[ticker] = {"ts": time.time(), "klines": klines}
+            return klines
+    except Exception as e:
+        log(f"Binance klines {ticker} error: {e}")
+    return None
+
+def get_underlying_momentum(ticker, lookback=10):
+    """Compute price velocity and acceleration for a ticker from rolling history.
+
+    Returns:
+        dict with velocity_pct (% per check), acceleration (change in velocity),
+        trend ("up"/"down"/"flat"), momentum_score (-1 to +1)
+    """
+    hist = _underlying_history.get(ticker, [])
+    if len(hist) < max(3, lookback):
+        return {"velocity_pct": 0, "acceleration": 0, "trend": "flat", "momentum_score": 0}
+
+    recent = hist[-lookback:]
+    prices = [h["price"] for h in recent]
+
+    # Velocity: average % change per check over lookback
+    changes = [(prices[i] - prices[i-1]) / prices[i-1] * 100 for i in range(1, len(prices))]
+    velocity = sum(changes) / len(changes) if changes else 0
+
+    # Acceleration: change in velocity (second derivative)
+    if len(changes) >= 4:
+        first_half = sum(changes[:len(changes)//2]) / (len(changes)//2)
+        second_half = sum(changes[len(changes)//2:]) / (len(changes) - len(changes)//2)
+        acceleration = second_half - first_half
+    else:
+        acceleration = 0
+
+    # Trend classification
+    if velocity > 0.02:
+        trend = "up"
+    elif velocity < -0.02:
+        trend = "down"
+    else:
+        trend = "flat"
+
+    # Momentum score: -1 (strong sell) to +1 (strong buy)
+    score = max(-1, min(1, velocity * 10))
+
+    return {
+        "velocity_pct": round(velocity, 4),
+        "acceleration": round(acceleration, 5),
+        "trend": trend,
+        "momentum_score": round(score, 3),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Dynamic holdings detection — auto-detect instruments bought by user
+# ---------------------------------------------------------------------------
+# Known warrant orderbook IDs → ticker mapping
+KNOWN_WARRANT_OB_IDS = {
+    "2334960": {"key": "silver301", "name": "MINI L SILVER AVA 301",
+                "api_type": "warrant", "underlying": "XAG-USD", "leverage": 4.3},
+    "2043157": {"key": "silver_sg", "name": "MINI L SILVER SG",
+                "api_type": "warrant", "underlying": "XAG-USD", "leverage": 1.56},
+    "856394":  {"key": "gold", "name": "BULL GULD X8 N",
+                "api_type": "certificate", "underlying": "XAU-USD", "leverage": 8.0},
+    "2286417": {"key": "bear_silver_x5", "name": "BEAR SILVER X5 AVA 12",
+                "api_type": "certificate", "underlying": "XAG-USD", "leverage": 5.0},
+}
+# Extend with WARRANT_CATALOG if available
+if CATALOG_AVAILABLE:
+    for wk, wv in WARRANT_CATALOG.items():
+        ob_id = str(wv.get("ob_id", ""))
+        if ob_id and ob_id not in KNOWN_WARRANT_OB_IDS:
+            KNOWN_WARRANT_OB_IDS[ob_id] = {
+                "key": wk, "name": wv.get("name", wk),
+                "api_type": wv.get("api_type", "warrant"),
+                "underlying": wv.get("underlying", "XAG-USD"),
+                "leverage": wv.get("leverage", 5.0),
+            }
+
+def detect_holdings(page):
+    """Detect all held instruments on Avanza. Auto-add new ones to POSITIONS.
+
+    Returns list of change descriptions (for logging/telegram).
+    """
+    changes = []
+    try:
+        result = page.evaluate("""async (accountId) => {
+            const resp = await fetch(
+                'https://www.avanza.se/_api/position-data/positions',
+                {credentials: 'include'}
+            );
+            if (resp.status !== 200) return {error: resp.status};
+            const data = await resp.json();
+            const items = [];
+            for (const item of (data.withOrderbook || [])) {
+                if (item.account && String(item.account.id) === accountId) {
+                    const obId = item.instrument && item.instrument.orderbook
+                        ? String(item.instrument.orderbook.id) : null;
+                    const name = item.instrument && item.instrument.orderbook
+                        ? item.instrument.orderbook.name || '' : '';
+                    const vol = item.volume && item.volume.value != null
+                        ? item.volume.value : 0;
+                    const avgPrice = item.averageAcquiredPrice && item.averageAcquiredPrice.value != null
+                        ? item.averageAcquiredPrice.value : 0;
+                    if (obId && vol > 0) {
+                        items.push({id: obId, name: name, units: vol, avg_price: avgPrice});
+                    }
+                }
+            }
+            return {positions: items};
+        }""", ACCOUNT_ID)
+
+        if not result or "positions" not in result:
+            return changes
+
+        held_ob_ids = {str(p["id"]): p for p in result["positions"]}
+
+        # Check for NEW instruments not in POSITIONS
+        existing_ob_ids = {pos["ob_id"]: key for key, pos in POSITIONS.items()}
+        for ob_id, holding in held_ob_ids.items():
+            if ob_id in existing_ob_ids:
+                key = existing_ob_ids[ob_id]
+                pos = POSITIONS[key]
+                # Reactivate if was sold
+                if not pos["active"]:
+                    pos["active"] = True
+                    pos["units"] = holding["units"]
+                    pos["entry"] = holding["avg_price"] if holding["avg_price"] > 0 else pos["entry"]
+                    # Set initial stop at 5% below entry
+                    pos["stop"] = round(pos["entry"] * 0.95, 2)
+                    pos.pop("sold_ts", None)
+                    pos.pop("sold_price", None)
+                    pos.pop("sold_reason", None)
+                    changes.append(f"REACTIVATED {key}: {holding['units']}u @ {pos['entry']}")
+                    log(f"Holdings: reactivated {key} ({holding['units']}u)")
+                elif pos["units"] != holding["units"]:
+                    old_units = pos["units"]
+                    pos["units"] = holding["units"]
+                    changes.append(f"UNITS CHANGED {key}: {old_units} -> {holding['units']}")
+                    log(f"Holdings: {key} units {old_units} -> {holding['units']}")
+            else:
+                # Brand new instrument — check if we recognize it
+                info = KNOWN_WARRANT_OB_IDS.get(ob_id)
+                if info:
+                    key = info["key"]
+                    entry_price = holding["avg_price"] if holding["avg_price"] > 0 else 0
+                    stop_price = round(entry_price * 0.95, 2) if entry_price > 0 else 0
+                    POSITIONS[key] = {
+                        "name": info["name"], "ob_id": ob_id,
+                        "api_type": info["api_type"],
+                        "units": holding["units"],
+                        "entry": entry_price, "stop": stop_price,
+                        "active": True,
+                        "_underlying": info["underlying"],
+                        "_leverage": info["leverage"],
+                    }
+                    changes.append(f"NEW {key}: {holding['units']}u @ {entry_price} (auto-detected)")
+                    log(f"Holdings: NEW instrument detected: {key} = {info['name']} "
+                        f"({holding['units']}u @ {entry_price})")
+                else:
+                    log(f"Holdings: unknown ob_id {ob_id} ({holding.get('name', '?')}) — skipping")
+
+        # Check for REMOVED instruments (held in POSITIONS but not on Avanza)
+        for key, pos in POSITIONS.items():
+            if not pos["active"]:
+                continue
+            if pos["ob_id"] not in held_ob_ids:
+                pos["active"] = False
+                pos["sold_reason"] = "auto_detect_not_held"
+                pos["sold_ts"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                changes.append(f"SOLD {key}: no longer on Avanza")
+                log(f"Holdings: {key} no longer held on Avanza — deactivating")
+
+        if changes:
+            _save_positions(POSITIONS)
+
+    except Exception as e:
+        log(f"Holdings detection error: {e}")
+
+    return changes
+
+
+# ---------------------------------------------------------------------------
+# Smart trailing stop — momentum-aware, derivative-based
+# ---------------------------------------------------------------------------
+
+def compute_smart_trail_distance(position_key, bid, entry, stop):
+    """Compute dynamic trailing stop distance based on momentum + derivatives.
+
+    Normal: 5% below current bid
+    Momentum reversal: tighten to 3%
+    Accelerating decline: tighten to 2%
+
+    Returns: optimal stop price, trail_distance_pct used
+    """
+    # Determine underlying ticker for momentum
+    underlying_ticker = "XAG-USD" if "silver" in position_key else "XAU-USD"
+    momentum = get_underlying_momentum(underlying_ticker, lookback=10)
+
+    velocity = momentum["velocity_pct"]
+    acceleration = momentum["acceleration"]
+
+    # Base distance: 5%
+    trail_dist = TRAIL_DISTANCE_PCT
+
+    # Tighten based on momentum
+    if velocity < -0.02 and acceleration < 0:
+        # Accelerating decline — tighten to 2%
+        trail_dist = TRAIL_TIGHTEN_ACCEL
+    elif velocity < -0.01:
+        # Negative momentum — tighten to 3%
+        trail_dist = TRAIL_TIGHTEN_MOMENTUM
+
+    # Compute new stop price
+    new_stop = round(bid * (1 - trail_dist / 100), 2)
+
+    # Never lower the stop (ratchet up only)
+    if new_stop <= stop:
+        return stop, trail_dist
+
+    return new_stop, trail_dist
+
+
+def _update_stop_orders_for(page, key, pos, stop_order_state):
+    """Cancel existing stop orders for a position and re-place at the new stop level.
+
+    Called when trailing stop moves up — cancels old hardware stops and places
+    new cascading stop orders at the updated price.
+    """
+    csrf = get_csrf(page)
+    if not csrf:
+        log(f"  Stop update for {key}: no CSRF token")
+        return
+
+    # Cancel existing orders
+    existing = stop_order_state.get(key, {})
+    if existing.get("orders"):
+        _cancel_stop_orders(page, key, existing, csrf)
+
+    # Place new cascading stop orders
+    units = pos["units"]
+    stop_base = pos["stop"]
+
+    # Safety: check stop distance from current bid
+    cur_price_data = fetch_price(page, pos["ob_id"], pos.get("api_type", "warrant"))
+    cur_bid = (cur_price_data or {}).get("bid", 0)
+    if cur_bid > 0:
+        distance_pct = (cur_bid - stop_base) / cur_bid * 100
+        if distance_pct < 3.0:
+            log(f"  SKIP stop update {key}: trigger {stop_base} only {distance_pct:.1f}% "
+                f"below bid {cur_bid} — too close")
+            return
+
+    orders = []
+    for level in range(STOP_ORDER_LEVELS):
+        spread = level * STOP_ORDER_SPREAD_PCT / 100.0
+        trigger_price = round(stop_base * (1 - spread), 2)
+        sell_price = round(trigger_price * 0.99, 2)
+
+        if level < STOP_ORDER_LEVELS - 1:
+            level_units = units // STOP_ORDER_LEVELS
+        else:
+            level_units = units - (units // STOP_ORDER_LEVELS) * (STOP_ORDER_LEVELS - 1)
+
+        if level_units <= 0:
+            continue
+
+        try:
+            ok, stop_id = place_stop_loss(
+                page, ACCOUNT_ID, pos["ob_id"],
+                trigger_price=trigger_price,
+                sell_price=sell_price,
+                volume=level_units,
+                valid_days=8,
+            )
+            if ok:
+                orders.append({
+                    "level": level + 1,
+                    "order_id": stop_id,
+                    "trigger": trigger_price,
+                    "sell": sell_price,
+                    "volume": level_units,
+                    "status": "placed",
+                })
+                log(f"  Stop S{level+1} {key}: trig={trigger_price} sell={sell_price} vol={level_units}")
+            else:
+                log(f"  Stop S{level+1} FAILED for {key}")
+        except Exception as e:
+            log(f"  Stop S{level+1} error {key}: {e}")
+
+    if orders:
+        stop_order_state[key] = {
+            "date": datetime.datetime.now().strftime("%Y-%m-%d"),
+            "stop_base": stop_base,
+            "orders": orders,
+        }
+        _save_stop_orders(stop_order_state)
+        log(f"  Trail stop orders updated for {key}: {len(orders)} levels at base={stop_base}")
+
+
+def update_smart_trailing_stops(page, positions, stop_order_state, prices):
+    """Update trailing stops with momentum-aware distance for all active positions."""
+    for key, pos in positions.items():
+        if not pos.get("active"):
+            continue
+        p = prices.get(key)
+        if not p or not p.get("bid"):
+            continue
+
+        bid = p["bid"]
+        entry = pos["entry"]
+        old_stop = pos["stop"]
+        pnl = pnl_pct(bid, entry)
+
+        # Only trail if in profit above threshold
+        if pnl < TRAIL_START_PCT:
+            continue
+
+        new_stop, dist_used = compute_smart_trail_distance(key, bid, entry, old_stop)
+
+        if new_stop > old_stop:
+            move_pct = ((new_stop - old_stop) / old_stop) * 100
+            if move_pct >= TRAIL_MIN_MOVE_PCT:
+                pos["stop"] = new_stop
+                underlying_ticker = "XAG-USD" if "silver" in key else "XAU-USD"
+                mom = get_underlying_momentum(underlying_ticker)
+                log(f"TRAIL {key}: stop {old_stop} -> {new_stop} "
+                    f"(dist={dist_used:.1f}%, vel={mom['velocity_pct']:.3f}%, "
+                    f"accel={mom['acceleration']:.4f})")
+                _save_positions(positions)
+
+                # Update hardware stop orders on Avanza
+                if STOP_ORDER_ENABLED and stop_order_state:
+                    try:
+                        _update_stop_orders_for(page, key, pos, stop_order_state)
+                    except Exception as e:
+                        log(f"Stop order update failed for {key}: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Probability report — the core autonomous intelligence
+# ---------------------------------------------------------------------------
+_last_prob_report = {}  # cached probability report
+
+def compute_probability_report():
+    """Compute comprehensive probability report for XAG-USD and XAU-USD.
+
+    Combines: signal consensus, Chronos forecasts, Monte Carlo price ranges,
+    per-signal accuracy, and momentum analysis.
+
+    Returns dict keyed by ticker with probability data.
+    """
+    global _last_prob_report
+    report = {}
+
+    for ticker in ["XAG-USD", "XAU-USD"]:
+        price = _underlying_prices.get(ticker, 0)
+        if price <= 0:
+            continue
+
+        entry = {"ticker": ticker, "price": round(price, 4), "ts": time.time()}
+
+        # --- Direction probability from signals ---
+        sig = last_signal_data.get(ticker, {})
+        buy_count = sig.get("buy_count", 0)
+        sell_count = sig.get("sell_count", 0)
+        voters = sig.get("voters", 0)
+        if buy_count + sell_count > 0:
+            entry["signal_up_pct"] = round(buy_count / (buy_count + sell_count) * 100, 1)
+            entry["signal_action"] = sig.get("action", "HOLD")
+            entry["signal_confidence"] = sig.get("weighted_confidence", 0)
+        else:
+            entry["signal_up_pct"] = 50.0
+            entry["signal_action"] = "HOLD"
+            entry["signal_confidence"] = 0
+        entry["signal_buy_count"] = buy_count
+        entry["signal_sell_count"] = sell_count
+        entry["signal_rsi"] = sig.get("rsi", 0)
+        entry["signal_regime"] = sig.get("regime", "?")
+
+        # --- Chronos / LLM probability ---
+        entry["chronos_1h"] = {"direction": "flat", "pct_move": 0, "confidence": 0}
+        entry["chronos_3h"] = {"direction": "flat", "pct_move": 0, "confidence": 0}
+        entry["ministral"] = {"action": "HOLD", "confidence": 0}
+        entry["llm_consensus"] = {"direction": "flat", "confidence": 0}
+
+        if LLM_AVAILABLE:
+            try:
+                llm_sigs = get_llm_signals()
+                ticker_llm = llm_sigs.get(ticker, {})
+                if ticker_llm:
+                    for h in ["1h", "3h"]:
+                        ckey = f"chronos_{h}"
+                        if ticker_llm.get(ckey) and isinstance(ticker_llm[ckey], dict):
+                            entry[ckey] = {
+                                "direction": ticker_llm[ckey].get("direction", "flat"),
+                                "pct_move": round(ticker_llm[ckey].get("pct_move", 0), 4),
+                                "confidence": round(ticker_llm[ckey].get("confidence", 0), 3),
+                            }
+                    if ticker_llm.get("ministral") and isinstance(ticker_llm["ministral"], dict):
+                        entry["ministral"] = {
+                            "action": ticker_llm["ministral"].get("action", "HOLD"),
+                            "confidence": round(ticker_llm["ministral"].get("confidence", 0), 3),
+                        }
+                    cons = ticker_llm.get("consensus", {})
+                    if cons:
+                        entry["llm_consensus"] = {
+                            "direction": cons.get("direction", "flat"),
+                            "confidence": round(cons.get("confidence", 0), 3),
+                        }
+            except Exception:
+                pass
+
+        # --- Combined direction probability ---
+        up_score, down_score, total_weight = 0, 0, 0
+
+        # Signal weight (based on accuracy)
+        sig_weight = 1.0
+        if buy_count + sell_count >= 3:
+            if sig.get("action") == "BUY":
+                up_score += sig_weight * buy_count / max(buy_count + sell_count, 1)
+            elif sig.get("action") == "SELL":
+                down_score += sig_weight * sell_count / max(buy_count + sell_count, 1)
+            total_weight += sig_weight
+
+        # Chronos weights
+        for h in ["1h", "3h"]:
+            c = entry.get(f"chronos_{h}", {})
+            if c.get("direction") in ("up", "down"):
+                w = 0.8  # Chronos weight
+                if c["direction"] == "up":
+                    up_score += w * c.get("confidence", 0.5)
+                else:
+                    down_score += w * c.get("confidence", 0.5)
+                total_weight += w
+
+        # Ministral weight
+        m = entry.get("ministral", {})
+        if m.get("action") in ("BUY", "SELL"):
+            w = 0.6
+            if m["action"] == "BUY":
+                up_score += w * m.get("confidence", 0.5)
+            else:
+                down_score += w * m.get("confidence", 0.5)
+            total_weight += w
+
+        if total_weight > 0:
+            prob_up = round(up_score / total_weight * 100, 1)
+            prob_down = round(down_score / total_weight * 100, 1)
+        else:
+            prob_up, prob_down = 50.0, 50.0
+
+        entry["prob_up_pct"] = prob_up
+        entry["prob_down_pct"] = prob_down
+
+        # --- Momentum ---
+        entry["momentum"] = get_underlying_momentum(ticker)
+
+        # --- Monte Carlo price ranges (1h, 3h from underlying) ---
+        atr_pct = sig.get("atr_pct", 4.4 if "XAG" in ticker else 1.9)
+        try:
+            import numpy as np
+            from metals_risk import _annualized_vol_from_atr
+            vol_annual = _annualized_vol_from_atr(atr_pct)
+            vol_annual = max(vol_annual, 0.05)
+            rng = np.random.default_rng(seed=int(time.time()) % 10000)
+
+            for hours, h_key in [(1, "1h"), (3, "3h"), (8, "8h")]:
+                t = hours / (252 * 24)  # metals trade ~24h
+                half = 2500
+                z = rng.standard_normal(half)
+                z_full = np.concatenate([z, -z])
+                log_ret = -0.5 * vol_annual**2 * t + vol_annual * (t**0.5) * z_full
+                terminal = price * np.exp(log_ret)
+                pcts = np.percentile(terminal, [5, 25, 50, 75, 95])
+                entry[f"range_{h_key}"] = {
+                    "p5": round(float(pcts[0]), 2),
+                    "p25": round(float(pcts[1]), 2),
+                    "p50": round(float(pcts[2]), 2),
+                    "p75": round(float(pcts[3]), 2),
+                    "p95": round(float(pcts[4]), 2),
+                    "expected_move_pct": round(float(np.std((terminal / price - 1) * 100)), 2),
+                }
+        except (ImportError, Exception) as e:
+            for h_key in ["1h", "3h", "8h"]:
+                entry[f"range_{h_key}"] = {"error": str(e)}
+
+        # --- Per-signal accuracy ---
+        entry["accuracy"] = {}
+        if TRACKER_AVAILABLE:
+            try:
+                acc = get_accuracy_report()
+                short_t = ticker.split("-")[0]
+                for k, v in acc.items():
+                    if short_t in k and v.get("total", 0) >= 5:
+                        entry["accuracy"][k] = {
+                            "pct": round(v["accuracy"] * 100, 1),
+                            "samples": v["total"],
+                        }
+            except Exception:
+                pass
+
+        # --- Individual signal votes (from vote_detail) ---
+        vote_detail = sig.get("vote_detail", "")
+        if vote_detail:
+            entry["per_signal_votes"] = _parse_vote_detail(vote_detail)
+
+        report[ticker] = entry
+
+    _last_prob_report = report
+    return report
+
+
+def _parse_vote_detail(vote_detail):
+    """Parse vote_detail string like 'B:sentiment,volume_flow | S:mean_reversion' into dict."""
+    result = {"buy": [], "sell": []}
+    try:
+        parts = vote_detail.split("|")
+        for part in parts:
+            part = part.strip()
+            if part.startswith("B:"):
+                signals = [s.strip() for s in part[2:].split(",") if s.strip()]
+                result["buy"] = signals
+            elif part.startswith("S:"):
+                signals = [s.strip() for s in part[2:].split(",") if s.strip()]
+                result["sell"] = signals
+    except Exception:
+        pass
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Probability-focused Telegram messages
+# ---------------------------------------------------------------------------
+
+def build_probability_telegram(prob_report, cet_str):
+    """Build a probability-focused Telegram message.
+
+    Format optimized for:
+    - Apple Watch first line (direction + probability)
+    - Price ranges for each ticker
+    - Per-signal accuracy
+    - Held positions with P&L
+    """
+    if not prob_report:
+        return None
+
+    # --- First line: Apple Watch (most important) ---
+    watch_parts = []
+    for ticker in ["XAG-USD", "XAU-USD"]:
+        r = prob_report.get(ticker)
+        if not r:
+            continue
+        short = ticker.split("-")[0]
+        prob_up = r.get("prob_up_pct", 50)
+        prob_down = r.get("prob_down_pct", 50)
+        if prob_up > prob_down:
+            arrow, prob = "↑", prob_up
+        elif prob_down > prob_up:
+            arrow, prob = "↓", prob_down
+        else:
+            arrow, prob = "→", 50
+        watch_parts.append(f"{short} {arrow}{prob:.0f}%")
+    first_line = f"*PROB* · {' · '.join(watch_parts)}"
+
+    lines = [first_line, ""]
+
+    # --- Per-ticker probability data ---
+    for ticker in ["XAG-USD", "XAU-USD"]:
+        r = prob_report.get(ticker)
+        if not r:
+            continue
+
+        price = r.get("price", 0)
+        short = ticker.split("-")[0]
+        prob_up = r.get("prob_up_pct", 50)
+        prob_down = r.get("prob_down_pct", 50)
+
+        # Chronos forecasts
+        chr_parts = []
+        for h in ["1h", "3h"]:
+            c = r.get(f"chronos_{h}", {})
+            if c.get("direction") in ("up", "down"):
+                arrow = "↑" if c["direction"] == "up" else "↓"
+                pct = abs(c.get("pct_move", 0))
+                chr_parts.append(f"{arrow}{pct:.2f}% {h}")
+            else:
+                chr_parts.append(f"→ {h}")
+
+        lines.append(f"`{short}  ${price:.2f}  ↑{prob_up:.0f}%  ↓{prob_down:.0f}%`")
+
+        # Price ranges
+        for h_key in ["1h", "3h"]:
+            rng = r.get(f"range_{h_key}", {})
+            if "error" not in rng and rng.get("p25") and rng.get("p75"):
+                exp_move = rng.get("expected_move_pct", 0)
+                lines.append(f"`  {h_key}: ${rng['p25']:.2f}-${rng['p75']:.2f} (±{exp_move:.1f}%)`")
+
+        # Chronos
+        if chr_parts:
+            lines.append(f"`  chr: {' | '.join(chr_parts)}`")
+
+        # Momentum
+        mom = r.get("momentum", {})
+        vel = mom.get("velocity_pct", 0)
+        accel = mom.get("acceleration", 0)
+        trend = mom.get("trend", "flat")
+        vel_arrow = "↑" if vel > 0 else "↓" if vel < 0 else "→"
+        accel_tag = "accel" if accel > 0 else "decel" if accel < 0 else ""
+        lines.append(f"`  mom: {vel_arrow}{abs(vel):.3f}%/30s {accel_tag} ({trend})`")
+
+        # Signal detail
+        sig = r.get("signal_action", "HOLD")
+        buy_c = r.get("signal_buy_count", 0)
+        sell_c = r.get("signal_sell_count", 0)
+        rsi = r.get("signal_rsi", 0)
+        regime = r.get("signal_regime", "?")
+        lines.append(f"`  sig: {sig} {buy_c}B/{sell_c}S RSI:{rsi:.0f} {regime}`")
+
+        # Accuracy summary
+        acc = r.get("accuracy", {})
+        if acc:
+            acc_parts = []
+            for k, v in sorted(acc.items(), key=lambda x: -x[1]["samples"])[:3]:
+                short_k = k.replace(f"_{short.lower()}", "").replace("_1h", "").replace("_3h", "")
+                acc_parts.append(f"{short_k}:{v['pct']:.0f}%({v['samples']})")
+            if acc_parts:
+                lines.append(f"`  acc: {' '.join(acc_parts)}`")
+
+        lines.append("")
+
+    # --- Held positions ---
+    active_positions = {k: p for k, p in POSITIONS.items() if p.get("active")}
+    if active_positions:
+        lines.append("_Held:_")
+        for key, pos in active_positions.items():
+            bid = 0
+            if price_history:
+                bid = price_history[-1].get(key, 0)
+            if bid <= 0:
+                bid = pos["entry"]  # fallback
+            pnl = pnl_pct(bid, pos["entry"])
+            dist_stop = ((bid - pos["stop"]) / bid * 100) if bid > 0 else 999
+
+            # Momentum-aware stop info
+            underlying_ticker = "XAG-USD" if "silver" in key else "XAU-USD"
+            mom = get_underlying_momentum(underlying_ticker)
+            trail_tag = ""
+            if mom["velocity_pct"] < -0.01:
+                trail_tag = " ⚡"  # momentum warning
+            if mom["acceleration"] < -0.0001:
+                trail_tag = " ⚡⚡"  # acceleration warning
+
+            short_key = key[:8]
+            lines.append(
+                f"`  {short_key} {pos['units']}u b:{bid:.2f} "
+                f"{pnl:+.1f}% stop:{pos['stop']} ({dist_stop:.1f}%){trail_tag}`"
+            )
+    else:
+        lines.append("_No held positions (monitoring only)_")
+
+    lines.append("")
+    lines.append(f"_#{check_count} · {cet_str} · {CHECK_INTERVAL}s_")
+
+    return "\n".join(lines)
+
 
 def read_decision_history(n=5):
     """Read the last N decisions from metals_decisions.jsonl."""
@@ -2008,56 +2737,27 @@ def _build_autonomous_telegram(trigger_reasons, tier, positions_data, signals_da
 
 
 def _autonomous_decision(trigger_reasons, blocked_tier):
-    """Handle triggers autonomously when Claude cooldown is active.
+    """Handle triggers autonomously — probability-focused decision + Telegram.
 
-    Uses position state, signal data, LLM predictions, and risk metrics to
-    produce a decision log entry and compact Telegram notification.
-    Does NOT trade — only the SwingTrader or Claude can execute trades.
+    Uses probability report (signals + Chronos + Monte Carlo + momentum) to
+    produce a decision log entry and probability-focused Telegram notification.
+    Does NOT trade — only the SwingTrader can execute trades.
     """
-    # Emergency bypass: escalate to Claude T3 if enabled, otherwise Layer 1 handles it
     EMERGENCY_PATTERNS = ["L3 EMERGENCY", "EMERGENCY drawdown", "AUTO-EXIT"]
     is_emergency = any(p in r for r in trigger_reasons for p in EMERGENCY_PATTERNS)
     if is_emergency:
-        if CLAUDE_ENABLED:
-            log("EMERGENCY detected during cooldown — bypassing to T3")
-            invoke_claude(trigger_reasons, tier=3)
-            return
-        else:
-            # Layer 1 already handles L3 auto-sell, drawdown breaker, AUTO-EXIT
-            # directly in main() before invoke_claude() is called — just log here
-            log("EMERGENCY in autonomous mode — Layer 1 handles execution, logging assessment")
-            # Fall through to rich assessment below
+        log("EMERGENCY in autonomous mode — Layer 1 handles execution, logging assessment")
 
     now = datetime.datetime.now(datetime.timezone.utc)
     reason_str = "; ".join(trigger_reasons[:5])
     cet_str = cet_time_str()
 
-    # --- 1. Gather position P&L ---
-    positions_data = {}
-    for key, pos in POSITIONS.items():
-        if not pos["active"]:
-            continue
-        bid = 0
-        if price_history:
-            bid = price_history[-1].get(key, 0)
-        if bid <= 0:
-            continue
-        entry = pos["entry"]
-        stop = pos["stop"]
-        pnl = pnl_pct(bid, entry)
-        peak = peak_bids.get(key, bid)
-        from_peak = pnl_pct(bid, peak) if peak > 0 else 0
-        dist_stop = ((bid - stop) / bid) * 100 if bid > 0 else 0
-        positions_data[key] = {
-            "bid": bid, "entry": entry, "stop": stop,
-            "units": pos["units"],
-            "pnl_pct": round(pnl, 2),
-            "from_peak_pct": round(from_peak, 2),
-            "dist_stop_pct": round(dist_stop, 1),
-        }
+    # --- 1. Compute probability report ---
+    prob_report = compute_probability_report()
 
-    # --- 2. Gather signal consensus ---
+    # --- 2. Autonomous prediction (for accuracy tracking) ---
     signals_data = {}
+    llm_data = {}
     if last_signal_data:
         for ticker in ["XAG-USD", "XAU-USD"]:
             if ticker in last_signal_data:
@@ -2070,77 +2770,53 @@ def _autonomous_decision(trigger_reasons, blocked_tier):
                     "macd_hist": s.get("macd_hist"),
                     "regime": s.get("regime", "?"),
                 }
-
-    # --- 3. Gather LLM predictions ---
-    llm_data = {}
     if LLM_AVAILABLE:
         try:
             llm_sigs = get_llm_signals()
             for ticker, data in llm_sigs.items():
+                if not isinstance(data, dict):
+                    continue
                 llm_entry = {}
-                if isinstance(data, dict):
-                    if data.get("ministral") and isinstance(data["ministral"], dict):
-                        m = data["ministral"]
-                        llm_entry["ministral"] = m.get("action", "?")
-                        llm_entry["ministral_conf"] = round(m.get("confidence", 0), 2)
-                    for h in ["1h", "3h"]:
-                        ckey = f"chronos_{h}"
-                        if data.get(ckey) and isinstance(data[ckey], dict):
-                            c = data[ckey]
-                            llm_entry[ckey] = c.get("direction", "?")
-                            llm_entry[f"{ckey}_pct"] = round(c.get("pct_move", 0), 3)
-                    if data.get("consensus") and isinstance(data["consensus"], dict):
-                        llm_entry["consensus"] = data["consensus"].get("weighted_action", "?")
-                        llm_entry["consensus_conf"] = round(data["consensus"].get("confidence", 0), 2)
+                if data.get("ministral") and isinstance(data["ministral"], dict):
+                    llm_entry["ministral"] = data["ministral"].get("action", "?")
+                    llm_entry["ministral_conf"] = round(data["ministral"].get("confidence", 0), 2)
+                for h in ["1h", "3h"]:
+                    ckey = f"chronos_{h}"
+                    if data.get(ckey) and isinstance(data[ckey], dict):
+                        llm_entry[ckey] = data[ckey].get("direction", "?")
+                        llm_entry[f"{ckey}_pct"] = round(data[ckey].get("pct_move", 0), 3)
+                if data.get("consensus") and isinstance(data["consensus"], dict):
+                    llm_entry["consensus"] = data["consensus"].get("weighted_action", "?")
+                    llm_entry["consensus_conf"] = round(data["consensus"].get("confidence", 0), 2)
                 if llm_entry:
                     llm_data[ticker] = llm_entry
         except Exception:
             pass
 
-    # --- 4. Gather risk metrics ---
-    risk_data = {}
-    if RISK_AVAILABLE:
-        try:
-            prices_for_risk = {k: {"bid": v["bid"]} for k, v in positions_data.items()}
-            mc = simulate_all_positions(POSITIONS, prices_for_risk)
-            if mc:
-                for key, sim in mc.items():
-                    risk_data[f"{key}_mc_pstop3h"] = round(sim.get("prob_stop_3h", 0), 1)
-        except Exception:
-            pass
-        try:
-            prices_for_dd = {k: {"bid": v["bid"]} for k, v in positions_data.items()}
-            dd = check_portfolio_drawdown(POSITIONS, prices_for_dd)
-            if dd:
-                risk_data["drawdown_pct"] = round(dd.get("current_drawdown_pct", 0), 1)
-                risk_data["drawdown_level"] = dd.get("level", "?")
-        except Exception:
-            pass
-
-    # --- 5. Autonomous prediction (for accuracy tracking) ---
     prediction = _make_autonomous_prediction(signals_data, llm_data)
+    thesis_status = _assess_thesis({}, signals_data, trigger_reasons)
 
-    # --- 6. Thesis assessment ---
-    thesis_status = _assess_thesis(positions_data, signals_data, trigger_reasons)
+    # --- 3. Build probability Telegram ---
+    msg = build_probability_telegram(prob_report, cet_str)
+    if is_emergency:
+        msg = f"*EMERGENCY* {trigger_reasons[0]}\n\n" + (msg or "No data")
 
-    # --- 7. Build Telegram message ---
-    msg = _build_autonomous_telegram(
-        trigger_reasons, blocked_tier, positions_data, signals_data,
-        llm_data, risk_data, prediction, thesis_status, cet_str, is_emergency,
-    )
-
-    # --- 8. Log decision ---
+    # --- 4. Log decision ---
     decision = {
         "ts": now.isoformat(),
-        "source": "autonomous",
+        "source": "autonomous_v8",
         "check_count": check_count,
         "tier": blocked_tier,
         "trigger": reason_str,
         "action": prediction.get("action", "HOLD"),
-        "positions": positions_data,
-        "signals": signals_data,
-        "llm": llm_data,
-        "risk": risk_data,
+        "probability": {
+            ticker: {
+                "prob_up": r.get("prob_up_pct", 50),
+                "prob_down": r.get("prob_down_pct", 50),
+                "momentum": r.get("momentum", {}),
+            }
+            for ticker, r in prob_report.items()
+        },
         "prediction": prediction,
         "thesis_status": thesis_status,
     }
@@ -2148,9 +2824,9 @@ def _autonomous_decision(trigger_reasons, blocked_tier):
         with open("data/metals_decisions.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(decision, ensure_ascii=False) + "\n")
     except Exception as e:
-        log(f"Autonomous decision log error: {e}")
+        log(f"Decision log error: {e}")
 
-    # --- 9. Send Telegram (throttled for routine HOLDs) ---
+    # --- 5. Send Telegram (throttled for routine HOLDs) ---
     global _last_auto_telegram
     is_routine = prediction.get("action") == "HOLD" and thesis_status in ("INTACT", "NEUTRAL")
     should_send = True
@@ -2160,7 +2836,7 @@ def _autonomous_decision(trigger_reasons, blocked_tier):
             should_send = False
             log(f"Autonomous T{blocked_tier}: Telegram throttled ({since_last_tg:.0f}s < {AUTO_TELEGRAM_COOLDOWN}s)")
 
-    if should_send:
+    if should_send and msg:
         send_telegram(msg)
         _last_auto_telegram = time.time()
 
@@ -2298,18 +2974,17 @@ def main():
 
     # Probe time server on startup
     h, ts, src = get_cet_time()
-    log(f"Starting metals trading loop (v7 — LLM + MC + Ranges + Spikes + Cascading Stops)...")
+    log(f"Starting metals trading loop (v8 — AUTONOMOUS + Probability + Smart Stops)...")
     log(f"Time: {ts} (source: {src})")
     log(f"Check interval: {CHECK_INTERVAL}s | Heartbeat: every {HEARTBEAT_CHECKS} checks (~{HEARTBEAT_CHECKS*CHECK_INTERVAL//60}min)")
     log(f"Triggers: price>{TRIGGER_PRICE_MOVE}% | trail>{TRIGGER_TRAILING}% | profit>{TRIGGER_PROFIT}%")
     log(f"Stop levels: L1(warn)<{STOP_L1_PCT}% | L2(alert)<{STOP_L2_PCT}% | L3(emergency)<{STOP_L3_PCT}%")
-    if not CLAUDE_ENABLED:
-        log("*** AUTONOMOUS MODE — Claude Code invocations DISABLED ***")
-        log("*** All triggers handled by _autonomous_decision() + SwingTrader ***")
-    else:
-        log(f"Cooldowns: T1={TIER_COOLDOWNS[1]}s | T2={TIER_COOLDOWNS[2]}s | T3=immediate")
-        log(f"Tiers: T1=haiku(8t,60s) | T2=sonnet(15t,180s) | T3=sonnet-critical(15t,180s)")
-    log(f"L1 WARNING: log-only (no Claude invocation). Only L2/L3 invoke Claude.")
+    log("*** AUTONOMOUS MODE v8 — 100% autonomous, probability-focused ***")
+    log(f"*** Smart trailing stops: {TRAIL_DISTANCE_PCT}% base, "
+        f"{TRAIL_TIGHTEN_MOMENTUM}% momentum, {TRAIL_TIGHTEN_ACCEL}% accel ***")
+    log(f"*** Holdings auto-detect every {HOLDINGS_CHECK_INTERVAL} checks (~{HOLDINGS_CHECK_INTERVAL*CHECK_INTERVAL}s) ***")
+    log(f"*** Probability telegram every {PROB_TELEGRAM_INTERVAL} checks (~{PROB_TELEGRAM_INTERVAL*CHECK_INTERVAL//60}min) ***")
+    log(f"*** Always tracking XAG-USD + XAU-USD via Binance FAPI ***")
     log(f"Short instruments: {', '.join(v['name'] for v in SHORT_INSTRUMENTS.values())}")
     if SPIKE_ENABLED:
         log(f"Spike catcher: place@{SPIKE_PLACE_CET:.2f} cancel@{SPIKE_CANCEL_CET:.2f} "
@@ -2338,10 +3013,16 @@ def main():
         active_count = sum(1 for p in POSITIONS.values() if p["active"])
         sold_count = sum(1 for p in POSITIONS.values() if not p["active"])
         log(f"  Positions: {active_count} active, {sold_count} sold/inactive")
-        if active_count == 0 and not SWING_TRADER_AVAILABLE and not TRADE_QUEUE_ENABLED:
-            log("All positions already sold and no swing trader / trade queue — nothing to monitor. Exiting.")
-            send_telegram("*METALS LOOP* All positions already sold. Not starting.")
-            return
+        if active_count == 0:
+            log("No active positions — running in monitoring mode (always tracking XAG/XAU)")
+            log("Will auto-detect new instruments bought on Avanza")
+
+        # Fetch initial underlying prices from Binance FAPI
+        und_prices = fetch_underlying_from_binance()
+        if und_prices:
+            log(f"  Binance FAPI: {', '.join(f'{k}=${v:.2f}' for k, v in und_prices.items())}")
+        else:
+            log("  WARNING: Binance FAPI fetch failed — will retry")
 
         # Place cascading stop-loss orders
         stop_order_state = {}
@@ -2469,37 +3150,68 @@ def main():
             pos_parts.append(f"{key}({status})")
         pos_summary = ", ".join(pos_parts)
 
-        _mode = "AUTONOMOUS (no Claude)" if not CLAUDE_ENABLED else "T1=haiku T2=sonnet T3=sonnet-critical"
-        send_telegram(f"""*METALS LOOP v7 STARTED*
-Mode: {_mode}
-LLM: {"Ministral+Chronos (60s)" if LLM_AVAILABLE else "DISABLED"}
-Risk: {"MC+Guards+Drawdown+DailyRanges" if RISK_AVAILABLE else "DISABLED"}
-Tracker: {"ON (" + str(get_snapshot_count()) + " snaps)" if TRACKER_AVAILABLE else "OFF"}
-Spike: {"P" + str(SPIKE_PERCENTILE) + " " + str(SPIKE_PARTIAL_PCT) + "% @15:15-16:30" if SPIKE_ENABLED else "OFF"}
-Stops: {"3x cascaded + trailing + momentum" if STOP_ORDER_ENABLED else "L3 only"}
-Swing: {"ACTIVE (DRY_RUN)" if swing_trader else "OFF"}
-TradeQ: {"ENABLED" if TRADE_QUEUE_ENABLED else "OFF"}
-Session: {"ALIVE" if session_healthy else "DEAD — re-login needed!"}
-Positions: {pos_summary}""")
+        # Fetch initial probability report
+        prob = compute_probability_report()
+        prob_summary = ""
+        for t, r in prob.items():
+            short = t.split("-")[0]
+            prob_summary += f"\n  {short}: ${r['price']:.2f} ↑{r['prob_up_pct']:.0f}%"
+
+        send_telegram(f"""*METALS LOOP v8 STARTED*
+Mode: AUTONOMOUS (probability-focused)
+Interval: {CHECK_INTERVAL}s | Holdings detect: {HOLDINGS_CHECK_INTERVAL*CHECK_INTERVAL}s
+LLM: {"Ministral+Chronos" if LLM_AVAILABLE else "OFF"}
+Stops: smart trailing {TRAIL_DISTANCE_PCT}%/{TRAIL_TIGHTEN_MOMENTUM}%/{TRAIL_TIGHTEN_ACCEL}%
+Swing: {"ACTIVE" if swing_trader else "OFF"}
+Session: {"ALIVE" if session_healthy else "DEAD"}
+Positions: {pos_summary}{prob_summary}""")
 
         try:
             while True:
                 check_count += 1
 
+                # --- ALWAYS: Fetch underlying prices from Binance FAPI (24/7) ---
+                fetch_underlying_from_binance()
+
                 if not is_market_hours():
-                    if check_count % 40 == 0:
-                        log("Outside market hours")
+                    # Outside Avanza hours: still track underlyings + compute probability
+                    if check_count % PROB_REPORT_INTERVAL == 0:
+                        compute_probability_report()
+                    # Send probability telegram even outside market hours (less frequent)
+                    if check_count % (PROB_TELEGRAM_INTERVAL * 3) == 0:
+                        prob = compute_probability_report()
+                        msg = build_probability_telegram(prob, cet_time_str())
+                        if msg:
+                            send_telegram(msg)
+                    if check_count % 60 == 0:
+                        log(f"Outside market hours — tracking underlyings "
+                            f"(XAG=${_underlying_prices.get('XAG-USD', 0):.2f}, "
+                            f"XAU=${_underlying_prices.get('XAU-USD', 0):.2f})")
                     time.sleep(CHECK_INTERVAL)
                     continue
 
-                # Check if all positions closed (keep running if swing trader is active)
-                active = sum(1 for p in POSITIONS.values() if p["active"])
-                if active == 0 and not swing_trader and not TRADE_QUEUE_ENABLED:
-                    log("All positions closed and no swing trader / trade queue.")
-                    send_telegram("*METALS LOOP* All positions closed. Loop exiting.")
-                    break
+                # --- HOLDINGS AUTO-DETECT (every ~2 min) ---
+                if check_count % HOLDINGS_CHECK_INTERVAL == 0:
+                    changes = detect_holdings(page)
+                    if changes:
+                        # New instruments detected — place stops, update peaks
+                        for key, pos in POSITIONS.items():
+                            if pos["active"] and key not in peak_bids:
+                                try:
+                                    p = fetch_price(page, pos["ob_id"], pos["api_type"])
+                                    if p and p.get("bid"):
+                                        peak_bids[key] = p.get("high") or p["bid"]
+                                        last_invoke_prices[key] = p["bid"]
+                                except Exception:
+                                    pass
+                        if STOP_ORDER_ENABLED:
+                            stop_order_state = place_stop_loss_orders(page, POSITIONS)
+                        send_telegram(
+                            "*HOLDINGS UPDATE*\n" +
+                            "\n".join(f"• {c}" for c in changes)
+                        )
 
-                # Fetch prices
+                # Fetch warrant prices for active positions
                 prices = {}
                 try:
                     for key, pos in POSITIONS.items():
@@ -2525,12 +3237,12 @@ Positions: {pos_summary}""")
                         except Exception:
                             pass
 
-                # Read signal data periodically (every ~6 min)
+                # Read signal data periodically (every ~2 min)
                 if check_count % 4 == 0:
                     last_signal_data = read_signal_data()
 
-                # Refresh account data + warrant catalog (every 10th check ~15 min)
-                if TRADE_QUEUE_ENABLED and check_count % 10 == 0:
+                # Refresh account data + warrant catalog (every 10th check ~5 min)
+                if check_count % 10 == 0:
                     try:
                         acct = fetch_account_cash(page, ACCOUNT_ID)
                         if acct:
@@ -2547,9 +3259,13 @@ Positions: {pos_summary}""")
                         except Exception as e:
                             log(f"Warrant catalog fetch error: {e}")
 
-                # Session health check (~every 30 min)
+                # Session health check (~every 10 min at 30s interval)
                 if check_count % SESSION_HEALTH_CHECK_INTERVAL == 0:
                     _check_session_and_alert(page)
+
+                # --- PROBABILITY REPORT (every ~2.5 min) ---
+                if check_count % PROB_REPORT_INTERVAL == 0:
+                    compute_probability_report()
 
                 # Store price snapshot
                 snap = {
@@ -2681,9 +3397,9 @@ Positions: {pos_summary}""")
                             send_telegram(f"*MOMENTUM EXIT* {POSITIONS[mkey]['name']}\nBid: {mbid} | Accelerating decline detected")
                             emergency_sell(page, mkey, POSITIONS[mkey], mbid)
 
-                # Trailing stop updates (every 5th check)
-                if STOP_ORDER_ENABLED and check_count % 5 == 0:
-                    update_trailing_stops(page, POSITIONS, stop_order_state, prices)
+                # Smart trailing stop updates (every 3rd check — more responsive)
+                if STOP_ORDER_ENABLED and check_count % 3 == 0:
+                    update_smart_trailing_stops(page, POSITIONS, stop_order_state, prices)
 
                 # Swing trader: autonomous BUY/SELL evaluation
                 if swing_trader:
@@ -2726,61 +3442,59 @@ Positions: {pos_summary}""")
                                 emergency_sell(page, key, pos, bid)
                         break
 
-                # Log status (every 3rd check)
+                # Log status (every 3rd check) — compact with probability
                 if check_count % 3 == 0:
                     parts = []
                     for key, pos in POSITIONS.items():
                         if pos["active"] and key in prices:
                             bid = prices[key].get('bid', 0)
-                            pnl = pnl_pct(bid, pos["entry"])
-                            parts.append(f"{key}:{bid}({pnl:+.1f}%)")
+                            pnl_val = pnl_pct(bid, pos["entry"])
+                            parts.append(f"{key}:{bid}({pnl_val:+.1f}%)")
                     cet = cet_time_str()
-                    # Add LLM consensus tag
-                    llm_tag = ""
-                    if LLM_AVAILABLE:
-                        try:
-                            llm_sigs = get_llm_signals()
-                            for t, d in llm_sigs.items():
-                                c = d.get("consensus", {})
-                                if c.get("direction") in ("up", "down"):
-                                    short_t = t.split("-")[0]
-                                    llm_tag += f" {short_t}={'UP' if c['direction']=='up' else 'DN'}({c.get('confidence',0):.0%})"
-                        except Exception:
-                            pass
-                    # Add risk score
-                    risk_tag = ""
-                    if RISK_AVAILABLE:
-                        try:
-                            dd = check_portfolio_drawdown(POSITIONS, prices)
-                            risk_tag = f" DD:{dd.get('current_pnl_pct', 0):+.1f}%"
-                        except Exception:
-                            pass
-                    # Add signal accuracy tag (every 12th check to avoid spam)
+                    # Underlying prices + probability
+                    und_tag = ""
+                    for t in ["XAG-USD", "XAU-USD"]:
+                        p = _underlying_prices.get(t, 0)
+                        if p > 0:
+                            short_t = t.split("-")[0]
+                            prob = _last_prob_report.get(t, {})
+                            prob_up = prob.get("prob_up_pct", 50)
+                            mom = get_underlying_momentum(t)
+                            vel = mom["velocity_pct"]
+                            und_tag += f" {short_t}=${p:.2f}(↑{prob_up:.0f}% v={vel:+.3f}%)"
+                    # Signal accuracy tag (every 12th check)
                     acc_tag = ""
                     if TRACKER_AVAILABLE and check_count % 12 == 0:
                         try:
                             acc_tag = f" ACC:[{get_accuracy_summary()}]"
                         except Exception:
                             pass
-                    log(f"#{check_count} [{cet}] {' | '.join(parts)}{llm_tag}{risk_tag}{acc_tag}" +
+                    pos_str = ' | '.join(parts) if parts else "no positions"
+                    log(f"#{check_count} [{cet}] {pos_str}{und_tag}{acc_tag}" +
                         (f" [TRIGGER: {reasons[0]}]" if triggered else ""))
 
-                # Invoke Claude (or autonomous handler) if triggered
+                # --- PROBABILITY TELEGRAM (every ~10 min) ---
+                if check_count % PROB_TELEGRAM_INTERVAL == 0:
+                    prob = compute_probability_report()
+                    msg = build_probability_telegram(prob, cet_time_str())
+                    if msg:
+                        global _last_auto_telegram
+                        send_telegram(msg)
+                        _last_auto_telegram = time.time()
+
+                # Handle triggers (autonomous — no Claude)
                 if triggered:
                     tier = classify_tier(reasons)
-                    if CLAUDE_ENABLED:
-                        write_context(prices, "; ".join(reasons), tier=tier)
                     for key in prices:
                         if prices[key].get('bid'):
                             last_invoke_prices[key] = prices[key]['bid']
-                    invoke_claude(reasons, tier=tier)
+                    _autonomous_decision(reasons, tier)
 
-                # Check if Claude finished (non-blocking)
+                # Check if Claude finished (non-blocking) — kept for compatibility
                 if claude_proc and claude_proc.poll() is not None:
                     elapsed = time.time() - claude_start
                     retcode = claude_proc.returncode
                     log(f"Claude finished (rc={retcode}, {elapsed:.0f}s)")
-                    # Log completion with elapsed time and return code
                     log_invocation(0, None, "completed", check_count, invoke_count,
                                    elapsed_s=elapsed, rc=retcode)
                     claude_proc = None
@@ -2791,15 +3505,12 @@ Positions: {pos_summary}""")
                             pass
                         claude_log_fh = None
 
-                    # Process trade queue (Layer 2 may have written orders)
                     if TRADE_QUEUE_ENABLED:
                         try:
                             process_trade_queue(page)
                         except Exception as e:
                             log(f"Trade queue processing error: {e}")
-                            traceback.print_exc()
 
-                    # Re-read trade log in case Claude executed a trade
                     if os.path.exists("data/metals_trades.jsonl"):
                         try:
                             with open("data/metals_trades.jsonl", "r") as f:

@@ -89,7 +89,7 @@ def log_snapshot(check_count, prices, positions, signal_data, llm_signals,
         for ticker in ["XAG-USD", "XAU-USD"]:
             if ticker in signal_data:
                 s = signal_data[ticker]
-                entry["signals"][ticker] = {
+                sig_entry = {
                     "action": s.get("action", "?"),
                     "confidence": round(s.get("confidence", 0), 3),
                     "w_confidence": round(s.get("weighted_confidence", 0), 3),
@@ -99,6 +99,19 @@ def log_snapshot(check_count, prices, positions, signal_data, llm_signals,
                     "rsi": s.get("rsi"),
                     "regime": s.get("regime", "?"),
                 }
+                # Parse per-signal votes for individual accuracy tracking
+                vote_detail = s.get("vote_detail", "")
+                if vote_detail:
+                    buy_signals, sell_signals = [], []
+                    for part in vote_detail.split("|"):
+                        part = part.strip()
+                        if part.startswith("B:"):
+                            buy_signals = [x.strip() for x in part[2:].split(",") if x.strip()]
+                        elif part.startswith("S:"):
+                            sell_signals = [x.strip() for x in part[2:].split(",") if x.strip()]
+                    sig_entry["_buy_signals"] = buy_signals
+                    sig_entry["_sell_signals"] = sell_signals
+                entry["signals"][ticker] = sig_entry
 
     # LLM signals (Chronos/Ministral)
     if llm_signals:
@@ -271,6 +284,17 @@ def backfill_outcomes(current_underlying_prices):
                         m_dir = "up" if ministral_action == "BUY" else "down"
                         outcome["ministral_predicted"] = m_dir
                         outcome["ministral_correct"] = (m_dir == actual_dir)
+
+                    # Per-individual-signal accuracy (from vote_detail parsing)
+                    buy_sigs = signal_info.get("_buy_signals", [])
+                    sell_sigs = signal_info.get("_sell_signals", [])
+                    per_sig = {}
+                    for sig_name in buy_sigs:
+                        per_sig[sig_name] = {"predicted": "up", "correct": actual_dir == "up"}
+                    for sig_name in sell_sigs:
+                        per_sig[sig_name] = {"predicted": "down", "correct": actual_dir == "down"}
+                    if per_sig:
+                        outcome["per_signal"] = per_sig
 
                     outcomes[ticker] = outcome
 
