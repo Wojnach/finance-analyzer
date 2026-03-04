@@ -162,15 +162,15 @@ TIER_CONFIG = {
 POSITIONS_DEFAULTS = {
     "gold": {
         "name": "BULL GULD X8 N", "ob_id": "856394", "api_type": "certificate",
-        "units": 4, "entry": 907.5, "stop": 780.0, "active": True,
+        "units": 0, "entry": 0, "stop": 0, "active": False,
     },
     "silver301": {
         "name": "MINI L SILVER AVA 301", "ob_id": "2334960", "api_type": "warrant",
-        "units": 130, "entry": 15.36, "stop": 12.50, "active": True,
+        "units": 0, "entry": 0, "stop": 0, "active": False,
     },
     "silver_sg": {
         "name": "MINI L SILVER SG", "ob_id": "2043157", "api_type": "warrant",
-        "units": 441, "entry": 52.0, "stop": 46.0, "active": True,
+        "units": 0, "entry": 0, "stop": 0, "active": False,
     },
 }
 POSITIONS_STATE_FILE = "data/metals_positions_state.json"

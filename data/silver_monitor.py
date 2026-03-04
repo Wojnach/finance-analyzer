@@ -14,9 +14,27 @@ from collections import deque
 from pathlib import Path
 
 # === Config ===
-REFERENCE_PRICE = 90.55
-LEVERAGE = 4.76
-POSITION_SEK = 150_000
+_DEFAULT_REFERENCE_PRICE = 90.55
+_DEFAULT_LEVERAGE = 4.76
+_DEFAULT_POSITION_SEK = 150_000
+
+
+def _load_position_params():
+    """Load position parameters from metals_positions_state.json instead of hardcoded values."""
+    state_path = Path(__file__).resolve().parent / "metals_positions_state.json"
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        for key, pos in state.items():
+            if "silver" in key.lower() and pos.get("active", False):
+                entry = pos.get("entry", _DEFAULT_REFERENCE_PRICE)
+                leverage = pos.get("leverage", _DEFAULT_LEVERAGE)
+                units = pos.get("units", 0)
+                invested = entry * units if units > 0 else _DEFAULT_POSITION_SEK
+                return entry, leverage, invested
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return _DEFAULT_REFERENCE_PRICE, _DEFAULT_LEVERAGE, _DEFAULT_POSITION_SEK
 CHECK_INTERVAL = 10              # fast price check every 10s
 ANALYSIS_INTERVAL = 300          # Claude analysis every 5 min
 VELOCITY_WINDOW = 18             # 18 readings at 10s = 3 min window
@@ -147,6 +165,25 @@ def calc_warrant(price):
     wpct = pct * LEVERAGE
     wsek = POSITION_SEK * wpct / 100
     return pct, wpct, wsek
+
+
+# Load params at module init (after _load_position_params is defined)
+REFERENCE_PRICE, LEVERAGE, POSITION_SEK = _load_position_params()
+
+
+def _has_active_silver_position():
+    """Check metals_positions_state.json for any active silver position."""
+    state_path = Path(__file__).resolve().parent / "metals_positions_state.json"
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        for key, pos in state.items():
+            if "silver" in key.lower() and pos.get("active", False):
+                return True
+        return False
+    except (FileNotFoundError, json.JSONDecodeError):
+        print("  [!] Cannot read metals_positions_state.json — assuming no position")
+        return False
 
 
 def _is_market_hours():
@@ -462,6 +499,13 @@ Adjust all values based on your analysis. Then run it."""
 def main():
     global session_low, session_high, last_analysis_ts, start_time
     global consecutive_down, prev_price, analysis_count
+
+    # Guard: exit immediately if no active silver position
+    if not _has_active_silver_position():
+        print("=== Silver Monitor: NO ACTIVE SILVER POSITION ===")
+        print("All silver positions are closed in metals_positions_state.json.")
+        print("Exiting. Restart when a new silver position is opened.")
+        sys.exit(0)
 
     start_time = time.time()
     last_analysis_ts = time.time()  # don't analyze immediately, let data accumulate

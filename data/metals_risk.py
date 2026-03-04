@@ -43,11 +43,37 @@ MAX_DRAWDOWN_PCT = 15.0            # emergency liquidation threshold
 DRAWDOWN_WARN_PCT = 10.0           # warning level
 
 # Leverage-adjusted risk: warrant leverage amplifies underlying moves
-LEVERAGE_MAP = {
+# Defaults used when metals_context.json is unavailable
+_LEVERAGE_DEFAULTS = {
     "gold": 8.0,       # BULL GULD X8
     "silver79": 5.0,   # MINI L SILVER AVA 79 (effective ~5x)
     "silver301": 4.3,  # MINI L SILVER AVA 301
+    "silver_sg": 4.76, # MINI L SILVER SG
 }
+
+
+def _load_leverage_map():
+    """Load leverage from metals_context.json warrant_catalog, fall back to defaults."""
+    ctx_path = os.path.join(os.path.dirname(__file__), "metals_context.json")
+    try:
+        if os.path.exists(ctx_path):
+            with open(ctx_path, "r", encoding="utf-8") as f:
+                ctx = json.load(f)
+            catalog = ctx.get("warrant_catalog", {})
+            lmap = {}
+            for key, info in catalog.items():
+                lev = info.get("leverage")
+                if lev and isinstance(lev, (int, float)) and lev > 0:
+                    lmap[key] = float(lev)
+            if lmap:
+                logger.info(f"Loaded leverage from warrant_catalog: {lmap}")
+                return lmap
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"Cannot load metals_context.json for leverage: {e}")
+    return dict(_LEVERAGE_DEFAULTS)
+
+
+LEVERAGE_MAP = _load_leverage_map()
 
 
 # ---------------------------------------------------------------------------
