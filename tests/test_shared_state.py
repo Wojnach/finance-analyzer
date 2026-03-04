@@ -265,11 +265,11 @@ class TestCacheEviction:
         for i in range(260):
             shared_state._tool_cache[f"recent_{i}"] = {"data": i, "time": 4500.0}
 
-        # Call _cached() — eviction runs but nothing is expired
+        # Call _cached() — age-based eviction finds nothing stale, then LRU fallback trims.
         result = _cached("trigger", 60, lambda: "val")
         assert result == "val"
-        # All 260 + 1 new entry remain (nothing expired)
-        assert len(shared_state._tool_cache) == 261
+        assert "trigger" in shared_state._tool_cache
+        assert len(shared_state._tool_cache) <= shared_state._CACHE_MAX_SIZE + 1
 
     @patch("portfolio.shared_state.time")
     def test_no_eviction_when_under_max_size(self, mock_time):
@@ -566,3 +566,4 @@ class TestModuleState:
 
     def test_cache_lock_is_lock(self):
         assert isinstance(shared_state._cache_lock, type(threading.Lock()))
+
