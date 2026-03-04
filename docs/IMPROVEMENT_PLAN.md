@@ -1,156 +1,113 @@
-# Improvement Plan — Auto-Session #6 (2026-03-03)
+# Improvement Plan — Auto-Session #7 (2026-03-04)
 
-## Status: COMPLETE
+## Status: IN PROGRESS
 
 ## Priority: Critical Bugs > Architecture > Tests > Features > Polish
 
-Previous sessions fixed BUG-1 through BUG-41, ARCH-1 through ARCH-9, REF-1 through REF-12.
-This session continues from BUG-42 onward.
+Previous sessions fixed BUG-1 through BUG-48, ARCH-1 through ARCH-10, REF-1 through REF-13.
+This session continues from BUG-49 onward.
 
 ---
 
 ## 1. Bugs & Problems Found
 
-### BUG-42: signal_engine.py trap detection silently swallows exceptions
-- **File:** `portfolio/signal_engine.py:273-274`
-- **Severity:** HIGH (affects trading decisions)
-- **Issue:** Bull/bear trap detection at line 257-274 catches all exceptions with bare `pass`.
-  If the DataFrame has unexpected column types, NaN values, or missing "volume" column,
-  the trap detection silently fails — meaning a bull/bear trap penalty is never applied.
-  This could cause the system to enter a trapped position.
-- **Fix:** Replace `except Exception: pass` with `except Exception: logger.warning(...)`.
-- **Impact:** `signal_engine.py` only. No behavior change when trap detection succeeds.
+### BUG-49: forecast.py resource leak — unclosed file handles
+- **File:** `portfolio/signals/forecast.py:57, 241`
+- **Severity:** HIGH (file descriptor exhaustion)
+- **Issue:** `json.load(open(...))` without context manager. File objects are never explicitly
+  closed. Over many invocations (every minute for each ticker), file descriptors accumulate.
+  Python's GC eventually closes them, but under load this causes "too many open files" errors.
+- **Fix:** Replace with `with open(...) as f: json.load(f)` or use existing `file_utils.load_json()`.
+- **Impact:** `portfolio/signals/forecast.py` only. No behavior change.
 
-### BUG-43: main.py signal error log missing stack trace
-- **File:** `portfolio/main.py:252`
-- **Severity:** MEDIUM (hinders debugging)
-- **Issue:** `logger.error("%s: %s", name, e)` logs only the exception message, not the
-  full stack trace. When a ticker fails (e.g., API returns unexpected JSON), the log shows
-  "BTC-USD: KeyError: 'close'" with no trace of which function or line caused it.
-- **Fix:** Add `exc_info=True` to the logger.error call.
-- **Impact:** `main.py` only. Improves debuggability.
+### BUG-50: smart_money.py hardcoded divisor in supply/demand zone margin
+- **File:** `portfolio/signals/smart_money.py:375, 385`
+- **Severity:** MEDIUM (logic correctness)
+- **Issue:** `margin = (z_high - z_low) * proximity_pct / 0.005` — divides by hardcoded `0.005`
+  instead of the module constant `_ZONE_PROXIMITY_PCT`. When `proximity_pct` equals the default
+  (0.005), this simplifies to `(z_high - z_low)`, which may be intended. But if `proximity_pct`
+  is ever changed, the margin scaling breaks.
+- **Fix:** Replace `/ 0.005` with `/ _ZONE_PROXIMITY_PCT` on both lines.
+- **Impact:** `portfolio/signals/smart_money.py` only.
 
-### BUG-44: bigbet.py has 3 silent exception swallowers
-- **File:** `portfolio/bigbet.py:100-101, 214-215`
-- **Severity:** MEDIUM (loses macro context and trade alert data)
-- **Issue:** Lines 100-101 silently fail when fetching macro context (DXY, FOMC) for big bet
-  evaluation. Lines 214-215 silently fail when appending to JSONL gate log, losing trade
-  alert data. Line 41-42 (state load) is acceptable — returns default empty state.
-- **Fix:** Add `logger.warning(...)` to lines 100-101 and 214-215.
-- **Impact:** `bigbet.py` only. No behavior change on success path.
+### BUG-51: digest.py crashes on corrupted trigger_state.json
+- **File:** `portfolio/digest.py:42`
+- **Severity:** HIGH (digest silently breaks)
+- **Issue:** `_set_last_digest_time()` calls `json.loads(path.read_text())` without try/except
+  when `path.exists()` is True. If `trigger_state.json` exists but is corrupted (which has
+  happened before — Mar 2-3 incident), `json.loads()` raises and the digest time never gets set,
+  causing duplicate digests on every cycle.
+- **Fix:** Wrap in try/except, default to empty dict on failure.
+- **Impact:** `portfolio/digest.py` only. Prevents crash-loop on corrupt state.
 
-### BUG-45: iskbets.py has 3 silent exception swallowers (same pattern as bigbet)
-- **File:** `portfolio/iskbets.py:268-269, 365-366`
-- **Severity:** MEDIUM (loses macro context and gate log data)
-- **Issue:** Same pattern as BUG-44. Macro context fetch and JSONL append fail silently.
-  Line 76-77 (state load) is acceptable — returns default empty state.
-- **Fix:** Add `logger.warning(...)` to lines 268-269 and 365-366.
-- **Impact:** `iskbets.py` only.
+### BUG-52: avanza_orders.py silent pass on file write failures
+- **File:** `portfolio/avanza_orders.py:162-163, 202-203`
+- **Severity:** MEDIUM (order state lost)
+- **Issue:** Two `except: pass` blocks silently swallow file write errors when saving pending
+  order state. If disk is full or file is locked, orders have no persistent record.
+- **Fix:** Add `logger.warning(...)` to both locations.
+- **Impact:** `portfolio/avanza_orders.py` only.
 
-### BUG-46: macro_context.py volume signal fetch fails silently
-- **File:** `portfolio/macro_context.py:210-211`
-- **Severity:** MEDIUM (volume signal returns None, HOLD vote)
-- **Issue:** `get_volume_signal()` fetches Binance klines to compute volume ratio. If the
-  fetch fails (network error, rate limit), the exception is swallowed and the function
-  returns None. Caller in signal_engine.py gets no volume data → HOLD vote.
-  Problem: no log trail — indistinguishable from "no volume spike detected".
-- **Fix:** Add `logger.warning("Volume signal fetch failed for %s", ticker, exc_info=True)`.
-- **Impact:** `macro_context.py` only.
+### BUG-53: avanza_orders.py silent pass on order error notification
+- **File:** `portfolio/avanza_orders.py:260-261`
+- **Severity:** MEDIUM (double failure invisible)
+- **Issue:** After an order fails, code tries to notify via Telegram. If that also fails, the
+  exception is silently swallowed — user never knows order failed AND notification failed.
+- **Fix:** Add `logger.warning("Order error notification failed: %s", e)`.
+- **Impact:** `portfolio/avanza_orders.py` only.
 
-### BUG-47: sentiment.py dissemination score fails silently
-- **File:** `portfolio/sentiment.py:412-413`
-- **Severity:** LOW (dissemination is a multiplier, default 1.0)
-- **Issue:** If `dissemination_score()` raises, the multiplier defaults to 1.0 (no effect).
-  But there's no log to indicate the feature is broken.
-- **Fix:** Add `logger.debug(...)` (debug level — non-critical feature).
-- **Impact:** `sentiment.py` only.
-
-### BUG-48: main.py _re.compile() called inside function body every invocation
-- **File:** `portfolio/main.py:130`
-- **Severity:** LOW (performance — pattern compiled on every trigger)
-- **Issue:** `_re.compile(r'^([A-Z][A-Z0-9]*(?:-[A-Z]+)?)\s+...')` is inside
-  `_extract_triggered_tickers()`. Since this function is called on every trigger (~20-50/day),
-  the pattern is recompiled each time.
-- **Fix:** Move `_re.compile()` to module level as `_TICKER_PAT`.
-- **Impact:** `main.py` only. Minor perf improvement.
+### BUG-54: health.py silent pass on state load and agent silence check
+- **File:** `portfolio/health.py:42, 113`
+- **Severity:** MEDIUM (health monitoring blind spots)
+- **Issue:** `_load_health_state()` swallows corruption silently. `check_agent_silence()` at
+  line 113 swallows `OSError` — if invocations.jsonl is locked, silence detection fails.
+- **Fix:** Add `logger.warning(...)` to both locations.
+- **Impact:** `portfolio/health.py` only.
 
 ---
 
 ## 2. Architecture Improvements
 
-### ARCH-10: Deduplicate post-cycle helpers in main.py loop
-- **File:** `portfolio/main.py:448-462` and `portfolio/main.py:486-497`
-- **Why:** The daily digest + message throttle flush code is duplicated between the first
-  `run(force_report=True)` block and the main while-loop. Both have identical try/except
-  patterns for `maybe_send_daily_digest()` and `flush_and_send()`.
-- **Change:** Extract a `_run_post_cycle(config)` helper that calls both. Call it from
-  both locations. Also move the Alpha Vantage refresh into the helper.
-- **Impact:** `main.py` only. Reduces ~30 lines of duplication to ~5.
+### ARCH-11: Use file_utils.load_json() consistently in forecast.py
+- **File:** `portfolio/signals/forecast.py`
+- **Why:** BUG-49 fix. Use existing `file_utils.load_json()` instead of raw `json.load(open(...))`.
+- **Impact:** Fixes resource leak and standardizes config loading pattern.
 
 ---
 
 ## 3. Test Coverage Improvements
 
-### TEST-8: signal_engine trap detection regression test
-- **File:** `tests/test_signal_engine_core.py` (augment existing)
-- **Why:** BUG-42. Verify that trap detection logs warnings instead of silently failing.
-  Test: DataFrame with missing volume column, DataFrame with NaN values, normal trap detection.
+### TEST-10: digest.py corrupt state handling
+- **File:** `tests/test_digest_state.py` (new)
+- **Why:** BUG-51. Test that `_set_last_digest_time()` handles corrupt JSON gracefully.
 
-### TEST-9: main.py _extract_triggered_tickers unit tests
-- **File:** `tests/test_main_helpers.py` (new)
-- **Why:** BUG-48 area. The regex extraction function is untested. Test: various trigger
-  reason strings (consensus, moved, flipped, unknown format, empty list).
+### TEST-11: avanza_orders.py error handling paths
+- **File:** `tests/test_avanza_orders_errors.py` (new)
+- **Why:** BUG-52/53. Test that write failures and notification failures are logged.
 
 ---
 
-## 4. Refactoring
+## 4. Items NOT Planned (Justified)
 
-### REF-13: Extract _run_post_cycle helper
-- **File:** `portfolio/main.py`
-- **Why:** See ARCH-10. DRY principle.
-- **Impact:** `main.py` only. Deduplicates ~30 lines.
-
----
-
-## 5. Items NOT Planned (Justified)
-
-1. **Silent `except: pass` in crash handlers** (main.py:392, 418, 515, 520) — These are
-   last-resort error handlers. Logging inside them could cause infinite recursion if the
-   logging system is broken. Keeping them silent is intentional defensive programming.
-
-2. **Silent `except: pass` in Playwright cleanup** (avanza_session.py:132-145) — Standard
-   cleanup pattern for browser automation. Playwright objects may be in an invalid state;
-   swallowing cleanup exceptions is correct.
-
-3. **Silent `except: pass` in SQLite best-effort writes** (outcome_tracker.py:150, 281, 353,
-   363) — JSONL is the primary data store; SQLite is secondary. Documented as best-effort.
-
-4. **Silent `except: pass` in forecast config load** (forecast.py:59) — Import-time config
-   read with a safe default. Logging at import time is unreliable.
-
-5. **Thread safety for `_prev_sentiment`** — The main loop is single-threaded. `_set_prev_sentiment`
-   is only called from `generate_signal()` which runs in the main loop. No race condition.
-
-6. **Freqtrade legacy config in config.json** — ~40 lines of unused Freqtrade config exist but
-   are inert (never read by Layer 1/2). Removing them risks breaking any external tooling that
-   might reference them. Low ROI cleanup.
+1. **forecast.py `_last_prediction_ts` dict** — Max 19 tickers, bounded by design. Skip.
+2. **SQLite best-effort writes in outcome_tracker.py** — Reviewed in session #6. Skip.
+3. **Playwright cleanup in avanza_session.py** — Reviewed in session #6. Skip.
+4. **avanza_tracker.py empty-dict returns** — Acceptable fallback by design. Skip.
 
 ---
 
-## 6. Dependency/Ordering — Implementation Batches
+## 5. Dependency/Ordering — Implementation Batches
 
-### Batch 1: Silent exception fixes (6 files, BUG-42 through BUG-47)
-**Files:** `portfolio/signal_engine.py`, `portfolio/main.py`, `portfolio/bigbet.py`,
-`portfolio/iskbets.py`, `portfolio/macro_context.py`, `portfolio/sentiment.py`
-**Changes:** Replace `except Exception: pass` with `logger.warning(...)` in 8 locations.
-**Test impact:** None — logging changes don't affect behavior.
+### Batch 1: Resource leak + crash fix (2 files, BUG-49 + BUG-51 + ARCH-11)
+**Files:** `portfolio/signals/forecast.py`, `portfolio/digest.py`
+**Changes:** Replace `json.load(open(...))` with `load_json()`. Wrap digest JSON read in try/except.
+**Test impact:** TEST-10 for digest.
 
-### Batch 2: Code cleanup + refactoring (1 file, BUG-48 + ARCH-10 + REF-13)
-**Files:** `portfolio/main.py`
-**Changes:** Module-level regex compile + _run_post_cycle helper extraction.
-**Test impact:** New test file for _extract_triggered_tickers.
+### Batch 2: Silent exception logging + logic fix (3 files, BUG-50 + BUG-52 + BUG-53 + BUG-54)
+**Files:** `portfolio/avanza_orders.py`, `portfolio/health.py`, `portfolio/signals/smart_money.py`
+**Changes:** Add `logger.warning(...)` to 4 silent exception blocks. Fix smart_money margin divisor.
+**Test impact:** TEST-11 for avanza_orders.
 
-### Batch 3: Tests (2 files, TEST-8 + TEST-9)
-**Files:** `tests/test_signal_engine_core.py` (augment), `tests/test_main_helpers.py` (new)
-**Changes:** Add trap detection logging test + trigger ticker extraction tests.
+### Batch 3: Tests (2 files, TEST-10 + TEST-11)
+**Files:** `tests/test_digest_state.py` (new), `tests/test_avanza_orders_errors.py` (new)
 **Prerequisites:** Batches 1-2 must complete first.
