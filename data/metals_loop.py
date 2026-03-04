@@ -22,11 +22,16 @@ Features:
 
 Run: .venv/Scripts/python.exe data/metals_loop.py
 """
-import json, os, sys, time, datetime, traceback, subprocess, shutil, platform
+import json, os, sys, time, datetime, traceback, subprocess, shutil, platform, atexit
 os.chdir(r"Q:/finance-analyzer")
 
 import requests
 from playwright.sync_api import sync_playwright
+
+try:
+    import msvcrt  # Windows file locking for single-instance guard
+except ImportError:
+    msvcrt = None
 
 # --- Optional modules (graceful fallback) ---
 try:
@@ -368,6 +373,79 @@ PROB_TELEGRAM_INTERVAL = 20       # send probability telegram every N checks (~1
 session_alert_sent = False        # debounce: only send one alert per outage
 session_expiry_warned = False     # debounce: only warn once about approaching expiry
 
+SINGLETON_LOCK_FILE = os.path.join("data", "metals_loop.singleton.lock")
+_singleton_lock_fh = None
+
+def acquire_singleton_lock(lock_path=SINGLETON_LOCK_FILE):
+    """Acquire single-instance lock for metals loop (non-blocking)."""
+    global _singleton_lock_fh
+    if _singleton_lock_fh is not None:
+        return True
+    if msvcrt is None:
+        return True
+
+    lock_dir = os.path.dirname(lock_path)
+    if lock_dir:
+        os.makedirs(lock_dir, exist_ok=True)
+
+    fh = open(lock_path, "a+", encoding="utf-8")
+    try:
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        fh.close()
+        return False
+
+    try:
+        fh.seek(0)
+        fh.truncate()
+        fh.write(f"pid={os.getpid()} started={datetime.datetime.now(datetime.timezone.utc).isoformat()}\n")
+        fh.flush()
+    except Exception:
+        pass
+
+    _singleton_lock_fh = fh
+    return True
+
+def release_singleton_lock():
+    """Release single-instance lock if held."""
+    global _singleton_lock_fh
+    if _singleton_lock_fh is None:
+        return
+    try:
+        if msvcrt is not None:
+            _singleton_lock_fh.seek(0)
+            msvcrt.locking(_singleton_lock_fh.fileno(), msvcrt.LK_UNLCK, 1)
+    except OSError:
+        pass
+    finally:
+        try:
+            _singleton_lock_fh.close()
+        except Exception:
+            pass
+        _singleton_lock_fh = None
+
+def _safe_print(msg):
+    """Print text without crashing on Windows non-UTF console encodings."""
+    try:
+        print(msg, flush=True)
+        return
+    except UnicodeEncodeError:
+        pass
+
+    try:
+        safe = msg.encode("ascii", "replace").decode("ascii")
+        print(safe, flush=True)
+        return
+    except Exception:
+        pass
+
+    try:
+        sys.stdout.buffer.write((msg + "\n").encode("utf-8", "replace"))
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
 def send_telegram(msg):
     try:
         requests.post(
@@ -376,11 +454,12 @@ def send_telegram(msg):
             timeout=10
         )
     except Exception as e:
-        print(f"[TG ERROR] {e}", flush=True)
+        _safe_print(f"[TG ERROR] {e}")
+
 
 def log(msg):
     ts = datetime.datetime.now().strftime("%H:%M:%S")
-    print(f"[{ts}] {msg}", flush=True)
+    _safe_print(f"[{ts}] {msg}")
 
 def pnl_pct(current, entry):
     if entry == 0: return 0
@@ -3129,6 +3208,12 @@ def main():
     global claude_proc, claude_log_fh, claude_start, claude_timeout
     global short_prices, daily_range_stats
 
+    # Prevent duplicate loop trees from concurrent launcher runs.
+    if not acquire_singleton_lock():
+        log("Duplicate metals loop instance detected; exiting.")
+        return
+    atexit.register(release_singleton_lock)
+
     # Probe time server on startup
     h, ts, src = get_cet_time()
     log(f"Starting unified monitoring loop (v9 — AUTONOMOUS + 5 instruments)...")
@@ -3737,6 +3822,7 @@ Positions: {pos_summary}{prob_summary}""")
                 except Exception as e:
                     print(f"[WARN] LLM thread stop failed: {e}", flush=True)
             browser.close()
+            release_singleton_lock()
             log(f"Loop stopped: {check_count} checks, {invoke_count} invocations")
 
 if __name__ == "__main__":

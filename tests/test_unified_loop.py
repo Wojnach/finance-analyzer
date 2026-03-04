@@ -342,3 +342,74 @@ class TestSignalTrackerCrypto:
         assert "BTC-USD" in result
         assert result["BTC-USD"]["actual_dir"] == "up"
         assert result["BTC-USD"]["main_correct"] is True
+
+
+def test_safe_print_fallback_on_unicode_encode_error(monkeypatch):
+    import builtins
+    import metals_loop as ml
+
+    calls = {"n": 0, "msgs": []}
+
+    def flaky_print(msg, flush=True):
+        calls["n"] += 1
+        calls["msgs"].append(msg)
+        if calls["n"] == 1:
+            raise UnicodeEncodeError("charmap", msg, 0, 1, "cannot encode")
+        return None
+
+    monkeypatch.setattr(builtins, "print", flaky_print)
+    ml._safe_print("BTC ↑ 54%")
+
+    # First call raises UnicodeEncodeError, second call uses sanitized fallback.
+    assert calls["n"] >= 2
+    assert "?" in calls["msgs"][-1]
+
+
+def test_log_uses_safe_print(monkeypatch):
+    import metals_loop as ml
+
+    seen = []
+
+    def capture(msg):
+        seen.append(msg)
+
+    monkeypatch.setattr(ml, "_safe_print", capture)
+    ml.log("XAG ↑ 62%")
+
+    assert seen
+    assert "XAG ↑ 62%" in seen[0]
+
+
+def test_singleton_lock_blocks_second_instance(tmp_path):
+    import metals_loop as ml
+
+    if ml.msvcrt is None:
+        pytest.skip("Windows-only lock behavior")
+
+    lock_path = tmp_path / "metals_loop.singleton.lock"
+
+    holder = lock_path.open("a+", encoding="utf-8")
+    ml.msvcrt.locking(holder.fileno(), ml.msvcrt.LK_NBLCK, 1)
+    try:
+        ml.release_singleton_lock()
+        assert ml.acquire_singleton_lock(str(lock_path)) is False
+    finally:
+        ml.msvcrt.locking(holder.fileno(), ml.msvcrt.LK_UNLCK, 1)
+        holder.close()
+        ml.release_singleton_lock()
+
+
+def test_singleton_lock_release_allows_reacquire(tmp_path):
+    import metals_loop as ml
+
+    if ml.msvcrt is None:
+        pytest.skip("Windows-only lock behavior")
+
+    lock_path = tmp_path / "metals_loop.singleton.lock"
+
+    ml.release_singleton_lock()
+    assert ml.acquire_singleton_lock(str(lock_path)) is True
+    ml.release_singleton_lock()
+
+    assert ml.acquire_singleton_lock(str(lock_path)) is True
+    ml.release_singleton_lock()
