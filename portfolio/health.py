@@ -39,8 +39,8 @@ def load_health() -> dict:
     if HEALTH_FILE.exists():
         try:
             return json.loads(HEALTH_FILE.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Health state file corrupt, resetting: %s", e)
     return {"start_time": time.time(), "cycle_count": 0, "error_count": 0, "errors": []}
 
 
@@ -110,8 +110,8 @@ def check_agent_silence(max_market_seconds: int = 7200,
                         break
                 except json.JSONDecodeError:
                     continue
-        except OSError:
-            pass
+        except OSError as e:
+            logger.warning("Failed to read invocations.jsonl for silence check: %s", e)
 
     if not last_ts:
         return {"silent": True, "age_seconds": float("inf"), "threshold": max_market_seconds, "market_open": False}
