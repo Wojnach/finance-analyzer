@@ -343,11 +343,13 @@ def run(force_report=False, active_symbols=None):
                 logger.info("Layer 2: outside market window, skipping")
                 _log_trigger(reasons_list, "skipped_offhours", tier=tier)
         else:
-            logger.info("Layer 2 disabled — skipping agent invocation")
-            _maybe_send_alert(
-                config, signals, prices_usd, fx_rate, state, reasons_list, tf_data
+            logger.info("Layer 2 disabled — autonomous mode")
+            from portfolio.autonomous import autonomous_decision
+            autonomous_decision(
+                config, signals, prices_usd, fx_rate, state,
+                reasons_list, tf_data, tier, triggered_tickers,
             )
-            _log_trigger(reasons_list, "alert_only", tier=tier)
+            _log_trigger(reasons_list, "autonomous", tier=tier)
     else:
         write_agent_summary(signals, prices_usd, fx_rate, state, tf_data)
         logger.info("No trigger.")
