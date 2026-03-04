@@ -20,11 +20,17 @@ Usage from metals_loop.py:
 
 import json
 import os
+import sys
 import time
 import datetime
 import threading
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from portfolio.file_utils import atomic_write_json, load_json, atomic_append_jsonl
+
 SIGNAL_LOG = "data/metals_signal_log.jsonl"
+OUTCOMES_LOG = "data/metals_signal_outcomes.jsonl"
 ACCURACY_CACHE_FILE = "data/metals_signal_accuracy.json"
 
 # Horizons for outcome checking (seconds)
@@ -84,9 +90,16 @@ def log_snapshot(check_count, prices, positions, signal_data, llm_signals,
                 elif "gold" in key.lower():
                     entry["prices"]["XAU-USD"] = round(und, 4)
 
+    # Also store crypto prices directly if present in signal_data
+    for crypto_ticker in ["BTC-USD", "ETH-USD"]:
+        if signal_data and crypto_ticker in signal_data:
+            sig_price = signal_data[crypto_ticker].get("price")
+            if sig_price and sig_price > 0:
+                entry["prices"][crypto_ticker] = round(sig_price, 4)
+
     # Main loop signals (from agent_summary.json)
     if signal_data:
-        for ticker in ["XAG-USD", "XAU-USD"]:
+        for ticker in ["XAG-USD", "XAU-USD", "BTC-USD", "ETH-USD"]:
             if ticker in signal_data:
                 s = signal_data[ticker]
                 sig_entry = {
@@ -163,19 +176,135 @@ def log_snapshot(check_count, prices, positions, signal_data, llm_signals,
 
     # Write to log
     try:
-        with open(SIGNAL_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        atomic_append_jsonl(SIGNAL_LOG, entry)
     except Exception as e:
         print(f"[TRACKER] log_snapshot error: {e}", flush=True)
+
+
+def _load_resolved_keys():
+    """Load set of already-resolved (snapshot_ts, horizon) pairs from outcomes file."""
+    resolved = set()
+    if not os.path.exists(OUTCOMES_LOG):
+        return resolved
+    try:
+        with open(OUTCOMES_LOG, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line.strip())
+                    key = (entry.get("snapshot_ts", ""), entry.get("horizon", ""))
+                    resolved.add(key)
+                except (json.JSONDecodeError, KeyError):
+                    pass
+    except Exception as e:
+        print(f"[TRACKER] outcomes load error: {e}", flush=True)
+    return resolved
+
+
+def _resolve_outcome(entry, h_key, current_underlying_prices, now):
+    """Compute outcome for a single snapshot + horizon. Returns outcome dict or None."""
+    h_secs = HORIZONS[h_key]
+
+    try:
+        ts = datetime.datetime.fromisoformat(entry["ts"])
+        epoch = ts.timestamp()
+    except (KeyError, ValueError):
+        return None
+
+    elapsed = now - epoch
+    if elapsed < h_secs * 0.9:  # 10% tolerance
+        return None
+
+    entry_prices = entry.get("prices", {})
+    outcomes = {}
+
+    for ticker in ["XAG-USD", "XAU-USD", "BTC-USD", "ETH-USD"]:
+        current_price = current_underlying_prices.get(ticker, 0)
+        if current_price <= 0:
+            continue
+
+        pred_price = entry_prices.get(ticker, 0)
+        if pred_price <= 0:
+            for pk, pv in entry_prices.items():
+                if pk.endswith("_und") and ticker.lower().startswith("xag") and "silver" in pk:
+                    pred_price = pv
+                    break
+                elif pk.endswith("_und") and ticker.lower().startswith("xau") and "gold" in pk:
+                    pred_price = pv
+                    break
+
+        if pred_price <= 0:
+            continue
+
+        actual_dir = "up" if current_price > pred_price else "down"
+        move_pct = ((current_price - pred_price) / pred_price) * 100
+
+        outcome = {
+            "price_then": round(pred_price, 4),
+            "price_now": round(current_price, 4),
+            "actual_dir": actual_dir,
+            "move_pct": round(move_pct, 3),
+        }
+
+        signal_info = entry.get("signals", {}).get(ticker, {})
+        main_action = signal_info.get("action", "?")
+        if main_action in ("BUY", "SELL"):
+            predicted_dir = "up" if main_action == "BUY" else "down"
+            outcome["main_predicted"] = main_action
+            outcome["main_correct"] = (predicted_dir == actual_dir)
+            outcome["main_actual_move_pct"] = round(move_pct, 4)
+
+        llm_info = entry.get("llm", {}).get(ticker, {})
+        llm_dir = llm_info.get("consensus_dir", "flat")
+        if llm_dir in ("up", "down"):
+            outcome["llm_predicted"] = llm_dir
+            outcome["llm_correct"] = (llm_dir == actual_dir)
+            outcome["llm_actual_move_pct"] = round(move_pct, 4)
+
+        for model in ["chronos_1h", "chronos_3h"]:
+            m_dir = llm_info.get(model, "flat")
+            if m_dir in ("up", "down"):
+                outcome[f"{model}_predicted"] = m_dir
+                outcome[f"{model}_correct"] = (m_dir == actual_dir)
+                outcome[f"{model}_actual_move_pct"] = round(move_pct, 4)
+
+                pred_pct = llm_info.get(f"{model}_pct_move", 0)
+                if pred_pct:
+                    signed_pred = abs(pred_pct) if m_dir == "up" else -abs(pred_pct)
+                    error = signed_pred - move_pct
+                    abs_error = abs(error)
+                    outcome[f"{model}_pred_pct_move"] = round(signed_pred, 4)
+                    outcome[f"{model}_error_pct"] = round(error, 4)
+                    outcome[f"{model}_abs_error_pct"] = round(abs_error, 4)
+
+        ministral_action = llm_info.get("ministral", "HOLD")
+        if ministral_action in ("BUY", "SELL"):
+            m_dir = "up" if ministral_action == "BUY" else "down"
+            outcome["ministral_predicted"] = m_dir
+            outcome["ministral_correct"] = (m_dir == actual_dir)
+            outcome["ministral_actual_move_pct"] = round(move_pct, 4)
+            outcome["ministral_conf"] = llm_info.get("ministral_conf", 0)
+
+        buy_sigs = signal_info.get("_buy_signals", [])
+        sell_sigs = signal_info.get("_sell_signals", [])
+        per_sig = {}
+        for sig_name in buy_sigs:
+            per_sig[sig_name] = {"predicted": "up", "correct": actual_dir == "up"}
+        for sig_name in sell_sigs:
+            per_sig[sig_name] = {"predicted": "down", "correct": actual_dir == "down"}
+        if per_sig:
+            outcome["per_signal"] = per_sig
+
+        outcomes[ticker] = outcome
+
+    return outcomes if outcomes else None
 
 
 def backfill_outcomes(current_underlying_prices):
     """Check past snapshots against current prices at 1h/3h horizons.
 
-    For each unresolved snapshot, if enough time has passed:
-    - Compare main-loop signal action vs actual price direction
-    - Compare LLM consensus direction vs actual price direction
-    - Mark as resolved with outcome
+    Outcomes are written to a SEPARATE append-only file (metals_signal_outcomes.jsonl)
+    so the signal log itself is never rewritten. This eliminates the race condition
+    where a concurrent log_snapshot() append could be lost during rewrite.
 
     Args:
         current_underlying_prices: {"XAG-USD": float, "XAU-USD": float}
@@ -189,265 +318,154 @@ def backfill_outcomes(current_underlying_prices):
         if not os.path.exists(SIGNAL_LOG):
             return
 
-        # Read recent entries (capped for performance)
+        # Load already-resolved keys to avoid duplicate outcomes
+        resolved_keys = _load_resolved_keys()
+
+        # Read recent signal log entries (capped for performance)
         entries = []
         with open(SIGNAL_LOG, "r", encoding="utf-8") as f:
             lines = f.readlines()
 
-        # Only scan last BACKFILL_SCAN_LIMIT entries
         start_idx = max(0, len(lines) - BACKFILL_SCAN_LIMIT)
         for i, line in enumerate(lines):
             if i < start_idx:
-                entries.append(None)  # placeholder to maintain indices
+                entries.append(None)
                 continue
             try:
                 entries.append(json.loads(line.strip()))
             except json.JSONDecodeError:
                 entries.append(None)
 
-        updated = False
+        new_outcomes = []
 
         for i in range(start_idx, len(entries)):
             entry = entries[i]
             if entry is None:
                 continue
 
-            # Parse timestamp
-            try:
-                ts = datetime.datetime.fromisoformat(entry["ts"])
-                epoch = ts.timestamp()
-            except (KeyError, ValueError):
-                continue
+            snapshot_ts = entry.get("ts", "")
 
-            # Check each horizon
-            for h_key, h_secs in HORIZONS.items():
-                outcome_key = f"outcomes_{h_key}"
-
+            for h_key in HORIZONS:
                 # Skip if already resolved
-                if entry.get(outcome_key) is not None:
+                if (snapshot_ts, h_key) in resolved_keys:
                     continue
 
-                # Not enough time elapsed yet
-                elapsed = now - epoch
-                if elapsed < h_secs * 0.9:  # 10% tolerance
-                    continue
-
-                # Resolve outcomes
-                outcomes = {}
-
-                # Get prices at prediction time
-                entry_prices = entry.get("prices", {})
-
-                for ticker in ["XAG-USD", "XAU-USD"]:
-                    current_price = current_underlying_prices.get(ticker, 0)
-                    if current_price <= 0:
-                        continue
-
-                    # Find the underlying price at snapshot time
-                    # Try direct ticker key, then position-derived keys
-                    pred_price = entry_prices.get(ticker, 0)
-                    if pred_price <= 0:
-                        # Try to get from position underlying
-                        for pk, pv in entry_prices.items():
-                            if pk.endswith("_und") and ticker.lower().startswith("xag") and "silver" in pk:
-                                pred_price = pv
-                                break
-                            elif pk.endswith("_und") and ticker.lower().startswith("xau") and "gold" in pk:
-                                pred_price = pv
-                                break
-
-                    if pred_price <= 0:
-                        continue
-
-                    actual_dir = "up" if current_price > pred_price else "down"
-                    move_pct = ((current_price - pred_price) / pred_price) * 100
-
-                    outcome = {
-                        "price_then": round(pred_price, 4),
-                        "price_now": round(current_price, 4),
-                        "actual_dir": actual_dir,
-                        "move_pct": round(move_pct, 3),
-                    }
-
-                    # Check main signal accuracy
-                    signal_info = entry.get("signals", {}).get(ticker, {})
-                    main_action = signal_info.get("action", "?")
-                    if main_action in ("BUY", "SELL"):
-                        predicted_dir = "up" if main_action == "BUY" else "down"
-                        outcome["main_predicted"] = main_action
-                        outcome["main_correct"] = (predicted_dir == actual_dir)
-                        # Track move magnitude when signal voted
-                        outcome["main_actual_move_pct"] = round(move_pct, 4)
-
-                    # Check LLM consensus accuracy
-                    llm_info = entry.get("llm", {}).get(ticker, {})
-                    llm_dir = llm_info.get("consensus_dir", "flat")
-                    if llm_dir in ("up", "down"):
-                        outcome["llm_predicted"] = llm_dir
-                        outcome["llm_correct"] = (llm_dir == actual_dir)
-                        outcome["llm_actual_move_pct"] = round(move_pct, 4)
-
-                    # Check individual LLM models with price deviation
-                    for model in ["chronos_1h", "chronos_3h"]:
-                        m_dir = llm_info.get(model, "flat")
-                        if m_dir in ("up", "down"):
-                            outcome[f"{model}_predicted"] = m_dir
-                            outcome[f"{model}_correct"] = (m_dir == actual_dir)
-                            outcome[f"{model}_actual_move_pct"] = round(move_pct, 4)
-
-                            # Chronos provides predicted pct_move — compute deviation
-                            pred_pct = llm_info.get(f"{model}_pct_move", 0)
-                            if pred_pct:
-                                # Signed predicted move (positive=up, negative=down)
-                                signed_pred = abs(pred_pct) if m_dir == "up" else -abs(pred_pct)
-                                # Error = predicted - actual
-                                error = signed_pred - move_pct
-                                abs_error = abs(error)
-                                outcome[f"{model}_pred_pct_move"] = round(signed_pred, 4)
-                                outcome[f"{model}_error_pct"] = round(error, 4)
-                                outcome[f"{model}_abs_error_pct"] = round(abs_error, 4)
-
-                    ministral_action = llm_info.get("ministral", "HOLD")
-                    if ministral_action in ("BUY", "SELL"):
-                        m_dir = "up" if ministral_action == "BUY" else "down"
-                        outcome["ministral_predicted"] = m_dir
-                        outcome["ministral_correct"] = (m_dir == actual_dir)
-                        outcome["ministral_actual_move_pct"] = round(move_pct, 4)
-                        outcome["ministral_conf"] = llm_info.get("ministral_conf", 0)
-
-                    # Per-individual-signal accuracy (from vote_detail parsing)
-                    buy_sigs = signal_info.get("_buy_signals", [])
-                    sell_sigs = signal_info.get("_sell_signals", [])
-                    per_sig = {}
-                    for sig_name in buy_sigs:
-                        per_sig[sig_name] = {"predicted": "up", "correct": actual_dir == "up"}
-                    for sig_name in sell_sigs:
-                        per_sig[sig_name] = {"predicted": "down", "correct": actual_dir == "down"}
-                    if per_sig:
-                        outcome["per_signal"] = per_sig
-
-                    outcomes[ticker] = outcome
-
+                outcomes = _resolve_outcome(entry, h_key, current_underlying_prices, now)
                 if outcomes:
-                    entry[outcome_key] = outcomes
-                    updated = True
+                    outcome_entry = {
+                        "snapshot_ts": snapshot_ts,
+                        "horizon": h_key,
+                        "resolved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "outcomes": outcomes,
+                    }
+                    new_outcomes.append(outcome_entry)
+                    resolved_keys.add((snapshot_ts, h_key))
 
-        # Write back if anything changed
-        if updated:
-            with open(SIGNAL_LOG, "w", encoding="utf-8") as f:
-                for i, entry in enumerate(entries):
-                    if entry is None:
-                        # Write back original line
-                        f.write(lines[i])
-                    else:
-                        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        # Append new outcomes to separate file (signal log stays untouched)
+        for outcome in new_outcomes:
+            atomic_append_jsonl(OUTCOMES_LOG, outcome)
 
-        # Recompute accuracy stats
-        _recompute_accuracy(entries, start_idx)
+        # Recompute accuracy from outcomes file
+        _recompute_accuracy_from_outcomes()
 
     except Exception as e:
         print(f"[TRACKER] backfill error: {e}", flush=True)
 
 
-def _recompute_accuracy(entries, start_idx):
-    """Recompute accuracy stats from resolved entries.
+def _recompute_accuracy_from_outcomes():
+    """Recompute accuracy stats from the separate outcomes file.
 
-    Tracks both directional accuracy and price deviation metrics:
-    - accuracy: % of correct direction predictions
-    - mae: mean absolute error of predicted vs actual % move (Chronos only)
-    - bias: mean signed error (positive = overestimates moves)
-    - avg_move_correct: avg actual move % when direction was correct
-    - avg_move_wrong: avg actual move % when direction was wrong
+    Reads metals_signal_outcomes.jsonl and computes per-signal accuracy.
+    Tracks both directional accuracy and price deviation metrics.
     """
     global _accuracy_cache
     import math
 
-    # Collect all resolved outcomes
-    # stats: {signal_key: {correct, total, errors[], actual_moves_correct[], actual_moves_wrong[]}}
     stats = {}
 
     def _ensure_key(key):
         if key not in stats:
             stats[key] = {
                 "correct": 0, "total": 0,
-                "errors": [],          # signed errors (predicted - actual) for Chronos
-                "abs_errors": [],      # absolute errors for Chronos
-                "actual_moves_correct": [],  # actual move % when direction correct
-                "actual_moves_wrong": [],    # actual move % when direction wrong
+                "errors": [],
+                "abs_errors": [],
+                "actual_moves_correct": [],
+                "actual_moves_wrong": [],
             }
 
     resolved_count = 0
-    for i in range(start_idx, len(entries) if entries else 0):
-        entry = entries[i] if entries else None
-        if entry is None:
-            continue
 
-        for h_key in HORIZONS:
-            outcomes = entry.get(f"outcomes_{h_key}")
-            if not outcomes:
-                continue
+    try:
+        if not os.path.exists(OUTCOMES_LOG):
+            return
 
-            for ticker, outcome in outcomes.items():
-                resolved_count += 1
-                short_ticker = ticker.split("-")[0]  # XAG, XAU
-                actual_move = outcome.get("move_pct", 0)
+        with open(OUTCOMES_LOG, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    record = json.loads(line.strip())
+                except (json.JSONDecodeError, ValueError):
+                    continue
 
-                # Main signal accuracy + move tracking
-                if "main_correct" in outcome:
-                    key = f"main_{short_ticker}_{h_key}"
-                    _ensure_key(key)
-                    stats[key]["total"] += 1
-                    correct = outcome["main_correct"]
-                    if correct:
-                        stats[key]["correct"] += 1
-                        stats[key]["actual_moves_correct"].append(abs(actual_move))
-                    else:
-                        stats[key]["actual_moves_wrong"].append(abs(actual_move))
+                h_key = record.get("horizon", "")
+                outcomes = record.get("outcomes", {})
 
-                # LLM consensus accuracy
-                if "llm_correct" in outcome:
-                    key = f"llm_{short_ticker}_{h_key}"
-                    _ensure_key(key)
-                    stats[key]["total"] += 1
-                    correct = outcome["llm_correct"]
-                    if correct:
-                        stats[key]["correct"] += 1
-                        stats[key]["actual_moves_correct"].append(abs(actual_move))
-                    else:
-                        stats[key]["actual_moves_wrong"].append(abs(actual_move))
+                for ticker, outcome in outcomes.items():
+                    resolved_count += 1
+                    short_ticker = ticker.split("-")[0]
+                    actual_move = outcome.get("move_pct", 0)
 
-                # Individual models with deviation tracking
-                for model in ["chronos_1h", "chronos_3h", "ministral"]:
-                    correct_key = f"{model}_correct"
-                    if correct_key in outcome:
-                        key = f"{model}_{short_ticker}_{h_key}"
+                    if "main_correct" in outcome:
+                        key = f"main_{short_ticker}_{h_key}"
                         _ensure_key(key)
                         stats[key]["total"] += 1
-                        correct = outcome[correct_key]
-                        if correct:
+                        if outcome["main_correct"]:
                             stats[key]["correct"] += 1
                             stats[key]["actual_moves_correct"].append(abs(actual_move))
                         else:
                             stats[key]["actual_moves_wrong"].append(abs(actual_move))
 
-                        # Chronos price deviation (predicted pct_move vs actual)
-                        error_key = f"{model}_error_pct"
-                        abs_error_key = f"{model}_abs_error_pct"
-                        if error_key in outcome:
-                            stats[key]["errors"].append(outcome[error_key])
-                            stats[key]["abs_errors"].append(outcome[abs_error_key])
+                    if "llm_correct" in outcome:
+                        key = f"llm_{short_ticker}_{h_key}"
+                        _ensure_key(key)
+                        stats[key]["total"] += 1
+                        if outcome["llm_correct"]:
+                            stats[key]["correct"] += 1
+                            stats[key]["actual_moves_correct"].append(abs(actual_move))
+                        else:
+                            stats[key]["actual_moves_wrong"].append(abs(actual_move))
 
-                # Per-individual-signal accuracy
-                per_sig = outcome.get("per_signal", {})
-                for sig_name, sig_data in per_sig.items():
-                    key = f"sig_{sig_name}_{short_ticker}_{h_key}"
-                    _ensure_key(key)
-                    stats[key]["total"] += 1
-                    if sig_data.get("correct"):
-                        stats[key]["correct"] += 1
-                        stats[key]["actual_moves_correct"].append(abs(actual_move))
-                    else:
-                        stats[key]["actual_moves_wrong"].append(abs(actual_move))
+                    for model in ["chronos_1h", "chronos_3h", "ministral"]:
+                        correct_key = f"{model}_correct"
+                        if correct_key in outcome:
+                            key = f"{model}_{short_ticker}_{h_key}"
+                            _ensure_key(key)
+                            stats[key]["total"] += 1
+                            if outcome[correct_key]:
+                                stats[key]["correct"] += 1
+                                stats[key]["actual_moves_correct"].append(abs(actual_move))
+                            else:
+                                stats[key]["actual_moves_wrong"].append(abs(actual_move))
+
+                            error_key = f"{model}_error_pct"
+                            abs_error_key = f"{model}_abs_error_pct"
+                            if error_key in outcome:
+                                stats[key]["errors"].append(outcome[error_key])
+                                stats[key]["abs_errors"].append(outcome[abs_error_key])
+
+                    per_sig = outcome.get("per_signal", {})
+                    for sig_name, sig_data in per_sig.items():
+                        key = f"sig_{sig_name}_{short_ticker}_{h_key}"
+                        _ensure_key(key)
+                        stats[key]["total"] += 1
+                        if sig_data.get("correct"):
+                            stats[key]["correct"] += 1
+                            stats[key]["actual_moves_correct"].append(abs(actual_move))
+                        else:
+                            stats[key]["actual_moves_wrong"].append(abs(actual_move))
+
+    except Exception as e:
+        print(f"[TRACKER] outcomes file read error: {e}", flush=True)
+        return
 
     # Compute final stats
     result = {}
@@ -462,7 +480,6 @@ def _recompute_accuracy(entries, start_idx):
             "accuracy": round(s["correct"] / s["total"], 3),
         }
 
-        # Price deviation metrics (Chronos pct_move predictions)
         if s["abs_errors"]:
             n = len(s["abs_errors"])
             entry["mae"] = round(sum(s["abs_errors"]) / n, 4)
@@ -470,7 +487,6 @@ def _recompute_accuracy(entries, start_idx):
             entry["rmse"] = round(math.sqrt(sum(e**2 for e in s["errors"]) / n), 4)
             entry["deviation_samples"] = n
 
-        # Average move magnitude when correct vs wrong
         if s["actual_moves_correct"]:
             entry["avg_move_correct"] = round(
                 sum(s["actual_moves_correct"]) / len(s["actual_moves_correct"]), 4)
@@ -483,16 +499,14 @@ def _recompute_accuracy(entries, start_idx):
     with _lock:
         _accuracy_cache = result
 
-    # Persist to disk for cross-session continuity
     try:
-        with open(ACCURACY_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump({
-                "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "resolved_snapshots": resolved_count,
-                "stats": result,
-            }, f, indent=2, ensure_ascii=False)
-    except Exception:
-        pass
+        atomic_write_json(ACCURACY_CACHE_FILE, {
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "resolved_snapshots": resolved_count,
+            "stats": result,
+        })
+    except Exception as e:
+        print(f"[TRACKER] accuracy cache write error: {e}", flush=True)
 
 
 def get_accuracy_report():
@@ -507,13 +521,9 @@ def get_accuracy_report():
             return dict(_accuracy_cache)
 
     # Try loading from disk
-    try:
-        if os.path.exists(ACCURACY_CACHE_FILE):
-            with open(ACCURACY_CACHE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return data.get("stats", {})
-    except Exception:
-        pass
+    data = load_json(ACCURACY_CACHE_FILE)
+    if data:
+        return data.get("stats", {})
 
     return {}
 
@@ -603,5 +613,6 @@ def get_snapshot_count():
             return 0
         with open(SIGNAL_LOG, "r", encoding="utf-8") as f:
             return sum(1 for _ in f)
-    except Exception:
+    except Exception as e:
+        print(f"[TRACKER] snapshot count error: {e}", flush=True)
         return 0

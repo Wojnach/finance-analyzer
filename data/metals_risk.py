@@ -49,6 +49,21 @@ _LEVERAGE_DEFAULTS = {
     "silver79": 5.0,   # MINI L SILVER AVA 79 (effective ~5x)
     "silver301": 4.3,  # MINI L SILVER AVA 301
     "silver_sg": 4.76, # MINI L SILVER SG
+    # Crypto — spot (no leverage) unless holding trackers
+    "btc": 1.0,
+    "eth": 1.0,
+    "mstr": 1.0,
+    "xbt_tracker": 1.0,   # CoinShares XBT Tracker
+    "eth_tracker": 1.0,   # CoinShares ETH Tracker
+}
+
+# Default ATR% per underlying (used when signal_data has no atr_pct)
+ATR_DEFAULTS = {
+    "XAG-USD": 4.4,   # silver
+    "XAU-USD": 1.9,   # gold
+    "BTC-USD": 3.2,   # bitcoin
+    "ETH-USD": 4.5,   # ethereum
+    "MSTR": 5.0,      # MicroStrategy (high vol stock)
 }
 
 
@@ -176,6 +191,22 @@ def simulate_warrant_risk(
     return result
 
 
+def _position_key_to_ticker(key):
+    """Map a position key (e.g. 'silver301', 'btc', 'gold') to a standard ticker."""
+    k = key.lower()
+    if "silver" in k:
+        return "XAG-USD"
+    if "gold" in k:
+        return "XAU-USD"
+    if "btc" in k or "xbt" in k:
+        return "BTC-USD"
+    if "eth" in k:
+        return "ETH-USD"
+    if "mstr" in k:
+        return "MSTR"
+    return key
+
+
 def simulate_all_positions(positions, prices, signal_data=None, llm_signals=None):
     """Run Monte Carlo for all active positions. Returns dict keyed by position name.
 
@@ -200,9 +231,9 @@ def simulate_all_positions(positions, prices, signal_data=None, llm_signals=None
 
         # Get direction probability from LLM or signals
         direction_prob = 0.5  # neutral default
+        # Map position key to ticker
+        ticker = _position_key_to_ticker(key)
         if llm_signals:
-            # Map position key to ticker
-            ticker = "XAG-USD" if "silver" in key else "XAU-USD"
             llm_data = llm_signals.get(ticker, {})
             consensus = llm_data.get("consensus", {})
             if consensus.get("direction") == "up":
@@ -211,9 +242,8 @@ def simulate_all_positions(positions, prices, signal_data=None, llm_signals=None
                 direction_prob = 0.5 - consensus.get("confidence", 0) * 0.3  # scale 0.2-0.5
 
         # ATR for underlying — use from signal data or default
-        atr_pct = 4.4 if "silver" in key else 1.9  # YTD defaults from metals_history
+        atr_pct = ATR_DEFAULTS.get(ticker, 3.0)
         if signal_data:
-            ticker = "XAG-USD" if "silver" in key else "XAU-USD"
             sig = signal_data.get(ticker, {})
             if sig.get("atr_pct"):
                 atr_pct = sig["atr_pct"]

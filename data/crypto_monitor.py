@@ -1,4 +1,7 @@
 """
+DEPRECATED — functionality merged into metals_loop.py (Unified Market Monitoring Loop v9).
+See crypto_data.py for the replacement module. Kept for reference only.
+
 BTC / ETH / MSTR Price Monitor with Claude Analysis
 
 Three correlated instruments tracked together:

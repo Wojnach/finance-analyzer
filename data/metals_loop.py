@@ -1,12 +1,13 @@
 """
-Metals Intraday Trading Loop v8 (Layer 1 — Autonomous).
-Runs every 30s, fully autonomous without Claude Code dependency.
+Unified Market Monitoring Loop v9 (Layer 1 — Autonomous).
+Runs every 60s, fully autonomous without Claude Code dependency.
+Tracks: XAG/XAU (Binance FAPI), BTC/ETH (Binance SPOT), MSTR (Yahoo).
 Core features: probability-focused Telegram, momentum-aware trailing stops,
-auto-detect holdings, Binance FAPI underlying prices 24/7, per-signal accuracy.
+auto-detect holdings, per-signal accuracy, crypto Fear & Greed, on-chain metrics.
 
 Features:
 - Tiered Claude invocation (Haiku/Sonnet, no Opus)
-- Local LLM inference (Ministral-8B + Chronos, 5min cycle)
+- Local LLM inference (Ministral-8B + Chronos for all tracked symbols)
 - Monte Carlo VaR for leveraged warrants
 - Trade guards (cooldowns, session limits, loss escalation)
 - Drawdown circuit breaker (-15% emergency liquidation)
@@ -16,6 +17,8 @@ Features:
 - Daily range analysis (historical percentiles + intraday assessment)
 - Spike catcher (limit sell orders before US open)
 - Invocation logging (tier/model/trigger tracking)
+- Crypto data: Fear & Greed, CryptoCompare news, on-chain (MVRV/SOPR)
+- MSTR-BTC NAV premium tracking
 
 Run: .venv/Scripts/python.exe data/metals_loop.py
 """
@@ -83,9 +86,19 @@ from metals_avanza_helpers import (
     check_session_alive,
 )
 
+try:
+    from crypto_data import (
+        get_fear_greed, get_crypto_news, fetch_mstr_price,
+        compute_mstr_btc_nav, get_onchain_summary, is_us_market_hours,
+    )
+    CRYPTO_DATA_AVAILABLE = True
+except ImportError as e:
+    print(f"[WARN] crypto_data import failed: {e}", flush=True)
+    CRYPTO_DATA_AVAILABLE = False
+
 # --- CONFIG ---
 CLAUDE_ENABLED = False        # Master switch: set True to re-enable Claude invocations
-CHECK_INTERVAL = 30           # seconds between price checks (was 60 — faster for autonomous)
+CHECK_INTERVAL = 60           # seconds between checks (was 30 — unified loop covers more)
 TRIGGER_PRICE_MOVE = 5.0      # % move from last invocation to trigger (was 2.0)
 TRIGGER_TRAILING = 8.0        # % drop from peak to trigger (was 3.0)
 TRIGGER_PROFIT = 4.0          # % profit from entry to trigger
@@ -444,7 +457,7 @@ def read_signal_data():
                     result[key] = data[key]
             return result
 
-        for ticker in ["XAG-USD", "XAU-USD"]:
+        for ticker in SIGNAL_TICKERS:
             if ticker in tickers:
                 t = tickers[ticker]
                 extra = t.get("extra", {})
@@ -461,10 +474,11 @@ def read_signal_data():
                     "sell_count": extra.get("_sell_count", 0),
                     "voters": extra.get("_voters", 0),
                     "vote_detail": extra.get("_vote_detail", ""),
+                    "price": t.get("price", 0),
                 }
 
         timeframes = data.get("timeframe_heatmap", {})
-        for ticker in ["XAG-USD", "XAU-USD"]:
+        for ticker in SIGNAL_TICKERS:
             if ticker in timeframes and ticker in result:
                 result[ticker]["timeframes"] = timeframes[ticker]
 
@@ -478,15 +492,26 @@ def read_signal_data():
 # ---------------------------------------------------------------------------
 BINANCE_FAPI_TICKER = "https://fapi.binance.com/fapi/v1/ticker/price"
 BINANCE_FAPI_KLINES = "https://fapi.binance.com/fapi/v1/klines"
+BINANCE_SPOT_TICKER = "https://api.binance.com/api/v3/ticker/price"
+
+# Metals via FAPI (futures), Crypto via SPOT
 UNDERLYING_SYMBOLS = {"XAG-USD": "XAGUSDT", "XAU-USD": "XAUUSDT"}
-_underlying_prices = {}  # always-fresh: {"XAG-USD": float, "XAU-USD": float}
-_underlying_history = {"XAG-USD": [], "XAU-USD": []}  # rolling price history for momentum
+CRYPTO_SYMBOLS = {"BTC-USD": "BTCUSDT", "ETH-USD": "ETHUSDT"}
+# All tickers tracked for underlying prices
+ALL_TRACKED_TICKERS = list(UNDERLYING_SYMBOLS.keys()) + list(CRYPTO_SYMBOLS.keys()) + ["MSTR"]
+# Tickers that have signals in agent_summary.json (MSTR was removed Mar 1)
+SIGNAL_TICKERS = ["XAG-USD", "XAU-USD", "BTC-USD", "ETH-USD"]
+
+_underlying_prices = {}  # always-fresh: {"XAG-USD": float, ..., "BTC-USD": float, ...}
+_underlying_history = {}  # rolling price history for momentum per ticker
 _underlying_klines_cache = {}  # {"XAG-USD": {"ts": float, "klines": [...]}}
 
 def fetch_underlying_from_binance():
-    """Fetch current XAG/XAU prices from Binance FAPI (24/7, no Avanza dependency)."""
+    """Fetch prices: metals from FAPI, crypto from SPOT, MSTR from Yahoo."""
     global _underlying_prices
     prices = {}
+
+    # Metals via Binance FAPI (futures)
     for ticker, symbol in UNDERLYING_SYMBOLS.items():
         try:
             r = requests.get(
@@ -497,27 +522,52 @@ def fetch_underlying_from_binance():
                 prices[ticker] = float(data["price"])
         except Exception as e:
             log(f"Binance FAPI {ticker} error: {e}")
+
+    # Crypto via Binance SPOT
+    for ticker, symbol in CRYPTO_SYMBOLS.items():
+        try:
+            r = requests.get(
+                f"{BINANCE_SPOT_TICKER}?symbol={symbol}", timeout=5
+            )
+            if r.status_code == 200:
+                data = r.json()
+                prices[ticker] = float(data["price"])
+        except Exception as e:
+            log(f"Binance SPOT {ticker} error: {e}")
+
+    # MSTR via Yahoo (only when US market is relevant — always fetch, mark state)
+    if CRYPTO_DATA_AVAILABLE:
+        try:
+            mstr = fetch_mstr_price()
+            if mstr and mstr.get("price", 0) > 0:
+                prices["MSTR"] = mstr["price"]
+        except Exception as e:
+            log(f"MSTR Yahoo error: {e}")
+
     if prices:
         _underlying_prices.update(prices)
-        # Update rolling history (keep last 120 = ~1 hour at 30s)
+        # Update rolling history (keep last 60 = ~1 hour at 60s)
         for ticker, price in prices.items():
             hist = _underlying_history.setdefault(ticker, [])
             hist.append({"ts": time.time(), "price": price})
-            if len(hist) > 120:
+            if len(hist) > 60:
                 hist.pop(0)
     return prices
 
 def fetch_underlying_klines(ticker, interval="1h", limit=100):
-    """Fetch OHLCV klines from Binance FAPI for a ticker. Cached 5 min."""
-    symbol = UNDERLYING_SYMBOLS.get(ticker)
+    """Fetch OHLCV klines from Binance (FAPI for metals, SPOT for crypto). Cached 5 min."""
+    symbol = UNDERLYING_SYMBOLS.get(ticker) or CRYPTO_SYMBOLS.get(ticker)
     if not symbol:
         return None
     cache = _underlying_klines_cache.get(ticker)
     if cache and time.time() - cache["ts"] < 300:
         return cache["klines"]
+    # Crypto uses SPOT klines, metals use FAPI
+    is_crypto = ticker in CRYPTO_SYMBOLS
+    base_url = "https://api.binance.com/api/v3/klines" if is_crypto else BINANCE_FAPI_KLINES
     try:
         r = requests.get(
-            BINANCE_FAPI_KLINES,
+            base_url,
             params={"symbol": symbol, "interval": interval, "limit": limit},
             timeout=10,
         )
@@ -882,7 +932,7 @@ def compute_probability_report():
     global _last_prob_report
     report = {}
 
-    for ticker in ["XAG-USD", "XAU-USD"]:
+    for ticker in SIGNAL_TICKERS + ["MSTR"]:
         price = _underlying_prices.get(ticker, 0)
         if price <= 0:
             continue
@@ -973,6 +1023,55 @@ def compute_probability_report():
                 down_score += w * m.get("confidence", 0.5)
             total_weight += w
 
+        # Crypto-specific: Fear & Greed as contrarian weight
+        if ticker in ("BTC-USD", "ETH-USD") and CRYPTO_DATA_AVAILABLE:
+            try:
+                fg = get_fear_greed()
+                if fg:
+                    fg_val = fg["value"]
+                    entry["fear_greed"] = fg
+                    w = 0.4  # moderate weight
+                    if fg_val <= 20:  # extreme fear → contrarian buy
+                        up_score += w * 0.7
+                        total_weight += w
+                    elif fg_val >= 80:  # extreme greed → contrarian sell
+                        down_score += w * 0.7
+                        total_weight += w
+            except Exception:
+                pass
+
+            # On-chain bias for BTC
+            if ticker == "BTC-USD":
+                try:
+                    onchain = get_onchain_summary()
+                    if onchain:
+                        entry["onchain"] = onchain
+                        bias = onchain.get("bias", "neutral")
+                        if bias in ("bullish", "bearish"):
+                            w = 0.3
+                            if bias == "bullish":
+                                up_score += w * 0.6
+                            else:
+                                down_score += w * 0.6
+                            total_weight += w
+                except Exception:
+                    pass
+
+        # MSTR: price-only, no signals — use BTC correlation as proxy
+        if ticker == "MSTR":
+            btc_report = report.get("BTC-USD", {})
+            if btc_report:
+                btc_up = btc_report.get("prob_up_pct", 50)
+                btc_down = btc_report.get("prob_down_pct", 50)
+                # MSTR roughly tracks BTC with ~1.5x beta
+                w = 0.5
+                if btc_up > btc_down:
+                    up_score += w * (btc_up / 100)
+                else:
+                    down_score += w * (btc_down / 100)
+                total_weight += w
+                entry["btc_proxy"] = True
+
         if total_weight > 0:
             prob_up = round(up_score / total_weight * 100, 1)
             prob_down = round(down_score / total_weight * 100, 1)
@@ -986,7 +1085,8 @@ def compute_probability_report():
         entry["momentum"] = get_underlying_momentum(ticker)
 
         # --- Monte Carlo price ranges (1h, 3h from underlying) ---
-        atr_pct = sig.get("atr_pct", 4.4 if "XAG" in ticker else 1.9)
+        from metals_risk import ATR_DEFAULTS
+        atr_pct = sig.get("atr_pct", ATR_DEFAULTS.get(ticker, 3.0))
         try:
             import numpy as np
             from metals_risk import _annualized_vol_from_atr
@@ -1062,103 +1162,128 @@ def _parse_vote_detail(vote_detail):
 # Probability-focused Telegram messages
 # ---------------------------------------------------------------------------
 
-def build_probability_telegram(prob_report, cet_str):
-    """Build a probability-focused Telegram message.
+def _format_price(price, ticker):
+    """Format price compactly: $67.2K for BTC, $1,996 for ETH, $33.45 for metals."""
+    if price >= 10000:
+        return f"${price/1000:.1f}K"
+    elif price >= 1000:
+        return f"${price:,.0f}"
+    else:
+        return f"${price:.2f}"
 
-    Format optimized for:
-    - Apple Watch first line (direction + probability)
-    - Price ranges for each ticker
-    - Per-signal accuracy
-    - Held positions with P&L
+
+def build_probability_telegram(prob_report, cet_str):
+    """Build a unified probability-focused Telegram message for all instruments.
+
+    Format: metals first (with warrant P&L), then crypto (with F&G), then MSTR.
+    Apple Watch first line shows top 2 movers by probability deviation from 50%.
     """
     if not prob_report:
         return None
 
-    # --- First line: Apple Watch (most important) ---
-    watch_parts = []
-    for ticker in ["XAG-USD", "XAU-USD"]:
-        r = prob_report.get(ticker)
-        if not r:
-            continue
-        short = ticker.split("-")[0]
+    # --- First line: Apple Watch — top 2 movers by deviation from 50% ---
+    ticker_devs = []
+    for ticker, r in prob_report.items():
         prob_up = r.get("prob_up_pct", 50)
         prob_down = r.get("prob_down_pct", 50)
+        dev = max(abs(prob_up - 50), abs(prob_down - 50))
         if prob_up > prob_down:
             arrow, prob = "↑", prob_up
         elif prob_down > prob_up:
             arrow, prob = "↓", prob_down
         else:
             arrow, prob = "→", 50
-        watch_parts.append(f"{short} {arrow}{prob:.0f}%")
-    first_line = f"*PROB* · {' · '.join(watch_parts)}"
+        short = ticker.split("-")[0] if "-" in ticker else ticker
+        ticker_devs.append((dev, f"{short} {arrow}{prob:.0f}%"))
+    ticker_devs.sort(key=lambda x: -x[0])
+    watch_parts = [d[1] for d in ticker_devs[:2]]
 
+    # Add F&G to first line if available
+    fg_tag = ""
+    if CRYPTO_DATA_AVAILABLE:
+        try:
+            fg = get_fear_greed()
+            if fg:
+                fg_tag = f" · F&G {fg['value']}"
+        except Exception:
+            pass
+
+    first_line = f"*PROB* · {' · '.join(watch_parts)}{fg_tag}"
     lines = [first_line, ""]
 
     # --- Per-ticker probability data ---
-    for ticker in ["XAG-USD", "XAU-USD"]:
+    # Order: metals, crypto, then MSTR
+    ticker_order = ["XAG-USD", "XAU-USD", "BTC-USD", "ETH-USD", "MSTR"]
+    for ticker in ticker_order:
         r = prob_report.get(ticker)
         if not r:
             continue
 
         price = r.get("price", 0)
-        short = ticker.split("-")[0]
+        short = ticker.split("-")[0] if "-" in ticker else ticker
         prob_up = r.get("prob_up_pct", 50)
         prob_down = r.get("prob_down_pct", 50)
 
-        # Chronos forecasts
-        chr_parts = []
-        for h in ["1h", "3h"]:
-            c = r.get(f"chronos_{h}", {})
-            if c.get("direction") in ("up", "down"):
-                arrow = "↑" if c["direction"] == "up" else "↓"
-                pct = abs(c.get("pct_move", 0))
-                chr_parts.append(f"{arrow}{pct:.2f}% {h}")
-            else:
-                chr_parts.append(f"→ {h}")
+        price_str = _format_price(price, ticker)
+        lines.append(f"`{short:<4} {price_str}  ↑{prob_up:.0f}%  ↓{prob_down:.0f}%`")
 
-        lines.append(f"`{short}  ${price:.2f}  ↑{prob_up:.0f}%  ↓{prob_down:.0f}%`")
+        # Chronos forecasts (metals + crypto, not MSTR)
+        if ticker != "MSTR":
+            chr_parts = []
+            for h in ["1h", "3h"]:
+                c = r.get(f"chronos_{h}", {})
+                if c.get("direction") in ("up", "down"):
+                    arrow = "↑" if c["direction"] == "up" else "↓"
+                    pct = abs(c.get("pct_move", 0))
+                    chr_parts.append(f"{arrow}{pct:.2f}% {h}")
+            if chr_parts:
+                lines.append(f"`  chr: {' | '.join(chr_parts)}`")
 
-        # Price ranges
-        for h_key in ["1h", "3h"]:
-            rng = r.get(f"range_{h_key}", {})
-            if "error" not in rng and rng.get("p25") and rng.get("p75"):
-                exp_move = rng.get("expected_move_pct", 0)
-                lines.append(f"`  {h_key}: ${rng['p25']:.2f}-${rng['p75']:.2f} (±{exp_move:.1f}%)`")
+        # Signal detail (for tickers with signals)
+        if ticker in SIGNAL_TICKERS:
+            sig = r.get("signal_action", "HOLD")
+            buy_c = r.get("signal_buy_count", 0)
+            sell_c = r.get("signal_sell_count", 0)
+            rsi = r.get("signal_rsi", 0)
+            regime = r.get("signal_regime", "?")
+            lines.append(f"`  sig: {sig} {buy_c}B/{sell_c}S RSI:{rsi:.0f} {regime}`")
 
-        # Chronos
-        if chr_parts:
-            lines.append(f"`  chr: {' | '.join(chr_parts)}`")
+        # Crypto-specific context
+        if ticker in ("BTC-USD", "ETH-USD"):
+            fg_data = r.get("fear_greed")
+            if fg_data:
+                lines.append(f"`  F&G: {fg_data['value']} ({fg_data['classification']})`")
+            onchain = r.get("onchain")
+            if onchain and onchain.get("mvrv"):
+                lines.append(f"`  MVRV: {onchain['mvrv']:.2f} ({onchain.get('zone', '?')})`")
+            # ETH/BTC ratio
+            if ticker == "ETH-USD":
+                btc_p = _underlying_prices.get("BTC-USD", 0)
+                if btc_p > 0:
+                    ratio = price / btc_p
+                    lines.append(f"`  ETH/BTC: {ratio:.4f}`")
 
-        # Momentum
-        mom = r.get("momentum", {})
-        vel = mom.get("velocity_pct", 0)
-        accel = mom.get("acceleration", 0)
-        trend = mom.get("trend", "flat")
-        vel_arrow = "↑" if vel > 0 else "↓" if vel < 0 else "→"
-        accel_tag = "accel" if accel > 0 else "decel" if accel < 0 else ""
-        lines.append(f"`  mom: {vel_arrow}{abs(vel):.3f}%/30s {accel_tag} ({trend})`")
-
-        # Signal detail
-        sig = r.get("signal_action", "HOLD")
-        buy_c = r.get("signal_buy_count", 0)
-        sell_c = r.get("signal_sell_count", 0)
-        rsi = r.get("signal_rsi", 0)
-        regime = r.get("signal_regime", "?")
-        lines.append(f"`  sig: {sig} {buy_c}B/{sell_c}S RSI:{rsi:.0f} {regime}`")
-
-        # Accuracy summary
-        acc = r.get("accuracy", {})
-        if acc:
-            acc_parts = []
-            for k, v in sorted(acc.items(), key=lambda x: -x[1]["samples"])[:3]:
-                short_k = k.replace(f"_{short.lower()}", "").replace("_1h", "").replace("_3h", "")
-                acc_parts.append(f"{short_k}:{v['pct']:.0f}%({v['samples']})")
-            if acc_parts:
-                lines.append(f"`  acc: {' '.join(acc_parts)}`")
+        # MSTR-specific context
+        if ticker == "MSTR":
+            if CRYPTO_DATA_AVAILABLE:
+                try:
+                    mstr_data = fetch_mstr_price()
+                    if mstr_data:
+                        chg = mstr_data.get("change_pct", 0)
+                        state = mstr_data.get("market_state", "CLOSED")
+                        state_tag = "" if state == "REGULAR" else f" ({state.lower()})"
+                        lines.append(f"`  {chg:+.1f}% today{state_tag}`")
+                    btc_p = _underlying_prices.get("BTC-USD", 0)
+                    if btc_p > 0:
+                        nav = compute_mstr_btc_nav(price, btc_p)
+                        if nav:
+                            lines.append(f"`  NAV: ${nav['nav_per_share']:.0f} prem:{nav['premium_pct']:+.0f}%`")
+                except Exception:
+                    pass
 
         lines.append("")
 
-    # --- Held positions ---
+    # --- Held positions (Avanza warrants) ---
     active_positions = {k: p for k, p in POSITIONS.items() if p.get("active")}
     if active_positions:
         lines.append("_Held:_")
@@ -1172,13 +1297,19 @@ def build_probability_telegram(prob_report, cet_str):
             dist_stop = ((bid - pos["stop"]) / bid * 100) if bid > 0 else 999
 
             # Momentum-aware stop info
-            underlying_ticker = "XAG-USD" if "silver" in key else "XAU-USD"
+            k_lower = key.lower()
+            if "silver" in k_lower:
+                underlying_ticker = "XAG-USD"
+            elif "gold" in k_lower:
+                underlying_ticker = "XAU-USD"
+            else:
+                underlying_ticker = "XAG-USD"  # fallback
             mom = get_underlying_momentum(underlying_ticker)
             trail_tag = ""
             if mom["velocity_pct"] < -0.01:
-                trail_tag = " ⚡"  # momentum warning
+                trail_tag = " ⚡"
             if mom["acceleration"] < -0.0001:
-                trail_tag = " ⚡⚡"  # acceleration warning
+                trail_tag = " ⚡⚡"
 
             short_key = key[:8]
             lines.append(
@@ -1189,7 +1320,7 @@ def build_probability_telegram(prob_report, cet_str):
         lines.append("_No held positions (monitoring only)_")
 
     lines.append("")
-    lines.append(f"_#{check_count} · {cet_str} · {CHECK_INTERVAL}s_")
+    lines.append(f"_#{check_count} · {cet_str} · {CHECK_INTERVAL}s loop_")
 
     return "\n".join(lines)
 
@@ -2505,15 +2636,41 @@ def check_triggers(prices):
         if dist_stop >= STOP_L2_PCT:
             l2_zone_checks.pop(key, None)
 
-    # Signal flip detection
+    # Signal flip detection (all tracked tickers with signals)
     if last_signal_data:
-        for ticker in ["XAG-USD", "XAU-USD"]:
+        for ticker in SIGNAL_TICKERS:
             if ticker in last_signal_data:
                 current_action = last_signal_data[ticker].get("action", "?")
                 prev_action = prev_signal_actions.get(ticker)
                 if prev_action and current_action != prev_action and current_action in ("BUY", "SELL"):
                     reasons.append(f"signal flip {ticker}: {prev_action}->{current_action}")
                 prev_signal_actions[ticker] = current_action
+
+    # Crypto price move triggers (from underlying price history)
+    _CRYPTO_TRIGGER_PCT = {"BTC-USD": 3.0, "ETH-USD": 3.0, "MSTR": 5.0}
+    for ticker, threshold in _CRYPTO_TRIGGER_PCT.items():
+        hist = _underlying_history.get(ticker, [])
+        if len(hist) < 2:
+            continue
+        current_p = hist[-1]["price"]
+        # Compare against price 10 checks ago (or oldest available)
+        ref_idx = max(0, len(hist) - 10)
+        ref_p = hist[ref_idx]["price"]
+        if ref_p > 0:
+            move_pct = abs((current_p - ref_p) / ref_p * 100)
+            if move_pct >= threshold:
+                reasons.append(f"{ticker} moved {move_pct:.1f}% (last 10 checks)")
+
+    # Fear & Greed extreme trigger
+    if CRYPTO_DATA_AVAILABLE and check_count > 5:
+        try:
+            fg = get_fear_greed()
+            if fg:
+                fg_val = fg["value"]
+                if fg_val <= 10 or fg_val >= 85:
+                    reasons.append(f"F&G extreme: {fg_val} ({fg['classification']})")
+        except Exception:
+            pass
 
     # LLM consensus trigger (high confidence + proven accuracy)
     if LLM_AVAILABLE and check_count > 5:
@@ -2759,7 +2916,7 @@ def _autonomous_decision(trigger_reasons, blocked_tier):
     signals_data = {}
     llm_data = {}
     if last_signal_data:
-        for ticker in ["XAG-USD", "XAU-USD"]:
+        for ticker in SIGNAL_TICKERS:
             if ticker in last_signal_data:
                 s = last_signal_data[ticker]
                 signals_data[ticker] = {
@@ -2974,17 +3131,17 @@ def main():
 
     # Probe time server on startup
     h, ts, src = get_cet_time()
-    log(f"Starting metals trading loop (v8 — AUTONOMOUS + Probability + Smart Stops)...")
+    log(f"Starting unified monitoring loop (v9 — AUTONOMOUS + 5 instruments)...")
     log(f"Time: {ts} (source: {src})")
     log(f"Check interval: {CHECK_INTERVAL}s | Heartbeat: every {HEARTBEAT_CHECKS} checks (~{HEARTBEAT_CHECKS*CHECK_INTERVAL//60}min)")
     log(f"Triggers: price>{TRIGGER_PRICE_MOVE}% | trail>{TRIGGER_TRAILING}% | profit>{TRIGGER_PROFIT}%")
     log(f"Stop levels: L1(warn)<{STOP_L1_PCT}% | L2(alert)<{STOP_L2_PCT}% | L3(emergency)<{STOP_L3_PCT}%")
-    log("*** AUTONOMOUS MODE v8 — 100% autonomous, probability-focused ***")
+    log("*** AUTONOMOUS MODE v9 — unified 5-instrument monitoring ***")
     log(f"*** Smart trailing stops: {TRAIL_DISTANCE_PCT}% base, "
         f"{TRAIL_TIGHTEN_MOMENTUM}% momentum, {TRAIL_TIGHTEN_ACCEL}% accel ***")
     log(f"*** Holdings auto-detect every {HOLDINGS_CHECK_INTERVAL} checks (~{HOLDINGS_CHECK_INTERVAL*CHECK_INTERVAL}s) ***")
     log(f"*** Probability telegram every {PROB_TELEGRAM_INTERVAL} checks (~{PROB_TELEGRAM_INTERVAL*CHECK_INTERVAL//60}min) ***")
-    log(f"*** Always tracking XAG-USD + XAU-USD via Binance FAPI ***")
+    log(f"*** Tracking: XAG/XAU (FAPI) + BTC/ETH (SPOT) + MSTR (Yahoo) ***")
     log(f"Short instruments: {', '.join(v['name'] for v in SHORT_INSTRUMENTS.values())}")
     if SPIKE_ENABLED:
         log(f"Spike catcher: place@{SPIKE_PLACE_CET:.2f} cancel@{SPIKE_CANCEL_CET:.2f} "
@@ -3014,15 +3171,15 @@ def main():
         sold_count = sum(1 for p in POSITIONS.values() if not p["active"])
         log(f"  Positions: {active_count} active, {sold_count} sold/inactive")
         if active_count == 0:
-            log("No active positions — running in monitoring mode (always tracking XAG/XAU)")
+            log("No active positions — running in monitoring mode")
             log("Will auto-detect new instruments bought on Avanza")
 
-        # Fetch initial underlying prices from Binance FAPI
+        # Fetch initial prices (metals FAPI + crypto SPOT + MSTR Yahoo)
         und_prices = fetch_underlying_from_binance()
         if und_prices:
-            log(f"  Binance FAPI: {', '.join(f'{k}=${v:.2f}' for k, v in und_prices.items())}")
+            log(f"  Prices: {', '.join(f'{k}=${v:.2f}' for k, v in und_prices.items())}")
         else:
-            log("  WARNING: Binance FAPI fetch failed — will retry")
+            log("  WARNING: Initial price fetch failed — will retry")
 
         # Place cascading stop-loss orders
         stop_order_state = {}
@@ -3070,6 +3227,11 @@ def main():
                         result["XAG-USD"] = silver_und
                     if gold_und and gold_und > 0:
                         result["XAU-USD"] = gold_und
+                # Also include crypto from _underlying_prices (always fresh)
+                for ticker in ("BTC-USD", "ETH-USD"):
+                    p = _underlying_prices.get(ticker, 0)
+                    if p > 0:
+                        result[ticker] = p
                 return result
 
             start_llm_thread(_get_signal_data, _get_underlying_prices)
@@ -3157,10 +3319,12 @@ def main():
             short = t.split("-")[0]
             prob_summary += f"\n  {short}: ${r['price']:.2f} ↑{r['prob_up_pct']:.0f}%"
 
-        send_telegram(f"""*METALS LOOP v8 STARTED*
-Mode: AUTONOMOUS (probability-focused)
+        crypto_tag = "F&G+news+onchain" if CRYPTO_DATA_AVAILABLE else "OFF"
+        send_telegram(f"""*UNIFIED LOOP v9 STARTED*
+Instruments: XAG/XAU/BTC/ETH/MSTR
 Interval: {CHECK_INTERVAL}s | Holdings detect: {HOLDINGS_CHECK_INTERVAL*CHECK_INTERVAL}s
-LLM: {"Ministral+Chronos" if LLM_AVAILABLE else "OFF"}
+LLM: {"Ministral+Chronos (4 tickers)" if LLM_AVAILABLE else "OFF"}
+Crypto: {crypto_tag}
 Stops: smart trailing {TRAIL_DISTANCE_PCT}%/{TRAIL_TIGHTEN_MOMENTUM}%/{TRAIL_TIGHTEN_ACCEL}%
 Swing: {"ACTIVE" if swing_trader else "OFF"}
 Session: {"ALIVE" if session_healthy else "DEAD"}
@@ -3184,9 +3348,13 @@ Positions: {pos_summary}{prob_summary}""")
                         if msg:
                             send_telegram(msg)
                     if check_count % 60 == 0:
-                        log(f"Outside market hours — tracking underlyings "
-                            f"(XAG=${_underlying_prices.get('XAG-USD', 0):.2f}, "
-                            f"XAU=${_underlying_prices.get('XAU-USD', 0):.2f})")
+                        price_tags = []
+                        for t in ALL_TRACKED_TICKERS:
+                            p = _underlying_prices.get(t, 0)
+                            if p > 0:
+                                short_t = t.split("-")[0] if "-" in t else t
+                                price_tags.append(f"{short_t}=${_format_price(p, t)}")
+                        log(f"Outside market hours — {' '.join(price_tags)}")
                     time.sleep(CHECK_INTERVAL)
                     continue
 
@@ -3451,9 +3619,9 @@ Positions: {pos_summary}{prob_summary}""")
                             pnl_val = pnl_pct(bid, pos["entry"])
                             parts.append(f"{key}:{bid}({pnl_val:+.1f}%)")
                     cet = cet_time_str()
-                    # Underlying prices + probability
+                    # Underlying prices + probability (all tracked)
                     und_tag = ""
-                    for t in ["XAG-USD", "XAU-USD"]:
+                    for t in ALL_TRACKED_TICKERS:
                         p = _underlying_prices.get(t, 0)
                         if p > 0:
                             short_t = t.split("-")[0]
@@ -3543,6 +3711,11 @@ Positions: {pos_summary}{prob_summary}""")
                                         und_prices["XAG-USD"] = p["underlying"]
                                     elif "gold" in key.lower():
                                         und_prices["XAU-USD"] = p["underlying"]
+                            # Add crypto prices for backfill
+                            for ticker in ("BTC-USD", "ETH-USD"):
+                                cp = _underlying_prices.get(ticker, 0)
+                                if cp > 0:
+                                    und_prices[ticker] = cp
                             if und_prices:
                                 backfill_outcomes(und_prices)
                         except Exception as e:

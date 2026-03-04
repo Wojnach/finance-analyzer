@@ -25,21 +25,35 @@ import traceback
 import platform
 
 os.chdir(r"Q:/finance-analyzer")
+sys.path.insert(0, ".")
 
 import requests
+
+from portfolio.file_utils import atomic_write_json, load_json, atomic_append_jsonl
 
 # --- CONFIG ---
 LLM_INTERVAL = 300       # run Ministral every 5 minutes
 CHRONOS_INTERVAL = 60    # run Chronos every 60 seconds (builds samples ~5x faster)
 ACCURACY_WINDOW = 50     # rolling window for accuracy calculation
 PREDICTION_LOG = "data/metals_llm_predictions.jsonl"
+PREDICTION_OUTCOMES_LOG = "data/metals_llm_outcomes.jsonl"
 
-# Binance FAPI for metals klines
+# Binance endpoints for klines
 FAPI_BASE = "https://fapi.binance.com/fapi/v1/klines"
-METALS_SYMBOLS = {
+SPOT_KLINES_BASE = "https://api.binance.com/api/v3/klines"
+
+# Tracked symbols: metals (FAPI) + crypto (SPOT)
+TRACKED_SYMBOLS = {
     "XAG-USD": "XAGUSDT",
     "XAU-USD": "XAUUSDT",
+    "BTC-USD": "BTCUSDT",
+    "ETH-USD": "ETHUSDT",
 }
+# Crypto tickers use Binance SPOT, metals use FAPI
+_CRYPTO_TICKERS = {"BTC-USD", "ETH-USD"}
+
+# Backwards compat alias
+METALS_SYMBOLS = TRACKED_SYMBOLS
 
 # Ministral subprocess paths
 if platform.system() == "Windows":
@@ -71,15 +85,26 @@ def _log(msg):
     print(f"[{ts}] [LLM] {msg}", flush=True)
 
 
-def _fetch_fapi_klines(symbol, interval="1h", limit=200):
-    """Fetch klines from Binance FAPI (futures) for metals."""
+def _fetch_fapi_klines(symbol, interval="1h", limit=200, ticker=None):
+    """Fetch klines from Binance FAPI (metals) or SPOT (crypto).
+
+    Args:
+        symbol: Binance symbol (e.g. XAGUSDT, BTCUSDT)
+        interval: candle interval (1h, 5m, etc.)
+        limit: number of candles
+        ticker: original ticker key (e.g. BTC-USD) — used to pick SPOT vs FAPI
+    """
     try:
+        # Crypto tickers use SPOT; metals use FAPI
+        is_crypto = ticker in _CRYPTO_TICKERS if ticker else symbol in ("BTCUSDT", "ETHUSDT")
+        base_url = SPOT_KLINES_BASE if is_crypto else FAPI_BASE
+
         params = {
             "symbol": symbol,
             "interval": interval,
             "limit": limit,
         }
-        r = requests.get(FAPI_BASE, params=params, timeout=15)
+        r = requests.get(base_url, params=params, timeout=15)
         r.raise_for_status()
         data = r.json()
         if not data:
@@ -222,19 +247,39 @@ def _log_prediction(model, ticker, direction, confidence, current_price, horizon
             "outcome_price": None,
             "correct": None,
         }
-        with open(PREDICTION_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
+        atomic_append_jsonl(PREDICTION_LOG, entry)
+    except Exception as e:
+        _log(f"Prediction log error: {e}")
+
+
+def _load_resolved_prediction_keys():
+    """Load set of already-resolved prediction timestamps from outcomes file."""
+    resolved = set()
+    if not os.path.exists(PREDICTION_OUTCOMES_LOG):
+        return resolved
+    try:
+        with open(PREDICTION_OUTCOMES_LOG, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line.strip())
+                    key = (entry.get("pred_ts", ""), entry.get("model", ""),
+                           entry.get("ticker", ""), entry.get("horizon", ""))
+                    resolved.add(key)
+                except (json.JSONDecodeError, KeyError):
+                    pass
+    except Exception as e:
+        _log(f"Prediction outcomes load error: {e}")
+    return resolved
 
 
 def check_prediction_accuracy(current_prices):
     """Check old predictions against current prices.
 
-    Looks at predictions from ~1h and ~3h ago, compares predicted direction
-    with actual direction, updates the log entries.
+    Outcomes are written to a SEPARATE append-only file (metals_llm_outcomes.jsonl)
+    so the prediction log itself is never rewritten. This eliminates the race
+    condition where a concurrent _log_prediction() append could be lost during rewrite.
 
-    Returns dict: {model: {horizon: {correct: int, total: int, accuracy: float}}}
+    Returns dict: {model_horizon: {correct: int, total: int, accuracy: float}}
     """
     now = time.time()
     accuracy = {}
@@ -243,40 +288,46 @@ def check_prediction_accuracy(current_prices):
         if not os.path.exists(PREDICTION_LOG):
             return accuracy
 
-        # Read all predictions
+        # Load already-resolved keys
+        resolved_keys = _load_resolved_prediction_keys()
+
+        # Read predictions (append-only, never rewritten)
         entries = []
         with open(PREDICTION_LOG, "r", encoding="utf-8") as f:
             for line in f:
                 try:
                     entries.append(json.loads(line.strip()))
-                except:
-                    pass
+                except (json.JSONDecodeError, ValueError) as e:
+                    _log(f"Prediction log parse error: {e}")
 
         if not entries:
             return accuracy
 
-        updated = False
+        new_outcomes = []
+
         for entry in entries:
-            if entry.get("outcome") is not None:
-                continue  # already resolved
+            pred_ts_str = entry.get("ts", "")
+            model = entry.get("model", "?")
+            ticker = entry.get("ticker", "")
+            horizon_key = entry.get("horizon", "1h")
+
+            # Skip if already resolved
+            dedup_key = (pred_ts_str, model, ticker, horizon_key)
+            if dedup_key in resolved_keys:
+                continue
 
             # Parse timestamp
             try:
-                pred_ts = datetime.datetime.fromisoformat(entry["ts"])
+                pred_ts = datetime.datetime.fromisoformat(pred_ts_str)
                 pred_epoch = pred_ts.timestamp()
-            except:
+            except (ValueError, KeyError) as e:
                 continue
 
-            horizon_key = entry.get("horizon", "1h")
             horizon_secs = HORIZONS.get(horizon_key, 3600)
-
-            # Check if enough time has passed
             elapsed = now - pred_epoch
-            if elapsed < horizon_secs * 0.9:  # allow 10% tolerance
+            if elapsed < horizon_secs * 0.9:
                 continue
 
-            # Get current price for this ticker
-            ticker = entry.get("ticker", "")
             if ticker not in current_prices:
                 continue
 
@@ -285,44 +336,63 @@ def check_prediction_accuracy(current_prices):
             if pred_price <= 0 or actual_price <= 0:
                 continue
 
-            # Determine actual direction
-            actual_direction = "up" if actual_price > pred_price else "down"
             pred_direction = entry.get("direction", "flat")
-
             if pred_direction == "flat":
-                entry["outcome"] = "skipped"
-                updated = True
+                # Record as skipped
+                outcome_entry = {
+                    "pred_ts": pred_ts_str,
+                    "model": model,
+                    "ticker": ticker,
+                    "horizon": horizon_key,
+                    "outcome": "skipped",
+                    "correct": None,
+                    "resolved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                }
+                new_outcomes.append(outcome_entry)
+                resolved_keys.add(dedup_key)
                 continue
 
+            actual_direction = "up" if actual_price > pred_price else "down"
             correct = (pred_direction == actual_direction)
-            entry["outcome"] = actual_direction
-            entry["outcome_price"] = round(actual_price, 4)
-            entry["correct"] = correct
-            updated = True
 
-        # Write back updated entries
-        if updated:
-            with open(PREDICTION_LOG, "w", encoding="utf-8") as f:
-                for entry in entries:
-                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            outcome_entry = {
+                "pred_ts": pred_ts_str,
+                "model": model,
+                "ticker": ticker,
+                "horizon": horizon_key,
+                "outcome": actual_direction,
+                "outcome_price": round(actual_price, 4),
+                "pred_price": round(pred_price, 4),
+                "correct": correct,
+                "resolved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+            new_outcomes.append(outcome_entry)
+            resolved_keys.add(dedup_key)
 
-        # Compute accuracy stats (last ACCURACY_WINDOW resolved predictions per model)
-        for entry in entries:
-            if entry.get("correct") is None:
-                continue
+        # Append new outcomes (prediction log stays untouched)
+        for outcome in new_outcomes:
+            atomic_append_jsonl(PREDICTION_OUTCOMES_LOG, outcome)
 
-            model = entry.get("model", "?")
-            horizon = entry.get("horizon", "1h")
-            key = f"{model}_{horizon}"
+        # Compute accuracy from outcomes file
+        if os.path.exists(PREDICTION_OUTCOMES_LOG):
+            with open(PREDICTION_OUTCOMES_LOG, "r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        rec = json.loads(line.strip())
+                    except (json.JSONDecodeError, ValueError):
+                        continue
 
-            if key not in accuracy:
-                accuracy[key] = {"correct": 0, "total": 0, "accuracy": 0.0}
+                    if rec.get("correct") is None:
+                        continue
 
-            accuracy[key]["total"] += 1
-            if entry["correct"]:
-                accuracy[key]["correct"] += 1
+                    key = f"{rec.get('model', '?')}_{rec.get('horizon', '1h')}"
+                    if key not in accuracy:
+                        accuracy[key] = {"correct": 0, "total": 0, "accuracy": 0.0}
 
-        # Compute accuracy percentages
+                    accuracy[key]["total"] += 1
+                    if rec["correct"]:
+                        accuracy[key]["correct"] += 1
+
         for key in accuracy:
             total = accuracy[key]["total"]
             if total > 0:
@@ -398,11 +468,11 @@ def _build_signal_context(signal_data, ticker):
 
 
 def _run_inference_cycle(signal_data, underlying_prices, chronos_only=False):
-    """Run one complete inference cycle for all metals tickers.
+    """Run one complete inference cycle for all tracked tickers (metals + crypto).
 
     Args:
         signal_data: dict from read_signal_data() in metals_loop
-        underlying_prices: {"XAG-USD": float, "XAU-USD": float}
+        underlying_prices: {"XAG-USD": float, "XAU-USD": float, "BTC-USD": float, ...}
         chronos_only: if True, skip Ministral and only run Chronos (faster cycle)
     """
     global _llm_signals, _llm_accuracy, _llm_last_run
@@ -411,7 +481,7 @@ def _run_inference_cycle(signal_data, underlying_prices, chronos_only=False):
     with _lock:
         results = dict(_llm_signals) if chronos_only else {}
 
-    for ticker, binance_sym in METALS_SYMBOLS.items():
+    for ticker, binance_sym in TRACKED_SYMBOLS.items():
         current_price = underlying_prices.get(ticker, 0)
         if current_price <= 0:
             continue
@@ -461,7 +531,7 @@ def _run_inference_cycle(signal_data, underlying_prices, chronos_only=False):
 
         # --- Chronos inference ---
         try:
-            candles = _fetch_fapi_klines(binance_sym, interval="1h", limit=200)
+            candles = _fetch_fapi_klines(binance_sym, interval="1h", limit=200, ticker=ticker)
             if candles and len(candles) >= 50:
                 close_prices = [c["close"] for c in candles]
 
@@ -571,9 +641,11 @@ def _llm_worker(signal_data_fn, underlying_prices_fn):
     Ministral runs every LLM_INTERVAL (5 min) — heavier GPU load, needs signal context.
     Chronos runs every CHRONOS_INTERVAL (60s) — fast subprocess, builds samples ~5x faster.
 
+    Covers all tracked symbols: XAG, XAU (FAPI), BTC, ETH (SPOT).
+
     Args:
         signal_data_fn: callable that returns signal data dict
-        underlying_prices_fn: callable that returns {"XAG-USD": float, "XAU-USD": float}
+        underlying_prices_fn: callable that returns {"XAG-USD": float, ..., "BTC-USD": float, ...}
     """
     _log("LLM worker started")
     last_ministral = 0
