@@ -123,14 +123,26 @@ def log_snapshot(check_count, prices, positions, signal_data, llm_signals,
                 llm_entry["consensus_conf"] = round(consensus.get("confidence", 0), 3)
                 llm_entry["consensus_action"] = consensus.get("weighted_action", "HOLD")
 
-            # Individual model predictions
+            # Store prediction price for deviation tracking
+            pred_price = data.get("price", 0)
+            if pred_price and pred_price > 0:
+                llm_entry["pred_price"] = round(pred_price, 4)
+
+            # Individual model predictions — include pct_move for deviation tracking
             if data.get("ministral"):
-                llm_entry["ministral"] = data["ministral"].get("action", "HOLD")
+                m = data["ministral"]
+                llm_entry["ministral"] = m.get("action", "HOLD")
+                llm_entry["ministral_conf"] = round(m.get("confidence", 0), 3)
             for h in ["1h", "3h"]:
                 key = f"chronos_{h}"
                 if data.get(key):
-                    llm_entry[f"chronos_{h}"] = data[key].get("direction", "flat")
-                    llm_entry[f"chronos_{h}_conf"] = round(data[key].get("confidence", 0), 3)
+                    c = data[key]
+                    llm_entry[f"chronos_{h}"] = c.get("direction", "flat")
+                    llm_entry[f"chronos_{h}_conf"] = round(c.get("confidence", 0), 3)
+                    # Chronos provides predicted pct_move — store for deviation tracking
+                    pct_move = c.get("pct_move", 0)
+                    if pct_move:
+                        llm_entry[f"chronos_{h}_pct_move"] = round(pct_move, 4)
 
             if llm_entry:
                 entry["llm"][ticker] = llm_entry
@@ -264,6 +276,8 @@ def backfill_outcomes(current_underlying_prices):
                         predicted_dir = "up" if main_action == "BUY" else "down"
                         outcome["main_predicted"] = main_action
                         outcome["main_correct"] = (predicted_dir == actual_dir)
+                        # Track move magnitude when signal voted
+                        outcome["main_actual_move_pct"] = round(move_pct, 4)
 
                     # Check LLM consensus accuracy
                     llm_info = entry.get("llm", {}).get(ticker, {})
@@ -271,19 +285,35 @@ def backfill_outcomes(current_underlying_prices):
                     if llm_dir in ("up", "down"):
                         outcome["llm_predicted"] = llm_dir
                         outcome["llm_correct"] = (llm_dir == actual_dir)
+                        outcome["llm_actual_move_pct"] = round(move_pct, 4)
 
-                    # Check individual LLM models
+                    # Check individual LLM models with price deviation
                     for model in ["chronos_1h", "chronos_3h"]:
                         m_dir = llm_info.get(model, "flat")
                         if m_dir in ("up", "down"):
                             outcome[f"{model}_predicted"] = m_dir
                             outcome[f"{model}_correct"] = (m_dir == actual_dir)
+                            outcome[f"{model}_actual_move_pct"] = round(move_pct, 4)
+
+                            # Chronos provides predicted pct_move — compute deviation
+                            pred_pct = llm_info.get(f"{model}_pct_move", 0)
+                            if pred_pct:
+                                # Signed predicted move (positive=up, negative=down)
+                                signed_pred = abs(pred_pct) if m_dir == "up" else -abs(pred_pct)
+                                # Error = predicted - actual
+                                error = signed_pred - move_pct
+                                abs_error = abs(error)
+                                outcome[f"{model}_pred_pct_move"] = round(signed_pred, 4)
+                                outcome[f"{model}_error_pct"] = round(error, 4)
+                                outcome[f"{model}_abs_error_pct"] = round(abs_error, 4)
 
                     ministral_action = llm_info.get("ministral", "HOLD")
                     if ministral_action in ("BUY", "SELL"):
                         m_dir = "up" if ministral_action == "BUY" else "down"
                         outcome["ministral_predicted"] = m_dir
                         outcome["ministral_correct"] = (m_dir == actual_dir)
+                        outcome["ministral_actual_move_pct"] = round(move_pct, 4)
+                        outcome["ministral_conf"] = llm_info.get("ministral_conf", 0)
 
                     # Per-individual-signal accuracy (from vote_detail parsing)
                     buy_sigs = signal_info.get("_buy_signals", [])
@@ -320,11 +350,31 @@ def backfill_outcomes(current_underlying_prices):
 
 
 def _recompute_accuracy(entries, start_idx):
-    """Recompute accuracy stats from resolved entries."""
+    """Recompute accuracy stats from resolved entries.
+
+    Tracks both directional accuracy and price deviation metrics:
+    - accuracy: % of correct direction predictions
+    - mae: mean absolute error of predicted vs actual % move (Chronos only)
+    - bias: mean signed error (positive = overestimates moves)
+    - avg_move_correct: avg actual move % when direction was correct
+    - avg_move_wrong: avg actual move % when direction was wrong
+    """
     global _accuracy_cache
+    import math
 
     # Collect all resolved outcomes
-    stats = {}  # {signal_key: {correct: int, total: int}}
+    # stats: {signal_key: {correct, total, errors[], actual_moves_correct[], actual_moves_wrong[]}}
+    stats = {}
+
+    def _ensure_key(key):
+        if key not in stats:
+            stats[key] = {
+                "correct": 0, "total": 0,
+                "errors": [],          # signed errors (predicted - actual) for Chronos
+                "abs_errors": [],      # absolute errors for Chronos
+                "actual_moves_correct": [],  # actual move % when direction correct
+                "actual_moves_wrong": [],    # actual move % when direction wrong
+            }
 
     resolved_count = 0
     for i in range(start_idx, len(entries) if entries else 0):
@@ -340,46 +390,95 @@ def _recompute_accuracy(entries, start_idx):
             for ticker, outcome in outcomes.items():
                 resolved_count += 1
                 short_ticker = ticker.split("-")[0]  # XAG, XAU
+                actual_move = outcome.get("move_pct", 0)
 
-                # Main signal accuracy
+                # Main signal accuracy + move tracking
                 if "main_correct" in outcome:
                     key = f"main_{short_ticker}_{h_key}"
-                    if key not in stats:
-                        stats[key] = {"correct": 0, "total": 0}
+                    _ensure_key(key)
                     stats[key]["total"] += 1
-                    if outcome["main_correct"]:
+                    correct = outcome["main_correct"]
+                    if correct:
                         stats[key]["correct"] += 1
+                        stats[key]["actual_moves_correct"].append(abs(actual_move))
+                    else:
+                        stats[key]["actual_moves_wrong"].append(abs(actual_move))
 
                 # LLM consensus accuracy
                 if "llm_correct" in outcome:
                     key = f"llm_{short_ticker}_{h_key}"
-                    if key not in stats:
-                        stats[key] = {"correct": 0, "total": 0}
+                    _ensure_key(key)
                     stats[key]["total"] += 1
-                    if outcome["llm_correct"]:
+                    correct = outcome["llm_correct"]
+                    if correct:
                         stats[key]["correct"] += 1
+                        stats[key]["actual_moves_correct"].append(abs(actual_move))
+                    else:
+                        stats[key]["actual_moves_wrong"].append(abs(actual_move))
 
-                # Individual models
+                # Individual models with deviation tracking
                 for model in ["chronos_1h", "chronos_3h", "ministral"]:
                     correct_key = f"{model}_correct"
                     if correct_key in outcome:
                         key = f"{model}_{short_ticker}_{h_key}"
-                        if key not in stats:
-                            stats[key] = {"correct": 0, "total": 0}
+                        _ensure_key(key)
                         stats[key]["total"] += 1
-                        if outcome[correct_key]:
+                        correct = outcome[correct_key]
+                        if correct:
                             stats[key]["correct"] += 1
+                            stats[key]["actual_moves_correct"].append(abs(actual_move))
+                        else:
+                            stats[key]["actual_moves_wrong"].append(abs(actual_move))
 
-    # Compute percentages
+                        # Chronos price deviation (predicted pct_move vs actual)
+                        error_key = f"{model}_error_pct"
+                        abs_error_key = f"{model}_abs_error_pct"
+                        if error_key in outcome:
+                            stats[key]["errors"].append(outcome[error_key])
+                            stats[key]["abs_errors"].append(outcome[abs_error_key])
+
+                # Per-individual-signal accuracy
+                per_sig = outcome.get("per_signal", {})
+                for sig_name, sig_data in per_sig.items():
+                    key = f"sig_{sig_name}_{short_ticker}_{h_key}"
+                    _ensure_key(key)
+                    stats[key]["total"] += 1
+                    if sig_data.get("correct"):
+                        stats[key]["correct"] += 1
+                        stats[key]["actual_moves_correct"].append(abs(actual_move))
+                    else:
+                        stats[key]["actual_moves_wrong"].append(abs(actual_move))
+
+    # Compute final stats
     result = {}
     for key, s in stats.items():
         total = min(s["total"], ACCURACY_WINDOW)
-        if total > 0:
-            result[key] = {
-                "correct": s["correct"],
-                "total": s["total"],
-                "accuracy": round(s["correct"] / s["total"], 3),
-            }
+        if total <= 0:
+            continue
+
+        entry = {
+            "correct": s["correct"],
+            "total": s["total"],
+            "accuracy": round(s["correct"] / s["total"], 3),
+        }
+
+        # Price deviation metrics (Chronos pct_move predictions)
+        if s["abs_errors"]:
+            n = len(s["abs_errors"])
+            entry["mae"] = round(sum(s["abs_errors"]) / n, 4)
+            entry["bias"] = round(sum(s["errors"]) / n, 4)
+            entry["rmse"] = round(math.sqrt(sum(e**2 for e in s["errors"]) / n), 4)
+            entry["deviation_samples"] = n
+
+        # Average move magnitude when correct vs wrong
+        if s["actual_moves_correct"]:
+            entry["avg_move_correct"] = round(
+                sum(s["actual_moves_correct"]) / len(s["actual_moves_correct"]), 4)
+        if s["actual_moves_wrong"]:
+            entry["avg_move_wrong"] = round(
+                sum(s["actual_moves_wrong"]) / len(s["actual_moves_wrong"]), 4)
+
+        result[key] = entry
 
     with _lock:
         _accuracy_cache = result
@@ -422,7 +521,8 @@ def get_accuracy_report():
 def get_accuracy_summary():
     """Get a one-line summary string for status display.
 
-    Returns e.g.: "main_XAG_1h:72%(18) chrono_1h_XAG_1h:55%(11)"
+    Includes direction accuracy + MAE where available.
+    Returns e.g.: "main_XAG_1h:72%(18) chronos_1h_XAG_1h:55%(11)MAE=0.32%"
     """
     report = get_accuracy_report()
     if not report:
@@ -434,7 +534,11 @@ def get_accuracy_summary():
         s = report[key]
         if s["total"] >= 5:  # only show meaningful samples
             pct = int(s["accuracy"] * 100)
-            parts.append(f"{key}:{pct}%({s['total']})")
+            part = f"{key}:{pct}%({s['total']})"
+            # Add MAE for models with price deviation data
+            if "mae" in s:
+                part += f" MAE={s['mae']:.2f}%"
+            parts.append(part)
 
     if not parts:
         return "< 5 samples"
@@ -464,10 +568,20 @@ def get_accuracy_for_context():
 
         if source not in by_source:
             by_source[source] = {}
-        by_source[source][horizon] = {
+        entry = {
             "accuracy": stats["accuracy"],
             "samples": stats["total"],
         }
+        # Include deviation metrics if available
+        if "mae" in stats:
+            entry["mae"] = stats["mae"]
+            entry["bias"] = stats["bias"]
+            entry["rmse"] = stats["rmse"]
+        if "avg_move_correct" in stats:
+            entry["avg_move_correct"] = stats["avg_move_correct"]
+        if "avg_move_wrong" in stats:
+            entry["avg_move_wrong"] = stats["avg_move_wrong"]
+        by_source[source][horizon] = entry
 
     # Find best/worst
     best_key = max(report.keys(), key=lambda k: report[k]["accuracy"]) if report else None
