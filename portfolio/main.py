@@ -610,6 +610,13 @@ if __name__ == "__main__":
         ticker = args[idx + 1].upper()
         from portfolio.analyze import run_analysis
         run_analysis(ticker)
+    elif "--analyze-focus" in args:
+        idx = args.index("--analyze-focus")
+        raw = args[idx + 1] if idx + 1 < len(args) and not args[idx + 1].startswith("--") else ""
+        tickers = [t.strip() for t in raw.split(",") if t.strip()] if raw else None
+        from portfolio.focus_analysis import run_focus_analysis
+        msg = run_focus_analysis(tickers=tickers)
+        print(msg)
     elif "--watch" in args:
         idx = args.index("--watch")
         pos_args = args[idx + 1:]
@@ -633,3 +640,4 @@ if __name__ == "__main__":
         loop(interval=override)
     else:
         run(force_report="--report" in args)
+
