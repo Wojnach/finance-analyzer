@@ -1,11 +1,14 @@
 """Health monitoring for the finance-analyzer Layer 1 loop."""
 
 import json
+import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from portfolio.file_utils import atomic_write_json
+
+logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 HEALTH_FILE = DATA_DIR / "health_state.json"
