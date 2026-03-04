@@ -38,8 +38,8 @@ def _load_state():
     if STATE_FILE.exists():
         try:
             return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("bigbet state load failed: %s", e)
     return {"cooldowns": {}, "price_history": {}}
 
 

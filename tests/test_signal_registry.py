@@ -13,6 +13,26 @@ from portfolio.signal_registry import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_registries():
+    """Snapshot and restore global registries to prevent cross-test pollution.
+
+    Under pytest-xdist, tests may run in parallel processes sharing state.
+    Manual `del` cleanup after assertions is fragile — if the assertion fails,
+    the cleanup is skipped and the entry leaks into subsequent tests (TEST-15).
+    """
+    enhanced_snapshot = dict(_ENHANCED_SIGNALS)
+    core_snapshot = dict(_CORE_SIGNALS)
+    yield
+    # Restore: remove any keys that were added during the test
+    for key in list(_ENHANCED_SIGNALS):
+        if key not in enhanced_snapshot:
+            del _ENHANCED_SIGNALS[key]
+    for key in list(_CORE_SIGNALS):
+        if key not in core_snapshot:
+            del _CORE_SIGNALS[key]
+
+
 class TestRegisterSignal:
     """Tests for the @register_signal decorator."""
 
@@ -26,8 +46,6 @@ class TestRegisterSignal:
         assert entry["name"] == "test_enhanced_dec"
         assert entry["type"] == "enhanced"
         assert entry["func"] is compute_test
-        # Cleanup
-        del _ENHANCED_SIGNALS["test_enhanced_dec"]
 
     def test_register_core_via_decorator(self):
         @register_signal("test_core_dec", signal_type="core")
@@ -38,8 +56,6 @@ class TestRegisterSignal:
         entry = _CORE_SIGNALS["test_core_dec"]
         assert entry["type"] == "core"
         assert entry["func"] is compute_core
-        # Cleanup
-        del _CORE_SIGNALS["test_core_dec"]
 
     def test_decorator_returns_original_function(self):
         @register_signal("test_passthrough", signal_type="enhanced")
@@ -47,7 +63,6 @@ class TestRegisterSignal:
             return 42
 
         assert my_func() == 42
-        del _ENHANCED_SIGNALS["test_passthrough"]
 
     def test_requires_macro_flag(self):
         @register_signal("test_macro", signal_type="enhanced", requires_macro=True)
@@ -55,7 +70,6 @@ class TestRegisterSignal:
             return {"vote": "HOLD"}
 
         assert _ENHANCED_SIGNALS["test_macro"]["requires_macro"] is True
-        del _ENHANCED_SIGNALS["test_macro"]
 
 
 class TestRegisterEnhanced:
@@ -68,12 +82,10 @@ class TestRegisterEnhanced:
         assert entry["module_path"] == "portfolio.signals.test"
         assert entry["func_name"] == "compute_test"
         assert entry["func"] is None  # lazy-loaded
-        del _ENHANCED_SIGNALS["test_prog"]
 
     def test_requires_macro_default_false(self):
         register_enhanced("test_nomacro", "mod.path", "func")
         assert _ENHANCED_SIGNALS["test_nomacro"]["requires_macro"] is False
-        del _ENHANCED_SIGNALS["test_nomacro"]
 
 
 class TestGetEnhancedSignals:

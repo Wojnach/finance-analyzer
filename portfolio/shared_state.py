@@ -39,6 +39,14 @@ def _cached(key, ttl, func, *args):
             expired = [k for k, v in _tool_cache.items() if now - v["time"] > 3600]
             for k in expired:
                 del _tool_cache[k]
+            # LRU fallback: if still over limit (all entries fresh), evict oldest 25%
+            if len(_tool_cache) > _CACHE_MAX_SIZE:
+                sorted_keys = sorted(
+                    _tool_cache, key=lambda k: _tool_cache[k]["time"]
+                )
+                evict_count = len(sorted_keys) // 4 or 1
+                for k in sorted_keys[:evict_count]:
+                    del _tool_cache[k]
     try:
         data = func(*args)
         with _cache_lock:

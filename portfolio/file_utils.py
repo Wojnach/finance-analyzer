@@ -1,9 +1,12 @@
 """Shared file I/O utilities."""
 import json
+import logging
 import os
 import tempfile
 from collections import deque
 from pathlib import Path
+
+logger = logging.getLogger("portfolio.file_utils")
 
 
 def atomic_write_json(path, data, indent=2):
@@ -76,3 +79,43 @@ def atomic_append_jsonl(path, entry):
         f.write(line)
         f.flush()
         os.fsync(f.fileno())
+
+
+def prune_jsonl(path, max_entries=5000):
+    """Prune a JSONL file to keep only the most recent *max_entries*.
+
+    Reads the file, keeps the tail, and atomically rewrites it.
+    No-op if the file has fewer entries than *max_entries*.
+
+    Returns the number of entries removed, or 0 if no pruning was needed.
+    """
+    path = Path(path)
+    if not path.exists():
+        return 0
+    lines = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if stripped:
+                lines.append(stripped)
+    if len(lines) <= max_entries:
+        return 0
+    removed = len(lines) - max_entries
+    keep = lines[-max_entries:]
+    # Atomic rewrite via tempfile
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            for line in keep:
+                f.write(line + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, str(path))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    logger.info("Pruned %s: removed %d entries, kept %d", path.name, removed, max_entries)
+    return removed

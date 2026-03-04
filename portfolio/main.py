@@ -155,6 +155,14 @@ def _run_post_cycle(config):
             refresh_fundamentals_batch(config)
     except Exception as e_av:
         logger.warning("Alpha Vantage refresh failed: %s", e_av)
+    # Prune unbounded JSONL files to prevent disk exhaustion (BUG-59)
+    try:
+        from portfolio.file_utils import prune_jsonl
+        _data = Path(__file__).resolve().parent.parent / "data"
+        for name in ("invocations.jsonl", "layer2_journal.jsonl", "telegram_messages.jsonl"):
+            prune_jsonl(_data / name, max_entries=5000)
+    except Exception as e_prune:
+        logger.warning("JSONL prune failed: %s", e_prune)
 
 
 # --- Main orchestrator ---

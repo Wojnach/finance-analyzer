@@ -156,7 +156,12 @@ def reset_circuit_breakers():
 
 
 def _log_health(model: str, ticker: str, success: bool, duration_ms: int, error: str = ""):
-    """Append a line to forecast_health.jsonl for persistent success/failure tracking."""
+    """Append a line to forecast_health.jsonl for persistent success/failure tracking.
+
+    On success, auto-resets the relevant circuit breaker so recovered models
+    resume immediately instead of waiting for the full TTL (BUG-56 fix).
+    """
+    global _kronos_tripped_until, _chronos_tripped_until
     try:
         entry = {
             "ts": datetime.now(timezone.utc).isoformat(),
@@ -171,6 +176,15 @@ def _log_health(model: str, ticker: str, success: bool, duration_ms: int, error:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception:
         pass  # health logging must never break the signal
+
+    # Auto-reset circuit breaker on success — faster recovery from transient failures
+    if success:
+        if model == "kronos" and _kronos_tripped_until > 0:
+            _kronos_tripped_until = 0.0
+            logger.info("Kronos circuit breaker RESET on successful %s", ticker)
+        elif model == "chronos" and _chronos_tripped_until > 0:
+            _chronos_tripped_until = 0.0
+            logger.info("Chronos circuit breaker RESET on successful %s", ticker)
 
 
 def _load_candles_ohlcv(ticker: str, periods: int = 168,

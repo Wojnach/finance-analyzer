@@ -91,8 +91,8 @@ def invoke_agent(reasons, tier=3):
         if not l2_cfg.get("enabled", True):
             logger.info("Layer 2 disabled (config.layer2.enabled=false), skipping")
             return False
-    except Exception:
-        pass  # if config fails to load, default to enabled
+    except Exception as e:
+        logger.warning("Failed to load config for layer2 check: %s", e)
 
     tier_cfg = TIER_CONFIG.get(tier, TIER_CONFIG[3])
     timeout = tier_cfg["timeout"]
@@ -198,8 +198,8 @@ def invoke_agent(reasons, tier=3):
             tier_label = tier_cfg["label"]
             notify_msg = f"_Layer 2 T{tier} ({tier_label}): {reason_str}_"
             send_or_store(notify_msg, config, category="invocation")
-        except Exception:
-            pass  # non-critical
+        except Exception as e:
+            logger.debug("invocation notification failed: %s", e)
         return True
     except Exception as e:
         logger.error("invoking agent: %s", e)
