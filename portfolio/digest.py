@@ -39,7 +39,11 @@ def _get_last_digest_time():
 
 def _set_last_digest_time(t):
     path = DATA_DIR / "trigger_state.json"
-    state = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    try:
+        state = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (json.JSONDecodeError, OSError):
+        logger.warning("trigger_state.json corrupt in _set_last_digest_time, resetting")
+        state = {}
     state["last_digest_time"] = t
     _atomic_write_json(path, state)
 

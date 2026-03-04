@@ -372,7 +372,7 @@ def _detect_supply_demand(
     # Expand zones slightly by proximity_pct to catch near-touches
     in_demand = False
     for z_low, z_high in demand_zones:
-        margin = (z_high - z_low) * proximity_pct / 0.005 if z_high > z_low else 0
+        margin = (z_high - z_low) * proximity_pct / _ZONE_PROXIMITY_PCT if z_high > z_low else 0
         # Use a small expansion: max of proximity_pct * price or a fraction
         # of zone width
         expand = max(current_close * proximity_pct, margin * 0.1)
@@ -382,7 +382,7 @@ def _detect_supply_demand(
 
     in_supply = False
     for z_low, z_high in supply_zones:
-        margin = (z_high - z_low) * proximity_pct / 0.005 if z_high > z_low else 0
+        margin = (z_high - z_low) * proximity_pct / _ZONE_PROXIMITY_PCT if z_high > z_low else 0
         expand = max(current_close * proximity_pct, margin * 0.1)
         if (z_low - expand) <= current_close <= (z_high + expand):
             in_supply = True

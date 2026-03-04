@@ -53,8 +53,8 @@ def _init_kronos_enabled():
     """Read kronos_enabled from config.json at import time."""
     global _KRONOS_ENABLED
     try:
-        import json as _json
-        _cfg = _json.load(open(Path(__file__).resolve().parent.parent.parent / "config.json"))
+        from portfolio.file_utils import load_json as _load_json
+        _cfg = _load_json(str(Path(__file__).resolve().parent.parent.parent / "config.json"), {})
         _KRONOS_ENABLED = bool(_cfg.get("forecast", {}).get("kronos_enabled", False))
     except Exception:
         pass
@@ -238,7 +238,8 @@ def _run_kronos(candles: list[dict], horizons: tuple = (1, 24), _ticker: str = "
     try:
         # Read tunable params from config
         try:
-            cfg = json.load(open(Path(__file__).resolve().parent.parent.parent / "config.json"))
+            from portfolio.file_utils import load_json
+            cfg = load_json(str(Path(__file__).resolve().parent.parent.parent / "config.json"), {})
             fc = cfg.get("forecast", {})
         except Exception:
             fc = {}

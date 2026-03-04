@@ -199,8 +199,8 @@ def _check_telegram_confirm(config: dict) -> bool:
     # Save offset
     try:
         offset_file.write_text(str(offset))
-    except OSError:
-        pass
+    except OSError as e:
+        logger.warning("Failed to save Telegram offset: %s", e)
 
     return found_confirm
 
@@ -257,8 +257,8 @@ def _execute_confirmed_order(order: dict, config: dict) -> None:
                 f"AVANZA ORDER ERROR\n{order['instrument_name']}: {e}",
                 config,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Order error notification failed: %s", e)
 
 
 def _notify_expired(order: dict, config: dict) -> None:
