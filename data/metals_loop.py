@@ -103,7 +103,7 @@ except ImportError as e:
 
 # --- CONFIG ---
 CLAUDE_ENABLED = False        # Master switch: set True to re-enable Claude invocations
-CHECK_INTERVAL = 60           # seconds between checks (was 30 — unified loop covers more)
+CHECK_INTERVAL = 30           # seconds between checks
 TRIGGER_PRICE_MOVE = 5.0      # % move from last invocation to trigger (was 2.0)
 TRIGGER_TRAILING = 8.0        # % drop from peak to trigger (was 3.0)
 TRIGGER_PROFIT = 4.0          # % profit from entry to trigger
@@ -133,7 +133,7 @@ STOP_L2_PCT = 5.0   # L2: alert — Telegram + force Claude invocation
 STOP_L3_PCT = 2.0   # L3: emergency — auto-sell immediately
 
 # Cascading stop-loss orders (hardware protection via Avanza limit orders)
-STOP_ORDER_ENABLED = True
+STOP_ORDER_ENABLED = False      # default OFF: only place stop orders on explicit request
 STOP_ORDER_LEVELS = 3          # number of stop orders per position
 STOP_ORDER_SPREAD_PCT = 1.0    # spread between levels (1% of stop price)
 STOP_ORDER_FILE = "data/metals_stop_orders.json"
@@ -166,8 +166,10 @@ MOMENTUM_REQUIRE_L1 = True      # only trigger if already in L1+ danger zone
 # Auto-exit override (prevent Claude HOLD paralysis)
 AUTO_EXIT_L2_CHECKS = 5         # auto-sell after position in L2+ zone for N checks
 
-# Periodic holdings verification — high frequency for auto-detect
-HOLDINGS_CHECK_INTERVAL = 4     # verify Avanza holdings every N checks (~2 min at 30s)
+# Holdings reconciliation cadence (always compare local state vs Avanza)
+HOLDINGS_DIFF_INTERVAL_S = 30   # run diff/reconcile every 30s
+# Legacy periodic verification cadence (active positions only)
+HOLDINGS_CHECK_INTERVAL = 4     # every N checks
 
 # Tier config: model, timeout, max_turns (no Opus — Sonnet handles critical too)
 TIER_CONFIG = {
@@ -1510,13 +1512,43 @@ def emergency_sell(page, key, pos, bid):
             return True
 
         elif "short.sell.not.allowed" in message_code:
-            # "Short sell not allowed" means we tried to sell more than we hold.
-            # This happens when: (a) position already sold by stop-loss on Avanza,
-            # (b) position was sold in a previous emergency_sell this session, or
-            # (c) we never held this position on this account.
-            # In all cases, deactivate — we clearly don't hold it.
-            log(f"  {key}: short-sell-not-allowed — position already sold or not held, deactivating")
-            send_telegram(f"*L3* {pos['name']}: not held (already sold?), deactivating")
+            # Ambiguous broker response: can mean already sold OR account/order mismatch.
+            # Confirm with live holdings before deactivating local state.
+            held_confirmed = False
+            try:
+                verify = page.evaluate("""async (args) => {
+                    const [accountId, orderbookId] = args;
+                    const resp = await fetch(
+                        'https://www.avanza.se/_api/position-data/positions',
+                        {credentials: 'include'}
+                    );
+                    if (resp.status !== 200) return {held: null, status: resp.status};
+                    const data = await resp.json();
+                    for (const item of (data.withOrderbook || [])) {
+                        if (
+                            item.account && String(item.account.id) === String(accountId) &&
+                            item.instrument && item.instrument.orderbook &&
+                            String(item.instrument.orderbook.id) === String(orderbookId)
+                        ) {
+                            const vol = item.volume && item.volume.value != null ? item.volume.value : 0;
+                            return {held: vol > 0, units: vol};
+                        }
+                    }
+                    return {held: false, units: 0};
+                }""", [ACCOUNT_ID, pos["ob_id"]])
+                held_confirmed = bool(verify and verify.get("held") is True)
+                if held_confirmed and verify.get("units") is not None:
+                    pos["units"] = int(verify["units"])
+            except Exception as e:
+                log(f"  {key}: holdings re-check failed after short-sell-not-allowed: {e}")
+
+            if held_confirmed:
+                log(f"  {key}: short-sell-not-allowed but position still held — keeping active")
+                send_telegram(f"*L3 WARNING* {pos['name']}: SELL rejected but holding is still live. Kept active.")
+                return False
+
+            log(f"  {key}: short-sell-not-allowed and not held — deactivating")
+            send_telegram(f"*L3* {pos['name']}: no longer held, deactivating")
             pos["active"] = False
             pos["sold_ts"] = now_ts
             pos["sold_price"] = bid
@@ -1932,17 +1964,18 @@ def _handle_buy_fill(page, order, exec_price, price_data):
 
     _save_positions(POSITIONS)
 
-    # Place hardware stop-loss
-    stop_trigger = order.get("stop_trigger")
-    stop_sell = order.get("stop_sell")
-    if stop_trigger and stop_sell and order["volume"] > 0:
-        vol = POSITIONS[pos_key]["units"]  # use total units (may have added to existing)
-        ok, stop_id = place_stop_loss(page, ACCOUNT_ID, order["ob_id"], stop_trigger, stop_sell, vol)
-        if ok:
-            log(f"  Stop-loss placed for {pos_key}: trigger={stop_trigger}, sell={stop_sell}")
-        else:
-            log(f"  Stop-loss FAILED for {pos_key} — manual intervention needed")
-            send_telegram(f"*WARNING* Stop-loss failed for {POSITIONS[pos_key]['name']} — set manually!")
+    # Place hardware stop-loss (only if enabled)
+    if STOP_ORDER_ENABLED:
+        stop_trigger = order.get("stop_trigger")
+        stop_sell = order.get("stop_sell")
+        if stop_trigger and stop_sell and order["volume"] > 0:
+            vol = POSITIONS[pos_key]["units"]  # use total units (may have added to existing)
+            ok, stop_id = place_stop_loss(page, ACCOUNT_ID, order["ob_id"], stop_trigger, stop_sell, vol)
+            if ok:
+                log(f"  Stop-loss placed for {pos_key}: trigger={stop_trigger}, sell={stop_sell}")
+            else:
+                log(f"  Stop-loss FAILED for {pos_key} — manual intervention needed")
+                send_telegram(f"*WARNING* Stop-loss failed for {POSITIONS[pos_key]['name']} — set manually!")
 
 
 def _handle_sell_fill(page, order, exec_price):
@@ -3224,7 +3257,7 @@ def main():
     log("*** AUTONOMOUS MODE v9 — unified 5-instrument monitoring ***")
     log(f"*** Smart trailing stops: {TRAIL_DISTANCE_PCT}% base, "
         f"{TRAIL_TIGHTEN_MOMENTUM}% momentum, {TRAIL_TIGHTEN_ACCEL}% accel ***")
-    log(f"*** Holdings auto-detect every {HOLDINGS_CHECK_INTERVAL} checks (~{HOLDINGS_CHECK_INTERVAL*CHECK_INTERVAL}s) ***")
+    log(f"*** Holdings reconcile every {HOLDINGS_DIFF_INTERVAL_S}s (Avanza vs local state) ***")
     log(f"*** Probability telegram every {PROB_TELEGRAM_INTERVAL} checks (~{PROB_TELEGRAM_INTERVAL*CHECK_INTERVAL//60}min) ***")
     log(f"*** Tracking: XAG/XAU (FAPI) + BTC/ETH (SPOT) + MSTR (Yahoo) ***")
     log(f"Short instruments: {', '.join(v['name'] for v in SHORT_INSTRUMENTS.values())}")
@@ -3282,7 +3315,8 @@ def main():
             if pos["active"]:
                 p = fetch_price(page, pos["ob_id"], pos["api_type"])
                 if p and p.get('bid'):
-                    peak_bids[key] = p.get('high') or p['bid']
+                    # Use current bid as trailing baseline; day-high can trigger false emergency exits.
+                    peak_bids[key] = p['bid']
                     last_invoke_prices[key] = p['bid']
                     log(f"  {key}: bid={p['bid']}, peak={peak_bids[key]}, entry={pos['entry']}, "
                         f"pnl={pnl_pct(p['bid'], pos['entry']):+.1f}%")
@@ -3407,7 +3441,7 @@ def main():
         crypto_tag = "F&G+news+onchain" if CRYPTO_DATA_AVAILABLE else "OFF"
         send_telegram(f"""*UNIFIED LOOP v9 STARTED*
 Instruments: XAG/XAU/BTC/ETH/MSTR
-Interval: {CHECK_INTERVAL}s | Holdings detect: {HOLDINGS_CHECK_INTERVAL*CHECK_INTERVAL}s
+Interval: {CHECK_INTERVAL}s | Holdings diff: every {HOLDINGS_DIFF_INTERVAL_S}s
 LLM: {"Ministral+Chronos (4 tickers)" if LLM_AVAILABLE else "OFF"}
 Crypto: {crypto_tag}
 Stops: smart trailing {TRAIL_DISTANCE_PCT}%/{TRAIL_TIGHTEN_MOMENTUM}%/{TRAIL_TIGHTEN_ACCEL}%
@@ -3416,11 +3450,36 @@ Session: {"ALIVE" if session_healthy else "DEAD"}
 Positions: {pos_summary}{prob_summary}""")
 
         try:
+            last_holdings_diff_ts = 0.0
             while True:
                 check_count += 1
 
                 # --- ALWAYS: Fetch underlying prices from Binance FAPI (24/7) ---
                 fetch_underlying_from_binance()
+
+                # --- HOLDINGS DIFF/RECONCILE (always, every 30s) ---
+                now_ts = time.time()
+                if now_ts - last_holdings_diff_ts >= HOLDINGS_DIFF_INTERVAL_S:
+                    last_holdings_diff_ts = now_ts
+                    changes = detect_holdings(page)
+                    if changes:
+                        # New instruments detected — place stops, update peaks
+                        for key, pos in POSITIONS.items():
+                            if pos["active"] and key not in peak_bids:
+                                try:
+                                    p = fetch_price(page, pos["ob_id"], pos["api_type"])
+                                    if p and p.get("bid"):
+                                        # Freshly detected holdings should start trailing from current bid.
+                                        peak_bids[key] = p["bid"]
+                                        last_invoke_prices[key] = p["bid"]
+                                except Exception:
+                                    pass
+                        if STOP_ORDER_ENABLED:
+                            stop_order_state = place_stop_loss_orders(page, POSITIONS)
+                        send_telegram(
+                            "*HOLDINGS UPDATE*\n" +
+                            "\n".join(f"• {c}" for c in changes)
+                        )
 
                 if not is_market_hours():
                     # Outside Avanza hours: still track underlyings + compute probability
@@ -3442,27 +3501,6 @@ Positions: {pos_summary}{prob_summary}""")
                         log(f"Outside market hours — {' '.join(price_tags)}")
                     time.sleep(CHECK_INTERVAL)
                     continue
-
-                # --- HOLDINGS AUTO-DETECT (every ~2 min) ---
-                if check_count % HOLDINGS_CHECK_INTERVAL == 0:
-                    changes = detect_holdings(page)
-                    if changes:
-                        # New instruments detected — place stops, update peaks
-                        for key, pos in POSITIONS.items():
-                            if pos["active"] and key not in peak_bids:
-                                try:
-                                    p = fetch_price(page, pos["ob_id"], pos["api_type"])
-                                    if p and p.get("bid"):
-                                        peak_bids[key] = p.get("high") or p["bid"]
-                                        last_invoke_prices[key] = p["bid"]
-                                except Exception:
-                                    pass
-                        if STOP_ORDER_ENABLED:
-                            stop_order_state = place_stop_loss_orders(page, POSITIONS)
-                        send_telegram(
-                            "*HOLDINGS UPDATE*\n" +
-                            "\n".join(f"• {c}" for c in changes)
-                        )
 
                 # Fetch warrant prices for active positions
                 prices = {}
