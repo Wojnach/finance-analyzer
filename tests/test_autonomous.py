@@ -371,7 +371,14 @@ class TestBuildTelegram:
         assert "BTC" in msg
 
     def test_hold_count_shown(self):
-        msg = self._call(hold_count=15)
+        actionable = {"BTC-USD": _make_signal("HOLD", buy_count=2, sell_count=1, close=67000)}
+        predictions = {
+            "BTC-USD": {
+                "outlook": "neutral", "conviction": 0.2,
+                "thesis": "range", "recommendation": "HOLD",
+            },
+        }
+        msg = self._call(actionable=actionable, predictions=predictions, hold_count=15)
         assert "15" in msg
 
     def test_portfolio_context(self):
@@ -405,8 +412,43 @@ class TestBuildTelegram:
         assert len(msg) <= 4096
 
     def test_sell_count_in_summary(self):
-        msg = self._call(hold_count=10, sell_count=2)
+        actionable = {"BTC-USD": _make_signal("HOLD", buy_count=2, sell_count=1, close=67000)}
+        predictions = {
+            "BTC-USD": {
+                "outlook": "neutral", "conviction": 0.2,
+                "thesis": "range", "recommendation": "HOLD",
+            },
+        }
+        msg = self._call(
+            actionable=actionable,
+            predictions=predictions,
+            hold_count=10,
+            sell_count=2,
+        )
         assert "2 sell" in msg.lower() or "2S" in msg
+
+    def test_buy_mode_hides_hold_sell_summary(self):
+        msg = self._call(hold_count=10, sell_count=2)
+        assert "hold" not in msg.lower()
+        assert " sell" not in msg.lower()
+
+    def test_sell_mode_hides_hold_sell_summary(self):
+        actionable = {"BTC-USD": _make_signal("SELL", buy_count=1, sell_count=5, close=67000)}
+        predictions = {
+            "BTC-USD": {
+                "outlook": "bearish", "conviction": 0.7,
+                "thesis": "breakdown", "recommendation": "SELL",
+            },
+        }
+        msg = self._call(
+            actionable=actionable,
+            predictions=predictions,
+            hold_count=10,
+            sell_count=2,
+        )
+        assert "*AUTO SELL" in msg
+        assert "+10 hold" not in msg.lower()
+        assert "2 sell" not in msg.lower()
 
     def test_mode_b_probability(self):
         config = _base_config()
@@ -503,6 +545,13 @@ class TestShouldSend:
         reasons = ["post-trade reassessment"]
         with patch("portfolio.autonomous.THROTTLE_FILE", tmp_path / "throttle.json"):
             assert _should_send(predictions, reasons, tier=2) is True
+
+    def test_consensus_hold_only_is_suppressed(self, tmp_path):
+        from portfolio.autonomous import _should_send
+        predictions = {"BTC-USD": {"recommendation": "HOLD"}}
+        reasons = ["BTC-USD consensus HOLD"]
+        with patch("portfolio.autonomous.THROTTLE_FILE", tmp_path / "throttle.json"):
+            assert _should_send(predictions, reasons, tier=3) is False
 
 
 # ===========================================================================

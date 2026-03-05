@@ -502,17 +502,21 @@ def _build_telegram_mode_a(actionable, hold_count, sell_count, patient_state, bo
                            config, tier, regime, reflection, reasons):
     """Mode A: BUY/SELL ticker grid format."""
     lines = []
+    trade_tickers = [
+        (t, p) for t, p in predictions.items() if p.get("recommendation") in ("BUY", "SELL")
+    ]
+    focus_reco = None
 
     # --- First line: Apple Watch glance ---
-    has_trade = any(p["recommendation"] in ("BUY", "SELL") for p in predictions.values())
+    has_trade = len(trade_tickers) > 0
     if has_trade:
-        # Find top movers
         top = sorted(
-            [(t, p) for t, p in predictions.items() if p["recommendation"] != "HOLD"],
+            trade_tickers,
             key=lambda x: -x[1].get("conviction", 0),
         )
         if top:
             t, p = top[0]
+            focus_reco = p.get("recommendation")
             price_str = _format_price(prices_usd.get(t, 0))
             lines.append(f"*AUTO {p['recommendation']} {t}* {price_str}")
         else:
@@ -549,9 +553,11 @@ def _build_telegram_mode_a(actionable, hold_count, sell_count, patient_state, bo
 
     # --- Ticker grid ---
     for ticker, sig in actionable.items():
+        pred = predictions.get(ticker, {})
+        if focus_reco and pred.get("recommendation") != focus_reco:
+            continue
         price = prices_usd.get(ticker, 0)
         p_str = _format_price(price)
-        pred = predictions.get(ticker, {})
         action = pred.get("recommendation", sig.get("action", "HOLD"))
         extra = sig.get("extra", {})
         b = extra.get("_buy_count", 0)
@@ -570,13 +576,14 @@ def _build_telegram_mode_a(actionable, hold_count, sell_count, patient_state, bo
         lines.append(line)
 
     # --- Summary line ---
-    summary_parts = []
-    if hold_count > 0:
-        summary_parts.append(f"+{hold_count} hold")
-    if sell_count > 0:
-        summary_parts.append(f"{sell_count} sell")
-    if summary_parts:
-        lines.append(f"_{' \u00b7 '.join(summary_parts)}_")
+    if not focus_reco:
+        summary_parts = []
+        if hold_count > 0:
+            summary_parts.append(f"+{hold_count} hold")
+        if sell_count > 0:
+            summary_parts.append(f"{sell_count} sell")
+        if summary_parts:
+            lines.append(f"_{' \u00b7 '.join(summary_parts)}_")
 
     # --- Context line ---
     safe_fx = fx_rate if fx_rate > 0 else 1
@@ -603,13 +610,13 @@ def _build_telegram_mode_a(actionable, hold_count, sell_count, patient_state, bo
     reasoning_parts = []
     buy_tickers = [t for t, p in predictions.items() if p["recommendation"] == "BUY"]
     sell_tickers = [t for t, p in predictions.items() if p["recommendation"] == "SELL"]
-    if buy_tickers:
+    if buy_tickers and focus_reco in (None, "BUY"):
         for t in buy_tickers[:2]:
             p = predictions[t]
             b = p.get("buy_count", 0)
             s = p.get("sell_count", 0)
             reasoning_parts.append(f"{t}: BUY signal {b}B/{s}S — {p.get('thesis', '')}")
-    if sell_tickers:
+    if sell_tickers and focus_reco in (None, "SELL"):
         for t in sell_tickers[:2]:
             p = predictions[t]
             b = p.get("buy_count", 0)
@@ -738,6 +745,10 @@ def _should_send(predictions, reasons, tier):
     has_action = any(p["recommendation"] in ("BUY", "SELL") for p in predictions.values())
     if has_action:
         return True
+    # Skip noise if all reasons are explicit consensus HOLD only.
+    normalized = [str(r).strip().lower() for r in (reasons or []) if str(r).strip()]
+    if normalized and all(("consensus" in r and "hold" in r and "buy" not in r and "sell" not in r) for r in normalized):
+        return False
     if tier >= 3:
         return True
     for r in reasons:
