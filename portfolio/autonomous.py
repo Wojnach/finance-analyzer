@@ -32,6 +32,34 @@ THROTTLE_FILE = DATA_DIR / "autonomous_throttle.json"
 
 _HOLD_COOLDOWN_SECONDS = 1800  # 30 minutes between routine HOLD messages
 _TF_ORDER = ["Now", "12h", "2d", "7d", "1mo", "3mo", "6mo"]
+_MIN_BUY_VOTES = 3             # raw BUY votes required to classify as BUY
+_BUY_MUST_DOMINATE = True      # BUY votes must exceed SELL votes
+
+_consensus_acc_cache = None
+
+
+def _consensus_accuracy():
+    """Load cached consensus accuracy from agent_summary (compact preferred)."""
+    global _consensus_acc_cache
+    if _consensus_acc_cache is not None:
+        return _consensus_acc_cache
+
+    for fname in ("agent_summary_compact.json", "agent_summary.json"):
+        path = DATA_DIR / fname
+        summary = load_json(path, default=None)
+        if not summary:
+            continue
+        acc = (
+            summary.get("signal_accuracy_1d", {})
+            .get("consensus", {})
+            .get("accuracy")
+        )
+        if isinstance(acc, (int, float)):
+            _consensus_acc_cache = acc
+            return acc
+
+    _consensus_acc_cache = None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +313,13 @@ def _ticker_prediction(ticker, sig, tf_entries):
 
     conviction = max(0.0, min(1.0, conviction))
 
+    # Gating: suppress weak BUY consensus (too few or not dominant)
+    if action == "BUY":
+        if buy_count < _MIN_BUY_VOTES or (_BUY_MUST_DOMINATE and buy_count <= sell_count):
+            recommendation = "HOLD"
+            outlook = "neutral"
+            conviction = 0.0
+
     # Generate thesis
     parts = []
     if action != "HOLD":
@@ -516,7 +551,8 @@ def _build_telegram_mode_a(actionable, hold_count, sell_count, patient_state, bo
     for ticker, sig in actionable.items():
         price = prices_usd.get(ticker, 0)
         p_str = _format_price(price)
-        action = sig.get("action", "HOLD")
+        pred = predictions.get(ticker, {})
+        action = pred.get("recommendation", sig.get("action", "HOLD"))
         extra = sig.get("extra", {})
         b = extra.get("_buy_count", 0)
         s = extra.get("_sell_count", 0)
@@ -524,10 +560,14 @@ def _build_telegram_mode_a(actionable, hold_count, sell_count, patient_state, bo
         h = max(0, total - b - s)
         tf_entries = tf_data.get(ticker, [])
         heatmap = _tf_heatmap(tf_entries)
+        prob = pred.get("conviction")
 
         # Truncate ticker to 5 chars for alignment
         t_short = ticker.replace("-USD", "").replace("-", "")[:5]
-        lines.append(f"`{t_short:<5} {p_str:>7}  {action:<4} {b}B/{s}S/{h}H {heatmap}`")
+        line = f"`{t_short:<5} {p_str:>7}  {action:<4} {b}B/{s}S/{h}H {heatmap}`"
+        if prob is not None:
+            line += f" p{int(round(prob * 100))}%"
+        lines.append(line)
 
     # --- Summary line ---
     summary_parts = []
@@ -553,7 +593,9 @@ def _build_telegram_mode_a(actionable, hold_count, sell_count, patient_state, bo
         if h.get("shares", 0) > 0:
             bold_holdings_str += f" {t.replace('-USD', '')} {h['shares']:.0f}sh"
 
-    ctx = f"_P:{p_total / 1000:.0f}K({p_pnl:+.0f}%) \u00b7 B:{b_total / 1000:.0f}K({b_pnl:+.0f}%){bold_holdings_str}_"
+    acc = _consensus_accuracy()
+    acc_str = f" \u00b7 acc{int(round(acc * 100))}%" if acc is not None else ""
+    ctx = f"_P:{p_total / 1000:.0f}K({p_pnl:+.0f}%) \u00b7 B:{b_total / 1000:.0f}K({b_pnl:+.0f}%){bold_holdings_str}{acc_str}_"
     lines.append("")
     lines.append(ctx)
 

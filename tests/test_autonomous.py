@@ -217,6 +217,13 @@ class TestTickerPrediction:
         # Low RSI supports a buy
         assert pred["conviction"] > 0.3
 
+    def test_buy_suppressed_when_votes_weak(self):
+        from portfolio.autonomous import _ticker_prediction
+        sig = _make_signal("BUY", conf=0.7, rsi=45, buy_count=2, sell_count=4)
+        pred = _ticker_prediction("AAPL", sig, _make_tf_data("AAPL"))
+        assert pred["recommendation"] == "HOLD"
+        assert pred["conviction"] == 0.0
+
     def test_tf_alignment_boosts_conviction(self):
         from portfolio.autonomous import _ticker_prediction
         sig = _make_signal("BUY", conf=0.6, rsi=50, buy_count=5, sell_count=1)
