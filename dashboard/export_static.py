@@ -17,6 +17,7 @@ from pathlib import Path
 # Ensure project root is importable
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+CONFIG_PATH = PROJECT_ROOT / "config.json"
 
 from dashboard.app import app  # noqa: E402
 
@@ -36,10 +37,21 @@ ENDPOINTS = [
     ("/api/warrants", "warrants.json"),
     ("/api/risk", "risk.json"),
     ("/api/metals", "metals.json"),
+    ("/api/metals-accuracy", "metals-accuracy.json"),
+    ("/api/lora-status", "lora-status.json"),
     ("/api/health", "health.json"),
 ]
 
 DEFAULT_OUT_DIR = Path(__file__).resolve().parent / "static" / "api-data"
+
+
+def _get_dashboard_token():
+    """Read dashboard token from config.json, if configured."""
+    try:
+        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return cfg.get("dashboard_token") or None
 
 
 def export_all(out_dir: Path | None = None) -> dict:
@@ -54,6 +66,7 @@ def export_all(out_dir: Path | None = None) -> dict:
     if out_dir is None:
         out_dir = DEFAULT_OUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
+    token = _get_dashboard_token()
 
     ok = []
     failed = []
@@ -61,7 +74,11 @@ def export_all(out_dir: Path | None = None) -> dict:
     with app.test_client() as client:
         for route, filename in ENDPOINTS:
             try:
-                resp = client.get(route)
+                req_route = route
+                if token:
+                    sep = "&" if "?" in req_route else "?"
+                    req_route = f"{req_route}{sep}token={token}"
+                resp = client.get(req_route)
                 if resp.status_code != 200:
                     failed.append({
                         "route": route,

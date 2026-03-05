@@ -243,6 +243,18 @@ class TestApiTelegrams:
         assert len(data) == 1
         assert data[0]["text"] == "hello"
 
+    def test_skips_non_dict_json_lines(self, client, tmp_data):
+        (tmp_data / "telegram_messages.jsonl").write_text(
+            '"raw string"\n{"ts":"t1","text":"ok"}\n[1,2,3]\n',
+            encoding="utf-8",
+        )
+        with _no_auth():
+            resp = client.get("/api/telegrams")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data) == 1
+        assert data[0]["text"] == "ok"
+
 
 class TestApiSignalLog:
     def test_returns_entries(self, client, tmp_data):
@@ -385,6 +397,32 @@ class TestApiAccuracyHistory:
         with _no_auth():
             resp = client.get("/api/accuracy-history")
         assert resp.get_json() == []
+
+
+class TestApiMetalsAccuracy:
+    def test_returns_stats_when_file_exists(self, client, tmp_data):
+        payload = {"stats": {"xag": {"1h": {"accuracy": 0.6, "total": 10}}}}
+        (tmp_data / "metals_signal_accuracy.json").write_text(
+            json.dumps(payload), encoding="utf-8"
+        )
+        with _no_auth():
+            resp = client.get("/api/metals-accuracy")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["stats"]["xag"]["1h"]["accuracy"] == 0.6
+
+    def test_returns_empty_shape_when_missing(self, client, tmp_data):
+        with _no_auth():
+            resp = client.get("/api/metals-accuracy")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["error"] == "no data"
+        assert data["stats"] == {}
+
+    def test_requires_auth_when_configured(self, client, tmp_data):
+        with patch("dashboard.app._get_dashboard_token", return_value="secret"):
+            resp = client.get("/api/metals-accuracy")
+        assert resp.status_code == 401
 
 
 class TestApiTrades:
@@ -832,6 +870,22 @@ class TestApiDecisions:
         data = resp.get_json()
         assert len(data) == 1
         assert data[0]["ts"] == "2026-02-22T08:00:00+00:00"
+
+    def test_skips_non_dict_json_lines(self, client, tmp_data):
+        lines = [
+            json.dumps("raw string line"),
+            json.dumps(_sample_journal_entry(ts="2026-02-22T10:00:00+00:00")),
+            json.dumps(["bad", "shape"]),
+        ]
+        (tmp_data / "layer2_journal.jsonl").write_text(
+            "\n".join(lines) + "\n", encoding="utf-8"
+        )
+        with _no_auth():
+            resp = client.get("/api/decisions")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data) == 1
+        assert data[0]["ts"] == "2026-02-22T10:00:00+00:00"
 
 
 # ---------------------------------------------------------------------------
