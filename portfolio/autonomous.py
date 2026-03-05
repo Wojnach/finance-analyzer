@@ -601,8 +601,8 @@ def _build_telegram_mode_b(actionable, hold_count, sell_count, patient_state, bo
             compact = json.loads(compact_file.read_text(encoding="utf-8"))
             focus_probs = compact.get("focus_probabilities", {})
             cumulative_gains = compact.get("cumulative_gains", {})
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load compact summary for probability mode: %s", e)
 
     # First line
     focus_parts = []

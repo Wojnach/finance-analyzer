@@ -60,5 +60,5 @@ def _fx_alert_telegram(age_secs):
         from portfolio.message_store import send_or_store
         send_or_store(msg, config, category="fx_alert")
         _fx_cache["_last_fx_alert"] = now
-    except Exception:
-        pass  # non-critical
+    except Exception as e:
+        logger.debug("FX Telegram alert failed: %s", e)

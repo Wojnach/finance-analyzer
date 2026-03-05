@@ -158,9 +158,8 @@ def _run_post_cycle(config):
     # Prune unbounded JSONL files to prevent disk exhaustion (BUG-59)
     try:
         from portfolio.file_utils import prune_jsonl
-        _data = Path(__file__).resolve().parent.parent / "data"
         for name in ("invocations.jsonl", "layer2_journal.jsonl", "telegram_messages.jsonl"):
-            prune_jsonl(_data / name, max_entries=5000)
+            prune_jsonl(DATA_DIR / name, max_entries=5000)
     except Exception as e_prune:
         logger.warning("JSONL prune failed: %s", e_prune)
 
@@ -189,16 +188,15 @@ def run(force_report=False, active_symbols=None):
     prices_usd = {}
     tf_data = {}
 
-    import time as _time
-    _run_start = _time.monotonic()
+    _run_start = time.monotonic()
 
     for name, source in SYMBOLS.items():
         if name not in active:
             continue
         try:
-            _ticker_start = _time.monotonic()
+            _ticker_start = time.monotonic()
             tfs = collect_timeframes(source)
-            _tf_elapsed = _time.monotonic() - _ticker_start
+            _tf_elapsed = time.monotonic() - _ticker_start
             tf_data[name] = tfs
 
             now_entry = tfs[0][1] if tfs else None
@@ -217,12 +215,12 @@ def run(force_report=False, active_symbols=None):
             price = ind["close"]
             prices_usd[name] = price
 
-            _sig_start = _time.monotonic()
+            _sig_start = time.monotonic()
             action, conf, extra = generate_signal(
                 ind, ticker=name, config=config, timeframes=tfs, df=now_df
             )
-            _sig_elapsed = _time.monotonic() - _sig_start
-            _ticker_elapsed = _time.monotonic() - _ticker_start
+            _sig_elapsed = time.monotonic() - _sig_start
+            _ticker_elapsed = time.monotonic() - _ticker_start
             logger.info(
                 "%s: timing: tf=%.1fs sig=%.1fs total=%.1fs",
                 name, _tf_elapsed, _sig_elapsed, _ticker_elapsed,
@@ -281,7 +279,7 @@ def run(force_report=False, active_symbols=None):
             signals_failed += 1
             logger.error("%s: %s", name, e, exc_info=True)
 
-    _run_elapsed = _time.monotonic() - _run_start
+    _run_elapsed = time.monotonic() - _run_start
     logger.info(
         "Signal loop done: %d OK, %d failed in %.1fs (%.1fs/ticker avg)",
         signals_ok, signals_failed, _run_elapsed,
@@ -443,8 +441,8 @@ def _crash_alert(error_msg):
             text += "\n\n_Further crash alerts suppressed until recovery._"
         from portfolio.message_store import send_or_store
         send_or_store(text, config, category="error")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Crash alert send failed: %s", e)
 
 
 def _crash_sleep():
@@ -484,8 +482,8 @@ def loop(interval=None):
                     config = _load_config()
                     from portfolio.message_store import send_or_store
                     send_or_store(msg, config, category="error")
-                except Exception:
-                    pass
+                except Exception as e2:
+                    logger.debug("Restart notification failed: %s", e2)
         except Exception as e:
             logger.warning("Failed to check heartbeat staleness: %s", e)
 
@@ -552,13 +550,13 @@ def loop(interval=None):
                 from portfolio.health import update_health
                 update_health(cycle_count=_ss._run_cycle_id, signals_ok=0, signals_failed=0,
                               error=str(e))
-            except Exception:
-                pass
+            except Exception as e2:
+                logger.debug("Health update after crash failed: %s", e2)
             _crash_sleep()
         try:
             (DATA_DIR / "heartbeat.txt").write_text(datetime.now(timezone.utc).isoformat())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Heartbeat write failed: %s", e)
 
 
 if __name__ == "__main__":

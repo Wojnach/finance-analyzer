@@ -1,6 +1,6 @@
 # Portfolio Intelligence System — System Overview
 
-> **Updated:** 2026-03-04 (auto-improvement session #8)
+> **Updated:** 2026-03-05 (auto-improvement session #9)
 > **Canonical architecture doc:** docs/architecture-plan.md
 > **Layer 2 instructions:** CLAUDE.md
 
@@ -143,9 +143,10 @@ main.py (orchestrator — loop, run, CLI dispatch)  [~575 lines]
 
 ## Test Suite
 
-- **~98 test files**, ~3,220+ tests, 26 pre-existing failures (documented)
+- **~99 test files**, ~3,230+ tests, 26 pre-existing failures (documented)
 - Pre-existing failures: 15 integration (missing `ta_base_strategy`), 4 consensus MIN_VOTERS, 2 forecast config, 3 portfolio signal/trigger, 1 subprocess, 1 forecast gating
 - Session #8 added: 9 cache eviction tests, 11 circuit breaker reset tests, 9 JSONL pruning tests, signal registry isolation fix (47 tests total)
+- Session #9 added: 9 silent exception logging tests (`test_silent_exceptions.py`)
 - Sequential runtime: ~16 min. Parallel (`-n auto` via pytest-xdist): ~5:34 (2.9x speedup)
 - Configuration: pytest + pyproject.toml, ruff linting (line length 120)
 - Test isolation: `tmp_path` + `monkeypatch` autouse fixtures for module-level file paths

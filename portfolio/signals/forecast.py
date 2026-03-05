@@ -56,8 +56,8 @@ def _init_kronos_enabled():
         from portfolio.file_utils import load_json as _load_json
         _cfg = _load_json(str(Path(__file__).resolve().parent.parent.parent / "config.json"), {})
         _KRONOS_ENABLED = bool(_cfg.get("forecast", {}).get("kronos_enabled", False))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Kronos init from config: %s", e)
 
 _init_kronos_enabled()
 
@@ -174,8 +174,8 @@ def _log_health(model: str, ticker: str, success: bool, duration_ms: int, error:
             entry["error"] = error[:200]
         with open(_HEALTH_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except Exception:
-        pass  # health logging must never break the signal
+    except Exception as e:
+        logger.debug("Forecast health logging failed: %s", e)
 
     # Auto-reset circuit breaker on success — faster recovery from transient failures
     if success:
@@ -592,8 +592,8 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
         try:
             from portfolio.forecast_signal import set_chronos_model
             set_chronos_model(chronos_model)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Chronos model config override failed: %s", e)
 
     config_forecast = (context or {}).get("config", {}).get("forecast", {})
 

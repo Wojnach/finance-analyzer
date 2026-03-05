@@ -410,8 +410,9 @@ def build_context(entries, portfolio_data=None, now=None):
                 units = h.get("units", 0)
                 lines.append(f"**{name}** ({underlying} {leverage}x): {units} units")
             lines.append("")
-    except Exception:
-        pass
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger("portfolio.journal").debug("Warrant state load failed: %s", e)
 
     warns = _detect_warnings(entries)
     if warns:
@@ -564,8 +565,9 @@ def write_context():
                     md = _append_vector_memory_section(md, config, market_state, entries)
                     CONTEXT_FILE.write_text(md, encoding="utf-8")
                     return len(entries)
-        except Exception:
-            pass  # Fall through to chronological
+        except Exception as e:
+            import logging as _logging
+            _logging.getLogger("portfolio.journal").debug("Smart retrieval failed, falling back to chronological: %s", e)
 
     # Fallback: chronological (original behavior)
     entries = load_recent()

@@ -147,8 +147,9 @@ def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
         db = SignalDB()
         db.insert_snapshot(entry)
         db.close()
-    except Exception:
-        pass  # SQLite write is best-effort; JSONL is the primary
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger("portfolio.outcome_tracker").debug("SQLite snapshot write failed: %s", e)
 
     return entry
 
@@ -278,8 +279,9 @@ def backfill_outcomes():
     try:
         from portfolio.signal_db import SignalDB
         _db = SignalDB()
-    except Exception:
-        pass
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger("portfolio.outcome_tracker").debug("SignalDB open failed: %s", e)
 
     for entry in entries:
         entry_ts = datetime.fromisoformat(entry["ts"]).timestamp()
@@ -350,8 +352,9 @@ def backfill_outcomes():
                             entry["ts"], ticker, h_key,
                             round(hist_price, 2), change_pct, outcome_ts_str,
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        import logging as _logging
+                        _logging.getLogger("portfolio.outcome_tracker").debug("SQLite outcome write failed: %s", e)
 
         entry["outcomes"] = outcomes
         if entry_updated:
@@ -360,8 +363,9 @@ def backfill_outcomes():
     if _db is not None:
         try:
             _db.close()
-        except Exception:
-            pass
+        except Exception as e:
+            import logging as _logging
+            _logging.getLogger("portfolio.outcome_tracker").debug("SignalDB close failed: %s", e)
 
     import os, tempfile
 
