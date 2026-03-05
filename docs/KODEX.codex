@@ -1,0 +1,69 @@
+# Codex Quickload Primer (Finance Analyzer) — 2026-03-05
+Purpose: minimize tokens when loading the project into Codex/Claude. Use this as the single doc to prime context; follow links/paths instead of inlining big files.
+
+## What This System Does (one screen)
+- Two-layer trading agent: Layer 1 (Python, 60s loop) collects prices & computes 30 signals; Layer 2 (Claude) decides trades + Telegram.
+- Dual simulated portfolios: Patient (conservative, max 5 positions) and Bold (aggressive, max 3 positions), each starting 500K SEK.
+- Instruments: BTC-USD, ETH-USD, XAU-USD, XAG-USD, 15 US tickers (AAPL, AMD, AMZN, AVGO, BTC?, etc. see `portfolio/tickers.py`), Nordic via Avanza (price-only).
+- Telegram outputs come from Layer 2 or autonomous fallback; no live trading in Layer 1.
+
+## Load Order (shortest path to useful context)
+1) `README.md` — 1-page architecture + run commands.
+2) `docs/SYSTEM_OVERVIEW.md` — dependency map, signal list, data file inventory, known discrepancies.
+3) Code entry points (read headers/top comments first):
+   - `portfolio/main.py` — orchestrator; handles CLI `--loop`, `--report`, triggers.
+   - `portfolio/signal_engine.py` — builds vote counts, weighted consensus, stores `_buy_count/_sell_count/_weighted_confidence`.
+   - `portfolio/reporting.py` — writes `agent_summary*.json`, tiered summaries.
+   - `portfolio/autonomous.py` — Telegram builder when Layer 2 disabled; applies gating on weak BUYs.
+   - `portfolio/telegram_notifications.py` & `portfolio/message_store.py` — sending/logging messages.
+   - `portfolio/trigger.py` — defines trigger reasons that invoke Layer 2.
+4) For risk/portfolio math: skim `portfolio/risk_management.py`, `portfolio/trade_guards.py`, `portfolio/equity_curve.py` only when needed.
+
+## Files to Avoid Loading (token sink)
+- `portfolio/signals/` (19 modules, ~8k lines). If needed, open only specific signal file (e.g., `signals/volume_flow.py`).
+- `data/*.jsonl`, `data/agent_summary.json` (large). Use `agent_summary_compact.json` if you must inspect live data.
+- Logs (`data/portfolio.log*`, `data/telegram_messages.jsonl`) — huge, skip unless debugging a message.
+- `.venv`, `.venv-llm`, `training/`, `dashboard/static/api-data/` — large/binary.
+
+## Key Runtime Artifacts (read-only, small)
+- `data/agent_summary_compact.json` — concise signals/timeframes/trigger reasons; safe to load.
+- `data/agent_context_t1.json`, `data/agent_context_t2.json` — per-tier snapshots for Layer 2.
+- `data/telegram_messages.jsonl` — sent messages (large; tail selectively).
+
+## How Telegram Messages Are Built
+- Primary path: Layer 2 (Claude) using `portfolio/agent_invocation.py` -> `message_store.py`.
+- Fallback/autonomous: `portfolio/autonomous.py::_build_telegram()` (Mode A signals) and Mode B probability format.
+- Each ticker line: ``TICK p$ price  action  bB/sS/hH heatmap  pXX%``; context line now adds consensus accuracy `accXX%`.
+- Gating: BUY requires ≥3 BUY votes and BUY > SELL; otherwise downgraded to HOLD (keeps counts).
+
+## Running & Restarting
+- Loop: `.venv\\Scripts\\python.exe -u portfolio\\main.py --loop` or `scripts\\win\\pf-loop.bat` (Task Scheduler: PF-DataLoop).
+- One-shot report: `--report`; accuracy refresh: `--check-outcomes`; dashboard: `dashboard/app.py`.
+- Restart helper: `data/restart_loop.ps1` kills `portfolio/main.py --loop` then runs scheduled task PF-DataLoop.
+
+## Testing
+- Targeted fast tests: `.venv\\Scripts\\python -m pytest tests/test_autonomous.py -q`
+- Full suite: `.venv\\Scripts\\python -m pytest -n auto` (parallel, ~5–6 min on this machine). Some known baseline failures documented in `docs/SYSTEM_OVERVIEW.md`.
+
+## Accuracy / Probability Fields (where to look)
+- Signal accuracy caches: `portfolio/signal_engine.py` loads from `portfolio/accuracy_stats.py` (SQLite + JSON cache).
+- Per-ticker forecast & reliability: `data/agent_context_t2.json` contains `signal_reliability` and `forecast` fields (small).
+- Consensus accuracy for Telegram context: `_consensus_accuracy()` in `portfolio/autonomous.py` reads `agent_summary*_` -> `signal_accuracy_1d.consensus.accuracy`.
+
+## Common Debug Paths
+- Trigger reasons: `portfolio/trigger.py` (lists and classifies triggers).
+- Missing Telegram? Check `message_store.py` for layer gating and `config.telegram.layer1_messages` (Layer 1 send is off by default).
+- Loop health: `data/health_state.json`, `logs/` (RotatingFileHandler configured in `logging_config.py`).
+
+## Token Budget Tips
+- When asking Codex/Claude to analyze, load only: README, SYSTEM_OVERVIEW, the specific module in question, and `agent_summary_compact.json` if live data needed.
+- Refer to functions by fully qualified path to avoid needing entire files (e.g., `portfolio.signal_engine._weighted_consensus`).
+- If you need signals detail, start with `portfolio/signal_engine.py` sections: vote blending (~line 630), raw counts (~line 700), accuracy blending (~line 650), confluence (~line 690). Only open an individual `signals/*.py` if absolutely required.
+- For Telegram formatting changes, load `portfolio/autonomous.py` (Mode A/B) plus `tests/test_autonomous.py::TestBuildTelegram` for expected strings.
+- For trading rules, load `CLAUDE.md` instead of Layer 2 logs.
+
+## Refresh Cadence
+- Layer 1 loop writes summaries every 60s (open) / 5–10 min (closed/weekend).
+- Accuracy caches (`data/forecast_*`, `signal_accuracy_1d` caches) are updated when `--check-outcomes` or scheduled accuracy runs execute.
+
+Keep this primer under ~5 KB; update when entry points move or message format changes.***
