@@ -107,3 +107,22 @@ Telegram "AUTO BUY" messages fire on thin consensus (e.g., 2B/4S/19H) and omit p
 3. Update/create unit tests for gating and message formatting.
 4. Run targeted tests (`tests/test_autonomous.py`, `tests/test_telegram_formatting.py`), then quick lint/check if available.
 5. Review sample Telegram payload to confirm readability and length.
+
+# Avanza Sell Block Triage (2026-03-05)
+
+## Problem
+User reports manual Avanza sells failing after recent changes; suspect dangling open orders or expired session blocking volume. Need quick diagnostics without trading.
+
+## Plan
+1. Add read-only CLI to list Avanza open orders (account, ticker, side, price, status) to see if orders are locking shares.
+2. Expose `get_open_orders()` helper in `portfolio/avanza_client.py` so scripts/tests can reuse.
+3. Document usage in script help; no automatic cancellations. (If cancel needed, add explicit `--cancel ORDER_ID` flag.)
+
+## Risks
+- Avanza client instantiation requires creds; CLI should fail fast with clear error if missing/expired.
+- Listing orders must not place/cancel trades; ensure default path is read-only.
+
+## Execution Order
+1. Implement helper + CLI script (read-only, optional `--cancel`).
+2. Run syntax check (`python -m compileall scripts/avanza_orders.py portfolio/avanza_client.py`).
+3. Commit.
