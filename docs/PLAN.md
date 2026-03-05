@@ -66,3 +66,25 @@ direct API calls using `anthropic` SDK when API key is available.
 - `metals_loop.py` uses defaults on first boot before state file exists — now safe (inactive defaults)
 - `metals_risk.py` loads leverage at import time — falls back to defaults if context.json missing
 - `silver_monitor.py` exits if no active position — must be restarted when new position opened
+
+# Telegram Signal Quality & Probabilities (2026-03-05)
+
+## Problem
+Telegram "AUTO BUY" messages fire on thin consensus (e.g., 2B/4S/19H) and omit probability/accuracy context, so alerts read as strong buys even when signals are weak or historically unreliable.
+
+## Plan
+1. Tighten BUY gating in `portfolio/autonomous.py` ticker prediction: require minimum BUY votes and BUY dominance over SELL before classifying as BUY. Aim: suppress BUY recommendations when raw vote count is weak/inverted despite weighted flips.
+2. Expose probability & accuracy in Telegram output (signals mode): append per-ticker conviction (probability) and surface consensus accuracy so recipients see both likelihood and model hit-rate.
+3. Tests: add/adjust unit tests for `_ticker_prediction` gating and Telegram line formatting to cover new fields and thresholds.
+
+## Risks
+- Over-gating could silence legitimate contrarian BUYs driven by accurate inverted signals; mitigate by choosing moderate thresholds and keeping SELL behavior unchanged.
+- Telegram message length could approach the 4096 limit; must keep additions compact.
+- Tests may assume old formatting; need targeted updates to avoid brittle snapshots.
+
+## Execution Order
+1. Implement BUY gating logic and ensure prediction output remains backward-compatible except for classification changes.
+2. Add probability/accuracy fields to Telegram builder with concise formatting.
+3. Update/create unit tests for gating and message formatting.
+4. Run targeted tests (`tests/test_autonomous.py`, `tests/test_telegram_formatting.py`), then quick lint/check if available.
+5. Review sample Telegram payload to confirm readability and length.
