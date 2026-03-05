@@ -42,6 +42,23 @@ def _get_config():
     return _read_json(CONFIG_PATH) or {}
 
 
+def _parse_limit_arg(name, default, max_value):
+    """Parse integer query arg with sane bounds and fallback."""
+    try:
+        value = int(request.args.get(name, default))
+    except (ValueError, TypeError):
+        value = default
+    return max(1, min(value, max_value))
+
+
+def _iter_latest_dict_entries(path, read_limit):
+    """Yield JSONL entries newest-first, skipping non-dict shapes."""
+    raw = _read_jsonl(path, limit=read_limit)
+    for entry in reversed(raw):
+        if isinstance(entry, dict):
+            yield entry
+
+
 # ---------------------------------------------------------------------------
 # Token authentication middleware
 # ---------------------------------------------------------------------------
@@ -102,7 +119,7 @@ def api_summary():
     sig = _read_json(DATA_DIR / "agent_summary.json")
     port = _read_json(DATA_DIR / "portfolio_state.json")
     port_bold = _read_json(DATA_DIR / "portfolio_state_bold.json")
-    tel = _read_jsonl(DATA_DIR / "telegram_messages.jsonl", limit=50)
+    tel = list(_iter_latest_dict_entries(DATA_DIR / "telegram_messages.jsonl", read_limit=50))
     return jsonify({
         "signals": sig,
         "portfolio": port,
@@ -155,20 +172,13 @@ def api_telegrams():
       - category: filter by category (trade, analysis, iskbets, bigbet, digest, etc.)
       - search: text search in message body
     """
-    try:
-        limit = min(int(request.args.get("limit", 200)), 2000)
-    except (ValueError, TypeError):
-        limit = 200
+    limit = _parse_limit_arg("limit", default=200, max_value=2000)
     category_filter = request.args.get("category", "").strip().lower()
     search_filter = request.args.get("search", "").strip().lower()
 
-    raw = _read_jsonl(DATA_DIR / "telegram_messages.jsonl", limit=5000)
-
     results = []
-    for entry in reversed(raw):  # newest first
-        if not isinstance(entry, dict):
-            continue
-        if category_filter and entry.get("category", "") != category_filter:
+    for entry in _iter_latest_dict_entries(DATA_DIR / "telegram_messages.jsonl", read_limit=5000):
+        if category_filter and (entry.get("category", "") or "").lower() != category_filter:
             continue
         if search_filter and search_filter not in (entry.get("text", "") or "").lower():
             continue
@@ -398,20 +408,13 @@ def api_decisions():
       - action: filter by action (BUY, SELL, HOLD)
       - strategy: filter by strategy (patient, bold)
     """
-    try:
-        limit = min(int(request.args.get("limit", 50)), 500)
-    except (ValueError, TypeError):
-        limit = 50
+    limit = _parse_limit_arg("limit", default=50, max_value=500)
     ticker_filter = request.args.get("ticker", "").upper()
     action_filter = request.args.get("action", "").upper()
     strategy_filter = request.args.get("strategy", "").lower()
 
-    raw = _read_jsonl(DATA_DIR / "layer2_journal.jsonl", limit=1000)
-
     results = []
-    for entry in reversed(raw):  # newest first
-        if not isinstance(entry, dict):
-            continue
+    for entry in _iter_latest_dict_entries(DATA_DIR / "layer2_journal.jsonl", read_limit=1000):
         # Apply action/strategy filters
         if action_filter or strategy_filter:
             decisions = entry.get("decisions", {})
@@ -501,8 +504,7 @@ def api_metals():
       - data/silver_analysis.json — multi-TF technicals
     """
     context = _read_json(DATA_DIR / "metals_context.json")
-    decisions = _read_jsonl(DATA_DIR / "metals_decisions.jsonl", limit=50)
-    decisions.reverse()  # newest first
+    decisions = list(_iter_latest_dict_entries(DATA_DIR / "metals_decisions.jsonl", read_limit=50))
     history = _read_json(DATA_DIR / "metals_history.json")
     technicals = _read_json(DATA_DIR / "silver_analysis.json")
     return jsonify({

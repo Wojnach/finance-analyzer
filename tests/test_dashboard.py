@@ -171,6 +171,21 @@ class TestApiSummary:
         assert data["signals"] is None
         assert data["portfolio"] is None
 
+    def test_summary_telegrams_skip_non_dict_lines(self, client, tmp_data):
+        (tmp_data / "agent_summary.json").write_text('{"signals": {}}', encoding="utf-8")
+        (tmp_data / "portfolio_state.json").write_text('{"cash_sek": 500000}', encoding="utf-8")
+        (tmp_data / "portfolio_state_bold.json").write_text('{"cash_sek": 450000}', encoding="utf-8")
+        (tmp_data / "telegram_messages.jsonl").write_text(
+            '"raw string"\n{"ts":"t1","text":"ok"}\n[1,2,3]\n',
+            encoding="utf-8",
+        )
+
+        with _no_auth():
+            resp = client.get("/api/summary")
+        data = resp.get_json()
+        assert len(data["telegrams"]) == 1
+        assert data["telegrams"][0]["text"] == "ok"
+
 
 class TestApiSignals:
     def test_returns_signals(self, client, tmp_data):
@@ -254,6 +269,18 @@ class TestApiTelegrams:
         data = resp.get_json()
         assert len(data) == 1
         assert data[0]["text"] == "ok"
+
+    def test_category_filter_is_case_insensitive(self, client, tmp_data):
+        (tmp_data / "telegram_messages.jsonl").write_text(
+            '{"ts":"t1","category":"Trade","text":"buy"}\n'
+            '{"ts":"t2","category":"analysis","text":"hold"}\n',
+            encoding="utf-8",
+        )
+        with _no_auth():
+            resp = client.get("/api/telegrams?category=trade")
+        data = resp.get_json()
+        assert len(data) == 1
+        assert data[0]["text"] == "buy"
 
 
 class TestApiSignalLog:
