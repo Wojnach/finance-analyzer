@@ -1,169 +1,125 @@
-# Portfolio Intelligence System — System Overview
+# System Overview
 
-> **Updated:** 2026-03-05 (auto-improvement session #9)
-> **Canonical architecture doc:** docs/architecture-plan.md
-> **Layer 2 instructions:** CLAUDE.md
+Updated: 2026-03-05
+Branch: improve/auto-session-2026-03-05
 
-## Architecture Summary
+## 1) Architecture Summary
 
-Two-layer autonomous trading system managing 19 instruments (2 crypto, 2 metals, 15 US equities)
-with 30 signals across 7 timeframes, dual simulated portfolios (Patient + Bold, 500K SEK each).
+This repository is a two-layer autonomous trading system:
 
-| Layer | Role | Runs | Decides |
-|-------|------|------|---------|
-| **Layer 1** (Python) | Data collection, signal computation, trigger detection | Every 60s (market), 5min (closed), 10min (weekend) | When to invoke Layer 2 |
-| **Layer 2** (Claude Code) | Analysis, trade execution, Telegram notifications | On trigger (~20-50/day) | What to trade, what to say |
+1. Layer 1 (`portfolio/main.py`) runs a continuous loop, fetches market data, computes signals, detects meaningful changes, writes summary/context files, and decides whether Layer 2 should run.
+2. Layer 2 (Claude subprocess via `portfolio/agent_invocation.py`) consumes Layer 1 output, makes strategy decisions, writes journals/portfolio updates, and sends notifications.
 
-## Module Dependency Graph
+A separate Flask dashboard (`dashboard/app.py`) serves current state and historical telemetry from `data/`.
 
-```
-main.py (orchestrator — loop, run, CLI dispatch)  [~575 lines]
-├── shared_state.py        (global caches + LRU eviction, rate limiters, locks)  [122 lines]
-├── market_timing.py       (DST-aware market hours, agent window)  [80 lines]
-├── fx_rates.py            (USD/SEK caching via Frankfurter API)  [65 lines]
-├── indicators.py          (RSI, MACD, EMA, BB, ATR, regime detection)  [167 lines]
-├── data_collector.py      (kline fetching + multi-timeframe collector)  [260 lines]
-│   ├── http_retry.py      (retry with exponential backoff + jitter)  [66 lines]
-│   ├── circuit_breaker.py (per-source failure tracking)
-│   └── api_utils.py       (config loading, Alpaca headers, API URLs)
-├── signal_engine.py       (30-signal voting + weighted consensus)  [~700 lines]
-│   ├── signal_registry.py (enhanced signal plugin registry)  [130 lines]
-│   ├── signal_utils.py    (shared helpers: SMA, EMA, RSI, majority_vote)  [130 lines]
-│   ├── macro_context.py   (DXY, yields, FOMC, volume signal)  [+logger]
-│   ├── accuracy_stats.py  (signal performance tracking, SQLite)  [633 lines]
-│   └── signals/           (19 enhanced signal modules, ~8,400 lines total)
-├── portfolio_mgr.py       (state load/save, portfolio_value)  [57 lines]
-│   └── file_utils.py      (atomic JSON I/O, JSONL pruning)
-├── reporting.py           (agent_summary.json, tiered context)  [~760 lines]
-│   ├── equity_curve.py    (FIFO trade metrics, profit factor)  [597 lines]
-│   ├── trade_guards.py    (cooldown, consecutive-loss escalation)  [267 lines]
-│   ├── risk_management.py (concentration, correlation, ATR stops)  [704 lines]
-│   ├── monte_carlo.py     (GBM price simulation, antithetic variates)  [~400 lines]
-│   ├── monte_carlo_risk.py (t-copula portfolio VaR/CVaR)  [~350 lines]
-│   ├── journal_index.py   (BM25 journal retrieval)  [400 lines]
-│   ├── futures_data.py    (Binance FAPI OI/LS data)  [241 lines]
-│   ├── avanza_tracker.py  (Nordic equity price tracking)
-│   └── alpha_vantage.py   (stock fundamentals)  [330 lines]
-├── trigger.py             (6 trigger conditions, tier classification)  [~330 lines]
-├── agent_invocation.py    (Claude subprocess management)  [~200 lines]
-│   ├── perception_gate.py (pre-invocation signal filter)  [99 lines]
-│   ├── message_store.py   (save-only notifications)  [144 lines]
-│   └── telegram_notifications.py (Telegram sends)  [137 lines]
-├── digest.py              (4-hour summary builder)  [202 lines]
-├── daily_digest.py        (morning daily digest — focus instruments + movers)
-├── message_throttle.py    (analysis message rate limiting)
-├── reflection.py          (periodic strategy metrics)  [243 lines]
-├── health.py              (heartbeat + error tracking)  [173 lines]
-└── logging_config.py      (structured RotatingFileHandler)  [48 lines]
-```
+## 2) Entry Points and Runtime Surfaces
 
-**Total:** ~97 Python modules, ~15,000+ lines of production code.
+### Trading runtime
 
-## Signal Architecture (30 total: 11 core + 19 enhanced)
+- Primary continuous entry: `portfolio/main.py --loop`
+- One-shot/reporting and maintenance entrypoints: `portfolio/main.py` flags (`--report`, `--accuracy`, `--check-outcomes`, `--forecast-accuracy`, `--retrain`, etc.)
+- Launcher scripts: `scripts/win/pf-loop.bat`, `scripts/win/pf-agent.bat`, `start-loop.bat`
 
-**Core signals** (in signal_engine.py):
-1. RSI(14), 2. MACD(12,26,9), 3. EMA(9,21), 4. BB(20,2), 5. Fear & Greed,
-6. Sentiment, 7. CryptoTrader-LM (Ministral-8B), 8. Volume Confirmation
-- Disabled: ML Classifier (#9, 28.2%), Funding Rate (#10, 27.0%), Custom LoRA (#11, 20.9%)
+### Dashboard runtime
 
-**Enhanced composite signals** (portfolio/signals/, each 4-8 sub-indicators via majority vote):
-12-trend, 13-momentum, 14-volume_flow, 15-volatility, 16-candlestick, 17-structure,
-18-fibonacci, 19-smart_money, 20-oscillators, 21-heikin_ashi, 22-mean_reversion,
-23-calendar, 24-macro_regime, 25-momentum_factors, 26-news_event, 27-econ_calendar,
-28-forecast (Kronos/Chronos), 29-claude_fundamental (LLM cascade),
-30-futures_flow (Binance FAPI OI/LS, crypto only)
+- Flask app: `dashboard/app.py` on port `5055`
+- Static export tooling: `dashboard/export_static.py`
+- External sync tooling: `scripts/sync_dashboard.py`
 
-**Signal applicability:**
-- Crypto (BTC, ETH): 27 signals (8 active core + 19 enhanced)
-- Metals (XAU, XAG): 25 signals (7 core + 18 enhanced; no futures_flow)
-- Stocks (15 tickers): 25 signals (7 core + 18 enhanced; no ministral, no futures_flow)
+### Auxiliary runtime
 
-**Signal consensus flow:**
-1. Each of 30 signals votes BUY/SELL/HOLD per ticker
-2. Disabled signals (<50% accuracy) auto-inverted in weighted consensus
-3. Confidence penalty cascade: regime→volume gate→trap detection→dynamic MIN_VOTERS
-4. Raw consensus + weighted consensus both reported to Layer 2
-5. Layer 2 uses both as inputs to independent judgment
+- Metals subsystem in `data/metals_*.py` + `data/silver_monitor.py`
+- LoRA training pipeline in `training/lora/`
 
-## Global State Inventory
+## 3) Module Responsibilities
 
-| Location | Variable | Purpose | Thread-Safe |
-|----------|----------|---------|-------------|
-| shared_state.py | `_tool_cache` | Per-cycle data cache (256 max) | Yes (`_cache_lock`) |
-| shared_state.py | `_run_cycle_id` | Cycle counter (regime cache invalidation) | No (single-threaded loop) |
-| shared_state.py | `_current_market_state` | "open"/"closed"/"weekend" | No (written by main loop only) |
-| shared_state.py | `_regime_cache` | Per-cycle regime detection cache | No (invalidated by cycle_id) |
-| shared_state.py | `_*_limiter` | Rate limiters (Alpaca, Binance, yfinance, AV) | Yes (internal Lock) |
-| signal_engine.py | `_prev_sentiment` | Sentiment hysteresis per ticker | No (single-threaded) |
-| fx_rates.py | `_fx_cache` | FX rate + timestamp | No (single-threaded) |
-| agent_invocation.py | `_agent_proc` | Current subprocess handle | No (managed by main loop) |
-| api_utils.py | `_config_cache` | Parsed config.json | Yes (`_config_lock`) |
-| data_collector.py | `*_cb` | Circuit breakers | Yes (internal) |
+### Orchestration and control
 
-## External Dependencies
+- `portfolio/main.py`: lifecycle, scheduling, crash backoff, health heartbeat, trigger routing, module orchestration.
+- `portfolio/market_timing.py`: market-hour/off-hour scheduling and agent invocation window logic.
+- `portfolio/agent_invocation.py`: Layer 2 subprocess lifecycle, timeout handling, invocation logging.
+- `portfolio/trigger.py`: change detection (consensus transitions, sustained flips, price threshold, F&G threshold crossing, sustained sentiment reversal, post-trade reassessment).
 
-| Dependency | Purpose | Rate Limit |
-|------------|---------|------------|
-| Binance Spot API | Crypto OHLCV (BTC, ETH) | 600/min |
-| Binance FAPI | Metals OHLCV + futures data | 600/min |
-| Alpaca IEX v2 | US stock OHLCV (15 tickers) | 150/min |
-| yfinance | Stock fallback (extended hours) | 30/min |
-| Alternative.me | Crypto Fear & Greed | 5min cache |
-| Frankfurter API | USD/SEK exchange rate | 1h cache |
-| Alpha Vantage | Stock fundamentals (P/E, revenue) | 5/min, 25/day |
-| BGeometrics | BTC on-chain data | 8/hr, 15/day |
-| Telegram Bot API | Notifications | Unbounded |
-| Ministral-8B (local GPU) | CryptoTrader-LM signal | 15min cache |
-| Claude Code CLI | Layer 2 agent | On trigger |
-| Kronos/Chronos (local) | Forecast signal #28 | 5min cache |
-| Anthropic API | Claude Fundamental signal #29 | Per config cooldowns |
+### Data collection and signal generation
 
-## Data Files
+- `portfolio/data_collector.py`: Binance/Alpaca/yfinance collection and timeframe assembly.
+- `portfolio/indicators.py`: indicator calculation primitives.
+- `portfolio/signal_engine.py`: core and enhanced signal aggregation, consensus/weighted consensus.
+- `portfolio/signals/*.py`: enhanced signal modules.
+- `portfolio/accuracy_stats.py`, `portfolio/outcome_tracker.py`, `portfolio/signal_db.py`: signal/outcome logging and accuracy analytics.
 
-| File | Written By | Read By | Purpose |
-|------|-----------|---------|---------|
-| agent_summary.json | L1 | L2 (T3), Dashboard | Full 30-signal snapshot (~64KB) |
-| agent_summary_compact.json | L1 | L2 (T1/T2) | Tiered compaction (~15KB) |
-| agent_context_t1.json | L1 | L2 (T1) | Held positions + macro (~200 lines) |
-| agent_context_t2.json | L1 | L2 (T2) | Triggered tickers + detail (~600 lines) |
-| portfolio_state.json | L2 | L1, Dashboard | Patient holdings + transactions |
-| portfolio_state_bold.json | L2 | L1, Dashboard | Bold holdings + transactions |
-| trigger_state.json | L1 | L1 | Consensus, sustained counts, sentiment |
-| sentiment_state.json | L1 | L1 | Sentiment hysteresis state |
-| layer2_journal.jsonl | L2 | L1 (digest), Dashboard | Decisions, theses, reflections |
-| layer2_context.md | L1 | L2 | Memory built from journal entries |
-| signal_log.jsonl + SQLite | L1 | Accuracy tracker | All signal votes per cycle |
-| health_state.json | L1 | Dashboard, monitors | Heartbeat, error log |
-| invocations.jsonl | L1 | Dashboard, health | Layer 2 invocation history |
-| telegram_messages.jsonl | L2 | Dashboard | All sent Telegram messages |
-| fundamentals_cache.json | L1 | L1 (enrichment) | Alpha Vantage stock data |
-| trade_guard_state.json | L1 | L1 | Per-ticker cooldowns, loss tracking |
-| onchain_cache.json | L1 | L1 | BGeometrics BTC on-chain data |
-| forecast_predictions.jsonl | L1 | Accuracy tracker | Kronos/Chronos predictions |
+### Portfolio, risk, and reporting
 
-## Test Suite
+- `portfolio/portfolio_mgr.py`: portfolio state persistence and value calculation.
+- `portfolio/risk_management.py`, `portfolio/trade_guards.py`, `portfolio/equity_curve.py`, `portfolio/monte_carlo*.py`: risk/equity analytics.
+- `portfolio/reporting.py`: full/compact/tiered summary file generation for Layer 2 and dashboard.
+- `portfolio/journal.py`, `portfolio/journal_index.py`: Layer 2 memory context generation.
 
-- **~99 test files**, ~3,230+ tests, 26 pre-existing failures (documented)
-- Pre-existing failures: 15 integration (missing `ta_base_strategy`), 4 consensus MIN_VOTERS, 2 forecast config, 3 portfolio signal/trigger, 1 subprocess, 1 forecast gating
-- Session #8 added: 9 cache eviction tests, 11 circuit breaker reset tests, 9 JSONL pruning tests, signal registry isolation fix (47 tests total)
-- Session #9 added: 9 silent exception logging tests (`test_silent_exceptions.py`)
-- Sequential runtime: ~16 min. Parallel (`-n auto` via pytest-xdist): ~5:34 (2.9x speedup)
-- Configuration: pytest + pyproject.toml, ruff linting (line length 120)
-- Test isolation: `tmp_path` + `monkeypatch` autouse fixtures for module-level file paths
+### Shared infrastructure
 
-## Deployment
+- `portfolio/file_utils.py`: safe JSON/JSONL load and atomic write/append helpers.
+- `portfolio/http_retry.py`: resilient HTTP retry policy.
+- `portfolio/shared_state.py`: in-process cache and rate-limiter shared state.
+- `portfolio/config_validator.py`: startup config validation.
+- `portfolio/health.py`, `portfolio/message_store.py`, `portfolio/telegram_notifications.py`: health and messaging.
 
-- **Machine:** Windows 11 (herc2), RTX 3080 10GB
-- **Python:** 3.12, two venvs (.venv for main, .venv-llm for GPU inference)
-- **Scheduler:** Windows Task Scheduler (PF-DataLoop, PF-Dashboard, PF-OutcomeCheck, PF-MLRetrain)
-- **Auto-restart:** pf-loop.bat with :restart loop + 30s delay
-- **Dashboard:** Flask on port 5055
+### Dashboard
 
-## Discrepancies vs Architecture Doc
+- `dashboard/app.py`: authenticated API over `data/` files.
+- `dashboard/static/index.html`: client UI consuming API and static fallback data.
+- `dashboard/export_static.py`: endpoint snapshots to `dashboard/static/api-data/`.
 
-1. **architecture-plan.md still lists "Cooldown expired"** as a trigger type; cooldown was REMOVED Feb 27.
-2. **architecture-plan.md says 11 core signals** but 3 are disabled; effective core count is 8.
-3. **architecture-plan.md file tree** omits modules added since Feb 27: perception_gate, reflection, vector_memory, trade_guards, equity_curve, journal_index, futures_flow, monte_carlo, monte_carlo_risk, daily_digest, message_throttle, cumulative_tracker, warrant_portfolio, prophecy, ticker_accuracy, forecast_accuracy, forecast_signal.
-4. **architecture-plan.md still lists removed tickers** (MSTR, BABA, GRRR, IONQ, TEM, UPST, VERI, QQQ, etc.) — removed Mar 1.
-5. **Scheduled tasks** (PF-ForceSleep, PF-WakeUp, PF-AutoImprove) not in arch doc.
-6. **Alpaca ticker count** says 27 but actual is 15 stocks.
+## 4) End-to-End Data Flow
+
+1. `main.loop()` selects active instruments based on market timing.
+2. `run()` collects OHLCV/timeframes per symbol, computes indicators, generates action/confidence + extra signal metadata.
+3. Trigger state is evaluated in `trigger.check_triggers(...)` against persisted baseline.
+4. On trigger/forced run:
+   - `reporting.write_agent_summary(...)` writes full summary.
+   - Tier classification/context is generated (`classify_tier`, `write_tiered_summary`).
+   - Signal snapshot/outcome tracking writes to JSONL/SQLite paths.
+   - `agent_invocation.invoke_agent(...)` optionally launches Layer 2.
+5. Health/risk/post-cycle jobs run (digest, throttled messaging, AV refresh, JSONL pruning).
+6. Dashboard endpoints read `data/` JSON/JSONL files and expose a read API.
+
+## 5) External Dependencies
+
+- Market and macro data: Binance spot/futures, Alpaca, yfinance, Frankfurter, Alpha Vantage, (plus optional sentiment/on-chain sources).
+- Local/LLM model stack: ministral/trader inference scripts and forecast components.
+- Notification and agent orchestration: Telegram Bot API, Claude CLI subprocess.
+- Python stack: Flask, pandas, numpy, scikit-learn, joblib (+ optional training dependencies).
+
+## 6) Configuration Model
+
+Primary runtime config is `config.json` (template: `config.example.json`). Key domains include:
+
+- `telegram.*`
+- `alpaca.*`
+- optional feature domains (`layer2`, `iskbets`, dashboard token, etc.)
+
+`portfolio/config_validator.py` enforces required keys at loop startup. Authentication for dashboard APIs is conditional on `dashboard_token`.
+
+## 7) Observed Discrepancies vs Existing Docs
+
+1. `docs/architecture-plan.md` still contains outdated assumptions (instrument counts/history, cooldown wording, and module inventory drift vs current code).
+2. Runtime trigger behavior has no periodic cooldown trigger in `trigger.py`, but several docs still describe cooldown/check-in semantics.
+3. Documentation frequently describes legacy ticker counts and old signal totals that do not align with current symbols/signal module set.
+4. Existing overview docs understate dashboard/api surface changes and metals subsystem coupling into the same `data/` namespace.
+
+## 8) Concrete Risk Areas Found During Exploration
+
+1. Dashboard endpoints `/api/telegrams` and `/api/decisions` assume each JSONL entry is a dict; valid non-dict JSON lines can cause 500s.
+2. `accuracy_stats.load_entries()` JSONL fallback has no per-line decode guard; one malformed line can break `/api/accuracy`.
+3. `dashboard/export_static.py` does not include all frontend-used endpoints and can fail when dashboard token auth is enabled.
+4. `main.py` validates config in loop mode, but non-loop command paths can bypass strict startup validation.
+5. Trigger trade-check path silently swallows malformed portfolio files, reducing observability of state corruption.
+
+## 9) Test Surface Snapshot
+
+- Strong coverage exists for trigger logic and dashboard routes.
+- Targeted gaps remain around:
+  - endpoint robustness against non-dict JSONL lines,
+  - `/api/metals-accuracy` route behavior,
+  - static export script behavior under dashboard auth and endpoint parity expectations.
+
+These findings inform the improvement plan in `docs/IMPROVEMENT_PLAN.md`.
