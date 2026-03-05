@@ -166,6 +166,8 @@ def api_telegrams():
 
     results = []
     for entry in reversed(raw):  # newest first
+        if not isinstance(entry, dict):
+            continue
         if category_filter and entry.get("category", "") != category_filter:
             continue
         if search_filter and search_filter not in (entry.get("text", "") or "").lower():
@@ -408,6 +410,8 @@ def api_decisions():
 
     results = []
     for entry in reversed(raw):  # newest first
+        if not isinstance(entry, dict):
+            continue
         # Apply action/strategy filters
         if action_filter or strategy_filter:
             decisions = entry.get("decisions", {})
