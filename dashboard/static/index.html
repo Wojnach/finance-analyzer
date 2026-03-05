@@ -2142,38 +2142,82 @@
         if (d.ts) h += ' &middot; Updated: ' + new Date(d.ts).toLocaleString("sv-SE");
         h += '</div>';
 
-        // Group by source type (main, llm, chronos, ministral)
-        var groups = {};
-        Object.keys(stats).forEach(function (key) {
-          // key format: "main_XAG_1h", "chronos_1h_XAG_1h", "ministral_XAG_1h", "llm_XAG_1h"
-          var parts = key.split("_");
-          var source = parts[0]; // main, llm, chronos, ministral
-          if (!groups[source]) groups[source] = {};
-          groups[source][key] = stats[key];
+        // Model matrix (requested): LLM consensus + Chronos 1h/3h + Ministral for XAG/XAU, 1h/3h.
+        var modelDefs = [
+          { key: "llm", label: "LLM consensus" },
+          { key: "chronos_1h", label: "Chronos 1h" },
+          { key: "chronos_3h", label: "Chronos 3h" },
+          { key: "ministral", label: "Ministral" }
+        ];
+        var instruments = ["XAG", "XAU"];
+        var horizons = ["1h", "3h"];
+
+        function statKey(modelKey, ticker, horizon) {
+          return modelKey + "_" + ticker + "_" + horizon;
+        }
+
+        function renderAccCell(modelKey, ticker, horizon) {
+          var sd = stats[statKey(modelKey, ticker, horizon)];
+          if (!sd || !sd.total) {
+            return '<div class="nd" style="font-size:10px">n/a</div>';
+          }
+          var p = Math.round((sd.accuracy || 0) * 100);
+          var bc = p >= 55 ? "var(--grn)" : p >= 45 ? "var(--yel)" : "var(--red)";
+          var lowN = sd.total < 20;
+          var nTag = lowN ? ' <span style="color:var(--txd)">(low N)</span>' : "";
+          var extra = "";
+          if (typeof sd.mae === "number") {
+            extra += '<div style="font-size:10px;color:var(--txd)">MAE ' + sd.mae.toFixed(2) + '%</div>';
+            if (typeof sd.within_1_0pct === "number") {
+              extra += '<div style="font-size:10px;color:var(--txd)">within1% ' + Math.round(sd.within_1_0pct * 100) + '%</div>';
+            }
+          }
+          if (typeof sd.avg_conf === "number" && typeof sd.calibration_gap === "number") {
+            extra += '<div style="font-size:10px;color:var(--txd)">conf ' + Math.round(sd.avg_conf * 100) + '%'
+              + ' · cal gap ' + Math.round(sd.calibration_gap * 100) + '%</div>';
+          }
+          return '<div style="font-size:12px;font-weight:700;color:' + bc + '">' + p + '%</div>'
+            + '<div style="font-size:10px;color:var(--txm)">' + sd.correct + '/' + sd.total + nTag + '</div>'
+            + extra;
+        }
+
+        instruments.forEach(function (ticker) {
+          h += '<div style="margin-top:12px;font-size:11px;color:var(--txm);text-transform:uppercase;letter-spacing:0.5px">'
+            + ticker + ' model scoreboard</div>';
+          h += '<div style="overflow-x:auto">';
+          h += '<table class="mt" style="width:100%;font-size:11px">';
+          h += '<thead><tr><th style="min-width:120px">Model</th><th>1h</th><th>3h</th></tr></thead><tbody>';
+          modelDefs.forEach(function (m) {
+            h += '<tr>';
+            h += '<td style="font-weight:600">' + m.label + '</td>';
+            horizons.forEach(function (hz) {
+              h += '<td>' + renderAccCell(m.key, ticker, hz) + '</td>';
+            });
+            h += '</tr>';
+          });
+          h += '</tbody></table></div>';
         });
 
-        var sourceLabels = {
-          main: "Main Loop Signals (XAG/XAU consensus)",
-          llm: "LLM Consensus",
-          chronos: "Chronos Forecasts",
-          ministral: "Ministral LLM"
-        };
-
-        Object.keys(groups).forEach(function (source) {
-          var items = groups[source];
-          var label = sourceLabels[source] || source;
-          h += '<div style="font-size:11px;color:var(--txm);margin:12px 0 5px;text-transform:uppercase;letter-spacing:0.5px">' + label + '</div>';
-          // Sort by total samples descending
-          var keys = Object.keys(items).sort(function (a, b) { return items[b].total - items[a].total; });
-          keys.forEach(function (key) {
-            var sd = items[key];
-            var p = Math.round(sd.accuracy * 100);
-            var bc = p >= 55 ? "var(--grn)" : p >= 45 ? "var(--yel)" : "var(--red)";
-            // Friendlier label: "main_XAG_1h" -> "XAG 1h"
-            var shortLabel = key.replace(source + "_", "").replace(/_/g, " ");
-            h += '<div class="abr"><div class="abl">' + shortLabel + '</div><div class="abt"><div class="abf" style="width:' + p + '%;background:' + bc + '">' + p + '%</div></div><div class="abc">' + sd.correct + '/' + sd.total + '</div></div>';
+        // Keep a compact raw section for any extra keys not covered in the matrix.
+        var covered = {};
+        modelDefs.forEach(function (m) {
+          instruments.forEach(function (t) {
+            horizons.forEach(function (hz) {
+              covered[statKey(m.key, t, hz)] = true;
+            });
           });
         });
+        var extraKeys = Object.keys(stats).filter(function (k) { return !covered[k]; });
+        if (extraKeys.length) {
+          h += '<div style="margin-top:12px;font-size:11px;color:var(--txm);text-transform:uppercase;letter-spacing:0.5px">Other tracked signals</div>';
+          extraKeys.sort(function (a, b) { return (stats[b].total || 0) - (stats[a].total || 0); });
+          extraKeys.forEach(function (key) {
+            var sd = stats[key];
+            var p = Math.round((sd.accuracy || 0) * 100);
+            var bc = p >= 55 ? "var(--grn)" : p >= 45 ? "var(--yel)" : "var(--red)";
+            h += '<div class="abr"><div class="abl">' + key.replace(/_/g, " ") + '</div><div class="abt"><div class="abf" style="width:' + p + '%;background:' + bc + '">' + p + '%</div></div><div class="abc">' + sd.correct + '/' + sd.total + '</div></div>';
+          });
+        }
 
         c.innerHTML = h;
       }

@@ -237,6 +237,32 @@ class TestResolveOutcome:
         result = _resolve_outcome(entry, "1h", {}, now)
         assert result is None
 
+    def test_confidence_and_brier_fields_present(self):
+        from metals_signal_tracker import _resolve_outcome
+        import datetime
+
+        entry = {
+            "ts": "2026-03-01T10:00:00+00:00",
+            "prices": {"XAG-USD": 30.0},
+            "llm": {
+                "XAG-USD": {
+                    "consensus_dir": "up",
+                    "consensus_conf": 0.8,
+                    "chronos_1h": "up",
+                    "chronos_1h_conf": 0.7,
+                    "chronos_1h_pct_move": 1.0,
+                    "ministral": "BUY",
+                    "ministral_conf": 0.6,
+                }
+            },
+        }
+        now = datetime.datetime(2026, 3, 1, 14, 0, 0, tzinfo=datetime.timezone.utc).timestamp()
+        result = _resolve_outcome(entry, "1h", {"XAG-USD": 31.0}, now)
+        out = result["XAG-USD"]
+        assert "llm_conf" in out and "llm_brier" in out
+        assert "chronos_1h_conf" in out and "chronos_1h_brier" in out
+        assert "ministral_conf" in out and "ministral_brier" in out
+
 
 # ---------------------------------------------------------------------------
 # backfill_outcomes
@@ -348,6 +374,44 @@ class TestAccuracy:
         with mod._lock:
             cache = dict(mod._accuracy_cache)
         assert len(cache) > 0
+
+    def test_recompute_adds_calibration_and_proximity_metrics(self, tmp_path):
+        import metals_signal_tracker as mod
+
+        outcomes = [
+            {"snapshot_ts": "2026-03-01T10:00:00+00:00", "horizon": "1h",
+             "outcomes": {
+                 "XAG-USD": {
+                     "move_pct": 1.2,
+                     "llm_correct": True, "llm_conf": 0.8, "llm_brier": 0.04,
+                     "chronos_1h_correct": True,
+                     "chronos_1h_conf": 0.7, "chronos_1h_brier": 0.09,
+                     "chronos_1h_error_pct": -0.3, "chronos_1h_abs_error_pct": 0.3,
+                 }
+             }},
+            {"snapshot_ts": "2026-03-01T11:00:00+00:00", "horizon": "1h",
+             "outcomes": {
+                 "XAG-USD": {
+                     "move_pct": -1.1,
+                     "llm_correct": False, "llm_conf": 0.8, "llm_brier": 0.64,
+                     "chronos_1h_correct": False,
+                     "chronos_1h_conf": 0.6, "chronos_1h_brier": 0.36,
+                     "chronos_1h_error_pct": 1.2, "chronos_1h_abs_error_pct": 1.2,
+                 }
+             }},
+        ]
+        with open(mod.OUTCOMES_LOG, "w") as f:
+            for o in outcomes:
+                f.write(json.dumps(o) + "\n")
+
+        mod._recompute_accuracy_from_outcomes()
+        with mod._lock:
+            cache = dict(mod._accuracy_cache)
+
+        llm = cache["llm_XAG_1h"]
+        assert "avg_conf" in llm and "calibration_gap" in llm and "brier" in llm
+        chr1 = cache["chronos_1h_XAG_1h"]
+        assert "mae" in chr1 and "within_1_0pct" in chr1 and "brier" in chr1
 
     def test_accuracy_cache_written_to_disk(self, tmp_path):
         import metals_signal_tracker as mod

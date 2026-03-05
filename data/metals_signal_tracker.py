@@ -259,6 +259,12 @@ def _resolve_outcome(entry, h_key, current_underlying_prices, now):
             outcome["llm_predicted"] = llm_dir
             outcome["llm_correct"] = (llm_dir == actual_dir)
             outcome["llm_actual_move_pct"] = round(move_pct, 4)
+            llm_conf = llm_info.get("consensus_conf")
+            if isinstance(llm_conf, (int, float)) and llm_conf >= 0:
+                llm_conf = min(1.0, max(0.0, float(llm_conf)))
+                llm_hit = 1.0 if outcome["llm_correct"] else 0.0
+                outcome["llm_conf"] = round(llm_conf, 4)
+                outcome["llm_brier"] = round((llm_conf - llm_hit) ** 2, 6)
 
         for model in ["chronos_1h", "chronos_3h"]:
             m_dir = llm_info.get(model, "flat")
@@ -266,6 +272,12 @@ def _resolve_outcome(entry, h_key, current_underlying_prices, now):
                 outcome[f"{model}_predicted"] = m_dir
                 outcome[f"{model}_correct"] = (m_dir == actual_dir)
                 outcome[f"{model}_actual_move_pct"] = round(move_pct, 4)
+                model_conf = llm_info.get(f"{model}_conf")
+                if isinstance(model_conf, (int, float)) and model_conf >= 0:
+                    model_conf = min(1.0, max(0.0, float(model_conf)))
+                    model_hit = 1.0 if outcome[f"{model}_correct"] else 0.0
+                    outcome[f"{model}_conf"] = round(model_conf, 4)
+                    outcome[f"{model}_brier"] = round((model_conf - model_hit) ** 2, 6)
 
                 pred_pct = llm_info.get(f"{model}_pct_move", 0)
                 if pred_pct:
@@ -282,7 +294,12 @@ def _resolve_outcome(entry, h_key, current_underlying_prices, now):
             outcome["ministral_predicted"] = m_dir
             outcome["ministral_correct"] = (m_dir == actual_dir)
             outcome["ministral_actual_move_pct"] = round(move_pct, 4)
-            outcome["ministral_conf"] = llm_info.get("ministral_conf", 0)
+            m_conf = llm_info.get("ministral_conf", 0)
+            if isinstance(m_conf, (int, float)) and m_conf >= 0:
+                m_conf = min(1.0, max(0.0, float(m_conf)))
+                m_hit = 1.0 if outcome["ministral_correct"] else 0.0
+                outcome["ministral_conf"] = round(m_conf, 4)
+                outcome["ministral_brier"] = round((m_conf - m_hit) ** 2, 6)
 
         buy_sigs = signal_info.get("_buy_signals", [])
         sell_sigs = signal_info.get("_sell_signals", [])
@@ -391,6 +408,9 @@ def _recompute_accuracy_from_outcomes():
                 "abs_errors": [],
                 "actual_moves_correct": [],
                 "actual_moves_wrong": [],
+                "conf_values": [],
+                "conf_hits": [],
+                "brier_scores": [],
             }
 
     resolved_count = 0
@@ -433,6 +453,13 @@ def _recompute_accuracy_from_outcomes():
                             stats[key]["actual_moves_correct"].append(abs(actual_move))
                         else:
                             stats[key]["actual_moves_wrong"].append(abs(actual_move))
+                        llm_conf = outcome.get("llm_conf")
+                        if isinstance(llm_conf, (int, float)):
+                            stats[key]["conf_values"].append(llm_conf)
+                            stats[key]["conf_hits"].append(1.0 if outcome["llm_correct"] else 0.0)
+                        llm_brier = outcome.get("llm_brier")
+                        if isinstance(llm_brier, (int, float)):
+                            stats[key]["brier_scores"].append(llm_brier)
 
                     for model in ["chronos_1h", "chronos_3h", "ministral"]:
                         correct_key = f"{model}_correct"
@@ -445,6 +472,15 @@ def _recompute_accuracy_from_outcomes():
                                 stats[key]["actual_moves_correct"].append(abs(actual_move))
                             else:
                                 stats[key]["actual_moves_wrong"].append(abs(actual_move))
+                            conf_key = f"{model}_conf"
+                            model_conf = outcome.get(conf_key)
+                            if isinstance(model_conf, (int, float)):
+                                stats[key]["conf_values"].append(model_conf)
+                                stats[key]["conf_hits"].append(1.0 if outcome[correct_key] else 0.0)
+                            brier_key = f"{model}_brier"
+                            model_brier = outcome.get(brier_key)
+                            if isinstance(model_brier, (int, float)):
+                                stats[key]["brier_scores"].append(model_brier)
 
                             error_key = f"{model}_error_pct"
                             abs_error_key = f"{model}_abs_error_pct"
@@ -486,6 +522,19 @@ def _recompute_accuracy_from_outcomes():
             entry["bias"] = round(sum(s["errors"]) / n, 4)
             entry["rmse"] = round(math.sqrt(sum(e**2 for e in s["errors"]) / n), 4)
             entry["deviation_samples"] = n
+            entry["within_0_5pct"] = round(sum(1 for e in s["abs_errors"] if e <= 0.5) / n, 3)
+            entry["within_1_0pct"] = round(sum(1 for e in s["abs_errors"] if e <= 1.0) / n, 3)
+            entry["within_2_0pct"] = round(sum(1 for e in s["abs_errors"] if e <= 2.0) / n, 3)
+
+        if s["conf_values"]:
+            n_conf = len(s["conf_values"])
+            avg_conf = sum(s["conf_values"]) / n_conf
+            hit_rate = sum(s["conf_hits"]) / n_conf if n_conf else 0.0
+            entry["conf_samples"] = n_conf
+            entry["avg_conf"] = round(avg_conf, 4)
+            entry["calibration_gap"] = round(abs(avg_conf - hit_rate), 4)
+        if s["brier_scores"]:
+            entry["brier"] = round(sum(s["brier_scores"]) / len(s["brier_scores"]), 6)
 
         if s["actual_moves_correct"]:
             entry["avg_move_correct"] = round(
