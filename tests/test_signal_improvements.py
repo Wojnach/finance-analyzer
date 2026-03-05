@@ -254,6 +254,30 @@ class TestAccuracyCache:
         finally:
             acc_mod.ACCURACY_CACHE_FILE = orig
 
+    def test_load_entries_skips_malformed_jsonl_lines(self, tmp_path, monkeypatch):
+        import portfolio.accuracy_stats as acc_mod
+
+        signal_log = tmp_path / "signal_log.jsonl"
+        signal_log.write_text(
+            '{"ts":"2026-03-05T00:00:00+00:00","tickers":{}}\n'
+            '{"broken":\n'
+            '{"ts":"2026-03-05T01:00:00+00:00","tickers":{"BTC-USD":{}}}\n',
+            encoding="utf-8",
+        )
+
+        class _BrokenSignalDB:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError("sqlite unavailable in test")
+
+        fake_signal_db = type("_FakeSignalDbModule", (), {"SignalDB": _BrokenSignalDB})()
+        monkeypatch.setitem(__import__("sys").modules, "portfolio.signal_db", fake_signal_db)
+        monkeypatch.setattr(acc_mod, "SIGNAL_LOG", signal_log)
+
+        entries = acc_mod.load_entries()
+        assert len(entries) == 2
+        assert entries[0]["ts"] == "2026-03-05T00:00:00+00:00"
+        assert entries[1]["ts"] == "2026-03-05T01:00:00+00:00"
+
     def test_cache_ttl_expired(self, tmp_path):
         from portfolio.accuracy_stats import load_cached_accuracy, ACCURACY_CACHE_FILE
 
