@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-03-05 (autonomous improvement session)
+- Hardened dashboard JSONL consumers:
+  - `/api/telegrams` now ignores non-object JSONL entries instead of propagating malformed shapes.
+  - `/api/decisions` now ignores non-object JSONL entries instead of assuming dict records.
+- Added dashboard API test coverage for:
+  - malformed JSONL resilience in `/api/telegrams` and `/api/decisions`,
+  - `/api/metals-accuracy` success/missing/auth behavior.
+- Improved `portfolio.accuracy_stats.load_entries()` JSONL fallback to skip malformed lines instead of failing the entire accuracy read.
+- Upgraded static dashboard export tool:
+  - supports token-protected dashboards (reads `dashboard_token` from `config.json`),
+  - exports frontend-required routes `/api/metals-accuracy` and `/api/lora-status`.
+
 ## 2026-03-05
 - **BUG-61 through BUG-67**: Replaced 15 silent `except Exception: pass` handlers with logged warnings/debug messages across 6 modules: `autonomous.py`, `fx_rates.py`, `outcome_tracker.py`, `journal.py`, `forecast.py`, `main.py`.
 - **BUG-69**: Fixed `_run_post_cycle()` in `main.py` to use module-level `DATA_DIR` constant instead of re-deriving path.

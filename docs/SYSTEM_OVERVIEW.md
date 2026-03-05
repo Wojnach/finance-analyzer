@@ -3,6 +3,16 @@
 Updated: 2026-03-05
 Branch: improve/auto-session-2026-03-05
 
+## Session Delta (This Branch)
+
+Implemented improvements in this branch:
+
+1. Dashboard endpoint hardening for malformed/non-object JSONL lines in `/api/telegrams` and `/api/decisions`.
+2. Accuracy log ingestion hardening in `portfolio/accuracy_stats.py` JSONL fallback (skip malformed lines).
+3. Static dashboard export parity/auth updates in `dashboard/export_static.py`:
+   - token-aware export requests when `dashboard_token` is configured,
+   - inclusion of `/api/metals-accuracy` and `/api/lora-status` in exported static data.
+
 ## 1) Architecture Summary
 
 This repository is a two-layer autonomous trading system:
