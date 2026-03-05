@@ -210,6 +210,21 @@ def get_portfolio_value() -> float:
     return total
 
 
+def get_open_orders() -> list:
+    """Return open orders for the ISK account (read-only).
+
+    Uses the authenticated Avanza client; does not place or cancel orders.
+    """
+    client = get_client()
+    account_id = get_account_id()
+    try:
+        orders = client.get_orders(account_id)
+    except Exception as e:
+        logger.error("Failed to fetch open orders: %s", e)
+        raise
+    return orders or []
+
+
 # --- Account ID ---
 
 _account_id: Optional[str] = None
