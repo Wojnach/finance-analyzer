@@ -138,6 +138,9 @@ STOP_ORDER_LEVELS = 3          # number of stop orders per position
 STOP_ORDER_SPREAD_PCT = 1.0    # spread between levels (1% of stop price)
 STOP_ORDER_FILE = "data/metals_stop_orders.json"
 
+# Emergency auto-sell (L3) safety
+EMERGENCY_SELL_ENABLED = False  # default OFF: requires explicit enablement
+
 # Trade queue (Layer 2 writes intent, Layer 1 executes)
 TRADE_QUEUE_ENABLED = True
 TRADE_QUEUE_FILE = "data/metals_trade_queue.json"
@@ -1431,6 +1434,10 @@ def emergency_sell(page, key, pos, bid):
     Returns True if position was successfully sold or confirmed already sold.
     Returns False if sell failed and position may still be active.
     """
+    if not EMERGENCY_SELL_ENABLED:
+        log(f"[L3 DISABLED] Skipping emergency sell for {key} at {bid}")
+        return False
+
     log(f"!!! L3 EMERGENCY SELL: {key} at {bid} (entry: {pos['entry']}, stop: {pos['stop']})")
     send_telegram(f"*L3 EMERGENCY SELL* {pos['name']}\nBid: {bid} | Entry: {pos['entry']}\nAuto-selling {pos['units']} units")
 
