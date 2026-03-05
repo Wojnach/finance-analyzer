@@ -67,6 +67,25 @@ direct API calls using `anthropic` SDK when API key is available.
 - `metals_risk.py` loads leverage at import time — falls back to defaults if context.json missing
 - `silver_monitor.py` exits if no active position — must be restarted when new position opened
 
+# LLM-Friendly Overview (2026-03-05)
+
+## Problem
+Codex/Claude runs are expensive and slowed by large context. Project layout and key entry points aren’t summarized for quick loading, making heavy tasks slower and costlier.
+
+## Plan
+1. Inventory high-level docs and code entry points (README, SYSTEM_OVERVIEW, architecture-plan, portfolio/main.py, autonomous/reporting/signal_engine).
+2. Produce a concise, LLM-optimized primer (`docs/KODEX.codex`) covering structure, key scripts, data files, run/test commands, and where to read/skip to reduce tokens.
+3. Keep it stable and short (<~4–5 KB) with pointers to deeper docs instead of duplicating content.
+
+## Risks
+- Primer could drift if code moves; mitigate by anchoring to stable paths and noting refresh cadence.
+- Token bloat if too detailed; mitigate by hard size budget and link-outs.
+
+## Execution Order
+1. Read key docs (README, SYSTEM_OVERVIEW, architecture-plan) and top-level scripts for signal/telegram flow.
+2. Draft `docs/KODEX.codex` with navigation and “read/skip” guidance.
+3. Sanity-check for length/clarity; no code changes needed; commit.
+
 # Telegram Signal Quality & Probabilities (2026-03-05)
 
 ## Problem
