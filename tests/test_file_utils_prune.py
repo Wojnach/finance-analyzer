@@ -123,3 +123,33 @@ class TestPruneJsonl:
         assert removed == 10
         result = _read_jsonl(path)
         assert len(result) == 5000
+
+    def test_malformed_lines_dropped(self, tmp_path):
+        """Malformed (partial-write) lines should be dropped during prune."""
+        path = tmp_path / "corrupt.jsonl"
+        with open(path, "w", encoding="utf-8") as f:
+            for i in range(10):
+                f.write(json.dumps({"i": i}) + "\n")
+            # Simulate a partial write (truncated JSON)
+            f.write('{"i": 10, "data": "trunc\n')
+            for i in range(11, 20):
+                f.write(json.dumps({"i": i}) + "\n")
+
+        # 19 valid lines + 1 corrupt = should keep 19 valid, prune to 5
+        removed = prune_jsonl(path, max_entries=5)
+        result = _read_jsonl(path)
+        assert len(result) == 5
+        # Should be the last 5 valid entries (i=15..19)
+        assert result[0] == {"i": 15}
+        assert result[-1] == {"i": 19}
+
+    def test_all_malformed_lines_result_in_empty(self, tmp_path):
+        """File with only malformed lines should result in no pruning needed."""
+        path = tmp_path / "all_corrupt.jsonl"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("not json\n")
+            f.write("{broken\n")
+            f.write("also bad\n")
+
+        removed = prune_jsonl(path, max_entries=10)
+        assert removed == 0  # 0 valid lines <= max_entries

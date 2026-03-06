@@ -85,6 +85,7 @@ def prune_jsonl(path, max_entries=5000):
     """Prune a JSONL file to keep only the most recent *max_entries*.
 
     Reads the file, keeps the tail, and atomically rewrites it.
+    Skips malformed lines (e.g., from partial writes) during read.
     No-op if the file has fewer entries than *max_entries*.
 
     Returns the number of entries removed, or 0 if no pruning was needed.
@@ -96,8 +97,14 @@ def prune_jsonl(path, max_entries=5000):
     with open(path, encoding="utf-8") as f:
         for line in f:
             stripped = line.strip()
-            if stripped:
+            if not stripped:
+                continue
+            # Validate JSON to avoid preserving corrupt partial lines
+            try:
+                json.loads(stripped)
                 lines.append(stripped)
+            except json.JSONDecodeError:
+                logger.warning("prune_jsonl: skipping malformed line in %s", path.name)
     if len(lines) <= max_entries:
         return 0
     removed = len(lines) - max_entries
