@@ -36,12 +36,16 @@ _MIN_BUY_VOTES = 3             # raw BUY votes required to classify as BUY
 _BUY_MUST_DOMINATE = True      # BUY votes must exceed SELL votes
 
 _consensus_acc_cache = None
+_consensus_acc_cache_ts = 0
+_CONSENSUS_ACC_TTL = 300  # re-read every 5 minutes
 
 
 def _consensus_accuracy():
     """Load cached consensus accuracy from agent_summary (compact preferred)."""
-    global _consensus_acc_cache
-    if _consensus_acc_cache is not None:
+    global _consensus_acc_cache, _consensus_acc_cache_ts
+    import time
+    now = time.monotonic()
+    if now - _consensus_acc_cache_ts < _CONSENSUS_ACC_TTL:
         return _consensus_acc_cache
 
     for fname in ("agent_summary_compact.json", "agent_summary.json"):
@@ -56,9 +60,11 @@ def _consensus_accuracy():
         )
         if isinstance(acc, (int, float)):
             _consensus_acc_cache = acc
+            _consensus_acc_cache_ts = now
             return acc
 
     _consensus_acc_cache = None
+    _consensus_acc_cache_ts = now
     return None
 
 
@@ -223,10 +229,6 @@ def _classify_tickers(signals, patient_state, bold_state, tier, triggered_ticker
                 actionable[ticker] = sig
             else:
                 hold_count += 1
-        # Count sells not already in actionable
-        for ticker, sig in signals.items():
-            if ticker not in actionable and sig["action"] == "SELL":
-                sell_count += 1
 
     # Top hold tickers (for when all are HOLD)
     top_hold = []

@@ -838,3 +838,96 @@ class TestTelegramEdgeCases:
             predictions, _base_config(), 3, "range-bound", "", ["test"],
         )
         assert isinstance(msg, str)
+
+
+# ===========================================================================
+# BUG-2: _consensus_acc_cache never invalidates
+# ===========================================================================
+
+class TestConsensusAccuracyCache:
+    def test_cache_refreshes_after_ttl(self, tmp_path):
+        """Cache should not persist forever — must re-read after TTL expires."""
+        import portfolio.autonomous as mod
+        summary_file = tmp_path / "agent_summary_compact.json"
+        summary_file.write_text(json.dumps({
+            "signal_accuracy_1d": {"consensus": {"accuracy": 0.52}}
+        }))
+        old_data_dir = mod.DATA_DIR
+        old_cache = mod._consensus_acc_cache
+        old_cache_ts = mod._consensus_acc_cache_ts
+        try:
+            mod.DATA_DIR = tmp_path
+            mod._consensus_acc_cache = None
+            mod._consensus_acc_cache_ts = 0
+            # First call: should load 0.52
+            acc1 = mod._consensus_accuracy()
+            assert acc1 == 0.52
+            # Update file
+            summary_file.write_text(json.dumps({
+                "signal_accuracy_1d": {"consensus": {"accuracy": 0.61}}
+            }))
+            # Second call with fresh cache: still returns old value
+            acc2 = mod._consensus_accuracy()
+            assert acc2 == 0.52
+            # Expire cache by setting timestamp to 0
+            mod._consensus_acc_cache_ts = 0
+            acc3 = mod._consensus_accuracy()
+            assert acc3 == 0.61
+        finally:
+            mod.DATA_DIR = old_data_dir
+            mod._consensus_acc_cache = old_cache
+            mod._consensus_acc_cache_ts = old_cache_ts
+
+    def test_cache_returns_none_then_retries(self, tmp_path):
+        """If file missing on first call, should retry on next call (not cache None forever)."""
+        import portfolio.autonomous as mod
+        old_data_dir = mod.DATA_DIR
+        old_cache = mod._consensus_acc_cache
+        old_cache_ts = mod._consensus_acc_cache_ts
+        try:
+            mod.DATA_DIR = tmp_path
+            mod._consensus_acc_cache = None
+            mod._consensus_acc_cache_ts = 0
+            # No file exists
+            acc1 = mod._consensus_accuracy()
+            assert acc1 is None
+            # Now create the file
+            (tmp_path / "agent_summary_compact.json").write_text(json.dumps({
+                "signal_accuracy_1d": {"consensus": {"accuracy": 0.55}}
+            }))
+            # Expire cache
+            mod._consensus_acc_cache_ts = 0
+            acc2 = mod._consensus_accuracy()
+            assert acc2 == 0.55
+        finally:
+            mod.DATA_DIR = old_data_dir
+            mod._consensus_acc_cache = old_cache
+            mod._consensus_acc_cache_ts = old_cache_ts
+
+
+# ===========================================================================
+# BUG-4: T3 sell_count dead code
+# ===========================================================================
+
+class TestT3SellCount:
+    def test_t3_sell_count_is_zero_for_sell_tickers(self):
+        """In T3, all SELL tickers go into actionable, so sell_count should be 0."""
+        from portfolio.autonomous import _classify_tickers
+        signals = {
+            "BTC-USD": _make_signal("BUY", buy_count=5, sell_count=1),
+            "ETH-USD": _make_signal("SELL", buy_count=1, sell_count=5),
+            "NVDA": _make_signal("SELL", buy_count=0, sell_count=3),
+            "AMD": _make_signal("HOLD"),
+        }
+        actionable, _, hold_count, sell_count = _classify_tickers(
+            signals, _patient_state(), _bold_state(), tier=3, triggered_tickers=set()
+        )
+        # BUY and SELL tickers should be in actionable
+        assert "BTC-USD" in actionable
+        assert "ETH-USD" in actionable
+        assert "NVDA" in actionable
+        # AMD is HOLD, not held, so it's a hold
+        assert "AMD" not in actionable
+        assert hold_count == 1
+        # sell_count should be 0 since all SELLs are in actionable
+        assert sell_count == 0
