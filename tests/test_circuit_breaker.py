@@ -213,3 +213,86 @@ class TestTimingEdgeCases:
         cb.record_failure()
         cb.record_failure()
         assert cb.state == State.OPEN
+
+
+class TestThreadSafety:
+    """Test thread safety of CircuitBreaker."""
+
+    def test_concurrent_failures_reach_threshold(self):
+        """Many threads recording failures should eventually open the circuit."""
+        import threading
+
+        cb = CircuitBreaker("test", failure_threshold=10, recovery_timeout=60)
+        barrier = threading.Barrier(20)
+
+        def record():
+            barrier.wait()
+            cb.record_failure()
+
+        threads = [threading.Thread(target=record) for _ in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert cb.state == State.OPEN
+        # failure_count should be exactly 20 (no lost increments)
+        assert cb._failure_count == 20
+
+    def test_concurrent_success_and_failure(self):
+        """Mixed success/failure from multiple threads shouldn't corrupt state."""
+        import threading
+
+        cb = CircuitBreaker("test", failure_threshold=100, recovery_timeout=60)
+        barrier = threading.Barrier(10)
+
+        def fail():
+            barrier.wait()
+            for _ in range(50):
+                cb.record_failure()
+
+        def succeed():
+            barrier.wait()
+            for _ in range(50):
+                cb.record_success()
+
+        threads = []
+        for _ in range(5):
+            threads.append(threading.Thread(target=fail))
+            threads.append(threading.Thread(target=succeed))
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # State should be valid (no corruption)
+        assert cb.state in (State.CLOSED, State.OPEN)
+
+    def test_concurrent_allow_request(self):
+        """Many threads calling allow_request during OPEN should be safe."""
+        import threading
+
+        cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=1)
+        cb.record_failure()
+        assert cb.state == State.OPEN
+
+        results = []
+        lock = threading.Lock()
+        barrier = threading.Barrier(10)
+
+        def check():
+            barrier.wait()
+            import time
+            time.sleep(1.1)
+            r = cb.allow_request()
+            with lock:
+                results.append(r)
+
+        threads = [threading.Thread(target=check) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # At least one should have gotten through
+        assert any(results)

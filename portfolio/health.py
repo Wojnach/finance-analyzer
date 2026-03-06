@@ -159,7 +159,7 @@ def get_health_summary() -> dict:
     state = load_health()
     is_stale, age, _ = check_staleness()
     agent_silence = check_agent_silence()
-    return {
+    summary = {
         "status": "stale" if is_stale else "healthy",
         "heartbeat_age_seconds": round(age, 1),
         "cycle_count": state.get("cycle_count", 0),
@@ -173,3 +173,14 @@ def get_health_summary() -> dict:
         "agent_silence_seconds": agent_silence["age_seconds"],
         "module_failures": state.get("last_module_failures"),
     }
+    # Include circuit breaker status if data_collector has been imported
+    try:
+        from portfolio.data_collector import binance_spot_cb, binance_fapi_cb, alpaca_cb
+        summary["circuit_breakers"] = {
+            "binance_spot": binance_spot_cb.get_status(),
+            "binance_fapi": binance_fapi_cb.get_status(),
+            "alpaca": alpaca_cb.get_status(),
+        }
+    except Exception:
+        pass
+    return summary
