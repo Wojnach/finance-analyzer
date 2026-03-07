@@ -84,7 +84,7 @@ REGIME_WEIGHTS = {
     "trending-up": {"ema": 1.5, "macd": 1.3, "rsi": 0.7, "bb": 0.7},
     "trending-down": {"ema": 1.5, "macd": 1.3, "rsi": 0.7, "bb": 0.7},
     "ranging": {"rsi": 1.5, "bb": 1.5, "ema": 0.5, "macd": 0.5},
-    "high-vol": {"bb": 1.5, "volume": 1.3, "funding": 1.3, "ema": 0.5},
+    "high-vol": {"bb": 1.5, "volume": 1.3, "ema": 0.5},
 }
 
 
