@@ -1,5 +1,5 @@
 {
-  "session": "auto-session-2026-03-06",
+  "session": "auto-session-2026-03-07",
   "phases_completed": [
     "PHASE 0: SETUP",
     "PHASE 1: EXPLORE",
@@ -8,20 +8,24 @@
     "PHASE 4: DOCUMENTATION"
   ],
   "current_phase": "PHASE 5: VERIFY & MERGE",
-  "phase_started": "2026-03-06T05:00:00+00:00",
-  "last_update": "2026-03-06T06:00:00+00:00",
-  "status": "in_progress",
+  "phase_started": "2026-03-07T09:30:00+00:00",
+  "last_update": "2026-03-07T09:30:00+00:00",
+  "status": "running",
   "batches_done": [
-    "Batch 1: BUG-1 CircuitBreaker thread safety + health CB exposure (3 new tests)",
-    "Batch 2: BUG-2 accuracy cache TTL + BUG-4 dead T3 sell_count (3 new tests)",
-    "Batch 3: BUG-5 prune_jsonl malformed line filtering (2 new tests)"
+    "Batch 1: Digest hardening — BUG-10,11,13,14 + ARCH-6 (22 tests)",
+    "Batch 2: Outcome tracker memory — BUG-12 + ARCH-7 (6 tests)",
+    "Batch 3: Disabled signal cleanup — ARCH-8 (1-line fix)",
+    "Batch 4: Digest health indicator — FEAT-2 (3 tests)"
   ],
   "commits": [
-    "9e2a904 fix(circuit_breaker): add thread safety with threading.Lock",
-    "3633e8a fix(autonomous): add TTL cache for accuracy and remove dead T3 sell_count",
-    "70fd879 fix(file_utils): skip malformed lines during JSONL prune"
+    "0249e6f docs: update system overview and improvement plan for session 2026-03-07",
+    "90bc8a4 fix(digest): harden 4h digest against missing/corrupt data (BUG-10,11,13,14)",
+    "123949b fix(outcome_tracker): limit backfill to last N entries for memory safety (BUG-12)",
+    "d586c89 refactor(signal_engine): remove dead funding weight from REGIME_WEIGHTS (ARCH-8)",
+    "d21bb51 feat(digest): add system health indicator to 4h digest (FEAT-2)"
   ],
-  "bugs_fixed": 4,
-  "tests_added": 8,
-  "files_changed": 5
+  "bugs_fixed": 5,
+  "tests_added": 28,
+  "files_changed": 4,
+  "notes": "All 4 batches complete. Running full test suite before merge."
 }

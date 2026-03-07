@@ -1,9 +1,28 @@
 # Improvement Plan
 
-Updated: 2026-03-07
+Updated: 2026-03-07 (post-implementation)
 Branch: worktree-auto-session-2026-03-07
 
 Previous sessions: 2026-03-05 (dashboard hardening), 2026-03-06 (CircuitBreaker, TTL cache, prune fix).
+
+## Session Results (2026-03-07)
+
+All 4 batches implemented and committed. 28 new tests added (22 digest + 6 outcome_tracker).
+
+| Batch | Items | Commit | Tests |
+|-------|-------|--------|-------|
+| 1 | BUG-10,11,13,14 + ARCH-6 | `90bc8a4` | 22 (test_4h_digest.py) |
+| 2 | BUG-12 + ARCH-7 | `123949b` | 6 (test_outcome_tracker_backfill.py) |
+| 3 | ARCH-8 | `d586c89` | 0 (1-line change, no new tests needed) |
+| 4 | FEAT-2 | `d21bb51` | 3 (added to test_4h_digest.py) |
+
+Bonus fix found during testing: signal_log parsing had a naive/aware datetime
+comparison bug (fallback `"2000-01-01"` is tz-naive, `cutoff` is tz-aware).
+Fixed in Batch 1.
+
+ARCH-8 was smaller than planned — ml/funding vote derivation in outcome_tracker
+serves historical accuracy tracking and cannot be safely removed. Only the dead
+`"funding": 1.3` weight in REGIME_WEIGHTS was removed.
 
 ## 1) Bugs & Problems Found
 
