@@ -11,7 +11,8 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from portfolio.portfolio_mgr import _atomic_write_json, portfolio_value, load_state
+from portfolio.file_utils import atomic_write_json as _atomic_write_json, load_json
+from portfolio.portfolio_mgr import portfolio_value, load_state
 from portfolio.message_store import send_or_store
 from portfolio.telegram_notifications import escape_markdown_v1
 
@@ -29,11 +30,9 @@ DIGEST_INTERVAL = 14400  # 4 hours
 
 def _get_last_digest_time():
     try:
-        state = json.loads(
-            (DATA_DIR / "trigger_state.json").read_text(encoding="utf-8")
-        )
+        state = load_json(DATA_DIR / "trigger_state.json", default={})
         return state.get("last_digest_time", 0)
-    except Exception:
+    except (json.JSONDecodeError, OSError, ValueError):
         return 0
 
 
@@ -59,7 +58,16 @@ def _build_digest_message():
 
     # --- Invocations (Layer 1 trigger → Layer 2) ---
     entries = load_jsonl(INVOCATIONS_FILE)
-    recent = [e for e in entries if datetime.fromisoformat(e["ts"]) >= cutoff]
+    recent = []
+    for e in entries:
+        ts_str = e.get("ts", "")
+        if not ts_str:
+            continue
+        try:
+            if datetime.fromisoformat(ts_str) >= cutoff:
+                recent.append(e)
+        except (ValueError, TypeError):
+            continue
     reason_counts = Counter()
     status_counts = Counter()
     for e in recent:
@@ -84,7 +92,16 @@ def _build_digest_message():
 
     # --- Layer 2 decisions from journal ---
     journal = load_jsonl(JOURNAL_FILE)
-    recent_journal = [e for e in journal if datetime.fromisoformat(e["ts"]) >= cutoff]
+    recent_journal = []
+    for e in journal:
+        ts_str = e.get("ts", "")
+        if not ts_str:
+            continue
+        try:
+            if datetime.fromisoformat(ts_str) >= cutoff:
+                recent_journal.append(e)
+        except (ValueError, TypeError):
+            continue
     l2_decisions = {"patient": Counter(), "bold": Counter()}
     for e in recent_journal:
         decisions = e.get("decisions", {})
@@ -96,7 +113,16 @@ def _build_digest_message():
 
     # --- Signal consensus breakdown from signal_log ---
     signal_entries = load_jsonl(SIGNAL_LOG_FILE)
-    recent_signals = [e for e in signal_entries if datetime.fromisoformat(e.get("ts", "2000-01-01")) >= cutoff]
+    recent_signals = []
+    for e in signal_entries:
+        ts_str = e.get("ts", "")
+        if not ts_str:
+            continue
+        try:
+            if datetime.fromisoformat(ts_str) >= cutoff:
+                recent_signals.append(e)
+        except (ValueError, TypeError):
+            continue
     consensus_counts = Counter()
     for e in recent_signals:
         for ticker_data in e.get("tickers", {}).values():
@@ -104,9 +130,14 @@ def _build_digest_message():
             consensus_counts[action] += 1
 
     # --- Portfolio values ---
-    summary = json.loads(AGENT_SUMMARY_FILE.read_text(encoding="utf-8"))
+    summary = load_json(AGENT_SUMMARY_FILE, default={})
+    if not summary:
+        logger.warning("agent_summary.json missing or empty, using defaults")
     fx_rate = summary.get("fx_rate", 10.5)
-    prices_usd = {t: s["price_usd"] for t, s in summary.get("signals", {}).items()}
+    prices_usd = {}
+    for t, s in summary.get("signals", {}).items():
+        if isinstance(s, dict) and "price_usd" in s:
+            prices_usd[t] = s["price_usd"]
 
     state = load_state()
     p_total = portfolio_value(state, prices_usd, fx_rate)
@@ -176,18 +207,22 @@ def _build_digest_message():
     )
 
     if BOLD_STATE_FILE.exists():
-        bold = json.loads(BOLD_STATE_FILE.read_text(encoding="utf-8"))
-        b_total = portfolio_value(bold, prices_usd, fx_rate)
-        b_pnl = (
-            (b_total - bold["initial_value_sek"]) / bold["initial_value_sek"]
-        ) * 100
-        b_holdings = [
-            t for t, h in bold.get("holdings", {}).items() if h.get("shares", 0) > 0
-        ]
-        b_holdings_str = escape_markdown_v1(', '.join(b_holdings)) if b_holdings else 'cash'
-        lines.append(
-            f"_Bold: {b_total:,.0f} SEK ({b_pnl:+.1f}%) · {b_holdings_str}_"
-        )
+        try:
+            bold = load_json(BOLD_STATE_FILE, default={})
+            if bold and bold.get("initial_value_sek"):
+                b_total = portfolio_value(bold, prices_usd, fx_rate)
+                b_pnl = (
+                    (b_total - bold["initial_value_sek"]) / bold["initial_value_sek"]
+                ) * 100
+                b_holdings = [
+                    t for t, h in bold.get("holdings", {}).items() if h.get("shares", 0) > 0
+                ]
+                b_holdings_str = escape_markdown_v1(', '.join(b_holdings)) if b_holdings else 'cash'
+                lines.append(
+                    f"_Bold: {b_total:,.0f} SEK ({b_pnl:+.1f}%) · {b_holdings_str}_"
+                )
+        except (KeyError, TypeError, ZeroDivisionError) as e:
+            logger.warning("Bold state read failed: %s", e)
 
     return "\n".join(lines)
 
