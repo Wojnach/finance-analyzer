@@ -308,6 +308,81 @@ class TestBuildDigestBoldState:
 
 
 # ---------------------------------------------------------------------------
+# _build_digest_message — health indicator (FEAT-2)
+# ---------------------------------------------------------------------------
+
+class TestBuildDigestHealthIndicator:
+    """FEAT-2: system health line in digest."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path):
+        self.data = tmp_path / "data"
+        self.data.mkdir()
+        state = {
+            "cash_sek": 500000, "initial_value_sek": 500000,
+            "total_fees_sek": 0, "holdings": {}, "transactions": [],
+        }
+        (self.data / "portfolio_state.json").write_text(json.dumps(state))
+        (self.data / "agent_summary.json").write_text(
+            json.dumps({"fx_rate": 10.5, "signals": {}})
+        )
+        _write_jsonl(self.data / "invocations.jsonl", [])
+        _write_jsonl(self.data / "layer2_journal.jsonl", [])
+        _write_jsonl(self.data / "signal_log.jsonl", [])
+
+    def _patch_all(self):
+        from contextlib import ExitStack
+        stack = ExitStack()
+        stack.enter_context(patch("portfolio.digest.DATA_DIR", self.data))
+        stack.enter_context(patch("portfolio.digest.INVOCATIONS_FILE", self.data / "invocations.jsonl"))
+        stack.enter_context(patch("portfolio.digest.JOURNAL_FILE", self.data / "layer2_journal.jsonl"))
+        stack.enter_context(patch("portfolio.digest.SIGNAL_LOG_FILE", self.data / "signal_log.jsonl"))
+        stack.enter_context(patch("portfolio.digest.AGENT_SUMMARY_FILE", self.data / "agent_summary.json"))
+        stack.enter_context(patch("portfolio.digest.BOLD_STATE_FILE", self.data / "portfolio_state_bold.json"))
+        stack.enter_context(patch("portfolio.portfolio_mgr.STATE_FILE", self.data / "portfolio_state.json"))
+        return stack
+
+    def test_health_line_present(self):
+        """Digest should include health indicator line."""
+        mock_health = {
+            "heartbeat_age_seconds": 60,
+            "signals_ok": 19,
+            "signals_failed": 0,
+        }
+        with self._patch_all(), \
+             patch("portfolio.health.get_health_summary", return_value=mock_health):
+            from portfolio.digest import _build_digest_message
+            msg = _build_digest_message()
+        assert "Health:" in msg
+        assert "loop OK" in msg
+        assert "19ok" in msg
+
+    def test_health_stale_loop(self):
+        """Health should show stale message when heartbeat is old."""
+        mock_health = {
+            "heartbeat_age_seconds": 600,
+            "signals_ok": 15,
+            "signals_failed": 4,
+        }
+        with self._patch_all(), \
+             patch("portfolio.health.get_health_summary", return_value=mock_health):
+            from portfolio.digest import _build_digest_message
+            msg = _build_digest_message()
+        assert "10m stale" in msg
+        assert "4fail" in msg
+
+    def test_health_failure_does_not_crash(self):
+        """If health module raises, digest still completes."""
+        with self._patch_all(), \
+             patch("portfolio.health.get_health_summary", side_effect=Exception("boom")):
+            from portfolio.digest import _build_digest_message
+            msg = _build_digest_message()
+        assert "*4H DIGEST*" in msg
+        # Health line absent but message still valid
+        assert "Health:" not in msg
+
+
+# ---------------------------------------------------------------------------
 # _maybe_send_digest — integration
 # ---------------------------------------------------------------------------
 

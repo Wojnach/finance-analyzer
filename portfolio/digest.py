@@ -224,6 +224,29 @@ def _build_digest_message():
         except (KeyError, TypeError, ZeroDivisionError) as e:
             logger.warning("Bold state read failed: %s", e)
 
+    # --- System health ---
+    try:
+        from portfolio.health import get_health_summary
+        health = get_health_summary()
+        heartbeat_age = health.get("heartbeat_age_seconds", 0)
+        if heartbeat_age < 300:
+            uptime_str = "OK"
+        elif heartbeat_age < 3600:
+            uptime_str = f"{heartbeat_age / 60:.0f}m stale"
+        else:
+            uptime_str = f"{heartbeat_age / 3600:.1f}h stale"
+
+        sig_failed = health.get("signals_failed", 0)
+        sig_ok = health.get("signals_ok", 0)
+        agent_completion = f"{l2_analyses}/{invoked}" if invoked > 0 else "N/A"
+
+        lines.append("")
+        lines.append(
+            f"_Health: loop {uptime_str} · signals {sig_ok}ok/{sig_failed}fail · agent {agent_completion}_"
+        )
+    except Exception as e:
+        logger.debug("Health indicator skipped: %s", e)
+
     return "\n".join(lines)
 
 
