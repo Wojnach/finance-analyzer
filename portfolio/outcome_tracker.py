@@ -255,7 +255,13 @@ def _fetch_historical_price(ticker, target_ts):
     return None
 
 
-def backfill_outcomes():
+def backfill_outcomes(max_entries=2000):
+    """Backfill price outcomes for signal log entries.
+
+    Args:
+        max_entries: Only process the last N entries to limit memory usage.
+            Older entries are assumed to be fully backfilled already.
+    """
     if not SIGNAL_LOG.exists():
         return 0
 
@@ -264,7 +270,17 @@ def backfill_outcomes():
         for line in f:
             line = line.strip()
             if line:
-                entries.append(json.loads(line))
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+
+    # Split into head (preserved as-is) and tail (processed for backfill)
+    if max_entries and len(entries) > max_entries:
+        head_entries = entries[:-max_entries]
+        entries = entries[-max_entries:]
+    else:
+        head_entries = []
 
     now = datetime.now(timezone.utc)
     now_ts = now.timestamp()
@@ -372,6 +388,8 @@ def backfill_outcomes():
     fd, tmp = tempfile.mkstemp(dir=SIGNAL_LOG.parent, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
+            for entry in head_entries:
+                f.write(json.dumps(entry) + "\n")
             for entry in entries:
                 f.write(json.dumps(entry) + "\n")
         os.replace(tmp, SIGNAL_LOG)
