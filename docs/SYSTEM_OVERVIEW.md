@@ -1,135 +1,150 @@
 # System Overview
 
-Updated: 2026-03-05
-Branch: improve/auto-session-2026-03-05
-
-## Session Delta (This Branch)
-
-Implemented improvements in this branch:
-
-1. Dashboard endpoint hardening for malformed/non-object JSONL lines in `/api/telegrams` and `/api/decisions`.
-2. Accuracy log ingestion hardening in `portfolio/accuracy_stats.py` JSONL fallback (skip malformed lines).
-3. Static dashboard export parity/auth updates in `dashboard/export_static.py`:
-   - token-aware export requests when `dashboard_token` is configured,
-   - inclusion of `/api/metals-accuracy` and `/api/lora-status` in exported static data.
+Updated: 2026-03-07
+Branch: worktree-auto-session-2026-03-07
 
 ## 1) Architecture Summary
 
-This repository is a two-layer autonomous trading system:
+Two-layer autonomous trading system with 30 signals, 19 instruments, and dual-strategy portfolio management.
 
-1. Layer 1 (`portfolio/main.py`) runs a continuous loop, fetches market data, computes signals, detects meaningful changes, writes summary/context files, and decides whether Layer 2 should run.
-2. Layer 2 (Claude subprocess via `portfolio/agent_invocation.py`) consumes Layer 1 output, makes strategy decisions, writes journals/portfolio updates, and sends notifications.
+- **Layer 1** (`portfolio/main.py`): Continuous 60s loop — data collection, signal generation, trigger detection, summary writing.
+- **Layer 2** (`portfolio/agent_invocation.py`): Claude subprocess — reads summaries, makes trade decisions, writes journals, sends Telegram.
+- **Autonomous mode** (`portfolio/autonomous.py`): Fallback when Layer 2 disabled — signal-based decisions without LLM.
+- **Dashboard** (`dashboard/app.py`): Flask REST API over `data/` files, port 5055.
+- **Metals subsystem** (`data/metals_loop.py`): Separate autonomous warrant trading loop via Avanza API.
 
-A separate Flask dashboard (`dashboard/app.py`) serves current state and historical telemetry from `data/`.
+## 2) Entry Points
 
-## 2) Entry Points and Runtime Surfaces
+| Surface | Entry | Notes |
+|---------|-------|-------|
+| Main loop | `portfolio/main.py --loop` | Via `scripts/win/pf-loop.bat`, auto-restart |
+| One-shot | `--report`, `--accuracy`, `--check-outcomes` | Developer/cron tools |
+| Dashboard | `dashboard/app.py` | Port 5055, optional token auth |
+| Metals loop | `data/metals_loop.py` | Separate process, warrant trading |
+| Agent | `scripts/win/pf-agent.bat` | Spawns Claude CLI for Layer 2 |
 
-### Trading runtime
+## 3) Module Map (~95 portfolio modules)
 
-- Primary continuous entry: `portfolio/main.py --loop`
-- One-shot/reporting and maintenance entrypoints: `portfolio/main.py` flags (`--report`, `--accuracy`, `--check-outcomes`, `--forecast-accuracy`, `--retrain`, etc.)
-- Launcher scripts: `scripts/win/pf-loop.bat`, `scripts/win/pf-agent.bat`, `start-loop.bat`
+### Orchestration (5 modules)
+- `main.py` (642 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, module orchestration
+- `agent_invocation.py` (206 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing
+- `trigger.py` (326 lines): Change detection — consensus flip, price >2%, F&G threshold, sentiment reversal, post-trade
+- `market_timing.py` (80 lines): DST-aware US market hours, agent invocation window
+- `config_validator.py`: Startup config validation
 
-### Dashboard runtime
+### Signal System (30 signals: 8 core + 19 enhanced + 3 disabled)
+- `signal_engine.py` (727 lines): 30-signal voting, weighted consensus, accuracy inversion, confidence penalties
+- `signal_registry.py` (130 lines): Plugin-based signal discovery via importlib
+- `signal_utils.py` (130 lines): Shared helpers — SMA, EMA, RSI, majority_vote
+- `signals/*.py` (19 modules): Enhanced composite signals, each with 4-8 sub-indicators
+- `accuracy_stats.py` (636 lines): Per-signal hit rate tracking, accuracy cache, activation rates
+- `outcome_tracker.py` (391 lines): Signal snapshot logging, price backfill for accuracy
 
-- Flask app: `dashboard/app.py` on port `5055`
-- Static export tooling: `dashboard/export_static.py`
-- External sync tooling: `scripts/sync_dashboard.py`
+### Data Collection (3 modules)
+- `data_collector.py` (259 lines): Binance spot/FAPI, Alpaca, yfinance; circuit breakers; 7 timeframes
+- `indicators.py` (167 lines): RSI, MACD, EMA, BB, ATR, regime detection (cache per cycle)
+- `shared_state.py` (124 lines): Thread-safe cache (TTL + stale fallback), rate limiters
 
-### Auxiliary runtime
+### Portfolio & Risk (7 modules)
+- `portfolio_mgr.py` (57 lines): State load/save via atomic_write_json
+- `trade_guards.py` (267 lines): Per-ticker cooldown, consecutive-loss escalation, position rate limit
+- `risk_management.py` (710 lines): Drawdown circuit breaker (-15%), ATR stops, concentration risk, correlation pairs
+- `equity_curve.py` (599 lines): FIFO round-trip matching, Sharpe/Sortino, max drawdown, calmar ratio
+- `monte_carlo.py` (401 lines): GBM with antithetic variates, probability-driven drift
+- `monte_carlo_risk.py` (504 lines): Student-t copula VaR/CVaR, correlation priors
+- `kelly_sizing.py`: Kelly criterion position sizing
 
-- Metals subsystem in `data/metals_*.py` + `data/silver_monitor.py`
-- LoRA training pipeline in `training/lora/`
+### Reporting & Analysis (6 modules)
+- `reporting.py` (962 lines): agent_summary.json (full/compact/tiered), three-tier compaction
+- `journal.py`: Layer 2 journal JSONL streaming
+- `journal_index.py` (400 lines): BM25 relevance ranking, importance scoring
+- `reflection.py` (243 lines): Periodic strategy metrics (win rate, avg PnL)
+- `prophecy.py`: Macro belief system (silver_bull_2026, etc.)
+- `focus_analysis.py`: Mode B probability format for focus instruments
 
-## 3) Module Responsibilities
+### External Data (11 modules)
+- `fear_greed.py`, `sentiment.py`, `social_sentiment.py`, `onchain_data.py`
+- `funding_rate.py`, `alpha_vantage.py`, `fx_rates.py`, `futures_data.py`
+- `ministral_signal.py`, `ministral_trader.py`, `ml_signal.py` (disabled)
 
-### Orchestration and control
+### Notification (5 modules)
+- `telegram_notifications.py` (138 lines): Send with Markdown escaping, 4096 char limit, fallback
+- `telegram_poller.py`: Incoming message polling, command handling
+- `message_store.py`: Transaction/notification logging
+- `message_throttle.py`: Analysis message rate limiting
+- `digest.py` (206 lines): 4-hour periodic digest with invocation stats
 
-- `portfolio/main.py`: lifecycle, scheduling, crash backoff, health heartbeat, trigger routing, module orchestration.
-- `portfolio/market_timing.py`: market-hour/off-hour scheduling and agent invocation window logic.
-- `portfolio/agent_invocation.py`: Layer 2 subprocess lifecycle, timeout handling, invocation logging.
-- `portfolio/trigger.py`: change detection (consensus transitions, sustained flips, price threshold, F&G threshold crossing, sustained sentiment reversal, post-trade reassessment).
+### Infrastructure (6 modules)
+- `file_utils.py` (129 lines): atomic_write_json, load_json/jsonl, prune_jsonl
+- `http_retry.py` (66 lines): Exponential backoff (3 retries, 1s base, 2x factor)
+- `circuit_breaker.py` (97 lines): Thread-safe state machine (CLOSED→OPEN→HALF_OPEN)
+- `health.py` (187 lines): Heartbeat, error ring buffer, module failure tracking
+- `logging_config.py` (48 lines): RotatingFileHandler (10MB, 3 backups)
+- `signal_db.py`: WAL-mode SQLite dual-write with JSONL fallback
 
-### Data collection and signal generation
+## 4) Data Flow
 
-- `portfolio/data_collector.py`: Binance/Alpaca/yfinance collection and timeframe assembly.
-- `portfolio/indicators.py`: indicator calculation primitives.
-- `portfolio/signal_engine.py`: core and enhanced signal aggregation, consensus/weighted consensus.
-- `portfolio/signals/*.py`: enhanced signal modules.
-- `portfolio/accuracy_stats.py`, `portfolio/outcome_tracker.py`, `portfolio/signal_db.py`: signal/outcome logging and accuracy analytics.
+```
+main.loop()
+  → market_timing.get_market_state() → select active instruments
+  → for each ticker:
+      data_collector.collect_timeframes() → 7 OHLCV DataFrames
+      indicators.compute_indicators() → RSI, MACD, EMA, BB, ATR
+      signal_engine.generate_signal() → 30 votes → consensus action
+  → trigger.check_triggers() → compare vs persistent baseline
+  → if triggered:
+      reporting.write_agent_summary() → agent_summary.json
+      reporting.write_tiered_summary() → T1/T2/T3 context files
+      outcome_tracker.log_signal_snapshot() → signal_log.jsonl + SQLite
+      agent_invocation.invoke_agent() → spawns Claude CLI subprocess
+        OR autonomous.autonomous_decision() → fallback when L2 disabled
+  → post-cycle:
+      digest._maybe_send_digest() → 4h Telegram digest
+      health.update_health() → heartbeat + error tracking
+      reflection.maybe_reflect() → periodic strategy metrics
+      file_utils.prune_jsonl() → keep last 5000 entries per file
+```
 
-### Portfolio, risk, and reporting
+## 5) Signal Architecture
 
-- `portfolio/portfolio_mgr.py`: portfolio state persistence and value calculation.
-- `portfolio/risk_management.py`, `portfolio/trade_guards.py`, `portfolio/equity_curve.py`, `portfolio/monte_carlo*.py`: risk/equity analytics.
-- `portfolio/reporting.py`: full/compact/tiered summary file generation for Layer 2 and dashboard.
-- `portfolio/journal.py`, `portfolio/journal_index.py`: Layer 2 memory context generation.
+### Consensus Formula
+- Active voters = signals that voted BUY or SELL (not HOLD)
+- MIN_VOTERS = 3 (all asset classes)
+- Core gate: at least 1 core signal must be active for non-HOLD
+- Confidence = active_voters_in_direction / total_active_voters
+- Sub-50% accuracy signals auto-inverted (30% BUY → 70% SELL)
+- Recency-weighted: 70% recent (7d) + 30% all-time
 
-### Shared infrastructure
+### Weighted Consensus
+- Weight = accuracy_weight × regime_multiplier × activation_frequency_normalization
+- Regime weights: trending → trust EMA/MACD more; ranging → trust RSI/BB more
+- Activation rates: rare, balanced signals get bonus; noisy/biased get penalty
 
-- `portfolio/file_utils.py`: safe JSON/JSONL load and atomic write/append helpers.
-- `portfolio/http_retry.py`: resilient HTTP retry policy.
-- `portfolio/shared_state.py`: in-process cache and rate-limiter shared state.
-- `portfolio/config_validator.py`: startup config validation.
-- `portfolio/health.py`, `portfolio/message_store.py`, `portfolio/telegram_notifications.py`: health and messaging.
+## 6) Configuration
 
-### Dashboard
+Primary config: `config.json` (not in repo). Key domains:
+- `telegram.token`, `telegram.chat_id`, `telegram.layer1_messages`
+- `alpaca.api_key`, `alpaca.api_secret`
+- `layer2.enabled`, `layer2.max_turns`, `layer2.timeout`
+- `notification.mode` ("signals" | "probability"), `notification.focus_tickers`
+- Feature flags: `trade_guards.enabled`, `risk_audit.enabled`, `reflection.enabled`
+- `forecast.kronos_enabled`, `claude_fundamental.enabled`
+- `bigbet.enabled`, `iskbets.*`, `dashboard_token`
 
-- `dashboard/app.py`: authenticated API over `data/` files.
-- `dashboard/static/index.html`: client UI consuming API and static fallback data.
-- `dashboard/export_static.py`: endpoint snapshots to `dashboard/static/api-data/`.
+## 7) Test Surface
 
-## 4) End-to-End Data Flow
+- ~3,168 tests across 105+ test files
+- Sequential: ~16 min; Parallel (`-n auto`): ~5.5 min
+- 26 pre-existing failures (integration/strategy, consensus thresholds)
+- Config: `pyproject.toml` → `[tool.pytest.ini_options]`
+- Linter: ruff (line-length=120, target py311)
 
-1. `main.loop()` selects active instruments based on market timing.
-2. `run()` collects OHLCV/timeframes per symbol, computes indicators, generates action/confidence + extra signal metadata.
-3. Trigger state is evaluated in `trigger.check_triggers(...)` against persisted baseline.
-4. On trigger/forced run:
-   - `reporting.write_agent_summary(...)` writes full summary.
-   - Tier classification/context is generated (`classify_tier`, `write_tiered_summary`).
-   - Signal snapshot/outcome tracking writes to JSONL/SQLite paths.
-   - `agent_invocation.invoke_agent(...)` optionally launches Layer 2.
-5. Health/risk/post-cycle jobs run (digest, throttled messaging, AV refresh, JSONL pruning).
-6. Dashboard endpoints read `data/` JSON/JSONL files and expose a read API.
+## 8) Key Design Patterns
 
-## 5) External Dependencies
-
-- Market and macro data: Binance spot/futures, Alpaca, yfinance, Frankfurter, Alpha Vantage, (plus optional sentiment/on-chain sources).
-- Local/LLM model stack: ministral/trader inference scripts and forecast components.
-- Notification and agent orchestration: Telegram Bot API, Claude CLI subprocess.
-- Python stack: Flask, pandas, numpy, scikit-learn, joblib (+ optional training dependencies).
-
-## 6) Configuration Model
-
-Primary runtime config is `config.json` (template: `config.example.json`). Key domains include:
-
-- `telegram.*`
-- `alpaca.*`
-- optional feature domains (`layer2`, `iskbets`, dashboard token, etc.)
-
-`portfolio/config_validator.py` enforces required keys at loop startup. Authentication for dashboard APIs is conditional on `dashboard_token`.
-
-## 7) Observed Discrepancies vs Existing Docs
-
-1. `docs/architecture-plan.md` still contains outdated assumptions (instrument counts/history, cooldown wording, and module inventory drift vs current code).
-2. Runtime trigger behavior has no periodic cooldown trigger in `trigger.py`, but several docs still describe cooldown/check-in semantics.
-3. Documentation frequently describes legacy ticker counts and old signal totals that do not align with current symbols/signal module set.
-4. Existing overview docs understate dashboard/api surface changes and metals subsystem coupling into the same `data/` namespace.
-
-## 8) Concrete Risk Areas Found During Exploration
-
-1. Dashboard endpoints `/api/telegrams` and `/api/decisions` assume each JSONL entry is a dict; valid non-dict JSON lines can cause 500s.
-2. `accuracy_stats.load_entries()` JSONL fallback has no per-line decode guard; one malformed line can break `/api/accuracy`.
-3. `dashboard/export_static.py` does not include all frontend-used endpoints and can fail when dashboard token auth is enabled.
-4. `main.py` validates config in loop mode, but non-loop command paths can bypass strict startup validation.
-5. Trigger trade-check path silently swallows malformed portfolio files, reducing observability of state corruption.
-
-## 9) Test Surface Snapshot
-
-- Strong coverage exists for trigger logic and dashboard routes.
-- Targeted gaps remain around:
-  - endpoint robustness against non-dict JSONL lines,
-  - `/api/metals-accuracy` route behavior,
-  - static export script behavior under dashboard auth and endpoint parity expectations.
-
-These findings inform the improvement plan in `docs/IMPROVEMENT_PLAN.md`.
+- **Atomic writes**: `file_utils.atomic_write_json()` prevents corrupt state files
+- **Circuit breakers**: Per-API failure tracking with auto-recovery
+- **Cache-through**: TTL cache with stale-data fallback (shared_state._cached)
+- **Tiered invocation**: T1 (quick, 70%), T2 (signal, 25%), T3 (full, 5%)
+- **Three-tier compaction**: Held → full votes; triggered → vote_detail string; HOLD → minimal
+- **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
+- **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
