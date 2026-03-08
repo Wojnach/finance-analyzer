@@ -86,10 +86,12 @@ class TestCacheEvictionMixed:
     def test_stale_removed_first_then_lru_if_needed(self):
         now = time.time()
         with _cache_lock:
-            # Half stale (>1h), half fresh (<1h)
+            # Half stale (>ttl*stale_factor), half fresh
             for i in range(_CACHE_MAX_SIZE):
                 age = 7200 if i % 2 == 0 else 60
-                _tool_cache[f"mix_{i}"] = {"data": i, "time": now - age}
+                # Stale entries get small ttl so 7200 > 60*3=180 → evicted
+                ttl = 60 if i % 2 == 0 else 3600
+                _tool_cache[f"mix_{i}"] = {"data": i, "time": now - age, "ttl": ttl}
             # Add extras to go over limit
             for i in range(20):
                 _tool_cache[f"extra_{i}"] = {"data": i, "time": now - 30}

@@ -243,10 +243,11 @@ class TestCacheEviction:
         mock_time.time.return_value = 1000.0
 
         # Fill cache with 260 entries (> 256 max)
+        # Include ttl so TTL-aware eviction works: threshold = ttl * _MAX_STALE_FACTOR = 60 * 3 = 180s
         for i in range(260):
-            shared_state._tool_cache[f"old_{i}"] = {"data": i, "time": 1000.0}
+            shared_state._tool_cache[f"old_{i}"] = {"data": i, "time": 1000.0, "ttl": 60}
 
-        # Advance time so all entries are >3600s old (expired)
+        # Advance time so all entries exceed ttl * stale_factor (age=4000 > 180)
         mock_time.time.return_value = 5000.0
 
         # Next _cached() call triggers eviction
@@ -289,13 +290,13 @@ class TestCacheEviction:
 
     @patch("portfolio.shared_state.time")
     def test_partial_eviction_mixed_ages(self, mock_time):
-        """Only entries older than 3600s are evicted; fresh entries survive."""
+        """Only entries exceeding ttl * stale_factor are evicted; fresh entries survive."""
         mock_time.time.return_value = 5000.0
 
-        # 200 old entries (time=1000, age=4000s > 3600s)
+        # 200 old entries (time=1000, age=4000s > ttl=60 * 3 = 180s threshold)
         for i in range(200):
-            shared_state._tool_cache[f"old_{i}"] = {"data": i, "time": 1000.0}
-        # 60 fresh entries (time=4500, age=500s < 3600s)
+            shared_state._tool_cache[f"old_{i}"] = {"data": i, "time": 1000.0, "ttl": 60}
+        # 60 fresh entries (time=4500, age=500s < default ttl=3600 * 3 = 10800s threshold)
         for i in range(60):
             shared_state._tool_cache[f"fresh_{i}"] = {"data": i, "time": 4500.0}
 
