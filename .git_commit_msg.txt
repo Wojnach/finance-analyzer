@@ -1,0 +1,6 @@
+docs: update system overview and improvement plan for 2026-03-08 session
+
+Adds 8 new bugs (BUG-15 through BUG-22) and 1 architecture fix (ARCH-9).
+Organized into 4 independent implementation batches.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
