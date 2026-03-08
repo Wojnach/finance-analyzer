@@ -15,12 +15,15 @@ another trigger has already fired.
 """
 
 import json
+import logging
 import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from portfolio.file_utils import atomic_write_json, load_json
+
+logger = logging.getLogger("portfolio.trigger")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATE_FILE = BASE_DIR / "data" / "trigger_state.json"
@@ -81,7 +84,8 @@ def _check_recent_trade(state):
 
             if current_count > prev_count:
                 trade_detected = True
-        except (json.JSONDecodeError, KeyError):
+        except (json.JSONDecodeError, KeyError) as exc:
+            logger.warning("Failed to parse portfolio file %s: %s", pf_file, exc)
             pass
 
     if new_tx_counts:

@@ -35,8 +35,10 @@ def _cached(key, ttl, func, *args):
         if key in _tool_cache and now - _tool_cache[key]["time"] < ttl:
             return _tool_cache[key]["data"]
         # Evict expired entries when cache grows too large
+        # Use TTL-aware eviction: entries expire after ttl * _MAX_STALE_FACTOR
         if len(_tool_cache) > _CACHE_MAX_SIZE:
-            expired = [k for k, v in _tool_cache.items() if now - v["time"] > 3600]
+            expired = [k for k, v in _tool_cache.items()
+                       if now - v["time"] > v.get("ttl", 3600) * _MAX_STALE_FACTOR]
             for k in expired:
                 del _tool_cache[k]
             # LRU fallback: if still over limit (all entries fresh), evict oldest 25%
@@ -50,7 +52,7 @@ def _cached(key, ttl, func, *args):
     try:
         data = func(*args)
         with _cache_lock:
-            _tool_cache[key] = {"data": data, "time": now}
+            _tool_cache[key] = {"data": data, "time": now, "ttl": ttl}
         return data
     except Exception as e:
         logger.warning("[%s] error: %s", key, e)
