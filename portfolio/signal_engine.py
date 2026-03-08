@@ -60,7 +60,7 @@ def _load_prev_sentiments():
         for k in removed:
             del _prev_sentiment[k]
     except Exception:
-        logger.debug("Failed to load prev sentiments", exc_info=True)
+        logger.warning("Failed to load prev sentiments", exc_info=True)
     _prev_sentiment_loaded = True
 
 
@@ -77,7 +77,7 @@ def _set_prev_sentiment(ticker, direction):
         from portfolio.file_utils import atomic_write_json
         atomic_write_json(_SENTIMENT_STATE_FILE, {"prev_sentiment": _prev_sentiment})
     except Exception:
-        logger.debug("Failed to persist sentiment", exc_info=True)
+        logger.warning("Failed to persist sentiment", exc_info=True)
 
 
 REGIME_WEIGHTS = {
@@ -194,6 +194,7 @@ def _compute_adx(df, period=14):
         val = adx.iloc[-1]
         return float(val) if pd.notna(val) and np.isfinite(val) else None
     except Exception:
+        logger.warning("ADX computation failed", exc_info=True)
         return None
 
 
@@ -357,7 +358,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             elif fg["value"] >= 80:
                 votes["fear_greed"] = "SELL"
     except ImportError:
-        pass
+        logger.debug("Optional module %s not available", "fear_greed")
 
     # Social media posts (Reddit) — fetched separately, merged into sentiment
     social_posts = []
@@ -375,7 +376,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             if reddit:
                 social_posts.extend(reddit)
         except ImportError:
-            pass
+            logger.debug("Optional module %s not available", "social_sentiment")
 
     # Sentiment (crypto->CryptoBERT, stocks->Trading-Hero-LLM) — includes social posts
     # Hysteresis: flipping direction requires confidence > 0.55, same direction > 0.40
@@ -425,7 +426,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                     votes["sentiment"] = "SELL"
                     _set_prev_sentiment(ticker, "negative")
         except ImportError:
-            pass
+            logger.debug("Optional module %s not available", "sentiment")
 
     # ML Classifier — disabled: 28.2% accuracy (1,027 samples, 1d horizon).
     # Worse than coin flip; actively harmful to consensus. Still tracked for
@@ -449,7 +450,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 extra_info["volume_action"] = vs["action"]
                 votes["volume"] = vs["action"]
         except ImportError:
-            pass
+            logger.debug("Optional module %s not available", "macro_context")
 
     # Ministral-8B LLM reasoning (original CryptoTrader-LM, crypto only)
     # custom_lora fully disabled: 20.9% accuracy, 97% SELL bias (worse than random).
@@ -514,7 +515,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 # custom_lora fully disabled — not even stored in extra.
                 # Shadow A/B data preserved in data/ab_test_log.jsonl.
         except ImportError:
-            pass
+            logger.debug("Optional module %s not available", "ministral_signal")
 
     # --- Enhanced signal modules (composite indicators computed from raw OHLCV) ---
     # Loaded from signal_registry — no hardcoded list needed here.
@@ -679,7 +680,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
 
         activation_rates = load_cached_activation_rates()
     except Exception:
-        logger.warning("Accuracy stats load failed", exc_info=True)
+        logger.error("Accuracy stats load failed", exc_info=True)
     weighted_action, weighted_conf = _weighted_consensus(
         votes, accuracy_data, regime, activation_rates
     )

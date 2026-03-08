@@ -1,8 +1,11 @@
 """Portfolio state management — load, save, atomic writes, value calculation."""
 
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger("portfolio.portfolio_mgr")
 
 from portfolio.file_utils import atomic_write_json as _atomic_write_json
 
@@ -49,8 +52,16 @@ def save_bold_state(state):
 
 
 def portfolio_value(state, prices_usd, fx_rate):
-    total = state["cash_sek"]
+    if not isinstance(fx_rate, (int, float)) or fx_rate <= 0:
+        logger.warning("portfolio_value: invalid fx_rate=%r, returning cash only", fx_rate)
+        return state.get("cash_sek", 0)
+    total = state.get("cash_sek", 0)
     for ticker, h in state.get("holdings", {}).items():
-        if h["shares"] > 0 and ticker in prices_usd:
-            total += h["shares"] * prices_usd[ticker] * fx_rate
+        try:
+            shares = h.get("shares", 0)
+            price = prices_usd.get(ticker)
+            if shares > 0 and price is not None:
+                total += shares * price * fx_rate
+        except (TypeError, ValueError, AttributeError) as e:
+            logger.warning("portfolio_value: error calculating %s: %s", ticker, e)
     return total

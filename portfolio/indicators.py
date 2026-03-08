@@ -1,14 +1,19 @@
 """Technical indicator computation and regime detection."""
 
+import logging
+
 import numpy as np
 import pandas as pd
 
 from portfolio.shared_state import _run_cycle_id, _regime_cache, _regime_cache_cycle
 import portfolio.shared_state as _ss
 
+logger = logging.getLogger("portfolio.indicators")
+
 
 def compute_indicators(df):
     if len(df) < 26:
+        logger.debug("compute_indicators: insufficient data (%d rows, need 26)", len(df))
         return None
     close = df["close"]
 
