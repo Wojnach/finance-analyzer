@@ -83,7 +83,7 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 ### 1. Read the data
 
 - `data/layer2_context.md` — **read this first.** Your memory from previous invocations: theses, regime, prices, watchlist
-- `data/agent_summary_compact.json` — all 27 signals, timeframes, indicators, macro context, fundamentals (compact version, readable in one shot)
+- `data/agent_summary_compact.json` — all 30 signals, timeframes, indicators, macro context, fundamentals (compact version, readable in one shot)
 - `data/agent_summary.json` — full version with enhanced signal details (too large for single read; use compact instead)
 - `data/fundamentals_cache.json` — Alpha Vantage OVERVIEW data for stocks (P/E, revenue growth, analyst targets, sector). Refreshed daily, stocks only (not crypto/metals). Available in `agent_summary_compact.json` → `fundamentals` section for held/interesting tickers.
 - `data/portfolio_state.json` — Patient strategy: current cash, holdings, transaction history
@@ -94,7 +94,7 @@ have strong, well-reasoned conviction to deviate, you may — just state why in 
 ### 2. Analyze
 
 - **Use your memory:** Compare previous thesis prices with current prices — were you right? Write your assessment in the `reflection` field. Check if watchlist conditions were met. Notice regime shifts. If you just traded, don't reverse on noise. Check the Warnings section for contradictions and whipsaws.
-- Review all 27 signals across all timeframes for each instrument
+- Review all 30 signals across all timeframes for each instrument
 - Check macro context: DXY, treasury yields, yield curve, FOMC proximity
 - Assess portfolio risk: concentration, drawdown, cash reserves
 - Check recent transaction history: avoid whipsaw trades
@@ -483,7 +483,7 @@ requests.post(
 - This is SIMULATED money (500K SEK starting) — trade freely to build a track record
 - **Near close (<1h to market close):** Do not open new positions on stocks or warrants. For existing positions, flag that close is imminent — the user needs to decide now (take profit or close flat). Crypto is exempt (24/7). US market closes 21:00 CET (15:00 ET).
 
-## 27 Signals (8 Core + 19 Enhanced Composite)
+## 30 Signals (8 Core Active + 3 Disabled + 19 Enhanced Composite)
 
 ### Core Signals (1-8 active, 3 disabled)
 
