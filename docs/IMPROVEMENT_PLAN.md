@@ -1,11 +1,11 @@
 # Improvement Plan
 
-Updated: 2026-03-07 (post-implementation)
-Branch: worktree-auto-session-2026-03-07
+Updated: 2026-03-08
+Branch: improve/auto-session-2026-03-08
 
-Previous sessions: 2026-03-05 (dashboard hardening), 2026-03-06 (CircuitBreaker, TTL cache, prune fix).
+Previous sessions: 2026-03-05 (dashboard hardening), 2026-03-06 (CircuitBreaker, TTL cache, prune fix), 2026-03-07 (digest hardening, outcome tracker, disabled signals).
 
-## Session Results (2026-03-07)
+## Session Results (2026-03-07 — previous)
 
 All 4 batches implemented and committed. 28 new tests added (22 digest + 6 outcome_tracker).
 
@@ -16,151 +16,129 @@ All 4 batches implemented and committed. 28 new tests added (22 digest + 6 outco
 | 3 | ARCH-8 | `d586c89` | 0 (1-line change, no new tests needed) |
 | 4 | FEAT-2 | `d21bb51` | 3 (added to test_4h_digest.py) |
 
-Bonus fix found during testing: signal_log parsing had a naive/aware datetime
-comparison bug (fallback `"2000-01-01"` is tz-naive, `cutoff` is tz-aware).
-Fixed in Batch 1.
+## Session Plan (2026-03-08)
 
-ARCH-8 was smaller than planned — ml/funding vote derivation in outcome_tracker
-serves historical accuracy tracking and cannot be safely removed. Only the dead
-`"funding": 1.3` weight in REGIME_WEIGHTS was removed.
+### 1) Bugs & Problems Found
 
-## 1) Bugs & Problems Found
+#### BUG-15 (P1): Silent ImportError passes in signal_engine.py
 
-### BUG-10 (P1): `digest._build_digest_message()` crashes on missing keys
+- **File**: `portfolio/signal_engine.py` (5 locations: lines ~359, 377, 427, 451, 516)
+- **Issue**: Optional module imports (social_sentiment, fear_greed, sentiment, etc.) silently
+  `pass` on ImportError. If a dependency is missing, the signal votes "HOLD" with no warning.
+  The system operates with incomplete signal coverage without anyone knowing.
+- **Fix**: Add `logger.debug()` to each ImportError catch so missing modules are visible in logs.
+- **Impact**: Low risk — only adds logging, no behavioral change.
 
-- **File**: `portfolio/digest.py:62,87`
-- **Issue**: Uses `e["ts"]` (direct key access) when iterating JSONL entries. If any
-  entry in `invocations.jsonl` or `layer2_journal.jsonl` is missing the `"ts"` key
-  (e.g., due to partial write or schema change), this raises `KeyError` and the entire
-  digest fails silently (caught by outer `except Exception` in `_maybe_send_digest`).
-- **Compare**: Line 99 correctly uses `e.get("ts", "2000-01-01")` for signal_log entries.
-- **Fix**: Replace `e["ts"]` with `e.get("ts", "")` and skip entries with empty/invalid ts.
-- **Impact**: Low risk — only affects digest generation, not trading. But digest is the
-  primary monitoring tool; silent failure means no 4h updates.
+#### BUG-16 (P2): Sentiment state persistence logged at DEBUG level
 
-### BUG-11 (P1): `digest._build_digest_message()` raw file read without error handling
+- **File**: `portfolio/signal_engine.py:62-63, 79-80`
+- **Issue**: Sentiment state loading/saving failures logged at DEBUG level. In a trading system,
+  losing state persistence is at least a WARNING — it means sentiment hysteresis won't work
+  across restarts.
+- **Fix**: Upgrade `logger.debug()` to `logger.warning()` for sentiment persist failures.
+- **Impact**: No behavioral change, just better visibility.
 
-- **File**: `portfolio/digest.py:107`
-- **Issue**: `json.loads(AGENT_SUMMARY_FILE.read_text())` — if `agent_summary.json`
-  doesn't exist or is corrupted, this crashes. Should use `load_json()` with fallback.
-- **Fix**: Use `load_json(AGENT_SUMMARY_FILE, default={})` from file_utils.
-- **Impact**: Digest crashes if agent_summary is stale/missing. Same silent failure
-  as BUG-10 — no 4h monitoring updates.
+#### BUG-17 (P2): Silent None returns in _compute_adx() and compute_indicators()
 
-### BUG-12 (P2): `outcome_tracker.backfill_outcomes()` loads entire signal_log into memory
+- **File**: `portfolio/signal_engine.py:172-197` and `portfolio/indicators.py:10-12`
+- **Issue**: Both functions return None silently on insufficient data or computation failure.
+  Callers handle None correctly, but no logging makes debugging impossible when ADX or
+  indicators aren't computed.
+- **Fix**: Add `logger.debug()` for data insufficiency, `logger.warning()` for computation errors.
+- **Impact**: No behavioral change, adds diagnostic logging.
 
-- **File**: `portfolio/outcome_tracker.py:262-267`
-- **Issue**: Reads all JSONL entries into a list. With ~40-100 entries/day × 19 tickers,
-  after 6 months this could be 10K+ entries with nested outcomes dicts. Each entry can
-  be 10-50KB. Total memory: 100MB-500MB.
-- **Fix**: Process file in streaming chunks, write updates incrementally, or add a
-  max-entries limit (e.g., only process last 2000 entries — older ones are fully filled).
-- **Impact**: Memory pressure on the trading host. Not urgent at current data volumes
-  (~2 months of data) but will become a problem.
+#### BUG-18 (P2): Accuracy stats load failure degrades consensus silently
 
-### BUG-13 (P2): `digest._build_digest_message()` doesn't handle missing bold state
+- **File**: `portfolio/signal_engine.py:681-682`
+- **Issue**: If accuracy statistics can't be loaded, weighted consensus falls back to equal
+  weights silently. Signals with 30% accuracy carry the same weight as 80% signals. The
+  warning is logged but at a level that doesn't trigger alerts.
+- **Fix**: Upgrade to `logger.error()` and ensure accuracy data fallback is explicit.
+- **Impact**: No behavioral change, better monitoring.
 
-- **File**: `portfolio/digest.py:179`
-- **Issue**: `json.loads(BOLD_STATE_FILE.read_text())` inside an `if BOLD_STATE_FILE.exists()`
-  check. But the file could be corrupted even if it exists. No try/except around this read.
-- **Fix**: Use `load_json()` with try/except, or skip bold section on error.
-- **Impact**: Digest crash if bold state file is corrupted.
+#### BUG-19 (P2): JSONL malformed lines silently skipped
 
-### BUG-14 (P3): `_get_last_digest_time()` uses bare `except Exception`
+- **File**: `portfolio/file_utils.py:64-65`
+- **Issue**: `load_jsonl()` silently skips lines with JSON decode errors. If 50 out of 1000
+  lines are corrupt, data is lost without warning. For signal_log and journal files, missing
+  entries means missing context.
+- **Fix**: Add `logger.debug()` with filename and error details.
+- **Impact**: No behavioral change, aids debugging corrupt files.
 
-- **File**: `portfolio/digest.py:36`
-- **Issue**: Catches all exceptions including `FileNotFoundError`, `PermissionError`, etc.
-  Should narrow to `(json.JSONDecodeError, FileNotFoundError, OSError)`.
-- **Fix**: Narrow exception types.
-- **Impact**: Cosmetic — function returns 0 (safe fallback) on any error.
+#### BUG-20 (P2): portfolio_value() has no type validation
 
-## 2) Architecture Improvements
+- **File**: `portfolio/portfolio_mgr.py:51-56`
+- **Issue**: If `shares`, `price`, or `fx_rate` is None or a string (from corrupted JSON),
+  the multiplication crashes with TypeError. No validation at the boundary.
+- **Fix**: Add type checks for `fx_rate`, `shares`, `price` with safe defaults and logging.
+- **Impact**: Prevents crash on corrupt portfolio state; may mask underlying issues.
 
-### ARCH-6: Harden digest.py resilience (Batch 1)
+#### BUG-21 (P3): Cache eviction threshold mismatch in shared_state.py
 
-Bundle BUG-10, BUG-11, BUG-13, BUG-14 into a single digest hardening commit.
+- **File**: `portfolio/shared_state.py:34-49`
+- **Issue**: Cache eviction uses hardcoded 3600s (1 hour) threshold regardless of individual
+  TTLs. Entries with TTL=43200 (12h, like onchain data) get evicted after 1h. This wastes
+  API calls by re-fetching data that should still be cached.
+- **Fix**: Use per-entry TTL-aware expiry check instead of global 3600s threshold.
+- **Impact**: Reduces unnecessary API calls; may slightly increase memory usage.
 
-- Replace all raw `json.loads(file.read_text())` with `load_json()` from file_utils
-- Replace all `e["ts"]` with safe `.get()` + skip on invalid
-- Narrow exception types in `_get_last_digest_time`
-- Add tests for: missing files, corrupted JSON, missing "ts" key in JSONL entries
+#### BUG-22 (P3): Trigger state not persisted on early Layer 2 crash
 
-**Files changed**: `portfolio/digest.py`
-**Impact assessment**: No behavioral change on happy path. Prevents silent digest failures.
+- **File**: `portfolio/trigger.py:84-85`
+- **Issue**: When portfolio file parsing fails (KeyError, JSONDecodeError), the exception is
+  caught and passed silently. If the trigger state was modified before the error, changes are
+  lost. Also, trigger_state.json isn't persisted until the next successful check_triggers call.
+- **Fix**: Add `logger.warning()` for parse failures. Ensure trigger state is saved even when
+  downstream (agent invocation) fails.
+- **Impact**: Better diagnostics; prevents stale trigger state on crash.
 
-### ARCH-7: Add streaming to outcome_tracker backfill (Batch 2)
+### 2) Architecture Improvements
 
-Fix BUG-12 by limiting backfill to recent entries only.
+#### ARCH-9: Fix signal count inconsistency in CLAUDE.md
 
-- Add `max_entries` parameter to `backfill_outcomes()` (default 2000)
-- Only process the last N entries, skip fully-filled entries early
-- This is safe because older entries are already fully backfilled
+- **File**: `CLAUDE.md` line 486
+- **Issue**: Section header says "27 Signals (8 Core + 19 Enhanced Composite)" but the actual
+  list goes to signal #30 (Forecast, Claude Fundamental, Futures Flow). This inconsistency
+  confuses Layer 2 about how many signals exist.
+- **Fix**: Update header to "30 Signals (8 Core Active + 3 Disabled + 19 Enhanced Composite)".
+- **Impact**: Documentation-only. Layer 2 will correctly understand the signal landscape.
 
-**Files changed**: `portfolio/outcome_tracker.py`
-**Impact assessment**: Reduces memory usage from O(all_entries) to O(max_entries).
+### 3) Useful Features
 
-### ARCH-8: Clean up disabled signal references (Batch 3)
+(No new features this session — focusing on reliability improvements.)
 
-Three signals are disabled (ml, funding, custom_lora) but still referenced in code paths:
-- `signal_engine.py` still has import paths for ml_signal, funding_rate
-- `outcome_tracker.py` still derives votes for ml, funding signals
-- `tickers.py` SIGNAL_NAMES still includes disabled names
+### 4) Refactoring TODOs
 
-Remove dead code paths. Keep SIGNAL_NAMES entries (needed for accuracy tracking).
+#### REF-1 (carried): DRY outcome_tracker price fetchers
+#### REF-2 (carried): Align reflection.py and equity_curve.py trade matching
 
-**Files changed**: `portfolio/signal_engine.py`, `portfolio/outcome_tracker.py`
-**Impact assessment**: No behavioral change — disabled signals already return HOLD.
+### 5) Dependency/Ordering
 
-## 3) Useful Features
-
-### FEAT-2: Add digest health indicator
-
-When digest runs, include a brief "system health" line showing:
-- Loop uptime (from health.py heartbeat)
-- Signal failures in last 4h
-- Agent completion rate (invoked vs succeeded)
-
-This is already partially computed but not surfaced clearly.
-
-**Files changed**: `portfolio/digest.py`
-**Impact**: Better monitoring visibility without additional infrastructure.
-
-## 4) Refactoring TODOs
-
-### REF-1: DRY `outcome_tracker._fetch_historical_price()` and `_fetch_current_price()`
-
-Both functions duplicate Binance spot/FAPI/yfinance dispatch logic. Could extract a
-`_fetch_price(ticker, timestamp=None)` helper. Low priority — code is stable.
-
-### REF-2: Align reflection.py and equity_curve.py trade matching
-
-reflection.py uses simple avg-cost matching; equity_curve.py uses FIFO. Results diverge
-for multiple partial entries/exits. Low priority — reflection is supplementary context.
-
-## 5) Dependency/Ordering
-
-### Batch 1: Digest hardening (BUG-10, BUG-11, BUG-13, BUG-14, ARCH-6)
-- Files: `portfolio/digest.py`, `tests/test_digest.py`
+#### Batch 1: Signal Engine Logging (BUG-15, BUG-16, BUG-17, BUG-18)
+- Files: `portfolio/signal_engine.py`, `portfolio/indicators.py`
+- Tests: Add test for _compute_adx edge cases
 - No dependencies on other batches
 
-### Batch 2: Outcome tracker memory optimization (BUG-12, ARCH-7)
-- Files: `portfolio/outcome_tracker.py`, `tests/test_outcome_tracker.py` (new)
+#### Batch 2: File I/O Safety (BUG-19, BUG-20)
+- Files: `portfolio/file_utils.py`, `portfolio/portfolio_mgr.py`
+- Tests: Add tests for malformed JSONL, corrupt portfolio state
 - No dependencies on other batches
 
-### Batch 3: Disabled signal cleanup (ARCH-8)
-- Files: `portfolio/signal_engine.py`, `portfolio/outcome_tracker.py`
-- Depends on Batch 2 (outcome_tracker.py modified in both)
+#### Batch 3: Cache & Trigger Hardening (BUG-21, BUG-22)
+- Files: `portfolio/shared_state.py`, `portfolio/trigger.py`
+- Tests: Add tests for TTL-aware eviction, trigger parse failures
+- No dependencies on other batches
 
-### Batch 4: Digest health indicator (FEAT-2)
-- Files: `portfolio/digest.py`
-- Depends on Batch 1 (digest.py modified in both)
+#### Batch 4: Documentation Fix (ARCH-9)
+- Files: `CLAUDE.md`
+- No tests needed
 
-## 6) Summary
+## Summary
 
 | Category | Count | Items |
 |----------|-------|-------|
-| Bugs | 5 | BUG-10 through BUG-14 |
-| Architecture | 3 | ARCH-6 through ARCH-8 |
-| Features | 1 | FEAT-2 |
-| Refactoring | 2 | REF-1, REF-2 (deferred) |
-| Batches | 4 | Ordered by dependency |
+| Bugs | 8 | BUG-15 through BUG-22 |
+| Architecture | 1 | ARCH-9 |
+| Features | 0 | — |
+| Refactoring | 2 | REF-1, REF-2 (carried from previous) |
+| Batches | 4 | Independent (can run in parallel) |

@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-03-07
-Branch: worktree-auto-session-2026-03-07
+Updated: 2026-03-08
+Branch: improve/auto-session-2026-03-08
 
 ## 1) Architecture Summary
 
@@ -120,6 +120,11 @@ main.loop()
 - Regime weights: trending → trust EMA/MACD more; ranging → trust RSI/BB more
 - Activation rates: rare, balanced signals get bonus; noisy/biased get penalty
 
+### Signal Inventory (30 total)
+- **Core active (8)**: RSI, MACD, EMA, BB, Fear&Greed, Sentiment, Ministral-8B, Volume
+- **Core disabled (3)**: ML Classifier (28.2%), Funding Rate (27.0%), Custom LoRA (20.9%)
+- **Enhanced composite (19)**: Trend, Momentum, Volume Flow, Volatility, Candlestick, Structure, Fibonacci, Smart Money, Oscillators, Heikin-Ashi, Mean Reversion, Calendar, Macro Regime, Momentum Factors, News Event, Econ Calendar, Forecast, Claude Fundamental, Futures Flow
+
 ## 6) Configuration
 
 Primary config: `config.json` (not in repo). Key domains:
@@ -138,6 +143,7 @@ Primary config: `config.json` (not in repo). Key domains:
 - 26 pre-existing failures (integration/strategy, consensus thresholds)
 - Config: `pyproject.toml` → `[tool.pytest.ini_options]`
 - Linter: ruff (line-length=120, target py311)
+- 7 untested utility modules: telegram_poller, data_refresh, backup, log_rotation, social_sentiment, stats, regime_alerts
 
 ## 8) Key Design Patterns
 
@@ -148,3 +154,12 @@ Primary config: `config.json` (not in repo). Key domains:
 - **Three-tier compaction**: Held → full votes; triggered → vote_detail string; HOLD → minimal
 - **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
 - **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
+
+## 9) Known Issues (as of 2026-03-08)
+
+- Silent ImportError passes in signal_engine.py (BUG-15, 5 locations)
+- Cache eviction uses hardcoded 3600s regardless of per-entry TTL (BUG-21)
+- portfolio_value() lacks type validation (BUG-20)
+- JSONL loader silently skips corrupt lines (BUG-19)
+- CLAUDE.md header says "27 Signals" but system has 30 (ARCH-9)
+- See `docs/IMPROVEMENT_PLAN.md` for full bug list and fix plan
