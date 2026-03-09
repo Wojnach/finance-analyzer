@@ -584,6 +584,11 @@ if __name__ == "__main__":
     elif "--forecast-accuracy" in args:
         from portfolio.forecast_accuracy import print_forecast_accuracy_report
         print_forecast_accuracy_report()
+    elif "--local-llm-report" in args:
+        from portfolio.local_llm_report import print_local_llm_report
+        idx = args.index("--local-llm-report")
+        days = int(args[idx + 1]) if idx + 1 < len(args) and not args[idx + 1].startswith("--") else 30
+        print_local_llm_report(days=days)
     elif "--prophecy-review" in args:
         from portfolio.prophecy import print_prophecy_review
         print_prophecy_review()
