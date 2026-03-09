@@ -1,28 +1,40 @@
-# Worktree README
+## GoldDigger Signal Upgrade
 
-## Branch
+- Branch: `golddigger-signal-upgrade`
+- Worktree: `Q:\finance-analyzer\.worktrees\golddigger-signal-upgrade`
+- Scope: safer GoldDigger signal upgrades for intraday macro overlays and diagnostics
 
-- `local-llm-accuracy`
+### What Changed
 
-## What changed
+- Fixed dead GoldDigger volume confirmation by wiring volume fetches into live snapshots.
+- Fixed ignored config knobs for `binance_gold_symbol` and `fred_series`.
+- Added intraday proxy support for:
+  - DXY via `yfinance`
+  - 10Y yield proxy via `yfinance`
+  - safe fallback to FRED or macro context
+- Added event-risk blocking around high-impact macro events for metals.
+- Added richer structured poll logging for proxy/event context.
+- Added `--once` single-cycle dry-run path.
+- Made GoldDigger config loading work from a clean git worktree by honoring:
+  - `PORTFOLIO_CONFIG_PATH`
+  - `GOLDDIGGER_CONFIG_PATH`
+  - local worktree `config.json`
+  - fallback shared checkout `config.json`
 
-- Added a research-backed plan for improving local LLM accuracy at [`docs/plans/2026-03-09-local-llm-accuracy-plan.md`](Q:/finance-analyzer/.worktrees/local-llm-accuracy/docs/plans/2026-03-09-local-llm-accuracy-plan.md).
-- Gated `Ministral` votes by per-ticker historical accuracy.
-- Gated `Chronos` / `Kronos` sub-signals individually before composite forecast voting.
-- Switched the `Ministral` subprocess wrapper to the repo-managed inference script.
-- Tightened `Ministral` output parsing and added targeted tests.
-- Added `--local-llm-report` for local-model health, accuracy, and gating summaries.
-- Added automatic daily export of the local-LLM report to `data/local_llm_report_latest.json` and `data/local_llm_report_history.jsonl`.
+### Verification
 
-## How to run
+- `Q:\finance-analyzer\.venv\Scripts\python.exe -m pytest -q tests\test_golddigger.py`
+- `Q:\finance-analyzer\.venv\Scripts\python.exe -m portfolio.golddigger --once --dry-run --log-level INFO`
 
-- `Q:\finance-analyzer\.venv\Scripts\python.exe -m pytest -q tests/test_local_llm_accuracy.py`
-- `Q:\finance-analyzer\.venv\Scripts\python.exe -m pytest -q tests/test_local_llm_report.py`
-- `Q:\finance-analyzer\.venv\Scripts\python.exe -m pytest -q tests/test_portfolio.py -k "Ministral"`
-- `Q:\finance-analyzer\.venv\Scripts\python.exe -m pytest -q tests/test_forecast_accuracy_gating.py -k "ComputeForecastWithGating or KronosDisabledDefault or AccuracyWeightedVote or VolatilityGate or RegimeInVote"`
-- `Q:\finance-analyzer\.venv\Scripts\python.exe portfolio\main.py --export-local-llm-report 30`
+### Safe Dry-Run Example
 
-## Notes
+```powershell
+$env:GOLDDIGGER_CONFIG_PATH='Q:\path\to\temp-config.json'
+Q:\finance-analyzer\.venv\Scripts\python.exe -m portfolio.golddigger --once --dry-run --log-level INFO
+```
 
-- No live trading process was touched.
-- Model upgrades such as `chronos-bolt-small` or newer Mistral small models are documented in the plan but not enabled by default in code.
+### Merge Notes
+
+- Main checkout was left untouched.
+- New behavior is feature-flagged in `golddigger` config.
+- `--once` suppresses Telegram notifications so it can be used from a worktree safely.

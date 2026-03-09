@@ -149,6 +149,15 @@ def log_poll(
     cert_bid: Optional[float] = None,
     cert_ask: Optional[float] = None,
     data_quality: str = "ok",
+    gold_volume_ratio: Optional[float] = None,
+    dxy: Optional[float] = None,
+    dxy_change_pct: Optional[float] = None,
+    us10y_source: Optional[str] = None,
+    us10y_change_pct: Optional[float] = None,
+    next_event_type: Optional[str] = None,
+    next_event_hours: Optional[float] = None,
+    event_risk_active: bool = False,
+    event_risk_phase: Optional[str] = None,
 ):
     """Append a structured poll log entry to the JSONL log."""
     entry = {
@@ -164,5 +173,14 @@ def log_poll(
         "cert_bid": cert_bid,
         "cert_ask": cert_ask,
         "quality": data_quality,
+        "gold_volume_ratio": gold_volume_ratio,
+        "dxy": dxy,
+        "dxy_change_pct": dxy_change_pct,
+        "us10y_source": us10y_source,
+        "us10y_change_pct": us10y_change_pct,
+        "next_event_type": next_event_type,
+        "next_event_hours": next_event_hours,
+        "event_risk_active": event_risk_active,
+        "event_risk_phase": event_risk_phase,
     }
     atomic_append_jsonl(log_file, entry)

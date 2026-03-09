@@ -76,6 +76,26 @@ class GolddiggerConfig:
     use_trade_guards: bool = True         # integrate trade_guards.py
     use_volume_confirm: bool = True       # volume confirmation from Binance FAPI
     use_chronos_forecast: bool = True     # Chronos forecast integration
+    volume_ratio_min: float = 0.75        # require at least 75% of normal recent volume
+
+    # --- Intraday macro/event overlays ---
+    rates_source: str = "auto"            # auto|yfinance|fred|macro
+    rates_proxy_ticker: str = "^TNX"      # yfinance 10Y yield proxy
+    rates_proxy_interval: str = "15m"
+    rates_proxy_lookback_bars: int = 5
+    rates_proxy_ttl_seconds: int = 300
+    rates_proxy_max_bar_age_minutes: float = 45.0
+    use_intraday_dxy_gate: bool = True
+    dxy_proxy_ticker: str = "DX-Y.NYB"    # yfinance DXY proxy
+    dxy_proxy_interval: str = "15m"
+    dxy_proxy_lookback_bars: int = 5
+    dxy_proxy_ttl_seconds: int = 300
+    dxy_proxy_max_bar_age_minutes: float = 45.0
+    dxy_gate_threshold_pct: float = 0.15  # block longs if DXY rises >= 0.15% over lookback
+    use_event_risk_gate: bool = True
+    event_risk_hours_before: float = 4.0
+    event_risk_hours_after: float = 1.0
+    event_risk_block_types: tuple[str, ...] = ("FOMC", "CPI", "NFP")
 
     # --- Execution hardening ---
     slippage_buffer: float = 0.005        # 0.5% adverse fill assumption
@@ -134,6 +154,24 @@ class GolddiggerConfig:
             use_trade_guards=gd.get("use_trade_guards", True),
             use_volume_confirm=gd.get("use_volume_confirm", True),
             use_chronos_forecast=gd.get("use_chronos_forecast", True),
+            volume_ratio_min=gd.get("volume_ratio_min", 0.75),
+            rates_source=gd.get("rates_source", "auto"),
+            rates_proxy_ticker=gd.get("rates_proxy_ticker", "^TNX"),
+            rates_proxy_interval=gd.get("rates_proxy_interval", "15m"),
+            rates_proxy_lookback_bars=gd.get("rates_proxy_lookback_bars", 5),
+            rates_proxy_ttl_seconds=gd.get("rates_proxy_ttl_seconds", 300),
+            rates_proxy_max_bar_age_minutes=gd.get("rates_proxy_max_bar_age_minutes", 45.0),
+            use_intraday_dxy_gate=gd.get("use_intraday_dxy_gate", True),
+            dxy_proxy_ticker=gd.get("dxy_proxy_ticker", "DX-Y.NYB"),
+            dxy_proxy_interval=gd.get("dxy_proxy_interval", "15m"),
+            dxy_proxy_lookback_bars=gd.get("dxy_proxy_lookback_bars", 5),
+            dxy_proxy_ttl_seconds=gd.get("dxy_proxy_ttl_seconds", 300),
+            dxy_proxy_max_bar_age_minutes=gd.get("dxy_proxy_max_bar_age_minutes", 45.0),
+            dxy_gate_threshold_pct=gd.get("dxy_gate_threshold_pct", 0.15),
+            use_event_risk_gate=gd.get("use_event_risk_gate", True),
+            event_risk_hours_before=gd.get("event_risk_hours_before", 4.0),
+            event_risk_hours_after=gd.get("event_risk_hours_after", 1.0),
+            event_risk_block_types=tuple(gd.get("event_risk_block_types", ["FOMC", "CPI", "NFP"])),
             # Execution hardening
             slippage_buffer=gd.get("slippage_buffer", 0.005),
             stale_data_max_seconds=gd.get("stale_data_max_seconds", 30.0),
