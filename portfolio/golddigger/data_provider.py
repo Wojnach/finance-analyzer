@@ -30,7 +30,7 @@ _fred_cb = CircuitBreaker("golddigger_fred", failure_threshold=3, recovery_timeo
 
 # FRED yield cache (yields don't change intraday often)
 _yield_cache: dict = {"value": None, "time": 0}
-_YIELD_CACHE_TTL = 3600  # 1 hour
+_YIELD_CACHE_TTL = 900  # 15 min (daily data, but catch updates sooner)
 
 
 @dataclass

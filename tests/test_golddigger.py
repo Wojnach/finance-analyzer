@@ -26,23 +26,24 @@ from portfolio.golddigger.bot import GolddiggerBot
 class TestGolddiggerConfig:
     def test_defaults(self):
         cfg = GolddiggerConfig()
-        assert cfg.poll_seconds == 30
-        assert cfg.window_n == 120
+        assert cfg.poll_seconds == 5
+        assert cfg.window_n == 720
         assert cfg.w_gold == 0.50
         assert cfg.w_fx == 0.30
         assert cfg.w_yield == 0.20
         assert abs(cfg.w_gold + cfg.w_fx + cfg.w_yield - 1.0) < 1e-9
         assert cfg.theta_in == 1.0
         assert cfg.theta_out == 0.2
-        assert cfg.confirm_polls == 2
+        assert cfg.confirm_polls == 6
         assert cfg.stop_loss_pct == 0.05
         assert cfg.take_profit_pct == 0.08
         assert cfg.daily_loss_limit == 0.015
         assert cfg.max_positions == 1
+        assert cfg.alert_cooldown_seconds == 300
 
     def test_from_config_empty(self):
         cfg = GolddiggerConfig.from_config({})
-        assert cfg.poll_seconds == 30
+        assert cfg.poll_seconds == 5
         assert cfg.equity_sek == 100_000.0
 
     def test_from_config_custom(self):

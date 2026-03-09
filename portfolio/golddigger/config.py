@@ -10,9 +10,9 @@ DATA_DIR = BASE_DIR / "data"
 @dataclass(frozen=True)
 class GolddiggerConfig:
     # --- Polling ---
-    poll_seconds: int = 30
-    window_n: int = 120  # rolling z-score window (120 x 30s = 60 min)
-    min_window: int = 10  # minimum samples before z-score is valid
+    poll_seconds: int = 5
+    window_n: int = 720   # rolling z-score window (720 x 5s = 60 min)
+    min_window: int = 60   # minimum samples before z-score is valid (~5 min warmup)
 
     # --- Signal weights (sum = 1.0) ---
     w_gold: float = 0.50
@@ -22,7 +22,7 @@ class GolddiggerConfig:
     # --- Entry / exit thresholds ---
     theta_in: float = 1.0     # composite score entry threshold (1 sigma)
     theta_out: float = 0.2    # composite score exit threshold
-    confirm_polls: int = 2    # consecutive polls above theta_in to enter
+    confirm_polls: int = 6    # consecutive polls above theta_in (~30s at 5s poll)
 
     # --- Risk parameters ---
     risk_fraction: float = 0.005       # 0.5% equity risked per trade
@@ -66,6 +66,9 @@ class GolddiggerConfig:
     # --- Telegram ---
     telegram_alerts: bool = True
     max_daily_trades: int = 10
+    alert_cooldown_seconds: int = 300   # 5 min between repeated alerts
+    alert_on_entry_zone: bool = True    # alert when S crosses theta_in
+    alert_on_exit_zone: bool = True     # alert when S crosses theta_out
 
     # --- Signal integration ---
     use_signal_consensus: bool = True     # use XAU-USD Layer 1 signals as filter
@@ -76,7 +79,7 @@ class GolddiggerConfig:
 
     # --- Execution hardening ---
     slippage_buffer: float = 0.005        # 0.5% adverse fill assumption
-    stale_data_max_seconds: float = 90.0  # block entries if data older than this
+    stale_data_max_seconds: float = 30.0  # block alerts if data older than this
     session_check_interval: int = 300     # 5 min Avanza session health check
     hardware_stop_loss: bool = True       # place stop-loss on Avanza after entry
 
@@ -93,14 +96,14 @@ class GolddiggerConfig:
         gd = config.get("golddigger", {})
         avanza = config.get("avanza", {})
         return cls(
-            poll_seconds=gd.get("poll_seconds", 30),
-            window_n=gd.get("window_n", 120),
+            poll_seconds=gd.get("poll_seconds", 5),
+            window_n=gd.get("window_n", 720),
             w_gold=gd.get("w_gold", 0.50),
             w_fx=gd.get("w_fx", 0.30),
             w_yield=gd.get("w_yield", 0.20),
             theta_in=gd.get("theta_in", 1.0),
             theta_out=gd.get("theta_out", 0.2),
-            confirm_polls=gd.get("confirm_polls", 2),
+            confirm_polls=gd.get("confirm_polls", 6),
             risk_fraction=gd.get("risk_fraction", 0.005),
             max_notional_fraction=gd.get("max_notional_fraction", 0.10),
             stop_loss_pct=gd.get("stop_loss_pct", 0.05),
@@ -122,6 +125,9 @@ class GolddiggerConfig:
             trades_file=gd.get("trades_file", str(DATA_DIR / "golddigger_trades.jsonl")),
             telegram_alerts=gd.get("telegram_alerts", True),
             max_daily_trades=gd.get("max_daily_trades", 10),
+            alert_cooldown_seconds=gd.get("alert_cooldown_seconds", 300),
+            alert_on_entry_zone=gd.get("alert_on_entry_zone", True),
+            alert_on_exit_zone=gd.get("alert_on_exit_zone", True),
             # Signal integration
             use_signal_consensus=gd.get("use_signal_consensus", True),
             use_macro_context=gd.get("use_macro_context", True),
@@ -130,7 +136,7 @@ class GolddiggerConfig:
             use_chronos_forecast=gd.get("use_chronos_forecast", True),
             # Execution hardening
             slippage_buffer=gd.get("slippage_buffer", 0.005),
-            stale_data_max_seconds=gd.get("stale_data_max_seconds", 90.0),
+            stale_data_max_seconds=gd.get("stale_data_max_seconds", 30.0),
             session_check_interval=gd.get("session_check_interval", 300),
             hardware_stop_loss=gd.get("hardware_stop_loss", True),
             # ATR-based dynamic stops
