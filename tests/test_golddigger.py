@@ -27,19 +27,24 @@ class TestGolddiggerConfig:
     def test_defaults(self):
         cfg = GolddiggerConfig()
         assert cfg.poll_seconds == 5
-        assert cfg.window_n == 720
-        assert cfg.w_gold == 0.50
-        assert cfg.w_fx == 0.30
-        assert cfg.w_yield == 0.20
+        assert cfg.window_n == 120
+        assert cfg.min_window == 20
+        assert cfg.w_gold == 1.00
+        assert cfg.w_fx == 0.00
+        assert cfg.w_yield == 0.00
         assert abs(cfg.w_gold + cfg.w_fx + cfg.w_yield - 1.0) < 1e-9
-        assert cfg.theta_in == 1.0
-        assert cfg.theta_out == 0.2
-        assert cfg.confirm_polls == 6
+        assert cfg.theta_in == 0.7
+        assert cfg.theta_out == 0.1
+        assert cfg.confirm_polls == 3
         assert cfg.stop_loss_pct == 0.05
         assert cfg.take_profit_pct == 0.08
         assert cfg.daily_loss_limit == 0.015
         assert cfg.max_positions == 1
         assert cfg.alert_cooldown_seconds == 300
+        # Augmented signal gates
+        assert cfg.use_augmented_signals is True
+        assert cfg.aug_kline_bars == 120
+        assert cfg.aug_refresh_seconds == 60.0
 
     def test_from_config_empty(self):
         cfg = GolddiggerConfig.from_config({})
@@ -523,7 +528,7 @@ class TestGolddiggerBot:
 
     @patch("portfolio.golddigger.bot._now_stockholm")
     def test_flatten_at_session_end(self, mock_now, tmp_path):
-        mock_now.return_value = (17, 20, "2026-03-09")  # at flatten time
+        mock_now.return_value = (21, 55, "2026-03-09")  # at flatten time (EU+US overlap end)
         cfg = self.make_cfg(tmp_path)
         bot = GolddiggerBot(cfg, dry_run=True)
         # Put bot in a position
@@ -544,7 +549,7 @@ class TestGolddiggerBot:
 
     @patch("portfolio.golddigger.bot._now_stockholm")
     def test_stop_loss_exit(self, mock_now, tmp_path):
-        mock_now.return_value = (10, 30, "2026-03-09")
+        mock_now.return_value = (16, 30, "2026-03-09")
         cfg = self.make_cfg(tmp_path)
         bot = GolddiggerBot(cfg, dry_run=True)
         bot._current_date = "2026-03-09"
@@ -565,7 +570,7 @@ class TestGolddiggerBot:
 
     @patch("portfolio.golddigger.bot._now_stockholm")
     def test_take_profit_exit(self, mock_now, tmp_path):
-        mock_now.return_value = (10, 30, "2026-03-09")
+        mock_now.return_value = (16, 30, "2026-03-09")
         cfg = self.make_cfg(tmp_path)
         bot = GolddiggerBot(cfg, dry_run=True)
         bot._current_date = "2026-03-09"

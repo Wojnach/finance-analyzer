@@ -11,18 +11,20 @@ DATA_DIR = BASE_DIR / "data"
 class GolddiggerConfig:
     # --- Polling ---
     poll_seconds: int = 5
-    window_n: int = 720   # rolling z-score window (720 x 5s = 60 min)
-    min_window: int = 60   # minimum samples before z-score is valid (~5 min warmup)
+    window_n: int = 120   # rolling z-score window (120 x 5s = 10 min)
+    min_window: int = 20   # minimum samples before z-score is valid (~1.5 min warmup)
 
     # --- Signal weights (sum = 1.0) ---
-    w_gold: float = 0.50
-    w_fx: float = 0.30
-    w_yield: float = 0.20
+    # Gold-only for intraday: FX (ECB daily) and yields (FRED daily) are constant
+    # intraday, so they contribute nothing to the composite signal.
+    w_gold: float = 1.00
+    w_fx: float = 0.00
+    w_yield: float = 0.00
 
     # --- Entry / exit thresholds ---
-    theta_in: float = 1.0     # composite score entry threshold (1 sigma)
-    theta_out: float = 0.2    # composite score exit threshold
-    confirm_polls: int = 6    # consecutive polls above theta_in (~30s at 5s poll)
+    theta_in: float = 0.7     # composite score entry threshold (0.7 sigma)
+    theta_out: float = 0.1    # composite score exit threshold
+    confirm_polls: int = 3    # consecutive polls above theta_in (~15s at 5s poll)
 
     # --- Risk parameters ---
     risk_fraction: float = 0.005       # 0.5% equity risked per trade
@@ -33,13 +35,13 @@ class GolddiggerConfig:
     spread_max: float = 0.02           # 2% spread hard cap (reject entry)
     max_positions: int = 1
 
-    # --- Session window (Stockholm time) ---
-    session_start_hour: int = 9
-    session_start_minute: int = 2
-    session_end_hour: int = 17
-    session_end_minute: int = 20
-    # Avanza commodity warrants: 08:15-21:55 CET, but gold certs follow
-    # standard equity hours. Using conservative 09:02-17:20.
+    # --- Session window (Stockholm time / CET) ---
+    session_start_hour: int = 15
+    session_start_minute: int = 30
+    session_end_hour: int = 21
+    session_end_minute: int = 55
+    # Overlap of Avanza commodity warrants (08:15-21:55 CET) and
+    # US market (15:30-22:00 CET). Gold moves most when US is open.
 
     # --- Avanza instrument ---
     bull_orderbook_id: str = ""   # BULL GULD X20 AVA orderbook ID
@@ -77,6 +79,14 @@ class GolddiggerConfig:
     use_volume_confirm: bool = True       # volume confirmation from Binance FAPI
     use_chronos_forecast: bool = True     # Chronos forecast integration
 
+    # --- Augmented signal gates (secondary filters) ---
+    use_augmented_signals: bool = True     # enable volatility/momentum/structure gates
+    aug_require_vol_confirm: bool = True   # block entry when volatility signal is SELL
+    aug_block_momentum_sell: bool = True   # block entry when momentum is SELL
+    aug_block_structure_sell: bool = True   # block entry when structure is SELL
+    aug_refresh_seconds: float = 60.0      # how often to refresh kline-based signals
+    aug_kline_bars: int = 120              # lookback bars for 1m klines (2h window)
+
     # --- Execution hardening ---
     slippage_buffer: float = 0.005        # 0.5% adverse fill assumption
     stale_data_max_seconds: float = 30.0  # block alerts if data older than this
@@ -97,13 +107,14 @@ class GolddiggerConfig:
         avanza = config.get("avanza", {})
         return cls(
             poll_seconds=gd.get("poll_seconds", 5),
-            window_n=gd.get("window_n", 720),
-            w_gold=gd.get("w_gold", 0.50),
-            w_fx=gd.get("w_fx", 0.30),
-            w_yield=gd.get("w_yield", 0.20),
-            theta_in=gd.get("theta_in", 1.0),
-            theta_out=gd.get("theta_out", 0.2),
-            confirm_polls=gd.get("confirm_polls", 6),
+            window_n=gd.get("window_n", 120),
+            min_window=gd.get("min_window", 20),
+            w_gold=gd.get("w_gold", 1.00),
+            w_fx=gd.get("w_fx", 0.00),
+            w_yield=gd.get("w_yield", 0.00),
+            theta_in=gd.get("theta_in", 0.7),
+            theta_out=gd.get("theta_out", 0.1),
+            confirm_polls=gd.get("confirm_polls", 3),
             risk_fraction=gd.get("risk_fraction", 0.005),
             max_notional_fraction=gd.get("max_notional_fraction", 0.10),
             stop_loss_pct=gd.get("stop_loss_pct", 0.05),
@@ -134,6 +145,13 @@ class GolddiggerConfig:
             use_trade_guards=gd.get("use_trade_guards", True),
             use_volume_confirm=gd.get("use_volume_confirm", True),
             use_chronos_forecast=gd.get("use_chronos_forecast", True),
+            # Augmented signal gates
+            use_augmented_signals=gd.get("use_augmented_signals", True),
+            aug_require_vol_confirm=gd.get("aug_require_vol_confirm", True),
+            aug_block_momentum_sell=gd.get("aug_block_momentum_sell", True),
+            aug_block_structure_sell=gd.get("aug_block_structure_sell", True),
+            aug_refresh_seconds=gd.get("aug_refresh_seconds", 60.0),
+            aug_kline_bars=gd.get("aug_kline_bars", 120),
             # Execution hardening
             slippage_buffer=gd.get("slippage_buffer", 0.005),
             stale_data_max_seconds=gd.get("stale_data_max_seconds", 30.0),

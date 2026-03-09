@@ -24,6 +24,7 @@ from portfolio.golddigger.data_provider import MarketSnapshot, collect_snapshot
 from portfolio.golddigger.signal import CompositeSignal, SignalState
 from portfolio.golddigger.risk import RiskManager, SizeResult
 from portfolio.golddigger.state import BotState, log_trade, log_poll
+from portfolio.golddigger.augmented_signals import AugmentedSignals
 
 logger = logging.getLogger("portfolio.golddigger.bot")
 
@@ -69,6 +70,13 @@ class GolddiggerBot:
         self.state = BotState.load(cfg.state_file)
         self._current_date: Optional[str] = None
         self._page = None  # Playwright page, set externally
+
+        # Augmented signal gates (volatility, momentum, structure)
+        self.augmented = AugmentedSignals(
+            symbol=cfg.binance_gold_symbol,
+            lookback_bars=getattr(cfg, 'aug_kline_bars', 120),
+            refresh_interval=getattr(cfg, 'aug_refresh_seconds', 60.0),
+        ) if getattr(cfg, 'use_augmented_signals', False) else None
 
     def set_page(self, page):
         """Set the Playwright page for Avanza API calls."""
@@ -234,6 +242,18 @@ class GolddiggerBot:
                 logger.info("Entry blocked: spread %.2f%% > max", spread * 100)
                 return None
 
+        # Augmented signal gates (volatility, momentum, structure from 1m klines)
+        if self.augmented is not None:
+            aug_state = self.augmented.refresh_if_needed()
+            allowed, aug_reason = aug_state.entry_allowed(
+                require_vol_confirm=getattr(self.cfg, 'aug_require_vol_confirm', True),
+                block_on_momentum_sell=getattr(self.cfg, 'aug_block_momentum_sell', True),
+                block_on_structure_sell=getattr(self.cfg, 'aug_block_structure_sell', True),
+            )
+            if not allowed:
+                logger.info("Entry blocked: %s [%s]", aug_reason, aug_state.summary())
+                return None
+
         # Signal check
         if not self.signal.should_enter(sig, spread_pct, self.cfg.spread_max):
             return None
@@ -267,7 +287,8 @@ class GolddiggerBot:
             "z_gold": sig.z_gold,
             "notional_sek": sizing.notional_sek,
             "reason": f"ENTRY: S={sig.composite_s:.2f} >= {self.cfg.theta_in} "
-                      f"(confirmed {sig.confirm_count}x), z_gold={sig.z_gold:.2f}",
+                      f"(confirmed {sig.confirm_count}x), z_gold={sig.z_gold:.2f}"
+                      + (f" | {self.augmented.state.summary()}" if self.augmented else ""),
         }
 
         if not self.dry_run:
