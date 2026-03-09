@@ -44,6 +44,7 @@ All tasks are managed via Windows Task Scheduler.
 | **PF-DataLoop**   | ENABLED  | On logon (continuous) | `scripts\win\pf-loop.bat` — Layer 1 fast loop  |
 | **PF-Dashboard**  | ENABLED  | On logon (continuous) | Flask dashboard on port 5055                    |
 | **PF-OutcomeCheck** | ENABLED | Daily 18:00 local     | `--check-outcomes` — backfill signal accuracy   |
+| **PF-LocalLlmReport** | ENABLED | Daily 18:10 local  | `scripts\win\pf-local-llm-report.bat` — export local-LLM trend snapshot |
 | **PF-MLRetrain**  | ENABLED  | Weekly                | `--retrain` — retrain ML classifier             |
 | **PF-Loop**       | DISABLED | —                     | Redundant with PF-DataLoop, caused duplicates   |
 | **Portfolio-Agent** | DISABLED | —                    | Bypassed trigger system, caused 15-min HOLD spam |
@@ -54,6 +55,7 @@ All tasks are managed via Windows Task Scheduler.
 schtasks /query /tn "PF-DataLoop" /v /fo LIST
 schtasks /query /tn "PF-Dashboard" /v /fo LIST
 schtasks /query /tn "PF-OutcomeCheck" /v /fo LIST
+schtasks /query /tn "PF-LocalLlmReport" /v /fo LIST
 ```
 
 ### Checking for duplicate processes
