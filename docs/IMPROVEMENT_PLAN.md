@@ -9,6 +9,28 @@ Previous sessions: 2026-03-05 (dashboard hardening), 2026-03-06 (CircuitBreaker,
 
 All 4 batches implemented. BUG-15 through BUG-22 fixed, ARCH-9 done.
 
+## Session Results (2026-03-09)
+
+All 3 batches implemented. 5 bugs fixed (BUG-23 through BUG-27), 2 architecture improvements (ARCH-10, ARCH-11), 3 test coverage gaps filled (TEST-1, TEST-2, TEST-3), 1 refactoring (REF-3).
+
+**Batch 1 — Signal Validation (BUG-23, ARCH-10, ARCH-11):**
+- Added `_validate_signal_result()` to `signal_engine.py` — normalizes action, clamps confidence, replaces NaN
+- `max_confidence` parameter in `signal_registry.py` — 0.7 for 5 context-aware signals
+- 42 new tests
+
+**Batch 2 — Defensive Fixes (BUG-24, BUG-25, BUG-26, BUG-27):**
+- `_fetch_headlines()` guard for None ticker
+- `load_json()` no longer swallows OSError
+- Heartbeat written after initial `run()`
+- Redundant `pass` removed from trigger.py
+- 11 new tests
+
+**Batch 3 — Test Coverage + Refactoring (TEST-1, TEST-2, TEST-3, REF-3):**
+- 57 candlestick tests, 51 fibonacci tests, 32 structure tests (all were 0)
+- `patterns_detected` moved to `indicators` dict (standard return format)
+
+**Totals:** 193 new tests, 10 files changed, 5 bugs fixed, 2 arch improvements, 1 refactor.
+
 ## Session Plan (2026-03-09)
 
 ### 1) Bugs & Problems Found

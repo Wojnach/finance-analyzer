@@ -157,11 +157,10 @@ Primary config: `config.json` (not in repo). Key domains:
 
 ## 9) Known Issues (as of 2026-03-09)
 
-- BUG-15 through BUG-22: Fixed in 2026-03-08 session (signal logging, file I/O, cache TTL, trigger state)
-- BUG-23: Signal return values not validated — None/NaN can enter consensus pipeline
-- BUG-24: news_event.py crashes if ticker is None
-- BUG-25: load_json() silently swallows OSError (permission denied, disk full)
-- BUG-26: Heartbeat not written after initial run(), only inside while loop
-- BUG-27: Redundant `pass` in trigger.py:89
-- TEST gaps: candlestick, fibonacci, structure signals have zero test coverage
-- See `docs/IMPROVEMENT_PLAN.md` for full bug list and fix plan
+- BUG-15 through BUG-22: Fixed in 2026-03-08 session
+- BUG-23 through BUG-27: Fixed in 2026-03-09 session (signal validation, None ticker, OSError, heartbeat, pass cleanup)
+- ARCH-10: Signal result validation centralized in `_validate_signal_result()`
+- ARCH-11: Confidence caps enforced via `max_confidence` in signal registry
+- REF-3: Candlestick `patterns_detected` moved from top-level to `indicators` dict
+- TEST coverage: candlestick (57 tests), fibonacci (51 tests), structure (32 tests) — formerly zero
+- ~3,310 tests across 110+ test files
