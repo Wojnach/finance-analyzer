@@ -8,6 +8,7 @@ from pathlib import Path
 
 from portfolio.accuracy_stats import accuracy_by_signal_ticker
 from portfolio.api_utils import load_config
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json, prune_jsonl
 from portfolio.forecast_accuracy import compute_forecast_accuracy, load_health_stats
 
 logger = logging.getLogger("portfolio.local_llm_report")
@@ -16,6 +17,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 PREDICTIONS_FILE = DATA_DIR / "forecast_predictions.jsonl"
 CONFIG_EXAMPLE_FILE = BASE_DIR / "config.example.json"
+LATEST_REPORT_FILE = DATA_DIR / "local_llm_report_latest.json"
+HISTORY_FILE = DATA_DIR / "local_llm_report_history.jsonl"
+EXPORT_STATE_FILE = DATA_DIR / "local_llm_report_export_state.json"
+DEFAULT_REPORT_DAYS = 30
+DEFAULT_HISTORY_MAX_ENTRIES = 366
 
 
 def _load_prediction_entries(predictions_file=None, days=None):
@@ -123,6 +129,13 @@ def _build_recommendations(report):
     return recommendations
 
 
+def _int_or_default(value, default):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _load_report_config(config=None):
     if config is not None:
         return config
@@ -136,7 +149,52 @@ def _load_report_config(config=None):
         return {}
 
 
-def build_local_llm_report(days=30, config=None, predictions_file=None, health_file=None):
+def _report_config_view(config):
+    forecast = (config.get("forecast") or {})
+    ministral = ((config.get("local_models") or {}).get("ministral") or {})
+    report_cfg = config.get("local_llm_report") or {}
+
+    view = {
+        "forecast": {
+            key: forecast[key]
+            for key in (
+                "chronos_model",
+                "kronos_enabled",
+                "kronos_interval",
+                "kronos_periods",
+                "kronos_temperature",
+                "kronos_top_p",
+                "kronos_samples",
+                "hold_threshold",
+                "min_samples",
+                "subsignal_hold_threshold",
+                "subsignal_min_samples",
+                "subsignal_accuracy_days",
+            )
+            if key in forecast
+        },
+        "local_models": {
+            "ministral": {
+                key: ministral[key]
+                for key in ("hold_threshold", "min_samples", "accuracy_days")
+                if key in ministral
+            }
+        },
+        "local_llm_report": {
+            "daily_export_enabled": report_cfg.get("daily_export_enabled", True),
+            "report_days": _int_or_default(report_cfg.get("report_days"), DEFAULT_REPORT_DAYS),
+            "history_max_entries": _int_or_default(
+                report_cfg.get("history_max_entries"), DEFAULT_HISTORY_MAX_ENTRIES
+            ),
+        },
+    }
+
+    if not view["local_models"]["ministral"]:
+        view["local_models"] = {}
+    return view
+
+
+def build_local_llm_report(days=DEFAULT_REPORT_DAYS, config=None, predictions_file=None, health_file=None):
     cfg = _load_report_config(config=config)
 
     entries = _load_prediction_entries(predictions_file=predictions_file, days=days)
@@ -171,7 +229,7 @@ def build_local_llm_report(days=30, config=None, predictions_file=None, health_f
 
     report = {
         "days": days,
-        "config": cfg,
+        "config": _report_config_view(cfg),
         "health": load_health_stats(health_file=health_file),
         "ministral": {
             "overall": _aggregate_accuracy(ministral_by_ticker),
@@ -187,7 +245,102 @@ def build_local_llm_report(days=30, config=None, predictions_file=None, health_f
     return report
 
 
-def print_local_llm_report(days=30):
+def _build_export_entry(report, exported_at):
+    return {
+        "date": exported_at[:10],
+        "exported_at": exported_at,
+        "days": report["days"],
+        "config": report["config"],
+        "health": report["health"],
+        "ministral": report["ministral"],
+        "forecast": report["forecast"],
+        "gating_counts": report["gating_counts"],
+        "recommendations": report["recommendations"],
+    }
+
+
+def export_local_llm_report(
+    days=DEFAULT_REPORT_DAYS,
+    config=None,
+    now=None,
+    predictions_file=None,
+    health_file=None,
+    latest_file=None,
+    history_file=None,
+    state_file=None,
+    max_entries=DEFAULT_HISTORY_MAX_ENTRIES,
+):
+    timestamp = now or datetime.now(timezone.utc)
+    exported_at = timestamp.isoformat()
+    cfg = _load_report_config(config=config)
+    report = build_local_llm_report(
+        days=days,
+        config=cfg,
+        predictions_file=predictions_file,
+        health_file=health_file,
+    )
+    entry = _build_export_entry(report, exported_at)
+
+    latest_path = latest_file or LATEST_REPORT_FILE
+    history_path = history_file or HISTORY_FILE
+    state_path = state_file or EXPORT_STATE_FILE
+
+    atomic_write_json(latest_path, entry)
+    atomic_append_jsonl(history_path, entry)
+    prune_jsonl(history_path, max_entries=max_entries)
+    atomic_write_json(
+        state_path,
+        {
+            "last_export_date": entry["date"],
+            "last_exported_at": exported_at,
+            "days": days,
+        },
+    )
+    return entry
+
+
+def maybe_export_local_llm_report(
+    config=None,
+    now=None,
+    days=None,
+    predictions_file=None,
+    health_file=None,
+    latest_file=None,
+    history_file=None,
+    state_file=None,
+):
+    cfg = _load_report_config(config=config)
+    report_cfg = cfg.get("local_llm_report") or {}
+    if not report_cfg.get("daily_export_enabled", True):
+        return None
+
+    timestamp = now or datetime.now(timezone.utc)
+    export_date = timestamp.date().isoformat()
+    state_path = state_file or EXPORT_STATE_FILE
+    state = load_json(state_path, default={}) or {}
+    if state.get("last_export_date") == export_date:
+        return None
+
+    export_days = days
+    if export_days is None:
+        export_days = _int_or_default(report_cfg.get("report_days"), DEFAULT_REPORT_DAYS)
+    max_entries = _int_or_default(
+        report_cfg.get("history_max_entries"), DEFAULT_HISTORY_MAX_ENTRIES
+    )
+    return export_local_llm_report(
+        days=export_days,
+        config=cfg,
+        now=timestamp,
+        predictions_file=predictions_file,
+        health_file=health_file,
+        latest_file=latest_file,
+        history_file=history_file,
+        state_file=state_path,
+        max_entries=max_entries,
+    )
+
+
+def print_local_llm_report(days=DEFAULT_REPORT_DAYS):
     report = build_local_llm_report(days=days)
 
     print(f"=== Local LLM Report ({days}d) ===")

@@ -155,6 +155,17 @@ def _run_post_cycle(config):
             refresh_fundamentals_batch(config)
     except Exception as e_av:
         logger.warning("Alpha Vantage refresh failed: %s", e_av)
+    try:
+        from portfolio.local_llm_report import maybe_export_local_llm_report
+        export = maybe_export_local_llm_report(config=config)
+        if export:
+            logger.info(
+                "local LLM report exported: %s (%sd window)",
+                export["date"],
+                export["days"],
+            )
+    except Exception as e_report:
+        logger.warning("local LLM report export failed: %s", e_report)
     # Prune unbounded JSONL files to prevent disk exhaustion (BUG-59)
     try:
         from portfolio.file_utils import prune_jsonl
@@ -589,6 +600,14 @@ if __name__ == "__main__":
         idx = args.index("--local-llm-report")
         days = int(args[idx + 1]) if idx + 1 < len(args) and not args[idx + 1].startswith("--") else 30
         print_local_llm_report(days=days)
+    elif "--export-local-llm-report" in args:
+        from portfolio.local_llm_report import export_local_llm_report, HISTORY_FILE, LATEST_REPORT_FILE
+        idx = args.index("--export-local-llm-report")
+        days = int(args[idx + 1]) if idx + 1 < len(args) and not args[idx + 1].startswith("--") else 30
+        export = export_local_llm_report(days=days)
+        print(f"Exported local LLM report for {export['date']} ({days}d window)")
+        print(f"Latest: {LATEST_REPORT_FILE}")
+        print(f"History: {HISTORY_FILE}")
     elif "--prophecy-review" in args:
         from portfolio.prophecy import print_prophecy_review
         print_prophecy_review()
@@ -647,4 +666,3 @@ if __name__ == "__main__":
         loop(interval=override)
     else:
         run(force_report="--report" in args)
-

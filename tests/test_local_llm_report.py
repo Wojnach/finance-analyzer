@@ -1,6 +1,7 @@
 import json
+from datetime import datetime, timezone
 
-from portfolio.local_llm_report import build_local_llm_report
+from portfolio.local_llm_report import build_local_llm_report, maybe_export_local_llm_report
 
 
 def test_build_local_llm_report_recommendations(tmp_path, monkeypatch):
@@ -80,6 +81,7 @@ def test_build_local_llm_report_ministral_summary(tmp_path, monkeypatch):
     assert report["ministral"]["overall"]["samples"] == 20
     assert report["ministral"]["overall"]["correct"] == 13
     assert report["ministral"]["overall"]["accuracy"] == 0.65
+    assert report["config"]["local_llm_report"]["report_days"] == 30
 
 
 def test_build_local_llm_report_falls_back_without_config_json(tmp_path, monkeypatch):
@@ -106,4 +108,89 @@ def test_build_local_llm_report_falls_back_without_config_json(tmp_path, monkeyp
 
     report = build_local_llm_report(days=30, predictions_file=pred_path)
 
-    assert report["config"] == {}
+    assert report["config"]["forecast"] == {}
+    assert report["config"]["local_llm_report"]["daily_export_enabled"] is True
+
+
+def test_build_local_llm_report_sanitizes_config(tmp_path, monkeypatch):
+    pred_path = tmp_path / "forecast_predictions.jsonl"
+    pred_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "portfolio.local_llm_report.load_config",
+        lambda: {
+            "forecast": {"chronos_model": "amazon/chronos-bolt-small"},
+            "local_models": {"ministral": {"hold_threshold": 0.55}},
+            "exchange": {"apiKey": "SECRET", "secret": "SECRET"},
+            "telegram": {"token": "SECRET", "chat_id": "123"},
+        },
+    )
+    monkeypatch.setattr(
+        "portfolio.local_llm_report.accuracy_by_signal_ticker",
+        lambda signal_name, horizon="1d", days=30: {},
+    )
+    monkeypatch.setattr(
+        "portfolio.local_llm_report.compute_forecast_accuracy",
+        lambda horizon="24h", days=30, predictions_file=None, use_raw_sub_signals=False: {},
+    )
+    monkeypatch.setattr("portfolio.local_llm_report.load_health_stats", lambda health_file=None: {})
+
+    report = build_local_llm_report(days=30, predictions_file=pred_path)
+
+    assert "exchange" not in report["config"]
+    assert "telegram" not in report["config"]
+    assert report["config"]["forecast"]["chronos_model"] == "amazon/chronos-bolt-small"
+
+
+def test_maybe_export_local_llm_report_writes_daily_snapshot_once(tmp_path, monkeypatch):
+    latest_file = tmp_path / "local_llm_report_latest.json"
+    history_file = tmp_path / "local_llm_report_history.jsonl"
+    state_file = tmp_path / "local_llm_report_export_state.json"
+
+    monkeypatch.setattr(
+        "portfolio.local_llm_report.build_local_llm_report",
+        lambda days=30, config=None, predictions_file=None, health_file=None: {
+            "days": days,
+            "config": {"forecast": {}, "local_models": {}, "local_llm_report": {}},
+            "health": {"chronos": {"success_rate": 1.0, "ok": 1, "total": 1}},
+            "ministral": {"overall": {"accuracy": 0.6, "correct": 6, "samples": 10}, "by_ticker": {}},
+            "forecast": {"raw": {}, "effective": {}},
+            "gating_counts": {"forecast": {}, "subsignals": {}},
+            "recommendations": [],
+        },
+    )
+
+    config = {
+        "local_llm_report": {
+            "daily_export_enabled": True,
+            "report_days": 45,
+            "history_max_entries": 5,
+        }
+    }
+    now = datetime(2026, 3, 9, 8, 0, tzinfo=timezone.utc)
+
+    first = maybe_export_local_llm_report(
+        config=config,
+        now=now,
+        latest_file=latest_file,
+        history_file=history_file,
+        state_file=state_file,
+    )
+    second = maybe_export_local_llm_report(
+        config=config,
+        now=now,
+        latest_file=latest_file,
+        history_file=history_file,
+        state_file=state_file,
+    )
+
+    history_entries = [
+        json.loads(line)
+        for line in history_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert first["days"] == 45
+    assert second is None
+    assert len(history_entries) == 1
+    assert json.loads(latest_file.read_text(encoding="utf-8"))["date"] == "2026-03-09"
