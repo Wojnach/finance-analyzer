@@ -12,12 +12,15 @@
 - Switched the `Ministral` subprocess wrapper to the repo-managed inference script.
 - Tightened `Ministral` output parsing and added targeted tests.
 - Added `--local-llm-report` for local-model health, accuracy, and gating summaries.
+- Added automatic daily export of the local-LLM report to `data/local_llm_report_latest.json` and `data/local_llm_report_history.jsonl`.
 
 ## How to run
 
 - `Q:\finance-analyzer\.venv\Scripts\python.exe -m pytest -q tests/test_local_llm_accuracy.py`
+- `Q:\finance-analyzer\.venv\Scripts\python.exe -m pytest -q tests/test_local_llm_report.py`
 - `Q:\finance-analyzer\.venv\Scripts\python.exe -m pytest -q tests/test_portfolio.py -k "Ministral"`
 - `Q:\finance-analyzer\.venv\Scripts\python.exe -m pytest -q tests/test_forecast_accuracy_gating.py -k "ComputeForecastWithGating or KronosDisabledDefault or AccuracyWeightedVote or VolatilityGate or RegimeInVote"`
+- `Q:\finance-analyzer\.venv\Scripts\python.exe portfolio\main.py --export-local-llm-report 30`
 
 ## Notes
 

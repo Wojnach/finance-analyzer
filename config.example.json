@@ -121,6 +121,11 @@
       "accuracy_days": 30
     }
   },
+  "local_llm_report": {
+    "daily_export_enabled": true,
+    "report_days": 30,
+    "history_max_entries": 366
+  },
   "iskbets": {
     "min_bigbet_conditions": 2,
     "min_buy_votes": 3,
