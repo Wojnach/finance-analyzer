@@ -190,10 +190,14 @@ You do NOT execute trades directly. Instead, write your trade intent to `data/me
 The metals loop (Layer 1) reads this file after you exit, validates the order, and executes it using
 its already-warm Playwright session. This avoids BankID session issues.
 
+This queue file is shared state. Write it atomically using the repo helper below.
+Do NOT overwrite it with plain `open(..., "w")`.
+
 **When you decide to BUY or SELL, write the queue file:**
 
 ```python
-import json, uuid, datetime
+import uuid, datetime
+from portfolio.file_utils import atomic_write_json
 
 queue = {
     "version": 1,
@@ -221,8 +225,7 @@ queue = {
     ]
 }
 
-with open("data/metals_trade_queue.json", "w", encoding="utf-8") as f:
-    json.dump(queue, f, indent=2, ensure_ascii=False)
+atomic_write_json("data/metals_trade_queue.json", queue, ensure_ascii=False)
 ```
 
 **Safety notes:**

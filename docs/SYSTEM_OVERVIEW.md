@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-03-09
-Branch: improve/auto-session-2026-03-09
+Updated: 2026-03-10
+Branch: metals-state-store
 
 ## 1) Architecture Summary
 
@@ -11,7 +11,7 @@ Two-layer autonomous trading system with 30 signals, 19 instruments, and dual-st
 - **Layer 2** (`portfolio/agent_invocation.py`): Claude subprocess — reads summaries, makes trade decisions, writes journals, sends Telegram.
 - **Autonomous mode** (`portfolio/autonomous.py`): Fallback when Layer 2 disabled — signal-based decisions without LLM.
 - **Dashboard** (`dashboard/app.py`): Flask REST API over `data/` files, port 5055.
-- **Metals subsystem** (`data/metals_loop.py`): Separate autonomous warrant trading loop via Avanza API.
+- **Metals subsystem** (`data/metals_loop.py`): Separate autonomous warrant trading loop via Avanza API, using worktree-relative repo paths and atomic shared state files.
 
 ## 2) Entry Points
 
@@ -148,6 +148,7 @@ Primary config: `config.json` (not in repo). Key domains:
 ## 8) Key Design Patterns
 
 - **Atomic writes**: `file_utils.atomic_write_json()` prevents corrupt state files
+- **Metals shared state**: positions, stop orders, trade queue, and guard/spike state now use atomic JSON writes with explicit corrupt-file logging
 - **Circuit breakers**: Per-API failure tracking with auto-recovery
 - **Cache-through**: TTL cache with stale-data fallback (shared_state._cached)
 - **Tiered invocation**: T1 (quick, 70%), T2 (signal, 25%), T3 (full, 5%)

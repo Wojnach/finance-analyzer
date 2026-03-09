@@ -76,6 +76,8 @@ Create/update `data/metals_positions_state.json`:
 ```
 
 This persists across restarts. The state file overrides DEFAULTS for fields it contains.
+The loop now writes this file atomically via `portfolio.file_utils.atomic_write_json()`.
+If you edit it manually, stop the loop first and replace the whole JSON document in one save.
 
 ### Step 3: Place hardware stop-loss orders
 
@@ -124,6 +126,9 @@ Save the stop order IDs to `data/metals_stop_orders.json`:
   }
 }
 ```
+
+The metals loop now writes `data/metals_stop_orders.json` atomically as shared state.
+Avoid partial manual edits while the loop is running.
 
 ### Step 4: Restart the loop
 
