@@ -77,6 +77,19 @@ class TestPositionLoadSave:
             # The save/load may reset, check it at least doesn't crash
             pass
 
+    def test_load_positions_bad_json_logs_and_falls_back(self, tmp_path, capsys):
+        import metals_loop as mod
+
+        with open(mod.POSITIONS_STATE_FILE, "w", encoding="utf-8") as f:
+            f.write("{bad json")
+
+        positions = mod._load_positions()
+        captured = capsys.readouterr()
+
+        assert isinstance(positions, dict)
+        assert positions
+        assert "Position state load failed" in captured.out
+
     def test_save_preserves_sell_metadata(self, tmp_path):
         import metals_loop as mod
 
@@ -93,6 +106,23 @@ class TestPositionLoadSave:
             if loaded[key].get("last_sell_ts"):
                 assert loaded[key]["last_sell_ts"] == "2026-03-01T10:00:00"
                 break
+
+    def test_save_positions_uses_atomic_write_json(self, monkeypatch):
+        import metals_loop as mod
+
+        calls = []
+
+        def _fake_atomic_write_json(path, data, indent=2):
+            calls.append((path, data, indent))
+
+        monkeypatch.setattr(mod, "atomic_write_json", _fake_atomic_write_json, raising=False)
+
+        positions = mod._load_positions()
+        mod._save_positions(positions)
+
+        assert len(calls) == 1
+        assert calls[0][0] == mod.POSITIONS_STATE_FILE
+        assert isinstance(calls[0][1], dict)
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +230,20 @@ class TestStopOrders:
         loaded = mod._load_stop_orders()
         assert loaded.get("silver79", {}).get("stop_id") == "abc123"
 
+    def test_save_stop_orders_uses_atomic_write_json(self, monkeypatch):
+        import metals_loop as mod
+
+        calls = []
+
+        def _fake_atomic_write_json(path, data, indent=2):
+            calls.append((path, data, indent))
+
+        monkeypatch.setattr(mod, "atomic_write_json", _fake_atomic_write_json, raising=False)
+        mod._save_stop_orders({"silver79": {"stop_id": "abc123"}})
+
+        assert len(calls) == 1
+        assert calls[0][0] == mod.STOP_ORDER_FILE
+
 
 # ---------------------------------------------------------------------------
 # Trade queue
@@ -222,3 +266,31 @@ class TestTradeQueue:
         mod._save_trade_queue(queue)
         loaded = mod._load_trade_queue()
         assert len(loaded.get("orders", [])) == 1
+
+    def test_load_trade_queue_bad_json_logs_and_falls_back(self, tmp_path, monkeypatch):
+        import metals_loop as mod
+
+        messages = []
+        monkeypatch.setattr(mod, "log", messages.append)
+
+        with open(mod.TRADE_QUEUE_FILE, "w", encoding="utf-8") as f:
+            f.write("{bad json")
+
+        queue = mod._load_trade_queue()
+
+        assert queue == {"version": 1, "orders": []}
+        assert any("Trade queue load error" in msg for msg in messages)
+
+    def test_save_trade_queue_uses_atomic_write_json(self, monkeypatch):
+        import metals_loop as mod
+
+        calls = []
+
+        def _fake_atomic_write_json(path, data, indent=2):
+            calls.append((path, data, indent))
+
+        monkeypatch.setattr(mod, "atomic_write_json", _fake_atomic_write_json, raising=False)
+        mod._save_trade_queue({"version": 1, "orders": []})
+
+        assert len(calls) == 1
+        assert calls[0][0] == mod.TRADE_QUEUE_FILE
