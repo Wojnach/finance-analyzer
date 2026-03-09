@@ -530,6 +530,7 @@
       <div class="nav-tab" data-tab="messages" onclick="switchTab('messages')">Messages</div>
       <div class="nav-tab" data-tab="health" onclick="switchTab('health')">Health</div>
       <div class="nav-tab" data-tab="metals" onclick="switchTab('metals')">Metals</div>
+      <div class="nav-tab" data-tab="golddigger" onclick="switchTab('golddigger')">GoldDigger</div>
     </div>
 
     <div class="ct">
@@ -778,6 +779,44 @@
           </div>
         </div>
       </div>
+
+      <!-- ============================================================
+           TAB: GoldDigger (Gold certificate signal tracker)
+           ============================================================ -->
+      <div class="tab-content" id="tab-golddigger">
+        <!-- Summary banner -->
+        <div class="pnl" id="gdSummary">
+          <div class="nd">Loading GoldDigger data...</div>
+        </div>
+
+        <!-- Two-column: Z-scores & Signal | Position & Risk -->
+        <div class="twocol">
+          <div class="pnl" id="gdSignal">
+            <div class="pt">Composite Signal</div>
+            <div id="gdSignalContent"><div class="nd">--</div></div>
+          </div>
+          <div class="pnl" id="gdPosition">
+            <div class="pt">Position & Risk</div>
+            <div id="gdPositionContent"><div class="nd">--</div></div>
+          </div>
+        </div>
+
+        <!-- S_t chart -->
+        <div class="pnl">
+          <div class="pt">Composite Score (S_t) History</div>
+          <div class="chart-wrap" style="height:300px">
+            <canvas id="gdScoreChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Trade history -->
+        <div class="pnl">
+          <div class="pt">Trade History</div>
+          <div style="overflow-x:auto;max-height:400px;overflow-y:auto" id="gdTrades">
+            <div class="nd">--</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script>
@@ -793,6 +832,7 @@
       var equityChartInstance = null;
       var accChartInstance = null;
       var metalsPriceChartInstance = null;
+      var gdScoreChartInstance = null;
 
       // Tickers: populated dynamically from data
       var T = [];
@@ -909,6 +949,7 @@
         if (name === "messages") loadMessages();
         if (name === "health") loadHealth();
         if (name === "metals") loadMetals();
+        if (name === "golddigger") loadGoldDigger();
       }
 
       /* ================================================================
@@ -2019,6 +2060,322 @@
             }
           }
         });
+      }
+
+      /* ================================================================
+         GoldDigger monitoring tab
+         ================================================================ */
+      async function loadGoldDigger() {
+        var d = await fj("/api/golddigger");
+        if (!d || !d.state) {
+          document.getElementById("gdSummary").innerHTML = '<div class="nd">No GoldDigger data available. Start the bot to generate data.</div>';
+          document.getElementById("gdSignalContent").innerHTML = '<div class="nd">--</div>';
+          document.getElementById("gdPositionContent").innerHTML = '<div class="nd">--</div>';
+          document.getElementById("gdTrades").innerHTML = '<div class="nd">--</div>';
+          return;
+        }
+        renderGdSummary(d.state);
+        renderGdSignal(d.state);
+        renderGdPosition(d.state);
+        renderGdScoreChart(d.log);
+        renderGdTrades(d.trades);
+      }
+
+      function renderGdSummary(st) {
+        var score = st.composite_score;
+        var scoreColor = score == null ? "var(--txm)" : score >= 1.0 ? "var(--grn)" : score <= -1.0 ? "var(--red)" : "var(--yel)";
+        var mode = st.position && st.position.side ? "POSITIONED" : "SCANNING";
+        var modeColor = mode === "POSITIONED" ? "var(--org)" : "var(--cyn)";
+        var session = st.session_active !== false;
+        var sessionColor = session ? "var(--grn)" : "var(--red)";
+
+        var h = '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4px 0">';
+        h += '<div style="text-align:center">';
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">Composite S(t)</div>';
+        h += '<div style="font-size:28px;font-weight:700;color:' + scoreColor + '">' + fn(score, 3) + '</div>';
+        h += '</div>';
+        h += '<div style="text-align:center">';
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">Mode</div>';
+        h += '<div style="font-size:18px;font-weight:600;color:' + modeColor + '">' + mode + '</div>';
+        h += '</div>';
+        h += '<div style="text-align:center">';
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">Session</div>';
+        h += '<div style="font-size:18px;font-weight:600;color:' + sessionColor + '">' + (session ? "OPEN" : "CLOSED") + '</div>';
+        h += '</div>';
+
+        // Gold price
+        if (st.gold_price) {
+          h += '<div style="text-align:center">';
+          h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">XAU/USD</div>';
+          h += '<div style="font-size:18px;font-weight:600;color:var(--yel)">$' + fn(st.gold_price, 1) + '</div>';
+          h += '</div>';
+        }
+        // USD/SEK
+        if (st.usdsek) {
+          h += '<div style="text-align:center">';
+          h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">USD/SEK</div>';
+          h += '<div style="font-size:18px;font-weight:600">' + fn(st.usdsek, 3) + '</div>';
+          h += '</div>';
+        }
+        // Confirm count
+        if (st.confirm_count != null) {
+          var cc = st.confirm_count || 0;
+          var ccMax = st.confirm_required || 6;
+          var ccColor = cc >= ccMax ? "var(--grn)" : cc > 0 ? "var(--yel)" : "var(--txm)";
+          h += '<div style="text-align:center">';
+          h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">Confirms</div>';
+          h += '<div style="font-size:18px;font-weight:600;color:' + ccColor + '">' + cc + '/' + ccMax + '</div>';
+          h += '</div>';
+        }
+        // Updated timestamp
+        if (st.ts) {
+          h += '<div style="text-align:center">';
+          h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">Updated</div>';
+          h += '<div style="font-size:13px;color:var(--txd)">' + ft(st.ts) + '</div>';
+          h += '</div>';
+        }
+        h += '</div>';
+        document.getElementById("gdSummary").innerHTML = h;
+      }
+
+      function renderGdSignal(st) {
+        var h = '';
+        // Z-score bars
+        var zScores = [
+          { label: "Z(gold)", value: st.z_gold, weight: 0.50 },
+          { label: "Z(fx)", value: st.z_fx, weight: -0.30 },
+          { label: "Z(yield)", value: st.z_yield, weight: -0.20 }
+        ];
+        h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase;margin-bottom:6px">Z-Scores (rolling window)</div>';
+        zScores.forEach(function(z) {
+          var val = z.value;
+          var barColor = val == null ? "var(--gry)" : val > 0 ? "var(--grn)" : "var(--red)";
+          var absVal = Math.min(Math.abs(val || 0), 3);
+          var barW = (absVal / 3 * 50).toFixed(0);
+          var dir = (val || 0) >= 0 ? "right" : "left";
+          h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">';
+          h += '<div style="font-size:11px;color:var(--txd);min-width:60px;text-align:right">' + z.label + '</div>';
+          h += '<div style="flex:1;height:14px;background:var(--card2);border-radius:3px;position:relative;overflow:hidden">';
+          h += '<div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--bdr2)"></div>';
+          if (dir === "right") {
+            h += '<div style="position:absolute;left:50%;top:0;bottom:0;width:' + barW + '%;background:' + barColor + ';border-radius:0 3px 3px 0"></div>';
+          } else {
+            h += '<div style="position:absolute;right:50%;top:0;bottom:0;width:' + barW + '%;background:' + barColor + ';border-radius:3px 0 0 3px"></div>';
+          }
+          h += '</div>';
+          h += '<div style="font-size:11px;font-weight:600;color:' + barColor + ';min-width:45px">' + fn(val, 3) + '</div>';
+          h += '<div style="font-size:9px;color:var(--txm);min-width:35px">w=' + z.weight + '</div>';
+          h += '</div>';
+        });
+
+        // Entry/exit thresholds
+        var score = st.composite_score;
+        h += '<div style="margin-top:12px;font-size:10px;color:var(--txm);text-transform:uppercase;margin-bottom:4px">Thresholds</div>';
+        var thetaIn = st.theta_in || 1.0;
+        var thetaOut = st.theta_out || 0.2;
+        h += '<div style="display:flex;gap:12px;font-size:11px;color:var(--txd)">';
+        h += '<span>Entry: <b style="color:' + (score >= thetaIn ? "var(--grn)" : "var(--txm)") + '">' + fn(thetaIn, 2) + '</b></span>';
+        h += '<span>Exit: <b style="color:' + (score != null && score <= thetaOut ? "var(--red)" : "var(--txm)") + '">' + fn(thetaOut, 2) + '</b></span>';
+        h += '<span>Spread max: <b>' + fn((st.spread_max || 0.02) * 100, 1) + '%</b></span>';
+        h += '</div>';
+
+        // Integration gates
+        if (st.gates) {
+          h += '<div style="margin-top:12px;font-size:10px;color:var(--txm);text-transform:uppercase;margin-bottom:4px">Signal Gates</div>';
+          var gates = st.gates;
+          var gateItems = [
+            { label: "XAU Consensus", value: gates.xau_consensus, pass: gates.xau_consensus_pass },
+            { label: "DXY Macro", value: gates.dxy_context, pass: gates.dxy_pass },
+            { label: "Volume", value: gates.volume_ratio, pass: gates.volume_pass },
+            { label: "Chronos", value: gates.chronos_action, pass: gates.chronos_pass }
+          ];
+          h += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+          gateItems.forEach(function(g) {
+            var gColor = g.pass === true ? "var(--grn)" : g.pass === false ? "var(--red)" : "var(--txm)";
+            var icon = g.pass === true ? "\u2713" : g.pass === false ? "\u2717" : "?";
+            h += '<div style="padding:4px 8px;border-radius:4px;background:' + gColor + '15;border:1px solid ' + gColor + '40;font-size:10px">';
+            h += '<span style="color:' + gColor + ';font-weight:700">' + icon + '</span> ';
+            h += '<span style="color:var(--txd)">' + g.label + '</span>';
+            if (g.value != null) h += ' <span style="color:var(--tx);font-weight:600">' + g.value + '</span>';
+            h += '</div>';
+          });
+          h += '</div>';
+        }
+
+        document.getElementById("gdSignalContent").innerHTML = h;
+      }
+
+      function renderGdPosition(st) {
+        var h = '';
+        var pos = st.position || {};
+        if (pos.side) {
+          var pnlPct = pos.pnl_pct || 0;
+          var pnlColor = pnlPct >= 0 ? "var(--grn)" : "var(--red)";
+          h += '<div style="display:inline-block;padding:4px 12px;border-radius:4px;background:var(--org)22;color:var(--org);font-weight:700;font-size:12px;border:1px solid var(--org)44;margin-bottom:10px">';
+          h += pos.side.toUpperCase() + ' ' + (pos.shares || 0) + ' shares @ ' + fn(pos.entry_price, 2) + ' SEK';
+          h += '</div>';
+          h += '<div style="font-size:14px;font-weight:700;color:' + pnlColor + ';margin-bottom:8px">' + fn(pnlPct, 2) + '% P&L</div>';
+
+          // Stop / TP levels
+          h += '<div style="display:flex;gap:12px;font-size:11px;color:var(--txd);margin-bottom:8px">';
+          if (pos.stop_price) h += '<span>Stop: <b style="color:var(--red)">' + fn(pos.stop_price, 2) + '</b></span>';
+          if (pos.tp_price) h += '<span>TP: <b style="color:var(--grn)">' + fn(pos.tp_price, 2) + '</b></span>';
+          if (pos.current_price) h += '<span>Current: <b style="color:var(--tx)">' + fn(pos.current_price, 2) + '</b></span>';
+          h += '</div>';
+        } else {
+          h += '<div style="display:inline-block;padding:4px 12px;border-radius:4px;background:var(--cyn)22;color:var(--cyn);font-weight:700;font-size:12px;border:1px solid var(--cyn)44;margin-bottom:10px">';
+          h += 'NO POSITION';
+          h += '</div>';
+        }
+
+        // Daily stats
+        if (st.daily) {
+          h += '<div style="margin-top:10px;font-size:10px;color:var(--txm);text-transform:uppercase;margin-bottom:4px">Daily Stats</div>';
+          h += '<div style="display:flex;gap:12px;font-size:11px;color:var(--txd)">';
+          h += '<span>Trades: <b>' + (st.daily.trade_count || 0) + '/' + (st.daily.max_trades || 10) + '</b></span>';
+          if (st.daily.pnl_sek != null) {
+            var dlColor = st.daily.pnl_sek >= 0 ? "var(--grn)" : "var(--red)";
+            h += '<span>Day P&L: <b style="color:' + dlColor + '">' + fn(st.daily.pnl_sek, 0) + ' SEK</b></span>';
+          }
+          h += '</div>';
+        }
+
+        // Risk
+        h += '<div style="margin-top:10px;font-size:10px;color:var(--txm);text-transform:uppercase;margin-bottom:4px">Risk Parameters</div>';
+        h += '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--txd)">';
+        h += '<span>Equity: <b>' + fn(st.equity_sek, 0) + ' SEK</b></span>';
+        h += '<span>Risk/trade: <b>' + fn((st.risk_fraction || 0.005) * 100, 2) + '%</b></span>';
+        h += '<span>Max notional: <b>' + fn((st.max_notional_fraction || 0.10) * 100, 0) + '%</b></span>';
+        h += '<span>Leverage: <b>' + (st.leverage || 20) + 'x</b></span>';
+        h += '</div>';
+
+        document.getElementById("gdPositionContent").innerHTML = h;
+      }
+
+      function renderGdScoreChart(log) {
+        if (!log || !log.length) return;
+
+        var labels = log.map(function(e) {
+          var d = new Date(e.ts);
+          return d.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+        }).reverse();
+        var scores = log.map(function(e) { return e.composite_score; }).reverse();
+        var zGold = log.map(function(e) { return e.z_gold; }).reverse();
+        var zFx = log.map(function(e) { return e.z_fx; }).reverse();
+        var zYield = log.map(function(e) { return e.z_yield; }).reverse();
+
+        if (gdScoreChartInstance) {
+          gdScoreChartInstance.destroy();
+          gdScoreChartInstance = null;
+        }
+
+        var canvas = document.getElementById("gdScoreChart");
+        gdScoreChartInstance = new Chart(canvas.getContext("2d"), {
+          type: "line",
+          data: {
+            labels: labels,
+            datasets: [
+              {
+                label: "S(t) Composite",
+                data: scores,
+                borderColor: "#eab308",
+                backgroundColor: "rgba(234,179,8,0.1)",
+                borderWidth: 2.5,
+                pointRadius: 1,
+                fill: true,
+                yAxisID: "y"
+              },
+              {
+                label: "z(gold)",
+                data: zGold,
+                borderColor: "#00ff88",
+                borderWidth: 1.5,
+                pointRadius: 0,
+                borderDash: [4, 2],
+                yAxisID: "y"
+              },
+              {
+                label: "z(fx)",
+                data: zFx,
+                borderColor: "#3b82f6",
+                borderWidth: 1.5,
+                pointRadius: 0,
+                borderDash: [4, 2],
+                yAxisID: "y"
+              },
+              {
+                label: "z(yield)",
+                data: zYield,
+                borderColor: "#f97316",
+                borderWidth: 1.5,
+                pointRadius: 0,
+                borderDash: [4, 2],
+                yAxisID: "y"
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            plugins: {
+              legend: { labels: { color: "#a0aec0", font: { size: 10 } } },
+              annotation: {
+                annotations: {
+                  thetaIn: { type: "line", yMin: 1.0, yMax: 1.0, borderColor: "rgba(0,255,136,0.4)", borderDash: [5,3], borderWidth: 1, label: { display: true, content: "Entry", position: "end", font: { size: 9 }, color: "#00ff88" } },
+                  thetaOut: { type: "line", yMin: 0.2, yMax: 0.2, borderColor: "rgba(255,68,68,0.4)", borderDash: [5,3], borderWidth: 1, label: { display: true, content: "Exit", position: "end", font: { size: 9 }, color: "#ff4444" } },
+                  zero: { type: "line", yMin: 0, yMax: 0, borderColor: "rgba(255,255,255,0.15)", borderWidth: 1 }
+                }
+              }
+            },
+            scales: {
+              x: {
+                ticks: { color: "#718096", font: { size: 9 }, maxTicksLimit: 20 },
+                grid: { color: "rgba(255,255,255,0.05)" }
+              },
+              y: {
+                title: { display: true, text: "Score / Z-score", color: "#718096", font: { size: 10 } },
+                ticks: { color: "#a0aec0", font: { size: 9 } },
+                grid: { color: "rgba(255,255,255,0.05)" }
+              }
+            }
+          }
+        });
+      }
+
+      function renderGdTrades(trades) {
+        if (!trades || !trades.length) {
+          document.getElementById("gdTrades").innerHTML = '<div class="nd">No trades yet</div>';
+          return;
+        }
+        var h = '<table style="width:100%;font-size:11px;border-collapse:collapse">';
+        h += '<tr style="color:var(--txm);border-bottom:1px solid var(--bdr)">';
+        h += '<th style="text-align:left;padding:4px 6px">Time</th>';
+        h += '<th style="padding:4px 6px">Action</th>';
+        h += '<th style="padding:4px 6px">Shares</th>';
+        h += '<th style="padding:4px 6px">Price</th>';
+        h += '<th style="padding:4px 6px">Total SEK</th>';
+        h += '<th style="padding:4px 6px">S(t)</th>';
+        h += '<th style="text-align:left;padding:4px 6px">Reason</th>';
+        h += '</tr>';
+        var shown = Math.min(trades.length, 30);
+        for (var i = 0; i < shown; i++) {
+          var t = trades[i];
+          var actColor = (t.action || "").toUpperCase() === "BUY" ? "var(--grn)" : "var(--red)";
+          h += '<tr style="border-bottom:1px solid var(--bdr)">';
+          h += '<td style="padding:4px 6px;color:var(--txd);white-space:nowrap">' + ft(t.ts || t.timestamp) + '</td>';
+          h += '<td style="padding:4px 6px;text-align:center;color:' + actColor + ';font-weight:700">' + eh((t.action || "").toUpperCase()) + '</td>';
+          h += '<td style="padding:4px 6px;text-align:center">' + fn(t.shares, 0) + '</td>';
+          h += '<td style="padding:4px 6px;text-align:center">' + fn(t.price_sek, 2) + ' SEK</td>';
+          h += '<td style="padding:4px 6px;text-align:center">' + fn(t.total_sek, 0) + ' SEK</td>';
+          h += '<td style="padding:4px 6px;text-align:center;color:var(--yel)">' + fn(t.composite_score, 2) + '</td>';
+          var reason = t.reason || "";
+          if (reason.length > 60) reason = reason.substring(0, 60) + "...";
+          h += '<td style="padding:4px 6px;color:var(--txd);max-width:200px;overflow:hidden;text-overflow:ellipsis">' + eh(reason) + '</td>';
+          h += '</tr>';
+        }
+        h += '</table>';
+        document.getElementById("gdTrades").innerHTML = h;
       }
 
       /* ================================================================
