@@ -67,6 +67,26 @@ class GolddiggerConfig:
     telegram_alerts: bool = True
     max_daily_trades: int = 10
 
+    # --- Signal integration ---
+    use_signal_consensus: bool = True     # use XAU-USD Layer 1 signals as filter
+    use_macro_context: bool = True        # read DXY from main system
+    use_trade_guards: bool = True         # integrate trade_guards.py
+    use_volume_confirm: bool = True       # volume confirmation from Binance FAPI
+    use_chronos_forecast: bool = True     # Chronos forecast integration
+
+    # --- Execution hardening ---
+    slippage_buffer: float = 0.005        # 0.5% adverse fill assumption
+    stale_data_max_seconds: float = 90.0  # block entries if data older than this
+    session_check_interval: int = 300     # 5 min Avanza session health check
+    hardware_stop_loss: bool = True       # place stop-loss on Avanza after entry
+
+    # --- ATR-based dynamic stops ---
+    atr_stop_multiplier: float = 2.0      # ATR multiplier for stop distance
+    atr_stop_min_pct: float = 0.03        # minimum 3% cert stop
+    atr_stop_max_pct: float = 0.15        # maximum 15% cert stop
+    leverage: float = 20.0                # certificate leverage
+    use_dynamic_stops: bool = True        # use ATR instead of fixed stops
+
     @classmethod
     def from_config(cls, config: dict) -> "GolddiggerConfig":
         """Build from the main config.json's 'golddigger' section."""
@@ -102,4 +122,21 @@ class GolddiggerConfig:
             trades_file=gd.get("trades_file", str(DATA_DIR / "golddigger_trades.jsonl")),
             telegram_alerts=gd.get("telegram_alerts", True),
             max_daily_trades=gd.get("max_daily_trades", 10),
+            # Signal integration
+            use_signal_consensus=gd.get("use_signal_consensus", True),
+            use_macro_context=gd.get("use_macro_context", True),
+            use_trade_guards=gd.get("use_trade_guards", True),
+            use_volume_confirm=gd.get("use_volume_confirm", True),
+            use_chronos_forecast=gd.get("use_chronos_forecast", True),
+            # Execution hardening
+            slippage_buffer=gd.get("slippage_buffer", 0.005),
+            stale_data_max_seconds=gd.get("stale_data_max_seconds", 90.0),
+            session_check_interval=gd.get("session_check_interval", 300),
+            hardware_stop_loss=gd.get("hardware_stop_loss", True),
+            # ATR-based dynamic stops
+            atr_stop_multiplier=gd.get("atr_stop_multiplier", 2.0),
+            atr_stop_min_pct=gd.get("atr_stop_min_pct", 0.03),
+            atr_stop_max_pct=gd.get("atr_stop_max_pct", 0.15),
+            leverage=gd.get("leverage", 20.0),
+            use_dynamic_stops=gd.get("use_dynamic_stops", True),
         )

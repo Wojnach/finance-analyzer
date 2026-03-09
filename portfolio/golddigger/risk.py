@@ -67,12 +67,31 @@ class RiskManager:
             return False, f"Max daily trades reached ({self._daily_trade_count})"
         return True, "ok"
 
-    def size_position(self, entry_ask: float, equity_sek: float) -> SizeResult:
+    def dynamic_stop_levels(self, entry_ask: float, atr_pct: Optional[float] = None) -> tuple:
+        """Compute ATR-based stop and TP if ATR available, else fall back to fixed."""
+        if atr_pct is None or not getattr(self.cfg, 'use_dynamic_stops', False):
+            stop = entry_ask * (1.0 - self.cfg.stop_loss_pct)
+            tp = entry_ask * (1.0 + self.cfg.take_profit_pct)
+            return stop, tp
+
+        leverage = getattr(self.cfg, 'leverage', 20.0)
+        multiplier = getattr(self.cfg, 'atr_stop_multiplier', 2.0)
+        underlying_stop = multiplier * atr_pct / 100.0
+        cert_stop_pct = underlying_stop * leverage
+        cert_stop_pct = max(getattr(self.cfg, 'atr_stop_min_pct', 0.03),
+                            min(cert_stop_pct, getattr(self.cfg, 'atr_stop_max_pct', 0.15)))
+
+        stop = entry_ask * (1.0 - cert_stop_pct)
+        tp = entry_ask * (1.0 + cert_stop_pct * 1.5)  # 1.5:1 R:R
+        return stop, tp
+
+    def size_position(self, entry_ask: float, equity_sek: float, atr_pct: Optional[float] = None) -> SizeResult:
         """Compute position size respecting risk budget and notional cap.
 
         Args:
             entry_ask: Certificate ask price (SEK)
             equity_sek: Current equity in SEK
+            atr_pct: Optional ATR percentage for dynamic stop calculation
 
         Returns:
             SizeResult with quantity and price levels.
@@ -80,10 +99,12 @@ class RiskManager:
         if entry_ask <= 0:
             return SizeResult(0, 0, 0, 0, 0, reason="Invalid entry price")
 
-        # Stop and TP prices
-        stop_price = entry_ask * (1.0 - self.cfg.stop_loss_pct)
-        tp_price = entry_ask * (1.0 + self.cfg.take_profit_pct)
-        per_unit_risk = entry_ask - stop_price
+        # Apply slippage buffer
+        effective_entry = entry_ask * (1.0 + getattr(self.cfg, 'slippage_buffer', 0.005))
+
+        # Stop and TP prices (dynamic or fixed)
+        stop_price, tp_price = self.dynamic_stop_levels(effective_entry, atr_pct)
+        per_unit_risk = effective_entry - stop_price
 
         if per_unit_risk <= 0:
             return SizeResult(0, 0, 0, stop_price, tp_price, reason="Zero per-unit risk")
@@ -92,14 +113,14 @@ class RiskManager:
         risk_budget = self.cfg.risk_fraction * equity_sek
         qty_risk = math.floor(risk_budget / per_unit_risk)
 
-        # Notional cap: eta * equity / ask
+        # Notional cap: eta * equity / ask (use effective_entry for conservative sizing)
         max_notional = self.cfg.max_notional_fraction * equity_sek
-        qty_notional = math.floor(max_notional / entry_ask)
+        qty_notional = math.floor(max_notional / effective_entry)
 
         qty = min(qty_risk, qty_notional)
         qty = max(qty, 0)
 
-        notional = qty * entry_ask
+        notional = qty * effective_entry
 
         reason = ""
         if qty == 0:

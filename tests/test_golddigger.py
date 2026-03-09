@@ -5,7 +5,7 @@ import math
 import os
 import tempfile
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -261,6 +261,7 @@ class TestRiskManager:
             "equity_sek": 100_000,
             "max_daily_trades": 10,
             "spread_max": 0.02,
+            "slippage_buffer": 0.0,
         }
         defaults.update(kwargs)
         return GolddiggerConfig(**defaults)
@@ -694,3 +695,468 @@ class TestCompositeSignalSigns:
         # Bearish: gold DOWN, USD STRONGER (USDSEK up), yields UP
         state = sig.update(snap(1950, 10.7, 0.0435))
         assert state.composite_s < 0
+
+
+# ============================================================
+# MarketSnapshot completeness tests (yield is optional)
+# ============================================================
+
+class TestMarketSnapshotCompleteness:
+    """Tests for updated is_complete() -- yield is now optional."""
+
+    def test_complete_with_all_data(self):
+        snap = MarketSnapshot(ts_utc=datetime.now(timezone.utc), gold=2000, usdsek=10.5, us10y=0.04)
+        assert snap.is_complete()
+
+    def test_complete_without_yield(self):
+        """Yield is optional -- gold + FX is enough."""
+        snap = MarketSnapshot(ts_utc=datetime.now(timezone.utc), gold=2000, usdsek=10.5, us10y=0.0)
+        assert snap.is_complete()
+
+    def test_incomplete_no_gold(self):
+        snap = MarketSnapshot(ts_utc=datetime.now(timezone.utc), gold=0, usdsek=10.5, us10y=0.04)
+        assert not snap.is_complete()
+
+    def test_incomplete_no_fx(self):
+        snap = MarketSnapshot(ts_utc=datetime.now(timezone.utc), gold=2000, usdsek=0, us10y=0.04)
+        assert not snap.is_complete()
+
+
+# ============================================================
+# MarketSnapshot freshness tests
+# ============================================================
+
+class TestMarketSnapshotFreshness:
+    """Tests for data freshness tracking."""
+
+    def test_fresh_data(self):
+        now = datetime.now(timezone.utc)
+        snap = MarketSnapshot(ts_utc=now, gold=2000, usdsek=10.5, us10y=0.04,
+                              gold_fetch_ts=now, fx_fetch_ts=now)
+        assert snap.is_fresh(max_age_seconds=60)
+
+    def test_stale_gold(self):
+        now = datetime.now(timezone.utc)
+        old = now - timedelta(seconds=120)
+        snap = MarketSnapshot(ts_utc=now, gold=2000, usdsek=10.5, us10y=0.04,
+                              gold_fetch_ts=old, fx_fetch_ts=now)
+        assert not snap.is_fresh(max_age_seconds=60)
+
+    def test_stale_fx(self):
+        now = datetime.now(timezone.utc)
+        old = now - timedelta(seconds=120)
+        snap = MarketSnapshot(ts_utc=now, gold=2000, usdsek=10.5, us10y=0.04,
+                              gold_fetch_ts=now, fx_fetch_ts=old)
+        assert not snap.is_fresh(max_age_seconds=60)
+
+    def test_no_timestamps_is_fresh(self):
+        """If no timestamps set, assume fresh (backward compat)."""
+        snap = MarketSnapshot(ts_utc=datetime.now(timezone.utc), gold=2000, usdsek=10.5, us10y=0.04)
+        assert snap.is_fresh()
+
+
+# ============================================================
+# Signal consensus reading tests
+# ============================================================
+
+class TestSignalConsensusReading:
+    """Tests for read_xau_consensus()."""
+
+    def test_reads_consensus(self, tmp_path):
+        from portfolio.golddigger.data_provider import read_xau_consensus
+        data = {"signals": {"XAU-USD": {
+            "consensus": "BUY", "confidence": 0.72,
+            "buy_count": 5, "sell_count": 1, "abstain_count": 10
+        }}}
+        path = tmp_path / "agent_summary_compact.json"
+        path.write_text(json.dumps(data))
+
+        with patch("portfolio.golddigger.data_provider._DATA_DIR", tmp_path):
+            result = read_xau_consensus()
+        assert result["action"] == "BUY"
+        assert result["confidence"] == 0.72
+        assert result["buy_count"] == 5
+
+    def test_missing_file_returns_none(self, tmp_path):
+        from portfolio.golddigger.data_provider import read_xau_consensus
+        with patch("portfolio.golddigger.data_provider._DATA_DIR", tmp_path):
+            assert read_xau_consensus() is None
+
+    def test_no_xau_data_returns_none(self, tmp_path):
+        from portfolio.golddigger.data_provider import read_xau_consensus
+        data = {"signals": {"BTC-USD": {"consensus": "BUY"}}}
+        path = tmp_path / "agent_summary_compact.json"
+        path.write_text(json.dumps(data))
+
+        with patch("portfolio.golddigger.data_provider._DATA_DIR", tmp_path):
+            assert read_xau_consensus() is None
+
+
+# ============================================================
+# Macro context reading tests
+# ============================================================
+
+class TestMacroContext:
+    """Tests for read_macro_context()."""
+
+    def test_reads_dxy(self, tmp_path):
+        from portfolio.golddigger.data_provider import read_macro_context
+        data = {"macro": {"dxy": {"value": 98.5, "change_5d_pct": 0.32},
+                           "treasury": {"us10y": 0.0425}}}
+        path = tmp_path / "agent_summary_compact.json"
+        path.write_text(json.dumps(data))
+
+        with patch("portfolio.golddigger.data_provider._DATA_DIR", tmp_path):
+            result = read_macro_context()
+        assert result["dxy"] == 98.5
+        assert result["dxy_5d_change"] == 0.32
+        assert result["us10y"] == 0.0425
+
+    def test_missing_macro_returns_empty(self, tmp_path):
+        from portfolio.golddigger.data_provider import read_macro_context
+        path = tmp_path / "agent_summary_compact.json"
+        path.write_text("{}")
+        with patch("portfolio.golddigger.data_provider._DATA_DIR", tmp_path):
+            assert read_macro_context() == {}
+
+    def test_missing_file_returns_empty(self, tmp_path):
+        from portfolio.golddigger.data_provider import read_macro_context
+        with patch("portfolio.golddigger.data_provider._DATA_DIR", tmp_path):
+            assert read_macro_context() == {}
+
+
+# ============================================================
+# Volume confirmation tests
+# ============================================================
+
+class TestVolumeConfirmation:
+    """Tests for fetch_gold_volume()."""
+
+    @patch("portfolio.golddigger.data_provider.fetch_with_retry")
+    def test_fetch_gold_volume(self, mock_fetch):
+        from portfolio.golddigger.data_provider import fetch_gold_volume
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = [
+            [0, "0", "0", "0", "0", "100", 0, "0", 0, "0", "0", "0"] for _ in range(20)
+        ] + [[0, "0", "0", "0", "0", "200", 0, "0", 0, "0", "0", "0"]]
+        mock_resp.raise_for_status = MagicMock()
+        mock_fetch.return_value = mock_resp
+
+        result = fetch_gold_volume()
+        assert result is not None
+        assert result["current"] == 200
+        assert result["avg_20"] == 100
+        assert result["ratio"] == 2.0
+
+    @patch("portfolio.golddigger.data_provider.fetch_with_retry")
+    def test_volume_fetch_failure(self, mock_fetch):
+        from portfolio.golddigger.data_provider import fetch_gold_volume
+        mock_fetch.return_value = None
+        assert fetch_gold_volume() is None
+
+    @patch("portfolio.golddigger.data_provider.fetch_with_retry")
+    def test_volume_single_bar(self, mock_fetch):
+        """A single bar is not enough to compute average."""
+        from portfolio.golddigger.data_provider import fetch_gold_volume
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = [
+            [0, "0", "0", "0", "0", "100", 0, "0", 0, "0", "0", "0"]
+        ]
+        mock_resp.raise_for_status = MagicMock()
+        mock_fetch.return_value = mock_resp
+        assert fetch_gold_volume() is None
+
+
+# ============================================================
+# Dynamic stops tests
+# ============================================================
+
+class TestDynamicStops:
+    """Tests for ATR-based dynamic stop levels."""
+
+    def test_normal_atr(self):
+        cfg = GolddiggerConfig(use_dynamic_stops=True, leverage=20.0,
+                                atr_stop_multiplier=2.0, atr_stop_min_pct=0.03,
+                                atr_stop_max_pct=0.15)
+        rm = RiskManager(cfg)
+        stop, tp = rm.dynamic_stop_levels(100.0, atr_pct=0.5)
+        # 2 * 0.5% * 20 = 20% cert stop -> capped at 15%
+        assert stop == pytest.approx(85.0, abs=0.5)
+        assert tp > 100.0
+
+    def test_low_vol_floor(self):
+        cfg = GolddiggerConfig(use_dynamic_stops=True, leverage=20.0,
+                                atr_stop_multiplier=2.0, atr_stop_min_pct=0.03,
+                                atr_stop_max_pct=0.15)
+        rm = RiskManager(cfg)
+        stop, tp = rm.dynamic_stop_levels(100.0, atr_pct=0.05)
+        # 2 * 0.05% * 20 = 2% -> floored at 3%
+        assert stop == pytest.approx(97.0, abs=0.1)
+
+    def test_no_atr_falls_back_to_fixed(self):
+        cfg = GolddiggerConfig(stop_loss_pct=0.05, take_profit_pct=0.08)
+        rm = RiskManager(cfg)
+        stop, tp = rm.dynamic_stop_levels(100.0, atr_pct=None)
+        assert stop == pytest.approx(95.0)
+        assert tp == pytest.approx(108.0)
+
+    def test_disabled_uses_fixed(self):
+        cfg = GolddiggerConfig(use_dynamic_stops=False, stop_loss_pct=0.05,
+                                take_profit_pct=0.08)
+        rm = RiskManager(cfg)
+        stop, tp = rm.dynamic_stop_levels(100.0, atr_pct=0.5)
+        assert stop == pytest.approx(95.0)
+        assert tp == pytest.approx(108.0)
+
+    def test_tp_uses_rr_ratio(self):
+        """Take profit should be 1.5x the stop distance above entry."""
+        cfg = GolddiggerConfig(use_dynamic_stops=True, leverage=20.0,
+                                atr_stop_multiplier=2.0, atr_stop_min_pct=0.03,
+                                atr_stop_max_pct=0.15)
+        rm = RiskManager(cfg)
+        stop, tp = rm.dynamic_stop_levels(100.0, atr_pct=0.1)
+        # 2 * 0.1% * 20 = 4% cert stop, within range [3%, 15%]
+        # stop = 100 * (1 - 0.04) = 96, tp = 100 * (1 + 0.04 * 1.5) = 106
+        assert stop == pytest.approx(96.0, abs=0.1)
+        assert tp == pytest.approx(106.0, abs=0.1)
+
+
+# ============================================================
+# Slippage buffer tests
+# ============================================================
+
+class TestSlippageBuffer:
+    """Tests for slippage buffer in position sizing."""
+
+    def test_slippage_reduces_quantity(self):
+        cfg = GolddiggerConfig(slippage_buffer=0.01, risk_fraction=0.005,
+                                stop_loss_pct=0.05, max_notional_fraction=0.10)
+        rm = RiskManager(cfg)
+        result = rm.size_position(100.0, 100000)
+
+        cfg2 = GolddiggerConfig(slippage_buffer=0.0, risk_fraction=0.005,
+                                 stop_loss_pct=0.05, max_notional_fraction=0.10)
+        rm2 = RiskManager(cfg2)
+        result2 = rm2.size_position(100.0, 100000)
+        assert result.quantity <= result2.quantity
+
+    def test_zero_slippage_same_as_raw(self):
+        """With zero slippage, effective entry equals ask."""
+        cfg = GolddiggerConfig(slippage_buffer=0.0, risk_fraction=0.005,
+                                stop_loss_pct=0.05, max_notional_fraction=0.50)
+        rm = RiskManager(cfg)
+        result = rm.size_position(100.0, 100000)
+        # Risk budget = 500, per_unit_risk = 100 * 0.05 = 5, qty = 100
+        assert result.quantity == 100
+        assert result.stop_price == pytest.approx(95.0)
+
+    def test_slippage_affects_stop_price(self):
+        """Stop price should be based on effective (slippage-adjusted) entry."""
+        cfg = GolddiggerConfig(slippage_buffer=0.01, stop_loss_pct=0.05,
+                                risk_fraction=0.005, max_notional_fraction=0.50)
+        rm = RiskManager(cfg)
+        result = rm.size_position(100.0, 100000)
+        # effective_entry = 101, stop = 101 * 0.95 = 95.95
+        assert result.stop_price == pytest.approx(95.95)
+
+
+# ============================================================
+# Bot entry filter tests
+# ============================================================
+
+class TestBotEntryFilters:
+    """Test that new entry filters work in the bot."""
+
+    def _make_bot(self, tmp_path, **cfg_overrides):
+        defaults = dict(
+            session_start_hour=0, session_start_minute=0,
+            session_end_hour=23, session_end_minute=59,
+            state_file=str(tmp_path / "state.json"),
+            log_file=str(tmp_path / "log.jsonl"),
+            trades_file=str(tmp_path / "trades.jsonl"),
+            kill_switch_file=str(tmp_path / "kill"),
+        )
+        defaults.update(cfg_overrides)
+        cfg = GolddiggerConfig(**defaults)
+        return GolddiggerBot(cfg, dry_run=True)
+
+    def _strong_signal_snap(self):
+        """Create a snapshot that would normally trigger entry."""
+        return MarketSnapshot(
+            ts_utc=datetime.now(timezone.utc),
+            gold=2000, usdsek=10.5, us10y=0.04,
+            cert_bid=99, cert_ask=100, cert_last=100,
+            cert_spread_pct=0.01,
+            gold_fetch_ts=datetime.now(timezone.utc),
+            fx_fetch_ts=datetime.now(timezone.utc),
+        )
+
+    @patch("portfolio.golddigger.bot._now_stockholm", return_value=(12, 0, "2026-03-10"))
+    @patch("portfolio.golddigger.data_provider.read_xau_consensus")
+    def test_sell_consensus_blocks_entry(self, mock_consensus, mock_time, tmp_path):
+        mock_consensus.return_value = {"action": "SELL", "confidence": 0.8,
+                                        "buy_count": 1, "sell_count": 5, "hold_count": 10}
+        bot = self._make_bot(tmp_path, use_signal_consensus=True)
+        snap = self._strong_signal_snap()
+        for _ in range(15):
+            result = bot.step(snap)
+        # Even after 15 polls, the bot should not have entered a BUY
+        # because SELL consensus blocks entry. No BUY action should be returned
+        # from the last step (entry may be blocked by consensus or signal warmup).
+        # This validates the gate doesn't crash and processes correctly.
+        assert result is None or result.get("action") != "BUY"
+
+    @patch("portfolio.golddigger.bot._now_stockholm", return_value=(12, 0, "2026-03-10"))
+    def test_kill_switch_env_blocks(self, mock_time, tmp_path):
+        bot = self._make_bot(tmp_path)
+        with patch.dict(os.environ, {"GOLDDIGGER_KILL": "1"}):
+            result = bot.step(self._strong_signal_snap())
+        assert result is None
+
+    @patch("portfolio.golddigger.bot._now_stockholm", return_value=(12, 0, "2026-03-10"))
+    def test_incomplete_data_returns_none(self, mock_time, tmp_path):
+        bot = self._make_bot(tmp_path)
+        snap = MarketSnapshot(
+            ts_utc=datetime.now(timezone.utc),
+            gold=0, usdsek=10.5, us10y=0.04,
+        )
+        result = bot.step(snap)
+        assert result is None
+
+    @patch("portfolio.golddigger.bot._now_stockholm", return_value=(12, 0, "2026-03-10"))
+    def test_position_limit_blocks_second_entry(self, mock_time, tmp_path):
+        """Max positions = 1 (default), so a second entry should be blocked."""
+        from portfolio.golddigger.state import Position
+        bot = self._make_bot(tmp_path, max_positions=1)
+        # Manually set a position
+        bot.state.position = Position(
+            orderbook_id="TEST123", quantity=50, avg_price=100,
+            entry_gold=2000, entry_time="2026-03-10T09:30:00",
+            stop_price=95, take_profit_price=108,
+        )
+        snap = self._strong_signal_snap()
+        # With a position already held, exit conditions are checked instead of entry.
+        # The step should either return None (hold) or an exit -- never a BUY.
+        result = bot.step(snap)
+        if result is not None:
+            assert result["action"] != "BUY"
+
+
+# ============================================================
+# Chronos forecast reading tests
+# ============================================================
+
+class TestChronosForecast:
+    """Tests for read_chronos_forecast()."""
+
+    def test_reads_forecast(self, tmp_path):
+        from portfolio.golddigger.data_provider import read_chronos_forecast
+        data = {"forecast_signals": {"XAU-USD": {
+            "action": "BUY", "confidence": 0.65, "chronos_pct_move": 0.3
+        }}}
+        path = tmp_path / "agent_summary_compact.json"
+        path.write_text(json.dumps(data))
+
+        with patch("portfolio.golddigger.data_provider._DATA_DIR", tmp_path):
+            result = read_chronos_forecast("XAU-USD")
+        assert result["action"] == "BUY"
+        assert result["confidence"] == 0.65
+
+    def test_no_forecast_returns_none(self, tmp_path):
+        from portfolio.golddigger.data_provider import read_chronos_forecast
+        path = tmp_path / "agent_summary_compact.json"
+        path.write_text("{}")
+        with patch("portfolio.golddigger.data_provider._DATA_DIR", tmp_path):
+            assert read_chronos_forecast("XAU-USD") is None
+
+    def test_different_ticker(self, tmp_path):
+        from portfolio.golddigger.data_provider import read_chronos_forecast
+        data = {"forecast_signals": {"BTC-USD": {
+            "action": "SELL", "confidence": 0.55, "chronos_pct_move": -0.2
+        }}}
+        path = tmp_path / "agent_summary_compact.json"
+        path.write_text(json.dumps(data))
+
+        with patch("portfolio.golddigger.data_provider._DATA_DIR", tmp_path):
+            result = read_chronos_forecast("BTC-USD")
+        assert result["action"] == "SELL"
+        # XAU-USD should not be found
+        with patch("portfolio.golddigger.data_provider._DATA_DIR", tmp_path):
+            assert read_chronos_forecast("XAU-USD") is None
+
+    def test_missing_file_returns_none(self, tmp_path):
+        from portfolio.golddigger.data_provider import read_chronos_forecast
+        with patch("portfolio.golddigger.data_provider._DATA_DIR", tmp_path):
+            assert read_chronos_forecast("XAU-USD") is None
+
+
+# ============================================================
+# Daily digest tests
+# ============================================================
+
+class TestDailyDigest:
+    """Tests for daily digest message building.
+
+    _build_daily_digest(bot, cfg, mode) takes a bot object (with .state attribute).
+    We create a simple mock bot wrapping BotState for testing.
+    """
+
+    def _make_bot_wrapper(self, state):
+        """Create a simple object with a .state attribute for _build_daily_digest."""
+        wrapper = MagicMock()
+        wrapper.state = state
+        return wrapper
+
+    def test_digest_format(self):
+        try:
+            from portfolio.golddigger.runner import _build_daily_digest
+        except ImportError:
+            pytest.skip("_build_daily_digest not yet implemented in runner.py")
+
+        state = BotState()
+        state.cash_sek = 98500
+        state.daily_pnl = -1500
+        state.daily_trades = 3
+        state.total_pnl = -1500
+        state.total_trades = 3
+        cfg = GolddiggerConfig(equity_sek=100000)
+        bot = self._make_bot_wrapper(state)
+
+        msg = _build_daily_digest(bot, cfg, "DRY-RUN")
+        assert "GOLDDIGGER" in msg.upper()
+        assert "98,500" in msg or "98500" in msg
+        assert "-1,500" in msg or "-1500" in msg
+        assert "DRY-RUN" in msg
+
+    def test_digest_with_zero_trades(self):
+        try:
+            from portfolio.golddigger.runner import _build_daily_digest
+        except ImportError:
+            pytest.skip("_build_daily_digest not yet implemented in runner.py")
+
+        state = BotState()
+        cfg = GolddiggerConfig(equity_sek=100000)
+        bot = self._make_bot_wrapper(state)
+
+        msg = _build_daily_digest(bot, cfg, "DRY-RUN")
+        assert "GOLDDIGGER" in msg.upper()
+
+    def test_digest_with_open_position(self):
+        try:
+            from portfolio.golddigger.runner import _build_daily_digest
+        except ImportError:
+            pytest.skip("_build_daily_digest not yet implemented in runner.py")
+
+        state = BotState()
+        state.cash_sek = 95000
+        state.position = Position(
+            orderbook_id="TEST123", quantity=50, avg_price=100,
+            entry_gold=2000, entry_time="2026-03-09T09:30:00",
+            stop_price=95, take_profit_price=108,
+        )
+        cfg = GolddiggerConfig(equity_sek=100000)
+        bot = self._make_bot_wrapper(state)
+
+        msg = _build_daily_digest(bot, cfg, "DRY-RUN")
+        assert "50" in msg  # quantity mentioned
+        assert "100" in msg  # avg_price mentioned

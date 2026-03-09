@@ -76,14 +76,33 @@ def _setup_playwright():
         return None, None, None
 
 
-def _execute_order(page, action: dict, config: dict, account_id: str) -> bool:
+def _build_daily_digest(bot, cfg, mode):
+    """Build a daily digest summary string."""
+    state = bot.state
+    lines = [
+        f"*GOLDDIGGER DIGEST* ({mode})",
+        f"Equity: {state.cash_sek:,.0f} SEK",
+        f"Daily P&L: {state.daily_pnl:+,.0f} SEK",
+        f"Daily trades: {state.daily_trades}",
+        f"Total P&L: {state.total_pnl:+,.0f} SEK ({state.total_pnl / cfg.equity_sek * 100:+.2f}%)",
+        f"Total trades: {state.total_trades}",
+    ]
+    if state.has_position():
+        pos = state.position
+        lines.append(f"_Open: {pos.quantity}x @ {pos.avg_price:.2f}_")
+    return "\n".join(lines)
+
+
+def _execute_order(page, action: dict, config: dict, account_id: str, cfg=None) -> bool:
     """Execute an order on Avanza via Playwright.
 
     Uses the same order placement as metals_avanza_helpers.
     Returns True if order was placed successfully.
     """
+    _data_dir = Path(__file__).resolve().parent.parent.parent / "data"
     try:
-        sys.path.insert(0, str(DATA_DIR))
+        if str(_data_dir) not in sys.path:
+            sys.path.insert(0, str(_data_dir))
         from metals_avanza_helpers import place_order
 
         ob_id = action["orderbook_id"]
@@ -102,6 +121,30 @@ def _execute_order(page, action: dict, config: dict, account_id: str) -> bool:
                 f"_{action.get('reason', '')}_",
                 config,
             )
+
+            # Hardware stop-loss after BUY
+            if side == "BUY" and cfg is not None and getattr(cfg, 'hardware_stop_loss', False):
+                stop_price = action.get("stop_price")
+                if stop_price and stop_price > 0:
+                    try:
+                        from metals_avanza_helpers import place_stop_loss, fetch_price as avanza_fetch_price
+                        cert_data = avanza_fetch_price(page, ob_id, "warrant")
+                        bid = cert_data.get("bid", 0) if cert_data else 0
+                        if bid > 0 and (bid - stop_price) / bid < 0.03:
+                            logger.warning("Stop too close to bid (%.2f vs %.2f), skipping HW stop", stop_price, bid)
+                        else:
+                            sell_price = round(stop_price * 0.98, 2)
+                            sl_ok, sl_id = place_stop_loss(page, account_id, ob_id,
+                                                           trigger_price=stop_price, sell_price=sell_price, volume=qty)
+                            if sl_ok:
+                                logger.info("Hardware stop-loss placed: trigger=%.2f, id=%s", stop_price, sl_id)
+                            else:
+                                logger.error("Failed to place hardware stop-loss!")
+                                _send_telegram("_GOLDDIGGER: Failed to place stop-loss!_", config)
+                    except Exception as e_sl:
+                        logger.error("Hardware stop-loss error: %s", e_sl)
+                        _send_telegram("_GOLDDIGGER: Stop-loss placement error!_", config)
+
             return True
         else:
             logger.error("Order FAILED: %s", result)
@@ -147,15 +190,32 @@ def run(live: bool = False):
         )
 
     consecutive_errors = 0
+    _last_session_check = time.time()
 
     try:
         while True:
             try:
+                # Session health check
+                if live and page and (time.time() - _last_session_check) > cfg.session_check_interval:
+                    try:
+                        _data_dir = Path(__file__).resolve().parent.parent.parent / "data"
+                        if str(_data_dir) not in sys.path:
+                            sys.path.insert(0, str(_data_dir))
+                        from metals_avanza_helpers import check_session_alive
+                        if not check_session_alive(page):
+                            logger.error("Avanza session expired!")
+                            if cfg.telegram_alerts:
+                                _send_telegram("_GOLDDIGGER: Avanza session expired — stopping_", config)
+                            break
+                    except ImportError:
+                        logger.debug("check_session_alive not available — skipping health check")
+                    _last_session_check = time.time()
+
                 action = bot.step()
 
                 if action:
                     if live and page:
-                        _execute_order(page, action, config, cfg.avanza_account_id)
+                        _execute_order(page, action, config, cfg.avanza_account_id, cfg=cfg)
                     elif not live:
                         logger.info("[DRY-RUN] Would execute: %s %d @ %.2f — %s",
                                     action["action"], action["quantity"],
@@ -211,6 +271,8 @@ def run(live: bool = False):
                 pass
 
         if cfg.telegram_alerts:
+            digest = _build_daily_digest(bot, cfg, mode)
+            _send_telegram(digest, config)
             _send_telegram(
                 f"*GOLDDIGGER STOPPED*\n"
                 f"Equity: {bot.state.cash_sek:,.0f} SEK\n"

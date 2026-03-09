@@ -4,15 +4,22 @@ Uses Binance FAPI for gold (XAUUSDT), existing fx_rates for USD/SEK,
 FRED for US10Y yield, and Avanza Playwright session for certificate bid/ask.
 """
 
+import json
 import logging
 import math
+import sys as _sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from portfolio.circuit_breaker import CircuitBreaker
 from portfolio.http_retry import fetch_with_retry
+
+_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+if str(_DATA_DIR) not in _sys.path:
+    _sys.path.insert(0, str(_DATA_DIR))
 
 logger = logging.getLogger("portfolio.golddigger.data")
 
@@ -38,13 +45,19 @@ class MarketSnapshot:
     cert_last: Optional[float] = None
     cert_spread_pct: Optional[float] = None
     data_quality: str = "ok"  # "ok", "partial", "stale"
+    gold_fetch_ts: Optional[datetime] = None
+    fx_fetch_ts: Optional[datetime] = None
+    gold_volume_ratio: Optional[float] = None
 
     def is_complete(self) -> bool:
-        return (
-            self.gold > 0
-            and self.usdsek > 0
-            and self.us10y > 0
-        )
+        return self.gold > 0 and self.usdsek > 0
+
+    def is_fresh(self, max_age_seconds: float = 90.0) -> bool:
+        now = datetime.now(timezone.utc)
+        for ts in [self.gold_fetch_ts, self.fx_fetch_ts]:
+            if ts is not None and (now - ts).total_seconds() > max_age_seconds:
+                return False
+        return True
 
 
 def fetch_gold_price() -> Optional[float]:
@@ -142,7 +155,7 @@ def fetch_certificate_price(page, orderbook_id: str, api_type: str = "warrant") 
     if not orderbook_id:
         return None
     try:
-        from data.metals_avanza_helpers import fetch_price
+        from metals_avanza_helpers import fetch_price
         data = fetch_price(page, orderbook_id, api_type)
         if data is None:
             return None
@@ -163,11 +176,108 @@ def fetch_certificate_price(page, orderbook_id: str, api_type: str = "warrant") 
         return None
 
 
+def _load_json_safe(path) -> Optional[dict]:
+    """Load JSON file safely, return None on failure."""
+    try:
+        if not Path(path).exists():
+            return None
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def fetch_gold_volume(lookback_bars: int = 20) -> Optional[dict]:
+    """Fetch XAUUSDT volume from Binance FAPI. Returns {current, avg_20, ratio}."""
+    try:
+        r = fetch_with_retry(
+            f"{BINANCE_FAPI_BASE}/klines",
+            params={"symbol": "XAUUSDT", "interval": "5m", "limit": lookback_bars + 1},
+            timeout=10,
+        )
+        if r is None:
+            return None
+        r.raise_for_status()
+        bars = r.json()
+        volumes = [float(bar[5]) for bar in bars]
+        if len(volumes) < 2:
+            return None
+        current = volumes[-1]
+        avg = sum(volumes[:-1]) / len(volumes[:-1])
+        return {
+            "current": current,
+            "avg_20": avg,
+            "ratio": current / avg if avg > 0 else 1.0,
+        }
+    except Exception as e:
+        logger.warning("Gold volume fetch failed: %s", e)
+        return None
+
+
+def read_xau_consensus() -> Optional[dict]:
+    """Read latest XAU-USD signal consensus from agent_summary_compact.json."""
+    path = _DATA_DIR / "agent_summary_compact.json"
+    data = _load_json_safe(path)
+    if not data:
+        return None
+    signals = data.get("signals", {}).get("XAU-USD", {})
+    if not signals:
+        return None
+    return {
+        "action": signals.get("consensus", "HOLD"),
+        "confidence": signals.get("confidence", 0.0),
+        "buy_count": signals.get("buy_count", 0),
+        "sell_count": signals.get("sell_count", 0),
+        "hold_count": signals.get("abstain_count", 0),
+    }
+
+
+def read_macro_context() -> dict:
+    """Read DXY and macro data from agent_summary_compact.json."""
+    path = _DATA_DIR / "agent_summary_compact.json"
+    data = _load_json_safe(path)
+    if not data:
+        return {}
+    macro = data.get("macro", {})
+    return {
+        "dxy": macro.get("dxy", {}).get("value"),
+        "dxy_5d_change": macro.get("dxy", {}).get("change_5d_pct"),
+        "us10y": macro.get("treasury", {}).get("us10y"),
+    }
+
+
+def read_chronos_forecast(ticker: str = "XAU-USD") -> Optional[dict]:
+    """Read Chronos forecast from agent_summary_compact.json."""
+    path = _DATA_DIR / "agent_summary_compact.json"
+    data = _load_json_safe(path)
+    if not data:
+        return None
+    forecasts = data.get("forecast_signals", {}).get(ticker)
+    if not forecasts:
+        return None
+    return {
+        "action": forecasts.get("action", "HOLD"),
+        "confidence": forecasts.get("confidence", 0.0),
+        "pct_move": forecasts.get("chronos_pct_move"),
+    }
+
+
+def read_xau_atr() -> Optional[float]:
+    """Read XAU-USD ATR percentage from agent_summary_compact.json."""
+    path = _DATA_DIR / "agent_summary_compact.json"
+    data = _load_json_safe(path)
+    if not data:
+        return None
+    xau = data.get("signals", {}).get("XAU-USD", {})
+    return xau.get("atr_pct")
+
+
 def collect_snapshot(
     fred_api_key: str = "",
     page=None,
     orderbook_id: str = "",
     api_type: str = "warrant",
+    fetch_volume: bool = False,
 ) -> MarketSnapshot:
     """Collect a complete market snapshot from all data sources.
 
@@ -177,12 +287,21 @@ def collect_snapshot(
     """
     ts = datetime.now(timezone.utc)
     gold = fetch_gold_price()
+    gold_fetch_ts = datetime.now(timezone.utc) if gold is not None else None
     usdsek = fetch_usdsek()
+    fx_fetch_ts = datetime.now(timezone.utc) if usdsek is not None else None
     us10y = fetch_us10y(fred_api_key)
 
     cert_data = None
     if page and orderbook_id:
         cert_data = fetch_certificate_price(page, orderbook_id, api_type)
+
+    # Optional volume fetch
+    gold_volume_ratio = None
+    if fetch_volume:
+        vol_data = fetch_gold_volume()
+        if vol_data:
+            gold_volume_ratio = vol_data.get("ratio")
 
     # Determine data quality
     missing = []
@@ -207,6 +326,9 @@ def collect_snapshot(
         usdsek=usdsek,
         us10y=us10y,
         data_quality=quality,
+        gold_fetch_ts=gold_fetch_ts,
+        fx_fetch_ts=fx_fetch_ts,
+        gold_volume_ratio=gold_volume_ratio,
     )
     if cert_data:
         snap.cert_bid = cert_data.get("bid")

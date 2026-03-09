@@ -142,6 +142,12 @@ class GolddiggerBot:
             logger.warning("Incomplete data: quality=%s — holding", snapshot.data_quality)
             return None
 
+        # --- Freshness check ---
+        stale_max = getattr(self.cfg, 'stale_data_max_seconds', 90.0)
+        if not snapshot.is_fresh(stale_max):
+            logger.warning("Stale data (>%.0fs) — holding", stale_max)
+            return None
+
         # --- Compute signal ---
         sig = self.signal.update(snapshot)
 
@@ -186,6 +192,38 @@ class GolddiggerBot:
             logger.info("Entry blocked by risk: %s", reason)
             return None
 
+        # Signal consensus gate (Phase 2)
+        if getattr(self.cfg, 'use_signal_consensus', False):
+            from portfolio.golddigger.data_provider import read_xau_consensus
+            consensus = read_xau_consensus()
+            if consensus and consensus["action"] == "SELL":
+                logger.info("Entry blocked: XAU-USD consensus SELL (%dB/%dS)",
+                             consensus.get("buy_count", 0), consensus.get("sell_count", 0))
+                return None
+
+        # DXY macro gate (Phase 2)
+        if getattr(self.cfg, 'use_macro_context', False):
+            from portfolio.golddigger.data_provider import read_macro_context
+            macro = read_macro_context()
+            dxy_change = macro.get("dxy_5d_change")
+            if dxy_change is not None and dxy_change > 1.0:
+                logger.info("Entry blocked: DXY strengthening +%.1f%% 5d", dxy_change)
+                return None
+
+        # Volume gate (Phase 4)
+        if getattr(self.cfg, 'use_volume_confirm', False) and snap.gold_volume_ratio is not None:
+            if snap.gold_volume_ratio < 0.5:
+                logger.info("Entry blocked: low volume (ratio=%.2f)", snap.gold_volume_ratio)
+                return None
+
+        # Chronos forecast gate (Phase 4)
+        if getattr(self.cfg, 'use_chronos_forecast', False):
+            from portfolio.golddigger.data_provider import read_chronos_forecast
+            forecast = read_chronos_forecast("XAU-USD")
+            if forecast and forecast["action"] == "SELL" and forecast.get("confidence", 0) > 0.6:
+                logger.info("Entry blocked: Chronos forecast SELL (conf=%.2f)", forecast["confidence"])
+                return None
+
         # Spread check
         spread_pct = snap.cert_spread_pct
         if spread_pct is not None:
@@ -200,13 +238,19 @@ class GolddiggerBot:
         if not self.signal.should_enter(sig, spread_pct, self.cfg.spread_max):
             return None
 
+        # ATR for dynamic stops
+        atr_pct = None
+        if getattr(self.cfg, 'use_dynamic_stops', False):
+            from portfolio.golddigger.data_provider import read_xau_atr
+            atr_pct = read_xau_atr()
+
         # Size the position
         entry_price = snap.cert_ask or snap.cert_last or 0
         if entry_price <= 0:
             logger.warning("No valid certificate price for entry")
             return None
 
-        sizing = self.risk.size_position(entry_price, self.state.cash_sek)
+        sizing = self.risk.size_position(entry_price, self.state.cash_sek, atr_pct=atr_pct)
         if sizing.quantity <= 0:
             logger.info("Position size = 0 after sizing: %s", sizing.reason)
             return None
