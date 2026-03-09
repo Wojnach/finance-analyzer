@@ -47,6 +47,8 @@ def _fetch_headlines(ticker: str, config: dict) -> list[dict]:
     from a representative peer. This ensures that "tariff" news hitting NVDA
     also propagates to MU, TSM, AMD, etc.
     """
+    if not ticker:
+        return []
     short = ticker.upper().replace("-USD", "")
     from portfolio.sentiment import _is_crypto, _fetch_crypto_headlines, _fetch_stock_headlines
 

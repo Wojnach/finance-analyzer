@@ -36,7 +36,7 @@ def load_json(path, default=None):
         return default
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, ValueError, OSError):
+    except (json.JSONDecodeError, ValueError):
         return default
 
 

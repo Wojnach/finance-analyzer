@@ -86,7 +86,6 @@ def _check_recent_trade(state):
                 trade_detected = True
         except (json.JSONDecodeError, KeyError) as exc:
             logger.warning("Failed to parse portfolio file %s: %s", pf_file, exc)
-            pass
 
     if new_tx_counts:
         state["last_checked_tx_count"] = new_tx_counts

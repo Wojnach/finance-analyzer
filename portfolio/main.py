@@ -516,6 +516,10 @@ def loop(interval=None):
         run(force_report=True)
         _run_post_cycle(config)
         _reset_crash_counter()
+        try:
+            (DATA_DIR / "heartbeat.txt").write_text(datetime.now(timezone.utc).isoformat())
+        except Exception as e:
+            logger.debug("Heartbeat write after initial run failed: %s", e)
     except KeyboardInterrupt:
         raise
     except Exception as e:
