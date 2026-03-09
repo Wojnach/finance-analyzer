@@ -515,5 +515,29 @@ def api_metals():
     })
 
 
+# ---------------------------------------------------------------------------
+# New: GoldDigger monitoring
+# ---------------------------------------------------------------------------
+
+@app.route("/api/golddigger")
+@require_auth
+def api_golddigger():
+    """Return GoldDigger signal data: state, log entries, trades.
+
+    Reads:
+      - data/golddigger_state.json — live composite score, z-scores, position, session
+      - data/golddigger_log.jsonl — signal log (newest first, last 100)
+      - data/golddigger_trades.jsonl — trade history (newest first, last 50)
+    """
+    state = _read_json(DATA_DIR / "golddigger_state.json")
+    log = list(_iter_latest_dict_entries(DATA_DIR / "golddigger_log.jsonl", read_limit=100))
+    trades = list(_iter_latest_dict_entries(DATA_DIR / "golddigger_trades.jsonl", read_limit=50))
+    return jsonify({
+        "state": state,
+        "log": log,
+        "trades": trades,
+    })
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5055, debug=False)
