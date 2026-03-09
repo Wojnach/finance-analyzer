@@ -179,6 +179,62 @@ def per_ticker_accuracy(horizon="1d"):
     return result
 
 
+def accuracy_by_signal_ticker(signal_name, horizon="1d", days=None):
+    """Compute per-ticker accuracy for one signal.
+
+    Args:
+        signal_name: Signal name present in SIGNAL_NAMES.
+        horizon: Outcome horizon to evaluate.
+        days: Optional lookback window in days.
+
+    Returns:
+        dict: {ticker: {"accuracy": float, "samples": int, "correct": int}}
+    """
+    if signal_name not in SIGNAL_NAMES:
+        return {}
+
+    entries = load_entries()
+    cutoff = None
+    if days is not None:
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    stats = defaultdict(lambda: {"correct": 0, "total": 0})
+
+    for entry in entries:
+        if cutoff and entry.get("ts", "") < cutoff:
+            continue
+
+        outcomes = entry.get("outcomes", {})
+        tickers = entry.get("tickers", {})
+        for ticker, tdata in tickers.items():
+            outcome = outcomes.get(ticker, {}).get(horizon)
+            if not outcome:
+                continue
+
+            vote = (tdata.get("signals") or {}).get(signal_name, "HOLD")
+            if vote == "HOLD":
+                continue
+
+            change_pct = outcome.get("change_pct", 0)
+            stats[ticker]["total"] += 1
+            if _vote_correct(vote, change_pct):
+                stats[ticker]["correct"] += 1
+
+    result = {}
+    for ticker, data in stats.items():
+        total = data["total"]
+        if total == 0:
+            continue
+        result[ticker] = {
+            "accuracy": data["correct"] / total,
+            "samples": total,
+            "correct": data["correct"],
+        }
+    return result
+
+
 def best_worst_signals(horizon="1d", acc=None):
     if acc is None:
         acc = signal_accuracy(horizon)

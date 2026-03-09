@@ -19,6 +19,10 @@ from portfolio.signal_utils import true_range
 logger = logging.getLogger("portfolio.signal_engine")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+_LOCAL_MODEL_ACCURACY_TTL = 1800
+_LOCAL_MODEL_HOLD_THRESHOLD = 0.55
+_LOCAL_MODEL_MIN_SAMPLES = 30
+_LOCAL_MODEL_LOOKBACK_DAYS = 30
 
 # --- Signal (full 30-signal for "Now" timeframe) ---
 
@@ -203,6 +207,62 @@ def _time_of_day_factor():
     if 2 <= hour <= 6:
         return 0.8
     return 1.0
+
+
+def _load_local_model_accuracy(signal_name, horizon="1d", days=None, cache_ttl=None):
+    """Load per-ticker accuracy for a local model signal."""
+    lookback_days = days if days is not None else _LOCAL_MODEL_LOOKBACK_DAYS
+    ttl = cache_ttl or _LOCAL_MODEL_ACCURACY_TTL
+    cache_key = f"local_model_accuracy_{signal_name}_{horizon}_{lookback_days}"
+
+    def _fetch():
+        try:
+            from portfolio.accuracy_stats import accuracy_by_signal_ticker
+
+            return accuracy_by_signal_ticker(signal_name, horizon=horizon, days=lookback_days)
+        except Exception:
+            logger.warning("Failed to load %s accuracy", signal_name, exc_info=True)
+            return {}
+
+    return _cached(cache_key, ttl, _fetch)
+
+
+def _gate_local_model_vote(signal_name, vote, ticker, config=None):
+    """Apply accuracy-based abstention to local model votes."""
+    info = {
+        "gating": "raw",
+        "accuracy": None,
+        "samples": 0,
+    }
+    if vote == "HOLD" or not ticker:
+        return vote, info
+
+    cfg = ((config or {}).get("local_models", {}) or {}).get(signal_name, {})
+    hold_threshold = cfg.get("hold_threshold", _LOCAL_MODEL_HOLD_THRESHOLD)
+    min_samples = cfg.get("min_samples", _LOCAL_MODEL_MIN_SAMPLES)
+    days = cfg.get("accuracy_days", _LOCAL_MODEL_LOOKBACK_DAYS)
+    cache_ttl = cfg.get("accuracy_cache_ttl", _LOCAL_MODEL_ACCURACY_TTL)
+
+    accuracy_data = _load_local_model_accuracy(
+        signal_name, horizon=cfg.get("horizon", "1d"), days=days, cache_ttl=cache_ttl
+    )
+    ticker_stats = (accuracy_data or {}).get(ticker)
+    if not ticker_stats or ticker_stats.get("samples", 0) < min_samples:
+        info["gating"] = "insufficient_data"
+        if ticker_stats:
+            info["accuracy"] = round(ticker_stats.get("accuracy", 0.0), 3)
+            info["samples"] = ticker_stats.get("samples", 0)
+        return vote, info
+
+    accuracy = float(ticker_stats.get("accuracy", 0.0))
+    samples = int(ticker_stats.get("samples", 0))
+    info["accuracy"] = round(accuracy, 3)
+    info["samples"] = samples
+    if accuracy < hold_threshold:
+        info["gating"] = "held"
+        return "HOLD", info
+
+    return vote, info
 
 
 def _compute_adx(df, period=14):
@@ -549,9 +609,17 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             )
             if ms:
                 orig = ms.get("original") or ms
-                extra_info["ministral_action"] = orig["action"]
+                raw_action = orig["action"]
+                gated_action, gating = _gate_local_model_vote(
+                    "ministral", raw_action, ticker, config=config
+                )
+                extra_info["ministral_raw_action"] = raw_action
+                extra_info["ministral_action"] = gated_action
                 extra_info["ministral_reasoning"] = orig.get("reasoning", "")
-                votes["ministral"] = orig["action"]
+                extra_info["ministral_accuracy"] = gating.get("accuracy")
+                extra_info["ministral_samples"] = gating.get("samples", 0)
+                extra_info["ministral_gating"] = gating.get("gating", "raw")
+                votes["ministral"] = gated_action
 
                 # custom_lora fully disabled — not even stored in extra.
                 # Shadow A/B data preserved in data/ab_test_log.jsonl.

@@ -270,6 +270,26 @@ class TestCryptoCompareAPI:
 
 
 class TestMinistralTrader:
+    def test_predict_prefers_json_payload(self):
+        from portfolio.ministral_trader import predict
+        import unittest.mock as mock
+
+        fake_response = {
+            "choices": [{
+                "text": '{"action":"SELL","reasoning":"Momentum and trend are bearish."}'
+            }]
+        }
+        fake_model = mock.MagicMock(return_value=fake_response)
+
+        with mock.patch(
+            "portfolio.ministral_trader.load_model", return_value=fake_model
+        ):
+            ctx = {"ticker": "BTC", "price_usd": 69000.0}
+            result = predict(ctx)
+
+        assert result["action"] == "SELL"
+        assert "bearish" in result["reasoning"].lower()
+
     def test_predict_output_format(self):
         from portfolio.ministral_trader import predict
         import unittest.mock as mock
@@ -379,6 +399,20 @@ class TestTimeframesConfig:
 
 
 class TestMinistralSignalWrapper:
+    def test_uses_repo_managed_script_path(self):
+        import unittest.mock as mock
+        from portfolio.ministral_signal import get_ministral_signal
+
+        fake_result = mock.MagicMock()
+        fake_result.returncode = 0
+        fake_result.stdout = '{"action": "BUY", "reasoning": "test", "model": "CryptoTrader-LM"}\n'
+
+        with mock.patch("subprocess.run", return_value=fake_result) as run_mock:
+            get_ministral_signal({"ticker": "BTC", "price_usd": 69000})
+
+        cmd = run_mock.call_args.args[0]
+        assert cmd[1].endswith("portfolio\\ministral_trader.py") or cmd[1].endswith("portfolio/ministral_trader.py")
+
     def test_parses_json_output(self):
         import unittest.mock as mock
         from portfolio.ministral_signal import get_ministral_signal
@@ -393,6 +427,21 @@ class TestMinistralSignalWrapper:
             result = get_ministral_signal({"ticker": "BTC", "price_usd": 69000})
         assert result["original"]["action"] == "BUY"
         assert result["original"]["model"] == "CryptoTrader-LM"
+
+    def test_extracts_json_with_prefix_output(self):
+        import unittest.mock as mock
+        from portfolio.ministral_signal import get_ministral_signal
+
+        fake_result = mock.MagicMock()
+        fake_result.returncode = 0
+        fake_result.stdout = (
+            "Loading model weights...\n"
+            '{"action": "SELL", "reasoning": "test", "model": "CryptoTrader-LM"}\n'
+        )
+
+        with mock.patch("subprocess.run", return_value=fake_result):
+            result = get_ministral_signal({"ticker": "BTC", "price_usd": 69000})
+        assert result["original"]["action"] == "SELL"
 
     def test_raises_on_failure(self):
         import unittest.mock as mock
@@ -686,11 +735,12 @@ class TestIntegrationHerc2:
         """Run actual CryptoTrader-LM inference on local GPU."""
         import subprocess
         import os
+        from pathlib import Path
 
         _check_gpu()
 
         model_venv = r"Q:\models\.venv-llm\Scripts\python.exe"
-        model_script = r"Q:\models\ministral_trader.py"
+        model_script = str(Path(__file__).resolve().parents[1] / "portfolio" / "ministral_trader.py")
 
         if not os.path.exists(model_venv):
             pytest.skip(f"Model venv not found: {model_venv}")
