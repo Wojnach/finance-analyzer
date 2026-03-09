@@ -88,6 +88,47 @@ REGIME_WEIGHTS = {
 }
 
 
+_VALID_ACTIONS = frozenset({"BUY", "SELL", "HOLD"})
+
+
+def _validate_signal_result(result, sig_name=None, max_confidence=1.0):
+    """Normalize and validate a signal's return dict.
+
+    Ensures action is a valid string, confidence is a finite float in [0, 1],
+    and sub_signals is a dict. Returns a clean dict, always.
+    """
+    if not result or not isinstance(result, dict):
+        return {"action": "HOLD", "confidence": 0.0, "sub_signals": {}}
+
+    action = result.get("action")
+    if action not in _VALID_ACTIONS:
+        if sig_name:
+            logger.warning("Signal %s returned invalid action=%r, defaulting to HOLD", sig_name, action)
+        action = "HOLD"
+
+    conf = result.get("confidence", 0.0)
+    try:
+        conf = float(conf)
+    except (TypeError, ValueError):
+        conf = 0.0
+    if not np.isfinite(conf):
+        if sig_name:
+            logger.warning("Signal %s returned non-finite confidence=%r, defaulting to 0.0", sig_name, conf)
+        conf = 0.0
+    conf = max(0.0, min(max_confidence, conf))
+
+    sub_signals = result.get("sub_signals")
+    if not isinstance(sub_signals, dict):
+        sub_signals = {}
+
+    return {
+        "action": action,
+        "confidence": conf,
+        "sub_signals": sub_signals,
+        "indicators": result.get("indicators") or {},
+    }
+
+
 def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None):
     """Compute weighted consensus using accuracy, regime, and activation frequency.
 
@@ -560,15 +601,14 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 _sig_dt = time.monotonic() - _sig_t0
                 if _sig_dt > 1.0:
                     logger.info("[SLOW] %s/%s: %.1fs", ticker, sig_name, _sig_dt)
-                if result and isinstance(result, dict):
-                    extra_info[f"{sig_name}_action"] = result.get("action", "HOLD")
-                    extra_info[f"{sig_name}_confidence"] = result.get("confidence", 0.0)
-                    extra_info[f"{sig_name}_sub_signals"] = result.get("sub_signals", {})
-                    if result.get("indicators"):
-                        extra_info[f"{sig_name}_indicators"] = result["indicators"]
-                    votes[sig_name] = result.get("action", "HOLD")
-                else:
-                    votes[sig_name] = "HOLD"
+                max_conf = entry.get("max_confidence", 1.0)
+                validated = _validate_signal_result(result, sig_name=sig_name, max_confidence=max_conf)
+                extra_info[f"{sig_name}_action"] = validated["action"]
+                extra_info[f"{sig_name}_confidence"] = validated["confidence"]
+                extra_info[f"{sig_name}_sub_signals"] = validated["sub_signals"]
+                if validated["indicators"]:
+                    extra_info[f"{sig_name}_indicators"] = validated["indicators"]
+                votes[sig_name] = validated["action"]
             except Exception as e:
                 logger.warning("Signal %s failed: %s", sig_name, e)
                 votes[sig_name] = "HOLD"

@@ -48,7 +48,8 @@ def register_signal(name: str, signal_type: str = "enhanced",
 
 def register_enhanced(name: str, module_path: str, func_name: str,
                       requires_macro: bool = False,
-                      requires_context: bool = False):
+                      requires_context: bool = False,
+                      max_confidence: float = 1.0):
     """Programmatically register an enhanced signal module."""
     _ENHANCED_SIGNALS[name] = {
         "name": name,
@@ -57,6 +58,7 @@ def register_enhanced(name: str, module_path: str, func_name: str,
         "func_name": func_name,
         "requires_macro": requires_macro,
         "requires_context": requires_context,
+        "max_confidence": max_confidence,
         "func": None,  # lazy-loaded
     }
 
@@ -110,20 +112,20 @@ def _register_defaults():
     # macro_regime is special — requires_macro=True
     register_enhanced("macro_regime", "portfolio.signals.macro_regime",
                       "compute_macro_regime_signal", requires_macro=True)
-    # news_event and econ_calendar require context (ticker, config)
+    # news_event and econ_calendar require context (ticker, config); capped at 0.7
     register_enhanced("news_event", "portfolio.signals.news_event",
-                      "compute_news_event_signal", requires_context=True)
+                      "compute_news_event_signal", requires_context=True, max_confidence=0.7)
     register_enhanced("econ_calendar", "portfolio.signals.econ_calendar",
-                      "compute_econ_calendar_signal", requires_context=True)
-    # forecast signal — Kronos + Chronos price direction prediction
+                      "compute_econ_calendar_signal", requires_context=True, max_confidence=0.7)
+    # forecast signal — Kronos + Chronos price direction prediction; capped at 0.7
     register_enhanced("forecast", "portfolio.signals.forecast",
-                      "compute_forecast_signal", requires_context=True)
-    # Claude fundamental — three-tier LLM cascade (requires context for ticker + config)
+                      "compute_forecast_signal", requires_context=True, max_confidence=0.7)
+    # Claude fundamental — three-tier LLM cascade; capped at 0.7
     register_enhanced("claude_fundamental", "portfolio.signals.claude_fundamental",
-                      "compute_claude_fundamental_signal", requires_context=True)
-    # Futures flow — OI, LS ratios, funding history (crypto only, requires context)
+                      "compute_claude_fundamental_signal", requires_context=True, max_confidence=0.7)
+    # Futures flow — OI, LS ratios, funding history (crypto only); capped at 0.7
     register_enhanced("futures_flow", "portfolio.signals.futures_flow",
-                      "compute_futures_flow_signal", requires_context=True)
+                      "compute_futures_flow_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
