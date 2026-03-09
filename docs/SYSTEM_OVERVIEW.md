@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-03-08
-Branch: improve/auto-session-2026-03-08
+Updated: 2026-03-09
+Branch: improve/auto-session-2026-03-09
 
 ## 1) Architecture Summary
 
@@ -155,11 +155,13 @@ Primary config: `config.json` (not in repo). Key domains:
 - **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
 - **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
 
-## 9) Known Issues (as of 2026-03-08)
+## 9) Known Issues (as of 2026-03-09)
 
-- Silent ImportError passes in signal_engine.py (BUG-15, 5 locations)
-- Cache eviction uses hardcoded 3600s regardless of per-entry TTL (BUG-21)
-- portfolio_value() lacks type validation (BUG-20)
-- JSONL loader silently skips corrupt lines (BUG-19)
-- CLAUDE.md header says "27 Signals" but system has 30 (ARCH-9)
+- BUG-15 through BUG-22: Fixed in 2026-03-08 session (signal logging, file I/O, cache TTL, trigger state)
+- BUG-23: Signal return values not validated — None/NaN can enter consensus pipeline
+- BUG-24: news_event.py crashes if ticker is None
+- BUG-25: load_json() silently swallows OSError (permission denied, disk full)
+- BUG-26: Heartbeat not written after initial run(), only inside while loop
+- BUG-27: Redundant `pass` in trigger.py:89
+- TEST gaps: candlestick, fibonacci, structure signals have zero test coverage
 - See `docs/IMPROVEMENT_PLAN.md` for full bug list and fix plan
