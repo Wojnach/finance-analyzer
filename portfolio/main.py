@@ -471,6 +471,20 @@ def _reset_crash_counter():
         _consecutive_crashes = 0
 
 
+def _sleep_for_next_cycle(previous_cycle_started, interval_s):
+    """Sleep until the next scheduled cycle start.
+
+    Anchors cadence to cycle start time so the loop period remains close to the
+    configured interval instead of drifting by the work duration each cycle.
+    """
+    elapsed = time.monotonic() - previous_cycle_started
+    remaining = interval_s - elapsed
+    if remaining > 0:
+        time.sleep(remaining)
+        return
+    logger.warning("Loop overran target cadence by %.1fs", abs(remaining))
+
+
 def loop(interval=None):
     from portfolio.logging_config import setup_logging
     setup_logging()
@@ -540,6 +554,7 @@ def loop(interval=None):
         _crash_sleep()
 
     last_state = None
+    last_cycle_started = time.monotonic()
     while True:
         market_state, active_symbols, sleep_interval = get_market_state()
         if interval:
@@ -550,7 +565,8 @@ def loop(interval=None):
                 market_state, len(active_symbols), sleep_interval
             )
             last_state = market_state
-        time.sleep(sleep_interval)
+        _sleep_for_next_cycle(last_cycle_started, sleep_interval)
+        cycle_started = time.monotonic()
         try:
             run(force_report=False, active_symbols=active_symbols)
             _run_post_cycle(config)
@@ -568,6 +584,7 @@ def loop(interval=None):
             except Exception as e2:
                 logger.debug("Health update after crash failed: %s", e2)
             _crash_sleep()
+        last_cycle_started = cycle_started
         try:
             (DATA_DIR / "heartbeat.txt").write_text(datetime.now(timezone.utc).isoformat())
         except Exception as e:

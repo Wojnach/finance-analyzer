@@ -103,12 +103,12 @@ except ImportError as e:
 
 # --- CONFIG ---
 CLAUDE_ENABLED = False        # Master switch: set True to re-enable Claude invocations
-CHECK_INTERVAL = 30           # seconds between checks
+CHECK_INTERVAL = 60           # target seconds between checks
 TRIGGER_PRICE_MOVE = 5.0      # % move from last invocation to trigger (was 2.0)
 TRIGGER_TRAILING = 8.0        # % drop from peak to trigger (was 3.0)
 TRIGGER_PROFIT = 4.0          # % profit from entry to trigger
 TRIGGER_STOP_NEAR = 5.0       # % from stop-loss to trigger
-HEARTBEAT_CHECKS = 60         # invoke every N checks (~30min at 30s)
+HEARTBEAT_CHECKS = 60         # invoke every N checks (~60 min at 60s)
 # Per-tier cooldowns (seconds) — replaces flat MIN_INVOKE_INTERVAL
 TIER_COOLDOWNS = {
     1: 120,    # Haiku: 2 min cooldown
@@ -372,7 +372,7 @@ cached_account_data = {}      # latest account buying power (refreshed periodica
 cached_warrant_catalog = {}   # warrant catalog with live prices (refreshed periodically)
 session_healthy = True            # tracks Avanza session health
 _last_auto_telegram = 0           # timestamp of last autonomous Telegram (for throttling)
-AUTO_TELEGRAM_COOLDOWN = 600      # 10 min between routine autonomous messages (was 30 min)
+AUTO_TELEGRAM_COOLDOWN = 1800     # 30 min between routine autonomous messages
 PROB_REPORT_INTERVAL = 5          # compute probability report every N checks (~2.5 min)
 PROB_TELEGRAM_INTERVAL = 20       # send probability telegram every N checks (~10 min)
 session_alert_sent = False        # debounce: only send one alert per outage
@@ -469,6 +469,20 @@ def log(msg):
 def pnl_pct(current, entry):
     if entry == 0: return 0
     return ((current - entry) / entry) * 100
+
+
+def _sleep_for_cycle(cycle_started, interval_s, label):
+    """Sleep until the next scheduled cycle start.
+
+    This keeps cadence anchored to cycle start time rather than drifting by
+    `interval + work_duration` on every iteration.
+    """
+    elapsed = time.monotonic() - cycle_started
+    remaining = interval_s - elapsed
+    if remaining > 0:
+        time.sleep(remaining)
+        return
+    log(f"{label} overran by {abs(remaining):.1f}s; continuing immediately")
 
 def get_cet_time():
     """Get current CET/CEST time from timeapi.io, fallback to zoneinfo (DST-safe)."""
@@ -3012,6 +3026,53 @@ def _build_autonomous_telegram(trigger_reasons, tier, positions_data, signals_da
     return "\n".join(lines)
 
 
+def _build_autonomous_positions_data():
+    """Build a compact snapshot of active positions for autonomous decisions."""
+    latest_prices = price_history[-1] if price_history else {}
+    positions_data = {}
+
+    for key, pos in POSITIONS.items():
+        if not pos.get("active"):
+            continue
+
+        bid = latest_prices.get(key, 0) or pos.get("entry", 0)
+        peak = peak_bids.get(key, bid if bid > 0 else 0)
+        pnl = pnl_pct(bid, pos["entry"]) if bid > 0 else 0
+        from_peak = pnl_pct(bid, peak) if peak > 0 and bid > 0 else 0
+        dist_stop = ((bid - pos["stop"]) / bid * 100) if bid > 0 else 999
+
+        positions_data[key] = {
+            "name": pos["name"],
+            "units": pos["units"],
+            "entry": pos["entry"],
+            "bid": bid,
+            "stop": pos["stop"],
+            "pnl_pct": round(pnl, 2),
+            "from_peak_pct": round(from_peak, 2),
+            "dist_stop_pct": round(dist_stop, 2),
+        }
+
+    return positions_data
+
+
+def _build_autonomous_risk_data(positions_data, llm_signals):
+    """Flatten the risk summary into the small shape used by Telegram/logging."""
+    if not RISK_AVAILABLE or not positions_data:
+        return {}
+
+    prices = {key: {"bid": pos["bid"]} for key, pos in positions_data.items()}
+    risk_data = {}
+    try:
+        drawdown = check_portfolio_drawdown(POSITIONS, prices)
+        drawdown_pct = drawdown.get("current_drawdown_pct")
+        if isinstance(drawdown_pct, (int, float)):
+            risk_data["drawdown_pct"] = round(drawdown_pct, 2)
+    except Exception as e:
+        log(f"Autonomous drawdown summary failed: {e}")
+
+    return risk_data
+
+
 def _autonomous_decision(trigger_reasons, blocked_tier):
     """Handle triggers autonomously — probability-focused decision + Telegram.
 
@@ -3021,6 +3082,10 @@ def _autonomous_decision(trigger_reasons, blocked_tier):
     """
     EMERGENCY_PATTERNS = ["L3 EMERGENCY", "EMERGENCY drawdown", "AUTO-EXIT"]
     is_emergency = any(p in r for r in trigger_reasons for p in EMERGENCY_PATTERNS)
+    if is_emergency and CLAUDE_ENABLED:
+        log("Emergency trigger with Claude enabled — escalating to Tier 3")
+        invoke_claude(trigger_reasons, tier=3)
+        return
     if is_emergency:
         log("EMERGENCY in autonomous mode — Layer 1 handles execution, logging assessment")
 
@@ -3028,12 +3093,11 @@ def _autonomous_decision(trigger_reasons, blocked_tier):
     reason_str = "; ".join(trigger_reasons[:5])
     cet_str = cet_time_str()
 
-    # --- 1. Compute probability report ---
-    prob_report = compute_probability_report()
-
-    # --- 2. Autonomous prediction (for accuracy tracking) ---
+    # --- 1. Autonomous prediction (for accuracy tracking) ---
+    positions_data = _build_autonomous_positions_data()
     signals_data = {}
     llm_data = {}
+    llm_signals = None
     if last_signal_data:
         for ticker in SIGNAL_TICKERS:
             if ticker in last_signal_data:
@@ -3048,8 +3112,8 @@ def _autonomous_decision(trigger_reasons, blocked_tier):
                 }
     if LLM_AVAILABLE:
         try:
-            llm_sigs = get_llm_signals()
-            for ticker, data in llm_sigs.items():
+            llm_signals = get_llm_signals()
+            for ticker, data in llm_signals.items():
                 if not isinstance(data, dict):
                     continue
                 llm_entry = {}
@@ -3070,21 +3134,28 @@ def _autonomous_decision(trigger_reasons, blocked_tier):
             pass
 
     prediction = _make_autonomous_prediction(signals_data, llm_data)
-    thesis_status = _assess_thesis({}, signals_data, trigger_reasons)
+    thesis_status = _assess_thesis(positions_data, signals_data, trigger_reasons)
+    risk_data = _build_autonomous_risk_data(positions_data, llm_signals)
 
-    # --- 3. Build probability Telegram ---
-    msg = build_probability_telegram(prob_report, cet_str)
-    if is_emergency:
-        msg = f"*EMERGENCY* {trigger_reasons[0]}\n\n" + (msg or "No data")
+    # --- 2. Build autonomous Telegram ---
+    msg = _build_autonomous_telegram(
+        trigger_reasons, blocked_tier, positions_data, signals_data, llm_data,
+        risk_data, prediction, thesis_status, cet_str, is_emergency,
+    )
 
-    # --- 4. Log decision ---
+    # --- 3. Log decision ---
+    prob_report = {}
     decision = {
         "ts": now.isoformat(),
-        "source": "autonomous_v8",
+        "source": "autonomous",
         "check_count": check_count,
         "tier": blocked_tier,
         "trigger": reason_str,
         "action": prediction.get("action", "HOLD"),
+        "positions": positions_data,
+        "signals": signals_data,
+        "llm": llm_data,
+        "risk": risk_data,
         "probability": {
             ticker: {
                 "prob_up": r.get("prob_up_pct", 50),
@@ -3102,7 +3173,7 @@ def _autonomous_decision(trigger_reasons, blocked_tier):
     except Exception as e:
         log(f"Decision log error: {e}")
 
-    # --- 5. Send Telegram (throttled for routine HOLDs) ---
+    # --- 4. Send Telegram (throttled for routine HOLDs) ---
     global _last_auto_telegram
     is_routine = prediction.get("action") == "HOLD" and thesis_status in ("INTACT", "NEUTRAL")
     should_send = True
@@ -3459,6 +3530,7 @@ Positions: {pos_summary}{prob_summary}""")
         try:
             last_holdings_diff_ts = 0.0
             while True:
+                cycle_started = time.monotonic()
                 check_count += 1
 
                 # --- ALWAYS: Fetch underlying prices from Binance FAPI (24/7) ---
@@ -3506,7 +3578,7 @@ Positions: {pos_summary}{prob_summary}""")
                                 short_t = t.split("-")[0] if "-" in t else t
                                 price_tags.append(f"{short_t}=${_format_price(p, t)}")
                         log(f"Outside market hours — {' '.join(price_tags)}")
-                    time.sleep(CHECK_INTERVAL)
+                    _sleep_for_cycle(cycle_started, CHECK_INTERVAL, "metals loop")
                     continue
 
                 # Fetch warrant prices for active positions
@@ -3522,7 +3594,7 @@ Positions: {pos_summary}{prob_summary}""")
                                     peak_bids[key] = bid
                 except Exception as e:
                     log(f"Price error: {e}")
-                    time.sleep(CHECK_INTERVAL)
+                    _sleep_for_cycle(cycle_started, CHECK_INTERVAL, "metals loop")
                     continue
 
                 # Fetch short instrument prices (every 4th check)
@@ -3656,7 +3728,7 @@ Positions: {pos_summary}{prob_summary}""")
                 if startup_grace:
                     startup_grace = False
                     log(f"#{check_count} Baseline established (grace period)")
-                    time.sleep(CHECK_INTERVAL)
+                    _sleep_for_cycle(cycle_started, CHECK_INTERVAL, "metals loop")
                     continue
 
                 # Check stop order fills (every 2nd check)
@@ -3851,7 +3923,7 @@ Positions: {pos_summary}{prob_summary}""")
                         except Exception as e:
                             log(f"Signal tracker backfill error: {e}")
 
-                time.sleep(CHECK_INTERVAL)
+                _sleep_for_cycle(cycle_started, CHECK_INTERVAL, "metals loop")
 
         except KeyboardInterrupt:
             log("Stopped by user")
