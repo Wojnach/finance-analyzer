@@ -8,6 +8,7 @@ Uses a separate venv (Q:/models/.venv-llm on Windows, ~/.venv-llm on Linux).
 import argparse
 import json
 import platform
+import re
 import sys
 
 if platform.system() == "Windows":
@@ -30,6 +31,32 @@ def load_model(lora_path=None):
         n_gpu_layers=-1,
         verbose=False,
     )
+
+
+def _extract_json_payload(text):
+    """Extract a JSON payload from model output when possible."""
+    if not text:
+        return None
+
+    stripped = text.strip()
+    if not stripped:
+        return None
+
+    if stripped.startswith("{"):
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            pass
+
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            return json.loads(stripped[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    return None
 
 
 def predict(context, lora_path=None):
@@ -58,28 +85,37 @@ Multi-timeframe Analysis:
 Recent Headlines:
 {context.get('headlines', 'N/A')}
 
-Respond with EXACTLY one of: BUY, SELL, or HOLD.
-Then give a one-sentence reason.
-Format: DECISION: [BUY/SELL/HOLD] - [reason][/INST]"""
+Respond with EXACTLY one JSON object and no extra text.
+Schema: {{"action":"BUY|SELL|HOLD","reasoning":"one sentence grounded in the data"}}
+Use HOLD when the evidence is mixed or weak.[/INST]"""
 
     response = model(
         prompt,
-        max_tokens=100,
-        temperature=0.1,
+        max_tokens=120,
+        temperature=0.0,
+        top_p=0.2,
         stop=["[INST]", "\n\n"],
     )
 
     text = response["choices"][0]["text"].strip()
+    payload = _extract_json_payload(text)
 
-    decision = "HOLD"
-    for word in ["BUY", "SELL", "HOLD"]:
-        if word in text.upper():
-            decision = word
-            break
+    decision = None
+    reasoning = text[:200]
+    if isinstance(payload, dict):
+        raw_action = str(payload.get("action", "")).upper()
+        if raw_action in {"BUY", "SELL", "HOLD"}:
+            decision = raw_action
+        if payload.get("reasoning"):
+            reasoning = str(payload["reasoning"])[:200]
+
+    if decision is None:
+        match = re.search(r"\b(BUY|SELL|HOLD)\b", text.upper())
+        decision = match.group(1) if match else "HOLD"
 
     return {
         "action": decision,
-        "reasoning": text[:200],
+        "reasoning": reasoning,
         "model": "custom-lora" if lora_path else "CryptoTrader-LM",
     }
 

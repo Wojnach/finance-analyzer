@@ -100,6 +100,27 @@
     "secret": "FAKE_SECRET_replace_in_config_json"
   },
   "newsapi_key": "",
+  "forecast": {
+    "chronos_model": "amazon/chronos-bolt-small",
+    "kronos_enabled": false,
+    "kronos_interval": "5m",
+    "kronos_periods": 500,
+    "kronos_temperature": 0.7,
+    "kronos_top_p": 0.9,
+    "kronos_samples": 3,
+    "hold_threshold": 0.55,
+    "min_samples": 10,
+    "subsignal_hold_threshold": 0.55,
+    "subsignal_min_samples": 10,
+    "subsignal_accuracy_days": 30
+  },
+  "local_models": {
+    "ministral": {
+      "hold_threshold": 0.55,
+      "min_samples": 30,
+      "accuracy_days": 30
+    }
+  },
   "iskbets": {
     "min_bigbet_conditions": 2,
     "min_buy_votes": 3,

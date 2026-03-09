@@ -67,7 +67,7 @@ def load_health_stats(health_file=None):
 
 
 def compute_forecast_accuracy(ticker=None, horizon="24h", days=None,
-                              predictions_file=None):
+                              predictions_file=None, use_raw_sub_signals=False):
     """Compute accuracy of forecast sub-signals.
 
     For each prediction entry that has an actual outcome (backfilled),
@@ -115,6 +115,8 @@ def compute_forecast_accuracy(ticker=None, horizon="24h", days=None,
 
         # Check each sub-signal
         sub_signals = entry.get("sub_signals", {})
+        if use_raw_sub_signals and entry.get("raw_sub_signals"):
+            sub_signals = entry.get("raw_sub_signals", {})
         for sub_name, vote in sub_signals.items():
             if vote == "HOLD":
                 continue

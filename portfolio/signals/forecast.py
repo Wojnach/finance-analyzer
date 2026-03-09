@@ -442,6 +442,80 @@ def _load_forecast_accuracy(cache_ttl=None):
     return _cached("forecast_ticker_accuracy", ttl, _fetch)
 
 
+def _load_forecast_subsignal_accuracy(cache_ttl=None, days=30):
+    """Load raw sub-signal accuracy for 1h and 24h forecast votes."""
+    ttl = cache_ttl or _ACCURACY_CACHE_TTL
+    cache_key = f"forecast_subsignal_accuracy_{days}"
+
+    def _fetch():
+        try:
+            from portfolio.forecast_accuracy import compute_forecast_accuracy
+
+            return {
+                "1h": compute_forecast_accuracy(
+                    horizon="1h", days=days, use_raw_sub_signals=True
+                ),
+                "24h": compute_forecast_accuracy(
+                    horizon="24h", days=days, use_raw_sub_signals=True
+                ),
+            }
+        except Exception as e:
+            logger.debug("Failed to load forecast sub-signal accuracy: %s", e)
+            return {}
+
+    return _cached(cache_key, ttl, _fetch)
+
+
+def _gate_subsignal_votes_by_accuracy(sub_signals, ticker, config_forecast=None):
+    """Gate individual forecast sub-signals using raw historical accuracy."""
+    cfg = config_forecast or {}
+    hold_threshold = cfg.get("subsignal_hold_threshold", cfg.get("hold_threshold", _HOLD_THRESHOLD))
+    min_samples = cfg.get("subsignal_min_samples", cfg.get("min_samples", _MIN_SAMPLES))
+    lookback_days = cfg.get("subsignal_accuracy_days", 30)
+    cache_ttl = cfg.get("subsignal_accuracy_cache_ttl", _ACCURACY_CACHE_TTL)
+
+    gated = dict(sub_signals)
+    info = {}
+    if not ticker:
+        return gated, info
+
+    accuracy_matrix = _load_forecast_subsignal_accuracy(cache_ttl=cache_ttl, days=lookback_days)
+    for sub_name, vote in sub_signals.items():
+        if vote == "HOLD":
+            continue
+
+        horizon = "1h" if sub_name.endswith("_1h") else "24h"
+        horizon_stats = ((accuracy_matrix or {}).get(horizon) or {}).get(sub_name) or {}
+        ticker_stats = (horizon_stats.get("by_ticker") or {}).get(ticker)
+
+        accuracy = None
+        samples = 0
+        source = None
+        if ticker_stats and ticker_stats.get("total", 0) >= min_samples:
+            accuracy = float(ticker_stats["accuracy"])
+            samples = int(ticker_stats["total"])
+            source = "ticker"
+        elif horizon_stats.get("total", 0) >= min_samples:
+            accuracy = float(horizon_stats["accuracy"])
+            samples = int(horizon_stats["total"])
+            source = "global"
+
+        gating = "insufficient_data"
+        if accuracy is not None:
+            gating = "held" if accuracy < hold_threshold else "raw"
+            if gating == "held":
+                gated[sub_name] = "HOLD"
+
+        info[sub_name] = {
+            "gating": gating,
+            "accuracy": round(accuracy, 3) if accuracy is not None else None,
+            "samples": samples,
+            "source": source,
+        }
+
+    return gated, info
+
+
 def _regime_discount(regime: str, config_forecast: dict | None = None) -> float:
     """Return confidence multiplier based on market regime.
 
@@ -670,6 +744,13 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
             result["indicators"]["chronos_24h_pct"] = chronos["24h"].get("pct_move", 0)
             result["indicators"]["chronos_24h_conf"] = chronos["24h"].get("confidence", 0)
 
+    raw_sub_signals = dict(result["sub_signals"])
+    gated_sub_signals, subsignal_gating = _gate_subsignal_votes_by_accuracy(
+        raw_sub_signals, ticker, config_forecast=config_forecast
+    )
+    result["sub_signals"] = gated_sub_signals
+    result["indicators"]["forecast_subsignal_gating"] = subsignal_gating
+
     # Accuracy-weighted vote — per-ticker accuracy gating + health exclusion
     kronos_ok = kronos is not None and bool(kronos.get("results"))
     chronos_ok = chronos is not None
@@ -706,6 +787,8 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
                 "ticker": ticker,
                 "current_price": current_price,
                 "sub_signals": result["sub_signals"],
+                "raw_sub_signals": raw_sub_signals,
+                "subsignal_gating": subsignal_gating,
                 "action": result["action"],
                 "confidence": result["confidence"],
                 "per_ticker_accuracy": gating_info.get("forecast_accuracy"),
