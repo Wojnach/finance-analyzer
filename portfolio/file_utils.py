@@ -4,6 +4,7 @@ import logging
 import os
 import tempfile
 from collections import deque
+from contextlib import suppress
 from pathlib import Path
 
 logger = logging.getLogger("portfolio.file_utils")
@@ -22,10 +23,8 @@ def atomic_write_json(path, data, indent=2, ensure_ascii=True):
             json.dump(data, f, indent=indent, default=str, ensure_ascii=ensure_ascii)
         os.replace(tmp, str(path))
     except BaseException:
-        try:
+        with suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
 
 
@@ -120,10 +119,8 @@ def prune_jsonl(path, max_entries=5000):
             os.fsync(f.fileno())
         os.replace(tmp, str(path))
     except BaseException:
-        try:
+        with suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
     logger.info("Pruned %s: removed %d entries, kept %d", path.name, removed, max_entries)
     return removed

@@ -369,14 +369,39 @@ SHORT_INSTRUMENTS = {
 
 ACCOUNT_ID = "1625505"
 
-try:
-    with open("config.json", "r", encoding="utf-8") as _cf:
-        config = json.load(_cf)
-except (FileNotFoundError, json.JSONDecodeError) as e:
-    print(f"[FATAL] Cannot load config.json: {e}", flush=True)
-    sys.exit(1)
-TG_TOKEN = config["telegram"]["token"]
-TG_CHAT = config["telegram"]["chat_id"]
+def _load_runtime_config():
+    """Load config.json for the current checkout, with safe import-time fallback."""
+    candidates = [
+        BASE_DIR / "config.json",
+        Path(r"Q:/finance-analyzer/config.json"),
+    ]
+    last_error = None
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            with open(path, encoding="utf-8") as _cf:
+                return json.load(_cf)
+        except (OSError, json.JSONDecodeError) as e:
+            last_error = e
+            print(f"[WARN] Cannot load config from {path}: {e}", flush=True)
+
+    if __name__ == "__main__":
+        if last_error:
+            print(f"[FATAL] Cannot load config.json: {last_error}", flush=True)
+        else:
+            print("[FATAL] Cannot load config.json from the current checkout or live repo root", flush=True)
+        sys.exit(1)
+
+    if last_error:
+        print(f"[WARN] Proceeding without config.json during import: {last_error}", flush=True)
+    return {}
+
+
+config = _load_runtime_config()
+telegram_cfg = config.get("telegram", {}) if isinstance(config, dict) else {}
+TG_TOKEN = telegram_cfg.get("token", "")
+TG_CHAT = telegram_cfg.get("chat_id", "")
 
 # --- STATE ---
 check_count = 0
@@ -479,6 +504,8 @@ def _safe_print(msg):
 
 
 def send_telegram(msg):
+    if not TG_TOKEN or not TG_CHAT:
+        return
     try:
         requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
