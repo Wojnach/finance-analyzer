@@ -79,17 +79,28 @@ def _make_predictions(ticker, accuracy_pct, n_samples, horizon="24h"):
 
 
 @pytest.fixture(autouse=True)
-def _reset_state():
+def _reset_state(monkeypatch):
     """Reset circuit breakers and module state before each test."""
     import portfolio.signals.forecast as mod
-    orig_kronos = mod._KRONOS_ENABLED
     orig_disabled = mod._FORECAST_MODELS_DISABLED
     mod._FORECAST_MODELS_DISABLED = False
+    mod._KRONOS_ENABLED = False
+    monkeypatch.setattr(
+        mod,
+        "_gate_subsignal_votes_by_accuracy",
+        lambda sub_signals, ticker, config_forecast=None: (
+            dict(sub_signals),
+            {
+                name: {"gating": "raw", "accuracy": None, "samples": 0}
+                for name in sub_signals
+            },
+        ),
+    )
     reset_circuit_breakers()
     yield
     reset_circuit_breakers()
-    mod._KRONOS_ENABLED = orig_kronos
     mod._FORECAST_MODELS_DISABLED = orig_disabled
+    mod._KRONOS_ENABLED = False
 
 
 # ---------------------------------------------------------------------------
