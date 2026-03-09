@@ -59,6 +59,69 @@ def _iter_latest_dict_entries(path, read_limit):
             yield entry
 
 
+def _aggregate_accuracy_bucket(bucket):
+    """Aggregate nested accuracy stats into one accuracy/total pair."""
+    if not isinstance(bucket, dict):
+        return {"accuracy": None, "total": 0, "correct": 0}
+
+    correct = 0
+    total = 0
+    for stats in bucket.values():
+        if not isinstance(stats, dict):
+            continue
+        correct += int(stats.get("correct", 0) or 0)
+        total += int(stats.get("total", 0) or 0)
+
+    return {
+        "accuracy": round(correct / total, 3) if total else None,
+        "correct": correct,
+        "total": total,
+    }
+
+
+def _build_local_llm_trend_point(entry, ticker=None):
+    """Flatten one local-LLM history entry into chart-friendly metrics."""
+    ticker = (ticker or "").upper() or None
+    ministral = ((entry.get("ministral") or {}).get("overall") or {})
+    by_ticker = ((entry.get("ministral") or {}).get("by_ticker") or {})
+    ticker_stats = by_ticker.get(ticker, {}) if ticker else {}
+    health = entry.get("health") or {}
+    forecast = entry.get("forecast") or {}
+    gating = (entry.get("gating_counts") or {}).get("forecast") or {}
+
+    raw_1h = _aggregate_accuracy_bucket((forecast.get("raw") or {}).get("1h"))
+    raw_24h = _aggregate_accuracy_bucket((forecast.get("raw") or {}).get("24h"))
+    effective_1h = _aggregate_accuracy_bucket((forecast.get("effective") or {}).get("1h"))
+    effective_24h = _aggregate_accuracy_bucket((forecast.get("effective") or {}).get("24h"))
+
+    return {
+        "date": entry.get("date"),
+        "exported_at": entry.get("exported_at"),
+        "days": entry.get("days"),
+        "ticker": ticker,
+        "ministral_accuracy": ministral.get("accuracy"),
+        "ministral_samples": ministral.get("samples", 0),
+        "ministral_ticker_accuracy": ticker_stats.get("accuracy"),
+        "ministral_ticker_samples": ticker_stats.get("samples", 0),
+        "chronos_success_rate": (health.get("chronos") or {}).get("success_rate"),
+        "chronos_total": (health.get("chronos") or {}).get("total", 0),
+        "kronos_success_rate": (health.get("kronos") or {}).get("success_rate"),
+        "kronos_total": (health.get("kronos") or {}).get("total", 0),
+        "forecast_raw_1h_accuracy": raw_1h["accuracy"],
+        "forecast_raw_1h_total": raw_1h["total"],
+        "forecast_raw_24h_accuracy": raw_24h["accuracy"],
+        "forecast_raw_24h_total": raw_24h["total"],
+        "forecast_effective_1h_accuracy": effective_1h["accuracy"],
+        "forecast_effective_1h_total": effective_1h["total"],
+        "forecast_effective_24h_accuracy": effective_24h["accuracy"],
+        "forecast_effective_24h_total": effective_24h["total"],
+        "forecast_gating_raw": gating.get("raw", 0),
+        "forecast_gating_held": gating.get("held", 0),
+        "forecast_gating_insufficient_data": gating.get("insufficient_data", 0),
+        "forecast_gating_vol_gated": gating.get("vol_gated", 0),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Token authentication middleware
 # ---------------------------------------------------------------------------
@@ -354,6 +417,31 @@ def api_accuracy_history():
     """Return accuracy snapshots over time for charting trend lines."""
     entries = _read_jsonl(DATA_DIR / "accuracy_snapshots.jsonl", limit=500)
     return jsonify(entries)
+
+
+@app.route("/api/local-llm-trends")
+@require_auth
+def api_local_llm_trends():
+    """Return local-LLM report trend data for dashboard charts.
+
+    Query params:
+      - limit: number of history points to return (default 90, max 366)
+      - ticker: optional ticker filter for Ministral per-ticker series
+    """
+    limit = _parse_limit_arg("limit", default=90, max_value=366)
+    ticker = request.args.get("ticker", "").strip().upper() or None
+    latest = _read_json(DATA_DIR / "local_llm_report_latest.json")
+    history = _read_jsonl(DATA_DIR / "local_llm_report_history.jsonl", limit=limit)
+
+    return jsonify({
+        "ticker": ticker,
+        "latest": latest,
+        "series": [
+            _build_local_llm_trend_point(entry, ticker=ticker)
+            for entry in history
+            if isinstance(entry, dict)
+        ],
+    })
 
 
 @app.route("/api/metals-accuracy")

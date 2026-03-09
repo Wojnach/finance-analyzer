@@ -39,6 +39,7 @@ def test_endpoints_include_frontend_required_routes():
     routes = {route for route, _ in export_mod.ENDPOINTS}
     assert "/api/metals-accuracy" in routes
     assert "/api/lora-status" in routes
+    assert "/api/local-llm-trends" in routes
 
 
 def test_export_all_appends_dashboard_token(monkeypatch, tmp_path):
