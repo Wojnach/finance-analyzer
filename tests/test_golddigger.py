@@ -45,6 +45,12 @@ class TestGolddiggerConfig:
         assert cfg.use_augmented_signals is True
         assert cfg.aug_kline_bars == 120
         assert cfg.aug_refresh_seconds == 60.0
+        assert cfg.rates_source == "auto"
+        assert cfg.rates_proxy_ticker == "^TNX"
+        assert cfg.use_intraday_dxy_gate is True
+        assert cfg.dxy_proxy_ticker == "DX-Y.NYB"
+        assert cfg.use_event_risk_gate is True
+        assert cfg.event_risk_block_types == ("FOMC", "CPI", "NFP")
 
     def test_from_config_empty(self):
         cfg = GolddiggerConfig.from_config({})
@@ -61,6 +67,9 @@ class TestGolddiggerConfig:
                 "theta_in": 1.5,
                 "equity_sek": 200_000,
                 "bull_orderbook_id": "12345",
+                "rates_source": "fred",
+                "dxy_gate_threshold_pct": 0.25,
+                "event_risk_block_types": ["FOMC", "CPI"],
             },
             "avanza": {"account_id": "99999"},
         }
@@ -71,6 +80,9 @@ class TestGolddiggerConfig:
         assert cfg.equity_sek == 200_000
         assert cfg.bull_orderbook_id == "12345"
         assert cfg.avanza_account_id == "99999"
+        assert cfg.rates_source == "fred"
+        assert cfg.dxy_gate_threshold_pct == 0.25
+        assert cfg.event_risk_block_types == ("FOMC", "CPI")
 
     def test_frozen(self):
         cfg = GolddiggerConfig()
@@ -457,12 +469,22 @@ class TestLogPoll:
     def test_appends_poll(self, tmp_path):
         path = str(tmp_path / "log.jsonl")
         log_poll(path, gold=2000, usdsek=10.5, us10y=0.0425,
-                 composite_s=0.75, z_gold=1.2, z_fx=-0.3, z_yield=-0.5)
+                 composite_s=0.75, z_gold=1.2, z_fx=-0.3, z_yield=-0.5,
+                 gold_volume_ratio=1.8, dxy=98.7, dxy_change_pct=0.22,
+                 us10y_source="yfinance:^TNX", us10y_change_pct=0.15,
+                 next_event_type="CPI", next_event_hours=3.5,
+                 event_risk_active=True, event_risk_phase="pre")
         lines = Path(path).read_text().strip().split("\n")
         assert len(lines) == 1
         entry = json.loads(lines[0])
         assert entry["gold"] == 2000
         assert entry["S"] == 0.75
+        assert entry["gold_volume_ratio"] == 1.8
+        assert entry["dxy"] == 98.7
+        assert entry["dxy_change_pct"] == 0.22
+        assert entry["us10y_source"] == "yfinance:^TNX"
+        assert entry["next_event_type"] == "CPI"
+        assert entry["event_risk_active"] is True
 
 
 # ============================================================
@@ -830,6 +852,88 @@ class TestMacroContext:
         with patch("portfolio.golddigger.data_provider._DATA_DIR", tmp_path):
             assert read_macro_context() == {}
 
+    def test_reads_nested_treasury_shape(self, tmp_path):
+        from portfolio.golddigger.data_provider import read_macro_context
+        data = {
+            "macro": {
+                "dxy": {"value": 99.1, "change_5d": 0.55},
+                "treasury": {"10y": {"yield_pct": 4.25, "change_5d": -1.1}},
+            }
+        }
+        path = tmp_path / "agent_summary_compact.json"
+        path.write_text(json.dumps(data))
+
+        with patch("portfolio.golddigger.data_provider._DATA_DIR", tmp_path):
+            result = read_macro_context()
+        assert result["dxy"] == 99.1
+        assert result["dxy_5d_change"] == 0.55
+        assert result["us10y"] == 0.0425
+        assert result["us10y_change_5d_pct"] == -1.1
+
+
+class TestIntradayProxyFetchers:
+    @patch("portfolio.golddigger.data_provider._fetch_yfinance_proxy")
+    def test_fetch_dxy_context_uses_yfinance_proxy(self, mock_proxy):
+        from portfolio.golddigger.data_provider import fetch_dxy_context
+        cfg = GolddiggerConfig()
+        mock_proxy.return_value = {
+            "value": 98.7,
+            "change_pct": 0.21,
+            "as_of": "2026-03-10T10:00:00+00:00",
+        }
+
+        result = fetch_dxy_context(cfg)
+        assert result["value"] == 98.7
+        assert result["change_pct"] == 0.21
+        assert result["source"] == "yfinance:DX-Y.NYB"
+
+    @patch("portfolio.golddigger.data_provider.fetch_us10y")
+    @patch("portfolio.golddigger.data_provider._fetch_yfinance_proxy")
+    def test_fetch_us10y_context_falls_back_to_fred(self, mock_proxy, mock_fred):
+        from portfolio.golddigger.data_provider import fetch_us10y_context
+        mock_proxy.return_value = None
+        mock_fred.return_value = 0.0415
+
+        result = fetch_us10y_context(
+            fred_api_key="test",
+            source="auto",
+            yfinance_ticker="^TNX",
+            fred_series="DGS10",
+        )
+        assert result["value"] == 0.0415
+        assert result["source"] == "fred:DGS10"
+
+    @patch("portfolio.golddigger.data_provider.fetch_us10y")
+    @patch("portfolio.golddigger.data_provider._fetch_yfinance_proxy")
+    def test_fetch_us10y_context_uses_intraday_proxy(self, mock_proxy, mock_fred):
+        from portfolio.golddigger.data_provider import fetch_us10y_context
+        mock_proxy.return_value = {
+            "value": 4.136,
+            "change_pct": 0.18,
+            "as_of": "2026-03-10T10:00:00+00:00",
+        }
+
+        result = fetch_us10y_context(source="auto", yfinance_ticker="^TNX")
+        assert result["value"] == pytest.approx(0.04136)
+        assert result["change_pct"] == 0.18
+        assert result["source"] == "yfinance:^TNX"
+        mock_fred.assert_not_called()
+
+
+class TestEventRisk:
+    @patch("portfolio.golddigger.data_provider.datetime")
+    def test_active_event_window_detected(self, mock_datetime):
+        from portfolio.golddigger.data_provider import read_event_risk
+
+        mock_datetime.now.return_value = datetime(2026, 3, 11, 13, 0, tzinfo=timezone.utc)
+        mock_datetime.combine.side_effect = datetime.combine
+
+        result = read_event_risk(hours_before=4.0, hours_after=1.0)
+        assert result is not None
+        assert result["active"] is True
+        assert result["event_type"] == "CPI"
+        assert result["phase"] == "pre"
+
 
 # ============================================================
 # Volume confirmation tests
@@ -871,6 +975,25 @@ class TestVolumeConfirmation:
         mock_resp.raise_for_status = MagicMock()
         mock_fetch.return_value = mock_resp
         assert fetch_gold_volume() is None
+
+    @patch("portfolio.golddigger.data_provider.fetch_gold_volume")
+    @patch("portfolio.golddigger.data_provider.fetch_us10y_context")
+    @patch("portfolio.golddigger.data_provider.fetch_usdsek")
+    @patch("portfolio.golddigger.data_provider.fetch_gold_price")
+    def test_collect_snapshot_enables_volume_from_cfg(
+        self, mock_gold, mock_fx, mock_rates, mock_volume
+    ):
+        from portfolio.golddigger.data_provider import collect_snapshot
+
+        cfg = GolddiggerConfig(use_volume_confirm=True)
+        mock_gold.return_value = 2000.0
+        mock_fx.return_value = 10.5
+        mock_rates.return_value = {"value": 0.041, "source": "fred:DGS10", "change_pct": None}
+        mock_volume.return_value = {"current": 200.0, "avg_20": 100.0, "ratio": 2.0}
+
+        snap = collect_snapshot(cfg=cfg)
+        assert snap.gold_volume_ratio == 2.0
+        mock_volume.assert_called_once_with("XAUUSDT")
 
 
 # ============================================================
@@ -997,20 +1120,59 @@ class TestBotEntryFilters:
             fx_fetch_ts=datetime.now(timezone.utc),
         )
 
+    def _arm_entry(self, bot):
+        bot.signal.update = MagicMock(return_value=SignalState(
+            composite_s=1.2,
+            z_gold=1.0,
+            confirm_count=1,
+            valid=True,
+            window_size=10,
+        ))
+        bot.signal.should_enter = MagicMock(return_value=True)
+        bot.risk.can_trade = MagicMock(return_value=(True, "ok"))
+        bot.risk.size_position = MagicMock(return_value=SizeResult(
+            quantity=5,
+            risk_budget_sek=500.0,
+            notional_sek=500.0,
+            stop_price=95.0,
+            take_profit_price=108.0,
+            reason="ok",
+        ))
+
     @patch("portfolio.golddigger.bot._now_stockholm", return_value=(12, 0, "2026-03-10"))
     @patch("portfolio.golddigger.data_provider.read_xau_consensus")
     def test_sell_consensus_blocks_entry(self, mock_consensus, mock_time, tmp_path):
         mock_consensus.return_value = {"action": "SELL", "confidence": 0.8,
                                         "buy_count": 1, "sell_count": 5, "hold_count": 10}
         bot = self._make_bot(tmp_path, use_signal_consensus=True)
+        self._arm_entry(bot)
+        result = bot.step(self._strong_signal_snap())
+        assert result is None
+
+    @patch("portfolio.golddigger.bot._now_stockholm", return_value=(12, 0, "2026-03-10"))
+    def test_event_risk_blocks_entry(self, mock_time, tmp_path):
+        bot = self._make_bot(tmp_path, use_event_risk_gate=True)
+        self._arm_entry(bot)
         snap = self._strong_signal_snap()
-        for _ in range(15):
-            result = bot.step(snap)
-        # Even after 15 polls, the bot should not have entered a BUY
-        # because SELL consensus blocks entry. No BUY action should be returned
-        # from the last step (entry may be blocked by consensus or signal warmup).
-        # This validates the gate doesn't crash and processes correctly.
-        assert result is None or result.get("action") != "BUY"
+        snap.event_risk_active = True
+        snap.event_risk_phase = "pre"
+        snap.next_event_type = "CPI"
+        snap.next_event_hours = 1.5
+
+        result = bot.step(snap)
+        assert result is None
+
+    @patch("portfolio.golddigger.bot._now_stockholm", return_value=(12, 0, "2026-03-10"))
+    def test_intraday_dxy_blocks_entry(self, mock_time, tmp_path):
+        bot = self._make_bot(tmp_path, use_intraday_dxy_gate=True, dxy_gate_threshold_pct=0.15)
+        self._arm_entry(bot)
+        snap = self._strong_signal_snap()
+        snap.dxy = 99.0
+        snap.dxy_source = "yfinance:DX-Y.NYB"
+        snap.dxy_change_pct = 0.31
+
+        result = bot.step(snap)
+        assert result is None
 
     @patch("portfolio.golddigger.bot._now_stockholm", return_value=(12, 0, "2026-03-10"))
     def test_kill_switch_env_blocks(self, mock_time, tmp_path):
@@ -1166,3 +1328,15 @@ class TestDailyDigest:
         msg = _build_daily_digest(bot, cfg, "DRY-RUN")
         assert "50" in msg  # quantity mentioned
         assert "100" in msg  # avg_price mentioned
+
+
+class TestRunnerConfigLoad:
+    def test_load_config_uses_env_override(self, tmp_path):
+        from portfolio.golddigger.runner import _load_config
+
+        cfg_path = tmp_path / "gd-config.json"
+        cfg_path.write_text(json.dumps({"telegram": {"token": "x", "chat_id": "y"}}))
+
+        with patch.dict(os.environ, {"GOLDDIGGER_CONFIG_PATH": str(cfg_path)}, clear=False):
+            config = _load_config()
+        assert config["telegram"]["token"] == "x"

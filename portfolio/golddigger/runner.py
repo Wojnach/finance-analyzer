@@ -30,10 +30,30 @@ BACKOFF_MAX = 300  # 5 minutes
 
 
 def _load_config() -> dict:
-    """Load main config.json."""
-    config_path = Path(__file__).resolve().parent.parent.parent / "config.json"
-    with open(config_path, encoding="utf-8") as f:
-        return json.load(f)
+    """Load config.json with worktree-aware fallback order."""
+    worktree_root = Path(__file__).resolve().parent.parent.parent
+    candidate_paths = []
+
+    env_path = os.environ.get("PORTFOLIO_CONFIG_PATH") or os.environ.get("GOLDDIGGER_CONFIG_PATH")
+    if env_path:
+        candidate_paths.append(Path(env_path))
+
+    candidate_paths.append(worktree_root / "config.json")
+
+    # Clean worktrees usually don't carry the untracked live config.
+    parents = Path(__file__).resolve().parents
+    if len(parents) >= 5 and parents[3].name == ".worktrees":
+        candidate_paths.append(parents[4] / "config.json")
+
+    for config_path in candidate_paths:
+        if config_path.exists():
+            if config_path.parent != worktree_root:
+                logger.info("Using shared config from %s", config_path)
+            with open(config_path, encoding="utf-8") as f:
+                return json.load(f)
+
+    searched = ", ".join(str(p) for p in candidate_paths)
+    raise FileNotFoundError(f"No config.json found. Checked: {searched}")
 
 
 def _send_telegram(msg: str, config: dict):
@@ -159,11 +179,12 @@ def _execute_order(page, action: dict, config: dict, account_id: str, cfg=None) 
         return False
 
 
-def run(live: bool = False):
+def run(live: bool = False, once: bool = False):
     """Main loop — runs until killed or market close."""
     config = _load_config()
     cfg = GolddiggerConfig.from_config(config)
     dry_run = not live
+    notifications_enabled = cfg.telegram_alerts and not once
 
     bot = GolddiggerBot(cfg, dry_run=dry_run)
 
@@ -179,7 +200,7 @@ def run(live: bool = False):
         else:
             logger.warning("No Playwright session — running without certificate prices")
 
-    if cfg.telegram_alerts:
+    if notifications_enabled:
         _send_telegram(
             f"*GOLDDIGGER STARTED* ({mode})\n"
             f"Equity: {cfg.equity_sek:,.0f} SEK\n"
@@ -204,7 +225,7 @@ def run(live: bool = False):
                         from metals_avanza_helpers import check_session_alive
                         if not check_session_alive(page):
                             logger.error("Avanza session expired!")
-                            if cfg.telegram_alerts:
+                            if notifications_enabled:
                                 _send_telegram("_GOLDDIGGER: Avanza session expired — stopping_", config)
                             break
                     except ImportError:
@@ -220,7 +241,7 @@ def run(live: bool = False):
                         logger.info("[DRY-RUN] Would execute: %s %d @ %.2f — %s",
                                     action["action"], action["quantity"],
                                     action["price"], action.get("reason", ""))
-                        if cfg.telegram_alerts:
+                        if notifications_enabled:
                             _send_telegram(
                                 f"*GOLDDIGGER {action['action']}* (dry-run)\n"
                                 f"{action['quantity']}x @ {action['price']:.2f} SEK\n"
@@ -231,6 +252,9 @@ def run(live: bool = False):
                             )
 
                 consecutive_errors = 0
+                if once:
+                    logger.info("GoldDigger single-cycle complete (%s)", "action" if action else "hold")
+                    break
                 time.sleep(cfg.poll_seconds)
 
             except KeyboardInterrupt:
@@ -244,7 +268,7 @@ def run(live: bool = False):
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
                     msg = f"_GOLDDIGGER HALTED: {consecutive_errors} consecutive errors_"
                     logger.error(msg)
-                    if cfg.telegram_alerts:
+                    if notifications_enabled:
                         _send_telegram(msg, config)
                     break
 
@@ -270,7 +294,7 @@ def run(live: bool = False):
             except Exception:
                 pass
 
-        if cfg.telegram_alerts:
+        if notifications_enabled:
             digest = _build_daily_digest(bot, cfg, mode)
             _send_telegram(digest, config)
             _send_telegram(

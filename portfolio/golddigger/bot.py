@@ -140,7 +140,7 @@ class GolddiggerBot:
         # --- Collect data ---
         if snapshot is None:
             snapshot = collect_snapshot(
-                fred_api_key=self.cfg.fred_api_key,
+                cfg=self.cfg,
                 page=self._page,
                 orderbook_id=self.cfg.bull_orderbook_id,
                 api_type=self.cfg.cert_api_type,
@@ -173,6 +173,15 @@ class GolddiggerBot:
             cert_bid=snapshot.cert_bid,
             cert_ask=snapshot.cert_ask,
             data_quality=snapshot.data_quality,
+            gold_volume_ratio=snapshot.gold_volume_ratio,
+            dxy=snapshot.dxy,
+            dxy_change_pct=snapshot.dxy_change_pct,
+            us10y_source=snapshot.us10y_source,
+            us10y_change_pct=snapshot.us10y_change_pct,
+            next_event_type=snapshot.next_event_type,
+            next_event_hours=snapshot.next_event_hours,
+            event_risk_active=snapshot.event_risk_active,
+            event_risk_phase=snapshot.event_risk_phase,
         )
 
         self.state.last_poll_time = datetime.now(timezone.utc).isoformat()
@@ -200,6 +209,16 @@ class GolddiggerBot:
             logger.info("Entry blocked by risk: %s", reason)
             return None
 
+        if getattr(self.cfg, "use_event_risk_gate", False) and snap.event_risk_active:
+            logger.info(
+                "Entry blocked: event risk active (%s %s, %.2fh, phase=%s)",
+                snap.next_event_type,
+                "event" if snap.next_event_type else "window",
+                snap.next_event_hours or 0.0,
+                snap.event_risk_phase or "n/a",
+            )
+            return None
+
         # Signal consensus gate (Phase 2)
         if getattr(self.cfg, 'use_signal_consensus', False):
             from portfolio.golddigger.data_provider import read_xau_consensus
@@ -209,8 +228,16 @@ class GolddiggerBot:
                              consensus.get("buy_count", 0), consensus.get("sell_count", 0))
                 return None
 
-        # DXY macro gate (Phase 2)
-        if getattr(self.cfg, 'use_macro_context', False):
+        # Intraday DXY gate (preferred) with macro fallback
+        if getattr(self.cfg, "use_intraday_dxy_gate", False) and snap.dxy_change_pct is not None:
+            if snap.dxy_change_pct >= getattr(self.cfg, "dxy_gate_threshold_pct", 0.15):
+                logger.info(
+                    "Entry blocked: DXY proxy strengthening +%.3f%% (%s)",
+                    snap.dxy_change_pct,
+                    snap.dxy_source or "unknown",
+                )
+                return None
+        elif getattr(self.cfg, 'use_macro_context', False):
             from portfolio.golddigger.data_provider import read_macro_context
             macro = read_macro_context()
             dxy_change = macro.get("dxy_5d_change")
@@ -220,8 +247,13 @@ class GolddiggerBot:
 
         # Volume gate (Phase 4)
         if getattr(self.cfg, 'use_volume_confirm', False) and snap.gold_volume_ratio is not None:
-            if snap.gold_volume_ratio < 0.5:
-                logger.info("Entry blocked: low volume (ratio=%.2f)", snap.gold_volume_ratio)
+            volume_ratio_min = getattr(self.cfg, "volume_ratio_min", 0.75)
+            if snap.gold_volume_ratio < volume_ratio_min:
+                logger.info(
+                    "Entry blocked: low volume (ratio=%.2f < %.2f)",
+                    snap.gold_volume_ratio,
+                    volume_ratio_min,
+                )
                 return None
 
         # Chronos forecast gate (Phase 4)
