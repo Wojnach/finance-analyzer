@@ -426,6 +426,91 @@ class TestApiAccuracyHistory:
         assert resp.get_json() == []
 
 
+class TestApiLocalLlmTrends:
+    def test_returns_latest_and_series(self, client, tmp_data):
+        latest = {
+            "date": "2026-03-09",
+            "exported_at": "2026-03-09T18:10:00+00:00",
+            "days": 30,
+            "ministral": {
+                "overall": {"accuracy": 0.6, "samples": 20, "correct": 12},
+                "by_ticker": {"BTC-USD": {"accuracy": 0.7, "samples": 10, "correct": 7}},
+            },
+            "health": {
+                "chronos": {"success_rate": 0.9, "total": 10},
+                "kronos": {"success_rate": 0.5, "total": 8},
+            },
+            "forecast": {
+                "raw": {
+                    "1h": {"chronos_1h": {"accuracy": 0.5, "correct": 5, "total": 10}},
+                    "24h": {"chronos_24h": {"accuracy": 0.6, "correct": 6, "total": 10}},
+                },
+                "effective": {
+                    "1h": {"chronos_1h": {"accuracy": 0.7, "correct": 7, "total": 10}},
+                    "24h": {"chronos_24h": {"accuracy": 0.8, "correct": 8, "total": 10}},
+                },
+            },
+            "gating_counts": {"forecast": {"raw": 4, "held": 2, "insufficient_data": 1}},
+            "recommendations": [],
+        }
+        history = [
+            latest,
+            {
+                "date": "2026-03-10",
+                "exported_at": "2026-03-10T18:10:00+00:00",
+                "days": 30,
+                "ministral": {
+                    "overall": {"accuracy": 0.65, "samples": 22, "correct": 14},
+                    "by_ticker": {"BTC-USD": {"accuracy": 0.75, "samples": 12, "correct": 9}},
+                },
+                "health": {
+                    "chronos": {"success_rate": 1.0, "total": 12},
+                    "kronos": {"success_rate": 0.55, "total": 9},
+                },
+                "forecast": {
+                    "raw": {
+                        "1h": {"chronos_1h": {"accuracy": 0.55, "correct": 11, "total": 20}},
+                        "24h": {"chronos_24h": {"accuracy": 0.65, "correct": 13, "total": 20}},
+                    },
+                    "effective": {
+                        "1h": {"chronos_1h": {"accuracy": 0.75, "correct": 15, "total": 20}},
+                        "24h": {"chronos_24h": {"accuracy": 0.85, "correct": 17, "total": 20}},
+                    },
+                },
+                "gating_counts": {"forecast": {"raw": 5, "held": 1}},
+                "recommendations": [],
+            },
+        ]
+
+        (tmp_data / "local_llm_report_latest.json").write_text(
+            json.dumps(latest), encoding="utf-8"
+        )
+        (tmp_data / "local_llm_report_history.jsonl").write_text(
+            "\n".join(json.dumps(entry) for entry in history) + "\n",
+            encoding="utf-8",
+        )
+
+        with _no_auth():
+            resp = client.get("/api/local-llm-trends?limit=1&ticker=BTC-USD")
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ticker"] == "BTC-USD"
+        assert data["latest"]["date"] == "2026-03-09"
+        assert len(data["series"]) == 1
+        assert data["series"][0]["date"] == "2026-03-10"
+        assert data["series"][0]["ministral_ticker_accuracy"] == 0.75
+        assert data["series"][0]["forecast_effective_24h_accuracy"] == 0.85
+        assert data["series"][0]["forecast_gating_raw"] == 5
+
+    def test_empty_shape_when_missing(self, client, tmp_data):
+        with _no_auth():
+            resp = client.get("/api/local-llm-trends")
+
+        assert resp.status_code == 200
+        assert resp.get_json() == {"ticker": None, "latest": None, "series": []}
+
+
 class TestApiMetalsAccuracy:
     def test_returns_stats_when_file_exists(self, client, tmp_data):
         payload = {"stats": {"xag": {"1h": {"accuracy": 0.6, "total": 10}}}}

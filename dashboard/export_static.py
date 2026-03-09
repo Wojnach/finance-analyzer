@@ -33,6 +33,7 @@ ENDPOINTS = [
     ("/api/decisions", "decisions.json"),
     ("/api/telegrams", "telegrams.json"),
     ("/api/accuracy-history", "accuracy-history.json"),
+    ("/api/local-llm-trends", "local-llm-trends.json"),
     ("/api/trades", "trades.json"),
     ("/api/warrants", "warrants.json"),
     ("/api/risk", "risk.json"),

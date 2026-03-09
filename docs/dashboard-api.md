@@ -256,6 +256,75 @@ Both fields may be `null` if the respective files do not exist.
 
 ---
 
+### `GET /api/local-llm-trends`
+
+Returns local-LLM report trend data for dashboard charts.
+
+- **Auth required:** Yes
+- **Source:** `data/local_llm_report_latest.json`, `data/local_llm_report_history.jsonl`
+- **Query params:**
+  - `limit`: number of history points to return (default `90`, max `366`)
+  - `ticker`: optional ticker symbol to include per-ticker Ministral series values
+
+- **Response:**
+
+```json
+{
+  "ticker": "BTC-USD",
+  "latest": {
+    "date": "2026-03-09",
+    "days": 30,
+    "ministral": {"overall": {"accuracy": 0.61, "samples": 41, "correct": 25}},
+    "health": {"chronos": {"success_rate": 0.92, "total": 24}},
+    "forecast": {"raw": {}, "effective": {}},
+    "gating_counts": {"forecast": {"raw": 12, "held": 4}}
+  },
+  "series": [
+    {
+      "date": "2026-03-09",
+      "exported_at": "2026-03-09T18:10:00+00:00",
+      "days": 30,
+      "ticker": "BTC-USD",
+      "ministral_accuracy": 0.61,
+      "ministral_samples": 41,
+      "ministral_ticker_accuracy": 0.67,
+      "ministral_ticker_samples": 12,
+      "chronos_success_rate": 0.92,
+      "chronos_total": 24,
+      "kronos_success_rate": 0.50,
+      "kronos_total": 10,
+      "forecast_raw_1h_accuracy": 0.54,
+      "forecast_raw_1h_total": 26,
+      "forecast_raw_24h_accuracy": 0.57,
+      "forecast_raw_24h_total": 21,
+      "forecast_effective_1h_accuracy": 0.63,
+      "forecast_effective_1h_total": 24,
+      "forecast_effective_24h_accuracy": 0.66,
+      "forecast_effective_24h_total": 18,
+      "forecast_gating_raw": 12,
+      "forecast_gating_held": 4,
+      "forecast_gating_insufficient_data": 7,
+      "forecast_gating_vol_gated": 0
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `latest` | object or null | Most recent full local-LLM report snapshot |
+| `series` | array | Flattened trend points for charts |
+| `ministral_ticker_accuracy` | number or null | Per-ticker Ministral accuracy when `ticker` is provided and present |
+| `forecast_gating_*` | integer | Counts of forecast gating actions recorded in the snapshot |
+
+If the report files do not exist yet, the endpoint returns:
+
+```json
+{"ticker": null, "latest": null, "series": []}
+```
+
+---
+
 ### `GET /api/lora-status`
 
 Returns LoRA training state and progress.
