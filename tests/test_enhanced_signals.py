@@ -182,8 +182,9 @@ class TestCandlestickSignal:
     def test_patterns_detected_field(self):
         from portfolio.signals.candlestick import compute_candlestick_signal
         result = compute_candlestick_signal(_make_ohlcv())
-        assert "patterns_detected" in result
-        assert isinstance(result["patterns_detected"], list)
+        assert "indicators" in result
+        assert "patterns_detected" in result["indicators"]
+        assert isinstance(result["indicators"]["patterns_detected"], list)
 
     def test_minimum_3_rows(self):
         from portfolio.signals.candlestick import compute_candlestick_signal

@@ -45,7 +45,7 @@ def compute_candlestick_signal(df: pd.DataFrame) -> dict:
         ``action``            – ``'BUY'``, ``'SELL'``, or ``'HOLD'``
         ``confidence``        – 0.0 – 1.0
         ``sub_signals``       – per-family sub-votes
-        ``patterns_detected`` – list of pattern name strings found
+        ``indicators``         – includes ``patterns_detected`` list
     """
     default = {
         "action": "HOLD",
@@ -56,7 +56,7 @@ def compute_candlestick_signal(df: pd.DataFrame) -> dict:
             "doji": "HOLD",
             "star": "HOLD",
         },
-        "patterns_detected": [],
+        "indicators": {"patterns_detected": []},
     }
 
     # ------------------------------------------------------------------
@@ -166,7 +166,7 @@ def compute_candlestick_signal(df: pd.DataFrame) -> dict:
         "action": action,
         "confidence": confidence,
         "sub_signals": sub_signals,
-        "patterns_detected": patterns,
+        "indicators": {"patterns_detected": patterns},
     }
 
 
