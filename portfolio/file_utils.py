@@ -9,7 +9,7 @@ from pathlib import Path
 logger = logging.getLogger("portfolio.file_utils")
 
 
-def atomic_write_json(path, data, indent=2):
+def atomic_write_json(path, data, indent=2, ensure_ascii=True):
     """Atomically write JSON data to a file using tempfile + os.replace.
 
     Ensures the file is never left in a partially-written state.
@@ -19,7 +19,7 @@ def atomic_write_json(path, data, indent=2):
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=indent, default=str)
+            json.dump(data, f, indent=indent, default=str, ensure_ascii=ensure_ascii)
         os.replace(tmp, str(path))
     except BaseException:
         try:

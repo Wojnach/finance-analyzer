@@ -19,6 +19,8 @@ import time
 import datetime
 import logging
 
+from portfolio.file_utils import atomic_write_json
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -89,6 +91,32 @@ def _load_leverage_map():
 
 
 LEVERAGE_MAP = _load_leverage_map()
+
+
+def _default_guard_state():
+    return {
+        "ticker_trades": {},        # "gold" -> last trade ISO timestamp
+        "consecutive_losses": 0,
+        "session_trade_count": 0,
+        "session_date": None,
+        "new_position_times": [],   # ISO timestamps of BUY trades
+    }
+
+
+def _default_spike_state():
+    return {"orders": {}, "date": None, "placed": False, "cancelled": False}
+
+
+def _load_json_state(path, default_factory, label):
+    """Load a JSON state file with explicit logging on corrupt/unreadable content."""
+    if not os.path.exists(path):
+        return default_factory()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError, ValueError) as e:
+        logger.warning("%s load failed: %s", label, e)
+        return default_factory()
 
 
 # ---------------------------------------------------------------------------
@@ -269,26 +297,13 @@ def simulate_all_positions(positions, prices, signal_data=None, llm_signals=None
 
 def _load_guard_state():
     """Load trade guard state from file."""
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {
-        "ticker_trades": {},        # "gold" -> last trade ISO timestamp
-        "consecutive_losses": 0,
-        "session_trade_count": 0,
-        "session_date": None,
-        "new_position_times": [],   # ISO timestamps of BUY trades
-    }
+    return _load_json_state(STATE_FILE, _default_guard_state, "Guard state")
 
 
 def _save_guard_state(state):
     """Persist trade guard state."""
     try:
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2, ensure_ascii=False)
+        atomic_write_json(STATE_FILE, state, ensure_ascii=False)
     except Exception as e:
         logger.warning(f"Failed to save guard state: {e}")
 
@@ -906,19 +921,12 @@ def compute_spike_targets(positions, prices, range_stats, percentile=75, partial
 
 def load_spike_state():
     """Load spike order state from file."""
-    if os.path.exists(SPIKE_STATE_FILE):
-        try:
-            with open(SPIKE_STATE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {"orders": {}, "date": None, "placed": False, "cancelled": False}
+    return _load_json_state(SPIKE_STATE_FILE, _default_spike_state, "Spike state")
 
 
 def save_spike_state(state):
     """Persist spike order state."""
     try:
-        with open(SPIKE_STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2, ensure_ascii=False)
+        atomic_write_json(SPIKE_STATE_FILE, state, ensure_ascii=False)
     except Exception as e:
         logger.warning(f"Failed to save spike state: {e}")

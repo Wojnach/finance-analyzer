@@ -112,8 +112,8 @@ class TestPositionLoadSave:
 
         calls = []
 
-        def _fake_atomic_write_json(path, data, indent=2):
-            calls.append((path, data, indent))
+        def _fake_atomic_write_json(path, data, indent=2, ensure_ascii=True):
+            calls.append((path, data, indent, ensure_ascii))
 
         monkeypatch.setattr(mod, "atomic_write_json", _fake_atomic_write_json, raising=False)
 
@@ -123,6 +123,7 @@ class TestPositionLoadSave:
         assert len(calls) == 1
         assert calls[0][0] == mod.POSITIONS_STATE_FILE
         assert isinstance(calls[0][1], dict)
+        assert calls[0][3] is False
 
 
 # ---------------------------------------------------------------------------
@@ -235,14 +236,15 @@ class TestStopOrders:
 
         calls = []
 
-        def _fake_atomic_write_json(path, data, indent=2):
-            calls.append((path, data, indent))
+        def _fake_atomic_write_json(path, data, indent=2, ensure_ascii=True):
+            calls.append((path, data, indent, ensure_ascii))
 
         monkeypatch.setattr(mod, "atomic_write_json", _fake_atomic_write_json, raising=False)
         mod._save_stop_orders({"silver79": {"stop_id": "abc123"}})
 
         assert len(calls) == 1
         assert calls[0][0] == mod.STOP_ORDER_FILE
+        assert calls[0][3] is False
 
 
 # ---------------------------------------------------------------------------
@@ -279,18 +281,19 @@ class TestTradeQueue:
         queue = mod._load_trade_queue()
 
         assert queue == {"version": 1, "orders": []}
-        assert any("Trade queue load error" in msg for msg in messages)
+        assert any("Trade queue load failed" in msg for msg in messages)
 
     def test_save_trade_queue_uses_atomic_write_json(self, monkeypatch):
         import metals_loop as mod
 
         calls = []
 
-        def _fake_atomic_write_json(path, data, indent=2):
-            calls.append((path, data, indent))
+        def _fake_atomic_write_json(path, data, indent=2, ensure_ascii=True):
+            calls.append((path, data, indent, ensure_ascii))
 
         monkeypatch.setattr(mod, "atomic_write_json", _fake_atomic_write_json, raising=False)
         mod._save_trade_queue({"version": 1, "orders": []})
 
         assert len(calls) == 1
         assert calls[0][0] == mod.TRADE_QUEUE_FILE
+        assert calls[0][3] is False

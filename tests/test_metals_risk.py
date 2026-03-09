@@ -67,7 +67,7 @@ class TestTradeGuards:
         with open(mod.STATE_FILE, "w", encoding="utf-8") as f:
             f.write("{bad json")
 
-        with caplog.at_level("WARNING"):
+        with caplog.at_level("WARNING", logger=mod.logger.name):
             state = mod._load_guard_state()
 
         assert isinstance(state, dict)
@@ -79,14 +79,15 @@ class TestTradeGuards:
 
         calls = []
 
-        def _fake_atomic_write_json(path, data, indent=2):
-            calls.append((path, data, indent))
+        def _fake_atomic_write_json(path, data, indent=2, ensure_ascii=True):
+            calls.append((path, data, indent, ensure_ascii))
 
         monkeypatch.setattr(mod, "atomic_write_json", _fake_atomic_write_json, raising=False)
         mod._save_guard_state({"ticker_trades": {}})
 
         assert len(calls) == 1
         assert calls[0][0] == mod.STATE_FILE
+        assert calls[0][3] is False
 
     def test_cooldown_blocks_same_key(self, tmp_path):
         from metals_risk import check_trade_guard, record_metals_trade
@@ -327,7 +328,7 @@ class TestSpikeState:
         with open(mod.SPIKE_STATE_FILE, "w", encoding="utf-8") as f:
             f.write("{bad json")
 
-        with caplog.at_level("WARNING"):
+        with caplog.at_level("WARNING", logger=mod.logger.name):
             state = mod.load_spike_state()
 
         assert state == {"orders": {}, "date": None, "placed": False, "cancelled": False}
@@ -346,14 +347,15 @@ class TestSpikeState:
 
         calls = []
 
-        def _fake_atomic_write_json(path, data, indent=2):
-            calls.append((path, data, indent))
+        def _fake_atomic_write_json(path, data, indent=2, ensure_ascii=True):
+            calls.append((path, data, indent, ensure_ascii))
 
         monkeypatch.setattr(mod, "atomic_write_json", _fake_atomic_write_json, raising=False)
         mod.save_spike_state({"orders": {}})
 
         assert len(calls) == 1
         assert calls[0][0] == mod.SPIKE_STATE_FILE
+        assert calls[0][3] is False
 
 
 # ---------------------------------------------------------------------------

@@ -23,10 +23,15 @@ Features:
 Run: .venv/Scripts/python.exe data/metals_loop.py
 """
 import json, os, sys, time, datetime, traceback, subprocess, shutil, platform, atexit
-os.chdir(r"Q:/finance-analyzer")
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+DATA_DIR = BASE_DIR / "data"
+os.chdir(BASE_DIR)
 
 import requests
 from playwright.sync_api import sync_playwright
+from portfolio.file_utils import atomic_write_json
 
 try:
     import msvcrt  # Windows file locking for single-instance guard
@@ -35,7 +40,8 @@ except ImportError:
 
 # --- Optional modules (graceful fallback) ---
 try:
-    sys.path.insert(0, "data")
+    if str(DATA_DIR) not in sys.path:
+        sys.path.insert(0, str(DATA_DIR))
     from metals_llm import (
         start_llm_thread, stop_llm_thread, get_llm_signals,
         get_llm_accuracy, get_llm_summary, get_llm_age,
@@ -198,32 +204,54 @@ POSITIONS_DEFAULTS = {
 }
 POSITIONS_STATE_FILE = "data/metals_positions_state.json"
 
+
+def _load_json_state(path, default, label):
+    """Load a JSON state file with explicit logging on corrupt/unreadable content."""
+    import copy
+
+    fallback = copy.deepcopy(default)
+    if not os.path.exists(path):
+        return fallback
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError, ValueError) as e:
+        message = f"{label} load failed: {e}"
+        if "log" in globals():
+            log(message)
+        else:
+            print(message, flush=True)
+        return fallback
+
+
+def _default_trade_queue():
+    return {"version": 1, "orders": []}
+
 def _load_positions():
     """Load position state from disk, falling back to defaults."""
     import copy
     positions = copy.deepcopy(POSITIONS_DEFAULTS)
     try:
-        if os.path.exists(POSITIONS_STATE_FILE):
-            with open(POSITIONS_STATE_FILE, "r", encoding="utf-8") as f:
-                saved = json.load(f)
-            for key, state in saved.items():
-                if key in positions:
-                    # Restore persisted active/sold status
-                    positions[key]["active"] = state.get("active", True)
-                    # Restore updated units/entry/stop if they were modified
-                    if "units" in state:
-                        positions[key]["units"] = state["units"]
-                    if "entry" in state:
-                        positions[key]["entry"] = state["entry"]
-                    if "stop" in state:
-                        positions[key]["stop"] = state["stop"]
-                    # Preserve sell metadata
-                    if "sold_ts" in state:
-                        positions[key]["sold_ts"] = state["sold_ts"]
-                    if "sold_price" in state:
-                        positions[key]["sold_price"] = state["sold_price"]
-                    if "sold_reason" in state:
-                        positions[key]["sold_reason"] = state["sold_reason"]
+        saved = _load_json_state(POSITIONS_STATE_FILE, {}, "Position state")
+        for key, state in saved.items():
+            if key in positions:
+                # Restore persisted active/sold status
+                positions[key]["active"] = state.get("active", True)
+                # Restore updated units/entry/stop if they were modified
+                if "units" in state:
+                    positions[key]["units"] = state["units"]
+                if "entry" in state:
+                    positions[key]["entry"] = state["entry"]
+                if "stop" in state:
+                    positions[key]["stop"] = state["stop"]
+                # Preserve sell metadata
+                if "sold_ts" in state:
+                    positions[key]["sold_ts"] = state["sold_ts"]
+                if "sold_price" in state:
+                    positions[key]["sold_price"] = state["sold_price"]
+                if "sold_reason" in state:
+                    positions[key]["sold_reason"] = state["sold_reason"]
+        if saved:
             print(f"Position state loaded from {POSITIONS_STATE_FILE}", flush=True)
     except Exception as e:
         print(f"Position state load failed (using defaults): {e}", flush=True)
@@ -244,8 +272,7 @@ def _save_positions(positions):
             if field in pos:
                 state[key][field] = pos[field]
     try:
-        with open(POSITIONS_STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2, ensure_ascii=False)
+        atomic_write_json(POSITIONS_STATE_FILE, state, ensure_ascii=False)
     except Exception as e:
         log(f"Position state save failed: {e}")
 
@@ -1608,19 +1635,12 @@ def _cleanup_stop_orders_for(page, key):
 
 def _load_stop_orders():
     """Load stop order state from disk."""
-    try:
-        if os.path.exists(STOP_ORDER_FILE):
-            with open(STOP_ORDER_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception as e:
-        log(f"Stop order state load failed: {e}")
-    return {}
+    return _load_json_state(STOP_ORDER_FILE, {}, "Stop order state")
 
 def _save_stop_orders(state):
     """Save stop order state to disk."""
     try:
-        with open(STOP_ORDER_FILE, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2, ensure_ascii=False)
+        atomic_write_json(STOP_ORDER_FILE, state, ensure_ascii=False)
     except Exception as e:
         log(f"Stop order state save failed: {e}")
 
@@ -1731,21 +1751,14 @@ def _fetch_warrant_catalog_prices(page):
 
 def _load_trade_queue():
     """Load trade queue from disk."""
-    try:
-        if os.path.exists(TRADE_QUEUE_FILE):
-            with open(TRADE_QUEUE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except (json.JSONDecodeError, IOError) as e:
-        log(f"Trade queue load error: {e}")
-    return {"version": 1, "orders": []}
+    return _load_json_state(TRADE_QUEUE_FILE, _default_trade_queue(), "Trade queue")
 
 
 def _save_trade_queue(queue):
     """Save trade queue to disk."""
     try:
-        with open(TRADE_QUEUE_FILE, "w", encoding="utf-8") as f:
-            json.dump(queue, f, indent=2, ensure_ascii=False)
-    except IOError as e:
+        atomic_write_json(TRADE_QUEUE_FILE, queue, ensure_ascii=False)
+    except OSError as e:
         log(f"Trade queue save error: {e}")
 
 
