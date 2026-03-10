@@ -45,7 +45,19 @@ def load_entries():
     return entries
 
 
-def _vote_correct(vote, change_pct):
+_MIN_CHANGE_PCT = 0.05  # outcomes within ±0.05% are treated as neutral (skip)
+
+
+def _vote_correct(vote, change_pct, min_change_pct=None):
+    """Check if a signal vote matches the price outcome.
+
+    Returns True (correct), False (incorrect), or None (neutral — skip this outcome).
+    Outcomes within ±min_change_pct are considered noise and should not count
+    for or against the signal's accuracy.
+    """
+    threshold = min_change_pct if min_change_pct is not None else _MIN_CHANGE_PCT
+    if abs(change_pct) < threshold:
+        return None  # neutral — price didn't move enough to judge
     if vote == "BUY" and change_pct > 0:
         return True
     if vote == "SELL" and change_pct < 0:
@@ -85,8 +97,11 @@ def signal_accuracy(horizon="1d", since=None):
                 vote = signals.get(sig_name, "HOLD")
                 if vote == "HOLD":
                     continue
+                result_val = _vote_correct(vote, change_pct)
+                if result_val is None:
+                    continue  # neutral outcome — don't count
                 stats[sig_name]["total"] += 1
-                if _vote_correct(vote, change_pct):
+                if result_val:
                     stats[sig_name]["correct"] += 1
 
     result = {}
@@ -132,8 +147,11 @@ def consensus_accuracy(horizon="1d"):
                 continue
 
             change_pct = outcome.get("change_pct", 0)
+            result_val = _vote_correct(consensus, change_pct)
+            if result_val is None:
+                continue
             total += 1
-            if _vote_correct(consensus, change_pct):
+            if result_val:
                 correct += 1
 
     acc = correct / total if total > 0 else 0.0
@@ -163,8 +181,11 @@ def per_ticker_accuracy(horizon="1d"):
                 continue
 
             change_pct = outcome.get("change_pct", 0)
+            result_val = _vote_correct(consensus, change_pct)
+            if result_val is None:
+                continue
             stats[ticker]["total"] += 1
-            if _vote_correct(consensus, change_pct):
+            if result_val:
                 stats[ticker]["correct"] += 1
 
     result = {}
@@ -218,8 +239,11 @@ def accuracy_by_signal_ticker(signal_name, horizon="1d", days=None):
                 continue
 
             change_pct = outcome.get("change_pct", 0)
+            result_val = _vote_correct(vote, change_pct)
+            if result_val is None:
+                continue
             stats[ticker]["total"] += 1
-            if _vote_correct(vote, change_pct):
+            if result_val:
                 stats[ticker]["correct"] += 1
 
     result = {}
@@ -630,8 +654,11 @@ def accuracy_by_ticker_signal(horizon="1d", min_samples=0):
             for sig_name, vote in signals.items():
                 if vote == "HOLD":
                     continue
+                result_val = _vote_correct(vote, change_pct)
+                if result_val is None:
+                    continue
                 stats[ticker][sig_name]["total"] += 1
-                if _vote_correct(vote, change_pct):
+                if result_val:
                     stats[ticker][sig_name]["correct"] += 1
 
     result = {}

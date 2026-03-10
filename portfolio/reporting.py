@@ -567,6 +567,24 @@ def write_agent_summary(
         from portfolio.health import update_module_failures
         update_module_failures(_module_warnings)
 
+    # Aggregate signal health across all tickers (ARCH-12: signal failure surfacing)
+    all_failures = []
+    for _name, sig_data in summary.get("signals", {}).items():
+        failures = sig_data.get("extra", {}).get("_signal_failures", [])
+        all_failures.extend(failures)
+    if all_failures:
+        enhanced_count = len(get_enhanced_signals())
+        summary["signal_health"] = {
+            "ok": enhanced_count - len(set(all_failures)),
+            "failed": len(set(all_failures)),
+            "failed_names": sorted(set(all_failures)),
+            "failed_tickers": {
+                _name: sig_data.get("extra", {}).get("_signal_failures", [])
+                for _name, sig_data in summary.get("signals", {}).items()
+                if sig_data.get("extra", {}).get("_signal_failures")
+            },
+        }
+
     _atomic_write_json(AGENT_SUMMARY_FILE, summary)
     _write_compact_summary(summary)
     return summary

@@ -286,10 +286,13 @@ def _compute_adx(df, period=14):
 
         alpha = 1.0 / period
         atr_smooth = tr.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
-        plus_di = 100 * plus_dm.ewm(alpha=alpha, min_periods=period, adjust=False).mean() / atr_smooth.replace(0, np.nan)
-        minus_di = 100 * minus_dm.ewm(alpha=alpha, min_periods=period, adjust=False).mean() / atr_smooth.replace(0, np.nan)
+        # Use clip(lower=1e-10) instead of replace(0, np.nan) to avoid NaN propagation
+        atr_clipped = atr_smooth.clip(lower=1e-10)
+        plus_di = 100 * plus_dm.ewm(alpha=alpha, min_periods=period, adjust=False).mean() / atr_clipped
+        minus_di = 100 * minus_dm.ewm(alpha=alpha, min_periods=period, adjust=False).mean() / atr_clipped
 
-        dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+        di_sum = (plus_di + minus_di).clip(lower=1e-10)
+        dx = 100 * (plus_di - minus_di).abs() / di_sum
         adx = dx.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
 
         val = adx.iloc[-1]
@@ -356,6 +359,8 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
             penalty_log.append({"stage": "volume_boost", "rvol": volume_ratio, "mult": 1.15})
 
     # --- Stage 3: Trap detection ---
+    # NOTE: df must be the "Now" timeframe (15m candles, 100 bars ≈ 25h).
+    # Last 5 bars = 75 minutes — appropriate for intraday trap detection.
     if action != "HOLD" and df is not None and isinstance(df, pd.DataFrame) and len(df) >= 5:
         try:
             recent_close = df["close"].iloc[-5:]
@@ -653,6 +658,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
         # Build context data once for signals that need it
         context_data = {"ticker": ticker, "config": config or {}, "macro": macro_data}
 
+        _signal_failures = []
         for sig_name, entry in _enhanced_entries.items():
             try:
                 _sig_t0 = time.monotonic()
@@ -680,6 +686,14 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             except Exception as e:
                 logger.warning("Signal %s failed: %s", sig_name, e)
                 votes[sig_name] = "HOLD"
+                _signal_failures.append(sig_name)
+        if _signal_failures:
+            extra_info["_signal_failures"] = _signal_failures
+            if len(_signal_failures) > 3:
+                logger.warning(
+                    "%s: %d enhanced signals failed: %s",
+                    ticker, len(_signal_failures), ", ".join(_signal_failures),
+                )
     else:
         for sig_name in _enhanced_entries:
             votes[sig_name] = "HOLD"

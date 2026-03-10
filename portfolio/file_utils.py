@@ -29,12 +29,15 @@ def atomic_write_json(path, data, indent=2, ensure_ascii=True):
 
 
 def load_json(path, default=None):
-    """Load a JSON file. Returns *default* if missing or unparseable."""
+    """Load a JSON file. Returns *default* if missing or unparseable.
+
+    Uses try/except instead of exists() check to avoid TOCTOU race.
+    """
     path = Path(path)
-    if not path.exists():
-        return default
     try:
         return json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return default
     except (json.JSONDecodeError, ValueError):
         return default
 
