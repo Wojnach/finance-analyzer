@@ -1,28 +1,50 @@
-# Worktree README
+# Worktree Notes
 
-## Branch
+Branch: `metals-state-store`
+Path: `Q:\wt\metals-state-store`
 
-- `local-llm-accuracy`
+## What Changed
 
-## What changed
+- Hardened metals shared state persistence in `data/metals_loop.py` and
+  `data/metals_risk.py`.
+- Replaced raw JSON overwrites for shared metals state with atomic writes.
+- Added explicit corrupt-file logging for guard, spike, positions, stop-order,
+  and trade-queue state.
+- Fixed `data/metals_loop.py` path handling so imports and relative paths bind
+  to the current checkout instead of the hardcoded live repo path.
+- Updated the Layer 2 prompt and related docs to match the safer queue/state
+  contract.
 
-- Added a research-backed plan for improving local LLM accuracy at [`docs/plans/2026-03-09-local-llm-accuracy-plan.md`](Q:/finance-analyzer/.worktrees/local-llm-accuracy/docs/plans/2026-03-09-local-llm-accuracy-plan.md).
-- Gated `Ministral` votes by per-ticker historical accuracy.
-- Gated `Chronos` / `Kronos` sub-signals individually before composite forecast voting.
-- Switched the `Ministral` subprocess wrapper to the repo-managed inference script.
-- Tightened `Ministral` output parsing and added targeted tests.
-- Added `--local-llm-report` for local-model health, accuracy, and gating summaries.
-- Added automatic daily export of the local-LLM report to `data/local_llm_report_latest.json` and `data/local_llm_report_history.jsonl`.
+## Key Commands
 
-## How to run
+Run targeted verification:
 
-- `Q:\finance-analyzer\.venv\Scripts\python.exe -m pytest -q tests/test_local_llm_accuracy.py`
-- `Q:\finance-analyzer\.venv\Scripts\python.exe -m pytest -q tests/test_local_llm_report.py`
-- `Q:\finance-analyzer\.venv\Scripts\python.exe -m pytest -q tests/test_portfolio.py -k "Ministral"`
-- `Q:\finance-analyzer\.venv\Scripts\python.exe -m pytest -q tests/test_forecast_accuracy_gating.py -k "ComputeForecastWithGating or KronosDisabledDefault or AccuracyWeightedVote or VolatilityGate or RegimeInVote"`
-- `Q:\finance-analyzer\.venv\Scripts\python.exe portfolio\main.py --export-local-llm-report 30`
+```powershell
+Q:\finance-analyzer\.venv\Scripts\python.exe -m pytest -q `
+  tests\test_metals_loop_autonomous.py `
+  tests\test_unified_loop.py `
+  tests\test_metals_loop_functions.py `
+  tests\test_metals_risk.py
+```
 
-## Notes
+Run lint if available:
 
-- No live trading process was touched.
-- Model upgrades such as `chronos-bolt-small` or newer Mistral small models are documented in the plan but not enabled by default in code.
+```powershell
+Q:\finance-analyzer\.venv\Scripts\python.exe -m ruff check `
+  data\metals_loop.py data\metals_risk.py portfolio\file_utils.py
+```
+
+## Commits In This Worktree
+
+- `442581f` `docs: add metals state hardening plan`
+- `0d38be1` `test: cover metals state persistence hardening`
+- `a1ef4d9` `fix: harden metals state persistence`
+- `03b511d` `fix: make metals loop worktree-safe`
+
+## Verification Snapshot
+
+- Targeted metals slice:
+  - `134 passed`
+- Full suite:
+  - `3901 passed`
+  - `18 failed` (pre-existing repo baseline outside this worktree scope)

@@ -61,6 +61,34 @@ class TestTradeGuards:
         warnings = check_trade_guard("silver79", "BUY")
         assert len(warnings) == 0
 
+    def test_load_guard_state_bad_json_logs_and_falls_back(self, tmp_path, caplog):
+        import metals_risk as mod
+
+        with open(mod.STATE_FILE, "w", encoding="utf-8") as f:
+            f.write("{bad json")
+
+        with caplog.at_level("WARNING", logger=mod.logger.name):
+            state = mod._load_guard_state()
+
+        assert isinstance(state, dict)
+        assert "ticker_trades" in state
+        assert any("guard state" in record.message.lower() for record in caplog.records)
+
+    def test_save_guard_state_uses_atomic_write_json(self, monkeypatch):
+        import metals_risk as mod
+
+        calls = []
+
+        def _fake_atomic_write_json(path, data, indent=2, ensure_ascii=True):
+            calls.append((path, data, indent, ensure_ascii))
+
+        monkeypatch.setattr(mod, "atomic_write_json", _fake_atomic_write_json, raising=False)
+        mod._save_guard_state({"ticker_trades": {}})
+
+        assert len(calls) == 1
+        assert calls[0][0] == mod.STATE_FILE
+        assert calls[0][3] is False
+
     def test_cooldown_blocks_same_key(self, tmp_path):
         from metals_risk import check_trade_guard, record_metals_trade
         record_metals_trade("silver79", "BUY")
@@ -294,6 +322,18 @@ class TestSpikeState:
         state = load_spike_state()
         assert isinstance(state, dict)
 
+    def test_load_bad_json_logs_and_falls_back(self, tmp_path, caplog):
+        import metals_risk as mod
+
+        with open(mod.SPIKE_STATE_FILE, "w", encoding="utf-8") as f:
+            f.write("{bad json")
+
+        with caplog.at_level("WARNING", logger=mod.logger.name):
+            state = mod.load_spike_state()
+
+        assert state == {"orders": {}, "date": None, "placed": False, "cancelled": False}
+        assert any("spike state" in record.message.lower() for record in caplog.records)
+
     def test_roundtrip(self, tmp_path):
         from metals_risk import load_spike_state, save_spike_state
 
@@ -301,6 +341,21 @@ class TestSpikeState:
         save_spike_state(state)
         loaded = load_spike_state()
         assert loaded.get("silver79", {}).get("spike_order_id") == "123"
+
+    def test_save_spike_state_uses_atomic_write_json(self, monkeypatch):
+        import metals_risk as mod
+
+        calls = []
+
+        def _fake_atomic_write_json(path, data, indent=2, ensure_ascii=True):
+            calls.append((path, data, indent, ensure_ascii))
+
+        monkeypatch.setattr(mod, "atomic_write_json", _fake_atomic_write_json, raising=False)
+        mod.save_spike_state({"orders": {}})
+
+        assert len(calls) == 1
+        assert calls[0][0] == mod.SPIKE_STATE_FILE
+        assert calls[0][3] is False
 
 
 # ---------------------------------------------------------------------------
