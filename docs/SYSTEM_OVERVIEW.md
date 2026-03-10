@@ -156,12 +156,20 @@ Primary config: `config.json` (not in repo). Key domains:
 - **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
 - **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
 
-## 9) Known Issues (as of 2026-03-09)
+## 9) Known Issues (as of 2026-03-10)
 
 - BUG-15 through BUG-22: Fixed in 2026-03-08 session
 - BUG-23 through BUG-27: Fixed in 2026-03-09 session (signal validation, None ticker, OSError, heartbeat, pass cleanup)
+- BUG-28: Enhanced signal failures silently count as HOLD — no tracking or surfacing
+- BUG-29: `_vote_correct()` treats 0% change as incorrect — biases accuracy downward in flat markets
+- BUG-30: `load_json()` has TOCTOU race between `exists()` and `read_text()`
+- BUG-31: `_compute_adx()` not cached, uses NaN propagation via `replace(0, np.nan)`
+- BUG-32: main.py re-exports ~50 private symbols (documentation only, not fixing this session)
+- BUG-33: Trap detection relies on undocumented assumption about `df` timeframe
 - ARCH-10: Signal result validation centralized in `_validate_signal_result()`
 - ARCH-11: Confidence caps enforced via `max_confidence` in signal registry
+- ARCH-12: Signal failure tracking and surfacing (planned)
+- ARCH-13: Accuracy tolerance for flat markets (planned)
 - REF-3: Candlestick `patterns_detected` moved from top-level to `indicators` dict
 - TEST coverage: candlestick (57 tests), fibonacci (51 tests), structure (32 tests) — formerly zero
 - ~3,310 tests across 110+ test files

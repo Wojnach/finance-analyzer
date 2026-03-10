@@ -1,174 +1,200 @@
 # Improvement Plan
 
-Updated: 2026-03-09
-Branch: improve/auto-session-2026-03-09
+Updated: 2026-03-10
+Branch: worktree-improve-auto-session-2026-03-10
 
-Previous sessions: 2026-03-05 (dashboard hardening), 2026-03-06 (CircuitBreaker, TTL cache, prune fix), 2026-03-07 (digest hardening, outcome tracker, disabled signals), 2026-03-08 (signal logging, file I/O safety, cache TTL, trigger hardening).
+Previous sessions: 2026-03-05 (dashboard hardening), 2026-03-06 (CircuitBreaker, TTL cache, prune fix), 2026-03-07 (digest hardening, outcome tracker, disabled signals), 2026-03-08 (signal logging, file I/O safety, cache TTL, trigger hardening), 2026-03-09 (signal validation, confidence caps, candlestick/fibonacci/structure tests).
 
-## Session Results (2026-03-08 — previous)
+## Session Results (2026-03-09 — previous)
 
-All 4 batches implemented. BUG-15 through BUG-22 fixed, ARCH-9 done.
+All 3 batches implemented. 5 bugs fixed (BUG-23 through BUG-27), 2 architecture improvements (ARCH-10, ARCH-11), 3 test coverage gaps filled (TEST-1, TEST-2, TEST-3), 1 refactoring (REF-3). 193 new tests.
 
-## Session Results (2026-03-09)
-
-All 3 batches implemented. 5 bugs fixed (BUG-23 through BUG-27), 2 architecture improvements (ARCH-10, ARCH-11), 3 test coverage gaps filled (TEST-1, TEST-2, TEST-3), 1 refactoring (REF-3).
-
-**Batch 1 — Signal Validation (BUG-23, ARCH-10, ARCH-11):**
-- Added `_validate_signal_result()` to `signal_engine.py` — normalizes action, clamps confidence, replaces NaN
-- `max_confidence` parameter in `signal_registry.py` — 0.7 for 5 context-aware signals
-- 42 new tests
-
-**Batch 2 — Defensive Fixes (BUG-24, BUG-25, BUG-26, BUG-27):**
-- `_fetch_headlines()` guard for None ticker
-- `load_json()` no longer swallows OSError
-- Heartbeat written after initial `run()`
-- Redundant `pass` removed from trigger.py
-- 11 new tests
-
-**Batch 3 — Test Coverage + Refactoring (TEST-1, TEST-2, TEST-3, REF-3):**
-- 57 candlestick tests, 51 fibonacci tests, 32 structure tests (all were 0)
-- `patterns_detected` moved to `indicators` dict (standard return format)
-
-**Totals:** 193 new tests, 10 files changed, 5 bugs fixed, 2 arch improvements, 1 refactor.
-
-## Session Plan (2026-03-09)
+## Session Plan (2026-03-10)
 
 ### 1) Bugs & Problems Found
 
-#### BUG-23 (P1): Signal return value not validated — None/NaN can enter consensus
+#### BUG-28 (P1): Enhanced signal failures silently counted as HOLD — degrades consensus quality
 
-- **File**: `portfolio/signal_engine.py:563-569`
-- **Issue**: Enhanced signals return `{"action": ..., "confidence": ...}`. The engine does
-  `result.get("action", "HOLD")` and `result.get("confidence", 0.0)` but doesn't validate
-  the values. If a signal returns `{"action": None}` or `{"confidence": float("nan")}`,
-  these corrupt values propagate into `extra_info` and downstream reporting. Specifically:
-  - `None` action would be stored in `votes[sig_name]` and counted as neither BUY/SELL/HOLD
-  - `NaN` confidence would poison weighted consensus math (`NaN + anything = NaN`)
-- **Fix**: Add `_validate_signal_result()` function that normalizes action to a valid
-  string and ensures confidence is a finite float in [0, 1].
-- **Impact**: Medium. Prevents silent corruption of consensus when a signal misbehaves.
+- **File**: `portfolio/signal_engine.py:680-682` (approx, in `generate_signal()`)
+- **Issue**: When any enhanced signal throws an exception, it's caught and the vote is set
+  to HOLD: `votes[sig_name] = "HOLD"`. This is correct for preventing crashes, but there is
+  NO tracking of how many signals failed per cycle. If 15 out of 19 enhanced signals crash
+  (e.g., due to a missing column in OHLCV data), the consensus operates on only 4 enhanced
+  + 8 core = 12 signals. The consensus appears valid but is based on dramatically less data.
+  Layer 2 has no way to know signals degraded.
+- **Fix**: Track signal failures in `extra_info["_signal_failures"]` list. Log a warning if
+  failure count > 3. Surface in `agent_summary_compact.json` so Layer 2 can see it.
+- **Impact**: Medium. Prevents silent degradation of consensus quality. Layer 2 can adjust
+  confidence when many signals failed.
 
-#### BUG-24 (P2): news_event.py crashes on None ticker
+#### BUG-29 (P1): `_vote_correct()` treats 0% price change as neither correct nor incorrect
 
-- **File**: `portfolio/signals/news_event.py:50`
-- **Issue**: `_fetch_headlines()` does `ticker.upper().replace("-USD", "")` on line 50.
-  The `context` parameter comes from `signal_engine.py:545` where `ticker` can be None
-  (when `generate_signal()` is called without a ticker). If ticker is None, this crashes
-  with `AttributeError: 'NoneType' object has no attribute 'upper'`.
-- **Fix**: Add early return with HOLD if ticker is None.
-- **Impact**: Low risk. ticker is almost always set in practice, but defensive coding matters.
+- **File**: `portfolio/accuracy_stats.py:48-53`
+- **Issue**: `_vote_correct("BUY", 0.0)` returns False (0 > 0 is False). Same for SELL.
+  When the price doesn't move at all between snapshot and outcome, BOTH BUY and SELL are
+  counted as wrong. This biases accuracy downward for all signals, especially in
+  low-volatility periods where many outcomes are ~0%. A flat price isn't evidence the signal
+  was wrong — it's ambiguous.
+- **Fix**: Add a small tolerance: treat change_pct within ±0.05% as neutral (skip, don't
+  count as correct or incorrect). This prevents flat-market periods from diluting accuracy.
+- **Impact**: High. Affects all accuracy calculations. In sideways markets, signals appear
+  less accurate than they really are, potentially triggering wrong signal inversions.
 
-#### BUG-25 (P2): `load_json()` silently swallows OSError
+#### BUG-30 (P2): `load_json()` returns default on `PermissionError` and `IsADirectoryError`
 
-- **File**: `portfolio/file_utils.py:39`
-- **Issue**: `load_json()` catches `OSError` which includes permission denied, disk full,
-  and network filesystem errors. These are NOT the same as "file doesn't exist" — they
-  indicate real problems. Returning `default` silently masks infrastructure issues.
-- **Fix**: Only catch `json.JSONDecodeError` and `ValueError`. Let `OSError` propagate
-  (except `FileNotFoundError` which is already handled by the `exists()` check).
-- **Impact**: Low risk — changes error handling to be more correct. Callers that want
-  to swallow errors can catch at their level.
+- **File**: `portfolio/file_utils.py:31-39`
+- **Issue**: `load_json()` catches `json.JSONDecodeError` and `ValueError`, but NOT
+  `PermissionError`, `IsADirectoryError`, or `IOError`. On Windows, `path.read_text()` can
+  raise `PermissionError` if another process holds a lock (e.g., during atomic write). This
+  would crash the loop. While `OSError` was removed from the catch list in BUG-25 fix
+  (correctly), we should catch ONLY `FileNotFoundError` + decode errors, and let other OS
+  errors propagate as they indicate real problems. Currently, `path.exists()` check is
+  TOCTOU: file can be deleted between `exists()` and `read_text()`.
+- **Fix**: Remove TOCTOU pattern. Use try/except with `FileNotFoundError` instead of
+  `exists()` check. Keep `json.JSONDecodeError` + `ValueError` catch.
+- **Impact**: Low risk but improves correctness. The TOCTOU window is tiny in practice.
 
-#### BUG-26 (P2): Heartbeat not written during initial run
+#### BUG-31 (P2): `_compute_adx()` called on every confidence penalty check — no caching
 
-- **File**: `portfolio/main.py:516-517, 557`
-- **Issue**: The heartbeat file is written inside the `while True` loop (line 557) but NOT
-  after the initial `run()` call (line 516). If the initial run hangs or takes very long,
-  the stale heartbeat detection on the next restart will fire spuriously.
-- **Fix**: Write heartbeat after the initial `run()` succeeds.
-- **Impact**: Low risk. Fixes edge case on first run after restart.
+- **File**: `portfolio/signal_engine.py:336`
+- **Issue**: `apply_confidence_penalties()` calls `_compute_adx(df)` on every invocation.
+  ADX computes rolling EWM over the full DataFrame. For the "Now" timeframe (100 bars of
+  15m candles), this is fast (~0.5ms). But it's called once per ticker per cycle (19 tickers
+  = 19 calls). The result is stored in `extra_info["_adx"]` but never cached across cycles.
+  More importantly, `_compute_adx()` uses `replace(0, np.nan)` which creates NaN values
+  that propagate through the DI calculations. The final `pd.notna(val)` check at line 296
+  catches this, but NaN propagation is unnecessary work.
+- **Fix**: (1) Replace `atr_smooth.replace(0, np.nan)` with
+  `atr_smooth.clip(lower=1e-10)` to avoid NaN entirely.
+  (2) Cache ADX result in `extra_info` so penalty cascade doesn't recompute.
+- **Impact**: Low. Performance improvement + cleaner NaN handling.
 
-#### BUG-27 (P3): Redundant `pass` in trigger.py:89
+#### BUG-32 (P2): `main.py` re-exports ~50 private symbols — tight coupling and namespace pollution
 
-- **File**: `portfolio/trigger.py:88-89`
-- **Issue**: After `logger.warning(...)`, the `pass` statement is redundant.
-- **Fix**: Remove the `pass`.
-- **Impact**: No behavioral change. Code cleanup.
+- **File**: `portfolio/main.py:36-108`
+- **Issue**: main.py re-exports 50+ private symbols (prefixed with `_`) from other modules
+  for "backwards compatibility". This couples external code (tests, trigger.py) to main.py's
+  import surface. Any module rename or refactor requires updating main.py. Some re-exports
+  are genuinely private: `_tool_cache`, `_prev_sentiment`, `_cached`, etc. Tests patching
+  `portfolio.main._cached` instead of `portfolio.shared_state._cached` create false
+  confidence — they test import wiring, not behavior.
+- **Fix**: NOT fixing this session (too risky for live system). Document as ARCH-12 for
+  future cleanup. The correct fix is: (1) update all test patches to target source modules,
+  (2) remove re-exports from main.py, (3) update any external callers.
+- **Impact**: No behavioral change. Documentation only for now.
+
+#### BUG-33 (P2): Trap detection uses wrong timeframe data
+
+- **File**: `portfolio/signal_engine.py:359-376`
+- **Issue**: `apply_confidence_penalties()` receives `df` which is the "Now" timeframe
+  DataFrame (100 bars of 15m candles). The trap detection looks at the last 5 bars, which
+  represents 75 minutes of data. For detecting a bull/bear trap, this is a reasonable
+  timeframe for intraday signals. However, the function doesn't know which timeframe `df`
+  represents — it could be daily bars (5 bars = 5 days) or weekly bars (5 bars = 5 weeks).
+  In practice, `df` is always the Now timeframe from `generate_signal()`, so this is correct.
+  But adding a defensive check would prevent future bugs if the calling convention changes.
+- **Fix**: Add a comment documenting that `df` must be the Now timeframe (15m candles).
+  Not worth adding a timeframe parameter for a hypothetical future change.
+- **Impact**: Low. Documentation improvement only.
 
 ### 2) Architecture Improvements
 
-#### ARCH-10: Signal result validation function
+#### ARCH-12: Signal failure tracking and surfacing
 
-- **Files**: `portfolio/signal_engine.py`
-- **Issue**: Each enhanced signal returns a dict, but the engine trusts the format blindly.
-  A misbehaving signal can inject None/NaN/invalid strings into the consensus pipeline.
-- **Fix**: Add `_validate_signal_result(result)` that:
-  - Normalizes `action` to one of ("BUY", "SELL", "HOLD")
-  - Clamps `confidence` to [0.0, 1.0] and replaces NaN with 0.0
-  - Ensures `sub_signals` is a dict (default to {})
-  - Returns a clean dict, always
-- **Impact**: Centralizes validation. All 19 enhanced signals benefit automatically.
+- **Files**: `portfolio/signal_engine.py`, `portfolio/reporting.py`
+- **Issue**: When enhanced signals fail (crash/timeout), the failure is logged at WARNING
+  level but not surfaced to Layer 2 or the dashboard. Layer 2 operates on the assumption
+  that all 30 signals voted, when some may have silently failed.
+- **Fix**: Add `signal_failures: list[str]` to the per-ticker signal data in
+  `agent_summary_compact.json`. List signal names that failed (threw exceptions). Also
+  add a top-level `signal_health: {"ok": N, "failed": N, "failed_names": [...]}` section.
+- **Impact**: Enables Layer 2 to lower confidence when signal coverage is degraded.
 
-#### ARCH-11: Confidence cap enforcement in signal registry
+#### ARCH-13: Accuracy tolerance for flat markets
 
-- **Files**: `portfolio/signal_registry.py`, `portfolio/signal_engine.py`
-- **Issue**: Only 5/19 enhanced signals cap confidence at 0.7 (forecast, news_event,
-  econ_calendar, claude_fundamental, futures_flow). The other 14 can return 1.0 confidence
-  on majority vote, which over-weights them vs capped signals. CLAUDE.md documents that
-  context-aware signals cap at 0.7, but technical signals don't.
-- **Fix**: Add `max_confidence` parameter to signal registry entries. Apply it in
-  `_validate_signal_result()`. Set 0.7 for context-aware signals, 1.0 for others (explicit).
-- **Impact**: Makes confidence caps visible and enforceable from the registry. No behavioral
-  change for existing capped signals; documents intent for uncapped ones.
+- **Files**: `portfolio/accuracy_stats.py`
+- **Issue**: The `_vote_correct()` function has a binary correct/incorrect model. A BUY
+  signal with 0.01% price increase is "correct" but a BUY with -0.01% is "wrong". This
+  creates noise in accuracy statistics. Signals shouldn't be penalized for small absolute
+  moves where the direction is essentially random.
+- **Fix**: Add `min_change_pct` parameter (default 0.05%) to `_vote_correct()`. Outcomes
+  within the tolerance band are skipped (not counted as correct or incorrect). This improves
+  accuracy signal-to-noise ratio.
+- **Impact**: All accuracy calculations become more meaningful. Prevents flat-market accuracy
+  dilution that can trigger wrong signal inversions.
 
 ### 3) Test Coverage Gaps
 
-#### TEST-1: Missing tests for candlestick signal
+#### TEST-4: Missing tests for `apply_confidence_penalties()`
 
-- **File**: `portfolio/signals/candlestick.py` (200+ lines, 0 tests)
-- **Issue**: No `tests/test_signals_candlestick.py`. Hammer, engulfing, doji, and star
-  pattern detection are completely untested.
-- **Fix**: Write tests covering: each pattern type, edge cases (insufficient data, flat
-  candles, all-NaN), the extra `patterns_detected` field.
+- **File**: `portfolio/signal_engine.py:302-401`
+- **Issue**: The 4-stage confidence penalty cascade has 0 dedicated tests. It's indirectly
+  tested through `generate_signal()` tests but not the specific edge cases:
+  - Regime penalties (ranging 0.75x, high-vol 0.80x, trend-aligned 1.10x)
+  - Volume gate (RVOL < 0.5 → force HOLD)
+  - Volume + ADX combined gate
+  - Trap detection (bull/bear trap with declining volume)
+  - Dynamic MIN_VOTERS per regime
+  - Confidence clamping to [0, 1]
+  - Disabled mode (config.confidence_penalties.enabled = false)
+- **Fix**: Write `tests/test_confidence_penalties.py` covering each stage and edge case.
 
-#### TEST-2: Missing tests for fibonacci signal
+#### TEST-5: Missing tests for `_weighted_consensus()`
 
-- **File**: `portfolio/signals/fibonacci.py` (450+ lines, 0 tests)
-- **Issue**: No `tests/test_signals_fibonacci.py`. Retracement levels, golden pocket,
-  extensions, pivot points, and camarilla calculations are untested.
-- **Fix**: Write tests covering: each sub-indicator, edge cases, vote aggregation.
+- **File**: `portfolio/signal_engine.py:136-186`
+- **Issue**: The weighted consensus function has no dedicated tests. It's the core of the
+  signal system. Edge cases to test:
+  - All HOLD votes → returns HOLD with 0.0 confidence
+  - Unanimous BUY → returns BUY with 1.0 confidence
+  - Signal inversion at <50% accuracy
+  - Accuracy exactly 50% (boundary case)
+  - Regime weight multipliers
+  - Activation rate normalization
+  - Small sample size (<20) → default 0.5 weight
+- **Fix**: Write tests in `tests/test_weighted_consensus.py`.
 
-#### TEST-3: Missing tests for structure signal
+#### TEST-6: Missing tests for `_compute_adx()`
 
-- **File**: `portfolio/signals/structure.py` (280+ lines, 0 tests)
-- **Issue**: No `tests/test_signals_structure.py`. High/low breakout, Donchian 55, RSI
-  centerline cross, and MACD zero-line cross are untested.
-- **Fix**: Write tests covering: each sub-indicator, edge cases.
+- **File**: `portfolio/signal_engine.py:268-299`
+- **Issue**: ADX computation has no tests. Should verify:
+  - Returns None for insufficient data
+  - Returns valid float for normal data
+  - Handles all-zero ATR gracefully (no division by zero)
+  - Returns None for NaN-heavy data
+- **Fix**: Add to `tests/test_confidence_penalties.py` (same area of code).
 
 ### 4) Refactoring TODOs
 
-#### REF-3: Remove `patterns_detected` from candlestick signal return
+#### REF-4: Remove NaN propagation in `_compute_adx()`
 
-- **File**: `portfolio/signals/candlestick.py:49,59`
-- **Issue**: Returns `patterns_detected` which is non-standard. All other signals return
-  only `action`, `confidence`, `sub_signals`, and optionally `indicators`. This extra field
-  is never used downstream.
-- **Fix**: Move pattern names into `indicators` dict instead.
+- **File**: `portfolio/signal_engine.py:289-290`
+- **Issue**: `atr_smooth.replace(0, np.nan)` creates NaN values that propagate through DI
+  calculations, only to be caught at the final `pd.notna(val)` check. This is wasteful.
+- **Fix**: Use `atr_smooth.clip(lower=1e-10)` instead. Same effect (prevents division by
+  zero) without NaN propagation.
 
 ### 5) Dependency/Ordering
 
-#### Batch 1: Signal Validation (BUG-23, ARCH-10, ARCH-11)
-- Files: `portfolio/signal_engine.py`, `portfolio/signal_registry.py`
-- Tests: Add tests for `_validate_signal_result()`, NaN/None handling
-- Must be done first — other batches may depend on clean signal output
+#### Batch 1: Accuracy & Signal Health (BUG-29, ARCH-13, BUG-28, ARCH-12)
+- Files: `portfolio/accuracy_stats.py`, `portfolio/signal_engine.py`, `portfolio/reporting.py`
+- Tests: Verify accuracy tolerance, test signal failure tracking
+- Must be done first — accuracy change affects signal inversion decisions
 
-#### Batch 2: Defensive Fixes (BUG-24, BUG-25, BUG-26, BUG-27)
-- Files: `portfolio/signals/news_event.py`, `portfolio/file_utils.py`,
-  `portfolio/main.py`, `portfolio/trigger.py`
-- Tests: Add tests for None ticker in news_event, OSError in load_json
+#### Batch 2: Code Quality & Safety (BUG-30, BUG-31, REF-4)
+- Files: `portfolio/file_utils.py`, `portfolio/signal_engine.py`
+- Tests: Test TOCTOU fix, ADX caching, NaN-free ADX
 - Independent of Batch 1
 
-#### Batch 3: Test Coverage (TEST-1, TEST-2, TEST-3, REF-3)
-- Files: `tests/test_signals_candlestick.py` (new), `tests/test_signals_fibonacci.py` (new),
-  `tests/test_signals_structure.py` (new), `portfolio/signals/candlestick.py`
+#### Batch 3: Test Coverage (TEST-4, TEST-5, TEST-6)
+- Files: `tests/test_confidence_penalties.py` (new), `tests/test_weighted_consensus.py` (new)
 - Independent of Batches 1 and 2
 
 ## Summary
 
 | Category | Count | Items |
 |----------|-------|-------|
-| Bugs | 5 | BUG-23 through BUG-27 |
-| Architecture | 2 | ARCH-10, ARCH-11 |
-| Test Coverage | 3 | TEST-1, TEST-2, TEST-3 |
-| Refactoring | 1 | REF-3 |
+| Bugs | 6 | BUG-28 through BUG-33 |
+| Architecture | 2 | ARCH-12, ARCH-13 |
+| Test Coverage | 3 | TEST-4, TEST-5, TEST-6 |
+| Refactoring | 1 | REF-4 |
 | Batches | 3 | Batch 1 depends-first, Batch 2+3 independent |
