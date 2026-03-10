@@ -15,9 +15,15 @@ Usage from metals_loop.py:
 import json
 import math
 import os
+import sys
 import time
 import datetime
 import logging
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
 from portfolio.file_utils import atomic_write_json
 
