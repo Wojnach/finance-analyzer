@@ -12,6 +12,10 @@ Run: .venv/Scripts/python.exe -u data/silver_monitor.py
 import json, time, datetime, requests, sys, os, subprocess, shutil, platform
 from collections import deque
 from pathlib import Path
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
@@ -66,9 +70,7 @@ ALERT_LEVELS = [
 ]
 
 # US market open pattern (from 22 trading days of 15m data, Jan 25 - Feb 25 2026)
-# US open = 14:30 UTC (15:30 CET winter time)
-US_OPEN_HOUR_UTC = 14
-US_OPEN_MIN_UTC = 30
+# Use America/New_York so DST shifts are handled automatically.
 US_OPEN_STATS = {
     "pre_open_mean_pct": -0.125,     # 13:30-14:30 UTC avg move
     "post_open_mean_pct": -0.692,    # 14:30-15:30 UTC avg move — bearish lean
@@ -99,6 +101,39 @@ consecutive_down = 0
 prev_price = None
 analysis_count = 0
 _singleton_lock_fh = None
+_US_EASTERN_TZ = ZoneInfo("America/New_York") if ZoneInfo else None
+
+
+def _us_open_dt_utc(now_utc=None):
+    """Return today's 09:30 New York open translated to UTC."""
+    now_utc = now_utc or datetime.datetime.now(datetime.timezone.utc)
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=datetime.timezone.utc)
+    if _US_EASTERN_TZ is not None:
+        ny_now = now_utc.astimezone(_US_EASTERN_TZ)
+        open_ny = datetime.datetime.combine(
+            ny_now.date(),
+            datetime.time(9, 30),
+            tzinfo=_US_EASTERN_TZ,
+        )
+        return open_ny.astimezone(datetime.timezone.utc)
+    return now_utc.replace(hour=14, minute=30, second=0, microsecond=0)
+
+
+def _us_close_dt_utc(now_utc=None):
+    """Return today's 16:00 New York close translated to UTC."""
+    now_utc = now_utc or datetime.datetime.now(datetime.timezone.utc)
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=datetime.timezone.utc)
+    if _US_EASTERN_TZ is not None:
+        ny_now = now_utc.astimezone(_US_EASTERN_TZ)
+        close_ny = datetime.datetime.combine(
+            ny_now.date(),
+            datetime.time(16, 0),
+            tzinfo=_US_EASTERN_TZ,
+        )
+        return close_ny.astimezone(datetime.timezone.utc)
+    return now_utc.replace(hour=21, minute=0, second=0, microsecond=0)
 
 
 def acquire_singleton_lock(lock_path=SINGLETON_LOCK_FILE):
@@ -237,23 +272,22 @@ def _has_active_silver_position():
 
 
 def _is_market_hours():
-    """Check if current time is within EU+US market hours (07:00-21:00 UTC weekdays)."""
+    """Check if current time is within EU open through US cash close, weekdays only."""
     now = datetime.datetime.now(datetime.timezone.utc)
     if now.weekday() >= 5:  # weekend
         return False
-    return 7 <= now.hour < 21
+    us_close = _us_close_dt_utc(now)
+    return datetime.time(7, 0) <= now.time() < us_close.time()
 
 
 def _is_analysis_window():
-    """Check if Claude analysis should run: 1h before EU open to 1h after US close, weekdays only.
-
-    EU open  07:00 UTC -> analysis from 06:00 UTC
-    US close 21:00 UTC -> analysis until 22:00 UTC
-    """
+    """Check if Claude analysis should run: 1h before EU open to 1h after US close."""
     now = datetime.datetime.now(datetime.timezone.utc)
     if now.weekday() >= 5:  # weekend
         return False
-    return 6 <= now.hour < 22
+    analysis_start = now.replace(hour=6, minute=0, second=0, microsecond=0)
+    analysis_end = _us_close_dt_utc(now) + datetime.timedelta(hours=1)
+    return analysis_start <= now < analysis_end
 
 
 def send_telegram(msg):
@@ -362,7 +396,7 @@ def gather_analysis_data(price):
 
     # US market open proximity context
     now_utc = datetime.datetime.now(datetime.timezone.utc)
-    us_open_today = now_utc.replace(hour=US_OPEN_HOUR_UTC, minute=US_OPEN_MIN_UTC, second=0, microsecond=0)
+    us_open_today = _us_open_dt_utc(now_utc)
     minutes_to_open = (us_open_today - now_utc).total_seconds() / 60
     if minutes_to_open < -120:  # more than 2h past open, not relevant
         us_open_phase = "post_open_settled"

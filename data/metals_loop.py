@@ -24,6 +24,10 @@ Run: .venv/Scripts/python.exe data/metals_loop.py
 """
 import json, os, sys, time, datetime, traceback, subprocess, shutil, platform, atexit
 from pathlib import Path
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
@@ -34,12 +38,25 @@ os.chdir(BASE_DIR)
 import requests
 from playwright.sync_api import sync_playwright
 from portfolio.file_utils import atomic_write_json
-from portfolio.notification_text import (
-    format_tier_footer,
-    format_vote_summary,
-    humanize_thesis_status,
-    humanize_ticker,
-)
+try:
+    from portfolio.notification_text import (
+        format_tier_footer,
+        format_vote_summary,
+        humanize_thesis_status,
+        humanize_ticker,
+    )
+except ImportError:
+    def format_tier_footer(source, tier, check_number, cet_str):
+        return f"_{source} T{tier} · #{check_number} · {cet_str}_"
+
+    def format_vote_summary(buy_count, sell_count):
+        return f"{int(buy_count)}B/{int(sell_count)}S"
+
+    def humanize_thesis_status(status):
+        return str(status or "neutral").replace("_", " ").title()
+
+    def humanize_ticker(ticker):
+        return str(ticker or "").replace("-USD", "")
 
 try:
     import msvcrt  # Windows file locking for single-instance guard
@@ -89,6 +106,13 @@ except ImportError as e:
     SWING_TRADER_AVAILABLE = False
 
 try:
+    from metals_execution_engine import build_execution_recommendations, hours_to_metals_close
+    EXECUTION_ENGINE_AVAILABLE = True
+except ImportError as e:
+    print(f"[WARN] metals_execution_engine import failed: {e}", flush=True)
+    EXECUTION_ENGINE_AVAILABLE = False
+
+try:
     from metals_swing_config import WARRANT_CATALOG
     CATALOG_AVAILABLE = True
 except ImportError as e:
@@ -129,12 +153,13 @@ TIER_COOLDOWNS = {
     2: 600,    # Sonnet: 10 min cooldown
     3: 0,      # Critical: no cooldown (immediate)
 }
-EOD_HOUR_CET = 17.0           # 17:00 CET (DST-safe via cet_hour())
+EOD_HOUR_CET = 17.0           # 17:00 Stockholm time (legacy summary trigger)
 
 # Spike catcher config (US open limit sell orders)
 SPIKE_ENABLED = True
-SPIKE_PLACE_CET = 15.25       # 15:15 CET — place orders before US open (15:30)
-SPIKE_CANCEL_CET = 16.5       # 16:30 CET — cancel unfilled orders
+SPIKE_PLACE_ET = (9, 15)      # place 15 min before NYSE open
+SPIKE_OPEN_ET = (9, 30)       # NYSE regular session open
+SPIKE_CANCEL_ET = (10, 30)    # cancel 1h after open if unfilled
 SPIKE_PERCENTILE = 75          # P75 of daily open_to_high as target
 SPIKE_PARTIAL_PCT = 50         # sell 50% of position to capture spike profit
 
@@ -154,6 +179,9 @@ STOP_ORDER_FILE = "data/metals_stop_orders.json"
 
 # Emergency auto-sell (L3) safety
 EMERGENCY_SELL_ENABLED = False  # default OFF: requires explicit enablement
+
+_STOCKHOLM_TZ = ZoneInfo("Europe/Stockholm") if ZoneInfo else None
+_US_EASTERN_TZ = ZoneInfo("America/New_York") if ZoneInfo else None
 
 # Trade queue (Layer 2 writes intent, Layer 1 executes)
 TRADE_QUEUE_ENABLED = True
@@ -548,7 +576,13 @@ def _sleep_for_cycle(cycle_started, interval_s, label):
     log(f"{label} overran by {abs(remaining):.1f}s; continuing immediately")
 
 def get_cet_time():
-    """Get current CET/CEST time from timeapi.io, fallback to zoneinfo (DST-safe)."""
+    """Get current Stockholm time from timeapi.io, fallback to zoneinfo (DST-safe)."""
+    tz_label = "CET"
+    if _STOCKHOLM_TZ is not None:
+        try:
+            tz_label = datetime.datetime.now(_STOCKHOLM_TZ).tzname() or "CET"
+        except Exception:
+            pass
     try:
         r = requests.get(
             "http://timeapi.io/api/time/current/zone?timeZone=Europe/Stockholm",
@@ -558,22 +592,70 @@ def get_cet_time():
             data = r.json()
             h = data["hour"]
             m = data["minute"]
-            return h + m / 60, f"{h:02d}:{m:02d} CET", "timeapi"
+            return h + m / 60, f"{h:02d}:{m:02d} {tz_label}", "timeapi"
     except Exception as e:
         print(f"[WARN] timeapi.io failed: {e}", flush=True)
     # Fallback: zoneinfo handles DST correctly (CET/CEST)
     try:
-        from zoneinfo import ZoneInfo
-        now = datetime.datetime.now(ZoneInfo("Europe/Stockholm"))
+        now = datetime.datetime.now(_STOCKHOLM_TZ)
         h = now.hour
         m = now.minute
-        return h + m / 60, f"{h:02d}:{m:02d} CET", "zoneinfo"
-    except ImportError:
+        return h + m / 60, f"{h:02d}:{m:02d} {now.tzname() or tz_label}", "zoneinfo"
+    except Exception:
         # Last resort: UTC+1 (wrong during summer DST)
         now = datetime.datetime.now(datetime.timezone.utc)
         h = (now.hour + 1) % 24
         m = now.minute
         return h + m / 60, f"{h:02d}:{m:02d} CET", "system_utc+1"
+
+
+def get_us_spike_schedule(now=None):
+    """Return the daily US-open spike window in Stockholm time.
+
+    Uses New York local times so DST changes in the United States are handled
+    automatically, including the spring/fall mismatch against Stockholm.
+    """
+    if now is None:
+        now = datetime.datetime.now(datetime.timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=datetime.timezone.utc)
+
+    if _STOCKHOLM_TZ is not None and _US_EASTERN_TZ is not None:
+        now_utc = now.astimezone(datetime.timezone.utc)
+        ny_date = now_utc.astimezone(_US_EASTERN_TZ).date()
+
+        def _mk_ny(hour, minute):
+            return datetime.datetime.combine(
+                ny_date, datetime.time(hour, minute), tzinfo=_US_EASTERN_TZ
+            )
+
+        place_ny = _mk_ny(*SPIKE_PLACE_ET)
+        open_ny = _mk_ny(*SPIKE_OPEN_ET)
+        cancel_ny = _mk_ny(*SPIKE_CANCEL_ET)
+        place_st = place_ny.astimezone(_STOCKHOLM_TZ)
+        open_st = open_ny.astimezone(_STOCKHOLM_TZ)
+        cancel_st = cancel_ny.astimezone(_STOCKHOLM_TZ)
+
+        return {
+            "place_hour": place_st.hour + place_st.minute / 60.0,
+            "open_hour": open_st.hour + open_st.minute / 60.0,
+            "cancel_hour": cancel_st.hour + cancel_st.minute / 60.0,
+            "place_label": place_st.strftime("%H:%M ") + (place_st.tzname() or "Stockholm"),
+            "open_label": open_st.strftime("%H:%M ") + (open_st.tzname() or "Stockholm"),
+            "cancel_label": cancel_st.strftime("%H:%M ") + (cancel_st.tzname() or "Stockholm"),
+            "et_open_label": open_ny.strftime("%H:%M ") + (open_ny.tzname() or "ET"),
+        }
+
+    # Fallback: winter Stockholm schedule
+    return {
+        "place_hour": 15.25,
+        "open_hour": 15.5,
+        "cancel_hour": 16.5,
+        "place_label": "15:15 CET",
+        "open_label": "15:30 CET",
+        "cancel_label": "16:30 CET",
+        "et_open_label": "09:30 ET",
+    }
 
 def cet_hour():
     h, _, _ = get_cet_time()
@@ -584,7 +666,7 @@ def cet_time_str():
     return ts
 
 def is_market_hours():
-    """Check if Avanza commodity warrant market is open (Mon-Fri 08:15-21:55 CET)."""
+    """Check if Avanza commodity warrant market is open (Mon-Fri 08:15-21:55 Stockholm time)."""
     now = datetime.datetime.now(datetime.timezone.utc)
     weekday = now.weekday()
     h = cet_hour()
@@ -2606,6 +2688,9 @@ def log_invocation(tier, model, trigger, check_num, invoke_num, elapsed_s=None, 
 def write_context(prices, trigger_reason, tier=2):
     """Write context JSON for Claude Layer 2."""
     now = datetime.datetime.now(datetime.timezone.utc)
+    hours_remaining = hours_to_metals_close(now) if EXECUTION_ENGINE_AVAILABLE else round(
+        max(0, EOD_HOUR_CET + 25 / 60 - cet_hour()), 1
+    )
     ctx = {
         "timestamp": now.isoformat(),
         "cet_time": cet_time_str(),
@@ -2613,8 +2698,8 @@ def write_context(prices, trigger_reason, tier=2):
         "invoke_count": invoke_count,
         "trigger_reason": trigger_reason,
         "tier": tier,
-        "market_close_cet": "17:25",
-        "hours_remaining": round(max(0, EOD_HOUR_CET + 25/60 - cet_hour()), 1),
+        "market_close_cet": "21:55",
+        "hours_remaining": round(hours_remaining, 1),
         "positions": {},
         "underlying": {},
         "totals": {},
@@ -2689,6 +2774,21 @@ def write_context(prices, trigger_reason, tier=2):
     # Warrant catalog with live prices — for BUY warrant selection
     if TRADE_QUEUE_ENABLED and cached_warrant_catalog:
         ctx["warrant_catalog"] = cached_warrant_catalog
+
+    if EXECUTION_ENGINE_AVAILABLE:
+        try:
+            llm_sigs = get_llm_signals() if LLM_AVAILABLE else None
+            ctx["execution_targets"] = build_execution_recommendations(
+                POSITIONS,
+                prices,
+                signal_data=last_signal_data,
+                llm_signals=llm_sigs,
+                warrant_catalog=cached_warrant_catalog or None,
+                account=cached_account_data or None,
+                hours_remaining=hours_remaining,
+            )
+        except Exception as e:
+            ctx["execution_targets"] = {"error": str(e)}
 
     total_val = 0
     total_inv = 0
@@ -3414,8 +3514,12 @@ def main():
     log(f"*** Tracking: XAG/XAU (FAPI) + BTC/ETH (SPOT) + MSTR (Yahoo) ***")
     log(f"Short instruments: {', '.join(v['name'] for v in SHORT_INSTRUMENTS.values())}")
     if SPIKE_ENABLED:
-        log(f"Spike catcher: place@{SPIKE_PLACE_CET:.2f} cancel@{SPIKE_CANCEL_CET:.2f} "
-            f"P{SPIKE_PERCENTILE} {SPIKE_PARTIAL_PCT}% partial")
+        spike_sched = get_us_spike_schedule()
+        log(
+            f"Spike catcher: place@{spike_sched['place_label']} cancel@{spike_sched['cancel_label']} "
+            f"(US open {spike_sched['et_open_label']} / {spike_sched['open_label']}) "
+            f"P{SPIKE_PERCENTILE} {SPIKE_PARTIAL_PCT}% partial"
+        )
     log(f"Invocation log: {INVOCATION_LOG}")
 
     with sync_playwright() as pw:
@@ -3734,6 +3838,9 @@ Positions: {pos_summary}{prob_summary}""")
                 # --- SPIKE CATCHER: US open limit sell orders ---
                 if SPIKE_ENABLED and RISK_AVAILABLE and daily_range_stats and check_count > 3:
                     h_now = cet_hour()
+                    spike_sched = get_us_spike_schedule()
+                    spike_place_hour = spike_sched["place_hour"]
+                    spike_cancel_hour = spike_sched["cancel_hour"]
                     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
                     spike_st = load_spike_state()
 
@@ -3743,8 +3850,8 @@ Positions: {pos_summary}{prob_summary}""")
                                     "placed": False, "cancelled": False}
                         save_spike_state(spike_st)
 
-                    # Phase 1: Place orders at 15:15 CET
-                    if (not spike_st["placed"] and SPIKE_PLACE_CET <= h_now < SPIKE_CANCEL_CET):
+                    # Phase 1: Place orders 15 min before the NYSE open, translated to Stockholm time
+                    if (not spike_st["placed"] and spike_place_hour <= h_now < spike_cancel_hour):
                         targets = compute_spike_targets(
                             POSITIONS, prices, daily_range_stats,
                             percentile=SPIKE_PERCENTILE, partial_pct=SPIKE_PARTIAL_PCT)
@@ -3763,7 +3870,7 @@ Positions: {pos_summary}{prob_summary}""")
                                 + "\n".join(f"`{k}: SELL {t['units_to_sell']}u @ {t['target_price']} "
                                            f"(+{t['target_pnl_pct']:.1f}%)`"
                                            for k, t in targets.items())
-                                + f"\n_P{SPIKE_PERCENTILE} target, cancels at 16:30_"
+                                + f"\n_P{SPIKE_PERCENTILE} target, cancels at {spike_sched['cancel_label']}_"
                             )
                         else:
                             log("Spike catcher: no eligible positions for spike targets")
@@ -3789,12 +3896,14 @@ Positions: {pos_summary}{prob_summary}""")
                                 save_spike_state(spike_st)
                                 _save_positions(POSITIONS)  # persist after spike fills
 
-                    # Phase 3: Cancel unfilled at 16:30 CET
-                    if spike_st["placed"] and not spike_st["cancelled"] and h_now >= SPIKE_CANCEL_CET:
+                    # Phase 3: Cancel unfilled 1h after the NYSE open
+                    if spike_st["placed"] and not spike_st["cancelled"] and h_now >= spike_cancel_hour:
                         if spike_st.get("orders"):
                             log(f"Spike catcher: cancelling {len(spike_st['orders'])} unfilled orders")
                             cancel_spike_orders(page, spike_st)
-                            send_telegram("_Spike orders cancelled (16:30 CET, unfilled)_")
+                            send_telegram(
+                                f"_Spike orders cancelled ({spike_sched['cancel_label']}, unfilled)_"
+                            )
                         spike_st["cancelled"] = True
                         save_spike_state(spike_st)
 

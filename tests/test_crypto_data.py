@@ -182,26 +182,30 @@ class TestOnchainSummary:
 # ---------------------------------------------------------------------------
 
 class TestUSMarketHours:
-    @patch("metals_shared.cet_hour", return_value=16.0)
-    def test_during_market_hours(self, mock_cet):
+    def test_during_market_hours(self):
         from crypto_data import is_us_market_hours
         import datetime
-        # Mock weekday to Tuesday
-        with patch("crypto_data.datetime") as mock_dt:
-            mock_dt.datetime.now.return_value = MagicMock(weekday=lambda: 1)
-            mock_dt.timezone = datetime.timezone
-            result = is_us_market_hours()
-            assert result is True
+        result = is_us_market_hours(
+            datetime.datetime(2026, 3, 11, 14, 30, tzinfo=datetime.timezone.utc)
+        )
+        assert result is True
 
-    @patch("metals_shared.cet_hour", return_value=10.0)
-    def test_before_market_hours(self, mock_cet):
+    def test_before_market_hours(self):
         from crypto_data import is_us_market_hours
         import datetime
-        with patch("crypto_data.datetime") as mock_dt:
-            mock_dt.datetime.now.return_value = MagicMock(weekday=lambda: 1)
-            mock_dt.timezone = datetime.timezone
-            result = is_us_market_hours()
-            assert result is False
+        result = is_us_market_hours(
+            datetime.datetime(2026, 3, 11, 13, 0, tzinfo=datetime.timezone.utc)
+        )
+        assert result is False
+
+    def test_handles_us_dst_gap_vs_stockholm(self):
+        from crypto_data import is_us_market_hours
+        import datetime
+        # March 11, 2026: US already on EDT, Stockholm still on CET.
+        result = is_us_market_hours(
+            datetime.datetime(2026, 3, 11, 19, 30, tzinfo=datetime.timezone.utc)
+        )
+        assert result is True
 
 
 # ---------------------------------------------------------------------------

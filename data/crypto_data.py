@@ -16,6 +16,10 @@ import sys
 import time
 import datetime
 import logging
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -223,14 +227,16 @@ def get_onchain_summary():
 # US Market Hours Check
 # ---------------------------------------------------------------------------
 
-def is_us_market_hours():
-    """Check if US stock market is open (15:30-22:00 CET, Mon-Fri)."""
-    try:
-        from metals_shared import cet_hour
-        h = cet_hour()
-        now = datetime.datetime.now(datetime.timezone.utc)
-        return now.weekday() < 5 and 15.5 <= h <= 22.0
-    except ImportError:
-        # Fallback: UTC-based approximation
-        now = datetime.datetime.now(datetime.timezone.utc)
-        return now.weekday() < 5 and 14.5 <= now.hour <= 21.0
+def is_us_market_hours(now=None):
+    """Check if the US regular session is open (09:30-16:00 New York time)."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=datetime.timezone.utc)
+
+    if ZoneInfo is not None:
+        ny = now.astimezone(ZoneInfo("America/New_York"))
+        minutes = ny.hour * 60 + ny.minute
+        return ny.weekday() < 5 and (9 * 60 + 30) <= minutes <= (16 * 60)
+
+    # Fallback: UTC-based approximation when zoneinfo is unavailable.
+    return now.weekday() < 5 and 14 <= now.hour <= 21
