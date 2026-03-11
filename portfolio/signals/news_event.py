@@ -30,7 +30,8 @@ from portfolio.shared_state import _cached
 
 logger = logging.getLogger("portfolio.signals.news_event")
 
-# Cache TTL for headline fetches (5 minutes)
+# Cache TTL for outer headline fetch (5 min).
+# Inner NewsAPI cache uses NEWSAPI_TTL (30 min) to protect daily quota.
 _HEADLINE_TTL = 300
 
 # Baseline article count (normal news volume)

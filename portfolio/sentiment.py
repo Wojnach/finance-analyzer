@@ -155,21 +155,57 @@ def _fetch_newsapi_headlines(ticker, api_key, limit=10):
     ]
 
 
+def _fetch_newsapi_with_tracking(ticker, api_key, limit=10):
+    """Fetch from NewsAPI and track the call against daily quota."""
+    from portfolio.shared_state import newsapi_track_call
+    result = _fetch_newsapi_headlines(ticker, api_key, limit=limit)
+    newsapi_track_call()
+    return result
+
+
 def _fetch_stock_headlines(ticker, newsapi_key=None, limit=20):
+    """Fetch stock headlines. NewsAPI is primary (when key + quota available), Yahoo fallback."""
+    from portfolio.shared_state import _cached, newsapi_quota_ok, NEWSAPI_TTL
+
     articles = []
-    try:
-        articles.extend(_fetch_yahoo_headlines(ticker, limit=limit))
-    except Exception as e:
-        logger.debug("[Yahoo News] error: %s", e)
-    if newsapi_key:
+
+    # Primary: NewsAPI (faster, dedicated news API)
+    if newsapi_key and newsapi_quota_ok():
+        try:
+            cached_newsapi = _cached(
+                f"newsapi_{ticker}",
+                NEWSAPI_TTL,
+                _fetch_newsapi_with_tracking,
+                ticker,
+                newsapi_key,
+                limit,
+            )
+            if cached_newsapi:
+                articles.extend(cached_newsapi)
+        except Exception as e:
+            logger.debug("[NewsAPI] error for %s: %s", ticker, e)
+
+    # Fallback: Yahoo Finance (fills remaining gap or serves as sole source)
+    if len(articles) < limit:
         try:
             remaining = max(0, limit - len(articles))
             if remaining > 0:
-                articles.extend(
-                    _fetch_newsapi_headlines(ticker, newsapi_key, limit=remaining)
-                )
+                yahoo_articles = _fetch_yahoo_headlines(ticker, limit=remaining)
+                # Deduplicate by title
+                seen_titles = {a.get("title", "").lower() for a in articles}
+                for ya in yahoo_articles:
+                    if ya.get("title", "").lower() not in seen_titles:
+                        articles.append(ya)
+                        seen_titles.add(ya.get("title", "").lower())
         except Exception as e:
-            logger.debug("[NewsAPI] error: %s", e)
+            logger.debug("[Yahoo News] error for %s: %s", ticker, e)
+
+    newsapi_count = len([a for a in articles if a.get("source", "") != "Yahoo Finance"])
+    yahoo_count = len(articles) - newsapi_count
+    if articles:
+        logger.debug("[Headlines %s] %d NewsAPI + %d Yahoo = %d total",
+                     ticker, newsapi_count, yahoo_count, len(articles))
+
     return articles[:limit]
 
 

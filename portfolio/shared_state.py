@@ -114,6 +114,39 @@ _yfinance_limiter = _RateLimiter(30, "yfinance")
 _alpha_vantage_limiter = _RateLimiter(5, "alpha_vantage")
 
 
+# NewsAPI: 100 req/day free tier — use daily counter, not per-minute limiter
+_newsapi_daily_count = 0
+_newsapi_daily_reset = 0.0  # timestamp of last reset
+_NEWSAPI_DAILY_BUDGET = 90  # leave 10-call margin
+_newsapi_lock = threading.Lock()
+
+
+def newsapi_quota_ok() -> bool:
+    """Check if we still have NewsAPI quota today. Thread-safe."""
+    global _newsapi_daily_count, _newsapi_daily_reset
+    now = time.time()
+    with _newsapi_lock:
+        # Reset counter at midnight UTC
+        from datetime import datetime, timezone
+        today_start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).timestamp()
+        if _newsapi_daily_reset < today_start:
+            _newsapi_daily_count = 0
+            _newsapi_daily_reset = now
+        return _newsapi_daily_count < _NEWSAPI_DAILY_BUDGET
+
+
+def newsapi_track_call():
+    """Increment NewsAPI daily counter. Call after each successful API request."""
+    global _newsapi_daily_count
+    with _newsapi_lock:
+        _newsapi_daily_count += 1
+        if _newsapi_daily_count == _NEWSAPI_DAILY_BUDGET:
+            logger.warning("NewsAPI daily budget exhausted (%d/%d), falling back to Yahoo",
+                          _newsapi_daily_count, _NEWSAPI_DAILY_BUDGET)
+
+
 # TTL constants for tool caching
 FUNDAMENTALS_TTL = 86400  # 24 hours
 ONCHAIN_TTL = 43200      # 12 hours (on-chain data updates slowly)
@@ -123,3 +156,4 @@ MINISTRAL_TTL = 900      # 15 min
 ML_SIGNAL_TTL = 900      # 15 min
 FUNDING_RATE_TTL = 900   # 15 min
 VOLUME_TTL = 300         # 5 min
+NEWSAPI_TTL = 1800       # 30 min — shared between sentiment and news_event callers
