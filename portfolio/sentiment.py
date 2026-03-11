@@ -130,16 +130,16 @@ def _fetch_yahoo_headlines(ticker, limit=10):
     return articles
 
 
-def _fetch_newsapi_headlines(ticker, api_key, limit=10):
-    url = (
-        f"https://newsapi.org/v2/everything?"
-        f"q={ticker}&language=en&sortBy=publishedAt&pageSize={limit}"
-    )
+def _fetch_newsapi_headlines(ticker, api_key, limit=10, query=None):
+    """Fetch headlines from NewsAPI with optional custom search query."""
+    search_q = query or ticker
     data = fetch_json(
-        url,
+        "https://newsapi.org/v2/everything",
+        params={"q": search_q, "language": "en", "sortBy": "publishedAt",
+                "pageSize": limit},
         headers={"User-Agent": "Mozilla/5.0", "X-Api-Key": api_key},
         timeout=15,
-        label="newsapi",
+        label=f"newsapi:{ticker}",
     )
     if data is None:
         return []
@@ -155,43 +155,47 @@ def _fetch_newsapi_headlines(ticker, api_key, limit=10):
     ]
 
 
-def _fetch_newsapi_with_tracking(ticker, api_key, limit=10):
+def _fetch_newsapi_with_tracking(ticker, api_key, limit=10, query=None):
     """Fetch from NewsAPI and track the call against daily quota."""
     from portfolio.shared_state import newsapi_track_call
-    result = _fetch_newsapi_headlines(ticker, api_key, limit=limit)
+    result = _fetch_newsapi_headlines(ticker, api_key, limit=limit, query=query)
     newsapi_track_call()
     return result
 
 
 def _fetch_stock_headlines(ticker, newsapi_key=None, limit=20):
-    """Fetch stock headlines. NewsAPI is primary (when key + quota available), Yahoo fallback."""
-    from portfolio.shared_state import _cached, newsapi_quota_ok, NEWSAPI_TTL
+    """Fetch stock headlines. NewsAPI for priority tickers (metals), Yahoo for the rest."""
+    from portfolio.shared_state import (
+        _cached, newsapi_quota_ok, newsapi_ttl_for_ticker, newsapi_search_query,
+    )
 
     articles = []
 
-    # Primary: NewsAPI (faster, dedicated news API)
-    if newsapi_key and newsapi_quota_ok():
+    # NewsAPI: only for priority tickers during active hours (metals get 20-min refresh)
+    ttl = newsapi_ttl_for_ticker(ticker) if newsapi_key else None
+    if ttl is not None and newsapi_key and newsapi_quota_ok():
         try:
+            query = newsapi_search_query(ticker)
             cached_newsapi = _cached(
                 f"newsapi_{ticker}",
-                NEWSAPI_TTL,
+                ttl,
                 _fetch_newsapi_with_tracking,
                 ticker,
                 newsapi_key,
                 limit,
+                query,
             )
             if cached_newsapi:
                 articles.extend(cached_newsapi)
         except Exception as e:
             logger.debug("[NewsAPI] error for %s: %s", ticker, e)
 
-    # Fallback: Yahoo Finance (fills remaining gap or serves as sole source)
+    # Yahoo Finance: fallback for metals, primary for everything else
     if len(articles) < limit:
         try:
             remaining = max(0, limit - len(articles))
             if remaining > 0:
                 yahoo_articles = _fetch_yahoo_headlines(ticker, limit=remaining)
-                # Deduplicate by title
                 seen_titles = {a.get("title", "").lower() for a in articles}
                 for ya in yahoo_articles:
                     if ya.get("title", "").lower() not in seen_titles:

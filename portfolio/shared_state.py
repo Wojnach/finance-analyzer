@@ -114,11 +114,27 @@ _yfinance_limiter = _RateLimiter(30, "yfinance")
 _alpha_vantage_limiter = _RateLimiter(5, "alpha_vantage")
 
 
-# NewsAPI: 100 req/day free tier — use daily counter, not per-minute limiter
+# NewsAPI: 100 req/day free tier — tiered priority system
+# Budget: metals (XAU, XAG) get 20-min refresh during active hours (~84/day)
+# All other tickers: Yahoo-only (0 NewsAPI calls)
+# BTC/ETH: already served by CryptoCompare, not NewsAPI
 _newsapi_daily_count = 0
 _newsapi_daily_reset = 0.0  # timestamp of last reset
 _NEWSAPI_DAILY_BUDGET = 90  # leave 10-call margin
 _newsapi_lock = threading.Lock()
+
+# Tier 1 = 20-min TTL during active hours; everything else = Yahoo-only
+_NEWSAPI_PRIORITY = {"XAU": 1, "XAG": 1}
+
+# Better search queries — raw "XAU"/"XAG" returns sparse results on NewsAPI
+_NEWSAPI_SEARCH_QUERIES = {
+    "XAU": "gold AND (price OR market OR ounce OR bullion OR futures OR commodity)",
+    "XAG": "silver AND (price OR market OR ounce OR bullion OR futures OR commodity)",
+}
+
+# Active monitoring: 08:00-22:00 CET = 07:00-21:00 UTC
+_NEWSAPI_ACTIVE_START_UTC = 7
+_NEWSAPI_ACTIVE_END_UTC = 21
 
 
 def newsapi_quota_ok() -> bool:
@@ -147,6 +163,33 @@ def newsapi_track_call():
                           _newsapi_daily_count, _NEWSAPI_DAILY_BUDGET)
 
 
+def newsapi_ttl_for_ticker(ticker: str):
+    """Dynamic TTL based on ticker priority and time of day.
+
+    Returns TTL in seconds, or None to skip NewsAPI for this ticker.
+    Tier 1 (metals): 20-min during active hours (08:00-22:00 CET).
+    Other tickers: None (Yahoo-only, saves budget for metals).
+    """
+    short = ticker.upper().replace("-USD", "")
+    priority = _NEWSAPI_PRIORITY.get(short)
+    if priority is None:
+        return None
+
+    from datetime import datetime, timezone
+    hour_utc = datetime.now(timezone.utc).hour
+    is_active = _NEWSAPI_ACTIVE_START_UTC <= hour_utc < _NEWSAPI_ACTIVE_END_UTC
+
+    if is_active:
+        return 1200  # 20 minutes
+    return None  # off-hours: Yahoo-only
+
+
+def newsapi_search_query(ticker: str) -> str:
+    """Optimized search query for NewsAPI. Falls back to ticker symbol."""
+    short = ticker.upper().replace("-USD", "")
+    return _NEWSAPI_SEARCH_QUERIES.get(short, short)
+
+
 # TTL constants for tool caching
 FUNDAMENTALS_TTL = 86400  # 24 hours
 ONCHAIN_TTL = 43200      # 12 hours (on-chain data updates slowly)
@@ -156,4 +199,4 @@ MINISTRAL_TTL = 900      # 15 min
 ML_SIGNAL_TTL = 900      # 15 min
 FUNDING_RATE_TTL = 900   # 15 min
 VOLUME_TTL = 300         # 5 min
-NEWSAPI_TTL = 1800       # 30 min — shared between sentiment and news_event callers
+NEWSAPI_TTL = 1800       # 30 min fallback — overridden by newsapi_ttl_for_ticker()
