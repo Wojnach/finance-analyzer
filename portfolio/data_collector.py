@@ -157,6 +157,45 @@ def alpaca_klines(ticker, interval="1d", limit=100):
 # --- yfinance API ---
 
 
+def fetch_vix():
+    """Fetch current VIX level via yfinance. Returns dict or None."""
+    try:
+        import yfinance as yf
+
+        vix = yf.Ticker("^VIX")
+        hist = vix.history(period="5d")
+        if hist is None or hist.empty:
+            return None
+        # Flatten MultiIndex columns if present
+        if isinstance(hist.columns, pd.MultiIndex):
+            hist.columns = hist.columns.get_level_values(0)
+        last = hist.iloc[-1]
+        prev = hist.iloc[-2] if len(hist) > 1 else last
+        current = float(last["Close"])
+        prev_close = float(prev["Close"])
+        change_pct = ((current - prev_close) / prev_close * 100) if prev_close > 0 else 0
+
+        # VIX regime classification
+        if current >= 30:
+            regime_hint = "high-vol"
+        elif current >= 20:
+            regime_hint = "elevated"
+        elif current >= 15:
+            regime_hint = "normal"
+        else:
+            regime_hint = "complacent"
+
+        return {
+            "value": round(current, 2),
+            "prev_close": round(prev_close, 2),
+            "change_pct": round(change_pct, 2),
+            "regime_hint": regime_hint,
+        }
+    except Exception as e:
+        logger.warning("VIX fetch failed: %s", e)
+        return None
+
+
 def yfinance_klines(ticker, interval="1d", limit=100):
     """Fetch candles via yfinance with extended-hours data (prepost=True).
 

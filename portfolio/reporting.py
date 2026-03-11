@@ -160,6 +160,16 @@ def write_agent_summary(
         fed = get_fed_calendar()
         if fed:
             macro["fed"] = fed
+        # VIX (CBOE Volatility Index) — market fear gauge
+        try:
+            from portfolio.data_collector import fetch_vix
+            vix = _cached("vix", 900, fetch_vix)  # 15min cache
+            if vix:
+                macro["vix"] = vix
+        except Exception:
+            logger.warning("[reporting] vix fetch failed", exc_info=True)
+            _module_warnings.append("vix")
+
         if macro:
             summary["macro"] = macro
     except Exception:
@@ -832,6 +842,14 @@ def _macro_headline(summary):
                 break
     if fg_vals:
         parts.append(f"F&G {'/'.join(fg_vals)}")
+
+    vix = macro.get("vix", {})
+    if vix:
+        vix_val = vix.get("value")
+        if vix_val is not None:
+            change = vix.get("change_pct", 0)
+            arrow = "↑" if change > 0 else "↓" if change < 0 else ""
+            parts.append(f"VIX {vix_val}{arrow}")
 
     fed = macro.get("fed", {})
     days = fed.get("days_until")
