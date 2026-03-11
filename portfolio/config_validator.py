@@ -23,6 +23,10 @@ REQUIRED_KEYS = [
 OPTIONAL_KEYS = [
     ("mistral_api_key",),
     ("iskbets",),
+    ("newsapi_key",),
+    ("alpha_vantage", "api_key"),
+    ("golddigger", "fred_api_key"),
+    ("bgeometrics", "api_token"),
 ]
 
 

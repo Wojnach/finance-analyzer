@@ -170,7 +170,9 @@ Full plan: `docs/plans/2026-02-09-llm-trading-research.md`
 
 ## Pending
 
-- [ ] **Get Alpha Vantage API key:** Sign up at https://www.alphavantage.co/support/#api-key (free tier, 25 req/day). Add key to `config.json` → `alpha_vantage.api_key`. Module is ready and integrated — just needs the key to start fetching.
+- [x] **Alpha Vantage API key:** Configured in `config.json → alpha_vantage.api_key` (free tier, 25 req/day). Module active and fetching. (Feb 25 → configured Mar 2026)
+- [x] **NewsAPI key:** Configured in `config.json → newsapi_key` (free tier, 100 req/day). Enhances stock sentiment + news_event signal #26 with broader headline coverage alongside Yahoo Finance fallback. (Mar 11, 2026)
+- [ ] **Avanza credentials:** Currently manual BankID login every ~24h via `scripts/avanza_login.py`. Plan: add `avanza.username` + `avanza.password` to `config.json` for automated TOTP-based session renewal.
 
 ---
 

@@ -136,6 +136,27 @@ Primary config: `config.json` (not in repo). Key domains:
 - `forecast.kronos_enabled`, `claude_fundamental.enabled`
 - `bigbet.enabled`, `iskbets.*`, `dashboard_token`
 
+### External API Integrations (all configured as of 2026-03-11)
+
+| Service | Config Key | Tier | Purpose |
+|---------|-----------|------|---------|
+| Binance | `exchange.key/secret` | Free | Crypto spot + FAPI futures (BTC, ETH, XAU, XAG) |
+| Alpaca | `alpaca.key/secret` | Paper | US stock OHLCV data (15 NASDAQ/NYSE tickers) |
+| Telegram | `telegram.token/chat_id` | Free | All Layer 2 notifications + digest |
+| Alpha Vantage | `alpha_vantage.api_key` | Free (25/day) | Stock fundamentals (P/E, revenue, analyst targets) |
+| NewsAPI | `newsapi_key` | Free (100/day) | Stock headlines for sentiment + news_event signal |
+| FRED | `golddigger.fred_api_key` | Free | US 10Y Treasury yield (DGS10) for GoldDigger |
+| BGeometrics | `bgeometrics.api_token` | Free (15/day) | Bitcoin on-chain (MVRV, SOPR, NUPL, netflow) |
+| Claude (CLI) | via Max subscription | Max sub | Claude Fundamental signal #29 (Haiku/Sonnet/Opus cascade) |
+| CryptoCompare | Public (no key) | Free | Crypto news headlines |
+| Yahoo Finance | Public (no key) | Free | Stock prices, VIX, news fallback |
+| Alternative.me | Public (no key) | Free | Crypto Fear & Greed Index |
+| Avanza | Playwright BankID session | Manual | Warrant + Nordic equity trading (manual login ~24h) |
+
+**Avanza auth:** Manual BankID login every ~24h via `scripts/avanza_login.py` (Playwright).
+Session stored in `data/avanza_storage_state.json`. Config `avanza.username/password/totp_secret`
+are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
+
 ## 7) Test Surface
 
 - ~3,168 tests across 105+ test files

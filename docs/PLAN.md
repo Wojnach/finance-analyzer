@@ -590,3 +590,50 @@ Files: `portfolio/reporting.py`
 - Add to macro section
 
 ### Priority: 1A+2A+3A+4A (parallel) → 1B+2B → 3B+4B
+
+## Addendum: Unify API Boilerplate (DRY Refactor)
+
+Updated: 2026-03-11
+
+### Problem
+
+9 API modules reinvent the same patterns instead of using existing shared infrastructure:
+- `http_retry.py` has `fetch_with_retry()` but callers duplicate JSON parsing + error handling (~12 blocks)
+- `shared_state.py` has `_cached()` but 3 modules roll their own TTL cache (~60 lines)
+- `circuit_breaker.py` exists but `alpha_vantage.py` reimplements it manually (~30 lines)
+- `api_utils.py` has `load_config()` but 3 modules load config.json themselves
+- Rate limiters exist in `shared_state.py` but `macro_context.py` uses `time.sleep()`
+
+### Batch 1: `fetch_json()` helper in `http_retry.py`
+
+Add `fetch_json()` that wraps `fetch_with_retry()` + `raise_for_status()` + `.json()`.
+
+Migrate callers (12 blocks across 9 files):
+- `data_collector.py` (2), `alpha_vantage.py` (1), `sentiment.py` (2),
+  `onchain_data.py` (1), `futures_data.py` (1), `fx_rates.py` (1),
+  `fear_greed.py` (1), `funding_rate.py` (1), `macro_context.py` (2)
+
+Risk: `data_collector.py` raises `ConnectionError` on None — `fetch_json()` returns
+`default` instead, so adjust callers that catch `ConnectionError`.
+
+### Batch 2: Delegate local caches to `shared_state._cached()`
+
+- `funding_rate.py`: `_cache` dict → `_cached("funding_rate_{ticker}", FUNDING_RATE_TTL, ...)`
+- `fx_rates.py`: `_fx_cache` dict → `_cached("fx_usd_sek", 900, ...)` (keep 10.85 fallback)
+- `macro_context.py`: 3 local caches → `_cached("macro_{metric}", 300, ...)`
+
+Risk: `fx_rates.py` has stale-data Telegram alerting — keep alert, delegate caching.
+
+### Batch 3: CircuitBreaker + config + rate limiters
+
+- `alpha_vantage.py`: manual CB → `CircuitBreaker("alpha_vantage", 3, 300)`
+- `onchain_data.py`: `json.loads(config.read_text())` → `api_utils.load_config()`
+- `macro_context.py`: `time.sleep(0.1/0.4)` → `_binance_limiter.wait()` / `_alpaca_limiter.wait()`
+
+Risk: `alpha_vantage.py` CB has daily budget tracking interleaved — keep budget separate.
+
+### Not Doing
+
+- Persistent file cache unification (unique per module, leave as-is)
+- Sentiment model paths → config (separate task)
+- Data collector source dispatch (correct design, not duplicated)
