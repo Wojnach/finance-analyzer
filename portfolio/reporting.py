@@ -384,6 +384,20 @@ def write_agent_summary(
         logger.warning("[reporting] monte_carlo failed", exc_info=True)
         _module_warnings.append("monte_carlo")
 
+    # Price targets for held positions and BUY-consensus tickers
+    try:
+        from portfolio.api_utils import load_config as _load_pt_cfg
+        _pt_cfg = _load_pt_cfg().get("price_targets", {})
+        if _pt_cfg.get("enabled", True):
+            from portfolio.price_targets import compute_all_targets
+            pt_results = compute_all_targets(summary,
+                {"patient": _patient_pf, "bold": _bold_pf}, _pt_cfg)
+            if pt_results:
+                summary["price_targets"] = pt_results
+    except Exception:
+        logger.warning("[reporting] price_targets failed", exc_info=True)
+        _module_warnings.append("price_targets")
+
     # Portfolio trade metrics (per-trade performance)
     try:
         from portfolio.equity_curve import compute_trade_metrics

@@ -669,6 +669,28 @@ if __name__ == "__main__":
             sys.exit(1)
         from portfolio.analyze import watch_positions
         watch_positions(pos_args)
+    elif "--price-targets" in args:
+        import json as _json
+        from pathlib import Path as _Path
+        _data = _Path("data")
+        _summary = _json.loads((_data / "agent_summary.json").read_text(encoding="utf-8"))
+        _patient = _json.loads((_data / "portfolio_state.json").read_text(encoding="utf-8"))
+        _bold = _json.loads((_data / "portfolio_state_bold.json").read_text(encoding="utf-8"))
+        from portfolio.price_targets import compute_all_targets
+        from portfolio.api_utils import load_config as _pt_load
+        _pt_cfg = _pt_load().get("price_targets", {})
+        results = compute_all_targets(_summary, {"patient": _patient, "bold": _bold}, _pt_cfg)
+        for ticker, data in (results or {}).items():
+            side = data["side"].upper()
+            print(f"\n=== {ticker} {side} @ ${data['price_usd']:.2f} ({data['hours_remaining']:.1f}h left) ===")
+            ext = data.get("extremes", {})
+            label = "Running max" if data["side"] == "sell" else "Running min"
+            print(f"{label}: p25=${ext.get('p25',0):.2f}  p50=${ext.get('p50',0):.2f}  p75=${ext.get('p75',0):.2f}  p90=${ext.get('p90',0):.2f}")
+            for t in data.get("targets", [])[:5]:
+                print(f"  {t['label']:<14} ${t['price']:.2f}  fill={t['fill_prob']:.0%}  EV={t['ev_sek']:+,.0f} SEK")
+            rec = data.get("recommended")
+            if rec:
+                print(f"  >>> RECOMMENDED: ${rec['price']:.2f}  fill={rec['fill_prob']:.0%}  EV={rec['ev_sek']:+,.0f} SEK")
     elif "--avanza-status" in args:
         from portfolio.avanza_client import get_positions, get_portfolio_value
         positions = get_positions()
