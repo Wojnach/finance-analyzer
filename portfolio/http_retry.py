@@ -63,3 +63,26 @@ def fetch_with_retry(url, method="GET", retries=DEFAULT_RETRIES,
                 return None
 
     return None
+
+
+def fetch_json(url, *, method="GET", retries=DEFAULT_RETRIES, default=None,
+               label="", headers=None, params=None, timeout=30, session=None,
+               **kwargs):
+    """Fetch URL and return parsed JSON, or ``default`` on any failure.
+
+    Combines fetch_with_retry() + raise_for_status() + .json() into one call.
+    """
+    resp = fetch_with_retry(url, method=method, retries=retries, timeout=timeout,
+                            headers=headers, params=params, session=session)
+    if resp is None:
+        if label:
+            logger.warning("[%s] request returned None", label)
+        return default
+    try:
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        if label:
+            logger.warning("[%s] HTTP %s or JSON parse error: %s", label,
+                           getattr(resp, 'status_code', '?'), e)
+        return default

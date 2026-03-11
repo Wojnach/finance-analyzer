@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 import platform
 from pathlib import Path
 
-from portfolio.http_retry import fetch_with_retry
+from portfolio.http_retry import fetch_json
 
 logger = logging.getLogger("portfolio.sentiment")
 
@@ -80,14 +80,14 @@ def _is_crypto(ticker):
 def _fetch_crypto_headlines(ticker="BTC", limit=20):
     category = TICKER_CATEGORIES.get(ticker.upper(), ticker.upper())
     url = f"{CRYPTOCOMPARE_URL}&categories={category}"
-    r = fetch_with_retry(
+    data = fetch_json(
         url,
         headers={"User-Agent": "Mozilla/5.0"},
         timeout=15,
+        label="crypto_headlines",
     )
-    if r is None:
+    if data is None:
         return []
-    data = r.json()
     raw = data.get("Data", [])
     articles = list(raw)[:limit] if isinstance(raw, list) else []
     return [
@@ -135,14 +135,14 @@ def _fetch_newsapi_headlines(ticker, api_key, limit=10):
         f"https://newsapi.org/v2/everything?"
         f"q={ticker}&language=en&sortBy=publishedAt&pageSize={limit}"
     )
-    r = fetch_with_retry(
+    data = fetch_json(
         url,
         headers={"User-Agent": "Mozilla/5.0", "X-Api-Key": api_key},
         timeout=15,
+        label="newsapi",
     )
-    if r is None:
+    if data is None:
         return []
-    data = r.json()
     articles = data.get("articles", [])
     return [
         {

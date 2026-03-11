@@ -18,7 +18,7 @@ import logging
 import time
 from pathlib import Path
 
-from portfolio.http_retry import fetch_with_retry
+from portfolio.http_retry import fetch_json
 from portfolio.shared_state import _cached
 
 logger = logging.getLogger("portfolio.onchain_data")
@@ -78,22 +78,13 @@ def _load_onchain_cache(max_age_seconds=ONCHAIN_TTL):
 def _api_get(endpoint, token, params=None):
     """Make authenticated GET request to BGeometrics API.
 
-    Uses fetch_with_retry but skips retries on 429 (rate limit) since
-    retrying just burns more of the 8 req/hour free tier budget.
+    Skips retries on failure since retrying just burns more of the
+    8 req/hour free tier budget.
     """
     url = f"{API_BASE}{endpoint}"
     headers = {"Authorization": f"Bearer {token}"}
-    resp = fetch_with_retry(url, headers=headers, params=params, timeout=15,
-                            retries=0)  # No retries — rate limit is tight
-    if resp is None or resp.status_code != 200:
-        status = resp.status_code if resp else "no response"
-        logger.warning("BGeometrics %s returned %s", endpoint, status)
-        return None
-    try:
-        return resp.json()
-    except Exception:
-        logger.warning("BGeometrics %s invalid JSON", endpoint)
-        return None
+    return fetch_json(url, headers=headers, params=params, timeout=15,
+                      retries=0, label=f"bgeometrics:{endpoint}")
 
 
 def _fetch_mvrv(token):

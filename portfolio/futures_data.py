@@ -1,14 +1,14 @@
 """Binance FAPI futures data — open interest, long/short ratios, funding history.
 
 Fetches public endpoints for crypto tickers (BTC-USD, ETH-USD only).
-Uses existing infrastructure: fetch_with_retry, _cached, _binance_limiter.
+Uses existing infrastructure: fetch_json, _cached, _binance_limiter.
 """
 
 import logging
 import time
 
 from portfolio.api_utils import BINANCE_FAPI_BASE, BINANCE_FUTURES_DATA
-from portfolio.http_retry import fetch_with_retry
+from portfolio.http_retry import fetch_json
 from portfolio.shared_state import _cached, _binance_limiter
 
 logger = logging.getLogger("portfolio.futures_data")
@@ -27,13 +27,7 @@ _FUNDING_TTL = 900   # 15 min
 def _fetch_json(url, params=None, timeout=10):
     """Fetch JSON from Binance FAPI with rate limiting and retry."""
     _binance_limiter.wait()
-    r = fetch_with_retry(url, params=params, timeout=timeout)
-    if r is None:
-        return None
-    if r.status_code != 200:
-        logger.warning("Binance FAPI %s returned %d", url, r.status_code)
-        return None
-    return r.json()
+    return fetch_json(url, params=params, timeout=timeout, label="binance_fapi")
 
 
 def get_open_interest(ticker):

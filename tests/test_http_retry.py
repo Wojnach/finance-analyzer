@@ -21,6 +21,7 @@ import requests
 
 from portfolio.http_retry import (
     fetch_with_retry,
+    fetch_json,
     RETRYABLE_STATUS,
     DEFAULT_RETRIES,
     DEFAULT_BACKOFF,
@@ -754,3 +755,152 @@ class TestDefaultConstants:
 
         # 1 initial + 3 retries = 4 total calls
         assert mock_req.get.call_count == 4
+
+
+# ---------------------------------------------------------------------------
+# fetch_json() tests
+# ---------------------------------------------------------------------------
+
+class TestFetchJsonSuccess:
+    def test_returns_parsed_json_on_200(self):
+        """Successful 200 response returns parsed JSON body."""
+        mock_resp = _mock_response(200)
+        mock_resp.json.return_value = {"key": "value"}
+        mock_resp.raise_for_status.return_value = None
+
+        with patch("portfolio.http_retry.requests") as mock_req:
+            mock_req.get.return_value = mock_resp
+            result = fetch_json("https://api.example.com/data")
+
+        assert result == {"key": "value"}
+
+    def test_returns_list_json(self):
+        """JSON arrays are returned correctly."""
+        mock_resp = _mock_response(200)
+        mock_resp.json.return_value = [1, 2, 3]
+        mock_resp.raise_for_status.return_value = None
+
+        with patch("portfolio.http_retry.requests") as mock_req:
+            mock_req.get.return_value = mock_resp
+            result = fetch_json("https://api.example.com/data")
+
+        assert result == [1, 2, 3]
+
+    def test_passes_params_and_headers(self):
+        """Parameters and headers are forwarded to fetch_with_retry."""
+        mock_resp = _mock_response(200)
+        mock_resp.json.return_value = {}
+        mock_resp.raise_for_status.return_value = None
+
+        with patch("portfolio.http_retry.requests") as mock_req:
+            mock_req.get.return_value = mock_resp
+            fetch_json("https://api.example.com/data",
+                        headers={"X-Key": "abc"}, params={"q": "1"})
+
+        _, kwargs = mock_req.get.call_args
+        assert kwargs["headers"] == {"X-Key": "abc"}
+        assert kwargs["params"] == {"q": "1"}
+
+
+class TestFetchJsonNoneResponse:
+    def test_returns_default_on_none_response(self):
+        """When fetch_with_retry returns None, return the default value."""
+        with patch("portfolio.http_retry.requests") as mock_req:
+            mock_req.get.return_value = _mock_response(503)
+            mock_req.get.return_value = None
+            # Simulate fetch_with_retry returning None
+            with patch("portfolio.http_retry.fetch_with_retry", return_value=None):
+                result = fetch_json("https://api.example.com/data")
+
+        assert result is None
+
+    def test_returns_custom_default_on_none_response(self):
+        """Custom default value is returned when response is None."""
+        with patch("portfolio.http_retry.fetch_with_retry", return_value=None):
+            result = fetch_json("https://api.example.com/data", default=[])
+
+        assert result == []
+
+    def test_returns_empty_dict_default(self):
+        """Empty dict default works."""
+        with patch("portfolio.http_retry.fetch_with_retry", return_value=None):
+            result = fetch_json("https://api.example.com/data", default={})
+
+        assert result == {}
+
+
+class TestFetchJsonNon200:
+    def test_returns_default_on_non_200_status(self):
+        """Non-200 status (raise_for_status raises) returns default."""
+        mock_resp = _mock_response(404)
+        mock_resp.raise_for_status.side_effect = Exception("404 Client Error")
+
+        with patch("portfolio.http_retry.fetch_with_retry", return_value=mock_resp):
+            result = fetch_json("https://api.example.com/data")
+
+        assert result is None
+
+    def test_returns_custom_default_on_non_200(self):
+        """Custom default returned on non-200."""
+        mock_resp = _mock_response(500)
+        mock_resp.raise_for_status.side_effect = Exception("500 Server Error")
+
+        with patch("portfolio.http_retry.fetch_with_retry", return_value=mock_resp):
+            result = fetch_json("https://api.example.com/data", default="fallback")
+
+        assert result == "fallback"
+
+
+class TestFetchJsonInvalidBody:
+    def test_returns_default_on_invalid_json(self):
+        """When .json() raises, return default."""
+        mock_resp = _mock_response(200)
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.side_effect = ValueError("No JSON object could be decoded")
+
+        with patch("portfolio.http_retry.fetch_with_retry", return_value=mock_resp):
+            result = fetch_json("https://api.example.com/data")
+
+        assert result is None
+
+
+class TestFetchJsonLogging:
+    def test_logs_warning_with_label_on_none_response(self):
+        """When label is provided and response is None, a warning is logged."""
+        with patch("portfolio.http_retry.fetch_with_retry", return_value=None), \
+             patch("portfolio.http_retry.logger") as mock_logger:
+            fetch_json("https://api.example.com/data", label="test_api")
+
+        mock_logger.warning.assert_called_once()
+        assert "test_api" in mock_logger.warning.call_args[0][1]
+
+    def test_no_warning_without_label_on_none_response(self):
+        """When no label and response is None, no warning is logged."""
+        with patch("portfolio.http_retry.fetch_with_retry", return_value=None), \
+             patch("portfolio.http_retry.logger") as mock_logger:
+            fetch_json("https://api.example.com/data")
+
+        mock_logger.warning.assert_not_called()
+
+    def test_logs_warning_with_label_on_http_error(self):
+        """When label is provided and raise_for_status fails, a warning is logged."""
+        mock_resp = _mock_response(500)
+        mock_resp.raise_for_status.side_effect = Exception("500 error")
+
+        with patch("portfolio.http_retry.fetch_with_retry", return_value=mock_resp), \
+             patch("portfolio.http_retry.logger") as mock_logger:
+            fetch_json("https://api.example.com/data", label="my_svc")
+
+        mock_logger.warning.assert_called_once()
+        assert "my_svc" in mock_logger.warning.call_args[0][1]
+
+    def test_no_warning_without_label_on_http_error(self):
+        """When no label and raise_for_status fails, no warning is logged."""
+        mock_resp = _mock_response(500)
+        mock_resp.raise_for_status.side_effect = Exception("500 error")
+
+        with patch("portfolio.http_retry.fetch_with_retry", return_value=mock_resp), \
+             patch("portfolio.http_retry.logger") as mock_logger:
+            fetch_json("https://api.example.com/data")
+
+        mock_logger.warning.assert_not_called()

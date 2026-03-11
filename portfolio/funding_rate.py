@@ -1,7 +1,7 @@
 import time
 
 from portfolio.api_utils import BINANCE_FAPI_BASE as BINANCE_FAPI
-from portfolio.http_retry import fetch_with_retry
+from portfolio.http_retry import fetch_json
 SYMBOL_MAP = {
     "BTC-USD": "BTCUSDT",
     "ETH-USD": "ETHUSDT",
@@ -21,15 +21,14 @@ def get_funding_rate(ticker):
         return cached["data"]
 
     symbol = SYMBOL_MAP[ticker]
-    r = fetch_with_retry(
+    data = fetch_json(
         f"{BINANCE_FAPI}/premiumIndex",
         params={"symbol": symbol},
         timeout=10,
+        label="funding_rate",
     )
-    if r is None:
+    if data is None:
         return None
-    r.raise_for_status()
-    data = r.json()
 
     rate = float(data["lastFundingRate"])
     # Normal funding ~0.01% (0.0001). Thresholds:

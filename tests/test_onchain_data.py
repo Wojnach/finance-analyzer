@@ -25,88 +25,88 @@ def _mock_response(json_data, status_code=200):
 class TestFetchOnchainData:
     """Tests for individual metric fetch functions."""
 
-    @patch("portfolio.onchain_data.fetch_with_retry")
+    @patch("portfolio.onchain_data.fetch_json")
     def test_fetch_mvrv_success(self, mock_fetch):
-        mock_fetch.return_value = _mock_response({
+        mock_fetch.return_value = {
             "d": "2026-03-01",
             "mvrv": 1.85,
             "mvrvZScore": 0.42,
-        })
+        }
         from portfolio.onchain_data import _fetch_mvrv
         result = _fetch_mvrv("test_token")
         assert result is not None
         assert result["mvrv"] == 1.85
         assert result["mvrv_zscore"] == 0.42
 
-    @patch("portfolio.onchain_data.fetch_with_retry")
+    @patch("portfolio.onchain_data.fetch_json")
     def test_fetch_mvrv_failure(self, mock_fetch):
-        mock_fetch.return_value = _mock_response({}, status_code=401)
+        mock_fetch.return_value = None
         from portfolio.onchain_data import _fetch_mvrv
         result = _fetch_mvrv("bad_token")
         assert result is None
 
-    @patch("portfolio.onchain_data.fetch_with_retry")
+    @patch("portfolio.onchain_data.fetch_json")
     def test_fetch_mvrv_network_error(self, mock_fetch):
         mock_fetch.return_value = None
         from portfolio.onchain_data import _fetch_mvrv
         result = _fetch_mvrv("token")
         assert result is None
 
-    @patch("portfolio.onchain_data.fetch_with_retry")
+    @patch("portfolio.onchain_data.fetch_json")
     def test_fetch_sopr_success(self, mock_fetch):
-        mock_fetch.return_value = _mock_response({
+        mock_fetch.return_value = {
             "d": "2026-03-01",
             "sopr": 1.02,
-        })
+        }
         from portfolio.onchain_data import _fetch_sopr
         result = _fetch_sopr("token")
         assert result is not None
         assert result["sopr"] == 1.02
 
-    @patch("portfolio.onchain_data.fetch_with_retry")
+    @patch("portfolio.onchain_data.fetch_json")
     def test_fetch_nupl_success(self, mock_fetch):
-        mock_fetch.return_value = _mock_response({
+        mock_fetch.return_value = {
             "d": "2026-03-01",
             "nupl": 0.45,
-        })
+        }
         from portfolio.onchain_data import _fetch_nupl
         result = _fetch_nupl("token")
         assert result is not None
         assert result["nupl"] == 0.45
 
-    @patch("portfolio.onchain_data.fetch_with_retry")
+    @patch("portfolio.onchain_data.fetch_json")
     def test_fetch_realized_price_success(self, mock_fetch):
-        mock_fetch.return_value = _mock_response({
+        mock_fetch.return_value = {
             "d": "2026-03-01",
             "realizedPrice": 30500.0,
-        })
+        }
         from portfolio.onchain_data import _fetch_realized_price
         result = _fetch_realized_price("token")
         assert result is not None
         assert result["realized_price"] == 30500.0
 
-    @patch("portfolio.onchain_data.fetch_with_retry")
+    @patch("portfolio.onchain_data.fetch_json")
     def test_fetch_exchange_netflow_success(self, mock_fetch):
-        mock_fetch.return_value = _mock_response([
+        mock_fetch.return_value = [
             {"d": "2026-03-01", "netflow": -1250.5},
-        ])
+        ]
         from portfolio.onchain_data import _fetch_exchange_netflow
         result = _fetch_exchange_netflow("token")
         assert result is not None
         assert result["netflow"] == -1250.5
 
-    @patch("portfolio.onchain_data.fetch_with_retry")
+    @patch("portfolio.onchain_data.fetch_json")
     def test_fetch_exchange_netflow_empty_list(self, mock_fetch):
-        mock_fetch.return_value = _mock_response([])
+        mock_fetch.return_value = []
         from portfolio.onchain_data import _fetch_exchange_netflow
         result = _fetch_exchange_netflow("token")
         assert result is None
 
-    @patch("portfolio.onchain_data.fetch_with_retry")
+    @patch("portfolio.onchain_data.fetch_json")
     def test_fetch_liquidations_success(self, mock_fetch):
-        mock_fetch.return_value = _mock_response([
+        mock_fetch.return_value = [
             {"d": "2026-03-01", "longLiquidations": 15000000, "shortLiquidations": 8000000},
-        ])
+        ]
         from portfolio.onchain_data import _fetch_liquidations
         result = _fetch_liquidations("token")
         assert result is not None
