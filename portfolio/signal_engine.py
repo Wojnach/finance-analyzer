@@ -410,6 +410,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     votes = {}
     extra_info = {}
 
+    # Compute regime early so F&G gating and other sections can use it
+    regime = detect_regime(ind, is_crypto=ticker in CRYPTO_SYMBOLS)
+
     # RSI — only votes at extremes (adaptive thresholds from rolling percentiles)
     rsi_lower = ind.get("rsi_p20", 30)
     rsi_upper = ind.get("rsi_p80", 70)
@@ -450,6 +453,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     # --- Extended signals from tools (optional) ---
 
     # Fear & Greed Index (per-ticker: crypto->alternative.me, stocks->VIX)
+    # Gated: F&G has 31.4% accuracy overall. It's auto-inverted (~69% contrarian)
+    # but in trending markets contrarian signals fight the trend and lose.
+    # Only allow F&G to vote in ranging/high-vol regimes where mean reversion works.
     votes["fear_greed"] = "HOLD"
     try:
         from portfolio.fear_greed import get_fear_greed
@@ -459,7 +465,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
         if fg:
             extra_info["fear_greed"] = fg["value"]
             extra_info["fear_greed_class"] = fg["classification"]
-            if fg["value"] <= 20:
+            # Gate: suppress F&G votes in trending regimes
+            if regime in ("trending-up", "trending-down"):
+                extra_info["fear_greed_gated"] = regime
+                votes["fear_greed"] = "HOLD"
+            elif fg["value"] <= 20:
                 votes["fear_greed"] = "BUY"
             elif fg["value"] >= 80:
                 votes["fear_greed"] = "SELL"
@@ -751,7 +761,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             conf = max(buy_conf, sell_conf)
 
     # Weighted consensus using accuracy data, regime, and activation frequency
-    regime = detect_regime(ind, is_crypto=ticker in CRYPTO_SYMBOLS)
+    # (regime already computed early in the function for F&G gating)
     accuracy_data = {}
     activation_rates = {}
     try:
