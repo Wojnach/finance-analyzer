@@ -17,6 +17,7 @@ from portfolio.alpha_vantage import (
     refresh_fundamentals_batch,
     should_batch_refresh,
 )
+from portfolio.circuit_breaker import State as _CBState
 from portfolio.signals.claude_fundamental import _build_fundamentals_block
 
 
@@ -236,8 +237,9 @@ class TestBatchRefresh:
             alpha_vantage._cache.clear()
         alpha_vantage._daily_budget_used = 0
         alpha_vantage._budget_reset_date = ""
-        alpha_vantage._circuit_breaker_failures = 0
-        alpha_vantage._circuit_breaker_paused_until = 0.0
+        alpha_vantage._cb._state = _CBState.CLOSED
+        alpha_vantage._cb._failure_count = 0
+        alpha_vantage._cb._last_failure_time = None
 
     def _make_config(self, **overrides):
         cfg = {
@@ -298,17 +300,24 @@ class TestBatchRefresh:
     @patch("portfolio.alpha_vantage._save_persistent_cache")
     @patch("portfolio.alpha_vantage._alpha_vantage_limiter")
     def test_circuit_breaker_trips(self, mock_limiter, mock_save, mock_fetch):
+        # Reset circuit breaker to clean state
+        alpha_vantage._cb._state = _CBState.CLOSED
+        alpha_vantage._cb._failure_count = 0
         mock_fetch.return_value = None  # simulate failure
         config = self._make_config()
         count = refresh_fundamentals_batch(config)
         assert count == 0
-        assert alpha_vantage._circuit_breaker_paused_until > time.time()
+        assert not alpha_vantage._cb.allow_request()
 
     @patch("portfolio.alpha_vantage._fetch_overview")
     @patch("portfolio.alpha_vantage._save_persistent_cache")
     @patch("portfolio.alpha_vantage._alpha_vantage_limiter")
     def test_circuit_breaker_blocks(self, mock_limiter, mock_save, mock_fetch):
-        alpha_vantage._circuit_breaker_paused_until = time.time() + 300
+        # Reset and then trip the circuit breaker
+        alpha_vantage._cb._state = _CBState.CLOSED
+        alpha_vantage._cb._failure_count = 0
+        for _ in range(alpha_vantage._cb.failure_threshold):
+            alpha_vantage._cb.record_failure()
         config = self._make_config()
         count = refresh_fundamentals_batch(config)
         assert count == 0

@@ -18,6 +18,7 @@ import logging
 import time
 from pathlib import Path
 
+from portfolio.api_utils import load_config as _load_config
 from portfolio.http_retry import fetch_json
 from portfolio.shared_state import _cached
 
@@ -38,7 +39,7 @@ ONCHAIN_TTL = 43200  # 12 hours
 def _load_config_token():
     """Load BGeometrics API token from config.json."""
     try:
-        config = json.loads((BASE_DIR / "config.json").read_text(encoding="utf-8"))
+        config = _load_config()
         token = config.get("bgeometrics", {}).get("api_token", "")
         return token if token else None
     except Exception:

@@ -13,6 +13,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
+from portfolio.circuit_breaker import CircuitBreaker
 from portfolio.http_retry import fetch_with_retry
 from portfolio.shared_state import _alpha_vantage_limiter
 from portfolio.tickers import STOCK_SYMBOLS
@@ -30,8 +31,7 @@ _cache = {}  # ticker -> normalized fundamentals dict
 _cache_lock = threading.Lock()
 _daily_budget_used = 0
 _budget_reset_date = ""  # ISO date string for budget tracking
-_circuit_breaker_failures = 0
-_circuit_breaker_paused_until = 0.0
+_cb = CircuitBreaker("alpha_vantage", failure_threshold=3, recovery_timeout=300)
 
 
 def load_persistent_cache():
@@ -207,7 +207,7 @@ def refresh_fundamentals_batch(config):
     Respects rate limits (5/min) and daily budget (25/day).
     Returns number of successfully refreshed tickers.
     """
-    global _daily_budget_used, _circuit_breaker_failures, _circuit_breaker_paused_until
+    global _daily_budget_used
 
     av_config = config.get("alpha_vantage", {})
     if not av_config.get("enabled", True):
@@ -225,9 +225,8 @@ def refresh_fundamentals_batch(config):
     cache_ttl_hours = av_config.get("cache_ttl_hours", 24)
 
     # Check circuit breaker
-    if time.time() < _circuit_breaker_paused_until:
-        remaining = int(_circuit_breaker_paused_until - time.time())
-        logger.info("Alpha Vantage circuit breaker active, %ds remaining", remaining)
+    if not _cb.allow_request():
+        logger.info("Alpha Vantage circuit breaker active (%s)", _cb.state.value)
         return 0
 
     budget_used = _check_budget()
@@ -265,27 +264,23 @@ def refresh_fundamentals_batch(config):
         try:
             raw = _fetch_overview(ticker, api_key)
             if raw is None:
-                _circuit_breaker_failures += 1
-                if _circuit_breaker_failures >= 3:
-                    _circuit_breaker_paused_until = time.time() + 300  # 5 min pause
-                    logger.warning("Alpha Vantage circuit breaker tripped after %d failures", _circuit_breaker_failures)
+                _cb.record_failure()
+                if not _cb.allow_request():
                     break
                 continue
 
             normalized = _normalize_overview(raw)
             if normalized is None:
                 logger.warning("Alpha Vantage: empty/error response for %s", ticker)
-                _circuit_breaker_failures += 1
-                if _circuit_breaker_failures >= 3:
-                    _circuit_breaker_paused_until = time.time() + 300
-                    logger.warning("Alpha Vantage circuit breaker tripped after %d failures", _circuit_breaker_failures)
+                _cb.record_failure()
+                if not _cb.allow_request():
                     break
                 continue
 
             with _cache_lock:
                 _cache[ticker] = normalized
             _daily_budget_used += 1
-            _circuit_breaker_failures = 0  # reset on success
+            _cb.record_success()
             success_count += 1
             logger.info("Refreshed fundamentals for %s (PE=%.1f, sector=%s)",
                         ticker,
@@ -294,10 +289,8 @@ def refresh_fundamentals_batch(config):
 
         except Exception as e:
             logger.warning("Alpha Vantage fetch failed for %s: %s", ticker, e)
-            _circuit_breaker_failures += 1
-            if _circuit_breaker_failures >= 3:
-                _circuit_breaker_paused_until = time.time() + 300
-                logger.warning("Alpha Vantage circuit breaker tripped")
+            _cb.record_failure()
+            if not _cb.allow_request():
                 break
 
     if success_count > 0:

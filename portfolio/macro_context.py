@@ -1,13 +1,13 @@
 import json
 import logging
-import time
 from pathlib import Path
 
 import pandas as pd
 
 from portfolio.api_utils import get_alpaca_headers, load_config, BINANCE_BASE, BINANCE_FAPI_BASE, ALPACA_BASE
 from portfolio.http_retry import fetch_with_retry
-from portfolio.shared_state import _cached, _yfinance_limiter, VOLUME_TTL as _VOLUME_TTL
+from portfolio.shared_state import (_cached, _binance_limiter, _alpaca_limiter,
+                                    _yfinance_limiter, VOLUME_TTL as _VOLUME_TTL)
 
 logger = logging.getLogger("portfolio.macro_context")
 
@@ -62,7 +62,7 @@ def _fetch_klines(ticker):
     source_type, symbol = TICKER_MAP.get(ticker, (None, None))
     if source_type in ("binance", "binance_fapi"):
         base_url = BINANCE_FAPI_BASE if source_type == "binance_fapi" else BINANCE_BASE
-        time.sleep(0.1)  # rate limit: space out Binance calls
+        _binance_limiter.wait()
         r = fetch_with_retry(
             f"{base_url}/klines",
             params={"symbol": symbol, "interval": "15m", "limit": 100},
@@ -95,7 +95,7 @@ def _fetch_klines(ticker):
     elif source_type == "alpaca":
         from datetime import datetime, timezone
 
-        time.sleep(0.4)  # rate limit: space out Alpaca calls (150/min target)
+        _alpaca_limiter.wait()
         end = datetime.now(timezone.utc)
         start = end - pd.Timedelta(days=5)
         r = fetch_with_retry(
