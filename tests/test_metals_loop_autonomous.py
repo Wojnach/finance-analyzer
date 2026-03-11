@@ -279,6 +279,47 @@ class TestBuildAutonomousTelegram:
         )
         assert "Ministral BUY (65%)" in msg
 
+    def test_probability_and_accuracy_in_message(self):
+        from metals_loop import _build_autonomous_telegram
+        llm = {"XAG-USD": {"ministral": "BUY", "ministral_conf": 0.65,
+                           "chronos_3h": "up", "chronos_3h_pct": 0.008}}
+        prob = {"XAG-USD": {"prob_up_pct": 68, "prob_down_pct": 32}}
+        llm_acc = {"ministral_1h": {"correct": 36, "total": 50, "accuracy": 0.72},
+                   "chronos_3h": {"correct": 29, "total": 50, "accuracy": 0.58}}
+        sig_acc = {"main_XAG_1h": {"correct": 58, "total": 89, "accuracy": 0.652}}
+        msg = _build_autonomous_telegram(
+            ["test"], 1, {}, {}, llm, {},
+            {"action": "HOLD"}, "NEUTRAL", "10:00 CET", False,
+            prob_report=prob, llm_accuracy=llm_acc, signal_accuracy=sig_acc,
+        )
+        assert "XAG probability: ↑68% ↓32%" in msg
+        assert "accuracy 72% (50 sam)" in msg
+        assert "accuracy 58% (50 sam)" in msg
+        assert "Signal consensus: 65% accuracy (89 sam)" in msg
+
+    def test_accuracy_omitted_when_few_samples(self):
+        from metals_loop import _build_autonomous_telegram
+        llm = {"XAG-USD": {"ministral": "HOLD", "ministral_conf": 0.6}}
+        llm_acc = {"ministral_1h": {"correct": 2, "total": 3, "accuracy": 0.667}}
+        msg = _build_autonomous_telegram(
+            ["test"], 1, {}, {}, llm, {},
+            {"action": "HOLD"}, "NEUTRAL", "10:00 CET", False,
+            llm_accuracy=llm_acc,
+        )
+        assert "Ministral HOLD (60%)" in msg
+        assert "accuracy" not in msg
+
+    def test_graceful_fallback_no_accuracy_data(self):
+        from metals_loop import _build_autonomous_telegram
+        llm = {"XAG-USD": {"ministral": "BUY", "ministral_conf": 0.65}}
+        msg = _build_autonomous_telegram(
+            ["test"], 1, {}, {}, llm, {},
+            {"action": "HOLD"}, "NEUTRAL", "10:00 CET", False,
+        )
+        assert "Ministral BUY (65%)" in msg
+        # No crash, no accuracy line
+        assert "accuracy" not in msg
+
     def test_risk_in_message(self):
         from metals_loop import _build_autonomous_telegram
         risk = {"drawdown_pct": -4.2}
@@ -330,10 +371,19 @@ class TestBuildAutonomousTelegram:
             },
         }
         risk = {"drawdown_pct": -4.2, "silver_sg_mc_pstop3h": 2.1}
+        prob = {
+            "XAG-USD": {"prob_up_pct": 68, "prob_down_pct": 32},
+        }
+        llm_acc = {
+            "ministral_1h": {"correct": 36, "total": 50, "accuracy": 0.72},
+            "chronos_3h": {"correct": 29, "total": 50, "accuracy": 0.58},
+        }
+        sig_acc = {"main_XAG_1h": {"correct": 58, "total": 89, "accuracy": 0.652}}
         msg = _build_autonomous_telegram(
             ["heartbeat check #80"], 1, positions, signals, llm, risk,
             {"action": "HOLD", "direction": "up", "confidence": 0.6},
             "INTACT", "14:35 CET", False,
+            prob_report=prob, llm_accuracy=llm_acc, signal_accuracy=sig_acc,
         )
         assert len(msg) < 4096
 

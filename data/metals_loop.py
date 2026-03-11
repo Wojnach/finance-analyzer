@@ -3004,7 +3004,8 @@ def _assess_thesis(positions_data, signals_data, trigger_reasons):
 
 def _build_autonomous_telegram(trigger_reasons, tier, positions_data, signals_data,
                                 llm_data, risk_data, prediction, thesis_status,
-                                cet_str, is_emergency):
+                                cet_str, is_emergency,
+                                prob_report=None, llm_accuracy=None, signal_accuracy=None):
     """Build a rich Telegram message for autonomous mode."""
     action_str = prediction.get("action", "HOLD")
     emergency_tag = " EMG" if is_emergency else ""
@@ -3058,23 +3059,51 @@ def _build_autonomous_telegram(trigger_reasons, tier, positions_data, signals_da
         sig_parts.append(f"{short_t} {sig['action']} ({votes} votes)")
     sig_line = f"Signal votes: {' | '.join(sig_parts[:3])}" if sig_parts else ""
 
-    # LLM line
-    llm_parts = []
+    # Probability + accuracy block (replaces old "AI view" line)
+    prob_lines = []
+    _llm_acc = llm_accuracy or {}
+    _sig_acc = signal_accuracy or {}
+    _prob = prob_report or {}
+
     for ticker, data in llm_data.items():
         if ticker.startswith("_"):
             continue
-        ticker_parts = []
+        short = ticker.split("-")[0] if "-" in ticker else ticker
+
+        # Probability headline from prob_report
+        pr = _prob.get(ticker, {})
+        prob_up = pr.get("prob_up_pct")
+        prob_down = pr.get("prob_down_pct")
+        if prob_up is not None and prob_down is not None:
+            prob_lines.append(f"{short} probability: ↑{prob_up:.0f}% ↓{prob_down:.0f}%")
+
+        # Ministral with accuracy
         if "ministral" in data:
             conf = data.get("ministral_conf", 0)
-            ticker_parts.append(f"Ministral {data['ministral']} ({conf:.0%})")
+            min_part = f"Ministral {data['ministral']} ({conf:.0%})"
+            min_acc = _llm_acc.get("ministral_1h", {})
+            if min_acc.get("total", 0) >= 5:
+                min_part += f" · accuracy {min_acc['accuracy']:.0%} ({min_acc['total']} sam)"
+            prob_lines.append(f"`{min_part}`")
+
+        # Chronos with accuracy
         if "chronos_3h" in data:
             pct = data.get("chronos_3h_pct", 0)
             direction = data["chronos_3h"]
             move = f"{pct:+.1f}%" if direction in ("up", "down") else f"{abs(pct):.1f}%"
-            ticker_parts.append(f"Chronos {direction} {move} over 3h")
-        if ticker_parts:
-            llm_parts.append(f"{humanize_ticker(ticker)}: {', '.join(ticker_parts)}")
-    llm_line = f"AI view: {' | '.join(llm_parts[:3])}" if llm_parts else ""
+            chr_part = f"Chronos {direction} {move} 3h"
+            chr_acc = _llm_acc.get("chronos_3h", {})
+            if chr_acc.get("total", 0) >= 5:
+                chr_part += f" · accuracy {chr_acc['accuracy']:.0%} ({chr_acc['total']} sam)"
+            prob_lines.append(f"`{chr_part}`")
+
+        # Signal consensus accuracy from signal tracker
+        cons_key = f"main_{short}_1h"
+        cons_acc = _sig_acc.get(cons_key, {})
+        if cons_acc.get("total", 0) >= 5:
+            prob_lines.append(
+                f"`Signal consensus: {cons_acc['accuracy']:.0%} accuracy ({cons_acc['total']} sam)`"
+            )
 
     # Risk line
     risk_parts = []
@@ -3088,10 +3117,12 @@ def _build_autonomous_telegram(trigger_reasons, tier, positions_data, signals_da
     if pos_lines:
         lines.extend(pos_lines)
         lines.append("")
+    if prob_lines:
+        lines.append("")
+        lines.extend(prob_lines)
+        lines.append("")
     if sig_line:
         lines.append(sig_line)
-    if llm_line:
-        lines.append(llm_line)
     if risk_line:
         lines.append(risk_line)
     lines.append("")
@@ -3211,14 +3242,29 @@ def _autonomous_decision(trigger_reasons, blocked_tier):
     thesis_status = _assess_thesis(positions_data, signals_data, trigger_reasons)
     risk_data = _build_autonomous_risk_data(positions_data, llm_signals)
 
+    # Fetch probability + accuracy data for enriched Telegram
+    prob_report = compute_probability_report()
+    llm_accuracy = {}
+    if LLM_AVAILABLE:
+        try:
+            llm_accuracy = get_llm_accuracy()
+        except Exception:
+            pass
+    signal_accuracy = {}
+    if TRACKER_AVAILABLE:
+        try:
+            signal_accuracy = get_accuracy_report()
+        except Exception:
+            pass
+
     # --- 2. Build autonomous Telegram ---
     msg = _build_autonomous_telegram(
         trigger_reasons, blocked_tier, positions_data, signals_data, llm_data,
         risk_data, prediction, thesis_status, cet_str, is_emergency,
+        prob_report=prob_report, llm_accuracy=llm_accuracy, signal_accuracy=signal_accuracy,
     )
 
     # --- 3. Log decision ---
-    prob_report = {}
     decision = {
         "ts": now.isoformat(),
         "source": "autonomous",
