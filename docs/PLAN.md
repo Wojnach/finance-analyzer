@@ -108,3 +108,63 @@ Broader follow-up if the targeted slice stays green:
    merged.
 3. If prompt/docs changes prove noisy, revert those separately from the runtime
    persistence helper changes.
+
+## Addendum: 4-Area System Improvement Plan
+
+Updated: 2026-03-11
+Branch: `improve/4areas-2026-03-11`
+
+### Area 1: Layer 2 Agent Completion Rate
+
+**Problem:** Agent completion is not tracked post-exit. Exit codes are lost. No rolling
+metrics on success/failure rate by tier.
+
+**Batch 1A — Completion tracking (HIGH)**
+Files: `portfolio/agent_invocation.py`
+- Add `check_agent_completion()` called from main loop each cycle
+- Poll `_agent_proc.poll()`, log exit_code/duration/tier to `data/invocations.jsonl`
+- Track rolling completion rate (last 24h) in health state
+- Surface in agent_summary_compact.json
+
+**Batch 1B — Incomplete session detection (MEDIUM)**
+Files: `portfolio/agent_invocation.py`, `portfolio/health.py`
+- After agent exits, check if journal + Telegram were written
+- Log as "incomplete" vs "failed" vs "success"
+
+### Area 2: Signal Accuracy
+
+**Problem:** Consensus 48.1%. F&G 31.4%, MACD 31.6%.
+
+**Batch 2A — F&G regime gating (HIGH)**
+Files: `portfolio/signal_engine.py`
+- F&G abstains in trending regimes (trending-up/trending-down)
+- Only votes in ranging/high-vol where contrarian logic works
+
+**Batch 2B — Per-ticker signal weighting (MEDIUM)**
+Files: `portfolio/signal_engine.py`, `portfolio/accuracy_stats.py`
+- Use per-ticker accuracy where available (50+ samples)
+- Fall back to global weights when insufficient data
+
+### Area 3: Avanza Execution Reliability
+
+**Batch 3A — Pre-trade validation (HIGH)**
+Files: new `portfolio/trade_validation.py`
+- Bid/ask spread check (reject if >2%)
+- Position size limit (max 50% cash)
+- Cash verification
+- Price sanity (reject if >5% from last known)
+
+### Area 4: Better Data Sources
+
+**Batch 4A — VIX via yfinance (HIGH)**
+Files: `portfolio/data_collector.py`, `portfolio/reporting.py`
+- Fetch `^VIX` via yfinance, cache 15min TTL
+- Surface in agent_summary_compact.json → macro.vix
+- Use for regime detection: >30=high-vol, <15=complacent
+
+**Batch 4B — Market breadth from existing data (LOW)**
+Files: `portfolio/reporting.py`
+- % above 200-SMA / 50-SMA from existing 19 tickers
+- Add to macro section
+
+### Priority: 1A+2A+3A+4A (parallel) → 1B+2B → 3B+4B
