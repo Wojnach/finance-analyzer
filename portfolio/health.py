@@ -38,12 +38,13 @@ def update_health(cycle_count: int, signals_ok: int, signals_failed: int,
 
 
 def load_health() -> dict:
-    """Load current health state."""
-    if HEALTH_FILE.exists():
-        try:
-            return json.loads(HEALTH_FILE.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Health state file corrupt, resetting: %s", e)
+    """Load current health state. Returns defaults if missing or corrupt."""
+    try:
+        return json.loads(HEALTH_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        pass
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Health state file corrupt, resetting: %s", e)
     return {"start_time": time.time(), "cycle_count": 0, "error_count": 0, "errors": []}
 
 

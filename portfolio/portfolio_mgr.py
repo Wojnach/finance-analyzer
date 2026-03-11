@@ -1,13 +1,12 @@
 """Portfolio state management — load, save, atomic writes, value calculation."""
 
-import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger("portfolio.portfolio_mgr")
 
-from portfolio.file_utils import atomic_write_json as _atomic_write_json
+from portfolio.file_utils import atomic_write_json as _atomic_write_json, load_json
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -23,13 +22,25 @@ _DEFAULT_STATE = {
 }
 
 
+def _validated_state(loaded):
+    """Merge loaded state with defaults to ensure all required keys exist."""
+    if not loaded or not isinstance(loaded, dict):
+        return {**_DEFAULT_STATE, "start_date": datetime.now(timezone.utc).isoformat()}
+    result = {**_DEFAULT_STATE, **loaded}
+    # Ensure types are correct for critical fields
+    if not isinstance(result.get("holdings"), dict):
+        result["holdings"] = {}
+    if not isinstance(result.get("transactions"), list):
+        result["transactions"] = []
+    return result
+
+
 def load_state():
-    if STATE_FILE.exists():
-        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    return {
-        **_DEFAULT_STATE,
-        "start_date": datetime.now(timezone.utc).isoformat(),
-    }
+    """Load Patient portfolio state. Returns validated defaults if missing or corrupt."""
+    loaded = load_json(str(STATE_FILE), default=None)
+    if loaded is None:
+        return {**_DEFAULT_STATE, "start_date": datetime.now(timezone.utc).isoformat()}
+    return _validated_state(loaded)
 
 
 def save_state(state):
@@ -37,13 +48,11 @@ def save_state(state):
 
 
 def load_bold_state():
-    """Load Bold portfolio state, returning defaults if missing."""
-    if BOLD_STATE_FILE.exists():
-        return json.loads(BOLD_STATE_FILE.read_text(encoding="utf-8"))
-    return {
-        **_DEFAULT_STATE,
-        "start_date": datetime.now(timezone.utc).isoformat(),
-    }
+    """Load Bold portfolio state. Returns validated defaults if missing or corrupt."""
+    loaded = load_json(str(BOLD_STATE_FILE), default=None)
+    if loaded is None:
+        return {**_DEFAULT_STATE, "start_date": datetime.now(timezone.utc).isoformat()}
+    return _validated_state(loaded)
 
 
 def save_bold_state(state):

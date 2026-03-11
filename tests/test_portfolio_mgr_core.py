@@ -258,3 +258,163 @@ class TestPortfolioValue:
         fx = 10.85
         expected = 0.00123 * 70000 * 10.85
         assert portfolio_mgr.portfolio_value(state, prices, fx) == pytest.approx(expected)
+
+    def test_invalid_fx_rate_zero(self):
+        """portfolio_value with fx_rate=0 returns cash only."""
+        state = _make_state(cash=100_000, holdings={"BTC-USD": {"shares": 1.0}})
+        assert portfolio_mgr.portfolio_value(state, {"BTC-USD": 70000}, 0) == 100_000
+
+    def test_invalid_fx_rate_negative(self):
+        """portfolio_value with negative fx_rate returns cash only."""
+        state = _make_state(cash=100_000, holdings={"BTC-USD": {"shares": 1.0}})
+        assert portfolio_mgr.portfolio_value(state, {"BTC-USD": 70000}, -5) == 100_000
+
+
+# ===========================================================================
+# TEST-7: Corruption and TOCTOU safety (BUG-34, BUG-35)
+# ===========================================================================
+
+class TestLoadStateCorruptFile:
+    """load_state should return validated defaults on corrupt JSON."""
+
+    def test_corrupt_json_returns_default(self, tmp_path):
+        fake = tmp_path / "state.json"
+        fake.write_text("{invalid json!!", encoding="utf-8")
+        with patch.object(portfolio_mgr, "STATE_FILE", fake):
+            result = portfolio_mgr.load_state()
+        assert result["cash_sek"] == 500_000
+        assert result["holdings"] == {}
+        assert result["transactions"] == []
+
+    def test_empty_file_returns_default(self, tmp_path):
+        fake = tmp_path / "state.json"
+        fake.write_text("", encoding="utf-8")
+        with patch.object(portfolio_mgr, "STATE_FILE", fake):
+            result = portfolio_mgr.load_state()
+        assert result["cash_sek"] == 500_000
+
+    def test_null_json_returns_default(self, tmp_path):
+        fake = tmp_path / "state.json"
+        fake.write_text("null", encoding="utf-8")
+        with patch.object(portfolio_mgr, "STATE_FILE", fake):
+            result = portfolio_mgr.load_state()
+        assert result["cash_sek"] == 500_000
+
+    def test_json_array_returns_default(self, tmp_path):
+        """A valid JSON array (not dict) should be treated as corrupt."""
+        fake = tmp_path / "state.json"
+        fake.write_text("[1, 2, 3]", encoding="utf-8")
+        with patch.object(portfolio_mgr, "STATE_FILE", fake):
+            result = portfolio_mgr.load_state()
+        assert result["cash_sek"] == 500_000
+        assert result["holdings"] == {}
+
+
+class TestLoadStateMissingKeys:
+    """load_state should fill missing keys from _DEFAULT_STATE (BUG-35)."""
+
+    def test_missing_cash_gets_default(self, tmp_path):
+        fake = tmp_path / "state.json"
+        _write_state(fake, {"holdings": {"BTC-USD": {"shares": 1}}, "initial_value_sek": 500_000})
+        with patch.object(portfolio_mgr, "STATE_FILE", fake):
+            result = portfolio_mgr.load_state()
+        assert result["cash_sek"] == 500_000  # filled from default
+
+    def test_missing_holdings_gets_default(self, tmp_path):
+        fake = tmp_path / "state.json"
+        _write_state(fake, {"cash_sek": 300_000, "initial_value_sek": 500_000})
+        with patch.object(portfolio_mgr, "STATE_FILE", fake):
+            result = portfolio_mgr.load_state()
+        assert result["holdings"] == {}
+
+    def test_missing_transactions_gets_default(self, tmp_path):
+        fake = tmp_path / "state.json"
+        _write_state(fake, {"cash_sek": 300_000, "initial_value_sek": 500_000})
+        with patch.object(portfolio_mgr, "STATE_FILE", fake):
+            result = portfolio_mgr.load_state()
+        assert result["transactions"] == []
+
+    def test_corrupt_holdings_type_replaced(self, tmp_path):
+        """If holdings is not a dict, replace with empty dict."""
+        fake = tmp_path / "state.json"
+        _write_state(fake, {"cash_sek": 300_000, "holdings": "not_a_dict",
+                            "initial_value_sek": 500_000})
+        with patch.object(portfolio_mgr, "STATE_FILE", fake):
+            result = portfolio_mgr.load_state()
+        assert result["holdings"] == {}
+
+    def test_corrupt_transactions_type_replaced(self, tmp_path):
+        """If transactions is not a list, replace with empty list."""
+        fake = tmp_path / "state.json"
+        _write_state(fake, {"cash_sek": 300_000, "transactions": "not_a_list",
+                            "initial_value_sek": 500_000})
+        with patch.object(portfolio_mgr, "STATE_FILE", fake):
+            result = portfolio_mgr.load_state()
+        assert result["transactions"] == []
+
+    def test_preserves_existing_values_alongside_defaults(self, tmp_path):
+        """Existing values should not be overwritten by defaults."""
+        fake = tmp_path / "state.json"
+        _write_state(fake, {"cash_sek": 123, "holdings": {"ETH-USD": {"shares": 5}},
+                            "total_fees_sek": 42.0, "initial_value_sek": 500_000})
+        with patch.object(portfolio_mgr, "STATE_FILE", fake):
+            result = portfolio_mgr.load_state()
+        assert result["cash_sek"] == 123
+        assert result["holdings"]["ETH-USD"]["shares"] == 5
+        assert result["total_fees_sek"] == 42.0
+        assert result["transactions"] == []  # filled from default
+
+
+class TestLoadBoldStateCorrupt:
+    """load_bold_state has the same safety guarantees as load_state."""
+
+    def test_missing_file_returns_default(self, tmp_path):
+        fake = tmp_path / "bold_missing.json"
+        with patch.object(portfolio_mgr, "BOLD_STATE_FILE", fake):
+            result = portfolio_mgr.load_bold_state()
+        assert result["cash_sek"] == 500_000
+        assert result["holdings"] == {}
+
+    def test_corrupt_json_returns_default(self, tmp_path):
+        fake = tmp_path / "bold.json"
+        fake.write_text("{{bad json}}", encoding="utf-8")
+        with patch.object(portfolio_mgr, "BOLD_STATE_FILE", fake):
+            result = portfolio_mgr.load_bold_state()
+        assert result["cash_sek"] == 500_000
+
+    def test_missing_keys_filled(self, tmp_path):
+        fake = tmp_path / "bold.json"
+        _write_state(fake, {"cash_sek": 200_000})
+        with patch.object(portfolio_mgr, "BOLD_STATE_FILE", fake):
+            result = portfolio_mgr.load_bold_state()
+        assert result["cash_sek"] == 200_000
+        assert result["holdings"] == {}
+        assert result["transactions"] == []
+
+    def test_corrupt_holdings_type(self, tmp_path):
+        fake = tmp_path / "bold.json"
+        _write_state(fake, {"cash_sek": 200_000, "holdings": 42})
+        with patch.object(portfolio_mgr, "BOLD_STATE_FILE", fake):
+            result = portfolio_mgr.load_bold_state()
+        assert result["holdings"] == {}
+
+
+class TestValidatedState:
+    """Direct tests for _validated_state()."""
+
+    def test_none_returns_default(self):
+        result = portfolio_mgr._validated_state(None)
+        assert result["cash_sek"] == 500_000
+
+    def test_empty_dict_returns_default_with_extras(self):
+        result = portfolio_mgr._validated_state({})
+        assert result["cash_sek"] == 500_000
+        assert result["holdings"] == {}
+
+    def test_non_dict_returns_default(self):
+        result = portfolio_mgr._validated_state([1, 2, 3])
+        assert result["cash_sek"] == 500_000
+
+    def test_false_returns_default(self):
+        result = portfolio_mgr._validated_state(False)
+        assert result["cash_sek"] == 500_000

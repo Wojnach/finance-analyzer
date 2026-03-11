@@ -48,15 +48,16 @@ def _load_prev_sentiments():
     if _prev_sentiment_loaded:
         return
     try:
+        from portfolio.file_utils import load_json as _load_json
         # Primary: own state file (no race with trigger.py)
-        if _SENTIMENT_STATE_FILE.exists():
-            data = json.loads(_SENTIMENT_STATE_FILE.read_text(encoding="utf-8"))
+        data = _load_json(str(_SENTIMENT_STATE_FILE), default=None)
+        if data and isinstance(data, dict):
             _prev_sentiment = data.get("prev_sentiment", {})
         else:
             # Migration: read from trigger_state.json if sentiment_state.json doesn't exist yet
             ts_file = DATA_DIR / "trigger_state.json"
-            if ts_file.exists():
-                ts = json.loads(ts_file.read_text(encoding="utf-8"))
+            ts = _load_json(str(ts_file), default=None)
+            if ts and isinstance(ts, dict):
                 _prev_sentiment = ts.get("prev_sentiment", {})
         # Prune entries for removed tickers
         from portfolio.tickers import ALL_TICKERS
@@ -160,7 +161,10 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None):
             invert = False
         else:
             invert = acc < 0.5
-            weight = (1.0 - acc) if invert else acc
+            # Cap inverted weight at 0.75 to prevent single low-accuracy
+            # signals from dominating consensus (e.g., 5% acc → 0.95 weight
+            # before cap). Non-inverted signals are uncapped.
+            weight = min(0.75, 1.0 - acc) if invert else acc
         # Regime adjustment
         weight *= regime_mults.get(signal_name, 1.0)
         # Activation frequency normalization (rarity * bias correction)

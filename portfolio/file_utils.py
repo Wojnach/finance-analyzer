@@ -53,10 +53,12 @@ def load_jsonl(path, limit=None):
         list of parsed dicts. Empty list if file missing or empty.
     """
     path = Path(path)
-    if not path.exists():
-        return []
     container = deque(maxlen=limit) if limit else []
-    with open(path, encoding="utf-8") as f:
+    try:
+        f = open(path, encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    with f:
         for line in f:
             line = line.strip()
             if not line:
@@ -94,10 +96,12 @@ def prune_jsonl(path, max_entries=5000):
     Returns the number of entries removed, or 0 if no pruning was needed.
     """
     path = Path(path)
-    if not path.exists():
-        return 0
     lines = []
-    with open(path, encoding="utf-8") as f:
+    try:
+        f = open(path, encoding="utf-8")
+    except FileNotFoundError:
+        return 0
+    with f:
         for line in f:
             stripped = line.strip()
             if not stripped:

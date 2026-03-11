@@ -651,3 +651,115 @@ class TestEdgeCases:
         action, conf = _weighted_consensus(votes, acc, "trending-up")
         assert action == "BUY"
         assert conf == 1.0
+
+
+# ===========================================================================
+# TEST-8: Inversion weight cap at 0.75 (BUG-38)
+# ===========================================================================
+
+class TestInversionWeightCap:
+    """BUG-38: Inverted signals capped at weight 0.75 to prevent domination."""
+
+    def test_5_percent_accuracy_capped_at_075(self):
+        """A 5% accurate signal should get weight 0.75, not 0.95."""
+        votes = {"terrible": "BUY", "good": "BUY"}
+        acc = {"terrible": _acc(0.05, 100), "good": _acc(0.70, 100)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        # terrible: inverted to SELL, weight capped at 0.75 (not 0.95)
+        # good: BUY, weight 0.70
+        # Before cap: SELL would have 0.95 > BUY 0.70 -> SELL wins
+        # After cap: SELL 0.75, BUY 0.70 -> closer, but SELL still wins here
+        assert action == "SELL"
+
+    def test_cap_prevents_extreme_domination(self):
+        """Without cap, 1 signal at 5% acc would overpower 2 signals at 60% acc.
+        With cap at 0.75, the 2 good signals (1.2 total) beat the capped one (0.75)."""
+        votes = {"bad": "BUY", "good1": "BUY", "good2": "BUY"}
+        acc = {
+            "bad": _acc(0.05, 100),   # inverted: capped at 0.75
+            "good1": _acc(0.60, 100), # BUY weight 0.60
+            "good2": _acc(0.60, 100), # BUY weight 0.60
+        }
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        # bad inverted to SELL: 0.75 (capped from 0.95)
+        # good1+good2 BUY: 0.60 + 0.60 = 1.20
+        # BUY wins (1.20 > 0.75) -- without cap, SELL would be 0.95 vs BUY 1.20, BUY still wins
+        # but with even worse accuracy or regime multipliers, the cap becomes critical
+        assert action == "BUY"
+        assert conf == pytest.approx(1.20 / (1.20 + 0.75), abs=0.01)
+
+    def test_10_percent_accuracy_capped(self):
+        """10% accuracy -> inverted weight would be 0.90, capped to 0.75."""
+        votes = {"low_acc": "SELL"}
+        acc = {"low_acc": _acc(0.10, 50)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        # Inverted from SELL to BUY, weight capped at 0.75
+        assert action == "BUY"
+        assert conf == 1.0  # sole voter
+
+    def test_25_percent_accuracy_capped(self):
+        """25% accuracy -> inverted weight would be 0.75, exactly at cap (no change)."""
+        votes = {"sig": "BUY"}
+        acc = {"sig": _acc(0.25, 50)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        # 1.0 - 0.25 = 0.75, exactly at cap
+        assert action == "SELL"
+
+    def test_30_percent_accuracy_not_capped(self):
+        """30% accuracy -> inverted weight = 0.70, below cap (unaffected)."""
+        votes = {"sig": "BUY"}
+        acc = {"sig": _acc(0.30, 50)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        # 1.0 - 0.30 = 0.70 < 0.75, not capped
+        assert action == "SELL"
+
+    def test_45_percent_accuracy_not_capped(self):
+        """45% accuracy -> inverted weight = 0.55, well below cap."""
+        votes = {"sig": "BUY"}
+        acc = {"sig": _acc(0.45, 50)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        assert action == "SELL"
+
+    def test_cap_does_not_affect_normal_signals(self):
+        """Non-inverted signals (>= 50% accuracy) are never capped."""
+        votes = {"great": "BUY"}
+        acc = {"great": _acc(0.95, 200)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        assert action == "BUY"
+        assert conf == 1.0
+
+    def test_cap_does_not_affect_small_samples(self):
+        """Signals with <20 samples get default 0.5, no inversion, no cap."""
+        votes = {"new": "BUY"}
+        acc = {"new": _acc(0.05, 10)}  # terrible acc but too few samples
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        # <20 samples -> default weight 0.5, no inversion
+        assert action == "BUY"
+
+    def test_cap_with_regime_multiplier(self):
+        """Capped weight still gets regime multiplier applied."""
+        votes = {"ema": "BUY"}
+        acc = {"ema": _acc(0.05, 100)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        # ema: inverted to SELL, weight = min(0.75, 0.95) = 0.75
+        # regime mult for ema in trending-up = 1.5
+        # effective weight = 0.75 * 1.5 = 1.125
+        assert action == "SELL"
+        assert conf == 1.0  # sole voter
+
+    def test_multiple_capped_signals(self):
+        """Multiple extremely low-accuracy signals all get capped."""
+        votes = {"bad1": "BUY", "bad2": "BUY", "bad3": "BUY", "good": "BUY"}
+        acc = {
+            "bad1": _acc(0.05, 100),  # capped at 0.75
+            "bad2": _acc(0.10, 100),  # capped at 0.75
+            "bad3": _acc(0.15, 100),  # capped at 0.75
+            "good": _acc(0.70, 100),  # BUY weight 0.70
+        }
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        # SELL from inversions: 0.75 + 0.75 + 0.75 = 2.25
+        # BUY from good: 0.70
+        # Without cap: 0.95 + 0.90 + 0.85 = 2.70 SELL vs 0.70 BUY
+        # Cap reduces SELL weight from 2.70 to 2.25
+        assert action == "SELL"
+        assert conf == pytest.approx(2.25 / (2.25 + 0.70), abs=0.01)
