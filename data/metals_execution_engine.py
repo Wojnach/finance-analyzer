@@ -117,6 +117,30 @@ def _signal_probability(signal_data: dict | None, llm_signals: dict | None, tick
     return max(0.05, min(0.95, numer / denom))
 
 
+def _signal_entry(signal_data: dict | None, ticker: str) -> dict:
+    entry = (signal_data or {}).get(ticker) or {}
+    return entry if isinstance(entry, dict) else {}
+
+
+def _signal_extra(signal_data: dict | None, ticker: str) -> dict:
+    extra = _signal_entry(signal_data, ticker).get("extra") or {}
+    return extra if isinstance(extra, dict) else {}
+
+
+def _chronos_drift(signal_data: dict | None, ticker: str) -> float | None:
+    forecast_signals = (signal_data or {}).get("forecast_signals") or {}
+    if not isinstance(forecast_signals, dict):
+        return None
+    forecast = forecast_signals.get(ticker) or {}
+    if not isinstance(forecast, dict):
+        return None
+    chronos_pct = _safe_float(forecast.get("chronos_24h_pct"), 0.0)
+    chronos_conf = _safe_float(forecast.get("chronos_24h_conf"), 0.0)
+    if chronos_conf <= 0.3 or chronos_pct == 0:
+        return None
+    return (chronos_pct / 100.0) * math.sqrt(252.0)
+
+
 def _expected_terminal_price(price: float, drift: float, hours_remaining: float, is_24h: bool = True) -> float:
     if price <= 0 or hours_remaining <= 0:
         return price
@@ -290,8 +314,13 @@ def build_execution_recommendations(
         ticker = "XAG-USD" if "silver" in key.lower() else "XAU-USD"
         direction_sign = _position_direction(pos.get("name"), key)
         prob_up = _signal_probability(signal_data, llm_signals, ticker)
-        atr_pct = _safe_float(((signal_data or {}).get(ticker) or {}).get("atr_pct"), _DEFAULT_ATR.get(ticker, 3.0))
+        signal_entry = _signal_entry(signal_data, ticker)
+        signal_extra = _signal_extra(signal_data, ticker)
+        chronos_drift = _chronos_drift(signal_data, ticker)
+        atr_pct = _safe_float(signal_entry.get("atr_pct"), _DEFAULT_ATR.get(ticker, 3.0))
         drift_under = drift_from_probability(prob_up, volatility_from_atr(atr_pct))
+        if chronos_drift is not None:
+            drift_under = 0.7 * drift_under + 0.3 * chronos_drift
         expected_underlying = _expected_terminal_price(underlying_price, drift_under, hours_remaining)
         expected_bid = _instrument_price_from_underlying(
             bid, underlying_price, expected_underlying, leverage, direction_sign
@@ -304,8 +333,12 @@ def build_execution_recommendations(
             atr_pct=atr_pct,
             p_up=prob_up,
             hours_remaining=hours_remaining,
-            indicators=(signal_data or {}).get(ticker),
+            indicators=signal_entry,
+            extra=signal_extra,
             is_24h=True,
+            regime=str(signal_entry.get("regime", "") or ""),
+            bb_squeeze=bool((signal_extra.get("volatility_sig_indicators") or {}).get("bb_squeeze_on", False)),
+            chronos_drift=chronos_drift,
         )
         fill_vol = _warrant_vol_from_underlying(atr_pct, leverage)
         fill_drift = direction_sign * leverage * drift_under
@@ -337,6 +370,12 @@ def build_execution_recommendations(
             "leverage": round(leverage, 3),
             "units": units,
             "prob_up": round(prob_up, 4),
+            "plan_features": {
+                "regime": signal_entry.get("regime"),
+                "squeeze_warning": bool(underlying_plan.get("squeeze_warning", False)),
+                "chronos_drift_annual": _round_or_none(chronos_drift, 4),
+                "extra_level_count": len(signal_extra),
+            },
             "spread_pct": _round_or_none(
                 ((_safe_float(current.get("ask")) - bid) / bid * 100.0) if bid > 0 and _safe_float(current.get("ask")) > 0 else None,
                 2,
@@ -360,6 +399,9 @@ def build_execution_recommendations(
             continue
         direction_sign = _position_direction(info.get("name"), catalog_key, info.get("direction"))
         prob_up = _signal_probability(signal_data, llm_signals, ticker)
+        signal_entry = _signal_entry(signal_data, ticker)
+        signal_extra = _signal_extra(signal_data, ticker)
+        chronos_drift = _chronos_drift(signal_data, ticker)
         if not _buy_direction_matches(prob_up, direction_sign):
             continue
 
@@ -376,12 +418,20 @@ def build_execution_recommendations(
                 "current_underlying": round(underlying_price, 4),
                 "leverage": round(leverage, 3),
                 "prob_up": round(prob_up, 4),
+                "plan_features": {
+                    "regime": signal_entry.get("regime"),
+                    "squeeze_warning": False,
+                    "chronos_drift_annual": _round_or_none(chronos_drift, 4),
+                    "extra_level_count": len(signal_extra),
+                },
                 "filtered_out": filter_reasons,
             }
             continue
 
-        atr_pct = _safe_float(((signal_data or {}).get(ticker) or {}).get("atr_pct"), _DEFAULT_ATR.get(ticker, 3.0))
+        atr_pct = _safe_float(signal_entry.get("atr_pct"), _DEFAULT_ATR.get(ticker, 3.0))
         drift_under = drift_from_probability(prob_up, volatility_from_atr(atr_pct))
+        if chronos_drift is not None:
+            drift_under = 0.7 * drift_under + 0.3 * chronos_drift
         expected_underlying = _expected_terminal_price(underlying_price, drift_under, hours_remaining)
         expected_order_price = _instrument_price_from_underlying(
             ask, underlying_price, expected_underlying, leverage, direction_sign
@@ -394,8 +444,12 @@ def build_execution_recommendations(
             atr_pct=atr_pct,
             p_up=prob_up,
             hours_remaining=hours_remaining,
-            indicators=(signal_data or {}).get(ticker),
+            indicators=signal_entry,
+            extra=signal_extra,
             is_24h=True,
+            regime=str(signal_entry.get("regime", "") or ""),
+            bb_squeeze=bool((signal_extra.get("volatility_sig_indicators") or {}).get("bb_squeeze_on", False)),
+            chronos_drift=chronos_drift,
         )
         fill_vol = _warrant_vol_from_underlying(atr_pct, leverage)
         fill_drift = direction_sign * leverage * drift_under
@@ -421,6 +475,12 @@ def build_execution_recommendations(
                 "current_underlying": round(underlying_price, 4),
                 "leverage": round(leverage, 3),
                 "prob_up": round(prob_up, 4),
+                "plan_features": {
+                    "regime": signal_entry.get("regime"),
+                    "squeeze_warning": bool(underlying_plan.get("squeeze_warning", False)),
+                    "chronos_drift_annual": _round_or_none(chronos_drift, 4),
+                    "extra_level_count": len(signal_extra),
+                },
                 "filtered_out": ["no viable candidate targets"],
             }
             continue
@@ -440,6 +500,12 @@ def build_execution_recommendations(
             "leverage": round(leverage, 3),
             "prob_up": round(prob_up, 4),
             "planned_units": planned_units,
+            "plan_features": {
+                "regime": signal_entry.get("regime"),
+                "squeeze_warning": bool(underlying_plan.get("squeeze_warning", False)),
+                "chronos_drift_annual": _round_or_none(chronos_drift, 4),
+                "extra_level_count": len(signal_extra),
+            },
             "spread_pct": _round_or_none(info.get("spread_pct"), 2),
             "barrier_distance_pct": _round_or_none(info.get("barrier_distance_pct"), 2),
             "recommended": recommendation,

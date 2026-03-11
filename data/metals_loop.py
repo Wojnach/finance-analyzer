@@ -120,14 +120,29 @@ except ImportError as e:
     WARRANT_CATALOG = {}
     CATALOG_AVAILABLE = False
 
-from portfolio.avanza_control import (
-    get_csrf,
-    fetch_price,
-    fetch_account_cash,
-    place_order,
-    place_stop_loss,
-    check_session_alive,
-)
+try:
+    from portfolio.avanza_control import (
+        get_csrf,
+        fetch_price,
+        fetch_account_cash,
+        place_order,
+        place_stop_loss,
+        check_session_alive,
+    )
+    AVANZA_CONTROL_AVAILABLE = True
+except ImportError as e:
+    print(f"[WARN] portfolio.avanza_control import failed: {e}", flush=True)
+    AVANZA_CONTROL_AVAILABLE = False
+
+    def _missing_avanza_control(*_args, **_kwargs):
+        raise RuntimeError("portfolio.avanza_control unavailable in this environment")
+
+    get_csrf = _missing_avanza_control
+    fetch_price = _missing_avanza_control
+    fetch_account_cash = _missing_avanza_control
+    place_order = _missing_avanza_control
+    place_stop_loss = _missing_avanza_control
+    check_session_alive = _missing_avanza_control
 
 try:
     from crypto_data import (
@@ -692,12 +707,12 @@ def read_signal_data():
             data = json.load(f)
 
         result = {"age_min": round(age_min, 1)}
+        for key in ["forecast_signals", "cumulative_gains"]:
+            if key in data:
+                result[key] = data[key]
 
         tickers = data.get("tickers", {})
         if not tickers:
-            for key in ["forecast_signals", "cumulative_gains"]:
-                if key in data:
-                    result[key] = data[key]
             return result
 
         for ticker in SIGNAL_TICKERS:
@@ -718,6 +733,7 @@ def read_signal_data():
                     "voters": extra.get("_voters", 0),
                     "vote_detail": extra.get("_vote_detail", ""),
                     "price": t.get("price", 0),
+                    "extra": extra,
                 }
 
         timeframes = data.get("timeframe_heatmap", {})
