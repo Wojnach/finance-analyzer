@@ -5,6 +5,19 @@ Branch: worktree-improve-auto-session-2026-03-11
 
 Previous sessions: 2026-03-05 (dashboard hardening), 2026-03-06 (CircuitBreaker, TTL cache, prune fix), 2026-03-07 (digest hardening, outcome tracker, disabled signals), 2026-03-08 (signal logging, file I/O safety, cache TTL, trigger hardening), 2026-03-09 (signal validation, confidence caps, candlestick/fibonacci/structure tests), 2026-03-10 (accuracy tolerance, signal failure tracking, ADX caching, TOCTOU fix, weighted consensus tests).
 
+## Session Results (2026-03-11)
+
+All 3 batches implemented. 5 bugs fixed (BUG-34 through BUG-38), 1 architecture improvement (ARCH-14 partial — high-traffic paths migrated), 2 test coverage gaps filled (TEST-7, TEST-8), 2 refactorings (REF-5, REF-6). 31 new tests (21 portfolio_mgr + 10 inversion cap). All 151 tests pass across modified files.
+
+**Changes:**
+- `portfolio/portfolio_mgr.py` — TOCTOU fix + state validation via `_validated_state()`
+- `portfolio/health.py` — TOCTOU fix in `load_health()`
+- `portfolio/file_utils.py` — TOCTOU fix in `load_jsonl()` and `prune_jsonl()`
+- `portfolio/signal_engine.py` — Inversion weight cap at 0.75 + sentiment state `load_json()` migration
+- `portfolio/digest.py` — Digest state `load_json()` migration
+- `tests/test_portfolio_mgr_core.py` — 21 new tests for corruption, missing keys, type validation
+- `tests/test_weighted_consensus.py` — 10 new tests for inversion weight cap behavior
+
 ## Session Results (2026-03-10 — previous)
 
 All 3 batches implemented. 6 bugs fixed (BUG-28 through BUG-33), 2 architecture improvements (ARCH-12, ARCH-13), 3 test coverage gaps filled (TEST-4, TEST-5, TEST-6), 1 refactoring (REF-4). 193+ new tests.
