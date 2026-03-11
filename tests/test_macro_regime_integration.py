@@ -314,10 +314,11 @@ class TestDXYMocked:
 
     def test_get_dxy_mocked(self):
         """get_dxy() should parse yfinance data correctly."""
-        from portfolio.macro_context import get_dxy, _cache
+        from portfolio.macro_context import get_dxy
+        import portfolio.shared_state as ss
 
         # Clear DXY cache so get_dxy() actually fetches
-        _cache.pop("dxy", None)
+        ss._tool_cache.pop("dxy", None)
 
         # Create mock ticker with history
         mock_history = pd.DataFrame({

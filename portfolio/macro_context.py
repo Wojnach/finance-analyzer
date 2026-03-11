@@ -7,7 +7,7 @@ import pandas as pd
 
 from portfolio.api_utils import get_alpaca_headers, load_config, BINANCE_BASE, BINANCE_FAPI_BASE, ALPACA_BASE
 from portfolio.http_retry import fetch_with_retry
-from portfolio.shared_state import _yfinance_limiter
+from portfolio.shared_state import _cached, _yfinance_limiter, VOLUME_TTL as _VOLUME_TTL
 
 logger = logging.getLogger("portfolio.macro_context")
 
@@ -20,17 +20,12 @@ def _alpaca_headers():
     return get_alpaca_headers()
 
 
-_cache = {}
 DXY_TTL = 3600
-VOLUME_TTL = 300
+TREASURY_TTL_VAL = 3600
 
 
-def get_dxy():
-    now = time.time()
-    cached = _cache.get("dxy")
-    if cached and now - cached["time"] < DXY_TTL:
-        return cached["data"]
-
+def _fetch_dxy():
+    """Fetch DXY data from yfinance."""
     import yfinance as yf
 
     _yfinance_limiter.wait()
@@ -51,14 +46,16 @@ def get_dxy():
     else:
         trend = "weak"
 
-    result = {
+    return {
         "value": round(current, 2),
         "sma20": round(sma20, 2),
         "trend": trend,
         "change_5d_pct": round(pct_5d, 2),
     }
-    _cache["dxy"] = {"data": result, "time": now}
-    return result
+
+
+def get_dxy():
+    return _cached("dxy", DXY_TTL, _fetch_dxy)
 
 
 def _fetch_klines(ticker):
@@ -128,12 +125,8 @@ def _fetch_klines(ticker):
     return None
 
 
-def get_volume_signal(ticker):
-    now = time.time()
-    cached = _cache.get(f"vol_{ticker}")
-    if cached and now - cached["time"] < VOLUME_TTL:
-        return cached["data"]
-
+def _fetch_volume_signal(ticker):
+    """Compute volume signal from klines for a single ticker."""
     klines_df = _fetch_klines(ticker)
     if klines_df is None or klines_df.empty:
         return None
@@ -167,27 +160,23 @@ def get_volume_signal(ticker):
     else:
         action = "HOLD"
 
-    result = {
+    return {
         "ratio": round(ratio, 2),
         "spike": ratio > 1.5,
         "price_change_3": round(price_change * 100, 2),
         "action": action,
     }
-    _cache[f"vol_{ticker}"] = {"data": result, "time": now}
-    return result
 
 
-TREASURY_TTL = 3600
+def get_volume_signal(ticker):
+    return _cached(f"vol_{ticker}", _VOLUME_TTL, _fetch_volume_signal, ticker)
+
 
 from portfolio.fomc_dates import FOMC_DATES_ISO as FOMC_DATES
 
 
-def get_treasury():
-    now = time.time()
-    cached = _cache.get("treasury")
-    if cached and now - cached["time"] < TREASURY_TTL:
-        return cached["data"]
-
+def _fetch_treasury():
+    """Fetch treasury yield data from yfinance."""
     import yfinance as yf
 
     tickers = {"10y": "^TNX", "2y": "2YY=F", "30y": "^TYX"}
@@ -223,9 +212,11 @@ def get_treasury():
         else:
             result["curve"] = "normal"
 
-    if result:
-        _cache["treasury"] = {"data": result, "time": now}
     return result or None
+
+
+def get_treasury():
+    return _cached("treasury", TREASURY_TTL_VAL, _fetch_treasury)
 
 
 def get_fed_calendar():

@@ -1,25 +1,15 @@
-import time
-
 from portfolio.api_utils import BINANCE_FAPI_BASE as BINANCE_FAPI
 from portfolio.http_retry import fetch_json
+from portfolio.shared_state import _cached, FUNDING_RATE_TTL
+
 SYMBOL_MAP = {
     "BTC-USD": "BTCUSDT",
     "ETH-USD": "ETHUSDT",
 }
 
-_cache = {}
-TTL = 900
 
-
-def get_funding_rate(ticker):
-    if ticker not in SYMBOL_MAP:
-        return None
-
-    now = time.time()
-    cached = _cache.get(ticker)
-    if cached and now - cached["time"] < TTL:
-        return cached["data"]
-
+def _fetch_funding_rate(ticker):
+    """Fetch and interpret funding rate for a single ticker."""
     symbol = SYMBOL_MAP[ticker]
     data = fetch_json(
         f"{BINANCE_FAPI}/premiumIndex",
@@ -41,14 +31,19 @@ def get_funding_rate(ticker):
     else:
         action = "HOLD"
 
-    result = {
+    return {
         "rate": rate,
         "rate_pct": round(rate * 100, 4),
         "action": action,
         "mark_price": float(data["markPrice"]),
     }
-    _cache[ticker] = {"data": result, "time": now}
-    return result
+
+
+def get_funding_rate(ticker):
+    if ticker not in SYMBOL_MAP:
+        return None
+    return _cached(f"funding_rate_{ticker}", FUNDING_RATE_TTL,
+                   _fetch_funding_rate, ticker)
 
 
 if __name__ == "__main__":

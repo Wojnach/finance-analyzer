@@ -1,4 +1,9 @@
-"""USD/SEK exchange rate fetching with caching and staleness alerts."""
+"""USD/SEK exchange rate fetching with caching and staleness alerts.
+
+NOTE: Not migrated to shared_state._cached() because this module has custom
+staleness behaviour: Telegram alerting when stale, hardcoded 10.85 fallback,
+and ConnectionError semantics. These would be lost with _cached().
+"""
 
 import logging
 import time
