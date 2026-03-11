@@ -1,8 +1,12 @@
 """Optimal price targets with fill probabilities for buy and sell decisions.
 
 Combines Monte Carlo running max/min simulation, first-passage-time analytics,
-and structural price levels (BB bands) to produce ranked price targets with
-fill probability and expected value.
+and structural price levels (BB, Fibonacci, pivots, Keltner, Donchian, VWAP,
+smart money swing levels) to produce ranked price targets with fill probability
+and expected value.
+
+Supports regime-aware confidence adjustment, BB squeeze warnings, and
+Chronos forecast drift blending for improved accuracy.
 
 Usage:
     from portfolio.price_targets import compute_targets
@@ -35,6 +39,15 @@ def _year_fraction(hours: float, is_24h: bool = True) -> float:
     if is_24h:
         return hours / (252.0 * 24.0)
     return hours / (252.0 * 6.5)
+
+
+def _is_valid_level(val: object) -> bool:
+    """Return True if *val* is a finite positive number usable as a price level."""
+    if not isinstance(val, (int, float)):
+        return False
+    if math.isnan(val) or math.isinf(val):
+        return False
+    return val > 0
 
 
 # ---------------------------------------------------------------------------
@@ -136,15 +149,97 @@ def running_extremes(price: float, vol_annual: float, drift_annual: float,
     }
 
 
-def structural_levels(price: float, indicators: dict | None) -> dict:
-    """Extract BB mid/upper/lower from indicator dict."""
-    if not indicators:
+def structural_levels(price: float, indicators: dict | None,
+                      extra: dict | None = None) -> dict:
+    """Extract all available price levels from indicators and enhanced signal data.
+
+    Sources:
+    - BB mid/upper/lower from main indicators
+    - Fibonacci retracement levels, pivots, Camarilla, golden pocket, swings
+    - Keltner channels, Donchian channels (volatility signal)
+    - VWAP (volume flow signal)
+    - Smart money swing highs/lows
+    """
+    if not indicators and not extra:
         return {}
-    levels = {}
-    for key in ("bb_mid", "bb_upper", "bb_lower"):
-        val = indicators.get(key)
-        if val is not None and isinstance(val, (int, float)):
-            levels[key] = float(val)
+
+    levels: dict[str, float] = {}
+
+    # BB levels (from main indicators)
+    if indicators:
+        for key in ("bb_mid", "bb_upper", "bb_lower"):
+            val = indicators.get(key)
+            if _is_valid_level(val):
+                levels[key] = float(val)
+
+    if not extra:
+        return levels
+
+    # -- Fibonacci levels --------------------------------------------------
+    fib_ind = extra.get("fibonacci_indicators", {})
+    if fib_ind:
+        fib_levels_dict = fib_ind.get("fib_levels", {})
+        for ratio_key, val in fib_levels_dict.items():
+            if _is_valid_level(val):
+                # Convert "0.236" -> "fib_236", "0.5" -> "fib_5" etc.
+                clean_key = str(ratio_key).replace("0.", "")
+                levels[f"fib_{clean_key}"] = float(val)
+
+        # Pivot levels
+        _pivot_keys = [
+            ("pivot", "pivot_pp"),
+            ("r1", "pivot_r1"),
+            ("r2", "pivot_r2"),
+            ("s1", "pivot_s1"),
+            ("s2", "pivot_s2"),
+        ]
+        for src_key, label in _pivot_keys:
+            val = fib_ind.get(src_key)
+            if _is_valid_level(val):
+                levels[label] = float(val)
+
+        # Camarilla pivots
+        for key in ("cam_r3", "cam_s3", "cam_r4", "cam_s4"):
+            val = fib_ind.get(key)
+            if _is_valid_level(val):
+                levels[key] = float(val)
+
+        # Golden pocket
+        for key in ("gp_upper", "gp_lower"):
+            val = fib_ind.get(key)
+            if _is_valid_level(val):
+                levels[key] = float(val)
+
+        # Fibonacci swing points
+        for key in ("swing_high", "swing_low"):
+            val = fib_ind.get(key)
+            if _is_valid_level(val):
+                levels[f"fib_{key}"] = float(val)
+
+    # -- Volatility levels (Keltner, Donchian) -----------------------------
+    vol_ind = extra.get("volatility_sig_indicators", {})
+    if vol_ind:
+        for key in ("keltner_upper", "keltner_lower",
+                     "donchian_upper", "donchian_lower"):
+            val = vol_ind.get(key)
+            if _is_valid_level(val):
+                levels[key] = float(val)
+
+    # -- VWAP from volume flow ---------------------------------------------
+    vf_ind = extra.get("volume_flow_indicators", {})
+    if vf_ind:
+        val = vf_ind.get("vwap")
+        if _is_valid_level(val):
+            levels["vwap"] = float(val)
+
+    # -- Smart money swing levels ------------------------------------------
+    sm_ind = extra.get("smart_money_indicators", {})
+    if sm_ind:
+        for key in ("last_swing_high", "last_swing_low"):
+            val = sm_ind.get(key)
+            if _is_valid_level(val):
+                levels[f"smc_{key.replace('last_', '')}"] = float(val)
+
     return levels
 
 
@@ -154,12 +249,72 @@ def expected_value(fill_prob: float, gain_if_filled: float,
     return fill_prob * gain_if_filled + (1.0 - fill_prob) * gain_at_fallback
 
 
+def _apply_regime_adjustment(targets: list[dict], regime: str, side: str,
+                             price_usd: float, bb_mid: float | None) -> None:
+    """Mutate *targets* in-place with regime-aware confidence adjustments.
+
+    - ranging/range-bound: penalize far targets, boost targets near bb_mid
+    - trending-up + sell: boost fill_prob slightly for targets above price
+    - trending-down + buy: boost fill_prob slightly for targets below price
+    - high-vol: no fill_prob change (widening is handled by ATR already)
+    """
+    regime_lower = regime.lower().replace("-", "").replace("_", "")
+    if not regime_lower:
+        return
+
+    for t in targets:
+        tp = t["price"]
+        fp = t["fill_prob"]
+
+        if regime_lower in ("ranging", "rangebound"):
+            # Penalize targets far from price (>1% away)
+            pct_away = abs(tp - price_usd) / price_usd if price_usd > 0 else 0
+            if pct_away > 0.01:
+                t["fill_prob"] = round(fp * 0.85, 4)
+            # Boost targets near bb_mid (mean-reversion)
+            if bb_mid and bb_mid > 0:
+                pct_from_mid = abs(tp - bb_mid) / bb_mid
+                if pct_from_mid < 0.005:  # within 0.5% of bb_mid
+                    t["fill_prob"] = round(min(fp * 1.15, 1.0), 4)
+
+        elif regime_lower in ("trendingup",):
+            if side == "sell" and tp > price_usd:
+                t["fill_prob"] = round(min(fp * 1.10, 1.0), 4)
+            elif side == "buy" and tp < price_usd:
+                t["fill_prob"] = round(fp * 0.90, 4)
+
+        elif regime_lower in ("trendingdown",):
+            if side == "buy" and tp < price_usd:
+                t["fill_prob"] = round(min(fp * 1.10, 1.0), 4)
+            elif side == "sell" and tp > price_usd:
+                t["fill_prob"] = round(fp * 0.90, 4)
+
+
 def compute_targets(ticker: str, side: str, price_usd: float,
                     atr_pct: float, p_up: float, hours_remaining: float,
-                    indicators: dict | None = None, warrant_leverage: float = 1.0,
+                    indicators: dict | None = None, extra: dict | None = None,
+                    warrant_leverage: float = 1.0,
                     position_units: int = 1, fx_rate: float = 1.0,
-                    is_24h: bool = True, n_paths: int = 10_000) -> dict:
-    """Main entry point: compute ranked price targets with fill probabilities."""
+                    is_24h: bool = True, n_paths: int = 10_000,
+                    regime: str = "", bb_squeeze: bool = False,
+                    chronos_drift: float | None = None) -> dict:
+    """Main entry point: compute ranked price targets with fill probabilities.
+
+    Parameters
+    ----------
+    extra : dict | None
+        Enhanced signal indicator dicts (fibonacci_indicators, etc.)
+        passed through to ``structural_levels``.
+    regime : str
+        Market regime string (e.g. "trending-up", "ranging").
+        Used for regime-aware confidence adjustment.
+    bb_squeeze : bool
+        If True, Bollinger Band squeeze is active -- reduce confidence
+        on all targets by 0.7x and flag ``squeeze_warning``.
+    chronos_drift : float | None
+        Annualised drift from Chronos 24h forecast.  When provided,
+        blended 30/70 with the signal-based drift.
+    """
     result: dict = {
         "ticker": ticker,
         "side": side,
@@ -179,8 +334,12 @@ def compute_targets(ticker: str, side: str, price_usd: float,
     else:
         drift = drift_from_probability(p_up, vol)
 
-    # Structural levels
-    levels = structural_levels(price_usd, indicators)
+    # Blend Chronos drift when available
+    if chronos_drift is not None:
+        drift = 0.7 * drift + 0.3 * chronos_drift
+
+    # Structural levels (enriched with extra signal indicators)
+    levels = structural_levels(price_usd, indicators, extra=extra)
 
     # Running extremes
     extremes = running_extremes(price_usd, vol, drift, hours_remaining,
@@ -248,6 +407,33 @@ def compute_targets(ticker: str, side: str, price_usd: float,
             "label": label,
         })
 
+    # Regime-aware adjustments
+    bb_mid_val = levels.get("bb_mid")
+    if regime:
+        _apply_regime_adjustment(targets, regime, side, price_usd, bb_mid_val)
+        # Re-compute EV after fill_prob adjustment
+        for t in targets:
+            if side == "sell":
+                gain = (t["price"] - price_usd) * position_units * warrant_leverage * fx_rate
+            else:
+                gain = (price_usd - t["price"]) * position_units * warrant_leverage * fx_rate
+            t["ev_sek"] = round(expected_value(t["fill_prob"], gain, 0.0), 2)
+
+    # BB squeeze warning: reduce confidence on all targets
+    if bb_squeeze:
+        result["squeeze_warning"] = True
+        for t in targets:
+            t["fill_prob"] = round(t["fill_prob"] * 0.7, 4)
+            # Re-compute EV after squeeze adjustment
+            if side == "sell":
+                gain = (t["price"] - price_usd) * position_units * warrant_leverage * fx_rate
+            else:
+                gain = (price_usd - t["price"]) * position_units * warrant_leverage * fx_rate
+            t["ev_sek"] = round(expected_value(t["fill_prob"], gain, 0.0), 2)
+
+    # Filter out targets that dropped below min_fill after adjustments
+    targets = [t for t in targets if t["fill_prob"] >= min_fill]
+
     # Sort by EV descending
     targets.sort(key=lambda t: t["ev_sek"], reverse=True)
     result["targets"] = targets
@@ -282,6 +468,9 @@ def compute_all_targets(agent_summary: dict, portfolio_states: dict,
     if not tasks:
         return None
 
+    # Forecast signals for Chronos drift
+    forecast_signals = agent_summary.get("forecast_signals", {})
+
     results: dict = {}
     for ticker, side in tasks:
         if ticker in results:
@@ -307,18 +496,39 @@ def compute_all_targets(agent_summary: dict, portfolio_states: dict,
             if hours <= 0:
                 hours = float(default_hours)
 
-        # Indicators for structural levels
+        # Indicators for structural levels (BB from main signal data)
         indicators = {k: sig.get(k) for k in ("bb_mid", "bb_upper", "bb_lower")
                       if sig.get(k) is not None}
         if not indicators:
             indicators = {k: extra.get(k) for k in ("bb_mid", "bb_upper", "bb_lower")
                           if extra.get(k) is not None}
 
+        # Chronos drift from forecast signal
+        chronos_drift_val = None
+        fc_data = forecast_signals.get(ticker, {})
+        chronos_pct = fc_data.get("chronos_24h_pct", 0)
+        chronos_conf = fc_data.get("chronos_24h_conf", 0)
+        if isinstance(chronos_conf, (int, float)) and chronos_conf > 0.3 \
+                and isinstance(chronos_pct, (int, float)) and chronos_pct != 0:
+            chronos_drift_val = (chronos_pct / 100.0) * math.sqrt(252)
+
+        # BB squeeze detection
+        vol_ind = extra.get("volatility_sig_indicators", {})
+        squeeze = bool(vol_ind.get("bb_squeeze_on", False)) if vol_ind else False
+
+        # Regime
+        regime = sig.get("regime", "") or ""
+
         try:
             res = compute_targets(
                 ticker, side, price, atr_pct, p_up, hours,
-                indicators=indicators or None, is_24h=is_24h_asset,
+                indicators=indicators or None,
+                extra=extra or None,
+                is_24h=is_24h_asset,
                 n_paths=n_paths,
+                regime=regime,
+                bb_squeeze=squeeze,
+                chronos_drift=chronos_drift_val,
             )
             if res.get("targets"):
                 results[ticker] = res

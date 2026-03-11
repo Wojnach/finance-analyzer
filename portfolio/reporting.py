@@ -398,6 +398,29 @@ def write_agent_summary(
         logger.warning("[reporting] price_targets failed", exc_info=True)
         _module_warnings.append("price_targets")
 
+    # Surface price levels for Layer 2 visibility (compact per-ticker dict)
+    try:
+        from portfolio.price_targets import structural_levels as _struct_levels
+        price_levels_summary: dict = {}
+        for _pl_ticker, _pl_sig in summary.get("signals", {}).items():
+            _pl_bb = {k: _pl_sig.get(k)
+                      for k in ("bb_mid", "bb_upper", "bb_lower")
+                      if _pl_sig.get(k) is not None}
+            if not _pl_bb:
+                _pl_extra = _pl_sig.get("extra", {})
+                _pl_bb = {k: _pl_extra.get(k)
+                          for k in ("bb_mid", "bb_upper", "bb_lower")
+                          if _pl_extra.get(k) is not None}
+            _pl_extra = _pl_sig.get("extra", {})
+            _pl_levels = _struct_levels(
+                _pl_sig.get("price_usd", 0), _pl_bb or None, _pl_extra or None)
+            if _pl_levels:
+                price_levels_summary[_pl_ticker] = _pl_levels
+        if price_levels_summary:
+            summary["price_levels"] = price_levels_summary
+    except Exception:
+        logger.warning("[reporting] price_levels extraction failed", exc_info=True)
+
     # Portfolio trade metrics (per-trade performance)
     try:
         from portfolio.equity_curve import compute_trade_metrics
