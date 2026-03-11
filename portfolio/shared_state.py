@@ -123,13 +123,14 @@ _newsapi_daily_reset = 0.0  # timestamp of last reset
 _NEWSAPI_DAILY_BUDGET = 90  # leave 10-call margin
 _newsapi_lock = threading.Lock()
 
-# Tier 1 = 20-min TTL during active hours; everything else = Yahoo-only
-_NEWSAPI_PRIORITY = {"XAU": 1, "XAG": 1}
+# Tier 1 = 20-min TTL during active hours; Tier 2 = 3h; rest = Yahoo-only
+_NEWSAPI_PRIORITY = {"XAU": 1, "XAG": 1, "MSTR": 2}
 
-# Better search queries — raw "XAU"/"XAG" returns sparse results on NewsAPI
+# Better search queries — raw ticker symbols return sparse results on NewsAPI
 _NEWSAPI_SEARCH_QUERIES = {
     "XAU": "gold AND (price OR market OR ounce OR bullion OR futures OR commodity)",
     "XAG": "silver AND (price OR market OR ounce OR bullion OR futures OR commodity)",
+    "MSTR": "MicroStrategy OR MSTR",
 }
 
 # Active monitoring: 08:00-22:00 CET = 07:00-21:00 UTC
@@ -180,7 +181,9 @@ def newsapi_ttl_for_ticker(ticker: str):
     is_active = _NEWSAPI_ACTIVE_START_UTC <= hour_utc < _NEWSAPI_ACTIVE_END_UTC
 
     if is_active:
-        return 1200  # 20 minutes
+        if priority == 1:
+            return 1200   # 20 min — metals
+        return 10800      # 3h — secondary (MSTR etc.)
     return None  # off-hours: Yahoo-only
 
 

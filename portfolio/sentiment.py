@@ -68,6 +68,7 @@ TICKER_CATEGORIES = {
     "TTWO": "TECHNOLOGY",
     "VRT": "TECHNOLOGY",
     "LMT": "TECHNOLOGY",
+    "MSTR": "TECHNOLOGY",
 }
 
 CRYPTOCOMPARE_URL = "https://min-api.cryptocompare.com/data/v2/news/?lang=EN"

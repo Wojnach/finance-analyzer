@@ -39,7 +39,7 @@ Do NOT analyze all tickers — focus only on held positions and macro headline.
 + portfolio states. Analyze triggered tickers and held positions. Full journal + Telegram.
 
 **Tier 3 (Full Review):** Read `data/agent_summary_compact.json` + portfolio states.
-Full cross-asset analysis of all 19+ instruments. This is the default behavior described below.
+Full cross-asset analysis of all 20+ instruments. This is the default behavior described below.
 
 Your prompt tells you which tier this is. Follow the tier-appropriate behavior — lower tiers
 should complete faster by reading less data and writing shorter analysis.
@@ -381,7 +381,7 @@ during US market hours (15:30–22:00 CET). When US markets are closed, lead wit
 metals — those are the only things the user can act on right now. Mention stock setups as
 "pre-market watch" items, not as actionable trades.
 
-**Actionable-only rules (19+ tickers):**
+**Actionable-only rules (20+ tickers):**
 - Always show tickers with BUY or SELL consensus
 - Always show tickers with active positions (in either portfolio)
 - If ALL tickers are HOLD and no positions, show the top 3-5 most interesting (highest non-abstaining voter count)
@@ -637,6 +637,7 @@ CLI: `python portfolio/main.py --prophecy-review` -- print belief review
 | TTWO    | NASDAQ      | Alpaca (IEX feed)  |
 | VRT     | NYSE        | Alpaca (IEX feed)  |
 | LMT     | NYSE        | Alpaca (IEX feed)  |
+| MSTR    | NASDAQ      | Alpaca (IEX feed)  |
 
 ### Tier 2: Avanza price-only (Nordic stocks — no signals)
 

@@ -29,6 +29,7 @@ SYMBOLS = {
     "TTWO": {"alpaca": "TTWO"},
     "VRT": {"alpaca": "VRT"},
     "LMT": {"alpaca": "LMT"},
+    "MSTR": {"alpaca": "MSTR"},
 }
 
 # ── Asset-class subsets ───────────────────────────────────────────────────
@@ -39,7 +40,7 @@ STOCK_SYMBOLS = {
     "PLTR", "NVDA", "AMD", "GOOGL", "AMZN", "AAPL",
     "AVGO", "META", "MU",
     "SOUN", "SMCI", "TSM", "TTWO",
-    "VRT", "LMT",
+    "VRT", "LMT", "MSTR",
 }
 
 # All known tickers (union of all subsets)
