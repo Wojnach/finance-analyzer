@@ -1231,6 +1231,248 @@ class TestApiMetals:
         data = resp.get_json()
         assert len(data["decisions"]) == 50
 
+    def test_builds_fallback_context_from_live_files(self, client, tmp_data):
+        decision = {
+            "ts": "2026-03-11T12:01:56+00:00",
+            "check_count": 60,
+            "tier": 3,
+            "trigger": "EMERGENCY drawdown breached: -41.3%",
+            "positions": {
+                "silver301": {
+                    "name": "MINI L SILVER AVA 301",
+                    "units": 1105,
+                    "entry": 13.921176,
+                    "bid": 12.03,
+                    "stop": 13.23,
+                    "pnl_pct": -13.58,
+                    "from_peak_pct": -5.57,
+                    "dist_stop_pct": -9.98,
+                }
+            },
+            "risk": {"drawdown_pct": -41.32},
+            "llm": {
+                "XAG-USD": {
+                    "consensus_action": "BUY",
+                    "consensus_conf": 1.0,
+                    "chronos_1h": "up",
+                    "chronos_1h_pct_move": 0.288,
+                }
+            },
+        }
+        signal = {
+            "ts": "2026-03-11T12:01:56+00:00",
+            "check": 60,
+            "prices": {"silver301": 12.03, "silver301_und": 86.21, "XAG-USD": 86.21},
+            "llm": {
+                "XAG-USD": {
+                    "consensus_action": "BUY",
+                    "consensus_conf": 1.0,
+                    "chronos_1h": "up",
+                    "chronos_1h_pct_move": 0.288,
+                }
+            },
+            "triggered": True,
+            "trigger_reasons": ["EMERGENCY drawdown breached: -41.3%"],
+        }
+        history_point = {
+            "ts": "2026-03-11T12:01:54+00:00",
+            "total_value": 13293.1,
+            "total_invested": 15382.9,
+            "pnl_pct": -13.58,
+            "positions": {"silver301": {"bid": 12.03, "value": 13293.1, "pnl_pct": -13.58}},
+        }
+        tech = {
+            "context": {"gold_price": 5179.79},
+            "price": {"current": 86.21},
+            "technicals": {"1m": {"rsi": 51.6}},
+        }
+        positions_state = {
+            "silver301": {"active": True, "units": 1105, "entry": 13.921176, "stop": 13.23}
+        }
+
+        (tmp_data / "metals_decisions.jsonl").write_text(json.dumps(decision) + "\n", encoding="utf-8")
+        (tmp_data / "metals_signal_log.jsonl").write_text(json.dumps(signal) + "\n", encoding="utf-8")
+        (tmp_data / "metals_value_history.jsonl").write_text(json.dumps(history_point) + "\n", encoding="utf-8")
+        (tmp_data / "silver_analysis.json").write_text(json.dumps(tech), encoding="utf-8")
+        (tmp_data / "metals_positions_state.json").write_text(json.dumps(positions_state), encoding="utf-8")
+
+        with _no_auth():
+            resp = client.get("/api/metals")
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        context = data["context"]
+        assert context["positions"]["silver301"]["bid"] == 12.03
+        assert context["totals"]["current"] == 13293.0
+        assert context["underlying"]["gold"]["price"] == 5179.79
+        assert context["signals"]["forecast_signals"]["XAG-USD"]["action"] == "BUY"
+        assert context["llm_predictions"]["predictions"]["XAG-USD"]["chronos_1h"]["pct_move"] == 0.288
+        assert context["risk"]["trade_guards"]["status"] == "warnings"
+
+    def test_merges_fallback_into_partial_context(self, client, tmp_data):
+        partial_context = {
+            "totals": {"pnl_pct": -1.0},
+            "risk": {"drawdown": {"level": "WARNING"}},
+        }
+        decision = {
+            "ts": "2026-03-11T12:01:56+00:00",
+            "check_count": 60,
+            "tier": 3,
+            "trigger": "EMERGENCY drawdown breached: -41.3%",
+            "positions": {
+                "silver301": {
+                    "name": "MINI L SILVER AVA 301",
+                    "units": 1105,
+                    "entry": 13.921176,
+                    "bid": 12.03,
+                    "stop": 13.23,
+                    "pnl_pct": -13.58,
+                }
+            },
+            "risk": {"drawdown_pct": -41.32},
+        }
+        signal = {
+            "ts": "2026-03-11T12:01:56+00:00",
+            "check": 60,
+            "prices": {"silver301": 12.03, "XAG-USD": 86.21},
+            "triggered": False,
+            "trigger_reasons": [],
+        }
+        history_point = {
+            "ts": "2026-03-11T12:01:54+00:00",
+            "total_value": 13293.1,
+            "total_invested": 15382.9,
+            "pnl_pct": -13.58,
+            "positions": {"silver301": {"bid": 12.03, "value": 13293.1, "pnl_pct": -13.58}},
+        }
+        tech = {"context": {"gold_price": 5179.79}, "price": {"current": 86.21}}
+        positions_state = {
+            "silver301": {"active": True, "units": 1105, "entry": 13.921176, "stop": 13.23}
+        }
+
+        (tmp_data / "metals_context.json").write_text(json.dumps(partial_context), encoding="utf-8")
+        (tmp_data / "metals_decisions.jsonl").write_text(json.dumps(decision) + "\n", encoding="utf-8")
+        (tmp_data / "metals_signal_log.jsonl").write_text(json.dumps(signal) + "\n", encoding="utf-8")
+        (tmp_data / "metals_value_history.jsonl").write_text(json.dumps(history_point) + "\n", encoding="utf-8")
+        (tmp_data / "silver_analysis.json").write_text(json.dumps(tech), encoding="utf-8")
+        (tmp_data / "metals_positions_state.json").write_text(json.dumps(positions_state), encoding="utf-8")
+
+        with _no_auth():
+            resp = client.get("/api/metals")
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        context = data["context"]
+        assert context["totals"]["pnl_pct"] == -1.0
+        assert context["totals"]["current"] == 13293.0
+        assert context["positions"]["silver301"]["entry"] == 13.921176
+        assert context["risk"]["drawdown"]["level"] == "WARNING"
+        assert context["risk"]["drawdown"]["current_drawdown_pct"] == -41.32
+
+
+class TestApiGoldDigger:
+    def test_normalizes_compact_state_log_and_trades(self, client, tmp_data):
+        state = {
+            "equity_sek": 100000.0,
+            "daily_pnl": 120.0,
+            "daily_trades": 1,
+            "last_poll_time": "2026-03-11T12:01:00+00:00",
+            "halted": False,
+            "position": {
+                "quantity": 250,
+                "avg_price": 9.5,
+                "stop": 8.9,
+                "take_profit_price": 10.4,
+            },
+        }
+        log_lines = [
+            {
+                "ts": "2026-03-11T11:59:00+00:00",
+                "gold": 5192.9,
+                "usdsek": 9.11,
+                "S": 0.4,
+                "z_g": 0.4,
+                "z_f": 0.1,
+                "z_y": -0.1,
+                "cert_bid": 9.6,
+            },
+            {
+                "ts": "2026-03-11T12:00:00+00:00",
+                "gold": 5193.1,
+                "usdsek": 9.11,
+                "S": 0.9,
+                "z_g": 0.9,
+                "z_f": 0.0,
+                "z_y": 0.0,
+                "cert_bid": 9.7,
+            },
+            {
+                "ts": "2026-03-11T12:01:00+00:00",
+                "gold": 5193.4,
+                "usdsek": 9.11,
+                "S": 1.2,
+                "z_g": 1.2,
+                "z_f": 0.0,
+                "z_y": 0.0,
+                "cert_bid": 9.8,
+            },
+        ]
+        trade = {
+            "ts": "2026-03-11T12:01:05+00:00",
+            "action": "BUY",
+            "quantity": 250,
+            "price_sek": 9.8,
+            "composite_s": 1.2,
+            "reason": "entry threshold met",
+        }
+
+        (tmp_data / "golddigger_state.json").write_text(json.dumps(state), encoding="utf-8")
+        (tmp_data / "golddigger_log.jsonl").write_text(
+            "\n".join(json.dumps(line) for line in log_lines) + "\n",
+            encoding="utf-8",
+        )
+        (tmp_data / "golddigger_trades.jsonl").write_text(json.dumps(trade) + "\n", encoding="utf-8")
+
+        with _no_auth(), patch(
+            "dashboard.app._get_config",
+            return_value={
+                "golddigger": {
+                    "theta_in": 0.7,
+                    "theta_out": 0.1,
+                    "confirm_polls": 3,
+                    "poll_seconds": 5,
+                    "max_daily_trades": 10,
+                    "risk_fraction": 0.005,
+                    "max_notional_fraction": 0.10,
+                    "leverage": 20.0,
+                    "spread_max": 0.02,
+                }
+            },
+        ):
+            resp = client.get("/api/golddigger")
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["state"]["composite_score"] == 1.2
+        assert data["state"]["z_gold"] == 1.2
+        assert data["state"]["confirm_count"] == 2
+        assert data["state"]["position"]["shares"] == 250
+        assert data["state"]["position"]["side"] == "BUY"
+        assert data["log"][0]["composite_score"] == 1.2
+        assert data["trades"][0]["shares"] == 250
+        assert data["trades"][0]["total_sek"] == 2450.0
+        assert data["trades"][0]["composite_score"] == 1.2
+
+    def test_returns_empty_payload_when_files_missing(self, client, tmp_data):
+        with _no_auth():
+            resp = client.get("/api/golddigger")
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["state"] is None
+        assert data["log"] == []
+        assert data["trades"] == []
+
 
 class TestSignalHeatmapUpdated:
     def test_core_signals_includes_custom_lora(self, client, tmp_data):

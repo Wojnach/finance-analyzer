@@ -368,6 +368,14 @@
         border: 1px solid var(--bdr); transition: all 0.2s;
       }
       .atab.active { background: var(--cyn); color: #0a0e17; border-color: var(--cyn); }
+      .acc-toolbar {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 10px; margin-bottom: 10px; flex-wrap: wrap;
+      }
+      .acc-sort {
+        background: var(--card2); color: var(--tx); border: 1px solid var(--bdr);
+        border-radius: 4px; padding: 4px 8px; font-size: 11px;
+      }
 
       .abr { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
       .abl { font-size: 10px; color: var(--txd); width: 70px; text-align: right; flex-shrink: 0; }
@@ -833,6 +841,8 @@
       var accChartInstance = null;
       var metalsPriceChartInstance = null;
       var gdScoreChartInstance = null;
+      var _accuracyData = null;
+      var _accuracySort = "pct_desc";
 
       // Tickers: populated dynamically from data
       var T = [];
@@ -876,6 +886,39 @@
       }
       function eh(s) {
         return s ? String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;") : "";
+      }
+      function _accuracySortLabel(mode) {
+        if (mode === "pct_asc") return "Accuracy: lowest first";
+        if (mode === "samples_desc") return "Samples: highest first";
+        if (mode === "name_asc") return "Signal name: A-Z";
+        return "Accuracy: highest first";
+      }
+      function _sortAccuracyEntries(entries, mode) {
+        return entries.slice().sort(function(a, b) {
+          var an = a[0], bn = b[0];
+          var av = a[1] || {}, bv = b[1] || {};
+          var ap = av.pct != null ? Number(av.pct) : -1;
+          var bp = bv.pct != null ? Number(bv.pct) : -1;
+          var at = av.total != null ? Number(av.total) : 0;
+          var bt = bv.total != null ? Number(bv.total) : 0;
+
+          if (mode === "pct_asc") {
+            if (ap !== bp) return ap - bp;
+            if (at !== bt) return bt - at;
+            return an.localeCompare(bn);
+          }
+          if (mode === "samples_desc") {
+            if (at !== bt) return bt - at;
+            if (ap !== bp) return bp - ap;
+            return an.localeCompare(bn);
+          }
+          if (mode === "name_asc") {
+            return an.localeCompare(bn);
+          }
+          if (ap !== bp) return bp - ap;
+          if (at !== bt) return bt - at;
+          return an.localeCompare(bn);
+        });
       }
 
       /* ================================================================
@@ -1544,37 +1587,65 @@
       /* ================================================================
          Accuracy panel
          ================================================================ */
-      async function loadAccuracy() {
+      function setAccuracySort(mode) {
+        _accuracySort = mode || "pct_desc";
+        if (_accuracyData) renderAccuracy(_accuracyData);
+      }
+
+      function renderAccuracy(d) {
         var c = document.getElementById("accC");
-        var d = await fj("/api/accuracy");
         if (!d || d.error || !Object.keys(d).length) {
           c.innerHTML = '<div class="nd">No accuracy data available</div>';
           return;
         }
-        var ks = Object.keys(d);
-        var h = '<div class="atabs">';
+
+        var horizonOrder = ["1d", "3d", "5d", "10d"];
+        var ks = horizonOrder.filter(function (k) { return d[k]; });
+        if (!ks.length) ks = Object.keys(d);
+
+        var h = '<div class="acc-toolbar">';
+        h += '<div style="font-size:11px;color:var(--txm)">Sort portfolio-loop signals for each horizon panel</div>';
+        h += '<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txm)">Sort';
+        h += '<select class="acc-sort" onchange="setAccuracySort(this.value)">';
+        h += '<option value="pct_desc"' + (_accuracySort === "pct_desc" ? " selected" : "") + '>Accuracy desc</option>';
+        h += '<option value="pct_asc"' + (_accuracySort === "pct_asc" ? " selected" : "") + '>Accuracy asc</option>';
+        h += '<option value="samples_desc"' + (_accuracySort === "samples_desc" ? " selected" : "") + '>Samples desc</option>';
+        h += '<option value="name_asc"' + (_accuracySort === "name_asc" ? " selected" : "") + '>Name A-Z</option>';
+        h += '</select></label></div>';
+        h += '<div class="atabs">';
         ks.forEach(function (k, i) {
           h += '<div class="atab' + (i === 0 ? ' active' : '') + '" onclick="satab(this,\'' + k + '\')">' + k + '</div>';
         });
         h += '</div>';
+
         ks.forEach(function (k, i) {
           h += '<div class="apnl" data-h="' + k + '" style="' + (i > 0 ? 'display:none' : '') + '">';
           var hd = d[k];
           if (hd.consensus)
             h += '<div style="margin-bottom:8px;font-size:12px;color:var(--txd)">Consensus: <strong style="color:var(--tx)">' + fn(hd.consensus.pct, 1) + '%</strong> (' + hd.consensus.correct + '/' + hd.consensus.total + ')</div>';
           if (hd.signals) {
+            var signalEntries = _sortAccuracyEntries(Object.entries(hd.signals), _accuracySort);
+            h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">';
+            h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase">Signals</div>';
+            h += '<div style="font-size:10px;color:var(--txm)">' + _accuracySortLabel(_accuracySort) + '</div>';
+            h += '</div>';
             h += '<div style="margin-bottom:10px">';
-            Object.keys(hd.signals).forEach(function (n) {
-              var sd = hd.signals[n], p = sd.pct || 0;
+            signalEntries.forEach(function (entry) {
+              var n = entry[0];
+              var sd = entry[1] || {};
+              var p = sd.pct || 0;
               var bc = p >= 55 ? "var(--grn)" : p >= 45 ? "var(--yel)" : "var(--red)";
               h += '<div class="abr"><div class="abl">' + n + '</div><div class="abt"><div class="abf" style="width:' + p + '%;background:' + bc + '">' + fn(p, 0) + '%</div></div><div class="abc">' + sd.correct + '/' + sd.total + '</div></div>';
             });
             h += '</div>';
           }
           if (hd.per_ticker) {
+            var tickerEntries = _sortAccuracyEntries(Object.entries(hd.per_ticker), "pct_desc");
             h += '<div style="font-size:10px;color:var(--txm);margin-bottom:5px">PER TICKER</div>';
-            Object.keys(hd.per_ticker).forEach(function (t) {
-              var td = hd.per_ticker[t], p = td.pct || 0;
+            tickerEntries.forEach(function (entry) {
+              var t = entry[0];
+              var td = entry[1] || {};
+              var p = td.pct || 0;
               var bc = p >= 55 ? "var(--grn)" : p >= 45 ? "var(--yel)" : "var(--red)";
               h += '<div class="abr"><div class="abl">' + t + '</div><div class="abt"><div class="abf" style="width:' + p + '%;background:' + bc + '">' + fn(p, 0) + '%</div></div><div class="abc">' + td.correct + '/' + td.total + '</div></div>';
             });
@@ -1582,6 +1653,12 @@
           h += '</div>';
         });
         c.innerHTML = h;
+      }
+
+      async function loadAccuracy() {
+        var d = await fj("/api/accuracy");
+        _accuracyData = d;
+        renderAccuracy(d);
       }
 
       /* ================================================================
@@ -1698,25 +1775,32 @@
          ================================================================ */
       async function loadMetals() {
         var d = await fj("/api/metals");
-        if (!d || !d.context) {
-          document.getElementById("metalsSummary").innerHTML = '<div class="nd">No metals data available</div>';
-          document.getElementById("metalsPositions").innerHTML = "";
-          document.getElementById("metalsRiskContent").innerHTML = '<div class="nd">--</div>';
-          document.getElementById("metalsTechContent").innerHTML = '<div class="nd">--</div>';
-          document.getElementById("metalsDecisions").innerHTML = '<div class="nd">--</div>';
-          return;
-        }
-        renderMetalsSummary(d.context);
-        renderMetalsPositionCards(d.context);
-        renderMetalsRisk(d.context);
-        renderMetalsTechnicals(d.technicals, d.context);
-        renderMetalsDecisions(d.decisions);
-        renderMetalsPriceChart(d.context);
+        var ctx = d && d.context ? d.context : {};
+
+        renderMetalsSummary(ctx);
+        renderMetalsPositionCards(ctx);
+        renderMetalsRisk(ctx);
+        renderMetalsPriceChart(ctx);
+        renderMetalsTechnicals(d ? d.technicals : null, ctx);
+        renderMetalsDecisions(d ? d.decisions : null);
       }
 
       function renderMetalsSummary(ctx) {
         var t = ctx.totals || {};
         var u = ctx.underlying || {};
+        var hasSummaryData =
+          t.current != null ||
+          t.invested != null ||
+          t.pnl_pct != null ||
+          t.profit_sek != null ||
+          (u.gold && u.gold.price != null) ||
+          (u.silver && u.silver.price != null) ||
+          ctx.check_count != null ||
+          ctx.invoke_count != null;
+        if (!hasSummaryData) {
+          document.getElementById("metalsSummary").innerHTML = '<div class="nd">Live metals context unavailable. The loop has not written enough data yet.</div>';
+          return;
+        }
         var pnlColor = (t.pnl_pct || 0) >= 0 ? "var(--grn)" : "var(--red)";
         var h = '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:4px 0">';
         h += '<div style="text-align:center">';
@@ -1757,8 +1841,10 @@
           var p = pos[k];
           var pnlColor = (p.pnl_pct || 0) >= 0 ? "var(--grn)" : "var(--red)";
           var stopDist = p.dist_to_stop_pct || 0;
-          var stopColor = stopDist < 5 ? "var(--red)" : stopDist < 7 ? "var(--org)" : stopDist < 10 ? "var(--yel)" : "var(--grn)";
-          var stopBarW = Math.min(stopDist / 15 * 100, 100);
+          var stopDistAbs = Math.abs(stopDist);
+          var stopColor = stopDist < 0 ? "var(--red)" : stopDist < 5 ? "var(--red)" : stopDist < 7 ? "var(--org)" : stopDist < 10 ? "var(--yel)" : "var(--grn)";
+          var stopBarW = Math.min(stopDistAbs / 15 * 100, 100);
+          var stopLabel = stopDist < 0 ? "Stop breached" : "Stop distance";
           var levBadge = p.leverage ? '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:var(--card2);color:var(--cyn);border:1px solid var(--cyn);margin-left:6px">' + p.leverage + 'x</span>' : '';
 
           h += '<div class="card" style="min-width:220px;flex:1">';
@@ -1775,7 +1861,7 @@
           h += '</div>';
 
           // Stop-loss distance bar
-          h += '<div style="font-size:10px;color:var(--txm);margin-bottom:3px">Stop distance: <span style="color:' + stopColor + ';font-weight:600">' + fn(stopDist, 1) + '%</span> (stop: ' + fn(p.stop, 2) + ')</div>';
+          h += '<div style="font-size:10px;color:var(--txm);margin-bottom:3px">' + stopLabel + ': <span style="color:' + stopColor + ';font-weight:600">' + fn(stopDist, 1) + '%</span> (stop: ' + fn(p.stop, 2) + ')</div>';
           h += '<div style="background:var(--card2);border-radius:3px;height:6px;overflow:hidden">';
           h += '<div style="width:' + stopBarW + '%;height:100%;background:' + stopColor + ';border-radius:3px"></div>';
           h += '</div>';
@@ -1797,6 +1883,29 @@
         var tg = risk.trade_guards || {};
         var sig = ctx.signals || {};
         var llm = ctx.llm_predictions || {};
+        var preds = llm.predictions || {};
+        var fs = sig.forecast_signals || {};
+        var xagPred = preds["XAG-USD"] || {};
+        var xauPred = preds["XAU-USD"] || {};
+        var xagFs = fs["XAG-USD"] || {
+          action: xagPred.consensus ? xagPred.consensus.weighted_action : null,
+          chronos_1h_pct: xagPred.chronos_1h ? xagPred.chronos_1h.pct_move : null
+        };
+        var xauFs = fs["XAU-USD"] || {
+          action: xauPred.consensus ? xauPred.consensus.weighted_action : null,
+          chronos_1h_pct: xauPred.chronos_1h ? xauPred.chronos_1h.pct_move : null
+        };
+        var hasRiskData =
+          dd.current_drawdown_pct != null ||
+          Object.keys(mc).length ||
+          tg.status ||
+          xagFs.action ||
+          xauFs.action ||
+          Object.keys(preds).length;
+        if (!hasRiskData) {
+          document.getElementById("metalsRiskContent").innerHTML = '<div class="nd">No risk context yet</div>';
+          return;
+        }
 
         var ddLevel = (dd.level || "OK").toUpperCase();
         var ddColor = ddLevel === "OK" ? "var(--grn)" : ddLevel === "WARNING" ? "var(--org)" : "var(--red)";
@@ -1822,9 +1931,6 @@
         h += '</table>';
 
         // Pipeline signals
-        var fs = sig.forecast_signals || {};
-        var xagFs = fs["XAG-USD"] || {};
-        var xauFs = fs["XAU-USD"] || {};
         h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase;margin:8px 0 4px">Pipeline Signals</div>';
         h += '<div style="font-size:11px;color:var(--txd);margin-bottom:4px">XAG: <span class="' + ac(xagFs.action) + '" style="font-weight:600">' + (xagFs.action || "N/A") + '</span>';
         if (xagFs.chronos_1h_pct != null) h += ' | Chronos 1h: ' + fn(xagFs.chronos_1h_pct, 3) + '%';
@@ -1834,9 +1940,6 @@
         h += '</div>';
 
         // LLM consensus
-        var preds = llm.predictions || {};
-        var xagPred = preds["XAG-USD"] || {};
-        var xauPred = preds["XAU-USD"] || {};
         h += '<div style="font-size:10px;color:var(--txm);text-transform:uppercase;margin:8px 0 4px">LLM Consensus</div>';
         if (xagPred.consensus) {
           h += '<div style="font-size:11px;color:var(--txd)">XAG: <span style="color:var(--tx);font-weight:600">' + (xagPred.consensus.weighted_action || xagPred.consensus.direction || "--") + '</span>';
@@ -1973,7 +2076,13 @@
 
       function renderMetalsPriceChart(ctx) {
         var priceHistory = ctx.price_history_recent || [];
-        if (!priceHistory.length) return;
+        if (!priceHistory.length) {
+          if (metalsPriceChartInstance) {
+            metalsPriceChartInstance.destroy();
+            metalsPriceChartInstance = null;
+          }
+          return;
+        }
 
         var labels = priceHistory.map(function(p) {
           var d = new Date(p.ts);
@@ -2072,12 +2181,13 @@
           document.getElementById("gdSignalContent").innerHTML = '<div class="nd">--</div>';
           document.getElementById("gdPositionContent").innerHTML = '<div class="nd">--</div>';
           document.getElementById("gdTrades").innerHTML = '<div class="nd">--</div>';
+          renderGdScoreChart([], null);
           return;
         }
         renderGdSummary(d.state);
         renderGdSignal(d.state);
         renderGdPosition(d.state);
-        renderGdScoreChart(d.log);
+        renderGdScoreChart(d.log, d.state);
         renderGdTrades(d.trades);
       }
 
@@ -2208,11 +2318,13 @@
       function renderGdPosition(st) {
         var h = '';
         var pos = st.position || {};
-        if (pos.side) {
+        var hasPosition = pos.side || pos.shares || pos.quantity || pos.entry_price != null || pos.current_price != null;
+        if (hasPosition) {
+          var side = pos.side || "BUY";
           var pnlPct = pos.pnl_pct || 0;
           var pnlColor = pnlPct >= 0 ? "var(--grn)" : "var(--red)";
           h += '<div style="display:inline-block;padding:4px 12px;border-radius:4px;background:var(--org)22;color:var(--org);font-weight:700;font-size:12px;border:1px solid var(--org)44;margin-bottom:10px">';
-          h += pos.side.toUpperCase() + ' ' + (pos.shares || 0) + ' shares @ ' + fn(pos.entry_price, 2) + ' SEK';
+          h += side.toUpperCase() + ' ' + (pos.shares || pos.quantity || 0) + ' shares @ ' + fn(pos.entry_price, 2) + ' SEK';
           h += '</div>';
           h += '<div style="font-size:14px;font-weight:700;color:' + pnlColor + ';margin-bottom:8px">' + fn(pnlPct, 2) + '% P&L</div>';
 
@@ -2252,8 +2364,14 @@
         document.getElementById("gdPositionContent").innerHTML = h;
       }
 
-      function renderGdScoreChart(log) {
-        if (!log || !log.length) return;
+      function renderGdScoreChart(log, st) {
+        if (!log || !log.length) {
+          if (gdScoreChartInstance) {
+            gdScoreChartInstance.destroy();
+            gdScoreChartInstance = null;
+          }
+          return;
+        }
 
         var labels = log.map(function(e) {
           var d = new Date(e.ts);
@@ -2263,6 +2381,9 @@
         var zGold = log.map(function(e) { return e.z_gold; }).reverse();
         var zFx = log.map(function(e) { return e.z_fx; }).reverse();
         var zYield = log.map(function(e) { return e.z_yield; }).reverse();
+        var thetaIn = labels.map(function() { return st && st.theta_in != null ? st.theta_in : 0.7; });
+        var thetaOut = labels.map(function() { return st && st.theta_out != null ? st.theta_out : 0.1; });
+        var zeroLine = labels.map(function() { return 0; });
 
         if (gdScoreChartInstance) {
           gdScoreChartInstance.destroy();
@@ -2311,6 +2432,32 @@
                 pointRadius: 0,
                 borderDash: [4, 2],
                 yAxisID: "y"
+              },
+              {
+                label: "Entry threshold",
+                data: thetaIn,
+                borderColor: "rgba(0,255,136,0.4)",
+                borderWidth: 1,
+                pointRadius: 0,
+                borderDash: [5, 3],
+                yAxisID: "y"
+              },
+              {
+                label: "Exit threshold",
+                data: thetaOut,
+                borderColor: "rgba(255,68,68,0.4)",
+                borderWidth: 1,
+                pointRadius: 0,
+                borderDash: [5, 3],
+                yAxisID: "y"
+              },
+              {
+                label: "Zero",
+                data: zeroLine,
+                borderColor: "rgba(255,255,255,0.15)",
+                borderWidth: 1,
+                pointRadius: 0,
+                yAxisID: "y"
               }
             ]
           },
@@ -2319,14 +2466,7 @@
             maintainAspectRatio: false,
             interaction: { mode: "index", intersect: false },
             plugins: {
-              legend: { labels: { color: "#a0aec0", font: { size: 10 } } },
-              annotation: {
-                annotations: {
-                  thetaIn: { type: "line", yMin: 1.0, yMax: 1.0, borderColor: "rgba(0,255,136,0.4)", borderDash: [5,3], borderWidth: 1, label: { display: true, content: "Entry", position: "end", font: { size: 9 }, color: "#00ff88" } },
-                  thetaOut: { type: "line", yMin: 0.2, yMax: 0.2, borderColor: "rgba(255,68,68,0.4)", borderDash: [5,3], borderWidth: 1, label: { display: true, content: "Exit", position: "end", font: { size: 9 }, color: "#ff4444" } },
-                  zero: { type: "line", yMin: 0, yMax: 0, borderColor: "rgba(255,255,255,0.15)", borderWidth: 1 }
-                }
-              }
+              legend: { labels: { color: "#a0aec0", font: { size: 10 } } }
             },
             scales: {
               x: {
@@ -2361,14 +2501,16 @@
         var shown = Math.min(trades.length, 30);
         for (var i = 0; i < shown; i++) {
           var t = trades[i];
+          var shares = t.shares != null ? t.shares : t.quantity;
+          var score = t.composite_score != null ? t.composite_score : t.composite_s;
           var actColor = (t.action || "").toUpperCase() === "BUY" ? "var(--grn)" : "var(--red)";
           h += '<tr style="border-bottom:1px solid var(--bdr)">';
           h += '<td style="padding:4px 6px;color:var(--txd);white-space:nowrap">' + ft(t.ts || t.timestamp) + '</td>';
           h += '<td style="padding:4px 6px;text-align:center;color:' + actColor + ';font-weight:700">' + eh((t.action || "").toUpperCase()) + '</td>';
-          h += '<td style="padding:4px 6px;text-align:center">' + fn(t.shares, 0) + '</td>';
+          h += '<td style="padding:4px 6px;text-align:center">' + fn(shares, 0) + '</td>';
           h += '<td style="padding:4px 6px;text-align:center">' + fn(t.price_sek, 2) + ' SEK</td>';
           h += '<td style="padding:4px 6px;text-align:center">' + fn(t.total_sek, 0) + ' SEK</td>';
-          h += '<td style="padding:4px 6px;text-align:center;color:var(--yel)">' + fn(t.composite_score, 2) + '</td>';
+          h += '<td style="padding:4px 6px;text-align:center;color:var(--yel)">' + fn(score, 2) + '</td>';
           var reason = t.reason || "";
           if (reason.length > 60) reason = reason.substring(0, 60) + "...";
           h += '<td style="padding:4px 6px;color:var(--txd);max-width:200px;overflow:hidden;text-overflow:ellipsis">' + eh(reason) + '</td>';
