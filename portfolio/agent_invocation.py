@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from portfolio.api_utils import load_config as _load_config
-from portfolio.file_utils import atomic_append_jsonl
+from portfolio.file_utils import atomic_append_jsonl, load_jsonl
 from portfolio.message_store import send_or_store
 from portfolio.telegram_notifications import escape_markdown_v1
 
@@ -20,11 +20,17 @@ logger = logging.getLogger("portfolio.agent")
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 INVOCATIONS_FILE = DATA_DIR / "invocations.jsonl"
+JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
+TELEGRAM_FILE = DATA_DIR / "telegram_messages.jsonl"
 
 _agent_proc = None
 _agent_log = None
 _agent_start = 0
 _agent_timeout = 900  # per-invocation timeout (set from tier config)
+_agent_tier = None  # tier of the currently running agent
+_agent_reasons = None  # trigger reasons for the current invocation
+_journal_ts_before = None  # last journal timestamp before agent started
+_telegram_ts_before = None  # last telegram timestamp before agent started
 
 # Per-tier configuration
 TIER_CONFIG = {
@@ -81,8 +87,32 @@ def _log_trigger(reasons, status, tier=None):
     atomic_append_jsonl(INVOCATIONS_FILE, entry)
 
 
+def _last_jsonl_ts(path):
+    """Return the 'ts' value from the last entry of a JSONL file, or None."""
+    if not path.exists():
+        return None
+    last_ts = None
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    ts = entry.get("ts")
+                    if ts:
+                        last_ts = ts
+                except (json.JSONDecodeError, AttributeError):
+                    continue
+    except OSError:
+        pass
+    return last_ts
+
+
 def invoke_agent(reasons, tier=3):
     global _agent_proc, _agent_log, _agent_start, _agent_timeout
+    global _agent_tier, _agent_reasons, _journal_ts_before, _telegram_ts_before
 
     # Check if Layer 2 is enabled — allows running data loop without Claude quota
     try:
@@ -184,6 +214,10 @@ def invoke_agent(reasons, tier=3):
         log_fh = None  # prevent cleanup below from closing it
         _agent_start = time.time()
         _agent_timeout = timeout
+        _agent_tier = tier
+        _agent_reasons = list(reasons)
+        _journal_ts_before = _last_jsonl_ts(JOURNAL_FILE)
+        _telegram_ts_before = _last_jsonl_ts(TELEGRAM_FILE)
         logger.info(
             "Agent T%d invoked pid=%s max_turns=%d timeout=%ds (%s)",
             tier, _agent_proc.pid, max_turns, timeout,
@@ -206,3 +240,157 @@ def invoke_agent(reasons, tier=3):
         if log_fh is not None:
             log_fh.close()
         return False
+
+
+def check_agent_completion():
+    """Check if a running agent has completed and log completion info.
+
+    Returns:
+        dict with completion info (status, exit_code, duration_s, tier,
+        journal_written, telegram_sent), or None if no agent is running
+        or the agent is still in progress.
+    """
+    global _agent_proc, _agent_log, _agent_start
+    global _agent_tier, _agent_reasons, _journal_ts_before, _telegram_ts_before
+
+    if _agent_proc is None:
+        return None
+
+    exit_code = _agent_proc.poll()
+    if exit_code is None:
+        # Still running
+        return None
+
+    # Process has finished — collect completion info
+    duration_s = round(time.time() - _agent_start, 1)
+    completed_at = datetime.now(timezone.utc).isoformat()
+
+    # Check if journal was written (new entry after agent started)
+    journal_ts_after = _last_jsonl_ts(JOURNAL_FILE)
+    journal_written = (
+        journal_ts_after is not None
+        and journal_ts_after != _journal_ts_before
+    )
+
+    # Check if Telegram message was sent (new entry after agent started)
+    telegram_ts_after = _last_jsonl_ts(TELEGRAM_FILE)
+    telegram_sent = (
+        telegram_ts_after is not None
+        and telegram_ts_after != _telegram_ts_before
+    )
+
+    # Determine status
+    if exit_code != 0:
+        status = "failed"
+    elif journal_written and telegram_sent:
+        status = "success"
+    else:
+        status = "incomplete"
+
+    result = {
+        "status": status,
+        "exit_code": exit_code,
+        "duration_s": duration_s,
+        "tier": _agent_tier,
+        "completed_at": completed_at,
+        "journal_written": journal_written,
+        "telegram_sent": telegram_sent,
+    }
+
+    # Log to invocations file
+    log_entry = {
+        "ts": completed_at,
+        "reasons": _agent_reasons or [],
+        "status": status,
+        "tier": _agent_tier,
+        "exit_code": exit_code,
+        "duration_s": duration_s,
+        "journal_written": journal_written,
+        "telegram_sent": telegram_sent,
+    }
+    try:
+        atomic_append_jsonl(INVOCATIONS_FILE, log_entry)
+    except Exception as e:
+        logger.warning("Failed to log agent completion: %s", e)
+
+    logger.info(
+        "Agent completed: status=%s exit=%d duration=%.1fs tier=%s journal=%s telegram=%s",
+        status, exit_code, duration_s, _agent_tier, journal_written, telegram_sent,
+    )
+
+    # Clean up
+    if _agent_log:
+        try:
+            _agent_log.close()
+        except Exception:
+            pass
+    _agent_proc = None
+    _agent_log = None
+    _agent_start = 0
+    _agent_tier = None
+    _agent_reasons = None
+    _journal_ts_before = None
+    _telegram_ts_before = None
+
+    return result
+
+
+def get_completion_stats(hours=24):
+    """Compute rolling completion stats from the invocations log.
+
+    Args:
+        hours: Number of hours to look back (default 24).
+
+    Returns:
+        dict with keys: total, success, incomplete, failed, completion_rate.
+        Returns zeroed stats if no data is available.
+    """
+    entries = load_jsonl(INVOCATIONS_FILE)
+    cutoff = datetime.now(timezone.utc).timestamp() - (hours * 3600)
+
+    total = 0
+    success = 0
+    incomplete = 0
+    failed = 0
+
+    for entry in entries:
+        # Only count entries that have a completion status (not "invoked" or "skipped_gate")
+        entry_status = entry.get("status", "")
+        if entry_status not in ("success", "incomplete", "failed"):
+            continue
+
+        ts_str = entry.get("ts", "")
+        if not ts_str:
+            continue
+
+        try:
+            # Parse ISO-8601 timestamp
+            ts_str_clean = ts_str.replace("+00:00", "+0000").replace("Z", "+0000")
+            if "+" in ts_str_clean[10:]:
+                dt = datetime.fromisoformat(ts_str)
+            else:
+                dt = datetime.fromisoformat(ts_str).replace(tzinfo=timezone.utc)
+            entry_ts = dt.timestamp()
+        except (ValueError, TypeError):
+            continue
+
+        if entry_ts < cutoff:
+            continue
+
+        total += 1
+        if entry_status == "success":
+            success += 1
+        elif entry_status == "incomplete":
+            incomplete += 1
+        elif entry_status == "failed":
+            failed += 1
+
+    completion_rate = (success / total * 100) if total > 0 else 0.0
+
+    return {
+        "total": total,
+        "success": success,
+        "incomplete": incomplete,
+        "failed": failed,
+        "completion_rate": round(completion_rate, 1),
+    }
