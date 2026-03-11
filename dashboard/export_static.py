@@ -19,7 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 
-from dashboard.app import app  # noqa: E402
+from dashboard.app import app, _json_safe  # noqa: E402
 
 # Endpoints to export: (Flask route, static filename)
 ENDPOINTS = [
@@ -27,6 +27,7 @@ ENDPOINTS = [
     ("/api/signals", "signals.json"),
     ("/api/portfolio", "portfolio.json"),
     ("/api/portfolio-bold", "portfolio-bold.json"),
+    ("/api/accuracy", "accuracy.json"),
     ("/api/signal-heatmap", "signal-heatmap.json"),
     ("/api/equity-curve", "equity-curve.json"),
     ("/api/triggers", "triggers.json"),
@@ -38,6 +39,7 @@ ENDPOINTS = [
     ("/api/warrants", "warrants.json"),
     ("/api/risk", "risk.json"),
     ("/api/metals", "metals.json"),
+    ("/api/golddigger", "golddigger.json"),
     ("/api/metals-accuracy", "metals-accuracy.json"),
     ("/api/lora-status", "lora-status.json"),
     ("/api/health", "health.json"),
@@ -92,7 +94,13 @@ def export_all(out_dir: Path | None = None) -> dict:
                 data = resp.get_json()
                 dest = out_dir / filename
                 with open(dest, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+                    json.dump(
+                        _json_safe(data),
+                        f,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    )
 
                 ok.append(filename)
             except Exception as e:

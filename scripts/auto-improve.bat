@@ -24,7 +24,7 @@ powershell -NoProfile -Command ^
 echo [%TS_START%] AutoImprove session starting...
 
 REM --- Run claude with the prompt file ---
-type Q:\finance-analyzer\docs\auto-improve-prompt.md | claude -p --verbose > Q:\finance-analyzer\data\auto-improve-out.txt 2>&1
+type Q:\finance-analyzer\docs\auto-improve-prompt.md | claude -p --verbose --model claude-opus-4-6 > Q:\finance-analyzer\data\auto-improve-out.txt 2>&1
 set EXIT_CODE=%ERRORLEVEL%
 
 REM --- Timestamp end ---

@@ -347,6 +347,18 @@ The mode can be switched via Telegram command: `/mode probability` or `/mode sig
 (backtick-wrapped) lines for the merged ticker grid. The vote format (`XB/YS/ZH`) is
 mandatory, do not invent alternatives.
 
+**Prefer plain English labels over house shorthand.** Assume the operator may not
+know the abbreviations yet. Avoid or expand unexplained terms such as:
+- `F&G` -> `Fear & Greed`
+- `TF` -> `timeframe`
+- `acc` -> `accuracy`
+- `wConf` -> `weighted confidence`
+- `DD` -> `drawdown`
+- `Ref` -> `reflection`
+
+Ticker symbols are fine. Standard market terms like `RSI`, `MACD`, and `ATR` are
+also fine. The problem is internal shorthand, not normal indicator names.
+
 **Sections (in order, Mode A):**
 
 1. **First line** — Apple Watch glance
@@ -445,34 +457,26 @@ BTC: coin-flip accuracy, don't trade on signals alone.
 - Your BUY/HOLD/SELL call is secondary (supplementary interpretation)
 - Only focus instruments get the rich format (rest stays as compact grid)
 
-**ALWAYS save the message locally** (with category — `"trade"` for BUY/SELL, `"analysis"` for HOLD):
+**Always route messages through the shared helper** (category `"trade"` for an
+executed BUY/SELL, `"analysis"` for HOLD/commentary).
+
+Do **not** write directly to `data/telegram_messages.jsonl` and do **not** call
+the Telegram HTTP API directly for normal Layer 2 notifications. Use the shared
+helper so message logging, delivery, and text cleanup stay consistent:
 
 ```python
-import json, datetime, pathlib
+import json
+from portfolio.message_store import send_or_store
+
 msg = "YOUR_MESSAGE"
-# Set category: "trade" if you executed a BUY or SELL, "analysis" for HOLD/commentary
 category = "trade"  # or "analysis"
-log = pathlib.Path("data/telegram_messages.jsonl")
-with open(log, "a", encoding="utf-8") as f:
-    f.write(json.dumps({
-        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "text": msg,
-        "category": category,
-        "sent": category == "trade",
-    }, ensure_ascii=False) + "\n")
-```
-
-**ALWAYS send your analysis to Telegram** — both trades AND HOLD decisions. The user
-monitors Layer 2 activity via Telegram and wants to see every decision you make.
-
-```python
-import requests
 config = json.load(open("config.json"))
-requests.post(
-    f"https://api.telegram.org/bot{config['telegram']['token']}/sendMessage",
-    json={"chat_id": config["telegram"]["chat_id"], "text": msg, "parse_mode": "Markdown"}
-)
+send_or_store(msg, config, category=category)
 ```
+
+`send_or_store(...)` both logs and delivers the message using the repo's current
+rules. For this system, HOLD/analysis messages are still expected to reach
+Telegram normally.
 
 ## Trading Rules
 

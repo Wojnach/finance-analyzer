@@ -8,7 +8,7 @@ REM Clear Claude Code session markers so Layer 2 agent can launch
 set CLAUDECODE=
 set CLAUDE_CODE_ENTRYPOINT=
 echo [%date% %time%] Starting loop...
-.venv\Scripts\python.exe -u portfolio\main.py --loop
+.venv\Scripts\python.exe -u portfolio\main.py --loop >> data\loop_out.txt 2>&1
 echo [%date% %time%] Loop exited (code %ERRORLEVEL%). Restarting in 30s...
 timeout /t 30 /nobreak >nul
 goto restart

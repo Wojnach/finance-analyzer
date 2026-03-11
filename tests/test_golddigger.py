@@ -17,6 +17,7 @@ from portfolio.golddigger.signal import CompositeSignal, SignalState, _log_retur
 from portfolio.golddigger.risk import RiskManager, SizeResult
 from portfolio.golddigger.state import BotState, Position, log_trade, log_poll
 from portfolio.golddigger.bot import GolddiggerBot
+from portfolio.golddigger import runner as golddigger_runner
 
 
 # ============================================================
@@ -29,6 +30,7 @@ class TestGolddiggerConfig:
         assert cfg.poll_seconds == 5
         assert cfg.window_n == 120
         assert cfg.min_window == 20
+        assert cfg.cert_api_type == "certificate"
         assert cfg.w_gold == 1.00
         assert cfg.w_fx == 0.00
         assert cfg.w_yield == 0.00
@@ -994,6 +996,35 @@ class TestVolumeConfirmation:
         snap = collect_snapshot(cfg=cfg)
         assert snap.gold_volume_ratio == 2.0
         mock_volume.assert_called_once_with("XAUUSDT")
+
+    @patch("portfolio.avanza_control.fetch_price")
+    def test_fetch_certificate_price_falls_back_to_certificate(self, mock_fetch):
+        from portfolio.golddigger.data_provider import fetch_certificate_price
+
+        mock_fetch.side_effect = [
+            None,
+            {"bid": 9.48, "ask": 9.52, "last": 9.14},
+        ]
+
+        result = fetch_certificate_price(page=object(), orderbook_id="2308943", api_type="warrant")
+        assert result == {
+            "bid": 9.48,
+            "ask": 9.52,
+            "last": 9.14,
+            "spread_pct": pytest.approx((9.52 - 9.48) / 9.48),
+        }
+        assert [call.args[2] for call in mock_fetch.call_args_list] == ["warrant", "certificate"]
+
+
+class TestRunnerSingleton:
+    def test_duplicate_instance_exits_without_notifications(self):
+        golddigger_runner.release_singleton_lock()
+        with patch.object(golddigger_runner, "acquire_singleton_lock", return_value=False), \
+             patch.object(golddigger_runner, "_send_telegram") as mock_tg:
+            result = golddigger_runner.run(live=False, once=True)
+
+        assert result is None
+        mock_tg.assert_not_called()
 
 
 # ============================================================

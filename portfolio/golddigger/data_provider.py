@@ -326,7 +326,7 @@ def fetch_us10y(fred_api_key: str = "", series_id: str = "DGS10") -> Optional[fl
         return _yield_cache.get("value")
 
 
-def fetch_certificate_price(page, orderbook_id: str, api_type: str = "warrant") -> Optional[dict]:
+def fetch_certificate_price(page, orderbook_id: str, api_type: str = "certificate") -> Optional[dict]:
     """Fetch certificate bid/ask/last from Avanza via Playwright page.
 
     Returns dict: {bid, ask, last, spread_pct} or None.
@@ -334,16 +334,29 @@ def fetch_certificate_price(page, orderbook_id: str, api_type: str = "warrant") 
     if not orderbook_id:
         return None
     try:
-        from metals_avanza_helpers import fetch_price
-        data = fetch_price(page, orderbook_id, api_type)
-        if data is None:
+        from portfolio.avanza_control import fetch_price_with_fallback, normalize_api_type
+
+        preferred = normalize_api_type(api_type)
+        data = fetch_price_with_fallback(page, orderbook_id, api_type=preferred)
+        if not data:
             return None
+
         bid = data.get("bid")
         ask = data.get("ask")
         last = data.get("last")
         spread_pct = None
         if bid and ask and bid > 0:
             spread_pct = (ask - bid) / bid
+
+        resolved_type = data.get("api_type", preferred)
+        if resolved_type != preferred and preferred:
+            logger.info(
+                "Certificate quote fallback for %s: %s -> %s",
+                orderbook_id,
+                preferred,
+                resolved_type,
+            )
+
         return {
             "bid": bid,
             "ask": ask,

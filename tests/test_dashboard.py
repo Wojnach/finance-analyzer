@@ -186,6 +186,23 @@ class TestApiSummary:
         assert len(data["telegrams"]) == 1
         assert data["telegrams"][0]["text"] == "ok"
 
+    def test_summary_sanitizes_nan_values_for_browser_json(self, client, tmp_data):
+        payload = {
+            "signals": {
+                "BTC-USD": {
+                    "indicators": {"sma50": float("nan")},
+                }
+            }
+        }
+        (tmp_data / "agent_summary.json").write_text(json.dumps(payload), encoding="utf-8")
+
+        with _no_auth():
+            resp = client.get("/api/summary")
+
+        assert resp.status_code == 200
+        assert "NaN" not in resp.get_data(as_text=True)
+        assert resp.get_json()["signals"]["signals"]["BTC-USD"]["indicators"]["sma50"] is None
+
 
 class TestApiSignals:
     def test_returns_signals(self, client, tmp_data):

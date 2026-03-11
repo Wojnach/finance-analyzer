@@ -12,14 +12,20 @@ Usage:
 import json
 import logging
 import os
-import sys
 import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
+from portfolio.avanza_control import (
+    check_session_alive,
+    fetch_price as fetch_avanza_price,
+    place_order,
+    place_stop_loss,
+)
 from portfolio.golddigger.config import GolddiggerConfig, DATA_DIR
 from portfolio.golddigger.bot import GolddiggerBot
+from portfolio.process_lock import acquire_lock_file, release_lock_file
 
 logger = logging.getLogger("portfolio.golddigger.runner")
 
@@ -27,6 +33,8 @@ logger = logging.getLogger("portfolio.golddigger.runner")
 MAX_CONSECUTIVE_ERRORS = 5
 BACKOFF_BASE = 10  # seconds
 BACKOFF_MAX = 300  # 5 minutes
+SINGLETON_LOCK_FILE = DATA_DIR / "golddigger.singleton.lock"
+_singleton_lock_fh = None
 
 
 def _load_config() -> dict:
@@ -69,6 +77,31 @@ def _send_telegram(msg: str, config: dict):
         )
     except Exception as e:
         logger.warning("Telegram send failed: %s", e)
+
+
+def acquire_singleton_lock(lock_path=SINGLETON_LOCK_FILE, *, mode: str = "run") -> bool:
+    """Acquire the GoldDigger singleton lock."""
+    global _singleton_lock_fh
+    if _singleton_lock_fh is not None:
+        return True
+
+    fh = acquire_lock_file(
+        lock_path,
+        owner="golddigger",
+        metadata={"mode": mode, "script": "portfolio.golddigger.runner"},
+    )
+    if fh is None:
+        return False
+
+    _singleton_lock_fh = fh
+    return True
+
+
+def release_singleton_lock() -> None:
+    """Release the GoldDigger singleton lock if held."""
+    global _singleton_lock_fh
+    release_lock_file(_singleton_lock_fh)
+    _singleton_lock_fh = None
 
 
 def _setup_playwright():
@@ -116,15 +149,10 @@ def _build_daily_digest(bot, cfg, mode):
 def _execute_order(page, action: dict, config: dict, account_id: str, cfg=None) -> bool:
     """Execute an order on Avanza via Playwright.
 
-    Uses the same order placement as metals_avanza_helpers.
+    Uses the canonical Avanza control facade.
     Returns True if order was placed successfully.
     """
-    _data_dir = Path(__file__).resolve().parent.parent.parent / "data"
     try:
-        if str(_data_dir) not in sys.path:
-            sys.path.insert(0, str(_data_dir))
-        from metals_avanza_helpers import place_order
-
         ob_id = action["orderbook_id"]
         side = action["action"]  # BUY or SELL
         price = action["price"]
@@ -147,8 +175,7 @@ def _execute_order(page, action: dict, config: dict, account_id: str, cfg=None) 
                 stop_price = action.get("stop_price")
                 if stop_price and stop_price > 0:
                     try:
-                        from metals_avanza_helpers import place_stop_loss, fetch_price as avanza_fetch_price
-                        cert_data = avanza_fetch_price(page, ob_id, "warrant")
+                        cert_data = fetch_avanza_price(page, ob_id, "warrant")
                         bid = cert_data.get("bid", 0) if cert_data else 0
                         if bid > 0 and (bid - stop_price) / bid < 0.03:
                             logger.warning("Stop too close to bid (%.2f vs %.2f), skipping HW stop", stop_price, bid)
@@ -181,72 +208,131 @@ def _execute_order(page, action: dict, config: dict, account_id: str, cfg=None) 
 
 def run(live: bool = False, once: bool = False):
     """Main loop — runs until killed or market close."""
-    config = _load_config()
-    cfg = GolddiggerConfig.from_config(config)
-    dry_run = not live
-    notifications_enabled = cfg.telegram_alerts and not once
+    lock_mode = "once" if once else ("live" if live else "dry-run")
+    if not acquire_singleton_lock(mode=lock_mode):
+        logger.warning("Duplicate GoldDigger instance detected; exiting.")
+        return
 
-    bot = GolddiggerBot(cfg, dry_run=dry_run)
-
+    config = None
+    cfg = None
+    bot = None
+    notifications_enabled = False
     mode = "LIVE" if live else "DRY-RUN"
-    logger.info("GoldDigger starting in %s mode (poll: %ds)", mode, cfg.poll_seconds)
-
-    # Setup Playwright for live mode
     pw, browser, page = None, None, None
-    if live and cfg.bull_orderbook_id:
-        pw, browser, page = _setup_playwright()
-        if page:
-            bot.set_page(page)
-        else:
-            logger.warning("No Playwright session — running without certificate prices")
-
-    if notifications_enabled:
-        _send_telegram(
-            f"*GOLDDIGGER STARTED* ({mode})\n"
-            f"Equity: {cfg.equity_sek:,.0f} SEK\n"
-            f"Poll: {cfg.poll_seconds}s | Window: {cfg.window_n}\n"
-            f"Entry: S >= {cfg.theta_in} | Exit: S <= {cfg.theta_out}\n"
-            f"Stop: {cfg.stop_loss_pct*100:.0f}% | TP: {cfg.take_profit_pct*100:.0f}%",
-            config,
-        )
-
-    consecutive_errors = 0
-    _last_session_check = time.time()
-
     try:
+        config = _load_config()
+        cfg = GolddiggerConfig.from_config(config)
+        dry_run = not live
+        notifications_enabled = cfg.telegram_alerts and not once
+
+        # Signal-only mode: live data collection but no order execution or state changes
+        effective_dry_run = dry_run or not cfg.trade_enabled
+        bot = GolddiggerBot(cfg, dry_run=effective_dry_run)
+
+        if live and not cfg.trade_enabled:
+            mode = "SIGNAL-ONLY"
+        logger.info("GoldDigger starting in %s mode (poll: %ds)", mode, cfg.poll_seconds)
+
+        # Setup Playwright for live mode
+        if live and cfg.bull_orderbook_id:
+            pw, browser, page = _setup_playwright()
+            if page:
+                bot.set_page(page)
+            else:
+                logger.warning("No Playwright session — running without certificate prices")
+
+        if notifications_enabled:
+            _send_telegram(
+                f"*GOLDDIGGER STARTED* ({mode})\n"
+                f"Equity: {cfg.equity_sek:,.0f} SEK\n"
+                f"Poll: {cfg.poll_seconds}s | Window: {cfg.window_n}\n"
+                f"Entry: S >= {cfg.theta_in} | Exit: S <= {cfg.theta_out}\n"
+                f"Stop: {cfg.stop_loss_pct*100:.0f}% | TP: {cfg.take_profit_pct*100:.0f}%",
+                config,
+            )
+
+        consecutive_errors = 0
+        _last_session_check = time.time()
+
         while True:
             try:
-                # Session health check
+                # Session health check (retry-resilient)
                 if live and page and (time.time() - _last_session_check) > cfg.session_check_interval:
-                    try:
-                        _data_dir = Path(__file__).resolve().parent.parent.parent / "data"
-                        if str(_data_dir) not in sys.path:
-                            sys.path.insert(0, str(_data_dir))
-                        from metals_avanza_helpers import check_session_alive
-                        if not check_session_alive(page):
-                            logger.error("Avanza session expired!")
-                            if notifications_enabled:
-                                _send_telegram("_GOLDDIGGER: Avanza session expired — stopping_", config)
+                    session_ok = False
+                    for _retry in range(3):
+                        if check_session_alive(page):
+                            session_ok = True
                             break
-                    except ImportError:
-                        logger.debug("check_session_alive not available — skipping health check")
+                        logger.warning("Session check failed (attempt %d/3), "
+                                       "retrying in 10s...", _retry + 1)
+                        time.sleep(10)
+
+                    if not session_ok:
+                        logger.error("Avanza session expired after 3 checks — "
+                                     "waiting 5 min for possible renewal...")
+                        if notifications_enabled:
+                            _send_telegram(
+                                "_GOLDDIGGER: Session expired — waiting 5min "
+                                "then restarting_", config)
+                        time.sleep(300)
+                        # One last check — user may have renewed
+                        if check_session_alive(page):
+                            logger.info("Session recovered after wait — resuming")
+                            if notifications_enabled:
+                                _send_telegram(
+                                    "_GOLDDIGGER: Session recovered — resuming_",
+                                    config)
+                        else:
+                            # Try full Playwright reload (picks up renewed
+                            # storage state if user ran avanza_login)
+                            if browser:
+                                try:
+                                    browser.close()
+                                except Exception:
+                                    pass
+                            if pw:
+                                try:
+                                    pw.stop()
+                                except Exception:
+                                    pass
+                            pw, browser, page = _setup_playwright()
+                            if page and check_session_alive(page):
+                                bot.set_page(page)
+                                logger.info("Session reloaded via Playwright "
+                                            "— resuming")
+                                if notifications_enabled:
+                                    _send_telegram(
+                                        "_GOLDDIGGER: Session reloaded "
+                                        "— resuming_", config)
+                            else:
+                                logger.error("Session still dead — exiting "
+                                             "(bat will restart in 30s)")
+                                if notifications_enabled:
+                                    _send_telegram(
+                                        "_GOLDDIGGER: Session dead — "
+                                        "restarting in 30s_", config)
+                                break
                     _last_session_check = time.time()
 
                 action = bot.step()
 
                 if action:
-                    if live and page:
+                    if live and page and cfg.trade_enabled:
                         _execute_order(page, action, config, cfg.avanza_account_id, cfg=cfg)
-                    elif not live:
-                        logger.info("[DRY-RUN] Would execute: %s %d @ %.2f — %s",
-                                    action["action"], action["quantity"],
+                    else:
+                        tag = "signal-only" if (live and not cfg.trade_enabled) else "dry-run"
+                        logger.info("[%s] Would execute: %s %d @ %.2f — %s",
+                                    tag.upper(), action["action"], action["quantity"],
                                     action["price"], action.get("reason", ""))
                         if notifications_enabled:
+                            pnl_line = ""
+                            if action["action"] == "SELL" and action.get("pnl_sek") is not None:
+                                pnl_line = f"\nP&L: {action['pnl_sek']:+,.0f} SEK"
                             _send_telegram(
-                                f"*GOLDDIGGER {action['action']}* (dry-run)\n"
+                                f"*GOLDDIGGER {action['action']}* ({tag})\n"
                                 f"{action['quantity']}x @ {action['price']:.2f} SEK\n"
                                 f"Gold: ${action.get('gold_price', 0):.0f} | "
-                                f"S={action.get('composite_s', 0):.2f}\n"
+                                f"S={action.get('composite_s', 0):.2f}{pnl_line}\n"
                                 f"_{action.get('reason', '')}_",
                                 config,
                             )
@@ -280,7 +366,8 @@ def run(live: bool = False, once: bool = False):
         logger.info("GoldDigger stopped by user")
     finally:
         # Save state
-        bot.state.save(cfg.state_file)
+        if bot is not None and cfg is not None:
+            bot.state.save(cfg.state_file)
 
         # Cleanup Playwright
         if browser:
@@ -294,7 +381,7 @@ def run(live: bool = False, once: bool = False):
             except Exception:
                 pass
 
-        if notifications_enabled:
+        if notifications_enabled and bot is not None and cfg is not None and config is not None:
             digest = _build_daily_digest(bot, cfg, mode)
             _send_telegram(digest, config)
             _send_telegram(
@@ -306,4 +393,5 @@ def run(live: bool = False, once: bool = False):
                 config,
             )
 
+        release_singleton_lock()
         logger.info("GoldDigger shutdown complete")

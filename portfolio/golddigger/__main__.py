@@ -23,7 +23,9 @@ def main():
 
     live = args.live
     if live:
-        logging.getLogger().info("Starting in LIVE mode — real orders will be placed!")
+        logging.getLogger().info(
+            "Starting in live request mode; runner will resolve LIVE vs SIGNAL-ONLY"
+        )
 
     run(live=live, once=args.once)
 

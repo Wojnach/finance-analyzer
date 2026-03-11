@@ -383,7 +383,8 @@ class TestBuildTelegram:
 
     def test_portfolio_context(self):
         msg = self._call()
-        assert "500" in msg or "P:" in msg
+        assert "Patient portfolio" in msg
+        assert "Bold portfolio" in msg
 
     def test_first_line_under_70_chars(self):
         msg = self._call()
@@ -425,7 +426,7 @@ class TestBuildTelegram:
             hold_count=10,
             sell_count=2,
         )
-        assert "2 sell" in msg.lower() or "2S" in msg
+        assert "2 with sell signals" in msg.lower()
 
     def test_buy_mode_hides_hold_sell_summary(self):
         msg = self._call(hold_count=10, sell_count=2)
@@ -447,14 +448,14 @@ class TestBuildTelegram:
             sell_count=2,
         )
         assert "*AUTO SELL" in msg
-        assert "+10 hold" not in msg.lower()
-        assert "2 sell" not in msg.lower()
+        assert "10 more on hold" not in msg.lower()
+        assert "2 with sell signals" not in msg.lower()
 
     def test_mode_b_probability(self):
         config = _base_config()
         config["notification"]["mode"] = "probability"
         msg = self._call(config=config)
-        assert "PROB" in msg or "AUTO" in msg
+        assert "PROBABILITY" in msg or "AUTO" in msg
 
     def test_trade_recommendation_shown(self):
         msg = self._call()
@@ -473,7 +474,8 @@ class TestBuildTelegram:
             holdings={"NVDA": {"shares": 50, "avg_cost_usd": 185}},
         )
         msg = self._call(bold=bold, prices={"BTC-USD": 67000, "NVDA": 185})
-        assert "B:" in msg
+        assert "Bold portfolio" in msg
+        assert "NVDA 50 shares" in msg
 
 
 # ===========================================================================

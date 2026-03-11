@@ -42,10 +42,13 @@ All tasks are managed via Windows Task Scheduler.
 | Task name         | Status   | Schedule              | Action                                         |
 | ----------------- | -------- | --------------------- | ---------------------------------------------- |
 | **PF-DataLoop**   | ENABLED  | On logon (continuous) | `scripts\win\pf-loop.bat` — Layer 1 fast loop  |
+| **PF-MetalsLoop** | ENABLED  | On logon + weekdays 07:00 | `scripts\win\metals-loop.bat` — brokered metals loop |
+| **PF-SilverMonitor** | ENABLED | On logon + weekdays 07:00 | `scripts\win\silver-monitor.bat` — canonical silver monitor wrapper |
 | **PF-Dashboard**  | ENABLED  | On logon (continuous) | Flask dashboard on port 5055                    |
 | **PF-OutcomeCheck** | ENABLED | Daily 18:00 local     | `--check-outcomes` — backfill signal accuracy   |
 | **PF-LocalLlmReport** | ENABLED | Daily 18:10 local  | `scripts\win\pf-local-llm-report.bat` — export local-LLM trend snapshot |
 | **PF-MLRetrain**  | ENABLED  | Weekly                | `--retrain` — retrain ML classifier             |
+| **PF-SilverORB**  | DISABLED | —                     | Legacy silver task name kept only for rollback  |
 | **PF-Loop**       | DISABLED | —                     | Redundant with PF-DataLoop, caused duplicates   |
 | **Portfolio-Agent** | DISABLED | —                    | Bypassed trigger system, caused 15-min HOLD spam |
 
@@ -53,6 +56,8 @@ All tasks are managed via Windows Task Scheduler.
 
 ```cmd
 schtasks /query /tn "PF-DataLoop" /v /fo LIST
+schtasks /query /tn "PF-MetalsLoop" /v /fo LIST
+schtasks /query /tn "PF-SilverMonitor" /v /fo LIST
 schtasks /query /tn "PF-Dashboard" /v /fo LIST
 schtasks /query /tn "PF-OutcomeCheck" /v /fo LIST
 schtasks /query /tn "PF-LocalLlmReport" /v /fo LIST
@@ -83,6 +88,19 @@ Or via Task Scheduler:
 schtasks /run /tn "PF-DataLoop"
 ```
 
+### Start the metals loop
+
+```cmd
+cd /d Q:\finance-analyzer
+scripts\win\metals-loop.bat
+```
+
+Or via Task Scheduler:
+
+```cmd
+schtasks /run /tn "PF-MetalsLoop"
+```
+
 ### Stop the data loop
 
 Find and kill the Python process:
@@ -92,6 +110,39 @@ powershell.exe -NoProfile -Command "Get-Process python* | Where-Object { $_.Comm
 ```
 
 Or kill the cmd window running `pf-loop.bat`.
+
+### Stop the metals loop
+
+Find and kill the Python process:
+
+```powershell
+powershell.exe -NoProfile -Command "Get-Process python* | Where-Object { $_.CommandLine -like '*metals_loop.py*' } | Stop-Process -Force"
+```
+
+Or kill the cmd window running `metals-loop.bat`.
+
+### Start the silver monitor
+
+```cmd
+cd /d Q:\finance-analyzer
+scripts\win\silver-monitor.bat
+```
+
+Or via Task Scheduler:
+
+```cmd
+schtasks /run /tn "PF-SilverMonitor"
+```
+
+### Stop the silver monitor
+
+Find and kill the Python process:
+
+```powershell
+powershell.exe -NoProfile -Command "Get-Process python* | Where-Object { $_.CommandLine -like '*silver_monitor.py*' } | Stop-Process -Force"
+```
+
+Or kill the cmd window running `silver-monitor.bat`.
 
 ### Start the dashboard
 
@@ -121,12 +172,17 @@ powershell.exe -NoProfile -Command "Get-Process python* | Where-Object { $_.Comm
    ```cmd
    schtasks /run /tn "PF-DataLoop"
    ```
-4. Start the dashboard:
+4. Start the metals loop:
+   ```cmd
+   schtasks /run /tn "PF-MetalsLoop"
+   ```
+5. Start the dashboard:
    ```cmd
    schtasks /run /tn "PF-Dashboard"
    ```
-5. Verify Layer 1 is running by checking `data/loop_out.txt` for recent timestamps.
-6. Verify dashboard at `http://localhost:5055`.
+6. Verify Layer 1 is running by checking `data/loop_out.txt` for recent timestamps.
+7. Verify the metals loop is running by checking `data/metals_loop_out.txt` for recent timestamps.
+8. Verify dashboard at `http://localhost:5055`.
 
 ### Layer 1 restart (data loop only)
 
@@ -140,6 +196,10 @@ crashes, it will restart automatically. To force a restart:
 
 Both PF-DataLoop and PF-Dashboard are configured to start on logon. After logging into
 herc2, verify both are running:
+
+`PF-MetalsLoop` should also start on logon and own the canonical `data/metals_loop.py`
+runtime. `PF-SilverMonitor` should start on logon and own the canonical
+`data/silver_monitor.py` runtime.
 
 ```powershell
 powershell.exe -NoProfile -Command "Get-Process python* | Select-Object Id, ProcessName, StartTime"

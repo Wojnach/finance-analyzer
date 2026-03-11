@@ -81,11 +81,11 @@ If you edit it manually, stop the loop first and replace the whole JSON document
 
 ### Step 3: Place hardware stop-loss orders
 
-Use the `place_stop_loss()` helper from `metals_avanza_helpers.py`. The loop does this
+Use the `place_stop_loss()` helper from `portfolio.avanza_control.py`. The loop does this
 automatically via `place_stop_loss_orders()`, but for manual placement:
 
 ```python
-from metals_avanza_helpers import place_stop_loss
+from portfolio.avanza_control import place_stop_loss
 
 # Split units across 2-3 cascading levels
 # Level 1: trigger near software L3, catches initial drop

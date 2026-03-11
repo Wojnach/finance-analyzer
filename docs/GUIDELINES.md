@@ -1,3 +1,5 @@
+ultrathink
+
 # Execution Guidelines
 
 ## HOW TO EXECUTE

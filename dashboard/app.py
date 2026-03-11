@@ -2,11 +2,35 @@
 
 import json
 import functools
+import math
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
+from flask.json.provider import DefaultJSONProvider
+
+
+def _json_safe(value):
+    """Convert NaN/Infinity to JSON-safe null recursively."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+class SafeJSONProvider(DefaultJSONProvider):
+    """Flask JSON provider that strips non-finite floats."""
+
+    def dumps(self, obj, **kwargs):
+        return super().dumps(_json_safe(obj), **kwargs)
+
 
 app = Flask(__name__, static_folder="static")
+app.json = SafeJSONProvider(app)
 
 
 @app.after_request

@@ -9,16 +9,19 @@ Categories that are ALWAYS sent to Telegram:
 Categories that are SENT to Telegram:
   - analysis:   HOLD analysis, market commentary (Layer 2 — sole Telegram sender)
 
-Categories that are SAVED ONLY (viewable on dashboard / via file):
+Categories that are ALSO SENT to Telegram:
   - invocation:  "Layer 2 Tx invoked" notifications
   - regime:      regime shift alerts
-  - fx_alert:    FX rate staleness warnings
   - error:       loop crash notifications
+
+Categories that are SAVED ONLY (viewable on dashboard / via file):
+  - fx_alert:    FX rate staleness warnings
 """
 
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,9 +34,55 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 MESSAGES_FILE = BASE_DIR / "data" / "telegram_messages.jsonl"
 
 _TELEGRAM_MAX_LENGTH = 4096
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")
+_COMMON_MOJIBAKE_REPLACEMENTS = {
+    "Â·": "·",
+    "â": "—",
+    "â€“": "–",
+    "â": "'",
+    "â": "'",
+    'â': '"',
+    'â': '"',
+    "â": "→",
+    "â": "↑",
+    "â": "↓",
+    "Â": "",
+}
 
 # Categories whose messages should be sent to Telegram in addition to being saved.
-SEND_CATEGORIES = {"trade", "iskbets", "bigbet", "digest", "daily_digest", "analysis"}
+SEND_CATEGORIES = {"trade", "iskbets", "bigbet", "digest", "daily_digest", "analysis", "invocation", "regime", "error"}
+
+
+def _repair_common_mojibake(text):
+    repaired = text
+    for bad, good in _COMMON_MOJIBAKE_REPLACEMENTS.items():
+        repaired = repaired.replace(bad, good)
+    return repaired
+
+
+def _normalize_message_whitespace(text):
+    lines = []
+    for raw_line in text.split("\n"):
+        if raw_line.startswith("`") and raw_line.endswith("`"):
+            lines.append(raw_line.rstrip())
+            continue
+        line = raw_line.replace("\t", " ")
+        line = re.sub(r" {2,}", " ", line).strip()
+        lines.append(line)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def sanitize_message_text(text):
+    """Normalize message text before saving/sending.
+
+    Keeps intended Markdown structure while removing common control-byte and
+    mojibake artifacts that make Telegram messages unreadable.
+    """
+    cleaned = str(text or "")
+    cleaned = cleaned.replace("\r\n", "\n").replace("\r", "\n")
+    cleaned = _repair_common_mojibake(cleaned)
+    cleaned = _CONTROL_CHAR_RE.sub(" ", cleaned)
+    return _normalize_message_whitespace(cleaned)
 
 
 def log_message(text, category="analysis", sent=False):
@@ -44,9 +93,10 @@ def log_message(text, category="analysis", sent=False):
         category: Message category (see module docstring for valid values).
         sent: Whether the message was actually sent to Telegram.
     """
+    cleaned = sanitize_message_text(text)
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
-        "text": text,
+        "text": cleaned,
         "category": category,
         "sent": sent,
     }
@@ -62,6 +112,8 @@ def _do_send_telegram(msg, config):
     if os.environ.get("NO_TELEGRAM"):
         logger.info("[NO_TELEGRAM] Skipping send")
         return True
+
+    msg = sanitize_message_text(msg)
 
     token = config.get("telegram", {}).get("token")
     chat_id = config.get("telegram", {}).get("chat_id")
@@ -127,17 +179,18 @@ def send_or_store(msg, config, category="analysis"):
     Returns:
         True if message was sent (or save-only succeeded), False on send failure.
     """
+    cleaned = sanitize_message_text(msg)
     should_send = category in SEND_CATEGORIES
 
     if should_send:
-        sent_ok = _do_send_telegram(msg, config)
-        log_message(msg, category=category, sent=sent_ok)
+        sent_ok = _do_send_telegram(cleaned, config)
+        log_message(cleaned, category=category, sent=sent_ok)
         if sent_ok:
-            logger.info("Message sent [%s]: %.60s...", category, msg.replace("\n", " "))
+            logger.info("Message sent [%s]: %.60s...", category, cleaned.replace("\n", " "))
         else:
-            logger.warning("Message send failed [%s]: %.60s...", category, msg.replace("\n", " "))
+            logger.warning("Message send failed [%s]: %.60s...", category, cleaned.replace("\n", " "))
         return sent_ok
     else:
-        log_message(msg, category=category, sent=False)
-        logger.debug("Message stored [%s]: %.60s...", category, msg.replace("\n", " "))
+        log_message(cleaned, category=category, sent=False)
+        logger.debug("Message stored [%s]: %.60s...", category, cleaned.replace("\n", " "))
         return True

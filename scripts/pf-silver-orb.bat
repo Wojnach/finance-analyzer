@@ -1,5 +1,4 @@
 @echo off
 cd /d Q:\finance-analyzer
-echo [%date% %time%] Starting Silver ORB Monitor...
-.venv\Scripts\python.exe -u data\silver_monitor.py >> logs\silver_monitor.log 2>&1
-echo [%date% %time%] Silver ORB Monitor exited.
+echo [%date% %time%] PF-SilverORB is legacy. Delegating to scripts\win\silver-monitor.bat...
+call scripts\win\silver-monitor.bat

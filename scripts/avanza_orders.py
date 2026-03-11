@@ -11,7 +11,7 @@ import argparse
 import json
 from pprint import pprint
 
-from portfolio.avanza_client import (
+from portfolio.avanza_control import (
     delete_order,
     get_account_id,
     get_open_orders,

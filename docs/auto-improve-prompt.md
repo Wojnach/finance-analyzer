@@ -1,3 +1,5 @@
+ultrathink
+
 # Autonomous System Improvement Session
 
 You are about to perform a deep, autonomous improvement session on this codebase. This is a long-running task — spend your entire output context working systematically. Do not stop early due to token budget concerns. Save progress and state to files before your context window refreshes.

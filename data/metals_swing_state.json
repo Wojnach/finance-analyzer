@@ -6,5 +6,19 @@
   "total_trades": 0,
   "total_pnl_sek": 0,
   "session_trades": 0,
-  "macd_history": {}
+  "macd_history": {},
+  "_und_history": {
+    "XAG-USD": [
+      86.86,
+      86.93,
+      86.82,
+      86.84,
+      86.84,
+      86.98,
+      86.98,
+      87.04,
+      87.11,
+      87.06
+    ]
+  }
 }

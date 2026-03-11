@@ -9,6 +9,9 @@ DATA_DIR = BASE_DIR / "data"
 
 @dataclass(frozen=True)
 class GolddiggerConfig:
+    # --- Master trade switch ---
+    trade_enabled: bool = True  # False = signal-only mode (live data + Telegrams, no orders)
+
     # --- Polling ---
     poll_seconds: int = 5
     window_n: int = 120   # rolling z-score window (120 x 5s = 10 min)
@@ -47,7 +50,7 @@ class GolddiggerConfig:
     bull_orderbook_id: str = ""   # BULL GULD X20 AVA orderbook ID
     bear_orderbook_id: str = ""   # BEAR GULD X20 AVA (future use)
     avanza_account_id: str = ""
-    cert_api_type: str = "warrant"  # Avanza API type for price fetch
+    cert_api_type: str = "certificate"  # Avanza market-guide type for gold certificate quotes
 
     # --- Equity ---
     equity_sek: float = 100_000.0
@@ -126,6 +129,7 @@ class GolddiggerConfig:
         gd = config.get("golddigger", {})
         avanza = config.get("avanza", {})
         return cls(
+            trade_enabled=gd.get("trade_enabled", True),
             poll_seconds=gd.get("poll_seconds", 5),
             window_n=gd.get("window_n", 120),
             min_window=gd.get("min_window", 20),
@@ -145,7 +149,7 @@ class GolddiggerConfig:
             bull_orderbook_id=str(gd.get("bull_orderbook_id", "")),
             bear_orderbook_id=str(gd.get("bear_orderbook_id", "")),
             avanza_account_id=str(avanza.get("account_id", gd.get("account_id", ""))),
-            cert_api_type=gd.get("cert_api_type", "warrant"),
+            cert_api_type=gd.get("cert_api_type", "certificate"),
             equity_sek=gd.get("equity_sek", 100_000.0),
             binance_gold_symbol=gd.get("binance_gold_symbol", "XAUUSDT"),
             fred_api_key=gd.get("fred_api_key", config.get("fred_api_key", "")),

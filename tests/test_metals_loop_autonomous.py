@@ -9,6 +9,7 @@ import os
 import sys
 import time
 import datetime
+import copy
 from unittest.mock import patch, MagicMock, mock_open
 
 import pytest
@@ -23,6 +24,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "data"))
 def reset_metals_loop_state():
     """Reset module-level state between tests."""
     import metals_loop as ml
+    original_positions = copy.deepcopy(ml.POSITIONS)
+    original_claude_enabled = ml.CLAUDE_ENABLED
     ml.check_count = 0
     ml.price_history = []
     ml.last_signal_data = {}
@@ -32,7 +35,12 @@ def reset_metals_loop_state():
     ml.invoke_count = 0
     ml.claude_proc = None
     ml.claude_log_fh = None
+    ml.CLAUDE_ENABLED = False
+    for pos in ml.POSITIONS.values():
+        pos["active"] = False
     yield
+    ml.POSITIONS = original_positions
+    ml.CLAUDE_ENABLED = original_claude_enabled
 
 
 # ============================================================
@@ -240,8 +248,8 @@ class TestBuildAutonomousTelegram:
             {"action": "HOLD"}, "INTACT", "14:35 CET", False,
         )
         assert "*AUTO HOLD*" in msg
-        assert "INTACT" in msg
-        assert "441u" in msg
+        assert "Thesis intact" in msg
+        assert "441 units" in msg
         assert "48.3" in msg
 
     def test_emergency_tag(self):
@@ -251,7 +259,7 @@ class TestBuildAutonomousTelegram:
             {"action": "HOLD"}, "THREATENED", "14:35 CET", True,
         )
         assert "EMG" in msg
-        assert "THREATENED" in msg
+        assert "Thesis threatened" in msg
 
     def test_signals_in_message(self):
         from metals_loop import _build_autonomous_telegram
@@ -260,7 +268,7 @@ class TestBuildAutonomousTelegram:
             ["test"], 1, {}, signals, {}, {},
             {"action": "HOLD"}, "NEUTRAL", "10:00 CET", False,
         )
-        assert "XAG BUY 4B/2S" in msg
+        assert "XAG BUY (4 buy / 2 sell votes)" in msg
 
     def test_llm_in_message(self):
         from metals_loop import _build_autonomous_telegram
@@ -269,7 +277,7 @@ class TestBuildAutonomousTelegram:
             ["test"], 1, {}, {}, llm, {},
             {"action": "HOLD"}, "NEUTRAL", "10:00 CET", False,
         )
-        assert "min BUY 65%" in msg
+        assert "Ministral BUY (65%)" in msg
 
     def test_risk_in_message(self):
         from metals_loop import _build_autonomous_telegram
@@ -278,7 +286,7 @@ class TestBuildAutonomousTelegram:
             ["test"], 1, {}, {}, {}, risk,
             {"action": "HOLD"}, "NEUTRAL", "10:00 CET", False,
         )
-        assert "DD -4.2%" in msg
+        assert "Portfolio drawdown -4.2%" in msg
 
     def test_mc_stop_probability_shown(self):
         from metals_loop import _build_autonomous_telegram
@@ -293,7 +301,7 @@ class TestBuildAutonomousTelegram:
             ["test"], 1, positions, {}, {}, risk,
             {"action": "HOLD"}, "INTACT", "10:00 CET", False,
         )
-        assert "MC:2.1%" in msg
+        assert "Monte Carlo stop-hit risk 2.1%" in msg
 
     def test_message_under_telegram_limit(self):
         from metals_loop import _build_autonomous_telegram
@@ -335,7 +343,7 @@ class TestBuildAutonomousTelegram:
             ["test"], 2, {}, {}, {}, {},
             {"action": "HOLD"}, "NEUTRAL", "10:00 CET", False,
         )
-        assert "Autonomous T2" in msg
+        assert "Autonomous Tier 2" in msg
 
 
 # ============================================================
@@ -655,6 +663,13 @@ class TestConfig:
         import metals_loop as ml
         assert ml.last_invoke_times == {1: 0.0, 2: 0.0, 3: 0.0}
 
+    def test_main_returns_duplicate_exit_code_when_lock_held(self):
+        import metals_loop as ml
+
+        with patch.object(ml, "acquire_singleton_lock", return_value=False), \
+             patch.object(ml, "log"):
+            assert ml.main() == ml.DUPLICATE_INSTANCE_EXIT_CODE
+
 
 # ============================================================
 # Edge case tests
@@ -726,7 +741,7 @@ class TestEdgeCases:
             {"action": "HOLD"}, "NEUTRAL", "10:00 CET", False,
         )
         assert "*AUTO HOLD*" in msg
-        assert "NEUTRAL" in msg
+        assert "Thesis neutral" in msg
         assert len(msg) > 0
 
     def test_telegram_builder_multiple_positions(self):
@@ -746,8 +761,8 @@ class TestEdgeCases:
             ["test"], 1, positions, {}, {}, {},
             {"action": "HOLD"}, "INTACT", "10:00 CET", False,
         )
-        assert "441u" in msg
-        assert "130u" in msg
+        assert "441 units" in msg
+        assert "130 units" in msg
 
     def test_throttle_resets_after_cooldown(self):
         """Telegram should send again after cooldown expires."""

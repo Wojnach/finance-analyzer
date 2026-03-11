@@ -31,13 +31,15 @@ from metals_swing_config import (
     TELEGRAM_SUMMARY_INTERVAL,
     STATE_FILE, DECISIONS_LOG, TRADES_LOG,
 )
-from metals_avanza_helpers import (
-    get_csrf,
+from portfolio.avanza_control import (
+    delete_stop_loss,
     fetch_price,
     fetch_account_cash,
     place_order,
     place_stop_loss,
 )
+
+SEND_PERIODIC_SUMMARY = False
 
 
 def _log(msg):
@@ -98,24 +100,8 @@ def _save_state(state):
 
 def _delete_stop_loss(page, stop_id):
     """Delete a stop-loss order by ID."""
-    csrf = get_csrf(page)
-    if not csrf:
-        return False
-
-    try:
-        result = page.evaluate("""async (args) => {
-            const [accountId, stopId, token] = args;
-            const resp = await fetch(
-                'https://www.avanza.se/_api/trading/stoploss/' + accountId + '/' + stopId, {
-                method: 'DELETE',
-                headers: {'X-SecurityToken': token},
-                credentials: 'include',
-            });
-            return {status: resp.status, body: await resp.text()};
-        }""", [ACCOUNT_ID, stop_id, csrf])
-        return result.get("status") == 200
-    except Exception:
-        return False
+    success, _ = delete_stop_loss(page, ACCOUNT_ID, stop_id)
+    return success
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +204,7 @@ class SwingTrader:
         self._update_macd_history(signal_data)
 
         # Periodic summary
-        if self.check_count % TELEGRAM_SUMMARY_INTERVAL == 0:
+        if SEND_PERIODIC_SUMMARY and self.check_count % TELEGRAM_SUMMARY_INTERVAL == 0:
             self._send_summary(signal_data)
 
     # -------------------------------------------------------------------
@@ -809,31 +795,20 @@ class SwingTrader:
         cash = self.state["cash_sek"]
 
         if not positions:
-            # No open positions — brief status
-            xag = signal_data.get("XAG-USD", {}) if signal_data else {}
-            xau = signal_data.get("XAU-USD", {}) if signal_data else {}
-            msg = (f"*SWING #{self.check_count}* No positions\n"
-                   f"`Cash: {cash:.0f} SEK | Trades: {self.state['total_trades']} | PnL: {self.state['total_pnl_sek']:+.0f}`\n")
-            if xag:
-                msg += f"`XAG: {xag.get('action','?')} {xag.get('buy_count',0)}B/{xag.get('sell_count',0)}S RSI {xag.get('rsi',0):.0f}`\n"
-            if xau:
-                msg += f"`XAU: {xau.get('action','?')} {xau.get('buy_count',0)}B/{xau.get('sell_count',0)}S RSI {xau.get('rsi',0):.0f}`\n"
-            if DRY_RUN:
-                msg += "_DRY RUN mode_"
-            _send_telegram(msg)
-        else:
-            lines = [f"*SWING #{self.check_count}* {len(positions)} position(s)"]
-            for pid, pos in positions.items():
-                data = fetch_price(self.page, pos["ob_id"], pos["api_type"])
-                bid = data.get("bid", 0) if data else 0
-                pnl = ((bid / pos["entry_price"]) - 1) * 100 if pos["entry_price"] > 0 else 0
-                held = (_now_utc() - datetime.datetime.fromisoformat(pos["entry_ts"])).total_seconds() / 3600
-                trail = " TRAIL" if pos.get("trailing_active") else ""
-                lines.append(f"`{pos['warrant_name']}: {bid} ({pnl:+.1f}%) {held:.1f}h{trail}`")
-            lines.append(f"`Cash: {cash:.0f} | Trades: {self.state['total_trades']} | PnL: {self.state['total_pnl_sek']:+.0f}`")
-            if DRY_RUN:
-                lines.append("_DRY RUN mode_")
-            _send_telegram("\n".join(lines))
+            return
+
+        lines = [f"*SWING #{self.check_count}* {len(positions)} position(s)"]
+        for pid, pos in positions.items():
+            data = fetch_price(self.page, pos["ob_id"], pos["api_type"])
+            bid = data.get("bid", 0) if data else 0
+            pnl = ((bid / pos["entry_price"]) - 1) * 100 if pos["entry_price"] > 0 else 0
+            held = (_now_utc() - datetime.datetime.fromisoformat(pos["entry_ts"])).total_seconds() / 3600
+            trail = " TRAIL" if pos.get("trailing_active") else ""
+            lines.append(f"`{pos['warrant_name']}: {bid} ({pnl:+.1f}%) {held:.1f}h{trail}`")
+        lines.append(f"`Cash: {cash:.0f} | Trades: {self.state['total_trades']} | PnL: {self.state['total_pnl_sek']:+.0f}`")
+        if DRY_RUN:
+            lines.append("_DRY RUN mode_")
+        _send_telegram("\n".join(lines))
 
 
 # ---------------------------------------------------------------------------

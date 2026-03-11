@@ -1,3 +1,5 @@
+ultrathink
+
 # Execution Protocol
 
 ## Phase 1: Understand

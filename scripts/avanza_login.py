@@ -266,7 +266,7 @@ def run_login():
     print(f"  Cookies: {len(cookie_list)} captured")
     print(f"  Expires: {expires_at.strftime('%Y-%m-%d %H:%M UTC')} (~{max_inactive // 60}h)")
     print()
-    print("You can now use the Avanza API via portfolio/avanza_client.py")
+    print("You can now use the Avanza API via portfolio/avanza_control.py")
 
     return session_data
 

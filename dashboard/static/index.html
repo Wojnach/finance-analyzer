@@ -2756,11 +2756,91 @@
          Detection: first fj() call probes the live API; on failure it sets
          _staticMode = true so subsequent calls go straight to the static files. */
       var _staticMode = null; // null = unknown, true/false after first probe
+      var _dashboardToken = (function () {
+        try {
+          return new URLSearchParams(window.location.search).get("token") || "";
+        } catch (e) {
+          return "";
+        }
+      })();
+
+      function _withApiToken(apiUrl) {
+        if (!_dashboardToken || apiUrl.indexOf("/api/") !== 0) {
+          return apiUrl;
+        }
+        try {
+          var liveUrl = new URL(apiUrl, window.location.origin);
+          if (!liveUrl.searchParams.get("token")) {
+            liveUrl.searchParams.set("token", _dashboardToken);
+          }
+          return liveUrl.pathname + liveUrl.search;
+        } catch (e) {
+          return apiUrl;
+        }
+      }
 
       function _staticUrl(apiUrl) {
         // /api/equity-curve?foo=1 → ./api-data/equity-curve.json
         var path = apiUrl.replace(/^\/api\//, "").replace(/\?.*$/, "");
         return "./api-data/" + path + ".json";
+      }
+
+      function _applyStaticFilters(apiUrl, data) {
+        if (!Array.isArray(data)) return data;
+
+        try {
+          var parsed = new URL(apiUrl, window.location.origin);
+          var path = parsed.pathname;
+          var searchParams = parsed.searchParams;
+
+          if (path === "/api/telegrams") {
+            var category = (searchParams.get("category") || "").toLowerCase();
+            var search = (searchParams.get("search") || "").toLowerCase();
+            if (category) {
+              data = data.filter(function (entry) {
+                return ((entry.category || "").toLowerCase() === category);
+              });
+            }
+            if (search) {
+              data = data.filter(function (entry) {
+                return ((entry.text || "").toLowerCase().indexOf(search) >= 0);
+              });
+            }
+          } else if (path === "/api/decisions") {
+            var ticker = (searchParams.get("ticker") || "").toUpperCase();
+            var action = (searchParams.get("action") || "").toUpperCase();
+            var strategy = (searchParams.get("strategy") || "").toLowerCase();
+            data = data.filter(function (entry) {
+              if (action || strategy) {
+                var decisions = entry.decisions || {};
+                var matched = false;
+                Object.keys(decisions).forEach(function (strat) {
+                  var dec = decisions[strat] || {};
+                  if (strategy && strat !== strategy) return;
+                  if (action && (dec.action || "").toUpperCase() !== action) return;
+                  matched = true;
+                });
+                if (!matched) return false;
+              }
+
+              if (ticker) {
+                var tickers = entry.tickers || {};
+                if (!Object.prototype.hasOwnProperty.call(tickers, ticker)) return false;
+              }
+
+              return true;
+            });
+          }
+
+          var limit = parseInt(searchParams.get("limit") || "", 10);
+          if (!isNaN(limit) && limit > 0) {
+            data = data.slice(0, limit);
+          }
+        } catch (e) {
+          return data;
+        }
+
+        return data;
       }
 
       async function fj(u) {
@@ -2769,13 +2849,14 @@
           return _fjStatic(u);
         }
         try {
-          var r = await fetch(u);
+          var liveUrl = _withApiToken(u);
+          var r = await fetch(liveUrl);
           if (r.status === 401) {
-            showErr("Unauthorized: invalid or missing token. Add ?token=XXX to URL.");
+            showErr("Unauthorized: open the dashboard with ?token=XXX in the URL.");
             return null;
           }
           if (!r.ok) {
-            console.error("API error:", u, r.status, r.statusText);
+            console.error("API error:", liveUrl, r.status, r.statusText);
             // Try static fallback on non-401 errors
             if (_staticMode === null) _staticMode = true;
             return _fjStatic(u);
@@ -2798,7 +2879,8 @@
             console.error("Static fallback also failed:", su, r.status);
             return null;
           }
-          return await r.json();
+          var data = await r.json();
+          return _applyStaticFilters(u, data);
         } catch (e) {
           console.error("Static fetch failed:", su, e.message || e);
           return null;
@@ -2981,8 +3063,6 @@
          ================================================================ */
       initTheme();
       refresh();
-      loadAccuracy();
-      loadAccuracyHistory();
       startCd();
     </script>
   </body>

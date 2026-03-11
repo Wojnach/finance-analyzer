@@ -34,10 +34,13 @@ def reset_singleton():
     """Reset the client singleton and mock state before each test."""
     mod._client = None
     mod._account_id = None
+    mod._session_client = None
     _MockAvanzaClass.reset_mock()
-    yield
+    with patch.object(mod, "_try_session_auth", return_value=False):
+        yield
     mod._client = None
     mod._account_id = None
+    mod._session_client = None
 
 
 @pytest.fixture
@@ -190,6 +193,31 @@ class TestGetPrice:
         assert info["lastPrice"] == 1234.56
         assert info["name"] == "Test Stock"
 
+    def test_uses_session_price_when_available(self):
+        """BankID session path should use portfolio.avanza_session directly."""
+        with patch.object(mod, "_try_session_auth", return_value=True), \
+             patch("portfolio.avanza_session.get_instrument_price",
+                   return_value={"lastPrice": 42.0, "name": "Session Price"}) as mock_session:
+            info = mod.get_price("12345")
+
+        mock_session.assert_called_once_with("12345")
+        assert info["lastPrice"] == 42.0
+
+    def test_session_price_failure_falls_back_to_totp(self, config_file):
+        """Session lookup errors should fall back to the avanza-api client."""
+        mock_client = MagicMock()
+        mock_client.get_stock_info.return_value = {"lastPrice": 55.0, "name": "Fallback"}
+        _MockAvanzaClass.return_value = mock_client
+
+        with patch.object(mod, "_try_session_auth", return_value=True), \
+             patch("portfolio.avanza_session.get_instrument_price",
+                   side_effect=RuntimeError("session failed")), \
+             patch.object(mod, "CONFIG_FILE", config_file):
+            info = mod.get_price("12345")
+
+        mock_client.get_stock_info.assert_called_once_with("12345")
+        assert info["lastPrice"] == 55.0
+
 
 class TestGetPositions:
     """Tests for get_positions()."""
@@ -249,6 +277,16 @@ class TestGetPositions:
             positions = mod.get_positions()
 
         assert positions == []
+
+    def test_uses_session_positions_when_available(self):
+        """BankID session path should use portfolio.avanza_session directly."""
+        expected = [{"name": "Session Position", "orderbook_id": "12345"}]
+        with patch.object(mod, "_try_session_auth", return_value=True), \
+             patch("portfolio.avanza_session.get_positions", return_value=expected) as mock_session:
+            positions = mod.get_positions()
+
+        mock_session.assert_called_once_with()
+        assert positions == expected
 
 
 class TestGetPortfolioValue:

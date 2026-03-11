@@ -37,7 +37,9 @@ API_BASE = "http://localhost:5055"
 # Auto-detect repo paths relative to this script
 SCRIPT_DIR = Path(__file__).resolve().parent
 FINANCE_DIR = SCRIPT_DIR.parent
-RAANMAN_REPO = FINANCE_DIR.parent / "raanmanlol-repo"
+
+# raanmanlol repo clone (Wojnach/raanmanlol → master branch → GitHub Pages)
+RAANMAN_REPO = Path("Q:/raanmanlol-repo")
 BETS_DATA_DIR = RAANMAN_REPO / "bets" / "data"
 
 # Dashboard token (read from config.json if set)
@@ -146,6 +148,20 @@ def _fetch_all():
             log.warning("Error fetching %s: %s", endpoint, exc)
             fail_count += 1
 
+    # Sync dashboard HTML (patch static path: ./api-data/ → ./data/)
+    src_html = FINANCE_DIR / "dashboard" / "static" / "index.html"
+    dst_html = RAANMAN_REPO / "bets" / "index.html"
+    if src_html.exists():
+        html = src_html.read_text(encoding="utf-8")
+        html = html.replace("./api-data/", "./data/")
+        html_bytes = html.encode("utf-8")
+        html_hash = _hash_content(html_bytes)
+        if _content_hashes.get("index.html") != html_hash:
+            dst_html.write_bytes(html_bytes)
+            _content_hashes["index.html"] = html_hash
+            changed_count += 1
+            log.info("Updated index.html")
+
     # Write sync metadata (always updated)
     meta = {
         "synced_at": datetime.now(timezone.utc).isoformat(),
@@ -161,9 +177,9 @@ def _fetch_all():
 
 
 def _git_sync():
-    """Commit and push data changes to the raanmanlol repo."""
+    """Commit and push data changes to the raanmanlol repo (master branch)."""
     if not RAANMAN_REPO.exists():
-        log.error("Raanman repo not found at %s", RAANMAN_REPO)
+        log.error("raanmanlol repo not found at %s", RAANMAN_REPO)
         return False
 
     def _run(cmd, **kwargs):
@@ -176,8 +192,14 @@ def _git_sync():
             **kwargs,
         )
 
-    # 1. Stage data files first (before pull, to avoid unstaged changes error)
-    _run(["git", "add", "bets/data/"])
+    # 0. Ensure git identity is configured (required for commits)
+    result = _run(["git", "config", "user.name"])
+    if result.returncode != 0 or not result.stdout.strip():
+        _run(["git", "config", "user.name", "wojnach"])
+        _run(["git", "config", "user.email", "wojnach@users.noreply.github.com"])
+
+    # 1. Stage data files
+    _run(["git", "add", "bets/data/", "bets/index.html"])
 
     # 2. Check if anything changed in git
     result = _run(["git", "diff", "--cached", "--quiet"])
@@ -187,24 +209,24 @@ def _git_sync():
 
     # 3. Commit locally
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    _run(["git", "commit", "-m", f"sync: dashboard data {ts}"])
-
-    # 4. Stash any leftover unstaged changes, pull, then drop stash
-    _run(["git", "stash", "--include-untracked"])
-    result = _run(["git", "pull", "--rebase", "origin", "master"])
-    _run(["git", "stash", "pop"])  # restore stashed changes (ok if nothing stashed)
+    result = _run(["git", "commit", "-m", f"sync: dashboard data {ts}"])
     if result.returncode != 0:
-        _run(["git", "rebase", "--abort"])
-        log.error("git pull --rebase failed: %s", result.stderr.strip())
+        log.error("git commit failed: %s", result.stderr.strip())
         return False
 
-    # 5. Push
+    # 4. Stash unstaged changes, pull --rebase, pop stash, then push
+    _run(["git", "stash", "--include-untracked"])
+    pull = _run(["git", "pull", "--rebase", "origin", "master"])
+    _run(["git", "stash", "pop"])
+    if pull.returncode != 0:
+        log.warning("git pull --rebase failed: %s (attempting push anyway)",
+                    pull.stderr.strip())
     result = _run(["git", "push", "origin", "master"])
     if result.returncode != 0:
         log.error("git push failed: %s", result.stderr.strip())
         return False
 
-    log.info("Pushed data update to GitHub")
+    log.info("Pushed data update to raanmanlol master")
     return True
 
 
@@ -246,8 +268,8 @@ def main():
     )
     args = parser.parse_args()
 
-    log.info("Raanman repo: %s", RAANMAN_REPO)
-    log.info("Data output:  %s", BETS_DATA_DIR)
+    log.info("raanmanlol repo:   %s", RAANMAN_REPO)
+    log.info("Data output:       %s", BETS_DATA_DIR)
     log.info("Endpoints:    %d", len(ENDPOINTS))
 
     if args.loop:

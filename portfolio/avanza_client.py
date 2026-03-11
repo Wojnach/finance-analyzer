@@ -22,7 +22,7 @@ CONFIG_FILE = BASE_DIR / "config.json"
 
 # Singleton client instance (avanza-api library)
 _client = None
-# Singleton session-based client (BankID)
+# Cached signal that a BankID Playwright session has already been verified.
 _session_client = None
 
 
@@ -51,30 +51,21 @@ def _load_credentials() -> dict:
     return creds
 
 
-def _try_session_auth():
-    """Try to create a session-based client from BankID login.
-
-    Returns:
-        requests.Session if valid session exists, None otherwise.
-    """
+def _try_session_auth() -> bool:
+    """Return True when a BankID-backed Playwright session is available."""
     global _session_client
-    if _session_client is not None:
-        return _session_client
+    if _session_client is True:
+        return True
     try:
-        from portfolio.avanza_session import (
-            create_requests_session,
-            verify_session,
-        )
-        session = create_requests_session()
-        if verify_session(session=session):
-            _session_client = session
+        from portfolio.avanza_session import verify_session
+        if verify_session():
+            _session_client = True
             logger.info("Using BankID session for Avanza API")
-            return _session_client
-        else:
-            logger.info("BankID session exists but verification failed")
+            return True
+        logger.info("BankID session exists but verification failed")
     except Exception as e:
         logger.debug("BankID session not available: %s", e)
-    return None
+    return False
 
 
 def get_client():
@@ -113,7 +104,7 @@ def reset_client() -> None:
 
 
 def reset_session() -> None:
-    """Reset the singleton BankID session (forces reload from file on next call)."""
+    """Reset the cached BankID session verification flag."""
     global _session_client
     _session_client = None
 
@@ -144,11 +135,10 @@ def get_price(orderbook_id: str) -> dict[str, Any]:
         Dict with price info including lastPrice, change, changePercent, etc.
     """
     # Try session-based auth first
-    session = _try_session_auth()
-    if session is not None:
+    if _try_session_auth():
         try:
             from portfolio.avanza_session import get_instrument_price
-            return get_instrument_price(orderbook_id, session=session)
+            return get_instrument_price(orderbook_id)
         except Exception as e:
             logger.warning("Session-based price fetch failed, trying TOTP: %s", e)
             reset_session()
@@ -168,11 +158,10 @@ def get_positions() -> list[dict]:
         Returns empty list if no positions or on error.
     """
     # Try session-based auth first
-    session = _try_session_auth()
-    if session is not None:
+    if _try_session_auth():
         try:
             from portfolio.avanza_session import get_positions as session_get_positions
-            return session_get_positions(session=session)
+            return session_get_positions()
         except Exception as e:
             logger.warning("Session-based positions fetch failed, trying TOTP: %s", e)
             reset_session()

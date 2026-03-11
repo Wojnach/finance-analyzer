@@ -160,15 +160,19 @@ Cancel a pending order.
 
 ## Files
 
+**Canonical import path for strategy/runtime code:** `portfolio/avanza_control.py`
+
 | File | Purpose |
 |------|---------|
 | `scripts/avanza_login.py` | Interactive BankID login, saves session |
 | `data/avanza_storage_state.json` | Playwright browser state (cookies) |
 | `data/avanza_session.json` | Session tokens |
 | `portfolio/avanza_session.py` | Session management, `get_positions()`, `api_get()` |
-| `portfolio/avanza_client.py` | Trading functions: `place_buy_order()`, `place_sell_order()`, `delete_order()` |
+| `portfolio/avanza_client.py` | Account reads plus TOTP-backed fallback order helpers |
+| `portfolio/avanza_control.py` | Canonical facade for quotes, account reads, browser-session orders, and stop-loss actions |
 | `portfolio/avanza_orders.py` | Human-in-the-loop order confirmation via Telegram |
 | `portfolio/avanza_tracker.py` | Price tracking for Avanza instruments |
+| `data/metals_avanza_helpers.py` | Low-level Playwright request helpers wrapped by `portfolio/avanza_control.py` |
 
 ## Known Issues
 

@@ -130,6 +130,7 @@
     "poll_seconds": 5,
     "window_n": 720,
     "min_window": 60,
+    "cert_api_type": "certificate",
     "w_gold": 0.5,
     "w_fx": 0.3,
     "w_yield": 0.2,

@@ -34,6 +34,12 @@ os.chdir(BASE_DIR)
 import requests
 from playwright.sync_api import sync_playwright
 from portfolio.file_utils import atomic_write_json
+from portfolio.notification_text import (
+    format_tier_footer,
+    format_vote_summary,
+    humanize_thesis_status,
+    humanize_ticker,
+)
 
 try:
     import msvcrt  # Windows file locking for single-instance guard
@@ -90,7 +96,7 @@ except ImportError as e:
     WARRANT_CATALOG = {}
     CATALOG_AVAILABLE = False
 
-from metals_avanza_helpers import (
+from portfolio.avanza_control import (
     get_csrf,
     fetch_price,
     fetch_account_cash,
@@ -433,6 +439,7 @@ session_alert_sent = False        # debounce: only send one alert per outage
 session_expiry_warned = False     # debounce: only warn once about approaching expiry
 
 SINGLETON_LOCK_FILE = os.path.join("data", "metals_loop.singleton.lock")
+DUPLICATE_INSTANCE_EXIT_CODE = 11
 _singleton_lock_fh = None
 
 def acquire_singleton_lock(lock_path=SINGLETON_LOCK_FILE):
@@ -3000,55 +3007,80 @@ def _build_autonomous_telegram(trigger_reasons, tier, positions_data, signals_da
                                 cet_str, is_emergency):
     """Build a rich Telegram message for autonomous mode."""
     action_str = prediction.get("action", "HOLD")
-    reason_short = trigger_reasons[0][:40] if trigger_reasons else "periodic"
     emergency_tag = " EMG" if is_emergency else ""
 
+    def _fmt_num(value):
+        try:
+            value = float(value)
+        except Exception:
+            return str(value)
+        if value.is_integer():
+            return str(int(value))
+        return f"{value:.4f}".rstrip("0").rstrip(".")
+
     # First line: Apple Watch
-    xag_bid = ""
+    headline_detail = ""
     for key, pos in positions_data.items():
         if "silver" in key.lower():
-            xag_bid = f"bid:{pos['bid']}"
+            headline_detail = f"Silver bid {_fmt_num(pos['bid'])}"
             break
-    first_line = f"*AUTO {action_str}{emergency_tag}* · {xag_bid} · {thesis_status}"
+    if not headline_detail and positions_data:
+        _, first_pos = next(iter(positions_data.items()))
+        headline_detail = f"Bid {_fmt_num(first_pos['bid'])}"
+    if not headline_detail:
+        headline_detail = "Monitoring positions"
+    first_line = (
+        f"*AUTO {action_str}{emergency_tag}* · "
+        f"{headline_detail} · {humanize_thesis_status(thesis_status)}"
+    )
 
     # Position lines
     pos_lines = []
     for key, pos in positions_data.items():
-        short_key = key[:6].upper()
+        display_name = pos.get("name") or humanize_ticker(key).upper()
         mc_key = f"{key}_mc_pstop3h"
-        mc_tag = f" MC:{risk_data[mc_key]:.1f}%" if mc_key in risk_data else ""
+        pos_lines.append(f"`{display_name} · {pos['units']} units`")
         pos_lines.append(
-            f"`{short_key} {pos['units']}u  e:{pos['entry']}  b:{pos['bid']}  "
-            f"{pos['pnl_pct']:+.1f}%  pk:{pos['from_peak_pct']:+.1f}%`"
+            f"`Entry {_fmt_num(pos['entry'])} · Bid {_fmt_num(pos['bid'])} · "
+            f"Profit/loss {pos['pnl_pct']:+.1f}% · Off peak {pos['from_peak_pct']:+.1f}%`"
         )
-        pos_lines.append(f"`  stop:{pos['stop']} ({pos['dist_stop_pct']:.1f}%){mc_tag}`")
+        stop_line = f"`Stop-loss {_fmt_num(pos['stop'])} ({pos['dist_stop_pct']:.1f}% away)"
+        if mc_key in risk_data:
+            stop_line += f" · Monte Carlo stop-hit risk {risk_data[mc_key]:.1f}%"
+        stop_line += "`"
+        pos_lines.append(stop_line)
 
     # Signal line
     sig_parts = []
     for ticker, sig in signals_data.items():
-        short_t = ticker.split("-")[0]
-        sig_parts.append(f"{short_t} {sig['action']} {sig.get('buy_count',0)}B/{sig.get('sell_count',0)}S")
-    sig_line = f"Signals: {' | '.join(sig_parts)}" if sig_parts else ""
+        short_t = humanize_ticker(ticker)
+        votes = format_vote_summary(sig.get("buy_count", 0), sig.get("sell_count", 0))
+        sig_parts.append(f"{short_t} {sig['action']} ({votes} votes)")
+    sig_line = f"Signal votes: {' | '.join(sig_parts[:3])}" if sig_parts else ""
 
     # LLM line
     llm_parts = []
     for ticker, data in llm_data.items():
         if ticker.startswith("_"):
             continue
+        ticker_parts = []
         if "ministral" in data:
             conf = data.get("ministral_conf", 0)
-            llm_parts.append(f"min {data['ministral']} {conf:.0%}")
+            ticker_parts.append(f"Ministral {data['ministral']} ({conf:.0%})")
         if "chronos_3h" in data:
-            arrow = "^" if data["chronos_3h"] == "up" else "v"
             pct = data.get("chronos_3h_pct", 0)
-            llm_parts.append(f"chr {arrow}{abs(pct):.1f}% 3h")
-    llm_line = f"LLM: {' | '.join(llm_parts)}" if llm_parts else ""
+            direction = data["chronos_3h"]
+            move = f"{pct:+.1f}%" if direction in ("up", "down") else f"{abs(pct):.1f}%"
+            ticker_parts.append(f"Chronos {direction} {move} over 3h")
+        if ticker_parts:
+            llm_parts.append(f"{humanize_ticker(ticker)}: {', '.join(ticker_parts)}")
+    llm_line = f"AI view: {' | '.join(llm_parts[:3])}" if llm_parts else ""
 
     # Risk line
     risk_parts = []
     dd_pct = risk_data.get("drawdown_pct")
     if dd_pct is not None:
-        risk_parts.append(f"DD {dd_pct:+.1f}%")
+        risk_parts.append(f"Portfolio drawdown {dd_pct:+.1f}%")
     risk_line = f"Risk: {' | '.join(risk_parts)}" if risk_parts else ""
 
     # Assemble
@@ -3063,7 +3095,7 @@ def _build_autonomous_telegram(trigger_reasons, tier, positions_data, signals_da
     if risk_line:
         lines.append(risk_line)
     lines.append("")
-    lines.append(f"_Autonomous T{tier} · #{check_count} · {cet_str}_")
+    lines.append(format_tier_footer("Autonomous", tier, check_count, cet_str))
 
     return "\n".join(lines)
 
@@ -3364,7 +3396,7 @@ def main():
     # Prevent duplicate loop trees from concurrent launcher runs.
     if not acquire_singleton_lock():
         log("Duplicate metals loop instance detected; exiting.")
-        return
+        return DUPLICATE_INSTANCE_EXIT_CODE
     atexit.register(release_singleton_lock)
 
     # Probe time server on startup
@@ -3985,4 +4017,4 @@ Positions: {pos_summary}{prob_summary}""")
             log(f"Loop stopped: {check_count} checks, {invoke_count} invocations")
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

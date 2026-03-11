@@ -18,6 +18,13 @@ from pathlib import Path
 
 from portfolio.file_utils import atomic_append_jsonl, load_json, load_jsonl
 from portfolio.message_store import send_or_store
+from portfolio.notification_text import (
+    format_confidence,
+    format_fear_greed,
+    format_portfolio_context,
+    format_vote_summary,
+    humanize_ticker,
+)
 from portfolio.portfolio_mgr import portfolio_value, load_bold_state, BOLD_STATE_FILE
 from portfolio.telegram_notifications import escape_markdown_v1
 from portfolio.tickers import SYMBOLS, CRYPTO_SYMBOLS, METALS_SYMBOLS
@@ -520,7 +527,7 @@ def _build_telegram_mode_a(actionable, hold_count, sell_count, patient_state, bo
             t, p = top[0]
             focus_reco = p.get("recommendation")
             price_str = _format_price(prices_usd.get(t, 0))
-            lines.append(f"*AUTO {p['recommendation']} {t}* {price_str}")
+            lines.append(f"*AUTO {p['recommendation']} {humanize_ticker(t)}* {price_str}")
         else:
             lines.append("*AUTO HOLD*")
     else:
@@ -534,19 +541,22 @@ def _build_telegram_mode_a(actionable, hold_count, sell_count, patient_state, bo
         for t, p in movers[:2]:
             b = p.get("buy_count", 0)
             s = p.get("sell_count", 0)
-            label = f"{b}B" if b > s else f"{s}S"
-            mover_parts.append(f"{t} {label}")
+            label = f"{b} buy votes" if b > s else f"{s} sell votes"
+            mover_parts.append(f"{humanize_ticker(t)} {label}")
 
         # F&G
         fg_str = ""
         for sig in signals.values():
             fg = sig.get("extra", {}).get("fear_greed")
             if fg is not None:
-                fg_str = f" F&G {fg}"
+                fg_str = f" · {format_fear_greed(fg)}"
                 break
 
-        mover_text = " ".join(mover_parts)
-        first = f"*AUTO HOLD* {mover_text}{fg_str}"
+        mover_text = " · ".join(mover_parts)
+        first = "*AUTO HOLD*"
+        if mover_text:
+            first += f" · {mover_text}"
+        first += fg_str
         if len(first) > 70:
             first = first[:67] + "..."
         lines.append(first)
@@ -571,19 +581,20 @@ def _build_telegram_mode_a(actionable, hold_count, sell_count, patient_state, bo
         prob = pred.get("conviction")
 
         # Truncate ticker to 5 chars for alignment
-        t_short = ticker.replace("-USD", "").replace("-", "")[:5]
-        line = f"`{t_short:<5} {p_str:>7}  {action:<4} {b}B/{s}S/{h}H {heatmap}`"
+        t_short = humanize_ticker(ticker).replace(" ", "")[:5]
+        vote_summary = format_vote_summary(b, s)
+        line = f"`{t_short:<5} {p_str:>7}  {action:<4} {vote_summary:<18} {heatmap}`"
         if prob is not None:
-            line += f" p{int(round(prob * 100))}%"
+            line += f" {format_confidence(prob)}"
         lines.append(line)
 
     # --- Summary line ---
     if not focus_reco:
         summary_parts = []
         if hold_count > 0:
-            summary_parts.append(f"+{hold_count} hold")
+            summary_parts.append(f"{hold_count} more on hold")
         if sell_count > 0:
-            summary_parts.append(f"{sell_count} sell")
+            summary_parts.append(f"{sell_count} with sell signals")
         if summary_parts:
             lines.append(f"_{' \u00b7 '.join(summary_parts)}_")
 
@@ -600,11 +611,17 @@ def _build_telegram_mode_a(actionable, hold_count, sell_count, patient_state, bo
     bold_holdings_str = ""
     for t, h in bold_state.get("holdings", {}).items():
         if h.get("shares", 0) > 0:
-            bold_holdings_str += f" {t.replace('-USD', '')} {h['shares']:.0f}sh"
+            bold_holdings_str += f" · {humanize_ticker(t)} {h['shares']:.0f} shares"
 
     acc = _consensus_accuracy()
-    acc_str = f" \u00b7 acc{int(round(acc * 100))}%" if acc is not None else ""
-    ctx = f"_P:{p_total / 1000:.0f}K({p_pnl:+.0f}%) \u00b7 B:{b_total / 1000:.0f}K({b_pnl:+.0f}%){bold_holdings_str}{acc_str}_"
+    ctx = format_portfolio_context(
+        p_total,
+        p_pnl,
+        b_total,
+        b_pnl,
+        bold_holdings=bold_holdings_str,
+        consensus_accuracy=acc,
+    )
     lines.append("")
     lines.append(ctx)
 
@@ -617,17 +634,23 @@ def _build_telegram_mode_a(actionable, hold_count, sell_count, patient_state, bo
             p = predictions[t]
             b = p.get("buy_count", 0)
             s = p.get("sell_count", 0)
-            reasoning_parts.append(f"{t}: BUY signal {b}B/{s}S — {p.get('thesis', '')}")
+            votes = format_vote_summary(b, s)
+            reasoning_parts.append(
+                f"{humanize_ticker(t)}: BUY signal ({votes} votes) — {p.get('thesis', '')}"
+            )
     if sell_tickers and focus_reco in (None, "SELL"):
         for t in sell_tickers[:2]:
             p = predictions[t]
             b = p.get("buy_count", 0)
             s = p.get("sell_count", 0)
-            reasoning_parts.append(f"{t}: SELL signal {b}B/{s}S — {p.get('thesis', '')}")
+            votes = format_vote_summary(b, s)
+            reasoning_parts.append(
+                f"{humanize_ticker(t)}: SELL signal ({votes} votes) — {p.get('thesis', '')}"
+            )
     if not reasoning_parts:
         reasoning_parts.append(f"No clean entries. Regime: {regime}.")
     if reflection:
-        reasoning_parts.append(f"Ref: {reflection[:100]}")
+        reasoning_parts.append(f"Reflection: {reflection[:100]}")
 
     lines.append(escape_markdown_v1(" | ".join(reasoning_parts[:3])))
 
@@ -660,12 +683,14 @@ def _build_telegram_mode_b(actionable, hold_count, sell_count, patient_state, bo
     for t in focus_tickers[:2]:
         prob = focus_probs.get(t, {})
         p3h = prob.get("3h", {})
-        direction = "\u2191" if p3h.get("direction", "up") == "up" else "\u2193"
+        direction = {"up": "up", "down": "down", "flat": "flat"}.get(
+            p3h.get("direction", "up"), p3h.get("direction", "up")
+        )
         pct = p3h.get("probability", 50)
-        t_short = t.replace("-USD", "")
-        focus_parts.append(f"{t_short} {direction}{pct}% 3h")
+        t_short = humanize_ticker(t)
+        focus_parts.append(f"{t_short} {direction} {pct}% in 3h")
 
-    first_line = f"*AUTO PROB* {' \u00b7 '.join(focus_parts)}" if focus_parts else "*AUTO PROB*"
+    first_line = f"*AUTO PROBABILITY* {' \u00b7 '.join(focus_parts)}" if focus_parts else "*AUTO PROBABILITY*"
     lines.append(first_line)
     lines.append("")
 
@@ -675,28 +700,32 @@ def _build_telegram_mode_b(actionable, hold_count, sell_count, patient_state, bo
         price = prices_usd.get(t, 0)
         prob = focus_probs.get(t, {})
         gains = cumulative_gains.get(t, {})
-        t_short = t.replace("-USD", "")
+        t_short = humanize_ticker(t)
 
         p3h = prob.get("3h", {})
         p1d = prob.get("1d", {})
         p3d = prob.get("3d", {})
 
         def _prob_str(p_data):
-            d = "\u2191" if p_data.get("direction", "up") == "up" else "\u2193"
-            return f"{d}{p_data.get('probability', 50)}%"
+            direction = p_data.get("direction", "up")
+            word = {"up": "up", "down": "down", "flat": "flat"}.get(direction, direction)
+            return f"{word} {p_data.get('probability', 50)}%"
 
-        lines.append(f"`{t_short}  {_format_price(price)}  {_prob_str(p3h)} 3h  {_prob_str(p1d)} 1d  {_prob_str(p3d)} 3d`")
+        lines.append(
+            f"`{t_short}  {_format_price(price)}  {_prob_str(p3h)} in 3h  "
+            f"{_prob_str(p1d)} in 1d  {_prob_str(p3d)} in 3d`"
+        )
 
         # Accuracy + 7d gain
         acc = p1d.get("accuracy", 0)
         samples = p1d.get("samples", 0)
         gain_7d = gains.get("7d", 0)
-        lines.append(f"`  acc: {acc:.0f}% 1d ({samples} sam) | 7d: {gain_7d:+.1f}%`")
+        lines.append(f"`  accuracy: {acc:.0f}% at 1d ({samples} samples) | 7d move: {gain_7d:+.1f}%`")
 
         # Claude's call
         pred = predictions.get(t)
         if pred:
-            lines.append(f"`  Claude: {pred['recommendation']} ({pred['thesis'][:40]})`")
+            lines.append(f"`  Model view: {pred['recommendation']} ({pred['thesis'][:40]})`")
 
     # Non-focus tickers - compact grid
     for ticker, sig in actionable.items():
@@ -704,31 +733,35 @@ def _build_telegram_mode_b(actionable, hold_count, sell_count, patient_state, bo
             continue
         price = prices_usd.get(ticker, 0)
         gains = cumulative_gains.get(ticker, {})
-        t_short = ticker.replace("-USD", "").replace("-", "")[:5]
+        t_short = humanize_ticker(ticker).replace(" ", "")[:5]
         g7d = gains.get("7d", 0)
-        lines.append(f"`{t_short:<5} {_format_price(price):>7} 7d:{g7d:+.1f}%`")
+        lines.append(f"`{t_short:<5} {_format_price(price):>7} 7d move:{g7d:+.1f}%`")
 
     # Summary
     if hold_count > 0 or sell_count > 0:
         parts = []
         if hold_count > 0:
-            parts.append(f"+{hold_count} hold")
+            parts.append(f"{hold_count} more on hold")
         if sell_count > 0:
-            parts.append(f"{sell_count} sell")
+            parts.append(f"{sell_count} with sell signals")
         lines.append(f"_{' \u00b7 '.join(parts)}_")
 
     # Context
     p_total = portfolio_value(patient_state, prices_usd, safe_fx)
     b_total = portfolio_value(bold_state, prices_usd, safe_fx)
+    p_pnl = ((p_total - patient_state.get("initial_value_sek", 500000))
+             / max(patient_state.get("initial_value_sek", 500000), 1)) * 100
+    b_pnl = ((b_total - bold_state.get("initial_value_sek", 500000))
+             / max(bold_state.get("initial_value_sek", 500000), 1)) * 100
     lines.append("")
-    lines.append(f"_P:{p_total / 1000:.0f}K \u00b7 B:{b_total / 1000:.0f}K_")
+    lines.append(format_portfolio_context(p_total, p_pnl, b_total, b_pnl))
 
     # Reasoning
     reasoning = []
     for t in focus_tickers:
         pred = predictions.get(t)
         if pred and pred["recommendation"] != "HOLD":
-            reasoning.append(f"{t.replace('-USD', '')}: {pred['thesis'][:50]}")
+            reasoning.append(f"{humanize_ticker(t)}: {pred['thesis'][:50]}")
     if not reasoning:
         reasoning.append(f"Regime: {regime}. Monitoring.")
     lines.append(escape_markdown_v1(". ".join(reasoning[:2])))

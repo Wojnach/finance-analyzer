@@ -13,6 +13,12 @@ import json, time, datetime, requests, sys, os, subprocess, shutil, platform
 from collections import deque
 from pathlib import Path
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+from portfolio.process_lock import acquire_lock_file, release_lock_file
+
 # === Config ===
 _DEFAULT_REFERENCE_PRICE = 90.55
 _DEFAULT_LEVERAGE = 4.76
@@ -38,14 +44,16 @@ def _load_position_params():
 CHECK_INTERVAL = 10              # fast price check every 10s
 ANALYSIS_INTERVAL = 300          # Claude analysis every 5 min
 VELOCITY_WINDOW = 18             # 18 readings at 10s = 3 min window
-VELOCITY_ALERT_PCT = -0.3
+VELOCITY_ALERT_PCT = -0.8        # require a real 3 min flush; -0.3% was too noisy
+VELOCITY_TELEGRAM_ENABLED = False  # mute noisy rapid-drop Telegrams, keep Claude re-analysis
 
 BINANCE_URL = "https://fapi.binance.com/fapi/v1/ticker/price"
 BINANCE_KLINES = "https://fapi.binance.com/fapi/v1/klines"
 BINANCE_SYMBOL = "XAGUSDT"
 
-BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
+SINGLETON_LOCK_FILE = DATA_DIR / "silver_monitor.singleton.lock"
+DUPLICATE_INSTANCE_EXIT_CODE = 11
 
 # Mechanical alert thresholds — only serious drops get instant Telegram
 # Minor moves are handled by Claude analysis every 5 min
@@ -90,6 +98,32 @@ start_time = None
 consecutive_down = 0
 prev_price = None
 analysis_count = 0
+_singleton_lock_fh = None
+
+
+def acquire_singleton_lock(lock_path=SINGLETON_LOCK_FILE):
+    """Acquire the silver monitor singleton lock."""
+    global _singleton_lock_fh
+    if _singleton_lock_fh is not None:
+        return True
+
+    fh = acquire_lock_file(
+        lock_path,
+        owner="silver_monitor",
+        metadata={"script": "data/silver_monitor.py"},
+    )
+    if fh is None:
+        return False
+
+    _singleton_lock_fh = fh
+    return True
+
+
+def release_singleton_lock():
+    """Release the silver monitor singleton lock if held."""
+    global _singleton_lock_fh
+    release_lock_file(_singleton_lock_fh)
+    _singleton_lock_fh = None
 
 
 def fetch_price():
@@ -165,6 +199,22 @@ def calc_warrant(price):
     wpct = pct * LEVERAGE
     wsek = POSITION_SEK * wpct / 100
     return pct, wpct, wsek
+
+
+def calc_velocity_pct(history):
+    """Return % move across the full velocity window, or None if not ready."""
+    if len(history) < VELOCITY_WINDOW:
+        return None
+    oldest = history[0]
+    if oldest <= 0:
+        return None
+    return (history[-1] - oldest) / oldest * 100
+
+
+def should_send_velocity_alert(history):
+    """Only alert on a meaningful drop across the full configured window."""
+    vel = calc_velocity_pct(history)
+    return vel is not None and vel <= VELOCITY_ALERT_PCT
 
 
 # Load params at module init (after _load_position_params is defined)
@@ -500,162 +550,173 @@ def main():
     global session_low, session_high, last_analysis_ts, start_time
     global consecutive_down, prev_price, analysis_count
 
-    # Guard: exit immediately if no active silver position
-    if not _has_active_silver_position():
-        print("=== Silver Monitor: NO ACTIVE SILVER POSITION ===")
-        print("All silver positions are closed in metals_positions_state.json.")
-        print("Exiting. Restart when a new silver position is opened.")
-        sys.exit(0)
+    if not acquire_singleton_lock():
+        print("=== Silver Monitor: DUPLICATE INSTANCE ===")
+        print(f"Another silver monitor is already running ({SINGLETON_LOCK_FILE}).")
+        print("Exiting without starting a second monitoring loop.")
+        sys.exit(DUPLICATE_INSTANCE_EXIT_CODE)
 
-    start_time = time.time()
-    last_analysis_ts = time.time()  # don't analyze immediately, let data accumulate
+    price = None
+    try:
+        # Guard: exit immediately if no active silver position
+        if not _has_active_silver_position():
+            print("=== Silver Monitor: NO ACTIVE SILVER POSITION ===")
+            print("All silver positions are closed in metals_positions_state.json.")
+            print("Exiting. Restart when a new silver position is opened.")
+            sys.exit(0)
 
-    print("=== Silver Monitor + Claude Analysis ===")
-    print(f"Ref: ${REFERENCE_PRICE} | Lev: {LEVERAGE}x | Pos: {POSITION_SEK:,} SEK")
-    print(f"Fast checks: {CHECK_INTERVAL}s | Claude analysis: {ANALYSIS_INTERVAL}s (5 min)")
-    print(f"Alerts: {', '.join(f'{t[0]}%' for t in ALERT_LEVELS)}")
-    print()
+        start_time = time.time()
+        last_analysis_ts = time.time()  # don't analyze immediately, let data accumulate
 
-    price = fetch_price()
-    if price:
-        pct, wpct, wsek = calc_warrant(price)
-        session_low = price
-        session_high = price
-        print(f"Start: ${price:.2f} ({pct:+.2f}%) | W:{wpct:+.1f}%")
-        # No startup Telegram — only alert on WARNING/EXIT
+        print("=== Silver Monitor + Claude Analysis ===")
+        print(f"Ref: ${REFERENCE_PRICE} | Lev: {LEVERAGE}x | Pos: {POSITION_SEK:,} SEK")
+        print(f"Fast checks: {CHECK_INTERVAL}s | Claude analysis: {ANALYSIS_INTERVAL}s (5 min)")
+        print(f"Alerts: {', '.join(f'{t[0]}%' for t in ALERT_LEVELS)}")
+        print()
 
-        # Run first Claude analysis after 60 seconds
-        last_analysis_ts = time.time() - ANALYSIS_INTERVAL + 60
-    print()
+        price = fetch_price()
+        if price:
+            pct, wpct, wsek = calc_warrant(price)
+            session_low = price
+            session_high = price
+            print(f"Start: ${price:.2f} ({pct:+.2f}%) | W:{wpct:+.1f}%")
+            # No startup Telegram — only alert on WARNING/EXIT
 
-    while True:
-        try:
-            time.sleep(CHECK_INTERVAL)
-            price = fetch_price()
-            if price is None:
-                continue
+            # Run first Claude analysis after 60 seconds
+            last_analysis_ts = time.time() - ANALYSIS_INTERVAL + 60
+        print()
 
-            now = datetime.datetime.now()
-            pct_change, warrant_pct, warrant_sek = calc_warrant(price)
+        while True:
+            try:
+                time.sleep(CHECK_INTERVAL)
+                price = fetch_price()
+                if price is None:
+                    continue
 
-            # Consecutive down tracking
-            if prev_price is not None:
-                if price < prev_price - 0.001:
-                    consecutive_down += 1
-                else:
-                    consecutive_down = 0
-            prev_price = price
+                now = datetime.datetime.now()
+                pct_change, warrant_pct, warrant_sek = calc_warrant(price)
 
-            price_history.append(price)
-            session_prices.append((time.time(), price))
+                # Consecutive down tracking
+                if prev_price is not None:
+                    if price < prev_price - 0.001:
+                        consecutive_down += 1
+                    else:
+                        consecutive_down = 0
+                prev_price = price
 
-            if session_low is None or price < session_low:
-                session_low = price
-            if session_high is None or price > session_high:
-                session_high = price
+                price_history.append(price)
+                session_prices.append((time.time(), price))
 
-            # Status line
-            ts = now.strftime("%H:%M:%S")
-            next_analysis = max(0, ANALYSIS_INTERVAL - (time.time() - last_analysis_ts))
-            print(f"[{ts}] ${price:.2f} ({pct_change:+.2f}%) W:{warrant_pct:+.1f}% ({warrant_sek:+,.0f}) "
-                  f"Lo:{session_low:.2f} Hi:{session_high:.2f} "
-                  f"{'v' + str(consecutive_down) if consecutive_down >= 3 else ''} "
-                  f"[next analysis: {next_analysis:.0f}s]")
+                if session_low is None or price < session_low:
+                    session_low = price
+                if session_high is None or price > session_high:
+                    session_high = price
 
-            # === Mechanical threshold alerts (instant, no Claude needed) ===
-            for threshold, level_name in ALERT_LEVELS:
-                if pct_change <= threshold and threshold not in alerted_levels:
-                    alerted_levels.add(threshold)
-                    msg = (
-                        f"*{level_name}: XAG ${price:.2f} ({pct_change:+.1f}%)*\n"
-                        f"`Warrant: {warrant_pct:+.1f}% = {warrant_sek:+,.0f} SEK`\n"
-                        f"`Position: {POSITION_SEK + warrant_sek:,.0f} SEK`\n"
-                        f"_Ref ${REFERENCE_PRICE} | {LEVERAGE}x_"
-                    )
-                    print(f"\n  *** {level_name}: {pct_change:.1f}% ***")
-                    send_telegram(msg)
-                    # Also trigger immediate Claude analysis on danger+ levels
-                    if threshold <= -3.0:
-                        print("  -> Triggering immediate Claude analysis")
-                        last_analysis_ts = 0  # force next cycle
-                    print()
+                # Status line
+                ts = now.strftime("%H:%M:%S")
+                next_analysis = max(0, ANALYSIS_INTERVAL - (time.time() - last_analysis_ts))
+                print(f"[{ts}] ${price:.2f} ({pct_change:+.2f}%) W:{warrant_pct:+.1f}% ({warrant_sek:+,.0f}) "
+                      f"Lo:{session_low:.2f} Hi:{session_high:.2f} "
+                      f"{'v' + str(consecutive_down) if consecutive_down >= 3 else ''} "
+                      f"[next analysis: {next_analysis:.0f}s]")
 
-            # === Velocity alert ===
-            if len(price_history) >= 3:
-                oldest = price_history[0]
-                vel = (price - oldest) / oldest * 100
-                if vel <= VELOCITY_ALERT_PCT:
+                # === Mechanical threshold alerts (instant, no Claude needed) ===
+                for threshold, level_name in ALERT_LEVELS:
+                    if pct_change <= threshold and threshold not in alerted_levels:
+                        alerted_levels.add(threshold)
+                        msg = (
+                            f"*{level_name}: XAG ${price:.2f} ({pct_change:+.1f}%)*\n"
+                            f"`Warrant: {warrant_pct:+.1f}% = {warrant_sek:+,.0f} SEK`\n"
+                            f"`Position: {POSITION_SEK + warrant_sek:,.0f} SEK`\n"
+                            f"_Ref ${REFERENCE_PRICE} | {LEVERAGE}x_"
+                        )
+                        print(f"\n  *** {level_name}: {pct_change:.1f}% ***")
+                        send_telegram(msg)
+                        # Also trigger immediate Claude analysis on danger+ levels
+                        if threshold <= -3.0:
+                            print("  -> Triggering immediate Claude analysis")
+                            last_analysis_ts = 0  # force next cycle
+                        print()
+
+                # === Velocity alert ===
+                vel = calc_velocity_pct(price_history)
+                if vel is not None and should_send_velocity_alert(price_history):
                     vel_key = f"vel_{int(time.time() // 300)}"
                     if vel_key not in alerted_levels:
                         alerted_levels.add(vel_key)
                         msg = (
-                            f"*RAPID DROP: XAG {vel:.1f}% in {len(price_history) * CHECK_INTERVAL}s*\n"
+                            f"*RAPID DROP: XAG {vel:.1f}% in {VELOCITY_WINDOW * CHECK_INTERVAL}s*\n"
                             f"`${price:.2f} | W:{warrant_pct:+.1f}%`\n"
                             f"_Check now_"
                         )
                         print(f"\n  *** VELOCITY: {vel:.1f}% ***")
-                        send_telegram(msg)
+                        if VELOCITY_TELEGRAM_ENABLED:
+                            send_telegram(msg)
+                        else:
+                            print("  >> Velocity Telegram muted")
                         last_analysis_ts = 0  # trigger Claude analysis
                         print()
 
-            # === Claude Analysis Cycle (every 5 min) ===
-            # Only invoke Claude during analysis window (06:00-22:00 UTC weekdays)
-            # Price loop still runs 24/7 for mechanical alerts
-            if not _is_analysis_window():
+                # === Claude Analysis Cycle (every 5 min) ===
+                # Only invoke Claude during analysis window (06:00-22:00 UTC weekdays)
+                # Price loop still runs 24/7 for mechanical alerts
+                if not _is_analysis_window():
+                    if time.time() - last_analysis_ts >= ANALYSIS_INTERVAL:
+                        last_analysis_ts = time.time()
+                        print(f"  [off-hours] Skipping Claude analysis (outside 06-22 UTC weekdays)")
+                    continue
                 if time.time() - last_analysis_ts >= ANALYSIS_INTERVAL:
                     last_analysis_ts = time.time()
-                    print(f"  [off-hours] Skipping Claude analysis (outside 06-22 UTC weekdays)")
-                continue
-            if time.time() - last_analysis_ts >= ANALYSIS_INTERVAL:
-                last_analysis_ts = time.time()
-                analysis_count += 1
-                print(f"\n{'='*50}")
-                print(f"  ANALYSIS CYCLE #{analysis_count}")
-                print(f"{'='*50}")
+                    analysis_count += 1
+                    print(f"\n{'='*50}")
+                    print(f"  ANALYSIS CYCLE #{analysis_count}")
+                    print(f"{'='*50}")
 
-                # Gather comprehensive data
-                data = gather_analysis_data(price)
-                analysis_path = DATA_DIR / "silver_analysis.json"
-                with open(analysis_path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2, ensure_ascii=False)
-                print(f"  Data written to {analysis_path}")
+                    # Gather comprehensive data
+                    data = gather_analysis_data(price)
+                    analysis_path = DATA_DIR / "silver_analysis.json"
+                    with open(analysis_path, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2, ensure_ascii=False)
+                    print(f"  Data written to {analysis_path}")
 
-                # Invoke Claude
-                success = invoke_claude_analysis(analysis_path)
-                # Record this analysis cycle for session context
-                analysis_history.append({
-                    "cycle": analysis_count,
-                    "price": price,
-                    "decision": "unknown",  # updated below if we can read it
-                    "ts": time.time(),
-                })
-                # Try to read back the decision Claude made
-                try:
-                    tg_lines = open(DATA_DIR / "telegram_messages.jsonl", "r", encoding="utf-8").readlines()
-                    if tg_lines:
-                        last = json.loads(tg_lines[-1])
-                        if last.get("category") == "analysis":
-                            analysis_history[-1]["decision"] = last.get("decision", "unknown")
-                except Exception:
-                    pass
-                if not success:
-                    # Log locally only — no Telegram on fallback
-                    t = data.get("technicals", {})
-                    rsi_1m = t.get("1m", {}).get("rsi", "?")
-                    rsi_5m = t.get("5m", {}).get("rsi", "?")
-                    rsi_15m = t.get("15m", {}).get("rsi", "?")
-                    rsi_1h = t.get("1h", {}).get("rsi", "?")
-                    print(f"  [fallback] RSI: 1m={rsi_1m} 5m={rsi_5m} 15m={rsi_15m} 1h={rsi_1h}")
-                print(f"{'='*50}\n")
+                    # Invoke Claude
+                    success = invoke_claude_analysis(analysis_path)
+                    # Record this analysis cycle for session context
+                    analysis_history.append({
+                        "cycle": analysis_count,
+                        "price": price,
+                        "decision": "unknown",  # updated below if we can read it
+                        "ts": time.time(),
+                    })
+                    # Try to read back the decision Claude made
+                    try:
+                        tg_lines = open(DATA_DIR / "telegram_messages.jsonl", "r", encoding="utf-8").readlines()
+                        if tg_lines:
+                            last = json.loads(tg_lines[-1])
+                            if last.get("category") == "analysis":
+                                analysis_history[-1]["decision"] = last.get("decision", "unknown")
+                    except Exception:
+                        pass
+                    if not success:
+                        # Log locally only — no Telegram on fallback
+                        t = data.get("technicals", {})
+                        rsi_1m = t.get("1m", {}).get("rsi", "?")
+                        rsi_5m = t.get("5m", {}).get("rsi", "?")
+                        rsi_15m = t.get("15m", {}).get("rsi", "?")
+                        rsi_1h = t.get("1h", {}).get("rsi", "?")
+                        print(f"  [fallback] RSI: 1m={rsi_1m} 5m={rsi_5m} 15m={rsi_15m} 1h={rsi_1h}")
+                    print(f"{'='*50}\n")
 
-        except KeyboardInterrupt:
-            print(f"\n=== Monitor stopped ===")
-            if price:
-                pct, wpct, wsek = calc_warrant(price)
-                print(f"Final: ${price:.2f} ({pct:+.2f}%) | W:{wpct:+.1f}% ({wsek:+,.0f} SEK)")
-                print(f"Session: Lo ${session_low:.2f} Hi ${session_high:.2f}")
-                print(f"Analyses run: {analysis_count}")
-            sys.exit(0)
+            except KeyboardInterrupt:
+                print(f"\n=== Monitor stopped ===")
+                if price:
+                    pct, wpct, wsek = calc_warrant(price)
+                    print(f"Final: ${price:.2f} ({pct:+.2f}%) | W:{wpct:+.1f}% ({wsek:+,.0f} SEK)")
+                    print(f"Session: Lo ${session_low:.2f} Hi ${session_high:.2f}")
+                    print(f"Analyses run: {analysis_count}")
+                sys.exit(0)
+    finally:
+        release_singleton_lock()
 
 
 if __name__ == "__main__":

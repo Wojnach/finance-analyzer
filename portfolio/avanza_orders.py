@@ -4,7 +4,7 @@ Workflow:
 1. Layer 2 calls request_order() → saves intent to pending orders, returns details
 2. Layer 2 sends Telegram message with order details + "Reply CONFIRM to execute"
 3. Main loop calls check_pending_orders() each cycle
-4. On CONFIRM reply → execute order via avanza_client, notify via Telegram
+4. On CONFIRM reply → execute order via avanza_control, notify via Telegram
 5. On timeout (5 min) → expire the pending order, notify
 """
 
@@ -15,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
-from portfolio.avanza_client import place_buy_order, place_sell_order
+from portfolio.avanza_control import place_buy_order, place_sell_order
 from portfolio.file_utils import atomic_write_json
 from portfolio.http_retry import fetch_with_retry
 from portfolio.telegram_notifications import send_telegram
