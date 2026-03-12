@@ -22,23 +22,29 @@ logger = logging.getLogger("portfolio.daily_digest")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
-TRIGGER_STATE_FILE = DATA_DIR / "trigger_state.json"
 AGENT_SUMMARY_FILE = DATA_DIR / "agent_summary.json"
 BOLD_STATE_FILE = DATA_DIR / "portfolio_state_bold.json"
+_DAILY_DIGEST_STATE_FILE = DATA_DIR / "daily_digest_state.json"
 
 
 def _get_last_daily_digest_time():
-    """Get the last daily digest timestamp from trigger state."""
-    state = load_json(TRIGGER_STATE_FILE, default={})
+    """Get the last daily digest timestamp from its own state file."""
+    state = load_json(_DAILY_DIGEST_STATE_FILE, default={})
+    if not state:
+        # Migration: check trigger_state.json for existing timestamp
+        old = load_json(DATA_DIR / "trigger_state.json", default={})
+        return old.get("last_daily_digest_time", 0)
     return state.get("last_daily_digest_time", 0)
 
 
 def _set_last_daily_digest_time(t):
-    """Save the last daily digest timestamp."""
+    """Save the last daily digest timestamp to its own state file."""
     from portfolio.file_utils import atomic_write_json
-    state = load_json(TRIGGER_STATE_FILE, default={})
+    state = load_json(_DAILY_DIGEST_STATE_FILE, default={})
+    if not isinstance(state, dict):
+        state = {}
     state["last_daily_digest_time"] = t
-    atomic_write_json(TRIGGER_STATE_FILE, state)
+    atomic_write_json(_DAILY_DIGEST_STATE_FILE, state)
 
 
 def should_send_daily_digest(config):

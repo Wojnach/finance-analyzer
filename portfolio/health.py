@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from portfolio.file_utils import atomic_write_json
+from portfolio.file_utils import atomic_write_json, last_jsonl_entry
 
 logger = logging.getLogger(__name__)
 
@@ -89,33 +89,11 @@ def check_agent_silence(max_market_seconds: int = 7200,
     last_ts = state.get("last_invocation_ts")
 
     # Fall back to parsing invocations.jsonl if health_state doesn't have the timestamp.
-    # Read from the end of the file to avoid scanning the entire history.
     if not last_ts:
         invocations_file = DATA_DIR / "invocations.jsonl"
-        if not invocations_file.exists():
+        last_ts = last_jsonl_entry(invocations_file, field="ts")
+        if last_ts is None:
             return {"silent": True, "age_seconds": float("inf"), "threshold": max_market_seconds, "market_open": False}
-
-        try:
-            # Read last few KB to find the last valid entry (avoids full file scan)
-            file_size = invocations_file.stat().st_size
-            read_size = min(file_size, 4096)
-            with open(invocations_file, "rb") as f:
-                f.seek(max(0, file_size - read_size))
-                tail = f.read().decode("utf-8", errors="replace")
-            for line in reversed(tail.strip().splitlines()):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    ts = entry.get("ts")
-                    if ts:
-                        last_ts = ts
-                        break
-                except json.JSONDecodeError:
-                    continue
-        except OSError as e:
-            logger.warning("Failed to read invocations.jsonl for silence check: %s", e)
 
     if not last_ts:
         return {"silent": True, "age_seconds": float("inf"), "threshold": max_market_seconds, "market_open": False}

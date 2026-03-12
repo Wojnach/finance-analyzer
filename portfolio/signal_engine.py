@@ -49,16 +49,9 @@ def _load_prev_sentiments():
         return
     try:
         from portfolio.file_utils import load_json as _load_json
-        # Primary: own state file (no race with trigger.py)
         data = _load_json(str(_SENTIMENT_STATE_FILE), default=None)
         if data and isinstance(data, dict):
             _prev_sentiment = data.get("prev_sentiment", {})
-        else:
-            # Migration: read from trigger_state.json if sentiment_state.json doesn't exist yet
-            ts_file = DATA_DIR / "trigger_state.json"
-            ts = _load_json(str(ts_file), default=None)
-            if ts and isinstance(ts, dict):
-                _prev_sentiment = ts.get("prev_sentiment", {})
         # Prune entries for removed tickers
         from portfolio.tickers import ALL_TICKERS
         removed = [k for k in _prev_sentiment if k not in ALL_TICKERS]

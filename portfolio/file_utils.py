@@ -86,6 +86,47 @@ def atomic_append_jsonl(path, entry):
         os.fsync(f.fileno())
 
 
+def last_jsonl_entry(path, field=None):
+    """Return the last parsed JSON entry from a JSONL file (efficient tail read).
+
+    Reads only the last 4KB of the file instead of scanning the entire file.
+
+    Args:
+        path: Path to the JSONL file.
+        field: If set, return only this field's value from the last entry.
+
+    Returns:
+        The last entry (dict) or the value of *field*, or None if file is
+        missing/empty/unreadable.
+    """
+    path = Path(path)
+    try:
+        file_size = path.stat().st_size
+    except (OSError, FileNotFoundError):
+        return None
+    if file_size == 0:
+        return None
+    read_size = min(file_size, 4096)
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, file_size - read_size))
+            tail = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    for line in reversed(tail.strip().splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+            if field is not None:
+                return entry.get(field)
+            return entry
+        except (json.JSONDecodeError, AttributeError):
+            continue
+    return None
+
+
 def prune_jsonl(path, max_entries=5000):
     """Prune a JSONL file to keep only the most recent *max_entries*.
 

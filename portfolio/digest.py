@@ -28,22 +28,27 @@ SIGNAL_LOG_FILE = DATA_DIR / "signal_log.jsonl"
 DIGEST_INTERVAL = 14400  # 4 hours
 
 
+_DIGEST_STATE_FILE = DATA_DIR / "digest_state.json"
+
+
 def _get_last_digest_time():
     try:
-        state = load_json(DATA_DIR / "trigger_state.json", default={})
+        state = load_json(_DIGEST_STATE_FILE, default={})
+        if not state:
+            # Migration: check trigger_state.json for existing timestamp
+            old = load_json(DATA_DIR / "trigger_state.json", default={})
+            return old.get("last_digest_time", 0)
         return state.get("last_digest_time", 0)
     except (json.JSONDecodeError, OSError, ValueError):
         return 0
 
 
 def _set_last_digest_time(t):
-    path = DATA_DIR / "trigger_state.json"
-    state = load_json(str(path), default={})
+    state = load_json(_DIGEST_STATE_FILE, default={})
     if not isinstance(state, dict):
-        logger.warning("trigger_state.json corrupt in _set_last_digest_time, resetting")
         state = {}
     state["last_digest_time"] = t
-    _atomic_write_json(path, state)
+    _atomic_write_json(_DIGEST_STATE_FILE, state)
 
 
 JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
@@ -56,7 +61,7 @@ def _build_digest_message():
     cutoff = now - timedelta(seconds=DIGEST_INTERVAL)
 
     # --- Invocations (Layer 1 trigger → Layer 2) ---
-    entries = load_jsonl(INVOCATIONS_FILE)
+    entries = load_jsonl(INVOCATIONS_FILE, limit=500)
     recent = []
     for e in entries:
         ts_str = e.get("ts", "")
@@ -90,7 +95,7 @@ def _build_digest_message():
                 reason_counts["other"] += 1
 
     # --- Layer 2 decisions from journal ---
-    journal = load_jsonl(JOURNAL_FILE)
+    journal = load_jsonl(JOURNAL_FILE, limit=500)
     recent_journal = []
     for e in journal:
         ts_str = e.get("ts", "")
@@ -111,7 +116,7 @@ def _build_digest_message():
             l2_decisions[strat][action_key] += 1
 
     # --- Signal consensus breakdown from signal_log ---
-    signal_entries = load_jsonl(SIGNAL_LOG_FILE)
+    signal_entries = load_jsonl(SIGNAL_LOG_FILE, limit=500)
     recent_signals = []
     for e in signal_entries:
         ts_str = e.get("ts", "")
