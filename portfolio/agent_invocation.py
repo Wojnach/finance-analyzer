@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from portfolio.api_utils import load_config as _load_config
-from portfolio.file_utils import atomic_append_jsonl, load_jsonl
+from portfolio.file_utils import atomic_append_jsonl, load_jsonl, last_jsonl_entry
 from portfolio.message_store import send_or_store
 from portfolio.telegram_notifications import escape_markdown_v1
 
@@ -88,26 +88,11 @@ def _log_trigger(reasons, status, tier=None):
 
 
 def _last_jsonl_ts(path):
-    """Return the 'ts' value from the last entry of a JSONL file, or None."""
-    if not path.exists():
-        return None
-    last_ts = None
-    try:
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    ts = entry.get("ts")
-                    if ts:
-                        last_ts = ts
-                except (json.JSONDecodeError, AttributeError):
-                    continue
-    except OSError:
-        pass
-    return last_ts
+    """Return the 'ts' value from the last entry of a JSONL file, or None.
+
+    Uses efficient tail-read via last_jsonl_entry() (reads last 4KB only).
+    """
+    return last_jsonl_entry(path, field="ts")
 
 
 def invoke_agent(reasons, tier=3):

@@ -73,10 +73,10 @@ def _check_recent_trade(state):
     new_tx_counts = {}
 
     for label, pf_file in [("patient", PORTFOLIO_FILE), ("bold", PORTFOLIO_BOLD_FILE)]:
-        if not pf_file.exists():
-            continue
         try:
-            pf = json.loads(pf_file.read_text(encoding="utf-8"))
+            pf = load_json(pf_file, default=None)
+            if pf is None:
+                continue
             txs = pf.get("transactions", [])
             current_count = len(txs)
             prev_count = last_checked_tx.get(label, current_count)
@@ -84,7 +84,7 @@ def _check_recent_trade(state):
 
             if current_count > prev_count:
                 trade_detected = True
-        except (json.JSONDecodeError, KeyError) as exc:
+        except (KeyError, AttributeError) as exc:
             logger.warning("Failed to parse portfolio file %s: %s", pf_file, exc)
 
     if new_tx_counts:

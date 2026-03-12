@@ -61,7 +61,7 @@ def _build_digest_message():
     cutoff = now - timedelta(seconds=DIGEST_INTERVAL)
 
     # --- Invocations (Layer 1 trigger → Layer 2) ---
-    entries = load_jsonl(INVOCATIONS_FILE)
+    entries = load_jsonl(INVOCATIONS_FILE, limit=500)
     recent = []
     for e in entries:
         ts_str = e.get("ts", "")
@@ -95,7 +95,7 @@ def _build_digest_message():
                 reason_counts["other"] += 1
 
     # --- Layer 2 decisions from journal ---
-    journal = load_jsonl(JOURNAL_FILE)
+    journal = load_jsonl(JOURNAL_FILE, limit=500)
     recent_journal = []
     for e in journal:
         ts_str = e.get("ts", "")
@@ -116,7 +116,7 @@ def _build_digest_message():
             l2_decisions[strat][action_key] += 1
 
     # --- Signal consensus breakdown from signal_log ---
-    signal_entries = load_jsonl(SIGNAL_LOG_FILE)
+    signal_entries = load_jsonl(SIGNAL_LOG_FILE, limit=500)
     recent_signals = []
     for e in signal_entries:
         ts_str = e.get("ts", "")

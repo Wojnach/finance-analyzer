@@ -64,6 +64,10 @@ def _cross_asset_signals(all_signals):
 def write_agent_summary(
     signals, prices_usd, fx_rate, state, tf_data, trigger_reasons=None
 ):
+    # Load config once for the entire function (BUG-46: was loaded 3+ times)
+    from portfolio.api_utils import load_config as _load_config_once
+    _report_config = _load_config_once()
+
     total = portfolio_value(state, prices_usd, fx_rate)
     initial = state.get("initial_value_sek", 500000)
     pnl_pct = ((total - initial) / initial) * 100
@@ -325,17 +329,10 @@ def write_agent_summary(
     if cross_leads:
         summary["cross_asset_leads"] = cross_leads
 
-    # Load portfolios once for trade guards + risk audit
-    _patient_pf = {}
-    _bold_pf = {}
-    try:
-        _patient_pf = json.loads((DATA_DIR / "portfolio_state.json").read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
-    try:
-        _bold_pf = json.loads((DATA_DIR / "portfolio_state_bold.json").read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
+    # Load portfolios once for trade guards + risk audit (BUG-42: use load_json for TOCTOU safety)
+    from portfolio.file_utils import load_json as _load_json
+    _patient_pf = _load_json(DATA_DIR / "portfolio_state.json", default={})
+    _bold_pf = _load_json(DATA_DIR / "portfolio_state_bold.json", default={})
 
     # Trade guard warnings (overtrading prevention)
     try:
@@ -359,8 +356,7 @@ def write_agent_summary(
 
     # Monte Carlo simulation (price bands, stop probability, portfolio VaR)
     try:
-        from portfolio.api_utils import load_config as _load_mc_cfg
-        _mc_cfg = _load_mc_cfg().get("monte_carlo", {})
+        _mc_cfg = _report_config.get("monte_carlo", {})
         if _mc_cfg.get("enabled", True):
             from portfolio.monte_carlo import simulate_all
             from portfolio.monte_carlo_risk import compute_portfolio_var
@@ -386,8 +382,7 @@ def write_agent_summary(
 
     # Price targets for held positions and BUY-consensus tickers
     try:
-        from portfolio.api_utils import load_config as _load_pt_cfg
-        _pt_cfg = _load_pt_cfg().get("price_targets", {})
+        _pt_cfg = _report_config.get("price_targets", {})
         if _pt_cfg.get("enabled", True):
             from portfolio.price_targets import compute_all_targets
             pt_results = compute_all_targets(summary,
@@ -450,9 +445,7 @@ def write_agent_summary(
     # Focus probabilities (Mode B — directional probabilities for focus tickers)
     focus_tickers = []
     try:
-        from portfolio.api_utils import load_config as _load_cfg
-        _cfg = _load_cfg()
-        focus_tickers = _cfg.get("notification", {}).get("focus_tickers", [])
+        focus_tickers = _report_config.get("notification", {}).get("focus_tickers", [])
         if focus_tickers:
             from portfolio.ticker_accuracy import get_focus_probabilities
             focus_probs = get_focus_probabilities(focus_tickers, signals)
