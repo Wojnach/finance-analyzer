@@ -103,7 +103,7 @@ from portfolio.telegram_notifications import (  # noqa: E402, F401
 
 # Agent invocation re-exports
 from portfolio.agent_invocation import (  # noqa: E402, F401
-    invoke_agent, _log_trigger,
+    invoke_agent, _log_trigger, check_agent_completion,
     INVOCATIONS_FILE, TIER_CONFIG,
 )
 
@@ -180,6 +180,18 @@ def _run_post_cycle(config):
 
 def run(force_report=False, active_symbols=None):
     _ss._run_cycle_id += 1
+
+    # Check if a previously-spawned agent has completed (BUG-39)
+    try:
+        completion = check_agent_completion()
+        if completion:
+            logger.info(
+                "Agent completed: status=%s tier=%s duration=%.1fs",
+                completion.get("status"), completion.get("tier"),
+                completion.get("duration_s", 0),
+            )
+    except Exception as e:
+        logger.warning("check_agent_completion failed: %s", e)
 
     config = _load_config()
     state = load_state()
