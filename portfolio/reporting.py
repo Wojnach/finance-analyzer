@@ -553,6 +553,52 @@ def write_agent_summary(
         logger.warning("[reporting] warrant_portfolio failed", exc_info=True)
         _module_warnings.append("warrant_portfolio")
 
+    # Exit optimizer plans for warrant positions
+    try:
+        from portfolio.exit_optimizer import compute_exit_plan, Position, MarketSnapshot
+        from portfolio.session_calendar import get_session_info
+        from portfolio.cost_model import get_cost_model
+        warrant_state_path = DATA_DIR / "portfolio_state_warrants.json"
+        if warrant_state_path.exists():
+            warrant_state = json.loads(warrant_state_path.read_text(encoding="utf-8"))
+            exit_plans = {}
+            for wk, wpos in warrant_state.get("positions", {}).items():
+                if not wpos.get("active") or wpos.get("units", 0) <= 0:
+                    continue
+                underlying = wpos.get("underlying", "")
+                und_price = prices_usd.get(underlying, 0)
+                if und_price <= 0:
+                    continue
+                sess = get_session_info("warrant", underlying=underlying)
+                if not sess.is_open or sess.remaining_minutes < 2:
+                    continue
+                position = Position(
+                    symbol=underlying,
+                    qty=wpos["units"],
+                    entry_price_sek=wpos.get("entry_price", 0),
+                    entry_underlying_usd=wpos.get("entry_underlying", und_price),
+                    entry_ts=datetime.fromisoformat(wpos["entry_ts"]) if wpos.get("entry_ts") else datetime.now(timezone.utc),
+                    instrument_type="warrant",
+                    leverage=wpos.get("leverage", 5.0),
+                    financing_level=wpos.get("financing_level"),
+                )
+                market = MarketSnapshot(
+                    asof_ts=datetime.now(timezone.utc),
+                    price=und_price,
+                    atr_pct=signals.get(underlying, {}).get("extra", {}).get("atr_pct"),
+                    usdsek=fx_rate,
+                )
+                plan = compute_exit_plan(
+                    position, market, sess.session_end,
+                    costs=get_cost_model("warrant"), n_paths=3000,
+                )
+                exit_plans[wk] = plan.to_dict()
+            if exit_plans:
+                summary["exit_plans"] = exit_plans
+    except Exception:
+        logger.warning("[reporting] exit_optimizer failed", exc_info=True)
+        _module_warnings.append("exit_optimizer")
+
     # Prophecy/belief context for Layer 2
     try:
         from portfolio.prophecy import get_context_for_layer2, evaluate_checkpoints
@@ -767,7 +813,7 @@ def _write_compact_summary(summary):
     # Propagate focus mode sections to compact (small, relevant to Layer 2)
     for section_key in ("focus_probabilities", "cumulative_gains", "warrant_portfolio",
                         "prophecy", "forecast_accuracy", "forecast_signals",
-                        "forecast_gating"):
+                        "forecast_gating", "exit_plans"):
         section_data = summary.get(section_key)
         if section_data:
             compact[section_key] = section_data

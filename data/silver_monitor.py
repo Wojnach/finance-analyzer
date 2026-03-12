@@ -426,6 +426,48 @@ def gather_analysis_data(price):
         ),
     }
 
+    # Exit optimizer — probabilistic exit assessment
+    try:
+        from portfolio.exit_optimizer import compute_exit_plan, Position, MarketSnapshot
+        from portfolio.session_calendar import get_session_info
+        from portfolio.cost_model import get_cost_model
+        sess = get_session_info("warrant", underlying="XAG-USD")
+        if sess.is_open and sess.remaining_minutes >= 2:
+            opt_pos = Position(
+                symbol="XAG-USD",
+                qty=round(POSITION_SEK / (price * LEVERAGE), 2) if price > 0 else 0,
+                entry_price_sek=REFERENCE_PRICE * 10.85,  # approximate
+                entry_underlying_usd=REFERENCE_PRICE,
+                entry_ts=datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2),
+                instrument_type="warrant",
+                leverage=LEVERAGE,
+            )
+            opt_market = MarketSnapshot(
+                asof_ts=datetime.datetime.now(datetime.timezone.utc),
+                price=price,
+                usdsek=10.85,
+            )
+            exit_plan = compute_exit_plan(
+                opt_pos, opt_market, sess.session_end,
+                costs=get_cost_model("warrant"), n_paths=2000,
+            )
+            data["exit_analysis"] = {
+                "recommended_action": exit_plan.recommended.action,
+                "recommended_price": round(exit_plan.recommended.price_usd, 2),
+                "recommended_ev_sek": round(exit_plan.recommended.ev_sek),
+                "fill_probability": round(exit_plan.recommended.fill_prob, 3),
+                "expected_fill_time_min": round(exit_plan.recommended.expected_fill_time_min),
+                "market_exit_pnl_sek": round(exit_plan.market_exit.pnl_sek),
+                "stop_hit_prob": round(exit_plan.stop_hit_prob, 3),
+                "risk_flags": list(exit_plan.recommended.risk_flags),
+                "remaining_session_min": round(sess.remaining_minutes),
+                "session_max_p50": exit_plan.session_max_distribution.get("p50"),
+                "session_max_p80": exit_plan.session_max_distribution.get("p80"),
+                "session_min_p20": exit_plan.session_min_distribution.get("p20"),
+            }
+    except Exception as e:
+        print(f"  [!] Exit optimizer error: {e}")
+
     # Session context — price history and previous decisions
     if session_prices:
         prices_only = [p for _, p in session_prices]

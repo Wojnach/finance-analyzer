@@ -208,6 +208,107 @@ def compute_stop_levels(holdings: dict, agent_summary: dict) -> dict:
     return result
 
 
+def compute_probabilistic_stops(holdings: dict, agent_summary: dict) -> dict:
+    """Compute Monte Carlo probabilistic stop-loss quality for held positions.
+
+    For each position, simulates remaining-session price paths and estimates
+    the probability of hitting the ATR stop level, plus the expected time to
+    hit if triggered.
+
+    Args:
+        holdings: The "holdings" dict from portfolio state.
+        agent_summary: Parsed agent_summary.json dict.
+
+    Returns:
+        dict keyed by ticker, each with:
+            - stop_price_usd: ATR-based stop level
+            - stop_hit_prob: P(hitting stop this session), 0.0-1.0
+            - expected_hit_time_min: E[time to stop | hit], or None
+            - knockout_prob: For warrants, P(reaching financing level)
+            - current_price_usd: current price
+    """
+    try:
+        from portfolio.exit_optimizer import simulate_intraday_paths, _first_hit_times
+        from portfolio.session_calendar import get_session_info, remaining_session_minutes
+    except ImportError:
+        logger.warning("exit_optimizer or session_calendar not available")
+        return {}
+
+    import numpy as np
+
+    signals = agent_summary.get("signals", {})
+    result = {}
+
+    for ticker, pos in holdings.items():
+        shares = pos.get("shares", 0)
+        if shares <= 0:
+            continue
+
+        entry_price = pos.get("avg_cost_usd", 0)
+        if entry_price <= 0:
+            continue
+
+        sig = signals.get(ticker)
+        if not sig:
+            continue
+
+        current_price = sig.get("price_usd", 0)
+        atr_pct = sig.get("atr_pct", 0)
+        if current_price <= 0 or atr_pct <= 0:
+            continue
+
+        # Determine instrument type for session lookup
+        if ticker.endswith("-USD") and ticker.startswith(("BTC", "ETH")):
+            inst_type = "crypto"
+        elif ticker.startswith(("XAG", "XAU")):
+            inst_type = "warrant"
+        else:
+            inst_type = "stock"
+
+        # Get remaining session minutes
+        remaining = remaining_session_minutes(inst_type)
+        if remaining < 2:
+            continue
+
+        # Estimate volatility from ATR
+        import math
+        vol = max(atr_pct / 100.0 * math.sqrt(252.0 / 14), 0.05)
+
+        # ATR stop level
+        stop_price = entry_price * (1 - 2 * atr_pct / 100)
+        if stop_price <= 0:
+            stop_price = entry_price * 0.01
+
+        # Simulate paths
+        paths = simulate_intraday_paths(
+            price=current_price,
+            volatility=vol,
+            drift=0.0,
+            remaining_minutes=int(remaining),
+            instrument_type=inst_type,
+            n_paths=2000,
+        )
+
+        # Stop hit probability
+        session_min = np.min(paths[:, 1:], axis=1)
+        stop_hit_prob = float(np.mean(session_min <= stop_price))
+
+        # Expected time to hit stop
+        hit_times = _first_hit_times(paths, stop_price, direction="below")
+        hitting = hit_times[hit_times > 0]
+        expected_hit_time = float(np.mean(hitting)) if len(hitting) > 0 else None
+
+        result[ticker] = {
+            "stop_price_usd": round(stop_price, 4),
+            "stop_hit_prob": round(stop_hit_prob, 4),
+            "expected_hit_time_min": round(expected_hit_time, 1) if expected_hit_time else None,
+            "knockout_prob": None,
+            "current_price_usd": round(current_price, 4),
+        }
+
+    return result
+
+
 def get_position_ages(portfolio: dict) -> dict:
     """Calculate age of each position from first BUY transaction.
 

@@ -556,8 +556,55 @@ class SwingTrader:
 
             exit_reason = None
 
+            # --- Exit optimizer: probabilistic exit assessment ---
+            try:
+                from portfolio.exit_optimizer import compute_exit_plan, Position, MarketSnapshot
+                from portfolio.session_calendar import get_session_info
+                from portfolio.cost_model import get_cost_model
+                sess = get_session_info("warrant", underlying=pos.get("underlying"))
+                if sess.is_open and sess.remaining_minutes >= 2:
+                    opt_pos = Position(
+                        symbol=pos.get("underlying", ""),
+                        qty=pos.get("units", 0),
+                        entry_price_sek=pos.get("entry_price", 0),
+                        entry_underlying_usd=entry_und,
+                        entry_ts=datetime.datetime.fromisoformat(pos["entry_ts"]) if pos.get("entry_ts") else _now_utc(),
+                        instrument_type="warrant",
+                        leverage=pos.get("leverage", 5.0),
+                        financing_level=pos.get("financing_level"),
+                    )
+                    opt_market = MarketSnapshot(
+                        asof_ts=_now_utc(),
+                        price=underlying_price,
+                        bid=current_bid if current_bid > 0 else None,
+                        usdsek=10.85,
+                    )
+                    exit_plan = compute_exit_plan(
+                        opt_pos, opt_market, sess.session_end,
+                        costs=get_cost_model("warrant"), n_paths=2000,
+                    )
+                    pos["_exit_plan"] = {
+                        "recommended": exit_plan.recommended.action,
+                        "rec_price": exit_plan.recommended.price_usd,
+                        "rec_ev": exit_plan.recommended.ev_sek,
+                        "rec_fill_prob": exit_plan.recommended.fill_prob,
+                        "stop_hit_prob": exit_plan.stop_hit_prob,
+                        "risk_flags": list(exit_plan.recommended.risk_flags),
+                        "market_exit_pnl": exit_plan.market_exit.pnl_sek,
+                    }
+                    # Override: if optimizer says market exit due to risk override
+                    if (exit_plan.recommended.action == "market"
+                            and any(f in exit_plan.recommended.risk_flags
+                                    for f in ("KNOCKOUT_DANGER", "SESSION_END_IMMINENT"))):
+                        exit_reason = f"EXIT_OPTIMIZER: {', '.join(exit_plan.recommended.risk_flags)} (EV {exit_plan.recommended.ev_sek:+,.0f} SEK)"
+                    # Override: if stop hit probability is very high
+                    elif exit_plan.stop_hit_prob > 0.30:
+                        exit_reason = f"EXIT_OPTIMIZER: stop hit prob {exit_plan.stop_hit_prob:.0%} > 30% (EV {exit_plan.recommended.ev_sek:+,.0f} SEK)"
+            except Exception as e:
+                _log(f"Exit optimizer error: {e}")
+
             # 1. Take profit
-            if und_change_pct >= TAKE_PROFIT_UNDERLYING_PCT:
+            if not exit_reason and und_change_pct >= TAKE_PROFIT_UNDERLYING_PCT:
                 exit_reason = f"TAKE_PROFIT: underlying +{und_change_pct:.2f}% >= +{TAKE_PROFIT_UNDERLYING_PCT}%"
 
             # 2. Trailing stop
