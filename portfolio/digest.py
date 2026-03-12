@@ -28,22 +28,27 @@ SIGNAL_LOG_FILE = DATA_DIR / "signal_log.jsonl"
 DIGEST_INTERVAL = 14400  # 4 hours
 
 
+_DIGEST_STATE_FILE = DATA_DIR / "digest_state.json"
+
+
 def _get_last_digest_time():
     try:
-        state = load_json(DATA_DIR / "trigger_state.json", default={})
+        state = load_json(_DIGEST_STATE_FILE, default={})
+        if not state:
+            # Migration: check trigger_state.json for existing timestamp
+            old = load_json(DATA_DIR / "trigger_state.json", default={})
+            return old.get("last_digest_time", 0)
         return state.get("last_digest_time", 0)
     except (json.JSONDecodeError, OSError, ValueError):
         return 0
 
 
 def _set_last_digest_time(t):
-    path = DATA_DIR / "trigger_state.json"
-    state = load_json(str(path), default={})
+    state = load_json(_DIGEST_STATE_FILE, default={})
     if not isinstance(state, dict):
-        logger.warning("trigger_state.json corrupt in _set_last_digest_time, resetting")
         state = {}
     state["last_digest_time"] = t
-    _atomic_write_json(path, state)
+    _atomic_write_json(_DIGEST_STATE_FILE, state)
 
 
 JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
