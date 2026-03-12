@@ -92,7 +92,8 @@ def _notify_critical(category: str, message: str) -> None:
     try:
         import json as _json
         from portfolio.message_store import send_or_store
-        config = _json.load(open(BASE_DIR / "config.json"))
+        with open(BASE_DIR / "config.json", encoding="utf-8") as fh:
+            config = _json.load(fh)
         send_or_store(message, config, category="error")
     except Exception:
         logger.warning("Failed to send critical alert: %s", message, exc_info=True)
@@ -1188,6 +1189,26 @@ def _page_with_session():
     return page
 
 
+def _validate_action(action: dict) -> str | None:
+    """Return an error message if the action is invalid, or None if OK."""
+    act = action.get("action")
+    if act == "cancel":
+        if not action.get("order_id"):
+            return "cancel action missing order_id"
+        return None
+    if act == "place":
+        price = float(action.get("price") or 0.0)
+        volume = int(action.get("volume") or 0)
+        if price <= 0:
+            return f"place action with invalid price {price}"
+        if volume <= 0:
+            return f"place action with invalid volume {volume}"
+        if not action.get("orderbook_id"):
+            return "place action missing orderbook_id"
+        return None
+    return f"unknown action type: {act!r}"
+
+
 def execute_actions(
     actions: list[dict],
     *,
@@ -1208,37 +1229,63 @@ def execute_actions(
     results: list[dict] = []
     try:
         for action in actions:
-            account_id = str(action.get("account_id") or "") or None
-            order_type = str(action.get("order_type") or "limit_order")
-            if action["action"] == "cancel" and order_type == "stop_loss":
-                ok, result = delete_stop_loss(page, account_id, action["order_id"])
-            elif action["action"] == "cancel":
-                ok, result = delete_order_live(page, account_id, action["order_id"])
-            elif order_type == "stop_loss":
-                ok, stop_id = place_stop_loss(
-                    page,
-                    account_id,
-                    action["orderbook_id"],
-                    float(action["trigger_price"]),
-                    float(action["price"]),
-                    int(action["volume"]),
-                    valid_days=int(action.get("valid_days") or HARD_STOP_VALID_DAYS),
+            # Pre-execution validation — skip invalid actions instead of crashing
+            validation_error = _validate_action(action)
+            if validation_error:
+                logger.warning("Skipping invalid action: %s — %s", validation_error, action)
+                fail_result = {"ok": False, "result": {"error": validation_error}, **action}
+                results.append(fail_result)
+                if on_result is not None:
+                    on_result(fail_result)
+                continue
+
+            # Per-action try/except — one action failing must not prevent the
+            # remaining actions from executing.  A cancel that succeeds followed
+            # by a place that throws would otherwise leave the position naked.
+            try:
+                account_id = str(action.get("account_id") or "") or None
+                order_type = str(action.get("order_type") or "limit_order")
+                if action["action"] == "cancel" and order_type == "stop_loss":
+                    ok, result = delete_stop_loss(page, account_id, action["order_id"])
+                elif action["action"] == "cancel":
+                    ok, result = delete_order_live(page, account_id, action["order_id"])
+                elif order_type == "stop_loss":
+                    ok, stop_id = place_stop_loss(
+                        page,
+                        account_id,
+                        action["orderbook_id"],
+                        float(action["trigger_price"]),
+                        float(action["price"]),
+                        int(action["volume"]),
+                        valid_days=int(action.get("valid_days") or HARD_STOP_VALID_DAYS),
+                    )
+                    result = {"stop_id": stop_id}
+                else:
+                    ok, result = place_order(
+                        page,
+                        account_id,
+                        action["orderbook_id"],
+                        action["side"],
+                        float(action["price"]),
+                        int(action["volume"]),
+                    )
+                results.append({
+                    "ok": ok,
+                    "result": result,
+                    **action,
+                })
+            except Exception as exc:
+                logger.error(
+                    "Action execution crashed for %s %s on %s: %s",
+                    action.get("action"), action.get("side", ""),
+                    action.get("orderbook_id", ""), exc,
+                    exc_info=True,
                 )
-                result = {"stop_id": stop_id}
-            else:
-                ok, result = place_order(
-                    page,
-                    account_id,
-                    action["orderbook_id"],
-                    action["side"],
-                    float(action["price"]),
-                    int(action["volume"]),
-                )
-            results.append({
-                "ok": ok,
-                "result": result,
-                **action,
-            })
+                results.append({
+                    "ok": False,
+                    "result": {"error": str(exc)},
+                    **action,
+                })
             if on_result is not None:
                 on_result(results[-1])
     finally:
@@ -1258,87 +1305,95 @@ def apply_execution_results_to_state(state: dict, results: list[dict]) -> dict:
         orderbook_id = str(result.get("orderbook_id") or "")
         if not orderbook_id:
             continue
-        inst_state = instruments.setdefault(orderbook_id, {})
-        managed_ids = [
-            str(order_id)
-            for order_id in (inst_state.get("managed_order_ids") or [])
-            if order_id
-        ]
-        managed_stop_ids = [
-            str(order_id)
-            for order_id in (inst_state.get("managed_stop_ids") or [])
-            if order_id
-        ]
-        dead_order_ids = list(inst_state.get("dead_order_ids") or [])
-        dead_order_timestamps = dict(inst_state.get("dead_order_timestamps") or {})
-        order_type = str(result.get("order_type") or "limit_order")
-        if result.get("action") == "cancel" and result.get("ok"):
-            cancelled_id = str(result.get("order_id") or "")
-            http_status = int((result.get("result") or {}).get("http_status") or 0)
-            if order_type == "stop_loss":
-                managed_stop_ids = [order_id for order_id in managed_stop_ids if order_id != cancelled_id]
-            else:
-                managed_ids = [order_id for order_id in managed_ids if order_id != cancelled_id]
-            # Track phantom orders: DELETE returned 404 means the order doesn't exist
-            # on the order book, but Avanza's list-orders API may still return it.
-            # Exclude these from candidate selection on future cycles.
-            if http_status == 404 and cancelled_id and cancelled_id not in dead_order_ids:
-                dead_order_ids.append(cancelled_id)
-                dead_order_timestamps[cancelled_id] = _now_utc()
-            # Reset fail count on success
-            cancel_fail_counts = dict(inst_state.get("cancel_fail_counts") or {})
-            cancel_fail_counts.pop(cancelled_id, None)
-            inst_state["cancel_fail_counts"] = cancel_fail_counts
-        elif result.get("action") == "cancel" and not result.get("ok"):
-            # Track consecutive cancel failures -- auto-dead after MAX_CANCEL_RETRIES
-            failed_id = str(result.get("order_id") or "")
-            if failed_id:
-                cancel_fail_counts = dict(inst_state.get("cancel_fail_counts") or {})
-                count = cancel_fail_counts.get(failed_id, 0) + 1
-                if count >= MAX_CANCEL_RETRIES:
-                    if order_type == "stop_loss":
-                        managed_stop_ids = [oid for oid in managed_stop_ids if oid != failed_id]
-                    else:
-                        managed_ids = [oid for oid in managed_ids if oid != failed_id]
-                    if failed_id not in dead_order_ids:
-                        dead_order_ids.append(failed_id)
-                        dead_order_timestamps[failed_id] = _now_utc()
-                    cancel_fail_counts.pop(failed_id, None)
-                    logger.warning(
-                        "Order %s failed cancel %d times -- marked dead", failed_id, count
-                    )
+        # Per-result try/except — one malformed result must not prevent the
+        # remaining results from being processed (which would lose order IDs).
+        try:
+            inst_state = instruments.setdefault(orderbook_id, {})
+            managed_ids = [
+                str(order_id)
+                for order_id in (inst_state.get("managed_order_ids") or [])
+                if order_id
+            ]
+            managed_stop_ids = [
+                str(order_id)
+                for order_id in (inst_state.get("managed_stop_ids") or [])
+                if order_id
+            ]
+            dead_order_ids = list(inst_state.get("dead_order_ids") or [])
+            dead_order_timestamps = dict(inst_state.get("dead_order_timestamps") or {})
+            order_type = str(result.get("order_type") or "limit_order")
+            if result.get("action") == "cancel" and result.get("ok"):
+                cancelled_id = str(result.get("order_id") or "")
+                http_status = int((result.get("result") or {}).get("http_status") or 0)
+                if order_type == "stop_loss":
+                    managed_stop_ids = [order_id for order_id in managed_stop_ids if order_id != cancelled_id]
                 else:
-                    cancel_fail_counts[failed_id] = count
+                    managed_ids = [order_id for order_id in managed_ids if order_id != cancelled_id]
+                # Track phantom orders: DELETE returned 404 means the order doesn't exist
+                # on the order book, but Avanza's list-orders API may still return it.
+                # Exclude these from candidate selection on future cycles.
+                if http_status == 404 and cancelled_id and cancelled_id not in dead_order_ids:
+                    dead_order_ids.append(cancelled_id)
+                    dead_order_timestamps[cancelled_id] = _now_utc()
+                # Reset fail count on success
+                cancel_fail_counts = dict(inst_state.get("cancel_fail_counts") or {})
+                cancel_fail_counts.pop(cancelled_id, None)
                 inst_state["cancel_fail_counts"] = cancel_fail_counts
-        elif result.get("action") == "place" and result.get("ok"):
-            if order_type == "stop_loss":
-                placed_id = (
-                    str((result.get("result") or {}).get("stop_id") or "")
-                    or str((((result.get("result") or {}).get("parsed") or {}).get("stoplossOrderId")) or "")
-                )
-                if placed_id and placed_id not in managed_stop_ids:
-                    managed_stop_ids.append(placed_id)
-                elif not placed_id:
-                    logger.warning(
-                        "Stop-loss placed OK but no ID extracted for %s — order will be untracked",
-                        orderbook_id,
+            elif result.get("action") == "cancel" and not result.get("ok"):
+                # Track consecutive cancel failures -- auto-dead after MAX_CANCEL_RETRIES
+                failed_id = str(result.get("order_id") or "")
+                if failed_id:
+                    cancel_fail_counts = dict(inst_state.get("cancel_fail_counts") or {})
+                    count = cancel_fail_counts.get(failed_id, 0) + 1
+                    if count >= MAX_CANCEL_RETRIES:
+                        if order_type == "stop_loss":
+                            managed_stop_ids = [oid for oid in managed_stop_ids if oid != failed_id]
+                        else:
+                            managed_ids = [oid for oid in managed_ids if oid != failed_id]
+                        if failed_id not in dead_order_ids:
+                            dead_order_ids.append(failed_id)
+                            dead_order_timestamps[failed_id] = _now_utc()
+                        cancel_fail_counts.pop(failed_id, None)
+                        logger.warning(
+                            "Order %s failed cancel %d times -- marked dead", failed_id, count
+                        )
+                    else:
+                        cancel_fail_counts[failed_id] = count
+                    inst_state["cancel_fail_counts"] = cancel_fail_counts
+            elif result.get("action") == "place" and result.get("ok"):
+                if order_type == "stop_loss":
+                    placed_id = (
+                        str((result.get("result") or {}).get("stop_id") or "")
+                        or str((((result.get("result") or {}).get("parsed") or {}).get("stoplossOrderId")) or "")
                     )
-            else:
-                placed_id = (
-                    str((result.get("result") or {}).get("order_id") or "")
-                    or str((((result.get("result") or {}).get("parsed") or {}).get("orderId")) or "")
-                )
-                if placed_id and placed_id not in managed_ids:
-                    managed_ids.append(placed_id)
-                elif not placed_id:
-                    logger.warning(
-                        "Order placed OK but no ID extracted for %s — order will be untracked",
-                        orderbook_id,
+                    if placed_id and placed_id not in managed_stop_ids:
+                        managed_stop_ids.append(placed_id)
+                    elif not placed_id:
+                        logger.warning(
+                            "Stop-loss placed OK but no ID extracted for %s — order will be untracked",
+                            orderbook_id,
+                        )
+                else:
+                    placed_id = (
+                        str((result.get("result") or {}).get("order_id") or "")
+                        or str((((result.get("result") or {}).get("parsed") or {}).get("orderId")) or "")
                     )
-        inst_state["managed_order_ids"] = managed_ids
-        inst_state["managed_stop_ids"] = managed_stop_ids
-        inst_state["dead_order_ids"] = dead_order_ids
-        inst_state["dead_order_timestamps"] = dead_order_timestamps
+                    if placed_id and placed_id not in managed_ids:
+                        managed_ids.append(placed_id)
+                    elif not placed_id:
+                        logger.warning(
+                            "Order placed OK but no ID extracted for %s — order will be untracked",
+                            orderbook_id,
+                        )
+            inst_state["managed_order_ids"] = managed_ids
+            inst_state["managed_stop_ids"] = managed_stop_ids
+            inst_state["dead_order_ids"] = dead_order_ids
+            inst_state["dead_order_timestamps"] = dead_order_timestamps
+        except Exception:
+            logger.error(
+                "Failed to process execution result for %s — state may be incomplete",
+                orderbook_id, exc_info=True,
+            )
     return next_state
 
 

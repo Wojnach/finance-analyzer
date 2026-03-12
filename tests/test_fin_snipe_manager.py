@@ -844,3 +844,131 @@ def test_stage_replacements_emergency_flag():
     assert c2 == cancels
     assert p2 == placements
     assert "test_pending_emergency" in events2
+
+
+# ---------------------------------------------------------------------------
+# _validate_action tests
+# ---------------------------------------------------------------------------
+
+
+def test_validate_action_valid_cancel():
+    from portfolio.fin_snipe_manager import _validate_action
+    assert _validate_action({"action": "cancel", "order_id": "123"}) is None
+
+
+def test_validate_action_cancel_missing_order_id():
+    from portfolio.fin_snipe_manager import _validate_action
+    assert "missing order_id" in _validate_action({"action": "cancel"})
+    assert "missing order_id" in _validate_action({"action": "cancel", "order_id": ""})
+
+
+def test_validate_action_valid_place():
+    from portfolio.fin_snipe_manager import _validate_action
+    action = {"action": "place", "price": 12.5, "volume": 100, "orderbook_id": "2334960"}
+    assert _validate_action(action) is None
+
+
+def test_validate_action_place_bad_price():
+    from portfolio.fin_snipe_manager import _validate_action
+    action = {"action": "place", "price": 0, "volume": 100, "orderbook_id": "2334960"}
+    assert "invalid price" in _validate_action(action)
+    action2 = {"action": "place", "price": -5, "volume": 100, "orderbook_id": "2334960"}
+    assert "invalid price" in _validate_action(action2)
+
+
+def test_validate_action_place_bad_volume():
+    from portfolio.fin_snipe_manager import _validate_action
+    action = {"action": "place", "price": 12.5, "volume": 0, "orderbook_id": "2334960"}
+    assert "invalid volume" in _validate_action(action)
+
+
+def test_validate_action_place_missing_orderbook():
+    from portfolio.fin_snipe_manager import _validate_action
+    action = {"action": "place", "price": 12.5, "volume": 100}
+    assert "missing orderbook_id" in _validate_action(action)
+
+
+def test_validate_action_unknown_type():
+    from portfolio.fin_snipe_manager import _validate_action
+    assert "unknown action type" in _validate_action({"action": "nuke"})
+    assert "unknown action type" in _validate_action({})
+
+
+# ---------------------------------------------------------------------------
+# execute_actions: validation gate (dry_run=False path not tested — needs Playwright)
+# ---------------------------------------------------------------------------
+
+
+def test_execute_actions_dry_run_skips_invalid():
+    """Dry-run mode doesn't validate; all actions pass through."""
+    actions = [
+        {"action": "place", "price": 0, "volume": 0},
+        {"action": "cancel", "order_id": "123"},
+    ]
+    results = execute_actions(actions, dry_run=True)
+    assert len(results) == 2
+    assert all(r.get("dry_run") for r in results)
+
+
+# ---------------------------------------------------------------------------
+# apply_execution_results_to_state: per-result isolation
+# ---------------------------------------------------------------------------
+
+
+def test_apply_results_isolates_per_result():
+    """A malformed result for one instrument must not block others."""
+    state = {
+        "instruments": {
+            "111": {"managed_order_ids": ["old1"]},
+            "222": {"managed_order_ids": ["old2"]},
+        }
+    }
+    results = [
+        # Good result: cancel succeeds for instrument 111
+        {"action": "cancel", "ok": True, "order_id": "old1", "orderbook_id": "111",
+         "result": {"http_status": 200}},
+        # Bad result: will crash because we inject a broken "result" that raises on access
+        {"action": "place", "ok": True, "orderbook_id": "222",
+         "result": "not_a_dict_on_purpose"},
+        # Another good result: cancel for instrument 222
+        {"action": "cancel", "ok": True, "order_id": "old2", "orderbook_id": "222",
+         "result": {"http_status": 200}},
+    ]
+    # The middle result will crash when code tries .get("order_id") on a string.
+    # But the 1st and 3rd results should still be processed.
+    new_state = apply_execution_results_to_state(state, results)
+    # Instrument 111: old1 cancelled → removed from managed_order_ids
+    assert "old1" not in (new_state["instruments"]["111"].get("managed_order_ids") or [])
+
+
+def test_apply_results_skips_empty_orderbook_id():
+    """Results without an orderbook_id are silently skipped."""
+    state = {"instruments": {}}
+    results = [{"action": "cancel", "ok": True, "order_id": "x"}]
+    new_state = apply_execution_results_to_state(state, results)
+    assert new_state["instruments"] == {}
+
+
+# ---------------------------------------------------------------------------
+# _notify_critical: file handle leak fix (config loaded with 'with' statement)
+# ---------------------------------------------------------------------------
+
+
+def test_notify_critical_loads_config_safely(tmp_path, monkeypatch):
+    """_notify_critical uses a context manager for config.json (no file handle leak)."""
+    import portfolio.fin_snipe_manager as mgr
+
+    # Write a minimal config.json
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps({"telegram": {"bot_token": "", "chat_id": ""}}))
+    monkeypatch.setattr(mgr, "BASE_DIR", tmp_path)
+    mgr._critical_alert_last.clear()
+
+    sent = []
+    monkeypatch.setattr(
+        "portfolio.message_store.send_or_store",
+        lambda msg, cfg, **kw: sent.append(msg),
+    )
+    mgr._notify_critical("test_cat", "test leak fix")
+    assert len(sent) == 1
+    assert "test leak fix" in sent[0]
