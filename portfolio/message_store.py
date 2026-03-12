@@ -50,7 +50,7 @@ _COMMON_MOJIBAKE_REPLACEMENTS = {
 }
 
 # Categories whose messages should be sent to Telegram in addition to being saved.
-SEND_CATEGORIES = {"trade", "iskbets", "bigbet", "digest", "daily_digest", "analysis", "invocation", "regime", "error"}
+SEND_CATEGORIES = {"trade", "iskbets", "bigbet", "digest", "daily_digest", "analysis", "invocation", "regime", "error", "elongir"}
 
 
 def _repair_common_mojibake(text):
