@@ -58,12 +58,44 @@ MIN_STOP_DISTANCE_PCT = 1.0
 FAST_RECHECK_SECONDS = 5
 MAX_FAST_RECHECK_CYCLES = 6  # After 6 consecutive fast rechecks, fall back to normal interval
 MAX_CANCEL_RETRIES = 3  # After N consecutive failed cancels, mark order as dead
+DEAD_ORDER_EXPIRY_HOURS = 4  # Remove dead order reservations after this many hours
+CRITICAL_ALERT_COOLDOWN_SECONDS = 1800  # 30 min between same-category alerts
 
 logger = logging.getLogger("portfolio.fin_snipe_manager")
+
+# Throttle state for critical Telegram alerts (category -> last_sent ISO timestamp)
+_critical_alert_last: dict[str, str] = {}
 
 
 def _now_utc() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def _notify_critical(category: str, message: str) -> None:
+    """Send a throttled Telegram alert for critical fin_snipe_manager events.
+
+    Categories: 'session_expired', 'naked_position', 'execution_failure',
+    'phantom_orders'. Throttled to one per category per CRITICAL_ALERT_COOLDOWN_SECONDS.
+    """
+    now = dt.datetime.now(dt.timezone.utc)
+    last_raw = _critical_alert_last.get(category)
+    if last_raw:
+        try:
+            last = dt.datetime.fromisoformat(last_raw)
+            if (now - last).total_seconds() < CRITICAL_ALERT_COOLDOWN_SECONDS:
+                logger.debug("Critical alert throttled: %s", category)
+                return
+        except (ValueError, TypeError):
+            pass
+
+    _critical_alert_last[category] = now.isoformat()
+    try:
+        import json as _json
+        from portfolio.message_store import send_or_store
+        config = _json.load(open(BASE_DIR / "config.json"))
+        send_or_store(message, config, category="error")
+    except Exception:
+        logger.warning("Failed to send critical alert: %s", message, exc_info=True)
 
 
 def _extract_value(value: Any) -> Any:
@@ -231,8 +263,18 @@ def _stage_replacements(
     *,
     event: str,
     events: list[str],
+    emergency: bool = False,
 ) -> tuple[list[dict], list[dict]]:
+    """Two-phase order replacement: cancel this cycle, place next cycle.
+
+    When ``emergency=True``, both cancel and place happen in the same cycle.
+    This is used when the position has NO existing sell or stop protection —
+    waiting a full cycle would leave the position completely naked.
+    """
     if cancels and placements:
+        if emergency:
+            events.append(f"{event}_emergency")
+            return cancels, placements  # Both in one cycle — position is naked
         events.append(event)
         return cancels, []
     return cancels, placements
@@ -932,6 +974,28 @@ def plan_instrument(
             oid: count for oid, count in instrument_state["cancel_fail_counts"].items()
             if str(oid) in all_live_ids
         }
+    # Time-based expiry for dead orders: if a dead order has been dead for
+    # longer than DEAD_ORDER_EXPIRY_HOURS, remove it regardless of API state.
+    # This prevents permanently blocked selling when phantom orders persist.
+    dead_ts = dict(instrument_state.get("dead_order_timestamps") or {})
+    now = dt.datetime.now(dt.timezone.utc)
+    expired_dead = set()
+    for oid, ts_str in list(dead_ts.items()):
+        try:
+            marked_at = dt.datetime.fromisoformat(ts_str)
+            if (now - marked_at).total_seconds() > DEAD_ORDER_EXPIRY_HOURS * 3600:
+                expired_dead.add(oid)
+        except (ValueError, TypeError):
+            expired_dead.add(oid)  # Can't parse timestamp — remove
+    if expired_dead:
+        instrument_state["dead_order_ids"] = [
+            oid for oid in (instrument_state.get("dead_order_ids") or [])
+            if oid not in expired_dead
+        ]
+        for oid in expired_dead:
+            dead_ts.pop(oid, None)
+        logger.info("Expired %d dead order(s) after %dh: %s", len(expired_dead), DEAD_ORDER_EXPIRY_HOURS, expired_dead)
+    instrument_state["dead_order_timestamps"] = dead_ts
 
     entry_volume = (
         _budgeted_entry_volume(snapshot, instrument_state, budget_sek)
@@ -966,6 +1030,12 @@ def plan_instrument(
             events.append("position_detected")
         if int(instrument_state.get("last_position_volume") or 0) not in (0, position_volume):
             events.append("position_volume_changed")
+        # Detect naked position: no existing managed sell or stop orders.
+        # In emergency mode, bypass two-phase staged replacement — cancel
+        # and re-place in the same cycle to avoid leaving the position
+        # completely unprotected for a full cycle interval.
+        sell_naked = len(open_sells) == 0
+        stop_naked = len(open_stops) == 0
         cancel_buys, _ = _reconcile_orders(open_buys, desired_buys)
         cancel_sells, place_sells = _reconcile_orders(open_sells, desired_sells)
         cancel_sells, place_sells = _stage_replacements(
@@ -973,6 +1043,7 @@ def plan_instrument(
             place_sells,
             event="sell_reprice_pending",
             events=events,
+            emergency=sell_naked,
         )
         if stop_plan and stop_plan.get("skip"):
             events.append(str(stop_plan.get("reason") or "stop_skipped"))
@@ -982,6 +1053,7 @@ def plan_instrument(
             place_stops,
             event="stop_reprice_pending",
             events=events,
+            emergency=stop_naked,
         )
         actions.extend(cancel_buys)
         actions.extend(cancel_sells)
@@ -1029,6 +1101,7 @@ def plan_instrument(
         "managed_order_ids": managed_order_ids,
         "managed_stop_ids": managed_stop_ids,
         "dead_order_ids": list(instrument_state.get("dead_order_ids") or []),
+        "dead_order_timestamps": dict(instrument_state.get("dead_order_timestamps") or {}),
         "cancel_fail_counts": dict(instrument_state.get("cancel_fail_counts") or {}),
         "mode": mode,
         "last_position_volume": position_volume,
@@ -1083,11 +1156,23 @@ def plan_cycle(
     for snapshot in snapshots:
         orderbook_id = snapshot["orderbook_id"]
         instrument_state = (current_state.get("instruments") or {}).get(orderbook_id) or {}
-        plan = plan_instrument(
-            snapshot,
-            instrument_state,
-            budget_sek=(budgets or {}).get(orderbook_id),
-        )
+        try:
+            plan = plan_instrument(
+                snapshot,
+                instrument_state,
+                budget_sek=(budgets or {}).get(orderbook_id),
+            )
+        except Exception:
+            name = snapshot.get("name") or orderbook_id
+            logger.error(
+                "plan_instrument failed for %s (%s) — skipping",
+                name, orderbook_id, exc_info=True,
+            )
+            _notify_critical(
+                "plan_failure",
+                f"*SNIPE ALERT* plan_instrument failed for {name} — instrument skipped this cycle",
+            )
+            continue
         plans.append(plan)
         actions.extend(plan["actions"])
         current_state["instruments"][orderbook_id] = plan["state"]
@@ -1185,6 +1270,7 @@ def apply_execution_results_to_state(state: dict, results: list[dict]) -> dict:
             if order_id
         ]
         dead_order_ids = list(inst_state.get("dead_order_ids") or [])
+        dead_order_timestamps = dict(inst_state.get("dead_order_timestamps") or {})
         order_type = str(result.get("order_type") or "limit_order")
         if result.get("action") == "cancel" and result.get("ok"):
             cancelled_id = str(result.get("order_id") or "")
@@ -1198,6 +1284,7 @@ def apply_execution_results_to_state(state: dict, results: list[dict]) -> dict:
             # Exclude these from candidate selection on future cycles.
             if http_status == 404 and cancelled_id and cancelled_id not in dead_order_ids:
                 dead_order_ids.append(cancelled_id)
+                dead_order_timestamps[cancelled_id] = _now_utc()
             # Reset fail count on success
             cancel_fail_counts = dict(inst_state.get("cancel_fail_counts") or {})
             cancel_fail_counts.pop(cancelled_id, None)
@@ -1215,6 +1302,7 @@ def apply_execution_results_to_state(state: dict, results: list[dict]) -> dict:
                         managed_ids = [oid for oid in managed_ids if oid != failed_id]
                     if failed_id not in dead_order_ids:
                         dead_order_ids.append(failed_id)
+                        dead_order_timestamps[failed_id] = _now_utc()
                     cancel_fail_counts.pop(failed_id, None)
                     logger.warning(
                         "Order %s failed cancel %d times -- marked dead", failed_id, count
@@ -1230,6 +1318,11 @@ def apply_execution_results_to_state(state: dict, results: list[dict]) -> dict:
                 )
                 if placed_id and placed_id not in managed_stop_ids:
                     managed_stop_ids.append(placed_id)
+                elif not placed_id:
+                    logger.warning(
+                        "Stop-loss placed OK but no ID extracted for %s — order will be untracked",
+                        orderbook_id,
+                    )
             else:
                 placed_id = (
                     str((result.get("result") or {}).get("order_id") or "")
@@ -1237,9 +1330,15 @@ def apply_execution_results_to_state(state: dict, results: list[dict]) -> dict:
                 )
                 if placed_id and placed_id not in managed_ids:
                     managed_ids.append(placed_id)
+                elif not placed_id:
+                    logger.warning(
+                        "Order placed OK but no ID extracted for %s — order will be untracked",
+                        orderbook_id,
+                    )
         inst_state["managed_order_ids"] = managed_ids
         inst_state["managed_stop_ids"] = managed_stop_ids
         inst_state["dead_order_ids"] = dead_order_ids
+        inst_state["dead_order_timestamps"] = dead_order_timestamps
     return next_state
 
 
@@ -1292,6 +1391,11 @@ def run_cycle(
     actions: list[dict] = []
     try:
         if not verify_session():
+            if live:
+                _notify_critical(
+                    "session_expired",
+                    "*SNIPE ALERT* Avanza session expired — cannot manage orders. Re-login required.",
+                )
             raise RuntimeError("Avanza session invalid or expired.")
 
         snapshots = build_snapshots(
@@ -1332,9 +1436,34 @@ def run_cycle(
                 manager_log_path=manager_log_path,
             ),
         )
+        # Alert on execution failures
+        if live and results:
+            failed = [r for r in results if not r.get("ok") and not r.get("dry_run")]
+            if failed:
+                fail_summary = ", ".join(
+                    f"{r.get('action')}/{r.get('side','')}" for r in failed[:3]
+                )
+                _notify_critical(
+                    "execution_failure",
+                    f"*SNIPE ALERT* {len(failed)}/{len(results)} actions failed: {fail_summary}",
+                )
+
         final_state = apply_execution_results_to_state(next_state, results) if live else next_state
         if live:
             save_state(final_state, state_path)
+
+        # Alert on naked positions (held position with no managed sell or stop)
+        if live:
+            for plan in plans:
+                if plan.get("position_volume", 0) > 0 and plan.get("mode") == "exit":
+                    inst_st = (final_state.get("instruments") or {}).get(plan["orderbook_id"]) or {}
+                    has_sell = bool(inst_st.get("managed_order_ids"))
+                    has_stop = bool(inst_st.get("managed_stop_ids"))
+                    if not has_sell and not has_stop:
+                        _notify_critical(
+                            "naked_position",
+                            f"*SNIPE ALERT* {plan.get('name', '?')} has {plan['position_volume']} units with NO sell/stop protection",
+                        )
         log_cycle_results(
             session_id=session_id,
             cycle_index=cycle_index,
