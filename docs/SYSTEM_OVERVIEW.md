@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-03-10
-Branch: metals-state-store
+Updated: 2026-03-12
+Branch: worktree-auto-session-2026-03-12
 
 ## 1) Architecture Summary
 
@@ -26,14 +26,14 @@ Two-layer autonomous trading system with 30 signals, 19 instruments, and dual-st
 ## 3) Module Map (~95 portfolio modules)
 
 ### Orchestration (5 modules)
-- `main.py` (642 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, module orchestration
-- `agent_invocation.py` (206 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing
-- `trigger.py` (326 lines): Change detection — consensus flip, price >2%, F&G threshold, sentiment reversal, post-trade
+- `main.py` (708 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, module orchestration
+- `agent_invocation.py` (397 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing, completion tracking
+- `trigger.py` (330 lines): Change detection — consensus flip, price >2%, F&G threshold, sentiment reversal, post-trade
 - `market_timing.py` (80 lines): DST-aware US market hours, agent invocation window
 - `config_validator.py`: Startup config validation
 
 ### Signal System (30 signals: 8 core + 19 enhanced + 3 disabled)
-- `signal_engine.py` (727 lines): 30-signal voting, weighted consensus, accuracy inversion, confidence penalties
+- `signal_engine.py` (865 lines): 30-signal voting, weighted consensus, accuracy inversion, confidence penalties
 - `signal_registry.py` (130 lines): Plugin-based signal discovery via importlib
 - `signal_utils.py` (130 lines): Shared helpers — SMA, EMA, RSI, majority_vote
 - `signals/*.py` (19 modules): Enhanced composite signals, each with 4-8 sub-indicators
@@ -41,12 +41,12 @@ Two-layer autonomous trading system with 30 signals, 19 instruments, and dual-st
 - `outcome_tracker.py` (391 lines): Signal snapshot logging, price backfill for accuracy
 
 ### Data Collection (3 modules)
-- `data_collector.py` (259 lines): Binance spot/FAPI, Alpaca, yfinance; circuit breakers; 7 timeframes
+- `data_collector.py` (299 lines): Binance spot/FAPI, Alpaca, yfinance; circuit breakers; 7 timeframes
 - `indicators.py` (167 lines): RSI, MACD, EMA, BB, ATR, regime detection (cache per cycle)
-- `shared_state.py` (124 lines): Thread-safe cache (TTL + stale fallback), rate limiters
+- `shared_state.py` (206 lines): Thread-safe cache (TTL + stale fallback), rate limiters, NewsAPI quota
 
 ### Portfolio & Risk (7 modules)
-- `portfolio_mgr.py` (57 lines): State load/save via atomic_write_json
+- `portfolio_mgr.py` (77 lines): State load/save via atomic_write_json, TOCTOU-safe via load_json
 - `trade_guards.py` (267 lines): Per-ticker cooldown, consecutive-loss escalation, position rate limit
 - `risk_management.py` (710 lines): Drawdown circuit breaker (-15%), ATR stops, concentration risk, correlation pairs
 - `equity_curve.py` (599 lines): FIFO round-trip matching, Sharpe/Sortino, max drawdown, calmar ratio
@@ -75,10 +75,10 @@ Two-layer autonomous trading system with 30 signals, 19 instruments, and dual-st
 - `digest.py` (206 lines): 4-hour periodic digest with invocation stats
 
 ### Infrastructure (6 modules)
-- `file_utils.py` (129 lines): atomic_write_json, load_json/jsonl, prune_jsonl
+- `file_utils.py` (134 lines): atomic_write_json, load_json/jsonl, prune_jsonl, atomic_append_jsonl
 - `http_retry.py` (66 lines): Exponential backoff (3 retries, 1s base, 2x factor)
 - `circuit_breaker.py` (97 lines): Thread-safe state machine (CLOSED→OPEN→HALF_OPEN)
-- `health.py` (187 lines): Heartbeat, error ring buffer, module failure tracking
+- `health.py` (188 lines): Heartbeat, error ring buffer, module failure tracking, efficient JSONL tail-read
 - `logging_config.py` (48 lines): RotatingFileHandler (10MB, 3 backups)
 - `signal_db.py`: WAL-mode SQLite dual-write with JSONL fallback
 
@@ -177,20 +177,31 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
 - **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
 
-## 9) Known Issues (as of 2026-03-10)
+## 9) Known Issues (as of 2026-03-12)
 
 - BUG-15 through BUG-22: Fixed in 2026-03-08 session
 - BUG-23 through BUG-27: Fixed in 2026-03-09 session (signal validation, None ticker, OSError, heartbeat, pass cleanup)
 - BUG-28: Enhanced signal failures silently count as HOLD — no tracking or surfacing
 - BUG-29: `_vote_correct()` treats 0% change as incorrect — biases accuracy downward in flat markets
-- BUG-30: `load_json()` has TOCTOU race between `exists()` and `read_text()`
+- BUG-30: `load_json()` TOCTOU race — fixed in 2026-03-10 session
 - BUG-31: `_compute_adx()` not cached, uses NaN propagation via `replace(0, np.nan)`
-- BUG-32: main.py re-exports ~50 private symbols (documentation only, not fixing this session)
+- BUG-32: main.py re-exports ~50 private symbols (documentation only)
 - BUG-33: Trap detection relies on undocumented assumption about `df` timeframe
+- BUG-34 through BUG-38: Fixed in 2026-03-11 session (portfolio_mgr TOCTOU, health TOCTOU, inversion weight cap)
+- **BUG-39 (P1)**: `check_agent_completion()` never called from main loop — agent tracking broken
+- **BUG-40 (P2)**: `digest.py` reads/writes `trigger_state.json` — race with `trigger.py`
+- **BUG-41 (P2)**: `daily_digest.py` also reads `trigger_state.json` — same contention
+- **BUG-42 (P2)**: `reporting.py` uses raw `json.loads()` — bypasses TOCTOU-safe `load_json()`
+- **BUG-43 (P2)**: `trigger.py _check_recent_trade()` uses raw `json.loads()` — same issue
+- **BUG-44 (P3)**: `_last_jsonl_ts()` scans entire file — O(n) for last entry
+- **BUG-45 (P3)**: `digest.py` loads entire JSONL files without limit
+- **BUG-46 (P3)**: `reporting.py` calls `load_config()` 3+ times per cycle
 - ARCH-10: Signal result validation centralized in `_validate_signal_result()`
 - ARCH-11: Confidence caps enforced via `max_confidence` in signal registry
 - ARCH-12: Signal failure tracking and surfacing (planned)
 - ARCH-13: Accuracy tolerance for flat markets (planned)
+- **ARCH-15**: Centralize JSONL tail-read utility in `file_utils.py` (DRY + performance)
 - REF-3: Candlestick `patterns_detected` moved from top-level to `indicators` dict
+- **REF-7**: Remove legacy `trigger_state.json` migration in `signal_engine.py`
 - TEST coverage: candlestick (57 tests), fibonacci (51 tests), structure (32 tests) — formerly zero
 - ~3,310 tests across 110+ test files
