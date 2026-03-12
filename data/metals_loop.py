@@ -1,11 +1,16 @@
 """
-Unified Market Monitoring Loop v9 (Layer 1 — Autonomous).
+Unified Market Monitoring Loop v10 (Layer 1 — Autonomous).
 Runs every 60s, fully autonomous without Claude Code dependency.
 Tracks: XAG/XAU (Binance FAPI), BTC/ETH (Binance SPOT), MSTR (Yahoo).
 Core features: probability-focused Telegram, momentum-aware trailing stops,
 auto-detect holdings, per-signal accuracy, crypto Fear & Greed, on-chain metrics.
 
+v10: Silver fast-tick monitor merged from silver_monitor.py — 10-second price
+checks with instant threshold alerts (-3% to -12.5%) and 3-minute velocity
+flush detection.  Replaces the standalone silver_monitor.py process.
+
 Features:
+- Silver fast-tick: 10s price checks during 60s cycle sleep (threshold + velocity alerts)
 - Tiered Claude invocation (Haiku/Sonnet, no Opus)
 - Local LLM inference (Ministral-8B + Chronos for all tracked symbols)
 - Monte Carlo VaR for leveraged warrants
@@ -237,6 +242,22 @@ TIER_CONFIG = {
     2: {"model": "sonnet", "timeout": 180,  "max_turns": 15, "label": "ANALYSIS"},
     3: {"model": "sonnet", "timeout": 180,  "max_turns": 15, "label": "CRITICAL"},
 }
+
+# --- SILVER FAST-TICK MONITOR (merged from silver_monitor.py) ---
+# Provides 10-second price checks with instant threshold alerts and velocity detection
+# for active silver positions. Runs during _sleep_for_cycle() between main 60s cycles.
+SILVER_FAST_TICK_ENABLED = True
+SILVER_FAST_TICK_INTERVAL = 10   # seconds between fast price checks
+SILVER_ALERT_LEVELS = [
+    (-3.0, "WARNING"),       # -14.3% warrant at ~4.76x
+    (-5.0, "DANGER"),        # -23.8% warrant
+    (-7.0, "HIGH RISK"),     # -33.3% warrant
+    (-10.0, "CRITICAL"),     # -47.6% warrant
+    (-12.5, "EMERGENCY"),    # -59.5% warrant
+]
+SILVER_VELOCITY_WINDOW = 18      # 18 × 10s = 3 min rolling window
+SILVER_VELOCITY_ALERT_PCT = -0.8 # % drop threshold over the velocity window
+SILVER_VELOCITY_TELEGRAM = True  # send Telegram on velocity alerts
 
 # --- POSITIONS (defaults — overridden by persisted state on startup) ---
 POSITIONS_DEFAULTS = {
@@ -485,6 +506,16 @@ SINGLETON_LOCK_FILE = os.path.join("data", "metals_loop.singleton.lock")
 DUPLICATE_INSTANCE_EXIT_CODE = 11
 _singleton_lock_fh = None
 
+# --- Silver fast-tick state (merged from silver_monitor.py) ---
+from collections import deque
+_silver_fast_prices = deque(maxlen=SILVER_VELOCITY_WINDOW)
+_silver_alerted_levels = set()       # thresholds already alerted this session
+_silver_session_low = None
+_silver_session_high = None
+_silver_consecutive_down = 0
+_silver_prev_price = None
+_silver_underlying_ref = None        # XAG-USD price at position entry (reference for alerts)
+
 def acquire_singleton_lock(lock_path=SINGLETON_LOCK_FILE):
     """Acquire single-instance lock for metals loop (non-blocking)."""
     global _singleton_lock_fh
@@ -578,17 +609,223 @@ def pnl_pct(current, entry):
 
 
 def _sleep_for_cycle(cycle_started, interval_s, label):
-    """Sleep until the next scheduled cycle start.
+    """Sleep until the next scheduled cycle start, running silver fast ticks.
 
     This keeps cadence anchored to cycle start time rather than drifting by
-    `interval + work_duration` on every iteration.
+    `interval + work_duration` on every iteration.  During the sleep window,
+    runs 10-second silver fast ticks for any active silver position.
     """
-    elapsed = time.monotonic() - cycle_started
-    remaining = interval_s - elapsed
-    if remaining > 0:
-        time.sleep(remaining)
+    if not SILVER_FAST_TICK_ENABLED or not _has_active_silver():
+        # No silver position — simple sleep
+        elapsed = time.monotonic() - cycle_started
+        remaining = interval_s - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+            return
+        log(f"{label} overran by {abs(remaining):.1f}s; continuing immediately")
         return
-    log(f"{label} overran by {abs(remaining):.1f}s; continuing immediately")
+
+    # Silver fast-tick sub-loop during sleep
+    min_remaining = SILVER_FAST_TICK_INTERVAL * 0.5  # don't bother if less than half a tick left
+    while True:
+        elapsed = time.monotonic() - cycle_started
+        remaining = interval_s - elapsed
+        if remaining <= min_remaining:
+            break
+        tick_sleep = min(SILVER_FAST_TICK_INTERVAL, remaining - min_remaining)
+        if tick_sleep <= 0:
+            break
+        time.sleep(tick_sleep)
+        try:
+            _silver_fast_tick()
+        except Exception as e:
+            _safe_print(f"[silver tick] error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Silver fast-tick monitor (merged from silver_monitor.py)
+# ---------------------------------------------------------------------------
+
+def _has_active_silver():
+    """Return True if any active silver position exists."""
+    for key, pos in POSITIONS.items():
+        if "silver" in key.lower() and pos.get("active"):
+            return True
+    return False
+
+
+def _get_active_silver():
+    """Return (key, pos) for the first active silver position, or (None, None)."""
+    for key, pos in POSITIONS.items():
+        if "silver" in key.lower() and pos.get("active"):
+            return key, pos
+    return None, None
+
+
+def _silver_fetch_xag():
+    """Fetch just XAG-USD from Binance FAPI (lightweight, single HTTP request).
+
+    Updates ``_underlying_prices`` and returns the price, or the cached value
+    on failure.
+    """
+    try:
+        r = requests.get(
+            f"{BINANCE_FAPI_TICKER}?symbol=XAGUSDT", timeout=5
+        )
+        if r.status_code == 200:
+            price = float(r.json()["price"])
+            _underlying_prices["XAG-USD"] = price
+            return price
+    except Exception:
+        pass
+    return _underlying_prices.get("XAG-USD")
+
+
+def _silver_init_ref():
+    """Initialize ``_silver_underlying_ref`` from persisted state or live price.
+
+    Priority:
+      1. ``underlying_entry`` field in metals_positions_state.json
+      2. Current XAG-USD price from Binance (fallback for first run)
+
+    Once computed, persists ``underlying_entry`` back to the state file so
+    subsequent restarts use the same reference.
+    """
+    global _silver_underlying_ref
+
+    # Already initialized
+    if _silver_underlying_ref is not None:
+        return
+
+    silver_key, silver_pos = _get_active_silver()
+    if silver_key is None:
+        return
+
+    # Try persisted underlying entry
+    ref = silver_pos.get("underlying_entry")
+    if ref and ref > 0:
+        _silver_underlying_ref = ref
+        log(f"Silver ref loaded: ${ref:.2f} (persisted)")
+        return
+
+    # Fallback: current XAG-USD price
+    xag = _underlying_prices.get("XAG-USD")
+    if xag and xag > 0:
+        _silver_underlying_ref = xag
+        log(f"Silver ref set to current XAG: ${xag:.2f} (session start)")
+        # Persist for future restarts
+        _silver_persist_ref(silver_key, xag)
+        return
+
+
+def _silver_persist_ref(silver_key, ref_price):
+    """Write ``underlying_entry`` to the position state file for restart persistence."""
+    try:
+        state = _load_json_state(POSITIONS_STATE_FILE, {}, "silver_persist")
+        if silver_key in state:
+            state[silver_key]["underlying_entry"] = round(ref_price, 4)
+            atomic_write_json(POSITIONS_STATE_FILE, state)
+    except Exception as e:
+        log(f"Silver ref persist error: {e}")
+
+
+def _silver_reset_session():
+    """Reset silver fast-tick session state (e.g., on new position or loop restart)."""
+    global _silver_session_low, _silver_session_high
+    global _silver_consecutive_down, _silver_prev_price, _silver_underlying_ref
+    _silver_fast_prices.clear()
+    _silver_alerted_levels.clear()
+    _silver_session_low = None
+    _silver_session_high = None
+    _silver_consecutive_down = 0
+    _silver_prev_price = None
+    _silver_underlying_ref = None
+
+
+def _silver_fast_tick():
+    """10-second silver price check with threshold and velocity alerts.
+
+    Merged from silver_monitor.py.  Fetches XAG-USD from Binance FAPI,
+    checks for significant drops from the entry reference price, and detects
+    rapid 3-minute flushes.  Only runs when an active silver position exists.
+    """
+    global _silver_session_low, _silver_session_high
+    global _silver_consecutive_down, _silver_prev_price
+
+    silver_key, silver_pos = _get_active_silver()
+    if silver_key is None:
+        return
+
+    price = _silver_fetch_xag()
+    if price is None or price <= 0:
+        return
+
+    # Ensure reference is initialized
+    _silver_init_ref()
+    ref = _silver_underlying_ref
+    if ref is None or ref <= 0:
+        return
+
+    # Underlying % change from entry reference
+    pct_change = (price - ref) / ref * 100
+
+    # Approximate warrant P&L using position data
+    entry_sek = silver_pos.get("entry", 0)
+    units = silver_pos.get("units", 0)
+    leverage = silver_pos.get("leverage", 4.76)
+    invested = entry_sek * units if (entry_sek > 0 and units > 0) else 0
+    warrant_pct = pct_change * leverage
+    warrant_sek = invested * warrant_pct / 100 if invested > 0 else 0
+
+    # --- Session tracking ---
+    if _silver_session_low is None or price < _silver_session_low:
+        _silver_session_low = price
+    if _silver_session_high is None or price > _silver_session_high:
+        _silver_session_high = price
+
+    # Consecutive down ticks
+    if _silver_prev_price is not None:
+        if price < _silver_prev_price - 0.001:
+            _silver_consecutive_down += 1
+        else:
+            _silver_consecutive_down = 0
+    _silver_prev_price = price
+
+    # Velocity tracking
+    _silver_fast_prices.append(price)
+
+    # --- Threshold alerts (from entry) ---
+    for threshold, level_name in SILVER_ALERT_LEVELS:
+        if pct_change <= threshold and threshold not in _silver_alerted_levels:
+            _silver_alerted_levels.add(threshold)
+            parts = [f"*{level_name}: XAG ${price:.2f} ({pct_change:+.1f}%)*"]
+            if invested > 0:
+                parts.append(f"`Warrant: {warrant_pct:+.1f}% = {warrant_sek:+,.0f} SEK`")
+                parts.append(f"`Position: {invested + warrant_sek:,.0f} SEK`")
+            parts.append(f"_Entry ${ref:.2f} | {leverage}x | {silver_key}_")
+            msg = "\n".join(parts)
+            log(f"*** SILVER {level_name}: XAG ${price:.2f} ({pct_change:+.1f}%) ***")
+            send_telegram(msg)
+
+    # --- Velocity alert (3-min rolling drop) ---
+    if len(_silver_fast_prices) >= SILVER_VELOCITY_WINDOW:
+        oldest = _silver_fast_prices[0]
+        if oldest > 0:
+            vel = (price - oldest) / oldest * 100
+            if vel <= SILVER_VELOCITY_ALERT_PCT:
+                vel_key = f"vel_{int(time.time() // 300)}"
+                if vel_key not in _silver_alerted_levels:
+                    _silver_alerted_levels.add(vel_key)
+                    msg = (
+                        f"*RAPID DROP: XAG {vel:.1f}% in "
+                        f"{SILVER_VELOCITY_WINDOW * SILVER_FAST_TICK_INTERVAL}s*\n"
+                        f"`${price:.2f} | W:{warrant_pct:+.1f}%`\n"
+                        f"_Check now_"
+                    )
+                    log(f"*** SILVER VELOCITY: {vel:.1f}% ***")
+                    if SILVER_VELOCITY_TELEGRAM:
+                        send_telegram(msg)
+
 
 def get_cet_time():
     """Get current Stockholm time from timeapi.io, fallback to zoneinfo (DST-safe)."""
@@ -3644,6 +3881,18 @@ def main():
         else:
             log("Risk module: NOT available (import failed)")
 
+        # Initialize silver fast-tick monitor (merged from silver_monitor.py)
+        if SILVER_FAST_TICK_ENABLED and _has_active_silver():
+            _silver_init_ref()
+            skey, spos = _get_active_silver()
+            log(f"Silver fast-tick: ACTIVE (10s ticks, ref=${_silver_underlying_ref or '?'})")
+            log(f"  Position: {skey} | {spos.get('units',0)} units @ {spos.get('entry',0)} SEK")
+            log(f"  Alerts: {', '.join(f'{t[0]}%' for t, _ in SILVER_ALERT_LEVELS)}")
+        elif SILVER_FAST_TICK_ENABLED:
+            log("Silver fast-tick: STANDBY (no active silver position)")
+        else:
+            log("Silver fast-tick: DISABLED")
+
         if TRACKER_AVAILABLE:
             snap_count = get_snapshot_count()
             log(f"Signal tracker: active ({snap_count} existing snapshots)")
@@ -3711,12 +3960,14 @@ def main():
             prob_summary += f"\n  {short}: ${r['price']:.2f} ↑{r['prob_up_pct']:.0f}%"
 
         crypto_tag = "F&G+news+onchain" if CRYPTO_DATA_AVAILABLE else "OFF"
-        send_telegram(f"""*UNIFIED LOOP v9 STARTED*
+        silver_tick_tag = f"10s ticks, ref=${_silver_underlying_ref or '?'}" if (SILVER_FAST_TICK_ENABLED and _has_active_silver()) else "OFF"
+        send_telegram(f"""*UNIFIED LOOP v10 STARTED*
 Instruments: XAG/XAU/BTC/ETH/MSTR
 Interval: {CHECK_INTERVAL}s | Holdings diff: every {HOLDINGS_DIFF_INTERVAL_S}s
 LLM: {"Ministral+Chronos (4 tickers)" if LLM_AVAILABLE else "OFF"}
 Crypto: {crypto_tag}
 Stops: smart trailing {TRAIL_DISTANCE_PCT}%/{TRAIL_TIGHTEN_MOMENTUM}%/{TRAIL_TIGHTEN_ACCEL}%
+Silver fast-tick: {silver_tick_tag}
 Swing: {"ACTIVE" if swing_trader else "OFF"}
 Session: {"ALIVE" if session_healthy else "DEAD"}
 Positions: {pos_summary}{prob_summary}""")
@@ -3749,6 +4000,10 @@ Positions: {pos_summary}{prob_summary}""")
                                     pass
                         if STOP_ORDER_ENABLED:
                             stop_order_state = place_stop_loss_orders(page, POSITIONS)
+                        # Initialize silver fast-tick if new silver position detected
+                        if SILVER_FAST_TICK_ENABLED and _has_active_silver() and _silver_underlying_ref is None:
+                            _silver_init_ref()
+                            log(f"Silver fast-tick activated: ref=${_silver_underlying_ref or '?'}")
                         send_telegram(
                             "*HOLDINGS UPDATE*\n" +
                             "\n".join(f"• {c}" for c in changes)

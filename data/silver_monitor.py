@@ -1,4 +1,14 @@
 """
+DEPRECATED: Silver fast-tick monitoring has been merged into metals_loop.py (v10).
+
+The metals loop now runs 10-second silver price checks during its 60s sleep cycle,
+with the same threshold alerts (-3% to -12.5%) and 3-minute velocity flush detection.
+This standalone script is no longer needed.
+
+To use the merged version, just run metals_loop.py — silver fast ticks activate
+automatically when an active silver position exists in metals_positions_state.json.
+
+Original description:
 Silver Price Monitor with Claude Analysis
 MINI L SILVER AVA 301 | 150K SEK | 4.76x leverage
 
