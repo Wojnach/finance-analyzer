@@ -75,7 +75,7 @@ Two-layer autonomous trading system with 30 signals, 19 instruments, and dual-st
 - `digest.py` (206 lines): 4-hour periodic digest with invocation stats
 
 ### Infrastructure (6 modules)
-- `file_utils.py` (134 lines): atomic_write_json, load_json/jsonl, prune_jsonl, atomic_append_jsonl
+- `file_utils.py` (~165 lines): atomic_write_json, load_json/jsonl, prune_jsonl, atomic_append_jsonl, last_jsonl_entry
 - `http_retry.py` (66 lines): Exponential backoff (3 retries, 1s base, 2x factor)
 - `circuit_breaker.py` (97 lines): Thread-safe state machine (CLOSED→OPEN→HALF_OPEN)
 - `health.py` (188 lines): Heartbeat, error ring buffer, module failure tracking, efficient JSONL tail-read
@@ -188,20 +188,13 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-32: main.py re-exports ~50 private symbols (documentation only)
 - BUG-33: Trap detection relies on undocumented assumption about `df` timeframe
 - BUG-34 through BUG-38: Fixed in 2026-03-11 session (portfolio_mgr TOCTOU, health TOCTOU, inversion weight cap)
-- **BUG-39 (P1)**: `check_agent_completion()` never called from main loop — agent tracking broken
-- **BUG-40 (P2)**: `digest.py` reads/writes `trigger_state.json` — race with `trigger.py`
-- **BUG-41 (P2)**: `daily_digest.py` also reads `trigger_state.json` — same contention
-- **BUG-42 (P2)**: `reporting.py` uses raw `json.loads()` — bypasses TOCTOU-safe `load_json()`
-- **BUG-43 (P2)**: `trigger.py _check_recent_trade()` uses raw `json.loads()` — same issue
-- **BUG-44 (P3)**: `_last_jsonl_ts()` scans entire file — O(n) for last entry
-- **BUG-45 (P3)**: `digest.py` loads entire JSONL files without limit
-- **BUG-46 (P3)**: `reporting.py` calls `load_config()` 3+ times per cycle
+- BUG-39 through BUG-46: Fixed in 2026-03-12 session (agent completion wiring, digest/daily_digest state isolation, TOCTOU-safe I/O in reporting+trigger, JSONL tail-read optimization, digest load limits, config dedup)
 - ARCH-10: Signal result validation centralized in `_validate_signal_result()`
 - ARCH-11: Confidence caps enforced via `max_confidence` in signal registry
 - ARCH-12: Signal failure tracking and surfacing (planned)
 - ARCH-13: Accuracy tolerance for flat markets (planned)
-- **ARCH-15**: Centralize JSONL tail-read utility in `file_utils.py` (DRY + performance)
+- ARCH-15: Centralized JSONL tail-read utility `last_jsonl_entry()` in `file_utils.py` (done 2026-03-12)
 - REF-3: Candlestick `patterns_detected` moved from top-level to `indicators` dict
-- **REF-7**: Remove legacy `trigger_state.json` migration in `signal_engine.py`
+- REF-7: Removed legacy `trigger_state.json` migration in `signal_engine.py` (done 2026-03-12)
 - TEST coverage: candlestick (57 tests), fibonacci (51 tests), structure (32 tests) — formerly zero
-- ~3,310 tests across 110+ test files
+- ~3,330 tests across 110+ test files
