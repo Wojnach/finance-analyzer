@@ -618,6 +618,14 @@ if __name__ == "__main__":
             print(f"Updated {fc_updated} forecast entries")
         except Exception as e:
             print(f"Forecast backfill failed: {e}")
+        # Backfill Layer 2 decision outcomes
+        print("\n=== Decision Outcome Backfill ===")
+        try:
+            from portfolio.decision_outcome_tracker import backfill_decision_outcomes
+            dec_updated = backfill_decision_outcomes()
+            print(f"Updated {dec_updated} decision outcome entries")
+        except Exception as e:
+            print(f"Decision outcome backfill failed: {e}")
     elif "--accuracy" in args:
         from portfolio.accuracy_stats import print_accuracy_report
         print_accuracy_report()

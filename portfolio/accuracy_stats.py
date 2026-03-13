@@ -702,6 +702,79 @@ def top_signals_for_ticker(ticker, horizon="1d", min_samples=5):
     return ranked
 
 
+def probability_calibration(horizon="1d", buckets=None, since=None):
+    """Compute calibration data for reliability diagrams.
+
+    Groups consensus predictions by confidence bucket and computes actual
+    accuracy per bucket. Confidence = max(buy, sell) / (buy + sell).
+
+    Args:
+        horizon: Outcome horizon to evaluate ("1d", "3d", "5d", "10d").
+        buckets: List of bucket boundaries. Defaults to [0.5, 0.6, 0.7, 0.8, 0.9, 1.01].
+        since: Optional ISO-8601 string cutoff. Only entries with ts >= since
+               are included. None means all entries.
+
+    Returns:
+        list[dict]: One dict per bucket with keys: bucket_low, bucket_high,
+        predicted_confidence, actual_accuracy, sample_count, correct_count.
+    """
+    if buckets is None:
+        buckets = [0.5, 0.6, 0.7, 0.8, 0.9, 1.01]  # 1.01 to include 1.0
+
+    entries = load_entries()
+    # Build list of (confidence, correct_bool) tuples
+    samples = []
+    for entry in entries:
+        if since and entry.get("ts", "") < since:
+            continue
+        outcomes = entry.get("outcomes") or {}
+        tickers = entry.get("tickers") or {}
+        for ticker, tdata in tickers.items():
+            consensus = tdata.get("consensus")
+            if consensus not in ("BUY", "SELL"):
+                continue
+            buy_c = int(tdata.get("buy_count") or 0)
+            sell_c = int(tdata.get("sell_count") or 0)
+            total = buy_c + sell_c
+            if total < 1:
+                continue
+            confidence = max(buy_c, sell_c) / total
+
+            outcome = (outcomes.get(ticker) or {}).get(horizon)
+            if outcome is None:
+                continue
+            change_pct = outcome.get("change_pct")
+            if change_pct is None or abs(change_pct) < _MIN_CHANGE_PCT:
+                continue
+
+            correct = (consensus == "BUY" and change_pct > 0) or \
+                      (consensus == "SELL" and change_pct < 0)
+            samples.append((confidence, correct))
+
+    # Bucket the samples
+    result = []
+    for i in range(len(buckets) - 1):
+        lo, hi = buckets[i], buckets[i + 1]
+        bucket_samples = [(c, correct) for c, correct in samples if lo <= c < hi]
+        if not bucket_samples:
+            result.append({
+                "bucket_low": lo, "bucket_high": hi,
+                "predicted_confidence": (lo + hi) / 2,
+                "actual_accuracy": None, "sample_count": 0, "correct_count": 0,
+            })
+            continue
+        correct_count = sum(1 for _, c in bucket_samples if c)
+        n = len(bucket_samples)
+        avg_conf = sum(c for c, _ in bucket_samples) / n
+        result.append({
+            "bucket_low": lo, "bucket_high": hi,
+            "predicted_confidence": round(avg_conf, 4),
+            "actual_accuracy": round(correct_count / n, 4),
+            "sample_count": n, "correct_count": correct_count,
+        })
+    return result
+
+
 if __name__ == "__main__":
     print_accuracy_report()
 
