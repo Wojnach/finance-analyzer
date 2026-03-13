@@ -948,7 +948,7 @@ def read_signal_data():
             if key in data:
                 result[key] = data[key]
 
-        tickers = data.get("tickers", {})
+        tickers = data.get("signals", {})
         if not tickers:
             return result
 
@@ -969,7 +969,7 @@ def read_signal_data():
                     "sell_count": extra.get("_sell_count", 0),
                     "voters": extra.get("_voters", 0),
                     "vote_detail": extra.get("_vote_detail", ""),
-                    "price": t.get("price", 0),
+                    "price": t.get("price_usd", 0),
                     "extra": extra,
                 }
 

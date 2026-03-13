@@ -42,6 +42,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 STATE_FILE = BASE_DIR / "data" / "fin_snipe_state.json"
 MANAGER_LOG_FILE = BASE_DIR / "data" / "fin_snipe_manager_log.jsonl"
 PREDICTION_LOG_FILE = BASE_DIR / "data" / "fin_snipe_predictions.jsonl"
+FILL_LOG_FILE = BASE_DIR / "data" / "fin_snipe_fills.jsonl"
 LOCK_FILE = BASE_DIR / "data" / "fin_snipe_manager.singleton.lock"
 
 FLASH_ENTRY_VOLUME_PCT = 0.30
@@ -140,6 +141,55 @@ def _append_log(path: Path, event: str, payload: dict[str, Any]) -> None:
         **_json_safe(payload),
     }
     atomic_append_jsonl(path, entry)
+
+
+def _log_fill_detected(
+    snapshot: dict,
+    instrument_state: dict,
+    *,
+    fill_side: str,
+    old_vol: int,
+    new_vol: int,
+    session_id: str | None = None,
+    fill_log_path: Path = FILL_LOG_FILE,
+) -> None:
+    """Append a fill-detection entry to the fills JSONL log."""
+    try:
+        entry: dict[str, Any] = {
+            "event": "fill_detected",
+            "fill_side": fill_side,
+            "fill_volume": abs(new_vol - old_vol),
+            "instrument_price": float(snapshot.get("current_bid") or snapshot.get("current_last") or 0),
+            "underlying_price": float(snapshot.get("current_underlying") or 0),
+            "position_avg_price": float(snapshot.get("position_average_price") or 0),
+            "orderbook_id": snapshot.get("orderbook_id", ""),
+            "name": snapshot.get("name", ""),
+            "ticker": snapshot.get("ticker", ""),
+            "leverage": float(snapshot.get("leverage") or 1.0),
+            "prev_volume": old_vol,
+            "new_volume": new_vol,
+            "mode": instrument_state.get("mode"),
+            "entry_underlying": instrument_state.get("entry_underlying"),
+            "managed_order_ids": instrument_state.get("managed_order_ids", []),
+        }
+        if session_id is not None:
+            entry["session_id"] = session_id
+        # Compute realized P&L % for SELL fills where position goes to 0
+        if fill_side == "SELL" and new_vol == 0:
+            entry_underlying = instrument_state.get("entry_underlying")
+            current_underlying = snapshot.get("current_underlying")
+            leverage = float(snapshot.get("leverage") or 1.0)
+            if entry_underlying and current_underlying:
+                try:
+                    entry["realized_pnl_pct"] = round(
+                        ((float(current_underlying) / float(entry_underlying)) - 1) * 100 * leverage,
+                        2,
+                    )
+                except (ZeroDivisionError, ValueError, TypeError):
+                    pass
+        _append_log(fill_log_path, "fill_detected", entry)
+    except Exception:
+        logger.debug("Failed to log fill detection", exc_info=True)
 
 
 def _maybe_prune_log(path: Path) -> None:
@@ -1029,8 +1079,21 @@ def plan_instrument(
         open_stops = _candidate_stop_orders(snapshot, instrument_state)
         if instrument_state.get("mode") != "exit":
             events.append("position_detected")
-        if int(instrument_state.get("last_position_volume") or 0) not in (0, position_volume):
+            _log_fill_detected(
+                snapshot, instrument_state,
+                fill_side="BUY",
+                old_vol=int(instrument_state.get("last_position_volume") or 0),
+                new_vol=position_volume,
+            )
+        last_vol = int(instrument_state.get("last_position_volume") or 0)
+        if last_vol not in (0, position_volume):
             events.append("position_volume_changed")
+            _log_fill_detected(
+                snapshot, instrument_state,
+                fill_side="BUY" if position_volume > last_vol else "SELL",
+                old_vol=last_vol,
+                new_vol=position_volume,
+            )
         # Detect naked position: no existing managed sell or stop orders.
         # In emergency mode, bypass two-phase staged replacement — cancel
         # and re-place in the same cycle to avoid leaving the position
@@ -1070,6 +1133,12 @@ def plan_instrument(
             mode = "entry"
             if instrument_state.get("mode") == "exit":
                 events.append("position_flat_rearm")
+                _log_fill_detected(
+                    snapshot, instrument_state,
+                    fill_side="SELL",
+                    old_vol=int(instrument_state.get("last_position_volume") or 0),
+                    new_vol=0,
+                )
             cancel_buys, place_buys = _reconcile_orders(open_buys, desired_buys)
             cancel_sells, _ = _reconcile_orders(open_sells, desired_sells)
             cancel_stops, _ = _reconcile_stop_orders(open_stops, desired_stops)
