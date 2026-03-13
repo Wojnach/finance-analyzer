@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from portfolio.file_utils import atomic_write_json, last_jsonl_entry
+from portfolio.file_utils import atomic_write_json, load_json, last_jsonl_entry
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +39,9 @@ def update_health(cycle_count: int, signals_ok: int, signals_failed: int,
 
 def load_health() -> dict:
     """Load current health state. Returns defaults if missing or corrupt."""
-    try:
-        return json.loads(HEALTH_FILE.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        pass
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("Health state file corrupt, resetting: %s", e)
+    state = load_json(HEALTH_FILE)
+    if state is not None:
+        return state
     return {"start_time": time.time(), "cycle_count": 0, "error_count": 0, "errors": []}
 
 

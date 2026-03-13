@@ -7,6 +7,7 @@ from pathlib import Path
 
 from portfolio.shared_state import _cached
 from portfolio.indicators import detect_regime
+from portfolio.file_utils import load_json
 from portfolio.portfolio_mgr import _atomic_write_json, portfolio_value
 from portfolio.tickers import CRYPTO_SYMBOLS, STOCK_SYMBOLS
 from portfolio.signal_registry import get_enhanced_signals
@@ -330,9 +331,8 @@ def write_agent_summary(
         summary["cross_asset_leads"] = cross_leads
 
     # Load portfolios once for trade guards + risk audit (BUG-42: use load_json for TOCTOU safety)
-    from portfolio.file_utils import load_json as _load_json
-    _patient_pf = _load_json(DATA_DIR / "portfolio_state.json", default={})
-    _bold_pf = _load_json(DATA_DIR / "portfolio_state_bold.json", default={})
+    _patient_pf = load_json(DATA_DIR / "portfolio_state.json", default={})
+    _bold_pf = load_json(DATA_DIR / "portfolio_state_bold.json", default={})
 
     # Trade guard warnings (overtrading prevention)
     try:
@@ -559,8 +559,8 @@ def write_agent_summary(
         from portfolio.session_calendar import get_session_info
         from portfolio.cost_model import get_cost_model
         warrant_state_path = DATA_DIR / "portfolio_state_warrants.json"
-        if warrant_state_path.exists():
-            warrant_state = json.loads(warrant_state_path.read_text(encoding="utf-8"))
+        warrant_state = load_json(warrant_state_path)
+        if warrant_state is not None:
             exit_plans = {}
             for wk, wpos in warrant_state.get("positions", {}).items():
                 if not wpos.get("active") or wpos.get("units", 0) <= 0:
@@ -620,9 +620,9 @@ def write_agent_summary(
     now_utc = datetime.now(timezone.utc)
     now_iso = now_utc.isoformat()
     _STALE_MAX_HOURS = 24
-    if AGENT_SUMMARY_FILE.exists():
+    prev = load_json(AGENT_SUMMARY_FILE)
+    if prev is not None:
         try:
-            prev = json.loads(AGENT_SUMMARY_FILE.read_text(encoding="utf-8"))
             for section in ("signals", "timeframes", "fear_greed"):
                 prev_section = prev.get(section, {})
                 for ticker, data in prev_section.items():
@@ -690,13 +690,10 @@ def _get_held_tickers():
 
     held = set()
     for fname in ("portfolio_state.json", "portfolio_state_bold.json"):
-        try:
-            state = json.loads((DATA_DIR / fname).read_text(encoding="utf-8"))
-            for ticker, pos in state.get("holdings", {}).items():
-                if pos.get("shares", 0) > 0:
-                    held.add(ticker)
-        except (FileNotFoundError, json.JSONDecodeError):
-            pass
+        state = load_json(DATA_DIR / fname, default={})
+        for ticker, pos in state.get("holdings", {}).items():
+            if pos.get("shares", 0) > 0:
+                held.add(ticker)
     _held_tickers_cache["cycle_id"] = _run_cycle_id
     _held_tickers_cache["tickers"] = held
     return held
@@ -848,7 +845,7 @@ def _portfolio_snapshot(state_file, prices_usd=None, fx_rate=None):
     including holdings value. Otherwise falls back to cash-only estimate.
     """
     try:
-        state = json.loads(state_file.read_text(encoding="utf-8"))
+        state = load_json(state_file, default={})
         cash = state.get("cash_sek", 0)
         initial = state.get("initial_value_sek", 500000)
         holdings = state.get("holdings", {})

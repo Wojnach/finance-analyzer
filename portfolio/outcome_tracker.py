@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from portfolio.api_utils import BINANCE_BASE, BINANCE_FAPI_BASE
+from portfolio.file_utils import atomic_append_jsonl
 from portfolio.http_retry import fetch_with_retry
 from portfolio.shared_state import _yfinance_limiter
 
@@ -137,9 +138,7 @@ def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
         "outcomes": {},
     }
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(SIGNAL_LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
+    atomic_append_jsonl(SIGNAL_LOG, entry)
 
     # Dual-write to SQLite
     try:
