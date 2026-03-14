@@ -168,7 +168,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 
 ## 8) Key Design Patterns
 
-- **Atomic writes**: `file_utils.atomic_write_json()` prevents corrupt state files
+- **Atomic writes**: `file_utils.atomic_write_json()` and `atomic_write_jsonl()` prevent corrupt state files. All 23 portfolio modules use `load_json()`/`load_jsonl()` — zero raw `json.loads(path.read_text())` calls remain (enforced by `test_io_safety_sweep.py`)
 - **Metals shared state**: positions, stop orders, trade queue, and guard/spike state now use atomic JSON writes with explicit corrupt-file logging
 - **Circuit breakers**: Per-API failure tracking with auto-recovery
 - **Cache-through**: TTL cache with stale-data fallback (shared_state._cached)
@@ -184,6 +184,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-28: Enhanced signal failures silently count as HOLD — no tracking or surfacing
 - BUG-29: `_vote_correct()` treats 0% change as incorrect — biases accuracy downward in flat markets
 - BUG-30: `load_json()` TOCTOU race — fixed in 2026-03-10 session
+- BUG-47 through BUG-50: Fixed in 2026-03-14 session (IO safety sweep: raw json.loads, non-atomic writes, manual JSONL loops)
 - BUG-31: `_compute_adx()` not cached, uses NaN propagation via `replace(0, np.nan)`
 - BUG-32: main.py re-exports ~50 private symbols (documentation only)
 - BUG-33: Trap detection relies on undocumented assumption about `df` timeframe
@@ -197,4 +198,4 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - REF-3: Candlestick `patterns_detected` moved from top-level to `indicators` dict
 - REF-7: Removed legacy `trigger_state.json` migration in `signal_engine.py` (done 2026-03-12)
 - TEST coverage: candlestick (57 tests), fibonacci (51 tests), structure (32 tests) — formerly zero
-- ~3,330 tests across 110+ test files
+- ~3,360 tests across 111+ test files (including 34 IO safety sweep tests)

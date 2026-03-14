@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-03-14 (autonomous improvement session)
+- **IO safety sweep complete**: Replaced all 37+ raw `json.loads(path.read_text())` calls across 23 portfolio modules with `load_json()` from `file_utils` — eliminates TOCTOU race conditions and crash-on-corrupt-file.
+- **REF-8**: Added `atomic_write_jsonl()` helper to `file_utils.py` for safe full-file JSONL rewrites.
+- **BUG-48**: Replaced 3 non-atomic writes: `prophecy.py` (→ `atomic_write_json`), `signal_history.py` and `forecast_accuracy.py` (→ `atomic_write_jsonl`).
+- **BUG-49**: Replaced manual JSONL parse loops with `load_jsonl()` in `analyze.py`, `signal_history.py`, `focus_analysis.py`, `equity_curve.py`.
+- **TEST-11**: Added `tests/test_io_safety_sweep.py` (34 tests) — static analysis scan verifying no raw file reads remain, plus functional tests for `atomic_write_jsonl` and `load_json` edge cases.
+- Modules touched: accuracy_stats, alpha_vantage, analyze, autonomous, avanza_client, avanza_orders, avanza_session, avanza_tracker, bigbet, daily_digest, equity_curve, focus_analysis, forecast_accuracy, forecast_signal, iskbets, journal, local_llm_report, main, onchain_data, perception_gate, prophecy, signal_history, telegram_notifications, signals/claude_fundamental.
+
 ## 2026-03-11
 - **NewsAPI configured**: Added API key to `config.json → newsapi_key` (free tier, 100 req/day). Enhances stock sentiment headlines in `sentiment.py` and news_event signal #26 alongside Yahoo Finance fallback.
 - **Config validator updated**: Added `newsapi_key`, `alpha_vantage.api_key`, `golddigger.fred_api_key`, `bgeometrics.api_token` to `OPTIONAL_KEYS` in `config_validator.py` — warns at startup if missing.
