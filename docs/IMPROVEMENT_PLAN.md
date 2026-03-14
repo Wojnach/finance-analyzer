@@ -1,172 +1,133 @@
 # Improvement Plan
 
-Updated: 2026-03-12
-Branch: worktree-auto-session-2026-03-12
+Updated: 2026-03-14
+Branch: improve/auto-session-2026-03-14
 
-Previous sessions: 2026-03-05, 2026-03-06, 2026-03-07, 2026-03-08, 2026-03-09, 2026-03-10, 2026-03-11.
+Previous sessions: 2026-03-05 through 2026-03-13.
 
-## Session Plan (2026-03-12)
+## Session Plan (2026-03-14)
+
+### Theme: Complete IO Safety Sweep
+
+Commit `8246657` ("fix(io-safety): replace raw json.loads with load_json and
+atomic_append_jsonl") addressed 3 files (health.py, outcome_tracker.py,
+reporting.py). This session completes the sweep across all remaining portfolio
+modules — 37 raw `json.loads(path.read_text())` calls and 3 non-atomic file
+writes remain.
 
 ### 1) Bugs & Problems Found
 
-#### BUG-39 (P1): `check_agent_completion()` is never called from the main loop
+#### BUG-47 (P2): 37 raw `json.loads(path.read_text())` in portfolio/ modules — TOCTOU risk
 
-- **File**: `portfolio/agent_invocation.py:245`, `portfolio/main.py`
-- **Issue**: `check_agent_completion()` was implemented (with 30+ tests in
-  `test_agent_completion.py`) but is never called from `main.py` or anywhere
-  in production code. This means:
-  1. Agent completion status (success/incomplete/failed) is never recorded
-  2. `get_completion_stats()` always returns zero counts
-  3. The digest message's "Succeeded/Failed" counts are computed as
-     `invoked - journal_entries`, a fragile heuristic instead of actual tracking
-  4. Running agents are never checked for timeout between invocations —
-     timeout only fires when a new trigger tries to invoke a new agent
-- **Fix**: Add `check_agent_completion()` call at the start of each `run()` cycle
-  and after the post-cycle housekeeping. This ensures completed agents are detected
-  promptly and their status is logged.
-- **Impact**: High. Enables accurate agent completion tracking, which feeds into
-  digest messages and health monitoring.
+- **Files** (20 modules):
+  - `accuracy_stats.py:357,373,387` — cache reads
+  - `alpha_vantage.py:44` — cache read
+  - `analyze.py:75,265,304,363,613` — portfolio/summary/config reads
+  - `autonomous.py:676` — compact summary read
+  - `avanza_client.py:41` — config read
+  - `avanza_orders.py:35` — pending orders read
+  - `avanza_session.py:53,83` — session state reads
+  - `avanza_tracker.py:37` — config read
+  - `bigbet.py:40,91` — state and summary reads
+  - `daily_digest.py:204` — bold state read
+  - `focus_analysis.py:161,162` — summary and config reads
+  - `forecast_signal.py:251` — summary read
+  - `iskbets.py:45,75,264` — config, state, summary reads
+  - `journal.py:183,432,445,452` — portfolio/config/summary reads
+  - `main.py:461,696,697,698` — config and reporting reads
+  - `onchain_data.py:66` — cache read
+  - `perception_gate.py:96` — config read
+  - `prophecy.py:65` — beliefs read
+  - `telegram_notifications.py:126` — bold state read
+- **Issue**: All use the `json.loads(path.read_text())` pattern which:
+  1. Can read partial content during concurrent atomic rewrites (TOCTOU)
+  2. Crashes on empty files (JSONDecodeError) instead of returning a default
+  3. Duplicates error handling that `load_json()` already provides
+- **Fix**: Replace with `load_json(path, default=...)` from `file_utils`.
+  Each call needs the right default value (usually `{}` or `None`).
+- **Impact**: Medium. Prevents crash-on-corrupt-file and aligns with the
+  established TOCTOU-safe pattern.
 
-#### BUG-40 (P2): `digest.py` reads/writes `trigger_state.json` — race with `trigger.py`
+#### BUG-48 (P2): 3 non-atomic JSON/JSONL writes — corruption risk on crash
 
-- **File**: `portfolio/digest.py:33,40-46`
-- **Issue**: `_get_last_digest_time()` and `_set_last_digest_time()` both operate
-  on `trigger_state.json`, which is also read/written by `trigger.py` every cycle.
-  The pattern is: load → modify → atomic_write. If `trigger.py._save_state()` runs
-  between digest's load and write, the trigger state changes are overwritten.
-  This is a classic read-modify-write race condition. While single-threaded in
-  practice (both run in the same loop iteration), the execution order within
-  `_run_post_cycle` → `_maybe_send_digest` means trigger state was just saved,
-  then digest reads it, modifies one key, and saves — potentially dropping any
-  concurrent writes from other modules.
-- **Fix**: Move digest state to its own file `data/digest_state.json`. The only
-  key needed is `last_digest_time`. This eliminates the shared-file contention.
-- **Impact**: Medium. Prevents silent data loss in trigger_state.json.
+- **Files**:
+  - `prophecy.py:78` — `save_beliefs()` uses `open("w")` + `json.dump()`
+  - `signal_history.py:49` — `_save_history()` uses `open("w")` for JSONL rewrite
+  - `forecast_accuracy.py:339` — `_write_predictions()` uses `open("w")` for JSONL rewrite
+- **Issue**: If the process crashes or is killed mid-write, the file is left
+  partially written (truncated or empty), losing all data.
+- **Fix**: Use `atomic_write_json()` for prophecy.py. For the JSONL writers,
+  use a tempfile-then-rename pattern (new `atomic_write_jsonl()` helper).
+- **Impact**: Medium. prophecy.json is read every Layer 2 invocation.
 
-#### BUG-41 (P2): `daily_digest.py` also reads `trigger_state.json`
+#### BUG-49 (P2): Manual JSONL reading loops instead of `load_jsonl()`
 
-- **File**: `portfolio/daily_digest.py:25`
-- **Issue**: Same contention pattern as BUG-40. `daily_digest.py` reads
-  `trigger_state.json` for `last_daily_digest_time`. Should use its own file.
-- **Fix**: Move daily digest state to `data/daily_digest_state.json`.
-- **Impact**: Medium. Same race elimination as BUG-40.
+- **Files**:
+  - `analyze.py:53-65` — `_load_journal_for_ticker()` manual JSONL parse
+  - `signal_history.py:28-39` — `_load_history()` manual JSONL parse
+  - `accuracy_stats.py:37-44` — `load_entries()` JSONL fallback manual parse
+  - `equity_curve.py:48-56` — JSONL manual parse
+  - `focus_analysis.py:87-95` — JSONL manual parse
+- **Issue**: Duplicates the JSONL parsing logic that `load_jsonl()` handles.
+- **Fix**: Replace with `load_jsonl()` where possible.
+- **Impact**: Low. DRY improvement and consistent error handling.
 
-#### BUG-42 (P2): `reporting.py` reads portfolio files with raw `json.loads()` — TOCTOU risk
+#### BUG-50 (P3): `signal_history._save_history()` loads then rewrites entire file
 
-- **File**: `portfolio/reporting.py:331-338`
-- **Issue**: Portfolio state files are loaded with `json.loads(path.read_text())`
-  wrapped in try/except. This bypasses `load_json()` which was specifically
-  designed to handle the TOCTOU race (BUG-30, fixed in session 2026-03-10).
-  If the file is being atomically rewritten when read, `read_text()` could return
-  partial content.
-- **Fix**: Use `load_json(path, default={})` instead.
-- **Impact**: Low. The try/except catches the exception, but inconsistent with
-  the established pattern.
+- **File**: `portfolio/signal_history.py:42-51,67-95`
+- **Issue**: Non-atomic full-file rewrite. Crash during write loses all history.
+- **Fix**: Use atomic write pattern from REF-8.
+- **Impact**: Low.
 
-#### BUG-43 (P2): `trigger.py` `_check_recent_trade()` uses raw `json.loads()` — same TOCTOU
+### 2) Refactoring
 
-- **File**: `portfolio/trigger.py:78-79`
-- **Issue**: Same pattern as BUG-42. `json.loads(pf_file.read_text())` instead
-  of `load_json()`.
-- **Fix**: Use `load_json(path, default={})`.
-- **Impact**: Low. Consistency fix.
+#### REF-8: Add `atomic_write_jsonl()` helper to file_utils.py
 
-#### BUG-44 (P3): `_last_jsonl_ts()` scans entire file — O(n) for last entry
+- **File**: `portfolio/file_utils.py`
+- **Issue**: `prune_jsonl()` has the tempfile pattern for JSONL rewrite but it's
+  embedded in pruning logic. Extract reusable `atomic_write_jsonl(path, entries)`.
+- **Impact**: Enables safe JSONL rewrites for BUG-48 and BUG-50.
 
-- **File**: `portfolio/agent_invocation.py:90-110`
-- **Issue**: `_last_jsonl_ts()` reads the entire JSONL file line-by-line to find
-  the last `ts` value. The signal_log.jsonl can be 5000+ entries. This is called
-  twice at agent invocation start (once for journal, once for telegram). Meanwhile,
-  `check_agent_silence()` in `health.py:99-105` already has the efficient
-  tail-read implementation (seek to last 4KB, parse backwards).
-- **Fix**: Refactor `_last_jsonl_ts()` to read from the end of the file (last 4KB),
-  matching the pattern in `health.py`.
-- **Impact**: Low. Performance improvement for agent invocation path.
+### 3) Test Coverage
 
-#### BUG-45 (P3): `digest.py` loads entire JSONL files without limit
+#### TEST-11: Verify IO safety of replaced calls
 
-- **File**: `portfolio/digest.py:59,93,114`
-- **Issue**: `_build_digest_message()` loads three JSONL files entirely into memory
-  (invocations, journal, signal_log) then filters by 4-hour cutoff. Signal_log can
-  have 5000+ entries. Most entries are discarded.
-- **Fix**: Use `load_jsonl(path, limit=500)` to cap memory usage. 500 entries
-  covers ~8 hours of data at 1-per-minute, well beyond the 4-hour window.
-- **Impact**: Low. Memory optimization.
+- **File**: `tests/test_io_safety_sweep.py`
+- Test that each modified module imports `load_json`/`load_jsonl` and handles
+  missing/corrupt files gracefully.
 
-#### BUG-46 (P3): `reporting.py` calls `load_config()` 3+ times per cycle
+### 4) Dependency/Ordering
 
-- **File**: `portfolio/reporting.py:362,389,454`
-- **Issue**: Each section (monte_carlo, price_targets, focus_probabilities) imports
-  and calls `load_config()` independently, reading and parsing `config.json` from
-  disk 3+ times per reporting cycle.
-- **Fix**: Load config once at the top of `write_agent_summary()` and pass it
-  into sections that need it.
-- **Impact**: Low. Minor I/O reduction.
+#### Batch 1: Add `atomic_write_jsonl()` helper (REF-8)
+- Files: `portfolio/file_utils.py`
+- Zero-risk — additive only
 
-### 2) Architecture Improvements
+#### Batch 2: IO safety sweep — core modules (BUG-47 partial, BUG-48, BUG-49, BUG-50)
+- Files: `portfolio/accuracy_stats.py`, `portfolio/bigbet.py`,
+  `portfolio/prophecy.py`, `portfolio/autonomous.py`,
+  `portfolio/daily_digest.py`, `portfolio/forecast_signal.py`,
+  `portfolio/onchain_data.py`, `portfolio/perception_gate.py`,
+  `portfolio/telegram_notifications.py`, `portfolio/signal_history.py`,
+  `portfolio/forecast_accuracy.py`, `portfolio/alpha_vantage.py`
+- ~20 replacements
 
-#### ARCH-15: Centralize JSONL tail-read utility
+#### Batch 3: IO safety sweep — Avanza + analysis + remaining modules (BUG-47 remainder)
+- Files: `portfolio/analyze.py`, `portfolio/avanza_client.py`,
+  `portfolio/avanza_orders.py`, `portfolio/avanza_session.py`,
+  `portfolio/avanza_tracker.py`, `portfolio/focus_analysis.py`,
+  `portfolio/iskbets.py`, `portfolio/journal.py`, `portfolio/main.py`,
+  `portfolio/equity_curve.py`, `portfolio/cumulative_tracker.py`,
+  `portfolio/local_llm_report.py`
+- ~20 replacements
 
-- **Files**: `portfolio/file_utils.py`, `portfolio/agent_invocation.py`, `portfolio/health.py`
-- **Issue**: The "read last entry from JSONL" pattern is duplicated in
-  `agent_invocation._last_jsonl_ts()` (full scan) and `health.check_agent_silence()`
-  (efficient tail read). Both should use a shared utility.
-- **Fix**: Add `last_jsonl_entry(path, field=None)` to `file_utils.py`. Returns
-  the last parsed JSON entry, or the value of a specific field if `field` is set.
-  Migrate both callers.
-- **Impact**: DRY + performance. One implementation to test and maintain.
-
-### 3) Test Coverage Gaps
-
-#### TEST-9: Test `check_agent_completion()` integration in main loop
-
-- **File**: `tests/test_main_agent_completion.py`
-- **Issue**: Tests exist for `check_agent_completion()` in isolation but there
-  are no tests verifying it is called from the main loop. Need an integration
-  test that confirms the main loop calls completion checking.
-- **Fix**: Add a test that patches `check_agent_completion` and verifies it's
-  called during a `run()` cycle.
-
-#### TEST-10: Test digest state isolation
-
-- **File**: `tests/test_digest.py` (or existing file)
-- **Issue**: After moving digest state to its own file, need tests verifying
-  that the new file is used and trigger_state.json is not modified.
-
-### 4) Refactoring TODOs
-
-#### REF-7: Remove legacy trigger_state.json migration in signal_engine.py
-
-- **File**: `portfolio/signal_engine.py:57-61`
-- **Issue**: Migration code reads `trigger_state.json` for `prev_sentiment` as
-  fallback when `sentiment_state.json` doesn't exist. This migration was added
-  months ago and sentiment_state.json has been the primary store since. The
-  migration path is dead code.
-- **Fix**: Remove the fallback branch. Keep only the `sentiment_state.json` read.
-
-### 5) Dependency/Ordering
-
-#### Batch 1: Agent Completion Tracking (BUG-39, TEST-9)
-- Files: `portfolio/main.py`, `portfolio/agent_invocation.py`
-- Tests: Add integration test
-- Zero-risk addition — no existing behavior changed
-
-#### Batch 2: Eliminate trigger_state.json Contention (BUG-40, BUG-41, REF-7, TEST-10)
-- Files: `portfolio/digest.py`, `portfolio/daily_digest.py`, `portfolio/signal_engine.py`
-- Tests: Verify new state files, no trigger_state.json modification
-- Must verify that existing digest behavior is preserved
-
-#### Batch 3: I/O Safety & Performance (BUG-42, BUG-43, BUG-44, BUG-45, BUG-46, ARCH-15)
-- Files: `portfolio/reporting.py`, `portfolio/trigger.py`, `portfolio/agent_invocation.py`,
-  `portfolio/file_utils.py`
-- Independent of Batches 1 and 2
+#### Batch 4: Tests (TEST-11)
+- Files: `tests/test_io_safety_sweep.py`
 
 ## Summary
 
 | Category | Count | Items |
 |----------|-------|-------|
-| Bugs | 8 | BUG-39 through BUG-46 |
-| Architecture | 1 | ARCH-15 |
-| Test Coverage | 2 | TEST-9, TEST-10 |
-| Refactoring | 1 | REF-7 |
-| Batches | 3 | Batch 1 critical → Batch 2 safety → Batch 3 performance |
+| Bugs | 4 | BUG-47 through BUG-50 |
+| Refactoring | 1 | REF-8 |
+| Test Coverage | 1 | TEST-11 |
+| Batches | 4 | Batch 1 helper → Batch 2+3 sweep → Batch 4 tests |
