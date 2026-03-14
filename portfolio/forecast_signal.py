@@ -14,6 +14,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from portfolio.file_utils import load_json
+
 logger = logging.getLogger("portfolio.forecast")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -247,12 +249,11 @@ def run_forecasts(tickers=None):
     """
     if tickers is None:
         # Load tickers from agent_summary
-        try:
-            summary = json.loads(AGENT_SUMMARY_FILE.read_text(encoding="utf-8"))
-            tickers = list(summary.get("signals", {}).keys())
-        except Exception:
+        summary = load_json(AGENT_SUMMARY_FILE)
+        if summary is None:
             logger.error("Could not load tickers from agent_summary.json")
             return
+        tickers = list(summary.get("signals", {}).keys())
 
     ts = datetime.now(timezone.utc).isoformat()
     results = []

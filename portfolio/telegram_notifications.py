@@ -5,6 +5,7 @@ import logging
 import os
 import re
 
+from portfolio.file_utils import load_json
 from portfolio.http_retry import fetch_with_retry
 from portfolio.message_store import send_or_store
 from portfolio.tickers import SYMBOLS
@@ -122,8 +123,8 @@ def _maybe_send_alert(config, signals, prices_usd, fx_rate, state, reasons, tf_d
     if fg_val:
         lines.append(f"_F&G: {fg_val}_")
     lines.append(f"_Patient: {patient_total:,.0f} SEK ({patient_pnl:+.1f}%)_")
-    if BOLD_STATE_FILE.exists():
-        bold = json.loads(BOLD_STATE_FILE.read_text(encoding="utf-8"))
+    bold = load_json(BOLD_STATE_FILE)
+    if bold is not None:
         bold_total = portfolio_value(bold, prices_usd, fx_rate)
         bold_pnl = (
             (bold_total - bold["initial_value_sek"]) / bold["initial_value_sek"]

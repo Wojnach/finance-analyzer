@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 from portfolio.api_utils import load_config as _load_config
+from portfolio.file_utils import load_json
 from portfolio.http_retry import fetch_json
 from portfolio.shared_state import _cached
 
@@ -60,10 +61,10 @@ def _save_onchain_cache(data):
 
 def _load_onchain_cache(max_age_seconds=ONCHAIN_TTL):
     """Load on-chain data from persistent cache if fresh enough."""
+    data = load_json(CACHE_FILE)
+    if data is None:
+        return None
     try:
-        if not CACHE_FILE.exists():
-            return None
-        data = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
         ts = data.get("ts", 0)
         if time.time() - ts > max_age_seconds:
             return None

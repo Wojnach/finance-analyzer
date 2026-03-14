@@ -13,7 +13,7 @@ from pathlib import Path
 
 logger = logging.getLogger("portfolio.bigbet")
 
-from portfolio.file_utils import atomic_write_json
+from portfolio.file_utils import atomic_write_json, load_json
 from portfolio.message_store import send_or_store
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -35,11 +35,9 @@ MAX_STREAK_AGE_S = 300     # 5 minutes
 
 
 def _load_state():
-    if STATE_FILE.exists():
-        try:
-            return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.warning("bigbet state load failed: %s", e)
+    state = load_json(STATE_FILE)
+    if state is not None:
+        return state
     return {"cooldowns": {}, "price_history": {}}
 
 
@@ -87,8 +85,8 @@ def _build_eval_prompt(ticker, direction, conditions, signals, tf_data, prices_u
     fomc_days = "N/A"
     try:
         summary_file = DATA_DIR / "agent_summary.json"
-        if summary_file.exists():
-            summary = json.loads(summary_file.read_text(encoding="utf-8"))
+        summary = load_json(summary_file)
+        if summary:
             macro = summary.get("macro", {})
             dxy_info = macro.get("dxy", {})
             dxy = dxy_info.get("value", "N/A")

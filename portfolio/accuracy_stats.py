@@ -6,7 +6,7 @@ from pathlib import Path
 
 logger = logging.getLogger("portfolio.accuracy_stats")
 
-from portfolio.file_utils import atomic_write_json as _atomic_write_json
+from portfolio.file_utils import atomic_write_json as _atomic_write_json, load_json
 from portfolio.tickers import DISABLED_SIGNALS, SIGNAL_NAMES
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -352,12 +352,12 @@ ACTIVATION_CACHE_TTL = 3600  # recompute hourly
 def load_cached_activation_rates():
     """Load cached activation rates, recomputing if stale."""
     cache_file = DATA_DIR / "activation_cache.json"
-    if cache_file.exists():
+    cache = load_json(cache_file)
+    if cache is not None:
         try:
-            cache = json.loads(cache_file.read_text(encoding="utf-8"))
             if time.time() - cache.get("time", 0) < ACTIVATION_CACHE_TTL:
                 return cache.get("rates", {})
-        except (json.JSONDecodeError, KeyError):
+        except (KeyError, AttributeError):
             logger.debug("Activation rates cache corrupted, regenerating")
     rates = signal_activation_rates()
     try:
@@ -368,25 +368,22 @@ def load_cached_activation_rates():
 
 
 def load_cached_accuracy(horizon="1d"):
-    if ACCURACY_CACHE_FILE.exists():
+    cache = load_json(ACCURACY_CACHE_FILE)
+    if cache is not None:
         try:
-            cache = json.loads(ACCURACY_CACHE_FILE.read_text(encoding="utf-8"))
             if time.time() - cache.get("time", 0) < ACCURACY_CACHE_TTL:
                 cached = cache.get(horizon)
                 if cached:
                     return cached
-        except (json.JSONDecodeError, KeyError):
+        except (KeyError, AttributeError):
             logger.debug("Accuracy cache corrupted or missing horizon %s", horizon)
     return None
 
 
 def write_accuracy_cache(horizon, data):
-    cache = {}
-    if ACCURACY_CACHE_FILE.exists():
-        try:
-            cache = json.loads(ACCURACY_CACHE_FILE.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, KeyError):
-            logger.debug("Accuracy cache corrupted, starting fresh")
+    cache = load_json(ACCURACY_CACHE_FILE, default={})
+    if not isinstance(cache, dict):
+        cache = {}
     cache[horizon] = data
     cache["time"] = time.time()
     _atomic_write_json(ACCURACY_CACHE_FILE, cache)

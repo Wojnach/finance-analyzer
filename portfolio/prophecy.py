@@ -15,6 +15,8 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from copy import deepcopy
 
+from portfolio.file_utils import atomic_write_json, load_json
+
 logger = logging.getLogger("portfolio.prophecy")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -58,25 +60,19 @@ def load_beliefs():
     Returns:
         dict: {"beliefs": [...], "metadata": {...}}
     """
-    if not PROPHECY_FILE.exists():
+    data = load_json(PROPHECY_FILE)
+    if data is None:
         return {"beliefs": [], "metadata": {"version": 1, "last_review": None}}
-
-    try:
-        data = json.loads(PROPHECY_FILE.read_text(encoding="utf-8"))
-        if isinstance(data, list):
-            # Legacy format — wrap in dict
-            return {"beliefs": data, "metadata": {"version": 1, "last_review": None}}
-        return data
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("Failed to load prophecy.json: %s", e)
-        return {"beliefs": [], "metadata": {"version": 1, "last_review": None}}
+    if isinstance(data, list):
+        # Legacy format — wrap in dict
+        return {"beliefs": data, "metadata": {"version": 1, "last_review": None}}
+    return data
 
 
 def save_beliefs(data):
     """Save beliefs to prophecy.json."""
     data["metadata"]["last_review"] = datetime.now(timezone.utc).isoformat()
-    with open(PROPHECY_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    atomic_write_json(PROPHECY_FILE, data)
 
 
 def add_belief(belief_dict):

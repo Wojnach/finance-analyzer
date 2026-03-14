@@ -86,6 +86,27 @@ def atomic_append_jsonl(path, entry):
         os.fsync(f.fileno())
 
 
+def atomic_write_jsonl(path, entries):
+    """Atomically rewrite a JSONL file with the given entries.
+
+    Uses tempfile + os.replace so the file is never left partially written.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            for entry in entries:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, str(path))
+    except BaseException:
+        with suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
 def last_jsonl_entry(path, field=None):
     """Return the last parsed JSON entry from a JSONL file (efficient tail read).
 

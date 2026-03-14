@@ -10,6 +10,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from portfolio.file_utils import atomic_write_jsonl, load_jsonl
 from portfolio.tickers import SIGNAL_NAMES
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -25,18 +26,7 @@ def _load_history():
     Returns:
         list[dict]: All history entries.
     """
-    if not HISTORY_FILE.exists():
-        return []
-    entries = []
-    for line in HISTORY_FILE.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entries.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return entries
+    return load_jsonl(HISTORY_FILE)
 
 
 def _save_history(entries):
@@ -45,10 +35,7 @@ def _save_history(entries):
     Args:
         entries: List of history entry dicts.
     """
-    DATA_DIR.mkdir(exist_ok=True)
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        for entry in entries:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    atomic_write_jsonl(HISTORY_FILE, entries)
 
 
 def _entries_for_ticker(entries, ticker):

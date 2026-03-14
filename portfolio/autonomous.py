@@ -671,9 +671,9 @@ def _build_telegram_mode_b(actionable, hold_count, sell_count, patient_state, bo
     compact_file = DATA_DIR / "agent_summary_compact.json"
     focus_probs = {}
     cumulative_gains = {}
-    if compact_file.exists():
+    compact = load_json(compact_file)
+    if compact is not None:
         try:
-            compact = json.loads(compact_file.read_text(encoding="utf-8"))
             focus_probs = compact.get("focus_probabilities", {})
             cumulative_gains = compact.get("cumulative_gains", {})
         except Exception as e:

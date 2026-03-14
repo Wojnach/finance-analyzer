@@ -12,11 +12,11 @@ Config:
     }
 """
 
-import json
 import logging
 from pathlib import Path
 
 from portfolio.api_utils import load_config
+from portfolio.file_utils import load_json
 
 logger = logging.getLogger("portfolio.perception_gate")
 
@@ -88,11 +88,8 @@ def should_invoke(reasons, tier, config=None):
 def _load_compact_summary():
     """Load the compact summary JSON."""
     path = DATA_DIR / "agent_summary_compact.json"
-    if not path.exists():
-        path = DATA_DIR / "agent_summary.json"
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
+    result = load_json(path)
+    if result is not None:
+        return result
+    path = DATA_DIR / "agent_summary.json"
+    return load_json(path)

@@ -199,15 +199,15 @@ def build_daily_digest(config):
     p_h_str = " · " + escape_markdown_v1(", ".join(p_holdings)) if p_holdings else ""
     lines.append(f"`Patient: {p_total:,.0f} SEK ({p_pnl:+.1f}%){p_h_str}`")
 
-    if BOLD_STATE_FILE.exists():
+    bold = load_json(BOLD_STATE_FILE)
+    if bold is not None:
         try:
-            bold = json.loads(BOLD_STATE_FILE.read_text(encoding="utf-8"))
             b_total = portfolio_value(bold, prices_usd, fx_rate)
             b_pnl = ((b_total - bold["initial_value_sek"]) / bold["initial_value_sek"]) * 100
             b_holdings = [t for t, h in bold.get("holdings", {}).items() if h.get("shares", 0) > 0]
             b_h_str = " · " + escape_markdown_v1(", ".join(b_holdings)) if b_holdings else ""
             lines.append(f"`Bold:    {b_total:,.0f} SEK ({b_pnl:+.1f}%){b_h_str}`")
-        except (json.JSONDecodeError, FileNotFoundError):
+        except (KeyError, TypeError):
             pass
 
     # Warrant total

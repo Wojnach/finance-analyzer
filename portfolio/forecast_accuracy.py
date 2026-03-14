@@ -10,6 +10,8 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from collections import defaultdict
 
+from portfolio.file_utils import atomic_write_jsonl
+
 logger = logging.getLogger("portfolio.forecast_accuracy")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -336,9 +338,7 @@ def _lookup_price_at_time(ticker, target_time, snapshot_file=None):
 def _write_predictions(entries, predictions_file=None):
     """Write predictions back to JSONL file."""
     path = predictions_file or PREDICTIONS_FILE
-    with open(path, "w", encoding="utf-8") as f:
-        for entry in entries:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    atomic_write_jsonl(path, entries)
 
 
 def get_forecast_accuracy_summary(focus_tickers=None, days=7):

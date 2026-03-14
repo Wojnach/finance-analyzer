@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from portfolio.circuit_breaker import CircuitBreaker
+from portfolio.file_utils import load_json
 from portfolio.http_retry import fetch_with_retry
 from portfolio.shared_state import _alpha_vantage_limiter
 from portfolio.tickers import STOCK_SYMBOLS
@@ -37,17 +38,14 @@ _cb = CircuitBreaker("alpha_vantage", failure_threshold=3, recovery_timeout=300)
 def load_persistent_cache():
     """Load fundamentals cache from disk on startup."""
     global _cache
-    if not CACHE_FILE.exists():
+    data = load_json(CACHE_FILE)
+    if data is None:
         logger.info("No fundamentals cache found at %s", CACHE_FILE)
         return
-    try:
-        data = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            with _cache_lock:
-                _cache = data
-            logger.info("Loaded fundamentals for %d tickers from cache", len(data))
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("Failed to load fundamentals cache: %s", e)
+    if isinstance(data, dict):
+        with _cache_lock:
+            _cache = data
+        logger.info("Loaded fundamentals for %d tickers from cache", len(data))
 
 
 def _save_persistent_cache():
