@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from portfolio.avanza_control import place_buy_order, place_sell_order
-from portfolio.file_utils import atomic_write_json
+from portfolio.file_utils import atomic_write_json, load_json
 from portfolio.http_retry import fetch_with_retry
 from portfolio.telegram_notifications import send_telegram
 
@@ -29,13 +29,11 @@ EXPIRY_MINUTES = 5
 
 def _load_pending() -> list[dict]:
     """Load pending orders from disk."""
-    if not PENDING_FILE.exists():
-        return []
-    try:
-        return json.loads(PENDING_FILE.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    result = load_json(PENDING_FILE, default=[])
+    if result is None:
         logger.warning("Failed to read pending orders, returning empty")
         return []
+    return result
 
 
 def _save_pending(orders: list[dict]) -> None:

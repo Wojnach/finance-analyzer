@@ -10,6 +10,8 @@ import pathlib
 import datetime
 from collections import defaultdict
 
+from portfolio.file_utils import load_jsonl
+
 DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 
 DEFAULT_HISTORY_PATH = DATA_DIR / "portfolio_value_history.jsonl"
@@ -41,20 +43,7 @@ def load_equity_curve(path: str | None = None) -> list[dict]:
     if path is None:
         path = str(DEFAULT_HISTORY_PATH)
 
-    result = []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    result.append(entry)
-                except json.JSONDecodeError:
-                    continue  # Skip malformed lines
-    except FileNotFoundError:
-        return []
+    result = load_jsonl(path)
 
     # Sort by timestamp
     result.sort(key=lambda x: x.get("ts", ""))

@@ -17,7 +17,7 @@ import pandas as pd
 logger = logging.getLogger("portfolio.iskbets")
 
 from portfolio.api_utils import get_alpaca_headers, BINANCE_BASE, ALPACA_BASE
-from portfolio.file_utils import atomic_write_json
+from portfolio.file_utils import atomic_write_json, load_json
 from portfolio.http_retry import fetch_with_retry
 from portfolio.shared_state import _cached
 from portfolio.message_store import send_or_store
@@ -39,11 +39,8 @@ from portfolio.tickers import (
 
 def _load_config():
     """Load per-session ISKBETS config. Returns dict or None if disabled/expired."""
-    if not CONFIG_FILE.exists():
-        return None
-    try:
-        cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-    except Exception:
+    cfg = load_json(CONFIG_FILE)
+    if cfg is None:
         return None
     if not cfg.get("enabled", False):
         return None
@@ -70,11 +67,9 @@ def _save_config(cfg):
 
 def _load_state():
     """Load ISKBETS runtime state."""
-    if STATE_FILE.exists():
-        try:
-            return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+    result = load_json(STATE_FILE)
+    if result is not None:
+        return result
     return {"active_position": None, "trade_history": []}
 
 
@@ -260,8 +255,8 @@ def _build_gate_prompt(ticker, price, conditions, signals, tf_data, atr, config)
     fomc_days = "N/A"
     try:
         summary_file = DATA_DIR / "agent_summary.json"
-        if summary_file.exists():
-            summary = json.loads(summary_file.read_text(encoding="utf-8"))
+        summary = load_json(summary_file)
+        if summary:
             macro = summary.get("macro", {})
             fed_info = macro.get("fed", {})
             fomc_days = fed_info.get("days_until", "N/A")

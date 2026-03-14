@@ -12,6 +12,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from portfolio.file_utils import load_json, load_jsonl
 from portfolio.telegram_notifications import send_telegram as _shared_send_telegram
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -47,21 +48,13 @@ TIME_MAX_MINS = 300   # 5h — hard time exit
 
 def _load_journal_for_ticker(ticker, max_entries=5):
     """Load last N journal entries that mention this ticker with a non-neutral outlook."""
-    if not JOURNAL_FILE.exists():
-        return []
+    all_entries = load_jsonl(JOURNAL_FILE)
     entries = []
-    for line in JOURNAL_FILE.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-            tickers = entry.get("tickers", {})
-            info = tickers.get(ticker, {})
-            if info.get("outlook", "neutral") != "neutral":
-                entries.append(entry)
-        except (json.JSONDecodeError, KeyError, ValueError):
-            continue
+    for entry in all_entries:
+        tickers = entry.get("tickers", {})
+        info = tickers.get(ticker, {})
+        if info.get("outlook", "neutral") != "neutral":
+            entries.append(entry)
     return entries[-max_entries:]
 
 
@@ -72,7 +65,7 @@ def _get_holdings(ticker):
         if not filepath.exists():
             continue
         try:
-            pf = json.loads(filepath.read_text(encoding="utf-8"))
+            pf = load_json(filepath)
             h = pf.get("holdings", {}).get(ticker, {})
             if h.get("shares", 0) > 0:
                 holdings[label] = h
@@ -262,7 +255,10 @@ def run_analysis(ticker):
         print("No agent_summary.json found. Run --report first to generate signal data.")
         return
 
-    summary = json.loads(AGENT_SUMMARY_FILE.read_text(encoding="utf-8"))
+    summary = load_json(AGENT_SUMMARY_FILE)
+    if summary is None:
+        print("Failed to parse agent_summary.json.")
+        return
 
     if ticker not in summary.get("signals", {}):
         print(f"No signal data for {ticker} in agent_summary.json. Run --report first.")
@@ -301,7 +297,7 @@ def run_analysis(ticker):
 
         # Send to Telegram
         try:
-            config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            config = load_json(CONFIG_FILE)
             price = summary["signals"][ticker]["price_usd"]
             tg_msg = f"*ANALYSIS: {ticker}* (${price:,.2f})\n\n{output}"
             _send_telegram(tg_msg, config)
@@ -359,10 +355,7 @@ def _load_summary():
     """Load the full agent_summary.json."""
     if not AGENT_SUMMARY_FILE.exists():
         return None
-    try:
-        return json.loads(AGENT_SUMMARY_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+    return load_json(AGENT_SUMMARY_FILE)
 
 
 def _get_signal_state(ticker, summary=None):
@@ -609,10 +602,8 @@ def watch_positions(position_args, interval=60):
         print("No valid positions to watch.")
         return
 
-    try:
-        config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        config = None
+    config = load_json(CONFIG_FILE)
+    if config is None:
         print("WARNING: config.json not found — Telegram alerts disabled")
 
     start_time = time.time()

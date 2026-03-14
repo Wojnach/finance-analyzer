@@ -4,6 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+from portfolio.file_utils import load_json
 from portfolio.tickers import ALL_TICKERS
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -177,10 +178,10 @@ def _build_continuation_chains(entries):
 def _load_portfolio_pnl():
     data = {}
     for label, filepath in [("patient", PORTFOLIO_FILE), ("bold", BOLD_FILE)]:
-        if not filepath.exists():
+        pf = load_json(filepath)
+        if pf is None:
             continue
         try:
-            pf = json.loads(filepath.read_text(encoding="utf-8"))
             holdings = pf.get("holdings", {})
             holding_tickers = [t for t, h in holdings.items() if h.get("shares", 0) > 0]
             data[label] = {
@@ -190,7 +191,7 @@ def _load_portfolio_pnl():
                 "trades": len(pf.get("transactions", [])),
                 "holdings": holding_tickers,
             }
-        except (json.JSONDecodeError, ValueError, AttributeError):
+        except (ValueError, AttributeError):
             continue
     return data
 
@@ -428,10 +429,7 @@ def build_context(entries, portfolio_data=None, now=None):
 def _load_config():
     """Load config.json for smart retrieval setting."""
     config_file = DATA_DIR.parent / "config.json"
-    try:
-        return json.loads(config_file.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    return load_json(config_file, default={}) or {}
 
 
 def _get_current_market_state():
@@ -442,19 +440,20 @@ def _get_current_market_state():
             summary_file = DATA_DIR / "agent_summary.json"
         if not summary_file.exists():
             return None
-        summary = json.loads(summary_file.read_text(encoding="utf-8"))
+        summary = load_json(summary_file)
+        if summary is None:
+            return None
         signals = summary.get("signals", {})
 
         # Detect held tickers
         held = set()
         for fname in ("portfolio_state.json", "portfolio_state_bold.json"):
-            try:
-                pf = json.loads((DATA_DIR / fname).read_text(encoding="utf-8"))
-                for t, pos in pf.get("holdings", {}).items():
-                    if pos.get("shares", 0) > 0:
-                        held.add(t)
-            except (FileNotFoundError, json.JSONDecodeError):
-                pass
+            pf = load_json(DATA_DIR / fname)
+            if pf is None:
+                continue
+            for t, pos in pf.get("holdings", {}).items():
+                if pos.get("shares", 0) > 0:
+                    held.add(t)
 
         # Detect dominant regime
         regimes = []

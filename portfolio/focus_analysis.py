@@ -14,6 +14,7 @@ import math
 from datetime import datetime, timezone
 from pathlib import Path
 
+from portfolio.file_utils import load_json, load_jsonl
 from portfolio.market_timing import MARKET_OPEN_HOUR, _market_close_hour_utc
 from portfolio.message_store import send_or_store
 
@@ -82,19 +83,11 @@ def hours_to_us_close(now: datetime | None = None) -> float:
 
 
 def latest_journal_price(ticker: str, default: float = 0.0) -> float:
-    if not JOURNAL_FILE.exists():
-        return default
-    try:
-        lines = JOURNAL_FILE.read_text(encoding="utf-8").splitlines()
-        for line in reversed(lines[-400:]):
-            if not line.strip():
-                continue
-            entry = json.loads(line)
-            px = entry.get("prices", {}).get(ticker)
-            if isinstance(px, (int, float)) and px > 0:
-                return float(px)
-    except Exception:
-        return default
+    entries = load_jsonl(JOURNAL_FILE, limit=400)
+    for entry in reversed(entries):
+        px = entry.get("prices", {}).get(ticker)
+        if isinstance(px, (int, float)) and px > 0:
+            return float(px)
     return default
 
 
@@ -158,8 +151,10 @@ def run_focus_analysis(tickers: list[str] | None = None) -> str:
     if not SUMMARY_FILE.exists():
         raise FileNotFoundError("No agent_summary.json found. Run --report first.")
 
-    summary = json.loads(SUMMARY_FILE.read_text(encoding="utf-8"))
-    config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    summary = load_json(SUMMARY_FILE)
+    if summary is None:
+        raise FileNotFoundError("Failed to parse agent_summary.json.")
+    config = load_json(CONFIG_FILE, default={})
 
     focus = [normalize_ticker(t) for t in (tickers or DEFAULT_FOCUS_TICKERS)]
     hours_left = hours_to_us_close()

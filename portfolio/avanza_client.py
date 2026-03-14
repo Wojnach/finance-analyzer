@@ -15,6 +15,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Optional
 
+from portfolio.file_utils import load_json
+
 logger = logging.getLogger("portfolio.avanza_client")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -36,9 +38,9 @@ def _load_credentials() -> dict:
         FileNotFoundError: if config.json does not exist
         KeyError: if 'avanza' section is missing or credentials incomplete
     """
-    if not CONFIG_FILE.exists():
-        raise FileNotFoundError(f"Config file not found: {CONFIG_FILE}")
-    config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    config = load_json(CONFIG_FILE)
+    if config is None:
+        raise FileNotFoundError(f"Config file not found or unreadable: {CONFIG_FILE}")
     if "avanza" not in config:
         raise KeyError(
             "Missing 'avanza' section in config.json. "

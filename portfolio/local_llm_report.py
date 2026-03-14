@@ -143,8 +143,9 @@ def _load_report_config(config=None):
     try:
         return load_config()
     except FileNotFoundError:
-        if CONFIG_EXAMPLE_FILE.exists():
-            return json.loads(CONFIG_EXAMPLE_FILE.read_text(encoding="utf-8"))
+        result = load_json(CONFIG_EXAMPLE_FILE)
+        if result is not None:
+            return result
         logger.warning("config.json not found for local LLM report; using empty config")
         return {}
 

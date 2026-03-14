@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from portfolio.file_utils import load_json
+
 logger = logging.getLogger("portfolio.avanza_session")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -49,10 +51,9 @@ def load_session() -> dict:
             "Run: python scripts/avanza_login.py"
         )
 
-    try:
-        data = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as e:
-        raise AvanzaSessionError(f"Failed to read session file: {e}")
+    data = load_json(SESSION_FILE)
+    if data is None:
+        raise AvanzaSessionError(f"Failed to read session file: {SESSION_FILE}")
 
     # Check expiry
     expires_at = data.get("expires_at")
@@ -80,7 +81,9 @@ def load_session() -> dict:
 def session_remaining_minutes() -> Optional[float]:
     """Get minutes remaining on the current session, or None if no session."""
     try:
-        data = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
+        data = load_json(SESSION_FILE)
+        if data is None:
+            return None
         expires_at = data.get("expires_at")
         if not expires_at:
             return None

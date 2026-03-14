@@ -19,6 +19,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from portfolio.file_utils import load_json
+
 logger = logging.getLogger("portfolio.avanza_tracker")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -31,13 +33,10 @@ def load_avanza_instruments() -> dict[str, dict]:
     Returns:
         Dict of {config_key: instrument_config} or empty dict if not configured.
     """
-    if not CONFIG_FILE.exists():
+    config = load_json(CONFIG_FILE, default={})
+    if not config:
         return {}
-    try:
-        config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        return config.get("avanza", {}).get("instruments", {})
-    except Exception:
-        return {}
+    return config.get("avanza", {}).get("instruments", {})
 
 
 def fetch_avanza_prices() -> dict[str, dict[str, Any]]:

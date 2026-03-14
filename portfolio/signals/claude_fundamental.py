@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from portfolio.file_utils import load_json
 from portfolio.signal_utils import majority_vote
 
 logger = logging.getLogger("portfolio.signals.claude_fundamental")
@@ -571,7 +572,7 @@ def _refresh_tier(tier, context):
     if not summary_path.exists():
         logger.warning("agent_summary_compact.json not found, skipping %s refresh", tier)
         return
-    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary = load_json(summary_path, default={})
     macro = context.get("macro")
     # Also try to get macro from summary if not in context
     if not macro:
@@ -590,7 +591,7 @@ def _refresh_tier(tier, context):
         for pf in ("portfolio_state.json", "portfolio_state_bold.json"):
             pf_path = DATA_DIR / pf
             if pf_path.exists():
-                portfolios[pf] = json.loads(pf_path.read_text(encoding="utf-8"))
+                portfolios[pf] = load_json(pf_path, default={})
         prompt = _build_opus_prompt(summary, macro, portfolios)
         raw = _call_claude_cli(models["opus"], prompt, timeout=timeouts["opus"])
         results = _parse_opus_response(raw)

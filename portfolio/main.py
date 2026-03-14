@@ -26,6 +26,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from portfolio.file_utils import load_json
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 DATA_DIR = BASE_DIR / "data"
@@ -458,7 +460,7 @@ def _crash_alert(error_msg):
 
     try:
         config_path = Path(__file__).resolve().parent.parent / "config.json"
-        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config = load_json(config_path, default={})
         text = f"LOOP CRASH #{_consecutive_crashes}\n\n{error_msg[:3000]}"
         if _consecutive_crashes == _MAX_CRASH_ALERTS:
             text += "\n\n_Further crash alerts suppressed until recovery._"
@@ -690,12 +692,11 @@ if __name__ == "__main__":
         from portfolio.analyze import watch_positions
         watch_positions(pos_args)
     elif "--price-targets" in args:
-        import json as _json
         from pathlib import Path as _Path
         _data = _Path("data")
-        _summary = _json.loads((_data / "agent_summary.json").read_text(encoding="utf-8"))
-        _patient = _json.loads((_data / "portfolio_state.json").read_text(encoding="utf-8"))
-        _bold = _json.loads((_data / "portfolio_state_bold.json").read_text(encoding="utf-8"))
+        _summary = load_json(_data / "agent_summary.json", default={})
+        _patient = load_json(_data / "portfolio_state.json", default={})
+        _bold = load_json(_data / "portfolio_state_bold.json", default={})
         from portfolio.price_targets import compute_all_targets
         from portfolio.api_utils import load_config as _pt_load
         _pt_cfg = _pt_load().get("price_targets", {})
