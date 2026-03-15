@@ -604,4 +604,8 @@ def _compute_gs_ratio_history():
 
 
 if __name__ == "__main__":
-    precompute()
+    # Delegate to consolidated metals precompute
+    from portfolio.metals_precompute import precompute as metals_precompute
+
+    config = load_json("config.json")
+    metals_precompute(config)
