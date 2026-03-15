@@ -36,7 +36,7 @@ _PRICE_FILE = _DATA_DIR / "price_snapshots_hourly.jsonl"
 _LESSONS_FILE = _DATA_DIR / "system_lessons.json"
 _LEGACY_LESSONS_FILE = _DATA_DIR / "fin_command_lessons.json"
 _EVOLVE_STATE_FILE = _DATA_DIR / "fin_evolve_state.json"
-_EVOLVE_INTERVAL_SEC = 4 * 3600  # Every 4 hours
+_EVOLVE_INTERVAL_SEC = 2 * 3600  # Every 2 hours — aligned with L2 invocation cycle
 
 # Minimum samples required before generating a lesson for a group
 _MIN_SAMPLES_LESSON = 3

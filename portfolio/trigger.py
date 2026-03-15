@@ -276,7 +276,7 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
 
 # Full review interval: 2h during market hours, 4h off-hours
 _FULL_REVIEW_MARKET_HOURS = 2
-_FULL_REVIEW_OFF_HOURS = 4
+_FULL_REVIEW_OFF_HOURS = 2  # Match market hours — feeds evolution engine
 
 
 def classify_tier(reasons, state=None):
