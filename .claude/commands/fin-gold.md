@@ -11,14 +11,30 @@ Gold is the anchor asset — central bank reserve, inflation hedge, safe haven. 
    Avanza commodity warrant hours: **08:15-21:55 CET** (NOT 17:25).
    Gold trades 24/7 on spot markets. COMEX: 00:00-22:00 CET with 1h break.
 
-2. **Read precomputed context** — `data/gold_deep_context.json`
-   Contains cached external research (analyst targets, central bank buying, real yields context,
-   COT positioning, ETF flows, price trajectory, signal accuracy).
-   Check `generated_at` — if older than 7 days, print:
-   `WARNING: Precomputed context is STALE ({age} days old) — run: .venv/Scripts/python.exe portfolio/metals_precompute.py`
+2. **Ensure fresh precomputed context** — Check `data/gold_deep_context.json`:
+   - Read the file and parse `generated_at` timestamp
+   - Compute age: `(now - generated_at)` in hours
+   - **If the file is missing OR older than 2 hours**, refresh it by running:
+     ```
+     .venv/Scripts/python.exe portfolio/metals_precompute.py
+     ```
+     This takes ~15 seconds and fetches fresh futures prices, ETF data, COT, FRED yields.
+     After it completes, re-read `data/gold_deep_context.json` for the fresh data.
+   - **If the file is fresh (< 2 hours old)**, use it directly — no refresh needed.
+   - Print the data age: `"Precomputed context: {age} min old"` (or `"freshly generated"` if just refreshed)
 
-2b. **Read learned lessons** — `data/system_lessons.json` (if exists)
-   This file is auto-generated every 4h by the evolution engine (`portfolio/fin_evolve.py`).
+   The file contains: analyst targets, central bank buying, real yields, COT positioning,
+   GLD ETF flows, G/S ratio history, signal accuracy, price trajectory.
+
+2b. **Ensure fresh learned lessons** — Check `data/system_lessons.json`:
+   - If the file is missing OR older than 2 hours, refresh by running:
+     ```
+     .venv/Scripts/python.exe portfolio/fin_evolve.py
+     ```
+     This scores past verdicts against actual outcomes and generates calibration advice.
+   - If fresh, use directly.
+
+   This file is auto-generated every 2h by the evolution engine.
    It contains unified accuracy from ALL prediction sources (Layer 2 journal + /fin commands):
    - Your accuracy by source (layer2 vs fin-silver vs fin-gold), regime, confidence level
    - Per-ticker accuracy across ALL sources (BTC-USD, ETH-USD, XAG-USD, XAU-USD, etc.)
