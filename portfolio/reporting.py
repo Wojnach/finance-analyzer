@@ -815,6 +815,25 @@ def _write_compact_summary(summary):
         if section_data:
             compact[section_key] = section_data
 
+    # Load system lessons if available (small, actionable)
+    try:
+        system_lessons = load_json(
+            DATA_DIR / "system_lessons.json", default=None
+        )
+        if system_lessons:
+            compact["system_lessons"] = {
+                "calibration_advice": system_lessons.get("calibration_advice"),
+                "anti_patterns": system_lessons.get("anti_patterns", [])[:5],
+                "confirmed_patterns": system_lessons.get("confirmed_patterns", [])[:5],
+                "by_regime": system_lessons.get("by_regime"),
+                "by_ticker": system_lessons.get("by_ticker"),
+                "by_source": system_lessons.get("by_source"),
+                "cross_asset": system_lessons.get("cross_asset"),
+                "total_scored": system_lessons.get("total_verdicts", 0),
+            }
+    except Exception:
+        pass
+
     _atomic_write_json(COMPACT_SUMMARY_FILE, compact)
 
 

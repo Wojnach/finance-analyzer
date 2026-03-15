@@ -17,12 +17,14 @@ Gold is the anchor asset — central bank reserve, inflation hedge, safe haven. 
    Check `generated_at` — if older than 7 days, print:
    `WARNING: Precomputed context is STALE ({age} days old) — run: .venv/Scripts/python.exe portfolio/metals_precompute.py`
 
-2b. **Read learned lessons** — `data/fin_command_lessons.json` (if exists)
-   This file is auto-generated daily by the evolution engine (`portfolio/fin_evolve.py`).
-   It contains:
-   - Your accuracy by regime, confidence level, and command
+2b. **Read learned lessons** — `data/system_lessons.json` (if exists)
+   This file is auto-generated every 4h by the evolution engine (`portfolio/fin_evolve.py`).
+   It contains unified accuracy from ALL prediction sources (Layer 2 journal + /fin commands):
+   - Your accuracy by source (layer2 vs fin-silver vs fin-gold), regime, confidence level
+   - Per-ticker accuracy across ALL sources (BTC-USD, ETH-USD, XAG-USD, XAU-USD, etc.)
    - Anti-patterns (conditions where past verdicts were wrong)
    - Confirmed patterns (conditions where past verdicts were right)
+   - Cross-asset patterns (e.g., "when gold bullish, silver follows X%")
    - Calibration advice (are you over/underconfident?)
 
    **Apply these adjustments:**
