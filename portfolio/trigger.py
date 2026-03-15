@@ -274,9 +274,9 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
 # Tier classification
 # ---------------------------------------------------------------------------
 
-# Full review interval: 2h during market hours, 4h off-hours
-_FULL_REVIEW_MARKET_HOURS = 2
-_FULL_REVIEW_OFF_HOURS = 2  # Match market hours — feeds evolution engine
+# Full review interval: 4h during market hours, 4h off-hours (T1 only)
+_FULL_REVIEW_MARKET_HOURS = 4
+_FULL_REVIEW_OFF_HOURS = 4  # Off-hours caps at T1, not T3
 
 
 def classify_tier(reasons, state=None):
@@ -301,7 +301,7 @@ def classify_tier(reasons, state=None):
     if market_open and hours_since >= _FULL_REVIEW_MARKET_HOURS:
         return 3
     if not market_open and hours_since >= _FULL_REVIEW_OFF_HOURS:
-        return 3
+        return 1  # T1 quick check only — save T3 budget for market hours
     if any("F&G crossed" in r for r in reasons):
         return 3
     if state.get("today_date") != _today_str():

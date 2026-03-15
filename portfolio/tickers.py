@@ -13,23 +13,16 @@ SYMBOLS = {
     # Metals (Binance futures)
     "XAU-USD": {"binance_fapi": "XAUUSDT"},
     "XAG-USD": {"binance_fapi": "XAGUSDT"},
-    # US Equities (Alpaca IEX)
+    # US Equities (Alpaca IEX) — focused set (Mar 15 cleanup)
     "PLTR": {"alpaca": "PLTR"},
     "NVDA": {"alpaca": "NVDA"},
-    "AMD": {"alpaca": "AMD"},
-    "GOOGL": {"alpaca": "GOOGL"},
-    "AMZN": {"alpaca": "AMZN"},
-    "AAPL": {"alpaca": "AAPL"},
-    "AVGO": {"alpaca": "AVGO"},
-    "META": {"alpaca": "META"},
     "MU": {"alpaca": "MU"},
-    "SOUN": {"alpaca": "SOUN"},
     "SMCI": {"alpaca": "SMCI"},
     "TSM": {"alpaca": "TSM"},
     "TTWO": {"alpaca": "TTWO"},
     "VRT": {"alpaca": "VRT"},
-    "LMT": {"alpaca": "LMT"},
     "MSTR": {"alpaca": "MSTR"},
+    # Removed Mar 15: AMD, GOOGL, AMZN, AAPL, AVGO, META, SOUN, LMT
 }
 
 # ── Asset-class subsets ───────────────────────────────────────────────────
@@ -37,10 +30,7 @@ SYMBOLS = {
 CRYPTO_SYMBOLS = {"BTC-USD", "ETH-USD"}
 METALS_SYMBOLS = {"XAU-USD", "XAG-USD"}
 STOCK_SYMBOLS = {
-    "PLTR", "NVDA", "AMD", "GOOGL", "AMZN", "AAPL",
-    "AVGO", "META", "MU",
-    "SOUN", "SMCI", "TSM", "TTWO",
-    "VRT", "LMT", "MSTR",
+    "PLTR", "NVDA", "MU", "SMCI", "TSM", "TTWO", "VRT", "MSTR",
 }
 
 # All known tickers (union of all subsets)
