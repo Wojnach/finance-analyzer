@@ -113,6 +113,52 @@ G/S ratio {current}:1 ({compressing/expanding} — {implication for silver})
 If gold at ${gold_price} and ratio compresses to 50:1 → silver = ${implied}
 ```
 
+## 9. Log the invocation
+
+After producing the output, append a log entry to `data/fin_command_log.jsonl`:
+```python
+import json, datetime, pathlib
+entry = {
+    "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "command": "fin-gold",
+    "ticker": "XAU-USD",
+    "price_usd": <current XAU price from agent_summary_compact>,
+    "gs_ratio": <computed G/S ratio>,
+    "signal_consensus": "<BUY/SELL/HOLD>",
+    "vote_breakdown": "<XB/YS/ZH>",
+    "weighted_confidence": <0.0-1.0>,
+    "regime": "<regime>",
+    "rsi": <rsi value>,
+    "chronos_24h_pct": <chronos prediction %>,
+    "chronos_accuracy": <chronos accuracy for XAU>,
+    "prob_3h": <directional probability 3h>,
+    "prob_1d": <directional probability 1d>,
+    "prob_3d": <directional probability 3d>,
+    "monte_carlo_p_up": <probability of up>,
+    "real_yield": <10Y - CPI from FRED>,
+    "dxy": <DXY value>,
+    "verdict_1_3d": "<bullish/bearish/neutral>",
+    "verdict_1_3d_conf": <0.0-1.0>,
+    "verdict_1_4w": "<bullish/bearish/neutral>",
+    "verdict_1_4w_conf": <0.0-1.0>,
+    "precompute_age_hours": <hours since gold_deep_context.json was generated>,
+    "avanza_available": <true/false>,
+    "data_sources_used": ["agent_summary", "precompute", ...],
+    "execution_time_sec": <wall clock seconds from step 1 to this step>,
+}
+with open("data/fin_command_log.jsonl", "a", encoding="utf-8") as f:
+    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+```
+
+**Timing:** Record the start time at step 1 (when you check the clock). Compute `execution_time_sec`
+as the difference between now and step 1 start time.
+
+**Why log:** Builds a dataset of every analysis for tracking:
+- Verdict accuracy (compare with actual price moves)
+- Data availability patterns
+- Execution time trends
+- Signal accuracy at invocation time vs outcome
+
 ## Critical rules
 - **Gold is the macro anchor.** Its behavior tells you about risk appetite, dollar confidence,
   and central bank policy direction. Analyze it as a macro instrument, not just a commodity.

@@ -120,6 +120,50 @@ Support: ${s1}, ${s2} | Resistance: ${r1}, ${r2} | Prophecy target: $120
 Fibonacci: 23.6% ${f1} | 38.2% ${f2} | 50% ${f3} | 61.8% ${f4}
 ```
 
+## 9. Log the invocation
+
+After producing the output, append a log entry to `data/fin_command_log.jsonl`:
+```python
+import json, datetime, pathlib
+entry = {
+    "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "command": "fin-silver",
+    "ticker": "XAG-USD",
+    "price_usd": <current XAG price from agent_summary_compact>,
+    "gs_ratio": <computed G/S ratio>,
+    "signal_consensus": "<BUY/SELL/HOLD>",
+    "vote_breakdown": "<XB/YS/ZH>",
+    "weighted_confidence": <0.0-1.0>,
+    "regime": "<regime>",
+    "rsi": <rsi value>,
+    "chronos_24h_pct": <chronos prediction %>,
+    "chronos_accuracy": <chronos accuracy for XAG>,
+    "prob_3h": <directional probability 3h>,
+    "prob_1d": <directional probability 1d>,
+    "prob_3d": <directional probability 3d>,
+    "monte_carlo_p_up": <probability of up>,
+    "verdict_1_3d": "<bullish/bearish/neutral>",
+    "verdict_1_3d_conf": <0.0-1.0>,
+    "verdict_1_4w": "<bullish/bearish/neutral>",
+    "verdict_1_4w_conf": <0.0-1.0>,
+    "precompute_age_hours": <hours since silver_deep_context.json was generated>,
+    "avanza_available": <true/false>,
+    "data_sources_used": ["agent_summary", "precompute", "prophecy", ...],
+    "execution_time_sec": <wall clock seconds from step 1 to this step>,
+}
+with open("data/fin_command_log.jsonl", "a", encoding="utf-8") as f:
+    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+```
+
+**Timing:** Record the start time at step 1 (when you check the clock). Compute `execution_time_sec`
+as the difference between now and step 1 start time. This tracks how long the full analysis takes.
+
+**Why log:** Over time, this builds a dataset of every analysis — you can track:
+- How often each verdict was correct (compare verdict_1_3d with actual price move 3 days later)
+- Which data sources were available vs missing
+- Whether precompute staleness correlates with analysis quality
+- Average execution time and whether it's improving
+
 ## Critical rules
 - **Separate long-term thesis from short-term signal noise** — ALWAYS. The $120 prophecy is a
   multi-month view. Short-term signals may contradict it without invalidating it.
