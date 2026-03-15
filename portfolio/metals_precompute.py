@@ -582,11 +582,19 @@ def _record_cot_history(cot_data, metal):
     if not report_date:
         return
 
-    # Check for duplicates
+    # Check for duplicates — only scan last 20 entries (cap growth)
     existing = load_jsonl(_COT_HISTORY_FILE)
-    for entry in existing:
+    for entry in existing[-20:]:
         if entry.get("metal") == metal and entry.get("report_date") == report_date:
             return  # Already logged
+
+    # Cap history at 104 entries (~1 year of weekly data for 2 metals)
+    if len(existing) > 104:
+        from portfolio.file_utils import prune_jsonl
+        try:
+            prune_jsonl(_COT_HISTORY_FILE, max_entries=104)
+        except Exception:
+            pass  # Non-critical
 
     record = {
         "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -696,8 +704,8 @@ def _build_silver_context(market, generated_at):
                 "gold_price": gc_current,
                 "gs_ratio": market.get("gs_ratio"),
                 "gs_ratio_vs_historical": _gs_ratio_label(market.get("gs_ratio")),
-                "implied_silver_at_50": round(gc_current / 50, 2),
-                "implied_silver_at_40": round(gc_current / 40, 2),
+                "implied_silver_at_50": round(gc_current / 50, 2) if gc_current > 0 else None,
+                "implied_silver_at_40": round(gc_current / 40, 2) if gc_current > 0 else None,
             }
 
     # COT trend
@@ -763,8 +771,8 @@ def _build_gold_context(market, generated_at):
             external["silver_context"] = {
                 "silver_price": si_current,
                 "gs_ratio": market.get("gs_ratio"),
-                "implied_silver_at_50": round(gc_current / 50, 2),
-                "implied_silver_at_40": round(gc_current / 40, 2),
+                "implied_silver_at_50": round(gc_current / 50, 2) if gc_current > 0 else None,
+                "implied_silver_at_40": round(gc_current / 40, 2) if gc_current > 0 else None,
             }
 
     # COT trend

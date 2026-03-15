@@ -15,7 +15,7 @@ Gold is the anchor asset — central bank reserve, inflation hedge, safe haven. 
    Contains cached external research (analyst targets, central bank buying, real yields context,
    COT positioning, ETF flows, price trajectory, signal accuracy).
    Check `generated_at` — if older than 7 days, print:
-   `WARNING: Precomputed context is STALE ({age} days old) — run: .venv/Scripts/python.exe portfolio/gold_precompute.py`
+   `WARNING: Precomputed context is STALE ({age} days old) — run: .venv/Scripts/python.exe portfolio/metals_precompute.py`
 
 3. **Read live data** (parallel):
    - `data/agent_summary_compact.json` — XAU-USD and XAG-USD sections: signals, prices, probabilities,
@@ -29,7 +29,14 @@ Gold is the anchor asset — central bank reserve, inflation hedge, safe haven. 
    .venv/Scripts/python.exe scripts/avanza_metals_check.py
    ```
    Same as fin-silver — returns all metals positions. Filter for gold-related ones.
-   If session expired: "Avanza session expired — run `python scripts/avanza_login.py`"
+
+   **If Avanza fails** (session expired, API error, script crashes):
+   - Print: "Avanza unavailable — using fallback data"
+   - Fall back to `data/metals_positions_state.json` for position info (units, entry price)
+   - Use the precomputed `futures_context` from `gold_deep_context.json` for current underlying price
+   - Estimate warrant P&L from underlying price change
+   - Note clearly that P&L is estimated, not live
+   - Tell user: "For live data, run `python scripts/avanza_login.py` to refresh session"
 
 5. **Compute derived metrics** (from live data):
    - **Gold/silver ratio:** XAU price / XAG price. If ratio compressing → silver catching up (bullish for silver, neutral for gold). If expanding → gold outperforming (flight to safety).

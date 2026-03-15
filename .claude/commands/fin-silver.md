@@ -15,7 +15,7 @@ This is the PRIMARY instrument. Silver is the user's highest-conviction trade ($
    This contains cached external research (analyst targets, supply/demand, COT, physical market,
    G/S ratio history, prophecy snapshot, signal accuracy, price trajectory, journal history).
    Check `generated_at` — if older than 7 days, print:
-   `WARNING: Precomputed context is STALE ({age} days old) — run: .venv/Scripts/python.exe portfolio/silver_precompute.py`
+   `WARNING: Precomputed context is STALE ({age} days old) — run: .venv/Scripts/python.exe portfolio/metals_precompute.py`
 
 3. **Read live data** (parallel):
    - `data/agent_summary_compact.json` — XAG-USD and XAU-USD sections: signals, prices, probabilities,
@@ -33,7 +33,14 @@ This is the PRIMARY instrument. Silver is the user's highest-conviction trade ($
    This hits the live Avanza API and returns all metals-related positions with:
    - name, units, current value (SEK), acquired value, P&L (SEK + %), today's change
    - Separates `active` positions from `knocked_out` ones
-   If the session is expired, tell the user: "Avanza session expired — run `python scripts/avanza_login.py`"
+
+   **If Avanza fails** (session expired, API error, script crashes):
+   - Print: "Avanza unavailable — using fallback data"
+   - Fall back to `data/metals_positions_state.json` for position info (units, entry price)
+   - Use the precomputed `futures_context` from `silver_deep_context.json` for current underlying price
+   - Estimate warrant P&L from underlying price change: `pnl_pct ≈ (current_underlying / entry_underlying - 1) * leverage * 100`
+   - Note clearly that P&L is estimated, not live
+   - Tell user: "For live data, run `python scripts/avanza_login.py` to refresh session"
 
 5. **Compute derived metrics** (from live data):
    - **Gold/silver ratio:** XAU price / XAG price (from agent_summary_compact.json prices).
