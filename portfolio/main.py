@@ -168,6 +168,12 @@ def _run_post_cycle(config):
             )
     except Exception as e_report:
         logger.warning("local LLM report export failed: %s", e_report)
+    # Silver deep context precompute (every 4h, self-checking)
+    try:
+        from portfolio.silver_precompute import maybe_precompute_silver
+        maybe_precompute_silver(config)
+    except Exception as e_silver:
+        logger.warning("Silver precompute failed: %s", e_silver)
     # Prune unbounded JSONL files to prevent disk exhaustion (BUG-59)
     try:
         from portfolio.file_utils import prune_jsonl

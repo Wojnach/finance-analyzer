@@ -21,6 +21,53 @@ from portfolio.file_utils import atomic_write_json, load_json, load_jsonl
 
 logger = logging.getLogger("portfolio.silver_precompute")
 
+_STATE_FILE = "data/silver_precompute_state.json"
+_DEFAULT_INTERVAL_SEC = 4 * 3600  # 4 hours
+
+
+def maybe_precompute_silver(config=None):
+    """Run silver precompute if enough time has elapsed since last run.
+
+    Called from main loop's _run_post_cycle(). Self-checking — safe to call
+    every cycle; will only execute when interval has elapsed.
+
+    Also runs on first call if state file doesn't exist (fresh start / crash recovery).
+    """
+    import time
+
+    interval = _DEFAULT_INTERVAL_SEC
+    if config:
+        interval = config.get("silver", {}).get(
+            "precompute_interval_sec", _DEFAULT_INTERVAL_SEC
+        )
+
+    state = load_json(_STATE_FILE, default={})
+    last_run = state.get("last_run_epoch", 0)
+    now = time.time()
+
+    if (now - last_run) < interval:
+        return None  # Not yet
+
+    try:
+        result = precompute()
+        atomic_write_json(_STATE_FILE, {
+            "last_run_epoch": now,
+            "last_run_iso": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "status": "ok",
+        })
+        logger.info("Silver precompute completed (interval=%ds)", interval)
+        return result
+    except Exception as e:
+        logger.warning("Silver precompute failed: %s", e)
+        # Write failure state so we retry next cycle, not wait full interval
+        atomic_write_json(_STATE_FILE, {
+            "last_run_epoch": last_run,  # Keep old timestamp so we retry soon
+            "last_run_iso": state.get("last_run_iso", ""),
+            "status": f"error: {e}",
+            "last_error_epoch": now,
+        })
+        return None
+
 
 def precompute():
     """Aggregate all silver context into a single cached JSON file."""
