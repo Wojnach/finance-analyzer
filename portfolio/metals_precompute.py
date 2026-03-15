@@ -29,16 +29,16 @@ logger = logging.getLogger("portfolio.metals_precompute")
 _STATE_FILE = "data/metals_precompute_state.json"
 _REFRESH_STATE_FILE = "data/metals_refresh_state.json"
 _COT_HISTORY_FILE = "data/cot_history.jsonl"
-_DEFAULT_INTERVAL_SEC = 4 * 3600  # 4 hours
+_DEFAULT_INTERVAL_SEC = 2 * 3600  # 2 hours — aligned with L2 + evolution cycle
 
 # Per-source refresh intervals (seconds)
 _REFRESH_INTERVALS = {
-    "gld": 24 * 3600,             # GLD ETF: daily
-    "slv": 24 * 3600,             # SLV ETF: daily
-    "gold_futures": 24 * 3600,    # Gold futures (GC=F): daily
-    "silver_futures": 24 * 3600,  # Silver futures (SI=F): daily
-    "cot": 7 * 24 * 3600,        # CFTC COT: weekly
-    "fred": 24 * 3600,           # FRED yields: daily
+    "gld": 4 * 3600,             # GLD ETF: every 4h (intraday volume trends)
+    "slv": 4 * 3600,             # SLV ETF: every 4h
+    "gold_futures": 4 * 3600,    # Gold futures (GC=F): every 4h (Fibonacci, SMAs)
+    "silver_futures": 4 * 3600,  # Silver futures (SI=F): every 4h
+    "cot": 7 * 24 * 3600,       # CFTC COT: weekly (only updates Fridays)
+    "fred": 24 * 3600,           # FRED yields: daily (only updates once/day)
 }
 
 _REQUEST_TIMEOUT = 15  # seconds per HTTP request
