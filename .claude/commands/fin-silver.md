@@ -17,6 +17,22 @@ This is the PRIMARY instrument. Silver is the user's highest-conviction trade ($
    Check `generated_at` — if older than 7 days, print:
    `WARNING: Precomputed context is STALE ({age} days old) — run: .venv/Scripts/python.exe portfolio/metals_precompute.py`
 
+2b. **Read learned lessons** — `data/fin_command_lessons.json` (if exists)
+   This file is auto-generated daily by the evolution engine (`portfolio/fin_evolve.py`).
+   It contains:
+   - Your accuracy by regime, confidence level, and command
+   - Anti-patterns (conditions where past verdicts were wrong)
+   - Confirmed patterns (conditions where past verdicts were right)
+   - Calibration advice (are you over/underconfident?)
+
+   **Apply these adjustments:**
+   - If calibration says OVERCONFIDENT, reduce all verdict confidence by the suggested amount
+   - If an anti-pattern matches current conditions, note it in the bear case and reduce confidence
+   - If a confirmed pattern matches, note it in the bull case and increase confidence
+   - If accuracy for current regime is < 0.5, add a disclaimer: "Note: past verdicts in {regime} regime have been weak ({accuracy}%)"
+
+   If the file doesn't exist or has < 5 verdicts, skip this step (not enough data yet).
+
 3. **Read live data** (parallel):
    - `data/agent_summary_compact.json` — XAG-USD and XAU-USD sections: signals, prices, probabilities,
      regime, cumulative gains, forecast signals, Monte Carlo, signal_reliability

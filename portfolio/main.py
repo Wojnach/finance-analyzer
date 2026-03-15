@@ -181,6 +181,12 @@ def _run_post_cycle(config):
             prune_jsonl(DATA_DIR / name, max_entries=5000)
     except Exception as e_prune:
         logger.warning("JSONL prune failed: %s", e_prune)
+    # Fin command self-improvement: backfill outcomes + evolve lessons (daily)
+    try:
+        from portfolio.fin_evolve import maybe_evolve
+        maybe_evolve(config)
+    except Exception as e_evolve:
+        logger.warning("Fin evolve failed: %s", e_evolve)
 
 
 # --- Main orchestrator ---
