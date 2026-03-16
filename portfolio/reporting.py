@@ -834,6 +834,21 @@ def _write_compact_summary(summary):
     except Exception:
         pass
 
+    # Add signal health summary (failure rates for each signal)
+    try:
+        from portfolio.health import get_signal_health_summary
+        sh = get_signal_health_summary()
+        if sh:
+            # Only include signals with failures or <90% success rate
+            degraded = {
+                name: data for name, data in sh.items()
+                if data.get("success_rate_pct", 100) < 90 or data.get("total_failures", 0) > 0
+            }
+            if degraded:
+                compact["signal_health"] = degraded
+    except Exception:
+        pass
+
     _atomic_write_json(COMPACT_SUMMARY_FILE, compact)
 
 

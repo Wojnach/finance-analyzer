@@ -22,6 +22,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import mean
 
+from portfolio.file_utils import (
+    load_json as _load_json,
+    load_jsonl as _load_jsonl,
+    atomic_write_json as _atomic_write_json,
+    atomic_write_jsonl as _atomic_write_jsonl,
+    atomic_append_jsonl as _atomic_append_jsonl_single,
+)
+
 logger = logging.getLogger("portfolio.fin_evolve")
 
 # Resolve project root so imports work when run standalone
@@ -46,79 +54,10 @@ _MIN_TOTAL_SCORED = 5
 _MAX_PRICE_WINDOW_HOURS = 6
 
 
-# ---------------------------------------------------------------------------
-# File I/O helpers — delegate to file_utils when available
-# ---------------------------------------------------------------------------
-
-def _load_json(path, default=None):
-    """Load JSON, falling back to file_utils if available."""
-    try:
-        from portfolio.file_utils import load_json
-        return load_json(path, default=default)
-    except ImportError:
-        try:
-            return json.loads(Path(path).read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError, ValueError):
-            return default
-
-
-def _load_jsonl(path, limit=None):
-    """Load JSONL, falling back to file_utils if available."""
-    try:
-        from portfolio.file_utils import load_jsonl
-        return load_jsonl(path, limit=limit)
-    except ImportError:
-        entries = []
-        try:
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            entries.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            continue
-        except FileNotFoundError:
-            pass
-        return entries
-
-
-def _atomic_write_json(path, data):
-    """Atomic JSON write, falling back to file_utils if available."""
-    try:
-        from portfolio.file_utils import atomic_write_json
-        atomic_write_json(path, data)
-    except ImportError:
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        Path(path).write_text(
-            json.dumps(data, indent=2, default=str, ensure_ascii=False),
-            encoding="utf-8",
-        )
-
-
-def _atomic_write_jsonl(path, entries):
-    """Atomic JSONL rewrite, falling back to file_utils if available."""
-    try:
-        from portfolio.file_utils import atomic_write_jsonl
-        atomic_write_jsonl(path, entries)
-    except ImportError:
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            for entry in entries:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-
 def _atomic_append_jsonl(path, entries):
-    """Append multiple entries to a JSONL file without rewriting.
-
-    Uses file_utils.atomic_append_jsonl (single-entry) if available,
-    otherwise appends directly.
-    """
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        for entry in entries:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    """Append multiple entries to a JSONL file."""
+    for entry in entries:
+        _atomic_append_jsonl_single(path, entry)
 
 
 # ---------------------------------------------------------------------------
