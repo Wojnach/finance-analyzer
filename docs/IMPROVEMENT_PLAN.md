@@ -1,133 +1,177 @@
 # Improvement Plan
 
-Updated: 2026-03-14
-Branch: improve/auto-session-2026-03-14
+Updated: 2026-03-16
+Branch: improve/auto-session-2026-03-16
 
-Previous sessions: 2026-03-05 through 2026-03-13.
+Previous sessions: 2026-03-05 through 2026-03-14.
 
-## Session Plan (2026-03-14)
+## Session Plan (2026-03-16)
 
-### Theme: Complete IO Safety Sweep
+### Theme: Signal Health Tracking & Dynamic Applicable Count
 
-Commit `8246657` ("fix(io-safety): replace raw json.loads with load_json and
-atomic_append_jsonl") addressed 3 files (health.py, outcome_tracker.py,
-reporting.py). This session completes the sweep across all remaining portfolio
-modules — 37 raw `json.loads(path.read_text())` calls and 3 non-atomic file
-writes remain.
+Previous sessions completed the IO safety sweep (BUG-47 through BUG-50, REF-8). This
+session addresses signal reliability infrastructure: persistent failure tracking,
+dynamic `total_applicable` computation, and remaining non-atomic JSONL appends.
 
 ### 1) Bugs & Problems Found
 
-#### BUG-47 (P2): 37 raw `json.loads(path.read_text())` in portfolio/ modules — TOCTOU risk
+#### BUG-51 (P1): Signal failure tracking is ephemeral — no persistent record
 
-- **Files** (20 modules):
-  - `accuracy_stats.py:357,373,387` — cache reads
-  - `alpha_vantage.py:44` — cache read
-  - `analyze.py:75,265,304,363,613` — portfolio/summary/config reads
-  - `autonomous.py:676` — compact summary read
-  - `avanza_client.py:41` — config read
-  - `avanza_orders.py:35` — pending orders read
-  - `avanza_session.py:53,83` — session state reads
-  - `avanza_tracker.py:37` — config read
-  - `bigbet.py:40,91` — state and summary reads
-  - `daily_digest.py:204` — bold state read
-  - `focus_analysis.py:161,162` — summary and config reads
-  - `forecast_signal.py:251` — summary read
-  - `iskbets.py:45,75,264` — config, state, summary reads
-  - `journal.py:183,432,445,452` — portfolio/config/summary reads
-  - `main.py:461,696,697,698` — config and reporting reads
-  - `onchain_data.py:66` — cache read
-  - `perception_gate.py:96` — config read
-  - `prophecy.py:65` — beliefs read
-  - `telegram_notifications.py:126` — bold state read
-- **Issue**: All use the `json.loads(path.read_text())` pattern which:
-  1. Can read partial content during concurrent atomic rewrites (TOCTOU)
-  2. Crashes on empty files (JSONDecodeError) instead of returning a default
-  3. Duplicates error handling that `load_json()` already provides
-- **Fix**: Replace with `load_json(path, default=...)` from `file_utils`.
-  Each call needs the right default value (usually `{}` or `None`).
-- **Impact**: Medium. Prevents crash-on-corrupt-file and aligns with the
-  established TOCTOU-safe pattern.
+- **File**: `portfolio/signal_engine.py:693-696`
+- **Issue**: When a signal raises an exception during `generate_signal()`, the failure
+  is logged via `logger.warning()` and stored in `extra_info["_signal_failures"]`, but
+  this dict is recreated each cycle. There is no persistent record of which signals
+  fail, how often, or when they last succeeded. If a signal silently degrades (e.g.,
+  Kronos at 0.5% success rate), the only way to discover it is manually checking logs.
+- **Fix**: Add `update_signal_health(signal_name, success: bool)` to `health.py` that
+  persists per-signal failure counts and timestamps to `data/health_state.json`. Call
+  it from the signal execution loop in `signal_engine.py`.
+- **Impact**: High. Enables automatic detection of degraded signals and surfaces
+  failure rates in Layer 2 context.
 
-#### BUG-48 (P2): 3 non-atomic JSON/JSONL writes — corruption risk on crash
+#### BUG-52 (P2): `total_applicable` hardcoded, doesn't reflect actual signal availability
+
+- **File**: `portfolio/signal_engine.py:723-730`
+- **Issue**: `total_applicable` is hardcoded: 27 for crypto, 25 for stocks/metals.
+  But 3 signals are disabled (ML, funding, custom_lora), and others may fail at
+  runtime (Kronos ~0.5%, claude_fundamental requires API key). The hardcoded count
+  inflates abstention rates and misrepresents signal coverage to Layer 2.
+- **Fix**: Compute `total_applicable` dynamically from `SIGNAL_NAMES` minus
+  `DISABLED_SIGNALS` minus signals that failed this cycle (from BUG-51 tracking).
+  Also account for signals that don't apply to certain asset classes (e.g.,
+  futures_flow only applies to crypto).
+- **Impact**: Medium. More accurate confidence reporting.
+
+#### BUG-53 (P2): 7 modules use non-atomic JSONL appends
 
 - **Files**:
-  - `prophecy.py:78` — `save_beliefs()` uses `open("w")` + `json.dump()`
-  - `signal_history.py:49` — `_save_history()` uses `open("w")` for JSONL rewrite
-  - `forecast_accuracy.py:339` — `_write_predictions()` uses `open("w")` for JSONL rewrite
-- **Issue**: If the process crashes or is killed mid-write, the file is left
-  partially written (truncated or empty), losing all data.
-- **Fix**: Use `atomic_write_json()` for prophecy.py. For the JSONL writers,
-  use a tempfile-then-rename pattern (new `atomic_write_jsonl()` helper).
-- **Impact**: Medium. prophecy.json is read every Layer 2 invocation.
+  - `portfolio/forecast_signal.py:296`
+  - `portfolio/sentiment.py:398`
+  - `portfolio/regime_alerts.py:98`
+  - `portfolio/risk_management.py:433`
+  - `portfolio/signals/forecast.py:175,801`
+  - `portfolio/weekly_digest.py:287`
+  - `portfolio/orb_postmortem.py:135`
+- **Issue**: These files use raw `open("a") + write()` instead of
+  `atomic_append_jsonl()` from `file_utils`. While less dangerous than non-atomic
+  writes (append doesn't truncate), they lack flush+fsync guarantees.
+- **Fix**: Replace with `atomic_append_jsonl()`.
+- **Impact**: Low-medium. Consistency with established pattern.
 
-#### BUG-49 (P2): Manual JSONL reading loops instead of `load_jsonl()`
+#### BUG-54 (P3): `_compute_adx()` called repeatedly without caching
 
-- **Files**:
-  - `analyze.py:53-65` — `_load_journal_for_ticker()` manual JSONL parse
-  - `signal_history.py:28-39` — `_load_history()` manual JSONL parse
-  - `accuracy_stats.py:37-44` — `load_entries()` JSONL fallback manual parse
-  - `equity_curve.py:48-56` — JSONL manual parse
-  - `focus_analysis.py:87-95` — JSONL manual parse
-- **Issue**: Duplicates the JSONL parsing logic that `load_jsonl()` handles.
-- **Fix**: Replace with `load_jsonl()` where possible.
-- **Impact**: Low. DRY improvement and consistent error handling.
+- **File**: `portfolio/signal_engine.py` (within confidence penalties)
+- **Issue**: ADX computation iterates the full kline array each call. Not cached
+  like other indicator values. Minor perf waste on each cycle.
+- **Fix**: Cache ADX in the indicators cache alongside RSI/MACD/etc.
+- **Impact**: Low. Minor performance improvement.
 
-#### BUG-50 (P3): `signal_history._save_history()` loads then rewrites entire file
+#### BUG-55 (P3): `fin_evolve.py` has dead fallback wrappers for file_utils
 
-- **File**: `portfolio/signal_history.py:42-51,67-95`
-- **Issue**: Non-atomic full-file rewrite. Crash during write loses all history.
-- **Fix**: Use atomic write pattern from REF-8.
-- **Impact**: Low.
+- **File**: `portfolio/fin_evolve.py:1-20`
+- **Issue**: Has local `_load_json()` / `_load_jsonl()` wrappers with
+  `ImportError` fallback to raw `json.loads`. Since `file_utils` is guaranteed
+  to exist (it's in the same package), the fallback is dead code.
+- **Fix**: Replace with direct `from portfolio.file_utils import load_json, load_jsonl`.
+- **Impact**: Low. Code hygiene.
 
-### 2) Refactoring
+### 2) Architecture Improvements
 
-#### REF-8: Add `atomic_write_jsonl()` helper to file_utils.py
+#### ARCH-12: Signal failure tracking and health surfacing
 
-- **File**: `portfolio/file_utils.py`
-- **Issue**: `prune_jsonl()` has the tempfile pattern for JSONL rewrite but it's
-  embedded in pruning logic. Extract reusable `atomic_write_jsonl(path, entries)`.
-- **Impact**: Enables safe JSONL rewrites for BUG-48 and BUG-50.
+- **Files**: `portfolio/health.py`, `portfolio/signal_engine.py`, `portfolio/reporting.py`
+- **What**: Persistent per-signal health metrics: failure count, last success/failure
+  timestamps, rolling success rate (7-day window). Surfaced in
+  `agent_summary_compact.json → signal_health` section for Layer 2 awareness.
+- **Why**: Currently no automated detection of signal degradation. Kronos was at
+  0.5% success rate for weeks before manual discovery. Health tracking enables
+  auto-alerting and dynamic signal weighting.
+- **How**: `health.py` gets `update_signal_health()` + `get_signal_health()`.
+  `signal_engine.py` calls it after each signal execution. `reporting.py` includes
+  health summary in compact output.
 
-### 3) Test Coverage
+#### ARCH-14: Dynamic `total_applicable` computation
 
-#### TEST-11: Verify IO safety of replaced calls
+- **Files**: `portfolio/signal_engine.py`, `portfolio/tickers.py`
+- **What**: Replace hardcoded 27/25 with computed value from active signal list,
+  accounting for disabled signals and per-asset-class applicability.
+- **Why**: Hardcoded values become wrong when signals are added/removed/disabled.
+  Currently 3 signals are disabled but still counted as applicable.
+- **How**: `_compute_applicable_count(sector)` function using `SIGNAL_NAMES`,
+  `DISABLED_SIGNALS`, and per-signal asset class restrictions.
 
-- **File**: `tests/test_io_safety_sweep.py`
-- Test that each modified module imports `load_json`/`load_jsonl` and handles
-  missing/corrupt files gracefully.
+### 3) Features
 
-### 4) Dependency/Ordering
+#### FEAT-2: Signal failure rate in accuracy reports
 
-#### Batch 1: Add `atomic_write_jsonl()` helper (REF-8)
-- Files: `portfolio/file_utils.py`
-- Zero-risk — additive only
+- **File**: `portfolio/accuracy_stats.py`
+- **What**: Include signal failure rate (from ARCH-12 health data) alongside
+  accuracy stats in the `--accuracy` CLI output and in `agent_summary_compact.json`.
+- **Why**: A signal with 90% accuracy but 80% failure rate is effectively only
+  voting 20% of the time — that context matters for Layer 2 decisions.
 
-#### Batch 2: IO safety sweep — core modules (BUG-47 partial, BUG-48, BUG-49, BUG-50)
-- Files: `portfolio/accuracy_stats.py`, `portfolio/bigbet.py`,
-  `portfolio/prophecy.py`, `portfolio/autonomous.py`,
-  `portfolio/daily_digest.py`, `portfolio/forecast_signal.py`,
-  `portfolio/onchain_data.py`, `portfolio/perception_gate.py`,
-  `portfolio/telegram_notifications.py`, `portfolio/signal_history.py`,
-  `portfolio/forecast_accuracy.py`, `portfolio/alpha_vantage.py`
-- ~20 replacements
+### 4) Refactoring
 
-#### Batch 3: IO safety sweep — Avanza + analysis + remaining modules (BUG-47 remainder)
-- Files: `portfolio/analyze.py`, `portfolio/avanza_client.py`,
-  `portfolio/avanza_orders.py`, `portfolio/avanza_session.py`,
-  `portfolio/avanza_tracker.py`, `portfolio/focus_analysis.py`,
-  `portfolio/iskbets.py`, `portfolio/journal.py`, `portfolio/main.py`,
-  `portfolio/equity_curve.py`, `portfolio/cumulative_tracker.py`,
-  `portfolio/local_llm_report.py`
-- ~20 replacements
+#### REF-9: Consolidate JSONL append pattern
 
-#### Batch 4: Tests (TEST-11)
-- Files: `tests/test_io_safety_sweep.py`
+- **Files**: 7 files listed in BUG-53
+- **What**: Replace raw `open("a")` JSONL appends with `atomic_append_jsonl()`.
+- **Why**: Consistency, flush+fsync guarantees, error handling.
+
+#### REF-10: Remove dead `fin_evolve.py` fallback wrappers
+
+- **File**: `portfolio/fin_evolve.py`
+- **What**: Replace `_load_json` / `_load_jsonl` with direct `file_utils` imports.
+- **Why**: Dead code that obscures actual dependencies.
+
+### 5) Test Coverage
+
+#### TEST-12: Signal health tracking tests
+
+- **File**: `tests/test_signal_health.py`
+- Tests for `update_signal_health()`, `get_signal_health()`, rolling window,
+  persistence across restarts, integration with `generate_signal()`.
+
+#### TEST-13: Dynamic applicable count tests
+
+- **File**: `tests/test_signal_engine_core.py` (extend existing)
+- Tests for `_compute_applicable_count()` with different sectors and disabled
+  signal configurations.
+
+### 6) Dependency/Ordering
+
+#### Batch 1: Signal health infrastructure (BUG-51 + ARCH-12)
+- Files: `portfolio/health.py`, `portfolio/signal_engine.py`
+- Tests: `tests/test_signal_health.py`
+- Adds `update_signal_health()` / `get_signal_health()` to health.py
+- Wires signal_engine.py to call health tracking after each signal
+- Zero-risk to existing behavior — additive only
+
+#### Batch 2: Dynamic applicable count + JSONL consolidation (BUG-52 + BUG-53 + REF-9)
+- Files: `portfolio/signal_engine.py`, `portfolio/tickers.py`,
+  `portfolio/forecast_signal.py`, `portfolio/sentiment.py`,
+  `portfolio/regime_alerts.py`, `portfolio/risk_management.py`,
+  `portfolio/signals/forecast.py`, `portfolio/weekly_digest.py`,
+  `portfolio/orb_postmortem.py`
+- Tests: extend `tests/test_signal_engine_core.py`
+- Depends on Batch 1 (uses health data for "actually available" count)
+
+#### Batch 3: Reporting integration + cleanup (FEAT-2 + REF-10 + BUG-54 + BUG-55)
+- Files: `portfolio/reporting.py`, `portfolio/accuracy_stats.py`,
+  `portfolio/fin_evolve.py`, `portfolio/signal_engine.py`
+- Depends on Batch 1+2 (surfaces health data in reports)
+
+#### Batch 4: Final tests + documentation
+- Files: `tests/test_signal_health.py` (verify all), `docs/SYSTEM_OVERVIEW.md`
+- Run full test suite, verify no regressions
 
 ## Summary
 
 | Category | Count | Items |
 |----------|-------|-------|
-| Bugs | 4 | BUG-47 through BUG-50 |
-| Refactoring | 1 | REF-8 |
-| Test Coverage | 1 | TEST-11 |
-| Batches | 4 | Batch 1 helper → Batch 2+3 sweep → Batch 4 tests |
+| Bugs | 5 | BUG-51 through BUG-55 |
+| Architecture | 2 | ARCH-12, ARCH-14 |
+| Features | 1 | FEAT-2 |
+| Refactoring | 2 | REF-9, REF-10 |
+| Test Coverage | 2 | TEST-12, TEST-13 |
+| Batches | 4 | Batch 1 health → Batch 2 dynamic+JSONL → Batch 3 reporting → Batch 4 tests |

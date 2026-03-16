@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-03-12
-Branch: worktree-auto-session-2026-03-12
+Updated: 2026-03-16
+Branch: improve/auto-session-2026-03-16
 
 ## 1) Architecture Summary
 
@@ -177,25 +177,34 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
 - **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
 
-## 9) Known Issues (as of 2026-03-12)
+## 9) Known Issues (as of 2026-03-16)
 
 - BUG-15 through BUG-22: Fixed in 2026-03-08 session
 - BUG-23 through BUG-27: Fixed in 2026-03-09 session (signal validation, None ticker, OSError, heartbeat, pass cleanup)
-- BUG-28: Enhanced signal failures silently count as HOLD — no tracking or surfacing
-- BUG-29: `_vote_correct()` treats 0% change as incorrect — biases accuracy downward in flat markets
+- BUG-28: Enhanced signal failures silently count as HOLD — no tracking or surfacing (addressed by ARCH-12)
+- BUG-29: `_vote_correct()` treats 0% change as incorrect — fixed with `_MIN_CHANGE_PCT` threshold
 - BUG-30: `load_json()` TOCTOU race — fixed in 2026-03-10 session
-- BUG-47 through BUG-50: Fixed in 2026-03-14 session (IO safety sweep: raw json.loads, non-atomic writes, manual JSONL loops)
-- BUG-31: `_compute_adx()` not cached, uses NaN propagation via `replace(0, np.nan)`
+- BUG-31: `_compute_adx()` not cached, uses NaN propagation via `replace(0, np.nan)` — BUG-54
 - BUG-32: main.py re-exports ~50 private symbols (documentation only)
 - BUG-33: Trap detection relies on undocumented assumption about `df` timeframe
 - BUG-34 through BUG-38: Fixed in 2026-03-11 session (portfolio_mgr TOCTOU, health TOCTOU, inversion weight cap)
 - BUG-39 through BUG-46: Fixed in 2026-03-12 session (agent completion wiring, digest/daily_digest state isolation, TOCTOU-safe I/O in reporting+trigger, JSONL tail-read optimization, digest load limits, config dedup)
+- BUG-47 through BUG-50: Fixed in 2026-03-14 session (IO safety sweep: raw json.loads, non-atomic writes, manual JSONL loops)
+- BUG-51 (P1): Signal failure tracking ephemeral — no persistent record of degradation (2026-03-16)
+- BUG-52 (P2): `total_applicable` hardcoded at 27/25, doesn't account for disabled/failing signals (2026-03-16)
+- BUG-53 (P2): 7 modules use non-atomic JSONL appends instead of `atomic_append_jsonl()` (2026-03-16)
+- BUG-54 (P3): `_compute_adx()` not cached in indicator cache (2026-03-16)
+- BUG-55 (P3): `fin_evolve.py` has dead ImportError fallback wrappers for file_utils (2026-03-16)
 - ARCH-10: Signal result validation centralized in `_validate_signal_result()`
 - ARCH-11: Confidence caps enforced via `max_confidence` in signal registry
-- ARCH-12: Signal failure tracking and surfacing (planned)
+- ARCH-12: Signal failure tracking and health surfacing (in progress, 2026-03-16)
 - ARCH-13: Accuracy tolerance for flat markets (planned)
+- ARCH-14: Dynamic `total_applicable` computation (in progress, 2026-03-16)
 - ARCH-15: Centralized JSONL tail-read utility `last_jsonl_entry()` in `file_utils.py` (done 2026-03-12)
 - REF-3: Candlestick `patterns_detected` moved from top-level to `indicators` dict
 - REF-7: Removed legacy `trigger_state.json` migration in `signal_engine.py` (done 2026-03-12)
+- REF-9: Consolidate 7 raw JSONL appends to `atomic_append_jsonl()` (in progress, 2026-03-16)
+- REF-10: Remove dead `fin_evolve.py` fallback wrappers (in progress, 2026-03-16)
+- FEAT-2: Signal failure rate in accuracy reports (in progress, 2026-03-16)
 - TEST coverage: candlestick (57 tests), fibonacci (51 tests), structure (32 tests) — formerly zero
 - ~3,360 tests across 111+ test files (including 34 IO safety sweep tests)
