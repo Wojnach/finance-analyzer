@@ -13,7 +13,7 @@ import json
 import logging
 import pathlib
 
-from portfolio.file_utils import load_json
+from portfolio.file_utils import atomic_append_jsonl, load_json
 
 logger = logging.getLogger(__name__)
 
@@ -430,8 +430,7 @@ def log_portfolio_value(patient_path: str | None = None,
     }
 
     history_path = DATA_DIR / "portfolio_value_history.jsonl"
-    with open(history_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    atomic_append_jsonl(history_path, entry)
 
 
 def transaction_cost_analysis(portfolio: dict) -> dict:

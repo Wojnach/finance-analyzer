@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Optional
 
+from portfolio.file_utils import atomic_append_jsonl
 from portfolio.orb_predictor import ORBPredictor, Prediction
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -132,8 +133,7 @@ def log_postmortem(result: PostmortemResult, filepath: str = str(POSTMORTEM_PATH
     """Append one JSON line per day to the postmortem log."""
     entry = asdict(result)
     entry["logged_at"] = datetime.now(timezone.utc).isoformat()
-    with open(filepath, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    atomic_append_jsonl(filepath, entry)
 
 
 def load_postmortem_history(filepath: str = str(POSTMORTEM_PATH)) -> list[PostmortemResult]:

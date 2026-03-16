@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 import platform
 from pathlib import Path
 
+from portfolio.file_utils import atomic_append_jsonl
 from portfolio.http_retry import fetch_json
 
 logger = logging.getLogger("portfolio.sentiment")
@@ -395,8 +396,7 @@ def _log_ab_result(ticker, primary_result, shadow_results):
             },
             "shadow": shadow_results,
         }
-        with open(AB_LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        atomic_append_jsonl(AB_LOG_FILE, entry)
     except Exception:
         logger.debug("Failed to log A/B result", exc_info=True)
 

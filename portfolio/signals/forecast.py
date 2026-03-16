@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from portfolio.file_utils import atomic_append_jsonl
 from portfolio.signal_utils import majority_vote
 from portfolio.shared_state import _cached
 
@@ -172,8 +173,7 @@ def _log_health(model: str, ticker: str, success: bool, duration_ms: int, error:
         }
         if error:
             entry["error"] = error[:200]
-        with open(_HEALTH_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        atomic_append_jsonl(_HEALTH_FILE, entry)
     except Exception as e:
         logger.debug("Forecast health logging failed: %s", e)
 
@@ -798,8 +798,7 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
                 entry["kronos"] = kronos["results"]
             if chronos:
                 entry["chronos"] = chronos
-            with open(_PREDICTIONS_FILE, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            atomic_append_jsonl(_PREDICTIONS_FILE, entry)
             _last_prediction_ts[ticker] = now_mono
     except Exception:
         logger.debug("Failed to log forecast prediction", exc_info=True)

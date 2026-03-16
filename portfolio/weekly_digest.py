@@ -14,7 +14,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from portfolio.file_utils import load_json, load_jsonl
+from portfolio.file_utils import atomic_append_jsonl, load_json, load_jsonl
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -284,8 +284,7 @@ def send_digest(msg):
         "text": msg,
         "type": "weekly_digest",
     }
-    with open(log_file, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    atomic_append_jsonl(log_file, entry)
 
     # Send via shared module
     try:

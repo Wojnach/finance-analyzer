@@ -12,7 +12,7 @@ import numpy as np
 
 from portfolio.shared_state import _cached, FEAR_GREED_TTL, SENTIMENT_TTL, MINISTRAL_TTL, ML_SIGNAL_TTL, FUNDING_RATE_TTL, VOLUME_TTL
 from portfolio.indicators import detect_regime
-from portfolio.tickers import CRYPTO_SYMBOLS, STOCK_SYMBOLS, METALS_SYMBOLS
+from portfolio.tickers import CRYPTO_SYMBOLS, STOCK_SYMBOLS, METALS_SYMBOLS, SIGNAL_NAMES, DISABLED_SIGNALS
 from portfolio.signal_registry import get_enhanced_signals, load_signal_func
 from portfolio.signal_utils import true_range
 
@@ -84,6 +84,32 @@ REGIME_WEIGHTS = {
     "ranging": {"rsi": 1.5, "bb": 1.5, "ema": 0.5, "macd": 0.5},
     "high-vol": {"bb": 1.5, "volume": 1.3, "ema": 0.5},
 }
+
+
+# Signals that only apply to specific asset classes
+_CRYPTO_ONLY_SIGNALS = {"futures_flow", "funding"}
+_CORE_SIGNAL_SET = {"rsi", "macd", "ema", "bb", "fear_greed", "sentiment", "ministral", "ml", "funding", "volume", "claude_fundamental"}
+
+
+def _compute_applicable_count(ticker: str) -> int:
+    """Compute total applicable signals for a ticker dynamically.
+
+    Accounts for disabled signals and per-asset-class restrictions
+    instead of using hardcoded 27/25 values.
+    """
+    is_crypto = ticker in CRYPTO_SYMBOLS
+    count = 0
+    for sig in SIGNAL_NAMES:
+        if sig in DISABLED_SIGNALS:
+            continue
+        # futures_flow only applies to crypto
+        if sig in _CRYPTO_ONLY_SIGNALS and not is_crypto:
+            continue
+        # ministral (CryptoTrader-LM) only runs for crypto
+        if sig == "ministral" and not is_crypto:
+            continue
+        count += 1
+    return count
 
 
 _VALID_ACTIONS = frozenset({"BUY", "SELL", "HOLD"})
@@ -726,19 +752,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     core_sell = sum(1 for s in CORE_SIGNAL_NAMES if votes.get(s) == "SELL")
     core_active = core_buy + core_sell
 
-    # Total applicable signals:
-    # Crypto: 8 core (11 original - custom_lora, ml, funding disabled) + 19 enhanced = 27
-    # Metals: 7 core + 18 enhanced = 25 (futures_flow only applies to crypto)
-    # Stocks: 7 core + 18 enhanced = 25
-    # (enhanced: 16 original + forecast + claude_fundamental + futures_flow[crypto only])
-    is_crypto = ticker in CRYPTO_SYMBOLS
-    is_metal = ticker in METALS_SYMBOLS
-    if is_crypto:
-        total_applicable = 27  # 8 core + 19 enhanced
-    elif is_metal:
-        total_applicable = 25  # 7 core + 18 enhanced
-    else:
-        total_applicable = 25  # 7 core + 18 enhanced
+    # Total applicable signals: computed dynamically from SIGNAL_NAMES
+    # minus DISABLED_SIGNALS minus per-asset-class exclusions.
+    total_applicable = _compute_applicable_count(ticker)
 
     active_voters = buy + sell
     if ticker in STOCK_SYMBOLS:

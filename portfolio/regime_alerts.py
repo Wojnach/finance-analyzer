@@ -9,7 +9,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from portfolio.file_utils import load_json, load_jsonl
+from portfolio.file_utils import atomic_append_jsonl, load_json, load_jsonl
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -95,8 +95,7 @@ def log_regime_change(ticker, old_regime, new_regime):
         "old_regime": old_regime,
         "new_regime": new_regime,
     }
-    with open(REGIME_HISTORY_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    atomic_append_jsonl(REGIME_HISTORY_FILE, entry)
 
 
 def get_regime_distribution(ticker, days=7):

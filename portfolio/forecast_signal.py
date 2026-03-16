@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from portfolio.file_utils import load_json
+from portfolio.file_utils import atomic_append_jsonl, load_json
 
 logger = logging.getLogger("portfolio.forecast")
 
@@ -293,9 +293,8 @@ def run_forecasts(tickers=None):
 
     # Append all predictions
     if results:
-        with open(PREDICTIONS_FILE, "a", encoding="utf-8") as f:
-            for entry in results:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        for entry in results:
+            atomic_append_jsonl(PREDICTIONS_FILE, entry)
         logger.info("Logged %d forecast predictions", len(results))
 
     return results
