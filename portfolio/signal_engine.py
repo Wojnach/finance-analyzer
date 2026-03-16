@@ -701,6 +701,17 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                     "%s: %d enhanced signals failed: %s",
                     ticker, len(_signal_failures), ", ".join(_signal_failures),
                 )
+
+        # Persist signal health (single batch write for all enhanced signals)
+        try:
+            from portfolio.health import update_signal_health_batch
+            health_results = {
+                sig_name: (sig_name not in _signal_failures)
+                for sig_name in _enhanced_entries
+            }
+            update_signal_health_batch(health_results)
+        except Exception:
+            pass  # health tracking is best-effort
     else:
         for sig_name in _enhanced_entries:
             votes[sig_name] = "HOLD"

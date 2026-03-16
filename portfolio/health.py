@@ -130,6 +130,89 @@ def update_module_failures(failures: list):
     atomic_write_json(HEALTH_FILE, state)
 
 
+def update_signal_health(signal_name: str, success: bool):
+    """Record a single signal execution result.
+
+    For batch updates (multiple signals per cycle), prefer
+    update_signal_health_batch() to avoid repeated disk writes.
+    """
+    update_signal_health_batch({signal_name: success})
+
+
+def update_signal_health_batch(results: dict):
+    """Record multiple signal execution results in a single disk write.
+
+    Args:
+        results: dict of {signal_name: bool} where True=success, False=failure.
+    """
+    if not results:
+        return
+    state = load_health()
+    sh = state.setdefault("signal_health", {})
+    now = datetime.now(timezone.utc).isoformat()
+
+    for signal_name, success in results.items():
+        entry = sh.setdefault(signal_name, {
+            "total_calls": 0,
+            "total_failures": 0,
+            "last_success": None,
+            "last_failure": None,
+            "recent_results": [],
+        })
+        entry["total_calls"] = entry.get("total_calls", 0) + 1
+        if success:
+            entry["last_success"] = now
+        else:
+            entry["total_failures"] = entry.get("total_failures", 0) + 1
+            entry["last_failure"] = now
+
+        # Rolling window: keep last 50 results for recent success rate
+        recent = entry.get("recent_results", [])
+        recent.append(success)
+        if len(recent) > 50:
+            recent = recent[-50:]
+        entry["recent_results"] = recent
+
+    atomic_write_json(HEALTH_FILE, state)
+
+
+def get_signal_health(signal_name: str = None) -> dict:
+    """Get signal health data.
+
+    If signal_name is given, returns that signal's health dict.
+    Otherwise returns the full signal_health dict for all signals.
+    """
+    state = load_health()
+    sh = state.get("signal_health", {})
+    if signal_name:
+        return sh.get(signal_name, {})
+    return sh
+
+
+def get_signal_health_summary() -> dict:
+    """Compact signal health summary for reporting.
+
+    Returns dict of signal_name -> {success_rate, total_calls, total_failures,
+    last_failure} for signals with at least 1 call.
+    """
+    sh = get_signal_health()
+    summary = {}
+    for sig_name, data in sh.items():
+        total = data.get("total_calls", 0)
+        if total == 0:
+            continue
+        failures = data.get("total_failures", 0)
+        recent = data.get("recent_results", [])
+        recent_rate = (sum(1 for r in recent if r) / len(recent) * 100) if recent else 0
+        summary[sig_name] = {
+            "success_rate_pct": round(recent_rate, 1),
+            "total_calls": total,
+            "total_failures": failures,
+            "last_failure": data.get("last_failure"),
+        }
+    return summary
+
+
 def get_health_summary() -> dict:
     """Return a summary dict suitable for API/dashboard consumption."""
     state = load_health()
@@ -148,6 +231,7 @@ def get_health_summary() -> dict:
         "agent_silent": agent_silence["silent"],
         "agent_silence_seconds": agent_silence["age_seconds"],
         "module_failures": state.get("last_module_failures"),
+        "signal_health": get_signal_health_summary(),
     }
     # Include circuit breaker status if data_collector has been imported
     try:
