@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-03-17
+- **Model/runtime hardening session**: landed the `feat/model-upgrades` work on `main`, moving both local trading LLMs onto the native CUDA llama.cpp path and tightening the Windows loop launcher.
+- **Qwen3 upgrade**: `qwen3_trader.py` now runs through `llama-completion` on CUDA 13.1, gained batch-mode support for multi-ticker runs, and exposes explicit native asset validation via `load_model()` so missing GGUF/binary paths fail clearly.
+- **Ministral-3 upgrade**: `ministral_trader.py` now prefers native `llama-completion` inference for Ministral-3-8B and falls back cleanly to the legacy Ministral-8B path when native arch/load errors occur.
+- **GPU gate**: added exclusive GPU/VRAM coordination with VRAM usage logging across all four GPU-backed models (Ministral, Qwen3, Chronos, Kronos), then tightened the wait timeout from 60s to 15s after measuring real lock hold times.
+- **Loop crash fix**: `scripts/win/pf-loop.bat` now sets `PYTHONPATH=Q:\finance-analyzer` before launching the loop to prevent `ModuleNotFoundError` crash loops in detached Windows contexts, and `scripts/restart_loop.py` mirrors the same safeguard for manual restarts.
+
 ## 2026-03-14 (autonomous improvement session)
 - **IO safety sweep complete**: Replaced all 37+ raw `json.loads(path.read_text())` calls across 23 portfolio modules with `load_json()` from `file_utils` — eliminates TOCTOU race conditions and crash-on-corrupt-file.
 - **REF-8**: Added `atomic_write_jsonl()` helper to `file_utils.py` for safe full-file JSONL rewrites.

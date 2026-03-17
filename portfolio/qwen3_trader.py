@@ -26,16 +26,31 @@ def _can_use_native():
     return os.path.exists(MODEL_PATH) and os.path.exists(LLAMA_CLI)
 
 
+def load_model():
+    """Validate native Qwen3 assets and return the resolved runtime paths."""
+    missing = []
+    if not os.path.exists(MODEL_PATH):
+        missing.append(MODEL_PATH)
+    if not os.path.exists(LLAMA_CLI):
+        missing.append(LLAMA_CLI)
+    if missing:
+        raise FileNotFoundError(
+            f"Qwen3 native assets missing: {', '.join(missing)}"
+        )
+    return {"model_path": MODEL_PATH, "llama_cli": LLAMA_CLI}
+
+
 def _run_native(prompt, max_tokens=256):
     """Run inference via native llama-completion binary."""
+    assets = load_model()
     prompt_file = os.path.join(tempfile.gettempdir(), "qwen3_prompt.txt")
     with open(prompt_file, "w", encoding="utf-8") as f:
         f.write(prompt)
 
     proc = subprocess.run(
         [
-            LLAMA_CLI,
-            "-m", MODEL_PATH,
+            assets["llama_cli"],
+            "-m", assets["model_path"],
             "-ngl", "99",
             "-c", "2048",
             "-n", str(max_tokens),

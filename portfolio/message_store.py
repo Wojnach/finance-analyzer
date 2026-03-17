@@ -182,6 +182,15 @@ def send_or_store(msg, config, category="analysis"):
     cleaned = sanitize_message_text(msg)
     should_send = category in SEND_CATEGORIES
 
+    # Global mute gate: skip Telegram send unless category is whitelisted
+    tg_cfg = config.get("telegram", {})
+    if tg_cfg.get("mute_all", False):
+        unmuted = set(tg_cfg.get("unmuted_categories", []))
+        if category not in unmuted:
+            log_message(cleaned, category=category, sent=False)
+            logger.info("Message muted [%s]: %.60s...", category, cleaned.replace("\n", " "))
+            return True
+
     if should_send:
         sent_ok = _do_send_telegram(cleaned, config)
         log_message(cleaned, category=category, sent=sent_ok)

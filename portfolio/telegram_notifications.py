@@ -36,6 +36,10 @@ def send_telegram(msg, config):
     if os.environ.get("NO_TELEGRAM"):
         logger.info("[NO_TELEGRAM] Skipping send")
         return True
+    # Global mute gate
+    if config.get("telegram", {}).get("mute_all", False):
+        logger.info("[mute_all] Skipping send_telegram")
+        return True
     # Layer 1 messages disabled — only Layer 2 (Claude Code) sends Telegram
     # via direct requests.post. To re-enable, set telegram.layer1_messages: true.
     if not config.get("telegram", {}).get("layer1_messages", False):
