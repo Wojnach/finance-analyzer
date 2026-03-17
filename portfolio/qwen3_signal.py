@@ -126,7 +126,7 @@ def get_qwen3_signal(context):
 
     Returns dict with 'action', 'reasoning', 'model' keys.
     """
-    with gpu_gate("qwen3", timeout=60) as acquired:
+    with gpu_gate("qwen3", timeout=15) as acquired:
         if not acquired:
             logger.warning("GPU gate timeout — returning HOLD")
             return {"action": "HOLD", "reasoning": "GPU busy", "model": "Qwen3-8B"}

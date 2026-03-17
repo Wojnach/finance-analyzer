@@ -74,7 +74,7 @@ def _call_model(context, lora_path=None):
 
 def get_ministral_signal(context):
     """Get trading signal from Ministral with GPU gating."""
-    with gpu_gate("ministral", timeout=60) as acquired:
+    with gpu_gate("ministral", timeout=15) as acquired:
         if not acquired:
             logger.warning("GPU gate timeout — returning HOLD")
             return {"original": {"action": "HOLD", "reasoning": "GPU busy", "model": "skipped"}, "custom": None}

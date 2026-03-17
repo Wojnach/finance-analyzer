@@ -245,7 +245,7 @@ def _run_kronos(candles: list[dict], horizons: tuple = (1, 24), _ticker: str = "
         return None
     t0 = time.time()
     try:
-        with gpu_gate("kronos", timeout=60) as acquired:
+        with gpu_gate("kronos", timeout=15) as acquired:
             if not acquired:
                 logger.warning("GPU gate timeout for Kronos %s", _ticker)
                 return None
@@ -323,7 +323,7 @@ def _run_chronos(prices: list[float], horizons: tuple = (1, 24), _ticker: str = 
     if _chronos_circuit_open():
         return None
 
-    with gpu_gate("chronos", timeout=60) as acquired:
+    with gpu_gate("chronos", timeout=15) as acquired:
         if not acquired:
             logger.warning("GPU gate timeout for Chronos %s", _ticker)
             return None
