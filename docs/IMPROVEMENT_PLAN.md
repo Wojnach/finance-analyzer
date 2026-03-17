@@ -1,177 +1,118 @@
 # Improvement Plan
 
-Updated: 2026-03-16
-Branch: improve/auto-session-2026-03-16
+Updated: 2026-03-17
+Branch: improve/auto-session-20260317
 
-Previous sessions: 2026-03-05 through 2026-03-14.
+Previous sessions: 2026-03-05 through 2026-03-16.
 
-## Session Plan (2026-03-16)
+## Session Plan (2026-03-17)
 
-### Theme: Signal Health Tracking & Dynamic Applicable Count
+### Theme: Silent Exception Elimination & Error Visibility
 
-Previous sessions completed the IO safety sweep (BUG-47 through BUG-50, REF-8). This
-session addresses signal reliability infrastructure: persistent failure tracking,
-dynamic `total_applicable` computation, and remaining non-atomic JSONL appends.
+Previous sessions completed signal health tracking (BUG-51), dynamic applicable count
+(BUG-52), atomic JSONL appends (BUG-53), and dead IO fallback removal (BUG-55). This
+session addresses the largest remaining class of hidden failures: silent `except Exception: pass`
+blocks that swallow errors without logging. These are the single biggest source of invisible
+bugs in production.
 
 ### 1) Bugs & Problems Found
 
-#### BUG-51 (P1): Signal failure tracking is ephemeral — no persistent record
+#### BUG-56 (P1): 15+ silent `except Exception: pass` blocks swallow errors
 
-- **File**: `portfolio/signal_engine.py:693-696`
-- **Issue**: When a signal raises an exception during `generate_signal()`, the failure
-  is logged via `logger.warning()` and stored in `extra_info["_signal_failures"]`, but
-  this dict is recreated each cycle. There is no persistent record of which signals
-  fail, how often, or when they last succeeded. If a signal silently degrades (e.g.,
-  Kronos at 0.5% success rate), the only way to discover it is manually checking logs.
-- **Fix**: Add `update_signal_health(signal_name, success: bool)` to `health.py` that
-  persists per-signal failure counts and timestamps to `data/health_state.json`. Call
-  it from the signal execution loop in `signal_engine.py`.
-- **Impact**: High. Enables automatic detection of degraded signals and surfaces
-  failure rates in Layer 2 context.
+- **Files** (highest risk first):
+  - `portfolio/message_store.py:148` — send failure silenced
+  - `portfolio/avanza_session.py:135-148` — 3 separate silent catches in session management
+  - `portfolio/focus_analysis.py:111` — analysis error silenced
+  - `portfolio/agent_invocation.py:310` — agent process cleanup error silenced
+  - `portfolio/analyze.py:233,393` — 2 analysis errors silenced
+  - `portfolio/golddigger/runner.py:291,296,376,381` — 4 golddigger errors silenced
+  - `portfolio/metals_precompute.py:596` — precompute error silenced (has comment "Non-critical")
+  - `portfolio/fin_snipe_manager.py:1363` — snipe manager error silenced
+  - `portfolio/health.py:244` — health status circuit breaker import error silenced
+- **Issue**: When these code paths fail, the system silently continues with potentially
+  stale or missing data. Debugging production issues requires correlating timestamps across
+  multiple log files because the actual failure point is invisible.
+- **Fix**: Replace `except Exception: pass` with `except Exception: logger.debug(...)` at
+  minimum for non-critical paths, or `logger.warning(...)` for paths where failure affects
+  data quality. Keep the pass/continue behavior — just add logging.
+- **Impact**: High. This is the #1 source of invisible production bugs. Every silent failure
+  that gets logged becomes a diagnosable issue instead of a mystery.
 
-#### BUG-52 (P2): `total_applicable` hardcoded, doesn't reflect actual signal availability
+#### BUG-57 (P2): `analyze.py:392` uses non-atomic JSONL append
 
-- **File**: `portfolio/signal_engine.py:723-730`
-- **Issue**: `total_applicable` is hardcoded: 27 for crypto, 25 for stocks/metals.
-  But 3 signals are disabled (ML, funding, custom_lora), and others may fail at
-  runtime (Kronos ~0.5%, claude_fundamental requires API key). The hardcoded count
-  inflates abstention rates and misrepresents signal coverage to Layer 2.
-- **Fix**: Compute `total_applicable` dynamically from `SIGNAL_NAMES` minus
-  `DISABLED_SIGNALS` minus signals that failed this cycle (from BUG-51 tracking).
-  Also account for signals that don't apply to certain asset classes (e.g.,
-  futures_flow only applies to crypto).
-- **Impact**: Medium. More accurate confidence reporting.
+- **File**: `portfolio/analyze.py:390-392`
+- **Issue**: Uses raw `open("a") + write()` instead of `atomic_append_jsonl()` from file_utils.
+  On crash during write, the file could end up with a partial JSON line.
+- **Fix**: Replace with `atomic_append_jsonl(WATCH_LOG_FILE, event)`.
+- **Impact**: Low-medium. `analyze.py` watch log is non-critical, but consistency matters.
 
-#### BUG-53 (P2): 7 modules use non-atomic JSONL appends
+#### BUG-58 (P2): `message_store.py` silently fails on send
 
-- **Files**:
-  - `portfolio/forecast_signal.py:296`
-  - `portfolio/sentiment.py:398`
-  - `portfolio/regime_alerts.py:98`
-  - `portfolio/risk_management.py:433`
-  - `portfolio/signals/forecast.py:175,801`
-  - `portfolio/weekly_digest.py:287`
-  - `portfolio/orb_postmortem.py:135`
-- **Issue**: These files use raw `open("a") + write()` instead of
-  `atomic_append_jsonl()` from `file_utils`. While less dangerous than non-atomic
-  writes (append doesn't truncate), they lack flush+fsync guarantees.
-- **Fix**: Replace with `atomic_append_jsonl()`.
-- **Impact**: Low-medium. Consistency with established pattern.
+- **File**: `portfolio/message_store.py:148`
+- **Issue**: The `except Exception: pass` in message delivery means Telegram send failures
+  are completely invisible. The message is logged to JSONL (good) but delivery failure
+  is never reported.
+- **Fix**: Add `logger.warning("Telegram delivery failed: %s", e)` before the pass.
+  Do NOT raise — message logging should still succeed even if delivery fails.
+- **Impact**: Medium. Users won't know they missed a notification.
 
-#### BUG-54 (P3): `_compute_adx()` called repeatedly without caching
+#### BUG-59 (P3): `avanza_session.py` has 3 silent cleanup catches
 
-- **File**: `portfolio/signal_engine.py` (within confidence penalties)
-- **Issue**: ADX computation iterates the full kline array each call. Not cached
-  like other indicator values. Minor perf waste on each cycle.
-- **Fix**: Cache ADX in the indicators cache alongside RSI/MACD/etc.
-- **Impact**: Low. Minor performance improvement.
-
-#### BUG-55 (P3): `fin_evolve.py` has dead fallback wrappers for file_utils
-
-- **File**: `portfolio/fin_evolve.py:1-20`
-- **Issue**: Has local `_load_json()` / `_load_jsonl()` wrappers with
-  `ImportError` fallback to raw `json.loads`. Since `file_utils` is guaranteed
-  to exist (it's in the same package), the fallback is dead code.
-- **Fix**: Replace with direct `from portfolio.file_utils import load_json, load_jsonl`.
-- **Impact**: Low. Code hygiene.
+- **File**: `portfolio/avanza_session.py:135,141,147`
+- **Issue**: Session cleanup (browser close, page close, etc.) silently catches all
+  exceptions. While cleanup failures are indeed non-critical, they can indicate
+  resource leaks (zombie browser processes, file handle leaks).
+- **Fix**: Add `logger.debug("session cleanup: %s", e)` to each catch block.
+- **Impact**: Low. Helps diagnose resource leaks.
 
 ### 2) Architecture Improvements
 
-#### ARCH-12: Signal failure tracking and health surfacing
+#### ARCH-15: Structured exception logging helper
 
-- **Files**: `portfolio/health.py`, `portfolio/signal_engine.py`, `portfolio/reporting.py`
-- **What**: Persistent per-signal health metrics: failure count, last success/failure
-  timestamps, rolling success rate (7-day window). Surfaced in
-  `agent_summary_compact.json → signal_health` section for Layer 2 awareness.
-- **Why**: Currently no automated detection of signal degradation. Kronos was at
-  0.5% success rate for weeks before manual discovery. Health tracking enables
-  auto-alerting and dynamic signal weighting.
-- **How**: `health.py` gets `update_signal_health()` + `get_signal_health()`.
-  `signal_engine.py` calls it after each signal execution. `reporting.py` includes
-  health summary in compact output.
+- **Files**: `portfolio/file_utils.py` (add helper), multiple consumers
+- **What**: Add a `log_exception(logger, msg, exc, level="debug")` helper that provides
+  a consistent pattern for logging exceptions that shouldn't be raised. This makes the
+  "catch and log" pattern a one-liner instead of repeating `logger.X("...: %s", e)`.
+- **Why**: Currently each silent catch needs manual conversion. A helper makes it trivial
+  to convert `except Exception: pass` to `except Exception as e: log_exception(...)`.
+- **Decision**: Skip this — it's over-engineering. The standard `logger.debug/warning` is
+  sufficient and more readable. Just do the manual conversion.
 
-#### ARCH-14: Dynamic `total_applicable` computation
+### 3) Refactoring TODOs
 
-- **Files**: `portfolio/signal_engine.py`, `portfolio/tickers.py`
-- **What**: Replace hardcoded 27/25 with computed value from active signal list,
-  accounting for disabled signals and per-asset-class applicability.
-- **Why**: Hardcoded values become wrong when signals are added/removed/disabled.
-  Currently 3 signals are disabled but still counted as applicable.
-- **How**: `_compute_applicable_count(sector)` function using `SIGNAL_NAMES`,
-  `DISABLED_SIGNALS`, and per-signal asset class restrictions.
+#### REF-11: Convert silent exception handlers to logged ones
 
-### 3) Features
+- **Scope**: All 15+ `except Exception: pass` blocks identified in BUG-56.
+- **Pattern**: For each block:
+  1. Add `as e` to capture the exception
+  2. Add appropriate log level:
+     - `logger.debug(...)` for truly non-critical cleanup (session close, temp file removal)
+     - `logger.warning(...)` for data-affecting failures (message send, analysis, session mgmt)
+  3. Keep the original control flow (pass/continue/return)
+- **Impact assessment**: Zero behavioral change — only adds logging. No tests should break.
 
-#### FEAT-2: Signal failure rate in accuracy reports
+#### REF-12: Replace raw JSONL append in analyze.py
 
-- **File**: `portfolio/accuracy_stats.py`
-- **What**: Include signal failure rate (from ARCH-12 health data) alongside
-  accuracy stats in the `--accuracy` CLI output and in `agent_summary_compact.json`.
-- **Why**: A signal with 90% accuracy but 80% failure rate is effectively only
-  voting 20% of the time — that context matters for Layer 2 decisions.
+- **Scope**: `portfolio/analyze.py:390-392`
+- **Pattern**: Replace `open("a") + write()` with `atomic_append_jsonl()`.
 
-### 4) Refactoring
+### 4) Dependency/Ordering
 
-#### REF-9: Consolidate JSONL append pattern
+**Batch 1** (REF-11 + BUG-56): Silent exception elimination
+- Files: ~10 portfolio modules
+- Risk: Zero — only adds logging, no behavior change
+- Tests: Run full suite to verify no regressions
 
-- **Files**: 7 files listed in BUG-53
-- **What**: Replace raw `open("a")` JSONL appends with `atomic_append_jsonl()`.
-- **Why**: Consistency, flush+fsync guarantees, error handling.
+**Batch 2** (REF-12 + BUG-57): Atomic JSONL in analyze.py
+- Files: `portfolio/analyze.py`
+- Risk: Near-zero — same behavior, just atomic
+- Tests: Run test_analyze.py if it exists
 
-#### REF-10: Remove dead `fin_evolve.py` fallback wrappers
+### 5) What We're NOT Doing
 
-- **File**: `portfolio/fin_evolve.py`
-- **What**: Replace `_load_json` / `_load_jsonl` with direct `file_utils` imports.
-- **Why**: Dead code that obscures actual dependencies.
-
-### 5) Test Coverage
-
-#### TEST-12: Signal health tracking tests
-
-- **File**: `tests/test_signal_health.py`
-- Tests for `update_signal_health()`, `get_signal_health()`, rolling window,
-  persistence across restarts, integration with `generate_signal()`.
-
-#### TEST-13: Dynamic applicable count tests
-
-- **File**: `tests/test_signal_engine_core.py` (extend existing)
-- Tests for `_compute_applicable_count()` with different sectors and disabled
-  signal configurations.
-
-### 6) Dependency/Ordering
-
-#### Batch 1: Signal health infrastructure (BUG-51 + ARCH-12)
-- Files: `portfolio/health.py`, `portfolio/signal_engine.py`
-- Tests: `tests/test_signal_health.py`
-- Adds `update_signal_health()` / `get_signal_health()` to health.py
-- Wires signal_engine.py to call health tracking after each signal
-- Zero-risk to existing behavior — additive only
-
-#### Batch 2: Dynamic applicable count + JSONL consolidation (BUG-52 + BUG-53 + REF-9)
-- Files: `portfolio/signal_engine.py`, `portfolio/tickers.py`,
-  `portfolio/forecast_signal.py`, `portfolio/sentiment.py`,
-  `portfolio/regime_alerts.py`, `portfolio/risk_management.py`,
-  `portfolio/signals/forecast.py`, `portfolio/weekly_digest.py`,
-  `portfolio/orb_postmortem.py`
-- Tests: extend `tests/test_signal_engine_core.py`
-- Depends on Batch 1 (uses health data for "actually available" count)
-
-#### Batch 3: Reporting integration + cleanup (FEAT-2 + REF-10 + BUG-54 + BUG-55)
-- Files: `portfolio/reporting.py`, `portfolio/accuracy_stats.py`,
-  `portfolio/fin_evolve.py`, `portfolio/signal_engine.py`
-- Depends on Batch 1+2 (surfaces health data in reports)
-
-#### Batch 4: Final tests + documentation
-- Files: `tests/test_signal_health.py` (verify all), `docs/SYSTEM_OVERVIEW.md`
-- Run full test suite, verify no regressions
-
-## Summary
-
-| Category | Count | Items |
-|----------|-------|-------|
-| Bugs | 5 | BUG-51 through BUG-55 |
-| Architecture | 2 | ARCH-12, ARCH-14 |
-| Features | 1 | FEAT-2 |
-| Refactoring | 2 | REF-9, REF-10 |
-| Test Coverage | 2 | TEST-12, TEST-13 |
-| Batches | 4 | Batch 1 health → Batch 2 dynamic+JSONL → Batch 3 reporting → Batch 4 tests |
+- **Not refactoring reporting.py exception handlers**: Those 26 `except Exception:` blocks
+  already have proper `logger.warning()` + `_module_warnings.append()`. They're correct.
+- **Not touching signal modules**: The `except Exception:` blocks in signal modules (calendar,
+  fibonacci, momentum, etc.) are the sub-indicator isolation pattern — each sub-indicator is
+  independently wrapped so one failure doesn't kill the whole signal. These are correct.
+- **Not adding new features**: Focus is purely on error visibility.
