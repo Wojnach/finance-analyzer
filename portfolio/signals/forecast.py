@@ -25,6 +25,7 @@ from pathlib import Path
 import pandas as pd
 
 from portfolio.file_utils import atomic_append_jsonl
+from portfolio.gpu_gate import gpu_gate
 from portfolio.signal_utils import majority_vote
 from portfolio.shared_state import _cached
 
@@ -237,18 +238,28 @@ def _load_candles_ohlcv(ticker: str, periods: int = 168,
 
 
 def _run_kronos(candles: list[dict], horizons: tuple = (1, 24), _ticker: str = "") -> dict | None:
-    """Run Kronos inference via subprocess.
-
-    Reads optimal parameters from config.json → forecast section:
-    - kronos_temperature: sampling temperature (default 1.0, lower = sharper)
-    - kronos_top_p: nucleus sampling threshold (default 0.9)
-    - kronos_samples: number of parallel samples (default 3)
-    """
+    """Run Kronos inference via subprocess with GPU gating."""
     if not _KRONOS_ENABLED:
         return None
     if _kronos_circuit_open():
         return None
     t0 = time.time()
+    try:
+        with gpu_gate("kronos", timeout=60) as acquired:
+            if not acquired:
+                logger.warning("GPU gate timeout for Kronos %s", _ticker)
+                return None
+            return _run_kronos_inner(candles, horizons, _ticker, t0)
+    except Exception as e:
+        ms = round((time.time() - t0) * 1000)
+        logger.warning("Kronos GPU gate error: %s", e)
+        _log_health("kronos", _ticker, False, ms, str(e)[:200])
+        _trip_kronos()
+        return None
+
+
+def _run_kronos_inner(candles, horizons, _ticker, t0):
+    """Kronos inference (called inside GPU gate)."""
     try:
         # Read tunable params from config
         try:
@@ -308,9 +319,19 @@ def _run_kronos(candles: list[dict], horizons: tuple = (1, 24), _ticker: str = "
 
 def _run_chronos(prices: list[float], horizons: tuple = (1, 24), _ticker: str = "",
                  timeout: int | None = None) -> dict | None:
-    """Run Chronos forecast (in-process, lazy-loaded) with timeout protection."""
+    """Run Chronos forecast (in-process, lazy-loaded) with GPU gating and timeout."""
     if _chronos_circuit_open():
         return None
+
+    with gpu_gate("chronos", timeout=60) as acquired:
+        if not acquired:
+            logger.warning("GPU gate timeout for Chronos %s", _ticker)
+            return None
+        return _run_chronos_inner(prices, horizons, _ticker, timeout)
+
+
+def _run_chronos_inner(prices, horizons, _ticker, timeout):
+    """Chronos inference (called inside GPU gate)."""
     t0 = time.time()
     _timeout = timeout or _CHRONOS_TIMEOUT
     try:
