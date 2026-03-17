@@ -76,6 +76,7 @@ SIGNAL_NAMES = [
     "ml",
     "funding",
     "volume",
+    "qwen3",
     # custom_lora removed — disabled signal, was polluting accuracy stats
     # Enhanced composite signals
     "trend",

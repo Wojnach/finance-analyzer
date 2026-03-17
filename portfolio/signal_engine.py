@@ -33,7 +33,7 @@ MIN_VOTERS_STOCK = 3  # stocks have 25 signals (7 core + 18 enhanced) — need 3
 # Enhanced signals can strengthen/weaken but never create consensus alone.
 CORE_SIGNAL_NAMES = frozenset({
     "rsi", "macd", "ema", "bb", "fear_greed", "sentiment",
-    "volume", "ministral", "claude_fundamental",
+    "volume", "ministral", "qwen3", "claude_fundamental",
 })
 
 # Sentiment hysteresis — prevents rapid flip spam from ~50% confidence oscillation
@@ -88,7 +88,7 @@ REGIME_WEIGHTS = {
 
 # Signals that only apply to specific asset classes
 _CRYPTO_ONLY_SIGNALS = {"futures_flow", "funding"}
-_CORE_SIGNAL_SET = {"rsi", "macd", "ema", "bb", "fear_greed", "sentiment", "ministral", "ml", "funding", "volume", "claude_fundamental"}
+_CORE_SIGNAL_SET = {"rsi", "macd", "ema", "bb", "fear_greed", "sentiment", "ministral", "qwen3", "ml", "funding", "volume", "claude_fundamental"}
 
 
 def _compute_applicable_count(ticker: str) -> int:
@@ -663,6 +663,86 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 # Shadow A/B data preserved in data/ab_test_log.jsonl.
         except ImportError:
             logger.debug("Optional module %s not available", "ministral_signal")
+
+    # Qwen3-8B LLM reasoning (all tickers — crypto, stocks, metals)
+    # General financial model providing ensemble diversification vs Ministral.
+    # Config: config.json → local_models.qwen3 (hold_threshold, min_samples)
+    votes["qwen3"] = "HOLD"
+    qwen3_enabled = (config or {}).get("local_models", {}).get("qwen3", {}).get("enabled", True)
+    if ticker and qwen3_enabled:
+        short_ticker = ticker.replace("-USD", "")
+        try:
+            from portfolio.qwen3_signal import get_qwen3_signal
+
+            tf_summary = ""
+            if timeframes:
+                parts = []
+                for label, entry in timeframes:
+                    if (
+                        isinstance(entry, dict)
+                        and "action" in entry
+                        and entry["action"]
+                    ):
+                        ti = entry.get("indicators", {})
+                        parts.append(
+                            f"{label}: {entry['action']} (RSI={ti.get('rsi', 0):.0f})"
+                        )
+                if parts:
+                    tf_summary = " | ".join(parts)
+
+            ema_gap = (
+                abs(ind["ema9"] - ind["ema21"]) / ind["ema21"] * 100
+                if ind["ema21"] != 0
+                else 0
+            )
+
+            # Determine asset type for prompt context
+            if ticker in CRYPTO_SYMBOLS:
+                asset_type = "cryptocurrency"
+            elif ticker in METALS_SYMBOLS:
+                asset_type = "precious metal"
+            else:
+                asset_type = "stock"
+
+            ctx = {
+                "ticker": short_ticker,
+                "asset_type": asset_type,
+                "price_usd": ind["close"],
+                "rsi": round(ind["rsi"], 1),
+                "macd_hist": round(ind["macd_hist"], 2),
+                "ema_bullish": ind["ema9"] > ind["ema21"],
+                "ema_gap_pct": round(ema_gap, 2),
+                "bb_position": ind["price_vs_bb"],
+                "fear_greed": extra_info.get("fear_greed", "N/A"),
+                "fear_greed_class": extra_info.get("fear_greed_class", ""),
+                "news_sentiment": extra_info.get("sentiment", "N/A"),
+                "sentiment_confidence": extra_info.get("sentiment_conf", "N/A"),
+                "volume_ratio": extra_info.get("volume_ratio", "N/A"),
+                "funding_rate": extra_info.get("funding_action", "N/A"),
+                "timeframe_summary": tf_summary,
+                "headlines": "",
+            }
+            q3 = _cached(
+                f"qwen3_{short_ticker}",
+                MINISTRAL_TTL,
+                get_qwen3_signal,
+                ctx,
+            )
+            if q3:
+                raw_action = q3.get("action", "HOLD")
+                gated_action, gating = _gate_local_model_vote(
+                    "qwen3", raw_action, ticker, config=config
+                )
+                extra_info["qwen3_raw_action"] = raw_action
+                extra_info["qwen3_action"] = gated_action
+                extra_info["qwen3_reasoning"] = q3.get("reasoning", "")
+                extra_info["qwen3_accuracy"] = gating.get("accuracy")
+                extra_info["qwen3_samples"] = gating.get("samples", 0)
+                extra_info["qwen3_gating"] = gating.get("gating", "raw")
+                votes["qwen3"] = gated_action
+
+        except ImportError:
+            logger.debug("Optional module %s not available", "qwen3_signal")
 
     # --- Enhanced signal modules (composite indicators computed from raw OHLCV) ---
     # Loaded from signal_registry — no hardcoded list needed here.

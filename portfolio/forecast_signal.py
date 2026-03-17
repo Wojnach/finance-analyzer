@@ -26,9 +26,11 @@ AGENT_SUMMARY_FILE = DATA_DIR / "agent_summary.json"
 # Chronos model — loaded lazily on first use
 # Configurable via config.json → forecast.chronos_model
 # Options: "amazon/chronos-t5-tiny", "amazon/chronos-t5-small",
-#          "amazon/chronos-t5-base", "amazon/chronos-t5-large"
-_CHRONOS_MODEL = "amazon/chronos-t5-small"
+#          "amazon/chronos-t5-base", "amazon/chronos-t5-large",
+#          "amazon/chronos-2" (preferred, requires chronos-forecasting>=2.0)
+_CHRONOS_MODEL = "amazon/chronos-2"
 _chronos_pipeline = None
+_chronos_version = 0  # 0=not loaded, 1=v1 (T5), 2=v2 (Chronos-2)
 _prophet_cache = {}  # ticker -> last fit time, to avoid refitting every minute
 
 
@@ -64,31 +66,48 @@ def _load_candles(ticker, periods=168):
 
 def set_chronos_model(model_name: str):
     """Override the Chronos model (e.g. from config). Resets cached pipeline."""
-    global _CHRONOS_MODEL, _chronos_pipeline
+    global _CHRONOS_MODEL, _chronos_pipeline, _chronos_version
     if model_name and model_name != _CHRONOS_MODEL:
         _CHRONOS_MODEL = model_name
         _chronos_pipeline = None  # force reload on next call
+        _chronos_version = 0
         logger.info("Chronos model set to %s", model_name)
 
 
 def _get_chronos_pipeline():
-    """Lazy-load Chronos pipeline with GPU if available."""
-    global _chronos_pipeline
+    """Lazy-load Chronos pipeline. Tries Chronos-2 first, falls back to v1."""
+    global _chronos_pipeline, _chronos_version
     if _chronos_pipeline is not None:
         return _chronos_pipeline
 
     try:
         import torch
-        from chronos import ChronosPipeline
-
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info("Loading Chronos model %s on %s...", _CHRONOS_MODEL, device)
+
+        # Try Chronos-2 first (newer, multivariate, better accuracy)
+        try:
+            from chronos import Chronos2Pipeline
+            logger.info("Loading Chronos-2 model %s on %s...", _CHRONOS_MODEL, device)
+            _chronos_pipeline = Chronos2Pipeline.from_pretrained(
+                _CHRONOS_MODEL,
+                device_map=device,
+            )
+            _chronos_version = 2
+            logger.info("Chronos-2 model loaded: %s", _CHRONOS_MODEL)
+            return _chronos_pipeline
+        except (ImportError, Exception) as e:
+            logger.info("Chronos-2 not available (%s), falling back to v1", e)
+
+        # Fallback to v1 (ChronosPipeline)
+        from chronos import ChronosPipeline
+        logger.info("Loading Chronos v1 model %s on %s...", _CHRONOS_MODEL, device)
         _chronos_pipeline = ChronosPipeline.from_pretrained(
             _CHRONOS_MODEL,
             device_map=device,
             dtype=torch.float32,
         )
-        logger.info("Chronos model loaded: %s", _CHRONOS_MODEL)
+        _chronos_version = 1
+        logger.info("Chronos v1 model loaded: %s", _CHRONOS_MODEL)
         return _chronos_pipeline
     except Exception as e:
         logger.warning("Failed to load Chronos (%s): %s", _CHRONOS_MODEL, e)
@@ -96,7 +115,7 @@ def _get_chronos_pipeline():
 
 
 def forecast_chronos(ticker, prices, horizons=(1, 24)):
-    """Generate probabilistic forecasts using Chronos.
+    """Generate probabilistic forecasts using Chronos (v1 or v2).
 
     Args:
         ticker: Instrument ticker
@@ -111,57 +130,125 @@ def forecast_chronos(ticker, prices, horizons=(1, 24)):
         return None
 
     try:
-        import torch
-        context = torch.tensor([prices], dtype=torch.float32)
-        max_h = max(horizons)
-
-        # Generate forecast samples
-        forecast = pipeline.predict(context, max_h, num_samples=100)
-        # forecast shape: (1, num_samples, max_h)
-        samples = forecast[0].numpy()  # (num_samples, max_h)
-
-        results = {}
-        current_price = prices[-1]
-        for h in horizons:
-            h_samples = samples[:, h - 1]
-            median = float(np.median(h_samples))
-            low = float(np.percentile(h_samples, 10))
-            high = float(np.percentile(h_samples, 90))
-
-            # Signal: if current price is below lower band -> BUY
-            #         if current price is above upper band -> SELL
-            if current_price < low:
-                action = "BUY"
-                confidence = min((low - current_price) / current_price * 10, 1.0)
-            elif current_price > high:
-                action = "SELL"
-                confidence = min((current_price - high) / current_price * 10, 1.0)
-            else:
-                # Direction from median
-                pct_move = (median - current_price) / current_price
-                if abs(pct_move) < 0.002:  # <0.2% = noise
-                    action = "HOLD"
-                    confidence = 0.0
-                elif pct_move > 0:
-                    action = "BUY"
-                    confidence = min(abs(pct_move) * 20, 1.0)
-                else:
-                    action = "SELL"
-                    confidence = min(abs(pct_move) * 20, 1.0)
-
-            results[f"{h}h"] = {
-                "median": round(median, 4),
-                "low_10": round(low, 4),
-                "high_90": round(high, 4),
-                "pct_move": round((median - current_price) / current_price * 100, 3),
-                "action": action,
-                "confidence": round(confidence, 3),
-            }
-
-        return results
+        if _chronos_version == 2:
+            return _forecast_chronos_v2(pipeline, ticker, prices, horizons)
+        else:
+            return _forecast_chronos_v1(pipeline, ticker, prices, horizons)
     except Exception as e:
         logger.warning("Chronos forecast failed for %s: %s", ticker, e)
         return None
+
+
+def _forecast_chronos_v1(pipeline, ticker, prices, horizons=(1, 24)):
+    """Chronos v1 (T5) sample-based forecasting."""
+    import torch
+    context = torch.tensor([prices], dtype=torch.float32)
+    max_h = max(horizons)
+
+    # Generate forecast samples
+    forecast = pipeline.predict(context, max_h, num_samples=100)
+    # forecast shape: (1, num_samples, max_h)
+    samples = forecast[0].numpy()  # (num_samples, max_h)
+
+    results = {}
+    current_price = prices[-1]
+    for h in horizons:
+        h_samples = samples[:, h - 1]
+        median = float(np.median(h_samples))
+        low = float(np.percentile(h_samples, 10))
+        high = float(np.percentile(h_samples, 90))
+
+        # Signal: if current price is below lower band -> BUY
+        #         if current price is above upper band -> SELL
+        if current_price < low:
+            action = "BUY"
+            confidence = min((low - current_price) / current_price * 10, 1.0)
+        elif current_price > high:
+            action = "SELL"
+            confidence = min((current_price - high) / current_price * 10, 1.0)
+        else:
+            # Direction from median
+            pct_move = (median - current_price) / current_price
+            if abs(pct_move) < 0.002:  # <0.2% = noise
+                action = "HOLD"
+                confidence = 0.0
+            elif pct_move > 0:
+                action = "BUY"
+                confidence = min(abs(pct_move) * 20, 1.0)
+            else:
+                action = "SELL"
+                confidence = min(abs(pct_move) * 20, 1.0)
+
+        results[f"{h}h"] = {
+            "median": round(median, 4),
+            "low_10": round(low, 4),
+            "high_90": round(high, 4),
+            "pct_move": round((median - current_price) / current_price * 100, 3),
+            "action": action,
+            "confidence": round(confidence, 3),
+        }
+
+    return results
+
+
+def _forecast_chronos_v2(pipeline, ticker, prices, horizons=(1, 24)):
+    """Chronos-2 DataFrame-based forecasting with quantile output."""
+    n = len(prices)
+    timestamps = pd.date_range(end=pd.Timestamp.now(tz="UTC"), periods=n, freq="h")
+    context_df = pd.DataFrame({
+        "timestamp": timestamps,
+        "target": prices,
+        "id": ticker or "default",
+    })
+
+    max_h = max(horizons)
+    pred_df = pipeline.predict_df(
+        context_df,
+        prediction_length=max_h,
+        quantile_levels=[0.1, 0.5, 0.9],
+        id_column="id",
+        timestamp_column="timestamp",
+        target="target",
+    )
+
+    results = {}
+    current_price = prices[-1]
+
+    for h in horizons:
+        # pred_df has columns: id, timestamp, 0.1, 0.5, 0.9
+        row = pred_df.iloc[h - 1]
+        median = float(row["0.5"])
+        low = float(row["0.1"])
+        high = float(row["0.9"])
+
+        if current_price < low:
+            action = "BUY"
+            confidence = min((low - current_price) / current_price * 10, 1.0)
+        elif current_price > high:
+            action = "SELL"
+            confidence = min((current_price - high) / current_price * 10, 1.0)
+        else:
+            pct_move = (median - current_price) / current_price
+            if abs(pct_move) < 0.002:
+                action = "HOLD"
+                confidence = 0.0
+            elif pct_move > 0:
+                action = "BUY"
+                confidence = min(abs(pct_move) * 20, 1.0)
+            else:
+                action = "SELL"
+                confidence = min(abs(pct_move) * 20, 1.0)
+
+        results[f"{h}h"] = {
+            "median": round(median, 4),
+            "low_10": round(low, 4),
+            "high_90": round(high, 4),
+            "pct_move": round((median - current_price) / current_price * 100, 3),
+            "action": action,
+            "confidence": round(confidence, 3),
+        }
+
+    return results
 
 
 def forecast_prophet(ticker, prices, horizons=(1, 24)):

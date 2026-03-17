@@ -1,36 +1,52 @@
 #!/usr/bin/env python3
-"""Ministral-8B trading signal via llama-cpp-python (GGUF).
+"""Ministral-3-8B trading signal via llama-cpp-python (GGUF).
 
 Runs as a subprocess: reads JSON context from stdin, outputs JSON prediction.
 Uses a separate venv (Q:/models/.venv-llm on Windows, ~/.venv-llm on Linux).
+Falls back to legacy Ministral-8B if Ministral-3 is not downloaded yet.
 """
 
 import argparse
 import json
+import os
 import platform
 import re
 import sys
 
 if platform.system() == "Windows":
-    MODEL_PATH = r"Q:\models\ministral-8b-gguf\Ministral-8B-Instruct-2410-Q4_K_M.gguf"
-    DEFAULT_LORA = r"Q:\models\cryptotrader-lm\cryptotrader-lm-lora.gguf"
+    MODEL_PATH = r"Q:\models\ministral-3-8b-gguf\Ministral-3-8B-Instruct-2512-Q5_K_M.gguf"
+    LEGACY_MODEL_PATH = r"Q:\models\ministral-8b-gguf\Ministral-8B-Instruct-2410-Q4_K_M.gguf"
+    DEFAULT_LORA = None  # LoRA incompatible with Ministral-3 architecture
 else:
-    MODEL_PATH = (
-        "/home/deck/models/ministral-8b-gguf/Ministral-8B-Instruct-2410-Q4_K_M.gguf"
-    )
-    DEFAULT_LORA = "/home/deck/models/cryptotrader-lm/cryptotrader-lm-lora.gguf"
+    MODEL_PATH = "/home/deck/models/ministral-3-8b-gguf/Ministral-3-8B-Instruct-2512-Q5_K_M.gguf"
+    LEGACY_MODEL_PATH = "/home/deck/models/ministral-8b-gguf/Ministral-8B-Instruct-2410-Q4_K_M.gguf"
+    DEFAULT_LORA = None
 
 
 def load_model(lora_path=None):
     from llama_cpp import Llama
 
-    return Llama(
-        model_path=MODEL_PATH,
-        lora_path=lora_path or DEFAULT_LORA,
-        n_ctx=4096,
-        n_gpu_layers=-1,
-        verbose=False,
-    )
+    model_path = MODEL_PATH
+    if not os.path.exists(MODEL_PATH):
+        if os.path.exists(LEGACY_MODEL_PATH):
+            model_path = LEGACY_MODEL_PATH
+            # Legacy model supports LoRA
+            lora = lora_path or r"Q:\models\cryptotrader-lm\cryptotrader-lm-lora.gguf"
+        else:
+            raise FileNotFoundError(f"No model found at {MODEL_PATH} or {LEGACY_MODEL_PATH}")
+    else:
+        lora = None  # Ministral-3 is incompatible with old LoRA
+
+    kwargs = {
+        "model_path": model_path,
+        "n_ctx": 4096,
+        "n_gpu_layers": -1,
+        "verbose": False,
+    }
+    if lora and os.path.exists(lora):
+        kwargs["lora_path"] = lora
+
+    return Llama(**kwargs)
 
 
 def _extract_json_payload(text):
@@ -116,7 +132,7 @@ Use HOLD when the evidence is mixed or weak.[/INST]"""
     return {
         "action": decision,
         "reasoning": reasoning,
-        "model": "custom-lora" if lora_path else "CryptoTrader-LM",
+        "model": "Ministral-3-8B" if os.path.exists(MODEL_PATH) else "CryptoTrader-LM",
     }
 
 
