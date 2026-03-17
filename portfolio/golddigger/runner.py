@@ -288,13 +288,13 @@ def run(live: bool = False, once: bool = False):
                             if browser:
                                 try:
                                     browser.close()
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.debug("Browser close failed: %s", e)
                             if pw:
                                 try:
                                     pw.stop()
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.debug("Playwright stop failed: %s", e)
                             pw, browser, page = _setup_playwright()
                             if page and check_session_alive(page):
                                 bot.set_page(page)
@@ -373,13 +373,13 @@ def run(live: bool = False, once: bool = False):
         if browser:
             try:
                 browser.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Browser close failed: %s", e)
         if pw:
             try:
                 pw.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Playwright stop failed: %s", e)
 
         if notifications_enabled and bot is not None and cfg is not None and config is not None:
             digest = _build_daily_digest(bot, cfg, mode)

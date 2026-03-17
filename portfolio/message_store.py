@@ -145,8 +145,8 @@ def _do_send_telegram(msg, config):
         err_desc = ""
         try:
             err_desc = r.json().get("description", "")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to parse Telegram error response: %s", e)
         if any(kw in err_desc.lower() for kw in ("parse", "markdown", "entity")):
             logger.warning(
                 "Telegram Markdown parse failed (%s), resending without formatting",

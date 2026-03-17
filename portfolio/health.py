@@ -241,6 +241,6 @@ def get_health_summary() -> dict:
             "binance_fapi": binance_fapi_cb.get_status(),
             "alpaca": alpaca_cb.get_status(),
         }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Circuit breaker status unavailable: %s", e)
     return summary

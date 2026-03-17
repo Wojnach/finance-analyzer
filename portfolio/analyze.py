@@ -6,13 +6,16 @@ Usage:
 """
 
 import json
+import logging
 import os
 import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from portfolio.file_utils import load_json, load_jsonl
+from portfolio.file_utils import atomic_append_jsonl, load_json, load_jsonl
+
+logger = logging.getLogger("portfolio.analyze")
 from portfolio.telegram_notifications import send_telegram as _shared_send_telegram
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -69,7 +72,8 @@ def _get_holdings(ticker):
             h = pf.get("holdings", {}).get(ticker, {})
             if h.get("shares", 0) > 0:
                 holdings[label] = h
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to load portfolio %s: %s", label, e)
             continue
     return holdings
 
@@ -230,8 +234,8 @@ def _log_analysis(ticker, output, elapsed):
                 )
                 + "\n"
             )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to log analysis output: %s", e)
 
 
 def _send_telegram(msg, config):
@@ -386,12 +390,10 @@ def _get_signal_state(ticker, summary=None):
 def _log_watch(event):
     """Append watch event to log."""
     try:
-        WATCH_LOG_FILE.parent.mkdir(exist_ok=True)
-        with open(WATCH_LOG_FILE, "a", encoding="utf-8") as f:
-            event["ts"] = datetime.now(timezone.utc).isoformat()
-            f.write(json.dumps(event, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
+        event["ts"] = datetime.now(timezone.utc).isoformat()
+        atomic_append_jsonl(WATCH_LOG_FILE, event)
+    except Exception as e:
+        logger.debug("Failed to log watch event: %s", e)
 
 
 def _build_watch_prompt(positions, summary, elapsed_mins):

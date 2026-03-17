@@ -1360,8 +1360,8 @@ def execute_actions(
     finally:
         try:
             page.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Snipe manager page close failed: %s", e)
         close_playwright()
     return results
 

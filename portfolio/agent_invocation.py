@@ -307,8 +307,8 @@ def check_agent_completion():
     if _agent_log:
         try:
             _agent_log.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Agent log close failed: %s", e)
     _agent_proc = None
     _agent_log = None
     _agent_start = 0

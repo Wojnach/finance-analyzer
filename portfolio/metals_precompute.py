@@ -593,8 +593,8 @@ def _record_cot_history(cot_data, metal):
         from portfolio.file_utils import prune_jsonl
         try:
             prune_jsonl(_COT_HISTORY_FILE, max_entries=104)
-        except Exception:
-            pass  # Non-critical
+        except Exception as e:
+            logger.debug("COT history prune failed: %s", e)
 
     record = {
         "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),

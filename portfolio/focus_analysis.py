@@ -108,8 +108,8 @@ def extract_focus_probabilities(summary: dict, tickers: list[str]) -> dict:
                 missing, signal_map, horizons=["3h", "1d", "3d"], days=7
             )
             probs.update(computed or {})
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Focus probability computation failed for %s: %s", missing, e)
     return probs
 
 

@@ -90,7 +90,8 @@ def session_remaining_minutes() -> Optional[float]:
         exp = datetime.fromisoformat(expires_at)
         now = datetime.now(timezone.utc)
         return (exp - now).total_seconds() / 60.0
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to compute session minutes remaining: %s", e)
         return None
 
 
@@ -132,20 +133,20 @@ def close_playwright():
     if _pw_context:
         try:
             _pw_context.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Context close failed: %s", e)
         _pw_context = None
     if _pw_browser:
         try:
             _pw_browser.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Browser close failed: %s", e)
         _pw_browser = None
     if _pw_instance:
         try:
             _pw_instance.stop()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Playwright stop failed: %s", e)
         _pw_instance = None
 
 
@@ -255,7 +256,8 @@ def get_instrument_price(orderbook_id: str) -> dict[str, Any]:
                 f"/_api/market-guide/{instrument_type}/{orderbook_id}",
             )
             return data
-        except Exception:
+        except Exception as e:
+            logger.debug("Market guide lookup failed for %s/%s: %s", instrument_type, orderbook_id, e)
             continue
 
     # Fallback: generic orderbook endpoint
