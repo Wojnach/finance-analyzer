@@ -85,13 +85,13 @@ Market Context:
 
 Multi-timeframe: {context.get('timeframe_summary', 'N/A')}
 
-Provide your trading decision as JSON.<|im_end|>
+Provide your trading decision as JSON. /no_think<|im_end|>
 <|im_start|>assistant
 """
 
     response = model(
         prompt,
-        max_tokens=120,
+        max_tokens=200,
         temperature=0.1,
         top_p=0.3,
         stop=["<|im_end|>", "<|im_start|>"],
