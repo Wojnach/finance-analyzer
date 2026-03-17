@@ -127,7 +127,86 @@ Provide your trading decision as JSON.<|im_end|>
     }
 
 
+def predict_batch(contexts):
+    """Process multiple tickers in one model-load cycle.
+
+    Args:
+        contexts: list of context dicts, each with 'ticker', 'price_usd', etc.
+
+    Returns:
+        list of result dicts in same order as input.
+    """
+    model = load_model()
+    results = []
+    for ctx in contexts:
+        try:
+            ticker = ctx.get("ticker", "UNKNOWN")
+            asset_type = ctx.get("asset_type", "cryptocurrency")
+
+            prompt = f"""<|im_start|>system
+You are an expert financial analyst specializing in {asset_type} trading.
+Analyze the market data and provide a single trading decision: BUY, SELL, or HOLD.
+Respond with EXACTLY one JSON object: {{"action":"BUY|SELL|HOLD","reasoning":"one sentence"}}
+Use HOLD when evidence is mixed or weak.<|im_end|>
+<|im_start|>user
+Asset: {ticker} ({asset_type})
+Current Price: ${ctx.get('price_usd', 0):,.2f}
+
+Technical Indicators:
+- RSI(14): {ctx.get('rsi', 'N/A')}
+- MACD Histogram: {ctx.get('macd_hist', 'N/A')}
+- EMA(9) vs EMA(21): {'Bullish (9 > 21)' if ctx.get('ema_bullish') else 'Bearish (9 < 21)'} (gap: {ctx.get('ema_gap_pct', 'N/A')}%)
+- Bollinger Bands: Price is {ctx.get('bb_position', 'N/A')}
+- Volume Ratio: {ctx.get('volume_ratio', 'N/A')}x avg
+
+Market Context:
+- Fear & Greed: {ctx.get('fear_greed', 'N/A')}/100 ({ctx.get('fear_greed_class', '')})
+- Sentiment: {ctx.get('news_sentiment', 'N/A')} (conf: {ctx.get('sentiment_confidence', 'N/A')})
+
+Multi-timeframe: {ctx.get('timeframe_summary', 'N/A')}
+
+Provide your trading decision as JSON.<|im_end|>
+<|im_start|>assistant
+"""
+            response = model(
+                prompt,
+                max_tokens=256,
+                temperature=0.7,
+                top_p=0.8,
+                stop=["<|im_end|>", "<|im_start|>"],
+            )
+            text = response["choices"][0]["text"].strip()
+
+            if "<think>" in text:
+                think_end = text.find("</think>")
+                if think_end >= 0:
+                    text = text[think_end + 8:].strip()
+
+            payload = _extract_json_payload(text)
+            decision = None
+            reasoning = text[:200]
+            if isinstance(payload, dict):
+                raw_action = str(payload.get("action", "")).upper()
+                if raw_action in {"BUY", "SELL", "HOLD"}:
+                    decision = raw_action
+                if payload.get("reasoning"):
+                    reasoning = str(payload["reasoning"])[:200]
+            if decision is None:
+                match = re.search(r"\b(BUY|SELL|HOLD)\b", text.upper())
+                decision = match.group(1) if match else "HOLD"
+
+            results.append({"action": decision, "reasoning": reasoning, "model": "Qwen3-8B"})
+        except Exception as e:
+            results.append({"action": "HOLD", "reasoning": f"error: {e}", "model": "Qwen3-8B"})
+    return results
+
+
 if __name__ == "__main__":
-    context = json.loads(sys.stdin.read())
-    result = predict(context)
-    print(json.dumps(result))
+    data = json.loads(sys.stdin.read())
+    # Support both single context and batch mode
+    if isinstance(data, list):
+        results = predict_batch(data)
+        print(json.dumps(results))
+    else:
+        result = predict(data)
+        print(json.dumps(result))

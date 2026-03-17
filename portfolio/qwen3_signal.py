@@ -2,39 +2,50 @@
 
 Runs for ALL tickers (crypto, stocks, metals). Uses GPU lock to coordinate
 with Ministral (only one GGUF model can be on GPU at a time).
+
+Supports batch mode: multiple tickers processed in one model-load cycle
+to avoid the ~5s model load overhead per ticker.
 """
 
 import json
 import logging
 import platform
 import subprocess
+import time
 from pathlib import Path
 
 logger = logging.getLogger("portfolio.qwen3_signal")
 
+# Batch queue — accumulates contexts, flushed when get_qwen3_batch() is called
+_batch_queue: list[dict] = []
+_batch_results: dict[str, dict] = {}  # ticker -> result, populated by flush
+
 
 def _extract_json_from_stdout(stdout):
-    """Extract the first JSON object from subprocess stdout."""
+    """Extract JSON (object or array) from subprocess stdout."""
     if not stdout:
         return None
     text = stdout.strip()
     if not text:
         return None
-    if text.startswith("{"):
+    # Try parsing as-is (could be array for batch mode)
+    if text.startswith("[") or text.startswith("{"):
         try:
             return json.loads(text)
         except json.JSONDecodeError:
             pass
-    start = text.find("{")
-    end = text.rfind("}")
-    if start >= 0 and end > start:
-        try:
-            return json.loads(text[start:end + 1])
-        except json.JSONDecodeError:
-            pass
+    # Find first [ or { and parse from there
+    for start_char in ("[", "{"):
+        idx = text.find(start_char)
+        if idx >= 0:
+            try:
+                return json.loads(text[idx:])
+            except json.JSONDecodeError:
+                pass
+    # Last resort: scan lines in reverse
     for line in reversed(text.splitlines()):
         line = line.strip()
-        if line.startswith("{") and line.endswith("}"):
+        if line.startswith(("{", "[")):
             try:
                 return json.loads(line)
             except json.JSONDecodeError:
@@ -43,7 +54,7 @@ def _extract_json_from_stdout(stdout):
 
 
 def _call_qwen3(context):
-    """Call Qwen3-8B inference subprocess."""
+    """Call Qwen3-8B inference subprocess (single ticker)."""
     repo_root = Path(__file__).resolve().parent.parent
     if platform.system() == "Windows":
         python = r"Q:\models\.venv-llm\Scripts\python.exe"
@@ -68,9 +79,80 @@ def _call_qwen3(context):
     return payload
 
 
+def _call_qwen3_batch(contexts):
+    """Call Qwen3-8B inference subprocess in batch mode.
+
+    Loads model once, processes all tickers, returns list of results.
+    Saves ~5s model load per additional ticker vs single-ticker mode.
+    """
+    if not contexts:
+        return []
+
+    repo_root = Path(__file__).resolve().parent.parent
+    if platform.system() == "Windows":
+        python = r"Q:\models\.venv-llm\Scripts\python.exe"
+    else:
+        python = "/home/deck/models/.venv-llm/bin/python"
+
+    script = repo_root / "portfolio" / "qwen3_trader.py"
+    cmd = [python, str(script)]
+
+    t0 = time.time()
+    # Send as JSON array to trigger batch mode in qwen3_trader.py
+    result = subprocess.run(
+        cmd,
+        input=json.dumps(contexts),
+        capture_output=True,
+        text=True,
+        timeout=30 + 20 * len(contexts),  # 30s base + 20s per ticker
+    )
+    elapsed = time.time() - t0
+    logger.info("Qwen3 batch: %d tickers in %.1fs (%.1fs/ticker)",
+                len(contexts), elapsed, elapsed / len(contexts) if contexts else 0)
+
+    if result.returncode != 0:
+        raise RuntimeError(f"Qwen3 batch failed: {result.stderr[-500:]}")
+    payload = _extract_json_from_stdout(result.stdout)
+    if not isinstance(payload, list):
+        raise RuntimeError(f"Qwen3 batch returned non-list: {type(payload)}")
+    return payload
+
+
 def get_qwen3_signal(context):
-    """Get trading signal from Qwen3-8B.
+    """Get trading signal from Qwen3-8B (single ticker).
 
     Returns dict with 'action', 'reasoning', 'model' keys.
     """
     return _call_qwen3(context)
+
+
+def get_qwen3_signal_batch(contexts):
+    """Get trading signals for multiple tickers in one model-load cycle.
+
+    Args:
+        contexts: list of context dicts, each with 'ticker' key.
+
+    Returns:
+        dict mapping ticker -> result dict.
+    """
+    if not contexts:
+        return {}
+
+    try:
+        results = _call_qwen3_batch(contexts)
+        # Map results back to tickers
+        mapped = {}
+        for ctx, res in zip(contexts, results):
+            ticker = ctx.get("ticker", "UNKNOWN")
+            mapped[ticker] = res
+        return mapped
+    except Exception as e:
+        logger.warning("Qwen3 batch failed (%s), returning HOLD for all", e)
+        return {
+            ctx.get("ticker", "UNKNOWN"): {
+                "action": "HOLD",
+                "reasoning": f"batch error: {e}",
+                "model": "Qwen3-8B",
+            }
+            for ctx in contexts
+        }
