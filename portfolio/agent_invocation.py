@@ -32,6 +32,11 @@ _agent_reasons = None  # trigger reasons for the current invocation
 _journal_ts_before = None  # last journal timestamp before agent started
 _telegram_ts_before = None  # last telegram timestamp before agent started
 
+# Stack overflow detection — exit code 3221225794 = Windows STATUS_STACK_OVERFLOW (0xC00000FD)
+_STACK_OVERFLOW_EXIT_CODE = 3221225794
+_consecutive_stack_overflows = 0
+_MAX_STACK_OVERFLOWS = 5  # auto-disable after this many consecutive stack overflow crashes
+
 # Per-tier configuration
 TIER_CONFIG = {
     1: {"max_turns": 15, "timeout": 120, "label": "QUICK CHECK"},
@@ -98,6 +103,15 @@ def _last_jsonl_ts(path):
 def invoke_agent(reasons, tier=3):
     global _agent_proc, _agent_log, _agent_start, _agent_timeout
     global _agent_tier, _agent_reasons, _journal_ts_before, _telegram_ts_before
+
+    # Check if Layer 2 is auto-disabled due to consecutive stack overflows
+    if _consecutive_stack_overflows >= _MAX_STACK_OVERFLOWS:
+        logger.info(
+            "Layer 2 skipped: auto-disabled after %d consecutive stack overflows",
+            _consecutive_stack_overflows,
+        )
+        _log_trigger(reasons, "skipped_stack_overflow", tier=tier)
+        return False
 
     # Check if Layer 2 is enabled — allows running data loop without Claude quota
     try:
@@ -302,6 +316,33 @@ def check_agent_completion():
         "Agent completed: status=%s exit=%d duration=%.1fs tier=%s journal=%s telegram=%s",
         status, exit_code, duration_s, _agent_tier, journal_written, telegram_sent,
     )
+
+    # Track consecutive stack overflow crashes
+    global _consecutive_stack_overflows
+    if exit_code == _STACK_OVERFLOW_EXIT_CODE:
+        _consecutive_stack_overflows += 1
+        logger.error(
+            "Claude CLI stack overflow (exit %d), %d consecutive. "
+            "Check project root for problematic files or update Claude Code.",
+            exit_code, _consecutive_stack_overflows,
+        )
+        if _consecutive_stack_overflows == _MAX_STACK_OVERFLOWS:
+            logger.error(
+                "Layer 2 auto-disabled after %d consecutive stack overflows",
+                _MAX_STACK_OVERFLOWS,
+            )
+            try:
+                config = _load_config()
+                send_or_store(
+                    f"*ALERT* Layer 2 auto-disabled after {_MAX_STACK_OVERFLOWS} "
+                    f"consecutive stack overflows (exit {exit_code}). "
+                    "Claude CLI is crashing — investigate project root.",
+                    config, category="alert",
+                )
+            except Exception as e:
+                logger.warning("Stack overflow alert failed: %s", e)
+    elif status == "success":
+        _consecutive_stack_overflows = 0
 
     # Clean up
     if _agent_log:

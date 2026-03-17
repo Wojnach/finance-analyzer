@@ -312,6 +312,10 @@ def run(force_report=False, active_symbols=None):
                         label, entry['action'], entry['confidence'] * 100, ei['rsi'], ei['macd_hist']
                     )
 
+        except KeyboardInterrupt:
+            logger.warning("%s: interrupted, stopping ticker processing", name)
+            signals_failed += 1
+            break
         except Exception as e:
             signals_failed += 1
             logger.error("%s: %s", name, e, exc_info=True)
@@ -572,7 +576,8 @@ def loop(interval=None):
         except Exception as e:
             logger.debug("Heartbeat write after initial run failed: %s", e)
     except KeyboardInterrupt:
-        raise
+        logger.info("Loop interrupted during initial run, shutting down cleanly")
+        return
     except Exception as e:
         import traceback
         _crash_alert(traceback.format_exc())
@@ -598,7 +603,8 @@ def loop(interval=None):
             _run_post_cycle(config)
             _reset_crash_counter()
         except KeyboardInterrupt:
-            raise
+            logger.info("Loop interrupted, shutting down cleanly")
+            break
         except Exception as e:
             import traceback
             _crash_alert(traceback.format_exc())

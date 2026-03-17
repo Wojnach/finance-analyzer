@@ -54,6 +54,9 @@ def _cached(key, ttl, func, *args):
         with _cache_lock:
             _tool_cache[key] = {"data": data, "time": now, "ttl": ttl}
         return data
+    except KeyboardInterrupt:
+        logger.warning("[%s] interrupted (KeyboardInterrupt), returning None", key)
+        return None
     except Exception as e:
         logger.warning("[%s] error: %s", key, e)
         with _cache_lock:
