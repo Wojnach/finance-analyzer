@@ -14,6 +14,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from portfolio.gpu_gate import gpu_gate
+
 logger = logging.getLogger("portfolio.qwen3_signal")
 
 # Batch queue — accumulates contexts, flushed when get_qwen3_batch() is called
@@ -120,11 +122,15 @@ def _call_qwen3_batch(contexts):
 
 
 def get_qwen3_signal(context):
-    """Get trading signal from Qwen3-8B (single ticker).
+    """Get trading signal from Qwen3-8B with GPU gating.
 
     Returns dict with 'action', 'reasoning', 'model' keys.
     """
-    return _call_qwen3(context)
+    with gpu_gate("qwen3", timeout=60) as acquired:
+        if not acquired:
+            logger.warning("GPU gate timeout — returning HOLD")
+            return {"action": "HOLD", "reasoning": "GPU busy", "model": "Qwen3-8B"}
+        return _call_qwen3(context)
 
 
 def get_qwen3_signal_batch(contexts):

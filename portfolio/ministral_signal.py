@@ -1,31 +1,32 @@
-"""Wrapper to call Ministral-8B trading model via subprocess.
+"""Wrapper to call Ministral trading model via subprocess.
 
-Only runs the original CryptoTrader-LM LoRA.  The custom LoRA has been
-fully disabled (20.9% accuracy, 97% SELL bias — worse than random).
-Shadow A/B testing data is preserved in data/ab_test_log.jsonl.
+Uses GPU gate to ensure exclusive GPU access during model load/inference.
+Ministral-3 runs via native llama-completion binary; legacy via llama-cpp-python.
 """
 
 import json
+import logging
 import platform
 import subprocess
 from pathlib import Path
+
+from portfolio.gpu_gate import gpu_gate
+
+logger = logging.getLogger("portfolio.ministral_signal")
 
 
 def _extract_json_from_stdout(stdout):
     """Extract the first JSON object from subprocess stdout."""
     if not stdout:
         return None
-
     text = stdout.strip()
     if not text:
         return None
-
     if text.startswith("{"):
         try:
             return json.loads(text)
         except json.JSONDecodeError:
             pass
-
     start = text.find("{")
     end = text.rfind("}")
     if start >= 0 and end > start:
@@ -33,7 +34,6 @@ def _extract_json_from_stdout(stdout):
             return json.loads(text[start:end + 1])
         except json.JSONDecodeError:
             pass
-
     for line in reversed(text.splitlines()):
         line = line.strip()
         if line.startswith("{") and line.endswith("}"):
@@ -41,7 +41,6 @@ def _extract_json_from_stdout(stdout):
                 return json.loads(line)
             except json.JSONDecodeError:
                 continue
-
     return None
 
 
@@ -74,5 +73,10 @@ def _call_model(context, lora_path=None):
 
 
 def get_ministral_signal(context):
-    original = _call_model(context)
+    """Get trading signal from Ministral with GPU gating."""
+    with gpu_gate("ministral", timeout=60) as acquired:
+        if not acquired:
+            logger.warning("GPU gate timeout — returning HOLD")
+            return {"original": {"action": "HOLD", "reasoning": "GPU busy", "model": "skipped"}, "custom": None}
+        original = _call_model(context)
     return {"original": original, "custom": None}
