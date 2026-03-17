@@ -7,6 +7,7 @@ cd /d Q:\finance-analyzer
 REM Clear Claude Code session markers so Layer 2 agent can launch
 set CLAUDECODE=
 set CLAUDE_CODE_ENTRYPOINT=
+set PYTHONPATH=Q:\finance-analyzer
 echo [%date% %time%] Starting loop...
 .venv\Scripts\python.exe -u portfolio\main.py --loop >> data\loop_out.txt 2>&1
 echo [%date% %time%] Loop exited (code %ERRORLEVEL%). Restarting in 30s...
