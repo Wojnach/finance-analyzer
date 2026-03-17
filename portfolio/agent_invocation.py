@@ -100,6 +100,15 @@ def _last_jsonl_ts(path):
     return last_jsonl_entry(path, field="ts")
 
 
+def _safe_last_jsonl_ts(path, label):
+    """Return the last JSONL timestamp without failing the invocation flow."""
+    try:
+        return _last_jsonl_ts(path)
+    except Exception as e:
+        logger.debug("%s baseline read failed: %s", label, e)
+        return None
+
+
 def invoke_agent(reasons, tier=3):
     global _agent_proc, _agent_log, _agent_start, _agent_timeout
     global _agent_tier, _agent_reasons, _journal_ts_before, _telegram_ts_before
@@ -215,8 +224,8 @@ def invoke_agent(reasons, tier=3):
         _agent_timeout = timeout
         _agent_tier = tier
         _agent_reasons = list(reasons)
-        _journal_ts_before = _last_jsonl_ts(JOURNAL_FILE)
-        _telegram_ts_before = _last_jsonl_ts(TELEGRAM_FILE)
+        _journal_ts_before = _safe_last_jsonl_ts(JOURNAL_FILE, "journal")
+        _telegram_ts_before = _safe_last_jsonl_ts(TELEGRAM_FILE, "telegram")
         logger.info(
             "Agent T%d invoked pid=%s max_turns=%d timeout=%ds (%s)",
             tier, _agent_proc.pid, max_turns, timeout,
@@ -267,16 +276,25 @@ def check_agent_completion():
     # Check if journal was written (new entry after agent started)
     journal_ts_after = _last_jsonl_ts(JOURNAL_FILE)
     journal_written = (
-        journal_ts_after is not None
+        _journal_ts_before is not None
+        and journal_ts_after is not None
         and journal_ts_after != _journal_ts_before
     )
 
     # Check if Telegram message was sent (new entry after agent started)
     telegram_ts_after = _last_jsonl_ts(TELEGRAM_FILE)
     telegram_sent = (
-        telegram_ts_after is not None
+        _telegram_ts_before is not None
+        and telegram_ts_after is not None
         and telegram_ts_after != _telegram_ts_before
     )
+
+    # Without a baseline from invoke_agent(), stay conservative and do not infer
+    # success from pre-existing files in the workspace.
+    if _journal_ts_before is None:
+        journal_written = False
+    if _telegram_ts_before is None:
+        telegram_sent = False
 
     # Determine status
     if exit_code != 0:
