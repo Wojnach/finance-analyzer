@@ -41,7 +41,7 @@ _MAX_CONFIDENCE = 0.7
 _CHRONOS_TIMEOUT = 60
 
 # Default Kronos subprocess timeout (seconds) — lower since it usually fails fast
-_KRONOS_TIMEOUT = 30
+_KRONOS_TIMEOUT = 60
 
 # Forecast models master switch. Set to True to disable all model calls (early-return HOLD).
 # Circuit breakers remain as secondary protection — auto-trip on failure, 5min TTL.
@@ -77,7 +77,7 @@ _HEALTH_FILE = _DATA_DIR / "forecast_health.jsonl"
 
 # Circuit breaker — after first failure, skip remaining tickers in this loop cycle.
 # Prevents 27 x 6s GPU timeouts when CUDA is broken.
-_CIRCUIT_BREAKER_TTL = 300  # 5 minutes before retry
+_CIRCUIT_BREAKER_TTL = 120  # 2 minutes before retry
 _kronos_tripped_until = 0.0  # monotonic timestamp when breaker resets
 _chronos_tripped_until = 0.0
 
@@ -245,7 +245,7 @@ def _run_kronos(candles: list[dict], horizons: tuple = (1, 24), _ticker: str = "
         return None
     t0 = time.time()
     try:
-        with gpu_gate("kronos", timeout=15) as acquired:
+        with gpu_gate("kronos", timeout=60) as acquired:
             if not acquired:
                 logger.warning("GPU gate timeout for Kronos %s", _ticker)
                 return None
@@ -323,7 +323,7 @@ def _run_chronos(prices: list[float], horizons: tuple = (1, 24), _ticker: str = 
     if _chronos_circuit_open():
         return None
 
-    with gpu_gate("chronos", timeout=15) as acquired:
+    with gpu_gate("chronos", timeout=60) as acquired:
         if not acquired:
             logger.warning("GPU gate timeout for Chronos %s", _ticker)
             return None

@@ -77,7 +77,7 @@ def _release_lock():
 
 
 @contextmanager
-def gpu_gate(model_name: str, timeout: float = 20):
+def gpu_gate(model_name: str, timeout: float = 60):
     """Acquire exclusive GPU access, log VRAM before/after.
 
     Args:

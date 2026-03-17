@@ -67,13 +67,18 @@ def _call_qwen3(context):
     script = repo_root / "portfolio" / "qwen3_trader.py"
     cmd = [python, str(script)]
 
-    result = subprocess.run(
-        cmd,
-        input=json.dumps(context),
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            input=json.dumps(context),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as e:
+        stderr_text = e.stderr[-500:] if e.stderr else "(no stderr)"
+        logger.error("Qwen3 subprocess timed out after 120s — stderr: %s", stderr_text)
+        raise
     if result.returncode != 0:
         raise RuntimeError(f"Qwen3 failed: {result.stderr[-500:]}")
     payload = _extract_json_from_stdout(result.stdout)
@@ -126,10 +131,16 @@ def get_qwen3_signal(context):
 
     Returns dict with 'action', 'reasoning', 'model' keys.
     """
-    with gpu_gate("qwen3", timeout=15) as acquired:
+    with gpu_gate("qwen3", timeout=60) as acquired:
         if not acquired:
             logger.warning("GPU gate timeout — returning HOLD")
             return {"action": "HOLD", "reasoning": "GPU busy", "model": "Qwen3-8B"}
+        # Check VRAM before loading model — Qwen3 Q4_K_M needs ~5GB
+        from portfolio.gpu_gate import get_vram_usage
+        vram = get_vram_usage()
+        if vram and vram["free_mb"] < 5500:
+            logger.warning("Insufficient VRAM for Qwen3: %dMB free (need 5500MB) — returning HOLD", vram["free_mb"])
+            return {"action": "HOLD", "reasoning": f"low VRAM ({vram['free_mb']}MB free)", "model": "Qwen3-8B"}
         return _call_qwen3(context)
 
 
