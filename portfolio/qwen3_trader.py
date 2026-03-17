@@ -1,41 +1,61 @@
 #!/usr/bin/env python3
-"""Qwen3-8B trading signal via llama-cpp-python (GGUF).
+"""Qwen3-8B trading signal via native llama-completion binary (GGUF).
 
 Runs as a subprocess: reads JSON context from stdin, outputs JSON prediction.
-Uses GPU lock to coordinate with Ministral (only one model on GPU at a time).
-Supports ALL tickers (crypto, stocks, metals) — not crypto-only like Ministral.
+Uses the native llama.cpp binary (b8391+) for inference — no llama-cpp-python needed.
+Supports single and batch mode (load model once for multiple tickers).
 """
 
-import argparse
 import json
 import os
 import platform
 import re
+import subprocess
 import sys
+import tempfile
 
 if platform.system() == "Windows":
     MODEL_PATH = r"Q:\models\qwen3-8b-gguf\Qwen3-8B-Q4_K_M.gguf"
+    LLAMA_CLI = r"Q:\models\llama-cpp-bin\cuda13\llama-completion.exe"
 else:
     MODEL_PATH = "/home/deck/models/qwen3-8b-gguf/Qwen3-8B-Q4_K_M.gguf"
+    LLAMA_CLI = "/usr/local/bin/llama-completion"
 
 
-def load_model():
-    from llama_cpp import Llama
+def _can_use_native():
+    return os.path.exists(MODEL_PATH) and os.path.exists(LLAMA_CLI)
 
-    if not os.path.exists(MODEL_PATH):
-        raise FileNotFoundError(f"Qwen3-8B model not found at {MODEL_PATH}")
 
-    return Llama(
-        model_path=MODEL_PATH,
-        n_ctx=4096,
-        n_gpu_layers=-1,
-        verbose=False,
-        chat_format="chatml",
+def _run_native(prompt, max_tokens=256):
+    """Run inference via native llama-completion binary."""
+    prompt_file = os.path.join(tempfile.gettempdir(), "qwen3_prompt.txt")
+    with open(prompt_file, "w", encoding="utf-8") as f:
+        f.write(prompt)
+
+    proc = subprocess.run(
+        [
+            LLAMA_CLI,
+            "-m", MODEL_PATH,
+            "-ngl", "99",
+            "-c", "2048",
+            "-n", str(max_tokens),
+            "--temp", "0.7",
+            "--top-p", "0.8",
+            "--no-display-prompt",
+            "-f", prompt_file,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        stdin=subprocess.DEVNULL,
     )
+    if proc.returncode != 0:
+        raise RuntimeError(f"llama-completion failed: {proc.stderr[-300:]}")
+    return proc.stdout.strip()
 
 
 def _extract_json_payload(text):
-    """Extract a JSON payload from model output when possible."""
+    """Extract a JSON payload from model output."""
     if not text:
         return None
     stripped = text.strip()
@@ -56,14 +76,11 @@ def _extract_json_payload(text):
     return None
 
 
-def predict(context):
-    model = load_model()
-
-    # Build asset-type-aware prompt
+def _build_prompt(context):
     ticker = context.get("ticker", "UNKNOWN")
     asset_type = context.get("asset_type", "cryptocurrency")
 
-    prompt = f"""<|im_start|>system
+    return f"""<|im_start|>system
 You are an expert financial analyst specializing in {asset_type} trading.
 Analyze the market data and provide a single trading decision: BUY, SELL, or HOLD.
 Respond with EXACTLY one JSON object: {{"action":"BUY|SELL|HOLD","reasoning":"one sentence"}}
@@ -89,24 +106,16 @@ Provide your trading decision as JSON.<|im_end|>
 <|im_start|>assistant
 """
 
-    response = model(
-        prompt,
-        max_tokens=256,
-        temperature=0.7,
-        top_p=0.8,
-        stop=["<|im_end|>", "<|im_start|>"],
-    )
 
-    text = response["choices"][0]["text"].strip()
-
-    # Strip thinking tags if present (Qwen3 thinking mode)
+def _parse_response(text):
+    """Parse model output into action + reasoning."""
+    # Strip thinking tags if present
     if "<think>" in text:
         think_end = text.find("</think>")
         if think_end >= 0:
             text = text[think_end + 8:].strip()
 
     payload = _extract_json_payload(text)
-
     decision = None
     reasoning = text[:200]
     if isinstance(payload, dict):
@@ -115,87 +124,30 @@ Provide your trading decision as JSON.<|im_end|>
             decision = raw_action
         if payload.get("reasoning"):
             reasoning = str(payload["reasoning"])[:200]
-
     if decision is None:
         match = re.search(r"\b(BUY|SELL|HOLD)\b", text.upper())
         decision = match.group(1) if match else "HOLD"
+    return decision, reasoning
 
-    return {
-        "action": decision,
-        "reasoning": reasoning,
-        "model": "Qwen3-8B",
-    }
+
+def predict(context):
+    """Single-ticker prediction."""
+    prompt = _build_prompt(context)
+    text = _run_native(prompt)
+    decision, reasoning = _parse_response(text)
+    return {"action": decision, "reasoning": reasoning, "model": "Qwen3-8B"}
 
 
 def predict_batch(contexts):
-    """Process multiple tickers in one model-load cycle.
+    """Process multiple tickers — one model load, sequential inference.
 
-    Args:
-        contexts: list of context dicts, each with 'ticker', 'price_usd', etc.
-
-    Returns:
-        list of result dicts in same order as input.
+    Note: The native binary loads/unloads per call, so batch mode here
+    just runs them sequentially. True batching requires llama-server.
     """
-    model = load_model()
     results = []
     for ctx in contexts:
         try:
-            ticker = ctx.get("ticker", "UNKNOWN")
-            asset_type = ctx.get("asset_type", "cryptocurrency")
-
-            prompt = f"""<|im_start|>system
-You are an expert financial analyst specializing in {asset_type} trading.
-Analyze the market data and provide a single trading decision: BUY, SELL, or HOLD.
-Respond with EXACTLY one JSON object: {{"action":"BUY|SELL|HOLD","reasoning":"one sentence"}}
-Use HOLD when evidence is mixed or weak.<|im_end|>
-<|im_start|>user
-Asset: {ticker} ({asset_type})
-Current Price: ${ctx.get('price_usd', 0):,.2f}
-
-Technical Indicators:
-- RSI(14): {ctx.get('rsi', 'N/A')}
-- MACD Histogram: {ctx.get('macd_hist', 'N/A')}
-- EMA(9) vs EMA(21): {'Bullish (9 > 21)' if ctx.get('ema_bullish') else 'Bearish (9 < 21)'} (gap: {ctx.get('ema_gap_pct', 'N/A')}%)
-- Bollinger Bands: Price is {ctx.get('bb_position', 'N/A')}
-- Volume Ratio: {ctx.get('volume_ratio', 'N/A')}x avg
-
-Market Context:
-- Fear & Greed: {ctx.get('fear_greed', 'N/A')}/100 ({ctx.get('fear_greed_class', '')})
-- Sentiment: {ctx.get('news_sentiment', 'N/A')} (conf: {ctx.get('sentiment_confidence', 'N/A')})
-
-Multi-timeframe: {ctx.get('timeframe_summary', 'N/A')}
-
-Provide your trading decision as JSON.<|im_end|>
-<|im_start|>assistant
-"""
-            response = model(
-                prompt,
-                max_tokens=256,
-                temperature=0.7,
-                top_p=0.8,
-                stop=["<|im_end|>", "<|im_start|>"],
-            )
-            text = response["choices"][0]["text"].strip()
-
-            if "<think>" in text:
-                think_end = text.find("</think>")
-                if think_end >= 0:
-                    text = text[think_end + 8:].strip()
-
-            payload = _extract_json_payload(text)
-            decision = None
-            reasoning = text[:200]
-            if isinstance(payload, dict):
-                raw_action = str(payload.get("action", "")).upper()
-                if raw_action in {"BUY", "SELL", "HOLD"}:
-                    decision = raw_action
-                if payload.get("reasoning"):
-                    reasoning = str(payload["reasoning"])[:200]
-            if decision is None:
-                match = re.search(r"\b(BUY|SELL|HOLD)\b", text.upper())
-                decision = match.group(1) if match else "HOLD"
-
-            results.append({"action": decision, "reasoning": reasoning, "model": "Qwen3-8B"})
+            results.append(predict(ctx))
         except Exception as e:
             results.append({"action": "HOLD", "reasoning": f"error: {e}", "model": "Qwen3-8B"})
     return results
@@ -203,7 +155,6 @@ Provide your trading decision as JSON.<|im_end|>
 
 if __name__ == "__main__":
     data = json.loads(sys.stdin.read())
-    # Support both single context and batch mode
     if isinstance(data, list):
         results = predict_batch(data)
         print(json.dumps(results))

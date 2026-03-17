@@ -54,12 +54,13 @@ def _extract_json_from_stdout(stdout):
 
 
 def _call_qwen3(context):
-    """Call Qwen3-8B inference subprocess (single ticker)."""
+    """Call Qwen3-8B via qwen3_trader (uses native llama-completion binary)."""
     repo_root = Path(__file__).resolve().parent.parent
+    # Use main venv Python — qwen3_trader.py calls native binary, no llama-cpp-python needed
     if platform.system() == "Windows":
-        python = r"Q:\models\.venv-llm\Scripts\python.exe"
+        python = str(repo_root / ".venv" / "Scripts" / "python.exe")
     else:
-        python = "/home/deck/models/.venv-llm/bin/python"
+        python = str(repo_root / ".venv" / "bin" / "python")
 
     script = repo_root / "portfolio" / "qwen3_trader.py"
     cmd = [python, str(script)]
@@ -90,9 +91,9 @@ def _call_qwen3_batch(contexts):
 
     repo_root = Path(__file__).resolve().parent.parent
     if platform.system() == "Windows":
-        python = r"Q:\models\.venv-llm\Scripts\python.exe"
+        python = str(repo_root / ".venv" / "Scripts" / "python.exe")
     else:
-        python = "/home/deck/models/.venv-llm/bin/python"
+        python = str(repo_root / ".venv" / "bin" / "python")
 
     script = repo_root / "portfolio" / "qwen3_trader.py"
     cmd = [python, str(script)]
@@ -104,7 +105,7 @@ def _call_qwen3_batch(contexts):
         input=json.dumps(contexts),
         capture_output=True,
         text=True,
-        timeout=30 + 20 * len(contexts),  # 30s base + 20s per ticker
+        timeout=30 + 15 * len(contexts),  # 30s base + 15s per ticker
     )
     elapsed = time.time() - t0
     logger.info("Qwen3 batch: %d tickers in %.1fs (%.1fs/ticker)",
