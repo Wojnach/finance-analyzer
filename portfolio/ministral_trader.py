@@ -26,27 +26,34 @@ else:
 def load_model(lora_path=None):
     from llama_cpp import Llama
 
-    model_path = MODEL_PATH
-    if not os.path.exists(MODEL_PATH):
-        if os.path.exists(LEGACY_MODEL_PATH):
-            model_path = LEGACY_MODEL_PATH
-            # Legacy model supports LoRA
-            lora = lora_path or r"Q:\models\cryptotrader-lm\cryptotrader-lm-lora.gguf"
-        else:
-            raise FileNotFoundError(f"No model found at {MODEL_PATH} or {LEGACY_MODEL_PATH}")
-    else:
-        lora = None  # Ministral-3 is incompatible with old LoRA
+    # Try Ministral-3 first, fall back to legacy on any failure
+    # (including unsupported 'mistral3' architecture in older llama-cpp-python)
+    if os.path.exists(MODEL_PATH):
+        try:
+            return Llama(
+                model_path=MODEL_PATH,
+                n_ctx=4096,
+                n_gpu_layers=-1,
+                verbose=False,
+            )
+        except Exception as e:
+            import sys
+            print(f"Ministral-3 load failed ({e}), falling back to legacy", file=sys.stderr)
 
-    kwargs = {
-        "model_path": model_path,
-        "n_ctx": 4096,
-        "n_gpu_layers": -1,
-        "verbose": False,
-    }
-    if lora and os.path.exists(lora):
-        kwargs["lora_path"] = lora
+    # Legacy fallback with LoRA support
+    if os.path.exists(LEGACY_MODEL_PATH):
+        lora = lora_path or r"Q:\models\cryptotrader-lm\cryptotrader-lm-lora.gguf"
+        kwargs = {
+            "model_path": LEGACY_MODEL_PATH,
+            "n_ctx": 4096,
+            "n_gpu_layers": -1,
+            "verbose": False,
+        }
+        if lora and os.path.exists(lora):
+            kwargs["lora_path"] = lora
+        return Llama(**kwargs)
 
-    return Llama(**kwargs)
+    raise FileNotFoundError(f"No model found at {MODEL_PATH} or {LEGACY_MODEL_PATH}")
 
 
 def _extract_json_payload(text):
