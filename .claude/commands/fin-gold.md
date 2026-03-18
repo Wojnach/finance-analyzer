@@ -11,6 +11,34 @@ Gold is the anchor asset — central bank reserve, inflation hedge, safe haven. 
    Avanza commodity warrant hours: **08:15-21:55 CET** (NOT 17:25).
    Gold trades 24/7 on spot markets. COMEX: 00:00-22:00 CET with 1h break.
 
+1b. **Recall prior verdicts** — Read `data/fin_command_log.jsonl` and extract the last 3 entries covering XAU-USD:
+   ```python
+   import json
+   entries = []
+   with open("data/fin_command_log.jsonl", encoding="utf-8") as f:
+       for line in f:
+           line = line.strip()
+           if not line: continue
+           try:
+               e = json.loads(line)
+               if e.get("ticker") == "XAU-USD" or "XAU-USD" in e.get("tickers", []):
+                   entries.append(e)
+           except: pass
+   for e in entries[-3:]:
+       print(json.dumps(e, indent=2))
+   ```
+   For each prior entry, compare prior price against current:
+   - Single-ticker entries: use `price_usd`
+   - Multi-ticker entries (fin-goldsilver): use `gold.price_usd`
+   - If `verdict_correct_1d` or `outcome_1d_pct` exists, note the scored result
+   - Include a **Prior Verdict Reflection** section early in your output:
+     ```
+     ### Prior Verdict Reflection
+     {date} ({command}): Said {verdict} at ${price} (conf {conf}) → now ${current} ({pct}%) — {RIGHT/WRONG}
+     ```
+   - Use this to calibrate current verdicts — if you've been consistently wrong, adjust confidence down
+   - If no prior entries exist, skip this section
+
 2. **Ensure fresh precomputed context** — Check `data/gold_deep_context.json`:
    - Read the file and parse `generated_at` timestamp
    - Compute age: `(now - generated_at)` in hours

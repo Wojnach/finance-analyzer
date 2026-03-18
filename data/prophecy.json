@@ -3,7 +3,7 @@
     {
       "id": "silver_bull_2026",
       "ticker": "XAG-USD",
-      "thesis": "Silver to $120 — war premium (Ukraine/Middle East), industrial demand (solar/EV/AI data centers), gold-silver ratio compression from 90 to 50, central bank diversification away from USD",
+      "thesis": "Silver to $120 \u2014 war premium (Ukraine/Middle East), industrial demand (solar/EV/AI data centers), gold-silver ratio compression from 90 to 50, central bank diversification away from USD",
       "direction": "bullish",
       "conviction": 0.8,
       "target_price": 120.0,
@@ -16,7 +16,7 @@
         "Gold-silver ratio at 90 (historically compresses to 50-60 in bull markets)",
         "Industrial demand: solar panels, EVs, AI data centers all rising",
         "Geopolitical premium: Ukraine/Russia, Middle East conflicts ongoing",
-        "Central banks buying gold at record pace — silver follows gold moves with leverage",
+        "Central banks buying gold at record pace \u2014 silver follows gold moves with leverage",
         "Supply deficit: silver mine output declining while demand rising"
       ],
       "opposing_evidence": [
@@ -97,14 +97,14 @@
       "updated_at": "2026-03-10T06:43:00+00:00",
       "status": "active",
       "supporting_evidence": [
-        "Historical post-halving cycles: BTC peaks 12-18 months after halving (Apr 2024 halving → Q2-Q4 2025 peak window extending into 2026)",
+        "Historical post-halving cycles: BTC peaks 12-18 months after halving (Apr 2024 halving \u2192 Q2-Q4 2025 peak window extending into 2026)",
         "ETF inflows creating sustained institutional demand floor",
-        "Halving supply shock not yet fully reflected — miners capitulated, new supply 50% lower",
+        "Halving supply shock not yet fully reflected \u2014 miners capitulated, new supply 50% lower",
         "User conviction: predicted Q2 2026 explosive move",
         "Macro: potential Fed rate cuts in 2026 = liquidity tailwind"
       ],
       "opposing_evidence": [
-        "Range-bound for months — could be distribution not accumulation",
+        "Range-bound for months \u2014 could be distribution not accumulation",
         "Regulatory risk from SEC/global regulators",
         "Strong USD headwind if Fed delays cuts"
       ],
@@ -115,8 +115,8 @@
           "target_value": 75000.0,
           "comparison": "above",
           "deadline": "2026-06-30T00:00:00+00:00",
-          "status": "pending",
-          "triggered_at": null,
+          "status": "triggered",
+          "triggered_at": "2026-03-17T00:11:02.388020+00:00",
           "created_at": "2026-02-28T00:00:00+00:00"
         },
         {
@@ -155,7 +155,7 @@
         "macro",
         "halving-cycle"
       ],
-      "notes": "User expects BTC to explode up in Q2 2026. Hold and wait — do not trade range noise. Watch for $75K breakout as confirmation."
+      "notes": "User expects BTC to explode up in Q2 2026. Hold and wait \u2014 do not trade range noise. Watch for $75K breakout as confirmation."
     },
     {
       "id": "eth_q2_breakout_2026",
@@ -171,13 +171,13 @@
       "status": "active",
       "supporting_evidence": [
         "ETH historically outperforms BTC in bull market legs (higher beta)",
-        "ETH/BTC ratio at multi-year lows — mean reversion likely when BTC breaks out",
+        "ETH/BTC ratio at multi-year lows \u2014 mean reversion likely when BTC breaks out",
         "User conviction: expects explosive move alongside BTC in Q2 2026",
         "ETH staking yield + institutional adoption growing",
         "Pectra upgrade potential catalyst"
       ],
       "opposing_evidence": [
-        "ETH/BTC ratio declining — structural underperformance",
+        "ETH/BTC ratio declining \u2014 structural underperformance",
         "L2 fragmentation diluting ETH value capture",
         "Could lag BTC indefinitely if narrative shifts to BTC-only"
       ],
@@ -222,6 +222,6 @@
   ],
   "metadata": {
     "version": 1,
-    "last_review": "2026-03-09T08:24:56.709914+00:00"
+    "last_review": "2026-03-17T00:11:02.388020+00:00"
   }
 }

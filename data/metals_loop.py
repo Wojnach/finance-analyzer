@@ -960,6 +960,9 @@ def read_signal_data():
                     "action": t.get("action", "?"),
                     "confidence": round(t.get("confidence", 0), 3),
                     "weighted_confidence": round(t.get("weighted_confidence", 0), 3),
+                    "raw_action": extra.get("_raw_action", t.get("action", "?")),
+                    "raw_confidence": round(extra.get("_raw_confidence", t.get("confidence", 0)), 3),
+                    "weighted_action": extra.get("_weighted_action", t.get("action", "?")),
                     "rsi": round(t.get("rsi", 0), 1),
                     "macd_hist": t.get("macd_hist", 0),
                     "bb_position": t.get("bb_position", "?"),
@@ -3278,15 +3281,30 @@ def _make_autonomous_prediction(signals_data, llm_data):
 
     for ticker, sig in signals_data.items():
         action = sig.get("action", "HOLD")
-        buy_count = sig.get("buy_count", 0)
-        sell_count = sig.get("sell_count", 0)
-        total = buy_count + sell_count
-        if total == 0:
+        weight = sig.get("weighted_confidence")
+        try:
+            weight = float(weight)
+        except (TypeError, ValueError):
+            weight = None
+        if weight is None:
+            buy_count = sig.get("buy_count", 0)
+            sell_count = sig.get("sell_count", 0)
+            total = buy_count + sell_count
+            if total == 0:
+                continue
+            if action == "BUY":
+                weight = buy_count / total
+            elif action == "SELL":
+                weight = sell_count / total
+            else:
+                continue
+        weight = max(0.0, min(weight, 1.0))
+        if weight == 0:
             continue
         if action == "BUY":
-            directions.append(("up", buy_count / total))
+            directions.append(("up", weight))
         elif action == "SELL":
-            directions.append(("down", sell_count / total))
+            directions.append(("down", weight))
 
     for ticker, data in llm_data.items():
         if ticker.startswith("_"):
@@ -3408,8 +3426,19 @@ def _build_autonomous_telegram(trigger_reasons, tier, positions_data, signals_da
     for ticker, sig in signals_data.items():
         short_t = humanize_ticker(ticker)
         votes = format_vote_summary(sig.get("buy_count", 0), sig.get("sell_count", 0))
-        sig_parts.append(f"{short_t} {sig['action']} ({votes} votes)")
-    sig_line = f"Signal votes: {' | '.join(sig_parts[:3])}" if sig_parts else ""
+        action = sig.get("action", "?")
+        raw_action = sig.get("raw_action") or action
+        if raw_action != action:
+            conf = sig.get("weighted_confidence")
+            try:
+                conf = float(conf)
+            except (TypeError, ValueError):
+                conf = None
+            conf_part = f"{conf:.0%} confidence; " if conf is not None else ""
+            sig_parts.append(f"{short_t} {action} ({conf_part}raw {raw_action}, {votes} votes)")
+        else:
+            sig_parts.append(f"{short_t} {action} ({votes} votes)")
+    sig_line = f"Signals: {' | '.join(sig_parts[:3])}" if sig_parts else ""
 
     # LLM line
     llm_parts = []
@@ -3531,6 +3560,10 @@ def _autonomous_decision(trigger_reasons, blocked_tier):
                 s = last_signal_data[ticker]
                 signals_data[ticker] = {
                     "action": s.get("action", "?"),
+                    "confidence": s.get("confidence", 0),
+                    "weighted_confidence": s.get("weighted_confidence", 0),
+                    "raw_action": s.get("raw_action", s.get("action", "?")),
+                    "raw_confidence": s.get("raw_confidence", s.get("confidence", 0)),
                     "buy_count": s.get("buy_count", 0),
                     "sell_count": s.get("sell_count", 0),
                     "rsi": s.get("rsi"),

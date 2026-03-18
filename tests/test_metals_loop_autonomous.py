@@ -110,6 +110,21 @@ class TestMakeAutonomousPrediction:
         assert result["confidence"] >= 0.7
         assert result["action"] == "SELL"
 
+    def test_weighted_confidence_overrides_raw_vote_ratio(self):
+        from metals_loop import _make_autonomous_prediction
+        signals = {
+            "XAG-USD": {
+                "action": "BUY",
+                "buy_count": 0,
+                "sell_count": 7,
+                "weighted_confidence": 0.78,
+            },
+        }
+        result = _make_autonomous_prediction(signals, {})
+        assert result["direction"] == "up"
+        assert result["action"] == "BUY"
+        assert result["up_weight"] == 0.78
+
     def test_low_confidence_stays_hold(self):
         from metals_loop import _make_autonomous_prediction
         # Conflicting signals: XAG BUY vs XAU SELL with similar weights → ~0.5 confidence
@@ -269,6 +284,23 @@ class TestBuildAutonomousTelegram:
             {"action": "HOLD"}, "NEUTRAL", "10:00 CET", False,
         )
         assert "XAG BUY (4 buy / 2 sell votes)" in msg
+
+    def test_signal_mismatch_in_message_shows_raw_action(self):
+        from metals_loop import _build_autonomous_telegram
+        signals = {
+            "XAG-USD": {
+                "action": "BUY",
+                "raw_action": "SELL",
+                "weighted_confidence": 0.78,
+                "buy_count": 0,
+                "sell_count": 7,
+            }
+        }
+        msg = _build_autonomous_telegram(
+            ["test"], 1, {}, signals, {}, {},
+            {"action": "BUY"}, "NEUTRAL", "10:00 CET", False,
+        )
+        assert "XAG BUY (78% confidence; raw SELL, 0 buy / 7 sell votes)" in msg
 
     def test_llm_in_message(self):
         from metals_loop import _build_autonomous_telegram

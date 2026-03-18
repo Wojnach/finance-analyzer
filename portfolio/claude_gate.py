@@ -39,7 +39,7 @@ logger = logging.getLogger("portfolio.claude_gate")
 # Master kill switch.  Set to False to block ALL Claude Code invocations
 # across the entire codebase — no exceptions.
 # ---------------------------------------------------------------------------
-CLAUDE_ENABLED = True
+CLAUDE_ENABLED = False
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -106,44 +106,6 @@ def _count_today_invocations() -> int:
     return count
 
 
-def _check_gates(caller: str, model: str, now_iso: str) -> str | None:
-    """Run shared gate checks.
-
-    Returns None if all gates pass, or a reason string if blocked.
-    """
-    # --- Gate 1: module-level kill switch ---
-    if not CLAUDE_ENABLED:
-        logger.info("Claude invocation BLOCKED (CLAUDE_ENABLED=False) caller=%s", caller)
-        _log_invocation({
-            "timestamp": now_iso,
-            "caller": caller,
-            "status": "blocked",
-            "reason": "CLAUDE_ENABLED=False",
-            "model": model,
-            "max_turns": 0,
-            "duration_seconds": 0,
-            "exit_code": -1,
-        })
-        return "CLAUDE_ENABLED=False"
-
-    # --- Gate 2: config.json layer2.enabled ---
-    if not _load_config_layer2_enabled():
-        logger.info("Claude invocation BLOCKED (config layer2.enabled=false) caller=%s", caller)
-        _log_invocation({
-            "timestamp": now_iso,
-            "caller": caller,
-            "status": "blocked",
-            "reason": "config.layer2.enabled=false",
-            "model": model,
-            "max_turns": 0,
-            "duration_seconds": 0,
-            "exit_code": -1,
-        })
-        return "config.layer2.enabled=false"
-
-    return None
-
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -175,9 +137,34 @@ def invoke_claude(
     now_iso = datetime.now(timezone.utc).isoformat()
     working_dir = cwd or str(BASE_DIR)
 
-    # --- Shared gate checks ---
-    block_reason = _check_gates(caller, model, now_iso)
-    if block_reason:
+    # --- Gate 1: module-level kill switch ---
+    if not CLAUDE_ENABLED:
+        logger.info("Claude invocation BLOCKED (CLAUDE_ENABLED=False) caller=%s", caller)
+        _log_invocation({
+            "timestamp": now_iso,
+            "caller": caller,
+            "status": "blocked",
+            "reason": "CLAUDE_ENABLED=False",
+            "model": model,
+            "max_turns": max_turns,
+            "duration_seconds": 0,
+            "exit_code": -1,
+        })
+        return False, -1
+
+    # --- Gate 2: config.json layer2.enabled ---
+    if not _load_config_layer2_enabled():
+        logger.info("Claude invocation BLOCKED (config layer2.enabled=false) caller=%s", caller)
+        _log_invocation({
+            "timestamp": now_iso,
+            "caller": caller,
+            "status": "blocked",
+            "reason": "config.layer2.enabled=false",
+            "model": model,
+            "max_turns": max_turns,
+            "duration_seconds": 0,
+            "exit_code": -1,
+        })
         return False, -1
 
     # --- Rate-limit warning ---
@@ -255,120 +242,6 @@ def invoke_claude(
     )
 
     return exit_code == 0, exit_code
-
-
-def invoke_claude_text(
-    prompt: str,
-    caller: str,
-    model: str = "sonnet",
-    timeout: int = 60,
-) -> tuple[str, bool, int]:
-    """Invoke Claude Code and return the response text.
-
-    Like ``invoke_claude()`` but passes the prompt via stdin and returns
-    stdout.  Designed for signals that need to parse the LLM response
-    (e.g. ``claude_fundamental``).
-
-    The same gates apply: CLAUDE_ENABLED, config layer2.enabled, rate-limit
-    warning, PATH check, and invocation logging.
-
-    Args:
-        prompt: The prompt text (sent via stdin, not as a positional arg).
-        caller: Identifier of the calling module.
-        model: Claude model alias (``"sonnet"``, ``"haiku"``, ``"opus"``).
-        timeout: Subprocess timeout in seconds.
-
-    Returns:
-        ``(stdout_text, success, exit_code)``.
-        On failure, ``stdout_text`` is the empty string.
-    """
-    now_iso = datetime.now(timezone.utc).isoformat()
-
-    # --- Shared gate checks ---
-    block_reason = _check_gates(caller, model, now_iso)
-    if block_reason:
-        return "", False, -1
-
-    # --- Rate-limit warning ---
-    today_count = _count_today_invocations()
-    if today_count >= _DAILY_WARN_THRESHOLD:
-        logger.warning(
-            "Daily invocation count (%d) exceeds threshold (%d) — caller=%s",
-            today_count, _DAILY_WARN_THRESHOLD, caller,
-        )
-
-    # --- Locate claude CLI ---
-    claude_cmd = _find_claude_cmd()
-    if not claude_cmd:
-        logger.error("claude CLI not found on PATH — caller=%s", caller)
-        _log_invocation({
-            "timestamp": now_iso,
-            "caller": caller,
-            "status": "error",
-            "reason": "claude not on PATH",
-            "model": model,
-            "max_turns": 0,
-            "duration_seconds": 0,
-            "exit_code": -1,
-        })
-        return "", False, -1
-
-    # --- Build command (prompt via stdin, not positional arg) ---
-    cmd = [
-        claude_cmd, "-p",
-        "--model", model,
-        "--output-format", "text",
-        "--no-session-persistence",
-    ]
-
-    # --- Execute ---
-    t0 = time.time()
-    exit_code = -1
-    status = "error"
-    stdout_text = ""
-
-    try:
-        result = subprocess.run(
-            cmd,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=_clean_env(),
-        )
-        exit_code = result.returncode
-        stdout_text = result.stdout or ""
-        status = "invoked" if exit_code == 0 else "error"
-        if exit_code != 0:
-            logger.warning(
-                "claude CLI failed (rc=%d) caller=%s: %s",
-                exit_code, caller, (result.stderr or "")[:500],
-            )
-    except subprocess.TimeoutExpired:
-        status = "timeout"
-        logger.warning("Claude text invocation timed out after %ds — caller=%s", timeout, caller)
-    except Exception as e:
-        status = "error"
-        logger.error("Claude text invocation failed — caller=%s: %s", caller, e)
-
-    duration = round(time.time() - t0, 2)
-
-    _log_invocation({
-        "timestamp": now_iso,
-        "caller": caller,
-        "status": status,
-        "model": model,
-        "max_turns": 0,
-        "duration_seconds": duration,
-        "exit_code": exit_code,
-    })
-
-    logger.info(
-        "Claude text invocation: caller=%s model=%s status=%s exit=%d duration=%.1fs",
-        caller, model, status, exit_code, duration,
-    )
-
-    return stdout_text, exit_code == 0, exit_code
 
 
 def get_invocation_stats() -> dict:

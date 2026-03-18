@@ -8,10 +8,12 @@
     "sold_reason": "startup_verify_not_held"
   },
   "silver301": {
-    "active": true,
-    "units": 1105,
+    "active": false,
+    "units": 3252,
     "entry": 13.921176,
-    "stop": 13.23
+    "stop": 13.23,
+    "sold_ts": "2026-03-18T15:31:40.628565+00:00",
+    "sold_reason": "startup_verify_not_held"
   },
   "silver_sg": {
     "active": false,
