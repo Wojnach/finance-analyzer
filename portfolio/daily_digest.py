@@ -102,7 +102,6 @@ def build_daily_digest(config):
 
     notification = config.get("notification", {})
     focus_tickers = notification.get("focus_tickers", ["XAG-USD", "BTC-USD"])
-    mover_thresholds = notification.get("mover_thresholds", {"3d_pct": 5.0, "7d_pct": 10.0})
 
     lines = []
 
@@ -142,7 +141,6 @@ def build_daily_digest(config):
             prob = focus_probs.get(ticker, {})
             prob_1d = prob.get("1d", {})
             acc = prob.get("accuracy_1d", 0)
-            acc_samples = prob.get("accuracy_samples", 0)
 
             # Main ticker line
             prob_str = ""

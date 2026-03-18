@@ -22,7 +22,6 @@ def fetch_with_retry(url, method="GET", retries=DEFAULT_RETRIES,
     Returns response object on success, None on all retries exhausted.
     """
     requester = session or requests
-    last_exc = None
 
     for attempt in range(retries + 1):
         try:
@@ -49,7 +48,6 @@ def fetch_with_retry(url, method="GET", retries=DEFAULT_RETRIES,
                 return None
 
         except (requests.ConnectionError, requests.Timeout) as e:
-            last_exc = e
             if attempt < retries:
                 wait = backoff * (backoff_factor ** attempt)
                 jitter = random.uniform(0, wait * 0.1)

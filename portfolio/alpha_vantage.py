@@ -216,7 +216,6 @@ def refresh_fundamentals_batch(config):
         return 0
 
     daily_budget = av_config.get("daily_budget", 25)
-    max_stale_days = av_config.get("max_stale_days", 5)
     skip_tickers = set(av_config.get("skip_tickers", []))
     cache_ttl_hours = av_config.get("cache_ttl_hours", 24)
 

@@ -186,7 +186,6 @@ def compute_metrics(curve: list[dict], strategy: str) -> dict:
     # --- Maximum drawdown ---
     peak = values[0]
     max_dd = 0.0
-    days_below_peak = 0
     # Group by date for drawdown day counting
     date_was_below = set()
 

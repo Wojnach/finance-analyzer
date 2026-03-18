@@ -189,7 +189,6 @@ def validate_portfolio(portfolio: dict) -> list[str]:
     # --- Check 7: Transaction field completeness ---
     required_tx_fields = ["timestamp", "ticker", "action", "shares", "price_usd",
                           "total_sek", "reason"]
-    recommended_tx_fields = ["price_sek", "fee_sek", "confidence", "fx_rate"]
 
     for i, tx in enumerate(transactions):
         for field in required_tx_fields:

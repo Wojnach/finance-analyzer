@@ -222,7 +222,6 @@ def _evaluate_conditions(ticker, signals, prices_usd, tf_data):
 
     ind = sig["indicators"]
     extra = sig.get("extra", {})
-    price = prices_usd.get(ticker, 0)
 
     bull_conditions = []
     bear_conditions = []

@@ -266,8 +266,6 @@ def _ticker_prediction(ticker, sig, tf_entries):
     rsi = ind.get("rsi", 50)
     buy_count = extra.get("_buy_count", 0)
     sell_count = extra.get("_sell_count", 0)
-    total = extra.get("_total_applicable", 20)
-    weighted_conf = extra.get("weighted_confidence", sig.get("confidence", 0.5))
 
     # Base conviction from signal consensus
     active = buy_count + sell_count

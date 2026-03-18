@@ -282,7 +282,6 @@ def _detect_liquidity_sweep(
     current_high = float(highs[-1])
     current_low = float(lows[-1])
     current_close = float(close[-1])
-    current_open = float(opens[-1])
 
     # Check sell-side sweep (bullish signal): wick below recent swing low
     # then close back above it

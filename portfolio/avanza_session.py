@@ -209,7 +209,6 @@ def get_positions() -> list[dict]:
         volume_obj = entry.get("volume", {})
         value_obj = entry.get("value", {})
         acquired_obj = entry.get("acquiredValue", {})
-        perf = entry.get("lastTradingDayPerformance", {})
         account = entry.get("account", {})
 
         vol = volume_obj.get("value", 0) if isinstance(volume_obj, dict) else volume_obj

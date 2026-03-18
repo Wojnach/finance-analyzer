@@ -404,8 +404,6 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
 
     # --- Stage 4: Dynamic MIN_VOTERS ---
     active_voters = extra_info.get("_voters", 0)
-    buy_count = extra_info.get("_buy_count", 0)
-    sell_count = extra_info.get("_sell_count", 0)
 
     if regime in ("trending-up", "trending-down"):
         dynamic_min = 3

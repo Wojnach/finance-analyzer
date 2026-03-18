@@ -65,7 +65,6 @@ def _check_recent_trade(state):
 
     Returns True if a recent trade was detected.
     """
-    last_trigger = state.get("last_trigger_time", 0)
     last_checked_tx = state.get("last_checked_tx_count", {})
 
     trade_detected = False

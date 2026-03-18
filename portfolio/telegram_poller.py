@@ -110,7 +110,6 @@ class TelegramPoller:
         Returns (cmd, args) or (None, None) for non-commands.
         Recognized: bought, sold, cancel, status, /mode
         """
-        text_lower = text.lower().strip()
         parts = text.split(None, 1)
         first_word = parts[0].lower() if parts else ""
         rest = parts[1] if len(parts) > 1 else ""
