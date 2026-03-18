@@ -39,7 +39,7 @@ _MAX_STACK_OVERFLOWS = 5  # auto-disable after this many consecutive stack overf
 # Per-tier configuration
 TIER_CONFIG = {
     1: {"max_turns": 15, "timeout": 120, "label": "QUICK CHECK"},
-    2: {"max_turns": 25, "timeout": 300, "label": "SIGNAL ANALYSIS"},
+    2: {"max_turns": 40, "timeout": 600, "label": "SIGNAL ANALYSIS"},
     3: {"max_turns": 40, "timeout": 900, "label": "FULL REVIEW"},
 }
 
@@ -210,6 +210,8 @@ def invoke_agent(reasons, tier=3):
         agent_env = os.environ.copy()
         agent_env.pop("CLAUDECODE", None)
         agent_env.pop("CLAUDE_CODE_ENTRYPOINT", None)
+        # Increase Node.js stack size to prevent stack overflow in Claude CLI
+        agent_env["NODE_OPTIONS"] = "--stack-size=16384"
         _agent_proc = subprocess.Popen(
             cmd,
             cwd=str(BASE_DIR),
