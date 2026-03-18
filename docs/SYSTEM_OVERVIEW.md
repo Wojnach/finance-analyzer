@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-03-16
-Branch: improve/auto-session-2026-03-16
+Updated: 2026-03-18
+Branch: improve/auto-session-2026-03-18
 
 ## 1) Architecture Summary
 
@@ -168,7 +168,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 
 ## 8) Key Design Patterns
 
-- **Atomic writes**: `file_utils.atomic_write_json()` and `atomic_write_jsonl()` prevent corrupt state files. All 23 portfolio modules use `load_json()`/`load_jsonl()` — zero raw `json.loads(path.read_text())` calls remain (enforced by `test_io_safety_sweep.py`)
+- **Atomic writes**: `file_utils.atomic_write_json()` and `atomic_write_jsonl()` prevent corrupt state files. All portfolio modules (including golddigger/elongir subsystems) use `load_json()`/`load_jsonl()` — zero raw `json.loads(path.read_text())` calls remain (enforced by `test_io_safety_sweep.py`)
 - **Metals shared state**: positions, stop orders, trade queue, and guard/spike state now use atomic JSON writes with explicit corrupt-file logging
 - **Circuit breakers**: Per-API failure tracking with auto-recovery
 - **Cache-through**: TTL cache with stale-data fallback (shared_state._cached)
@@ -177,7 +177,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
 - **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
 
-## 9) Known Issues (as of 2026-03-16)
+## 9) Known Issues (as of 2026-03-18)
 
 - BUG-15 through BUG-22: Fixed in 2026-03-08 session
 - BUG-23 through BUG-27: Fixed in 2026-03-09 session (signal validation, None ticker, OSError, heartbeat, pass cleanup)
@@ -207,4 +207,12 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - REF-10: Remove dead `fin_evolve.py` fallback wrappers (in progress, 2026-03-16)
 - FEAT-2: Signal failure rate in accuracy reports (in progress, 2026-03-16)
 - TEST coverage: candlestick (57 tests), fibonacci (51 tests), structure (32 tests) — formerly zero
+- BUG-71/73: Golddigger/elongir config loading used raw `json.load()` — fixed 2026-03-18
+- BUG-72: Golddigger sent Telegram directly bypassing message_store — fixed 2026-03-18
+- BUG-74: Golddigger data_provider used raw `json.load()` for cached data — fixed 2026-03-18
+- BUG-75/76/77: Dead variables in signal_engine, trigger, telegram_poller — fixed 2026-03-18
+- BUG-79: avanza_tracker silent exception — fixed 2026-03-18
+- REF-13: 112 ruff lint violations (unused imports, f-strings, reimports) — fixed 2026-03-18
+- REF-14: 15 dead variable assignments across 13 modules — fixed 2026-03-18
+- ARCH-16: Golddigger/elongir duplicated config loading (deferred — localized, may diverge)
 - ~3,360 tests across 111+ test files (including 34 IO safety sweep tests)

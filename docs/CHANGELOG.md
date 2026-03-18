@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-03-18 (autonomous improvement session)
+- **REF-13: ruff lint cleanup**: Auto-fixed 112 violations (94 unused imports, 15 empty f-strings, 2 reimports) across 59 files. Manually fixed 3 Python 3.11 f-string backslash compatibility issues in `autonomous.py` and 1 unused import in `risk_management.py`.
+- **REF-14 + BUG-75/76/77: Dead variable removal**: Removed 15 unused variable assignments across 13 modules: `signal_engine.py`, `trigger.py`, `telegram_poller.py`, `smart_money.py`, `autonomous.py`, `alpha_vantage.py`, `avanza_session.py`, `bigbet.py`, `daily_digest.py`, `equity_curve.py`, `http_retry.py`, `portfolio_validator.py`.
+- **BUG-71/73: Config IO hardening**: Replaced raw `json.load(open(...))` in golddigger and elongir config loading with `load_json()` from `file_utils`. Corrupt config now raises `ValueError` instead of cryptic `JSONDecodeError`.
+- **BUG-72: Golddigger Telegram routing**: Replaced direct `requests.post()` Telegram call with `send_or_store()` from `message_store`. Gains JSONL message logging, Markdown escaping, and 4096 char handling.
+- **BUG-74: Golddigger data cache IO**: Replaced local `_load_json_safe()` body with `load_json()` from `file_utils`.
+- **BUG-79: Silent exception logging**: Added `logger.debug()` to `avanza_tracker.py`'s silent import exception handler.
+- Theme: Lint Cleanup & Subsystem IO Hardening. See `docs/IMPROVEMENT_PLAN.md` for full details.
+
 ## 2026-03-17
 - **Model/runtime hardening session**: landed the `feat/model-upgrades` work on `main`, moving both local trading LLMs onto the native CUDA llama.cpp path and tightening the Windows loop launcher.
 - **Qwen3 upgrade**: `qwen3_trader.py` now runs through `llama-completion` on CUDA 13.1, gained batch-mode support for multi-ticker runs, and exposes explicit native asset validation via `load_model()` so missing GGUF/binary paths fail clearly.
