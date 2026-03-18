@@ -1,118 +1,136 @@
 # Improvement Plan
 
-Updated: 2026-03-17
-Branch: improve/auto-session-20260317
+Updated: 2026-03-18
+Branch: improve/auto-session-2026-03-18
 
-Previous sessions: 2026-03-05 through 2026-03-16.
+Previous sessions: 2026-03-05 through 2026-03-17.
 
-## Session Plan (2026-03-17)
+## Session Plan (2026-03-18)
 
-### Theme: Silent Exception Elimination & Error Visibility
+### Theme: Lint Cleanup & Subsystem IO Hardening
 
-Previous sessions completed signal health tracking (BUG-51), dynamic applicable count
-(BUG-52), atomic JSONL appends (BUG-53), and dead IO fallback removal (BUG-55). This
-session addresses the largest remaining class of hidden failures: silent `except Exception: pass`
-blocks that swallow errors without logging. These are the single biggest source of invisible
-bugs in production.
+Previous sessions completed silent exception elimination (BUG-56 to BUG-70) and IO safety
+sweeps across the core 23 portfolio modules. This session addresses two remaining gaps:
+
+1. **229 ruff lint violations** across `portfolio/` — 94 unused imports, 15 unused variables,
+   15 empty f-strings, and more. These are auto-fixable in bulk plus a handful of manual fixes.
+2. **Golddigger & elongir subsystems** merged recently but bypass the IO safety patterns
+   established in the March sessions (raw `json.load(open(...))`, direct Telegram API calls,
+   duplicated config loading).
 
 ### 1) Bugs & Problems Found
 
-#### BUG-56 (P1): 15+ silent `except Exception: pass` blocks swallow errors
+#### BUG-71 (P2): Golddigger runner uses raw `json.load(open(...))` for config
 
-- **Files** (highest risk first):
-  - `portfolio/message_store.py:148` — send failure silenced
-  - `portfolio/avanza_session.py:135-148` — 3 separate silent catches in session management
-  - `portfolio/focus_analysis.py:111` — analysis error silenced
-  - `portfolio/agent_invocation.py:310` — agent process cleanup error silenced
-  - `portfolio/analyze.py:233,393` — 2 analysis errors silenced
-  - `portfolio/golddigger/runner.py:291,296,376,381` — 4 golddigger errors silenced
-  - `portfolio/metals_precompute.py:596` — precompute error silenced (has comment "Non-critical")
-  - `portfolio/fin_snipe_manager.py:1363` — snipe manager error silenced
-  - `portfolio/health.py:244` — health status circuit breaker import error silenced
-- **Issue**: When these code paths fail, the system silently continues with potentially
-  stale or missing data. Debugging production issues requires correlating timestamps across
-  multiple log files because the actual failure point is invisible.
-- **Fix**: Replace `except Exception: pass` with `except Exception: logger.debug(...)` at
-  minimum for non-critical paths, or `logger.warning(...)` for paths where failure affects
-  data quality. Keep the pass/continue behavior — just add logging.
-- **Impact**: High. This is the #1 source of invisible production bugs. Every silent failure
-  that gets logged becomes a diagnosable issue instead of a mystery.
+- **File**: `portfolio/golddigger/runner.py:59-61`
+- **Issue**: Uses `with open(config_path) as f: return json.load(f)` instead of
+  `load_json()` from file_utils. If config.json is corrupt or partially written, this
+  crashes instead of returning a default.
+- **Fix**: Use `load_json()` from `portfolio.file_utils`, raising explicitly if None.
+- **Impact**: Low. Consistency with the rest of the codebase.
 
-#### BUG-57 (P2): `analyze.py:392` uses non-atomic JSONL append
+#### BUG-72 (P2): Golddigger sends Telegram directly instead of via message_store
 
-- **File**: `portfolio/analyze.py:390-392`
-- **Issue**: Uses raw `open("a") + write()` instead of `atomic_append_jsonl()` from file_utils.
-  On crash during write, the file could end up with a partial JSON line.
-- **Fix**: Replace with `atomic_append_jsonl(WATCH_LOG_FILE, event)`.
-- **Impact**: Low-medium. `analyze.py` watch log is non-critical, but consistency matters.
+- **File**: `portfolio/golddigger/runner.py:67-79`
+- **Issue**: `_send_telegram()` calls `requests.post()` to the Telegram API directly.
+  This bypasses `message_store.send_or_store()` which provides: (a) JSONL message logging,
+  (b) Markdown escaping, (c) 4096 char limit handling. Elongir correctly uses `send_or_store`.
+- **Fix**: Replace direct API call with `from portfolio.message_store import send_or_store`.
+- **Impact**: Medium. Golddigger notifications not logged to dashboard.
 
-#### BUG-58 (P2): `message_store.py` silently fails on send
+#### BUG-73 (P2): Elongir runner uses raw `json.load(open(...))` for config
 
-- **File**: `portfolio/message_store.py:148`
-- **Issue**: The `except Exception: pass` in message delivery means Telegram send failures
-  are completely invisible. The message is logged to JSONL (good) but delivery failure
-  is never reported.
-- **Fix**: Add `logger.warning("Telegram delivery failed: %s", e)` before the pass.
-  Do NOT raise — message logging should still succeed even if delivery fails.
-- **Impact**: Medium. Users won't know they missed a notification.
+- **File**: `portfolio/elongir/runner.py:59-60`
+- **Issue**: Same as BUG-71 but in the elongir subsystem.
+- **Fix**: Same pattern.
+- **Impact**: Low.
 
-#### BUG-59 (P3): `avanza_session.py` has 3 silent cleanup catches
+#### BUG-74 (P2): Golddigger data_provider uses raw `json.load(open(...))`
 
-- **File**: `portfolio/avanza_session.py:135,141,147`
-- **Issue**: Session cleanup (browser close, page close, etc.) silently catches all
-  exceptions. While cleanup failures are indeed non-critical, they can indicate
-  resource leaks (zombie browser processes, file handle leaks).
-- **Fix**: Add `logger.debug("session cleanup: %s", e)` to each catch block.
-- **Impact**: Low. Helps diagnose resource leaks.
+- **File**: `portfolio/golddigger/data_provider.py:376-377`
+- **Issue**: Raw file read for cached data.
+- **Fix**: Use `load_json()`.
+- **Impact**: Low.
+
+#### BUG-75 (P3): Dead variables in signal_engine.py confidence penalties
+
+- **File**: `portfolio/signal_engine.py:408-409`
+- **Issue**: `buy_count` and `sell_count` assigned but never used.
+- **Fix**: Remove the assignments.
+- **Impact**: Zero.
+
+#### BUG-76 (P3): Dead variable in trigger.py
+
+- **File**: `portfolio/trigger.py:69`
+- **Issue**: `last_trigger` assigned but never used.
+- **Fix**: Remove the assignment.
+- **Impact**: Zero.
+
+#### BUG-77 (P3): Dead variable and reimport in telegram_poller.py
+
+- **File**: `portfolio/telegram_poller.py:113,136`
+- **Issue**: `text_lower` unused. `json` reimported at line 136.
+- **Fix**: Remove both.
+- **Impact**: Zero.
+
+#### BUG-78 (P3): claude_gate.py silent exception without logging
+
+- **File**: `portfolio/claude_gate.py:68`
+- **Issue**: `except Exception:` returns True without logging.
+- **Fix**: Add `as e` and `logger.debug(...)`.
+- **Impact**: Low.
+
+#### BUG-79 (P3): avanza_tracker.py silent exception without logging
+
+- **File**: `portfolio/avanza_tracker.py:55`
+- **Issue**: `except Exception:` returns {} without logging.
+- **Fix**: Add `as e` and `logger.debug(...)`.
+- **Impact**: Low.
 
 ### 2) Architecture Improvements
 
-#### ARCH-15: Structured exception logging helper
+#### ARCH-16: Golddigger/elongir duplicated config loading (DEFERRED)
 
-- **Files**: `portfolio/file_utils.py` (add helper), multiple consumers
-- **What**: Add a `log_exception(logger, msg, exc, level="debug")` helper that provides
-  a consistent pattern for logging exceptions that shouldn't be raised. This makes the
-  "catch and log" pattern a one-liner instead of repeating `logger.X("...: %s", e)`.
-- **Why**: Currently each silent catch needs manual conversion. A helper makes it trivial
-  to convert `except Exception: pass` to `except Exception as e: log_exception(...)`.
-- **Decision**: Skip this — it's over-engineering. The standard `logger.debug/warning` is
-  sufficient and more readable. Just do the manual conversion.
+- Both have nearly identical `_load_config()` functions.
+- Skip for this session — duplication is localized, subsystems may diverge.
 
 ### 3) Refactoring TODOs
 
-#### REF-11: Convert silent exception handlers to logged ones
+#### REF-13: ruff --fix auto-cleanup (111 auto-fixable issues)
 
-- **Scope**: All 15+ `except Exception: pass` blocks identified in BUG-56.
-- **Pattern**: For each block:
-  1. Add `as e` to capture the exception
-  2. Add appropriate log level:
-     - `logger.debug(...)` for truly non-critical cleanup (session close, temp file removal)
-     - `logger.warning(...)` for data-affecting failures (message send, analysis, session mgmt)
-  3. Keep the original control flow (pass/continue/return)
-- **Impact assessment**: Zero behavioral change — only adds logging. No tests should break.
+- Run `ruff check --fix` to auto-remove 94 unused imports, 15 empty f-strings, 2 reimports.
+- Zero behavioral change.
 
-#### REF-12: Replace raw JSONL append in analyze.py
+#### REF-14: Manual dead variable removal (15 F841 violations)
 
-- **Scope**: `portfolio/analyze.py:390-392`
-- **Pattern**: Replace `open("a") + write()` with `atomic_append_jsonl()`.
+- Remove unused variable assignments across ~8 modules.
+- Must verify RHS has no side effects before removing.
+
+#### REF-15: Golddigger Telegram via message_store
+
+- Replace `_send_telegram()` with `send_or_store()` matching elongir's pattern.
 
 ### 4) Dependency/Ordering
 
-**Batch 1** (REF-11 + BUG-56): Silent exception elimination
-- Files: ~10 portfolio modules
-- Risk: Zero — only adds logging, no behavior change
-- Tests: Run full suite to verify no regressions
+**Batch 1** (REF-13): ruff auto-fix
+- Files: ~40 portfolio modules
+- Risk: Near-zero
+- Commit: `refactor: ruff auto-fix unused imports and f-strings`
 
-**Batch 2** (REF-12 + BUG-57): Atomic JSONL in analyze.py
-- Files: `portfolio/analyze.py`
-- Risk: Near-zero — same behavior, just atomic
-- Tests: Run test_analyze.py if it exists
+**Batch 2** (REF-14 + BUG-75/76/77): Manual dead variable removal
+- Files: signal_engine.py, trigger.py, telegram_poller.py, smart_money.py, portfolio_validator.py
+- Risk: Near-zero
+- Commit: `fix: remove dead variable assignments`
+
+**Batch 3** (BUG-71/72/73/74 + REF-15 + BUG-78/79): Subsystem IO hardening
+- Files: golddigger/runner.py, golddigger/data_provider.py, elongir/runner.py, claude_gate.py, avanza_tracker.py
+- Risk: Low
+- Commit: `fix: harden golddigger/elongir IO + add missing exception logging`
 
 ### 5) What We're NOT Doing
 
-- **Not refactoring reporting.py exception handlers**: Those 26 `except Exception:` blocks
-  already have proper `logger.warning()` + `_module_warnings.append()`. They're correct.
-- **Not touching signal modules**: The `except Exception:` blocks in signal modules (calendar,
-  fibonacci, momentum, etc.) are the sub-indicator isolation pattern — each sub-indicator is
-  independently wrapped so one failure doesn't kill the whole signal. These are correct.
-- **Not adding new features**: Focus is purely on error visibility.
+- **Not fixing E501 line-too-long** (73 issues): Ignored in ruff config.
+- **Not fixing E402 module-import-not-at-top** (20 issues): Intentional conditional imports.
+- **Not fixing E741 ambiguous-variable-name** (6 issues): Mathematical variables.
+- **Not refactoring config loading duplication** (ARCH-16): Localized, may diverge.
+- **Not adding new features**: Focus is purely on cleanup and hardening.
