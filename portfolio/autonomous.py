@@ -10,10 +10,9 @@ Replaces _maybe_send_alert() when layer2.enabled=false. Provides:
 No trade execution — decisions are logged as recommendations only.
 """
 
-import json
 import logging
 from collections import Counter
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 
 from portfolio.file_utils import atomic_append_jsonl, load_json, load_jsonl
@@ -25,9 +24,8 @@ from portfolio.notification_text import (
     format_vote_summary,
     humanize_ticker,
 )
-from portfolio.portfolio_mgr import portfolio_value, load_bold_state, BOLD_STATE_FILE
+from portfolio.portfolio_mgr import portfolio_value, load_bold_state
 from portfolio.telegram_notifications import escape_markdown_v1
-from portfolio.tickers import SYMBOLS, CRYPTO_SYMBOLS, METALS_SYMBOLS
 
 logger = logging.getLogger("portfolio.autonomous")
 
@@ -597,7 +595,8 @@ def _build_telegram_mode_a(actionable, hold_count, sell_count, patient_state, bo
         if sell_count > 0:
             summary_parts.append(f"{sell_count} with sell signals")
         if summary_parts:
-            lines.append(f"_{' \u00b7 '.join(summary_parts)}_")
+            joined = " · ".join(summary_parts)
+            lines.append(f"_{joined}_")
 
     # --- Context line ---
     safe_fx = fx_rate if fx_rate > 0 else 1
@@ -691,7 +690,8 @@ def _build_telegram_mode_b(actionable, hold_count, sell_count, patient_state, bo
         t_short = humanize_ticker(t)
         focus_parts.append(f"{t_short} {direction} {pct}% in 3h")
 
-    first_line = f"*AUTO PROBABILITY* {' \u00b7 '.join(focus_parts)}" if focus_parts else "*AUTO PROBABILITY*"
+    joined_focus = " · ".join(focus_parts)
+    first_line = f"*AUTO PROBABILITY* {joined_focus}" if focus_parts else "*AUTO PROBABILITY*"
     lines.append(first_line)
     lines.append("")
 
@@ -745,7 +745,8 @@ def _build_telegram_mode_b(actionable, hold_count, sell_count, patient_state, bo
             parts.append(f"{hold_count} more on hold")
         if sell_count > 0:
             parts.append(f"{sell_count} with sell signals")
-        lines.append(f"_{' \u00b7 '.join(parts)}_")
+        joined_parts = " · ".join(parts)
+        lines.append(f"_{joined_parts}_")
 
     # Context
     p_total = portfolio_value(patient_state, prices_usd, safe_fx)

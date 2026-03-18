@@ -14,7 +14,6 @@ import logging
 import os
 import time
 import traceback
-from datetime import datetime, timezone
 from pathlib import Path
 
 from portfolio.avanza_control import (

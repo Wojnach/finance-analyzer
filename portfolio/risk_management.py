@@ -229,7 +229,7 @@ def compute_probabilistic_stops(holdings: dict, agent_summary: dict) -> dict:
     """
     try:
         from portfolio.exit_optimizer import simulate_intraday_paths, _first_hit_times
-        from portfolio.session_calendar import get_session_info, remaining_session_minutes
+        from portfolio.session_calendar import remaining_session_minutes
     except ImportError:
         logger.warning("exit_optimizer or session_calendar not available")
         return {}

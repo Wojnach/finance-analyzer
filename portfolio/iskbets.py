@@ -29,8 +29,6 @@ STATE_FILE = DATA_DIR / "iskbets_state.json"
 # Ticker → source mapping (imported from shared tickers module)
 from portfolio.tickers import (
     SYMBOLS as TICKER_SOURCES,
-    CRYPTO_SYMBOLS as CRYPTO_TICKERS,
-    METALS_SYMBOLS as METALS_TICKERS,
 )
 
 
@@ -501,11 +499,11 @@ def format_entry_alert(ticker, price, conditions, atr, iskbets_cfg, signals=None
         lines.append("")
 
     # Price levels — the key info
-    lines.append(f"*If you buy:*")
+    lines.append("*If you buy:*")
     lines.append(f"`Stop loss:  ${stop:,.0f} ({stop_pct:+.1f}%)`")
     lines.append(f"`Target #1:  ${stage1:,.0f} ({stage1_pct:+.1f}%)`")
-    lines.append(f"_After target #1, stop moves to breakeven._")
-    lines.append(f"_Then trailing stop locks in profit._")
+    lines.append("_After target #1, stop moves to breakeven._")
+    lines.append("_Then trailing stop locks in profit._")
     lines.append("")
     lines.append(f"_Bought? Reply:_ `bought {short_ticker} PRICE AMOUNT`")
     lines.append(f"_Example:_ `bought {short_ticker} {price:.0f} 100000`")
@@ -558,10 +556,10 @@ def format_exit_alert(ticker, price, exit_type, entry_price, amount_sek, entry_t
             f"`Now:    ${price:,.2f} ({pnl_pct:+.1f}%)`",
             "",
             f"Your stop just moved to *breakeven* (${entry_price:,.2f}).",
-            f"You can't lose money on this trade anymore.",
-            f"Trailing stop will now lock in profit as price rises.",
+            "You can't lose money on this trade anymore.",
+            "Trailing stop will now lock in profit as price rises.",
             "",
-            f"_No action needed — hold and let it run._",
+            "_No action needed — hold and let it run._",
         ]
     else:
         lines = [
@@ -574,7 +572,7 @@ def format_exit_alert(ticker, price, exit_type, entry_price, amount_sek, entry_t
             "",
             f"_{label}. Sell now on Avanza._",
             "",
-            f"_Sold? Reply:_ `sold`",
+            "_Sold? Reply:_ `sold`",
         ]
 
     return "\n".join(lines)

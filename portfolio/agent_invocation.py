@@ -1,6 +1,5 @@
 """Layer 2 agent invocation — manages the Claude Code subprocess lifecycle."""
 
-import json
 import logging
 import os
 import platform

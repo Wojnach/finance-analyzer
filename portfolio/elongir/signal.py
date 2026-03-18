@@ -9,8 +9,7 @@ exit conditions.
 """
 
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional
 
 from portfolio.elongir.indicators import IndicatorSet

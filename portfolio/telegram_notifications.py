@@ -1,6 +1,5 @@
 """Telegram notification utilities — send messages, alerts, escape markdown."""
 
-import json
 import logging
 import os
 import re

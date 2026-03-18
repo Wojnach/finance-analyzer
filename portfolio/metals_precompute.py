@@ -106,14 +106,14 @@ def precompute(config=None):
     # Build silver context
     silver_ctx = _build_silver_context(market, generated_at)
     atomic_write_json("data/silver_deep_context.json", silver_ctx)
-    print(f"Silver deep context written to data/silver_deep_context.json")
+    print("Silver deep context written to data/silver_deep_context.json")
     print(f"  Generated: {generated_at}")
     print(f"  Sections: {list(silver_ctx.keys())}")
 
     # Build gold context
     gold_ctx = _build_gold_context(market, generated_at)
     atomic_write_json("data/gold_deep_context.json", gold_ctx)
-    print(f"Gold deep context written to data/gold_deep_context.json")
+    print("Gold deep context written to data/gold_deep_context.json")
     print(f"  Generated: {generated_at}")
     print(f"  Sections: {list(gold_ctx.keys())}")
 

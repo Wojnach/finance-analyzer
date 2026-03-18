@@ -5,7 +5,6 @@ import logging
 import numpy as np
 import pandas as pd
 
-from portfolio.shared_state import _run_cycle_id, _regime_cache, _regime_cache_cycle
 import portfolio.shared_state as _ss
 
 logger = logging.getLogger("portfolio.indicators")

@@ -346,7 +346,7 @@ def _format_alert(ticker, direction, conditions, prices_usd, fx_rate, extra_info
         lo = price * 0.90
         hi = price * 0.95
         lines.append(f"_Expected pullback: 5-10% (${hi:,.0f}–${lo:,.0f})_")
-    lines.append(f"_Hold: 3-5h max_")
+    lines.append("_Hold: 3-5h max_")
 
     if probability is not None:
         lines.append(f"_Claude: {probability}/10 — {l2_reasoning}_")

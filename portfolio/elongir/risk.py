@@ -3,7 +3,7 @@
 import logging
 import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Tuple
 
 from portfolio.elongir.config import ElongirConfig

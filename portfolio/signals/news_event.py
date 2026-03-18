@@ -23,7 +23,6 @@ from portfolio.news_keywords import (
     is_credible_source,
     get_sector_impact,
     dissemination_score,
-    KEYWORD_SECTOR_IMPACT,
 )
 from portfolio.signal_utils import majority_vote
 from portfolio.shared_state import _cached

@@ -18,7 +18,6 @@ them as a batch for richer "drumbeat effect" detection.
 import json
 import logging
 import subprocess
-from collections import defaultdict
 from datetime import datetime, timezone
 
 import platform

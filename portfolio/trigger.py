@@ -14,7 +14,6 @@ off-hours) provides the "heartbeat" via classify_tier(), but only when
 another trigger has already fired.
 """
 
-import json
 import logging
 import os
 import time

@@ -7,7 +7,6 @@ Avanza expects (replaying cookies via requests library causes 401s).
 This is the preferred auth method until TOTP credentials are configured.
 """
 
-import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path

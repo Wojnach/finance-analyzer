@@ -13,9 +13,8 @@ import random
 import statistics
 import sys
 from dataclasses import dataclass, field
-from typing import Optional
 
-from portfolio.orb_predictor import DayResult, ORBPredictor, Prediction
+from portfolio.orb_predictor import DayResult, ORBPredictor
 
 
 # === Data Structures ===

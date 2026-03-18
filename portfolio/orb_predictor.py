@@ -21,7 +21,7 @@ Usage:
 
 import requests
 import statistics
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional

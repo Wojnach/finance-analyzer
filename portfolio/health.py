@@ -1,6 +1,5 @@
 """Health monitoring for the finance-analyzer Layer 1 loop."""
 
-import json
 import logging
 import time
 from datetime import datetime, timezone

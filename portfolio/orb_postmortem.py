@@ -10,8 +10,8 @@ Usage:
 
 import json
 import statistics
-from datetime import datetime, timezone, timedelta
-from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone
+from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional
 

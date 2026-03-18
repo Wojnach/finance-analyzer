@@ -8,12 +8,10 @@ Workflow:
 5. On timeout (5 min) → expire the pending order, notify
 """
 
-import json
 import logging
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional
 
 from portfolio.avanza_control import place_buy_order, place_sell_order
 from portfolio.file_utils import atomic_write_json, load_json

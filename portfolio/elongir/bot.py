@@ -9,7 +9,6 @@ Each call to step() represents one poll cycle. The bot:
 """
 
 import logging
-import math
 from datetime import datetime, timezone
 from typing import Optional
 

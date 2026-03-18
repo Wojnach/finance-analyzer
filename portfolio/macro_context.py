@@ -1,10 +1,9 @@
-import json
 import logging
 from pathlib import Path
 
 import pandas as pd
 
-from portfolio.api_utils import get_alpaca_headers, load_config, BINANCE_BASE, BINANCE_FAPI_BASE, ALPACA_BASE
+from portfolio.api_utils import get_alpaca_headers, BINANCE_BASE, BINANCE_FAPI_BASE, ALPACA_BASE
 from portfolio.http_retry import fetch_with_retry
 from portfolio.shared_state import (_cached, _binance_limiter, _alpaca_limiter,
                                     _yfinance_limiter, VOLUME_TTL as _VOLUME_TTL)

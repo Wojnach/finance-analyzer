@@ -5,7 +5,6 @@ Signals that maintain direction for 3+ consecutive checks are "persistent".
 Signals that flip every 1-2 checks are "noisy".
 """
 
-import json
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path

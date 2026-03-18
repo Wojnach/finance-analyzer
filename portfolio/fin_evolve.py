@@ -12,9 +12,7 @@ Run every 4h via main loop integration, or standalone:
 Output: data/system_lessons.json (replaces data/fin_command_lessons.json)
 """
 
-import json
 import logging
-import os
 import sys
 import time
 from collections import defaultdict
@@ -1055,13 +1053,13 @@ def main():
         print(f"  Calibration: {result.get('calibration_advice', 'N/A')}")
 
         if result.get("by_source"):
-            print(f"  By source:")
+            print("  By source:")
             for source, data in result["by_source"].items():
                 print(f"    {source}: {data.get('accuracy_3d', 'N/A'):.1%} "
                       f"({data.get('n_evaluable', 0)} evaluable)")
 
         if result.get("by_ticker"):
-            print(f"  By ticker:")
+            print("  By ticker:")
             for ticker, data in sorted(result["by_ticker"].items()):
                 print(f"    {ticker}: {data.get('accuracy_3d', 'N/A'):.1%} "
                       f"({data.get('n_evaluable', 0)} evaluable)")
@@ -1076,7 +1074,7 @@ def main():
                 print(f"    - {p}")
 
         if result.get("cross_asset"):
-            print(f"  Cross-asset patterns:")
+            print("  Cross-asset patterns:")
             for key, data in result["cross_asset"].items():
                 print(f"    - {data.get('note', key)}")
 

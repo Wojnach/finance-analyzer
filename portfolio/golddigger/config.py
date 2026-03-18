@@ -1,6 +1,6 @@
 """GoldDigger configuration — all tunable parameters in one place."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent

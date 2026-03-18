@@ -4,7 +4,6 @@ Loads portfolio value history from the JSONL log and computes performance
 metrics useful for charting and strategy comparison.
 """
 
-import json
 import math
 import pathlib
 import datetime
@@ -328,7 +327,6 @@ def _pair_round_trips(transactions):
             - hold_hours: float
             - fee_sek: float (total fees for this round trip)
     """
-    from collections import defaultdict
 
     # Group BUYs by ticker — maintain FIFO order
     buy_queues = defaultdict(list)
@@ -579,7 +577,7 @@ if __name__ == "__main__":
 
         c = results["comparison"]
         print(f"\n{'='*50}")
-        print(f"  COMPARISON")
+        print("  COMPARISON")
         print(f"{'='*50}")
         print(f"  Return leader:    {c['leader']} (by {abs(c['return_diff_pct']):.2f}%)")
         print(f"  Lower drawdown:   {c['lower_drawdown']} (by {abs(c['drawdown_diff_pct']):.2f}%)")

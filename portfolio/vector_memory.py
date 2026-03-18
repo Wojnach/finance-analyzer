@@ -18,7 +18,6 @@ Defaults to disabled — graceful fallback if chromadb is not installed.
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger("portfolio.vector_memory")

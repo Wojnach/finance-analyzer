@@ -9,8 +9,8 @@ import json
 import logging
 import math
 import re
-from collections import Counter, defaultdict
-from datetime import datetime, timezone, timedelta
+from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger("portfolio.journal_index")

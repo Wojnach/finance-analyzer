@@ -6,7 +6,6 @@ signal votes. This is the core engine for Mode B probability-based notifications
 
 import logging
 import math
-from collections import defaultdict
 
 from portfolio.tickers import SIGNAL_NAMES, DISABLED_SIGNALS
 

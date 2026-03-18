@@ -18,7 +18,6 @@ This is the orchestrator module. All logic has been extracted to:
 - logging_config.py — structured logging setup
 """
 
-import json
 import logging
 import os
 import sys

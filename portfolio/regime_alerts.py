@@ -4,7 +4,6 @@ Detects changes from one regime to another and sends Telegram notification.
 Tracks regime history for pattern detection.
 """
 
-import json
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path

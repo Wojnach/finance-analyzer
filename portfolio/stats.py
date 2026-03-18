@@ -1,5 +1,5 @@
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from portfolio.file_utils import load_jsonl

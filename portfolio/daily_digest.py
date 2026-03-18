@@ -7,7 +7,6 @@ changes, warrant P&L, and top movers.
 Runs in both Mode A and Mode B.
 """
 
-import json
 import logging
 import time
 from datetime import datetime, timezone

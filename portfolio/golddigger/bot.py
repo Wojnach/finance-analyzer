@@ -13,8 +13,6 @@ can either execute (live) or record (dry-run/backtest).
 
 import logging
 import os
-import time
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -22,7 +20,7 @@ from typing import Optional
 from portfolio.golddigger.config import GolddiggerConfig
 from portfolio.golddigger.data_provider import MarketSnapshot, collect_snapshot
 from portfolio.golddigger.signal import CompositeSignal, SignalState
-from portfolio.golddigger.risk import RiskManager, SizeResult
+from portfolio.golddigger.risk import RiskManager
 from portfolio.golddigger.state import BotState, log_trade, log_poll
 from portfolio.golddigger.augmented_signals import AugmentedSignals
 

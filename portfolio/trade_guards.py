@@ -8,7 +8,6 @@ Three guards:
 State is persisted to data/trade_guard_state.json.
 """
 
-import json
 import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path

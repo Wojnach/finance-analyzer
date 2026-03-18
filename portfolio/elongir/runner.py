@@ -12,14 +12,11 @@ import logging
 import os
 import time
 import traceback
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
-from portfolio.elongir.config import ElongirConfig, DATA_DIR
+from portfolio.elongir.config import ElongirConfig
 from portfolio.elongir.bot import ElongirBot
 from portfolio.elongir.state import (
-    BotState,
     warrant_price_sek,
     effective_leverage,
     sell_price,

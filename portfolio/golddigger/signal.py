@@ -11,7 +11,7 @@ Positive S = gold up + USD weak + yields down = bullish for BULL GULD certificat
 import logging
 import math
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from portfolio.golddigger.data_provider import MarketSnapshot

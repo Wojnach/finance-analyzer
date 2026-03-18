@@ -6,9 +6,7 @@ Free tier: 25 requests/day, 5 requests/minute.
 Not used for crypto or metals (no OVERVIEW data available).
 """
 
-import json
 import logging
-import time
 import threading
 from datetime import datetime, timezone
 from pathlib import Path

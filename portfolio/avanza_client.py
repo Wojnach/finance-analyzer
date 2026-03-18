@@ -9,7 +9,6 @@ Supports two authentication methods:
 The client transparently tries BankID session first, then falls back to TOTP.
 """
 
-import json
 import logging
 from datetime import date
 from pathlib import Path

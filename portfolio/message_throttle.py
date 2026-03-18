@@ -4,7 +4,6 @@ Trade messages always bypass the throttle.
 Analysis messages are queued and consolidated.
 """
 
-import json
 import logging
 import time
 from pathlib import Path

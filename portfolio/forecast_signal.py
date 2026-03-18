@@ -5,7 +5,6 @@ Logs predictions to data/forecast_predictions.jsonl for accuracy tracking.
 Can be run standalone or called from the main loop.
 """
 
-import json
 import logging
 import time
 from datetime import datetime, timezone

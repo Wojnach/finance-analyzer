@@ -1,8 +1,7 @@
 """Persistent state management for the Elongir silver dip-trading bot."""
 
 import logging
-import math
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from typing import Optional
 

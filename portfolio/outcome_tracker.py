@@ -1,5 +1,4 @@
 import json
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -16,7 +15,6 @@ HORIZONS = {"3h": 10800, "1d": 86400, "3d": 259200, "5d": 432000, "10d": 864000}
 from portfolio.tickers import (
     BINANCE_SPOT_MAP,
     BINANCE_FAPI_MAP,
-    BINANCE_MAP,
     YF_MAP,
     SIGNAL_NAMES,
 )

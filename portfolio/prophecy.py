@@ -9,11 +9,9 @@ Layer 2 reads these beliefs every invocation to maintain strategic context
 and compare technical signals against fundamental convictions.
 """
 
-import json
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
-from copy import deepcopy
 
 from portfolio.file_utils import atomic_write_json, load_json
 

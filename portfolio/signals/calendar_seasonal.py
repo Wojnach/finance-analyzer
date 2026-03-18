@@ -21,14 +21,12 @@ from __future__ import annotations
 import calendar
 from datetime import date, datetime, timedelta
 
-import numpy as np
 import pandas as pd
 
 # ---------------------------------------------------------------------------
 # FOMC meeting dates — imported from shared constant
 # ---------------------------------------------------------------------------
 from portfolio.fomc_dates import (
-    FOMC_DATES_2026 as _FOMC_DATES_2026,
     FOMC_ANNOUNCEMENT_DATES as _FOMC_ANNOUNCEMENT_DATES,
 )
 

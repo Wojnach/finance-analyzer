@@ -133,7 +133,6 @@ class TelegramPoller:
         Returns:
             Reply text for the user.
         """
-        import json
         from pathlib import Path
         from portfolio.file_utils import atomic_write_json
 

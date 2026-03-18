@@ -18,7 +18,6 @@ Categories that are SAVED ONLY (viewable on dashboard / via file):
   - fx_alert:    FX rate staleness warnings
 """
 
-import json
 import logging
 import os
 import re

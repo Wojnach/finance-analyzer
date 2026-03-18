@@ -1,6 +1,5 @@
 """Signal generation engine — 30-signal voting system with weighted consensus."""
 
-import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -10,7 +9,7 @@ import pandas as pd
 
 import numpy as np
 
-from portfolio.shared_state import _cached, FEAR_GREED_TTL, SENTIMENT_TTL, MINISTRAL_TTL, ML_SIGNAL_TTL, FUNDING_RATE_TTL, VOLUME_TTL
+from portfolio.shared_state import _cached, FEAR_GREED_TTL, SENTIMENT_TTL, MINISTRAL_TTL, VOLUME_TTL
 from portfolio.indicators import detect_regime
 from portfolio.tickers import CRYPTO_SYMBOLS, STOCK_SYMBOLS, METALS_SYMBOLS, SIGNAL_NAMES, DISABLED_SIGNALS
 from portfolio.signal_registry import get_enhanced_signals, load_signal_func

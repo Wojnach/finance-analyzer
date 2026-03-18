@@ -38,7 +38,6 @@ WATCH_LOG_FILE = DATA_DIR / "watch_log.jsonl"
 from portfolio.tickers import (
     ALL_TICKERS as KNOWN_TICKERS,
     CRYPTO_SYMBOLS as CRYPTO_TICKERS,
-    METALS_SYMBOLS as METALS_TICKERS,
 )
 
 # Position watch exit thresholds
@@ -794,7 +793,7 @@ def watch_positions(position_args, interval=60):
                             print(f"  stderr: {result.stderr[:200]}")
 
                 except subprocess.TimeoutExpired:
-                    print(f"  Claude timed out after 60s")
+                    print("  Claude timed out after 60s")
                 except FileNotFoundError:
                     print("  claude not found in PATH — falling back to mechanical only")
                 except Exception as e:

@@ -8,9 +8,8 @@ Usage:
     python -m portfolio.weekly_digest --dry-run # print without sending
 """
 
-import json
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 

@@ -1,10 +1,8 @@
 """Persistent state management for GoldDigger bot."""
 
-import json
 import logging
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
 from portfolio.file_utils import atomic_write_json, load_json, atomic_append_jsonl

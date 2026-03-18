@@ -4,7 +4,6 @@ Tracks actual warrant positions with leverage-multiplied P&L based on
 the underlying instrument's price movement.
 """
 
-import json
 import logging
 from pathlib import Path
 

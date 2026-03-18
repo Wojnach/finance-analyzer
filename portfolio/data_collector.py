@@ -8,7 +8,7 @@ import pandas as pd
 
 from portfolio.circuit_breaker import CircuitBreaker
 from portfolio.http_retry import fetch_with_retry
-from portfolio.api_utils import load_config as _load_config, get_alpaca_headers, BINANCE_BASE, BINANCE_FAPI_BASE, ALPACA_BASE
+from portfolio.api_utils import get_alpaca_headers, BINANCE_BASE, BINANCE_FAPI_BASE, ALPACA_BASE
 from portfolio.indicators import compute_indicators, technical_signal
 import portfolio.shared_state as _ss
 
