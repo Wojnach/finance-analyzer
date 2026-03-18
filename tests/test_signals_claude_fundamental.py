@@ -1,7 +1,6 @@
 """Tests for portfolio.signals.claude_fundamental — three-tier LLM cascade."""
 
 import json
-import subprocess
 import time
 
 import pytest
@@ -343,15 +342,17 @@ class TestComputeSignal:
         assert result2["action"] == "SELL"
         mock_refresh.assert_not_called()
 
-    @mock.patch("portfolio.signals.claude_fundamental._refresh_tier")
-    def test_expired_cache_triggers_refresh(self, mock_refresh):
-        """Expired cache should trigger a refresh call."""
-        # Cache is at ts=0 (expired)
+    @mock.patch("portfolio.market_timing.get_market_state", return_value=("open", None, None))
+    def test_expired_cache_triggers_refresh(self, mock_market):
+        """Expired cache should trigger background refresh threads."""
+        # Cache is at ts=0 (expired), market is "open" so refresh is allowed
         df = _make_df()
         ctx = {"ticker": "BTC-USD", "config": {"claude_fundamental": {"enabled": True}}}
         compute_claude_fundamental_signal(df, context=ctx)
-        # Should have tried to refresh all three tiers
-        assert mock_refresh.call_count == 3
+        # The function spawns daemon threads — verify the cache timestamps
+        # were updated (marking them as "refreshing to prevent duplicate spawns")
+        for tier in ("haiku", "sonnet", "opus"):
+            assert _cache[tier]["ts"] > 0
 
     @mock.patch("portfolio.signals.claude_fundamental._refresh_tier", side_effect=Exception("API down"))
     def test_api_failure_graceful(self, mock_refresh):
@@ -412,64 +413,56 @@ class TestContrarianFlag:
         assert result["indicators"]["_tier"] == "opus"
 
 
-# --- CLI subprocess layer ---
+# --- CLI layer (now routes through claude_gate) ---
 
 class TestCallClaudeCli:
-    @mock.patch("portfolio.signals.claude_fundamental.subprocess.run")
-    def test_success(self, mock_run):
-        """Successful CLI call returns stdout."""
-        mock_run.return_value = mock.Mock(
-            returncode=0,
-            stdout='{"BTC-USD": {"action": "BUY", "confidence": 0.6}}',
-            stderr="",
+    @mock.patch("portfolio.claude_gate.invoke_claude_text")
+    def test_success(self, mock_gate):
+        """Successful CLI call returns stdout text."""
+        mock_gate.return_value = (
+            '{"BTC-USD": {"action": "BUY", "confidence": 0.6}}',
+            True,
+            0,
         )
         result = _call_claude_cli("haiku", "test prompt", timeout=30)
         assert "BTC-USD" in result
-        mock_run.assert_called_once()
-        # Verify prompt sent via stdin
-        call_kwargs = mock_run.call_args
-        assert call_kwargs.kwargs["input"] == "test prompt"
-
-    @mock.patch("portfolio.signals.claude_fundamental.subprocess.run")
-    def test_claudecode_env_stripped(self, mock_run):
-        """CLAUDECODE env var should be removed to prevent nested session error."""
-        import os
-        mock_run.return_value = mock.Mock(returncode=0, stdout="{}", stderr="")
-        # Temporarily set CLAUDECODE in os.environ
-        old = os.environ.get("CLAUDECODE")
-        os.environ["CLAUDECODE"] = "1"
-        try:
-            _call_claude_cli("haiku", "test", timeout=30)
-        finally:
-            if old is None:
-                os.environ.pop("CLAUDECODE", None)
-            else:
-                os.environ["CLAUDECODE"] = old
-        # The env passed to subprocess should NOT contain CLAUDECODE
-        call_kwargs = mock_run.call_args
-        assert "CLAUDECODE" not in call_kwargs.kwargs["env"]
-
-    @mock.patch("portfolio.signals.claude_fundamental.subprocess.run")
-    def test_nonzero_exit_raises(self, mock_run):
-        """Non-zero exit code should raise RuntimeError."""
-        mock_run.return_value = mock.Mock(
-            returncode=1, stdout="", stderr="Error: model not found"
+        mock_gate.assert_called_once_with(
+            prompt="test prompt",
+            caller="claude_fundamental_haiku",
+            model="haiku",
+            timeout=30,
         )
-        with pytest.raises(RuntimeError, match="claude CLI failed"):
+
+    @mock.patch("portfolio.claude_gate.invoke_claude_text")
+    def test_nonzero_exit_raises(self, mock_gate):
+        """Non-zero exit code should raise RuntimeError."""
+        mock_gate.return_value = ("", False, 1)
+        with pytest.raises(RuntimeError, match="claude_gate returned exit_code=1"):
             _call_claude_cli("haiku", "test", timeout=30)
 
-    @mock.patch("portfolio.signals.claude_fundamental.subprocess.run")
-    def test_timeout_propagated(self, mock_run):
-        """Timeout should be passed to subprocess.run."""
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=30)
-        with pytest.raises(subprocess.TimeoutExpired):
+    @mock.patch("portfolio.claude_gate.invoke_claude_text")
+    def test_blocked_raises(self, mock_gate):
+        """Blocked invocation (gate returns -1) should raise RuntimeError."""
+        mock_gate.return_value = ("", False, -1)
+        with pytest.raises(RuntimeError, match="claude_gate returned exit_code=-1"):
             _call_claude_cli("haiku", "test", timeout=30)
 
-    @mock.patch("portfolio.signals.claude_fundamental.subprocess.run")
-    def test_model_passed_to_cli(self, mock_run):
-        """Model alias should be passed via --model flag."""
-        mock_run.return_value = mock.Mock(returncode=0, stdout="{}", stderr="")
+    @mock.patch("portfolio.claude_gate.invoke_claude_text")
+    def test_model_passed_to_gate(self, mock_gate):
+        """Model alias should be forwarded to invoke_claude_text."""
+        mock_gate.return_value = ("{}", True, 0)
         _call_claude_cli("sonnet", "test", timeout=60)
-        cmd = mock_run.call_args.args[0]
-        idx = cmd.index("--model")
-        assert cmd[idx + 1] == "sonnet"
+        mock_gate.assert_called_once_with(
+            prompt="test",
+            caller="claude_fundamental_sonnet",
+            model="sonnet",
+            timeout=60,
+        )
+
+    @mock.patch("portfolio.claude_gate.invoke_claude_text")
+    def test_timeout_forwarded(self, mock_gate):
+        """Timeout should be forwarded to invoke_claude_text."""
+        mock_gate.return_value = ("{}", True, 0)
+        _call_claude_cli("opus", "test", timeout=180)
+        _, kwargs = mock_gate.call_args
+        assert kwargs["timeout"] == 180

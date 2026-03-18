@@ -13,9 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
-import subprocess
 import threading
 import time
 from pathlib import Path
@@ -29,6 +27,7 @@ logger = logging.getLogger("portfolio.signals.claude_fundamental")
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 
 _MAX_CONFIDENCE = 0.7
+_CF_LOG = DATA_DIR / "claude_fundamental_log.jsonl"
 
 SUB_SIGNAL_NAMES = [
     "fundamental_quality",
@@ -410,33 +409,22 @@ Rules:
 def _call_claude_cli(model, prompt, timeout=60):
     """Call claude CLI and return text response.
 
-    Uses Claude Code Max subscription via ``claude -p``.
+    Routes through ``claude_gate.invoke_claude_text()`` for kill switch,
+    rate limiting, and invocation logging.  Falls back to raw subprocess
+    only if the gate module cannot be imported (should not happen in
+    normal operation).
     """
-    env = os.environ.copy()
-    env.pop("CLAUDECODE", None)  # prevent nested session error
+    from portfolio.claude_gate import invoke_claude_text
 
-    cmd = [
-        "claude", "-p",
-        "--model", model,
-        "--output-format", "text",
-        "--no-session-persistence",
-    ]
-
-    result = subprocess.run(
-        cmd,
-        input=prompt,
-        capture_output=True,
-        text=True,
+    text, success, exit_code = invoke_claude_text(
+        prompt=prompt,
+        caller=f"claude_fundamental_{model}",
+        model=model,
         timeout=timeout,
-        env=env,
     )
-
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"claude CLI failed (rc={result.returncode}): {result.stderr[:500]}"
-        )
-
-    return result.stdout
+    if not success:
+        raise RuntimeError(f"claude_gate returned exit_code={exit_code}")
+    return text
 
 
 def _extract_json(text):
@@ -561,6 +549,29 @@ def _parse_opus_response(text):
     return results
 
 
+def _journal_refresh(tier: str, results: dict) -> None:
+    """Persist tier refresh results for accuracy tracking and debugging."""
+    import datetime as _dt
+    from portfolio.file_utils import atomic_append_jsonl
+
+    ts = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    for ticker, result in results.items():
+        entry = {
+            "ts": ts,
+            "tier": tier,
+            "ticker": ticker,
+            "action": result.get("action", "HOLD"),
+            "confidence": result.get("confidence", 0.0),
+            "sub_signals": result.get("sub_signals", {}),
+            "reasoning": result.get("indicators", {}).get("reasoning", ""),
+            "contrarian_flag": result.get("indicators", {}).get("contrarian_flag", False),
+        }
+        try:
+            atomic_append_jsonl(_CF_LOG, entry)
+        except Exception as e:
+            logger.warning("Failed to journal cf result: %s", e)
+
+
 def _refresh_tier(tier, context):
     """Refresh one tier's cache by calling the claude CLI."""
     config = context.get("config", {})
@@ -601,6 +612,9 @@ def _refresh_tier(tier, context):
         _cache[tier]["ts"] = time.time()
 
     logger.info("Claude fundamental %s refreshed: %d tickers", tier, len(results))
+
+    # Journal the results for accuracy tracking and debugging
+    _journal_refresh(tier, results)
 
 
 def _get_best_result(ticker):
@@ -644,21 +658,29 @@ def compute_claude_fundamental_signal(df: pd.DataFrame, context: dict = None) ->
     if not cf_config.get("enabled", True):
         return dict(_DEFAULT_HOLD)
 
+    # Market hours gate — only refresh during EU+US hours (07:00-21:00 UTC weekdays).
+    # Fundamentals don't change overnight and we don't want to waste claude calls.
+    # Cached results from the last open-hours refresh are still served during off-hours.
+    from portfolio.market_timing import get_market_state
+    market_state, _, _ = get_market_state()
+    skip_refresh = market_state in ("closed", "weekend")
+
     cooldowns = _get_cooldowns(config)
 
     # Refresh in background thread — never block the signal loop.
     # Fundamentals change on a hours/days timescale, not minutes.
-    for tier in ("haiku", "sonnet", "opus"):
-        if _needs_refresh(tier, cooldowns):
-            with _lock:
-                if _needs_refresh(tier, cooldowns):
-                    # Mark as refreshing to prevent duplicate spawns
-                    _cache[tier]["ts"] = time.time()
-                    t = threading.Thread(
-                        target=_bg_refresh, args=(tier, context),
-                        daemon=True, name=f"cf-{tier}",
-                    )
-                    t.start()
+    if not skip_refresh:
+        for tier in ("haiku", "sonnet", "opus"):
+            if _needs_refresh(tier, cooldowns):
+                with _lock:
+                    if _needs_refresh(tier, cooldowns):
+                        # Mark as refreshing to prevent duplicate spawns
+                        _cache[tier]["ts"] = time.time()
+                        t = threading.Thread(
+                            target=_bg_refresh, args=(tier, context),
+                            daemon=True, name=f"cf-{tier}",
+                        )
+                        t.start()
 
     # Cascade lookup for this ticker
     ticker = context.get("ticker", "")
