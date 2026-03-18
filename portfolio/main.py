@@ -326,6 +326,31 @@ def run(force_report=False, active_symbols=None):
         _run_elapsed / max(signals_ok + signals_failed, 1),
     )
 
+    # --- Cycle failure alert via Telegram ---
+    # Collect per-ticker signal failures from this cycle
+    _cycle_signal_failures = {}
+    for _tk, _sig in signals.items():
+        _sf = _sig.get("extra", {}).get("_signal_failures", [])
+        if _sf:
+            _cycle_signal_failures[_tk] = _sf
+
+    if signals_failed > 0 or _cycle_signal_failures:
+        _parts = []
+        if signals_failed > 0:
+            _parts.append(f"{signals_failed} ticker(s) failed entirely")
+        if _cycle_signal_failures:
+            _sf_total = sum(len(v) for v in _cycle_signal_failures.values())
+            _sf_tickers = ", ".join(
+                f"{tk}({len(sigs)})" for tk, sigs in _cycle_signal_failures.items()
+            )
+            _parts.append(f"{_sf_total} signal failures: {_sf_tickers}")
+        _fail_msg = f"*LOOP ERRORS* ({int(_run_elapsed)}s cycle)\n" + "\n".join(_parts)
+        try:
+            from portfolio.message_store import send_or_store
+            send_or_store(_fail_msg, config, category="error")
+        except Exception as _e:
+            logger.warning("Failed to send cycle error alert: %s", _e)
+
     total = portfolio_value(state, prices_usd, fx_rate)
     pnl_pct = ((total - state["initial_value_sek"]) / state["initial_value_sek"]) * 100
     logger.info("Portfolio: %s SEK (%+.2f%%) | Cash: %s SEK", "{:,.0f}".format(total), pnl_pct, "{:,.0f}".format(state['cash_sek']))

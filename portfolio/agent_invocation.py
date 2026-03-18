@@ -336,6 +336,18 @@ def check_agent_completion():
         status, exit_code, duration_s, _agent_tier, journal_written, telegram_sent,
     )
 
+    # Telegram alert on any agent failure (not just stack overflow)
+    if status == "failed":
+        try:
+            config = _load_config()
+            send_or_store(
+                f"*L2 FAILED* T{_agent_tier} exit={exit_code} "
+                f"({duration_s:.0f}s) journal={journal_written} tg={telegram_sent}",
+                config, category="error",
+            )
+        except Exception as e:
+            logger.warning("Agent failure alert failed: %s", e)
+
     # Track consecutive stack overflow crashes
     global _consecutive_stack_overflows
     if exit_code == _STACK_OVERFLOW_EXIT_CODE:
