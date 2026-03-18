@@ -7,7 +7,6 @@ Usage:
     python -m portfolio.elongir --once       # single poll cycle
 """
 
-import json
 import logging
 import os
 import time
@@ -16,6 +15,7 @@ from pathlib import Path
 
 from portfolio.elongir.config import ElongirConfig
 from portfolio.elongir.bot import ElongirBot
+from portfolio.file_utils import load_json
 from portfolio.elongir.state import (
     warrant_price_sek,
     effective_leverage,
@@ -53,8 +53,10 @@ def _load_config() -> dict:
         if config_path.exists():
             if config_path.parent != worktree_root:
                 logger.info("Using shared config from %s", config_path)
-            with open(config_path, encoding="utf-8") as f:
-                return json.load(f)
+            data = load_json(config_path, default=None)
+            if data is None:
+                raise ValueError(f"Config corrupt or unreadable: {config_path}")
+            return data
 
     searched = ", ".join(str(p) for p in candidate_paths)
     raise FileNotFoundError(f"No config.json found. Checked: {searched}")

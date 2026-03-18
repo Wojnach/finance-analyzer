@@ -51,7 +51,8 @@ def fetch_avanza_prices() -> dict[str, dict[str, Any]]:
 
     try:
         from portfolio.avanza_client import get_price
-    except Exception:
+    except Exception as e:
+        logger.debug("avanza_client not available: %s", e)
         return {}
 
     results = {}

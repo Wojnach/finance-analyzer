@@ -4,7 +4,6 @@ Uses Binance FAPI for gold (XAUUSDT), existing fx_rates for USD/SEK,
 FRED for US10Y yield, and Avanza Playwright session for certificate bid/ask.
 """
 
-import json
 import logging
 import sys as _sys
 import time
@@ -12,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime, time as dt_time, timezone
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
+
+from portfolio.file_utils import load_json
 
 from portfolio.circuit_breaker import CircuitBreaker
 from portfolio.http_retry import fetch_with_retry
@@ -370,13 +371,7 @@ def fetch_certificate_price(page, orderbook_id: str, api_type: str = "certificat
 
 def _load_json_safe(path) -> Optional[dict]:
     """Load JSON file safely, return None on failure."""
-    try:
-        if not Path(path).exists():
-            return None
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return None
+    return load_json(path, default=None)
 
 
 def fetch_gold_volume(symbol: str = "XAUUSDT", lookback_bars: int = 20) -> Optional[dict]:

@@ -9,7 +9,6 @@ Usage:
     python -m portfolio.golddigger --dry-run    # paper trade (default)
 """
 
-import json
 import logging
 import os
 import time
@@ -22,8 +21,10 @@ from portfolio.avanza_control import (
     place_order,
     place_stop_loss,
 )
+from portfolio.file_utils import load_json
 from portfolio.golddigger.config import GolddiggerConfig, DATA_DIR
 from portfolio.golddigger.bot import GolddiggerBot
+from portfolio.message_store import send_or_store
 from portfolio.process_lock import acquire_lock_file, release_lock_file
 
 logger = logging.getLogger("portfolio.golddigger.runner")
@@ -56,24 +57,19 @@ def _load_config() -> dict:
         if config_path.exists():
             if config_path.parent != worktree_root:
                 logger.info("Using shared config from %s", config_path)
-            with open(config_path, encoding="utf-8") as f:
-                return json.load(f)
+            data = load_json(config_path, default=None)
+            if data is None:
+                raise ValueError(f"Config corrupt or unreadable: {config_path}")
+            return data
 
     searched = ", ".join(str(p) for p in candidate_paths)
     raise FileNotFoundError(f"No config.json found. Checked: {searched}")
 
 
 def _send_telegram(msg: str, config: dict):
-    """Send a Telegram notification."""
+    """Send a Telegram notification via message_store."""
     try:
-        import requests
-        token = config["telegram"]["token"]
-        chat_id = config["telegram"]["chat_id"]
-        requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"},
-            timeout=15,
-        )
+        send_or_store(msg, config, category="golddigger")
     except Exception as e:
         logger.warning("Telegram send failed: %s", e)
 
