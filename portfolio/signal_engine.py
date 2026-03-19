@@ -18,6 +18,11 @@ logger = logging.getLogger("portfolio.signal_engine")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _LOCAL_MODEL_ACCURACY_TTL = 1800
+
+# ADX computation cache — keyed by id(df) so each DataFrame is computed at most once.
+# Naturally expires when DataFrames are garbage-collected between cycles.
+_adx_cache: dict[int, float | None] = {}
+_ADX_CACHE_MAX = 200  # prevent unbounded growth
 _LOCAL_MODEL_HOLD_THRESHOLD = 0.55
 _LOCAL_MODEL_MIN_SAMPLES = 30
 _LOCAL_MODEL_LOOKBACK_DAYS = 30
@@ -290,9 +295,15 @@ def _compute_adx(df, period=14):
     """Compute ADX (Average Directional Index) from a DataFrame with high/low/close.
 
     Returns the latest ADX value, or None if insufficient data.
+    Cached per DataFrame identity to avoid recomputation within a cycle.
     """
     if df is None or not isinstance(df, pd.DataFrame) or len(df) < period * 2:
         return None
+
+    df_id = id(df)
+    if df_id in _adx_cache:
+        return _adx_cache[df_id]
+
     try:
         high = df["high"]
         low = df["low"]
@@ -317,9 +328,15 @@ def _compute_adx(df, period=14):
         adx = dx.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
 
         val = adx.iloc[-1]
-        return float(val) if pd.notna(val) and np.isfinite(val) else None
+        result = float(val) if pd.notna(val) and np.isfinite(val) else None
+        # Cache result; evict oldest entries if cache is full
+        if len(_adx_cache) >= _ADX_CACHE_MAX:
+            _adx_cache.clear()
+        _adx_cache[df_id] = result
+        return result
     except Exception:
         logger.warning("ADX computation failed", exc_info=True)
+        _adx_cache[df_id] = None
         return None
 
 
