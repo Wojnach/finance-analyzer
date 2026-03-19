@@ -10,13 +10,10 @@ BUG-35: alpha_vantage imports from portfolio_mgr instead of file_utils
 
 from __future__ import annotations
 
-import json
-import pytest
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-
+from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # BUG-30: Dashboard signal heatmap includes all 30 signals
@@ -54,7 +51,7 @@ class TestBug31DigestSignalKey:
     def test_digest_reads_tickers_key(self):
         """Signal log uses entry['tickers'][ticker]['consensus'], not entry['signals']."""
         entry = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "tickers": {
                 "BTC-USD": {"consensus": "BUY", "price_usd": 67000},
                 "ETH-USD": {"consensus": "SELL", "price_usd": 1900},
@@ -73,7 +70,7 @@ class TestBug31DigestSignalKey:
     def test_old_signals_key_returns_empty(self):
         """The old 'signals' key does NOT exist at top level in signal_log entries."""
         entry = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "tickers": {
                 "BTC-USD": {"consensus": "BUY", "signals": {"rsi": "BUY"}},
             },

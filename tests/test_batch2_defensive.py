@@ -6,11 +6,10 @@ BUG-26: heartbeat written after initial run (tested via code inspection)
 BUG-27: redundant pass removed from trigger.py (code cleanup, no behavioral test)
 """
 
-import json
-import os
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
+import pytest
 
 
 class TestBug24NewsEventNoneTicker:
@@ -29,6 +28,7 @@ class TestBug24NewsEventNoneTicker:
     def test_compute_signal_none_ticker_in_context(self):
         """Full signal path: context with None ticker returns HOLD."""
         import pandas as pd
+
         from portfolio.signals.news_event import compute_news_event_signal
         df = pd.DataFrame({"close": [100] * 30, "volume": [1000] * 30,
                           "high": [101] * 30, "low": [99] * 30, "open": [100] * 30})
@@ -38,6 +38,7 @@ class TestBug24NewsEventNoneTicker:
     def test_compute_signal_no_context(self):
         """Signal with no context returns HOLD."""
         import pandas as pd
+
         from portfolio.signals.news_event import compute_news_event_signal
         df = pd.DataFrame({"close": [100] * 30, "volume": [1000] * 30,
                           "high": [101] * 30, "low": [99] * 30, "open": [100] * 30})
@@ -62,9 +63,8 @@ class TestBug25LoadJsonOSError:
         path = tmp_path / "test.json"
         path.write_text('{"key": "value"}', encoding="utf-8")
 
-        with patch.object(Path, "read_text", side_effect=OSError("Disk full")):
-            with pytest.raises(OSError):
-                load_json(path, default={})
+        with patch.object(Path, "read_text", side_effect=OSError("Disk full")), pytest.raises(OSError):
+            load_json(path, default={})
 
     def test_load_json_still_handles_missing_file(self, tmp_path):
         from portfolio.file_utils import load_json
@@ -93,6 +93,7 @@ class TestBug26HeartbeatAfterInitialRun:
     def test_heartbeat_code_present_after_initial_run(self):
         """Verify the fix is in place by checking the source code."""
         import inspect
+
         from portfolio import main
         source = inspect.getsource(main.loop)
         # Find heartbeat write near initial run
@@ -117,6 +118,7 @@ class TestBug27TriggerPassRemoved:
     def test_no_redundant_pass(self):
         """Check that there's no 'pass' after logger.warning in _check_recent_trade."""
         import inspect
+
         from portfolio import trigger
         source = inspect.getsource(trigger._check_recent_trade)
         lines = source.split("\n")

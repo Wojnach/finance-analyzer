@@ -22,20 +22,16 @@ import unittest.mock as mock
 
 import numpy as np
 import pandas as pd
-import pytest
-
 from conftest import make_indicators as _make_indicators_base
+
 from portfolio.main import (
-    CRYPTO_SYMBOLS,
-    STOCK_SYMBOLS,
-    REGIME_WEIGHTS,
+    _confluence_score,
+    _cross_asset_signals,
+    _time_of_day_factor,
+    _weighted_consensus,
     compute_indicators,
     detect_regime,
     generate_signal,
-    _weighted_consensus,
-    _confluence_score,
-    _time_of_day_factor,
-    _cross_asset_signals,
     write_agent_summary,
 )
 
@@ -146,7 +142,7 @@ class TestNamedVotes:
 
 class TestLogSignalSnapshotUsesPassedVotes:
     def test_uses_passed_votes_when_available(self):
-        from portfolio.outcome_tracker import log_signal_snapshot, SIGNAL_NAMES
+        from portfolio.outcome_tracker import SIGNAL_NAMES, log_signal_snapshot
 
         passed_votes = {name: "HOLD" for name in SIGNAL_NAMES}
         passed_votes["rsi"] = "BUY"
@@ -236,13 +232,11 @@ class TestDetectRegime:
 
 class TestAccuracyCache:
     def test_cache_written_and_read(self, tmp_path):
+        import portfolio.accuracy_stats as acc_mod
         from portfolio.accuracy_stats import (
             load_cached_accuracy,
             write_accuracy_cache,
-            ACCURACY_CACHE_FILE,
         )
-
-        import portfolio.accuracy_stats as acc_mod
 
         orig = acc_mod.ACCURACY_CACHE_FILE
         acc_mod.ACCURACY_CACHE_FILE = tmp_path / "cache.json"
@@ -279,9 +273,8 @@ class TestAccuracyCache:
         assert entries[1]["ts"] == "2026-03-05T01:00:00+00:00"
 
     def test_cache_ttl_expired(self, tmp_path):
-        from portfolio.accuracy_stats import load_cached_accuracy, ACCURACY_CACHE_FILE
-
         import portfolio.accuracy_stats as acc_mod
+        from portfolio.accuracy_stats import load_cached_accuracy
 
         orig = acc_mod.ACCURACY_CACHE_FILE
         acc_mod.ACCURACY_CACHE_FILE = tmp_path / "cache.json"

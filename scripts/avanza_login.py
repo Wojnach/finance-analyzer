@@ -13,7 +13,7 @@ The session is saved to data/avanza_session.json and is valid for ~24 hours.
 import json
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -239,7 +239,7 @@ def run_login():
 
     # Determine expiry
     max_inactive = captured_tokens.get("max_inactive_minutes", 1440)  # 24h default
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expires_at = now + timedelta(minutes=max_inactive)
 
     session_data = {

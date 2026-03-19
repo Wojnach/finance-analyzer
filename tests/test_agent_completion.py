@@ -21,19 +21,17 @@ Covers:
 
 import json
 import time
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 import portfolio.agent_invocation as ai
 from portfolio.agent_invocation import (
+    _last_jsonl_ts,
     check_agent_completion,
     get_completion_stats,
-    _last_jsonl_ts,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -441,7 +439,7 @@ class TestGetCompletionStats:
 
     def test_counts_statuses_correctly(self, tmp_invocations):
         """Correctly counts success, incomplete, and failed entries."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             {"ts": (now - timedelta(hours=1)).isoformat(), "status": "success"},
             {"ts": (now - timedelta(hours=2)).isoformat(), "status": "success"},
@@ -463,7 +461,7 @@ class TestGetCompletionStats:
 
     def test_respects_time_window(self, tmp_invocations):
         """Only counts entries within the specified hour window."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             {"ts": (now - timedelta(hours=1)).isoformat(), "status": "success"},
             {"ts": (now - timedelta(hours=2)).isoformat(), "status": "success"},
@@ -482,7 +480,7 @@ class TestGetCompletionStats:
 
     def test_custom_hours_window(self, tmp_invocations):
         """Custom hours parameter is respected."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             {"ts": (now - timedelta(hours=1)).isoformat(), "status": "success"},
             {"ts": (now - timedelta(hours=3)).isoformat(), "status": "failed"},  # outside 2h
@@ -498,7 +496,7 @@ class TestGetCompletionStats:
 
     def test_ignores_non_completion_statuses(self, tmp_invocations):
         """Entries with status 'invoked' or 'skipped_gate' are not counted."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             {"ts": (now - timedelta(hours=1)).isoformat(), "status": "invoked"},
             {"ts": (now - timedelta(hours=1)).isoformat(), "status": "skipped_gate"},
@@ -514,7 +512,7 @@ class TestGetCompletionStats:
 
     def test_handles_corrupt_entries(self, tmp_invocations):
         """Corrupt JSONL lines are skipped gracefully."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         content = (
             '{"ts": "' + (now - timedelta(hours=1)).isoformat() + '", "status": "success"}\n'
             'NOT VALID JSON\n'
@@ -529,7 +527,7 @@ class TestGetCompletionStats:
 
     def test_handles_entries_without_ts(self, tmp_invocations):
         """Entries missing the 'ts' field are skipped."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             {"status": "success"},  # no ts
             {"ts": (now - timedelta(hours=1)).isoformat(), "status": "failed"},
@@ -544,7 +542,7 @@ class TestGetCompletionStats:
 
     def test_completion_rate_100_percent(self, tmp_invocations):
         """100% completion rate when all entries are success."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             {"ts": (now - timedelta(hours=i)).isoformat(), "status": "success"}
             for i in range(1, 6)
@@ -558,7 +556,7 @@ class TestGetCompletionStats:
 
     def test_completion_rate_0_percent(self, tmp_invocations):
         """0% completion rate when no entries are success."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             {"ts": (now - timedelta(hours=1)).isoformat(), "status": "failed"},
             {"ts": (now - timedelta(hours=2)).isoformat(), "status": "incomplete"},

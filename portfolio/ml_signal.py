@@ -1,8 +1,9 @@
 import time
+from pathlib import Path
+
 import joblib
 import numpy as np
 import pandas as pd
-from pathlib import Path
 
 from portfolio.api_utils import BINANCE_BASE
 from portfolio.http_retry import fetch_with_retry

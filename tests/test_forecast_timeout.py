@@ -9,21 +9,19 @@ Covers:
 
 import json
 import time
-from datetime import datetime, timezone
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
 from portfolio.signals.forecast import (
-    _run_chronos,
     _CHRONOS_TIMEOUT,
     _KRONOS_TIMEOUT,
     _PREDICTION_DEDUP_TTL,
+    _chronos_circuit_open,
+    _run_chronos,
     compute_forecast_signal,
     reset_circuit_breakers,
-    _chronos_circuit_open,
 )
 
 

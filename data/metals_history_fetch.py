@@ -7,7 +7,13 @@ Generates data/metals_history.json with:
 
 Run: .venv/Scripts/python.exe data/metals_history_fetch.py
 """
-import json, os, time, datetime, requests
+import datetime
+import json
+import os
+import time
+
+import requests
+
 os.chdir(r"Q:/finance-analyzer")
 
 FAPI_BASE = "https://fapi.binance.com/fapi/v1/klines"
@@ -17,7 +23,7 @@ SYMBOLS = {
 }
 
 # 2026 YTD start
-YTD_START = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+YTD_START = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
 
 def fetch_fapi_klines(symbol, interval, start_ts, end_ts=None, limit=1000):
     """Fetch klines from Binance FAPI with pagination."""
@@ -59,7 +65,7 @@ def klines_to_daily(klines):
     """Convert raw klines to daily OHLCV dicts."""
     days = []
     for k in klines:
-        ts = datetime.datetime.fromtimestamp(k[0] / 1000, tz=datetime.timezone.utc)
+        ts = datetime.datetime.fromtimestamp(k[0] / 1000, tz=datetime.UTC)
         days.append({
             "date": ts.strftime("%Y-%m-%d"),
             "open": float(k[1]),
@@ -162,7 +168,7 @@ def compute_stats(days):
     }
 
 def main():
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     print(f"Fetching 2026 YTD metals data (Jan 1 - {now.strftime('%b %d')})...")
     print()
 
@@ -203,7 +209,7 @@ def main():
 
     # Print summary
     print(f"\n{'='*60}")
-    print(f"  METALS 2026 YTD SUMMARY")
+    print("  METALS 2026 YTD SUMMARY")
     print(f"{'='*60}")
     for ticker, data in result["metals"].items():
         s = data["stats"]

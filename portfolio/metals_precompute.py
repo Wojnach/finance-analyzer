@@ -71,7 +71,7 @@ def maybe_precompute_metals(config=None):
         result = precompute(config)
         atomic_write_json(_STATE_FILE, {
             "last_run_epoch": now,
-            "last_run_iso": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "last_run_iso": datetime.datetime.now(datetime.UTC).isoformat(),
             "status": "ok",
         })
         logger.info("Metals precompute completed (interval=%ds)", interval)
@@ -94,7 +94,7 @@ def precompute(config=None):
       - data/silver_deep_context.json
       - data/gold_deep_context.json
     """
-    generated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    generated_at = datetime.datetime.now(datetime.UTC).isoformat()
 
     # Fetch all shared market data in one pass
     market = _fetch_market_data(config)
@@ -335,7 +335,7 @@ def _fetch_futures(symbol):
         "distance_from_high_pct": round(
             (high_3mo - current) / high_3mo * 100, 2
         ) if high_3mo > 0 else None,
-        "fetched_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "fetched_at": datetime.datetime.now(datetime.UTC).isoformat(),
     }
 
 
@@ -366,7 +366,7 @@ def _fetch_etf_data(symbol):
         "low_1mo": round(float(closes.min()), 2),
         "avg_volume_1mo": int(volumes.mean()) if len(volumes) > 0 else None,
         "latest_volume": int(volumes.iloc[-1]) if len(volumes) > 0 else None,
-        "fetched_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "fetched_at": datetime.datetime.now(datetime.UTC).isoformat(),
     }
 
     # Volume trend (last 5d vs 1mo avg)
@@ -437,7 +437,7 @@ def _fetch_cftc_cot(commodity_name):
         "comm_long": comm_long,
         "comm_short": comm_short,
         "comm_net": comm_net,
-        "fetched_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "fetched_at": datetime.datetime.now(datetime.UTC).isoformat(),
     }
 
     if prev_nc_net is not None and nc_net is not None:
@@ -484,7 +484,7 @@ def _fetch_fred_data(api_key):
         logger.debug("FRED API key not configured, skipping")
         return None
 
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
 
     # Fetch DGS10 (10-Year Treasury Constant Maturity Rate)
     dgs10_url = (
@@ -597,7 +597,7 @@ def _record_cot_history(cot_data, metal):
             logger.debug("COT history prune failed: %s", e)
 
     record = {
-        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "ts": datetime.datetime.now(datetime.UTC).isoformat(),
         "metal": metal,
         "report_date": report_date,
         "oi": cot_data.get("open_interest"),
@@ -872,7 +872,7 @@ def _compute_price_trajectory(ticker, price_key):
         return {}
 
     # Keep last 7 days of hourly data
-    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
+    cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=7)
     cutoff_iso = cutoff.isoformat()
     recent = [p for p in prices if p["ts"] >= cutoff_iso]
 

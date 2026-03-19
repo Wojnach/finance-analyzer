@@ -4,11 +4,8 @@ import subprocess
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from portfolio.bigbet import (
     MAX_ACTIVE_BET_SECONDS,
-    TOTAL_CONDITIONS,
     _build_eval_prompt,
     _evaluate_conditions,
     _format_alert,
@@ -19,7 +16,6 @@ from portfolio.bigbet import (
     check_bigbet,
     invoke_layer2_eval,
 )
-
 
 # --- Fixtures for original tests ---
 

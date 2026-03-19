@@ -26,7 +26,13 @@ import numpy as np
 import pandas as pd
 
 from portfolio.signal_utils import (
-    ema, majority_vote, rma, safe_float, sma, true_range, wma,
+    ema,
+    majority_vote,
+    rma,
+    safe_float,
+    sma,
+    true_range,
+    wma,
 )
 
 # ---------------------------------------------------------------------------

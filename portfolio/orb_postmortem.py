@@ -10,10 +10,9 @@ Usage:
 
 import json
 import statistics
-from datetime import datetime, timezone
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from portfolio.file_utils import atomic_append_jsonl
 from portfolio.orb_predictor import ORBPredictor, Prediction
@@ -132,7 +131,7 @@ def run_postmortem(prediction: Prediction, actual_high: float, actual_low: float
 def log_postmortem(result: PostmortemResult, filepath: str = str(POSTMORTEM_PATH)) -> None:
     """Append one JSON line per day to the postmortem log."""
     entry = asdict(result)
-    entry["logged_at"] = datetime.now(timezone.utc).isoformat()
+    entry["logged_at"] = datetime.now(UTC).isoformat()
     atomic_append_jsonl(filepath, entry)
 
 
@@ -143,7 +142,7 @@ def load_postmortem_history(filepath: str = str(POSTMORTEM_PATH)) -> list[Postmo
         return []
 
     results = []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -235,7 +234,7 @@ def format_lessons_learned(history: list[PostmortemResult]) -> str:
     return "\n".join(lines)
 
 
-def generate_daily_report() -> Optional[PostmortemResult]:
+def generate_daily_report() -> PostmortemResult | None:
     """Run end-of-day postmortem for today.
 
     Reads today's prediction from orb_predictions_today.json,
@@ -249,7 +248,7 @@ def generate_daily_report() -> Optional[PostmortemResult]:
         print("No prediction found for today (data/orb_predictions_today.json missing)")
         return None
 
-    with open(PREDICTIONS_TODAY_PATH, "r", encoding="utf-8") as f:
+    with open(PREDICTIONS_TODAY_PATH, encoding="utf-8") as f:
         pred_data = json.load(f)
 
     # Remove non-Prediction fields

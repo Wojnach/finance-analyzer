@@ -3,14 +3,16 @@ from pathlib import Path
 
 import pandas as pd
 
-from portfolio.api_utils import get_alpaca_headers, BINANCE_BASE, BINANCE_FAPI_BASE, ALPACA_BASE
+from portfolio.api_utils import ALPACA_BASE, BINANCE_BASE, BINANCE_FAPI_BASE, get_alpaca_headers
 from portfolio.http_retry import fetch_with_retry
-from portfolio.shared_state import (_cached, _binance_limiter, _alpaca_limiter,
-                                    _yfinance_limiter, VOLUME_TTL as _VOLUME_TTL)
+from portfolio.shared_state import VOLUME_TTL as _VOLUME_TTL
+from portfolio.shared_state import _alpaca_limiter, _binance_limiter, _cached, _yfinance_limiter
 
 logger = logging.getLogger("portfolio.macro_context")
 
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
+
+from datetime import UTC
 
 from portfolio.tickers import TICKER_SOURCE_MAP as TICKER_MAP
 
@@ -92,10 +94,10 @@ def _fetch_klines(ticker):
             df[col] = df[col].astype(float)
         return df
     elif source_type == "alpaca":
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         _alpaca_limiter.wait()
-        end = datetime.now(timezone.utc)
+        end = datetime.now(UTC)
         start = end - pd.Timedelta(days=5)
         r = fetch_with_retry(
             f"{ALPACA_BASE}/stocks/{symbol}/bars",
@@ -219,9 +221,9 @@ def get_treasury():
 
 
 def get_fed_calendar():
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     upcoming = [d for d in FOMC_DATES if d >= today]
     if not upcoming:
         return None

@@ -9,7 +9,6 @@ from portfolio.monte_carlo_risk import (
     estimate_correlation_matrix,
 )
 
-
 # ---------------------------------------------------------------------------
 # Correlation matrix estimation
 # ---------------------------------------------------------------------------

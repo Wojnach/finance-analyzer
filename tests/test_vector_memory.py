@@ -1,19 +1,14 @@
 """Tests for ChromaDB vector memory module."""
 
-import json
-import pytest
-from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
-from pathlib import Path
+from unittest.mock import patch
 
 from portfolio.vector_memory import (
-    entry_to_text,
     _entry_id,
     build_query_text,
+    entry_to_text,
     get_semantic_context,
     reset,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -8,13 +8,11 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
 import pandas as pd
 import pytest
 
 from portfolio.signals.fibonacci import (
     MIN_ROWS,
-    _FIB_TOLERANCE,
     _compute_fib_extensions,
     _compute_fib_levels,
     _detect_trend,
@@ -27,7 +25,6 @@ from portfolio.signals.fibonacci import (
     _pivot_standard_signal,
     compute_fibonacci_signal,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

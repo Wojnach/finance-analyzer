@@ -7,9 +7,8 @@ and XAG-USD signals from agent_summary_compact.json.
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 import requests
 
@@ -32,7 +31,7 @@ _cb_fx = CircuitBreaker("elongir-fx", failure_threshold=3, recovery_timeout=120)
 # Individual data fetchers
 # ---------------------------------------------------------------------------
 
-def fetch_silver_price() -> Optional[float]:
+def fetch_silver_price() -> float | None:
     """Fetch current silver spot price from Binance FAPI (XAGUSDT)."""
     if not _cb_binance.allow_request():
         logger.warning("Binance circuit breaker OPEN -- skipping")
@@ -56,7 +55,7 @@ def fetch_silver_price() -> Optional[float]:
 def fetch_klines(
     interval: str = "1m",
     limit: int = 100,
-) -> Optional[list]:
+) -> list | None:
     """Fetch klines from Binance FAPI for XAGUSDT.
 
     Returns list of raw kline arrays, or None on failure.
@@ -80,7 +79,7 @@ def fetch_klines(
         return None
 
 
-def fetch_usdsek() -> Optional[float]:
+def fetch_usdsek() -> float | None:
     """Fetch USD/SEK exchange rate using portfolio.fx_rates."""
     if not _cb_fx.allow_request():
         logger.warning("FX circuit breaker OPEN -- skipping")
@@ -96,14 +95,14 @@ def fetch_usdsek() -> Optional[float]:
         return None
 
 
-def read_xag_signals() -> Optional[dict]:
+def read_xag_signals() -> dict | None:
     """Read XAG-USD signals from agent_summary_compact.json.
 
     Returns the XAG-USD ticker section, or None if unavailable.
     """
     compact_path = DATA_DIR / "agent_summary_compact.json"
     try:
-        with open(compact_path, "r", encoding="utf-8") as f:
+        with open(compact_path, encoding="utf-8") as f:
             data = json.load(f)
         tickers = data.get("tickers", {})
         return tickers.get("XAG-USD")
@@ -121,10 +120,10 @@ class MarketSnapshot:
     """A point-in-time snapshot of all market data needed by the bot."""
     silver_usd: float = 0.0
     fx_rate: float = 0.0
-    klines_1m: Optional[list] = None
-    klines_5m: Optional[list] = None
-    klines_15m: Optional[list] = None
-    xag_signals: Optional[dict] = None
+    klines_1m: list | None = None
+    klines_5m: list | None = None
+    klines_15m: list | None = None
+    xag_signals: dict | None = None
     timestamp: str = ""
 
     def is_complete(self) -> bool:
@@ -152,5 +151,5 @@ def collect_snapshot() -> MarketSnapshot:
         klines_5m=klines_5m,
         klines_15m=klines_15m,
         xag_signals=xag_signals,
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
     )

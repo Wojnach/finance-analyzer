@@ -8,7 +8,7 @@ import json
 import logging
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger("portfolio.bigbet")
@@ -198,7 +198,7 @@ def invoke_layer2_eval(ticker, direction, conditions, signals, tf_data, prices_u
             f.write(
                 json.dumps(
                     {
-                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "ts": datetime.now(UTC).isoformat(),
                         "ticker": ticker,
                         "direction": direction,
                         "probability": probability,
@@ -313,7 +313,7 @@ def _format_alert(ticker, direction, conditions, prices_usd, fx_rate, extra_info
     price = prices_usd.get(ticker, 0)
     n = len(conditions)
     total = TOTAL_CONDITIONS
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     if n >= 5:
         confidence = "HIGH"

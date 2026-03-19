@@ -5,25 +5,22 @@ Integration tests (marked @pytest.mark.integration) run locally with live models
 """
 
 import json
-import pytest
-import numpy as np
-import pandas as pd
 
-from conftest import make_indicators, make_candles
+import pytest
+from conftest import make_candles, make_indicators
+
 from portfolio.main import (
-    compute_indicators,
-    technical_signal,
-    generate_signal,
-    TIMEFRAMES,
-    STOCK_TIMEFRAMES,
     ALPACA_INTERVAL_MAP,
-    alpaca_klines,
-    fetch_usd_sek,
     MIN_VOTERS_CRYPTO,
-    MIN_VOTERS_STOCK,
+    STOCK_TIMEFRAMES,
+    TIMEFRAMES,
+    alpaca_klines,
+    compute_indicators,
+    fetch_usd_sek,
+    generate_signal,
+    technical_signal,
 )
 from portfolio.sentiment import _aggregate_sentiments, _fetch_crypto_headlines
-
 
 # --- compute_indicators ---
 
@@ -271,8 +268,9 @@ class TestCryptoCompareAPI:
 
 class TestMinistralTrader:
     def test_predict_prefers_json_payload(self):
-        from portfolio.ministral_trader import predict
         import unittest.mock as mock
+
+        from portfolio.ministral_trader import predict
 
         fake_response = {
             "choices": [{
@@ -291,8 +289,9 @@ class TestMinistralTrader:
         assert "bearish" in result["reasoning"].lower()
 
     def test_predict_output_format(self):
-        from portfolio.ministral_trader import predict
         import unittest.mock as mock
+
+        from portfolio.ministral_trader import predict
 
         fake_response = {
             "choices": [{"text": "DECISION: BUY - Bullish signals dominate"}]
@@ -323,8 +322,9 @@ class TestMinistralTrader:
         assert result["action"] == "BUY"
 
     def test_predict_extracts_sell(self):
-        from portfolio.ministral_trader import predict
         import unittest.mock as mock
+
+        from portfolio.ministral_trader import predict
 
         fake_response = {
             "choices": [{"text": "I recommend SELL due to bearish divergence"}]
@@ -339,8 +339,9 @@ class TestMinistralTrader:
         assert result["action"] == "SELL"
 
     def test_predict_defaults_hold(self):
-        from portfolio.ministral_trader import predict
         import unittest.mock as mock
+
+        from portfolio.ministral_trader import predict
 
         fake_response = {
             "choices": [{"text": "Market conditions unclear, wait for confirmation"}]
@@ -401,6 +402,7 @@ class TestTimeframesConfig:
 class TestMinistralSignalWrapper:
     def test_uses_repo_managed_script_path(self):
         import unittest.mock as mock
+
         from portfolio.ministral_signal import get_ministral_signal
 
         fake_result = mock.MagicMock()
@@ -415,6 +417,7 @@ class TestMinistralSignalWrapper:
 
     def test_parses_json_output(self):
         import unittest.mock as mock
+
         from portfolio.ministral_signal import get_ministral_signal
 
         fake_result = mock.MagicMock()
@@ -430,6 +433,7 @@ class TestMinistralSignalWrapper:
 
     def test_extracts_json_with_prefix_output(self):
         import unittest.mock as mock
+
         from portfolio.ministral_signal import get_ministral_signal
 
         fake_result = mock.MagicMock()
@@ -445,6 +449,7 @@ class TestMinistralSignalWrapper:
 
     def test_raises_on_failure(self):
         import unittest.mock as mock
+
         from portfolio.ministral_signal import get_ministral_signal
 
         fake_result = mock.MagicMock()
@@ -549,7 +554,7 @@ class TestTriggerSystem:
         assert any("F&G" in r for r in reasons)
 
     def test_sentiment_reversal_triggers(self):
-        from portfolio.trigger import check_triggers, SUSTAINED_CHECKS
+        from portfolio.trigger import SUSTAINED_CHECKS, check_triggers
 
         sigs = self._make_signals()
         prices = {"BTC-USD": 69000, "ETH-USD": 2000}
@@ -639,6 +644,7 @@ class TestAlpacaKlines:
 class TestFetchUsdSek:
     def test_parses_frankfurter_response(self):
         import unittest.mock as mock
+
         from portfolio.main import _fx_cache
 
         _fx_cache["rate"] = None
@@ -655,6 +661,7 @@ class TestFetchUsdSek:
 
     def test_fallback_on_error(self):
         import unittest.mock as mock
+
         from portfolio.main import _fx_cache
 
         _fx_cache["rate"] = None
@@ -733,8 +740,8 @@ class TestIntegrationHerc2:
 
     def test_ministral_gpu_inference(self):
         """Run actual CryptoTrader-LM inference on local GPU."""
-        import subprocess
         import os
+        import subprocess
         from pathlib import Path
 
         _check_gpu()
@@ -791,8 +798,8 @@ class TestIntegrationHerc2:
 
     def test_full_report(self):
         """Run --report end-to-end locally (no Telegram)."""
-        import subprocess
         import os
+        import subprocess
 
         env = {**os.environ, "NO_TELEGRAM": "1"}
         result = subprocess.run(

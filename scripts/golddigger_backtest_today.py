@@ -4,19 +4,17 @@ a configuration that detects real gold moves.
 Uses 1-minute klines from Binance FAPI as proxy for 5s polling.
 """
 
-import json
 import sys
-from collections import deque
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from portfolio.http_retry import fetch_with_retry
-from portfolio.golddigger.signal import CompositeSignal, SignalState
-from portfolio.golddigger.data_provider import MarketSnapshot
 from portfolio.golddigger.augmented_signals import AugmentedSignals
+from portfolio.golddigger.data_provider import MarketSnapshot
+from portfolio.golddigger.signal import CompositeSignal
+from portfolio.http_retry import fetch_with_retry
 
 BINANCE_FAPI = "https://fapi.binance.com/fapi/v1"
 SESSION_START_H, SESSION_START_M = 15, 30
@@ -31,7 +29,7 @@ def fetch_klines_today(symbol="XAUUSDT", interval="1m", days_ago=0):
         tz = timezone(timedelta(hours=1))
     now_cet = datetime.now(tz) - timedelta(days=days_ago)
     start_of_day = now_cet.replace(hour=0, minute=0, second=0, microsecond=0)
-    start_ms = int(start_of_day.astimezone(timezone.utc).timestamp() * 1000)
+    start_ms = int(start_of_day.astimezone(UTC).timestamp() * 1000)
     all_klines = []
     start = start_ms
     while True:
@@ -97,7 +95,7 @@ def run_single(klines, usdsek, us10y, theta_in, theta_out, confirm_polls,
     for kline in klines:
         ts_ms = kline[0]
         close = float(kline[4])
-        dt_utc = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+        dt_utc = datetime.fromtimestamp(ts_ms / 1000, tz=UTC)
         dt_cet = dt_utc.astimezone(tz)
         hour, minute = dt_cet.hour, dt_cet.minute
         time_str = dt_cet.strftime("%H:%M")
@@ -298,7 +296,7 @@ def main():
 
         session_klines = []
         for kl in klines:
-            dt = datetime.fromtimestamp(kl[0]/1000, tz=timezone.utc).astimezone(tz)
+            dt = datetime.fromtimestamp(kl[0]/1000, tz=UTC).astimezone(tz)
             h, m = dt.hour, dt.minute
             nm = h*60+m
             if (SESSION_START_H*60+SESSION_START_M) <= nm <= (SESSION_END_H*60+SESSION_END_M):
@@ -376,7 +374,7 @@ def run_augmented_filter(klines, usdsek, us10y, config_tuple, label):
         # Find the kline index corresponding to this entry time
         entry_idx = None
         for i, kl in enumerate(klines):
-            dt = datetime.fromtimestamp(kl[0] / 1000, tz=timezone.utc).astimezone(tz)
+            dt = datetime.fromtimestamp(kl[0] / 1000, tz=UTC).astimezone(tz)
             if dt.strftime("%H:%M") == entry_time:
                 entry_idx = i
                 break

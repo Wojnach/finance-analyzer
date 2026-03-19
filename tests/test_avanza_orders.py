@@ -2,8 +2,7 @@
 
 import json
 import sys
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -121,7 +120,7 @@ class TestGetPendingOrders:
 class TestCheckPendingOrders:
     def test_expires_stale_orders(self, tmp_data_dir, config):
         """Orders past their expiry are marked expired."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         order = {
             "id": "test-1",
             "timestamp": (now - timedelta(minutes=10)).isoformat(),

@@ -10,7 +10,6 @@ operate on 1-minute candle data, not tick-level.
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Optional
 
 import pandas as pd
 
@@ -108,7 +107,7 @@ class AugmentedSignals:
                     self._state.summary(), len(df))
         return self._state
 
-    def _fetch_klines(self) -> Optional[pd.DataFrame]:
+    def _fetch_klines(self) -> pd.DataFrame | None:
         """Fetch 1-minute klines from Binance FAPI."""
         try:
             r = fetch_with_retry(

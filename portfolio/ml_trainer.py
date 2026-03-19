@@ -1,9 +1,10 @@
+from pathlib import Path
+
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
-from pathlib import Path
 from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.metrics import classification_report, accuracy_score
+from sklearn.metrics import accuracy_score, classification_report
 
 DATA_DIR = (
     Path(__file__).resolve().parent.parent

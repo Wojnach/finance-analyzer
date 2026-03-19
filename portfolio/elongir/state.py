@@ -1,11 +1,10 @@
 """Persistent state management for the Elongir silver dip-trading bot."""
 
 import logging
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
-from typing import Optional
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 
-from portfolio.file_utils import atomic_write_json, load_json, atomic_append_jsonl
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
 
 logger = logging.getLogger("portfolio.elongir.state")
 
@@ -79,7 +78,7 @@ class Position:
 class BotState:
     """Complete bot state, persisted to JSON between sessions."""
     cash_sek: float = 100_000.0
-    position: Optional[Position] = None
+    position: Position | None = None
     daily_pnl: float = 0.0
     daily_trades: int = 0
     total_trades: int = 0
@@ -161,7 +160,7 @@ def log_trade(
 ) -> None:
     """Append a trade record to the JSONL trade log."""
     entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "action": action,
         "quantity": quantity,
         "warrant_price_sek": round(warrant_price_sek_val, 4),
@@ -180,17 +179,17 @@ def log_poll(
     fx_rate: float,
     warrant_mid: float,
     signal_state: str,
-    rsi_5m: Optional[float] = None,
-    rsi_15m: Optional[float] = None,
-    macd_hist_5m: Optional[float] = None,
-    bb_pos_5m: Optional[str] = None,
+    rsi_5m: float | None = None,
+    rsi_15m: float | None = None,
+    macd_hist_5m: float | None = None,
+    bb_pos_5m: str | None = None,
     position_qty: int = 0,
     equity_sek: float = 0.0,
-    leverage: Optional[float] = None,
+    leverage: float | None = None,
 ) -> None:
     """Append a structured poll log entry to the JSONL log."""
     entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "silver_usd": round(silver_usd, 4),
         "fx_rate": round(fx_rate, 4),
         "warrant_mid": round(warrant_mid, 4),

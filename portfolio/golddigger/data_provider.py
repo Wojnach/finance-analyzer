@@ -8,13 +8,13 @@ import logging
 import sys as _sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, time as dt_time, timezone
+from datetime import UTC, datetime
+from datetime import time as dt_time
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
-
-from portfolio.file_utils import load_json
+from typing import TYPE_CHECKING, Optional
 
 from portfolio.circuit_breaker import CircuitBreaker
+from portfolio.file_utils import load_json
 from portfolio.http_retry import fetch_with_retry
 
 if TYPE_CHECKING:
@@ -44,37 +44,37 @@ class MarketSnapshot:
     gold: float           # XAUUSD price
     usdsek: float         # USD/SEK exchange rate
     us10y: float          # US 10Y yield as decimal (e.g., 0.0425)
-    us10y_source: Optional[str] = None
-    us10y_change_pct: Optional[float] = None
-    dxy: Optional[float] = None
-    dxy_source: Optional[str] = None
-    dxy_change_pct: Optional[float] = None
-    next_event_type: Optional[str] = None
-    next_event_hours: Optional[float] = None
+    us10y_source: str | None = None
+    us10y_change_pct: float | None = None
+    dxy: float | None = None
+    dxy_source: str | None = None
+    dxy_change_pct: float | None = None
+    next_event_type: str | None = None
+    next_event_hours: float | None = None
     event_risk_active: bool = False
-    event_risk_phase: Optional[str] = None
-    cert_bid: Optional[float] = None
-    cert_ask: Optional[float] = None
-    cert_last: Optional[float] = None
-    cert_spread_pct: Optional[float] = None
+    event_risk_phase: str | None = None
+    cert_bid: float | None = None
+    cert_ask: float | None = None
+    cert_last: float | None = None
+    cert_spread_pct: float | None = None
     data_quality: str = "ok"  # "ok", "partial", "stale"
-    gold_fetch_ts: Optional[datetime] = None
-    fx_fetch_ts: Optional[datetime] = None
-    macro_fetch_ts: Optional[datetime] = None
-    gold_volume_ratio: Optional[float] = None
+    gold_fetch_ts: datetime | None = None
+    fx_fetch_ts: datetime | None = None
+    macro_fetch_ts: datetime | None = None
+    gold_volume_ratio: float | None = None
 
     def is_complete(self) -> bool:
         return self.gold > 0 and self.usdsek > 0
 
     def is_fresh(self, max_age_seconds: float = 90.0) -> bool:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for ts in [self.gold_fetch_ts, self.fx_fetch_ts]:
             if ts is not None and (now - ts).total_seconds() > max_age_seconds:
                 return False
         return True
 
 
-def _coerce_utc(ts_value) -> Optional[datetime]:
+def _coerce_utc(ts_value) -> datetime | None:
     """Convert a timestamp-like value to timezone-aware UTC."""
     if ts_value is None:
         return None
@@ -88,8 +88,8 @@ def _coerce_utc(ts_value) -> Optional[datetime]:
         except ValueError:
             return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def _fetch_yfinance_proxy(
@@ -100,7 +100,7 @@ def _fetch_yfinance_proxy(
     lookback_bars: int,
     ttl_seconds: int,
     max_bar_age_minutes: float,
-) -> Optional[dict]:
+) -> dict | None:
     """Fetch an intraday market proxy via yfinance with cache + staleness checks."""
     now = time.time()
     cached = _proxy_cache.get(cache_key)
@@ -125,7 +125,7 @@ def _fetch_yfinance_proxy(
 
         bar_age_minutes = max(
             0.0,
-            (datetime.now(timezone.utc) - last_time).total_seconds() / 60.0,
+            (datetime.now(UTC) - last_time).total_seconds() / 60.0,
         )
         if bar_age_minutes > max_bar_age_minutes:
             logger.warning(
@@ -155,7 +155,7 @@ def _fetch_yfinance_proxy(
         return cached["value"] if cached else None
 
 
-def fetch_gold_price(symbol: str = "XAUUSDT") -> Optional[float]:
+def fetch_gold_price(symbol: str = "XAUUSDT") -> float | None:
     """Fetch a gold proxy from Binance FAPI. Returns price or None."""
     if not _gold_cb.allow_request():
         logger.warning("Gold circuit breaker OPEN")
@@ -179,7 +179,7 @@ def fetch_gold_price(symbol: str = "XAUUSDT") -> Optional[float]:
         return None
 
 
-def fetch_usdsek() -> Optional[float]:
+def fetch_usdsek() -> float | None:
     """Fetch USD/SEK via existing fx_rates module."""
     try:
         from portfolio.fx_rates import fetch_usd_sek
@@ -189,7 +189,7 @@ def fetch_usdsek() -> Optional[float]:
         return None
 
 
-def fetch_dxy_context(cfg: "GolddiggerConfig") -> Optional[dict]:
+def fetch_dxy_context(cfg: "GolddiggerConfig") -> dict | None:
     """Fetch a DXY proxy for intraday gating, with macro-context fallback."""
     proxy = _fetch_yfinance_proxy(
         cache_key="dxy_proxy",
@@ -228,7 +228,7 @@ def fetch_us10y_context(
     ttl_seconds: int = 300,
     max_bar_age_minutes: float = 45.0,
     fred_series: str = "DGS10",
-) -> Optional[dict]:
+) -> dict | None:
     """Fetch the active rates proxy context with safe fallbacks."""
     if source in ("auto", "yfinance"):
         proxy = _fetch_yfinance_proxy(
@@ -269,7 +269,7 @@ def fetch_us10y_context(
     return None
 
 
-def fetch_us10y(fred_api_key: str = "", series_id: str = "DGS10") -> Optional[float]:
+def fetch_us10y(fred_api_key: str = "", series_id: str = "DGS10") -> float | None:
     """Fetch US 10Y yield from FRED API. Returns yield as decimal (e.g., 0.0425).
 
     Cached for 1 hour since Treasury yields are based on daily closes.
@@ -327,7 +327,7 @@ def fetch_us10y(fred_api_key: str = "", series_id: str = "DGS10") -> Optional[fl
         return _yield_cache.get("value")
 
 
-def fetch_certificate_price(page, orderbook_id: str, api_type: str = "certificate") -> Optional[dict]:
+def fetch_certificate_price(page, orderbook_id: str, api_type: str = "certificate") -> dict | None:
     """Fetch certificate bid/ask/last from Avanza via Playwright page.
 
     Returns dict: {bid, ask, last, spread_pct} or None.
@@ -369,12 +369,12 @@ def fetch_certificate_price(page, orderbook_id: str, api_type: str = "certificat
         return None
 
 
-def _load_json_safe(path) -> Optional[dict]:
+def _load_json_safe(path) -> dict | None:
     """Load JSON file safely, return None on failure."""
     return load_json(path, default=None)
 
 
-def fetch_gold_volume(symbol: str = "XAUUSDT", lookback_bars: int = 20) -> Optional[dict]:
+def fetch_gold_volume(symbol: str = "XAUUSDT", lookback_bars: int = 20) -> dict | None:
     """Fetch gold proxy volume from Binance FAPI. Returns {current, avg_20, ratio}."""
     try:
         r = fetch_with_retry(
@@ -401,7 +401,7 @@ def fetch_gold_volume(symbol: str = "XAUUSDT", lookback_bars: int = 20) -> Optio
         return None
 
 
-def read_xau_consensus() -> Optional[dict]:
+def read_xau_consensus() -> dict | None:
     """Read latest XAU-USD signal consensus from agent_summary_compact.json."""
     path = _DATA_DIR / "agent_summary_compact.json"
     data = _load_json_safe(path)
@@ -443,7 +443,7 @@ def read_macro_context() -> dict:
     }
 
 
-def read_chronos_forecast(ticker: str = "XAU-USD") -> Optional[dict]:
+def read_chronos_forecast(ticker: str = "XAU-USD") -> dict | None:
     """Read Chronos forecast from agent_summary_compact.json."""
     path = _DATA_DIR / "agent_summary_compact.json"
     data = _load_json_safe(path)
@@ -463,7 +463,7 @@ def read_event_risk(
     hours_before: float = 4.0,
     hours_after: float = 1.0,
     block_types: tuple[str, ...] = ("FOMC", "CPI", "NFP"),
-) -> Optional[dict]:
+) -> dict | None:
     """Return current event-risk context for metals around scheduled macro releases."""
     try:
         from portfolio.econ_dates import ECON_EVENTS, EVENT_SECTOR_MAP, next_event
@@ -471,7 +471,7 @@ def read_event_risk(
         logger.warning("Event-risk calendar unavailable: %s", e)
         return None
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     active_types = set(block_types)
     next_evt = next_event(now.date())
 
@@ -481,7 +481,7 @@ def read_event_risk(
             continue
         if "metals" not in EVENT_SECTOR_MAP.get(evt_type, set()):
             continue
-        evt_dt = datetime.combine(evt["date"], dt_time(hour=14), tzinfo=timezone.utc)
+        evt_dt = datetime.combine(evt["date"], dt_time(hour=14), tzinfo=UTC)
         hours_to_event = (evt_dt - now).total_seconds() / 3600.0
         if -hours_after <= hours_to_event <= hours_before:
             return {
@@ -503,7 +503,7 @@ def read_event_risk(
     return None
 
 
-def read_xau_atr() -> Optional[float]:
+def read_xau_atr() -> float | None:
     """Read XAU-USD ATR percentage from agent_summary_compact.json."""
     path = _DATA_DIR / "agent_summary_compact.json"
     data = _load_json_safe(path)
@@ -541,11 +541,11 @@ def collect_snapshot(
     orderbook_id = orderbook_id or getattr(cfg, "bull_orderbook_id", "")
     api_type = getattr(cfg, "cert_api_type", api_type)
 
-    ts = datetime.now(timezone.utc)
+    ts = datetime.now(UTC)
     gold = fetch_gold_price(gold_symbol)
-    gold_fetch_ts = datetime.now(timezone.utc) if gold is not None else None
+    gold_fetch_ts = datetime.now(UTC) if gold is not None else None
     usdsek = fetch_usdsek()
-    fx_fetch_ts = datetime.now(timezone.utc) if usdsek is not None else None
+    fx_fetch_ts = datetime.now(UTC) if usdsek is not None else None
     rate_ctx = fetch_us10y_context(
         fred_api_key,
         source=rates_source,
@@ -564,7 +564,7 @@ def collect_snapshot(
         hours_after=getattr(cfg, "event_risk_hours_after", 1.0),
         block_types=getattr(cfg, "event_risk_block_types", ("FOMC", "CPI", "NFP")),
     ) if cfg is not None and getattr(cfg, "use_event_risk_gate", False) else None
-    macro_fetch_ts = datetime.now(timezone.utc) if (rate_ctx or dxy_ctx or event_ctx) else None
+    macro_fetch_ts = datetime.now(UTC) if (rate_ctx or dxy_ctx or event_ctx) else None
 
     cert_data = None
     if page and orderbook_id:

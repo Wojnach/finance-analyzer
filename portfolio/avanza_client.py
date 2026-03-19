@@ -12,7 +12,7 @@ The client transparently tries BankID session first, then falls back to TOTP.
 import logging
 from datetime import date
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from portfolio.file_utils import load_json
 
@@ -217,7 +217,7 @@ def get_open_orders() -> list:
 
 # --- Account ID ---
 
-_account_id: Optional[str] = None
+_account_id: str | None = None
 
 
 def get_account_id() -> str:
@@ -255,7 +255,7 @@ def place_buy_order(
     orderbook_id: str,
     price: float,
     volume: int,
-    valid_until: Optional[date] = None,
+    valid_until: date | None = None,
 ) -> dict:
     """Place a limit BUY order on Avanza.
 
@@ -276,7 +276,7 @@ def place_sell_order(
     orderbook_id: str,
     price: float,
     volume: int,
-    valid_until: Optional[date] = None,
+    valid_until: date | None = None,
 ) -> dict:
     """Place a limit SELL order on Avanza.
 

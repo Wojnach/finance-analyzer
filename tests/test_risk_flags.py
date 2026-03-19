@@ -1,16 +1,14 @@
 """Tests for risk audit flags in risk_management.py."""
 
-import pytest
 
 from portfolio.risk_management import (
-    check_concentration_risk,
-    check_regime_mismatch,
-    check_correlation_risk,
-    check_atr_stop_proximity,
-    compute_all_risk_flags,
     CORRELATED_PAIRS,
+    check_atr_stop_proximity,
+    check_concentration_risk,
+    check_correlation_risk,
+    check_regime_mismatch,
+    compute_all_risk_flags,
 )
-
 
 # --- Helper fixtures ---
 

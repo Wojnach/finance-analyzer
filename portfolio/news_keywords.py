@@ -9,6 +9,7 @@ Provides:
 from __future__ import annotations
 
 import re
+from datetime import UTC
 
 # ---------------------------------------------------------------------------
 # Keyword tiers: word/phrase -> weight multiplier for sentiment scoring
@@ -212,7 +213,7 @@ def dissemination_score(articles: list[dict]) -> float:
         diversity_factor = 1.25
 
     # Factor 3: Time clustering — articles within 1h of each other
-    from datetime import datetime, timezone
+    from datetime import datetime
     timestamps = []
     for a in articles:
         pub = a.get("published", "")
@@ -220,7 +221,7 @@ def dissemination_score(articles: list[dict]) -> float:
             continue
         try:
             if isinstance(pub, (int, float)):
-                ts = datetime.fromtimestamp(pub, tz=timezone.utc)
+                ts = datetime.fromtimestamp(pub, tz=UTC)
             else:
                 # Try ISO format
                 pub_str = str(pub).replace("Z", "+00:00")

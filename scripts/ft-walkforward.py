@@ -145,7 +145,7 @@ def run_window(window, idx, total, epochs, spaces):
         }
 
     # 2. Export best params (auto-updates ta_base_strategy.json)
-    print(f"  [2/3] Exporting best params...")
+    print("  [2/3] Exporting best params...")
     r = run_ft(
         "hyperopt-show",
         "--best",
@@ -217,7 +217,7 @@ def run_window(window, idx, total, epochs, spaces):
 
 def print_summary(results):
     print(f"\n\n{'='*70}")
-    print(f"  WALK-FORWARD SUMMARY")
+    print("  WALK-FORWARD SUMMARY")
     print(f"{'='*70}\n")
 
     header = f"{'#':>3} | {'Test Period':>21} | {'Trades':>6} | {'Profit':>8} | {'PF':>6} | {'MaxDD':>6} | {'WinRate':>7} | {'Sharpe':>6}"
@@ -305,7 +305,7 @@ def main():
         )
         sys.exit(1)
 
-    print(f"Walk-Forward Validation")
+    print("Walk-Forward Validation")
     print(
         f"  Train: {args.train_days}d | Test: {args.test_days}d | Step: {args.test_days}d"
     )

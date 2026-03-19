@@ -5,8 +5,9 @@ This avoids circular imports and provides a single source of truth.
 """
 
 import logging
-import time
 import threading
+import time
+from datetime import UTC
 
 logger = logging.getLogger("portfolio.shared_state")
 
@@ -147,8 +148,8 @@ def newsapi_quota_ok() -> bool:
     now = time.time()
     with _newsapi_lock:
         # Reset counter at midnight UTC
-        from datetime import datetime, timezone
-        today_start = datetime.now(timezone.utc).replace(
+        from datetime import datetime
+        today_start = datetime.now(UTC).replace(
             hour=0, minute=0, second=0, microsecond=0
         ).timestamp()
         if _newsapi_daily_reset < today_start:
@@ -179,8 +180,8 @@ def newsapi_ttl_for_ticker(ticker: str):
     if priority is None:
         return None
 
-    from datetime import datetime, timezone
-    hour_utc = datetime.now(timezone.utc).hour
+    from datetime import datetime
+    hour_utc = datetime.now(UTC).hour
     is_active = _NEWSAPI_ACTIVE_START_UTC <= hour_utc < _NEWSAPI_ACTIVE_END_UTC
 
     if is_active:

@@ -6,9 +6,9 @@ and computes per-model per-ticker per-horizon accuracy statistics.
 
 import json
 import logging
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
 from collections import defaultdict
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from portfolio.file_utils import atomic_write_jsonl
 
@@ -95,7 +95,7 @@ def compute_forecast_accuracy(ticker=None, horizon="24h", days=None,
 
     cutoff = None
     if days is not None:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
     # Track per-model stats
     model_stats = defaultdict(lambda: defaultdict(lambda: {"correct": 0, "total": 0}))
@@ -268,7 +268,7 @@ def backfill_forecast_outcomes(max_entries=500, predictions_file=None,
             modified_entries.append(entry)
             continue
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         for horizon_key, hours in [("1h", 1), ("24h", 24)]:
             if horizon_key in entry["outcome"]:

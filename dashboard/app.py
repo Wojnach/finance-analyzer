@@ -1,9 +1,8 @@
 """Portfolio Intelligence Dashboard — lightweight Flask API + frontend."""
 
-import json
 import functools
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -49,9 +48,10 @@ CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
 STOCKHOLM_TZ = ZoneInfo("Europe/Stockholm")
 
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from portfolio.file_utils import load_json as _load_json_impl, load_jsonl as _load_jsonl_impl
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from portfolio.file_utils import load_json as _load_json_impl
+from portfolio.file_utils import load_jsonl as _load_jsonl_impl
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -95,12 +95,12 @@ def _parse_iso8601(value):
     except ValueError:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt
 
 
 def _stockholm_now():
-    return datetime.now(timezone.utc).astimezone(STOCKHOLM_TZ)
+    return datetime.now(UTC).astimezone(STOCKHOLM_TZ)
 
 
 def _hours_until_stockholm_close(now=None, close_hour=21, close_minute=55):
@@ -225,7 +225,7 @@ def _normalize_golddigger_state(state, log_entries):
     state["session_active"] = (
         latest_ts is not None
         and not bool(state.get("halted"))
-        and (datetime.now(timezone.utc) - latest_ts).total_seconds() <= max_age_seconds
+        and (datetime.now(UTC) - latest_ts).total_seconds() <= max_age_seconds
     )
     state["daily"] = {
         "trade_count": state.get("daily_trades", 0),
@@ -760,9 +760,9 @@ def api_signal_log():
 def api_accuracy():
     try:
         from portfolio.accuracy_stats import (
-            signal_accuracy,
             consensus_accuracy,
             per_ticker_accuracy,
+            signal_accuracy,
         )
 
         result = {}

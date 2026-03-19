@@ -6,7 +6,7 @@ Signals that flip every 1-2 checks are "noisy".
 """
 
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.file_utils import atomic_write_jsonl, load_jsonl
@@ -62,7 +62,7 @@ def update_history(ticker, votes_dict):
     entries = _load_history()
 
     new_entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "ticker": ticker,
         "votes": {sig: votes_dict.get(sig, "HOLD") for sig in SIGNAL_NAMES},
     }

@@ -24,18 +24,17 @@ Tests organized by function:
 
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest import mock
 
 import pytest
 
 import portfolio.trigger as trigger_mod
 from portfolio.trigger import (
+    _check_recent_trade,
     classify_tier,
     update_tier_state,
-    _check_recent_trade,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -75,7 +74,7 @@ def _write_portfolio(pf_file, transactions=None):
 
 def _mock_market_hours():
     """Return a started mock that sets datetime.now to Tuesday 12:00 UTC (market hours)."""
-    fake_now = datetime(2026, 2, 17, 12, 0, 0, tzinfo=timezone.utc)
+    fake_now = datetime(2026, 2, 17, 12, 0, 0, tzinfo=UTC)
     m = mock.patch("portfolio.trigger.datetime")
     mock_dt = m.start()
     mock_dt.now.return_value = fake_now
@@ -85,7 +84,7 @@ def _mock_market_hours():
 
 def _mock_offhours():
     """Return a started mock that sets datetime.now to Saturday 03:00 UTC (off-hours)."""
-    fake_now = datetime(2026, 2, 14, 3, 0, 0, tzinfo=timezone.utc)
+    fake_now = datetime(2026, 2, 14, 3, 0, 0, tzinfo=UTC)
     m = mock.patch("portfolio.trigger.datetime")
     mock_dt = m.start()
     mock_dt.now.return_value = fake_now

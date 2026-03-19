@@ -1,7 +1,11 @@
-import json, datetime, pathlib, requests
+import datetime
+import json
+import pathlib
+
+import requests
 
 BASE = pathlib.Path("Q:/finance-analyzer/data")
-now = datetime.datetime.now(datetime.timezone.utc)
+now = datetime.datetime.now(datetime.UTC)
 ts_now = now.isoformat()
 
 # === 1. Journal Entry ===

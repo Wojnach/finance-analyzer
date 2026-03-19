@@ -2,18 +2,17 @@
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
-import numpy as np
-
-from portfolio.shared_state import _cached, FEAR_GREED_TTL, SENTIMENT_TTL, MINISTRAL_TTL, VOLUME_TTL
 from portfolio.indicators import detect_regime
-from portfolio.tickers import CRYPTO_SYMBOLS, STOCK_SYMBOLS, METALS_SYMBOLS, SIGNAL_NAMES, DISABLED_SIGNALS
+from portfolio.shared_state import FEAR_GREED_TTL, MINISTRAL_TTL, SENTIMENT_TTL, VOLUME_TTL, _cached
 from portfolio.signal_registry import get_enhanced_signals, load_signal_func
 from portfolio.signal_utils import true_range
+from portfolio.tickers import CRYPTO_SYMBOLS, DISABLED_SIGNALS, METALS_SYMBOLS, SIGNAL_NAMES, STOCK_SYMBOLS
 
 logger = logging.getLogger("portfolio.signal_engine")
 
@@ -225,7 +224,7 @@ def _confluence_score(votes, indicators):
 
 
 def _time_of_day_factor():
-    hour = datetime.now(timezone.utc).hour
+    hour = datetime.now(UTC).hour
     if 2 <= hour <= 6:
         return 0.8
     return 1.0
@@ -842,10 +841,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
         min_voters = MIN_VOTERS_CRYPTO
 
     # Core gate: if no core signal is active, force HOLD regardless of enhanced votes
-    if core_active == 0:
-        action = "HOLD"
-        conf = 0.0
-    elif active_voters < min_voters:
+    if core_active == 0 or active_voters < min_voters:
         action = "HOLD"
         conf = 0.0
     else:
@@ -867,8 +863,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     activation_rates = {}
     try:
         from portfolio.accuracy_stats import (
-            load_cached_accuracy, signal_accuracy, signal_accuracy_recent,
-            write_accuracy_cache, load_cached_activation_rates,
+            load_cached_accuracy,
+            load_cached_activation_rates,
+            signal_accuracy,
+            signal_accuracy_recent,
+            write_accuracy_cache,
         )
 
         # Load all-time accuracy

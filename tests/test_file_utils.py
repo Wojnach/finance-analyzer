@@ -1,11 +1,11 @@
 """Tests for portfolio.file_utils — atomic JSON write and shared I/O helpers."""
 import json
-import os
-import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from portfolio.file_utils import atomic_write_json, load_json, load_jsonl, atomic_append_jsonl
+import pytest
+
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json, load_jsonl
 
 
 class TestAtomicWriteJson:
@@ -59,18 +59,16 @@ class TestAtomicWriteJson:
         path = tmp_path / "test.json"
         path.write_text('{"original": true}', encoding="utf-8")
 
-        with patch("portfolio.file_utils.json.dump", side_effect=OSError("disk full")):
-            with pytest.raises(OSError):
-                atomic_write_json(path, {"new": True})
+        with patch("portfolio.file_utils.json.dump", side_effect=OSError("disk full")), pytest.raises(OSError):
+            atomic_write_json(path, {"new": True})
         # Original file should be unchanged
         assert json.loads(path.read_text(encoding="utf-8")) == {"original": True}
 
     def test_no_temp_file_left_on_error(self, tmp_path):
         path = tmp_path / "test.json"
 
-        with patch("portfolio.file_utils.json.dump", side_effect=OSError("disk full")):
-            with pytest.raises(OSError):
-                atomic_write_json(path, {"new": True})
+        with patch("portfolio.file_utils.json.dump", side_effect=OSError("disk full")), pytest.raises(OSError):
+            atomic_write_json(path, {"new": True})
         # No .tmp files should remain
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert len(tmp_files) == 0

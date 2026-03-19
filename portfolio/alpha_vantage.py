@@ -8,7 +8,7 @@ Not used for crypto or metals (no OVERVIEW data available).
 
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.circuit_breaker import CircuitBreaker
@@ -121,7 +121,7 @@ def _normalize_overview(raw):
         "beta": _float(raw.get("Beta")),
         "w52_high": _float(raw.get("52WeekHigh")),
         "w52_low": _float(raw.get("52WeekLow")),
-        "_fetched_at": datetime.now(timezone.utc).isoformat(),
+        "_fetched_at": datetime.now(UTC).isoformat(),
     }
     return result
 
@@ -157,7 +157,7 @@ def _fetch_overview(ticker, api_key):
 def _check_budget():
     """Check and reset daily budget counter. Returns True if budget available."""
     global _daily_budget_used, _budget_reset_date
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     if _budget_reset_date != today:
         _daily_budget_used = 0
         _budget_reset_date = today
@@ -175,7 +175,7 @@ def _is_stale(ticker, max_stale_days=5):
         return True
     try:
         fetched_time = datetime.fromisoformat(fetched_at)
-        age_seconds = (datetime.now(timezone.utc) - fetched_time).total_seconds()
+        age_seconds = (datetime.now(UTC) - fetched_time).total_seconds()
         return age_seconds > max_stale_days * 86400
     except (ValueError, TypeError):
         return True
@@ -192,7 +192,7 @@ def _cache_age_hours(ticker):
         return None
     try:
         fetched_time = datetime.fromisoformat(fetched_at)
-        return (datetime.now(timezone.utc) - fetched_time).total_seconds() / 3600
+        return (datetime.now(UTC) - fetched_time).total_seconds() / 3600
     except (ValueError, TypeError):
         return None
 

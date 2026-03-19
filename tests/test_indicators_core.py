@@ -16,7 +16,6 @@ import pytest
 import portfolio.shared_state as _ss
 from portfolio.indicators import compute_indicators, detect_regime, technical_signal
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

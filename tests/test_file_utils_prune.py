@@ -1,7 +1,5 @@
 """Tests for prune_jsonl in file_utils (BUG-59)."""
 import json
-import pytest
-from pathlib import Path
 
 from portfolio.file_utils import prune_jsonl
 

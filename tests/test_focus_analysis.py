@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from portfolio.focus_analysis import (
     estimate_near_close_range,
@@ -17,13 +17,13 @@ def test_normalize_ticker_aliases():
 
 def test_hours_to_us_close_weekend_is_zero():
     # Saturday
-    now = datetime(2026, 3, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 3, 7, 12, 0, tzinfo=UTC)
     assert hours_to_us_close(now) == 0.0
 
 
 def test_hours_to_us_close_open_window_positive():
     # Wednesday before US close during EST (close ~= 21:00 UTC in winter)
-    now = datetime(2026, 1, 7, 18, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 1, 7, 18, 30, tzinfo=UTC)
     h = hours_to_us_close(now)
     assert h > 0
     assert h < 4

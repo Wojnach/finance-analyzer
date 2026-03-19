@@ -10,7 +10,7 @@ import logging
 import math
 import re
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger("portfolio.journal_index")
@@ -220,7 +220,7 @@ def _compute_importance(entry, now=None):
         float: importance score (0.0 to 1.0)
     """
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
     score = 0.5  # base
 
@@ -228,7 +228,7 @@ def _compute_importance(entry, now=None):
     try:
         ts = datetime.fromisoformat(entry.get("ts", ""))
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
         age_hours = (now - ts).total_seconds() / 3600
         # Half-life of 4 hours
         decay = 0.5 ** (age_hours / 4)
@@ -276,7 +276,7 @@ class JournalIndex:
         self.entries = entries
         documents = [_tokenize_entry(e) for e in entries]
         self.bm25.fit(documents)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         self.importances = [_compute_importance(e, now) for e in entries]
 
     def query(self, market_state, k=8):
@@ -379,7 +379,7 @@ def retrieve_relevant_entries(signals, held_tickers, regime, prices, k=8):
                     entries.append(json.loads(line))
                 except json.JSONDecodeError:
                     continue
-    except (IOError, OSError):
+    except OSError:
         return []
 
     if not entries:

@@ -9,11 +9,10 @@ exit conditions.
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
-from portfolio.elongir.indicators import IndicatorSet
 from portfolio.elongir.config import ElongirConfig
+from portfolio.elongir.indicators import IndicatorSet
 
 logger = logging.getLogger("portfolio.elongir.signal")
 
@@ -36,8 +35,8 @@ class DipDetector:
         self.cfg = config
         self._state = "SCANNING"
         self._macd_improving_count = 0
-        self._prev_macd_hist: Optional[float] = None
-        self._prev_rsi: Optional[float] = None
+        self._prev_macd_hist: float | None = None
+        self._prev_rsi: float | None = None
 
     @property
     def state(self) -> str:
@@ -54,7 +53,7 @@ class DipDetector:
         self,
         indicators: IndicatorSet,
         silver_price: float,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Process one poll cycle. Returns "BUY" if entry triggered, else None.
 
         Dip criteria (all must be true):
@@ -141,10 +140,10 @@ class DipDetector:
     def _check_dip_criteria(
         self,
         silver_price: float,
-        rsi_5m: Optional[float],
-        bb_lower_5m: Optional[float],
-        bb_lower_15m: Optional[float],
-        high_1h: Optional[float],
+        rsi_5m: float | None,
+        bb_lower_5m: float | None,
+        bb_lower_15m: float | None,
+        high_1h: float | None,
     ) -> bool:
         """Check all dip detection criteria."""
         # 1. RSI oversold
@@ -171,19 +170,19 @@ class DipDetector:
 
         return True
 
-    def _check_macd_improving(self, macd_hist: Optional[float]) -> bool:
+    def _check_macd_improving(self, macd_hist: float | None) -> bool:
         """Check if MACD histogram is improving (less negative or more positive)."""
         if macd_hist is None or self._prev_macd_hist is None:
             return False
         return macd_hist > self._prev_macd_hist
 
-    def _check_rsi_turning_up(self, rsi: Optional[float]) -> bool:
+    def _check_rsi_turning_up(self, rsi: float | None) -> bool:
         """Check if RSI is turning up (current > previous)."""
         if rsi is None or self._prev_rsi is None:
             return False
         return rsi > self._prev_rsi
 
-    def _update_prev(self, rsi: Optional[float], macd_hist: Optional[float]) -> None:
+    def _update_prev(self, rsi: float | None, macd_hist: float | None) -> None:
         """Update previous values for next comparison."""
         if rsi is not None:
             self._prev_rsi = rsi
@@ -208,7 +207,7 @@ class ReversalDetector:
 
     def __init__(self, config: ElongirConfig):
         self.cfg = config
-        self._prev_macd_hist: Optional[float] = None
+        self._prev_macd_hist: float | None = None
 
     def update(
         self,
@@ -218,7 +217,7 @@ class ReversalDetector:
         entry_time_iso: str,
         trailing_peak_usd: float,
         trailing_active: bool,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Check exit conditions. Returns exit reason string or None.
 
         Returns one of: "SELL_SIGNAL", "STOP", "TRAILING_STOP",
@@ -238,9 +237,9 @@ class ReversalDetector:
         try:
             entry_dt = datetime.fromisoformat(entry_time_iso)
             if entry_dt.tzinfo is None:
-                entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+                entry_dt = entry_dt.replace(tzinfo=UTC)
             elapsed_hours = (
-                datetime.now(timezone.utc) - entry_dt
+                datetime.now(UTC) - entry_dt
             ).total_seconds() / 3600.0
             if elapsed_hours >= self.cfg.max_hold_hours:
                 return "TIME_STOP"

@@ -2,17 +2,16 @@
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from portfolio.shared_state import _cached
-from portfolio.indicators import detect_regime
-from portfolio.file_utils import load_json
-from portfolio.portfolio_mgr import _atomic_write_json, portfolio_value
-from portfolio.tickers import CRYPTO_SYMBOLS, STOCK_SYMBOLS
-from portfolio.signal_registry import get_enhanced_signals
-
 import portfolio.shared_state as _ss
+from portfolio.file_utils import load_json
+from portfolio.indicators import detect_regime
+from portfolio.portfolio_mgr import _atomic_write_json, portfolio_value
+from portfolio.shared_state import _cached
+from portfolio.signal_registry import get_enhanced_signals
+from portfolio.tickers import CRYPTO_SYMBOLS, STOCK_SYMBOLS
 
 logger = logging.getLogger("portfolio.reporting")
 
@@ -74,7 +73,7 @@ def write_agent_summary(
     pnl_pct = ((total - initial) / initial) * 100
 
     summary = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "trigger_reasons": trigger_reasons or [],
         "fx_rate": round(fx_rate, 2),
         "portfolio": {
@@ -183,10 +182,10 @@ def write_agent_summary(
 
     try:
         from portfolio.accuracy_stats import (
-            signal_accuracy,
-            consensus_accuracy,
             best_worst_signals,
+            consensus_accuracy,
             load_cached_accuracy,
+            signal_accuracy,
             write_accuracy_cache,
         )
 
@@ -458,7 +457,8 @@ def write_agent_summary(
     # Forecast accuracy (model health + sub-signal accuracy for focus tickers)
     try:
         from portfolio.forecast_accuracy import (
-            get_forecast_accuracy_summary, get_all_ticker_accuracies,
+            get_all_ticker_accuracies,
+            get_forecast_accuracy_summary,
         )
         _fa_focus = focus_tickers if focus_tickers else None
         fa_summary = get_forecast_accuracy_summary(
@@ -472,7 +472,8 @@ def write_agent_summary(
         # for each ticker (raw, held, insufficient_data)
         try:
             from portfolio.signals.forecast import (
-                _HOLD_THRESHOLD, _MIN_SAMPLES,
+                _HOLD_THRESHOLD,
+                _MIN_SAMPLES,
             )
             all_acc = get_all_ticker_accuracies(horizon="24h", days=7)
             if all_acc:
@@ -555,9 +556,9 @@ def write_agent_summary(
 
     # Exit optimizer plans for warrant positions
     try:
-        from portfolio.exit_optimizer import compute_exit_plan, Position, MarketSnapshot
-        from portfolio.session_calendar import get_session_info
         from portfolio.cost_model import get_cost_model
+        from portfolio.exit_optimizer import MarketSnapshot, Position, compute_exit_plan
+        from portfolio.session_calendar import get_session_info
         warrant_state_path = DATA_DIR / "portfolio_state_warrants.json"
         warrant_state = load_json(warrant_state_path)
         if warrant_state is not None:
@@ -577,13 +578,13 @@ def write_agent_summary(
                     qty=wpos["units"],
                     entry_price_sek=wpos.get("entry_price", 0),
                     entry_underlying_usd=wpos.get("entry_underlying", und_price),
-                    entry_ts=datetime.fromisoformat(wpos["entry_ts"]) if wpos.get("entry_ts") else datetime.now(timezone.utc),
+                    entry_ts=datetime.fromisoformat(wpos["entry_ts"]) if wpos.get("entry_ts") else datetime.now(UTC),
                     instrument_type="warrant",
                     leverage=wpos.get("leverage", 5.0),
                     financing_level=wpos.get("financing_level"),
                 )
                 market = MarketSnapshot(
-                    asof_ts=datetime.now(timezone.utc),
+                    asof_ts=datetime.now(UTC),
                     price=und_price,
                     atr_pct=signals.get(underlying, {}).get("extra", {}).get("atr_pct"),
                     usdsek=fx_rate,
@@ -601,7 +602,7 @@ def write_agent_summary(
 
     # Prophecy/belief context for Layer 2
     try:
-        from portfolio.prophecy import get_context_for_layer2, evaluate_checkpoints
+        from portfolio.prophecy import evaluate_checkpoints, get_context_for_layer2
         # Evaluate checkpoints against current prices
         triggered_cps = evaluate_checkpoints(prices_usd)
         if triggered_cps:
@@ -617,7 +618,7 @@ def write_agent_summary(
 
     # Preserve stale data for instruments not in current cycle (e.g. stocks off-hours)
     # so Layer 2 always sees all instruments. Prune entries stale for >24h.
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     now_iso = now_utc.isoformat()
     _STALE_MAX_HOURS = 24
     prev = load_json(AGENT_SUMMARY_FILE)

@@ -16,16 +16,24 @@ import logging
 import sys
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from statistics import mean
 
 from portfolio.file_utils import (
-    load_json as _load_json,
-    load_jsonl as _load_jsonl,
-    atomic_write_json as _atomic_write_json,
-    atomic_write_jsonl as _atomic_write_jsonl,
     atomic_append_jsonl as _atomic_append_jsonl_single,
+)
+from portfolio.file_utils import (
+    atomic_write_json as _atomic_write_json,
+)
+from portfolio.file_utils import (
+    atomic_write_jsonl as _atomic_write_jsonl,
+)
+from portfolio.file_utils import (
+    load_json as _load_json,
+)
+from portfolio.file_utils import (
+    load_jsonl as _load_jsonl,
 )
 
 logger = logging.getLogger("portfolio.fin_evolve")
@@ -108,10 +116,10 @@ def _find_price_at(price_history, ticker, target_ts):
             continue
         # Ensure both are offset-aware for comparison
         if entry_ts.tzinfo is None:
-            entry_ts = entry_ts.replace(tzinfo=timezone.utc)
+            entry_ts = entry_ts.replace(tzinfo=UTC)
         tgt = target_ts
         if tgt.tzinfo is None:
-            tgt = tgt.replace(tzinfo=timezone.utc)
+            tgt = tgt.replace(tzinfo=UTC)
 
         diff = abs((entry_ts - tgt).total_seconds())
         if diff < best_diff and ticker in entry.get("prices", {}):
@@ -164,7 +172,7 @@ def backfill_outcomes():
         logger.debug("No price history available for backfill")
         return 0
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     updated_count = 0
 
     for entry in entries:
@@ -172,7 +180,7 @@ def backfill_outcomes():
         if ts is None:
             continue
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
 
         age_hours = (now - ts).total_seconds() / 3600
         ticker = entry.get("ticker")
@@ -245,14 +253,14 @@ def backfill_journal_outcomes():
                    if "journal_ts" in e and "ticker" in e}
 
     new_outcomes = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     for entry in journal:
         ts = _parse_iso(entry.get("ts"))
         if not ts:
             continue
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
 
         age_hours = (now - ts).total_seconds() / 3600
         if age_hours < 24:
@@ -764,7 +772,7 @@ def evolve():
         )
         return None
 
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     lessons = {
         "generated_at": now_iso,
         "total_verdicts": len(all_scored),
@@ -989,7 +997,7 @@ def maybe_evolve(config=None):
             _EVOLVE_STATE_FILE,
             {
                 "last_run_epoch": now,
-                "last_run_iso": datetime.now(timezone.utc).isoformat(),
+                "last_run_iso": datetime.now(UTC).isoformat(),
                 "status": "ok",
                 "verdicts_scored": (
                     result.get("total_verdicts") if result else 0

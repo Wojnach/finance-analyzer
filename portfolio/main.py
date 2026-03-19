@@ -22,7 +22,7 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.file_utils import load_json
@@ -37,79 +37,126 @@ logger = logging.getLogger("portfolio.loop")
 # External code (tests, trigger.py, etc.) that does `from portfolio.main import X`
 # continues to work via these re-exports.
 
-from portfolio.tickers import SYMBOLS, CRYPTO_SYMBOLS, STOCK_SYMBOLS, METALS_SYMBOLS  # noqa: E402, F401
-from portfolio.api_utils import load_config as _load_config  # noqa: E402, F401
-from portfolio.http_retry import fetch_with_retry  # noqa: E402, F401
-
-# Shared state re-exports
-from portfolio.shared_state import (  # noqa: E402, F401
-    _tool_cache, _cached, _run_cycle_id, _current_market_state,
-    _regime_cache, _regime_cache_cycle,
-    _RateLimiter, _alpaca_limiter, _binance_limiter, _yfinance_limiter,
-    _alpha_vantage_limiter,
-    FUNDAMENTALS_TTL, FEAR_GREED_TTL, SENTIMENT_TTL, MINISTRAL_TTL,
-    ML_SIGNAL_TTL, FUNDING_RATE_TTL, VOLUME_TTL, _RETRY_COOLDOWN,
-)
 import portfolio.shared_state as _ss
-
-# Market timing re-exports
-from portfolio.market_timing import (  # noqa: E402, F401
-    _is_us_dst, _market_close_hour_utc, _is_agent_window,
-    get_market_state, MARKET_OPEN_HOUR,
-    INTERVAL_MARKET_OPEN, INTERVAL_MARKET_CLOSED, INTERVAL_WEEKEND,
-)
-
-# FX rates re-exports
-from portfolio.fx_rates import fetch_usd_sek, _fx_cache  # noqa: E402, F401
-
-# Indicators re-exports
-from portfolio.indicators import (  # noqa: E402, F401
-    compute_indicators, detect_regime, technical_signal,
-)
-
-# Data collector re-exports
-from portfolio.data_collector import (  # noqa: E402, F401
-    binance_klines, binance_fapi_klines, alpaca_klines, yfinance_klines,
-    _fetch_klines, collect_timeframes,
-    TIMEFRAMES, STOCK_TIMEFRAMES, ALPACA_INTERVAL_MAP,
-    BINANCE_BASE, BINANCE_FAPI_BASE, ALPACA_BASE,
-)
-
-# Signal engine re-exports
-from portfolio.signal_engine import (  # noqa: E402, F401
-    generate_signal,
-    MIN_VOTERS_CRYPTO, MIN_VOTERS_STOCK,
-    _prev_sentiment, _prev_sentiment_loaded,
-    _load_prev_sentiments, _get_prev_sentiment, _set_prev_sentiment,
-    REGIME_WEIGHTS, _weighted_consensus, _confluence_score, _time_of_day_factor,
-)
-
-# Portfolio manager re-exports
-from portfolio.portfolio_mgr import (  # noqa: E402, F401
-    load_state, save_state, _atomic_write_json, portfolio_value,
-    STATE_FILE, INITIAL_CASH_SEK,
-)
-
-# Reporting re-exports
-from portfolio.reporting import (  # noqa: E402, F401
-    write_agent_summary, _write_compact_summary, _cross_asset_signals,
-    AGENT_SUMMARY_FILE, COMPACT_SUMMARY_FILE,
-)
-
-# Telegram re-exports
-from portfolio.telegram_notifications import (  # noqa: E402, F401
-    send_telegram, escape_markdown_v1, _maybe_send_alert,
-    BOLD_STATE_FILE,
-)
 
 # Agent invocation re-exports
 from portfolio.agent_invocation import (  # noqa: E402, F401
-    invoke_agent, _log_trigger, check_agent_completion,
-    INVOCATIONS_FILE, TIER_CONFIG,
+    INVOCATIONS_FILE,
+    TIER_CONFIG,
+    _log_trigger,
+    check_agent_completion,
+    invoke_agent,
+)
+from portfolio.api_utils import load_config as _load_config  # noqa: E402, F401
+
+# Data collector re-exports
+from portfolio.data_collector import (  # noqa: E402, F401
+    ALPACA_BASE,
+    ALPACA_INTERVAL_MAP,
+    BINANCE_BASE,
+    BINANCE_FAPI_BASE,
+    STOCK_TIMEFRAMES,
+    TIMEFRAMES,
+    _fetch_klines,
+    alpaca_klines,
+    binance_fapi_klines,
+    binance_klines,
+    collect_timeframes,
+    yfinance_klines,
 )
 
 # Digest re-exports
 from portfolio.digest import _maybe_send_digest  # noqa: E402, F401
+
+# FX rates re-exports
+from portfolio.fx_rates import _fx_cache, fetch_usd_sek  # noqa: E402, F401
+from portfolio.http_retry import fetch_with_retry  # noqa: E402, F401
+
+# Indicators re-exports
+from portfolio.indicators import (  # noqa: E402, F401
+    compute_indicators,
+    detect_regime,
+    technical_signal,
+)
+
+# Market timing re-exports
+from portfolio.market_timing import (  # noqa: E402, F401
+    INTERVAL_MARKET_CLOSED,
+    INTERVAL_MARKET_OPEN,
+    INTERVAL_WEEKEND,
+    MARKET_OPEN_HOUR,
+    _is_agent_window,
+    _is_us_dst,
+    _market_close_hour_utc,
+    get_market_state,
+)
+
+# Portfolio manager re-exports
+from portfolio.portfolio_mgr import (  # noqa: E402, F401
+    INITIAL_CASH_SEK,
+    STATE_FILE,
+    _atomic_write_json,
+    load_state,
+    portfolio_value,
+    save_state,
+)
+
+# Reporting re-exports
+from portfolio.reporting import (  # noqa: E402, F401
+    AGENT_SUMMARY_FILE,
+    COMPACT_SUMMARY_FILE,
+    _cross_asset_signals,
+    _write_compact_summary,
+    write_agent_summary,
+)
+
+# Shared state re-exports
+from portfolio.shared_state import (  # noqa: E402, F401
+    _RETRY_COOLDOWN,
+    FEAR_GREED_TTL,
+    FUNDAMENTALS_TTL,
+    FUNDING_RATE_TTL,
+    MINISTRAL_TTL,
+    ML_SIGNAL_TTL,
+    SENTIMENT_TTL,
+    VOLUME_TTL,
+    _alpaca_limiter,
+    _alpha_vantage_limiter,
+    _binance_limiter,
+    _cached,
+    _current_market_state,
+    _RateLimiter,
+    _regime_cache,
+    _regime_cache_cycle,
+    _run_cycle_id,
+    _tool_cache,
+    _yfinance_limiter,
+)
+
+# Signal engine re-exports
+from portfolio.signal_engine import (  # noqa: E402, F401
+    MIN_VOTERS_CRYPTO,
+    MIN_VOTERS_STOCK,
+    REGIME_WEIGHTS,
+    _confluence_score,
+    _get_prev_sentiment,
+    _load_prev_sentiments,
+    _prev_sentiment,
+    _prev_sentiment_loaded,
+    _set_prev_sentiment,
+    _time_of_day_factor,
+    _weighted_consensus,
+    generate_signal,
+)
+
+# Telegram re-exports
+from portfolio.telegram_notifications import (  # noqa: E402, F401
+    BOLD_STATE_FILE,
+    _maybe_send_alert,
+    escape_markdown_v1,
+    send_telegram,
+)
+from portfolio.tickers import CRYPTO_SYMBOLS, METALS_SYMBOLS, STOCK_SYMBOLS, SYMBOLS  # noqa: E402, F401
 
 CONFIG_FILE = BASE_DIR / "config.json"
 
@@ -151,7 +198,7 @@ def _run_post_cycle(config):
     except Exception as e_mt:
         logger.warning("message throttle flush failed: %s", e_mt)
     try:
-        from portfolio.alpha_vantage import should_batch_refresh, refresh_fundamentals_batch
+        from portfolio.alpha_vantage import refresh_fundamentals_batch, should_batch_refresh
         if should_batch_refresh(config):
             refresh_fundamentals_batch(config)
     except Exception as e_av:
@@ -297,7 +344,7 @@ def run(force_report=False, active_symbols=None):
 
             logger.info(
                 "%s: $%s | RSI %.0f | MACD %+.1f%s%s | %s (%.0f%%)",
-                name, "{:,.2f}".format(price), ind['rsi'], ind['macd_hist'], extra_str, enh_str, action, conf * 100
+                name, f"{price:,.2f}", ind['rsi'], ind['macd_hist'], extra_str, enh_str, action, conf * 100
             )
             signals_ok += 1
 
@@ -353,7 +400,7 @@ def run(force_report=False, active_symbols=None):
 
     total = portfolio_value(state, prices_usd, fx_rate)
     pnl_pct = ((total - state["initial_value_sek"]) / state["initial_value_sek"]) * 100
-    logger.info("Portfolio: %s SEK (%+.2f%%) | Cash: %s SEK", "{:,.0f}".format(total), pnl_pct, "{:,.0f}".format(state['cash_sek']))
+    logger.info("Portfolio: %s SEK (%+.2f%%) | Cash: %s SEK", f"{total:,.0f}", pnl_pct, "{:,.0f}".format(state['cash_sek']))
 
     if not STATE_FILE.exists():
         save_state(state)
@@ -388,8 +435,8 @@ def run(force_report=False, active_symbols=None):
         logger.info("Trigger: %s", ', '.join(reasons_list))
 
         # Classify tier and write tier-specific context
-        from portfolio.trigger import classify_tier, update_tier_state
         from portfolio.reporting import write_tiered_summary
+        from portfolio.trigger import classify_tier, update_tier_state
         tier = classify_tier(reasons_list)
         triggered_tickers = _extract_triggered_tickers(reasons_list)
         write_tiered_summary(summary, tier, triggered_tickers)
@@ -552,7 +599,7 @@ def loop(interval=None):
     if heartbeat_file.exists():
         try:
             last_beat = datetime.fromisoformat(heartbeat_file.read_text().strip())
-            age_seconds = (datetime.now(timezone.utc) - last_beat).total_seconds()
+            age_seconds = (datetime.now(UTC) - last_beat).total_seconds()
             if age_seconds > 300:  # 5 minutes — previous loop likely crashed
                 age_min = int(age_seconds // 60)
                 msg = f"_LOOP RESTARTED_ — previous heartbeat was {age_min}m ago. Possible crash."
@@ -583,8 +630,8 @@ def loop(interval=None):
     logger.info("Starting loop with market-aware scheduling. Ctrl+C to stop.")
 
     try:
-        from portfolio.telegram_poller import TelegramPoller
         from portfolio.iskbets import handle_command
+        from portfolio.telegram_poller import TelegramPoller
         poller = TelegramPoller(config, on_command=handle_command)
         poller.start()
         logger.info("ISKBETS Telegram poller started")
@@ -596,7 +643,7 @@ def loop(interval=None):
         _run_post_cycle(config)
         _reset_crash_counter()
         try:
-            (DATA_DIR / "heartbeat.txt").write_text(datetime.now(timezone.utc).isoformat())
+            (DATA_DIR / "heartbeat.txt").write_text(datetime.now(UTC).isoformat())
         except Exception as e:
             logger.debug("Heartbeat write after initial run failed: %s", e)
     except KeyboardInterrupt:
@@ -642,7 +689,7 @@ def loop(interval=None):
             _crash_sleep()
         last_cycle_started = cycle_started
         try:
-            (DATA_DIR / "heartbeat.txt").write_text(datetime.now(timezone.utc).isoformat())
+            (DATA_DIR / "heartbeat.txt").write_text(datetime.now(UTC).isoformat())
         except Exception as e:
             logger.debug("Heartbeat write failed: %s", e)
 
@@ -682,7 +729,7 @@ if __name__ == "__main__":
         days = int(args[idx + 1]) if idx + 1 < len(args) and not args[idx + 1].startswith("--") else 30
         print_local_llm_report(days=days)
     elif "--export-local-llm-report" in args:
-        from portfolio.local_llm_report import export_local_llm_report, HISTORY_FILE, LATEST_REPORT_FILE
+        from portfolio.local_llm_report import HISTORY_FILE, LATEST_REPORT_FILE, export_local_llm_report
         idx = args.index("--export-local-llm-report")
         days = int(args[idx + 1]) if idx + 1 < len(args) and not args[idx + 1].startswith("--") else 30
         export = export_local_llm_report(days=days)
@@ -739,8 +786,8 @@ if __name__ == "__main__":
         _summary = load_json(_data / "agent_summary.json", default={})
         _patient = load_json(_data / "portfolio_state.json", default={})
         _bold = load_json(_data / "portfolio_state_bold.json", default={})
-        from portfolio.price_targets import compute_all_targets
         from portfolio.api_utils import load_config as _pt_load
+        from portfolio.price_targets import compute_all_targets
         _pt_cfg = _pt_load().get("price_targets", {})
         results = compute_all_targets(_summary, {"patient": _patient, "bold": _bold}, _pt_cfg)
         for ticker, data in (results or {}).items():
@@ -755,7 +802,7 @@ if __name__ == "__main__":
             if rec:
                 print(f"  >>> RECOMMENDED: ${rec['price']:.2f}  fill={rec['fill_prob']:.0%}  EV={rec['ev_sek']:+,.0f} SEK")
     elif "--avanza-status" in args:
-        from portfolio.avanza_client import get_positions, get_portfolio_value
+        from portfolio.avanza_client import get_portfolio_value, get_positions
         positions = get_positions()
         value = get_portfolio_value()
         print(f"Portfolio value: {value:,.0f} SEK")

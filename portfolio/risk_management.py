@@ -96,7 +96,7 @@ def check_drawdown(portfolio_path: str, max_drawdown_pct: float = 20.0,
 
     if history_path.exists():
         try:
-            with open(history_path, "r", encoding="utf-8") as f:
+            with open(history_path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -106,7 +106,7 @@ def check_drawdown(portfolio_path: str, max_drawdown_pct: float = 20.0,
                     val = entry.get(value_key, 0)
                     if val > peak_value:
                         peak_value = val
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             pass
 
     # Also compare against current value in case it's a new peak
@@ -228,7 +228,7 @@ def compute_probabilistic_stops(holdings: dict, agent_summary: dict) -> dict:
             - current_price_usd: current price
     """
     try:
-        from portfolio.exit_optimizer import simulate_intraday_paths, _first_hit_times
+        from portfolio.exit_optimizer import _first_hit_times, simulate_intraday_paths
         from portfolio.session_calendar import remaining_session_minutes
     except ImportError:
         logger.warning("exit_optimizer or session_calendar not available")
@@ -325,7 +325,7 @@ def get_position_ages(portfolio: dict) -> dict:
     """
     holdings = portfolio.get("holdings", {})
     transactions = portfolio.get("transactions", [])
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     result = {}
 
     for ticker, pos in holdings.items():
@@ -358,7 +358,7 @@ def get_position_ages(portfolio: dict) -> dict:
         if first_buy_ts is not None:
             # Ensure timezone-aware comparison
             if first_buy_ts.tzinfo is None:
-                first_buy_ts = first_buy_ts.replace(tzinfo=datetime.timezone.utc)
+                first_buy_ts = first_buy_ts.replace(tzinfo=datetime.UTC)
             age_delta = now - first_buy_ts
             age_hours = age_delta.total_seconds() / 3600
             age_days = age_hours / 24
@@ -420,7 +420,7 @@ def log_portfolio_value(patient_path: str | None = None,
             prices[ticker] = price
 
     entry = {
-        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "ts": datetime.datetime.now(datetime.UTC).isoformat(),
         "patient_value_sek": round(patient_value, 2),
         "bold_value_sek": round(bold_value, 2),
         "patient_pnl_pct": round(patient_pnl_pct, 4),

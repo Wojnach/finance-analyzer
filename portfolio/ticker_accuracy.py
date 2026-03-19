@@ -6,8 +6,9 @@ signal votes. This is the core engine for Mode B probability-based notifications
 
 import logging
 import math
+from datetime import UTC
 
-from portfolio.tickers import SIGNAL_NAMES, DISABLED_SIGNALS
+from portfolio.tickers import DISABLED_SIGNALS, SIGNAL_NAMES
 
 logger = logging.getLogger("portfolio.ticker_accuracy")
 
@@ -32,8 +33,8 @@ def accuracy_by_ticker_signal(ticker, horizon="1d", days=None):
 
     cutoff = None
     if days is not None:
-        from datetime import datetime, timedelta, timezone
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        from datetime import datetime, timedelta
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
     stats = {s: {"correct": 0, "total": 0} for s in SIGNAL_NAMES}
 

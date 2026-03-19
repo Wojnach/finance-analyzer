@@ -7,7 +7,7 @@ rolling changes so messages can show "XAG +12.4% 7d".
 import json
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from portfolio.file_utils import atomic_append_jsonl, load_jsonl
@@ -45,7 +45,7 @@ def maybe_log_hourly_snapshot(prices_usd):
         return False
 
     entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "prices": {k: round(v, 4) for k, v in prices_usd.items() if v},
     }
 
@@ -107,7 +107,7 @@ def compute_rolling_changes(tickers=None, snapshots=None):
     if not snapshots:
         return {}
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     latest = snapshots[-1]
     latest_prices = latest.get("prices", {})
 

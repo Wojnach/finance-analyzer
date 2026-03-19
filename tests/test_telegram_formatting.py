@@ -6,7 +6,6 @@ Covers:
 - Message length stays under 4096 chars with 31 tickers
 """
 
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -425,7 +424,7 @@ class TestTimeframeHeatmap:
 class TestHoldCount:
     def test_hold_count_italicized(self):
         """HOLD count line should use Markdown italics."""
-        line = f"_+ 27 HOLD_"
+        line = "_+ 27 HOLD_"
         assert line.startswith("_")
         assert line.endswith("_")
 

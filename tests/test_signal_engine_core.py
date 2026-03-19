@@ -7,20 +7,20 @@ Covers:
 - _time_of_day_factor: time-based confidence dampening
 """
 
+from datetime import UTC, datetime
+from unittest import mock
+
 import numpy as np
 import pandas as pd
 import pytest
-from datetime import datetime, timezone
-from unittest import mock
 
 from portfolio.signal_engine import (
-    _weighted_consensus,
-    apply_confidence_penalties,
+    REGIME_WEIGHTS,
     _confluence_score,
     _time_of_day_factor,
-    REGIME_WEIGHTS,
+    _weighted_consensus,
+    apply_confidence_penalties,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -676,7 +676,7 @@ class TestTimeOfDayFactor:
     @pytest.mark.parametrize("hour", [2, 3, 4, 5, 6])
     def test_night_hours_return_08(self, hour):
         with mock.patch("portfolio.signal_engine.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 2, 26, hour, 30, tzinfo=timezone.utc)
+            mock_dt.now.return_value = datetime(2026, 2, 26, hour, 30, tzinfo=UTC)
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             factor = _time_of_day_factor()
         assert factor == 0.8
@@ -684,7 +684,7 @@ class TestTimeOfDayFactor:
     @pytest.mark.parametrize("hour", [0, 1, 7, 8, 12, 15, 18, 21, 23])
     def test_day_hours_return_10(self, hour):
         with mock.patch("portfolio.signal_engine.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 2, 26, hour, 30, tzinfo=timezone.utc)
+            mock_dt.now.return_value = datetime(2026, 2, 26, hour, 30, tzinfo=UTC)
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             factor = _time_of_day_factor()
         assert factor == 1.0

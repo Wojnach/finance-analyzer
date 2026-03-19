@@ -4,13 +4,12 @@ Tests the CLAUDE_ENABLED flag, _autonomous_decision(), helper functions,
 and the gating logic in invoke_claude().
 """
 
+import copy
 import json
 import os
 import sys
 import time
-import datetime
-import copy
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
@@ -596,7 +595,7 @@ class TestAutonomousDecision:
                  patch("builtins.open", side_effect=patched_open):
                 ml._autonomous_decision(["heartbeat"], 1)
 
-            with open(decisions_file, "r") as f:
+            with open(decisions_file) as f:
                 entry = json.loads(f.readline().strip())
             # silver_sg is active with bid 48.3
             assert "silver_sg" in entry["positions"]

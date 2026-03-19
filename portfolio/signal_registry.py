@@ -5,13 +5,13 @@ discovers all signals from the registry instead of hardcoded lists.
 """
 import importlib
 import logging
-from typing import Callable, Dict, Optional
+from collections.abc import Callable
 
 logger = logging.getLogger("portfolio.signal_registry")
 
 # Registry storage
-_CORE_SIGNALS: Dict[str, dict] = {}
-_ENHANCED_SIGNALS: Dict[str, dict] = {}
+_CORE_SIGNALS: dict[str, dict] = {}
+_ENHANCED_SIGNALS: dict[str, dict] = {}
 
 
 def register_signal(name: str, signal_type: str = "enhanced",
@@ -63,7 +63,7 @@ def register_enhanced(name: str, module_path: str, func_name: str,
     }
 
 
-def get_enhanced_signals() -> Dict[str, dict]:
+def get_enhanced_signals() -> dict[str, dict]:
     """Return all registered enhanced signals."""
     return dict(_ENHANCED_SIGNALS)
 
@@ -75,7 +75,7 @@ def get_signal_names() -> list:
     return core + enhanced
 
 
-def load_signal_func(entry: dict) -> Optional[Callable]:
+def load_signal_func(entry: dict) -> Callable | None:
     """Lazy-load and cache the compute function for a signal."""
     if entry.get("func") is not None:
         return entry["func"]

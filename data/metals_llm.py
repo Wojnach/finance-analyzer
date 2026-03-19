@@ -14,22 +14,22 @@ Usage from metals_loop.py:
     accuracy = get_llm_accuracy()  # get rolling accuracy per model
 """
 
+import datetime
 import json
 import os
-import sys
-import time
-import datetime
-import threading
-import subprocess
-import traceback
 import platform
+import subprocess
+import sys
+import threading
+import time
+import traceback
 
 os.chdir(r"Q:/finance-analyzer")
 sys.path.insert(0, ".")
 
 import requests
 
-from portfolio.file_utils import atomic_write_json, load_json, atomic_append_jsonl
+from portfolio.file_utils import atomic_append_jsonl
 
 # --- CONFIG ---
 LLM_INTERVAL = 300       # run Ministral every 5 minutes
@@ -236,7 +236,7 @@ def _log_prediction(model, ticker, direction, confidence, current_price, horizon
     """Log a prediction for accuracy tracking."""
     try:
         entry = {
-            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "ts": datetime.datetime.now(datetime.UTC).isoformat(),
             "model": model,
             "ticker": ticker,
             "direction": direction,  # "up" or "down"
@@ -258,7 +258,7 @@ def _load_resolved_prediction_keys():
     if not os.path.exists(PREDICTION_OUTCOMES_LOG):
         return resolved
     try:
-        with open(PREDICTION_OUTCOMES_LOG, "r", encoding="utf-8") as f:
+        with open(PREDICTION_OUTCOMES_LOG, encoding="utf-8") as f:
             for line in f:
                 try:
                     entry = json.loads(line.strip())
@@ -293,7 +293,7 @@ def check_prediction_accuracy(current_prices):
 
         # Read predictions (append-only, never rewritten)
         entries = []
-        with open(PREDICTION_LOG, "r", encoding="utf-8") as f:
+        with open(PREDICTION_LOG, encoding="utf-8") as f:
             for line in f:
                 try:
                     entries.append(json.loads(line.strip()))
@@ -320,7 +320,7 @@ def check_prediction_accuracy(current_prices):
             try:
                 pred_ts = datetime.datetime.fromisoformat(pred_ts_str)
                 pred_epoch = pred_ts.timestamp()
-            except (ValueError, KeyError) as e:
+            except (ValueError, KeyError):
                 continue
 
             horizon_secs = HORIZONS.get(horizon_key, 3600)
@@ -346,7 +346,7 @@ def check_prediction_accuracy(current_prices):
                     "horizon": horizon_key,
                     "outcome": "skipped",
                     "correct": None,
-                    "resolved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "resolved_at": datetime.datetime.now(datetime.UTC).isoformat(),
                 }
                 new_outcomes.append(outcome_entry)
                 resolved_keys.add(dedup_key)
@@ -364,7 +364,7 @@ def check_prediction_accuracy(current_prices):
                 "outcome_price": round(actual_price, 4),
                 "pred_price": round(pred_price, 4),
                 "correct": correct,
-                "resolved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "resolved_at": datetime.datetime.now(datetime.UTC).isoformat(),
             }
             new_outcomes.append(outcome_entry)
             resolved_keys.add(dedup_key)
@@ -375,7 +375,7 @@ def check_prediction_accuracy(current_prices):
 
         # Compute accuracy from outcomes file
         if os.path.exists(PREDICTION_OUTCOMES_LOG):
-            with open(PREDICTION_OUTCOMES_LOG, "r", encoding="utf-8") as f:
+            with open(PREDICTION_OUTCOMES_LOG, encoding="utf-8") as f:
                 for line in f:
                     try:
                         rec = json.loads(line.strip())
@@ -490,12 +490,12 @@ def _run_inference_cycle(signal_data, underlying_prices, chronos_only=False):
             # Preserve existing Ministral data, just update price/timestamp
             ticker_result = results[ticker]
             ticker_result["price"] = current_price
-            ticker_result["ts"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            ticker_result["ts"] = datetime.datetime.now(datetime.UTC).isoformat()
         else:
             ticker_result = {
                 "ticker": ticker,
                 "price": current_price,
-                "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "ts": datetime.datetime.now(datetime.UTC).isoformat(),
                 "ministral": None,
                 "chronos_1h": None,
                 "chronos_3h": None,
@@ -699,7 +699,7 @@ def start_llm_thread(signal_data_fn, underlying_prices_fn):
         name="metals-llm-worker",
     )
     _llm_thread.start()
-    _log("LLM background thread started (Ministral: {}s, Chronos: {}s)".format(LLM_INTERVAL, CHRONOS_INTERVAL))
+    _log(f"LLM background thread started (Ministral: {LLM_INTERVAL}s, Chronos: {CHRONOS_INTERVAL}s)")
 
 
 def stop_llm_thread():

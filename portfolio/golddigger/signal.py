@@ -12,7 +12,6 @@ import logging
 import math
 from collections import deque
 from dataclasses import dataclass
-from typing import Optional
 
 from portfolio.golddigger.data_provider import MarketSnapshot
 
@@ -89,9 +88,9 @@ class CompositeSignal:
         self._yield_changes: deque = deque(maxlen=window_n)
 
         # Previous snapshot values for computing returns
-        self._prev_gold: Optional[float] = None
-        self._prev_fx: Optional[float] = None
-        self._prev_yield: Optional[float] = None
+        self._prev_gold: float | None = None
+        self._prev_fx: float | None = None
+        self._prev_yield: float | None = None
 
         # Confirmation counter
         self._confirm_count: int = 0
@@ -165,7 +164,7 @@ class CompositeSignal:
 
         return state
 
-    def should_enter(self, state: SignalState, spread_pct: Optional[float] = None, spread_max: float = 0.02) -> bool:
+    def should_enter(self, state: SignalState, spread_pct: float | None = None, spread_max: float = 0.02) -> bool:
         """Check if all entry conditions are met.
 
         Requires:

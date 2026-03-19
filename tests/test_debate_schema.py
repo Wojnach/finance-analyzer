@@ -1,9 +1,7 @@
 """Tests for bull/bear adversarial debate schema in journal entries."""
 
-import pytest
-from portfolio.journal import _append_entry, _non_neutral_tickers
+from portfolio.journal import _append_entry
 from portfolio.journal_index import _tokenize_entry
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

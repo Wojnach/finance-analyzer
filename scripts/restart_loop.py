@@ -1,7 +1,6 @@
 """Kill crash-looping main loop and restart fresh."""
-import subprocess
 import os
-import sys
+import subprocess
 import time
 
 print(f"[{time.strftime('%H:%M:%S')}] Restarting data loop...")

@@ -12,23 +12,20 @@ All tests use isolated temp files for trigger state so they are safe
 for parallel execution with pytest-xdist (-n auto).
 """
 
-import json
 import time
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 from unittest import mock
 
 import pytest
 
 from portfolio.trigger import (
-    PRICE_THRESHOLD,
     FG_THRESHOLDS,
+    PRICE_THRESHOLD,
     SUSTAINED_CHECKS,
-    check_triggers,
     _load_state,
     _save_state,
+    check_triggers,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -334,7 +331,7 @@ class TestMarketHoursBoundary:
         sigs = _make_signals(["BTC-USD"], "HOLD")
         prices = {"BTC-USD": 69000}
 
-        fake_now = datetime(2026, 2, 16, 12, 0, 0, tzinfo=timezone.utc)
+        fake_now = datetime(2026, 2, 16, 12, 0, 0, tzinfo=UTC)
         with mock.patch("portfolio.trigger.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
@@ -353,7 +350,7 @@ class TestMarketHoursBoundary:
         sigs = _make_signals(["BTC-USD"], "HOLD")
         prices = {"BTC-USD": 69000}
 
-        fake_now = datetime(2026, 2, 16, 23, 0, 0, tzinfo=timezone.utc)
+        fake_now = datetime(2026, 2, 16, 23, 0, 0, tzinfo=UTC)
         with mock.patch("portfolio.trigger.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
@@ -373,7 +370,7 @@ class TestMarketHoursBoundary:
         prices = {"BTC-USD": 69000}
 
         # Saturday at 10:00 UTC
-        fake_now = datetime(2026, 2, 14, 10, 0, 0, tzinfo=timezone.utc)
+        fake_now = datetime(2026, 2, 14, 10, 0, 0, tzinfo=UTC)
         with mock.patch("portfolio.trigger.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)

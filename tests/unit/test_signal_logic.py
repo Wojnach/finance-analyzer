@@ -3,9 +3,6 @@ Unit tests for trading signal logic.
 Tests the trigger + guards entry model and sell signal generation.
 """
 
-import pytest
-import pandas as pd
-import numpy as np
 
 
 class TestBuySignals:

@@ -18,14 +18,14 @@ import logging
 import pandas as pd
 
 from portfolio.news_keywords import (
-    score_headline,
-    keyword_severity,
-    is_credible_source,
-    get_sector_impact,
     dissemination_score,
+    get_sector_impact,
+    is_credible_source,
+    keyword_severity,
+    score_headline,
 )
-from portfolio.signal_utils import majority_vote
 from portfolio.shared_state import _cached
+from portfolio.signal_utils import majority_vote
 
 logger = logging.getLogger("portfolio.signals.news_event")
 
@@ -50,7 +50,7 @@ def _fetch_headlines(ticker: str, config: dict) -> list[dict]:
     if not ticker:
         return []
     short = ticker.upper().replace("-USD", "")
-    from portfolio.sentiment import _is_crypto, _fetch_crypto_headlines, _fetch_stock_headlines
+    from portfolio.sentiment import _fetch_crypto_headlines, _fetch_stock_headlines, _is_crypto
 
     articles = []
     try:
@@ -240,9 +240,7 @@ def _source_weight_vote(headlines: list[dict]) -> tuple[str, dict]:
         sev = keyword_severity(h.get("title", ""))
         if sev != "normal":
             if any(kw in title for kw in ("beat", "upgrade", "approval", "approved",
-                                           "raise", "buyback", "split")):
-                credible_pos += 1
-            elif "rate cut" in title:
+                                           "raise", "buyback", "split")) or "rate cut" in title:
                 credible_pos += 1
             else:
                 credible_neg += 1

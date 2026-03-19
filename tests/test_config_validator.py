@@ -7,7 +7,6 @@ import pytest
 
 from portfolio.config_validator import validate_config, validate_config_file
 
-
 # --- validate_config (dict-based) ---
 
 

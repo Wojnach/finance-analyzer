@@ -6,7 +6,7 @@ import json
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -61,7 +61,8 @@ def load_json(path):
 
 
 def _atomic_write_json(path, data):
-    import os, tempfile
+    import os
+    import tempfile
 
     path.parent.mkdir(exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
@@ -108,7 +109,7 @@ def fmt_shares(v):
 def time_ago(iso_str):
     try:
         dt = datetime.fromisoformat(iso_str)
-        delta = datetime.now(timezone.utc) - dt
+        delta = datetime.now(UTC) - dt
         mins = int(delta.total_seconds() / 60)
         if mins < 1:
             return "just now"
@@ -294,7 +295,7 @@ def cmd_log(_args):
     age_trigger = file_age_minutes(TRIGGER_FILE)
     age_state = file_age_minutes(STATE_FILE)
 
-    print(f"Data ages:")
+    print("Data ages:")
     print(f"  agent_summary.json   {age_summary:5.1f}m")
     print(f"  trigger_state.json   {age_trigger:5.1f}m")
     print(f"  portfolio_state.json {age_state:5.1f}m")
@@ -304,7 +305,7 @@ def cmd_log(_args):
         trigger = load_json(TRIGGER_FILE)
         last_t = trigger.get("last_trigger_time", 0)
         if last_t:
-            dt = datetime.fromtimestamp(last_t, tz=timezone.utc)
+            dt = datetime.fromtimestamp(last_t, tz=UTC)
             print(
                 f"Last trigger: {dt.strftime('%m-%d %H:%M')} UTC"
                 f" ({time_ago(dt.isoformat())})"
@@ -395,7 +396,7 @@ def cmd_buy(args):
     state["total_fees_sek"] = round(state.get("total_fees_sek", 0) + fee, 2)
 
     trade = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "ticker": ticker,
         "action": "BUY",
         "shares": shares,
@@ -462,7 +463,7 @@ def cmd_sell(args):
     state["total_fees_sek"] = round(state.get("total_fees_sek", 0) + fee, 2)
 
     trade = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "ticker": ticker,
         "action": "SELL",
         "shares": sell_shares,

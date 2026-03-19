@@ -1,10 +1,9 @@
 """Tests for portfolio.autonomous — autonomous decision engine for main loop."""
 
 import json
-import os
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -257,7 +256,7 @@ class TestBuildReflection:
     def test_price_moved_as_expected(self):
         from portfolio.autonomous import _build_reflection
         prev = {
-            "ts": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
+            "ts": (datetime.now(UTC) - timedelta(hours=2)).isoformat(),
             "prices": {"BTC-USD": 65000, "ETH-USD": 1900},
             "tickers": {"BTC-USD": {"outlook": "bullish", "thesis": "uptrend"}},
         }
@@ -272,13 +271,13 @@ class TestBuildReflection:
 
     def test_no_prices_in_previous(self):
         from portfolio.autonomous import _build_reflection
-        prev = {"ts": datetime.now(timezone.utc).isoformat(), "tickers": {}}
+        prev = {"ts": datetime.now(UTC).isoformat(), "tickers": {}}
         assert _build_reflection(prev, {"BTC-USD": 67000}) == ""
 
     def test_bearish_thesis_price_dropped(self):
         from portfolio.autonomous import _build_reflection
         prev = {
-            "ts": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            "ts": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
             "prices": {"ETH-USD": 2000},
             "tickers": {"ETH-USD": {"outlook": "bearish", "thesis": "weak"}},
         }
@@ -512,10 +511,10 @@ class TestShouldSend:
             assert _should_send(predictions, reasons, tier=3) is True
 
     def test_routine_hold_throttled(self, tmp_path):
-        from portfolio.autonomous import _should_send, THROTTLE_FILE
+        from portfolio.autonomous import _should_send
         throttle_file = tmp_path / "throttle.json"
         # Write recent timestamp
-        recent = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        recent = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
         throttle_file.write_text(json.dumps({"last_send": recent}))
         predictions = {"BTC-USD": {"recommendation": "HOLD"}}
         reasons = ["sentiment shift"]
@@ -526,7 +525,7 @@ class TestShouldSend:
         from portfolio.autonomous import _should_send
         throttle_file = tmp_path / "throttle.json"
         # Write old timestamp
-        old = (datetime.now(timezone.utc) - timedelta(minutes=35)).isoformat()
+        old = (datetime.now(UTC) - timedelta(minutes=35)).isoformat()
         throttle_file.write_text(json.dumps({"last_send": old}))
         predictions = {"BTC-USD": {"recommendation": "HOLD"}}
         reasons = ["sentiment shift"]
@@ -689,7 +688,7 @@ class TestAutonomousDecision:
         from portfolio.autonomous import autonomous_decision
         # Write a previous journal entry
         prev = {
-            "ts": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            "ts": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
             "source": "autonomous",
             "trigger": "periodic",
             "regime": "range-bound",

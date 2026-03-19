@@ -19,13 +19,12 @@ Usage:
     prediction = predictor.predict_daily_range(morning, days)
 """
 
-import requests
 import statistics
-from datetime import datetime, timezone
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Optional
+from datetime import UTC, datetime
 
+import requests
 
 # === Constants ===
 BINANCE_FAPI_KLINES = "https://fapi.binance.com/fapi/v1/klines"
@@ -152,7 +151,7 @@ class ORBPredictor:
         """Parse Binance kline arrays into dicts."""
         parsed = []
         for k in raw_klines:
-            ts = datetime.fromtimestamp(k[0] / 1000, tz=timezone.utc)
+            ts = datetime.fromtimestamp(k[0] / 1000, tz=UTC)
             parsed.append({
                 "ts": ts,
                 "open": float(k[1]),
@@ -179,7 +178,7 @@ class ORBPredictor:
 
     # === Morning Range Calculation ===
 
-    def calculate_morning_range(self, day_candles: list[dict]) -> Optional[MorningRange]:
+    def calculate_morning_range(self, day_candles: list[dict]) -> MorningRange | None:
         """Calculate the morning range (9-11 CET / 08:00-10:00 UTC) for a single day.
 
         Returns None if insufficient data.
@@ -220,7 +219,7 @@ class ORBPredictor:
 
     # === Day Result Calculation ===
 
-    def calculate_day_result(self, day_candles: list[dict]) -> Optional[DayResult]:
+    def calculate_day_result(self, day_candles: list[dict]) -> DayResult | None:
         """Calculate the full day outcome for backtesting.
 
         Returns None if insufficient morning or day data.
@@ -291,7 +290,7 @@ class ORBPredictor:
         use_direction_filter: bool = True,
         use_range_filter: bool = False,
         min_sample: int = 5,
-    ) -> Optional[Prediction]:
+    ) -> Prediction | None:
         """Predict the day's high/low based on morning range and historical statistics.
 
         Uses percentile-based extensions from historical data.
@@ -373,7 +372,7 @@ class ORBPredictor:
         entry_price: float = 90.55,
         leverage: float = 4.76,
         position_sek: float = 150_000,
-        current_warrant_price: Optional[float] = None,
+        current_warrant_price: float | None = None,
     ) -> WarrantTarget:
         """Translate a silver price target to warrant P&L.
 

@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "data"))
@@ -99,7 +100,7 @@ class TestTradeGuards:
         assert len(cooldown_warns) > 0
 
     def test_cooldown_expires(self, tmp_path, monkeypatch):
-        from metals_risk import check_trade_guard, record_metals_trade, _load_guard_state, _save_guard_state
+        from metals_risk import _load_guard_state, _save_guard_state, check_trade_guard, record_metals_trade
 
         record_metals_trade("silver79", "BUY")
 
@@ -127,7 +128,7 @@ class TestTradeGuards:
         assert len(warnings) > 0
 
     def test_win_resets_losses(self, tmp_path):
-        from metals_risk import record_metals_trade, _load_guard_state
+        from metals_risk import _load_guard_state, record_metals_trade
 
         record_metals_trade("silver79", "SELL", pnl_pct_value=-2.0)
         record_metals_trade("silver79", "SELL", pnl_pct_value=-1.0)
@@ -138,7 +139,7 @@ class TestTradeGuards:
         assert losses == 0
 
     def test_session_limit(self, tmp_path):
-        from metals_risk import check_trade_guard, record_metals_trade, MAX_TRADES_PER_SESSION
+        from metals_risk import MAX_TRADES_PER_SESSION, check_trade_guard, record_metals_trade
 
         # Record max trades
         for i in range(MAX_TRADES_PER_SESSION):
@@ -188,7 +189,7 @@ class TestDrawdown:
         assert isinstance(result, dict)
 
     def test_warning_level(self, tmp_path):
-        from metals_risk import check_portfolio_drawdown, HISTORY_FILE
+        from metals_risk import HISTORY_FILE, check_portfolio_drawdown
 
         # Create history showing a peak, then decline
         peak_entry = {"ts": "2026-03-01T10:00:00", "total_value": 100000}
@@ -221,7 +222,7 @@ class TestDrawdown:
 
 class TestLogPortfolioValue:
     def test_writes_to_history(self, tmp_path):
-        from metals_risk import log_portfolio_value, HISTORY_FILE
+        from metals_risk import HISTORY_FILE, log_portfolio_value
 
         positions = {"silver79": {"active": True, "units": 100, "entry": 40.0}}
         prices = {"silver79": {"bid": 42.0}}

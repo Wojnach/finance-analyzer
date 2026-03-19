@@ -13,11 +13,11 @@ Uses economic calendar dates from econ_dates.py and FOMC dates from fomc_dates.p
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
-from portfolio.econ_dates import next_event, events_within_hours, EVENT_SECTOR_MAP
+from portfolio.econ_dates import EVENT_SECTOR_MAP, events_within_hours, next_event
 from portfolio.news_keywords import TICKER_SECTORS
 from portfolio.signal_utils import majority_vote
 
@@ -32,8 +32,8 @@ def _get_current_date(df: pd.DataFrame) -> datetime:
     if df is not None and "time" in df.columns and len(df) > 0:
         last_time = df["time"].iloc[-1]
         if isinstance(last_time, pd.Timestamp):
-            return last_time.to_pydatetime().replace(tzinfo=timezone.utc)
-    return datetime.now(timezone.utc)
+            return last_time.to_pydatetime().replace(tzinfo=UTC)
+    return datetime.now(UTC)
 
 
 def _event_proximity(ref_date) -> tuple[str, dict]:

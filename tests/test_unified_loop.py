@@ -7,8 +7,9 @@ import json
 import os
 import sys
 import time
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "data"))
 
@@ -42,7 +43,7 @@ class TestMetalsLLMExtensions:
 
     @patch("metals_llm.requests.get")
     def test_fetch_klines_crypto_uses_spot(self, mock_get):
-        from metals_llm import _fetch_fapi_klines, SPOT_KLINES_BASE
+        from metals_llm import _fetch_fapi_klines
         mock_get.return_value = MagicMock(
             status_code=200,
             json=lambda: [[0, "100", "110", "90", "105", "1000", 0, "0", 0, "0", "0", "0"]],
@@ -57,7 +58,7 @@ class TestMetalsLLMExtensions:
 
     @patch("metals_llm.requests.get")
     def test_fetch_klines_metals_uses_fapi(self, mock_get):
-        from metals_llm import _fetch_fapi_klines, FAPI_BASE
+        from metals_llm import _fetch_fapi_klines
         mock_get.return_value = MagicMock(
             status_code=200,
             json=lambda: [[0, "33", "34", "32", "33.5", "500", 0, "0", 0, "0", "0", "0"]],
@@ -349,7 +350,7 @@ class TestSignalTrackerCrypto:
         yield
 
     def test_log_snapshot_records_crypto_signals(self):
-        from metals_signal_tracker import log_snapshot, SIGNAL_LOG
+        from metals_signal_tracker import SIGNAL_LOG, log_snapshot
         signal_data = {
             "BTC-USD": {
                 "action": "SELL", "confidence": 0.6, "weighted_confidence": 0.5,
@@ -360,7 +361,7 @@ class TestSignalTrackerCrypto:
         }
         log_snapshot(1, {}, {}, signal_data, {}, False, [])
 
-        with open(SIGNAL_LOG, "r") as f:
+        with open(SIGNAL_LOG) as f:
             entry = json.loads(f.readline())
         assert "BTC-USD" in entry["signals"]
         assert entry["signals"]["BTC-USD"]["action"] == "SELL"
@@ -368,11 +369,12 @@ class TestSignalTrackerCrypto:
         assert entry["prices"]["BTC-USD"] == 67200
 
     def test_resolve_outcome_handles_crypto(self):
-        from metals_signal_tracker import _resolve_outcome
         import datetime
+
+        from metals_signal_tracker import _resolve_outcome
         now = time.time()
         entry = {
-            "ts": datetime.datetime.fromtimestamp(now - 4000, tz=datetime.timezone.utc).isoformat(),
+            "ts": datetime.datetime.fromtimestamp(now - 4000, tz=datetime.UTC).isoformat(),
             "prices": {"BTC-USD": 67000, "XAG-USD": 33.0},
             "signals": {
                 "BTC-USD": {"action": "BUY"},
@@ -388,6 +390,7 @@ class TestSignalTrackerCrypto:
 
 def test_safe_print_fallback_on_unicode_encode_error(monkeypatch):
     import builtins
+
     import metals_loop as ml
 
     calls = {"n": 0, "msgs": []}

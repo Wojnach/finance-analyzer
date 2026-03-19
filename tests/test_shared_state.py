@@ -1,14 +1,12 @@
 """Tests for portfolio/shared_state.py — caching, eviction, rate limiting."""
 
-import time
 import threading
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from portfolio import shared_state
 from portfolio.shared_state import _cached, _RateLimiter
-
 
 # ---------------------------------------------------------------------------
 # Helpers

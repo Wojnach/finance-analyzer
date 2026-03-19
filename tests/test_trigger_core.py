@@ -23,22 +23,18 @@ Uses tmp_path to isolate state files; never touches real data.
 
 import json
 import time
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 from unittest import mock
 
 import pytest
 
 import portfolio.trigger as trigger_mod
 from portfolio.trigger import (
-    PRICE_THRESHOLD,
-    FG_THRESHOLDS,
     SUSTAINED_CHECKS,
     check_triggers,
     classify_tier,
     update_tier_state,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -69,7 +65,7 @@ def isolate_state_files(tmp_path, monkeypatch):
 @pytest.fixture
 def market_hours_context():
     """Mock datetime.now() to be during market hours (Tuesday 12:00 UTC)."""
-    fake_now = datetime(2026, 2, 17, 12, 0, 0, tzinfo=timezone.utc)  # Tuesday
+    fake_now = datetime(2026, 2, 17, 12, 0, 0, tzinfo=UTC)  # Tuesday
 
     def _patch():
         m = mock.patch("portfolio.trigger.datetime")
@@ -85,7 +81,7 @@ def market_hours_context():
 @pytest.fixture
 def offhours_context():
     """Mock datetime.now() to be during off-hours (Saturday 03:00 UTC)."""
-    fake_now = datetime(2026, 2, 14, 3, 0, 0, tzinfo=timezone.utc)  # Saturday
+    fake_now = datetime(2026, 2, 14, 3, 0, 0, tzinfo=UTC)  # Saturday
 
     def _patch():
         m = mock.patch("portfolio.trigger.datetime")

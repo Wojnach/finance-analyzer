@@ -5,8 +5,9 @@ Batch 5 of the metals monitoring auto-improvement plan.
 import json
 import os
 import sys
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "data"))
 

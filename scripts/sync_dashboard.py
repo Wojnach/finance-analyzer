@@ -15,11 +15,10 @@ import argparse
 import hashlib
 import json
 import logging
-import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 try:
@@ -164,7 +163,7 @@ def _fetch_all():
 
     # Write sync metadata (always updated)
     meta = {
-        "synced_at": datetime.now(timezone.utc).isoformat(),
+        "synced_at": datetime.now(UTC).isoformat(),
         "endpoints_ok": ok_count,
         "endpoints_failed": fail_count,
         "endpoints_changed": changed_count,
@@ -208,7 +207,7 @@ def _git_sync():
         return True
 
     # 3. Commit locally
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     result = _run(["git", "commit", "-m", f"sync: dashboard data {ts}"])
     if result.returncode != 0:
         log.error("git commit failed: %s", result.stderr.strip())

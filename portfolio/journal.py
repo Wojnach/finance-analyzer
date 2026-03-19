@@ -1,7 +1,7 @@
 import json
 import re
 from collections import defaultdict
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from portfolio.file_utils import load_json
@@ -20,7 +20,7 @@ TIER_COMPACT = 4
 def load_recent(max_entries=10, max_age_hours=8):
     if not JOURNAL_FILE.exists():
         return []
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+    cutoff = datetime.now(UTC) - timedelta(hours=max_age_hours)
     entries = []
     with open(JOURNAL_FILE, encoding="utf-8") as f:
         for line in f:
@@ -66,7 +66,7 @@ def _fmt_time_range(ts_start, ts_end):
 
 def _entry_age_hours(entry, now=None):
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     ts = datetime.fromisoformat(entry["ts"])
     return (now - ts).total_seconds() / 3600
 
@@ -278,7 +278,7 @@ def build_context(entries, portfolio_data=None, now=None):
         return "## Your Memory\n\nNo previous invocations. Fresh start.\n"
 
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
     lines = []
 

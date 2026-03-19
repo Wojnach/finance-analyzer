@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from portfolio.accuracy_stats import accuracy_by_signal_ticker
@@ -7,7 +7,7 @@ from portfolio.signals.forecast import _gate_subsignal_votes_by_accuracy
 
 
 def _now():
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class TestAccuracyBySignalTicker:

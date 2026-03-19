@@ -12,7 +12,7 @@ No trade execution — decisions are logged as recommendations only.
 
 import logging
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.file_utils import atomic_append_jsonl, load_json, load_jsonl
@@ -24,7 +24,7 @@ from portfolio.notification_text import (
     format_vote_summary,
     humanize_ticker,
 )
-from portfolio.portfolio_mgr import portfolio_value, load_bold_state
+from portfolio.portfolio_mgr import load_bold_state, portfolio_value
 from portfolio.telegram_notifications import escape_markdown_v1
 
 logger = logging.getLogger("portfolio.autonomous")
@@ -91,7 +91,7 @@ def autonomous_decision(config, signals, prices_usd, fx_rate, state,
 
 def _autonomous_decision_inner(config, signals, prices_usd, fx_rate, state,
                                reasons, tf_data, tier, triggered_tickers):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Load bold state
     bold_state = _load_bold_state_safe()
@@ -801,7 +801,7 @@ def _should_send(predictions, reasons, tier):
     if last_send:
         try:
             last_dt = datetime.fromisoformat(last_send)
-            age = (datetime.now(timezone.utc) - last_dt).total_seconds()
+            age = (datetime.now(UTC) - last_dt).total_seconds()
             if age < _HOLD_COOLDOWN_SECONDS:
                 return False
         except (ValueError, TypeError):
@@ -811,7 +811,7 @@ def _should_send(predictions, reasons, tier):
 
 def _update_throttle():
     """Update throttle timestamp."""
-    data = {"last_send": datetime.now(timezone.utc).isoformat()}
+    data = {"last_send": datetime.now(UTC).isoformat()}
     try:
         from portfolio.file_utils import atomic_write_json
         atomic_write_json(THROTTLE_FILE, data)

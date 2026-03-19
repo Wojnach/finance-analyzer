@@ -4,11 +4,9 @@ Each test triggers a code path that previously had `except Exception: pass` and
 verifies that the fix now produces a log message instead of silently swallowing errors.
 """
 
-import json
 import logging
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-
+from unittest.mock import MagicMock, patch
 
 # --- BUG-61: autonomous.py compact summary load ---
 
@@ -187,8 +185,9 @@ def test_forecast_logs_health_failure(monkeypatch, caplog):
 
 def test_main_post_cycle_uses_data_dir_constant():
     """main.py:161 — _run_post_cycle should use DATA_DIR constant, not re-derive."""
-    import portfolio.main as mmod
     import inspect
+
+    import portfolio.main as mmod
 
     source = inspect.getsource(mmod._run_post_cycle)
     assert "Path(__file__)" not in source, \
@@ -201,8 +200,9 @@ def test_main_post_cycle_uses_data_dir_constant():
 
 def test_main_run_no_redundant_time_import():
     """main.py — run() should not have `import time` since it's module-level."""
-    import portfolio.main as mmod
     import inspect
+
+    import portfolio.main as mmod
 
     source = inspect.getsource(mmod.run)
     assert "import time" not in source, \

@@ -18,16 +18,16 @@ Usage from metals_loop.py:
     summary = get_accuracy_summary()  # "main_XAG:72%(18) chrono_XAG_1h:55%(11)"
 """
 
+import datetime
 import json
 import os
 import sys
-import time
-import datetime
 import threading
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from portfolio.file_utils import atomic_write_json, load_json, atomic_append_jsonl
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
 
 SIGNAL_LOG = "data/metals_signal_log.jsonl"
 OUTCOMES_LOG = "data/metals_signal_outcomes.jsonl"
@@ -64,7 +64,7 @@ def log_snapshot(check_count, prices, positions, signal_data, llm_signals,
         trigger_reasons: list of trigger reason strings
         llm_accuracy: dict from get_llm_accuracy() — optional
     """
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
 
     entry = {
         "ts": now.isoformat(),
@@ -187,7 +187,7 @@ def _load_resolved_keys():
     if not os.path.exists(OUTCOMES_LOG):
         return resolved
     try:
-        with open(OUTCOMES_LOG, "r", encoding="utf-8") as f:
+        with open(OUTCOMES_LOG, encoding="utf-8") as f:
             for line in f:
                 try:
                     entry = json.loads(line.strip())
@@ -225,10 +225,7 @@ def _resolve_outcome(entry, h_key, current_underlying_prices, now):
         pred_price = entry_prices.get(ticker, 0)
         if pred_price <= 0:
             for pk, pv in entry_prices.items():
-                if pk.endswith("_und") and ticker.lower().startswith("xag") and "silver" in pk:
-                    pred_price = pv
-                    break
-                elif pk.endswith("_und") and ticker.lower().startswith("xau") and "gold" in pk:
+                if pk.endswith("_und") and ticker.lower().startswith("xag") and "silver" in pk or pk.endswith("_und") and ticker.lower().startswith("xau") and "gold" in pk:
                     pred_price = pv
                     break
 
@@ -340,7 +337,7 @@ def backfill_outcomes(current_underlying_prices):
 
         # Read recent signal log entries (capped for performance)
         entries = []
-        with open(SIGNAL_LOG, "r", encoding="utf-8") as f:
+        with open(SIGNAL_LOG, encoding="utf-8") as f:
             lines = f.readlines()
 
         start_idx = max(0, len(lines) - BACKFILL_SCAN_LIMIT)
@@ -372,7 +369,7 @@ def backfill_outcomes(current_underlying_prices):
                     outcome_entry = {
                         "snapshot_ts": snapshot_ts,
                         "horizon": h_key,
-                        "resolved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "resolved_at": datetime.datetime.now(datetime.UTC).isoformat(),
                         "outcomes": outcomes,
                     }
                     new_outcomes.append(outcome_entry)
@@ -419,7 +416,7 @@ def _recompute_accuracy_from_outcomes():
         if not os.path.exists(OUTCOMES_LOG):
             return
 
-        with open(OUTCOMES_LOG, "r", encoding="utf-8") as f:
+        with open(OUTCOMES_LOG, encoding="utf-8") as f:
             for line in f:
                 try:
                     record = json.loads(line.strip())
@@ -550,7 +547,7 @@ def _recompute_accuracy_from_outcomes():
 
     try:
         atomic_write_json(ACCURACY_CACHE_FILE, {
-            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "ts": datetime.datetime.now(datetime.UTC).isoformat(),
             "resolved_snapshots": resolved_count,
             "stats": result,
         })
@@ -660,7 +657,7 @@ def get_snapshot_count():
     try:
         if not os.path.exists(SIGNAL_LOG):
             return 0
-        with open(SIGNAL_LOG, "r", encoding="utf-8") as f:
+        with open(SIGNAL_LOG, encoding="utf-8") as f:
             return sum(1 for _ in f)
     except Exception as e:
         print(f"[TRACKER] snapshot count error: {e}", flush=True)

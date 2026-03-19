@@ -19,7 +19,7 @@ def _load_config():
     cfg_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
     if not os.path.exists(cfg_path):
         cfg_path = "config.json"
-    with open(cfg_path, "r", encoding="utf-8") as f:
+    with open(cfg_path, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -81,7 +81,7 @@ def get_cet_time():
         return h + m / 60, f"{h:02d}:{m:02d} CET", "zoneinfo"
     except ImportError:
         # Last resort: UTC+1 (wrong during summer DST)
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         h = (now.hour + 1) % 24
         m = now.minute
         return h + m / 60, f"{h:02d}:{m:02d} CET", "system_utc+1"
@@ -101,7 +101,7 @@ def cet_time_str():
 
 def is_market_hours():
     """Check if Avanza commodity warrant market is open (Mon-Fri 08:15-21:55 CET)."""
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     weekday = now.weekday()
     h = cet_hour()
     return weekday < 5 and 8.25 <= h <= 21.92

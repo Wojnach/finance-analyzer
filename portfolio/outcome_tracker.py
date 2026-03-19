@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from portfolio.api_utils import BINANCE_BASE, BINANCE_FAPI_BASE
@@ -13,10 +13,10 @@ SIGNAL_LOG = DATA_DIR / "signal_log.jsonl"
 
 HORIZONS = {"3h": 10800, "1d": 86400, "3d": 259200, "5d": 432000, "10d": 864000}
 from portfolio.tickers import (
-    BINANCE_SPOT_MAP,
     BINANCE_FAPI_MAP,
-    YF_MAP,
+    BINANCE_SPOT_MAP,
     SIGNAL_NAMES,
+    YF_MAP,
 )
 
 
@@ -97,7 +97,7 @@ def _derive_signal_vote(name, indicators, extra):
 
 
 def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
-    ts = datetime.now(timezone.utc).isoformat()
+    ts = datetime.now(UTC).isoformat()
     tickers = {}
 
     for ticker, sig_data in signals_dict.items():
@@ -236,7 +236,7 @@ def _fetch_historical_price(ticker, target_ts):
         import yfinance as yf
 
         _yfinance_limiter.wait()
-        target_dt = datetime.fromtimestamp(target_ts, tz=timezone.utc)
+        target_dt = datetime.fromtimestamp(target_ts, tz=UTC)
         start_date = (target_dt - timedelta(days=5)).strftime("%Y-%m-%d")
         end_date = (target_dt + timedelta(days=1)).strftime("%Y-%m-%d")
         t = yf.Ticker(YF_MAP[ticker])
@@ -279,7 +279,7 @@ def backfill_outcomes(max_entries=2000):
     else:
         head_entries = []
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     now_ts = now.timestamp()
     price_cache = {}
     updated = 0
@@ -349,7 +349,7 @@ def backfill_outcomes(max_entries=2000):
                     )
 
                 outcome_ts_str = datetime.fromtimestamp(
-                    target_ts, tz=timezone.utc
+                    target_ts, tz=UTC
                 ).isoformat()
                 outcomes[ticker][h_key] = {
                     "price_usd": round(hist_price, 2),
@@ -380,7 +380,8 @@ def backfill_outcomes(max_entries=2000):
             import logging as _logging
             _logging.getLogger("portfolio.outcome_tracker").debug("SignalDB close failed: %s", e)
 
-    import os, tempfile
+    import os
+    import tempfile
 
     fd, tmp = tempfile.mkstemp(dir=SIGNAL_LOG.parent, suffix=".tmp")
     try:

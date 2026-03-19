@@ -5,7 +5,7 @@ Batch 5 of the metals monitoring auto-improvement plan.
 import json
 import os
 import sys
-import threading
+
 import pytest
 
 # Ensure data/ is importable
@@ -32,7 +32,7 @@ def _isolate_files(tmp_path, monkeypatch):
 
 class TestLogSnapshot:
     def test_basic_snapshot(self, tmp_path):
-        from metals_signal_tracker import log_snapshot, SIGNAL_LOG
+        from metals_signal_tracker import SIGNAL_LOG, log_snapshot
 
         log_snapshot(
             check_count=1,
@@ -43,7 +43,7 @@ class TestLogSnapshot:
             triggered=True,
             trigger_reasons=["price_move"],
         )
-        with open(SIGNAL_LOG, "r") as f:
+        with open(SIGNAL_LOG) as f:
             lines = f.readlines()
         assert len(lines) == 1
         entry = json.loads(lines[0])
@@ -52,7 +52,7 @@ class TestLogSnapshot:
         assert "XAG-USD" in entry.get("prices", {}) or "silver79" in entry.get("prices", {})
 
     def test_silver_gold_price_mapping(self, tmp_path):
-        from metals_signal_tracker import log_snapshot, SIGNAL_LOG
+        from metals_signal_tracker import SIGNAL_LOG, log_snapshot
 
         log_snapshot(
             check_count=2,
@@ -66,13 +66,13 @@ class TestLogSnapshot:
             triggered=False,
             trigger_reasons=[],
         )
-        with open(SIGNAL_LOG, "r") as f:
+        with open(SIGNAL_LOG) as f:
             entry = json.loads(f.readline())
         # Should map to XAG-USD and XAU-USD
         assert "XAG-USD" in entry.get("prices", entry.get("underlying_prices", {}))
 
     def test_with_signal_data(self, tmp_path):
-        from metals_signal_tracker import log_snapshot, SIGNAL_LOG
+        from metals_signal_tracker import SIGNAL_LOG, log_snapshot
 
         signal_data = {
             "XAG-USD": {
@@ -96,12 +96,12 @@ class TestLogSnapshot:
             triggered=True,
             trigger_reasons=["consensus"],
         )
-        with open(SIGNAL_LOG, "r") as f:
+        with open(SIGNAL_LOG) as f:
             entry = json.loads(f.readline())
         assert "signals" in entry or "signal_data" in entry
 
     def test_with_llm_signals(self, tmp_path):
-        from metals_signal_tracker import log_snapshot, SIGNAL_LOG
+        from metals_signal_tracker import SIGNAL_LOG, log_snapshot
 
         llm = {"XAG-USD": {"direction": "BUY", "confidence": 0.8}}
         log_snapshot(
@@ -113,12 +113,12 @@ class TestLogSnapshot:
             triggered=False,
             trigger_reasons=[],
         )
-        with open(SIGNAL_LOG, "r") as f:
+        with open(SIGNAL_LOG) as f:
             entry = json.loads(f.readline())
         assert "llm" in entry or "llm_signals" in entry
 
     def test_with_positions(self, tmp_path):
-        from metals_signal_tracker import log_snapshot, SIGNAL_LOG
+        from metals_signal_tracker import SIGNAL_LOG, log_snapshot
 
         log_snapshot(
             check_count=5,
@@ -129,12 +129,12 @@ class TestLogSnapshot:
             triggered=False,
             trigger_reasons=[],
         )
-        with open(SIGNAL_LOG, "r") as f:
+        with open(SIGNAL_LOG) as f:
             entry = json.loads(f.readline())
         assert "positions" in entry or "pos" in entry
 
     def test_trigger_reasons_recorded(self, tmp_path):
-        from metals_signal_tracker import log_snapshot, SIGNAL_LOG
+        from metals_signal_tracker import SIGNAL_LOG, log_snapshot
 
         log_snapshot(
             check_count=6,
@@ -145,13 +145,13 @@ class TestLogSnapshot:
             triggered=True,
             trigger_reasons=["price_move", "consensus"],
         )
-        with open(SIGNAL_LOG, "r") as f:
+        with open(SIGNAL_LOG) as f:
             entry = json.loads(f.readline())
         reasons = entry.get("trigger_reasons", entry.get("triggers", []))
         assert len(reasons) >= 1
 
     def test_multiple_snapshots_append(self, tmp_path):
-        from metals_signal_tracker import log_snapshot, SIGNAL_LOG
+        from metals_signal_tracker import SIGNAL_LOG, log_snapshot
 
         for i in range(3):
             log_snapshot(
@@ -163,7 +163,7 @@ class TestLogSnapshot:
                 triggered=False,
                 trigger_reasons=[],
             )
-        with open(SIGNAL_LOG, "r") as f:
+        with open(SIGNAL_LOG) as f:
             lines = f.readlines()
         assert len(lines) == 3
 
@@ -174,72 +174,78 @@ class TestLogSnapshot:
 
 class TestResolveOutcome:
     def test_direction_up(self):
-        from metals_signal_tracker import _resolve_outcome
         import datetime
+
+        from metals_signal_tracker import _resolve_outcome
 
         entry = {
             "ts": "2026-03-01T10:00:00+00:00",
             "prices": {"XAG-USD": 30.0},
         }
-        now = datetime.datetime(2026, 3, 1, 14, 0, 0, tzinfo=datetime.timezone.utc).timestamp()
+        now = datetime.datetime(2026, 3, 1, 14, 0, 0, tzinfo=datetime.UTC).timestamp()
         result = _resolve_outcome(entry, "1h", {"XAG-USD": 31.0}, now)
         assert result is not None
         assert "XAG-USD" in result
         assert result["XAG-USD"]["actual_dir"] == "up"
 
     def test_direction_down(self):
-        from metals_signal_tracker import _resolve_outcome
         import datetime
+
+        from metals_signal_tracker import _resolve_outcome
 
         entry = {
             "ts": "2026-03-01T10:00:00+00:00",
             "prices": {"XAG-USD": 30.0},
         }
-        now = datetime.datetime(2026, 3, 1, 14, 0, 0, tzinfo=datetime.timezone.utc).timestamp()
+        now = datetime.datetime(2026, 3, 1, 14, 0, 0, tzinfo=datetime.UTC).timestamp()
         result = _resolve_outcome(entry, "1h", {"XAG-USD": 29.0}, now)
         assert result is not None
         assert result["XAG-USD"]["actual_dir"] == "down"
 
     def test_too_early(self):
-        from metals_signal_tracker import _resolve_outcome
         import datetime
+
+        from metals_signal_tracker import _resolve_outcome
 
         entry = {
             "ts": "2026-03-01T10:00:00+00:00",
             "prices": {"XAG-USD": 30.0},
         }
         # Only 30 min later — too early for 1h horizon
-        now = datetime.datetime(2026, 3, 1, 10, 30, 0, tzinfo=datetime.timezone.utc).timestamp()
+        now = datetime.datetime(2026, 3, 1, 10, 30, 0, tzinfo=datetime.UTC).timestamp()
         result = _resolve_outcome(entry, "1h", {"XAG-USD": 31.0}, now)
         assert result is None
 
     def test_no_prices_in_entry(self):
-        from metals_signal_tracker import _resolve_outcome
         import datetime
+
+        from metals_signal_tracker import _resolve_outcome
 
         entry = {
             "ts": "2026-03-01T10:00:00+00:00",
             "prices": {},
         }
-        now = datetime.datetime(2026, 3, 1, 14, 0, 0, tzinfo=datetime.timezone.utc).timestamp()
+        now = datetime.datetime(2026, 3, 1, 14, 0, 0, tzinfo=datetime.UTC).timestamp()
         result = _resolve_outcome(entry, "1h", {"XAG-USD": 31.0}, now)
         assert result is None
 
     def test_no_current_prices(self):
-        from metals_signal_tracker import _resolve_outcome
         import datetime
+
+        from metals_signal_tracker import _resolve_outcome
 
         entry = {
             "ts": "2026-03-01T10:00:00+00:00",
             "prices": {"XAG-USD": 30.0},
         }
-        now = datetime.datetime(2026, 3, 1, 14, 0, 0, tzinfo=datetime.timezone.utc).timestamp()
+        now = datetime.datetime(2026, 3, 1, 14, 0, 0, tzinfo=datetime.UTC).timestamp()
         result = _resolve_outcome(entry, "1h", {}, now)
         assert result is None
 
     def test_confidence_and_brier_fields_present(self):
-        from metals_signal_tracker import _resolve_outcome
         import datetime
+
+        from metals_signal_tracker import _resolve_outcome
 
         entry = {
             "ts": "2026-03-01T10:00:00+00:00",
@@ -256,7 +262,7 @@ class TestResolveOutcome:
                 }
             },
         }
-        now = datetime.datetime(2026, 3, 1, 14, 0, 0, tzinfo=datetime.timezone.utc).timestamp()
+        now = datetime.datetime(2026, 3, 1, 14, 0, 0, tzinfo=datetime.UTC).timestamp()
         result = _resolve_outcome(entry, "1h", {"XAG-USD": 31.0}, now)
         out = result["XAG-USD"]
         assert "llm_conf" in out and "llm_brier" in out
@@ -270,8 +276,8 @@ class TestResolveOutcome:
 
 class TestBackfillOutcomes:
     def test_writes_to_outcomes_file(self, tmp_path):
-        from metals_signal_tracker import backfill_outcomes, SIGNAL_LOG, OUTCOMES_LOG
-        import datetime
+
+        from metals_signal_tracker import OUTCOMES_LOG, SIGNAL_LOG, backfill_outcomes
 
         # Create an old snapshot
         ts = "2026-03-01T10:00:00+00:00"
@@ -287,13 +293,13 @@ class TestBackfillOutcomes:
         backfill_outcomes({"XAG-USD": 31.0})
 
         if os.path.exists(OUTCOMES_LOG):
-            with open(OUTCOMES_LOG, "r") as f:
+            with open(OUTCOMES_LOG) as f:
                 lines = f.readlines()
             assert len(lines) >= 0  # May be 0 if too recent
 
     def test_dedup_resolved(self, tmp_path):
-        from metals_signal_tracker import backfill_outcomes, SIGNAL_LOG, OUTCOMES_LOG
-        import datetime
+
+        from metals_signal_tracker import OUTCOMES_LOG, SIGNAL_LOG, backfill_outcomes
 
         ts = "2026-03-01T10:00:00+00:00"
         entry = {
@@ -310,7 +316,7 @@ class TestBackfillOutcomes:
         backfill_outcomes({"XAG-USD": 31.5})
 
         if os.path.exists(OUTCOMES_LOG):
-            with open(OUTCOMES_LOG, "r") as f:
+            with open(OUTCOMES_LOG) as f:
                 lines = f.readlines()
             # Each (ts, horizon) pair should appear at most once
             keys = set()
@@ -321,7 +327,7 @@ class TestBackfillOutcomes:
                 keys.add(key)
 
     def test_signal_log_not_rewritten(self, tmp_path):
-        from metals_signal_tracker import backfill_outcomes, SIGNAL_LOG
+        from metals_signal_tracker import SIGNAL_LOG, backfill_outcomes
 
         ts = "2026-03-01T10:00:00+00:00"
         original = json.dumps({"ts": ts, "prices": {"XAG-USD": 30.0}, "signals": {}})
@@ -330,7 +336,7 @@ class TestBackfillOutcomes:
 
         backfill_outcomes({"XAG-USD": 31.0})
 
-        with open(SIGNAL_LOG, "r") as f:
+        with open(SIGNAL_LOG) as f:
             content = f.read().strip()
         assert content == original  # Signal log should be append-only, not rewritten
 
@@ -434,12 +440,12 @@ class TestAccuracy:
         mod._recompute_accuracy_from_outcomes()
 
         assert os.path.exists(mod.ACCURACY_CACHE_FILE)
-        with open(mod.ACCURACY_CACHE_FILE, "r") as f:
+        with open(mod.ACCURACY_CACHE_FILE) as f:
             cache = json.load(f)
         assert isinstance(cache, dict)
 
     def test_get_report_from_cache(self, tmp_path):
-        from metals_signal_tracker import get_accuracy_report, ACCURACY_CACHE_FILE
+        from metals_signal_tracker import ACCURACY_CACHE_FILE, get_accuracy_report
 
         cache_data = {
             "rsi_1h_XAG-USD": {"correct": 7, "total": 10, "accuracy": 0.7},
@@ -451,7 +457,7 @@ class TestAccuracy:
         assert isinstance(report, dict)
 
     def test_get_summary_string(self, tmp_path):
-        from metals_signal_tracker import get_accuracy_summary, ACCURACY_CACHE_FILE
+        from metals_signal_tracker import ACCURACY_CACHE_FILE, get_accuracy_summary
 
         cache_data = {
             "rsi_1h_XAG-USD": {"correct": 7, "total": 10, "accuracy": 0.7},
@@ -469,7 +475,7 @@ class TestAccuracy:
         assert isinstance(summary, str)
 
     def test_get_for_context_structured(self, tmp_path):
-        from metals_signal_tracker import get_accuracy_for_context, ACCURACY_CACHE_FILE
+        from metals_signal_tracker import ACCURACY_CACHE_FILE, get_accuracy_for_context
 
         cache_data = {
             "rsi_1h_XAG-USD": {"correct": 7, "total": 10, "accuracy": 0.7},
@@ -492,7 +498,7 @@ class TestAccuracy:
 
 class TestSnapshotCount:
     def test_count_lines(self, tmp_path):
-        from metals_signal_tracker import get_snapshot_count, SIGNAL_LOG
+        from metals_signal_tracker import SIGNAL_LOG, get_snapshot_count
 
         with open(SIGNAL_LOG, "w") as f:
             for i in range(5):

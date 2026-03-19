@@ -6,22 +6,18 @@ print_forecast_accuracy_report, _lookup_price_at_time, _write_predictions.
 """
 
 import json
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-
-import pytest
+from datetime import UTC, datetime, timedelta
 
 from portfolio.forecast_accuracy import (
-    load_predictions,
-    load_health_stats,
-    compute_forecast_accuracy,
-    backfill_forecast_outcomes,
-    get_forecast_accuracy_summary,
-    print_forecast_accuracy_report,
     _lookup_price_at_time,
     _write_predictions,
+    backfill_forecast_outcomes,
+    compute_forecast_accuracy,
+    get_forecast_accuracy_summary,
+    load_health_stats,
+    load_predictions,
+    print_forecast_accuracy_report,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -35,11 +31,11 @@ def _write_jsonl(path, entries):
 
 
 def _now_iso():
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _ago(hours=0, days=0):
-    return (datetime.now(timezone.utc) - timedelta(hours=hours, days=days)).isoformat()
+    return (datetime.now(UTC) - timedelta(hours=hours, days=days)).isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -364,18 +360,18 @@ class TestComputeForecastAccuracy:
 class TestLookupPriceAtTime:
     def test_missing_file(self, tmp_path):
         path = tmp_path / "missing.jsonl"
-        target = datetime.now(timezone.utc)
+        target = datetime.now(UTC)
         assert _lookup_price_at_time("BTC-USD", target, snapshot_file=path) is None
 
     def test_empty_file(self, tmp_path):
         path = tmp_path / "snaps.jsonl"
         path.write_text("", encoding="utf-8")
-        target = datetime.now(timezone.utc)
+        target = datetime.now(UTC)
         assert _lookup_price_at_time("BTC-USD", target, snapshot_file=path) is None
 
     def test_exact_match(self, tmp_path):
         path = tmp_path / "snaps.jsonl"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         snap = {"ts": now.isoformat(), "prices": {"BTC-USD": 67500.0}}
         _write_jsonl(path, [snap])
         result = _lookup_price_at_time("BTC-USD", now, snapshot_file=path)
@@ -383,7 +379,7 @@ class TestLookupPriceAtTime:
 
     def test_closest_within_tolerance(self, tmp_path):
         path = tmp_path / "snaps.jsonl"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # Snapshot 30 minutes before target
         snap_time = now - timedelta(minutes=30)
         snap = {"ts": snap_time.isoformat(), "prices": {"BTC-USD": 68000.0}}
@@ -393,7 +389,7 @@ class TestLookupPriceAtTime:
 
     def test_outside_tolerance(self, tmp_path):
         path = tmp_path / "snaps.jsonl"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # Snapshot 3 hours before target (exceeds 2h tolerance)
         snap_time = now - timedelta(hours=3)
         snap = {"ts": snap_time.isoformat(), "prices": {"BTC-USD": 68000.0}}
@@ -403,7 +399,7 @@ class TestLookupPriceAtTime:
 
     def test_ticker_not_in_snapshot(self, tmp_path):
         path = tmp_path / "snaps.jsonl"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         snap = {"ts": now.isoformat(), "prices": {"ETH-USD": 2000.0}}
         _write_jsonl(path, [snap])
         result = _lookup_price_at_time("BTC-USD", now, snapshot_file=path)
@@ -412,7 +408,7 @@ class TestLookupPriceAtTime:
     def test_picks_closest(self, tmp_path):
         """When multiple snapshots exist, pick the closest to target time."""
         path = tmp_path / "snaps.jsonl"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         snaps = [
             {"ts": (now - timedelta(hours=1, minutes=30)).isoformat(),
              "prices": {"BTC-USD": 66000.0}},
@@ -427,7 +423,7 @@ class TestLookupPriceAtTime:
 
     def test_invalid_json_skipped(self, tmp_path):
         path = tmp_path / "snaps.jsonl"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         path.write_text(
             'not json\n'
             f'{{"ts": "{now.isoformat()}", "prices": {{"BTC-USD": 67000.0}}}}\n',
@@ -494,7 +490,7 @@ class TestBackfillForecastOutcomes:
         pred_path = tmp_path / "pred.jsonl"
         snap_path = tmp_path / "price_snapshots_hourly.jsonl"
 
-        entry_time = datetime.now(timezone.utc) - timedelta(hours=26)
+        entry_time = datetime.now(UTC) - timedelta(hours=26)
         entries = [{
             "ticker": "BTC-USD",
             "ts": entry_time.isoformat(),
@@ -531,7 +527,7 @@ class TestBackfillForecastOutcomes:
         pred_path = tmp_path / "pred.jsonl"
         snap_path = tmp_path / "price_snapshots_hourly.jsonl"
 
-        entry_time = datetime.now(timezone.utc) - timedelta(hours=26)
+        entry_time = datetime.now(UTC) - timedelta(hours=26)
         entries = [{
             "ticker": "BTC-USD",
             "ts": entry_time.isoformat(),
@@ -550,7 +546,7 @@ class TestBackfillForecastOutcomes:
         pred_path = tmp_path / "pred.jsonl"
         snap_path = tmp_path / "price_snapshots_hourly.jsonl"
 
-        entry_time = datetime.now(timezone.utc) - timedelta(hours=26)
+        entry_time = datetime.now(UTC) - timedelta(hours=26)
         entries = []
         for i in range(5):
             entries.append({

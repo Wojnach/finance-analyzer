@@ -1,10 +1,7 @@
 """Tests for portfolio.daily_digest — morning daily digest."""
 
-import json
 import time
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 
 class TestShouldSendDailyDigest:

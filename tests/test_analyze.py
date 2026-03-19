@@ -1,10 +1,6 @@
 """Tests for portfolio.analyze — deep instrument analysis module."""
 
 import json
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from portfolio.analyze import (
     _build_analysis_prompt,

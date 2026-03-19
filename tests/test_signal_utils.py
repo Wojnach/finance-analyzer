@@ -9,10 +9,17 @@ import pandas as pd
 import pytest
 
 from portfolio.signal_utils import (
-    ema, majority_vote, rma, roc, rsi, safe_float, sma, true_range, wma,
+    ema,
+    majority_vote,
+    rma,
+    roc,
+    rsi,
+    safe_float,
+    sma,
+    true_range,
+    wma,
 )
 from portfolio.signals.fibonacci import _near_level
-
 
 # ---------------------------------------------------------------------------
 # sma

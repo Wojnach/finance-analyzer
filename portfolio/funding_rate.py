@@ -1,6 +1,6 @@
 from portfolio.api_utils import BINANCE_FAPI_BASE as BINANCE_FAPI
 from portfolio.http_retry import fetch_json
-from portfolio.shared_state import _cached, FUNDING_RATE_TTL
+from portfolio.shared_state import FUNDING_RATE_TTL, _cached
 
 SYMBOL_MAP = {
     "BTC-USD": "BTCUSDT",

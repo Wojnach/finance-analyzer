@@ -24,8 +24,8 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 import numpy as np
 
@@ -46,10 +46,10 @@ class MarketSnapshot:
     """
     asof_ts: datetime
     price: float              # Current underlying price (USD)
-    bid: Optional[float] = None
-    ask: Optional[float] = None
-    volatility_annual: Optional[float] = None   # Annualized vol (decimal)
-    atr_pct: Optional[float] = None             # ATR% for vol estimation
+    bid: float | None = None
+    ask: float | None = None
+    volatility_annual: float | None = None   # Annualized vol (decimal)
+    atr_pct: float | None = None             # ATR% for vol estimation
     usdsek: float = 10.85                       # FX rate
     drift: float = 0.0                          # Annualized drift (0 = neutral)
 
@@ -68,8 +68,8 @@ class Position:
     entry_ts: datetime
     instrument_type: str = "warrant"     # "warrant", "stock", "crypto"
     leverage: float = 1.0                # Effective leverage at entry
-    financing_level: Optional[float] = None  # MINI future financing level (USD)
-    trailing_peak_usd: Optional[float] = None  # Highest underlying since entry
+    financing_level: float | None = None  # MINI future financing level (USD)
+    trailing_peak_usd: float | None = None  # Highest underlying since entry
 
 
 @dataclass(frozen=True)
@@ -95,7 +95,7 @@ class CandidateExit:
     ev_sek: float
     pnl_pct: float
     risk_flags: tuple[str, ...] = ()
-    quantile: Optional[float] = None
+    quantile: float | None = None
 
 
 @dataclass
@@ -191,7 +191,7 @@ def simulate_intraday_paths(
     remaining_minutes: int,
     instrument_type: str = "warrant",
     n_paths: int = 5000,
-    seed: Optional[int] = None,
+    seed: int | None = None,
 ) -> np.ndarray:
     """Simulate GBM price paths at 1-minute resolution.
 
@@ -352,12 +352,12 @@ def _pnl_pct(pnl_sek: float, position: Position) -> float:
 # ---------------------------------------------------------------------------
 
 def _compute_risk_flags(
-    target_price: Optional[float],
+    target_price: float | None,
     position: Position,
     market: MarketSnapshot,
     remaining_minutes: float,
-    session_max: Optional[np.ndarray] = None,
-    session_min: Optional[np.ndarray] = None,
+    session_max: np.ndarray | None = None,
+    session_min: np.ndarray | None = None,
 ) -> list[str]:
     """Generate risk warnings for a candidate exit."""
     flags = []
@@ -410,7 +410,7 @@ def _apply_risk_overrides(
     position: Position,
     market: MarketSnapshot,
     remaining_minutes: float,
-    session_min: Optional[np.ndarray] = None,
+    session_min: np.ndarray | None = None,
 ) -> CandidateExit:
     """Apply hard risk overrides and select recommended exit.
 
@@ -465,12 +465,12 @@ def compute_exit_plan(
     position: Position,
     market: MarketSnapshot,
     session_end: datetime,
-    costs: Optional[CostModel] = None,
+    costs: CostModel | None = None,
     *,
     n_paths: int = DEFAULT_N_PATHS,
-    quantiles: Optional[list[float]] = None,
-    stop_price_usd: Optional[float] = None,
-    seed: Optional[int] = None,
+    quantiles: list[float] | None = None,
+    stop_price_usd: float | None = None,
+    seed: int | None = None,
 ) -> ExitPlan:
     """Compute a full exit plan for a held position.
 
@@ -503,9 +503,9 @@ def compute_exit_plan(
 
     now = market.asof_ts
     if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
+        now = now.replace(tzinfo=UTC)
     if session_end.tzinfo is None:
-        session_end = session_end.replace(tzinfo=timezone.utc)
+        session_end = session_end.replace(tzinfo=UTC)
 
     remaining_min = max(0, (session_end - now).total_seconds() / 60)
 
@@ -682,10 +682,10 @@ def compute_exit_plan_from_summary(
     session_end: datetime,
     *,
     instrument_type: str = "warrant",
-    financing_level: Optional[float] = None,
+    financing_level: float | None = None,
     leverage: float = 1.0,
     n_paths: int = DEFAULT_N_PATHS,
-) -> Optional[ExitPlan]:
+) -> ExitPlan | None:
     """Build exit plan from agent_summary and portfolio state data.
 
     Convenience wrapper that extracts price, volatility, and position data
@@ -719,7 +719,7 @@ def compute_exit_plan_from_summary(
 
     # Build MarketSnapshot
     market = MarketSnapshot(
-        asof_ts=datetime.now(timezone.utc),
+        asof_ts=datetime.now(UTC),
         price=price,
         atr_pct=atr_pct,
         usdsek=fx_rate,
@@ -732,7 +732,7 @@ def compute_exit_plan_from_summary(
     entry_underlying = position_state.get("entry_underlying_usd",
                                            position_state.get("entry_underlying", price))
     entry_ts_str = position_state.get("entry_ts")
-    entry_ts = datetime.now(timezone.utc)
+    entry_ts = datetime.now(UTC)
     if entry_ts_str:
         try:
             entry_ts = datetime.fromisoformat(entry_ts_str)

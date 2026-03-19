@@ -17,7 +17,7 @@ another trigger has already fired.
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.file_utils import atomic_write_json, load_json
@@ -41,7 +41,7 @@ _startup_grace_active = True  # True until first check_triggers call completes
 
 
 def _today_str():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
 def _load_state():
@@ -291,8 +291,8 @@ def classify_tier(reasons, state=None):
     last_full = state.get("last_full_review_time", 0)
     hours_since = (time.time() - last_full) / 3600
 
-    now_utc = datetime.now(timezone.utc)
-    from portfolio.market_timing import _market_close_hour_utc, MARKET_OPEN_HOUR
+    now_utc = datetime.now(UTC)
+    from portfolio.market_timing import MARKET_OPEN_HOUR, _market_close_hour_utc
     close_hour = _market_close_hour_utc(now_utc)
     market_open = now_utc.weekday() < 5 and MARKET_OPEN_HOUR <= now_utc.hour < close_hour
 

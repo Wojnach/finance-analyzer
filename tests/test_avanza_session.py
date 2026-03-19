@@ -2,7 +2,7 @@
 
 import json
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -10,17 +10,15 @@ import pytest
 
 from portfolio.avanza_session import (
     API_BASE,
-    EXPIRY_BUFFER_MINUTES,
     AvanzaSessionError,
+    api_get,
+    get_instrument_price,
+    get_positions,
     is_session_expiring_soon,
     load_session,
     session_remaining_minutes,
     verify_session,
-    api_get,
-    get_positions,
-    get_instrument_price,
 )
-
 
 # --- Fixtures ---
 
@@ -33,7 +31,7 @@ def _make_session_data(
     customer_id="12345",
 ):
     """Create a valid session data dict."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return {
         "cookies": cookies or [
             {

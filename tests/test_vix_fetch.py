@@ -1,9 +1,8 @@
 """Tests for VIX fetch via yfinance with regime classification."""
 
-from unittest.mock import patch, MagicMock
-import pandas as pd
-import pytest
+from unittest.mock import MagicMock, patch
 
+import pandas as pd
 
 # ---------------------------------------------------------------------------
 # Helpers to build mock DataFrames returned by yf.Ticker("^VIX").history()

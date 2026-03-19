@@ -7,8 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from portfolio.signal_engine import apply_confidence_penalties, _compute_adx
-
+from portfolio.signal_engine import _compute_adx, apply_confidence_penalties
 
 # ---------------------------------------------------------------------------
 # Helpers

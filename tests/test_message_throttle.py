@@ -1,10 +1,7 @@
 """Tests for portfolio.message_throttle — analysis message rate limiting."""
 
-import json
 import time
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import patch
 
 
 class TestShouldSendAnalysis:

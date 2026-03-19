@@ -712,8 +712,8 @@ def test_dead_order_expiry_removes_old_entries():
     """Dead orders older than DEAD_ORDER_EXPIRY_HOURS are pruned from state."""
     import datetime as dt
 
-    old_ts = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=5)).isoformat()
-    recent_ts = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)).isoformat()
+    old_ts = (dt.datetime.now(dt.UTC) - dt.timedelta(hours=5)).isoformat()
+    recent_ts = (dt.datetime.now(dt.UTC) - dt.timedelta(hours=1)).isoformat()
 
     snap = _snapshot(
         position_volume=100,
@@ -803,7 +803,7 @@ def test_notify_critical_throttles(monkeypatch):
     def _fake_notify(category, message):
         # Set throttle timestamp but capture instead of sending
         import datetime as dt
-        mgr._critical_alert_last[category] = dt.datetime.now(dt.timezone.utc).isoformat()
+        mgr._critical_alert_last[category] = dt.datetime.now(dt.UTC).isoformat()
         sent_messages.append((category, message))
 
     monkeypatch.setattr(mgr, "_notify_critical", _fake_notify)
@@ -818,7 +818,7 @@ def test_notify_critical_throttles(monkeypatch):
     mgr._critical_alert_last.clear()
     # Call the real function's throttle check
     import datetime as dt
-    mgr._critical_alert_last["test_cat"] = dt.datetime.now(dt.timezone.utc).isoformat()
+    mgr._critical_alert_last["test_cat"] = dt.datetime.now(dt.UTC).isoformat()
     # The real _notify_critical would skip because last_sent is recent
     # We verify the throttle state is set
     assert "test_cat" in mgr._critical_alert_last

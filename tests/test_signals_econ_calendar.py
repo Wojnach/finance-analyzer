@@ -1,19 +1,18 @@
 """Tests for portfolio.signals.econ_calendar — economic calendar signal."""
 
-import pytest
+from datetime import UTC, date, datetime
 from unittest import mock
-from datetime import date, datetime, timezone
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 from portfolio.signals.econ_calendar import (
-    compute_econ_calendar_signal,
+    _MAX_CONFIDENCE,
     _event_proximity,
     _event_type_info,
     _pre_event_risk,
     _sector_exposure,
-    _MAX_CONFIDENCE,
+    compute_econ_calendar_signal,
 )
 
 
@@ -66,7 +65,7 @@ class TestEventProximity:
             "impact": "high",
             "hours_until": 2.0,
         }
-        ref = datetime(2026, 3, 18, 12, 0, tzinfo=timezone.utc)
+        ref = datetime(2026, 3, 18, 12, 0, tzinfo=UTC)
         action, ind = _event_proximity(ref)
         assert action == "SELL"
 
@@ -78,7 +77,7 @@ class TestEventProximity:
             "impact": "high",
             "hours_until": 12.0,
         }
-        ref = datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc)
+        ref = datetime(2026, 3, 17, 12, 0, tzinfo=UTC)
         action, ind = _event_proximity(ref)
         assert action == "SELL"
 
@@ -90,13 +89,13 @@ class TestEventProximity:
             "impact": "high",
             "hours_until": 720.0,
         }
-        ref = datetime(2026, 3, 18, 12, 0, tzinfo=timezone.utc)
+        ref = datetime(2026, 3, 18, 12, 0, tzinfo=UTC)
         action, ind = _event_proximity(ref)
         assert action == "HOLD"
 
     @mock.patch("portfolio.signals.econ_calendar.next_event", return_value=None)
     def test_no_event_holds(self, mock_next):
-        ref = datetime(2030, 1, 1, tzinfo=timezone.utc)
+        ref = datetime(2030, 1, 1, tzinfo=UTC)
         action, ind = _event_proximity(ref)
         assert action == "HOLD"
 
@@ -110,7 +109,7 @@ class TestEventTypeInfo:
             "impact": "high",
             "hours_until": 6.0,
         }
-        ref = datetime(2026, 3, 18, 8, 0, tzinfo=timezone.utc)
+        ref = datetime(2026, 3, 18, 8, 0, tzinfo=UTC)
         action, ind = _event_type_info(ref)
         assert action == "SELL"
 
@@ -122,7 +121,7 @@ class TestEventTypeInfo:
             "impact": "medium",
             "hours_until": 100.0,
         }
-        ref = datetime(2026, 7, 26, 12, 0, tzinfo=timezone.utc)
+        ref = datetime(2026, 7, 26, 12, 0, tzinfo=UTC)
         action, ind = _event_type_info(ref)
         assert action == "HOLD"
 
@@ -133,7 +132,7 @@ class TestPreEventRisk:
         mock_events.return_value = [
             {"date": date(2026, 3, 18), "type": "FOMC", "impact": "high", "hours_until": 2.0}
         ]
-        ref = datetime(2026, 3, 18, 12, 0, tzinfo=timezone.utc)
+        ref = datetime(2026, 3, 18, 12, 0, tzinfo=UTC)
         action, ind = _pre_event_risk(ref)
         assert action == "SELL"
         assert ind["high_impact_within_4h"] == 1
@@ -141,7 +140,7 @@ class TestPreEventRisk:
     @mock.patch("portfolio.signals.econ_calendar.events_within_hours")
     def test_no_events_holds(self, mock_events):
         mock_events.return_value = []
-        ref = datetime(2026, 5, 15, 12, 0, tzinfo=timezone.utc)
+        ref = datetime(2026, 5, 15, 12, 0, tzinfo=UTC)
         action, ind = _pre_event_risk(ref)
         assert action == "HOLD"
 
@@ -155,7 +154,7 @@ class TestSectorExposure:
             "impact": "high",
             "hours_until": 6.0,
         }
-        ref = datetime(2026, 3, 18, 8, 0, tzinfo=timezone.utc)
+        ref = datetime(2026, 3, 18, 8, 0, tzinfo=UTC)
         action, ind = _sector_exposure(ref, "BTC-USD")
         assert action == "SELL"
         assert ind["event_affects_sector"] is True
@@ -168,7 +167,7 @@ class TestSectorExposure:
             "impact": "high",
             "hours_until": 6.0,
         }
-        ref = datetime(2026, 3, 6, 8, 0, tzinfo=timezone.utc)
+        ref = datetime(2026, 3, 6, 8, 0, tzinfo=UTC)
         # LMT is defense — NFP doesn't directly map to defense
         action, ind = _sector_exposure(ref, "LMT")
         assert action == "HOLD"
@@ -181,6 +180,6 @@ class TestSectorExposure:
             "impact": "high",
             "hours_until": 720.0,
         }
-        ref = datetime(2026, 3, 18, 12, 0, tzinfo=timezone.utc)
+        ref = datetime(2026, 3, 18, 12, 0, tzinfo=UTC)
         action, ind = _sector_exposure(ref, "BTC-USD")
         assert action == "HOLD"

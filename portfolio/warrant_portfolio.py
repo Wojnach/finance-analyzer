@@ -5,6 +5,7 @@ the underlying instrument's price movement.
 """
 
 import logging
+from datetime import UTC
 from pathlib import Path
 
 from portfolio.file_utils import atomic_write_json, load_json
@@ -192,12 +193,12 @@ def record_warrant_transaction(config_key, action, units, price_sek, underlying_
         name: Human-readable name (optional).
         underlying: Underlying ticker (optional).
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     state = load_warrant_state()
 
     txn = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "config_key": config_key,
         "action": action,
         "units": units,

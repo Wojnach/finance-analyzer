@@ -1,22 +1,18 @@
 """Tests for the periodic trade reflection module."""
 
 import json
-import pytest
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 from portfolio.reflection import (
-    should_reflect,
-    compute_reflection,
-    save_reflection,
-    maybe_reflect,
-    load_latest_reflection,
-    _count_trades,
     _compute_strategy_metrics,
+    _count_trades,
     _generate_insights,
+    load_latest_reflection,
+    maybe_reflect,
+    save_reflection,
+    should_reflect,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -52,7 +48,7 @@ def _tx(ticker="BTC-USD", action="BUY", shares=1.0, price_sek=100000):
 
 def _reflection(trade_count=7, ts=None):
     if ts is None:
-        ts = datetime.now(timezone.utc).isoformat()
+        ts = datetime.now(UTC).isoformat()
     return {
         "ts": ts,
         "trade_count_total": trade_count,
@@ -178,7 +174,7 @@ class TestShouldReflect:
     @patch("portfolio.reflection.load_json", return_value=_portfolio())
     @patch("portfolio.reflection.load_jsonl")
     def test_stale_reflection_triggers(self, mock_jsonl, mock_json):
-        old_ts = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+        old_ts = (datetime.now(UTC) - timedelta(days=10)).isoformat()
         mock_jsonl.return_value = [_reflection(trade_count=0, ts=old_ts)]
         assert should_reflect(_cfg(max_age=7)) is True
 
@@ -207,13 +203,13 @@ class TestSaveLoad:
             assert load_latest_reflection() is None
 
     def test_load_latest_returns_none_when_stale(self):
-        old_ts = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+        old_ts = (datetime.now(UTC) - timedelta(days=10)).isoformat()
         with patch("portfolio.reflection.load_jsonl",
                     return_value=[_reflection(ts=old_ts)]):
             assert load_latest_reflection(max_age_days=7) is None
 
     def test_load_latest_returns_fresh(self):
-        now_ts = datetime.now(timezone.utc).isoformat()
+        now_ts = datetime.now(UTC).isoformat()
         with patch("portfolio.reflection.load_jsonl",
                     return_value=[_reflection(ts=now_ts)]):
             ref = load_latest_reflection(max_age_days=7)

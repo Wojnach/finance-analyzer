@@ -9,7 +9,7 @@ State is persisted to data/trade_guard_state.json.
 """
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from portfolio.file_utils import atomic_write_json, load_json
@@ -73,7 +73,7 @@ def check_overtrading_guards(ticker, action, strategy, portfolio, config=None):
 
     warnings = []
     state = _load_state()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # --- Guard 1: Per-ticker cooldown ---
     base_cooldown = cfg.get("ticker_cooldown_minutes", DEFAULT_TICKER_COOLDOWN_MINUTES)
@@ -181,7 +181,7 @@ def record_trade(ticker, direction, strategy, pnl_pct=None, config=None):
         config: Optional config dict.
     """
     state = _load_state()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     now_str = now.isoformat()
 
     # Update ticker trade timestamp

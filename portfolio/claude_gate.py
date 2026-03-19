@@ -24,11 +24,10 @@ Usage::
 import json
 import logging
 import os
-import platform
 import shutil
 import subprocess
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.file_utils import atomic_append_jsonl, load_jsonl
@@ -97,7 +96,7 @@ def _log_invocation(entry: dict) -> None:
 
 def _count_today_invocations() -> int:
     """Count invocation records from today (UTC)."""
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_str = datetime.now(UTC).strftime("%Y-%m-%d")
     count = 0
     for entry in load_jsonl(INVOCATIONS_LOG):
         ts = entry.get("timestamp", "")
@@ -134,7 +133,7 @@ def invoke_claude(
         ``(success, exit_code)`` where *success* is True when exit_code == 0.
         If the invocation is blocked, returns ``(False, -1)``.
     """
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     working_dir = cwd or str(BASE_DIR)
 
     # --- Gate 1: module-level kill switch ---
@@ -252,7 +251,7 @@ def get_invocation_stats() -> dict:
         ``last_invocation_ts``, ``last_caller``, ``enabled``.
     """
     entries = load_jsonl(INVOCATIONS_LOG)
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_str = datetime.now(UTC).strftime("%Y-%m-%d")
 
     total = len(entries)
     today_count = 0

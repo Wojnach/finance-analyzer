@@ -1,12 +1,8 @@
 """Tests for forecast integration — enriched probabilities, thesis alignment, compact summary."""
 
-import json
 import math
-from unittest.mock import patch, MagicMock
 from pathlib import Path
-
-import pytest
-
+from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # TestDirectionProbabilityWithForecast
@@ -447,7 +443,6 @@ class TestForecastSignalsInSummary:
     def test_forecast_signals_propagated_to_compact(self):
         """forecast_signals is propagated to compact summary."""
         from portfolio.reporting import _write_compact_summary
-        from portfolio.reporting import _atomic_write_json
 
         summary = {
             "signals": {},
@@ -584,9 +579,10 @@ class TestSignalEngineIndicators:
 
     def test_enhanced_signal_indicators_stored(self):
         """Enhanced signal indicators dict is stored in extra_info when present."""
-        from portfolio.signal_engine import generate_signal
-        import pandas as pd
         import numpy as np
+        import pandas as pd
+
+        from portfolio.signal_engine import generate_signal
 
         # Create a minimal DF and indicators
         n = 50
@@ -637,9 +633,10 @@ class TestSignalEngineIndicators:
 
     def test_enhanced_signal_no_indicators_no_key(self):
         """Enhanced signal without indicators dict -> no _indicators key in extra."""
-        from portfolio.signal_engine import generate_signal
-        import pandas as pd
         import numpy as np
+        import pandas as pd
+
+        from portfolio.signal_engine import generate_signal
 
         n = 50
         df = pd.DataFrame({
@@ -693,9 +690,9 @@ class TestNewsEventThesisIntegration:
 
     def test_thesis_alignment_in_sub_signals(self):
         """thesis_alignment is included in sub_signals dict."""
-        from portfolio.signals.news_event import compute_news_event_signal
         import pandas as pd
-        import numpy as np
+
+        from portfolio.signals.news_event import compute_news_event_signal
 
         df = pd.DataFrame({"close": [100] * 30})
         result = compute_news_event_signal(df, context=None)
@@ -704,8 +701,9 @@ class TestNewsEventThesisIntegration:
 
     def test_thesis_alignment_included_in_vote_when_enabled(self):
         """When thesis alignment is enabled and votes, it's included in majority."""
-        from portfolio.signals.news_event import compute_news_event_signal
         import pandas as pd
+
+        from portfolio.signals.news_event import compute_news_event_signal
 
         df = pd.DataFrame({"close": [100] * 30})
         context = {

@@ -1,19 +1,17 @@
 """Tests for portfolio.news_keywords — keyword dictionaries, scoring, sector maps."""
 
-import pytest
 
 from portfolio.news_keywords import (
-    score_headline,
-    keyword_severity,
-    is_credible_source,
-    get_sector_impact,
-    SECTOR_MAP,
-    TICKER_SECTORS,
+    ALL_KEYWORDS,
     CRITICAL_KEYWORDS,
     HIGH_KEYWORDS,
     MODERATE_KEYWORDS,
-    ALL_KEYWORDS,
-    CREDIBLE_SOURCES,
+    SECTOR_MAP,
+    TICKER_SECTORS,
+    get_sector_impact,
+    is_credible_source,
+    keyword_severity,
+    score_headline,
 )
 
 

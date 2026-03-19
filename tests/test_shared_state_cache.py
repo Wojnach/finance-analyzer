@@ -1,9 +1,9 @@
 """Tests for shared_state.py cache eviction — BUG-55 LRU fallback."""
 import time
-import pytest
-from unittest.mock import patch
 
-from portfolio.shared_state import _cached, _tool_cache, _CACHE_MAX_SIZE, _cache_lock
+import pytest
+
+from portfolio.shared_state import _CACHE_MAX_SIZE, _cache_lock, _cached, _tool_cache
 
 
 @pytest.fixture(autouse=True)

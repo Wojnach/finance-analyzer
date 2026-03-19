@@ -9,30 +9,29 @@ Each call to step() represents one poll cycle. The bot:
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from portfolio.elongir.config import ElongirConfig
 from portfolio.elongir.data_provider import MarketSnapshot
 from portfolio.elongir.indicators import IndicatorSet, compute_all
-from portfolio.elongir.signal import DipDetector, ReversalDetector
 from portfolio.elongir.risk import (
+    check_daily_limits,
+    check_session,
     compute_position_size,
     compute_stop,
     compute_tp,
-    check_daily_limits,
-    check_session,
     get_stockholm_time,
 )
+from portfolio.elongir.signal import DipDetector, ReversalDetector
 from portfolio.elongir.state import (
     BotState,
     Position,
-    warrant_price_sek,
-    effective_leverage,
     buy_price,
-    sell_price,
-    log_trade,
+    effective_leverage,
     log_poll,
+    log_trade,
+    sell_price,
+    warrant_price_sek,
 )
 
 logger = logging.getLogger("portfolio.elongir.bot")
@@ -45,14 +44,14 @@ class ElongirBot:
     across poll cycles.
     """
 
-    def __init__(self, config: ElongirConfig, state: Optional[BotState] = None):
+    def __init__(self, config: ElongirConfig, state: BotState | None = None):
         self.cfg = config
         self.state = state or BotState.load(config.state_file)
         self.dip_detector = DipDetector(config)
         self.reversal_detector = ReversalDetector(config)
-        self._current_date: Optional[str] = None
+        self._current_date: str | None = None
 
-    def step(self, snapshot: MarketSnapshot) -> Optional[dict]:
+    def step(self, snapshot: MarketSnapshot) -> dict | None:
         """Execute one poll cycle.
 
         Args:
@@ -135,7 +134,7 @@ class ElongirBot:
         snapshot: MarketSnapshot,
         indicators: IndicatorSet,
         warrant_mid: float,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Run dip detector and execute buy if triggered."""
         self.state.signal_state = self.dip_detector.state
 
@@ -152,7 +151,7 @@ class ElongirBot:
         snapshot: MarketSnapshot,
         indicators: IndicatorSet,
         warrant_mid: float,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Run reversal detector and execute sell if triggered."""
         pos = self.state.position
 
@@ -194,7 +193,7 @@ class ElongirBot:
         snapshot: MarketSnapshot,
         indicators: IndicatorSet,
         warrant_mid: float,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Execute a simulated buy."""
         w_ask = buy_price(warrant_mid, self.cfg.spread_pct)
         if w_ask <= 0:
@@ -217,7 +216,7 @@ class ElongirBot:
         self.state.position = Position(
             entry_silver_usd=snapshot.silver_usd,
             entry_warrant_sek=w_ask,
-            entry_time=datetime.now(timezone.utc).isoformat(),
+            entry_time=datetime.now(UTC).isoformat(),
             quantity=sizing.quantity,
             cost_sek=sizing.total_cost_sek,
             stop_price_usd=stop,
@@ -267,7 +266,7 @@ class ElongirBot:
         snapshot: MarketSnapshot,
         reason: str,
         warrant_mid: float,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Execute a simulated sell (full exit)."""
         pos = self.state.position
         w_bid = sell_price(warrant_mid, self.cfg.spread_pct)
@@ -287,8 +286,8 @@ class ElongirBot:
         try:
             entry_dt = datetime.fromisoformat(pos.entry_time)
             if entry_dt.tzinfo is None:
-                entry_dt = entry_dt.replace(tzinfo=timezone.utc)
-            hold_minutes = (datetime.now(timezone.utc) - entry_dt).total_seconds() / 60.0
+                entry_dt = entry_dt.replace(tzinfo=UTC)
+            hold_minutes = (datetime.now(UTC) - entry_dt).total_seconds() / 60.0
         except (ValueError, TypeError):
             hold_minutes = 0.0
 

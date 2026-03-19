@@ -3,22 +3,20 @@
 import json
 import math
 import os
-import tempfile
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from portfolio.golddigger.config import GolddiggerConfig
-from portfolio.golddigger.data_provider import MarketSnapshot, fetch_gold_price
-from portfolio.golddigger.signal import CompositeSignal, SignalState, _log_return, _zscore, EPSILON
-from portfolio.golddigger.risk import RiskManager, SizeResult
-from portfolio.golddigger.state import BotState, Position, log_trade, log_poll
-from portfolio.golddigger.bot import GolddiggerBot
 from portfolio.golddigger import runner as golddigger_runner
-
+from portfolio.golddigger.bot import GolddiggerBot
+from portfolio.golddigger.config import GolddiggerConfig
+from portfolio.golddigger.data_provider import MarketSnapshot
+from portfolio.golddigger.risk import RiskManager, SizeResult
+from portfolio.golddigger.signal import CompositeSignal, SignalState, _log_return, _zscore
+from portfolio.golddigger.state import BotState, Position, log_poll, log_trade
 
 # ============================================================
 # Config tests
@@ -145,7 +143,7 @@ class TestZscore:
 class TestCompositeSignal:
     def make_snap(self, gold=2000.0, usdsek=10.5, us10y=0.0425):
         return MarketSnapshot(
-            ts_utc=datetime.now(timezone.utc),
+            ts_utc=datetime.now(UTC),
             gold=gold, usdsek=usdsek, us10y=us10y,
         )
 
@@ -513,7 +511,7 @@ class TestGolddiggerBot:
     def make_snap(self, gold=2000.0, usdsek=10.5, us10y=0.0425,
                   cert_bid=100.0, cert_ask=101.0):
         return MarketSnapshot(
-            ts_utc=datetime.now(timezone.utc),
+            ts_utc=datetime.now(UTC),
             gold=gold, usdsek=usdsek, us10y=us10y,
             cert_bid=cert_bid, cert_ask=cert_ask,
             cert_last=100.5,
@@ -544,7 +542,7 @@ class TestGolddiggerBot:
         cfg = self.make_cfg(tmp_path)
         bot = GolddiggerBot(cfg, dry_run=True)
         snap = MarketSnapshot(
-            ts_utc=datetime.now(timezone.utc),
+            ts_utc=datetime.now(UTC),
             gold=0.0, usdsek=10.5, us10y=0.0425,  # gold missing
         )
         result = bot.step(snap)
@@ -669,21 +667,21 @@ class TestGolddiggerBot:
 class TestMarketSnapshot:
     def test_complete(self):
         snap = MarketSnapshot(
-            ts_utc=datetime.now(timezone.utc),
+            ts_utc=datetime.now(UTC),
             gold=2000, usdsek=10.5, us10y=0.0425,
         )
         assert snap.is_complete()
 
     def test_incomplete_gold(self):
         snap = MarketSnapshot(
-            ts_utc=datetime.now(timezone.utc),
+            ts_utc=datetime.now(UTC),
             gold=0, usdsek=10.5, us10y=0.0425,
         )
         assert not snap.is_complete()
 
     def test_incomplete_fx(self):
         snap = MarketSnapshot(
-            ts_utc=datetime.now(timezone.utc),
+            ts_utc=datetime.now(UTC),
             gold=2000, usdsek=0, us10y=0.0425,
         )
         assert not snap.is_complete()
@@ -700,7 +698,7 @@ class TestCompositeSignalSigns:
         """Bullish gold regime should produce S > 0."""
         sig = CompositeSignal(window_n=20, min_window=5)
         snap = lambda g, f, y: MarketSnapshot(
-            ts_utc=datetime.now(timezone.utc), gold=g, usdsek=f, us10y=y,
+            ts_utc=datetime.now(UTC), gold=g, usdsek=f, us10y=y,
         )
         # Baseline
         sig.update(snap(2000, 10.5, 0.0425))
@@ -717,7 +715,7 @@ class TestCompositeSignalSigns:
         """Bearish gold regime should produce S < 0."""
         sig = CompositeSignal(window_n=20, min_window=5)
         snap = lambda g, f, y: MarketSnapshot(
-            ts_utc=datetime.now(timezone.utc), gold=g, usdsek=f, us10y=y,
+            ts_utc=datetime.now(UTC), gold=g, usdsek=f, us10y=y,
         )
         sig.update(snap(2000, 10.5, 0.0425))
         for _ in range(8):
@@ -735,20 +733,20 @@ class TestMarketSnapshotCompleteness:
     """Tests for updated is_complete() -- yield is now optional."""
 
     def test_complete_with_all_data(self):
-        snap = MarketSnapshot(ts_utc=datetime.now(timezone.utc), gold=2000, usdsek=10.5, us10y=0.04)
+        snap = MarketSnapshot(ts_utc=datetime.now(UTC), gold=2000, usdsek=10.5, us10y=0.04)
         assert snap.is_complete()
 
     def test_complete_without_yield(self):
         """Yield is optional -- gold + FX is enough."""
-        snap = MarketSnapshot(ts_utc=datetime.now(timezone.utc), gold=2000, usdsek=10.5, us10y=0.0)
+        snap = MarketSnapshot(ts_utc=datetime.now(UTC), gold=2000, usdsek=10.5, us10y=0.0)
         assert snap.is_complete()
 
     def test_incomplete_no_gold(self):
-        snap = MarketSnapshot(ts_utc=datetime.now(timezone.utc), gold=0, usdsek=10.5, us10y=0.04)
+        snap = MarketSnapshot(ts_utc=datetime.now(UTC), gold=0, usdsek=10.5, us10y=0.04)
         assert not snap.is_complete()
 
     def test_incomplete_no_fx(self):
-        snap = MarketSnapshot(ts_utc=datetime.now(timezone.utc), gold=2000, usdsek=0, us10y=0.04)
+        snap = MarketSnapshot(ts_utc=datetime.now(UTC), gold=2000, usdsek=0, us10y=0.04)
         assert not snap.is_complete()
 
 
@@ -760,20 +758,20 @@ class TestMarketSnapshotFreshness:
     """Tests for data freshness tracking."""
 
     def test_fresh_data(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         snap = MarketSnapshot(ts_utc=now, gold=2000, usdsek=10.5, us10y=0.04,
                               gold_fetch_ts=now, fx_fetch_ts=now)
         assert snap.is_fresh(max_age_seconds=60)
 
     def test_stale_gold(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         old = now - timedelta(seconds=120)
         snap = MarketSnapshot(ts_utc=now, gold=2000, usdsek=10.5, us10y=0.04,
                               gold_fetch_ts=old, fx_fetch_ts=now)
         assert not snap.is_fresh(max_age_seconds=60)
 
     def test_stale_fx(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         old = now - timedelta(seconds=120)
         snap = MarketSnapshot(ts_utc=now, gold=2000, usdsek=10.5, us10y=0.04,
                               gold_fetch_ts=now, fx_fetch_ts=old)
@@ -781,7 +779,7 @@ class TestMarketSnapshotFreshness:
 
     def test_no_timestamps_is_fresh(self):
         """If no timestamps set, assume fresh (backward compat)."""
-        snap = MarketSnapshot(ts_utc=datetime.now(timezone.utc), gold=2000, usdsek=10.5, us10y=0.04)
+        snap = MarketSnapshot(ts_utc=datetime.now(UTC), gold=2000, usdsek=10.5, us10y=0.04)
         assert snap.is_fresh()
 
 
@@ -927,7 +925,7 @@ class TestEventRisk:
     def test_active_event_window_detected(self, mock_datetime):
         from portfolio.golddigger.data_provider import read_event_risk
 
-        mock_datetime.now.return_value = datetime(2026, 3, 11, 13, 0, tzinfo=timezone.utc)
+        mock_datetime.now.return_value = datetime(2026, 3, 11, 13, 0, tzinfo=UTC)
         mock_datetime.combine.side_effect = datetime.combine
 
         result = read_event_risk(hours_before=4.0, hours_after=1.0)
@@ -1143,12 +1141,12 @@ class TestBotEntryFilters:
     def _strong_signal_snap(self):
         """Create a snapshot that would normally trigger entry."""
         return MarketSnapshot(
-            ts_utc=datetime.now(timezone.utc),
+            ts_utc=datetime.now(UTC),
             gold=2000, usdsek=10.5, us10y=0.04,
             cert_bid=99, cert_ask=100, cert_last=100,
             cert_spread_pct=0.01,
-            gold_fetch_ts=datetime.now(timezone.utc),
-            fx_fetch_ts=datetime.now(timezone.utc),
+            gold_fetch_ts=datetime.now(UTC),
+            fx_fetch_ts=datetime.now(UTC),
         )
 
     def _arm_entry(self, bot):
@@ -1216,7 +1214,7 @@ class TestBotEntryFilters:
     def test_incomplete_data_returns_none(self, mock_time, tmp_path):
         bot = self._make_bot(tmp_path)
         snap = MarketSnapshot(
-            ts_utc=datetime.now(timezone.utc),
+            ts_utc=datetime.now(UTC),
             gold=0, usdsek=10.5, us10y=0.04,
         )
         result = bot.step(snap)

@@ -109,7 +109,7 @@ def _parse_ts(ts_str):
         # Python 3.7+ fromisoformat handles most ISO formats
         dt = datetime.datetime.fromisoformat(ts_str)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=datetime.timezone.utc)
+            dt = dt.replace(tzinfo=datetime.UTC)
         return dt
     except (ValueError, TypeError):
         return None
@@ -117,9 +117,8 @@ def _parse_ts(ts_str):
 
 def _gzip_file(src_path, dst_path):
     """Compress src_path to dst_path using gzip."""
-    with open(src_path, "rb") as f_in:
-        with gzip.open(dst_path, "wb") as f_out:
-            shutil.copyfileobj(f_in, f_out)
+    with open(src_path, "rb") as f_in, gzip.open(dst_path, "wb") as f_out:
+        shutil.copyfileobj(f_in, f_out)
 
 
 def rotate_jsonl(filename, policy, dry_run=False):
@@ -137,7 +136,7 @@ def rotate_jsonl(filename, policy, dry_run=False):
     size_mb = _file_size_mb(filepath)
     ts_field = policy.get("ts_field", "ts")
     max_age_days = policy.get("max_age_days", 30)
-    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=max_age_days)
+    cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=max_age_days)
 
     # Read all lines and classify as keep vs archive
     keep_lines = []
@@ -145,7 +144,7 @@ def rotate_jsonl(filename, policy, dry_run=False):
     parse_failures = 0
     total_lines = 0
 
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         for line in f:
             line = line.rstrip("\n")
             if not line.strip():
@@ -365,7 +364,7 @@ def get_file_stats():
         line_count = None
         if policy.get("type") == "jsonl" and filepath.exists():
             try:
-                with open(filepath, "r", encoding="utf-8") as f:
+                with open(filepath, encoding="utf-8") as f:
                     line_count = sum(1 for line in f if line.strip())
             except OSError:
                 pass

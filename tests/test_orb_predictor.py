@@ -5,17 +5,15 @@ warrant translation, summary statistics, and edge cases. All data is mocked
 with deterministic values -- no network calls.
 """
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
-from datetime import datetime, timezone, timedelta
 
 from portfolio.orb_predictor import (
     ORBPredictor,
-    MorningRange,
-    DayResult,
     Prediction,
     WarrantTarget,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers for building mock kline data
@@ -44,7 +42,7 @@ def _morning_candles(date_str: str, base_price: float = 30.0, spread: float = 0.
     direction="down" means close < open.
     """
     dt_base = datetime.strptime(date_str, "%Y-%m-%d").replace(
-        hour=8, minute=0, tzinfo=timezone.utc
+        hour=8, minute=0, tzinfo=UTC
     )
     candles = []
     step = spread / n
@@ -82,7 +80,7 @@ def _full_day_candles(date_str: str, morning_base: float = 30.0,
     m_mid = (m_high + m_low) / 2
 
     dt_base = datetime.strptime(date_str, "%Y-%m-%d").replace(
-        hour=10, minute=0, tzinfo=timezone.utc
+        hour=10, minute=0, tzinfo=UTC
     )
     afternoon = []
     for i in range(afternoon_n):
@@ -109,7 +107,7 @@ def _full_day_candles(date_str: str, morning_base: float = 30.0,
 def _build_history(num_days: int = 20, base_price: float = 30.0) -> list[dict]:
     """Build num_days worth of full-day klines on consecutive weekdays."""
     all_klines = []
-    dt = datetime(2026, 1, 5, tzinfo=timezone.utc)  # Monday
+    dt = datetime(2026, 1, 5, tzinfo=UTC)  # Monday
     days_created = 0
     while days_created < num_days:
         if dt.weekday() < 5:  # Skip weekends
@@ -216,7 +214,7 @@ class TestMorningRange:
         morning = _morning_candles("2026-02-10", n=8)
         # Add an afternoon candle at 14:00 with extreme price
         afternoon = _candle(
-            datetime(2026, 2, 10, 14, 0, tzinfo=timezone.utc),
+            datetime(2026, 2, 10, 14, 0, tzinfo=UTC),
             100.0, 200.0, 5.0, 150.0, 9999.0,
         )
         mr = predictor.calculate_morning_range(morning + [afternoon])
@@ -311,11 +309,11 @@ class TestDayResult:
         """If morning range fails (too few candles), DayResult is None."""
         predictor = ORBPredictor()
         # 2 morning candles + lots of afternoon -- morning fails
-        dt_base = datetime(2026, 2, 10, 8, 0, tzinfo=timezone.utc)
+        dt_base = datetime(2026, 2, 10, 8, 0, tzinfo=UTC)
         candles = [_candle(dt_base, 30.0, 30.5, 29.5, 30.2)]
         # Add 30 afternoon candles
         for i in range(30):
-            dt = datetime(2026, 2, 10, 10 + i // 4, (i % 4) * 15, tzinfo=timezone.utc)
+            dt = datetime(2026, 2, 10, 10 + i // 4, (i % 4) * 15, tzinfo=UTC)
             candles.append(_candle(dt, 30.0, 30.1, 29.9, 30.0))
         dr = predictor.calculate_day_result(candles)
         assert dr is None
@@ -612,7 +610,7 @@ class TestStatistics:
         klines_in_morning = _build_history(num_days=10, base_price=30.0)
         # Override: rebuild with no high extension
         all_klines = []
-        dt = datetime(2026, 1, 5, tzinfo=timezone.utc)
+        dt = datetime(2026, 1, 5, tzinfo=UTC)
         days_created = 0
         while days_created < 10:
             if dt.weekday() < 5:
@@ -752,7 +750,7 @@ class TestEdgeCases:
     def test_parse_klines(self):
         """_parse_klines converts raw Binance arrays to dicts correctly."""
         predictor = ORBPredictor()
-        ts_ms = int(datetime(2026, 2, 10, 8, 0, tzinfo=timezone.utc).timestamp() * 1000)
+        ts_ms = int(datetime(2026, 2, 10, 8, 0, tzinfo=UTC).timestamp() * 1000)
         raw = [[ts_ms, "30.0", "30.5", "29.5", "30.2", "1000.0",
                 0, "0", 0, "0", "0", "0"]]
         parsed = predictor._parse_klines(raw)

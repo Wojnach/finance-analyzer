@@ -4,8 +4,7 @@ Covers Monte Carlo path simulation, P&L computation, risk flags,
 risk overrides, exit plan generation, cost models, and session calendar.
 """
 
-import math
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pytest
@@ -19,7 +18,6 @@ from portfolio.cost_model import (
     get_cost_model,
 )
 from portfolio.exit_optimizer import (
-    DEFAULT_QUANTILES,
     CandidateExit,
     ExitPlan,
     MarketSnapshot,
@@ -34,11 +32,8 @@ from portfolio.exit_optimizer import (
     simulate_intraday_paths,
 )
 from portfolio.session_calendar import (
-    SessionInfo,
     _cet_offset,
-    _cet_to_utc,
     _eu_dst,
-    _make_session_end,
     get_session_info,
     remaining_session_minutes,
 )
@@ -47,7 +42,7 @@ from portfolio.session_calendar import (
 # Shared fixtures and constants
 # ---------------------------------------------------------------------------
 
-BASE_TIME = datetime(2026, 3, 12, 14, 0, tzinfo=timezone.utc)  # Thu 14:00 UTC
+BASE_TIME = datetime(2026, 3, 12, 14, 0, tzinfo=UTC)  # Thu 14:00 UTC
 SEED = 42
 N_PATHS = 1000
 
@@ -200,11 +195,11 @@ class TestEuDst:
     """EU DST detection for summer and winter."""
 
     def test_winter_january(self):
-        dt = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
+        dt = datetime(2026, 1, 15, 12, 0, tzinfo=UTC)
         assert _eu_dst(dt) is False
 
     def test_summer_july(self):
-        dt = datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc)
+        dt = datetime(2026, 7, 15, 12, 0, tzinfo=UTC)
         assert _eu_dst(dt) is True
 
     def test_march_12_is_winter(self):
@@ -213,15 +208,15 @@ class TestEuDst:
 
     def test_transition_day_march_29_2026(self):
         # Last Sunday of March 2026 is the 29th. DST starts at 01:00 UTC.
-        before = datetime(2026, 3, 29, 0, 59, tzinfo=timezone.utc)
-        after = datetime(2026, 3, 29, 1, 0, tzinfo=timezone.utc)
+        before = datetime(2026, 3, 29, 0, 59, tzinfo=UTC)
+        after = datetime(2026, 3, 29, 1, 0, tzinfo=UTC)
         assert _eu_dst(before) is False
         assert _eu_dst(after) is True
 
     def test_october_end_transition(self):
         # Last Sunday of Oct 2026 is the 25th. DST ends at 01:00 UTC.
-        before = datetime(2026, 10, 25, 0, 59, tzinfo=timezone.utc)
-        after = datetime(2026, 10, 25, 1, 0, tzinfo=timezone.utc)
+        before = datetime(2026, 10, 25, 0, 59, tzinfo=UTC)
+        after = datetime(2026, 10, 25, 1, 0, tzinfo=UTC)
         assert _eu_dst(before) is True
         assert _eu_dst(after) is False
 
@@ -230,11 +225,11 @@ class TestCetOffset:
     """CET offset correctness."""
 
     def test_winter_offset_is_1(self):
-        dt = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
+        dt = datetime(2026, 1, 15, 12, 0, tzinfo=UTC)
         assert _cet_offset(dt) == 1
 
     def test_summer_offset_is_2(self):
-        dt = datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc)
+        dt = datetime(2026, 7, 15, 12, 0, tzinfo=UTC)
         assert _cet_offset(dt) == 2
 
 
@@ -254,7 +249,7 @@ class TestGetSessionInfoWarrant:
         assert info.remaining_minutes == pytest.approx(415.0, abs=1)
 
     def test_warrant_closed_at_night(self):
-        night = datetime(2026, 3, 12, 23, 0, tzinfo=timezone.utc)
+        night = datetime(2026, 3, 12, 23, 0, tzinfo=UTC)
         info = get_session_info("warrant", now=night)
         assert info.is_open is False
         assert info.remaining_minutes == 0
@@ -266,12 +261,12 @@ class TestGetSessionInfoWarrant:
 
     def test_warrant_underlying_us_stock_before_open(self):
         # Use January (no US DST). US open 14:30 UTC (EST).
-        winter = datetime(2026, 1, 15, 14, 0, tzinfo=timezone.utc)
+        winter = datetime(2026, 1, 15, 14, 0, tzinfo=UTC)
         info = get_session_info("warrant", underlying="TSM", now=winter)
         assert info.underlying_open is False
 
     def test_warrant_underlying_us_stock_during_us_hours(self):
-        us_open = datetime(2026, 3, 12, 16, 0, tzinfo=timezone.utc)
+        us_open = datetime(2026, 3, 12, 16, 0, tzinfo=UTC)
         info = get_session_info("warrant", underlying="TSM", now=us_open)
         assert info.underlying_open is True
 
@@ -285,7 +280,7 @@ class TestGetSessionInfoStockSe:
         assert info.is_open is True
 
     def test_closed_after_hours(self):
-        evening = datetime(2026, 3, 12, 18, 0, tzinfo=timezone.utc)
+        evening = datetime(2026, 3, 12, 18, 0, tzinfo=UTC)
         info = get_session_info("stock_se", now=evening)
         assert info.is_open is False
 
@@ -294,19 +289,19 @@ class TestGetSessionInfoStockUs:
     """get_session_info for stock_us."""
 
     def test_us_open_during_session(self):
-        us_mid = datetime(2026, 3, 12, 17, 0, tzinfo=timezone.utc)
+        us_mid = datetime(2026, 3, 12, 17, 0, tzinfo=UTC)
         info = get_session_info("stock_us", now=us_mid)
         assert info.is_open is True
         assert info.phase == "open"
 
     def test_us_closed_before_open(self):
         # January: no US DST. US opens 14:30 UTC (EST). 14:00 is before open.
-        winter = datetime(2026, 1, 15, 14, 0, tzinfo=timezone.utc)
+        winter = datetime(2026, 1, 15, 14, 0, tzinfo=UTC)
         info = get_session_info("stock_us", now=winter)
         assert info.is_open is False
 
     def test_us_remaining_minutes(self):
-        us_mid = datetime(2026, 3, 12, 17, 0, tzinfo=timezone.utc)
+        us_mid = datetime(2026, 3, 12, 17, 0, tzinfo=UTC)
         info = get_session_info("stock_us", now=us_mid)
         # Mar 12 is US DST (EDT). Close at 20:00 UTC. 20:00 - 17:00 = 180 min.
         assert info.remaining_minutes == pytest.approx(180.0, abs=1)
@@ -322,7 +317,7 @@ class TestGetSessionInfoCrypto:
         assert info.underlying_open is True
 
     def test_crypto_open_on_weekend(self):
-        saturday = datetime(2026, 3, 14, 12, 0, tzinfo=timezone.utc)
+        saturday = datetime(2026, 3, 14, 12, 0, tzinfo=UTC)
         info = get_session_info("crypto", now=saturday)
         assert info.is_open is True
 
@@ -340,17 +335,17 @@ class TestSessionWeekend:
     """Weekend closed behavior for stocks."""
 
     def test_stock_se_closed_on_saturday(self):
-        saturday = datetime(2026, 3, 14, 10, 0, tzinfo=timezone.utc)
+        saturday = datetime(2026, 3, 14, 10, 0, tzinfo=UTC)
         info = get_session_info("stock_se", now=saturday)
         assert info.is_open is False
 
     def test_stock_us_closed_on_sunday(self):
-        sunday = datetime(2026, 3, 15, 17, 0, tzinfo=timezone.utc)
+        sunday = datetime(2026, 3, 15, 17, 0, tzinfo=UTC)
         info = get_session_info("stock_us", now=sunday)
         assert info.is_open is False
 
     def test_warrant_closed_on_weekend(self):
-        saturday = datetime(2026, 3, 14, 12, 0, tzinfo=timezone.utc)
+        saturday = datetime(2026, 3, 14, 12, 0, tzinfo=UTC)
         info = get_session_info("warrant", now=saturday)
         assert info.is_open is False
 

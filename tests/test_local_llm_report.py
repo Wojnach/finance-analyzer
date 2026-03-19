@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from portfolio.local_llm_report import build_local_llm_report, maybe_export_local_llm_report
 
@@ -167,7 +167,7 @@ def test_maybe_export_local_llm_report_writes_daily_snapshot_once(tmp_path, monk
             "history_max_entries": 5,
         }
     }
-    now = datetime(2026, 3, 9, 8, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 3, 9, 8, 0, tzinfo=UTC)
 
     first = maybe_export_local_llm_report(
         config=config,

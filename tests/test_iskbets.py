@@ -1,17 +1,15 @@
 """Tests for ISKBETS — intraday quick-gamble mode."""
 
-import json
-import os
 import subprocess
+
+# Ensure project root on path
+import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-# Ensure project root on path
-import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -31,7 +29,6 @@ from portfolio.iskbets import (
     invoke_layer2_gate,
 )
 from portfolio.telegram_poller import TelegramPoller
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -175,7 +172,7 @@ def _make_position(
         "entry_price_usd": entry_price,
         "amount_sek": amount_sek,
         "shares": amount_sek / (entry_price * 10.5),
-        "entry_time": datetime.now(timezone.utc).isoformat(),
+        "entry_time": datetime.now(UTC).isoformat(),
         "atr_15m": atr,
         "stop_loss": entry_price - 2 * atr,
         "stage1_target": entry_price + 1.5 * atr,
@@ -544,7 +541,7 @@ class TestPnL:
             exit_type="trailing_stop",
             entry_price=130.0,
             amount_sek=100000,
-            entry_time=datetime.now(timezone.utc).isoformat(),
+            entry_time=datetime.now(UTC).isoformat(),
             fx_rate=10.0,
         )
         assert "SELL MSTR" in msg
@@ -710,7 +707,7 @@ class TestFormatting:
             exit_type="hard_stop",
             entry_price=66000,
             amount_sek=100000,
-            entry_time=datetime.now(timezone.utc).isoformat(),
+            entry_time=datetime.now(UTC).isoformat(),
             fx_rate=10.5,
         )
         assert "SELL BTC" in msg

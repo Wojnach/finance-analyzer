@@ -1,25 +1,21 @@
 """Tests for portfolio.alpha_vantage — Alpha Vantage fundamentals cache."""
 
 import json
-import time
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import patch
 
 from portfolio import alpha_vantage
 from portfolio.alpha_vantage import (
     _normalize_overview,
-    get_fundamentals,
     get_all_fundamentals,
+    get_fundamentals,
     load_persistent_cache,
     refresh_fundamentals_batch,
     should_batch_refresh,
 )
 from portfolio.circuit_breaker import State as _CBState
 from portfolio.signals.claude_fundamental import _build_fundamentals_block
-
 
 # ── Sample Alpha Vantage OVERVIEW response ──────────────────────────────────
 
@@ -149,7 +145,7 @@ class TestNormalizeOverview:
     def test_fetched_at_is_recent(self):
         result = _normalize_overview(SAMPLE_AV_RESPONSE)
         fetched = datetime.fromisoformat(result["_fetched_at"])
-        age = (datetime.now(timezone.utc) - fetched).total_seconds()
+        age = (datetime.now(UTC) - fetched).total_seconds()
         assert age < 5  # should be very recent
 
 
@@ -206,13 +202,13 @@ class TestCache:
         assert get_all_fundamentals() == {}
 
     def test_stale_detection(self):
-        old_time = (datetime.now(timezone.utc) - timedelta(days=6)).isoformat()
+        old_time = (datetime.now(UTC) - timedelta(days=6)).isoformat()
         with alpha_vantage._cache_lock:
             alpha_vantage._cache["NVDA"] = {"pe_ratio": 55.3, "_fetched_at": old_time}
         assert alpha_vantage._is_stale("NVDA", max_stale_days=5)
 
     def test_fresh_detection(self):
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         with alpha_vantage._cache_lock:
             alpha_vantage._cache["NVDA"] = {"pe_ratio": 55.3, "_fetched_at": now}
         assert not alpha_vantage._is_stale("NVDA", max_stale_days=5)
@@ -221,7 +217,7 @@ class TestCache:
         assert alpha_vantage._cache_age_hours("NVDA") is None
 
     def test_cache_age_hours_recent(self):
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         with alpha_vantage._cache_lock:
             alpha_vantage._cache["NVDA"] = {"_fetched_at": now}
         age = alpha_vantage._cache_age_hours("NVDA")
@@ -291,7 +287,7 @@ class TestBatchRefresh:
     def test_budget_exhaustion(self, mock_limiter, mock_save, mock_fetch):
         mock_fetch.return_value = SAMPLE_AV_RESPONSE
         alpha_vantage._daily_budget_used = 25
-        alpha_vantage._budget_reset_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        alpha_vantage._budget_reset_date = datetime.now(UTC).strftime("%Y-%m-%d")
         config = self._make_config(daily_budget=25)
         count = refresh_fundamentals_batch(config)
         assert count == 0
@@ -335,7 +331,7 @@ class TestBatchRefresh:
         assert count >= 1
 
     def test_all_fresh_no_refresh(self):
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         with alpha_vantage._cache_lock:
             for ticker in ("NVDA", "AMD", "AAPL"):
                 alpha_vantage._cache[ticker] = {"_fetched_at": now}
@@ -365,7 +361,7 @@ class TestShouldBatchRefresh:
         assert should_batch_refresh(config)
 
     def test_no_refresh_all_fresh(self):
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         config = {"alpha_vantage": {"enabled": True, "api_key": "test",
                                      "cache_ttl_hours": 24, "skip_tickers": ["QQQ"]}}
         with alpha_vantage._cache_lock:

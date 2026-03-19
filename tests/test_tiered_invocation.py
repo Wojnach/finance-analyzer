@@ -10,36 +10,27 @@ Covers:
 
 import json
 import time
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 from unittest import mock
 
-import pytest
-
+from portfolio.agent_invocation import (
+    TIER_CONFIG,
+    _build_tier_prompt,
+)
+from portfolio.reporting import (
+    _macro_headline,
+    _write_tier1_summary,
+    _write_tier2_summary,
+    write_tiered_summary,
+)
 from portfolio.trigger import (
     STATE_FILE,
-    classify_tier,
-    update_tier_state,
     _load_state,
     _save_state,
     _today_str,
-    _FULL_REVIEW_MARKET_HOURS,
-    _FULL_REVIEW_OFF_HOURS,
+    classify_tier,
+    update_tier_state,
 )
-from portfolio.reporting import (
-    write_tiered_summary,
-    _write_tier1_summary,
-    _write_tier2_summary,
-    _macro_headline,
-    _portfolio_snapshot,
-    TIER1_FILE,
-    TIER2_FILE,
-)
-from portfolio.agent_invocation import (
-    _build_tier_prompt,
-    TIER_CONFIG,
-)
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -134,7 +125,7 @@ class TestClassifyTier(TriggerTestBase):
     def test_periodic_market_hours_returns_tier3(self, mock_dt):
         """2h+ since last full review during market hours -> Tier 3."""
         # Simulate Tuesday 10:00 UTC (market hours)
-        fake_now = datetime(2026, 2, 17, 10, 0, 0, tzinfo=timezone.utc)
+        fake_now = datetime(2026, 2, 17, 10, 0, 0, tzinfo=UTC)
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -148,7 +139,7 @@ class TestClassifyTier(TriggerTestBase):
     def test_periodic_offhours_returns_tier3(self, mock_dt):
         """4h+ since last full review during off-hours -> Tier 3."""
         # Simulate Saturday 10:00 UTC (weekend)
-        fake_now = datetime(2026, 2, 21, 10, 0, 0, tzinfo=timezone.utc)
+        fake_now = datetime(2026, 2, 21, 10, 0, 0, tzinfo=UTC)
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -281,7 +272,7 @@ def _make_summary(held_tickers=None, triggered_tickers=None):
         ]
 
     return {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "trigger_reasons": ["test"],
         "fx_rate": 9.07,
         "signals": signals,

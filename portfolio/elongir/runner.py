@@ -13,14 +13,14 @@ import time
 import traceback
 from pathlib import Path
 
-from portfolio.elongir.config import ElongirConfig
 from portfolio.elongir.bot import ElongirBot
-from portfolio.file_utils import load_json
+from portfolio.elongir.config import ElongirConfig
 from portfolio.elongir.state import (
-    warrant_price_sek,
     effective_leverage,
     sell_price,
+    warrant_price_sek,
 )
+from portfolio.file_utils import load_json
 from portfolio.process_lock import acquire_lock_file, release_lock_file
 
 logger = logging.getLogger("portfolio.elongir.runner")

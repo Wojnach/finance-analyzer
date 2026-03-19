@@ -2,10 +2,10 @@
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from portfolio.file_utils import atomic_write_json, load_json, last_jsonl_entry
+from portfolio.file_utils import atomic_write_json, last_jsonl_entry, load_json
 
 logger = logging.getLogger(__name__)
 
@@ -17,20 +17,20 @@ def update_health(cycle_count: int, signals_ok: int, signals_failed: int,
                   last_trigger_reason: str = None, error: str = None):
     """Called at end of each Layer 1 cycle to update health state."""
     state = load_health()
-    state["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
+    state["last_heartbeat"] = datetime.now(UTC).isoformat()
     state["cycle_count"] = cycle_count
     state["signals_ok"] = signals_ok
     state["signals_failed"] = signals_failed
     state["uptime_seconds"] = time.time() - state.get("start_time", time.time())
     if last_trigger_reason:
         state["last_trigger_reason"] = last_trigger_reason
-        state["last_trigger_time"] = datetime.now(timezone.utc).isoformat()
+        state["last_trigger_time"] = datetime.now(UTC).isoformat()
         # Cache the invocation timestamp so check_agent_silence() can avoid
         # re-parsing invocations.jsonl on every call.
         state["last_invocation_ts"] = state["last_trigger_time"]
     if error:
         state["errors"] = state.get("errors", [])[-19:] + [
-            {"ts": datetime.now(timezone.utc).isoformat(), "error": error}
+            {"ts": datetime.now(UTC).isoformat(), "error": error}
         ]
         state["error_count"] = state.get("error_count", 0) + 1
     atomic_write_json(HEALTH_FILE, state)
@@ -64,7 +64,7 @@ def check_staleness(max_age_seconds: int = 300) -> tuple:
     if not hb:
         return True, float("inf"), state
     last = datetime.fromisoformat(hb)
-    age = (datetime.now(timezone.utc) - last).total_seconds()
+    age = (datetime.now(UTC) - last).total_seconds()
     return age > max_age_seconds, age, state
 
 
@@ -95,7 +95,7 @@ def check_agent_silence(max_market_seconds: int = 7200,
         return {"silent": True, "age_seconds": float("inf"), "threshold": max_market_seconds, "market_open": False}
 
     last = datetime.fromisoformat(last_ts)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     age = (now - last).total_seconds()
 
     # DST-aware market hours check
@@ -123,7 +123,7 @@ def update_module_failures(failures: list):
         return
     state = load_health()
     state["last_module_failures"] = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "modules": list(failures),
     }
     atomic_write_json(HEALTH_FILE, state)
@@ -148,7 +148,7 @@ def update_signal_health_batch(results: dict):
         return
     state = load_health()
     sh = state.setdefault("signal_health", {})
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     for signal_name, success in results.items():
         entry = sh.setdefault(signal_name, {
@@ -234,7 +234,7 @@ def get_health_summary() -> dict:
     }
     # Include circuit breaker status if data_collector has been imported
     try:
-        from portfolio.data_collector import binance_spot_cb, binance_fapi_cb, alpaca_cb
+        from portfolio.data_collector import alpaca_cb, binance_fapi_cb, binance_spot_cb
         summary["circuit_breakers"] = {
             "binance_spot": binance_spot_cb.get_status(),
             "binance_fapi": binance_fapi_cb.get_status(),

@@ -8,16 +8,15 @@ Covers:
 """
 
 import json
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 
 
 def _make_entry(hours_ago, tickers=None, outcomes=None):
     """Create a signal_log entry with given age."""
-    ts = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
+    ts = (datetime.now(UTC) - timedelta(hours=hours_ago)).isoformat()
     entry = {"ts": ts, "tickers": tickers or {"BTC-USD": {"price_usd": 67000, "consensus": "BUY"}}}
     if outcomes is not None:
         entry["outcomes"] = outcomes

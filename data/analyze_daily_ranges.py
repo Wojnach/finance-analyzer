@@ -1,7 +1,9 @@
 """Analyze historical daily price ranges for XAG and XAU, project onto leveraged warrants."""
-import json, statistics, math
+import json
+import math
+import statistics
 
-with open("data/metals_history.json", "r") as f:
+with open("data/metals_history.json") as f:
     hist = json.load(f)
 
 # Current positions
@@ -71,7 +73,7 @@ for metal_key in ["XAG-USD", "XAU-USD"]:
     print(f"  Avg daily range: {stats['avg_daily_range_pct']:.2f}%")
     print(f"  Up days: {stats['up_days']}/{stats['total_trading_days']} ({stats['up_days']/stats['total_trading_days']*100:.0f}%)")
 
-    print(f"\n  --- Daily Range (High-Low)/Open ---")
+    print("\n  --- Daily Range (High-Low)/Open ---")
     print(f"  {'Percentile':<12} {'Range %':>10} {'$ Move':>10}")
     for p in [10, 25, 50, 75, 90, 95]:
         val = percentile(dr_sorted, p)
@@ -81,19 +83,19 @@ for metal_key in ["XAG-USD", "XAU-USD"]:
     print(f"  {'Max':<12} {max(daily_ranges):>9.2f}%")
     print(f"  {'Mean':<12} {statistics.mean(daily_ranges):>9.2f}%")
 
-    print(f"\n  --- Max Intraday Gain from Open (Open->High) ---")
+    print("\n  --- Max Intraday Gain from Open (Open->High) ---")
     print(f"  {'Percentile':<12} {'Gain %':>10}")
     for p in [25, 50, 75, 90, 95]:
         val = percentile(oth_sorted, p)
         print(f"  P{p:<10} {val:>9.2f}%")
 
-    print(f"\n  --- Max Intraday Drop from Open (Open->Low) ---")
+    print("\n  --- Max Intraday Drop from Open (Open->Low) ---")
     print(f"  {'Percentile':<12} {'Drop %':>10}")
     for p in [25, 50, 75, 90, 95]:
         val = percentile(otl_sorted, p)
         print(f"  P{p:<10} {val:>9.2f}%")
 
-    print(f"\n  --- Close-to-Close Daily Change ---")
+    print("\n  --- Close-to-Close Daily Change ---")
     print(f"  {'Percentile':<12} {'Change %':>10}")
     for p in [5, 10, 25, 50, 75, 90, 95]:
         val = percentile(ctc_sorted, p)
@@ -101,7 +103,7 @@ for metal_key in ["XAG-USD", "XAU-USD"]:
 
     # Recent 5 days
     recent = candles[-5:]
-    print(f"\n  --- Last 5 Days ---")
+    print("\n  --- Last 5 Days ---")
     print(f"  {'Date':<12} {'Open':>8} {'High':>8} {'Low':>8} {'Close':>8} {'Range%':>8} {'Chg%':>8}")
     for i, c in enumerate(recent):
         o, h, l, cl = c["open"], c["high"], c["low"], c["close"]
@@ -113,9 +115,9 @@ for metal_key in ["XAG-USD", "XAU-USD"]:
 # WARRANT IMPACT TABLE
 # ========================================================
 print(f"\n{'='*70}")
-print(f"  WARRANT IMPACT — Expected Daily Moves (Leveraged)")
+print("  WARRANT IMPACT — Expected Daily Moves (Leveraged)")
 print(f"{'='*70}")
-print(f"\n  How much your warrants can move today based on typical underlying ranges:")
+print("\n  How much your warrants can move today based on typical underlying ranges:")
 
 for metal_key in ["XAG-USD", "XAU-USD"]:
     candles = hist["metals"][metal_key]["daily_ohlcv"]
@@ -188,11 +190,11 @@ for metal_key in ["XAG-USD", "XAU-USD"]:
 # TODAY'S SESSION SO FAR
 # ========================================================
 print(f"\n{'='*70}")
-print(f"  TODAY'S SESSION (so far, ~1h into session)")
+print("  TODAY'S SESSION (so far, ~1h into session)")
 print(f"{'='*70}")
 
 # Today's underlying range from price_history_recent
-with open("data/metals_context.json", "r") as f:
+with open("data/metals_context.json") as f:
     ctx = json.load(f)
 
 recent = ctx["price_history_recent"]
@@ -233,13 +235,13 @@ if recent:
 # EU SESSION HOURS (09:00-17:25 CET) — subset analysis
 # ========================================================
 print(f"\n{'='*70}")
-print(f"  EU SESSION RANGE ESTIMATE (Avanza 09:00-17:25 CET, ~8.4h)")
+print("  EU SESSION RANGE ESTIMATE (Avanza 09:00-17:25 CET, ~8.4h)")
 print(f"{'='*70}")
-print(f"\n  XAG/XAU trade 24/7 but warrants only during EU hours.")
-print(f"  EU session captures roughly 35-50% of 24h range (based on metals")
-print(f"  volatility clustering around US open 15:30 CET and London AM fix).")
-print(f"  ")
-print(f"  Estimated EU-session ranges (40% of 24h range as conservative estimate):")
+print("\n  XAG/XAU trade 24/7 but warrants only during EU hours.")
+print("  EU session captures roughly 35-50% of 24h range (based on metals")
+print("  volatility clustering around US open 15:30 CET and London AM fix).")
+print("  ")
+print("  Estimated EU-session ranges (40% of 24h range as conservative estimate):")
 
 for metal_key in ["XAG-USD", "XAU-USD"]:
     candles = hist["metals"][metal_key]["daily_ohlcv"]
@@ -263,7 +265,7 @@ for metal_key in ["XAG-USD", "XAU-USD"]:
         print(f"    -> {short_name} ({lev}x): typical EU drop ~{med*eu_factor*lev/2:.1f}%, bad EU drop ~{p90*eu_factor*lev/2:.1f}%")
 
 print(f"\n{'='*70}")
-print(f"  KEY TAKEAWAYS")
+print("  KEY TAKEAWAYS")
 print(f"{'='*70}")
 
 # XAG stats

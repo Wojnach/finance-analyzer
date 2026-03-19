@@ -5,21 +5,19 @@ instead of waiting for timeouts on every ticker.
 """
 
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
 from portfolio.signals.forecast import (
-    _run_kronos,
-    _run_chronos,
-    _kronos_circuit_open,
     _chronos_circuit_open,
-    reset_circuit_breakers,
-    compute_forecast_signal,
     _health_weighted_vote,
-    _CIRCUIT_BREAKER_TTL,
-    _FORECAST_MODELS_DISABLED,
+    _kronos_circuit_open,
+    _run_chronos,
+    _run_kronos,
+    compute_forecast_signal,
+    reset_circuit_breakers,
 )
 
 

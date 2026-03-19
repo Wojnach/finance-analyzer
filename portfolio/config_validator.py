@@ -56,7 +56,7 @@ def validate_config_file() -> dict:
     if not CONFIG_FILE.exists():
         raise ValueError(f"config.json not found at {CONFIG_FILE}")
 
-    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+    with open(CONFIG_FILE, encoding="utf-8") as f:
         config = json.load(f)
 
     # Check optional keys and warn

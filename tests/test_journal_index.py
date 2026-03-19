@@ -1,21 +1,18 @@
 """Tests for smart journal retrieval (BM25) in journal_index.py."""
 
 import json
-from datetime import datetime, timezone, timedelta
-
-import pytest
+from datetime import UTC, datetime, timedelta
 
 from portfolio.journal_index import (
     BM25,
     JournalIndex,
-    _tokenize_entry,
+    _build_query_tokens,
     _clean_words,
     _compute_importance,
     _price_bucket,
-    _build_query_tokens,
+    _tokenize_entry,
     retrieve_relevant_entries,
 )
-
 
 # --- Helpers ---
 
@@ -23,7 +20,7 @@ def _make_entry(ts_offset_hours=0, regime="trending-up", tickers=None,
                 decisions=None, watchlist=None, reflection="",
                 prices=None, trigger="cooldown"):
     """Create a journal entry for testing."""
-    base = datetime(2026, 2, 20, 12, 0, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 2, 20, 12, 0, 0, tzinfo=UTC)
     ts = base + timedelta(hours=ts_offset_hours)
     return {
         "ts": ts.isoformat(),
@@ -188,13 +185,13 @@ class TestPriceBuckets:
 
 class TestImportance:
     def test_recent_entry_higher(self):
-        now = datetime(2026, 2, 20, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 20, 12, 0, 0, tzinfo=UTC)
         recent = _make_entry(ts_offset_hours=-1)
         old = _make_entry(ts_offset_hours=-24)
         assert _compute_importance(recent, now) > _compute_importance(old, now)
 
     def test_trade_action_boosts(self):
-        now = datetime(2026, 2, 20, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 20, 12, 0, 0, tzinfo=UTC)
         hold = _make_entry(ts_offset_hours=-1)
         trade = _make_entry(ts_offset_hours=-1, decisions={
             "patient": {"action": "HOLD", "reasoning": ""},
@@ -203,7 +200,7 @@ class TestImportance:
         assert _compute_importance(trade, now) > _compute_importance(hold, now)
 
     def test_high_conviction_boosts(self):
-        now = datetime(2026, 2, 20, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 20, 12, 0, 0, tzinfo=UTC)
         low_conv = _make_entry(ts_offset_hours=-1, tickers={
             "BTC-USD": {"outlook": "bullish", "conviction": 0.3},
         })
@@ -213,13 +210,13 @@ class TestImportance:
         assert _compute_importance(high_conv, now) > _compute_importance(low_conv, now)
 
     def test_reflection_boosts(self):
-        now = datetime(2026, 2, 20, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 20, 12, 0, 0, tzinfo=UTC)
         no_ref = _make_entry(ts_offset_hours=-1)
         with_ref = _make_entry(ts_offset_hours=-1, reflection="Previous thesis was correct")
         assert _compute_importance(with_ref, now) > _compute_importance(no_ref, now)
 
     def test_importance_capped_at_1(self):
-        now = datetime(2026, 2, 20, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 20, 12, 0, 0, tzinfo=UTC)
         entry = _make_entry(
             ts_offset_hours=0,
             decisions={

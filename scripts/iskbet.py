@@ -15,7 +15,7 @@ import re
 import sys
 import tempfile
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -147,7 +147,7 @@ def cmd_status():
     remaining = ""
     try:
         exp_dt = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
-        delta = exp_dt - datetime.now(timezone.utc)
+        delta = exp_dt - datetime.now(UTC)
         if delta.total_seconds() <= 0:
             remaining = " (EXPIRED)"
         else:
@@ -196,7 +196,7 @@ def cmd_off():
 
 
 def cmd_activate(tickers, duration, amount):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expiry = now + duration
 
     # Warn if replacing active session
@@ -232,7 +232,7 @@ def cmd_activate(tickers, duration, amount):
         dur_str = f"{total_secs // 60}m"
 
     ticker_str = ", ".join(tickers)
-    print(f"ISKBETS: ACTIVATED")
+    print("ISKBETS: ACTIVATED")
     print(f"  Tickers:  {ticker_str}")
     print(f"  Amount:   {amount:,.0f} SEK")
     print(f"  Duration: {dur_str}")

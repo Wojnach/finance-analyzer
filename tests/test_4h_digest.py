@@ -10,12 +10,10 @@ Covers BUG-10, BUG-11, BUG-13, BUG-14 fixes:
 
 import json
 import time
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -29,11 +27,11 @@ def _write_jsonl(path, entries):
 
 
 def _now_iso():
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _hours_ago_iso(h):
-    return (datetime.now(timezone.utc) - timedelta(hours=h)).isoformat()
+    return (datetime.now(UTC) - timedelta(hours=h)).isoformat()
 
 
 # ---------------------------------------------------------------------------

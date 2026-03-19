@@ -5,7 +5,7 @@ of each run() cycle so completed agents are detected promptly.
 """
 
 from contextlib import ExitStack
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 

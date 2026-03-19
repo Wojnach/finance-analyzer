@@ -15,19 +15,19 @@ Covers:
 - Other HTTP methods (PUT, DELETE)
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, call
 import requests
 
 from portfolio.http_retry import (
-    fetch_with_retry,
-    fetch_json,
-    RETRYABLE_STATUS,
-    DEFAULT_RETRIES,
     DEFAULT_BACKOFF,
     DEFAULT_BACKOFF_FACTOR,
+    DEFAULT_RETRIES,
+    RETRYABLE_STATUS,
+    fetch_json,
+    fetch_with_retry,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -178,7 +178,7 @@ class TestRetryOnServerErrors:
 
     def test_retryable_status_set_contains_expected_codes(self):
         """Verify the retryable status set has the expected codes."""
-        assert RETRYABLE_STATUS == {429, 500, 502, 503, 504}
+        assert {429, 500, 502, 503, 504} == RETRYABLE_STATUS
 
     def test_retry_on_500_then_success(self):
         """Internal Server Error retried and succeeds."""

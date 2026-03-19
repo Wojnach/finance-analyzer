@@ -10,12 +10,12 @@ Usage from metals_loop.py:
     )
 """
 
-import json
+import datetime
+import logging
 import os
 import sys
 import time
-import datetime
-import logging
+
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
@@ -229,9 +229,9 @@ def get_onchain_summary():
 
 def is_us_market_hours(now=None):
     """Check if the US regular session is open (09:30-16:00 New York time)."""
-    now = now or datetime.datetime.now(datetime.timezone.utc)
+    now = now or datetime.datetime.now(datetime.UTC)
     if now.tzinfo is None:
-        now = now.replace(tzinfo=datetime.timezone.utc)
+        now = now.replace(tzinfo=datetime.UTC)
 
     if ZoneInfo is not None:
         ny = now.astimezone(ZoneInfo("America/New_York"))

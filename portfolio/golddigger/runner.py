@@ -17,13 +17,15 @@ from pathlib import Path
 
 from portfolio.avanza_control import (
     check_session_alive,
-    fetch_price as fetch_avanza_price,
     place_order,
     place_stop_loss,
 )
+from portfolio.avanza_control import (
+    fetch_price as fetch_avanza_price,
+)
 from portfolio.file_utils import load_json
-from portfolio.golddigger.config import GolddiggerConfig, DATA_DIR
 from portfolio.golddigger.bot import GolddiggerBot
+from portfolio.golddigger.config import DATA_DIR, GolddiggerConfig
 from portfolio.message_store import send_or_store
 from portfolio.process_lock import acquire_lock_file, release_lock_file
 

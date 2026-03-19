@@ -11,36 +11,30 @@ Covers:
 """
 
 import json
-import time
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
 
+from portfolio.forecast_accuracy import (
+    get_all_ticker_accuracies,
+    get_ticker_accuracy,
+)
 from portfolio.signals.forecast import (
-    _accuracy_weighted_vote,
-    _health_weighted_vote,
-    _load_forecast_accuracy,
-    _compute_atr_pct,
-    _regime_discount,
-    _HOLD_THRESHOLD,
-    _MIN_SAMPLES,
     _MAX_CONFIDENCE,
+    _REGIME_DISCOUNT_HIGH_VOL,
+    _REGIME_DISCOUNT_TRENDING,
+    _REGIME_NEUTRAL,
     _VOL_GATE_CRYPTO,
     _VOL_GATE_DEFAULT,
-    _REGIME_DISCOUNT_TRENDING,
-    _REGIME_DISCOUNT_HIGH_VOL,
-    _REGIME_NEUTRAL,
+    _accuracy_weighted_vote,
+    _compute_atr_pct,
+    _load_forecast_accuracy,
+    _regime_discount,
     compute_forecast_signal,
     reset_circuit_breakers,
 )
-from portfolio.forecast_accuracy import (
-    get_ticker_accuracy,
-    get_all_ticker_accuracies,
-)
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -53,7 +47,7 @@ def _write_jsonl(path, entries):
 
 
 def _ago(hours=0, days=0):
-    return (datetime.now(timezone.utc) - timedelta(hours=hours, days=days)).isoformat()
+    return (datetime.now(UTC) - timedelta(hours=hours, days=days)).isoformat()
 
 
 def _make_predictions(ticker, accuracy_pct, n_samples, horizon="24h"):

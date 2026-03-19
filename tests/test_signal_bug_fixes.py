@@ -9,11 +9,8 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
-from unittest.mock import patch, MagicMock
 
 from portfolio.signal_utils import majority_vote
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -75,8 +72,7 @@ class TestBug18FuturesFlowVotePassing:
     def test_compute_futures_flow_produces_non_hold(self):
         """Integration: with aligned sub-signals, futures_flow should vote."""
         from portfolio.signals.futures_flow import (
-            _oi_trend, _oi_divergence, _ls_extreme, _top_vs_crowd,
-            _funding_trend, _oi_acceleration,
+            _oi_trend,
         )
         # Create data that produces BUY signals
         df = _make_ohlcv(30, 100, 1.0)  # rising prices
@@ -163,7 +159,7 @@ class TestBug20MomentumFactorsBarRequirement:
 
     def test_high_proximity_still_hold_with_too_few_bars(self):
         """Below MIN_ROWS should still return HOLD."""
-        from portfolio.signals.momentum_factors import _high_proximity, MIN_ROWS
+        from portfolio.signals.momentum_factors import MIN_ROWS, _high_proximity
         close = pd.Series([100.0] * (MIN_ROWS - 1))
         val, signal = _high_proximity(close)
         assert np.isnan(val)

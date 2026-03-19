@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.momentum_factors import (
     MIN_ROWS,
@@ -30,7 +29,6 @@ from portfolio.signals.momentum_factors import (
     _volume_weighted_momentum,
     compute_momentum_factors_signal,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

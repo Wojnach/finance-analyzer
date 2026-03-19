@@ -6,7 +6,6 @@ instead of the broken `is np.nan` identity check.
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.trend import _golden_cross
 
@@ -26,7 +25,7 @@ class TestGoldenCrossNanGuard:
         """Verify that pd.isna catches NaN where `is np.nan` does not."""
         val = pd.Series([np.nan]).iloc[0]
         # The old check would fail:
-        assert not (val is np.nan), "identity check should NOT work for pandas NaN"
+        assert val is not np.nan, "identity check should NOT work for pandas NaN"
         # The new check works:
         assert pd.isna(val), "pd.isna should detect NaN"
 

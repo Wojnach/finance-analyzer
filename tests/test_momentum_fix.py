@@ -6,14 +6,12 @@ UnboundLocalError due to variable shadowing of the imported rsi function.
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.momentum import (
     _rsi_divergence,
     _stochasticrsi,
     compute_momentum_signal,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper to generate test data

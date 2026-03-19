@@ -4,7 +4,6 @@ Covers BUG-23 (None/NaN enter consensus), ARCH-10 (centralized validation),
 and ARCH-11 (max_confidence enforcement from signal registry).
 """
 
-import math
 import numpy as np
 import pytest
 

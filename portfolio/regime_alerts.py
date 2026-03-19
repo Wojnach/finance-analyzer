@@ -5,7 +5,7 @@ Tracks regime history for pattern detection.
 """
 
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from portfolio.file_utils import atomic_append_jsonl, load_json, load_jsonl
@@ -75,7 +75,7 @@ def check_regime_transition(current_regime, ticker):
         "ticker": ticker,
         "old_regime": old_regime,
         "new_regime": current_regime,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -89,7 +89,7 @@ def log_regime_change(ticker, old_regime, new_regime):
     """
     DATA_DIR.mkdir(exist_ok=True)
     entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "ticker": ticker,
         "old_regime": old_regime,
         "new_regime": new_regime,
@@ -109,7 +109,7 @@ def get_regime_distribution(ticker, days=7):
               Empty dict if no data.
     """
     entries = load_jsonl(REGIME_HISTORY_FILE)
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = datetime.now(UTC) - timedelta(days=days)
 
     regime_list = []
     for entry in entries:
@@ -159,7 +159,7 @@ def send_regime_alert(ticker, old_regime, new_regime):
     Returns:
         requests.Response or None.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     msg = (
         f"*REGIME SHIFT: {ticker}*\n"
         f"`{old_regime}` -> `{new_regime}`\n"

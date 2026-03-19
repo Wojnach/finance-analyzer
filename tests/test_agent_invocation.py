@@ -14,11 +14,10 @@ Covers:
   - invoke_agent: Telegram notification on successful spawn
 """
 
-import json
 import os
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, call, mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
@@ -29,7 +28,6 @@ from portfolio.agent_invocation import (
     _log_trigger,
     invoke_agent,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -599,7 +597,6 @@ class TestPerceptionGate:
                     side_effect=fake_gate,
                 ):
                     # We need to patch at the point of import inside invoke_agent
-                    import importlib
                     import portfolio.perception_gate as pg
                     orig = pg.should_invoke
                     pg.should_invoke = fake_gate

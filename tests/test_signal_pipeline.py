@@ -11,20 +11,13 @@ Covers:
 import json
 import unittest.mock as mock
 
-import numpy as np
-import pandas as pd
-import pytest
+from conftest import make_indicators as _make_indicators_base
+from conftest import make_ohlcv_df
 
-from conftest import make_indicators as _make_indicators_base, make_ohlcv_df
 from portfolio.main import (
-    generate_signal,
-    CRYPTO_SYMBOLS,
     STOCK_SYMBOLS,
-    METALS_SYMBOLS,
-    MIN_VOTERS_CRYPTO,
-    MIN_VOTERS_STOCK,
+    generate_signal,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -350,7 +343,7 @@ class TestConfluenceScore:
 class TestWriteAgentSummary:
     def test_summary_structure(self):
         """write_agent_summary should produce a dict with expected keys."""
-        from portfolio.main import write_agent_summary, portfolio_value
+        from portfolio.main import write_agent_summary
 
         # Create minimal inputs
         signals = {
@@ -382,7 +375,6 @@ class TestWriteAgentSummary:
             captured = {}
             original_write = None
             try:
-                from portfolio.main import _atomic_write_json, AGENT_SUMMARY_FILE
                 def capture_write(path, data):
                     captured["data"] = data
                 with mock.patch("portfolio.reporting._atomic_write_json", side_effect=capture_write):

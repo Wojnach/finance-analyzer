@@ -15,19 +15,20 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess
 import platform
+import subprocess
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
-from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
 
 from portfolio.file_utils import atomic_append_jsonl
 from portfolio.gpu_gate import gpu_gate
-from portfolio.signal_utils import majority_vote
 from portfolio.shared_state import _cached
+from portfolio.signal_utils import majority_vote
 
 logger = logging.getLogger("portfolio.signals.forecast")
 
@@ -166,7 +167,7 @@ def _log_health(model: str, ticker: str, success: bool, duration_ms: int, error:
     global _kronos_tripped_until, _chronos_tripped_until
     try:
         entry = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "model": model,
             "ticker": ticker,
             "ok": success,
@@ -804,7 +805,7 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
         last_ts = _last_prediction_ts.get(ticker, 0.0)
         if now_mono - last_ts >= _PREDICTION_DEDUP_TTL:
             entry = {
-                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts": datetime.now(UTC).isoformat(),
                 "ticker": ticker,
                 "current_price": current_price,
                 "sub_signals": result["sub_signals"],

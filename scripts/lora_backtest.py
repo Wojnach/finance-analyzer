@@ -12,9 +12,8 @@ Usage:
 import argparse
 import json
 import platform
-import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -396,7 +395,7 @@ def main():
     print_report(results)
 
     output = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "days": args.days,
         "tickers": tickers,
         "models": {},

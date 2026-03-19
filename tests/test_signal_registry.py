@@ -1,15 +1,16 @@
 """Tests for portfolio.signal_registry — plugin-style signal registration."""
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from portfolio.signal_registry import (
     _CORE_SIGNALS,
     _ENHANCED_SIGNALS,
-    register_signal,
-    register_enhanced,
     get_enhanced_signals,
     get_signal_names,
     load_signal_func,
+    register_enhanced,
+    register_signal,
 )
 
 

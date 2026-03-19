@@ -1,6 +1,10 @@
-import json, datetime, pathlib, requests
+import datetime
+import json
+import pathlib
 
-ts_now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+import requests
+
+ts_now = datetime.datetime.now(datetime.UTC).isoformat()
 
 # --- Journal Entry ---
 entry = {

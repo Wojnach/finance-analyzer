@@ -8,13 +8,9 @@ only allows votes in ranging / high-vol regimes.
 
 import unittest.mock as mock
 
-import numpy as np
-import pandas as pd
-import pytest
-
 from conftest import make_indicators as _make_indicators_base
-from portfolio.signal_engine import generate_signal
 
+from portfolio.signal_engine import generate_signal
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -1,11 +1,6 @@
 """Tests for per-ticker per-signal accuracy cross-tabulation."""
 
-import json
-import sqlite3
 import pytest
-from pathlib import Path
-from collections import defaultdict
-
 
 # ---------------------------------------------------------------------------
 # Helpers to build test data

@@ -6,7 +6,7 @@ Uses Reddit's public JSON API, no authentication needed.
 import json
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 USER_AGENT = "finance-analyzer/1.0 (portfolio intelligence bot)"
 
@@ -45,9 +45,9 @@ def _fetch_subreddit(sub, keywords, dedicated, per_sub):
                 "title": title,
                 "source": f"reddit/r/{sub}",
                 "published": (
-                    datetime.fromtimestamp(created, tz=timezone.utc).isoformat()
+                    datetime.fromtimestamp(created, tz=UTC).isoformat()
                     if created
-                    else datetime.now(timezone.utc).isoformat()
+                    else datetime.now(UTC).isoformat()
                 ),
                 "score": post.get("score", 0),
                 "num_comments": post.get("num_comments", 0),
@@ -77,9 +77,9 @@ def _search_subreddit(sub, keywords, limit=10):
                 "title": title,
                 "source": f"reddit/r/{sub}",
                 "published": (
-                    datetime.fromtimestamp(created, tz=timezone.utc).isoformat()
+                    datetime.fromtimestamp(created, tz=UTC).isoformat()
                     if created
-                    else datetime.now(timezone.utc).isoformat()
+                    else datetime.now(UTC).isoformat()
                 ),
                 "score": post.get("score", 0),
                 "num_comments": post.get("num_comments", 0),

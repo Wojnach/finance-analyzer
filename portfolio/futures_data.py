@@ -9,7 +9,7 @@ import time
 
 from portfolio.api_utils import BINANCE_FAPI_BASE, BINANCE_FUTURES_DATA
 from portfolio.http_retry import fetch_json
-from portfolio.shared_state import _cached, _binance_limiter
+from portfolio.shared_state import _binance_limiter, _cached
 
 logger = logging.getLogger("portfolio.futures_data")
 

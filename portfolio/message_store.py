@@ -21,7 +21,7 @@ Categories that are SAVED ONLY (viewable on dashboard / via file):
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.file_utils import atomic_append_jsonl
@@ -94,7 +94,7 @@ def log_message(text, category="analysis", sent=False):
     """
     cleaned = sanitize_message_text(text)
     entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "text": cleaned,
         "category": category,
         "sent": sent,

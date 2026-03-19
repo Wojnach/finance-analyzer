@@ -12,8 +12,7 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, time, timedelta
 
 from portfolio.market_timing import _is_us_dst
 
@@ -32,7 +31,7 @@ class SessionInfo:
         phase: Human-readable phase: "open", "extended", "pre_open", "closed".
     """
     session_end: datetime
-    extended_end: Optional[datetime]
+    extended_end: datetime | None
     remaining_minutes: float
     is_open: bool
     is_extended: bool
@@ -56,14 +55,14 @@ def _eu_dst(dt: datetime) -> bool:
     year = dt.year
 
     # Last Sunday of March
-    mar31 = datetime(year, 3, 31, tzinfo=timezone.utc)
+    mar31 = datetime(year, 3, 31, tzinfo=UTC)
     last_sun_mar = 31 - (mar31.weekday() + 1) % 7
-    dst_start = datetime(year, 3, last_sun_mar, 1, 0, tzinfo=timezone.utc)
+    dst_start = datetime(year, 3, last_sun_mar, 1, 0, tzinfo=UTC)
 
     # Last Sunday of October
-    oct31 = datetime(year, 10, 31, tzinfo=timezone.utc)
+    oct31 = datetime(year, 10, 31, tzinfo=UTC)
     last_sun_oct = 31 - (oct31.weekday() + 1) % 7
-    dst_end = datetime(year, 10, last_sun_oct, 1, 0, tzinfo=timezone.utc)
+    dst_end = datetime(year, 10, last_sun_oct, 1, 0, tzinfo=UTC)
 
     return dst_start <= dt < dst_end
 
@@ -86,7 +85,7 @@ def _make_session_end(now: datetime, cet_hour: int, cet_minute: int) -> datetime
     utc_hour = cet_hour - offset
     end = now.replace(hour=utc_hour, minute=cet_minute, second=0, microsecond=0)
     if end.tzinfo is None:
-        end = end.replace(tzinfo=timezone.utc)
+        end = end.replace(tzinfo=UTC)
     return end
 
 
@@ -114,8 +113,8 @@ SESSIONS = {
 
 
 def get_session_info(instrument_type: str,
-                     underlying: Optional[str] = None,
-                     now: Optional[datetime] = None) -> SessionInfo:
+                     underlying: str | None = None,
+                     now: datetime | None = None) -> SessionInfo:
     """Get current session state for an instrument.
 
     Args:
@@ -127,9 +126,9 @@ def get_session_info(instrument_type: str,
         SessionInfo with remaining time, phase, and session boundaries.
     """
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
+        now = now.replace(tzinfo=UTC)
 
     # Crypto: always open (24/7)
     if instrument_type == "crypto":
@@ -206,7 +205,7 @@ def get_session_info(instrument_type: str,
 
 
 def remaining_session_minutes(instrument_type: str = "warrant",
-                              now: Optional[datetime] = None) -> float:
+                              now: datetime | None = None) -> float:
     """Shortcut: get remaining minutes for an instrument's session."""
     info = get_session_info(instrument_type, now=now)
     return info.remaining_minutes

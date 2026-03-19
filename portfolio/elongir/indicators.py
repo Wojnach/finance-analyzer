@@ -7,16 +7,14 @@ for a single snapshot.
 
 import math
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
 
 from portfolio.elongir.data_provider import MarketSnapshot
-
 
 # ---------------------------------------------------------------------------
 # Core indicator functions
 # ---------------------------------------------------------------------------
 
-def compute_rsi(closes: list[float], period: int = 14) -> Optional[float]:
+def compute_rsi(closes: list[float], period: int = 14) -> float | None:
     """Compute RSI from close prices. Returns None if insufficient data."""
     if len(closes) < period + 1:
         return None
@@ -37,7 +35,7 @@ def compute_macd(
     fast: int = 12,
     slow: int = 26,
     signal_period: int = 9,
-) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+) -> tuple[float | None, float | None, float | None]:
     """Compute MACD line, signal line, and histogram.
 
     Returns (macd_line, signal_line, histogram) or (None, None, None).
@@ -77,7 +75,7 @@ def compute_bb(
     closes: list[float],
     period: int = 20,
     std_mult: float = 2.0,
-) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+) -> tuple[float | None, float | None, float | None]:
     """Compute Bollinger Bands (lower, mid, upper).
 
     Returns (lower, mid, upper) or (None, None, None).
@@ -91,7 +89,7 @@ def compute_bb(
     return mid - std_mult * std, mid, mid + std_mult * std
 
 
-def compute_ema(values: list[float], period: int) -> Optional[float]:
+def compute_ema(values: list[float], period: int) -> float | None:
     """Compute current EMA value. Returns None if insufficient data."""
     if len(values) < period:
         return None
@@ -106,7 +104,7 @@ def compute_volume_ratio(
     volumes: list[float],
     recent: int = 5,
     avg_period: int = 20,
-) -> Optional[float]:
+) -> float | None:
     """Volume ratio: average of recent N bars / average of last avg_period bars.
 
     Returns None if insufficient data.
@@ -125,7 +123,7 @@ def compute_atr(
     lows: list[float],
     closes: list[float],
     period: int = 14,
-) -> Optional[float]:
+) -> float | None:
     """Compute Average True Range. Returns None if insufficient data."""
     n = len(closes)
     if n < period + 1 or len(highs) < period + 1 or len(lows) < period + 1:
@@ -148,7 +146,7 @@ def compute_atr(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _ema_series(values: list[float], period: int) -> Optional[list[float]]:
+def _ema_series(values: list[float], period: int) -> list[float] | None:
     """Compute a full EMA series from values."""
     if len(values) < period:
         return None
@@ -161,7 +159,7 @@ def _ema_series(values: list[float], period: int) -> Optional[list[float]]:
     return result
 
 
-def _extract_ohlcv(klines: list) -> Tuple[
+def _extract_ohlcv(klines: list) -> tuple[
     list[float], list[float], list[float], list[float], list[float]
 ]:
     """Extract OHLCV from raw Binance kline arrays.
@@ -184,23 +182,23 @@ def _extract_ohlcv(klines: list) -> Tuple[
 @dataclass
 class TimeframeIndicators:
     """Indicators for a single timeframe."""
-    rsi: Optional[float] = None
-    macd_line: Optional[float] = None
-    macd_signal: Optional[float] = None
-    macd_histogram: Optional[float] = None
-    bb_lower: Optional[float] = None
-    bb_mid: Optional[float] = None
-    bb_upper: Optional[float] = None
-    bb_position: Optional[str] = None  # "above_upper" | "below_lower" | "inside"
-    ema_9: Optional[float] = None
-    ema_21: Optional[float] = None
-    volume_ratio: Optional[float] = None
-    atr: Optional[float] = None
-    last_close: Optional[float] = None
-    high_1h: Optional[float] = None     # highest close in the last ~60 min
+    rsi: float | None = None
+    macd_line: float | None = None
+    macd_signal: float | None = None
+    macd_histogram: float | None = None
+    bb_lower: float | None = None
+    bb_mid: float | None = None
+    bb_upper: float | None = None
+    bb_position: str | None = None  # "above_upper" | "below_lower" | "inside"
+    ema_9: float | None = None
+    ema_21: float | None = None
+    volume_ratio: float | None = None
+    atr: float | None = None
+    last_close: float | None = None
+    high_1h: float | None = None     # highest close in the last ~60 min
 
 
-def _compute_timeframe(klines: Optional[list]) -> TimeframeIndicators:
+def _compute_timeframe(klines: list | None) -> TimeframeIndicators:
     """Compute indicators for a single timeframe from raw klines."""
     ti = TimeframeIndicators()
     if not klines or len(klines) < 2:

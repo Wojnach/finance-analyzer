@@ -9,18 +9,18 @@ import json
 import logging
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
 
 logger = logging.getLogger("portfolio.iskbets")
 
-from portfolio.api_utils import get_alpaca_headers, BINANCE_BASE, ALPACA_BASE
+from portfolio.api_utils import ALPACA_BASE, BINANCE_BASE, get_alpaca_headers
 from portfolio.file_utils import atomic_write_json, load_json
 from portfolio.http_retry import fetch_with_retry
-from portfolio.shared_state import _cached
 from portfolio.message_store import send_or_store
+from portfolio.shared_state import _cached
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 CONFIG_FILE = DATA_DIR / "iskbets_config.json"
@@ -30,7 +30,6 @@ STATE_FILE = DATA_DIR / "iskbets_state.json"
 from portfolio.tickers import (
     SYMBOLS as TICKER_SOURCES,
 )
-
 
 # ── State I/O ────────────────────────────────────────────────────────────
 
@@ -47,7 +46,7 @@ def _load_config():
     if expiry:
         try:
             exp_dt = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
-            if datetime.now(timezone.utc) > exp_dt:
+            if datetime.now(UTC) > exp_dt:
                 # Auto-disable
                 cfg["enabled"] = False
                 _save_config(cfg)
@@ -344,7 +343,7 @@ def invoke_layer2_gate(ticker, price, conditions, signals, tf_data, atr, iskbets
             f.write(
                 json.dumps(
                     {
-                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "ts": datetime.now(UTC).isoformat(),
                         "ticker": ticker,
                         "price": price,
                         "approved": approved,
@@ -449,9 +448,9 @@ def format_entry_alert(ticker, price, conditions, atr, iskbets_cfg, signals=None
     stop_pct = ((stop - price) / price) * 100
     stage1_pct = ((stage1 - price) / price) * 100
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     short_ticker = ticker.replace("-USD", "")
     lines = [
         f"\U0001f7e1 *ISKBETS BUY {short_ticker}* @ ${price:,.2f}",
@@ -520,7 +519,7 @@ def format_exit_alert(ticker, price, exit_type, entry_price, amount_sek, entry_t
     # Duration
     try:
         entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
-        now = exit_time if exit_time else datetime.now(timezone.utc)
+        now = exit_time if exit_time else datetime.now(UTC)
         duration = now - entry_dt
         hours = int(duration.total_seconds() // 3600)
         mins = int((duration.total_seconds() % 3600) // 60)
@@ -592,7 +591,7 @@ def format_position_status(pos, price, fx_rate):
 
     try:
         entry_dt = datetime.fromisoformat(pos["entry_time"].replace("Z", "+00:00"))
-        duration = datetime.now(timezone.utc) - entry_dt
+        duration = datetime.now(UTC) - entry_dt
         hours = int(duration.total_seconds() // 3600)
         mins = int((duration.total_seconds() % 3600) // 60)
         dur_str = f"{hours}h {mins}min"
@@ -769,7 +768,7 @@ def _handle_bought(args, config):
         "entry_price_usd": price_usd,
         "amount_sek": amount_sek,
         "shares": round(shares, 6),
-        "entry_time": datetime.now(timezone.utc).isoformat(),
+        "entry_time": datetime.now(UTC).isoformat(),
         "atr_15m": round(atr, 4),
         "stop_loss": round(stop, 2),
         "stage1_target": round(stage1, 2),
@@ -820,7 +819,7 @@ def _handle_sold(args, config):
 
     try:
         entry_dt = datetime.fromisoformat(pos["entry_time"].replace("Z", "+00:00"))
-        duration = datetime.now(timezone.utc) - entry_dt
+        duration = datetime.now(UTC) - entry_dt
         hours = int(duration.total_seconds() // 3600)
         mins = int((duration.total_seconds() % 3600) // 60)
         dur_str = f"{hours}h {mins}min"
@@ -836,7 +835,7 @@ def _handle_sold(args, config):
         "pnl_sek": round(pnl_sek, 2),
         "pnl_pct": round(pnl_pct, 2),
         "entry_time": pos["entry_time"],
-        "exit_time": datetime.now(timezone.utc).isoformat(),
+        "exit_time": datetime.now(UTC).isoformat(),
         "duration": dur_str,
     }
     state["trade_history"].append(trade)

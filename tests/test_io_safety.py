@@ -5,13 +5,7 @@ and that JSONL appends use atomic_append_jsonl() with fsync.
 """
 
 import json
-import os
-import time
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
-
+from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # BUG-47: health.py load_health() should use load_json()
@@ -22,7 +16,7 @@ class TestHealthLoadJson:
 
     def test_load_health_missing_file(self, tmp_path):
         """load_health returns defaults when health file doesn't exist."""
-        from portfolio.health import load_health, HEALTH_FILE
+        from portfolio.health import load_health
         fake_path = tmp_path / "no_such_file.json"
         with patch("portfolio.health.HEALTH_FILE", fake_path):
             result = load_health()
@@ -61,6 +55,7 @@ class TestHealthLoadJson:
     def test_load_health_uses_load_json(self):
         """Verify load_health calls load_json, not raw json.loads."""
         import inspect
+
         from portfolio.health import load_health
         source = inspect.getsource(load_health)
         assert "load_json" in source, "load_health should use load_json()"
@@ -77,6 +72,7 @@ class TestGetHeldTickersLoadJson:
     def test_get_held_tickers_uses_load_json(self):
         """Verify _get_held_tickers calls load_json, not raw json.loads."""
         import inspect
+
         from portfolio.reporting import _get_held_tickers
         source = inspect.getsource(_get_held_tickers)
         assert "load_json" in source, "_get_held_tickers should use load_json()"
@@ -116,6 +112,7 @@ class TestReportingLoadJsonPatterns:
     def test_write_agent_summary_no_raw_json_loads(self):
         """No raw json.loads(path.read_text()) in write_agent_summary or helpers."""
         import inspect
+
         from portfolio import reporting
         source = inspect.getsource(reporting)
         # Count remaining raw json.loads patterns (there should be zero for file reads)
@@ -139,6 +136,7 @@ class TestOutcomeTrackerAtomicAppend:
     def test_log_signal_snapshot_uses_atomic_append(self):
         """Verify the function uses atomic_append_jsonl, not raw open/write."""
         import inspect
+
         from portfolio.outcome_tracker import log_signal_snapshot
         source = inspect.getsource(log_signal_snapshot)
         assert "atomic_append_jsonl" in source, (
@@ -177,6 +175,7 @@ class TestOutcomeTrackerAtomicAppend:
     def test_atomic_append_jsonl_has_fsync(self):
         """Verify atomic_append_jsonl flushes and fsyncs."""
         import inspect
+
         from portfolio.file_utils import atomic_append_jsonl
         source = inspect.getsource(atomic_append_jsonl)
         assert "f.flush()" in source

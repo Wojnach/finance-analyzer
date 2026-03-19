@@ -3,8 +3,6 @@
 import datetime as dt
 import json
 
-import pytest
-
 
 def test_backfill_skips_neutral_outlook(tmp_path, monkeypatch):
     """Neutral outlook predictions are not scored."""
@@ -15,7 +13,7 @@ def test_backfill_skips_neutral_outlook(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "DECISIONS_FILE", decisions_file)
     monkeypatch.setattr(mod, "OUTCOMES_FILE", outcomes_file)
 
-    ts = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=2)).isoformat()
+    ts = (dt.datetime.now(dt.UTC) - dt.timedelta(days=2)).isoformat()
     decision = {
         "ts": ts,
         "predictions": {"BTC-USD": {"outlook": "neutral", "conviction": 0.0}},
@@ -42,7 +40,7 @@ def test_backfill_scores_bullish_correctly(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "DECISIONS_FILE", decisions_file)
     monkeypatch.setattr(mod, "OUTCOMES_FILE", outcomes_file)
 
-    ts = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=2)).isoformat()
+    ts = (dt.datetime.now(dt.UTC) - dt.timedelta(days=2)).isoformat()
     decision = {
         "ts": ts,
         "predictions": {
@@ -74,7 +72,7 @@ def test_backfill_scores_bearish_correctly(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "DECISIONS_FILE", decisions_file)
     monkeypatch.setattr(mod, "OUTCOMES_FILE", outcomes_file)
 
-    ts = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=4)).isoformat()
+    ts = (dt.datetime.now(dt.UTC) - dt.timedelta(days=4)).isoformat()
     decision = {
         "ts": ts,
         "predictions": {
@@ -107,7 +105,7 @@ def test_backfill_scores_wrong_prediction(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "DECISIONS_FILE", decisions_file)
     monkeypatch.setattr(mod, "OUTCOMES_FILE", outcomes_file)
 
-    ts = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=2)).isoformat()
+    ts = (dt.datetime.now(dt.UTC) - dt.timedelta(days=2)).isoformat()
     decision = {
         "ts": ts,
         "predictions": {
@@ -139,7 +137,7 @@ def test_backfill_deduplicates(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "DECISIONS_FILE", decisions_file)
     monkeypatch.setattr(mod, "OUTCOMES_FILE", outcomes_file)
 
-    ts = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=4)).isoformat()
+    ts = (dt.datetime.now(dt.UTC) - dt.timedelta(days=4)).isoformat()
     decision = {
         "ts": ts,
         "predictions": {
@@ -171,7 +169,7 @@ def test_backfill_skips_future_horizons(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "OUTCOMES_FILE", outcomes_file)
 
     # Decision from 1 hour ago -- too soon for 1d or 3d horizon
-    ts = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)).isoformat()
+    ts = (dt.datetime.now(dt.UTC) - dt.timedelta(hours=1)).isoformat()
     decision = {
         "ts": ts,
         "predictions": {
@@ -202,7 +200,7 @@ def test_backfill_skips_missing_price(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "DECISIONS_FILE", decisions_file)
     monkeypatch.setattr(mod, "OUTCOMES_FILE", outcomes_file)
 
-    ts = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=2)).isoformat()
+    ts = (dt.datetime.now(dt.UTC) - dt.timedelta(days=2)).isoformat()
     decision = {
         "ts": ts,
         "predictions": {
@@ -245,7 +243,7 @@ def test_backfill_handles_fetch_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "DECISIONS_FILE", decisions_file)
     monkeypatch.setattr(mod, "OUTCOMES_FILE", outcomes_file)
 
-    ts = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=2)).isoformat()
+    ts = (dt.datetime.now(dt.UTC) - dt.timedelta(days=2)).isoformat()
     decision = {
         "ts": ts,
         "predictions": {

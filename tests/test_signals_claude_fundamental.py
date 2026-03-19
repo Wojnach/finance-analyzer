@@ -2,26 +2,24 @@
 
 import json
 import time
-
-import pytest
 from unittest import mock
 
-import pandas as pd
 import numpy as np
+import pandas as pd
+import pytest
 
 from portfolio.signals.claude_fundamental import (
-    compute_claude_fundamental_signal,
-    _parse_haiku_response,
-    _parse_sonnet_response,
-    _parse_opus_response,
+    _MAX_CONFIDENCE,
+    SUB_SIGNAL_NAMES,
+    _cache,
+    _call_claude_cli,
     _extract_json,
     _get_best_result,
-    _call_claude_cli,
-    _cache,
     _lock,
-    _MAX_CONFIDENCE,
-    _DEFAULT_HOLD,
-    SUB_SIGNAL_NAMES,
+    _parse_haiku_response,
+    _parse_opus_response,
+    _parse_sonnet_response,
+    compute_claude_fundamental_signal,
 )
 
 

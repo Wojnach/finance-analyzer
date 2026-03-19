@@ -20,8 +20,8 @@ import logging
 
 import pandas as pd
 
-from portfolio.signal_utils import majority_vote
 from portfolio.shared_state import _cached
+from portfolio.signal_utils import majority_vote
 
 logger = logging.getLogger("portfolio.signals.futures_flow")
 

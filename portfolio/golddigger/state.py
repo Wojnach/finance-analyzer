@@ -1,11 +1,10 @@
 """Persistent state management for GoldDigger bot."""
 
 import logging
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
-from typing import Optional
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 
-from portfolio.file_utils import atomic_write_json, load_json, atomic_append_jsonl
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
 
 logger = logging.getLogger("portfolio.golddigger.state")
 
@@ -28,7 +27,7 @@ class BotState:
     """Complete bot state, persisted to JSON between sessions."""
     equity_sek: float = 100_000.0
     cash_sek: float = 100_000.0
-    position: Optional[Position] = None
+    position: Position | None = None
     daily_pnl: float = 0.0
     daily_trades: int = 0
     total_trades: int = 0
@@ -80,7 +79,7 @@ class BotState:
             quantity=quantity,
             avg_price=price,
             entry_gold=gold_price,
-            entry_time=datetime.now(timezone.utc).isoformat(),
+            entry_time=datetime.now(UTC).isoformat(),
             stop_price=stop_price,
             take_profit_price=tp_price,
         )
@@ -122,7 +121,7 @@ def log_trade(
 ):
     """Append a trade record to the JSONL trade log."""
     entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "action": action,
         "quantity": quantity,
         "price_sek": price,
@@ -144,22 +143,22 @@ def log_poll(
     z_fx: float,
     z_yield: float,
     position_qty: int = 0,
-    cert_bid: Optional[float] = None,
-    cert_ask: Optional[float] = None,
+    cert_bid: float | None = None,
+    cert_ask: float | None = None,
     data_quality: str = "ok",
-    gold_volume_ratio: Optional[float] = None,
-    dxy: Optional[float] = None,
-    dxy_change_pct: Optional[float] = None,
-    us10y_source: Optional[str] = None,
-    us10y_change_pct: Optional[float] = None,
-    next_event_type: Optional[str] = None,
-    next_event_hours: Optional[float] = None,
+    gold_volume_ratio: float | None = None,
+    dxy: float | None = None,
+    dxy_change_pct: float | None = None,
+    us10y_source: str | None = None,
+    us10y_change_pct: float | None = None,
+    next_event_type: str | None = None,
+    next_event_hours: float | None = None,
     event_risk_active: bool = False,
-    event_risk_phase: Optional[str] = None,
+    event_risk_phase: str | None = None,
 ):
     """Append a structured poll log entry to the JSONL log."""
     entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "gold": gold,
         "usdsek": usdsek,
         "us10y": us10y,

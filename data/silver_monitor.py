@@ -19,9 +19,19 @@ Two layers:
 
 Run: .venv/Scripts/python.exe -u data/silver_monitor.py
 """
-import json, time, datetime, requests, sys, os, subprocess, shutil, platform
+import datetime
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+import time
 from collections import deque
 from pathlib import Path
+
+import requests
+
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
@@ -43,7 +53,7 @@ def _load_position_params():
     """Load position parameters from metals_positions_state.json instead of hardcoded values."""
     state_path = Path(__file__).resolve().parent / "metals_positions_state.json"
     try:
-        with open(state_path, "r", encoding="utf-8") as f:
+        with open(state_path, encoding="utf-8") as f:
             state = json.load(f)
         for key, pos in state.items():
             if "silver" in key.lower() and pos.get("active", False):
@@ -116,9 +126,9 @@ _US_EASTERN_TZ = ZoneInfo("America/New_York") if ZoneInfo else None
 
 def _us_open_dt_utc(now_utc=None):
     """Return today's 09:30 New York open translated to UTC."""
-    now_utc = now_utc or datetime.datetime.now(datetime.timezone.utc)
+    now_utc = now_utc or datetime.datetime.now(datetime.UTC)
     if now_utc.tzinfo is None:
-        now_utc = now_utc.replace(tzinfo=datetime.timezone.utc)
+        now_utc = now_utc.replace(tzinfo=datetime.UTC)
     if _US_EASTERN_TZ is not None:
         ny_now = now_utc.astimezone(_US_EASTERN_TZ)
         open_ny = datetime.datetime.combine(
@@ -126,15 +136,15 @@ def _us_open_dt_utc(now_utc=None):
             datetime.time(9, 30),
             tzinfo=_US_EASTERN_TZ,
         )
-        return open_ny.astimezone(datetime.timezone.utc)
+        return open_ny.astimezone(datetime.UTC)
     return now_utc.replace(hour=14, minute=30, second=0, microsecond=0)
 
 
 def _us_close_dt_utc(now_utc=None):
     """Return today's 16:00 New York close translated to UTC."""
-    now_utc = now_utc or datetime.datetime.now(datetime.timezone.utc)
+    now_utc = now_utc or datetime.datetime.now(datetime.UTC)
     if now_utc.tzinfo is None:
-        now_utc = now_utc.replace(tzinfo=datetime.timezone.utc)
+        now_utc = now_utc.replace(tzinfo=datetime.UTC)
     if _US_EASTERN_TZ is not None:
         ny_now = now_utc.astimezone(_US_EASTERN_TZ)
         close_ny = datetime.datetime.combine(
@@ -142,7 +152,7 @@ def _us_close_dt_utc(now_utc=None):
             datetime.time(16, 0),
             tzinfo=_US_EASTERN_TZ,
         )
-        return close_ny.astimezone(datetime.timezone.utc)
+        return close_ny.astimezone(datetime.UTC)
     return now_utc.replace(hour=21, minute=0, second=0, microsecond=0)
 
 
@@ -270,7 +280,7 @@ def _has_active_silver_position():
     """Check metals_positions_state.json for any active silver position."""
     state_path = Path(__file__).resolve().parent / "metals_positions_state.json"
     try:
-        with open(state_path, "r", encoding="utf-8") as f:
+        with open(state_path, encoding="utf-8") as f:
             state = json.load(f)
         for key, pos in state.items():
             if "silver" in key.lower() and pos.get("active", False):
@@ -283,7 +293,7 @@ def _has_active_silver_position():
 
 def _is_market_hours():
     """Check if current time is within EU open through US cash close, weekdays only."""
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     if now.weekday() >= 5:  # weekend
         return False
     us_close = _us_close_dt_utc(now)
@@ -292,7 +302,7 @@ def _is_market_hours():
 
 def _is_analysis_window():
     """Check if Claude analysis should run: 1h before EU open to 1h after US close."""
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     if now.weekday() >= 5:  # weekend
         return False
     analysis_start = now.replace(hour=6, minute=0, second=0, microsecond=0)
@@ -321,7 +331,7 @@ def send_telegram(msg):
 def gather_analysis_data(price):
     """Collect comprehensive data for Claude analysis."""
     data = {
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         "position": {
             "instrument": "MINI L SILVER AVA 301",
             "invested_sek": POSITION_SEK,
@@ -405,7 +415,7 @@ def gather_analysis_data(price):
         data["context"]["gold_silver_ratio"] = round(data["context"]["gold_price"] / price, 2)
 
     # US market open proximity context
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    now_utc = datetime.datetime.now(datetime.UTC)
     us_open_today = _us_open_dt_utc(now_utc)
     minutes_to_open = (us_open_today - now_utc).total_seconds() / 60
     if minutes_to_open < -120:  # more than 2h past open, not relevant
@@ -438,9 +448,9 @@ def gather_analysis_data(price):
 
     # Exit optimizer — probabilistic exit assessment
     try:
-        from portfolio.exit_optimizer import compute_exit_plan, Position, MarketSnapshot
-        from portfolio.session_calendar import get_session_info
         from portfolio.cost_model import get_cost_model
+        from portfolio.exit_optimizer import MarketSnapshot, Position, compute_exit_plan
+        from portfolio.session_calendar import get_session_info
         sess = get_session_info("warrant", underlying="XAG-USD")
         if sess.is_open and sess.remaining_minutes >= 2:
             opt_pos = Position(
@@ -448,12 +458,12 @@ def gather_analysis_data(price):
                 qty=round(POSITION_SEK / (price * LEVERAGE), 2) if price > 0 else 0,
                 entry_price_sek=REFERENCE_PRICE * 10.85,  # approximate
                 entry_underlying_usd=REFERENCE_PRICE,
-                entry_ts=datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2),
+                entry_ts=datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=2),
                 instrument_type="warrant",
                 leverage=LEVERAGE,
             )
             opt_market = MarketSnapshot(
-                asof_ts=datetime.datetime.now(datetime.timezone.utc),
+                asof_ts=datetime.datetime.now(datetime.UTC),
                 price=price,
                 usdsek=10.85,
             )
@@ -602,7 +612,7 @@ Adjust all values based on your analysis. Then run it."""
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)
 
     log_path = DATA_DIR / "silver_agent.log"
-    print(f"  -> Invoking Claude for analysis...")
+    print("  -> Invoking Claude for analysis...")
     try:
         with open(log_path, "a", encoding="utf-8") as log_fh:
             proc = subprocess.Popen(
@@ -620,7 +630,7 @@ Adjust all values based on your analysis. Then run it."""
             print(f"  -> Claude finished (exit {proc.returncode})")
             return proc.returncode == 0
     except subprocess.TimeoutExpired:
-        print(f"  [!] Claude timed out, killing")
+        print("  [!] Claude timed out, killing")
         if platform.system() == "Windows":
             subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                            capture_output=True)
@@ -749,7 +759,7 @@ def main():
                 if not _is_analysis_window():
                     if time.time() - last_analysis_ts >= ANALYSIS_INTERVAL:
                         last_analysis_ts = time.time()
-                        print(f"  [off-hours] Skipping Claude analysis (outside 06-22 UTC weekdays)")
+                        print("  [off-hours] Skipping Claude analysis (outside 06-22 UTC weekdays)")
                     continue
                 if time.time() - last_analysis_ts >= ANALYSIS_INTERVAL:
                     last_analysis_ts = time.time()
@@ -776,7 +786,7 @@ def main():
                     })
                     # Try to read back the decision Claude made
                     try:
-                        tg_lines = open(DATA_DIR / "telegram_messages.jsonl", "r", encoding="utf-8").readlines()
+                        tg_lines = open(DATA_DIR / "telegram_messages.jsonl", encoding="utf-8").readlines()
                         if tg_lines:
                             last = json.loads(tg_lines[-1])
                             if last.get("category") == "analysis":
@@ -794,7 +804,7 @@ def main():
                     print(f"{'='*50}\n")
 
             except KeyboardInterrupt:
-                print(f"\n=== Monitor stopped ===")
+                print("\n=== Monitor stopped ===")
                 if price:
                     pct, wpct, wsek = calc_warrant(price)
                     print(f"Final: ${price:.2f} ({pct:+.2f}%) | W:{wpct:+.1f}% ({wsek:+,.0f} SEK)")

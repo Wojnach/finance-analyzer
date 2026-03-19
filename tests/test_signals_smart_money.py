@@ -22,17 +22,16 @@ import pandas as pd
 import pytest
 
 from portfolio.signals.smart_money import (
-    compute_smart_money_signal,
-    _find_swing_highs,
-    _find_swing_lows,
+    MIN_ROWS,
     _detect_bos,
     _detect_choch,
     _detect_fvg,
     _detect_liquidity_sweep,
     _detect_supply_demand,
-    MIN_ROWS,
+    _find_swing_highs,
+    _find_swing_lows,
+    compute_smart_money_signal,
 )
-
 
 # ---------------------------------------------------------------------------
 # Data-builder helpers

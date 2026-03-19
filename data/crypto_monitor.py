@@ -16,9 +16,17 @@ Two layers:
 
 Run: .venv/Scripts/python.exe -u data/crypto_monitor.py
 """
-import json, time, datetime, requests, sys, os, subprocess, shutil, platform
+import datetime
+import json
+import os
+import platform
+import shutil
+import subprocess
+import time
 from collections import deque
 from pathlib import Path
+
+import requests
 
 # === Config ===
 CHECK_INTERVAL = 15              # price check every 15s
@@ -140,7 +148,7 @@ def fetch_binance_price(symbol):
         r = requests.get(BINANCE_TICKER, params={"symbol": symbol}, timeout=5)
         r.raise_for_status()
         return float(r.json()["price"])
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -176,7 +184,7 @@ def fetch_yahoo_price(symbol):
             "prev_close": prev_close,
             "change_pct": round((price - prev_close) / prev_close * 100, 2) if prev_close else 0,
         }
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -272,7 +280,7 @@ def fetch_all_prices():
 
 def gather_analysis_data(prices):
     """Collect comprehensive data for Claude analysis."""
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    now_utc = datetime.datetime.now(datetime.UTC)
     data = {
         "timestamp": now_utc.isoformat(),
         "instruments": {},
@@ -421,7 +429,7 @@ def invoke_claude_analysis(data_path):
         print("  [!] claude not found on PATH, skipping analysis")
         return False
 
-    prompt = f"""You are a crypto/equities analyst monitoring BTC, ETH, and MSTR together. These three instruments are highly correlated (BTC leads, ETH follows with higher beta, MSTR is leveraged BTC equity exposure).
+    prompt = """You are a crypto/equities analyst monitoring BTC, ETH, and MSTR together. These three instruments are highly correlated (BTC leads, ETH follows with higher beta, MSTR is leveraged BTC equity exposure).
 
 The user is watching for a LONG-TERM RE-ENTRY opportunity. They sold after a -50% drawdown from the Oct 2025 ATH ($126K BTC). They need to know: is NOW the time to re-enter, or should they wait?
 
@@ -450,10 +458,10 @@ Consider:
 Write and execute data/crypto_tg_send.py:
 ```python
 import json, datetime
-prices = {{}}  # fill with current BTC, ETH, MSTR prices
+prices = {}  # fill with current BTC, ETH, MSTR prices
 summary = '...'  # 3-5 sentence analysis with re-entry assessment
 # Log locally (NO Telegram — warnings disabled)
-entry = {{
+entry = {
     'ts': datetime.datetime.now(datetime.timezone.utc).isoformat(),
     'text': summary,
     'prices': prices,
@@ -461,10 +469,10 @@ entry = {{
     'fear_greed': None,    # current F&G value
     'category': 'crypto_monitor',
     'sent': False,
-}}
+}
 with open('data/crypto_monitor_log.jsonl', 'a') as f:
     f.write(json.dumps(entry) + '\\n')
-print(f'Logged: {{summary[:100]}}')
+print(f'Logged: {summary[:100]}')
 ```
 
 IMPORTANT: Do NOT send Telegram messages. Only log locally. Include re-entry assessment in every analysis."""
@@ -474,7 +482,7 @@ IMPORTANT: Do NOT send Telegram messages. Only log locally. Include re-entry ass
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)
 
     log_path = DATA_DIR / "crypto_agent.log"
-    print(f"  -> Invoking Claude for analysis...")
+    print("  -> Invoking Claude for analysis...")
     try:
         with open(log_path, "a", encoding="utf-8") as log_fh:
             proc = subprocess.Popen(
@@ -491,7 +499,7 @@ IMPORTANT: Do NOT send Telegram messages. Only log locally. Include re-entry ass
             print(f"  -> Claude finished (exit {proc.returncode})")
             return proc.returncode == 0
     except subprocess.TimeoutExpired:
-        print(f"  [!] Claude timed out, killing")
+        print("  [!] Claude timed out, killing")
         if platform.system() == "Windows":
             subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                            capture_output=True)
@@ -521,7 +529,7 @@ def main():
     print("=== BTC / ETH / MSTR Monitor (with News) ===")
     print(f"Fast checks: {CHECK_INTERVAL}s | Analysis: {ANALYSIS_INTERVAL}s | News: {NEWS_INTERVAL}s")
     print(f"Telegram warnings: {'ENABLED' if SEND_WARNINGS else 'DISABLED'}")
-    print(f"Mode: Long-term re-entry monitoring")
+    print("Mode: Long-term re-entry monitoring")
     print()
 
     # Initial fetch
@@ -612,7 +620,7 @@ def main():
                 })
                 # Read back summary
                 try:
-                    lines = open(DATA_DIR / "crypto_monitor_log.jsonl", "r", encoding="utf-8").readlines()
+                    lines = open(DATA_DIR / "crypto_monitor_log.jsonl", encoding="utf-8").readlines()
                     if lines:
                         last = json.loads(lines[-1])
                         analysis_history[-1]["summary"] = last.get("text", "")[:200]
@@ -620,11 +628,11 @@ def main():
                     pass
 
                 if not success:
-                    print(f"  [fallback] Claude analysis failed")
+                    print("  [fallback] Claude analysis failed")
                 print(f"{'='*60}\n")
 
         except KeyboardInterrupt:
-            print(f"\n=== Crypto Monitor stopped ===")
+            print("\n=== Crypto Monitor stopped ===")
             for key in ["BTC", "ETH", "MSTR"]:
                 if key in prices:
                     chg = ""

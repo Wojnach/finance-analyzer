@@ -7,18 +7,16 @@ Covers:
 - Stock signal generation produces correct vote counts
 """
 
-import json
-import pytest
 import unittest.mock as mock
 
 from conftest import make_indicators as _make_indicators
+
 from portfolio.main import (
-    generate_signal,
+    CRYPTO_SYMBOLS,
     MIN_VOTERS_CRYPTO,
     MIN_VOTERS_STOCK,
     STOCK_SYMBOLS,
-    CRYPTO_SYMBOLS,
-    _prev_sentiment,
+    generate_signal,
 )
 
 
@@ -197,7 +195,6 @@ class TestSentimentHysteresis:
 
     def test_first_sentiment_uses_low_threshold(self):
         """First reading with no previous direction uses 0.40 threshold."""
-        import portfolio.signal_engine as pse
 
         ind = make_indicators()
         # Mock sentiment returning positive with 0.45 confidence

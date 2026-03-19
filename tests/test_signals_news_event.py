@@ -1,19 +1,18 @@
 """Tests for portfolio.signals.news_event — news/event detection signal."""
 
-import pytest
 from unittest import mock
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 from portfolio.signals.news_event import (
-    compute_news_event_signal,
+    _MAX_CONFIDENCE,
     _headline_velocity,
     _keyword_severity_vote,
+    _sector_impact_vote,
     _sentiment_shift,
     _source_weight_vote,
-    _sector_impact_vote,
-    _MAX_CONFIDENCE,
+    compute_news_event_signal,
 )
 
 

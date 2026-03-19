@@ -8,8 +8,8 @@ and ConnectionError semantics. These would be lost with _cached().
 import logging
 import time
 
-from portfolio.http_retry import fetch_with_retry
 from portfolio.api_utils import load_config as _load_config
+from portfolio.http_retry import fetch_with_retry
 
 logger = logging.getLogger("portfolio.fx_rates")
 

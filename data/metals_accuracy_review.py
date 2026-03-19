@@ -7,7 +7,10 @@ Reads metals_decisions.jsonl and evaluates:
 
 Run: .venv/Scripts/python.exe data/metals_accuracy_review.py
 """
-import json, os, sys, datetime
+import datetime
+import json
+import os
+
 os.chdir(r"Q:/finance-analyzer")
 
 DECISIONS_FILE = "data/metals_decisions.jsonl"
@@ -23,7 +26,7 @@ def load_decisions():
         print(f"No decisions file found at {DECISIONS_FILE}")
         return []
     entries = []
-    with open(DECISIONS_FILE, "r", encoding="utf-8") as f:
+    with open(DECISIONS_FILE, encoding="utf-8") as f:
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             if not line:
@@ -139,7 +142,7 @@ def evaluate_hold_sells(decisions):
 def print_report(decisions):
     """Print comprehensive accuracy report."""
     print(f"\n{'='*60}")
-    print(f"  METALS TRADING ACCURACY REPORT")
+    print("  METALS TRADING ACCURACY REPORT")
     print(f"  Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"{'='*60}\n")
 
@@ -166,12 +169,12 @@ def print_report(decisions):
     for d in decisions:
         t = d.get("trigger", "?")
         trigger_counts[t] = trigger_counts.get(t, 0) + 1
-    print(f"\n  Triggers:")
+    print("\n  Triggers:")
     for trigger, count in sorted(trigger_counts.items(), key=lambda x: -x[1]):
         print(f"    {trigger}: {count}x")
 
     # Prediction accuracy
-    print(f"\n--- PREDICTION ACCURACY ---\n")
+    print("\n--- PREDICTION ACCURACY ---\n")
     pred_results = evaluate_predictions(decisions)
     if pred_results:
         correct = sum(1 for r in pred_results if r["correct"] is True)
@@ -193,7 +196,7 @@ def print_report(decisions):
                 print(f"    {label}: {bc}/{bt} ({ba:.1f}%)")
 
         # Recent 5 predictions
-        print(f"\n  Last 5 predictions:")
+        print("\n  Last 5 predictions:")
         for r in pred_results[-5:]:
             mark = "✓" if r["correct"] else "✗" if r["correct"] is not None else "?"
             print(f"    [{mark}] {r['ts'][:16]} pred={r['direction']} conf={r['confidence']:.1f} "
@@ -202,7 +205,7 @@ def print_report(decisions):
         print("  No predictions to evaluate yet")
 
     # Per-position HOLD/SELL accuracy
-    print(f"\n--- PER-POSITION DECISION ACCURACY ---\n")
+    print("\n--- PER-POSITION DECISION ACCURACY ---\n")
     pos_stats = evaluate_hold_sells(decisions)
     for key, stats in pos_stats.items():
         entry = POSITIONS.get(key, {}).get("entry", 0)
@@ -219,7 +222,7 @@ def print_report(decisions):
         print(f"    SELL: {stats['sells_correct']}/{stats['sells_total']} correct ({stats['sells_accuracy']:.0f}%)")
 
     # Reflections summary
-    print(f"\n--- REFLECTION HIGHLIGHTS ---\n")
+    print("\n--- REFLECTION HIGHLIGHTS ---\n")
     reflections = [d.get("reflection", "") for d in decisions if d.get("reflection")]
     if reflections:
         for r in reflections[-5:]:

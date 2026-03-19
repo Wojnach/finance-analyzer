@@ -10,7 +10,7 @@ and compare technical signals against fundamental convictions.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.file_utils import atomic_write_json, load_json
@@ -69,7 +69,7 @@ def load_beliefs():
 
 def save_beliefs(data):
     """Save beliefs to prophecy.json."""
-    data["metadata"]["last_review"] = datetime.now(timezone.utc).isoformat()
+    data["metadata"]["last_review"] = datetime.now(UTC).isoformat()
     atomic_write_json(PROPHECY_FILE, data)
 
 
@@ -91,7 +91,7 @@ def add_belief(belief_dict):
 
     # Merge with template
     belief = {**BELIEF_TEMPLATE, **belief_dict}
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     if not belief["created_at"]:
         belief["created_at"] = now
     if not belief["updated_at"]:
@@ -117,7 +117,7 @@ def update_belief(belief_id, updates):
     for i, belief in enumerate(data["beliefs"]):
         if belief["id"] == belief_id:
             belief.update(updates)
-            belief["updated_at"] = datetime.now(timezone.utc).isoformat()
+            belief["updated_at"] = datetime.now(UTC).isoformat()
             data["beliefs"][i] = belief
             save_beliefs(data)
             return belief
@@ -183,14 +183,14 @@ def add_checkpoint(belief_id, checkpoint_dict):
         if belief["id"] == belief_id:
             cp = {**CHECKPOINT_TEMPLATE, **checkpoint_dict}
             if not cp["created_at"]:
-                cp["created_at"] = datetime.now(timezone.utc).isoformat()
+                cp["created_at"] = datetime.now(UTC).isoformat()
             if not cp["id"]:
                 cp["id"] = f"cp_{len(belief.get('checkpoints', []))}"
 
             if "checkpoints" not in belief:
                 belief["checkpoints"] = []
             belief["checkpoints"].append(cp)
-            belief["updated_at"] = datetime.now(timezone.utc).isoformat()
+            belief["updated_at"] = datetime.now(UTC).isoformat()
             data["beliefs"][i] = belief
             save_beliefs(data)
             return cp
@@ -210,7 +210,7 @@ def evaluate_checkpoints(prices_usd):
     data = load_beliefs()
     triggered = []
     modified = False
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     for i, belief in enumerate(data["beliefs"]):
         if belief.get("status") != "active":
@@ -246,9 +246,7 @@ def evaluate_checkpoints(prices_usd):
                 continue
 
             met = False
-            if comparison == "above" and current_price >= target:
-                met = True
-            elif comparison == "below" and current_price <= target:
+            if comparison == "above" and current_price >= target or comparison == "below" and current_price <= target:
                 met = True
             elif comparison == "between":
                 # target_value should be [low, high]

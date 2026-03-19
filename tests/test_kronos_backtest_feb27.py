@@ -11,7 +11,7 @@ import json
 import logging
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -74,7 +74,7 @@ def fetch_binance_klines(symbol: str, interval: str, start_dt: datetime,
 def load_kronos_predictor():
     """Load Kronos model (cached after first call)."""
     import torch
-    from model import KronosTokenizer, Kronos, KronosPredictor
+    from model import Kronos, KronosPredictor, KronosTokenizer
 
     model_path = Path(r"Q:\models\kronos\kronos-base")
     tokenizer_path = Path(r"Q:\models\kronos\kronos-tokenizer")
@@ -163,8 +163,8 @@ def direction_correct(predicted_close: float, actual_close: float,
 def feb27_btc_5m():
     """Fetch BTC 5-min candles covering Feb 26-28 (context + test + outcomes)."""
     # Feb 25 00:00 to Feb 28 12:00 — plenty of context + outcomes
-    start = datetime(2026, 2, 25, 0, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 2, 28, 12, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 2, 25, 0, 0, tzinfo=UTC)
+    end = datetime(2026, 2, 28, 12, 0, tzinfo=UTC)
     df = fetch_binance_klines("BTCUSDT", "5m", start, end)
     if df.empty:
         pytest.skip("Could not fetch BTC 5m candles from Binance")
@@ -175,8 +175,8 @@ def feb27_btc_5m():
 @pytest.fixture(scope="module")
 def feb27_eth_5m():
     """Fetch ETH 5-min candles covering Feb 26-28."""
-    start = datetime(2026, 2, 25, 0, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 2, 28, 12, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 2, 25, 0, 0, tzinfo=UTC)
+    end = datetime(2026, 2, 28, 12, 0, tzinfo=UTC)
     df = fetch_binance_klines("ETHUSDT", "5m", start, end)
     if df.empty:
         pytest.skip("Could not fetch ETH 5m candles from Binance")
@@ -186,8 +186,8 @@ def feb27_eth_5m():
 @pytest.fixture(scope="module")
 def feb27_xag_5m():
     """Fetch XAG (silver) 5-min candles from Binance FAPI."""
-    start = datetime(2026, 2, 25, 0, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 2, 28, 12, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 2, 25, 0, 0, tzinfo=UTC)
+    end = datetime(2026, 2, 28, 12, 0, tzinfo=UTC)
     # XAG on Binance FAPI
     url = "https://fapi.binance.com/fapi/v1/klines"
     all_candles = []
@@ -503,7 +503,7 @@ class TestKronosParamSweep:
         # Sort by accuracy
         sweep_results.sort(key=lambda x: x["accuracy"], reverse=True)
 
-        print(f"\n=== BEST PARAMS ===")
+        print("\n=== BEST PARAMS ===")
         best = sweep_results[0]
         print(f"  T={best['params']['T']}, top_p={best['params']['top_p']}, "
               f"sample_count={best['params']['sample_count']}: {best['accuracy']:.1f}%")

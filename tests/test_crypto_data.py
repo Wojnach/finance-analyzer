@@ -1,10 +1,9 @@
 """Tests for data/crypto_data.py — Fear & Greed, news, MSTR price, on-chain, NAV."""
-import json
 import os
 import sys
-import time
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "data"))
 
@@ -168,7 +167,7 @@ class TestOnchainSummary:
 
     def test_returns_none_on_import_error(self):
         """If portfolio.onchain_data is not importable, returns None gracefully."""
-        from crypto_data import get_onchain_summary, _cache
+        from crypto_data import _cache
         # Clear any cached data
         _cache.pop("onchain", None)
         with patch.dict("sys.modules", {"portfolio.onchain_data": None}):
@@ -183,27 +182,30 @@ class TestOnchainSummary:
 
 class TestUSMarketHours:
     def test_during_market_hours(self):
-        from crypto_data import is_us_market_hours
         import datetime
+
+        from crypto_data import is_us_market_hours
         result = is_us_market_hours(
-            datetime.datetime(2026, 3, 11, 14, 30, tzinfo=datetime.timezone.utc)
+            datetime.datetime(2026, 3, 11, 14, 30, tzinfo=datetime.UTC)
         )
         assert result is True
 
     def test_before_market_hours(self):
-        from crypto_data import is_us_market_hours
         import datetime
+
+        from crypto_data import is_us_market_hours
         result = is_us_market_hours(
-            datetime.datetime(2026, 3, 11, 13, 0, tzinfo=datetime.timezone.utc)
+            datetime.datetime(2026, 3, 11, 13, 0, tzinfo=datetime.UTC)
         )
         assert result is False
 
     def test_handles_us_dst_gap_vs_stockholm(self):
-        from crypto_data import is_us_market_hours
         import datetime
+
+        from crypto_data import is_us_market_hours
         # March 11, 2026: US already on EDT, Stockholm still on CET.
         result = is_us_market_hours(
-            datetime.datetime(2026, 3, 11, 19, 30, tzinfo=datetime.timezone.utc)
+            datetime.datetime(2026, 3, 11, 19, 30, tzinfo=datetime.UTC)
         )
         assert result is True
 

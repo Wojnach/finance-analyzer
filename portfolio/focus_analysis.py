@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.file_utils import load_json, load_jsonl
@@ -70,7 +70,7 @@ def normalize_ticker(ticker: str) -> str:
 
 def hours_to_us_close(now: datetime | None = None) -> float:
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     if now.weekday() >= 5:
         return 0.0
     close_hour = _market_close_hour_utc(now)

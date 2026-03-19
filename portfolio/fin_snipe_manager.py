@@ -69,7 +69,7 @@ _critical_alert_last: dict[str, str] = {}
 
 
 def _now_utc() -> str:
-    return dt.datetime.now(dt.timezone.utc).isoformat()
+    return dt.datetime.now(dt.UTC).isoformat()
 
 
 def _notify_critical(category: str, message: str) -> None:
@@ -78,7 +78,7 @@ def _notify_critical(category: str, message: str) -> None:
     Categories: 'session_expired', 'naked_position', 'execution_failure',
     'phantom_orders'. Throttled to one per category per CRITICAL_ALERT_COOLDOWN_SECONDS.
     """
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     last_raw = _critical_alert_last.get(category)
     if last_raw:
         try:
@@ -92,6 +92,7 @@ def _notify_critical(category: str, message: str) -> None:
     _critical_alert_last[category] = now.isoformat()
     try:
         import json as _json
+
         from portfolio.message_store import send_or_store
         with open(BASE_DIR / "config.json", encoding="utf-8") as fh:
             config = _json.load(fh)
@@ -107,7 +108,7 @@ def _extract_value(value: Any) -> Any:
 
 
 def _new_session_id() -> str:
-    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
     return f"fin-snipe-{stamp}-pid{os.getpid()}"
 
 
@@ -265,7 +266,7 @@ def _relevant_stop_orders(snapshot: dict) -> list[dict]:
     return [
         order for order in (snapshot.get("stop_orders") or [])
         if _stop_order_status(order) in {"ACTIVE", "ERROR"}
-        and str(((order.get("order") or {}).get("type") or "")).upper() == "SELL"
+        and str((order.get("order") or {}).get("type") or "").upper() == "SELL"
     ]
 
 
@@ -400,13 +401,13 @@ def _compute_exit_target(snapshot: dict, instrument_state: dict) -> dict[str, An
                 qty=position_volume,
                 entry_price_sek=position_avg,
                 entry_underlying_usd=_estimate_entry_underlying(snapshot, instrument_state),
-                entry_ts=dt.datetime.now(dt.timezone.utc),
+                entry_ts=dt.datetime.now(dt.UTC),
                 instrument_type="warrant",
                 leverage=leverage,
                 financing_level=None,
             ),
             MarketSnapshot(
-                asof_ts=dt.datetime.now(dt.timezone.utc),
+                asof_ts=dt.datetime.now(dt.UTC),
                 price=current_underlying,
                 bid=float(underlying_summary.get("bid") or current_underlying),
                 ask=float(underlying_summary.get("ask") or current_underlying),
@@ -1029,7 +1030,7 @@ def plan_instrument(
     # longer than DEAD_ORDER_EXPIRY_HOURS, remove it regardless of API state.
     # This prevents permanently blocked selling when phantom orders persist.
     dead_ts = dict(instrument_state.get("dead_order_timestamps") or {})
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     expired_dead = set()
     for oid, ts_str in list(dead_ts.items()):
         try:

@@ -10,12 +10,11 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 import portfolio.trigger as trigger_mod
-from portfolio.trigger import check_triggers, _GRACE_PERIOD_KEY
+from portfolio.trigger import _GRACE_PERIOD_KEY, check_triggers
 
 # Use project-local temp dir to avoid Windows permission issues with %TEMP%
 _TEST_TMP_ROOT = Path(__file__).resolve().parent.parent / "data" / "_test_tmp"

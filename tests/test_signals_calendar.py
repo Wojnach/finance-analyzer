@@ -15,25 +15,23 @@ Covers:
 - January Effect detection
 """
 
-from datetime import date, datetime
+from datetime import date
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.calendar_seasonal import (
     _MAX_CONFIDENCE,
-    compute_calendar_signal,
     _day_of_week_effect,
-    _turnaround_tuesday,
-    _month_end_effect,
-    _sell_in_may,
-    _january_effect,
-    _pre_holiday_effect,
     _fomc_drift,
+    _january_effect,
+    _month_end_effect,
+    _pre_holiday_effect,
     _santa_claus_rally,
+    _sell_in_may,
+    _turnaround_tuesday,
+    compute_calendar_signal,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

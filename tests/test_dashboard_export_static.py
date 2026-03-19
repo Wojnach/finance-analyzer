@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 import dashboard.export_static as export_mod
 

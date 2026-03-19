@@ -17,33 +17,30 @@ import os
 import sys
 import tempfile
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-import numpy as np
 import pandas as pd
 import requests
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
-from portfolio.main import compute_indicators, technical_signal
 from portfolio.iskbets import (
+    DATA_DIR,
     _evaluate_entry,
+    _log_telegram,
+    _send_telegram,
     check_exits,
     format_entry_alert,
     format_exit_alert,
     invoke_layer2_gate,
-    _send_telegram,
-    _log_telegram,
-    _load_state,
-    _save_state,
-    DATA_DIR,
-    CONFIG_FILE as ISKBETS_CONFIG_FILE,
-    STATE_FILE as ISKBETS_STATE_FILE,
-    compute_atr_15m,
 )
+from portfolio.iskbets import (
+    STATE_FILE as ISKBETS_STATE_FILE,
+)
+from portfolio.main import compute_indicators, technical_signal
 
 APP_CONFIG_FILE = BASE_DIR / "config.json"
 REPLAY_STATE_FILE = DATA_DIR / "iskbets_state_replay.json"
@@ -397,7 +394,7 @@ def run_replay(ticker, symbol, start_dt, hours, speed, fg_value, config,
     min_bb = iskbets_cfg.get("min_bigbet_conditions", 2)
     min_bv = iskbets_cfg.get("min_buy_votes", 3)
     print(f"  Gates: bigbet >= {min_bb}, buy_votes >= {min_bv}")
-    print(f"  Ctrl+C to stop")
+    print("  Ctrl+C to stop")
     print(f"{'='*65}\n")
 
     # Clear replay state
@@ -616,13 +613,12 @@ def run_replay(ticker, symbol, start_dt, hours, speed, fg_value, config,
                         _create_position(state, ticker, price, atr, amount_sek, fx_rate, iskbets_cfg, sim_time)
                         save_replay_state(state)
                         print(f"  AUTO-ENTRY: {amount_sek:,.0f} SEK @ ${price:,.2f}")
-                        print(f"  Monitoring exits...\n")
+                        print("  Monitoring exits...\n")
                     else:
-                        print(f"  Type amount (SEK) to confirm, or Enter to skip:")
+                        print("  Type amount (SEK) to confirm, or Enter to skip:")
                         try:
-                            import select
                             # Non-blocking input with timeout
-                            user_input = input(f"  > ").strip()
+                            user_input = input("  > ").strip()
                         except EOFError:
                             user_input = ""
 
@@ -634,9 +630,9 @@ def run_replay(ticker, symbol, start_dt, hours, speed, fg_value, config,
                             _create_position(state, ticker, price, atr, amt, fx_rate, iskbets_cfg, sim_time)
                             save_replay_state(state)
                             print(f"  BOUGHT: {amt:,.0f} SEK @ ${price:,.2f}")
-                            print(f"  Monitoring exits...\n")
+                            print("  Monitoring exits...\n")
                         else:
-                            print(f"  Skipped. Continuing scan...\n")
+                            print("  Skipped. Continuing scan...\n")
 
                 # Terminal status
                 bb_pos = ind.get("price_vs_bb", "in")[:2]
@@ -673,7 +669,7 @@ def run_replay(ticker, symbol, start_dt, hours, speed, fg_value, config,
                 print(f"    {t['ticker']} {t['pnl_pct']:+.1f}% ({t['pnl_sek']:+,.0f} SEK) — {t['exit_type']}")
             print(f"  Total P&L: {total_pnl:+,.0f} SEK")
         else:
-            print(f"  No trades completed")
+            print("  No trades completed")
 
         pos = state.get("active_position")
         if pos:
@@ -684,7 +680,7 @@ def run_replay(ticker, symbol, start_dt, hours, speed, fg_value, config,
         print(f"{'='*65}")
 
     except KeyboardInterrupt:
-        print(f"\n\n  Replay stopped by user.")
+        print("\n\n  Replay stopped by user.")
         state = load_replay_state()
         if state.get("active_position"):
             pos = state["active_position"]
@@ -709,7 +705,7 @@ def _create_position(state, ticker, price, atr, amount_sek, fx_rate, iskbets_cfg
     stop = price - (hard_stop_mult * atr)
     stage1 = price + (stage1_mult * atr)
 
-    entry_time = sim_time.isoformat() if sim_time else datetime.now(timezone.utc).isoformat()
+    entry_time = sim_time.isoformat() if sim_time else datetime.now(UTC).isoformat()
 
     state["active_position"] = {
         "ticker": ticker,
@@ -788,18 +784,18 @@ def main():
 
     symbol = TICKER_MAP.get(ticker)
     if not symbol:
-        print(f"ERROR: Replay only supports crypto tickers (BTC-USD, ETH-USD)")
-        print(f"  Stocks need Alpaca historical data which has different access patterns.")
+        print("ERROR: Replay only supports crypto tickers (BTC-USD, ETH-USD)")
+        print("  Stocks need Alpaca historical data which has different access patterns.")
         sys.exit(1)
 
     # Parse start time
     try:
         start_dt = datetime.fromisoformat(args.start)
         if start_dt.tzinfo is None:
-            start_dt = start_dt.replace(tzinfo=timezone.utc)
+            start_dt = start_dt.replace(tzinfo=UTC)
     except ValueError:
         print(f"ERROR: Invalid start time: {args.start}")
-        print(f"  Use ISO format like: 2026-02-13T12:00")
+        print("  Use ISO format like: 2026-02-13T12:00")
         sys.exit(1)
 
     # Load config
@@ -815,8 +811,8 @@ def main():
         age_min = (time.time() - summary_file.stat().st_mtime) / 60
         if age_min < 5:
             print(f"\n  WARNING: agent_summary.json is {age_min:.0f}m old — production loop may be running!")
-            print(f"  The TelegramPoller may conflict. Consider pausing the loop first.")
-            print(f"  Press Ctrl+C to abort or wait 5s to continue...")
+            print("  The TelegramPoller may conflict. Consider pausing the loop first.")
+            print("  Press Ctrl+C to abort or wait 5s to continue...")
             try:
                 time.sleep(5)
             except KeyboardInterrupt:

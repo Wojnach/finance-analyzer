@@ -1,7 +1,8 @@
 """Tests for forecast circuit breaker auto-reset on success (BUG-56)."""
 import time
+from unittest.mock import mock_open, patch
+
 import pytest
-from unittest.mock import patch, mock_open
 
 import portfolio.signals.forecast as forecast
 

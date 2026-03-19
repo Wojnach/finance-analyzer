@@ -10,7 +10,7 @@ Usage:
 
 import sys
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from portfolio.file_utils import atomic_append_jsonl, load_json, load_jsonl
@@ -131,7 +131,7 @@ def generate_weekly_digest():
     Returns:
         str: Formatted Telegram message.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     week_ago = now - timedelta(days=7)
 
     # Load portfolio states
@@ -279,7 +279,7 @@ def send_digest(msg):
     # Save locally first
     log_file = DATA_DIR / "telegram_messages.jsonl"
     entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "text": msg,
         "type": "weekly_digest",
     }

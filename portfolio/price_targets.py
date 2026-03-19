@@ -22,7 +22,7 @@ import math
 import numpy as np
 from scipy.stats import norm
 
-from portfolio.monte_carlo import volatility_from_atr, drift_from_probability, MIN_VOLATILITY
+from portfolio.monte_carlo import MIN_VOLATILITY, drift_from_probability, volatility_from_atr
 
 logger = logging.getLogger("portfolio.price_targets")
 
@@ -357,9 +357,7 @@ def compute_targets(ticker: str, side: str, price_usd: float,
 
     # Structural levels
     for label, val in levels.items():
-        if side == "sell" and val > price_usd:
-            candidates.append((val, label))
-        elif side == "buy" and val < price_usd:
+        if side == "sell" and val > price_usd or side == "buy" and val < price_usd:
             candidates.append((val, label))
 
     # Fixed offsets

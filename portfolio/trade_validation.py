@@ -7,7 +7,6 @@ optional warnings for near-limit conditions.
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
 
 logger = logging.getLogger("portfolio.trade_validation")
 
@@ -25,9 +24,9 @@ def validate_trade(
     price: float,
     volume: float,
     cash_available: float,
-    bid: Optional[float] = None,
-    ask: Optional[float] = None,
-    last_known_price: Optional[float] = None,
+    bid: float | None = None,
+    ask: float | None = None,
+    last_known_price: float | None = None,
     max_spread_pct: float = 2.0,
     max_cash_pct: float = 50.0,
     min_order_sek: float = 500.0,

@@ -10,7 +10,7 @@ Workflow:
 
 import logging
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from portfolio.avanza_control import place_buy_order, place_sell_order
@@ -67,7 +67,7 @@ def request_order(
     if price <= 0:
         raise ValueError(f"price must be > 0, got {price}")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     order = {
         "id": str(uuid.uuid4()),
         "timestamp": now.isoformat(),
@@ -112,7 +112,7 @@ def check_pending_orders(config: dict) -> list[dict]:
         return []
 
     acted_on = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Check for CONFIRM replies in Telegram
     confirmed = _check_telegram_confirm(config)

@@ -3,7 +3,7 @@
 import json
 import logging
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from portfolio.accuracy_stats import accuracy_by_signal_ticker
@@ -31,7 +31,7 @@ def _load_prediction_entries(predictions_file=None, days=None):
 
     cutoff = None
     if days is not None:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff = datetime.now(UTC) - timedelta(days=days)
 
     entries = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -271,7 +271,7 @@ def export_local_llm_report(
     state_file=None,
     max_entries=DEFAULT_HISTORY_MAX_ENTRIES,
 ):
-    timestamp = now or datetime.now(timezone.utc)
+    timestamp = now or datetime.now(UTC)
     exported_at = timestamp.isoformat()
     cfg = _load_report_config(config=config)
     report = build_local_llm_report(
@@ -315,7 +315,7 @@ def maybe_export_local_llm_report(
     if not report_cfg.get("daily_export_enabled", True):
         return None
 
-    timestamp = now or datetime.now(timezone.utc)
+    timestamp = now or datetime.now(UTC)
     export_date = timestamp.date().isoformat()
     state_path = state_file or EXPORT_STATE_FILE
     state = load_json(state_path, default={}) or {}

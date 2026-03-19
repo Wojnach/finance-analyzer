@@ -16,6 +16,7 @@ import logging
 import re
 import threading
 import time
+from datetime import UTC
 from pathlib import Path
 
 import pandas as pd
@@ -223,9 +224,9 @@ def _get_fundamentals_data():
 
 def _build_haiku_prompt(summary, macro):
     """Build Haiku prompt for quick directional pulse."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    date_str = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     macro_line = _build_macro_block(macro)
     ticker_grid = _build_ticker_grid(summary)
 
@@ -267,9 +268,9 @@ Rules:
 
 def _build_sonnet_prompt(summary, macro):
     """Build Sonnet prompt for full 5-dimension fundamental analysis."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    date_str = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     macro_line = _build_macro_block(macro)
     ticker_grid = _build_ticker_grid(summary)
 
@@ -326,9 +327,9 @@ Rules:
 
 def _build_opus_prompt(summary, macro, portfolios):
     """Build Opus prompt for deep conviction with cross-asset reasoning."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    date_str = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     macro_line = _build_macro_block(macro)
     ticker_grid = _build_ticker_grid(summary)
 
@@ -552,9 +553,10 @@ def _parse_opus_response(text):
 def _journal_refresh(tier: str, results: dict) -> None:
     """Persist tier refresh results for accuracy tracking and debugging."""
     import datetime as _dt
+
     from portfolio.file_utils import atomic_append_jsonl
 
-    ts = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    ts = _dt.datetime.now(_dt.UTC).isoformat()
     for ticker, result in results.items():
         entry = {
             "ts": ts,

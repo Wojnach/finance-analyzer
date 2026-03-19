@@ -1,10 +1,10 @@
 """Tests for enhanced portfolio metrics (per-trade metrics in equity_curve.py)."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
-from datetime import datetime, timezone, timedelta
 
 from portfolio.equity_curve import _pair_round_trips, compute_trade_metrics
-
 
 # --- Helpers ---
 
@@ -12,7 +12,7 @@ def _make_tx(ticker, action, shares, price_sek, total_sek, fee_sek=0,
              ts_offset_hours=0, base_ts=None):
     """Create a transaction dict."""
     if base_ts is None:
-        base_ts = datetime(2026, 2, 15, 12, 0, 0, tzinfo=timezone.utc)
+        base_ts = datetime(2026, 2, 15, 12, 0, 0, tzinfo=UTC)
     ts = base_ts + timedelta(hours=ts_offset_hours)
     return {
         "timestamp": ts.isoformat(),

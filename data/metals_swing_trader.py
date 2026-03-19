@@ -9,32 +9,48 @@ Usage from metals_loop.py:
     trader.evaluate_and_execute(prices, signal_data)
 """
 
+import datetime
 import json
 import os
 import time
-import datetime
-import traceback
 
 import requests
-
 from metals_swing_config import (
-    WARRANT_CATALOG, DRY_RUN, BUY_MODE, SELL_MODE,
-    ACCOUNT_ID, POSITION_SIZE_PCT, MAX_CONCURRENT, TARGET_LEVERAGE,
-    MIN_BARRIER_DISTANCE_PCT, MIN_SPREAD_PCT, MIN_TRADE_SEK,
-    MIN_BUY_VOTERS, MIN_BUY_TF_RATIO, RSI_ENTRY_LOW, RSI_ENTRY_HIGH,
-    MACD_IMPROVING_CHECKS,
-    TAKE_PROFIT_UNDERLYING_PCT, TRAILING_START_PCT, TRAILING_DISTANCE_PCT,
-    HARD_STOP_UNDERLYING_PCT, SIGNAL_REVERSAL_EXIT, MAX_HOLD_HOURS,
+    ACCOUNT_ID,
+    BUY_COOLDOWN_MINUTES,
+    DECISIONS_LOG,
+    DRY_RUN,
     EOD_EXIT_MINUTES_BEFORE,
-    BUY_COOLDOWN_MINUTES, LOSS_ESCALATION,
-    STOP_LOSS_UNDERLYING_PCT, STOP_LOSS_VALID_DAYS,
+    HARD_STOP_UNDERLYING_PCT,
+    LOSS_ESCALATION,
+    MACD_IMPROVING_CHECKS,
+    MAX_CONCURRENT,
+    MAX_HOLD_HOURS,
+    MIN_BARRIER_DISTANCE_PCT,
+    MIN_BUY_TF_RATIO,
+    MIN_BUY_VOTERS,
+    MIN_SPREAD_PCT,
+    MIN_TRADE_SEK,
+    POSITION_SIZE_PCT,
+    RSI_ENTRY_HIGH,
+    RSI_ENTRY_LOW,
+    SIGNAL_REVERSAL_EXIT,
+    STATE_FILE,
+    STOP_LOSS_UNDERLYING_PCT,
+    STOP_LOSS_VALID_DAYS,
+    TAKE_PROFIT_UNDERLYING_PCT,
+    TARGET_LEVERAGE,
     TELEGRAM_SUMMARY_INTERVAL,
-    STATE_FILE, DECISIONS_LOG, TRADES_LOG,
+    TRADES_LOG,
+    TRAILING_DISTANCE_PCT,
+    TRAILING_START_PCT,
+    WARRANT_CATALOG,
 )
+
 from portfolio.avanza_control import (
     delete_stop_loss,
-    fetch_price,
     fetch_account_cash,
+    fetch_price,
     place_order,
     place_stop_loss,
 )
@@ -48,7 +64,7 @@ def _log(msg):
 
 
 def _now_utc():
-    return datetime.datetime.now(datetime.timezone.utc)
+    return datetime.datetime.now(datetime.UTC)
 
 
 def _cet_hour():
@@ -58,7 +74,7 @@ def _cet_hour():
         now = datetime.datetime.now(ZoneInfo("Europe/Stockholm"))
         return now.hour + now.minute / 60
     except ImportError:
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         return ((now.hour + 1) % 24) + now.minute / 60
 
 
@@ -70,7 +86,7 @@ def _load_state():
     """Load swing trader state from disk."""
     if os.path.exists(STATE_FILE):
         try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
+            with open(STATE_FILE, encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             _log(f"State load error: {e}")
@@ -114,7 +130,7 @@ def _send_telegram(msg):
     global _tg_config
     if _tg_config is None:
         try:
-            with open("config.json", "r", encoding="utf-8") as f:
+            with open("config.json", encoding="utf-8") as f:
                 cfg = json.load(f)
             _tg_config = {
                 "token": cfg["telegram"]["token"],
@@ -485,7 +501,7 @@ class SwingTrader:
         entry_price = pos["entry_price"]
 
         if entry_und <= 0 or entry_price <= 0:
-            _log(f"  Cannot set stop: no entry underlying price")
+            _log("  Cannot set stop: no entry underlying price")
             return
 
         # Stop at -STOP_LOSS_UNDERLYING_PCT% on underlying, translated to warrant price
@@ -495,7 +511,7 @@ class SwingTrader:
         sell_price = round(trigger_price * 0.99, 2)  # sell 1% below trigger for fill
 
         if trigger_price <= 0:
-            _log(f"  Stop price would be <=0, skipping")
+            _log("  Stop price would be <=0, skipping")
             return
 
         _log(f"  Setting stop-loss: trigger={trigger_price} sell={sell_price} "
@@ -516,7 +532,7 @@ class SwingTrader:
             _save_state(self.state)
             _log(f"  Stop-loss placed: {stop_id}")
         else:
-            _log(f"  Stop-loss FAILED")
+            _log("  Stop-loss FAILED")
             _send_telegram(f"_SWING: stop-loss failed for {pos['warrant_name']}_")
 
     # -------------------------------------------------------------------
@@ -558,9 +574,9 @@ class SwingTrader:
 
             # --- Exit optimizer: probabilistic exit assessment ---
             try:
-                from portfolio.exit_optimizer import compute_exit_plan, Position, MarketSnapshot
-                from portfolio.session_calendar import get_session_info
                 from portfolio.cost_model import get_cost_model
+                from portfolio.exit_optimizer import MarketSnapshot, Position, compute_exit_plan
+                from portfolio.session_calendar import get_session_info
                 sess = get_session_info("warrant", underlying=pos.get("underlying"))
                 if sess.is_open and sess.remaining_minutes >= 2:
                     opt_pos = Position(

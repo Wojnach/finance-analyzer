@@ -18,18 +18,16 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.macro_regime import (
-    compute_macro_regime_signal,
-    _sma_regime,
     _dxy_risk,
-    _yield_curve,
-    _yield_10y_momentum,
     _fomc_proximity,
     _golden_death_cross,
+    _sma_regime,
+    _yield_10y_momentum,
+    _yield_curve,
+    compute_macro_regime_signal,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test data helpers

@@ -12,13 +12,12 @@ Usage from metals_loop.py:
     )
 """
 
+import datetime
 import json
+import logging
 import math
 import os
 import sys
-import time
-import datetime
-import logging
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -80,7 +79,7 @@ def _load_leverage_map():
     ctx_path = os.path.join(os.path.dirname(__file__), "metals_context.json")
     try:
         if os.path.exists(ctx_path):
-            with open(ctx_path, "r", encoding="utf-8") as f:
+            with open(ctx_path, encoding="utf-8") as f:
                 ctx = json.load(f)
             catalog = ctx.get("warrant_catalog", {})
             lmap = {}
@@ -118,7 +117,7 @@ def _load_json_state(path, default_factory, label):
     if not os.path.exists(path):
         return default_factory()
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError, ValueError) as e:
         logger.warning("%s load failed: %s", label, e)
@@ -322,7 +321,7 @@ def check_trade_guard(position_key, action, current_time=None):
         Each warning: {guard, severity, message, details}
     """
     state = _load_guard_state()
-    now = current_time or datetime.datetime.now(datetime.timezone.utc)
+    now = current_time or datetime.datetime.now(datetime.UTC)
     today = now.strftime("%Y-%m-%d")
     warnings = []
 
@@ -402,7 +401,7 @@ def record_metals_trade(position_key, action, pnl_pct_value=None):
         pnl_pct_value: P&L % if SELL (for consecutive loss tracking)
     """
     state = _load_guard_state()
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     today = now.strftime("%Y-%m-%d")
 
     # Reset on new day
@@ -435,7 +434,7 @@ def record_metals_trade(position_key, action, pnl_pct_value=None):
 
 def log_portfolio_value(positions, prices):
     """Log current portfolio value to history file."""
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     total_val = 0
     total_inv = 0
     pos_detail = {}
@@ -493,7 +492,7 @@ def check_portfolio_drawdown(positions, prices):
     peak_value = total_inv  # start at invested amount
     try:
         if os.path.exists(HISTORY_FILE):
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            with open(HISTORY_FILE, encoding="utf-8") as f:
                 for line in f:
                     try:
                         entry = json.loads(line)
@@ -637,7 +636,7 @@ def compute_daily_range_stats(history_path="data/metals_history.json"):
     - trading_days: number of days in sample
     """
     try:
-        with open(history_path, "r", encoding="utf-8") as f:
+        with open(history_path, encoding="utf-8") as f:
             hist = json.load(f)
     except Exception as e:
         logger.warning(f"Cannot load metals_history.json: {e}")

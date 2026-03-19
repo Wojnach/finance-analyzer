@@ -1,15 +1,15 @@
 """Tests for Gold/Silver (XAU/XAG) tracking via Binance Futures API."""
 
-import json
-from unittest.mock import patch, MagicMock
-import pytest
+from datetime import UTC
+from unittest.mock import MagicMock, patch
+
 import pandas as pd
+import pytest
 
 from portfolio.main import (
-    binance_fapi_klines,
-    _fetch_klines,
     METALS_SYMBOLS,
-    BINANCE_FAPI_BASE,
+    _fetch_klines,
+    binance_fapi_klines,
 )
 
 
@@ -139,11 +139,12 @@ class TestMetalsMarketState:
 
     def test_metals_active_on_weekends(self):
         """Metals should be active on weekends like crypto."""
+        from datetime import datetime
+
         from portfolio.main import get_market_state
-        from datetime import datetime, timezone
         # Saturday 12:00 UTC
         with patch("portfolio.market_timing.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 2, 21, 12, 0, tzinfo=timezone.utc)
+            mock_dt.now.return_value = datetime(2026, 2, 21, 12, 0, tzinfo=UTC)
             mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
             state, symbols, interval = get_market_state()
             assert "XAU-USD" in symbols
@@ -152,11 +153,12 @@ class TestMetalsMarketState:
 
     def test_metals_active_when_market_closed(self):
         """Metals should be active during off-hours like crypto."""
+        from datetime import datetime
+
         from portfolio.main import get_market_state
-        from datetime import datetime, timezone
         # Wednesday 3:00 UTC (market closed)
         with patch("portfolio.market_timing.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 2, 18, 3, 0, tzinfo=timezone.utc)
+            mock_dt.now.return_value = datetime(2026, 2, 18, 3, 0, tzinfo=UTC)
             mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
             state, symbols, interval = get_market_state()
             assert "XAU-USD" in symbols
@@ -165,11 +167,12 @@ class TestMetalsMarketState:
 
     def test_metals_active_during_market_hours(self):
         """Metals should be active during market hours (all symbols are)."""
+        from datetime import datetime
+
         from portfolio.main import get_market_state
-        from datetime import datetime, timezone
         # Wednesday 14:00 UTC (market open)
         with patch("portfolio.market_timing.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 2, 18, 14, 0, tzinfo=timezone.utc)
+            mock_dt.now.return_value = datetime(2026, 2, 18, 14, 0, tzinfo=UTC)
             mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
             state, symbols, interval = get_market_state()
             assert "XAU-USD" in symbols
@@ -182,7 +185,7 @@ class TestMetalsSignalConfig:
 
     def test_metals_total_applicable(self):
         """Metals should have 25 applicable signals (7 original + 18 enhanced)."""
-        from portfolio.main import generate_signal, METALS_SYMBOLS
+        from portfolio.main import generate_signal
         # Create minimal indicators
         ind = {
             "close": 2650.0,

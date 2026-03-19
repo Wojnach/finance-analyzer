@@ -1,9 +1,10 @@
 """Tests for metals swing trader — entry/exit logic, warrant selection, state management."""
 
+import datetime
 import json
 import os
 import sys
-import datetime
+
 import pytest
 
 # Ensure data/ is on path for imports
@@ -11,15 +12,20 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 # Patch config before importing trader
 import metals_swing_config as cfg
+
 cfg.DRY_RUN = True  # always dry run in tests
 cfg.STATE_FILE = "data/_test_swing_state.json"
 cfg.DECISIONS_LOG = "data/_test_swing_decisions.jsonl"
 cfg.TRADES_LOG = "data/_test_swing_trades.jsonl"
 
 from metals_swing_trader import (
-    SwingTrader, _load_state, _save_state, _default_state, _compact_signal, _now_utc,
+    SwingTrader,
+    _compact_signal,
+    _default_state,
+    _load_state,
+    _now_utc,
+    _save_state,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

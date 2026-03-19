@@ -8,9 +8,9 @@ This is the preferred auth method until TOTP credentials are configured.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from portfolio.file_utils import load_json
 
@@ -59,7 +59,7 @@ def load_session() -> dict:
     if expires_at:
         try:
             exp = datetime.fromisoformat(expires_at)
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             if exp <= now:
                 raise AvanzaSessionError(
                     f"Session expired at {expires_at}. "
@@ -77,7 +77,7 @@ def load_session() -> dict:
     return data
 
 
-def session_remaining_minutes() -> Optional[float]:
+def session_remaining_minutes() -> float | None:
     """Get minutes remaining on the current session, or None if no session."""
     try:
         data = load_json(SESSION_FILE)
@@ -87,7 +87,7 @@ def session_remaining_minutes() -> Optional[float]:
         if not expires_at:
             return None
         exp = datetime.fromisoformat(expires_at)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return (exp - now).total_seconds() / 60.0
     except Exception as e:
         logger.debug("Failed to compute session minutes remaining: %s", e)

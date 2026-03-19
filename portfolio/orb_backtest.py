@@ -16,7 +16,6 @@ from dataclasses import dataclass, field
 
 from portfolio.orb_predictor import DayResult, ORBPredictor
 
-
 # === Data Structures ===
 
 
@@ -233,9 +232,7 @@ def _directional_accuracy(days: list[BacktestDay]) -> float:
         upside = day.actual_high - morning_high
         downside = morning_low - day.actual_low
 
-        if day.morning_direction == "up" and upside >= downside:
-            correct += 1
-        elif day.morning_direction == "down" and downside >= upside:
+        if day.morning_direction == "up" and upside >= downside or day.morning_direction == "down" and downside >= upside:
             correct += 1
 
     return correct / len(days) * 100

@@ -8,8 +8,6 @@ import datetime
 import json
 import pathlib
 
-import pytest
-
 from portfolio.risk_management import (
     _compute_portfolio_value,
     check_drawdown,
@@ -17,7 +15,6 @@ from portfolio.risk_management import (
     get_position_ages,
     transaction_cost_analysis,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -367,7 +364,7 @@ class TestComputeStopLevels:
 class TestGetPositionAges:
     def test_basic_age(self):
         """Calculate age from first BUY timestamp."""
-        buy_ts = (datetime.datetime.now(datetime.timezone.utc) -
+        buy_ts = (datetime.datetime.now(datetime.UTC) -
                   datetime.timedelta(hours=48)).isoformat()
         portfolio = _make_portfolio(
             holdings={"BTC-USD": {"shares": 1}},
@@ -385,9 +382,9 @@ class TestGetPositionAges:
 
     def test_multiple_buys_uses_earliest(self):
         """Multiple BUY transactions -> age from the earliest one."""
-        ts_old = (datetime.datetime.now(datetime.timezone.utc) -
+        ts_old = (datetime.datetime.now(datetime.UTC) -
                   datetime.timedelta(hours=100)).isoformat()
-        ts_new = (datetime.datetime.now(datetime.timezone.utc) -
+        ts_new = (datetime.datetime.now(datetime.UTC) -
                   datetime.timedelta(hours=10)).isoformat()
 
         portfolio = _make_portfolio(
@@ -405,9 +402,9 @@ class TestGetPositionAges:
 
     def test_counts_sells(self):
         """SELL transactions are counted."""
-        buy_ts = (datetime.datetime.now(datetime.timezone.utc) -
+        buy_ts = (datetime.datetime.now(datetime.UTC) -
                   datetime.timedelta(hours=72)).isoformat()
-        sell_ts = (datetime.datetime.now(datetime.timezone.utc) -
+        sell_ts = (datetime.datetime.now(datetime.UTC) -
                    datetime.timedelta(hours=24)).isoformat()
 
         portfolio = _make_portfolio(
@@ -428,7 +425,7 @@ class TestGetPositionAges:
             holdings={"BTC-USD": {"shares": 0}},
             transactions=[
                 {"ticker": "BTC-USD", "action": "BUY",
-                 "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()},
+                 "timestamp": datetime.datetime.now(datetime.UTC).isoformat()},
             ],
         )
 
@@ -456,7 +453,7 @@ class TestGetPositionAges:
             holdings={"BTC-USD": {"shares": 1}},
             transactions=[
                 {"ticker": "ETH-USD", "action": "BUY",
-                 "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()},
+                 "timestamp": datetime.datetime.now(datetime.UTC).isoformat()},
             ],
         )
         result = get_position_ages(portfolio)
@@ -465,7 +462,7 @@ class TestGetPositionAges:
     def test_naive_timestamp_treated_as_utc(self):
         """Naive (no timezone) timestamps should be treated as UTC."""
         # Use a naive timestamp (no +00:00)
-        naive_ts = (datetime.datetime.now(datetime.timezone.utc) -
+        naive_ts = (datetime.datetime.now(datetime.UTC) -
                     datetime.timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")
         portfolio = _make_portfolio(
             holdings={"BTC-USD": {"shares": 1}},

@@ -15,7 +15,6 @@ import os
 import subprocess
 import sys
 
-
 MODELS = {
     "ministral": {
         "repo": "mistralai/Ministral-3-8B-Instruct-2512-GGUF",

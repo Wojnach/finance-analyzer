@@ -7,7 +7,7 @@ Can be run standalone or called from the main loop.
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -262,14 +262,15 @@ def forecast_prophet(ticker, prices, horizons=(1, 24)):
         Dict with forecast results per horizon, or None on failure
     """
     try:
-        from prophet import Prophet
         import logging as _logging
+
+        from prophet import Prophet
         # Suppress Prophet's verbose stdout
         _logging.getLogger("prophet").setLevel(_logging.WARNING)
         _logging.getLogger("cmdstanpy").setLevel(_logging.WARNING)
 
         # Build dataframe with hourly timestamps (tz-naive, Prophet requirement)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         n = len(prices)
         ds = pd.date_range(end=now, periods=n, freq="h")
         df = pd.DataFrame({"ds": ds, "y": prices})
@@ -341,7 +342,7 @@ def run_forecasts(tickers=None):
             return
         tickers = list(summary.get("signals", {}).keys())
 
-    ts = datetime.now(timezone.utc).isoformat()
+    ts = datetime.now(UTC).isoformat()
     results = []
 
     for ticker in tickers:

@@ -256,7 +256,7 @@ def validate_portfolio_file(path: str) -> list[str]:
         list of error message strings (empty = valid).
     """
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             portfolio = json.load(f)
     except FileNotFoundError:
         return [f"Portfolio file not found: {path}"]

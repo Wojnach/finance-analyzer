@@ -1,11 +1,7 @@
 """Tests for BGeometrics on-chain data integration."""
 
-import json
 import time
-import pytest
-from unittest.mock import patch, MagicMock
-from pathlib import Path
-
+from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -147,9 +143,9 @@ class TestGetOnchainData:
         mock_net.return_value = {"netflow": -1250.5}
         mock_liq.return_value = {"long_liquidations": 15e6, "short_liquidations": 8e6}
 
-        from portfolio.onchain_data import get_onchain_data
         # Bypass cache
         import portfolio.shared_state as ss
+        from portfolio.onchain_data import get_onchain_data
         cache_key = "onchain_btc"
         ss._tool_cache.pop(cache_key, None)
 
@@ -179,8 +175,8 @@ class TestGetOnchainData:
         mock_net.return_value = None  # failed
         mock_liq.return_value = None  # failed
 
-        from portfolio.onchain_data import get_onchain_data
         import portfolio.shared_state as ss
+        from portfolio.onchain_data import get_onchain_data
         ss._tool_cache.pop("onchain_btc", None)
 
         result = get_onchain_data()
@@ -285,7 +281,7 @@ class TestOnchainCache:
         assert result is None
 
     def test_load_cache_returns_data_if_fresh(self, tmp_path):
-        from portfolio.onchain_data import _load_onchain_cache, _save_onchain_cache, CACHE_FILE
+        from portfolio.onchain_data import _load_onchain_cache, _save_onchain_cache
         test_data = {"mvrv": 1.5, "ts": time.time()}
         _save_onchain_cache(test_data)
         loaded = _load_onchain_cache(max_age_seconds=3600)

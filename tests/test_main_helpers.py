@@ -5,14 +5,11 @@ Covers:
 - _run_post_cycle: post-cycle housekeeping (digest, flush, AV refresh)
 """
 
-import pytest
 from unittest import mock
-
 
 # ---------------------------------------------------------------------------
 # _extract_triggered_tickers tests (TEST-9 / BUG-48)
 # ---------------------------------------------------------------------------
-
 from portfolio.main import _extract_triggered_tickers
 
 

@@ -1,11 +1,8 @@
 """Tests for the perception gate pre-invocation filter."""
 
-import json
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-from portfolio.perception_gate import should_invoke, _BYPASS_KEYWORDS
-
+from portfolio.perception_gate import should_invoke
 
 # ---------------------------------------------------------------------------
 # Helpers

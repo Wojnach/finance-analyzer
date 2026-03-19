@@ -9,11 +9,12 @@ Covers:
 """
 
 import json
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from dashboard.app import app, _read_json, _read_jsonl
+import pytest
+
+from dashboard.app import _read_json, _read_jsonl, app
 
 
 @pytest.fixture
@@ -313,20 +314,19 @@ class TestApiSignalLog:
 
 class TestApiAccuracy:
     def test_returns_accuracy_data(self, client, tmp_data):
-        with _no_auth():
-            with patch("dashboard.app.Path"):
-                # Mock the accuracy_stats imports
-                mock_sa = {"rsi": {"correct": 10, "total": 20, "accuracy": 0.5}}
-                mock_ca = {"correct": 50, "total": 100, "accuracy": 0.5}
-                mock_ta = {"BTC-USD": {"correct": 5, "total": 10}}
-                with patch.dict("sys.modules", {
-                    "portfolio.accuracy_stats": MagicMock(
-                        signal_accuracy=MagicMock(return_value=mock_sa),
-                        consensus_accuracy=MagicMock(return_value=mock_ca),
-                        per_ticker_accuracy=MagicMock(return_value=mock_ta),
-                    )
-                }):
-                    resp = client.get("/api/accuracy")
+        with _no_auth(), patch("dashboard.app.Path"):
+            # Mock the accuracy_stats imports
+            mock_sa = {"rsi": {"correct": 10, "total": 20, "accuracy": 0.5}}
+            mock_ca = {"correct": 50, "total": 100, "accuracy": 0.5}
+            mock_ta = {"BTC-USD": {"correct": 5, "total": 10}}
+            with patch.dict("sys.modules", {
+                "portfolio.accuracy_stats": MagicMock(
+                    signal_accuracy=MagicMock(return_value=mock_sa),
+                    consensus_accuracy=MagicMock(return_value=mock_ca),
+                    per_ticker_accuracy=MagicMock(return_value=mock_ta),
+                )
+            }):
+                resp = client.get("/api/accuracy")
         assert resp.status_code == 200
 
 
@@ -343,9 +343,8 @@ class TestApiIskbets:
 
 class TestApiLoraStatus:
     def test_returns_lora_state(self, client):
-        with _no_auth():
-            with patch("dashboard.app.TRAINING_DIR", Path("/nonexistent")):
-                resp = client.get("/api/lora-status")
+        with _no_auth(), patch("dashboard.app.TRAINING_DIR", Path("/nonexistent")):
+            resp = client.get("/api/lora-status")
         data = resp.get_json()
         assert data["state"] is None
         assert data["training_progress"] is None
@@ -607,9 +606,8 @@ class TestApiHealth:
             "cycles": 100,
             "agent_silent": False,
         }
-        with _no_auth():
-            with patch("portfolio.health.get_health_summary", return_value=mock_health):
-                resp = client.get("/api/health")
+        with _no_auth(), patch("portfolio.health.get_health_summary", return_value=mock_health):
+            resp = client.get("/api/health")
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["loop_alive"] is True
@@ -953,7 +951,7 @@ class TestApiDecisions:
 
     def test_limit_parameter(self, client, tmp_data):
         entries = [
-            _sample_journal_entry(ts="2026-02-22T0{}:00:00+00:00".format(i))
+            _sample_journal_entry(ts=f"2026-02-22T0{i}:00:00+00:00")
             for i in range(9)
         ]
         self._write_journal(tmp_data, entries)

@@ -8,22 +8,20 @@ Covers:
 """
 
 import json
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
 
 from portfolio.signals.forecast import (
-    _accuracy_weighted_vote,
+    _ACCURACY_CACHE_TTL,
     _HOLD_THRESHOLD,
     _MIN_SAMPLES,
-    _ACCURACY_CACHE_TTL,
+    _accuracy_weighted_vote,
     compute_forecast_signal,
     reset_circuit_breakers,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -36,7 +34,7 @@ def _write_jsonl(path, entries):
 
 
 def _ago(hours=0, days=0):
-    return (datetime.now(timezone.utc) - timedelta(hours=hours, days=days)).isoformat()
+    return (datetime.now(UTC) - timedelta(hours=hours, days=days)).isoformat()
 
 
 @pytest.fixture(autouse=True)
@@ -199,7 +197,6 @@ class TestReportingEnrichment:
         }
 
         # Build the _forecast_signals dict the same way reporting.py does
-        from portfolio.reporting import logger as _logger
         _forecast_signals = {}
         for t_name, t_data in signals.items():
             extra = t_data.get("extra", {})

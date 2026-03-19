@@ -1,10 +1,10 @@
 """Tests for futures_data.py and signals/futures_flow.py."""
 
-import pytest
-from unittest.mock import patch, MagicMock
-import pandas as pd
-import numpy as np
+from unittest.mock import patch
 
+import numpy as np
+import pandas as pd
+import pytest
 
 # ---------------------------------------------------------------------------
 # fixtures
@@ -150,6 +150,7 @@ class TestFuturesData:
             "time": 1700000000000,
         }
         from portfolio.futures_data import get_open_interest
+
         # Clear cache
         from portfolio.shared_state import _tool_cache
         _tool_cache.pop("futures_oi_BTC-USD", None)

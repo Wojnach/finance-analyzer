@@ -9,7 +9,7 @@ Runs in both Mode A and Mode B.
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.file_utils import load_json
@@ -60,7 +60,7 @@ def should_send_daily_digest(config):
     notification = config.get("notification", {})
     digest_hour = notification.get("daily_digest_hour_utc", 6)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if now.hour != digest_hour:
         return False
 

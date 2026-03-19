@@ -5,20 +5,16 @@ get_latest_values, _daily_returns, _parse_ts.
 """
 
 import json
-import math
 import pathlib
 
-import pytest
-
 from portfolio.equity_curve import (
-    load_equity_curve,
-    compute_metrics,
-    compare_strategies,
-    get_latest_values,
     _daily_returns,
     _parse_ts,
+    compare_strategies,
+    compute_metrics,
+    get_latest_values,
+    load_equity_curve,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

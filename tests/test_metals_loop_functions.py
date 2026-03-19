@@ -5,6 +5,7 @@ Batch 5 of the metals monitoring auto-improvement plan.
 import json
 import os
 import sys
+
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "data"))
@@ -155,7 +156,7 @@ class TestReadSignalData:
         summary_path = "data/agent_summary.json"
         backup = None
         if os.path.exists(summary_path):
-            with open(summary_path, "r") as f:
+            with open(summary_path) as f:
                 backup = f.read()
 
         try:

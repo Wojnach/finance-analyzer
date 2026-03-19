@@ -22,25 +22,22 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.volume_flow import (
-    compute_volume_flow_signal,
-    _compute_obv,
-    _compute_vwap,
-    _compute_ad_line,
+    MIN_ROWS,
     _compute_cmf,
     _compute_mfi,
+    _compute_obv,
     _compute_volume_rsi,
-    _vote_obv,
-    _vote_vwap,
+    _compute_vwap,
     _vote_ad,
     _vote_cmf,
     _vote_mfi,
+    _vote_obv,
     _vote_volume_rsi,
-    MIN_ROWS,
+    _vote_vwap,
+    compute_volume_flow_signal,
 )
-
 
 # ---------------------------------------------------------------------------
 # DataFrame builders

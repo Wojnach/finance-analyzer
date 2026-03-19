@@ -1,8 +1,6 @@
 """Tests for portfolio.fin_snipe module."""
 
-import json
 
-import pytest
 
 
 def test_load_json_uses_file_utils(tmp_path, monkeypatch):

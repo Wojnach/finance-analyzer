@@ -48,7 +48,7 @@ def hours_to_metals_close(now: _dt.datetime | None = None) -> float:
         tz = ZoneInfo("Europe/Stockholm")
         now_cet = now.astimezone(tz) if now else _dt.datetime.now(tz)
     else:  # pragma: no cover
-        utc_now = now or _dt.datetime.now(_dt.timezone.utc)
+        utc_now = now or _dt.datetime.now(_dt.UTC)
         now_cet = utc_now + _dt.timedelta(hours=1)
     close_cet = now_cet.replace(hour=21, minute=55, second=0, microsecond=0)
     return round(max(0.0, (close_cet - now_cet).total_seconds() / 3600.0), 4)

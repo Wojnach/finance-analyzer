@@ -30,21 +30,19 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.oscillators import (
-    compute_oscillator_signal,
-    _awesome_oscillator,
+    MIN_ROWS,
     _aroon_oscillator,
-    _vortex_indicator,
+    _awesome_oscillator,
     _chande_momentum,
+    _coppock_curve,
     _know_sure_thing,
     _schaff_trend_cycle,
     _trix,
-    _coppock_curve,
-    MIN_ROWS,
+    _vortex_indicator,
+    compute_oscillator_signal,
 )
-
 
 # ---------------------------------------------------------------------------
 # DataFrame builders

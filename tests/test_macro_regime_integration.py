@@ -8,14 +8,10 @@ Covers:
 - All API calls are mocked, no real network requests
 """
 
-import json
-from datetime import datetime, timezone
 from unittest import mock
 
 import numpy as np
 import pandas as pd
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -314,8 +310,8 @@ class TestDXYMocked:
 
     def test_get_dxy_mocked(self):
         """get_dxy() should parse yfinance data correctly."""
-        from portfolio.macro_context import get_dxy
         import portfolio.shared_state as ss
+        from portfolio.macro_context import get_dxy
 
         # Clear DXY cache so get_dxy() actually fetches
         ss._tool_cache.pop("dxy", None)

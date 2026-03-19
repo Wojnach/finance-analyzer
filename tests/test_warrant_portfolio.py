@@ -1,13 +1,9 @@
 """Tests for portfolio.warrant_portfolio — leverage-aware P&L tracking."""
 
 import json
-import os
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
-
 
 # ============================================================
 # warrant_pnl

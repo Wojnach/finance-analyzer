@@ -9,19 +9,16 @@ Covers:
 
 import json
 import time
-import pytest
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
-
 from portfolio.health import (
+    check_agent_silence,
+    check_staleness,
+    get_health_summary,
+    load_health,
     update_health,
     update_module_failures,
-    load_health,
-    check_staleness,
-    check_agent_silence,
-    get_health_summary,
 )
 
 
@@ -142,7 +139,7 @@ class TestCheckStaleness:
 
     def test_not_stale_when_recent(self, tmp_path):
         hf = tmp_path / "health_state.json"
-        recent = datetime.now(timezone.utc).isoformat()
+        recent = datetime.now(UTC).isoformat()
         hf.write_text(json.dumps({
             "start_time": time.time(),
             "cycle_count": 5,
@@ -157,7 +154,7 @@ class TestCheckStaleness:
 
     def test_stale_when_old_heartbeat(self, tmp_path):
         hf = tmp_path / "health_state.json"
-        old = (datetime.now(timezone.utc) - timedelta(seconds=600)).isoformat()
+        old = (datetime.now(UTC) - timedelta(seconds=600)).isoformat()
         hf.write_text(json.dumps({
             "start_time": time.time(),
             "cycle_count": 5,
@@ -173,7 +170,7 @@ class TestCheckStaleness:
     def test_custom_max_age(self, tmp_path):
         hf = tmp_path / "health_state.json"
         # Heartbeat 30 seconds ago
-        recent = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
+        recent = (datetime.now(UTC) - timedelta(seconds=30)).isoformat()
         hf.write_text(json.dumps({
             "start_time": time.time(),
             "cycle_count": 1,
@@ -193,7 +190,7 @@ class TestCheckStaleness:
 class TestGetHealthSummary:
     def test_summary_format_when_healthy(self, tmp_path):
         hf = tmp_path / "health_state.json"
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         hf.write_text(json.dumps({
             "start_time": time.time(),
             "cycle_count": 100,
@@ -222,7 +219,7 @@ class TestGetHealthSummary:
 
     def test_summary_format_when_stale(self, tmp_path):
         hf = tmp_path / "health_state.json"
-        old = (datetime.now(timezone.utc) - timedelta(seconds=600)).isoformat()
+        old = (datetime.now(UTC) - timedelta(seconds=600)).isoformat()
         hf.write_text(json.dumps({
             "start_time": time.time(),
             "cycle_count": 50,
@@ -251,7 +248,7 @@ class TestGetHealthSummary:
 
     def test_recent_errors_capped_at_5(self, tmp_path):
         hf = tmp_path / "health_state.json"
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         errors = [{"ts": now, "error": f"err{i}"} for i in range(10)]
         hf.write_text(json.dumps({
             "start_time": time.time(),
@@ -270,7 +267,7 @@ class TestGetHealthSummary:
 
     def test_includes_agent_silence_fields(self, tmp_path):
         hf = tmp_path / "health_state.json"
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         hf.write_text(json.dumps({
             "start_time": time.time(),
             "cycle_count": 1,
@@ -296,7 +293,7 @@ class TestCheckAgentSilence:
 
     def test_not_silent_with_recent_invocation(self, tmp_path):
         inv_file = tmp_path / "invocations.jsonl"
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         inv_file.write_text(
             json.dumps({"ts": now, "reasons": ["test"], "status": "invoked"}) + "\n",
             encoding="utf-8",
@@ -309,7 +306,7 @@ class TestCheckAgentSilence:
 
     def test_silent_with_old_invocation(self, tmp_path):
         inv_file = tmp_path / "invocations.jsonl"
-        old = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+        old = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
         inv_file.write_text(
             json.dumps({"ts": old, "reasons": ["test"], "status": "invoked"}) + "\n",
             encoding="utf-8",
@@ -376,7 +373,7 @@ class TestUpdateModuleFailures:
 
     def test_summary_includes_module_failures(self, tmp_path):
         hf = tmp_path / "health_state.json"
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         hf.write_text(json.dumps({
             "start_time": time.time(), "cycle_count": 10,
             "error_count": 0, "errors": [],
@@ -394,7 +391,7 @@ class TestUpdateModuleFailures:
 
     def test_summary_module_failures_none_when_absent(self, tmp_path):
         hf = tmp_path / "health_state.json"
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         hf.write_text(json.dumps({
             "start_time": time.time(), "cycle_count": 10,
             "error_count": 0, "errors": [],

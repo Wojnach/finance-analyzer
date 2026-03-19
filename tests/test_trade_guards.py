@@ -1,22 +1,16 @@
 """Tests for trade guards (overtrading prevention)."""
 
 import json
-import os
-import tempfile
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
 
 from portfolio.trade_guards import (
-    check_overtrading_guards,
-    record_trade,
-    get_all_guard_warnings,
-    _load_state,
-    _save_state,
     _get_cooldown_multiplier,
-    STATE_FILE,
+    check_overtrading_guards,
+    get_all_guard_warnings,
+    record_trade,
 )
 
 
@@ -58,7 +52,7 @@ class TestTickerCooldown:
             assert len(cooldown_warns) == 0
 
     def test_warning_within_cooldown(self, clean_state):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         state = {
             "ticker_trades": {"bold:BTC-USD": (now - timedelta(minutes=10)).isoformat()},
             "consecutive_losses": {"patient": 0, "bold": 0},
@@ -73,7 +67,7 @@ class TestTickerCooldown:
             assert cooldown_warns[0]["details"]["remaining_min"] > 0
 
     def test_no_warning_after_cooldown_expires(self, clean_state):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         state = {
             "ticker_trades": {"bold:BTC-USD": (now - timedelta(minutes=60)).isoformat()},
             "consecutive_losses": {"patient": 0, "bold": 0},
@@ -87,7 +81,7 @@ class TestTickerCooldown:
             assert len(cooldown_warns) == 0
 
     def test_loss_escalation_increases_cooldown(self, clean_state):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # 3 consecutive losses → 4x cooldown (30 * 4 = 120 min)
         state = {
             "ticker_trades": {"bold:BTC-USD": (now - timedelta(minutes=50)).isoformat()},
@@ -104,7 +98,7 @@ class TestTickerCooldown:
             assert cooldown_warns[0]["details"]["multiplier"] == 4
 
     def test_different_tickers_independent(self, clean_state):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         state = {
             "ticker_trades": {"bold:BTC-USD": (now - timedelta(minutes=10)).isoformat()},
             "consecutive_losses": {"patient": 0, "bold": 0},
@@ -118,7 +112,7 @@ class TestTickerCooldown:
             assert len(cooldown_warns) == 0
 
     def test_different_strategies_independent(self, clean_state):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         state = {
             "ticker_trades": {"bold:BTC-USD": (now - timedelta(minutes=10)).isoformat()},
             "consecutive_losses": {"patient": 0, "bold": 0},
@@ -166,7 +160,7 @@ class TestPositionRateLimit:
             assert len(rate_warns) == 0
 
     def test_warning_at_limit(self, clean_state):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         state = {
             "ticker_trades": {},
             "consecutive_losses": {"patient": 0, "bold": 0},
@@ -183,7 +177,7 @@ class TestPositionRateLimit:
             assert len(rate_warns) == 1
 
     def test_no_warning_for_sell(self, clean_state):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         state = {
             "ticker_trades": {},
             "consecutive_losses": {"patient": 0, "bold": 0},
@@ -200,7 +194,7 @@ class TestPositionRateLimit:
             assert len(rate_warns) == 0
 
     def test_old_positions_dont_count(self, clean_state):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         state = {
             "ticker_trades": {},
             "consecutive_losses": {"patient": 0, "bold": 0},
@@ -217,7 +211,7 @@ class TestPositionRateLimit:
             assert len(rate_warns) == 0
 
     def test_patient_has_longer_window(self, clean_state):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # 5 hours ago — inside patient's 8h window, outside bold's 4h window
         state = {
             "ticker_trades": {},
@@ -298,7 +292,7 @@ class TestGuardConfig:
             assert warnings == []
 
     def test_custom_cooldown(self, clean_state):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         state = {
             "ticker_trades": {"bold:BTC-USD": (now - timedelta(minutes=20)).isoformat()},
             "consecutive_losses": {"patient": 0, "bold": 0},
@@ -324,7 +318,7 @@ class TestGetAllGuardWarnings:
             assert result["warnings"] == []
 
     def test_buy_signal_triggers_checks(self, clean_state):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         state = {
             "ticker_trades": {"bold:BTC-USD": (now - timedelta(minutes=10)).isoformat()},
             "consecutive_losses": {"patient": 0, "bold": 0},

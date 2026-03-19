@@ -8,10 +8,9 @@ Tests cover:
 5. Signal count changes (qwen3 added for all tickers)
 """
 
-import json
 import os
 import sys
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -33,8 +32,8 @@ class TestChronosUpgrade:
 
     def test_set_chronos_model_resets_version(self):
         """Changing model name should reset version to 0."""
-        from portfolio.forecast_signal import set_chronos_model
         import portfolio.forecast_signal as fs
+        from portfolio.forecast_signal import set_chronos_model
 
         old_model = fs._CHRONOS_MODEL
         old_version = fs._chronos_version
@@ -140,6 +139,7 @@ class TestMinistralUpgrade:
         with patch.dict("sys.modules", {"llama_cpp": mock_llama_module}):
             with patch("os.path.exists", side_effect=path_exists):
                 import importlib
+
                 import portfolio.ministral_trader as mt
                 importlib.reload(mt)
                 mt.load_model()
@@ -154,6 +154,7 @@ class TestMinistralUpgrade:
         with patch.dict("sys.modules", {"llama_cpp": mock_llama_module}):
             with patch("os.path.exists", return_value=False):
                 import importlib
+
                 import portfolio.ministral_trader as mt
                 importlib.reload(mt)
                 with pytest.raises(FileNotFoundError):

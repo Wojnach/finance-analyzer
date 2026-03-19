@@ -2,9 +2,9 @@
 """Signal accuracy backtest — retroactively measure how well each signal
 predicts price movement at 1d/3d/5d/10d horizons using 365 days of 1h data."""
 
-import os
-import time
 import pathlib
+import time
+
 import pandas as pd
 import requests
 
@@ -301,7 +301,7 @@ def run_backtest():
             print("".join(parts))
 
         # Bonus: vote direction breakdown
-        print(f"\n  Vote breakdown:")
+        print("\n  Vote breakdown:")
         for name in list(SIGNALS.keys()) + ["Funding Rate"]:
             votes = all_votes[name]
             buys = int((votes == "BUY").sum())

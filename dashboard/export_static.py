@@ -19,7 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 
-from dashboard.app import app, _json_safe  # noqa: E402
+from dashboard.app import _json_safe, app  # noqa: E402
 
 # Endpoints to export: (Flask route, static filename)
 ENDPOINTS = [

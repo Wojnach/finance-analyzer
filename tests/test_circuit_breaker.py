@@ -2,8 +2,6 @@
 
 from unittest.mock import patch
 
-import pytest
-
 from portfolio.circuit_breaker import CircuitBreaker, State
 
 

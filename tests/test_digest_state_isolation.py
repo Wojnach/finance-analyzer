@@ -4,10 +4,6 @@ Verifies that digest.py and daily_digest.py use their own state files
 instead of sharing trigger_state.json with trigger.py.
 """
 
-import json
-import time
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 

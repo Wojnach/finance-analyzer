@@ -16,7 +16,7 @@ At least 50 rows recommended; returns HOLD on insufficient data.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -181,7 +181,7 @@ def _vote_volume_rsi(vrsi_val: float, price_up: bool) -> str:
 # Composite signal
 # ---------------------------------------------------------------------------
 
-def compute_volume_flow_signal(df: pd.DataFrame) -> Dict[str, Any]:
+def compute_volume_flow_signal(df: pd.DataFrame) -> dict[str, Any]:
     """Compute composite volume flow signal from OHLCV data.
 
     Parameters
@@ -198,7 +198,7 @@ def compute_volume_flow_signal(df: pd.DataFrame) -> Dict[str, Any]:
         sub_signals : dict    Per-sub-indicator vote
         indicators : dict     Raw indicator values (latest bar)
     """
-    default_result: Dict[str, Any] = {
+    default_result: dict[str, Any] = {
         "action": "HOLD",
         "confidence": 0.0,
         "sub_signals": {

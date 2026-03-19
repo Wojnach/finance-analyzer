@@ -13,7 +13,7 @@ Config:
 """
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from portfolio.file_utils import atomic_append_jsonl, load_json, load_jsonl
@@ -165,7 +165,7 @@ def should_reflect(config=None):
     # Check age
     try:
         last_ts = datetime.fromisoformat(last["ts"])
-        age = datetime.now(timezone.utc) - last_ts
+        age = datetime.now(UTC) - last_ts
         if age > timedelta(days=max_age_days):
             return True
     except (KeyError, ValueError):
@@ -190,7 +190,7 @@ def compute_reflection():
     total_trades = _count_trades(patient) + _count_trades(bold)
 
     return {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "patient": patient_metrics,
         "bold": bold_metrics,
         "regime_distribution": regime_dist,
@@ -232,7 +232,7 @@ def load_latest_reflection(max_age_days=7):
     last = reflections[-1]
     try:
         ts = datetime.fromisoformat(last["ts"])
-        age = datetime.now(timezone.utc) - ts
+        age = datetime.now(UTC) - ts
         if age > timedelta(days=max_age_days):
             return None
     except (KeyError, ValueError):

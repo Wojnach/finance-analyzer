@@ -11,15 +11,14 @@ and the updated _run_kronos() that uses it.
 """
 
 import json
-import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from portfolio.signals.forecast import (
-    _run_kronos,
     _extract_json_from_stdout,
     _kronos_circuit_open,
+    _run_kronos,
     reset_circuit_breakers,
 )
 

@@ -1,48 +1,43 @@
 """Tests for the Elongir silver dip-trading bot."""
 
 import json
-import math
-import os
-import tempfile
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 
+from portfolio.elongir.bot import ElongirBot
 from portfolio.elongir.config import ElongirConfig
-from portfolio.elongir.state import (
-    BotState,
-    Position,
-    warrant_price_sek,
-    effective_leverage,
-    buy_price,
-    sell_price,
-    log_trade,
-    log_poll,
-)
+from portfolio.elongir.data_provider import MarketSnapshot
 from portfolio.elongir.indicators import (
-    compute_rsi,
-    compute_macd,
-    compute_bb,
-    compute_ema,
-    compute_volume_ratio,
-    compute_atr,
     IndicatorSet,
     TimeframeIndicators,
-    compute_all,
     _extract_ohlcv,
+    compute_all,
+    compute_atr,
+    compute_bb,
+    compute_ema,
+    compute_macd,
+    compute_rsi,
+    compute_volume_ratio,
 )
-from portfolio.elongir.signal import DipDetector, ReversalDetector
 from portfolio.elongir.risk import (
+    check_daily_limits,
     compute_position_size,
     compute_stop,
     compute_tp,
-    check_daily_limits,
 )
-from portfolio.elongir.bot import ElongirBot
-from portfolio.elongir.data_provider import MarketSnapshot
-
+from portfolio.elongir.signal import DipDetector, ReversalDetector
+from portfolio.elongir.state import (
+    BotState,
+    Position,
+    buy_price,
+    effective_leverage,
+    log_poll,
+    log_trade,
+    sell_price,
+    warrant_price_sek,
+)
 
 # ---------------------------------------------------------------------------
 # Config tests
@@ -479,7 +474,7 @@ class TestReversalDetector:
         rd = ReversalDetector(self._make_config(max_hold_hours=5.0))
         ind = IndicatorSet()
         ind.tf_5m = TimeframeIndicators(rsi=50.0, macd_histogram=0.0)
-        entry_time = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
+        entry_time = (datetime.now(UTC) - timedelta(hours=6)).isoformat()
         result = rd.update(ind, 90.0, 90.0, entry_time, 90.0, False)
         assert result == "TIME_STOP"
 
@@ -488,7 +483,7 @@ class TestReversalDetector:
         ind = IndicatorSet()
         ind.tf_5m = TimeframeIndicators(rsi=55.0, macd_histogram=0.1)
         # Use recent entry time so TIME_STOP doesn't fire first
-        recent_time = datetime.now(timezone.utc).isoformat()
+        recent_time = datetime.now(UTC).isoformat()
         # Peak=92.0, current=91.3 -> drop = (92-91.3)/92 = 0.76% > 0.7%
         result = rd.update(ind, 91.3, 90.0, recent_time, 92.0, True)
         assert result == "TRAILING_STOP"
@@ -497,7 +492,7 @@ class TestReversalDetector:
         cfg = self._make_config(rsi_overbought=70.0)
         rd = ReversalDetector(cfg)
         ind = IndicatorSet()
-        recent_time = datetime.now(timezone.utc).isoformat()
+        recent_time = datetime.now(UTC).isoformat()
         # First poll to set prev_macd_hist
         ind.tf_5m = TimeframeIndicators(rsi=65.0, macd_histogram=0.5)
         rd.update(ind, 91.0, 90.0, recent_time, 91.0, False)
@@ -511,7 +506,7 @@ class TestReversalDetector:
         rd = ReversalDetector(self._make_config())
         ind = IndicatorSet()
         ind.tf_5m = TimeframeIndicators(rsi=50.0, macd_histogram=0.1)
-        result = rd.update(ind, 90.5, 90.0, datetime.now(timezone.utc).isoformat(), 90.5, False)
+        result = rd.update(ind, 90.5, 90.0, datetime.now(UTC).isoformat(), 90.5, False)
         assert result is None
 
     def test_should_activate_trailing(self):
@@ -598,7 +593,7 @@ class TestElongirBot:
         snap = MarketSnapshot(
             silver_usd=silver,
             fx_rate=fx,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
         )
         if klines:
             snap.klines_1m = self._make_klines(100, silver)
@@ -677,7 +672,7 @@ class TestElongirBot:
         bot.state.position = Position(
             entry_silver_usd=90.0,
             entry_warrant_sek=100.0,
-            entry_time=datetime.now(timezone.utc).isoformat(),
+            entry_time=datetime.now(UTC).isoformat(),
             quantity=100,
             cost_sek=10000.0,
             stop_price_usd=88.0,

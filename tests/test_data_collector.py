@@ -13,32 +13,30 @@ Covers:
 """
 
 import time
-from unittest import mock
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
 import portfolio.shared_state as _ss
-from portfolio.data_collector import (
-    _binance_fetch,
-    binance_klines,
-    binance_fapi_klines,
-    alpaca_klines,
-    yfinance_klines,
-    _fetch_klines,
-    collect_timeframes,
-    _BINANCE_KLINE_COLS,
-    ALPACA_INTERVAL_MAP,
-    _YF_INTERVAL_MAP,
-    TIMEFRAMES,
-    STOCK_TIMEFRAMES,
-    binance_spot_cb,
-    binance_fapi_cb,
-    alpaca_cb,
-)
 from portfolio.circuit_breaker import CircuitBreaker
-
+from portfolio.data_collector import (
+    _BINANCE_KLINE_COLS,
+    _YF_INTERVAL_MAP,
+    ALPACA_INTERVAL_MAP,
+    STOCK_TIMEFRAMES,
+    TIMEFRAMES,
+    _binance_fetch,
+    _fetch_klines,
+    alpaca_cb,
+    alpaca_klines,
+    binance_fapi_cb,
+    binance_fapi_klines,
+    binance_klines,
+    binance_spot_cb,
+    collect_timeframes,
+    yfinance_klines,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers — realistic API response builders

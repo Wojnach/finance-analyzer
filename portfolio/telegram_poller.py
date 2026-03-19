@@ -133,6 +133,7 @@ class TelegramPoller:
             Reply text for the user.
         """
         from pathlib import Path
+
         from portfolio.file_utils import atomic_write_json
 
         config_path = Path(__file__).resolve().parent.parent / "config.json"
@@ -147,7 +148,7 @@ class TelegramPoller:
 
         # Update config.json
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 cfg = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             cfg = {}

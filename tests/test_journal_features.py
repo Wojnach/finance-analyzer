@@ -1,6 +1,5 @@
 import json
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from portfolio.journal import build_context
@@ -9,7 +8,7 @@ from tests.test_journal import make_entry
 
 class TestReflection:
     def test_reflection_rendered_when_present(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(
                 age_hours=0.5,
@@ -21,12 +20,12 @@ class TestReflection:
         assert "Previous bullish thesis" in md
 
     def test_no_reflection_when_absent(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         md = build_context([make_entry(age_hours=0.5, now=now)])
         assert "Reflection" not in md
 
     def test_reflection_in_full_context_output(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(
                 age_hours=1.0,
@@ -41,7 +40,7 @@ class TestReflection:
 
 class TestConviction:
     def test_conviction_displayed_as_percentage(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(
                 age_hours=0.5,
@@ -59,7 +58,7 @@ class TestConviction:
         assert "[70%]" in build_context(entries)
 
     def test_missing_conviction_no_display(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(
                 age_hours=0.5,
@@ -73,7 +72,7 @@ class TestConviction:
         assert "%" not in md
 
     def test_zero_conviction_no_display(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(
                 age_hours=0.5,
@@ -93,7 +92,7 @@ class TestConviction:
 
 class TestContinuationChains:
     def test_simple_chain_of_2(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         e1 = make_entry(
             age_hours=2,
             now=now,
@@ -112,7 +111,7 @@ class TestContinuationChains:
         assert "Thesis Chains" in build_context([e1, e2])
 
     def test_chain_of_3(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         e1 = make_entry(age_hours=3, now=now)
         e2 = make_entry(age_hours=2, now=now, continues=e1["ts"])
         e3 = make_entry(age_hours=1, now=now, continues=e2["ts"])
@@ -121,13 +120,13 @@ class TestContinuationChains:
         assert "→" in md
 
     def test_no_continues_no_chains(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         assert "Thesis Chains" not in build_context(
             [make_entry(age_hours=0.5, now=now)]
         )
 
     def test_dangling_reference_handled(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         e = make_entry(age_hours=0.5, now=now, continues="2026-01-01T00:00:00+00:00")
         assert "Thesis Chains" not in build_context([e])
 
@@ -192,7 +191,7 @@ class TestPortfolioPnl:
             assert _load_portfolio_pnl() == {}
 
     def test_portfolio_section_in_context(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         pdata = {
             "patient": {
                 "cash_sek": 425000.0,
@@ -216,7 +215,7 @@ class TestPortfolioPnl:
 
 class TestLayeredCompression:
     def test_recent_entry_gets_full_detail(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(
                 age_hours=0.5,
@@ -232,7 +231,7 @@ class TestLayeredCompression:
         assert "BUY BTC-USD" in md
 
     def test_medium_entry_gets_compact(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(
                 age_hours=3,
@@ -252,7 +251,7 @@ class TestLayeredCompression:
         assert "trigger:" not in md
 
     def test_old_entry_gets_oneline(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [make_entry(age_hours=6, now=now, patient_action="BUY BTC-USD")]
         md = build_context(entries, now=now)
         lines = [l for l in md.split("\n") if "BUY" in l]
@@ -260,17 +259,17 @@ class TestLayeredCompression:
             assert len(line) < 120
 
     def test_recent_hold_not_compressed(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         md = build_context([make_entry(age_hours=0.5, now=now)], now=now)
         assert "trigger:" in md
 
     def test_old_holds_compressed(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [make_entry(age_hours=h, now=now) for h in [5, 4.5, 4]]
         assert "HOLD" in build_context(entries, now=now)
 
     def test_mixed_ages_in_single_context(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(age_hours=6, now=now, patient_action="BUY BTC-USD"),
             make_entry(age_hours=3, now=now, patient_action="SELL BTC-USD"),
@@ -296,7 +295,7 @@ class TestWarnings:
     def test_thesis_contradiction_detected(self):
         from portfolio.journal import _detect_warnings
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(
                 age_hours=3,
@@ -329,7 +328,7 @@ class TestWarnings:
     def test_no_warning_when_thesis_correct(self):
         from portfolio.journal import _detect_warnings
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(
                 age_hours=h,
@@ -349,7 +348,7 @@ class TestWarnings:
     def test_small_price_move_not_contradiction(self):
         from portfolio.journal import _detect_warnings
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(
                 age_hours=h,
@@ -369,7 +368,7 @@ class TestWarnings:
     def test_whipsaw_detected(self):
         from portfolio.journal import _detect_warnings
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(age_hours=3, now=now, patient_action="BUY BTC-USD"),
             make_entry(age_hours=2, now=now),
@@ -380,7 +379,7 @@ class TestWarnings:
     def test_regime_stuck_detected(self):
         from portfolio.journal import _detect_warnings
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(age_hours=h, now=now, regime="range-bound") for h in [9, 5, 1]
         ]
@@ -389,7 +388,7 @@ class TestWarnings:
     def test_regime_not_stuck_under_8h(self):
         from portfolio.journal import _detect_warnings
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(age_hours=h, now=now, regime="range-bound") for h in [6, 3, 1]
         ]
@@ -398,7 +397,7 @@ class TestWarnings:
     def test_churning_detected(self):
         from portfolio.journal import _detect_warnings
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(age_hours=3, now=now, patient_action="BUY BTC-USD"),
             make_entry(age_hours=2, now=now, patient_action="SELL BTC-USD"),

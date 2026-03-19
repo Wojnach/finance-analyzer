@@ -35,20 +35,18 @@ import math
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.heikin_ashi import (
-    compute_heikin_ashi_signal,
-    _compute_ha_candles,
-    _ha_trend_signal,
-    _ha_doji_signal,
-    _ha_color_change_signal,
-    _hull_ma_signal,
     _alligator_signal,
+    _compute_ha_candles,
     _elder_impulse_signal,
+    _ha_color_change_signal,
+    _ha_doji_signal,
+    _ha_trend_signal,
+    _hull_ma_signal,
     _ttm_squeeze_signal,
+    compute_heikin_ashi_signal,
 )
-
 
 # ---------------------------------------------------------------------------
 # DataFrame construction helpers

@@ -15,7 +15,7 @@ At least 50 rows recommended; returns HOLD on insufficient data.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -42,12 +42,12 @@ def _body(open_s: pd.Series, close_s: pd.Series) -> pd.Series:
     return (close_s - open_s).abs()
 
 
-def _find_swing_highs(highs: np.ndarray, lookback: int = _SWING_LOOKBACK) -> List[Tuple[int, float]]:
+def _find_swing_highs(highs: np.ndarray, lookback: int = _SWING_LOOKBACK) -> list[tuple[int, float]]:
     """Find swing highs: bar whose high > high of `lookback` bars on each side.
 
     Returns list of (index, high_value) tuples sorted by index ascending.
     """
-    swings: List[Tuple[int, float]] = []
+    swings: list[tuple[int, float]] = []
     n = len(highs)
     for i in range(lookback, n - lookback):
         is_swing = True
@@ -60,12 +60,12 @@ def _find_swing_highs(highs: np.ndarray, lookback: int = _SWING_LOOKBACK) -> Lis
     return swings
 
 
-def _find_swing_lows(lows: np.ndarray, lookback: int = _SWING_LOOKBACK) -> List[Tuple[int, float]]:
+def _find_swing_lows(lows: np.ndarray, lookback: int = _SWING_LOOKBACK) -> list[tuple[int, float]]:
     """Find swing lows: bar whose low < low of `lookback` bars on each side.
 
     Returns list of (index, low_value) tuples sorted by index ascending.
     """
-    swings: List[Tuple[int, float]] = []
+    swings: list[tuple[int, float]] = []
     n = len(lows)
     for i in range(lookback, n - lookback):
         is_swing = True
@@ -86,9 +86,9 @@ def _detect_bos(
     highs: np.ndarray,
     lows: np.ndarray,
     close: np.ndarray,
-    swing_highs: List[Tuple[int, float]],
-    swing_lows: List[Tuple[int, float]],
-) -> Tuple[str, dict]:
+    swing_highs: list[tuple[int, float]],
+    swing_lows: list[tuple[int, float]],
+) -> tuple[str, dict]:
     """Detect Break of Structure on the most recent bar.
 
     Bullish BOS: current close breaks above the most recent swing high.
@@ -127,9 +127,9 @@ def _detect_bos(
 # ---------------------------------------------------------------------------
 
 def _detect_choch(
-    swing_highs: List[Tuple[int, float]],
-    swing_lows: List[Tuple[int, float]],
-) -> Tuple[str, str]:
+    swing_highs: list[tuple[int, float]],
+    swing_lows: list[tuple[int, float]],
+) -> tuple[str, str]:
     """Detect Change of Character from swing sequence.
 
     Bullish CHoCH: bearish structure (lower highs + lower lows) makes a
@@ -187,7 +187,7 @@ def _detect_fvg(
     lows: np.ndarray,
     close: np.ndarray,
     scan_bars: int = _FVG_SCAN_BARS,
-) -> Tuple[str, int]:
+) -> tuple[str, int]:
     """Detect Fair Value Gaps and check if current price is filling one.
 
     Bullish FVG (gap up): candle[i+2].low > candle[i].high
@@ -199,8 +199,8 @@ def _detect_fvg(
     """
     n = len(highs)
     current_close = float(close[-1])
-    unfilled_bullish: List[Tuple[float, float]] = []  # (gap_low, gap_high)
-    unfilled_bearish: List[Tuple[float, float]] = []
+    unfilled_bullish: list[tuple[float, float]] = []  # (gap_low, gap_high)
+    unfilled_bearish: list[tuple[float, float]] = []
 
     start = max(0, n - scan_bars - 2)
 
@@ -263,8 +263,8 @@ def _detect_liquidity_sweep(
     lows: np.ndarray,
     opens: np.ndarray,
     close: np.ndarray,
-    swing_highs: List[Tuple[int, float]],
-    swing_lows: List[Tuple[int, float]],
+    swing_highs: list[tuple[int, float]],
+    swing_lows: list[tuple[int, float]],
     threshold_pct: float = _LIQUIDITY_SWEEP_PCT,
 ) -> str:
     """Detect liquidity sweeps on the most recent bar.
@@ -318,7 +318,7 @@ def _detect_supply_demand(
     lookback: int = _SUPPLY_DEMAND_LOOKBACK,
     strong_mult: float = _STRONG_BODY_MULT,
     proximity_pct: float = _ZONE_PROXIMITY_PCT,
-) -> Tuple[str, bool, bool]:
+) -> tuple[str, bool, bool]:
     """Identify supply/demand zones and check if price is in one.
 
     Demand zone: base of a strong bullish candle (body > 2x avg).
@@ -341,8 +341,8 @@ def _detect_supply_demand(
         return "HOLD", False, False
 
     current_close = float(close[-1])
-    demand_zones: List[Tuple[float, float]] = []  # (zone_low, zone_high)
-    supply_zones: List[Tuple[float, float]] = []
+    demand_zones: list[tuple[float, float]] = []  # (zone_low, zone_high)
+    supply_zones: list[tuple[float, float]] = []
 
     start = max(0, n - lookback)
     for i in range(start, n - 1):  # exclude current bar
@@ -398,7 +398,7 @@ def _detect_supply_demand(
 # Composite signal
 # ---------------------------------------------------------------------------
 
-def compute_smart_money_signal(df: pd.DataFrame) -> Dict[str, Any]:
+def compute_smart_money_signal(df: pd.DataFrame) -> dict[str, Any]:
     """Compute the composite Smart Money Concepts signal.
 
     Parameters
@@ -414,7 +414,7 @@ def compute_smart_money_signal(df: pd.DataFrame) -> Dict[str, Any]:
         ``sub_signals`` dict with individual votes, and ``indicators``
         dict with raw values.
     """
-    default_result: Dict[str, Any] = {
+    default_result: dict[str, Any] = {
         "action": "HOLD",
         "confidence": 0.0,
         "sub_signals": {

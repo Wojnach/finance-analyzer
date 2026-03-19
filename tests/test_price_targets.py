@@ -1,17 +1,15 @@
 """Tests for portfolio.price_targets -- optimal buy/sell price targets."""
 
-import math
 
-import pytest
 
 from portfolio.price_targets import (
+    _apply_regime_adjustment,
+    compute_targets,
+    expected_value,
     fill_probability,
     fill_probability_buy,
     running_extremes,
     structural_levels,
-    expected_value,
-    compute_targets,
-    _apply_regime_adjustment,
 )
 
 

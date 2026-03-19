@@ -8,12 +8,13 @@ import json
 import logging
 import time
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from portfolio.file_utils import atomic_write_json as _atomic_write_json, load_json
-from portfolio.portfolio_mgr import portfolio_value, load_state
+from portfolio.file_utils import atomic_write_json as _atomic_write_json
+from portfolio.file_utils import load_json
 from portfolio.message_store import send_or_store
+from portfolio.portfolio_mgr import load_state, portfolio_value
 from portfolio.telegram_notifications import escape_markdown_v1
 
 logger = logging.getLogger("portfolio.digest")
@@ -57,7 +58,7 @@ JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
 def _build_digest_message():
     from portfolio.stats import load_jsonl
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cutoff = now - timedelta(seconds=DIGEST_INTERVAL)
 
     # --- Invocations (Layer 1 trigger → Layer 2) ---

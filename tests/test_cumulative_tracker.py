@@ -1,17 +1,15 @@
 """Tests for portfolio.cumulative_tracker — rolling price changes."""
 
-import json
 import time
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 
 
 def _make_snapshot(hours_ago, prices):
     """Build a snapshot dict at a given number of hours in the past."""
-    ts = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
+    ts = datetime.now(UTC) - timedelta(hours=hours_ago)
     return {
         "ts": ts.isoformat(),
         "prices": prices,
@@ -170,7 +168,7 @@ class TestFindClosestPrice:
 
     def test_exact_match(self):
         from portfolio.cumulative_tracker import _find_closest_price
-        target = datetime.now(timezone.utc) - timedelta(hours=24)
+        target = datetime.now(UTC) - timedelta(hours=24)
         snapshots = [{"ts": target.isoformat(), "prices": {"XAG-USD": 85.0}}]
 
         price = _find_closest_price(snapshots, "XAG-USD", target)
@@ -178,7 +176,7 @@ class TestFindClosestPrice:
 
     def test_closest_within_range(self):
         from portfolio.cumulative_tracker import _find_closest_price
-        target = datetime.now(timezone.utc) - timedelta(hours=24)
+        target = datetime.now(UTC) - timedelta(hours=24)
         snap_near = {"ts": (target + timedelta(hours=1)).isoformat(), "prices": {"XAG-USD": 85.0}}
         snap_far = {"ts": (target + timedelta(hours=5)).isoformat(), "prices": {"XAG-USD": 90.0}}
 
@@ -187,7 +185,7 @@ class TestFindClosestPrice:
 
     def test_none_when_out_of_range(self):
         from portfolio.cumulative_tracker import _find_closest_price
-        target = datetime.now(timezone.utc) - timedelta(hours=24)
+        target = datetime.now(UTC) - timedelta(hours=24)
         snap = {"ts": (target + timedelta(hours=10)).isoformat(), "prices": {"XAG-USD": 85.0}}
 
         price = _find_closest_price([snap], "XAG-USD", target, max_hours=6)
@@ -195,7 +193,7 @@ class TestFindClosestPrice:
 
     def test_missing_ticker(self):
         from portfolio.cumulative_tracker import _find_closest_price
-        target = datetime.now(timezone.utc)
+        target = datetime.now(UTC)
         snap = {"ts": target.isoformat(), "prices": {"BTC-USD": 67000}}
 
         price = _find_closest_price([snap], "XAG-USD", target)

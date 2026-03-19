@@ -7,8 +7,8 @@ Answers: "How often would patient Claude Code approve a trade?"
 """
 
 import pathlib
+
 import pandas as pd
-import numpy as np
 
 DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 SYMBOLS = {"BTCUSDT": "BTC", "ETHUSDT": "ETH"}
@@ -233,25 +233,25 @@ def run_simulation():
         print(f"  {label}-USD  ({total_candles} candles = {total_days:.0f} days)")
         print(f"{'─' * 70}")
 
-        print(f"\n  Raw signal distribution:")
+        print("\n  Raw signal distribution:")
         for act in ["BUY", "SELL", "HOLD"]:
             n = (df["action"] == act).sum()
             pct = n / total_candles * 100
             print(f"    {act:<6} {n:>6} candles ({pct:.1f}%)")
 
-        print(f"\n  Trigger frequency (current system — every signal flip):")
+        print("\n  Trigger frequency (current system — every signal flip):")
         print(f"    Signal flips:       {flips:>6} ({flips / total_days:.1f}/day)")
 
-        sustained_buys = ((df["sustained_action"] == "BUY")).sum()
-        sustained_sells = ((df["sustained_action"] == "SELL")).sum()
+        sustained_buys = (df["sustained_action"] == "BUY").sum()
+        sustained_sells = (df["sustained_action"] == "SELL").sum()
         sustained_total = sustained_buys + sustained_sells
-        print(f"\n  After sustained filter (2 consecutive same direction):")
+        print("\n  After sustained filter (2 consecutive same direction):")
         print(f"    Sustained BUY:      {sustained_buys:>6} candles")
         print(f"    Sustained SELL:     {sustained_sells:>6} candles")
 
         n_2tf = len(trades_2tf)
         n_3tf = len(trades_3tf)
-        print(f"\n  Tradeable moments (sustained + multi-TF aligned):")
+        print("\n  Tradeable moments (sustained + multi-TF aligned):")
         print(
             f"    2-TF aligned (Now+4h):     {n_2tf:>5} entries ({n_2tf / total_days:.1f}/day)"
         )
@@ -267,7 +267,7 @@ def run_simulation():
         print(f"    3-TF: {n3_buy} BUY / {n3_sell} SELL entries")
 
         # Outcome analysis
-        print(f"\n  Forward returns at tradeable moments:")
+        print("\n  Forward returns at tradeable moments:")
         print(f"    {'Scenario':<28} {'Count':>5} {'1d Hit%':>8} {'3d Hit%':>8}")
         print(f"    {'─' * 52}")
 
@@ -294,7 +294,7 @@ def run_simulation():
             print(f"      avg return:              {'':>5} {avg1:>7.2f}% {avg3:>7.2f}%")
 
         # Invocation estimate comparison
-        print(f"\n  Estimated invocations (extrapolated to weekly):")
+        print("\n  Estimated invocations (extrapolated to weekly):")
         flips_per_week = flips / total_days * 7
         tradeable_per_week = n_2tf / total_days * 7
         strong_per_week = n_3tf / total_days * 7

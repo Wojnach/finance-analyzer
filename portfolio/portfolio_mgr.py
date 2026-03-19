@@ -1,12 +1,13 @@
 """Portfolio state management — load, save, atomic writes, value calculation."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger("portfolio.portfolio_mgr")
 
-from portfolio.file_utils import atomic_write_json as _atomic_write_json, load_json
+from portfolio.file_utils import atomic_write_json as _atomic_write_json
+from portfolio.file_utils import load_json
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -25,7 +26,7 @@ _DEFAULT_STATE = {
 def _validated_state(loaded):
     """Merge loaded state with defaults to ensure all required keys exist."""
     if not loaded or not isinstance(loaded, dict):
-        return {**_DEFAULT_STATE, "start_date": datetime.now(timezone.utc).isoformat()}
+        return {**_DEFAULT_STATE, "start_date": datetime.now(UTC).isoformat()}
     result = {**_DEFAULT_STATE, **loaded}
     # Ensure types are correct for critical fields
     if not isinstance(result.get("holdings"), dict):
@@ -39,7 +40,7 @@ def load_state():
     """Load Patient portfolio state. Returns validated defaults if missing or corrupt."""
     loaded = load_json(str(STATE_FILE), default=None)
     if loaded is None:
-        return {**_DEFAULT_STATE, "start_date": datetime.now(timezone.utc).isoformat()}
+        return {**_DEFAULT_STATE, "start_date": datetime.now(UTC).isoformat()}
     return _validated_state(loaded)
 
 
@@ -51,7 +52,7 @@ def load_bold_state():
     """Load Bold portfolio state. Returns validated defaults if missing or corrupt."""
     loaded = load_json(str(BOLD_STATE_FILE), default=None)
     if loaded is None:
-        return {**_DEFAULT_STATE, "start_date": datetime.now(timezone.utc).isoformat()}
+        return {**_DEFAULT_STATE, "start_date": datetime.now(UTC).isoformat()}
     return _validated_state(loaded)
 
 

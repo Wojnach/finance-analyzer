@@ -10,9 +10,7 @@ Covers:
 - JSONL ↔ SQLite format compatibility
 """
 
-import json
 import pytest
-from pathlib import Path
 
 from portfolio.signal_db import SignalDB
 

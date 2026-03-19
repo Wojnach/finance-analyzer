@@ -12,7 +12,7 @@ Sources:
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from portfolio.fomc_dates import FOMC_ANNOUNCEMENT_DATES
 
@@ -147,17 +147,17 @@ def next_event(ref_date: date | None = None) -> dict | None:
     Returns None if no future events in the calendar.
     """
     if ref_date is None:
-        ref_date = datetime.now(timezone.utc).date()
+        ref_date = datetime.now(UTC).date()
 
     for evt in ECON_EVENTS:
         if evt["date"] >= ref_date:
             # Calculate hours until (approximate: assume 14:00 UTC release)
             evt_dt = datetime.combine(evt["date"], datetime.min.time().replace(hour=14),
-                                      tzinfo=timezone.utc)
-            now = datetime.now(timezone.utc)
+                                      tzinfo=UTC)
+            now = datetime.now(UTC)
             if isinstance(ref_date, date) and not isinstance(ref_date, datetime):
                 ref_dt = datetime.combine(ref_date, datetime.min.time().replace(hour=14),
-                                          tzinfo=timezone.utc)
+                                          tzinfo=UTC)
             else:
                 ref_dt = now
             delta = evt_dt - ref_dt
@@ -174,15 +174,15 @@ def next_event(ref_date: date | None = None) -> dict | None:
 def events_within_hours(hours: float, ref_date: date | None = None) -> list[dict]:
     """Return all events within the given hours from ref_date."""
     if ref_date is None:
-        ref_date = datetime.now(timezone.utc).date()
+        ref_date = datetime.now(UTC).date()
 
     results = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for evt in ECON_EVENTS:
         if evt["date"] < ref_date:
             continue
         evt_dt = datetime.combine(evt["date"], datetime.min.time().replace(hour=14),
-                                  tzinfo=timezone.utc)
+                                  tzinfo=UTC)
         delta = evt_dt - now
         hrs = delta.total_seconds() / 3600
         if 0 <= hrs <= hours:

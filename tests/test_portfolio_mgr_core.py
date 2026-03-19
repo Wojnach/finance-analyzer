@@ -1,13 +1,12 @@
 """Tests for portfolio.portfolio_mgr — load_state, save_state, portfolio_value."""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from unittest.mock import patch
 
 import pytest
 
 from portfolio import portfolio_mgr
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -4,7 +4,6 @@ import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Tuple
 
 from portfolio.elongir.config import ElongirConfig
 
@@ -93,7 +92,7 @@ def check_daily_limits(
     daily_pnl: float,
     equity_sek: float,
     config: ElongirConfig,
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Check if trading is allowed given daily limits.
 
     Returns (ok, reason). ok=True means trading allowed.
@@ -136,7 +135,7 @@ def check_session(config: ElongirConfig) -> bool:
     return start_minutes <= current_minutes <= end_minutes
 
 
-def get_stockholm_time() -> Tuple[int, int, str]:
+def get_stockholm_time() -> tuple[int, int, str]:
     """Get current Stockholm (CET/CEST) time as (hour, minute, date_str)."""
     try:
         import zoneinfo

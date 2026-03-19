@@ -1,9 +1,10 @@
 """Tests for portfolio.ticker_accuracy — per-ticker accuracy and probability engine."""
 
 import math
-import pytest
-from unittest.mock import patch, MagicMock
+from datetime import UTC
+from unittest.mock import patch
 
+import pytest
 
 # --- Helper: build fake signal_log entries ---
 
@@ -167,9 +168,10 @@ class TestAccuracyByTickerSignal:
 
     @patch("portfolio.accuracy_stats.load_entries")
     def test_days_filter(self, mock_load):
+        from datetime import datetime, timedelta
+
         from portfolio.ticker_accuracy import accuracy_by_ticker_signal
-        from datetime import datetime, timedelta, timezone
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         old_entries = _make_entries_with_known_accuracy("XAG-USD", "rsi", 2, 10)
         # Override timestamps to be old (30 days ago)
         for e in old_entries:
@@ -468,7 +470,7 @@ class TestIntegration:
     @patch("portfolio.accuracy_stats.load_entries")
     def test_xag_known_accuracy_probability(self, mock_load):
         """Simulate XAG-USD with 71% RSI accuracy and a BUY vote."""
-        from portfolio.ticker_accuracy import direction_probability, accuracy_by_ticker_signal
+        from portfolio.ticker_accuracy import direction_probability
         entries = _make_entries_with_known_accuracy("XAG-USD", "rsi", 71, 100)
         mock_load.return_value = entries
 

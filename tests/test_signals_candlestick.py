@@ -16,21 +16,20 @@ import pandas as pd
 import pytest
 
 from portfolio.signals.candlestick import (
-    compute_candlestick_signal,
-    _detect_trend,
-    _check_hammer_family,
-    _check_engulfing,
-    _check_doji,
-    _check_star,
     _body,
-    _range,
-    _upper_shadow,
-    _lower_shadow,
+    _body_pct,
+    _check_doji,
+    _check_engulfing,
+    _check_hammer_family,
+    _check_star,
+    _detect_trend,
     _is_green,
     _is_red,
-    _body_pct,
+    _lower_shadow,
+    _range,
+    _upper_shadow,
+    compute_candlestick_signal,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

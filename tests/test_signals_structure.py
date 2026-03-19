@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.structure import (
     _donchian_breakout,
@@ -17,7 +16,6 @@ from portfolio.signals.structure import (
     _rsi_centerline,
     compute_structure_signal,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

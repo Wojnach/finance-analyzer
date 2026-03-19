@@ -10,20 +10,18 @@ Covers:
 """
 
 import json
+from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock, patch
+
 import pytest
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 from portfolio.weekly_digest import (
-    _load_jsonl,
     _portfolio_summary,
-    _trades_this_week,
     _regime_distribution,
+    _trades_this_week,
     generate_weekly_digest,
     send_digest,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -40,7 +38,7 @@ def sample_patient_state():
         },
         "transactions": [
             {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "ticker": "MU",
                 "action": "BUY",
                 "shares": 19.4453,
@@ -68,7 +66,7 @@ def sample_bold_state():
         },
         "transactions": [
             {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "ticker": "MU",
                 "action": "BUY",
                 "shares": 36.132,
@@ -81,7 +79,7 @@ def sample_bold_state():
                 "reason": "Test BUY"
             },
             {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "ticker": "NVDA",
                 "action": "BUY",
                 "shares": 56.5602,
@@ -99,7 +97,7 @@ def sample_bold_state():
 
 @pytest.fixture
 def sample_journal_entries():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return [
         {"ts": now.isoformat(), "regime": "range-bound", "decisions": {"patient": {"action": "HOLD"}, "bold": {"action": "HOLD"}}},
         {"ts": (now - timedelta(hours=1)).isoformat(), "regime": "range-bound", "decisions": {"patient": {"action": "HOLD"}, "bold": {"action": "HOLD"}}},
@@ -140,7 +138,7 @@ class TestPortfolioSummary:
 
 class TestTradesThisWeek:
     def test_filters_recent_trades(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         since = now - timedelta(days=7)
         transactions = [
             {"timestamp": now.isoformat(), "action": "BUY", "ticker": "MU"},
@@ -151,12 +149,12 @@ class TestTradesThisWeek:
         assert len(result) == 2
 
     def test_empty_transactions(self):
-        result = _trades_this_week([], datetime.now(timezone.utc) - timedelta(days=7))
+        result = _trades_this_week([], datetime.now(UTC) - timedelta(days=7))
         assert result == []
 
     def test_handles_bad_timestamps(self):
         transactions = [{"timestamp": "not-a-date", "action": "BUY"}]
-        result = _trades_this_week(transactions, datetime.now(timezone.utc) - timedelta(days=7))
+        result = _trades_this_week(transactions, datetime.now(UTC) - timedelta(days=7))
         assert result == []
 
 

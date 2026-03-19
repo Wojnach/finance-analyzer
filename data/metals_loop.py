@@ -27,8 +27,18 @@ Features:
 
 Run: .venv/Scripts/python.exe data/metals_loop.py
 """
-import json, os, sys, time, datetime, traceback, subprocess, shutil, platform, atexit
+import atexit
+import datetime
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+import time
+import traceback
 from pathlib import Path
+
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
@@ -42,7 +52,9 @@ os.chdir(BASE_DIR)
 
 import requests
 from playwright.sync_api import sync_playwright
+
 from portfolio.file_utils import atomic_write_json
+
 try:
     from portfolio.notification_text import (
         format_tier_footer,
@@ -73,8 +85,12 @@ try:
     if str(DATA_DIR) not in sys.path:
         sys.path.insert(0, str(DATA_DIR))
     from metals_llm import (
-        start_llm_thread, stop_llm_thread, get_llm_signals,
-        get_llm_accuracy, get_llm_summary, get_llm_age,
+        get_llm_accuracy,
+        get_llm_age,
+        get_llm_signals,
+        get_llm_summary,
+        start_llm_thread,
+        stop_llm_thread,
     )
     LLM_AVAILABLE = True
 except ImportError as e:
@@ -83,10 +99,17 @@ except ImportError as e:
 
 try:
     from metals_risk import (
-        get_risk_summary, log_portfolio_value, check_portfolio_drawdown,
-        check_trade_guard, record_metals_trade, simulate_all_positions,
-        compute_daily_range_stats, compute_intraday_assessment,
-        compute_spike_targets, load_spike_state, save_spike_state,
+        check_portfolio_drawdown,
+        check_trade_guard,
+        compute_daily_range_stats,
+        compute_intraday_assessment,
+        compute_spike_targets,
+        get_risk_summary,
+        load_spike_state,
+        log_portfolio_value,
+        record_metals_trade,
+        save_spike_state,
+        simulate_all_positions,
     )
     RISK_AVAILABLE = True
 except ImportError as e:
@@ -95,8 +118,12 @@ except ImportError as e:
 
 try:
     from metals_signal_tracker import (
-        log_snapshot, backfill_outcomes, get_accuracy_report,
-        get_accuracy_summary, get_accuracy_for_context, get_snapshot_count,
+        backfill_outcomes,
+        get_accuracy_for_context,
+        get_accuracy_report,
+        get_accuracy_summary,
+        get_snapshot_count,
+        log_snapshot,
     )
     TRACKER_AVAILABLE = True
 except ImportError as e:
@@ -127,12 +154,12 @@ except ImportError as e:
 
 try:
     from portfolio.avanza_control import (
-        get_csrf,
-        fetch_price,
+        check_session_alive,
         fetch_account_cash,
+        fetch_price,
+        get_csrf,
         place_order,
         place_stop_loss,
-        check_session_alive,
     )
     AVANZA_CONTROL_AVAILABLE = True
 except ImportError as e:
@@ -151,8 +178,12 @@ except ImportError as e:
 
 try:
     from crypto_data import (
-        get_fear_greed, get_crypto_news, fetch_mstr_price,
-        compute_mstr_btc_nav, get_onchain_summary, is_us_market_hours,
+        compute_mstr_btc_nav,
+        fetch_mstr_price,
+        get_crypto_news,
+        get_fear_greed,
+        get_onchain_summary,
+        is_us_market_hours,
     )
     CRYPTO_DATA_AVAILABLE = True
 except ImportError as e:
@@ -285,7 +316,7 @@ def _load_json_state(path, default, label):
     if not os.path.exists(path):
         return fallback
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError, ValueError) as e:
         message = f"{label} load failed: {e}"
@@ -402,7 +433,7 @@ def _verify_position_holdings(page, positions):
                     log(f"  {key}: NOT found in Avanza holdings — deactivating")
                     pos["active"] = False
                     pos["sold_reason"] = "startup_verify_not_held"
-                    pos["sold_ts"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    pos["sold_ts"] = datetime.datetime.now(datetime.UTC).isoformat()
             return
         else:
             log(f"  Positions API returned: {result}")
@@ -424,7 +455,7 @@ def _verify_position_holdings(page, positions):
                 log(f"  {key}: bid=0, last=0 — instrument may be dead, deactivating")
                 pos["active"] = False
                 pos["sold_reason"] = "startup_verify_no_price"
-                pos["sold_ts"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                pos["sold_ts"] = datetime.datetime.now(datetime.UTC).isoformat()
             else:
                 log(f"  {key}: bid={bid} (holdings unverified, keeping active)")
         except Exception as e:
@@ -508,6 +539,7 @@ _singleton_lock_fh = None
 
 # --- Silver fast-tick state (merged from silver_monitor.py) ---
 from collections import deque
+
 _silver_fast_prices = deque(maxlen=SILVER_VELOCITY_WINDOW)
 _silver_alerted_levels = set()       # thresholds already alerted this session
 _silver_session_low = None
@@ -538,7 +570,7 @@ def acquire_singleton_lock(lock_path=SINGLETON_LOCK_FILE):
     try:
         fh.seek(0)
         fh.truncate()
-        fh.write(f"pid={os.getpid()} started={datetime.datetime.now(datetime.timezone.utc).isoformat()}\n")
+        fh.write(f"pid={os.getpid()} started={datetime.datetime.now(datetime.UTC).isoformat()}\n")
         fh.flush()
     except Exception:
         pass
@@ -855,7 +887,7 @@ def get_cet_time():
         return h + m / 60, f"{h:02d}:{m:02d} {now.tzname() or tz_label}", "zoneinfo"
     except Exception:
         # Last resort: UTC+1 (wrong during summer DST)
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         h = (now.hour + 1) % 24
         m = now.minute
         return h + m / 60, f"{h:02d}:{m:02d} CET", "system_utc+1"
@@ -868,12 +900,12 @@ def get_us_spike_schedule(now=None):
     automatically, including the spring/fall mismatch against Stockholm.
     """
     if now is None:
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
     if now.tzinfo is None:
-        now = now.replace(tzinfo=datetime.timezone.utc)
+        now = now.replace(tzinfo=datetime.UTC)
 
     if _STOCKHOLM_TZ is not None and _US_EASTERN_TZ is not None:
-        now_utc = now.astimezone(datetime.timezone.utc)
+        now_utc = now.astimezone(datetime.UTC)
         ny_date = now_utc.astimezone(_US_EASTERN_TZ).date()
 
         def _mk_ny(hour, minute):
@@ -919,7 +951,7 @@ def cet_time_str():
 
 def is_market_hours():
     """Check if Avanza commodity warrant market is open (Mon-Fri 08:15-21:55 Stockholm time)."""
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     weekday = now.weekday()
     h = cet_hour()
     return weekday < 5 and 8.25 <= h <= 21.92
@@ -940,7 +972,7 @@ def read_signal_data():
         mtime = os.path.getmtime(path)
         age_min = (time.time() - mtime) / 60
 
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
 
         result = {"age_min": round(age_min, 1)}
@@ -1245,7 +1277,7 @@ def detect_holdings(page):
             if pos["ob_id"] not in held_ob_ids:
                 pos["active"] = False
                 pos["sold_reason"] = "auto_detect_not_held"
-                pos["sold_ts"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                pos["sold_ts"] = datetime.datetime.now(datetime.UTC).isoformat()
                 changes.append(f"SOLD {key}: no longer on Avanza")
                 log(f"Holdings: {key} no longer held on Avanza — deactivating")
 
@@ -1830,7 +1862,7 @@ def read_decision_history(n=5):
         path = "data/metals_decisions.jsonl"
         if not os.path.exists(path):
             return []
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             lines = f.readlines()
         entries = []
         for line in lines[-n:]:
@@ -1892,7 +1924,7 @@ def emergency_sell(page, key, pos, bid):
         log(f"Emergency sell result: {result}")
 
         # Log trade
-        now_ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now_ts = datetime.datetime.now(datetime.UTC).isoformat()
         trade = {
             "ts": now_ts,
             "action": "EMERGENCY_SELL",
@@ -2173,11 +2205,11 @@ def process_trade_queue(page):
         for order in pending:
             order["status"] = "failed"
             order["result"] = {"error": "session_unhealthy"}
-            order["executed_ts"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            order["executed_ts"] = datetime.datetime.now(datetime.UTC).isoformat()
         _save_trade_queue(queue)
         return
 
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
 
     for order in pending:
         order_id_short = order.get("id", "?")[:8]
@@ -2188,7 +2220,7 @@ def process_trade_queue(page):
         try:
             order_ts = datetime.datetime.fromisoformat(order["timestamp"])
             if order_ts.tzinfo is None:
-                order_ts = order_ts.replace(tzinfo=datetime.timezone.utc)
+                order_ts = order_ts.replace(tzinfo=datetime.UTC)
             age_s = (now - order_ts).total_seconds()
         except (ValueError, KeyError):
             age_s = 9999
@@ -2211,7 +2243,7 @@ def process_trade_queue(page):
                 try:
                     other_ts = datetime.datetime.fromisoformat(other["executed_ts"])
                     if other_ts.tzinfo is None:
-                        other_ts = other_ts.replace(tzinfo=datetime.timezone.utc)
+                        other_ts = other_ts.replace(tzinfo=datetime.UTC)
                     if (now - other_ts).total_seconds() < 300:
                         already_done = True
                         break
@@ -2289,7 +2321,7 @@ def process_trade_queue(page):
             try:
                 with open("data/metals_trades.jsonl", "a", encoding="utf-8") as f:
                     f.write(json.dumps(trade_entry, ensure_ascii=False) + "\n")
-            except IOError as e:
+            except OSError as e:
                 log(f"  Trade log write error: {e}")
 
             if action == "BUY":
@@ -2364,7 +2396,7 @@ def _handle_buy_fill(page, order, exec_price, price_data):
             "stop": order.get("stop_trigger", exec_price * 0.85),  # fallback: 15% below
             "active": True,
             "swing": True,  # mark as swing trade from queue
-            "bought_ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "bought_ts": datetime.datetime.now(datetime.UTC).isoformat(),
         }
         peak_bids[pos_key] = exec_price
         last_invoke_prices[pos_key] = exec_price
@@ -2402,7 +2434,7 @@ def _handle_sell_fill(page, order, exec_price):
         entry = pos.get("entry", 0)
         pnl = pnl_pct(exec_price, entry) if entry > 0 else 0
         pos["active"] = False
-        pos["sold_ts"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        pos["sold_ts"] = datetime.datetime.now(datetime.UTC).isoformat()
         pos["sold_price"] = exec_price
         pos["sold_reason"] = "trade_queue_sell"
         _save_positions(POSITIONS)
@@ -2519,7 +2551,7 @@ def place_stop_loss_orders(page, positions):
             "date": today_str,
             "stop_base": stop_base,
             "orders": orders,
-            "placed_ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "placed_ts": datetime.datetime.now(datetime.UTC).isoformat(),
         }
 
     _save_stop_orders(state)
@@ -2616,7 +2648,7 @@ def check_stop_order_fills(page, stop_state, positions):
 
             # Log the trade
             trade = {
-                "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "ts": datetime.datetime.now(datetime.UTC).isoformat(),
                 "action": "STOP_ORDER_SELL",
                 "position": key,
                 "name": pos["name"],
@@ -2630,7 +2662,7 @@ def check_stop_order_fills(page, stop_state, positions):
 
             if remaining <= 0:
                 pos["active"] = False
-                pos["sold_ts"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                pos["sold_ts"] = datetime.datetime.now(datetime.UTC).isoformat()
                 pos["sold_price"] = state["stop_base"]
                 pos["sold_reason"] = "stop_order_filled"
             else:
@@ -2904,7 +2936,7 @@ def check_spike_fills(page, spike_state, positions):
 
                     # Log the trade
                     trade = {
-                        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "ts": datetime.datetime.now(datetime.UTC).isoformat(),
                         "action": "SPIKE_SELL",
                         "position": key,
                         "units": target.get("units_to_sell"),
@@ -2925,7 +2957,7 @@ def check_spike_fills(page, spike_state, positions):
 def log_invocation(tier, model, trigger, check_num, invoke_num, elapsed_s=None, rc=None):
     """Log a Claude invocation to the invocations JSONL file."""
     entry = {
-        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "ts": datetime.datetime.now(datetime.UTC).isoformat(),
         "tier": tier,
         "model": model or "sonnet",
         "trigger": trigger,
@@ -2943,7 +2975,7 @@ def log_invocation(tier, model, trigger, check_num, invoke_num, elapsed_s=None, 
 
 def write_context(prices, trigger_reason, tier=2):
     """Write context JSON for Claude Layer 2."""
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     hours_remaining = hours_to_metals_close(now) if EXECUTION_ENGINE_AVAILABLE else round(
         max(0, EOD_HOUR_CET + 25 / 60 - cet_hour()), 1
     )
@@ -2982,7 +3014,7 @@ def write_context(prices, trigger_reason, tier=2):
 
     # Historical stats
     try:
-        with open("data/metals_history.json", "r", encoding="utf-8") as f:
+        with open("data/metals_history.json", encoding="utf-8") as f:
             history = json.load(f)
         ctx["historical_ytd"] = {
             ticker: data["stats"]
@@ -3545,7 +3577,7 @@ def _autonomous_decision(trigger_reasons, blocked_tier):
     if is_emergency:
         log("EMERGENCY in autonomous mode — Layer 1 handles execution, logging assessment")
 
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     reason_str = "; ".join(trigger_reasons[:5])
     cet_str = cet_time_str()
 
@@ -3685,9 +3717,9 @@ def invoke_claude(trigger_reasons, tier=2):
     # Read prompt template
     prompt_file = "data/metals_agent_prompt.txt"
     try:
-        with open(prompt_file, "r", encoding="utf-8") as f:
+        with open(prompt_file, encoding="utf-8") as f:
             base_prompt = f.read()
-    except (FileNotFoundError, IOError) as e:
+    except (OSError, FileNotFoundError) as e:
         log(f"Cannot read {prompt_file}: {e}")
         return False
 
@@ -3787,7 +3819,7 @@ def main():
 
     # Probe time server on startup
     h, ts, src = get_cet_time()
-    log(f"Starting unified monitoring loop (v9 — AUTONOMOUS + 5 instruments)...")
+    log("Starting unified monitoring loop (v9 — AUTONOMOUS + 5 instruments)...")
     log(f"Time: {ts} (source: {src})")
     log(f"Check interval: {CHECK_INTERVAL}s | Heartbeat: every {HEARTBEAT_CHECKS} checks (~{HEARTBEAT_CHECKS*CHECK_INTERVAL//60}min)")
     log(f"Triggers: price>{TRIGGER_PRICE_MOVE}% | trail>{TRIGGER_TRAILING}% | profit>{TRIGGER_PROFIT}%")
@@ -3797,7 +3829,7 @@ def main():
         f"{TRAIL_TIGHTEN_MOMENTUM}% momentum, {TRAIL_TIGHTEN_ACCEL}% accel ***")
     log(f"*** Holdings reconcile every {HOLDINGS_DIFF_INTERVAL_S}s (Avanza vs local state) ***")
     log(f"*** Probability telegram every {PROB_TELEGRAM_INTERVAL} checks (~{PROB_TELEGRAM_INTERVAL*CHECK_INTERVAL//60}min) ***")
-    log(f"*** Tracking: XAG/XAU (FAPI) + BTC/ETH (SPOT) + MSTR (Yahoo) ***")
+    log("*** Tracking: XAG/XAU (FAPI) + BTC/ETH (SPOT) + MSTR (Yahoo) ***")
     log(f"Short instruments: {', '.join(v['name'] for v in SHORT_INSTRUMENTS.values())}")
     if SPIKE_ENABLED:
         spike_sched = get_us_spike_schedule()
@@ -4121,7 +4153,7 @@ Positions: {pos_summary}{prob_summary}""")
 
                 # Store price snapshot
                 snap = {
-                    "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "ts": datetime.datetime.now(datetime.UTC).isoformat(),
                     "check": check_count,
                 }
                 for key in POSITIONS:
@@ -4170,7 +4202,7 @@ Positions: {pos_summary}{prob_summary}""")
                             spike_st["placed"] = True
                             save_spike_state(spike_st)
                             send_telegram(
-                                f"*SPIKE CATCHER*\n"
+                                "*SPIKE CATCHER*\n"
                                 + "\n".join(f"`{k}: SELL {t['units_to_sell']}u @ {t['target_price']} "
                                            f"(+{t['target_pnl_pct']:.1f}%)`"
                                            for k, t in targets.items())
@@ -4370,12 +4402,12 @@ Positions: {pos_summary}{prob_summary}""")
 
                     if os.path.exists("data/metals_trades.jsonl"):
                         try:
-                            with open("data/metals_trades.jsonl", "r") as f:
+                            with open("data/metals_trades.jsonl") as f:
                                 lines = f.readlines()
                             if lines:
                                 last_trade = json.loads(lines[-1])
                                 log(f"Last trade: {last_trade.get('action','')} {last_trade.get('name','')}")
-                        except (json.JSONDecodeError, IOError) as e:
+                        except (OSError, json.JSONDecodeError) as e:
                             log(f"Trade log read error: {e}")
 
                 # --- SIGNAL TRACKER: log snapshot + backfill accuracy ---

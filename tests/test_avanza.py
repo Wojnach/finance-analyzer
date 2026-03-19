@@ -3,7 +3,6 @@
 import json
 import sys
 from datetime import date
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,6 +14,7 @@ _mock_avanza_module.Avanza = _MockAvanzaClass
 
 # Mock the constants sub-module with real-looking enums
 import enum
+
 
 class _MockOrderType(enum.Enum):
     BUY = "BUY"
@@ -82,9 +82,8 @@ class TestLoadCredentials:
 
     def test_raises_on_missing_config_file(self, tmp_path):
         """FileNotFoundError when config.json does not exist."""
-        with patch.object(mod, "CONFIG_FILE", tmp_path / "nonexistent.json"):
-            with pytest.raises(FileNotFoundError):
-                mod._load_credentials()
+        with patch.object(mod, "CONFIG_FILE", tmp_path / "nonexistent.json"), pytest.raises(FileNotFoundError):
+            mod._load_credentials()
 
     def test_raises_on_missing_avanza_section(self, config_file_missing_avanza):
         """KeyError when 'avanza' key is not in config."""
@@ -104,9 +103,8 @@ class TestLoadCredentials:
         cfg_path = tmp_path / "config.json"
         cfg_path.write_text(json.dumps(config), encoding="utf-8")
 
-        with patch.object(mod, "CONFIG_FILE", cfg_path):
-            with pytest.raises(KeyError, match="avanza.password"):
-                mod._load_credentials()
+        with patch.object(mod, "CONFIG_FILE", cfg_path), pytest.raises(KeyError, match="avanza.password"):
+            mod._load_credentials()
 
 
 class TestGetClient:
@@ -356,9 +354,8 @@ class TestGetAccountId:
             ]
         }
         _MockAvanzaClass.return_value = mock_client
-        with patch.object(mod, "CONFIG_FILE", config_file):
-            with pytest.raises(RuntimeError, match="No ISK account"):
-                mod.get_account_id()
+        with patch.object(mod, "CONFIG_FILE", config_file), pytest.raises(RuntimeError, match="No ISK account"):
+            mod.get_account_id()
 
     def test_finds_isk_among_multiple_accounts(self, config_file):
         mock_client = MagicMock()
@@ -414,15 +411,13 @@ class TestPlaceBuyOrder:
 
     def test_buy_rejects_zero_volume(self, config_file):
         _make_client_with_isk(config_file)
-        with patch.object(mod, "CONFIG_FILE", config_file):
-            with pytest.raises(ValueError, match="Volume"):
-                mod.place_buy_order("5533", price=100.0, volume=0)
+        with patch.object(mod, "CONFIG_FILE", config_file), pytest.raises(ValueError, match="Volume"):
+            mod.place_buy_order("5533", price=100.0, volume=0)
 
     def test_buy_rejects_negative_price(self, config_file):
         _make_client_with_isk(config_file)
-        with patch.object(mod, "CONFIG_FILE", config_file):
-            with pytest.raises(ValueError, match="Price"):
-                mod.place_buy_order("5533", price=-5.0, volume=10)
+        with patch.object(mod, "CONFIG_FILE", config_file), pytest.raises(ValueError, match="Price"):
+            mod.place_buy_order("5533", price=-5.0, volume=10)
 
 
 class TestPlaceSellOrder:

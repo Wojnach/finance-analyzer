@@ -1,22 +1,19 @@
 """Tests for LoRA training pipeline — data generation, prompt format, and consistency."""
 
-import json
 import random
 
-import numpy as np
 import pandas as pd
-import pytest
 
 from training.lora.generate_data import (
     PROMPT_TEMPLATE,
+    _build_timeframe_summary,
+    _sample_fear_greed,
+    _sample_sentiment,
+    balance_classes,
     build_completion,
     build_prompt,
     compute_indicators,
     label_candles,
-    _sample_fear_greed,
-    _sample_sentiment,
-    _build_timeframe_summary,
-    balance_classes,
 )
 
 
@@ -57,8 +54,9 @@ class TestPromptFormat:
         assert "{timeframe_summary}" in PROMPT_TEMPLATE
 
     def test_prompt_matches_inference_structure(self):
-        from portfolio.ministral_trader import predict
         import inspect
+
+        from portfolio.ministral_trader import predict
 
         source = inspect.getsource(predict)
         assert "1-hour candles" in source

@@ -1,9 +1,11 @@
 import time
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
 
 from portfolio.api_utils import BINANCE_BASE
 from portfolio.http_retry import fetch_with_retry
+
 DATA_DIR = (
     Path(__file__).resolve().parent.parent
     / "user_data"

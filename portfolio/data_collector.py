@@ -2,15 +2,15 @@
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
+import portfolio.shared_state as _ss
+from portfolio.api_utils import ALPACA_BASE, BINANCE_BASE, BINANCE_FAPI_BASE, get_alpaca_headers
 from portfolio.circuit_breaker import CircuitBreaker
 from portfolio.http_retry import fetch_with_retry
-from portfolio.api_utils import get_alpaca_headers, BINANCE_BASE, BINANCE_FAPI_BASE, ALPACA_BASE
 from portfolio.indicators import compute_indicators, technical_signal
-import portfolio.shared_state as _ss
 
 logger = logging.getLogger("portfolio.data_collector")
 
@@ -113,7 +113,7 @@ def alpaca_klines(ticker, interval="1d", limit=100):
         raise ConnectionError(f"Alpaca circuit open for {ticker}")
     try:
         alpaca_tf, lookback_days = ALPACA_INTERVAL_MAP[interval]
-        end = datetime.now(timezone.utc)
+        end = datetime.now(UTC)
         start = end - pd.Timedelta(days=lookback_days)
         r = fetch_with_retry(
             f"{ALPACA_BASE}/stocks/{ticker}/bars",
@@ -203,6 +203,7 @@ def yfinance_klines(ticker, interval="1d", limit=100):
     columns: open, high, low, close, volume, time
     """
     import yfinance as yf
+
     from portfolio.tickers import YF_MAP
 
     yf_ticker = YF_MAP.get(ticker, ticker)

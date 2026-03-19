@@ -36,7 +36,7 @@ def backfill_decision_outcomes(max_entries: int = 500) -> int:
     for o in existing_outcomes or []:
         existing.add((o.get("decision_ts"), o.get("ticker"), o.get("horizon")))
 
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     new_count = 0
 
     # Process most recent entries first (limited to max_entries)

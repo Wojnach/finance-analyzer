@@ -14,6 +14,7 @@ logger = logging.getLogger("portfolio.telegram")
 _MD_V1_SPECIAL = re.compile(r'([_*`\[\]])')
 
 from pathlib import Path
+
 BOLD_STATE_FILE = Path(__file__).resolve().parent.parent / "data" / "portfolio_state_bold.json"
 _COOLDOWN_PREFIXES = ("cooldown", "crypto check-in", "startup")
 

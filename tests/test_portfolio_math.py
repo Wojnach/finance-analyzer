@@ -8,11 +8,7 @@ Covers:
 - Rounding: no floating point drift over many trades
 """
 
-import copy
-import json
-import math
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Constants matching CLAUDE.md spec

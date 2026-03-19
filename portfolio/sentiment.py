@@ -17,10 +17,9 @@ them as a batch for richer "drumbeat effect" detection.
 
 import json
 import logging
-import subprocess
-from datetime import datetime, timezone
-
 import platform
+import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.file_utils import atomic_append_jsonl
@@ -96,7 +95,7 @@ def _fetch_crypto_headlines(ticker="BTC", limit=20):
             "title": a["title"],
             "source": a.get("source", "unknown"),
             "published": datetime.fromtimestamp(
-                a["published_on"], tz=timezone.utc
+                a["published_on"], tz=UTC
             ).isoformat(),
         }
         for a in articles
@@ -125,7 +124,7 @@ def _fetch_yahoo_headlines(ticker, limit=10):
             {
                 "title": title,
                 "source": source,
-                "published": pub or datetime.now(timezone.utc).isoformat(),
+                "published": pub or datetime.now(UTC).isoformat(),
             }
         )
     return articles
@@ -149,7 +148,7 @@ def _fetch_newsapi_headlines(ticker, api_key, limit=10, query=None):
         {
             "title": a.get("title", ""),
             "source": a.get("source", {}).get("name", "unknown"),
-            "published": a.get("publishedAt", datetime.now(timezone.utc).isoformat()),
+            "published": a.get("publishedAt", datetime.now(UTC).isoformat()),
         }
         for a in articles
         if a.get("title")
@@ -167,7 +166,10 @@ def _fetch_newsapi_with_tracking(ticker, api_key, limit=10, query=None):
 def _fetch_stock_headlines(ticker, newsapi_key=None, limit=20):
     """Fetch stock headlines. NewsAPI for priority tickers (metals), Yahoo for the rest."""
     from portfolio.shared_state import (
-        _cached, newsapi_quota_ok, newsapi_ttl_for_ticker, newsapi_search_query,
+        _cached,
+        newsapi_quota_ok,
+        newsapi_search_query,
+        newsapi_ttl_for_ticker,
     )
 
     articles = []
@@ -337,7 +339,7 @@ _STOPWORDS = {
     "every", "first", "their", "there", "these", "those", "under",
     "which", "while", "would", "other", "still", "where", "before",
     "should", "since", "until", "years", "might", "price", "stock",
-    "market", "shares", "today", "could", "report", "quarter",
+    "market", "shares", "today", "report", "quarter",
 }
 
 _SIGNIFICANT_KEYWORDS = {
@@ -386,7 +388,7 @@ def _log_ab_result(ticker, primary_result, shadow_results):
     """Log A/B test results to sentiment_ab_log.jsonl for accuracy comparison."""
     try:
         entry = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "ticker": ticker,
             "primary": {
                 "model": primary_result.get("model", "unknown"),

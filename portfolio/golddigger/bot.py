@@ -13,16 +13,15 @@ can either execute (live) or record (dry-run/backtest).
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
+from portfolio.golddigger.augmented_signals import AugmentedSignals
 from portfolio.golddigger.config import GolddiggerConfig
 from portfolio.golddigger.data_provider import MarketSnapshot, collect_snapshot
-from portfolio.golddigger.signal import CompositeSignal, SignalState
 from portfolio.golddigger.risk import RiskManager
-from portfolio.golddigger.state import BotState, log_trade, log_poll
-from portfolio.golddigger.augmented_signals import AugmentedSignals
+from portfolio.golddigger.signal import CompositeSignal, SignalState
+from portfolio.golddigger.state import BotState, log_poll, log_trade
 
 logger = logging.getLogger("portfolio.golddigger.bot")
 
@@ -66,7 +65,7 @@ class GolddiggerBot:
         )
         self.risk = RiskManager(cfg)
         self.state = BotState.load(cfg.state_file)
-        self._current_date: Optional[str] = None
+        self._current_date: str | None = None
         self._page = None  # Playwright page, set externally
 
         # Augmented signal gates (volatility, momentum, structure)
@@ -103,7 +102,7 @@ class GolddiggerBot:
         now = hour * 60 + minute
         return now >= flatten
 
-    def step(self, snapshot: Optional[MarketSnapshot] = None) -> Optional[dict]:
+    def step(self, snapshot: MarketSnapshot | None = None) -> dict | None:
         """Execute one poll cycle.
 
         Args:
@@ -182,7 +181,7 @@ class GolddiggerBot:
             event_risk_phase=snapshot.event_risk_phase,
         )
 
-        self.state.last_poll_time = datetime.now(timezone.utc).isoformat()
+        self.state.last_poll_time = datetime.now(UTC).isoformat()
 
         # --- Flatten at session end ---
         if self._should_flatten(hour, minute) and self.state.has_position():
@@ -199,7 +198,7 @@ class GolddiggerBot:
 
     def _check_entry_conditions(
         self, snap: MarketSnapshot, sig: SignalState
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Check if we should enter a new position."""
         # Risk manager gate
         can_trade, reason = self.risk.can_trade()
@@ -347,7 +346,7 @@ class GolddiggerBot:
 
     def _check_exit_conditions(
         self, snap: MarketSnapshot, sig: SignalState
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Check stop-loss, take-profit, and signal exit for open position."""
         pos = self.state.position
         bid = snap.cert_bid or snap.cert_last or 0

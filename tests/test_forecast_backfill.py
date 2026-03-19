@@ -8,17 +8,14 @@ for the backfill pipeline, idempotency, partial fills, and file I/O.
 """
 
 import json
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from portfolio.forecast_accuracy import (
-    backfill_forecast_outcomes,
-    load_predictions,
     _lookup_price_at_time,
+    backfill_forecast_outcomes,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -42,7 +39,7 @@ def _read_jsonl(path):
 
 
 def _ago(hours=0, days=0):
-    return (datetime.now(timezone.utc) - timedelta(hours=hours, days=days)).isoformat()
+    return (datetime.now(UTC) - timedelta(hours=hours, days=days)).isoformat()
 
 
 def _make_prediction(ticker="BTC-USD", hours_ago=26, price=67000.0,
@@ -111,7 +108,7 @@ class TestBackfillForecasts:
     def test_backfills_1h_outcome(self, setup_files):
         """Prediction from 2 hours ago should get 1h backfilled."""
         pred_file, snap_file, tmp_dir = setup_files
-        entry_time = datetime.now(timezone.utc) - timedelta(hours=2)
+        entry_time = datetime.now(UTC) - timedelta(hours=2)
         pred = {
             "ts": entry_time.isoformat(),
             "ticker": "XAG-USD",
@@ -159,7 +156,7 @@ class TestBackfillForecasts:
         """
         pred_file, snap_file, tmp_dir = setup_files
 
-        base_time = datetime.now(timezone.utc) - timedelta(hours=30)
+        base_time = datetime.now(UTC) - timedelta(hours=30)
         preds = []
         snaps = []
         for i in range(10):
@@ -214,7 +211,7 @@ class TestBackfillForecasts:
         """Running backfill twice should not re-backfill already-filled entries."""
         pred_file, snap_file, tmp_dir = setup_files
 
-        entry_time = datetime.now(timezone.utc) - timedelta(hours=26)
+        entry_time = datetime.now(UTC) - timedelta(hours=26)
         preds = [{
             "ts": entry_time.isoformat(),
             "ticker": "BTC-USD",
@@ -246,7 +243,7 @@ class TestBackfillForecasts:
         """If 1h is already filled but 24h is not, only fill 24h."""
         pred_file, snap_file, tmp_dir = setup_files
 
-        entry_time = datetime.now(timezone.utc) - timedelta(hours=26)
+        entry_time = datetime.now(UTC) - timedelta(hours=26)
         preds = [{
             "ts": entry_time.isoformat(),
             "ticker": "BTC-USD",
@@ -276,7 +273,7 @@ class TestBackfillForecasts:
         """Verify the output file has correct JSONL format after backfill."""
         pred_file, snap_file, tmp_dir = setup_files
 
-        entry_time = datetime.now(timezone.utc) - timedelta(hours=3)
+        entry_time = datetime.now(UTC) - timedelta(hours=3)
         preds = [
             {
                 "ts": entry_time.isoformat(),
@@ -337,7 +334,7 @@ class TestBackfillForecasts:
         """Snapshot more than 2h from target time should not be used."""
         pred_file, snap_file, tmp_dir = setup_files
 
-        entry_time = datetime.now(timezone.utc) - timedelta(hours=5)
+        entry_time = datetime.now(UTC) - timedelta(hours=5)
         preds = [{
             "ts": entry_time.isoformat(),
             "ticker": "BTC-USD",
@@ -361,7 +358,7 @@ class TestBackfillForecasts:
         """Verify change_pct = (actual - current) / current * 100."""
         pred_file, snap_file, tmp_dir = setup_files
 
-        entry_time = datetime.now(timezone.utc) - timedelta(hours=3)
+        entry_time = datetime.now(UTC) - timedelta(hours=3)
         preds = [{
             "ts": entry_time.isoformat(),
             "ticker": "XAG-USD",
@@ -386,7 +383,7 @@ class TestBackfillForecasts:
     def test_negative_price_change_correctly_computed(self, setup_files):
         pred_file, snap_file, tmp_dir = setup_files
 
-        entry_time = datetime.now(timezone.utc) - timedelta(hours=3)
+        entry_time = datetime.now(UTC) - timedelta(hours=3)
         preds = [{
             "ts": entry_time.isoformat(),
             "ticker": "ETH-USD",
@@ -413,7 +410,7 @@ class TestBackfillForecasts:
     def test_both_1h_and_24h_backfilled_in_single_pass(self, setup_files):
         pred_file, snap_file, tmp_dir = setup_files
 
-        entry_time = datetime.now(timezone.utc) - timedelta(hours=26)
+        entry_time = datetime.now(UTC) - timedelta(hours=26)
         preds = [{
             "ts": entry_time.isoformat(),
             "ticker": "BTC-USD",
@@ -443,7 +440,7 @@ class TestBackfillForecasts:
     def test_multiple_tickers_in_same_file(self, setup_files):
         pred_file, snap_file, tmp_dir = setup_files
 
-        entry_time = datetime.now(timezone.utc) - timedelta(hours=3)
+        entry_time = datetime.now(UTC) - timedelta(hours=3)
         preds = [
             {
                 "ts": entry_time.isoformat(),
@@ -477,7 +474,7 @@ class TestBackfillForecasts:
         """Each backfilled outcome should contain a backfilled_at ISO timestamp."""
         pred_file, snap_file, tmp_dir = setup_files
 
-        entry_time = datetime.now(timezone.utc) - timedelta(hours=3)
+        entry_time = datetime.now(UTC) - timedelta(hours=3)
         preds = [{
             "ts": entry_time.isoformat(),
             "ticker": "BTC-USD",
@@ -491,11 +488,11 @@ class TestBackfillForecasts:
         }]
         _write_jsonl(snap_file, snaps)
 
-        before = datetime.now(timezone.utc)
+        before = datetime.now(UTC)
         backfill_forecast_outcomes(
             predictions_file=pred_file, snapshot_file=snap_file
         )
-        after = datetime.now(timezone.utc)
+        after = datetime.now(UTC)
 
         updated = _read_jsonl(pred_file)
         bf_at = updated[0]["outcome"]["1h"]["backfilled_at"]
@@ -538,14 +535,14 @@ class TestLookupPriceAtTimeEdgeCases:
     def test_empty_snapshot_file(self, tmp_path):
         snap_file = tmp_path / "snaps.jsonl"
         snap_file.write_text("", encoding="utf-8")
-        target = datetime.now(timezone.utc)
+        target = datetime.now(UTC)
         result = _lookup_price_at_time("BTC-USD", target, snapshot_file=snap_file)
         assert result is None
 
     def test_picks_closest_from_multiple(self, tmp_path):
         """When multiple snapshots are within tolerance, pick the closest."""
         snap_file = tmp_path / "snaps.jsonl"
-        target = datetime.now(timezone.utc)
+        target = datetime.now(UTC)
         snaps = [
             {"ts": (target - timedelta(minutes=90)).isoformat(),
              "prices": {"BTC-USD": 66000.0}},
@@ -561,7 +558,7 @@ class TestLookupPriceAtTimeEdgeCases:
     def test_boundary_exactly_2h_tolerance(self, tmp_path):
         """Snapshot exactly at the 2h boundary is NOT included (strict <)."""
         snap_file = tmp_path / "snaps.jsonl"
-        target = datetime.now(timezone.utc)
+        target = datetime.now(UTC)
         snap = {
             "ts": (target - timedelta(hours=2)).isoformat(),
             "prices": {"BTC-USD": 67000.0},
@@ -574,7 +571,7 @@ class TestLookupPriceAtTimeEdgeCases:
     def test_snapshot_just_under_2h_included(self, tmp_path):
         """Snapshot at 1h59m should be within tolerance."""
         snap_file = tmp_path / "snaps.jsonl"
-        target = datetime.now(timezone.utc)
+        target = datetime.now(UTC)
         snap = {
             "ts": (target - timedelta(hours=1, minutes=59)).isoformat(),
             "prices": {"BTC-USD": 67000.0},

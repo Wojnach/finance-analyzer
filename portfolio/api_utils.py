@@ -27,7 +27,7 @@ def load_config():
         try:
             mtime = config_path.stat().st_mtime
             if _config_cache is None or mtime != _config_mtime:
-                with open(config_path, "r", encoding="utf-8") as f:
+                with open(config_path, encoding="utf-8") as f:
                     _config_cache = json.load(f)
                 _config_mtime = mtime
         except Exception:

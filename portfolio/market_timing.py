@@ -1,6 +1,6 @@
 """Market timing utilities — DST-aware NYSE hours, market state detection."""
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from portfolio.tickers import SYMBOLS
 
@@ -28,12 +28,12 @@ def _is_us_dst(dt):
     mar1_wd = date(year, 3, 1).weekday()  # 0=Mon..6=Sun
     first_sun_mar = 1 + (6 - mar1_wd) % 7
     second_sun_mar = first_sun_mar + 7
-    dst_start = datetime(year, 3, second_sun_mar, 7, 0, tzinfo=timezone.utc)
+    dst_start = datetime(year, 3, second_sun_mar, 7, 0, tzinfo=UTC)
 
     # First Sunday of November
     nov1_wd = date(year, 11, 1).weekday()
     first_sun_nov = 1 + (6 - nov1_wd) % 7
-    dst_end = datetime(year, 11, first_sun_nov, 6, 0, tzinfo=timezone.utc)
+    dst_end = datetime(year, 11, first_sun_nov, 6, 0, tzinfo=UTC)
 
     return dst_start <= dt < dst_end
 
@@ -59,7 +59,7 @@ def _is_agent_window(now=None):
     Weekends: no agent invocation.
     """
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     if now.weekday() >= 5:
         return False
     close_hour = _market_close_hour_utc(now)
@@ -67,7 +67,7 @@ def _is_agent_window(now=None):
 
 
 def get_market_state():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     weekday = now.weekday()  # 0=Mon, 6=Sun
     hour = now.hour
     all_symbols = set(SYMBOLS.keys())

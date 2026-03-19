@@ -7,16 +7,13 @@ _get_ticker_signal_accuracy, recommended_size.
 import json
 import pathlib
 
-import pytest
-
 from portfolio.kelly_sizing import (
-    kelly_fraction,
     _compute_trade_stats,
     _get_signal_accuracy,
     _get_ticker_signal_accuracy,
+    kelly_fraction,
     recommended_size,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

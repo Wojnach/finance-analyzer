@@ -1,7 +1,6 @@
 """Tests for Monte Carlo price simulation engine."""
 
 import numpy as np
-import pytest
 
 # We'll import after creating the module
 MC_MODULE = "portfolio.monte_carlo"
@@ -412,6 +411,7 @@ class TestPerformance:
     def test_10k_paths_under_1s(self):
         """10K paths for a single ticker should complete quickly."""
         import time
+
         from portfolio.monte_carlo import MonteCarloEngine
         start = time.perf_counter()
         mc = MonteCarloEngine(price=100.0, volatility=0.20, drift=0.05,
@@ -426,6 +426,7 @@ class TestPerformance:
     def test_batch_5_tickers_under_5s(self):
         """Simulating 5 tickers with 10K paths each should complete in <5s."""
         import time
+
         from portfolio.monte_carlo import simulate_all
         summary = {
             "signals": {

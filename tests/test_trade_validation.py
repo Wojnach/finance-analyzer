@@ -19,10 +19,8 @@ Covers:
 - Multiple warnings accumulate
 """
 
-import pytest
 
 from portfolio.trade_validation import ValidationResult, validate_trade
-
 
 # ---------------------------------------------------------------------------
 # Helpers

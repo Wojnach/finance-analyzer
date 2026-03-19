@@ -8,7 +8,6 @@ Requires Avanza credentials or BankID session (see scripts/avanza_login.py).
 """
 
 import argparse
-import json
 from pprint import pprint
 
 from portfolio.avanza_control import (

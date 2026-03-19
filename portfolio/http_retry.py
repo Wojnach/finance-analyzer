@@ -1,9 +1,10 @@
 """HTTP retry utility with exponential backoff for finance-analyzer API calls."""
 
+import logging
 import random
 import time
+
 import requests
-import logging
 
 logger = logging.getLogger(__name__)
 

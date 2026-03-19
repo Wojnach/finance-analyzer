@@ -6,7 +6,10 @@ from pathlib import Path
 
 logger = logging.getLogger("portfolio.accuracy_stats")
 
-from portfolio.file_utils import atomic_write_json as _atomic_write_json, load_json
+from datetime import UTC
+
+from portfolio.file_utils import atomic_write_json as _atomic_write_json
+from portfolio.file_utils import load_json
 from portfolio.tickers import DISABLED_SIGNALS, SIGNAL_NAMES
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -122,9 +125,9 @@ def signal_accuracy_recent(horizon="1d", days=7):
 
     Thin wrapper around signal_accuracy() with a time cutoff.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
     return signal_accuracy(horizon, since=cutoff)
 
 
@@ -217,9 +220,9 @@ def accuracy_by_signal_ticker(signal_name, horizon="1d", days=None):
     entries = load_entries()
     cutoff = None
     if days is not None:
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
     stats = defaultdict(lambda: {"correct": 0, "total": 0})
 
@@ -469,11 +472,11 @@ def save_accuracy_snapshot():
     accuracy for each signal at the 1d horizon. Used by check_accuracy_changes()
     to detect significant shifts over time.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     acc = signal_accuracy("1d")
     snapshot = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "signals": {
             name: {"accuracy": data["accuracy"], "total": data["total"]}
             for name, data in acc.items()
@@ -544,13 +547,13 @@ def check_accuracy_changes(threshold_drop=0.1, threshold_rise=0.1):
             old_samples, new_samples.
         Empty list if no significant changes or no historical snapshot available.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     snapshots = _load_accuracy_snapshots()
     if not snapshots:
         return []
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     target = now - timedelta(days=7)
     old_snapshot = _find_snapshot_near(snapshots, target)
 

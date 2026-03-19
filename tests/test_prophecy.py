@@ -1,14 +1,11 @@
 """Tests for portfolio.prophecy — Prophecy/Belief system."""
 
 import json
+from datetime import UTC, datetime, timedelta
+
 import pytest
-from datetime import datetime, timezone, timedelta
-from unittest.mock import patch
-from pathlib import Path
-from io import StringIO
 
 import portfolio.prophecy as prophecy
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -150,7 +147,7 @@ class TestSaveBeliefs:
         saved = json.loads(_isolate_prophecy_file.read_text(encoding="utf-8"))
         # Should be a recent ISO timestamp
         dt = datetime.fromisoformat(saved["metadata"]["last_review"])
-        assert (datetime.now(timezone.utc) - dt).total_seconds() < 10
+        assert (datetime.now(UTC) - dt).total_seconds() < 10
 
 
 # ---------------------------------------------------------------------------
@@ -369,7 +366,7 @@ class TestEvaluateCheckpoints:
 
     def test_deadline_expiry(self):
         prophecy.add_belief(_make_belief(id="eval_exp", ticker="XAG-USD"))
-        past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        past = (datetime.now(UTC) - timedelta(days=1)).isoformat()
         prophecy.add_checkpoint("eval_exp", _make_checkpoint(
             id="cp_0", target_value=35.0, comparison="above", deadline=past
         ))

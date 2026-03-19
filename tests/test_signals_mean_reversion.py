@@ -18,19 +18,16 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.mean_reversion import (
-    compute_mean_reversion_signal,
-    _rsi2_mean_reversion,
-    _rsi3_mean_reversion,
-    _internal_bar_strength,
+    _bb_pct_b,
     _consecutive_days,
     _gap_fill,
-    _bb_pct_b,
     _ibs_rsi2_combined,
+    _internal_bar_strength,
+    _rsi2_mean_reversion,
+    compute_mean_reversion_signal,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

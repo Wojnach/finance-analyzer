@@ -1,14 +1,12 @@
 import json
-import pytest
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from portfolio.journal import (
-    load_recent,
     _is_all_hold,
     _non_neutral_tickers,
     build_context,
+    load_recent,
 )
 
 
@@ -28,7 +26,7 @@ def make_entry(
     now=None,
 ):
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     ts = now - timedelta(hours=age_hours)
     entry = {
         "ts": ts.isoformat(),
@@ -73,7 +71,7 @@ class TestLoadRecent:
             assert load_recent() == []
 
     def test_age_filtering(self, tmp_path):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(age_hours=10, now=now),
             make_entry(age_hours=1, now=now),
@@ -84,7 +82,7 @@ class TestLoadRecent:
         assert len(result) == 1
 
     def test_max_entries(self, tmp_path):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [make_entry(age_hours=i * 0.1, now=now) for i in range(20)]
         jf = write_journal(tmp_path, entries)
         with patch("portfolio.journal.JOURNAL_FILE", jf):
@@ -92,7 +90,7 @@ class TestLoadRecent:
         assert len(result) == 5
 
     def test_malformed_lines_skipped(self, tmp_path):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         good = make_entry(age_hours=0.5, now=now)
         jf = tmp_path / "layer2_journal.jsonl"
         jf.write_text("not json\n" + json.dumps(good) + "\n{}\n", encoding="utf-8")
@@ -134,32 +132,32 @@ class TestBuildContextBackwardCompat:
         assert "Fresh start" in build_context([])
 
     def test_hold_compression(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [make_entry(age_hours=i * 0.3, now=now) for i in range(3)]
         assert "3x HOLD" in build_context(entries)
 
     def test_single_hold_not_compressed(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         md = build_context([make_entry(age_hours=0.5, now=now)])
         assert "1x HOLD" not in md
         assert "trigger:" in md
 
     def test_watchlist_rendered(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         md = build_context(
             [make_entry(age_hours=0.5, now=now, watchlist=["BTC breakout above 70K"])]
         )
         assert "BTC breakout above 70K" in md
 
     def test_prices_rendered(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         md = build_context(
             [make_entry(age_hours=0.5, now=now, prices={"BTC-USD": 66800.0})]
         )
         assert "$66,800.00" in md
 
     def test_non_hold_not_compressed(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entries = [
             make_entry(age_hours=1.5, now=now),
             make_entry(age_hours=1.0, now=now, patient_action="BUY BTC-USD"),
@@ -170,6 +168,6 @@ class TestBuildContextBackwardCompat:
         assert "3x HOLD" not in md
 
     def test_regime_displayed(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         md = build_context([make_entry(age_hours=0.5, now=now, regime="trending-up")])
         assert "trending-up" in md

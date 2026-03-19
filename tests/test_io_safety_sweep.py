@@ -5,8 +5,6 @@ atomic_write_json, atomic_write_jsonl) instead of raw json.loads(path.read_text(
 or non-atomic open("w") patterns.
 """
 
-import ast
-import importlib
 import re
 from pathlib import Path
 

@@ -3,7 +3,6 @@
 import logging
 import math
 from dataclasses import dataclass
-from typing import Optional
 
 from portfolio.golddigger.config import GolddiggerConfig
 
@@ -29,7 +28,7 @@ class RiskManager:
         self._daily_pnl: float = 0.0
         self._daily_trade_count: int = 0
         self._halted: bool = False
-        self._last_reset_date: Optional[str] = None
+        self._last_reset_date: str | None = None
 
     def reset_daily(self, date_str: str):
         """Reset daily counters if it's a new trading day."""
@@ -67,7 +66,7 @@ class RiskManager:
             return False, f"Max daily trades reached ({self._daily_trade_count})"
         return True, "ok"
 
-    def dynamic_stop_levels(self, entry_ask: float, atr_pct: Optional[float] = None) -> tuple:
+    def dynamic_stop_levels(self, entry_ask: float, atr_pct: float | None = None) -> tuple:
         """Compute ATR-based stop and TP if ATR available, else fall back to fixed."""
         if atr_pct is None or not getattr(self.cfg, 'use_dynamic_stops', False):
             stop = entry_ask * (1.0 - self.cfg.stop_loss_pct)
@@ -85,7 +84,7 @@ class RiskManager:
         tp = entry_ask * (1.0 + cert_stop_pct * 1.5)  # 1.5:1 R:R
         return stop, tp
 
-    def size_position(self, entry_ask: float, equity_sek: float, atr_pct: Optional[float] = None) -> SizeResult:
+    def size_position(self, entry_ask: float, equity_sek: float, atr_pct: float | None = None) -> SizeResult:
         """Compute position size respecting risk budget and notional cap.
 
         Args:

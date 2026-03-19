@@ -4,9 +4,9 @@ Loads portfolio value history from the JSONL log and computes performance
 metrics useful for charting and strategy comparison.
 """
 
+import datetime
 import math
 import pathlib
-import datetime
 from collections import defaultdict
 
 from portfolio.file_utils import load_jsonl
@@ -53,7 +53,7 @@ def _parse_ts(ts_str: str) -> datetime.datetime:
     """Parse an ISO-8601 timestamp string to a timezone-aware datetime."""
     dt = datetime.datetime.fromisoformat(ts_str)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=datetime.timezone.utc)
+        dt = dt.replace(tzinfo=datetime.UTC)
     return dt
 
 
@@ -372,9 +372,9 @@ def _pair_round_trips(transactions):
                 buy_dt = datetime.datetime.fromisoformat(buy["ts"])
                 sell_dt = datetime.datetime.fromisoformat(sell_ts)
                 if buy_dt.tzinfo is None:
-                    buy_dt = buy_dt.replace(tzinfo=datetime.timezone.utc)
+                    buy_dt = buy_dt.replace(tzinfo=datetime.UTC)
                 if sell_dt.tzinfo is None:
-                    sell_dt = sell_dt.replace(tzinfo=datetime.timezone.utc)
+                    sell_dt = sell_dt.replace(tzinfo=datetime.UTC)
                 hold_hours = (sell_dt - buy_dt).total_seconds() / 3600
             except (ValueError, TypeError):
                 pass

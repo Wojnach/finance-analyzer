@@ -1,16 +1,15 @@
 """Tests for portfolio.econ_dates — economic calendar dates and lookups."""
 
-import pytest
-from datetime import date, datetime, timezone
+from datetime import date
 
 from portfolio.econ_dates import (
-    ECON_EVENTS,
     CPI_DATES_2026,
-    NFP_DATES_2026,
-    GDP_DATES_2026,
+    ECON_EVENTS,
     EVENT_SECTOR_MAP,
-    next_event,
+    GDP_DATES_2026,
+    NFP_DATES_2026,
     events_within_hours,
+    next_event,
 )
 
 

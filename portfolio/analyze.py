@@ -10,7 +10,7 @@ import logging
 import os
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.file_utils import atomic_append_jsonl, load_json, load_jsonl
@@ -37,6 +37,8 @@ WATCH_LOG_FILE = DATA_DIR / "watch_log.jsonl"
 
 from portfolio.tickers import (
     ALL_TICKERS as KNOWN_TICKERS,
+)
+from portfolio.tickers import (
     CRYPTO_SYMBOLS as CRYPTO_TICKERS,
 )
 
@@ -224,7 +226,7 @@ def _log_analysis(ticker, output, elapsed):
             f.write(
                 json.dumps(
                     {
-                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "ts": datetime.now(UTC).isoformat(),
                         "ticker": ticker,
                         "elapsed_s": round(elapsed, 2),
                         "output": output[:2000],
@@ -389,7 +391,7 @@ def _get_signal_state(ticker, summary=None):
 def _log_watch(event):
     """Append watch event to log."""
     try:
-        event["ts"] = datetime.now(timezone.utc).isoformat()
+        event["ts"] = datetime.now(UTC).isoformat()
         atomic_append_jsonl(WATCH_LOG_FILE, event)
     except Exception as e:
         logger.debug("Failed to log watch event: %s", e)
@@ -632,7 +634,7 @@ def watch_positions(position_args, interval=60):
 
     try:
         while True:
-            now_dt = datetime.now(timezone.utc)
+            now_dt = datetime.now(UTC)
             elapsed_mins = (time.time() - start_time) / 60
             ts_str = now_dt.strftime("%H:%M:%S UTC")
 

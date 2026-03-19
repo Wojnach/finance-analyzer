@@ -6,11 +6,11 @@ import platform
 import shutil
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.api_utils import load_config as _load_config
-from portfolio.file_utils import atomic_append_jsonl, load_jsonl, last_jsonl_entry
+from portfolio.file_utils import atomic_append_jsonl, last_jsonl_entry, load_jsonl
 from portfolio.message_store import send_or_store
 from portfolio.telegram_notifications import escape_markdown_v1
 
@@ -82,7 +82,7 @@ def _build_tier_prompt(tier, reasons):
 
 def _log_trigger(reasons, status, tier=None):
     entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "reasons": reasons,
         "status": status,
     }
@@ -272,7 +272,7 @@ def check_agent_completion():
 
     # Process has finished — collect completion info
     duration_s = round(time.time() - _agent_start, 1)
-    completed_at = datetime.now(timezone.utc).isoformat()
+    completed_at = datetime.now(UTC).isoformat()
 
     # Check if journal was written (new entry after agent started)
     journal_ts_after = _last_jsonl_ts(JOURNAL_FILE)
@@ -403,7 +403,7 @@ def get_completion_stats(hours=24):
         Returns zeroed stats if no data is available.
     """
     entries = load_jsonl(INVOCATIONS_FILE)
-    cutoff = datetime.now(timezone.utc).timestamp() - (hours * 3600)
+    cutoff = datetime.now(UTC).timestamp() - (hours * 3600)
 
     total = 0
     success = 0
@@ -426,7 +426,7 @@ def get_completion_stats(hours=24):
             if "+" in ts_str_clean[10:]:
                 dt = datetime.fromisoformat(ts_str)
             else:
-                dt = datetime.fromisoformat(ts_str).replace(tzinfo=timezone.utc)
+                dt = datetime.fromisoformat(ts_str).replace(tzinfo=UTC)
             entry_ts = dt.timestamp()
         except (ValueError, TypeError):
             continue

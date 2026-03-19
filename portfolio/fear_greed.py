@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from portfolio.http_retry import fetch_json
 
@@ -27,7 +27,7 @@ def get_crypto_fear_greed() -> dict:
         "value": int(data["value"]),
         "classification": data["value_classification"],
         "timestamp": datetime.fromtimestamp(
-            int(data["timestamp"]), tz=timezone.utc
+            int(data["timestamp"]), tz=UTC
         ).isoformat(),
     }
 
@@ -54,7 +54,7 @@ def get_stock_fear_greed() -> dict:
     return {
         "value": value,
         "classification": _classify(value),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "vix": round(vix_val, 2),
     }
 

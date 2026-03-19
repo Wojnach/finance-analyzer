@@ -1,12 +1,10 @@
 """Tests for portfolio.fin_evolve — system-wide self-improvement engine."""
 
 import json
-import os
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -14,7 +12,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from portfolio import fin_evolve
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -77,7 +74,7 @@ def _make_verdict(
     **extra,
 ):
     """Create a verdict entry with sensible defaults."""
-    ts = datetime.now(timezone.utc) + timedelta(hours=ts_offset_hours)
+    ts = datetime.now(UTC) + timedelta(hours=ts_offset_hours)
     entry = {
         "ts": ts.isoformat(),
         "command": command,
@@ -114,7 +111,7 @@ def _make_journal_entry(
     prices=None,
 ):
     """Create a Layer 2 journal entry."""
-    ts = datetime.now(timezone.utc) + timedelta(hours=ts_offset_hours)
+    ts = datetime.now(UTC) + timedelta(hours=ts_offset_hours)
     if tickers is None:
         tickers = {
             "BTC-USD": {"outlook": "bullish", "thesis": "test", "conviction": 0.6, "levels": []},
@@ -192,7 +189,7 @@ class TestCheckVerdict:
 
 class TestFindPriceAt:
     def test_exact_match(self):
-        ts = datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc)
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
         history = [
             {"_parsed_ts": ts, "prices": {"XAG-USD": 85.5}},
         ]
@@ -200,8 +197,8 @@ class TestFindPriceAt:
         assert result == 85.5
 
     def test_close_match(self):
-        ts = datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc)
-        snap_ts = datetime(2026, 3, 10, 13, 0, tzinfo=timezone.utc)
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+        snap_ts = datetime(2026, 3, 10, 13, 0, tzinfo=UTC)
         history = [
             {"_parsed_ts": snap_ts, "prices": {"XAG-USD": 86.0}},
         ]
@@ -209,8 +206,8 @@ class TestFindPriceAt:
         assert result == 86.0
 
     def test_too_far(self):
-        ts = datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc)
-        snap_ts = datetime(2026, 3, 11, 12, 0, tzinfo=timezone.utc)
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+        snap_ts = datetime(2026, 3, 11, 12, 0, tzinfo=UTC)
         history = [
             {"_parsed_ts": snap_ts, "prices": {"XAG-USD": 86.0}},
         ]
@@ -218,7 +215,7 @@ class TestFindPriceAt:
         assert result is None
 
     def test_ticker_not_in_snapshot(self):
-        ts = datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc)
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
         history = [
             {"_parsed_ts": ts, "prices": {"BTC-USD": 70000.0}},
         ]
@@ -226,21 +223,21 @@ class TestFindPriceAt:
         assert result is None
 
     def test_empty_history(self):
-        ts = datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc)
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
         assert fin_evolve._find_price_at([], "XAG-USD", ts) is None
 
     def test_none_history(self):
-        ts = datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc)
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
         assert fin_evolve._find_price_at(None, "XAG-USD", ts) is None
 
     def test_closest_wins(self):
-        ts = datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc)
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
         history = [
-            {"_parsed_ts": datetime(2026, 3, 10, 10, 0, tzinfo=timezone.utc),
+            {"_parsed_ts": datetime(2026, 3, 10, 10, 0, tzinfo=UTC),
              "prices": {"XAG-USD": 84.0}},
-            {"_parsed_ts": datetime(2026, 3, 10, 11, 30, tzinfo=timezone.utc),
+            {"_parsed_ts": datetime(2026, 3, 10, 11, 30, tzinfo=UTC),
              "prices": {"XAG-USD": 85.0}},
-            {"_parsed_ts": datetime(2026, 3, 10, 14, 0, tzinfo=timezone.utc),
+            {"_parsed_ts": datetime(2026, 3, 10, 14, 0, tzinfo=UTC),
              "prices": {"XAG-USD": 86.0}},
         ]
         result = fin_evolve._find_price_at(history, "XAG-USD", ts)
@@ -253,7 +250,7 @@ class TestFindPriceAt:
 
 class TestBackfillOutcomes:
     def test_backfill_1d(self, tmp_path):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         verdict_ts = now - timedelta(hours=30)
         verdict = _make_verdict(ts_offset_hours=-30, price_usd=85.0)
         target_ts = verdict_ts + timedelta(days=1)
@@ -268,7 +265,7 @@ class TestBackfillOutcomes:
         assert entries[0]["verdict_correct_1d"] is True
 
     def test_backfill_3d(self, tmp_path):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         verdict_ts = now - timedelta(hours=80)
         verdict = _make_verdict(ts_offset_hours=-80, price_usd=85.0)
         snap_1d = _make_price_snap(verdict_ts + timedelta(days=1), {"XAG-USD": 86.0})
@@ -282,7 +279,7 @@ class TestBackfillOutcomes:
         assert entries[0]["verdict_correct_3d"] is False
 
     def test_backfill_7d(self, tmp_path):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         verdict_ts = now - timedelta(hours=180)
         verdict = _make_verdict(ts_offset_hours=-180, price_usd=85.0)
         snap_1d = _make_price_snap(verdict_ts + timedelta(days=1), {"XAG-USD": 86.0})
@@ -299,7 +296,7 @@ class TestBackfillOutcomes:
     def test_no_double_backfill(self, tmp_path):
         verdict = _make_verdict(ts_offset_hours=-30, price_usd=85.0,
                                 outcome_1d_pct=2.0, verdict_correct_1d=True)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         verdict_ts = now - timedelta(hours=30)
         snap = _make_price_snap(verdict_ts + timedelta(days=1), {"XAG-USD": 999.0})
         _write_jsonl(fin_evolve._LOG_FILE, [verdict])
@@ -318,7 +315,7 @@ class TestBackfillOutcomes:
         assert fin_evolve.backfill_outcomes() == 0
 
     def test_bearish_verdict_backfill(self, tmp_path):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         verdict_ts = now - timedelta(hours=30)
         verdict = _make_verdict(ts_offset_hours=-30, price_usd=85.0, verdict_1_3d="bearish")
         snap = _make_price_snap(verdict_ts + timedelta(days=1), {"XAG-USD": 83.0})
@@ -335,7 +332,7 @@ class TestBackfillOutcomes:
 
 class TestBackfillJournalOutcomes:
     def test_scores_non_neutral_outlooks(self, tmp_path):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entry_ts = now - timedelta(hours=30)
         journal_entry = _make_journal_entry(ts_offset_hours=-30)
         snap = _make_price_snap(entry_ts + timedelta(days=1),
@@ -368,7 +365,7 @@ class TestBackfillJournalOutcomes:
         assert fin_evolve.backfill_journal_outcomes() == 0
 
     def test_deduplication(self, tmp_path):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entry_ts = now - timedelta(hours=30)
         journal_entry = _make_journal_entry(ts_offset_hours=-30)
         snap = _make_price_snap(entry_ts + timedelta(days=1),
@@ -383,7 +380,7 @@ class TestBackfillJournalOutcomes:
         assert len(outcomes) == 2
 
     def test_scores_3d_when_old_enough(self, tmp_path):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entry_ts = now - timedelta(hours=80)
         journal_entry = _make_journal_entry(ts_offset_hours=-80)
         snap_1d = _make_price_snap(entry_ts + timedelta(days=1),
@@ -409,7 +406,7 @@ class TestBackfillJournalOutcomes:
             },
             prices={"BTC-USD": 67000.0},
         )
-        snap = _make_price_snap(datetime.now(timezone.utc) - timedelta(hours=6),
+        snap = _make_price_snap(datetime.now(UTC) - timedelta(hours=6),
                                 {"BTC-USD": 68000.0})
         _write_jsonl(fin_evolve._JOURNAL_FILE, [journal_entry])
         _write_jsonl(fin_evolve._PRICE_FILE, [snap])
@@ -423,7 +420,7 @@ class TestBackfillJournalOutcomes:
         assert fin_evolve.backfill_journal_outcomes() == 0
 
     def test_handles_missing_conviction(self, tmp_path):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         entry_ts = now - timedelta(hours=30)
         journal_entry = _make_journal_entry(
             ts_offset_hours=-30,
@@ -852,7 +849,7 @@ class TestEvolve:
         outcomes = []
         for i in range(6):
             outcomes.append({
-                "journal_ts": (datetime.now(timezone.utc) - timedelta(hours=100 + i * 24)).isoformat(),
+                "journal_ts": (datetime.now(UTC) - timedelta(hours=100 + i * 24)).isoformat(),
                 "ticker": "BTC-USD", "source": "layer2", "outlook": "bullish",
                 "conviction": 0.6, "price_at_verdict": 67000 + i * 100,
                 "regime": "trending-up",
@@ -878,7 +875,7 @@ class TestEvolve:
         journal = []
         for i in range(3):
             journal.append({
-                "journal_ts": (datetime.now(timezone.utc) - timedelta(hours=100 + i * 24)).isoformat(),
+                "journal_ts": (datetime.now(UTC) - timedelta(hours=100 + i * 24)).isoformat(),
                 "ticker": "BTC-USD", "source": "layer2", "outlook": "bullish",
                 "conviction": 0.5, "price_at_verdict": 67000,
                 "regime": "trending-up", "outcome_3d_pct": 1.5, "correct_3d": True,
@@ -902,7 +899,7 @@ class TestEvolve:
         journal = []
         for i in range(3):
             journal.append({
-                "journal_ts": (datetime.now(timezone.utc) - timedelta(hours=100 + i * 24)).isoformat(),
+                "journal_ts": (datetime.now(UTC) - timedelta(hours=100 + i * 24)).isoformat(),
                 "ticker": "BTC-USD", "source": "layer2", "outlook": "bullish",
                 "conviction": 0.5, "regime": "trending-up",
                 "outcome_3d_pct": -1.0, "correct_3d": False,
@@ -1015,7 +1012,7 @@ class TestBucketMidpoint:
 
 class TestEndToEnd:
     def test_full_pipeline(self, tmp_path):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         verdicts = []
         for i in range(6):
             v = _make_verdict(ts_offset_hours=-(96 + i * 2), price_usd=85.0 + i * 0.5,
@@ -1047,7 +1044,7 @@ class TestEndToEnd:
         assert "fin-silver" in result["by_command"]
 
     def test_full_pipeline_with_journal(self, tmp_path):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         journal_entries = []
         for i in range(6):
             journal_entries.append(_make_journal_entry(

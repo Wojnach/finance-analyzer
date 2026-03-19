@@ -4,21 +4,21 @@ Tests DST detection, NYSE close hour calculation, agent window logic,
 and market state determination with mocked datetimes.
 """
 
-import pytest
-from datetime import datetime, timezone, date
+from datetime import UTC, date, datetime
 from unittest.mock import patch
 
+import pytest
+
 from portfolio.market_timing import (
+    INTERVAL_MARKET_CLOSED,
+    INTERVAL_MARKET_OPEN,
+    INTERVAL_WEEKEND,
+    MARKET_OPEN_HOUR,
+    _is_agent_window,
     _is_us_dst,
     _market_close_hour_utc,
-    _is_agent_window,
     get_market_state,
-    MARKET_OPEN_HOUR,
-    INTERVAL_MARKET_OPEN,
-    INTERVAL_MARKET_CLOSED,
-    INTERVAL_WEEKEND,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -26,7 +26,7 @@ from portfolio.market_timing import (
 
 def utc(year, month, day, hour=12, minute=0):
     """Shorthand to build a UTC-aware datetime."""
-    return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
+    return datetime(year, month, day, hour, minute, tzinfo=UTC)
 
 
 # ===========================================================================
@@ -104,15 +104,15 @@ class TestIsDstTransitionBoundaries:
     def test_2026_just_before_dst_start(self):
         # 2026: March 1 is Sunday, so 2nd Sunday = March 8
         # DST starts at 07:00 UTC on March 8
-        just_before = datetime(2026, 3, 8, 6, 59, tzinfo=timezone.utc)
+        just_before = datetime(2026, 3, 8, 6, 59, tzinfo=UTC)
         assert _is_us_dst(just_before) is False
 
     def test_2026_exact_dst_start(self):
-        exact_start = datetime(2026, 3, 8, 7, 0, tzinfo=timezone.utc)
+        exact_start = datetime(2026, 3, 8, 7, 0, tzinfo=UTC)
         assert _is_us_dst(exact_start) is True
 
     def test_2026_just_after_dst_start(self):
-        just_after = datetime(2026, 3, 8, 7, 1, tzinfo=timezone.utc)
+        just_after = datetime(2026, 3, 8, 7, 1, tzinfo=UTC)
         assert _is_us_dst(just_after) is True
 
     # --- Fall back (November) ---
@@ -120,15 +120,15 @@ class TestIsDstTransitionBoundaries:
     def test_2026_just_before_dst_end(self):
         # 2026: November 1 is Sunday, so 1st Sunday = November 1
         # DST ends at 06:00 UTC on November 1
-        just_before = datetime(2026, 11, 1, 5, 59, tzinfo=timezone.utc)
+        just_before = datetime(2026, 11, 1, 5, 59, tzinfo=UTC)
         assert _is_us_dst(just_before) is True
 
     def test_2026_exact_dst_end(self):
-        exact_end = datetime(2026, 11, 1, 6, 0, tzinfo=timezone.utc)
+        exact_end = datetime(2026, 11, 1, 6, 0, tzinfo=UTC)
         assert _is_us_dst(exact_end) is False
 
     def test_2026_just_after_dst_end(self):
-        just_after = datetime(2026, 11, 1, 6, 1, tzinfo=timezone.utc)
+        just_after = datetime(2026, 11, 1, 6, 1, tzinfo=UTC)
         assert _is_us_dst(just_after) is False
 
     # --- 2025 boundaries (March 1 is Saturday) ---
@@ -137,15 +137,15 @@ class TestIsDstTransitionBoundaries:
         # 2025: March 1 is Saturday (weekday=5)
         # First Sunday = March 2, Second Sunday = March 9
         # DST starts March 9 at 07:00 UTC
-        assert _is_us_dst(datetime(2025, 3, 9, 6, 59, tzinfo=timezone.utc)) is False
-        assert _is_us_dst(datetime(2025, 3, 9, 7, 0, tzinfo=timezone.utc)) is True
+        assert _is_us_dst(datetime(2025, 3, 9, 6, 59, tzinfo=UTC)) is False
+        assert _is_us_dst(datetime(2025, 3, 9, 7, 0, tzinfo=UTC)) is True
 
     def test_2025_dst_end(self):
         # 2025: November 1 is Saturday (weekday=5)
         # First Sunday = November 2
         # DST ends November 2 at 06:00 UTC
-        assert _is_us_dst(datetime(2025, 11, 2, 5, 59, tzinfo=timezone.utc)) is True
-        assert _is_us_dst(datetime(2025, 11, 2, 6, 0, tzinfo=timezone.utc)) is False
+        assert _is_us_dst(datetime(2025, 11, 2, 5, 59, tzinfo=UTC)) is True
+        assert _is_us_dst(datetime(2025, 11, 2, 6, 0, tzinfo=UTC)) is False
 
     # --- 2027 boundaries (March 1 is Monday) ---
 
@@ -153,15 +153,15 @@ class TestIsDstTransitionBoundaries:
         # 2027: March 1 is Monday (weekday=0)
         # First Sunday = March 7, Second Sunday = March 14
         # DST starts March 14 at 07:00 UTC
-        assert _is_us_dst(datetime(2027, 3, 14, 6, 59, tzinfo=timezone.utc)) is False
-        assert _is_us_dst(datetime(2027, 3, 14, 7, 0, tzinfo=timezone.utc)) is True
+        assert _is_us_dst(datetime(2027, 3, 14, 6, 59, tzinfo=UTC)) is False
+        assert _is_us_dst(datetime(2027, 3, 14, 7, 0, tzinfo=UTC)) is True
 
     def test_2027_dst_end(self):
         # 2027: November 1 is Monday (weekday=0)
         # First Sunday = November 7
         # DST ends November 7 at 06:00 UTC
-        assert _is_us_dst(datetime(2027, 11, 7, 5, 59, tzinfo=timezone.utc)) is True
-        assert _is_us_dst(datetime(2027, 11, 7, 6, 0, tzinfo=timezone.utc)) is False
+        assert _is_us_dst(datetime(2027, 11, 7, 5, 59, tzinfo=UTC)) is True
+        assert _is_us_dst(datetime(2027, 11, 7, 6, 0, tzinfo=UTC)) is False
 
     # --- 2024 boundaries (for variety, March 1 is Friday) ---
 
@@ -169,15 +169,15 @@ class TestIsDstTransitionBoundaries:
         # 2024: March 1 is Friday (weekday=4)
         # First Sunday = March 3, Second Sunday = March 10
         # DST starts March 10 at 07:00 UTC
-        assert _is_us_dst(datetime(2024, 3, 10, 6, 59, tzinfo=timezone.utc)) is False
-        assert _is_us_dst(datetime(2024, 3, 10, 7, 0, tzinfo=timezone.utc)) is True
+        assert _is_us_dst(datetime(2024, 3, 10, 6, 59, tzinfo=UTC)) is False
+        assert _is_us_dst(datetime(2024, 3, 10, 7, 0, tzinfo=UTC)) is True
 
     def test_2024_dst_end(self):
         # 2024: November 1 is Friday (weekday=4)
         # First Sunday = November 3
         # DST ends November 3 at 06:00 UTC
-        assert _is_us_dst(datetime(2024, 11, 3, 5, 59, tzinfo=timezone.utc)) is True
-        assert _is_us_dst(datetime(2024, 11, 3, 6, 0, tzinfo=timezone.utc)) is False
+        assert _is_us_dst(datetime(2024, 11, 3, 5, 59, tzinfo=UTC)) is True
+        assert _is_us_dst(datetime(2024, 11, 3, 6, 0, tzinfo=UTC)) is False
 
 
 # ===========================================================================
@@ -235,22 +235,22 @@ class TestMarketCloseHourUtc:
 
     def test_dst_start_day_before_transition(self):
         # Just before DST starts => EST => 21
-        before = datetime(2026, 3, 8, 6, 59, tzinfo=timezone.utc)
+        before = datetime(2026, 3, 8, 6, 59, tzinfo=UTC)
         assert _market_close_hour_utc(before) == 21
 
     def test_dst_start_day_after_transition(self):
         # Just after DST starts => EDT => 20
-        after = datetime(2026, 3, 8, 7, 0, tzinfo=timezone.utc)
+        after = datetime(2026, 3, 8, 7, 0, tzinfo=UTC)
         assert _market_close_hour_utc(after) == 20
 
     def test_dst_end_day_before_transition(self):
         # Just before DST ends => EDT => 20
-        before = datetime(2026, 11, 1, 5, 59, tzinfo=timezone.utc)
+        before = datetime(2026, 11, 1, 5, 59, tzinfo=UTC)
         assert _market_close_hour_utc(before) == 20
 
     def test_dst_end_day_after_transition(self):
         # Just after DST ends => EST => 21
-        after = datetime(2026, 11, 1, 6, 0, tzinfo=timezone.utc)
+        after = datetime(2026, 11, 1, 6, 0, tzinfo=UTC)
         assert _market_close_hour_utc(after) == 21
 
     def test_various_months(self):
@@ -275,44 +275,44 @@ class TestIsAgentWindowInside:
 
     def test_monday_midday(self):
         # Monday 12:00 UTC
-        now = datetime(2026, 2, 23, 12, 0, tzinfo=timezone.utc)  # Monday
+        now = datetime(2026, 2, 23, 12, 0, tzinfo=UTC)  # Monday
         assert _is_agent_window(now) is True
 
     def test_wednesday_morning_edge(self):
         # Wednesday 07:00 UTC (exactly the start = EU market open)
-        now = datetime(2026, 2, 25, 7, 0, tzinfo=timezone.utc)  # Wednesday
+        now = datetime(2026, 2, 25, 7, 0, tzinfo=UTC)  # Wednesday
         assert _is_agent_window(now) is True
 
     def test_friday_afternoon(self):
         # Friday 15:00 UTC
-        now = datetime(2026, 2, 27, 15, 0, tzinfo=timezone.utc)  # Friday
+        now = datetime(2026, 2, 27, 15, 0, tzinfo=UTC)  # Friday
         assert _is_agent_window(now) is True
 
     def test_tuesday_late_evening_est(self):
         # In EST (winter), window extends to 21:00 UTC (NYSE close)
         # Tuesday 20:30 UTC in February (EST)
-        now = datetime(2026, 2, 24, 20, 30, tzinfo=timezone.utc)  # Tuesday
+        now = datetime(2026, 2, 24, 20, 30, tzinfo=UTC)  # Tuesday
         assert _is_agent_window(now) is True
 
     def test_tuesday_late_evening_edt(self):
         # In EDT (summer), window extends to 20:00 UTC (NYSE close)
         # Tuesday 19:30 UTC in July (EDT)
-        now = datetime(2026, 7, 7, 19, 30, tzinfo=timezone.utc)  # Tuesday
+        now = datetime(2026, 7, 7, 19, 30, tzinfo=UTC)  # Tuesday
         assert _is_agent_window(now) is True
 
     def test_thursday_at_0700(self):
         # Exactly at 07:00 (inclusive start = EU market open)
-        now = datetime(2026, 2, 26, 7, 0, tzinfo=timezone.utc)  # Thursday
+        now = datetime(2026, 2, 26, 7, 0, tzinfo=UTC)  # Thursday
         assert _is_agent_window(now) is True
 
     def test_monday_one_minute_before_end_est(self):
         # In EST, end = 21:00 UTC, so 20:59 is still inside
-        now = datetime(2026, 1, 5, 20, 59, tzinfo=timezone.utc)  # Monday
+        now = datetime(2026, 1, 5, 20, 59, tzinfo=UTC)  # Monday
         assert _is_agent_window(now) is True
 
     def test_monday_one_minute_before_end_edt(self):
         # In EDT, end = 20:00 UTC, so 19:59 is still inside
-        now = datetime(2026, 6, 1, 19, 59, tzinfo=timezone.utc)  # Monday
+        now = datetime(2026, 6, 1, 19, 59, tzinfo=UTC)  # Monday
         assert _is_agent_window(now) is True
 
 
@@ -324,42 +324,42 @@ class TestIsAgentWindowOutside:
     """Times that should be outside the agent window."""
 
     def test_saturday(self):
-        now = datetime(2026, 2, 28, 12, 0, tzinfo=timezone.utc)  # Saturday
+        now = datetime(2026, 2, 28, 12, 0, tzinfo=UTC)  # Saturday
         assert _is_agent_window(now) is False
 
     def test_sunday(self):
-        now = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)  # Sunday
+        now = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)  # Sunday
         assert _is_agent_window(now) is False
 
     def test_weekday_too_early(self):
         # Monday 06:59 UTC (before 07:00)
-        now = datetime(2026, 2, 23, 6, 59, tzinfo=timezone.utc)  # Monday
+        now = datetime(2026, 2, 23, 6, 59, tzinfo=UTC)  # Monday
         assert _is_agent_window(now) is False
 
     def test_weekday_midnight(self):
-        now = datetime(2026, 2, 24, 0, 0, tzinfo=timezone.utc)  # Tuesday
+        now = datetime(2026, 2, 24, 0, 0, tzinfo=UTC)  # Tuesday
         assert _is_agent_window(now) is False
 
     def test_weekday_too_late_est(self):
         # In EST (winter), window ends at 21:00 UTC (NYSE close)
-        now = datetime(2026, 1, 5, 21, 0, tzinfo=timezone.utc)  # Monday
+        now = datetime(2026, 1, 5, 21, 0, tzinfo=UTC)  # Monday
         assert _is_agent_window(now) is False
 
     def test_weekday_too_late_edt(self):
         # In EDT (summer), window ends at 20:00 UTC (NYSE close)
-        now = datetime(2026, 6, 1, 20, 0, tzinfo=timezone.utc)  # Monday
+        now = datetime(2026, 6, 1, 20, 0, tzinfo=UTC)  # Monday
         assert _is_agent_window(now) is False
 
     def test_weekday_23_utc(self):
-        now = datetime(2026, 2, 25, 23, 0, tzinfo=timezone.utc)  # Wednesday
+        now = datetime(2026, 2, 25, 23, 0, tzinfo=UTC)  # Wednesday
         assert _is_agent_window(now) is False
 
     def test_sunday_evening(self):
-        now = datetime(2026, 3, 1, 20, 0, tzinfo=timezone.utc)  # Sunday
+        now = datetime(2026, 3, 1, 20, 0, tzinfo=UTC)  # Sunday
         assert _is_agent_window(now) is False
 
     def test_saturday_morning(self):
-        now = datetime(2026, 2, 28, 7, 0, tzinfo=timezone.utc)  # Saturday
+        now = datetime(2026, 2, 28, 7, 0, tzinfo=UTC)  # Saturday
         assert _is_agent_window(now) is False
 
 
@@ -372,11 +372,11 @@ class TestIsAgentWindowDefault:
 
     @patch("portfolio.market_timing.datetime")
     def test_default_now_weekday_midday(self, mock_dt):
-        mock_dt.now.return_value = datetime(2026, 2, 24, 12, 0, tzinfo=timezone.utc)
+        mock_dt.now.return_value = datetime(2026, 2, 24, 12, 0, tzinfo=UTC)
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
         # _is_agent_window with no arg should use the patched now
         result = _is_agent_window()
-        mock_dt.now.assert_called_once_with(timezone.utc)
+        mock_dt.now.assert_called_once_with(UTC)
         assert result is True
 
 
@@ -390,7 +390,7 @@ class TestGetMarketStateOpen:
     @patch("portfolio.market_timing.datetime")
     def test_weekday_midday_edt(self, mock_dt):
         """Wednesday 14:00 UTC in summer (EDT, close=20) => open."""
-        fake_now = datetime(2026, 7, 8, 14, 0, tzinfo=timezone.utc)  # Wednesday
+        fake_now = datetime(2026, 7, 8, 14, 0, tzinfo=UTC)  # Wednesday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -403,7 +403,7 @@ class TestGetMarketStateOpen:
     @patch("portfolio.market_timing.datetime")
     def test_weekday_midday_est(self, mock_dt):
         """Tuesday 14:00 UTC in winter (EST, close=21) => open."""
-        fake_now = datetime(2026, 1, 6, 14, 0, tzinfo=timezone.utc)  # Tuesday
+        fake_now = datetime(2026, 1, 6, 14, 0, tzinfo=UTC)  # Tuesday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -414,7 +414,7 @@ class TestGetMarketStateOpen:
     @patch("portfolio.market_timing.datetime")
     def test_at_market_open_hour(self, mock_dt):
         """Exactly at MARKET_OPEN_HOUR (7) => open."""
-        fake_now = datetime(2026, 2, 24, MARKET_OPEN_HOUR, 0, tzinfo=timezone.utc)  # Tuesday
+        fake_now = datetime(2026, 2, 24, MARKET_OPEN_HOUR, 0, tzinfo=UTC)  # Tuesday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -424,7 +424,7 @@ class TestGetMarketStateOpen:
     @patch("portfolio.market_timing.datetime")
     def test_one_hour_before_close_edt(self, mock_dt):
         """Hour 19 UTC when close is 20 (EDT) => still open."""
-        fake_now = datetime(2026, 7, 8, 19, 0, tzinfo=timezone.utc)  # Wednesday
+        fake_now = datetime(2026, 7, 8, 19, 0, tzinfo=UTC)  # Wednesday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -434,7 +434,7 @@ class TestGetMarketStateOpen:
     @patch("portfolio.market_timing.datetime")
     def test_one_hour_before_close_est(self, mock_dt):
         """Hour 20 UTC when close is 21 (EST) => still open."""
-        fake_now = datetime(2026, 1, 6, 20, 0, tzinfo=timezone.utc)  # Tuesday
+        fake_now = datetime(2026, 1, 6, 20, 0, tzinfo=UTC)  # Tuesday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -452,7 +452,7 @@ class TestGetMarketStateClosed:
     @patch("portfolio.market_timing.datetime")
     def test_weekday_before_open(self, mock_dt):
         """Tuesday 05:00 UTC => closed."""
-        fake_now = datetime(2026, 2, 24, 5, 0, tzinfo=timezone.utc)  # Tuesday
+        fake_now = datetime(2026, 2, 24, 5, 0, tzinfo=UTC)  # Tuesday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -464,7 +464,7 @@ class TestGetMarketStateClosed:
     @patch("portfolio.market_timing.datetime")
     def test_weekday_after_close_edt(self, mock_dt):
         """Wednesday 20:00 UTC in summer (EDT close=20) => closed."""
-        fake_now = datetime(2026, 7, 8, 20, 0, tzinfo=timezone.utc)  # Wednesday
+        fake_now = datetime(2026, 7, 8, 20, 0, tzinfo=UTC)  # Wednesday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -475,7 +475,7 @@ class TestGetMarketStateClosed:
     @patch("portfolio.market_timing.datetime")
     def test_weekday_after_close_est(self, mock_dt):
         """Monday 21:00 UTC in winter (EST close=21) => closed."""
-        fake_now = datetime(2026, 1, 5, 21, 0, tzinfo=timezone.utc)  # Monday
+        fake_now = datetime(2026, 1, 5, 21, 0, tzinfo=UTC)  # Monday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -486,7 +486,7 @@ class TestGetMarketStateClosed:
     @patch("portfolio.market_timing.datetime")
     def test_weekday_at_midnight(self, mock_dt):
         """Thursday 00:00 UTC => closed."""
-        fake_now = datetime(2026, 2, 26, 0, 0, tzinfo=timezone.utc)  # Thursday
+        fake_now = datetime(2026, 2, 26, 0, 0, tzinfo=UTC)  # Thursday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -496,7 +496,7 @@ class TestGetMarketStateClosed:
     @patch("portfolio.market_timing.datetime")
     def test_weekday_hour_6_is_before_open(self, mock_dt):
         """Hour 6 UTC is before MARKET_OPEN_HOUR (7) => closed."""
-        fake_now = datetime(2026, 2, 24, 6, 0, tzinfo=timezone.utc)  # Tuesday
+        fake_now = datetime(2026, 2, 24, 6, 0, tzinfo=UTC)  # Tuesday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -506,7 +506,7 @@ class TestGetMarketStateClosed:
     @patch("portfolio.market_timing.datetime")
     def test_weekday_late_night(self, mock_dt):
         """Friday 23:00 UTC => closed."""
-        fake_now = datetime(2026, 2, 27, 23, 0, tzinfo=timezone.utc)  # Friday
+        fake_now = datetime(2026, 2, 27, 23, 0, tzinfo=UTC)  # Friday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -524,7 +524,7 @@ class TestGetMarketStateWeekend:
 
     @patch("portfolio.market_timing.datetime")
     def test_saturday_midday(self, mock_dt):
-        fake_now = datetime(2026, 2, 28, 12, 0, tzinfo=timezone.utc)  # Saturday
+        fake_now = datetime(2026, 2, 28, 12, 0, tzinfo=UTC)  # Saturday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -535,7 +535,7 @@ class TestGetMarketStateWeekend:
 
     @patch("portfolio.market_timing.datetime")
     def test_sunday_midday(self, mock_dt):
-        fake_now = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)  # Sunday
+        fake_now = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)  # Sunday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -546,7 +546,7 @@ class TestGetMarketStateWeekend:
     @patch("portfolio.market_timing.datetime")
     def test_saturday_during_market_hours(self, mock_dt):
         """Even at 10:00 UTC Saturday (would be open on a weekday) => weekend."""
-        fake_now = datetime(2026, 2, 28, 10, 0, tzinfo=timezone.utc)  # Saturday
+        fake_now = datetime(2026, 2, 28, 10, 0, tzinfo=UTC)  # Saturday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -555,7 +555,7 @@ class TestGetMarketStateWeekend:
 
     @patch("portfolio.market_timing.datetime")
     def test_sunday_morning(self, mock_dt):
-        fake_now = datetime(2026, 3, 1, 7, 0, tzinfo=timezone.utc)  # Sunday
+        fake_now = datetime(2026, 3, 1, 7, 0, tzinfo=UTC)  # Sunday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -564,7 +564,7 @@ class TestGetMarketStateWeekend:
 
     @patch("portfolio.market_timing.datetime")
     def test_saturday_midnight(self, mock_dt):
-        fake_now = datetime(2026, 2, 28, 0, 0, tzinfo=timezone.utc)  # Saturday
+        fake_now = datetime(2026, 2, 28, 0, 0, tzinfo=UTC)  # Saturday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -573,7 +573,7 @@ class TestGetMarketStateWeekend:
 
     @patch("portfolio.market_timing.datetime")
     def test_sunday_late_night(self, mock_dt):
-        fake_now = datetime(2026, 3, 1, 23, 59, tzinfo=timezone.utc)  # Sunday
+        fake_now = datetime(2026, 3, 1, 23, 59, tzinfo=UTC)  # Sunday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -591,7 +591,7 @@ class TestGetMarketStateSymbols:
     @patch("portfolio.market_timing.datetime")
     def test_symbols_match_tickers(self, mock_dt):
         from portfolio.tickers import SYMBOLS
-        fake_now = datetime(2026, 2, 24, 14, 0, tzinfo=timezone.utc)  # Tuesday
+        fake_now = datetime(2026, 2, 24, 14, 0, tzinfo=UTC)  # Tuesday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -601,7 +601,7 @@ class TestGetMarketStateSymbols:
     @patch("portfolio.market_timing.datetime")
     def test_symbols_on_weekend(self, mock_dt):
         from portfolio.tickers import SYMBOLS
-        fake_now = datetime(2026, 2, 28, 12, 0, tzinfo=timezone.utc)  # Saturday
+        fake_now = datetime(2026, 2, 28, 12, 0, tzinfo=UTC)  # Saturday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -636,32 +636,32 @@ class TestAgentWindowDstBoundary:
 
     def test_est_window_end_at_2059(self):
         # EST (Feb): window ends at 21:00 (NYSE close). 20:59 is inside.
-        now = datetime(2026, 2, 24, 20, 59, tzinfo=timezone.utc)  # Tuesday
+        now = datetime(2026, 2, 24, 20, 59, tzinfo=UTC)  # Tuesday
         assert _is_agent_window(now) is True
 
     def test_est_window_end_at_2100(self):
         # EST (Feb): window ends at 21:00. 21:00 is outside.
-        now = datetime(2026, 2, 24, 21, 0, tzinfo=timezone.utc)  # Tuesday
+        now = datetime(2026, 2, 24, 21, 0, tzinfo=UTC)  # Tuesday
         assert _is_agent_window(now) is False
 
     def test_edt_window_end_at_1959(self):
         # EDT (Jul): window ends at 20:00 (NYSE close). 19:59 is inside.
-        now = datetime(2026, 7, 7, 19, 59, tzinfo=timezone.utc)  # Tuesday
+        now = datetime(2026, 7, 7, 19, 59, tzinfo=UTC)  # Tuesday
         assert _is_agent_window(now) is True
 
     def test_edt_window_end_at_2000(self):
         # EDT (Jul): window ends at 20:00. 20:00 is outside.
-        now = datetime(2026, 7, 7, 20, 0, tzinfo=timezone.utc)  # Tuesday
+        now = datetime(2026, 7, 7, 20, 0, tzinfo=UTC)  # Tuesday
         assert _is_agent_window(now) is False
 
     def test_edt_2030_would_be_inside_est_but_outside_edt(self):
         # 20:30 in summer (EDT): outside (window ends 20:00)
-        now = datetime(2026, 7, 7, 20, 30, tzinfo=timezone.utc)  # Tuesday
+        now = datetime(2026, 7, 7, 20, 30, tzinfo=UTC)  # Tuesday
         assert _is_agent_window(now) is False
 
     def test_est_2030_inside(self):
         # 20:30 in winter (EST): inside (window ends 21:00)
-        now = datetime(2026, 1, 6, 20, 30, tzinfo=timezone.utc)  # Tuesday
+        now = datetime(2026, 1, 6, 20, 30, tzinfo=UTC)  # Tuesday
         assert _is_agent_window(now) is True
 
 
@@ -675,7 +675,7 @@ class TestGetMarketStateBoundaries:
     @patch("portfolio.market_timing.datetime")
     def test_at_exactly_close_hour_edt(self, mock_dt):
         """At hour 20 in EDT => hour == close_hour => NOT open => closed."""
-        fake_now = datetime(2026, 7, 8, 20, 0, tzinfo=timezone.utc)  # Wednesday
+        fake_now = datetime(2026, 7, 8, 20, 0, tzinfo=UTC)  # Wednesday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -685,7 +685,7 @@ class TestGetMarketStateBoundaries:
     @patch("portfolio.market_timing.datetime")
     def test_at_exactly_close_hour_est(self, mock_dt):
         """At hour 21 in EST => hour == close_hour => NOT open => closed."""
-        fake_now = datetime(2026, 1, 5, 21, 0, tzinfo=timezone.utc)  # Monday
+        fake_now = datetime(2026, 1, 5, 21, 0, tzinfo=UTC)  # Monday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -695,7 +695,7 @@ class TestGetMarketStateBoundaries:
     @patch("portfolio.market_timing.datetime")
     def test_one_hour_before_close_is_open_edt(self, mock_dt):
         """Hour 19 in EDT (close=20) => MARKET_OPEN_HOUR <= 19 < 20 => open."""
-        fake_now = datetime(2026, 7, 8, 19, 0, tzinfo=timezone.utc)  # Wednesday
+        fake_now = datetime(2026, 7, 8, 19, 0, tzinfo=UTC)  # Wednesday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -705,7 +705,7 @@ class TestGetMarketStateBoundaries:
     @patch("portfolio.market_timing.datetime")
     def test_at_exactly_market_open(self, mock_dt):
         """At MARKET_OPEN_HOUR (7) => open."""
-        fake_now = datetime(2026, 2, 24, 7, 0, tzinfo=timezone.utc)  # Tuesday
+        fake_now = datetime(2026, 2, 24, 7, 0, tzinfo=UTC)  # Tuesday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -715,7 +715,7 @@ class TestGetMarketStateBoundaries:
     @patch("portfolio.market_timing.datetime")
     def test_one_hour_before_market_open(self, mock_dt):
         """At hour 6 (one before MARKET_OPEN_HOUR 7) => closed."""
-        fake_now = datetime(2026, 2, 24, 6, 0, tzinfo=timezone.utc)  # Tuesday
+        fake_now = datetime(2026, 2, 24, 6, 0, tzinfo=UTC)  # Tuesday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -725,7 +725,7 @@ class TestGetMarketStateBoundaries:
     @patch("portfolio.market_timing.datetime")
     def test_friday_at_close_transitions_to_closed_not_weekend(self, mock_dt):
         """Friday at close hour is still 'closed' (weekday < 5), not 'weekend'."""
-        fake_now = datetime(2026, 2, 27, 21, 0, tzinfo=timezone.utc)  # Friday (EST)
+        fake_now = datetime(2026, 2, 27, 21, 0, tzinfo=UTC)  # Friday (EST)
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -768,24 +768,24 @@ class TestDstMultipleYears:
 
         # Before DST start => False
         before_start = datetime(
-            year, 3, expected_second_sun_mar, 6, 59, tzinfo=timezone.utc
+            year, 3, expected_second_sun_mar, 6, 59, tzinfo=UTC
         )
         assert _is_us_dst(before_start) is False
 
         # At DST start => True
         at_start = datetime(
-            year, 3, expected_second_sun_mar, 7, 0, tzinfo=timezone.utc
+            year, 3, expected_second_sun_mar, 7, 0, tzinfo=UTC
         )
         assert _is_us_dst(at_start) is True
 
         # Before DST end => True
         before_end = datetime(
-            year, 11, expected_first_sun_nov, 5, 59, tzinfo=timezone.utc
+            year, 11, expected_first_sun_nov, 5, 59, tzinfo=UTC
         )
         assert _is_us_dst(before_end) is True
 
         # At DST end => False
         at_end = datetime(
-            year, 11, expected_first_sun_nov, 6, 0, tzinfo=timezone.utc
+            year, 11, expected_first_sun_nov, 6, 0, tzinfo=UTC
         )
         assert _is_us_dst(at_end) is False
