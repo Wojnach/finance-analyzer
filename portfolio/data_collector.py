@@ -1,7 +1,9 @@
 """Data collection — Binance, Alpaca, yfinance kline fetchers + multi-timeframe collector."""
 
 import logging
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 
 import pandas as pd
@@ -263,37 +265,64 @@ def _fetch_klines(source, interval, limit):
 # --- Multi-timeframe collector ---
 
 
+# yfinance is not thread-safe; serialize calls with a lock
+_yfinance_lock = threading.Lock()
+
+
+def _fetch_one_timeframe(source, source_key, label, interval, limit, ttl):
+    """Fetch and process a single timeframe. Thread-safe."""
+    cache_key = f"tf_{source_key}_{label}"
+    if ttl > 0:
+        with _ss._cache_lock:
+            cached = _ss._tool_cache.get(cache_key)
+            if cached and time.time() - cached["time"] < ttl:
+                return (label, cached["data"])
+    try:
+        # yfinance is not thread-safe — serialize its calls
+        if "alpaca" in source and _ss._current_market_state in ("closed", "weekend"):
+            with _yfinance_lock:
+                df = _fetch_klines(source, interval, limit)
+        else:
+            df = _fetch_klines(source, interval, limit)
+        ind = compute_indicators(df)
+        if ind is None:
+            logger.debug("%s/%s: insufficient data (%d rows), skipping",
+                         source_key, label, len(df) if df is not None else 0)
+            return None
+        if label == "Now":
+            action, conf = None, None
+        else:
+            action, conf = technical_signal(ind)
+        entry = {"indicators": ind, "action": action, "confidence": conf}
+        if label == "Now":
+            entry["_df"] = df  # preserve raw DataFrame for enhanced signals
+        if ttl > 0:
+            with _ss._cache_lock:
+                _ss._tool_cache[cache_key] = {"data": entry, "time": time.time()}
+        return (label, entry)
+    except Exception as e:
+        return (label, {"error": str(e)})
+
+
 def collect_timeframes(source):
+    """Collect all timeframes for a source, fetching in parallel."""
     is_stock = "alpaca" in source
     tfs = STOCK_TIMEFRAMES if is_stock else TIMEFRAMES
     source_key = source.get("alpaca") or source.get("binance") or source.get("binance_fapi")
-    results = []
-    for label, interval, limit, ttl in tfs:
-        cache_key = f"tf_{source_key}_{label}"
-        if ttl > 0:
-            with _ss._cache_lock:
-                cached = _ss._tool_cache.get(cache_key)
-                if cached and time.time() - cached["time"] < ttl:
-                    results.append((label, cached["data"]))
-                    continue
-        try:
-            df = _fetch_klines(source, interval, limit)
-            ind = compute_indicators(df)
-            if ind is None:
-                logger.debug("%s/%s: insufficient data (%d rows), skipping",
-                             source_key, label, len(df) if df is not None else 0)
-                continue
-            if label == "Now":
-                action, conf = None, None
-            else:
-                action, conf = technical_signal(ind)
-            entry = {"indicators": ind, "action": action, "confidence": conf}
-            if label == "Now":
-                entry["_df"] = df  # preserve raw DataFrame for enhanced signals
-            if ttl > 0:
-                with _ss._cache_lock:
-                    _ss._tool_cache[cache_key] = {"data": entry, "time": time.time()}
-            results.append((label, entry))
-        except Exception as e:
-            results.append((label, {"error": str(e)}))
-    return results
+
+    # Submit all timeframe fetches to thread pool
+    with ThreadPoolExecutor(max_workers=len(tfs), thread_name_prefix=f"tf_{source_key}") as pool:
+        futures = {
+            pool.submit(_fetch_one_timeframe, source, source_key, label, interval, limit, ttl): label
+            for label, interval, limit, ttl in tfs
+        }
+        raw_results = []
+        for future in as_completed(futures):
+            result = future.result()
+            if result is not None:
+                raw_results.append(result)
+
+    # Maintain original timeframe order
+    tf_order = {label: i for i, (label, _, _, _) in enumerate(tfs)}
+    raw_results.sort(key=lambda x: tf_order.get(x[0], 999))
+    return raw_results

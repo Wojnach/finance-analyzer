@@ -279,14 +279,19 @@ def run(force_report=False, active_symbols=None):
 
     _run_start = time.monotonic()
 
-    for name, source in SYMBOLS.items():
-        if name not in active:
-            continue
+    # --- Phase 1: Parallel data collection (I/O-bound) ---
+    # Fetch timeframes for all active tickers concurrently.
+    # Rate limiters and cache locks are already thread-safe.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    active_items = [(name, source) for name, source in SYMBOLS.items() if name in active]
+
+    def _collect_ticker_data(name, source):
+        """Collect timeframes + extract indicators for one ticker. Thread-safe."""
         try:
-            _ticker_start = time.monotonic()
+            t0 = time.monotonic()
             tfs = collect_timeframes(source)
-            _tf_elapsed = time.monotonic() - _ticker_start
-            tf_data[name] = tfs
+            tf_elapsed = time.monotonic() - t0
 
             now_entry = tfs[0][1] if tfs else None
             now_df = None
@@ -298,9 +303,47 @@ def run(force_report=False, active_symbols=None):
                 ind = compute_indicators(now_df)
 
             if ind is None:
-                logger.info("%s: insufficient data, skipping", name)
+                return name, None, None, None, 0.0
+
+            return name, tfs, ind, now_df, tf_elapsed
+        except Exception as e:
+            logger.warning("%s: data collection failed: %s", name, e)
+            return name, None, None, None, 0.0
+
+    # Cap workers at 8 to avoid overwhelming rate limiters
+    max_workers = min(len(active_items), 8)
+    collected = {}
+    _fetch_start = time.monotonic()
+
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ticker") as pool:
+        futures = {
+            pool.submit(_collect_ticker_data, name, source): name
+            for name, source in active_items
+        }
+        for future in as_completed(futures):
+            name, tfs, ind, now_df, tf_elapsed = future.result()
+            if tfs is not None and ind is not None:
+                collected[name] = {
+                    "tfs": tfs, "ind": ind, "now_df": now_df, "tf_elapsed": tf_elapsed,
+                }
+            else:
                 signals_failed += 1
-                continue
+
+    _fetch_elapsed = time.monotonic() - _fetch_start
+    logger.info(
+        "Parallel data fetch: %d tickers in %.1fs (was sequential)",
+        len(collected), _fetch_elapsed,
+    )
+
+    # --- Phase 2: Sequential signal generation (CPU-bound + GPU-locked LLM) ---
+    for name, data in collected.items():
+        tfs = data["tfs"]
+        ind = data["ind"]
+        now_df = data["now_df"]
+        _tf_elapsed = data["tf_elapsed"]
+
+        try:
+            tf_data[name] = tfs
             price = ind["close"]
             prices_usd[name] = price
 
@@ -309,10 +352,9 @@ def run(force_report=False, active_symbols=None):
                 ind, ticker=name, config=config, timeframes=tfs, df=now_df
             )
             _sig_elapsed = time.monotonic() - _sig_start
-            _ticker_elapsed = time.monotonic() - _ticker_start
             logger.info(
                 "%s: timing: tf=%.1fs sig=%.1fs total=%.1fs",
-                name, _tf_elapsed, _sig_elapsed, _ticker_elapsed,
+                name, _tf_elapsed, _sig_elapsed, _tf_elapsed + _sig_elapsed,
             )
             signals[name] = {
                 "action": action,
@@ -374,9 +416,9 @@ def run(force_report=False, active_symbols=None):
 
     _run_elapsed = time.monotonic() - _run_start
     logger.info(
-        "Signal loop done: %d OK, %d failed in %.1fs (%.1fs/ticker avg)",
+        "Signal loop done: %d OK, %d failed in %.1fs (%.1fs/ticker avg, fetch=%.1fs)",
         signals_ok, signals_failed, _run_elapsed,
-        _run_elapsed / max(signals_ok + signals_failed, 1),
+        _run_elapsed / max(signals_ok + signals_failed, 1), _fetch_elapsed,
     )
 
     # --- Cycle failure alert via Telegram ---
