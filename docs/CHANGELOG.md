@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-03-19 (autonomous improvement session)
+- **REF-16: Python 3.11 modernization**: ruff auto-fix applied 1,910 fixes across 268 files. Key changes: `datetime.timezone.utc` → `datetime.UTC` (199), `Optional[X]` → `X | None` (149), unsorted imports (75), `Dict`/`List`/`Tuple` → builtins (44), redundant open modes (10), deprecated typing imports (8), duplicate set value (1). Zero behavioral change.
+- **REF-17: Manual ruff fixes**: 28 fixes across 20 files. `raise ImportError(...)` → `raise ... from None` (B904), 17 unused loop variables prefixed with `_` (B007), 2 needless bool returns simplified (SIM103).
+- **BUG-81**: `avanza_client.py` `raise ImportError` now chains with `from None` for clean tracebacks.
+- **BUG-83: Silent exception logging**: Added `logger.debug()` to 5 remaining `except Exception: pass` handlers in gpu_gate.py, telegram_notifications.py, signal_engine.py, reporting.py (x2).
+- **BUG-84: ADX caching**: `_compute_adx()` now cached per DataFrame identity (`id(df)`), eliminating ~140 redundant computations per loop cycle. Cache auto-clears on overflow (200 entries max).
+- Theme: Python Modernization & Final Bug Sweep. See `docs/IMPROVEMENT_PLAN.md` for full details.
+
 ## 2026-03-18 (autonomous improvement session)
 - **REF-13: ruff lint cleanup**: Auto-fixed 112 violations (94 unused imports, 15 empty f-strings, 2 reimports) across 59 files. Manually fixed 3 Python 3.11 f-string backslash compatibility issues in `autonomous.py` and 1 unused import in `risk_management.py`.
 - **REF-14 + BUG-75/76/77: Dead variable removal**: Removed 15 unused variable assignments across 13 modules: `signal_engine.py`, `trigger.py`, `telegram_poller.py`, `smart_money.py`, `autonomous.py`, `alpha_vantage.py`, `avanza_session.py`, `bigbet.py`, `daily_digest.py`, `equity_curve.py`, `http_retry.py`, `portfolio_validator.py`.

@@ -177,14 +177,14 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
 - **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
 
-## 9) Known Issues (as of 2026-03-18)
+## 9) Known Issues (as of 2026-03-19)
 
 - BUG-15 through BUG-22: Fixed in 2026-03-08 session
 - BUG-23 through BUG-27: Fixed in 2026-03-09 session (signal validation, None ticker, OSError, heartbeat, pass cleanup)
 - BUG-28: Enhanced signal failures silently count as HOLD — no tracking or surfacing (addressed by ARCH-12)
 - BUG-29: `_vote_correct()` treats 0% change as incorrect — fixed with `_MIN_CHANGE_PCT` threshold
 - BUG-30: `load_json()` TOCTOU race — fixed in 2026-03-10 session
-- BUG-31: `_compute_adx()` not cached, uses NaN propagation via `replace(0, np.nan)` — BUG-54
+- BUG-31: `_compute_adx()` not cached, uses NaN propagation via `replace(0, np.nan)` — fixed as BUG-84 (2026-03-19)
 - BUG-32: main.py re-exports ~50 private symbols (documentation only)
 - BUG-33: Trap detection relies on undocumented assumption about `df` timeframe
 - BUG-34 through BUG-38: Fixed in 2026-03-11 session (portfolio_mgr TOCTOU, health TOCTOU, inversion weight cap)
@@ -193,8 +193,13 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-51 (P1): Signal failure tracking ephemeral — no persistent record of degradation (2026-03-16)
 - BUG-52 (P2): `total_applicable` hardcoded at 27/25, doesn't account for disabled/failing signals (2026-03-16)
 - BUG-53 (P2): 7 modules use non-atomic JSONL appends instead of `atomic_append_jsonl()` (2026-03-16)
-- BUG-54 (P3): `_compute_adx()` not cached in indicator cache (2026-03-16)
+- BUG-54 (P3): `_compute_adx()` not cached — fixed as BUG-84 (2026-03-19)
 - BUG-55 (P3): `fin_evolve.py` has dead ImportError fallback wrappers for file_utils (2026-03-16)
+- BUG-80: Duplicate `"could"` in sentiment.py stopwords set — fixed 2026-03-19 (auto-fix)
+- BUG-81: Missing `raise ... from None` in avanza_client.py — fixed 2026-03-19
+- BUG-82: Unused imports in claude_gate.py — fixed 2026-03-19 (auto-fix)
+- BUG-83: 5 remaining silent `except Exception: pass` handlers — fixed 2026-03-19
+- BUG-84: `_compute_adx()` not cached per ticker — fixed 2026-03-19 (id(df) cache)
 - ARCH-10: Signal result validation centralized in `_validate_signal_result()`
 - ARCH-11: Confidence caps enforced via `max_confidence` in signal registry
 - ARCH-12: Signal failure tracking and health surfacing (in progress, 2026-03-16)
@@ -205,6 +210,8 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - REF-7: Removed legacy `trigger_state.json` migration in `signal_engine.py` (done 2026-03-12)
 - REF-9: Consolidate 7 raw JSONL appends to `atomic_append_jsonl()` (in progress, 2026-03-16)
 - REF-10: Remove dead `fin_evolve.py` fallback wrappers (in progress, 2026-03-16)
+- REF-16: 1,910 ruff auto-fix violations (datetime.UTC, PEP 604, PEP 585, import sorting) — fixed 2026-03-19
+- REF-17: 28 manual ruff fixes (B007 unused loop vars, B904 raise-from, SIM103 needless bool) — fixed 2026-03-19
 - FEAT-2: Signal failure rate in accuracy reports (in progress, 2026-03-16)
 - TEST coverage: candlestick (57 tests), fibonacci (51 tests), structure (32 tests) — formerly zero
 - BUG-71/73: Golddigger/elongir config loading used raw `json.load()` — fixed 2026-03-18
