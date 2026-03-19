@@ -279,15 +279,15 @@ def run(force_report=False, active_symbols=None):
 
     _run_start = time.monotonic()
 
-    # --- Phase 1: Parallel data collection (I/O-bound) ---
-    # Fetch timeframes for all active tickers concurrently.
-    # Rate limiters and cache locks are already thread-safe.
+    # --- Fully parallel: data collection + signal generation per ticker ---
+    # Each ticker: fetch timeframes, compute indicators, generate signals — all threaded.
+    # Rate limiters, cache locks, and GPU gate are already thread-safe.
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     active_items = [(name, source) for name, source in SYMBOLS.items() if name in active]
 
-    def _collect_ticker_data(name, source):
-        """Collect timeframes + extract indicators for one ticker. Thread-safe."""
+    def _process_ticker(name, source):
+        """Fetch data + generate signals for one ticker. Fully thread-safe."""
         try:
             t0 = time.monotonic()
             tfs = collect_timeframes(source)
@@ -303,65 +303,21 @@ def run(force_report=False, active_symbols=None):
                 ind = compute_indicators(now_df)
 
             if ind is None:
-                return name, None, None, None, 0.0
+                logger.info("%s: insufficient data, skipping", name)
+                return name, None
 
-            return name, tfs, ind, now_df, tf_elapsed
-        except Exception as e:
-            logger.warning("%s: data collection failed: %s", name, e)
-            return name, None, None, None, 0.0
-
-    # Cap workers at 8 to avoid overwhelming rate limiters
-    max_workers = min(len(active_items), 8)
-    collected = {}
-    _fetch_start = time.monotonic()
-
-    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ticker") as pool:
-        futures = {
-            pool.submit(_collect_ticker_data, name, source): name
-            for name, source in active_items
-        }
-        for future in as_completed(futures):
-            name, tfs, ind, now_df, tf_elapsed = future.result()
-            if tfs is not None and ind is not None:
-                collected[name] = {
-                    "tfs": tfs, "ind": ind, "now_df": now_df, "tf_elapsed": tf_elapsed,
-                }
-            else:
-                signals_failed += 1
-
-    _fetch_elapsed = time.monotonic() - _fetch_start
-    logger.info(
-        "Parallel data fetch: %d tickers in %.1fs (was sequential)",
-        len(collected), _fetch_elapsed,
-    )
-
-    # --- Phase 2: Sequential signal generation (CPU-bound + GPU-locked LLM) ---
-    for name, data in collected.items():
-        tfs = data["tfs"]
-        ind = data["ind"]
-        now_df = data["now_df"]
-        _tf_elapsed = data["tf_elapsed"]
-
-        try:
-            tf_data[name] = tfs
             price = ind["close"]
-            prices_usd[name] = price
 
-            _sig_start = time.monotonic()
+            sig_start = time.monotonic()
             action, conf, extra = generate_signal(
                 ind, ticker=name, config=config, timeframes=tfs, df=now_df
             )
-            _sig_elapsed = time.monotonic() - _sig_start
+            sig_elapsed = time.monotonic() - sig_start
+            total_elapsed = time.monotonic() - t0
             logger.info(
                 "%s: timing: tf=%.1fs sig=%.1fs total=%.1fs",
-                name, _tf_elapsed, _sig_elapsed, _tf_elapsed + _sig_elapsed,
+                name, tf_elapsed, sig_elapsed, total_elapsed,
             )
-            signals[name] = {
-                "action": action,
-                "confidence": conf,
-                "indicators": ind,
-                "extra": extra,
-            }
 
             extra_str = ""
             if extra:
@@ -394,7 +350,6 @@ def run(force_report=False, active_symbols=None):
                 "%s: $%s | RSI %.0f | MACD %+.1f%s%s | %s (%.0f%%)",
                 name, f"{price:,.2f}", ind['rsi'], ind['macd_hist'], extra_str, enh_str, action, conf * 100
             )
-            signals_ok += 1
 
             for label, entry in tfs[1:]:
                 if "error" in entry:
@@ -406,19 +361,41 @@ def run(force_report=False, active_symbols=None):
                         label, entry['action'], entry['confidence'] * 100, ei['rsi'], ei['macd_hist']
                     )
 
-        except KeyboardInterrupt:
-            logger.warning("%s: interrupted, stopping ticker processing", name)
-            signals_failed += 1
-            break
+            return name, {
+                "tfs": tfs, "ind": ind, "now_df": now_df, "price": price,
+                "action": action, "confidence": conf, "extra": extra,
+            }
         except Exception as e:
-            signals_failed += 1
             logger.error("%s: %s", name, e, exc_info=True)
+            return name, None
+
+    max_workers = min(len(active_items), 8)
+
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ticker") as pool:
+        futures = {
+            pool.submit(_process_ticker, name, source): name
+            for name, source in active_items
+        }
+        for future in as_completed(futures):
+            name, result = future.result()
+            if result is not None:
+                tf_data[name] = result["tfs"]
+                prices_usd[name] = result["price"]
+                signals[name] = {
+                    "action": result["action"],
+                    "confidence": result["confidence"],
+                    "indicators": result["ind"],
+                    "extra": result["extra"],
+                }
+                signals_ok += 1
+            else:
+                signals_failed += 1
 
     _run_elapsed = time.monotonic() - _run_start
     logger.info(
-        "Signal loop done: %d OK, %d failed in %.1fs (%.1fs/ticker avg, fetch=%.1fs)",
+        "Signal loop done: %d OK, %d failed in %.1fs (%.1fs/ticker avg)",
         signals_ok, signals_failed, _run_elapsed,
-        _run_elapsed / max(signals_ok + signals_failed, 1), _fetch_elapsed,
+        _run_elapsed / max(signals_ok + signals_failed, 1),
     )
 
     # --- Cycle failure alert via Telegram ---
