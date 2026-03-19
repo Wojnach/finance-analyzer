@@ -77,20 +77,26 @@ def _is_crypto(ticker):
     return ticker.upper().replace("-USD", "") in CRYPTO_TICKERS
 
 
-def _fetch_crypto_headlines(ticker="BTC", limit=20):
+def _fetch_crypto_headlines(ticker="BTC", limit=20, *, cryptocompare_api_key=None):
     category = TICKER_CATEGORIES.get(ticker.upper(), ticker.upper())
     url = f"{CRYPTOCOMPARE_URL}&categories={category}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    if cryptocompare_api_key:
+        headers["Authorization"] = f"Apikey {cryptocompare_api_key}"
     data = fetch_json(
         url,
-        headers={"User-Agent": "Mozilla/5.0"},
+        headers=headers,
         timeout=15,
         label="crypto_headlines",
     )
     if data is None:
-        return []
+        return _fetch_crypto_headlines_yahoo_fallback(ticker, limit)
+    if isinstance(data, dict) and data.get("Response") == "Error":
+        logger.warning("[CryptoCompare] API error: %s", data.get("Message", "unknown"))
+        return _fetch_crypto_headlines_yahoo_fallback(ticker, limit)
     raw = data.get("Data", [])
     articles = list(raw)[:limit] if isinstance(raw, list) else []
-    return [
+    parsed = [
         {
             "title": a["title"],
             "source": a.get("source", "unknown"),
@@ -100,6 +106,29 @@ def _fetch_crypto_headlines(ticker="BTC", limit=20):
         }
         for a in articles
     ]
+    if not parsed:
+        return _fetch_crypto_headlines_yahoo_fallback(ticker, limit)
+    return parsed
+
+
+# Mapping from short crypto ticker to yfinance symbol for fallback
+_CRYPTO_YFINANCE_MAP = {"BTC": "BTC-USD", "ETH": "ETH-USD"}
+
+
+def _fetch_crypto_headlines_yahoo_fallback(ticker, limit=20):
+    """Fallback: fetch crypto headlines via yfinance when CryptoCompare fails."""
+    yf_symbol = _CRYPTO_YFINANCE_MAP.get(ticker.upper())
+    if not yf_symbol:
+        return []
+    try:
+        articles = _fetch_yahoo_headlines(yf_symbol, limit=limit)
+        if articles:
+            logger.info("[CryptoCompare] fallback to Yahoo Finance for %s: %d articles",
+                        ticker, len(articles))
+        return articles
+    except Exception as e:
+        logger.debug("[Yahoo News] crypto fallback error for %s: %s", ticker, e)
+        return []
 
 
 def _fetch_yahoo_headlines(ticker, limit=10):
@@ -406,7 +435,8 @@ def _log_ab_result(ticker, primary_result, shadow_results):
 # Main entry point
 # ---------------------------------------------------------------------------
 
-def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None) -> dict:
+def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
+                   *, cryptocompare_api_key=None) -> dict:
     """Get sentiment for a ticker using primary model + shadow A/B models.
 
     Primary model (votes): CryptoBERT (crypto) or Trading-Hero-LLM (stocks)
@@ -419,7 +449,9 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None) -> dict:
     is_crypto = _is_crypto(short)
 
     if is_crypto:
-        articles = _fetch_crypto_headlines(short)
+        articles = _fetch_crypto_headlines(
+            short, cryptocompare_api_key=cryptocompare_api_key,
+        )
         model_script = CRYPTOBERT_SCRIPT
         model_name = "CryptoBERT"
     else:

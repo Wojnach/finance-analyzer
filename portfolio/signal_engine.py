@@ -536,13 +536,17 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     if ticker:
         short_ticker = ticker.replace("-USD", "")
         try:
+            from functools import partial
+
             from portfolio.sentiment import get_sentiment
 
             newsapi_key = (config or {}).get("newsapi_key", "")
+            cc_api_key = (config or {}).get("cryptocompare_api_key", "") or None
+            _sent_fn = partial(get_sentiment, cryptocompare_api_key=cc_api_key)
             sent = _cached(
                 f"sentiment_{short_ticker}",
                 SENTIMENT_TTL,
-                get_sentiment,
+                _sent_fn,
                 short_ticker,
                 newsapi_key or None,
                 social_posts or None,
