@@ -813,7 +813,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             }
             update_signal_health_batch(health_results)
         except Exception:
-            pass  # health tracking is best-effort
+            logger.debug("Signal health tracking failed", exc_info=True)
     else:
         for sig_name in _enhanced_entries:
             votes[sig_name] = "HOLD"

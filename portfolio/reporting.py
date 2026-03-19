@@ -833,7 +833,7 @@ def _write_compact_summary(summary):
                 "total_scored": system_lessons.get("total_verdicts", 0),
             }
     except Exception:
-        pass
+        logger.debug("Failed to load system lessons for compact summary", exc_info=True)
 
     # Add signal health summary (failure rates for each signal)
     try:
@@ -848,7 +848,7 @@ def _write_compact_summary(summary):
             if degraded:
                 compact["signal_health"] = degraded
     except Exception:
-        pass
+        logger.debug("Failed to load signal health for compact summary", exc_info=True)
 
     _atomic_write_json(COMPACT_SUMMARY_FILE, compact)
 

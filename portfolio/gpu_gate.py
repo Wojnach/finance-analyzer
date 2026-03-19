@@ -38,7 +38,7 @@ def get_vram_usage() -> dict:
                     "gpu_util_pct": int(parts[3]),
                 }
     except Exception:
-        pass
+        logger.debug("GPU info query failed", exc_info=True)
     return None
 
 
