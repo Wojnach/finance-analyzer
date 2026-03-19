@@ -220,6 +220,12 @@ def _run_post_cycle(config):
         maybe_precompute_metals(config)
     except Exception as e_metals:
         logger.warning("Metals precompute failed: %s", e_metals)
+    # Oil deep context precompute (every 2h, self-checking)
+    try:
+        from portfolio.oil_precompute import maybe_precompute_oil
+        maybe_precompute_oil(config)
+    except Exception as e_oil:
+        logger.warning("Oil precompute failed: %s", e_oil)
     # Prune unbounded JSONL files to prevent disk exhaustion (BUG-59)
     try:
         from portfolio.file_utils import prune_jsonl
