@@ -1,136 +1,134 @@
 # Improvement Plan
 
-Updated: 2026-03-18
-Branch: improve/auto-session-2026-03-18
+Updated: 2026-03-19
+Branch: improve/auto-session-2026-03-19
 
-Previous sessions: 2026-03-05 through 2026-03-17.
+Previous sessions: 2026-03-05 through 2026-03-18.
 
-## Session Plan (2026-03-18)
+## Session Plan (2026-03-19)
 
-### Theme: Lint Cleanup & Subsystem IO Hardening
+### Theme: Python Modernization & Final Bug Sweep
 
-Previous sessions completed silent exception elimination (BUG-56 to BUG-70) and IO safety
-sweeps across the core 23 portfolio modules. This session addresses two remaining gaps:
+Previous sessions completed IO safety hardening (BUG-47 through BUG-74), silent exception
+elimination (BUG-56 through BUG-70), and initial lint cleanup (REF-13/14). This session
+addresses two remaining gaps:
 
-1. **229 ruff lint violations** across `portfolio/` — 94 unused imports, 15 unused variables,
-   15 empty f-strings, and more. These are auto-fixable in bulk plus a handful of manual fixes.
-2. **Golddigger & elongir subsystems** merged recently but bypass the IO safety patterns
-   established in the March sessions (raw `json.load(open(...))`, direct Telegram API calls,
-   duplicated config loading).
+1. **494 auto-fixable ruff violations** — Python 3.11+ modernization (datetime.UTC, PEP 604
+   union types, PEP 585 generics, import sorting) and style cleanups (redundant open modes,
+   deprecated imports, extraneous parentheses).
+2. **6 real bugs** found by ruff B/SIM rules + 5 remaining silent exception handlers.
 
 ### 1) Bugs & Problems Found
 
-#### BUG-71 (P2): Golddigger runner uses raw `json.load(open(...))` for config
+#### BUG-80 (P3): Duplicate value in sentiment.py stopwords set
 
-- **File**: `portfolio/golddigger/runner.py:59-61`
-- **Issue**: Uses `with open(config_path) as f: return json.load(f)` instead of
-  `load_json()` from file_utils. If config.json is corrupt or partially written, this
-  crashes instead of returning a default.
-- **Fix**: Use `load_json()` from `portfolio.file_utils`, raising explicitly if None.
-- **Impact**: Low. Consistency with the rest of the codebase.
+- **File**: `portfolio/sentiment.py:336,340`
+- **Issue**: `"could"` appears twice in the `_STOPWORDS` set literal. No functional impact
+  (sets deduplicate), but indicates a copy-paste error.
+- **Fix**: Remove the duplicate entry.
+- **Impact**: Zero functional. Code cleanliness.
 
-#### BUG-72 (P2): Golddigger sends Telegram directly instead of via message_store
+#### BUG-81 (P3): Missing `raise ... from` in avanza_client.py
 
-- **File**: `portfolio/golddigger/runner.py:67-79`
-- **Issue**: `_send_telegram()` calls `requests.post()` to the Telegram API directly.
-  This bypasses `message_store.send_or_store()` which provides: (a) JSONL message logging,
-  (b) Markdown escaping, (c) 4096 char limit handling. Elongir correctly uses `send_or_store`.
-- **Fix**: Replace direct API call with `from portfolio.message_store import send_or_store`.
-- **Impact**: Medium. Golddigger notifications not logged to dashboard.
+- **File**: `portfolio/avanza_client.py:89`
+- **Issue**: `raise ImportError(...)` inside `except ImportError:` without `from err` or
+  `from None`. This obscures the original traceback.
+- **Fix**: Change to `raise ImportError(...) from None`.
+- **Impact**: Low. Better debugging experience on import failures.
 
-#### BUG-73 (P2): Elongir runner uses raw `json.load(open(...))` for config
+#### BUG-82 (P3): Unused imports in claude_gate.py
 
-- **File**: `portfolio/elongir/runner.py:59-60`
-- **Issue**: Same as BUG-71 but in the elongir subsystem.
-- **Fix**: Same pattern.
-- **Impact**: Low.
-
-#### BUG-74 (P2): Golddigger data_provider uses raw `json.load(open(...))`
-
-- **File**: `portfolio/golddigger/data_provider.py:376-377`
-- **Issue**: Raw file read for cached data.
-- **Fix**: Use `load_json()`.
-- **Impact**: Low.
-
-#### BUG-75 (P3): Dead variables in signal_engine.py confidence penalties
-
-- **File**: `portfolio/signal_engine.py:408-409`
-- **Issue**: `buy_count` and `sell_count` assigned but never used.
-- **Fix**: Remove the assignments.
+- **File**: `portfolio/claude_gate.py:27,31`
+- **Issue**: `platform` and `timedelta` imported but never used.
+- **Fix**: Remove both imports.
 - **Impact**: Zero.
 
-#### BUG-76 (P3): Dead variable in trigger.py
+#### BUG-83 (P3): 5 remaining silent `except Exception: pass` handlers
 
-- **File**: `portfolio/trigger.py:69`
-- **Issue**: `last_trigger` assigned but never used.
-- **Fix**: Remove the assignment.
-- **Impact**: Zero.
+- **Files**:
+  - `portfolio/gpu_gate.py:40-41` — lock release failure
+  - `portfolio/telegram_notifications.py:69-70` — fallback send failure
+  - `portfolio/signal_engine.py:816-817` — health tracking best-effort
+  - `portfolio/reporting.py:834-835` — weekly digest failure
+  - `portfolio/reporting.py:849-850` — daily digest failure
+- **Issue**: Exceptions swallowed without any logging. While these are all best-effort
+  code paths, silent failures make debugging harder.
+- **Fix**: Add `logger.debug()` or `logger.warning()` to each handler.
+- **Impact**: Low. Better observability.
 
-#### BUG-77 (P3): Dead variable and reimport in telegram_poller.py
+#### BUG-84 (P3): ADX not cached in indicator cache (was BUG-54)
 
-- **File**: `portfolio/telegram_poller.py:113,136`
-- **Issue**: `text_lower` unused. `json` reimported at line 136.
-- **Fix**: Remove both.
-- **Impact**: Zero.
-
-#### BUG-78 (P3): claude_gate.py silent exception without logging
-
-- **File**: `portfolio/claude_gate.py:68`
-- **Issue**: `except Exception:` returns True without logging.
-- **Fix**: Add `as e` and `logger.debug(...)`.
-- **Impact**: Low.
-
-#### BUG-79 (P3): avanza_tracker.py silent exception without logging
-
-- **File**: `portfolio/avanza_tracker.py:55`
-- **Issue**: `except Exception:` returns {} without logging.
-- **Fix**: Add `as e` and `logger.debug(...)`.
-- **Impact**: Low.
+- **File**: `portfolio/signal_engine.py:361`
+- **Issue**: `_compute_adx(df)` is called fresh every time `apply_confidence_penalties()`
+  runs. ADX computation involves EMA smoothing over the full DataFrame. While not expensive
+  per-call (~1ms), it adds up across 20 tickers × 7 timeframes = 140 calls/cycle.
+- **Fix**: Cache ADX result per (ticker, cycle) using `_cached()`.
+- **Impact**: Low. Performance improvement, ~140ms saved per cycle.
 
 ### 2) Architecture Improvements
 
-#### ARCH-16: Golddigger/elongir duplicated config loading (DEFERRED)
-
-- Both have nearly identical `_load_config()` functions.
-- Skip for this session — duplication is localized, subsystems may diverge.
+None planned. The codebase architecture is solid after 14 sessions of hardening.
+Remaining open items (ARCH-12 signal failure tracking, ARCH-13 flat-market accuracy)
+are feature work, not cleanup — they belong in dedicated feature branches.
 
 ### 3) Refactoring TODOs
 
-#### REF-13: ruff --fix auto-cleanup (111 auto-fixable issues)
+#### REF-16: ruff auto-fix (494 auto-fixable violations)
 
-- Run `ruff check --fix` to auto-remove 94 unused imports, 15 empty f-strings, 2 reimports.
-- Zero behavioral change.
+Run `ruff check --fix` to auto-modernize:
+- **UP017** (199): `datetime.timezone.utc` → `datetime.UTC` (Python 3.11+)
+- **UP045** (149): `Optional[X]` → `X | None` (PEP 604)
+- **I001** (75): unsorted imports
+- **UP006** (44): `Dict`/`List`/`Tuple` → `dict`/`list`/`tuple` (PEP 585)
+- **UP015** (10): redundant open modes (`open(f, "r")` → `open(f)`)
+- **UP035** (8): deprecated typing imports
+- **SIM114** (6): if-with-same-arms
+- **UP024** (2): `OSError` alias cleanup
+- **UP032** (2): unnecessary f-string
+- **UP034** (1): extraneous parentheses
+- **E401** (1): multiple imports on one line
+- **SIM117** (1): collapsible with-statements
+- **B033** (1): duplicate set value
 
-#### REF-14: Manual dead variable removal (15 F841 violations)
+Zero behavioral change. All are syntactic modernization.
 
-- Remove unused variable assignments across ~8 modules.
-- Must verify RHS has no side effects before removing.
+#### REF-17: Manual ruff fixes (non-auto-fixable)
 
-#### REF-15: Golddigger Telegram via message_store
+- **B904** (1): Add `from None` to re-raised ImportError
+- **SIM103** (1): Simplify needless bool return
+- **B007** (9): Prefix unused loop variables with `_`
 
-- Replace `_send_telegram()` with `send_or_store()` matching elongir's pattern.
+### 4) What We're NOT Doing
 
-### 4) Dependency/Ordering
+- **Not fixing E402** (20 issues): Intentional conditional imports at module level.
+- **Not fixing E741** (6 issues): Mathematical variable names (l, I, O).
+- **Not fixing SIM105** (11 issues): `try/except: pass` → `contextlib.suppress()`.
+  These are all best-effort cleanup handlers where the existing pattern is clearer.
+- **Not fixing SIM102** (8 issues): Collapsible-if. These are intentionally split for
+  readability (e.g., separate early-return checks).
+- **Not fixing SIM115** (3 issues): `file_utils.py` open-without-context-manager.
+  The try/except FileNotFoundError pattern requires this structure.
+- **Not fixing B023** (1 issue): False positive — `_vote_str()` in analyze.py is called
+  immediately within the same loop iteration, not deferred.
 
-**Batch 1** (REF-13): ruff auto-fix
-- Files: ~40 portfolio modules
+### 5) Dependency/Ordering
+
+**Batch 1** (REF-16): ruff auto-fix
+- Files: ~80+ portfolio modules
+- Risk: Near-zero (all syntactic, tested by existing suite)
+- Commit: `refactor: ruff auto-fix Python 3.11 modernization (494 fixes)`
+
+**Batch 2** (BUG-80/81/82 + REF-17): Manual bug fixes
+- Files: sentiment.py, avanza_client.py, claude_gate.py, + ~5 modules for B007/SIM103
 - Risk: Near-zero
-- Commit: `refactor: ruff auto-fix unused imports and f-strings`
+- Commit: `fix: manual ruff fixes — duplicate set value, raise-from, unused imports`
 
-**Batch 2** (REF-14 + BUG-75/76/77): Manual dead variable removal
-- Files: signal_engine.py, trigger.py, telegram_poller.py, smart_money.py, portfolio_validator.py
+**Batch 3** (BUG-83): Silent exception logging
+- Files: gpu_gate.py, telegram_notifications.py, signal_engine.py, reporting.py
 - Risk: Near-zero
-- Commit: `fix: remove dead variable assignments`
+- Commit: `fix: add logging to 5 remaining silent exception handlers`
 
-**Batch 3** (BUG-71/72/73/74 + REF-15 + BUG-78/79): Subsystem IO hardening
-- Files: golddigger/runner.py, golddigger/data_provider.py, elongir/runner.py, claude_gate.py, avanza_tracker.py
-- Risk: Low
-- Commit: `fix: harden golddigger/elongir IO + add missing exception logging`
-
-### 5) What We're NOT Doing
-
-- **Not fixing E501 line-too-long** (73 issues): Ignored in ruff config.
-- **Not fixing E402 module-import-not-at-top** (20 issues): Intentional conditional imports.
-- **Not fixing E741 ambiguous-variable-name** (6 issues): Mathematical variables.
-- **Not refactoring config loading duplication** (ARCH-16): Localized, may diverge.
-- **Not adding new features**: Focus is purely on cleanup and hardening.
+**Batch 4** (BUG-84): ADX caching
+- Files: signal_engine.py
+- Risk: Low (cache key must include ticker to avoid cross-contamination)
+- Commit: `perf: cache ADX computation per ticker per cycle`
