@@ -581,7 +581,7 @@ class TestGolddiggerBot:
             stop_price=95, take_profit_price=108,
         )
         # Prime signal engine
-        for i in range(5):
+        for _i in range(5):
             bot.signal.update(self.make_snap(gold=2000))
 
         # Bid drops below stop (100 * 0.95 = 95)
@@ -601,7 +601,7 @@ class TestGolddiggerBot:
             entry_gold=2000, entry_time="2026-03-09T09:30:00",
             stop_price=95, take_profit_price=108,
         )
-        for i in range(5):
+        for _i in range(5):
             bot.signal.update(self.make_snap(gold=2000))
 
         # Bid above TP (100 * 1.08 = 108)

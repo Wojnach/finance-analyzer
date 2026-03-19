@@ -132,9 +132,7 @@ class TestMinistralUpgrade:
             if "ministral-8b" in path.lower() or "Ministral-8B" in path:
                 return True
             # LoRA path
-            if "cryptotrader" in path.lower():
-                return True
-            return False
+            return "cryptotrader" in path.lower()
 
         with patch.dict("sys.modules", {"llama_cpp": mock_llama_module}):
             with patch("os.path.exists", side_effect=path_exists):

@@ -63,9 +63,7 @@ def _vote_correct(vote, change_pct, min_change_pct=None):
         return None  # neutral — price didn't move enough to judge
     if vote == "BUY" and change_pct > 0:
         return True
-    if vote == "SELL" and change_pct < 0:
-        return True
-    return False
+    return bool(vote == "SELL" and change_pct < 0)
 
 
 def signal_accuracy(horizon="1d", since=None):
@@ -294,7 +292,7 @@ def signal_activation_rates():
 
     for entry in entries:
         tickers = entry.get("tickers", {})
-        for ticker, tdata in tickers.items():
+        for _ticker, tdata in tickers.items():
             signals = tdata.get("signals", {})
             for sig_name in SIGNAL_NAMES:
                 vote = signals.get(sig_name)
@@ -396,7 +394,7 @@ def _count_entries_with_outcomes(entries, horizon):
     count = 0
     for entry in entries:
         outcomes = entry.get("outcomes", {})
-        for ticker, horizons in outcomes.items():
+        for _ticker, horizons in outcomes.items():
             if horizons.get(horizon):
                 count += 1
                 break

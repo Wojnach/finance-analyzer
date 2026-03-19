@@ -861,7 +861,7 @@ class SwingTrader:
             return
 
         lines = [f"*SWING #{self.check_count}* {len(positions)} position(s)"]
-        for pid, pos in positions.items():
+        for _pid, pos in positions.items():
             data = fetch_price(self.page, pos["ob_id"], pos["api_type"])
             bid = data.get("bid", 0) if data else 0
             pnl = ((bid / pos["entry_price"]) - 1) * 100 if pos["entry_price"] > 0 else 0

@@ -121,7 +121,7 @@ class TestTierConfig:
 
     def test_each_tier_has_label(self):
         """Each tier has a human-readable label."""
-        for tier_id, cfg in TIER_CONFIG.items():
+        for _tier_id, cfg in TIER_CONFIG.items():
             assert "label" in cfg
             assert isinstance(cfg["label"], str)
             assert len(cfg["label"]) > 0

@@ -727,7 +727,7 @@ def _build_telegram_mode_b(actionable, hold_count, sell_count, patient_state, bo
             lines.append(f"`  Model view: {pred['recommendation']} ({pred['thesis'][:40]})`")
 
     # Non-focus tickers - compact grid
-    for ticker, sig in actionable.items():
+    for ticker, _sig in actionable.items():
         if ticker in focus_tickers:
             continue
         price = prices_usd.get(ticker, 0)

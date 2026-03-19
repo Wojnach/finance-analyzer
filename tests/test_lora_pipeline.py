@@ -300,11 +300,11 @@ class TestBalanceClasses:
 
     def test_uses_min_class_count(self):
         examples = []
-        for i in range(100):
+        for _i in range(100):
             examples.append({"label": "BUY", "messages": []})
-        for i in range(20):
+        for _i in range(20):
             examples.append({"label": "SELL", "messages": []})
-        for i in range(50):
+        for _i in range(50):
             examples.append({"label": "HOLD", "messages": []})
         balanced = balance_classes(examples, target_per_class=1000)
         assert len(balanced) == 60

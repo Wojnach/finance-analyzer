@@ -354,7 +354,7 @@ class TestFloatingPointPrecision:
         price = 100.0  # simple price for clarity
 
         # Execute 100 buy/sell cycles
-        for i in range(100):
+        for _i in range(100):
             _execute_buy(pf, "TEST", price, 0.10, is_crypto=True)
             _execute_sell(pf, "TEST", 1.00, price, is_crypto=True)
 
@@ -409,7 +409,7 @@ class TestHoldingsIntegrity:
         _execute_buy(pf, "BTC-USD", 680000.0, 0.15)
         _execute_sell(pf, "BTC-USD", 0.50, 690000.0)
 
-        for ticker, holding in pf["holdings"].items():
+        for _ticker, holding in pf["holdings"].items():
             assert holding["shares"] >= 0
 
     def test_patient_partial_sell_keeps_ticker(self):

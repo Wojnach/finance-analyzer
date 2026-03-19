@@ -100,7 +100,7 @@ class TestBug26HeartbeatAfterInitialRun:
         lines = source.split("\n")
         found_initial_run = False
         found_heartbeat_after = False
-        for i, line in enumerate(lines):
+        for _i, line in enumerate(lines):
             if "run(force_report=True)" in line:
                 found_initial_run = True
             if found_initial_run and "heartbeat" in line and "write_text" in line:

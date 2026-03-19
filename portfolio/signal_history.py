@@ -74,7 +74,7 @@ def update_history(ticker, votes_dict):
         by_ticker[e.get("ticker", "unknown")].append(e)
 
     trimmed = []
-    for t, t_entries in by_ticker.items():
+    for _t, t_entries in by_ticker.items():
         trimmed.extend(t_entries[-MAX_ENTRIES_PER_TICKER:])
 
     # Sort by timestamp for stable ordering

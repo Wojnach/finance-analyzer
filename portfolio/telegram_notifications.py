@@ -113,7 +113,7 @@ def _maybe_send_alert(config, signals, prices_usd, fx_rate, state, reasons, tf_d
     if hold_count > 0:
         lines.append(f"_+ {hold_count} HOLD_")
     fg_val = ""
-    for ticker, sig in signals.items():
+    for _ticker, sig in signals.items():
         extra = sig.get("extra", {})
         if "fear_greed" in extra:
             fg_class = escape_markdown_v1(extra.get("fear_greed_class", ""))

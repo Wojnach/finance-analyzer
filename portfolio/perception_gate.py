@@ -66,7 +66,7 @@ def should_invoke(reasons, tier, config=None):
 
     max_confidence = 0.0
     non_hold_count = 0
-    for ticker, sig in signals.items():
+    for _ticker, sig in signals.items():
         if not isinstance(sig, dict):
             continue
         action = sig.get("action", "HOLD")

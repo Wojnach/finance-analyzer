@@ -327,7 +327,7 @@ def leave_n_out_validation(
     rng = random.Random(seed)
     all_bt_days = []
 
-    for i in range(iterations):
+    for _i in range(iterations):
         # Pick N random days to hold out (must have enough history before them)
         eligible_indices = list(range(10, len(day_results)))  # skip first 10 for min history
         if len(eligible_indices) < n:

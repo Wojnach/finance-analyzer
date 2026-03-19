@@ -3311,7 +3311,7 @@ def _make_autonomous_prediction(signals_data, llm_data):
     """Generate an autonomous prediction from signals + LLM for accuracy tracking."""
     directions = []  # (direction, weight)
 
-    for ticker, sig in signals_data.items():
+    for _ticker, sig in signals_data.items():
         action = sig.get("action", "HOLD")
         weight = sig.get("weighted_confidence")
         try:
@@ -4278,7 +4278,7 @@ Positions: {pos_summary}{prob_summary}""")
 
                 # Check momentum exit
                 momentum_exits = check_momentum_exit(POSITIONS, prices, price_history)
-                for mkey, mreason in momentum_exits:
+                for mkey, _mreason in momentum_exits:
                     if POSITIONS[mkey].get("active"):
                         mbid = prices.get(mkey, {}).get("bid") or 0
                         if mbid > 0:

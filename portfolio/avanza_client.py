@@ -88,7 +88,7 @@ def get_client():
     except ImportError:
         raise ImportError(
             "avanza-api package not installed. Run: pip install avanza-api"
-        )
+        ) from None
     creds = _load_credentials()
     _client = Avanza({
         "username": creds["username"],

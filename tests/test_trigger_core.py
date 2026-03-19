@@ -250,7 +250,7 @@ class TestSignalFlipSustained:
         # Now sustain HOLD for 3 consecutive cycles.
         # HOLD does not trigger consensus (only BUY/SELL do), so triggered action
         # in state["last"]["signals"] stays BUY. After 3 HOLD cycles, sustained flip fires.
-        for i in range(SUSTAINED_CHECKS - 1):
+        for _i in range(SUSTAINED_CHECKS - 1):
             _suppress_cooldown(sf)
             check_triggers({"BTC-USD": _sig("HOLD")}, prices, {}, {})
 

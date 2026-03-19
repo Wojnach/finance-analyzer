@@ -43,7 +43,7 @@ def _make_ohlcv_df(n=50, close_start=100.0, trend="flat", volume_start=1000.0):
     dates = pd.date_range("2026-01-01", periods=n, freq="h")
     closes = []
     c = close_start
-    for i in range(n):
+    for _i in range(n):
         if trend == "up":
             c += 0.5
         elif trend == "down":

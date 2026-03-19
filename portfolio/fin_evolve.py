@@ -658,7 +658,7 @@ def _compute_cross_asset(scored):
 
     # Gold bullish -> silver follow
     gold_bull_silver = []
-    for ts, tickers in by_ts.items():
+    for _ts, tickers in by_ts.items():
         gold = tickers.get("XAU-USD")
         silver = tickers.get("XAG-USD")
         if (gold and silver
@@ -676,7 +676,7 @@ def _compute_cross_asset(scored):
 
     # BTC bullish -> ETH follow
     btc_bull_eth = []
-    for ts, tickers in by_ts.items():
+    for _ts, tickers in by_ts.items():
         btc = tickers.get("BTC-USD")
         eth = tickers.get("ETH-USD")
         if (btc and eth

@@ -592,14 +592,14 @@ def get_risk_summary(positions, prices, signal_data=None, llm_signals=None):
         score += 25
 
     # Add MC stop probability risk
-    for key, mc_data in result.get("monte_carlo", {}).items():
+    for _key, mc_data in result.get("monte_carlo", {}).items():
         if isinstance(mc_data, dict):
             p_stop = mc_data.get("p_stop_8h", 0)
             if isinstance(p_stop, (int, float)) and p_stop > 0.2:
                 score += 15  # significant stop risk
 
     # Trade guard blocks add risk awareness
-    for key, warns in guards.items():
+    for _key, warns in guards.items():
         if warns:
             score += 5
 

@@ -616,7 +616,7 @@ class TestCollectTimeframes:
 
         non_now_entries = [(label, data) for label, data in results if label != "Now"]
         assert len(non_now_entries) > 0
-        for label, data in non_now_entries:
+        for _label, data in non_now_entries:
             if "error" not in data:
                 assert data["action"] == "BUY"
                 assert data["confidence"] == 0.75
@@ -688,7 +688,7 @@ class TestCollectTimeframes:
 
         # All entries should have error
         assert len(results) == len(TIMEFRAMES)
-        for label, data in results:
+        for _label, data in results:
             assert "error" in data
             assert "API down" in data["error"]
 
