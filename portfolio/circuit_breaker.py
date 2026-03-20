@@ -31,6 +31,7 @@ class CircuitBreaker:
         self._failure_count = 0
         self._last_failure_time: float | None = None
         self._lock = threading.Lock()
+        self._half_open_probe_sent = False  # BUG-93: Only one request in HALF_OPEN
 
     @property
     def state(self) -> State:
@@ -42,6 +43,7 @@ class CircuitBreaker:
             if self._state == State.HALF_OPEN:
                 logger.info("Circuit breaker '%s': HALF_OPEN -> CLOSED (recovery confirmed)", self.name)
                 self._state = State.CLOSED
+                self._half_open_probe_sent = False  # BUG-93: Reset probe flag
             self._failure_count = 0
 
     def record_failure(self) -> None:
@@ -56,6 +58,7 @@ class CircuitBreaker:
                     self.name, self._failure_count,
                 )
                 self._state = State.OPEN
+                self._half_open_probe_sent = False  # BUG-93: Reset probe flag
             elif self._state == State.CLOSED and self._failure_count >= self.failure_threshold:
                 logger.warning(
                     "Circuit breaker '%s': CLOSED -> OPEN (threshold %d reached)",
@@ -79,11 +82,15 @@ class CircuitBreaker:
                         self.name, elapsed,
                     )
                     self._state = State.HALF_OPEN
+                    self._half_open_probe_sent = True  # BUG-93: This IS the probe
                     return True
                 return False
 
-            # HALF_OPEN — allow the probe request
-            return True
+            # BUG-93: HALF_OPEN — allow exactly one probe request
+            if not self._half_open_probe_sent:
+                self._half_open_probe_sent = True
+                return True
+            return False
 
     def get_status(self) -> dict:
         """Return current circuit breaker status."""

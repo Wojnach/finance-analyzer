@@ -70,7 +70,7 @@ def write_agent_summary(
 
     total = portfolio_value(state, prices_usd, fx_rate)
     initial = state.get("initial_value_sek", 500000)
-    pnl_pct = ((total - initial) / initial) * 100
+    pnl_pct = ((total - initial) / initial) * 100 if initial else 0  # BUG-99: zero guard
 
     summary = {
         "timestamp": datetime.now(UTC).isoformat(),
@@ -650,9 +650,12 @@ def write_agent_summary(
     # Surface module warnings to Layer 2 so it knows what context is missing
     if _module_warnings:
         summary["_module_warnings"] = _module_warnings
-        # Persist to health state for dashboard/monitoring visibility
-        from portfolio.health import update_module_failures
-        update_module_failures(_module_warnings)
+        # BUG-89: Persist to health state, but don't let a failure here crash summary output
+        try:
+            from portfolio.health import update_module_failures
+            update_module_failures(_module_warnings)
+        except Exception:
+            logger.warning("[reporting] update_module_failures failed", exc_info=True)
 
     # Aggregate signal health across all tickers (ARCH-12: signal failure surfacing)
     all_failures = []
@@ -1000,7 +1003,7 @@ def _write_tier1_summary(summary):
             "rsi": sig.get("rsi", 0),
             "regime": sig.get("regime", "unknown"),
             "atr_pct": sig.get("atr_pct", 0),
-            "votes": f"{extra.get('_buy_count', 0)}B/{extra.get('_sell_count', 0)}S/{extra.get('_voters', 0) - extra.get('_buy_count', 0) - extra.get('_sell_count', 0)}H",
+            "votes": f"{extra.get('_buy_count', 0)}B/{extra.get('_sell_count', 0)}S/{extra.get('_total_applicable', 0) - extra.get('_buy_count', 0) - extra.get('_sell_count', 0)}H",
         }
         # Compact timeframe heatmap
         tf_list = timeframes.get(ticker, [])

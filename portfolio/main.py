@@ -398,6 +398,13 @@ def run(force_report=False, active_symbols=None):
         _run_elapsed / max(signals_ok + signals_failed, 1),
     )
 
+    # BUG-85: Flush batched sentiment state to disk once per cycle (not per-ticker)
+    try:
+        from portfolio.signal_engine import flush_sentiment_state
+        flush_sentiment_state()
+    except Exception:
+        logger.warning("Failed to flush sentiment state", exc_info=True)
+
     # --- Cycle failure alert via Telegram ---
     # Collect per-ticker signal failures from this cycle
     _cycle_signal_failures = {}

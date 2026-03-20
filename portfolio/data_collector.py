@@ -84,6 +84,11 @@ def _binance_fetch(base_url, cb, label, symbol, interval="5m", limit=100):
             raise ConnectionError(f"Binance {label} klines request failed for {symbol}")
         r.raise_for_status()
         data = r.json()
+        # BUG-100: Empty response (200 OK but no data) should not count as success
+        if not data:
+            logger.warning("Binance %s returned empty data for %s %s", label, symbol, interval)
+            cb.record_failure()
+            return pd.DataFrame()
         df = pd.DataFrame(data, columns=_BINANCE_KLINE_COLS)
         for col in ["open", "high", "low", "close", "volume"]:
             df[col] = df[col].astype(float)

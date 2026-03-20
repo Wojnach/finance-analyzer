@@ -1,11 +1,11 @@
 # System Overview
 
-Updated: 2026-03-19
-Branch: improve/auto-session-2026-03-19
+Updated: 2026-03-20
+Branch: improve/auto-session-2026-03-20
 
 ## 1) Architecture Summary
 
-Two-layer autonomous trading system with 30 signals, 19 instruments, and dual-strategy portfolio management.
+Two-layer autonomous trading system with 30 signals, 20 instruments, and dual-strategy portfolio management.
 
 - **Layer 1** (`portfolio/main.py`): Continuous 60s loop — data collection, signal generation, trigger detection, summary writing.
 - **Layer 2** (`portfolio/agent_invocation.py`): Claude subprocess — reads summaries, makes trade decisions, writes journals, sends Telegram.
@@ -26,14 +26,14 @@ Two-layer autonomous trading system with 30 signals, 19 instruments, and dual-st
 ## 3) Module Map (~95 portfolio modules)
 
 ### Orchestration (5 modules)
-- `main.py` (708 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, module orchestration
-- `agent_invocation.py` (397 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing, completion tracking
-- `trigger.py` (330 lines): Change detection — consensus flip, price >2%, F&G threshold, sentiment reversal, post-trade
+- `main.py` (843 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, parallel ticker processing via ThreadPoolExecutor(8)
+- `agent_invocation.py` (400 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing, completion tracking
+- `trigger.py` (327 lines): Change detection — consensus flip, price >2%, F&G threshold, sentiment reversal, post-trade
 - `market_timing.py` (80 lines): DST-aware US market hours, agent invocation window
 - `config_validator.py`: Startup config validation
 
 ### Signal System (30 signals: 8 core + 19 enhanced + 3 disabled)
-- `signal_engine.py` (865 lines): 30-signal voting, weighted consensus, accuracy inversion, confidence penalties
+- `signal_engine.py` (981 lines): 30-signal voting, weighted consensus, accuracy inversion, confidence penalties
 - `signal_registry.py` (130 lines): Plugin-based signal discovery via importlib
 - `signal_utils.py` (130 lines): Shared helpers — SMA, EMA, RSI, majority_vote
 - `signals/*.py` (19 modules): Enhanced composite signals, each with 4-8 sub-indicators
@@ -177,7 +177,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
 - **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
 
-## 9) Known Issues (as of 2026-03-19)
+## 9) Known Issues (as of 2026-03-20)
 
 - BUG-15 through BUG-22: Fixed in 2026-03-08 session
 - BUG-23 through BUG-27: Fixed in 2026-03-09 session (signal validation, None ticker, OSError, heartbeat, pass cleanup)
@@ -222,4 +222,18 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - REF-13: 112 ruff lint violations (unused imports, f-strings, reimports) — fixed 2026-03-18
 - REF-14: 15 dead variable assignments across 13 modules — fixed 2026-03-18
 - ARCH-16: Golddigger/elongir duplicated config loading (deferred — localized, may diverge)
-- ~3,360 tests across 111+ test files (including 34 IO safety sweep tests)
+- ~3,400 tests across 114+ test files (including 34 IO safety sweep tests, 36 thread safety/NaN/Batch 2-3 tests)
+- BUG-85 (P1): Thread-unsafe `_prev_sentiment` + per-ticker serialization data loss in signal_engine.py — fixed 2026-03-20
+- BUG-86 (P2): Thread-unsafe `_adx_cache` in signal_engine.py — fixed 2026-03-20
+- BUG-87 (P1): NaN propagation from compute_indicators into JSON and signals — fixed 2026-03-20
+- BUG-88 (P1): Tier 1 votes string always shows 0 HOLD in reporting.py — fixed 2026-03-20
+- BUG-89 (P1): `update_module_failures` crash prevents all summary output — fixed 2026-03-20
+- BUG-90 (P2): Confidence penalty cascade amplifies above 1.0 before gates — fixed 2026-03-20
+- BUG-91 (P1): Timed-out agent completion never logged — fixed 2026-03-20
+- BUG-92 (P1): taskkill failure not checked; potential concurrent agents — fixed 2026-03-20
+- BUG-93 (P2): Circuit breaker HALF_OPEN allows unlimited concurrent requests — fixed 2026-03-20
+- BUG-95 (P2): Stack overflow counter not reset on non-overflow failures — fixed 2026-03-20
+- BUG-97 (P2): Exception in check_agent_completion leaves agent state dirty — fixed 2026-03-20
+- BUG-99 (P3): ZeroDivisionError if initial_value_sek is 0 — fixed 2026-03-20
+- BUG-100 (P2): Empty Binance response recorded as circuit breaker success — fixed 2026-03-20
+- BUG-100 (P2): Binance empty response recorded as circuit breaker success — fixed 2026-03-20

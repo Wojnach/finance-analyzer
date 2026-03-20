@@ -69,16 +69,18 @@ class TestCircuitBreakerStates:
         cb.record_failure()
         assert cb.state == State.OPEN
 
-    def test_half_open_allows_request(self):
+    def test_half_open_allows_one_probe(self):
+        """HALF_OPEN allows exactly one probe request (BUG-93)."""
         cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=5)
         cb.record_failure()
         assert cb.state == State.OPEN
 
         with patch("portfolio.circuit_breaker.time.monotonic", return_value=cb._last_failure_time + 6):
-            cb.allow_request()
+            assert cb.allow_request() is True  # Probe — transitions OPEN → HALF_OPEN
 
         assert cb.state == State.HALF_OPEN
-        assert cb.allow_request() is True
+        # Second request in HALF_OPEN is blocked (probe already sent)
+        assert cb.allow_request() is False
 
 
 class TestRecordSuccess:
