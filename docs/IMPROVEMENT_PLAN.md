@@ -213,25 +213,19 @@ bugs, not design issues.
 
 ### 4) Dependency/Ordering
 
-**Batch 1** (Thread Safety & NaN Guards — BUG-85, BUG-86, BUG-87):
-- Files: `signal_engine.py`, `indicators.py`, `file_utils.py`
-- Tests first: thread-safety tests, NaN propagation tests
-- Risk: MEDIUM — threading changes require careful testing
-- Commit: `fix: thread-safe sentiment state + NaN guards in indicators`
+**Batch 1** (Thread Safety & NaN Guards — BUG-85, BUG-86, BUG-87): **DONE**
+- Files: `signal_engine.py`, `indicators.py`
+- 11 new tests (`test_thread_safety_and_nan.py`)
+- Commit: `fix: thread-safe sentiment/ADX + NaN guards in indicators`
 
-**Batch 2** (Reporting & Agent Fixes — BUG-88, BUG-89, BUG-91, BUG-92):
+**Batch 2** (Reporting & Agent Fixes — BUG-88, BUG-89, BUG-91, BUG-92, BUG-95, BUG-97, BUG-99): **DONE**
 - Files: `reporting.py`, `agent_invocation.py`
-- Tests first: Tier 1 vote string tests, timeout logging tests
-- Risk: LOW — isolated fixes in separate functions
-- Commit: `fix: Tier 1 vote display, summary write resilience, agent timeout logging`
+- 12 new tests (`test_batch2_fixes.py`), 8 existing tests updated
+- Commit: `fix: agent invocation resilience + reporting guards`
 
-**Batch 3** (Infrastructure — BUG-90, BUG-93, BUG-100):
+**Batch 3** (Infrastructure — BUG-90, BUG-93, BUG-100): **DONE**
 - Files: `signal_engine.py`, `circuit_breaker.py`, `data_collector.py`
-- Tests first: confidence clamping tests, half-open probe tests
-- Risk: LOW — each fix is localized
+- 13 new tests (`test_batch3_fixes.py`), 1 existing test updated
 - Commit: `fix: confidence clamping, circuit breaker probe, empty response handling`
 
-**Batch 4** (Remaining Medium — BUG-95, BUG-97, BUG-99):
-- Files: `agent_invocation.py`, `reporting.py`
-- Risk: LOW — defensive additions only
-- Commit: `fix: stack overflow counter reset, completion check resilience, zero-division guard`
+**Batch 4** — Merged into Batch 2 (BUG-95, BUG-97, BUG-99 completed early).

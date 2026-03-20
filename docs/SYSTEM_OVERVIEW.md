@@ -222,7 +222,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - REF-13: 112 ruff lint violations (unused imports, f-strings, reimports) — fixed 2026-03-18
 - REF-14: 15 dead variable assignments across 13 modules — fixed 2026-03-18
 - ARCH-16: Golddigger/elongir duplicated config loading (deferred — localized, may diverge)
-- ~3,360 tests across 111+ test files (including 34 IO safety sweep tests)
+- ~3,400 tests across 114+ test files (including 34 IO safety sweep tests, 36 thread safety/NaN/Batch 2-3 tests)
 - BUG-85 (P1): Thread-unsafe `_prev_sentiment` + per-ticker serialization data loss in signal_engine.py — fixed 2026-03-20
 - BUG-86 (P2): Thread-unsafe `_adx_cache` in signal_engine.py — fixed 2026-03-20
 - BUG-87 (P1): NaN propagation from compute_indicators into JSON and signals — fixed 2026-03-20
@@ -235,4 +235,5 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-95 (P2): Stack overflow counter not reset on non-overflow failures — fixed 2026-03-20
 - BUG-97 (P2): Exception in check_agent_completion leaves agent state dirty — fixed 2026-03-20
 - BUG-99 (P3): ZeroDivisionError if initial_value_sek is 0 — fixed 2026-03-20
+- BUG-100 (P2): Empty Binance response recorded as circuit breaker success — fixed 2026-03-20
 - BUG-100 (P2): Binance empty response recorded as circuit breaker success — fixed 2026-03-20
