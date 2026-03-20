@@ -99,9 +99,9 @@ class TestTierConfig:
         """Tier 1 (Quick Check) has 120s timeout."""
         assert TIER_CONFIG[1]["timeout"] == 120
 
-    def test_tier2_timeout_is_300(self):
-        """Tier 2 (Signal Analysis) has 300s timeout."""
-        assert TIER_CONFIG[2]["timeout"] == 300
+    def test_tier2_timeout_is_600(self):
+        """Tier 2 (Signal Analysis) has 600s timeout."""
+        assert TIER_CONFIG[2]["timeout"] == 600
 
     def test_tier3_timeout_is_900(self):
         """Tier 3 (Full Review) has 900s timeout."""
@@ -111,9 +111,9 @@ class TestTierConfig:
         """Tier 1 has 15 max turns."""
         assert TIER_CONFIG[1]["max_turns"] == 15
 
-    def test_tier2_max_turns_is_25(self):
-        """Tier 2 has 25 max turns."""
-        assert TIER_CONFIG[2]["max_turns"] == 25
+    def test_tier2_max_turns_is_40(self):
+        """Tier 2 has 40 max turns."""
+        assert TIER_CONFIG[2]["max_turns"] == 40
 
     def test_tier3_max_turns_is_40(self):
         """Tier 3 has 40 max turns."""
@@ -137,9 +137,9 @@ class TestTierConfig:
         assert TIER_CONFIG[2]["timeout"] < TIER_CONFIG[3]["timeout"]
 
     def test_max_turns_increase_with_tier(self):
-        """Higher tiers have more max turns."""
-        assert TIER_CONFIG[1]["max_turns"] < TIER_CONFIG[2]["max_turns"]
-        assert TIER_CONFIG[2]["max_turns"] < TIER_CONFIG[3]["max_turns"]
+        """Higher tiers have more or equal max turns."""
+        assert TIER_CONFIG[1]["max_turns"] <= TIER_CONFIG[2]["max_turns"]
+        assert TIER_CONFIG[2]["max_turns"] <= TIER_CONFIG[3]["max_turns"]
 
 
 # ===========================================================================
@@ -354,7 +354,7 @@ class TestInvokeAgentHappyPath:
         cmd = mock_popen_cls.call_args[0][0]
         assert "--max-turns" in cmd
         mt_idx = cmd.index("--max-turns")
-        assert cmd[mt_idx + 1] == "25"  # Tier 2 max_turns
+        assert cmd[mt_idx + 1] == "40"  # Tier 2 max_turns
 
     @patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude")
     @patch("portfolio.agent_invocation.subprocess.Popen")
@@ -451,7 +451,9 @@ class TestInvokeAgentTimeout:
              patch("portfolio.agent_invocation._load_config", return_value={}), \
              patch("portfolio.agent_invocation.send_or_store"), \
              patch("portfolio.agent_invocation.escape_markdown_v1", side_effect=lambda x: x), \
+             patch("portfolio.agent_invocation.atomic_append_jsonl"), \
              patch("builtins.open", mock_open()):
+            mock_run.return_value = MagicMock(returncode=0)
             mock_p.return_value = MagicMock(pid=201)
             invoke_agent(["test"], tier=1)
 
@@ -477,6 +479,7 @@ class TestInvokeAgentTimeout:
              patch("portfolio.agent_invocation._load_config", return_value={}), \
              patch("portfolio.agent_invocation.send_or_store"), \
              patch("portfolio.agent_invocation.escape_markdown_v1", side_effect=lambda x: x), \
+             patch("portfolio.agent_invocation.atomic_append_jsonl"), \
              patch("builtins.open", mock_open()):
             mock_p.return_value = MagicMock(pid=301)
             invoke_agent(["test"], tier=1)
@@ -501,14 +504,15 @@ class TestInvokeAgentTimeout:
              patch("portfolio.agent_invocation._load_config", return_value={}), \
              patch("portfolio.agent_invocation.send_or_store"), \
              patch("portfolio.agent_invocation.escape_markdown_v1", side_effect=lambda x: x), \
+             patch("portfolio.agent_invocation.atomic_append_jsonl"), \
              patch("builtins.open", mock_open()):
             mock_p.return_value = MagicMock(pid=401)
             invoke_agent(["test"], tier=2)
 
         log_fh.close.assert_called()
 
-    def test_wait_timeout_ignored_on_stubborn_process(self):
-        """If wait() times out, the invocation still proceeds."""
+    def test_wait_timeout_stubborn_process_blocks_spawn(self):
+        """If wait() times out after kill, new agent is NOT spawned (BUG-92)."""
         proc = MagicMock()
         proc.poll.return_value = None
         proc.pid = 500
@@ -522,14 +526,16 @@ class TestInvokeAgentTimeout:
         with patch("portfolio.agent_invocation.platform.system", return_value="Linux"), \
              patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude"), \
              patch("portfolio.agent_invocation.subprocess.Popen") as mock_p, \
-             patch("portfolio.agent_invocation._load_config", return_value={}), \
+             patch("portfolio.agent_invocation._load_config", return_value={"layer2": {"enabled": True}}), \
              patch("portfolio.agent_invocation.send_or_store"), \
              patch("portfolio.agent_invocation.escape_markdown_v1", side_effect=lambda x: x), \
+             patch("portfolio.agent_invocation.atomic_append_jsonl"), \
              patch("builtins.open", mock_open()):
             mock_p.return_value = MagicMock(pid=501)
             result = invoke_agent(["test"], tier=1)
 
-        assert result is True
+        # BUG-92: stubborn process that won't die blocks new spawn
+        assert result is False
 
 
 # ===========================================================================

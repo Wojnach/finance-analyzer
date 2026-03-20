@@ -138,20 +138,41 @@ def invoke_agent(reasons, tier=3):
         elapsed = time.time() - _agent_start
         if elapsed > _agent_timeout:
             logger.info("Agent pid=%s timed out (%.0fs), killing", _agent_proc.pid, elapsed)
+            kill_ok = True
             if platform.system() == "Windows":
-                subprocess.run(
+                # BUG-92: Check taskkill return code to detect kill failure
+                result = subprocess.run(
                     ["taskkill", "/F", "/T", "/PID", str(_agent_proc.pid)],
                     capture_output=True,
                 )
+                if result.returncode != 0:
+                    logger.error(
+                        "taskkill failed (rc=%d): %s",
+                        result.returncode, result.stderr.decode(errors="replace").strip(),
+                    )
+                    kill_ok = False
             else:
                 _agent_proc.kill()
             try:
                 _agent_proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                pass
+                if kill_ok:
+                    logger.error("Agent pid=%s did not exit after kill+wait", _agent_proc.pid)
+                kill_ok = False
             if _agent_log:
                 _agent_log.close()
                 _agent_log = None
+            # BUG-91: Log the timed-out invocation before spawning a new one
+            _log_trigger(
+                _agent_reasons or reasons, "timeout",
+                tier=_agent_tier or tier,
+            )
+            # BUG-92: If kill failed, don't spawn new agent (old one may still be running)
+            if not kill_ok:
+                logger.error("Not spawning new agent — old process may still be running")
+                _agent_proc = None
+                return False
+            _agent_proc = None
         else:
             logger.info(
                 "Agent still running (pid %s, %.0fs), skipping",
@@ -274,16 +295,24 @@ def check_agent_completion():
     duration_s = round(time.time() - _agent_start, 1)
     completed_at = datetime.now(UTC).isoformat()
 
-    # Check if journal was written (new entry after agent started)
-    journal_ts_after = _last_jsonl_ts(JOURNAL_FILE)
+    # BUG-97: _last_jsonl_ts can raise OSError if file is locked on Windows
+    try:
+        journal_ts_after = _last_jsonl_ts(JOURNAL_FILE)
+    except Exception:
+        logger.warning("Failed to read journal timestamp after agent completion")
+        journal_ts_after = None
     journal_written = (
         _journal_ts_before is not None
         and journal_ts_after is not None
         and journal_ts_after != _journal_ts_before
     )
 
-    # Check if Telegram message was sent (new entry after agent started)
-    telegram_ts_after = _last_jsonl_ts(TELEGRAM_FILE)
+    # BUG-97: Same protection for telegram file
+    try:
+        telegram_ts_after = _last_jsonl_ts(TELEGRAM_FILE)
+    except Exception:
+        logger.warning("Failed to read telegram timestamp after agent completion")
+        telegram_ts_after = None
     telegram_sent = (
         _telegram_ts_before is not None
         and telegram_ts_after is not None
@@ -372,7 +401,9 @@ def check_agent_completion():
                 )
             except Exception as e:
                 logger.warning("Stack overflow alert failed: %s", e)
-    elif status == "success":
+    else:
+        # BUG-95: Reset counter on any non-stack-overflow completion (success or otherwise).
+        # This prevents false positive auto-disable when the consecutive chain is broken.
         _consecutive_stack_overflows = 0
 
     # Clean up
