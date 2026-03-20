@@ -397,6 +397,8 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
         if trending_buy or trending_sell:
             conf *= 1.10
             penalty_log.append({"stage": "regime", "regime": regime, "aligned": True, "mult": 1.10})
+    # BUG-90: Clamp after Stage 1 so inflated confidence doesn't bypass Stage 2 gates
+    conf = min(1.0, conf)
 
     # --- Stage 2: Volume/ADX gate ---
     volume_ratio = extra_info.get("volume_ratio")
@@ -421,6 +423,8 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
             # High volume — slight confidence boost
             conf *= 1.15
             penalty_log.append({"stage": "volume_boost", "rvol": volume_ratio, "mult": 1.15})
+    # BUG-90: Clamp after Stage 2
+    conf = min(1.0, conf)
 
     # --- Stage 3: Trap detection ---
     # NOTE: df must be the "Now" timeframe (15m candles, 100 bars ≈ 25h).
@@ -443,6 +447,8 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
                     penalty_log.append({"stage": "trap", "type": "bear_trap", "mult": 0.5})
         except Exception:
             logger.warning("Trap detection failed for %s", ticker, exc_info=True)
+    # BUG-90: Clamp after Stage 3
+    conf = min(1.0, conf)
 
     # --- Stage 4: Dynamic MIN_VOTERS ---
     active_voters = extra_info.get("_voters", 0)
