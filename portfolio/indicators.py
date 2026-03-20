@@ -14,7 +14,21 @@ def compute_indicators(df):
     if len(df) < 26:
         logger.debug("compute_indicators: insufficient data (%d rows, need 26)", len(df))
         return None
-    close = df["close"]
+    close = df["close"].copy()
+
+    # BUG-87: Guard against NaN in close series
+    if close.iloc[-1] != close.iloc[-1]:  # NaN check (NaN != NaN is True)
+        logger.warning("compute_indicators: last close is NaN, returning None")
+        return None
+    if close.isna().all():
+        logger.warning("compute_indicators: all close values are NaN, returning None")
+        return None
+    # Forward-fill interior NaN gaps to prevent downstream NaN propagation
+    if close.isna().any():
+        logger.debug("compute_indicators: forward-filling %d NaN close values", close.isna().sum())
+        close = close.ffill().bfill()
+        df = df.copy()
+        df["close"] = close
 
     # RSI(14)
     delta = close.diff()
@@ -59,29 +73,40 @@ def compute_indicators(df):
     rsi_p20 = rsi_series.rolling(100, min_periods=20).quantile(0.2).iloc[-1]
     rsi_p80 = rsi_series.rolling(100, min_periods=20).quantile(0.8).iloc[-1]
 
+    def _safe(val, default=0.0):
+        """Return float(val) if finite, else default. Prevents NaN in JSON output."""
+        v = float(val)
+        if v != v or not np.isfinite(v):  # NaN or Inf
+            return default
+        return v
+
+    close_val = _safe(close.iloc[-1])
+    bb_upper_val = _safe(bb_upper.iloc[-1], close_val)
+    bb_lower_val = _safe(bb_lower.iloc[-1], close_val)
+
     return {
-        "close": float(close.iloc[-1]),
-        "rsi": float(rsi.iloc[-1]),
-        "macd_hist": float(macd_hist.iloc[-1]),
-        "macd_hist_prev": float(macd_hist.iloc[-2]) if len(macd_hist) > 1 else 0.0,
-        "ema9": float(ema9.iloc[-1]),
-        "ema21": float(ema21.iloc[-1]),
-        "bb_upper": float(bb_upper.iloc[-1]),
-        "bb_lower": float(bb_lower.iloc[-1]),
-        "bb_mid": float(bb_mid.iloc[-1]),
+        "close": close_val,
+        "rsi": _safe(rsi.iloc[-1], 50.0),
+        "macd_hist": _safe(macd_hist.iloc[-1]),
+        "macd_hist_prev": _safe(macd_hist.iloc[-2]) if len(macd_hist) > 1 else 0.0,
+        "ema9": _safe(ema9.iloc[-1], close_val),
+        "ema21": _safe(ema21.iloc[-1], close_val),
+        "bb_upper": bb_upper_val,
+        "bb_lower": bb_lower_val,
+        "bb_mid": _safe(bb_mid.iloc[-1], close_val),
         "price_vs_bb": (
             "below_lower"
-            if float(close.iloc[-1]) <= float(bb_lower.iloc[-1])
+            if close_val <= bb_lower_val
             else (
                 "above_upper"
-                if float(close.iloc[-1]) >= float(bb_upper.iloc[-1])
+                if close_val >= bb_upper_val
                 else "inside"
             )
         ),
-        "atr": float(atr14),
-        "atr_pct": float(atr14 / close.iloc[-1] * 100) if close.iloc[-1] != 0 else 0.0,
-        "rsi_p20": float(rsi_p20) if not pd.isna(rsi_p20) else 30.0,
-        "rsi_p80": float(rsi_p80) if not pd.isna(rsi_p80) else 70.0,
+        "atr": _safe(atr14),
+        "atr_pct": _safe(atr14 / close.iloc[-1] * 100) if close_val != 0 else 0.0,
+        "rsi_p20": _safe(rsi_p20, 30.0),
+        "rsi_p80": _safe(rsi_p80, 70.0),
     }
 
 

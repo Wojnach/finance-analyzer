@@ -1,6 +1,7 @@
 """Signal generation engine — 30-signal voting system with weighted consensus."""
 
 import logging
+import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,6 +23,7 @@ _LOCAL_MODEL_ACCURACY_TTL = 1800
 # ADX computation cache — keyed by id(df) so each DataFrame is computed at most once.
 # Naturally expires when DataFrames are garbage-collected between cycles.
 _adx_cache: dict[int, float | None] = {}
+_adx_lock = threading.Lock()  # BUG-86: protect concurrent access from ThreadPoolExecutor
 _ADX_CACHE_MAX = 200  # prevent unbounded growth
 _LOCAL_MODEL_HOLD_THRESHOLD = 0.55
 _LOCAL_MODEL_MIN_SAMPLES = 30
@@ -42,43 +44,64 @@ CORE_SIGNAL_NAMES = frozenset({
 # Sentiment hysteresis — prevents rapid flip spam from ~50% confidence oscillation
 _prev_sentiment = {}  # in-memory cache; seeded from sentiment_state.json on first call
 _prev_sentiment_loaded = False
+_sentiment_lock = threading.Lock()  # BUG-85: protect concurrent access from ThreadPoolExecutor
+_sentiment_dirty = False  # Track whether in-memory state diverged from disk
 
 _SENTIMENT_STATE_FILE = DATA_DIR / "sentiment_state.json"
 
 
 def _load_prev_sentiments():
     global _prev_sentiment, _prev_sentiment_loaded
-    if _prev_sentiment_loaded:
-        return
-    try:
-        from portfolio.file_utils import load_json as _load_json
-        data = _load_json(str(_SENTIMENT_STATE_FILE), default=None)
-        if data and isinstance(data, dict):
-            _prev_sentiment = data.get("prev_sentiment", {})
-        # Prune entries for removed tickers
-        from portfolio.tickers import ALL_TICKERS
-        removed = [k for k in _prev_sentiment if k not in ALL_TICKERS]
-        for k in removed:
-            del _prev_sentiment[k]
-    except Exception:
-        logger.warning("Failed to load prev sentiments", exc_info=True)
-    _prev_sentiment_loaded = True
+    with _sentiment_lock:
+        if _prev_sentiment_loaded:
+            return
+        try:
+            from portfolio.file_utils import load_json as _load_json
+            data = _load_json(str(_SENTIMENT_STATE_FILE), default=None)
+            if data and isinstance(data, dict):
+                _prev_sentiment = data.get("prev_sentiment", {})
+            # Prune entries for removed tickers
+            from portfolio.tickers import ALL_TICKERS
+            removed = [k for k in _prev_sentiment if k not in ALL_TICKERS]
+            for k in removed:
+                del _prev_sentiment[k]
+        except Exception:
+            logger.warning("Failed to load prev sentiments", exc_info=True)
+        _prev_sentiment_loaded = True
 
 
 def _get_prev_sentiment(ticker):
     _load_prev_sentiments()
-    return _prev_sentiment.get(ticker)
+    with _sentiment_lock:
+        return _prev_sentiment.get(ticker)
 
 
 def _set_prev_sentiment(ticker, direction):
+    """Set sentiment direction for a ticker (thread-safe, batched disk write)."""
+    global _sentiment_dirty
     _load_prev_sentiments()
-    _prev_sentiment[ticker] = direction
-    # Persist to own state file (avoids racing with trigger.py on trigger_state.json)
+    with _sentiment_lock:
+        _prev_sentiment[ticker] = direction
+        _sentiment_dirty = True
+
+
+def flush_sentiment_state():
+    """Persist sentiment state to disk. Call once per cycle, not per-ticker.
+
+    BUG-85 fix: batching prevents concurrent per-ticker writes that clobber each other.
+    """
+    global _sentiment_dirty
+    with _sentiment_lock:
+        if not _sentiment_dirty:
+            return
+        snapshot = dict(_prev_sentiment)
+        _sentiment_dirty = False
+    # Write outside the lock to avoid holding it during I/O
     try:
         from portfolio.file_utils import atomic_write_json
-        atomic_write_json(_SENTIMENT_STATE_FILE, {"prev_sentiment": _prev_sentiment})
+        atomic_write_json(_SENTIMENT_STATE_FILE, {"prev_sentiment": snapshot})
     except Exception:
-        logger.warning("Failed to persist sentiment", exc_info=True)
+        logger.warning("Failed to persist sentiment state", exc_info=True)
 
 
 REGIME_WEIGHTS = {
@@ -301,8 +324,9 @@ def _compute_adx(df, period=14):
         return None
 
     df_id = id(df)
-    if df_id in _adx_cache:
-        return _adx_cache[df_id]
+    with _adx_lock:
+        if df_id in _adx_cache:
+            return _adx_cache[df_id]
 
     try:
         high = df["high"]
@@ -329,14 +353,16 @@ def _compute_adx(df, period=14):
 
         val = adx.iloc[-1]
         result = float(val) if pd.notna(val) and np.isfinite(val) else None
-        # Cache result; evict oldest entries if cache is full
-        if len(_adx_cache) >= _ADX_CACHE_MAX:
-            _adx_cache.clear()
-        _adx_cache[df_id] = result
+        # BUG-86: Thread-safe cache write with eviction
+        with _adx_lock:
+            if len(_adx_cache) >= _ADX_CACHE_MAX:
+                _adx_cache.clear()
+            _adx_cache[df_id] = result
         return result
     except Exception:
         logger.warning("ADX computation failed", exc_info=True)
-        _adx_cache[df_id] = None
+        with _adx_lock:
+            _adx_cache[df_id] = None
         return None
 
 
