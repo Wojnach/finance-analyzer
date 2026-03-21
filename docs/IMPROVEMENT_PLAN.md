@@ -118,7 +118,22 @@ This session addresses six verified issues found by deep code audit:
 
 ---
 
-### 3) What Was NOT Changed (and Why)
+### 3) Results
+
+All 6 bugs fixed, all 3 batches implemented, 16 new tests passing.
+166 related tests pass (zero regressions). 139 pre-existing test failures
+(all pre-date this session — verified by running same tests on main branch).
+
+| Bug | Status | Commit |
+|-----|--------|--------|
+| BUG-101 | FIXED | sentiment dirty flag after write |
+| BUG-102 | FIXED | forecast circuit breaker thread lock |
+| BUG-103 | FIXED | zero-division guard on initial_value_sek |
+| BUG-104 | FIXED | calendar_seasonal exception logging (9 handlers) |
+| BUG-105 | FIXED | FX alert category changed to "error" |
+| BUG-106 | FIXED | prediction dedup cache eviction (10min) |
+
+### 4) What Was NOT Changed (and Why)
 
 - **reporting.py test coverage**: 24K lines, 0 tests. Too large for this session.
 - **ADX cache key fragility**: Theoretically racy id(df) but practically safe.
