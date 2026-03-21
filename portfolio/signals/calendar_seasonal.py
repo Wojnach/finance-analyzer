@@ -19,9 +19,12 @@ calendar signals are inherently weak.
 from __future__ import annotations
 
 import calendar
+import logging
 from datetime import date, datetime, timedelta
 
 import pandas as pd
+
+logger = logging.getLogger("portfolio.signals.calendar_seasonal")
 
 # ---------------------------------------------------------------------------
 # FOMC meeting dates — imported from shared constant
@@ -378,47 +381,57 @@ def compute_calendar_signal(df: pd.DataFrame) -> dict:
         else:
             last_date = pd.Timestamp(last_time).date()
     except Exception:
+        logger.debug("calendar: failed to extract last_date from DataFrame", exc_info=True)
         return result
 
     # ---- Compute each sub-signal ----
+    # BUG-104: All exception handlers now log failures instead of silently swallowing.
     try:
         dow_action, dow_ind = _day_of_week_effect(last_date)
     except Exception:
+        logger.debug("calendar: day_of_week_effect failed", exc_info=True)
         dow_action, dow_ind = "HOLD", {}
 
     try:
         tt_action, tt_ind = _turnaround_tuesday(df, last_date)
     except Exception:
+        logger.debug("calendar: turnaround_tuesday failed", exc_info=True)
         tt_action, tt_ind = "HOLD", {}
 
     try:
         me_action, me_ind = _month_end_effect(last_date)
     except Exception:
+        logger.debug("calendar: month_end_effect failed", exc_info=True)
         me_action, me_ind = "HOLD", {}
 
     try:
         sim_action, sim_ind = _sell_in_may(last_date)
     except Exception:
+        logger.debug("calendar: sell_in_may failed", exc_info=True)
         sim_action, sim_ind = "HOLD", {}
 
     try:
         jan_action, jan_ind = _january_effect(last_date)
     except Exception:
+        logger.debug("calendar: january_effect failed", exc_info=True)
         jan_action, jan_ind = "HOLD", {}
 
     try:
         ph_action, ph_ind = _pre_holiday_effect(last_date)
     except Exception:
+        logger.debug("calendar: pre_holiday_effect failed", exc_info=True)
         ph_action, ph_ind = "HOLD", {}
 
     try:
         fomc_action, fomc_ind = _fomc_drift(last_date)
     except Exception:
+        logger.debug("calendar: fomc_drift failed", exc_info=True)
         fomc_action, fomc_ind = "HOLD", {}
 
     try:
         santa_action, santa_ind = _santa_claus_rally(last_date)
     except Exception:
+        logger.debug("calendar: santa_claus_rally failed", exc_info=True)
         santa_action, santa_ind = "HOLD", {}
 
     # ---- Populate sub-signals and indicators ----
