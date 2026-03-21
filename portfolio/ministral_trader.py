@@ -49,6 +49,7 @@ def _predict_native(prompt):
             LLAMA_CLI,
             "-m", MODEL_PATH,
             "-ngl", "99",
+            "-t", "4",  # cap CPU threads to prevent overheating
             "-c", "4096",
             "-n", "120",
             "--temp", "0",

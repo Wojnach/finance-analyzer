@@ -52,6 +52,7 @@ def _run_native(prompt, max_tokens=256):
             assets["llama_cli"],
             "-m", assets["model_path"],
             "-ngl", "99",
+            "-t", "4",  # cap CPU threads to prevent overheating
             "-c", "2048",
             "-n", str(max_tokens),
             "--temp", "0.7",

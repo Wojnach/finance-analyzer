@@ -1,7 +1,7 @@
 """Daily digest — morning Telegram with long-term perspective.
 
-Separate from the 4-hour digest (digest.py). Runs at a configurable UTC hour
-(default 06:00 = 07:00 CET). Provides focus instrument probabilities, rolling
+Separate from the 4-hour digest (digest.py). Runs at a configurable local hour
+(default 09:00 Europe/Stockholm). Provides focus instrument probabilities, rolling
 changes, warrant P&L, and top movers.
 
 Runs in both Mode A and Mode B.
@@ -9,6 +9,7 @@ Runs in both Mode A and Mode B.
 
 import logging
 import time
+import zoneinfo
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -49,7 +50,8 @@ def _set_last_daily_digest_time(t):
 def should_send_daily_digest(config):
     """Check if it's time to send the daily digest.
 
-    Sends once per day at the configured hour (default 06:00 UTC = 07:00 CET).
+    Sends once per day at the configured local hour (default 09:00 Europe/Stockholm).
+    Falls back to ``daily_digest_hour_utc`` for backwards compatibility.
 
     Args:
         config: Full app config dict.
@@ -58,11 +60,19 @@ def should_send_daily_digest(config):
         True if the daily digest should be sent now.
     """
     notification = config.get("notification", {})
-    digest_hour = notification.get("daily_digest_hour_utc", 6)
 
-    now = datetime.now(UTC)
-    if now.hour != digest_hour:
-        return False
+    # Prefer local-hour config (DST-aware), fall back to legacy UTC hour
+    local_hour = notification.get("daily_digest_hour_local")
+    if local_hour is not None:
+        tz_name = notification.get("daily_digest_tz", "Europe/Stockholm")
+        now_local = datetime.now(zoneinfo.ZoneInfo(tz_name))
+        if now_local.hour != local_hour:
+            return False
+    else:
+        digest_hour = notification.get("daily_digest_hour_utc", 6)
+        now = datetime.now(UTC)
+        if now.hour != digest_hour:
+            return False
 
     last = _get_last_daily_digest_time()
     if last:

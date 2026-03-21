@@ -51,8 +51,8 @@
           "target_value": 70.0,
           "comparison": "below",
           "deadline": "2026-12-31T00:00:00+00:00",
-          "status": "pending",
-          "triggered_at": null,
+          "status": "triggered",
+          "triggered_at": "2026-03-19T13:38:40.672036+00:00",
           "created_at": "2026-02-28T00:00:00+00:00"
         },
         {
@@ -222,6 +222,6 @@
   ],
   "metadata": {
     "version": 1,
-    "last_review": "2026-03-17T00:11:02.388020+00:00"
+    "last_review": "2026-03-19T13:38:40.672036+00:00"
   }
 }
