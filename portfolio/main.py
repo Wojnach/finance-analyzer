@@ -431,7 +431,9 @@ def run(force_report=False, active_symbols=None):
             logger.warning("Failed to send cycle error alert: %s", _e)
 
     total = portfolio_value(state, prices_usd, fx_rate)
-    pnl_pct = ((total - state["initial_value_sek"]) / state["initial_value_sek"]) * 100
+    # BUG-103: Guard against zero/missing initial_value_sek to prevent ZeroDivisionError
+    initial_val = state.get("initial_value_sek") or INITIAL_CASH_SEK
+    pnl_pct = ((total - initial_val) / initial_val) * 100
     logger.info("Portfolio: %s SEK (%+.2f%%) | Cash: %s SEK", f"{total:,.0f}", pnl_pct, "{:,.0f}".format(state['cash_sek']))
 
     if not STATE_FILE.exists():

@@ -61,9 +61,10 @@ def _fx_alert_telegram(age_secs):
             msg = f"_FX WARNING: USD/SEK rate is {age_secs / 3600:.1f}h stale. API may be down._"
         else:
             msg = "_FX WARNING: Using hardcoded fallback rate 10.85 SEK. No live or cached rate available._"
-        # Route via message store (fx_alert → save-only, not sent to Telegram)
+        # BUG-105: Route via message store with "error" category so it reaches Telegram.
+        # Previously used "fx_alert" which was save-only — user never saw FX warnings.
         from portfolio.message_store import send_or_store
-        send_or_store(msg, config, category="fx_alert")
+        send_or_store(msg, config, category="error")
         _fx_cache["_last_fx_alert"] = now
     except Exception as e:
         logger.debug("FX Telegram alert failed: %s", e)

@@ -17,6 +17,7 @@ import json
 import logging
 import platform
 import subprocess
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
@@ -82,9 +83,14 @@ _CIRCUIT_BREAKER_TTL = 30  # 30 seconds before retry
 _kronos_tripped_until = 0.0  # monotonic timestamp when breaker resets
 _chronos_tripped_until = 0.0
 
+# BUG-102: Lock protects circuit breaker state and dedup cache from ThreadPoolExecutor races.
+# The read-check-write pattern in _log_health() is not atomic without a lock.
+_forecast_lock = threading.Lock()
+
 # Prediction dedup — track last logged timestamp per ticker to avoid
 # logging cached replays. Key: ticker, value: ISO-8601 timestamp.
 _PREDICTION_DEDUP_TTL = 60  # seconds — don't re-log within this window
+_PREDICTION_DEDUP_EVICT_AGE = 600  # BUG-106: evict entries older than 10 minutes
 _last_prediction_ts: dict[str, float] = {}  # ticker -> monotonic timestamp
 
 
@@ -132,30 +138,35 @@ def _extract_json_from_stdout(stdout: str | None) -> dict | None:
 
 
 def _kronos_circuit_open() -> bool:
-    return time.monotonic() < _kronos_tripped_until
+    with _forecast_lock:
+        return time.monotonic() < _kronos_tripped_until
 
 
 def _trip_kronos():
     global _kronos_tripped_until
-    _kronos_tripped_until = time.monotonic() + _CIRCUIT_BREAKER_TTL
+    with _forecast_lock:
+        _kronos_tripped_until = time.monotonic() + _CIRCUIT_BREAKER_TTL
     logger.warning("Kronos circuit breaker TRIPPED — skipping for %ds", _CIRCUIT_BREAKER_TTL)
 
 
 def _chronos_circuit_open() -> bool:
-    return time.monotonic() < _chronos_tripped_until
+    with _forecast_lock:
+        return time.monotonic() < _chronos_tripped_until
 
 
 def _trip_chronos():
     global _chronos_tripped_until
-    _chronos_tripped_until = time.monotonic() + _CIRCUIT_BREAKER_TTL
+    with _forecast_lock:
+        _chronos_tripped_until = time.monotonic() + _CIRCUIT_BREAKER_TTL
     logger.warning("Chronos circuit breaker TRIPPED — skipping for %ds", _CIRCUIT_BREAKER_TTL)
 
 
 def reset_circuit_breakers():
     """Reset both circuit breakers (for testing or manual recovery)."""
     global _kronos_tripped_until, _chronos_tripped_until
-    _kronos_tripped_until = 0.0
-    _chronos_tripped_until = 0.0
+    with _forecast_lock:
+        _kronos_tripped_until = 0.0
+        _chronos_tripped_until = 0.0
 
 
 def _log_health(model: str, ticker: str, success: bool, duration_ms: int, error: str = ""):
@@ -180,13 +191,15 @@ def _log_health(model: str, ticker: str, success: bool, duration_ms: int, error:
         logger.debug("Forecast health logging failed: %s", e)
 
     # Auto-reset circuit breaker on success — faster recovery from transient failures
+    # BUG-102: Use lock to make read-check-write atomic
     if success:
-        if model == "kronos" and _kronos_tripped_until > 0:
-            _kronos_tripped_until = 0.0
-            logger.info("Kronos circuit breaker RESET on successful %s", ticker)
-        elif model == "chronos" and _chronos_tripped_until > 0:
-            _chronos_tripped_until = 0.0
-            logger.info("Chronos circuit breaker RESET on successful %s", ticker)
+        with _forecast_lock:
+            if model == "kronos" and _kronos_tripped_until > 0:
+                _kronos_tripped_until = 0.0
+                logger.info("Kronos circuit breaker RESET on successful %s", ticker)
+            elif model == "chronos" and _chronos_tripped_until > 0:
+                _chronos_tripped_until = 0.0
+                logger.info("Chronos circuit breaker RESET on successful %s", ticker)
 
 
 def _load_candles_ohlcv(ticker: str, periods: int = 168,
@@ -800,10 +813,14 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
     result["confidence"] = min(result["confidence"], _MAX_CONFIDENCE)
 
     # Log prediction for accuracy tracking (with dedup)
+    # BUG-102: Lock protects _last_prediction_ts from concurrent ThreadPoolExecutor access
+    # BUG-106: Evict stale entries to prevent unbounded dict growth
     try:
         now_mono = time.monotonic()
-        last_ts = _last_prediction_ts.get(ticker, 0.0)
-        if now_mono - last_ts >= _PREDICTION_DEDUP_TTL:
+        with _forecast_lock:
+            last_ts = _last_prediction_ts.get(ticker, 0.0)
+            should_log = now_mono - last_ts >= _PREDICTION_DEDUP_TTL
+        if should_log:
             entry = {
                 "ts": datetime.now(UTC).isoformat(),
                 "ticker": ticker,
@@ -821,7 +838,13 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
             if chronos:
                 entry["chronos"] = chronos
             atomic_append_jsonl(_PREDICTIONS_FILE, entry)
-            _last_prediction_ts[ticker] = now_mono
+            with _forecast_lock:
+                _last_prediction_ts[ticker] = now_mono
+                # BUG-106: Evict stale entries older than 10 minutes
+                stale = [k for k, v in _last_prediction_ts.items()
+                         if now_mono - v > _PREDICTION_DEDUP_EVICT_AGE]
+                for k in stale:
+                    del _last_prediction_ts[k]
     except Exception:
         logger.debug("Failed to log forecast prediction", exc_info=True)
 

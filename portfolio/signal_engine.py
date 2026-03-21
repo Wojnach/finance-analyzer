@@ -89,19 +89,24 @@ def flush_sentiment_state():
     """Persist sentiment state to disk. Call once per cycle, not per-ticker.
 
     BUG-85 fix: batching prevents concurrent per-ticker writes that clobber each other.
+    BUG-101 fix: dirty flag cleared only AFTER successful write, so a failed write
+    will be retried on the next cycle instead of silently losing state.
     """
     global _sentiment_dirty
     with _sentiment_lock:
         if not _sentiment_dirty:
             return
         snapshot = dict(_prev_sentiment)
-        _sentiment_dirty = False
     # Write outside the lock to avoid holding it during I/O
     try:
         from portfolio.file_utils import atomic_write_json
         atomic_write_json(_SENTIMENT_STATE_FILE, {"prev_sentiment": snapshot})
+        # BUG-101: Only clear dirty flag after successful write
+        with _sentiment_lock:
+            _sentiment_dirty = False
     except Exception:
-        logger.warning("Failed to persist sentiment state", exc_info=True)
+        # Dirty flag remains True — next cycle will retry the write
+        logger.warning("Failed to persist sentiment state (will retry next cycle)", exc_info=True)
 
 
 REGIME_WEIGHTS = {
