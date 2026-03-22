@@ -71,6 +71,60 @@ def load_jsonl(path, limit=None):
     return list(container)
 
 
+def load_jsonl_tail(path, max_entries=500, tail_bytes=512_000):
+    """Load the last N entries from a JSONL file by reading from the end.
+
+    Much more efficient than load_jsonl(limit=N) for large files because
+    it only reads the last `tail_bytes` bytes instead of the entire file.
+
+    Args:
+        path: Path to the .jsonl file.
+        max_entries: Maximum entries to return.
+        tail_bytes: How many bytes to read from the end of the file.
+            Default 512KB ≈ ~1000 typical entries.
+
+    Returns:
+        list of parsed dicts (chronological order). Empty list if missing.
+    """
+    path = Path(path)
+    try:
+        file_size = path.stat().st_size
+    except (FileNotFoundError, OSError):
+        return []
+    if file_size == 0:
+        return []
+
+    entries = []
+    try:
+        with open(path, "rb") as f:
+            # Seek to near end of file
+            offset = max(0, file_size - tail_bytes)
+            f.seek(offset)
+            data = f.read()
+        # Decode and split into lines
+        text = data.decode("utf-8", errors="replace")
+        lines = text.split("\n")
+        # If we seeked mid-file, the first line is likely truncated — skip it
+        if offset > 0 and lines:
+            lines = lines[1:]
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    except (OSError, UnicodeDecodeError) as e:
+        logger.debug("load_jsonl_tail failed for %s: %s", path.name, e)
+        return []
+
+    # Return last max_entries in chronological order
+    if len(entries) > max_entries:
+        entries = entries[-max_entries:]
+    return entries
+
+
 def atomic_append_jsonl(path, entry):
     """Append a single JSON entry to a JSONL file.
 

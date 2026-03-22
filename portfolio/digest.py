@@ -14,7 +14,7 @@ from pathlib import Path
 from portfolio.file_utils import atomic_write_json as _atomic_write_json
 from portfolio.file_utils import load_json
 from portfolio.message_store import send_or_store
-from portfolio.portfolio_mgr import load_state, portfolio_value
+from portfolio.portfolio_mgr import INITIAL_CASH_SEK, load_state, portfolio_value
 from portfolio.telegram_notifications import escape_markdown_v1
 
 logger = logging.getLogger("portfolio.digest")
@@ -56,7 +56,7 @@ JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
 
 
 def _build_digest_message():
-    from portfolio.stats import load_jsonl
+    from portfolio.file_utils import load_jsonl, load_jsonl_tail
 
     now = datetime.now(UTC)
     cutoff = now - timedelta(seconds=DIGEST_INTERVAL)
@@ -117,7 +117,8 @@ def _build_digest_message():
             l2_decisions[strat][action_key] += 1
 
     # --- Signal consensus breakdown from signal_log ---
-    signal_entries = load_jsonl(SIGNAL_LOG_FILE, limit=500)
+    # BUG-109: Use tail read for signal_log (68MB+) instead of reading entire file
+    signal_entries = load_jsonl_tail(SIGNAL_LOG_FILE, max_entries=500)
     recent_signals = []
     for e in signal_entries:
         ts_str = e.get("ts", "")
@@ -146,7 +147,8 @@ def _build_digest_message():
 
     state = load_state()
     p_total = portfolio_value(state, prices_usd, fx_rate)
-    p_pnl = ((p_total - state["initial_value_sek"]) / state["initial_value_sek"]) * 100
+    p_initial = state.get("initial_value_sek") or INITIAL_CASH_SEK  # BUG-107: zero guard
+    p_pnl = ((p_total - p_initial) / p_initial) * 100
     p_holdings = [
         t for t, h in state.get("holdings", {}).items() if h.get("shares", 0) > 0
     ]

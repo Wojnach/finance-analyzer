@@ -155,13 +155,17 @@ def _fetch_overview(ticker, api_key):
 
 
 def _check_budget():
-    """Check and reset daily budget counter. Returns True if budget available."""
+    """Check and reset daily budget counter. Returns current usage count.
+
+    BUG-108: Protected by _cache_lock for thread safety.
+    """
     global _daily_budget_used, _budget_reset_date
     today = datetime.now(UTC).strftime("%Y-%m-%d")
-    if _budget_reset_date != today:
-        _daily_budget_used = 0
-        _budget_reset_date = today
-    return _daily_budget_used
+    with _cache_lock:
+        if _budget_reset_date != today:
+            _daily_budget_used = 0
+            _budget_reset_date = today
+        return _daily_budget_used
 
 
 def _is_stale(ticker, max_stale_days=5):
@@ -274,7 +278,7 @@ def refresh_fundamentals_batch(config):
 
             with _cache_lock:
                 _cache[ticker] = normalized
-            _daily_budget_used += 1
+                _daily_budget_used += 1  # BUG-108: increment under lock
             _cb.record_success()
             success_count += 1
             logger.info("Refreshed fundamentals for %s (PE=%.1f, sector=%s)",

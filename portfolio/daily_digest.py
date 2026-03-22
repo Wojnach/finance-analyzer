@@ -15,7 +15,7 @@ from pathlib import Path
 
 from portfolio.file_utils import load_json
 from portfolio.message_store import send_or_store
-from portfolio.portfolio_mgr import load_state, portfolio_value
+from portfolio.portfolio_mgr import INITIAL_CASH_SEK, load_state, portfolio_value
 from portfolio.telegram_notifications import escape_markdown_v1
 
 logger = logging.getLogger("portfolio.daily_digest")
@@ -201,7 +201,8 @@ def build_daily_digest(config):
 
     state = load_state()
     p_total = portfolio_value(state, prices_usd, fx_rate)
-    p_pnl = ((p_total - state["initial_value_sek"]) / state["initial_value_sek"]) * 100
+    p_initial = state.get("initial_value_sek") or INITIAL_CASH_SEK  # BUG-107: zero guard
+    p_pnl = ((p_total - p_initial) / p_initial) * 100
     p_holdings = [t for t, h in state.get("holdings", {}).items() if h.get("shares", 0) > 0]
     p_h_str = " · " + escape_markdown_v1(", ".join(p_holdings)) if p_holdings else ""
     lines.append(f"`Patient: {p_total:,.0f} SEK ({p_pnl:+.1f}%){p_h_str}`")
@@ -210,7 +211,8 @@ def build_daily_digest(config):
     if bold is not None:
         try:
             b_total = portfolio_value(bold, prices_usd, fx_rate)
-            b_pnl = ((b_total - bold["initial_value_sek"]) / bold["initial_value_sek"]) * 100
+            b_initial = bold.get("initial_value_sek") or INITIAL_CASH_SEK  # BUG-107
+            b_pnl = ((b_total - b_initial) / b_initial) * 100
             b_holdings = [t for t, h in bold.get("holdings", {}).items() if h.get("shares", 0) > 0]
             b_h_str = " · " + escape_markdown_v1(", ".join(b_holdings)) if b_holdings else ""
             lines.append(f"`Bold:    {b_total:,.0f} SEK ({b_pnl:+.1f}%){b_h_str}`")
