@@ -1,141 +1,135 @@
 # Improvement Plan
 
-Updated: 2026-03-21
-Branch: improve/auto-session-2026-03-21
+Updated: 2026-03-22
+Branch: improve/auto-session-2026-03-22
 
-Previous sessions: 2026-03-05 through 2026-03-20.
+Previous sessions: 2026-03-05 through 2026-03-21.
 
-## Session Plan (2026-03-21)
+## Session Plan (2026-03-22)
 
-### Theme: Crash Safety, Thread Safety, Silent Failure Elimination
+### Theme: Digest Safety, Budget Tracking, Reporting Tests
 
-Previous session (2026-03-20) fixed thread-unsafe sentiment/ADX globals (BUG-85/86),
-NaN propagation (BUG-87/88), and agent lifecycle reliability (BUG-91/92/97).
+Previous session (2026-03-21) fixed crash safety (BUG-101), thread safety (BUG-102),
+zero-division (BUG-103), silent failures (BUG-104), alert routing (BUG-105), and
+memory leak (BUG-106).
 
-This session addresses six verified issues found by deep code audit:
+This session addresses five verified issues found by deep code audit:
 
-1. **Crash safety** — sentiment flush sets dirty=False before write; data lost on failure
-2. **Thread safety** — forecast circuit breaker globals lack locks in ThreadPoolExecutor
-3. **Zero-division** — portfolio P&L calculation crashes on corrupt state
-4. **Silent failures** — calendar_seasonal has 9 exception handlers with no logging
-5. **Alert routing** — FX rate fallback alerts saved but never sent to user
-6. **Memory leak** — forecast prediction dedup cache grows unbounded
+1. **Zero-division** — digest P&L calculation crashes on corrupt portfolio state (same
+   class as BUG-103, but in digest.py and daily_digest.py — missed in prior fix)
+2. **Thread safety** — Alpha Vantage `_daily_budget_used` incremented without lock
+3. **Performance** — digest reads entire 68MB signal_log.jsonl to get last 500 entries
+4. **Test coverage** — reporting.py (1,109 lines) has ZERO tests despite being critical
+   Layer 2 input builder
+5. **Stale import** — digest.py imports `load_jsonl` from `portfolio.stats` instead of
+   canonical `portfolio.file_utils`
 
 ---
 
 ### 1) Bugs & Problems Found
 
-#### BUG-101 (P1): Sentiment flush not crash-safe — dirty flag cleared before write
+#### BUG-107 (P2): Zero-division in digest P&L calculations
 
-- **File**: `portfolio/signal_engine.py:88-104`
-- **Issue**: `flush_sentiment_state()` sets `_sentiment_dirty = False` (line 98) inside the
-  lock, BEFORE `atomic_write_json()` is called (line 102). If the write fails (disk full,
-  permission error, etc.), the dirty flag is already cleared. On next cycle, the function
-  returns early without retrying the write. On restart, sentiment hysteresis state is lost.
-- **Fix**: Move `_sentiment_dirty = False` to after successful write. Re-acquire lock to
-  set it only on success.
-- **Impact**: After disk error + restart, sentiment signals may flip incorrectly
-  (threshold drops from 0.55 to 0.40), causing false triggers.
-
-#### BUG-102 (P2): Forecast circuit breaker globals not thread-safe
-
-- **File**: `portfolio/signals/forecast.py:82-83, 134-158, 167-189`
-- **Issue**: `_kronos_tripped_until` and `_chronos_tripped_until` are plain float globals
-  modified by `_trip_kronos()`, `_trip_chronos()`, and `_log_health()` from
-  ThreadPoolExecutor worker threads. While Python GIL makes float assignment atomic,
-  the read-check-write pattern in `_log_health()` (lines 184-189) is NOT atomic.
-  Similarly, `_last_prediction_ts` dict (line 88) is modified without lock.
-- **Fix**: Add `_forecast_lock = threading.Lock()` around all circuit breaker and dedup
-  cache mutations.
-- **Impact**: Race condition could cause circuit breaker to trip/reset incorrectly.
-
-#### BUG-103 (P2): Division by zero in portfolio P&L logging
-
-- **File**: `portfolio/main.py:434`
-- **Issue**: `state["initial_value_sek"]` used as divisor without guard. If portfolio state
-  is corrupted (e.g., `initial_value_sek: 0` or missing key), the entire run() cycle
-  crashes with ZeroDivisionError before triggering, reporting, or agent invocation.
+- **Files**: `portfolio/digest.py:149`, `portfolio/daily_digest.py:204,213`
+- **Issue**: `state["initial_value_sek"]` used as divisor without zero guard. Same class
+  as BUG-103 (fixed in main.py) and BUG-99 (fixed in reporting.py), but NOT fixed in the
+  two digest modules. If portfolio state is corrupt (`initial_value_sek: 0` or missing),
+  the digest crashes with ZeroDivisionError, preventing the user from receiving their 4h
+  and daily digest messages.
 - **Fix**: Guard: `initial = state.get("initial_value_sek") or INITIAL_CASH_SEK`
-- **Impact**: Entire cycle lost on state corruption.
+- **Impact**: Digest crash blocks user notifications for 4+ hours until next attempt.
 
-#### BUG-104 (P3): Calendar seasonal signal: 9 silent exception handlers
+#### BUG-108 (P3): Alpha Vantage budget counter not thread-safe
 
-- **File**: `portfolio/signals/calendar_seasonal.py:380-422`
-- **Issue**: 9 `except Exception:` blocks catch sub-signal computation errors with zero
-  logging. Failures are completely invisible.
-- **Fix**: Add `logger.debug()` to each handler.
-- **Impact**: Silent accuracy degradation when calendar sub-signals break.
+- **File**: `portfolio/alpha_vantage.py:159-164,277`
+- **Issue**: `_daily_budget_used` is a module-level int incremented (`+= 1`) and read
+  (`_check_budget()`) without any lock protection. While `refresh_fundamentals_batch()`
+  is currently called single-threaded from the main loop post-cycle, the lack of
+  synchronization is inconsistent with the rest of the module (which uses `_cache_lock`
+  for all `_cache` operations) and creates a latent bug if the function is ever called
+  from ThreadPoolExecutor.
+- **Fix**: Protect budget reads/writes with `_cache_lock` (reuse existing lock — budget
+  operations are infrequent and short).
+- **Impact**: Currently LOW (single-threaded caller), but inconsistent pattern.
 
-#### BUG-105 (P3): FX rate fallback alerts never reach user
+#### BUG-109 (P3): Digest reads entire signal_log.jsonl (68MB+)
 
-- **File**: `portfolio/fx_rates.py:66`
-- **Issue**: `send_or_store(msg, config, category="fx_alert")` uses category `"fx_alert"`
-  which is save-only in `message_store.py`. User never receives Telegram notification
-  when FX rate goes stale or falls back to hardcoded 10.85 SEK.
-- **Fix**: Change category to `"error"` (which IS sent to Telegram).
-- **Impact**: Trades with stale FX rate without user awareness.
+- **File**: `portfolio/digest.py:120`
+- **Issue**: `load_jsonl(SIGNAL_LOG_FILE, limit=500)` reads the entire 68MB+ file line
+  by line (deque keeps last 500). The digest only needs entries from the last 4 hours,
+  but there's no efficient way to seek to recent entries. This causes a ~2-3 second
+  I/O spike every 4 hours.
+- **Fix**: Use `last_jsonl_entries()` helper that reads from the end of the file, or
+  add a `tail_bytes` parameter to `load_jsonl` that seeks to the last N bytes before
+  parsing. 500 entries × ~500 bytes each ≈ 250KB tail read instead of 68MB.
+- **Impact**: Performance — 2-3s I/O pause every 4 hours. Not critical but wasteful.
 
-#### BUG-106 (P3): Forecast prediction dedup cache grows unbounded
+#### BUG-110 (P3): Stale import path in digest.py
 
-- **File**: `portfolio/signals/forecast.py:88`
-- **Issue**: `_last_prediction_ts` dict maps ticker -> monotonic timestamp. Entries are
-  never evicted. Minor memory leak.
-- **Fix**: Evict entries older than 10 minutes during each write.
-- **Impact**: Negligible but indicates missing cleanup pattern.
+- **File**: `portfolio/digest.py:59`
+- **Issue**: `from portfolio.stats import load_jsonl` — imports `load_jsonl` via the
+  `stats.py` re-export rather than the canonical `portfolio.file_utils`. This creates
+  an unnecessary dependency on `stats.py` and masks the actual data source.
+- **Fix**: Change to `from portfolio.file_utils import load_jsonl`.
+- **Impact**: Code clarity only. No behavioral change.
+
+#### COVERAGE-1 (P2): reporting.py has ZERO test coverage
+
+- **File**: `portfolio/reporting.py` (1,109 lines, ~20 functions)
+- **Issue**: The reporting module builds `agent_summary.json` and all tiered context
+  files that Layer 2 reads for every invocation. It is the most critical untested module
+  in the system. Functions like `write_agent_summary()`, `_write_compact_summary()`, and
+  `_write_tier2_summary()` process all 30 signals, macro context, accuracy data, risk
+  flags, and Monte Carlo results. A regression here silently corrupts Layer 2 input.
+- **Fix**: Write targeted tests for core functions: `write_agent_summary()` output
+  structure, `_write_compact_summary()` three-tier compaction, `_cross_asset_signals()`,
+  and `_module_warnings` propagation.
+- **Impact**: HIGH — regressions in reporting silently degrade all Layer 2 decisions.
 
 ---
 
 ### 2) Implementation Batches
 
-#### Batch 1: Crash Safety & Core Fixes (3 files)
+#### Batch 1: Zero-division & Import Fixes (3 files)
 
 | Bug | File | Change |
 |-----|------|--------|
-| BUG-101 | signal_engine.py | Move `_sentiment_dirty = False` after successful write |
-| BUG-103 | main.py | Guard division by `initial_value_sek` |
-| BUG-105 | fx_rates.py | Change FX alert category to `"error"` |
+| BUG-107 | digest.py | Guard `state["initial_value_sek"]` division with `or INITIAL_CASH_SEK` |
+| BUG-107 | daily_digest.py | Same guard for patient and bold P&L calculations |
+| BUG-110 | digest.py | Change `from portfolio.stats import load_jsonl` to `from portfolio.file_utils import load_jsonl` |
 
-**Risk**: LOW — all changes are additive guards.
+**Risk**: LOW — additive guards, import path change has identical behavior.
 
-#### Batch 2: Thread Safety & Silent Failures (2 files)
+#### Batch 2: Thread Safety & Performance (2 files)
 
 | Bug | File | Change |
 |-----|------|--------|
-| BUG-102 | signals/forecast.py | Add threading.Lock around circuit breaker + dedup |
-| BUG-106 | signals/forecast.py | Add dedup cache eviction |
-| BUG-104 | signals/calendar_seasonal.py | Add logger.debug() to 9 exception handlers |
+| BUG-108 | alpha_vantage.py | Wrap `_daily_budget_used` reads/writes with `_cache_lock` |
+| BUG-109 | file_utils.py | Add `load_jsonl_tail()` helper that reads from file end |
+| BUG-109 | digest.py | Use `load_jsonl_tail()` for signal_log reads |
 
-**Risk**: LOW — lock addition is additive. Calendar logging is observational only.
+**Risk**: LOW — lock addition is additive. File tail-read is new code but isolated.
 
-#### Batch 3: Tests
+#### Batch 3: Reporting Tests
 
 | Test | Covers |
 |------|--------|
-| test_sentiment_flush_crash_safe.py | BUG-101 |
-| test_forecast_thread_safety.py | BUG-102/106 |
-| test_fx_alert_routing.py | BUG-105 |
-| test_calendar_exception_logging.py | BUG-104 |
+| test_reporting_core.py | write_agent_summary output structure, _write_compact_summary three-tier compaction, _cross_asset_signals, _module_warnings propagation |
+
+**Risk**: NONE — tests only, no production code changes.
 
 ---
 
-### 3) Results
+### 3) What Was NOT Changed (and Why)
 
-All 6 bugs fixed, all 3 batches implemented, 16 new tests passing.
-166 related tests pass (zero regressions). 139 pre-existing test failures
-(all pre-date this session — verified by running same tests on main branch).
-
-| Bug | Status | Commit |
-|-----|--------|--------|
-| BUG-101 | FIXED | sentiment dirty flag after write |
-| BUG-102 | FIXED | forecast circuit breaker thread lock |
-| BUG-103 | FIXED | zero-division guard on initial_value_sek |
-| BUG-104 | FIXED | calendar_seasonal exception logging (9 handlers) |
-| BUG-105 | FIXED | FX alert category changed to "error" |
-| BUG-106 | FIXED | prediction dedup cache eviction (10min) |
-
-### 4) What Was NOT Changed (and Why)
-
-- **reporting.py test coverage**: 24K lines, 0 tests. Too large for this session.
-- **ADX cache key fragility**: Theoretically racy id(df) but practically safe.
-- **Portfolio state validation**: Needs dedicated feature, not quick fix.
-- **Config reload consistency**: Would touch 10+ files.
+- **sentiment.py test coverage**: 608 lines, 0 tests. Large module with many external
+  dependencies (subprocess calls, HTTP). Would need extensive mocking. Deferred.
+- **main.py test coverage**: 851 lines, 0 tests. Loop orchestration is hard to unit test.
+  Integration testing would be more valuable. Deferred.
+- **NewsAPI quota persistence**: `_newsapi_daily_count` resets on restart. LOW risk since
+  the daily budget (90) is generous and restarts are rare during active hours.
+- **Circuit breaker state persistence**: State is in-memory only. On restart, breakers
+  reset to CLOSED. This is acceptable — the recovery timeout (60s) means a brief burst
+  of retries, then the breaker re-trips if the API is still down.
+- **Stale data files in data/**: ~50 experimental scripts and state files. Cleanup would
+  be valuable but is housekeeping, not a bug fix. Deferred to a dedicated cleanup session.
