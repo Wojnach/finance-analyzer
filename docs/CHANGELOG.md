@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-03-22 (autonomous improvement session)
+- **BUG-107: Digest zero-division**: `digest.py` and `daily_digest.py` P&L calculations crashed when `initial_value_sek` was 0 or missing. Added `or INITIAL_CASH_SEK` fallback (same fix as BUG-103, missed in these two modules).
+- **BUG-108: Alpha Vantage budget thread safety**: `_daily_budget_used` counter was read/incremented without lock protection. Wrapped in existing `_cache_lock`.
+- **BUG-109: Signal log performance**: `digest.py` read entire 68MB `signal_log.jsonl` to get last 500 entries. Added `load_jsonl_tail()` to `file_utils.py` — seeks to last 512KB instead of reading entire file.
+- **BUG-110: Stale import path**: `digest.py` imported `load_jsonl` from `portfolio.stats` re-export instead of canonical `portfolio.file_utils`.
+- **COVERAGE-1: reporting.py tests**: Added 50 tests for `reporting.py` (1,109 lines, previously ZERO coverage). Covers `write_agent_summary`, `_write_compact_summary`, `_cross_asset_signals`, `_macro_headline`, `_portfolio_snapshot`, `write_tiered_summary`, `_get_held_tickers`.
+- Theme: Digest Safety, Budget Tracking, Reporting Tests. See `docs/IMPROVEMENT_PLAN.md` for full details.
+
 ## 2026-03-19 (autonomous improvement session)
 - **REF-16: Python 3.11 modernization**: ruff auto-fix applied 1,910 fixes across 268 files. Key changes: `datetime.timezone.utc` → `datetime.UTC` (199), `Optional[X]` → `X | None` (149), unsorted imports (75), `Dict`/`List`/`Tuple` → builtins (44), redundant open modes (10), deprecated typing imports (8), duplicate set value (1). Zero behavioral change.
 - **REF-17: Manual ruff fixes**: 28 fixes across 20 files. `raise ImportError(...)` → `raise ... from None` (B904), 17 unused loop variables prefixed with `_` (B007), 2 needless bool returns simplified (SIM103).

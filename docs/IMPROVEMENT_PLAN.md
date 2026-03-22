@@ -133,3 +133,19 @@ This session addresses five verified issues found by deep code audit:
   of retries, then the breaker re-trips if the API is still down.
 - **Stale data files in data/**: ~50 experimental scripts and state files. Cleanup would
   be valuable but is housekeeping, not a bug fix. Deferred to a dedicated cleanup session.
+
+---
+
+### 4) Results
+
+| ID | Type | Status | Details |
+|----|------|--------|---------|
+| BUG-107 | Zero-division | FIXED | `digest.py:150`, `daily_digest.py:204,214` — added `or INITIAL_CASH_SEK` guard |
+| BUG-108 | Thread safety | FIXED | `alpha_vantage.py:164,281` — budget ops wrapped in `_cache_lock` |
+| BUG-109 | Performance | FIXED | `file_utils.py:74-125` — new `load_jsonl_tail()`, `digest.py:121` uses it |
+| BUG-110 | Stale import | FIXED | `digest.py:59` — changed to `from portfolio.file_utils import load_jsonl` |
+| COVERAGE-1 | Tests | DONE | `test_reporting_core.py` — 50 tests for reporting.py (was 0) |
+
+**New test files:** 2 (`test_bug_fixes_session_mar22.py` — 11 tests, `test_reporting_core.py` — 50 tests)
+**Total new tests:** 61
+**Regressions:** 0 (4528 passed, 139 failed pre-existing, 10 errors pre-existing)
