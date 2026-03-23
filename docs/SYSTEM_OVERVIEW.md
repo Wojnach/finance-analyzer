@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-03-20
-Branch: improve/auto-session-2026-03-20
+Updated: 2026-03-23
+Branch: improve/auto-session-2026-03-23
 
 ## 1) Architecture Summary
 
@@ -23,7 +23,7 @@ Two-layer autonomous trading system with 30 signals, 20 instruments, and dual-st
 | Metals loop | `data/metals_loop.py` | Separate process, warrant trading |
 | Agent | `scripts/win/pf-agent.bat` | Spawns Claude CLI for Layer 2 |
 
-## 3) Module Map (~95 portfolio modules)
+## 3) Module Map (~142 portfolio modules)
 
 ### Orchestration (5 modules)
 - `main.py` (843 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, parallel ticker processing via ThreadPoolExecutor(8)
@@ -222,7 +222,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - REF-13: 112 ruff lint violations (unused imports, f-strings, reimports) — fixed 2026-03-18
 - REF-14: 15 dead variable assignments across 13 modules — fixed 2026-03-18
 - ARCH-16: Golddigger/elongir duplicated config loading (deferred — localized, may diverge)
-- ~3,400 tests across 114+ test files (including 34 IO safety sweep tests, 36 thread safety/NaN/Batch 2-3 tests)
+- ~4,800 tests across 155+ test files
 - BUG-85 (P1): Thread-unsafe `_prev_sentiment` + per-ticker serialization data loss in signal_engine.py — fixed 2026-03-20
 - BUG-86 (P2): Thread-unsafe `_adx_cache` in signal_engine.py — fixed 2026-03-20
 - BUG-87 (P1): NaN propagation from compute_indicators into JSON and signals — fixed 2026-03-20
@@ -236,4 +236,12 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-97 (P2): Exception in check_agent_completion leaves agent state dirty — fixed 2026-03-20
 - BUG-99 (P3): ZeroDivisionError if initial_value_sek is 0 — fixed 2026-03-20
 - BUG-100 (P2): Empty Binance response recorded as circuit breaker success — fixed 2026-03-20
-- BUG-100 (P2): Binance empty response recorded as circuit breaker success — fixed 2026-03-20
+- BUG-101 through BUG-106: Crash safety, thread safety, zero-division, silent failures, alert routing, memory leak — fixed 2026-03-21
+- BUG-107 (P2): Zero-division in digest P&L calculations — fixed 2026-03-22
+- BUG-108 (P3): Alpha Vantage budget counter not thread-safe — fixed 2026-03-22
+- BUG-109 (P3): Digest reads entire 68MB signal_log.jsonl — fixed 2026-03-22
+- BUG-110 (P3): Stale import path in digest.py — fixed 2026-03-22
+- BUG-111 (P1): outcome_tracker RSI vote derivation uses fixed 30/70, not adaptive thresholds — in progress 2026-03-23
+- BUG-112 (P2): backfill_outcomes reads entire signal_log.jsonl into memory — in progress 2026-03-23
+- BUG-113 (P3): majority_vote HOLD confidence inconsistency — in progress 2026-03-23
+- BUG-114 (P3): forecast JSON extraction fallbacks lack observability — in progress 2026-03-23

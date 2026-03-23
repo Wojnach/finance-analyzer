@@ -1,138 +1,160 @@
 # Improvement Plan
 
-Updated: 2026-03-22
-Branch: improve/auto-session-2026-03-22
+Updated: 2026-03-23
+Branch: improve/auto-session-2026-03-23
 
-Previous sessions: 2026-03-05 through 2026-03-21.
+Previous sessions: 2026-03-05 through 2026-03-22.
 
-## Session Plan (2026-03-22)
+## Session Plan (2026-03-23)
 
-### Theme: Digest Safety, Budget Tracking, Reporting Tests
+### Theme: Accuracy Tracking Correctness, Memory Optimization, Signal Robustness
 
-Previous session (2026-03-21) fixed crash safety (BUG-101), thread safety (BUG-102),
-zero-division (BUG-103), silent failures (BUG-104), alert routing (BUG-105), and
-memory leak (BUG-106).
+Previous session (2026-03-22) fixed zero-division in digest, thread safety in Alpha Vantage
+budget counter, performance in digest signal_log reads, and added 50 tests for reporting.py.
 
-This session addresses five verified issues found by deep code audit:
+This session addresses verified issues found by deep code audit of the signal system,
+outcome tracker, and shared utilities:
 
-1. **Zero-division** — digest P&L calculation crashes on corrupt portfolio state (same
-   class as BUG-103, but in digest.py and daily_digest.py — missed in prior fix)
-2. **Thread safety** — Alpha Vantage `_daily_budget_used` incremented without lock
-3. **Performance** — digest reads entire 68MB signal_log.jsonl to get last 500 entries
-4. **Test coverage** — reporting.py (1,109 lines) has ZERO tests despite being critical
-   Layer 2 input builder
-5. **Stale import** — digest.py imports `load_jsonl` from `portfolio.stats` instead of
-   canonical `portfolio.file_utils`
+1. **Accuracy corruption** — outcome_tracker derives RSI votes with fixed 30/70 thresholds
+   while signal_engine uses adaptive percentile thresholds. This corrupts accuracy backfill.
+2. **Memory waste** — backfill_outcomes loads entire 68MB signal_log.jsonl into memory to
+   process only the last 2,000 entries.
+3. **Confidence edge case** — majority_vote returns inconsistent confidence when HOLD wins
+   by default (neither BUY nor SELL achieves majority).
+4. **Test coverage** — outcome_tracker has complex derivation logic with zero dedicated tests.
+5. **Observability** — forecast JSON extraction fallbacks don't log which strategy succeeded.
 
 ---
 
 ### 1) Bugs & Problems Found
 
-#### BUG-107 (P2): Zero-division in digest P&L calculations
+#### BUG-111 (P1): outcome_tracker RSI vote derivation uses fixed thresholds
 
-- **Files**: `portfolio/digest.py:149`, `portfolio/daily_digest.py:204,213`
-- **Issue**: `state["initial_value_sek"]` used as divisor without zero guard. Same class
-  as BUG-103 (fixed in main.py) and BUG-99 (fixed in reporting.py), but NOT fixed in the
-  two digest modules. If portfolio state is corrupt (`initial_value_sek: 0` or missing),
-  the digest crashes with ZeroDivisionError, preventing the user from receiving their 4h
-  and daily digest messages.
-- **Fix**: Guard: `initial = state.get("initial_value_sek") or INITIAL_CASH_SEK`
-- **Impact**: Digest crash blocks user notifications for 4+ hours until next attempt.
+- **Files**: `portfolio/outcome_tracker.py:24-32`, `portfolio/signal_engine.py:490-498`
+- **Issue**: `_derive_signal_vote("rsi", ...)` uses hardcoded `< 30` (BUY) and `> 70`
+  (SELL) thresholds. But `signal_engine.generate_signal()` uses adaptive thresholds from
+  rolling RSI percentiles: `rsi_p20` (20th percentile, default 30) and `rsi_p80` (80th
+  percentile, default 70), clamped to [15, 85]. When RSI is between the adaptive threshold
+  and the fixed threshold (e.g., RSI=25 with adaptive lower=22), the outcome tracker records
+  a BUY vote that signal_engine never actually cast. This corrupts accuracy tracking for RSI.
+- **Mitigation**: The `_votes` dict from signal_engine is passed through `extra["_votes"]`
+  in most cases, making `_derive_signal_vote` a fallback. But when `_votes` is missing (e.g.,
+  stale log entries, format migration), the derivation kicks in with wrong thresholds.
+- **Fix**: Pass `rsi_p20` and `rsi_p80` through the indicators dict. Update
+  `_derive_signal_vote("rsi", ...)` to use them with proper defaults. Also store the adaptive
+  thresholds in the signal snapshot so historical accuracy can be reconstructed correctly.
+- **Impact**: HIGH — RSI accuracy numbers may be inflated or deflated depending on how often
+  the adaptive thresholds deviate from 30/70. Affects weighted consensus through accuracy
+  weighting.
 
-#### BUG-108 (P3): Alpha Vantage budget counter not thread-safe
+#### BUG-112 (P2): backfill_outcomes reads entire signal_log.jsonl into memory
 
-- **File**: `portfolio/alpha_vantage.py:159-164,277`
-- **Issue**: `_daily_budget_used` is a module-level int incremented (`+= 1`) and read
-  (`_check_budget()`) without any lock protection. While `refresh_fundamentals_batch()`
-  is currently called single-threaded from the main loop post-cycle, the lack of
-  synchronization is inconsistent with the rest of the module (which uses `_cache_lock`
-  for all `_cache` operations) and creates a latent bug if the function is ever called
-  from ThreadPoolExecutor.
-- **Fix**: Protect budget reads/writes with `_cache_lock` (reuse existing lock — budget
-  operations are infrequent and short).
-- **Impact**: Currently LOW (single-threaded caller), but inconsistent pattern.
+- **File**: `portfolio/outcome_tracker.py:265-280`
+- **Issue**: `backfill_outcomes()` reads all lines from signal_log.jsonl into a Python list,
+  parses every JSON line, then splits into head (preserved) and tail (processed). With 68MB+
+  file and 150K+ entries, this loads ~75MB of parsed JSON into memory. The `max_entries=2000`
+  parameter limits processing but not loading.
+- **Fix**: Use a two-pass approach: (1) count total lines with a fast binary scan, (2) re-read
+  only the last max_entries lines for processing, (3) on rewrite, copy the head bytes verbatim
+  from the original file and append the modified tail. This reduces memory from 75MB to ~1MB.
+- **Impact**: MEDIUM — runs daily via PF-OutcomeCheck. Not a crash risk but wastes memory.
 
-#### BUG-109 (P3): Digest reads entire signal_log.jsonl (68MB+)
+#### BUG-113 (P3): majority_vote confidence calculation when HOLD wins
 
-- **File**: `portfolio/digest.py:120`
-- **Issue**: `load_jsonl(SIGNAL_LOG_FILE, limit=500)` reads the entire 68MB+ file line
-  by line (deque keeps last 500). The digest only needs entries from the last 4 hours,
-  but there's no efficient way to seek to recent entries. This causes a ~2-3 second
-  I/O spike every 4 hours.
-- **Fix**: Use `last_jsonl_entries()` helper that reads from the end of the file, or
-  add a `tail_bytes` parameter to `load_jsonl` that seeks to the last N bytes before
-  parsing. 500 entries × ~500 bytes each ≈ 250KB tail read instead of 68MB.
-- **Impact**: Performance — 2-3s I/O pause every 4 hours. Not critical but wasteful.
+- **File**: `portfolio/signal_utils.py:122-123`
+- **Issue**: When HOLD wins (neither BUY nor SELL has strict majority over HOLD), line 123
+  returns `hold / denom` when `count_hold=True`, but `0.0` when `count_hold=False`. The
+  `count_hold=False` path is correct (HOLD confidence should be 0.0 since it's the absence
+  of a signal). The `count_hold=True` path computes `hold / total`, which can produce
+  misleading confidence values. Example: votes=["HOLD","HOLD","BUY"] with `count_hold=True`
+  returns `("HOLD", 0.6667)` — this suggests 67% confidence in HOLD, but HOLD really means
+  "no signal". The confidence should reflect ambiguity, not HOLD strength.
+- **Fix**: Return 0.0 confidence for HOLD regardless of `count_hold` flag. HOLD is the
+  default/fallback action, not a directional vote. Confidence should only be non-zero for
+  BUY/SELL.
+- **Impact**: LOW — only affects callers using `count_hold=True`, which is rare (not used
+  in the main signal path).
 
-#### BUG-110 (P3): Stale import path in digest.py
+#### BUG-114 (P3): forecast JSON extraction fallbacks lack observability
 
-- **File**: `portfolio/digest.py:59`
-- **Issue**: `from portfolio.stats import load_jsonl` — imports `load_jsonl` via the
-  `stats.py` re-export rather than the canonical `portfolio.file_utils`. This creates
-  an unnecessary dependency on `stats.py` and masks the actual data source.
-- **Fix**: Change to `from portfolio.file_utils import load_jsonl`.
-- **Impact**: Code clarity only. No behavioral change.
+- **File**: `portfolio/signals/forecast.py` (in `_extract_json_from_stdout()`)
+- **Issue**: Three fallback strategies for extracting JSON from contaminated subprocess
+  stdout. When all three fail, returns None silently. When a later fallback succeeds, no
+  log indicates which strategy worked. This makes debugging Kronos stdout contamination
+  harder.
+- **Fix**: Add debug-level logging when a non-first fallback strategy succeeds.
+- **Impact**: LOW — observability only, no behavioral change.
 
-#### COVERAGE-1 (P2): reporting.py has ZERO test coverage
+#### COVERAGE-2 (P2): outcome_tracker has zero dedicated tests
 
-- **File**: `portfolio/reporting.py` (1,109 lines, ~20 functions)
-- **Issue**: The reporting module builds `agent_summary.json` and all tiered context
-  files that Layer 2 reads for every invocation. It is the most critical untested module
-  in the system. Functions like `write_agent_summary()`, `_write_compact_summary()`, and
-  `_write_tier2_summary()` process all 30 signals, macro context, accuracy data, risk
-  flags, and Monte Carlo results. A regression here silently corrupts Layer 2 input.
-- **Fix**: Write targeted tests for core functions: `write_agent_summary()` output
-  structure, `_write_compact_summary()` three-tier compaction, `_cross_asset_signals()`,
-  and `_module_warnings` propagation.
-- **Impact**: HIGH — regressions in reporting silently degrade all Layer 2 decisions.
+- **File**: `portfolio/outcome_tracker.py` (407 lines, ~5 functions)
+- **Issue**: The outcome tracker manages accuracy backfill — a core data pipeline that feeds
+  signal accuracy (which drives weighted consensus). Functions like `_derive_signal_vote()`,
+  `log_signal_snapshot()`, and `backfill_outcomes()` have complex logic with no tests.
+  Regressions here silently corrupt all accuracy data.
+- **Fix**: Write targeted tests for `_derive_signal_vote()` (all 11 signal branches),
+  `log_signal_snapshot()` (snapshot structure), and edge cases in backfill.
+- **Impact**: HIGH — regressions corrupt accuracy tracking → corrupts weighted consensus →
+  corrupts trade decisions.
 
 ---
 
 ### 2) Implementation Batches
 
-#### Batch 1: Zero-division & Import Fixes (3 files)
+#### Batch 1: Accuracy-Critical Fix + Tests (2 files)
 
 | Bug | File | Change |
 |-----|------|--------|
-| BUG-107 | digest.py | Guard `state["initial_value_sek"]` division with `or INITIAL_CASH_SEK` |
-| BUG-107 | daily_digest.py | Same guard for patient and bold P&L calculations |
-| BUG-110 | digest.py | Change `from portfolio.stats import load_jsonl` to `from portfolio.file_utils import load_jsonl` |
+| BUG-111 | outcome_tracker.py | Update `_derive_signal_vote("rsi", ...)` to use adaptive thresholds from indicators |
+| COVERAGE-2 | test_outcome_tracker_core.py | New test file: ~30 tests for _derive_signal_vote, log_signal_snapshot |
 
-**Risk**: LOW — additive guards, import path change has identical behavior.
+**Risk**: LOW — _derive_signal_vote is a fallback path. The fix aligns it with signal_engine.
+Tests are additive.
 
-#### Batch 2: Thread Safety & Performance (2 files)
+**Dependency**: None.
+
+#### Batch 2: Memory Optimization (1 file + tests)
 
 | Bug | File | Change |
 |-----|------|--------|
-| BUG-108 | alpha_vantage.py | Wrap `_daily_budget_used` reads/writes with `_cache_lock` |
-| BUG-109 | file_utils.py | Add `load_jsonl_tail()` helper that reads from file end |
-| BUG-109 | digest.py | Use `load_jsonl_tail()` for signal_log reads |
+| BUG-112 | outcome_tracker.py | Refactor backfill_outcomes to use streaming head + parsed tail |
+| — | test_outcome_tracker_core.py | Add backfill tests with large file simulation |
 
-**Risk**: LOW — lock addition is additive. File tail-read is new code but isolated.
+**Risk**: MEDIUM — modifies the file-rewrite logic in a function that runs daily. Must be
+tested thoroughly. The rewrite still uses atomic tempfile+replace pattern.
 
-#### Batch 3: Reporting Tests
+**Dependency**: Batch 1 (tests exist to validate).
 
-| Test | Covers |
-|------|--------|
-| test_reporting_core.py | write_agent_summary output structure, _write_compact_summary three-tier compaction, _cross_asset_signals, _module_warnings propagation |
+#### Batch 3: Signal Utility Fixes (2 files + tests)
 
-**Risk**: NONE — tests only, no production code changes.
+| Bug | File | Change |
+|-----|------|--------|
+| BUG-113 | signal_utils.py | Return 0.0 confidence for HOLD in majority_vote |
+| BUG-114 | forecast.py | Add debug logging for JSON extraction fallback selection |
+| — | test_signal_utils.py or existing tests | Add edge case test for all-HOLD votes |
+
+**Risk**: LOW — majority_vote change only affects the count_hold=True path. Forecast logging
+is additive.
+
+**Dependency**: None (parallel with Batch 1-2).
 
 ---
 
 ### 3) What Was NOT Changed (and Why)
 
-- **sentiment.py test coverage**: 608 lines, 0 tests. Large module with many external
-  dependencies (subprocess calls, HTTP). Would need extensive mocking. Deferred.
-- **main.py test coverage**: 851 lines, 0 tests. Loop orchestration is hard to unit test.
-  Integration testing would be more valuable. Deferred.
-- **NewsAPI quota persistence**: `_newsapi_daily_count` resets on restart. LOW risk since
-  the daily budget (90) is generous and restarts are rare during active hours.
-- **Circuit breaker state persistence**: State is in-memory only. On restart, breakers
-  reset to CLOSED. This is acceptable — the recovery timeout (60s) means a brief burst
-  of retries, then the breaker re-trips if the API is still down.
-- **Stale data files in data/**: ~50 experimental scripts and state files. Cleanup would
-  be valuable but is housekeeping, not a bug fix. Deferred to a dedicated cleanup session.
+- **main.py test coverage**: 851 lines, 0 tests. Loop orchestration is inherently
+  integration-level. Unit testing individual functions would require extracting them further.
+  Not worth the refactoring risk for this session. Deferred.
+- **sentiment.py test coverage**: 608 lines, 0 tests. Too many external dependencies.
+  Would need extensive mocking infrastructure. Deferred.
+- **Signal registry function signature validation**: Would prevent future bugs but has no
+  current manifestation. The existing test suite catches signature mismatches at test time.
+  Deferred.
+- **forecast.py 50-bar minimum**: Not a bug — 50 bars is adequate for time-series models.
+  Adding a higher threshold could reduce forecast availability without clear benefit.
+- **ADX cache nuclear eviction**: The `_adx_cache.clear()` at 200 entries is crude but
+  functional. With 20 tickers × 7 timeframes = 140 entries per cycle (below 200), it
+  rarely triggers. Not worth optimizing.
 
 ---
 
@@ -140,12 +162,8 @@ This session addresses five verified issues found by deep code audit:
 
 | ID | Type | Status | Details |
 |----|------|--------|---------|
-| BUG-107 | Zero-division | FIXED | `digest.py:150`, `daily_digest.py:204,214` — added `or INITIAL_CASH_SEK` guard |
-| BUG-108 | Thread safety | FIXED | `alpha_vantage.py:164,281` — budget ops wrapped in `_cache_lock` |
-| BUG-109 | Performance | FIXED | `file_utils.py:74-125` — new `load_jsonl_tail()`, `digest.py:121` uses it |
-| BUG-110 | Stale import | FIXED | `digest.py:59` — changed to `from portfolio.file_utils import load_jsonl` |
-| COVERAGE-1 | Tests | DONE | `test_reporting_core.py` — 50 tests for reporting.py (was 0) |
-
-**New test files:** 2 (`test_bug_fixes_session_mar22.py` — 11 tests, `test_reporting_core.py` — 50 tests)
-**Total new tests:** 61
-**Regressions:** 0 (4528 passed, 139 failed pre-existing, 10 errors pre-existing)
+| BUG-111 | Accuracy | PENDING | outcome_tracker RSI adaptive thresholds |
+| BUG-112 | Performance | PENDING | backfill_outcomes memory optimization |
+| BUG-113 | Logic | PENDING | majority_vote HOLD confidence |
+| BUG-114 | Observability | PENDING | forecast JSON extraction logging |
+| COVERAGE-2 | Tests | PENDING | outcome_tracker test suite |
