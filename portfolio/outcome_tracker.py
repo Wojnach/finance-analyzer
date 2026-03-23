@@ -326,7 +326,7 @@ def backfill_outcomes(max_entries=2000):
         all_filled = True
         for ticker in tickers:
             if ticker not in outcomes:
-                outcomes[ticker] = {"1d": None, "3d": None, "5d": None, "10d": None}
+                outcomes[ticker] = {h: None for h in HORIZONS}
             for h_key in HORIZONS:
                 if outcomes[ticker].get(h_key) is None:
                     all_filled = False
@@ -341,7 +341,7 @@ def backfill_outcomes(max_entries=2000):
             if ticker not in known_tickers:
                 continue  # skip removed/unknown tickers (e.g. AI)
             if ticker not in outcomes:
-                outcomes[ticker] = {"1d": None, "3d": None, "5d": None, "10d": None}
+                outcomes[ticker] = {h: None for h in HORIZONS}
 
             base_price = tickers[ticker].get("price_usd")
             for h_key, h_seconds in HORIZONS.items():
