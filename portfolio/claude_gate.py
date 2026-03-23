@@ -243,6 +243,83 @@ def invoke_claude(
     return exit_code == 0, exit_code
 
 
+def invoke_claude_text(
+    prompt: str,
+    caller: str,
+    model: str = "sonnet",
+    timeout: int = 60,
+) -> tuple[str, bool, int]:
+    """Invoke Claude CLI for text-only Q&A (no tools, single turn).
+
+    Unlike ``invoke_claude()``, this captures stdout and returns the text
+    response.  Used by signals that need Claude's analysis as structured
+    text (e.g., claude_fundamental).
+
+    Returns:
+        ``(text, success, exit_code)``
+    """
+    now_iso = datetime.now(UTC).isoformat()
+
+    if not CLAUDE_ENABLED or not _load_config_layer2_enabled():
+        _log_invocation({
+            "timestamp": now_iso, "caller": caller, "status": "blocked",
+            "reason": "disabled", "model": model, "max_turns": 1,
+            "duration_seconds": 0, "exit_code": -1,
+        })
+        return "", False, -1
+
+    claude_cmd = _find_claude_cmd()
+    if not claude_cmd:
+        logger.error("claude CLI not found — caller=%s", caller)
+        return "", False, -1
+
+    cmd = [
+        claude_cmd, "-p", prompt,
+        "--model", model,
+        "--output-format", "text",
+        "--max-turns", "1",
+        "--allowedTools", "",
+    ]
+
+    t0 = time.time()
+    text = ""
+    exit_code = -1
+    status = "error"
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=_clean_env(),
+            cwd=str(BASE_DIR),
+            stdin=subprocess.DEVNULL,
+        )
+        exit_code = result.returncode
+        text = result.stdout or ""
+        status = "invoked" if exit_code == 0 else "error"
+    except subprocess.TimeoutExpired:
+        status = "timeout"
+        logger.warning("Claude text invocation timed out after %ds — caller=%s", timeout, caller)
+    except Exception as e:
+        logger.error("Claude text invocation failed — caller=%s: %s", caller, e)
+
+    duration = round(time.time() - t0, 2)
+    _log_invocation({
+        "timestamp": now_iso, "caller": caller, "status": status,
+        "model": model, "max_turns": 1,
+        "duration_seconds": duration, "exit_code": exit_code,
+    })
+
+    logger.info(
+        "Claude text: caller=%s model=%s status=%s exit=%d duration=%.1fs len=%d",
+        caller, model, status, exit_code, duration, len(text),
+    )
+
+    return text, exit_code == 0, exit_code
+
+
 def get_invocation_stats() -> dict:
     """Return summary statistics from the invocation log.
 

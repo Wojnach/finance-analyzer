@@ -645,11 +645,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
         except ImportError:
             logger.debug("Optional module %s not available", "macro_context")
 
-    # Ministral-8B LLM reasoning (original CryptoTrader-LM, crypto only)
+    # Ministral-3-8B LLM reasoning (all tickers — crypto, stocks, metals)
+    # Upgraded from legacy Ministral-8B (44% accuracy) to Ministral-3-8B.
     # custom_lora fully disabled: 20.9% accuracy, 97% SELL bias (worse than random).
-    # Model no longer invoked. Shadow A/B testing data preserved in ab_test_log.jsonl.
     votes["ministral"] = "HOLD"
-    if ticker and ticker in CRYPTO_SYMBOLS:
+    if ticker:
         short_ticker = ticker.replace("-USD", "")
         try:
             from portfolio.ministral_signal import get_ministral_signal
