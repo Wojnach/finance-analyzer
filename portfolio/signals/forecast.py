@@ -121,7 +121,9 @@ def _extract_json_from_stdout(stdout: str | None) -> dict | None:
     brace_idx = text.find("{")
     if brace_idx > 0:
         try:
-            return json.loads(text[brace_idx:])
+            parsed = json.loads(text[brace_idx:])
+            logger.debug("JSON extracted via brace-offset fallback (offset=%d, len=%d)", brace_idx, len(text))
+            return parsed
         except json.JSONDecodeError:
             pass
 
@@ -130,10 +132,13 @@ def _extract_json_from_stdout(stdout: str | None) -> dict | None:
         line = line.strip()
         if line.startswith("{"):
             try:
-                return json.loads(line)
+                parsed = json.loads(line)
+                logger.debug("JSON extracted via reverse-line-scan fallback (len=%d)", len(text))
+                return parsed
             except json.JSONDecodeError:
                 continue
 
+    logger.debug("JSON extraction failed — all 3 strategies exhausted (len=%d)", len(text) if text else 0)
     return None
 
 

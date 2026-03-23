@@ -117,10 +117,12 @@ def majority_vote(votes: list, count_hold: bool = False) -> tuple:
         return "BUY", round(buy / denom, 4) if denom > 0 else 0.0
     elif sell > buy and sell > hold:
         return "SELL", round(sell / denom, 4) if denom > 0 else 0.0
-    elif buy == sell and buy > 0:
-        return "HOLD", 0.0  # tie between buy and sell
     else:
-        return "HOLD", round(hold / denom, 4) if denom > 0 and count_hold else 0.0
+        # HOLD wins: tie between buy/sell, or hold > both, or no clear majority.
+        # HOLD confidence is always 0.0 — it's the absence of a signal, not a
+        # directional vote. (BUG-113: previously returned hold/total when
+        # count_hold=True, which gave misleading non-zero confidence for HOLD.)
+        return "HOLD", 0.0
 
 
 def roc(series: pd.Series, period: int) -> pd.Series:
