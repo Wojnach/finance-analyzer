@@ -139,7 +139,65 @@ def _build_macro_block(macro):
     return " | ".join(parts) if parts else "Macro data unavailable."
 
 
-def _build_fundamentals_block(ticker, fundamentals, tier="haiku"):
+# Earnings calendar cache (refreshed every 12h)
+_earnings_cache = {"data": {}, "ts": 0}
+_EARNINGS_CACHE_TTL = 43200  # 12 hours
+
+
+def _get_earnings_calendar():
+    """Fetch next earnings dates from yfinance for all stock tickers.
+
+    Cached for 12h to avoid excessive Yahoo Finance requests.
+    Returns dict of {ticker: {date, eps_estimate, days_until}}.
+    """
+    now = time.time()
+    if now - _earnings_cache["ts"] < _EARNINGS_CACHE_TTL and _earnings_cache["data"]:
+        return _earnings_cache["data"]
+
+    from datetime import datetime
+
+    try:
+        from portfolio.tickers import STOCK_SYMBOLS
+    except ImportError:
+        return {}
+
+    result = {}
+    for ticker in STOCK_SYMBOLS:
+        try:
+            import yfinance as yf
+            t = yf.Ticker(ticker)
+            cal = t.calendar
+            if cal is None or (hasattr(cal, "empty") and cal.empty):
+                continue
+            if isinstance(cal, dict):
+                dates = cal.get("Earnings Date", [])
+                eps_avg = cal.get("Earnings Average")
+            elif hasattr(cal, "loc"):
+                dates = cal.loc["Earnings Date"] if "Earnings Date" in cal.index else []
+                eps_avg = cal.loc["Earnings Average"] if "Earnings Average" in cal.index else None
+            else:
+                continue
+
+            if dates:
+                next_date = dates[0] if isinstance(dates, list) else dates
+                if hasattr(next_date, "date"):
+                    next_date = next_date.date()
+                today = datetime.now(UTC).date()
+                days_until = (next_date - today).days
+                result[ticker] = {
+                    "date": str(next_date),
+                    "eps_estimate": float(eps_avg) if eps_avg is not None else None,
+                    "days_until": days_until,
+                }
+        except Exception:
+            continue
+
+    _earnings_cache["data"] = result
+    _earnings_cache["ts"] = now
+    return result
+
+
+def _build_fundamentals_block(ticker, fundamentals, tier="haiku", earnings=None):
     """Build a fundamentals data string for a ticker based on tier detail level.
 
     Args:
@@ -153,6 +211,8 @@ def _build_fundamentals_block(ticker, fundamentals, tier="haiku"):
     fund = fundamentals.get(ticker) if fundamentals else None
     if not fund:
         return ""
+
+    earn = (earnings or {}).get(ticker, {})
 
     if tier == "haiku":
         # One-liner: key metrics only
@@ -169,6 +229,8 @@ def _build_fundamentals_block(ticker, fundamentals, tier="haiku"):
         margin = fund.get("profit_margin")
         if margin is not None:
             parts.append(f"Margin={margin:.0%}")
+        if earn.get("days_until") is not None:
+            parts.append(f"Earnings={earn['days_until']}d")
         return " ".join(parts) if len(parts) > 1 else ""
 
     # Sonnet/Opus: detailed block
@@ -214,6 +276,11 @@ def _build_fundamentals_block(ticker, fundamentals, tier="haiku"):
     if sector:
         ind_str = f"/{industry}" if industry else ""
         lines.append(f"    Sector: {sector}{ind_str}")
+    if earn.get("date"):
+        earn_parts = [f"NextEarnings={earn['date']} ({earn.get('days_until', '?')}d)"]
+        if earn.get("eps_estimate") is not None:
+            earn_parts.append(f"EPS_Est=${earn['eps_estimate']:.2f}")
+        lines.append(f"    Catalyst: {' '.join(earn_parts)}")
 
     return "\n".join(lines) if len(lines) > 1 else ""
 
@@ -237,10 +304,11 @@ def _build_haiku_prompt(summary, macro):
 
     # Add one-liner fundamentals for each ticker
     fundamentals = _get_fundamentals_data()
+    earnings = _get_earnings_calendar()
     fund_lines = []
     tickers = summary.get("signals", summary.get("tickers", {}))
     for ticker in tickers:
-        line = _build_fundamentals_block(ticker, fundamentals, tier="haiku")
+        line = _build_fundamentals_block(ticker, fundamentals, tier="haiku", earnings=earnings)
         if line:
             fund_lines.append(line)
     fund_section = "\n".join(fund_lines) if fund_lines else ""
@@ -281,10 +349,11 @@ def _build_sonnet_prompt(summary, macro):
 
     # Add detailed fundamentals per ticker
     fundamentals = _get_fundamentals_data()
+    earnings = _get_earnings_calendar()
     fund_blocks = []
     tickers = summary.get("signals", summary.get("tickers", {}))
     for ticker in tickers:
-        block = _build_fundamentals_block(ticker, fundamentals, tier="sonnet")
+        block = _build_fundamentals_block(ticker, fundamentals, tier="sonnet", earnings=earnings)
         if block:
             fund_blocks.append(block)
     fund_section = "\n".join(fund_blocks) if fund_blocks else ""
@@ -354,10 +423,11 @@ def _build_opus_prompt(summary, macro, portfolios):
 
     # Add detailed fundamentals + cross-sector comparison for Opus
     fundamentals = _get_fundamentals_data()
+    earnings = _get_earnings_calendar()
     fund_blocks = []
     tickers = summary.get("signals", summary.get("tickers", {}))
     for ticker in tickers:
-        block = _build_fundamentals_block(ticker, fundamentals, tier="opus")
+        block = _build_fundamentals_block(ticker, fundamentals, tier="opus", earnings=earnings)
         if block:
             fund_blocks.append(block)
     fund_section = "\n".join(fund_blocks) if fund_blocks else ""

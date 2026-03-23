@@ -971,6 +971,21 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
         activation_rates = load_cached_activation_rates()
     except Exception:
         logger.error("Accuracy stats load failed", exc_info=True)
+
+    # Override global accuracy with per-ticker accuracy for LLM signals.
+    # The global number averages across all tickers, but Qwen3/Ministral
+    # performance varies hugely per ticker (e.g., Qwen3: MU 90%, PLTR 44%).
+    for llm_sig in ("qwen3", "ministral"):
+        per_ticker_acc = extra_info.get(f"{llm_sig}_accuracy")
+        per_ticker_samples = extra_info.get(f"{llm_sig}_samples", 0)
+        if per_ticker_acc is not None and per_ticker_samples >= 20:
+            accuracy_data[llm_sig] = {
+                "accuracy": per_ticker_acc,
+                "total": per_ticker_samples,
+                "correct": int(per_ticker_acc * per_ticker_samples),
+                "pct": round(per_ticker_acc * 100, 1),
+            }
+
     weighted_action, weighted_conf = _weighted_consensus(
         votes, accuracy_data, regime, activation_rates
     )

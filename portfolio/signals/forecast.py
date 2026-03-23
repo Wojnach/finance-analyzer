@@ -474,7 +474,7 @@ def _load_forecast_accuracy(cache_ttl=None):
     def _fetch():
         try:
             from portfolio.forecast_accuracy import get_all_ticker_accuracies
-            return get_all_ticker_accuracies(horizon="24h", days=7)
+            return get_all_ticker_accuracies(horizon="24h", days=14)
         except Exception as e:
             logger.debug("Failed to load forecast accuracy: %s", e)
             return {}
