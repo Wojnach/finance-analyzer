@@ -48,11 +48,14 @@ def _build_tier_prompt(tier, reasons):
     """Build a tier-specific prompt for the Claude Code agent."""
     reason_str = ", ".join(reasons[:5])
 
+    playbook = "docs/TRADING_PLAYBOOK.md"
+
     if tier == 1:
         return (
             "You are the Layer 2 trading agent (QUICK CHECK). "
             f"Trigger: {reason_str}. "
-            "Read data/layer2_context.md then data/agent_context_t1.json. "
+            f"Read {playbook} for trading rules, then data/layer2_context.md "
+            "then data/agent_context_t1.json. "
             "This is a routine check. Confirm held positions are OK (check ATR stops). "
             "If no positions are held, briefly assess macro state. "
             "Write a brief journal entry and send a short Telegram message. "
@@ -62,19 +65,21 @@ def _build_tier_prompt(tier, reasons):
         return (
             "You are the Layer 2 trading agent (SIGNAL ANALYSIS). "
             f"Trigger: {reason_str}. "
-            "Read data/layer2_context.md, then data/agent_context_t2.json, "
+            f"Read {playbook} for trading rules, then data/layer2_context.md, "
+            "then data/agent_context_t2.json, "
             "data/portfolio_state.json, and data/portfolio_state_bold.json. "
             "Analyze triggered tickers and held positions. Decide for BOTH strategies. "
-            "Write journal entry and send Telegram per CLAUDE.md instructions."
+            "Write journal entry and send Telegram per the playbook instructions."
         )
     else:
-        # Tier 3 — full review, same as the original pf-agent.bat prompt
+        # Tier 3 — full review
         return (
             "You are the Layer 2 trading agent. "
-            "FIRST read data/layer2_context.md (your memory from previous invocations). "
+            f"FIRST read {playbook} for trading rules. "
+            "Then read data/layer2_context.md (your memory from previous invocations). "
             "Then read data/agent_summary_compact.json (signals, trigger reasons, timeframes), "
             "data/portfolio_state.json (Patient portfolio), and data/portfolio_state_bold.json "
-            "(Bold portfolio). Follow the instructions in CLAUDE.md to analyze, decide, and act "
+            "(Bold portfolio). Follow the playbook to analyze, decide, and act "
             "for BOTH strategies independently. Compare your previous theses and prices with "
             "current data — were you right? Always write a journal entry and send a Telegram message."
         )
