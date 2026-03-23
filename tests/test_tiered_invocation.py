@@ -492,7 +492,7 @@ class TestBuildTierPrompt:
     def test_tier3_prompt_is_full_review(self):
         prompt = _build_tier_prompt(3, ["periodic review"])
         assert "agent_summary_compact.json" in prompt
-        assert "CLAUDE.md" in prompt
+        assert "TRADING_PLAYBOOK.md" in prompt
 
     def test_prompt_includes_reasons(self):
         reasons = ["MU consensus BUY (79%)", "cooldown (10min)"]
