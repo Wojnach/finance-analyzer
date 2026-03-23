@@ -25,9 +25,14 @@ def _derive_signal_vote(name, indicators, extra):
         rsi = indicators.get("rsi")
         if rsi is None:
             return "HOLD"
-        if rsi < 30:
+        # BUG-111: Should use adaptive thresholds from rsi_p20/rsi_p80
+        rsi_lower = indicators.get("rsi_p20", 30)
+        rsi_upper = indicators.get("rsi_p80", 70)
+        rsi_lower = max(rsi_lower, 15)
+        rsi_upper = min(rsi_upper, 85)
+        if rsi < rsi_lower:
             return "BUY"
-        if rsi > 70:
+        if rsi > rsi_upper:
             return "SELL"
         return "HOLD"
 
