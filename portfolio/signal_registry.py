@@ -126,6 +126,9 @@ def _register_defaults():
     # Futures flow — OI, LS ratios, funding history (crypto only); capped at 0.7
     register_enhanced("futures_flow", "portfolio.signals.futures_flow",
                       "compute_futures_flow_signal", requires_context=True, max_confidence=0.7)
+    # Crypto macro — options max pain, gold-BTC rotation, exchange reserves (crypto only); capped at 0.7
+    register_enhanced("crypto_macro", "portfolio.signals.crypto_macro",
+                      "compute_crypto_macro_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
