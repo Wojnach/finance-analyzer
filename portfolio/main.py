@@ -239,6 +239,12 @@ def _run_post_cycle(config):
         maybe_evolve(config)
     except Exception as e_evolve:
         logger.warning("Fin evolve failed: %s", e_evolve)
+    # Scheduled crypto analysis report (08:00, 13:00, 18:00 CET)
+    try:
+        from portfolio.crypto_scheduler import maybe_run_crypto_report
+        maybe_run_crypto_report(config)
+    except Exception as e_crypto:
+        logger.warning("Crypto scheduler failed: %s", e_crypto)
 
 
 # --- Main orchestrator ---
