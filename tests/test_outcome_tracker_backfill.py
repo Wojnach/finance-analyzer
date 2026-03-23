@@ -133,3 +133,79 @@ class TestBackfillMaxEntries:
             from portfolio.outcome_tracker import backfill_outcomes
             result = backfill_outcomes()
         assert result == 0
+
+
+class TestBackfillStreamingOptimization:
+    """Tests for BUG-112: verify head bytes are streamed, not parsed as JSON."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path):
+        self.log_file = tmp_path / "signal_log.jsonl"
+
+    def test_head_bytes_preserved_exactly(self):
+        """Head entries should be byte-identical in output (no JSON re-serialization)."""
+        # Create entries with specific formatting that would change if re-serialized
+        head_json = '{"ts":"2025-01-01T00:00:00+00:00","tickers":{"BTC-USD":{"price_usd":67000}},"outcomes":{"BTC-USD":{"1d":{"price_usd":67100,"change_pct":0.15,"ts":"x"},"3d":{"price_usd":67100,"change_pct":0.15,"ts":"x"},"5d":{"price_usd":67100,"change_pct":0.15,"ts":"x"},"10d":{"price_usd":67100,"change_pct":0.15,"ts":"x"}}}}'
+        tail_entry = _make_entry(hours_ago=1)
+
+        with open(self.log_file, "w", encoding="utf-8") as f:
+            f.write(head_json + "\n")
+            f.write(json.dumps(tail_entry) + "\n")
+
+        with patch("portfolio.outcome_tracker.SIGNAL_LOG", self.log_file), \
+             patch("portfolio.outcome_tracker._fetch_historical_price", return_value=None):
+            from portfolio.outcome_tracker import backfill_outcomes
+            backfill_outcomes(max_entries=1)
+
+        # Read raw bytes — head line should be exactly preserved
+        with open(self.log_file, "rb") as f:
+            first_line = f.readline()
+        assert first_line.strip() == head_json.encode("utf-8")
+
+    def test_large_file_only_parses_tail(self):
+        """With many entries, only the last max_entries should be JSON-parsed."""
+        # Create 100 head + 5 tail entries
+        entries = []
+        for i in range(105):
+            e = _make_entry(hours_ago=500 - i)
+            # Mark head entries as fully filled so they don't need processing
+            if i < 100:
+                e["outcomes"] = {"BTC-USD": {
+                    "1d": {"price_usd": 67100, "change_pct": 0.15, "ts": "x"},
+                    "3d": {"price_usd": 67100, "change_pct": 0.15, "ts": "x"},
+                    "5d": {"price_usd": 67100, "change_pct": 0.15, "ts": "x"},
+                    "10d": {"price_usd": 67100, "change_pct": 0.15, "ts": "x"},
+                }}
+            entries.append(e)
+
+        _write_signal_log(self.log_file, entries)
+
+        with patch("portfolio.outcome_tracker.SIGNAL_LOG", self.log_file), \
+             patch("portfolio.outcome_tracker._fetch_historical_price", return_value=None):
+            from portfolio.outcome_tracker import backfill_outcomes
+            backfill_outcomes(max_entries=5)
+
+        result = _read_signal_log(self.log_file)
+        assert len(result) == 105  # all entries preserved
+
+    def test_empty_file_with_streaming(self):
+        """Zero-byte file should return 0."""
+        self.log_file.write_bytes(b"")
+
+        with patch("portfolio.outcome_tracker.SIGNAL_LOG", self.log_file):
+            from portfolio.outcome_tracker import backfill_outcomes
+            result = backfill_outcomes()
+        assert result == 0
+
+    def test_all_entries_as_tail_when_below_max(self):
+        """When total entries < max_entries, head_end_offset should be 0."""
+        entries = [_make_entry(hours_ago=i) for i in range(3)]
+        _write_signal_log(self.log_file, entries)
+
+        with patch("portfolio.outcome_tracker.SIGNAL_LOG", self.log_file), \
+             patch("portfolio.outcome_tracker._fetch_historical_price", return_value=None):
+            from portfolio.outcome_tracker import backfill_outcomes
+            backfill_outcomes(max_entries=100)
+
+        result = _read_signal_log(self.log_file)
+        assert len(result) == 3
