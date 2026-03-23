@@ -92,7 +92,12 @@ def _needs_refresh(tier, cooldowns):
 def _build_ticker_grid(summary):
     """Build compact ticker grid from agent_summary_compact data."""
     lines = []
-    tickers = summary.get("tickers", {})
+    tickers = summary.get("signals", summary.get("tickers", {}))
+    if not tickers:
+        logger.warning("claude_fundamental: empty ticker grid — summary has keys %s "
+                        "but no 'signals' or 'tickers' data. Signal will return HOLD.",
+                        list(summary.keys())[:5])
+        return ""
     for ticker, data in tickers.items():
         price = data.get("price_usd", data.get("price", "?"))
         rsi_val = data.get("rsi", "?")
@@ -233,7 +238,7 @@ def _build_haiku_prompt(summary, macro):
     # Add one-liner fundamentals for each ticker
     fundamentals = _get_fundamentals_data()
     fund_lines = []
-    tickers = summary.get("tickers", {})
+    tickers = summary.get("signals", summary.get("tickers", {}))
     for ticker in tickers:
         line = _build_fundamentals_block(ticker, fundamentals, tier="haiku")
         if line:
@@ -277,7 +282,7 @@ def _build_sonnet_prompt(summary, macro):
     # Add detailed fundamentals per ticker
     fundamentals = _get_fundamentals_data()
     fund_blocks = []
-    tickers = summary.get("tickers", {})
+    tickers = summary.get("signals", summary.get("tickers", {}))
     for ticker in tickers:
         block = _build_fundamentals_block(ticker, fundamentals, tier="sonnet")
         if block:
@@ -350,7 +355,7 @@ def _build_opus_prompt(summary, macro, portfolios):
     # Add detailed fundamentals + cross-sector comparison for Opus
     fundamentals = _get_fundamentals_data()
     fund_blocks = []
-    tickers = summary.get("tickers", {})
+    tickers = summary.get("signals", summary.get("tickers", {}))
     for ticker in tickers:
         block = _build_fundamentals_block(ticker, fundamentals, tier="opus")
         if block:

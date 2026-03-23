@@ -11,7 +11,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 SIGNAL_LOG = DATA_DIR / "signal_log.jsonl"
 
-HORIZONS = {"3h": 10800, "1d": 86400, "3d": 259200, "5d": 432000, "10d": 864000}
+HORIZONS = {"3h": 10800, "4h": 14400, "12h": 43200, "1d": 86400, "3d": 259200, "5d": 432000, "10d": 864000}
 from portfolio.tickers import (
     BINANCE_FAPI_MAP,
     BINANCE_SPOT_MAP,

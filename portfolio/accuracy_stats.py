@@ -17,7 +17,7 @@ DATA_DIR = BASE_DIR / "data"
 SIGNAL_LOG = DATA_DIR / "signal_log.jsonl"
 ACCURACY_CACHE_FILE = DATA_DIR / "accuracy_cache.json"
 ACCURACY_CACHE_TTL = 3600
-HORIZONS = ["1d", "3d", "5d", "10d"]
+HORIZONS = ["3h", "4h", "12h", "1d", "3d", "5d", "10d"]
 
 
 def load_entries():

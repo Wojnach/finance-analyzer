@@ -243,3 +243,97 @@ def get_health_summary() -> dict:
     except Exception as e:
         logger.debug("Circuit breaker status unavailable: %s", e)
     return summary
+
+
+def check_outcome_staleness(max_age_hours: int = 36) -> dict:
+    """Check if outcome backfill is stale (no recent outcomes in signal_log).
+
+    Returns dict with: stale (bool), newest_outcome_age_hours (float),
+    entries_without_outcomes (int).
+    """
+    signal_log = DATA_DIR / "signal_log.jsonl"
+    if not signal_log.exists():
+        return {"stale": True, "newest_outcome_age_hours": float("inf"),
+                "entries_without_outcomes": 0}
+
+    import json
+    now = time.time()
+    newest_outcome_ts = 0
+    missing_count = 0
+    # Check last 50 entries
+    try:
+        with open(signal_log) as f:
+            lines = f.readlines()
+        for line in lines[-50:]:
+            entry = json.loads(line)
+            outcomes = entry.get("outcomes", {})
+            has_any = any(
+                outcomes.get(t, {}).get("1d") is not None
+                for t in outcomes
+            )
+            if has_any:
+                # Parse outcome timestamps to find newest
+                for t_outcomes in outcomes.values():
+                    for h_data in t_outcomes.values():
+                        if isinstance(h_data, dict) and h_data.get("ts"):
+                            try:
+                                ots = datetime.fromisoformat(h_data["ts"]).timestamp()
+                                newest_outcome_ts = max(newest_outcome_ts, ots)
+                            except (ValueError, TypeError):
+                                pass
+            else:
+                missing_count += 1
+    except Exception as exc:
+        logger.warning("check_outcome_staleness error: %s", exc)
+        return {"stale": True, "newest_outcome_age_hours": float("inf"),
+                "entries_without_outcomes": 0}
+
+    if newest_outcome_ts == 0:
+        age_hours = float("inf")
+    else:
+        age_hours = (now - newest_outcome_ts) / 3600
+
+    return {
+        "stale": age_hours > max_age_hours,
+        "newest_outcome_age_hours": round(age_hours, 1),
+        "entries_without_outcomes": missing_count,
+    }
+
+
+def check_dead_signals(recent_entries: int = 20) -> list[str]:
+    """Detect signals that voted HOLD on every ticker in the last N entries.
+
+    Returns list of signal names that are effectively dead (100% HOLD).
+    """
+    signal_log = DATA_DIR / "signal_log.jsonl"
+    if not signal_log.exists():
+        return []
+
+    import json
+    try:
+        with open(signal_log) as f:
+            lines = f.readlines()
+    except Exception:
+        return []
+
+    # Collect vote counts per signal
+    from collections import defaultdict
+    vote_counts = defaultdict(lambda: {"total": 0, "non_hold": 0})
+
+    for line in lines[-recent_entries:]:
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        for _ticker, tdata in entry.get("tickers", {}).items():
+            for sig_name, vote in tdata.get("signals", {}).items():
+                vote_counts[sig_name]["total"] += 1
+                if vote in ("BUY", "SELL"):
+                    vote_counts[sig_name]["non_hold"] += 1
+
+    # Signals with >0 total votes but 0 non-HOLD votes are dead
+    dead = []
+    for sig_name, counts in vote_counts.items():
+        if counts["total"] >= recent_entries and counts["non_hold"] == 0:
+            dead.append(sig_name)
+    return sorted(dead)

@@ -549,6 +549,38 @@ def run(force_report=False, active_symbols=None):
     except Exception as e:
         logger.warning("health update failed: %s", e)
 
+    # Periodic safeguard checks (every 100 cycles ≈ 100 min)
+    if _ss._run_cycle_id % 100 == 0 and _ss._run_cycle_id > 0:
+        try:
+            from portfolio.health import check_dead_signals, check_outcome_staleness
+            outcome_status = check_outcome_staleness()
+            if outcome_status["stale"]:
+                age = outcome_status["newest_outcome_age_hours"]
+                msg = (f"⚠️ SAFEGUARD: Outcome backfill stale! "
+                       f"Newest outcome: {age:.0f}h ago. "
+                       f"Entries missing outcomes: {outcome_status['entries_without_outcomes']}/50. "
+                       f"Accuracy data is degrading.")
+                logger.warning(msg)
+                try:
+                    from portfolio.telegram_notifications import send_telegram
+                    send_telegram(msg)
+                except Exception:
+                    pass
+
+            dead_signals = check_dead_signals()
+            if dead_signals:
+                msg = (f"⚠️ SAFEGUARD: Dead signals (100% HOLD in last 20 entries): "
+                       f"{', '.join(dead_signals)}. "
+                       f"These signals contribute nothing to consensus.")
+                logger.warning(msg)
+                try:
+                    from portfolio.telegram_notifications import send_telegram
+                    send_telegram(msg)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug("safeguard checks failed: %s", e)
+
     # Log portfolio equity snapshot for dashboard chart
     try:
         from portfolio.risk_management import log_portfolio_value
