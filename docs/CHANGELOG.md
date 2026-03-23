@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-03-23 (autonomous improvement session)
+- **BUG-111: Accuracy tracking corruption**: `outcome_tracker._derive_signal_vote("rsi")` used hardcoded 30/70 thresholds while `signal_engine` uses adaptive `rsi_p20`/`rsi_p80` percentiles. Accuracy backfill recorded different RSI votes than actually cast, corrupting signal accuracy tracking. Fixed to use adaptive thresholds with [15,85] clamp, matching signal_engine exactly.
+- **BUG-112: Backfill memory optimization**: `backfill_outcomes()` loaded entire 68MB signal_log.jsonl (~150K entries, ~75MB parsed JSON) into memory to process only 2,000 entries. Refactored to streaming approach: count lines (binary scan), skip head without parsing, parse only tail, stream head bytes verbatim on rewrite. Memory: 75MB → 2MB.
+- **BUG-113: majority_vote HOLD confidence**: When HOLD won (neither BUY nor SELL majority), `majority_vote()` returned misleading non-zero confidence with `count_hold=True`. HOLD is the absence of a signal — confidence is now always 0.0.
+- **BUG-114: Forecast extraction observability**: `_extract_json_from_stdout()` had 3 fallback strategies for parsing JSON from contaminated subprocess stdout but never logged which succeeded. Added debug-level logging for each fallback path.
+- **COVERAGE-2: outcome_tracker tests**: Added 85 new tests (81 in `test_outcome_tracker_core.py` + 4 streaming tests in `test_outcome_tracker_backfill.py`). Coverage for `_derive_signal_vote` (all 11 signal branches) and `log_signal_snapshot`.
+- Theme: Accuracy Tracking Correctness, Memory Optimization, Signal Robustness. See `docs/IMPROVEMENT_PLAN.md` for full details.
+
 ## 2026-03-22 (autonomous improvement session)
 - **BUG-107: Digest zero-division**: `digest.py` and `daily_digest.py` P&L calculations crashed when `initial_value_sek` was 0 or missing. Added `or INITIAL_CASH_SEK` fallback (same fix as BUG-103, missed in these two modules).
 - **BUG-108: Alpha Vantage budget thread safety**: `_daily_budget_used` counter was read/incremented without lock protection. Wrapped in existing `_cache_lock`.

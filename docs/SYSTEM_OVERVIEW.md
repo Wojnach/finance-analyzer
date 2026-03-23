@@ -241,7 +241,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-108 (P3): Alpha Vantage budget counter not thread-safe — fixed 2026-03-22
 - BUG-109 (P3): Digest reads entire 68MB signal_log.jsonl — fixed 2026-03-22
 - BUG-110 (P3): Stale import path in digest.py — fixed 2026-03-22
-- BUG-111 (P1): outcome_tracker RSI vote derivation uses fixed 30/70, not adaptive thresholds — in progress 2026-03-23
-- BUG-112 (P2): backfill_outcomes reads entire signal_log.jsonl into memory — in progress 2026-03-23
-- BUG-113 (P3): majority_vote HOLD confidence inconsistency — in progress 2026-03-23
-- BUG-114 (P3): forecast JSON extraction fallbacks lack observability — in progress 2026-03-23
+- BUG-111 (P1): outcome_tracker RSI vote derivation uses fixed 30/70, not adaptive thresholds — fixed 2026-03-23
+- BUG-112 (P2): backfill_outcomes reads entire signal_log.jsonl into memory — fixed 2026-03-23 (streaming optimization: 75MB → 2MB)
+- BUG-113 (P3): majority_vote HOLD confidence inconsistency — fixed 2026-03-23
+- BUG-114 (P3): forecast JSON extraction fallbacks lack observability — fixed 2026-03-23

@@ -162,8 +162,14 @@ is additive.
 
 | ID | Type | Status | Details |
 |----|------|--------|---------|
-| BUG-111 | Accuracy | PENDING | outcome_tracker RSI adaptive thresholds |
-| BUG-112 | Performance | PENDING | backfill_outcomes memory optimization |
-| BUG-113 | Logic | PENDING | majority_vote HOLD confidence |
-| BUG-114 | Observability | PENDING | forecast JSON extraction logging |
-| COVERAGE-2 | Tests | PENDING | outcome_tracker test suite |
+| BUG-111 | Accuracy | FIXED | `outcome_tracker.py:28-32` — RSI now uses `rsi_p20`/`rsi_p80` adaptive thresholds with [15,85] clamp, matching signal_engine.py exactly |
+| BUG-112 | Performance | FIXED | `outcome_tracker.py:260-410` — streaming head bytes (64KB chunks) instead of parsing all JSON. Memory: ~75MB → ~2MB |
+| BUG-113 | Logic | FIXED | `signal_utils.py:122-126` — HOLD always returns 0.0 confidence regardless of count_hold flag |
+| BUG-114 | Observability | FIXED | `forecast.py:121,131,137` — debug logging for brace-offset, reverse-line-scan, and total failure |
+| COVERAGE-2 | Tests | DONE | `test_outcome_tracker_core.py` — 81 new tests (71 for _derive_signal_vote, 10 for log_signal_snapshot) |
+| — | Tests | DONE | `test_outcome_tracker_backfill.py` — 4 new streaming optimization tests |
+
+**New test files**: 1 (`test_outcome_tracker_core.py` — 81 tests)
+**Updated test files**: 1 (`test_outcome_tracker_backfill.py` — +4 tests)
+**Total new tests**: 85
+**Regressions**: 0
