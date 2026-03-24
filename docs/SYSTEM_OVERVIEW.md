@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-03-23
-Branch: improve/auto-session-2026-03-23
+Updated: 2026-03-24
+Branch: improve/auto-session-2026-03-24
 
 ## 1) Architecture Summary
 
@@ -26,15 +26,15 @@ Two-layer autonomous trading system with 30 signals, 20 instruments, and dual-st
 ## 3) Module Map (~142 portfolio modules)
 
 ### Orchestration (5 modules)
-- `main.py` (843 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, parallel ticker processing via ThreadPoolExecutor(8)
-- `agent_invocation.py` (400 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing, completion tracking
+- `main.py` (889 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, parallel ticker processing via ThreadPoolExecutor(8)
+- `agent_invocation.py` (489 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing, completion tracking, stack overflow auto-disable
 - `trigger.py` (327 lines): Change detection — consensus flip, price >2%, F&G threshold, sentiment reversal, post-trade
 - `market_timing.py` (80 lines): DST-aware US market hours, agent invocation window
 - `config_validator.py`: Startup config validation
 
 ### Signal System (30 signals: 8 core + 19 enhanced + 3 disabled)
-- `signal_engine.py` (981 lines): 30-signal voting, weighted consensus, accuracy inversion, confidence penalties
-- `signal_registry.py` (130 lines): Plugin-based signal discovery via importlib
+- `signal_engine.py` (1,033 lines): 30-signal voting, weighted consensus, accuracy inversion, confidence penalties, thread-safe sentiment + ADX cache
+- `signal_registry.py` (135 lines): Plugin-based signal discovery via importlib, lazy loading
 - `signal_utils.py` (130 lines): Shared helpers — SMA, EMA, RSI, majority_vote
 - `signals/*.py` (19 modules): Enhanced composite signals, each with 4-8 sub-indicators
 - `accuracy_stats.py` (636 lines): Per-signal hit rate tracking, accuracy cache, activation rates
@@ -177,7 +177,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
 - **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
 
-## 9) Known Issues (as of 2026-03-20)
+## 9) Known Issues (as of 2026-03-24)
 
 - BUG-15 through BUG-22: Fixed in 2026-03-08 session
 - BUG-23 through BUG-27: Fixed in 2026-03-09 session (signal validation, None ticker, OSError, heartbeat, pass cleanup)
@@ -222,7 +222,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - REF-13: 112 ruff lint violations (unused imports, f-strings, reimports) — fixed 2026-03-18
 - REF-14: 15 dead variable assignments across 13 modules — fixed 2026-03-18
 - ARCH-16: Golddigger/elongir duplicated config loading (deferred — localized, may diverge)
-- ~4,800 tests across 155+ test files
+- ~5,965 tests across 155+ test files
 - BUG-85 (P1): Thread-unsafe `_prev_sentiment` + per-ticker serialization data loss in signal_engine.py — fixed 2026-03-20
 - BUG-86 (P2): Thread-unsafe `_adx_cache` in signal_engine.py — fixed 2026-03-20
 - BUG-87 (P1): NaN propagation from compute_indicators into JSON and signals — fixed 2026-03-20
@@ -245,3 +245,17 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-112 (P2): backfill_outcomes reads entire signal_log.jsonl into memory — fixed 2026-03-23 (streaming optimization: 75MB → 2MB)
 - BUG-113 (P3): majority_vote HOLD confidence inconsistency — fixed 2026-03-23
 - BUG-114 (P3): forecast JSON extraction fallbacks lack observability — fixed 2026-03-23
+- BUG-115 (P2): `structure.py` signal module has no logging — failures silently return HOLD with zero visibility
+- BUG-116 (P3): Trigger state pruning silently drops tickers with no logging (trigger.py:52-59)
+- BUG-117 (P2): `fx_rates.py` hardcoded fallback rate 10.85 SEK/USD — could be severely stale if market moves
+- BUG-118 (P3): FOMC/econ dates hardcoded for 2026-2027 in `econ_calendar.py`, `calendar_seasonal.py`, `macro_regime.py`
+- BUG-119 (P2): Layer 2 tier config mismatch — CLAUDE.md says T2=25 turns but code has T2=40 turns
+- BUG-120 (P3): `_safe_series()` in volume_flow.py forward-fills inf/NaN silently — could hide data issues
+- BUG-121 (P3): Sector representative mapping in news_event.py is hardcoded dict — not extensible
+- ARCH-17: main.py re-exports 100+ symbols from submodules — obscures true module boundaries
+- ARCH-18: metals_loop.py is 1000+ lines monolith — should be split into modules
+- ARCH-19: No CI/CD pipeline — all testing is manual
+- ARCH-20: No type checking (mypy) configured
+- TEST-1: GPU gate module (`gpu_gate.py`) has zero test coverage
+- TEST-2: Health module (`health.py`) has only 3 tests — under-tested critical module
+- TEST-3: 26 pre-existing test failures still unaddressed (integration, config, state isolation)
