@@ -199,13 +199,19 @@ def force_sell(page, trade: FishTrade) -> bool:
 # Monitor loop
 # ---------------------------------------------------------------------------
 
-def monitor_trade(trade: FishTrade, poll_interval: int = 60, fish_interval: int = 1800):
+def monitor_trade(
+    trade: FishTrade,
+    poll_interval: int = 60,
+    fish_interval: int = 1800,
+    max_duration_hours: float = 4.0,
+):
     """Main monitoring loop for an active fishing trade.
 
     Args:
         trade: Active trade to monitor
         poll_interval: Seconds between position checks (default 60)
         fish_interval: Seconds between full fin_fish re-runs (default 1800 = 30min)
+        max_duration_hours: Auto-exit after this many hours (default 4h, prevents zombie processes)
     """
     import zoneinfo
     try:
@@ -217,10 +223,19 @@ def monitor_trade(trade: FishTrade, poll_interval: int = 60, fish_interval: int 
     page = get_page()
     last_fish_run = 0
     check_count = 0
+    monitor_start = time.time()
+
+    # Look up instrument name from config
+    from data.fin_fish_config import WARRANT_CATALOG
+    inst_name = trade.ob_id
+    for _key, info in WARRANT_CATALOG.items():
+        if str(info.get("ob_id")) == str(trade.ob_id):
+            inst_name = info.get("name", trade.ob_id)
+            break
 
     log.info(
-        "Monitoring BEAR SILVER X5 AVA 12 | %d units @ %.2f | SL=%.2f | TP orders=%d",
-        trade.current_volume, trade.entry_price, trade.stop_trigger, len(trade.tp_orders),
+        "Monitoring %s | %d units @ %.2f | SL=%.2f | TP orders=%d",
+        inst_name, trade.current_volume, trade.entry_price, trade.stop_trigger, len(trade.tp_orders),
     )
 
     try:
@@ -232,6 +247,16 @@ def monitor_trade(trade: FishTrade, poll_interval: int = 60, fish_interval: int 
             # --- Session end check ---
             if now.hour >= 21:
                 log.warning("SESSION END (21:00 CET) — force selling")
+                force_sell(page, trade)
+                break
+
+            # --- Max duration check (prevents zombie processes) ---
+            elapsed_hours = (time.time() - monitor_start) / 3600
+            if elapsed_hours >= max_duration_hours:
+                log.warning(
+                    "MAX DURATION (%.1fh) reached — force selling to prevent zombie process",
+                    max_duration_hours,
+                )
                 force_sell(page, trade)
                 break
 
@@ -374,26 +399,41 @@ def monitor_trade(trade: FishTrade, poll_interval: int = 60, fish_interval: int 
 
 def main():
     parser = argparse.ArgumentParser(description="Fin Fish Trade Monitor")
-    parser.add_argument("--ob-id", default="2286417", help="Orderbook ID")
-    parser.add_argument("--account", default="1625505", help="Account ID")
-    parser.add_argument("--entry-price", type=float, default=3.60, help="Entry price")
-    parser.add_argument("--volume", type=int, default=1080, help="Position volume")
-    parser.add_argument("--stop-trigger", type=float, default=3.42, help="Stop loss trigger")
+    parser.add_argument("--ob-id", required=True, help="Orderbook ID (e.g. 2286417)")
+    parser.add_argument("--account", default="1625505", help="Account ID (default: ISK)")
+    parser.add_argument("--direction", default="SHORT", choices=["LONG", "SHORT"], help="Trade direction")
+    parser.add_argument("--entry-price", type=float, required=True, help="Entry price")
+    parser.add_argument("--volume", type=int, required=True, help="Position volume")
+    parser.add_argument("--stop-trigger", type=float, required=True, help="Stop loss trigger price")
+    parser.add_argument("--tp-orders", type=str, default="[]",
+                        help='TP orders as JSON array, e.g. \'[{"price":3.87,"volume":432}]\'')
     parser.add_argument("--poll", type=int, default=60, help="Poll interval seconds")
     parser.add_argument("--fish-interval", type=int, default=1800, help="Fin fish re-run interval")
+    parser.add_argument("--max-duration", type=float, default=4.0,
+                        help="Max monitor duration in hours (default: 4h, prevents zombie processes)")
     args = parser.parse_args()
+
+    try:
+        tp_orders = json.loads(args.tp_orders)
+    except json.JSONDecodeError:
+        parser.error(f"--tp-orders must be valid JSON, got: {args.tp_orders}")
 
     trade = FishTrade(
         ob_id=args.ob_id,
         account_id=args.account,
-        direction="SHORT",
+        direction=args.direction,
         entry_price=args.entry_price,
         volume=args.volume,
         stop_trigger=args.stop_trigger,
-        tp_orders=[{"price": 3.87, "volume": 432, "order_id": "864492386"}],
+        tp_orders=tp_orders,
     )
 
-    monitor_trade(trade, poll_interval=args.poll, fish_interval=args.fish_interval)
+    monitor_trade(
+        trade,
+        poll_interval=args.poll,
+        fish_interval=args.fish_interval,
+        max_duration_hours=args.max_duration,
+    )
 
 
 if __name__ == "__main__":

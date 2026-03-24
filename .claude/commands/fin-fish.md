@@ -39,11 +39,12 @@ No barrier/knockout risk. Intraday only (3-5h max hold).
    - RSI 45-65: neutral zone, both directions shown but lower conviction
    - Chronos 24h positive: favors BULL. Negative: favors BEAR.
 
-5. **Instrument selection** (automatic):
+5. **Instrument selection** (automatic, from `data/fin_fish_config.py`):
    - BULL SILVER X5 AVA 3 (id 1069606) -- fish silver dips, 5x, 0% commission
-   - BEAR SILVER X5 AVA 5 (id 1313617) -- fish silver peaks, 5x, 0% commission
-   - BULL GULD X5 AVA (id 2308943) -- fish gold dips, 5x, 0% commission
-   - BEAR GULD X5 AVA 3 (id 1074615) -- fish gold peaks, 5x, 0% commission
+   - BEAR SILVER X5 AVA 12 (id 2286417) -- fish silver peaks, 5x, 0% commission
+   - BULL GULD X5 AVA (id 738811) -- fish gold dips, 5x, 0% commission
+   - BEAR GULD X5 VON4 (id 1047859) -- fish gold peaks, 5x, 2.2% spread (no AVA 5x bear gold exists)
+   - BEAR GULD X2 AVA (id 738805) -- gold peaks fallback, 2x only, 0.5% spread
 
 6. **Cascading exit plan** (shown for each level):
    Take-profit: TP1 +1.5% sell 40%, TP2 +2.5% sell 40%, TP3 +4.0% sell 20%
