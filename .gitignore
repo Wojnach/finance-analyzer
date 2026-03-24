@@ -37,6 +37,8 @@ data/avanza_storage_state.json
 # Claude Code
 .claude/*
 !.claude/settings.json
+!.claude/commands/
+!.claude/commands/*.md
 
 # Git worktrees
 .worktrees/
