@@ -31,9 +31,14 @@ def fetch_usd_sek():
             raise ConnectionError("FX rate request failed after retries")
         r.raise_for_status()
         rate = float(r.json()["rates"]["SEK"])
-        _fx_cache["rate"] = rate
-        _fx_cache["time"] = now
-        return rate
+        # BUG-117: Sanity check — SEK/USD should be in 7-15 range historically.
+        # If outside this range, the API may be returning bad data.
+        if not (7.0 <= rate <= 15.0):
+            logger.error("FX rate %.4f SEK/USD outside sane bounds (7-15) — ignoring", rate)
+        else:
+            _fx_cache["rate"] = rate
+            _fx_cache["time"] = now
+            return rate
     except Exception as e:
         logger.warning("FX rate fetch failed: %s", e)
     if _fx_cache["rate"]:
@@ -43,7 +48,9 @@ def fetch_usd_sek():
             _fx_alert_telegram(age_secs)
         return _fx_cache["rate"]
     # Last resort: hardcoded fallback
-    logger.warning("Using hardcoded FX fallback rate 10.85 SEK — no cached or live rate available")
+    # BUG-117: Use ERROR level — hardcoded rate may be severely stale.
+    # Portfolio valuations using this rate could be off by 10-15% if SEK has moved.
+    logger.error("Using hardcoded FX fallback rate 10.85 SEK — no cached or live rate available")
     _fx_alert_telegram(None)
     return 10.85
 

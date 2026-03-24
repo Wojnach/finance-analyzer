@@ -22,7 +22,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 
 ### Layer 2: Decision Engine (`portfolio/agent_invocation.py`)
 - Claude CLI subprocess (`claude -p "..."`) invoked by Layer 1 on trigger events
-- Tiered: T1 Quick (120s/15 turns), T2 Signal (300s/25 turns), T3 Full (900s/40 turns)
+- Tiered: T1 Quick (120s/15 turns), T2 Signal (600s/40 turns), T3 Full (900s/40 turns)
 - Reads signal summaries → makes trade decisions → writes journal → sends Telegram
 - Full trading playbook: **`docs/TRADING_PLAYBOOK.md`**
 

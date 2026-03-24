@@ -54,6 +54,9 @@ def _save_state(state):
     tc = state.get("triggered_consensus", {})
     current_tickers = state.get("_current_tickers")
     if current_tickers is not None:
+        removed = {k for k in tc if k not in current_tickers}
+        if removed:
+            logger.info("trigger: pruning %d stale ticker(s) from baseline: %s", len(removed), ", ".join(sorted(removed)))
         pruned = {k: v for k, v in tc.items() if k in current_tickers}
         state["triggered_consensus"] = pruned
     state.pop("_current_tickers", None)  # don't persist internal field
