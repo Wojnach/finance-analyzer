@@ -249,6 +249,10 @@ def _fomc_drift(last_date: date) -> tuple[str, dict]:
         "days_to_fomc": None,
     }
 
+    # BUG-118: Warn when all FOMC dates are in the past (data staleness)
+    if _FOMC_ANNOUNCEMENT_DATES and last_date > max(_FOMC_ANNOUNCEMENT_DATES):
+        logger.warning("calendar_seasonal: all FOMC dates are in the past — fomc_dates.py needs updating")
+
     for fomc_date in _FOMC_ANNOUNCEMENT_DATES:
         delta = (fomc_date - last_date).days
 

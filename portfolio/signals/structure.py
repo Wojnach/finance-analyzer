@@ -13,10 +13,14 @@ the majority direction.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
 from portfolio.signal_utils import majority_vote, rsi
+
+logger = logging.getLogger("portfolio.signals.structure")
 
 # ---------------------------------------------------------------------------
 # Minimum data lengths for each sub-indicator
@@ -217,21 +221,25 @@ def compute_structure_signal(df: pd.DataFrame) -> dict:
     try:
         hl_action, hl_ind = _highlow_breakout(df)
     except Exception:
+        logger.exception("high_low_breakout sub-signal failed")
         hl_action, hl_ind = "HOLD", {"period_high": np.nan, "period_low": np.nan}
 
     try:
         dc_action, dc_ind = _donchian_breakout(df, period=55)
     except Exception:
+        logger.exception("donchian_55 sub-signal failed")
         dc_action, dc_ind = "HOLD", {"donchian_upper": np.nan, "donchian_lower": np.nan}
 
     try:
         rsi_action, rsi_ind = _rsi_centerline(df)
     except Exception:
+        logger.exception("rsi_centerline sub-signal failed")
         rsi_action, rsi_ind = "HOLD", {"rsi": np.nan}
 
     try:
         macd_action, macd_ind = _macd_zeroline(df)
     except Exception:
+        logger.exception("macd_zeroline sub-signal failed")
         macd_action, macd_ind = "HOLD", {"macd_hist": np.nan}
 
     # ---- Populate sub-signals and indicators ----

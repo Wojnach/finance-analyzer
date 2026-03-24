@@ -22,7 +22,11 @@ they work on short timeframes (100x 15m candles) as well as long ones.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
+
+logger = logging.getLogger("portfolio.signals.macro_regime")
 import pandas as pd
 
 from portfolio.signal_utils import majority_vote
@@ -355,31 +359,37 @@ def compute_macro_regime_signal(df: pd.DataFrame, macro: dict = None) -> dict:
     try:
         sma_action, sma_ind = _sma_regime(df)
     except Exception:
+        logger.exception("sma_regime sub-signal failed")
         sma_action, sma_ind = "HOLD", {}
 
     try:
         dxy_action, dxy_ind = _dxy_risk(macro)
     except Exception:
+        logger.exception("dxy_risk sub-signal failed")
         dxy_action, dxy_ind = "HOLD", {}
 
     try:
         yc_action, yc_ind = _yield_curve(macro)
     except Exception:
+        logger.exception("yield_curve sub-signal failed")
         yc_action, yc_ind = "HOLD", {}
 
     try:
         y10_action, y10_ind = _yield_10y_momentum(macro)
     except Exception:
+        logger.exception("yield_10y_momentum sub-signal failed")
         y10_action, y10_ind = "HOLD", {}
 
     try:
         fomc_action, fomc_ind = _fomc_proximity(macro)
     except Exception:
+        logger.exception("fomc_proximity sub-signal failed")
         fomc_action, fomc_ind = "HOLD", {}
 
     try:
         gdc_action, gdc_ind = _golden_death_cross(df)
     except Exception:
+        logger.exception("golden_death_cross sub-signal failed")
         gdc_action, gdc_ind = "HOLD", {}
 
     # ---- Populate sub-signals and indicators ----

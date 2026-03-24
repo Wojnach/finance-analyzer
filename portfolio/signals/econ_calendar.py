@@ -164,22 +164,29 @@ def compute_econ_calendar_signal(df: pd.DataFrame, context: dict = None) -> dict
     # Compute each sub-signal
     try:
         prox_action, prox_ind = _event_proximity(ref_date)
+        # BUG-118: Warn when all economic dates have passed (data staleness)
+        if prox_ind.get("next_event") is None:
+            logger.warning("econ_calendar: no future events found — dates may need updating")
     except Exception:
+        logger.exception("event_proximity sub-signal failed")
         prox_action, prox_ind = "HOLD", {}
 
     try:
         type_action, type_ind = _event_type_info(ref_date)
     except Exception:
+        logger.exception("event_type sub-signal failed")
         type_action, type_ind = "HOLD", {}
 
     try:
         risk_action, risk_ind = _pre_event_risk(ref_date)
     except Exception:
+        logger.exception("pre_event_risk sub-signal failed")
         risk_action, risk_ind = "HOLD", {}
 
     try:
         sec_action, sec_ind = _sector_exposure(ref_date, ticker)
     except Exception:
+        logger.exception("sector_exposure sub-signal failed")
         sec_action, sec_ind = "HOLD", {}
 
     # Populate result

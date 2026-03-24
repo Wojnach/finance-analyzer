@@ -29,8 +29,21 @@ MIN_ROWS = 50
 
 
 def _safe_series(series: pd.Series) -> pd.Series:
-    """Replace inf/-inf with NaN and forward-fill."""
-    return series.replace([np.inf, -np.inf], np.nan).ffill()
+    """Replace inf/-inf with NaN and forward-fill.
+
+    Logs a warning when >5% of the series required forward-fill,
+    as this may indicate data quality issues that affect volume-based signals.
+    """
+    cleaned = series.replace([np.inf, -np.inf], np.nan)
+    n_bad = int(cleaned.isna().sum() - series.isna().sum())  # inf-only count
+    filled = cleaned.ffill()
+    n_filled = int(series.isna().sum()) + n_bad  # total values that needed fill
+    if len(series) > 0 and n_filled > len(series) * 0.05:
+        logger.warning(
+            "volume_flow _safe_series: %d/%d values (%.0f%%) needed forward-fill",
+            n_filled, len(series), n_filled / len(series) * 100,
+        )
+    return filled
 
 
 # ---------------------------------------------------------------------------
