@@ -194,6 +194,79 @@ def place_stop_loss(page, account_id, ob_id, trigger_price, sell_price, volume,
         return False, ""
 
 
+def delete_order(page, account_id, order_id):
+    """Cancel an open order on Avanza.
+
+    IMPORTANT: Uses POST to /_api/trading-critical/rest/order/delete, NOT
+    the DELETE HTTP method. The DELETE verb returns 404 on this endpoint
+    (discovered 2026-03-24 — Avanza changed the API at some point).
+
+    Returns (success: bool, result: dict).
+    """
+    csrf = get_csrf(page)
+    if not csrf:
+        return False, {"error": "no CSRF token"}
+
+    try:
+        result = page.evaluate("""async (args) => {
+            const [accountId, orderId, token] = args;
+            const resp = await fetch('https://www.avanza.se/_api/trading-critical/rest/order/delete', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
+                credentials: 'include',
+                body: JSON.stringify({accountId: accountId, orderId: orderId}),
+            });
+            return {status: resp.status, body: await resp.text()};
+        }""", [account_id, order_id, csrf])
+
+        body = {}
+        try:
+            body = json.loads(result.get("body", ""))
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        success = body.get("orderRequestStatus") == "SUCCESS"
+        return success, {
+            "http_status": result.get("status"),
+            "parsed": body,
+            "order_id": order_id,
+        }
+    except Exception as e:
+        return False, {"error": str(e)}
+
+
+def delete_stop_loss(page, account_id, stop_id):
+    """Delete a stop-loss order on Avanza.
+
+    Uses DELETE to /_api/trading/stoploss/{accountId}/{stopId}.
+
+    Returns (success: bool, result: dict).
+    """
+    csrf = get_csrf(page)
+    if not csrf:
+        return False, {"error": "no CSRF token"}
+
+    try:
+        result = page.evaluate("""async (args) => {
+            const [accountId, stopId, token] = args;
+            const resp = await fetch(
+                'https://www.avanza.se/_api/trading/stoploss/' + accountId + '/' + stopId,
+                {
+                    method: 'DELETE',
+                    headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
+                    credentials: 'include',
+                }
+            );
+            return {status: resp.status, body: await resp.text()};
+        }""", [account_id, stop_id, csrf])
+
+        http_status = result.get("status", 0)
+        success = 200 <= http_status < 300
+        return success, {"http_status": http_status}
+    except Exception as e:
+        return False, {"error": str(e)}
+
+
 def check_session_alive(page):
     """Quick 401 check — returns True if Avanza session is alive."""
     try:
