@@ -222,7 +222,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - REF-13: 112 ruff lint violations (unused imports, f-strings, reimports) — fixed 2026-03-18
 - REF-14: 15 dead variable assignments across 13 modules — fixed 2026-03-18
 - ARCH-16: Golddigger/elongir duplicated config loading (deferred — localized, may diverge)
-- ~5,965 tests across 155+ test files
+- ~5,994 tests across 157+ test files
 - BUG-85 (P1): Thread-unsafe `_prev_sentiment` + per-ticker serialization data loss in signal_engine.py — fixed 2026-03-20
 - BUG-86 (P2): Thread-unsafe `_adx_cache` in signal_engine.py — fixed 2026-03-20
 - BUG-87 (P1): NaN propagation from compute_indicators into JSON and signals — fixed 2026-03-20
@@ -245,17 +245,18 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-112 (P2): backfill_outcomes reads entire signal_log.jsonl into memory — fixed 2026-03-23 (streaming optimization: 75MB → 2MB)
 - BUG-113 (P3): majority_vote HOLD confidence inconsistency — fixed 2026-03-23
 - BUG-114 (P3): forecast JSON extraction fallbacks lack observability — fixed 2026-03-23
-- BUG-115 (P2): `structure.py` signal module has no logging — failures silently return HOLD with zero visibility
-- BUG-116 (P3): Trigger state pruning silently drops tickers with no logging (trigger.py:52-59)
-- BUG-117 (P2): `fx_rates.py` hardcoded fallback rate 10.85 SEK/USD — could be severely stale if market moves
-- BUG-118 (P3): FOMC/econ dates hardcoded for 2026-2027 in `econ_calendar.py`, `calendar_seasonal.py`, `macro_regime.py`
-- BUG-119 (P2): Layer 2 tier config mismatch — CLAUDE.md says T2=25 turns but code has T2=40 turns
-- BUG-120 (P3): `_safe_series()` in volume_flow.py forward-fills inf/NaN silently — could hide data issues
-- BUG-121 (P3): Sector representative mapping in news_event.py is hardcoded dict — not extensible
-- ARCH-17: main.py re-exports 100+ symbols from submodules — obscures true module boundaries
-- ARCH-18: metals_loop.py is 1000+ lines monolith — should be split into modules
-- ARCH-19: No CI/CD pipeline — all testing is manual
-- ARCH-20: No type checking (mypy) configured
+- BUG-115 (P1): `structure.py` signal module had no logging — failures silently returned HOLD — **fixed 2026-03-24** (added logger + exception logging)
+- BUG-116 (P2): Trigger state pruning silently dropped tickers — **fixed 2026-03-24** (added logger.info on prune)
+- BUG-117 (P2): `fx_rates.py` hardcoded fallback 10.85 SEK/USD — **fixed 2026-03-24** (bounds check 7-15, ERROR level logging)
+- BUG-118 (P3): FOMC/econ dates hardcoded for 2026-2027 — **mitigated 2026-03-24** (staleness warnings in econ_calendar.py, calendar_seasonal.py)
+- BUG-119 (P2): CLAUDE.md T2=25 turns but code=40 — **fixed 2026-03-24** (docs updated to 600s/40 turns)
+- BUG-120 (P3): `_safe_series()` forward-fills silently — **fixed 2026-03-24** (warning when >5% values filled)
+- BUG-121 (P3): Sector representative mapping in news_event.py is hardcoded dict — not extensible (deferred)
+- Also added logging to `macro_regime.py` exception handlers (had no `import logging` at all) — **fixed 2026-03-24**
+- ARCH-17: main.py re-exports 100+ symbols from submodules — obscures true module boundaries (deferred)
+- ARCH-18: metals_loop.py is 1000+ lines monolith — should be split into modules (deferred)
+- ARCH-19: No CI/CD pipeline — all testing is manual (deferred)
+- ARCH-20: No type checking (mypy) configured (deferred)
 - TEST-1: GPU gate module (`gpu_gate.py`) has zero test coverage
-- TEST-2: Health module (`health.py`) has only 3 tests — under-tested critical module
+- TEST-2: Health module (`health.py`) had only 3 tests — **extended 2026-03-24** (24 new tests covering staleness, signal health, dead signals)
 - TEST-3: 26 pre-existing test failures still unaddressed (integration, config, state isolation)
