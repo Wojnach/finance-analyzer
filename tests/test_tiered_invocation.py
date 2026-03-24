@@ -514,8 +514,8 @@ class TestTierConfig:
 
     def test_tier2_config(self):
         cfg = TIER_CONFIG[2]
-        assert cfg["max_turns"] == 25
-        assert cfg["timeout"] == 300
+        assert cfg["max_turns"] == 40
+        assert cfg["timeout"] == 600
         assert cfg["label"] == "SIGNAL ANALYSIS"
 
     def test_tier3_config(self):
