@@ -3,18 +3,24 @@
 Ensures only one LLM model uses the GPU at a time. Logs VRAM usage
 before and after each model load for monitoring.
 
-Uses the existing file-based lock at Q:/models/.gpu_lock.
+Uses a threading lock for in-process concurrency (ThreadPoolExecutor workers)
+plus a file-based lock at Q:/models/.gpu_lock for cross-process protection.
 """
 
 import logging
+import os
 import subprocess
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
 logger = logging.getLogger("portfolio.gpu_gate")
 
-# Import the existing GPU lock
+# In-process lock — prevents ThreadPoolExecutor workers from racing
+_THREAD_LOCK = threading.Lock()
+
+# File-based lock for cross-process protection
 _GPU_LOCK_DIR = Path("Q:/models")
 _GPU_LOCK_FILE = _GPU_LOCK_DIR / ".gpu_lock"
 _STALE_SECONDS = 300  # 5 min
@@ -63,9 +69,9 @@ def _read_lock() -> dict:
 
 
 def _write_lock(model_name: str):
-    import os
     _GPU_LOCK_FILE.write_text(
-        f"{model_name}|{os.getpid()}|{time.time()}", encoding="utf-8"
+        f"{model_name}|{os.getpid()}|{time.time()}|{threading.get_ident()}",
+        encoding="utf-8",
     )
 
 
@@ -80,74 +86,77 @@ def _release_lock():
 def gpu_gate(model_name: str, timeout: float = 60):
     """Acquire exclusive GPU access, log VRAM before/after.
 
+    Uses a two-layer lock:
+    1. threading.Lock for in-process concurrency (ThreadPoolExecutor workers)
+    2. File-based lock for cross-process protection (metals loop, etc.)
+
     Args:
         model_name: e.g. "ministral-3", "qwen3", "chronos"
         timeout: max seconds to wait for lock
 
     Yields:
-        None (use as context manager)
-
-    Logs VRAM usage at acquire and release for monitoring.
+        True if acquired, False if timed out.
     """
-    import os
-
     deadline = time.time() + timeout
-    acquired = False
 
-    while time.time() < deadline:
-        if not _GPU_LOCK_FILE.exists():
-            _write_lock(model_name)
-            acquired = True
-            break
-
-        info = _read_lock()
-
-        # Re-entry from same process
-        if info.get("model") == model_name and info.get("pid") == os.getpid():
-            acquired = True
-            break
-
-        # Stale lock
-        if _is_stale():
-            logger.warning("Breaking stale GPU lock: %s (pid=%s)", info.get("model"), info.get("pid"))
-            _release_lock()
-            _write_lock(model_name)
-            acquired = True
-            break
-
-        # Wait
-        holder = info.get("model", "?")
-        logger.debug("GPU locked by %s, waiting...", holder)
-        time.sleep(1.0)
-
-    if not acquired:
-        info = _read_lock()
-        logger.warning("GPU lock timeout (%ss) — held by %s", timeout, info.get("model", "?"))
-        # Don't raise — just skip this model. Better to return HOLD than crash.
+    # Layer 1: In-process thread lock (prevents ThreadPoolExecutor races)
+    remaining = deadline - time.time()
+    thread_acquired = _THREAD_LOCK.acquire(timeout=max(0, remaining))
+    if not thread_acquired:
+        logger.warning("GPU thread-lock timeout (%ss) for %s", timeout, model_name)
         yield False
         return
 
-    # Log VRAM at acquire
-    vram = get_vram_usage()
-    if vram:
-        logger.info(
-            "GPU gate ACQUIRED by %s — VRAM: %dMB used / %dMB free / %dMB total (GPU %d%%)",
-            model_name, vram["used_mb"], vram["free_mb"], vram["total_mb"], vram["gpu_util_pct"],
-        )
-
-    t0 = time.time()
     try:
-        yield True
-    finally:
-        elapsed = time.time() - t0
-        # Log VRAM at release
+        # Layer 2: File-based lock (cross-process)
+        file_acquired = False
+        while time.time() < deadline:
+            try:
+                # Atomic create — fails if file already exists (no TOCTOU race)
+                fd = os.open(str(_GPU_LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, f"{model_name}|{os.getpid()}|{time.time()}|{threading.get_ident()}".encode())
+                os.close(fd)
+                file_acquired = True
+                break
+            except FileExistsError:
+                # Lock file exists — check if stale or same process
+                info = _read_lock()
+                if info.get("pid") == os.getpid():
+                    # Re-entry from same process (shouldn't happen with thread lock, but safe)
+                    file_acquired = True
+                    break
+                if _is_stale():
+                    logger.warning("Breaking stale GPU lock: %s (pid=%s)", info.get("model"), info.get("pid"))
+                    _release_lock()
+                    continue  # retry atomic create
+                logger.debug("GPU file-locked by %s, waiting...", info.get("model", "?"))
+                time.sleep(1.0)
+
+        if not file_acquired:
+            info = _read_lock()
+            logger.warning("GPU file-lock timeout (%ss) — held by %s", timeout, info.get("model", "?"))
+            yield False
+            return
+
+        # Log VRAM at acquire
         vram = get_vram_usage()
         if vram:
             logger.info(
-                "GPU gate RELEASED by %s after %.1fs — VRAM: %dMB used / %dMB free",
-                model_name, elapsed, vram["used_mb"], vram["free_mb"],
+                "GPU gate ACQUIRED by %s — VRAM: %dMB used / %dMB free / %dMB total (GPU %d%%)",
+                model_name, vram["used_mb"], vram["free_mb"], vram["total_mb"], vram["gpu_util_pct"],
             )
-        # Release lock
-        info = _read_lock()
-        if info.get("pid") == os.getpid():
+
+        t0 = time.time()
+        try:
+            yield True
+        finally:
+            elapsed = time.time() - t0
+            vram = get_vram_usage()
+            if vram:
+                logger.info(
+                    "GPU gate RELEASED by %s after %.1fs — VRAM: %dMB used / %dMB free",
+                    model_name, elapsed, vram["used_mb"], vram["free_mb"],
+                )
             _release_lock()
+    finally:
+        _THREAD_LOCK.release()
