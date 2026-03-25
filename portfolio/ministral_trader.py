@@ -16,6 +16,8 @@ import re
 import subprocess
 import sys
 
+from portfolio.subprocess_utils import run_safe
+
 if platform.system() == "Windows":
     MODEL_PATH = r"Q:\models\ministral-3-8b-gguf\Ministral-3-8B-Instruct-2512-Q5_K_M.gguf"
     LEGACY_MODEL_PATH = r"Q:\models\ministral-8b-gguf\Ministral-8B-Instruct-2410-Q4_K_M.gguf"
@@ -44,21 +46,21 @@ def _predict_native(prompt):
     with open(prompt_file, "w", encoding="utf-8") as f:
         f.write(prompt)
 
-    proc = subprocess.run(
+    proc = run_safe(
         [
             LLAMA_CLI,
             "-m", MODEL_PATH,
             "-ngl", "99",
             "-t", "4",  # cap CPU threads to prevent overheating
             "-c", "4096",
-            "-n", "120",
+            "-n", "1024",
             "--temp", "0",
             "--no-display-prompt",
             "-f", prompt_file,
         ],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
         stdin=subprocess.DEVNULL,
     )
     if proc.returncode != 0:
@@ -112,18 +114,26 @@ def _extract_json_payload(text):
 
 
 def _build_prompt(context):
-    return f"""[INST]You are an expert cryptocurrency trader. Based on the following market data, provide a single trading decision: BUY, SELL, or HOLD.
+    return f"""[INST]You are an expert financial analyst. Analyze the following market data step by step before making a trading decision.
+
+Think through these questions:
+1. What is the overall trend? Are EMA and MACD aligned?
+2. Is RSI signaling overbought/oversold, and does volume confirm?
+3. Are multiple timeframes in agreement or conflicting?
+4. Does sentiment support or contradict the technical picture?
+5. What is your conviction level given the evidence?
 
 Market Data:
 - Asset: {context['ticker']}
 - Current Price: ${context['price_usd']:,.2f}
 - 24h Change: {context.get('change_24h', 'N/A')}
 
-Technical Indicators (1-hour candles):
+Technical Indicators:
 - RSI(14): {context.get('rsi', 'N/A')}
 - MACD Histogram: {context.get('macd_hist', 'N/A')}
 - EMA(9) vs EMA(21): {'Bullish (9 > 21)' if context.get('ema_bullish') else 'Bearish (9 < 21)'} (gap: {context.get('ema_gap_pct', 'N/A')}%)
 - Bollinger Bands: Price is {context.get('bb_position', 'N/A')}
+- Volume Ratio: {context.get('volume_ratio', 'N/A')}x avg
 
 Market Sentiment:
 - Fear & Greed Index: {context.get('fear_greed', 'N/A')}/100 ({context.get('fear_greed_class', '')})
@@ -135,26 +145,34 @@ Multi-timeframe Analysis:
 Recent Headlines:
 {context.get('headlines', 'N/A')}
 
-Respond with EXACTLY one JSON object and no extra text.
-Schema: {{"action":"BUY|SELL|HOLD","reasoning":"one sentence grounded in the data"}}
-Use HOLD when the evidence is mixed or weak.[/INST]"""
+First reason through the data step by step, then provide your final answer as a JSON object:
+{{"action":"BUY|SELL|HOLD","confidence":0-100,"reasoning":"2-3 sentences explaining your logic"}}
+
+Confidence guide: 80+ = strong conviction, 60-79 = moderate, 40-59 = weak/mixed, <40 = default to HOLD.[/INST]"""
 
 
 def _parse_response(text):
-    """Parse model output into action + reasoning."""
+    """Parse model output into action + reasoning + confidence."""
     payload = _extract_json_payload(text)
     decision = None
     reasoning = text[:200]
+    confidence = None
     if isinstance(payload, dict):
         raw_action = str(payload.get("action", "")).upper()
         if raw_action in {"BUY", "SELL", "HOLD"}:
             decision = raw_action
         if payload.get("reasoning"):
             reasoning = str(payload["reasoning"])[:200]
+        if payload.get("confidence") is not None:
+            try:
+                confidence = int(float(payload["confidence"]))
+                confidence = max(0, min(100, confidence))
+            except (ValueError, TypeError):
+                pass
     if decision is None:
         match = re.search(r"\b(BUY|SELL|HOLD)\b", text.upper())
         decision = match.group(1) if match else "HOLD"
-    return decision, reasoning
+    return decision, reasoning, confidence
 
 
 def predict(context, lora_path=None):
@@ -164,8 +182,11 @@ def predict(context, lora_path=None):
     if _can_use_native_cli():
         try:
             text = _predict_native(prompt)
-            decision, reasoning = _parse_response(text)
-            return {"action": decision, "reasoning": reasoning, "model": "Ministral-3-8B"}
+            decision, reasoning, confidence = _parse_response(text)
+            result = {"action": decision, "reasoning": reasoning, "model": "Ministral-3-8B"}
+            if confidence is not None:
+                result["confidence"] = confidence
+            return result
         except Exception as e:
             print(f"Native CLI failed ({e}), falling back to legacy", file=sys.stderr)
 
@@ -173,14 +194,17 @@ def predict(context, lora_path=None):
     model = load_model(lora_path)
     response = model(
         prompt,
-        max_tokens=120,
+        max_tokens=1024,
         temperature=0.0,
         top_p=0.2,
-        stop=["[INST]", "\n\n"],
+        stop=["[INST]"],
     )
     text = response["choices"][0]["text"].strip()
-    decision, reasoning = _parse_response(text)
-    return {"action": decision, "reasoning": reasoning, "model": "CryptoTrader-LM"}
+    decision, reasoning, confidence = _parse_response(text)
+    result = {"action": decision, "reasoning": reasoning, "model": "CryptoTrader-LM"}
+    if confidence is not None:
+        result["confidence"] = confidence
+    return result
 
 
 if __name__ == "__main__":

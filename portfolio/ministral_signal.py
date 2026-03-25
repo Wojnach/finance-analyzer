@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 
 from portfolio.gpu_gate import gpu_gate
+from portfolio.subprocess_utils import kill_orphaned_llama, run_safe
 
 logger = logging.getLogger("portfolio.ministral_signal")
 
@@ -57,12 +58,12 @@ def _call_model(context, lora_path=None):
     if lora_path:
         cmd.extend(["--lora", str(lora_path)])
 
-    result = subprocess.run(
+    result = run_safe(
         cmd,
         input=json.dumps(context),
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Ministral failed: {result.stderr[-500:]}")
@@ -74,7 +75,13 @@ def _call_model(context, lora_path=None):
 
 def get_ministral_signal(context):
     """Get trading signal from Ministral with GPU gating."""
-    with gpu_gate("ministral", timeout=120) as acquired:
+    try:
+        killed = kill_orphaned_llama()
+        if killed:
+            logger.warning("Reaped %d orphaned llama process(es)", killed)
+    except Exception:
+        pass
+    with gpu_gate("ministral", timeout=300) as acquired:
         if not acquired:
             logger.warning("GPU gate timeout — returning HOLD")
             return {"original": {"action": "HOLD", "reasoning": "GPU busy", "model": "skipped"}, "custom": None}

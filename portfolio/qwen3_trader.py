@@ -14,6 +14,8 @@ import subprocess
 import sys
 import tempfile
 
+from portfolio.subprocess_utils import run_safe
+
 if platform.system() == "Windows":
     MODEL_PATH = r"Q:\models\qwen3-8b-gguf\Qwen3-8B-Q4_K_M.gguf"
     LLAMA_CLI = r"Q:\models\llama-cpp-bin\cuda13\llama-completion.exe"
@@ -40,20 +42,20 @@ def load_model():
     return {"model_path": MODEL_PATH, "llama_cli": LLAMA_CLI}
 
 
-def _run_native(prompt, max_tokens=256):
+def _run_native(prompt, max_tokens=2048):
     """Run inference via native llama-completion binary."""
     assets = load_model()
     prompt_file = os.path.join(tempfile.gettempdir(), "qwen3_prompt.txt")
     with open(prompt_file, "w", encoding="utf-8") as f:
         f.write(prompt)
 
-    proc = subprocess.run(
+    proc = run_safe(
         [
             assets["llama_cli"],
             "-m", assets["model_path"],
             "-ngl", "99",
             "-t", "4",  # cap CPU threads to prevent overheating
-            "-c", "2048",
+            "-c", "4096",
             "-n", str(max_tokens),
             "--temp", "0.7",
             "--top-p", "0.8",
@@ -62,7 +64,7 @@ def _run_native(prompt, max_tokens=256):
         ],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
         stdin=subprocess.DEVNULL,
     )
     if proc.returncode != 0:
@@ -98,9 +100,20 @@ def _build_prompt(context):
 
     return f"""<|im_start|>system
 You are an expert financial analyst specializing in {asset_type} trading.
-Analyze the market data and provide a single trading decision: BUY, SELL, or HOLD.
-Respond with EXACTLY one JSON object: {{"action":"BUY|SELL|HOLD","reasoning":"one sentence"}}
-Use HOLD when evidence is mixed or weak.<|im_end|>
+
+Your job is to deeply analyze market data and produce a high-quality trading decision.
+Think carefully before answering. Consider:
+1. Are the technical indicators confirming each other or diverging?
+2. Is the trend strengthening or weakening across timeframes?
+3. Does volume support the move? Low volume signals are unreliable.
+4. Is sentiment aligned with technicals, or is it contrarian?
+5. What is the risk/reward setup? Is there a clear edge or is it ambiguous?
+
+After your analysis, respond with a JSON object:
+{{"action":"BUY|SELL|HOLD","confidence":0-100,"reasoning":"2-3 sentences explaining your logic"}}
+
+Use HOLD when evidence is mixed, weak, or conflicting. A confident HOLD is better than a low-confidence BUY/SELL.
+Confidence guide: 80+ = strong conviction, 60-79 = moderate, 40-59 = weak/mixed, <40 = default to HOLD.<|im_end|>
 <|im_start|>user
 Asset: {ticker} ({asset_type})
 Current Price: ${context.get('price_usd', 0):,.2f}
@@ -118,14 +131,14 @@ Market Context:
 
 Multi-timeframe: {context.get('timeframe_summary', 'N/A')}
 
-Provide your trading decision as JSON.<|im_end|>
+Analyze the data thoroughly, then provide your trading decision as JSON.<|im_end|>
 <|im_start|>assistant
 """
 
 
 def _parse_response(text):
-    """Parse model output into action + reasoning."""
-    # Strip thinking tags if present
+    """Parse model output into action + reasoning + confidence."""
+    # Strip thinking tags if present (Qwen3 native thinking mode)
     if "<think>" in text:
         think_end = text.find("</think>")
         if think_end >= 0:
@@ -134,24 +147,34 @@ def _parse_response(text):
     payload = _extract_json_payload(text)
     decision = None
     reasoning = text[:200]
+    confidence = None
     if isinstance(payload, dict):
         raw_action = str(payload.get("action", "")).upper()
         if raw_action in {"BUY", "SELL", "HOLD"}:
             decision = raw_action
         if payload.get("reasoning"):
             reasoning = str(payload["reasoning"])[:200]
+        if payload.get("confidence") is not None:
+            try:
+                confidence = int(float(payload["confidence"]))
+                confidence = max(0, min(100, confidence))
+            except (ValueError, TypeError):
+                pass
     if decision is None:
         match = re.search(r"\b(BUY|SELL|HOLD)\b", text.upper())
         decision = match.group(1) if match else "HOLD"
-    return decision, reasoning
+    return decision, reasoning, confidence
 
 
 def predict(context):
     """Single-ticker prediction."""
     prompt = _build_prompt(context)
     text = _run_native(prompt)
-    decision, reasoning = _parse_response(text)
-    return {"action": decision, "reasoning": reasoning, "model": "Qwen3-8B"}
+    decision, reasoning, confidence = _parse_response(text)
+    result = {"action": decision, "reasoning": reasoning, "model": "Qwen3-8B"}
+    if confidence is not None:
+        result["confidence"] = confidence
+    return result
 
 
 def predict_batch(contexts):

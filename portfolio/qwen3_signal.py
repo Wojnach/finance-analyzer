@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from portfolio.gpu_gate import gpu_gate
+from portfolio.subprocess_utils import kill_orphaned_llama, run_safe
 
 logger = logging.getLogger("portfolio.qwen3_signal")
 
@@ -68,16 +69,16 @@ def _call_qwen3(context):
     cmd = [python, str(script)]
 
     try:
-        result = subprocess.run(
+        result = run_safe(
             cmd,
             input=json.dumps(context),
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=240,
         )
     except subprocess.TimeoutExpired as e:
         stderr_text = e.stderr[-500:] if e.stderr else "(no stderr)"
-        logger.error("Qwen3 subprocess timed out after 120s — stderr: %s", stderr_text)
+        logger.error("Qwen3 subprocess timed out after 240s — stderr: %s", stderr_text)
         raise
     if result.returncode != 0:
         raise RuntimeError(f"Qwen3 failed: {result.stderr[-500:]}")
@@ -107,12 +108,12 @@ def _call_qwen3_batch(contexts):
 
     t0 = time.time()
     # Send as JSON array to trigger batch mode in qwen3_trader.py
-    result = subprocess.run(
+    result = run_safe(
         cmd,
         input=json.dumps(contexts),
         capture_output=True,
         text=True,
-        timeout=30 + 15 * len(contexts),  # 30s base + 15s per ticker
+        timeout=60 + 30 * len(contexts),  # 60s base + 30s per ticker (extended for deeper reasoning)
     )
     elapsed = time.time() - t0
     logger.info("Qwen3 batch: %d tickers in %.1fs (%.1fs/ticker)",
@@ -131,7 +132,13 @@ def get_qwen3_signal(context):
 
     Returns dict with 'action', 'reasoning', 'model' keys.
     """
-    with gpu_gate("qwen3", timeout=150) as acquired:
+    try:
+        killed = kill_orphaned_llama()
+        if killed:
+            logger.warning("Reaped %d orphaned llama process(es)", killed)
+    except Exception:
+        pass
+    with gpu_gate("qwen3", timeout=300) as acquired:
         if not acquired:
             logger.warning("GPU gate timeout — returning HOLD")
             return {"action": "HOLD", "reasoning": "GPU busy", "model": "Qwen3-8B"}

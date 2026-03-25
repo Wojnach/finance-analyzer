@@ -711,6 +711,8 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 extra_info["ministral_accuracy"] = gating.get("accuracy")
                 extra_info["ministral_samples"] = gating.get("samples", 0)
                 extra_info["ministral_gating"] = gating.get("gating", "raw")
+                if orig.get("confidence") is not None:
+                    extra_info["ministral_confidence"] = orig["confidence"]
                 votes["ministral"] = gated_action
 
                 # custom_lora fully disabled — not even stored in extra.
@@ -793,6 +795,8 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 extra_info["qwen3_accuracy"] = gating.get("accuracy")
                 extra_info["qwen3_samples"] = gating.get("samples", 0)
                 extra_info["qwen3_gating"] = gating.get("gating", "raw")
+                if q3.get("confidence") is not None:
+                    extra_info["qwen3_confidence"] = q3["confidence"]
                 votes["qwen3"] = gated_action
 
         except ImportError:
