@@ -91,12 +91,13 @@ def _notify_critical(category: str, message: str) -> None:
 
     _critical_alert_last[category] = now.isoformat()
     try:
-        import json as _json
-
         from portfolio.message_store import send_or_store
-        with open(BASE_DIR / "config.json", encoding="utf-8") as fh:
-            config = _json.load(fh)
-        send_or_store(message, config, category="error")
+        # BUG-124: Use load_json instead of raw open/json.load
+        config = load_json(BASE_DIR / "config.json", default={})
+        if config:
+            send_or_store(message, config, category="error")
+        else:
+            logger.warning("Cannot send critical alert — config.json missing or corrupt")
     except Exception:
         logger.warning("Failed to send critical alert: %s", message, exc_info=True)
 
