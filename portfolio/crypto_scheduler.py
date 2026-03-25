@@ -15,7 +15,6 @@ Usage (in main.py _run_post_cycle):
     maybe_run_crypto_report(config)
 """
 
-import json
 import logging
 import time
 import zoneinfo
@@ -284,7 +283,7 @@ def _build_crypto_report(config):
             if target:
                 lines.append(f"Analyst target: ${target:.0f} | Beta: {beta:.1f}x")
     except Exception:
-        pass
+        logger.debug("Failed to load MSTR fundamentals from cache", exc_info=True)
 
     lines.append("")
 

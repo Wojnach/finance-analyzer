@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-03-25 (autonomous improvement session)
+- **BUG-122: Health module 68MB memory spike (x2)**: `check_outcome_staleness()` and `check_dead_signals()` in `health.py` both used `f.readlines()` on the 68MB signal_log.jsonl to check 20-50 entries. Replaced with `load_jsonl_tail()` — reads ~512KB instead of 68MB. Eliminates ~150MB memory spike per health cycle.
+- **BUG-123: Untracked files break worktrees**: `portfolio/metals_ladder.py`, `portfolio/process_lock.py`, `portfolio/subprocess_utils.py`, `portfolio/notification_text.py` were imported by tracked modules but never committed. Any worktree or fresh clone hit `ModuleNotFoundError`. Now tracked in git along with 5 test files.
+- **BUG-124: fin_snipe_manager raw config read**: `_notify_critical()` used raw `open()/json.load()` for config.json. Replaced with `load_json()` for crash-safe fallback.
+- **BUG-125: onchain_data non-atomic cache write**: `_save_onchain_cache()` used `write_text()`. Replaced with `atomic_write_json()` to prevent corrupt cache on crash.
+- **BUG-126: main.py silent exception handlers**: Two `except Exception: pass` in safeguard Telegram alerts. Added `logger.debug()` for visibility.
+- **BUG-127: crypto_scheduler silent exception**: Fundamentals cache read failure silently swallowed. Added `logger.debug()`.
+- **REF-9: Raw JSONL append consolidation**: Replaced 5 remaining raw `open("a")/f.write(json.dumps())` patterns with `atomic_append_jsonl()` in `crypto_macro_data.py`, `analyze.py`, `bigbet.py`, `iskbets.py`. Provides fsync durability.
+- **REF-10: fin_evolve.py import cleanup**: Removed 5 underscore-prefixed import aliases (`_load_json`, `_atomic_write_json`, etc.) — legacy from removed fallback wrappers. Updated 13 call sites and fixed 2 test assertions.
+- Also synced 5 modified portfolio files from main that were never committed (ministral/qwen3 signal/trader, signal_engine).
+- Theme: Memory Optimization, I/O Safety, Git Hygiene, Observability.
+
 ## 2026-03-23 (autonomous improvement session)
 - **BUG-111: Accuracy tracking corruption**: `outcome_tracker._derive_signal_vote("rsi")` used hardcoded 30/70 thresholds while `signal_engine` uses adaptive `rsi_p20`/`rsi_p80` percentiles. Accuracy backfill recorded different RSI votes than actually cast, corrupting signal accuracy tracking. Fixed to use adaptive thresholds with [15,85] clamp, matching signal_engine exactly.
 - **BUG-112: Backfill memory optimization**: `backfill_outcomes()` loaded entire 68MB signal_log.jsonl (~150K entries, ~75MB parsed JSON) into memory to process only 2,000 entries. Refactored to streaming approach: count lines (binary scan), skip head without parsing, parse only tail, stream head bytes verbatim on rewrite. Memory: 75MB → 2MB.

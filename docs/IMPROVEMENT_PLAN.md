@@ -1,136 +1,151 @@
-# Improvement Plan — Auto-Session 2026-03-24
+# Improvement Plan — Auto-Session 2026-03-25
 
-Updated: 2026-03-24
-Branch: improve/auto-session-2026-03-24
+Updated: 2026-03-25 (COMPLETED)
+Branch: improve/auto-session-2026-03-25
 
 ## 1. Bugs & Problems Found
 
-### P1 — Critical (affects trading decisions or system reliability)
+### P1 — Critical (affects system reliability or data correctness)
 
-#### BUG-115: `structure.py` signal swallows exceptions silently
-- **File**: `portfolio/signals/structure.py:217-235`
-- **Problem**: All 4 sub-indicator try/except blocks catch bare `Exception` with no logging. No `import logging` or logger in the file. When a sub-indicator crashes, it silently falls back to HOLD with zero visibility.
-- **Impact**: Trading decisions based on incomplete signal data. Systematic failures in structure signal invisible for days.
-- **Fix**: Add logger + `logger.exception()` in each except block.
+#### BUG-122: health.py reads entire 68MB signal_log.jsonl (x2)
+- **Files**: `portfolio/health.py:265-266` and `portfolio/health.py:314-315`
+- **Problem**: Both `check_outcome_staleness()` and `check_dead_signals()` use `f.readlines()` on the 68MB signal_log.jsonl file. This loads ~75MB into memory to check only 20-50 entries. The exact same pattern was fixed in BUG-109 (digest.py).
+- **Impact**: ~150MB total memory spike per health check cycle (both functions called back-to-back in main.py). On memory-constrained systems, could trigger OOM or slow GC pauses.
+- **Fix**: Replace `open()/readlines()` with `load_jsonl_tail()` from `file_utils.py`.
 
-#### BUG-119: Layer 2 tier config mismatch
-- **File**: `portfolio/agent_invocation.py:42`, `CLAUDE.md`
-- **Problem**: `TIER_CONFIG[2]` has `max_turns: 40`, but `CLAUDE.md` documents T2 as "25 turns".
-- **Impact**: T2 sessions run longer than documented, or docs mislead Layer 2 agents.
-- **Fix**: Align CLAUDE.md with code (40 turns is the actual runtime value).
+#### BUG-123: Untracked files break worktrees and CI
+- **Files**: `portfolio/metals_ladder.py`, `portfolio/process_lock.py`, `portfolio/subprocess_utils.py`, `portfolio/notification_text.py` + 5 test files
+- **Problem**: These files are imported by tracked modules (e.g., `fin_snipe.py` → `metals_ladder.py`, `fin_snipe_manager.py` → `process_lock.py`) but are not committed to git. Any git worktree or fresh clone fails with `ModuleNotFoundError`.
+- **Impact**: Every worktree creation requires manual file copying. CI would fail. Current test suite fails on `test_fin_snipe_manager.py` immediately.
+- **Fix**: Track and commit all required files.
 
 ### P2 — Important (could cause incorrect behavior)
 
-#### BUG-116: Trigger state pruning silently drops tickers
-- **File**: `portfolio/trigger.py:52-59`
-- **Problem**: When tickers are removed from tracking, their trigger state entries are pruned without logging. Temporary API failures wipe baselines, causing spurious triggers on return.
-- **Impact**: Potential spurious Layer 2 invocations after temporary API outages.
-- **Fix**: Add `logger.info()` when pruning entries.
+#### BUG-124: fin_snipe_manager.py raw config.json read
+- **File**: `portfolio/fin_snipe_manager.py:97-98`
+- **Problem**: Uses `open(BASE_DIR / "config.json")` + `_json.load(fh)` instead of `load_json()` from `file_utils`. Violates the project's "Atomic I/O only" rule (CLAUDE.md rule 4).
+- **Impact**: On corrupt/partial config.json, crashes with unhandled JSONDecodeError instead of graceful fallback. Race condition with config writes.
+- **Fix**: Use `load_json()` or `api_utils.load_config()`.
 
-#### BUG-117: FX rate hardcoded fallback may be stale
-- **File**: `portfolio/fx_rates.py:48`
-- **Problem**: Fallback rate is `10.85` SEK/USD. If SEK moves to 9.x or 12.x, portfolio valuations could be off by 10-15%.
-- **Impact**: Portfolio P&L display could be significantly wrong in extreme FX movements.
-- **Fix**: Add bounds check — warn at ERROR level when using hardcoded fallback, and validate cached rate is within reasonable range (8-15 SEK).
+#### BUG-125: onchain_data.py non-atomic cache write
+- **File**: `portfolio/onchain_data.py:57`
+- **Problem**: `CACHE_FILE.write_text(json.dumps(...))` is not atomic. If process crashes during write, the cache file is corrupt and subsequent reads fail.
+- **Impact**: On-chain data cache corruption on crash → stale MVRV/SOPR data → degraded BTC analysis.
+- **Fix**: Replace with `atomic_write_json(CACHE_FILE, data, ensure_ascii=False)`.
 
-#### BUG-120: `_safe_series()` forward-fills silently
-- **File**: `portfolio/signals/volume_flow.py`
-- **Problem**: `_safe_series()` replaces inf/-inf with NaN and forward-fills. Forward-filling volume data creates fictitious volume levels.
-- **Impact**: Volume Flow signal could produce false BUY/SELL votes based on stale forward-filled volume.
-- **Fix**: Add logging when forward-fill is applied to >5% of the series.
+### P3 — Minor (observability, code quality)
 
-### P3 — Minor (code quality, future maintenance)
+#### BUG-126: main.py silent Telegram exception handlers
+- **File**: `portfolio/main.py:573-574` and `portfolio/main.py:585-586`
+- **Problem**: Two `except Exception: pass` blocks swallow Telegram send failures without logging. These are inside safeguard checks (outcome staleness, dead signals).
+- **Impact**: If Telegram is down, no visibility into failed safeguard alerts.
+- **Fix**: Add `logger.debug("Failed to send safeguard alert", exc_info=True)`.
 
-#### BUG-118: FOMC/econ dates hardcoded for 2026-2027
-- **Files**: `portfolio/signals/econ_calendar.py`, `portfolio/signals/calendar_seasonal.py`, `portfolio/signals/macro_regime.py`
-- **Problem**: Economic calendar dates are hardcoded through 2027. After that, these signals silently degrade to HOLD.
-- **Impact**: After 2027, three signal modules silently stop contributing. No warning emitted.
-- **Fix**: Add a log warning when the latest event date is in the past.
-
-#### BUG-121: news_event.py sector mapping hardcoded
-- **File**: `portfolio/signals/news_event.py`
-- **Problem**: Sector→ticker representative mapping is a hardcoded dict. Adding a new ticker requires code changes.
-- **Impact**: Low — current ticker list is stable.
-- **Fix**: Deferred — low value.
+#### BUG-127: crypto_scheduler.py silent exception handler
+- **File**: `portfolio/crypto_scheduler.py:286-287`
+- **Problem**: `except Exception: pass` swallows fundamentals cache read failure without logging.
+- **Impact**: Low — just a display issue in crypto scheduler output.
+- **Fix**: Add `logger.debug()`.
 
 ---
 
-## 2. Architecture Improvements
+## 2. Refactoring
 
-### ARCH-17: main.py re-export cleanup — DEFERRED
-100+ re-exports from submodules. Breaking change risk too high without full caller audit.
+### REF-10: fin_evolve.py aliased imports (previously flagged, still open)
+- **File**: `portfolio/fin_evolve.py:23-37`
+- **Problem**: Imports from `file_utils` use underscore-prefixed aliases (`atomic_append_jsonl as _atomic_append_jsonl_single`, etc.). Legacy from when these were local fallback wrappers that have since been removed.
+- **Impact**: Confusing code, appears to be private functions but are just renames.
+- **Fix**: Replace 5 aliased imports with direct imports, update all 13 call sites.
 
-### ARCH-18: metals_loop.py split — DEFERRED
-1000+ line monolith. Risks destabilizing live metals trading. Requires dedicated session.
-
-### ARCH-19: No CI/CD — DEFERRED
-Out of scope for code improvement session. Needs GitHub Actions + Windows runner setup.
-
-### ARCH-20: No type checking — DEFERRED
-Adding mypy would require type annotations across 142 modules. Incremental adoption not worth the session time.
+### REF-20: Consolidate remaining raw JSONL reads in health.py
+- **File**: `portfolio/health.py:259-267` and `portfolio/health.py:312-317`
+- **Problem**: Uses raw `import json` + manual file parsing instead of `load_jsonl_tail()`.
+- **Impact**: Code duplication, missing malformed-line resilience that `load_jsonl_tail()` provides.
+- **Fix**: Part of BUG-122 fix.
 
 ---
 
 ## 3. Improvements to Implement
 
-### Batch 1: Signal module logging & safety (5 files)
-**Priority**: High — directly improves signal reliability visibility.
+### Batch 1: Track untracked files + fix import chain (9 files)
+**Priority**: Critical — blocks all worktree/CI operations.
+
+| # | Change | File |
+|---|--------|------|
+| 1 | Track in git | `portfolio/metals_ladder.py` |
+| 2 | Track in git | `portfolio/process_lock.py` |
+| 3 | Track in git | `portfolio/subprocess_utils.py` |
+| 4 | Track in git | `portfolio/notification_text.py` |
+| 5 | Track in git | `tests/test_avanza_control.py` |
+| 6 | Track in git | `tests/test_metals_ladder.py` |
+| 7 | Track in git | `tests/test_metals_swing_trader_notifications.py` |
+| 8 | Track in git | `tests/test_notification_text.py` |
+| 9 | Track in git | `tests/test_silver_monitor.py` |
+
+**Impact**: No production code changes — only adding files that already exist but aren't tracked.
+
+### Batch 2: health.py memory optimization + I/O safety (3 files)
+**Priority**: High — eliminates 150MB memory spikes per cycle.
 
 | # | Change | File | Bug |
 |---|--------|------|-----|
-| 1 | Add logging to exception handlers | `portfolio/signals/structure.py` | BUG-115 |
-| 2 | Add forward-fill count warnings | `portfolio/signals/volume_flow.py` | BUG-120 |
-| 3 | Add event staleness warning | `portfolio/signals/econ_calendar.py` | BUG-118 |
-| 4 | Add event staleness warning | `portfolio/signals/calendar_seasonal.py` | BUG-118 |
-| 5 | Add event staleness warning | `portfolio/signals/macro_regime.py` | BUG-118 |
+| 1 | Replace readlines() with load_jsonl_tail() in check_outcome_staleness() | `portfolio/health.py` | BUG-122 |
+| 2 | Replace readlines() with load_jsonl_tail() in check_dead_signals() | `portfolio/health.py` | BUG-122 |
+| 3 | Replace write_text() with atomic_write_json() | `portfolio/onchain_data.py` | BUG-125 |
 
-**Impact**: Signal modules are isolated pure functions. Changes cannot break other signals or the main loop.
+**Impact**: health.py is called every cycle. Changes are isolated to data reading — no behavioral change. onchain_data.py change is a write-path safety improvement.
 
-### Batch 2: Trigger, FX & documentation fixes (3 files)
-**Priority**: High — reduces noise, improves accuracy.
+### Batch 3: Silent exception cleanup + config I/O (3 files)
+**Priority**: Medium — improves observability and crash safety.
 
 | # | Change | File | Bug |
 |---|--------|------|-----|
-| 1 | Add logging to trigger state pruning | `portfolio/trigger.py` | BUG-116 |
-| 2 | Add FX rate bounds validation | `portfolio/fx_rates.py` | BUG-117 |
-| 3 | Fix T2 turns documentation mismatch | `CLAUDE.md` | BUG-119 |
+| 1 | Use load_json() for config read in _notify_critical() | `portfolio/fin_snipe_manager.py` | BUG-124 |
+| 2 | Add logger.debug to Telegram exception handlers | `portfolio/main.py` | BUG-126 |
+| 3 | Add logger.debug to fundamentals cache handler | `portfolio/crypto_scheduler.py` | BUG-127 |
 
-**Impact**: trigger.py affects Layer 2 invocation frequency. FX rate affects portfolio display only.
+**Impact**: fin_snipe_manager.py touches notification path only. main.py/crypto_scheduler.py changes are logging-only additions.
 
-### Batch 3: Test coverage for under-tested modules (test files)
-**Priority**: Medium — improves confidence in infrastructure.
+### Batch 4: Import cleanup (1 file)
+**Priority**: Low — code readability only.
 
 | # | Change | File | Bug |
 |---|--------|------|-----|
-| 1 | Add tests for `health.py` staleness + silence detection | `tests/test_health_extended.py` | TEST-2 |
-| 2 | Add tests for `structure.py` logging behavior | `tests/test_structure_logging.py` | BUG-115 verify |
+| 1 | Remove aliased imports, use direct names | `portfolio/fin_evolve.py` | REF-10 |
 
-**Impact**: Test-only changes. No production code affected.
+**Impact**: No behavioral change. 13 call sites renamed from `_load_json` → `load_json`, etc.
 
 ---
 
-## 4. Refactoring TODOs (Deferred)
+## 4. Deferred Items (from prior sessions, still valid)
 
-- **REF-18**: Standardize signal exception handling with a decorator — low value, merge conflict risk.
-- **REF-19**: Extract `_MAX_CONFIDENCE = 0.7` to shared constant — already enforced by registry.
+- **ARCH-17**: main.py re-exports 100+ symbols (breaking change risk too high)
+- **ARCH-18**: metals_loop.py monolith split (risks destabilizing live metals trading)
+- **ARCH-19**: No CI/CD (out of scope — needs GitHub Actions + Windows runner)
+- **ARCH-20**: No type checking/mypy (incremental adoption not worth session time)
+- **ARCH-16**: Golddigger/elongir duplicated config loading (localized, may diverge)
+- **BUG-121**: news_event.py sector mapping hardcoded (low value, ticker list stable)
+- **TEST-1**: gpu_gate.py zero test coverage (requires GPU/CUDA mocking)
+- **TEST-3**: 26 pre-existing test failures (integration, config, state isolation)
 
 ---
 
 ## 5. Dependency & Ordering
 
-Batches 1 and 2 are independent — can be implemented in parallel.
-Batch 3 depends on Batch 1 (tests verify new logging behavior).
-
 ```
-Batch 1 (signal logging)  ──┐
-                             ├──→ Batch 3 (tests) ──→ Final verification
-Batch 2 (trigger/fx/docs) ──┘
+Batch 1 (track files) → required for test suite to pass
+Batch 2 (health/onchain) → independent
+Batch 3 (exceptions/config) → independent
+Batch 4 (imports) → independent
+
+All batches are independent after Batch 1. Can be parallelized.
 ```
 
 ### Risk Summary
 
 | Batch | Files Changed | Production Risk | Test Risk |
 |-------|--------------|-----------------|-----------|
-| 1 | 5 signal modules | Low — isolated, additive logging only | Low — existing tests unaffected |
-| 2 | 3 files (trigger, fx, docs) | Medium — trigger affects L2 frequency | Low — additive changes |
-| 3 | 2 test files (new) | None — test-only | None |
+| 1 | 9 files (add) | None — existing files, just tracking | Low — adds passing tests |
+| 2 | 2 files (modify) | Low — isolated data reading | Low — existing tests cover behavior |
+| 3 | 3 files (modify) | Low — logging + load_json swap | None — no behavioral change |
+| 4 | 1 file (modify) | None — import rename only | None — no behavioral change |

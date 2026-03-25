@@ -5,7 +5,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from portfolio.file_utils import atomic_write_json, last_jsonl_entry, load_json
+from portfolio.file_utils import atomic_write_json, last_jsonl_entry, load_json, load_jsonl_tail
 
 logger = logging.getLogger(__name__)
 
@@ -252,20 +252,18 @@ def check_outcome_staleness(max_age_hours: int = 36) -> dict:
     entries_without_outcomes (int).
     """
     signal_log = DATA_DIR / "signal_log.jsonl"
-    if not signal_log.exists():
-        return {"stale": True, "newest_outcome_age_hours": float("inf"),
-                "entries_without_outcomes": 0}
 
-    import json
     now = time.time()
     newest_outcome_ts = 0
     missing_count = 0
-    # Check last 50 entries
+    # BUG-122: Use load_jsonl_tail instead of reading the entire 68MB file
+    entries = load_jsonl_tail(signal_log, max_entries=50)
+    if not entries:
+        return {"stale": True, "newest_outcome_age_hours": float("inf"),
+                "entries_without_outcomes": 0}
+
     try:
-        with open(signal_log) as f:
-            lines = f.readlines()
-        for line in lines[-50:]:
-            entry = json.loads(line)
+        for entry in entries:
             outcomes = entry.get("outcomes", {})
             has_any = any(
                 outcomes.get(t, {}).get("1d") is not None
@@ -306,25 +304,17 @@ def check_dead_signals(recent_entries: int = 20) -> list[str]:
     Returns list of signal names that are effectively dead (100% HOLD).
     """
     signal_log = DATA_DIR / "signal_log.jsonl"
-    if not signal_log.exists():
-        return []
 
-    import json
-    try:
-        with open(signal_log) as f:
-            lines = f.readlines()
-    except Exception:
+    # BUG-122: Use load_jsonl_tail instead of reading the entire 68MB file
+    entries = load_jsonl_tail(signal_log, max_entries=recent_entries)
+    if not entries:
         return []
 
     # Collect vote counts per signal
     from collections import defaultdict
     vote_counts = defaultdict(lambda: {"total": 0, "non_hold": 0})
 
-    for line in lines[-recent_entries:]:
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    for entry in entries:
         for _ticker, tdata in entry.get("tickers", {}).items():
             for sig_name, vote in tdata.get("signals", {}).items():
                 vote_counts[sig_name]["total"] += 1

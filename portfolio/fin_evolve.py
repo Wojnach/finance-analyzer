@@ -21,19 +21,11 @@ from pathlib import Path
 from statistics import mean
 
 from portfolio.file_utils import (
-    atomic_append_jsonl as _atomic_append_jsonl_single,
-)
-from portfolio.file_utils import (
-    atomic_write_json as _atomic_write_json,
-)
-from portfolio.file_utils import (
-    atomic_write_jsonl as _atomic_write_jsonl,
-)
-from portfolio.file_utils import (
-    load_json as _load_json,
-)
-from portfolio.file_utils import (
-    load_jsonl as _load_jsonl,
+    atomic_append_jsonl,
+    atomic_write_json,
+    atomic_write_jsonl,
+    load_json,
+    load_jsonl,
 )
 
 logger = logging.getLogger("portfolio.fin_evolve")
@@ -63,7 +55,7 @@ _MAX_PRICE_WINDOW_HOURS = 6
 def _atomic_append_jsonl(path, entries):
     """Append multiple entries to a JSONL file."""
     for entry in entries:
-        _atomic_append_jsonl_single(path, entry)
+        atomic_append_jsonl(path, entry)
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +83,7 @@ def _load_price_history():
     Returns a list of dicts: [{"ts": "...", "prices": {"XAG-USD": 80.5, ...}}, ...]
     Sorted by timestamp ascending.
     """
-    entries = _load_jsonl(_PRICE_FILE)
+    entries = load_jsonl(_PRICE_FILE)
     # Pre-parse timestamps for faster lookups
     for entry in entries:
         entry["_parsed_ts"] = _parse_iso(entry.get("ts"))
@@ -163,7 +155,7 @@ def backfill_outcomes():
 
     Returns the number of entries updated.
     """
-    entries = _load_jsonl(_LOG_FILE)
+    entries = load_jsonl(_LOG_FILE)
     if not entries:
         return 0
 
@@ -220,7 +212,7 @@ def backfill_outcomes():
                 updated_count += 1
 
     if updated_count > 0:
-        _atomic_write_jsonl(_LOG_FILE, entries)
+        atomic_write_jsonl(_LOG_FILE, entries)
         logger.info("Backfilled %d outcome fields in fin_command_log.jsonl", updated_count)
 
     return updated_count
@@ -238,7 +230,7 @@ def backfill_journal_outcomes():
 
     Returns the number of new outcomes scored.
     """
-    journal = _load_jsonl(_JOURNAL_FILE)
+    journal = load_jsonl(_JOURNAL_FILE)
     if not journal:
         return 0
 
@@ -248,7 +240,7 @@ def backfill_journal_outcomes():
         return 0
 
     # Load existing outcomes to avoid re-scoring
-    existing = _load_jsonl(_JOURNAL_OUTCOMES_FILE)
+    existing = load_jsonl(_JOURNAL_OUTCOMES_FILE)
     scored_keys = {(e["journal_ts"], e["ticker"]) for e in existing
                    if "journal_ts" in e and "ticker" in e}
 
@@ -754,11 +746,11 @@ def evolve():
     Returns the lessons dict, or None if not enough data.
     """
     # --- Source 1: fin_command entries ---
-    fin_entries = _load_jsonl(_LOG_FILE)
+    fin_entries = load_jsonl(_LOG_FILE)
     fin_scored = [e for e in fin_entries if "outcome_3d_pct" in e]
 
     # --- Source 2: journal outcomes ---
-    journal_outcomes = _load_jsonl(_JOURNAL_OUTCOMES_FILE)
+    journal_outcomes = load_jsonl(_JOURNAL_OUTCOMES_FILE)
     journal_scored = [e for e in journal_outcomes if "outcome_3d_pct" in e]
 
     # --- Merge into unified format ---
@@ -885,10 +877,10 @@ def evolve():
         lessons["layer2_patterns"] = layer2_patterns
 
     # Write to system_lessons.json (primary output)
-    _atomic_write_json(_LESSONS_FILE, lessons)
+    atomic_write_json(_LESSONS_FILE, lessons)
 
     # Write backwards-compatible copy for /fin-silver and /fin-gold
-    _atomic_write_json(_LEGACY_LESSONS_FILE, lessons)
+    atomic_write_json(_LEGACY_LESSONS_FILE, lessons)
 
     logger.info(
         "System evolve wrote lessons: %d verdicts scored "
@@ -982,7 +974,7 @@ def maybe_evolve(config=None):
 
     Returns the lessons dict if evolution ran, else None.
     """
-    state = _load_json(_EVOLVE_STATE_FILE, default={})
+    state = load_json(_EVOLVE_STATE_FILE, default={})
     last_run = state.get("last_run_epoch", 0)
     now = time.time()
 
@@ -993,7 +985,7 @@ def maybe_evolve(config=None):
         n_backfilled = backfill_outcomes()
         n_journal = backfill_journal_outcomes()
         result = evolve()
-        _atomic_write_json(
+        atomic_write_json(
             _EVOLVE_STATE_FILE,
             {
                 "last_run_epoch": now,

@@ -18,6 +18,7 @@ import logging
 import time
 from pathlib import Path
 
+from portfolio.file_utils import atomic_append_jsonl
 from portfolio.http_retry import fetch_json
 from portfolio.shared_state import _cached
 
@@ -304,8 +305,7 @@ def _append_ratio_history(ratio, gold_price, btc_price):
             "gold": gold_price,
             "btc": btc_price,
         }
-        with open(RATIO_HISTORY_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
+        atomic_append_jsonl(RATIO_HISTORY_FILE, entry)
     except Exception:
         logger.warning("Failed to append ratio history", exc_info=True)
 
@@ -420,8 +420,7 @@ def _append_netflow_history(netflow):
                 return
 
         entry = {"ts": time.time(), "netflow": netflow}
-        with open(NETFLOW_HISTORY_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
+        atomic_append_jsonl(NETFLOW_HISTORY_FILE, entry)
     except Exception:
         logger.warning("Failed to append netflow history", exc_info=True)
 

@@ -571,7 +571,7 @@ def run(force_report=False, active_symbols=None):
                     from portfolio.telegram_notifications import send_telegram
                     send_telegram(msg)
                 except Exception:
-                    pass
+                    logger.debug("Failed to send outcome staleness alert", exc_info=True)
 
             dead_signals = check_dead_signals()
             if dead_signals:
@@ -583,7 +583,7 @@ def run(force_report=False, active_symbols=None):
                     from portfolio.telegram_notifications import send_telegram
                     send_telegram(msg)
                 except Exception:
-                    pass
+                    logger.debug("Failed to send dead signals alert", exc_info=True)
         except Exception as e:
             logger.debug("safeguard checks failed: %s", e)
 

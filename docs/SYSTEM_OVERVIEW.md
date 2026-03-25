@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-03-24
-Branch: improve/auto-session-2026-03-24
+Updated: 2026-03-25
+Branch: improve/auto-session-2026-03-25
 
 ## 1) Architecture Summary
 
@@ -74,13 +74,16 @@ Two-layer autonomous trading system with 30 signals, 20 instruments, and dual-st
 - `message_throttle.py`: Analysis message rate limiting
 - `digest.py` (206 lines): 4-hour periodic digest with invocation stats
 
-### Infrastructure (6 modules)
-- `file_utils.py` (~165 lines): atomic_write_json, load_json/jsonl, prune_jsonl, atomic_append_jsonl, last_jsonl_entry
+### Infrastructure (9 modules)
+- `file_utils.py` (~250 lines): atomic_write_json, load_json/jsonl, prune_jsonl, atomic_append_jsonl, load_jsonl_tail, last_jsonl_entry
 - `http_retry.py` (66 lines): Exponential backoff (3 retries, 1s base, 2x factor)
 - `circuit_breaker.py` (97 lines): Thread-safe state machine (CLOSED→OPEN→HALF_OPEN)
-- `health.py` (188 lines): Heartbeat, error ring buffer, module failure tracking, efficient JSONL tail-read
+- `health.py` (~340 lines): Heartbeat, error ring buffer, module failure tracking, signal health, dead signal detection
 - `logging_config.py` (48 lines): RotatingFileHandler (10MB, 3 backups)
 - `signal_db.py`: WAL-mode SQLite dual-write with JSONL fallback
+- `process_lock.py` (101 lines): Cross-platform non-blocking file locks (msvcrt/fcntl)
+- `subprocess_utils.py` (233 lines): Windows Job Object subprocess protection, orphan reaper
+- `notification_text.py` (65 lines): Shared text helpers for human-readable notifications
 
 ## 4) Data Flow
 
@@ -253,6 +256,15 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-120 (P3): `_safe_series()` forward-fills silently — **fixed 2026-03-24** (warning when >5% values filled)
 - BUG-121 (P3): Sector representative mapping in news_event.py is hardcoded dict — not extensible (deferred)
 - Also added logging to `macro_regime.py` exception handlers (had no `import logging` at all) — **fixed 2026-03-24**
+- BUG-122 (P1): health.py reads entire 68MB signal_log.jsonl (x2) — **fixed 2026-03-25** (load_jsonl_tail)
+- BUG-123 (P1): Untracked files break worktrees (metals_ladder, process_lock, subprocess_utils, notification_text) — **fixed 2026-03-25** (tracked in git)
+- BUG-124 (P2): fin_snipe_manager raw config.json read — **fixed 2026-03-25** (load_json)
+- BUG-125 (P2): onchain_data non-atomic cache write — **fixed 2026-03-25** (atomic_write_json)
+- BUG-126 (P3): main.py silent Telegram exception handlers — **fixed 2026-03-25** (logger.debug)
+- BUG-127 (P3): crypto_scheduler silent exception handler — **fixed 2026-03-25** (logger.debug)
+- REF-9: Raw JSONL append consolidation (5 files) — **fixed 2026-03-25** (atomic_append_jsonl)
+- REF-10: fin_evolve.py aliased imports — **fixed 2026-03-25** (direct imports)
+- Also synced 5 modified portfolio files + 5 test files from main working tree — **fixed 2026-03-25**
 - ARCH-17: main.py re-exports 100+ symbols from submodules — obscures true module boundaries (deferred)
 - ARCH-18: metals_loop.py is 1000+ lines monolith — should be split into modules (deferred)
 - ARCH-19: No CI/CD pipeline — all testing is manual (deferred)

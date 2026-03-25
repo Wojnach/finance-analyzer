@@ -13,13 +13,12 @@ Usage:
     interp = interpret_onchain(data)  # returns interpretation dict
 """
 
-import json
 import logging
 import time
 from pathlib import Path
 
 from portfolio.api_utils import load_config as _load_config
-from portfolio.file_utils import load_json
+from portfolio.file_utils import atomic_write_json, load_json
 from portfolio.http_retry import fetch_json
 from portfolio.shared_state import _cached
 
@@ -54,7 +53,8 @@ def _load_config_token():
 def _save_onchain_cache(data):
     """Save on-chain data to persistent cache file."""
     try:
-        CACHE_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        # BUG-125: Use atomic_write_json to prevent corrupt cache on crash
+        atomic_write_json(CACHE_FILE, data, ensure_ascii=False)
     except Exception:
         logger.warning("Failed to write onchain cache", exc_info=True)
 

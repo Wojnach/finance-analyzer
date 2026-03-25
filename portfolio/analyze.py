@@ -5,7 +5,6 @@ Usage:
   python main.py --watch BTC-USD:66500 ETH-USD:1920 AMD:150
 """
 
-import json
 import logging
 import os
 import subprocess
@@ -221,20 +220,12 @@ def _build_analysis_prompt(ticker, summary):
 def _log_analysis(ticker, output, elapsed):
     """Append to analysis_log.jsonl."""
     try:
-        ANALYSIS_LOG_FILE.parent.mkdir(exist_ok=True)
-        with open(ANALYSIS_LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(
-                json.dumps(
-                    {
-                        "ts": datetime.now(UTC).isoformat(),
-                        "ticker": ticker,
-                        "elapsed_s": round(elapsed, 2),
-                        "output": output[:2000],
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
+        atomic_append_jsonl(ANALYSIS_LOG_FILE, {
+            "ts": datetime.now(UTC).isoformat(),
+            "ticker": ticker,
+            "elapsed_s": round(elapsed, 2),
+            "output": output[:2000],
+        })
     except Exception as e:
         logger.debug("Failed to log analysis output: %s", e)
 

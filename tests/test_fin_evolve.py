@@ -958,7 +958,7 @@ class TestMaybeEvolve:
             "last_run_epoch": time.time() - fin_evolve._EVOLVE_INTERVAL_SEC - 100,
             "status": "ok",
         }
-        fin_evolve._atomic_write_json(fin_evolve._EVOLVE_STATE_FILE, state)
+        fin_evolve.atomic_write_json(fin_evolve._EVOLVE_STATE_FILE, state)
         scored = []
         for i in range(6):
             v = _make_verdict(ts_offset_hours=-(100 + i * 24))
@@ -968,8 +968,8 @@ class TestMaybeEvolve:
         _write_jsonl(fin_evolve._LOG_FILE, scored)
         assert fin_evolve.maybe_evolve() is not None
 
-    def test_4h_interval(self, tmp_path):
-        assert fin_evolve._EVOLVE_INTERVAL_SEC == 4 * 3600
+    def test_2h_interval(self, tmp_path):
+        assert fin_evolve._EVOLVE_INTERVAL_SEC == 2 * 3600
 
 
 # ---------------------------------------------------------------------------
