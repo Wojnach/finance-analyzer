@@ -13,7 +13,6 @@ Usage:
     interp = interpret_onchain(data)  # returns interpretation dict
 """
 
-import json
 import logging
 import time
 from pathlib import Path

@@ -5,7 +5,6 @@ Usage:
   python main.py --watch BTC-USD:66500 ETH-USD:1920 AMD:150
 """
 
-import json
 import logging
 import os
 import subprocess

@@ -4,7 +4,6 @@ Detects extreme oversold/overbought setups and sends Telegram alerts.
 Does NOT trade. User manually trades turbo warrants on Avanza.
 """
 
-import json
 import logging
 import subprocess
 import time

@@ -5,7 +5,6 @@ exit conditions using an ATR-based ladder. User trades manually on Avanza
 and confirms via Telegram replies.
 """
 
-import json
 import logging
 import subprocess
 import time
