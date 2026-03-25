@@ -13,7 +13,7 @@ from pathlib import Path
 
 logger = logging.getLogger("portfolio.bigbet")
 
-from portfolio.file_utils import atomic_write_json, load_json
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
 from portfolio.message_store import send_or_store
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -193,22 +193,14 @@ def invoke_layer2_eval(ticker, direction, conditions, signals, tf_data, prices_u
 
     # Log evaluation
     try:
-        EVAL_LOG_FILE.parent.mkdir(exist_ok=True)
-        with open(EVAL_LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(
-                json.dumps(
-                    {
-                        "ts": datetime.now(UTC).isoformat(),
-                        "ticker": ticker,
-                        "direction": direction,
-                        "probability": probability,
-                        "reasoning": reasoning,
-                        "elapsed_s": round(time.time() - t0, 2),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
+        atomic_append_jsonl(EVAL_LOG_FILE, {
+            "ts": datetime.now(UTC).isoformat(),
+            "ticker": ticker,
+            "direction": direction,
+            "probability": probability,
+            "reasoning": reasoning,
+            "elapsed_s": round(time.time() - t0, 2),
+        })
     except Exception:
         logger.warning("Failed to append bigbet gate log", exc_info=True)
 

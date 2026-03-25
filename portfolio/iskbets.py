@@ -17,7 +17,7 @@ import pandas as pd
 logger = logging.getLogger("portfolio.iskbets")
 
 from portfolio.api_utils import ALPACA_BASE, BINANCE_BASE, get_alpaca_headers
-from portfolio.file_utils import atomic_write_json, load_json
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
 from portfolio.http_retry import fetch_with_retry
 from portfolio.message_store import send_or_store
 from portfolio.shared_state import _cached
@@ -338,22 +338,14 @@ def invoke_layer2_gate(ticker, price, conditions, signals, tf_data, atr, iskbets
 
     # Log decision
     try:
-        GATE_LOG_FILE.parent.mkdir(exist_ok=True)
-        with open(GATE_LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(
-                json.dumps(
-                    {
-                        "ts": datetime.now(UTC).isoformat(),
-                        "ticker": ticker,
-                        "price": price,
-                        "approved": approved,
-                        "reasoning": reasoning,
-                        "elapsed_s": round(time.time() - t0, 2),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
+        atomic_append_jsonl(GATE_LOG_FILE, {
+            "ts": datetime.now(UTC).isoformat(),
+            "ticker": ticker,
+            "price": price,
+            "approved": approved,
+            "reasoning": reasoning,
+            "elapsed_s": round(time.time() - t0, 2),
+        })
     except Exception:
         logger.warning("Failed to append iskbets gate log", exc_info=True)
 
