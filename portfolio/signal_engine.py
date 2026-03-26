@@ -237,7 +237,7 @@ _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal wei
 
 
 def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
-                        accuracy_gate=None):
+                        accuracy_gate=None, max_signals=None):
     """Compute weighted consensus using accuracy, regime, and activation frequency.
 
     Weight per signal = accuracy_weight * regime_mult * normalized_weight
@@ -249,6 +249,10 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
 
     Correlation deduplication: within defined correlation groups, only the
     highest-accuracy signal gets full weight. Others get 0.3x penalty.
+
+    Top-N gate: when max_signals is set, only the top max_signals non-HOLD
+    signals (ranked by accuracy) participate in the consensus. This focuses
+    the vote on the best performers and ignores marginal contributors.
     """
     gate = accuracy_gate if accuracy_gate is not None else ACCURACY_GATE_THRESHOLD
     buy_weight = 0.0
@@ -256,6 +260,18 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     gated_signals = []
     regime_mults = REGIME_WEIGHTS.get(regime, {})
     activation_rates = activation_rates or {}
+
+    # Top-N gate: only let the top max_signals (by accuracy) participate
+    active_votes = {k: v for k, v in votes.items() if v != "HOLD"}
+    if max_signals and len(active_votes) > max_signals:
+        ranked = sorted(
+            active_votes.keys(),
+            key=lambda s: accuracy_data.get(s, {}).get("accuracy", 0.5),
+            reverse=True,
+        )
+        excluded = set(ranked[max_signals:])
+    else:
+        excluded = set()
 
     # Pre-compute which signal is the "leader" (highest accuracy) in each
     # correlation group, considering only signals that are actively voting.
@@ -282,6 +298,8 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
 
     for signal_name, vote in votes.items():
         if vote == "HOLD":
+            continue
+        if signal_name in excluded:
             continue
         stats = accuracy_data.get(signal_name, {})
         acc = stats.get("accuracy", 0.5)
@@ -1071,6 +1089,25 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     except Exception:
         logger.error("Accuracy stats load failed", exc_info=True)
 
+    # Overlay regime-specific accuracy when available
+    try:
+        from portfolio.accuracy_stats import (
+            load_cached_regime_accuracy,
+            signal_accuracy_by_regime,
+            write_regime_accuracy_cache,
+        )
+        regime_acc = load_cached_regime_accuracy("1d")
+        if not regime_acc:
+            regime_acc = signal_accuracy_by_regime("1d")
+            if regime_acc:
+                write_regime_accuracy_cache("1d", regime_acc)
+        current_regime_data = regime_acc.get(regime, {})
+        for sig_name, rdata in current_regime_data.items():
+            if rdata.get("total", 0) >= 30:
+                accuracy_data[sig_name] = rdata
+    except Exception:
+        logger.debug("Regime-conditional accuracy unavailable", exc_info=True)
+
     # Override global accuracy with per-ticker accuracy for LLM signals.
     # The global number averages across all tickers, but Qwen3/Ministral
     # performance varies hugely per ticker (e.g., Qwen3: MU 90%, PLTR 44%).
@@ -1107,9 +1144,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
 
     sig_cfg = (config or {}).get("signals", {})
     accuracy_gate = sig_cfg.get("accuracy_gate_threshold", ACCURACY_GATE_THRESHOLD)
+    max_signals = sig_cfg.get("max_active_signals")
     weighted_action, weighted_conf = _weighted_consensus(
         votes, accuracy_data, regime, activation_rates,
         accuracy_gate=accuracy_gate,
+        max_signals=max_signals,
     )
 
     # Apply core gate AND MIN_VOTERS gate to weighted consensus too

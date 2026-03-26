@@ -617,6 +617,101 @@ def print_accuracy_report():
                 )
 
 
+REGIME_ACCURACY_CACHE_FILE = DATA_DIR / "regime_accuracy_cache.json"
+
+
+def signal_accuracy_by_regime(horizon="1d", since=None):
+    """Compute per-signal accuracy grouped by market regime.
+
+    Args:
+        horizon: Outcome horizon to evaluate ("1d", "3d", "5d", "10d").
+        since: Optional ISO-8601 string cutoff. Only entries with ts >= since
+               are included. None means all entries (no time filter).
+
+    Returns:
+        dict: {regime: {signal_name: {correct, total, accuracy, pct}}}
+              Only includes signals with total > 0.
+    """
+    entries = load_entries()
+
+    # {regime: {signal_name: {correct, total}}}
+    regime_stats = defaultdict(lambda: {s: {"correct": 0, "total": 0} for s in SIGNAL_NAMES})
+
+    for entry in entries:
+        if since and entry.get("ts", "") < since:
+            continue
+        outcomes = entry.get("outcomes", {})
+        tickers = entry.get("tickers", {})
+
+        for ticker, tdata in tickers.items():
+            outcome = outcomes.get(ticker, {}).get(horizon)
+            if not outcome:
+                continue
+
+            change_pct = outcome.get("change_pct", 0)
+            signals = tdata.get("signals", {})
+            regime = tdata.get("regime", "unknown")
+
+            for sig_name in SIGNAL_NAMES:
+                vote = signals.get(sig_name, "HOLD")
+                if vote == "HOLD":
+                    continue
+                result_val = _vote_correct(vote, change_pct)
+                if result_val is None:
+                    continue  # neutral outcome — don't count
+                regime_stats[regime][sig_name]["total"] += 1
+                if result_val:
+                    regime_stats[regime][sig_name]["correct"] += 1
+
+    result = {}
+    for regime, sig_map in regime_stats.items():
+        regime_result = {}
+        for sig_name, s in sig_map.items():
+            if s["total"] == 0:
+                continue
+            acc = s["correct"] / s["total"]
+            regime_result[sig_name] = {
+                "correct": s["correct"],
+                "total": s["total"],
+                "accuracy": acc,
+                "pct": round(acc * 100, 1),
+            }
+        if regime_result:
+            result[regime] = regime_result
+
+    return result
+
+
+def load_cached_regime_accuracy(horizon="1d"):
+    """Load cached regime accuracy, returning None if missing or stale.
+
+    Uses the same TTL as the main accuracy cache (ACCURACY_CACHE_TTL).
+    """
+    cache = load_json(REGIME_ACCURACY_CACHE_FILE)
+    if cache is not None:
+        try:
+            if time.time() - cache.get("time", 0) < ACCURACY_CACHE_TTL:
+                cached = cache.get(horizon)
+                if cached:
+                    return cached
+        except (KeyError, AttributeError):
+            logger.debug("Regime accuracy cache corrupted or missing horizon %s", horizon)
+    return None
+
+
+def write_regime_accuracy_cache(horizon, data):
+    """Persist regime accuracy data to the cache file.
+
+    Merges with any existing horizons to avoid overwriting other cached data.
+    """
+    cache = load_json(REGIME_ACCURACY_CACHE_FILE, default={})
+    if not isinstance(cache, dict):
+        cache = {}
+    cache[horizon] = data
+    cache["time"] = time.time()
+    _atomic_write_json(REGIME_ACCURACY_CACHE_FILE, cache)
+
+
 ACCURACY_SNAPSHOTS_FILE = DATA_DIR / "accuracy_snapshots.jsonl"
 
 
