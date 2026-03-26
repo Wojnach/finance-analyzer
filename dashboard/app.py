@@ -2,6 +2,8 @@
 
 import functools
 import math
+import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -54,19 +56,43 @@ from portfolio.file_utils import load_json as _load_json_impl
 from portfolio.file_utils import load_jsonl as _load_jsonl_impl
 
 # ---------------------------------------------------------------------------
+# TTL Cache (BUG-130: avoid re-reading files on every API request)
+# ---------------------------------------------------------------------------
+
+_cache = {}
+_cache_lock = threading.Lock()
+_DEFAULT_TTL = 5  # seconds
+
+
+def _cached_read(key, ttl, read_fn):
+    """Return cached result if fresh, otherwise call read_fn and cache."""
+    now = time.monotonic()
+    with _cache_lock:
+        entry = _cache.get(key)
+        if entry and (now - entry[1]) < ttl:
+            return entry[0]
+    result = read_fn()
+    with _cache_lock:
+        _cache[key] = (result, now)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _read_json(path):
-    return _load_json_impl(path)
+def _read_json(path, ttl=_DEFAULT_TTL):
+    return _cached_read(f"json:{path}", ttl, lambda: _load_json_impl(path))
 
 
-def _read_jsonl(path, limit=100):
-    return _load_jsonl_impl(path, limit=limit)
+def _read_jsonl(path, limit=100, ttl=_DEFAULT_TTL):
+    return _cached_read(
+        f"jsonl:{path}:{limit}", ttl, lambda: _load_jsonl_impl(path, limit=limit)
+    )
 
 
 def _get_config():
-    return _read_json(CONFIG_PATH) or {}
+    return _read_json(CONFIG_PATH, ttl=60) or {}
 
 
 def _parse_limit_arg(name, default, max_value):
