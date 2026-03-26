@@ -242,7 +242,7 @@ class TestCheckTelegramConfirm:
             assert mod._check_telegram_confirm(config) is True
 
     def test_advances_offset(self, tmp_data_dir, config):
-        """Offset file is updated after processing."""
+        """Offset file is updated after processing (BUG-128: now atomic JSON)."""
         mock_resp = MagicMock()
         mock_resp.ok = True
         mock_resp.json.return_value = {
@@ -256,7 +256,45 @@ class TestCheckTelegramConfirm:
 
         offset_file = tmp_data_dir / "avanza_telegram_offset.txt"
         assert offset_file.exists()
-        assert int(offset_file.read_text().strip()) == 43
+        import json
+        data = json.loads(offset_file.read_text(encoding="utf-8"))
+        assert data["offset"] == 43
+
+    def test_reads_legacy_plaintext_offset(self, tmp_data_dir, config):
+        """BUG-128: Backwards compatibility with old plain-text offset format."""
+        offset_file = tmp_data_dir / "avanza_telegram_offset.txt"
+        offset_file.write_text("99", encoding="utf-8")
+
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {
+            "ok": True,
+            "result": [
+                {"update_id": 100, "message": {"chat": {"id": 123456}, "text": "hello"}},
+            ],
+        }
+        with patch.object(mod, "fetch_with_retry", return_value=mock_resp) as mock_fetch:
+            mod._check_telegram_confirm(config)
+
+        # Should have used offset=99 in the API call
+        call_kwargs = mock_fetch.call_args
+        assert call_kwargs[1].get("params", {}).get("offset") == 99 or \
+               call_kwargs.kwargs.get("params", {}).get("offset") == 99
+
+    def test_reads_json_offset_format(self, tmp_data_dir, config):
+        """BUG-128: Reads new JSON offset format correctly."""
+        offset_file = tmp_data_dir / "avanza_telegram_offset.txt"
+        offset_file.write_text('{"offset": 77}', encoding="utf-8")
+
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {"ok": True, "result": []}
+        with patch.object(mod, "fetch_with_retry", return_value=mock_resp) as mock_fetch:
+            mod._check_telegram_confirm(config)
+
+        call_kwargs = mock_fetch.call_args
+        assert call_kwargs[1].get("params", {}).get("offset") == 77 or \
+               call_kwargs.kwargs.get("params", {}).get("offset") == 77
 
     def test_returns_false_on_api_error(self, tmp_data_dir, config):
         with patch.object(mod, "fetch_with_retry", return_value=None):

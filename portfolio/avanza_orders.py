@@ -149,10 +149,13 @@ def _check_telegram_confirm(config: dict) -> bool:
     if not token or not chat_id:
         return False
 
-    # Load stored offset
+    # Load stored offset (BUG-128: now atomic JSON; handles legacy plain-text format)
     offset_file = DATA_DIR / "avanza_telegram_offset.txt"
     offset = 0
-    if offset_file.exists():
+    offset_data = load_json(offset_file)
+    if isinstance(offset_data, dict):
+        offset = int(offset_data.get("offset", 0))
+    elif offset_file.exists():
         try:
             offset = int(offset_file.read_text().strip())
         except (ValueError, OSError):
@@ -192,9 +195,9 @@ def _check_telegram_confirm(config: dict) -> bool:
         if text == "CONFIRM":
             found_confirm = True
 
-    # Save offset
+    # Save offset atomically to prevent corruption on crash (BUG-128)
     try:
-        offset_file.write_text(str(offset))
+        atomic_write_json(offset_file, {"offset": offset})
     except OSError as e:
         logger.warning("Failed to save Telegram offset: %s", e)
 

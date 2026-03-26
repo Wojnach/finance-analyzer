@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-03-25
-Branch: improve/auto-session-2026-03-25
+Updated: 2026-03-26
+Branch: improve/auto-session-2026-03-26
 
 ## 1) Architecture Summary
 
@@ -162,11 +162,13 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 
 ## 7) Test Surface
 
-- ~3,168 tests across 105+ test files
-- Sequential: ~16 min; Parallel (`-n auto`): ~5.5 min
-- 26 pre-existing failures (integration/strategy, consensus thresholds)
+- ~5,994 tests across 159 test files (156 main + 1 integration + 2 unit)
+- Sequential: ~16 min; Parallel (`-n auto`): ~5.5 min (2.9x speedup on 8 workers)
+- 26 pre-existing failures (integration/strategy, consensus thresholds, forecast config)
 - Config: `pyproject.toml` → `[tool.pytest.ini_options]`
 - Linter: ruff (line-length=120, target py311)
+- Fixtures: `conftest.py` provides `make_indicators()`, `make_candles()`, `make_ohlcv_df()`, `sample_config`, `config_file`, `tmp_data_dir`
+- 76 tests use `tmp_path` isolation for parallel-safe file I/O
 - 7 untested utility modules: telegram_poller, data_refresh, backup, log_rotation, social_sentiment, stats, regime_alerts
 
 ## 8) Key Design Patterns
@@ -225,7 +227,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - REF-13: 112 ruff lint violations (unused imports, f-strings, reimports) — fixed 2026-03-18
 - REF-14: 15 dead variable assignments across 13 modules — fixed 2026-03-18
 - ARCH-16: Golddigger/elongir duplicated config loading (deferred — localized, may diverge)
-- ~5,994 tests across 157+ test files
+- ~5,994 tests across 159 test files
 - BUG-85 (P1): Thread-unsafe `_prev_sentiment` + per-ticker serialization data loss in signal_engine.py — fixed 2026-03-20
 - BUG-86 (P2): Thread-unsafe `_adx_cache` in signal_engine.py — fixed 2026-03-20
 - BUG-87 (P1): NaN propagation from compute_indicators into JSON and signals — fixed 2026-03-20
@@ -272,3 +274,10 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - TEST-1: GPU gate module (`gpu_gate.py`) has zero test coverage
 - TEST-2: Health module (`health.py`) had only 3 tests — **extended 2026-03-24** (24 new tests covering staleness, signal health, dead signals)
 - TEST-3: 26 pre-existing test failures still unaddressed (integration, config, state isolation)
+- BUG-128 (P2): `avanza_orders.py` non-atomic offset file — **fixed 2026-03-26** (atomic_write_json + legacy read compat)
+- BUG-129 (P3): `avanza_session.py` Playwright globals not thread-safe — **fixed 2026-03-26** (threading.Lock)
+- BUG-130 (P3): Dashboard no caching — **fixed 2026-03-26** (TTL cache, 5s default / 60s config)
+- BUG-131 (P3): Telegram truncation breaks Markdown — **fixed 2026-03-26** (newline-boundary truncation)
+- BUG-132 (P3): `orb_predictor.py` fetches 5000+ candles from Binance on every call with no caching (deferred)
+- ARCH-21: `autonomous.py` has 500+ line functions (e.g., `_build_telegram_mode_a`) — should decompose for maintainability (deferred)
+- ARCH-22: `agent_invocation.py` uses module-level globals for process lifecycle — could be a class for clarity (deferred)

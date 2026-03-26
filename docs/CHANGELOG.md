@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-03-26 (autonomous improvement session)
+- **BUG-128: Avanza offset file atomicity**: `avanza_orders.py` Telegram offset file now uses `atomic_write_json()` instead of `write_text()`, preventing corruption on crash. Read path handles both legacy plain-text and new JSON format for backwards compatibility.
+- **BUG-129: Playwright thread safety**: `avanza_session.py` global Playwright state (`_pw_instance`, `_pw_browser`, `_pw_context`) now protected by `threading.Lock` to prevent concurrent access corruption.
+- **BUG-130: Dashboard TTL cache**: Added thread-safe in-memory TTL cache to `dashboard/app.py` (5s default, 60s for config). Eliminates redundant disk I/O on concurrent API requests.
+- **BUG-131: Safe Telegram truncation**: `message_store.py` now truncates at the last newline boundary before the 4096-char limit instead of at an arbitrary character position. Prevents splitting Markdown tags mid-formatting.
+- **SYSTEM_OVERVIEW.md**: Updated test count (5,994 across 159 files), added fixture documentation, tracked BUG-128 through BUG-132, ARCH-21/22.
+- **New tests**: 9 new tests — avanza offset format compatibility (3), message truncation safety (3), dashboard cache behavior (3). All pass.
+- Theme: Crash Safety, Thread Safety, Performance Caching, Markdown Integrity.
+
 ## 2026-03-25 (autonomous improvement session)
 - **BUG-122: Health module 68MB memory spike (x2)**: `check_outcome_staleness()` and `check_dead_signals()` in `health.py` both used `f.readlines()` on the 68MB signal_log.jsonl to check 20-50 entries. Replaced with `load_jsonl_tail()` — reads ~512KB instead of 68MB. Eliminates ~150MB memory spike per health cycle.
 - **BUG-123: Untracked files break worktrees**: `portfolio/metals_ladder.py`, `portfolio/process_lock.py`, `portfolio/subprocess_utils.py`, `portfolio/notification_text.py` were imported by tracked modules but never committed. Any worktree or fresh clone hit `ModuleNotFoundError`. Now tracked in git along with 5 test files.

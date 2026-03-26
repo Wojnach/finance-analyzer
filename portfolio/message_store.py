@@ -120,13 +120,19 @@ def _do_send_telegram(msg, config):
         logger.warning("Telegram token/chat_id not configured")
         return False
 
-    # Truncate to Telegram's max message length
+    # Truncate to Telegram's max message length (BUG-131: truncate at line
+    # boundary to avoid breaking Markdown formatting mid-tag)
     if len(msg) > _TELEGRAM_MAX_LENGTH:
         logger.warning(
             "Telegram message truncated from %d to %d chars",
             len(msg), _TELEGRAM_MAX_LENGTH,
         )
-        msg = msg[:_TELEGRAM_MAX_LENGTH - 20] + "\n...(truncated)"
+        cut = _TELEGRAM_MAX_LENGTH - 20
+        # Find last newline before cut point to avoid splitting Markdown tags
+        nl_pos = msg.rfind("\n", 0, cut)
+        if nl_pos > cut // 2:
+            cut = nl_pos
+        msg = msg[:cut] + "\n...(truncated)"
 
     r = fetch_with_retry(
         f"https://api.telegram.org/bot{token}/sendMessage",
