@@ -274,10 +274,10 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - TEST-1: GPU gate module (`gpu_gate.py`) has zero test coverage
 - TEST-2: Health module (`health.py`) had only 3 tests — **extended 2026-03-24** (24 new tests covering staleness, signal health, dead signals)
 - TEST-3: 26 pre-existing test failures still unaddressed (integration, config, state isolation)
-- BUG-128 (P2): `avanza_orders.py` uses `write_text()` for Telegram offset file — not atomic, could lose offset on crash leading to duplicate/missed order confirmations
-- BUG-129 (P3): `avanza_session.py` global Playwright state (`_pw_instance/_pw_browser/_pw_context`) has no thread-safety protection — concurrent calls would corrupt browser state
-- BUG-130 (P3): Dashboard `app.py` reads files on every API request with no caching — slow responses under load
-- BUG-131 (P3): `message_store.py` 4096-char Telegram truncation can break Markdown mid-tag (incomplete code blocks, unclosed formatting)
-- BUG-132 (P3): `orb_predictor.py` fetches 5000+ candles from Binance on every call with no caching
-- ARCH-21: `autonomous.py` has 500+ line functions (e.g., `_build_telegram_mode_a`) — should decompose for maintainability
-- ARCH-22: `agent_invocation.py` uses module-level globals for process lifecycle — could be a class for clarity
+- BUG-128 (P2): `avanza_orders.py` non-atomic offset file — **fixed 2026-03-26** (atomic_write_json + legacy read compat)
+- BUG-129 (P3): `avanza_session.py` Playwright globals not thread-safe — **fixed 2026-03-26** (threading.Lock)
+- BUG-130 (P3): Dashboard no caching — **fixed 2026-03-26** (TTL cache, 5s default / 60s config)
+- BUG-131 (P3): Telegram truncation breaks Markdown — **fixed 2026-03-26** (newline-boundary truncation)
+- BUG-132 (P3): `orb_predictor.py` fetches 5000+ candles from Binance on every call with no caching (deferred)
+- ARCH-21: `autonomous.py` has 500+ line functions (e.g., `_build_telegram_mode_a`) — should decompose for maintainability (deferred)
+- ARCH-22: `agent_invocation.py` uses module-level globals for process lifecycle — could be a class for clarity (deferred)
