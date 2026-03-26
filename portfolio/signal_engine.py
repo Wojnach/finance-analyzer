@@ -29,6 +29,13 @@ _LOCAL_MODEL_HOLD_THRESHOLD = 0.55
 _LOCAL_MODEL_MIN_SAMPLES = 30
 _LOCAL_MODEL_LOOKBACK_DAYS = 30
 
+# Accuracy gate: signals with blended accuracy below this threshold are
+# force-HOLD (treated like DISABLED_SIGNALS but dynamically). A signal at
+# 44% is noise, not a reliable contrarian indicator — inverting it just
+# produces different noise with whiplash as accuracy oscillates around 50%.
+ACCURACY_GATE_THRESHOLD = 0.45
+ACCURACY_GATE_MIN_SAMPLES = 30  # need enough data before gating
+
 # --- Signal (full 30-signal for "Now" timeframe) ---
 
 MIN_VOTERS_CRYPTO = 3  # crypto has 27 signals (8 core + 19 enhanced; custom_lora, ml, funding disabled) — need 3
@@ -187,50 +194,47 @@ def _validate_signal_result(result, sig_name=None, max_confidence=1.0):
     }
 
 
-def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None):
+def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
+                        accuracy_gate=None):
     """Compute weighted consensus using accuracy, regime, and activation frequency.
 
     Weight per signal = accuracy_weight * regime_mult * normalized_weight
     where normalized_weight = rarity_bonus * bias_penalty (from activation rates).
     Rare, balanced signals get more weight; noisy/biased signals get less.
 
-    Signals with accuracy below 50% (with >=20 samples) are **inverted**: a 30%
-    accurate BUY signal becomes a 70% accurate SELL signal. This turns consistently
-    wrong signals into useful contrarian indicators.
+    Signals below the accuracy gate (with sufficient samples) are force-skipped —
+    they are noise, not useful contrarian indicators.
     """
+    gate = accuracy_gate if accuracy_gate is not None else ACCURACY_GATE_THRESHOLD
     buy_weight = 0.0
     sell_weight = 0.0
+    gated_signals = []
     regime_mults = REGIME_WEIGHTS.get(regime, {})
     activation_rates = activation_rates or {}
     for signal_name, vote in votes.items():
         if vote == "HOLD":
             continue
-        # Accuracy weight — invert signals below 50%
         stats = accuracy_data.get(signal_name, {})
         acc = stats.get("accuracy", 0.5)
         samples = stats.get("total", 0)
-        if samples < 20:
-            weight = 0.5
-            invert = False
-        else:
-            invert = acc < 0.5
-            # Cap inverted weight at 0.75 to prevent single low-accuracy
-            # signals from dominating consensus (e.g., 5% acc → 0.95 weight
-            # before cap). Non-inverted signals are uncapped.
-            weight = min(0.75, 1.0 - acc) if invert else acc
+        # Accuracy gate: skip signals that are below threshold with enough data
+        if samples >= ACCURACY_GATE_MIN_SAMPLES and acc < gate:
+            gated_signals.append(signal_name)
+            continue
+        # Weight = accuracy (or 0.5 default for new signals with insufficient data)
+        weight = acc if samples >= 20 else 0.5
         # Regime adjustment
         weight *= regime_mults.get(signal_name, 1.0)
         # Activation frequency normalization (rarity * bias correction)
         act_data = activation_rates.get(signal_name, {})
         norm_weight = act_data.get("normalized_weight", 1.0)
         weight *= norm_weight
-        effective_vote = vote
-        if invert:
-            effective_vote = "SELL" if vote == "BUY" else "BUY"
-        if effective_vote == "BUY":
+        if vote == "BUY":
             buy_weight += weight
-        elif effective_vote == "SELL":
+        elif vote == "SELL":
             sell_weight += weight
+    if gated_signals:
+        logger.debug("Accuracy-gated signals (<%s%%): %s", ACCURACY_GATE_THRESHOLD * 100, gated_signals)
     total_weight = buy_weight + sell_weight
     if total_weight == 0:
         return "HOLD", 0.0
@@ -535,8 +539,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     # --- Extended signals from tools (optional) ---
 
     # Fear & Greed Index (per-ticker: crypto->alternative.me, stocks->VIX)
-    # Gated: F&G has 31.4% accuracy overall. It's auto-inverted (~69% contrarian)
-    # but in trending markets contrarian signals fight the trend and lose.
+    # Gated: F&G is contrarian (buy fear, sell greed) which fights trends.
     # Only allow F&G to vote in ranging/high-vol regimes where mean reversion works.
     votes["fear_greed"] = "HOLD"
     try:
@@ -1003,8 +1006,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 "pct": round(per_ticker_acc * 100, 1),
             }
 
+    sig_cfg = (config or {}).get("signals", {})
+    accuracy_gate = sig_cfg.get("accuracy_gate_threshold", ACCURACY_GATE_THRESHOLD)
     weighted_action, weighted_conf = _weighted_consensus(
-        votes, accuracy_data, regime, activation_rates
+        votes, accuracy_data, regime, activation_rates,
+        accuracy_gate=accuracy_gate,
     )
 
     # Apply core gate AND MIN_VOTERS gate to weighted consensus too
