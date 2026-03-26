@@ -2,7 +2,7 @@
 
 from datetime import UTC, date, datetime
 
-from portfolio.tickers import SYMBOLS
+from portfolio.tickers import STOCK_SYMBOLS, SYMBOLS
 
 # Market hours (UTC)
 MARKET_OPEN_HOUR = 7  # ~Frankfurt/London open
@@ -64,6 +64,68 @@ def _is_agent_window(now=None):
         return False
     close_hour = _market_close_hour_utc(now)
     return MARKET_OPEN_HOUR <= now.hour < close_hour
+
+
+def _market_open_hour_utc(dt):
+    """Return the NYSE open hour in UTC, adjusted for DST.
+
+    NYSE opens at 09:30 ET.
+    EDT (Mar-Nov): 09:30 ET = 13:30 UTC -> hour 13
+    EST (Nov-Mar): 09:30 ET = 14:30 UTC -> hour 14
+    """
+    if _is_us_dst(dt):
+        return 13
+    return 14
+
+
+def is_us_stock_market_open(now=None, pre_market_buffer_min=0, post_market_buffer_min=0):
+    """Check if US stock market (NYSE) is currently open.
+
+    Args:
+        now: UTC datetime (default: current time)
+        pre_market_buffer_min: minutes before open to consider "open"
+        post_market_buffer_min: minutes after close to consider "open"
+
+    Returns:
+        True if within [open - pre_buffer, close + post_buffer] on weekdays.
+    """
+    if now is None:
+        now = datetime.now(UTC)
+    if now.weekday() >= 5:
+        return False
+
+    open_hour = _market_open_hour_utc(now)
+    close_hour = _market_close_hour_utc(now)
+
+    # Convert to minutes-since-midnight for easy buffer math
+    now_min = now.hour * 60 + now.minute
+    open_min = open_hour * 60 + 30 - pre_market_buffer_min   # NYSE opens at :30
+    close_min = close_hour * 60 + post_market_buffer_min      # NYSE closes at :00
+
+    return open_min <= now_min < close_min
+
+
+def should_skip_gpu(ticker, config=None, now=None):
+    """Determine if GPU-intensive signals should be skipped for this ticker.
+
+    Returns True for US stocks when the US market is closed.
+    Returns False for crypto and metals (always run GPU signals).
+    """
+    if ticker not in STOCK_SYMBOLS:
+        return False
+
+    gpu_cfg = (config or {}).get("gpu_signals", {})
+    if not gpu_cfg.get("skip_stocks_offhours", True):
+        return False
+
+    pre_buffer = gpu_cfg.get("pre_market_buffer_min", 30)
+    post_buffer = gpu_cfg.get("post_market_buffer_min", 15)
+
+    return not is_us_stock_market_open(
+        now=now,
+        pre_market_buffer_min=pre_buffer,
+        post_market_buffer_min=post_buffer,
+    )
 
 
 def get_market_state():

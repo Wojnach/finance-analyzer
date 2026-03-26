@@ -65,6 +65,11 @@ YF_MAP = {t: t for t in STOCK_SYMBOLS}
 # Kept in SIGNAL_NAMES for historical tracking but excluded from active reports.
 DISABLED_SIGNALS = {"ml", "funding"}
 
+# Signals that require local GPU inference.
+# Skipped for US stocks outside market hours to save GPU resources.
+# claude_fundamental excluded — uses remote API, has its own market-hours gate.
+GPU_SIGNALS = frozenset({"ministral", "qwen3", "forecast"})
+
 SIGNAL_NAMES = [
     "rsi",
     "macd",

@@ -328,6 +328,8 @@ def run(force_report=False, active_symbols=None):
             extra_str = ""
             if extra:
                 parts = []
+                if extra.get("_gpu_signals_skipped"):
+                    parts.append("GPU:skip")
                 if "fear_greed" in extra:
                     parts.append(f"F&G:{extra['fear_greed']}")
                 if "sentiment" in extra:

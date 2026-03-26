@@ -13,7 +13,7 @@ from portfolio.indicators import detect_regime
 from portfolio.shared_state import FEAR_GREED_TTL, MINISTRAL_TTL, SENTIMENT_TTL, VOLUME_TTL, _cached
 from portfolio.signal_registry import get_enhanced_signals, load_signal_func
 from portfolio.signal_utils import true_range
-from portfolio.tickers import CRYPTO_SYMBOLS, DISABLED_SIGNALS, METALS_SYMBOLS, SIGNAL_NAMES, STOCK_SYMBOLS
+from portfolio.tickers import CRYPTO_SYMBOLS, DISABLED_SIGNALS, GPU_SIGNALS, METALS_SYMBOLS, SIGNAL_NAMES, STOCK_SYMBOLS
 
 logger = logging.getLogger("portfolio.signal_engine")
 
@@ -122,11 +122,11 @@ _CRYPTO_ONLY_SIGNALS = {"futures_flow", "funding"}
 _CORE_SIGNAL_SET = {"rsi", "macd", "ema", "bb", "fear_greed", "sentiment", "ministral", "qwen3", "ml", "funding", "volume", "claude_fundamental"}
 
 
-def _compute_applicable_count(ticker: str) -> int:
+def _compute_applicable_count(ticker: str, skip_gpu: bool = False) -> int:
     """Compute total applicable signals for a ticker dynamically.
 
-    Accounts for disabled signals and per-asset-class restrictions
-    instead of using hardcoded 27/25 values.
+    Accounts for disabled signals, per-asset-class restrictions,
+    and GPU signals skipped outside market hours.
     """
     is_crypto = ticker in CRYPTO_SYMBOLS
     count = 0
@@ -138,6 +138,9 @@ def _compute_applicable_count(ticker: str) -> int:
             continue
         # ministral (CryptoTrader-LM) only runs for crypto
         if sig == "ministral" and not is_crypto:
+            continue
+        # GPU signals skipped for stocks outside market hours
+        if skip_gpu and sig in GPU_SIGNALS:
             continue
         count += 1
     return count
@@ -483,6 +486,12 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     votes = {}
     extra_info = {}
 
+    # Check if GPU-intensive signals should be skipped (stocks outside market hours)
+    from portfolio.market_timing import should_skip_gpu
+    skip_gpu = should_skip_gpu(ticker, config=config) if ticker else False
+    if skip_gpu:
+        extra_info["_gpu_signals_skipped"] = True
+
     # Compute regime early so F&G gating and other sections can use it
     regime = detect_regime(ind, is_crypto=ticker in CRYPTO_SYMBOLS)
 
@@ -649,7 +658,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     # Upgraded from legacy Ministral-8B (44% accuracy) to Ministral-3-8B.
     # custom_lora fully disabled: 20.9% accuracy, 97% SELL bias (worse than random).
     votes["ministral"] = "HOLD"
-    if ticker:
+    if ticker and not skip_gpu:
         short_ticker = ticker.replace("-USD", "")
         try:
             from portfolio.ministral_signal import get_ministral_signal
@@ -725,7 +734,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     # Config: config.json → local_models.qwen3 (hold_threshold, min_samples)
     votes["qwen3"] = "HOLD"
     qwen3_enabled = (config or {}).get("local_models", {}).get("qwen3", {}).get("enabled", True)
-    if ticker and qwen3_enabled:
+    if ticker and qwen3_enabled and not skip_gpu:
         short_ticker = ticker.replace("-USD", "")
         try:
             from portfolio.qwen3_signal import get_qwen3_signal
@@ -831,6 +840,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
 
         _signal_failures = []
         for sig_name, entry in _enhanced_entries.items():
+            # Skip GPU-intensive enhanced signals for stocks outside market hours
+            if skip_gpu and sig_name in GPU_SIGNALS:
+                votes[sig_name] = "HOLD"
+                continue
             try:
                 _sig_t0 = time.monotonic()
                 compute_fn = load_signal_func(entry)
@@ -892,7 +905,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
 
     # Total applicable signals: computed dynamically from SIGNAL_NAMES
     # minus DISABLED_SIGNALS minus per-asset-class exclusions.
-    total_applicable = _compute_applicable_count(ticker)
+    total_applicable = _compute_applicable_count(ticker, skip_gpu=skip_gpu)
 
     active_voters = buy + sell
     if ticker in STOCK_SYMBOLS:
