@@ -226,6 +226,16 @@ def _validate_signal_result(result, sig_name=None, max_confidence=1.0):
     }
 
 
+# Correlation groups: signals that frequently agree (>90% in recent data).
+# Within a group, only the highest-accuracy signal gets full weight;
+# others get a penalty to prevent correlated signals inflating consensus.
+CORRELATION_GROUPS = {
+    "low_activity_timing": frozenset({"calendar", "econ_calendar", "forecast", "futures_flow"}),
+    "rare_technical": frozenset({"volatility_sig", "oscillators"}),
+}
+_CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal weight
+
+
 def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
                         accuracy_gate=None):
     """Compute weighted consensus using accuracy, regime, and activation frequency.
@@ -236,6 +246,9 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
 
     Signals below the accuracy gate (with sufficient samples) are force-skipped —
     they are noise, not useful contrarian indicators.
+
+    Correlation deduplication: within defined correlation groups, only the
+    highest-accuracy signal gets full weight. Others get 0.3x penalty.
     """
     gate = accuracy_gate if accuracy_gate is not None else ACCURACY_GATE_THRESHOLD
     buy_weight = 0.0
@@ -243,6 +256,30 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     gated_signals = []
     regime_mults = REGIME_WEIGHTS.get(regime, {})
     activation_rates = activation_rates or {}
+
+    # Pre-compute which signal is the "leader" (highest accuracy) in each
+    # correlation group, considering only signals that are actively voting.
+    active_non_hold = {s for s, v in votes.items() if v != "HOLD"}
+    group_leaders = {}
+    for group_name, group_sigs in CORRELATION_GROUPS.items():
+        active_in_group = active_non_hold & group_sigs
+        if len(active_in_group) <= 1:
+            continue
+        best_sig = max(
+            active_in_group,
+            key=lambda s: accuracy_data.get(s, {}).get("accuracy", 0.5),
+        )
+        group_leaders[group_name] = best_sig
+
+    # Build a set of signals that should get the correlation penalty
+    penalized_signals = set()
+    for group_name, group_sigs in CORRELATION_GROUPS.items():
+        leader = group_leaders.get(group_name)
+        if leader:
+            for s in group_sigs:
+                if s != leader and s in active_non_hold:
+                    penalized_signals.add(s)
+
     for signal_name, vote in votes.items():
         if vote == "HOLD":
             continue
@@ -261,6 +298,9 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         act_data = activation_rates.get(signal_name, {})
         norm_weight = act_data.get("normalized_weight", 1.0)
         weight *= norm_weight
+        # Correlation penalty: secondary signals in a group get reduced weight
+        if signal_name in penalized_signals:
+            weight *= _CORRELATION_PENALTY
         if vote == "BUY":
             buy_weight += weight
         elif vote == "SELL":

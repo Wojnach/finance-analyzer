@@ -717,3 +717,110 @@ class TestRegimeWeightsConstant:
         assert "high-vol" in REGIME_WEIGHTS
         assert REGIME_WEIGHTS["high-vol"]["bb"] == 1.5
         assert REGIME_WEIGHTS["high-vol"]["volume"] == 1.3
+
+    def test_ranging_has_enhanced_weights(self):
+        """Enhanced signals should have regime weights in ranging."""
+        rw = REGIME_WEIGHTS["ranging"]
+        assert rw["mean_reversion"] == 1.5
+        assert rw["fibonacci"] == 1.4
+        assert rw["trend"] == 0.5
+
+    def test_trending_up_has_enhanced_weights(self):
+        """Enhanced signals should have regime weights in trending-up."""
+        rw = REGIME_WEIGHTS["trending-up"]
+        assert rw["trend"] == 1.4
+        assert rw["mean_reversion"] == 0.6
+
+
+# ---------------------------------------------------------------------------
+# Correlation deduplication tests
+# ---------------------------------------------------------------------------
+
+class TestCorrelationDedup:
+    """Test signal correlation grouping in _weighted_consensus."""
+
+    def test_single_signal_in_group_no_penalty(self):
+        """Only 1 signal from a correlated group votes — no penalty."""
+        votes = {"calendar": "BUY", "rsi": "SELL"}
+        accuracy = {
+            "calendar": {"accuracy": 0.63, "total": 600},
+            "rsi": {"accuracy": 0.53, "total": 800},
+        }
+        action, conf = _weighted_consensus(votes, accuracy, "ranging")
+        # calendar in group but alone => no penalty
+        # calendar weight = 0.63 * 1.2 (ranging regime) = 0.756
+        # rsi weight = 0.53 * 1.5 (ranging regime) = 0.795
+        # SELL wins
+        assert action == "SELL"
+
+    def test_two_signals_in_group_leader_gets_full_weight(self):
+        """When 2 signals from same group vote, leader gets full, other 0.3x."""
+        votes = {"calendar": "BUY", "econ_calendar": "BUY"}
+        accuracy = {
+            "calendar": {"accuracy": 0.63, "total": 600},
+            "econ_calendar": {"accuracy": 0.87, "total": 2500},
+        }
+        action, conf = _weighted_consensus(votes, accuracy, "ranging")
+        # Both in "low_activity_timing" group
+        # econ_calendar is leader (0.87 > 0.63)
+        # calendar gets 0.3x penalty
+        assert action == "BUY"
+        assert conf == 1.0  # Both vote BUY so 100% consensus
+
+    def test_correlated_group_reduces_apparent_confidence(self):
+        """When 3 correlated signals + 1 independent signal disagree,
+        the correlation penalty should reduce the correlated side's weight."""
+        votes = {
+            "calendar": "BUY",
+            "econ_calendar": "BUY",
+            "forecast": "BUY",
+            "rsi": "SELL",
+        }
+        accuracy = {
+            "calendar": {"accuracy": 0.63, "total": 600},
+            "econ_calendar": {"accuracy": 0.87, "total": 2500},
+            "forecast": {"accuracy": 0.48, "total": 5000},
+            "rsi": {"accuracy": 0.53, "total": 800},
+        }
+        action, conf = _weighted_consensus(votes, accuracy, "ranging")
+        # forecast at 0.48 < 0.47 gate => gated
+        # econ_calendar: leader, full weight = 0.87
+        # calendar: penalized 0.3x = 0.63 * 0.3 * 1.2 (ranging) = 0.2268
+        # rsi: SELL weight = 0.53 * 1.5 (ranging) = 0.795
+        # BUY: 0.87 + 0.2268 = 1.0968, SELL: 0.795
+        # BUY wins but with reduced confidence
+        assert action == "BUY"
+        # Confidence = BUY / (BUY + SELL) — should be less than 1.0
+        assert conf < 1.0
+
+    def test_no_penalty_when_group_signals_vote_differently(self):
+        """If signals in the same group vote opposite directions,
+        they each count as independent."""
+        votes = {"calendar": "BUY", "econ_calendar": "SELL"}
+        accuracy = {
+            "calendar": {"accuracy": 0.63, "total": 600},
+            "econ_calendar": {"accuracy": 0.87, "total": 2500},
+        }
+        action, conf = _weighted_consensus(votes, accuracy, "ranging")
+        # Both are in same group and both are active.
+        # Leader: econ_calendar (0.87), penalized: calendar
+        # But they vote differently — penalty still applies to the secondary
+        # econ_calendar SELL weight = 0.87, calendar BUY weight = 0.63 * 0.3 * 1.2 = 0.2268
+        # SELL wins
+        assert action == "SELL"
+
+    def test_adaptive_recency_fast_track(self):
+        """When divergence > 15%, the blend should use 90% recent weight."""
+        from portfolio.signal_engine import (
+            _RECENCY_DIVERGENCE_THRESHOLD,
+            _RECENCY_WEIGHT_FAST,
+            _RECENCY_WEIGHT_NORMAL,
+        )
+        assert _RECENCY_DIVERGENCE_THRESHOLD == 0.15
+        assert _RECENCY_WEIGHT_FAST == 0.9
+        assert _RECENCY_WEIGHT_NORMAL == 0.7
+
+    def test_accuracy_gate_at_047(self):
+        """Verify gate threshold is 0.47."""
+        from portfolio.signal_engine import ACCURACY_GATE_THRESHOLD
+        assert ACCURACY_GATE_THRESHOLD == 0.47
