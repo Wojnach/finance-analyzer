@@ -8,6 +8,7 @@ This is the preferred auth method until TOTP credentials are configured.
 """
 
 import logging
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,8 @@ API_BASE = "https://www.avanza.se"
 EXPIRY_BUFFER_MINUTES = 30
 
 # Module-level Playwright context (lazy-initialized, reused across calls)
+# BUG-129: Protected by _pw_lock to prevent concurrent access corruption
+_pw_lock = threading.Lock()
 _pw_instance = None
 _pw_browser = None
 _pw_context = None
@@ -109,44 +112,46 @@ def _get_playwright_context():
     """Get or create a headless Playwright browser context with saved auth state."""
     global _pw_instance, _pw_browser, _pw_context
 
-    if _pw_context is not None:
+    with _pw_lock:
+        if _pw_context is not None:
+            return _pw_context
+
+        # Validate session first
+        load_session()
+
+        from playwright.sync_api import sync_playwright
+
+        _pw_instance = sync_playwright().start()
+        _pw_browser = _pw_instance.chromium.launch(headless=True)
+        _pw_context = _pw_browser.new_context(
+            storage_state=str(STORAGE_STATE_FILE),
+            locale="sv-SE",
+        )
         return _pw_context
-
-    # Validate session first
-    load_session()
-
-    from playwright.sync_api import sync_playwright
-
-    _pw_instance = sync_playwright().start()
-    _pw_browser = _pw_instance.chromium.launch(headless=True)
-    _pw_context = _pw_browser.new_context(
-        storage_state=str(STORAGE_STATE_FILE),
-        locale="sv-SE",
-    )
-    return _pw_context
 
 
 def close_playwright():
     """Clean up Playwright resources."""
     global _pw_instance, _pw_browser, _pw_context
-    if _pw_context:
-        try:
-            _pw_context.close()
-        except Exception as e:
-            logger.debug("Context close failed: %s", e)
-        _pw_context = None
-    if _pw_browser:
-        try:
-            _pw_browser.close()
-        except Exception as e:
-            logger.debug("Browser close failed: %s", e)
-        _pw_browser = None
-    if _pw_instance:
-        try:
-            _pw_instance.stop()
-        except Exception as e:
-            logger.debug("Playwright stop failed: %s", e)
-        _pw_instance = None
+    with _pw_lock:
+        if _pw_context:
+            try:
+                _pw_context.close()
+            except Exception as e:
+                logger.debug("Context close failed: %s", e)
+            _pw_context = None
+        if _pw_browser:
+            try:
+                _pw_browser.close()
+            except Exception as e:
+                logger.debug("Browser close failed: %s", e)
+            _pw_browser = None
+        if _pw_instance:
+            try:
+                _pw_instance.stop()
+            except Exception as e:
+                logger.debug("Playwright stop failed: %s", e)
+            _pw_instance = None
 
 
 def verify_session() -> bool:
