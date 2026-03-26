@@ -124,10 +124,35 @@ def flush_sentiment_state():
 
 
 REGIME_WEIGHTS = {
-    "trending-up": {"ema": 1.5, "macd": 1.3, "rsi": 0.7, "bb": 0.7},
-    "trending-down": {"ema": 1.5, "macd": 1.3, "rsi": 0.7, "bb": 0.7},
-    "ranging": {"rsi": 1.5, "bb": 1.5, "ema": 0.5, "macd": 0.5},
-    "high-vol": {"bb": 1.5, "volume": 1.3, "ema": 0.5},
+    "trending-up": {
+        "ema": 1.5, "macd": 1.3, "rsi": 0.7, "bb": 0.7,
+        # Enhanced: boost trend-following, dampen mean-reversion
+        "trend": 1.4, "momentum_factors": 1.3, "heikin_ashi": 1.2,
+        "structure": 1.2, "smart_money": 1.1,
+        "mean_reversion": 0.6, "fibonacci": 0.7,
+    },
+    "trending-down": {
+        "ema": 1.5, "macd": 1.3, "rsi": 0.7, "bb": 0.7,
+        # Enhanced: same as trending-up (trend signals work both ways)
+        "trend": 1.4, "momentum_factors": 1.3, "heikin_ashi": 1.2,
+        "structure": 1.2, "smart_money": 1.1,
+        "mean_reversion": 0.6, "fibonacci": 0.7,
+    },
+    "ranging": {
+        "rsi": 1.5, "bb": 1.5, "ema": 0.5, "macd": 0.5,
+        # Enhanced: boost mean-reversion and level-based signals
+        "mean_reversion": 1.5, "fibonacci": 1.4, "calendar": 1.2,
+        "oscillators": 1.2,
+        "trend": 0.5, "momentum_factors": 0.6, "heikin_ashi": 0.6,
+        "structure": 0.7,
+    },
+    "high-vol": {
+        "bb": 1.5, "volume": 1.3, "ema": 0.5,
+        # Enhanced: boost volatility-aware and smart money signals
+        "volatility_sig": 1.4, "smart_money": 1.3, "volume_flow": 1.2,
+        "candlestick": 1.2,
+        "trend": 0.6, "calendar": 0.7, "mean_reversion": 0.7,
+    },
 }
 
 
