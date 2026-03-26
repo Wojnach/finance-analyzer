@@ -1492,3 +1492,62 @@ class TestSignalHeatmapUpdated:
         assert "custom_lora" in result["core_signals"]
         assert len(result["core_signals"]) == 11
         assert len(result["enhanced_signals"]) == 19
+
+
+# ---------------------------------------------------------------------------
+# BUG-130: TTL Cache
+# ---------------------------------------------------------------------------
+
+
+class TestDashboardCache:
+    """Verify dashboard file reads are cached with TTL."""
+
+    def test_cached_json_returns_same_object(self, tmp_path):
+        """Repeated reads within TTL return cached result."""
+        from dashboard.app import _read_json, _cache
+
+        f = tmp_path / "cached.json"
+        f.write_text('{"val": 1}', encoding="utf-8")
+
+        _cache.clear()
+        result1 = _read_json(f)
+        f.write_text('{"val": 2}', encoding="utf-8")
+        result2 = _read_json(f)  # Should still return cached {"val": 1}
+
+        assert result1 == {"val": 1}
+        assert result2 == {"val": 1}  # Cached, not re-read
+
+    def test_cache_expires_after_ttl(self, tmp_path):
+        """After TTL, file is re-read."""
+        import time as _time
+
+        from dashboard.app import _cache, _cached_read
+        from portfolio.file_utils import load_json as _lj
+
+        f = tmp_path / "expire.json"
+        f.write_text('{"v": "old"}', encoding="utf-8")
+
+        _cache.clear()
+        r1 = _cached_read(f"test:{f}", 0.1, lambda: _lj(f))
+        assert r1 == {"v": "old"}
+
+        f.write_text('{"v": "new"}', encoding="utf-8")
+        _time.sleep(0.15)
+
+        r2 = _cached_read(f"test:{f}", 0.1, lambda: _lj(f))
+        assert r2 == {"v": "new"}
+
+    def test_cached_jsonl_with_different_limits(self, tmp_path):
+        """Different limit params produce different cache entries."""
+        from dashboard.app import _cache, _read_jsonl
+
+        f = tmp_path / "multi.jsonl"
+        lines = "\n".join(f'{{"i": {i}}}' for i in range(10))
+        f.write_text(lines, encoding="utf-8")
+
+        _cache.clear()
+        r3 = _read_jsonl(f, limit=3)
+        r5 = _read_jsonl(f, limit=5)
+
+        assert len(r3) == 3
+        assert len(r5) == 5
