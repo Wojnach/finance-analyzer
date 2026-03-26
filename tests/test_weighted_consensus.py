@@ -2,15 +2,19 @@
 
 Covers 11 test categories:
   1. All HOLD         2. All BUY        3. All SELL
-  4. Majority vote    5. Signal inversion  6. 50% boundary
-  7. Small sample     8. Regime weights    9. Activation rates
+  4. Majority vote    5. Accuracy gate   6. 45% gate boundary
+  7. Small sample     8. Regime weights  9. Activation rates
  10. Empty votes     11. HOLD ignored
 Plus edge cases and integration scenarios.
 """
 
 import pytest
 
-from portfolio.signal_engine import _weighted_consensus
+from portfolio.signal_engine import (
+    _weighted_consensus,
+    ACCURACY_GATE_THRESHOLD,
+    ACCURACY_GATE_MIN_SAMPLES,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -24,6 +28,18 @@ def _acc(accuracy, total=100):
 def _acc_dict(names, accuracy=0.6, total=50):
     """Create accuracy data for multiple signals at the same accuracy."""
     return {n: _acc(accuracy, total) for n in names}
+
+
+# ===========================================================================
+# Verify constants are as expected
+# ===========================================================================
+
+class TestConstants:
+    def test_accuracy_gate_threshold(self):
+        assert ACCURACY_GATE_THRESHOLD == 0.45
+
+    def test_accuracy_gate_min_samples(self):
+        assert ACCURACY_GATE_MIN_SAMPLES == 30
 
 
 # ===========================================================================
@@ -137,7 +153,7 @@ class TestMajorityVote:
         assert action == "BUY"
 
     def test_high_accuracy_minority_beats_count(self):
-        """1 signal at 0.95 beats 2 signals at 0.4 (below inversion threshold)."""
+        """1 signal at 0.95 vs 2 signals at 0.51 — lower total weight loses."""
         votes = {"ace": "BUY", "meh1": "SELL", "meh2": "SELL"}
         acc = {"ace": _acc(0.95, 100), "meh1": _acc(0.51, 50), "meh2": _acc(0.51, 50)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
@@ -146,117 +162,214 @@ class TestMajorityVote:
 
 
 # ===========================================================================
-# Category 5: Signal inversion
+# Category 5: Accuracy gate (replaces signal inversion)
 # ===========================================================================
 
-class TestSignalInversion:
-    def test_low_accuracy_buy_inverted_to_sell(self):
-        votes = {"bad_signal": "BUY"}
-        acc = {"bad_signal": _acc(0.30, 100)}
-        action, conf = _weighted_consensus(votes, acc, "trending-up")
-        assert action == "SELL"
-        assert conf == 1.0
+class TestAccuracyGate:
+    """Signals below ACCURACY_GATE_THRESHOLD (0.45) with >= ACCURACY_GATE_MIN_SAMPLES (30)
+    are skipped entirely — they don't participate in voting."""
 
-    def test_low_accuracy_sell_inverted_to_buy(self):
-        votes = {"bad_signal": "SELL"}
-        acc = {"bad_signal": _acc(0.25, 50)}
+    def test_gated_sole_voter_returns_hold(self):
+        """Signal at 0.30 accuracy with 100 samples -> gated, returns HOLD."""
+        votes = {"bad": "BUY"}
+        acc = {"bad": _acc(0.30, 100)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        assert action == "HOLD"
+        assert conf == 0.0
+
+    def test_044_accuracy_gated(self):
+        """Signal at 0.44 accuracy with 50 samples -> gated (0.44 < 0.45)."""
+        votes = {"low": "BUY"}
+        acc = {"low": _acc(0.44, 50)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        assert action == "HOLD"
+        assert conf == 0.0
+
+    def test_045_accuracy_not_gated(self):
+        """Signal at 0.45 accuracy with 50 samples -> NOT gated, votes normally."""
+        votes = {"borderline": "BUY"}
+        acc = {"borderline": _acc(0.45, 50)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
         assert action == "BUY"
         assert conf == 1.0
 
-    def test_inversion_uses_complement_weight(self):
-        """A 30% accurate signal, when inverted, gets weight 0.70."""
-        votes = {"bad": "BUY", "good": "SELL"}
-        acc = {"bad": _acc(0.30, 100), "good": _acc(0.60, 100)}
+    def test_insufficient_samples_not_gated(self):
+        """Signal at 0.30 accuracy with 25 samples -> NOT gated (needs >= 30).
+        Uses actual accuracy 0.30 as weight since samples >= 20."""
+        votes = {"new_bad": "BUY"}
+        acc = {"new_bad": _acc(0.30, 25)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # bad BUY inverted to SELL with weight 0.70
-        # good SELL weight 0.60
-        # SELL total: 0.70 + 0.60 = 1.30, BUY total: 0.0
+        assert action == "BUY"
+        assert conf == 1.0  # sole voter
+
+    def test_exactly_29_samples_not_gated(self):
+        """29 samples < 30 min -> not gated even with terrible accuracy."""
+        votes = {"almost": "SELL"}
+        acc = {"almost": _acc(0.10, 29)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
         assert action == "SELL"
         assert conf == 1.0
 
-    def test_inversion_changes_consensus_direction(self):
-        """3 low-accuracy BUY signals inverted overpower 2 good BUY signals."""
-        votes = {
-            "good1": "BUY", "good2": "BUY",
-            "bad1": "BUY", "bad2": "BUY", "bad3": "BUY",
-        }
+    def test_exactly_30_samples_gated_if_below_threshold(self):
+        """30 samples >= 30 min -> gated when accuracy < 0.45."""
+        votes = {"enough": "BUY"}
+        acc = {"enough": _acc(0.40, 30)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        assert action == "HOLD"
+        assert conf == 0.0
+
+    def test_mixed_gated_and_good(self):
+        """One good signal + one gated signal -> only good signal participates."""
+        votes = {"good": "BUY", "bad": "SELL"}
+        acc = {"good": _acc(0.70, 100), "bad": _acc(0.30, 100)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        # bad is gated (0.30 < 0.45, 100 >= 30) -> skipped
+        # only good participates -> BUY with confidence 1.0
+        assert action == "BUY"
+        assert conf == 1.0
+
+    def test_all_signals_gated_returns_hold(self):
+        """All signals gated -> HOLD."""
+        votes = {"bad1": "BUY", "bad2": "SELL", "bad3": "BUY"}
         acc = {
-            "good1": _acc(0.7, 100), "good2": _acc(0.7, 100),
-            "bad1": _acc(0.3, 100), "bad2": _acc(0.3, 100), "bad3": _acc(0.3, 100),
+            "bad1": _acc(0.20, 100),
+            "bad2": _acc(0.30, 50),
+            "bad3": _acc(0.10, 200),
         }
         action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # good BUY weight: 0.7+0.7 = 1.4
-        # bad BUY -> inverted SELL weight: 0.7+0.7+0.7 = 2.1
-        assert action == "SELL"
-        assert conf == pytest.approx(2.1 / (1.4 + 2.1), abs=0.01)
+        assert action == "HOLD"
+        assert conf == 0.0
 
-    def test_49_percent_inverted(self):
+    def test_custom_accuracy_gate_lower(self):
+        """Custom accuracy_gate=0.35 means 0.40 >= 0.35 -> NOT gated."""
+        votes = {"sig": "BUY"}
+        acc = {"sig": _acc(0.40, 50)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up",
+                                           accuracy_gate=0.35)
+        assert action == "BUY"
+        assert conf == 1.0
+
+    def test_custom_accuracy_gate_higher(self):
+        """Custom accuracy_gate=0.55 means 0.50 < 0.55 -> gated."""
+        votes = {"sig": "SELL"}
+        acc = {"sig": _acc(0.50, 50)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up",
+                                           accuracy_gate=0.55)
+        assert action == "HOLD"
+        assert conf == 0.0
+
+    def test_custom_accuracy_gate_at_boundary(self):
+        """accuracy_gate=0.35, signal at 0.34 -> gated; signal at 0.35 -> not gated."""
+        votes_gated = {"sig": "BUY"}
+        acc_gated = {"sig": _acc(0.34, 50)}
+        action, _ = _weighted_consensus(votes_gated, acc_gated, "trending-up",
+                                        accuracy_gate=0.35)
+        assert action == "HOLD"
+
+        votes_ok = {"sig": "BUY"}
+        acc_ok = {"sig": _acc(0.35, 50)}
+        action, _ = _weighted_consensus(votes_ok, acc_ok, "trending-up",
+                                        accuracy_gate=0.35)
+        assert action == "BUY"
+
+    def test_gated_signal_does_not_affect_weight(self):
+        """Gated signals contribute zero to both buy and sell weight."""
+        votes = {"good_buy": "BUY", "good_sell": "SELL", "gated": "BUY"}
+        acc = {
+            "good_buy": _acc(0.60, 50),
+            "good_sell": _acc(0.70, 100),
+            "gated": _acc(0.20, 100),  # gated
+        }
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        # Only good_buy (0.60) and good_sell (0.70) participate
+        # BUY: 0.60, SELL: 0.70 -> SELL wins
+        assert action == "SELL"
+        assert conf == pytest.approx(0.70 / 1.30, abs=0.01)
+
+    def test_between_045_and_050_votes_normally(self):
+        """Signals between 0.45-0.50 are not gated, not inverted, vote with their accuracy."""
+        votes = {"mid": "BUY", "good": "SELL"}
+        acc = {"mid": _acc(0.47, 50), "good": _acc(0.80, 100)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        # mid: BUY with weight 0.47 (not gated, not inverted)
+        # good: SELL with weight 0.80
+        assert action == "SELL"
+        assert conf == pytest.approx(0.80 / (0.47 + 0.80), abs=0.01)
+
+    def test_049_accuracy_not_gated_not_inverted(self):
+        """0.49 accuracy is above 0.45 gate -> votes normally as BUY."""
         votes = {"borderline": "BUY"}
         acc = {"borderline": _acc(0.49, 50)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
-        assert action == "SELL"
-
-    def test_all_inverted_still_produces_result(self):
-        votes = {"b1": "BUY", "b2": "BUY", "b3": "BUY"}
-        acc = {k: _acc(0.2, 100) for k in votes}
-        action, conf = _weighted_consensus(votes, acc, "trending-up")
-        assert action == "SELL"
-        assert conf == 1.0
-
-    def test_mixed_inverted_and_normal(self):
-        """Normal SELL + inverted BUY (low acc) both contribute to SELL weight."""
-        votes = {"norm_sell": "SELL", "bad_buy": "BUY"}
-        acc = {"norm_sell": _acc(0.7, 100), "bad_buy": _acc(0.3, 100)}
-        action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # norm_sell: SELL with weight 0.7
-        # bad_buy: inverted to SELL with weight 0.7
-        # total SELL: 1.4, BUY: 0
-        assert action == "SELL"
-        assert conf == 1.0
-
-    def test_inverted_sell_and_normal_buy_reinforce(self):
-        """Normal BUY + inverted SELL (low acc) both contribute to BUY weight."""
-        votes = {"norm_buy": "BUY", "bad_sell": "SELL"}
-        acc = {"norm_buy": _acc(0.7, 100), "bad_sell": _acc(0.3, 100)}
-        action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # norm_buy: BUY with weight 0.7
-        # bad_sell: inverted to BUY with weight 0.7
+        # 0.49 >= 0.45 -> not gated. No inversion. BUY stays BUY.
         assert action == "BUY"
         assert conf == 1.0
 
+    def test_low_accuracy_buy_stays_buy(self):
+        """No inversion: a 0.46 accuracy BUY stays BUY (not flipped to SELL)."""
+        votes = {"sig": "BUY"}
+        acc = {"sig": _acc(0.46, 50)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        assert action == "BUY"
+
+    def test_low_accuracy_sell_stays_sell(self):
+        """No inversion: a 0.46 accuracy SELL stays SELL (not flipped to BUY)."""
+        votes = {"sig": "SELL"}
+        acc = {"sig": _acc(0.46, 50)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        assert action == "SELL"
+
 
 # ===========================================================================
-# Category 6: 50% boundary (accuracy at exactly 50%)
+# Category 6: Gate boundary (accuracy at exactly 0.45)
 # ===========================================================================
 
 class TestBoundaryAccuracy:
-    def test_exactly_50_percent_no_inversion(self):
+    def test_exactly_45_percent_not_gated(self):
+        """0.45 accuracy with enough samples is at the boundary -> NOT gated."""
+        votes = {"borderline": "BUY"}
+        acc = {"borderline": _acc(0.45, 50)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        assert action == "BUY"
+
+    def test_45_percent_weight_is_045(self):
+        """At 45% accuracy, weight = 0.45."""
+        votes = {"low": "BUY", "good": "SELL"}
+        acc = {"low": _acc(0.45, 50), "good": _acc(0.80, 100)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        # BUY weight: 0.45, SELL weight: 0.80
+        assert action == "SELL"
+        assert conf == pytest.approx(0.80 / (0.45 + 0.80), abs=0.01)
+
+    def test_just_below_45_gated(self):
+        """0.4499 accuracy with enough samples -> gated."""
+        votes = {"sig": "BUY"}
+        acc = {"sig": _acc(0.4499, 50)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        assert action == "HOLD"
+        assert conf == 0.0
+
+    def test_just_above_45_not_gated(self):
+        votes = {"sig": "BUY"}
+        acc = {"sig": _acc(0.4501, 50)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        assert action == "BUY"
+
+    def test_50_percent_not_gated(self):
+        """0.50 accuracy is well above gate."""
         votes = {"borderline": "BUY"}
         acc = {"borderline": _acc(0.50, 50)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
         assert action == "BUY"
 
     def test_50_percent_weight_is_0_5(self):
-        """At 50% accuracy, weight = 0.5 (not inverted)."""
+        """At 50% accuracy, weight = 0.5."""
         votes = {"half": "BUY", "good": "SELL"}
         acc = {"half": _acc(0.50, 50), "good": _acc(0.80, 100)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
         # BUY weight: 0.5, SELL weight: 0.8
         assert action == "SELL"
         assert conf == pytest.approx(0.8 / 1.3, abs=0.01)
-
-    def test_just_below_50_inverted(self):
-        votes = {"sig": "BUY"}
-        acc = {"sig": _acc(0.4999, 50)}
-        action, conf = _weighted_consensus(votes, acc, "trending-up")
-        assert action == "SELL"
-
-    def test_just_above_50_not_inverted(self):
-        votes = {"sig": "BUY"}
-        acc = {"sig": _acc(0.5001, 50)}
-        action, conf = _weighted_consensus(votes, acc, "trending-up")
-        assert action == "BUY"
 
 
 # ===========================================================================
@@ -271,8 +384,8 @@ class TestSmallSample:
         assert action == "BUY"
         assert conf == 1.0  # sole voter
 
-    def test_under_20_never_inverted(self):
-        """Even 10% accuracy with <20 samples should NOT invert."""
+    def test_under_20_low_accuracy_not_gated(self):
+        """Even 10% accuracy with <20 samples is not gated (insufficient samples)."""
         votes = {"new_signal": "BUY"}
         acc = {"new_signal": _acc(0.10, 15)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
@@ -282,21 +395,23 @@ class TestSmallSample:
         votes = {"sig": "BUY"}
         acc = {"sig": _acc(0.2, 19)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # 19 < 20 -> default weight 0.5, no inversion
+        # 19 < 20 -> default weight 0.5, not gated (< 30 samples)
         assert action == "BUY"
 
     def test_exactly_20_uses_actual_accuracy(self):
+        """20 samples >= 20 -> uses actual accuracy as weight. Not gated (20 < 30)."""
         votes = {"sig": "BUY"}
         acc = {"sig": _acc(0.3, 20)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # 20 >= 20 -> actual accuracy 0.3 < 0.5 -> inverted
-        assert action == "SELL"
+        # 20 >= 20 -> actual accuracy 0.3. Not gated (20 < 30). BUY stays BUY.
+        assert action == "BUY"
+        assert conf == 1.0  # sole voter
 
     def test_zero_samples(self):
         votes = {"sig": "BUY"}
         acc = {"sig": _acc(0.0, 0)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # 0 < 20 -> default weight 0.5, no inversion
+        # 0 < 20 -> default weight 0.5, not gated
         assert action == "BUY"
 
     def test_no_accuracy_data_gets_default_weight(self):
@@ -317,6 +432,17 @@ class TestSmallSample:
         # BUY: 0.5, SELL: 0.8 -> SELL wins
         assert action == "SELL"
         assert conf == pytest.approx(0.8 / 1.3, abs=0.01)
+
+    def test_20_to_29_samples_uses_accuracy_not_gated(self):
+        """Samples 20-29: uses actual accuracy but NOT subject to gate (needs >= 30)."""
+        votes = {"mid_sample": "SELL"}
+        acc = {"mid_sample": _acc(0.30, 25)}
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        # 25 >= 20 -> uses actual accuracy 0.30
+        # 25 < 30 -> not gated
+        # SELL stays SELL (no inversion)
+        assert action == "SELL"
+        assert conf == 1.0
 
 
 # ===========================================================================
@@ -414,14 +540,14 @@ class TestRegimeWeights:
         assert action == "BUY"
         assert conf == 1.0  # sole voter
 
-    def test_regime_weight_with_inversion(self):
-        """Inverted signal weight still gets regime multiplier."""
+    def test_regime_weight_with_gated_signal(self):
+        """Gated signal does not participate even with favorable regime."""
         votes = {"ema": "BUY"}
         acc = {"ema": _acc(0.3, 100)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # acc 0.3 < 0.5 -> inverted to SELL, weight = (1-0.3) * 1.5 = 1.05
-        assert action == "SELL"
-        assert conf == 1.0
+        # acc 0.3 < 0.45 gate, 100 >= 30 -> gated, skipped entirely
+        assert action == "HOLD"
+        assert conf == 0.0
 
     def test_empty_regime_string(self):
         votes = {"rsi": "BUY"}
@@ -600,11 +726,11 @@ class TestEdgeCases:
         assert conf == pytest.approx(0.6, abs=0.01)
 
     def test_all_factors_combined(self):
-        """Accuracy + inversion + regime + activation all working together."""
+        """Accuracy + gate + regime + activation all working together."""
         votes = {"ema": "BUY", "bad_rsi": "BUY", "bb": "SELL"}
         acc = {
             "ema": _acc(0.7, 100),
-            "bad_rsi": _acc(0.3, 100),  # inverted
+            "bad_rsi": _acc(0.3, 100),  # gated (0.3 < 0.45, 100 >= 30)
             "bb": _acc(0.6, 50),
         }
         activation = {
@@ -614,11 +740,11 @@ class TestEdgeCases:
         }
         action, conf = _weighted_consensus(votes, acc, "trending-up", activation)
         # ema BUY: 0.7 * 1.5 (regime) * 1.5 (act) = 1.575
-        # bad_rsi BUY -> inverted SELL: (1-0.3) * 1.0 (not 'rsi' key!) * 0.8 (act) = 0.56
+        # bad_rsi: gated -> skipped entirely
         # bb SELL: 0.6 * 0.7 (regime for bb in trending-up) * 1.0 (act) = 0.42
-        # BUY total: 1.575, SELL total: 0.56 + 0.42 = 0.98
+        # BUY total: 1.575, SELL total: 0.42
         assert action == "BUY"
-        assert conf == pytest.approx(1.575 / (1.575 + 0.98), abs=0.01)
+        assert conf == pytest.approx(1.575 / (1.575 + 0.42), abs=0.01)
 
     def test_confidence_never_exceeds_1(self):
         votes = {"s1": "BUY"}
@@ -650,115 +776,3 @@ class TestEdgeCases:
         action, conf = _weighted_consensus(votes, acc, "trending-up")
         assert action == "BUY"
         assert conf == 1.0
-
-
-# ===========================================================================
-# TEST-8: Inversion weight cap at 0.75 (BUG-38)
-# ===========================================================================
-
-class TestInversionWeightCap:
-    """BUG-38: Inverted signals capped at weight 0.75 to prevent domination."""
-
-    def test_5_percent_accuracy_capped_at_075(self):
-        """A 5% accurate signal should get weight 0.75, not 0.95."""
-        votes = {"terrible": "BUY", "good": "BUY"}
-        acc = {"terrible": _acc(0.05, 100), "good": _acc(0.70, 100)}
-        action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # terrible: inverted to SELL, weight capped at 0.75 (not 0.95)
-        # good: BUY, weight 0.70
-        # Before cap: SELL would have 0.95 > BUY 0.70 -> SELL wins
-        # After cap: SELL 0.75, BUY 0.70 -> closer, but SELL still wins here
-        assert action == "SELL"
-
-    def test_cap_prevents_extreme_domination(self):
-        """Without cap, 1 signal at 5% acc would overpower 2 signals at 60% acc.
-        With cap at 0.75, the 2 good signals (1.2 total) beat the capped one (0.75)."""
-        votes = {"bad": "BUY", "good1": "BUY", "good2": "BUY"}
-        acc = {
-            "bad": _acc(0.05, 100),   # inverted: capped at 0.75
-            "good1": _acc(0.60, 100), # BUY weight 0.60
-            "good2": _acc(0.60, 100), # BUY weight 0.60
-        }
-        action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # bad inverted to SELL: 0.75 (capped from 0.95)
-        # good1+good2 BUY: 0.60 + 0.60 = 1.20
-        # BUY wins (1.20 > 0.75) -- without cap, SELL would be 0.95 vs BUY 1.20, BUY still wins
-        # but with even worse accuracy or regime multipliers, the cap becomes critical
-        assert action == "BUY"
-        assert conf == pytest.approx(1.20 / (1.20 + 0.75), abs=0.01)
-
-    def test_10_percent_accuracy_capped(self):
-        """10% accuracy -> inverted weight would be 0.90, capped to 0.75."""
-        votes = {"low_acc": "SELL"}
-        acc = {"low_acc": _acc(0.10, 50)}
-        action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # Inverted from SELL to BUY, weight capped at 0.75
-        assert action == "BUY"
-        assert conf == 1.0  # sole voter
-
-    def test_25_percent_accuracy_capped(self):
-        """25% accuracy -> inverted weight would be 0.75, exactly at cap (no change)."""
-        votes = {"sig": "BUY"}
-        acc = {"sig": _acc(0.25, 50)}
-        action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # 1.0 - 0.25 = 0.75, exactly at cap
-        assert action == "SELL"
-
-    def test_30_percent_accuracy_not_capped(self):
-        """30% accuracy -> inverted weight = 0.70, below cap (unaffected)."""
-        votes = {"sig": "BUY"}
-        acc = {"sig": _acc(0.30, 50)}
-        action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # 1.0 - 0.30 = 0.70 < 0.75, not capped
-        assert action == "SELL"
-
-    def test_45_percent_accuracy_not_capped(self):
-        """45% accuracy -> inverted weight = 0.55, well below cap."""
-        votes = {"sig": "BUY"}
-        acc = {"sig": _acc(0.45, 50)}
-        action, conf = _weighted_consensus(votes, acc, "trending-up")
-        assert action == "SELL"
-
-    def test_cap_does_not_affect_normal_signals(self):
-        """Non-inverted signals (>= 50% accuracy) are never capped."""
-        votes = {"great": "BUY"}
-        acc = {"great": _acc(0.95, 200)}
-        action, conf = _weighted_consensus(votes, acc, "trending-up")
-        assert action == "BUY"
-        assert conf == 1.0
-
-    def test_cap_does_not_affect_small_samples(self):
-        """Signals with <20 samples get default 0.5, no inversion, no cap."""
-        votes = {"new": "BUY"}
-        acc = {"new": _acc(0.05, 10)}  # terrible acc but too few samples
-        action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # <20 samples -> default weight 0.5, no inversion
-        assert action == "BUY"
-
-    def test_cap_with_regime_multiplier(self):
-        """Capped weight still gets regime multiplier applied."""
-        votes = {"ema": "BUY"}
-        acc = {"ema": _acc(0.05, 100)}
-        action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # ema: inverted to SELL, weight = min(0.75, 0.95) = 0.75
-        # regime mult for ema in trending-up = 1.5
-        # effective weight = 0.75 * 1.5 = 1.125
-        assert action == "SELL"
-        assert conf == 1.0  # sole voter
-
-    def test_multiple_capped_signals(self):
-        """Multiple extremely low-accuracy signals all get capped."""
-        votes = {"bad1": "BUY", "bad2": "BUY", "bad3": "BUY", "good": "BUY"}
-        acc = {
-            "bad1": _acc(0.05, 100),  # capped at 0.75
-            "bad2": _acc(0.10, 100),  # capped at 0.75
-            "bad3": _acc(0.15, 100),  # capped at 0.75
-            "good": _acc(0.70, 100),  # BUY weight 0.70
-        }
-        action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # SELL from inversions: 0.75 + 0.75 + 0.75 = 2.25
-        # BUY from good: 0.70
-        # Without cap: 0.95 + 0.90 + 0.85 = 2.70 SELL vs 0.70 BUY
-        # Cap reduces SELL weight from 2.70 to 2.25
-        assert action == "SELL"
-        assert conf == pytest.approx(2.25 / (2.25 + 0.70), abs=0.01)

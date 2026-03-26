@@ -114,6 +114,10 @@
     "subsignal_min_samples": 10,
     "subsignal_accuracy_days": 30
   },
+  "signals": {
+    "accuracy_gate_threshold": 0.45,
+    "accuracy_gate_min_samples": 30
+  },
   "local_models": {
     "ministral": {
       "hold_threshold": 0.55,

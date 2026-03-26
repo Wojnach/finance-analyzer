@@ -141,7 +141,7 @@ class TestWeightedConsensusBasic:
 
 
 class TestWeightedConsensusAccuracy:
-    """Accuracy weighting and inversion logic."""
+    """Accuracy weighting and gating logic."""
 
     def test_high_accuracy_signal_dominates(self):
         # Use neutral regime to isolate accuracy weighting
@@ -156,29 +156,38 @@ class TestWeightedConsensusAccuracy:
         expected_conf = 0.8 / (0.8 + 0.55)
         assert conf == pytest.approx(expected_conf, abs=0.01)
 
-    def test_low_accuracy_signal_gets_inverted(self):
-        """Signal with <50% accuracy and >=20 samples gets its vote flipped."""
+    def test_low_accuracy_signal_gated(self):
+        """Signal with accuracy < 0.45 and >=30 samples is gated (skipped)."""
         votes = {"bad_signal": "BUY"}
         accuracy = {"bad_signal": {"accuracy": 0.3, "total": 50}}
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # accuracy=0.3 < 0.5 with 50 samples => invert: BUY -> SELL, weight = 1.0-0.3 = 0.7
-        assert action == "SELL"
-        assert conf == 1.0  # only 1 effective vote, 100% confidence
+        # accuracy=0.3 < 0.45 with 50 samples => gated, no voters => HOLD
+        assert action == "HOLD"
+        assert conf == 0.0
 
-    def test_inversion_flips_sell_to_buy(self):
+    def test_low_accuracy_sell_also_gated(self):
         votes = {"bad_signal": "SELL"}
         accuracy = {"bad_signal": {"accuracy": 0.25, "total": 30}}
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # Inverted: SELL -> BUY, weight = 1.0 - 0.25 = 0.75
+        # Gated: 0.25 < 0.45 with 30 samples => skipped => HOLD
+        assert action == "HOLD"
+        assert conf == 0.0
+
+    def test_gate_not_applied_below_30_samples(self):
+        """Signal with accuracy < 0.45 but < 30 samples still votes (insufficient data for gating)."""
+        votes = {"new_signal": "BUY"}
+        accuracy = {"new_signal": {"accuracy": 0.3, "total": 25}}
+        action, conf = _weighted_consensus(votes, accuracy, "ranging")
+        # 25 < 30 gate min => not gated, 25 >= 20 => uses actual accuracy 0.3 as weight
         assert action == "BUY"
         assert conf == 1.0
 
-    def test_inversion_not_applied_below_20_samples(self):
-        """Signal with accuracy < 50% but < 20 samples gets default weight, NOT inverted."""
+    def test_below_20_samples_gets_default_weight(self):
+        """Signal with < 20 samples gets default weight 0.5."""
         votes = {"new_signal": "BUY"}
         accuracy = {"new_signal": {"accuracy": 0.3, "total": 15}}
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # < 20 samples => weight=0.5, no inversion
+        # < 20 samples => weight=0.5, no gating
         assert action == "BUY"
         assert conf == 1.0
 
@@ -193,17 +202,17 @@ class TestWeightedConsensusAccuracy:
         assert action == "BUY"
         assert conf == pytest.approx(0.7 / 1.2, abs=0.01)
 
-    def test_inversion_with_mixed_votes(self):
-        """Two signals: one good BUY and one bad BUY (inverted to SELL)."""
+    def test_gated_signal_excluded_from_mixed_votes(self):
+        """Bad signal gated, only good signal participates."""
         votes = {"good": "BUY", "bad": "BUY"}
         accuracy = {
             "good": {"accuracy": 0.7, "total": 50},
-            "bad": {"accuracy": 0.3, "total": 50},
+            "bad": {"accuracy": 0.3, "total": 50},  # gated: 0.3 < 0.45
         }
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # good: BUY weight=0.7, bad: inverted SELL weight=0.7
-        # buy_weight=0.7, sell_weight=0.7 => tie => HOLD
-        assert action == "HOLD"
+        # bad is gated (skipped), only good votes: BUY weight=0.7
+        assert action == "BUY"
+        assert conf == 1.0
 
 
 class TestWeightedConsensusRegime:

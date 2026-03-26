@@ -218,6 +218,7 @@ def invoke_agent(reasons, tier=3):
             claude_cmd, "-p", prompt,
             "--allowedTools", "Edit,Read,Bash,Write",
             "--max-turns", str(max_turns),
+            "--bare",
         ]
     else:
         # Fallback: use pf-agent.bat (always Tier 3)

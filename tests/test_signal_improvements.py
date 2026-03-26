@@ -298,7 +298,7 @@ class TestWeightedConsensus:
         votes = {"rsi": "BUY", "macd": "SELL", "ema": "HOLD"}
         acc = {
             "rsi": {"accuracy": 0.9, "total": 50},
-            "macd": {"accuracy": 0.4, "total": 50},
+            "macd": {"accuracy": 0.5, "total": 50},
         }
         action, conf = _weighted_consensus(votes, acc, "ranging")
         assert action == "BUY"
