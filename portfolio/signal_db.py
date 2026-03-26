@@ -55,6 +55,7 @@ class SignalDB:
                 sell_count INTEGER,
                 total_voters INTEGER,
                 signals TEXT,
+                regime TEXT DEFAULT 'unknown',
                 PRIMARY KEY (snapshot_id, ticker),
                 FOREIGN KEY (snapshot_id) REFERENCES snapshots(id)
             );
@@ -75,6 +76,12 @@ class SignalDB:
             CREATE INDEX IF NOT EXISTS idx_outcomes_horizon ON outcomes(horizon);
         """)
         conn.commit()
+
+        # Migration: add regime column to existing DBs that predate this field
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(ticker_signals)").fetchall()}
+        if "regime" not in existing_cols:
+            conn.execute("ALTER TABLE ticker_signals ADD COLUMN regime TEXT DEFAULT 'unknown'")
+            conn.commit()
 
     def close(self):
         if self._conn:
@@ -107,8 +114,8 @@ class SignalDB:
         for ticker, tdata in tickers.items():
             conn.execute(
                 """INSERT INTO ticker_signals
-                   (snapshot_id, ticker, price_usd, consensus, buy_count, sell_count, total_voters, signals)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (snapshot_id, ticker, price_usd, consensus, buy_count, sell_count, total_voters, signals, regime)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     snapshot_id,
                     ticker,
@@ -118,6 +125,7 @@ class SignalDB:
                     tdata.get("sell_count"),
                     tdata.get("total_voters"),
                     json.dumps(tdata.get("signals", {})),
+                    tdata.get("regime", "unknown"),
                 ),
             )
 
@@ -185,6 +193,7 @@ class SignalDB:
                     "sell_count": row["sell_count"],
                     "total_voters": row["total_voters"],
                     "signals": json.loads(row["signals"]) if row["signals"] else {},
+                    "regime": row["regime"] if row["regime"] is not None else "unknown",
                 }
 
             outcomes = {}

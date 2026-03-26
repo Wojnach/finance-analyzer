@@ -127,6 +127,8 @@ def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
         consensus = sig_data.get("action", "HOLD")
         total_voters = buy_count + sell_count
 
+        regime = extra.get("_regime", "unknown")
+
         tickers[ticker] = {
             "price_usd": price,
             "consensus": consensus,
@@ -134,6 +136,7 @@ def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
             "sell_count": sell_count,
             "total_voters": total_voters,
             "signals": signals,
+            "regime": regime,
         }
 
     entry = {
