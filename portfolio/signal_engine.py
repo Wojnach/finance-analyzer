@@ -988,6 +988,25 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 "pct": round(per_ticker_acc * 100, 1),
             }
 
+    # Apply MWU (Multiplicative Weight Updates) as an additional multiplier on
+    # activation_rates["normalized_weight"].  This layers online-learned signal
+    # quality on top of the existing frequency-normalisation.
+    # Wrapped in try/except so any failure here is non-fatal to signal generation.
+    try:
+        from portfolio.signal_weights import SignalWeightManager
+        _active_signal_names = [s for s, v in votes.items() if v != "HOLD"]
+        if _active_signal_names:
+            _mwu = SignalWeightManager()
+            _mwu_norm = _mwu.get_normalized_weights(_active_signal_names)
+            for _sig in _active_signal_names:
+                _mwu_factor = _mwu_norm.get(_sig, 1.0)
+                if _sig not in activation_rates:
+                    activation_rates[_sig] = {}
+                _existing = activation_rates[_sig].get("normalized_weight", 1.0)
+                activation_rates[_sig]["normalized_weight"] = _existing * _mwu_factor
+    except Exception:
+        logger.debug("MWU weight application failed", exc_info=True)
+
     sig_cfg = (config or {}).get("signals", {})
     accuracy_gate = sig_cfg.get("accuracy_gate_threshold", ACCURACY_GATE_THRESHOLD)
     weighted_action, weighted_conf = _weighted_consensus(
