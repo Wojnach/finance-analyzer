@@ -129,6 +129,99 @@ def signal_accuracy_recent(horizon="1d", days=7):
     return signal_accuracy(horizon, since=cutoff)
 
 
+def signal_accuracy_ewma(horizon="1d", halflife_days=5):
+    """Compute per-signal accuracy with exponential decay weighting.
+
+    Recent observations are weighted higher than older ones. The weight for
+    an observation of age ``age_days`` is ``exp(-ln(2) / halflife_days * age_days)``,
+    meaning entries that are ``halflife_days`` old receive half the weight of
+    today's entries.
+
+    Args:
+        horizon: Outcome horizon to evaluate ("1d", "3d", "5d", "10d").
+        halflife_days: Half-life of the decay in days (default 5). Smaller
+            values weight recent data more aggressively.
+
+    Returns:
+        dict: {signal_name: {accuracy, total_weight, effective_samples, total, correct, pct}}
+        where ``total`` and ``correct`` are int(round(...)) of the weighted sums
+        for compatibility with the existing accuracy pipeline.
+    """
+    import math
+    from datetime import datetime
+
+    entries = load_entries()
+    now = datetime.now(UTC)
+    decay_rate = math.log(2) / halflife_days  # λ = ln(2) / t½
+
+    # Accumulate per-signal: weighted_total, weighted_correct, sum_of_sq_weights
+    stats = {
+        s: {"w_total": 0.0, "w_correct": 0.0, "sum_w2": 0.0}
+        for s in SIGNAL_NAMES
+    }
+
+    for entry in entries:
+        # Compute age in days from entry timestamp
+        ts_str = entry.get("ts", "")
+        try:
+            entry_dt = datetime.fromisoformat(ts_str)
+            age_days = (now - entry_dt).total_seconds() / 86400.0
+            age_days = max(age_days, 0.0)  # clamp: never negative for future entries
+        except (ValueError, TypeError):
+            continue  # skip malformed timestamps
+
+        weight = math.exp(-decay_rate * age_days)
+
+        outcomes = entry.get("outcomes", {})
+        tickers = entry.get("tickers", {})
+
+        for ticker, tdata in tickers.items():
+            outcome = outcomes.get(ticker, {}).get(horizon)
+            if not outcome:
+                continue
+
+            change_pct = outcome.get("change_pct", 0)
+            signals = tdata.get("signals", {})
+
+            for sig_name in SIGNAL_NAMES:
+                vote = signals.get(sig_name, "HOLD")
+                if vote == "HOLD":
+                    continue
+                result_val = _vote_correct(vote, change_pct)
+                if result_val is None:
+                    continue  # neutral outcome — skip
+
+                stats[sig_name]["w_total"] += weight
+                stats[sig_name]["sum_w2"] += weight * weight
+                if result_val:
+                    stats[sig_name]["w_correct"] += weight
+
+    result = {}
+    for sig_name in SIGNAL_NAMES:
+        s = stats[sig_name]
+        w_total = s["w_total"]
+        w_correct = s["w_correct"]
+        sum_w2 = s["sum_w2"]
+
+        if w_total > 0:
+            accuracy = w_correct / w_total
+            # Kish (1965) effective sample size: n_eff = (Σwᵢ)² / Σwᵢ²
+            effective_samples = (w_total * w_total) / sum_w2
+        else:
+            accuracy = 0.0
+            effective_samples = 0.0
+
+        result[sig_name] = {
+            "accuracy": accuracy,
+            "total_weight": w_total,
+            "effective_samples": effective_samples,
+            "total": int(round(w_total)),
+            "correct": int(round(w_correct)),
+            "pct": round(accuracy * 100, 1),
+        }
+    return result
+
+
 def consensus_accuracy(horizon="1d"):
     entries = load_entries()
     correct = 0

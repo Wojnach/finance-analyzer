@@ -944,49 +944,31 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             load_cached_accuracy,
             load_cached_activation_rates,
             signal_accuracy,
-            signal_accuracy_recent,
+            signal_accuracy_ewma,
             write_accuracy_cache,
         )
 
-        # Load all-time accuracy
-        alltime = load_cached_accuracy("1d")
-        if not alltime:
-            alltime = signal_accuracy("1d")
+        # Read halflife from config (default 5 days)
+        halflife_days = (config or {}).get("signals", {}).get("accuracy_halflife_days", 5)
+
+        # Try EWMA-weighted accuracy first (smooth exponential decay, no hard 7d boundary)
+        ewma = load_cached_accuracy("1d_ewma")
+        if not ewma:
+            ewma = signal_accuracy_ewma("1d", halflife_days=halflife_days)
+            if ewma:
+                write_accuracy_cache("1d_ewma", ewma)
+
+        # Fall back to flat all-time accuracy if EWMA has no data
+        if ewma and any(v.get("total", 0) > 0 for v in ewma.values()):
+            accuracy_data = ewma
+        else:
+            alltime = load_cached_accuracy("1d")
+            if not alltime:
+                alltime = signal_accuracy("1d")
+                if alltime:
+                    write_accuracy_cache("1d", alltime)
             if alltime:
-                write_accuracy_cache("1d", alltime)
-
-        # Load recent accuracy (7d window) — more responsive to regime changes
-        recent = load_cached_accuracy("1d_recent")
-        if not recent:
-            recent = signal_accuracy_recent("1d", days=7)
-            if recent:
-                write_accuracy_cache("1d_recent", recent)
-
-        # Blend: 70% recent + 30% all-time (prefer recent performance)
-        if alltime and recent:
-            accuracy_data = {}
-            for sig_name in alltime:
-                at = alltime.get(sig_name, {})
-                rc = recent.get(sig_name, {})
-                at_acc = at.get("accuracy", 0.5)
-                rc_acc = rc.get("accuracy", 0.5)
-                rc_samples = rc.get("total", 0)
-                at_samples = at.get("total", 0)
-                # Only blend if recent has enough data; otherwise use all-time
-                if rc_samples >= 50:
-                    blended = 0.7 * rc_acc + 0.3 * at_acc
-                else:
-                    blended = at_acc
-                accuracy_data[sig_name] = {
-                    "accuracy": blended,
-                    "total": max(at_samples, rc_samples),
-                    "correct": at.get("correct", 0),
-                    "pct": round(blended * 100, 1),
-                }
-        elif alltime:
-            accuracy_data = alltime
-        elif recent:
-            accuracy_data = recent
+                accuracy_data = alltime
 
         activation_rates = load_cached_activation_rates()
     except Exception:

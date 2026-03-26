@@ -116,7 +116,8 @@
   },
   "signals": {
     "accuracy_gate_threshold": 0.45,
-    "accuracy_gate_min_samples": 30
+    "accuracy_gate_min_samples": 30,
+    "accuracy_halflife_days": 5
   },
   "local_models": {
     "ministral": {
