@@ -31,10 +31,17 @@ _LOCAL_MODEL_LOOKBACK_DAYS = 30
 
 # Accuracy gate: signals with blended accuracy below this threshold are
 # force-HOLD (treated like DISABLED_SIGNALS but dynamically). A signal at
-# 44% is noise, not a reliable contrarian indicator — inverting it just
+# 46% is noise, not a reliable contrarian indicator — inverting it just
 # produces different noise with whiplash as accuracy oscillates around 50%.
-ACCURACY_GATE_THRESHOLD = 0.45
+ACCURACY_GATE_THRESHOLD = 0.47
 ACCURACY_GATE_MIN_SAMPLES = 30  # need enough data before gating
+
+# Adaptive recency blend: when recent accuracy diverges from all-time by more
+# than this threshold, increase recent weight for faster regime adaptation.
+# Normal: 70% recent + 30% all-time. Fast: 90% recent + 10% all-time.
+_RECENCY_DIVERGENCE_THRESHOLD = 0.15  # 15% absolute divergence triggers fast blend
+_RECENCY_WEIGHT_NORMAL = 0.7
+_RECENCY_WEIGHT_FAST = 0.9
 
 # --- Signal (full 30-signal for "Now" timeframe) ---
 
@@ -117,10 +124,35 @@ def flush_sentiment_state():
 
 
 REGIME_WEIGHTS = {
-    "trending-up": {"ema": 1.5, "macd": 1.3, "rsi": 0.7, "bb": 0.7},
-    "trending-down": {"ema": 1.5, "macd": 1.3, "rsi": 0.7, "bb": 0.7},
-    "ranging": {"rsi": 1.5, "bb": 1.5, "ema": 0.5, "macd": 0.5},
-    "high-vol": {"bb": 1.5, "volume": 1.3, "ema": 0.5},
+    "trending-up": {
+        "ema": 1.5, "macd": 1.3, "rsi": 0.7, "bb": 0.7,
+        # Enhanced: boost trend-following, dampen mean-reversion
+        "trend": 1.4, "momentum_factors": 1.3, "heikin_ashi": 1.2,
+        "structure": 1.2, "smart_money": 1.1,
+        "mean_reversion": 0.6, "fibonacci": 0.7,
+    },
+    "trending-down": {
+        "ema": 1.5, "macd": 1.3, "rsi": 0.7, "bb": 0.7,
+        # Enhanced: same as trending-up (trend signals work both ways)
+        "trend": 1.4, "momentum_factors": 1.3, "heikin_ashi": 1.2,
+        "structure": 1.2, "smart_money": 1.1,
+        "mean_reversion": 0.6, "fibonacci": 0.7,
+    },
+    "ranging": {
+        "rsi": 1.5, "bb": 1.5, "ema": 0.5, "macd": 0.5,
+        # Enhanced: boost mean-reversion and level-based signals
+        "mean_reversion": 1.5, "fibonacci": 1.4, "calendar": 1.2,
+        "oscillators": 1.2,
+        "trend": 0.5, "momentum_factors": 0.6, "heikin_ashi": 0.6,
+        "structure": 0.7,
+    },
+    "high-vol": {
+        "bb": 1.5, "volume": 1.3, "ema": 0.5,
+        # Enhanced: boost volatility-aware and smart money signals
+        "volatility_sig": 1.4, "smart_money": 1.3, "volume_flow": 1.2,
+        "candlestick": 1.2,
+        "trend": 0.6, "calendar": 0.7, "mean_reversion": 0.7,
+    },
 }
 
 
@@ -194,6 +226,16 @@ def _validate_signal_result(result, sig_name=None, max_confidence=1.0):
     }
 
 
+# Correlation groups: signals that frequently agree (>90% in recent data).
+# Within a group, only the highest-accuracy signal gets full weight;
+# others get a penalty to prevent correlated signals inflating consensus.
+CORRELATION_GROUPS = {
+    "low_activity_timing": frozenset({"calendar", "econ_calendar", "forecast", "futures_flow"}),
+    "rare_technical": frozenset({"volatility_sig", "oscillators"}),
+}
+_CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal weight
+
+
 def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
                         accuracy_gate=None):
     """Compute weighted consensus using accuracy, regime, and activation frequency.
@@ -204,6 +246,9 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
 
     Signals below the accuracy gate (with sufficient samples) are force-skipped —
     they are noise, not useful contrarian indicators.
+
+    Correlation deduplication: within defined correlation groups, only the
+    highest-accuracy signal gets full weight. Others get 0.3x penalty.
     """
     gate = accuracy_gate if accuracy_gate is not None else ACCURACY_GATE_THRESHOLD
     buy_weight = 0.0
@@ -211,6 +256,30 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     gated_signals = []
     regime_mults = REGIME_WEIGHTS.get(regime, {})
     activation_rates = activation_rates or {}
+
+    # Pre-compute which signal is the "leader" (highest accuracy) in each
+    # correlation group, considering only signals that are actively voting.
+    active_non_hold = {s for s, v in votes.items() if v != "HOLD"}
+    group_leaders = {}
+    for group_name, group_sigs in CORRELATION_GROUPS.items():
+        active_in_group = active_non_hold & group_sigs
+        if len(active_in_group) <= 1:
+            continue
+        best_sig = max(
+            active_in_group,
+            key=lambda s: accuracy_data.get(s, {}).get("accuracy", 0.5),
+        )
+        group_leaders[group_name] = best_sig
+
+    # Build a set of signals that should get the correlation penalty
+    penalized_signals = set()
+    for group_name, group_sigs in CORRELATION_GROUPS.items():
+        leader = group_leaders.get(group_name)
+        if leader:
+            for s in group_sigs:
+                if s != leader and s in active_non_hold:
+                    penalized_signals.add(s)
+
     for signal_name, vote in votes.items():
         if vote == "HOLD":
             continue
@@ -229,6 +298,9 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         act_data = activation_rates.get(signal_name, {})
         norm_weight = act_data.get("normalized_weight", 1.0)
         weight *= norm_weight
+        # Correlation penalty: secondary signals in a group get reduced weight
+        if signal_name in penalized_signals:
+            weight *= _CORRELATION_PENALTY
         if vote == "BUY":
             buy_weight += weight
         elif vote == "SELL":
@@ -944,31 +1016,56 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             load_cached_accuracy,
             load_cached_activation_rates,
             signal_accuracy,
-            signal_accuracy_ewma,
+            signal_accuracy_recent,
             write_accuracy_cache,
         )
 
-        # Read halflife from config (default 5 days)
-        halflife_days = (config or {}).get("signals", {}).get("accuracy_halflife_days", 5)
-
-        # Try EWMA-weighted accuracy first (smooth exponential decay, no hard 7d boundary)
-        ewma = load_cached_accuracy("1d_ewma")
-        if not ewma:
-            ewma = signal_accuracy_ewma("1d", halflife_days=halflife_days)
-            if ewma:
-                write_accuracy_cache("1d_ewma", ewma)
-
-        # Fall back to flat all-time accuracy if EWMA has no data
-        if ewma and any(v.get("total", 0) > 0 for v in ewma.values()):
-            accuracy_data = ewma
-        else:
-            alltime = load_cached_accuracy("1d")
-            if not alltime:
-                alltime = signal_accuracy("1d")
-                if alltime:
-                    write_accuracy_cache("1d", alltime)
+        # Load all-time accuracy
+        alltime = load_cached_accuracy("1d")
+        if not alltime:
+            alltime = signal_accuracy("1d")
             if alltime:
-                accuracy_data = alltime
+                write_accuracy_cache("1d", alltime)
+
+        # Load recent accuracy (7d window) — more responsive to regime changes
+        recent = load_cached_accuracy("1d_recent")
+        if not recent:
+            recent = signal_accuracy_recent("1d", days=7)
+            if recent:
+                write_accuracy_cache("1d_recent", recent)
+
+        # Adaptive blend: normally 70% recent + 30% all-time, but when
+        # accuracy diverges sharply (>15%), fast-track to 90% recent + 10%
+        # all-time for faster regime adaptation.
+        if alltime and recent:
+            accuracy_data = {}
+            for sig_name in alltime:
+                at = alltime.get(sig_name, {})
+                rc = recent.get(sig_name, {})
+                at_acc = at.get("accuracy", 0.5)
+                rc_acc = rc.get("accuracy", 0.5)
+                rc_samples = rc.get("total", 0)
+                at_samples = at.get("total", 0)
+                # Only blend if recent has enough data; otherwise use all-time
+                if rc_samples >= 50:
+                    divergence = abs(rc_acc - at_acc)
+                    if divergence > _RECENCY_DIVERGENCE_THRESHOLD:
+                        w = _RECENCY_WEIGHT_FAST
+                    else:
+                        w = _RECENCY_WEIGHT_NORMAL
+                    blended = w * rc_acc + (1 - w) * at_acc
+                else:
+                    blended = at_acc
+                accuracy_data[sig_name] = {
+                    "accuracy": blended,
+                    "total": max(at_samples, rc_samples),
+                    "correct": at.get("correct", 0),
+                    "pct": round(blended * 100, 1),
+                }
+        elif alltime:
+            accuracy_data = alltime
+        elif recent:
+            accuracy_data = recent
 
         activation_rates = load_cached_activation_rates()
     except Exception:
@@ -987,25 +1084,6 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 "correct": int(per_ticker_acc * per_ticker_samples),
                 "pct": round(per_ticker_acc * 100, 1),
             }
-
-    # Apply MWU (Multiplicative Weight Updates) as an additional multiplier on
-    # activation_rates["normalized_weight"].  This layers online-learned signal
-    # quality on top of the existing frequency-normalisation.
-    # Wrapped in try/except so any failure here is non-fatal to signal generation.
-    try:
-        from portfolio.signal_weights import SignalWeightManager
-        _active_signal_names = [s for s, v in votes.items() if v != "HOLD"]
-        if _active_signal_names:
-            _mwu = SignalWeightManager()
-            _mwu_norm = _mwu.get_normalized_weights(_active_signal_names)
-            for _sig in _active_signal_names:
-                _mwu_factor = _mwu_norm.get(_sig, 1.0)
-                if _sig not in activation_rates:
-                    activation_rates[_sig] = {}
-                _existing = activation_rates[_sig].get("normalized_weight", 1.0)
-                activation_rates[_sig]["normalized_weight"] = _existing * _mwu_factor
-    except Exception:
-        logger.debug("MWU weight application failed", exc_info=True)
 
     sig_cfg = (config or {}).get("signals", {})
     accuracy_gate = sig_cfg.get("accuracy_gate_threshold", ACCURACY_GATE_THRESHOLD)

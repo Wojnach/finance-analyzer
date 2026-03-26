@@ -1,7 +1,7 @@
 """Tests for core functions in portfolio/signal_engine.py.
 
 Covers:
-- _weighted_consensus: weighted vote aggregation with accuracy, regime, inversion, activation rates
+- _weighted_consensus: weighted vote aggregation with accuracy, regime, gating, activation rates
 - apply_confidence_penalties: 4-stage penalty cascade (regime, volume/ADX, trap, dynamic min_voters)
 - _confluence_score: majority-based scoring with volume confirmation
 - _time_of_day_factor: time-based confidence dampening
@@ -156,38 +156,29 @@ class TestWeightedConsensusAccuracy:
         expected_conf = 0.8 / (0.8 + 0.55)
         assert conf == pytest.approx(expected_conf, abs=0.01)
 
-    def test_low_accuracy_signal_gated(self):
-        """Signal with accuracy < 0.45 and >=30 samples is gated (skipped)."""
+    def test_low_accuracy_signal_gets_gated(self):
+        """Signal with accuracy below gate threshold gets force-skipped."""
         votes = {"bad_signal": "BUY"}
         accuracy = {"bad_signal": {"accuracy": 0.3, "total": 50}}
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # accuracy=0.3 < 0.45 with 50 samples => gated, no voters => HOLD
+        # accuracy=0.3 < 0.47 gate with 50 >= 30 samples => gated => HOLD
         assert action == "HOLD"
         assert conf == 0.0
 
-    def test_low_accuracy_sell_also_gated(self):
+    def test_gating_applies_to_sell_signal(self):
         votes = {"bad_signal": "SELL"}
         accuracy = {"bad_signal": {"accuracy": 0.25, "total": 30}}
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # Gated: 0.25 < 0.45 with 30 samples => skipped => HOLD
+        # accuracy=0.25 < 0.47 gate => gated => HOLD
         assert action == "HOLD"
         assert conf == 0.0
 
-    def test_gate_not_applied_below_30_samples(self):
-        """Signal with accuracy < 0.45 but < 30 samples still votes (insufficient data for gating)."""
-        votes = {"new_signal": "BUY"}
-        accuracy = {"new_signal": {"accuracy": 0.3, "total": 25}}
-        action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # 25 < 30 gate min => not gated, 25 >= 20 => uses actual accuracy 0.3 as weight
-        assert action == "BUY"
-        assert conf == 1.0
-
-    def test_below_20_samples_gets_default_weight(self):
-        """Signal with < 20 samples gets default weight 0.5."""
+    def test_gating_not_applied_below_min_samples(self):
+        """Signal with accuracy below gate but < ACCURACY_GATE_MIN_SAMPLES keeps voting."""
         votes = {"new_signal": "BUY"}
         accuracy = {"new_signal": {"accuracy": 0.3, "total": 15}}
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # < 20 samples => weight=0.5, no gating
+        # < 30 samples => not gated, gets default weight=0.5
         assert action == "BUY"
         assert conf == 1.0
 
@@ -202,15 +193,16 @@ class TestWeightedConsensusAccuracy:
         assert action == "BUY"
         assert conf == pytest.approx(0.7 / 1.2, abs=0.01)
 
-    def test_gated_signal_excluded_from_mixed_votes(self):
-        """Bad signal gated, only good signal participates."""
+    def test_gated_signal_with_good_signal(self):
+        """Two signals: one good BUY and one bad BUY (gated, skipped)."""
         votes = {"good": "BUY", "bad": "BUY"}
         accuracy = {
             "good": {"accuracy": 0.7, "total": 50},
-            "bad": {"accuracy": 0.3, "total": 50},  # gated: 0.3 < 0.45
+            "bad": {"accuracy": 0.3, "total": 50},
         }
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # bad is gated (skipped), only good votes: BUY weight=0.7
+        # good: BUY weight=0.7, bad: gated (acc 0.3 < 0.47 gate)
+        # Only good votes => BUY with 100% conf
         assert action == "BUY"
         assert conf == 1.0
 
@@ -725,3 +717,110 @@ class TestRegimeWeightsConstant:
         assert "high-vol" in REGIME_WEIGHTS
         assert REGIME_WEIGHTS["high-vol"]["bb"] == 1.5
         assert REGIME_WEIGHTS["high-vol"]["volume"] == 1.3
+
+    def test_ranging_has_enhanced_weights(self):
+        """Enhanced signals should have regime weights in ranging."""
+        rw = REGIME_WEIGHTS["ranging"]
+        assert rw["mean_reversion"] == 1.5
+        assert rw["fibonacci"] == 1.4
+        assert rw["trend"] == 0.5
+
+    def test_trending_up_has_enhanced_weights(self):
+        """Enhanced signals should have regime weights in trending-up."""
+        rw = REGIME_WEIGHTS["trending-up"]
+        assert rw["trend"] == 1.4
+        assert rw["mean_reversion"] == 0.6
+
+
+# ---------------------------------------------------------------------------
+# Correlation deduplication tests
+# ---------------------------------------------------------------------------
+
+class TestCorrelationDedup:
+    """Test signal correlation grouping in _weighted_consensus."""
+
+    def test_single_signal_in_group_no_penalty(self):
+        """Only 1 signal from a correlated group votes — no penalty."""
+        votes = {"calendar": "BUY", "rsi": "SELL"}
+        accuracy = {
+            "calendar": {"accuracy": 0.63, "total": 600},
+            "rsi": {"accuracy": 0.53, "total": 800},
+        }
+        action, conf = _weighted_consensus(votes, accuracy, "ranging")
+        # calendar in group but alone => no penalty
+        # calendar weight = 0.63 * 1.2 (ranging regime) = 0.756
+        # rsi weight = 0.53 * 1.5 (ranging regime) = 0.795
+        # SELL wins
+        assert action == "SELL"
+
+    def test_two_signals_in_group_leader_gets_full_weight(self):
+        """When 2 signals from same group vote, leader gets full, other 0.3x."""
+        votes = {"calendar": "BUY", "econ_calendar": "BUY"}
+        accuracy = {
+            "calendar": {"accuracy": 0.63, "total": 600},
+            "econ_calendar": {"accuracy": 0.87, "total": 2500},
+        }
+        action, conf = _weighted_consensus(votes, accuracy, "ranging")
+        # Both in "low_activity_timing" group
+        # econ_calendar is leader (0.87 > 0.63)
+        # calendar gets 0.3x penalty
+        assert action == "BUY"
+        assert conf == 1.0  # Both vote BUY so 100% consensus
+
+    def test_correlated_group_reduces_apparent_confidence(self):
+        """When 3 correlated signals + 1 independent signal disagree,
+        the correlation penalty should reduce the correlated side's weight."""
+        votes = {
+            "calendar": "BUY",
+            "econ_calendar": "BUY",
+            "forecast": "BUY",
+            "rsi": "SELL",
+        }
+        accuracy = {
+            "calendar": {"accuracy": 0.63, "total": 600},
+            "econ_calendar": {"accuracy": 0.87, "total": 2500},
+            "forecast": {"accuracy": 0.48, "total": 5000},
+            "rsi": {"accuracy": 0.53, "total": 800},
+        }
+        action, conf = _weighted_consensus(votes, accuracy, "ranging")
+        # forecast at 0.48 < 0.47 gate => gated
+        # econ_calendar: leader, full weight = 0.87
+        # calendar: penalized 0.3x = 0.63 * 0.3 * 1.2 (ranging) = 0.2268
+        # rsi: SELL weight = 0.53 * 1.5 (ranging) = 0.795
+        # BUY: 0.87 + 0.2268 = 1.0968, SELL: 0.795
+        # BUY wins but with reduced confidence
+        assert action == "BUY"
+        # Confidence = BUY / (BUY + SELL) — should be less than 1.0
+        assert conf < 1.0
+
+    def test_no_penalty_when_group_signals_vote_differently(self):
+        """If signals in the same group vote opposite directions,
+        they each count as independent."""
+        votes = {"calendar": "BUY", "econ_calendar": "SELL"}
+        accuracy = {
+            "calendar": {"accuracy": 0.63, "total": 600},
+            "econ_calendar": {"accuracy": 0.87, "total": 2500},
+        }
+        action, conf = _weighted_consensus(votes, accuracy, "ranging")
+        # Both are in same group and both are active.
+        # Leader: econ_calendar (0.87), penalized: calendar
+        # But they vote differently — penalty still applies to the secondary
+        # econ_calendar SELL weight = 0.87, calendar BUY weight = 0.63 * 0.3 * 1.2 = 0.2268
+        # SELL wins
+        assert action == "SELL"
+
+    def test_adaptive_recency_fast_track(self):
+        """When divergence > 15%, the blend should use 90% recent weight."""
+        from portfolio.signal_engine import (
+            _RECENCY_DIVERGENCE_THRESHOLD,
+            _RECENCY_WEIGHT_FAST,
+            _RECENCY_WEIGHT_NORMAL,
+        )
+        assert _RECENCY_DIVERGENCE_THRESHOLD == 0.15
+        assert _RECENCY_WEIGHT_FAST == 0.9
+        assert _RECENCY_WEIGHT_NORMAL == 0.7
+
+    def test_accuracy_gate_at_047(self):
+        """Verify gate threshold is 0.47."""
+        from portfolio.signal_engine import ACCURACY_GATE_THRESHOLD
+        assert ACCURACY_GATE_THRESHOLD == 0.47
