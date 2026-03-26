@@ -353,6 +353,70 @@ def accuracy_by_signal_ticker(signal_name, horizon="1d", days=None):
     return result
 
 
+def signal_utility(horizon="1d"):
+    """Compute per-signal return magnitude utility.
+
+    For each non-HOLD signal vote with a non-neutral outcome, compute the
+    directional return:
+      - BUY  → +change_pct   (positive = correct direction)
+      - SELL → -change_pct   (negative change = correct direction → positive return)
+
+    Neutral outcomes (|change_pct| < _MIN_CHANGE_PCT) are skipped.
+
+    Returns:
+        dict: {signal_name: {avg_return, total_return, samples, utility_score}}
+        where utility_score = avg_return * sqrt(samples).
+        Signals with no data get zeros.
+    """
+    import math
+
+    entries = load_entries()
+    # {sig_name: {"total_return": float, "samples": int}}
+    stats = {s: {"total_return": 0.0, "samples": 0} for s in SIGNAL_NAMES}
+
+    for entry in entries:
+        outcomes = entry.get("outcomes", {})
+        tickers = entry.get("tickers", {})
+
+        for ticker, tdata in tickers.items():
+            outcome = outcomes.get(ticker, {}).get(horizon)
+            if not outcome:
+                continue
+
+            change_pct = outcome.get("change_pct", 0)
+            if abs(change_pct) < _MIN_CHANGE_PCT:
+                continue  # neutral outcome — skip
+
+            signals = tdata.get("signals", {})
+            for sig_name in SIGNAL_NAMES:
+                vote = signals.get(sig_name, "HOLD")
+                if vote == "HOLD":
+                    continue
+                # Directional return: positive when signal was correct
+                if vote == "BUY":
+                    dir_return = change_pct
+                else:  # SELL
+                    dir_return = -change_pct
+
+                stats[sig_name]["total_return"] += dir_return
+                stats[sig_name]["samples"] += 1
+
+    result = {}
+    for sig_name in SIGNAL_NAMES:
+        s = stats[sig_name]
+        n = s["samples"]
+        total_ret = s["total_return"]
+        avg_ret = total_ret / n if n > 0 else 0.0
+        utility = avg_ret * math.sqrt(n) if n > 0 else 0.0
+        result[sig_name] = {
+            "avg_return": avg_ret,
+            "total_return": total_ret,
+            "samples": n,
+            "utility_score": utility,
+        }
+    return result
+
+
 def best_worst_signals(horizon="1d", acc=None):
     if acc is None:
         acc = signal_accuracy(horizon)

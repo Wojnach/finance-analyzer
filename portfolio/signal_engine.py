@@ -31,9 +31,9 @@ _LOCAL_MODEL_LOOKBACK_DAYS = 30
 
 # Accuracy gate: signals with blended accuracy below this threshold are
 # force-HOLD (treated like DISABLED_SIGNALS but dynamically). A signal at
-# 46% is noise, not a reliable contrarian indicator — inverting it just
+# 44% is noise, not a reliable contrarian indicator — inverting it just
 # produces different noise with whiplash as accuracy oscillates around 50%.
-ACCURACY_GATE_THRESHOLD = 0.47
+ACCURACY_GATE_THRESHOLD = 0.45
 ACCURACY_GATE_MIN_SAMPLES = 30  # need enough data before gating
 
 # Adaptive recency blend: when recent accuracy diverges from all-time by more
@@ -1084,6 +1084,26 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 "correct": int(per_ticker_acc * per_ticker_samples),
                 "pct": round(per_ticker_acc * 100, 1),
             }
+
+    # Utility boost: scale accuracy weight by return-based utility score.
+    # Signals that catch large moves (high avg_return) get a confidence boost
+    # capped at 1.5x, applied only when >= 30 samples exist and avg_return > 0.
+    try:
+        from portfolio.accuracy_stats import signal_utility
+        utility_data = signal_utility("1d")
+        for sig_name in list(accuracy_data.keys()):
+            u = utility_data.get(sig_name, {})
+            u_score = u.get("avg_return", 0.0)
+            samples = u.get("samples", 0)
+            if samples >= 30 and u_score > 0:
+                boost = min(1.0 + u_score, 1.5)
+                if sig_name in accuracy_data:
+                    accuracy_data[sig_name]["accuracy"] *= boost
+                    accuracy_data[sig_name]["accuracy"] = min(
+                        accuracy_data[sig_name]["accuracy"], 0.95
+                    )
+    except Exception:
+        logger.debug("Utility weighting unavailable", exc_info=True)
 
     sig_cfg = (config or {}).get("signals", {})
     accuracy_gate = sig_cfg.get("accuracy_gate_threshold", ACCURACY_GATE_THRESHOLD)
