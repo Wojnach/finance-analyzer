@@ -31,10 +31,17 @@ _LOCAL_MODEL_LOOKBACK_DAYS = 30
 
 # Accuracy gate: signals with blended accuracy below this threshold are
 # force-HOLD (treated like DISABLED_SIGNALS but dynamically). A signal at
-# 44% is noise, not a reliable contrarian indicator — inverting it just
+# 46% is noise, not a reliable contrarian indicator — inverting it just
 # produces different noise with whiplash as accuracy oscillates around 50%.
-ACCURACY_GATE_THRESHOLD = 0.45
+ACCURACY_GATE_THRESHOLD = 0.47
 ACCURACY_GATE_MIN_SAMPLES = 30  # need enough data before gating
+
+# Adaptive recency blend: when recent accuracy diverges from all-time by more
+# than this threshold, increase recent weight for faster regime adaptation.
+# Normal: 70% recent + 30% all-time. Fast: 90% recent + 10% all-time.
+_RECENCY_DIVERGENCE_THRESHOLD = 0.15  # 15% absolute divergence triggers fast blend
+_RECENCY_WEIGHT_NORMAL = 0.7
+_RECENCY_WEIGHT_FAST = 0.9
 
 # --- Signal (full 30-signal for "Now" timeframe) ---
 
@@ -962,7 +969,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             if recent:
                 write_accuracy_cache("1d_recent", recent)
 
-        # Blend: 70% recent + 30% all-time (prefer recent performance)
+        # Adaptive blend: normally 70% recent + 30% all-time, but when
+        # accuracy diverges sharply (>15%), fast-track to 90% recent + 10%
+        # all-time for faster regime adaptation.
         if alltime and recent:
             accuracy_data = {}
             for sig_name in alltime:
@@ -974,7 +983,12 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
                 at_samples = at.get("total", 0)
                 # Only blend if recent has enough data; otherwise use all-time
                 if rc_samples >= 50:
-                    blended = 0.7 * rc_acc + 0.3 * at_acc
+                    divergence = abs(rc_acc - at_acc)
+                    if divergence > _RECENCY_DIVERGENCE_THRESHOLD:
+                        w = _RECENCY_WEIGHT_FAST
+                    else:
+                        w = _RECENCY_WEIGHT_NORMAL
+                    blended = w * rc_acc + (1 - w) * at_acc
                 else:
                     blended = at_acc
                 accuracy_data[sig_name] = {
