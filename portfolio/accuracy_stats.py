@@ -16,6 +16,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 SIGNAL_LOG = DATA_DIR / "signal_log.jsonl"
 ACCURACY_CACHE_FILE = DATA_DIR / "accuracy_cache.json"
+BEST_HORIZON_CACHE_FILE = DATA_DIR / "best_horizon_cache.json"
 ACCURACY_CACHE_TTL = 3600
 HORIZONS = ["3h", "4h", "12h", "1d", "3d", "5d", "10d"]
 
@@ -873,6 +874,103 @@ def format_accuracy_alerts(alerts):
             f"({a['change']:+.1f}pp, {a['new_samples']} samples)"
         )
     return lines
+
+
+def signal_best_horizon_accuracy(min_samples=50):
+    """Compute each signal's best accuracy across all horizons.
+
+    For each signal, evaluates accuracy at every horizon in HORIZONS and returns
+    the horizon with the highest accuracy (provided it meets the minimum sample
+    threshold). This allows the signal weighting system to use the most
+    predictive horizon for each signal rather than a fixed 1d window.
+
+    Results are cached in BEST_HORIZON_CACHE_FILE with the same TTL as the
+    main accuracy cache (ACCURACY_CACHE_TTL).
+
+    Args:
+        min_samples: Minimum number of datapoints required for a horizon to be
+            considered. Horizons below this threshold are skipped. Default 50.
+
+    Returns:
+        dict: {signal_name: {accuracy, total, correct, pct, best_horizon}}
+        Signals with no qualifying horizons are omitted from the result.
+    """
+    # --- Cache check ---
+    cached = load_json(BEST_HORIZON_CACHE_FILE)
+    if cached is not None and isinstance(cached, dict):
+        try:
+            if time.time() - cached.get("time", 0) < ACCURACY_CACHE_TTL:
+                data = cached.get("data")
+                if isinstance(data, dict):
+                    return data
+        except (KeyError, TypeError):
+            pass
+
+    entries = load_entries()
+    # {sig_name: {horizon: {correct, total}}}
+    stats: dict[str, dict[str, dict[str, int]]] = {
+        s: {h: {"correct": 0, "total": 0} for h in HORIZONS}
+        for s in SIGNAL_NAMES
+    }
+
+    for entry in entries:
+        outcomes = entry.get("outcomes", {})
+        tickers = entry.get("tickers", {})
+
+        for ticker, tdata in tickers.items():
+            signals = tdata.get("signals", {})
+            for horizon in HORIZONS:
+                outcome = outcomes.get(ticker, {}).get(horizon)
+                if not outcome:
+                    continue
+                change_pct = outcome.get("change_pct", 0)
+
+                for sig_name in SIGNAL_NAMES:
+                    vote = signals.get(sig_name, "HOLD")
+                    if vote == "HOLD":
+                        continue
+                    result_val = _vote_correct(vote, change_pct)
+                    if result_val is None:
+                        continue
+                    stats[sig_name][horizon]["total"] += 1
+                    if result_val:
+                        stats[sig_name][horizon]["correct"] += 1
+
+    result = {}
+    for sig_name in SIGNAL_NAMES:
+        best_hz = None
+        best_acc = -1.0
+        best_total = 0
+        best_correct = 0
+
+        for horizon in HORIZONS:
+            h_stats = stats[sig_name][horizon]
+            total = h_stats["total"]
+            if total < min_samples:
+                continue
+            acc = h_stats["correct"] / total
+            if acc > best_acc:
+                best_acc = acc
+                best_hz = horizon
+                best_total = total
+                best_correct = h_stats["correct"]
+
+        if best_hz is not None:
+            result[sig_name] = {
+                "accuracy": best_acc,
+                "total": best_total,
+                "correct": best_correct,
+                "pct": round(best_acc * 100, 1),
+                "best_horizon": best_hz,
+            }
+
+    # --- Write cache ---
+    try:
+        _atomic_write_json(BEST_HORIZON_CACHE_FILE, {"time": time.time(), "data": result})
+    except Exception:
+        logger.debug("Failed to write best_horizon cache", exc_info=True)
+
+    return result
 
 
 def accuracy_by_ticker_signal(horizon="1d", min_samples=0):

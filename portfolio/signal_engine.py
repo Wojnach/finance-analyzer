@@ -1161,7 +1161,20 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     except Exception:
         logger.debug("Utility weighting unavailable", exc_info=True)
 
+    # Multi-horizon: optionally use each signal's best horizon accuracy
     sig_cfg = (config or {}).get("signals", {})
+    if sig_cfg.get("use_best_horizon", False):
+        try:
+            from portfolio.accuracy_stats import signal_best_horizon_accuracy
+            best_hz = signal_best_horizon_accuracy(min_samples=50)
+            for sig_name, bh_data in best_hz.items():
+                if bh_data.get("total", 0) >= 30:
+                    # Only override if best-horizon accuracy is meaningfully better
+                    current = accuracy_data.get(sig_name, {}).get("accuracy", 0.5)
+                    if bh_data["accuracy"] > current + 0.03:
+                        accuracy_data[sig_name] = bh_data
+        except Exception:
+            logger.debug("Best-horizon accuracy unavailable", exc_info=True)
     accuracy_gate = sig_cfg.get("accuracy_gate_threshold", ACCURACY_GATE_THRESHOLD)
     max_signals = sig_cfg.get("max_active_signals")
     weighted_action, weighted_conf = _weighted_consensus(
