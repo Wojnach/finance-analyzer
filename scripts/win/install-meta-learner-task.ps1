@@ -27,16 +27,9 @@ $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
 
-$principal = New-ScheduledTaskPrincipal -UserId "$env:USERNAME" -LogonType S4U -RunLevel Limited
-
-Register-ScheduledTask `
-    -TaskName $taskName `
-    -Action $action `
-    -Trigger $trigger `
-    -Settings $settings `
-    -Principal $principal `
-    -Description "Daily LightGBM meta-learner retraining (low priority, 1 thread)" `
-    -Force
+Register-ScheduledTask -TaskName $taskName `
+    -Action $action -Trigger $trigger -Settings $settings `
+    -Description "Daily LightGBM meta-learner retraining (low priority, 1 thread)"
 
 Write-Host ""
 Write-Host "Installed: $taskName"
