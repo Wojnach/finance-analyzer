@@ -14,7 +14,7 @@ ultrathink
 
 5. **DOCUMENT AS YOU GO.** Update any existing docs that your changes affect. Write findings and decisions into your plan doc.
 
-6. **VERIFY & SHIP.** Run full test suite + linters. Review your git log. Merge, push, restart if needed.
+6. **VERIFY & SHIP.** Run full test suite + linters. Review your git log. Merge into main, commit, and push. This is MANDATORY — work that isn't merged and pushed didn't happen. Use `cmd.exe /c "cd /d Q:\finance-analyzer && git push"` for push (Windows git has the SSH keys, WSL git does not).
 
 ## TESTING
 
@@ -30,3 +30,4 @@ ultrathink
 - Do not ask for approval. Make your best call, document reasoning in commits.
 - If something is too risky, skip it with a `// TODO: MANUAL REVIEW` comment.
 - Spend your entire output context on this. Do not stop early.
+- **ALWAYS commit, merge into main, and push when done.** Unpushed work is lost work. Use Windows git for push: `cmd.exe /c "cd /d Q:\finance-analyzer && git push"`
