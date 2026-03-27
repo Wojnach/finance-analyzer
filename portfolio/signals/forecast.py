@@ -219,23 +219,39 @@ def _load_candles_ohlcv(ticker: str, periods: int = 168,
     from portfolio.tickers import SYMBOLS
 
     source_info = SYMBOLS.get(ticker, {})
-    # Map interval to Alpaca format if needed
-    alpaca_map = {"5m": "5Min", "15m": "15Min", "1h": "1Hour", "1d": "1Day"}
-    alpaca_interval = alpaca_map.get(interval, "1Hour")
+
+    # Determine the data source — needed to apply source-specific interval constraints
+    if "binance" in source_info:
+        source = "binance"
+    elif "binance_fapi" in source_info:
+        source = "binance_fapi"
+    elif "alpaca" in source_info:
+        source = "alpaca"
+    else:
+        source = None
+
+    # Alpaca minimum supported interval is 15m — fall back if configured interval is smaller.
+    # alpaca_klines() does its own mapping; pass the raw internal interval directly.
+    if source == "alpaca" and interval in ("1m", "3m", "5m"):
+        logger.debug(
+            "Alpaca does not support %s interval for %s — falling back to 15m", interval, ticker
+        )
+        interval = "15m"
 
     try:
-        if "binance" in source_info:
+        if source == "binance":
             from portfolio.data_collector import binance_klines
             symbol = source_info["binance"]
             df = binance_klines(symbol, interval=interval, limit=periods)
-        elif "binance_fapi" in source_info:
+        elif source == "binance_fapi":
             from portfolio.data_collector import binance_fapi_klines
             symbol = source_info["binance_fapi"]
             df = binance_fapi_klines(symbol, interval=interval, limit=periods)
-        elif "alpaca" in source_info:
+        elif source == "alpaca":
+            # Pass the raw internal interval — alpaca_klines() handles the mapping itself.
             from portfolio.data_collector import alpaca_klines
             symbol = source_info["alpaca"]
-            df = alpaca_klines(symbol, interval=alpaca_interval, limit=periods)
+            df = alpaca_klines(symbol, interval=interval, limit=periods)
         else:
             return None
 
@@ -735,6 +751,30 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
             return result
     else:
         close_prices = [c["close"] for c in candles]
+
+    # If Kronos-specific candle fetch failed but df has full OHLCV data, build candle dicts
+    # from the DataFrame so Kronos still gets richer data than just close prices.
+    if kronos_candles is None and df is not None and len(df) >= 50:
+        ohlcv_cols = {"open", "high", "low", "close", "volume"}
+        if ohlcv_cols.issubset(df.columns):
+            try:
+                kronos_candles = [
+                    {
+                        "open": float(row["open"]),
+                        "high": float(row["high"]),
+                        "low": float(row["low"]),
+                        "close": float(row["close"]),
+                        "volume": float(row["volume"]),
+                    }
+                    for _, row in df.iterrows()
+                ]
+                logger.debug(
+                    "Kronos candle fallback from df for %s (%d candles)", ticker, len(kronos_candles)
+                )
+                result["indicators"]["kronos_candles_source"] = "df_fallback"
+            except Exception as e:
+                logger.debug("Kronos df candle fallback failed for %s: %s", ticker, e)
+                kronos_candles = None
 
     current_price = close_prices[-1]
     result["indicators"]["current_price"] = current_price
