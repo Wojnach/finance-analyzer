@@ -24,7 +24,7 @@ ultrathink
 
 ## RULES
 
-- Use a git worktree or branch to isolate work from the live environment.
+- Use a git worktree or branch to isolate work from the live environment. **Clean up worktrees after merging** — delete the worktree directory and remove the branch: `git worktree remove <path> && git branch -d <branch>`. Leftover worktrees waste disk and cause confusion.
 - Use subagents and agent teams when parallel work makes sense.
 - Save progress to `docs/SESSION_PROGRESS.md` every few batches in case of context refresh. Prefer fresh context over degraded context.
 - Do not ask for approval. Make your best call, document reasoning in commits.

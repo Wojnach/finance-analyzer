@@ -331,9 +331,9 @@ For each batch in the plan:
 2. All tests must pass.
 3. Review git log — ensure commits tell a coherent story.
 4. Merge the worktree branch into main.
-5. Push.
+5. Push using Windows git: `cmd.exe /c "cd /d Q:\finance-analyzer && git push"`
 6. Update `docs/CHANGELOG.md` with what changed.
-7. Clean up the worktree.
+7. **Clean up the worktree AND branch:** `git worktree remove <path> && git branch -d <branch>`. Do NOT leave stale worktrees — they waste disk and cause confusion.
 8. Send Telegram notification with summary of improvements.
 
 ---
