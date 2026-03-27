@@ -558,7 +558,7 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
     return action, conf, penalty_log
 
 
-def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
+def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, horizon=None):
     votes = {}
     extra_info = {}
 
@@ -1020,19 +1020,22 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             write_accuracy_cache,
         )
 
+        # Select accuracy horizon — use 3h accuracy when predicting 3h moves
+        acc_horizon = horizon if horizon in ("3h", "4h", "12h") else "1d"
+
         # Load all-time accuracy
-        alltime = load_cached_accuracy("1d")
+        alltime = load_cached_accuracy(acc_horizon)
         if not alltime:
-            alltime = signal_accuracy("1d")
+            alltime = signal_accuracy(acc_horizon)
             if alltime:
-                write_accuracy_cache("1d", alltime)
+                write_accuracy_cache(acc_horizon, alltime)
 
         # Load recent accuracy (7d window) — more responsive to regime changes
-        recent = load_cached_accuracy("1d_recent")
+        recent = load_cached_accuracy(f"{acc_horizon}_recent")
         if not recent:
-            recent = signal_accuracy_recent("1d", days=7)
+            recent = signal_accuracy_recent(acc_horizon, days=7)
             if recent:
-                write_accuracy_cache("1d_recent", recent)
+                write_accuracy_cache(f"{acc_horizon}_recent", recent)
 
         # Adaptive blend: normally 70% recent + 30% all-time, but when
         # accuracy diverges sharply (>15%), fast-track to 90% recent + 10%
