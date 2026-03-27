@@ -50,16 +50,24 @@ _KRONOS_TIMEOUT = 90
 _FORECAST_MODELS_DISABLED = False
 
 # Kronos inference script — runs via subprocess calling Q:/models/kronos_infer.py
-# Enable via config.json → forecast.kronos_enabled = true
+# Enable via config.json → forecast.kronos_enabled = true | "shadow"
+# "shadow" = run inference + log predictions, but force HOLD in composite vote
 _KRONOS_ENABLED = False
+_KRONOS_SHADOW = False
 
 def _init_kronos_enabled():
     """Read kronos_enabled from config.json at import time."""
-    global _KRONOS_ENABLED
+    global _KRONOS_ENABLED, _KRONOS_SHADOW
     try:
         from portfolio.file_utils import load_json as _load_json
         _cfg = _load_json(str(Path(__file__).resolve().parent.parent.parent / "config.json"), {})
-        _KRONOS_ENABLED = bool(_cfg.get("forecast", {}).get("kronos_enabled", False))
+        val = _cfg.get("forecast", {}).get("kronos_enabled", False)
+        if val == "shadow":
+            _KRONOS_ENABLED = True
+            _KRONOS_SHADOW = True
+        else:
+            _KRONOS_ENABLED = bool(val)
+            _KRONOS_SHADOW = False
     except Exception as e:
         logger.debug("Kronos init from config: %s", e)
 
@@ -795,14 +803,20 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
     if kronos and kronos.get("results"):
         kr = kronos["results"]
         result["indicators"]["kronos_method"] = kronos.get("method", "unknown")
+        result["indicators"]["kronos_shadow"] = _KRONOS_SHADOW
 
         if "1h" in kr:
-            result["sub_signals"]["kronos_1h"] = _direction_to_action(kr["1h"].get("direction", "neutral"))
+            k1h_action = _direction_to_action(kr["1h"].get("direction", "neutral"))
+            # Shadow mode: log the real prediction but vote HOLD
+            result["sub_signals"]["kronos_1h"] = "HOLD" if _KRONOS_SHADOW else k1h_action
+            result["indicators"]["kronos_1h_raw"] = k1h_action
             result["indicators"]["kronos_1h_pct"] = kr["1h"].get("pct_move", 0)
             result["indicators"]["kronos_1h_conf"] = kr["1h"].get("confidence", 0)
 
         if "24h" in kr:
-            result["sub_signals"]["kronos_24h"] = _direction_to_action(kr["24h"].get("direction", "neutral"))
+            k24h_action = _direction_to_action(kr["24h"].get("direction", "neutral"))
+            result["sub_signals"]["kronos_24h"] = "HOLD" if _KRONOS_SHADOW else k24h_action
+            result["indicators"]["kronos_24h_raw"] = k24h_action
             result["indicators"]["kronos_24h_pct"] = kr["24h"].get("pct_move", 0)
             result["indicators"]["kronos_24h_conf"] = kr["24h"].get("confidence", 0)
 
