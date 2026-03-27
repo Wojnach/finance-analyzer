@@ -375,9 +375,58 @@ class TestMajorityVote:
         assert conf == pytest.approx(1.0)
 
     def test_buy_less_than_hold(self):
-        """2B/0S/5H => HOLD (BUY does not exceed HOLD count)."""
+        """2B/0S/5H => BUY — HOLDs are abstentions, so 2 BUYs beat 0 SELLs."""
         action, conf = majority_vote(
             ["BUY", "BUY", "HOLD", "HOLD", "HOLD", "HOLD", "HOLD"],
         )
+        assert action == "BUY"
+        assert conf == pytest.approx(1.0)  # 2 BUY / 2 active
+
+    # -----------------------------------------------------------------------
+    # New tests verifying HOLD-as-abstention behaviour (fix for HOLD-stuck bug)
+    # -----------------------------------------------------------------------
+
+    def test_5_holds_2_buys_gives_buy(self):
+        """5H/2B/0S: was incorrectly HOLD; now correctly BUY (HOLDs abstain)."""
+        action, conf = majority_vote(
+            ["HOLD", "HOLD", "HOLD", "HOLD", "HOLD", "BUY", "BUY"],
+        )
+        assert action == "BUY"
+        assert conf == pytest.approx(1.0)  # 2 BUY / 2 active
+
+    def test_3_holds_2_buys_1_sell_gives_buy(self):
+        """3H/2B/1S: BUY with conf 0.6667 (2 out of 3 active voters)."""
+        action, conf = majority_vote(
+            ["HOLD", "HOLD", "HOLD", "BUY", "BUY", "SELL"],
+        )
+        assert action == "BUY"
+        assert conf == pytest.approx(round(2 / 3, 4))
+
+    def test_all_hold_gives_hold(self):
+        """All HOLD → HOLD with 0 confidence (no active voters)."""
+        action, conf = majority_vote(["HOLD", "HOLD", "HOLD", "HOLD"])
         assert action == "HOLD"
         assert conf == pytest.approx(0.0)
+
+    def test_tie_1_buy_1_sell_gives_hold(self):
+        """1B/1S tie → HOLD even with no HOLDs."""
+        action, conf = majority_vote(["BUY", "SELL"])
+        assert action == "HOLD"
+        assert conf == pytest.approx(0.0)
+
+    def test_3_buys_4_holds_gives_buy_conf_1(self):
+        """3B/0S/4H → BUY with confidence 1.0 (all active voters agree)."""
+        action, conf = majority_vote(
+            ["BUY", "BUY", "BUY", "HOLD", "HOLD", "HOLD", "HOLD"],
+        )
+        assert action == "BUY"
+        assert conf == pytest.approx(1.0)
+
+    def test_count_hold_true_with_many_holds(self):
+        """2B/0S/5H with count_hold=True: confidence = 2/7 (HOLD in denominator)."""
+        action, conf = majority_vote(
+            ["BUY", "BUY", "HOLD", "HOLD", "HOLD", "HOLD", "HOLD"],
+            count_hold=True,
+        )
+        assert action == "BUY"
+        assert conf == pytest.approx(round(2 / 7, 4))

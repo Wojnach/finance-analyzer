@@ -90,6 +90,11 @@ def wma(series: pd.Series, period: int) -> pd.Series:
 def majority_vote(votes: list, count_hold: bool = False) -> tuple:
     """Compute majority vote from a list of BUY/SELL/HOLD strings.
 
+    HOLD votes are treated as abstentions — they do not block a directional
+    result.  Only BUY vs SELL counts determine direction.  This means a
+    composite with 5 HOLDs and 2 BUYs produces BUY (not HOLD), because the
+    HOLDs are neutral, not opposing votes.
+
     Args:
         votes: List of "BUY", "SELL", or "HOLD" strings
         count_hold: If False (default), confidence = winner / active_voters (BUY+SELL only).
@@ -105,23 +110,19 @@ def majority_vote(votes: list, count_hold: bool = False) -> tuple:
     active = buy + sell
     total = buy + sell + hold
 
-    if total == 0:
-        return "HOLD", 0.0
-
     if active == 0:
         return "HOLD", 0.0
 
     denom = total if count_hold else active
 
-    if buy > sell and buy > hold:
+    if buy > sell:
         return "BUY", round(buy / denom, 4) if denom > 0 else 0.0
-    elif sell > buy and sell > hold:
+    elif sell > buy:
         return "SELL", round(sell / denom, 4) if denom > 0 else 0.0
     else:
-        # HOLD wins: tie between buy/sell, or hold > both, or no clear majority.
+        # Tie between buy and sell — no clear direction.
         # HOLD confidence is always 0.0 — it's the absence of a signal, not a
-        # directional vote. (BUG-113: previously returned hold/total when
-        # count_hold=True, which gave misleading non-zero confidence for HOLD.)
+        # directional vote.
         return "HOLD", 0.0
 
 
