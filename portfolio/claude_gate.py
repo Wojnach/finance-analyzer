@@ -38,7 +38,7 @@ logger = logging.getLogger("portfolio.claude_gate")
 # Master kill switch.  Set to False to block ALL Claude Code invocations
 # across the entire codebase — no exceptions.
 # ---------------------------------------------------------------------------
-CLAUDE_ENABLED = False
+CLAUDE_ENABLED = True
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"

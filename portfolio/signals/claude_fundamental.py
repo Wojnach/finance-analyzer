@@ -55,12 +55,17 @@ _DEFAULT_HOLD = {
 
 
 def _get_cooldowns(config):
-    """Get per-tier cooldowns from config with defaults."""
+    """Get per-tier cooldowns from config with defaults.
+
+    Defaults are tuned for accuracy tracking — need enough samples to
+    measure hit rate. Haiku is cheap/fast so runs often. Opus is expensive
+    so runs sparingly.
+    """
     cf = config.get("claude_fundamental", {})
     return {
-        "haiku":  cf.get("haiku_cooldown", 60),
-        "sonnet": cf.get("sonnet_cooldown", 600),
-        "opus":   cf.get("opus_cooldown", 1800),
+        "haiku":  cf.get("haiku_cooldown", 300),    # 5 min default
+        "sonnet": cf.get("sonnet_cooldown", 1800),   # 30 min default
+        "opus":   cf.get("opus_cooldown", 7200),      # 2h default
     }
 
 
