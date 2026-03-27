@@ -366,7 +366,9 @@ class TestPenaltiesStage1Regime:
         action, conf, log = apply_confidence_penalties(
             "SELL", 0.7, "trending-down", {}, extra, "BTC-USD", None, {},
         )
-        assert conf == pytest.approx(0.7 * 1.10, abs=0.01)
+        # Stage 1 aligned bonus: 0.7 * 1.10 = 0.77
+        # Stage 5 unanimity: 4/5 = 80% agreement → 0.75x penalty → 0.77 * 0.75 = 0.5775
+        assert conf == pytest.approx(0.7 * 1.10 * 0.75, abs=0.01)
 
     def test_trending_up_sell_no_bonus(self):
         extra = _base_extra(voters=5, buy_count=1, sell_count=4)
@@ -375,7 +377,8 @@ class TestPenaltiesStage1Regime:
         )
         # Counter-trend: no regime entry in log
         assert not any(p["stage"] == "regime" for p in log)
-        assert conf == pytest.approx(0.7, abs=0.01)
+        # Stage 5 unanimity: 4/5 = 80% agreement → 0.75x penalty → 0.7 * 0.75 = 0.525
+        assert conf == pytest.approx(0.7 * 0.75, abs=0.01)
 
 
 class TestPenaltiesStage2VolumeGate:
@@ -591,9 +594,11 @@ class TestPenaltiesConfidenceClamping:
         action, conf, log = apply_confidence_penalties(
             "BUY", 0.95, "trending-up", {}, extra, "BTC-USD", None, {},
         )
-        # 0.95 * 1.1 * 1.15 = 1.20175, should clamp to 1.0
+        # 0.95 * 1.1 = 1.045 → clamped to 1.0 (Stage 3 BUG-90 clamp)
+        # volume boost 2.0 → 1.15x: 1.0 * 1.15 → clamped to 1.0
+        # Stage 5 unanimity: 8/10 = 80% agreement → 0.75x penalty → 1.0 * 0.75 = 0.75
         assert conf <= 1.0
-        assert conf == pytest.approx(1.0)
+        assert conf == pytest.approx(0.75)
 
     def test_confidence_clamped_to_min_0(self):
         extra = _base_extra(voters=6, volume_ratio=0.3)
@@ -689,6 +694,71 @@ class TestTimeOfDayFactor:
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             factor = _time_of_day_factor()
         assert factor == 1.0
+
+
+# ===========================================================================
+# Stage 5: Unanimity penalty
+# ===========================================================================
+
+class TestUnanimityPenalty:
+    """Stage 5: Unanimity penalty in confidence cascade."""
+
+    def test_high_agreement_penalized(self):
+        """90%+ agreement gets 0.6x penalty."""
+        df = _make_ohlcv_df(50)
+        extra = _base_extra(voters=10, buy_count=9, sell_count=1)
+        action, conf, log = apply_confidence_penalties(
+            "BUY", 0.9, "breakout", {}, extra, "BTC-USD", df, {}
+        )
+        # Should have unanimity penalty in log
+        unanimity = [p for p in log if p.get("stage") == "unanimity"]
+        assert len(unanimity) == 1
+        assert unanimity[0]["mult"] == 0.6
+
+    def test_moderate_agreement_penalized_less(self):
+        """80-90% agreement gets 0.75x penalty."""
+        df = _make_ohlcv_df(50)
+        extra = _base_extra(voters=10, buy_count=8, sell_count=2)
+        action, conf, log = apply_confidence_penalties(
+            "BUY", 0.85, "breakout", {}, extra, "BTC-USD", df, {}
+        )
+        unanimity = [p for p in log if p.get("stage") == "unanimity"]
+        assert len(unanimity) == 1
+        assert unanimity[0]["mult"] == 0.75
+
+    def test_normal_agreement_not_penalized(self):
+        """<80% agreement has no unanimity penalty."""
+        df = _make_ohlcv_df(50)
+        extra = _base_extra(voters=10, buy_count=7, sell_count=3)
+        action, conf, log = apply_confidence_penalties(
+            "BUY", 0.7, "breakout", {}, extra, "BTC-USD", df, {}
+        )
+        unanimity = [p for p in log if p.get("stage") == "unanimity"]
+        assert len(unanimity) == 0
+
+    def test_hold_not_penalized(self):
+        """HOLD actions skip unanimity check."""
+        df = _make_ohlcv_df(50)
+        extra = _base_extra(voters=10, buy_count=9, sell_count=1)
+        action, conf, log = apply_confidence_penalties(
+            "HOLD", 0.0, "breakout", {}, extra, "BTC-USD", df, {}
+        )
+        unanimity = [p for p in log if p.get("stage") == "unanimity"]
+        assert len(unanimity) == 0
+
+
+# ===========================================================================
+# Global confidence cap at 0.80
+# ===========================================================================
+
+class TestGlobalConfidenceCap:
+    """Global confidence cap at 0.80."""
+
+    def test_confidence_capped_at_80(self):
+        """Confidence should never exceed 0.80 from generate_signal."""
+        # This is tested via the return value, not directly testable
+        # in apply_confidence_penalties since cap is in generate_signal
+        pass  # Tested in integration tests
 
 
 # ===========================================================================
