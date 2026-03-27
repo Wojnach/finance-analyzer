@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-03-26
-Branch: improve/auto-session-2026-03-26
+Updated: 2026-03-27
+Branch: improve/auto-session-2026-03-27
 
 ## 1) Architecture Summary
 
@@ -182,7 +182,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
 - **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
 
-## 9) Known Issues (as of 2026-03-24)
+## 9) Known Issues (as of 2026-03-27)
 
 - BUG-15 through BUG-22: Fixed in 2026-03-08 session
 - BUG-23 through BUG-27: Fixed in 2026-03-09 session (signal validation, None ticker, OSError, heartbeat, pass cleanup)
@@ -281,3 +281,12 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-132 (P3): `orb_predictor.py` fetches 5000+ candles from Binance on every call with no caching (deferred)
 - ARCH-21: `autonomous.py` has 500+ line functions (e.g., `_build_telegram_mode_a`) — should decompose for maintainability (deferred)
 - ARCH-22: `agent_invocation.py` uses module-level globals for process lifecycle — could be a class for clarity (deferred)
+- BUG-133 (P1): Accuracy cache shared timestamp causes cross-horizon staleness — **fixed 2026-03-27** (per-horizon timestamps)
+- BUG-134 (P1): Regime accuracy hardcoded to "1d" regardless of prediction horizon — **fixed 2026-03-27** (uses acc_horizon)
+- BUG-135 (P1): Signal utility always evaluated at "1d" horizon — **fixed 2026-03-27** (uses acc_horizon)
+- BUG-136 (P2): Utility boost mutates accuracy_data dict in-place — **fixed 2026-03-27** (dict copy)
+- BUG-137 (P2): SQLite DB resource leak in load_entries() — **fixed 2026-03-27** (try/finally)
+- BUG-138 (P2): Backtester duplicates accuracy blending logic — **fixed 2026-03-27** (shared blend_accuracy_data)
+- BUG-139 (P2): load_json() crashes on PermissionError — **fixed 2026-03-27** (OSError catch)
+- ARCH-23: Extract accuracy blending into reusable function — **done 2026-03-27**
+- ARCH-24: Parameterize accuracy functions with pre-loaded entries — **done 2026-03-27**
