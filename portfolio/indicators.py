@@ -10,9 +10,18 @@ import portfolio.shared_state as _ss
 logger = logging.getLogger("portfolio.indicators")
 
 
-def compute_indicators(df):
-    if len(df) < 26:
-        logger.debug("compute_indicators: insufficient data (%d rows, need 26)", len(df))
+def compute_indicators(df, horizon=None):
+    if horizon == "3h":
+        rsi_period = 7
+        macd_fast, macd_slow, macd_signal_period = 8, 17, 9
+        min_rows = macd_slow  # 17
+    else:
+        rsi_period = 14
+        macd_fast, macd_slow, macd_signal_period = 12, 26, 9
+        min_rows = macd_slow  # 26
+
+    if len(df) < min_rows:
+        logger.debug("compute_indicators: insufficient data (%d rows, need %d)", len(df), min_rows)
         return None
     close = df["close"].copy()
 
@@ -30,21 +39,21 @@ def compute_indicators(df):
         df = df.copy()
         df["close"] = close
 
-    # RSI(14)
+    # RSI(rsi_period)
     delta = close.diff()
     gain = delta.where(delta > 0, 0.0)
     loss = (-delta).where(delta < 0, 0.0)
-    avg_gain = gain.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
+    avg_gain = gain.ewm(alpha=1 / rsi_period, min_periods=rsi_period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / rsi_period, min_periods=rsi_period, adjust=False).mean()
     avg_loss_safe = avg_loss.replace(0, np.finfo(float).eps)
     rs = avg_gain / avg_loss_safe
     rsi = 100 - (100 / (1 + rs))
 
-    # MACD(12,26,9)
-    ema12 = close.ewm(span=12, adjust=False).mean()
-    ema26 = close.ewm(span=26, adjust=False).mean()
-    macd = ema12 - ema26
-    macd_signal = macd.ewm(span=9, adjust=False).mean()
+    # MACD(macd_fast, macd_slow, macd_signal_period)
+    ema_fast = close.ewm(span=macd_fast, adjust=False).mean()
+    ema_slow = close.ewm(span=macd_slow, adjust=False).mean()
+    macd = ema_fast - ema_slow
+    macd_signal = macd.ewm(span=macd_signal_period, adjust=False).mean()
     macd_hist = macd - macd_signal
 
     # EMA(9, 21)
