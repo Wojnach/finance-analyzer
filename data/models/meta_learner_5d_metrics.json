@@ -1,0 +1,12 @@
+{
+  "horizon": "5d",
+  "train_samples": 810,
+  "test_samples": 233,
+  "train_accuracy": 0.6037,
+  "test_accuracy": 0.6781,
+  "test_auc": 0.6862,
+  "test_logloss": 0.6683,
+  "class_balance": 0.4401,
+  "features": 37,
+  "trained_at": "2026-03-27T12:56:49.082038+00:00"
+}
