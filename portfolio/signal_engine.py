@@ -1115,11 +1115,13 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             signal_accuracy_by_regime,
             write_regime_accuracy_cache,
         )
-        regime_acc = load_cached_regime_accuracy("1d")
+        # BUG-134: Use acc_horizon (not hardcoded "1d") so regime accuracy
+        # matches the prediction horizon (3h/4h/12h/1d).
+        regime_acc = load_cached_regime_accuracy(acc_horizon)
         if not regime_acc:
-            regime_acc = signal_accuracy_by_regime("1d")
+            regime_acc = signal_accuracy_by_regime(acc_horizon)
             if regime_acc:
-                write_regime_accuracy_cache("1d", regime_acc)
+                write_regime_accuracy_cache(acc_horizon, regime_acc)
         current_regime_data = regime_acc.get(regime, {})
         for sig_name, rdata in current_regime_data.items():
             if rdata.get("total", 0) >= 30:
@@ -1146,7 +1148,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # capped at 1.5x, applied only when >= 30 samples exist and avg_return > 0.
     try:
         from portfolio.accuracy_stats import signal_utility
-        utility_data = signal_utility("1d")
+        # BUG-135: Use acc_horizon (not hardcoded "1d") so utility boost
+        # reflects the actual prediction horizon's return profile.
+        utility_data = signal_utility(acc_horizon)
         for sig_name in list(accuracy_data.keys()):
             u = utility_data.get(sig_name, {})
             u_score = u.get("avg_return", 0.0)
@@ -1154,10 +1158,13 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             if samples >= 30 and u_score > 0:
                 boost = min(1.0 + u_score, 1.5)
                 if sig_name in accuracy_data:
-                    accuracy_data[sig_name]["accuracy"] *= boost
-                    accuracy_data[sig_name]["accuracy"] = min(
-                        accuracy_data[sig_name]["accuracy"], 0.95
-                    )
+                    # BUG-136: Build a new dict instead of mutating in-place.
+                    # The accuracy_data may be a reference to cached alltime data.
+                    boosted_acc = min(accuracy_data[sig_name]["accuracy"] * boost, 0.95)
+                    accuracy_data[sig_name] = {
+                        **accuracy_data[sig_name],
+                        "accuracy": boosted_acc,
+                    }
     except Exception:
         logger.debug("Utility weighting unavailable", exc_info=True)
 

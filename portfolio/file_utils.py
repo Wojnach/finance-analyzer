@@ -32,11 +32,17 @@ def load_json(path, default=None):
     """Load a JSON file. Returns *default* if missing or unparseable.
 
     Uses try/except instead of exists() check to avoid TOCTOU race.
+    Handles OSError (permission denied, locked files) gracefully on Windows.
     """
     path = Path(path)
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
+        return default
+    except OSError:
+        # BUG-139: PermissionError (file locked by antivirus/another process)
+        # and other OS-level errors should degrade gracefully like missing files.
+        logger.debug("load_json: OS error reading %s, returning default", path.name)
         return default
     except (json.JSONDecodeError, ValueError):
         return default

@@ -26,12 +26,14 @@ def load_entries():
     try:
         from portfolio.signal_db import SignalDB
         db = SignalDB()
-        count = db.snapshot_count()
-        if count > 0:
-            entries = db.load_entries()
+        try:
+            count = db.snapshot_count()
+            if count > 0:
+                entries = db.load_entries()
+                return entries
+        finally:
+            # BUG-137: Always close DB, even if load_entries() throws.
             db.close()
-            return entries
-        db.close()
     except Exception as e:
         logger.debug("SQLite signal_db unavailable, falling back to JSONL: %s", e)
     # Fallback to JSONL
@@ -530,7 +532,10 @@ def load_cached_accuracy(horizon="1d"):
     cache = load_json(ACCURACY_CACHE_FILE)
     if cache is not None:
         try:
-            if time.time() - cache.get("time", 0) < ACCURACY_CACHE_TTL:
+            # BUG-133: Use per-horizon timestamps to avoid cross-horizon staleness.
+            # Fall back to legacy shared "time" key for backwards compatibility.
+            ts = cache.get(f"time_{horizon}", cache.get("time", 0))
+            if time.time() - ts < ACCURACY_CACHE_TTL:
                 cached = cache.get(horizon)
                 if cached:
                     return cached
@@ -544,6 +549,9 @@ def write_accuracy_cache(horizon, data):
     if not isinstance(cache, dict):
         cache = {}
     cache[horizon] = data
+    # BUG-133: Write per-horizon timestamp so other horizons don't appear fresh.
+    cache[f"time_{horizon}"] = time.time()
+    # Keep legacy "time" key for backwards compat with older code paths.
     cache["time"] = time.time()
     _atomic_write_json(ACCURACY_CACHE_FILE, cache)
 
