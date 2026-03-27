@@ -10,7 +10,6 @@ Compares:
 
 import argparse
 import logging
-from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
 logger = logging.getLogger("portfolio.backtester")
