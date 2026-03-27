@@ -812,6 +812,8 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
             result["indicators"]["kronos_1h_raw"] = k1h_action
             result["indicators"]["kronos_1h_pct"] = kr["1h"].get("pct_move", 0)
             result["indicators"]["kronos_1h_conf"] = kr["1h"].get("confidence", 0)
+            result["indicators"]["kronos_1h_range_pct"] = kr["1h"].get("predicted_range_pct", 0)
+            result["indicators"]["kronos_1h_range_skew"] = kr["1h"].get("range_skew", 0)
 
         if "24h" in kr:
             k24h_action = _direction_to_action(kr["24h"].get("direction", "neutral"))
@@ -819,6 +821,10 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
             result["indicators"]["kronos_24h_raw"] = k24h_action
             result["indicators"]["kronos_24h_pct"] = kr["24h"].get("pct_move", 0)
             result["indicators"]["kronos_24h_conf"] = kr["24h"].get("confidence", 0)
+            result["indicators"]["kronos_24h_range_pct"] = kr["24h"].get("predicted_range_pct", 0)
+            result["indicators"]["kronos_24h_range_skew"] = kr["24h"].get("range_skew", 0)
+            result["indicators"]["kronos_24h_predicted_high"] = kr["24h"].get("predicted_high", 0)
+            result["indicators"]["kronos_24h_predicted_low"] = kr["24h"].get("predicted_low", 0)
 
     # Run Chronos (skip entirely if circuit breaker is open)
     t0 = time.time()
