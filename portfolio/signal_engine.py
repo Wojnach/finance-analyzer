@@ -155,6 +155,53 @@ REGIME_WEIGHTS = {
     },
 }
 
+# Regime-gated signals: completely silenced (forced HOLD) in certain regimes
+# because they produce negative alpha.  Based on 2026-03-27 accuracy audit:
+#   ranging: trend 40.7%, momentum_factors 41.4%
+#   trending: mean_reversion 53.1% all-time but poor when trend is strong
+REGIME_GATED_SIGNALS: dict[str, frozenset[str]] = {
+    "ranging": frozenset({"trend", "momentum_factors"}),
+    "trending-up": frozenset({"mean_reversion"}),
+    "trending-down": frozenset({"mean_reversion"}),
+}
+
+# Horizon-specific signal weight multipliers.
+# Signals with >15pp accuracy divergence between horizons get adjusted.
+# Source: 2026-03-27 accuracy audit (3h_recent vs 1d_recent).
+HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
+    "3h": {
+        "news_event": 1.4,      # 70.0% at 3h
+        "ema": 1.3,             # 62.9% at 3h
+        "ministral": 1.2,      # 62.6% at 3h
+        "sentiment": 0.5,      # 33.8% at 3h — worst performer
+        "fibonacci": 0.6,      # 38.3% at 3h (but 68.2% at 1d)
+        "forecast": 0.6,       # 38.3% at 3h
+    },
+    "4h": {
+        "news_event": 1.4,
+        "ema": 1.3,
+        "ministral": 1.2,
+        "sentiment": 0.5,
+        "fibonacci": 0.6,
+        "forecast": 0.6,
+    },
+    "1d": {
+        "fibonacci": 1.4,      # 68.2% at 1d
+        "mean_reversion": 1.3, # 65.4% at 1d
+        "calendar": 1.2,       # 62.8% at 1d
+        "news_event": 0.5,     # 29.5% at 1d (reversal of 3h edge)
+        "fear_greed": 0.5,     # 25.9% at 1d — collapsed
+        "macro_regime": 0.5,   # 30.3% at 1d
+        "structure": 0.6,      # 36.1% at 1d
+    },
+}
+
+# Activity rate cap: signals with activation rate above this threshold get
+# an additional penalty to prevent a single high-activity signal from
+# dominating consensus.  Targets volume_flow (83.1% activity, 49.2% accuracy).
+_ACTIVITY_RATE_CAP = 0.70
+_ACTIVITY_RATE_PENALTY = 0.5
+
 
 # Signals that only apply to specific asset classes
 _CRYPTO_ONLY_SIGNALS = {"futures_flow", "funding"}
@@ -232,23 +279,37 @@ def _validate_signal_result(result, sig_name=None, max_confidence=1.0):
 CORRELATION_GROUPS = {
     "low_activity_timing": frozenset({"calendar", "econ_calendar", "forecast", "futures_flow"}),
     "rare_technical": frozenset({"volatility_sig", "oscillators"}),
+    # Discovered 2026-03-27: ema/trend corr=0.55, all share SELL bias (37-40%)
+    "trend_direction": frozenset({"ema", "trend", "heikin_ashi"}),
+    # Discovered 2026-03-27: both permanent SELL lean (volume_flow 69% SELL, macro_regime 44% SELL)
+    "high_volume_sell": frozenset({"volume_flow", "macro_regime"}),
 }
 _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal weight
 
 
 def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
-                        accuracy_gate=None, max_signals=None):
+                        accuracy_gate=None, max_signals=None, horizon=None):
     """Compute weighted consensus using accuracy, regime, and activation frequency.
 
     Weight per signal = accuracy_weight * regime_mult * normalized_weight
+                        * horizon_mult * activity_cap
     where normalized_weight = rarity_bonus * bias_penalty (from activation rates).
     Rare, balanced signals get more weight; noisy/biased signals get less.
 
     Signals below the accuracy gate (with sufficient samples) are force-skipped —
     they are noise, not useful contrarian indicators.
 
+    Regime gating: signals in REGIME_GATED_SIGNALS for the current regime are
+    forced to HOLD before vote processing — they produce negative alpha.
+
     Correlation deduplication: within defined correlation groups, only the
     highest-accuracy signal gets full weight. Others get 0.3x penalty.
+
+    Horizon-specific weights: signals with divergent accuracy across horizons
+    get boosted or penalized via HORIZON_SIGNAL_WEIGHTS.
+
+    Activity rate cap: signals with >70% activation rate get 0.5x penalty
+    to prevent a single high-activity signal from dominating consensus.
 
     Top-N gate: when max_signals is set, only the top max_signals non-HOLD
     signals (ranked by accuracy) participate in the consensus. This focuses
@@ -260,6 +321,11 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     gated_signals = []
     regime_mults = REGIME_WEIGHTS.get(regime, {})
     activation_rates = activation_rates or {}
+    horizon_mults = HORIZON_SIGNAL_WEIGHTS.get(horizon, {}) if horizon else {}
+
+    # Regime gating: force-HOLD signals that produce negative alpha in this regime
+    regime_gated = REGIME_GATED_SIGNALS.get(regime, frozenset())
+    votes = {k: ("HOLD" if k in regime_gated else v) for k, v in votes.items()}
 
     # Top-N gate: only let the top max_signals (by accuracy) participate
     active_votes = {k: v for k, v in votes.items() if v != "HOLD"}
@@ -312,10 +378,17 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         weight = acc if samples >= 20 else 0.5
         # Regime adjustment
         weight *= regime_mults.get(signal_name, 1.0)
+        # Horizon-specific weight adjustment
+        if signal_name in horizon_mults:
+            weight *= horizon_mults[signal_name]
         # Activation frequency normalization (rarity * bias correction)
         act_data = activation_rates.get(signal_name, {})
         norm_weight = act_data.get("normalized_weight", 1.0)
         weight *= norm_weight
+        # Activity rate cap: penalize signals with extremely high activation rates
+        act_rate = act_data.get("activation_rate", 0.0)
+        if act_rate > _ACTIVITY_RATE_CAP:
+            weight *= _ACTIVITY_RATE_PENALTY
         # Correlation penalty: secondary signals in a group get reduced weight
         if signal_name in penalized_signals:
             weight *= _CORRELATION_PENALTY
@@ -1180,6 +1253,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         votes, accuracy_data, regime, activation_rates,
         accuracy_gate=accuracy_gate,
         max_signals=max_signals,
+        horizon=horizon,
     )
 
     # Apply core gate AND MIN_VOTERS gate to weighted consensus too
