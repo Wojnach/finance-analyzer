@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-03-27 (autonomous improvement session)
+- **BUG-133: Accuracy cache cross-horizon staleness (P1)**: Cache shared a single timestamp for all horizons. Writing 3h data made stale 1d data appear fresh. Now uses per-horizon timestamps (`time_1d`, `time_3h`, etc.) with backwards-compatible fallback to legacy `time` key.
+- **BUG-134: Regime accuracy hardcoded to 1d (P1)**: `signal_engine.py` always called `load_cached_regime_accuracy("1d")` regardless of prediction horizon. 3h/4h/12h predictions now use horizon-matched regime accuracy.
+- **BUG-135: Utility boost hardcoded to 1d (P1)**: `signal_utility("1d")` was called regardless of horizon. Signals profitable at 1d but not at 3h were incorrectly boosted. Now uses `acc_horizon`.
+- **BUG-136: Utility boost in-place mutation (P2)**: `accuracy_data[sig_name]["accuracy"] *= boost` mutated potentially cached data. Replaced with dict copy using spread operator.
+- **BUG-137: SQLite resource leak (P2)**: `load_entries()` didn't close SignalDB on exception. Added try/finally.
+- **BUG-139: load_json crashes on PermissionError (P2)**: `load_json()` now catches `OSError` (including `PermissionError`), returning default gracefully when files are locked by antivirus or other processes.
+- **ARCH-23: Shared accuracy blend function**: Extracted `blend_accuracy_data()` into `accuracy_stats.py`. Both `signal_engine.py` and `backtester.py` use the shared function, eliminating 30 lines of duplicated blending logic.
+- **ARCH-24: Pre-loaded entries parameter**: Added optional `entries=` parameter to 8 accuracy functions. `print_accuracy_report()` now loads entries once and passes to sub-functions, eliminating up to 21 redundant reads of the 68MB signal_log.jsonl.
+- **New tests**: 20 new tests — per-horizon cache timestamps (6), blend_accuracy_data (7), load_json OSError (4), entries= parameter (3). All pass.
+- Theme: Accuracy Correctness, Data Integrity, Code Deduplication.
+
 ## 2026-03-26 (autonomous improvement session)
 - **BUG-128: Avanza offset file atomicity**: `avanza_orders.py` Telegram offset file now uses `atomic_write_json()` instead of `write_text()`, preventing corruption on crash. Read path handles both legacy plain-text and new JSON format for backwards compatibility.
 - **BUG-129: Playwright thread safety**: `avanza_session.py` global Playwright state (`_pw_instance`, `_pw_browser`, `_pw_context`) now protected by `threading.Lock` to prevent concurrent access corruption.
