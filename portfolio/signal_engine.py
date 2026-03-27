@@ -576,10 +576,15 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     regime = detect_regime(ind, is_crypto=ticker in CRYPTO_SYMBOLS)
 
     # RSI — only votes at extremes (adaptive thresholds from rolling percentiles)
-    rsi_lower = ind.get("rsi_p20", 30)
-    rsi_upper = ind.get("rsi_p80", 70)
-    rsi_lower = max(rsi_lower, 15)
-    rsi_upper = min(rsi_upper, 85)
+    if horizon in ("3h", "4h"):
+        # 3h: RSI(7) is more sensitive — use fixed 25/75 thresholds
+        rsi_lower = 25
+        rsi_upper = 75
+    else:
+        rsi_lower = ind.get("rsi_p20", 30)
+        rsi_upper = ind.get("rsi_p80", 70)
+        rsi_lower = max(rsi_lower, 15)
+        rsi_upper = min(rsi_upper, 85)
     if ind["rsi"] < rsi_lower:
         votes["rsi"] = "BUY"
     elif ind["rsi"] > rsi_upper:
