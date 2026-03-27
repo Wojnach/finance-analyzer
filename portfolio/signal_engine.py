@@ -353,8 +353,12 @@ def _confluence_score(votes, indicators):
     return min(round(score, 4), 1.0)
 
 
-def _time_of_day_factor():
+def _time_of_day_factor(horizon=None):
     hour = datetime.now(UTC).hour
+    if horizon in ("3h", "4h"):
+        from portfolio.short_horizon import time_of_day_scale_3h
+        return time_of_day_scale_3h(hour)
+    # Default 1d behavior
     if 2 <= hour <= 6:
         return 0.8
     return 1.0
@@ -576,7 +580,7 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
     return action, conf, penalty_log
 
 
-def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
+def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, horizon=None):
     votes = {}
     extra_info = {}
 
@@ -590,10 +594,15 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     regime = detect_regime(ind, is_crypto=ticker in CRYPTO_SYMBOLS)
 
     # RSI — only votes at extremes (adaptive thresholds from rolling percentiles)
-    rsi_lower = ind.get("rsi_p20", 30)
-    rsi_upper = ind.get("rsi_p80", 70)
-    rsi_lower = max(rsi_lower, 15)
-    rsi_upper = min(rsi_upper, 85)
+    if horizon in ("3h", "4h"):
+        # 3h: RSI(7) is more sensitive — use fixed 25/75 thresholds
+        rsi_lower = 25
+        rsi_upper = 75
+    else:
+        rsi_lower = ind.get("rsi_p20", 30)
+        rsi_upper = ind.get("rsi_p80", 70)
+        rsi_lower = max(rsi_lower, 15)
+        rsi_upper = min(rsi_upper, 85)
     if ind["rsi"] < rsi_lower:
         votes["rsi"] = "BUY"
     elif ind["rsi"] > rsi_upper:
@@ -986,6 +995,13 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
         for sig_name in _enhanced_entries:
             votes[sig_name] = "HOLD"
 
+    # 3h horizon: gate slow signals that are noise at short timeframes
+    if horizon in ("3h", "4h"):
+        from portfolio.short_horizon import is_slow_signal_3h
+        for sig_name in list(votes.keys()):
+            if is_slow_signal_3h(sig_name) and votes[sig_name] != "HOLD":
+                votes[sig_name] = "HOLD"
+
     # Derive buy/sell counts from named votes
     buy = sum(1 for v in votes.values() if v == "BUY")
     sell = sum(1 for v in votes.values() if v == "SELL")
@@ -1038,19 +1054,22 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
             write_accuracy_cache,
         )
 
+        # Select accuracy horizon — use 3h accuracy when predicting 3h moves
+        acc_horizon = horizon if horizon in ("3h", "4h", "12h") else "1d"
+
         # Load all-time accuracy
-        alltime = load_cached_accuracy("1d")
+        alltime = load_cached_accuracy(acc_horizon)
         if not alltime:
-            alltime = signal_accuracy("1d")
+            alltime = signal_accuracy(acc_horizon)
             if alltime:
-                write_accuracy_cache("1d", alltime)
+                write_accuracy_cache(acc_horizon, alltime)
 
         # Load recent accuracy (7d window) — more responsive to regime changes
-        recent = load_cached_accuracy("1d_recent")
+        recent = load_cached_accuracy(f"{acc_horizon}_recent")
         if not recent:
-            recent = signal_accuracy_recent("1d", days=7)
+            recent = signal_accuracy_recent(acc_horizon, days=7)
             if recent:
-                write_accuracy_cache("1d_recent", recent)
+                write_accuracy_cache(f"{acc_horizon}_recent", recent)
 
         # Adaptive blend: normally 70% recent + 30% all-time, but when
         # accuracy diverges sharply (>15%), fast-track to 90% recent + 10%
@@ -1160,7 +1179,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     confluence = _confluence_score(votes, extra_info)
 
     # Time-of-day confidence adjustment
-    tod_factor = _time_of_day_factor()
+    tod_factor = _time_of_day_factor(horizon=horizon)
     conf *= tod_factor
     weighted_conf *= tod_factor
 
@@ -1176,6 +1195,8 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     extra_info["_core_active"] = core_active
     extra_info["_votes"] = votes
     extra_info["_regime"] = regime
+    if horizon:
+        extra_info["_horizon"] = horizon
     extra_info["_weighted_action"] = weighted_action
     extra_info["_weighted_confidence"] = weighted_conf
     extra_info["_confluence_score"] = confluence
@@ -1190,5 +1211,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None):
     )
     if penalty_log:
         extra_info["_penalty_log"] = penalty_log
+
+    # 3h horizon: cap confidence to prevent overconfident short-term predictions
+    if horizon in ("3h", "4h"):
+        from portfolio.short_horizon import CONFIDENCE_CAP_3H
+        conf = min(conf, CONFIDENCE_CAP_3H)
 
     return action, conf, extra_info
