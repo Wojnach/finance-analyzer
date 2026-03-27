@@ -574,6 +574,22 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
         action = "HOLD"
         conf = 0.0
 
+    # --- Stage 5: Unanimity penalty ---
+    # When all signals agree, the move is often already priced in.
+    # 90%+ confidence has 28-32% actual accuracy across all horizons.
+    if action != "HOLD" and conf > 0.0:
+        buy_count = extra_info.get("_buy_count", 0)
+        sell_count = extra_info.get("_sell_count", 0)
+        total_voters = buy_count + sell_count
+        if total_voters > 0:
+            agreement_ratio = max(buy_count, sell_count) / total_voters
+            if agreement_ratio >= 0.9:  # 90%+ agreement
+                conf *= 0.6
+                penalty_log.append({"stage": "unanimity", "agreement": round(agreement_ratio, 3), "mult": 0.6})
+            elif agreement_ratio >= 0.8:  # 80-90% agreement
+                conf *= 0.75
+                penalty_log.append({"stage": "unanimity", "agreement": round(agreement_ratio, 3), "mult": 0.75})
+
     # Clamp confidence to [0, 1]
     conf = max(0.0, min(1.0, conf))
 
@@ -1207,6 +1223,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     )
     if penalty_log:
         extra_info["_penalty_log"] = penalty_log
+
+    # Global confidence cap — calibration data shows >80% confidence is
+    # anti-correlated with accuracy at every horizon (70-80% bucket is the
+    # best performing at 57-59% actual accuracy)
+    conf = min(conf, 0.80)
 
     # 3h horizon: cap confidence to prevent overconfident short-term predictions
     if horizon in ("3h", "4h"):
