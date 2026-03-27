@@ -7,9 +7,10 @@ Avanza expects (replaying cookies via requests library causes 401s).
 This is the preferred auth method until TOTP credentials are configured.
 """
 
+import json
 import logging
 import threading
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,9 @@ API_BASE = "https://www.avanza.se"
 
 # Minimum remaining session life before we consider it expired (minutes)
 EXPIRY_BUFFER_MINUTES = 30
+
+# Default trading account
+DEFAULT_ACCOUNT_ID = "1625505"
 
 # Module-level Playwright context (lazy-initialized, reused across calls)
 # BUG-129: Protected by _pw_lock to prevent concurrent access corruption
@@ -197,6 +201,201 @@ def api_get(path: str, **kwargs) -> Any:
     if not resp.ok:
         raise RuntimeError(f"Avanza API error {resp.status}: {resp.text()[:500]}")
     return resp.json()
+
+
+def _get_csrf() -> str:
+    """Extract CSRF token from Playwright context cookies."""
+    ctx = _get_playwright_context()
+    for c in ctx.cookies():
+        if c["name"] == "AZACSRF":
+            return c["value"]
+    raise AvanzaSessionError("No AZACSRF cookie found — session may be invalid")
+
+
+def api_post(path: str, payload: dict) -> Any:
+    """Make an authenticated POST request to Avanza API.
+
+    Automatically includes the X-SecurityToken (CSRF) header.
+
+    Args:
+        path: API path (e.g., "/_api/trading-critical/rest/order/new")
+        payload: Request body dict.
+
+    Returns:
+        Parsed JSON response.
+    """
+    ctx = _get_playwright_context()
+    csrf = _get_csrf()
+    url = f"{API_BASE}{path}" if path.startswith("/") else path
+    resp = ctx.request.post(
+        url,
+        data=json.dumps(payload),
+        headers={
+            "Content-Type": "application/json",
+            "X-SecurityToken": csrf,
+        },
+    )
+    if resp.status == 401:
+        close_playwright()
+        raise AvanzaSessionError(
+            "Session returned 401 Unauthorized. "
+            "Run: python scripts/avanza_login.py"
+        )
+    if resp.status == 403:
+        close_playwright()
+        raise AvanzaSessionError(
+            "Session returned 403 Forbidden — CSRF token may be stale. "
+            "Run: python scripts/avanza_login.py"
+        )
+    body = resp.text()
+    try:
+        return json.loads(body)
+    except (json.JSONDecodeError, TypeError):
+        if not resp.ok:
+            raise RuntimeError(f"Avanza API error {resp.status}: {body[:500]}")
+        return {"raw": body}
+
+
+# --- Trading convenience functions ---
+
+
+def get_buying_power(account_id: str | None = None) -> dict:
+    """Get buying power and account value for an account.
+
+    Returns:
+        Dict with buying_power, total_value, own_capital (all in SEK).
+        Returns empty dict on failure.
+    """
+    aid = str(account_id or DEFAULT_ACCOUNT_ID)
+    data = api_get("/_api/account-overview/overview/categorizedAccounts")
+    for cat in data.get("categories", []):
+        for acc in cat.get("accounts", []):
+            if str(acc.get("id", "")) == aid:
+                _v = lambda obj: obj.get("value", 0) if isinstance(obj, dict) else (obj or 0)
+                return {
+                    "buying_power": _v(acc.get("buyingPower", {})),
+                    "total_value": _v(acc.get("totalValue", {})),
+                    "own_capital": _v(acc.get("ownCapital", {})),
+                }
+    # Account not found by id — try matching with categorizedAccounts
+    # (structure may nest accounts differently across Avanza updates)
+    total = data.get("categories", [{}])[0].get("totalValue", {})
+    total_val = total.get("value", 0) if isinstance(total, dict) else 0
+    positions = get_positions()
+    pos_val = sum(p.get("value", 0) for p in positions if str(p.get("account_id")) == aid)
+    return {
+        "buying_power": round(total_val - pos_val, 2),
+        "total_value": total_val,
+        "own_capital": total_val,
+    }
+
+
+def place_buy_order(
+    orderbook_id: str,
+    price: float,
+    volume: int,
+    account_id: str | None = None,
+    valid_until: str | None = None,
+) -> dict:
+    """Place a limit BUY order on Avanza.
+
+    Args:
+        orderbook_id: Avanza orderbook ID.
+        price: Limit price in SEK.
+        volume: Number of units (int >= 1).
+        account_id: Defaults to DEFAULT_ACCOUNT_ID.
+        valid_until: ISO date string. Defaults to today (day order).
+
+    Returns:
+        Dict with orderRequestStatus, orderId, message.
+    """
+    return _place_order("BUY", orderbook_id, price, volume, account_id, valid_until)
+
+
+def place_sell_order(
+    orderbook_id: str,
+    price: float,
+    volume: int,
+    account_id: str | None = None,
+    valid_until: str | None = None,
+) -> dict:
+    """Place a limit SELL order on Avanza."""
+    return _place_order("SELL", orderbook_id, price, volume, account_id, valid_until)
+
+
+def _place_order(
+    side: str,
+    orderbook_id: str,
+    price: float,
+    volume: int,
+    account_id: str | None = None,
+    valid_until: str | None = None,
+) -> dict:
+    """Internal: place a BUY or SELL limit order."""
+    if volume < 1:
+        raise ValueError(f"volume must be >= 1, got {volume}")
+    if price <= 0:
+        raise ValueError(f"price must be > 0, got {price}")
+
+    payload = {
+        "accountId": str(account_id or DEFAULT_ACCOUNT_ID),
+        "orderbookId": str(orderbook_id),
+        "side": side,
+        "condition": "NORMAL",
+        "price": price,
+        "validUntil": valid_until or date.today().isoformat(),
+        "volume": volume,
+    }
+    result = api_post("/_api/trading-critical/rest/order/new", payload)
+    status = result.get("orderRequestStatus", "UNKNOWN")
+    if status != "SUCCESS":
+        logger.warning("Order %s failed: %s — %s", side, status, result.get("message", ""))
+    else:
+        logger.info(
+            "Order %s placed: %dx @ %.3f SEK (id=%s)",
+            side, volume, price, result.get("orderId", "?"),
+        )
+    return result
+
+
+def cancel_order(order_id: str, account_id: str | None = None) -> dict:
+    """Cancel an open order.
+
+    IMPORTANT: Uses POST (not DELETE verb) — Avanza API change 2026-03-24.
+    """
+    payload = {
+        "accountId": str(account_id or DEFAULT_ACCOUNT_ID),
+        "orderId": str(order_id),
+    }
+    return api_post("/_api/trading-critical/rest/order/delete", payload)
+
+
+def get_open_orders(account_id: str | None = None) -> list[dict]:
+    """Get all open (unfilled) orders for an account."""
+    aid = str(account_id or DEFAULT_ACCOUNT_ID)
+    try:
+        data = api_get(f"/_api/trading/rest/order/account/{aid}")
+        if isinstance(data, list):
+            return data
+        return data.get("orders", data.get("openOrders", []))
+    except RuntimeError:
+        # Endpoint may vary — fallback to deal endpoint
+        try:
+            data = api_get("/_api/trading/rest/deals-and-orders")
+            orders = data.get("orders", [])
+            return [o for o in orders if str(o.get("accountId", "")) == aid]
+        except RuntimeError:
+            logger.debug("Could not fetch open orders")
+            return []
+
+
+def get_quote(orderbook_id: str) -> dict:
+    """Get bid/ask/last quote for an instrument. Fast single-endpoint call.
+
+    Returns:
+        Dict with buy, sell, last, changePercent, highest, lowest.
+    """
+    return api_get(f"/_api/market-guide/stock/{orderbook_id}/quote")
 
 
 def get_positions() -> list[dict]:

@@ -8,5 +8,19 @@
       "WebSearch(*)",
       "NotebookEdit(*)"
     ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -Command \"$now = Get-Date -Format 'dddd yyyy-MM-dd HH:mm:ss'; Write-Output ('{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"UserPromptSubmit\\\",\\\"additionalContext\\\":\\\"Current time: ' + $now + ' CET\\\"}}')\"",
+            "timeout": 5,
+            "statusMessage": "Checking time..."
+          }
+        ]
+      }
+    ]
   }
 }
