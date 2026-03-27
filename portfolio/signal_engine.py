@@ -335,8 +335,12 @@ def _confluence_score(votes, indicators):
     return min(round(score, 4), 1.0)
 
 
-def _time_of_day_factor():
+def _time_of_day_factor(horizon=None):
     hour = datetime.now(UTC).hour
+    if horizon in ("3h", "4h"):
+        from portfolio.short_horizon import time_of_day_scale_3h
+        return time_of_day_scale_3h(hour)
+    # Default 1d behavior
     if 2 <= hour <= 6:
         return 0.8
     return 1.0
@@ -1111,7 +1115,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     confluence = _confluence_score(votes, extra_info)
 
     # Time-of-day confidence adjustment
-    tod_factor = _time_of_day_factor()
+    tod_factor = _time_of_day_factor(horizon=horizon)
     conf *= tod_factor
     weighted_conf *= tod_factor
 
