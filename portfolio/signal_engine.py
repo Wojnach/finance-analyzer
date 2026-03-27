@@ -1047,6 +1047,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     activation_rates = {}
     try:
         from portfolio.accuracy_stats import (
+            blend_accuracy_data,
             load_cached_accuracy,
             load_cached_activation_rates,
             signal_accuracy,
@@ -1071,38 +1072,13 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             if recent:
                 write_accuracy_cache(f"{acc_horizon}_recent", recent)
 
-        # Adaptive blend: normally 70% recent + 30% all-time, but when
-        # accuracy diverges sharply (>15%), fast-track to 90% recent + 10%
-        # all-time for faster regime adaptation.
-        if alltime and recent:
-            accuracy_data = {}
-            for sig_name in alltime:
-                at = alltime.get(sig_name, {})
-                rc = recent.get(sig_name, {})
-                at_acc = at.get("accuracy", 0.5)
-                rc_acc = rc.get("accuracy", 0.5)
-                rc_samples = rc.get("total", 0)
-                at_samples = at.get("total", 0)
-                # Only blend if recent has enough data; otherwise use all-time
-                if rc_samples >= 50:
-                    divergence = abs(rc_acc - at_acc)
-                    if divergence > _RECENCY_DIVERGENCE_THRESHOLD:
-                        w = _RECENCY_WEIGHT_FAST
-                    else:
-                        w = _RECENCY_WEIGHT_NORMAL
-                    blended = w * rc_acc + (1 - w) * at_acc
-                else:
-                    blended = at_acc
-                accuracy_data[sig_name] = {
-                    "accuracy": blended,
-                    "total": max(at_samples, rc_samples),
-                    "correct": at.get("correct", 0),
-                    "pct": round(blended * 100, 1),
-                }
-        elif alltime:
-            accuracy_data = alltime
-        elif recent:
-            accuracy_data = recent
+        # ARCH-23: Use shared blend function (replaces inline logic).
+        accuracy_data = blend_accuracy_data(
+            alltime, recent,
+            divergence_threshold=_RECENCY_DIVERGENCE_THRESHOLD,
+            normal_weight=_RECENCY_WEIGHT_NORMAL,
+            fast_weight=_RECENCY_WEIGHT_FAST,
+        )
 
         activation_rates = load_cached_activation_rates()
     except Exception:

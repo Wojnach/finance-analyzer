@@ -30,8 +30,13 @@ def _old_consensus(votes):
 
 
 def _build_accuracy_data(horizon="1d"):
-    """Build blended accuracy_data dict matching signal_engine's EWMA blend."""
+    """Build blended accuracy_data dict matching signal_engine's EWMA blend.
+
+    ARCH-23: Uses shared blend_accuracy_data() from accuracy_stats to avoid
+    duplicating the blending logic.
+    """
     from portfolio.accuracy_stats import (
+        blend_accuracy_data,
         load_cached_accuracy,
         signal_accuracy,
         signal_accuracy_recent,
@@ -52,37 +57,7 @@ def _build_accuracy_data(horizon="1d"):
         if recent:
             write_accuracy_cache(f"{acc_horizon}_recent", recent)
 
-    _RECENCY_DIVERGENCE_THRESHOLD = 0.15
-    _RECENCY_WEIGHT_NORMAL = 0.7
-    _RECENCY_WEIGHT_FAST = 0.9
-
-    accuracy_data = {}
-    if alltime and recent:
-        for sig_name in alltime:
-            at = alltime.get(sig_name, {})
-            rc = recent.get(sig_name, {})
-            at_acc = at.get("accuracy", 0.5)
-            rc_acc = rc.get("accuracy", 0.5)
-            rc_samples = rc.get("total", 0)
-            at_samples = at.get("total", 0)
-            if rc_samples >= 50:
-                divergence = abs(rc_acc - at_acc)
-                w = _RECENCY_WEIGHT_FAST if divergence > _RECENCY_DIVERGENCE_THRESHOLD else _RECENCY_WEIGHT_NORMAL
-                blended = w * rc_acc + (1 - w) * at_acc
-            else:
-                blended = at_acc
-            accuracy_data[sig_name] = {
-                "accuracy": blended,
-                "total": max(at_samples, rc_samples),
-                "correct": at.get("correct", 0),
-                "pct": round(blended * 100, 1),
-            }
-    elif alltime:
-        accuracy_data = alltime
-    elif recent:
-        accuracy_data = recent
-
-    return accuracy_data
+    return blend_accuracy_data(alltime, recent)
 
 
 def run_backtest(horizon="1d", days=None):

@@ -69,18 +69,20 @@ def _vote_correct(vote, change_pct, min_change_pct=None):
     return bool(vote == "SELL" and change_pct < 0)
 
 
-def signal_accuracy(horizon="1d", since=None):
+def signal_accuracy(horizon="1d", since=None, entries=None):
     """Compute per-signal accuracy, optionally filtered to entries after `since`.
 
     Args:
         horizon: Outcome horizon to evaluate ("1d", "3d", "5d", "10d").
         since: Optional ISO-8601 string cutoff. Only entries with ts >= since
                are included. None means all entries (no time filter).
+        entries: Pre-loaded entries list. If None, loads from disk.
 
     Returns:
         dict: {signal_name: {correct, total, accuracy, pct}} for each signal.
     """
-    entries = load_entries()
+    if entries is None:
+        entries = load_entries()
     stats = {s: {"correct": 0, "total": 0} for s in SIGNAL_NAMES}
 
     for entry in entries:
@@ -132,7 +134,7 @@ def signal_accuracy_recent(horizon="1d", days=7):
     return signal_accuracy(horizon, since=cutoff)
 
 
-def signal_accuracy_ewma(horizon="1d", halflife_days=5):
+def signal_accuracy_ewma(horizon="1d", halflife_days=5, entries=None):
     """Compute per-signal accuracy with exponential decay weighting.
 
     Recent observations are weighted higher than older ones. The weight for
@@ -144,6 +146,7 @@ def signal_accuracy_ewma(horizon="1d", halflife_days=5):
         horizon: Outcome horizon to evaluate ("1d", "3d", "5d", "10d").
         halflife_days: Half-life of the decay in days (default 5). Smaller
             values weight recent data more aggressively.
+        entries: Pre-loaded entries list. If None, loads from disk.
 
     Returns:
         dict: {signal_name: {accuracy, total_weight, effective_samples, total, correct, pct}}
@@ -153,7 +156,8 @@ def signal_accuracy_ewma(horizon="1d", halflife_days=5):
     import math
     from datetime import datetime
 
-    entries = load_entries()
+    if entries is None:
+        entries = load_entries()
     now = datetime.now(UTC)
     decay_rate = math.log(2) / halflife_days  # λ = ln(2) / t½
 
@@ -225,8 +229,9 @@ def signal_accuracy_ewma(horizon="1d", halflife_days=5):
     return result
 
 
-def consensus_accuracy(horizon="1d"):
-    entries = load_entries()
+def consensus_accuracy(horizon="1d", entries=None):
+    if entries is None:
+        entries = load_entries()
     correct = 0
     total = 0
 
@@ -260,8 +265,9 @@ def consensus_accuracy(horizon="1d"):
     }
 
 
-def per_ticker_accuracy(horizon="1d"):
-    entries = load_entries()
+def per_ticker_accuracy(horizon="1d", entries=None):
+    if entries is None:
+        entries = load_entries()
     stats = defaultdict(lambda: {"correct": 0, "total": 0})
 
     for entry in entries:
@@ -356,7 +362,7 @@ def accuracy_by_signal_ticker(signal_name, horizon="1d", days=None):
     return result
 
 
-def signal_utility(horizon="1d"):
+def signal_utility(horizon="1d", entries=None):
     """Compute per-signal return magnitude utility.
 
     For each non-HOLD signal vote with a non-neutral outcome, compute the
@@ -366,6 +372,10 @@ def signal_utility(horizon="1d"):
 
     Neutral outcomes (|change_pct| < _MIN_CHANGE_PCT) are skipped.
 
+    Args:
+        horizon: Outcome horizon to evaluate.
+        entries: Pre-loaded entries list. If None, loads from disk.
+
     Returns:
         dict: {signal_name: {avg_return, total_return, samples, utility_score}}
         where utility_score = avg_return * sqrt(samples).
@@ -373,7 +383,8 @@ def signal_utility(horizon="1d"):
     """
     import math
 
-    entries = load_entries()
+    if entries is None:
+        entries = load_entries()
     # {sig_name: {"total_return": float, "samples": int}}
     stats = {s: {"total_return": 0.0, "samples": 0} for s in SIGNAL_NAMES}
 
@@ -435,8 +446,11 @@ def best_worst_signals(horizon="1d", acc=None):
     }
 
 
-def signal_activation_rates():
+def signal_activation_rates(entries=None):
     """Compute per-signal activation rates (how often each signal votes non-HOLD).
+
+    Args:
+        entries: Pre-loaded entries list. If None, loads from disk.
 
     Returns dict: {signal_name: {activation_rate, buy_rate, sell_rate, bias, samples}}
     - activation_rate: fraction of votes that are BUY or SELL (0.0 to 1.0)
@@ -447,7 +461,8 @@ def signal_activation_rates():
     """
     import math
 
-    entries = load_entries()
+    if entries is None:
+        entries = load_entries()
     stats = {s: {"buy": 0, "sell": 0, "total": 0} for s in SIGNAL_NAMES}
 
     for entry in entries:
@@ -505,6 +520,55 @@ def signal_activation_rates():
         }
 
     return result
+
+
+def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
+                        normal_weight=0.7, fast_weight=0.9,
+                        min_recent_samples=50):
+    """Blend all-time and recent accuracy using adaptive recency weighting.
+
+    When recent accuracy diverges sharply from all-time (> divergence_threshold),
+    fast-track to higher recent weight for faster regime adaptation.
+
+    Args:
+        alltime: Dict of {signal_name: {accuracy, total, correct, pct}}.
+        recent: Dict of {signal_name: {accuracy, total, correct, pct}}.
+        divergence_threshold: Absolute accuracy difference that triggers fast blend.
+        normal_weight: Recent weight when divergence is below threshold.
+        fast_weight: Recent weight when divergence exceeds threshold.
+        min_recent_samples: Minimum recent samples before blending (else use alltime).
+
+    Returns:
+        dict: Blended {signal_name: {accuracy, total, correct, pct}}.
+    """
+    if not alltime and not recent:
+        return {}
+    if not alltime:
+        return recent or {}
+    if not recent:
+        return alltime
+
+    accuracy_data = {}
+    for sig_name in alltime:
+        at = alltime.get(sig_name, {})
+        rc = recent.get(sig_name, {})
+        at_acc = at.get("accuracy", 0.5)
+        rc_acc = rc.get("accuracy", 0.5)
+        rc_samples = rc.get("total", 0)
+        at_samples = at.get("total", 0)
+        if rc_samples >= min_recent_samples:
+            divergence = abs(rc_acc - at_acc)
+            w = fast_weight if divergence > divergence_threshold else normal_weight
+            blended = w * rc_acc + (1 - w) * at_acc
+        else:
+            blended = at_acc
+        accuracy_data[sig_name] = {
+            "accuracy": blended,
+            "total": max(at_samples, rc_samples),
+            "correct": at.get("correct", 0),
+            "pct": round(blended * 100, 1),
+        }
+    return accuracy_data
 
 
 ACTIVATION_CACHE_TTL = 3600  # recompute hourly
@@ -588,7 +652,8 @@ def print_accuracy_report():
         print(f"--- {h} Horizon ({horizon_counts[h]} entries with outcomes) ---")
         print()
 
-        sig_acc = signal_accuracy(h)
+        # ARCH-24: Pass pre-loaded entries to avoid re-reading 68MB file per call.
+        sig_acc = signal_accuracy(h, entries=entries)
         sorted_sigs = sorted(
             SIGNAL_NAMES, key=lambda s: sig_acc[s]["accuracy"], reverse=True
         )
@@ -605,14 +670,14 @@ def print_accuracy_report():
                 f"{sig_name:<16}{s['correct']:>7}  {s['total']:>5}  {s['accuracy']*100:>7.1f}%{disabled_tag}"
             )
 
-        cons = consensus_accuracy(h)
+        cons = consensus_accuracy(h, entries=entries)
         print()
         if cons["total"] > 0:
             print(
                 f"{'Consensus':<16}{cons['correct']:>7}  {cons['total']:>5}  {cons['accuracy']*100:>7.1f}%"
             )
 
-        ticker_acc = per_ticker_accuracy(h)
+        ticker_acc = per_ticker_accuracy(h, entries=entries)
         if ticker_acc:
             print()
             print("Per-Ticker:")
@@ -629,19 +694,21 @@ def print_accuracy_report():
 REGIME_ACCURACY_CACHE_FILE = DATA_DIR / "regime_accuracy_cache.json"
 
 
-def signal_accuracy_by_regime(horizon="1d", since=None):
+def signal_accuracy_by_regime(horizon="1d", since=None, entries=None):
     """Compute per-signal accuracy grouped by market regime.
 
     Args:
         horizon: Outcome horizon to evaluate ("1d", "3d", "5d", "10d").
         since: Optional ISO-8601 string cutoff. Only entries with ts >= since
                are included. None means all entries (no time filter).
+        entries: Pre-loaded entries list. If None, loads from disk.
 
     Returns:
         dict: {regime: {signal_name: {correct, total, accuracy, pct}}}
               Only includes signals with total > 0.
     """
-    entries = load_entries()
+    if entries is None:
+        entries = load_entries()
 
     # {regime: {signal_name: {correct, total}}}
     regime_stats = defaultdict(lambda: {s: {"correct": 0, "total": 0} for s in SIGNAL_NAMES})
@@ -884,7 +951,7 @@ def format_accuracy_alerts(alerts):
     return lines
 
 
-def signal_best_horizon_accuracy(min_samples=50):
+def signal_best_horizon_accuracy(min_samples=50, entries=None):
     """Compute each signal's best accuracy across all horizons.
 
     For each signal, evaluates accuracy at every horizon in HORIZONS and returns
@@ -914,7 +981,8 @@ def signal_best_horizon_accuracy(min_samples=50):
         except (KeyError, TypeError):
             pass
 
-    entries = load_entries()
+    if entries is None:
+        entries = load_entries()
     # {sig_name: {horizon: {correct, total}}}
     stats: dict[str, dict[str, dict[str, int]]] = {
         s: {h: {"correct": 0, "total": 0} for h in HORIZONS}
