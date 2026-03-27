@@ -968,6 +968,13 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         for sig_name in _enhanced_entries:
             votes[sig_name] = "HOLD"
 
+    # 3h horizon: gate slow signals that are noise at short timeframes
+    if horizon in ("3h", "4h"):
+        from portfolio.short_horizon import is_slow_signal_3h
+        for sig_name in list(votes.keys()):
+            if is_slow_signal_3h(sig_name) and votes[sig_name] != "HOLD":
+                votes[sig_name] = "HOLD"
+
     # Derive buy/sell counts from named votes
     buy = sum(1 for v in votes.values() if v == "BUY")
     sell = sum(1 for v in votes.values() if v == "SELL")
@@ -1120,6 +1127,8 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     extra_info["_core_active"] = core_active
     extra_info["_votes"] = votes
     extra_info["_regime"] = regime
+    if horizon:
+        extra_info["_horizon"] = horizon
     extra_info["_weighted_action"] = weighted_action
     extra_info["_weighted_confidence"] = weighted_conf
     extra_info["_confluence_score"] = confluence
@@ -1134,5 +1143,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     )
     if penalty_log:
         extra_info["_penalty_log"] = penalty_log
+
+    # 3h horizon: cap confidence to prevent overconfident short-term predictions
+    if horizon in ("3h", "4h"):
+        from portfolio.short_horizon import CONFIDENCE_CAP_3H
+        conf = min(conf, CONFIDENCE_CAP_3H)
 
     return action, conf, extra_info
