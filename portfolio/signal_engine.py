@@ -1027,7 +1027,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 logger.warning("Macro context fetch failed", exc_info=True)
 
         # Build context data once for signals that need it
-        context_data = {"ticker": ticker, "config": config or {}, "macro": macro_data}
+        # BUG-144: Include regime so enhanced signals (forecast.py) can apply
+        # regime-specific confidence discounts.
+        context_data = {"ticker": ticker, "config": config or {}, "macro": macro_data, "regime": regime}
 
         _signal_failures = []
         for sig_name, entry in _enhanced_entries.items():
@@ -1091,7 +1093,16 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             if is_slow_signal_3h(sig_name) and votes[sig_name] != "HOLD":
                 votes[sig_name] = "HOLD"
 
-    # Derive buy/sell counts from named votes
+    # BUG-143: Apply regime gating BEFORE computing buy/sell counts so that
+    # all downstream code (core gate, min_voters, unanimity penalty) sees
+    # post-gated counts.  _weighted_consensus also applies this internally
+    # (idempotent — gating HOLD→HOLD is a no-op).
+    regime_gated = REGIME_GATED_SIGNALS.get(regime, frozenset())
+    for sig_name in regime_gated:
+        if sig_name in votes and votes[sig_name] != "HOLD":
+            votes[sig_name] = "HOLD"
+
+    # Derive buy/sell counts from named votes (post-gating)
     buy = sum(1 for v in votes.values() if v == "BUY")
     sell = sum(1 for v in votes.values() if v == "SELL")
 

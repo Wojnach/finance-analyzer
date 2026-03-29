@@ -54,8 +54,12 @@ def _make_df_volume_pattern(n=50, close_start=100.0, vol_pattern="flat", trend="
     return df
 
 
-def _base_extra(voters=6, buy_count=5, sell_count=1, **kwargs):
-    """Build a standard extra_info dict with voter counts."""
+def _base_extra(voters=6, buy_count=4, sell_count=2, **kwargs):
+    """Build a standard extra_info dict with voter counts.
+
+    Default buy/sell split (4/2 = 67%) avoids triggering unanimity penalty
+    (Stage 5, ≥80% agreement) so tests for other stages are isolated.
+    """
     d = {"_voters": voters, "_buy_count": buy_count, "_sell_count": sell_count}
     d.update(kwargs)
     return d
@@ -198,7 +202,7 @@ class TestDisabledMode:
 
     def test_enabled_by_default_when_key_missing(self):
         """Empty config -> penalties enabled (no 'enabled': False)."""
-        extra = _base_extra(voters=5, buy_count=4, sell_count=1)
+        extra = _base_extra(voters=5, buy_count=3, sell_count=2)
         action, conf, _ = apply_confidence_penalties(
             "BUY", 0.8, "ranging", {}, extra, "BTC-USD", None, {}
         )
@@ -207,14 +211,14 @@ class TestDisabledMode:
 
     def test_enabled_explicitly(self):
         config = {"confidence_penalties": {"enabled": True}}
-        extra = _base_extra(voters=5, buy_count=4, sell_count=1)
+        extra = _base_extra(voters=5, buy_count=3, sell_count=2)
         action, conf, _ = apply_confidence_penalties(
             "BUY", 0.8, "ranging", {}, extra, "BTC-USD", None, config
         )
         assert conf < 0.8
 
     def test_none_config_treated_as_enabled(self):
-        extra = _base_extra(voters=5, buy_count=4, sell_count=1)
+        extra = _base_extra(voters=5, buy_count=3, sell_count=2)
         action, conf, _ = apply_confidence_penalties(
             "BUY", 0.8, "ranging", {}, extra, "BTC-USD", None, None
         )
@@ -224,10 +228,14 @@ class TestDisabledMode:
 # --- 2. Regime penalties (Stage 1) ---
 
 class TestRegimePenalties:
-    """Stage 1: Regime-based confidence multipliers."""
+    """Stage 1: Regime-based confidence multipliers.
+
+    Vote counts use 60-70% agreement to avoid triggering the unanimity
+    penalty (Stage 5, ≥80% agreement) so these tests isolate Stage 1.
+    """
 
     def test_ranging_applies_075x(self):
-        extra = _base_extra(voters=6)
+        extra = _base_extra(voters=6, buy_count=4, sell_count=2)
         action, conf, log = apply_confidence_penalties(
             "BUY", 0.8, "ranging", {}, extra, "BTC-USD", None, {}
         )
@@ -238,7 +246,7 @@ class TestRegimePenalties:
         assert conf == pytest.approx(0.8 * 0.75, abs=0.01)
 
     def test_high_vol_applies_080x(self):
-        extra = _base_extra(voters=5, buy_count=4, sell_count=1)
+        extra = _base_extra(voters=5, buy_count=3, sell_count=2)
         action, conf, log = apply_confidence_penalties(
             "BUY", 0.8, "high-vol", {}, extra, "BTC-USD", None, {}
         )
@@ -247,7 +255,7 @@ class TestRegimePenalties:
         assert regime_entries[0]["mult"] == 0.80
 
     def test_trending_up_buy_gets_110x(self):
-        extra = _base_extra(voters=5)
+        extra = _base_extra(voters=5, buy_count=3, sell_count=2)
         action, conf, log = apply_confidence_penalties(
             "BUY", 0.7, "trending-up", {}, extra, "BTC-USD", None, {}
         )
@@ -258,7 +266,7 @@ class TestRegimePenalties:
         assert regime_entries[0]["mult"] == 1.10
 
     def test_trending_down_sell_gets_110x(self):
-        extra = _base_extra(voters=5, buy_count=1, sell_count=4)
+        extra = _base_extra(voters=5, buy_count=2, sell_count=3)
         action, conf, log = apply_confidence_penalties(
             "SELL", 0.7, "trending-down", {}, extra, "BTC-USD", None, {}
         )
@@ -267,7 +275,7 @@ class TestRegimePenalties:
         assert regime_entries[0]["aligned"] is True
 
     def test_trending_up_sell_no_bonus(self):
-        extra = _base_extra(voters=5, buy_count=1, sell_count=4)
+        extra = _base_extra(voters=5, buy_count=2, sell_count=3)
         action, conf, log = apply_confidence_penalties(
             "SELL", 0.7, "trending-up", {}, extra, "BTC-USD", None, {}
         )
@@ -276,7 +284,7 @@ class TestRegimePenalties:
         assert conf == pytest.approx(0.7, abs=0.01)
 
     def test_trending_down_buy_no_bonus(self):
-        extra = _base_extra(voters=5)
+        extra = _base_extra(voters=5, buy_count=3, sell_count=2)
         action, conf, log = apply_confidence_penalties(
             "BUY", 0.7, "trending-down", {}, extra, "BTC-USD", None, {}
         )
@@ -354,7 +362,7 @@ class TestVolumeGate:
             assert not any(p["stage"] == "volume_adx_gate" for p in log)
 
     def test_volume_above_15_boosts_115x(self):
-        extra = _base_extra(voters=5, volume_ratio=2.0)
+        extra = _base_extra(voters=5, buy_count=3, sell_count=2, volume_ratio=2.0)
         action, conf, log = apply_confidence_penalties(
             "BUY", 0.7, "trending-up", {}, extra, "BTC-USD", None, {}
         )
@@ -478,7 +486,7 @@ class TestTrapDetection:
     def test_trap_halves_confidence(self):
         """Bull trap should multiply conf by 0.5."""
         df = _make_df_volume_pattern(50, vol_pattern="declining", trend="up")
-        extra = _base_extra(voters=5)
+        extra = _base_extra(voters=5, buy_count=3, sell_count=2)
         # trending-up + BUY gives 1.10 bonus, so conf = 0.8 * 1.10 = 0.88
         # then trap: 0.88 * 0.5 = 0.44
         action, conf, log = apply_confidence_penalties(
@@ -583,7 +591,7 @@ class TestConfidenceClamping:
 
     def test_clamped_to_1_after_boosts(self):
         """Multiple boosts (regime + volume) should not exceed 1.0."""
-        extra = _base_extra(voters=10, buy_count=8, sell_count=2, volume_ratio=2.0)
+        extra = _base_extra(voters=10, buy_count=6, sell_count=4, volume_ratio=2.0)
         action, conf, log = apply_confidence_penalties(
             "BUY", 0.95, "trending-up", {}, extra, "BTC-USD", None, {}
         )
@@ -606,7 +614,7 @@ class TestConfidenceClamping:
         assert conf == 0.0
 
     def test_very_high_conf_clamped(self):
-        extra = _base_extra(voters=10, buy_count=9, sell_count=1, volume_ratio=5.0)
+        extra = _base_extra(voters=10, buy_count=6, sell_count=4, volume_ratio=5.0)
         action, conf, log = apply_confidence_penalties(
             "BUY", 1.0, "trending-up", {}, extra, "BTC-USD", None, {}
         )
