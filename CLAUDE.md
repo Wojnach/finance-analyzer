@@ -85,7 +85,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 
 ### Signal Mechanics
 - **MIN_VOTERS = 3** (all asset classes). Consensus = active voters (BUY+SELL), not total.
-- **Sub-50% accuracy auto-inverted**: 30% accurate BUY → 70% accurate SELL
+- **Accuracy gate**: signals below 45% accuracy (30+ samples) are force-HOLD (not inverted — inversion causes whiplash)
 - **Recency-weighted**: 70% recent (7d) + 30% all-time
 - **Regime penalties**: ranging 0.75x, high-vol 0.80x confidence multipliers
 - **Volume/ADX gates**: RVOL <0.5 forces HOLD
