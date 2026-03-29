@@ -77,41 +77,40 @@ Branch: improve/auto-session-2026-03-29
 
 ---
 
-## 3. Improvements to Implement
+## 3. Improvements Implemented
 
-### Batch 1: Signal accuracy fixes (2 files, P1)
-**Priority**: High — fixes incorrect signal weighting affecting trade decisions.
+### Batch 1: Signal accuracy fixes (2 files, P1) ✓ DONE
+**Commit**: `87c3377` — `fix: apply regime gating before vote counts + pass regime to forecast context`
 
-| # | Change | File | Bug |
-|---|--------|------|-----|
-| 1 | Apply regime gating to votes dict before computing buy/sell counts | `portfolio/signal_engine.py` | BUG-143 |
-| 2 | Pass regime through context_data to enhanced signals | `portfolio/signal_engine.py` | BUG-144, ARCH-25 |
+| # | Change | File | Bug | Status |
+|---|--------|------|-----|--------|
+| 1 | Apply regime gating to votes dict before computing buy/sell counts | `portfolio/signal_engine.py` | BUG-143 | ✓ |
+| 2 | Pass regime through context_data to enhanced signals | `portfolio/signal_engine.py` | BUG-144, ARCH-25 | ✓ |
 
-**Impact**: Changes signal consensus behavior in regimes with gated signals. Unanimity penalty becomes less aggressive. Forecast signal gets correct regime discount. Both changes affect trading decisions — test thoroughly.
+Also fixed 8 pre-existing test failures in `test_confidence_penalties.py` (unanimity penalty interacted with test fixtures using 83% agreement).
 
-### Batch 2: Code quality + resource safety (1 file)
-**Priority**: Medium — fixes resource leak and style issues.
+### Batch 2: Code quality + resource safety (1 file) ✓ DONE
+**Commit**: `3e76954` — `fix: meta_learner SQLite leak, datetime modernize, canonical SIGNAL_NAMES, model cache`
 
-| # | Change | File | Bug |
-|---|--------|------|-----|
-| 1 | Add try/finally to meta_learner._load_data() | `portfolio/meta_learner.py` | BUG-145 |
-| 2 | Modernize datetime import | `portfolio/meta_learner.py` | BUG-146 |
-| 3 | Import SIGNAL_NAMES from tickers | `portfolio/meta_learner.py` | BUG-147 |
-| 4 | Add model cache to predict() | `portfolio/meta_learner.py` | BUG-148/ARCH-27 |
+| # | Change | File | Bug | Status |
+|---|--------|------|-----|--------|
+| 1 | Add try/finally to meta_learner._load_data() | `portfolio/meta_learner.py` | BUG-145 | ✓ |
+| 2 | Modernize datetime import | `portfolio/meta_learner.py` | BUG-146 | ✓ |
+| 3 | Import SIGNAL_NAMES from tickers | `portfolio/meta_learner.py` | BUG-147 | ✓ |
+| 4 | Add model cache to predict() | `portfolio/meta_learner.py` | BUG-148/ARCH-27 | ✓ |
 
-**Impact**: Low risk — meta_learner is never imported by production code. All changes are backwards-compatible.
+### Batch 3: Tests for new changes ✓ DONE
+**Commit**: `8734b93` — `test: add coverage for regime gating, context regime, and meta_learner fixes`
 
-### Batch 3: Tests for new changes
-**Priority**: Medium — verifies all fixes.
+| # | Change | File | Coverage | Status |
+|---|--------|------|----------|--------|
+| 1 | Test regime gating before vote counts (3 tests) | `tests/test_signal_engine_core.py` | BUG-143 | ✓ |
+| 2 | Test regime in context_data (2 tests) | `tests/test_signal_engine_core.py` | BUG-144 | ✓ |
+| 3 | Test meta_learner model cache (5 tests) | `tests/test_meta_learner.py` | BUG-148 | ✓ |
+| 4 | Test meta_learner SQLite cleanup (2 tests) | `tests/test_meta_learner.py` | BUG-145 | ✓ |
+| 5 | Test SIGNAL_NAMES import (2 tests) | `tests/test_meta_learner.py` | BUG-147 | ✓ |
 
-| # | Change | File | Coverage |
-|---|--------|------|----------|
-| 1 | Test unanimity penalty with regime-gated signals | `tests/test_signal_engine_core.py` | BUG-143 |
-| 2 | Test regime passed through context_data | `tests/test_signal_engine_core.py` | BUG-144 |
-| 3 | Test meta_learner model cache | `tests/test_meta_learner.py` | BUG-148 |
-| 4 | Test meta_learner SQLite cleanup | `tests/test_meta_learner.py` | BUG-145 |
-
-**Impact**: Test-only additions. No production code changes.
+**Total new tests**: 14 (all passing).
 
 ---
 

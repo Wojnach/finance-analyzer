@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-03-29 (autonomous improvement session)
+- **BUG-143: Unanimity penalty uses pre-gated vote counts (P1)**: `buy`/`sell` counts in `signal_engine.py` were computed from raw votes BEFORE regime gating. The unanimity penalty (Stage 5) used stale counts — e.g., in ranging regime with 2 gated signals, penalty was ~33% too aggressive. Fix: apply `REGIME_GATED_SIGNALS` gating before counting (idempotent with `_weighted_consensus`).
+- **BUG-144: Forecast regime discount is dead code (P1)**: `forecast.py` reads `context.get("regime")` to apply 0.5x confidence discount in trending markets (Chronos mean-reversion bias). But `generate_signal()` never included `regime` in `context_data`. The discount was never applied. Fix: add `"regime": regime` to context_data dict.
+- **BUG-145: meta_learner SQLite connection leak (P2)**: `_load_data()` opened `sqlite3.connect()` but if `pd.read_sql_query()` threw, `conn.close()` was never called. Wrapped in try/finally.
+- **BUG-146: meta_learner datetime import style (P3)**: Modernized from `datetime, timezone` to `datetime, UTC` (Python 3.11+, matches codebase REF-16).
+- **BUG-147: meta_learner duplicated SIGNAL_NAMES (P2)**: Maintained its own 30-element copy instead of importing from `portfolio.tickers`. Any signal addition that updated `tickers.py` without updating `meta_learner.py` would silently train the model on wrong features. Fix: `from portfolio.tickers import SIGNAL_NAMES`.
+- **BUG-148: meta_learner predict() disk I/O on every call (P2)**: `joblib.load()` deserialized 600KB model file on every prediction. Added module-level `_model_cache` dict with mtime-based staleness detection. Required prerequisite for future meta-learner integration (FEAT-3).
+- **Test fixes**: Fixed 8 pre-existing failures in `test_confidence_penalties.py` caused by unanimity penalty (Stage 5) interacting with test fixtures using 83% buy/sell agreement. Updated `_base_extra` default to 67% agreement.
+- **New tests**: 14 new tests — regime gating before vote counts (3), regime in context_data (2), meta_learner SQLite cleanup (2), SIGNAL_NAMES import (2), model cache (5). All pass.
+- Theme: Signal Accuracy, Dead Code Activation, Resource Safety, Feature Coupling.
+
 ## 2026-03-27 (autonomous improvement session)
 - **BUG-133: Accuracy cache cross-horizon staleness (P1)**: Cache shared a single timestamp for all horizons. Writing 3h data made stale 1d data appear fresh. Now uses per-horizon timestamps (`time_1d`, `time_3h`, etc.) with backwards-compatible fallback to legacy `time` key.
 - **BUG-134: Regime accuracy hardcoded to 1d (P1)**: `signal_engine.py` always called `load_cached_regime_accuracy("1d")` regardless of prediction horizon. 3h/4h/12h predictions now use horizon-matched regime accuracy.
