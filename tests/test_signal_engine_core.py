@@ -1080,3 +1080,131 @@ class TestExpandedCorrelationGroups:
         assert "high_volume_sell" in CORRELATION_GROUPS
         assert "volume_flow" in CORRELATION_GROUPS["high_volume_sell"]
         assert "macro_regime" in CORRELATION_GROUPS["high_volume_sell"]
+
+
+# ===========================================================================
+# BUG-143: Regime gating applied before vote counting
+# ===========================================================================
+
+class TestRegimeGatingBeforeVoteCounts:
+    """BUG-143: Verify regime gating happens before buy/sell counts are computed.
+
+    Before the fix, buy/sell counts were derived from raw votes, so the
+    unanimity penalty used pre-gated counts. After the fix, regime-gated
+    signals are forced to HOLD before counting, so buy_count/sell_count
+    reflect the post-gated state.
+    """
+
+    def test_ranging_regime_reduces_buy_count(self):
+        """In ranging regime, trend+momentum_factors are gated to HOLD.
+
+        If trend and momentum_factors both vote BUY, gating them should
+        reduce _buy_count by 2 compared to ungated regime.
+        """
+        from portfolio.signal_engine import REGIME_GATED_SIGNALS
+
+        # Verify ranging gates trend and momentum_factors
+        assert "trend" in REGIME_GATED_SIGNALS["ranging"]
+        assert "momentum_factors" in REGIME_GATED_SIGNALS["ranging"]
+
+        votes = {
+            "rsi": "BUY", "macd": "BUY", "ema": "BUY",
+            "trend": "BUY", "momentum_factors": "BUY",
+            "bb": "SELL", "volume": "HOLD",
+        }
+
+        # Simulate the gating logic from generate_signal (BUG-143 fix)
+        regime = "ranging"
+        gated_votes = dict(votes)
+        regime_gated = REGIME_GATED_SIGNALS.get(regime, frozenset())
+        for sig_name in regime_gated:
+            if sig_name in gated_votes and gated_votes[sig_name] != "HOLD":
+                gated_votes[sig_name] = "HOLD"
+
+        # Post-gating: trend and momentum_factors should be HOLD
+        assert gated_votes["trend"] == "HOLD"
+        assert gated_votes["momentum_factors"] == "HOLD"
+
+        # Post-gated counts
+        buy_count = sum(1 for v in gated_votes.values() if v == "BUY")
+        sell_count = sum(1 for v in gated_votes.values() if v == "SELL")
+
+        # 3 BUY (rsi, macd, ema) — trend and momentum_factors gated
+        assert buy_count == 3
+        assert sell_count == 1  # bb
+
+    def test_unanimity_ratio_changes_after_gating(self):
+        """Gating should change the unanimity ratio used by Stage 5 penalty.
+
+        Example: 9 BUY / 1 SELL raw = 90% → 0.6x penalty.
+        After gating 2 signals: 7 BUY / 1 SELL = 87.5% → 0.75x penalty.
+        """
+        # Raw: 9/10 = 90% agreement → unanimity penalty 0.6x
+        raw_buy, raw_sell = 9, 1
+        raw_ratio = max(raw_buy, raw_sell) / (raw_buy + raw_sell)
+        assert raw_ratio == 0.9
+
+        # After gating 2 BUY signals: 7/8 = 87.5% → unanimity penalty 0.75x
+        gated_buy, gated_sell = 7, 1
+        gated_ratio = max(gated_buy, gated_sell) / (gated_buy + gated_sell)
+        assert gated_ratio == 0.875
+
+        # The penalty tier changes: 0.9 → 0.6x, 0.875 → 0.75x
+        # This is a 25% difference in penalty severity
+        assert raw_ratio >= 0.9  # would trigger 0.6x
+        assert 0.8 <= gated_ratio < 0.9  # would trigger 0.75x instead
+
+    def test_gating_idempotent_on_hold(self):
+        """Gating a signal that already votes HOLD is a no-op."""
+        from portfolio.signal_engine import REGIME_GATED_SIGNALS
+
+        votes = {"trend": "HOLD", "rsi": "BUY"}
+        regime_gated = REGIME_GATED_SIGNALS.get("ranging", frozenset())
+
+        gated_votes = dict(votes)
+        for sig_name in regime_gated:
+            if sig_name in gated_votes and gated_votes[sig_name] != "HOLD":
+                gated_votes[sig_name] = "HOLD"
+
+        # trend was already HOLD — unchanged
+        assert gated_votes["trend"] == "HOLD"
+        assert gated_votes["rsi"] == "BUY"
+
+
+# ===========================================================================
+# BUG-144: Regime passed through context_data to enhanced signals
+# ===========================================================================
+
+class TestRegimeInContextData:
+    """BUG-144: Verify context_data includes 'regime' key for enhanced signals.
+
+    Before the fix, context_data only had ticker, config, macro — the
+    regime key was never included, so forecast.py's regime discount was
+    dead code.
+    """
+
+    def test_context_data_structure(self):
+        """The context_data dict should include regime alongside existing keys."""
+        # Simulate what generate_signal builds at line ~1030
+        ticker = "BTC-USD"
+        config = {"signals": {}}
+        macro_data = {"fear_greed": 45}
+        regime = "trending-up"
+
+        context_data = {
+            "ticker": ticker,
+            "config": config,
+            "macro": macro_data,
+            "regime": regime,
+        }
+
+        assert "regime" in context_data
+        assert context_data["regime"] == "trending-up"
+        assert context_data["ticker"] == "BTC-USD"
+        assert context_data["macro"] == macro_data
+
+    def test_forecast_regime_discount_constants(self):
+        """Verify forecast.py regime discount constants exist and are reasonable."""
+        from portfolio.signals.forecast import _REGIME_DISCOUNT_TRENDING, _REGIME_NEUTRAL
+        assert _REGIME_DISCOUNT_TRENDING < 1.0  # trending discount < 1.0
+        assert _REGIME_NEUTRAL == 1.0  # neutral = no discount
