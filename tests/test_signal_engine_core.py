@@ -903,8 +903,8 @@ class TestCorrelationDedup:
 class TestRegimeGating:
     """Test REGIME_GATED_SIGNALS silences signals that produce negative alpha."""
 
-    def test_ranging_gates_trend(self):
-        """In ranging regime, 'trend' is forced to HOLD."""
+    def test_ranging_gates_trend_on_default_horizon(self):
+        """In ranging regime with no/1d horizon, 'trend' is forced to HOLD."""
         votes = {"trend": "SELL", "rsi": "BUY", "bb": "BUY"}
         accuracy = {
             "trend": {"accuracy": 0.40, "total": 600},
@@ -912,30 +912,70 @@ class TestRegimeGating:
             "bb": {"accuracy": 0.55, "total": 300},
         }
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # trend gated in ranging => only rsi+bb vote => BUY wins
+        # trend gated in ranging (default horizon) => only rsi+bb vote => BUY wins
         assert action == "BUY"
 
-    def test_ranging_gates_momentum_factors(self):
-        """In ranging regime, 'momentum_factors' is forced to HOLD."""
+    def test_ranging_does_not_gate_trend_on_3h(self):
+        """In ranging regime at 3h horizon, 'trend' is NOT gated (61.6% accuracy).
+
+        Trend participates at 3h even in ranging, unlike default horizon where
+        it's gated. Note: regime weight (trend 0.5x in ranging) still applies,
+        so trend needs more votes or higher accuracy to dominate.
+        """
+        from portfolio.signal_engine import _get_regime_gated
+        # Verify trend is NOT in the gated set for 3h
+        gated_3h = _get_regime_gated("ranging", "3h")
+        assert "trend" not in gated_3h
+        # But IS gated on default (1d-like) horizon
+        gated_default = _get_regime_gated("ranging")
+        assert "trend" in gated_default
+
+        # When trend is NOT gated, it participates (gets SELL weight)
+        # vs when gated, its vote is forced to HOLD
+        votes_gated = {"trend": "SELL", "rsi": "BUY"}
+        accuracy = {
+            "trend": {"accuracy": 0.62, "total": 2283},
+            "rsi": {"accuracy": 0.47, "total": 3572},
+        }
+        # Default (gated): trend forced HOLD, only rsi BUY => BUY 100%
+        _, conf_gated = _weighted_consensus(votes_gated, accuracy, "ranging")
+        # 3h (not gated): both participate, confidence < 1.0
+        _, conf_3h = _weighted_consensus(votes_gated, accuracy, "ranging", horizon="3h")
+        # With trend participating, BUY confidence is lower than 100%
+        assert conf_3h < conf_gated
+
+    def test_ranging_gates_momentum_factors_on_default(self):
+        """In ranging regime, 'momentum_factors' is forced to HOLD on default horizon."""
         votes = {"momentum_factors": "SELL", "fibonacci": "BUY"}
         accuracy = {
             "momentum_factors": {"accuracy": 0.41, "total": 500},
             "fibonacci": {"accuracy": 0.68, "total": 110},
         }
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # momentum_factors gated => fibonacci BUY wins
+        # momentum_factors gated on default => fibonacci BUY wins
         assert action == "BUY"
 
-    def test_trending_up_gates_mean_reversion(self):
-        """In trending-up regime, 'mean_reversion' is forced to HOLD."""
+    def test_trending_up_gates_mean_reversion_on_3h(self):
+        """In trending-up regime at 3h, 'mean_reversion' is gated (45.5%)."""
         votes = {"mean_reversion": "SELL", "ema": "BUY"}
         accuracy = {
-            "mean_reversion": {"accuracy": 0.53, "total": 500},
+            "mean_reversion": {"accuracy": 0.45, "total": 1402},
             "ema": {"accuracy": 0.63, "total": 2000},
         }
-        action, conf = _weighted_consensus(votes, accuracy, "trending-up")
-        # mean_reversion gated => ema BUY wins
+        action, conf = _weighted_consensus(votes, accuracy, "trending-up", horizon="3h")
+        # mean_reversion gated on 3h in trending => ema BUY wins
         assert action == "BUY"
+
+    def test_trending_up_does_not_gate_mean_reversion_on_1d(self):
+        """In trending-up at 1d, 'mean_reversion' is NOT gated (65.4%)."""
+        votes = {"mean_reversion": "SELL", "ema": "BUY"}
+        accuracy = {
+            "mean_reversion": {"accuracy": 0.65, "total": 332},
+            "ema": {"accuracy": 0.41, "total": 568},
+        }
+        action, conf = _weighted_consensus(votes, accuracy, "trending-up", horizon="1d")
+        # mean_reversion NOT gated on 1d => mean_reversion SELL can win
+        assert action == "SELL"
 
     def test_no_gating_in_ungated_regime(self):
         """In high-vol regime, trend is NOT gated."""
@@ -1095,17 +1135,18 @@ class TestRegimeGatingBeforeVoteCounts:
     reflect the post-gated state.
     """
 
-    def test_ranging_regime_reduces_buy_count(self):
-        """In ranging regime, trend+momentum_factors are gated to HOLD.
+    def test_ranging_regime_reduces_buy_count_default_horizon(self):
+        """In ranging regime (default horizon), trend+momentum_factors are gated.
 
         If trend and momentum_factors both vote BUY, gating them should
         reduce _buy_count by 2 compared to ungated regime.
         """
-        from portfolio.signal_engine import REGIME_GATED_SIGNALS
+        from portfolio.signal_engine import _get_regime_gated
 
-        # Verify ranging gates trend and momentum_factors
-        assert "trend" in REGIME_GATED_SIGNALS["ranging"]
-        assert "momentum_factors" in REGIME_GATED_SIGNALS["ranging"]
+        # Verify ranging gates trend and momentum_factors on default horizon
+        gated = _get_regime_gated("ranging")
+        assert "trend" in gated
+        assert "momentum_factors" in gated
 
         votes = {
             "rsi": "BUY", "macd": "BUY", "ema": "BUY",
@@ -1113,10 +1154,10 @@ class TestRegimeGatingBeforeVoteCounts:
             "bb": "SELL", "volume": "HOLD",
         }
 
-        # Simulate the gating logic from generate_signal (BUG-143 fix)
+        # Simulate the gating logic from generate_signal (BUG-143/149 fix)
         regime = "ranging"
         gated_votes = dict(votes)
-        regime_gated = REGIME_GATED_SIGNALS.get(regime, frozenset())
+        regime_gated = _get_regime_gated(regime)
         for sig_name in regime_gated:
             if sig_name in gated_votes and gated_votes[sig_name] != "HOLD":
                 gated_votes[sig_name] = "HOLD"
@@ -1132,6 +1173,14 @@ class TestRegimeGatingBeforeVoteCounts:
         # 3 BUY (rsi, macd, ema) — trend and momentum_factors gated
         assert buy_count == 3
         assert sell_count == 1  # bb
+
+    def test_ranging_regime_3h_keeps_trend_active(self):
+        """In ranging regime at 3h horizon, trend is NOT gated."""
+        from portfolio.signal_engine import _get_regime_gated
+
+        gated = _get_regime_gated("ranging", "3h")
+        assert "trend" not in gated
+        assert "momentum_factors" not in gated
 
     def test_unanimity_ratio_changes_after_gating(self):
         """Gating should change the unanimity ratio used by Stage 5 penalty.
@@ -1156,10 +1205,10 @@ class TestRegimeGatingBeforeVoteCounts:
 
     def test_gating_idempotent_on_hold(self):
         """Gating a signal that already votes HOLD is a no-op."""
-        from portfolio.signal_engine import REGIME_GATED_SIGNALS
+        from portfolio.signal_engine import _get_regime_gated
 
         votes = {"trend": "HOLD", "rsi": "BUY"}
-        regime_gated = REGIME_GATED_SIGNALS.get("ranging", frozenset())
+        regime_gated = _get_regime_gated("ranging")
 
         gated_votes = dict(votes)
         for sig_name in regime_gated:
