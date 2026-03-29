@@ -255,6 +255,96 @@ HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
 _ACTIVITY_RATE_CAP = 0.70
 _ACTIVITY_RATE_PENALTY = 0.5
 
+# Dynamic horizon weight computation settings
+_DYNAMIC_HORIZON_WEIGHT_TTL = 3600  # 1 hour cache
+_DYNAMIC_HORIZON_MIN_SAMPLES = 50   # need enough data per signal per horizon
+_DYNAMIC_HORIZON_CLAMP_LOW = 0.4    # minimum multiplier
+_DYNAMIC_HORIZON_CLAMP_HIGH = 1.5   # maximum multiplier
+_DYNAMIC_HORIZON_DEADBAND = 0.1     # ignore multipliers within ±10% of 1.0
+
+# Cross-horizon pairs: for a given horizon, which other horizons to compare against
+_CROSS_HORIZON_PAIRS = {
+    "3h": ["1d"],
+    "4h": ["1d"],
+    "1d": ["3h"],
+}
+
+
+def _compute_dynamic_horizon_weights(horizon: str) -> dict[str, float]:
+    """Compute horizon-specific signal weight multipliers from accuracy cache.
+
+    For each signal, computes the ratio of its accuracy on this horizon vs
+    the comparison horizon(s). Signals that perform much better on this
+    horizon get boosted; signals that perform much worse get penalized.
+
+    Returns a dict of {signal_name: multiplier} for multipliers outside
+    the deadband (i.e., > 1.1 or < 0.9). Falls back to static
+    HORIZON_SIGNAL_WEIGHTS if accuracy cache is unavailable.
+    """
+    try:
+        from portfolio.file_utils import load_json
+        cache = load_json(DATA_DIR / "accuracy_cache.json")
+        if not cache:
+            return HORIZON_SIGNAL_WEIGHTS.get(horizon, {})
+
+        # Get recent accuracy for this horizon and comparison horizons
+        this_key = f"{horizon}_recent"
+        this_data = cache.get(this_key, {})
+        if not this_data:
+            return HORIZON_SIGNAL_WEIGHTS.get(horizon, {})
+
+        cross_horizons = _CROSS_HORIZON_PAIRS.get(horizon, [])
+        if not cross_horizons:
+            return HORIZON_SIGNAL_WEIGHTS.get(horizon, {})
+
+        # Gather comparison accuracies (average across comparison horizons)
+        cross_data: dict[str, float] = {}
+        for ch in cross_horizons:
+            ch_key = f"{ch}_recent"
+            ch_acc = cache.get(ch_key, {})
+            for sig, stats in ch_acc.items():
+                if stats.get("total", 0) >= _DYNAMIC_HORIZON_MIN_SAMPLES:
+                    acc = stats.get("accuracy", 0.5)
+                    if sig not in cross_data:
+                        cross_data[sig] = acc
+                    else:
+                        cross_data[sig] = (cross_data[sig] + acc) / 2
+
+        # Compute multipliers
+        weights = {}
+        for sig, stats in this_data.items():
+            samples = stats.get("total", 0)
+            if samples < _DYNAMIC_HORIZON_MIN_SAMPLES:
+                continue
+            this_acc = stats.get("accuracy", 0.5)
+            cross_acc = cross_data.get(sig)
+            if cross_acc is None or cross_acc < 0.01:
+                continue
+
+            # Ratio of this-horizon accuracy to cross-horizon accuracy
+            ratio = this_acc / cross_acc
+            # Clamp
+            ratio = max(_DYNAMIC_HORIZON_CLAMP_LOW, min(_DYNAMIC_HORIZON_CLAMP_HIGH, ratio))
+            # Deadband: only include if meaningfully different from 1.0
+            if abs(ratio - 1.0) > _DYNAMIC_HORIZON_DEADBAND:
+                weights[sig] = round(ratio, 2)
+
+        return weights if weights else HORIZON_SIGNAL_WEIGHTS.get(horizon, {})
+    except Exception:
+        logger.debug("Dynamic horizon weights unavailable, using static fallback", exc_info=True)
+        return HORIZON_SIGNAL_WEIGHTS.get(horizon, {})
+
+
+def _get_horizon_weights(horizon: str | None) -> dict[str, float]:
+    """Get horizon-specific signal weight multipliers, preferring dynamic computation.
+
+    Uses cached dynamic weights when available, falling back to static dict.
+    """
+    if not horizon:
+        return {}
+    cache_key = f"dynamic_horizon_weights_{horizon}"
+    return _cached(cache_key, _DYNAMIC_HORIZON_WEIGHT_TTL, lambda: _compute_dynamic_horizon_weights(horizon))
+
 
 # Signals that only apply to specific asset classes
 _CRYPTO_ONLY_SIGNALS = {"futures_flow", "funding"}
@@ -378,7 +468,7 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     gated_signals = []
     regime_mults = REGIME_WEIGHTS.get(regime, {})
     activation_rates = activation_rates or {}
-    horizon_mults = HORIZON_SIGNAL_WEIGHTS.get(horizon, {}) if horizon else {}
+    horizon_mults = _get_horizon_weights(horizon)
 
     # Regime gating: force-HOLD signals that produce negative alpha in this regime.
     # BUG-149: now horizon-aware — e.g., trend works at 3h in ranging (61.6%)

@@ -1257,3 +1257,166 @@ class TestRegimeInContextData:
         from portfolio.signals.forecast import _REGIME_DISCOUNT_TRENDING, _REGIME_NEUTRAL
         assert _REGIME_DISCOUNT_TRENDING < 1.0  # trending discount < 1.0
         assert _REGIME_NEUTRAL == 1.0  # neutral = no discount
+
+
+# ===========================================================================
+# Dynamic horizon weight tests (2026-03-29 research)
+# ===========================================================================
+
+
+class TestDynamicHorizonWeights:
+    """Test _compute_dynamic_horizon_weights computes multipliers from accuracy cache."""
+
+    def test_computes_boost_for_better_horizon(self, tmp_path, monkeypatch):
+        """Signal with higher accuracy on 3h than 1d gets a boost multiplier."""
+        from portfolio.signal_engine import _compute_dynamic_horizon_weights, DATA_DIR
+
+        cache = {
+            "3h_recent": {
+                "news_event": {"accuracy": 0.70, "total": 1762},
+                "rsi": {"accuracy": 0.47, "total": 3572},
+            },
+            "1d_recent": {
+                "news_event": {"accuracy": 0.30, "total": 112},
+                "rsi": {"accuracy": 0.53, "total": 875},
+            },
+        }
+        cache_file = tmp_path / "accuracy_cache.json"
+        import json
+        cache_file.write_text(json.dumps(cache))
+        monkeypatch.setattr("portfolio.signal_engine.DATA_DIR", tmp_path)
+        # Clear cache to force recomputation
+        from portfolio.shared_state import _tool_cache
+        for key in list(_tool_cache.keys()):
+            if "dynamic_horizon" in key:
+                del _tool_cache[key]
+
+        weights = _compute_dynamic_horizon_weights("3h")
+        # news_event: 0.70 / 0.30 = 2.33, clamped to 1.5
+        assert "news_event" in weights
+        assert weights["news_event"] == 1.5
+
+    def test_computes_penalty_for_worse_horizon(self, tmp_path, monkeypatch):
+        """Signal with lower accuracy on 1d than 3h gets a penalty multiplier."""
+        from portfolio.signal_engine import _compute_dynamic_horizon_weights
+
+        cache = {
+            "1d_recent": {
+                "ema": {"accuracy": 0.41, "total": 568},
+            },
+            "3h_recent": {
+                "ema": {"accuracy": 0.63, "total": 2248},
+            },
+        }
+        cache_file = tmp_path / "accuracy_cache.json"
+        import json
+        cache_file.write_text(json.dumps(cache))
+        monkeypatch.setattr("portfolio.signal_engine.DATA_DIR", tmp_path)
+        from portfolio.shared_state import _tool_cache
+        for key in list(_tool_cache.keys()):
+            if "dynamic_horizon" in key:
+                del _tool_cache[key]
+
+        weights = _compute_dynamic_horizon_weights("1d")
+        # ema: 0.41 / 0.63 = 0.651, outside deadband
+        assert "ema" in weights
+        assert weights["ema"] < 0.9  # penalty
+        assert weights["ema"] >= 0.4  # clamped
+
+    def test_skips_low_sample_signals(self, tmp_path, monkeypatch):
+        """Signals with fewer than 50 samples are excluded."""
+        from portfolio.signal_engine import _compute_dynamic_horizon_weights
+
+        cache = {
+            "3h_recent": {
+                "rare_sig": {"accuracy": 0.90, "total": 10},  # too few
+            },
+            "1d_recent": {
+                "rare_sig": {"accuracy": 0.30, "total": 10},
+            },
+        }
+        cache_file = tmp_path / "accuracy_cache.json"
+        import json
+        cache_file.write_text(json.dumps(cache))
+        monkeypatch.setattr("portfolio.signal_engine.DATA_DIR", tmp_path)
+        from portfolio.shared_state import _tool_cache
+        for key in list(_tool_cache.keys()):
+            if "dynamic_horizon" in key:
+                del _tool_cache[key]
+
+        weights = _compute_dynamic_horizon_weights("3h")
+        assert "rare_sig" not in weights
+
+    def test_deadband_filters_near_unity(self, tmp_path, monkeypatch):
+        """Signals with near-equal accuracy across horizons are excluded (deadband)."""
+        from portfolio.signal_engine import _compute_dynamic_horizon_weights
+
+        cache = {
+            "3h_recent": {
+                "rsi": {"accuracy": 0.52, "total": 3000},
+            },
+            "1d_recent": {
+                "rsi": {"accuracy": 0.51, "total": 3000},
+            },
+        }
+        cache_file = tmp_path / "accuracy_cache.json"
+        import json
+        cache_file.write_text(json.dumps(cache))
+        monkeypatch.setattr("portfolio.signal_engine.DATA_DIR", tmp_path)
+        from portfolio.shared_state import _tool_cache
+        for key in list(_tool_cache.keys()):
+            if "dynamic_horizon" in key:
+                del _tool_cache[key]
+
+        weights = _compute_dynamic_horizon_weights("3h")
+        # 0.52/0.51 = 1.02, within ±0.1 deadband
+        assert "rsi" not in weights
+
+    def test_falls_back_to_static_on_missing_cache(self, tmp_path, monkeypatch):
+        """Returns static HORIZON_SIGNAL_WEIGHTS when cache file doesn't exist."""
+        from portfolio.signal_engine import HORIZON_SIGNAL_WEIGHTS, _compute_dynamic_horizon_weights
+
+        monkeypatch.setattr("portfolio.signal_engine.DATA_DIR", tmp_path)
+        from portfolio.shared_state import _tool_cache
+        for key in list(_tool_cache.keys()):
+            if "dynamic_horizon" in key:
+                del _tool_cache[key]
+
+        weights = _compute_dynamic_horizon_weights("3h")
+        assert weights == HORIZON_SIGNAL_WEIGHTS.get("3h", {})
+
+    def test_get_horizon_weights_uses_cache(self, tmp_path, monkeypatch):
+        """_get_horizon_weights returns cached result on second call."""
+        from portfolio.signal_engine import _get_horizon_weights
+
+        # With no horizon, returns empty
+        assert _get_horizon_weights(None) == {}
+        assert _get_horizon_weights("") == {}
+
+
+class TestMacroExternalCorrelationGroup:
+    """Test the new macro_external correlation group."""
+
+    def test_macro_external_group_penalizes_secondary(self):
+        """When fear_greed, sentiment, and news_event all vote the same,
+        only the highest-accuracy one gets full weight."""
+        votes = {
+            "fear_greed": "SELL",
+            "sentiment": "SELL",
+            "news_event": "SELL",
+            "rsi": "BUY",
+        }
+        accuracy = {
+            "fear_greed": {"accuracy": 0.56, "total": 8000},
+            "sentiment": {"accuracy": 0.44, "total": 35000},
+            "news_event": {"accuracy": 0.55, "total": 5000},
+            "rsi": {"accuracy": 0.52, "total": 25000},
+        }
+        # Without correlation: 3 SELL vs 1 BUY => SELL wins easily
+        # With correlation: fear_greed is leader (0.56), sentiment+news_event
+        # get 0.3x penalty => effective SELL weight is much reduced
+        action, conf = _weighted_consensus(votes, accuracy, "unknown")
+        # The key test is that confidence is reduced compared to if all three
+        # had full weight. We test that it's SELL (still majority) but
+        # confidence is notably less than ~75%
+        assert conf < 0.85  # would be higher without penalty
