@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import joblib
@@ -30,17 +30,14 @@ SIGNAL_DB = DATA_DIR / "signal_log.db"
 
 HORIZONS = ["3h", "1d", "3d", "5d"]
 
-# All 30 signal names in consistent order
-SIGNAL_NAMES = [
-    "rsi", "macd", "ema", "bb", "fear_greed", "sentiment", "ministral",
-    "ml", "funding", "volume", "qwen3", "trend", "momentum", "volume_flow",
-    "volatility_sig", "candlestick", "structure", "fibonacci", "smart_money",
-    "oscillators", "heikin_ashi", "mean_reversion", "calendar", "macro_regime",
-    "momentum_factors", "news_event", "econ_calendar", "forecast",
-    "claude_fundamental", "futures_flow",
-]
+# BUG-147: Import canonical list from tickers instead of maintaining a copy.
+from portfolio.tickers import SIGNAL_NAMES
 
 VOTE_MAP = {"BUY": 1, "SELL": -1, "HOLD": 0}
+
+# BUG-148: Module-level model cache to avoid deserializing on every predict() call.
+# Keyed by horizon. Each entry: (model, mtime) — reloads if file is newer.
+_model_cache: dict[str, tuple] = {}
 
 CRYPTO = {"BTC-USD", "ETH-USD"}
 METALS = {"XAU-USD", "XAG-USD"}
@@ -95,18 +92,20 @@ def _load_data(horizon="1d"):
         raise FileNotFoundError(f"Signal database not found: {SIGNAL_DB}")
 
     conn = sqlite3.connect(str(SIGNAL_DB))
-    query = """
-        SELECT s.ts, ts.ticker, ts.signals, ts.regime,
-               o.change_pct
-        FROM snapshots s
-        JOIN ticker_signals ts ON ts.snapshot_id = s.id
-        JOIN outcomes o ON o.snapshot_id = s.id AND o.ticker = ts.ticker
-        WHERE o.horizon = ?
-          AND o.change_pct IS NOT NULL
-          AND ts.signals IS NOT NULL
-    """
-    df = pd.read_sql_query(query, conn, params=(horizon,))
-    conn.close()
+    try:
+        query = """
+            SELECT s.ts, ts.ticker, ts.signals, ts.regime,
+                   o.change_pct
+            FROM snapshots s
+            JOIN ticker_signals ts ON ts.snapshot_id = s.id
+            JOIN outcomes o ON o.snapshot_id = s.id AND o.ticker = ts.ticker
+            WHERE o.horizon = ?
+              AND o.change_pct IS NOT NULL
+              AND ts.signals IS NOT NULL
+        """
+        df = pd.read_sql_query(query, conn, params=(horizon,))
+    finally:
+        conn.close()
     logger.info("Loaded %d raw rows for horizon=%s", len(df), horizon)
     return df
 
@@ -282,7 +281,7 @@ def train(horizon="1d", verbose=True):
         "test_logloss": round(test_loss, 4),
         "class_balance": round(y.mean(), 4),
         "features": len(X.columns),
-        "trained_at": datetime.now(timezone.utc).isoformat(),
+        "trained_at": datetime.now(UTC).isoformat(),
     }
 
     if verbose:
@@ -349,8 +348,16 @@ def predict(votes, ticker, hour_utc=None, day_of_week=None, horizon="1d"):
     if not model_path.exists():
         return "HOLD", 0.0
 
-    model = joblib.load(model_path)
-    now = datetime.now(timezone.utc)
+    # BUG-148: Use cached model, reload only when file is newer (retrained).
+    mtime = model_path.stat().st_mtime
+    cached = _model_cache.get(horizon)
+    if cached and cached[1] == mtime:
+        model = cached[0]
+    else:
+        model = joblib.load(model_path)
+        _model_cache[horizon] = (model, mtime)
+
+    now = datetime.now(UTC)
 
     features = {}
     for sig in SIGNAL_NAMES:
