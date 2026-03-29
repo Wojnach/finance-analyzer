@@ -156,43 +156,96 @@ REGIME_WEIGHTS = {
 }
 
 # Regime-gated signals: completely silenced (forced HOLD) in certain regimes
-# because they produce negative alpha.  Based on 2026-03-27 accuracy audit:
-#   ranging: trend 40.7%, momentum_factors 41.4%
-#   trending: mean_reversion 53.1% all-time but poor when trend is strong
-REGIME_GATED_SIGNALS: dict[str, frozenset[str]] = {
-    "ranging": frozenset({"trend", "momentum_factors"}),
-    "trending-up": frozenset({"mean_reversion"}),
-    "trending-down": frozenset({"mean_reversion"}),
+# because they produce negative alpha.  Horizon-aware since 2026-03-29:
+# BUG-149: trend has 61.6% accuracy on 3h even in ranging — short-term trends
+# exist within range-bound markets, so only gate on longer horizons.
+# Structure: {regime: {horizon: frozenset(signals), ...}}
+# "_default" key applies to horizons not explicitly listed.
+REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
+    "ranging": {
+        # trend 1d_recent=40.7%, momentum_factors 1d_recent=41.4% — gate on daily
+        "_default": frozenset({"trend", "momentum_factors"}),
+        # trend 3h_recent=61.6%, momentum_factors 3h_recent=60.1% — do NOT gate
+        "3h": frozenset(),
+        "4h": frozenset(),
+    },
+    "trending-up": {
+        # mean_reversion 1d_recent=65.4% — do NOT gate on daily (works in trends!)
+        # mean_reversion 3h_recent=45.5% — gate on short horizons
+        "_default": frozenset(),
+        "3h": frozenset({"mean_reversion"}),
+        "4h": frozenset({"mean_reversion"}),
+    },
+    "trending-down": {
+        "_default": frozenset(),
+        "3h": frozenset({"mean_reversion"}),
+        "4h": frozenset({"mean_reversion"}),
+    },
 }
+
+
+def _get_regime_gated(regime: str, horizon: str | None = None) -> frozenset[str]:
+    """Get the set of signals to gate for a regime+horizon combination."""
+    regime_dict = REGIME_GATED_SIGNALS.get(regime, {})
+    if not regime_dict:
+        return frozenset()
+    if horizon and horizon in regime_dict:
+        return regime_dict[horizon]
+    return regime_dict.get("_default", frozenset())
 
 # Horizon-specific signal weight multipliers.
 # Signals with >15pp accuracy divergence between horizons get adjusted.
-# Source: 2026-03-27 accuracy audit (3h_recent vs 1d_recent).
+# Updated: 2026-03-29 accuracy audit (3h_recent vs 1d_recent).
 HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
     "3h": {
-        "news_event": 1.4,      # 70.0% at 3h
-        "ema": 1.3,             # 62.9% at 3h
-        "ministral": 1.2,      # 62.6% at 3h
-        "sentiment": 0.5,      # 33.8% at 3h — worst performer
-        "fibonacci": 0.6,      # 38.3% at 3h (but 68.2% at 1d)
-        "forecast": 0.6,       # 38.3% at 3h
+        "news_event": 1.4,      # 70.0% at 3h (vs 29.5% at 1d — pure short-term signal)
+        "smart_money": 1.2,     # 63.2% at 3h (vs 39.6% at 1d) — NEW 2026-03-29
+        "ema": 1.3,             # 62.9% at 3h (vs 40.8% at 1d)
+        "ministral": 1.2,       # 62.6% at 3h
+        "qwen3": 1.2,           # 61.8% at 3h — NEW 2026-03-29
+        "trend": 1.2,           # 61.6% at 3h (vs 40.7% at 1d) — NEW 2026-03-29
+        "volatility_sig": 1.2,  # 60.2% at 3h (vs 35.0% at 1d) — NEW 2026-03-29
+        "momentum_factors": 1.2, # 60.1% at 3h (vs 41.4% at 1d) — NEW 2026-03-29
+        "sentiment": 0.5,       # 33.8% at 3h — worst performer
+        "fibonacci": 0.6,       # 38.3% at 3h (but 68.2% at 1d)
+        "forecast": 0.5,        # 38.3% at 3h — tightened from 0.6
+        "oscillators": 0.7,     # 39.4% at 3h — NEW 2026-03-29
+        "bb": 0.6,              # 41.7% at 3h (but 60.8% at 1d) — NEW 2026-03-29
+        "mean_reversion": 0.7,  # 45.5% at 3h (but 65.4% at 1d) — NEW 2026-03-29
     },
     "4h": {
         "news_event": 1.4,
+        "smart_money": 1.2,
         "ema": 1.3,
         "ministral": 1.2,
+        "qwen3": 1.2,
+        "trend": 1.2,
+        "volatility_sig": 1.2,
+        "momentum_factors": 1.2,
         "sentiment": 0.5,
         "fibonacci": 0.6,
-        "forecast": 0.6,
+        "forecast": 0.5,
+        "oscillators": 0.7,
+        "bb": 0.6,
+        "mean_reversion": 0.7,
     },
     "1d": {
-        "fibonacci": 1.4,      # 68.2% at 1d
-        "mean_reversion": 1.3, # 65.4% at 1d
-        "calendar": 1.2,       # 62.8% at 1d
-        "news_event": 0.5,     # 29.5% at 1d (reversal of 3h edge)
-        "fear_greed": 0.5,     # 25.9% at 1d — collapsed
-        "macro_regime": 0.5,   # 30.3% at 1d
-        "structure": 0.6,      # 36.1% at 1d
+        "fibonacci": 1.4,       # 68.2% at 1d
+        "ministral": 1.3,       # 68.0% at 1d — NEW 2026-03-29 (was only 3h boost)
+        "mean_reversion": 1.3,  # 65.4% at 1d
+        "calendar": 1.2,        # 62.8% at 1d
+        "bb": 1.2,              # 60.8% at 1d (vs 41.7% at 3h!) — NEW 2026-03-29
+        "macd": 1.2,            # 58.7% at 1d — NEW 2026-03-29
+        "news_event": 0.5,      # 29.5% at 1d (reversal of 3h edge)
+        "fear_greed": 0.4,      # 25.9% at 1d — collapsed, tightened from 0.5
+        "macro_regime": 0.5,    # 30.3% at 1d
+        "volatility_sig": 0.5,  # 35.0% at 1d — NEW 2026-03-29
+        "structure": 0.6,       # 36.1% at 1d
+        "forecast": 0.5,        # 36.1% at 1d — NEW 2026-03-29
+        "smart_money": 0.6,     # 39.6% at 1d (vs 63.2% at 3h) — NEW 2026-03-29
+        "ema": 0.6,             # 40.8% at 1d (vs 62.9% at 3h) — BUG-151
+        "trend": 0.6,           # 40.7% at 1d — NEW 2026-03-29
+        "heikin_ashi": 0.7,     # 42.0% at 1d — NEW 2026-03-29
     },
 }
 
@@ -201,6 +254,96 @@ HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
 # dominating consensus.  Targets volume_flow (83.1% activity, 49.2% accuracy).
 _ACTIVITY_RATE_CAP = 0.70
 _ACTIVITY_RATE_PENALTY = 0.5
+
+# Dynamic horizon weight computation settings
+_DYNAMIC_HORIZON_WEIGHT_TTL = 3600  # 1 hour cache
+_DYNAMIC_HORIZON_MIN_SAMPLES = 50   # need enough data per signal per horizon
+_DYNAMIC_HORIZON_CLAMP_LOW = 0.4    # minimum multiplier
+_DYNAMIC_HORIZON_CLAMP_HIGH = 1.5   # maximum multiplier
+_DYNAMIC_HORIZON_DEADBAND = 0.1     # ignore multipliers within ±10% of 1.0
+
+# Cross-horizon pairs: for a given horizon, which other horizons to compare against
+_CROSS_HORIZON_PAIRS = {
+    "3h": ["1d"],
+    "4h": ["1d"],
+    "1d": ["3h"],
+}
+
+
+def _compute_dynamic_horizon_weights(horizon: str) -> dict[str, float]:
+    """Compute horizon-specific signal weight multipliers from accuracy cache.
+
+    For each signal, computes the ratio of its accuracy on this horizon vs
+    the comparison horizon(s). Signals that perform much better on this
+    horizon get boosted; signals that perform much worse get penalized.
+
+    Returns a dict of {signal_name: multiplier} for multipliers outside
+    the deadband (i.e., > 1.1 or < 0.9). Falls back to static
+    HORIZON_SIGNAL_WEIGHTS if accuracy cache is unavailable.
+    """
+    try:
+        from portfolio.file_utils import load_json
+        cache = load_json(DATA_DIR / "accuracy_cache.json")
+        if not cache:
+            return HORIZON_SIGNAL_WEIGHTS.get(horizon, {})
+
+        # Get recent accuracy for this horizon and comparison horizons
+        this_key = f"{horizon}_recent"
+        this_data = cache.get(this_key, {})
+        if not this_data:
+            return HORIZON_SIGNAL_WEIGHTS.get(horizon, {})
+
+        cross_horizons = _CROSS_HORIZON_PAIRS.get(horizon, [])
+        if not cross_horizons:
+            return HORIZON_SIGNAL_WEIGHTS.get(horizon, {})
+
+        # Gather comparison accuracies (average across comparison horizons)
+        cross_data: dict[str, float] = {}
+        for ch in cross_horizons:
+            ch_key = f"{ch}_recent"
+            ch_acc = cache.get(ch_key, {})
+            for sig, stats in ch_acc.items():
+                if stats.get("total", 0) >= _DYNAMIC_HORIZON_MIN_SAMPLES:
+                    acc = stats.get("accuracy", 0.5)
+                    if sig not in cross_data:
+                        cross_data[sig] = acc
+                    else:
+                        cross_data[sig] = (cross_data[sig] + acc) / 2
+
+        # Compute multipliers
+        weights = {}
+        for sig, stats in this_data.items():
+            samples = stats.get("total", 0)
+            if samples < _DYNAMIC_HORIZON_MIN_SAMPLES:
+                continue
+            this_acc = stats.get("accuracy", 0.5)
+            cross_acc = cross_data.get(sig)
+            if cross_acc is None or cross_acc < 0.01:
+                continue
+
+            # Ratio of this-horizon accuracy to cross-horizon accuracy
+            ratio = this_acc / cross_acc
+            # Clamp
+            ratio = max(_DYNAMIC_HORIZON_CLAMP_LOW, min(_DYNAMIC_HORIZON_CLAMP_HIGH, ratio))
+            # Deadband: only include if meaningfully different from 1.0
+            if abs(ratio - 1.0) > _DYNAMIC_HORIZON_DEADBAND:
+                weights[sig] = round(ratio, 2)
+
+        return weights if weights else HORIZON_SIGNAL_WEIGHTS.get(horizon, {})
+    except Exception:
+        logger.debug("Dynamic horizon weights unavailable, using static fallback", exc_info=True)
+        return HORIZON_SIGNAL_WEIGHTS.get(horizon, {})
+
+
+def _get_horizon_weights(horizon: str | None) -> dict[str, float]:
+    """Get horizon-specific signal weight multipliers, preferring dynamic computation.
+
+    Uses cached dynamic weights when available, falling back to static dict.
+    """
+    if not horizon:
+        return {}
+    cache_key = f"dynamic_horizon_weights_{horizon}"
+    return _cached(cache_key, _DYNAMIC_HORIZON_WEIGHT_TTL, lambda: _compute_dynamic_horizon_weights(horizon))
 
 
 # Signals that only apply to specific asset classes
@@ -283,6 +426,10 @@ CORRELATION_GROUPS = {
     "trend_direction": frozenset({"ema", "trend", "heikin_ashi"}),
     # Discovered 2026-03-27: both permanent SELL lean (volume_flow 69% SELL, macro_regime 44% SELL)
     "high_volume_sell": frozenset({"volume_flow", "macro_regime"}),
+    # Discovered 2026-03-29: all depend on external data quality. sentiment 33.8% 3h,
+    # fear_greed 25.9% 1d, news_event varies wildly by horizon. When external data
+    # degrades, all fail together.
+    "macro_external": frozenset({"fear_greed", "sentiment", "news_event"}),
 }
 _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal weight
 
@@ -321,10 +468,11 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     gated_signals = []
     regime_mults = REGIME_WEIGHTS.get(regime, {})
     activation_rates = activation_rates or {}
-    horizon_mults = HORIZON_SIGNAL_WEIGHTS.get(horizon, {}) if horizon else {}
+    horizon_mults = _get_horizon_weights(horizon)
 
-    # Regime gating: force-HOLD signals that produce negative alpha in this regime
-    regime_gated = REGIME_GATED_SIGNALS.get(regime, frozenset())
+    # Regime gating: force-HOLD signals that produce negative alpha in this regime.
+    # BUG-149: now horizon-aware — e.g., trend works at 3h in ranging (61.6%)
+    regime_gated = _get_regime_gated(regime, horizon)
     votes = {k: ("HOLD" if k in regime_gated else v) for k, v in votes.items()}
 
     # Top-N gate: only let the top max_signals (by accuracy) participate
@@ -1097,7 +1245,8 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # all downstream code (core gate, min_voters, unanimity penalty) sees
     # post-gated counts.  _weighted_consensus also applies this internally
     # (idempotent — gating HOLD→HOLD is a no-op).
-    regime_gated = REGIME_GATED_SIGNALS.get(regime, frozenset())
+    # BUG-149: now horizon-aware via _get_regime_gated()
+    regime_gated = _get_regime_gated(regime, horizon)
     for sig_name in regime_gated:
         if sig_name in votes and votes[sig_name] != "HOLD":
             votes[sig_name] = "HOLD"
