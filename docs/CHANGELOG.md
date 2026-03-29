@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-03-29 (after-hours research session)
+- **BUG-149: Regime gating not horizon-aware (P1)**: `REGIME_GATED_SIGNALS` applied uniformly across all prediction horizons. Trend had 61.6% accuracy on 3h in ranging markets — short-term trends exist within ranges. Fix: restructured to `{regime: {horizon: frozenset(signals)}}` with `_get_regime_gated()` helper. Trend is now only gated on 1d/default in ranging (40.7%), NOT on 3h (61.6%). Mean reversion is gated on 3h in trending (45.5%), NOT on 1d (65.4%).
+- **BUG-150: Stale HORIZON_SIGNAL_WEIGHTS (P2)**: Static weights from March 27 were outdated. Updated with March 29 accuracy audit: 8 new 3h entries (smart_money 1.2, volatility_sig 1.2, momentum_factors 1.2, qwen3 1.2, trend 1.2, oscillators 0.7, bb 0.6, mean_reversion 0.7), 6 new 1d entries (ministral 1.3, macd 1.2, bb 1.2, volatility_sig 0.5, ema 0.6, trend 0.6, heikin_ashi 0.7). Tightened fear_greed 1d from 0.5 to 0.4 (25.9%), forecast from 0.6 to 0.5.
+- **BUG-151: EMA missing 1d penalty (P2)**: EMA at 40.8% 1d_recent had no horizon penalty despite being near accuracy gate. Added 0.6x penalty.
+- **FEAT-4: Dynamic horizon weight computation**: `_compute_dynamic_horizon_weights()` reads accuracy_cache.json and computes cross-horizon ratio multipliers automatically. Formula: `this_horizon_acc / cross_horizon_acc`, clamped [0.4, 1.5], with ±10% deadband. 1-hour cache TTL. Falls back to static dict when cache unavailable. Eliminates need for manual weight updates each session.
+- **FEAT-5: macro_external correlation group**: New group `{fear_greed, sentiment, news_event}` — all depend on external data quality and fail together. Secondary signals get 0.3x correlation penalty.
+- **New tests**: 10 new tests — horizon-aware regime gating (5), dynamic weight computation (6), macro_external correlation group (1). Updated 3 existing tests. All 115 signal_engine_core tests pass.
+- **Research deliverables**: daily_research_review.json, daily_research_signal_audit.json, daily_research_quant.json, daily_research_ticker_deep_dive.json, daily_research_macro.json.
+- Theme: Signal Accuracy Optimization, Adaptive Weighting, Horizon-Specific Intelligence.
+
 ## 2026-03-29 (autonomous improvement session)
 - **BUG-143: Unanimity penalty uses pre-gated vote counts (P1)**: `buy`/`sell` counts in `signal_engine.py` were computed from raw votes BEFORE regime gating. The unanimity penalty (Stage 5) used stale counts — e.g., in ranging regime with 2 gated signals, penalty was ~33% too aggressive. Fix: apply `REGIME_GATED_SIGNALS` gating before counting (idempotent with `_weighted_consensus`).
 - **BUG-144: Forecast regime discount is dead code (P1)**: `forecast.py` reads `context.get("regime")` to apply 0.5x confidence discount in trending markets (Chronos mean-reversion bias). But `generate_signal()` never included `regime` in `context_data`. The discount was never applied. Fix: add `"regime": regime` to context_data dict.

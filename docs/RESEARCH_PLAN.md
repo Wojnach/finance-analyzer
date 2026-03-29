@@ -1,63 +1,110 @@
-# After-Hours Research Plan — 2026-03-27
+# After-Hours Research Plan — 2026-03-29
+
+## Context
+Sunday session. All instruments ranging. No trades today (weekend). System uptime 63h+,
+zero signal failures. Key finding: massive horizon-specific accuracy divergence discovered
+in signal audit. Regime gating is not horizon-aware — suppressing signals that work well
+on shorter horizons.
 
 ## Bugs & Problems Found
 
-### Signal System Issues
-1. **10 signals gated** (blended accuracy < 45%): ema, fear_greed, forecast, heikin_ashi,
-   macro_regime, news_event, oscillators, structure, trend, volatility_sig
-2. **Signal correlation**: calendar+econ_calendar+forecast+futures_flow have 100% agreement
-   rate — they are effectively one voter, not four. Additional cluster: volatility_sig,
-   smart_money, fibonacci, oscillators at 97-99% agreement.
-3. **Slow regime adaptation**: The 70/30 recent/all-time blend takes too long to react when
-   accuracy shifts dramatically (Fear & Greed crashed 31.7% in 7 days).
-4. **Regime weights incomplete**: Only rsi, macd, ema, bb, volume have regime multipliers.
-   The 19 enhanced signals have no regime adjustment at all.
+### BUG-149: Regime gating is not horizon-aware (P1)
+- **File:** `portfolio/signal_engine.py` line 162
+- **Root cause:** `REGIME_GATED_SIGNALS` applies the same gating regardless of prediction
+  horizon. In ranging regime, `trend` is gated — but it has 61.6% recent accuracy on 3h.
+  We're suppressing a profitable signal on short horizons.
+- **Data:** trend 1d_recent=40.7% (correctly gated), trend 3h_recent=61.6% (incorrectly gated)
+- **Fix:** Make `REGIME_GATED_SIGNALS` horizon-specific. Only gate on horizons where the
+  signal genuinely fails.
 
-### Not Bugs (Working as Designed)
-- Accuracy gate at 0.45 is correctly gating the 10 worst signals
-- Fear & Greed is also regime-gated (only votes in ranging/high-vol)
-- Local model per-ticker accuracy gating works for ministral and qwen3
-- Dynamic MIN_VOTERS correctly raises bar in uncertain regimes
+### BUG-150: HORIZON_SIGNAL_WEIGHTS stale (P2)
+- **File:** `portfolio/signal_engine.py` line 171
+- **Root cause:** Static weights from March 27 audit. Accuracy has shifted since then.
+  Multiple high-performing signals on 3h (smart_money 63.2%, volatility_sig 60.2%,
+  momentum_factors 60.1%) have no boost. Multiple poor performers on 1d (ema 40.8%,
+  heikin_ashi 42.0%) have no penalty.
+- **Fix:** Update weights with March 29 accuracy data.
+
+### BUG-151: EMA has no 1d penalty despite 40.8% recent accuracy (P2)
+- **File:** `portfolio/signal_engine.py` HORIZON_SIGNAL_WEIGHTS
+- **Root cause:** ema at 40.8% on 1d_recent is near gating threshold. Has 1.3x boost
+  on 3h (correct — 62.9%) but no penalty on 1d.
+- **Fix:** Add ema 0.6x penalty for 1d horizon.
 
 ## Improvements Prioritized (impact × ease)
 
-| # | Title | Impact | Effort | Files |
-|---|-------|--------|--------|-------|
-| 1 | Adaptive recency blend weight | HIGH | EASY | `signal_engine.py` |
-| 2 | Raise accuracy gate 0.45 → 0.47 | MED | TRIVIAL | `signal_engine.py` |
-| 3 | Add regime weights for enhanced signals | HIGH | EASY | `signal_engine.py` |
-| 4 | Signal correlation grouping | HIGH | MEDIUM | `signal_engine.py`, `accuracy_stats.py` |
-| 5 | Per-ticker accuracy for all signals | HIGH | MEDIUM | `signal_engine.py`, `accuracy_stats.py` |
+### Tier 1: Implement NOW
 
-## What to Implement NOW
+#### 1. Horizon-aware regime gating
+- **Impact:** HIGH — unlocks 61.6% trend signal on 3h in ranging regime
+- **Effort:** Easy — small dict restructure
+- **Files:** `portfolio/signal_engine.py`
+- **Approach:** Change `REGIME_GATED_SIGNALS` to `{regime: {horizon: frozenset(signals)}}`
+  format. Gate trend on 1d in ranging but NOT on 3h/4h. Gate mean_reversion on 3h
+  in trending but NOT on 1d.
 
-### Batch 1: Adaptive Recency + Gate Threshold (signal_engine.py only)
-1. **Adaptive recency blend**: When `|recent_acc - alltime_acc| > 0.15`, increase recent weight
-   from 0.7 to 0.9. This makes the system react faster to regime shifts.
-2. **Raise accuracy gate**: `ACCURACY_GATE_THRESHOLD = 0.45` → `0.47`. Catches marginal signals
-   like momentum_factors (45.6% blended).
+#### 2. Update HORIZON_SIGNAL_WEIGHTS with fresh data
+- **Impact:** MEDIUM — better weights = better consensus
+- **Effort:** Easy — update dict values
+- **Files:** `portfolio/signal_engine.py`
+- **New 3h boosts:** smart_money 1.2, volatility_sig 1.2, momentum_factors 1.2
+- **New 3h penalties:** bb 0.6, mean_reversion 0.7
+- **New 1d penalties:** ema 0.6, heikin_ashi 0.7
+- **New 1d boosts:** macd 1.2
 
-### Batch 2: Regime Weights for Enhanced Signals (signal_engine.py only)
-3. Add regime-specific weight multipliers for enhanced signals:
-   - `pullback` regime (new): boost fibonacci, mean_reversion, bb; dampen trend, ema
-   - Update existing regime weights with enhanced signal entries
-   - Add `detect_pullback` helper using: RSI < 40, price below 20-SMA, recent drawdown > 5%
+#### 3. Dynamic horizon weight computation (replace static with computed)
+- **Impact:** HIGH — weights auto-update as accuracy changes
+- **Effort:** Medium — new function + caching
+- **Files:** `portfolio/signal_engine.py`
+- **Approach:** Compute multipliers from accuracy_cache per-horizon data. Each signal
+  gets a multiplier = this_horizon_acc / cross_horizon_mean_acc, clamped [0.5, 1.5].
+  This automatically captures horizon-specific performance without manual updates.
+  Keep static dict as default fallback.
 
-### Batch 3: Signal Correlation Deduplication (signal_engine.py)
-4. Group highly correlated signals and cap their combined vote weight.
-   - Define correlation groups in a constant
-   - In `_weighted_consensus`, when multiple signals from same group vote, only count
-     the highest-accuracy one (others get 0.3x weight penalty)
+### Tier 2: Low-hanging fruit
 
-## What to Defer
-- Per-ticker accuracy for all signals (needs significant refactoring of accuracy_stats.py)
-- New signal modules from quant research (need testing period)
-- LLM multi-agent debate system (complex architecture change)
+#### 4. Add `sentiment` to CORRELATION_GROUPS or regime gating
+- **Impact:** MEDIUM — 33.8% on 3h, 46.8% on 1d with large samples
+- **Effort:** Easy
+- **Files:** `portfolio/signal_engine.py`
+- **Approach:** Sentiment is consistently bad. Add to "macro_external" correlation group
+  so it gets penalized when voting with other external signals.
+
+#### 5. Add `forecast` to regime gating for ranging markets
+- **Impact:** MEDIUM — <40% on both horizons recently
+- **Effort:** Easy
+- **Files:** `portfolio/signal_engine.py`
+
+### Deferred
+- Per-ticker accuracy for all signals (not just LLMs) — requires significant refactor
+- Walk-forward PPO/RL for signal combination — too complex for overnight session
+- Multi-agent debate architecture — requires new infrastructure
+- Dynamic accuracy gate threshold per ticker — needs more data
 
 ## Execution Order
 
-1. Batch 1: `signal_engine.py` — adaptive blend + gate threshold → test → commit
-2. Batch 2: `signal_engine.py` — regime weights → test → commit
-3. Batch 3: `signal_engine.py` — correlation groups → test → commit
-4. Write tests for new behavior → commit
-5. Merge to main
+### Batch 1: signal_engine.py improvements (BUG-149, BUG-150, BUG-151)
+1. Make REGIME_GATED_SIGNALS horizon-aware
+2. Update HORIZON_SIGNAL_WEIGHTS with fresh March 29 data
+3. Add new correlation group for macro-external signals
+4. Add forecast to ranging regime gating
+5. Run targeted tests
+
+### Batch 2: Test updates
+1. Add tests for horizon-aware regime gating
+2. Add tests for updated weights
+3. Run full suite
+
+### Batch 3: Dynamic horizon weight computation
+1. Implement `_compute_horizon_weights()` function
+2. Add caching with 1h TTL
+3. Integrate into `_weighted_consensus()`
+4. Add tests
+5. Run full suite
+
+## Risk Assessment
+- All changes in weighting/gating layer, NOT signal computation
+- Signals still compute — we just change combination weights
+- Trivially reversible (revert to static dicts)
+- No config.json changes, no API key exposure
+- Horizon-aware gating is strictly better — it unlocks signals that work
