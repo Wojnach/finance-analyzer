@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-03-31 (after-hours research session)
+- **BUG-152: Trending-up regime gating incomplete (P1)**: Signal audit found 5 signals with 0-11% accuracy in trending-up (trend 0%, ema 11%, volume_flow 10%, macro_regime 11%, momentum_factors low). Plus claude_fundamental at 5.9%. All produce massive false SELL consensus during uptrends. Fix: gate all 6 at `_default` horizon in trending-up. 3h left ungated (short-term signals work in trends).
+- **BUG-153: low_activity_timing correlation group mixes quality tiers (P1)**: Group contained {calendar 62.8%, econ_calendar 86.8%, forecast 36.1%, futures_flow 33.3%}. If forecast became leader, it suppressed excellent signals. Fix: removed forecast and futures_flow from the group.
+- **BUG-154: claude_fundamental no regime gating (P2)**: 62.2% ranging (good), 5.9% trending-up (catastrophic), 30.4% trending-down (bad). Fix: gate in both trending-up and trending-down at `_default`.
+- **BUG-155: bb no trending-down gating (P2)**: 21.7% accuracy in trending-down (46 samples) — false reversal signals. Fix: gate bb in trending-down at `_default`.
+- **BUG-156: forecast actively harmful (P2)**: 36.1% 1d_recent, 38.3% 3h_recent. Verified: blended accuracy (70% recent + 30% all-time) = ~40% at both horizons, below 45% gate. No code change needed — existing accuracy gate catches it.
+- **New tests**: 11 new tests across 3 classes (TestTrendingUpRegimeGating, TestTrendingDownRegimeGating, TestCorrelationGroupSplit), 1 existing test updated. 132 total pass.
+- **Research deliverables**: daily_research_review.json, daily_research_signal_audit.json, daily_research_quant.json, daily_research_ticker_deep_dive.json, daily_research_macro.json, morning_briefing.json.
+- Theme: Regime-Aware Signal Protection, Correlation Group Quality, Breakout Readiness.
+
 ## 2026-03-30 (autonomous improvement session)
 - **BUG-150: Cross-horizon averaging bias (P1)**: `_compute_dynamic_horizon_weights()` used running `(old+new)/2` formula instead of true arithmetic mean. With 3+ cross horizons, the last-processed horizon got ~57% weight (should be 33%). Fix: accumulate sum+count, divide once. Also resolved 1 pre-existing test failure (`test_3h_boosts_news_event`).
 - **REF-18/ARCH-28: Extract `_build_llm_context()` helper**: Ministral and Qwen3 signal blocks had ~80 lines of identical code (timeframe summary, EMA gap, context dict). Extracted shared `_build_llm_context(ticker, ind, timeframes, extra_info)` function. Qwen3 extends with `asset_type`. Net -47 lines.
