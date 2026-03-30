@@ -210,18 +210,32 @@ class TestWeightedConsensusAccuracy:
 class TestWeightedConsensusRegime:
     """Regime weight multipliers from REGIME_WEIGHTS."""
 
-    def test_trending_up_boosts_ema_and_macd(self):
+    def test_trending_up_boosts_ema_and_macd_at_3h(self):
+        # BUG-152: ema is now regime-gated at 1d in trending-up (0-11% accuracy).
+        # At 3h it is NOT gated and gets the 1.5x regime boost.
+        votes = {"ema": "BUY", "rsi": "SELL"}
+        accuracy = {
+            "ema": {"accuracy": 0.6, "total": 50},
+            "rsi": {"accuracy": 0.6, "total": 50},
+        }
+        action, conf = _weighted_consensus(votes, accuracy, "trending-up", horizon="3h")
+        # ema weight = 0.6 * 1.5 (regime) * 1.3 (horizon) = 1.17
+        # rsi weight = 0.6 * 0.7 (regime) = 0.42
+        # BUY=1.17, SELL=0.42 => BUY
+        assert action == "BUY"
+        expected = 1.17 / (1.17 + 0.42)
+        assert conf == pytest.approx(expected, abs=0.01)
+
+    def test_trending_up_gates_ema_at_1d(self):
+        # BUG-152: ema gated in trending-up at _default/1d horizon
         votes = {"ema": "BUY", "rsi": "SELL"}
         accuracy = {
             "ema": {"accuracy": 0.6, "total": 50},
             "rsi": {"accuracy": 0.6, "total": 50},
         }
         action, conf = _weighted_consensus(votes, accuracy, "trending-up")
-        # ema weight = 0.6 * 1.5 = 0.9, rsi weight = 0.6 * 0.7 = 0.42
-        # BUY=0.9, SELL=0.42 => BUY
-        assert action == "BUY"
-        expected = 0.9 / (0.9 + 0.42)
-        assert conf == pytest.approx(expected, abs=0.01)
+        # ema is regime-gated → HOLD, only rsi SELL remains
+        assert action == "SELL"
 
     def test_ranging_boosts_rsi_and_bb(self):
         votes = {"rsi": "BUY", "ema": "SELL"}
@@ -1571,3 +1585,78 @@ class TestMacroExternalCorrelationGroup:
         # had full weight. We test that it's SELL (still majority) but
         # confidence is notably less than ~75%
         assert conf < 0.85  # would be higher without penalty
+
+
+class TestTrendingUpRegimeGating:
+    """BUG-152: SELL-biased signals must be gated in trending-up at 1d."""
+
+    def test_trending_up_gates_sell_biased_signals_at_default(self):
+        """All 6 SELL-biased signals should be gated at _default/1d in trending-up."""
+        from portfolio.signal_engine import _get_regime_gated
+        gated = _get_regime_gated("trending-up")
+        expected = {"trend", "ema", "volume_flow", "macro_regime",
+                    "momentum_factors", "claude_fundamental"}
+        assert expected == gated
+
+    def test_trending_up_does_not_gate_sell_biased_at_3h(self):
+        """SELL-biased signals work short-term — NOT gated at 3h."""
+        from portfolio.signal_engine import _get_regime_gated
+        gated = _get_regime_gated("trending-up", "3h")
+        # Only mean_reversion is gated at 3h in trending-up
+        assert "trend" not in gated
+        assert "ema" not in gated
+        assert "volume_flow" not in gated
+        assert "mean_reversion" in gated
+
+    def test_trending_up_gating_forces_hold_in_consensus(self):
+        """Gated signals should not participate in consensus vote."""
+        votes = {
+            "trend": "SELL",
+            "ema": "SELL",
+            "volume_flow": "SELL",
+            "macro_regime": "SELL",
+            "momentum_factors": "SELL",
+            "rsi": "BUY",
+            "ministral": "BUY",
+        }
+        accuracy = {s: {"accuracy": 0.55, "total": 100} for s in votes}
+        action, conf = _weighted_consensus(votes, accuracy, "trending-up")
+        # 5 SELL signals are gated, only rsi BUY + ministral BUY remain
+        assert action == "BUY"
+
+
+class TestTrendingDownRegimeGating:
+    """BUG-154/155: bb and claude_fundamental gated in trending-down at 1d."""
+
+    def test_trending_down_gates_bb_and_claude_fundamental(self):
+        from portfolio.signal_engine import _get_regime_gated
+        gated = _get_regime_gated("trending-down")
+        assert "bb" in gated
+        assert "claude_fundamental" in gated
+
+    def test_trending_down_does_not_gate_bb_at_3h(self):
+        from portfolio.signal_engine import _get_regime_gated
+        gated = _get_regime_gated("trending-down", "3h")
+        assert "bb" not in gated
+        # mean_reversion is still gated at 3h
+        assert "mean_reversion" in gated
+
+
+class TestCorrelationGroupSplit:
+    """BUG-153: low_activity_timing should not contain forecast/futures_flow."""
+
+    def test_low_activity_group_excludes_forecast(self):
+        from portfolio.signal_engine import CORRELATION_GROUPS
+        assert "forecast" not in CORRELATION_GROUPS["low_activity_timing"]
+
+    def test_low_activity_group_excludes_futures_flow(self):
+        from portfolio.signal_engine import CORRELATION_GROUPS
+        assert "futures_flow" not in CORRELATION_GROUPS["low_activity_timing"]
+
+    def test_low_activity_group_keeps_calendar(self):
+        from portfolio.signal_engine import CORRELATION_GROUPS
+        assert "calendar" in CORRELATION_GROUPS["low_activity_timing"]
+
+    def test_low_activity_group_keeps_econ_calendar(self):
+        from portfolio.signal_engine import CORRELATION_GROUPS
+        assert "econ_calendar" in CORRELATION_GROUPS["low_activity_timing"]

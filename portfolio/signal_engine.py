@@ -170,14 +170,23 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
         "4h": frozenset(),
     },
     "trending-up": {
-        # mean_reversion 1d_recent=65.4% — do NOT gate on daily (works in trends!)
+        # BUG-152: SELL-biased signals have 0-11% accuracy in trending-up.
+        # Gating at 1d prevents false SELL consensus during breakouts.
+        # trend ~0%, ema ~11%, volume_flow ~10%, macro_regime 11.1%, momentum_factors low
+        # claude_fundamental 5.9% trending-up (34 samples) — BUG-154
+        "_default": frozenset({
+            "trend", "ema", "volume_flow", "macro_regime",
+            "momentum_factors", "claude_fundamental",
+        }),
         # mean_reversion 3h_recent=45.5% — gate on short horizons
-        "_default": frozenset(),
+        # SELL-biased signals work short-term even in uptrends — do NOT gate at 3h
         "3h": frozenset({"mean_reversion"}),
         "4h": frozenset({"mean_reversion"}),
     },
     "trending-down": {
-        "_default": frozenset(),
+        # BUG-155: bb 21.7% in trending-down (false reversal signals)
+        # BUG-154: claude_fundamental 30.4% in trending-down
+        "_default": frozenset({"bb", "claude_fundamental"}),
         "3h": frozenset({"mean_reversion"}),
         "4h": frozenset({"mean_reversion"}),
     },
@@ -420,7 +429,10 @@ def _validate_signal_result(result, sig_name=None, max_confidence=1.0):
 # Within a group, only the highest-accuracy signal gets full weight;
 # others get a penalty to prevent correlated signals inflating consensus.
 CORRELATION_GROUPS = {
-    "low_activity_timing": frozenset({"calendar", "econ_calendar", "forecast", "futures_flow"}),
+    # BUG-153: Split low_activity_timing — calendar+econ_calendar are excellent
+    # (62.8%/86.8%) while forecast+futures_flow are broken (36.1%/33.3%).
+    # Mixing them risks forecast becoming leader and suppressing calendar.
+    "low_activity_timing": frozenset({"calendar", "econ_calendar"}),
     "rare_technical": frozenset({"volatility_sig", "oscillators"}),
     # Discovered 2026-03-27: ema/trend corr=0.55, all share SELL bias (37-40%)
     "trend_direction": frozenset({"ema", "trend", "heikin_ashi"}),
