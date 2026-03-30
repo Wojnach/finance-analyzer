@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-03-30 (autonomous improvement session)
+- **BUG-150: Cross-horizon averaging bias (P1)**: `_compute_dynamic_horizon_weights()` used running `(old+new)/2` formula instead of true arithmetic mean. With 3+ cross horizons, the last-processed horizon got ~57% weight (should be 33%). Fix: accumulate sum+count, divide once. Also resolved 1 pre-existing test failure (`test_3h_boosts_news_event`).
+- **REF-18/ARCH-28: Extract `_build_llm_context()` helper**: Ministral and Qwen3 signal blocks had ~80 lines of identical code (timeframe summary, EMA gap, context dict). Extracted shared `_build_llm_context(ticker, ind, timeframes, extra_info)` function. Qwen3 extends with `asset_type`. Net -47 lines.
+- **REF-19: Remove dead funding code**: `main.py:341-342` checked `funding_action`/`funding_rate` in extra dict, but funding signal is disabled and those keys are never set. Removed.
+- **REF-20: outcome_tracker module logger**: Replaced 5 function-local `import logging as _logging` patterns with a single module-level `logger = logging.getLogger("portfolio.outcome_tracker")`.
+- **New tests**: 9 new tests — cross-horizon true mean (2), `_build_llm_context` helper (5), module logger (2). All pass. 1 pre-existing failure resolved.
+- Theme: Signal Weight Accuracy, Code Deduplication, Dead Code Removal.
+
 ## 2026-03-29 (after-hours research session)
 - **BUG-149: Regime gating not horizon-aware (P1)**: `REGIME_GATED_SIGNALS` applied uniformly across all prediction horizons. Trend had 61.6% accuracy on 3h in ranging markets — short-term trends exist within ranges. Fix: restructured to `{regime: {horizon: frozenset(signals)}}` with `_get_regime_gated()` helper. Trend is now only gated on 1d/default in ranging (40.7%), NOT on 3h (61.6%). Mean reversion is gated on 3h in trending (45.5%), NOT on 1d (65.4%).
 - **BUG-150: Stale HORIZON_SIGNAL_WEIGHTS (P2)**: Static weights from March 27 were outdated. Updated with March 29 accuracy audit: 8 new 3h entries (smart_money 1.2, volatility_sig 1.2, momentum_factors 1.2, qwen3 1.2, trend 1.2, oscillators 0.7, bb 0.6, mean_reversion 0.7), 6 new 1d entries (ministral 1.3, macd 1.2, bb 1.2, volatility_sig 0.5, ema 0.6, trend 0.6, heikin_ashi 0.7). Tightened fear_greed 1d from 0.5 to 0.4 (25.9%), forecast from 0.6 to 0.5.

@@ -54,26 +54,30 @@ Branch: improve/auto-session-2026-03-30
 
 ---
 
-## 3. Improvements to Implement
+## 3. Improvements Implemented
 
-### Batch 1: Fix cross-horizon averaging (P1 bug)
-| # | Change | File | Bug | Risk |
-|---|--------|------|-----|------|
-| 1 | Fix running average → true mean in `_compute_dynamic_horizon_weights` | `portfolio/signal_engine.py` | BUG-150 | Low — only changes edge case weights |
+### Batch 1+2: Bug fix + refactor (3 files) ✓ DONE
+**Commit**: `1725eba` — `fix: cross-horizon averaging, extract LLM context, dead code cleanup`
 
-### Batch 2: Refactor duplicated LLM context + dead code cleanup
-| # | Change | File | Bug | Risk |
-|---|--------|------|-----|------|
-| 1 | Extract `_build_llm_context()` helper | `portfolio/signal_engine.py` | REF-18, ARCH-28 | Medium — must preserve both callers' behavior |
-| 2 | Remove dead funding_action/funding_rate code | `portfolio/main.py` | REF-19 | None — dead code removal |
-| 3 | Add module-level logger to outcome_tracker | `portfolio/outcome_tracker.py` | REF-20 | None — logging cleanup |
+| # | Change | File | Bug | Status |
+|---|--------|------|-----|--------|
+| 1 | Fix running average → true mean in `_compute_dynamic_horizon_weights` | `portfolio/signal_engine.py` | BUG-150 | ✓ |
+| 2 | Extract `_build_llm_context()` helper (~40 lines removed) | `portfolio/signal_engine.py` | REF-18, ARCH-28 | ✓ |
+| 3 | Remove dead funding_action/funding_rate code | `portfolio/main.py` | REF-19 | ✓ |
+| 4 | Add module-level logger to outcome_tracker (5 occurrences) | `portfolio/outcome_tracker.py` | REF-20 | ✓ |
 
-### Batch 3: Tests for all changes
-| # | Change | File | Coverage |
-|---|--------|------|----------|
-| 1 | Test `_compute_dynamic_horizon_weights` with 3+ horizons | `tests/test_signal_engine_core.py` | BUG-150 |
-| 2 | Test `_build_llm_context` helper | `tests/test_signal_engine_core.py` | REF-18 |
-| 3 | Test outcome_tracker uses module logger | `tests/test_outcome_tracker.py` | REF-20 |
+Net change: -47 lines (57 insertions, 104 deletions).
+
+### Batch 3: Tests ✓ DONE
+**Commit**: `6051379` — `test: add coverage for BUG-150, REF-18, REF-20`
+
+| # | Change | File | Coverage | Status |
+|---|--------|------|----------|--------|
+| 1 | Test true mean with 3+ cross horizons (2 tests) | `tests/test_signal_engine_core.py` | BUG-150 | ✓ |
+| 2 | Test `_build_llm_context` helper (5 tests) | `tests/test_signal_engine_core.py` | REF-18 | ✓ |
+| 3 | Test module-level logger + no function-local imports (2 tests) | `tests/test_outcome_tracker_core.py` | REF-20 | ✓ |
+
+**Total new tests**: 9 (all passing). **Bonus**: BUG-150 fix also resolved 1 pre-existing test failure (`test_3h_boosts_news_event`).
 
 ---
 
