@@ -19,6 +19,9 @@ from portfolio.avanza.search import find_certificates, find_warrants, search
 # Tick rules
 from portfolio.avanza.tick_rules import clear_cache as clear_tick_cache, get_tick_rules, round_to_tick
 
+# Streaming
+from portfolio.avanza.streaming import AvanzaStream
+
 # Trading
 from portfolio.avanza.trading import (
     cancel_order, delete_stop_loss, get_deals, get_orders, get_stop_losses,
@@ -26,7 +29,7 @@ from portfolio.avanza.trading import (
 )
 
 __all__ = [
-    "AvanzaAuth", "AuthError", "AvanzaClient",
+    "AvanzaAuth", "AuthError", "AvanzaClient", "AvanzaStream",
     "get_positions", "get_buying_power", "get_transactions",
     "get_quote", "get_market_data", "get_ohlc", "get_instrument_info", "get_news",
     "search", "find_warrants", "find_certificates",
