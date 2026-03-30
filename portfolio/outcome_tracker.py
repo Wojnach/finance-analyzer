@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -6,6 +7,8 @@ from portfolio.api_utils import BINANCE_BASE, BINANCE_FAPI_BASE
 from portfolio.file_utils import atomic_append_jsonl
 from portfolio.http_retry import fetch_with_retry
 from portfolio.shared_state import _yfinance_limiter
+
+logger = logging.getLogger("portfolio.outcome_tracker")
 
 _MWU_HORIZON = "1d"  # which outcome horizon to use for MWU weight updates
 
@@ -158,8 +161,7 @@ def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
         db.insert_snapshot(entry)
         db.close()
     except Exception as e:
-        import logging as _logging
-        _logging.getLogger("portfolio.outcome_tracker").debug("SQLite snapshot write failed: %s", e)
+        logger.debug("SQLite snapshot write failed: %s", e)
 
     return entry
 
@@ -320,8 +322,7 @@ def backfill_outcomes(max_entries=2000):
         from portfolio.signal_db import SignalDB
         _db = SignalDB()
     except Exception as e:
-        import logging as _logging
-        _logging.getLogger("portfolio.outcome_tracker").debug("SignalDB open failed: %s", e)
+        logger.debug("SignalDB open failed: %s", e)
 
     for entry in entries:
         entry_ts = datetime.fromisoformat(entry["ts"]).timestamp()
@@ -393,8 +394,7 @@ def backfill_outcomes(max_entries=2000):
                             round(hist_price, 2), change_pct, outcome_ts_str,
                         )
                     except Exception as e:
-                        import logging as _logging
-                        _logging.getLogger("portfolio.outcome_tracker").debug("SQLite outcome write failed: %s", e)
+                        logger.debug("SQLite outcome write failed: %s", e)
 
         entry["outcomes"] = outcomes
 
@@ -438,10 +438,7 @@ def backfill_outcomes(max_entries=2000):
                         _mwu_mgr.update(sig_name, correct)
                     _mwu_mgr.save()
             except Exception:
-                import logging as _logging
-                _logging.getLogger("portfolio.outcome_tracker").debug(
-                    "MWU weight update failed", exc_info=True
-                )
+                logger.debug("MWU weight update failed", exc_info=True)
 
         if entry_updated:
             updated += 1
@@ -450,8 +447,7 @@ def backfill_outcomes(max_entries=2000):
         try:
             _db.close()
         except Exception as e:
-            import logging as _logging
-            _logging.getLogger("portfolio.outcome_tracker").debug("SignalDB close failed: %s", e)
+            logger.debug("SignalDB close failed: %s", e)
 
     import os
     import tempfile

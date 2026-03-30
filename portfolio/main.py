@@ -338,8 +338,6 @@ def run(force_report=False, active_symbols=None):
                     parts.append(f"8B:{extra['ministral_action']}")
                 if "ml_action" in extra:
                     parts.append(f"ML:{extra['ml_action']}")
-                if "funding_action" in extra:
-                    parts.append(f"FR:{extra['funding_rate']}%")
                 if "volume_action" in extra and extra["volume_action"] != "HOLD":
                     parts.append(f"Vol:{extra['volume_ratio']}x")
                 if parts:

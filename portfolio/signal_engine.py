@@ -297,18 +297,18 @@ def _compute_dynamic_horizon_weights(horizon: str) -> dict[str, float]:
         if not cross_horizons:
             return HORIZON_SIGNAL_WEIGHTS.get(horizon, {})
 
-        # Gather comparison accuracies (average across comparison horizons)
-        cross_data: dict[str, float] = {}
+        # Gather comparison accuracies (true mean across comparison horizons)
+        cross_sum: dict[str, float] = {}
+        cross_count: dict[str, int] = {}
         for ch in cross_horizons:
             ch_key = f"{ch}_recent"
             ch_acc = cache.get(ch_key, {})
             for sig, stats in ch_acc.items():
                 if stats.get("total", 0) >= _DYNAMIC_HORIZON_MIN_SAMPLES:
                     acc = stats.get("accuracy", 0.5)
-                    if sig not in cross_data:
-                        cross_data[sig] = acc
-                    else:
-                        cross_data[sig] = (cross_data[sig] + acc) / 2
+                    cross_sum[sig] = cross_sum.get(sig, 0.0) + acc
+                    cross_count[sig] = cross_count.get(sig, 0) + 1
+        cross_data = {sig: cross_sum[sig] / cross_count[sig] for sig in cross_sum}
 
         # Compute multipliers
         weights = {}
@@ -601,6 +601,43 @@ def _load_local_model_accuracy(signal_name, horizon="1d", days=None, cache_ttl=N
             return {}
 
     return _cached(cache_key, ttl, _fetch)
+
+
+def _build_llm_context(ticker, ind, timeframes, extra_info):
+    """Build shared context dict for local LLM signals (Ministral, Qwen3)."""
+    tf_summary = ""
+    if timeframes:
+        parts = []
+        for label, entry in timeframes:
+            if isinstance(entry, dict) and "action" in entry and entry["action"]:
+                ti = entry.get("indicators", {})
+                parts.append(f"{label}: {entry['action']} (RSI={ti.get('rsi', 0):.0f})")
+        if parts:
+            tf_summary = " | ".join(parts)
+
+    ema_gap = (
+        abs(ind["ema9"] - ind["ema21"]) / ind["ema21"] * 100
+        if ind["ema21"] != 0
+        else 0
+    )
+
+    return {
+        "ticker": ticker.replace("-USD", ""),
+        "price_usd": ind["close"],
+        "rsi": round(ind["rsi"], 1),
+        "macd_hist": round(ind["macd_hist"], 2),
+        "ema_bullish": ind["ema9"] > ind["ema21"],
+        "ema_gap_pct": round(ema_gap, 2),
+        "bb_position": ind["price_vs_bb"],
+        "fear_greed": extra_info.get("fear_greed", "N/A"),
+        "fear_greed_class": extra_info.get("fear_greed_class", ""),
+        "news_sentiment": extra_info.get("sentiment", "N/A"),
+        "sentiment_confidence": extra_info.get("sentiment_conf", "N/A"),
+        "volume_ratio": extra_info.get("volume_ratio", "N/A"),
+        "funding_rate": extra_info.get("funding_action", "N/A"),
+        "timeframe_summary": tf_summary,
+        "headlines": "",
+    }
 
 
 def _gate_local_model_vote(signal_name, vote, ticker, config=None):
@@ -1002,45 +1039,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         try:
             from portfolio.ministral_signal import get_ministral_signal
 
-            tf_summary = ""
-            if timeframes:
-                parts = []
-                for label, entry in timeframes:
-                    if (
-                        isinstance(entry, dict)
-                        and "action" in entry
-                        and entry["action"]
-                    ):
-                        ti = entry.get("indicators", {})
-                        parts.append(
-                            f"{label}: {entry['action']} (RSI={ti.get('rsi', 0):.0f})"
-                        )
-                if parts:
-                    tf_summary = " | ".join(parts)
-
-            ema_gap = (
-                abs(ind["ema9"] - ind["ema21"]) / ind["ema21"] * 100
-                if ind["ema21"] != 0
-                else 0
-            )
-
-            ctx = {
-                "ticker": short_ticker,
-                "price_usd": ind["close"],
-                "rsi": round(ind["rsi"], 1),
-                "macd_hist": round(ind["macd_hist"], 2),
-                "ema_bullish": ind["ema9"] > ind["ema21"],
-                "ema_gap_pct": round(ema_gap, 2),
-                "bb_position": ind["price_vs_bb"],
-                "fear_greed": extra_info.get("fear_greed", "N/A"),
-                "fear_greed_class": extra_info.get("fear_greed_class", ""),
-                "news_sentiment": extra_info.get("sentiment", "N/A"),
-                "sentiment_confidence": extra_info.get("sentiment_conf", "N/A"),
-                "volume_ratio": extra_info.get("volume_ratio", "N/A"),
-                "funding_rate": extra_info.get("funding_action", "N/A"),
-                "timeframe_summary": tf_summary,
-                "headlines": "",
-            }
+            ctx = _build_llm_context(ticker, ind, timeframes, extra_info)
             ms = _cached(
                 f"ministral_{short_ticker}",
                 MINISTRAL_TTL,
@@ -1078,54 +1077,14 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         try:
             from portfolio.qwen3_signal import get_qwen3_signal
 
-            tf_summary = ""
-            if timeframes:
-                parts = []
-                for label, entry in timeframes:
-                    if (
-                        isinstance(entry, dict)
-                        and "action" in entry
-                        and entry["action"]
-                    ):
-                        ti = entry.get("indicators", {})
-                        parts.append(
-                            f"{label}: {entry['action']} (RSI={ti.get('rsi', 0):.0f})"
-                        )
-                if parts:
-                    tf_summary = " | ".join(parts)
-
-            ema_gap = (
-                abs(ind["ema9"] - ind["ema21"]) / ind["ema21"] * 100
-                if ind["ema21"] != 0
-                else 0
-            )
-
-            # Determine asset type for prompt context
+            ctx = _build_llm_context(ticker, ind, timeframes, extra_info)
+            # Qwen3 gets asset_type for prompt diversification
             if ticker in CRYPTO_SYMBOLS:
-                asset_type = "cryptocurrency"
+                ctx["asset_type"] = "cryptocurrency"
             elif ticker in METALS_SYMBOLS:
-                asset_type = "precious metal"
+                ctx["asset_type"] = "precious metal"
             else:
-                asset_type = "stock"
-
-            ctx = {
-                "ticker": short_ticker,
-                "asset_type": asset_type,
-                "price_usd": ind["close"],
-                "rsi": round(ind["rsi"], 1),
-                "macd_hist": round(ind["macd_hist"], 2),
-                "ema_bullish": ind["ema9"] > ind["ema21"],
-                "ema_gap_pct": round(ema_gap, 2),
-                "bb_position": ind["price_vs_bb"],
-                "fear_greed": extra_info.get("fear_greed", "N/A"),
-                "fear_greed_class": extra_info.get("fear_greed_class", ""),
-                "news_sentiment": extra_info.get("sentiment", "N/A"),
-                "sentiment_confidence": extra_info.get("sentiment_conf", "N/A"),
-                "volume_ratio": extra_info.get("volume_ratio", "N/A"),
-                "funding_rate": extra_info.get("funding_action", "N/A"),
-                "timeframe_summary": tf_summary,
-                "headlines": "",
-            }
+                ctx["asset_type"] = "stock"
             q3 = _cached(
                 f"qwen3_{short_ticker}",
                 MINISTRAL_TTL,
