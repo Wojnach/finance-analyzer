@@ -1394,6 +1394,157 @@ class TestDynamicHorizonWeights:
         assert _get_horizon_weights("") == {}
 
 
+class TestCrossHorizonTrueMean:
+    """BUG-150: Verify cross-horizon averaging uses true mean, not running average."""
+
+    def test_three_horizons_true_mean(self, tmp_path, monkeypatch):
+        """With 3 cross horizons, all should contribute equally to the mean.
+
+        BUG-150: Before the fix, a running (old+new)/2 average gave the last
+        horizon ~57% weight instead of 33%. This test monkeypatches
+        _CROSS_HORIZON_PAIRS to have 3 entries and verifies true arithmetic mean.
+        """
+        from portfolio.signal_engine import _compute_dynamic_horizon_weights
+
+        # Monkeypatch to give "1d" three cross horizons
+        monkeypatch.setattr("portfolio.signal_engine._CROSS_HORIZON_PAIRS", {
+            "1d": ["3h", "3d", "5d"],
+        })
+
+        cache = {
+            "1d_recent": {
+                "ema": {"accuracy": 0.70, "total": 500},
+            },
+            "3h_recent": {
+                "ema": {"accuracy": 0.40, "total": 500},
+            },
+            "3d_recent": {
+                "ema": {"accuracy": 0.50, "total": 500},
+            },
+            "5d_recent": {
+                "ema": {"accuracy": 0.60, "total": 500},
+            },
+        }
+        cache_file = tmp_path / "accuracy_cache.json"
+        import json
+        cache_file.write_text(json.dumps(cache))
+        monkeypatch.setattr("portfolio.signal_engine.DATA_DIR", tmp_path)
+        from portfolio.shared_state import _tool_cache
+        for key in list(_tool_cache.keys()):
+            if "dynamic_horizon" in key:
+                del _tool_cache[key]
+
+        weights = _compute_dynamic_horizon_weights("1d")
+        # True mean: (0.40 + 0.50 + 0.60) / 3 = 0.50
+        # Ratio: 0.70 / 0.50 = 1.40 (above deadband 0.1, within clamp 0.4-1.5)
+        assert "ema" in weights
+        assert weights["ema"] == 1.4
+
+    def test_two_horizons_same_as_before(self, tmp_path, monkeypatch):
+        """With exactly 2 cross horizons, true mean equals running average (regression check)."""
+        from portfolio.signal_engine import _compute_dynamic_horizon_weights
+
+        cache = {
+            "3h_recent": {
+                "rsi": {"accuracy": 0.70, "total": 500},
+            },
+            "1d_recent": {
+                "rsi": {"accuracy": 0.50, "total": 500},
+            },
+        }
+        cache_file = tmp_path / "accuracy_cache.json"
+        import json
+        cache_file.write_text(json.dumps(cache))
+        monkeypatch.setattr("portfolio.signal_engine.DATA_DIR", tmp_path)
+        from portfolio.shared_state import _tool_cache
+        for key in list(_tool_cache.keys()):
+            if "dynamic_horizon" in key:
+                del _tool_cache[key]
+
+        weights = _compute_dynamic_horizon_weights("3h")
+        # Cross for 3h: ["1d"]
+        # True mean of cross: 0.50 (just one horizon)
+        # Ratio: 0.70 / 0.50 = 1.4
+        assert "rsi" in weights
+        assert weights["rsi"] == 1.4
+
+
+class TestBuildLlmContext:
+    """REF-18: Test the extracted _build_llm_context helper."""
+
+    def test_returns_all_expected_keys(self):
+        from portfolio.signal_engine import _build_llm_context
+
+        ind = {
+            "close": 100.0,
+            "rsi": 55.3,
+            "macd_hist": 0.25,
+            "ema9": 101.0,
+            "ema21": 99.0,
+            "price_vs_bb": 0.75,
+        }
+        extra = {
+            "fear_greed": 42,
+            "fear_greed_class": "Fear",
+            "sentiment": "positive",
+            "sentiment_conf": 0.8,
+            "volume_ratio": 1.2,
+            "funding_action": "HOLD",
+        }
+        timeframes = []
+
+        ctx = _build_llm_context("BTC-USD", ind, timeframes, extra)
+        assert ctx["ticker"] == "BTC"  # -USD stripped
+        assert ctx["price_usd"] == 100.0
+        assert ctx["rsi"] == 55.3
+        assert ctx["ema_bullish"] is True  # 101 > 99
+        assert ctx["fear_greed"] == 42
+        assert ctx["timeframe_summary"] == ""
+        assert ctx["headlines"] == ""
+        assert "asset_type" not in ctx  # Qwen3-specific, not in base
+
+    def test_ticker_without_usd_suffix(self):
+        from portfolio.signal_engine import _build_llm_context
+
+        ind = {"close": 50.0, "rsi": 30.0, "macd_hist": -0.1,
+               "ema9": 48.0, "ema21": 52.0, "price_vs_bb": 0.2}
+        ctx = _build_llm_context("PLTR", ind, [], {})
+        assert ctx["ticker"] == "PLTR"  # no -USD to strip
+
+    def test_ema_gap_zero_division_safe(self):
+        from portfolio.signal_engine import _build_llm_context
+
+        ind = {"close": 50.0, "rsi": 50.0, "macd_hist": 0.0,
+               "ema9": 0.0, "ema21": 0.0, "price_vs_bb": 0.5}
+        ctx = _build_llm_context("BTC-USD", ind, [], {})
+        assert ctx["ema_gap_pct"] == 0.0
+
+    def test_timeframe_summary_formatting(self):
+        from portfolio.signal_engine import _build_llm_context
+
+        ind = {"close": 50.0, "rsi": 50.0, "macd_hist": 0.0,
+               "ema9": 50.0, "ema21": 50.0, "price_vs_bb": 0.5}
+        timeframes = [
+            ("1h", {"action": "BUY", "indicators": {"rsi": 35.0}}),
+            ("4h", {"action": "SELL", "indicators": {"rsi": 72.5}}),
+            ("1d", {"action": "", "indicators": {}}),  # empty action, should skip
+        ]
+        ctx = _build_llm_context("ETH-USD", ind, timeframes, {})
+        assert "1h: BUY (RSI=35)" in ctx["timeframe_summary"]
+        assert "4h: SELL (RSI=72)" in ctx["timeframe_summary"]
+        assert "1d" not in ctx["timeframe_summary"]  # empty action skipped
+
+    def test_missing_extra_keys_use_defaults(self):
+        from portfolio.signal_engine import _build_llm_context
+
+        ind = {"close": 50.0, "rsi": 50.0, "macd_hist": 0.0,
+               "ema9": 50.0, "ema21": 50.0, "price_vs_bb": 0.5}
+        ctx = _build_llm_context("XAU-USD", ind, [], {})
+        assert ctx["fear_greed"] == "N/A"
+        assert ctx["news_sentiment"] == "N/A"
+        assert ctx["volume_ratio"] == "N/A"
+
+
 class TestMacroExternalCorrelationGroup:
     """Test the new macro_external correlation group."""
 

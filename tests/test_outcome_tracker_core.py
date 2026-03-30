@@ -594,3 +594,26 @@ class TestLogSignalSnapshot:
         }
         entry = log_signal_snapshot(signals_dict, {"BTC-USD": 67000}, 10.5, ["test"])
         assert entry["tickers"]["BTC-USD"]["consensus"] == "HOLD"
+
+
+# ---------------------------------------------------------------------------
+# REF-20: Module-level logger (no more function-local import logging)
+# ---------------------------------------------------------------------------
+
+
+class TestModuleLogger:
+    """Verify outcome_tracker uses a module-level logger."""
+
+    def test_has_module_level_logger(self):
+        import portfolio.outcome_tracker as ot
+        import logging
+        assert hasattr(ot, "logger")
+        assert isinstance(ot.logger, logging.Logger)
+        assert ot.logger.name == "portfolio.outcome_tracker"
+
+    def test_no_function_local_logging_import(self):
+        """Ensure no function bodies contain 'import logging as _logging'."""
+        import inspect
+        import portfolio.outcome_tracker as ot
+        source = inspect.getsource(ot)
+        assert "import logging as _logging" not in source

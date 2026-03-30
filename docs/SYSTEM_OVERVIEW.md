@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-03-27
-Branch: improve/auto-session-2026-03-27
+Updated: 2026-03-30
+Branch: improve/auto-session-2026-03-30
 
 ## 1) Architecture Summary
 
@@ -33,7 +33,7 @@ Two-layer autonomous trading system with 30 signals, 20 instruments, and dual-st
 - `config_validator.py`: Startup config validation
 
 ### Signal System (30 signals: 8 core + 19 enhanced + 3 disabled)
-- `signal_engine.py` (1,033 lines): 30-signal voting, weighted consensus, accuracy inversion, confidence penalties, thread-safe sentiment + ADX cache
+- `signal_engine.py` (1,471 lines): 30-signal voting, weighted consensus, accuracy gating, 5-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + ADX cache
 - `signal_registry.py` (135 lines): Plugin-based signal discovery via importlib, lazy loading
 - `signal_utils.py` (130 lines): Shared helpers — SMA, EMA, RSI, majority_vote
 - `signals/*.py` (19 modules): Enhanced composite signals, each with 4-8 sub-indicators
@@ -115,13 +115,25 @@ main.loop()
 - MIN_VOTERS = 3 (all asset classes)
 - Core gate: at least 1 core signal must be active for non-HOLD
 - Confidence = active_voters_in_direction / total_active_voters
-- Sub-50% accuracy signals auto-inverted (30% BUY → 70% SELL)
-- Recency-weighted: 70% recent (7d) + 30% all-time
+- Accuracy gate: signals below 45% accuracy (30+ samples) are force-HOLD (not inverted)
+- Recency-weighted: 70% recent (7d) + 30% all-time; fast blend (90/10) on 15%+ divergence
+- Global confidence cap: 0.80 (70-80% bracket has best actual accuracy at 57-59%)
 
 ### Weighted Consensus
-- Weight = accuracy_weight × regime_multiplier × activation_frequency_normalization
+- Weight = accuracy_weight × regime_mult × horizon_mult × activation_norm × activity_cap × correlation_penalty
 - Regime weights: trending → trust EMA/MACD more; ranging → trust RSI/BB more
+- Regime gating: horizon-aware — some signals gated in certain regimes only for specific prediction horizons
+- Horizon weights: dynamic (computed from accuracy cache ratio this_horizon/cross_horizon) with static fallback
+- Correlation groups: within groups of correlated signals, only the best-accuracy signal gets full weight; others get 0.3x
+- Activity rate cap: signals with >70% activation rate get 0.5x penalty
 - Activation rates: rare, balanced signals get bonus; noisy/biased get penalty
+
+### 5-Stage Confidence Penalty Cascade
+1. Regime penalty: ranging 0.75x, high-vol 0.80x, trend-aligned +10%
+2. Volume/ADX gate: RVOL <0.5 → force HOLD; RVOL <0.8 + ADX <20 + conf <65% → force HOLD
+3. Trap detection: price up + volume declining → 0.5x (bull trap); same for bear traps
+4. Dynamic MIN_VOTERS: trending=3, high-vol=4, ranging=5
+5. Unanimity penalty: 90%+ agreement → 0.6x, 80-90% → 0.75x (high unanimity = already priced in)
 
 ### Signal Inventory (30 total)
 - **Core active (8)**: RSI, MACD, EMA, BB, Fear&Greed, Sentiment, Ministral-8B, Volume
@@ -290,3 +302,13 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-139 (P2): load_json() crashes on PermissionError — **fixed 2026-03-27** (OSError catch)
 - ARCH-23: Extract accuracy blending into reusable function — **done 2026-03-27**
 - ARCH-24: Parameterize accuracy functions with pre-loaded entries — **done 2026-03-27**
+- BUG-143 (P1): Unanimity penalty uses pre-gated vote counts (regime-gated signals counted) — **fixed 2026-03-29** (gating applied before counts)
+- BUG-144 (P1): Forecast regime discount is dead code (regime never passed in context_data) — **fixed 2026-03-29** (regime added to context)
+- ARCH-25: Pass regime through context_data to enhanced signals — **done 2026-03-29**
+- ARCH-26: Post-gated vote counts for penalty stages — **done 2026-03-29**
+- BUG-145 (P2): meta_learner SQLite connection leak on exception — **fixed 2026-03-29** (try/finally)
+- BUG-146 (P2): meta_learner old datetime import style — **fixed 2026-03-29** (UTC modernization)
+- BUG-147 (P2): meta_learner duplicates SIGNAL_NAMES list — **fixed 2026-03-29** (import from tickers)
+- BUG-148 (P2): meta_learner.predict() loads model from disk on every call — **fixed 2026-03-29** (module-level cache with mtime)
+- ARCH-27: Meta-learner model caching for predict() — **done 2026-03-29**
+- BUG-149 (P3): meta_learner orphaned — predict() never called from production (deferred — document or integrate as signal #31)
