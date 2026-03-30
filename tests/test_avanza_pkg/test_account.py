@@ -247,9 +247,10 @@ class TestGetTransactions:
         get_transactions("2026-03-01", "2026-03-31", types=["BUY", "SELL"])
 
         call_kwargs = mock_avanza.get_transactions_details.call_args[1]
-        from avanza.constants import TransactionsDetailsType
-        assert TransactionsDetailsType.BUY in call_kwargs["transaction_details_types"]
-        assert TransactionsDetailsType.SELL in call_kwargs["transaction_details_types"]
+        # Compare by .value to avoid xdist mock contamination of avanza.constants
+        type_values = [t.value for t in call_kwargs["transaction_details_types"]]
+        assert "BUY" in type_values
+        assert "SELL" in type_values
 
     def test_filter_by_account_id(self, mock_avanza):
         mock_avanza.get_transactions_details.return_value = {

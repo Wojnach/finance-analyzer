@@ -96,18 +96,18 @@ class TestSearch:
 
     def test_with_instrument_type(self, mock_avanza):
         mock_avanza.search_for_instrument.return_value = []
-        from avanza.constants import InstrumentType
         search("gold", instrument_type="certificate")
         call_args = mock_avanza.search_for_instrument.call_args[0]
-        assert call_args[0] == InstrumentType.CERTIFICATE
+        # Compare by .name to avoid xdist mock contamination of avanza.constants
+        assert call_args[0].name == "CERTIFICATE"
         assert call_args[1] == "gold"
 
     def test_default_any_type(self, mock_avanza):
         mock_avanza.search_for_instrument.return_value = []
-        from avanza.constants import InstrumentType
         search("SAAB")
         call_args = mock_avanza.search_for_instrument.call_args[0]
-        assert call_args[0] == InstrumentType.ANY
+        # Compare by .name to avoid xdist mock contamination of avanza.constants
+        assert call_args[0].name == "ANY"
 
     def test_custom_limit(self, mock_avanza):
         mock_avanza.search_for_instrument.return_value = []
@@ -135,11 +135,11 @@ class TestFindWarrants:
         mock_avanza.search_for_instrument.return_value = [
             {"id": "999", "name": "WARRANT GOLD", "instrumentType": "WARRANT", "tradable": True},
         ]
-        from avanza.constants import InstrumentType
         results = find_warrants("gold")
         assert len(results) == 1
         call_args = mock_avanza.search_for_instrument.call_args[0]
-        assert call_args[0] == InstrumentType.WARRANT
+        # Compare by .name to avoid xdist mock contamination of avanza.constants
+        assert call_args[0].name == "WARRANT"
 
     def test_default_limit(self, mock_avanza):
         mock_avanza.search_for_instrument.return_value = []
@@ -155,11 +155,11 @@ class TestFindWarrants:
 class TestFindCertificates:
     def test_delegates_with_certificate_type(self, mock_avanza):
         mock_avanza.search_for_instrument.return_value = RAW_HITS
-        from avanza.constants import InstrumentType
         results = find_certificates("silver")
         assert len(results) == 2
         call_args = mock_avanza.search_for_instrument.call_args[0]
-        assert call_args[0] == InstrumentType.CERTIFICATE
+        # Compare by .name to avoid xdist mock contamination of avanza.constants
+        assert call_args[0].name == "CERTIFICATE"
 
     def test_default_limit(self, mock_avanza):
         mock_avanza.search_for_instrument.return_value = []

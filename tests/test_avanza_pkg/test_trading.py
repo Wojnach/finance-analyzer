@@ -125,10 +125,10 @@ class TestPlaceOrder:
             "orderId": "ORD-789",
             "message": "",
         }
-        from avanza.constants import Condition
         place_order("BUY", "123", price=10.0, volume=5, condition="FILL_OR_KILL")
         call_kwargs = mock_avanza.place_order.call_args
-        assert call_kwargs[1]["condition"] == Condition.FILL_OR_KILL
+        # Compare by .value to avoid xdist mock contamination of avanza.constants
+        assert call_kwargs[1]["condition"].value == "FILL_OR_KILL"
 
 
 # ---------------------------------------------------------------------------
@@ -272,8 +272,8 @@ class TestPlaceStopLoss:
         )
         # The trigger object passed to the API should have the right type
         trigger = mock_avanza.place_stop_loss_order.call_args[0][3]
-        from avanza.constants import StopLossTriggerType
-        assert trigger.type == StopLossTriggerType.MORE_OR_EQUAL
+        # Compare by .value to avoid xdist mock contamination of avanza.constants
+        assert trigger.type.value == "MORE_OR_EQUAL"
 
 
 # ---------------------------------------------------------------------------
@@ -295,10 +295,10 @@ class TestPlaceTrailingStop:
         assert result.stop_id == "SL-300"
 
         trigger = mock_avanza.place_stop_loss_order.call_args[0][3]
-        from avanza.constants import StopLossPriceType, StopLossTriggerType
-        assert trigger.type == StopLossTriggerType.FOLLOW_DOWNWARDS
+        # Compare by .value to avoid xdist mock contamination of avanza.constants
+        assert trigger.type.value == "FOLLOW_DOWNWARDS"
         assert trigger.value == 5.0
-        assert trigger.value_type == StopLossPriceType.PERCENTAGE
+        assert trigger.value_type.value == "PERCENTAGE"
 
 
 # ---------------------------------------------------------------------------

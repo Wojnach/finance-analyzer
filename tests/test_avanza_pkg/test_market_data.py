@@ -176,11 +176,12 @@ class TestGetOhlc:
         mock_avanza.get_chart_data.return_value = []
         candles = get_ohlc("123", period="ONE_MONTH", resolution="WEEK")
         assert candles == []
-        # Verify correct enum values were passed
-        from avanza.constants import Resolution, TimePeriod
-        mock_avanza.get_chart_data.assert_called_once_with(
-            "123", TimePeriod.ONE_MONTH, Resolution.WEEK,
-        )
+        # Verify correct enum values were passed (compare by .name to avoid
+        # xdist mock contamination of avanza.constants)
+        call_args = mock_avanza.get_chart_data.call_args[0]
+        assert call_args[0] == "123"
+        assert call_args[1].name == "ONE_MONTH"
+        assert call_args[2].name == "WEEK"
 
     def test_empty_result(self, mock_avanza):
         mock_avanza.get_chart_data.return_value = []
