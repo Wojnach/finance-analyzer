@@ -164,3 +164,65 @@ def spread_zscore(spread_history: list[float], min_samples: int = 5) -> float | 
             return 0.0
         return float(np.sign(diff) * 10.0)
     return float((arr[-1] - mean) / std)
+
+
+# ---------------------------------------------------------------------------
+# Trade-Through Detection (approximate)
+# ---------------------------------------------------------------------------
+
+def detect_trade_throughs(trades: list[dict], threshold_bps: float = 5.0) -> dict:
+    """Detect trade-throughs: trades that jump across multiple price levels.
+
+    A trade-through occurs when a market order is large enough to consume
+    multiple levels of the order book, causing the execution price to jump
+    significantly from the previous trade.  We approximate this from
+    the trades list by detecting price gaps > threshold between consecutive
+    trades in the same direction.
+
+    Args:
+        trades: List of trade dicts with 'price', 'qty', 'sign'.
+        threshold_bps: Minimum price jump in basis points to count as
+                       trade-through (default 5 bps = 0.05%).
+
+    Returns:
+        Dict with buy_throughs, sell_throughs (counts), total_volume_throughs,
+        and max_gap_bps.  Returns zeros if insufficient trades.
+    """
+    if len(trades) < 2:
+        return {
+            "buy_throughs": 0,
+            "sell_throughs": 0,
+            "total_throughs": 0,
+            "through_volume": 0.0,
+            "max_gap_bps": 0.0,
+        }
+
+    buy_throughs = 0
+    sell_throughs = 0
+    through_volume = 0.0
+    max_gap_bps = 0.0
+
+    for i in range(1, len(trades)):
+        prev = trades[i - 1]
+        curr = trades[i]
+        mid_price = (prev["price"] + curr["price"]) / 2.0
+        if mid_price <= 0:
+            continue
+        gap_bps = abs(curr["price"] - prev["price"]) / mid_price * 10000
+
+        if gap_bps >= threshold_bps and curr["sign"] == prev["sign"]:
+            # Same-direction large gap = likely trade-through
+            if curr["sign"] == 1:
+                buy_throughs += 1
+            else:
+                sell_throughs += 1
+            through_volume += curr["qty"]
+            max_gap_bps = max(max_gap_bps, gap_bps)
+
+    return {
+        "buy_throughs": buy_throughs,
+        "sell_throughs": sell_throughs,
+        "total_throughs": buy_throughs + sell_throughs,
+        "through_volume": round(through_volume, 4),
+        "max_gap_bps": round(max_gap_bps, 2),
+    }

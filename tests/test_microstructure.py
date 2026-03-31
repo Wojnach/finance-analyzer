@@ -154,3 +154,63 @@ class TestSpreadZScore:
         from portfolio.microstructure import spread_zscore
         result = spread_zscore([0.5])
         assert result is None
+
+
+# --- Trade-Through Detection ---
+
+class TestDetectTradeThroughs:
+    def test_no_throughs_with_small_gaps(self):
+        from portfolio.microstructure import detect_trade_throughs
+        trades = [
+            {"price": 100.00, "qty": 1.0, "sign": 1},
+            {"price": 100.01, "qty": 1.0, "sign": 1},
+            {"price": 100.02, "qty": 1.0, "sign": 1},
+        ]
+        result = detect_trade_throughs(trades, threshold_bps=5.0)
+        assert result["total_throughs"] == 0
+
+    def test_detects_buy_through(self):
+        from portfolio.microstructure import detect_trade_throughs
+        trades = [
+            {"price": 100.00, "qty": 1.0, "sign": 1},
+            {"price": 100.10, "qty": 2.0, "sign": 1},  # 10 bps gap, same dir
+        ]
+        result = detect_trade_throughs(trades, threshold_bps=5.0)
+        assert result["buy_throughs"] == 1
+        assert result["sell_throughs"] == 0
+        assert result["through_volume"] == pytest.approx(2.0)
+
+    def test_detects_sell_through(self):
+        from portfolio.microstructure import detect_trade_throughs
+        trades = [
+            {"price": 100.10, "qty": 1.0, "sign": -1},
+            {"price": 100.00, "qty": 3.0, "sign": -1},  # 10 bps gap, same dir
+        ]
+        result = detect_trade_throughs(trades, threshold_bps=5.0)
+        assert result["sell_throughs"] == 1
+        assert result["buy_throughs"] == 0
+
+    def test_opposite_direction_not_through(self):
+        from portfolio.microstructure import detect_trade_throughs
+        # Large gap but direction changed — not a trade-through
+        trades = [
+            {"price": 100.00, "qty": 1.0, "sign": 1},
+            {"price": 100.10, "qty": 1.0, "sign": -1},  # direction flip
+        ]
+        result = detect_trade_throughs(trades, threshold_bps=5.0)
+        assert result["total_throughs"] == 0
+
+    def test_max_gap_tracked(self):
+        from portfolio.microstructure import detect_trade_throughs
+        trades = [
+            {"price": 100.00, "qty": 1.0, "sign": 1},
+            {"price": 100.10, "qty": 1.0, "sign": 1},  # ~10 bps
+            {"price": 100.30, "qty": 1.0, "sign": 1},  # ~20 bps
+        ]
+        result = detect_trade_throughs(trades, threshold_bps=5.0)
+        assert result["max_gap_bps"] > 15
+
+    def test_empty_trades(self):
+        from portfolio.microstructure import detect_trade_throughs
+        result = detect_trade_throughs([])
+        assert result["total_throughs"] == 0
