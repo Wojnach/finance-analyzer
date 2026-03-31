@@ -312,3 +312,14 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-148 (P2): meta_learner.predict() loads model from disk on every call — **fixed 2026-03-29** (module-level cache with mtime)
 - ARCH-27: Meta-learner model caching for predict() — **done 2026-03-29**
 - BUG-149 (P3): meta_learner orphaned — predict() never called from production (deferred — document or integrate as signal #31)
+- BUG-157 (P1): `analyze.py:434` loop variable capture in closure (B023) — **fixed 2026-03-31** (default param binding)
+- BUG-158 (P1): `test_signal_improvements.py:402,411` undefined `datetime` in lambda (F821) — **fixed 2026-03-31** (removed dead code)
+- BUG-159 (P2): `avanza_session.py:255` raise without exception chaining (B904) — **fixed 2026-03-31** (`from None`)
+- REF-21: 4 unused imports in portfolio/ (F401) — **fixed 2026-03-31** (auto-fix)
+- REF-22: 3 unused variables in portfolio/ (F841) — **fixed 2026-03-31** (removed)
+- REF-23: 2 f-strings without placeholders (F541) — **fixed 2026-03-31** (auto-fix)
+- REF-24..28: Import sorting, PEP604 annotations, deprecated imports, redundant open modes — **fixed 2026-03-31** (auto-fix)
+- REF-29: Unregistered `slow` pytest mark — **fixed 2026-03-31** (added to pyproject.toml)
+- REF-30: pyproject.toml description "29-signal" → "30-signal" — **fixed 2026-03-31**
+- REF-31: 78 unused imports + 65 unsorted imports in test files — **fixed 2026-03-31** (auto-fix)
+- ARCH-30: 14 `try/except/pass` → `contextlib.suppress` conversions — **done 2026-03-31**
