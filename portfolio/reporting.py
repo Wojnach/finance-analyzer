@@ -1029,6 +1029,23 @@ def _write_tier1_summary(summary):
         "all_prices": {},
     }
 
+    # Market health context for all tiers
+    mh = summary.get("market_health")
+    if mh:
+        t1["market_health"] = {
+            "score": mh.get("score"),
+            "zone": mh.get("zone"),
+            "distribution_days_spy": mh.get("distribution_days_spy"),
+            "ftd_state": mh.get("ftd_state"),
+        }
+    exp = summary.get("exposure_recommendation")
+    if exp:
+        t1["exposure_recommendation"] = {
+            "exposure_ceiling": exp.get("exposure_ceiling"),
+            "bias": exp.get("bias"),
+            "new_entries_allowed": exp.get("new_entries_allowed"),
+        }
+
     # Held positions with actionable detail
     for ticker in held_tickers:
         sig = signals.get(ticker, {})
@@ -1137,9 +1154,10 @@ def _write_tier2_summary(summary, triggered_tickers=None):
                 "price_usd": sig.get("price_usd", 0),
             }
 
-    # Include macro, accuracy, portfolio sections from full summary
+    # Include macro, accuracy, portfolio, and market health sections from full summary
     for key in ("macro", "signal_accuracy_1d", "signal_reliability", "onchain",
-                "cross_asset_leads", "avanza_instruments", "portfolio"):
+                "cross_asset_leads", "avanza_instruments", "portfolio",
+                "market_health", "exposure_recommendation", "earnings_proximity"):
         if key in summary:
             t2[key] = summary[key]
 

@@ -278,8 +278,13 @@ def recommended_size(ticker, portfolio_path=None, agent_summary=None, strategy="
     half_kelly = full_kelly / 2.0
     quarter_kelly = full_kelly / 4.0
 
-    # Recommended size = half Kelly * cash, capped at max allocation
-    rec_sek = min(half_kelly * cash_sek, max_alloc)
+    # Apply exposure ceiling from market health / exposure coach.
+    # Scales position sizes down when the broad market is unhealthy.
+    exposure_rec = agent_summary.get("exposure_recommendation", {})
+    exposure_ceiling = exposure_rec.get("exposure_ceiling", 1.0)
+
+    # Recommended size = half Kelly * cash * exposure_ceiling, capped at max allocation
+    rec_sek = min(half_kelly * cash_sek * exposure_ceiling, max_alloc)
 
     # Minimum trade size check
     if rec_sek < 500:
@@ -291,6 +296,7 @@ def recommended_size(ticker, portfolio_path=None, agent_summary=None, strategy="
         "quarter_kelly_pct": round(quarter_kelly, 4),
         "recommended_sek": round(rec_sek, 0),
         "max_alloc_sek": round(max_alloc, 0),
+        "exposure_ceiling": round(exposure_ceiling, 2),
         "win_prob": round(win_prob, 4),
         "avg_win_pct": round(avg_win, 2),
         "avg_loss_pct": round(avg_loss, 2),
