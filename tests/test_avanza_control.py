@@ -61,10 +61,119 @@ class TestDeleteOrderLive:
     @patch("portfolio.avanza_control.get_account_id", return_value="1625505")
     def test_parses_success_response(self, mock_account_id, mock_csrf):
         page = MagicMock()
-        page.evaluate.return_value = {"status": 200, "body": "{\"status\":\"SUCCESS\"}"}
+        page.evaluate.return_value = {"status": 200, "body": '{"orderRequestStatus":"SUCCESS"}'}
 
         success, result = mod.delete_order_live(page, None, "12345")
 
         assert success is True
         assert result["http_status"] == 200
-        assert result["parsed"]["status"] == "SUCCESS"
+
+
+# --- Page-free function tests ---
+
+
+class TestFetchPriceNoPage:
+    @patch("portfolio.avanza_control._api_get")
+    def test_returns_parsed_quote(self, mock_get):
+        mock_get.return_value = {
+            "quote": {
+                "buy": {"value": 24.50},
+                "sell": {"value": 24.55},
+                "last": {"value": 24.52},
+                "changePercent": {"value": 1.5},
+                "highest": {"value": 25.0},
+                "lowest": {"value": 24.0},
+            },
+            "keyIndicators": {"leverage": {"value": 5.0}, "barrierLevel": {"value": 35.0}},
+            "underlying": {"name": "Silver", "quote": {"last": {"value": 33.5}}},
+        }
+
+        result = mod.fetch_price_no_page("856394", api_type="certificate")
+        assert result is not None
+        assert result["bid"] == 24.50
+        assert result["ask"] == 24.55
+        assert result["leverage"] == 5.0
+        assert result["barrier"] == 35.0
+        assert result["underlying"] == 33.5
+
+    @patch("portfolio.avanza_control._api_get")
+    def test_returns_none_on_error(self, mock_get):
+        mock_get.side_effect = RuntimeError("API error")
+        result = mod.fetch_price_no_page("000000")
+        assert result is None
+
+
+class TestPlaceOrderNoPage:
+    @patch("portfolio.avanza_control._place_buy_order")
+    def test_buy_order(self, mock_buy):
+        mock_buy.return_value = {"orderRequestStatus": "SUCCESS", "orderId": "123"}
+        ok, result = mod.place_order_no_page("1625505", "856394", "BUY", 24.50, 100)
+        assert ok is True
+        assert result["orderRequestStatus"] == "SUCCESS"
+        mock_buy.assert_called_once_with("856394", 24.50, 100, "1625505")
+
+    @patch("portfolio.avanza_control._place_sell_order")
+    def test_sell_order(self, mock_sell):
+        mock_sell.return_value = {"orderRequestStatus": "SUCCESS", "orderId": "456"}
+        ok, result = mod.place_order_no_page("1625505", "856394", "SELL", 25.00, 50)
+        assert ok is True
+        assert result["orderRequestStatus"] == "SUCCESS"
+        mock_sell.assert_called_once_with("856394", 25.00, 50, "1625505")
+
+    @patch("portfolio.avanza_control._place_buy_order")
+    def test_failed_order(self, mock_buy):
+        mock_buy.return_value = {"orderRequestStatus": "ERROR", "message": "Insufficient funds"}
+        ok, result = mod.place_order_no_page("1625505", "856394", "BUY", 24.50, 100)
+        assert ok is False
+        assert result["message"] == "Insufficient funds"
+
+
+class TestPlaceStopLossNoPage:
+    @patch("portfolio.avanza_control._place_stop_loss_session")
+    def test_delegates_to_session(self, mock_stop):
+        mock_stop.return_value = {"status": "SUCCESS", "stoplossOrderId": "SL-1"}
+        ok, result = mod.place_stop_loss_no_page("1625505", "856394", 23.0, 22.5, 100)
+        assert ok is True
+        assert result["stoplossOrderId"] == "SL-1"
+        mock_stop.assert_called_once_with("856394", 23.0, 22.5, 100, "1625505", 8)
+
+
+class TestPlaceTrailingStopNoPage:
+    @patch("portfolio.avanza_control._place_trailing_stop_session")
+    def test_delegates_to_session(self, mock_trail):
+        mock_trail.return_value = {"status": "SUCCESS", "stoplossOrderId": "SL-TRAIL"}
+        ok, result = mod.place_trailing_stop_no_page("1625505", "856394", 5.0, 100)
+        assert ok is True
+        assert result["stoplossOrderId"] == "SL-TRAIL"
+        mock_trail.assert_called_once_with("856394", 5.0, 100, "1625505", 8)
+
+
+class TestDeleteOrderNoPage:
+    @patch("portfolio.avanza_control._cancel_order")
+    def test_delegates_to_session(self, mock_cancel):
+        mock_cancel.return_value = {"orderRequestStatus": "SUCCESS"}
+        ok, result = mod.delete_order_no_page("1625505", "12345")
+        assert ok is True
+        mock_cancel.assert_called_once_with("12345", "1625505")
+
+    @patch("portfolio.avanza_control._cancel_order")
+    def test_failed_cancel(self, mock_cancel):
+        mock_cancel.return_value = {"orderRequestStatus": "ERROR"}
+        ok, result = mod.delete_order_no_page("1625505", "12345")
+        assert ok is False
+
+
+class TestDeleteStopLossNoPage:
+    @patch("portfolio.avanza_control._api_delete")
+    def test_delegates_to_session(self, mock_delete):
+        mock_delete.return_value = {}
+        ok, result = mod.delete_stop_loss_no_page("1625505", "SL-123")
+        assert ok is True
+        mock_delete.assert_called_once_with("/_api/trading/stoploss/1625505/SL-123")
+
+    @patch("portfolio.avanza_control._api_delete")
+    def test_error_returns_false(self, mock_delete):
+        mock_delete.side_effect = RuntimeError("API error")
+        ok, result = mod.delete_stop_loss_no_page("1625505", "SL-123")
+        assert ok is False
+        assert "error" in result

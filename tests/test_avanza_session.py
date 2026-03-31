@@ -364,3 +364,155 @@ class TestLoginHelpers:
         from scripts.avanza_login import _is_logged_in
         cookies = [{"name": "session", "value": "xyz"}]
         assert _is_logged_in({}, cookies=cookies) is False
+
+
+# --- place_stop_loss tests ---
+
+
+class TestPlaceStopLoss:
+    @patch("portfolio.avanza_session.api_post")
+    def test_standard_stop_loss(self, mock_post, session_file):
+        from portfolio.avanza_session import place_stop_loss
+
+        mock_post.return_value = {"status": "SUCCESS", "stoplossOrderId": "SL-123"}
+
+        result = place_stop_loss("856394", trigger_price=23.0, sell_price=22.5, volume=100)
+        assert result["status"] == "SUCCESS"
+        assert result["stoplossOrderId"] == "SL-123"
+
+        # Verify correct endpoint and payload structure
+        call_args = mock_post.call_args
+        assert call_args[0][0] == "/_api/trading/stoploss/new"
+        payload = call_args[0][1]
+        assert payload["accountId"] == "1625505"
+        assert payload["orderBookId"] == "856394"
+        assert payload["stopLossTrigger"]["type"] == "LESS_OR_EQUAL"
+        assert payload["stopLossTrigger"]["value"] == 23.0
+        assert payload["stopLossTrigger"]["valueType"] == "MONETARY"
+        assert payload["stopLossOrderEvent"]["type"] == "SELL"
+        assert payload["stopLossOrderEvent"]["price"] == 22.5
+        assert payload["stopLossOrderEvent"]["volume"] == 100
+
+    @patch("portfolio.avanza_session.api_post")
+    def test_custom_account_id(self, mock_post, session_file):
+        from portfolio.avanza_session import place_stop_loss
+
+        mock_post.return_value = {"status": "SUCCESS", "stoplossOrderId": "SL-456"}
+
+        place_stop_loss("856394", 23.0, 22.5, 100, account_id="9999")
+        payload = mock_post.call_args[0][1]
+        assert payload["accountId"] == "9999"
+
+    @patch("portfolio.avanza_session.api_post")
+    def test_follow_downwards_trigger_type(self, mock_post, session_file):
+        from portfolio.avanza_session import place_stop_loss
+
+        mock_post.return_value = {"status": "SUCCESS", "stoplossOrderId": "SL-TRAIL"}
+
+        place_stop_loss(
+            "856394", trigger_price=5.0, sell_price=0, volume=50,
+            trigger_type="FOLLOW_DOWNWARDS", value_type="PERCENTAGE",
+        )
+        payload = mock_post.call_args[0][1]
+        assert payload["stopLossTrigger"]["type"] == "FOLLOW_DOWNWARDS"
+        assert payload["stopLossTrigger"]["valueType"] == "PERCENTAGE"
+        assert payload["stopLossTrigger"]["value"] == 5.0
+
+
+class TestPlaceTrailingStop:
+    @patch("portfolio.avanza_session.api_post")
+    def test_trailing_stop_delegates_correctly(self, mock_post, session_file):
+        from portfolio.avanza_session import place_trailing_stop
+
+        mock_post.return_value = {"status": "SUCCESS", "stoplossOrderId": "SL-HW"}
+
+        result = place_trailing_stop("856394", trail_percent=5.0, volume=100)
+        assert result["status"] == "SUCCESS"
+
+        payload = mock_post.call_args[0][1]
+        assert payload["stopLossTrigger"]["type"] == "FOLLOW_DOWNWARDS"
+        assert payload["stopLossTrigger"]["valueType"] == "PERCENTAGE"
+        assert payload["stopLossTrigger"]["value"] == 5.0
+        assert payload["stopLossOrderEvent"]["volume"] == 100
+
+    @patch("portfolio.avanza_session.api_post")
+    def test_trailing_stop_custom_percent(self, mock_post, session_file):
+        from portfolio.avanza_session import place_trailing_stop
+
+        mock_post.return_value = {"status": "SUCCESS", "stoplossOrderId": "SL-HW2"}
+
+        place_trailing_stop("856394", trail_percent=3.0, volume=50, valid_days=14)
+        payload = mock_post.call_args[0][1]
+        assert payload["stopLossTrigger"]["value"] == 3.0
+        assert payload["stopLossOrderEvent"]["validDays"] == 14
+
+    @patch("portfolio.avanza_session.api_post")
+    def test_trailing_stop_failure(self, mock_post, session_file):
+        from portfolio.avanza_session import place_trailing_stop
+
+        mock_post.return_value = {"status": "ERROR", "message": "Invalid instrument"}
+
+        result = place_trailing_stop("000000", trail_percent=5.0, volume=1)
+        assert result["status"] == "ERROR"
+
+
+class TestGetStopLosses:
+    @patch("portfolio.avanza_session.api_get")
+    def test_returns_list(self, mock_get, session_file):
+        from portfolio.avanza_session import get_stop_losses
+
+        mock_get.return_value = [
+            {"id": "SL-1", "orderbookId": "856394", "status": "ACTIVE"},
+            {"id": "SL-2", "orderbookId": "2334960", "status": "ACTIVE"},
+        ]
+
+        result = get_stop_losses()
+        assert len(result) == 2
+        assert result[0]["id"] == "SL-1"
+
+    @patch("portfolio.avanza_session.api_get")
+    def test_empty_list(self, mock_get, session_file):
+        from portfolio.avanza_session import get_stop_losses
+
+        mock_get.return_value = []
+        assert get_stop_losses() == []
+
+    @patch("portfolio.avanza_session.api_get")
+    def test_error_returns_empty(self, mock_get, session_file):
+        from portfolio.avanza_session import get_stop_losses
+
+        mock_get.side_effect = RuntimeError("API error")
+        assert get_stop_losses() == []
+
+
+class TestApiDelete:
+    @patch("portfolio.avanza_session._get_csrf", return_value="csrf-token")
+    @patch("portfolio.avanza_session._get_playwright_context")
+    def test_successful_delete(self, mock_get_ctx, mock_csrf, session_file):
+        from portfolio.avanza_session import api_delete
+
+        mock_ctx = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.ok = True
+        mock_resp.text.return_value = ""
+        mock_ctx.request.delete.return_value = mock_resp
+        mock_get_ctx.return_value = mock_ctx
+
+        result = api_delete("/_api/trading/stoploss/1625505/SL-1")
+        assert result["http_status"] == 200
+        assert result["ok"] is True
+
+    @patch("portfolio.avanza_session._get_csrf", return_value="csrf-token")
+    @patch("portfolio.avanza_session._get_playwright_context")
+    def test_401_raises(self, mock_get_ctx, mock_csrf, session_file):
+        from portfolio.avanza_session import api_delete
+
+        mock_ctx = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status = 401
+        mock_ctx.request.delete.return_value = mock_resp
+        mock_get_ctx.return_value = mock_ctx
+
+        with pytest.raises(AvanzaSessionError, match="401"):
+            api_delete("/_api/test")

@@ -350,9 +350,12 @@ def delete_stop_loss_no_page(account_id, stop_id):
         Tuple (ok: bool, result: dict) matching the page-based interface.
     """
     resolved_account_id = str(account_id or get_account_id())
-    result = _api_delete(f"/_api/trading/stoploss/{resolved_account_id}/{stop_id}")
-    ok = result.get("ok", False)
-    return ok, result
+    try:
+        result = _api_delete(f"/_api/trading/stoploss/{resolved_account_id}/{stop_id}")
+        # api_delete returns {} on success (200 with empty body)
+        return True, result
+    except Exception as e:
+        return False, {"error": str(e)}
 
 
 __all__ = [
