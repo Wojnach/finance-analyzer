@@ -1156,5 +1156,42 @@ def api_golddigger():
     })
 
 
+# ---------------------------------------------------------------------------
+# Market health
+# ---------------------------------------------------------------------------
+
+@app.route("/api/market-health")
+@require_auth
+def api_market_health():
+    """Return market health snapshot (distribution days, FTD, breadth score).
+
+    Also includes exposure recommendation and earnings proximity data.
+    """
+    try:
+        result = {}
+        # Market health from agent_summary (pre-computed) or live
+        summary = _read_json(DATA_DIR / "agent_summary.json")
+        if summary and "market_health" in summary:
+            result["market_health"] = summary["market_health"]
+        else:
+            try:
+                from portfolio.market_health import get_market_health
+                mh = get_market_health()
+                if mh:
+                    result["market_health"] = mh
+            except Exception:
+                pass
+
+        if summary:
+            if "exposure_recommendation" in summary:
+                result["exposure_recommendation"] = summary["exposure_recommendation"]
+            if "earnings_proximity" in summary:
+                result["earnings_proximity"] = summary["earnings_proximity"]
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5055, debug=False)
