@@ -25,7 +25,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from portfolio.avanza_control import delete_order_live, delete_stop_loss, place_order, place_stop_loss
+from portfolio.avanza_control import (
+    delete_order_no_page,
+    delete_stop_loss_no_page,
+    place_order_no_page,
+    place_stop_loss_no_page,
+)
 from portfolio.avanza_session import verify_session
 from portfolio.exit_optimizer import MarketSnapshot, Position, compute_exit_plan
 from portfolio.file_utils import (
@@ -1252,16 +1257,6 @@ def plan_cycle(
     return current_state, plans, actions
 
 
-def _page_with_session():
-    # Local import: avanza_control functions still require a Playwright page object.
-    # This will be removed once avanza_control is migrated to use api_get/api_post.
-    from portfolio.avanza_session import _get_playwright_context
-    ctx = _get_playwright_context()
-    page = ctx.new_page()
-    page.goto("https://www.avanza.se/min-ekonomi/oversikt.html", wait_until="domcontentloaded", timeout=15000)
-    return page
-
-
 def _validate_action(action: dict) -> str | None:
     """Return an error message if the action is invalid, or None if OK."""
     act = action.get("action")
@@ -1298,78 +1293,64 @@ def execute_actions(
                 on_result(result)
         return results
 
-    page = _page_with_session()
     results: list[dict] = []
-    try:
-        for action in actions:
-            # Pre-execution validation — skip invalid actions instead of crashing
-            validation_error = _validate_action(action)
-            if validation_error:
-                logger.warning("Skipping invalid action: %s — %s", validation_error, action)
-                fail_result = {"ok": False, "result": {"error": validation_error}, **action}
-                results.append(fail_result)
-                if on_result is not None:
-                    on_result(fail_result)
-                continue
-
-            # Per-action try/except — one action failing must not prevent the
-            # remaining actions from executing.  A cancel that succeeds followed
-            # by a place that throws would otherwise leave the position naked.
-            try:
-                account_id = str(action.get("account_id") or "") or None
-                order_type = str(action.get("order_type") or "limit_order")
-                if action["action"] == "cancel" and order_type == "stop_loss":
-                    ok, result = delete_stop_loss(page, account_id, action["order_id"])
-                elif action["action"] == "cancel":
-                    ok, result = delete_order_live(page, account_id, action["order_id"])
-                elif order_type == "stop_loss":
-                    ok, stop_id = place_stop_loss(
-                        page,
-                        account_id,
-                        action["orderbook_id"],
-                        float(action["trigger_price"]),
-                        float(action["price"]),
-                        int(action["volume"]),
-                        valid_days=int(action.get("valid_days") or HARD_STOP_VALID_DAYS),
-                    )
-                    result = {"stop_id": stop_id}
-                else:
-                    ok, result = place_order(
-                        page,
-                        account_id,
-                        action["orderbook_id"],
-                        action["side"],
-                        float(action["price"]),
-                        int(action["volume"]),
-                    )
-                results.append({
-                    "ok": ok,
-                    "result": result,
-                    **action,
-                })
-            except Exception as exc:
-                logger.error(
-                    "Action execution crashed for %s %s on %s: %s",
-                    action.get("action"), action.get("side", ""),
-                    action.get("orderbook_id", ""), exc,
-                    exc_info=True,
-                )
-                results.append({
-                    "ok": False,
-                    "result": {"error": str(exc)},
-                    **action,
-                })
+    for action in actions:
+        # Pre-execution validation — skip invalid actions instead of crashing
+        validation_error = _validate_action(action)
+        if validation_error:
+            logger.warning("Skipping invalid action: %s — %s", validation_error, action)
+            fail_result = {"ok": False, "result": {"error": validation_error}, **action}
+            results.append(fail_result)
             if on_result is not None:
-                on_result(results[-1])
-    finally:
+                on_result(fail_result)
+            continue
+
+        # Per-action try/except — one action failing must not prevent the
+        # remaining actions from executing.  A cancel that succeeds followed
+        # by a place that throws would otherwise leave the position naked.
         try:
-            page.close()
-        except Exception as e:
-            logger.debug("Snipe manager page close failed: %s", e)
-        # Local import: session cleanup still requires close_playwright until
-        # avanza_control is migrated to use api_get/api_post.
-        from portfolio.avanza_session import close_playwright
-        close_playwright()
+            account_id = str(action.get("account_id") or "") or None
+            order_type = str(action.get("order_type") or "limit_order")
+            if action["action"] == "cancel" and order_type == "stop_loss":
+                ok, result = delete_stop_loss_no_page(account_id, action["order_id"])
+            elif action["action"] == "cancel":
+                ok, result = delete_order_no_page(account_id, action["order_id"])
+            elif order_type == "stop_loss":
+                ok, result = place_stop_loss_no_page(
+                    account_id,
+                    action["orderbook_id"],
+                    float(action["trigger_price"]),
+                    float(action["price"]),
+                    int(action["volume"]),
+                    valid_days=int(action.get("valid_days") or HARD_STOP_VALID_DAYS),
+                )
+            else:
+                ok, result = place_order_no_page(
+                    account_id,
+                    action["orderbook_id"],
+                    action["side"],
+                    float(action["price"]),
+                    int(action["volume"]),
+                )
+            results.append({
+                "ok": ok,
+                "result": result,
+                **action,
+            })
+        except Exception as exc:
+            logger.error(
+                "Action execution crashed for %s %s on %s: %s",
+                action.get("action"), action.get("side", ""),
+                action.get("orderbook_id", ""), exc,
+                exc_info=True,
+            )
+            results.append({
+                "ok": False,
+                "result": {"error": str(exc)},
+                **action,
+            })
+        if on_result is not None:
+            on_result(results[-1])
     return results
 
 
