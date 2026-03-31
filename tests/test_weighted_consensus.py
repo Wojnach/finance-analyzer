@@ -475,12 +475,13 @@ class TestRegimeWeights:
         assert conf_up == conf_down
 
     def test_ranging_boosts_rsi_bb(self):
-        votes = {"rsi": "BUY", "ema": "SELL"}
-        acc = _acc_dict(["rsi", "ema"], 0.6, 50)
+        # Use candlestick instead of ema — ema is regime-gated in ranging (daily+)
+        votes = {"rsi": "BUY", "candlestick": "SELL"}
+        acc = _acc_dict(["rsi", "candlestick"], 0.6, 50)
         action, conf = _weighted_consensus(votes, acc, "ranging")
-        # rsi: 0.6 * 1.5 = 0.9, ema: 0.6 * 0.5 = 0.3
+        # rsi: 0.6 * 1.5 = 0.9, candlestick: 0.6 * 1.0 = 0.6
         assert action == "BUY"
-        assert conf == pytest.approx(0.9 / (0.9 + 0.3), abs=0.01)
+        assert conf == pytest.approx(0.9 / (0.9 + 0.6), abs=0.01)
 
     def test_ranging_boosts_bb(self):
         votes = {"bb": "SELL", "macd": "BUY"}

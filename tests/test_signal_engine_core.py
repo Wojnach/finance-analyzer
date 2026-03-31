@@ -238,16 +238,17 @@ class TestWeightedConsensusRegime:
         assert action == "SELL"
 
     def test_ranging_boosts_rsi_and_bb(self):
-        votes = {"rsi": "BUY", "ema": "SELL"}
+        # Use candlestick instead of ema — ema is regime-gated in ranging (daily+)
+        votes = {"rsi": "BUY", "candlestick": "SELL"}
         accuracy = {
             "rsi": {"accuracy": 0.6, "total": 50},
-            "ema": {"accuracy": 0.6, "total": 50},
+            "candlestick": {"accuracy": 0.6, "total": 50},
         }
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # rsi weight = 0.6 * 1.5 = 0.9, ema weight = 0.6 * 0.5 = 0.3
-        # BUY=0.9, SELL=0.3 => BUY
+        # rsi weight = 0.6 * 1.5 = 0.9, candlestick weight = 0.6 * 1.0 = 0.6
+        # BUY=0.9, SELL=0.6 => BUY
         assert action == "BUY"
-        expected = 0.9 / (0.9 + 0.3)
+        expected = 0.9 / (0.9 + 0.6)
         assert conf == pytest.approx(expected, abs=0.01)
 
     def test_high_vol_boosts_bb_and_volume(self):
@@ -282,21 +283,22 @@ class TestWeightedConsensusActivationRates:
     """Activation rate normalization (rarity * bias correction)."""
 
     def test_activation_rate_scales_weight(self):
-        votes = {"rsi": "BUY", "ema": "SELL"}
+        # Use candlestick instead of ema — ema is regime-gated in ranging (daily+)
+        votes = {"rsi": "BUY", "candlestick": "SELL"}
         accuracy = {
             "rsi": {"accuracy": 0.6, "total": 50},
-            "ema": {"accuracy": 0.6, "total": 50},
+            "candlestick": {"accuracy": 0.6, "total": 50},
         }
         activation = {
             "rsi": {"normalized_weight": 2.0},  # rare signal, boosted
-            "ema": {"normalized_weight": 0.5},   # noisy signal, dampened
+            "candlestick": {"normalized_weight": 0.5},   # noisy signal, dampened
         }
         action, conf = _weighted_consensus(votes, accuracy, "ranging", activation_rates=activation)
         # rsi: 0.6 * 1.5(ranging) * 2.0 = 1.8
-        # ema: 0.6 * 0.5(ranging) * 0.5 = 0.15
-        # BUY=1.8, SELL=0.15 => BUY
+        # candlestick: 0.6 * 1.0(ranging) * 0.5 = 0.3
+        # BUY=1.8, SELL=0.3 => BUY
         assert action == "BUY"
-        expected = 1.8 / (1.8 + 0.15)
+        expected = 1.8 / (1.8 + 0.3)
         assert conf == pytest.approx(expected, abs=0.01)
 
     def test_missing_activation_rate_defaults_to_1(self):
@@ -806,8 +808,9 @@ class TestRegimeWeightsConstant:
         """Enhanced signals should have regime weights in ranging."""
         rw = REGIME_WEIGHTS["ranging"]
         assert rw["mean_reversion"] == 1.5
-        assert rw["fibonacci"] == 1.4
+        assert rw["fibonacci"] == 1.6  # updated 2026-03-31 (68.2% recent accuracy)
         assert rw["trend"] == 0.5
+        assert rw["fear_greed"] == 0.3  # added 2026-03-31 (25.9% recent accuracy)
 
     def test_trending_up_has_enhanced_weights(self):
         """Enhanced signals should have regime weights in trending-up."""
@@ -1096,9 +1099,9 @@ class TestActivityRateCap:
             votes, accuracy, "ranging", activation_rates=activation
         )
         # rsi: 0.55 * 1.5(regime ranging) * 1.0 = 0.825
-        # fibonacci: 0.55 * 1.4(regime ranging) * 1.0 = 0.77
-        # rsi SELL wins
-        assert action == "SELL"
+        # fibonacci: 0.55 * 1.6(regime ranging) * 1.0 = 0.88
+        # fibonacci BUY wins (updated 2026-03-31: fibonacci ranging weight 1.4 -> 1.6)
+        assert action == "BUY"
 
 
 # ===========================================================================
@@ -1156,10 +1159,16 @@ class TestRegimeGatingBeforeVoteCounts:
         """
         from portfolio.signal_engine import _get_regime_gated
 
-        # Verify ranging gates trend and momentum_factors on default horizon
+        # Verify ranging gates trend, momentum_factors, ema, heikin_ashi,
+        # structure, fear_greed, macro_regime on default horizon (2026-03-31 update)
         gated = _get_regime_gated("ranging")
         assert "trend" in gated
         assert "momentum_factors" in gated
+        assert "ema" in gated
+        assert "heikin_ashi" in gated
+        assert "structure" in gated
+        assert "fear_greed" in gated
+        assert "macro_regime" in gated
 
         votes = {
             "rsi": "BUY", "macd": "BUY", "ema": "BUY",
@@ -1175,25 +1184,30 @@ class TestRegimeGatingBeforeVoteCounts:
             if sig_name in gated_votes and gated_votes[sig_name] != "HOLD":
                 gated_votes[sig_name] = "HOLD"
 
-        # Post-gating: trend and momentum_factors should be HOLD
+        # Post-gating: trend, momentum_factors, AND ema should be HOLD
         assert gated_votes["trend"] == "HOLD"
         assert gated_votes["momentum_factors"] == "HOLD"
+        assert gated_votes["ema"] == "HOLD"
 
         # Post-gated counts
         buy_count = sum(1 for v in gated_votes.values() if v == "BUY")
         sell_count = sum(1 for v in gated_votes.values() if v == "SELL")
 
-        # 3 BUY (rsi, macd, ema) — trend and momentum_factors gated
-        assert buy_count == 3
+        # 2 BUY (rsi, macd) — trend, momentum_factors, ema all gated
+        assert buy_count == 2
         assert sell_count == 1  # bb
 
     def test_ranging_regime_3h_keeps_trend_active(self):
-        """In ranging regime at 3h horizon, trend is NOT gated."""
+        """In ranging regime at 3h horizon, trend is NOT gated but fear_greed is."""
         from portfolio.signal_engine import _get_regime_gated
 
         gated = _get_regime_gated("ranging", "3h")
         assert "trend" not in gated
         assert "momentum_factors" not in gated
+        assert "ema" not in gated  # ema works at 3h (62.9%)
+        # fear_greed and macro_regime stay gated at ALL horizons (structural failure)
+        assert "fear_greed" in gated
+        assert "macro_regime" in gated
 
     def test_unanimity_ratio_changes_after_gating(self):
         """Gating should change the unanimity ratio used by Stage 5 penalty.
