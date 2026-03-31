@@ -1,4 +1,4 @@
-"""Composite volatility signal — 6 sub-indicators with majority voting.
+"""Composite volatility signal — 7 sub-indicators with majority voting.
 
 Sub-indicators:
     1. BB Squeeze: detects low-volatility compression and breakout release
@@ -7,6 +7,7 @@ Sub-indicators:
     4. Keltner Channel(20, 1.5): trend breakout via EMA + ATR envelope
     5. Historical Volatility: 20-day realized vol trend vs price direction
     6. Donchian Channel(20): high/low breakout over rolling window
+    7. GARCH(1,1): conditional volatility vs realized — regime detection
 """
 
 from __future__ import annotations
@@ -225,6 +226,65 @@ def _donchian_channel(high: pd.Series, low: pd.Series,
 
 
 # ---------------------------------------------------------------------------
+# Sub-indicator 7: GARCH(1,1) Conditional Volatility
+# ---------------------------------------------------------------------------
+
+def _garch_signal(close: pd.Series, lookback: int = 100) -> tuple[str, dict]:
+    """Simple GARCH(1,1) volatility estimator without external libraries.
+
+    Fits omega + alpha * r^2(t-1) + beta * sigma^2(t-1) iteratively.
+    Uses fixed alpha=0.1, beta=0.85 (standard GARCH(1,1) parameters).
+
+    Signal logic:
+        GARCH vol rising AND above realized vol -> volatility expansion -> SELL (caution)
+        GARCH vol falling AND below realized vol -> compression -> BUY (breakout setup)
+        Otherwise -> HOLD
+    """
+    if len(close) < lookback:
+        return "HOLD", {"garch_vol": 0.0, "realized_vol": 0.0, "garch_ratio": 0.0}
+
+    prices = close.iloc[-lookback:].values
+    returns = np.diff(np.log(prices))
+
+    if len(returns) < 20:
+        return "HOLD", {"garch_vol": 0.0, "realized_vol": 0.0, "garch_ratio": 0.0}
+
+    # GARCH(1,1) with fixed parameters
+    alpha = 0.10
+    beta = 0.85
+    omega = (1 - alpha - beta) * np.var(returns)
+
+    sigma2 = np.var(returns)  # initial variance
+    garch_variances = []
+    for r in returns:
+        sigma2 = omega + alpha * r ** 2 + beta * sigma2
+        garch_variances.append(sigma2)
+
+    current_garch_vol = float(np.sqrt(garch_variances[-1]) * np.sqrt(252) * 100)
+    prev_garch_vol = float(np.sqrt(garch_variances[-2]) * np.sqrt(252) * 100) if len(garch_variances) >= 2 else current_garch_vol
+
+    # Realized vol (20-day)
+    realized_vol = float(np.std(returns[-20:]) * np.sqrt(252) * 100)
+
+    ratio = current_garch_vol / realized_vol if realized_vol > 0 else 1.0
+
+    indicators = {
+        "garch_vol": round(current_garch_vol, 2),
+        "realized_vol": round(realized_vol, 2),
+        "garch_ratio": round(ratio, 3),
+    }
+
+    # Rising GARCH above realized = expanding risk = SELL (caution)
+    if current_garch_vol > prev_garch_vol and ratio > 1.2:
+        return "SELL", indicators
+    # Falling GARCH below realized = compression = BUY (breakout setup)
+    if current_garch_vol < prev_garch_vol and ratio < 0.8:
+        return "BUY", indicators
+
+    return "HOLD", indicators
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -335,6 +395,15 @@ def compute_volatility_signal(df: pd.DataFrame) -> dict[str, Any]:
         logger.error("donchian failed: %s", exc)
         sub_signals["donchian"] = "HOLD"
         indicators.update({"donchian_upper": 0.0, "donchian_lower": 0.0})
+
+    try:
+        action, ind = _garch_signal(close)
+        sub_signals["garch"] = action
+        indicators.update(ind)
+    except Exception as exc:
+        logger.error("garch failed: %s", exc)
+        sub_signals["garch"] = "HOLD"
+        indicators.update({"garch_vol": 0.0, "realized_vol": 0.0, "garch_ratio": 0.0})
 
     # -- Majority vote --------------------------------------------------------
     votes = list(sub_signals.values())

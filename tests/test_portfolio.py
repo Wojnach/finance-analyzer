@@ -409,7 +409,7 @@ class TestMinistralSignalWrapper:
         fake_result.returncode = 0
         fake_result.stdout = '{"action": "BUY", "reasoning": "test", "model": "CryptoTrader-LM"}\n'
 
-        with mock.patch("subprocess.run", return_value=fake_result) as run_mock:
+        with mock.patch("portfolio.ministral_signal.run_safe", return_value=fake_result) as run_mock:
             get_ministral_signal({"ticker": "BTC", "price_usd": 69000})
 
         cmd = run_mock.call_args.args[0]
@@ -426,7 +426,7 @@ class TestMinistralSignalWrapper:
             '{"action": "BUY", "reasoning": "test", "model": "CryptoTrader-LM"}\n'
         )
 
-        with mock.patch("subprocess.run", return_value=fake_result):
+        with mock.patch("portfolio.ministral_signal.run_safe", return_value=fake_result):
             result = get_ministral_signal({"ticker": "BTC", "price_usd": 69000})
         assert result["original"]["action"] == "BUY"
         assert result["original"]["model"] == "CryptoTrader-LM"
@@ -443,7 +443,7 @@ class TestMinistralSignalWrapper:
             '{"action": "SELL", "reasoning": "test", "model": "CryptoTrader-LM"}\n'
         )
 
-        with mock.patch("subprocess.run", return_value=fake_result):
+        with mock.patch("portfolio.ministral_signal.run_safe", return_value=fake_result):
             result = get_ministral_signal({"ticker": "BTC", "price_usd": 69000})
         assert result["original"]["action"] == "SELL"
 
@@ -456,7 +456,7 @@ class TestMinistralSignalWrapper:
         fake_result.returncode = 1
         fake_result.stderr = "Error: model not found"
 
-        with mock.patch("subprocess.run", return_value=fake_result):
+        with mock.patch("portfolio.ministral_signal.run_safe", return_value=fake_result):
             with pytest.raises(RuntimeError, match="Ministral failed"):
                 get_ministral_signal({"ticker": "BTC", "price_usd": 69000})
 

@@ -124,7 +124,7 @@ class TestBasicComputation:
         result = compute_mean_reversion_signal(df)
         expected_keys = {
             "rsi2_mr", "rsi3_mr", "ibs", "consecutive_days",
-            "gap_fill", "bb_pct_b", "ibs_rsi2_combined",
+            "gap_fill", "bb_pct_b", "ibs_rsi2_combined", "half_life_mr",
         }
         assert set(result["sub_signals"].keys()) == expected_keys
 
@@ -135,6 +135,7 @@ class TestBasicComputation:
             "rsi2", "rsi3", "ibs", "consecutive_days",
             "gap_pct", "gap_fill_pct", "bb_pct_b",
             "combined_ibs", "combined_rsi2",
+            "half_life", "zscore",
         }
         assert set(result["indicators"].keys()) == expected_keys
 

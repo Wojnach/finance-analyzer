@@ -138,11 +138,10 @@ class TestLoopConstants:
 class TestReadSignalData:
     @patch("metals_loop.os.path.exists", return_value=True)
     @patch("metals_loop.os.path.getmtime", return_value=time.time())
-    @patch("builtins.open")
-    def test_reads_crypto_tickers(self, mock_open, mock_mtime, mock_exists):
+    def test_reads_crypto_tickers(self, mock_mtime, mock_exists):
         from metals_loop import read_signal_data
         data = {
-            "tickers": {
+            "signals": {
                 "XAG-USD": {"action": "BUY", "confidence": 0.7, "rsi": 45,
                              "bb_position": "inside", "regime": "trending-up",
                              "atr_pct": 4.2, "extra": {"_buy_count": 5, "_sell_count": 1, "_voters": 6}},
@@ -157,11 +156,11 @@ class TestReadSignalData:
                 "BTC-USD": {"Now": "SELL", "12h": "HOLD"},
             },
         }
+        mock_open = MagicMock()
         mock_open.return_value.__enter__ = lambda s: s
         mock_open.return_value.__exit__ = MagicMock(return_value=False)
-        mock_open.return_value.read = lambda: json.dumps(data)
-        # Use json.load mock
-        with patch("metals_loop.json.load", return_value=data):
+        with patch("builtins.open", mock_open), \
+             patch("metals_loop.json.load", return_value=data):
             result = read_signal_data()
             assert "BTC-USD" in result
             assert result["BTC-USD"]["action"] == "SELL"
@@ -170,8 +169,7 @@ class TestReadSignalData:
 
     @patch("metals_loop.os.path.exists", return_value=True)
     @patch("metals_loop.os.path.getmtime", return_value=time.time())
-    @patch("builtins.open")
-    def test_preserves_forecasts_and_extra_payload(self, mock_open, mock_mtime, mock_exists):
+    def test_preserves_forecasts_and_extra_payload(self, mock_mtime, mock_exists):
         from metals_loop import read_signal_data
         data = {
             "forecast_signals": {
@@ -180,7 +178,7 @@ class TestReadSignalData:
             "cumulative_gains": {
                 "XAG-USD": {"1d": 1.2},
             },
-            "tickers": {
+            "signals": {
                 "XAG-USD": {
                     "action": "BUY",
                     "confidence": 0.7,
@@ -201,10 +199,11 @@ class TestReadSignalData:
                 },
             },
         }
+        mock_open = MagicMock()
         mock_open.return_value.__enter__ = lambda s: s
         mock_open.return_value.__exit__ = MagicMock(return_value=False)
-        mock_open.return_value.read = lambda: json.dumps(data)
-        with patch("metals_loop.json.load", return_value=data):
+        with patch("builtins.open", mock_open), \
+             patch("metals_loop.json.load", return_value=data):
             result = read_signal_data()
             assert result["forecast_signals"]["XAG-USD"]["chronos_24h_pct"] == 6.5
             assert result["cumulative_gains"]["XAG-USD"]["1d"] == 1.2

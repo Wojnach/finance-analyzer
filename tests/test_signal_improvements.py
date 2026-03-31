@@ -128,8 +128,8 @@ class TestNamedVotes:
         assert "ministral" in votes
         # custom_lora fully disabled (20.9% accuracy, 97% SELL bias)
         assert "custom_lora" not in votes
-        # 10 core (11 - custom_lora) + 19 enhanced composite signals (incl. forecast + claude_fundamental + futures_flow) = 29
-        assert len(votes) == 29
+        # 10 core (11 - custom_lora) + 23 enhanced composite signals (incl. forecast + claude_fundamental + futures_flow + orderbook_flow) = 33
+        assert len(votes) == 33
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_buy_count_matches_votes(self, _mock):
@@ -328,8 +328,9 @@ class TestRegimeWeights:
             "rsi": {"accuracy": 0.6, "total": 50},
         }
         action, _ = _weighted_consensus(votes, acc, "trending-up")
-        # EMA gets 1.5x, RSI gets 0.7x → BUY should win
-        assert action == "BUY"
+        # ema is regime-gated in trending-up at default horizon (0-11% accuracy)
+        # → forced HOLD, only rsi SELL remains
+        assert action == "SELL"
 
     def test_reversion_signals_boosted_in_ranging(self):
         votes = {"rsi": "BUY", "ema": "SELL"}

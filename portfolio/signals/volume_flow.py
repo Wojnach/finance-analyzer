@@ -257,8 +257,8 @@ def compute_volume_flow_signal(df: pd.DataFrame) -> dict[str, Any]:
     for col in required_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce").astype(float)
 
-    # Drop rows where all OHLCV are NaN
-    df = df.dropna(subset=list(required_cols), how="all")
+    # Drop rows where any essential OHLCV column is NaN (all are needed)
+    df = df.dropna(subset=list(required_cols), how="any")
     if len(df) < MIN_ROWS:
         logger.info("volume_flow: too many NaN rows, only %d remain", len(df))
         return default_result

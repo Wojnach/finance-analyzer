@@ -112,7 +112,50 @@ WARRANT_CATALOG = {
         "commission_sek": 0,
     },
     # -----------------------------------------------------------------------
-    # Legacy MINI warrants (kept for reference)
+    # MINI S Silver — overnight-holdable SHORT warrants (no daily reset)
+    # Barrier = knockout level. Higher barrier = safer but lower leverage.
+    # -----------------------------------------------------------------------
+    "MINI_S_SILVER_AVA_409": {
+        "ob_id": "2374804",
+        "api_type": "warrant",
+        "underlying": "XAG-USD",
+        "direction": "SHORT",
+        "leverage": 10.0,
+        "barrier": 80.97,
+        "parity": 1,
+        "name": "MINI S SILVER AVA 409",
+        "issuer": "AVA",
+        "spread_pct": 0.3,
+        "commission_sek": 0,
+    },
+    "MINI_S_SILVER_AVA_405": {
+        "ob_id": "2367822",
+        "api_type": "warrant",
+        "underlying": "XAG-USD",
+        "direction": "SHORT",
+        "leverage": 6.0,
+        "barrier": 85.94,
+        "parity": 1,
+        "name": "MINI S SILVER AVA 405",
+        "issuer": "AVA",
+        "spread_pct": 0.2,
+        "commission_sek": 0,
+    },
+    "MINI_S_SILVER_AVA_414": {
+        "ob_id": "2374783",
+        "api_type": "warrant",
+        "underlying": "XAG-USD",
+        "direction": "SHORT",
+        "leverage": 30.0,
+        "barrier": 77.50,
+        "parity": 1,
+        "name": "MINI S SILVER AVA 414",
+        "issuer": "AVA",
+        "spread_pct": 0.9,
+        "commission_sek": 0,
+    },
+    # -----------------------------------------------------------------------
+    # MINI L Silver — overnight-holdable LONG warrants (no daily reset)
     # -----------------------------------------------------------------------
     "MINI_L_SILVER_SG": {
         "ob_id": "2043157",
@@ -138,6 +181,17 @@ PREFERRED_INSTRUMENTS = {
     ("XAU-USD", "LONG"): "BULL_GULD_X5_AVA",
     ("XAU-USD", "SHORT"): "BEAR_GULD_X5_VON4",
 }
+
+# Overnight instruments — MINI warrants (no daily reset, can hold overnight)
+# Prefer wider barrier (safer) by default. Higher leverage = closer barrier.
+OVERNIGHT_INSTRUMENTS = {
+    ("XAG-USD", "SHORT"): "MINI_S_SILVER_AVA_405",   # 6x, barrier $85.94 (safest)
+    ("XAG-USD", "LONG"): "MINI_L_SILVER_SG",         # 1.56x, barrier $32.45
+}
+# Alternative overnight SHORT instruments ranked by barrier distance (safest first):
+#   MINI_S_SILVER_AVA_405: 6x lev, barrier $85.94 (+14% from $75)
+#   MINI_S_SILVER_AVA_409: 10x lev, barrier $80.97 (+8% from $75)
+#   MINI_S_SILVER_AVA_414: 30x lev, barrier $77.50 (+3% from $75) — DANGER
 
 # ---------------------------------------------------------------------------
 # Master switches

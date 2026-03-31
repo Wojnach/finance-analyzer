@@ -219,11 +219,12 @@ class TestWeightedConsensusRegime:
             "rsi": {"accuracy": 0.6, "total": 50},
         }
         action, conf = _weighted_consensus(votes, accuracy, "trending-up", horizon="3h")
-        # ema weight = 0.6 * 1.5 (regime) * 1.3 (horizon) = 1.17
-        # rsi weight = 0.6 * 0.7 (regime) = 0.42
-        # BUY=1.17, SELL=0.42 => BUY
+        # Dynamic horizon weights (from accuracy_cache.json): ema=1.5, rsi=0.9
+        # ema weight = 0.6 * 1.5 (regime) * 1.5 (horizon) = 1.35
+        # rsi weight = 0.6 * 0.7 (regime) * 0.9 (horizon) = 0.378
+        # BUY=1.35, SELL=0.378 => BUY
         assert action == "BUY"
-        expected = 1.17 / (1.17 + 0.42)
+        expected = 1.35 / (1.35 + 0.378)
         assert conf == pytest.approx(expected, abs=0.01)
 
     def test_trending_up_gates_ema_at_1d(self):
@@ -1017,7 +1018,7 @@ class TestHorizonWeights:
     """Test HORIZON_SIGNAL_WEIGHTS applies horizon-specific multipliers."""
 
     def test_3h_boosts_news_event(self):
-        """At 3h horizon, news_event gets 1.4x boost."""
+        """At 3h horizon, news_event gets 1.5x dynamic boost."""
         votes = {"news_event": "SELL", "rsi": "BUY"}
         accuracy = {
             "news_event": {"accuracy": 0.70, "total": 1700},
@@ -1025,12 +1026,12 @@ class TestHorizonWeights:
         }
         # Without horizon: equal accuracy => regime decides
         action_no_h, _ = _weighted_consensus(votes, accuracy, "ranging")
-        # With 3h horizon: news_event gets 1.4x
+        # With 3h horizon: dynamic weights give news_event 1.5x and rsi 0.9x
         action_3h, conf_3h = _weighted_consensus(votes, accuracy, "ranging", horizon="3h")
-        # news_event: 0.70 * 1.0(regime) * 1.4(horizon) = 0.98
-        # rsi: 0.70 * 1.5(regime ranging) = 1.05
-        # rsi still wins due to regime boost, but news_event got significant boost
-        assert action_3h == "BUY"  # RSI ranging boost still dominates
+        # news_event: 0.70 * 1.0(regime) * 1.5(dynamic horizon) = 1.05
+        # rsi: 0.70 * 1.5(regime ranging) * 0.9(dynamic horizon) = 0.945
+        # news_event SELL now wins due to stronger dynamic horizon boost
+        assert action_3h == "SELL"
 
     def test_1d_penalizes_news_event(self):
         """At 1d horizon, news_event gets 0.5x penalty."""

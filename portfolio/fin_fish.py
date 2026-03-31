@@ -1129,6 +1129,17 @@ def main() -> int:
     fx_rate = fetch_fx_rate()
     print(f"FX rate: {fx_rate:.2f} SEK/USD\n")
 
+    # --- Preflight GO/NO-GO check ---
+    print("Running preflight check...")
+    try:
+        from scripts.fish_preflight import compute_preflight, print_preflight
+        for ticker in tickers:
+            pf = compute_preflight(ticker)
+            print_preflight(pf)
+    except Exception as e:
+        print(f"  Preflight unavailable: {e}")
+    print()
+
     all_plans: list[dict] = []
     reports: list[str] = []
     log_entries: list[dict] = []

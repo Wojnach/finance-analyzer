@@ -1,6 +1,6 @@
 """Composite mean-reversion signal module.
 
-Computes 7 mean-reversion sub-indicators and returns a majority-vote composite
+Computes 8 mean-reversion sub-indicators and returns a majority-vote composite
 BUY/SELL/HOLD signal with confidence score.
 
 Sub-indicators:
@@ -11,6 +11,7 @@ Sub-indicators:
     5. Gap Fade / Gap Fill          (gap-fill after significant open gap)
     6. Bollinger Band %B MR         (price outside or near Bollinger Bands)
     7. IBS + RSI(2) Combined        (combined extreme reading confirmation)
+    8. Half-Life MR                 (Ornstein-Uhlenbeck half-life + z-score)
 
 Requires a pandas DataFrame with columns: open, high, low, close, volume
 and at least 20 rows of data (for Bollinger Band calculation).
@@ -316,6 +317,66 @@ def _ibs_rsi2_combined(high: pd.Series, low: pd.Series,
     return safe_float(ibs), rsi2_val, "HOLD"
 
 
+# ---- sub-indicator 8: Half-Life Mean Reversion (Ornstein-Uhlenbeck) --------
+
+def _half_life_mr(close: pd.Series, lookback: int = 60) -> tuple[float, float, str]:
+    """Ornstein-Uhlenbeck half-life + z-score mean reversion signal.
+
+    Fits log(price) to an AR(1) model: y(t) - y(t-1) = theta * (y(t-1) - mu).
+    Half-life = -ln(2) / theta.  Short half-life = fast mean reversion.
+
+    Z-score = (price - SMA) / std measures current deviation.
+    Signal fires when half-life is short (<40 bars) AND z-score is extreme.
+
+    Returns (half_life, zscore, signal).
+    """
+    if len(close) < max(lookback, 30):
+        return float("nan"), float("nan"), "HOLD"
+
+    prices = close.iloc[-lookback:].dropna()
+    if len(prices) < 30:
+        return float("nan"), float("nan"), "HOLD"
+
+    log_prices = np.log(prices.values)
+    y = np.diff(log_prices)  # y(t) - y(t-1)
+    x = log_prices[:-1]      # y(t-1)
+
+    # OLS regression: y = theta * x + c
+    x_mean = x.mean()
+    y_mean = y.mean()
+    ss_xx = np.sum((x - x_mean) ** 2)
+    if ss_xx == 0:
+        return float("nan"), float("nan"), "HOLD"
+
+    theta = np.sum((x - x_mean) * (y - y_mean)) / ss_xx
+
+    if theta >= 0:
+        # No mean reversion (random walk or trending)
+        return float("nan"), float("nan"), "HOLD"
+
+    half_life = -np.log(2) / theta
+
+    # Z-score: how far current price is from rolling mean
+    mean_price = prices.mean()
+    std_price = prices.std()
+    if std_price == 0:
+        return float(half_life), 0.0, "HOLD"
+
+    zscore = float((prices.iloc[-1] - mean_price) / std_price)
+
+    # Signal: short half-life + extreme z-score
+    if half_life > 60:
+        # Slow mean reversion — not actionable for intraday
+        return float(half_life), zscore, "HOLD"
+
+    if zscore < -1.5:
+        return float(half_life), zscore, "BUY"
+    if zscore > 1.5:
+        return float(half_life), zscore, "SELL"
+
+    return float(half_life), zscore, "HOLD"
+
+
 # ---- public API ------------------------------------------------------------
 
 def compute_mean_reversion_signal(df: pd.DataFrame) -> dict:
@@ -349,6 +410,7 @@ def compute_mean_reversion_signal(df: pd.DataFrame) -> dict:
             "gap_fill": "HOLD",
             "bb_pct_b": "HOLD",
             "ibs_rsi2_combined": "HOLD",
+            "half_life_mr": "HOLD",
         },
         "indicators": {
             "rsi2": float("nan"),
@@ -360,6 +422,8 @@ def compute_mean_reversion_signal(df: pd.DataFrame) -> dict:
             "bb_pct_b": float("nan"),
             "combined_ibs": float("nan"),
             "combined_rsi2": float("nan"),
+            "half_life": float("nan"),
+            "zscore": float("nan"),
         },
     }
 
@@ -459,6 +523,17 @@ def compute_mean_reversion_signal(df: pd.DataFrame) -> dict:
         sub_signals["ibs_rsi2_combined"] = "HOLD"
         indicators["combined_ibs"] = float("nan")
         indicators["combined_rsi2"] = float("nan")
+
+    # 8. Half-Life Mean Reversion (Ornstein-Uhlenbeck)
+    try:
+        hl_val, zs_val, hl_sig = _half_life_mr(close)
+        sub_signals["half_life_mr"] = hl_sig
+        indicators["half_life"] = safe_float(hl_val)
+        indicators["zscore"] = safe_float(zs_val)
+    except Exception:
+        sub_signals["half_life_mr"] = "HOLD"
+        indicators["half_life"] = float("nan")
+        indicators["zscore"] = float("nan")
 
     # -- Majority vote -----------------------------------------------------
     votes = list(sub_signals.values())

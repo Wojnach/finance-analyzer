@@ -114,32 +114,32 @@ class TestVoteCountIntegrity:
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_vote_counts(self, _mock):
-        """For stocks, total applicable = 25 (7 core + 18 enhanced)."""
+        """For stocks, total applicable = 24 (7 core + 17 enhanced)."""
         ind = make_indicators(close=130.0)
         df = make_ohlcv_df(n=250, close_base=130.0)
         _, _, extra = generate_signal(ind, ticker="NVDA", df=df)
 
-        assert extra["_total_applicable"] == 25
+        assert extra["_total_applicable"] == 24
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_metal_vote_counts(self, _mock):
-        """For metals, total applicable = 25 (7 core + 18 enhanced)."""
+        """For metals, total applicable = 26 (7 core + 19 enhanced, incl. orderbook_flow + metals_cross_asset)."""
         ind = make_indicators(close=2000.0)
         df = make_ohlcv_df(n=250, close_base=2000.0)
         _, _, extra = generate_signal(ind, ticker="XAU-USD", df=df)
 
-        assert extra["_total_applicable"] == 25
+        assert extra["_total_applicable"] == 26
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
-    def test_all_stock_symbols_have_25_applicable(self, _mock):
-        """Every stock symbol should have exactly 25 total applicable signals."""
+    def test_all_stock_symbols_have_24_applicable(self, _mock):
+        """Every stock symbol should have exactly 24 total applicable signals."""
         ind = make_indicators(close=100.0)
         df = make_ohlcv_df(n=250, close_base=100.0)
 
         for ticker in list(STOCK_SYMBOLS)[:5]:  # test a sample
             _, _, extra = generate_signal(ind, ticker=ticker, df=df)
-            assert extra["_total_applicable"] == 25, \
-                f"{ticker} has {extra['_total_applicable']} total applicable, expected 25"
+            assert extra["_total_applicable"] == 24, \
+                f"{ticker} has {extra['_total_applicable']} total applicable, expected 24"
 
 
 # ---------------------------------------------------------------------------

@@ -571,7 +571,8 @@ class TestAutonomousDecision:
             patch("portfolio.autonomous.JOURNAL_FILE", self.journal_file),
             patch("portfolio.autonomous.DECISIONS_FILE", self.decisions_file),
             patch("portfolio.autonomous.THROTTLE_FILE", self.throttle_file),
-            patch("portfolio.autonomous.BOLD_STATE_FILE", self.bold_state_file),
+            patch("portfolio.autonomous._load_bold_state_safe",
+                  return_value=json.loads(self.bold_state_file.read_text())),
             patch("portfolio.autonomous.send_or_store", return_value=True),
         ]
         for p in self._patches:
