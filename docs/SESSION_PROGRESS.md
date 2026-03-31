@@ -1,46 +1,94 @@
-# Session Progress
+# Session Progress — Avanza Pipeline Overhaul
 
-Updated: 2026-03-10
-Worktree: `Q:\wt\metals-state-store`
-Branch: `metals-state-store`
+**Date:** 2026-03-31
+**Session:** "optimization" → "mrcrypto"
+**Branch:** main (all merged and pushed)
+**Last push:** 1566be8
 
-## Completed
+---
 
-- Wrote and committed the session plan in `docs/PLAN.md`.
-- Added regression coverage for metals state persistence:
-  - corrupt JSON fallback with explicit logging
-  - save paths using atomic JSON writes
-- Hardened metals shared state writes in:
-  - `data/metals_loop.py`
-  - `data/metals_risk.py`
-- Extended `portfolio.file_utils.atomic_write_json()` with an `ensure_ascii`
-  parameter so callers can preserve existing UTF-8 output where needed.
-- Removed the hardcoded live-repo path binding from `data/metals_loop.py` so a
-  worktree import uses the current checkout instead of `Q:\finance-analyzer`.
-- Updated the Layer 2 trade queue prompt to use the atomic helper instead of
-  direct overwrite examples.
-- Updated the affected operator/system docs.
+## What Was Done
 
-## Verification So Far
+### Phase 1: New `portfolio/avanza/` Package (COMPLETE)
+- 11 modules: auth, client, types, market_data, trading, account, search, tick_rules, streaming, scanner, __init__
+- 170+ unit tests passing in 0.5s
+- TOTP auth singleton (thread-safe, auto-renewable) — needs TOTP creds to test live
+- `requests.Session` connection pooling (replaces Playwright for runtime API calls)
+- WebSocket streaming client (CometD/Bayeux) — built, needs TOTP for pushSubscriptionId
+- Instrument scanner — search + rank warrants/certs by spread/leverage/barrier. Works with BankID.
+- Live-tested scanner: BULL OLJA (1.2s), MINI SILVER (0.4s), BULL GULD (0.4s)
 
-- `pytest -q tests/test_metals_loop_functions.py tests/test_metals_risk.py`
-  - `52 passed`
-- `pytest -q tests/test_metals_loop_autonomous.py tests/test_unified_loop.py tests/test_metals_loop_functions.py tests/test_metals_risk.py`
-  - `134 passed`
-- `pytest -q -n auto`
-  - `3901 passed`
-  - `18 failed`
-  - Remaining failures are outside this worktree scope:
-    - `tests/integration/test_strategy.py` expects `ta_base_strategy`
-    - `tests/test_portfolio.py::TestTriggerSystem::*`
-    - `tests/test_portfolio.py::TestIntegrationHerc2::test_full_report`
+### Phase 2: Playwright Migration (MOSTLY COMPLETE)
+Files fully migrated (no more Playwright):
+- `scripts/fin_fish_monitor.py` — all page.evaluate → api_get/api_post
+- `data/place_stoploss_once.py` — ctx.request → api_post/api_delete
+- `data/gold_sell_final.py` — page.evaluate → api calls
+- `data/gold_sell_retry.py` — same
+- `data/gold_sell_debug.py` — same
+- `portfolio/fin_snipe_manager.py` — fully migrated via _no_page functions
 
-## Remaining Notes
+New page-free functions in `avanza_control.py`:
+- `fetch_price_no_page()`, `fetch_price_no_page_with_fallback()`
+- `place_order_no_page()`, `place_stop_loss_no_page()`, `place_trailing_stop_no_page()`
+- `delete_order_no_page()`, `delete_stop_loss_no_page()`
 
-- `ruff` is not on PATH in this environment. Use `python -m ruff` or the venv
-  executable directly for lint checks.
-- `python -m ruff check portfolio/file_utils.py` passes.
-- `data/metals_loop.py` and `data/metals_risk.py` still have many legacy lint
-  findings outside the scope of this persistence-focused batch.
-- This work is intentionally isolated in the worktree branch and has not been
-  merged or pushed.
+New functions in `avanza_session.py`:
+- `place_stop_loss()` — hardware stop via /_api/trading/stoploss/new
+- `place_trailing_stop()` — FOLLOW_DOWNWARDS (Avanza manages trail)
+- `get_stop_losses()` — list active stop-loss orders
+- `api_delete()` — authenticated DELETE requests
+
+### Phase 3: Hardware Trailing Stops (FUNCTIONS READY)
+- `avanza_session.place_trailing_stop(ob_id, trail_percent, volume)` — BankID path
+- `portfolio.avanza.trading.place_trailing_stop(ob_id, trail_percent, volume)` — TOTP path
+- NOT yet integrated into metals_loop.py (still uses software trailing)
+
+---
+
+## What's NOT Done (Future Sessions)
+
+### Needs TOTP Auth (user to configure)
+1. WebSocket live test — `AvanzaStream` needs `pushSubscriptionId`
+2. Smoke test — `scripts/avanza_smoke_test.py`
+3. Parallel scanner — 6x faster with TOTP vs BankID
+
+### Needs Careful Work (High Risk, separate session)
+4. **metals_loop.py migration** — 4,500 lines of live trading code
+   - Replace ~50 page.evaluate() calls with api_get/api_post
+   - Replace software trailing with hardware trailing (place_trailing_stop)
+   - Replace metals_avanza_helpers with avanza_session/_no_page functions
+   - TEST EXTENSIVELY before deploying
+
+5. **metals_avanza_helpers.py deprecation** — dead code once metals_loop migrated
+6. **avanza_client.py simplification** — delegate to portfolio.avanza.client
+
+---
+
+## Key Files
+
+### New Package
+```
+portfolio/avanza/__init__.py      — 30 exports
+portfolio/avanza/auth.py          — TOTP singleton
+portfolio/avanza/client.py        — HTTP wrapper
+portfolio/avanza/types.py         — 18 dataclasses
+portfolio/avanza/market_data.py   — quotes, depth, OHLC
+portfolio/avanza/trading.py       — orders, stops
+portfolio/avanza/account.py       — positions, cash
+portfolio/avanza/search.py        — instrument search
+portfolio/avanza/tick_rules.py    — price rounding
+portfolio/avanza/streaming.py     — WebSocket CometD
+portfolio/avanza/scanner.py       — search+rank instruments
+```
+
+### Design Docs
+- `docs/superpowers/specs/2026-03-30-avanza-pipeline-overhaul-design.md`
+- `docs/superpowers/plans/2026-03-30-avanza-pipeline-overhaul.md`
+
+### Quick Resume
+```bash
+git log --oneline -5
+.venv/Scripts/python.exe -m pytest tests/test_avanza_pkg/ -q
+# Scanner test (needs BankID):
+.venv/Scripts/python.exe -c "from portfolio.avanza.scanner import scan_instruments, format_scan_results; print(format_scan_results(scan_instruments('SILVER', direction='BULL', limit=5)))"
+```
