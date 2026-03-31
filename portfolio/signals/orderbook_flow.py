@@ -54,12 +54,24 @@ def _get_microstructure_context(ticker: str) -> dict | None:
     if tfi is None:
         return None
 
+    # Read accumulated OFI and spread z-score from microstructure state
+    ofi = 0.0
+    sz = 0.0
+    try:
+        from portfolio.microstructure_state import load_persisted_state
+        ms_state = load_persisted_state(ticker)
+        if ms_state:
+            ofi = ms_state.get("ofi", 0.0)
+            sz = ms_state.get("spread_zscore", 0.0)
+    except ImportError:
+        pass
+
     return {
         "depth_imbalance": di,
         "trade_imbalance_ratio": tfi["imbalance_ratio"],
         "vpin": vpin if vpin is not None else 0.0,
-        "ofi": 0.0,
-        "spread_zscore": 0.0,
+        "ofi": ofi,
+        "spread_zscore": sz,
         "spread_bps": depth.get("spread_bps", 0.0),
     }
 

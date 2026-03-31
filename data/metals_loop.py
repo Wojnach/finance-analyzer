@@ -1085,6 +1085,45 @@ def fetch_underlying_from_binance():
                 hist.pop(0)
     return prices
 
+# ---------------------------------------------------------------------------
+# Microstructure snapshot accumulator (order book depth → OFI, spread z-score)
+# ---------------------------------------------------------------------------
+_MICROSTRUCTURE_AVAILABLE = False
+try:
+    from portfolio.metals_orderbook import get_orderbook_depth
+    from portfolio.microstructure_state import accumulate_snapshot, persist_state
+    _MICROSTRUCTURE_AVAILABLE = True
+except ImportError:
+    pass
+
+_MICROSTRUCTURE_TICKERS = ["XAG-USD", "XAU-USD"]  # metals only for now
+_microstructure_persist_counter = 0
+
+def _accumulate_orderbook_snapshots():
+    """Poll order book depth and accumulate snapshots for OFI computation.
+
+    Called each cycle (~30-60s).  Fetches depth for metals tickers,
+    adds to ring buffer, and persists state every 5th call.
+    """
+    global _microstructure_persist_counter
+    if not _MICROSTRUCTURE_AVAILABLE:
+        return
+    for ticker in _MICROSTRUCTURE_TICKERS:
+        try:
+            depth = get_orderbook_depth(ticker, limit=20)
+            if depth:
+                accumulate_snapshot(ticker, depth)
+        except Exception as e:
+            if _microstructure_persist_counter % 30 == 0:  # log rarely
+                log(f"Microstructure snapshot error for {ticker}: {e}")
+    _microstructure_persist_counter += 1
+    if _microstructure_persist_counter % 5 == 0:  # persist every ~2.5-5 min
+        try:
+            persist_state()
+        except Exception as e:
+            log(f"Microstructure state persist error: {e}")
+
+
 def fetch_underlying_klines(ticker, interval="1h", limit=100):
     """Fetch OHLCV klines from Binance (FAPI for metals, SPOT for crypto). Cached 5 min."""
     symbol = UNDERLYING_SYMBOLS.get(ticker) or CRYPTO_SYMBOLS.get(ticker)
@@ -3912,16 +3951,7 @@ def main():
 
             def _get_underlying_prices():
                 result = {}
-                if price_history:
-                    snap = price_history[-1]
-                    silver_und = snap.get("silver79_und") or snap.get("silver301_und")
-                    gold_und = snap.get("gold_und")
-                    if silver_und and silver_und > 0:
-                        result["XAG-USD"] = silver_und
-                    if gold_und and gold_und > 0:
-                        result["XAU-USD"] = gold_und
-                # Also include crypto from _underlying_prices (always fresh)
-                for ticker in ("BTC-USD", "ETH-USD"):
+                for ticker in ("XAG-USD", "XAU-USD", "BTC-USD", "ETH-USD"):
                     p = _underlying_prices.get(ticker, 0)
                     if p > 0:
                         result[ticker] = p
@@ -4045,6 +4075,9 @@ Positions: {pos_summary}{prob_summary}""")
 
                 # --- ALWAYS: Fetch underlying prices from Binance FAPI (24/7) ---
                 fetch_underlying_from_binance()
+
+                # --- Accumulate order book snapshots for microstructure signals ---
+                _accumulate_orderbook_snapshots()
 
                 # --- HOLDINGS DIFF/RECONCILE (always, every 30s) ---
                 now_ts = time.time()
