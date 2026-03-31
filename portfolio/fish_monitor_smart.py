@@ -243,7 +243,7 @@ class SmartFishMonitor:
         else:
             move_pct = (self.current_price - self.entry_price) / self.entry_price * 100
 
-        if move_pct >= 5.0 and "tp0" not in self.alerts_sent:
+        if move_pct >= 5.0 and "TP0" not in self.alerts_sent:
             exits.append({
                 "trigger": "TP0",
                 "severity": "ACTION",
@@ -251,7 +251,7 @@ class SmartFishMonitor:
                 "move_pct": move_pct,
             })
 
-        if move_pct >= 2.5 and "tp_partial" not in self.alerts_sent:
+        if move_pct >= 2.5 and "TP_PARTIAL" not in self.alerts_sent:
             exits.append({
                 "trigger": "TP_PARTIAL",
                 "severity": "WATCH",
@@ -261,7 +261,7 @@ class SmartFishMonitor:
 
         # 2. Conviction drop
         conviction_drop = self.entry_conviction - self.current_conviction
-        if conviction_drop >= CONVICTION_DROP_ALERT and "conviction_drop" not in self.alerts_sent:
+        if conviction_drop >= CONVICTION_DROP_ALERT and "CONVICTION_DROP" not in self.alerts_sent:
             exits.append({
                 "trigger": "CONVICTION_DROP",
                 "severity": "WARNING",
@@ -269,13 +269,13 @@ class SmartFishMonitor:
             })
 
         # 3. Time decay
-        if elapsed_hours >= 3.0 and "time_3h" not in self.alerts_sent:
+        if elapsed_hours >= 3.0 and "TIME_DECAY_3H" not in self.alerts_sent:
             exits.append({
                 "trigger": "TIME_DECAY_3H",
                 "severity": "WATCH",
                 "message": f"Position held {elapsed_hours:.1f}h. Tighten stops.",
             })
-        if elapsed_hours >= 5.0 and "time_5h" not in self.alerts_sent:
+        if elapsed_hours >= 5.0 and "TIME_DECAY_5H" not in self.alerts_sent:
             exits.append({
                 "trigger": "TIME_DECAY_5H",
                 "severity": "ACTION",
@@ -283,7 +283,7 @@ class SmartFishMonitor:
             })
 
         # 4. Adverse move
-        if move_pct <= -3.0 and "adverse_3pct" not in self.alerts_sent:
+        if move_pct <= -3.0 and "ADVERSE_MOVE" not in self.alerts_sent:
             exits.append({
                 "trigger": "ADVERSE_MOVE",
                 "severity": "WARNING",
