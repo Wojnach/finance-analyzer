@@ -21,7 +21,6 @@ import pytest
 
 import portfolio.agent_invocation as ai
 
-
 # ===========================================================================
 # Fixtures
 # ===========================================================================
@@ -365,6 +364,7 @@ class TestBug89ModuleFailuresResilience:
         """If update_module_failures raises, it should be caught and logged."""
         # This is a structural test — verify the try/except is in place
         import inspect
+
         from portfolio import reporting
         source = inspect.getsource(reporting.write_agent_summary)
         # The fix wraps the call in try/except

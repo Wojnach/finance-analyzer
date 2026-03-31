@@ -24,6 +24,7 @@ Or run standalone via scheduled task (e.g. PF-LogRotate, daily at 03:00):
     .venv\\Scripts\\python.exe -m portfolio.log_rotation
 """
 
+import contextlib
 import datetime
 import gzip
 import json
@@ -346,10 +347,8 @@ def get_data_dir_size():
     for dirpath, _dirnames, filenames in os.walk(DATA_DIR):
         for f in filenames:
             fp = pathlib.Path(dirpath) / f
-            try:
+            with contextlib.suppress(OSError):
                 total += fp.stat().st_size
-            except OSError:
-                pass
     return total / (1024 * 1024)
 
 

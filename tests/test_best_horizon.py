@@ -11,18 +11,15 @@ Covers:
 
 import json
 import time
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from portfolio.accuracy_stats import (
     ACCURACY_CACHE_TTL,
-    BEST_HORIZON_CACHE_FILE,
     HORIZONS,
     signal_best_horizon_accuracy,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -307,7 +304,7 @@ class TestSignalEngineIntegration:
 
     def test_use_best_horizon_false_skips_override(self):
         """When use_best_horizon is False, best-horizon lookup is not called."""
-        from portfolio.signal_engine import _weighted_consensus, ACCURACY_GATE_THRESHOLD
+        from portfolio.signal_engine import _weighted_consensus
 
         accuracy_data = {"rsi": {"accuracy": 0.55, "total": 100, "correct": 55, "pct": 55.0}}
         votes = {"rsi": "BUY"}
@@ -322,7 +319,6 @@ class TestSignalEngineIntegration:
         """When best-horizon accuracy is meaningfully better, it overrides current."""
         # Simulate a generate_signals call with use_best_horizon=True
         # We'll test by calling the block logic directly via patching in signal_engine
-        from portfolio.signal_engine import _weighted_consensus, ACCURACY_GATE_THRESHOLD
 
         # Simulate accuracy_data with rsi at 0.52
         accuracy_data = {"rsi": {"accuracy": 0.52, "total": 100, "correct": 52, "pct": 52.0}}

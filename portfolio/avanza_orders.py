@@ -8,6 +8,7 @@ Workflow:
 5. On timeout (5 min) → expire the pending order, notify
 """
 
+import contextlib
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -156,10 +157,8 @@ def _check_telegram_confirm(config: dict) -> bool:
     if isinstance(offset_data, dict):
         offset = int(offset_data.get("offset", 0))
     elif offset_file.exists():
-        try:
+        with contextlib.suppress(ValueError, OSError):
             offset = int(offset_file.read_text().strip())
-        except (ValueError, OSError):
-            pass
 
     params = {"timeout": 1, "allowed_updates": ["message"]}
     if offset:

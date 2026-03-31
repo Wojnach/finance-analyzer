@@ -11,7 +11,6 @@ from portfolio.avanza.client import AvanzaClient
 from portfolio.avanza.tick_rules import clear_cache, get_tick_rules, round_to_tick
 from portfolio.avanza.types import TickEntry
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

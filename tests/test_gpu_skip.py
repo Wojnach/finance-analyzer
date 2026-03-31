@@ -2,8 +2,6 @@
 
 from datetime import UTC, datetime
 
-import pytest
-
 from portfolio.market_timing import is_us_stock_market_open, should_skip_gpu
 
 

@@ -10,7 +10,6 @@ import pytest
 from portfolio.avanza.auth import AvanzaAuth
 from portfolio.avanza.client import DEFAULT_ACCOUNT_ID, AvanzaClient
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

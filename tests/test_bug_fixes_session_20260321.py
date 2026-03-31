@@ -13,13 +13,10 @@ import json
 import logging
 import threading
 import time
-from pathlib import Path
-from unittest import mock
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
-
 
 # ===========================================================================
 # BUG-101: Sentiment flush crash safety

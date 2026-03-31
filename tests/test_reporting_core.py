@@ -11,10 +11,9 @@ Tests:
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers / Fixtures
@@ -1186,8 +1185,8 @@ class TestGetHeldTickers:
     """Tests for the _get_held_tickers cache and loading."""
 
     def test_returns_held_tickers_from_both_portfolios(self):
-        from portfolio.reporting import _get_held_tickers, _held_tickers_cache
         import portfolio.shared_state as ss
+        from portfolio.reporting import _get_held_tickers, _held_tickers_cache
 
         patient = {
             "holdings": {"BTC-USD": {"shares": 0.5}},
@@ -1217,8 +1216,8 @@ class TestGetHeldTickers:
         assert "ETH-USD" in result
 
     def test_zero_shares_not_included(self):
-        from portfolio.reporting import _get_held_tickers, _held_tickers_cache
         import portfolio.shared_state as ss
+        from portfolio.reporting import _get_held_tickers, _held_tickers_cache
 
         patient = {
             "holdings": {"BTC-USD": {"shares": 0}},

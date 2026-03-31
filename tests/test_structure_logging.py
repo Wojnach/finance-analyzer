@@ -9,9 +9,7 @@ from __future__ import annotations
 import logging
 from unittest.mock import patch
 
-import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.structure import compute_structure_signal
 

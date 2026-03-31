@@ -6,11 +6,10 @@ Covers:
 - Fix 3: Kronos df OHLCV fallback when candle loading fails
 """
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers

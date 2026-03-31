@@ -16,6 +16,7 @@ Dry-run is the default. Use ``--live`` explicitly to execute actions.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import copy
 import datetime as dt
 import logging
@@ -182,13 +183,11 @@ def _log_fill_detected(
             current_underlying = snapshot.get("current_underlying")
             leverage = float(snapshot.get("leverage") or 1.0)
             if entry_underlying and current_underlying:
-                try:
+                with contextlib.suppress(ZeroDivisionError, ValueError, TypeError):
                     entry["realized_pnl_pct"] = round(
                         ((float(current_underlying) / float(entry_underlying)) - 1) * 100 * leverage,
                         2,
                     )
-                except (ZeroDivisionError, ValueError, TypeError):
-                    pass
         _append_log(fill_log_path, "fill_detected", entry)
     except Exception:
         logger.debug("Failed to log fill detection", exc_info=True)

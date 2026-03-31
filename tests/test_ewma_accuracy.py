@@ -15,13 +15,12 @@ Covers:
 
 import math
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from portfolio.accuracy_stats import signal_accuracy_ewma
 from portfolio.tickers import SIGNAL_NAMES
-
 
 # ---------------------------------------------------------------------------
 # Helpers

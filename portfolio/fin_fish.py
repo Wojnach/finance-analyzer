@@ -39,14 +39,26 @@ from portfolio.price_targets import (
 # External config — import from data.fin_fish_config with inline fallbacks
 # ---------------------------------------------------------------------------
 try:
+    from data.fin_fish_config import (
+        FISHING_BUDGET_SEK as _CFG_BUDGET,
+    )
+    from data.fin_fish_config import (
+        FISHING_MIN_FILL_PROB as _CFG_MIN_FILL,
+    )
+    from data.fin_fish_config import (
+        FISHING_PREFER_AVA as _CFG_PREFER_AVA,
+    )
+    from data.fin_fish_config import (
+        FISHING_SL_CASCADE as _CFG_SL_CASCADE,
+    )
+    from data.fin_fish_config import (
+        FISHING_TP_CASCADE as _CFG_TP_CASCADE,
+    )
+    from data.fin_fish_config import (
+        PREFERRED_INSTRUMENTS as _CFG_PREFERRED,
+    )
     from data.fin_fish_config import (  # type: ignore[import-untyped]
         WARRANT_CATALOG as _CFG_CATALOG,
-        PREFERRED_INSTRUMENTS as _CFG_PREFERRED,
-        FISHING_BUDGET_SEK as _CFG_BUDGET,
-        FISHING_MIN_FILL_PROB as _CFG_MIN_FILL,
-        FISHING_TP_CASCADE as _CFG_TP_CASCADE,
-        FISHING_SL_CASCADE as _CFG_SL_CASCADE,
-        FISHING_PREFER_AVA as _CFG_PREFER_AVA,
     )
 except Exception:
     _CFG_CATALOG = None
@@ -739,14 +751,11 @@ def evaluate_warrants(
                 # Use budget / leverage for sizing.
                 # Gain = underlying_move_pct * leverage - spread_pct
                 warrant_price_at_fish = None  # unknown without Avanza quote
-                warrant_price_now = None
             else:
                 if direction == "LONG":
                     warrant_price_at_fish = max(0.01, (level - barrier) / parity * fx_rate)
-                    warrant_price_now = max(0.01, (spot - barrier) / parity * fx_rate)
                 else:
                     warrant_price_at_fish = max(0.01, (barrier - level) / parity * fx_rate)
-                    warrant_price_now = max(0.01, (barrier - spot) / parity * fx_rate)
 
             # Underlying move that generates profit
             bounce_underlying_pct = fl["bounce_to_spot_pct"]
@@ -1208,7 +1217,7 @@ def main() -> int:
 
     # Log
     log_entry = {
-        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "ts": datetime.datetime.now(datetime.UTC).isoformat(),
         "command": "fin-fish",
         "budget_sek": args.budget,
         "fx_rate": fx_rate,

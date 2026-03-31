@@ -6,6 +6,7 @@ Provides:
 - kill_orphaned_llama(): Safety-net reaper for orphaned llama-completion.exe processes.
 """
 
+import contextlib
 import json
 import logging
 import subprocess
@@ -129,11 +130,9 @@ def _run_with_job_object(cmd, **kwargs):
         # --- Launch process and assign to job ---------------------------------
         proc = subprocess.Popen(cmd, **popen_kwargs)
 
-        try:
+        # If assignment fails, the process is already running — still wait
+        with contextlib.suppress(Exception):
             kernel32.AssignProcessToJobObject(job, int(proc._handle))
-        except Exception:
-            # If assignment fails, the process is already running — still wait
-            pass
 
         try:
             stdout, stderr = proc.communicate(input=input_data, timeout=timeout)

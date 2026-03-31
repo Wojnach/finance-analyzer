@@ -6,12 +6,9 @@ unknown signals) and log_signal_snapshot (vote passthrough, fallback derivation,
 counting, entry structure, mock verification).
 """
 
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from portfolio.outcome_tracker import _derive_signal_vote, log_signal_snapshot
-
 
 # ---------------------------------------------------------------------------
 # _derive_signal_vote — RSI (with adaptive thresholds, BUG-111 fix)
@@ -605,8 +602,9 @@ class TestModuleLogger:
     """Verify outcome_tracker uses a module-level logger."""
 
     def test_has_module_level_logger(self):
-        import portfolio.outcome_tracker as ot
         import logging
+
+        import portfolio.outcome_tracker as ot
         assert hasattr(ot, "logger")
         assert isinstance(ot.logger, logging.Logger)
         assert ot.logger.name == "portfolio.outcome_tracker"
@@ -614,6 +612,7 @@ class TestModuleLogger:
     def test_no_function_local_logging_import(self):
         """Ensure no function bodies contain 'import logging as _logging'."""
         import inspect
+
         import portfolio.outcome_tracker as ot
         source = inspect.getsource(ot)
         assert "import logging as _logging" not in source

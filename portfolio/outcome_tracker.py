@@ -17,6 +17,8 @@ DATA_DIR = BASE_DIR / "data"
 SIGNAL_LOG = DATA_DIR / "signal_log.jsonl"
 
 HORIZONS = {"3h": 10800, "4h": 14400, "12h": 43200, "1d": 86400, "3d": 259200, "5d": 432000, "10d": 864000}
+import contextlib
+
 from portfolio.tickers import (
     BINANCE_FAPI_MAP,
     BINANCE_SPOT_MAP,
@@ -470,10 +472,8 @@ def backfill_outcomes(max_entries=2000):
                 f_out.write((json.dumps(entry) + "\n").encode("utf-8"))
         os.replace(tmp, SIGNAL_LOG)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
 
     return updated

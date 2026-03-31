@@ -1,11 +1,9 @@
 """Tests for portfolio/short_horizon.py — 3h horizon configuration."""
 
-import pytest
 from portfolio.short_horizon import (
     CONFIDENCE_CAP_3H,
-    SLOW_SIGNALS_3H,
-    time_of_day_scale_3h,
     is_slow_signal_3h,
+    time_of_day_scale_3h,
 )
 
 

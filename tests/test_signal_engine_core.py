@@ -1044,7 +1044,6 @@ class TestHorizonWeights:
 
     def test_no_horizon_no_adjustment(self):
         """Without horizon parameter, no horizon weights applied."""
-        from portfolio.signal_engine import HORIZON_SIGNAL_WEIGHTS
         votes = {"news_event": "SELL"}
         accuracy = {"news_event": {"accuracy": 0.70, "total": 1700}}
         _, conf_none = _weighted_consensus(votes, accuracy, "ranging", horizon=None)
@@ -1283,7 +1282,7 @@ class TestDynamicHorizonWeights:
 
     def test_computes_boost_for_better_horizon(self, tmp_path, monkeypatch):
         """Signal with higher accuracy on 3h than 1d gets a boost multiplier."""
-        from portfolio.signal_engine import _compute_dynamic_horizon_weights, DATA_DIR
+        from portfolio.signal_engine import _compute_dynamic_horizon_weights
 
         cache = {
             "3h_recent": {

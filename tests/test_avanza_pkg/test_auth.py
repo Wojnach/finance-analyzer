@@ -9,7 +9,6 @@ import pytest
 
 from portfolio.avanza.auth import AuthError, AvanzaAuth, _create_avanza_client
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 [project]
 name = "portfolio-intelligence"
 version = "1.0.0"
-description = "Two-layer autonomous trading system with 29-signal analysis"
+description = "Two-layer autonomous trading system with 30-signal analysis"
 requires-python = ">=3.11"
 dependencies = [
     "pandas",
@@ -29,6 +29,7 @@ testpaths = ["tests"]
 pythonpath = [".", "tests"]
 markers = [
     "integration: marks tests that require live GPU / network (deselect with '-k not integration')",
+    "slow: marks tests that take a long time to run (deselect with '-k not slow')",
 ]
 
 [tool.ruff]

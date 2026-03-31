@@ -252,7 +252,7 @@ def api_post(path: str, payload: dict) -> Any:
         return json.loads(body)
     except (json.JSONDecodeError, TypeError):
         if not resp.ok:
-            raise RuntimeError(f"Avanza API error {resp.status}: {body[:500]}")
+            raise RuntimeError(f"Avanza API error {resp.status}: {body[:500]}") from None
         return {"raw": body}
 
 

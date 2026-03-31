@@ -8,21 +8,15 @@ Covers:
   5. Integration: signal_engine uses regime overlay when total >= 30
 """
 
-import json
 import time
-from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 from portfolio.accuracy_stats import (
     ACCURACY_CACHE_TTL,
-    signal_accuracy_by_regime,
     load_cached_regime_accuracy,
+    signal_accuracy_by_regime,
     write_regime_accuracy_cache,
-    REGIME_ACCURACY_CACHE_FILE,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -329,7 +323,6 @@ class TestSignalEngineRegimeOverlay:
 
     def test_regime_overlay_applied_when_total_sufficient(self):
         """When regime_acc has total >= 30, accuracy_data is updated for that signal."""
-        from portfolio.signal_engine import _weighted_consensus
 
         # Accuracy that says rsi has 90% accuracy in trending-up
         regime_override = {"accuracy": 0.90, "total": 50, "correct": 45, "pct": 90.0}
@@ -361,11 +354,11 @@ class TestSignalEngineRegimeOverlay:
 
     def test_regime_overlay_exception_does_not_crash(self):
         """If regime overlay raises, signal_engine should not crash (caught by try/except)."""
-        from portfolio.signal_engine import generate_signal
-
         # The generate_signal function catches all exceptions in the regime overlay block.
         # We just verify it can be imported and the try/except structure exists.
         import inspect
+
+        from portfolio.signal_engine import generate_signal
         source = inspect.getsource(generate_signal)
         assert "load_cached_regime_accuracy" in source
         assert "signal_accuracy_by_regime" in source

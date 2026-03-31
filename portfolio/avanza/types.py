@@ -8,9 +8,8 @@ get plain Python scalars.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Sequence
-
+from datetime import UTC, datetime
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -40,7 +39,7 @@ def _ts(millis: Any) -> str:
     if isinstance(millis, str):
         return millis
     try:
-        return datetime.fromtimestamp(int(millis) / 1000, tz=timezone.utc).isoformat()
+        return datetime.fromtimestamp(int(millis) / 1000, tz=UTC).isoformat()
     except (ValueError, TypeError, OSError):
         return str(millis)
 

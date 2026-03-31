@@ -14,11 +14,8 @@ Covers:
 import math
 from unittest.mock import patch
 
-import pytest
-
 from portfolio.accuracy_stats import signal_utility
 from portfolio.tickers import SIGNAL_NAMES
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -9,7 +9,6 @@ Auto-runs every 2h via main loop.
 """
 
 import datetime
-import json
 import logging
 import math
 import os
@@ -948,8 +947,8 @@ def _try_garch(market):
         return None
 
     try:
-        import yfinance as yf
         import numpy as np
+        import yfinance as yf
 
         ticker = yf.Ticker("CL=F")
         hist = ticker.history(period="1y")

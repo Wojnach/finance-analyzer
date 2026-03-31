@@ -62,8 +62,8 @@ def _fetch_deribit_options(currency="BTC"):
 
     # Parse instrument names: BTC-28MAR26-70000-C
     # Format: {currency}-{expiry}-{strike}-{C|P}
-    from collections import defaultdict
     import datetime
+    from collections import defaultdict
 
     expiry_data = defaultdict(lambda: {"calls": defaultdict(float),
                                         "puts": defaultdict(float),
@@ -273,7 +273,7 @@ def _load_ratio_history(max_age_days=30):
             return []
         cutoff = time.time() - (max_age_days * 86400)
         entries = []
-        with open(RATIO_HISTORY_FILE, "r", encoding="utf-8") as f:
+        with open(RATIO_HISTORY_FILE, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -394,7 +394,7 @@ def _load_netflow_history():
             return []
         cutoff = time.time() - (NETFLOW_HISTORY_MAX_DAYS * 86400)
         entries = []
-        with open(NETFLOW_HISTORY_FILE, "r", encoding="utf-8") as f:
+        with open(NETFLOW_HISTORY_FILE, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:

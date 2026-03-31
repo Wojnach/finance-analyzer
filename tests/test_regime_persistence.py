@@ -16,7 +16,6 @@ import pytest
 from portfolio.outcome_tracker import log_signal_snapshot
 from portfolio.signal_db import SignalDB
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ import zoneinfo
 from datetime import datetime
 from pathlib import Path
 
-from portfolio.file_utils import atomic_write_json, load_json, atomic_append_jsonl
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
 from portfolio.message_store import send_or_store
 
 logger = logging.getLogger("portfolio.crypto_scheduler")
@@ -116,7 +116,6 @@ def _build_crypto_report(config):
     futures = summary.get("futures_data", {})
     prophecy = summary.get("prophecy", {})
     mc = summary.get("monte_carlo", {})
-    forecast = summary.get("forecast_signals", {})
     price_levels = summary.get("price_levels", {})
 
     # Load crypto macro data (options, gold-BTC ratio)
@@ -299,7 +298,6 @@ def _build_crypto_report(config):
     btc_levels = price_levels.get("BTC-USD", {})
     if btc_levels:
         vwap = btc_levels.get("vwap")
-        gp = btc_levels.get("gp_upper")
         swing_hi = btc_levels.get("smc_swing_high")
         swing_lo = btc_levels.get("smc_swing_low")
         if vwap and swing_hi:

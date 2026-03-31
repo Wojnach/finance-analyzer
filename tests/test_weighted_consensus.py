@@ -11,9 +11,9 @@ Plus edge cases and integration scenarios.
 import pytest
 
 from portfolio.signal_engine import (
-    _weighted_consensus,
-    ACCURACY_GATE_THRESHOLD,
     ACCURACY_GATE_MIN_SAMPLES,
+    ACCURACY_GATE_THRESHOLD,
+    _weighted_consensus,
 )
 
 # ---------------------------------------------------------------------------

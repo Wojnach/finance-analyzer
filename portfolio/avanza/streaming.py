@@ -15,11 +15,13 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import threading
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import websocket
 
@@ -101,10 +103,8 @@ class AvanzaStream:
         """Close the WebSocket and join the background thread."""
         self._stop_event.set()
         if self._ws is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._ws.close()
-            except Exception:
-                pass
         if self._thread is not None:
             self._thread.join(timeout=5.0)
             self._thread = None
@@ -137,10 +137,8 @@ class AvanzaStream:
                 self._backoff = min(self._backoff * _BACKOFF_FACTOR, _MAX_BACKOFF)
             finally:
                 if self._ws is not None:
-                    try:
+                    with contextlib.suppress(Exception):
                         self._ws.close()
-                    except Exception:
-                        pass
                     self._ws = None
 
     def _connect(self) -> None:

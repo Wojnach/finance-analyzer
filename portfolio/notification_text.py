@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 _THESIS_STATUS_LABELS = {
     "THREATENED": "Thesis threatened",
     "MIXED": "Thesis mixed",

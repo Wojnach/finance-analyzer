@@ -9,12 +9,9 @@ import json
 import math
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # BUG-87: NaN propagation in compute_indicators

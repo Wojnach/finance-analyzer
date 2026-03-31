@@ -31,6 +31,8 @@ SIGNAL_DB = DATA_DIR / "signal_log.db"
 HORIZONS = ["3h", "1d", "3d", "5d"]
 
 # BUG-147: Import canonical list from tickers instead of maintaining a copy.
+import contextlib
+
 from portfolio.tickers import SIGNAL_NAMES
 
 VOTE_MAP = {"BUY": 1, "SELL": -1, "HOLD": 0}
@@ -249,7 +251,7 @@ def train(horizon="1d", verbose=True):
     }
 
     if verbose:
-        print(f"\nTraining with num_threads=1, nice=19...")
+        print("\nTraining with num_threads=1, nice=19...")
 
     model = lgb.LGBMClassifier(**params)
     model.fit(
@@ -297,7 +299,7 @@ def train(horizon="1d", verbose=True):
         importance = model.feature_importances_
         feat_names = X.columns.tolist()
         top_idx = np.argsort(importance)[::-1][:10]
-        print(f"\nTop 10 features:")
+        print("\nTop 10 features:")
         for i, idx in enumerate(top_idx):
             print(f"  {i+1}. {feat_names[idx]:<25} importance={importance[idx]}")
 
@@ -394,8 +396,6 @@ def predict(votes, ticker, hour_utc=None, day_of_week=None, horizon="1d"):
 if __name__ == "__main__":
     import os
     # Throttle: lowest priority
-    try:
+    with contextlib.suppress(OSError, AttributeError):
         os.nice(19)
-    except (OSError, AttributeError):
-        pass
     train_all(verbose=True)

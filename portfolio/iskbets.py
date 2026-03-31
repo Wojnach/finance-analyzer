@@ -26,6 +26,8 @@ CONFIG_FILE = DATA_DIR / "iskbets_config.json"
 STATE_FILE = DATA_DIR / "iskbets_state.json"
 
 # Ticker → source mapping (imported from shared tickers module)
+import contextlib
+
 from portfolio.tickers import (
     SYMBOLS as TICKER_SOURCES,
 )
@@ -796,10 +798,8 @@ def _handle_sold(args, config):
     current_price = None
     parts = args.strip().split() if args else []
     if parts:
-        try:
+        with contextlib.suppress(ValueError):
             current_price = float(parts[0])
-        except ValueError:
-            pass
 
     if current_price is None:
         current_price = pos.get("highest_price", entry_price)

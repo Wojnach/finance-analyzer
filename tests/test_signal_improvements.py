@@ -399,7 +399,6 @@ class TestTimeOfDayFactor:
             mock_now = mock.MagicMock()
             mock_now.hour = 3
             mock_dt.now.return_value = mock_now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             factor = _time_of_day_factor()
             assert factor == 0.8
 
@@ -408,7 +407,6 @@ class TestTimeOfDayFactor:
             mock_now = mock.MagicMock()
             mock_now.hour = 14
             mock_dt.now.return_value = mock_now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             factor = _time_of_day_factor()
             assert factor == 1.0
 

@@ -21,6 +21,7 @@ Reference: docs/deep research/deep-research-report.md
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 from dataclasses import dataclass, field
@@ -734,10 +735,8 @@ def compute_exit_plan_from_summary(
     entry_ts_str = position_state.get("entry_ts")
     entry_ts = datetime.now(UTC)
     if entry_ts_str:
-        try:
+        with contextlib.suppress(ValueError, TypeError):
             entry_ts = datetime.fromisoformat(entry_ts_str)
-        except (ValueError, TypeError):
-            pass
 
     position = Position(
         symbol=ticker,
