@@ -3,6 +3,10 @@
 Chains search → detail fetch → ranking to answer questions like:
 "Find the best bull mini-future for oil right now"
 
+Works with EITHER auth method:
+- TOTP (AvanzaClient) — preferred, faster
+- BankID session (avanza_session.api_get/api_post) — fallback
+
 Usage:
     from portfolio.avanza.scanner import scan_instruments
 
@@ -25,10 +29,66 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any
 
-from portfolio.avanza.client import AvanzaClient
 from portfolio.avanza.types import _val
 
 logger = logging.getLogger("portfolio.avanza.scanner")
+
+
+# ---------------------------------------------------------------------------
+# Dual-auth API helpers — try TOTP first, fall back to BankID session
+# ---------------------------------------------------------------------------
+
+def _get_api():
+    """Return (search_fn, instrument_fn, marketdata_fn) that work with
+    whichever auth is currently available.
+
+    Returns:
+        Tuple of three callables:
+        - search(instrument_type_str, query, limit) -> dict or list
+        - get_instrument(api_type, ob_id) -> dict
+        - get_market_data(ob_id) -> dict
+    """
+    # Try TOTP client first
+    try:
+        from portfolio.avanza.client import AvanzaClient
+        client = AvanzaClient.get_instance()
+        avanza = client.avanza
+
+        def _search(itype_str, query, limit):
+            from avanza.constants import InstrumentType
+            return avanza.search_for_instrument(InstrumentType(itype_str), query, limit)
+
+        def _instrument(api_type, ob_id):
+            return avanza.get_instrument(api_type, ob_id)
+
+        def _marketdata(ob_id):
+            return avanza.get_market_data(ob_id)
+
+        logger.debug("Scanner using TOTP client")
+        return _search, _instrument, _marketdata
+    except Exception:
+        pass
+
+    # Fall back to BankID session (Playwright)
+    try:
+        from portfolio.avanza_session import api_get, api_post
+
+        def _search(itype_str, query, limit):
+            return api_post("/_api/search/filtered-search", {"query": query, "limit": limit})
+
+        def _instrument(api_type, ob_id):
+            return api_get(f"/_api/market-guide/{api_type}/{ob_id}")
+
+        def _marketdata(ob_id):
+            return api_get(f"/_api/trading-critical/rest/marketdata/{ob_id}")
+
+        logger.debug("Scanner using BankID session")
+        return _search, _instrument, _marketdata
+    except Exception as e:
+        raise RuntimeError(
+            "No Avanza auth available. Either configure TOTP credentials "
+            "or run scripts/avanza_login.py for BankID session."
+        ) from e
 
 
 @dataclass
@@ -95,8 +155,7 @@ def scan_instruments(
     Returns:
         List of ScannedInstrument, sorted by the chosen criterion.
     """
-    client = AvanzaClient.get_instance()
-    avanza = client.avanza
+    search_fn, instrument_fn, marketdata_fn = _get_api()
 
     # --- Step 1: Search ---
     search_query = f"{direction} {query}".strip() if direction else query
@@ -109,8 +168,7 @@ def scan_instruments(
     all_hits: list[dict] = []
     for itype in types_to_search:
         try:
-            from avanza.constants import InstrumentType
-            raw = avanza.search_for_instrument(InstrumentType(itype), search_query, max_search)
+            raw = search_fn(itype, search_query, max_search)
             hits = raw.get("hits", raw) if isinstance(raw, dict) else raw if isinstance(raw, list) else []
             all_hits.extend(hits)
         except Exception as e:
@@ -156,7 +214,7 @@ def scan_instruments(
 
         try:
             # Fetch instrument details (leverage, barrier, underlying)
-            info = avanza.get_instrument(api_type, ob_id)
+            info = instrument_fn(api_type, ob_id)
             if not info or not isinstance(info, dict):
                 return None
 
@@ -204,7 +262,7 @@ def scan_instruments(
             ask_vol = 0
             mm = False
             try:
-                md = avanza.get_market_data(ob_id)
+                md = marketdata_fn(ob_id)
                 if isinstance(md, dict):
                     od = md.get("orderDepth", md.get("orderDepthLevels", {}))
                     levels = od.get("levels", od) if isinstance(od, dict) else od
