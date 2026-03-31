@@ -129,6 +129,12 @@ def _register_defaults():
     # Crypto macro — options max pain, gold-BTC rotation, exchange reserves (crypto only); capped at 0.7
     register_enhanced("crypto_macro", "portfolio.signals.crypto_macro",
                       "compute_crypto_macro_signal", requires_context=True, max_confidence=0.7)
+    # Orderbook flow — microstructure metrics (metals + crypto); capped at 0.7
+    register_enhanced("orderbook_flow", "portfolio.signals.orderbook_flow",
+                      "compute_orderbook_flow_signal", requires_context=True, max_confidence=0.7)
+    # Metals cross-asset — copper, GVZ, G/S ratio, SPY, oil (metals only); capped at 0.7
+    register_enhanced("metals_cross_asset", "portfolio.signals.metals_cross_asset",
+                      "compute_metals_cross_asset_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
