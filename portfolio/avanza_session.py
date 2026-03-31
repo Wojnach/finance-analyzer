@@ -10,7 +10,7 @@ This is the preferred auth method until TOTP credentials are configured.
 import json
 import logging
 import threading
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -256,6 +256,36 @@ def api_post(path: str, payload: dict) -> Any:
         return {"raw": body}
 
 
+def api_delete(path: str) -> Any:
+    """Make an authenticated DELETE request to Avanza API.
+
+    Automatically includes the X-SecurityToken (CSRF) header.
+
+    Args:
+        path: API path (e.g., "/_api/trading/stoploss/{stop_id}")
+
+    Returns:
+        Dict with ``http_status`` and ``ok`` keys.
+    """
+    ctx = _get_playwright_context()
+    csrf = _get_csrf()
+    url = f"{API_BASE}{path}" if path.startswith("/") else path
+    resp = ctx.request.delete(
+        url,
+        headers={
+            "Content-Type": "application/json",
+            "X-SecurityToken": csrf,
+        },
+    )
+    if resp.status == 401:
+        close_playwright()
+        raise AvanzaSessionError(
+            "Session returned 401 Unauthorized. "
+            "Run: python scripts/avanza_login.py"
+        )
+    return {"http_status": resp.status, "ok": 200 <= resp.status < 300 or resp.status == 404}
+
+
 # --- Trading convenience functions ---
 
 
@@ -440,6 +470,116 @@ def get_positions() -> list[dict]:
             "account_type": account.get("type", ""),
         })
     return positions
+
+
+def place_stop_loss(
+    orderbook_id: str,
+    trigger_price: float,
+    sell_price: float,
+    volume: int,
+    account_id: str | None = None,
+    valid_days: int = 8,
+    trigger_type: str = "LESS_OR_EQUAL",
+    value_type: str = "MONETARY",
+) -> dict:
+    """Place a hardware stop-loss order on Avanza.
+
+    IMPORTANT: Uses /_api/trading/stoploss/new, NOT the regular order API.
+
+    Args:
+        orderbook_id: Avanza orderbook ID.
+        trigger_price: Price at which to trigger the stop-loss.
+            For FOLLOW_DOWNWARDS with PERCENTAGE, this is the trail %.
+        sell_price: Price to sell at when triggered.
+            For trailing stops (FOLLOW_DOWNWARDS), set to 0 (market).
+        volume: Number of units to sell.
+        account_id: Defaults to DEFAULT_ACCOUNT_ID.
+        valid_days: Days until the stop-loss expires (default 8).
+        trigger_type: LESS_OR_EQUAL, MORE_OR_EQUAL, FOLLOW_DOWNWARDS, FOLLOW_UPWARDS.
+        value_type: MONETARY (absolute price) or PERCENTAGE.
+
+    Returns:
+        Dict with status, stoplossOrderId.
+    """
+    acct = str(account_id or DEFAULT_ACCOUNT_ID)
+    valid_until = (date.today() + timedelta(days=valid_days)).isoformat()
+
+    payload = {
+        "parentStopLossId": "0",
+        "accountId": acct,
+        "orderBookId": str(orderbook_id),
+        "stopLossTrigger": {
+            "type": trigger_type,
+            "value": trigger_price,
+            "validUntil": valid_until,
+            "valueType": value_type,
+            "triggerOnMarketMakerQuote": True,
+        },
+        "stopLossOrderEvent": {
+            "type": "SELL",
+            "price": sell_price,
+            "volume": volume,
+            "validDays": valid_days,
+            "priceType": value_type,
+            "shortSellingAllowed": False,
+        },
+    }
+    result = api_post("/_api/trading/stoploss/new", payload)
+    status = result.get("status", "UNKNOWN")
+    if status == "SUCCESS":
+        logger.info(
+            "Stop-loss placed: %s trigger=%.3f sell=%.3f vol=%d (id=%s)",
+            trigger_type, trigger_price, sell_price, volume,
+            result.get("stoplossOrderId", "?"),
+        )
+    else:
+        logger.warning("Stop-loss failed: %s — %s", status, result)
+    return result
+
+
+def place_trailing_stop(
+    orderbook_id: str,
+    trail_percent: float,
+    volume: int,
+    account_id: str | None = None,
+    valid_days: int = 8,
+) -> dict:
+    """Place a hardware trailing stop-loss that Avanza manages automatically.
+
+    The stop follows the price downward by trail_percent%. If the instrument
+    drops trail_percent% from its peak since placement, the stop triggers a
+    market sell.
+
+    Args:
+        orderbook_id: Avanza orderbook ID.
+        trail_percent: Trailing distance as percentage (e.g. 5.0 for 5%).
+        volume: Number of units to sell.
+        account_id: Defaults to DEFAULT_ACCOUNT_ID.
+        valid_days: Days until the stop expires (default 8).
+
+    Returns:
+        Dict with status, stoplossOrderId.
+    """
+    return place_stop_loss(
+        orderbook_id=orderbook_id,
+        trigger_price=trail_percent,
+        sell_price=0,
+        volume=volume,
+        account_id=account_id,
+        valid_days=valid_days,
+        trigger_type="FOLLOW_DOWNWARDS",
+        value_type="PERCENTAGE",
+    )
+
+
+def get_stop_losses() -> list[dict]:
+    """Get all active stop-loss orders."""
+    try:
+        data = api_get("/_api/trading/stoploss")
+        return data if isinstance(data, list) else []
+    except RuntimeError:
+        logger.debug("Could not fetch stop-losses")
+        return []
 
 
 def get_instrument_price(orderbook_id: str) -> dict[str, Any]:

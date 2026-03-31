@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from portfolio.avanza_control import delete_order_live, delete_stop_loss, place_order, place_stop_loss
-from portfolio.avanza_session import _get_playwright_context, close_playwright, verify_session
+from portfolio.avanza_session import verify_session
 from portfolio.exit_optimizer import MarketSnapshot, Position, compute_exit_plan
 from portfolio.file_utils import (
     atomic_append_jsonl,
@@ -1253,6 +1253,9 @@ def plan_cycle(
 
 
 def _page_with_session():
+    # Local import: avanza_control functions still require a Playwright page object.
+    # This will be removed once avanza_control is migrated to use api_get/api_post.
+    from portfolio.avanza_session import _get_playwright_context
     ctx = _get_playwright_context()
     page = ctx.new_page()
     page.goto("https://www.avanza.se/min-ekonomi/oversikt.html", wait_until="domcontentloaded", timeout=15000)
@@ -1363,6 +1366,9 @@ def execute_actions(
             page.close()
         except Exception as e:
             logger.debug("Snipe manager page close failed: %s", e)
+        # Local import: session cleanup still requires close_playwright until
+        # avanza_control is migrated to use api_get/api_post.
+        from portfolio.avanza_session import close_playwright
         close_playwright()
     return results
 
