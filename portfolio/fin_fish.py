@@ -1314,20 +1314,91 @@ def main() -> int:
     atomic_append_jsonl(FISH_LOG_PATH, log_entry)
 
     # --- Smart monitoring mode ---
-    if args.monitor and tickers:
-        ticker = tickers[0]  # monitor first ticker
+    # Auto-detect active positions from Avanza or metals_positions_state
+    # Start monitoring automatically when a position exists (no --monitor flag needed)
+    should_monitor = args.monitor
+    detected_position = None
+
+    if not should_monitor and tickers:
+        # Try to detect active positions
+        try:
+            from portfolio.avanza_session import get_positions
+            positions = get_positions()
+            silver_keywords = ("silver", "silv", "xag", "mini s silver", "mini l silver",
+                               "bull silver", "bear silver")
+            gold_keywords = ("guld", "gold", "xau", "bull guld", "bear guld")
+
+            for pos in (positions or []):
+                name = (pos.get("name") or "").lower()
+                vol = pos.get("volume", 0)
+                if vol <= 0:
+                    continue
+
+                for ticker in tickers:
+                    keywords = silver_keywords if "XAG" in ticker else gold_keywords
+                    if any(kw in name for kw in keywords):
+                        detected_position = {
+                            "ticker": ticker,
+                            "name": pos.get("name", ""),
+                            "volume": vol,
+                            "value": pos.get("value", 0),
+                            "avg_price": pos.get("averageAcquiredPrice", 0),
+                            "last_price": pos.get("lastPrice", 0),
+                            "is_short": any(k in name for k in ("bear", "mini s")),
+                        }
+                        should_monitor = True
+                        print(f"\n  Active position detected: {pos.get('name')} ({vol}u)")
+                        print(f"  Auto-starting smart monitor...\n")
+                        break
+                if detected_position:
+                    break
+        except Exception:
+            pass  # Avanza unavailable — check persisted state
+            try:
+                pos_state = load_json(BASE_DIR / "data" / "metals_positions_state.json") or {}
+                for key, pos in pos_state.items():
+                    if pos.get("active") and any(t.lower().replace("-", "") in key.lower()
+                                                  for t in tickers):
+                        detected_position = {
+                            "ticker": tickers[0],
+                            "name": key,
+                            "volume": pos.get("units", 0),
+                            "value": 0,
+                            "avg_price": pos.get("entry", 0),
+                            "is_short": pos.get("direction", "").lower() == "short",
+                        }
+                        should_monitor = True
+                        print(f"\n  Active position from state: {key}")
+                        print(f"  Auto-starting smart monitor...\n")
+                        break
+            except Exception:
+                pass
+
+    if should_monitor and tickers:
+        ticker = tickers[0]
         if ticker in spot_data:
             spot = spot_data[ticker]["price"]
             entry = args.entry_price if args.entry_price > 0 else spot
 
-            # Determine direction from preflight or forced direction
+            # Use detected position info if available
+            cert_price = args.cert_price
+            cert_units = args.cert_units
+            cert_leverage = args.leverage
+
+            if detected_position and cert_price == 0:
+                cert_price = detected_position.get("avg_price", 0) or 0
+                cert_units = detected_position.get("volume", 0)
+
+            # Determine direction
             if args.direction != "auto":
                 direction = "LONG" if args.direction == "bull" else "SHORT"
+            elif detected_position:
+                direction = "SHORT" if detected_position.get("is_short") else "LONG"
             elif ticker in preflight_results:
                 pf = preflight_results[ticker]
                 direction = "LONG" if pf["bull_score"] > pf["bear_score"] else "SHORT"
             else:
-                direction = "SHORT"  # default for fishing
+                direction = "SHORT"
 
             entry_conviction = 50
             if ticker in preflight_results:
@@ -1341,9 +1412,9 @@ def main() -> int:
                     entry_price=entry,
                     direction=direction,
                     entry_conviction=entry_conviction,
-                    cert_entry_price=args.cert_price,
-                    cert_units=args.cert_units,
-                    cert_leverage=args.leverage,
+                    cert_entry_price=cert_price,
+                    cert_units=cert_units,
+                    cert_leverage=cert_leverage,
                 )
                 monitor.run()
             except KeyboardInterrupt:
