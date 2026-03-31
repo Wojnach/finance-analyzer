@@ -217,6 +217,16 @@ def write_agent_summary(
         logger.warning("[reporting] exposure_coach failed", exc_info=True)
         _module_warnings.append("exposure_coach")
 
+    # Signal postmortem context (regime insights, correlations)
+    try:
+        from portfolio.signal_postmortem import get_postmortem_context
+        pm = get_postmortem_context()
+        if pm:
+            summary["signal_postmortem"] = pm
+    except Exception:
+        logger.warning("[reporting] signal_postmortem failed", exc_info=True)
+        _module_warnings.append("signal_postmortem")
+
     try:
         from portfolio.accuracy_stats import (
             best_worst_signals,
