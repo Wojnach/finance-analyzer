@@ -71,6 +71,7 @@ class TestLegacyImports:
 
         expected = {
             "AvanzaAuth", "AuthError", "AvanzaClient", "AvanzaStream",
+            "ScannedInstrument", "scan_instruments", "format_scan_results",
             "get_positions", "get_buying_power", "get_transactions",
             "get_quote", "get_market_data", "get_ohlc", "get_instrument_info", "get_news",
             "search", "find_warrants", "find_certificates",
