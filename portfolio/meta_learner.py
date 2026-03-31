@@ -249,7 +249,7 @@ def train(horizon="1d", verbose=True):
     }
 
     if verbose:
-        print(f"\nTraining with num_threads=1, nice=19...")
+        print("\nTraining with num_threads=1, nice=19...")
 
     model = lgb.LGBMClassifier(**params)
     model.fit(
@@ -297,7 +297,7 @@ def train(horizon="1d", verbose=True):
         importance = model.feature_importances_
         feat_names = X.columns.tolist()
         top_idx = np.argsort(importance)[::-1][:10]
-        print(f"\nTop 10 features:")
+        print("\nTop 10 features:")
         for i, idx in enumerate(top_idx):
             print(f"  {i+1}. {feat_names[idx]:<25} importance={importance[idx]}")
 

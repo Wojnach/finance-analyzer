@@ -430,9 +430,9 @@ def _build_watch_prompt(positions, summary, elapsed_mins):
         hold_c = total - buy_c - sell_c
         w_conf = sig.get("weighted_confidence", 0)
 
-        def _vote_str(name):
-            vote = votes.get(name, "HOLD")
-            acc = acc_data.get(name, {})
+        def _vote_str(name, _votes=votes, _acc=acc_data):
+            vote = _votes.get(name, "HOLD")
+            acc = _acc.get(name, {})
             acc_pct = f"{acc['accuracy']*100:.0f}%" if acc else "N/A"
             return f"{vote}({acc_pct})"
 

@@ -7,7 +7,6 @@ Ministral-3 runs via native llama-completion binary; legacy via llama-cpp-python
 import json
 import logging
 import platform
-import subprocess
 from pathlib import Path
 
 from portfolio.gpu_gate import gpu_gate

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, Optional
+from typing import IO
 
 try:
     import msvcrt  # type: ignore[attr-defined]
@@ -22,8 +22,8 @@ def acquire_lock_file(
     lock_path: str | Path,
     *,
     owner: str = "",
-    metadata: Optional[dict] = None,
-) -> Optional[IO[str]]:
+    metadata: dict | None = None,
+) -> IO[str] | None:
     """Acquire a non-blocking file lock and return the open handle.
 
     Returns None if another process already holds the lock.
@@ -43,7 +43,7 @@ def acquire_lock_file(
     return fh
 
 
-def release_lock_file(fh: Optional[IO[str]]) -> None:
+def release_lock_file(fh: IO[str] | None) -> None:
     """Release a previously acquired lock handle."""
     if fh is None:
         return
@@ -80,11 +80,11 @@ def _write_lock_metadata(
     fh: IO[str],
     *,
     owner: str = "",
-    metadata: Optional[dict] = None,
+    metadata: dict | None = None,
 ) -> None:
     payload = {
         "pid": os.getpid(),
-        "started": datetime.now(timezone.utc).isoformat(),
+        "started": datetime.now(UTC).isoformat(),
     }
     if owner:
         payload["owner"] = owner

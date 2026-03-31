@@ -8,14 +8,21 @@ while exposing the broader account/session helpers from ``portfolio.avanza_*``.
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
 
 from data.metals_avanza_helpers import (
     check_session_alive,
-    fetch_account_cash as _fetch_account_cash,
-    fetch_price as _fetch_page_price,
     get_csrf,
+)
+from data.metals_avanza_helpers import (
+    fetch_account_cash as _fetch_account_cash,
+)
+from data.metals_avanza_helpers import (
+    fetch_price as _fetch_page_price,
+)
+from data.metals_avanza_helpers import (
     place_order as _place_page_order,
+)
+from data.metals_avanza_helpers import (
     place_stop_loss as _place_page_stop_loss,
 )
 from portfolio.avanza_client import (
@@ -25,9 +32,11 @@ from portfolio.avanza_client import (
     get_open_orders,
     get_portfolio_value,
     get_positions,
-    get_price as get_price_info,
     place_buy_order,
     place_sell_order,
+)
+from portfolio.avanza_client import (
+    get_price as get_price_info,
 )
 
 _TYPE_ALIASES = {
@@ -54,7 +63,7 @@ _PRICE_FALLBACK_TYPES = (
 )
 
 
-def normalize_api_type(api_type: Optional[str], default: str = "certificate") -> str:
+def normalize_api_type(api_type: str | None, default: str = "certificate") -> str:
     """Normalize Avanza instrument type names for market-guide lookups."""
     normalized = (api_type or "").strip().lower()
     if not normalized:
@@ -67,7 +76,7 @@ def fetch_price(page, orderbook_id: str, api_type: str = "certificate"):
     return _fetch_page_price(page, orderbook_id, normalize_api_type(api_type))
 
 
-def fetch_price_with_fallback(page, orderbook_id: str, api_type: Optional[str] = None):
+def fetch_price_with_fallback(page, orderbook_id: str, api_type: str | None = None):
     """Try the preferred market-guide type and then the common fallback types."""
     if not orderbook_id:
         return None
@@ -92,13 +101,13 @@ def fetch_price_with_fallback(page, orderbook_id: str, api_type: Optional[str] =
     return None
 
 
-def fetch_account_cash(page, account_id: Optional[str] = None):
+def fetch_account_cash(page, account_id: str | None = None):
     """Fetch buying power for an account via the authenticated browser session."""
     resolved_account_id = str(account_id or get_account_id())
     return _fetch_account_cash(page, resolved_account_id)
 
 
-def place_order(page, account_id: Optional[str], ob_id: str, side: str, price: float, volume: int):
+def place_order(page, account_id: str | None, ob_id: str, side: str, price: float, volume: int):
     """Place a BUY/SELL order via the authenticated browser session."""
     resolved_account_id = str(account_id or get_account_id())
     normalized_side = (side or "").strip().upper()
@@ -107,7 +116,7 @@ def place_order(page, account_id: Optional[str], ob_id: str, side: str, price: f
 
 def place_stop_loss(
     page,
-    account_id: Optional[str],
+    account_id: str | None,
     ob_id: str,
     trigger_price: float,
     sell_price: float,
@@ -127,7 +136,7 @@ def place_stop_loss(
     )
 
 
-def delete_order_live(page, account_id: Optional[str], order_id: str):
+def delete_order_live(page, account_id: str | None, order_id: str):
     """Cancel an open order via the authenticated page session.
 
     IMPORTANT: Uses POST to /_api/trading-critical/rest/order/delete with
@@ -178,7 +187,7 @@ def delete_order_live(page, account_id: Optional[str], order_id: str):
         return False, {"error": str(exc)}
 
 
-def delete_stop_loss(page, account_id: Optional[str], stop_id: str):
+def delete_stop_loss(page, account_id: str | None, stop_id: str):
     """Delete an existing Avanza stop-loss order via the authenticated page."""
     csrf = get_csrf(page)
     if not csrf:
