@@ -187,6 +187,12 @@ def _extract_triggered_tickers(reasons):
 def _run_post_cycle(config):
     """Post-cycle housekeeping: digest, daily digest, message throttle flush, AV refresh."""
     _maybe_send_digest(config)
+    # Market health refresh (hourly via internal cache, self-checking)
+    try:
+        from portfolio.market_health import maybe_refresh_market_health
+        maybe_refresh_market_health()
+    except Exception as e_mh:
+        logger.warning("market health refresh failed: %s", e_mh)
     try:
         from portfolio.daily_digest import maybe_send_daily_digest
         maybe_send_daily_digest(config)
