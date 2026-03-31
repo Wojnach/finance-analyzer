@@ -1493,6 +1493,38 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         except Exception:
             pass  # graceful degradation
 
+    # --- Linear factor model score (supplementary, not overriding) ---
+    # Provides a continuous predicted-return score from ridge regression
+    # weights trained on historical signal+return data. Used to:
+    # 1. Confirm or weaken consensus (agreement = boost, disagreement = dampen)
+    # 2. Provide alternative ranking in agent_summary for Layer 2 decisions
+    try:
+        from portfolio.linear_factor import LinearFactorModel
+        _lf_model = LinearFactorModel()
+        if _lf_model.load():
+            # Convert votes to numeric: BUY=+1, SELL=-1, HOLD=0
+            _vote_map = {"BUY": 1.0, "SELL": -1.0, "HOLD": 0.0}
+            numeric_votes = {k: _vote_map.get(v, 0.0) for k, v in votes.items()}
+            lf_score = _lf_model.predict(numeric_votes)
+            lf_action, lf_conf = _lf_model.score_to_action(lf_score)
+            extra_info["_linear_factor_score"] = round(lf_score, 6)
+            extra_info["_linear_factor_action"] = lf_action
+            extra_info["_linear_factor_confidence"] = lf_conf
+            # Confirmation boost/dampen: if linear model agrees with consensus,
+            # boost confidence by 10%. If it disagrees, dampen by 10%.
+            if lf_action == action and action != "HOLD" and lf_conf > 0.3:
+                conf *= 1.10
+                extra_info.setdefault("_penalty_log", []).append(
+                    {"stage": "linear_factor", "effect": "confirm_boost",
+                     "lf_action": lf_action, "lf_score": round(lf_score, 6)})
+            elif lf_action != "HOLD" and lf_action != action and action != "HOLD":
+                conf *= 0.90
+                extra_info.setdefault("_penalty_log", []).append(
+                    {"stage": "linear_factor", "effect": "disagree_dampen",
+                     "lf_action": lf_action, "lf_score": round(lf_score, 6)})
+    except Exception:
+        pass  # graceful degradation — no trained model = no adjustment
+
     # Global confidence cap — calibration data shows >80% confidence is
     # anti-correlated with accuracy at every horizon (70-80% bucket is the
     # best performing at 57-59% actual accuracy)
