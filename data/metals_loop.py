@@ -3976,6 +3976,22 @@ def main():
         else:
             log("Risk module: NOT available (import failed)")
 
+        # Compute seasonality profiles at startup
+        _SEASONALITY_AVAILABLE = False
+        try:
+            from portfolio.seasonality_updater import update_seasonality_profiles
+            from portfolio.seasonality import get_profile
+            _SEASONALITY_AVAILABLE = True
+            _seasonality_profiles = update_seasonality_profiles()
+            if _seasonality_profiles:
+                for t, p in _seasonality_profiles.items():
+                    count = sum(v["count"] for v in p.values())
+                    log(f"  Seasonality profile: {t} ({count} hourly observations)")
+            else:
+                log("  Seasonality profiles: no data available")
+        except Exception as e:
+            log(f"  Seasonality profiles: failed ({e})")
+
         # Initialize silver fast-tick monitor (merged from silver_monitor.py)
         if SILVER_FAST_TICK_ENABLED and _has_active_silver():
             _silver_init_ref()
