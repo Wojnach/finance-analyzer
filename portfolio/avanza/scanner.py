@@ -39,16 +39,17 @@ logger = logging.getLogger("portfolio.avanza.scanner")
 # ---------------------------------------------------------------------------
 
 def _get_api():
-    """Return (search_fn, instrument_fn, marketdata_fn) that work with
-    whichever auth is currently available.
+    """Return (search_fn, instrument_fn, marketdata_fn, thread_safe) that work
+    with whichever auth is currently available.
 
     Returns:
-        Tuple of three callables:
+        Tuple of four:
         - search(instrument_type_str, query, limit) -> dict or list
         - get_instrument(api_type, ob_id) -> dict
         - get_market_data(ob_id) -> dict
+        - thread_safe: bool — True for TOTP (requests.Session), False for BankID (Playwright)
     """
-    # Try TOTP client first
+    # Try TOTP client first (thread-safe, supports parallel fetching)
     try:
         from portfolio.avanza.client import AvanzaClient
         client = AvanzaClient.get_instance()
@@ -64,12 +65,12 @@ def _get_api():
         def _marketdata(ob_id):
             return avanza.get_market_data(ob_id)
 
-        logger.debug("Scanner using TOTP client")
-        return _search, _instrument, _marketdata
+        logger.debug("Scanner using TOTP client (thread-safe)")
+        return _search, _instrument, _marketdata, True
     except Exception:
         pass
 
-    # Fall back to BankID session (Playwright)
+    # Fall back to BankID session (Playwright — NOT thread-safe, must be sequential)
     try:
         from portfolio.avanza_session import api_get, api_post
 
@@ -80,10 +81,13 @@ def _get_api():
             return api_get(f"/_api/market-guide/{api_type}/{ob_id}")
 
         def _marketdata(ob_id):
-            return api_get(f"/_api/trading-critical/rest/marketdata/{ob_id}")
+            try:
+                return api_get(f"/_api/trading-critical/rest/marketdata/{ob_id}")
+            except Exception:
+                return {}
 
-        logger.debug("Scanner using BankID session")
-        return _search, _instrument, _marketdata
+        logger.debug("Scanner using BankID session (sequential only)")
+        return _search, _instrument, _marketdata, False
     except Exception as e:
         raise RuntimeError(
             "No Avanza auth available. Either configure TOTP credentials "
@@ -155,7 +159,7 @@ def scan_instruments(
     Returns:
         List of ScannedInstrument, sorted by the chosen criterion.
     """
-    search_fn, instrument_fn, marketdata_fn = _get_api()
+    search_fn, instrument_fn, marketdata_fn, thread_safe = _get_api()
 
     # --- Step 1: Search ---
     search_query = f"{direction} {query}".strip() if direction else query
@@ -303,14 +307,23 @@ def scan_instruments(
 
     results: list[ScannedInstrument] = []
     t0 = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(fetch_detail, h): h for h in all_hits}
-        for future in as_completed(futures):
-            result = future.result()
+    if thread_safe and workers > 1:
+        # TOTP: parallel fetch via thread pool
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(fetch_detail, h): h for h in all_hits}
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    results.append(result)
+    else:
+        # BankID/Playwright: sequential (not thread-safe)
+        for h in all_hits:
+            result = fetch_detail(h)
             if result is not None:
                 results.append(result)
     dt = (time.perf_counter() - t0) * 1000
-    logger.info("Scanner: fetched %d instrument details in %.0fms", len(results), dt)
+    logger.info("Scanner: fetched %d instrument details in %.0fms (%s)",
+                len(results), dt, "parallel" if thread_safe else "sequential")
 
     # --- Step 3: Filter ---
     if min_leverage > 0:
