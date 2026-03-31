@@ -256,6 +256,36 @@ def api_post(path: str, payload: dict) -> Any:
         return {"raw": body}
 
 
+def api_delete(path: str) -> Any:
+    """Make an authenticated DELETE request to Avanza API.
+
+    Automatically includes the X-SecurityToken (CSRF) header.
+
+    Args:
+        path: API path (e.g., "/_api/trading/stoploss/{stop_id}")
+
+    Returns:
+        Dict with ``http_status`` and ``ok`` keys.
+    """
+    ctx = _get_playwright_context()
+    csrf = _get_csrf()
+    url = f"{API_BASE}{path}" if path.startswith("/") else path
+    resp = ctx.request.delete(
+        url,
+        headers={
+            "Content-Type": "application/json",
+            "X-SecurityToken": csrf,
+        },
+    )
+    if resp.status == 401:
+        close_playwright()
+        raise AvanzaSessionError(
+            "Session returned 401 Unauthorized. "
+            "Run: python scripts/avanza_login.py"
+        )
+    return {"http_status": resp.status, "ok": 200 <= resp.status < 300 or resp.status == 404}
+
+
 # --- Trading convenience functions ---
 
 
