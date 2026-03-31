@@ -1,119 +1,174 @@
-# Improvement Plan — Auto-Session 2026-03-30
+# Improvement Plan — Auto-Session 2026-03-31
 
-Updated: 2026-03-30
-Branch: improve/auto-session-2026-03-30
+Updated: 2026-03-31
+Branch: improve/auto-session-2026-03-31
 
 ## 1. Bugs & Problems Found
 
-### P1 — Critical (affects accuracy or causes incorrect behavior)
+### P1 — Critical (affects correctness or test reliability)
 
-#### BUG-150: Cross-horizon averaging bug in `_compute_dynamic_horizon_weights`
-- **File**: `portfolio/signal_engine.py:311`
-- **Problem**: When computing cross-horizon comparison accuracy, the code uses a running `(old + new) / 2` formula. For 3+ horizons, this gives disproportionate weight to later values instead of a true average.
-  ```python
-  cross_data[sig] = (cross_data[sig] + acc) / 2  # running average, NOT true mean
-  ```
-  Example with accuracies [0.60, 0.70, 0.80]:
-  - Running: 0.60 → (0.60+0.70)/2=0.65 → (0.65+0.80)/2=0.725
-  - True mean: (0.60+0.70+0.80)/3 = 0.700
-  The last horizon's accuracy gets ~57% weight instead of 33%.
-- **Impact**: Dynamic horizon weights are biased toward the last-processed horizon's accuracy. The cross-horizon baseline is wrong, so the ratio (this_horizon / cross_horizon) over- or under-weights signals. Currently 6 horizons (3h, 4h, 12h, 1d, 3d, 5d) are compared, so the 5d accuracy always dominates.
-- **Fix**: Accumulate sum + count, then divide: `cross_sum[sig] = cross_sum.get(sig, 0) + acc; cross_count[sig] = cross_count.get(sig, 0) + 1` → `cross_data[sig] = cross_sum[sig] / cross_count[sig]`.
+#### BUG-157: `analyze.py:434` — Loop variable capture in closure (B023)
+- **File**: `portfolio/analyze.py:434`
+- **Problem**: Inner function `_vote_str(name)` references `votes` from an enclosing
+  loop scope. If `_vote_str` is called after the loop variable changes, it will use
+  the wrong `votes` dict. Currently not triggered because the function is used
+  immediately, but fragile — any refactoring that defers the call will silently break.
+- **Impact**: Latent bug — currently works but violates Python closure semantics safety.
+- **Fix**: Bind `votes` as a default parameter: `def _vote_str(name, votes=votes):`
 
-### P2 — Important (could cause incorrect behavior in edge cases)
+#### BUG-158: `test_signal_improvements.py:402,411` — Undefined `datetime` (F821)
+- **File**: `tests/test_signal_improvements.py:402, 411`
+- **Problem**: Two test methods reference `datetime` in a lambda but the name is not
+  imported or available in the local scope (it's been patched by `@patch`). These tests
+  would fail at runtime if the code path is reached.
+- **Impact**: Tests may pass coincidentally due to mock setup, but contain undefined
+  name references that ruff flags as F821.
+- **Fix**: Add `from datetime import datetime` import or bind the real datetime before patch.
 
-#### REF-18: Duplicated LLM context building (~80 lines)
-- **File**: `portfolio/signal_engine.py:1005-1043` (Ministral) vs `1081-1128` (Qwen3)
-- **Problem**: The `tf_summary` construction (lines 1005-1019 ≡ 1081-1095) and `ema_gap` calculation (lines 1021-1025 ≡ 1097-1101) are identical between Ministral and Qwen3 signal generation. The `ctx` dict is nearly identical (Qwen3 adds `asset_type`).
-- **Impact**: If either block is updated without the other, the two LLMs receive different context — a silent divergence. This has already happened: Qwen3 has `asset_type` but Ministral doesn't.
-- **Fix**: Extract `_build_llm_context(ticker, ind, timeframes, extra_info) -> dict` that both consumers call, with Qwen3 adding `asset_type` afterward.
+### P2 — Important (code quality, resource leaks)
 
-#### REF-19: Dead `funding_action`/`funding_rate` code in main.py
-- **File**: `portfolio/main.py:341-342`
-- **Problem**: These lines check for `funding_action` and `funding_rate` in `extra` dict, but the funding signal has been disabled since BUG-tracking began. The keys are never set in `extra_info` by `generate_signal()`.
-- **Impact**: Dead code — never executes. Minor maintenance burden.
-- **Fix**: Remove the 2-line block.
+#### BUG-159: `avanza_session.py:255` — `raise` without `from` (B904)
+- **File**: `portfolio/avanza_session.py:255`
+- **Problem**: `raise RuntimeError(...)` inside an `except` clause doesn't chain
+  the original exception. The original JSON decode error is lost.
+- **Fix**: `raise RuntimeError(...) from None` (intentional suppression) or `from err`.
 
-### P3 — Minor (code quality, observability)
+#### BUG-160: `avanza_session.py:331-334` — Bare `pass` exception handlers
+- **File**: `portfolio/avanza_session.py:331-334`
+- **Problem**: Two consecutive `except: pass` handlers with no logging. If shutdown
+  cleanup fails, there's zero observability.
+- **Fix**: Add `logger.debug()` calls for observability.
 
-#### REF-20: `outcome_tracker.py` uses function-local `import logging` (5 occurrences)
-- **File**: `portfolio/outcome_tracker.py:161, 323, 396, 441, 453`
-- **Problem**: Instead of a module-level `logger = logging.getLogger("portfolio.outcome_tracker")`, the module has 5 separate `import logging as _logging` statements inside function bodies, each creating an ad-hoc logger.
-- **Impact**: No functional impact, but inconsistent with every other module in the codebase. Makes grep-based log analysis harder.
-- **Fix**: Add module-level `import logging` + `logger = logging.getLogger("portfolio.outcome_tracker")` and replace all 5 function-local patterns.
+#### REF-21: 4 unused imports in portfolio/ (F401)
+- **Files**: `avanza/types.py:12` (`Sequence`), `avanza_control.py:11` (`Any`),
+  `ministral_signal.py:10` (`subprocess`), `oil_precompute.py:12` (`json`)
+- **Fix**: Remove unused imports.
+
+#### REF-22: 3 unused variables in portfolio/ (F841)
+- **Files**: `crypto_scheduler.py:119` (`forecast`), `crypto_scheduler.py:302` (`gp`),
+  `fin_fish.py:749` (`warrant_price_now`)
+- **Fix**: Remove or prefix with `_`.
+
+#### REF-23: 2 f-strings without placeholders (F541)
+- **Files**: `meta_learner.py:252, 300`
+- **Fix**: Remove extraneous `f` prefix.
+
+### P3 — Minor (lint, style, consistency)
+
+#### REF-24: 7 unsorted imports (I001) in portfolio/
+- **Fix**: `ruff check --fix --select I001`
+
+#### REF-25: 11 non-PEP604 Optional annotations (UP045)
+- **Fix**: `ruff check --fix --select UP045`
+
+#### REF-26: 3 datetime.timezone.utc → datetime.UTC (UP017)
+- **Fix**: `ruff check --fix --select UP017`
+
+#### REF-27: 3 deprecated imports (UP035)
+- **Fix**: `ruff check --fix --select UP035`
+
+#### REF-28: 2 redundant open modes (UP015)
+- **Fix**: `ruff check --fix --select UP015`
+
+#### REF-29: Unregistered `slow` pytest mark
+- **File**: `pyproject.toml`
+- **Problem**: 6 tests use `@pytest.mark.slow` but it's not registered, generating warnings.
+- **Fix**: Add `"slow: marks tests that take a long time to run"` to `markers` list.
+
+#### REF-30: pyproject.toml description says "29-signal" (should be 30)
+- **File**: `pyproject.toml:4`
+- **Fix**: Update to "30-signal".
+
+#### REF-31: Test lint cleanup — 78 unused imports, 65 unused variables
+- **Files**: Various test files
+- **Fix**: `ruff check --fix --select F401,I001` for auto-fixable; manual review for F841.
 
 ---
 
 ## 2. Architecture Improvements
 
-### ARCH-28: Extract LLM context builder for signal_engine.py
-- **File**: `portfolio/signal_engine.py`
-- **Problem**: Ministral and Qwen3 signal blocks build nearly identical context dicts. This is the single largest duplicated code block in the signal pipeline.
-- **Fix**: Create `_build_llm_context(ticker, ind, timeframes, extra_info)` that returns the shared context dict. Qwen3 can extend it with `asset_type`.
-- **Impact**: ~40 lines removed, single point of maintenance for LLM context.
+### ARCH-29: Avanza package migration — wire new package into metals_loop.py
+- **Status**: The new `portfolio.avanza` package exists with 10 modules and full test
+  coverage (2,351+ tests in `tests/test_avanza_pkg/`), but nothing in the codebase
+  actually imports from it yet. The old `avanza_session.py` + `avanza_client.py` +
+  `avanza_orders.py` are still the active code paths.
+- **Risk**: Too high for autonomous session — touches live trading code, needs manual
+  review and staged rollout.
+- **Decision**: **DEFERRED** — document in plan, don't implement.
+
+### ARCH-30: `SIM105` — Replace 14 `try/except/pass` with `contextlib.suppress`
+- **Files**: Across `streaming.py`, `avanza_orders.py`, `exit_optimizer.py`,
+  `equity_curve.py` (5 instances), `accuracy_stats.py`, `daily_digest.py`,
+  `avanza_session.py`, `bigbet.py`
+- **Impact**: Cleaner code, fewer lines, same behavior. Some handlers need investigation
+  first — equity_curve.py has 5 bare `pass` handlers that may need logging.
+- **Decision**: Implement for clear cases; add logging for currently-silent handlers.
 
 ---
 
-## 3. Improvements Implemented
+## 3. Implementation Batches
 
-### Batch 1+2: Bug fix + refactor (3 files) ✓ DONE
-**Commit**: `1725eba` — `fix: cross-horizon averaging, extract LLM context, dead code cleanup`
+### Batch 1: Ruff auto-fixes (portfolio/) — SAFE, auto-fixable
+**Scope**: F401, F541, I001, UP045, UP017, UP035, UP015 in portfolio/
+**Files**: ~15 files modified
+**Risk**: Zero — all auto-fixable, no behavioral change
+**Tests**: Run full suite after
 
-| # | Change | File | Bug | Status |
-|---|--------|------|-----|--------|
-| 1 | Fix running average → true mean in `_compute_dynamic_horizon_weights` | `portfolio/signal_engine.py` | BUG-150 | ✓ |
-| 2 | Extract `_build_llm_context()` helper (~40 lines removed) | `portfolio/signal_engine.py` | REF-18, ARCH-28 | ✓ |
-| 3 | Remove dead funding_action/funding_rate code | `portfolio/main.py` | REF-19 | ✓ |
-| 4 | Add module-level logger to outcome_tracker (5 occurrences) | `portfolio/outcome_tracker.py` | REF-20 | ✓ |
+### Batch 2: Manual bug fixes (portfolio/)
+**Scope**: BUG-157 (B023), BUG-159 (B904), BUG-160 (silent pass), REF-22 (F841)
+**Files**: `analyze.py`, `avanza_session.py`, `crypto_scheduler.py`, `fin_fish.py`
+**Risk**: Low — localized fixes
+**Tests**: Run full suite after
 
-Net change: -47 lines (57 insertions, 104 deletions).
+### Batch 3: SIM105 contextlib.suppress conversions + equity_curve pass audit
+**Scope**: ARCH-30
+**Files**: ~8 files
+**Risk**: Low — behavioral equivalence guaranteed by ruff
+**Tests**: Run full suite after
 
-### Batch 3: Tests ✓ DONE
-**Commit**: `6051379` — `test: add coverage for BUG-150, REF-18, REF-20`
-
-| # | Change | File | Coverage | Status |
-|---|--------|------|----------|--------|
-| 1 | Test true mean with 3+ cross horizons (2 tests) | `tests/test_signal_engine_core.py` | BUG-150 | ✓ |
-| 2 | Test `_build_llm_context` helper (5 tests) | `tests/test_signal_engine_core.py` | REF-18 | ✓ |
-| 3 | Test module-level logger + no function-local imports (2 tests) | `tests/test_outcome_tracker_core.py` | REF-20 | ✓ |
-
-**Total new tests**: 9 (all passing). **Bonus**: BUG-150 fix also resolved 1 pre-existing test failure (`test_3h_boosts_news_event`).
+### Batch 4: Test fixes and improvements
+**Scope**: BUG-158 (F821 undefined datetime), REF-29 (slow mark), REF-30 (description),
+  REF-31 (test lint cleanup — auto-fixable F401/I001 only)
+**Files**: `test_signal_improvements.py`, `pyproject.toml`, various test files
+**Risk**: Zero — test-only changes
+**Tests**: Run full suite after
 
 ---
 
-## 4. Deferred Items (from prior sessions + this session)
+## 4. Deferred Items (from prior sessions)
 
 - **ARCH-17**: main.py re-exports 100+ symbols (breaking change risk)
-- **ARCH-18**: metals_loop.py monolith (risks live trading)
+- **ARCH-18**: metals_loop.py 4465-line monolith (risks live trading)
 - **ARCH-19**: No CI/CD pipeline (needs GitHub Actions + Windows runner)
 - **ARCH-20**: No type checking/mypy (incremental adoption)
 - **ARCH-21**: autonomous.py function decomposition (stable, low ROI)
 - **ARCH-22**: agent_invocation.py class extraction (touches every caller)
+- **ARCH-29**: Avanza package migration (needs manual staged rollout)
 - **BUG-121**: news_event.py sector mapping hardcoded (low value)
 - **BUG-132**: orb_predictor.py no caching (low priority)
-- **BUG-140**: `_cached()` eviction under lock (negligible impact)
-- **BUG-142**: `signal_best_horizon_accuracy()` O(E×T×H×S) (cached, 1h TTL)
-- **BUG-149**: meta_learner orphaned — predict() never called (document or integrate)
+- **BUG-149**: meta_learner orphaned — predict() never called
 - **TEST-1**: gpu_gate.py zero test coverage (requires GPU mocking)
 - **TEST-3**: 26 pre-existing test failures (integration, config)
-- **FEAT-3**: Integrate meta_learner as signal #31 (requires accuracy evaluation)
+- **FEAT-3**: Integrate meta_learner as signal #31
 
 ---
 
 ## 5. Dependency & Ordering
 
 ```
-Batch 1 (cross-horizon fix) → highest priority, changes signal weights
-Batch 2 (refactor + cleanup) → independent of Batch 1
-Batch 3 (tests) → depends on Batch 1 + 2
+Batch 1 (ruff auto-fixes) → no dependencies, do first
+Batch 2 (manual bug fixes) → independent of Batch 1
+Batch 3 (SIM105 conversions) → after Batch 1 (imports may shift)
+Batch 4 (test fixes) → after Batch 1-3 (ensures clean test run)
 
-Run tests after each batch.
+Run full test suite after each batch.
 ```
 
 ### Risk Summary
 
 | Batch | Files Changed | Production Risk | Test Risk |
 |-------|--------------|-----------------|-----------|
-| 1 | 1 file (modify) | Low — dynamic horizon weights are clamped + deadband | Low — existing tests should pass |
-| 2 | 3 files (modify) | Low — refactor preserves behavior, dead code removal, logging change | Medium — need to verify Ministral/Qwen3 context unchanged |
-| 3 | 2 files (add/modify) | None — test files only | None — new tests |
+| 1 | ~15 (modify) | Zero — auto-fix only | Zero |
+| 2 | 4 (modify) | Low — localized bug fixes | Low |
+| 3 | ~8 (modify) | Low — behavioral equivalence | Low |
+| 4 | ~20+ (modify) | Zero — test files + config | Low |
