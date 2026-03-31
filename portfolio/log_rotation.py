@@ -31,6 +31,7 @@ import os
 import pathlib
 import shutil
 import sys
+import contextlib
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -346,10 +347,8 @@ def get_data_dir_size():
     for dirpath, _dirnames, filenames in os.walk(DATA_DIR):
         for f in filenames:
             fp = pathlib.Path(dirpath) / f
-            try:
+            with contextlib.suppress(OSError):
                 total += fp.stat().st_size
-            except OSError:
-                pass
     return total / (1024 * 1024)
 
 

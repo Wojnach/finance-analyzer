@@ -6,6 +6,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO
+import contextlib
 
 try:
     import msvcrt  # type: ignore[attr-defined]
@@ -52,10 +53,8 @@ def release_lock_file(fh: IO[str] | None) -> None:
     except OSError:
         pass
     finally:
-        try:
+        with contextlib.suppress(Exception):
             fh.close()
-        except Exception:
-            pass
 
 
 def _lock_file(fh: IO[str]) -> None:

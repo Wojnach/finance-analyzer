@@ -12,7 +12,7 @@ import os
 import subprocess
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 logger = logging.getLogger("portfolio.gpu_gate")
@@ -76,10 +76,8 @@ def _write_lock(model_name: str):
 
 
 def _release_lock():
-    try:
+    with suppress(OSError):
         _GPU_LOCK_FILE.unlink(missing_ok=True)
-    except OSError:
-        pass
 
 
 @contextmanager

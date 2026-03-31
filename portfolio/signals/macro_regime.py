@@ -30,6 +30,7 @@ logger = logging.getLogger("portfolio.signals.macro_regime")
 import pandas as pd
 
 from portfolio.signal_utils import majority_vote
+import contextlib
 
 # ---------------------------------------------------------------------------
 # Minimum data lengths
@@ -130,10 +131,8 @@ def _dxy_risk(macro: dict | None) -> tuple[str, dict]:
         return "HOLD", indicators
 
     if dxy_value is not None:
-        try:
+        with contextlib.suppress(TypeError, ValueError):
             indicators["dxy_value"] = float(dxy_value)
-        except (TypeError, ValueError):
-            pass
     indicators["dxy_change_5d_pct"] = dxy_change
 
     if dxy_change > 0.3:
@@ -187,10 +186,8 @@ def _yield_10y_momentum(macro: dict | None) -> tuple[str, dict]:
     change_5d = _safe_get(macro, "treasury", "10y", "change_5d")
 
     if yield_pct is not None:
-        try:
+        with contextlib.suppress(TypeError, ValueError):
             indicators["treasury_10y"] = float(yield_pct)
-        except (TypeError, ValueError):
-            pass
 
     if change_5d is None:
         return "HOLD", indicators

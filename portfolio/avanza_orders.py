@@ -17,6 +17,7 @@ from portfolio.avanza_control import place_buy_order, place_sell_order
 from portfolio.file_utils import atomic_write_json, load_json
 from portfolio.http_retry import fetch_with_retry
 from portfolio.telegram_notifications import send_telegram
+import contextlib
 
 logger = logging.getLogger("portfolio.avanza_orders")
 
@@ -156,10 +157,8 @@ def _check_telegram_confirm(config: dict) -> bool:
     if isinstance(offset_data, dict):
         offset = int(offset_data.get("offset", 0))
     elif offset_file.exists():
-        try:
+        with contextlib.suppress(ValueError, OSError):
             offset = int(offset_file.read_text().strip())
-        except (ValueError, OSError):
-            pass
 
     params = {"timeout": 1, "allowed_updates": ["message"]}
     if offset:

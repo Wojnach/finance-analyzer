@@ -29,6 +29,7 @@ STATE_FILE = DATA_DIR / "iskbets_state.json"
 from portfolio.tickers import (
     SYMBOLS as TICKER_SOURCES,
 )
+import contextlib
 
 # ── State I/O ────────────────────────────────────────────────────────────
 
@@ -796,10 +797,8 @@ def _handle_sold(args, config):
     current_price = None
     parts = args.strip().split() if args else []
     if parts:
-        try:
+        with contextlib.suppress(ValueError):
             current_price = float(parts[0])
-        except ValueError:
-            pass
 
     if current_price is None:
         current_price = pos.get("highest_price", entry_price)

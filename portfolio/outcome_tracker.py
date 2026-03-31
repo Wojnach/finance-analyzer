@@ -23,6 +23,7 @@ from portfolio.tickers import (
     SIGNAL_NAMES,
     YF_MAP,
 )
+import contextlib
 
 
 def _derive_signal_vote(name, indicators, extra):
@@ -470,10 +471,8 @@ def backfill_outcomes(max_entries=2000):
                 f_out.write((json.dumps(entry) + "\n").encode("utf-8"))
         os.replace(tmp, SIGNAL_LOG)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
 
     return updated

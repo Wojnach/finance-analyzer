@@ -30,6 +30,7 @@ from typing import Any
 import numpy as np
 
 from portfolio.cost_model import CostModel, get_cost_model
+import contextlib
 
 logger = logging.getLogger("portfolio.exit_optimizer")
 
@@ -734,10 +735,8 @@ def compute_exit_plan_from_summary(
     entry_ts_str = position_state.get("entry_ts")
     entry_ts = datetime.now(UTC)
     if entry_ts_str:
-        try:
+        with contextlib.suppress(ValueError, TypeError):
             entry_ts = datetime.fromisoformat(entry_ts_str)
-        except (ValueError, TypeError):
-            pass
 
     position = Position(
         symbol=ticker,

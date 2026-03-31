@@ -37,6 +37,7 @@ from portfolio.fin_snipe import build_snapshots
 from portfolio.metals_ladder import translate_underlying_target
 from portfolio.process_lock import acquire_lock_file, release_lock_file
 from portfolio.session_calendar import get_session_info
+import contextlib
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATE_FILE = BASE_DIR / "data" / "fin_snipe_state.json"
@@ -182,13 +183,11 @@ def _log_fill_detected(
             current_underlying = snapshot.get("current_underlying")
             leverage = float(snapshot.get("leverage") or 1.0)
             if entry_underlying and current_underlying:
-                try:
+                with contextlib.suppress(ZeroDivisionError, ValueError, TypeError):
                     entry["realized_pnl_pct"] = round(
                         ((float(current_underlying) / float(entry_underlying)) - 1) * 100 * leverage,
                         2,
                     )
-                except (ZeroDivisionError, ValueError, TypeError):
-                    pass
         _append_log(fill_log_path, "fill_detected", entry)
     except Exception:
         logger.debug("Failed to log fill detection", exc_info=True)

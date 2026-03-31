@@ -32,6 +32,7 @@ HORIZONS = ["3h", "1d", "3d", "5d"]
 
 # BUG-147: Import canonical list from tickers instead of maintaining a copy.
 from portfolio.tickers import SIGNAL_NAMES
+import contextlib
 
 VOTE_MAP = {"BUY": 1, "SELL": -1, "HOLD": 0}
 
@@ -394,8 +395,6 @@ def predict(votes, ticker, hour_utc=None, day_of_week=None, horizon="1d"):
 if __name__ == "__main__":
     import os
     # Throttle: lowest priority
-    try:
+    with contextlib.suppress(OSError, AttributeError):
         os.nice(19)
-    except (OSError, AttributeError):
-        pass
     train_all(verbose=True)
