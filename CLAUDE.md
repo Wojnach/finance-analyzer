@@ -45,7 +45,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 - **GoldDigger** (`portfolio/golddigger/`): Gold certificate trading (dry-run/live via Avanza)
 - **Elongir** (`portfolio/elongir/`): Equity trading bot (separate signal system)
 
-## Signal System (30 Signals)
+## Signal System (32 Signals)
 
 ### Core Active (8)
 1. RSI(14) — Oversold <30 BUY, overbought >70 SELL
@@ -62,7 +62,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 10. Funding Rate (27.0%) — contrarian logic wrong
 11. Custom LoRA (20.9%) — 97% SELL bias
 
-### Enhanced Composite (19 modules in `portfolio/signals/`)
+### Enhanced Composite (21 modules in `portfolio/signals/`)
 12. Trend — Golden/Death Cross, Supertrend, Ichimoku, ADX
 13. Momentum — Stochastic, StochRSI, CCI, Williams %R, ROC, PPO
 14. Volume Flow — OBV, VWAP, A/D, CMF, MFI
@@ -82,6 +82,8 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 28. Forecast — Kronos + Chronos time-series foundation models
 29. Claude Fundamental — Haiku/Sonnet/Opus cascade (quality, valuation, catalysts)
 30. Futures Flow — Binance FAPI (crypto only): OI, LS Ratio, Funding Trend
+31. Orderbook Flow — Depth imbalance, trade flow, VPIN, OFI, spread health (metals+crypto)
+32. Metals Cross-Asset — Copper, GVZ, Gold/Silver ratio, SPY, Oil (metals only)
 
 ### Signal Mechanics
 - **MIN_VOTERS = 3** (all asset classes). Consensus = active voters (BUY+SELL), not total.
@@ -89,7 +91,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 - **Recency-weighted**: 70% recent (7d) + 30% all-time
 - **Regime penalties**: ranging 0.75x, high-vol 0.80x confidence multipliers
 - **Volume/ADX gates**: RVOL <0.5 forces HOLD
-- **Applicable signals**: crypto=27, stocks/metals=25
+- **Applicable signals**: crypto=29, stocks=25, metals=27
 
 ## Instruments
 
@@ -113,14 +115,19 @@ XBT-TRACKER (→BTC), ETH-TRACKER (→ETH), MINI-SILVER (→XAG 5x), MINI-TSMC (
 `trigger.py` (change detection), `market_timing.py` (DST-aware hours)
 
 ### Signal Pipeline
-`signal_engine.py` (30-signal voting), `signal_registry.py` (plugin discovery),
-`signals/*.py` (19 enhanced modules), `accuracy_stats.py` (hit rates),
+`signal_engine.py` (32-signal voting), `signal_registry.py` (plugin discovery),
+`signals/*.py` (21 enhanced modules), `accuracy_stats.py` (hit rates),
 `outcome_tracker.py` (backfill), `forecast_accuracy.py` (model health)
 
 ### Data & External
 `data_collector.py` (Binance/Alpaca/yfinance), `fear_greed.py`, `sentiment.py`,
 `alpha_vantage.py` (fundamentals), `futures_data.py` (Binance FAPI),
 `onchain_data.py` (BTC MVRV/SOPR), `fx_rates.py` (USD/SEK)
+
+### Microstructure & Cross-Asset
+`metals_orderbook.py` (Binance FAPI depth+trades), `microstructure.py` (OFI/VPIN/depth imbalance),
+`microstructure_state.py` (snapshot accumulator, persisted rolling OFI),
+`metals_cross_assets.py` (copper/GVZ/SPY/G-S ratio via yfinance)
 
 ### Portfolio & Risk
 `portfolio_mgr.py` (atomic state I/O), `trade_guards.py` (cooldowns/escalation),
