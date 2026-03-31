@@ -230,13 +230,142 @@ def delete_stop_loss(page, account_id: str | None, stop_id: str):
         return False, {"error": str(exc)}
 
 
+
+# --- Page-free API (uses BankID session, no Playwright page needed) ---
+
+from portfolio.avanza_session import (
+    api_get as _api_get,
+    api_post as _api_post,
+    api_delete as _api_delete,
+    get_instrument_price as _get_instrument_price,
+    place_buy_order as _place_buy_order,
+    place_sell_order as _place_sell_order,
+    cancel_order as _cancel_order,
+    place_stop_loss as _place_stop_loss_session,
+    place_trailing_stop as _place_trailing_stop_session,
+    get_stop_losses as _get_stop_losses_session,
+    get_positions as _get_positions_session,
+    get_buying_power as _get_buying_power_session,
+    get_open_orders as _get_open_orders_session,
+    verify_session,
+)
+
+
+def fetch_price_no_page(orderbook_id: str, api_type: str = "certificate"):
+    """Fetch a quote without a Playwright page — uses BankID session API."""
+    normalized = normalize_api_type(api_type)
+    try:
+        data = _api_get(f"/_api/market-guide/{normalized}/{orderbook_id}")
+        quote = data.get("quote", {})
+        ki = data.get("keyIndicators", {})
+        underlying = data.get("underlying", {})
+        _v = lambda obj: obj.get("value") if isinstance(obj, dict) else obj
+        return {
+            "bid": _v(quote.get("buy")),
+            "ask": _v(quote.get("sell")),
+            "last": _v(quote.get("last")),
+            "change_pct": _v(quote.get("changePercent")),
+            "high": _v(quote.get("highest")),
+            "low": _v(quote.get("lowest")),
+            "underlying": _v(underlying.get("quote", {}).get("last")),
+            "underlying_name": underlying.get("name"),
+            "leverage": _v(ki.get("leverage")),
+            "barrier": _v(ki.get("barrierLevel")),
+            "api_type": normalized,
+        }
+    except Exception:
+        return None
+
+
+def fetch_price_no_page_with_fallback(orderbook_id: str, api_type: str | None = None):
+    """Try preferred type then fallback chain — no Playwright page needed."""
+    if not orderbook_id:
+        return None
+    candidates = []
+    preferred = normalize_api_type(api_type) if api_type else ""
+    if preferred:
+        candidates.append(preferred)
+    for fb in _PRICE_FALLBACK_TYPES:
+        if fb not in candidates:
+            candidates.append(fb)
+    for candidate in candidates:
+        data = fetch_price_no_page(orderbook_id, candidate)
+        if data and (data.get("bid") is not None or data.get("ask") is not None or data.get("last") is not None):
+            return data
+    return None
+
+
+def place_order_no_page(account_id, ob_id, side, price, volume):
+    """Place BUY/SELL via BankID session — no Playwright page needed.
+
+    Returns:
+        Tuple (ok: bool, result: dict) matching the page-based interface.
+    """
+    normalized_side = (side or "").strip().upper()
+    if normalized_side == "BUY":
+        result = _place_buy_order(ob_id, price, volume, account_id)
+    else:
+        result = _place_sell_order(ob_id, price, volume, account_id)
+    ok = result.get("orderRequestStatus") == "SUCCESS"
+    return ok, result
+
+
+def place_stop_loss_no_page(account_id, ob_id, trigger_price, sell_price, volume, valid_days=8):
+    """Hardware stop-loss via BankID session — no Playwright page needed.
+
+    Returns:
+        Tuple (ok: bool, result: dict) matching the page-based interface.
+    """
+    result = _place_stop_loss_session(ob_id, trigger_price, sell_price, volume, account_id, valid_days)
+    ok = result.get("status") == "SUCCESS"
+    return ok, result
+
+
+def place_trailing_stop_no_page(account_id, ob_id, trail_percent, volume, valid_days=8):
+    """Hardware trailing stop via BankID session — no Playwright page needed.
+
+    Returns:
+        Tuple (ok: bool, result: dict) matching the page-based interface.
+    """
+    result = _place_trailing_stop_session(ob_id, trail_percent, volume, account_id, valid_days)
+    ok = result.get("status") == "SUCCESS"
+    return ok, result
+
+
+def delete_order_no_page(account_id, order_id):
+    """Cancel order via BankID session — no Playwright page needed.
+
+    Returns:
+        Tuple (ok: bool, result: dict) matching the page-based interface.
+    """
+    result = _cancel_order(order_id, account_id)
+    ok = result.get("orderRequestStatus") == "SUCCESS"
+    return ok, result
+
+
+def delete_stop_loss_no_page(account_id, stop_id):
+    """Delete stop-loss via BankID session — no Playwright page needed.
+
+    Returns:
+        Tuple (ok: bool, result: dict) matching the page-based interface.
+    """
+    resolved_account_id = str(account_id or get_account_id())
+    result = _api_delete(f"/_api/trading/stoploss/{resolved_account_id}/{stop_id}")
+    ok = result.get("ok", False)
+    return ok, result
+
+
 __all__ = [
     "check_session_alive",
     "delete_order",
     "delete_order_live",
+    "delete_order_no_page",
     "delete_stop_loss",
+    "delete_stop_loss_no_page",
     "fetch_account_cash",
     "fetch_price",
+    "fetch_price_no_page",
+    "fetch_price_no_page_with_fallback",
     "fetch_price_with_fallback",
     "find_instrument",
     "get_account_id",
@@ -248,6 +377,10 @@ __all__ = [
     "normalize_api_type",
     "place_buy_order",
     "place_order",
+    "place_order_no_page",
     "place_sell_order",
     "place_stop_loss",
+    "place_stop_loss_no_page",
+    "place_trailing_stop_no_page",
+    "verify_session",
 ]
