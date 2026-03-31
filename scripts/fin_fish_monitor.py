@@ -25,14 +25,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from portfolio.avanza_session import _get_playwright_context, api_get, close_playwright
-from data.metals_avanza_helpers import (
-    delete_order,
-    delete_stop_loss as delete_stop_loss_helper,
-    fetch_price,
-    place_order,
-    place_stop_loss,
-    get_csrf,
+from portfolio.avanza_session import (
+    api_get,
+    api_post,
+    get_instrument_price,
+    get_positions,
+    verify_session,
+    _get_csrf,
 )
 from portfolio.file_utils import atomic_append_jsonl
 
@@ -87,30 +86,14 @@ class FishTrade:
 
 
 # ---------------------------------------------------------------------------
-# Avanza helpers
+# Avanza helpers (using avanza_session API functions)
 # ---------------------------------------------------------------------------
 
-def get_page():
-    """Get a Playwright page for Avanza API calls."""
-    ctx = _get_playwright_context()
-    page = ctx.new_page()
-    page.goto("https://www.avanza.se")
-    return page
-
-
-def get_position_volume(page, ob_id: str, account_id: str) -> int:
+def get_position_volume(ob_id: str, account_id: str) -> int:
     """Check current position volume for an instrument in an account."""
     try:
-        result = page.evaluate('''async () => {
-            const resp = await fetch(
-                "https://www.avanza.se/_api/position-data/positions",
-                {credentials: "include"}
-            );
-            if (resp.status !== 200) return [];
-            const data = await resp.json();
-            return data.withOrderbook || [];
-        }''')
-        for entry in result:
+        result = api_get("/_api/position-data/positions")
+        for entry in result.get("withOrderbook", []):
             inst = entry.get("instrument", {})
             ob = inst.get("orderbook", {})
             acc = entry.get("account", {})
@@ -122,39 +105,25 @@ def get_position_volume(page, ob_id: str, account_id: str) -> int:
     return 0
 
 
-def get_open_orders(page, ob_id: str) -> list[dict]:
+def get_open_orders(ob_id: str) -> list[dict]:
     """Get open orders for a specific instrument."""
     try:
-        result = page.evaluate('''async () => {
-            const resp = await fetch(
-                "https://www.avanza.se/_api/trading/rest/orders",
-                {credentials: "include"}
-            );
-            if (resp.status !== 200) return {"orders": []};
-            return await resp.json();
-        }''')
-        orders = result.get("orders", [])
+        result = api_get("/_api/trading/rest/orders")
+        orders = result.get("orders", []) if isinstance(result, dict) else result
         return [
             o for o in orders
             if isinstance(o, dict)
-            and str(o.get("orderbook", {}).get("id", "")) == ob_id
+            and str(o.get("orderbook", {}).get("id", "") or o.get("orderbookId", "")) == ob_id
         ]
     except Exception as e:
         log.warning("Order check failed: %s", e)
     return []
 
 
-def get_stop_losses(page, ob_id: str) -> list[dict]:
+def get_stop_losses(ob_id: str) -> list[dict]:
     """Get active stop losses for a specific instrument."""
     try:
-        result = page.evaluate('''async () => {
-            const resp = await fetch(
-                "https://www.avanza.se/_api/trading/stoploss",
-                {credentials: "include"}
-            );
-            if (resp.status !== 200) return [];
-            return await resp.json();
-        }''')
+        result = api_get("/_api/trading/stoploss")
         if isinstance(result, list):
             return [
                 s for s in result
@@ -166,17 +135,79 @@ def get_stop_losses(page, ob_id: str) -> list[dict]:
     return []
 
 
-def delete_stop_loss(page, account_id: str, stop_id: str) -> bool:
-    """Delete a stop loss order using the canonical helper."""
-    ok, _ = delete_stop_loss_helper(page, account_id, stop_id)
-    if not ok:
-        log.warning("Delete stop loss %s failed", stop_id)
-    return ok
+def delete_stop_loss(account_id: str, stop_id: str) -> bool:
+    """Delete a stop loss order."""
+    try:
+        from portfolio.avanza_session import api_delete
+        result = api_delete(f"/_api/trading/stoploss/{stop_id}")
+        ok = result.get("ok", False)
+        if not ok:
+            log.warning("Delete stop loss %s failed: %s", stop_id, result)
+        return ok
+    except Exception as e:
+        log.warning("Delete stop loss %s failed: %s", stop_id, e)
+        return False
 
 
-def force_sell(page, trade: FishTrade) -> bool:
+def place_stop_loss(account_id: str, ob_id: str, trigger_price: float,
+                    sell_price: float, volume: int, valid_days: int = 1) -> tuple[bool, str]:
+    """Place a stop loss order via api_post."""
+    valid_until = (
+        datetime.datetime.now() + datetime.timedelta(days=valid_days)
+    ).strftime("%Y-%m-%d")
+    try:
+        result = api_post("/_api/trading/stoploss/new", {
+            "parentStopLossId": "0",
+            "accountId": account_id,
+            "orderBookId": ob_id,
+            "stopLossTrigger": {
+                "type": "LESS_OR_EQUAL",
+                "value": trigger_price,
+                "validUntil": valid_until,
+                "valueType": "MONETARY",
+                "triggerOnMarketMakerQuote": True,
+            },
+            "stopLossOrderEvent": {
+                "type": "SELL",
+                "price": sell_price,
+                "volume": volume,
+                "validDays": valid_days,
+                "priceType": "MONETARY",
+                "shortSellingAllowed": False,
+            },
+        })
+        success = isinstance(result, dict) and result.get("status") == "SUCCESS"
+        stop_id = result.get("stoplossOrderId", "") if isinstance(result, dict) else ""
+        return success, stop_id
+    except Exception as e:
+        log.error("Place stop loss failed: %s", e)
+        return False, ""
+
+
+def fetch_price(ob_id: str) -> dict | None:
+    """Fetch price info for a certificate instrument."""
+    try:
+        data = get_instrument_price(ob_id)
+        if not data:
+            return None
+        listing = data.get("listing", {})
+        underlying_info = data.get("underlying", {})
+        key_indicators = data.get("keyIndicators", {})
+        return {
+            "bid": listing.get("bidPrice"),
+            "ask": listing.get("askPrice"),
+            "last": listing.get("lastPrice"),
+            "underlying": underlying_info.get("lastPrice") if isinstance(underlying_info, dict) else None,
+            "leverage": key_indicators.get("leverage", {}).get("value") if isinstance(key_indicators, dict) else None,
+        }
+    except Exception as e:
+        log.warning("Price fetch failed: %s", e)
+        return None
+
+
+def force_sell(trade: FishTrade) -> bool:
     """Market sell remaining position."""
-    price_info = fetch_price(page, trade.ob_id, "certificate")
+    price_info = fetch_price(trade.ob_id)
     if not price_info or not price_info.get("bid"):
         log.error("Cannot get bid price for force sell")
         return False
@@ -186,13 +217,20 @@ def force_sell(page, trade: FishTrade) -> bool:
     vol = trade.current_volume
 
     log.info("FORCE SELL %d units at %.2f (bid=%.2f)", vol, sell_price, bid)
-    ok, result = place_order(page, trade.account_id, trade.ob_id, "SELL", sell_price, vol)
-    if ok:
-        log.info("Force sell placed: order_id=%s", result.get("order_id"))
-        trade.closed = True
-    else:
-        log.error("Force sell failed: %s", result)
-    return ok
+    try:
+        from portfolio.avanza_session import place_sell_order
+        result = place_sell_order(trade.ob_id, sell_price, vol, trade.account_id)
+        ok = isinstance(result, dict) and result.get("orderRequestStatus") == "SUCCESS"
+        if ok:
+            order_id = result.get("orderId", "")
+            log.info("Force sell placed: order_id=%s", order_id)
+            trade.closed = True
+        else:
+            log.error("Force sell failed: %s", result)
+        return ok
+    except Exception as e:
+        log.error("Force sell exception: %s", e)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +258,6 @@ def monitor_trade(
         import dateutil.tz
         cet = dateutil.tz.gettz("Europe/Stockholm")
 
-    page = get_page()
     last_fish_run = 0
     check_count = 0
     monitor_start = time.time()
@@ -247,7 +284,7 @@ def monitor_trade(
             # --- Session end check ---
             if now.hour >= 21:
                 log.warning("SESSION END (21:00 CET) — force selling")
-                force_sell(page, trade)
+                force_sell(trade)
                 break
 
             # --- Max duration check (prevents zombie processes) ---
@@ -257,11 +294,11 @@ def monitor_trade(
                     "MAX DURATION (%.1fh) reached — force selling to prevent zombie process",
                     max_duration_hours,
                 )
-                force_sell(page, trade)
+                force_sell(trade)
                 break
 
             # --- Get current state ---
-            price_info = fetch_price(page, trade.ob_id, "certificate")
+            price_info = fetch_price(trade.ob_id)
             if not price_info:
                 log.warning("Price fetch failed, retrying in %ds", poll_interval)
                 time.sleep(poll_interval)
@@ -273,7 +310,7 @@ def monitor_trade(
             pnl = trade.pnl_pct(bid)
 
             # --- Check position volume ---
-            vol = get_position_volume(page, trade.ob_id, trade.account_id)
+            vol = get_position_volume(trade.ob_id, trade.account_id)
 
             if vol == 0:
                 log.info("Position closed (volume=0). Trade complete.")
@@ -288,17 +325,17 @@ def monitor_trade(
                     old_vol, vol,
                 )
                 # Adjust stop loss volume
-                stops = get_stop_losses(page, trade.ob_id)
+                stops = get_stop_losses(trade.ob_id)
                 for s in stops:
                     sid = s.get("id", "")
                     if sid:
                         log.info("Deleting old stop loss %s", sid)
-                        delete_stop_loss(page, trade.account_id, sid)
+                        delete_stop_loss(trade.account_id, sid)
 
                 if vol > 0:
                     # Re-place stop loss with new volume
                     sl_ok, sl_id = place_stop_loss(
-                        page, trade.account_id, trade.ob_id,
+                        trade.account_id, trade.ob_id,
                         trigger_price=trade.stop_trigger,
                         sell_price=round(trade.stop_trigger - 0.02, 2),
                         volume=vol, valid_days=1,
@@ -318,12 +355,12 @@ def monitor_trade(
                 if new_trigger > trade.stop_trigger:
                     log.info("3h elapsed — tightening stop from %.2f to %.2f",
                              trade.stop_trigger, new_trigger)
-                    stops = get_stop_losses(page, trade.ob_id)
+                    stops = get_stop_losses(trade.ob_id)
                     for s in stops:
-                        delete_stop_loss(page, trade.account_id, s.get("id", ""))
+                        delete_stop_loss(trade.account_id, s.get("id", ""))
 
                     sl_ok, sl_id = place_stop_loss(
-                        page, trade.account_id, trade.ob_id,
+                        trade.account_id, trade.ob_id,
                         trigger_price=new_trigger,
                         sell_price=round(new_trigger - 0.02, 2),
                         volume=trade.current_volume, valid_days=1,
@@ -336,7 +373,7 @@ def monitor_trade(
             # --- Force sell at 5h ---
             if hours >= 5.0:
                 log.warning("5h MAX HOLD — force selling")
-                force_sell(page, trade)
+                force_sell(trade)
                 break
 
             # --- Status log ---
@@ -386,10 +423,6 @@ def monitor_trade(
     except Exception as e:
         log.error("Monitor error: %s", e, exc_info=True)
     finally:
-        try:
-            page.close()
-        except Exception:
-            pass
         log.info("Monitor exiting. Trade closed=%s", trade.closed)
 
 
