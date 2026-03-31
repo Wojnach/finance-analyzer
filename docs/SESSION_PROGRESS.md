@@ -3,7 +3,7 @@
 **Date:** 2026-03-31
 **Session:** "optimization" → "mrcrypto"
 **Branch:** main (all merged and pushed)
-**Last push:** 1566be8
+**Last push:** 14ec331
 
 ---
 
@@ -38,10 +38,15 @@ New functions in `avanza_session.py`:
 - `get_stop_losses()` — list active stop-loss orders
 - `api_delete()` — authenticated DELETE requests
 
-### Phase 3: Hardware Trailing Stops (FUNCTIONS READY)
+### Phase 3: Hardware Trailing Stops (WIRED IN)
 - `avanza_session.place_trailing_stop(ob_id, trail_percent, volume)` — BankID path
 - `portfolio.avanza.trading.place_trailing_stop(ob_id, trail_percent, volume)` — TOTP path
-- NOT yet integrated into metals_loop.py (still uses software trailing)
+- **INTEGRATED into metals_loop.py** — `HARDWARE_TRAILING_ENABLED = True`
+- On each BUY fill: places a single FOLLOW_DOWNWARDS 5% trailing stop via avanza_session
+- Avanza manages the trail server-side — works even if process crashes
+- Software trailing skipped when hardware trailing is active
+- Stop ID stored in position state as `hw_trailing_stop_id`
+- Live verified: stop-loss API reachable, functions callable, BankID session works
 
 ---
 
@@ -53,10 +58,11 @@ New functions in `avanza_session.py`:
 3. Parallel scanner — 6x faster with TOTP vs BankID
 
 ### Needs Careful Work (High Risk, separate session)
-4. **metals_loop.py migration** — 4,500 lines of live trading code
-   - Replace ~50 page.evaluate() calls with api_get/api_post
-   - Replace software trailing with hardware trailing (place_trailing_stop)
+4. **metals_loop.py full Playwright removal** — 4,500 lines, ~50 page.evaluate() calls remain
+   - Hardware trailing is wired in (done)
+   - Remaining: replace page.evaluate() for price fetching, position reconciliation, order fills
    - Replace metals_avanza_helpers with avanza_session/_no_page functions
+   - Remove sync_playwright() context manager + browser management
    - TEST EXTENSIVELY before deploying
 
 5. **metals_avanza_helpers.py deprecation** — dead code once metals_loop migrated
