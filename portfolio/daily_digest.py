@@ -134,6 +134,23 @@ def build_daily_digest(config):
 
     lines.append("")
 
+    # --- Market health section ---
+    mh = summary.get("market_health")
+    if mh:
+        score = mh.get("score", 0)
+        zone = mh.get("zone", "?")
+        dist_spy = mh.get("distribution_days_spy", 0)
+        ftd = mh.get("ftd_state", "?")
+        ftd_short = ftd.replace("confirmed_", "").replace("_", " ")
+        zone_emoji = {"healthy": "OK", "caution": "WARN", "danger": "RISK"}.get(zone, "?")
+        lines.append(f"`Market: {score}/100 ({zone_emoji}) · {dist_spy} dist days · {ftd_short}`")
+        exp = summary.get("exposure_recommendation", {})
+        if exp:
+            ceil = exp.get("exposure_ceiling", 1.0)
+            bias = exp.get("bias", "neutral")
+            lines.append(f"`Exposure: {ceil:.0%} ceiling · {bias}`")
+        lines.append("")
+
     # --- Focus instruments section ---
     focus_probs = summary.get("focus_probabilities", {})
     warrant_summary = summary.get("warrant_portfolio", {})
