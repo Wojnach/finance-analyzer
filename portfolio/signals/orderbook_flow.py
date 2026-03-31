@@ -127,12 +127,11 @@ def compute_orderbook_flow_signal(
         sub_signals["ofi"] = "HOLD"
     votes.append(sub_signals["ofi"])
 
-    # Sub 5: Spread Health
+    # Sub 5: Spread Health — always abstains (HOLD) because spread width
+    # is non-directional.  The actual effect is the 0.3x confidence penalty
+    # applied below when spread_zscore > threshold.
     sz = ctx.get("spread_zscore", 0.0)
-    if sz > _SPREAD_ZSCORE_DANGER:
-        sub_signals["spread_health"] = "HOLD"
-    else:
-        sub_signals["spread_health"] = "HOLD"
+    sub_signals["spread_health"] = "HOLD"
     votes.append(sub_signals["spread_health"])
 
     action, confidence = majority_vote(votes)
