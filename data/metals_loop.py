@@ -245,7 +245,15 @@ SESSION_HEALTH_CHECK_INTERVAL = 20   # check every N loops (~30 min at 90s)
 SESSION_EXPIRY_WARNING_H = 20        # warn when storage state is >20h old (session lasts ~24h)
 SESSION_STORAGE_FILE = "data/avanza_storage_state.json"
 
-# Trailing stop config — smart momentum-aware
+# Hardware trailing stop (Avanza-managed, FOLLOW_DOWNWARDS)
+# When True: places a single trailing stop via Avanza API on position open.
+# Avanza tracks the price peak and triggers a sell when it drops trail_pct%.
+# This works even if our process crashes. No polling needed.
+HARDWARE_TRAILING_ENABLED = True
+HARDWARE_TRAILING_PCT = 5.0     # trail 5% below peak (matches TRAIL_DISTANCE_PCT)
+HARDWARE_TRAILING_VALID_DAYS = 8  # stop expires after 8 days
+
+# Software trailing stop config — momentum-aware (fallback when hardware disabled)
 TRAIL_START_PCT = 1.0           # start trailing after 1% gain from entry (was 2%)
 TRAIL_DISTANCE_PCT = 5.0        # trail 5% below current bid (was 3% — user wants 5% safety)
 TRAIL_MIN_MOVE_PCT = 0.5        # minimum move to update (was 1% — more responsive)
@@ -2443,12 +2451,42 @@ def _handle_buy_fill(page, order, exec_price, price_data):
 
     _save_positions(POSITIONS)
 
-    # Place hardware stop-loss (only if enabled)
-    if STOP_ORDER_ENABLED:
+    # --- Hardware trailing stop (Avanza-managed, no Playwright needed) ---
+    if HARDWARE_TRAILING_ENABLED:
+        vol = POSITIONS[pos_key]["units"]
+        ob_id_str = POSITIONS[pos_key].get("ob_id", order.get("ob_id"))
+        try:
+            from portfolio.avanza_session import place_trailing_stop as _place_hw_trail
+            result = _place_hw_trail(
+                orderbook_id=ob_id_str,
+                trail_percent=HARDWARE_TRAILING_PCT,
+                volume=vol,
+                account_id=ACCOUNT_ID,
+                valid_days=HARDWARE_TRAILING_VALID_DAYS,
+            )
+            if result.get("status") == "SUCCESS":
+                hw_stop_id = result.get("stoplossOrderId", "?")
+                POSITIONS[pos_key]["hw_trailing_stop_id"] = hw_stop_id
+                _save_positions(POSITIONS)
+                log(f"  HW trailing stop placed for {pos_key}: {HARDWARE_TRAILING_PCT}% trail, "
+                    f"vol={vol} [stoploss {hw_stop_id}]")
+                send_telegram(f"Trailing stop placed: {POSITIONS[pos_key]['name']} "
+                              f"{HARDWARE_TRAILING_PCT}% trail, {vol}u")
+            else:
+                log(f"  HW trailing stop FAILED for {pos_key}: {result}")
+                send_telegram(f"*WARNING* Hardware trailing stop failed for "
+                              f"{POSITIONS[pos_key]['name']} — set manually!")
+        except Exception as e:
+            log(f"  HW trailing stop error for {pos_key}: {e}")
+            send_telegram(f"*WARNING* Hardware trailing stop error for "
+                          f"{POSITIONS[pos_key]['name']}: {e}")
+
+    # Legacy cascade stop-loss (only if hardware trailing is OFF)
+    if STOP_ORDER_ENABLED and not HARDWARE_TRAILING_ENABLED:
         stop_trigger = order.get("stop_trigger")
         stop_sell = order.get("stop_sell")
         if stop_trigger and stop_sell and order["volume"] > 0:
-            vol = POSITIONS[pos_key]["units"]  # use total units (may have added to existing)
+            vol = POSITIONS[pos_key]["units"]
             ok, stop_id = place_stop_loss(page, ACCOUNT_ID, order["ob_id"], stop_trigger, stop_sell, vol)
             if ok:
                 log(f"  Stop-loss placed for {pos_key}: trigger={stop_trigger}, sell={stop_sell}")
@@ -4336,7 +4374,8 @@ Positions: {pos_summary}{prob_summary}""")
                             emergency_sell(page, mkey, POSITIONS[mkey], mbid)
 
                 # Smart trailing stop updates (every 3rd check — more responsive)
-                if STOP_ORDER_ENABLED and check_count % 3 == 0:
+                # Skip if hardware trailing is active — Avanza manages the trail
+                if STOP_ORDER_ENABLED and not HARDWARE_TRAILING_ENABLED and check_count % 3 == 0:
                     update_smart_trailing_stops(page, POSITIONS, stop_order_state, prices)
 
                 # Swing trader: autonomous BUY/SELL evaluation
