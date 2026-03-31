@@ -84,3 +84,26 @@ class TestComputeOrderbookFlowSignal:
             _make_df(), ticker="XAG-USD", config={}, macro={}
         )
         assert result["confidence"] < 0.5
+
+    @patch("portfolio.signals.orderbook_flow._get_microstructure_context")
+    def test_trade_throughs_contribute_to_vote(self, mock_ctx):
+        from portfolio.signals.orderbook_flow import compute_orderbook_flow_signal
+        mock_ctx.return_value = {
+            "depth_imbalance": 0.0,
+            "trade_imbalance_ratio": 0.0,
+            "vpin": 0.3,
+            "ofi": 0.0,
+            "spread_zscore": 0.0,
+            "spread_bps": 5.0,
+            "trade_throughs": {
+                "buy_throughs": 5,
+                "sell_throughs": 0,
+                "total_throughs": 5,
+                "through_volume": 10.0,
+                "max_gap_bps": 15.0,
+            },
+        }
+        result = compute_orderbook_flow_signal(
+            _make_df(), ticker="XAG-USD", config={}, macro={}
+        )
+        assert result["sub_signals"].get("trade_pressure") == "BUY"

@@ -1,11 +1,12 @@
 """Orderbook flow signal — microstructure-based short-term prediction.
 
-Signal #31.  Combines 5 microstructure sub-indicators via majority vote:
+Signal #31.  Combines 6 microstructure sub-indicators via majority vote:
     1. Depth Imbalance: ln(V_bid) - ln(V_ask) direction
     2. Trade Flow Imbalance: signed volume ratio direction
     3. VPIN Toxicity: high VPIN confirms directional flow
     4. OFI Direction: order flow imbalance trend
     5. Spread Health: abnormally wide spread → caution
+    6. Trade Pressure: trade-through imbalance (buy vs sell throughs)
 
 Applicable to metals (XAU-USD, XAG-USD) and crypto (BTC-USD, ETH-USD).
 Requires context: calls metals_orderbook + microstructure modules.
@@ -27,6 +28,7 @@ _TRADE_IMBALANCE_THRESHOLD = 0.3
 _VPIN_HIGH = 0.6
 _OFI_THRESHOLD = 5.0
 _SPREAD_ZSCORE_DANGER = 2.0
+_TRADE_THROUGH_THRESHOLD = 2
 
 
 def _get_microstructure_context(ticker: str) -> dict | None:
@@ -36,6 +38,7 @@ def _get_microstructure_context(ticker: str) -> dict | None:
         from portfolio.microstructure import (
             compute_vpin,
             depth_imbalance,
+            detect_trade_throughs,
             trade_flow_imbalance,
         )
     except ImportError:
@@ -50,6 +53,7 @@ def _get_microstructure_context(ticker: str) -> dict | None:
     di = depth_imbalance(depth)
     tfi = trade_flow_imbalance(trades)
     vpin = compute_vpin(trades, n_buckets=20)
+    tt = detect_trade_throughs(trades)
 
     if tfi is None:
         return None
@@ -73,6 +77,7 @@ def _get_microstructure_context(ticker: str) -> dict | None:
         "ofi": ofi,
         "spread_zscore": sz,
         "spread_bps": depth.get("spread_bps", 0.0),
+        "trade_throughs": tt,
     }
 
 
@@ -146,6 +151,18 @@ def compute_orderbook_flow_signal(
     sub_signals["spread_health"] = "HOLD"
     votes.append(sub_signals["spread_health"])
 
+    # Sub 6: Trade Pressure — trade-through imbalance
+    tt = ctx.get("trade_throughs") or {}
+    buy_tt = tt.get("buy_throughs", 0)
+    sell_tt = tt.get("sell_throughs", 0)
+    if buy_tt > sell_tt + _TRADE_THROUGH_THRESHOLD:
+        sub_signals["trade_pressure"] = "BUY"
+    elif sell_tt > buy_tt + _TRADE_THROUGH_THRESHOLD:
+        sub_signals["trade_pressure"] = "SELL"
+    else:
+        sub_signals["trade_pressure"] = "HOLD"
+    votes.append(sub_signals["trade_pressure"])
+
     action, confidence = majority_vote(votes)
 
     if sz > _SPREAD_ZSCORE_DANGER:
@@ -162,5 +179,9 @@ def compute_orderbook_flow_signal(
             "ofi": round(ofi, 4),
             "spread_zscore": round(sz, 4),
             "spread_bps": round(ctx.get("spread_bps", 0.0), 2),
+            "buy_throughs": buy_tt,
+            "sell_throughs": sell_tt,
+            "through_volume": tt.get("through_volume", 0.0),
+            "max_gap_bps": tt.get("max_gap_bps", 0.0),
         },
     }
