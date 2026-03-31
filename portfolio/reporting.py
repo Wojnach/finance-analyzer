@@ -180,6 +180,43 @@ def write_agent_summary(
         logger.warning("[reporting] macro_context failed", exc_info=True)
         _module_warnings.append("macro_context")
 
+    # Market health (distribution days, FTD, breadth score)
+    try:
+        from portfolio.market_health import get_market_health
+        mh = get_market_health()
+        if mh:
+            summary["market_health"] = mh
+    except Exception:
+        logger.warning("[reporting] market_health failed", exc_info=True)
+        _module_warnings.append("market_health")
+
+    # Earnings proximity for stock tickers
+    try:
+        from portfolio.earnings_calendar import get_all_earnings_proximity
+        earnings = get_all_earnings_proximity()
+        if earnings:
+            summary["earnings_proximity"] = earnings
+    except Exception:
+        logger.warning("[reporting] earnings_calendar failed", exc_info=True)
+        _module_warnings.append("earnings_calendar")
+
+    # Exposure recommendation (synthesizes market health + regime)
+    try:
+        from portfolio.exposure_coach import compute_exposure_recommendation
+        from portfolio.market_health import get_market_health as _get_mh
+        mh_data = summary.get("market_health") or _get_mh()
+        # Use most common regime across tickers as portfolio-level regime
+        regime_counts: dict[str, int] = {}
+        for sig_data in summary.get("signals", {}).values():
+            r = sig_data.get("extra", {}).get("_regime", "range-bound")
+            regime_counts[r] = regime_counts.get(r, 0) + 1
+        dominant_regime = max(regime_counts, key=regime_counts.get) if regime_counts else "range-bound"
+        exposure = compute_exposure_recommendation(mh_data, regime=dominant_regime)
+        summary["exposure_recommendation"] = exposure
+    except Exception:
+        logger.warning("[reporting] exposure_coach failed", exc_info=True)
+        _module_warnings.append("exposure_coach")
+
     try:
         from portfolio.accuracy_stats import (
             best_worst_signals,

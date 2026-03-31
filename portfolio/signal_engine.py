@@ -1429,6 +1429,37 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     if penalty_log:
         extra_info["_penalty_log"] = penalty_log
 
+    # --- Market health confidence penalty ---
+    # Penalizes BUY signals when broad market is unhealthy (distribution days,
+    # broken FTD, etc.).  Only affects BUY; SELL and HOLD pass through.
+    try:
+        from portfolio.market_health import get_confidence_penalty, get_market_health
+        mh = get_market_health()
+        mh_mult = get_confidence_penalty(action, mh)
+        if mh_mult != 1.0:
+            conf *= mh_mult
+            extra_info.setdefault("_penalty_log", []).append(
+                {"stage": "market_health", "zone": mh.get("zone") if mh else "unknown",
+                 "score": mh.get("score") if mh else None, "mult": mh_mult}
+            )
+    except Exception:
+        pass  # graceful degradation — no market health = no penalty
+
+    # --- Earnings proximity gate (stocks only) ---
+    # Force HOLD if ticker has earnings within 2 calendar days.
+    if ticker and action != "HOLD":
+        try:
+            from portfolio.earnings_calendar import should_gate_earnings
+            if should_gate_earnings(ticker):
+                extra_info.setdefault("_penalty_log", []).append(
+                    {"stage": "earnings_gate", "ticker": ticker, "effect": "force_hold"}
+                )
+                extra_info["_earnings_gated"] = True
+                action = "HOLD"
+                conf = 0.0
+        except Exception:
+            pass  # graceful degradation
+
     # Global confidence cap — calibration data shows >80% confidence is
     # anti-correlated with accuracy at every horizon (70-80% bucket is the
     # best performing at 57-59% actual accuracy)
