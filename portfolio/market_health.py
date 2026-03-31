@@ -51,12 +51,28 @@ _DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 _STATE_FILE = _DATA_DIR / "market_health_state.json"
 
 
-def _fetch_index_data(symbol: str, period: str = "60d") -> dict | None:
-    """Fetch daily OHLCV for an index from yfinance.
+def _fetch_index_data(symbol: str, period: str = "90d") -> dict | None:
+    """Fetch daily OHLCV for an index via Alpaca (primary) or yfinance (fallback).
 
     Returns dict with keys: closes, volumes, highs, lows, opens
     as lists of floats (oldest first).
     """
+    # Primary: Alpaca — already integrated with rate limiters and circuit breaker
+    try:
+        from portfolio.data_collector import alpaca_klines
+        df = alpaca_klines(symbol, interval="1d", limit=90)
+        if df is not None and len(df) >= 10:
+            return {
+                "closes": df["close"].tolist(),
+                "volumes": df["volume"].tolist(),
+                "highs": df["high"].tolist(),
+                "lows": df["low"].tolist(),
+                "opens": df["open"].tolist(),
+            }
+    except Exception:
+        logger.debug("Alpaca fetch failed for %s, trying yfinance fallback", symbol)
+
+    # Fallback: yfinance (for when Alpaca circuit is open or rate limited)
     try:
         import yfinance as yf
 

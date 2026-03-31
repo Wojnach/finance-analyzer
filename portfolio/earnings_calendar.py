@@ -27,34 +27,86 @@ _earnings_cache: dict[str, dict] = {}
 _earnings_lock = threading.Lock()
 
 
-def _fetch_earnings_date(ticker: str) -> dict | None:
-    """Fetch next earnings date from yfinance.
+def _fetch_earnings_alpha_vantage(ticker: str) -> dict | None:
+    """Fetch next earnings date from Alpha Vantage EARNINGS endpoint.
 
-    Returns dict with earnings_date, days_until, timing, or None.
+    Uses the already-configured AV API key and rate limiter.
     """
+    try:
+        from portfolio.api_utils import load_config
+        from portfolio.http_retry import fetch_with_retry
+        from portfolio.shared_state import _alpha_vantage_limiter
+
+        config = load_config()
+        api_key = config.get("alpha_vantage_key", "")
+        if not api_key:
+            return None
+
+        _alpha_vantage_limiter.wait()
+        r = fetch_with_retry(
+            "https://www.alphavantage.co/query",
+            params={
+                "function": "EARNINGS",
+                "symbol": ticker,
+                "apikey": api_key,
+            },
+            timeout=10,
+        )
+        if r is None:
+            return None
+        data = r.json()
+
+        # AV EARNINGS returns quarterlyEarnings and annualEarnings
+        quarterly = data.get("quarterlyEarnings", [])
+        if not quarterly:
+            return None
+
+        today = datetime.now(UTC).date()
+        # Find the next upcoming earnings (reportedDate in the future or very recent)
+        for q in quarterly:
+            rd = q.get("reportedDate")
+            if not rd or rd == "None":
+                continue
+            try:
+                from datetime import date as _date
+                ed = _date.fromisoformat(rd)
+                days_until = (ed - today).days
+                if days_until >= -1:
+                    return {
+                        "earnings_date": ed.isoformat(),
+                        "days_until": days_until,
+                        "gate_active": 0 <= days_until <= GATE_DAYS,
+                        "timing": "unknown",
+                    }
+            except (ValueError, TypeError):
+                continue
+
+        return None
+    except Exception:
+        logger.debug("Alpha Vantage earnings fetch failed for %s", ticker, exc_info=True)
+        return None
+
+
+def _fetch_earnings_yfinance(ticker: str) -> dict | None:
+    """Fallback: fetch next earnings date from yfinance."""
     try:
         import yfinance as yf
 
         t = yf.Ticker(ticker)
-
-        # Try .calendar first (has earnings date + timing)
         try:
             cal = t.calendar
             if cal is not None and not (hasattr(cal, 'empty') and cal.empty):
-                # yfinance returns calendar as dict or DataFrame depending on version
                 if isinstance(cal, dict):
                     earnings_date = cal.get("Earnings Date")
                     if isinstance(earnings_date, list) and earnings_date:
                         earnings_date = earnings_date[0]
                 else:
-                    # DataFrame — look for Earnings Date row
                     if "Earnings Date" in cal.index:
                         earnings_date = cal.loc["Earnings Date"].iloc[0]
                     else:
                         earnings_date = None
 
                 if earnings_date is not None:
-                    # Convert to date
                     if hasattr(earnings_date, "date"):
                         ed = earnings_date.date()
                     elif isinstance(earnings_date, str):
@@ -66,7 +118,6 @@ def _fetch_earnings_date(ticker: str) -> dict | None:
                         today = datetime.now(UTC).date()
                         days_until = (ed - today).days
                         if days_until < -5:
-                            # Past earnings, not useful
                             return None
                         return {
                             "earnings_date": ed.isoformat(),
@@ -75,34 +126,25 @@ def _fetch_earnings_date(ticker: str) -> dict | None:
                             "timing": "unknown",
                         }
         except Exception:
-            pass  # calendar not available, try earnings_dates
-
-        # Fallback: earnings_dates property
-        try:
-            dates = t.earnings_dates
-            if dates is not None and not dates.empty:
-                today = datetime.now(UTC).date()
-                for idx in dates.index:
-                    if hasattr(idx, "date"):
-                        ed = idx.date()
-                    else:
-                        continue
-                    days_until = (ed - today).days
-                    if days_until >= -1:  # future or very recent
-                        return {
-                            "earnings_date": ed.isoformat(),
-                            "days_until": days_until,
-                            "gate_active": 0 <= days_until <= GATE_DAYS,
-                            "timing": "unknown",
-                        }
-        except Exception:
             pass
-
         return None
-
     except Exception:
-        logger.debug("Failed to fetch earnings for %s", ticker, exc_info=True)
+        logger.debug("yfinance earnings fetch failed for %s", ticker, exc_info=True)
         return None
+
+
+def _fetch_earnings_date(ticker: str) -> dict | None:
+    """Fetch next earnings date — Alpha Vantage primary, yfinance fallback.
+
+    Returns dict with earnings_date, days_until, timing, or None.
+    """
+    # Primary: Alpha Vantage (already have API key + rate limiter)
+    result = _fetch_earnings_alpha_vantage(ticker)
+    if result:
+        return result
+
+    # Fallback: yfinance
+    return _fetch_earnings_yfinance(ticker)
 
 
 def get_earnings_proximity(ticker: str) -> dict | None:
