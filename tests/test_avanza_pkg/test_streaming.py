@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from portfolio.avanza.streaming import AvanzaStream
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

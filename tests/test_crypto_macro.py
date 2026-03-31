@@ -1,13 +1,8 @@
 """Tests for crypto macro signal and data module."""
 
-import json
-import time
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pandas as pd
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # crypto_macro_data tests

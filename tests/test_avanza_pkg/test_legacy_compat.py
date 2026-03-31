@@ -10,53 +10,53 @@ from __future__ import annotations
 class TestLegacyImports:
     def test_avanza_session_exports(self):
         """Legacy avanza_session imports still resolve."""
-        from portfolio.avanza_session import (
+        from portfolio.avanza_session import (  # noqa: F401
             AvanzaSessionError,
             api_get,
             api_post,
-            get_positions,
+            cancel_order,
             get_buying_power,
             get_instrument_price,
+            get_open_orders,
+            get_positions,
             get_quote,
+            is_session_expiring_soon,
+            load_session,
             place_buy_order,
             place_sell_order,
-            cancel_order,
-            get_open_orders,
-            verify_session,
-            load_session,
             session_remaining_minutes,
-            is_session_expiring_soon,
+            verify_session,
         )
         assert callable(api_get)
 
     def test_avanza_client_exports(self):
         """Legacy avanza_client imports still resolve."""
-        from portfolio.avanza_client import (
-            get_price,
-            get_positions,
-            get_portfolio_value,
+        from portfolio.avanza_client import (  # noqa: F401
             find_instrument,
             get_client,
+            get_portfolio_value,
+            get_positions,
+            get_price,
         )
         assert callable(get_price)
 
     def test_new_package_importable(self):
         """New portfolio.avanza package exports all public symbols."""
-        from portfolio.avanza import (
-            get_quote,
+        from portfolio.avanza import (  # noqa: F401
+            AvanzaAuth,
+            AvanzaClient,
+            cancel_order,
+            get_buying_power,
             get_market_data,
             get_ohlc,
-            place_order,
-            modify_order,
-            cancel_order,
             get_positions,
-            get_buying_power,
-            search,
-            round_to_tick,
+            get_quote,
             get_tick_rules,
+            modify_order,
+            place_order,
             place_trailing_stop,
-            AvanzaClient,
-            AvanzaAuth,
+            round_to_tick,
+            search,
         )
         assert callable(get_quote)
 

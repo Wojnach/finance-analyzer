@@ -15,8 +15,7 @@ from portfolio.avanza.market_data import (
     get_ohlc,
     get_quote,
 )
-from portfolio.avanza.types import InstrumentInfo, MarketData, NewsArticle, OHLC, Quote
-
+from portfolio.avanza.types import OHLC, InstrumentInfo, MarketData, NewsArticle, Quote
 
 # ---------------------------------------------------------------------------
 # Fixtures

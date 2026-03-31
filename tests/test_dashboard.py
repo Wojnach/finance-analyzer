@@ -1504,7 +1504,7 @@ class TestDashboardCache:
 
     def test_cached_json_returns_same_object(self, tmp_path):
         """Repeated reads within TTL return cached result."""
-        from dashboard.app import _read_json, _cache
+        from dashboard.app import _cache, _read_json
 
         f = tmp_path / "cached.json"
         f.write_text('{"val": 1}', encoding="utf-8")

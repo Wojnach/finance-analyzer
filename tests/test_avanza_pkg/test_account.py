@@ -6,11 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from portfolio.avanza.account import get_buying_power, get_positions, get_transactions
 from portfolio.avanza.auth import AvanzaAuth
 from portfolio.avanza.client import AvanzaClient
-from portfolio.avanza.account import get_buying_power, get_positions, get_transactions
 from portfolio.avanza.types import AccountCash, Position, Transaction
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

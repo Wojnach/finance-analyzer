@@ -11,7 +11,6 @@ from portfolio.avanza.client import AvanzaClient
 from portfolio.avanza.search import find_certificates, find_warrants, search
 from portfolio.avanza.types import SearchHit
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

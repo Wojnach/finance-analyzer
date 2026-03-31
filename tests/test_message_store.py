@@ -1,7 +1,7 @@
 """Tests for portfolio.message_store readability hardening + truncation safety."""
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 def test_sanitize_message_text_strips_control_bytes():

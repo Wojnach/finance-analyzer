@@ -7,11 +7,9 @@ Covers:
 """
 
 import sqlite3
-from pathlib import Path
 from unittest import mock
 
 import pytest
-
 
 # ===========================================================================
 # BUG-145: SQLite connection cleanup on exception

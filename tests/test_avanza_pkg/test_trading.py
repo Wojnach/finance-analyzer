@@ -21,7 +21,6 @@ from portfolio.avanza.trading import (
 )
 from portfolio.avanza.types import Deal, Order, OrderResult, StopLoss, StopLossResult
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

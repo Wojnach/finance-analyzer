@@ -9,12 +9,10 @@ Covers:
 import threading
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pandas as pd
 import pytest
 
 from portfolio.circuit_breaker import CircuitBreaker, State
-
 
 # ===========================================================================
 # BUG-90: Confidence clamping after each penalty stage

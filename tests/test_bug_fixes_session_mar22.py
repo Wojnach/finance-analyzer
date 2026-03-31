@@ -8,11 +8,7 @@ BUG-110: Stale import path in digest.py
 
 import json
 import threading
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
-
+from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # BUG-107: Zero-division in digest P&L calculation
@@ -107,8 +103,9 @@ class TestBug108AlphaVantageBudgetThreadSafety:
 
     def test_check_budget_uses_lock(self):
         """_check_budget should use _cache_lock to protect budget counter."""
-        import portfolio.alpha_vantage as av
         from datetime import UTC, datetime
+
+        import portfolio.alpha_vantage as av
 
         # Reset state
         original_used = av._daily_budget_used
@@ -241,6 +238,7 @@ class TestBug110StaleImport:
     def test_digest_imports_from_file_utils(self):
         """Verify digest.py uses canonical import path."""
         import inspect
+
         import portfolio.digest as digest_mod
 
         source = inspect.getsource(digest_mod)

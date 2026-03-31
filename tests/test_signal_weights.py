@@ -16,10 +16,7 @@ Covers:
 import json
 import math
 
-import pytest
-
-from portfolio.signal_weights import SignalWeightManager, _WEIGHT_FLOOR, _DEFAULT_ETA
-
+from portfolio.signal_weights import _DEFAULT_ETA, _WEIGHT_FLOOR, SignalWeightManager
 
 # ---------------------------------------------------------------------------
 # Helpers

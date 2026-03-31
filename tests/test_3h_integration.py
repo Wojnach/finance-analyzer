@@ -4,7 +4,6 @@ from unittest import mock
 
 import numpy as np
 import pandas as pd
-import pytest
 
 
 def _make_df(n=100, close_start=100.0):

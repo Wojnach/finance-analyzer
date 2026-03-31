@@ -8,8 +8,6 @@ Covers:
   5. Edge cases: empty entries, no-outcome entries, all HOLD votes
 """
 
-import io
-import sys
 from unittest.mock import patch
 
 import pytest
@@ -21,7 +19,6 @@ from portfolio.backtester import (
     print_report,
     run_backtest,
 )
-
 
 # ===========================================================================
 # _old_consensus — simple majority voting
