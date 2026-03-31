@@ -141,17 +141,20 @@ REGIME_WEIGHTS = {
     "ranging": {
         "rsi": 1.5, "bb": 1.5, "ema": 0.5, "macd": 0.5,
         # Enhanced: boost mean-reversion and level-based signals
-        "mean_reversion": 1.5, "fibonacci": 1.4, "calendar": 1.2,
+        # 2026-03-31: fibonacci 68.2% recent — boost to 1.6
+        # fear_greed 25.9% — penalize to 0.3
+        "mean_reversion": 1.5, "fibonacci": 1.6, "calendar": 1.2,
         "oscillators": 1.2,
         "trend": 0.5, "momentum_factors": 0.6, "heikin_ashi": 0.6,
-        "structure": 0.7,
+        "structure": 0.7, "fear_greed": 0.3,
     },
     "high-vol": {
         "bb": 1.5, "volume": 1.3, "ema": 0.5,
         # Enhanced: boost volatility-aware and smart money signals
+        # 2026-03-31: mean_reversion works in high-vol too (war overshoot/reversion)
         "volatility_sig": 1.4, "smart_money": 1.3, "volume_flow": 1.2,
-        "candlestick": 1.2,
-        "trend": 0.6, "calendar": 0.7, "mean_reversion": 0.7,
+        "candlestick": 1.2, "mean_reversion": 1.2,
+        "trend": 0.6, "calendar": 0.7,
     },
 }
 
@@ -163,11 +166,17 @@ REGIME_WEIGHTS = {
 # "_default" key applies to horizons not explicitly listed.
 REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
     "ranging": {
-        # trend 1d_recent=40.7%, momentum_factors 1d_recent=41.4% — gate on daily
-        "_default": frozenset({"trend", "momentum_factors"}),
-        # trend 3h_recent=61.6%, momentum_factors 3h_recent=60.1% — do NOT gate
-        "3h": frozenset(),
-        "4h": frozenset(),
+        # 2026-03-31 audit: trend 40.7%, momentum_factors 41.4%, ema 40.8%,
+        # heikin_ashi 42.0%, structure 36.1% — all below 45% gate on daily.
+        # fear_greed 25.9%, macro_regime 30.3% — catastrophically broken.
+        "_default": frozenset({
+            "trend", "momentum_factors", "ema", "heikin_ashi", "structure",
+            "fear_greed", "macro_regime",
+        }),
+        # 3h: trend 61.6%, ema 62.9%, momentum_factors 60.1%, heikin_ashi ~55%
+        # — short-term trends exist within ranges, do NOT gate at 3h/4h
+        "3h": frozenset({"fear_greed", "macro_regime"}),
+        "4h": frozenset({"fear_greed", "macro_regime"}),
     },
     "trending-up": {
         # BUG-152: SELL-biased signals have 0-11% accuracy in trending-up.
@@ -513,6 +522,26 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         )
         group_leaders[group_name] = best_sig
 
+    # Correlation group leader gating: when the best signal in a group has
+    # accuracy below threshold (with enough samples), gate the ENTIRE group.
+    # Prevents the "least bad" broken signal from voting.
+    # 2026-03-31: macro_external group (fear_greed 25.9%, sentiment 46.8%,
+    # news_event 29.5%) — even the leader is near noise.
+    _GROUP_LEADER_GATE_THRESHOLD = 0.47
+    group_gated_signals = set()
+    for group_name, group_sigs in CORRELATION_GROUPS.items():
+        leader = group_leaders.get(group_name)
+        if leader:
+            leader_stats = accuracy_data.get(leader, {})
+            leader_acc = leader_stats.get("accuracy", 0.5)
+            leader_samples = leader_stats.get("total", 0)
+            if leader_samples >= ACCURACY_GATE_MIN_SAMPLES and leader_acc < _GROUP_LEADER_GATE_THRESHOLD:
+                group_gated_signals.update(group_sigs & active_non_hold)
+                logger.debug(
+                    "Correlation group %s gated: leader %s at %.1f%% < %.0f%% threshold",
+                    group_name, leader, leader_acc * 100, _GROUP_LEADER_GATE_THRESHOLD * 100,
+                )
+
     # Build a set of signals that should get the correlation penalty
     penalized_signals = set()
     for group_name, group_sigs in CORRELATION_GROUPS.items():
@@ -526,6 +555,10 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         if vote == "HOLD":
             continue
         if signal_name in excluded:
+            continue
+        # Correlation group leader gating: entire group silenced
+        if signal_name in group_gated_signals:
+            gated_signals.append(signal_name)
             continue
         stats = accuracy_data.get(signal_name, {})
         acc = stats.get("accuracy", 0.5)
