@@ -27,10 +27,11 @@ import logging
 import numpy as np
 
 logger = logging.getLogger("portfolio.signals.macro_regime")
+import contextlib
+
 import pandas as pd
 
 from portfolio.signal_utils import majority_vote
-import contextlib
 
 # ---------------------------------------------------------------------------
 # Minimum data lengths

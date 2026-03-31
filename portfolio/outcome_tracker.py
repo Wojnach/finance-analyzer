@@ -17,13 +17,14 @@ DATA_DIR = BASE_DIR / "data"
 SIGNAL_LOG = DATA_DIR / "signal_log.jsonl"
 
 HORIZONS = {"3h": 10800, "4h": 14400, "12h": 43200, "1d": 86400, "3d": 259200, "5d": 432000, "10d": 864000}
+import contextlib
+
 from portfolio.tickers import (
     BINANCE_FAPI_MAP,
     BINANCE_SPOT_MAP,
     SIGNAL_NAMES,
     YF_MAP,
 )
-import contextlib
 
 
 def _derive_signal_vote(name, indicators, extra):

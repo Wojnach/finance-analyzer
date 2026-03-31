@@ -15,6 +15,7 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import threading
@@ -23,7 +24,6 @@ from collections.abc import Callable
 from typing import Any
 
 import websocket
-import contextlib
 
 logger = logging.getLogger("portfolio.avanza.streaming")
 

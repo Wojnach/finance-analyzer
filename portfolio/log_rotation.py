@@ -24,6 +24,7 @@ Or run standalone via scheduled task (e.g. PF-LogRotate, daily at 03:00):
     .venv\\Scripts\\python.exe -m portfolio.log_rotation
 """
 
+import contextlib
 import datetime
 import gzip
 import json
@@ -31,7 +32,6 @@ import os
 import pathlib
 import shutil
 import sys
-import contextlib
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"

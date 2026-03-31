@@ -16,6 +16,7 @@ Dry-run is the default. Use ``--live`` explicitly to execute actions.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import copy
 import datetime as dt
 import logging
@@ -37,7 +38,6 @@ from portfolio.fin_snipe import build_snapshots
 from portfolio.metals_ladder import translate_underlying_target
 from portfolio.process_lock import acquire_lock_file, release_lock_file
 from portfolio.session_calendar import get_session_info
-import contextlib
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATE_FILE = BASE_DIR / "data" / "fin_snipe_state.json"

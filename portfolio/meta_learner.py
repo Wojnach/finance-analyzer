@@ -31,8 +31,9 @@ SIGNAL_DB = DATA_DIR / "signal_log.db"
 HORIZONS = ["3h", "1d", "3d", "5d"]
 
 # BUG-147: Import canonical list from tickers instead of maintaining a copy.
-from portfolio.tickers import SIGNAL_NAMES
 import contextlib
+
+from portfolio.tickers import SIGNAL_NAMES
 
 VOTE_MAP = {"BUY": 1, "SELL": -1, "HOLD": 0}
 

@@ -26,10 +26,11 @@ CONFIG_FILE = DATA_DIR / "iskbets_config.json"
 STATE_FILE = DATA_DIR / "iskbets_state.json"
 
 # Ticker → source mapping (imported from shared tickers module)
+import contextlib
+
 from portfolio.tickers import (
     SYMBOLS as TICKER_SOURCES,
 )
-import contextlib
 
 # ── State I/O ────────────────────────────────────────────────────────────
 

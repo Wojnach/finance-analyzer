@@ -21,6 +21,7 @@ Reference: docs/deep research/deep-research-report.md
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 from dataclasses import dataclass, field
@@ -30,7 +31,6 @@ from typing import Any
 import numpy as np
 
 from portfolio.cost_model import CostModel, get_cost_model
-import contextlib
 
 logger = logging.getLogger("portfolio.exit_optimizer")
 

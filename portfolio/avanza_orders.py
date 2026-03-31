@@ -8,6 +8,7 @@ Workflow:
 5. On timeout (5 min) → expire the pending order, notify
 """
 
+import contextlib
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -17,7 +18,6 @@ from portfolio.avanza_control import place_buy_order, place_sell_order
 from portfolio.file_utils import atomic_write_json, load_json
 from portfolio.http_retry import fetch_with_retry
 from portfolio.telegram_notifications import send_telegram
-import contextlib
 
 logger = logging.getLogger("portfolio.avanza_orders")
 

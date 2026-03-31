@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO
-import contextlib
 
 try:
     import msvcrt  # type: ignore[attr-defined]
