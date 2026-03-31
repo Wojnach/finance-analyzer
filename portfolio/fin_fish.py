@@ -1104,6 +1104,16 @@ def main() -> int:
                         help="Force direction: bull, bear, or auto (default: auto).")
     parser.add_argument("--telegram", action="store_true",
                         help="Print Telegram-format summary instead of full report.")
+    parser.add_argument("--monitor", action="store_true",
+                        help="Enter smart monitoring mode after analysis.")
+    parser.add_argument("--entry-price", type=float, default=0,
+                        help="Entry price for monitoring (default: current spot).")
+    parser.add_argument("--cert-price", type=float, default=0,
+                        help="Certificate entry price in SEK for P&L tracking.")
+    parser.add_argument("--cert-units", type=int, default=0,
+                        help="Number of certificate units held.")
+    parser.add_argument("--leverage", type=float, default=5.0,
+                        help="Certificate leverage (default: 5x).")
     args = parser.parse_args()
 
     metals = [m.strip().lower() for m in args.metals.split(",")]
@@ -1131,13 +1141,79 @@ def main() -> int:
 
     # --- Preflight GO/NO-GO check ---
     print("Running preflight check...")
+    preflight_results = {}
     try:
         from scripts.fish_preflight import compute_preflight, print_preflight
         for ticker in tickers:
             pf = compute_preflight(ticker)
+            preflight_results[ticker] = pf
             print_preflight(pf)
     except Exception as e:
         print(f"  Preflight unavailable: {e}")
+
+    # --- Instrument profile briefing ---
+    try:
+        from portfolio.instrument_profile import (
+            format_profile_briefing,
+            get_profile,
+        )
+        signal_data = load_json(BASE_DIR / "data" / "agent_summary_compact.json")
+        for ticker in tickers:
+            profile = get_profile(ticker)
+            if profile:
+                print(f"\n{'='*60}")
+                print(f"  INSTRUMENT PROFILE: {profile['name']}")
+                print(f"{'='*60}")
+                print(format_profile_briefing(ticker, signal_data))
+
+                # Show signal reliability ranking for this ticker
+                reliability = (signal_data or {}).get("signal_reliability", {}).get(ticker, {})
+                if reliability:
+                    ranked = sorted(
+                        [(k, v) for k, v in reliability.items() if isinstance(v, dict) and v.get("total", 0) >= 30],
+                        key=lambda x: x[1].get("accuracy", 0),
+                        reverse=True,
+                    )
+                    if ranked:
+                        print("\n  Signal reliability (top 10 / bottom 3):")
+                        for name, data in ranked[:10]:
+                            acc = data.get("accuracy", 0)
+                            n = data.get("total", 0)
+                            marker = " *" if name in profile.get("trusted_signals", []) else ""
+                            print(f"    {name:20s} {acc:5.1%} ({n:4d} samples){marker}")
+                        if len(ranked) > 10:
+                            print("    ...")
+                            for name, data in ranked[-3:]:
+                                acc = data.get("accuracy", 0)
+                                n = data.get("total", 0)
+                                marker = " X" if name in profile.get("ignored_signals", []) else ""
+                                print(f"    {name:20s} {acc:5.1%} ({n:4d} samples){marker}")
+
+                # Show deep context summary if available
+                precompute_path = BASE_DIR / profile.get("precompute_file", "")
+                deep_ctx = load_json(precompute_path)
+                if deep_ctx:
+                    analyst = deep_ctx.get("analyst_targets", {})
+                    if analyst:
+                        targets = []
+                        for bank, data in analyst.items():
+                            if isinstance(data, dict) and data.get("target"):
+                                targets.append(f"{bank}: ${data['target']}")
+                            elif isinstance(data, (int, float)):
+                                targets.append(f"{bank}: ${data}")
+                        if targets:
+                            print(f"\n  Analyst targets: {', '.join(targets[:5])}")
+
+                    cot = deep_ctx.get("cot_positioning", {})
+                    if cot:
+                        trend = cot.get("trend", "")
+                        if trend:
+                            print(f"  COT trend: {trend}")
+
+                print()
+    except Exception as e:
+        logger.debug("Profile briefing error: %s", e)
+
     print()
 
     all_plans: list[dict] = []
@@ -1236,6 +1312,42 @@ def main() -> int:
         "metals": log_entries,
     }
     atomic_append_jsonl(FISH_LOG_PATH, log_entry)
+
+    # --- Smart monitoring mode ---
+    if args.monitor and tickers:
+        ticker = tickers[0]  # monitor first ticker
+        if ticker in spot_data:
+            spot = spot_data[ticker]["price"]
+            entry = args.entry_price if args.entry_price > 0 else spot
+
+            # Determine direction from preflight or forced direction
+            if args.direction != "auto":
+                direction = "LONG" if args.direction == "bull" else "SHORT"
+            elif ticker in preflight_results:
+                pf = preflight_results[ticker]
+                direction = "LONG" if pf["bull_score"] > pf["bear_score"] else "SHORT"
+            else:
+                direction = "SHORT"  # default for fishing
+
+            entry_conviction = 50
+            if ticker in preflight_results:
+                pf = preflight_results[ticker]
+                entry_conviction = pf["bull_score"] if direction == "LONG" else pf["bear_score"]
+
+            try:
+                from portfolio.fish_monitor_smart import SmartFishMonitor
+                monitor = SmartFishMonitor(
+                    ticker=ticker,
+                    entry_price=entry,
+                    direction=direction,
+                    entry_conviction=entry_conviction,
+                    cert_entry_price=args.cert_price,
+                    cert_units=args.cert_units,
+                    cert_leverage=args.leverage,
+                )
+                monitor.run()
+            except KeyboardInterrupt:
+                print("\nMonitoring stopped.")
 
     return 0
 
