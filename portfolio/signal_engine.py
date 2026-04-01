@@ -43,10 +43,10 @@ _RECENCY_DIVERGENCE_THRESHOLD = 0.15  # 15% absolute divergence triggers fast bl
 _RECENCY_WEIGHT_NORMAL = 0.7
 _RECENCY_WEIGHT_FAST = 0.9
 
-# --- Signal (full 30-signal for "Now" timeframe) ---
+# --- Signal (full 32-signal for "Now" timeframe) ---
 
-MIN_VOTERS_CRYPTO = 3  # crypto has 27 signals (8 core + 19 enhanced; custom_lora, ml, funding disabled) — need 3
-MIN_VOTERS_STOCK = 3  # stocks have 25 signals (7 core + 18 enhanced) — need 3 active voters
+MIN_VOTERS_CRYPTO = 3  # crypto has 30 signals (8 core + 22 enhanced; ml disabled) — need 3
+MIN_VOTERS_STOCK = 3  # stocks have 24-26 signals (7 core + 17-19 enhanced, GPU-dependent) — need 3
 
 # Core signals that must have at least 1 active voter for non-HOLD consensus.
 # Enhanced signals can strengthen/weaken but never create consensus alone.
