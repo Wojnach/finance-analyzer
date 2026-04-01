@@ -65,6 +65,7 @@ def _build_tier_prompt(tier, reasons):
         return (
             "You are the Layer 2 trading agent (SIGNAL ANALYSIS). "
             f"Trigger: {reason_str}. "
+            "If data/trading_insights.md exists, read it first for recent signal performance context. "
             f"Read {playbook} for trading rules, then data/layer2_context.md, "
             "then data/agent_context_t2.json, "
             "data/portfolio_state.json, and data/portfolio_state_bold.json. "
@@ -75,6 +76,7 @@ def _build_tier_prompt(tier, reasons):
         # Tier 3 — full review
         return (
             "You are the Layer 2 trading agent. "
+            "If data/trading_insights.md exists, read it first for recent signal performance context. "
             f"FIRST read {playbook} for trading rules. "
             "Then read data/layer2_context.md (your memory from previous invocations). "
             "Then read data/agent_summary_compact.json (signals, trigger reasons, timeframes), "
