@@ -1,6 +1,6 @@
 {
   "date": "2026-04-01",
-  "session_pnl_sek": 168,
+  "session_pnl_sek": 389,
   "trades": [
     {
       "instrument": "MINI S SILVER AVA 409",
@@ -33,6 +33,54 @@
       "exit": 1.29,
       "pnl": 11,
       "reason": "heartbeat died while in profit, emergency sell worked"
+    },
+    {
+      "instrument": "BULL SILVER X5 AVA 3",
+      "direction": "LONG",
+      "entry": 1.3,
+      "exit": 1.31,
+      "pnl": 11,
+      "reason": "SELL flip 1B/5S \u2014 but should have exited at RSI 63 + MC 30% peak earlier for +76 SEK"
+    },
+    {
+      "instrument": "TURBO L SILVER AVA 491",
+      "direction": "LONG",
+      "entry": 7.29,
+      "exit": 7.76,
+      "pnl": 147,
+      "reason": "RSI63+MC26% combined exit \u2014 best trade of day"
+    },
+    {
+      "instrument": "TURBO S SILVER AVA 544",
+      "direction": "SHORT",
+      "entry": 6.5,
+      "exit": 6.31,
+      "pnl": -44,
+      "reason": "BUY flip 7B>2S+4 \u2014 entered while monitor was dying"
+    },
+    {
+      "instrument": "TURBO S SILVER AVA 544",
+      "direction": "SHORT",
+      "entry": 6.35,
+      "exit": 0,
+      "pnl": 0,
+      "reason": "OPEN \u2014 monitoring"
+    },
+    {
+      "instrument": "TURBO S SILVER AVA 544",
+      "direction": "SHORT",
+      "entry": 6.35,
+      "exit": 6.76,
+      "pnl": 107,
+      "reason": "Manual sell \u2014 trusted signals 4 BUY vs 1 SELL, evening dip pattern played out"
+    },
+    {
+      "instrument": "TURBO L SILVER AVA 481",
+      "direction": "LONG",
+      "entry": 10.17,
+      "exit": 0,
+      "pnl": 0,
+      "reason": "OPEN \u2014 overnight LONG, 7.2x leverage, barrier $65 (13% safe). Liberation Day tariff narrative bullish for metals."
     }
   ],
   "lessons": [
@@ -65,6 +113,56 @@
       "id": 44,
       "lesson": "Document lessons as you go, not at end of session. If agent disconnects or context dies, all session knowledge is lost.",
       "fix": "Write to FISHING_PATTERNS.md and session files incrementally during the session."
+    },
+    {
+      "id": 45,
+      "lesson": "RSI 70 exit threshold too high for ranging days. Silver peaked at RSI 63 with MC at 30% \u2014 both signaling reversal but neither hit individual thresholds. Combined RSI >62 + MC <35% should trigger exit in ranging regime.",
+      "fix": "Add combined exit: RSI >62 AND MC <35% for LONG (or RSI <38 AND MC >65% for SHORT). This catches peaks/troughs that individual signals miss."
+    },
+    {
+      "id": 46,
+      "lesson": "RSI entry gate at 50 is too strict for ranging markets. Missed a $0.90 silver drop because RSI was 49 (1 point below threshold). That would have been +168 SEK on TURBO S.",
+      "fix": "Remove RSI gate from entry. Use only both-loops-agree + MC stable 2x. RSI is too noisy around 50 to be a useful gate."
+    },
+    {
+      "id": 47,
+      "lesson": "TURBO instruments (7-15x leverage) with 0.2-0.3% AVA spread are better than BULL/BEAR X10 SG (0.6% spread) for high-conviction trades. Same leverage, half the cost.",
+      "fix": "Use TURBO L AVA 491 (9.8x) and TURBO S AVA 544 (9.9x) as default high-leverage instruments. BULL/BEAR X5 for normal trades."
+    },
+    {
+      "id": 48,
+      "lesson": "When combined exit fires (RSI 63 + MC 26%), that IS the entry signal for the opposite direction. We sold BULL at the peak but then waited 20 min to enter SHORT. Should reduce cooldown to 60s after combined exits.",
+      "fix": "60s cooldown after combined exit (not 120s). The exit signal confidence is high enough to immediately consider the reverse trade."
+    },
+    {
+      "id": 49,
+      "lesson": "BULL SILVER X5 AVA 4 (ob 1650161) has 4x more volume and 0.2% spread vs AVA 3 (ob 1069606) at 0.8%. Saves ~8 SEK per round trip on 1400 SEK position.",
+      "fix": "Updated preferred LONG instrument to AVA 4. Always use fish_instrument_finder.py to check best available before trading."
+    },
+    {
+      "id": 50,
+      "lesson": "Monitor ignores news and macro events. We entered SHORT on Liberation Day anniversary (tariff safe-haven bid keeping silver high). A simple web search would have revealed this. The news_event signal voted SELL but with empty indicators \u2014 no way to see WHY or what event is driving the market.",
+      "fix": "Add periodic news check to monitor: (1) read news_event indicators from agent_summary, (2) check econ calendar for today, (3) do a web search for silver/gold headlines every 30 min. Flag any macro event that could override technical signals."
+    },
+    {
+      "id": 51,
+      "lesson": "Stop writing disposable inline monitoring scripts. We built SmartFishMonitor with ALL data sources (30 signals, cross-assets, LLM, price levels) but kept running throwaway scripts that only read 5 fields. The proper monitor class exists \u2014 USE IT.",
+      "fix": "Always use SmartFishMonitor class from portfolio/fish_monitor_smart.py. If it needs new features, add them to the class, not to a new inline script."
+    },
+    {
+      "id": 52,
+      "lesson": "/fin-fish must load and display ALL relevant signals at startup. Specifically for silver: econ_calendar (95%), fear_greed (92%), claude_fundamental (85%), momentum_factors (77%), structure (76%), mean_reversion (73%), fibonacci (68%). Plus cross-asset drivers: DXY (corr -0.65), copper (+0.55), gold (+0.85), oil (+0.30). Plus news_event and econ_calendar events.",
+      "fix": "The instrument_profile.py already defines these. Integrate into fin_fish.py startup and into the monitoring display. Every signal check should show trusted signal votes individually, not just aggregate B/S count."
+    },
+    {
+      "id": 53,
+      "lesson": "Metals loop flipping to BUY while holding SHORT should be an exit warning. We were SHORT and metals loop showed BUY 4B/2S RSI=42 \u2014 a clear reversal signal \u2014 but the monitor only checked main loop vote margin for exit. Both loops should inform exits.",
+      "fix": "Add exit rule: if metals loop action disagrees with position direction for 2+ consecutive checks, trigger exit warning. If both loops disagree, force exit."
+    },
+    {
+      "id": 54,
+      "lesson": "Check news/events BEFORE entering any trade. We entered SHORT on Liberation Day anniversary without knowing about it. A 30-second web search would have revealed the tariff narrative keeping silver elevated.",
+      "fix": "Add periodic web search (every 30min) to monitor. At minimum, check agent_summary news_event and econ_calendar signals and display their indicators/reasoning, not just action."
     }
   ],
   "signal_observations": {
