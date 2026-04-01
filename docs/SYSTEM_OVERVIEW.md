@@ -1,11 +1,11 @@
 # System Overview
 
-Updated: 2026-03-30
-Branch: improve/auto-session-2026-03-30
+Updated: 2026-04-01
+Branch: improve/auto-session-2026-04-01
 
 ## 1) Architecture Summary
 
-Two-layer autonomous trading system with 30 signals, 20 instruments, and dual-strategy portfolio management.
+Two-layer autonomous trading system with 32 signals (30 tracked + 2 asset-class-specific untracked), 20 instruments, and dual-strategy portfolio management.
 
 - **Layer 1** (`portfolio/main.py`): Continuous 60s loop — data collection, signal generation, trigger detection, summary writing.
 - **Layer 2** (`portfolio/agent_invocation.py`): Claude subprocess — reads summaries, makes trade decisions, writes journals, sends Telegram.
@@ -26,10 +26,10 @@ Two-layer autonomous trading system with 30 signals, 20 instruments, and dual-st
 ## 3) Module Map (~142 portfolio modules)
 
 ### Orchestration (5 modules)
-- `main.py` (889 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, parallel ticker processing via ThreadPoolExecutor(8)
+- `main.py` (909 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, parallel ticker processing via ThreadPoolExecutor(8)
 - `agent_invocation.py` (489 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing, completion tracking, stack overflow auto-disable
-- `trigger.py` (327 lines): Change detection — consensus flip, price >2%, F&G threshold, sentiment reversal, post-trade
-- `market_timing.py` (80 lines): DST-aware US market hours, agent invocation window
+- `trigger.py` (330 lines): Change detection — consensus flip, price >2%, F&G threshold, sentiment reversal, post-trade
+- `market_timing.py` (141 lines): DST-aware US market hours, agent invocation window, market state (open/closed/weekend)
 - `config_validator.py`: Startup config validation
 
 ### Signal System (30 signals: 8 core + 19 enhanced + 3 disabled)
@@ -135,10 +135,12 @@ main.loop()
 4. Dynamic MIN_VOTERS: trending=3, high-vol=4, ranging=5
 5. Unanimity penalty: 90%+ agreement → 0.6x, 80-90% → 0.75x (high unanimity = already priced in)
 
-### Signal Inventory (30 total)
-- **Core active (8)**: RSI, MACD, EMA, BB, Fear&Greed, Sentiment, Ministral-8B, Volume
-- **Core disabled (3)**: ML Classifier (28.2%), Funding Rate (27.0%), Custom LoRA (20.9%)
-- **Enhanced composite (19)**: Trend, Momentum, Volume Flow, Volatility, Candlestick, Structure, Fibonacci, Smart Money, Oscillators, Heikin-Ashi, Mean Reversion, Calendar, Macro Regime, Momentum Factors, News Event, Econ Calendar, Forecast, Claude Fundamental, Futures Flow
+### Signal Inventory (32 total: 30 tracked + 2 untracked)
+- **Core active (9)**: RSI, MACD, EMA, BB, Fear&Greed, Sentiment, Ministral-8B, Qwen3-8B, Volume
+- **Core disabled (2)**: ML Classifier (28.2%), Funding Rate (27.0%)
+- **Enhanced composite tracked (19)**: Trend, Momentum, Volume Flow, Volatility, Candlestick, Structure, Fibonacci, Smart Money, Oscillators, Heikin-Ashi, Mean Reversion, Calendar, Macro Regime, Momentum Factors, News Event, Econ Calendar, Forecast, Claude Fundamental, Futures Flow
+- **Enhanced composite untracked (2)**: Orderbook Flow, Metals Cross-Asset — registered in signal_registry and votes counted, but missing from SIGNAL_NAMES → accuracy never tracked (see BUG-160)
+- **Note**: crypto_macro is also registered in signal_registry but not in SIGNAL_NAMES — votes counted but accuracy untracked (part of BUG-160)
 
 ## 6) Configuration
 
@@ -323,3 +325,10 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - REF-30: pyproject.toml description "29-signal" → "30-signal" — **fixed 2026-03-31**
 - REF-31: 78 unused imports + 65 unsorted imports in test files — **fixed 2026-03-31** (auto-fix)
 - ARCH-30: 14 `try/except/pass` → `contextlib.suppress` conversions — **done 2026-03-31**
+- BUG-160 (P1): 3 signals (crypto_macro, orderbook_flow, metals_cross_asset) registered in signal_registry but missing from SIGNAL_NAMES — votes counted in consensus but accuracy never tracked, outcomes never backfilled
+- BUG-161 (P2): `metals_loop.py` has 6 raw `f.write(json.dumps(...))` JSONL appends instead of `atomic_append_jsonl()` — no fsync, crash during write corrupts file
+- BUG-162 (P3): `metals_loop.py` is 4,553-line monolith — hardest module to maintain, highest bug density
+- BUG-163 (P3): `exit_optimizer.py` antithetic variate breaks on odd n_paths — extra full path defeats variance reduction
+- BUG-164 (P3): `orb_predictor.py` hardcodes UTC hours 8-10 for morning range — incorrect during CEST (summer time)
+- REF-32: pyproject.toml description still says "30-signal" — should be "32-signal"
+- ~5,781 tests across 210 test files (as of 2026-04-01)

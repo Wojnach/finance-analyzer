@@ -1,7 +1,9 @@
-# Improvement Plan — Auto-Session 2026-03-31
+# Improvement Plan — Auto-Session 2026-04-01
 
-Updated: 2026-03-31
-Branch: improve/auto-session-2026-03-31
+Updated: 2026-04-01
+Branch: improve/auto-session-2026-04-01
+
+Previous session (2026-03-31): All 4 batches completed (ruff, bug fixes, SIM105, test fixes).
 
 ## 1. Bugs & Problems Found
 
@@ -167,3 +169,85 @@ Run full test suite after each batch.
 | 2 | 4 (modify) | Low — localized bug fixes | Low |
 | 3 | ~8 (modify) | Low — behavioral equivalence | Low |
 | 4 | ~20+ (modify) | Zero — test files + config | Low |
+
+---
+
+## 6. New Findings — 2026-04-01
+
+### P1 — Critical
+
+#### BUG-160: 3 signals missing from SIGNAL_NAMES — votes counted but accuracy untracked
+- **File**: `portfolio/tickers.py` (SIGNAL_NAMES list)
+- **Problem**: `crypto_macro`, `orderbook_flow`, `metals_cross_asset` are registered in
+  `signal_registry.py` (lines 129-137) and their votes ARE counted by `signal_engine.py`
+  in the weighted consensus. But they are NOT in `SIGNAL_NAMES`, so:
+  - `accuracy_stats.py` never computes their hit rates (iterates SIGNAL_NAMES)
+  - `outcome_tracker.py` never logs their votes (builds signal dict from SIGNAL_NAMES)
+  - Weighted consensus treats them with no accuracy data (likely default 50% weight)
+  - **We can never evaluate if these signals help or hurt**
+- **Fix**: Add all 3 to `SIGNAL_NAMES` in `tickers.py`
+- **Risk**: Low — additive change, signals start accumulating accuracy data going forward
+
+### P2 — High
+
+#### BUG-161: metals_loop.py has 6 raw JSONL appends without atomic_append_jsonl()
+- **File**: `data/metals_loop.py` (lines 1987, 2370, 2738, 3026, 3048, 3741)
+- **Problem**: Raw `f.write(json.dumps(...) + "\n")` without `f.flush()` or `os.fsync()`.
+  If the process crashes mid-write, the JSONL file gets a partial line → subsequent
+  `json.loads()` fails → all entries after the corrupt line are lost during reads.
+- **Fix**: Replace with `atomic_append_jsonl()` from `portfolio.file_utils`
+- **Risk**: Low — drop-in replacement, same semantics
+
+### P3 — Minor
+
+#### BUG-163: exit_optimizer.py antithetic variate odd n_paths
+- **File**: `portfolio/exit_optimizer.py`
+- **Problem**: Antithetic variate implementation splits n_paths in half and mirrors. If
+  n_paths is odd, adds one extra full random path that defeats variance reduction.
+- **Fix**: Document or enforce even n_paths
+- **Risk**: Negligible — n_paths defaults to 5000 (even)
+
+#### BUG-164: orb_predictor.py hardcodes UTC morning range hours
+- **File**: `portfolio/orb_predictor.py`
+- **Problem**: `MORNING_START_UTC = 8`, `MORNING_END_UTC = 10` — correct in CET winter
+  but wrong during CEST summer (should be 7-9 UTC)
+- **Fix**: Add DST-aware calculation via `market_timing.py`
+- **Risk**: Low — only affects ORB predictions during summer; not currently in active use
+
+#### REF-32: Signal count documentation drift
+- **Files**: `pyproject.toml`, `portfolio/signal_engine.py:1`, `CLAUDE.md`
+- **Fix**: Update "30-signal" → "32-signal" where applicable
+
+---
+
+## 7. Implementation Batches — 2026-04-01
+
+### Batch 5: Signal tracking fix (BUG-160)
+**Scope**: Add 3 missing signals to SIGNAL_NAMES
+**Files**: `portfolio/tickers.py`
+**Test**: Verify signal count matches registry; run accuracy_stats tests
+
+### Batch 6: Metals JSONL safety (BUG-161)
+**Scope**: Replace 6 raw JSONL appends with atomic_append_jsonl()
+**Files**: `data/metals_loop.py`
+**Test**: Verify metals_loop still writes correctly; no test file for metals_loop
+
+### Batch 7: Documentation consistency (REF-32)
+**Scope**: Update signal count references across docs
+**Files**: `pyproject.toml`, `portfolio/signal_engine.py`, `docs/SYSTEM_OVERVIEW.md`
+**Test**: None required
+
+### Dependency & Order
+```
+Batch 5 → Batch 7 (signal count must be correct before updating docs)
+Batch 6 → independent (can parallel with Batch 5)
+Run full test suite after Batch 5+6.
+```
+
+### Risk Summary — 2026-04-01
+
+| Batch | Files Changed | Production Risk | Test Risk |
+|-------|--------------|-----------------|-----------|
+| 5 | 1 (tickers.py) | Zero — additive | Low |
+| 6 | 1 (metals_loop.py) | Low — drop-in replacement | None (no test file) |
+| 7 | 3 (docs only) | Zero | Zero |
