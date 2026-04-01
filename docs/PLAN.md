@@ -1,54 +1,53 @@
-# Plan: Quiet Hours LLM Throttling
+# Plan: Unified Persistent LLM Server
 
 ## Problem
-After EU+US market close, `metals_loop.py` continues spawning Ministral-8B (every 5min)
-and Chronos (every 60s) as subprocesses. Each subprocess cold-starts Python, imports
-heavy libraries, and causes CPU spikes that spin up the CPU fan. With zero active positions,
-the signals are all HOLD and nobody acts on them.
+Three separate GGUF models run via cold-start subprocesses, each loading the model
+from disk every call (~5-10s CPU spike each time):
+1. **Ministral-3-8B** (main loop, `portfolio/ministral_trader.py` → `llama-completion.exe`)
+2. **Qwen3-8B** (main loop, `portfolio/qwen3_trader.py` → `llama-completion.exe`)
+3. **Ministral-8B + LoRA** (metals loop, `data/metals_llm.py` → `Q:\models\ministral_trader.py`)
 
-## Root Cause
-`_llm_worker()` in `data/metals_llm.py:638-679` uses fixed intervals (`LLM_INTERVAL=300`,
-`CHRONOS_INTERVAL=60`) with no awareness of market hours.
+Plus Chronos (PyTorch, separate — stays as its own persistent process).
 
-## Solution: Phase A — Time-aware interval throttling
+## Solution: Unified llama-server.exe
 
-### What
-Add a `_is_quiet_hours()` function to `metals_llm.py` that returns True when outside
-EU/US market hours (22:00-08:15 CET, weekday; all day weekends). When quiet, use
-extended intervals:
-- Ministral: 300s → 1800s (30 min)
-- Chronos: 60s → 300s (5 min)
+### Architecture
+- **One `llama-server.exe` process** on port 8787, shared by both loops
+- **Model swapping**: only one model fits in 10GB VRAM at a time. Server stops/starts
+  with different model when a different model is requested.
+- **Cross-process coordination**: file-based lock at `data/llama_server.lock` prevents
+  both loops from swapping simultaneously.
+- **Chronos unchanged**: PyTorch model, stays as its own persistent stdin/stdout server.
 
-### Where
-Single file change: `data/metals_llm.py`
-- Add `_is_quiet_hours()` helper (uses `cet_hour()` logic, same as `is_market_hours()`)
-- Add `LLM_INTERVAL_QUIET` and `CHRONOS_INTERVAL_QUIET` constants
-- Modify `_llm_worker()` to pick interval based on `_is_quiet_hours()`
-- Log when entering/leaving quiet mode
+### Model configs
+| Name | Model Path | VRAM | Used by |
+|------|-----------|------|---------|
+| ministral3 | ministral-3-8b-gguf/Q5_K_M.gguf | ~5.7GB | main loop |
+| qwen3 | qwen3-8b-gguf/Q4_K_M.gguf | ~4.7GB | main loop |
+| ministral8_lora | ministral-8b-gguf/Q4_K_M.gguf + LoRA | ~5GB | metals loop |
 
-### What won't break
-- Prediction accuracy tracking: unaffected — each sample is independent
-- Accuracy stats: fewer samples overnight, but still valid
-- Consensus computation: same logic, just runs less often
-- Signal data format: unchanged
-- metals_loop.py: no changes needed, reads LLM signals via `get_llm_signals()`
+### Flow
+1. Main loop signal cycle: load ministral3 → query N tickers → swap to qwen3 → query N tickers
+2. Metals loop (every 5-30min): acquire lock → swap to ministral8_lora → query 4 tickers → release
+3. Main loop waits if metals loop is mid-query (file lock)
 
-### Tests
-- Existing tests in `tests/test_unified_loop.py` — verify they pass
-- No new tests needed (interval change is config-level, not logic-level)
+### Files changed
+- `portfolio/llama_server.py` — add ministral8_lora config, file-based lock
+- `data/metals_llm.py` — use portfolio.llama_server instead of stdin/stdout Ministral server
+- `portfolio/ministral_signal.py` — already wired (done)
+- `portfolio/qwen3_signal.py` — already wired (done)
 
-## Solution: Phase B — Persistent LLM server (attempt, revertible)
+### Revert plan
+If this fails:
+1. `git revert HEAD` on main
+2. Both loops fall back to subprocess.run (the fallback paths are preserved in all callers)
+3. Metals loop falls back to its own stdin/stdout server (code still exists)
 
-### What
-Convert Ministral and Chronos from `subprocess.run()` per-call to a persistent
-HTTP server or stdin/stdout daemon that stays loaded. Eliminates cold-start CPU spikes.
-
-### Risk
-Has failed before in previous attempts. Will implement on a worktree branch and
-only merge if it works. Ready to revert.
-
-### Approach
-TBD after Phase A is verified.
+### What stays the same
+- Chronos persistent server (metals_llm.py, stdin/stdout) — PyTorch, not GGUF
+- GPU gate (`portfolio/gpu_gate.py`) — still used for non-server callers
+- Prediction accuracy tracking — unaffected
+- Signal formats — unchanged
 
 ---
-*Written: 2026-04-01*
+*Written: 2026-04-02*
