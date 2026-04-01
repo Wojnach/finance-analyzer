@@ -422,11 +422,24 @@ def _run_ministral_metals(context):
 
 
 def _run_chronos_metals(ticker, close_prices, horizons=(1, 3)):
-    """Run Chronos forecast via subprocess (non-persistent to free VRAM for llama-server).
+    """Run Chronos forecast.
+
+    Market hours: persistent server (0.3s queries, holds VRAM).
+    Quiet hours: subprocess per-call (7s, frees VRAM for llama-server).
 
     Returns dict of {horizon_key: {"direction": "up/down", "pct_move": float, "confidence": float}}
     """
     try:
+        # Market hours: use persistent server for speed
+        if not _is_quiet_hours():
+            result = _query_chronos_server(close_prices, horizons)
+            if result is not None:
+                if "error" in result:
+                    _log(f"Chronos error for {ticker}: {result['error']}")
+                    return None
+                return result
+
+        # Quiet hours (or server unavailable): subprocess per-call
         script = r"""
 import json, sys
 sys.path.insert(0, r"Q:/finance-analyzer")
@@ -899,14 +912,15 @@ def _llm_worker(signal_data_fn, underlying_prices_fn):
             now = time.time()
             quiet = _is_quiet_hours()
 
-            # Log transitions
+            # Log transitions + manage Chronos server lifecycle
             if quiet != _was_quiet:
                 if quiet:
                     _log(f"Quiet hours — Ministral every {LLM_INTERVAL_QUIET}s, "
-                         f"Chronos every {CHRONOS_INTERVAL_QUIET}s")
+                         f"Chronos every {CHRONOS_INTERVAL_QUIET}s (subprocess)")
+                    _stop_chronos_server()  # free VRAM for llama-server
                 else:
                     _log(f"Market hours — Ministral every {LLM_INTERVAL}s, "
-                         f"Chronos every {CHRONOS_INTERVAL}s")
+                         f"Chronos every {CHRONOS_INTERVAL}s (persistent)")
                 _was_quiet = quiet
 
             ministral_interval = LLM_INTERVAL_QUIET if quiet else LLM_INTERVAL
