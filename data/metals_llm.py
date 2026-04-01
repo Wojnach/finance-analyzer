@@ -422,18 +422,12 @@ def _run_ministral_metals(context):
 
 
 def _run_chronos_metals(ticker, close_prices, horizons=(1, 3)):
-    """Run Chronos forecast using persistent server, with subprocess fallback.
+    """Run Chronos forecast via subprocess (non-persistent to free VRAM for llama-server).
 
     Returns dict of {horizon_key: {"direction": "up/down", "pct_move": float, "confidence": float}}
     """
     try:
-        # Try persistent server first
-        result = _query_chronos_server(close_prices, horizons)
-
-        # Fallback: one-shot subprocess (cold start)
-        if result is None:
-            _log(f"Chronos server unavailable for {ticker}, falling back to subprocess")
-            script = r"""
+        script = r"""
 import json, sys
 sys.path.insert(0, r"Q:/finance-analyzer")
 try:
@@ -447,27 +441,27 @@ try:
 except Exception as e:
     print(json.dumps({"error": str(e)}))
 """
-            input_data = json.dumps({
-                "close_prices": close_prices,
-                "horizons": list(horizons),
-            })
-            proc = subprocess.run(
-                [MAIN_PYTHON, "-c", script],
-                input=input_data,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            if proc.returncode != 0:
-                _log(f"Chronos fallback failed for {ticker}: {proc.stderr[:200]}")
-                return None
-            stdout = proc.stdout.strip()
-            if not stdout:
-                return None
-            brace_idx = stdout.find("{")
-            if brace_idx > 0:
-                stdout = stdout[brace_idx:]
-            result = json.loads(stdout)
+        input_data = json.dumps({
+            "close_prices": close_prices,
+            "horizons": list(horizons),
+        })
+        proc = subprocess.run(
+            [MAIN_PYTHON, "-c", script],
+            input=input_data,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if proc.returncode != 0:
+            _log(f"Chronos failed for {ticker}: {proc.stderr[:200]}")
+            return None
+        stdout = proc.stdout.strip()
+        if not stdout:
+            return None
+        brace_idx = stdout.find("{")
+        if brace_idx > 0:
+            stdout = stdout[brace_idx:]
+        result = json.loads(stdout)
 
         if "error" in result:
             _log(f"Chronos error for {ticker}: {result['error']}")
