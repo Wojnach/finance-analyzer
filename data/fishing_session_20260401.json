@@ -163,12 +163,32 @@
       "id": 54,
       "lesson": "Check news/events BEFORE entering any trade. We entered SHORT on Liberation Day anniversary without knowing about it. A 30-second web search would have revealed the tariff narrative keeping silver elevated.",
       "fix": "Add periodic web search (every 30min) to monitor. At minimum, check agent_summary news_event and econ_calendar signals and display their indicators/reasoning, not just action."
+    },
+    {
+      "id": 55,
+      "lesson": "The simple MC + RSI + both-loops-agree setup works for intraday fishing. The aggregate consensus already IS all 30 signals weighted by accuracy. Reading individual trusted signal votes on top is double-counting. The signal_reliability accuracy numbers are measured on 1-DAY horizons \u2014 not valid for 30-60 minute trades. Use trusted signal breakdown only for overnight hold/sell decisions where the 1-day timeframe applies.",
+      "fix": "Intraday entry/exit: MC + RSI + both loops agree + combined RSI+MC exit. Overnight decision: trusted signal votes (1d accuracy) + focus 1d direction. News/cross-assets: supplementary for both. Do not mix timeframes."
     }
   ],
   "signal_observations": {
     "mc_reliability_in_ranging": "Low - whipsaws every 1-2 minutes when votes are close",
     "best_entry_signal": "Both loops BUY/SELL agreeing + MC stable for 2+ checks",
     "worst_signal": "Single MC check in ranging market - too noisy",
-    "rsi_useful_range": "< 45 for oversold (LONG entry), > 55 for overbought (SHORT entry)"
+    "rsi_useful_range": "< 45 for oversold (LONG entry), > 55 for overbought (SHORT entry)",
+    "what_worked": "MC+RSI+both-loops for entry, combined RSI>62+MC<35% for exit, historical pattern for timing, 2-check MC stability for ranging",
+    "what_didnt_work": "Individual trusted signal votes for intraday (wrong timeframe), RSI entry gate at 50 (too strict), single MC check (whipsaw), ignoring news/events",
+    "overnight_decision_method": "Trusted signals (1d accuracy) + focus 1d direction \u2014 valid because timeframe matches"
+  },
+  "overnight_position": {
+    "instrument": "TURBO L SILVER AVA 481",
+    "ob_id": "2379773",
+    "units": 157,
+    "entry_price": 10.17,
+    "direction": "LONG",
+    "leverage": 7.2,
+    "barrier": 65.0,
+    "barrier_distance_pct": 14.0,
+    "unrealized_pnl": 50,
+    "signals_at_close": "4B/1S trusted, Focus 1d UP 63%"
   }
 }
