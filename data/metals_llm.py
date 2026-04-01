@@ -34,6 +34,10 @@ from portfolio.file_utils import atomic_append_jsonl
 # --- CONFIG ---
 LLM_INTERVAL = 300       # run Ministral every 5 minutes
 CHRONOS_INTERVAL = 60    # run Chronos every 60 seconds (builds samples ~5x faster)
+
+# Quiet hours: reduced intervals to cut CPU fan noise after market close
+LLM_INTERVAL_QUIET = 1800       # Ministral every 30 minutes
+CHRONOS_INTERVAL_QUIET = 300    # Chronos every 5 minutes
 ACCURACY_WINDOW = 50     # rolling window for accuracy calculation
 PREDICTION_LOG = "data/metals_llm_predictions.jsonl"
 PREDICTION_OUTCOMES_LOG = "data/metals_llm_outcomes.jsonl"
@@ -83,6 +87,23 @@ HORIZONS = {
 def _log(msg):
     ts = datetime.datetime.now().strftime("%H:%M:%S")
     print(f"[{ts}] [LLM] {msg}", flush=True)
+
+
+def _is_quiet_hours():
+    """True when outside EU/US market hours — reduce LLM frequency to cut CPU load.
+
+    Quiet: weekdays 22:00-08:15 CET, all day weekends.
+    Active: weekdays 08:15-22:00 CET (covers EU open through US close).
+    """
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+    now = datetime.datetime.now(ZoneInfo("Europe/Stockholm"))
+    if now.weekday() >= 5:  # Saturday/Sunday
+        return True
+    h = now.hour + now.minute / 60.0
+    return h < 8.25 or h >= 22.0
 
 
 def _fetch_fapi_klines(symbol, interval="1h", limit=200, ticker=None):
@@ -650,21 +671,37 @@ def _llm_worker(signal_data_fn, underlying_prices_fn):
     _log("LLM worker started")
     last_ministral = 0
     last_chronos = 0
+    _was_quiet = None  # track transitions for logging
 
     while not _llm_stop.is_set():
         try:
             now = time.time()
+            quiet = _is_quiet_hours()
+
+            # Log transitions
+            if quiet != _was_quiet:
+                if quiet:
+                    _log(f"Quiet hours — Ministral every {LLM_INTERVAL_QUIET}s, "
+                         f"Chronos every {CHRONOS_INTERVAL_QUIET}s")
+                else:
+                    _log(f"Market hours — Ministral every {LLM_INTERVAL}s, "
+                         f"Chronos every {CHRONOS_INTERVAL}s")
+                _was_quiet = quiet
+
+            ministral_interval = LLM_INTERVAL_QUIET if quiet else LLM_INTERVAL
+            chronos_interval = CHRONOS_INTERVAL_QUIET if quiet else CHRONOS_INTERVAL
+
             prices = underlying_prices_fn()
 
             if not prices:
                 _log("No underlying prices available, skipping")
-            elif now - last_ministral >= LLM_INTERVAL:
+            elif now - last_ministral >= ministral_interval:
                 # Full cycle: Ministral + Chronos
                 signal_data = signal_data_fn()
                 _run_inference_cycle(signal_data, prices, chronos_only=False)
                 last_ministral = time.time()
                 last_chronos = time.time()  # Chronos ran too
-            elif now - last_chronos >= CHRONOS_INTERVAL:
+            elif now - last_chronos >= chronos_interval:
                 # Chronos-only fast cycle
                 _run_inference_cycle({}, prices, chronos_only=True)
                 last_chronos = time.time()
