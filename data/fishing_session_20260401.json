@@ -1,0 +1,76 @@
+{
+  "date": "2026-04-01",
+  "session_pnl_sek": 168,
+  "trades": [
+    {
+      "instrument": "MINI S SILVER AVA 409",
+      "direction": "SHORT",
+      "entry": 7.2,
+      "exit": 8.13,
+      "pnl": 168,
+      "reason": "overnight short, MC flipped to BUY + RSI 45"
+    },
+    {
+      "instrument": "BULL SILVER X5 AVA 3",
+      "direction": "LONG",
+      "entry": 1.26,
+      "exit": 1.25,
+      "pnl": -11,
+      "reason": "pivot to bull but MC whipsawed 74->26% in one cycle"
+    },
+    {
+      "instrument": "BULL SILVER X5 AVA 3",
+      "direction": "LONG",
+      "entry": 1.28,
+      "exit": 1.28,
+      "pnl": 0,
+      "reason": "MC whipsaw again, sold breakeven"
+    },
+    {
+      "instrument": "BULL SILVER X5 AVA 3",
+      "direction": "LONG",
+      "entry": 1.28,
+      "exit": 1.29,
+      "pnl": 11,
+      "reason": "heartbeat died while in profit, emergency sell worked"
+    }
+  ],
+  "lessons": [
+    {
+      "id": 39,
+      "lesson": "MC whipsaws in ranging markets. P(up) can swing 80% to 26% in one 60s main loop cycle when signal votes are close (5B/4S vs 4B/5S = one vote flip).",
+      "fix": "Require MC to hold above/below threshold for 2 consecutive checks before acting. Implemented in auto-fish v2."
+    },
+    {
+      "id": 40,
+      "lesson": "Auto-fish needs heartbeat kill-switch. If the monitoring agent disconnects, the script keeps running blind with no one evaluating trades.",
+      "fix": "Heartbeat file touched every 30s. If stale >120s: sell if in profit, hold if negative."
+    },
+    {
+      "id": 41,
+      "lesson": "Both loops (main + metals) must agree on direction before entry. Metals loop updates independently and can disagree with main loop.",
+      "fix": "Entry rule: action must match AND metals_action must match AND MC confirms AND RSI confirms. 4-gate entry."
+    },
+    {
+      "id": 42,
+      "lesson": "Reading ALL available data makes monitoring intelligent. Main loop writes: 30-signal consensus, MC, focus probs. Metals loop writes: LLM predictions (Chronos/Ministral), per-check signals. Full summary writes: Fibonacci, pivots, Keltner levels.",
+      "fix": "Monitor reads agent_summary_compact + agent_summary + metals_signal_log + forecast_predictions every signal check."
+    },
+    {
+      "id": 43,
+      "lesson": "Emergency sell on disconnect should only sell if position is profitable. Selling at a loss because of a technical disconnect is worse than holding.",
+      "fix": "Heartbeat dead + P&L > 0 = sell. Heartbeat dead + P&L < 0 = hold, just stop monitoring."
+    },
+    {
+      "id": 44,
+      "lesson": "Document lessons as you go, not at end of session. If agent disconnects or context dies, all session knowledge is lost.",
+      "fix": "Write to FISHING_PATTERNS.md and session files incrementally during the session."
+    }
+  ],
+  "signal_observations": {
+    "mc_reliability_in_ranging": "Low - whipsaws every 1-2 minutes when votes are close",
+    "best_entry_signal": "Both loops BUY/SELL agreeing + MC stable for 2+ checks",
+    "worst_signal": "Single MC check in ranging market - too noisy",
+    "rsi_useful_range": "< 45 for oversold (LONG entry), > 55 for overbought (SHORT entry)"
+  }
+}
