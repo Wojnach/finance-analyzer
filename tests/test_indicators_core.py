@@ -350,6 +350,30 @@ class TestDetectRegime:
         ind = {"atr_pct": 1.0, "ema9": 1.0, "ema21": 0, "rsi": 50, "close": 1.0}
         assert detect_regime(ind, is_crypto=True) == "ranging"
 
+    def test_trending_down_override_when_close_above_ema21(self):
+        """BUG-156: If close > ema21 but ema9 < ema21 (V-recovery lag),
+        override trending-down to ranging. MSTR/PLTR had 3-9% accuracy
+        because EMA crossover lagged behind price recovery."""
+        # ema9=95 < ema21=100 => would be trending-down, but close=110 > ema21
+        ind = {"atr_pct": 1.0, "ema9": 95, "ema21": 100, "rsi": 40, "close": 110}
+        assert detect_regime(ind, is_crypto=False) == "ranging"
+
+    def test_trending_up_override_when_close_below_ema21(self):
+        """Symmetric: if close < ema21 but ema9 > ema21, override to ranging."""
+        # ema9=105 > ema21=100 => would be trending-up, but close=90 < ema21
+        ind = {"atr_pct": 1.0, "ema9": 105, "ema21": 100, "rsi": 60, "close": 90}
+        assert detect_regime(ind, is_crypto=False) == "ranging"
+
+    def test_trending_down_stays_when_close_below_ema21(self):
+        """Normal case: close < ema21 and ema9 < ema21 => trending-down holds."""
+        ind = {"atr_pct": 1.0, "ema9": 95, "ema21": 100, "rsi": 40, "close": 93}
+        assert detect_regime(ind, is_crypto=True) == "trending-down"
+
+    def test_trending_up_stays_when_close_above_ema21(self):
+        """Normal case: close > ema21 and ema9 > ema21 => trending-up holds."""
+        ind = {"atr_pct": 1.0, "ema9": 105, "ema21": 100, "rsi": 60, "close": 107}
+        assert detect_regime(ind, is_crypto=True) == "trending-up"
+
 
 class TestDetectRegimeCache:
     """Verify that detect_regime uses and invalidates its cache correctly."""
