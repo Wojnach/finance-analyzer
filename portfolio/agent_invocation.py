@@ -87,6 +87,25 @@ def _build_tier_prompt(tier, reasons):
         )
 
 
+def _extract_ticker(reasons):
+    """Extract the primary ticker from trigger reasons.
+
+    Looks for common ticker patterns like 'XAG-USD', 'BTC-USD', 'NVDA'.
+    Falls back to 'XAG-USD' if no ticker found.
+    """
+    import re
+    for r in reasons:
+        # Match patterns like XAG-USD, BTC-USD, ETH-USD
+        m = re.search(r'\b([A-Z]{2,5}-USD)\b', r)
+        if m:
+            return m.group(1)
+        # Match stock tickers like NVDA, PLTR
+        m = re.search(r'\b([A-Z]{2,5})\b(?:\s+flipped|\s+crossed|\s+broke)', r)
+        if m:
+            return m.group(1)
+    return "XAG-USD"  # default to silver
+
+
 def _log_trigger(reasons, status, tier=None):
     entry = {
         "ts": datetime.now(UTC).isoformat(),
@@ -210,7 +229,43 @@ def invoke_agent(reasons, tier=3):
     except Exception as e:
         logger.warning("perception gate error (passing through): %s", e)
 
-    prompt = _build_tier_prompt(tier, reasons)
+    # Multi-agent mode: parallel specialists + synthesis (Coordinator Mode pattern)
+    # Enabled via config.layer2.multi_agent = true, only for T2/T3
+    try:
+        config = _load_config()
+        multi_agent = config.get("layer2", {}).get("multi_agent", False)
+    except Exception:
+        multi_agent = False
+
+    if multi_agent and tier >= 2:
+        try:
+            from portfolio.multi_agent_layer2 import (
+                launch_specialists,
+                wait_for_specialists,
+                build_synthesis_prompt,
+                get_report_paths,
+                cleanup_reports,
+            )
+            # Extract primary ticker from reasons
+            ticker = _extract_ticker(reasons)
+            logger.info("Multi-agent T%d: launching 3 specialists for %s", tier, ticker)
+            procs = launch_specialists(ticker, reasons)
+            if procs:
+                results = wait_for_specialists(procs, timeout=150)
+                success_count = sum(1 for v in results.values() if v)
+                logger.info("Specialists complete: %d/%d succeeded", success_count, len(results))
+                # Even if some fail, proceed with synthesis using available reports
+                prompt = build_synthesis_prompt(ticker, reasons)
+                # Fall through to normal agent launch with synthesis prompt
+            else:
+                logger.warning("No specialists launched, falling back to single-agent")
+                prompt = _build_tier_prompt(tier, reasons)
+        except Exception as e:
+            logger.warning("Multi-agent failed (%s), falling back to single-agent", e)
+            prompt = _build_tier_prompt(tier, reasons)
+    else:
+        prompt = _build_tier_prompt(tier, reasons)
+
     max_turns = tier_cfg["max_turns"]
 
     # Try direct claude invocation first; fall back to bat file for T3
