@@ -106,6 +106,13 @@ class SmartFishMonitor:
         self.start_time = time.time()
         self.check_count = 0
 
+        # Lesson 39: MC stability — track last 3 values, require 2 consecutive
+        self.mc_history: list[float] = []
+        # Lesson 53: metals loop disagreement counter
+        self.metals_disagree_count = 0
+        # Lesson 50: news/event flag from last signal check
+        self.news_action = "HOLD"
+
     # ------------------------------------------------------------------
     # Price fetching
     # ------------------------------------------------------------------
@@ -193,8 +200,13 @@ class SmartFishMonitor:
             "chronos_24h_pct": _safe_float(forecast.get("chronos_24h_pct")),
         }
 
-        # --- Full agent_summary: price levels ---
+        # --- Full agent_summary: price levels + news ---
         full_summary = load_json(BASE_DIR / "data" / "agent_summary.json") or {}
+        # News/event action (lesson 50)
+        enhanced = (full_summary.get("signals") or {}).get(self.ticker, {}).get("enhanced_signals", {})
+        result["news_action"] = (enhanced.get("news_event") or {}).get("action", "HOLD")
+        result["econ_action"] = (enhanced.get("econ_calendar") or {}).get("action", "HOLD")
+
         price_levels = (full_summary.get("price_levels") or {}).get(self.ticker, {})
         if price_levels:
             result["fib_382"] = _safe_float(price_levels.get("fib_382"))
@@ -298,62 +310,146 @@ class SmartFishMonitor:
     # Exit signal detection
     # ------------------------------------------------------------------
 
-    def compute_exit_signals(self) -> list[dict]:
-        """Evaluate all exit triggers. Returns list of triggered signals."""
+    def update_signal_state(self, signal_data: dict) -> None:
+        """Update internal state from latest signal data.
+
+        Call this each signal check to maintain MC history,
+        metals loop disagreement tracking, and news flag.
+        """
+        # MC history for stability checks (lesson 39)
+        mc_p_up = signal_data.get("mc_p_up", 0.5)
+        self.mc_history.append(mc_p_up)
+        if len(self.mc_history) > 3:
+            self.mc_history.pop(0)
+
+        # Metals loop disagreement tracking (lesson 53)
+        metals_action = signal_data.get("metals_action", "HOLD")
+        if metals_action != "HOLD":
+            position_bullish = self.direction == "LONG"
+            metals_bullish = metals_action == "BUY"
+            if position_bullish != metals_bullish:
+                self.metals_disagree_count += 1
+            else:
+                self.metals_disagree_count = 0
+
+        # News flag (lesson 50)
+        self.news_action = signal_data.get("news_action", "HOLD")
+
+    def mc_stable_bearish(self) -> bool:
+        """MC P(up) < 30% for last 2 consecutive checks."""
+        return len(self.mc_history) >= 2 and all(m < 0.30 for m in self.mc_history[-2:])
+
+    def mc_stable_bullish(self) -> bool:
+        """MC P(up) > 70% for last 2 consecutive checks."""
+        return len(self.mc_history) >= 2 and all(m > 0.70 for m in self.mc_history[-2:])
+
+    def compute_exit_signals(self, signal_data: dict | None = None) -> list[dict]:
+        """Evaluate all exit triggers. Returns list of triggered signals.
+
+        Exit rules (from backtested lessons):
+        - LONG combined exit: RSI > 62 AND MC < 35% (66.7% backtest win rate)
+        - SHORT solo exit: RSI < 30 (backtest shows combined doesn't work for shorts)
+        - Signal flip: vote margin > 4
+        - Metals loop disagreement: 2+ consecutive checks
+        - TP/SL: +2% / -2% underlying
+        - Time: 3h tighten, session end force sell
+        """
         exits = []
         elapsed_hours = (time.time() - self.start_time) / 3600
 
-        # 1. TP0: +5% underlying move in our favor
         if self.direction == "SHORT":
             move_pct = (self.entry_price - self.current_price) / self.entry_price * 100
         else:
             move_pct = (self.current_price - self.entry_price) / self.entry_price * 100
 
-        if move_pct >= 5.0 and "TP0" not in self.alerts_sent:
+        rsi = signal_data.get("rsi", 50) if signal_data else 50
+        mc_p = signal_data.get("mc_p_up", 0.5) if signal_data else 0.5
+        buy_c = signal_data.get("buy_count", 0) if signal_data else 0
+        sell_c = signal_data.get("sell_count", 0) if signal_data else 0
+
+        # --- Lesson 45: Combined RSI+MC exit (backtested) ---
+        # LONG: RSI > 62 AND MC < 35% → 66.7% win rate, catches peaks early
+        if (self.direction == "LONG" and rsi > 62 and mc_p < 0.35
+                and "COMBINED_EXIT" not in self.alerts_sent):
             exits.append({
-                "trigger": "TP0",
+                "trigger": "COMBINED_EXIT",
                 "severity": "ACTION",
-                "message": f"Take profit: +{move_pct:.1f}% in our favor. Sell 30% of position.",
-                "move_pct": move_pct,
+                "message": f"Combined exit: RSI {rsi:.0f} > 62 AND MC {mc_p:.0%} < 35% (backtested 66.7% win rate)",
+            })
+        # SHORT: RSI < 30 solo (backtest shows combined doesn't work for shorts)
+        if (self.direction == "SHORT" and rsi < 30
+                and "RSI_EXIT" not in self.alerts_sent):
+            exits.append({
+                "trigger": "RSI_EXIT",
+                "severity": "ACTION",
+                "message": f"RSI oversold exit: RSI {rsi:.0f} < 30",
             })
 
-        if move_pct >= 2.5 and "TP_PARTIAL" not in self.alerts_sent:
+        # --- Signal flip with 4+ vote margin ---
+        if self.direction == "LONG" and sell_c > buy_c + 4 and "SIGNAL_FLIP" not in self.alerts_sent:
             exits.append({
-                "trigger": "TP_PARTIAL",
-                "severity": "WATCH",
-                "message": f"Approaching TP: +{move_pct:.1f}%. Consider partial exit.",
-                "move_pct": move_pct,
+                "trigger": "SIGNAL_FLIP",
+                "severity": "ACTION",
+                "message": f"Strong SELL flip: {sell_c}S > {buy_c}B + 4",
+            })
+        if self.direction == "SHORT" and buy_c > sell_c + 4 and "SIGNAL_FLIP" not in self.alerts_sent:
+            exits.append({
+                "trigger": "SIGNAL_FLIP",
+                "severity": "ACTION",
+                "message": f"Strong BUY flip: {buy_c}B > {sell_c}S + 4",
             })
 
-        # 2. Conviction drop
-        conviction_drop = self.entry_conviction - self.current_conviction
-        if conviction_drop >= CONVICTION_DROP_ALERT and "CONVICTION_DROP" not in self.alerts_sent:
+        # --- Lesson 53: Metals loop disagreement ---
+        if self.metals_disagree_count >= 2 and "METALS_DISAGREE" not in self.alerts_sent:
             exits.append({
-                "trigger": "CONVICTION_DROP",
+                "trigger": "METALS_DISAGREE",
                 "severity": "WARNING",
-                "message": f"Conviction dropped {conviction_drop} pts ({self.entry_conviction} -> {self.current_conviction})",
+                "message": f"Metals loop disagrees with position for {self.metals_disagree_count} consecutive checks",
             })
 
-        # 3. Time decay
+        # --- TP/SL ---
+        if move_pct >= 2.0 and "TP" not in self.alerts_sent:
+            exits.append({
+                "trigger": "TP",
+                "severity": "ACTION",
+                "message": f"Take profit: +{move_pct:.1f}% underlying",
+            })
+        if move_pct <= -2.0 and "SL" not in self.alerts_sent:
+            exits.append({
+                "trigger": "SL",
+                "severity": "ACTION",
+                "message": f"Stop loss: {move_pct:.1f}% underlying",
+            })
+
+        # --- Time decay ---
         if elapsed_hours >= 3.0 and "TIME_DECAY_3H" not in self.alerts_sent:
             exits.append({
                 "trigger": "TIME_DECAY_3H",
                 "severity": "WATCH",
                 "message": f"Position held {elapsed_hours:.1f}h. Tighten stops.",
             })
-        if elapsed_hours >= 5.0 and "TIME_DECAY_5H" not in self.alerts_sent:
-            exits.append({
-                "trigger": "TIME_DECAY_5H",
-                "severity": "ACTION",
-                "message": f"Position held {elapsed_hours:.1f}h. Consider closing.",
-            })
 
-        # 4. Adverse move
+        # --- Adverse move warning ---
         if move_pct <= -3.0 and "ADVERSE_MOVE" not in self.alerts_sent:
             exits.append({
                 "trigger": "ADVERSE_MOVE",
                 "severity": "WARNING",
                 "message": f"Position down {move_pct:.1f}%. Review thesis.",
+            })
+
+        # --- Lesson 50: News event flag ---
+        news = signal_data.get("news_action", self.news_action) if signal_data else self.news_action
+        if news == "SELL" and self.direction == "LONG" and "NEWS_ADVERSE" not in self.alerts_sent:
+            exits.append({
+                "trigger": "NEWS_ADVERSE",
+                "severity": "WATCH",
+                "message": "News signal SELL while LONG. Check headlines.",
+            })
+        if news == "BUY" and self.direction == "SHORT" and "NEWS_ADVERSE" not in self.alerts_sent:
+            exits.append({
+                "trigger": "NEWS_ADVERSE",
+                "severity": "WATCH",
+                "message": "News signal BUY while SHORT. Check headlines.",
             })
 
         # 5. Cross-asset divergence
@@ -427,15 +523,24 @@ class SmartFishMonitor:
                 f"RSI {rsi:.1f} | Regime: {regime}"
             )
 
-            # Metals loop signals (independent computation)
+            # Metals loop signals (independent computation) + disagreement flag
             metals_action = signal_data.get("metals_action")
             if metals_action:
                 m_buy = signal_data.get("metals_buy", 0)
                 m_sell = signal_data.get("metals_sell", 0)
                 m_rsi = signal_data.get("metals_rsi", 0)
+                disagree = ""
+                if self.metals_disagree_count >= 2:
+                    disagree = f" !! DISAGREES x{self.metals_disagree_count}"
                 lines.append(
-                    f"  Metals loop: {metals_action} ({m_buy}B/{m_sell}S) | RSI {m_rsi:.1f}"
+                    f"  Metals loop: {metals_action} ({m_buy}B/{m_sell}S) | RSI {m_rsi:.1f}{disagree}"
                 )
+
+            # News/event flags (lesson 50)
+            news = signal_data.get("news_action", "HOLD")
+            econ = signal_data.get("econ_action", "HOLD")
+            if news != "HOLD" or econ != "HOLD":
+                lines.append(f"  Events: news={news} econ={econ}")
 
             # Focus probabilities (all horizons)
             focus_parts = []
@@ -545,7 +650,7 @@ class SmartFishMonitor:
                 now = time.time()
                 if now - self.last_signal_check >= SIGNAL_INTERVAL:
                     signal_data = self._load_signal_data()
-                    self.current_conviction = self._recompute_conviction()
+                    self.update_signal_state(signal_data)
                     self.last_signal_check = now
 
                     # Track signal history
@@ -556,6 +661,9 @@ class SmartFishMonitor:
                         "rsi": signal_data.get("rsi"),
                         "regime": signal_data.get("regime"),
                         "action": signal_data.get("action"),
+                        "mc_p_up": signal_data.get("mc_p_up"),
+                        "metals_action": signal_data.get("metals_action"),
+                        "news_action": signal_data.get("news_action"),
                     })
 
                 # 3. Cross-asset check (every CROSS_ASSET_INTERVAL)
@@ -564,7 +672,7 @@ class SmartFishMonitor:
                     self.last_cross_asset_check = now
 
                 # 4. Exit signals
-                exits = self.compute_exit_signals()
+                exits = self.compute_exit_signals(signal_data)
                 for ex in exits:
                     trigger = ex["trigger"]
                     if trigger not in self.alerts_sent:

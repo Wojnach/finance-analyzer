@@ -1,0 +1,29 @@
+{
+  "event": "Liberation Day Anniversary",
+  "date": "2026-04-02",
+  "description": "One year since Trump's April 2, 2025 reciprocal tariff announcement. SCOTUS struck down IEEPA tariff authority in Feb 2026, replaced by Section 122 at 10%. No major new tariff shock expected, but anniversary rhetoric could cause volatility.",
+  "last_year_impact": {
+    "gold": "Initially -$100 (bullion exempt from tariffs collapsed NY-London arb), then recovered above $3000 as equities crashed",
+    "silver": "-8.9% in one week to $30.40, worst weekly loss since Oct 2022. G/S ratio spiked above 100. Silver traded as risk asset, not safe haven.",
+    "key_lesson": "Silver crashed because of bullion exemption (arb collapsed) + industrial demand exposure. That specific dislocation no longer exists in 2026."
+  },
+  "this_year_outlook": {
+    "legal_change": "SCOTUS struck down IEEPA tariff authority (Feb 2026). Collection ended Feb 24. Section 122 tariffs at 10% require Congressional approval to increase.",
+    "expectation": "No major tariff shock. Anniversary rhetoric and media coverage may cause short-term volatility.",
+    "risk_level": "MEDIUM — volatility likely, not a crash"
+  },
+  "trading_rules": {
+    "no_new_longs_before": "14:30 CET (wait for US market reaction to any announcements)",
+    "wider_stops": "-3% underlying instead of -2% (volatility premium)",
+    "gs_ratio_buy_signal": "If gold/silver ratio spikes >65, that's historically a silver buy zone",
+    "preferred_direction": "Wait and react, don't predict. If silver dips >2%, buy the dip with TURBO L",
+    "overnight_caution": "Avoid overnight positions on April 1 evening unless signals strongly bullish (4+ trusted BUY, focus 1d UP >60%)",
+    "max_hold_time": "2h (shorter than normal 3h due to event risk)"
+  },
+  "instruments_ranked": [
+    {"name": "TURBO L SILVER AVA 481", "ob_id": "2379773", "leverage": 7.2, "barrier": 65.0, "barrier_pct": 13.3, "use": "Buy dips — wide barrier survives volatility"},
+    {"name": "BULL SILVER X5 AVA 4", "ob_id": "1650161", "leverage": 5.0, "barrier": 0, "use": "Conservative long — no knockout risk"},
+    {"name": "TURBO S SILVER AVA 544", "ob_id": "2370161", "leverage": 9.9, "barrier": 81.9, "use": "Short spikes — but careful, tariff news is bullish metals"},
+    {"name": "BEAR SILVER X5 AVA 12", "ob_id": "2286417", "leverage": 5.0, "barrier": 0, "use": "Conservative short — no knockout risk"}
+  ]
+}

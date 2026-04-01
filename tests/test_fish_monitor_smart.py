@@ -43,82 +43,159 @@ class TestMonitorInit:
 
 
 class TestExitSignals:
-    def test_tp0_triggers_at_5pct_short(self, monitor):
-        # For SHORT: entry 75, price drops to 71.25 = +5% in our favor
-        monitor.current_price = 71.25
-        exits = monitor.compute_exit_signals()
-        triggers = [e["trigger"] for e in exits]
-        assert "TP0" in triggers
+    """Test exit signal detection with signal_data parameter."""
 
-    def test_tp0_triggers_at_5pct_long(self):
+    def _sig(self, **overrides):
+        """Create default signal data dict with optional overrides."""
+        defaults = {
+            "rsi": 50, "mc_p_up": 0.5, "buy_count": 5, "sell_count": 5,
+            "action": "HOLD", "metals_action": "HOLD", "news_action": "HOLD",
+        }
+        defaults.update(overrides)
+        return defaults
+
+    def test_combined_exit_long_rsi62_mc35(self):
+        """Lesson 45: RSI>62 + MC<35% triggers COMBINED_EXIT for LONG."""
         m = SmartFishMonitor("XAG-USD", entry_price=75.00, direction="LONG")
-        m.current_price = 78.75  # +5%
-        exits = m.compute_exit_signals()
+        m.current_price = 76.00
+        exits = m.compute_exit_signals(self._sig(rsi=65, mc_p_up=0.28))
         triggers = [e["trigger"] for e in exits]
-        assert "TP0" in triggers
+        assert "COMBINED_EXIT" in triggers
 
-    def test_tp_partial_at_2_5pct(self, monitor):
-        monitor.current_price = 73.125  # SHORT entry 75, 2.5% drop
-        exits = monitor.compute_exit_signals()
+    def test_combined_exit_does_not_fire_for_short(self):
+        """Backtest shows combined exit doesn't work for shorts."""
+        m = SmartFishMonitor("XAG-USD", entry_price=75.00, direction="SHORT")
+        m.current_price = 74.00
+        exits = m.compute_exit_signals(self._sig(rsi=35, mc_p_up=0.70))
         triggers = [e["trigger"] for e in exits]
-        assert "TP_PARTIAL" in triggers
+        assert "COMBINED_EXIT" not in triggers
 
-    def test_no_exit_at_small_move(self, monitor):
-        monitor.current_price = 74.50  # only 0.67% move
-        exits = monitor.compute_exit_signals()
-        assert len(exits) == 0
-
-    def test_conviction_drop_alert(self, monitor):
-        monitor.current_conviction = 40  # dropped from 65 to 40 = 25 pts
-        exits = monitor.compute_exit_signals()
+    def test_short_exit_rsi30_solo(self):
+        """SHORT exits on RSI<30 alone (backtest validated)."""
+        m = SmartFishMonitor("XAG-USD", entry_price=75.00, direction="SHORT")
+        m.current_price = 73.00
+        exits = m.compute_exit_signals(self._sig(rsi=28))
         triggers = [e["trigger"] for e in exits]
-        assert "CONVICTION_DROP" in triggers
+        assert "RSI_EXIT" in triggers
 
-    def test_no_conviction_alert_small_drop(self, monitor):
-        monitor.current_conviction = 55  # only 10 pt drop
-        exits = monitor.compute_exit_signals()
+    def test_no_combined_exit_below_threshold(self):
+        """RSI 60 + MC 40% should NOT trigger combined exit."""
+        m = SmartFishMonitor("XAG-USD", entry_price=75.00, direction="LONG")
+        m.current_price = 76.00
+        exits = m.compute_exit_signals(self._sig(rsi=60, mc_p_up=0.40))
         triggers = [e["trigger"] for e in exits]
-        assert "CONVICTION_DROP" not in triggers
+        assert "COMBINED_EXIT" not in triggers
+
+    def test_signal_flip_4_margin(self):
+        """Need 4+ vote margin for signal flip exit."""
+        m = SmartFishMonitor("XAG-USD", entry_price=75.00, direction="LONG")
+        m.current_price = 75.50
+        # 3 margin: should NOT trigger
+        exits = m.compute_exit_signals(self._sig(buy_count=2, sell_count=5))
+        assert "SIGNAL_FLIP" not in [e["trigger"] for e in exits]
+        # 5 margin: SHOULD trigger
+        exits = m.compute_exit_signals(self._sig(buy_count=1, sell_count=6))
+        assert "SIGNAL_FLIP" in [e["trigger"] for e in exits]
+
+    def test_tp_at_2pct(self, monitor):
+        # SHORT at 75, price drops to 73.5 = +2%
+        monitor.current_price = 73.50
+        exits = monitor.compute_exit_signals(self._sig())
+        triggers = [e["trigger"] for e in exits]
+        assert "TP" in triggers
+
+    def test_sl_at_minus_2pct(self, monitor):
+        # SHORT at 75, price goes UP to 76.50 = -2%
+        monitor.current_price = 76.50
+        exits = monitor.compute_exit_signals(self._sig())
+        triggers = [e["trigger"] for e in exits]
+        assert "SL" in triggers
 
     def test_time_decay_3h(self, monitor):
-        monitor.start_time = time.time() - 3.5 * 3600  # 3.5 hours ago
-        exits = monitor.compute_exit_signals()
+        monitor.start_time = time.time() - 3.5 * 3600
+        exits = monitor.compute_exit_signals(self._sig())
         triggers = [e["trigger"] for e in exits]
         assert "TIME_DECAY_3H" in triggers
 
-    def test_time_decay_5h(self, monitor):
-        monitor.start_time = time.time() - 5.5 * 3600
-        exits = monitor.compute_exit_signals()
-        triggers = [e["trigger"] for e in exits]
-        assert "TIME_DECAY_5H" in triggers
-
     def test_adverse_move_alert(self, monitor):
-        # SHORT at 75, price goes UP to 77.25 = -3% adverse
-        monitor.current_price = 77.25
-        exits = monitor.compute_exit_signals()
+        monitor.current_price = 77.25  # SHORT at 75, -3%
+        exits = monitor.compute_exit_signals(self._sig())
         triggers = [e["trigger"] for e in exits]
         assert "ADVERSE_MOVE" in triggers
 
     def test_alerts_not_duplicated(self, monitor):
-        monitor.current_price = 71.25  # TP0
-        exits1 = monitor.compute_exit_signals()
-        assert len(exits1) > 0
-
-        # Simulate what run() does: mark alerts as sent
+        monitor.current_price = 73.50  # TP
+        exits1 = monitor.compute_exit_signals(self._sig())
         for ex in exits1:
             monitor.alerts_sent.add(ex["trigger"])
+        exits2 = monitor.compute_exit_signals(self._sig())
+        assert "TP" not in [e["trigger"] for e in exits2]
 
-        # Second call should not re-trigger same alerts
-        exits2 = monitor.compute_exit_signals()
-        assert "TP0" not in [e["trigger"] for e in exits2]
-
-    def test_cross_asset_divergence_short(self, monitor):
-        # Set up: gold rallied (adverse for short silver since gold leads silver)
-        monitor.cross_asset_baselines = {"gold": 4600.0}
-        monitor.cross_asset_prices = {"gold": 4690.0}  # +1.96% (above threshold 0.5%)
-        exits = monitor.compute_exit_signals()
+    def test_news_adverse_long(self):
+        """Lesson 50: news SELL while holding LONG triggers warning."""
+        m = SmartFishMonitor("XAG-USD", entry_price=75.00, direction="LONG")
+        m.current_price = 75.50
+        exits = m.compute_exit_signals(self._sig(news_action="SELL"))
         triggers = [e["trigger"] for e in exits]
-        assert "CROSS_ASSET_GOLD" in triggers
+        assert "NEWS_ADVERSE" in triggers
+
+    def test_news_not_adverse_when_aligned(self):
+        """news BUY while LONG should NOT trigger."""
+        m = SmartFishMonitor("XAG-USD", entry_price=75.00, direction="LONG")
+        m.current_price = 75.50
+        exits = m.compute_exit_signals(self._sig(news_action="BUY"))
+        triggers = [e["trigger"] for e in exits]
+        assert "NEWS_ADVERSE" not in triggers
+
+
+class TestMetalsDisagreement:
+    """Lesson 53: metals loop disagreement detection."""
+
+    def test_disagreement_counter_increments(self, monitor):
+        # SHORT position, metals says BUY = disagrees
+        monitor.update_signal_state({"mc_p_up": 0.5, "metals_action": "BUY"})
+        assert monitor.metals_disagree_count == 1
+        monitor.update_signal_state({"mc_p_up": 0.5, "metals_action": "BUY"})
+        assert monitor.metals_disagree_count == 2
+
+    def test_disagreement_resets_on_agreement(self, monitor):
+        # SHORT position: BUY disagrees, then SELL agrees
+        monitor.update_signal_state({"mc_p_up": 0.5, "metals_action": "BUY"})
+        assert monitor.metals_disagree_count == 1
+        monitor.update_signal_state({"mc_p_up": 0.5, "metals_action": "SELL"})
+        assert monitor.metals_disagree_count == 0
+
+    def test_disagreement_exit_at_2(self, monitor):
+        monitor.metals_disagree_count = 2
+        monitor.current_price = 74.50
+        exits = monitor.compute_exit_signals({"rsi": 50, "mc_p_up": 0.5, "buy_count": 3, "sell_count": 3, "news_action": "HOLD"})
+        triggers = [e["trigger"] for e in exits]
+        assert "METALS_DISAGREE" in triggers
+
+
+class TestMCStability:
+    """Lesson 39: MC stability tracking."""
+
+    def test_mc_history_tracks(self, monitor):
+        monitor.update_signal_state({"mc_p_up": 0.80, "metals_action": "HOLD"})
+        monitor.update_signal_state({"mc_p_up": 0.75, "metals_action": "HOLD"})
+        assert len(monitor.mc_history) == 2
+        assert monitor.mc_stable_bullish()
+
+    def test_mc_not_stable_with_one_check(self, monitor):
+        monitor.update_signal_state({"mc_p_up": 0.80, "metals_action": "HOLD"})
+        assert not monitor.mc_stable_bullish()  # need 2
+
+    def test_mc_stable_bearish(self, monitor):
+        monitor.update_signal_state({"mc_p_up": 0.20, "metals_action": "HOLD"})
+        monitor.update_signal_state({"mc_p_up": 0.25, "metals_action": "HOLD"})
+        assert monitor.mc_stable_bearish()
+
+    def test_mc_not_stable_mixed(self, monitor):
+        monitor.update_signal_state({"mc_p_up": 0.80, "metals_action": "HOLD"})
+        monitor.update_signal_state({"mc_p_up": 0.20, "metals_action": "HOLD"})
+        assert not monitor.mc_stable_bullish()
+        assert not monitor.mc_stable_bearish()
 
 
 class TestFormatStatus:
@@ -135,6 +212,7 @@ class TestFormatStatus:
             "action": "BUY",
             "buy_count": 8,
             "sell_count": 2,
+            "w_confidence": 0.75,
             "focus_3h": {"direction": "up", "probability": 0.6},
             "focus_1d": {"direction": "down", "probability": 0.55},
         }
