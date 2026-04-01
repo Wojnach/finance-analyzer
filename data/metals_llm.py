@@ -422,24 +422,22 @@ def _run_ministral_metals(context):
 
 
 def _run_chronos_metals(ticker, close_prices, horizons=(1, 3)):
-    """Run Chronos forecast.
+    """Run Chronos forecast via persistent server (only ~673MB VRAM — coexists with llama-server).
 
-    Market hours: persistent server (0.3s queries, holds VRAM).
-    Quiet hours: subprocess per-call (7s, frees VRAM for llama-server).
+    Falls back to subprocess if server unavailable.
 
     Returns dict of {horizon_key: {"direction": "up/down", "pct_move": float, "confidence": float}}
     """
     try:
-        # Market hours: use persistent server for speed
-        if not _is_quiet_hours():
-            result = _query_chronos_server(close_prices, horizons)
-            if result is not None:
-                if "error" in result:
-                    _log(f"Chronos error for {ticker}: {result['error']}")
-                    return None
-                return result
+        # Persistent server (fast, ~0.3s per query, minimal VRAM)
+        result = _query_chronos_server(close_prices, horizons)
+        if result is not None:
+            if "error" in result:
+                _log(f"Chronos error for {ticker}: {result['error']}")
+                return None
+            return result
 
-        # Quiet hours (or server unavailable): subprocess per-call
+        # Fallback: subprocess per-call
         script = r"""
 import json, sys
 sys.path.insert(0, r"Q:/finance-analyzer")
@@ -912,15 +910,14 @@ def _llm_worker(signal_data_fn, underlying_prices_fn):
             now = time.time()
             quiet = _is_quiet_hours()
 
-            # Log transitions + manage Chronos server lifecycle
+            # Log transitions
             if quiet != _was_quiet:
                 if quiet:
                     _log(f"Quiet hours — Ministral every {LLM_INTERVAL_QUIET}s, "
-                         f"Chronos every {CHRONOS_INTERVAL_QUIET}s (subprocess)")
-                    _stop_chronos_server()  # free VRAM for llama-server
+                         f"Chronos every {CHRONOS_INTERVAL_QUIET}s")
                 else:
                     _log(f"Market hours — Ministral every {LLM_INTERVAL}s, "
-                         f"Chronos every {CHRONOS_INTERVAL}s (persistent)")
+                         f"Chronos every {CHRONOS_INTERVAL}s")
                 _was_quiet = quiet
 
             ministral_interval = LLM_INTERVAL_QUIET if quiet else LLM_INTERVAL
