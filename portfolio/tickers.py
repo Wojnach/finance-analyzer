@@ -103,4 +103,7 @@ SIGNAL_NAMES = [
     "forecast",
     "claude_fundamental",
     "futures_flow",
+    "crypto_macro",
+    "orderbook_flow",
+    "metals_cross_asset",
 ]
