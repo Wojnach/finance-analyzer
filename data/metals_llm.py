@@ -77,6 +77,10 @@ _llm_last_run = 0        # timestamp of last inference run
 _llm_thread = None
 _llm_stop = threading.Event()
 
+# --- PERSISTENT MINISTRAL SERVER ---
+_ministral_proc = None
+_ministral_lock = threading.Lock()  # serialize access to the persistent process
+
 # Accuracy horizons in seconds
 HORIZONS = {
     "1h": 3600,
@@ -104,6 +108,82 @@ def _is_quiet_hours():
         return True
     h = now.hour + now.minute / 60.0
     return h < 8.25 or h >= 22.0
+
+
+def _start_ministral_server():
+    """Launch Ministral in persistent --server mode. Returns Popen or None."""
+    global _ministral_proc
+    try:
+        proc = subprocess.Popen(
+            [MINISTRAL_PYTHON, MINISTRAL_SCRIPT, "--server"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,  # line-buffered
+        )
+        # Wait for MINISTRAL_READY on stderr (model loaded)
+        import select
+        deadline = time.time() + 60  # 60s timeout for model load
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                _log(f"Ministral server exited during startup (code {proc.returncode})")
+                return None
+            # Read stderr non-blocking (Windows doesn't have select on pipes)
+            try:
+                line = proc.stderr.readline()
+                if "MINISTRAL_READY" in line:
+                    _log("Ministral server ready (model loaded, persistent)")
+                    _ministral_proc = proc
+                    return proc
+            except Exception:
+                time.sleep(0.5)
+        _log("Ministral server startup timed out (60s)")
+        proc.kill()
+        return None
+    except Exception as e:
+        _log(f"Ministral server launch failed: {e}")
+        return None
+
+
+def _stop_ministral_server():
+    """Stop the persistent Ministral server if running."""
+    global _ministral_proc
+    if _ministral_proc is not None:
+        try:
+            _ministral_proc.stdin.close()
+            _ministral_proc.wait(timeout=10)
+        except Exception:
+            try:
+                _ministral_proc.kill()
+            except Exception:
+                pass
+        _ministral_proc = None
+        _log("Ministral server stopped")
+
+
+def _query_ministral_server(context):
+    """Send a request to the persistent Ministral server. Returns result dict or None."""
+    global _ministral_proc
+    with _ministral_lock:
+        if _ministral_proc is None or _ministral_proc.poll() is not None:
+            _ministral_proc = None
+            _start_ministral_server()
+        if _ministral_proc is None:
+            return None  # server failed to start, caller falls back
+        try:
+            _ministral_proc.stdin.write(json.dumps(context) + "\n")
+            _ministral_proc.stdin.flush()
+            response_line = _ministral_proc.stdout.readline()
+            if not response_line:
+                _log("Ministral server returned empty response, restarting")
+                _stop_ministral_server()
+                return None
+            return json.loads(response_line.strip())
+        except Exception as e:
+            _log(f"Ministral server query failed: {e}")
+            _stop_ministral_server()
+            return None
 
 
 def _fetch_fapi_klines(symbol, interval="1h", limit=200, ticker=None):
@@ -147,13 +227,14 @@ def _fetch_fapi_klines(symbol, interval="1h", limit=200, ticker=None):
 
 
 def _run_ministral_metals(context):
-    """Run Ministral-8B with metals-adapted prompt via subprocess.
+    """Run Ministral-8B with metals-adapted prompt.
+
+    Uses persistent server (--server mode) when available. Falls back to
+    subprocess.run per-call if server fails.
 
     Returns {"action": "BUY/SELL/HOLD", "reasoning": "...", "confidence": 0.0-1.0}
     """
     try:
-        # Build metals-specific context for Ministral
-        # We modify the context to make the prompt metals-aware
         metals_context = {
             "ticker": context.get("ticker", "XAG-USD"),
             "price_usd": context.get("price_usd", 0),
@@ -171,23 +252,28 @@ def _run_ministral_metals(context):
             "headlines": context.get("headlines", "N/A"),
         }
 
-        proc = subprocess.run(
-            [MINISTRAL_PYTHON, MINISTRAL_SCRIPT],
-            input=json.dumps(metals_context),
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        # Try persistent server first
+        result = _query_ministral_server(metals_context)
 
-        if proc.returncode != 0:
-            _log(f"Ministral failed: {proc.stderr[:200]}")
-            return None
+        # Fallback: one-shot subprocess (cold start)
+        if result is None:
+            _log("Ministral server unavailable, falling back to subprocess")
+            proc = subprocess.run(
+                [MINISTRAL_PYTHON, MINISTRAL_SCRIPT],
+                input=json.dumps(metals_context),
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if proc.returncode != 0:
+                _log(f"Ministral fallback failed: {proc.stderr[:200]}")
+                return None
+            result = json.loads(proc.stdout.strip())
 
-        result = json.loads(proc.stdout.strip())
         return {
             "action": result.get("action", "HOLD"),
             "reasoning": result.get("reasoning", "")[:200],
-            "confidence": 0.6,  # base confidence, adjusted by accuracy
+            "confidence": 0.6,
         }
     except Exception as e:
         _log(f"Ministral error: {e}")
@@ -740,10 +826,11 @@ def start_llm_thread(signal_data_fn, underlying_prices_fn):
 
 
 def stop_llm_thread():
-    """Stop the background LLM inference thread."""
+    """Stop the background LLM inference thread and persistent server."""
     _llm_stop.set()
     if _llm_thread:
         _llm_thread.join(timeout=15)
+    _stop_ministral_server()
 
 
 def get_llm_signals():
