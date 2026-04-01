@@ -195,9 +195,16 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
     "trending-down": {
         # BUG-155: bb 21.7% in trending-down (false reversal signals)
         # BUG-154: claude_fundamental 30.4% in trending-down
-        "_default": frozenset({"bb", "claude_fundamental"}),
-        "3h": frozenset({"mean_reversion"}),
-        "4h": frozenset({"mean_reversion"}),
+        # BUG-156: volume_flow (0%), macro_regime (0%), ema (0%), trend (0%)
+        # on MSTR/PLTR in trending-down. These are SELL-biased and catastrophically
+        # wrong when the downtrend classification is stale or stocks are recovering.
+        "_default": frozenset({
+            "bb", "claude_fundamental",
+            "volume_flow", "macro_regime", "ema", "trend", "heikin_ashi",
+        }),
+        # 3h: trend signals may still work short-term; keep mean_reversion gated
+        "3h": frozenset({"mean_reversion", "bb", "claude_fundamental"}),
+        "4h": frozenset({"mean_reversion", "bb", "claude_fundamental"}),
     },
 }
 
@@ -453,14 +460,16 @@ CORRELATION_GROUPS = {
     # Mixing them risks forecast becoming leader and suppressing calendar.
     "low_activity_timing": frozenset({"calendar", "econ_calendar"}),
     "rare_technical": frozenset({"volatility_sig", "oscillators"}),
-    # Discovered 2026-03-27: ema/trend corr=0.55, all share SELL bias (37-40%)
-    "trend_direction": frozenset({"ema", "trend", "heikin_ashi"}),
-    # Discovered 2026-03-27: both permanent SELL lean (volume_flow 69% SELL, macro_regime 44% SELL)
-    "high_volume_sell": frozenset({"volume_flow", "macro_regime"}),
-    # Discovered 2026-03-29: all depend on external data quality. sentiment 33.8% 3h,
-    # fear_greed 25.9% 1d, news_event varies wildly by horizon. When external data
-    # degrades, all fail together.
-    "macro_external": frozenset({"fear_greed", "sentiment", "news_event"}),
+    # Discovered 2026-03-27: ema/trend corr=0.55, all share SELL bias (37-40%).
+    # 2026-04-01: volume_flow added (corr +0.511 with heikin_ashi, permanent SELL lean)
+    "trend_direction": frozenset({"ema", "trend", "heikin_ashi", "volume_flow"}),
+    # 2026-04-01 audit: fear_greed + macro_regime = +1.000 correlation (identical vote).
+    # structure = +0.928 with both. sentiment/news_event degrade together with external
+    # data quality. All external/macro-dependent signals in one group.
+    "macro_external": frozenset({
+        "fear_greed", "macro_regime", "structure",
+        "sentiment", "news_event",
+    }),
 }
 _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal weight
 

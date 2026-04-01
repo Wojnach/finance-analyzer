@@ -141,6 +141,7 @@ def detect_regime(indicators, is_crypto=True):
     ema21 = indicators.get("ema21", 0)
     rsi = indicators.get("rsi", 50)
 
+    close = indicators.get("close", 0)
     high_vol_threshold = 4.0 if is_crypto else 3.0
     if atr_pct > high_vol_threshold:
         result = "high-vol"
@@ -152,6 +153,16 @@ def detect_regime(indicators, is_crypto=True):
         else:
             result = "ranging"
     else:
+        result = "ranging"
+
+    # BUG-156: EMA crossover lags behind V-shaped recoveries.
+    # If close is above EMA21 but EMA9 < EMA21 (lagging), the stock is recovering,
+    # not trending down. Override to "ranging". Discovered 2026-04-01: MSTR labeled
+    # trending-down (9% accuracy) while price UP 100/100 days; PLTR at 3% accuracy.
+    # Symmetric: if close below EMA21 but labeled trending-up, override to ranging.
+    if result == "trending-down" and close > 0 and ema21 > 0 and close > ema21:
+        result = "ranging"
+    elif result == "trending-up" and close > 0 and ema21 > 0 and close < ema21:
         result = "ranging"
 
     _ss._regime_cache[cache_key] = result
