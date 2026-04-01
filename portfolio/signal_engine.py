@@ -1,4 +1,4 @@
-"""Signal generation engine — 30-signal voting system with weighted consensus."""
+"""Signal generation engine — 32-signal voting system with weighted consensus."""
 
 import logging
 import threading

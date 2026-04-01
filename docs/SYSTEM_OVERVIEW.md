@@ -32,8 +32,8 @@ Two-layer autonomous trading system with 32 signals (30 tracked + 2 asset-class-
 - `market_timing.py` (141 lines): DST-aware US market hours, agent invocation window, market state (open/closed/weekend)
 - `config_validator.py`: Startup config validation
 
-### Signal System (30 signals: 8 core + 19 enhanced + 3 disabled)
-- `signal_engine.py` (1,471 lines): 30-signal voting, weighted consensus, accuracy gating, 5-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + ADX cache
+### Signal System (32 signals: 9 core + 22 enhanced + 2 disabled)
+- `signal_engine.py` (1,538 lines): 32-signal voting, weighted consensus, accuracy gating, 5-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + ADX cache
 - `signal_registry.py` (135 lines): Plugin-based signal discovery via importlib, lazy loading
 - `signal_utils.py` (130 lines): Shared helpers — SMA, EMA, RSI, majority_vote
 - `signals/*.py` (19 modules): Enhanced composite signals, each with 4-8 sub-indicators
