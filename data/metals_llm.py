@@ -81,6 +81,11 @@ _llm_stop = threading.Event()
 _ministral_proc = None
 _ministral_lock = threading.Lock()  # serialize access to the persistent process
 
+# --- PERSISTENT CHRONOS SERVER ---
+_chronos_proc = None
+_chronos_lock = threading.Lock()
+CHRONOS_SERVER_SCRIPT = os.path.join(os.path.dirname(__file__), "chronos_server.py")
+
 # Accuracy horizons in seconds
 HORIZONS = {
     "1h": 3600,
@@ -186,6 +191,86 @@ def _query_ministral_server(context):
             return None
 
 
+def _start_chronos_server():
+    """Launch Chronos in persistent server mode. Returns Popen or None."""
+    global _chronos_proc
+    try:
+        proc = subprocess.Popen(
+            [MAIN_PYTHON, "-u", CHRONOS_SERVER_SCRIPT],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        deadline = time.time() + 120  # Chronos model load can be slow
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                stderr = proc.stderr.read()
+                _log(f"Chronos server exited during startup (code {proc.returncode}): {stderr[:200]}")
+                return None
+            line = proc.stderr.readline()
+            if "CHRONOS_READY" in line:
+                _log("Chronos server ready (model loaded, persistent)")
+                _chronos_proc = proc
+                return proc
+            if "CHRONOS_FAILED" in line:
+                _log(f"Chronos server failed: {line.strip()}")
+                proc.kill()
+                return None
+        _log("Chronos server startup timed out (120s)")
+        proc.kill()
+        return None
+    except Exception as e:
+        _log(f"Chronos server launch failed: {e}")
+        return None
+
+
+def _stop_chronos_server():
+    """Stop the persistent Chronos server if running."""
+    global _chronos_proc
+    if _chronos_proc is not None:
+        try:
+            _chronos_proc.stdin.close()
+            _chronos_proc.wait(timeout=10)
+        except Exception:
+            try:
+                _chronos_proc.kill()
+            except Exception:
+                pass
+        _chronos_proc = None
+        _log("Chronos server stopped")
+
+
+def _query_chronos_server(close_prices, horizons=(1, 3)):
+    """Send a request to the persistent Chronos server. Returns result dict or None."""
+    global _chronos_proc
+    with _chronos_lock:
+        if _chronos_proc is None or _chronos_proc.poll() is not None:
+            _chronos_proc = None
+            _start_chronos_server()
+        if _chronos_proc is None:
+            return None
+        try:
+            req = json.dumps({"close_prices": close_prices, "horizons": list(horizons)})
+            _chronos_proc.stdin.write(req + "\n")
+            _chronos_proc.stdin.flush()
+            response_line = _chronos_proc.stdout.readline()
+            if not response_line:
+                _log("Chronos server returned empty response, restarting")
+                _stop_chronos_server()
+                return None
+            result = json.loads(response_line.strip())
+            if "error" in result:
+                _log(f"Chronos server error: {result['error']}")
+                return None
+            return result
+        except Exception as e:
+            _log(f"Chronos server query failed: {e}")
+            _stop_chronos_server()
+            return None
+
+
 def _fetch_fapi_klines(symbol, interval="1h", limit=200, ticker=None):
     """Fetch klines from Binance FAPI (metals) or SPOT (crypto).
 
@@ -281,13 +366,18 @@ def _run_ministral_metals(context):
 
 
 def _run_chronos_metals(ticker, close_prices, horizons=(1, 3)):
-    """Run Chronos forecast for metals using close prices.
+    """Run Chronos forecast using persistent server, with subprocess fallback.
 
     Returns dict of {horizon_key: {"direction": "up/down", "pct_move": float, "confidence": float}}
     """
     try:
-        # Write a small script that runs Chronos and returns results
-        script = r"""
+        # Try persistent server first
+        result = _query_chronos_server(close_prices, horizons)
+
+        # Fallback: one-shot subprocess (cold start)
+        if result is None:
+            _log(f"Chronos server unavailable for {ticker}, falling back to subprocess")
+            script = r"""
 import json, sys
 sys.path.insert(0, r"Q:/finance-analyzer")
 try:
@@ -301,33 +391,28 @@ try:
 except Exception as e:
     print(json.dumps({"error": str(e)}))
 """
-        input_data = json.dumps({
-            "close_prices": close_prices,
-            "horizons": list(horizons),
-        })
+            input_data = json.dumps({
+                "close_prices": close_prices,
+                "horizons": list(horizons),
+            })
+            proc = subprocess.run(
+                [MAIN_PYTHON, "-c", script],
+                input=input_data,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if proc.returncode != 0:
+                _log(f"Chronos fallback failed for {ticker}: {proc.stderr[:200]}")
+                return None
+            stdout = proc.stdout.strip()
+            if not stdout:
+                return None
+            brace_idx = stdout.find("{")
+            if brace_idx > 0:
+                stdout = stdout[brace_idx:]
+            result = json.loads(stdout)
 
-        proc = subprocess.run(
-            [MAIN_PYTHON, "-c", script],
-            input=input_data,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-
-        if proc.returncode != 0:
-            _log(f"Chronos failed for {ticker}: {proc.stderr[:200]}")
-            return None
-
-        stdout = proc.stdout.strip()
-        if not stdout:
-            return None
-
-        # Handle contaminated stdout (HuggingFace prints during load)
-        brace_idx = stdout.find("{")
-        if brace_idx > 0:
-            stdout = stdout[brace_idx:]
-
-        result = json.loads(stdout)
         if "error" in result:
             _log(f"Chronos error for {ticker}: {result['error']}")
             return None
@@ -826,11 +911,12 @@ def start_llm_thread(signal_data_fn, underlying_prices_fn):
 
 
 def stop_llm_thread():
-    """Stop the background LLM inference thread and persistent server."""
+    """Stop the background LLM inference thread and persistent servers."""
     _llm_stop.set()
     if _llm_thread:
         _llm_thread.join(timeout=15)
     _stop_ministral_server()
+    _stop_chronos_server()
 
 
 def get_llm_signals():
