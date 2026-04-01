@@ -155,6 +155,94 @@ WARRANT_CATALOG = {
         "commission_sek": 0,
     },
     # -----------------------------------------------------------------------
+    # TURBO L Silver — high-leverage LONG with knockout barrier
+    # Like MINIs but higher leverage. AVA = zero commission, tight spread.
+    # -----------------------------------------------------------------------
+    "TURBO_L_SILVER_AVA_481": {
+        "ob_id": "2379773",
+        "api_type": "warrant",
+        "underlying": "XAG-USD",
+        "direction": "LONG",
+        "leverage": 7.2,
+        "barrier": 65.0,
+        "parity": 1,
+        "name": "TURBO L SILVER AVA 481",
+        "issuer": "AVA",
+        "spread_pct": 0.2,
+        "commission_sek": 0,
+    },
+    "TURBO_L_SILVER_AVA_482": {
+        "ob_id": "2379784",
+        "api_type": "warrant",
+        "underlying": "XAG-USD",
+        "direction": "LONG",
+        "leverage": 7.9,
+        "barrier": 66.0,
+        "parity": 1,
+        "name": "TURBO L SILVER AVA 482",
+        "issuer": "AVA",
+        "spread_pct": 0.2,
+        "commission_sek": 0,
+    },
+    "TURBO_L_SILVER_AVA_491": {
+        "ob_id": "2389098",
+        "api_type": "warrant",
+        "underlying": "XAG-USD",
+        "direction": "LONG",
+        "leverage": 9.8,
+        "barrier": 68.0,
+        "parity": 1,
+        "name": "TURBO L SILVER AVA 491",
+        "issuer": "AVA",
+        "spread_pct": 0.3,
+        "commission_sek": 0,
+    },
+    # -----------------------------------------------------------------------
+    # TURBO S Silver — high-leverage SHORT with knockout barrier
+    # -----------------------------------------------------------------------
+    "TURBO_S_SILVER_AVA_544": {
+        "ob_id": "2370161",
+        "api_type": "warrant",
+        "underlying": "XAG-USD",
+        "direction": "SHORT",
+        "leverage": 9.9,
+        "barrier": 81.9,
+        "parity": 1,
+        "name": "TURBO S SILVER AVA 544",
+        "issuer": "AVA",
+        "spread_pct": 0.3,
+        "commission_sek": 0,
+    },
+    "TURBO_S_SILVER_AVA_554": {
+        "ob_id": "2383705",
+        "api_type": "warrant",
+        "underlying": "XAG-USD",
+        "direction": "SHORT",
+        "leverage": 15.2,
+        "barrier": 79.0,
+        "parity": 1,
+        "name": "TURBO S SILVER AVA 554",
+        "issuer": "AVA",
+        "spread_pct": 0.4,
+        "commission_sek": 0,
+    },
+    # -----------------------------------------------------------------------
+    # Better BULL cert — BULL SILVER X5 AVA 4 has 4x more volume, 0.2% spread
+    # -----------------------------------------------------------------------
+    "BULL_SILVER_X5_AVA_4": {
+        "ob_id": "1650161",
+        "api_type": "certificate",
+        "underlying": "XAG-USD",
+        "direction": "LONG",
+        "leverage": 5.0,
+        "barrier": 0,
+        "parity": 1,
+        "name": "BULL SILVER X5 AVA 4",
+        "issuer": "AVA",
+        "spread_pct": 0.2,
+        "commission_sek": 0,
+    },
+    # -----------------------------------------------------------------------
     # MINI L Silver — overnight-holdable LONG warrants (no daily reset)
     # -----------------------------------------------------------------------
     "MINI_L_SILVER_SG": {
@@ -176,7 +264,7 @@ WARRANT_CATALOG = {
 # Preferred instruments — quick lookup for each ticker+direction combo
 # ---------------------------------------------------------------------------
 PREFERRED_INSTRUMENTS = {
-    ("XAG-USD", "LONG"): "BULL_SILVER_X5_AVA_3",
+    ("XAG-USD", "LONG"): "BULL_SILVER_X5_AVA_4",  # 0.2% spread, 1.4M vol (better than AVA_3)
     ("XAG-USD", "SHORT"): "BEAR_SILVER_X5_AVA_12",
     ("XAU-USD", "LONG"): "BULL_GULD_X5_AVA",
     ("XAU-USD", "SHORT"): "BEAR_GULD_X5_VON4",
