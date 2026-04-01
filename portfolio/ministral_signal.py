@@ -1,7 +1,8 @@
-"""Wrapper to call Ministral trading model via subprocess.
+"""Wrapper to call Ministral trading model.
 
+Prefers persistent llama-server (HTTP) to eliminate cold-start CPU cost.
+Falls back to subprocess llama-completion if server unavailable.
 Uses GPU gate to ensure exclusive GPU access during model load/inference.
-Ministral-3 runs via native llama-completion binary; legacy via llama-cpp-python.
 """
 
 import json
@@ -10,6 +11,7 @@ import platform
 from pathlib import Path
 
 from portfolio.gpu_gate import gpu_gate
+from portfolio.llama_server import query_llama_server
 from portfolio.subprocess_utils import kill_orphaned_llama, run_safe
 
 logger = logging.getLogger("portfolio.ministral_signal")
@@ -45,6 +47,20 @@ def _extract_json_from_stdout(stdout):
 
 
 def _call_model(context, lora_path=None):
+    # Try persistent llama-server first (no cold-start cost)
+    from portfolio.ministral_trader import _build_prompt, _parse_response
+    prompt = _build_prompt(context)
+
+    text = query_llama_server("ministral3", prompt, stop=["[INST]"])
+    if text is not None:
+        decision, reasoning, confidence = _parse_response(text)
+        result = {"action": decision, "reasoning": reasoning, "model": "Ministral-3-8B"}
+        if confidence is not None:
+            result["confidence"] = confidence
+        return result
+
+    # Fallback: subprocess (cold start)
+    logger.info("llama-server unavailable, falling back to subprocess")
     repo_root = Path(__file__).resolve().parent.parent
     if platform.system() == "Windows":
         python = r"Q:\models\.venv-llm\Scripts\python.exe"

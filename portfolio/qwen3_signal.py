@@ -1,10 +1,10 @@
-"""Wrapper to call Qwen3-8B trading model via subprocess.
+"""Wrapper to call Qwen3-8B trading model.
 
-Runs for ALL tickers (crypto, stocks, metals). Uses GPU lock to coordinate
-with Ministral (only one GGUF model can be on GPU at a time).
+Prefers persistent llama-server (HTTP), swapping models as needed.
+Falls back to subprocess if server unavailable.
+Uses GPU lock to coordinate with Ministral.
 
-Supports batch mode: multiple tickers processed in one model-load cycle
-to avoid the ~5s model load overhead per ticker.
+Supports batch mode: multiple tickers processed in one model-load cycle.
 """
 
 import json
@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from portfolio.gpu_gate import gpu_gate
+from portfolio.llama_server import query_llama_server
 from portfolio.subprocess_utils import kill_orphaned_llama, run_safe
 
 logger = logging.getLogger("portfolio.qwen3_signal")
@@ -57,9 +58,18 @@ def _extract_json_from_stdout(stdout):
 
 
 def _call_qwen3(context):
-    """Call Qwen3-8B via qwen3_trader (uses native llama-completion binary)."""
+    """Call Qwen3-8B, preferring persistent llama-server, with subprocess fallback."""
+    from portfolio.qwen3_trader import _build_prompt, _parse_response
+    prompt = _build_prompt(context)
+
+    text = query_llama_server("qwen3", prompt, n_predict=1024, temperature=0.6,
+                              top_p=0.95, stop=["<|endoftext|>", "<|im_end|>"])
+    if text is not None:
+        return _parse_response(text)
+
+    # Fallback: subprocess (cold start)
+    logger.info("llama-server unavailable for qwen3, falling back to subprocess")
     repo_root = Path(__file__).resolve().parent.parent
-    # Use main venv Python — qwen3_trader.py calls native binary, no llama-cpp-python needed
     if platform.system() == "Windows":
         python = str(repo_root / ".venv" / "Scripts" / "python.exe")
     else:
