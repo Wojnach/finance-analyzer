@@ -150,23 +150,89 @@ class SmartFishMonitor:
     # ------------------------------------------------------------------
 
     def _load_signal_data(self) -> dict:
-        """Load latest signal data from agent_summary_compact."""
+        """Load ALL available signal data from both loops.
+
+        Sources:
+        - agent_summary_compact.json: 30-signal consensus, MC, focus probs, regime
+        - agent_summary.json: price levels (fib, pivot, keltner), forecast signals
+        - metals_signal_log.jsonl: metals loop per-check signals + LLM predictions
+        - forecast_predictions.jsonl: Chronos/Kronos latest predictions
+        """
+        # --- Main loop data (agent_summary_compact) ---
         summary = load_json(SUMMARY_PATH) or {}
         signals = (summary.get("signals") or {}).get(self.ticker, {})
         focus = (summary.get("focus_probabilities") or {}).get(self.ticker, {})
         mc = (summary.get("monte_carlo") or {}).get(self.ticker, {})
-        return {
+        forecast = (summary.get("forecast_signals") or {}).get(self.ticker, {})
+        extra = signals.get("extra") or {}
+
+        result = {
+            # Core signals
             "rsi": _safe_float(signals.get("rsi")),
             "action": signals.get("action", "HOLD"),
             "regime": signals.get("regime", ""),
             "confidence": _safe_float(signals.get("confidence")),
-            "buy_count": (signals.get("extra") or {}).get("_buy_count", 0),
-            "sell_count": (signals.get("extra") or {}).get("_sell_count", 0),
+            "w_confidence": _safe_float(signals.get("weighted_confidence",
+                                                     signals.get("w_confidence"))),
+            "buy_count": extra.get("_buy_count", 0),
+            "sell_count": extra.get("_sell_count", 0),
+            "voters": extra.get("_voters", 0),
+            "vote_detail": extra.get("_vote_detail", ""),
+            "confluence": _safe_float(extra.get("_confluence_score")),
+            # Directional probabilities
             "focus_3h": focus.get("3h", {}),
             "focus_1d": focus.get("1d", {}),
+            "focus_3d": focus.get("3d", {}),
+            # Monte Carlo
             "mc_return_1d": _safe_float((mc.get("expected_return_1d") or {}).get("mean_pct")),
             "mc_p_up": _safe_float(mc.get("p_up"), 0.5),
+            "mc_bands_1d": mc.get("price_bands_1d", {}),
+            "mc_bands_3d": mc.get("price_bands_3d", {}),
+            # Forecast models
+            "chronos_1h_pct": _safe_float(forecast.get("chronos_1h_pct")),
+            "chronos_24h_pct": _safe_float(forecast.get("chronos_24h_pct")),
         }
+
+        # --- Full agent_summary: price levels ---
+        full_summary = load_json(BASE_DIR / "data" / "agent_summary.json") or {}
+        price_levels = (full_summary.get("price_levels") or {}).get(self.ticker, {})
+        if price_levels:
+            result["fib_382"] = _safe_float(price_levels.get("fib_382"))
+            result["fib_50"] = _safe_float(price_levels.get("fib_5"))
+            result["fib_618"] = _safe_float(price_levels.get("fib_618"))
+            result["pivot_pp"] = _safe_float(price_levels.get("pivot_pp"))
+            result["pivot_s1"] = _safe_float(price_levels.get("pivot_s1"))
+            result["pivot_r1"] = _safe_float(price_levels.get("pivot_r1"))
+            result["keltner_upper"] = _safe_float(price_levels.get("keltner_upper"))
+            result["keltner_lower"] = _safe_float(price_levels.get("keltner_lower"))
+
+        # --- Metals loop: LLM predictions ---
+        try:
+            metals_log = BASE_DIR / "data" / "metals_signal_log.jsonl"
+            lines = metals_log.read_text().strip().split("\n")
+            if lines:
+                last_metals = json.loads(lines[-1])
+                llm = (last_metals.get("llm") or {}).get(self.ticker, {})
+                if llm:
+                    result["ministral_action"] = llm.get("ministral", "HOLD")
+                    result["ministral_conf"] = _safe_float(llm.get("ministral_conf"))
+                    result["chronos_1h_dir"] = llm.get("chronos_1h", "flat")
+                    result["chronos_3h_dir"] = llm.get("chronos_3h", "flat")
+                    result["chronos_1h_move"] = _safe_float(llm.get("chronos_1h_pct_move"))
+                    result["chronos_3h_move"] = _safe_float(llm.get("chronos_3h_pct_move"))
+                    result["llm_consensus"] = llm.get("consensus_action", "HOLD")
+
+                # Also grab metals loop signal
+                metals_sig = (last_metals.get("signals") or {}).get(self.ticker, {})
+                if metals_sig:
+                    result["metals_action"] = metals_sig.get("action", "HOLD")
+                    result["metals_rsi"] = _safe_float(metals_sig.get("rsi"))
+                    result["metals_buy"] = metals_sig.get("buy_count", 0)
+                    result["metals_sell"] = metals_sig.get("sell_count", 0)
+        except Exception:
+            pass
+
+        return result
 
     def _compute_z_score(self) -> float | None:
         """Compute current z-score for mean reversion tracking."""
@@ -355,20 +421,68 @@ class SmartFishMonitor:
             action = signal_data.get("action", "?")
             buy_c = signal_data.get("buy_count", 0)
             sell_c = signal_data.get("sell_count", 0)
+            w_conf = signal_data.get("w_confidence", 0)
             lines.append(
-                f"  Signals: {action} ({buy_c}B/{sell_c}S) | RSI {rsi:.1f} | Regime: {regime}"
+                f"  Main loop: {action} ({buy_c}B/{sell_c}S) wConf={w_conf:.0%} | "
+                f"RSI {rsi:.1f} | Regime: {regime}"
             )
 
-            focus_3h = signal_data.get("focus_3h", {})
-            focus_1d = signal_data.get("focus_1d", {})
-            if focus_3h:
-                dir_3h = focus_3h.get("direction", "?")
-                prob_3h = _safe_float(focus_3h.get("probability"), 0.5)
-                lines.append(f"  Focus 3h: {dir_3h} {prob_3h:.0%}", )
-            if focus_1d:
-                dir_1d = focus_1d.get("direction", "?")
-                prob_1d = _safe_float(focus_1d.get("probability"), 0.5)
-                lines[-1] += f" | Focus 1d: {dir_1d} {prob_1d:.0%}"
+            # Metals loop signals (independent computation)
+            metals_action = signal_data.get("metals_action")
+            if metals_action:
+                m_buy = signal_data.get("metals_buy", 0)
+                m_sell = signal_data.get("metals_sell", 0)
+                m_rsi = signal_data.get("metals_rsi", 0)
+                lines.append(
+                    f"  Metals loop: {metals_action} ({m_buy}B/{m_sell}S) | RSI {m_rsi:.1f}"
+                )
+
+            # Focus probabilities (all horizons)
+            focus_parts = []
+            for h_name, h_key in [("3h", "focus_3h"), ("1d", "focus_1d"), ("3d", "focus_3d")]:
+                fd = signal_data.get(h_key, {})
+                if fd:
+                    dir_ = fd.get("direction", "?")
+                    prob = _safe_float(fd.get("probability"), 0.5)
+                    focus_parts.append(f"{h_name}:{dir_} {prob:.0%}")
+            if focus_parts:
+                lines.append(f"  Focus: {' | '.join(focus_parts)}")
+
+            # Monte Carlo
+            mc_p = signal_data.get("mc_p_up", 0.5)
+            mc_ret = signal_data.get("mc_return_1d", 0)
+            mc_1d = signal_data.get("mc_bands_1d", {})
+            if mc_1d:
+                lines.append(
+                    f"  MC: P(up)={mc_p:.0%} exp={mc_ret:+.2f}% | "
+                    f"1d: ${mc_1d.get('5',0):.2f}-${mc_1d.get('95',0):.2f}"
+                )
+
+            # LLM predictions (Chronos + Ministral from metals loop)
+            llm_parts = []
+            chr_1h = signal_data.get("chronos_1h_dir")
+            chr_3h = signal_data.get("chronos_3h_dir")
+            chr_1h_move = signal_data.get("chronos_1h_move", 0)
+            chr_3h_move = signal_data.get("chronos_3h_move", 0)
+            if chr_1h and chr_1h != "flat":
+                llm_parts.append(f"Chr1h:{chr_1h}({chr_1h_move:+.2f}%)")
+            if chr_3h and chr_3h != "flat":
+                llm_parts.append(f"Chr3h:{chr_3h}({chr_3h_move:+.2f}%)")
+            ministral = signal_data.get("ministral_action")
+            if ministral and ministral != "HOLD":
+                llm_parts.append(f"Ministral:{ministral}")
+            if llm_parts:
+                lines.append(f"  LLM: {' | '.join(llm_parts)}")
+
+            # Key price levels
+            fib_382 = signal_data.get("fib_382", 0)
+            pivot_s1 = signal_data.get("pivot_s1", 0)
+            pivot_r1 = signal_data.get("pivot_r1", 0)
+            if fib_382 > 0:
+                lines.append(
+                    f"  Levels: S1=${pivot_s1:.2f} | PP=${signal_data.get('pivot_pp',0):.2f} | "
+                    f"R1=${pivot_r1:.2f} | Fib38=${fib_382:.2f}"
+                )
 
         # Cross-asset status
         if self.cross_asset_prices:
