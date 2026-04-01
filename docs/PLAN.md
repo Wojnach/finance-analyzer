@@ -1,49 +1,54 @@
-# Session Plan: CLAUDE.md Restructure + Project Optimization
+# Plan: Quiet Hours LLM Throttling
 
-Updated: 2026-03-23
-Worktree: `bridge-cse_0132tqmY1gBYsC1KbybtNE55`
+## Problem
+After EU+US market close, `metals_loop.py` continues spawning Ministral-8B (every 5min)
+and Chronos (every 60s) as subprocesses. Each subprocess cold-starts Python, imports
+heavy libraries, and causes CPU spikes that spin up the CPU fan. With zero active positions,
+the signals are all HOLD and nobody acts on them.
 
-## Goal
+## Root Cause
+`_llm_worker()` in `data/metals_llm.py:638-679` uses fixed intervals (`LLM_INTERVAL=300`,
+`CHRONOS_INTERVAL=60`) with no awareness of market hours.
 
-Make every new Claude Code session immediately productive by:
-1. Restructuring CLAUDE.md from Layer-2-only playbook → project-wide orientation
-2. Splitting trading playbook into dedicated doc for Layer 2
-3. Cleaning up overloaded MEMORY.md (208+ lines, truncated at 200)
-4. Auditing and trimming MCP plugins
-5. Verifying nothing breaks
+## Solution: Phase A — Time-aware interval throttling
 
-## What Could Break
+### What
+Add a `_is_quiet_hours()` function to `metals_llm.py` that returns True when outside
+EU/US market hours (22:00-08:15 CET, weekday; all day weekends). When quiet, use
+extended intervals:
+- Ministral: 300s → 1800s (30 min)
+- Chronos: 60s → 300s (5 min)
 
-- Layer 2 agent may not find the trading playbook if prompt wording is wrong
-- Tests in `test_agent_completion.py` or similar may assert on old prompt text
-- MEMORY.md cleanup could remove info that future sessions need
+### Where
+Single file change: `data/metals_llm.py`
+- Add `_is_quiet_hours()` helper (uses `cet_hour()` logic, same as `is_market_hours()`)
+- Add `LLM_INTERVAL_QUIET` and `CHRONOS_INTERVAL_QUIET` constants
+- Modify `_llm_worker()` to pick interval based on `_is_quiet_hours()`
+- Log when entering/leaving quiet mode
 
-## Execution Order
+### What won't break
+- Prediction accuracy tracking: unaffected — each sample is independent
+- Accuracy stats: fewer samples overnight, but still valid
+- Consensus computation: same logic, just runs less often
+- Signal data format: unchanged
+- metals_loop.py: no changes needed, reads LLM signals via `get_llm_signals()`
 
-### Batch 1: CLAUDE.md Split (DONE)
-- [x] Deep explore: 3 parallel agents (project structure, plugins, memory files)
-- [x] New CLAUDE.md (267 lines): project overview, architecture, modules, signals, instruments, CLI, testing, environment, critical rules
-- [x] New docs/TRADING_PLAYBOOK.md (385 lines): full Layer 2 trading instructions
-- [x] Updated agent_invocation.py: all 3 tier prompts reference playbook
-- [x] Updated pf-agent.bat: prompt references playbook
-- [x] Committed: f66cc6a, merged to main, pushed
+### Tests
+- Existing tests in `tests/test_unified_loop.py` — verify they pass
+- No new tests needed (interval change is config-level, not logic-level)
 
-### Batch 2: Test Verification
-- [ ] Run tests related to agent_invocation.py
-- [ ] Run tests related to trigger/prompt building
-- [ ] Verify no test asserts on old "CLAUDE.md instructions" text
+## Solution: Phase B — Persistent LLM server (attempt, revertible)
 
-### Batch 3: MEMORY.md Cleanup
-- [ ] Audit all 18 memory files for staleness
-- [ ] Remove info now covered by new CLAUDE.md (architecture, modules, environment)
-- [ ] Consolidate duplicated entries
-- [ ] Get MEMORY.md under 200-line limit (currently 208+, truncated)
+### What
+Convert Ministral and Chronos from `subprocess.run()` per-call to a persistent
+HTTP server or stdin/stdout daemon that stays loaded. Eliminates cold-start CPU spikes.
 
-### Batch 4: Plugin Cleanup
-- [x] Disabled frontend-design plugin in settings.json
-- [ ] Document cloud plugin recommendations for user to action in claude.ai UI
+### Risk
+Has failed before in previous attempts. Will implement on a worktree branch and
+only merge if it works. Ready to revert.
 
-### Batch 5: Verify & Ship
-- [ ] Full test suite (parallel)
-- [ ] Review git log
-- [ ] Update SESSION_PROGRESS.md
+### Approach
+TBD after Phase A is verified.
+
+---
+*Written: 2026-04-01*
