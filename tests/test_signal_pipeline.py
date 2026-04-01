@@ -123,12 +123,12 @@ class TestVoteCountIntegrity:
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_metal_vote_counts(self, _mock):
-        """For metals, total applicable = 26 (7 core + 19 enhanced, incl. orderbook_flow + metals_cross_asset)."""
+        """For metals, total applicable = 28 (7 core + 21 enhanced, incl. orderbook_flow + metals_cross_asset)."""
         ind = make_indicators(close=2000.0)
         df = make_ohlcv_df(n=250, close_base=2000.0)
         _, _, extra = generate_signal(ind, ticker="XAU-USD", df=df)
 
-        assert extra["_total_applicable"] == 26
+        assert extra["_total_applicable"] == 28
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_all_stock_symbols_have_24_applicable(self, _mock):

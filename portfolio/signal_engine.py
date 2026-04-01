@@ -1,4 +1,4 @@
-"""Signal generation engine — 30-signal voting system with weighted consensus."""
+"""Signal generation engine — 32-signal voting system with weighted consensus."""
 
 import logging
 import threading
@@ -43,10 +43,10 @@ _RECENCY_DIVERGENCE_THRESHOLD = 0.15  # 15% absolute divergence triggers fast bl
 _RECENCY_WEIGHT_NORMAL = 0.7
 _RECENCY_WEIGHT_FAST = 0.9
 
-# --- Signal (full 30-signal for "Now" timeframe) ---
+# --- Signal (full 32-signal for "Now" timeframe) ---
 
-MIN_VOTERS_CRYPTO = 3  # crypto has 27 signals (8 core + 19 enhanced; custom_lora, ml, funding disabled) — need 3
-MIN_VOTERS_STOCK = 3  # stocks have 25 signals (7 core + 18 enhanced) — need 3 active voters
+MIN_VOTERS_CRYPTO = 3  # crypto has 30 signals (8 core + 22 enhanced; ml disabled) — need 3
+MIN_VOTERS_STOCK = 3  # stocks have 24-26 signals (7 core + 17-19 enhanced, GPU-dependent) — need 3
 
 # Core signals that must have at least 1 active voter for non-HOLD consensus.
 # Enhanced signals can strengthen/weaken but never create consensus alone.
@@ -365,7 +365,9 @@ def _get_horizon_weights(horizon: str | None) -> dict[str, float]:
 
 
 # Signals that only apply to specific asset classes
-_CRYPTO_ONLY_SIGNALS = {"futures_flow", "funding"}
+_CRYPTO_ONLY_SIGNALS = {"futures_flow", "funding", "crypto_macro"}
+_METALS_ONLY_SIGNALS = {"metals_cross_asset"}
+_NON_STOCK_SIGNALS = {"orderbook_flow"}  # metals + crypto only
 _CORE_SIGNAL_SET = {"rsi", "macd", "ema", "bb", "fear_greed", "sentiment", "ministral", "qwen3", "ml", "funding", "volume", "claude_fundamental"}
 
 
@@ -376,12 +378,20 @@ def _compute_applicable_count(ticker: str, skip_gpu: bool = False) -> int:
     and GPU signals skipped outside market hours.
     """
     is_crypto = ticker in CRYPTO_SYMBOLS
+    is_metal = ticker in METALS_SYMBOLS
+    is_stock = ticker in STOCK_SYMBOLS
     count = 0
     for sig in SIGNAL_NAMES:
         if sig in DISABLED_SIGNALS:
             continue
-        # futures_flow only applies to crypto
+        # crypto-only signals (futures_flow, funding, crypto_macro)
         if sig in _CRYPTO_ONLY_SIGNALS and not is_crypto:
+            continue
+        # metals-only signals (metals_cross_asset)
+        if sig in _METALS_ONLY_SIGNALS and not is_metal:
+            continue
+        # non-stock signals (orderbook_flow — metals + crypto only)
+        if sig in _NON_STOCK_SIGNALS and is_stock:
             continue
         # ministral (CryptoTrader-LM) only runs for crypto
         if sig == "ministral" and not is_crypto:

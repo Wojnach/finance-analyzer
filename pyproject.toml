@@ -1,7 +1,7 @@
 [project]
 name = "portfolio-intelligence"
 version = "1.0.0"
-description = "Two-layer autonomous trading system with 30-signal analysis"
+description = "Two-layer autonomous trading system with 32-signal analysis"
 requires-python = ">=3.11"
 dependencies = [
     "pandas",

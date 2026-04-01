@@ -53,7 +53,7 @@ os.chdir(BASE_DIR)
 import requests
 from playwright.sync_api import sync_playwright
 
-from portfolio.file_utils import atomic_write_json
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json
 
 try:
     from portfolio.notification_text import (
@@ -1983,8 +1983,7 @@ def emergency_sell(page, key, pos, bid):
             "pnl_pct": round(pnl_pct(bid, pos["entry"]), 2),
             "result": result,
         }
-        with open("data/metals_trades.jsonl", "a", encoding="utf-8") as f:
-            f.write(json.dumps(trade, ensure_ascii=False) + "\n")
+        atomic_append_jsonl("data/metals_trades.jsonl", trade)
 
         # Parse API response to determine outcome
         body_str = result.get("body", "")
@@ -2366,8 +2365,7 @@ def process_trade_queue(page):
                 "result": result,
             }
             try:
-                with open("data/metals_trades.jsonl", "a", encoding="utf-8") as f:
-                    f.write(json.dumps(trade_entry, ensure_ascii=False) + "\n")
+                atomic_append_jsonl("data/metals_trades.jsonl", trade_entry)
             except OSError as e:
                 log(f"  Trade log write error: {e}")
 
@@ -2734,8 +2732,7 @@ def check_stop_order_fills(page, stop_state, positions):
                 "entry": pos["entry"],
                 "pnl_pct": round(pnl_pct(state["stop_base"], pos["entry"]), 2),
             }
-            with open("data/metals_trades.jsonl", "a", encoding="utf-8") as f:
-                f.write(json.dumps(trade, ensure_ascii=False) + "\n")
+            atomic_append_jsonl("data/metals_trades.jsonl", trade)
 
             if remaining <= 0:
                 pos["active"] = False
@@ -3022,8 +3019,7 @@ def check_spike_fills(page, spike_state, positions):
                         "pnl_pct": pnl,
                         "reason": target.get("reason", "US open spike capture"),
                     }
-                    with open("data/metals_trades.jsonl", "a", encoding="utf-8") as f:
-                        f.write(json.dumps(trade, ensure_ascii=False) + "\n")
+                    atomic_append_jsonl("data/metals_trades.jsonl", trade)
 
         except Exception as e:
             log(f"Spike check error {key}: {e}")
@@ -3044,8 +3040,7 @@ def log_invocation(tier, model, trigger, check_num, invoke_num, elapsed_s=None, 
         "return_code": rc,
     }
     try:
-        with open(INVOCATION_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        atomic_append_jsonl(INVOCATION_LOG, entry)
     except Exception:
         pass
 
@@ -3737,8 +3732,7 @@ def _autonomous_decision(trigger_reasons, blocked_tier):
         "thesis_status": thesis_status,
     }
     try:
-        with open("data/metals_decisions.jsonl", "a", encoding="utf-8") as f:
-            f.write(json.dumps(decision, ensure_ascii=False) + "\n")
+        atomic_append_jsonl("data/metals_decisions.jsonl", decision)
     except Exception as e:
         log(f"Decision log error: {e}")
 
