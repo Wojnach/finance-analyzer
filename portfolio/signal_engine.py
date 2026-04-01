@@ -365,7 +365,9 @@ def _get_horizon_weights(horizon: str | None) -> dict[str, float]:
 
 
 # Signals that only apply to specific asset classes
-_CRYPTO_ONLY_SIGNALS = {"futures_flow", "funding"}
+_CRYPTO_ONLY_SIGNALS = {"futures_flow", "funding", "crypto_macro"}
+_METALS_ONLY_SIGNALS = {"metals_cross_asset"}
+_NON_STOCK_SIGNALS = {"orderbook_flow"}  # metals + crypto only
 _CORE_SIGNAL_SET = {"rsi", "macd", "ema", "bb", "fear_greed", "sentiment", "ministral", "qwen3", "ml", "funding", "volume", "claude_fundamental"}
 
 
@@ -376,12 +378,20 @@ def _compute_applicable_count(ticker: str, skip_gpu: bool = False) -> int:
     and GPU signals skipped outside market hours.
     """
     is_crypto = ticker in CRYPTO_SYMBOLS
+    is_metal = ticker in METALS_SYMBOLS
+    is_stock = ticker in STOCK_SYMBOLS
     count = 0
     for sig in SIGNAL_NAMES:
         if sig in DISABLED_SIGNALS:
             continue
-        # futures_flow only applies to crypto
+        # crypto-only signals (futures_flow, funding, crypto_macro)
         if sig in _CRYPTO_ONLY_SIGNALS and not is_crypto:
+            continue
+        # metals-only signals (metals_cross_asset)
+        if sig in _METALS_ONLY_SIGNALS and not is_metal:
+            continue
+        # non-stock signals (orderbook_flow — metals + crypto only)
+        if sig in _NON_STOCK_SIGNALS and is_stock:
             continue
         # ministral (CryptoTrader-LM) only runs for crypto
         if sig == "ministral" and not is_crypto:
