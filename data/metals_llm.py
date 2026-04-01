@@ -311,11 +311,41 @@ def _fetch_fapi_klines(symbol, interval="1h", limit=200, ticker=None):
         return None
 
 
-def _run_ministral_metals(context):
-    """Run Ministral-8B with metals-adapted prompt.
+def _build_ministral8_prompt(context):
+    """Build prompt for Ministral-8B (metals loop format)."""
+    return f"""[INST]You are an expert cryptocurrency trader. Based on the following market data, provide a single trading decision: BUY, SELL, or HOLD.
 
-    Uses persistent server (--server mode) when available. Falls back to
-    subprocess.run per-call if server fails.
+Market Data:
+- Asset: {context.get('ticker', 'XAG-USD')}
+- Current Price: ${context.get('price_usd', 0):,.2f}
+- 24h Change: {context.get('change_24h', 'N/A')}
+
+Technical Indicators (1-hour candles):
+- RSI(14): {context.get('rsi', 'N/A')}
+- MACD Histogram: {context.get('macd_hist', 'N/A')}
+- EMA(9) vs EMA(21): {'Bullish (9 > 21)' if context.get('ema_bullish') else 'Bearish (9 < 21)'} (gap: {context.get('ema_gap_pct', 'N/A')}%)
+- Bollinger Bands: Price is {context.get('bb_position', 'N/A')}
+
+Market Sentiment:
+- Fear & Greed Index: {context.get('fear_greed', 'N/A')}/100 ({context.get('fear_greed_class', '')})
+- News Sentiment: {context.get('news_sentiment', 'N/A')} (confidence: {context.get('sentiment_confidence', 'N/A')})
+
+Multi-timeframe Analysis:
+{context.get('timeframe_summary', 'N/A')}
+
+Recent Headlines:
+{context.get('headlines', 'N/A')}
+
+Respond with EXACTLY one of: BUY, SELL, or HOLD.
+Then give a one-sentence reason.
+Format: DECISION: [BUY/SELL/HOLD] - [reason][/INST]"""
+
+
+def _run_ministral_metals(context):
+    """Run Ministral-8B with metals-adapted prompt via shared llama-server.
+
+    Uses the unified llama-server (HTTP) with model swapping.
+    Falls back to subprocess.run per-call if server fails.
 
     Returns {"action": "BUY/SELL/HOLD", "reasoning": "...", "confidence": 0.0-1.0}
     """
@@ -337,23 +367,49 @@ def _run_ministral_metals(context):
             "headlines": context.get("headlines", "N/A"),
         }
 
-        # Try persistent server first
+        # Try shared llama-server first
+        try:
+            from portfolio.llama_server import query_llama_server
+            prompt = _build_ministral8_prompt(metals_context)
+            text = query_llama_server("ministral8_lora", prompt,
+                                      n_predict=100, temperature=0.1,
+                                      stop=["[INST]", "\n\n"])
+            if text is not None:
+                decision = "HOLD"
+                for word in ["BUY", "SELL", "HOLD"]:
+                    if word in text.upper():
+                        decision = word
+                        break
+                return {
+                    "action": decision,
+                    "reasoning": text[:200],
+                    "confidence": 0.6,
+                }
+        except ImportError:
+            pass  # portfolio not on path, fall through
+
+        # Try stdin/stdout persistent server (legacy)
         result = _query_ministral_server(metals_context)
+        if result is not None:
+            return {
+                "action": result.get("action", "HOLD"),
+                "reasoning": result.get("reasoning", "")[:200],
+                "confidence": 0.6,
+            }
 
         # Fallback: one-shot subprocess (cold start)
-        if result is None:
-            _log("Ministral server unavailable, falling back to subprocess")
-            proc = subprocess.run(
-                [MINISTRAL_PYTHON, MINISTRAL_SCRIPT],
-                input=json.dumps(metals_context),
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            if proc.returncode != 0:
-                _log(f"Ministral fallback failed: {proc.stderr[:200]}")
-                return None
-            result = json.loads(proc.stdout.strip())
+        _log("All Ministral servers unavailable, falling back to subprocess")
+        proc = subprocess.run(
+            [MINISTRAL_PYTHON, MINISTRAL_SCRIPT],
+            input=json.dumps(metals_context),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if proc.returncode != 0:
+            _log(f"Ministral fallback failed: {proc.stderr[:200]}")
+            return None
+        result = json.loads(proc.stdout.strip())
 
         return {
             "action": result.get("action", "HOLD"),
