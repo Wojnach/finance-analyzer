@@ -126,6 +126,82 @@ class GoldLeadDetector:
 
 
 # ---------------------------------------------------------------------------
+# Temporal Pattern — recurring time-of-day edges (Headlands-inspired)
+# ---------------------------------------------------------------------------
+
+class TemporalPatternDetector:
+    """Detect recurring time-of-day patterns from historical scan."""
+
+    def __init__(self):
+        self.patterns = {}  # {(dow, hour): {'direction': 'BULL', 'probability': 75, ...}}
+        try:
+            with open('data/temporal_patterns.json') as f:
+                data = json.load(f)
+            for p in data.get('patterns', []):
+                key = (p['day'], p['hour_cet'])
+                self.patterns[key] = p
+            log_msg(f'Temporal: loaded {len(self.patterns)} patterns')
+        except Exception:
+            log_msg('Temporal: no patterns file')
+
+    def detect(self, min_probability=68):
+        """Check if current (day, hour) has a pattern. Returns (direction, prob) or (None, 0)."""
+        dt = datetime.datetime.now()
+        dow = dt.weekday()  # 0=Mon
+        hour = dt.hour
+        key = (dow, hour)
+        p = self.patterns.get(key)
+        if p and p['probability'] >= min_probability:
+            return p['direction'], p['probability']
+        return None, 0
+
+    def status(self):
+        dt = datetime.datetime.now()
+        key = (dt.weekday(), dt.hour)
+        p = self.patterns.get(key)
+        if p:
+            return f'T:{p["day_name"]}{p["hour_cet"]:02d}={p["direction"][0]}{p["probability"]:.0f}%'
+        return ''
+
+
+# ---------------------------------------------------------------------------
+# Vol-Targeting — scale position size by current volatility
+# ---------------------------------------------------------------------------
+
+def compute_vol_scalar():
+    """Compute vol-targeting position size scalar.
+
+    Returns a float 0.25-2.0:
+    - High vol (ATR >> median) → smaller positions (0.25-0.5)
+    - Normal vol → 1.0
+    - Low vol → larger positions (1.5-2.0)
+    """
+    try:
+        import yfinance as yf
+        import numpy as np
+        si = yf.download('SI=F', period='6mo', interval='1d', progress=False)
+        if si.empty or len(si) < 30:
+            return 1.0
+        close = si['Close'].values.flatten()
+        high = si['High'].values.flatten()
+        low = si['Low'].values.flatten()
+        # ATR 14-day
+        tr = [max(high[i] - low[i], abs(high[i] - close[i-1]), abs(low[i] - close[i-1]))
+              for i in range(1, len(close))]
+        atr_14 = np.mean(tr[-14:])
+        atr_median = np.median(tr[-126:])  # 6-month median
+        if atr_median == 0:
+            return 1.0
+        ratio = atr_14 / atr_median
+        # Scale: ratio=1 → scalar=1, ratio=2 → scalar=0.5, ratio=0.5 → scalar=1.5
+        scalar = 1.0 / max(ratio, 0.5)
+        scalar = max(0.25, min(2.0, scalar))
+        return round(scalar, 2)
+    except Exception:
+        return 1.0
+
+
+# ---------------------------------------------------------------------------
 # ORB — Opening Range Breakout
 # ---------------------------------------------------------------------------
 
@@ -296,8 +372,8 @@ def sell_position(active, reason):
         log_msg(f'Sell error: {e}')
     return 0
 
-def buy_position(direction, price):
-    """Enter a new position. Returns active dict or None."""
+def buy_position(direction, price, size_scalar=1.0):
+    """Enter a new position with vol-targeted sizing. Returns active dict or None."""
     try:
         from portfolio.avanza_session import place_buy_order, get_quote, get_buying_power
         ob = '1650161' if direction == 'LONG' else '2286417'
@@ -306,12 +382,14 @@ def buy_position(direction, price):
         bp = float(get_buying_power().get('buying_power', 0))
         if ask <= 0 or bp < 100:
             return None
-        vol = int(min(bp * 0.95, 1500) / ask)
+        budget = min(bp * 0.95, 1500) * size_scalar
+        vol = int(budget / ask)
         if vol < 5:
             return None
         r = place_buy_order(ob, price=ask, volume=vol)
         nm = 'BULL X5' if direction == 'LONG' else 'BEAR X5'
-        log_msg(f'BUY: {vol}u {nm}@{ask} [{r.get("orderRequestStatus", "?")}]')
+        sz = f' (vol-scaled {size_scalar:.1f}x)' if size_scalar != 1.0 else ''
+        log_msg(f'BUY: {vol}u {nm}@{ask}{sz} [{r.get("orderRequestStatus", "?")}]')
         return {'ob': ob, 'd': direction, 'v': vol, 'c': ask, 'e': price, 't': time.time()}
     except Exception as e:
         log_msg(f'Buy error: {e}')
@@ -417,6 +495,9 @@ def main():
     # Tactic modules
     gold_lead = GoldLeadDetector()
     orb = ORBTracker()
+    temporal = TemporalPatternDetector()
+    vol_scalar = compute_vol_scalar()
+    log_msg(f'Vol scalar: {vol_scalar:.2f}x (1.0=normal, <1=high vol, >1=low vol)')
     # Try to load ORB range from orb_predictor
     try:
         from portfolio.orb_predictor import fetch_klines, calculate_morning_range
@@ -616,7 +697,7 @@ def main():
                         be = sg['a'] == 'SELL' and sg['ma'] == 'SELL' and m2b
                         if now > cd and (bu or be):
                             dr = 'LONG' if bu else 'SHORT'
-                            active = buy_position(dr, p)
+                            active = buy_position(dr, p, vol_scalar)
                             if active:
                                 md = 0
                                 fl = f' >>> MOMENTUM {dr}'
@@ -626,13 +707,13 @@ def main():
                         if not past_cancel and straddle_floor > 0 and straddle_ceil > 0:
                             if p <= straddle_floor and not straddle_bull_filled:
                                 log_msg(f'!! FLOOR HIT ${p:.2f} <= ${straddle_floor:.2f}')
-                                active = buy_position('LONG', p)
+                                active = buy_position('LONG', p, vol_scalar)
                                 if active:
                                     straddle_bull_filled = True
                                     fl = f' >>> STRADDLE LONG (floor)'
                             elif p >= straddle_ceil and not straddle_bear_filled:
                                 log_msg(f'!! CEILING HIT ${p:.2f} >= ${straddle_ceil:.2f}')
-                                active = buy_position('SHORT', p)
+                                active = buy_position('SHORT', p, vol_scalar)
                                 if active:
                                     straddle_bear_filled = True
                                     fl = f' >>> STRADDLE SHORT (ceil)'
@@ -643,7 +724,7 @@ def main():
                             # Time gating: stronger signal needed in dead zone
                             if not is_dead_zone or gl_conf >= 0.7:
                                 log_msg(f'!! GOLD LEAD: {gl_dir} (conf {gl_conf:.0%}, {gold_lead.status()})')
-                                active = buy_position(gl_dir, p)
+                                active = buy_position(gl_dir, p, vol_scalar)
                                 if active:
                                     fl = f' >>> GOLD-LEAD {gl_dir}'
 
@@ -652,9 +733,33 @@ def main():
                         orb_dir, orb_tp, orb_sl = orb.detect(p)
                         if orb_dir:
                             log_msg(f'!! ORB BREAKOUT: {orb_dir} (TP=${orb_tp:.2f} SL=${orb_sl:.2f})')
-                            active = buy_position(orb_dir, p)
+                            active = buy_position(orb_dir, p, vol_scalar)
                             if active:
                                 fl = f' >>> ORB {orb_dir}'
+
+                    # --- Temporal pattern entry (fires in ANY mode) ---
+                    if not active and now > cd:
+                        tp_dir, tp_prob = temporal.detect(min_probability=68)
+                        if tp_dir:
+                            log_msg(f'!! TEMPORAL: {tp_dir} {tp_prob:.0f}% ({temporal.status()})')
+                            active = buy_position(tp_dir if tp_dir == 'BULL' else 'SHORT' if tp_dir == 'BEAR' else tp_dir, p, vol_scalar)
+                            if active:
+                                fl = f' >>> TEMPORAL {tp_dir}'
+
+                    # --- Sentiment velocity entry (fires in ANY mode) ---
+                    if not active and now > cd and sg.get('news_spike'):
+                        # Headlines spiking > 2x baseline
+                        sentiment = sg.get('headline_sentiment', '')
+                        if sentiment == 'negative':
+                            log_msg(f'!! NEWS VELOCITY SPIKE: {sg.get("news_articles",0)} articles, negative -> BEAR')
+                            active = buy_position('SHORT', p, vol_scalar)
+                            if active:
+                                fl = f' >>> NEWS-VELOCITY SHORT'
+                        elif sentiment == 'positive':
+                            log_msg(f'!! NEWS VELOCITY SPIKE: {sg.get("news_articles",0)} articles, positive -> BULL')
+                            active = buy_position('LONG', p, vol_scalar)
+                            if active:
+                                fl = f' >>> NEWS-VELOCITY LONG'
 
                     # Show warnings when scanning too
                     scan_warns = []
@@ -678,8 +783,10 @@ def main():
                         straddle_str = f' F=${straddle_floor:.2f}({dist_f:.1f}%) C=${straddle_ceil:.2f}({dist_c:.1f}%)'
                     gl_s = f' {gold_lead.status()}' if gold_lead.status() else ''
                     orb_s = f' {orb.status()}' if orb.range_formed else ''
+                    tp_s = f' {temporal.status()}' if temporal.status() else ''
+                    vs = f' vol:{vol_scalar:.1f}x' if vol_scalar != 1.0 else ''
                     tz = ' [DEAD-ZONE]' if is_dead_zone else (' [US-SESSION]' if is_us_session else '')
-                    log_msg(f'${p:.2f} | {sg["a"]} {sg["b"]}B/{sg["s"]}S RSI={sg["rsi"]:.0f} MC={sg["mc"]:.0%} M:{sg["ma"]} | {sg["f1d"]}{sw}{fl}{mode_str}{straddle_str}{gl_s}{orb_s}{tz}')
+                    log_msg(f'${p:.2f} | {sg["a"]} {sg["b"]}B/{sg["s"]}S RSI={sg["rsi"]:.0f} MC={sg["mc"]:.0%} M:{sg["ma"]} | {sg["f1d"]}{sw}{fl}{mode_str}{straddle_str}{gl_s}{orb_s}{tp_s}{vs}{tz}')
             else:
                 if active:
                     d = active['d']
