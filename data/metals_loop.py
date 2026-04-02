@@ -190,6 +190,15 @@ except ImportError as e:
     print(f"[WARN] crypto_data import failed: {e}", flush=True)
     CRYPTO_DATA_AVAILABLE = False
 
+try:
+    from portfolio.news_keywords import score_headline
+    NEWS_KEYWORDS_AVAILABLE = True
+except ImportError:
+    NEWS_KEYWORDS_AVAILABLE = False
+
+    def score_headline(title):
+        return 1.0, []
+
 # --- CONFIG ---
 CLAUDE_ENABLED = False        # Master switch: set True to re-enable Claude invocations
 CHECK_INTERVAL = 60           # target seconds between checks
@@ -536,6 +545,8 @@ cached_warrant_catalog = {}   # warrant catalog with live prices (refreshed peri
 session_healthy = True            # tracks Avanza session health
 _last_auto_telegram = 0           # timestamp of last autonomous Telegram (for throttling)
 AUTO_TELEGRAM_COOLDOWN = 1800     # 30 min between routine autonomous messages
+_last_news_fetch_ts = 0.0         # timestamp of last metals news fetch
+NEWS_FETCH_INTERVAL = 1800        # fetch news every 30 min (1800s)
 PROB_REPORT_INTERVAL = 5          # compute probability report every N checks (~2.5 min)
 PROB_TELEGRAM_INTERVAL = 20       # send probability telegram every N checks (~10 min)
 session_alert_sent = False        # debounce: only send one alert per outage
@@ -1492,6 +1503,134 @@ def update_smart_trailing_stops(page, positions, stop_order_state, prices):
                         _update_stop_orders_for(page, key, pos, stop_order_state)
                     except Exception as e:
                         log(f"Stop order update failed for {key}: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Periodic news fetch — metals headlines for fish monitor context
+# ---------------------------------------------------------------------------
+
+# Severity keywords to scan for in headlines (subset of news_keywords.py)
+_METALS_SEVERITY_KEYWORDS = [
+    "tariff", "tariffs", "crash", "war", "sanctions", "ban", "recession",
+    "rate hike", "rate cut", "inflation", "collapse", "default", "nuclear",
+    "invasion", "trade war", "debt ceiling",
+]
+
+
+def _fetch_metals_news():
+    """Fetch silver/gold news headlines and write summary to data/metals_news_summary.json.
+
+    Sources:
+    1. CryptoCompare (via get_crypto_news) — general crypto/commodities news
+    2. NewsAPI (if key available in config) — targeted silver + gold queries
+
+    Results are merged, deduplicated, and scored for severity keywords.
+    Writes to data/metals_news_summary.json using atomic I/O.
+    """
+    global _last_news_fetch_ts
+    headlines = []
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
+
+    # Source 1: CryptoCompare news (general crypto/commodities)
+    if CRYPTO_DATA_AVAILABLE:
+        try:
+            crypto_news = get_crypto_news(limit=15)
+            for article in (crypto_news or []):
+                title = article.get("title", "")
+                if not title:
+                    continue
+                # Filter: only keep articles mentioning metals keywords
+                title_lower = title.lower()
+                is_metals = any(kw in title_lower for kw in (
+                    "gold", "silver", "precious", "metal", "bullion", "xau", "xag",
+                    "commodity", "commodities", "fed", "inflation", "tariff", "dollar",
+                    "treasury", "yields", "safe haven", "haven",
+                ))
+                if is_metals:
+                    published_ts = article.get("published_on", 0)
+                    pub_iso = (
+                        datetime.datetime.fromtimestamp(published_ts, tz=datetime.UTC).isoformat()
+                        if published_ts else now_iso
+                    )
+                    # Determine ticker affinity
+                    ticker = "XAU-USD"  # default to gold
+                    if any(kw in title_lower for kw in ("silver", "xag")):
+                        ticker = "XAG-USD"
+                    headlines.append({
+                        "title": title,
+                        "source": article.get("source", "CryptoCompare"),
+                        "ticker": ticker,
+                        "published": pub_iso,
+                    })
+        except Exception as e:
+            log(f"News fetch (CryptoCompare) error: {e}")
+
+    # Source 2: NewsAPI — targeted silver and gold queries
+    newsapi_key = config.get("newsapi_key", "") if isinstance(config, dict) else ""
+    if newsapi_key:
+        for query, ticker in [
+            ("silver AND (price OR market OR ounce OR bullion OR futures)", "XAG-USD"),
+            ("gold AND (price OR market OR ounce OR bullion OR futures)", "XAU-USD"),
+        ]:
+            try:
+                resp = requests.get(
+                    "https://newsapi.org/v2/everything",
+                    params={
+                        "q": query,
+                        "language": "en",
+                        "sortBy": "publishedAt",
+                        "pageSize": 5,
+                    },
+                    headers={"User-Agent": "Mozilla/5.0", "X-Api-Key": newsapi_key},
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    articles = resp.json().get("articles", [])
+                    for a in articles:
+                        title = a.get("title", "")
+                        if not title:
+                            continue
+                        headlines.append({
+                            "title": title,
+                            "source": a.get("source", {}).get("name", "NewsAPI"),
+                            "ticker": ticker,
+                            "published": a.get("publishedAt", now_iso),
+                        })
+            except Exception as e:
+                log(f"News fetch (NewsAPI {ticker}) error: {e}")
+
+    # Deduplicate by title (case-insensitive)
+    seen_titles = set()
+    unique_headlines = []
+    for h in headlines:
+        key = h["title"].lower().strip()
+        if key not in seen_titles:
+            seen_titles.add(key)
+            unique_headlines.append(h)
+
+    # Scan for severity keywords
+    severity_found = set()
+    for h in unique_headlines:
+        title_lower = h["title"].lower()
+        for kw in _METALS_SEVERITY_KEYWORDS:
+            if kw in title_lower:
+                severity_found.add(kw)
+        # Also use score_headline for richer detection
+        _weight, matched = score_headline(h["title"])
+        for m in matched:
+            severity_found.add(m)
+
+    summary = {
+        "timestamp": now_iso,
+        "headlines": unique_headlines[:20],  # cap at 20
+        "article_count": len(unique_headlines),
+        "severity_keywords_found": sorted(severity_found),
+    }
+
+    atomic_write_json(str(DATA_DIR / "metals_news_summary.json"), summary)
+    _last_news_fetch_ts = time.time()
+    log(f"News fetch: {len(unique_headlines)} headlines, severity={sorted(severity_found) or 'none'}")
+    return summary
 
 
 # ---------------------------------------------------------------------------
@@ -4523,6 +4662,13 @@ Positions: {pos_summary}{prob_summary}""")
                                 backfill_outcomes(und_prices)
                         except Exception as e:
                             log(f"Signal tracker backfill error: {e}")
+
+                # --- PERIODIC NEWS FETCH (every ~30 min) ---
+                if time.time() - _last_news_fetch_ts >= NEWS_FETCH_INTERVAL:
+                    try:
+                        _fetch_metals_news()
+                    except Exception as e:
+                        log(f"News fetch error (non-fatal): {e}")
 
                 _sleep_for_cycle(cycle_started, CHECK_INTERVAL, "metals loop")
 
