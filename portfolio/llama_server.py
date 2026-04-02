@@ -262,6 +262,10 @@ def query_llama_server(name, prompt, n_predict=1024, temperature=0.0,
     if cfg is None:
         return None
 
+    # BUG-165: Hold both locks for the entire model-swap + query operation.
+    # Releasing locks between swap and query allowed another thread/process to
+    # swap the model mid-query, killing the server and causing silent failures.
+    # Serialization is correct here — only one 8B model fits in VRAM at a time.
     with _thread_lock:
         fh = _acquire_file_lock(timeout=120)
         if fh is None:
@@ -269,30 +273,29 @@ def query_llama_server(name, prompt, n_predict=1024, temperature=0.0,
         try:
             if not _ensure_model(name):
                 return None
+
+            body = {
+                "prompt": prompt,
+                "n_predict": n_predict,
+                "temperature": temperature,
+                "top_p": top_p,
+            }
+            if stop:
+                body["stop"] = stop
+            r = _requests.post(
+                f"http://127.0.0.1:{_PORT}/completion",
+                json=body,
+                timeout=240,
+            )
+            if r.status_code == 200:
+                return r.json().get("content", "").strip()
+            logger.warning("llama-server %s returned %d", name, r.status_code)
+            return None
+        except Exception as e:
+            logger.warning("llama-server %s query failed: %s", name, e)
+            return None
         finally:
             _release_file_lock(fh)
-
-    try:
-        body = {
-            "prompt": prompt,
-            "n_predict": n_predict,
-            "temperature": temperature,
-            "top_p": top_p,
-        }
-        if stop:
-            body["stop"] = stop
-        r = _requests.post(
-            f"http://127.0.0.1:{_PORT}/completion",
-            json=body,
-            timeout=240,
-        )
-        if r.status_code == 200:
-            return r.json().get("content", "").strip()
-        logger.warning("llama-server %s returned %d", name, r.status_code)
-        return None
-    except Exception as e:
-        logger.warning("llama-server %s query failed: %s", name, e)
-        return None
 
 
 def stop_server(name=None):
