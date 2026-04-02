@@ -184,17 +184,106 @@ def buy_position(direction, price):
     return None
 
 # =========================================================================
+# MODE DETECTION — momentum vs straddle
+# =========================================================================
+
+def detect_mode():
+    """Detect whether to use momentum or straddle mode.
+
+    Returns ('momentum', {}) or ('straddle', {'floor': ..., 'ceil': ...}).
+    Works at any time of day — looks at recent data, not session start.
+    """
+    try:
+        import yfinance as yf
+        import numpy as np
+
+        # 1. Was yesterday a crash? (>3% drop)
+        daily = yf.download('SI=F', period='5d', interval='1d', progress=False)
+        if len(daily) >= 2:
+            yesterday_chg = (daily['Close'].iloc[-2] - daily['Close'].iloc[-3]) / daily['Close'].iloc[-3] * 100
+            yesterday_chg = float(yesterday_chg.iloc[0]) if hasattr(yesterday_chg, 'iloc') else float(yesterday_chg)
+            if yesterday_chg < -5:
+                log_msg(f'Mode: STRADDLE (yesterday crashed {yesterday_chg:.1f}%)')
+                return _compute_straddle_levels()
+
+        # 2. Today's range vs net move (is it chopping?)
+        intraday = yf.download('SI=F', period='1d', interval='15m', progress=False)
+        if not intraday.empty and len(intraday) >= 8:
+            closes = intraday['Close'].values.flatten()
+            highs = intraday['High'].values.flatten()
+            lows = intraday['Low'].values.flatten()
+
+            day_range = (max(highs) - min(lows)) / min(lows) * 100
+            net_move = abs(closes[-1] - closes[0]) / closes[0] * 100
+
+            if day_range > 3 and net_move < 0.5:
+                log_msg(f'Mode: STRADDLE (range {day_range:.1f}% but net move {net_move:.1f}% — chop)')
+                return _compute_straddle_levels()
+
+        # 3. Check MC stability from recent signal log
+        try:
+            with open('data/metals_signal_log.jsonl') as f:
+                lines = f.readlines()
+            recent_mc = []
+            for line in lines[-10:]:
+                d = json.loads(line)
+                xag = d.get('signals', {}).get('XAG-USD', {})
+                if xag.get('w_confidence') is not None:
+                    # Proxy: if action flips frequently, it's choppy
+                    recent_mc.append(xag.get('action', 'HOLD'))
+            if recent_mc:
+                flips = sum(1 for i in range(1, len(recent_mc)) if recent_mc[i] != recent_mc[i-1])
+                if flips >= 4:
+                    log_msg(f'Mode: STRADDLE (signal flipped {flips}x in last 10 checks)')
+                    return _compute_straddle_levels()
+        except Exception:
+            pass
+
+    except Exception as e:
+        log_msg(f'Mode detection error: {e}')
+
+    log_msg('Mode: MOMENTUM (default)')
+    return 'momentum', {}
+
+
+def _compute_straddle_levels():
+    """Compute floor/ceiling levels for straddle mode."""
+    try:
+        p = fetch_price()
+        if p:
+            floor_pct = 3.0
+            ceil_pct = 2.0
+            floor = p * (1 - floor_pct / 100)
+            ceil = p * (1 + ceil_pct / 100)
+            log_msg(f'Straddle levels: floor ${floor:.2f} (-{floor_pct}%) | ceil ${ceil:.2f} (+{ceil_pct}%)')
+            return 'straddle', {'floor': floor, 'ceil': ceil, 'floor_pct': floor_pct, 'ceil_pct': ceil_pct}
+    except Exception:
+        pass
+    return 'momentum', {}
+
+
+# =========================================================================
 # MAIN LOOP — triple try/except, never crashes
 # =========================================================================
 def main():
-    session_pnl = -597
+    session_pnl = 0
     active = detect_position()
     mch = []
     lsc = 0
     cd = 0
+
+    # Detect mode (works at any time of day)
+    mode, straddle_cfg = detect_mode()
+    straddle_floor = straddle_cfg.get('floor', 0)
+    straddle_ceil = straddle_cfg.get('ceil', 0)
+    straddle_bull_filled = False
+    straddle_bear_filled = False
+    momentum_losses = 0  # track consecutive bad trades for mode switch
     md = 0
 
-    log_msg(f'=== FISH MONITOR LIVE | {session_pnl:+.0f} SEK | until {SESSION_END_H}:{SESSION_END_M:02d} ===')
+    log_msg(f'=== FISH MONITOR LIVE | {session_pnl:+.0f} SEK | {mode.upper()} mode | until {SESSION_END_H}:{SESSION_END_M:02d} ===')
+    if mode == 'straddle':
+        log_msg(f'Straddle: floor ${straddle_floor:.2f} | ceil ${straddle_ceil:.2f}')
     if active:
         log_msg(f'Resuming {active["d"]} {active["v"]}u')
     else:
@@ -331,17 +420,48 @@ def main():
                             cd = now + 120  # TP/SL/timeout — need fresh signal
                         active = None
                         md = 0
+                        # Track momentum losses for potential mode switch
+                        if pnl <= 0:
+                            momentum_losses += 1
+                        else:
+                            momentum_losses = 0
+                        # Auto-switch to straddle after 3 consecutive losses
+                        if mode == 'momentum' and momentum_losses >= 3:
+                            log_msg(f'!! 3 consecutive losses — switching to STRADDLE mode')
+                            mode = 'straddle'
+                            _, straddle_cfg = _compute_straddle_levels()
+                            straddle_floor = straddle_cfg.get('floor', 0)
+                            straddle_ceil = straddle_cfg.get('ceil', 0)
+                            straddle_bull_filled = False
+                            straddle_bear_filled = False
                 else:
-                    # Scan for entry
-                    bu = sg['a'] == 'BUY' and sg['ma'] == 'BUY' and m2u
-                    be = sg['a'] == 'SELL' and sg['ma'] == 'SELL' and m2b
+                    # Scan for entry — depends on mode
                     fl = ''
-                    if now > cd and (bu or be):
-                        dr = 'LONG' if bu else 'SHORT'
-                        active = buy_position(dr, p)
-                        if active:
-                            md = 0
-                            fl = f' >>> {dr}'
+                    if mode == 'momentum':
+                        bu = sg['a'] == 'BUY' and sg['ma'] == 'BUY' and m2u
+                        be = sg['a'] == 'SELL' and sg['ma'] == 'SELL' and m2b
+                        if now > cd and (bu or be):
+                            dr = 'LONG' if bu else 'SHORT'
+                            active = buy_position(dr, p)
+                            if active:
+                                md = 0
+                                fl = f' >>> MOMENTUM {dr}'
+                    elif mode == 'straddle':
+                        # Check if price hit floor or ceiling
+                        past_cancel = h > CANCEL_HOUR or (h == CANCEL_HOUR and m >= CANCEL_MIN)
+                        if not past_cancel and straddle_floor > 0 and straddle_ceil > 0:
+                            if p <= straddle_floor and not straddle_bull_filled:
+                                log_msg(f'!! FLOOR HIT ${p:.2f} <= ${straddle_floor:.2f}')
+                                active = buy_position('LONG', p)
+                                if active:
+                                    straddle_bull_filled = True
+                                    fl = f' >>> STRADDLE LONG (floor)'
+                            elif p >= straddle_ceil and not straddle_bear_filled:
+                                log_msg(f'!! CEILING HIT ${p:.2f} >= ${straddle_ceil:.2f}')
+                                active = buy_position('SHORT', p)
+                                if active:
+                                    straddle_bear_filled = True
+                                    fl = f' >>> STRADDLE SHORT (ceil)'
                     # Show warnings when scanning too
                     scan_warns = []
                     ev_h = sg.get('event_hours', 999)
@@ -356,7 +476,13 @@ def main():
                     if sg['econ'] != 'HOLD':
                         scan_warns.append(f'E={sg["econ"]}')
                     sw = ' !!' + ' '.join(scan_warns) if scan_warns else ''
-                    log_msg(f'${p:.2f} | {sg["a"]} {sg["b"]}B/{sg["s"]}S RSI={sg["rsi"]:.0f} MC={sg["mc"]:.0%} M:{sg["ma"]} | {sg["f1d"]}{sw}{fl}')
+                    mode_str = f' [{mode.upper()}]' if mode == 'straddle' else ''
+                    straddle_str = ''
+                    if mode == 'straddle' and straddle_floor > 0:
+                        dist_f = (p - straddle_floor) / p * 100
+                        dist_c = (straddle_ceil - p) / p * 100
+                        straddle_str = f' F=${straddle_floor:.2f}({dist_f:.1f}%) C=${straddle_ceil:.2f}({dist_c:.1f}%)'
+                    log_msg(f'${p:.2f} | {sg["a"]} {sg["b"]}B/{sg["s"]}S RSI={sg["rsi"]:.0f} MC={sg["mc"]:.0%} M:{sg["ma"]} | {sg["f1d"]}{sw}{fl}{mode_str}{straddle_str}')
             else:
                 if active:
                     d = active['d']
