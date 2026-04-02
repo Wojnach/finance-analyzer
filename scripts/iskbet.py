@@ -98,6 +98,9 @@ def atomic_write_json(path, data):
 def send_telegram(msg):
     try:
         config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        if config.get("telegram", {}).get("mute_all", False):
+            print(f"[TG muted] {msg[:80]}")
+            return False
         token = config["telegram"]["token"]
         chat_id = config["telegram"]["chat_id"]
     except (FileNotFoundError, KeyError, json.JSONDecodeError):

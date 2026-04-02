@@ -65,7 +65,11 @@ def _call_qwen3(context):
     text = query_llama_server("qwen3", prompt, n_predict=1024, temperature=0.6,
                               top_p=0.95, stop=["<|endoftext|>", "<|im_end|>"])
     if text is not None:
-        return _parse_response(text)
+        decision, reasoning, confidence = _parse_response(text)
+        result = {"action": decision, "reasoning": reasoning, "model": "Qwen3-8B"}
+        if confidence is not None:
+            result["confidence"] = confidence
+        return result
 
     # Fallback: subprocess (cold start)
     logger.info("llama-server unavailable for qwen3, falling back to subprocess")

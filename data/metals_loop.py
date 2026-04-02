@@ -640,6 +640,9 @@ def _safe_print(msg):
 def send_telegram(msg):
     if not TG_TOKEN or not TG_CHAT:
         return
+    if telegram_cfg.get("mute_all", False):
+        log("[TG muted] " + msg[:80].replace("\n", " "))
+        return
     try:
         requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",

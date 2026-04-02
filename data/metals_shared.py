@@ -40,8 +40,12 @@ def send_telegram(msg):
     """Send a Telegram message using config.json credentials."""
     try:
         cfg = _get_config()
-        token = cfg.get("telegram", {}).get("token", "")
-        chat_id = cfg.get("telegram", {}).get("chat_id", "")
+        tg = cfg.get("telegram", {})
+        if tg.get("mute_all", False):
+            print(f"[TG muted] {msg[:80]}", flush=True)
+            return
+        token = tg.get("token", "")
+        chat_id = tg.get("chat_id", "")
         if not token or not chat_id:
             print("[WARN] Telegram not configured", flush=True)
             return

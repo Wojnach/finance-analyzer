@@ -250,6 +250,13 @@ def send_telegram(msg):
         print(f"  >> TG DISABLED (would send: {msg[:60]}...)")
         return False
     try:
+        _cfg = json.loads(Path("config.json").read_text(encoding="utf-8"))
+        if _cfg.get("telegram", {}).get("mute_all", False):
+            print(f"  >> TG MUTED: {msg[:60]}...")
+            return False
+    except Exception:
+        pass
+    try:
         r = requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
             json={"chat_id": TG_CHAT, "text": msg, "parse_mode": "Markdown"},

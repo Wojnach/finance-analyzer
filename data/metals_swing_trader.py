@@ -143,6 +143,16 @@ def _send_telegram(msg):
         _log("Telegram not configured")
         return
 
+    # Check mute_all from config
+    try:
+        with open("config.json", encoding="utf-8") as f:
+            _mute = json.load(f).get("telegram", {}).get("mute_all", False)
+        if _mute:
+            _log(f"[TG muted] {msg[:80]}")
+            return
+    except Exception:
+        pass
+
     try:
         requests.post(
             f"https://api.telegram.org/bot{_tg_config['token']}/sendMessage",
