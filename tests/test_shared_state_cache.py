@@ -1,19 +1,22 @@
-"""Tests for shared_state.py cache eviction — BUG-55 LRU fallback."""
+"""Tests for shared_state.py cache eviction and dogpile prevention."""
+import threading
 import time
 
 import pytest
 
-from portfolio.shared_state import _CACHE_MAX_SIZE, _cache_lock, _cached, _tool_cache
+from portfolio.shared_state import _CACHE_MAX_SIZE, _cache_lock, _cached, _loading_keys, _tool_cache
 
 
 @pytest.fixture(autouse=True)
 def _clean_cache():
-    """Clear the global cache before and after each test."""
+    """Clear the global cache and loading flags before and after each test."""
     with _cache_lock:
         _tool_cache.clear()
+        _loading_keys.clear()
     yield
     with _cache_lock:
         _tool_cache.clear()
+        _loading_keys.clear()
 
 
 class TestCacheEvictionStaleEntries:
@@ -153,3 +156,128 @@ class TestCachedBasicBehavior:
 
         result = _cached("test_too_old", 60, failing_func)
         assert result is None
+
+
+class TestDogpilePrevention:
+    """BUG-166: Only one thread should refresh a cache key at a time.
+
+    When a cache entry expires and multiple threads detect the miss,
+    only one thread should call the underlying function. Others should
+    return stale data (stale-while-revalidate pattern).
+    """
+
+    def test_only_one_thread_refreshes(self):
+        """Verify only 1 out of N threads calls the function on cache miss."""
+        call_count = {"n": 0}
+        barrier = threading.Barrier(3)
+        lock = threading.Lock()
+
+        def slow_fetch():
+            with lock:
+                call_count["n"] += 1
+            time.sleep(0.1)
+            return "fresh_data"
+
+        # Pre-seed with stale data so other threads get stale-while-revalidate
+        now = time.time()
+        with _cache_lock:
+            _tool_cache["dogpile_test"] = {"data": "stale", "time": now - 600, "ttl": 300}
+
+        results = [None, None, None]
+
+        def worker(idx):
+            barrier.wait()
+            results[idx] = _cached("dogpile_test", 300, slow_fetch)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        # Only one thread should have called slow_fetch
+        assert call_count["n"] == 1, f"Expected 1 call, got {call_count['n']}"
+        # All threads should return data (either fresh or stale)
+        for r in results:
+            assert r is not None
+
+    def test_stale_data_returned_during_reload(self):
+        """Threads that find the key loading should get stale data."""
+        now = time.time()
+        with _cache_lock:
+            _tool_cache["stale_test"] = {"data": "stale_value", "time": now - 400, "ttl": 300}
+
+        load_started = threading.Event()
+        can_finish = threading.Event()
+
+        def slow_fetch():
+            load_started.set()
+            can_finish.wait(timeout=5)
+            return "fresh_value"
+
+        # Thread 1 starts loading
+        t1_result = [None]
+
+        def t1():
+            t1_result[0] = _cached("stale_test", 300, slow_fetch)
+
+        thread1 = threading.Thread(target=t1)
+        thread1.start()
+        load_started.wait(timeout=5)
+
+        # Thread 2 tries to get the same key while Thread 1 is loading
+        t2_result = _cached("stale_test", 300, lambda: "should_not_call")
+        assert t2_result == "stale_value", "Thread 2 should get stale data"
+
+        # Let Thread 1 finish
+        can_finish.set()
+        thread1.join(timeout=5)
+        assert t1_result[0] == "fresh_value"
+
+    def test_loading_flag_cleared_on_exception(self):
+        """Loading flag must be cleared even if the function raises."""
+
+        def failing():
+            raise RuntimeError("boom")
+
+        # First call — fails but clears loading flag
+        result1 = _cached("fail_test", 300, failing)
+        assert result1 is None
+
+        # Second call — should be able to try again (not stuck in loading)
+        result2 = _cached("fail_test", 300, lambda: "recovered")
+        assert result2 == "recovered"
+
+    def test_no_dogpile_for_different_keys(self):
+        """Different cache keys should not block each other."""
+        call_counts = {"a": 0, "b": 0}
+
+        def fetch_a():
+            call_counts["a"] += 1
+            time.sleep(0.05)
+            return "data_a"
+
+        def fetch_b():
+            call_counts["b"] += 1
+            time.sleep(0.05)
+            return "data_b"
+
+        barrier = threading.Barrier(2)
+
+        def worker_a():
+            barrier.wait()
+            _cached("key_a", 300, fetch_a)
+
+        def worker_b():
+            barrier.wait()
+            _cached("key_b", 300, fetch_b)
+
+        t1 = threading.Thread(target=worker_a)
+        t2 = threading.Thread(target=worker_b)
+        t1.start()
+        t2.start()
+        t1.join(timeout=5)
+        t2.join(timeout=5)
+
+        assert call_counts["a"] == 1
+        assert call_counts["b"] == 1
