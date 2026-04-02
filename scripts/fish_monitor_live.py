@@ -319,8 +319,17 @@ def main():
                         pnl = sell_position(active, ex)
                         session_pnl += pnl
                         log_msg(f'Session: {session_pnl:+.0f} SEK')
+                        # Variable cooldown based on exit conviction
+                        # High-conviction directional exits → short cooldown (flip faster)
+                        # Low-conviction exits → longer cooldown (rescan needed)
+                        if ex in ('COMB', 'SELL flip', 'BUY flip', 'RSI'):
+                            cd = now + 5   # near-instant re-entry allowed
+                            log_msg(f'High-conviction exit ({ex}) — ready to flip')
+                        elif ex.startswith('MD'):
+                            cd = now + 60  # standard cooldown
+                        else:
+                            cd = now + 120  # TP/SL/timeout — need fresh signal
                         active = None
-                        cd = now + 60
                         md = 0
                 else:
                     # Scan for entry
