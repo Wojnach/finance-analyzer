@@ -119,7 +119,7 @@ class TestVoteCountIntegrity:
         df = make_ohlcv_df(n=250, close_base=130.0)
         _, _, extra = generate_signal(ind, ticker="NVDA", df=df)
 
-        assert extra["_total_applicable"] == 24
+        assert extra["_total_applicable"] == 26
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_metal_vote_counts(self, _mock):
@@ -131,15 +131,15 @@ class TestVoteCountIntegrity:
         assert extra["_total_applicable"] == 28
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
-    def test_all_stock_symbols_have_24_applicable(self, _mock):
-        """Every stock symbol should have exactly 24 total applicable signals."""
+    def test_all_stock_symbols_have_26_applicable(self, _mock):
+        """Every stock symbol should have exactly 26 total applicable signals."""
         ind = make_indicators(close=100.0)
         df = make_ohlcv_df(n=250, close_base=100.0)
 
         for ticker in list(STOCK_SYMBOLS)[:5]:  # test a sample
             _, _, extra = generate_signal(ind, ticker=ticker, df=df)
-            assert extra["_total_applicable"] == 24, \
-                f"{ticker} has {extra['_total_applicable']} total applicable, expected 24"
+            assert extra["_total_applicable"] == 26, \
+                f"{ticker} has {extra['_total_applicable']} total applicable, expected 26"
 
 
 # ---------------------------------------------------------------------------
