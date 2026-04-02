@@ -1,8 +1,75 @@
+import logging
 from datetime import UTC, datetime
+from pathlib import Path
 
 from portfolio.http_retry import fetch_json
 
+logger = logging.getLogger(__name__)
+
 CRYPTO_TICKERS = {"BTC", "ETH", "BTC-USD", "ETH-USD"}
+
+# Sustained fear/greed tracking — used by signal_engine to gate contrarian
+# signals during prolonged extreme sentiment regimes (e.g., 46-day fear streaks).
+EXTREME_FEAR_THRESHOLD = 20
+EXTREME_GREED_THRESHOLD = 80
+_STREAK_FILE = Path("data/fear_greed_streak.json")
+
+
+def get_sustained_fear_days() -> int:
+    """Return consecutive days the Fear & Greed index has been <= EXTREME_FEAR_THRESHOLD.
+
+    Returns 0 if not in an extreme fear streak, or if tracking data is unavailable.
+    """
+    try:
+        import json
+        if _STREAK_FILE.exists():
+            data = json.loads(_STREAK_FILE.read_text())
+            if data.get("streak_type") == "extreme_fear":
+                return data.get("streak_days", 0)
+    except Exception:
+        logger.debug("Could not read fear streak file", exc_info=True)
+    return 0
+
+
+def update_fear_streak(fg_value: int) -> dict:
+    """Update the sustained fear/greed streak tracker.
+
+    Called after each successful F&G fetch. Persists streak state to disk
+    so it survives process restarts.
+    """
+    import json
+    try:
+        data = json.loads(_STREAK_FILE.read_text()) if _STREAK_FILE.exists() else {}
+    except Exception:
+        data = {}
+
+    now = datetime.now(UTC).isoformat()
+    prev_type = data.get("streak_type", "neutral")
+    prev_days = data.get("streak_days", 0)
+
+    if fg_value <= EXTREME_FEAR_THRESHOLD:
+        if prev_type == "extreme_fear":
+            data["streak_days"] = prev_days + 1
+        else:
+            data = {"streak_type": "extreme_fear", "streak_days": 1,
+                    "streak_started": now}
+    elif fg_value >= EXTREME_GREED_THRESHOLD:
+        if prev_type == "extreme_greed":
+            data["streak_days"] = prev_days + 1
+        else:
+            data = {"streak_type": "extreme_greed", "streak_days": 1,
+                    "streak_started": now}
+    else:
+        data = {"streak_type": "neutral", "streak_days": 0,
+                "streak_started": now}
+
+    data["last_value"] = fg_value
+    data["last_updated"] = now
+    try:
+        _STREAK_FILE.write_text(json.dumps(data, indent=2))
+    except Exception:
+        logger.debug("Could not write fear streak file", exc_info=True)
+    return data
 
 
 def _classify(value):

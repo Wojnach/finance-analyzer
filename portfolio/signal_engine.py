@@ -166,15 +166,22 @@ REGIME_WEIGHTS = {
 # "_default" key applies to horizons not explicitly listed.
 REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
     "ranging": {
-        # 2026-03-31 audit: trend 40.7%, momentum_factors 41.4%, ema 40.8%,
-        # heikin_ashi 42.0%, structure 36.1% — all below 45% gate on daily.
-        # fear_greed 25.9%, macro_regime 30.3% — catastrophically broken.
+        # 2026-04-02 audit: 13 signals below 45% on 1d_recent. Gate the worst.
+        # trend 40.7%, momentum_factors 41.4%, ema 40.8%, heikin_ashi 42.0%,
+        # structure 36.1%, fear_greed 25.9%, macro_regime 30.3%,
+        # news_event 29.5%, volatility_sig 35.0%, forecast 36.1%,
+        # candlestick 44.5%, smart_money 39.6%.
+        # The dynamic 45% accuracy gate also catches these, but explicit
+        # regime gating is clearer and doesn't depend on blending math.
         "_default": frozenset({
             "trend", "momentum_factors", "ema", "heikin_ashi", "structure",
             "fear_greed", "macro_regime",
+            # 2026-04-02: added based on 1d_recent audit
+            "news_event", "volatility_sig", "forecast", "smart_money",
         }),
-        # 3h: trend 61.6%, ema 62.9%, momentum_factors 60.1%, heikin_ashi ~55%
-        # — short-term trends exist within ranges, do NOT gate at 3h/4h
+        # 3h: news_event 58.5%, smart_money 53.1% — decent at short horizons.
+        # volatility_sig 47.2%, forecast 47.2% — marginal, let accuracy gate
+        # handle them dynamically at 3h.
         "3h": frozenset({"fear_greed", "macro_regime"}),
         "4h": frozenset({"fear_greed", "macro_regime"}),
     },
@@ -977,18 +984,38 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # Fear & Greed Index (per-ticker: crypto->alternative.me, stocks->VIX)
     # Gated: F&G is contrarian (buy fear, sell greed) which fights trends.
     # Only allow F&G to vote in ranging/high-vol regimes where mean reversion works.
+    # 2026-04-02: Added sustained fear duration gate — during prolonged extreme
+    # fear (46+ consecutive days as of Apr 2), contrarian BUY signals are noise.
+    # Historical data: buying at F&G <15 yields median +38.4% over 90 days,
+    # but during sustained fear (2022), prices dropped another -40% after signal.
     votes["fear_greed"] = "HOLD"
     try:
-        from portfolio.fear_greed import get_fear_greed
+        from portfolio.fear_greed import get_fear_greed, get_sustained_fear_days, update_fear_streak
 
         fg_key = f"fear_greed_{ticker}" if ticker else "fear_greed"
         fg = _cached(fg_key, FEAR_GREED_TTL, get_fear_greed, ticker)
         if fg:
             extra_info["fear_greed"] = fg["value"]
             extra_info["fear_greed_class"] = fg["classification"]
+            # Read streak BEFORE updating — use previous cycle's state for voting
+            fear_days = get_sustained_fear_days()
+            # Update streak tracker (once per cycle, not per ticker)
+            if ticker in ("BTC-USD", None):
+                update_fear_streak(fg["value"])
+            extra_info["fear_greed_streak_days"] = fear_days
             # Gate: suppress F&G votes in trending regimes
             if regime in ("trending-up", "trending-down"):
                 extra_info["fear_greed_gated"] = regime
+                votes["fear_greed"] = "HOLD"
+            # Gate: sustained extreme fear — contrarian BUY is unreliable
+            # during first 30 days of prolonged fear (whiplash risk).
+            # After 30 days, allow BUY but at reduced confidence (handled
+            # by the existing 0.3x ranging regime weight).
+            elif fg["value"] <= 20 and fear_days > 30:
+                votes["fear_greed"] = "BUY"
+                extra_info["fear_greed_note"] = f"sustained_fear_{fear_days}d_allowing_contrarian"
+            elif fg["value"] <= 20 and fear_days > 0:
+                extra_info["fear_greed_gated"] = f"sustained_fear_{fear_days}d"
                 votes["fear_greed"] = "HOLD"
             elif fg["value"] <= 20:
                 votes["fear_greed"] = "BUY"

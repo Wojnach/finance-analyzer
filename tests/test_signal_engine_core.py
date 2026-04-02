@@ -1045,12 +1045,11 @@ class TestHorizonWeights:
 
     def test_no_horizon_no_adjustment(self):
         """Without horizon parameter, no horizon weights applied."""
-        votes = {"news_event": "SELL"}
-        accuracy = {"news_event": {"accuracy": 0.70, "total": 1700}}
+        # Use rsi — not regime-gated in ranging at any horizon
+        votes = {"rsi": "SELL"}
+        accuracy = {"rsi": {"accuracy": 0.70, "total": 1700}}
         _, conf_none = _weighted_consensus(votes, accuracy, "ranging", horizon=None)
         _, conf_3h = _weighted_consensus(votes, accuracy, "ranging", horizon="3h")
-        # With 3h, news_event gets 1.4x boost => higher confidence
-        # Actually both are 1.0 since it's the only voter, but weight differs
         # Both return SELL with 1.0 confidence (single voter)
         assert conf_none == 1.0
         assert conf_3h == 1.0
