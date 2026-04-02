@@ -1,0 +1,350 @@
+{
+  "generated": "2026-04-02",
+  "data_period": "6 months",
+  "min_samples": 20,
+  "min_directional_bias": 60,
+  "patterns": [
+    {
+      "day": 0,
+      "day_name": "Mon",
+      "hour_cet": 3,
+      "avg_return": 0.018,
+      "direction": "BULL",
+      "probability": 70.8,
+      "samples": 24
+    },
+    {
+      "day": 0,
+      "day_name": "Mon",
+      "hour_cet": 4,
+      "avg_return": 0.024,
+      "direction": "BULL",
+      "probability": 66.7,
+      "samples": 24
+    },
+    {
+      "day": 0,
+      "day_name": "Mon",
+      "hour_cet": 5,
+      "avg_return": 0.146,
+      "direction": "BEAR",
+      "probability": 62.5,
+      "samples": 24
+    },
+    {
+      "day": 0,
+      "day_name": "Mon",
+      "hour_cet": 7,
+      "avg_return": -0.325,
+      "direction": "BEAR",
+      "probability": 62.5,
+      "samples": 24
+    },
+    {
+      "day": 0,
+      "day_name": "Mon",
+      "hour_cet": 9,
+      "avg_return": 0.233,
+      "direction": "BULL",
+      "probability": 70.8,
+      "samples": 24
+    },
+    {
+      "day": 0,
+      "day_name": "Mon",
+      "hour_cet": 13,
+      "avg_return": 0.534,
+      "direction": "BULL",
+      "probability": 75.0,
+      "samples": 24
+    },
+    {
+      "day": 0,
+      "day_name": "Mon",
+      "hour_cet": 14,
+      "avg_return": -0.43,
+      "direction": "BEAR",
+      "probability": 75.0,
+      "samples": 24
+    },
+    {
+      "day": 0,
+      "day_name": "Mon",
+      "hour_cet": 17,
+      "avg_return": 0.393,
+      "direction": "BULL",
+      "probability": 66.7,
+      "samples": 24
+    },
+    {
+      "day": 0,
+      "day_name": "Mon",
+      "hour_cet": 18,
+      "avg_return": 0.159,
+      "direction": "BULL",
+      "probability": 62.5,
+      "samples": 24
+    },
+    {
+      "day": 0,
+      "day_name": "Mon",
+      "hour_cet": 19,
+      "avg_return": -0.019,
+      "direction": "BULL",
+      "probability": 62.5,
+      "samples": 24
+    },
+    {
+      "day": 0,
+      "day_name": "Mon",
+      "hour_cet": 20,
+      "avg_return": -0.026,
+      "direction": "BULL",
+      "probability": 62.5,
+      "samples": 24
+    },
+    {
+      "day": 0,
+      "day_name": "Mon",
+      "hour_cet": 21,
+      "avg_return": 0.188,
+      "direction": "BULL",
+      "probability": 66.7,
+      "samples": 24
+    },
+    {
+      "day": 1,
+      "day_name": "Tue",
+      "hour_cet": 1,
+      "avg_return": 0.217,
+      "direction": "BULL",
+      "probability": 73.1,
+      "samples": 26
+    },
+    {
+      "day": 1,
+      "day_name": "Tue",
+      "hour_cet": 8,
+      "avg_return": 0.38,
+      "direction": "BULL",
+      "probability": 69.2,
+      "samples": 26
+    },
+    {
+      "day": 1,
+      "day_name": "Tue",
+      "hour_cet": 9,
+      "avg_return": -0.011,
+      "direction": "BULL",
+      "probability": 61.5,
+      "samples": 26
+    },
+    {
+      "day": 1,
+      "day_name": "Tue",
+      "hour_cet": 11,
+      "avg_return": -0.104,
+      "direction": "BULL",
+      "probability": 61.5,
+      "samples": 26
+    },
+    {
+      "day": 1,
+      "day_name": "Tue",
+      "hour_cet": 12,
+      "avg_return": 0.13,
+      "direction": "BULL",
+      "probability": 65.4,
+      "samples": 26
+    },
+    {
+      "day": 1,
+      "day_name": "Tue",
+      "hour_cet": 14,
+      "avg_return": 0.22,
+      "direction": "BULL",
+      "probability": 69.2,
+      "samples": 26
+    },
+    {
+      "day": 1,
+      "day_name": "Tue",
+      "hour_cet": 17,
+      "avg_return": 0.153,
+      "direction": "BULL",
+      "probability": 61.5,
+      "samples": 26
+    },
+    {
+      "day": 1,
+      "day_name": "Tue",
+      "hour_cet": 18,
+      "avg_return": -0.124,
+      "direction": "BULL",
+      "probability": 65.4,
+      "samples": 26
+    },
+    {
+      "day": 2,
+      "day_name": "Wed",
+      "hour_cet": 1,
+      "avg_return": 0.24,
+      "direction": "BULL",
+      "probability": 70.8,
+      "samples": 24
+    },
+    {
+      "day": 2,
+      "day_name": "Wed",
+      "hour_cet": 2,
+      "avg_return": 0.375,
+      "direction": "BULL",
+      "probability": 61.5,
+      "samples": 26
+    },
+    {
+      "day": 2,
+      "day_name": "Wed",
+      "hour_cet": 4,
+      "avg_return": 0.12,
+      "direction": "BULL",
+      "probability": 61.5,
+      "samples": 26
+    },
+    {
+      "day": 2,
+      "day_name": "Wed",
+      "hour_cet": 17,
+      "avg_return": 0.187,
+      "direction": "BULL",
+      "probability": 73.1,
+      "samples": 26
+    },
+    {
+      "day": 2,
+      "day_name": "Wed",
+      "hour_cet": 20,
+      "avg_return": 0.107,
+      "direction": "BULL",
+      "probability": 68.0,
+      "samples": 25
+    },
+    {
+      "day": 3,
+      "day_name": "Thu",
+      "hour_cet": 1,
+      "avg_return": 0.058,
+      "direction": "BEAR",
+      "probability": 65.2,
+      "samples": 23
+    },
+    {
+      "day": 3,
+      "day_name": "Thu",
+      "hour_cet": 4,
+      "avg_return": 0.281,
+      "direction": "BULL",
+      "probability": 66.7,
+      "samples": 24
+    },
+    {
+      "day": 3,
+      "day_name": "Thu",
+      "hour_cet": 5,
+      "avg_return": -0.111,
+      "direction": "BEAR",
+      "probability": 70.8,
+      "samples": 24
+    },
+    {
+      "day": 3,
+      "day_name": "Thu",
+      "hour_cet": 7,
+      "avg_return": 0.262,
+      "direction": "BULL",
+      "probability": 65.2,
+      "samples": 23
+    },
+    {
+      "day": 3,
+      "day_name": "Thu",
+      "hour_cet": 11,
+      "avg_return": -0.156,
+      "direction": "BEAR",
+      "probability": 65.2,
+      "samples": 23
+    },
+    {
+      "day": 3,
+      "day_name": "Thu",
+      "hour_cet": 21,
+      "avg_return": 0.166,
+      "direction": "BULL",
+      "probability": 60.9,
+      "samples": 23
+    },
+    {
+      "day": 3,
+      "day_name": "Thu",
+      "hour_cet": 22,
+      "avg_return": -0.103,
+      "direction": "BULL",
+      "probability": 63.6,
+      "samples": 22
+    },
+    {
+      "day": 4,
+      "day_name": "Fri",
+      "hour_cet": 2,
+      "avg_return": 0.322,
+      "direction": "BULL",
+      "probability": 65.2,
+      "samples": 23
+    },
+    {
+      "day": 4,
+      "day_name": "Fri",
+      "hour_cet": 5,
+      "avg_return": 0.089,
+      "direction": "BULL",
+      "probability": 60.9,
+      "samples": 23
+    },
+    {
+      "day": 4,
+      "day_name": "Fri",
+      "hour_cet": 9,
+      "avg_return": 0.077,
+      "direction": "BULL",
+      "probability": 68.0,
+      "samples": 25
+    },
+    {
+      "day": 4,
+      "day_name": "Fri",
+      "hour_cet": 11,
+      "avg_return": 0.129,
+      "direction": "BULL",
+      "probability": 64.0,
+      "samples": 25
+    },
+    {
+      "day": 4,
+      "day_name": "Fri",
+      "hour_cet": 19,
+      "avg_return": -0.006,
+      "direction": "BULL",
+      "probability": 61.5,
+      "samples": 26
+    },
+    {
+      "day": 4,
+      "day_name": "Fri",
+      "hour_cet": 22,
+      "avg_return": -0.504,
+      "direction": "BEAR",
+      "probability": 68.0,
+      "samples": 25
+    }
+  ]
+}
