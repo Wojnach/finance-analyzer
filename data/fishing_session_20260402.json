@@ -53,6 +53,16 @@
       "id": 60,
       "lesson": "TURBO warrants with close barriers are death traps on event days. TURBO L AVA 491 (barrier 8) got knocked out when silver dropped to 9.66. TURBO L AVA 481 (barrier 5) survived but lost 42%. Use no-knockout BULL/BEAR X5 certs on event days.",
       "fix": "Event day rule: ONLY use no-knockout instruments (BULL/BEAR X5). Never TURBOs or MINIs with barriers <15% from current price."
+    },
+    {
+      "id": 61,
+      "lesson": "Monitor must run continuously until session end (21:45) or until told to stop. NEVER use a loop limit (300 checks etc). Use while True with session-end check and heartbeat. If we disconnect, heartbeat dies, script sells if profitable and holds if negative.",
+      "fix": "Always use: while True + session end at 21:45 + heartbeat timeout 120s + profit-only emergency sell. No max_checks parameter."
+    },
+    {
+      "id": 62,
+      "lesson": "Background monitor scripts die silently \u2014 stdout buffering means no output visible, and shell signal 144 kills them when other processes are cleaned up. Fix: (1) write to a log FILE not just stdout, (2) start via Windows Start-Process so it survives shell kills, (3) self-heartbeat to detect crashes, (4) create a proper script file instead of inline -c code.",
+      "fix": "Created scripts/fish_monitor_live.py. Writes to data/fish_monitor_live.log. Started via powershell Start-Process. Self-heartbeat. Check: tail data/fish_monitor_live.log and cat data/fish_heartbeat.txt."
     }
   ],
   "historical_analysis": {
