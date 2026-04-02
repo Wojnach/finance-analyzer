@@ -46,6 +46,140 @@ def fetch_price():
     except:
         return None
 
+
+def fetch_gold_price():
+    try:
+        return float(requests.get(f'{FAPI}?symbol=XAUUSDT', timeout=5).json()['price'])
+    except:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Gold-leads-silver detection (5-min rolling, 0.85 correlation)
+# ---------------------------------------------------------------------------
+GOLD_LEAD_MINUTES = 5
+GOLD_LEAD_THRESHOLD = 0.5  # gold must move >0.5% in 5 min
+SILVER_LAG_THRESHOLD = 0.2  # silver hasn't moved >0.2% yet
+
+class GoldLeadDetector:
+    """Detect when gold moves before silver — 5 minute edge."""
+
+    def __init__(self):
+        self.gold_prices = []  # [(timestamp, price), ...]
+        self.silver_prices = []
+
+    def update(self, gold_price, silver_price):
+        now = time.time()
+        if gold_price:
+            self.gold_prices.append((now, gold_price))
+        if silver_price:
+            self.silver_prices.append((now, silver_price))
+        # Keep 10 min of history
+        cutoff = now - 600
+        self.gold_prices = [(t, p) for t, p in self.gold_prices if t > cutoff]
+        self.silver_prices = [(t, p) for t, p in self.silver_prices if t > cutoff]
+
+    def detect(self):
+        """Returns ('LONG', confidence), ('SHORT', confidence), or (None, 0).
+
+        LONG: gold rallied >0.5% in 5 min, silver hasn't followed yet
+        SHORT: gold dropped >0.5% in 5 min, silver hasn't followed yet
+        """
+        if len(self.gold_prices) < 2 or len(self.silver_prices) < 2:
+            return None, 0
+
+        now = time.time()
+        # Gold 5-min change
+        gold_5m_ago = [p for t, p in self.gold_prices if t <= now - GOLD_LEAD_MINUTES * 60]
+        if not gold_5m_ago:
+            gold_5m_ago = [self.gold_prices[0][1]]
+        gold_now = self.gold_prices[-1][1]
+        gold_chg = (gold_now - gold_5m_ago[-1]) / gold_5m_ago[-1] * 100
+
+        # Silver recent change (should be smaller if gold is leading)
+        silver_5m_ago = [p for t, p in self.silver_prices if t <= now - GOLD_LEAD_MINUTES * 60]
+        if not silver_5m_ago:
+            silver_5m_ago = [self.silver_prices[0][1]]
+        silver_now = self.silver_prices[-1][1]
+        silver_chg = (silver_now - silver_5m_ago[-1]) / silver_5m_ago[-1] * 100
+
+        # Gold moved big, silver hasn't followed
+        if gold_chg > GOLD_LEAD_THRESHOLD and silver_chg < SILVER_LAG_THRESHOLD:
+            confidence = min(1.0, gold_chg / 1.0)  # scale: 0.5%=0.5, 1.0%=1.0
+            return 'LONG', round(confidence, 2)
+        elif gold_chg < -GOLD_LEAD_THRESHOLD and silver_chg > -SILVER_LAG_THRESHOLD:
+            confidence = min(1.0, abs(gold_chg) / 1.0)
+            return 'SHORT', round(confidence, 2)
+
+        return None, 0
+
+    def status(self):
+        """One-line status for display."""
+        if len(self.gold_prices) < 2:
+            return ''
+        now = time.time()
+        gold_5m_ago = [p for t, p in self.gold_prices if t <= now - GOLD_LEAD_MINUTES * 60]
+        if not gold_5m_ago:
+            return ''
+        gold_chg = (self.gold_prices[-1][1] - gold_5m_ago[-1]) / gold_5m_ago[-1] * 100
+        return f'Au5m:{gold_chg:+.1f}%'
+
+
+# ---------------------------------------------------------------------------
+# ORB — Opening Range Breakout
+# ---------------------------------------------------------------------------
+
+class ORBTracker:
+    """Track the opening range (first 15 min) and detect breakouts."""
+
+    def __init__(self):
+        self.range_high = 0
+        self.range_low = 0
+        self.range_formed = False
+        self.prices = []
+        self.start_time = 0
+
+    def set_range(self, high, low):
+        """Manually set the range (e.g., from orb_predictor)."""
+        self.range_high = high
+        self.range_low = low
+        self.range_formed = True
+        log_msg(f'ORB range set: ${low:.2f} - ${high:.2f} (width: {(high-low)/low*100:.1f}%)')
+
+    def update(self, price):
+        """Feed prices during range formation (first 15 min)."""
+        if self.range_formed:
+            return
+        if not self.start_time:
+            self.start_time = time.time()
+        self.prices.append(price)
+        elapsed = time.time() - self.start_time
+        if elapsed >= 900 and len(self.prices) >= 3:  # 15 min
+            self.range_high = max(self.prices)
+            self.range_low = min(self.prices)
+            self.range_formed = True
+            log_msg(f'ORB range formed: ${self.range_low:.2f} - ${self.range_high:.2f}')
+
+    def detect(self, price):
+        """Returns ('LONG', tp, sl), ('SHORT', tp, sl), or (None, 0, 0)."""
+        if not self.range_formed or self.range_high <= self.range_low:
+            return None, 0, 0
+        rng = self.range_high - self.range_low
+        if price > self.range_high:
+            tp = price + rng * 0.5  # 50% extension
+            sl = self.range_high - rng * 0.6
+            return 'LONG', tp, sl
+        elif price < self.range_low:
+            tp = price - rng * 0.5
+            sl = self.range_low + rng * 0.6
+            return 'SHORT', tp, sl
+        return None, 0, 0
+
+    def status(self):
+        if not self.range_formed:
+            return 'ORB:forming'
+        return f'ORB:${self.range_low:.2f}-${self.range_high:.2f}'
+
 def load_signals():
     try:
         with open('data/agent_summary_compact.json') as f:
@@ -279,6 +413,35 @@ def main():
     straddle_bull_filled = False
     straddle_bear_filled = False
     momentum_losses = 0  # track consecutive bad trades for mode switch
+
+    # Tactic modules
+    gold_lead = GoldLeadDetector()
+    orb = ORBTracker()
+    # Try to load ORB range from orb_predictor
+    try:
+        from portfolio.orb_predictor import fetch_klines, calculate_morning_range
+        klines = fetch_klines(num_batches=1, interval="15m", limit=100)
+        if klines:
+            from portfolio.orb_predictor import _group_by_day
+            days = _group_by_day(klines)
+            if days:
+                today_candles = days[-1]
+                mr = calculate_morning_range(today_candles)
+                if mr:
+                    orb.set_range(mr.high, mr.low)
+    except Exception as e:
+        log_msg(f'ORB init: {e}')
+
+    # VWAP for straddle exit target
+    vwap = 0
+    try:
+        with open('data/agent_summary.json') as f:
+            full = json.load(f)
+        vwap = float((full.get('price_levels', {}).get('XAG-USD', {}) or {}).get('vwap', 0))
+        if vwap:
+            log_msg(f'VWAP: ${vwap:.2f}')
+    except Exception:
+        pass
     md = 0
 
     log_msg(f'=== FISH MONITOR LIVE | {session_pnl:+.0f} SEK | {mode.upper()} mode | until {SESSION_END_H}:{SESSION_END_M:02d} ===')
@@ -314,6 +477,15 @@ def main():
             if not p:
                 time.sleep(30)
                 continue
+
+            # Track gold + ORB every cycle
+            gold_p = fetch_gold_price()
+            gold_lead.update(gold_p, p)
+            orb.update(p)
+
+            # Time-of-day gating (tactic 4)
+            is_us_session = 14 <= h < 17  # 14:00-17:00 CET = best hours
+            is_dead_zone = 10 <= h < 14   # 10:00-14:00 CET = low volume
 
             if now - lsc >= 60:
                 lsc = now
@@ -372,7 +544,9 @@ def main():
                     # Max hold time: reduce to 60m if high-impact event within 24h
                     max_hold = 60 if (event_hours < 24 or sg.get('high_impact_near')) else 120
 
-                    log_msg(f'${p:.2f} {d} {mv:+.1f}%/{cm:+.0f}% P&L:{cpnl:+.0f} | {sg["a"]} {sg["b"]}B/{sg["s"]}S RSI={sg["rsi"]:.0f} MC={sg["mc"]:.0%} M:{sg["ma"]} | {sg["f1d"]}{mdf}{warn_str} [{mn}m/{max_hold}m]')
+                    gl_str = f' {gold_lead.status()}' if gold_lead.status() else ''
+                    orb_str = f' {orb.status()}' if orb.range_formed else ''
+                    log_msg(f'${p:.2f} {d} {mv:+.1f}%/{cm:+.0f}% P&L:{cpnl:+.0f} | {sg["a"]} {sg["b"]}B/{sg["s"]}S RSI={sg["rsi"]:.0f} MC={sg["mc"]:.0%} M:{sg["ma"]} | {sg["f1d"]}{mdf}{warn_str}{gl_str}{orb_str} [{mn}m/{max_hold}m]')
 
                     ex = None
                     if d == 'LONG':
@@ -462,6 +636,26 @@ def main():
                                 if active:
                                     straddle_bear_filled = True
                                     fl = f' >>> STRADDLE SHORT (ceil)'
+                    # --- Gold-leads-silver entry (fires in ANY mode) ---
+                    if not active and now > cd:
+                        gl_dir, gl_conf = gold_lead.detect()
+                        if gl_dir and gl_conf >= 0.5:
+                            # Time gating: stronger signal needed in dead zone
+                            if not is_dead_zone or gl_conf >= 0.7:
+                                log_msg(f'!! GOLD LEAD: {gl_dir} (conf {gl_conf:.0%}, {gold_lead.status()})')
+                                active = buy_position(gl_dir, p)
+                                if active:
+                                    fl = f' >>> GOLD-LEAD {gl_dir}'
+
+                    # --- ORB breakout entry (fires in ANY mode) ---
+                    if not active and now > cd and orb.range_formed:
+                        orb_dir, orb_tp, orb_sl = orb.detect(p)
+                        if orb_dir:
+                            log_msg(f'!! ORB BREAKOUT: {orb_dir} (TP=${orb_tp:.2f} SL=${orb_sl:.2f})')
+                            active = buy_position(orb_dir, p)
+                            if active:
+                                fl = f' >>> ORB {orb_dir}'
+
                     # Show warnings when scanning too
                     scan_warns = []
                     ev_h = sg.get('event_hours', 999)
@@ -482,7 +676,10 @@ def main():
                         dist_f = (p - straddle_floor) / p * 100
                         dist_c = (straddle_ceil - p) / p * 100
                         straddle_str = f' F=${straddle_floor:.2f}({dist_f:.1f}%) C=${straddle_ceil:.2f}({dist_c:.1f}%)'
-                    log_msg(f'${p:.2f} | {sg["a"]} {sg["b"]}B/{sg["s"]}S RSI={sg["rsi"]:.0f} MC={sg["mc"]:.0%} M:{sg["ma"]} | {sg["f1d"]}{sw}{fl}{mode_str}{straddle_str}')
+                    gl_s = f' {gold_lead.status()}' if gold_lead.status() else ''
+                    orb_s = f' {orb.status()}' if orb.range_formed else ''
+                    tz = ' [DEAD-ZONE]' if is_dead_zone else (' [US-SESSION]' if is_us_session else '')
+                    log_msg(f'${p:.2f} | {sg["a"]} {sg["b"]}B/{sg["s"]}S RSI={sg["rsi"]:.0f} MC={sg["mc"]:.0%} M:{sg["ma"]} | {sg["f1d"]}{sw}{fl}{mode_str}{straddle_str}{gl_s}{orb_s}{tz}')
             else:
                 if active:
                     d = active['d']
