@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-04-01
-Branch: improve/auto-session-2026-04-01
+Updated: 2026-04-02
+Branch: improve/auto-session-2026-04-02
 
 ## 1) Architecture Summary
 
@@ -74,7 +74,7 @@ Two-layer autonomous trading system with 32 signals (30 tracked + 2 asset-class-
 - `message_throttle.py`: Analysis message rate limiting
 - `digest.py` (206 lines): 4-hour periodic digest with invocation stats
 
-### Infrastructure (9 modules)
+### Infrastructure (10 modules)
 - `file_utils.py` (~250 lines): atomic_write_json, load_json/jsonl, prune_jsonl, atomic_append_jsonl, load_jsonl_tail, last_jsonl_entry
 - `http_retry.py` (66 lines): Exponential backoff (3 retries, 1s base, 2x factor)
 - `circuit_breaker.py` (97 lines): Thread-safe state machine (CLOSED→OPEN→HALF_OPEN)
@@ -84,6 +84,7 @@ Two-layer autonomous trading system with 32 signals (30 tracked + 2 asset-class-
 - `process_lock.py` (101 lines): Cross-platform non-blocking file locks (msvcrt/fcntl)
 - `subprocess_utils.py` (233 lines): Windows Job Object subprocess protection, orphan reaper
 - `notification_text.py` (65 lines): Shared text helpers for human-readable notifications
+- `llama_server.py` (309 lines): Unified persistent llama-server manager, cross-process model swap with file lock, query-scoped locking (BUG-165)
 
 ## 4) Data Flow
 
@@ -135,12 +136,11 @@ main.loop()
 4. Dynamic MIN_VOTERS: trending=3, high-vol=4, ranging=5
 5. Unanimity penalty: 90%+ agreement → 0.6x, 80-90% → 0.75x (high unanimity = already priced in)
 
-### Signal Inventory (32 total: 30 tracked + 2 untracked)
+### Signal Inventory (32 total: all tracked)
 - **Core active (9)**: RSI, MACD, EMA, BB, Fear&Greed, Sentiment, Ministral-8B, Qwen3-8B, Volume
 - **Core disabled (2)**: ML Classifier (28.2%), Funding Rate (27.0%)
-- **Enhanced composite tracked (19)**: Trend, Momentum, Volume Flow, Volatility, Candlestick, Structure, Fibonacci, Smart Money, Oscillators, Heikin-Ashi, Mean Reversion, Calendar, Macro Regime, Momentum Factors, News Event, Econ Calendar, Forecast, Claude Fundamental, Futures Flow
-- **Enhanced composite untracked (2)**: Orderbook Flow, Metals Cross-Asset — registered in signal_registry and votes counted, but missing from SIGNAL_NAMES → accuracy never tracked (see BUG-160)
-- **Note**: crypto_macro is also registered in signal_registry but not in SIGNAL_NAMES — votes counted but accuracy untracked (part of BUG-160)
+- **Enhanced composite (21)**: Trend, Momentum, Volume Flow, Volatility, Candlestick, Structure, Fibonacci, Smart Money, Oscillators, Heikin-Ashi, Mean Reversion, Calendar, Macro Regime, Momentum Factors, News Event, Econ Calendar, Forecast, Claude Fundamental, Futures Flow, Crypto Macro, Orderbook Flow, Metals Cross-Asset
+- **Note**: BUG-160 fixed (2026-04-01) — all 3 previously untracked signals (crypto_macro, orderbook_flow, metals_cross_asset) added to SIGNAL_NAMES
 
 ## 6) Configuration
 
@@ -325,10 +325,13 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - REF-30: pyproject.toml description "29-signal" → "30-signal" — **fixed 2026-03-31**
 - REF-31: 78 unused imports + 65 unsorted imports in test files — **fixed 2026-03-31** (auto-fix)
 - ARCH-30: 14 `try/except/pass` → `contextlib.suppress` conversions — **done 2026-03-31**
-- BUG-160 (P1): 3 signals (crypto_macro, orderbook_flow, metals_cross_asset) registered in signal_registry but missing from SIGNAL_NAMES — votes counted in consensus but accuracy never tracked, outcomes never backfilled
-- BUG-161 (P2): `metals_loop.py` has 6 raw `f.write(json.dumps(...))` JSONL appends instead of `atomic_append_jsonl()` — no fsync, crash during write corrupts file
-- BUG-162 (P3): `metals_loop.py` is 4,553-line monolith — hardest module to maintain, highest bug density
-- BUG-163 (P3): `exit_optimizer.py` antithetic variate breaks on odd n_paths — extra full path defeats variance reduction
-- BUG-164 (P3): `orb_predictor.py` hardcodes UTC hours 8-10 for morning range — incorrect during CEST (summer time)
-- REF-32: pyproject.toml description still says "30-signal" — should be "32-signal"
-- ~5,781 tests across 210 test files (as of 2026-04-01)
+- BUG-160 (P1): 3 signals missing from SIGNAL_NAMES — **fixed 2026-04-01** (added crypto_macro, orderbook_flow, metals_cross_asset)
+- BUG-161 (P2): metals_loop.py raw JSONL appends — **fixed 2026-04-01** (atomic_append_jsonl)
+- BUG-162 (P3): `metals_loop.py` is 4,553-line monolith — hardest module to maintain, highest bug density (deferred)
+- BUG-163 (P3): `exit_optimizer.py` antithetic variate breaks on odd n_paths (deferred)
+- BUG-164 (P3): `orb_predictor.py` hardcodes UTC hours 8-10 for morning range (deferred)
+- BUG-165 (P1): llama_server.py model swap race condition — **fixed 2026-04-02** (locks held during entire query operation)
+- BUG-166 (P2): `shared_state._cached()` thundering herd on TTL expiry — **fixed 2026-04-02** (dogpile prevention via per-key loading flag)
+- BUG-167 (P2): Dead `_CORE_SIGNAL_SET` in signal_engine.py — **fixed 2026-04-02** (removed)
+- REF-33..37: 18 unused imports, 5 SIM105, 3 F541, 1 F841 in portfolio/ — **fixed 2026-04-02** (ruff auto-fix)
+- ~5,807 tests across 212 test files (as of 2026-04-02)

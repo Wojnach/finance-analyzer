@@ -375,7 +375,6 @@ def _get_horizon_weights(horizon: str | None) -> dict[str, float]:
 _CRYPTO_ONLY_SIGNALS = {"futures_flow", "funding", "crypto_macro"}
 _METALS_ONLY_SIGNALS = {"metals_cross_asset"}
 _NON_STOCK_SIGNALS = {"orderbook_flow"}  # metals + crypto only
-_CORE_SIGNAL_SET = {"rsi", "macd", "ema", "bb", "fear_greed", "sentiment", "ministral", "qwen3", "ml", "funding", "volume", "claude_fundamental"}
 
 
 def _compute_applicable_count(ticker: str, skip_gpu: bool = False) -> int:
