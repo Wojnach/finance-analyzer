@@ -68,13 +68,41 @@ def load_signals():
         f1d_data = focus.get('1d', {})
         f1d_dir = f1d_data.get('direction', '?')
         f1d_prob = float(f1d_data.get('probability', 0.5))
+        # News/event details (Gap 1+2 fix)
+        news_sig = enh.get('news_event') or {}
+        econ_sig = enh.get('econ_calendar') or {}
+        news_ind = news_sig.get('indicators', {})
+        econ_ind = econ_sig.get('indicators', {})
+
+        # Extract event proximity and type
+        event_hours = econ_ind.get('proximity_hours_until', 999)
+        event_name = econ_ind.get('risk_nearest_event', econ_ind.get('proximity_next_event', ''))
+        event_impact = econ_ind.get('type_event_impact', '')
+        high_impact_near = econ_ind.get('risk_high_impact_within_4h', False)
+
+        # Extract news severity
+        news_severity = news_ind.get('severity_max_severity', '')
+        news_keywords = news_ind.get('severity_keywords_found', [])
+        news_articles = news_ind.get('total_headlines', news_ind.get('velocity_article_count', 0))
+        news_velocity_base = news_ind.get('velocity_baseline', 0)
+
         return {
             'a': xag.get('action', '?'), 'rsi': float(xag.get('rsi', 50)),
             'b': ex.get('_buy_count', 0), 's': ex.get('_sell_count', 0),
             'mc': float(mc.get('p_up', 0.5)), 'ma': ma,
-            'news': (enh.get('news_event') or {}).get('action', 'HOLD'),
-            'econ': (enh.get('econ_calendar') or {}).get('action', 'HOLD'),
+            'news': news_sig.get('action', 'HOLD'),
+            'econ': econ_sig.get('action', 'HOLD'),
             'f1d': f'{f1d_dir} {f1d_prob:.0%}', 'f1d_dir': f1d_dir, 'f1d_prob': f1d_prob,
+            # Event details
+            'event_hours': event_hours if isinstance(event_hours, (int, float)) else 999,
+            'event_name': str(event_name)[:30] if event_name else '',
+            'event_impact': str(event_impact),
+            'high_impact_near': bool(high_impact_near),
+            # News details
+            'news_severity': str(news_severity),
+            'news_keywords': news_keywords if isinstance(news_keywords, list) else [],
+            'news_articles': int(news_articles) if news_articles else 0,
+            'news_spike': int(news_articles) > int(news_velocity_base or 0) * 2 if news_velocity_base else False,
         }
     except Exception as e:
         log_msg(f'Signal load error: {e}')
@@ -217,9 +245,30 @@ def main():
                         md = 0
 
                     mdf = f' !!MD{md}' if md >= 2 else ''
-                    nf = f' N={sg["news"]}' if sg['news'] != 'HOLD' else ''
-                    ef = f' E={sg["econ"]}' if sg['econ'] != 'HOLD' else ''
-                    log_msg(f'${p:.2f} {d} {mv:+.1f}%/{cm:+.0f}% P&L:{cpnl:+.0f} | {sg["a"]} {sg["b"]}B/{sg["s"]}S RSI={sg["rsi"]:.0f} MC={sg["mc"]:.0%} M:{sg["ma"]} | {sg["f1d"]}{mdf}{nf}{ef} [{mn}m]')
+
+                    # Event/news warnings (Gap 1+2 fix)
+                    warnings = []
+                    event_hours = sg.get('event_hours', 999)
+                    event_name = sg.get('event_name', '')
+                    if event_hours < 24 and event_name:
+                        warnings.append(f'EVENT:{event_name} {event_hours:.0f}h')
+                    if sg.get('high_impact_near'):
+                        warnings.append('HIGH-IMPACT <4h!')
+                    if sg.get('news_severity') in ('critical', 'high'):
+                        kw = ','.join(sg.get('news_keywords', [])[:3])
+                        warnings.append(f'NEWS:{sg["news_severity"]}({kw})')
+                    if sg.get('news_spike'):
+                        warnings.append(f'NEWS-SPIKE:{sg.get("news_articles",0)} articles')
+                    if sg['news'] != 'HOLD':
+                        warnings.append(f'N={sg["news"]}')
+                    if sg['econ'] != 'HOLD':
+                        warnings.append(f'E={sg["econ"]}')
+                    warn_str = ' !!' + ' '.join(warnings) if warnings else ''
+
+                    # Max hold time: reduce to 60m if high-impact event within 24h
+                    max_hold = 60 if (event_hours < 24 or sg.get('high_impact_near')) else 120
+
+                    log_msg(f'${p:.2f} {d} {mv:+.1f}%/{cm:+.0f}% P&L:{cpnl:+.0f} | {sg["a"]} {sg["b"]}B/{sg["s"]}S RSI={sg["rsi"]:.0f} MC={sg["mc"]:.0%} M:{sg["ma"]} | {sg["f1d"]}{mdf}{warn_str} [{mn}m/{max_hold}m]')
 
                     ex = None
                     if d == 'LONG':
@@ -235,8 +284,8 @@ def main():
                             ex = 'TP'
                         elif mv <= -3.0:
                             ex = 'SL'
-                        elif mn >= 120:
-                            ex = '2h'
+                        elif mn >= max_hold:
+                            ex = f'{max_hold}m hold'
                     else:
                         if sg['rsi'] < 30:
                             ex = 'RSI'
@@ -248,8 +297,8 @@ def main():
                             ex = 'TP'
                         elif mv <= -3.0:
                             ex = 'SL'
-                        elif mn >= 120:
-                            ex = '2h'
+                        elif mn >= max_hold:
+                            ex = f'{max_hold}m hold'
 
                     if ex:
                         pnl = sell_position(active, ex)
@@ -269,7 +318,18 @@ def main():
                         if active:
                             md = 0
                             fl = f' >>> {dr}'
-                    log_msg(f'${p:.2f} | {sg["a"]} {sg["b"]}B/{sg["s"]}S RSI={sg["rsi"]:.0f} MC={sg["mc"]:.0%} M:{sg["ma"]} | {sg["f1d"]}{fl}')
+                    # Show warnings when scanning too
+                    scan_warns = []
+                    ev_h = sg.get('event_hours', 999)
+                    ev_n = sg.get('event_name', '')
+                    if ev_h < 24 and ev_n:
+                        scan_warns.append(f'EVENT:{ev_n} {ev_h:.0f}h')
+                    if sg.get('news_severity') in ('critical', 'high'):
+                        scan_warns.append(f'NEWS:{sg["news_severity"]}')
+                    if sg['econ'] != 'HOLD':
+                        scan_warns.append(f'E={sg["econ"]}')
+                    sw = ' !!' + ' '.join(scan_warns) if scan_warns else ''
+                    log_msg(f'${p:.2f} | {sg["a"]} {sg["b"]}B/{sg["s"]}S RSI={sg["rsi"]:.0f} MC={sg["mc"]:.0%} M:{sg["ma"]} | {sg["f1d"]}{sw}{fl}')
             else:
                 if active:
                     d = active['d']
