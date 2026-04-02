@@ -21,12 +21,23 @@ _RETRY_COOLDOWN = 60
 _CACHE_MAX_SIZE = 256  # evict expired entries when cache exceeds this size
 _cache_lock = threading.Lock()
 
+# BUG-166: Dogpile/thundering-herd prevention.
+# Tracks which keys are currently being refreshed. When a thread sees a cache
+# miss and the key is already loading, it returns stale data (if available)
+# instead of calling the function redundantly.
+_loading_keys: set[str] = set()
+_LOADING_TIMEOUT = 120  # seconds to wait for a loading thread before giving up
 
 _MAX_STALE_FACTOR = 3  # return None if cached data is older than TTL * this factor
 
 
 def _cached(key, ttl, func, *args):
     """Cache-through helper: returns cached data if fresh, else calls func.
+
+    Dogpile prevention (BUG-166): when multiple threads detect a cache miss
+    simultaneously, only one thread fetches the data. Others return stale
+    data if available, preventing redundant expensive calls (LLM inference,
+    API requests) and model swap contention.
 
     On error, returns stale data if it's less than TTL * _MAX_STALE_FACTOR old.
     Beyond that, returns None to prevent trading on dangerously old data.
@@ -50,17 +61,36 @@ def _cached(key, ttl, func, *args):
                 evict_count = len(sorted_keys) // 4 or 1
                 for k in sorted_keys[:evict_count]:
                     del _tool_cache[k]
+
+        # BUG-166: Dogpile prevention — if another thread is already loading
+        # this key, return stale data instead of calling func redundantly.
+        if key in _loading_keys:
+            if key in _tool_cache:
+                age = now - _tool_cache[key]["time"]
+                max_stale = ttl * _MAX_STALE_FACTOR
+                if age <= max_stale:
+                    logger.debug("[%s] stale-while-revalidate (another thread loading)", key)
+                    return _tool_cache[key]["data"]
+            # No stale data available — return None rather than pile on
+            logger.debug("[%s] no stale data, another thread loading — returning None", key)
+            return None
+        _loading_keys.add(key)
+
     try:
         data = func(*args)
         with _cache_lock:
             _tool_cache[key] = {"data": data, "time": now, "ttl": ttl}
+            _loading_keys.discard(key)
         return data
     except KeyboardInterrupt:
+        with _cache_lock:
+            _loading_keys.discard(key)
         logger.warning("[%s] interrupted (KeyboardInterrupt), returning None", key)
         return None
     except Exception as e:
         logger.warning("[%s] error: %s", key, e)
         with _cache_lock:
+            _loading_keys.discard(key)
             if key in _tool_cache:
                 age = now - _tool_cache[key]["time"]
                 max_stale = ttl * _MAX_STALE_FACTOR

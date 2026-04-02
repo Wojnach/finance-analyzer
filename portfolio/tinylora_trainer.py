@@ -6,7 +6,7 @@ Training is only allowed after market hours (22:00-08:00 CET weekdays, all day w
 
 import json
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 logger = logging.getLogger("portfolio.tinylora_trainer")

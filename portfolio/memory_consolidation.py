@@ -403,7 +403,7 @@ if __name__ == "__main__":
     days = int(sys.argv[1]) if len(sys.argv) > 1 else 7
     result = consolidate_insights(days=days)
 
-    print(f"\nConsolidation complete:")
+    print("\nConsolidation complete:")
     print(f"  Entries processed: {result['entries_processed']}")
     print(f"  Total decisions:   {result['total_decisions']}")
     print(f"  Dominant regime:   {result['dominant_regime']}")

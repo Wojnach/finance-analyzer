@@ -253,8 +253,8 @@ def _run_post_cycle(config):
         logger.warning("Crypto scheduler failed: %s", e_crypto)
     # Signal postmortem (daily — uses accuracy cache, generates once per day)
     try:
-        from portfolio.signal_postmortem import POSTMORTEM_FILE, generate_postmortem
         from portfolio.file_utils import load_json as _lj
+        from portfolio.signal_postmortem import POSTMORTEM_FILE, generate_postmortem
         pm = _lj(POSTMORTEM_FILE)
         # Regenerate if missing or stale (>20 hours old)
         if not pm or (time.time() - pm.get("_epoch", 0)) > 72000:

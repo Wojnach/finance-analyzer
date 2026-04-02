@@ -27,7 +27,6 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Any
 
 from portfolio.avanza.types import _val
 

@@ -16,13 +16,11 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 from portfolio.file_utils import load_jsonl
 from portfolio.linear_factor import LinearFactorModel
 from portfolio.signal_weight_optimizer import (
-    WalkForwardResult,
     save_results,
     walk_forward_optimize,
 )
