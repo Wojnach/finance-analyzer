@@ -21,6 +21,7 @@ import platform
 import subprocess
 import threading
 import time
+from contextlib import suppress
 
 import requests as _requests
 
@@ -139,17 +140,13 @@ def _stop_server():
             _local_proc.terminate()
             _local_proc.wait(timeout=10)
         except Exception:
-            try:
+            with suppress(Exception):
                 _local_proc.kill()
-            except Exception:
-                pass
     _local_proc = None
     _local_model = None
 
-    try:
+    with suppress(OSError):
         os.remove(_PID_FILE)
-    except Exception:
-        pass
 
 
 def _start_server(name):
@@ -237,10 +234,8 @@ def _acquire_file_lock(timeout=120):
                 else:
                     os.kill(lock_pid, 0)  # raises if dead
             except (ProcessLookupError, OSError, ValueError):
-                try:
+                with suppress(OSError):
                     os.remove(_LOCK_FILE)
-                except Exception:
-                    pass
                 continue
             time.sleep(1)
     logger.warning("llama-server file lock timeout (%ds)", timeout)
@@ -250,14 +245,10 @@ def _acquire_file_lock(timeout=120):
 def _release_file_lock(fh):
     """Release cross-process file lock."""
     if fh is not None:
-        try:
+        with suppress(Exception):
             fh.close()
-        except Exception:
-            pass
-        try:
+        with suppress(OSError):
             os.remove(_LOCK_FILE)
-        except Exception:
-            pass
 
 
 def query_llama_server(name, prompt, n_predict=1024, temperature=0.0,
