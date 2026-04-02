@@ -14,9 +14,12 @@ Headlines are fetched using the existing sentiment.py functions with caching.
 from __future__ import annotations
 
 import logging
+import os
+from datetime import datetime, timezone
 
 import pandas as pd
 
+from portfolio.file_utils import atomic_write_json
 from portfolio.news_keywords import (
     dissemination_score,
     get_sector_impact,
@@ -38,6 +41,61 @@ _BASELINE_ARTICLES = 5
 
 # Max confidence cap
 _MAX_CONFIDENCE = 0.7
+
+# Persisted headlines path (fish monitor reads this)
+_HEADLINES_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "data", "headlines_latest.json",
+)
+
+
+def _persist_headlines(ticker: str, headlines: list[dict]) -> None:
+    """Write top 10 scored headlines to disk for fish monitor consumption."""
+    if not headlines:
+        return
+    try:
+        scored = []
+        for h in headlines:
+            title = h.get("title", "")
+            if not title:
+                continue
+            sev = keyword_severity(title)
+            weight, _ = score_headline(title)
+            # Determine sentiment from keyword direction
+            lower = title.lower()
+            if sev in ("critical", "high"):
+                sentiment = "negative"
+            elif sev == "moderate":
+                if any(kw in lower for kw in (
+                    "beat", "upgrade", "approval", "approved",
+                    "raise", "buyback", "split", "rally", "surge",
+                )):
+                    sentiment = "positive"
+                else:
+                    sentiment = "negative"
+            else:
+                sentiment = "neutral"
+            scored.append({
+                "title": title,
+                "source": h.get("source", "unknown"),
+                "severity": sev,
+                "sentiment": sentiment,
+                "_weight": weight,
+            })
+        # Sort by weight descending, take top 10
+        scored.sort(key=lambda x: x["_weight"], reverse=True)
+        top = scored[:10]
+        # Remove internal sort key
+        for item in top:
+            item.pop("_weight", None)
+        payload = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "ticker": ticker,
+            "headlines": top,
+        }
+        atomic_write_json(_HEADLINES_PATH, payload)
+    except Exception:
+        logger.debug("Failed to persist headlines for %s", ticker, exc_info=True)
 
 
 def _fetch_headlines(ticker: str, config: dict) -> list[dict]:
@@ -451,6 +509,9 @@ def compute_news_event_signal(df: pd.DataFrame, context: dict = None) -> dict:
     headlines = _fetch_headlines(ticker, config)
     if not headlines:
         return result
+
+    # Persist top scored headlines for fish monitor
+    _persist_headlines(ticker, headlines)
 
     # Compute each sub-signal
     try:

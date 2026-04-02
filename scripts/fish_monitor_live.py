@@ -86,7 +86,7 @@ def load_signals():
         news_articles = news_ind.get('total_headlines', news_ind.get('velocity_article_count', 0))
         news_velocity_base = news_ind.get('velocity_baseline', 0)
 
-        return {
+        out = {
             'a': xag.get('action', '?'), 'rsi': float(xag.get('rsi', 50)),
             'b': ex.get('_buy_count', 0), 's': ex.get('_sell_count', 0),
             'mc': float(mc.get('p_up', 0.5)), 'ma': ma,
@@ -104,6 +104,18 @@ def load_signals():
             'news_articles': int(news_articles) if news_articles else 0,
             'news_spike': int(news_articles) > int(news_velocity_base or 0) * 2 if news_velocity_base else False,
         }
+        # Read persisted headlines for context
+        try:
+            with open('data/headlines_latest.json') as hf:
+                hl_data = json.load(hf)
+            if hl_data.get('ticker') == 'XAG-USD' and hl_data.get('headlines'):
+                top_hl = hl_data['headlines'][0]
+                out['headline_top'] = top_hl.get('title', '')[:80]
+                out['headline_severity'] = top_hl.get('severity', '')
+                out['headline_sentiment'] = top_hl.get('sentiment', '')
+        except Exception:
+            pass
+        return out
     except Exception as e:
         log_msg(f'Signal load error: {e}')
         return None
@@ -261,6 +273,9 @@ def main():
                         warnings.append(f'NEWS-SPIKE:{sg.get("news_articles",0)} articles')
                     if sg['news'] != 'HOLD':
                         warnings.append(f'N={sg["news"]}')
+                        hl = sg.get('headline_top', '')
+                        if hl:
+                            warnings.append(f'"{hl[:50]}"')
                     if sg['econ'] != 'HOLD':
                         warnings.append(f'E={sg["econ"]}')
                     warn_str = ' !!' + ' '.join(warnings) if warnings else ''
@@ -326,6 +341,9 @@ def main():
                         scan_warns.append(f'EVENT:{ev_n} {ev_h:.0f}h')
                     if sg.get('news_severity') in ('critical', 'high'):
                         scan_warns.append(f'NEWS:{sg["news_severity"]}')
+                        hl = sg.get('headline_top', '')
+                        if hl:
+                            scan_warns.append(f'"{hl[:50]}"')
                     if sg['econ'] != 'HOLD':
                         scan_warns.append(f'E={sg["econ"]}')
                     sw = ' !!' + ' '.join(scan_warns) if scan_warns else ''
