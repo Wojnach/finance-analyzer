@@ -1,0 +1,62 @@
+{
+  "account": "1625505",
+  "instrument": "Silver (XAG-USD)",
+  "strategy": "Intraday fishing (momentum + straddle)",
+  "daily_results": [
+    {
+      "date": "2026-04-01",
+      "intraday_pnl_sek": 389,
+      "overnight_pnl_sek": -620,
+      "total_pnl_sek": -231,
+      "trades": 10,
+      "wins": 6,
+      "losses": 2,
+      "breakeven": 2,
+      "capital_used_sek": 1400,
+      "intraday_return_pct": 27.8,
+      "best_trade_sek": 147,
+      "best_trade_reason": "TURBO L combined RSI63+MC26% exit",
+      "worst_trade_sek": -44,
+      "worst_trade_reason": "TURBO S BUY flip exit",
+      "overnight_loss_reason": "Held TURBO L over Liberation Day \u2014 did not follow playbook",
+      "lessons_learned": "39-55",
+      "market_type": "ranging/swinging"
+    },
+    {
+      "date": "2026-04-02",
+      "intraday_pnl_sek": 7,
+      "overnight_pnl_sek": 0,
+      "total_pnl_sek": 7,
+      "trades": 6,
+      "wins": 3,
+      "losses": 3,
+      "breakeven": 0,
+      "capital_used_sek": 1000,
+      "intraday_return_pct": 0.7,
+      "best_trade_sek": 15,
+      "best_trade_reason": "BEAR X5 metals disagree exit",
+      "worst_trade_sek": -26,
+      "worst_trade_reason": "BULL X5 metals disagree exit on chop",
+      "overnight_loss_reason": null,
+      "lessons_learned": "56-62",
+      "market_type": "post-crash chop (Liberation Day)"
+    }
+  ],
+  "cumulative": {
+    "total_intraday_pnl_sek": 396,
+    "total_overnight_pnl_sek": -620,
+    "total_pnl_sek": -224,
+    "total_trades": 16,
+    "total_wins": 9,
+    "total_losses": 5,
+    "win_rate_pct": 56.3,
+    "avg_win_sek": 63,
+    "avg_loss_sek": -29,
+    "profit_factor": 2.2,
+    "best_day_sek": 389,
+    "worst_day_sek": -231,
+    "intraday_only_pnl_sek": 396,
+    "intraday_only_return_pct": 33.0,
+    "key_insight": "System is profitable intraday (+33% over 2 days). Overnight holds on event days destroy gains."
+  }
+}
