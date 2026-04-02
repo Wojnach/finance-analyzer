@@ -1,0 +1,65 @@
+{
+  "date": "2026-04-02",
+  "event": "Liberation Day Anniversary",
+  "session_pnl_sek": -609,
+  "trades": [
+    {
+      "instrument": "TURBO L SILVER AVA 481",
+      "direction": "LONG",
+      "entry": 10.17,
+      "exit": 6.22,
+      "pnl": -620,
+      "reason": "Overnight crash on Liberation Day. Did NOT follow playbook."
+    },
+    {
+      "instrument": "BULL SILVER X5 AVA 4",
+      "direction": "LONG",
+      "entry": 6.04,
+      "exit": 6.11,
+      "pnl": 11,
+      "reason": "Quick swap from TURBO (knockout risk) to BULL (safe). Metals disagree x3 exit."
+    },
+    {
+      "instrument": "BEAR SILVER X5 AVA 12",
+      "direction": "SHORT",
+      "entry": 0,
+      "exit": 0,
+      "pnl": 0,
+      "reason": "OPEN - riding crash day"
+    }
+  ],
+  "lessons": [
+    {
+      "id": 56,
+      "lesson": "FOLLOW YOUR OWN PLAYBOOK. We wrote Liberation Day rules (no overnight, wider stops) and ignored them. Cost: -620 SEK. The playbook existed, the data supported it, and we overrode it because trusted signals said 4B/1S.",
+      "fix": "When a dated playbook exists for a known event, it overrides signal consensus. Signals dont know about events."
+    },
+    {
+      "id": 57,
+      "lesson": "Crash days close near the low \u2014 only 22% average recovery from intraday low across 24 crash days. Dont try to buy the dip on the crash day itself.",
+      "fix": "On crash days (>3% drop), do NOT enter LONG. Wait for next day. 67% bounce probability on day after crash."
+    },
+    {
+      "id": 58,
+      "lesson": "Thursday is silvers worst day \u2014 avg -0.88%, down 55% of the time. Friday after Thursday crash bounces 63% of the time, avg +2.5%.",
+      "fix": "Thursday crash + Friday bounce is a tradeable pattern. Enter BULL at Friday open after Thursday crash, but half-size due to 37% continued-crash risk."
+    },
+    {
+      "id": 59,
+      "lesson": "Liberation Day is the exception to the Thursday-Friday bounce pattern. Apr 2025: Thu -7.7% then Fri -8.6%. If the event has new information (tariff announcement), the crash continues. Check if there are actual new announcements vs just anniversary noise.",
+      "fix": "Before trading the Friday bounce, web search for overnight developments. If new tariff action announced, skip the bounce trade."
+    },
+    {
+      "id": 60,
+      "lesson": "TURBO warrants with close barriers are death traps on event days. TURBO L AVA 491 (barrier 8) got knocked out when silver dropped to 9.66. TURBO L AVA 481 (barrier 5) survived but lost 42%. Use no-knockout BULL/BEAR X5 certs on event days.",
+      "fix": "Event day rule: ONLY use no-knockout instruments (BULL/BEAR X5). Never TURBOs or MINIs with barriers <15% from current price."
+    }
+  ],
+  "historical_analysis": {
+    "crash_day_intraday_recovery": "22% average \u2014 crashes close near the low",
+    "next_day_after_crash": "67% bounce, avg +1.7%",
+    "friday_after_thursday_crash": "63% bounce, BUT Liberation Day exception -8.6% (2025)",
+    "thursdays_worst_day": "-0.88% avg, down 55% of time",
+    "high_vol_week_fridays": "Split 14 up / 8 down \u2014 not reliable direction"
+  }
+}
