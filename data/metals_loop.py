@@ -567,6 +567,14 @@ _silver_consecutive_down = 0
 _silver_prev_price = None
 _silver_underlying_ref = None        # XAG-USD price at position entry (reference for alerts)
 
+# --- Fish precompute state ---
+_gold_price_history = deque(maxlen=12)  # ~12 minutes at 60s cycle, for 5-min change
+_silver_price_history_fish = deque(maxlen=12)  # same for silver
+_orb_computed_today = None                # date string "YYYY-MM-DD" when ORB was last computed
+_orb_range_cache = {"high": 0, "low": 0, "formed": False}
+_vol_scalar_cache = {"value": 1.0, "ts": 0.0}  # hourly refresh
+_signal_action_history = deque(maxlen=10)  # last 10 XAG signal actions for flip detection
+
 def acquire_singleton_lock(lock_path=SINGLETON_LOCK_FILE):
     """Acquire single-instance lock for metals loop (non-blocking)."""
     global _singleton_lock_fh
@@ -1634,6 +1642,169 @@ def _fetch_metals_news():
     _last_news_fetch_ts = time.time()
     log(f"News fetch: {len(unique_headlines)} headlines, severity={sorted(severity_found) or 'none'}")
     return summary
+
+
+# ---------------------------------------------------------------------------
+# Fish precomputation — provides pre-built data for the fishing monitor
+# ---------------------------------------------------------------------------
+
+def _write_fish_precomputed():
+    """Write data/fish_precomputed.json for the fishing monitor.
+
+    Computes: gold/silver 5-min price change, gold-leads-silver detection,
+    ORB range (once/day after 10:00 UTC), vol scalar (hourly), mode suggestion.
+    Never crashes the loop — all exceptions caught internally.
+    """
+    global _orb_computed_today, _orb_range_cache, _vol_scalar_cache
+
+    try:
+        gold_price = _underlying_prices.get("XAU-USD", 0)
+        silver_price = _underlying_prices.get("XAG-USD", 0)
+        if gold_price <= 0 or silver_price <= 0:
+            return  # no prices yet, skip silently
+
+        # --- Update price histories ---
+        _gold_price_history.append({"ts": time.time(), "price": gold_price})
+        _silver_price_history_fish.append({"ts": time.time(), "price": silver_price})
+
+        # --- 5-min change (need at least 5 entries = ~5 min at 60s cycle) ---
+        gold_5min_change = 0.0
+        silver_5min_change = 0.0
+        if len(_gold_price_history) >= 5:
+            old_gold = _gold_price_history[-5]["price"]
+            if old_gold > 0:
+                gold_5min_change = round((gold_price - old_gold) / old_gold * 100, 4)
+        if len(_silver_price_history_fish) >= 5:
+            old_silver = _silver_price_history_fish[-5]["price"]
+            if old_silver > 0:
+                silver_5min_change = round((silver_price - old_silver) / old_silver * 100, 4)
+
+        # --- Gold-leads-silver detection ---
+        gold_leads_silver = {"direction": "NEUTRAL", "confidence": 0.0}
+        if len(_gold_price_history) >= 5 and len(_silver_price_history_fish) >= 5:
+            if gold_5min_change > 0.5 and silver_5min_change < 0.2:
+                # Gold rallying but silver lagging => silver should follow up
+                gap = gold_5min_change - silver_5min_change
+                confidence = min(gap / 1.0, 1.0)  # 1.0% gap = full confidence
+                gold_leads_silver = {
+                    "direction": "LONG",
+                    "confidence": round(confidence, 2),
+                }
+            elif gold_5min_change < -0.5 and silver_5min_change > -0.2:
+                # Gold dropping but silver hasn't followed => silver should follow down
+                gap = abs(gold_5min_change) - abs(silver_5min_change)
+                confidence = min(gap / 1.0, 1.0)
+                gold_leads_silver = {
+                    "direction": "SHORT",
+                    "confidence": round(confidence, 2),
+                }
+
+        # --- ORB range (once per day, after 10:00 UTC) ---
+        now_utc = datetime.datetime.now(datetime.UTC)
+        today_str = now_utc.strftime("%Y-%m-%d")
+        if _orb_computed_today != today_str and now_utc.hour >= 10:
+            try:
+                from portfolio.orb_predictor import ORBPredictor
+                predictor = ORBPredictor()
+                # Fetch today's 15m klines from Binance FAPI
+                params = {"symbol": "XAGUSDT", "interval": "15m", "limit": 96}
+                r = requests.get(BINANCE_FAPI_KLINES, params=params, timeout=10)
+                if r.status_code == 200:
+                    raw = r.json()
+                    parsed = predictor._parse_klines(raw)
+                    # Filter to today's candles only
+                    today_candles = [c for c in parsed if c["date"] == today_str]
+                    morning = predictor.calculate_morning_range(today_candles)
+                    if morning:
+                        _orb_range_cache = {
+                            "high": round(morning.high, 4),
+                            "low": round(morning.low, 4),
+                            "formed": True,
+                        }
+                        _orb_computed_today = today_str
+                        log(f"Fish ORB computed: {morning.low:.2f}-{morning.high:.2f}")
+                    else:
+                        _orb_range_cache = {"high": 0, "low": 0, "formed": False}
+                        _orb_computed_today = today_str  # don't retry endlessly
+            except Exception as e:
+                log(f"Fish ORB error (non-fatal): {e}")
+
+        # --- Vol scalar (hourly refresh from signal ATR) ---
+        now_ts = time.time()
+        if now_ts - _vol_scalar_cache["ts"] >= 3600:
+            try:
+                klines = fetch_underlying_klines("XAG-USD", interval="1h", limit=24)
+                if klines and len(klines) >= 14:
+                    # Compute ATR(14) from hourly klines
+                    trs = []
+                    for i in range(1, len(klines)):
+                        k = klines[i]
+                        prev_close = klines[i - 1]["close"]
+                        tr = max(
+                            k["high"] - k["low"],
+                            abs(k["high"] - prev_close),
+                            abs(k["low"] - prev_close),
+                        )
+                        trs.append(tr)
+                    current_atr = sum(trs[-14:]) / 14
+                    if len(trs) >= 14:
+                        import statistics as _stats
+                        median_atr = _stats.median(trs)
+                        if current_atr > 0:
+                            vol_scalar = median_atr / current_atr
+                            vol_scalar = max(0.25, min(2.0, vol_scalar))
+                            _vol_scalar_cache = {
+                                "value": round(vol_scalar, 3),
+                                "ts": now_ts,
+                            }
+            except Exception as e:
+                log(f"Fish vol_scalar error (non-fatal): {e}")
+
+        # --- Mode suggestion ---
+        mode = "momentum"  # default
+
+        # Check yesterday close-to-close for big drop
+        xag_hist = _underlying_history.get("XAG-USD", [])
+        if len(xag_hist) >= 2:
+            # Use oldest vs newest in history buffer (~60 entries = 1 hour)
+            # For daily close-to-close, check the klines
+            klines_daily = fetch_underlying_klines("XAG-USD", interval="1d", limit=2)
+            if klines_daily and len(klines_daily) >= 2:
+                prev_close = klines_daily[-2]["close"]
+                curr_close = klines_daily[-1]["close"]
+                if prev_close > 0:
+                    daily_change_pct = (curr_close - prev_close) / prev_close * 100
+                    if daily_change_pct < -5.0:
+                        mode = "straddle"
+
+        # Check signal flip frequency (>4 flips in last 10 checks)
+        current_action = last_signal_data.get("XAG-USD", {}).get("action", "?")
+        if current_action in ("BUY", "SELL", "HOLD"):
+            _signal_action_history.append(current_action)
+        if len(_signal_action_history) >= 5:
+            flips = sum(
+                1 for i in range(1, len(_signal_action_history))
+                if _signal_action_history[i] != _signal_action_history[i - 1]
+            )
+            if flips > 4:
+                mode = "straddle"
+
+        # --- Write the precomputed file ---
+        output = {
+            "timestamp": now_utc.isoformat(),
+            "gold_price": round(gold_price, 2),
+            "silver_price": round(silver_price, 4),
+            "gold_5min_change_pct": gold_5min_change,
+            "silver_5min_change_pct": silver_5min_change,
+            "gold_leads_silver": gold_leads_silver,
+            "orb_range": _orb_range_cache,
+            "vol_scalar": _vol_scalar_cache["value"],
+            "mode_suggestion": mode,
+        }
+        atomic_write_json(str(DATA_DIR / "fish_precomputed.json"), output)
+
+    except Exception as e:
+        log(f"Fish precompute error (non-fatal): {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -4672,6 +4843,12 @@ Positions: {pos_summary}{prob_summary}""")
                         _fetch_metals_news()
                     except Exception as e:
                         log(f"News fetch error (non-fatal): {e}")
+
+                # --- FISH PRECOMPUTE (every cycle) ---
+                try:
+                    _write_fish_precomputed()
+                except Exception as e:
+                    log(f"Fish precompute error (non-fatal): {e}")
 
                 _sleep_for_cycle(cycle_started, CHECK_INTERVAL, "metals loop")
 

@@ -690,76 +690,126 @@ def main():
                             straddle_bull_filled = False
                             straddle_bear_filled = False
                 else:
-                    # Scan for entry — depends on mode
+                    # ==========================================================
+                    # VOTING SYSTEM — collect all tactic votes, then decide
+                    # ==========================================================
                     fl = ''
-                    if mode == 'momentum':
-                        bu = sg['a'] == 'BUY' and sg['ma'] == 'BUY' and m2u
-                        be = sg['a'] == 'SELL' and sg['ma'] == 'SELL' and m2b
-                        if now > cd and (bu or be):
-                            dr = 'LONG' if bu else 'SHORT'
-                            active = buy_position(dr, p, vol_scalar)
-                            if active:
-                                md = 0
-                                fl = f' >>> MOMENTUM {dr}'
-                    elif mode == 'straddle':
-                        # Check if price hit floor or ceiling
-                        past_cancel = h > CANCEL_HOUR or (h == CANCEL_HOUR and m >= CANCEL_MIN)
-                        if not past_cancel and straddle_floor > 0 and straddle_ceil > 0:
-                            if p <= straddle_floor and not straddle_bull_filled:
-                                log_msg(f'!! FLOOR HIT ${p:.2f} <= ${straddle_floor:.2f}')
-                                active = buy_position('LONG', p, vol_scalar)
-                                if active:
-                                    straddle_bull_filled = True
-                                    fl = f' >>> STRADDLE LONG (floor)'
-                            elif p >= straddle_ceil and not straddle_bear_filled:
-                                log_msg(f'!! CEILING HIT ${p:.2f} >= ${straddle_ceil:.2f}')
-                                active = buy_position('SHORT', p, vol_scalar)
-                                if active:
-                                    straddle_bear_filled = True
-                                    fl = f' >>> STRADDLE SHORT (ceil)'
-                    # --- Gold-leads-silver entry (fires in ANY mode) ---
-                    if not active and now > cd:
-                        gl_dir, gl_conf = gold_lead.detect()
-                        if gl_dir and gl_conf >= 0.5:
-                            # Time gating: stronger signal needed in dead zone
-                            if not is_dead_zone or gl_conf >= 0.7:
-                                log_msg(f'!! GOLD LEAD: {gl_dir} (conf {gl_conf:.0%}, {gold_lead.status()})')
-                                active = buy_position(gl_dir, p, vol_scalar)
-                                if active:
-                                    fl = f' >>> GOLD-LEAD {gl_dir}'
+                    votes = {}  # {'tactic_name': 'LONG'/'SHORT'}
 
-                    # --- ORB breakout entry (fires in ANY mode) ---
-                    if not active and now > cd and orb.range_formed:
-                        orb_dir, orb_tp, orb_sl = orb.detect(p)
-                        if orb_dir:
-                            log_msg(f'!! ORB BREAKOUT: {orb_dir} (TP=${orb_tp:.2f} SL=${orb_sl:.2f})')
-                            active = buy_position(orb_dir, p, vol_scalar)
-                            if active:
-                                fl = f' >>> ORB {orb_dir}'
+                    # Read precomputed data from metals loop
+                    fish_pre = {}
+                    try:
+                        with open('data/fish_precomputed.json') as fp_f:
+                            fish_pre = json.load(fp_f)
+                        # Update vol_scalar from precomputed (refreshed hourly)
+                        if fish_pre.get('vol_scalar'):
+                            vol_scalar = fish_pre['vol_scalar']
+                        # Update mode from precomputed
+                        if fish_pre.get('mode_suggestion') and mode != 'straddle':
+                            new_mode = fish_pre['mode_suggestion']
+                            if new_mode != mode:
+                                log_msg(f'Mode updated: {mode} -> {new_mode} (from metals loop)')
+                                mode = new_mode
+                                if mode == 'straddle':
+                                    _, sc = _compute_straddle_levels()
+                                    straddle_floor = sc.get('floor', 0)
+                                    straddle_ceil = sc.get('ceil', 0)
+                        # Update ORB from precomputed
+                        orb_pre = fish_pre.get('orb_range', {})
+                        if orb_pre.get('formed') and not orb.range_formed:
+                            orb.set_range(orb_pre['high'], orb_pre['low'])
+                    except Exception:
+                        pass
 
-                    # --- Temporal pattern entry (fires in ANY mode) ---
-                    if not active and now > cd:
+                    if now > cd:
+                        # --- Tactic 1: Momentum ---
+                        if mode == 'momentum':
+                            bu = sg['a'] == 'BUY' and sg['ma'] == 'BUY' and m2u
+                            be = sg['a'] == 'SELL' and sg['ma'] == 'SELL' and m2b
+                            if bu:
+                                votes['momentum'] = 'LONG'
+                            elif be:
+                                votes['momentum'] = 'SHORT'
+
+                        # --- Tactic 2: Straddle ---
+                        elif mode == 'straddle':
+                            past_cancel = h > CANCEL_HOUR or (h == CANCEL_HOUR and m >= CANCEL_MIN)
+                            if not past_cancel and straddle_floor > 0 and straddle_ceil > 0:
+                                if p <= straddle_floor and not straddle_bull_filled:
+                                    votes['straddle'] = 'LONG'
+                                elif p >= straddle_ceil and not straddle_bear_filled:
+                                    votes['straddle'] = 'SHORT'
+
+                        # --- Tactic 3: Gold-leads-silver (from precomputed or live) ---
+                        gl_pre = fish_pre.get('gold_leads_silver', {})
+                        if gl_pre.get('direction') and gl_pre.get('confidence', 0) >= 0.5:
+                            if not is_dead_zone or gl_pre['confidence'] >= 0.7:
+                                votes['gold_lead'] = gl_pre['direction']
+                        else:
+                            gold_lead.update(fetch_gold_price(), p)
+                            gl_dir, gl_conf = gold_lead.detect()
+                            if gl_dir and gl_conf >= 0.5:
+                                if not is_dead_zone or gl_conf >= 0.7:
+                                    votes['gold_lead'] = gl_dir
+
+                        # --- Tactic 4: ORB breakout ---
+                        if orb.range_formed:
+                            orb_dir, _, _ = orb.detect(p)
+                            if orb_dir:
+                                votes['orb'] = orb_dir
+
+                        # --- Tactic 5: Temporal pattern ---
                         tp_dir, tp_prob = temporal.detect(min_probability=68)
                         if tp_dir:
-                            log_msg(f'!! TEMPORAL: {tp_dir} {tp_prob:.0f}% ({temporal.status()})')
-                            active = buy_position(tp_dir if tp_dir == 'BULL' else 'SHORT' if tp_dir == 'BEAR' else tp_dir, p, vol_scalar)
-                            if active:
-                                fl = f' >>> TEMPORAL {tp_dir}'
+                            d_map = {'BULL': 'LONG', 'BEAR': 'SHORT'}
+                            votes['temporal'] = d_map.get(tp_dir, tp_dir)
 
-                    # --- Sentiment velocity entry (fires in ANY mode) ---
-                    if not active and now > cd and sg.get('news_spike'):
-                        # Headlines spiking > 2x baseline
-                        sentiment = sg.get('headline_sentiment', '')
-                        if sentiment == 'negative':
-                            log_msg(f'!! NEWS VELOCITY SPIKE: {sg.get("news_articles",0)} articles, negative -> BEAR')
-                            active = buy_position('SHORT', p, vol_scalar)
+                        # --- Tactic 6: Sentiment velocity ---
+                        if sg.get('news_spike'):
+                            sentiment = sg.get('headline_sentiment', '')
+                            if sentiment == 'negative':
+                                votes['sentiment'] = 'SHORT'
+                            elif sentiment == 'positive':
+                                votes['sentiment'] = 'LONG'
+
+                        # --- VOTE COUNTING ---
+                        if votes:
+                            longs = [k for k, v in votes.items() if v == 'LONG']
+                            shorts = [k for k, v in votes.items() if v == 'SHORT']
+
+                            if len(longs) >= 2 and len(longs) > len(shorts):
+                                # 2+ tactics agree LONG → full size
+                                log_msg(f'!! VOTE: LONG ({len(longs)} agree: {",".join(longs)} vs {len(shorts)} SHORT)')
+                                active = buy_position('LONG', p, vol_scalar)
+                                if active:
+                                    fl = f' >>> LONG ({",".join(longs)})'
+                                    if 'straddle' in longs:
+                                        straddle_bull_filled = True
+                            elif len(shorts) >= 2 and len(shorts) > len(longs):
+                                # 2+ tactics agree SHORT → full size
+                                log_msg(f'!! VOTE: SHORT ({len(shorts)} agree: {",".join(shorts)} vs {len(longs)} LONG)')
+                                active = buy_position('SHORT', p, vol_scalar)
+                                if active:
+                                    fl = f' >>> SHORT ({",".join(shorts)})'
+                                    if 'straddle' in shorts:
+                                        straddle_bear_filled = True
+                            elif len(longs) == 1 and len(shorts) == 0:
+                                # Single tactic → half size
+                                log_msg(f'!! VOTE: weak LONG ({longs[0]} only)')
+                                active = buy_position('LONG', p, vol_scalar * 0.5)
+                                if active:
+                                    fl = f' >>> LONG ({longs[0]}, half-size)'
+                            elif len(shorts) == 1 and len(longs) == 0:
+                                # Single tactic → half size
+                                log_msg(f'!! VOTE: weak SHORT ({shorts[0]} only)')
+                                active = buy_position('SHORT', p, vol_scalar * 0.5)
+                                if active:
+                                    fl = f' >>> SHORT ({shorts[0]}, half-size)'
+                            elif longs and shorts:
+                                # Conflict → no trade
+                                log_msg(f'!! VOTE: CONFLICT ({",".join(longs)} vs {",".join(shorts)}) — NO TRADE')
                             if active:
-                                fl = f' >>> NEWS-VELOCITY SHORT'
-                        elif sentiment == 'positive':
-                            log_msg(f'!! NEWS VELOCITY SPIKE: {sg.get("news_articles",0)} articles, positive -> BULL')
-                            active = buy_position('LONG', p, vol_scalar)
-                            if active:
-                                fl = f' >>> NEWS-VELOCITY LONG'
+                                md = 0
 
                     # Show warnings when scanning too
                     scan_warns = []
