@@ -146,7 +146,6 @@ def find_best_instruments(
             # Volume / activity check — detect dead instruments
             volume_traded = float(quote.get("totalVolumeTraded", 0) or 0)
             value_traded = float(quote.get("totalValueTraded", 0) or 0)
-            updated = quote.get("updated", 0) or quote.get("timeOfLast", 0)
             is_active = volume_traded > 0 or value_traded > 0
 
             candidates.append({

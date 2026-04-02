@@ -8,9 +8,9 @@ Cache: per-ticker, 24h TTL (earnings dates don't change intraday).
 """
 
 import logging
-import time
 import threading
-from datetime import UTC, datetime, timedelta
+import time
+from datetime import UTC, datetime
 
 from portfolio.tickers import STOCK_SYMBOLS
 

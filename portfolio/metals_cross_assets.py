@@ -14,10 +14,9 @@ from __future__ import annotations
 import logging
 from functools import wraps
 
-import numpy as np
 import pandas as pd
 
-from portfolio.shared_state import _yfinance_limiter, _cached
+from portfolio.shared_state import _cached, _yfinance_limiter
 
 logger = logging.getLogger("portfolio.metals_cross_assets")
 

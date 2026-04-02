@@ -29,7 +29,6 @@ from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_js
 from portfolio.instrument_profile import (
     get_cross_asset_drivers,
     get_profile,
-    get_regime_behavior,
 )
 
 logger = logging.getLogger("portfolio.fish_monitor_smart")

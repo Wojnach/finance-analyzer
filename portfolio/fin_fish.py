@@ -1348,7 +1348,7 @@ def main() -> int:
                         }
                         should_monitor = True
                         print(f"\n  Active position detected: {pos.get('name')} ({vol}u)")
-                        print(f"  Auto-starting smart monitor...\n")
+                        print("  Auto-starting smart monitor...\n")
                         break
                 if detected_position:
                     break
@@ -1369,7 +1369,7 @@ def main() -> int:
                         }
                         should_monitor = True
                         print(f"\n  Active position from state: {key}")
-                        print(f"  Auto-starting smart monitor...\n")
+                        print("  Auto-starting smart monitor...\n")
                         break
             except Exception:
                 pass

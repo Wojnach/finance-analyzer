@@ -234,19 +234,27 @@ def delete_stop_loss(page, account_id: str | None, stop_id: str):
 # --- Page-free API (uses BankID session, no Playwright page needed) ---
 
 from portfolio.avanza_session import (
-    api_get as _api_get,
-    api_post as _api_post,
     api_delete as _api_delete,
-    get_instrument_price as _get_instrument_price,
-    place_buy_order as _place_buy_order,
-    place_sell_order as _place_sell_order,
+)
+from portfolio.avanza_session import (
+    api_get as _api_get,
+)
+from portfolio.avanza_session import (
     cancel_order as _cancel_order,
+)
+from portfolio.avanza_session import (
+    place_buy_order as _place_buy_order,
+)
+from portfolio.avanza_session import (
+    place_sell_order as _place_sell_order,
+)
+from portfolio.avanza_session import (
     place_stop_loss as _place_stop_loss_session,
+)
+from portfolio.avanza_session import (
     place_trailing_stop as _place_trailing_stop_session,
-    get_stop_losses as _get_stop_losses_session,
-    get_positions as _get_positions_session,
-    get_buying_power as _get_buying_power_session,
-    get_open_orders as _get_open_orders_session,
+)
+from portfolio.avanza_session import (
     verify_session,
 )
 

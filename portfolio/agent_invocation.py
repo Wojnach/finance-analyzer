@@ -240,11 +240,9 @@ def invoke_agent(reasons, tier=3):
     if multi_agent and tier >= 2:
         try:
             from portfolio.multi_agent_layer2 import (
+                build_synthesis_prompt,
                 launch_specialists,
                 wait_for_specialists,
-                build_synthesis_prompt,
-                get_report_paths,
-                cleanup_reports,
             )
             # Extract primary ticker from reasons
             ticker = _extract_ticker(reasons)

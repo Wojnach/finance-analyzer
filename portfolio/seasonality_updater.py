@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 
 from portfolio.metals_orderbook import SYMBOL_MAP
-from portfolio.seasonality import compute_hourly_profile, save_profiles, load_profiles
+from portfolio.seasonality import compute_hourly_profile, load_profiles, save_profiles
 
 logger = logging.getLogger("portfolio.seasonality_updater")
 
@@ -51,6 +51,7 @@ def update_seasonality_profiles(tickers: list[str] | None = None) -> dict:
 def _fetch_hourly_klines(ticker: str, limit: int = 500):
     """Fetch 1h klines from Binance FAPI for a metals ticker."""
     import pandas as pd
+
     from portfolio.api_utils import BINANCE_FAPI_BASE
     from portfolio.http_retry import fetch_json
     from portfolio.shared_state import _binance_limiter
