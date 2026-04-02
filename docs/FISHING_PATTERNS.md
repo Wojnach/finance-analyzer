@@ -468,3 +468,33 @@ Before entering a position, check:
 43. **Document lessons incrementally.** Don't wait until end of session. If agent dies
     or context resets, all session knowledge is lost. Write to FISHING_PATTERNS.md and
     session JSON files after each significant event.
+
+44-55. See `data/fishing_session_20260401.json` for lessons on: combined RSI+MC exit
+    (#45), RSI entry gate removal (#46), TURBO instruments (#47), faster flip after
+    high-conviction exit (#48), better BULL cert (#49), news/events must be checked
+    (#50-54), timeframe-matched signal usage (#55).
+
+56. **FOLLOW YOUR OWN PLAYBOOK.** We wrote Liberation Day rules (no overnight, wider
+    stops) and ignored them. Cost: -620 SEK. When a dated playbook exists for a known
+    event, it overrides signal consensus. Signals don't know about events.
+
+57. **Crash days close near the low.** Only 22% average recovery from intraday low
+    across 24 crash days (>3% drop). Don't buy the dip on the crash day itself.
+    67% bounce probability on the NEXT day, avg +1.7%.
+
+58. **Thursday is silver's worst day.** Avg -0.88%, down 55% of the time. Friday
+    after Thursday crash bounces 63%, avg +2.5%. Tradeable pattern with half-size.
+
+59. **Liberation Day exception.** Apr 2025: Thu -7.7% then Fri -8.6%. If the event
+    has new information (tariff announcement), the crash continues. Check for actual
+    new announcements vs just anniversary noise before trading the Friday bounce.
+
+60. **No TURBO/MINI with barriers <15% on event days.** TURBO L AVA 491 (barrier $68)
+    got knocked out when silver dropped to $69.66. Use no-knockout BULL/BEAR X5 only.
+
+61. **No loop limits on monitor.** Run until session end (21:45). Use `while True` with
+    session-end check, not `while ck < 300`. If we disconnect, heartbeat detects it.
+
+62. **Use script files, not inline `-c` code.** Background inline scripts die silently
+    (stdout buffering, signal 144). Use proper script files that log to disk and start
+    via Windows `Start-Process` to survive shell kills.
