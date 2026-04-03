@@ -3,6 +3,10 @@
 Provides:
 - run_safe(): Drop-in subprocess.run() replacement that uses Windows Job Objects
   with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE so children die when the parent exits.
+- popen_in_job(): Popen wrapper for long-running subprocesses — assigns the child
+  to a Job Object so it's automatically killed if the parent dies.
+- kill_orphaned_by_cmdline(): Find and kill orphaned processes matching a command
+  line pattern (safety net for processes that escaped Job Object protection).
 - kill_orphaned_llama(): Safety-net reaper for orphaned llama-completion.exe processes.
 """
 
@@ -38,84 +42,80 @@ def run_safe(cmd, **kwargs):
         return subprocess.run(cmd, **kwargs)
 
 
-def _run_with_job_object(cmd, **kwargs):
-    """Internal: run subprocess inside a Windows Job Object."""
+def _create_job_object():
+    """Create a Windows Job Object with KILL_ON_JOB_CLOSE.
+
+    Returns (job_handle, kernel32) or raises OSError.
+    """
     import ctypes
     from ctypes import wintypes
 
     kernel32 = ctypes.windll.kernel32
 
-    # --- Create Job Object ---------------------------------------------------
     job = kernel32.CreateJobObjectW(None, None)
     if not job:
         raise OSError("CreateJobObjectW failed")
 
+    # JOBOBJECT_BASIC_LIMIT_INFORMATION (64-bit layout)
+    class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", wintypes.LARGE_INTEGER),
+            ("PerJobUserTimeLimit", wintypes.LARGE_INTEGER),
+            ("LimitFlags", wintypes.DWORD),
+            ("_pad0", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("_pad1", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class IO_COUNTERS(ctypes.Structure):
+        _fields_ = [
+            ("ReadOperationCount", ctypes.c_ulonglong),
+            ("WriteOperationCount", ctypes.c_ulonglong),
+            ("OtherOperationCount", ctypes.c_ulonglong),
+            ("ReadTransferCount", ctypes.c_ulonglong),
+            ("WriteTransferCount", ctypes.c_ulonglong),
+            ("OtherTransferCount", ctypes.c_ulonglong),
+        ]
+
+    class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+            ("IoInfo", IO_COUNTERS),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+    JobObjectExtendedLimitInformation = 9
+
+    info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+    info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+
+    ok = kernel32.SetInformationJobObject(
+        job,
+        JobObjectExtendedLimitInformation,
+        ctypes.byref(info),
+        ctypes.sizeof(info),
+    )
+    if not ok:
+        kernel32.CloseHandle(job)
+        raise OSError("SetInformationJobObject failed")
+
+    return job, kernel32
+
+
+def _run_with_job_object(cmd, **kwargs):
+    """Internal: run subprocess inside a Windows Job Object."""
+    job, kernel32 = _create_job_object()
+
     try:
-        # --- Configure KILL_ON_JOB_CLOSE -------------------------------------
-        #
-        # JOBOBJECT_BASIC_LIMIT_INFORMATION (64-bit layout):
-        #   PerProcessUserTimeLimit  LARGE_INTEGER  (8)
-        #   PerJobUserTimeLimit      LARGE_INTEGER  (8)
-        #   LimitFlags               DWORD          (4) + 4 pad
-        #   MinimumWorkingSetSize    SIZE_T         (8)
-        #   MaximumWorkingSetSize    SIZE_T         (8)
-        #   ActiveProcessLimit       DWORD          (4) + 4 pad
-        #   Affinity                 SIZE_T         (8)  <-- must be c_size_t
-        #   PriorityClass            DWORD          (4)
-        #   SchedulingClass          DWORD          (4)
-        #
-
-        class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
-            _fields_ = [
-                ("PerProcessUserTimeLimit", wintypes.LARGE_INTEGER),
-                ("PerJobUserTimeLimit", wintypes.LARGE_INTEGER),
-                ("LimitFlags", wintypes.DWORD),
-                ("_pad0", wintypes.DWORD),
-                ("MinimumWorkingSetSize", ctypes.c_size_t),
-                ("MaximumWorkingSetSize", ctypes.c_size_t),
-                ("ActiveProcessLimit", wintypes.DWORD),
-                ("_pad1", wintypes.DWORD),
-                ("Affinity", ctypes.c_size_t),
-                ("PriorityClass", wintypes.DWORD),
-                ("SchedulingClass", wintypes.DWORD),
-            ]
-
-        class IO_COUNTERS(ctypes.Structure):
-            _fields_ = [
-                ("ReadOperationCount", ctypes.c_ulonglong),
-                ("WriteOperationCount", ctypes.c_ulonglong),
-                ("OtherOperationCount", ctypes.c_ulonglong),
-                ("ReadTransferCount", ctypes.c_ulonglong),
-                ("WriteTransferCount", ctypes.c_ulonglong),
-                ("OtherTransferCount", ctypes.c_ulonglong),
-            ]
-
-        class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
-            _fields_ = [
-                ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
-                ("IoInfo", IO_COUNTERS),
-                ("ProcessMemoryLimit", ctypes.c_size_t),
-                ("JobMemoryLimit", ctypes.c_size_t),
-                ("PeakProcessMemoryUsed", ctypes.c_size_t),
-                ("PeakJobMemoryUsed", ctypes.c_size_t),
-            ]
-
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
-        JobObjectExtendedLimitInformation = 9
-
-        info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-
-        ok = kernel32.SetInformationJobObject(
-            job,
-            JobObjectExtendedLimitInformation,
-            ctypes.byref(info),
-            ctypes.sizeof(info),
-        )
-        if not ok:
-            raise OSError("SetInformationJobObject failed")
-
-        # --- Translate capture_output into stdout/stderr pipes ----------------
         popen_kwargs = dict(kwargs)
         timeout = popen_kwargs.pop("timeout", None)
 
@@ -127,10 +127,8 @@ def _run_with_job_object(cmd, **kwargs):
         if input_data is not None and "stdin" not in popen_kwargs:
             popen_kwargs["stdin"] = subprocess.PIPE
 
-        # --- Launch process and assign to job ---------------------------------
         proc = subprocess.Popen(cmd, **popen_kwargs)
 
-        # If assignment fails, the process is already running — still wait
         with contextlib.suppress(Exception):
             kernel32.AssignProcessToJobObject(job, int(proc._handle))
 
@@ -149,6 +147,100 @@ def _run_with_job_object(cmd, **kwargs):
         )
     finally:
         kernel32.CloseHandle(job)
+
+
+def popen_in_job(cmd, **kwargs):
+    """Start a long-running subprocess inside a Windows Job Object.
+
+    Like subprocess.Popen(), but assigns the child to a Job Object with
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. If the parent process dies (crash,
+    kill -9, power loss), the OS automatically kills the child.
+
+    Returns (proc, job_handle) on Windows. On non-Windows or if Job Object
+    creation fails, returns (proc, None).
+
+    Caller must call close_job(job_handle) when explicitly stopping the child.
+    """
+    proc = subprocess.Popen(cmd, **kwargs)
+
+    if sys.platform != "win32":
+        return proc, None
+
+    try:
+        job, kernel32 = _create_job_object()
+        kernel32.AssignProcessToJobObject(job, int(proc._handle))
+        return proc, job
+    except Exception as exc:
+        logger.debug("Job Object creation failed for Popen (%s), no auto-cleanup", exc)
+        return proc, None
+
+
+def close_job(job_handle):
+    """Close a Job Object handle.
+
+    Safe to call after the child has already been terminated — closing the
+    handle on a dead process is a no-op. Call this in your explicit stop
+    function after terminating the child.
+    """
+    if job_handle is None:
+        return
+    try:
+        import ctypes
+        ctypes.windll.kernel32.CloseHandle(job_handle)
+    except Exception:
+        pass
+
+
+def kill_orphaned_by_cmdline(pattern, exclude_pid=None):
+    """Find and kill processes whose command line contains *pattern*.
+
+    Used at startup to sweep orphaned subprocesses from a previous crash.
+    Skips the current process and *exclude_pid* if given.
+
+    Returns the number of processes killed. Returns 0 on non-Windows.
+    """
+    if sys.platform != "win32":
+        return 0
+
+    my_pid = __import__("os").getpid()
+    skip = {my_pid}
+    if exclude_pid is not None:
+        skip.add(exclude_pid)
+
+    try:
+        result = subprocess.run(
+            ["wmic", "process", "where",
+             f"CommandLine like '%{pattern}%'",
+             "get", "ProcessId", "/format:csv"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except Exception as exc:
+        logger.debug("WMIC process query failed: %s", exc)
+        return 0
+
+    killed = 0
+    for line in result.stdout.splitlines():
+        parts = line.strip().split(",")
+        if len(parts) < 2:
+            continue
+        try:
+            pid = int(parts[-1])
+        except ValueError:
+            continue
+        if pid in skip or pid == 0:
+            continue
+
+        logger.info("Killing orphaned process (pattern=%r): PID %d", pattern, pid)
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/PID", str(pid)],
+                capture_output=True, timeout=10,
+            )
+            killed += 1
+        except Exception:
+            pass
+
+    return killed
 
 
 def kill_orphaned_llama():

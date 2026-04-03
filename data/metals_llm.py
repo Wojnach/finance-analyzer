@@ -79,10 +79,12 @@ _llm_stop = threading.Event()
 
 # --- PERSISTENT MINISTRAL SERVER ---
 _ministral_proc = None
+_ministral_job = None  # Windows Job Object handle (auto-kill on parent death)
 _ministral_lock = threading.Lock()  # serialize access to the persistent process
 
 # --- PERSISTENT CHRONOS SERVER ---
 _chronos_proc = None
+_chronos_job = None  # Windows Job Object handle (auto-kill on parent death)
 _chronos_lock = threading.Lock()
 CHRONOS_SERVER_SCRIPT = os.path.join(os.path.dirname(__file__), "chronos_server.py")
 
@@ -117,9 +119,10 @@ def _is_quiet_hours():
 
 def _start_ministral_server():
     """Launch Ministral in persistent --server mode. Returns Popen or None."""
-    global _ministral_proc
+    global _ministral_proc, _ministral_job
     try:
-        proc = subprocess.Popen(
+        from portfolio.subprocess_utils import popen_in_job
+        proc, job = popen_in_job(
             [MINISTRAL_PYTHON, MINISTRAL_SCRIPT, "--server"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -140,6 +143,7 @@ def _start_ministral_server():
                 if "MINISTRAL_READY" in line:
                     _log("Ministral server ready (model loaded, persistent)")
                     _ministral_proc = proc
+                    _ministral_job = job
                     return proc
             except Exception:
                 time.sleep(0.5)
@@ -153,7 +157,7 @@ def _start_ministral_server():
 
 def _stop_ministral_server():
     """Stop the persistent Ministral server if running."""
-    global _ministral_proc
+    global _ministral_proc, _ministral_job
     if _ministral_proc is not None:
         try:
             _ministral_proc.stdin.close()
@@ -165,6 +169,13 @@ def _stop_ministral_server():
                 pass
         _ministral_proc = None
         _log("Ministral server stopped")
+    if _ministral_job is not None:
+        try:
+            from portfolio.subprocess_utils import close_job
+            close_job(_ministral_job)
+        except Exception:
+            pass
+        _ministral_job = None
 
 
 def _query_ministral_server(context):
@@ -193,9 +204,10 @@ def _query_ministral_server(context):
 
 def _start_chronos_server():
     """Launch Chronos in persistent server mode. Returns Popen or None."""
-    global _chronos_proc
+    global _chronos_proc, _chronos_job
     try:
-        proc = subprocess.Popen(
+        from portfolio.subprocess_utils import popen_in_job
+        proc, job = popen_in_job(
             [MAIN_PYTHON, "-u", CHRONOS_SERVER_SCRIPT],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -213,6 +225,7 @@ def _start_chronos_server():
             if "CHRONOS_READY" in line:
                 _log("Chronos server ready (model loaded, persistent)")
                 _chronos_proc = proc
+                _chronos_job = job
                 return proc
             if "CHRONOS_FAILED" in line:
                 _log(f"Chronos server failed: {line.strip()}")
@@ -228,7 +241,7 @@ def _start_chronos_server():
 
 def _stop_chronos_server():
     """Stop the persistent Chronos server if running."""
-    global _chronos_proc
+    global _chronos_proc, _chronos_job
     if _chronos_proc is not None:
         try:
             _chronos_proc.stdin.close()
@@ -240,6 +253,13 @@ def _stop_chronos_server():
                 pass
         _chronos_proc = None
         _log("Chronos server stopped")
+    if _chronos_job is not None:
+        try:
+            from portfolio.subprocess_utils import close_job
+            close_job(_chronos_job)
+        except Exception:
+            pass
+        _chronos_job = None
 
 
 def _query_chronos_server(close_prices, horizons=(1, 3)):
@@ -948,6 +968,23 @@ def _llm_worker(signal_data_fn, underlying_prices_fn):
     _log("LLM worker stopped")
 
 
+def _sweep_orphaned_servers():
+    """Kill orphaned Chronos/Ministral processes from a previous crash.
+
+    Safe to call at startup because the metals_loop singleton lock guarantees
+    we are the only metals_loop — any matching processes are orphans.
+    """
+    try:
+        from portfolio.subprocess_utils import kill_orphaned_by_cmdline
+        killed = 0
+        killed += kill_orphaned_by_cmdline("chronos_server.py")
+        killed += kill_orphaned_by_cmdline("ministral_trader.py")
+        if killed:
+            _log(f"Swept {killed} orphaned LLM server(s) from previous session")
+    except Exception as e:
+        _log(f"Orphan sweep failed (non-fatal): {e}")
+
+
 def start_llm_thread(signal_data_fn, underlying_prices_fn):
     """Start the background LLM inference thread.
 
@@ -959,6 +996,9 @@ def start_llm_thread(signal_data_fn, underlying_prices_fn):
     if _llm_thread and _llm_thread.is_alive():
         _log("LLM thread already running")
         return
+
+    # Kill any orphaned servers from a previous crash before starting new ones
+    _sweep_orphaned_servers()
 
     _llm_stop.clear()
     _llm_thread = threading.Thread(
