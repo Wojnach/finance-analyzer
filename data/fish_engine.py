@@ -25,7 +25,7 @@ State dict the engine expects each tick::
         'signal_sell_count': int,
         'rsi': float,
         'mc_p_up': float,
-        'metals_action': str,           # from metals loop signals
+        'metals_action': str,           # same as signal_action (unified)
         'regime': str,
         'news_action': str,
         'econ_action': str,
@@ -34,6 +34,7 @@ State dict the engine expects each tick::
         'orb_range': dict or None,      # {high, low, formed}
         'vol_scalar': float,
         'hour_cet': int,
+        'minute_cet': int,
         'day_of_week': int,             # 0=Mon
         'velocity': float or None,
         'trade_guard_ok': bool,
@@ -42,6 +43,20 @@ State dict the engine expects each tick::
         'headline_sentiment': str,      # 'positive'/'negative'/''
         'event_hours': float,           # hours until next econ event
         'high_impact_near': bool,
+        # Layer 2 journal context
+        'layer2_outlook': str,          # 'bullish'/'bearish'/''
+        'layer2_conviction': float,     # 0-1
+        'layer2_levels': list,          # [support, resistance]
+        'layer2_action': str,           # 'BUY'/'SELL'/'HOLD'
+        'layer2_ts': str,              # ISO timestamp
+        # Monte Carlo bands
+        'mc_bands_1d': dict,            # {'5': float, '25': float, '75': float, '95': float}
+        # Chronos forecast
+        'chronos_1h_pct': float,
+        'chronos_24h_pct': float,
+        # Prophecy belief
+        'prophecy_target': float,
+        'prophecy_conviction': float,
     }
 """
 
@@ -184,6 +199,27 @@ class FishEngine:
             instrument_ob, hold_minutes.
         """
         now = self._time()
+
+        # Auto-disable after 21:55 CET
+        hour = state.get("hour_cet", 0)
+        minute = state.get("minute_cet", 0)
+        if hour > 21 or (hour == 21 and minute >= 55):
+            if self.position is not None:
+                pos = self.position
+                hold_minutes = (now - pos["entry_ts"]) / 60
+                return {
+                    "action": "SELL",
+                    "direction": pos["direction"],
+                    "reason": "session end 21:55 CET",
+                    "tactics_agreed": [],
+                    "size_scalar": 0,
+                    "exit_reason": "SESSION_END",
+                    "confidence": 0,
+                    "instrument_ob": pos["ob_id"],
+                    "hold_minutes": round(hold_minutes, 1),
+                    "volume": pos["volume"],
+                }
+            return self._hold("market closed")
 
         # Update ORB from state if provided
         orb = state.get("orb_range")
@@ -374,19 +410,49 @@ class FishEngine:
 
         # --- Exit rules (priority order) ---
 
-        # TP: +2% underlying
-        if mv_pct >= EXIT_TP_PCT:
+        # Dynamic TP/SL from Monte Carlo (if available)
+        try:
+            mc_bands = state.get('mc_bands_1d', {})
+            if d == 'LONG' and mc_bands:
+                tp_level = float(mc_bands.get('75', 0))
+                sl_level = float(mc_bands.get('5', 0))
+                if tp_level > 0 and ep > 0:
+                    tp_pct = (tp_level - ep) / ep * 100
+                    sl_pct = (sl_level - ep) / ep * 100
+                else:
+                    tp_pct, sl_pct = EXIT_TP_PCT, EXIT_SL_PCT
+            elif d == 'SHORT' and mc_bands:
+                tp_level = float(mc_bands.get('25', 0))
+                sl_level = float(mc_bands.get('95', 0))
+                if tp_level > 0 and ep > 0:
+                    tp_pct = (ep - tp_level) / ep * 100
+                    sl_pct = (ep - sl_level) / ep * 100
+                else:
+                    tp_pct, sl_pct = EXIT_TP_PCT, EXIT_SL_PCT
+            else:
+                tp_pct, sl_pct = EXIT_TP_PCT, EXIT_SL_PCT
+        except Exception:
+            tp_pct, sl_pct = EXIT_TP_PCT, EXIT_SL_PCT
+
+        # Enforce minimum thresholds to cover friction
+        tp_pct = max(tp_pct, 1.0)
+        sl_pct = min(sl_pct, -1.0)
+
+        # TP: dynamic or +2% underlying
+        if mv_pct >= tp_pct:
+            mc_tag = '(MC)' if state.get('mc_bands_1d') else ''
             return self._sell(
-                "TP",
-                f"take profit at {mv_pct:+.1f}% ({cert_pct:+.0f}% cert)",
+                f"TP{mc_tag}",
+                f"take profit at {mv_pct:+.1f}% ({cert_pct:+.0f}% cert) [tp={tp_pct:.1f}%{mc_tag}]",
                 high_conviction=False,
             )
 
-        # SL: -3% underlying
-        if mv_pct <= EXIT_SL_PCT:
+        # SL: dynamic or -3% underlying
+        if mv_pct <= sl_pct:
+            mc_tag = '(MC)' if state.get('mc_bands_1d') else ''
             return self._sell(
-                "SL",
-                f"stop loss at {mv_pct:+.1f}% ({cert_pct:+.0f}% cert)",
+                f"SL{mc_tag}",
+                f"stop loss at {mv_pct:+.1f}% ({cert_pct:+.0f}% cert) [sl={sl_pct:.1f}%{mc_tag}]",
                 high_conviction=False,
             )
 
@@ -518,6 +584,16 @@ class FishEngine:
         # --- Tactic 6: Sentiment velocity ---
         self._vote_sentiment(state, votes)
 
+        # --- Tactic 9: Layer 2 journal vote (weight 2) ---
+        try:
+            l2_vote = self._vote_layer2(state)
+            if l2_vote:
+                votes['layer2'] = l2_vote
+                # Layer 2 counts as 2 votes -- add a second entry
+                votes['layer2_w'] = l2_vote  # duplicate to get weight 2
+        except Exception:
+            pass
+
         # --- Count votes (Rule 3: 2+ tactics must agree) ---
         longs = [k for k, v in votes.items() if v == "LONG"]
         shorts = [k for k, v in votes.items() if v == "SHORT"]
@@ -535,6 +611,13 @@ class FishEngine:
 
         if len(longs) >= MIN_VOTES and len(longs) > len(shorts):
             confidence = min(1.0, len(longs) / 4.0)
+            # Chronos confidence modifier
+            try:
+                chronos_pct = state.get('chronos_24h_pct', 0)
+                if chronos_pct < -0.3:
+                    confidence *= 0.7  # Chronos disagrees with LONG
+            except Exception:
+                pass
             return {
                 "action": "BUY",
                 "direction": "LONG",
@@ -549,6 +632,13 @@ class FishEngine:
 
         if len(shorts) >= MIN_VOTES and len(shorts) > len(longs):
             confidence = min(1.0, len(shorts) / 4.0)
+            # Chronos confidence modifier
+            try:
+                chronos_pct = state.get('chronos_24h_pct', 0)
+                if chronos_pct > 0.3:
+                    confidence *= 0.7  # Chronos disagrees with SHORT
+            except Exception:
+                pass
             return {
                 "action": "BUY",
                 "direction": "SHORT",
@@ -673,6 +763,32 @@ class FishEngine:
             votes["sentiment"] = "SHORT"
         elif sentiment == "positive":
             votes["sentiment"] = "LONG"
+
+    def _vote_layer2(self, state: dict) -> str | None:
+        """Tactic 9: Layer 2 journal reasoning -- highest trust vote (weight 2)."""
+        outlook = state.get('layer2_outlook', '')
+        conviction = state.get('layer2_conviction', 0)
+        ts = state.get('layer2_ts', '')
+
+        if not outlook or conviction < 0.4:
+            return None
+
+        # Check staleness -- ignore if >4h old
+        if ts:
+            try:
+                from datetime import datetime as _dt, timezone, timedelta
+                entry_time = _dt.fromisoformat(ts.replace('Z', '+00:00'))
+                age_hours = (_dt.now(timezone.utc) - entry_time).total_seconds() / 3600
+                if age_hours > 4:
+                    return None
+            except Exception:
+                pass
+
+        if outlook == 'bullish':
+            return 'LONG'
+        elif outlook == 'bearish':
+            return 'SHORT'
+        return None
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -1723,6 +1723,62 @@ def _run_fish_engine_tick():
     except Exception:
         pass
 
+    # Read Layer 2 journal for latest XAG-USD context
+    layer2_outlook = ''
+    layer2_conviction = 0.0
+    layer2_levels = []
+    layer2_action = 'HOLD'
+    layer2_ts = ''
+    try:
+        journal_path = DATA_DIR.parent / 'data' / 'layer2_journal.jsonl'
+        if not journal_path.exists():
+            journal_path = DATA_DIR / 'layer2_journal.jsonl'
+        if journal_path.exists():
+            lines = journal_path.read_text().strip().split('\n')
+            # Scan last 10 entries for XAG-USD
+            for line in reversed(lines[-10:]):
+                try:
+                    entry = json.loads(line)
+                    tickers = entry.get('tickers', {})
+                    if 'XAG-USD' in tickers:
+                        xag_j = tickers['XAG-USD']
+                        layer2_outlook = xag_j.get('outlook', '')
+                        layer2_conviction = float(xag_j.get('conviction', 0))
+                        layer2_levels = xag_j.get('levels', [])
+                        layer2_ts = entry.get('ts', '')
+                        # Also check decisions for action
+                        for strategy in ('patient', 'bold'):
+                            dec = entry.get('decisions', {}).get(strategy, {})
+                            if dec.get('action') in ('BUY', 'SELL'):
+                                layer2_action = dec['action']
+                                break
+                        break
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    # Monte Carlo bands
+    mc_bands_1d = xag_mc.get('price_bands_1d', {})
+
+    # Chronos forecast
+    xag_forecast = (summary.get('forecast_signals') or {}).get('XAG-USD', {})
+    chronos_1h_pct = float(xag_forecast.get('chronos_1h_pct', 0) or 0)
+    chronos_24h_pct = float(xag_forecast.get('chronos_24h_pct', 0) or 0)
+
+    # Prophecy
+    prophecy_target = 0.0
+    prophecy_conviction = 0.0
+    try:
+        beliefs = (summary.get('prophecy') or {}).get('beliefs', [])
+        for belief in beliefs:
+            if belief.get('ticker') == 'XAG-USD':
+                prophecy_target = float(belief.get('target_price', 0) or 0)
+                prophecy_conviction = float(belief.get('conviction', 0) or 0)
+                break
+    except Exception:
+        pass
+
     # Check trade guard from metals risk
     trade_guard_ok = True
     try:
@@ -1756,7 +1812,7 @@ def _run_fish_engine_tick():
         "signal_sell_count": xag_extra.get("_sell_count", 0),
         "rsi": float(xag_sig.get("rsi", 50)),
         "mc_p_up": float(xag_mc.get("p_up", 0.5)),
-        "metals_action": metals_sig.get("action", "HOLD"),
+        "metals_action": xag_sig.get("action", "HOLD"),  # same as signal_action
         "regime": xag_sig.get("regime", "ranging"),
         "news_action": news_action,
         "econ_action": econ_action,
@@ -1765,6 +1821,7 @@ def _run_fish_engine_tick():
         "orb_range": fish_pre.get("orb_range"),
         "vol_scalar": fish_pre.get("vol_scalar", 1.0),
         "hour_cet": now.hour,
+        "minute_cet": now.minute,
         "day_of_week": now.weekday(),
         "velocity": None,  # could hook into silver fast-tick
         "trade_guard_ok": trade_guard_ok,
@@ -1773,6 +1830,20 @@ def _run_fish_engine_tick():
         "headline_sentiment": "",
         "event_hours": event_hours,
         "high_impact_near": high_impact,
+        # Layer 2 journal context
+        "layer2_outlook": layer2_outlook,
+        "layer2_conviction": layer2_conviction,
+        "layer2_levels": layer2_levels,
+        "layer2_action": layer2_action,
+        "layer2_ts": layer2_ts,
+        # Monte Carlo bands
+        "mc_bands_1d": mc_bands_1d,
+        # Chronos forecast
+        "chronos_1h_pct": chronos_1h_pct,
+        "chronos_24h_pct": chronos_24h_pct,
+        # Prophecy belief
+        "prophecy_target": prophecy_target,
+        "prophecy_conviction": prophecy_conviction,
     }
 
     # Call engine

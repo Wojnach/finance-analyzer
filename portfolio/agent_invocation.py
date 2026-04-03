@@ -333,6 +333,105 @@ def invoke_agent(reasons, tier=3):
         return False
 
 
+def _write_fishing_context(journal_entry):
+    """Extract fishing context from Layer 2 journal entry.
+
+    Called after Layer 2 completes. Creates a structured context file
+    that the fish engine reads as its strongest tactic vote.
+    """
+    try:
+        tickers = journal_entry.get('tickers', {})
+        xag = tickers.get('XAG-USD')
+        if not xag:
+            return
+
+        outlook = xag.get('outlook', '')
+        conviction = float(xag.get('conviction', 0))
+        levels = xag.get('levels', [])
+        thesis = xag.get('thesis', '')
+
+        # Determine direction bias
+        if outlook == 'bullish' and conviction >= 0.4:
+            direction_bias = 'bullish'
+            tactic_vote = 'LONG'
+            allow_long = True
+            allow_short = conviction < 0.6  # block short only if very bullish
+        elif outlook == 'bearish' and conviction >= 0.4:
+            direction_bias = 'bearish'
+            tactic_vote = 'SHORT'
+            allow_long = conviction < 0.6
+            allow_short = True
+        else:
+            direction_bias = 'neutral'
+            tactic_vote = None
+            allow_long = True
+            allow_short = True
+
+        # Check for event context from watchlist
+        watchlist = journal_entry.get('watchlist', [])
+        event_context = ''
+        for item in watchlist:
+            if isinstance(item, str) and any(
+                w in item.lower() for w in ['event', 'fomc', 'cpi', 'tariff', 'opec']
+            ):
+                event_context = item[:100]
+                break
+
+        # Determine position size multiplier from regime
+        regime = journal_entry.get('regime', 'ranging')
+        if regime == 'high-vol':
+            position_size_multiplier = 0.5
+        elif regime in ('trending-up', 'trending-down'):
+            position_size_multiplier = 1.0
+        else:
+            position_size_multiplier = 0.75  # ranging = slightly reduced
+
+        context = {
+            'timestamp': journal_entry.get('ts', ''),
+            'valid_until': '',  # fish engine uses 4h staleness check
+            'ticker': 'XAG-USD',
+            'direction_bias': direction_bias,
+            'bias_confidence': conviction,
+            'bias_reasoning': thesis[:200] if thesis else '',
+            'allow_long': allow_long,
+            'allow_short': allow_short,
+            'max_hold_minutes': 120,
+            'position_size_multiplier': position_size_multiplier,
+            'allow_overnight': conviction >= 0.6 and outlook == 'bullish',
+            'event_context': event_context,
+            'bull_case': '',
+            'bear_case': '',
+            'journal_action': '',
+            'journal_confidence': conviction,
+            'tactic_vote': tactic_vote,
+            'tactic_weight': 2.0,
+            'levels': levels,
+        }
+
+        # Extract bull/bear cases from decisions
+        decisions = journal_entry.get('decisions', {})
+        for strategy in ('patient', 'bold'):
+            dec = decisions.get(strategy, {})
+            reasoning = dec.get('reasoning', '')
+            action = dec.get('action', 'HOLD')
+            if action != 'HOLD':
+                context['journal_action'] = action
+            if reasoning:
+                if not context['bull_case'] and 'bullish' in reasoning.lower():
+                    context['bull_case'] = reasoning[:150]
+                elif not context['bear_case'] and (
+                    'bearish' in reasoning.lower() or 'sell' in reasoning.lower()
+                ):
+                    context['bear_case'] = reasoning[:150]
+
+        from portfolio.file_utils import atomic_write_json
+
+        atomic_write_json('data/fishing_context.json', context)
+
+    except Exception as e:
+        logger.debug('Fishing context error: %s', e)
+
+
 def check_agent_completion():
     """Check if a running agent has completed and log completion info.
 
@@ -420,6 +519,15 @@ def check_agent_completion():
         atomic_append_jsonl(INVOCATIONS_FILE, log_entry)
     except Exception as e:
         logger.warning("Failed to log agent completion: %s", e)
+
+    # Post-process: extract fishing context from journal for metals fish engine
+    if journal_written:
+        try:
+            new_journal_entry = last_jsonl_entry(JOURNAL_FILE)
+            if new_journal_entry:
+                _write_fishing_context(new_journal_entry)
+        except Exception:
+            pass
 
     logger.info(
         "Agent completed: status=%s exit=%d duration=%.1fs tier=%s journal=%s telegram=%s",
