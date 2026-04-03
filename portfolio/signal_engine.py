@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from portfolio.indicators import detect_regime
-from portfolio.shared_state import FEAR_GREED_TTL, MINISTRAL_TTL, SENTIMENT_TTL, VOLUME_TTL, _cached
+from portfolio.shared_state import FEAR_GREED_TTL, MINISTRAL_TTL, SENTIMENT_TTL, VOLUME_TTL, _cached, _cached_or_enqueue
 from portfolio.signal_registry import get_enhanced_signals, load_signal_func
 from portfolio.signal_utils import true_range
 from portfolio.tickers import CRYPTO_SYMBOLS, DISABLED_SIGNALS, GPU_SIGNALS, METALS_SYMBOLS, SIGNAL_NAMES, STOCK_SYMBOLS
@@ -1123,17 +1123,19 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # Ministral-3-8B LLM reasoning (all tickers — crypto, stocks, metals)
     # Upgraded from legacy Ministral-8B (44% accuracy) to Ministral-3-8B.
     # custom_lora fully disabled: 20.9% accuracy, 97% SELL bias (worse than random).
+    # Uses batch queue: on cache miss, enqueues for post-cycle flush instead of
+    # calling model inline (avoids model swap ping-pong between threads).
     votes["ministral"] = "HOLD"
     if ticker and not skip_gpu:
         short_ticker = ticker.replace("-USD", "")
         try:
-            from portfolio.ministral_signal import get_ministral_signal
+            from portfolio.llm_batch import enqueue_ministral
 
             ctx = _build_llm_context(ticker, ind, timeframes, extra_info)
-            ms = _cached(
+            ms = _cached_or_enqueue(
                 f"ministral_{short_ticker}",
                 MINISTRAL_TTL,
-                get_ministral_signal,
+                enqueue_ministral,
                 ctx,
             )
             if ms:
@@ -1160,12 +1162,13 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # Qwen3-8B LLM reasoning (all tickers — crypto, stocks, metals)
     # General financial model providing ensemble diversification vs Ministral.
     # Config: config.json → local_models.qwen3 (hold_threshold, min_samples)
+    # Uses batch queue: same pattern as Ministral above.
     votes["qwen3"] = "HOLD"
     qwen3_enabled = (config or {}).get("local_models", {}).get("qwen3", {}).get("enabled", True)
     if ticker and qwen3_enabled and not skip_gpu:
         short_ticker = ticker.replace("-USD", "")
         try:
-            from portfolio.qwen3_signal import get_qwen3_signal
+            from portfolio.llm_batch import enqueue_qwen3
 
             ctx = _build_llm_context(ticker, ind, timeframes, extra_info)
             # Qwen3 gets asset_type for prompt diversification
@@ -1175,10 +1178,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 ctx["asset_type"] = "precious metal"
             else:
                 ctx["asset_type"] = "stock"
-            q3 = _cached(
+            q3 = _cached_or_enqueue(
                 f"qwen3_{short_ticker}",
                 MINISTRAL_TTL,
-                get_qwen3_signal,
+                enqueue_qwen3,
                 ctx,
             )
             if q3:

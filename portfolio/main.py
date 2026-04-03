@@ -472,6 +472,18 @@ def run(force_report=False, active_symbols=None):
             else:
                 signals_failed += 1
 
+    # --- Post-cycle LLM batch flush ---
+    # Ministral/Qwen3 cache misses were enqueued during parallel ticker processing.
+    # Now flush them sequentially, grouped by model (one swap max).
+    try:
+        from portfolio.llm_batch import flush_llm_batch
+        from portfolio.shared_state import _update_cache, MINISTRAL_TTL
+        batch_results = flush_llm_batch()
+        for cache_key, result in batch_results.items():
+            _update_cache(cache_key, result, ttl=MINISTRAL_TTL)
+    except Exception as e_batch:
+        logger.warning("LLM batch flush failed: %s", e_batch)
+
     _run_elapsed = time.monotonic() - _run_start
     logger.info(
         "Signal loop done: %d OK, %d failed in %.1fs (%.1fs/ticker avg)",

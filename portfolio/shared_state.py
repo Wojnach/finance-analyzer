@@ -105,6 +105,37 @@ def _cached(key, ttl, func, *args):
         return None
 
 
+def _cached_or_enqueue(key, ttl, enqueue_fn, context):
+    """Check cache — if fresh return it, if expired enqueue for batch and return stale.
+
+    Unlike _cached(), this never calls the model directly. On miss, it adds
+    the request to the batch queue and returns stale data (or None).
+    """
+    now = time.time()
+    with _cache_lock:
+        if key in _tool_cache and now - _tool_cache[key]["time"] < ttl:
+            return _tool_cache[key]["data"]
+        # Cache expired — enqueue for post-cycle batch
+        if enqueue_fn and context is not None:
+            enqueue_fn(key, context)
+        # Return stale if available
+        if key in _tool_cache:
+            age = now - _tool_cache[key]["time"]
+            if age <= ttl * _MAX_STALE_FACTOR:
+                return _tool_cache[key]["data"]
+    return None
+
+
+def _update_cache(key, data, ttl=None):
+    """Update a cache entry directly (for batch flush results)."""
+    with _cache_lock:
+        _tool_cache[key] = {
+            "data": data,
+            "time": time.time(),
+            "ttl": ttl or 900,
+        }
+
+
 # Cycle counter — incremented at the start of each run() to invalidate per-cycle caches
 _run_cycle_id = 0
 
