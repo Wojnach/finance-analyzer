@@ -105,10 +105,17 @@ def flush_llm_batch():
     if q_batch:
         logger.info("LLM batch: %d Qwen3 queries", len(q_batch))
         try:
-            from portfolio.qwen3_trader import _build_prompt as _qwen_build, _parse_response as _qwen_parse
+            from portfolio.qwen3_trader import _build_prompt as _qwen_build, _parse_response as _qwen_parse_raw
+
+            def _parse_qwen3(text):
+                decision, reasoning, confidence = _qwen_parse_raw(text)
+                result = {"action": decision, "reasoning": reasoning, "model": "Qwen3-8B"}
+                if confidence is not None:
+                    result["confidence"] = confidence
+                return result
 
             phase = _flush_via_server(
-                "qwen3", q_batch, _qwen_build, _qwen_parse,
+                "qwen3", q_batch, _qwen_build, _parse_qwen3,
                 ["<|endoftext|>", "<|im_end|>"],
             )
             results.update(phase)
