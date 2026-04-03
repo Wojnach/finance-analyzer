@@ -366,30 +366,95 @@ def sell_position(active, reason):
         if bid > 0:
             r = place_sell_order(active['ob'], price=bid, volume=active['v'])
             pnl = (bid - active['c']) * active['v']
-            log_msg(f'SELL({reason}): {active["v"]}u@{bid} P&L:{pnl:+.0f} [{r.get("orderRequestStatus", "?")}]')
+            amount = bid * active['v']
+            nm = 'BULL X5' if active['d'] == 'LONG' else 'BEAR X5'
+            log_msg(f'SELL({reason}): {active["v"]}u@{bid} = {amount:.0f} SEK P&L:{pnl:+.0f} [{r.get("orderRequestStatus", "?")}]')
+            # Rule 7: Log trade
+            _log_trade('SELL', nm, active['v'], bid, amount, reason)
             return pnl
     except Exception as e:
         log_msg(f'Sell error: {e}')
     return 0
 
-def buy_position(direction, price, size_scalar=1.0):
-    """Enter a new position with vol-targeted sizing. Returns active dict or None."""
+# ---------------------------------------------------------------------------
+# Trading rules constants
+# ---------------------------------------------------------------------------
+MIN_ORDER_SEK = 1000       # Rule 1: courtage-free threshold
+MIN_EXPECTED_GAIN = 50     # Rule 6: don't enter unless expected gain > friction
+MAX_SPREAD_PCT = 1.0       # Rule 9: skip instruments with >1% spread
+COOLDOWN_NORMAL = 300      # Rule 4: 5 min cooldown between trades
+COOLDOWN_HIGH_CONV = 120   # Rule 4: 2 min for high-conviction exits
+TRADE_LOG = 'data/fish_trades.jsonl'
+
+# Rule 2+5: Only AVA products, prefer higher-priced certs
+LONG_OB = '1650161'   # BULL SILVER X5 AVA 4 (~7 SEK, 0.14% spread)
+SHORT_OB = '2286417'  # BEAR SILVER X5 AVA 12 (~2.5 SEK, 0.39% spread)
+
+
+def _log_trade(action, instrument, units, price, amount, tactic=''):
+    """Rule 7: Log every trade with exact amounts."""
+    try:
+        entry = {
+            'ts': datetime.datetime.now(datetime.UTC).isoformat(),
+            'action': action,
+            'instrument': instrument,
+            'units': units,
+            'price_sek': round(price, 2),
+            'amount_sek': round(amount, 2),
+            'tactic': tactic,
+        }
+        from portfolio.file_utils import atomic_append_jsonl
+        atomic_append_jsonl(TRADE_LOG, entry)
+    except Exception:
+        pass
+
+
+def buy_position(direction, price, size_scalar=1.0, tactic=''):
+    """Enter a new position. Enforces all 9 trading rules."""
     try:
         from portfolio.avanza_session import place_buy_order, get_quote, get_buying_power
-        ob = '1650161' if direction == 'LONG' else '2286417'
+        ob = LONG_OB if direction == 'LONG' else SHORT_OB
         q = get_quote(ob)
         ask = float(q.get('sell', 0))
-        bp = float(get_buying_power().get('buying_power', 0))
-        if ask <= 0 or bp < 100:
+        bid = float(q.get('buy', 0))
+
+        if ask <= 0:
             return None
+
+        # Rule 9: Check spread before entering
+        if bid > 0:
+            spread_pct = (ask - bid) / bid * 100
+            if spread_pct > MAX_SPREAD_PCT:
+                log_msg(f'SKIP: spread {spread_pct:.1f}% > {MAX_SPREAD_PCT}% limit')
+                return None
+
+        bp = float(get_buying_power().get('buying_power', 0))
+
+        # Rule 1: Minimum order 1,000 SEK for courtage-free
         budget = min(bp * 0.95, 1500) * size_scalar
+        if budget < MIN_ORDER_SEK:
+            log_msg(f'SKIP: budget {budget:.0f} < {MIN_ORDER_SEK} SEK minimum')
+            return None
+
         vol = int(budget / ask)
+        order_amount = vol * ask
+
+        # Rule 1 double-check: actual order must be > 1000
+        if order_amount < MIN_ORDER_SEK:
+            log_msg(f'SKIP: order {order_amount:.0f} < {MIN_ORDER_SEK} SEK')
+            return None
+
         if vol < 5:
             return None
+
         r = place_buy_order(ob, price=ask, volume=vol)
         nm = 'BULL X5' if direction == 'LONG' else 'BEAR X5'
-        sz = f' (vol-scaled {size_scalar:.1f}x)' if size_scalar != 1.0 else ''
-        log_msg(f'BUY: {vol}u {nm}@{ask}{sz} [{r.get("orderRequestStatus", "?")}]')
+        status = r.get('orderRequestStatus', '?')
+        log_msg(f'BUY: {vol}u {nm}@{ask} = {order_amount:.0f} SEK [{status}] ({tactic})')
+
+        # Rule 7: Log trade
+        _log_trade('BUY', nm, vol, ask, -order_amount, tactic)
+
         return {'ob': ob, 'd': direction, 'v': vol, 'c': ask, 'e': price, 't': time.time()}
     except Exception as e:
         log_msg(f'Buy error: {e}')
@@ -667,12 +732,12 @@ def main():
                         # High-conviction directional exits → short cooldown (flip faster)
                         # Low-conviction exits → longer cooldown (rescan needed)
                         if ex in ('COMB', 'SELL flip', 'BUY flip', 'RSI'):
-                            cd = now + 5   # near-instant re-entry allowed
+                            cd = now + COOLDOWN_HIGH_CONV   # near-instant re-entry allowed
                             log_msg(f'High-conviction exit ({ex}) — ready to flip')
                         elif ex.startswith('MD'):
-                            cd = now + 60  # standard cooldown
+                            cd = now + COOLDOWN_NORMAL  # standard cooldown
                         else:
-                            cd = now + 120  # TP/SL/timeout — need fresh signal
+                            cd = now + COOLDOWN_NORMAL  # TP/SL/timeout — need fresh signal
                         active = None
                         md = 0
                         # Track momentum losses for potential mode switch
@@ -772,42 +837,36 @@ def main():
                             elif sentiment == 'positive':
                                 votes['sentiment'] = 'LONG'
 
-                        # --- VOTE COUNTING ---
+                        # --- VOTE COUNTING (Rule 3: require 2+ tactics) ---
                         if votes:
                             longs = [k for k, v in votes.items() if v == 'LONG']
                             shorts = [k for k, v in votes.items() if v == 'SHORT']
+                            tactic_str = ','.join(f'{k}={v[0]}' for k, v in votes.items())
 
                             if len(longs) >= 2 and len(longs) > len(shorts):
-                                # 2+ tactics agree LONG → full size
-                                log_msg(f'!! VOTE: LONG ({len(longs)} agree: {",".join(longs)} vs {len(shorts)} SHORT)')
-                                active = buy_position('LONG', p, vol_scalar)
+                                # 2+ tactics agree LONG
+                                log_msg(f'!! VOTE: LONG ({len(longs)} agree: {",".join(longs)} vs {len(shorts)}S) [{tactic_str}]')
+                                active = buy_position('LONG', p, vol_scalar, tactic=','.join(longs))
                                 if active:
                                     fl = f' >>> LONG ({",".join(longs)})'
                                     if 'straddle' in longs:
                                         straddle_bull_filled = True
                             elif len(shorts) >= 2 and len(shorts) > len(longs):
-                                # 2+ tactics agree SHORT → full size
-                                log_msg(f'!! VOTE: SHORT ({len(shorts)} agree: {",".join(shorts)} vs {len(longs)} LONG)')
-                                active = buy_position('SHORT', p, vol_scalar)
+                                # 2+ tactics agree SHORT
+                                log_msg(f'!! VOTE: SHORT ({len(shorts)} agree: {",".join(shorts)} vs {len(longs)}L) [{tactic_str}]')
+                                active = buy_position('SHORT', p, vol_scalar, tactic=','.join(shorts))
                                 if active:
                                     fl = f' >>> SHORT ({",".join(shorts)})'
                                     if 'straddle' in shorts:
                                         straddle_bear_filled = True
                             elif len(longs) == 1 and len(shorts) == 0:
-                                # Single tactic → half size
-                                log_msg(f'!! VOTE: weak LONG ({longs[0]} only)')
-                                active = buy_position('LONG', p, vol_scalar * 0.5)
-                                if active:
-                                    fl = f' >>> LONG ({longs[0]}, half-size)'
+                                # Rule 3: single tactic = NO TRADE (was half-size, caused churn)
+                                pass  # silently skip — don't even log, too noisy
                             elif len(shorts) == 1 and len(longs) == 0:
-                                # Single tactic → half size
-                                log_msg(f'!! VOTE: weak SHORT ({shorts[0]} only)')
-                                active = buy_position('SHORT', p, vol_scalar * 0.5)
-                                if active:
-                                    fl = f' >>> SHORT ({shorts[0]}, half-size)'
+                                pass  # same — single tactic, skip
                             elif longs and shorts:
-                                # Conflict → no trade
-                                log_msg(f'!! VOTE: CONFLICT ({",".join(longs)} vs {",".join(shorts)}) — NO TRADE')
+                                # Conflict
+                                log_msg(f'!! VOTE: CONFLICT ({",".join(longs)} vs {",".join(shorts)})')
                             if active:
                                 md = 0
 
