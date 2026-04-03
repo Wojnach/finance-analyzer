@@ -1298,8 +1298,31 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # post-gated counts.  _weighted_consensus also applies this internally
     # (idempotent — gating HOLD→HOLD is a no-op).
     # BUG-149: now horizon-aware via _get_regime_gated()
+    # BUG-158: Per-ticker exemption — if a signal has ≥60% accuracy with ≥50
+    # samples on THIS ticker, exempt it from regime gating. fear_greed is 93.8%
+    # on XAG-USD but globally gated in ranging — this recovers that alpha.
     regime_gated = _get_regime_gated(regime, horizon)
-    for sig_name in regime_gated:
+    _ticker_acc_data = {}
+    try:
+        from portfolio.accuracy_stats import accuracy_by_ticker_signal_cached
+        acc_horizon = horizon if horizon in ("3h", "4h", "12h") else "1d"
+        _ticker_acc_data = (accuracy_by_ticker_signal_cached(acc_horizon) or {}).get(ticker, {})
+    except Exception:
+        logger.debug("Per-ticker accuracy unavailable for regime gating exemption", exc_info=True)
+    _TICKER_EXEMPT_ACC = 0.60
+    _TICKER_EXEMPT_MIN_SAMPLES = 50
+    regime_gated_effective = set(regime_gated)
+    for sig_name in list(regime_gated_effective):
+        t_stats = _ticker_acc_data.get(sig_name, {})
+        t_acc = t_stats.get("accuracy", 0)
+        t_samples = t_stats.get("total", 0)
+        if t_samples >= _TICKER_EXEMPT_MIN_SAMPLES and t_acc >= _TICKER_EXEMPT_ACC:
+            regime_gated_effective.discard(sig_name)
+            logger.debug(
+                "BUG-158: %s exempt from %s regime gating for %s (%.1f%%, %d samples)",
+                sig_name, regime, ticker, t_acc * 100, t_samples,
+            )
+    for sig_name in regime_gated_effective:
         if sig_name in votes and votes[sig_name] != "HOLD":
             votes[sig_name] = "HOLD"
 
@@ -1406,19 +1429,33 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     except Exception:
         logger.debug("Regime-conditional accuracy unavailable", exc_info=True)
 
-    # Override global accuracy with per-ticker accuracy for LLM signals.
-    # The global number averages across all tickers, but Qwen3/Ministral
-    # performance varies hugely per ticker (e.g., Qwen3: MU 90%, PLTR 44%).
-    for llm_sig in ("qwen3", "ministral"):
-        per_ticker_acc = extra_info.get(f"{llm_sig}_accuracy")
-        per_ticker_samples = extra_info.get(f"{llm_sig}_samples", 0)
-        if per_ticker_acc is not None and per_ticker_samples >= 20:
-            accuracy_data[llm_sig] = {
-                "accuracy": per_ticker_acc,
-                "total": per_ticker_samples,
-                "correct": int(per_ticker_acc * per_ticker_samples),
-                "pct": round(per_ticker_acc * 100, 1),
-            }
+    # BUG-158: Override global accuracy with per-ticker accuracy for ALL signals.
+    # Per-ticker variance is enormous: fear_greed is 93.8% on XAG-USD but 25.9%
+    # globally. Using global accuracy throws away alpha on specific instruments.
+    # Use the cached per-ticker cross-tab (populated above for regime gating).
+    # Fall back to extra_info LLM-specific fields for backwards compat.
+    _PER_TICKER_MIN_SAMPLES = 30
+    if _ticker_acc_data:
+        for sig_name, t_stats in _ticker_acc_data.items():
+            if t_stats.get("total", 0) >= _PER_TICKER_MIN_SAMPLES:
+                accuracy_data[sig_name] = {
+                    "accuracy": t_stats["accuracy"],
+                    "total": t_stats["total"],
+                    "correct": t_stats.get("correct", 0),
+                    "pct": t_stats.get("pct", round(t_stats["accuracy"] * 100, 1)),
+                }
+    else:
+        # Fallback: LLM-specific per-ticker data from extra_info
+        for llm_sig in ("qwen3", "ministral"):
+            per_ticker_acc = extra_info.get(f"{llm_sig}_accuracy")
+            per_ticker_samples = extra_info.get(f"{llm_sig}_samples", 0)
+            if per_ticker_acc is not None and per_ticker_samples >= 20:
+                accuracy_data[llm_sig] = {
+                    "accuracy": per_ticker_acc,
+                    "total": per_ticker_samples,
+                    "correct": int(per_ticker_acc * per_ticker_samples),
+                    "pct": round(per_ticker_acc * 100, 1),
+                }
 
     # Utility boost: scale accuracy weight by return-based utility score.
     # Signals that catch large moves (high avg_return) get a confidence boost

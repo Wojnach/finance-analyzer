@@ -1126,6 +1126,77 @@ def top_signals_for_ticker(ticker, horizon="1d", min_samples=5):
     return ranked
 
 
+# ---------------------------------------------------------------------------
+# Per-ticker accuracy cache
+# ---------------------------------------------------------------------------
+
+TICKER_ACCURACY_CACHE_FILE = DATA_DIR / "ticker_signal_accuracy_cache.json"
+
+
+def load_cached_ticker_accuracy(horizon="1d"):
+    """Load cached per-ticker per-signal accuracy, returning None if stale.
+
+    Uses the same TTL as the main accuracy cache (ACCURACY_CACHE_TTL).
+    Cache structure: {horizon: {ticker: {signal: {correct, total, accuracy, pct}}}, "time": ...}
+    """
+    cache = load_json(TICKER_ACCURACY_CACHE_FILE)
+    if cache is not None:
+        try:
+            if time.time() - cache.get("time", 0) < ACCURACY_CACHE_TTL:
+                cached = cache.get(horizon)
+                if cached:
+                    return cached
+        except (KeyError, AttributeError):
+            logger.debug("Ticker accuracy cache corrupted or missing horizon %s", horizon)
+    return None
+
+
+def write_ticker_accuracy_cache(horizon, data):
+    """Persist per-ticker per-signal accuracy data to the cache file.
+
+    Merges with existing horizons to avoid overwriting other cached data.
+    """
+    cache = load_json(TICKER_ACCURACY_CACHE_FILE, default={})
+    if not isinstance(cache, dict):
+        cache = {}
+    cache[horizon] = data
+    cache["time"] = time.time()
+    _atomic_write_json(TICKER_ACCURACY_CACHE_FILE, cache)
+
+
+def accuracy_by_ticker_signal_cached(horizon="1d", min_samples=0):
+    """Cached version of accuracy_by_ticker_signal().
+
+    Checks the ticker accuracy cache first; on miss, computes from the
+    full signal log and writes the cache.
+    """
+    cached = load_cached_ticker_accuracy(horizon)
+    if cached:
+        if min_samples > 0:
+            return {
+                ticker: {
+                    sig: data for sig, data in sigs.items()
+                    if data.get("total", 0) >= min_samples
+                }
+                for ticker, sigs in cached.items()
+            }
+        return cached
+
+    data = accuracy_by_ticker_signal(horizon, min_samples=0)
+    if data:
+        write_ticker_accuracy_cache(horizon, data)
+
+    if min_samples > 0:
+        return {
+            ticker: {
+                sig: sdata for sig, sdata in sigs.items()
+                if sdata.get("total", 0) >= min_samples
+            }
+            for ticker, sigs in data.items()
+        }
+    return data
+
+
 def probability_calibration(horizon="1d", buckets=None, since=None):
     """Compute calibration data for reliability diagrams.
 
