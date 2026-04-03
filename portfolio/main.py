@@ -18,6 +18,7 @@ This is the orchestrator module. All logic has been extracted to:
 - logging_config.py — structured logging setup
 """
 
+import atexit
 import logging
 import os
 import sys
@@ -32,6 +33,60 @@ sys.path.insert(0, str(BASE_DIR))
 DATA_DIR = BASE_DIR / "data"
 
 logger = logging.getLogger("portfolio.loop")
+
+# --- Singleton guard (same pattern as metals_loop.py) ---
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
+
+_SINGLETON_LOCK_FILE = str(DATA_DIR / "main_loop.singleton.lock")
+_DUPLICATE_EXIT_CODE = 11
+_singleton_lock_fh = None
+
+
+def _acquire_singleton_lock():
+    """Acquire single-instance lock for main loop (non-blocking)."""
+    global _singleton_lock_fh
+    if _singleton_lock_fh is not None:
+        return True
+    if msvcrt is None:
+        return True
+
+    os.makedirs(os.path.dirname(_SINGLETON_LOCK_FILE), exist_ok=True)
+    fh = open(_SINGLETON_LOCK_FILE, "a+", encoding="utf-8")
+    try:
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        fh.close()
+        return False
+
+    fh.seek(0)
+    fh.truncate()
+    fh.write(f"{os.getpid()}\n")
+    fh.flush()
+    _singleton_lock_fh = fh
+    return True
+
+
+def _release_singleton_lock():
+    """Release single-instance lock if held."""
+    global _singleton_lock_fh
+    if _singleton_lock_fh is None:
+        return
+    try:
+        if msvcrt is not None:
+            _singleton_lock_fh.seek(0)
+            msvcrt.locking(_singleton_lock_fh.fileno(), msvcrt.LK_UNLCK, 1)
+    except OSError:
+        pass
+    finally:
+        try:
+            _singleton_lock_fh.close()
+        except Exception:
+            pass
+        _singleton_lock_fh = None
+
 
 # --- Re-exports for backwards compatibility ---
 # External code (tests, trigger.py, etc.) that does `from portfolio.main import X`
@@ -681,6 +736,12 @@ def _sleep_for_next_cycle(previous_cycle_started, interval_s):
 def loop(interval=None):
     from portfolio.logging_config import setup_logging
     setup_logging()
+
+    # Prevent duplicate loop instances
+    if not _acquire_singleton_lock():
+        logger.warning("Duplicate main loop instance detected; exiting.")
+        sys.exit(_DUPLICATE_EXIT_CODE)
+    atexit.register(_release_singleton_lock)
 
     # Validate config on startup (fail fast if misconfigured)
     from portfolio.config_validator import validate_config_file

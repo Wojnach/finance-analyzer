@@ -74,6 +74,43 @@ _local_proc = None       # Popen if this process started the server
 _local_model = None      # model name this process loaded
 
 
+def _kill_by_port():
+    """Kill any process listening on _PORT (catches orphaned servers)."""
+    try:
+        if platform.system() == "Windows":
+            # Find all PIDs on our port
+            result = subprocess.run(
+                ["netstat", "-ano"],
+                capture_output=True, text=True, timeout=10,
+            )
+            pids_to_kill = set()
+            for line in result.stdout.splitlines():
+                if f":{_PORT}" in line and "LISTENING" in line:
+                    parts = line.split()
+                    if parts:
+                        with suppress(ValueError):
+                            pids_to_kill.add(int(parts[-1]))
+            for pid in pids_to_kill:
+                if pid != os.getpid():
+                    logger.info("Killing orphaned process on port %d: PID %d", _PORT, pid)
+                    subprocess.run(
+                        ["taskkill", "/F", "/PID", str(pid)],
+                        capture_output=True, timeout=10,
+                    )
+        else:
+            result = subprocess.run(
+                ["fuser", f"{_PORT}/tcp"],
+                capture_output=True, text=True, timeout=10,
+            )
+            for pid_str in result.stdout.split():
+                with suppress(ValueError):
+                    pid = int(pid_str)
+                    if pid != os.getpid():
+                        os.kill(pid, 9)
+    except Exception as e:
+        logger.debug("Port kill check failed: %s", e)
+
+
 def _kill_server_by_pid():
     """Kill any existing llama-server via saved PID file."""
     try:
@@ -144,6 +181,10 @@ def _stop_server():
                 _local_proc.kill()
     _local_proc = None
     _local_model = None
+
+    # Safety net: kill anything still on port 8787 (catches orphaned servers
+    # not tracked by PID file — the root cause of 10x process accumulation)
+    _kill_by_port()
 
     with suppress(OSError):
         os.remove(_PID_FILE)
