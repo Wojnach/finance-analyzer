@@ -247,8 +247,13 @@ def _ensure_model(name):
     return _start_server(name)
 
 
-def _acquire_file_lock(timeout=120):
-    """Acquire cross-process file lock. Returns lock file handle or None."""
+def _acquire_file_lock(timeout=300):
+    """Acquire cross-process file lock. Returns lock file handle or None.
+
+    Timeout must exceed the HTTP query timeout (240s) to prevent callers
+    from falling back to subprocess while the server is still handling a
+    legitimate query (Codex review finding #1).
+    """
     os.makedirs(os.path.dirname(_LOCK_FILE), exist_ok=True)
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -308,7 +313,7 @@ def query_llama_server(name, prompt, n_predict=1024, temperature=0.0,
     # swap the model mid-query, killing the server and causing silent failures.
     # Serialization is correct here — only one 8B model fits in VRAM at a time.
     with _thread_lock:
-        fh = _acquire_file_lock(timeout=120)
+        fh = _acquire_file_lock(timeout=300)
         if fh is None:
             return None
         try:

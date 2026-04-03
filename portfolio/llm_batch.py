@@ -6,6 +6,13 @@ flush_llm_batch() processes them grouped by model: load Ministral once →
 query all tickers → swap to Qwen3 once → query all tickers.
 
 Result: max 1 model swap per cycle instead of N swaps.
+
+Note (Codex finding #4): The batch is not fully atomic — the metals loop
+can swap the model between individual items since the file lock is acquired
+per-query inside get_ministral_signal/get_qwen3_signal. This is acceptable:
+worst case is one extra swap if the metals loop fires during the batch
+(~30min interval in quiet hours, ~5min in market hours). Making it truly
+atomic would require refactoring the lock hierarchy.
 """
 
 import logging
@@ -22,7 +29,6 @@ _qwen3_queue: list[tuple[str, dict]] = []       # (cache_key, context)
 def enqueue_ministral(cache_key, context):
     """Add a Ministral cache miss to the batch queue."""
     with _lock:
-        # Deduplicate by cache_key
         if not any(k == cache_key for k, _ in _ministral_queue):
             _ministral_queue.append((cache_key, context))
 
