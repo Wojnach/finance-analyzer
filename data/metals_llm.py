@@ -190,9 +190,9 @@ def _query_ministral_server(context):
         try:
             _ministral_proc.stdin.write(json.dumps(context) + "\n")
             _ministral_proc.stdin.flush()
-            response_line = _ministral_proc.stdout.readline()
+            response_line = _readline_with_timeout(_ministral_proc.stdout, timeout_s=120)
             if not response_line:
-                _log("Ministral server returned empty response, restarting")
+                _log("Ministral server timed out or empty response, restarting")
                 _stop_ministral_server()
                 return None
             return json.loads(response_line.strip())
@@ -203,8 +203,20 @@ def _query_ministral_server(context):
 
 
 def _start_chronos_server():
-    """Launch Chronos in persistent server mode. Returns Popen or None."""
+    """Launch Chronos in persistent server mode. Returns Popen or None.
+
+    Checks VRAM before loading (Codex finding #6). Chronos uses ~673MB
+    which coexists with llama-server, but we verify before loading.
+    """
     global _chronos_proc, _chronos_job
+    try:
+        from portfolio.gpu_gate import get_vram_usage
+        vram = get_vram_usage()
+        if vram and vram["free_mb"] < 1000:
+            _log(f"Chronos: insufficient VRAM ({vram['free_mb']}MB free, need 1000MB)")
+            return None
+    except ImportError:
+        pass
     try:
         from portfolio.subprocess_utils import popen_in_job
         proc, job = popen_in_job(
@@ -262,6 +274,25 @@ def _stop_chronos_server():
         _chronos_job = None
 
 
+def _readline_with_timeout(stream, timeout_s=60):
+    """Read a line from a pipe with a timeout (Codex finding #7).
+
+    Uses a background thread since Python pipes don't support select() on Windows.
+    Returns the line or None on timeout.
+    """
+    result = [None]
+
+    def _read():
+        result[0] = stream.readline()
+
+    t = threading.Thread(target=_read, daemon=True)
+    t.start()
+    t.join(timeout=timeout_s)
+    if t.is_alive():
+        return None  # timed out — caller should restart server
+    return result[0]
+
+
 def _query_chronos_server(close_prices, horizons=(1, 3)):
     """Send a request to the persistent Chronos server. Returns result dict or None."""
     global _chronos_proc
@@ -275,9 +306,9 @@ def _query_chronos_server(close_prices, horizons=(1, 3)):
             req = json.dumps({"close_prices": close_prices, "horizons": list(horizons)})
             _chronos_proc.stdin.write(req + "\n")
             _chronos_proc.stdin.flush()
-            response_line = _chronos_proc.stdout.readline()
+            response_line = _readline_with_timeout(_chronos_proc.stdout, timeout_s=60)
             if not response_line:
-                _log("Chronos server returned empty response, restarting")
+                _log("Chronos server timed out or empty response, restarting")
                 _stop_chronos_server()
                 return None
             result = json.loads(response_line.strip())

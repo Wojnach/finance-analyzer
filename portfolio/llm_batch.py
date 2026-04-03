@@ -7,12 +7,8 @@ query all tickers → swap to Qwen3 once → query all tickers.
 
 Result: max 1 model swap per cycle instead of N swaps.
 
-Note (Codex finding #4): The batch is not fully atomic — the metals loop
-can swap the model between individual items since the file lock is acquired
-per-query inside get_ministral_signal/get_qwen3_signal. This is acceptable:
-worst case is one extra swap if the metals loop fires during the batch
-(~30min interval in quiet hours, ~5min in market hours). Making it truly
-atomic would require refactoring the lock hierarchy.
+Uses query_llama_server_batch() which holds the file lock for the entire
+model phase, preventing the metals loop from swapping mid-batch (Codex #4).
 """
 
 import logging
@@ -40,6 +36,32 @@ def enqueue_qwen3(cache_key, context):
             _qwen3_queue.append((cache_key, context))
 
 
+def _flush_via_server(model_name, batch, build_prompt_fn, parse_response_fn, stop_tokens):
+    """Flush a batch using query_llama_server_batch (atomic, lock held for entire phase)."""
+    try:
+        from portfolio.llama_server import query_llama_server_batch
+    except ImportError:
+        return {}
+
+    prompts_and_params = []
+    for cache_key, ctx in batch:
+        prompt = build_prompt_fn(ctx)
+        prompts_and_params.append({
+            "prompt": prompt,
+            "stop": stop_tokens,
+        })
+
+    texts = query_llama_server_batch(model_name, prompts_and_params)
+
+    results = {}
+    for (cache_key, ctx), text in zip(batch, texts):
+        if text is not None:
+            parsed = parse_response_fn(text)
+            if parsed:
+                results[cache_key] = parsed
+    return results
+
+
 def flush_llm_batch():
     """Process all queued LLM requests, batched by model.
 
@@ -58,35 +80,40 @@ def flush_llm_batch():
     results = {}
     t0 = time.monotonic()
 
-    # Phase 1: All Ministral queries (server loads ministral3 once)
+    # Phase 1: All Ministral queries (lock held for entire phase)
     if m_batch:
         logger.info("LLM batch: %d Ministral queries", len(m_batch))
         try:
-            from portfolio.ministral_signal import get_ministral_signal
-            for cache_key, ctx in m_batch:
-                try:
-                    result = get_ministral_signal(ctx)
-                    if result:
-                        results[cache_key] = result
-                except Exception as e:
-                    logger.warning("LLM batch Ministral %s failed: %s", cache_key, e)
-        except ImportError:
-            logger.debug("ministral_signal not available")
+            from portfolio.ministral_trader import _build_prompt, _parse_response
 
-    # Phase 2: All Qwen3 queries (server swaps to qwen3 once)
+            def _parse_ministral(text):
+                decision, reasoning, confidence = _parse_response(text)
+                result = {
+                    "original": {"action": decision, "reasoning": reasoning, "model": "Ministral-3-8B"},
+                    "custom": None,
+                }
+                if confidence is not None:
+                    result["original"]["confidence"] = confidence
+                return result
+
+            phase = _flush_via_server("ministral3", m_batch, _build_prompt, _parse_ministral, ["[INST]"])
+            results.update(phase)
+        except Exception as e:
+            logger.warning("LLM batch Ministral failed: %s", e)
+
+    # Phase 2: All Qwen3 queries (lock held for entire phase)
     if q_batch:
         logger.info("LLM batch: %d Qwen3 queries", len(q_batch))
         try:
-            from portfolio.qwen3_signal import get_qwen3_signal
-            for cache_key, ctx in q_batch:
-                try:
-                    result = get_qwen3_signal(ctx)
-                    if result:
-                        results[cache_key] = result
-                except Exception as e:
-                    logger.warning("LLM batch Qwen3 %s failed: %s", cache_key, e)
-        except ImportError:
-            logger.debug("qwen3_signal not available")
+            from portfolio.qwen3_trader import _build_prompt as _qwen_build, _parse_response as _qwen_parse
+
+            phase = _flush_via_server(
+                "qwen3", q_batch, _qwen_build, _qwen_parse,
+                ["<|endoftext|>", "<|im_end|>"],
+            )
+            results.update(phase)
+        except Exception as e:
+            logger.warning("LLM batch Qwen3 failed: %s", e)
 
     elapsed = time.monotonic() - t0
     logger.info("LLM batch: %d results in %.1fs (M:%d Q:%d)",

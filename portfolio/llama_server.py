@@ -111,14 +111,37 @@ def _kill_by_port():
         logger.debug("Port kill check failed: %s", e)
 
 
+def _is_llama_server_process(pid):
+    """Verify a PID is actually a llama-server process before killing it."""
+    try:
+        if platform.system() == "Windows":
+            result = subprocess.run(
+                ["wmic", "process", "where", f"ProcessId={pid}", "get", "Name"],
+                capture_output=True, text=True, timeout=5,
+            )
+            return "llama-server" in result.stdout.lower()
+        else:
+            with open(f"/proc/{pid}/cmdline", "r") as f:
+                return "llama-server" in f.read()
+    except Exception:
+        return False
+
+
 def _kill_server_by_pid():
-    """Kill any existing llama-server via saved PID file."""
+    """Kill any existing llama-server via saved PID file.
+
+    Validates the process is actually llama-server before killing to
+    prevent PID-reuse collateral damage (Codex finding #2).
+    """
     try:
         if os.path.exists(_PID_FILE):
             with open(_PID_FILE) as f:
                 content = f.read().strip()
             if content:
                 pid = int(content.split(":")[0])
+                if not _is_llama_server_process(pid):
+                    logger.warning("PID %d from pid file is not llama-server, skipping kill", pid)
+                    return
                 if platform.system() == "Windows":
                     subprocess.run(
                         ["taskkill", "/F", "/PID", str(pid)],
@@ -319,29 +342,77 @@ def query_llama_server(name, prompt, n_predict=1024, temperature=0.0,
         try:
             if not _ensure_model(name):
                 return None
-
-            body = {
-                "prompt": prompt,
-                "n_predict": n_predict,
-                "temperature": temperature,
-                "top_p": top_p,
-            }
-            if stop:
-                body["stop"] = stop
-            r = _requests.post(
-                f"http://127.0.0.1:{_PORT}/completion",
-                json=body,
-                timeout=240,
-            )
-            if r.status_code == 200:
-                return r.json().get("content", "").strip()
-            logger.warning("llama-server %s returned %d", name, r.status_code)
-            return None
+            text = _query_http(prompt, n_predict, temperature, top_p, stop)
+            if text is None:
+                logger.warning("llama-server %s returned empty response", name)
+            return text
         except Exception as e:
             logger.warning("llama-server %s query failed: %s", name, e)
             return None
         finally:
             _release_file_lock(fh)
+
+
+def _query_http(prompt, n_predict=1024, temperature=0.0, top_p=0.2, stop=None):
+    """Send an HTTP completion request. No locking — caller must hold locks."""
+    body = {
+        "prompt": prompt,
+        "n_predict": n_predict,
+        "temperature": temperature,
+        "top_p": top_p,
+    }
+    if stop:
+        body["stop"] = stop
+    r = _requests.post(
+        f"http://127.0.0.1:{_PORT}/completion",
+        json=body,
+        timeout=240,
+    )
+    if r.status_code == 200:
+        return r.json().get("content", "").strip()
+    return None
+
+
+def query_llama_server_batch(name, prompts_and_params):
+    """Query the server for multiple prompts, holding the lock for the entire batch.
+
+    Prevents other processes from swapping the model between items (Codex finding #4).
+
+    Args:
+        name: model name (e.g. "ministral3", "qwen3")
+        prompts_and_params: list of dicts with keys: prompt, n_predict, temperature, top_p, stop
+
+    Returns:
+        list of (completion_text_or_None) in same order as input.
+    """
+    cfg = _MODEL_CONFIGS.get(name)
+    if cfg is None:
+        return [None] * len(prompts_and_params)
+
+    results = []
+    with _thread_lock:
+        fh = _acquire_file_lock(timeout=300)
+        if fh is None:
+            return [None] * len(prompts_and_params)
+        try:
+            if not _ensure_model(name):
+                return [None] * len(prompts_and_params)
+            for params in prompts_and_params:
+                try:
+                    text = _query_http(
+                        params["prompt"],
+                        n_predict=params.get("n_predict", 1024),
+                        temperature=params.get("temperature", 0.0),
+                        top_p=params.get("top_p", 0.2),
+                        stop=params.get("stop"),
+                    )
+                    results.append(text)
+                except Exception as e:
+                    logger.warning("llama-server batch query failed: %s", e)
+                    results.append(None)
+        finally:
+            _release_file_lock(fh)
+    return results
 
 
 def stop_server(name=None):

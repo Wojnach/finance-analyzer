@@ -110,13 +110,17 @@ def _cached_or_enqueue(key, ttl, enqueue_fn, context):
 
     Unlike _cached(), this never calls the model directly. On miss, it adds
     the request to the batch queue and returns stale data (or None).
+
+    Dogpile prevention (Codex finding #5): uses _loading_keys to avoid
+    re-enqueuing the same key every cycle if the batch flush hasn't run yet.
     """
     now = time.time()
     with _cache_lock:
         if key in _tool_cache and now - _tool_cache[key]["time"] < ttl:
             return _tool_cache[key]["data"]
-        # Cache expired — enqueue for post-cycle batch
-        if enqueue_fn and context is not None:
+        # Cache expired — enqueue for post-cycle batch (once, not every thread)
+        if enqueue_fn and context is not None and key not in _loading_keys:
+            _loading_keys.add(key)
             enqueue_fn(key, context)
         # Return stale if available
         if key in _tool_cache:
@@ -129,6 +133,7 @@ def _cached_or_enqueue(key, ttl, enqueue_fn, context):
 def _update_cache(key, data, ttl=None):
     """Update a cache entry directly (for batch flush results)."""
     with _cache_lock:
+        _loading_keys.discard(key)
         _tool_cache[key] = {
             "data": data,
             "time": time.time(),
