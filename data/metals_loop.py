@@ -549,7 +549,7 @@ _last_news_fetch_ts = 0.0         # timestamp of last metals news fetch
 NEWS_FETCH_INTERVAL = 1800        # fetch news every 30 min (1800s)
 
 # --- FISH ENGINE (integrated intraday fishing) ---
-FISH_ENGINE_ENABLED = True        # master switch for fish engine
+FISH_ENGINE_ENABLED = False       # disabled by default — enable manually per session
 _fish_engine = None               # FishEngine instance (lazy init)
 PROB_REPORT_INTERVAL = 5          # compute probability report every N checks (~2.5 min)
 PROB_TELEGRAM_INTERVAL = 20       # send probability telegram every N checks (~10 min)
