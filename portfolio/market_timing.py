@@ -2,7 +2,7 @@
 
 from datetime import UTC, date, datetime
 
-from portfolio.tickers import STOCK_SYMBOLS, SYMBOLS
+from portfolio.tickers import CRYPTO_SYMBOLS, METALS_SYMBOLS, STOCK_SYMBOLS, SYMBOLS
 
 # Market hours (UTC)
 MARKET_OPEN_HOUR = 7  # ~Frankfurt/London open
@@ -133,9 +133,10 @@ def get_market_state():
     weekday = now.weekday()  # 0=Mon, 6=Sun
     hour = now.hour
     all_symbols = set(SYMBOLS.keys())
+    always_on = CRYPTO_SYMBOLS | METALS_SYMBOLS
     if weekday >= 5:
-        return "weekend", all_symbols, INTERVAL_WEEKEND
+        return "weekend", always_on, INTERVAL_WEEKEND
     close_hour = _market_close_hour_utc(now)
     if MARKET_OPEN_HOUR <= hour < close_hour:
         return "open", all_symbols, INTERVAL_MARKET_OPEN
-    return "closed", all_symbols, INTERVAL_MARKET_CLOSED
+    return "closed", always_on, INTERVAL_MARKET_CLOSED

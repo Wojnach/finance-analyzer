@@ -224,7 +224,10 @@ def _start_server(name):
         return False
 
     _stop_server()
-    time.sleep(1)
+    # Wait for GPU driver to reclaim VRAM after killing the previous server.
+    # Windows VRAM release is asynchronous — 1s was insufficient, causing
+    # Qwen3 to see 136MB free instead of ~5GB after Ministral teardown.
+    time.sleep(4)
 
     try:
         cmd = [

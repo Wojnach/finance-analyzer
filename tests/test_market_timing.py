@@ -586,12 +586,12 @@ class TestGetMarketStateWeekend:
 # ===========================================================================
 
 class TestGetMarketStateSymbols:
-    """The symbols set returned should match SYMBOLS.keys()."""
+    """Off-hours should only return 24/7 tickers (crypto + metals)."""
 
     @patch("portfolio.market_timing.datetime")
-    def test_symbols_match_tickers(self, mock_dt):
+    def test_symbols_all_during_market_hours(self, mock_dt):
         from portfolio.tickers import SYMBOLS
-        fake_now = datetime(2026, 2, 24, 14, 0, tzinfo=UTC)  # Tuesday
+        fake_now = datetime(2026, 2, 24, 14, 0, tzinfo=UTC)  # Tuesday 14:00 UTC
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -599,14 +599,26 @@ class TestGetMarketStateSymbols:
         assert symbols == set(SYMBOLS.keys())
 
     @patch("portfolio.market_timing.datetime")
-    def test_symbols_on_weekend(self, mock_dt):
-        from portfolio.tickers import SYMBOLS
+    def test_symbols_crypto_metals_only_on_weekend(self, mock_dt):
+        from portfolio.tickers import CRYPTO_SYMBOLS, METALS_SYMBOLS
         fake_now = datetime(2026, 2, 28, 12, 0, tzinfo=UTC)  # Saturday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
         _, symbols, _ = get_market_state()
-        assert symbols == set(SYMBOLS.keys())
+        assert symbols == CRYPTO_SYMBOLS | METALS_SYMBOLS
+
+    @patch("portfolio.market_timing.datetime")
+    def test_symbols_crypto_metals_only_at_night(self, mock_dt):
+        from portfolio.tickers import CRYPTO_SYMBOLS, METALS_SYMBOLS
+        fake_now = datetime(2026, 2, 24, 23, 0, tzinfo=UTC)  # Tuesday 23:00 UTC
+        mock_dt.now.return_value = fake_now
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+
+        state, symbols, interval = get_market_state()
+        assert state == "closed"
+        assert symbols == CRYPTO_SYMBOLS | METALS_SYMBOLS
+        assert interval == 120
 
 
 # ===========================================================================
