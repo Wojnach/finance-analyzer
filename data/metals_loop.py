@@ -547,6 +547,10 @@ _last_auto_telegram = 0           # timestamp of last autonomous Telegram (for t
 AUTO_TELEGRAM_COOLDOWN = 1800     # 30 min between routine autonomous messages
 _last_news_fetch_ts = 0.0         # timestamp of last metals news fetch
 NEWS_FETCH_INTERVAL = 1800        # fetch news every 30 min (1800s)
+
+# --- FISH ENGINE (integrated intraday fishing) ---
+FISH_ENGINE_ENABLED = True        # master switch for fish engine
+_fish_engine = None               # FishEngine instance (lazy init)
 PROB_REPORT_INTERVAL = 5          # compute probability report every N checks (~2.5 min)
 PROB_TELEGRAM_INTERVAL = 20       # send probability telegram every N checks (~10 min)
 session_alert_sent = False        # debounce: only send one alert per outage
@@ -1642,6 +1646,223 @@ def _fetch_metals_news():
     _last_news_fetch_ts = time.time()
     log(f"News fetch: {len(unique_headlines)} headlines, severity={sorted(severity_found) or 'none'}")
     return summary
+
+
+# ---------------------------------------------------------------------------
+# Fish engine — integrated intraday fishing decision engine
+# ---------------------------------------------------------------------------
+
+def _run_fish_engine_tick():
+    """Run one fish engine tick. Called every 60s by the main loop.
+
+    Builds a state dict from metals loop data, calls the engine,
+    and executes any buy/sell decisions via Avanza.
+    """
+    global _fish_engine
+
+    # Lazy init
+    if _fish_engine is None:
+        try:
+            from fish_engine import FishEngine
+            _fish_engine = FishEngine()
+            # Try to restore state from previous session
+            try:
+                state_data = _load_json_state(DATA_DIR / "fish_engine_state.json", None, "fish_engine")
+                if state_data:
+                    _fish_engine = FishEngine.from_dict(state_data)
+                    log(f"Fish engine restored: mode={_fish_engine.mode}, pnl={_fish_engine.session_pnl:+.0f}")
+            except Exception:
+                pass
+            log(f"Fish engine initialized: mode={_fish_engine.mode}")
+        except ImportError as e:
+            log(f"Fish engine import failed: {e}")
+            return
+
+    # Build state dict from metals loop data
+    xag_price = _underlying_prices.get("XAG-USD", 0)
+    xau_price = _underlying_prices.get("XAU-USD", 0)
+    if xag_price <= 0:
+        return  # no price, skip
+
+    # Read latest signals from agent_summary_compact
+    try:
+        summary = _load_json_state(DATA_DIR.parent / "data" / "agent_summary_compact.json", {}, "fish_sig")
+        if not summary:
+            summary = _load_json_state(DATA_DIR / "agent_summary_compact.json", {}, "fish_sig2")
+    except Exception:
+        summary = {}
+
+    xag_sig = (summary.get("signals") or {}).get("XAG-USD", {})
+    xag_extra = xag_sig.get("extra", {})
+    xag_mc = (summary.get("monte_carlo") or {}).get("XAG-USD", {})
+    xag_focus = (summary.get("focus_probabilities") or {}).get("XAG-USD", {})
+
+    # Read metals loop's own signals
+    metals_sig = last_signal_data.get("XAG-USD", {}) if last_signal_data else {}
+
+    # Read fish_precomputed for gold change, orb, vol_scalar
+    fish_pre = _load_json_state(DATA_DIR / "fish_precomputed.json", {}, "fish_pre")
+
+    # Read enhanced signals for news/econ
+    news_action = "HOLD"
+    econ_action = "HOLD"
+    event_hours = 999
+    high_impact = False
+    try:
+        full_summary = _load_json_state(DATA_DIR.parent / "data" / "agent_summary.json", {}, "fish_full")
+        if not full_summary:
+            full_summary = _load_json_state(DATA_DIR / "agent_summary.json", {}, "fish_full2")
+        enh = (full_summary.get("signals") or {}).get("XAG-USD", {}).get("enhanced_signals", {})
+        news_action = (enh.get("news_event") or {}).get("action", "HOLD")
+        econ_action = (enh.get("econ_calendar") or {}).get("action", "HOLD")
+        econ_ind = (enh.get("econ_calendar") or {}).get("indicators", {})
+        event_hours = econ_ind.get("proximity_hours_until", 999)
+        if not isinstance(event_hours, (int, float)):
+            event_hours = 999
+        high_impact = bool(econ_ind.get("risk_high_impact_within_4h", False))
+    except Exception:
+        pass
+
+    # Check trade guard from metals risk
+    trade_guard_ok = True
+    try:
+        if RISK_AVAILABLE:
+            guard = check_trade_guard("XAG-USD", "silver_fish")
+            trade_guard_ok = guard.get("allowed", True) if isinstance(guard, dict) else bool(guard)
+    except Exception:
+        pass
+
+    # Get spread from current quotes
+    spread_pct = 0.3  # default
+    try:
+        from avanza_session import get_quote as _aq
+        q = _aq("1650161")  # BULL X5 AVA 4
+        bid = float(q.get("buy", 0) or 0)
+        ask = float(q.get("sell", 0) or 0)
+        if bid > 0 and ask > 0:
+            spread_pct = (ask - bid) / bid * 100
+    except Exception:
+        pass
+
+    # Build state
+    now = datetime.datetime.now()
+    f1d = xag_focus.get("1d", {})
+    state = {
+        "silver_price": xag_price,
+        "gold_price": xau_price,
+        "gold_5min_change": fish_pre.get("gold_5min_change_pct", 0),
+        "signal_action": xag_sig.get("action", "HOLD"),
+        "signal_buy_count": xag_extra.get("_buy_count", 0),
+        "signal_sell_count": xag_extra.get("_sell_count", 0),
+        "rsi": float(xag_sig.get("rsi", 50)),
+        "mc_p_up": float(xag_mc.get("p_up", 0.5)),
+        "metals_action": metals_sig.get("action", "HOLD"),
+        "regime": xag_sig.get("regime", "ranging"),
+        "news_action": news_action,
+        "econ_action": econ_action,
+        "focus_1d_dir": f1d.get("direction", "?"),
+        "focus_1d_prob": float(f1d.get("probability", 0.5)),
+        "orb_range": fish_pre.get("orb_range"),
+        "vol_scalar": fish_pre.get("vol_scalar", 1.0),
+        "hour_cet": now.hour,
+        "day_of_week": now.weekday(),
+        "velocity": None,  # could hook into silver fast-tick
+        "trade_guard_ok": trade_guard_ok,
+        "spread_pct": spread_pct,
+        "news_spike": False,  # TODO: read from headlines
+        "headline_sentiment": "",
+        "event_hours": event_hours,
+        "high_impact_near": high_impact,
+    }
+
+    # Call engine
+    decision = _fish_engine.tick(state)
+
+    if decision["action"] == "HOLD":
+        return  # nothing to do
+
+    # Execute decision
+    if decision["action"] == "BUY":
+        _fish_engine_execute_buy(decision, xag_price)
+    elif decision["action"] == "SELL":
+        _fish_engine_execute_sell(decision)
+
+    # Persist engine state
+    try:
+        atomic_write_json(str(DATA_DIR / "fish_engine_state.json"), _fish_engine.to_dict())
+    except Exception:
+        pass
+
+
+def _fish_engine_execute_buy(decision, price):
+    """Execute a BUY decision from the fish engine."""
+    global _fish_engine
+    direction = decision.get("direction", "LONG")
+    ob_id = decision.get("instrument_ob", "1650161" if direction == "LONG" else "2286417")
+    tactic = decision.get("reason", "")
+
+    try:
+        from avanza_session import place_buy_order, get_quote, get_buying_power
+        q = get_quote(ob_id)
+        ask = float(q.get("sell", 0))
+        bp = float(get_buying_power().get("buying_power", 0))
+
+        if ask <= 0 or bp < 1000:
+            log(f"[fish] SKIP BUY: ask={ask}, bp={bp:.0f} (need >1000)")
+            return
+
+        budget = min(bp * 0.95, 1500) * decision.get("size_scalar", 1.0)
+        if budget < 1000:
+            log(f"[fish] SKIP BUY: budget {budget:.0f} < 1000 SEK")
+            return
+
+        volume = int(budget / ask)
+        if volume < 5:
+            return
+
+        result = place_buy_order(ob_id, price=ask, volume=volume)
+        status = result.get("orderRequestStatus", "?")
+        nm = "BULL X5" if direction == "LONG" else "BEAR X5"
+        log(f"[fish] BUY {volume}u {nm}@{ask} = {volume*ask:.0f} SEK ({tactic}) [{status}]")
+
+        if status == "SUCCESS":
+            _fish_engine.confirm_entry(direction, ask, volume, price)
+    except Exception as e:
+        log(f"[fish] BUY error: {e}")
+
+
+def _fish_engine_execute_sell(decision):
+    """Execute a SELL decision from the fish engine."""
+    global _fish_engine
+    if not _fish_engine or not _fish_engine.active_position:
+        return
+
+    pos = _fish_engine.active_position
+    ob_id = pos.get("ob", "")
+    volume = pos.get("volume", 0)
+    reason = decision.get("exit_reason", "engine")
+
+    if not ob_id or volume <= 0:
+        return
+
+    try:
+        from avanza_session import place_sell_order, get_quote
+        q = get_quote(ob_id)
+        bid = float(q.get("buy", 0))
+        if bid <= 0:
+            return
+
+        result = place_sell_order(ob_id, price=bid, volume=volume)
+        status = result.get("orderRequestStatus", "?")
+        entry_price = pos.get("cert_entry", 0)
+        pnl = (bid - entry_price) * volume
+        nm = "BULL X5" if pos.get("direction") == "LONG" else "BEAR X5"
+        log(f"[fish] SELL {volume}u {nm}@{bid} P&L:{pnl:+.0f} ({reason}) [{status}]")
+
+        if status == "SUCCESS":
+            _fish_engine.confirm_exit(pnl)
+    except Exception as e:
+        log(f"[fish] SELL error: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -4849,6 +5070,13 @@ Positions: {pos_summary}{prob_summary}""")
                     _write_fish_precomputed()
                 except Exception as e:
                     log(f"Fish precompute error (non-fatal): {e}")
+
+                # --- FISH ENGINE (intraday fishing, every cycle) ---
+                if FISH_ENGINE_ENABLED:
+                    try:
+                        _run_fish_engine_tick()
+                    except Exception as e:
+                        log(f"Fish engine error (non-fatal): {e}")
 
                 _sleep_for_cycle(cycle_started, CHECK_INTERVAL, "metals loop")
 
