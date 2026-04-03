@@ -1669,7 +1669,7 @@ def _run_fish_engine_tick():
             try:
                 state_data = _load_json_state(DATA_DIR / "fish_engine_state.json", None, "fish_engine")
                 if state_data:
-                    _fish_engine = FishEngine.from_dict(state_data)
+                    _fish_engine.from_dict(state_data)  # instance method, restores state in-place
                     log(f"Fish engine restored: mode={_fish_engine.mode}, pnl={_fish_engine.session_pnl:+.0f}")
             except Exception:
                 pass
@@ -1734,7 +1734,9 @@ def _run_fish_engine_tick():
         if not journal_path.exists():
             journal_path = DATA_DIR / 'layer2_journal.jsonl'
         if journal_path.exists():
-            lines = journal_path.read_text().strip().split('\n')
+            with open(str(journal_path), 'r', encoding='utf-8') as _jf:
+                lines = _jf.readlines()
+            lines = [l.strip() for l in lines if l.strip()]
             # Scan last 10 entries for XAG-USD
             for line in reversed(lines[-10:]):
                 try:
@@ -1905,11 +1907,11 @@ def _fish_engine_execute_buy(decision, price):
 def _fish_engine_execute_sell(decision):
     """Execute a SELL decision from the fish engine."""
     global _fish_engine
-    if not _fish_engine or not _fish_engine.active_position:
+    if not _fish_engine or not _fish_engine.has_position:
         return
 
-    pos = _fish_engine.active_position
-    ob_id = pos.get("ob", "")
+    pos = _fish_engine.position
+    ob_id = pos.get("ob_id", "")
     volume = pos.get("volume", 0)
     reason = decision.get("exit_reason", "engine")
 
@@ -1925,7 +1927,7 @@ def _fish_engine_execute_sell(decision):
 
         result = place_sell_order(ob_id, price=bid, volume=volume)
         status = result.get("orderRequestStatus", "?")
-        entry_price = pos.get("cert_entry", 0)
+        entry_price = pos.get("entry_cert", 0)
         pnl = (bid - entry_price) * volume
         nm = "BULL X5" if pos.get("direction") == "LONG" else "BEAR X5"
         log(f"[fish] SELL {volume}u {nm}@{bid} P&L:{pnl:+.0f} ({reason}) [{status}]")
