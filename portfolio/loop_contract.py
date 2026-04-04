@@ -1,8 +1,10 @@
-"""Loop Contract — runtime invariant verification for the main loop.
+"""Loop Contract — runtime invariant verification for all system loops.
 
-After every cycle, verify_contract() checks that critical operations
+After every cycle, verify functions check that critical operations
 actually happened. Violations are logged, alerted, and optionally
 trigger a self-healing Claude Code session.
+
+Supports: main loop, metals loop, GoldDigger, Elongir.
 """
 
 import logging
@@ -236,6 +238,226 @@ def verify_contract(report: CycleReport, previous_signal_counts: dict | None = N
     return violations
 
 
+# ---------------------------------------------------------------------------
+# Metals Loop Contract
+# ---------------------------------------------------------------------------
+
+METALS_MAX_CYCLE_DURATION_S = 120  # metals loop is simpler, tighter budget
+
+
+@dataclass
+class MetalsCycleReport:
+    """Populated during the metals loop to track what happened this cycle."""
+
+    cycle_id: int
+    cycle_start: float = 0.0
+    cycle_end: float = 0.0
+    underlying_prices_fetched: bool = False   # Binance FAPI prices obtained
+    underlying_tickers_ok: set = field(default_factory=set)  # which underlyings succeeded
+    position_prices_updated: bool = False     # active warrant prices fetched
+    active_positions: int = 0                 # how many active positions exist
+    positions_priced: int = 0                 # how many got valid prices
+    holdings_reconciled: bool = False         # holdings diff ran this cycle
+    session_alive: bool = True                # Avanza session health
+    stops_verified: bool = False              # stop orders in place for active positions
+    probability_computed: bool = False        # probability report ran on schedule
+    errors: list = field(default_factory=list)
+
+    @property
+    def cycle_duration_s(self) -> float:
+        if self.cycle_end and self.cycle_start:
+            return self.cycle_end - self.cycle_start
+        return 0.0
+
+
+def verify_metals_contract(report: MetalsCycleReport) -> list[Violation]:
+    """Check metals loop invariants."""
+    violations = []
+
+    # 1. Underlying prices fetched (XAG + XAU minimum)
+    required = {"XAG-USD", "XAU-USD"}
+    missing = required - report.underlying_tickers_ok
+    if missing:
+        violations.append(Violation(
+            invariant="underlying_prices_fetched",
+            severity="CRITICAL",
+            message=f"Missing underlying prices: {', '.join(sorted(missing))}",
+            details={"missing": sorted(missing), "ok": sorted(report.underlying_tickers_ok)},
+        ))
+
+    # 2. Position prices updated
+    if report.active_positions > 0 and report.positions_priced < report.active_positions:
+        violations.append(Violation(
+            invariant="position_prices_updated",
+            severity="WARNING",
+            message=(
+                f"Only {report.positions_priced}/{report.active_positions} "
+                f"active positions got price updates"
+            ),
+            details={
+                "active": report.active_positions,
+                "priced": report.positions_priced,
+            },
+        ))
+
+    # 3. Session alive
+    if not report.session_alive:
+        violations.append(Violation(
+            invariant="session_alive",
+            severity="CRITICAL",
+            message="Avanza session is dead. Trading disabled until session renewed.",
+            details={"alive": False},
+        ))
+
+    # 4. Cycle duration
+    duration = report.cycle_duration_s
+    if duration > METALS_MAX_CYCLE_DURATION_S:
+        violations.append(Violation(
+            invariant="cycle_duration",
+            severity="WARNING",
+            message=f"Metals cycle took {duration:.1f}s (limit: {METALS_MAX_CYCLE_DURATION_S}s)",
+            details={"duration_s": duration, "limit_s": METALS_MAX_CYCLE_DURATION_S},
+        ))
+
+    # 5. Stops in place
+    if report.active_positions > 0 and not report.stops_verified:
+        violations.append(Violation(
+            invariant="stops_in_place",
+            severity="WARNING",
+            message="Active positions exist but stop orders not verified this cycle",
+            details={"active_positions": report.active_positions},
+        ))
+
+    # 6. Holdings reconciled
+    if not report.holdings_reconciled:
+        violations.append(Violation(
+            invariant="holdings_reconciled",
+            severity="WARNING",
+            message="Holdings reconciliation did not run this cycle",
+            details={"reconciled": False},
+        ))
+
+    # 7. Errors recorded
+    if report.errors:
+        violations.append(Violation(
+            invariant="no_critical_errors",
+            severity="WARNING",
+            message=f"{len(report.errors)} error(s) this cycle: {report.errors[0][0]}",
+            details={"errors": report.errors[:5]},
+        ))
+
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# Bot Loop Contract (GoldDigger + Elongir)
+# ---------------------------------------------------------------------------
+
+BOT_MAX_CYCLE_DURATION_S = 120
+BOT_ERROR_WARNING_THRESHOLD = 2  # warn before halt threshold
+
+
+@dataclass
+class BotCycleReport:
+    """Populated during GoldDigger/Elongir to track what happened this cycle."""
+
+    cycle_id: int
+    bot_name: str = ""                        # "golddigger" or "elongir"
+    cycle_start: float = 0.0
+    cycle_end: float = 0.0
+    snapshot_collected: bool = False           # data snapshot obtained
+    bot_step_completed: bool = False           # bot.step() returned
+    action_taken: str = ""                     # "BUY", "SELL", "HOLD", ""
+    session_alive: bool = True                 # Avanza session (GoldDigger only)
+    consecutive_errors: int = 0               # current error streak
+    max_consecutive_errors: int = 5           # halt threshold
+    report_on_schedule: bool = True           # periodic reporting ran
+    errors: list = field(default_factory=list)
+
+    @property
+    def cycle_duration_s(self) -> float:
+        if self.cycle_end and self.cycle_start:
+            return self.cycle_end - self.cycle_start
+        return 0.0
+
+
+def verify_bot_contract(report: BotCycleReport) -> list[Violation]:
+    """Check GoldDigger/Elongir bot invariants."""
+    violations = []
+    name = report.bot_name or "bot"
+
+    # 1. Bot step completed
+    if not report.bot_step_completed:
+        violations.append(Violation(
+            invariant="bot_step_completed",
+            severity="CRITICAL",
+            message=f"{name}: bot.step() did not complete this cycle",
+            details={"completed": False},
+        ))
+
+    # 2. Snapshot collected (Elongir) / session alive (GoldDigger)
+    if not report.snapshot_collected:
+        violations.append(Violation(
+            invariant="snapshot_collected",
+            severity="CRITICAL",
+            message=f"{name}: data snapshot not collected this cycle",
+            details={"collected": False},
+        ))
+
+    # 3. Session alive (GoldDigger with Playwright)
+    if not report.session_alive:
+        violations.append(Violation(
+            invariant="session_alive",
+            severity="CRITICAL",
+            message=f"{name}: Avanza session is dead",
+            details={"alive": False},
+        ))
+
+    # 4. Consecutive errors approaching halt
+    if report.consecutive_errors >= BOT_ERROR_WARNING_THRESHOLD:
+        remaining = report.max_consecutive_errors - report.consecutive_errors
+        severity = "CRITICAL" if remaining <= 1 else "WARNING"
+        violations.append(Violation(
+            invariant="consecutive_errors",
+            severity=severity,
+            message=(
+                f"{name}: {report.consecutive_errors} consecutive errors "
+                f"({remaining} until halt)"
+            ),
+            details={
+                "consecutive": report.consecutive_errors,
+                "max": report.max_consecutive_errors,
+                "remaining": remaining,
+            },
+        ))
+
+    # 5. Cycle duration
+    duration = report.cycle_duration_s
+    if duration > BOT_MAX_CYCLE_DURATION_S:
+        violations.append(Violation(
+            invariant="cycle_duration",
+            severity="WARNING",
+            message=f"{name}: cycle took {duration:.1f}s (limit: {BOT_MAX_CYCLE_DURATION_S}s)",
+            details={"duration_s": duration, "limit_s": BOT_MAX_CYCLE_DURATION_S},
+        ))
+
+    # 6. Report on schedule
+    if not report.report_on_schedule:
+        violations.append(Violation(
+            invariant="report_on_schedule",
+            severity="WARNING",
+            message=f"{name}: periodic report missed schedule",
+            details={"on_schedule": False},
+        ))
+
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# Shared Infrastructure
+# ---------------------------------------------------------------------------
+
+
 class ViolationTracker:
     """Tracks consecutive violations per invariant for escalation.
 
@@ -256,20 +478,16 @@ class ViolationTracker:
     def previous_signal_counts(self) -> dict[str, int]:
         return self._previous_signal_counts
 
-    def update(self, violations: list[Violation], report: CycleReport) -> list[Violation]:
+    def update(self, violations: list[Violation], report=None) -> list[Violation]:
         """Process violations: track consecutive counts, escalate warnings.
 
-        Updates previous_signal_counts from the current report.
+        Updates previous_signal_counts from the current report (if applicable).
         Returns the final violation list (with escalated severities).
         """
-        # Track which invariants passed this cycle
+        # Track which invariants violated vs passed
         violated_names = {v.invariant for v in violations}
-        all_invariant_names = {
-            "all_tickers_processed", "min_success_rate", "cycle_duration",
-            "llm_batch_flushed", "valid_signals", "health_updated",
-            "summary_written", "signal_count_stable", "heartbeat_updated",
-            "post_cycle_complete",
-        }
+        # Use all known invariant names (from any loop type)
+        all_invariant_names = set(self._consecutive.keys()) | violated_names
 
         # Reset counts for invariants that passed
         for name in all_invariant_names - violated_names:
@@ -293,8 +511,9 @@ class ViolationTracker:
             else:
                 escalated.append(v)
 
-        # Update signal counts for next cycle's stability check
-        self._update_signal_counts(report)
+        # Update signal counts for next cycle's stability check (main loop only)
+        if report is not None and hasattr(report, "signals"):
+            self._update_signal_counts(report)
         self._save()
         return escalated
 
@@ -328,12 +547,21 @@ class ViolationTracker:
         })
 
 
-def _build_heal_prompt(violations: list[Violation]) -> str:
+_LOOP_FILES = {
+    "main": "portfolio/main.py",
+    "metals": "data/metals_loop.py",
+    "golddigger": "portfolio/golddigger/runner.py",
+    "elongir": "portfolio/elongir/runner.py",
+}
+
+
+def _build_heal_prompt(violations: list[Violation], loop_name: str = "main") -> str:
     """Build a diagnostic prompt for the self-healing Claude Code session."""
+    loop_file = _LOOP_FILES.get(loop_name, "portfolio/main.py")
     parts = [
-        "LOOP CONTRACT VIOLATION — SELF-HEALING SESSION",
+        f"LOOP CONTRACT VIOLATION — SELF-HEALING SESSION ({loop_name} loop)",
         "",
-        "The main loop's runtime contract has detected critical violations.",
+        f"The {loop_name} loop's runtime contract has detected critical violations.",
         "Your job: diagnose the root cause and fix it.",
         "",
         "## Violations",
@@ -348,7 +576,7 @@ def _build_heal_prompt(violations: list[Violation]) -> str:
     parts.extend([
         "## Instructions",
         "",
-        "1. Read `portfolio/main.py` — the main loop and `run()` function.",
+        f"1. Read `{loop_file}` — the loop that triggered this.",
         "2. Read `portfolio/loop_contract.py` — the contract that detected this.",
         "3. Check recent errors in `data/health_state.json`.",
         "4. Check `data/contract_violations.jsonl` for violation history.",
@@ -377,12 +605,13 @@ def _log_violations(violations: list[Violation], cycle_id: int):
         })
 
 
-def _alert_violations(violations: list[Violation], config: dict):
+def _alert_violations(violations: list[Violation], config: dict,
+                      loop_name: str = "main"):
     """Send Telegram alert for critical violations."""
     critical = [v for v in violations if v.severity == "CRITICAL"]
     if not critical:
         return
-    lines = [f"*LOOP CONTRACT* — {len(critical)} critical violation(s)"]
+    lines = [f"*LOOP CONTRACT ({loop_name})* — {len(critical)} critical violation(s)"]
     for v in critical:
         lines.append(f"• {v.invariant}: {v.message}")
     msg = "\n".join(lines)
@@ -393,7 +622,8 @@ def _alert_violations(violations: list[Violation], config: dict):
         logger.warning("Failed to send contract violation alert: %s", e)
 
 
-def _trigger_self_heal(violations: list[Violation], tracker: ViolationTracker):
+def _trigger_self_heal(violations: list[Violation], tracker: ViolationTracker,
+                       loop_name: str = "main"):
     """Spawn a Claude Code session to diagnose and fix critical violations."""
     if not tracker.can_self_heal():
         logger.info(
@@ -408,15 +638,15 @@ def _trigger_self_heal(violations: list[Violation], tracker: ViolationTracker):
 
     try:
         from portfolio.claude_gate import invoke_claude
-        prompt = _build_heal_prompt(critical)
+        prompt = _build_heal_prompt(critical, loop_name=loop_name)
         logger.info(
-            "Triggering self-healing session for %d critical violation(s)",
-            len(critical),
+            "Triggering self-healing session for %d critical violation(s) [%s]",
+            len(critical), loop_name,
         )
         tracker.record_heal()
         invoke_claude(
             prompt=prompt,
-            caller="loop_contract",
+            caller=f"loop_contract_{loop_name}",
             model="sonnet",
             max_turns=15,
             timeout=180,
@@ -425,20 +655,32 @@ def _trigger_self_heal(violations: list[Violation], tracker: ViolationTracker):
         logger.warning("Self-healing invocation failed: %s", e)
 
 
-def verify_and_act(report: CycleReport, config: dict,
-                   tracker: ViolationTracker | None = None):
+def verify_and_act(report, config: dict,
+                   tracker: ViolationTracker | None = None,
+                   verify_fn=None, loop_name: str = "main"):
     """Full contract verification pipeline: check → track → log → alert → heal.
 
-    This is the single entry point called from the main loop after each cycle.
+    Works with any report type (CycleReport, MetalsCycleReport, BotCycleReport).
+
+    Args:
+        report: A cycle report with at least cycle_id and signals attributes.
+        config: Application config dict (for Telegram alerts).
+        tracker: Optional ViolationTracker (created with defaults if None).
+        verify_fn: Custom verification function. If None, uses verify_contract
+            for main loop (requires CycleReport).
+        loop_name: Identifier for this loop ("main", "metals", "golddigger", "elongir").
     """
     if tracker is None:
         tracker = ViolationTracker()
 
     # Run contract checks
-    violations = verify_contract(
-        report,
-        previous_signal_counts=tracker.previous_signal_counts,
-    )
+    if verify_fn is not None:
+        violations = verify_fn(report)
+    else:
+        violations = verify_contract(
+            report,
+            previous_signal_counts=tracker.previous_signal_counts,
+        )
 
     if not violations:
         # All good — still update tracker to clear consecutive counts and save
@@ -452,16 +694,14 @@ def verify_and_act(report: CycleReport, config: dict,
     _log_violations(violations, report.cycle_id)
 
     # Alert critical violations via Telegram
-    _alert_violations(violations, config)
+    _alert_violations(violations, config, loop_name=loop_name)
 
     # Self-heal on critical violations
     critical = [v for v in violations if v.severity == "CRITICAL"]
     if critical:
-        _trigger_self_heal(violations, tracker)
+        _trigger_self_heal(violations, tracker, loop_name=loop_name)
 
     logger.warning(
-        "Contract violations: %d total (%d critical) — cycle %d",
-        len(violations),
-        len(critical),
-        report.cycle_id,
+        "Contract violations [%s]: %d total (%d critical) — cycle %d",
+        loop_name, len(violations), len(critical), report.cycle_id,
     )
