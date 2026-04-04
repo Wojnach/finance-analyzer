@@ -54,6 +54,7 @@ import requests
 from playwright.sync_api import sync_playwright
 
 from portfolio.file_utils import atomic_append_jsonl, atomic_write_json
+from portfolio.loop_contract import MetalsCycleReport, ViolationTracker, verify_and_act, verify_metals_contract
 
 try:
     from portfolio.notification_text import (
@@ -4722,14 +4723,25 @@ Swing: {"ACTIVE" if swing_trader else "OFF"}
 Session: {"ALIVE" if session_healthy else "DEAD"}
 Positions: {pos_summary}{prob_summary}""")
 
+        _contract_tracker = ViolationTracker(DATA_DIR / "metals_contract_state.json")
+
         try:
             last_holdings_diff_ts = 0.0
             while True:
                 cycle_started = time.monotonic()
                 check_count += 1
 
+                _report = MetalsCycleReport(cycle_id=check_count)
+                _report.cycle_start = cycle_started
+
                 # --- ALWAYS: Fetch underlying prices from Binance FAPI (24/7) ---
                 fetch_underlying_from_binance()
+
+                # Track which underlyings succeeded
+                for tk in ("XAG-USD", "XAU-USD", "BTC-USD", "ETH-USD"):
+                    if _underlying_prices.get(tk):
+                        _report.underlying_tickers_ok.add(tk)
+                _report.underlying_prices_fetched = bool(_report.underlying_tickers_ok)
 
                 # --- Accumulate order book snapshots for microstructure signals ---
                 _accumulate_orderbook_snapshots()
@@ -4761,6 +4773,7 @@ Positions: {pos_summary}{prob_summary}""")
                             "*HOLDINGS UPDATE*\n" +
                             "\n".join(f"• {c}" for c in changes)
                         )
+                    _report.holdings_reconciled = True
 
                 if not is_market_hours():
                     # Outside Avanza hours: still track underlyings + compute probability
@@ -4780,6 +4793,12 @@ Positions: {pos_summary}{prob_summary}""")
                                 short_t = t.split("-")[0] if "-" in t else t
                                 price_tags.append(f"{short_t}=${_format_price(p, t)}")
                         log(f"Outside market hours — {' '.join(price_tags)}")
+                    _report.cycle_end = time.monotonic()
+                    try:
+                        verify_and_act(_report, {}, tracker=_contract_tracker,
+                                       verify_fn=verify_metals_contract, loop_name="metals")
+                    except Exception as _e:
+                        log(f"Contract check failed: {_e}")
                     _sleep_for_cycle(cycle_started, CHECK_INTERVAL, "metals loop")
                     continue
 
@@ -4798,6 +4817,10 @@ Positions: {pos_summary}{prob_summary}""")
                     log(f"Price error: {e}")
                     _sleep_for_cycle(cycle_started, CHECK_INTERVAL, "metals loop")
                     continue
+
+                _report.active_positions = sum(1 for pos in POSITIONS.values() if pos.get("active"))
+                _report.positions_priced = len(prices)
+                _report.position_prices_updated = _report.positions_priced >= _report.active_positions
 
                 # Fetch short instrument prices (every 4th check)
                 if check_count % 4 == 0:
@@ -4834,10 +4857,12 @@ Positions: {pos_summary}{prob_summary}""")
                 # Session health check (~every 10 min at 30s interval)
                 if check_count % SESSION_HEALTH_CHECK_INTERVAL == 0:
                     _check_session_and_alert(page)
+                _report.session_alive = session_healthy
 
                 # --- PROBABILITY REPORT (every ~2.5 min) ---
                 if check_count % PROB_REPORT_INTERVAL == 0:
                     compute_probability_report()
+                    _report.probability_computed = True
 
                 # Store price snapshot
                 snap = {
@@ -5150,6 +5175,13 @@ Positions: {pos_summary}{prob_summary}""")
                         _run_fish_engine_tick()
                     except Exception as e:
                         log(f"Fish engine error (non-fatal): {e}")
+
+                _report.cycle_end = time.monotonic()
+                try:
+                    verify_and_act(_report, {}, tracker=_contract_tracker,
+                                   verify_fn=verify_metals_contract, loop_name="metals")
+                except Exception as _e:
+                    log(f"Contract check failed: {_e}")
 
                 _sleep_for_cycle(cycle_started, CHECK_INTERVAL, "metals loop")
 
