@@ -70,8 +70,13 @@ def portfolio_value(state, prices_usd, fx_rate):
         try:
             shares = h.get("shares", 0)
             price = prices_usd.get(ticker)
-            if shares > 0 and price is not None:
+            if shares > 0 and price is not None and price > 0:
                 total += shares * price * fx_rate
+            elif shares > 0 and (price is None or price <= 0):
+                logger.warning(
+                    "portfolio_value: invalid price for %s: %r (shares=%s)",
+                    ticker, price, shares,
+                )
         except (TypeError, ValueError, AttributeError) as e:
             logger.warning("portfolio_value: error calculating %s: %s", ticker, e)
     return total

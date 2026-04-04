@@ -340,7 +340,11 @@ def _compute_dynamic_horizon_weights(horizon: str) -> dict[str, float]:
                     acc = stats.get("accuracy", 0.5)
                     cross_sum[sig] = cross_sum.get(sig, 0.0) + acc
                     cross_count[sig] = cross_count.get(sig, 0) + 1
-        cross_data = {sig: cross_sum[sig] / cross_count[sig] for sig in cross_sum}
+        cross_data = {
+            sig: cross_sum[sig] / cross_count[sig]
+            for sig in cross_sum
+            if cross_count.get(sig, 0) > 0
+        }
 
         # Compute multipliers
         weights = {}
@@ -350,7 +354,7 @@ def _compute_dynamic_horizon_weights(horizon: str) -> dict[str, float]:
                 continue
             this_acc = stats.get("accuracy", 0.5)
             cross_acc = cross_data.get(sig)
-            if cross_acc is None or cross_acc < 0.01:
+            if cross_acc is None or not (0.01 <= cross_acc <= 1.0):
                 continue
 
             # Ratio of this-horizon accuracy to cross-horizon accuracy
