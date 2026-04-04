@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 import pandas as pd
 
@@ -89,7 +89,7 @@ def _persist_headlines(ticker: str, headlines: list[dict]) -> None:
         for item in top:
             item.pop("_weight", None)
         payload = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "ticker": ticker,
             "headlines": top,
         }

@@ -121,7 +121,7 @@ def _is_llama_server_process(pid):
             )
             return "llama-server" in result.stdout.lower()
         else:
-            with open(f"/proc/{pid}/cmdline", "r") as f:
+            with open(f"/proc/{pid}/cmdline") as f:
                 return "llama-server" in f.read()
     except Exception:
         return False
