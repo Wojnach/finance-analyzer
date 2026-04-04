@@ -2,20 +2,23 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from threading import Lock
 
 
 @dataclass
 class SharedData:
-    """Thread-safe data snapshot shared from metals loop to strategies.
+    """Data shared from metals loop to strategies.
 
     Updated by metals loop main thread, read by orchestrator thread.
-    Python GIL guarantees atomic dict reads.
+    Dict fields must be replaced with copies (not mutated in place)
+    to avoid concurrent-iteration RuntimeError.
     """
     underlying_prices: dict[str, float] = field(default_factory=dict)
     fx_rate: float = 0.0
     cert_prices: dict[str, dict] = field(default_factory=dict)
     is_market_hours: bool = False
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    trade_queue_lock: Lock = field(default_factory=Lock)
 
     def get_price(self, ticker: str) -> float:
         """Get underlying price, 0.0 if missing."""

@@ -39,21 +39,23 @@ def test_elongir_strategy_creation(elongir_config):
 def test_elongir_strategy_builds_snapshot(elongir_config, shared_data):
     from portfolio.strategies.elongir_strategy import ElongirStrategy
     s = ElongirStrategy(elongir_config)
-    snap = s._build_snapshot(shared_data, klines_1m=None, klines_5m=None, klines_15m=None)
+    with patch("portfolio.strategies.elongir_strategy.fetch_usdsek", return_value=10.5):
+        snap = s._build_snapshot(shared_data, klines_1m=None, klines_5m=None, klines_15m=None)
     assert snap.silver_usd == 33.5
     assert snap.fx_rate == 10.5
     assert snap.klines_1m is None
 
 
 def test_elongir_strategy_builds_snapshot_default_fx(elongir_config):
-    """Falls back to 10.5 when FX is 0."""
+    """Falls back to 10.5 when FX fetch fails and shared is 0."""
     from portfolio.strategies.elongir_strategy import ElongirStrategy
     shared = SharedData(
         underlying_prices={"XAG-USD": 33.5},
         fx_rate=0.0,
     )
     s = ElongirStrategy(elongir_config)
-    snap = s._build_snapshot(shared, klines_1m=None, klines_5m=None, klines_15m=None)
+    with patch("portfolio.strategies.elongir_strategy.fetch_usdsek", return_value=None):
+        snap = s._build_snapshot(shared, klines_1m=None, klines_5m=None, klines_15m=None)
     assert snap.fx_rate == 10.5
 
 

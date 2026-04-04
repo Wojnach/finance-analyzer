@@ -17,6 +17,7 @@ from portfolio.golddigger.config import DATA_DIR, GolddiggerConfig
 from portfolio.golddigger.data_provider import (
     MarketSnapshot,
     fetch_gold_price,
+    fetch_usdsek,
     fetch_us10y_context,
     read_event_risk,
 )
@@ -44,7 +45,9 @@ class GoldDiggerStrategy(StrategyBase):
         trade_queue_file: str = _DEFAULT_TRADE_QUEUE,
     ):
         self._cfg = GolddiggerConfig.from_config(config)
-        self._bot = GolddiggerBot(self._cfg, dry_run=True)
+        # dry_run=False so bot tracks position state (prevents duplicate BUY signals).
+        # Actual execution goes through trade queue, not Playwright.
+        self._bot = GolddiggerBot(self._cfg, dry_run=False)
         self._trade_queue_file = trade_queue_file
 
     def name(self) -> str:
@@ -69,6 +72,7 @@ class GoldDiggerStrategy(StrategyBase):
 
     def tick(self, shared: SharedData) -> dict | None:
         """One poll cycle: fetch gold, build snapshot, run bot."""
+        self._shared = shared  # store ref for trade queue lock
         gold = fetch_gold_price(self._cfg.binance_gold_symbol)
         if gold is None or gold <= 0:
             gold = shared.get_price("XAU-USD")
@@ -79,12 +83,17 @@ class GoldDiggerStrategy(StrategyBase):
         action = self._bot.step(snapshot)
 
         if action is not None and action.get("action") in ("BUY", "SELL", "FLATTEN"):
-            self._enqueue_trade(action)
+            self._enqueue_trade(action, shared)
 
         return action
 
     def _build_snapshot(self, shared: SharedData, gold_price: float) -> MarketSnapshot:
         """Build a GoldDigger MarketSnapshot from shared data + own fetches."""
+        # Fetch own FX rate (cached in fx_rates module, ~daily refresh)
+        fx = fetch_usdsek()
+        if fx is None or fx <= 0:
+            fx = shared.fx_rate if shared.fx_rate > 0 else 10.5
+
         rate_ctx = None
         if self._cfg.fred_api_key:
             rate_ctx = fetch_us10y_context(
@@ -112,7 +121,7 @@ class GoldDiggerStrategy(StrategyBase):
         snap = MarketSnapshot(
             ts_utc=now,
             gold=gold_price,
-            usdsek=shared.fx_rate if shared.fx_rate > 0 else 10.5,
+            usdsek=fx,
             us10y=rate_ctx["value"] if rate_ctx else 0.0,
             us10y_source=rate_ctx.get("source") if rate_ctx else None,
             us10y_change_pct=rate_ctx.get("change_pct") if rate_ctx else None,
@@ -133,8 +142,23 @@ class GoldDiggerStrategy(StrategyBase):
 
         return snap
 
-    def _enqueue_trade(self, action: dict) -> None:
-        """Write trade action to metals_trade_queue.json for execution."""
+    def _enqueue_trade(self, action: dict, shared: SharedData | None = None) -> None:
+        """Write trade action to metals_trade_queue.json for execution.
+
+        Uses shared.trade_queue_lock to prevent race with metals loop's
+        process_trade_queue() running on the main thread.
+        """
+        lock = shared.trade_queue_lock if shared else None
+        if lock:
+            lock.acquire()
+        try:
+            self._enqueue_trade_locked(action)
+        finally:
+            if lock:
+                lock.release()
+
+    def _enqueue_trade_locked(self, action: dict) -> None:
+        """Enqueue while holding the trade queue lock."""
         queue = load_json(self._trade_queue_file, default=None)
         if queue is None:
             queue = {"version": 1, "orders": []}

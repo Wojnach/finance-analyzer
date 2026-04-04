@@ -4805,7 +4805,7 @@ Positions: {pos_summary}{prob_summary}""")
                 if not is_market_hours():
                     # Update strategy shared data even outside market hours
                     if _strategy_shared_data is not None:
-                        _strategy_shared_data.underlying_prices = _underlying_prices
+                        _strategy_shared_data.underlying_prices = dict(_underlying_prices)
                         _strategy_shared_data.is_market_hours = False
                     # Outside Avanza hours: still track underlyings + compute probability
                     if check_count % PROB_REPORT_INTERVAL == 0:
@@ -4855,11 +4855,14 @@ Positions: {pos_summary}{prob_summary}""")
 
                 # Update strategy shared data with fresh prices and cert data
                 if _strategy_shared_data is not None:
-                    _strategy_shared_data.underlying_prices = _underlying_prices
+                    _strategy_shared_data.underlying_prices = dict(_underlying_prices)
                     _strategy_shared_data.is_market_hours = True
+                    # Copy cert prices to avoid concurrent mutation
+                    new_certs = {}
                     for key, pos in POSITIONS.items():
                         if pos["active"] and key in prices:
-                            _strategy_shared_data.cert_prices[pos.get("ob_id", "")] = prices[key]
+                            new_certs[pos.get("ob_id", "")] = dict(prices[key])
+                    _strategy_shared_data.cert_prices = new_certs
 
                 # Fetch short instrument prices (every 4th check)
                 if check_count % 4 == 0:
@@ -5149,7 +5152,15 @@ Positions: {pos_summary}{prob_summary}""")
 
                     if TRADE_QUEUE_ENABLED:
                         try:
-                            process_trade_queue(page)
+                            # Lock trade queue to prevent race with orchestrator thread
+                            _tq_lock = _strategy_shared_data.trade_queue_lock if _strategy_shared_data else None
+                            if _tq_lock:
+                                _tq_lock.acquire()
+                            try:
+                                process_trade_queue(page)
+                            finally:
+                                if _tq_lock:
+                                    _tq_lock.release()
                         except Exception as e:
                             log(f"Trade queue processing error: {e}")
 

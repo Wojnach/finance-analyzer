@@ -9,7 +9,7 @@ import logging
 
 from portfolio.elongir.bot import ElongirBot
 from portfolio.elongir.config import ElongirConfig
-from portfolio.elongir.data_provider import MarketSnapshot, fetch_klines
+from portfolio.elongir.data_provider import MarketSnapshot, fetch_klines, fetch_usdsek
 from portfolio.strategies.base import SharedData, StrategyBase
 
 logger = logging.getLogger("portfolio.strategies.elongir")
@@ -72,9 +72,13 @@ class ElongirStrategy(StrategyBase):
         klines_15m: list | None,
     ) -> MarketSnapshot:
         """Build an Elongir MarketSnapshot from shared data + klines."""
+        # Fetch own FX rate (cached in fx_rates module)
+        fx = fetch_usdsek()
+        if fx is None or fx <= 0:
+            fx = shared.fx_rate if shared.fx_rate > 0 else 10.5
         return MarketSnapshot(
             silver_usd=shared.get_price("XAG-USD"),
-            fx_rate=shared.fx_rate if shared.fx_rate > 0 else 10.5,
+            fx_rate=fx,
             klines_1m=klines_1m,
             klines_5m=klines_5m,
             klines_15m=klines_15m,

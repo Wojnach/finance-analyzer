@@ -49,8 +49,11 @@ def test_golddigger_strategy_creation(gd_config):
 
 def test_golddigger_strategy_builds_snapshot(gd_config, shared_data):
     from portfolio.strategies.golddigger_strategy import GoldDiggerStrategy
+    from unittest.mock import patch
+
     s = GoldDiggerStrategy(gd_config)
-    snap = s._build_snapshot(shared_data, gold_price=2345.0)
+    with patch("portfolio.strategies.golddigger_strategy.fetch_usdsek", return_value=10.5):
+        snap = s._build_snapshot(shared_data, gold_price=2345.0)
     assert snap.gold == 2345.0
     assert snap.usdsek == 10.5
     assert snap.cert_bid == 55.0
