@@ -1,0 +1,209 @@
+{
+  "date": "2026-04-04",
+  "generated_at": "2026-04-04T21:33:31.775181+00:00",
+  "system_health": {
+    "uptime_seconds": 38108,
+    "cycle_count": 64,
+    "error_count": 0,
+    "signal_modules_ok": 21,
+    "signal_modules_failed": 0,
+    "module_failures_at_startup": [
+      "monte_carlo",
+      "price_targets",
+      "equity_curve"
+    ],
+    "last_trigger": "XAU-USD consensus BUY (16%) at 21:17 UTC"
+  },
+  "trades_today": [],
+  "layer2_decisions": {
+    "apr3_entries": 6,
+    "apr4_entries": 0,
+    "all_decisions": "HOLD/HOLD for both Patient and Bold",
+    "note": "Layer 2 not triggered on Apr 4 or sessions timed out before writing journal"
+  },
+  "market_state": {
+    "BTC-USD": {
+      "price": 67242,
+      "regime": "ranging",
+      "consensus_oscillating": "BUY/SELL/HOLD",
+      "range": [
+        67134,
+        67490
+      ]
+    },
+    "ETH-USD": {
+      "price": 2063,
+      "regime": "ranging",
+      "consensus_dominant": "SELL/HOLD",
+      "range": [
+        2050,
+        2080
+      ]
+    },
+    "XAG-USD": {
+      "price": 72.95,
+      "regime": "ranging",
+      "consensus_oscillating": "BUY/SELL/HOLD",
+      "range": [
+        72.93,
+        72.98
+      ]
+    },
+    "XAU-USD": {
+      "price": 4673,
+      "regime": "ranging",
+      "consensus_oscillating": "HOLD with BUY/SELL flips",
+      "range": [
+        4672,
+        4674
+      ]
+    }
+  },
+  "signals_that_were_right": [
+    "HOLD consensus on all instruments \u2014 market went nowhere (correct)",
+    "Ranging regime detection was accurate \u2014 all instruments sideways",
+    "XAU-USD BUY signals (6B/0S at 21:17) \u2014 gold showing relative strength"
+  ],
+  "signals_that_were_wrong": [
+    "ETH-USD SELL consensus (80%) at 14:06 \u2014 ETH actually bounced from 053 to 080",
+    "BTC-USD SELL at 14:47 (3B/5S) \u2014 BTC bounced from 7134 to 7490",
+    "Signal consensus flipping too fast (20 trigger events in 7 hours) \u2014 noise, not signal"
+  ],
+  "accuracy_changes": {
+    "recent_7d_winners": {
+      "ministral": {
+        "recent": 68.0,
+        "alltime": 59.2,
+        "delta": 8.8
+      },
+      "fibonacci": {
+        "recent": 68.2,
+        "alltime": 42.9,
+        "delta": 25.3
+      },
+      "mean_reversion": {
+        "recent": 65.4,
+        "alltime": 51.7,
+        "delta": 13.7
+      },
+      "calendar": {
+        "recent": 62.8,
+        "alltime": 56.3,
+        "delta": 6.5
+      },
+      "bb": {
+        "recent": 60.8,
+        "alltime": 53.4,
+        "delta": 7.4
+      },
+      "macd": {
+        "recent": 58.7,
+        "alltime": 43.4,
+        "delta": 15.3
+      }
+    },
+    "recent_7d_losers": {
+      "fear_greed": {
+        "recent": 25.9,
+        "alltime": 58.6,
+        "delta": -32.7
+      },
+      "news_event": {
+        "recent": 29.5,
+        "alltime": 51.7,
+        "delta": -22.2
+      },
+      "macro_regime": {
+        "recent": 30.3,
+        "alltime": 47.1,
+        "delta": -16.8
+      },
+      "volatility_sig": {
+        "recent": 35.0,
+        "alltime": 47.1,
+        "delta": -12.1
+      },
+      "forecast": {
+        "recent": 36.1,
+        "alltime": 47.5,
+        "delta": -11.4
+      },
+      "structure": {
+        "recent": 36.1,
+        "alltime": 52.1,
+        "delta": -16.0
+      }
+    },
+    "regime_note": "Massive accuracy regime shift \u2014 contrarian signals (Fear&Greed) collapsing while mean-reversion/technical signals surging. Suggests ranging/choppy market where technicals work but macro signals fail."
+  },
+  "per_ticker_top_signals": {
+    "XAG-USD": [
+      "fear_greed 93.8%",
+      "econ_calendar 78.9%",
+      "momentum_factors 77.1%",
+      "claude_fundamental 73.9%",
+      "structure 72.1%"
+    ],
+    "XAU-USD": [
+      "fear_greed 90.4%",
+      "econ_calendar 84.4%",
+      "structure 78.4%",
+      "claude_fundamental 73.8%",
+      "smart_money 72.0%"
+    ],
+    "BTC-USD": [
+      "claude_fundamental 72.7%",
+      "econ_calendar 67.8%",
+      "calendar 65.2%",
+      "structure 65.0%",
+      "momentum_factors 61.5%"
+    ],
+    "ETH-USD": [
+      "econ_calendar 72.3%",
+      "claude_fundamental 59.9%",
+      "structure 59.8%",
+      "ministral 59.0%",
+      "bb 58.6%"
+    ]
+  },
+  "per_ticker_worst_signals": {
+    "XAG-USD": [
+      "sentiment 4.5%",
+      "ministral 18.9%",
+      "oscillators 35.1%"
+    ],
+    "XAU-USD": [
+      "oscillators 39.5%",
+      "ministral 43.2%",
+      "candlestick 43.2%"
+    ],
+    "BTC-USD": [
+      "custom_lora 23.5%",
+      "ml 26.4%",
+      "oscillators 34.3%",
+      "crypto_macro 36.0%"
+    ],
+    "ETH-USD": [
+      "crypto_macro 17.6%",
+      "custom_lora 28.9%",
+      "funding 29.9%",
+      "oscillators 34.5%"
+    ]
+  },
+  "system_errors": [
+    "monte_carlo, price_targets, equity_curve failed at 06:27 UTC (startup-only, recovered)"
+  ],
+  "key_observations": [
+    "ZERO TRADES TODAY \u2014 both strategies and metals system fully idle",
+    "All 4 primary instruments in ranging regime with minimal price movement",
+    "BTC stuck at 7K, XAG at 3, XAU at 673 \u2014 extreme consolidation",
+    "20 trigger events in 7h but ALL signals oscillating \u2014 pure noise in ranging market",
+    "CRITICAL: Recent 7d accuracy diverging massively from all-time \u2014 Fear&Greed collapsed -32.7%",
+    "Claude Fundamental is the BEST cross-asset signal: 72.7% BTC, 73.8% XAU, 73.9% XAG, 59.9% ETH",
+    "Econ Calendar is the SECOND BEST cross-asset signal: 67.8-84.4% across all assets",
+    "Oscillators signal is consistently the WORST: 34-39% across all assets \u2014 should be force-HOLD",
+    "Metals prophecy on track: silver at 3 with 20 target, 4/5 checkpoints hit",
+    "BTC Q2 breakout thesis: 5K checkpoint triggered, waiting for 5K next",
+    "ETH lagging badly: no checkpoints triggered, stuck at 063 vs K target"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "date": "2026-04-04",
+  "generated_at": "2026-04-04T21:35:19.583572+00:00",
+  "market_summary": "US markets closed for Good Friday (Apr 3) and weekend. Massive NFP beat (178K vs 50K expected) released Friday morning. Iran war ongoing \u2014 Trump vowed more attacks, crude surged 11% on Apr 2. Crypto in extreme fear (index 9). BTC bearish chatter at 2026 peak. Gold holding $4,673 with JPM targeting $5,055 by Q4. Silver at $73, targeting $100 with structural support.",
+  "key_events_tomorrow": [
+    "OPEC+ meeting April 5 (Sunday) \u2014 adding 206K bpd, watching for Iran-related production decisions",
+    "Markets reopen Monday April 6 \u2014 expect volatility from NFP digest + Iran escalation",
+    "No FOMC until late April/May \u2014 Fed on hold at 3.50-3.75%, one cut expected June",
+    "Crypto markets open 24/7 \u2014 BTC/ETH may react to weekend geopolitical news"
+  ],
+  "overnight_risks": [
+    "Iran escalation: Trump vowed to strike Tehran \"extremely hard\" \u2014 any weekend escalation spikes oil, hits equities",
+    "OPEC+ April 5 decision: if production increase > expected, oil drops = positive for equities/crypto, negative for metals",
+    "China/Asia open Sunday night: BTC/ETH often move on Asian session liquidity",
+    "Jobs report digestion: 178K NFP vs 50K expected \u2014 hawkish repricing of Fed cuts possible",
+    "Strait of Hormuz still partially disrupted \u2014 any shipping incident = oil spike risk"
+  ],
+  "instrument_news": {
+    "XAG-USD": "Silver at $73, holding above $70.65 support. Targeting $73.80-$75.30. COT shows net-long exposure decreasing (bullish contrarian). Structural shortage from solar/EV/AI industrial demand. FXEmpire targeting $100 breakout in 2026.",
+    "XAU-USD": "Gold at $4,673. JPM forecasts $5,055 by Q4 2026, Commerzbank raised target to $5,000. Central bank buying uninterrupted. COT shows managed funds at 12.3K contracts net long. Support at $4,510, resistance $4,822.",
+    "BTC-USD": "BTC at $66,925, below $70K. Bearish chatter at 2026 peak. Fear & Greed at 9 (extreme fear). BTC ETF inflows only $8.9M (weak). Goldman Sachs signaling potential April recovery. Iran war paradox: dollar strength hurting BTC.",
+    "ETH-USD": "ETH at $2,058, down 2.59% 24h. ETH ETFs saw $71.1M inflow (much stronger than BTC). Price action lagging BTC. Extreme fear environment.",
+    "NVDA": "Trading $170-$177 range. Semis near breakeven for 2026 after being up double digits in Feb. Analyst calls on Apr 1.",
+    "PLTR": "Strong fundamentals: US sales $1.1B (+93% YoY). Analyst reiterated Buy with $200 PT (21% upside).",
+    "MSTR": "No specific April news found. Tracking BTC closely \u2014 with BTC below $70K, MSTR under pressure.",
+    "WTI_OIL": "WTI at $98-103/barrel. Iran war drove 51% rally from $76 in Jan to $115 peak in late March. Oil dropped when Iran signaled readiness to end war (Mar 31). OPEC+ adding 206K bpd."
+  },
+  "metals_outlook": "Bullish medium-term. Gold structural support from central bank buying (emerging market reserve diversification). Silver industrial demand creating structural shortage. COT positioning not stretched on gold. Silver net-long decreasing = contrarian bullish. Key risk: dollar strength from Iran war paradox and hawkish NFP. Support: XAU $4,510 / XAG $70.65. Resistance: XAU $4,822 / XAG $75.30.",
+  "oil_outlook": "Elevated and volatile. WTI $98-103, down from $115 peak after Iran peace signals. OPEC+ adding 206K bpd on Apr 5. Strait of Hormuz partially disrupted. JPM expects Brent below $80 by Q3 if Hormuz eases. Key risk: Trump escalation vows could re-spike oil above $115. EIA projects $70-80 by year-end in base case.",
+  "sentiment_shift": "EXTREME FEAR across all assets. Crypto fear index at 9. Stock market Fear & Greed likely very low given Iran war + oil spike + Tesla -5%. Strong NFP (178K) creates hawkish repricing risk \u2014 market now pricing June cut as first, down from earlier expectations. The paradox: extreme fear is historically contrarian bullish, but the Iran war creates real tail risk that justifies some fear premium."
+}

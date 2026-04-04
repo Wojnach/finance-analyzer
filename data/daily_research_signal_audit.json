@@ -1,0 +1,286 @@
+{
+  "date": "2026-04-04",
+  "generated_at": "2026-04-04T21:38:59.840073+00:00",
+  "top_signals": {
+    "alltime_1d": [
+      {
+        "signal": "econ_calendar",
+        "accuracy": 69.6,
+        "samples": 3637,
+        "note": "Best overall signal. Proximity to FOMC/CPI/NFP provides edge."
+      },
+      {
+        "signal": "claude_fundamental",
+        "accuracy": 61.8,
+        "samples": 6322,
+        "note": "Second best. LLM quality/valuation analysis working well."
+      },
+      {
+        "signal": "fear_greed",
+        "accuracy": 58.6,
+        "samples": 10232,
+        "note": "Good contrarian signal BUT collapsing recently (25.9% recent 7d)."
+      },
+      {
+        "signal": "qwen3",
+        "accuracy": 59.8,
+        "samples": 3589,
+        "note": "Local LLM performing well."
+      },
+      {
+        "signal": "ministral",
+        "accuracy": 59.2,
+        "samples": 5561,
+        "note": "Surging to 68% recently."
+      }
+    ],
+    "recent_7d": [
+      {
+        "signal": "fibonacci",
+        "accuracy": 68.2,
+        "samples": 110,
+        "note": "Surging +25.3% from all-time. Works in ranging market."
+      },
+      {
+        "signal": "ministral",
+        "accuracy": 68.0,
+        "samples": 125,
+        "note": "Local LLM improving, up +8.8%."
+      },
+      {
+        "signal": "mean_reversion",
+        "accuracy": 65.4,
+        "samples": 332,
+        "note": "Surging +13.7%. Ranging market is its sweet spot."
+      },
+      {
+        "signal": "calendar",
+        "accuracy": 62.8,
+        "samples": 659,
+        "note": "Up +6.5%. Calendar effects more reliable in current regime."
+      },
+      {
+        "signal": "bb",
+        "accuracy": 60.8,
+        "samples": 293,
+        "note": "Bollinger Bands working well in range-bound market."
+      }
+    ],
+    "per_ticker_champions": {
+      "XAG-USD": "fear_greed 93.8% (all-time), econ_calendar 78.9%, momentum_factors 77.1%",
+      "XAU-USD": "fear_greed 90.4%, econ_calendar 84.4%, structure 78.4%",
+      "BTC-USD": "claude_fundamental 72.7%, econ_calendar 67.8%, calendar 65.2%",
+      "ETH-USD": "econ_calendar 72.3%, claude_fundamental 59.9%, structure 59.8%"
+    }
+  },
+  "worst_signals": {
+    "alltime_1d": [
+      {
+        "signal": "crypto_macro",
+        "accuracy": 29.8,
+        "samples": 322,
+        "recommendation": "FORCE-HOLD. Consistently wrong."
+      },
+      {
+        "signal": "funding",
+        "accuracy": 29.9,
+        "samples": 536,
+        "recommendation": "Already disabled. Keep disabled."
+      },
+      {
+        "signal": "ml",
+        "accuracy": 41.7,
+        "samples": 1714,
+        "recommendation": "Already disabled. Keep disabled."
+      },
+      {
+        "signal": "fibonacci",
+        "accuracy": 42.9,
+        "samples": 12140,
+        "recommendation": "PARADOX: 42.9% all-time but 68.2% recent. Regime-dependent."
+      },
+      {
+        "signal": "macd",
+        "accuracy": 43.4,
+        "samples": 5563,
+        "recommendation": "Similar paradox: 43.4% all-time but 58.7% recent. Needs regime gate."
+      }
+    ],
+    "recent_7d_collapsed": [
+      {
+        "signal": "fear_greed",
+        "accuracy_recent": 25.9,
+        "accuracy_alltime": 58.6,
+        "delta": -32.7,
+        "note": "Extreme fear (index 9) but market not reversing. Contrarian logic breaking in war regime."
+      },
+      {
+        "signal": "news_event",
+        "accuracy_recent": 29.5,
+        "accuracy_alltime": 51.7,
+        "delta": -22.2,
+        "note": "Iran war news overwhelms normal keyword sentiment."
+      },
+      {
+        "signal": "macro_regime",
+        "accuracy_recent": 30.3,
+        "accuracy_alltime": 47.1,
+        "delta": -16.8,
+        "note": "Macro indicators confused by simultaneous war + strong jobs + oil shock."
+      },
+      {
+        "signal": "structure",
+        "accuracy_recent": 36.1,
+        "accuracy_alltime": 52.1,
+        "delta": -16.0,
+        "note": "Structural breakout signals failing in ranging market."
+      },
+      {
+        "signal": "volatility_sig",
+        "accuracy_recent": 35.0,
+        "accuracy_alltime": 47.1,
+        "delta": -12.1,
+        "note": "Volatility signals misfiring in compressed range."
+      }
+    ],
+    "consistently_bad_per_ticker": {
+      "XAG-USD": [
+        "sentiment 4.5%",
+        "ministral 18.9%",
+        "oscillators 35.1%"
+      ],
+      "XAU-USD": [
+        "oscillators 39.5%",
+        "ministral 43.2%",
+        "candlestick 43.2%"
+      ],
+      "BTC-USD": [
+        "custom_lora 23.5%",
+        "ml 26.4%",
+        "oscillators 34.3%",
+        "crypto_macro 36.0%"
+      ],
+      "ETH-USD": [
+        "crypto_macro 17.6%",
+        "custom_lora 28.9%",
+        "funding 29.9%",
+        "oscillators 34.5%"
+      ]
+    }
+  },
+  "correlation_clusters": [
+    {
+      "cluster": "BTC candlestick-fibonacci",
+      "correlation": 0.708,
+      "ticker": "BTC-USD",
+      "issue": "These signals vote nearly identically. Double-counting the same pattern detection.",
+      "recommendation": "Downweight one or combine into single vote."
+    },
+    {
+      "cluster": "XAG fibonacci-mean_reversion",
+      "correlation": -0.694,
+      "ticker": "XAG-USD",
+      "issue": "Highly anti-correlated. They cancel each other out in consensus voting.",
+      "recommendation": "In ranging regime, favor mean_reversion (65.4% recent). In trending, favor fibonacci."
+    },
+    {
+      "cluster": "XAG rsi-mean_reversion",
+      "correlation": 0.557,
+      "ticker": "XAG-USD",
+      "issue": "Both capture oversold/overbought mean reversion. Moderate redundancy.",
+      "recommendation": "Acceptable - different methodologies reaching similar conclusions is confirmatory."
+    },
+    {
+      "cluster": "BTC volume_flow-oscillators",
+      "correlation": 0.445,
+      "ticker": "BTC-USD",
+      "issue": "Moderate correlation. Volume flow at 55.5% and oscillators at 34.3% - oscillators are dragging.",
+      "recommendation": "Force-HOLD oscillators for BTC. Volume flow alone is better."
+    }
+  ],
+  "regime_performance": {
+    "current_regime": "ranging (99/100 recent snapshots)",
+    "ranging_winners": [
+      "mean_reversion +13.7%",
+      "fibonacci +25.3%",
+      "bb +7.4%",
+      "macd +15.3%",
+      "ministral +8.8%"
+    ],
+    "ranging_losers": [
+      "fear_greed -32.7%",
+      "news_event -22.2%",
+      "macro_regime -16.8%",
+      "structure -16.0%",
+      "momentum_factors -14.4%"
+    ],
+    "insight": "Ranging market strongly favors mean-reversion and technical signals over macro/sentiment signals. The system should dynamically weight signals based on detected regime."
+  },
+  "cross_ticker_agreement": {
+    "XAG_vs_XAU": "44.4% consensus agreement -- metals need independent analysis",
+    "BTC_vs_ETH": "40.4% consensus agreement -- crypto pair diverging significantly"
+  },
+  "recommendations": [
+    {
+      "priority": 1,
+      "title": "Implement regime-adaptive signal weighting",
+      "description": "Use the ranging/trending regime detection to dynamically adjust signal weights. In ranging: upweight mean_reversion, bb, fibonacci, macd. In trending: upweight trend, structure, momentum_factors.",
+      "impact": "high",
+      "effort": "medium",
+      "files": [
+        "portfolio/signal_engine.py"
+      ]
+    },
+    {
+      "priority": 2,
+      "title": "Force-HOLD oscillators signal globally",
+      "description": "Oscillators is 34-39% across all tickers. Worse than coin flip everywhere. Should be gated.",
+      "impact": "medium",
+      "effort": "easy",
+      "files": [
+        "portfolio/signal_engine.py"
+      ]
+    },
+    {
+      "priority": 3,
+      "title": "Force-HOLD crypto_macro signal",
+      "description": "crypto_macro is 17.6% for ETH and 29.8% overall. Actively harmful.",
+      "impact": "medium",
+      "effort": "easy",
+      "files": [
+        "portfolio/signal_engine.py"
+      ]
+    },
+    {
+      "priority": 4,
+      "title": "Decorrelate candlestick and fibonacci for BTC",
+      "description": "Correlation 0.708 means double-counting. Downweight fibonacci when candlestick is active for BTC.",
+      "impact": "medium",
+      "effort": "medium",
+      "files": [
+        "portfolio/signal_engine.py"
+      ]
+    },
+    {
+      "priority": 5,
+      "title": "Add recent-accuracy-weighted voting",
+      "description": "Weight each signal vote by its recent 7d accuracy. This automatically adapts to regime shifts.",
+      "impact": "high",
+      "effort": "medium",
+      "files": [
+        "portfolio/signal_engine.py",
+        "portfolio/accuracy_stats.py"
+      ]
+    },
+    {
+      "priority": 6,
+      "title": "Add per-ticker signal gating",
+      "description": "Sentiment for XAG is 4.5%. Ministral for XAG is 18.9%. These should be gated per-ticker, not just globally.",
+      "impact": "medium",
+      "effort": "medium",
+      "files": [
+        "portfolio/signal_engine.py"
+      ]
+    }
+  ]
+}
