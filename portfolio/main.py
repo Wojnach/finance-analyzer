@@ -697,7 +697,7 @@ def run(force_report=False, active_symbols=None):
                     from portfolio.telegram_notifications import send_telegram
                     send_telegram(msg)
                 except Exception:
-                    logger.debug("Failed to send outcome staleness alert", exc_info=True)
+                    logger.warning("Failed to send outcome staleness alert", exc_info=True)
 
             dead_signals = check_dead_signals()
             if dead_signals:
@@ -709,9 +709,9 @@ def run(force_report=False, active_symbols=None):
                     from portfolio.telegram_notifications import send_telegram
                     send_telegram(msg)
                 except Exception:
-                    logger.debug("Failed to send dead signals alert", exc_info=True)
+                    logger.warning("Failed to send dead signals alert", exc_info=True)
         except Exception as e:
-            logger.debug("safeguard checks failed: %s", e)
+            logger.warning("safeguard checks failed: %s", e)
 
     # Log portfolio equity snapshot for dashboard chart
     try:
@@ -858,7 +858,7 @@ def loop(interval=None):
             if initial_report is not None:
                 initial_report.heartbeat_updated = True
         except Exception as e:
-            logger.debug("Heartbeat write after initial run failed: %s", e)
+            logger.warning("Heartbeat write after initial run failed: %s", e)
     except KeyboardInterrupt:
         logger.info("Loop interrupted during initial run, shutting down cleanly")
         return
@@ -898,7 +898,7 @@ def loop(interval=None):
                 update_health(cycle_count=_ss._run_cycle_id, signals_ok=0, signals_failed=0,
                               error=str(e))
             except Exception as e2:
-                logger.debug("Health update after crash failed: %s", e2)
+                logger.warning("Health update after crash failed: %s", e2)
             _crash_sleep()
             report = None
         last_cycle_started = cycle_started
@@ -907,7 +907,7 @@ def loop(interval=None):
             if report is not None:
                 report.heartbeat_updated = True
         except Exception as e:
-            logger.debug("Heartbeat write failed: %s", e)
+            logger.warning("Heartbeat write failed: %s", e)
         # Loop contract verification
         if report is not None:
             try:

@@ -1189,10 +1189,19 @@ def main() -> int:
                                 marker = " X" if name in profile.get("ignored_signals", []) else ""
                                 print(f"    {name:20s} {acc:5.1%} ({n:4d} samples){marker}")
 
-                # Show deep context summary if available
+                # Show deep context summary if available (with staleness check)
                 precompute_path = BASE_DIR / profile.get("precompute_file", "")
                 deep_ctx = load_json(precompute_path)
                 if deep_ctx:
+                    import datetime as _dt
+                    _gen = deep_ctx.get("generated_at", "")
+                    if _gen:
+                        try:
+                            _age_s = (_dt.datetime.now(_dt.timezone.utc) - _dt.datetime.fromisoformat(_gen)).total_seconds()
+                            if _age_s > 7200:  # 2 hours
+                                print(f"  ⚠ Deep context STALE ({_age_s/3600:.1f}h old)")
+                        except Exception:
+                            pass
                     analyst = deep_ctx.get("analyst_targets", {})
                     if analyst:
                         targets = []

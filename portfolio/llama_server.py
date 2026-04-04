@@ -161,8 +161,10 @@ def _write_pid(proc, model_name):
         os.makedirs(os.path.dirname(_PID_FILE), exist_ok=True)
         with open(_PID_FILE, "w") as f:
             f.write(f"{proc.pid}:{model_name}")
-    except Exception:
-        pass
+            f.flush()
+            os.fsync(f.fileno())
+    except Exception as e:
+        logger.warning("PID file write failed: %s", e)
 
 
 def _read_pid_model():
