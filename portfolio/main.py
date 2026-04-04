@@ -23,6 +23,7 @@ import logging
 import os
 import sys
 import time
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -81,10 +82,8 @@ def _release_singleton_lock():
     except OSError:
         pass
     finally:
-        try:
+        with suppress(Exception):
             _singleton_lock_fh.close()
-        except Exception:
-            pass
         _singleton_lock_fh = None
 
 

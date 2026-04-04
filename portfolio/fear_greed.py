@@ -2,6 +2,7 @@ import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
+from portfolio.file_utils import atomic_write_json, load_json
 from portfolio.http_retry import fetch_json
 
 logger = logging.getLogger(__name__)
@@ -21,11 +22,9 @@ def get_sustained_fear_days() -> int:
     Returns 0 if not in an extreme fear streak, or if tracking data is unavailable.
     """
     try:
-        import json
-        if _STREAK_FILE.exists():
-            data = json.loads(_STREAK_FILE.read_text())
-            if data.get("streak_type") == "extreme_fear":
-                return data.get("streak_days", 0)
+        data = load_json(_STREAK_FILE)
+        if data and data.get("streak_type") == "extreme_fear":
+            return data.get("streak_days", 0)
     except Exception:
         logger.debug("Could not read fear streak file", exc_info=True)
     return 0
@@ -37,11 +36,7 @@ def update_fear_streak(fg_value: int) -> dict:
     Called after each successful F&G fetch. Persists streak state to disk
     so it survives process restarts.
     """
-    import json
-    try:
-        data = json.loads(_STREAK_FILE.read_text()) if _STREAK_FILE.exists() else {}
-    except Exception:
-        data = {}
+    data = load_json(_STREAK_FILE, default={}) or {}
 
     now = datetime.now(UTC).isoformat()
     prev_type = data.get("streak_type", "neutral")
@@ -66,7 +61,7 @@ def update_fear_streak(fg_value: int) -> dict:
     data["last_value"] = fg_value
     data["last_updated"] = now
     try:
-        _STREAK_FILE.write_text(json.dumps(data, indent=2))
+        atomic_write_json(_STREAK_FILE, data)
     except Exception:
         logger.debug("Could not write fear streak file", exc_info=True)
     return data

@@ -267,7 +267,6 @@ def _ensure_model(name):
     # Check if correct model is already running (possibly started by another process)
     _, current_model = _read_pid_model()
     if current_model == name and _is_server_alive():
-        _local_model = name
         return True
     # Need to swap
     return _start_server(name)

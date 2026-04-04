@@ -44,7 +44,7 @@ def _flush_via_server(model_name, batch, build_prompt_fn, parse_response_fn, sto
         return {}
 
     prompts_and_params = []
-    for cache_key, ctx in batch:
+    for _cache_key, ctx in batch:
         prompt = build_prompt_fn(ctx)
         prompts_and_params.append({
             "prompt": prompt,
@@ -54,7 +54,7 @@ def _flush_via_server(model_name, batch, build_prompt_fn, parse_response_fn, sto
     texts = query_llama_server_batch(model_name, prompts_and_params)
 
     results = {}
-    for (cache_key, ctx), text in zip(batch, texts):
+    for (cache_key, _ctx), text in zip(batch, texts):
         if text is not None:
             parsed = parse_response_fn(text)
             if parsed:
