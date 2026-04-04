@@ -130,7 +130,7 @@ def _safe_last_jsonl_ts(path, label):
     try:
         return _last_jsonl_ts(path)
     except Exception as e:
-        logger.debug("%s baseline read failed: %s", label, e)
+        logger.warning("%s baseline read failed: %s", label, e)
         return None
 
 
@@ -324,7 +324,7 @@ def invoke_agent(reasons, tier=3):
             notify_msg = f"_Layer 2 T{tier} ({tier_label}): {reason_str}_"
             send_or_store(notify_msg, config, category="invocation")
         except Exception as e:
-            logger.debug("invocation notification failed: %s", e)
+            logger.warning("invocation notification failed: %s", e)
         return True
     except Exception as e:
         logger.error("invoking agent: %s", e)
@@ -429,7 +429,7 @@ def _write_fishing_context(journal_entry):
         atomic_write_json('data/fishing_context.json', context)
 
     except Exception as e:
-        logger.debug('Fishing context error: %s', e)
+        logger.warning('Fishing context error: %s', e)
 
 
 def check_agent_completion():
@@ -580,7 +580,7 @@ def check_agent_completion():
         try:
             _agent_log.close()
         except Exception as e:
-            logger.debug("Agent log close failed: %s", e)
+            logger.warning("Agent log close failed: %s", e)
     _agent_proc = None
     _agent_log = None
     _agent_start = 0

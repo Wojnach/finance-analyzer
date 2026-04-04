@@ -241,7 +241,7 @@ def get_health_summary() -> dict:
             "alpaca": alpaca_cb.get_status(),
         }
     except Exception as e:
-        logger.debug("Circuit breaker status unavailable: %s", e)
+        logger.warning("Circuit breaker status unavailable: %s", e)
     return summary
 
 

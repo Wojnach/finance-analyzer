@@ -97,7 +97,7 @@ def session_remaining_minutes() -> float | None:
         now = datetime.now(UTC)
         return (exp - now).total_seconds() / 60.0
     except Exception as e:
-        logger.debug("Failed to compute session minutes remaining: %s", e)
+        logger.warning("Failed to compute session minutes remaining: %s", e)
         return None
 
 
@@ -416,7 +416,7 @@ def get_open_orders(account_id: str | None = None) -> list[dict]:
             orders = data.get("orders", [])
             return [o for o in orders if str(o.get("accountId", "")) == aid]
         except RuntimeError:
-            logger.debug("Could not fetch open orders")
+            logger.warning("Could not fetch open orders")
             return []
 
 
@@ -579,7 +579,7 @@ def get_stop_losses() -> list[dict]:
         data = api_get("/_api/trading/stoploss")
         return data if isinstance(data, list) else []
     except RuntimeError:
-        logger.debug("Could not fetch stop-losses")
+        logger.warning("Could not fetch stop-losses")
         return []
 
 
@@ -600,7 +600,7 @@ def get_instrument_price(orderbook_id: str) -> dict[str, Any]:
             )
             return data
         except Exception as e:
-            logger.debug("Market guide lookup failed for %s/%s: %s", instrument_type, orderbook_id, e)
+            logger.warning("Market guide lookup failed for %s/%s: %s", instrument_type, orderbook_id, e)
             continue
 
     # Fallback: generic orderbook endpoint
