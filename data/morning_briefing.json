@@ -1,0 +1,107 @@
+{
+  "date": "2026-04-04",
+  "generated_at": "2026-04-04T21:51:36.508803+00:00",
+  "market_outlook": "neutral",
+  "confidence": 0.5,
+  "summary": "Weekend session (US closed Good Friday). All instruments in extreme ranging regime with minimal movement. BTC $67K, XAG $73, XAU $4673, ETH $2058. Both portfolios 100% cash. Key macro: Iran war escalation risk, massive NFP beat (178K vs 50K), crypto extreme fear (index 9). OPEC+ meets Apr 5. Markets reopen Monday Apr 6 with potential volatility from NFP digest.",
+  "key_levels": {
+    "XAG-USD": {
+      "price": 72.95,
+      "support": 70.65,
+      "resistance": 75.3,
+      "note": "Silver holding above $70 support. Targeting $73.80-$75.30 if momentum persists."
+    },
+    "XAU-USD": {
+      "price": 4673,
+      "support": 4510,
+      "resistance": 4822,
+      "note": "JPM targets $5,055 by Q4. Central bank buying structural support."
+    },
+    "BTC-USD": {
+      "price": 67242,
+      "support": 65000,
+      "resistance": 70000,
+      "note": "Below $70K. Bearish chatter at 2026 peak. ETF inflows weak ($9M). Watch $65K support."
+    },
+    "ETH-USD": {
+      "price": 2063,
+      "support": 1900,
+      "resistance": 2200,
+      "note": "ETH ETF inflows $71M (bullish divergence vs BTC). Still needs $2,500 for thesis confirmation."
+    }
+  },
+  "trade_ideas": [
+    {
+      "instrument": "XAG-USD",
+      "direction": "LONG (wait for Monday)",
+      "rationale": "Silver at $73, all prophecy checkpoints hit except $120 target. Industrial demand structural shortage. COT net-long decreasing (contrarian bullish). Gold-silver ratio compression thesis intact.",
+      "entry_zone": "$70-73 (current range)",
+      "target": "$75.30 (near-term), $100 (medium-term)",
+      "stop": "$68 (below $70.65 support)",
+      "confidence": 0.6,
+      "note": "DO NOT trade warrants over weekend. Wait for Monday 08:15 CET open."
+    },
+    {
+      "instrument": "ETH-USD",
+      "direction": "LONG (watchlist only)",
+      "rationale": "ETH ETF inflows $71M massively outpacing BTC $9M. Institutional rotation signal. But price still in downtrend. Wait for $2,200 break.",
+      "entry_zone": "$2,100-2,200 breakout",
+      "target": "$2,500 (thesis confirmation checkpoint)",
+      "stop": "$1,900",
+      "confidence": 0.4,
+      "note": "ETH underperforming BTC structurally. Only enter on clear strength."
+    }
+  ],
+  "system_improvements_implemented": [
+    "BUG-161: Fixed oscillators weight in ranging from 1.2x (boost) to 0.3x (penalize). Was amplifying 34-39% accuracy signal.",
+    "BUG-162: Added candlestick-fibonacci correlation group (0.708 corr on BTC). Prevents double-counting.",
+    "BUG-163: Added oscillators + candlestick to ranging regime gate. Both below 45% recent accuracy.",
+    "All 134 signal engine tests pass. 1216/1222 total tests pass (6 pre-existing failures)."
+  ],
+  "system_improvements_proposed": [
+    {
+      "title": "DXY Momentum Signal for XAG",
+      "priority": "CRITICAL",
+      "effort": "0.5 days",
+      "reason": "#1 missing predictor per SHAP analysis, recommended 2 sessions in a row"
+    },
+    {
+      "title": "ETH ETF Flow Momentum Signal",
+      "priority": "HIGH",
+      "effort": "1 day",
+      "reason": "$71M inflow is leading indicator, not captured by current signals"
+    },
+    {
+      "title": "Real Yield Spread Signal for XAG",
+      "priority": "HIGH",
+      "effort": "0.5 days",
+      "reason": "#3 predictor per SHAP, complements DXY signal"
+    },
+    {
+      "title": "HMM-based regime detection",
+      "priority": "MEDIUM",
+      "effort": "3 days",
+      "reason": "Replace threshold heuristics with probabilistic regime model"
+    },
+    {
+      "title": "Online adaptive signal weights via rolling accuracy EMA",
+      "priority": "MEDIUM",
+      "effort": "2 days",
+      "reason": "Auto-adapt to regime shifts without manual tuning"
+    }
+  ],
+  "risk_warnings": [
+    "IRAN WAR: Trump vowed to strike Tehran 'extremely hard'. Weekend escalation risk = oil spike, equity drop, crypto selloff.",
+    "OPEC+ MEETING Apr 5: If production increase > 206K bpd, oil drops = positive for risk assets. If hawkish, oil stays elevated.",
+    "NFP DIGEST: 178K vs 50K expected. May trigger hawkish repricing of Fed cuts. June cut probability may decline.",
+    "STRAIT OF HORMUZ: Still partially disrupted. Any shipping incident = oil spike above $115.",
+    "EXTREME FEAR: Crypto fear index at 9. Historically contrarian bullish BUT Iran war creates real tail risk."
+  ],
+  "research_highlights": [
+    "Signal accuracy regime shift: mean-reversion (+13.7%) and fibonacci (+25.3%) surging, while fear_greed (-32.7%) and macro_regime (-16.8%) collapsing in ranging market.",
+    "Per-ticker accuracy divergence: fear_greed is 93.8% for XAG (best signal) but 25.9% globally. Per-ticker override (BUG-158) already handles this.",
+    "Oscillators signal is consistently worst across all tickers (34-39%). Now gated and penalized.",
+    "BTC-USD candlestick-fibonacci correlation 0.708 \u2014 was double-counting. Now grouped.",
+    "ETH ETF inflows ($71M) vs BTC ($9M) \u2014 institutional rotation signal worth monitoring."
+  ]
+}

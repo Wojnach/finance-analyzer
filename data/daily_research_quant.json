@@ -1,0 +1,286 @@
+{
+  "date": "2026-04-04",
+  "research_topics": [
+    "Adaptive signal weighting with regime detection",
+    "Walk-forward optimization for signal reweighting",
+    "LLM multi-agent trading architectures",
+    "Silver price prediction with machine learning",
+    "Bitcoin price prediction feature importance",
+    "Mean reversion signal optimization for ranging markets",
+    "TradingAgents multi-agent framework (TauricResearch)",
+    "Volatility regime switching models (HMM)"
+  ],
+  "findings": [
+    {
+      "topic": "Adaptive signal weighting with regime detection",
+      "finding": "A 2026 ComSIA paper presents a hybrid AI trading system combining EMA/MACD trend-following, RSI/BB mean-reversion, FinBERT sentiment, and XGBoost ML (63% OOS accuracy). Regime detection uses a simple rolling SMA20 of returns as bull/bear switch. Dynamic ATR-based position sizing replaces fixed signal weights. Achieved 135.49% return, 1.68 Sharpe, -15.6% max drawdown over 2 years.",
+      "relevance_to_us": "Our regime detection (detect_regime in indicators.py) uses EMA9/EMA21 spread + ATR thresholds + RSI. The paper's approach of using rolling return SMA as a regime switch is simpler but complementary. Key insight: their ATR-based position sizing is something we should adopt — we currently apply fixed 0.75x/0.80x regime multipliers but don't scale position size by volatility. Also, their XGBoost classifier on 10 engineered features at 63% is comparable to our meta_learner LightGBM but their feature engineering (combining signals into a unified feature vector) is cleaner.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "https://arxiv.org/html/2601.19504v1"
+    },
+    {
+      "topic": "Adaptive signal weighting with regime detection",
+      "finding": "Zebra Optimization Algorithm (ZOA) dynamically fine-tunes weights of ensemble models (Bi-LSTM, GRU, FNN) in real-time based on recent predictive performance. The key principle: model contributions adjust automatically as market conditions shift, without manual regime labels.",
+      "relevance_to_us": "We already have signal_weight_optimizer.py doing walk-forward ridge regression for signal weights, but it retrains periodically (weekly). A lightweight online weight adjustment — updating signal weights every cycle based on rolling 7-day accuracy — would be faster to adapt. Could be implemented as a moving EMA of per-signal accuracy that modifies the weight in _weighted_consensus() without full retrain.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "high",
+      "source": "https://www.mdpi.com/2227-7072/13/3/151"
+    },
+    {
+      "topic": "Adaptive signal weighting with regime detection",
+      "finding": "XGBoost trained to predict Information Coefficient (IC) values for next 10 trading days, then dynamically adjusts factor weights based on predicted IC. Outperformed equal-weight and static IC-based weighting strategies with 22.54% annual returns.",
+      "relevance_to_us": "Direct analogy to our system: instead of using historical accuracy as signal weight (what we do now), train a model to PREDICT which signals will be accurate in the next period. Our meta_learner.py already does binary classification on signal votes — extending it to predict per-signal accuracy for the upcoming window would create a true adaptive weighting system. The signal_log.db has enough data to build this.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "high",
+      "source": "https://arxiv.org/html/2508.18592v1"
+    },
+    {
+      "topic": "Walk-forward optimization for signal reweighting",
+      "finding": "A rigorous walk-forward validation framework uses 34 independent OOS test periods across 10 years. Training: 252 days, testing: 63 days, step: 63 days. An epsilon-greedy RL agent learns signal-type preferences with adaptive threshold tau(c) = 0.45 + (1-c)*0.10. Key finding: returns were POSITIVE during high-volatility periods (+0.60% quarterly) but NEGATIVE during stable markets (-0.16%). Maximum drawdown -2.76% vs SPY's -23.8%.",
+      "relevance_to_us": "Our signal_weight_optimizer.py already implements walk-forward with 30d train / 7d test windows, which is good. Two actionable insights: (1) The adaptive threshold — scaling the consensus threshold based on confidence — maps directly to our MIN_VOTERS system. Currently we use fixed thresholds (3-5 voters depending on regime). An adaptive threshold based on signal confidence distribution would be more nuanced. (2) The finding that microstructure signals work better in volatile markets confirms our observation that mean_reversion works at 3h in ranging while trend works in trending.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "https://arxiv.org/html/2512.12924v1"
+    },
+    {
+      "topic": "Walk-forward optimization for signal reweighting",
+      "finding": "Best practice: use rolling (not anchored) windows, Sharpe ratio as fitness function (not just net profit), and validate that the walk-forward efficiency ratio (OOS performance / IS performance) stays above 0.5. Below 0.5 indicates overfitting.",
+      "relevance_to_us": "Our walk-forward optimizer uses R-squared and OOS correlation. Adding Sharpe ratio as fitness and computing the WF efficiency ratio would give us a better overfitting diagnostic. This is a simple addition to signal_weight_optimizer.py's WalkForwardResult dataclass.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "low",
+      "source": "https://blog.quantinsti.com/walk-forward-optimization-introduction/"
+    },
+    {
+      "topic": "LLM multi-agent trading architectures",
+      "finding": "TradingAgents v0.2.0 (Feb 2026) implements 7 specialized LLM roles: Fundamentals Analyst, Sentiment Analyst, News Analyst, Technical Analyst, Researcher (Bull+Bear debate), Trader, and Risk Manager. Built on LangGraph. Key innovation: structured debate between Bull and Bear researchers before trading decision. Supports Claude 4.x, GPT-5.x, Gemini 3.x, Ollama local models.",
+      "relevance_to_us": "Our Layer 2 is a single Claude session that reads all signals and makes decisions. The TradingAgents approach of STRUCTURED DEBATE (Bull vs Bear) before decision-making is directly applicable. We could implement this as a two-pass Layer 2: first pass generates bull case + bear case, second pass synthesizes. This could reduce the SELL-bias problem we've observed. Our multi_agent_layer2.py already exists but could adopt the debate pattern.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "medium",
+      "source": "https://github.com/TauricResearch/TradingAgents"
+    },
+    {
+      "topic": "LLM multi-agent trading architectures",
+      "finding": "A March 2026 paper ('Toward Expert Investment Teams') proposes fine-grained task decomposition where each LLM agent handles a specific sub-task (data retrieval vs deep analysis vs risk assessment), with quick-thinking models for data retrieval and deep-thinking models for analysis. This task-appropriate model selection reduces cost while maintaining quality.",
+      "relevance_to_us": "We already do this partially — Ministral-8B for quick signal generation, Claude for deep analysis. But we could formalize it: use Qwen3-8B (local, free) for initial signal screening and data aggregation, then only invoke Claude (expensive, rate-limited) for actual trade decisions. This maps to our existing T1/T2/T3 tiering in agent_invocation.py but could be extended to use local models for T1 entirely.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "medium",
+      "source": "https://arxiv.org/html/2602.23330"
+    },
+    {
+      "topic": "Silver price prediction with machine learning",
+      "finding": "XGBoost (Extreme Gradient Boosting) is the leading ML approach for silver price forecasting, outperforming LSTM and traditional time series methods. Key features: gold/silver ratio, DXY (dollar index), copper prices, US bond yields, inflation expectations, and S&P 500. Hybrid CNN-RNN models also show promise. Analyst consensus for silver year-end 2026: $70-87/oz.",
+      "relevance_to_us": "We already have metals_cross_asset.py computing copper, GVZ, gold/silver ratio, SPY, and oil correlations. But these are used as a SIGNAL (vote BUY/SELL/HOLD) rather than as FEATURES in an ML model. Building an XGBoost model specifically for XAG-USD using these cross-asset features + our existing technical signals as input features would likely outperform the current individual signal voting approach. Our Chronos-2 XAG accuracy has regressed to 54.5% — a purpose-built XGBoost could beat that.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "high",
+      "source": "https://www.mdpi.com/2227-7390/11/18/3813"
+    },
+    {
+      "topic": "Silver price prediction with machine learning",
+      "finding": "LightGBM with mixed daily + macroeconomic features achieved 27% reduction in out-of-sample MAE vs traditional SVR for gold. Feature importance analysis highlighted inflation metrics and DXY as top predictors. Gold-silver ratio historically mean-reverts with half-life of ~30 trading days.",
+      "relevance_to_us": "The gold-silver ratio mean-reversion with ~30 day half-life is directly actionable for our metals system. We compute the ratio in metals_cross_asset.py but don't exploit the mean-reversion property systematically. Adding a half-life based mean-reversion signal specifically for the G/S ratio would complement our existing signals. Also, DXY is available from our macro data — adding it as a direct feature to the meta_learner for metals tickers would be easy.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "https://www.sciencedirect.com/science/article/abs/pii/S0960077923009803"
+    },
+    {
+      "topic": "Bitcoin price prediction feature importance",
+      "finding": "Boruta feature selection + CNN-LSTM achieves 82.44% directional accuracy on BTC. On-chain data (MVRV, SOPR, NVT) significantly improves classification accuracy. SVM achieves 83% with F1=82% for direction prediction. Key finding: on-chain features are more important for classification (direction) while technical features dominate regression (magnitude).",
+      "relevance_to_us": "We already have onchain_data.py fetching BTC MVRV and SOPR from BGeometrics (15/day limit). But these are consumed qualitatively in Layer 2 context, not as direct ML features. Adding MVRV, SOPR, and NVT as numeric features to our meta_learner.py for BTC-USD would leverage this research. The 82% accuracy claim needs scrutiny (likely in-sample inflated), but even 60-65% on our data would be a significant improvement over our current BTC accuracy of 35-64%.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "high",
+      "source": "https://www.sciencedirect.com/science/article/abs/pii/S0952197625010875"
+    },
+    {
+      "topic": "Bitcoin price prediction feature importance",
+      "finding": "Systematic review across 50+ papers (2025) confirms: technical features (RSI, MACD) remain most relevant across methods, followed by blockchain-based features, then sentiment/Google Trends. Sample dimension engineering (choosing the right lookback period) matters as much as feature selection.",
+      "relevance_to_us": "Validates our multi-signal approach. The insight about sample dimension engineering maps to our horizon system (3h/1d/3d/5d). We should verify that each signal's lookback period is optimal for each horizon — e.g., RSI(14) may be optimal for 1d but RSI(7) might be better for 3h. Currently all signals use fixed parameters regardless of horizon.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "medium",
+      "source": "https://www.sciencedirect.com/science/article/pii/S2772941925000274"
+    },
+    {
+      "topic": "Mean reversion signal optimization for ranging markets",
+      "finding": "Best practices for ranging market mean reversion: (1) Z-score normalization of price deviation from MA for statistical significance, (2) RSI(2) is the gold standard for ultra-short-term mean reversion, (3) Volatility-optimized RSI uses ATR-scaled thresholds (dynamic oversold/overbought levels), (4) Half-life estimation via Ornstein-Uhlenbeck process determines optimal holding period, (5) Combining IBS + RSI(2) gives highest signal quality.",
+      "relevance_to_us": "Our mean_reversion.py already implements all 8 of these sub-indicators (RSI(2), RSI(3), IBS, consecutive downs, gap fade, BB %B, IBS+RSI(2) combined, half-life). This is well-implemented. The optimization opportunity is in the WEIGHTING within ranging regimes: currently mean_reversion gets the same base weight as other signals. In ranging regimes specifically, we should boost mean_reversion weight by 1.5-2x and reduce trend-following weight (which we already gate). This is a simple config change in REGIME_WEIGHTS and HORIZON_WEIGHTS.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "https://blog.quantinsti.com/mean-reversion-strategies-introduction-building-blocks/"
+    },
+    {
+      "topic": "Mean reversion signal optimization for ranging markets",
+      "finding": "Dynamic Range Breakout system: compute standard deviation bands around SMA, then trade the EDGES of the range rather than the center. Entry when price touches 2-sigma band AND RSI confirms, exit at mean (SMA). Reduces false signals by requiring both price and momentum confirmation.",
+      "relevance_to_us": "Our BB signal already does this (Bollinger Band breakout), but the mean_reversion BB %B sub-indicator uses the OPPOSITE logic (buy at lower band, sell at upper). In ranging markets, the mean-reversion interpretation is correct. The insight here is that we should check consistency: if both the BB signal and mean_reversion BB %B agree, that's a strong ranging-market signal. We could add a correlation check between these two.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "low",
+      "source": "https://medium.com/@redsword_23261/advanced-mean-reversion-trading-strategy-dynamic-range-breakout-system-based-on-standard-deviation-c4ccb428611b"
+    },
+    {
+      "topic": "TradingAgents multi-agent framework",
+      "finding": "TradingAgents v0.2.2 introduces a professional five-tier rating system for trade signals, unified LLM provider integration, and a debate mechanism where Bull and Bear researchers independently assess market conditions before the Trader agent synthesizes. The system uses LangGraph for workflow orchestration. Key architectural decision: agents don't share state directly — they communicate through structured reports that flow forward through the pipeline.",
+      "relevance_to_us": "Three directly applicable ideas: (1) Five-tier rating system — our confidence is 0-1 continuous, but binning into tiers (Strong Buy / Buy / Hold / Sell / Strong Sell) would make Layer 2 decisions more categorical and less prone to threshold gaming. (2) The forward-propagation architecture where each agent produces a structured report is similar to our agent_summary.json pipeline — we could formalize it further. (3) The debate mechanism could be implemented as structured prompt sections in our Layer 2 invocation.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "https://github.com/TauricResearch/TradingAgents"
+    },
+    {
+      "topic": "Volatility regime switching models (HMM)",
+      "finding": "Hidden Markov Models with 3 states (low-vol, medium-vol, high-vol) using GaussianHMM from hmmlearn on daily log returns + rolling volatility. Training is fast (~1 second on 5 years of data). HMMs outperform K-Means and simple threshold-based regime detection for identifying regime shifts. Key finding: disallowing trades during predicted high-volatility regimes improves Sharpe ratio significantly. A March 2026 paper extends this to Bitcoin with non-homogeneous transition probabilities.",
+      "relevance_to_us": "Our detect_regime() in indicators.py uses simple threshold logic: ATR% > 4 = high-vol, EMA spread > 0.5% = trending, else ranging. An HMM would be a significant upgrade because: (1) it captures transition probabilities (how likely to STAY in current regime vs switch), (2) it produces probabilities not hard labels (we could weight signals by regime probability), (3) it adapts to each instrument's volatility characteristics. Implementation: fit GaussianHMM per-ticker on rolling 90d returns + ATR, predict current state. hmmlearn is a pip install.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "high",
+      "source": "https://medium.com/@pta.forwork/market-regime-detection-using-hidden-markov-models-in-quantitative-trading-part-1-214e6c77bc2e"
+    },
+    {
+      "topic": "Volatility regime switching models (HMM)",
+      "finding": "Statistical Jump Model approach adds a jump penalty at each state transition, which enhances regime persistence and reduces the flickering problem (rapid regime switches). This addresses a known issue with standard HMMs where they can oscillate between states on noisy data.",
+      "relevance_to_us": "We likely suffer from regime flickering — our detect_regime() is computed fresh every 60s cycle and could flip between ranging/trending between cycles. Adding persistence (requiring N consecutive regime predictions before switching) would stabilize signal gating. This is independent of HMM adoption — we could add a simple persistence buffer to the current threshold-based regime detection immediately.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "https://arxiv.org/html/2402.05272v2"
+    },
+    {
+      "topic": "Volatility regime switching models (HMM)",
+      "finding": "Multi-Regime Smooth Transition Stochastic Volatility Model allows for gradual rather than abrupt regime transitions. Applied to financial time series, it captures the observation that markets don't snap between regimes instantly but transition over periods.",
+      "relevance_to_us": "Instead of hard regime labels (ranging/trending/high-vol), we could use regime PROBABILITIES and blend signal weights accordingly. For example, if the market is 60% ranging and 40% trending-up, apply a blended penalty: 0.6 * ranging_penalty + 0.4 * trending_penalty. This would be more robust than our current hard cutoffs. Could be implemented with either HMM posterior probabilities or a simpler sigmoid-based soft transition on the existing EMA spread metric.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "medium",
+      "source": "https://www.tandfonline.com/doi/full/10.1080/26941899.2025.2517013"
+    },
+    {
+      "topic": "Cross-asset precious metals features",
+      "finding": "DXY-gold correlation has dropped from -0.78 (2020) to -0.32 (early 2025), but then snapped to -0.96 in 2025 — a rare event that has only occurred 7 times since 1990 and historically preceded above-average gold returns. Copper-DXY correlation remains -0.55 to -0.75. Gold-silver ratio mean-reverts with ~30 day half-life.",
+      "relevance_to_us": "Our metals_cross_asset.py already computes these correlations. The actionable insight is that the DXY-gold correlation ITSELF is a predictive feature — when the correlation is extremely negative (< -0.90), it's historically bullish for gold. We should track rolling DXY-gold correlation as a meta-feature and flag when it enters the rare extreme zone. Also confirms the gold-silver ratio mean-reversion trade we should implement.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "https://www.mexc.com/news/814519"
+    }
+  ],
+  "recommended_improvements": [
+    {
+      "title": "HMM-based regime detection replacing threshold heuristics",
+      "description": "Replace detect_regime() in indicators.py with a GaussianHMM (3-state: low-vol, transition, high-vol) fitted per-ticker on rolling 90-day log returns + ATR%. Produces regime probabilities instead of hard labels, enabling soft-blended signal weights. Use hmmlearn library. Retrain weekly alongside ML retrain task. Immediate fallback: keep threshold logic if HMM produces degenerate states.",
+      "priority": 1,
+      "effort_days": 3,
+      "files_affected": [
+        "portfolio/indicators.py",
+        "portfolio/signal_engine.py",
+        "portfolio/shared_state.py",
+        "requirements.txt"
+      ]
+    },
+    {
+      "title": "Online adaptive signal weights via rolling accuracy EMA",
+      "description": "Instead of weekly walk-forward retrain, compute an exponential moving average of per-signal accuracy updated every cycle. Use EMA(alpha=0.05) of recent hit-rate as a real-time weight multiplier in _weighted_consensus(). Signals that have been accurate recently get upweighted, decaying signals get downweighted. This replaces the static accuracy_data lookup with a dynamic, cycle-updated weight. Complements existing accuracy gate (below 45% = force-HOLD) with continuous weight modulation above the gate.",
+      "priority": 2,
+      "effort_days": 2,
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/accuracy_stats.py",
+        "portfolio/shared_state.py"
+      ]
+    },
+    {
+      "title": "Add on-chain features (MVRV, SOPR, NVT) to meta_learner for BTC-USD",
+      "description": "Extend meta_learner.py feature vector to include on-chain metrics for BTC-USD. We already fetch MVRV and SOPR via onchain_data.py. Add these as numeric features alongside the 30 signal votes. Research shows on-chain data significantly improves classification accuracy for BTC direction (82% with Boruta+CNN-LSTM, 83% with SVM). Even a modest improvement from our current 35-64% BTC accuracy would be valuable. Also add NVT if available from BGeometrics.",
+      "priority": 3,
+      "effort_days": 2,
+      "files_affected": [
+        "portfolio/meta_learner.py",
+        "portfolio/onchain_data.py",
+        "portfolio/signal_engine.py"
+      ]
+    },
+    {
+      "title": "Regime persistence buffer to prevent flickering",
+      "description": "Add a simple persistence requirement to detect_regime(): a new regime must be detected N consecutive cycles (e.g., 3 cycles = 3 minutes) before the regime label changes. Prevents rapid oscillation between ranging/trending that causes signal gating whiplash. Store last N regime predictions in shared_state.py. This is independent of HMM adoption and provides immediate stability improvement.",
+      "priority": 4,
+      "effort_days": 0.5,
+      "files_affected": [
+        "portfolio/indicators.py",
+        "portfolio/shared_state.py"
+      ]
+    },
+    {
+      "title": "XGBoost silver-specific model using cross-asset features",
+      "description": "Build a purpose-built XGBoost model for XAG-USD direction prediction using: gold/silver ratio, DXY, copper price, GVZ, SPY, US 10Y yield, oil, plus our existing 27 signal votes as features. Train on signal_log.db data. XGBoost consistently outperforms LSTM for precious metals in recent literature. Our Chronos-2 XAG accuracy has regressed to 54.5% — a well-tuned XGBoost should beat that. Use walk-forward validation to avoid overfitting.",
+      "priority": 5,
+      "effort_days": 3,
+      "files_affected": [
+        "portfolio/meta_learner.py",
+        "portfolio/signals/metals_cross_asset.py",
+        "portfolio/signals/forecast.py",
+        "data/models/"
+      ]
+    },
+    {
+      "title": "Boost mean_reversion signal weight in ranging regime",
+      "description": "Simple config change: add mean_reversion to a regime-specific weight boost in signal_engine.py. In REGIME_WEIGHTS for ranging regime, set mean_reversion multiplier to 1.5x (currently 1.0x default). Also boost bb and oscillators to 1.2x in ranging. Research confirms mean reversion is the optimal strategy in ranging markets — our system already gates trend signals but doesn't proportionally boost MR signals.",
+      "priority": 6,
+      "effort_days": 0.5,
+      "files_affected": [
+        "portfolio/signal_engine.py"
+      ]
+    },
+    {
+      "title": "Bull/Bear debate structure for Layer 2 invocations",
+      "description": "Restructure the Layer 2 Claude prompt to require explicit bull-case and bear-case sections before the final decision, inspired by TradingAgents' debate mechanism. The prompt would instruct: (1) generate 3 strongest bull arguments from signals, (2) generate 3 strongest bear arguments, (3) synthesize with explicit reasoning about why one side wins. This reduces single-direction bias and forces more rigorous analysis.",
+      "priority": 7,
+      "effort_days": 1,
+      "files_affected": [
+        "portfolio/agent_invocation.py",
+        "docs/TRADING_PLAYBOOK.md"
+      ]
+    },
+    {
+      "title": "Adaptive consensus threshold based on signal confidence distribution",
+      "description": "Replace fixed MIN_VOTERS (3-5) with an adaptive threshold: tau(c) = base + (1 - avg_confidence) * scale. When average signal confidence is low, require more voters for consensus. When confidence is high, fewer voters suffice. Based on the walk-forward RL paper's adaptive threshold approach. Adds nuance to the current regime-based step function (3 in trending, 4 in high-vol, 5 in ranging).",
+      "priority": 8,
+      "effort_days": 1,
+      "files_affected": [
+        "portfolio/signal_engine.py"
+      ]
+    },
+    {
+      "title": "Gold-silver ratio mean-reversion signal",
+      "description": "Add a dedicated signal based on gold/silver ratio mean reversion with ~30 day half-life (confirmed by literature). When ratio is >1.5 sigma above 90-day mean, signal BUY silver (ratio will compress = silver outperforms). When <1.5 sigma below mean, signal SELL. This complements existing metals_cross_asset.py which tracks the ratio but doesn't exploit its mean-reverting property systematically.",
+      "priority": 9,
+      "effort_days": 1,
+      "files_affected": [
+        "portfolio/signals/metals_cross_asset.py",
+        "portfolio/signal_engine.py"
+      ]
+    },
+    {
+      "title": "Horizon-specific signal parameters (RSI period tuning)",
+      "description": "Research confirms that lookback period (sample dimension) matters as much as feature selection. Currently all signals use fixed parameters regardless of horizon (RSI always uses period=14). For 3h horizon, RSI(7) may be more responsive; for 5d, RSI(21) may be more stable. Run a grid search on signal_log.db to find optimal RSI/MACD/EMA parameters per horizon, then make the signal engine horizon-aware for core signal parameters.",
+      "priority": 10,
+      "effort_days": 3,
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/indicators.py",
+        "portfolio/signals/momentum.py"
+      ]
+    },
+    {
+      "title": "DXY-gold correlation tracker as meta-feature",
+      "description": "Track rolling 30-day DXY-gold correlation as a meta-feature. When correlation enters extreme zone (< -0.90), flag as historically bullish for gold (occurred only 7 times since 1990, preceded above-average returns). Add this as an additional context input to Layer 2 and as a feature in the meta_learner for XAU-USD. Low effort since we already compute DXY and gold prices.",
+      "priority": 11,
+      "effort_days": 1,
+      "files_affected": [
+        "portfolio/signals/metals_cross_asset.py",
+        "portfolio/meta_learner.py"
+      ]
+    },
+    {
+      "title": "Soft regime transitions via sigmoid blending",
+      "description": "Replace hard regime labels with soft probabilities using sigmoid functions on the existing EMA spread metric. Instead of: if EMA_spread > 0.5% then trending, compute: trending_probability = sigmoid((EMA_spread - 0.5) / 0.2). Then blend regime penalties: penalty = trending_prob * trending_weight + (1-trending_prob) * ranging_weight. This is a simpler alternative to full HMM that still captures gradual transitions.",
+      "priority": 12,
+      "effort_days": 1,
+      "files_affected": [
+        "portfolio/indicators.py",
+        "portfolio/signal_engine.py"
+      ]
+    }
+  ]
+}
