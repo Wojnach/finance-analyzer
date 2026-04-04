@@ -378,7 +378,7 @@ def compute_calendar_signal(df: pd.DataFrame) -> dict:
         if not pd.api.types.is_datetime64_any_dtype(time_col):
             time_col = pd.to_datetime(time_col)
         last_time = time_col.iloc[-1]
-        if isinstance(last_time, pd.Timestamp) or isinstance(last_time, datetime):
+        if isinstance(last_time, (pd.Timestamp, datetime)):
             last_date = last_time.date()
         elif isinstance(last_time, date):
             last_date = last_time

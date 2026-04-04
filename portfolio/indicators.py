@@ -120,11 +120,8 @@ def compute_indicators(df, horizon=None):
 
 
 def detect_regime(indicators, is_crypto=True):
-    # Access mutable state from shared_state module
-    if _ss._run_cycle_id != _ss._regime_cache_cycle:
-        _ss._regime_cache = {}
-        _ss._regime_cache_cycle = _ss._run_cycle_id
-
+    # BUG-169: Access regime cache under lock — 8 threads from ThreadPoolExecutor
+    # can call this concurrently. The check-then-clear pattern must be atomic.
     cache_key = (
         round(indicators.get("close", 0), 4),
         round(indicators.get("atr_pct", 0), 4),
@@ -133,9 +130,14 @@ def detect_regime(indicators, is_crypto=True):
         round(indicators.get("rsi", 50), 4),
         is_crypto,
     )
-    if cache_key in _ss._regime_cache:
-        return _ss._regime_cache[cache_key]
+    with _ss._regime_lock:
+        if _ss._run_cycle_id != _ss._regime_cache_cycle:
+            _ss._regime_cache = {}
+            _ss._regime_cache_cycle = _ss._run_cycle_id
+        if cache_key in _ss._regime_cache:
+            return _ss._regime_cache[cache_key]
 
+    # Compute outside lock (pure function, no shared state)
     atr_pct = indicators.get("atr_pct", 0)
     ema9 = indicators.get("ema9", 0)
     ema21 = indicators.get("ema21", 0)
@@ -156,16 +158,13 @@ def detect_regime(indicators, is_crypto=True):
         result = "ranging"
 
     # BUG-156: EMA crossover lags behind V-shaped recoveries.
-    # If close is above EMA21 but EMA9 < EMA21 (lagging), the stock is recovering,
-    # not trending down. Override to "ranging". Discovered 2026-04-01: MSTR labeled
-    # trending-down (9% accuracy) while price UP 100/100 days; PLTR at 3% accuracy.
-    # Symmetric: if close below EMA21 but labeled trending-up, override to ranging.
     if result == "trending-down" and close > 0 and ema21 > 0 and close > ema21:
         result = "ranging"
     elif result == "trending-up" and close > 0 and ema21 > 0 and close < ema21:
         result = "ranging"
 
-    _ss._regime_cache[cache_key] = result
+    with _ss._regime_lock:
+        _ss._regime_cache[cache_key] = result
     return result
 
 

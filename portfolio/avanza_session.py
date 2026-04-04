@@ -301,7 +301,8 @@ def get_buying_power(account_id: str | None = None) -> dict:
     for cat in data.get("categories", []):
         for acc in cat.get("accounts", []):
             if str(acc.get("id", "")) == aid:
-                _v = lambda obj: obj.get("value", 0) if isinstance(obj, dict) else (obj or 0)
+                def _v(obj):
+                    return obj.get("value", 0) if isinstance(obj, dict) else (obj or 0)
                 return {
                     "buying_power": _v(acc.get("buyingPower", {})),
                     "total_value": _v(acc.get("totalValue", {})),

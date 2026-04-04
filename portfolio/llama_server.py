@@ -121,7 +121,7 @@ def _is_llama_server_process(pid):
             )
             return "llama-server" in result.stdout.lower()
         else:
-            with open(f"/proc/{pid}/cmdline", "r") as f:
+            with open(f"/proc/{pid}/cmdline") as f:
                 return "llama-server" in f.read()
     except Exception:
         return False
@@ -267,7 +267,6 @@ def _ensure_model(name):
     # Check if correct model is already running (possibly started by another process)
     _, current_model = _read_pid_model()
     if current_model == name and _is_server_alive():
-        _local_model = name
         return True
     # Need to swap
     return _start_server(name)

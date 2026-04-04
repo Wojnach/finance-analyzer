@@ -76,11 +76,11 @@ def _compute_ha_candles(df: pd.DataFrame) -> pd.DataFrame:
     """
     o = df["open"].values.astype(float)
     h = df["high"].values.astype(float)
-    l = df["low"].values.astype(float)
+    lo = df["low"].values.astype(float)
     c = df["close"].values.astype(float)
     n = len(o)
 
-    ha_close = (o + h + l + c) / 4.0
+    ha_close = (o + h + lo + c) / 4.0
 
     ha_open = np.empty(n, dtype=float)
     ha_open[0] = (o[0] + c[0]) / 2.0
@@ -88,7 +88,7 @@ def _compute_ha_candles(df: pd.DataFrame) -> pd.DataFrame:
         ha_open[i] = (ha_open[i - 1] + ha_close[i - 1]) / 2.0
 
     ha_high = np.maximum(h, np.maximum(ha_open, ha_close))
-    ha_low = np.minimum(l, np.minimum(ha_open, ha_close))
+    ha_low = np.minimum(lo, np.minimum(ha_open, ha_close))
 
     return pd.DataFrame(
         {

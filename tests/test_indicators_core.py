@@ -409,6 +409,68 @@ class TestDetectRegimeCache:
         detect_regime(ind, is_crypto=False)
         assert len(_ss._regime_cache) == 2
 
+    def test_concurrent_access_thread_safe(self):
+        """BUG-169: Concurrent detect_regime calls from multiple threads must not corrupt cache."""
+        import threading
+
+        # Generate 20 different indicator sets to trigger cache writes
+        indicators_list = [
+            {"atr_pct": 1.0 + i * 0.1, "ema9": 105 + i, "ema21": 100, "rsi": 50 + i, "close": 105 + i}
+            for i in range(20)
+        ]
+        results = {}
+        errors = []
+
+        def worker(idx, ind):
+            try:
+                r = detect_regime(ind, is_crypto=True)
+                results[idx] = r
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=worker, args=(i, ind)) for i, ind in enumerate(indicators_list)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        assert not errors, f"Thread errors: {errors}"
+        assert len(results) == 20
+        # All results should be valid regime strings
+        valid_regimes = {"trending-up", "trending-down", "ranging", "high-vol"}
+        for r in results.values():
+            assert r in valid_regimes
+
+    def test_concurrent_cycle_invalidation(self):
+        """BUG-169: Cycle invalidation during concurrent access must not lose entries."""
+        import threading
+
+        ind = {"atr_pct": 1.0, "ema9": 105, "ema21": 100, "rsi": 60, "close": 105}
+        detect_regime(ind, is_crypto=True)
+        assert len(_ss._regime_cache) == 1
+
+        barrier = threading.Barrier(4)
+        errors = []
+
+        def worker():
+            try:
+                barrier.wait(timeout=5)
+                # Bump cycle while others are also calling detect_regime
+                _ss._run_cycle_id += 1
+                detect_regime(ind, is_crypto=True)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        assert not errors, f"Thread errors: {errors}"
+        # Cache should have exactly 1 entry for this indicator set
+        assert len(_ss._regime_cache) == 1
+
 
 # ---------------------------------------------------------------------------
 # technical_signal tests

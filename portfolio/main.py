@@ -23,6 +23,7 @@ import logging
 import os
 import sys
 import time
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -81,10 +82,8 @@ def _release_singleton_lock():
     except OSError:
         pass
     finally:
-        try:
+        with suppress(Exception):
             _singleton_lock_fh.close()
-        except Exception:
-            pass
         _singleton_lock_fh = None
 
 
@@ -511,7 +510,7 @@ def run(force_report=False, active_symbols=None):
     # Now flush them sequentially, grouped by model (one swap max).
     try:
         from portfolio.llm_batch import flush_llm_batch
-        from portfolio.shared_state import _update_cache, MINISTRAL_TTL
+        from portfolio.shared_state import MINISTRAL_TTL, _update_cache
         batch_results = flush_llm_batch()
         for cache_key, result in batch_results.items():
             _update_cache(cache_key, result, ttl=MINISTRAL_TTL)

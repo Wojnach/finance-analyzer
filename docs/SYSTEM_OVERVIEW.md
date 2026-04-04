@@ -1,11 +1,11 @@
 # System Overview
 
-Updated: 2026-04-02
-Branch: improve/auto-session-2026-04-02
+Updated: 2026-04-04
+Branch: improve/auto-session-2026-04-04
 
 ## 1) Architecture Summary
 
-Two-layer autonomous trading system with 32 signals (30 tracked + 2 asset-class-specific untracked), 20 instruments, and dual-strategy portfolio management.
+Two-layer autonomous trading system with 32 signals (all tracked), 20 instruments, and dual-strategy portfolio management.
 
 - **Layer 1** (`portfolio/main.py`): Continuous 60s loop — data collection, signal generation, trigger detection, summary writing.
 - **Layer 2** (`portfolio/agent_invocation.py`): Claude subprocess — reads summaries, makes trade decisions, writes journals, sends Telegram.
@@ -196,7 +196,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
 - **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
 
-## 9) Known Issues (as of 2026-03-27)
+## 9) Known Issues (as of 2026-04-04)
 
 - BUG-15 through BUG-22: Fixed in 2026-03-08 session
 - BUG-23 through BUG-27: Fixed in 2026-03-09 session (signal validation, None ticker, OSError, heartbeat, pass cleanup)
@@ -334,4 +334,13 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-166 (P2): `shared_state._cached()` thundering herd on TTL expiry — **fixed 2026-04-02** (dogpile prevention via per-key loading flag)
 - BUG-167 (P2): Dead `_CORE_SIGNAL_SET` in signal_engine.py — **fixed 2026-04-02** (removed)
 - REF-33..37: 18 unused imports, 5 SIM105, 3 F541, 1 F841 in portfolio/ — **fixed 2026-04-02** (ruff auto-fix)
-- ~5,807 tests across 212 test files (as of 2026-04-02)
+- BUG-168 (P3): `llama_server.py` `_ensure_model()` missing `global _local_model` — **fixed 2026-04-04** (removed dead assignment)
+- BUG-169 (P3): `indicators.py` `_regime_cache` accessed without lock from 8 concurrent threads — **fixed 2026-04-04** (added `_regime_lock`)
+- BUG-170 (P3): `fear_greed.py` streak file non-atomic write — **fixed 2026-04-04** (atomic_write_json + load_json)
+- REF-39: I001/UP015/UP017 auto-fixes — **fixed 2026-04-04** (ruff auto-fix)
+- REF-40: Unused loop variables in `llm_batch.py` — **fixed 2026-04-04** (prefixed with `_`)
+- REF-41: Ambiguous variable `l` in 3 modules — **fixed 2026-04-04** (renamed to `line`/`lo`)
+- REF-42: Duplicate isinstance in `calendar_seasonal.py` — **fixed 2026-04-04** (merged)
+- REF-43: Lambda assignments in `avanza_control.py`, `avanza_session.py` — **fixed 2026-04-04** (converted to def)
+- REF-44: `except Exception: pass` in `main.py` — **fixed 2026-04-04** (contextlib.suppress)
+- ~6,036 tests across 212+ test files (as of 2026-04-04), 79 pre-existing failures

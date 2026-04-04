@@ -148,8 +148,10 @@ _run_cycle_id = 0
 _current_market_state = "open"
 
 # Regime detection cache (invalidated each cycle)
+# BUG-169: Protected by _regime_lock — accessed from 8 concurrent ThreadPoolExecutor threads
 _regime_cache = {}
 _regime_cache_cycle = 0
+_regime_lock = threading.Lock()
 
 
 # --- Rate limiters ---
