@@ -144,7 +144,9 @@ REGIME_WEIGHTS = {
         # 2026-03-31: fibonacci 68.2% recent — boost to 1.6
         # fear_greed 25.9% — penalize to 0.3
         "mean_reversion": 1.5, "fibonacci": 1.6, "calendar": 1.2,
-        "oscillators": 1.2,
+        # 2026-04-04: BUG-161 — oscillators 34-39% per-ticker in ranging.
+        # Was 1.2x (boosted), now 0.3x (heavily penalized).
+        "oscillators": 0.3,
         "trend": 0.5, "momentum_factors": 0.6, "heikin_ashi": 0.6,
         "structure": 0.7, "fear_greed": 0.3,
     },
@@ -178,6 +180,9 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
             "fear_greed", "macro_regime",
             # 2026-04-02: added based on 1d_recent audit
             "news_event", "volatility_sig", "forecast", "smart_money",
+            # 2026-04-04: BUG-161/163 — oscillators 34-39% per-ticker,
+            # candlestick 44.5% recent (292 sam). Both noise in ranging.
+            "oscillators", "candlestick",
         }),
         # 3h: news_event 58.5%, smart_money 53.1% — decent at short horizons.
         # volatility_sig 47.2%, forecast 47.2% — marginal, let accuracy gate
@@ -480,6 +485,11 @@ CORRELATION_GROUPS = {
         "fear_greed", "macro_regime", "structure",
         "sentiment", "news_event",
     }),
+    # 2026-04-04: BUG-162 — candlestick-fibonacci correlation 0.708 on BTC.
+    # Both detect similar price patterns (retracement levels vs candle formations).
+    # In ranging regime, fibonacci is the leader (68.2% recent); candlestick (44.5%)
+    # gets 0.3x penalty to prevent double-counting.
+    "pattern_based": frozenset({"candlestick", "fibonacci"}),
 }
 _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal weight
 

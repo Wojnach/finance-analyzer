@@ -237,14 +237,14 @@ class TestWeightedConsensusRegime:
         assert action == "SELL"
 
     def test_ranging_boosts_rsi_and_bb(self):
-        # Use candlestick instead of ema — ema is regime-gated in ranging (daily+)
-        votes = {"rsi": "BUY", "candlestick": "SELL"}
+        # Use momentum instead of candlestick — candlestick is regime-gated in ranging
+        votes = {"rsi": "BUY", "momentum": "SELL"}
         accuracy = {
             "rsi": {"accuracy": 0.6, "total": 50},
-            "candlestick": {"accuracy": 0.6, "total": 50},
+            "momentum": {"accuracy": 0.6, "total": 50},
         }
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # rsi weight = 0.6 * 1.5 = 0.9, candlestick weight = 0.6 * 1.0 = 0.6
+        # rsi weight = 0.6 * 1.5 = 0.9, momentum weight = 0.6 * 1.0 = 0.6
         # BUY=0.9, SELL=0.6 => BUY
         assert action == "BUY"
         expected = 0.9 / (0.9 + 0.6)
@@ -282,19 +282,19 @@ class TestWeightedConsensusActivationRates:
     """Activation rate normalization (rarity * bias correction)."""
 
     def test_activation_rate_scales_weight(self):
-        # Use candlestick instead of ema — ema is regime-gated in ranging (daily+)
-        votes = {"rsi": "BUY", "candlestick": "SELL"}
+        # Use momentum instead of candlestick — candlestick is regime-gated in ranging
+        votes = {"rsi": "BUY", "momentum": "SELL"}
         accuracy = {
             "rsi": {"accuracy": 0.6, "total": 50},
-            "candlestick": {"accuracy": 0.6, "total": 50},
+            "momentum": {"accuracy": 0.6, "total": 50},
         }
         activation = {
             "rsi": {"normalized_weight": 2.0},  # rare signal, boosted
-            "candlestick": {"normalized_weight": 0.5},   # noisy signal, dampened
+            "momentum": {"normalized_weight": 0.5},   # noisy signal, dampened
         }
         action, conf = _weighted_consensus(votes, accuracy, "ranging", activation_rates=activation)
         # rsi: 0.6 * 1.5(ranging) * 2.0 = 1.8
-        # candlestick: 0.6 * 1.0(ranging) * 0.5 = 0.3
+        # momentum: 0.6 * 1.0(ranging) * 0.5 = 0.3
         # BUY=1.8, SELL=0.3 => BUY
         assert action == "BUY"
         expected = 1.8 / (1.8 + 0.3)
