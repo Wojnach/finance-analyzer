@@ -103,14 +103,14 @@ def _internal_bar_strength(high: pd.Series, low: pd.Series,
         return float("nan"), "HOLD"
 
     h = float(high.iloc[-1])
-    l = float(low.iloc[-1])
+    lo = float(low.iloc[-1])
     c = float(close.iloc[-1])
 
-    bar_range = h - l
+    bar_range = h - lo
     if bar_range == 0 or np.isnan(bar_range):
         return float("nan"), "HOLD"
 
-    ibs = (c - l) / bar_range
+    ibs = (c - lo) / bar_range
 
     if ibs < 0.2:
         return ibs, "BUY"
@@ -291,14 +291,14 @@ def _ibs_rsi2_combined(high: pd.Series, low: pd.Series,
 
     # IBS
     h = float(high.iloc[-1])
-    l = float(low.iloc[-1])
+    lo = float(low.iloc[-1])
     c = float(close.iloc[-1])
 
-    bar_range = h - l
+    bar_range = h - lo
     if bar_range == 0 or np.isnan(bar_range):
         return float("nan"), float("nan"), "HOLD"
 
-    ibs = (c - l) / bar_range
+    ibs = (c - lo) / bar_range
 
     # RSI(2)
     rsi2 = rsi(close, period=2)

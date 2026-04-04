@@ -267,7 +267,8 @@ def fetch_price_no_page(orderbook_id: str, api_type: str = "certificate"):
         quote = data.get("quote", {})
         ki = data.get("keyIndicators", {})
         underlying = data.get("underlying", {})
-        _v = lambda obj: obj.get("value") if isinstance(obj, dict) else obj
+        def _v(obj):
+            return obj.get("value") if isinstance(obj, dict) else obj
         return {
             "bid": _v(quote.get("buy")),
             "ask": _v(quote.get("sell")),

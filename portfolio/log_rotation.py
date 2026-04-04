@@ -211,16 +211,16 @@ def rotate_jsonl(filename, policy, dry_run=False):
                         existing_lines.append(existing_line)
             all_lines = existing_lines + lines
             with gzip.open(gz_path, "wt", encoding="utf-8") as gf:
-                for l in all_lines:
-                    gf.write(l + "\n")
+                for line in all_lines:
+                    gf.write(line + "\n")
         elif policy.get("compress", True):
             with gzip.open(gz_path, "wt", encoding="utf-8") as gf:
-                for l in lines:
-                    gf.write(l + "\n")
+                for line in lines:
+                    gf.write(line + "\n")
         else:
             with open(archive_path, "a", encoding="utf-8") as af:
-                for l in lines:
-                    af.write(l + "\n")
+                for line in lines:
+                    af.write(line + "\n")
 
     # Rewrite the original file with only kept lines
     tmp_path = filepath.with_suffix(".tmp")
