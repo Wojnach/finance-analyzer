@@ -4666,6 +4666,33 @@ def main():
         else:
             log("Swing trader: NOT available (import failed)")
 
+        # Initialize strategy orchestrator (GoldDigger + Elongir as plugins)
+        _strategy_orchestrator = None
+        _strategy_shared_data = None
+        try:
+            from portfolio.strategies.orchestrator import StrategyOrchestrator, load_strategies
+            from portfolio.strategies.base import SharedData as _StrategySharedData
+
+            _strategy_shared_data = _StrategySharedData(
+                underlying_prices=_underlying_prices,
+                fx_rate=0.0,
+                cert_prices={},
+                is_market_hours=False,
+            )
+            _loaded_strategies = load_strategies(config_data)
+            if _loaded_strategies:
+                _strategy_orchestrator = StrategyOrchestrator(
+                    strategies=_loaded_strategies,
+                    shared_data=_strategy_shared_data,
+                    send_telegram=send_telegram,
+                )
+                _strategy_orchestrator.start()
+                log(f"Strategy orchestrator: {_strategy_orchestrator.summary()}")
+            else:
+                log("Strategy orchestrator: no strategies enabled")
+        except Exception as e:
+            log(f"Strategy orchestrator: NOT available ({e})")
+
         # Initialize trade queue: fetch account data + warrant catalog
         if TRADE_QUEUE_ENABLED:
             log("Trade queue: ENABLED")
@@ -4776,6 +4803,10 @@ Positions: {pos_summary}{prob_summary}""")
                     _report.holdings_reconciled = True
 
                 if not is_market_hours():
+                    # Update strategy shared data even outside market hours
+                    if _strategy_shared_data is not None:
+                        _strategy_shared_data.underlying_prices = _underlying_prices
+                        _strategy_shared_data.is_market_hours = False
                     # Outside Avanza hours: still track underlyings + compute probability
                     if check_count % PROB_REPORT_INTERVAL == 0:
                         compute_probability_report()
@@ -4821,6 +4852,14 @@ Positions: {pos_summary}{prob_summary}""")
                 _report.active_positions = sum(1 for pos in POSITIONS.values() if pos.get("active"))
                 _report.positions_priced = len(prices)
                 _report.position_prices_updated = _report.positions_priced >= _report.active_positions
+
+                # Update strategy shared data with fresh prices and cert data
+                if _strategy_shared_data is not None:
+                    _strategy_shared_data.underlying_prices = _underlying_prices
+                    _strategy_shared_data.is_market_hours = True
+                    for key, pos in POSITIONS.items():
+                        if pos["active"] and key in prices:
+                            _strategy_shared_data.cert_prices[pos.get("ob_id", "")] = prices[key]
 
                 # Fetch short instrument prices (every 4th check)
                 if check_count % 4 == 0:
@@ -5198,6 +5237,11 @@ Positions: {pos_summary}{prob_summary}""")
                     stop_llm_thread()
                 except Exception as e:
                     print(f"[WARN] LLM thread stop failed: {e}", flush=True)
+            if _strategy_orchestrator is not None:
+                try:
+                    _strategy_orchestrator.stop()
+                except Exception as e:
+                    print(f"[WARN] Strategy orchestrator stop failed: {e}", flush=True)
             browser.close()
             release_singleton_lock()
             log(f"Loop stopped: {check_count} checks, {invoke_count} invocations")
