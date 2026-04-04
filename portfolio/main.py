@@ -239,31 +239,48 @@ def _extract_triggered_tickers(reasons):
     return tickers
 
 
-def _run_post_cycle(config):
-    """Post-cycle housekeeping: digest, daily digest, message throttle flush, AV refresh."""
+def _run_post_cycle(config, report=None):
+    """Post-cycle housekeeping: digest, daily digest, message throttle flush, AV refresh.
+
+    Args:
+        config: Application config dict.
+        report: Optional CycleReport to track task success/failure.
+    """
+    def _track(name, func, *args):
+        """Run a post-cycle task, tracking success on report if provided."""
+        try:
+            func(*args)
+            if report is not None:
+                report.post_cycle_results[name] = True
+        except Exception as e:
+            logger.warning("%s failed: %s", name, e)
+            if report is not None:
+                report.post_cycle_results[name] = False
+                report.errors.append((name, str(e)))
+
     _maybe_send_digest(config)
     # Market health refresh (hourly via internal cache, self-checking)
     try:
         from portfolio.market_health import maybe_refresh_market_health
-        maybe_refresh_market_health()
+        _track("market_health", maybe_refresh_market_health)
     except Exception as e_mh:
-        logger.warning("market health refresh failed: %s", e_mh)
+        logger.warning("market health import failed: %s", e_mh)
     try:
         from portfolio.daily_digest import maybe_send_daily_digest
-        maybe_send_daily_digest(config)
+        _track("daily_digest", maybe_send_daily_digest, config)
     except Exception as e_dd:
-        logger.warning("daily digest failed: %s", e_dd)
+        logger.warning("daily digest import failed: %s", e_dd)
     try:
         from portfolio.message_throttle import flush_and_send
-        flush_and_send(config)
+        _track("message_throttle", flush_and_send, config)
     except Exception as e_mt:
-        logger.warning("message throttle flush failed: %s", e_mt)
+        logger.warning("message throttle import failed: %s", e_mt)
     try:
         from portfolio.alpha_vantage import refresh_fundamentals_batch, should_batch_refresh
         if should_batch_refresh(config):
-            refresh_fundamentals_batch(config)
+            _track("alpha_vantage", refresh_fundamentals_batch, config)
     except Exception as e_av:
-        logger.warning("Alpha Vantage refresh failed: %s", e_av)
+        logger.warning("Alpha Vantage import failed: %s", e_av)
     try:
         from portfolio.local_llm_report import maybe_export_local_llm_report
         export = maybe_export_local_llm_report(config=config)
@@ -273,39 +290,47 @@ def _run_post_cycle(config):
                 export["date"],
                 export["days"],
             )
+        if report is not None:
+            report.post_cycle_results["local_llm_report"] = True
     except Exception as e_report:
         logger.warning("local LLM report export failed: %s", e_report)
+        if report is not None:
+            report.post_cycle_results["local_llm_report"] = False
     # Metals deep context precompute (every 4h, self-checking)
     try:
         from portfolio.metals_precompute import maybe_precompute_metals
-        maybe_precompute_metals(config)
+        _track("metals_precompute", maybe_precompute_metals, config)
     except Exception as e_metals:
-        logger.warning("Metals precompute failed: %s", e_metals)
+        logger.warning("Metals precompute import failed: %s", e_metals)
     # Oil deep context precompute (every 2h, self-checking)
     try:
         from portfolio.oil_precompute import maybe_precompute_oil
-        maybe_precompute_oil(config)
+        _track("oil_precompute", maybe_precompute_oil, config)
     except Exception as e_oil:
-        logger.warning("Oil precompute failed: %s", e_oil)
+        logger.warning("Oil precompute import failed: %s", e_oil)
     # Prune unbounded JSONL files to prevent disk exhaustion (BUG-59)
     try:
         from portfolio.file_utils import prune_jsonl
         for name in ("invocations.jsonl", "layer2_journal.jsonl", "telegram_messages.jsonl"):
             prune_jsonl(DATA_DIR / name, max_entries=5000)
+        if report is not None:
+            report.post_cycle_results["jsonl_prune"] = True
     except Exception as e_prune:
         logger.warning("JSONL prune failed: %s", e_prune)
+        if report is not None:
+            report.post_cycle_results["jsonl_prune"] = False
     # Fin command self-improvement: backfill outcomes + evolve lessons (daily)
     try:
         from portfolio.fin_evolve import maybe_evolve
-        maybe_evolve(config)
+        _track("fin_evolve", maybe_evolve, config)
     except Exception as e_evolve:
-        logger.warning("Fin evolve failed: %s", e_evolve)
+        logger.warning("Fin evolve import failed: %s", e_evolve)
     # Scheduled crypto analysis report (08:00, 13:00, 18:00 CET)
     try:
         from portfolio.crypto_scheduler import maybe_run_crypto_report
-        maybe_run_crypto_report(config)
+        _track("crypto_scheduler", maybe_run_crypto_report, config)
     except Exception as e_crypto:
-        logger.warning("Crypto scheduler failed: %s", e_crypto)
+        logger.warning("Crypto scheduler import failed: %s", e_crypto)
     # Signal postmortem (daily — uses accuracy cache, generates once per day)
     try:
         from portfolio.file_utils import load_json as _lj
@@ -318,8 +343,12 @@ def _run_post_cycle(config):
                 result["_epoch"] = time.time()
                 from portfolio.file_utils import atomic_write_json as _awj
                 _awj(POSTMORTEM_FILE, result)
+        if report is not None:
+            report.post_cycle_results["signal_postmortem"] = True
     except Exception as e_pm:
         logger.warning("Signal postmortem failed: %s", e_pm)
+        if report is not None:
+            report.post_cycle_results["signal_postmortem"] = False
 
 
 # --- Main orchestrator ---
@@ -359,6 +388,11 @@ def run(force_report=False, active_symbols=None):
     tf_data = {}
 
     _run_start = time.monotonic()
+
+    # Loop contract: track what actually happens this cycle
+    from portfolio.loop_contract import CycleReport
+    report = CycleReport(cycle_id=_ss._run_cycle_id, active_tickers=set(active))
+    report.cycle_start = _run_start
 
     # --- Fully parallel: data collection + signal generation per ticker ---
     # Each ticker: fetch timeframes, compute indicators, generate signals — all threaded.
@@ -481,8 +515,10 @@ def run(force_report=False, active_symbols=None):
         batch_results = flush_llm_batch()
         for cache_key, result in batch_results.items():
             _update_cache(cache_key, result, ttl=MINISTRAL_TTL)
+        report.llm_batch_flushed = True
     except Exception as e_batch:
         logger.warning("LLM batch flush failed: %s", e_batch)
+        report.errors.append(("llm_batch_flush", str(e_batch)))
 
     _run_elapsed = time.monotonic() - _run_start
     logger.info(
@@ -559,6 +595,7 @@ def run(force_report=False, active_symbols=None):
     if triggered or force_report:
         reasons_list = reasons if reasons else ["startup"]
         summary = write_agent_summary(signals, prices_usd, fx_rate, state, tf_data, reasons_list)
+        report.summary_written = True
         logger.info("Trigger: %s", ', '.join(reasons_list))
 
         # Classify tier and write tier-specific context
@@ -597,6 +634,7 @@ def run(force_report=False, active_symbols=None):
             _log_trigger(reasons_list, "autonomous", tier=tier)
     else:
         write_agent_summary(signals, prices_usd, fx_rate, state, tf_data)
+        report.summary_written = True
         logger.info("No trigger.")
 
     # Big Bet detection
@@ -639,8 +677,10 @@ def run(force_report=False, active_symbols=None):
             signals_failed=signals_failed,
             last_trigger_reason=trigger_reason,
         )
+        report.health_updated = True
     except Exception as e:
         logger.warning("health update failed: %s", e)
+        report.errors.append(("health_update", str(e)))
 
     # Periodic safeguard checks (every 100 cycles ≈ 100 min)
     if _ss._run_cycle_id % 100 == 0 and _ss._run_cycle_id > 0:
@@ -680,6 +720,13 @@ def run(force_report=False, active_symbols=None):
         log_portfolio_value()
     except Exception as e:
         logger.warning("equity snapshot failed: %s", e)
+
+    # Finalize cycle report
+    report.signals_ok = signals_ok
+    report.signals_failed = signals_failed
+    report.signals = signals
+    report.cycle_end = time.monotonic()
+    return report
 
 
 _consecutive_crashes = 0
@@ -804,11 +851,13 @@ def loop(interval=None):
         logger.warning("ISKBETS poller failed to start: %s", e)
 
     try:
-        run(force_report=True)
-        _run_post_cycle(config)
+        initial_report = run(force_report=True)
+        _run_post_cycle(config, report=initial_report)
         _reset_crash_counter()
         try:
             (DATA_DIR / "heartbeat.txt").write_text(datetime.now(UTC).isoformat())
+            if initial_report is not None:
+                initial_report.heartbeat_updated = True
         except Exception as e:
             logger.debug("Heartbeat write after initial run failed: %s", e)
     except KeyboardInterrupt:
@@ -835,8 +884,8 @@ def loop(interval=None):
         _sleep_for_next_cycle(last_cycle_started, sleep_interval)
         cycle_started = time.monotonic()
         try:
-            run(force_report=False, active_symbols=active_symbols)
-            _run_post_cycle(config)
+            report = run(force_report=False, active_symbols=active_symbols)
+            _run_post_cycle(config, report=report)
             _reset_crash_counter()
         except KeyboardInterrupt:
             logger.info("Loop interrupted, shutting down cleanly")
@@ -852,11 +901,21 @@ def loop(interval=None):
             except Exception as e2:
                 logger.debug("Health update after crash failed: %s", e2)
             _crash_sleep()
+            report = None
         last_cycle_started = cycle_started
         try:
             (DATA_DIR / "heartbeat.txt").write_text(datetime.now(UTC).isoformat())
+            if report is not None:
+                report.heartbeat_updated = True
         except Exception as e:
             logger.debug("Heartbeat write failed: %s", e)
+        # Loop contract verification
+        if report is not None:
+            try:
+                from portfolio.loop_contract import verify_and_act
+                verify_and_act(report, config)
+            except Exception as e_contract:
+                logger.warning("Loop contract check failed: %s", e_contract)
 
 
 if __name__ == "__main__":
