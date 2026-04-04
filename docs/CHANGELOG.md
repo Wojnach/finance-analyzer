@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-04-04 (autonomous improvement session)
+- **BUG-168: llama_server.py dead assignment (P3)**: `_ensure_model()` assigned `_local_model = name` without `global` declaration, creating and discarding a local variable. Fix: removed the dead assignment — PID file is the real cross-process guard.
+- **BUG-169: Regime cache thread safety (P3)**: `_regime_cache` in `shared_state.py` accessed without lock from 8 concurrent ThreadPoolExecutor threads. The check-then-clear pattern was racy. Fix: added `_regime_lock`, wrapped access in `indicators.detect_regime()`. Computation remains outside lock.
+- **BUG-170: fear_greed.py non-atomic write (P3)**: Streak file used `write_text()` instead of `atomic_write_json()`. Also replaced raw `json.loads()` reads with `load_json()` for consistency. Fix: uses atomic_write_json + load_json throughout.
+- **REF-39**: Ruff auto-fixes — 2 I001 (import sort), 1 UP015 (redundant open mode), 1 UP017 (datetime.UTC alias), 1 F401 (unused timezone import).
+- **REF-40**: Prefixed 2 unused loop variables with `_` in `llm_batch.py`.
+- **REF-41**: Renamed ambiguous variable `l` to `line`/`lo` in `log_rotation.py`, `heikin_ashi.py`, `mean_reversion.py` (6 occurrences).
+- **REF-42**: Merged duplicate `isinstance()` call in `calendar_seasonal.py`.
+- **REF-43**: Converted 2 lambda assignments to `def` functions in `avanza_control.py`, `avanza_session.py`.
+- **REF-44**: Converted `except Exception: pass` to `contextlib.suppress()` in `main.py`.
+- **BUG-171 verified**: LLM batch Ministral/Qwen3 parse asymmetry is intentional — Ministral wraps in `{"original": ..., "custom": ...}` (legacy LoRA structure), Qwen3 returns flat dict. Signal engine handles both via `ms.get("original") or ms`.
+- **New tests**: 2 thread-safety tests for regime cache (concurrent access, cycle invalidation). All 212 indicator/signal tests pass.
+- **Lint**: Reduced ruff violations from 75 to 59 (16 fixed). Remaining: 42 E402 (intentional), 9 SIM102, 5 SIM115, 3 SIM114.
+- Theme: Thread Safety, I/O Safety, Lint Cleanup, Code Quality.
+
 ## 2026-03-31 (after-hours research session)
 - **BUG-152: Trending-up regime gating incomplete (P1)**: Signal audit found 5 signals with 0-11% accuracy in trending-up (trend 0%, ema 11%, volume_flow 10%, macro_regime 11%, momentum_factors low). Plus claude_fundamental at 5.9%. All produce massive false SELL consensus during uptrends. Fix: gate all 6 at `_default` horizon in trending-up. 3h left ungated (short-term signals work in trends).
 - **BUG-153: low_activity_timing correlation group mixes quality tiers (P1)**: Group contained {calendar 62.8%, econ_calendar 86.8%, forecast 36.1%, futures_flow 33.3%}. If forecast became leader, it suppressed excellent signals. Fix: removed forecast and futures_flow from the group.
