@@ -19,16 +19,23 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from portfolio.loop_contract import (
+    BOT_ERROR_WARNING_THRESHOLD,
+    BOT_MAX_CYCLE_DURATION_S,
     ESCALATION_THRESHOLD,
     MAX_CYCLE_DURATION_S,
+    METALS_MAX_CYCLE_DURATION_S,
     MIN_SUCCESS_RATE,
     SELF_HEAL_COOLDOWN_S,
+    BotCycleReport,
     CycleReport,
+    MetalsCycleReport,
     Violation,
     ViolationTracker,
     _build_heal_prompt,
     verify_and_act,
+    verify_bot_contract,
     verify_contract,
+    verify_metals_contract,
 )
 
 
@@ -528,3 +535,278 @@ class TestPostCycleReportTracking:
         from portfolio.main import _run_post_cycle
         config = {"notification": {}}
         _run_post_cycle(config)  # No report — should not raise
+
+
+# ---------------------------------------------------------------------------
+# MetalsCycleReport and verify_metals_contract
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def good_metals_report():
+    """A MetalsCycleReport where everything succeeded."""
+    report = MetalsCycleReport(cycle_id=10)
+    report.cycle_start = 1000.0
+    report.cycle_end = 1040.0
+    report.underlying_prices_fetched = True
+    report.underlying_tickers_ok = {"XAG-USD", "XAU-USD", "BTC-USD", "ETH-USD"}
+    report.position_prices_updated = True
+    report.active_positions = 2
+    report.positions_priced = 2
+    report.holdings_reconciled = True
+    report.session_alive = True
+    report.stops_verified = True
+    report.probability_computed = True
+    return report
+
+
+class TestMetalsCycleReport:
+    """MetalsCycleReport construction and properties."""
+
+    def test_defaults(self):
+        r = MetalsCycleReport(cycle_id=1)
+        assert r.underlying_prices_fetched is False
+        assert r.session_alive is True  # default optimistic
+        assert r.active_positions == 0
+        assert r.errors == []
+
+    def test_cycle_duration(self):
+        r = MetalsCycleReport(cycle_id=1)
+        r.cycle_start = 100.0
+        r.cycle_end = 140.0
+        assert r.cycle_duration_s == pytest.approx(40.0)
+
+
+class TestVerifyMetalsContract:
+    """Each metals invariant is tested for detection and correct severity."""
+
+    def test_clean_report_passes(self, good_metals_report):
+        violations = verify_metals_contract(good_metals_report)
+        assert violations == []
+
+    def test_missing_xag_detected(self, good_metals_report):
+        good_metals_report.underlying_tickers_ok.discard("XAG-USD")
+        violations = verify_metals_contract(good_metals_report)
+        v = [v for v in violations if v.invariant == "underlying_prices_fetched"]
+        assert len(v) == 1
+        assert v[0].severity == "CRITICAL"
+        assert "XAG-USD" in v[0].message
+
+    def test_missing_xau_detected(self, good_metals_report):
+        good_metals_report.underlying_tickers_ok.discard("XAU-USD")
+        violations = verify_metals_contract(good_metals_report)
+        v = [v for v in violations if v.invariant == "underlying_prices_fetched"]
+        assert len(v) == 1
+
+    def test_crypto_missing_not_critical(self, good_metals_report):
+        """BTC/ETH missing is NOT a violation — only XAG/XAU are required."""
+        good_metals_report.underlying_tickers_ok = {"XAG-USD", "XAU-USD"}
+        violations = verify_metals_contract(good_metals_report)
+        assert not any(v.invariant == "underlying_prices_fetched" for v in violations)
+
+    def test_position_prices_incomplete(self, good_metals_report):
+        good_metals_report.active_positions = 3
+        good_metals_report.positions_priced = 1
+        violations = verify_metals_contract(good_metals_report)
+        v = [v for v in violations if v.invariant == "position_prices_updated"]
+        assert len(v) == 1
+        assert v[0].severity == "WARNING"
+
+    def test_no_positions_skips_price_check(self, good_metals_report):
+        good_metals_report.active_positions = 0
+        good_metals_report.positions_priced = 0
+        violations = verify_metals_contract(good_metals_report)
+        assert not any(v.invariant == "position_prices_updated" for v in violations)
+
+    def test_session_dead_critical(self, good_metals_report):
+        good_metals_report.session_alive = False
+        violations = verify_metals_contract(good_metals_report)
+        v = [v for v in violations if v.invariant == "session_alive"]
+        assert len(v) == 1
+        assert v[0].severity == "CRITICAL"
+
+    def test_slow_cycle_detected(self, good_metals_report):
+        good_metals_report.cycle_end = good_metals_report.cycle_start + METALS_MAX_CYCLE_DURATION_S + 1
+        violations = verify_metals_contract(good_metals_report)
+        v = [v for v in violations if v.invariant == "cycle_duration"]
+        assert len(v) == 1
+        assert v[0].severity == "WARNING"
+
+    def test_stops_missing_with_positions(self, good_metals_report):
+        good_metals_report.stops_verified = False
+        violations = verify_metals_contract(good_metals_report)
+        v = [v for v in violations if v.invariant == "stops_in_place"]
+        assert len(v) == 1
+        assert v[0].severity == "WARNING"
+
+    def test_stops_ok_without_positions(self, good_metals_report):
+        good_metals_report.active_positions = 0
+        good_metals_report.stops_verified = False
+        violations = verify_metals_contract(good_metals_report)
+        assert not any(v.invariant == "stops_in_place" for v in violations)
+
+    def test_holdings_not_reconciled(self, good_metals_report):
+        good_metals_report.holdings_reconciled = False
+        violations = verify_metals_contract(good_metals_report)
+        v = [v for v in violations if v.invariant == "holdings_reconciled"]
+        assert len(v) == 1
+
+    def test_errors_recorded(self, good_metals_report):
+        good_metals_report.errors.append(("price_fetch", "timeout"))
+        violations = verify_metals_contract(good_metals_report)
+        v = [v for v in violations if v.invariant == "no_critical_errors"]
+        assert len(v) == 1
+
+
+# ---------------------------------------------------------------------------
+# BotCycleReport and verify_bot_contract
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def good_bot_report():
+    """A BotCycleReport where everything succeeded."""
+    report = BotCycleReport(cycle_id=5, bot_name="golddigger")
+    report.cycle_start = 1000.0
+    report.cycle_end = 1020.0
+    report.snapshot_collected = True
+    report.bot_step_completed = True
+    report.session_alive = True
+    report.consecutive_errors = 0
+    report.max_consecutive_errors = 5
+    report.report_on_schedule = True
+    return report
+
+
+class TestBotCycleReport:
+    """BotCycleReport construction and properties."""
+
+    def test_defaults(self):
+        r = BotCycleReport(cycle_id=1, bot_name="elongir")
+        assert r.bot_name == "elongir"
+        assert r.bot_step_completed is False
+        assert r.session_alive is True
+        assert r.consecutive_errors == 0
+
+    def test_cycle_duration(self):
+        r = BotCycleReport(cycle_id=1)
+        r.cycle_start = 100.0
+        r.cycle_end = 125.0
+        assert r.cycle_duration_s == pytest.approx(25.0)
+
+
+class TestVerifyBotContract:
+    """Each bot invariant is tested for detection and correct severity."""
+
+    def test_clean_report_passes(self, good_bot_report):
+        violations = verify_bot_contract(good_bot_report)
+        assert violations == []
+
+    def test_bot_step_failed(self, good_bot_report):
+        good_bot_report.bot_step_completed = False
+        violations = verify_bot_contract(good_bot_report)
+        v = [v for v in violations if v.invariant == "bot_step_completed"]
+        assert len(v) == 1
+        assert v[0].severity == "CRITICAL"
+
+    def test_snapshot_not_collected(self, good_bot_report):
+        good_bot_report.snapshot_collected = False
+        violations = verify_bot_contract(good_bot_report)
+        v = [v for v in violations if v.invariant == "snapshot_collected"]
+        assert len(v) == 1
+        assert v[0].severity == "CRITICAL"
+
+    def test_session_dead(self, good_bot_report):
+        good_bot_report.session_alive = False
+        violations = verify_bot_contract(good_bot_report)
+        v = [v for v in violations if v.invariant == "session_alive"]
+        assert len(v) == 1
+        assert v[0].severity == "CRITICAL"
+
+    def test_errors_approaching_halt_warning(self, good_bot_report):
+        good_bot_report.consecutive_errors = BOT_ERROR_WARNING_THRESHOLD
+        violations = verify_bot_contract(good_bot_report)
+        v = [v for v in violations if v.invariant == "consecutive_errors"]
+        assert len(v) == 1
+        assert v[0].severity == "WARNING"
+        assert "until halt" in v[0].message
+
+    def test_errors_one_from_halt_critical(self, good_bot_report):
+        good_bot_report.consecutive_errors = good_bot_report.max_consecutive_errors - 1
+        violations = verify_bot_contract(good_bot_report)
+        v = [v for v in violations if v.invariant == "consecutive_errors"]
+        assert len(v) == 1
+        assert v[0].severity == "CRITICAL"
+
+    def test_no_errors_passes(self, good_bot_report):
+        good_bot_report.consecutive_errors = 0
+        violations = verify_bot_contract(good_bot_report)
+        assert not any(v.invariant == "consecutive_errors" for v in violations)
+
+    def test_slow_cycle(self, good_bot_report):
+        good_bot_report.cycle_end = good_bot_report.cycle_start + BOT_MAX_CYCLE_DURATION_S + 1
+        violations = verify_bot_contract(good_bot_report)
+        v = [v for v in violations if v.invariant == "cycle_duration"]
+        assert len(v) == 1
+
+    def test_report_missed(self, good_bot_report):
+        good_bot_report.report_on_schedule = False
+        violations = verify_bot_contract(good_bot_report)
+        v = [v for v in violations if v.invariant == "report_on_schedule"]
+        assert len(v) == 1
+
+    def test_bot_name_in_messages(self, good_bot_report):
+        good_bot_report.bot_step_completed = False
+        violations = verify_bot_contract(good_bot_report)
+        assert "golddigger" in violations[0].message
+
+
+# ---------------------------------------------------------------------------
+# verify_and_act with custom verify_fn
+# ---------------------------------------------------------------------------
+
+class TestVerifyAndActGeneric:
+    """verify_and_act works with custom verify functions and loop names."""
+
+    def test_metals_verify_fn(self, good_metals_report, tracker_dir):
+        good_metals_report.session_alive = False  # trigger violation
+        with patch("portfolio.loop_contract._log_violations") as mock_log, \
+             patch("portfolio.loop_contract._alert_violations") as mock_alert, \
+             patch("portfolio.loop_contract._trigger_self_heal") as mock_heal:
+            verify_and_act(
+                good_metals_report, {},
+                verify_fn=verify_metals_contract,
+                loop_name="metals",
+            )
+            mock_log.assert_called_once()
+            mock_alert.assert_called_once()
+            # Check loop_name passed through
+            _, kwargs = mock_alert.call_args
+            assert kwargs.get("loop_name") == "metals"
+
+    def test_bot_verify_fn(self, good_bot_report, tracker_dir):
+        good_bot_report.bot_step_completed = False  # trigger violation
+        with patch("portfolio.loop_contract._log_violations"), \
+             patch("portfolio.loop_contract._alert_violations") as mock_alert, \
+             patch("portfolio.loop_contract._trigger_self_heal"):
+            verify_and_act(
+                good_bot_report, {},
+                verify_fn=verify_bot_contract,
+                loop_name="golddigger",
+            )
+            _, kwargs = mock_alert.call_args
+            assert kwargs.get("loop_name") == "golddigger"
+
+    def test_heal_prompt_includes_loop_name(self):
+        violations = [
+            Violation(invariant="test", severity="CRITICAL", message="broken"),
+        ]
+        prompt = _build_heal_prompt(violations, loop_name="metals")
+        assert "metals" in prompt
+        assert "metals_loop.py" in prompt
+
+    def test_heal_prompt_golddigger(self):
+        prompt = _build_heal_prompt(
+            [Violation(invariant="x", severity="CRITICAL", message="y")],
+            loop_name="golddigger",
+        )
+        assert "golddigger" in prompt
+        assert "golddigger/runner.py" in prompt

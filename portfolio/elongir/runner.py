@@ -21,6 +21,7 @@ from portfolio.elongir.state import (
     warrant_price_sek,
 )
 from portfolio.file_utils import load_json
+from portfolio.loop_contract import BotCycleReport, ViolationTracker, verify_and_act, verify_bot_contract
 from portfolio.process_lock import acquire_lock_file, release_lock_file
 
 logger = logging.getLogger("portfolio.elongir.runner")
@@ -187,13 +188,21 @@ def run(once: bool = False) -> None:
 
         consecutive_errors = 0
         last_report_time = time.time()
+        _contract_tracker = ViolationTracker(Path("data/elongir_contract_state.json"))
+        _cycle_count = 0
 
         while True:
             try:
+                _cycle_count += 1
+                _report = BotCycleReport(cycle_id=_cycle_count, bot_name="elongir")
+                _report.cycle_start = time.monotonic()
+
                 # Collect data and run one step
                 from portfolio.elongir.data_provider import collect_snapshot
                 snapshot = collect_snapshot()
+                _report.snapshot_collected = True
                 action = bot.step(snapshot)
+                _report.bot_step_completed = True
 
                 # Send trade notification
                 if action is not None:
@@ -208,6 +217,8 @@ def run(once: bool = False) -> None:
                     last_report_time = time.time()
 
                 consecutive_errors = 0
+                _report.consecutive_errors = consecutive_errors
+                _report.max_consecutive_errors = MAX_CONSECUTIVE_ERRORS
 
                 if once:
                     logger.info(
@@ -216,12 +227,20 @@ def run(once: bool = False) -> None:
                     )
                     break
 
+                _report.cycle_end = time.monotonic()
+                try:
+                    verify_and_act(_report, config or {}, tracker=_contract_tracker,
+                                   verify_fn=verify_bot_contract, loop_name="elongir")
+                except Exception:
+                    pass
                 time.sleep(cfg.poll_seconds)
 
             except KeyboardInterrupt:
                 raise
             except Exception as e:
                 consecutive_errors += 1
+                _report.consecutive_errors = consecutive_errors
+                _report.max_consecutive_errors = MAX_CONSECUTIVE_ERRORS
                 logger.error(
                     "Poll error (%d/%d): %s",
                     consecutive_errors, MAX_CONSECUTIVE_ERRORS, e,

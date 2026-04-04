@@ -26,6 +26,7 @@ from portfolio.avanza_control import (
 from portfolio.file_utils import load_json
 from portfolio.golddigger.bot import GolddiggerBot
 from portfolio.golddigger.config import DATA_DIR, GolddiggerConfig
+from portfolio.loop_contract import BotCycleReport, ViolationTracker, verify_and_act, verify_bot_contract
 from portfolio.message_store import send_or_store
 from portfolio.process_lock import acquire_lock_file, release_lock_file
 
@@ -250,9 +251,16 @@ def run(live: bool = False, once: bool = False):
 
         consecutive_errors = 0
         _last_session_check = time.time()
+        _contract_tracker = ViolationTracker(Path("data/golddigger_contract_state.json"))
+        _cycle_count = 0
 
         while True:
             try:
+                _cycle_count += 1
+                _report = BotCycleReport(cycle_id=_cycle_count, bot_name="golddigger")
+                _report.cycle_start = time.monotonic()
+                _report.snapshot_collected = True  # GoldDigger always has data from session
+
                 # Session health check (retry-resilient)
                 if live and page and (time.time() - _last_session_check) > cfg.session_check_interval:
                     session_ok = False
@@ -310,8 +318,12 @@ def run(live: bool = False, once: bool = False):
                                         "restarting in 30s_", config)
                                 break
                     _last_session_check = time.time()
+                    _report.session_alive = session_ok
 
                 action = bot.step()
+                _report.bot_step_completed = True
+                if action:
+                    _report.action_taken = str(action)
 
                 if action:
                     if live and page and cfg.trade_enabled:
@@ -335,15 +347,25 @@ def run(live: bool = False, once: bool = False):
                             )
 
                 consecutive_errors = 0
+                _report.consecutive_errors = consecutive_errors
+                _report.max_consecutive_errors = MAX_CONSECUTIVE_ERRORS
                 if once:
                     logger.info("GoldDigger single-cycle complete (%s)", "action" if action else "hold")
                     break
+                _report.cycle_end = time.monotonic()
+                try:
+                    verify_and_act(_report, config or {}, tracker=_contract_tracker,
+                                   verify_fn=verify_bot_contract, loop_name="golddigger")
+                except Exception:
+                    pass
                 time.sleep(cfg.poll_seconds)
 
             except KeyboardInterrupt:
                 raise
             except Exception as e:
                 consecutive_errors += 1
+                _report.consecutive_errors = consecutive_errors
+                _report.max_consecutive_errors = MAX_CONSECUTIVE_ERRORS
                 logger.error("Poll error (%d/%d): %s",
                              consecutive_errors, MAX_CONSECUTIVE_ERRORS, e)
                 traceback.print_exc()
