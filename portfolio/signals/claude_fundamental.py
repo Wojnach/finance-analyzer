@@ -295,7 +295,8 @@ def _get_fundamentals_data():
     try:
         from portfolio.alpha_vantage import get_all_fundamentals
         return get_all_fundamentals()
-    except Exception:
+    except Exception as e:
+        logger.warning("Fundamentals fetch failed: %s", e, exc_info=True)
         return {}
 
 

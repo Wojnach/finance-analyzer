@@ -285,7 +285,8 @@ def _load_ratio_history(max_age_days=30):
                 except (json.JSONDecodeError, KeyError):
                     continue
         return entries
-    except Exception:
+    except Exception as e:
+        logger.warning("Gold/BTC ratio history load failed: %s", e, exc_info=True)
         return []
 
 
@@ -406,7 +407,8 @@ def _load_netflow_history():
                 except (json.JSONDecodeError, KeyError):
                     continue
         return entries
-    except Exception:
+    except Exception as e:
+        logger.warning("Exchange netflow history load failed: %s", e, exc_info=True)
         return []
 
 

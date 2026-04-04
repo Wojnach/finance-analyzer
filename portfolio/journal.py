@@ -1,8 +1,11 @@
 import json
+import logging
 import re
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+logger = logging.getLogger("portfolio.journal")
 
 from portfolio.file_utils import load_json
 from portfolio.tickers import ALL_TICKERS
@@ -476,7 +479,8 @@ def _get_current_market_state():
             "regime": regime,
             "prices": prices,
         }
-    except Exception:
+    except Exception as e:
+        logger.warning("Journal load failed: %s", e, exc_info=True)
         return None
 
 

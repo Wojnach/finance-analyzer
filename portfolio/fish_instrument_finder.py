@@ -54,7 +54,8 @@ def _get_quote(ob_id: str) -> dict | None:
     try:
         from portfolio.avanza_session import get_quote
         return get_quote(ob_id)
-    except Exception:
+    except Exception as e:
+        logger.warning("Instrument finder failed for ob_id %s: %s", ob_id, e, exc_info=True)
         return None
 
 

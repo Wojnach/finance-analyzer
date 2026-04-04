@@ -263,7 +263,8 @@ class SmartFishMonitor:
             if std == 0:
                 return 0.0
             return float((self.current_price - mean) / std)
-        except Exception:
+        except Exception as e:
+            logger.warning("Z-score computation failed: %s", e, exc_info=True)
             return None
 
     def _compute_half_life(self) -> float | None:
@@ -291,7 +292,8 @@ class SmartFishMonitor:
             if theta >= 0:
                 return None  # no mean reversion
             return float(-np.log(2) / theta)
-        except Exception:
+        except Exception as e:
+            logger.warning("Half-life computation failed: %s", e, exc_info=True)
             return None
 
     def _recompute_conviction(self) -> int:

@@ -908,5 +908,6 @@ def _get_current_price(ticker, config):
                 return None
             r.raise_for_status()
             return float(r.json()["latestTrade"]["p"])
-    except Exception:
+    except Exception as e:
+        logger.warning("Bet parse failed for %s: %s", ticker, e, exc_info=True)
         return None

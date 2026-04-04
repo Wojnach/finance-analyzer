@@ -123,7 +123,8 @@ def _is_llama_server_process(pid):
         else:
             with open(f"/proc/{pid}/cmdline") as f:
                 return "llama-server" in f.read()
-    except Exception:
+    except Exception as e:
+        logger.warning("Llama process check failed for PID %s: %s", pid, e, exc_info=True)
         return False
 
 
@@ -183,7 +184,8 @@ def _is_server_alive():
     try:
         r = _requests.get(f"http://127.0.0.1:{_PORT}/health", timeout=2)
         return r.status_code == 200
-    except Exception:
+    except Exception as e:
+        logger.warning("Llama health check failed: %s", e, exc_info=True)
         return False
 
 

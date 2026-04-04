@@ -42,7 +42,8 @@ def _load_config_token():
         config = _load_config()
         token = config.get("bgeometrics", {}).get("api_token", "")
         return token if token else None
-    except Exception:
+    except Exception as e:
+        logger.warning("BGeometrics token load failed: %s", e, exc_info=True)
         return None
 
 
@@ -69,7 +70,8 @@ def _load_onchain_cache(max_age_seconds=ONCHAIN_TTL):
         if time.time() - ts > max_age_seconds:
             return None
         return data
-    except Exception:
+    except Exception as e:
+        logger.warning("On-chain cache load failed: %s", e, exc_info=True)
         return None
 
 
