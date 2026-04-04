@@ -8,6 +8,9 @@ while exposing the broader account/session helpers from ``portfolio.avanza_*``.
 from __future__ import annotations
 
 import json
+import logging
+
+logger = logging.getLogger("portfolio.avanza_control")
 
 from data.metals_avanza_helpers import (
     check_session_alive,
@@ -184,6 +187,7 @@ def delete_order_live(page, account_id: str | None, order_id: str):
             "body": body_text,
         }
     except Exception as exc:
+        logger.error("Delete order failed for order %s: %s", order_id, exc, exc_info=True)
         return False, {"error": str(exc)}
 
 
@@ -227,6 +231,7 @@ def delete_stop_loss(page, account_id: str | None, stop_id: str):
             "body": body_text,
         }
     except Exception as exc:
+        logger.error("Delete stop-loss failed for stop %s: %s", stop_id, exc, exc_info=True)
         return False, {"error": str(exc)}
 
 
@@ -282,7 +287,8 @@ def fetch_price_no_page(orderbook_id: str, api_type: str = "certificate"):
             "barrier": _v(ki.get("barrierLevel")),
             "api_type": normalized,
         }
-    except Exception:
+    except Exception as e:
+        logger.error("Warrant price fetch failed for orderbook %s: %s", orderbook_id, e, exc_info=True)
         return None
 
 
@@ -364,6 +370,7 @@ def delete_stop_loss_no_page(account_id, stop_id):
         # api_delete returns {} on success (200 with empty body)
         return True, result
     except Exception as e:
+        logger.error("Delete stop-loss (no page) failed for stop %s: %s", stop_id, e, exc_info=True)
         return False, {"error": str(e)}
 
 
