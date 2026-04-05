@@ -1684,3 +1684,28 @@ class TestCorrelationGroupSplit:
     def test_low_activity_group_keeps_econ_calendar(self):
         from portfolio.signal_engine import CORRELATION_GROUPS
         assert "econ_calendar" in CORRELATION_GROUPS["low_activity_timing"]
+
+
+class TestPerTickerConsensusGate:
+    """BUG-164: Per-ticker consensus accuracy gate.
+
+    Tickers with historically poor consensus accuracy (AMD 24.8%, GOOGL 31.3%)
+    should be force-HOLD to prevent actively harmful recommendations.
+    """
+
+    def test_constants_defined(self):
+        from portfolio.signal_engine import (
+            _PER_TICKER_CONSENSUS_GATE,
+            _PER_TICKER_CONSENSUS_MIN_SAMPLES,
+        )
+        assert _PER_TICKER_CONSENSUS_GATE == 0.38
+        assert _PER_TICKER_CONSENSUS_MIN_SAMPLES == 50
+
+    def test_gate_threshold_between_worst_and_marginal(self):
+        """Gate at 38% catches AMD (24.8%), GOOGL (31.3%), META (34.2%)
+        but allows AMZN (39.0%) and above."""
+        from portfolio.signal_engine import _PER_TICKER_CONSENSUS_GATE
+        assert 0.248 < _PER_TICKER_CONSENSUS_GATE  # AMD caught
+        assert 0.313 < _PER_TICKER_CONSENSUS_GATE  # GOOGL caught
+        assert 0.342 < _PER_TICKER_CONSENSUS_GATE  # META caught
+        assert 0.390 > _PER_TICKER_CONSENSUS_GATE  # AMZN NOT caught

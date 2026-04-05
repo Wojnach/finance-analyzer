@@ -43,6 +43,12 @@ _RECENCY_DIVERGENCE_THRESHOLD = 0.15  # 15% absolute divergence triggers fast bl
 _RECENCY_WEIGHT_NORMAL = 0.7
 _RECENCY_WEIGHT_FAST = 0.9
 
+# Per-ticker consensus gate: BUG-164.  Suppress all non-HOLD consensus for
+# tickers where the system's overall consensus is historically harmful.
+# AMD 24.8%, GOOGL 31.3%, META 34.2% — actively wrong.
+_PER_TICKER_CONSENSUS_GATE = 0.38  # below 38% = force HOLD
+_PER_TICKER_CONSENSUS_MIN_SAMPLES = 50
+
 # --- Signal (full 32-signal for "Now" timeframe) ---
 
 MIN_VOTERS_CRYPTO = 3  # crypto has 30 signals (8 core + 22 enhanced; ml disabled) — need 3
@@ -1388,6 +1394,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             blend_accuracy_data,
             load_cached_accuracy,
             load_cached_activation_rates,
+            per_ticker_accuracy,
             signal_accuracy,
             signal_accuracy_recent,
             write_accuracy_cache,
@@ -1409,6 +1416,12 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             recent = signal_accuracy_recent(acc_horizon, days=7)
             if recent:
                 write_accuracy_cache(f"{acc_horizon}_recent", recent)
+
+        # BUG-164: Per-ticker consensus accuracy (lazy-populate cache)
+        if not load_cached_accuracy("per_ticker_consensus"):
+            _ptc = per_ticker_accuracy(acc_horizon)
+            if _ptc:
+                write_accuracy_cache("per_ticker_consensus", _ptc)
 
         # ARCH-23: Use shared blend function (replaces inline logic).
         accuracy_data = blend_accuracy_data(
@@ -1623,6 +1636,34 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                      "lf_action": lf_action, "lf_score": round(lf_score, 6)})
     except Exception:
         pass  # graceful degradation — no trained model = no adjustment
+
+    # --- Per-ticker consensus accuracy gate ---
+    # BUG-164: AMD 24.8%, GOOGL 31.3%, META 34.2% consensus accuracy.
+    # The system is actively harmful on these tickers.  Gate consensus
+    # when per-ticker historical accuracy is below threshold.
+    if ticker and action != "HOLD":
+        try:
+            from portfolio.accuracy_stats import load_cached_accuracy
+
+            _ptc_acc = load_cached_accuracy("per_ticker_consensus")
+            if _ptc_acc:
+                _ptc_stats = _ptc_acc.get(ticker, {})
+                _ptc_total = _ptc_stats.get("total", 0)
+                _ptc_accuracy = _ptc_stats.get("accuracy", 0.5)
+                if _ptc_total >= _PER_TICKER_CONSENSUS_MIN_SAMPLES and _ptc_accuracy < _PER_TICKER_CONSENSUS_GATE:
+                    extra_info.setdefault("_penalty_log", []).append({
+                        "stage": "per_ticker_consensus_gate",
+                        "ticker": ticker,
+                        "accuracy": round(_ptc_accuracy, 3),
+                        "samples": _ptc_total,
+                        "threshold": _PER_TICKER_CONSENSUS_GATE,
+                        "effect": "force_hold",
+                    })
+                    extra_info["_ticker_consensus_gated"] = True
+                    action = "HOLD"
+                    conf = 0.0
+        except Exception:
+            pass  # graceful degradation
 
     # Global confidence cap — calibration data shows >80% confidence is
     # anti-correlated with accuracy at every horizon (70-80% bucket is the
