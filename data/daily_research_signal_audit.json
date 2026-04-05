@@ -1,119 +1,425 @@
 {
   "date": "2026-04-05",
-  "generated_at": "2026-04-05T21:35:00+00:00",
+  "auditor": "signal_engine_deep_audit_v2",
+  "summary": "Deep technical audit of the 32-signal voting system across 6 modules. Found 4 bugs (2 high severity), 7 actionable recommendations, and documented the full 7-layer weighting mechanism. The system has extensive regime-adaptive infrastructure but several layers interact in ways that reduce net effectiveness — regime accuracy overlay using alltime data can un-gate recently broken signals, and static REGIME_WEIGHTS have drifted from actual regime-conditional performance.",
+
   "top_signals": [
-    {"signal": "fibonacci", "recent_7d": 68.2, "all_time": 42.5, "recent_samples": 110, "note": "Dominant in ranging. 68.2% recent with 110 samples — statistically significant. Fibonacci retracements working because prices oscillating around structural levels."},
-    {"signal": "ministral", "recent_7d": 68.0, "all_time": 58.6, "recent_samples": 125, "note": "LLM signal performing best in current market. 9.4pp above all-time. Generative reasoning thriving where pattern-matching fails."},
-    {"signal": "mean_reversion", "recent_7d": 65.4, "all_time": 52.2, "recent_samples": 332, "note": "Classic ranging regime winner. RSI(2/3), IBS, BB%B all working. Large sample confirms edge is real."},
-    {"signal": "calendar", "recent_7d": 62.8, "all_time": 56.9, "recent_samples": 659, "note": "Day-of-week + month-end effects stable. Largest sample of top performers."},
-    {"signal": "bb", "recent_7d": 60.8, "all_time": 53.8, "recent_samples": 293, "note": "Bollinger Band extremes working in range-bound market as expected."},
-    {"signal": "macd", "recent_7d": 58.7, "all_time": 43.4, "recent_samples": 138, "note": "Crossover signals working better — market oscillating enough for MACD to catch turns."}
+    {
+      "name": "calendar",
+      "1d_alltime_acc": 56.9,
+      "1d_recent_acc": 62.8,
+      "regime_ranging_1d_acc": 87.3,
+      "samples_ranging": 511,
+      "note": "Best ranging-regime performer at 87.3% (511 samples). Correctly boosted to 1.2x in ranging REGIME_WEIGHTS. Low activation rate provides genuine rarity bonus."
+    },
+    {
+      "name": "bb",
+      "1d_alltime_acc": 53.8,
+      "1d_recent_acc": 60.8,
+      "regime_ranging_1d_acc": 69.8,
+      "samples_ranging": 582,
+      "note": "Top technical signal in ranging at 69.8% (582 samples). Bollinger Band extremes are textbook mean-reversion. Correctly boosted 1.5x in ranging and 1.2x at 1d horizon."
+    },
+    {
+      "name": "ministral",
+      "1d_alltime_acc": 58.6,
+      "1d_recent_acc": 68.0,
+      "3h_recent_acc": 62.6,
+      "regime_ranging_1d_acc": 45.8,
+      "samples_ranging": 493,
+      "note": "Strong recent global accuracy (68.0%, 125 samples) but only 45.8% in ranging specifically. Recent boost likely from non-ranging windows. Per-ticker accuracy gating is good."
+    },
+    {
+      "name": "qwen3",
+      "1d_alltime_acc": 59.8,
+      "3h_recent_acc": 61.8,
+      "regime_ranging_1d_acc": 56.1,
+      "samples_ranging": 66,
+      "note": "Consistently above 59% across horizons. Small ranging sample (66) but promising at 56.1%."
+    },
+    {
+      "name": "mean_reversion",
+      "1d_alltime_acc": 52.2,
+      "1d_recent_acc": 65.4,
+      "regime_ranging_1d_acc": 62.4,
+      "regime_trending_down_1d_acc": 82.4,
+      "samples_ranging": 2543,
+      "note": "Star performer in ranging (62.4%) and trending-down (82.4%, 239 samples). Correctly boosted 1.5x in ranging."
+    },
+    {
+      "name": "claude_fundamental",
+      "1d_alltime_acc": 62.3,
+      "regime_ranging_1d_acc": 63.1,
+      "samples_ranging": 5312,
+      "note": "Strong in ranging (63.1%, 5312 samples). Largest sample size of any signal in ranging. But 0 recent votes — contributes nothing to current consensus."
+    },
+    {
+      "name": "fibonacci",
+      "1d_alltime_acc": 42.5,
+      "1d_recent_acc": 68.2,
+      "regime_ranging_1d_acc": 41.4,
+      "samples_recent": 110,
+      "samples_ranging": 1774,
+      "note": "PARADOX: 68.2% recent (110 sam) vs 41.4% regime-ranging (1774 sam). Currently boosted to 1.6x in ranging based on recent data, but regime data contradicts. Small recent sample may be misleading."
+    },
+    {
+      "name": "momentum",
+      "1d_alltime_acc": 55.0,
+      "regime_ranging_1d_acc": 58.9,
+      "samples_ranging": 2196,
+      "note": "Surprisingly strong in ranging at 58.9% (2196 samples). Has no special regime weight adjustment — potential untapped edge."
+    }
   ],
+
   "worst_signals": [
-    {"signal": "fear_greed", "recent_7d": 25.9, "all_time": 58.6, "recent_samples": 170, "note": "CATASTROPHIC. Contrarian logic broken in sustained extreme fear. F&G stuck at extreme fear for 46+ days but metals UP, crypto DOWN — mixed signal."},
-    {"signal": "news_event", "recent_7d": 29.5, "all_time": 51.8, "recent_samples": 112, "note": "Headline velocity/severity metrics failing. Possibly because news cycle is tariff-dominated and reactions are non-linear."},
-    {"signal": "macro_regime", "recent_7d": 30.3, "all_time": 47.1, "recent_samples": 145, "note": "200-SMA, DXY, yield curve analysis failing. Macro signals diverging from price action."},
-    {"signal": "volatility_sig", "recent_7d": 35.0, "all_time": 47.1, "recent_samples": 223, "note": "BB squeeze and ATR expansion detection wrong in current chop."},
-    {"signal": "structure", "recent_7d": 36.1, "all_time": 51.9, "recent_samples": 147, "note": "Breakout detection false-signaling in range-bound market."},
-    {"signal": "forecast", "recent_7d": 36.1, "all_time": 47.5, "recent_samples": 183, "note": "Chronos/Kronos time-series forecasts failing. Price too choppy for trend extrapolation."},
-    {"signal": "smart_money", "recent_7d": 39.6, "all_time": 53.6, "recent_samples": 48, "note": "BOS/CHoCH/FVG patterns unreliable in current environment."}
+    {
+      "name": "fear_greed",
+      "1d_alltime_acc": 58.6,
+      "1d_recent_acc": 25.9,
+      "regime_ranging_1d_acc": 67.1,
+      "samples_recent": 170,
+      "note": "Collapsed from 58.6% alltime to 25.9% recent (170 samples). Correctly regime-gated and penalized to 0.3x. But regime overlay can un-gate it using stale 67.1% ranging data."
+    },
+    {
+      "name": "forecast",
+      "1d_alltime_acc": 47.5,
+      "1d_recent_acc": 36.1,
+      "3h_recent_acc": 38.3,
+      "regime_ranging_1d_acc": 38.2,
+      "note": "Below coin-flip at every horizon and every regime. Regime-gated in ranging. Consider full disablement."
+    },
+    {
+      "name": "macro_regime",
+      "1d_alltime_acc": 47.1,
+      "1d_recent_acc": 30.3,
+      "regime_ranging_1d_acc": 47.0,
+      "regime_trending_down_1d_acc": 34.5,
+      "note": "Below coin-flip everywhere. Should be gated in trending-down too (34.5%, 1256 samples)."
+    },
+    {
+      "name": "smart_money",
+      "1d_alltime_acc": 53.6,
+      "1d_recent_acc": 39.6,
+      "regime_trending_down_1d_acc": 10.0,
+      "samples_trending_down": 130,
+      "note": "BUG: 10.0% accuracy in trending-down (130 samples) but NOT regime-gated there. Strongest negative-alpha signal in the system."
+    },
+    {
+      "name": "econ_calendar",
+      "1d_alltime_acc": 66.9,
+      "regime_ranging_1d_acc": 32.0,
+      "regime_trending_up_1d_acc": 15.4,
+      "regime_trending_down_1d_acc": 1.3,
+      "note": "Phantom top-performer. 86.8% in pre-regime 'unknown' bucket inflates alltime. Fails in EVERY labeled regime. 0 recent votes."
+    },
+    {
+      "name": "trend",
+      "1d_recent_acc": 40.7,
+      "regime_ranging_1d_acc": 34.1,
+      "3h_recent_acc": 61.6,
+      "note": "Worst ranging performer at 34.1% (615 sam). Correctly regime-gated at 1d but exempted at 3h (61.6%). Good horizon handling."
+    },
+    {
+      "name": "sentiment",
+      "1d_recent_acc": 46.8,
+      "3h_recent_acc": 33.8,
+      "note": "33.8% at 3h is actively harmful. 46.8% at 1d is noise. In macro_external correlation group — should be silenced by group leader gate."
+    },
+    {
+      "name": "structure",
+      "1d_recent_acc": 36.1,
+      "samples_recent": 147,
+      "note": "Recent collapse to 36.1%. Correctly regime-gated in ranging."
+    }
   ],
-  "silent_top_performers": [
-    {"signal": "econ_calendar", "all_time": 66.9, "recent_samples": 0, "note": "NOT VOTING — only fires near FOMC/CPI/NFP events. No economic events this week."},
-    {"signal": "claude_fundamental", "all_time": 62.3, "recent_samples": 0, "note": "NOT VOTING — possibly gated by per-ticker accuracy threshold or CLI rate limits."},
-    {"signal": "qwen3", "all_time": 59.8, "recent_samples": 0, "note": "Voting very selectively (only XAG-USD in last 50 entries). May be held by per-ticker accuracy gate on most tickers."}
-  ],
-  "per_ticker_consensus_accuracy": {
-    "best": [
-      {"ticker": "LMT", "accuracy": 62.3, "samples": 1211},
-      {"ticker": "MU", "accuracy": 57.3, "samples": 1907},
-      {"ticker": "NVDA", "accuracy": 55.4, "samples": 2257},
-      {"ticker": "BTC-USD", "accuracy": 53.2, "samples": 2980},
-      {"ticker": "PLTR", "accuracy": 52.7, "samples": 1901},
-      {"ticker": "XAG-USD", "accuracy": 52.4, "samples": 1857},
-      {"ticker": "XAU-USD", "accuracy": 52.2, "samples": 1600}
-    ],
-    "worst": [
-      {"ticker": "AMD", "accuracy": 24.8, "samples": 888, "note": "ACTIVELY HARMFUL — system wrong 3/4 of the time"},
-      {"ticker": "GOOGL", "accuracy": 31.3, "samples": 1327, "note": "Near-inverse accuracy"},
-      {"ticker": "META", "accuracy": 34.2, "samples": 1328, "note": "Terrible"},
-      {"ticker": "AMZN", "accuracy": 39.0, "samples": 1365, "note": "Below coin flip"},
-      {"ticker": "VRT", "accuracy": 44.9, "samples": 2939, "note": "Below threshold with large sample"},
-      {"ticker": "AAPL", "accuracy": 44.9, "samples": 1173, "note": "Below threshold"}
-    ]
-  },
+
   "correlation_clusters": [
     {
-      "name": "trend_direction",
+      "name": "trend_direction (defined)",
       "signals": ["ema", "trend", "heikin_ashi", "volume_flow"],
-      "note": "All trend-followers failing together in ranging: ema 40.8%, trend 40.7%, heikin_ashi 42.0%, volume_flow 49.2%. Already grouped with 0.3x penalty. 13 of these are regime-gated in ranging."
+      "current_handling": "CORRELATION_GROUPS with 0.3x penalty for non-leader",
+      "ranging_accuracy": {"ema": "40.8% (1d recent)", "trend": "34.1% (regime)", "heikin_ashi": "46.1% (regime)", "volume_flow": "46.4% (regime)"},
+      "note": "All fail together in ranging. Group leader (likely volume_flow by sample count) at 46.4% is below 47% group leader gate threshold — entire group should be silenced."
     },
     {
-      "name": "macro_external",
+      "name": "macro_external (defined)",
       "signals": ["fear_greed", "macro_regime", "structure", "sentiment", "news_event"],
-      "note": "External data signals all degrading: fear_greed 25.9%, macro_regime 30.3%, news_event 29.5%, structure 36.1%. Group-leader gating at 47% is catching the worst but sentiment (46.8%) is borderline."
+      "current_handling": "CORRELATION_GROUPS with leader gating at 47%",
+      "ranging_accuracy": {"fear_greed": "25.9% recent", "macro_regime": "30.3% recent", "structure": "36.1% recent", "sentiment": "46.8% recent", "news_event": "29.5% recent"},
+      "note": "Leader (sentiment 46.8%) is below 47% group gate — entire group silenced at 1d. Also individually regime-gated. Triple-gated: computationally wasteful but safe."
     },
     {
-      "name": "pattern_based",
+      "name": "pattern_based (defined)",
       "signals": ["candlestick", "fibonacci"],
-      "note": "Fibonacci (68.2%) is the clear leader; candlestick (44.5%) correctly penalized at 0.3x."
+      "current_handling": "CORRELATION_GROUPS with 0.3x penalty",
+      "note": "Both regime-gated in ranging _default. Correlation group is irrelevant when both are already gated."
     },
     {
-      "name": "low_activity_timing",
+      "name": "low_activity_timing (defined)",
       "signals": ["calendar", "econ_calendar"],
-      "note": "Both excellent all-time (56.9% and 66.9%) but econ_calendar inactive (event-driven only)."
+      "note": "Calendar strong (87.3% ranging). Econ_calendar broken (32.0% ranging). Low activation rate means penalty rarely applies. Grouping is correct."
     },
     {
-      "name": "llm_ensemble (not formally grouped)",
+      "name": "rare_technical (defined)",
+      "signals": ["volatility_sig", "oscillators"],
+      "note": "Both weak in ranging. Both regime-gated."
+    },
+    {
+      "name": "UNDISCOVERED: llm_ensemble",
       "signals": ["ministral", "qwen3"],
-      "note": "Both LLMs performing well (68.0%, 59.8% all-time) but qwen3 barely voting recently. Should NOT be in a correlation group — they provide independent reasoning."
+      "current_handling": "No correlation group — both get full weight",
+      "note": "Both local LLM signals using same _build_llm_context. Likely moderate correlation. Should measure and potentially group."
+    },
+    {
+      "name": "UNDISCOVERED: mean_reversion_bb",
+      "signals": ["mean_reversion", "bb"],
+      "current_handling": "No correlation group — both get full weight",
+      "ranging_accuracy": {"mean_reversion": "62.4%", "bb": "69.8%"},
+      "note": "Both mean-reversion signals that excel in ranging. Conceptual overlap (BB%B is a sub-indicator of mean_reversion module). May be double-counting the same edge."
     }
   ],
+
   "regime_performance": {
     "ranging": {
-      "winners": ["fibonacci", "ministral", "mean_reversion", "calendar", "bb", "macd", "rsi"],
-      "losers": ["fear_greed", "news_event", "macro_regime", "volatility_sig", "structure", "forecast", "smart_money", "trend", "ema", "heikin_ashi", "momentum_factors", "candlestick", "oscillators"],
-      "note": "Ranging regime has 13 signals below 45% and only 6 above 58%. The regime gating is already catching most of these but the volume of gated signals means few remain to vote."
+      "winners": [
+        {"signal": "calendar", "accuracy": 87.3, "samples": 511},
+        {"signal": "bb", "accuracy": 69.8, "samples": 582},
+        {"signal": "fear_greed", "accuracy": 67.1, "samples": 2817, "caveat": "25.9% RECENT — stale data"},
+        {"signal": "claude_fundamental", "accuracy": 63.1, "samples": 5312, "caveat": "0 recent votes"},
+        {"signal": "mean_reversion", "accuracy": 62.4, "samples": 2543},
+        {"signal": "momentum", "accuracy": 58.9, "samples": 2196},
+        {"signal": "rsi", "accuracy": 55.8, "samples": 2018},
+        {"signal": "sentiment", "accuracy": 57.5, "samples": 1833, "caveat": "46.8% recent"}
+      ],
+      "losers": [
+        {"signal": "econ_calendar", "accuracy": 32.0, "samples": 1264},
+        {"signal": "trend", "accuracy": 34.1, "samples": 615},
+        {"signal": "crypto_macro", "accuracy": 37.7, "samples": 403},
+        {"signal": "forecast", "accuracy": 38.2, "samples": 304},
+        {"signal": "fibonacci", "accuracy": 41.4, "samples": 1774},
+        {"signal": "volatility_sig", "accuracy": 42.8, "samples": 958},
+        {"signal": "volume", "accuracy": 44.5, "samples": 1916},
+        {"signal": "heikin_ashi", "accuracy": 46.1, "samples": 1331},
+        {"signal": "volume_flow", "accuracy": 46.4, "samples": 4688}
+      ]
+    },
+    "trending_up": {
+      "winners": [
+        {"signal": "calendar", "accuracy": 84.1, "samples": 258},
+        {"signal": "ema", "accuracy": 81.7, "samples": 197},
+        {"signal": "trend", "accuracy": 80.7, "samples": 135},
+        {"signal": "volume_flow", "accuracy": 78.0, "samples": 159},
+        {"signal": "macro_regime", "accuracy": 70.5, "samples": 88},
+        {"signal": "volume", "accuracy": 67.2, "samples": 186},
+        {"signal": "claude_fundamental", "accuracy": 67.2, "samples": 189},
+        {"signal": "heikin_ashi", "accuracy": 66.7, "samples": 708}
+      ],
+      "losers": [
+        {"signal": "econ_calendar", "accuracy": 15.4, "samples": 39},
+        {"signal": "futures_flow", "accuracy": 22.2, "samples": 9},
+        {"signal": "rsi", "accuracy": 31.5, "samples": 658},
+        {"signal": "macd", "accuracy": 31.0, "samples": 29},
+        {"signal": "mean_reversion", "accuracy": 37.7, "samples": 547}
+      ]
+    },
+    "trending_down": {
+      "winners": [
+        {"signal": "calendar", "accuracy": 100.0, "samples": 38, "caveat": "tiny sample"},
+        {"signal": "macd", "accuracy": 83.3, "samples": 84},
+        {"signal": "mean_reversion", "accuracy": 82.4, "samples": 239},
+        {"signal": "candlestick", "accuracy": 77.5, "samples": 374},
+        {"signal": "momentum", "accuracy": 72.7, "samples": 176},
+        {"signal": "rsi", "accuracy": 72.3, "samples": 498}
+      ],
+      "losers": [
+        {"signal": "econ_calendar", "accuracy": 1.3, "samples": 75},
+        {"signal": "smart_money", "accuracy": 10.0, "samples": 130, "caveat": "BUG: not gated"},
+        {"signal": "futures_flow", "accuracy": 8.3, "samples": 12},
+        {"signal": "oscillators", "accuracy": 28.4, "samples": 88},
+        {"signal": "volatility_sig", "accuracy": 33.1, "samples": 136},
+        {"signal": "macro_regime", "accuracy": 34.5, "samples": 1256},
+        {"signal": "heikin_ashi", "accuracy": 34.7, "samples": 418},
+        {"signal": "ema", "accuracy": 38.0, "samples": 1421},
+        {"signal": "trend", "accuracy": 38.5, "samples": 950}
+      ]
     }
   },
-  "current_weighting_mechanism": "Multi-layer: (1) REGIME_WEIGHTS multipliers per regime, (2) REGIME_GATED_SIGNALS force-HOLD signals with negative alpha per regime+horizon, (3) Dynamic horizon weights from accuracy ratios, (4) CORRELATION_GROUPS with 0.3x penalty for non-leaders, (5) Group leader gating at 47% threshold, (6) Activity rate cap at 70% -> 0.5x, (7) Accuracy gate at 45% force-HOLD, (8) Adaptive recency blend (70/30 normal, 90/10 when divergence >15%). Very sophisticated already.",
-  "accuracy_gate_analysis": "45% threshold with 30 sample minimum. Blended accuracy = recency_weight * recent + (1-recency_weight) * all_time. Normal recency 70%, fast 90% when divergence >15%. Edge case: signals with 0 recent samples get 100% all-time weight, which can keep a historically good but currently broken signal above the gate.",
-  "key_finding": "The system already has regime gating for 13 signals in ranging. The problem is NOT individual signal gating — it's that too few signals remain to form reliable consensus. With 13/30 gated, only 17 are active, and several of those (volume_flow 49.2%, sentiment 46.8%) are near noise. The effective signal count drops to maybe 10-12 reliable signals, which is borderline for a 3-voter minimum.",
+
+  "current_weighting_mechanism": "7-layer multiplicative weighting: (1) accuracy_weight = blended accuracy (70% recent_7d + 30% alltime, adaptive 90/10 when divergence > 15%, override by regime-specific then per-ticker accuracy), (2) regime_mult from static REGIME_WEIGHTS dict, (3) horizon_mult dynamic from cross-horizon accuracy ratios clamped [0.4,1.5], (4) activation normalization = IDF rarity * bias penalty, (5) activity rate cap 0.5x when > 70% activation, (6) correlation penalty 0.3x for non-leaders in defined groups, (7) accuracy gate at 45% threshold forces HOLD. Final consensus = BUY/SELL by total weighted vote, then 5-stage confidence penalty cascade (regime 0.75x/0.80x, volume/ADX gate, trap detection, dynamic MIN_VOTERS, unanimity penalty), followed by market health penalty, earnings gate, linear factor model confirmation, and global cap at 0.80.",
+
+  "accuracy_gate_analysis": {
+    "threshold": 0.45,
+    "min_samples": 30,
+    "mechanism": "Signals below 45% accuracy (>= 30 samples) are force-HOLD. Not inverted, not dampened — removed entirely.",
+    "edge_cases": [
+      {
+        "issue": "Regime overlay un-gates recently broken signals",
+        "detail": "fear_greed: blended accuracy = 0.9*0.259 + 0.1*0.586 = 0.292 (correctly gated). Regime overlay replaces with 0.671 (ranging alltime, 2817 sam) because sample >= 30. Signal is effectively un-gated despite 25.9% recent failure.",
+        "severity": "high"
+      },
+      {
+        "issue": "Per-ticker exemption uses alltime data",
+        "detail": "BUG-158 exempts signals with >= 60% per-ticker accuracy (50+ samples) from regime gating. This data is alltime, so historically good signals on specific tickers can bypass gating even when recently degraded.",
+        "severity": "medium"
+      },
+      {
+        "issue": "Utility boost inflates accuracy representation",
+        "detail": "Up to 1.5x boost on accuracy based on avg_return magnitude. A 50% accuracy signal with high avg_return gets displayed as 75% in the weighting. Conflates return magnitude with directional accuracy.",
+        "severity": "medium"
+      },
+      {
+        "issue": "MWU weights are completely unused",
+        "detail": "signal_weights.json has per-signal weights from multiplicative updates (eta=0.1) but they are never referenced in _weighted_consensus. Weights range from 0.01 to 4.5e+118 — numerically useless even if integrated.",
+        "severity": "low — dead code"
+      }
+    ]
+  },
+
+  "regime_detection_analysis": {
+    "function": "portfolio/indicators.py:detect_regime()",
+    "rules": {
+      "high_vol": "ATR% > 4.0 (crypto) or 3.0 (stocks)",
+      "trending_up": "EMA9-EMA21 gap >= 0.5% AND EMA9 > EMA21 AND RSI > 45",
+      "trending_down": "EMA9-EMA21 gap >= 0.5% AND EMA9 < EMA21 AND RSI < 55 AND close <= EMA21",
+      "ranging": "Default — everything else"
+    },
+    "issues": [
+      "Ranging is the catch-all bucket — most instruments spend most time here",
+      "No multi-timeframe detection — weekly uptrend with daily range = ranging",
+      "BUG-156 patch (close > EMA21 forces ranging) shrinks trending-down window"
+    ]
+  },
+
+  "mwu_weights_status": {
+    "file": "data/signal_weights.json",
+    "status": "UNUSED — dead feature",
+    "weight_extremes": {"min": "0.01 (oscillators, forecast)", "max": "4.5e+118 (fear_greed), 3.7e+167 (claude_fundamental), 1.7e+57 (calendar)"},
+    "note": "Multiplicative compounding without bounds has made these weights numerically meaningless. get_normalized_weights() exists but is never called from consensus."
+  },
+
+  "discovered_bugs": [
+    {
+      "id": "BUG-NEW-1",
+      "title": "smart_money not regime-gated in trending-down",
+      "severity": "high",
+      "detail": "smart_money has 10.0% accuracy in trending-down (130 samples). Not in REGIME_GATED_SIGNALS['trending-down']['_default']. When trending-down activates, smart_money votes with full weight and is catastrophically wrong 90% of the time.",
+      "fix": "Add 'smart_money' to REGIME_GATED_SIGNALS['trending-down']['_default']",
+      "file": "portfolio/signal_engine.py",
+      "line_range": "207-220"
+    },
+    {
+      "id": "BUG-NEW-2",
+      "title": "Regime accuracy overlay uses alltime data, un-gating recently broken signals",
+      "severity": "high",
+      "detail": "signal_accuracy_by_regime() at line 697 of accuracy_stats.py loads ALL entries without recency filter. When generate_signal() uses this at line 1440-1442 to override blended accuracy, it replaces correctly-gated recent data with stale alltime regime data. Example: fear_greed blended = 29.2% (gated), regime overlay = 67.1% (un-gated).",
+      "fix": "Create signal_accuracy_by_regime_recent(horizon, days=30) and prefer it over alltime regime data when sample >= 30",
+      "files": ["portfolio/accuracy_stats.py", "portfolio/signal_engine.py"]
+    },
+    {
+      "id": "BUG-NEW-3",
+      "title": "econ_calendar phantom top-performer",
+      "severity": "medium",
+      "detail": "econ_calendar: 86.8% in 'unknown' regime (pre-regime-detection data), but 32.0% ranging, 15.4% trending-up, 1.3% trending-down. All positive accuracy from historical data without regime labels. 0 recent votes. Could damage consensus if it starts voting again.",
+      "fix": "Add to DISABLED_SIGNALS or gate across all regimes",
+      "file": "portfolio/tickers.py or portfolio/signal_engine.py"
+    },
+    {
+      "id": "BUG-NEW-4",
+      "title": "fibonacci REGIME_WEIGHTS 1.6x contradicts regime data",
+      "severity": "low",
+      "detail": "REGIME_WEIGHTS['ranging']['fibonacci'] = 1.6 based on 68.2% recent global. But ranging-specific accuracy = 41.4% (1774 samples). The 1.6x boost is based on the wrong data.",
+      "fix": "Reduce to 0.6x or make REGIME_WEIGHTS dynamic from regime accuracy cache",
+      "file": "portfolio/signal_engine.py",
+      "line": 146
+    }
+  ],
+
   "recommendations": [
     {
-      "title": "Per-ticker accuracy gating for consensus",
-      "description": "AMD (24.8%), GOOGL (31.3%), META (34.2%) — the consensus is actively wrong on these tickers. Add a per-ticker consensus accuracy gate: if a ticker's consensus accuracy (30+ samples) is below 40%, suppress all non-HOLD consensus for that ticker. This prevents the system from making harmful recommendations.",
-      "implementation": "In signal_engine.py, after computing consensus, check per-ticker accuracy cache and force HOLD if below threshold.",
+      "title": "Add recent-window filter to regime-specific accuracy overlay",
+      "description": "Create signal_accuracy_by_regime_recent(horizon, days=30) and use it to prevent stale alltime regime data from un-gating recently broken signals. Highest-impact single fix.",
+      "implementation": "1. Add function to accuracy_stats.py (copy signal_accuracy_by_regime with since= parameter). 2. In generate_signal(), load regime_acc_recent and prefer it when samples >= 30. 3. Add caching with '_recent' suffix.",
       "expected_impact": "high",
+      "risk": "low",
+      "files_to_modify": ["portfolio/accuracy_stats.py", "portfolio/signal_engine.py"]
+    },
+    {
+      "title": "Fix smart_money trending-down regime gate",
+      "description": "Add 'smart_money' and 'oscillators' to REGIME_GATED_SIGNALS['trending-down']['_default']. smart_money is 10.0% accurate in trending-down.",
+      "implementation": "Update frozenset at line 213 of signal_engine.py",
+      "expected_impact": "high",
+      "risk": "very low",
       "files_to_modify": ["portfolio/signal_engine.py"]
     },
     {
-      "title": "Investigate qwen3 low activity — unlock a top signal",
-      "description": "Qwen3 (59.8% all-time) is only voting on XAG-USD. The per-ticker accuracy gate (_gate_local_model_vote) may be holding it on most tickers due to insufficient samples or threshold too high. Lowering hold_threshold from 0.55 to 0.50 or reducing min_samples could unlock votes.",
-      "implementation": "Check config.json local_models.qwen3 settings. May need to reduce hold_threshold or increase accuracy_days window.",
-      "expected_impact": "medium",
-      "files_to_modify": ["config.json (external)"]
-    },
-    {
-      "title": "Strengthen ranging-regime signal subset",
-      "description": "Only 6 signals reliably work in ranging (fibonacci, ministral, mean_reversion, calendar, bb, macd). These should get additional regime weight boost (e.g., 1.8x instead of 1.5x) to strengthen their contribution when they DO vote.",
-      "implementation": "Update REGIME_WEIGHTS['ranging'] in signal_engine.py for the top 6 ranging performers.",
-      "expected_impact": "medium",
+      "title": "Make REGIME_WEIGHTS data-driven from regime accuracy cache",
+      "description": "Replace static dict with dynamic computation: weight = min(1.6, max(0.3, regime_accuracy / 0.50)). Eliminates manual tuning drift (fibonacci 1.6x vs 41.4% actual).",
+      "implementation": "Add _compute_dynamic_regime_weights() with 1h cache TTL, fallback to static dict.",
+      "expected_impact": "high",
+      "risk": "medium — should shadow-run first",
       "files_to_modify": ["portfolio/signal_engine.py"]
     },
     {
-      "title": "Add per-ticker regime detection",
-      "description": "Currently all instruments share the same regime (all 'ranging'). But BTC-USD is in a different pattern than XAG-USD. Per-ticker regime detection would allow ticker-specific gating.",
-      "implementation": "detect_regime() in indicators.py already takes per-ticker data. Verify it's called per-ticker and the result is used per-ticker, not globally.",
+      "title": "Disable or fully gate econ_calendar",
+      "description": "Fails in every labeled regime (32.0%/15.4%/1.3%). Add to DISABLED_SIGNALS until investigated.",
       "expected_impact": "medium",
-      "files_to_modify": ["portfolio/indicators.py", "portfolio/signal_engine.py"]
+      "risk": "low",
+      "files_to_modify": ["portfolio/tickers.py"]
     },
     {
-      "title": "Dynamic correlation group penalty based on agreement rate",
-      "description": "Current 0.3x penalty is static. When all signals in a group agree, the penalty should be higher (e.g., 0.2x) because they're all reacting to the same information. When they disagree, the penalty should be lower (e.g., 0.5x) because there's genuine information diversity.",
-      "implementation": "In _weighted_consensus, compute per-group agreement rate and adjust penalty dynamically.",
-      "expected_impact": "low",
+      "title": "Add LLM ensemble correlation group",
+      "description": "Group ministral and qwen3. Both use same context builder and likely have moderate correlation. Let higher-accuracy one dominate.",
+      "implementation": "Add 'llm_ensemble': frozenset({'ministral', 'qwen3'}) to CORRELATION_GROUPS",
+      "expected_impact": "medium",
+      "risk": "low",
       "files_to_modify": ["portfolio/signal_engine.py"]
+    },
+    {
+      "title": "Boost momentum in ranging REGIME_WEIGHTS",
+      "description": "momentum has 58.9% accuracy in ranging (2196 samples) but no regime weight boost. Add momentum: 1.2 to REGIME_WEIGHTS['ranging'].",
+      "expected_impact": "low-medium",
+      "risk": "low",
+      "files_to_modify": ["portfolio/signal_engine.py"]
+    },
+    {
+      "title": "Clean up MWU weights system",
+      "description": "signal_weights.py is dead code — weights are never used in consensus. Either remove entirely or integrate with caps and renormalization.",
+      "expected_impact": "low (cleanup) to medium (if integrated)",
+      "risk": "zero for removal",
+      "files_to_modify": ["portfolio/signal_weights.py", "portfolio/outcome_tracker.py"]
     }
+  ],
+
+  "system_strengths": [
+    "Comprehensive multi-layer defense: 7 weight factors + 5-stage confidence cascade + regime gating",
+    "Per-ticker accuracy override (BUG-158) captures ticker-specific alpha",
+    "Adaptive recency blend (70/30 normal, 90/10 divergent) responds to regime shifts",
+    "Horizon-aware regime gating correctly allows trend at 3h while gating at 1d",
+    "Correlation group leader gating at 47% silences entire broken groups",
+    "Dynamic MIN_VOTERS (5 ranging vs 3 trending) prevents marginal consensus",
+    "Unanimity penalty correctly discounts overconfident consensus"
+  ],
+
+  "system_weaknesses": [
+    "Regime accuracy overlay uses alltime data — creates loophole un-gating broken signals",
+    "Static REGIME_WEIGHTS drift from actual data (fibonacci 1.6x vs 41.4% regime accuracy)",
+    "MWU weight system is dead code producing no value",
+    "No measured signal correlation — CORRELATION_GROUPS defined by manual inspection",
+    "The 'unknown' regime bucket inflates alltime accuracy for pre-regime signals",
+    "Utility boost conflates return magnitude with directional accuracy",
+    "Triple-gating of same signals (regime gate + accuracy gate + correlation gate) is computationally wasteful"
+  ],
+
+  "files_analyzed": [
+    "portfolio/signal_engine.py (1638 lines — core voting engine, regime weights, confidence penalties)",
+    "portfolio/accuracy_stats.py (~1200 lines — accuracy tracking, blending, regime-conditional, per-ticker)",
+    "portfolio/signal_registry.py (141 lines — plugin registration for 22 enhanced signals)",
+    "portfolio/signal_weights.py (~120 lines — MWU weight manager, unused)",
+    "portfolio/tickers.py (SIGNAL_NAMES, DISABLED_SIGNALS definitions)",
+    "portfolio/indicators.py (detect_regime function)",
+    "portfolio/short_horizon.py (3h/4h horizon caps and slow signal gating)",
+    "data/accuracy_cache.json (all accuracy data: 1d, 1d_recent, 3h, 3h_recent)",
+    "data/regime_accuracy_cache.json (per-regime accuracy: unknown, ranging, trending-up, trending-down)",
+    "data/signal_weights.json (MWU weights — unused)"
   ]
 }
