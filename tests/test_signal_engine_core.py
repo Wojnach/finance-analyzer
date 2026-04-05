@@ -244,10 +244,10 @@ class TestWeightedConsensusRegime:
             "momentum": {"accuracy": 0.6, "total": 50},
         }
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # rsi weight = 0.6 * 1.5 = 0.9, momentum weight = 0.6 * 1.0 = 0.6
-        # BUY=0.9, SELL=0.6 => BUY
+        # rsi weight = 0.6 * 1.5 = 0.9, momentum weight = 0.6 * 1.3 = 0.78
+        # BUY=0.9, SELL=0.78 => BUY
         assert action == "BUY"
-        expected = 0.9 / (0.9 + 0.6)
+        expected = 0.9 / (0.9 + 0.78)
         assert conf == pytest.approx(expected, abs=0.01)
 
     def test_high_vol_boosts_bb_and_volume(self):
@@ -294,10 +294,10 @@ class TestWeightedConsensusActivationRates:
         }
         action, conf = _weighted_consensus(votes, accuracy, "ranging", activation_rates=activation)
         # rsi: 0.6 * 1.5(ranging) * 2.0 = 1.8
-        # momentum: 0.6 * 1.0(ranging) * 0.5 = 0.3
-        # BUY=1.8, SELL=0.3 => BUY
+        # momentum: 0.6 * 1.3(ranging) * 0.5 = 0.39
+        # BUY=1.8, SELL=0.39 => BUY
         assert action == "BUY"
-        expected = 1.8 / (1.8 + 0.3)
+        expected = 1.8 / (1.8 + 0.39)
         assert conf == pytest.approx(expected, abs=0.01)
 
     def test_missing_activation_rate_defaults_to_1(self):

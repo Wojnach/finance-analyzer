@@ -154,6 +154,8 @@ REGIME_WEIGHTS = {
         # ministral 68.0% recent — add 1.4 (was unweighted)
         "mean_reversion": 1.7, "fibonacci": 1.8, "calendar": 1.2,
         "ministral": 1.4,
+        # 2026-04-05 audit: momentum 58.9% in ranging (2196 samples) — untapped edge
+        "momentum": 1.3,
         # 2026-04-04: BUG-161 — oscillators 34-39% per-ticker in ranging.
         # Was 1.2x (boosted), now 0.3x (heavily penalized).
         "oscillators": 0.3,
@@ -220,9 +222,11 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
         # BUG-156: volume_flow (0%), macro_regime (0%), ema (0%), trend (0%)
         # on MSTR/PLTR in trending-down. These are SELL-biased and catastrophically
         # wrong when the downtrend classification is stale or stocks are recovering.
+        # BUG-165: smart_money 10.0% in trending-down (130 samples) — worst signal
         "_default": frozenset({
             "bb", "claude_fundamental",
             "volume_flow", "macro_regime", "ema", "trend", "heikin_ashi",
+            "smart_money",  # BUG-165: 10.0% accuracy in trending-down
         }),
         # 3h: trend signals may still work short-term; keep mean_reversion gated
         "3h": frozenset({"mean_reversion", "bb", "claude_fundamental"}),
