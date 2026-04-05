@@ -1,31 +1,208 @@
 {
-  "date": "2026-04-04",
-  "generated_at": "2026-04-04T21:35:19.583572+00:00",
-  "market_summary": "US markets closed for Good Friday (Apr 3) and weekend. Massive NFP beat (178K vs 50K expected) released Friday morning. Iran war ongoing \u2014 Trump vowed more attacks, crude surged 11% on Apr 2. Crypto in extreme fear (index 9). BTC bearish chatter at 2026 peak. Gold holding $4,673 with JPM targeting $5,055 by Q4. Silver at $73, targeting $100 with structural support.",
-  "key_events_tomorrow": [
-    "OPEC+ meeting April 5 (Sunday) \u2014 adding 206K bpd, watching for Iran-related production decisions",
-    "Markets reopen Monday April 6 \u2014 expect volatility from NFP digest + Iran escalation",
-    "No FOMC until late April/May \u2014 Fed on hold at 3.50-3.75%, one cut expected June",
-    "Crypto markets open 24/7 \u2014 BTC/ETH may react to weekend geopolitical news"
+  "date": "2026-04-05",
+  "generated_at": "2026-04-05T23:40:00+02:00",
+  "market_summary": "Week of Mar 31 - Apr 4 was dominated by the Iran-US war (Day 34+), strong US jobs data, and oil price spikes. S&P 500 rallied 3.4% for the week (best day since May on Tuesday), Nasdaq surged 4.4%, but both remain near correction territory YTD (-4% S&P). Markets closed holiday-shortened (Good Friday). Oil surged 8-11% on Apr 2 after Trump threatened further Iran escalation, with WTI above $112 and Brent near $109. Gold holds above $4,650 on safe-haven demand. BTC consolidated around $67K-71K, pressured by risk-off from Iran war. Silver at ~$72, gold/silver ratio compressed to ~64. OPEC+ met Apr 5, approved symbolic May quota increase but actual supply constrained by Hormuz blockade. US added 178K jobs in March (vs 59K expected), unemployment fell to 4.3%, wage growth slowed to 3.5% YoY. Fed rate unchanged at 3.5-3.75%, one cut expected in 2026. New steel/aluminum/copper tariffs (50% flat) signed Apr 2.",
+
+  "key_events_this_week": [
+    {
+      "date": "2026-03-31",
+      "event": "Q2 begins; S&P 500 wrapping up tough March, April expected better historically"
+    },
+    {
+      "date": "2026-04-01",
+      "event": "S&P 500 rockets on end-of-war hopes; strong Tuesday rally (best day since May)"
+    },
+    {
+      "date": "2026-04-02",
+      "event": "Trump prime-time address: Iran war to continue weeks, threatens to strike Tehran 'extremely hard'. Oil surges 8-11%. New steel/aluminum/copper tariffs signed (50% flat rate). Tesla Q1 deliveries disappoint, stock -5%"
+    },
+    {
+      "date": "2026-04-03",
+      "event": "March NFP: +178K jobs (vs +59K expected), unemployment 4.3%, wage growth 3.5% YoY (lowest since May 2021). S&P 500 +0.11% to 6,582.69, Nasdaq +0.18% to 21,879.18. Treasury bonds fell on strong jobs data, traders pared rate cut bets"
+    },
+    {
+      "date": "2026-04-04",
+      "event": "Good Friday - shortened/closed session. S&P 500 range 6,475-6,602"
+    },
+    {
+      "date": "2026-04-05",
+      "event": "OPEC+ meeting: approved symbolic May quota increase, but actual supply constrained by Hormuz. Iran fires at Kuwait oil/power infrastructure. Trump ultimatum: Iran will be 'living in Hell' if Hormuz not reopened. Iran allows China/Russia/India ships through Hormuz selectively"
+    }
   ],
+
+  "key_events_next_week": [
+    {
+      "date": "2026-04-06",
+      "event": "Monday: Markets reopen after Good Friday. Asia/Europe digest OPEC+ decision and weekend Iran escalation. No major data releases."
+    },
+    {
+      "date": "2026-04-07",
+      "event": "Tuesday: US Durable Goods Orders (forecast -2.2% MoM). Trump Tuesday 8PM ET deadline/address on Iran. Watch for USD volatility."
+    },
+    {
+      "date": "2026-04-08",
+      "event": "Wednesday: RBNZ Interest Rate Decision (forecast 2.25% unchanged). Constellation Brands (STZ) and Delta Air Lines (DAL) earnings."
+    },
+    {
+      "date": "2026-04-09",
+      "event": "Thursday: US Core PCE Price Index (forecast 0.4% MoM, 2.9% YoY) - Fed's preferred inflation gauge. FOMC Meeting Minutes from March 17-18 meeting released at 18:00 UTC. HIGH VOLATILITY DAY."
+    },
+    {
+      "date": "2026-04-10",
+      "event": "Friday: US CPI Data (Core CPI forecast 0.2% MoM, 2.5% YoY). Often triggers largest intraday moves of the week. Could reshape Fed rate cut expectations."
+    },
+    {
+      "date": "2026-04-18-19",
+      "event": "Bank of Japan meeting (rate expected unchanged at 0.75%)"
+    },
+    {
+      "date": "2026-04-28-29",
+      "event": "Next FOMC meeting"
+    }
+  ],
+
   "overnight_risks": [
-    "Iran escalation: Trump vowed to strike Tehran \"extremely hard\" \u2014 any weekend escalation spikes oil, hits equities",
-    "OPEC+ April 5 decision: if production increase > expected, oil drops = positive for equities/crypto, negative for metals",
-    "China/Asia open Sunday night: BTC/ETH often move on Asian session liquidity",
-    "Jobs report digestion: 178K NFP vs 50K expected \u2014 hawkish repricing of Fed cuts possible",
-    "Strait of Hormuz still partially disrupted \u2014 any shipping incident = oil spike risk"
+    {
+      "risk": "Iran-Hormuz escalation",
+      "severity": "CRITICAL",
+      "detail": "Trump issued ultimatum for Iran to reopen Strait of Hormuz. Iran fired at Kuwait oil/power infrastructure on Apr 5. Iran selectively allowing China/Russia/India ships through. Any new military escalation or Hormuz incident over the weekend could gap oil up $5-10 and hammer equities at Monday open."
+    },
+    {
+      "risk": "OPEC+ symbolic increase",
+      "severity": "HIGH",
+      "detail": "OPEC+ approved symbolic May quota increase but cannot deliver actual barrels due to Hormuz constraints. Market may interpret this as supply remaining tight, supporting oil above $110."
+    },
+    {
+      "risk": "Strong jobs data hawkish repricing",
+      "severity": "MEDIUM",
+      "detail": "178K jobs vs 59K expected. Treasury bonds sold off Friday. Traders paring rate cut bets. Could pressure growth/tech stocks Monday as bond yields adjust higher."
+    },
+    {
+      "risk": "Asia futures positioning",
+      "severity": "MEDIUM",
+      "detail": "Asian markets showed some optimism on potential Hormuz shipping resumption earlier in the week. Weekend escalation could reverse this. Watch Nikkei, Hang Seng at Asia open Sunday night/Monday morning."
+    },
+    {
+      "risk": "Tariff impact lag",
+      "severity": "MEDIUM",
+      "detail": "New 50% steel/aluminum/copper tariffs signed Apr 2. Peak consumer impact expected Apr-Oct 2026. Construction and manufacturing stocks may face pressure as input costs rise."
+    },
+    {
+      "risk": "Week-ahead inflation data",
+      "severity": "HIGH",
+      "detail": "Core PCE (Thu) and CPI (Fri) both due this week. Hot prints could trigger major sell-off given already-elevated oil prices feeding into inflation expectations. FOMC minutes (Thu) add to volatility."
+    }
   ],
+
   "instrument_news": {
-    "XAG-USD": "Silver at $73, holding above $70.65 support. Targeting $73.80-$75.30. COT shows net-long exposure decreasing (bullish contrarian). Structural shortage from solar/EV/AI industrial demand. FXEmpire targeting $100 breakout in 2026.",
-    "XAU-USD": "Gold at $4,673. JPM forecasts $5,055 by Q4 2026, Commerzbank raised target to $5,000. Central bank buying uninterrupted. COT shows managed funds at 12.3K contracts net long. Support at $4,510, resistance $4,822.",
-    "BTC-USD": "BTC at $66,925, below $70K. Bearish chatter at 2026 peak. Fear & Greed at 9 (extreme fear). BTC ETF inflows only $8.9M (weak). Goldman Sachs signaling potential April recovery. Iran war paradox: dollar strength hurting BTC.",
-    "ETH-USD": "ETH at $2,058, down 2.59% 24h. ETH ETFs saw $71.1M inflow (much stronger than BTC). Price action lagging BTC. Extreme fear environment.",
-    "NVDA": "Trading $170-$177 range. Semis near breakeven for 2026 after being up double digits in Feb. Analyst calls on Apr 1.",
-    "PLTR": "Strong fundamentals: US sales $1.1B (+93% YoY). Analyst reiterated Buy with $200 PT (21% upside).",
-    "MSTR": "No specific April news found. Tracking BTC closely \u2014 with BTC below $70K, MSTR under pressure.",
-    "WTI_OIL": "WTI at $98-103/barrel. Iran war drove 51% rally from $76 in Jan to $115 peak in late March. Oil dropped when Iran signaled readiness to end war (Mar 31). OPEC+ adding 206K bpd."
+    "XAG-USD": "Silver at ~$72, near multi-decade highs. Gold/silver ratio compressed to ~64 (below 20yr mean of 70), indicating silver outperformance. Industrial demand strong (solar, EV, AI data centers). Supply deficit continues. Technical: support S1 $69.48, S2 $66.28; resistance R1 $75.87, R2 $79.06. SLV trading at $65.79. War premium supporting. CoinCodex forecast: $73.05 by Apr 11. Prophecy target $120 remains active with 0.8 conviction.",
+    "XAU-USD": "Gold at ~$4,677, holding near all-time highs. GLD holdings rose to 920 tonnes (from 840t end-2025). Net ETF inflows 78 tonnes in Jan-Feb 2026 (+73% YoY). Central bank buying on pace for 1,200+ tonnes in 2026 (~190t/quarter). JPMorgan expects $4,000-$6,300 range. Some bearish technical signals (Dark Cloud Cover, Bearish Engulfing) but fundamentals strong. Iran war safe-haven bid intact. Expected to trade $4,577-$4,761 range week of Apr 6.",
+    "BTC-USD": "Bitcoin consolidated around $67K-71K. Rejected at $71,500 resistance multiple times. Key support $66,000-$64,000. March ETF inflows rebounded to $1.32B, early April mixed. Corporate treasuries at record (public companies hold 1.1M+ BTC, ~5-6% of supply). Strategy (MSTR) continues aggressive accumulation. Whale activity shifting to altcoins (LINK, BCH), suggesting BTC distribution phase. Risk-off from Iran war pressuring. Need sustained break above $71,500 for bullish continuation.",
+    "ETH-USD": "Ethereum at $2,030-2,060, down ~6.5% for the week. Glamsterdam upgrade (biggest since The Merge) confirmed for June 2026: 10,000 TPS target, 78% gas fee reduction, gas limit 60M to 200M. DeFi TVL $55-68B. Harvard bought $86.8M in ETH ETF. Consolidating near $2,000 support. Upgrade is potential major catalyst but market currently focused on macro headwinds (Iran war, inflation). Mixed ETF flows.",
+    "SPY": "S&P 500 at 6,583 after +3.4% weekly gain. Near correction territory YTD (-4%). Strong jobs data (+178K) may reduce rate cut probability, pressuring growth stocks. Week ahead: PCE Thu, CPI Fri, FOMC minutes Thu. Fundstrat expects further consolidation Apr 5-9 before bottoming. Geopolitical risk remains elevated.",
+    "NVDA": "Part of tech sector that drove Nasdaq +4.4% weekly rally. Semiconductor stocks rallied to kick off Q2. Tariff risk on copper (50% flat rate) could impact chip supply chain costs. AI demand narrative intact.",
+    "TSLA": "Q1 deliveries rose YoY but fell from prior quarter, stock dropped 5%+ on Apr 2. Underperforming broader market recovery.",
+    "MSTR": "Strategy (formerly MicroStrategy) continues aggressive BTC accumulation. Public companies collectively hold 1.1M+ BTC. MSTR remains largest corporate holder. BTC price consolidation around $67-71K.",
+    "WTI-OIL": "WTI at $112+, highest since 2022. Surged 8-11% on Apr 2 after Trump Iran war speech. Strait of Hormuz 90-95% shipping reduction. OPEC+ symbolic May increase but cannot deliver barrels. JPMorgan expects Brent $110 Mar-Apr, declining to <$80 by Q3 if Hormuz reopens. Goldman expects war premium intact through April.",
+    "BRENT-OIL": "Brent at ~$109. Peaked at $126 on Mar 8. Largest supply disruption since 1973 oil embargo. OPEC+ constrained by Hormuz. If Hormuz reopens, prices could fall $30-40 rapidly.",
+    "PLTR": "Part of tech rally week. AI/defense spending narrative supportive amid Iran war.",
+    "AMD": "Semiconductor rally beneficiary. Monitor tariff impact on supply chain.",
+    "GOOGL": "Part of broader tech recovery. Mega-cap tech led Nasdaq +4.4% weekly gain.",
+    "AMZN": "Benefiting from broader tech rally. Consumer spending data mixed (strong jobs but tariff headwinds).",
+    "AAPL": "Part of mega-cap tech rally. Supply chain tariff exposure via China remains a concern.",
+    "META": "Social/advertising sector. Part of Nasdaq recovery rally.",
+    "AVGO": "Semiconductor/infrastructure. AI demand tailwind, tariff headwind on copper inputs."
   },
-  "metals_outlook": "Bullish medium-term. Gold structural support from central bank buying (emerging market reserve diversification). Silver industrial demand creating structural shortage. COT positioning not stretched on gold. Silver net-long decreasing = contrarian bullish. Key risk: dollar strength from Iran war paradox and hawkish NFP. Support: XAU $4,510 / XAG $70.65. Resistance: XAU $4,822 / XAG $75.30.",
-  "oil_outlook": "Elevated and volatile. WTI $98-103, down from $115 peak after Iran peace signals. OPEC+ adding 206K bpd on Apr 5. Strait of Hormuz partially disrupted. JPM expects Brent below $80 by Q3 if Hormuz eases. Key risk: Trump escalation vows could re-spike oil above $115. EIA projects $70-80 by year-end in base case.",
-  "sentiment_shift": "EXTREME FEAR across all assets. Crypto fear index at 9. Stock market Fear & Greed likely very low given Iran war + oil spike + Tesla -5%. Strong NFP (178K) creates hawkish repricing risk \u2014 market now pricing June cut as first, down from earlier expectations. The paradox: extreme fear is historically contrarian bullish, but the Iran war creates real tail risk that justifies some fear premium."
+
+  "metals_outlook": "BULLISH with near-term volatility. Gold ($4,677) supported by: (1) Iran war safe-haven demand, (2) record central bank buying (1,200+ tonnes pace), (3) ETF inflows accelerating (+73% YoY), (4) Fed on hold with inflation sticky. Risk: hot CPI/PCE data this week could strengthen USD and pressure gold short-term. Silver ($72) benefiting from: (1) gold/silver ratio compression to 64 (heading toward 50-60 range), (2) industrial demand surge (solar, EV, AI), (3) supply deficit, (4) war premium. Silver outperforming gold as ratio compresses. Key risk: PCE/CPI data Thu/Fri could cause sharp moves. Gold/silver ratio at 64 suggests silver still undervalued relative to gold historically (typical range 40-60 in bull markets). JPMorgan gold range $4,000-$6,300. Silver support at $69.50, resistance at $75.90.",
+
+  "crypto_outlook": "NEUTRAL-BEARISH near-term, BULLISH medium-term. BTC ($67-71K) trapped in range, repeated rejections at $71,500. Iran war creating risk-off headwind. ETF flows rebounded in March ($1.32B) but early April mixed. Whale activity rotating to altcoins (bearish for BTC short-term). Corporate treasuries at record levels (1.1M+ BTC in public companies). Key support $64-66K, break below opens $58-60K. ETH ($2,030-2,060) holding $2K support. Glamsterdam upgrade (June 2026) is major catalyst: 10x throughput, 78% gas reduction. Harvard buying ETH ETF ($86.8M). DeFi TVL $55-68B. Medium-term thesis intact (BTC $100K target, ETH $4K target) but needs macro headwinds to clear (Iran resolution, Fed clarity). Watch PCE/CPI this week -- hot inflation = more crypto pressure.",
+
+  "oil_outlook": "EXTREMELY ELEVATED with binary risk profile. WTI $112, Brent $109. Strait of Hormuz 90-95% blocked since Feb 28 (largest disruption since 1973). Iran selectively allowing China/Russia/India ships through. Trump ultimatum demanding Hormuz reopening -- escalation risk CRITICAL. OPEC+ Apr 5 meeting: symbolic May increase, but cannot deliver actual barrels through blocked strait. Peak Brent was $126 on Mar 8, now consolidating $105-115. BINARY OUTCOME: (1) Hormuz reopens or ceasefire = oil drops $30-40 rapidly to $70-80, (2) further escalation = oil could spike to $130-150. JPMorgan: Brent $110 through April, <$80 by Q3 if resolved. Goldman: war premium intact. EIA: Brent >$95 through Q2. Key watch: Trump's Tuesday 8PM ET deadline/address on Iran. Any Kuwait/Gulf infrastructure attacks could spike oil further.",
+
+  "sentiment_shift": "CAUTIOUS OPTIMISM with elevated tail risk. Markets snapped 5-week losing streak with +3.4% S&P rally, driven by end-of-war hopes early in the week (quickly dashed by Trump's Wednesday address). Strong jobs data (+178K) is double-edged: good for economy, bad for rate cuts. Fundstrat sees bottoming process but recommends waiting for Apr 5-9 consolidation before buying. Key sentiment drivers this week: (1) Iran war escalation/de-escalation -- binary risk, (2) PCE + CPI data -- hot prints could trigger major sell-off, (3) FOMC minutes -- clues on rate trajectory, (4) tariff impact beginning to feed through. Overall market positioning is cautious -- hedging activity elevated, VIX likely elevated. Gold and oil positioning reflects geopolitical fear. Crypto sentiment neutral, waiting for catalyst. The week of Apr 6-10 is one of the most event-dense weeks of Q2.",
+
+  "fed_outlook": {
+    "current_rate": "3.50-3.75%",
+    "last_meeting": "March 17-18 (held steady, 2nd consecutive hold)",
+    "next_meeting": "April 28-29",
+    "fomc_minutes_release": "April 9 (March meeting minutes)",
+    "rate_expectations": "Median dot: 1 cut in 2026, 1 in 2027. 7 of 19 members see no cuts in 2026. Strong jobs data reducing cut probability. Hot PCE/CPI this week could further delay any cuts.",
+    "key_concern": "Inflation remains somewhat elevated + oil price surge feeding through to CPI. Fed can take patient approach."
+  },
+
+  "geopolitical_risk": {
+    "iran_war": {
+      "status": "ACTIVE - Day 37 (started Feb 27, 2026)",
+      "latest": "Trump ultimatum for Hormuz reopening. Iran fired at Kuwait oil/power plants Apr 5. Iran claims downing 2 US C-130s, 2 Black Hawks. US F-15E pilot rescued. Iran selectively allowing China/Russia/India/Pakistan ships through Hormuz. Diplomatic efforts facing 'mounting distrust'.",
+      "strait_of_hormuz": "90-95% shipping reduction. Iran demands war damages payment before reopening. Selective access for allied nations.",
+      "oil_impact": "Largest supply disruption since 1973. Brent peaked $126, currently ~$109. WTI $112.",
+      "risk_level": "CRITICAL",
+      "key_watch": "Trump Tuesday 8PM ET deadline/address"
+    },
+    "tariffs": {
+      "latest": "Apr 2: New 50% tariff on steel/aluminum/copper articles. 25% on derivative articles. 15% on industrial/grid equipment (through 2027).",
+      "impact": "Peak consumer impact expected Apr-Oct 2026. Global trade realignment accelerating -- other countries cutting tariffs among themselves, bypassing US.",
+      "one_year_anniversary": "Liberation Day tariffs (Apr 2025) raised effective US tariff from 2.5% to 27%."
+    }
+  },
+
+  "weekly_closing_prices": {
+    "SPX": 6582.69,
+    "NASDAQ": 21879.18,
+    "DJIA": 46504.67,
+    "XAU_USD": 4676.64,
+    "XAG_USD": 72.55,
+    "BTC_USD": 67400,
+    "ETH_USD": 2060,
+    "WTI": 112,
+    "BRENT": 109,
+    "GOLD_SILVER_RATIO": 64.0,
+    "note": "Prices approximate as of Apr 3-4 close (Good Friday shortened session)"
+  },
+
+  "actionable_signals": [
+    {
+      "instrument": "XAG-USD",
+      "bias": "BULLISH",
+      "confidence": 0.70,
+      "rationale": "Gold/silver ratio compressing (64, heading toward 50-60 range). Industrial demand surge. Supply deficit. War premium. Support at $69.50.",
+      "risk": "Hot CPI/PCE data could cause short-term pullback. USD strength headwind."
+    },
+    {
+      "instrument": "XAU-USD",
+      "bias": "BULLISH",
+      "confidence": 0.65,
+      "rationale": "Safe-haven demand from Iran war. Record central bank buying. ETF inflows accelerating. Range $4,577-$4,761 expected.",
+      "risk": "Bearish technical patterns forming. Hot inflation data could trigger USD rally."
+    },
+    {
+      "instrument": "BTC-USD",
+      "bias": "NEUTRAL",
+      "confidence": 0.45,
+      "rationale": "Range-bound $64-71.5K. ETF flows mixed. Whale rotation to alts. Corporate accumulation supportive long-term.",
+      "risk": "Repeated $71.5K rejections bearish. Iran risk-off. Break below $64K opens $58-60K."
+    },
+    {
+      "instrument": "ETH-USD",
+      "bias": "NEUTRAL-BULLISH",
+      "confidence": 0.50,
+      "rationale": "Glamsterdam upgrade June 2026 is major catalyst. Harvard buying ETH ETF. $2,000 support holding.",
+      "risk": "Underperforming BTC (-6.5% weekly). Macro headwinds dominant near-term."
+    },
+    {
+      "instrument": "OIL",
+      "bias": "BINARY",
+      "confidence": 0.40,
+      "rationale": "AVOID directional bets. Binary outcome: Hormuz resolution = crash to $70-80, escalation = spike to $130-150. Not a tradeable setup.",
+      "risk": "Maximum uncertainty. Trump Tuesday deadline is key catalyst."
+    },
+    {
+      "instrument": "SPY",
+      "bias": "CAUTIOUS",
+      "confidence": 0.50,
+      "rationale": "Snapped 5-week losing streak but near correction territory. Consolidation expected Apr 5-9. Strong jobs data mixed signal.",
+      "risk": "PCE/CPI/FOMC minutes triple event risk Thu-Fri. Iran escalation. Tariff headwinds."
+    }
+  ]
 }
