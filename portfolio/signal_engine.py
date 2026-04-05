@@ -145,11 +145,15 @@ REGIME_WEIGHTS = {
         "mean_reversion": 0.6, "fibonacci": 0.7,
     },
     "ranging": {
-        "rsi": 1.5, "bb": 1.5, "ema": 0.5, "macd": 0.5,
+        "rsi": 1.5, "bb": 1.5, "ema": 0.5,
+        # 2026-04-05 audit: macd 58.7% recent (crossover catches range turns)
+        "macd": 1.3,
         # Enhanced: boost mean-reversion and level-based signals
-        # 2026-03-31: fibonacci 68.2% recent — boost to 1.6
-        # fear_greed 25.9% — penalize to 0.3
-        "mean_reversion": 1.5, "fibonacci": 1.6, "calendar": 1.2,
+        # 2026-04-05 audit: fibonacci 68.2% recent — boost to 1.8 (was 1.6)
+        # mean_reversion 65.4% recent — boost to 1.7 (was 1.5)
+        # ministral 68.0% recent — add 1.4 (was unweighted)
+        "mean_reversion": 1.7, "fibonacci": 1.8, "calendar": 1.2,
+        "ministral": 1.4,
         # 2026-04-04: BUG-161 — oscillators 34-39% per-ticker in ranging.
         # Was 1.2x (boosted), now 0.3x (heavily penalized).
         "oscillators": 0.3,

@@ -806,8 +806,10 @@ class TestRegimeWeightsConstant:
     def test_ranging_has_enhanced_weights(self):
         """Enhanced signals should have regime weights in ranging."""
         rw = REGIME_WEIGHTS["ranging"]
-        assert rw["mean_reversion"] == 1.5
-        assert rw["fibonacci"] == 1.6  # updated 2026-03-31 (68.2% recent accuracy)
+        assert rw["mean_reversion"] == 1.7  # 2026-04-05: 65.4% recent, boosted from 1.5
+        assert rw["fibonacci"] == 1.8  # 2026-04-05: 68.2% recent, boosted from 1.6
+        assert rw["ministral"] == 1.4  # 2026-04-05: 68.0% recent, newly added
+        assert rw["macd"] == 1.3  # 2026-04-05: 58.7% recent, newly added
         assert rw["trend"] == 0.5
         assert rw["fear_greed"] == 0.3  # added 2026-03-31 (25.9% recent accuracy)
 
@@ -1096,8 +1098,8 @@ class TestActivityRateCap:
             votes, accuracy, "ranging", activation_rates=activation
         )
         # rsi: 0.55 * 1.5(regime ranging) * 1.0 = 0.825
-        # fibonacci: 0.55 * 1.6(regime ranging) * 1.0 = 0.88
-        # fibonacci BUY wins (updated 2026-03-31: fibonacci ranging weight 1.4 -> 1.6)
+        # fibonacci: 0.55 * 1.8(regime ranging) * 1.0 = 0.99
+        # fibonacci BUY wins (updated 2026-04-05: fibonacci ranging weight 1.6 -> 1.8)
         assert action == "BUY"
 
 
