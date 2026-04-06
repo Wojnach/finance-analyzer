@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.file_utils import load_json, load_jsonl
-from portfolio.market_timing import MARKET_OPEN_HOUR, _market_close_hour_utc
+from portfolio.market_timing import _eu_market_open_hour_utc, _market_close_hour_utc
 from portfolio.message_store import send_or_store
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -76,8 +76,9 @@ def hours_to_us_close(now: datetime | None = None) -> float:
     close_hour = _market_close_hour_utc(now)
     if now.hour >= close_hour:
         return 0.0
-    if now.hour < MARKET_OPEN_HOUR:
-        return float(close_hour - MARKET_OPEN_HOUR)
+    eu_open = _eu_market_open_hour_utc(now)
+    if now.hour < eu_open:
+        return float(close_hour - eu_open)
     return max(0.0, close_hour - now.hour - now.minute / 60.0)
 
 

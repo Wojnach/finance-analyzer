@@ -644,12 +644,17 @@ def _trigger_self_heal(violations: list[Violation], tracker: ViolationTracker,
             len(critical), loop_name,
         )
         tracker.record_heal()
+        # C1: Self-heal is read-only by default — diagnostic only.
+        # Previously granted Edit+Bash+Write which allowed unreviewed
+        # code modification during critical failures (worst time for
+        # autonomous changes). Now restricted to read-only tools.
         invoke_claude(
             prompt=prompt,
             caller=f"loop_contract_{loop_name}",
             model="sonnet",
             max_turns=15,
             timeout=180,
+            allowed_tools="Read,Grep,Glob",
         )
     except Exception as e:
         logger.warning("Self-healing invocation failed: %s", e)

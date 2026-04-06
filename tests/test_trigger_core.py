@@ -767,12 +767,12 @@ class TestClassifyTierPostTrade:
 # ---------------------------------------------------------------------------
 
 class TestClassifyTierPeriodicReview:
-    def test_market_hours_2h_since_last_full_review(self, market_hours_context):
-        """During market hours, 2+ hours since last full review -> Tier 3."""
+    def test_market_hours_4h_since_last_full_review(self, market_hours_context):
+        """During market hours, 4+ hours since last full review -> Tier 3."""
         m = market_hours_context()
         try:
             state = {
-                "last_full_review_time": time.time() - 7201,  # 2+ hours ago
+                "last_full_review_time": time.time() - 14401,  # 4+ hours ago
                 "today_date": trigger_mod._today_str(),
             }
             reasons = ["cooldown (10min)"]
@@ -782,7 +782,7 @@ class TestClassifyTierPeriodicReview:
             m.stop()
 
     def test_offhours_4h_since_last_full_review(self, offhours_context):
-        """During off-hours, 4+ hours since last full review -> Tier 3."""
+        """During off-hours, 4+ hours since last full review -> T1 (not T3)."""
         m = offhours_context()
         try:
             state = {
@@ -791,16 +791,16 @@ class TestClassifyTierPeriodicReview:
             }
             reasons = ["crypto check-in (2h)"]
             tier = classify_tier(reasons, state=state)
-            assert tier == 3
+            assert tier == 1  # Off-hours caps at T1, saves T3 for market hours
         finally:
             m.stop()
 
-    def test_market_hours_within_2h_no_upgrade(self, market_hours_context):
-        """During market hours, within 2h of last full review -> no Tier 3 upgrade."""
+    def test_market_hours_within_4h_no_upgrade(self, market_hours_context):
+        """During market hours, within 4h of last full review -> no Tier 3 upgrade."""
         m = market_hours_context()
         try:
             state = {
-                "last_full_review_time": time.time() - 3600,  # 1 hour ago
+                "last_full_review_time": time.time() - 7200,  # 2 hours ago
                 "today_date": trigger_mod._today_str(),
             }
             reasons = ["cooldown (10min)"]
