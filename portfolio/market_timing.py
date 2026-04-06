@@ -1,6 +1,10 @@
-"""Market timing utilities — DST-aware NYSE and EU hours, market state detection."""
+"""Market timing utilities — DST-aware NYSE and EU hours, market state detection.
 
-from datetime import UTC, date, datetime
+Includes US (NYSE) and Swedish (Nasdaq Stockholm / Avanza) holiday calendars
+so the system skips stock/warrant processing on public holidays, not just weekends.
+"""
+
+from datetime import UTC, date, datetime, timedelta
 
 from portfolio.tickers import CRYPTO_SYMBOLS, METALS_SYMBOLS, STOCK_SYMBOLS, SYMBOLS
 
@@ -89,17 +93,141 @@ def _market_close_hour_utc(dt):
     return 21
 
 
+# ---------------------------------------------------------------------------
+# Holiday calendars
+# ---------------------------------------------------------------------------
+
+
+def _easter_sunday(year):
+    """Compute Easter Sunday for a given year using the Anonymous Gregorian algorithm."""
+    a = year % 19
+    b, c = divmod(year, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    l = (32 + 2 * e + 2 * i - h - k) % 7  # noqa: E741
+    m = (a + 11 * h + 22 * l) // 451
+    month, day = divmod(h + l - 7 * m + 114, 31)
+    return date(year, month, day + 1)
+
+
+def _observed(d):
+    """Return the NYSE-observed date for a fixed holiday.
+
+    If the holiday falls on Saturday, NYSE observes it Friday.
+    If Sunday, NYSE observes it Monday.
+    """
+    if d.weekday() == 5:  # Saturday
+        return d - timedelta(days=1)
+    if d.weekday() == 6:  # Sunday
+        return d + timedelta(days=1)
+    return d
+
+
+def _nth_weekday(year, month, weekday, n):
+    """Return the nth occurrence of a weekday in a given month.
+
+    weekday: 0=Mon, 6=Sun.  n: 1-based (1=first, 2=second, etc.)
+    """
+    first = date(year, month, 1)
+    offset = (weekday - first.weekday()) % 7
+    return first + timedelta(days=offset + 7 * (n - 1))
+
+
+def _last_weekday(year, month, weekday):
+    """Return the last occurrence of a weekday in a given month."""
+    if month == 12:
+        next_month = date(year + 1, 1, 1)
+    else:
+        next_month = date(year, month + 1, 1)
+    last_day = next_month - timedelta(days=1)
+    offset = (last_day.weekday() - weekday) % 7
+    return last_day - timedelta(days=offset)
+
+
+def us_market_holidays(year):
+    """Return the set of NYSE holiday dates for a given year.
+
+    Covers all 10 NYSE holidays including observed-date shifts.
+    """
+    easter = _easter_sunday(year)
+    holidays = {
+        _observed(date(year, 1, 1)),                 # New Year's Day
+        _nth_weekday(year, 1, 0, 3),                 # MLK Day (3rd Mon Jan)
+        _nth_weekday(year, 2, 0, 3),                 # Presidents' Day (3rd Mon Feb)
+        easter - timedelta(days=2),                   # Good Friday
+        _last_weekday(year, 5, 0),                    # Memorial Day (last Mon May)
+        _observed(date(year, 6, 19)),                 # Juneteenth
+        _observed(date(year, 7, 4)),                  # Independence Day
+        _nth_weekday(year, 9, 0, 1),                  # Labor Day (1st Mon Sep)
+        _nth_weekday(year, 11, 3, 4),                 # Thanksgiving (4th Thu Nov)
+        _observed(date(year, 12, 25)),                # Christmas
+    }
+    return holidays
+
+
+def is_us_market_holiday(dt=None):
+    """Return True if the given UTC datetime falls on a NYSE holiday."""
+    if dt is None:
+        dt = datetime.now(UTC)
+    d = dt.date() if hasattr(dt, "date") else dt
+    return d in us_market_holidays(d.year)
+
+
+def swedish_market_holidays(year):
+    """Return the set of Nasdaq Stockholm / Avanza holiday dates for a given year.
+
+    Covers full days when Avanza warrant trading is closed.
+    """
+    easter = _easter_sunday(year)
+
+    # Midsummer Eve: Friday before Midsummer Day (Saturday between Jun 20-26)
+    # Midsummer Day = first Saturday on or after Jun 20
+    jun20 = date(year, 6, 20)
+    days_to_sat = (5 - jun20.weekday()) % 7
+    midsummer_day = jun20 + timedelta(days=days_to_sat)
+    midsummer_eve = midsummer_day - timedelta(days=1)
+
+    holidays = {
+        date(year, 1, 1),                            # New Year's Day
+        date(year, 1, 6),                             # Epiphany
+        easter - timedelta(days=2),                   # Good Friday
+        easter + timedelta(days=1),                   # Easter Monday
+        date(year, 5, 1),                             # May Day
+        easter + timedelta(days=39),                  # Ascension Day
+        date(year, 6, 6),                             # National Day
+        midsummer_eve,                                # Midsummer Eve
+        date(year, 12, 24),                           # Christmas Eve
+        date(year, 12, 25),                           # Christmas Day
+        date(year, 12, 26),                           # Boxing Day
+        date(year, 12, 31),                           # New Year's Eve
+    }
+    return holidays
+
+
+def is_swedish_market_holiday(dt=None):
+    """Return True if the given UTC datetime falls on a Swedish market holiday."""
+    if dt is None:
+        dt = datetime.now(UTC)
+    d = dt.date() if hasattr(dt, "date") else dt
+    return d in swedish_market_holidays(d.year)
+
+
 def _is_agent_window(now=None):
     """Check if current time is within the Layer 2 invocation window.
 
     Window: EU market open through US market close.
     Summer: 07:00–20:00 UTC
     Winter: 08:00–21:00 UTC
-    Weekends: no agent invocation.
+    Weekends and US market holidays: no agent invocation.
     """
     if now is None:
         now = datetime.now(UTC)
     if now.weekday() >= 5:
+        return False
+    if is_us_market_holiday(now):
         return False
     eu_open = _eu_market_open_hour_utc(now)
     close_hour = _market_close_hour_utc(now)
@@ -132,6 +260,8 @@ def is_us_stock_market_open(now=None, pre_market_buffer_min=0, post_market_buffe
     if now is None:
         now = datetime.now(UTC)
     if now.weekday() >= 5:
+        return False
+    if is_us_market_holiday(now):
         return False
 
     open_hour = _market_open_hour_utc(now)
@@ -176,6 +306,9 @@ def get_market_state():
     always_on = CRYPTO_SYMBOLS | METALS_SYMBOLS
     if weekday >= 5:
         return "weekend", always_on, INTERVAL_WEEKEND
+    # US holiday: treat like off-hours (crypto + metals only, 2-min interval)
+    if is_us_market_holiday(now):
+        return "holiday", always_on, INTERVAL_MARKET_CLOSED
     eu_open = _eu_market_open_hour_utc(now)
     close_hour = _market_close_hour_utc(now)
     if eu_open <= hour < close_hour:

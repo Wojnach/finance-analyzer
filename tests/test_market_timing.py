@@ -4,7 +4,7 @@ Tests DST detection, NYSE close hour calculation, agent window logic,
 and market state determination with mocked datetimes.
 """
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -14,10 +14,15 @@ from portfolio.market_timing import (
     INTERVAL_MARKET_OPEN,
     INTERVAL_WEEKEND,
     MARKET_OPEN_HOUR,
+    _easter_sunday,
     _is_agent_window,
     _is_us_dst,
     _market_close_hour_utc,
     get_market_state,
+    is_swedish_market_holiday,
+    is_us_market_holiday,
+    swedish_market_holidays,
+    us_market_holidays,
 )
 
 # ---------------------------------------------------------------------------
@@ -841,3 +846,233 @@ class TestDstMultipleYears:
             year, 11, expected_first_sun_nov, 6, 0, tzinfo=UTC
         )
         assert _is_us_dst(at_end) is False
+
+
+# ===========================================================================
+# 14. _easter_sunday() — verified against known Easter dates
+# ===========================================================================
+
+class TestEasterSunday:
+    """Easter algorithm validated against known dates for 2024-2030."""
+
+    @pytest.mark.parametrize("year, expected_month, expected_day", [
+        (2024, 3, 31),
+        (2025, 4, 20),
+        (2026, 4, 5),
+        (2027, 3, 28),
+        (2028, 4, 16),
+        (2029, 4, 1),
+        (2030, 4, 21),
+    ])
+    def test_known_easters(self, year, expected_month, expected_day):
+        result = _easter_sunday(year)
+        assert result == date(year, expected_month, expected_day)
+
+
+# ===========================================================================
+# 15. US market holidays — known 2026 dates
+# ===========================================================================
+
+class TestUSMarketHolidays:
+    """Verify NYSE holiday calendar for 2026 against known dates."""
+
+    def test_2026_holidays(self):
+        holidays = us_market_holidays(2026)
+        expected = {
+            date(2026, 1, 1),    # New Year's Day (Thursday)
+            date(2026, 1, 19),   # MLK Day (3rd Monday Jan)
+            date(2026, 2, 16),   # Presidents' Day (3rd Monday Feb)
+            date(2026, 4, 3),    # Good Friday (Easter Apr 5)
+            date(2026, 5, 25),   # Memorial Day (last Monday May)
+            date(2026, 6, 19),   # Juneteenth (Friday)
+            date(2026, 7, 3),    # Independence Day observed (Jul 4 = Saturday → Friday)
+            date(2026, 9, 7),    # Labor Day (1st Monday Sep)
+            date(2026, 11, 26),  # Thanksgiving (4th Thursday Nov)
+            date(2026, 12, 25),  # Christmas (Friday)
+        }
+        assert holidays == expected
+
+    def test_2027_independence_day_observed(self):
+        """Jul 4 2027 is a Sunday → observed Monday Jul 5."""
+        holidays = us_market_holidays(2027)
+        assert date(2027, 7, 5) in holidays
+        assert date(2027, 7, 4) not in holidays
+
+    def test_holiday_count(self):
+        """NYSE has exactly 10 holidays per year."""
+        for year in range(2024, 2031):
+            holidays = us_market_holidays(year)
+            assert len(holidays) == 10, f"Year {year}: expected 10, got {len(holidays)}"
+
+    def test_no_weekend_holidays(self):
+        """All returned dates should be weekdays (observed-date shifts handle this)."""
+        for year in range(2024, 2031):
+            for d in us_market_holidays(year):
+                assert d.weekday() < 5, f"{d} is a weekend day in {year}"
+
+
+class TestIsUSMarketHoliday:
+    """Test the is_us_market_holiday() convenience function."""
+
+    def test_good_friday_2026(self):
+        dt = datetime(2026, 4, 3, 14, 0, tzinfo=UTC)
+        assert is_us_market_holiday(dt) is True
+
+    def test_easter_monday_not_us_holiday(self):
+        """Easter Monday is NOT a US market holiday (it IS a Swedish one)."""
+        dt = datetime(2026, 4, 6, 14, 0, tzinfo=UTC)
+        assert is_us_market_holiday(dt) is False
+
+    def test_regular_monday(self):
+        dt = datetime(2026, 3, 2, 14, 0, tzinfo=UTC)
+        assert is_us_market_holiday(dt) is False
+
+    def test_christmas_2026(self):
+        dt = datetime(2026, 12, 25, 14, 0, tzinfo=UTC)
+        assert is_us_market_holiday(dt) is True
+
+    def test_accepts_date_object(self):
+        assert is_us_market_holiday(date(2026, 4, 3)) is True
+
+    def test_default_now(self):
+        """Calling with no args should not raise."""
+        result = is_us_market_holiday()
+        assert isinstance(result, bool)
+
+
+# ===========================================================================
+# 16. Swedish market holidays — known 2026 dates
+# ===========================================================================
+
+class TestSwedishMarketHolidays:
+    """Verify Nasdaq Stockholm / Avanza holiday calendar for 2026."""
+
+    def test_2026_holidays(self):
+        holidays = swedish_market_holidays(2026)
+        expected = {
+            date(2026, 1, 1),    # New Year's Day
+            date(2026, 1, 6),    # Epiphany
+            date(2026, 4, 3),    # Good Friday
+            date(2026, 4, 6),    # Easter Monday
+            date(2026, 5, 1),    # May Day
+            date(2026, 5, 14),   # Ascension Day (Easter + 39)
+            date(2026, 6, 6),    # National Day
+            date(2026, 6, 19),   # Midsummer Eve
+            date(2026, 12, 24),  # Christmas Eve
+            date(2026, 12, 25),  # Christmas Day
+            date(2026, 12, 26),  # Boxing Day
+            date(2026, 12, 31),  # New Year's Eve
+        }
+        assert holidays == expected
+
+    def test_easter_monday_is_swedish_holiday(self):
+        """Easter Monday 2026 (Apr 6) — the day that triggered this fix."""
+        assert date(2026, 4, 6) in swedish_market_holidays(2026)
+
+    def test_midsummer_eve_2026(self):
+        """Midsummer Eve 2026 = Fri Jun 19 (Midsummer Day = Sat Jun 20)."""
+        assert date(2026, 6, 19) in swedish_market_holidays(2026)
+
+    def test_midsummer_eve_2027(self):
+        """Midsummer Day 2027 = Sat Jun 26, Eve = Fri Jun 25."""
+        assert date(2027, 6, 25) in swedish_market_holidays(2027)
+
+    def test_holiday_count(self):
+        """Swedish market has 12 holidays per year."""
+        for year in range(2024, 2031):
+            holidays = swedish_market_holidays(year)
+            assert len(holidays) == 12, f"Year {year}: expected 12, got {len(holidays)}"
+
+    def test_ascension_day_always_thursday(self):
+        """Ascension Day is always a Thursday (Easter + 39 days)."""
+        for year in range(2024, 2031):
+            easter = _easter_sunday(year)
+            ascension = easter + timedelta(days=39)
+            assert ascension.weekday() == 3, f"Year {year}: Ascension not Thursday"
+            assert ascension in swedish_market_holidays(year)
+
+
+class TestIsSwedishMarketHoliday:
+    """Test the is_swedish_market_holiday() convenience function."""
+
+    def test_easter_monday_2026(self):
+        dt = datetime(2026, 4, 6, 10, 0, tzinfo=UTC)
+        assert is_swedish_market_holiday(dt) is True
+
+    def test_good_friday_2026(self):
+        dt = datetime(2026, 4, 3, 10, 0, tzinfo=UTC)
+        assert is_swedish_market_holiday(dt) is True
+
+    def test_regular_tuesday(self):
+        dt = datetime(2026, 3, 3, 10, 0, tzinfo=UTC)
+        assert is_swedish_market_holiday(dt) is False
+
+    def test_accepts_date_object(self):
+        assert is_swedish_market_holiday(date(2026, 4, 6)) is True
+
+
+# ===========================================================================
+# 17. Holiday integration — agent window and market state
+# ===========================================================================
+
+class TestHolidayAgentWindow:
+    """Agent window should be False on US market holidays."""
+
+    def test_good_friday_midday(self):
+        """Good Friday 2026 (Apr 3) at 14:00 UTC — would be agent window on normal Friday."""
+        now = datetime(2026, 4, 3, 14, 0, tzinfo=UTC)
+        assert _is_agent_window(now) is False
+
+    def test_mlk_day_midday(self):
+        """MLK Day 2026 (Jan 19) at 14:00 UTC — Monday holiday."""
+        now = datetime(2026, 1, 19, 14, 0, tzinfo=UTC)
+        assert _is_agent_window(now) is False
+
+    def test_day_after_good_friday(self):
+        """Saturday after Good Friday — still False (weekend)."""
+        now = datetime(2026, 4, 4, 14, 0, tzinfo=UTC)
+        assert _is_agent_window(now) is False
+
+    def test_monday_after_easter(self):
+        """Easter Monday is NOT a US holiday — agent window should be True."""
+        now = datetime(2026, 4, 6, 14, 0, tzinfo=UTC)
+        assert _is_agent_window(now) is True
+
+
+class TestHolidayMarketState:
+    """get_market_state() should return 'holiday' on US holidays."""
+
+    @patch("portfolio.market_timing.datetime")
+    def test_good_friday_returns_holiday(self, mock_dt):
+        fake_now = datetime(2026, 4, 3, 14, 0, tzinfo=UTC)
+        mock_dt.now.return_value = fake_now
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+
+        state, symbols, interval = get_market_state()
+        assert state == "holiday"
+        assert interval == INTERVAL_MARKET_CLOSED
+
+    @patch("portfolio.market_timing.datetime")
+    def test_christmas_returns_holiday(self, mock_dt):
+        fake_now = datetime(2026, 12, 25, 14, 0, tzinfo=UTC)
+        mock_dt.now.return_value = fake_now
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+
+        state, _, _ = get_market_state()
+        assert state == "holiday"
+
+    @patch("portfolio.market_timing.datetime")
+    def test_holiday_only_has_crypto_and_metals(self, mock_dt):
+        """On holidays, only crypto + metals should be active (no US stocks)."""
+        from portfolio.tickers import CRYPTO_SYMBOLS, METALS_SYMBOLS, STOCK_SYMBOLS
+
+        fake_now = datetime(2026, 4, 3, 14, 0, tzinfo=UTC)
+        mock_dt.now.return_value = fake_now
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+
+        _, symbols, _ = get_market_state()
+        # Should contain crypto + metals
+        assert CRYPTO_SYMBOLS.issubset(symbols)
+        assert METALS_SYMBOLS.issubset(symbols)
+        # Should NOT contain any stock symbols
+        assert not (symbols & STOCK_SYMBOLS)

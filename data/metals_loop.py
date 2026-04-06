@@ -55,6 +55,7 @@ from playwright.sync_api import sync_playwright
 
 from portfolio.file_utils import atomic_append_jsonl, atomic_write_json
 from portfolio.loop_contract import MetalsCycleReport, ViolationTracker, verify_and_act, verify_metals_contract
+from portfolio.market_timing import is_swedish_market_holiday
 
 try:
     from portfolio.notification_text import (
@@ -985,11 +986,18 @@ def cet_time_str():
     return ts
 
 def is_market_hours():
-    """Check if Avanza commodity warrant market is open (Mon-Fri 08:15-21:55 Stockholm time)."""
+    """Check if Avanza commodity warrant market is open (Mon-Fri 08:15-21:55 Stockholm time).
+
+    Returns False on weekends and Swedish public holidays.
+    """
     now = datetime.datetime.now(datetime.UTC)
     weekday = now.weekday()
+    if weekday >= 5:
+        return False
+    if is_swedish_market_holiday(now):
+        return False
     h = cet_hour()
-    return weekday < 5 and 8.25 <= h <= 21.92
+    return 8.25 <= h <= 21.92
 
 def is_avanza_open():
     """Check if Avanza warrant market is open for trading."""
