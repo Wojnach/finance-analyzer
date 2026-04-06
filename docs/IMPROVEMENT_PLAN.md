@@ -1,199 +1,185 @@
-# Improvement Plan — Auto-Session 2026-04-04
+# Improvement Plan — Auto-Session 2026-04-06
 
-Updated: 2026-04-04
-Branch: improve/auto-session-2026-04-04
+Updated: 2026-04-06
+Branch: improve/auto-session-2026-04-06
 
-Previous session (2026-04-02): Batches 10-12 completed (llama_server race fix, cache dogpile, dead code).
-Previous session (2026-04-01): Batches 5-7 completed (signal tracking, metals JSONL safety, doc consistency).
-
-## Status of Previous Batches
-
-| Batch | Target | Status |
-|-------|--------|--------|
-| 8 | Ruff auto-fixes (F401/F541/F841/I001) | **Partial** — F401/F541/F841 done, 2 I001 remain |
-| 9 | SIM105 conversions (llama_server) | **Done** — only 1 SIM105 remains (main.py:84) |
-| 10 | llama_server race fix (BUG-165) | **Done** — query-scoped locking implemented |
-| 11 | Cache dogpile (BUG-166) | **Done** — `_loading_keys` pattern in shared_state |
-| 12 | Dead code + docs (BUG-167) | **Done** — `_CORE_SIGNAL_SET` removed |
+**Source:** Adversarial review synthesis (2026-04-05) — 10 critical, ~45 high findings.
+Previous sessions fixed BUG-80 through BUG-170 + REF-16 through REF-44.
+This session addresses the adversarial review findings in prioritized batches.
 
 ---
 
-## 1. Bugs & Problems Found
+## 1. Bugs & Problems to Fix (from Adversarial Review)
 
-### P2 — Important
+### Batch 1: Safety-Critical Fixes (C2, H18, H34, H35)
 
-#### BUG-168: llama_server.py — `_ensure_model()` missing global declaration
-- **File**: `portfolio/llama_server.py:265-273`
-- **Problem**: `_ensure_model()` assigns `_local_model = name` on line 270 without a
-  `global _local_model` declaration. This creates a local variable that is immediately
-  discarded. The module-level `_local_model` is never updated in the cross-process case
-  (when another process started the correct model).
-- **Impact**: Low — `_local_model` is only used by `_stop_server()` for cleanup, and
-  if the server was started by another process, `_local_proc` would be None anyway.
-  However, it's semantically wrong and could confuse maintainers.
-- **Fix**: Add `global _local_model` or remove the dead assignment.
-- **Risk**: Zero.
+#### C2: `place_order_no_page` fails open — non-BUY becomes live SELL
+- **File**: `portfolio/avanza_control.py:313-325`
+- **Problem**: Any non-"BUY" side (None, empty, "HOLD", typo) falls through to SELL.
+- **Impact**: A bug in any caller could liquidate a position.
+- **Fix**: Strict validation: `if normalized_side not in ("BUY", "SELL"): raise ValueError(...)`.
+- **Risk**: Zero — adds a guard, doesn't change happy path.
 
-#### BUG-169: indicators.py — `_regime_cache` not thread-safe
-- **File**: `portfolio/indicators.py:124-168`, `portfolio/shared_state.py:151-152`
-- **Problem**: `_regime_cache` and `_regime_cache_cycle` are plain dict/int in
-  `shared_state.py`, accessed without locks from 8 concurrent threads via
-  `indicators.detect_regime()`. The check-then-clear pattern at lines 124-126 is racy:
-  Thread A clears cache, Thread B computes and stores result, Thread C clears cache again.
-- **Impact**: P3 in practice — worst case is redundant computation (same regime computed
-  twice for the same ticker). Cannot produce wrong results. But it's a correctness gap
-  that would become P1 if the cache stored mutable values or had side effects.
-- **Fix**: Add a `_regime_lock = threading.Lock()` in shared_state.py. Wrap the
-  check-and-clear and the read-or-compute patterns.
-- **Risk**: Zero — adding a lock to a hot path adds ~1μs per call, negligible vs. the
-  computation cost.
+#### H18: `delete_stop_loss_no_page` ignores API result, reports false success
+- **File**: `portfolio/avanza_control.py:361-374`
+- **Problem**: Always returns `True` for any non-exception response, even on API errors.
+- **Fix**: Parse response for success indicator; return `False` on unexpected response.
+- **Risk**: Zero — makes error reporting more honest.
 
-#### BUG-170: fear_greed.py — Non-atomic streak file write
-- **File**: `portfolio/fear_greed.py:69`
-- **Problem**: `_STREAK_FILE.write_text(json.dumps(data, indent=2))` is non-atomic.
-  A crash during write could corrupt the streak file.
-- **Impact**: P3 — streak data is non-critical. Loss would only affect the streak counter
-  (not trading decisions).
-- **Fix**: Replace with `atomic_write_json(_STREAK_FILE, data)`.
-- **Risk**: Zero.
+#### H34: `atomic_write_json` doesn't fsync before os.replace
+- **File**: `portfolio/file_utils.py:13-28`
+- **Problem**: No `f.flush()` + `os.fsync()` before `os.replace()`. Data may be in OS
+  buffer when rename happens. Power loss could result in zero-byte file.
+- **Impact**: Portfolio state, accuracy cache, health state could all be lost.
+- **Fix**: Add `f.flush(); os.fsync(f.fileno())` before `os.replace()`.
+- **Risk**: Zero — adds durability guarantee. Marginal I/O cost (~1ms).
 
-#### BUG-171: llm_batch.py — Ministral/Qwen3 parse result asymmetry
-- **File**: `portfolio/llm_batch.py:89-115`
-- **Problem**: Ministral parse wraps in `{"original": {...}, "custom": None}` while
-  Qwen3 returns flat `{"action": ..., "reasoning": ..., "model": ...}`. These results
-  are stored in the shared cache via `_update_cache()`. If callers expect a consistent
-  format, one path will break.
-- **Impact**: Depends on callers — needs verification. If both callers handle their own
-  format, this is P3 cosmetic. If not, P2 bug.
-- **Fix**: Verify caller expectations in `signal_engine.py` for both ministral and qwen3
-  cache reads. Normalize if needed.
-- **Risk**: Low — need to trace caller paths first.
+#### H35: `load_json` silent-default hides corruption
+- **File**: `portfolio/file_utils.py:31-48`
+- **Problem**: All errors (including JSONDecodeError on corrupt data) silently return
+  `default`. Callers cannot distinguish "file missing" from "file corrupt".
+- **Fix**: Add `require_json()` variant that raises on corruption. Keep `load_json()`
+  for backward compat but add WARNING-level log on JSONDecodeError.
+- **Risk**: Zero — additive, existing callers unchanged.
 
-### P3 — Minor (lint, style)
+### Batch 2: Portfolio State Safety (C7, C8)
 
-#### REF-39: 7 auto-fixable ruff issues
-- 2 I001 (unsorted imports): `llm_batch.py:108`, `main.py:513`
-- 1 UP015 (redundant open mode): `llama_server.py:124`
-- 1 UP017 (datetime.UTC alias): `signals/news_event.py:92`
-- 3 SIM114 (same-arms if): `indicators.py:163`, `signals/crypto_macro.py:150,154`
+#### C7: `load_state` silently regenerates defaults on corrupt JSON
+- **File**: `portfolio/portfolio_mgr.py:39-44`
+- **Problem**: On load failure, returns fresh defaults. Next `save_state()` permanently
+  destroys transaction history.
+- **Fix**: On load failure, log CRITICAL + create `.bak` rolling backup on every
+  successful save. If underlying load_json returns None (corruption), raise or
+  return read-only state.
+- **Risk**: Low — tested path, additive backup logic.
 
-#### REF-40: 2 B007 unused loop variables in llm_batch.py
-- **File**: `portfolio/llm_batch.py:47,57`
-- **Problem**: `cache_key` (line 47) and `ctx` (line 57) are not used within their
-  respective loop bodies.
-- **Fix**: Prefix with `_` to indicate intentional disuse.
+#### C8: Portfolio state has no concurrency safety
+- **File**: `portfolio/portfolio_mgr.py:39-61`
+- **Problem**: No lock between `load_state()` and `save_state()`. Concurrent callers
+  can overwrite each other's mutations.
+- **Fix**: Add `update_state(fn)` that holds a threading lock during read-modify-write.
+  Existing `load_state/save_state` kept for backward compat.
+- **Risk**: Low — lock is process-scoped, matches existing usage.
 
-#### REF-41: 6 E741 ambiguous variable name `l`
-- **Files**: `log_rotation.py:214,218,222`, `signals/heikin_ashi.py:79`,
-  `signals/mean_reversion.py:106,294`
-- **Fix**: Rename `l` to descriptive names (`line`, `low`, etc.).
+### Batch 3: Dead Code Giving False Security (C4, C6)
 
-#### REF-42: 1 SIM101 duplicate isinstance
-- **File**: `signals/calendar_seasonal.py:381`
-- **Fix**: Merge into single `isinstance(last_time, (datetime, str))`.
+#### C4: `record_trade()` has ZERO production call sites
+- **File**: `portfolio/trade_guards.py:171-219`
+- **Problem**: Entire overtrading guard system is non-functional. Function works (tested)
+  but nobody calls it from production code.
+- **Fix**: Wire `record_trade()` calls in `portfolio_mgr.save_state/save_bold_state`.
+  When `transactions` list grows, extract the new trade and call `record_trade()`.
+- **Risk**: Medium — touches trade path. Wire recording only, defer enforcement.
 
-#### REF-43: 2 E731 lambda assignments
-- **Files**: `avanza_control.py:270`, `avanza_session.py:304`
-- **Fix**: Convert to def functions.
+#### C6: MWU signal weights written to disk but never read by engine
+- **File**: `portfolio/signal_weights.py`, `portfolio/outcome_tracker.py`
+- **Problem**: `SignalWeightManager.batch_update()` writes to `signal_weights.json`
+  but `signal_engine.py` never reads it. Dead CPU + disk I/O.
+- **Fix**: Remove the dead write path from `outcome_tracker.py`. Keep
+  `SignalWeightManager` class for potential future use.
+- **Risk**: Zero — removing dead code.
 
-#### REF-44: 1 SIM105 remaining contextlib.suppress
-- **File**: `main.py:84`
-- **Fix**: Convert `try/except Exception: pass` to `contextlib.suppress(Exception)`.
+### Batch 4: Math & Signal Correctness (C9, C10, H26)
 
----
+#### C9: Monte-Carlo t-copula is an identity transform
+- **File**: `portfolio/monte_carlo_risk.py:270-290`
+- **Problem**: `t_dist.cdf(T, df) → U → t_dist.ppf(U, df)` round-trips to identity.
+  VaR/CVaR biased by ~sqrt(2).
+- **Fix**: Replace `t_dist.ppf()` with `norm.ppf()` for proper t-copula + Gaussian GBM.
+- **Risk**: Low — changes risk estimates to correct values.
 
-## 2. Architecture Improvements
+#### C10: Regime-gated signals cannot recover through data
+- **File**: `portfolio/signal_engine.py:1339-1355`, `portfolio/outcome_tracker.py`
+- **Problem**: Votes rewritten to HOLD before logging. Accuracy for gated signals
+  never accumulates — they can never be un-gated based on data.
+- **Fix**: Log raw pre-gate vote as `raw_vote` alongside gated `vote` in signal
+  snapshots. Accuracy computation can use `raw_vote` when present.
+- **Risk**: Low — additive field, doesn't change gating behavior.
 
-### ARCH-30: Regime cache thread safety (fixes BUG-169)
-- **Scope**: Add `_regime_lock` to protect `_regime_cache` and `_regime_cache_cycle`
-  in `shared_state.py`. Wrap access in `indicators.detect_regime()`.
-- **Impact**: Eliminates last known thread-safety gap in the parallel ticker processing
-  path. Completes the thread-safety story started by BUG-85/86.
-- **Risk**: Zero — lock overhead is negligible.
+#### H26: Fear/greed streaks count fetches not days
+- **File**: `portfolio/fear_greed.py:33-67`
+- **Problem**: `update_fear_streak()` increments `streak_days` on every call (every
+  60s loop cycle). After 24h, streak_days = 1440, not 1.
+- **Fix**: Compare `last_updated` date to current date. Only increment on date change.
+- **Risk**: Zero — streak data is informational only.
 
----
+### Batch 5: System Safety (C1, C5, H47)
 
-## 3. Implementation Batches
+#### C1: Self-heal grants Edit+Bash+Write to Claude CLI in live loop
+- **File**: `portfolio/loop_contract.py:625-653`
+- **Problem**: On critical violations, spawns Claude with write+bash access synchronously.
+  Blocks loop 180s + unreviewed code modification.
+- **Fix**: Make self-heal read-only: `allowed_tools="Read,Grep,Glob"`. Diagnostic only.
+- **Risk**: Zero — reduces permissions.
 
-### Batch 13: Ruff auto-fixes — REF-39
-**Scope**: Run `ruff check --fix` for I001, UP015, UP017. Manual fix for SIM114 (unsafe-fix).
-**Files**: 5 files
-**Test**: `ruff check portfolio/` clean for targeted rules
-**Risk**: Zero
+#### C5: Singleton lock no-ops on non-Windows
+- **File**: `portfolio/main.py:39-55`
+- **Problem**: On Linux/WSL, lock always returns True. No concurrent-writer protection.
+- **Fix**: Add `fcntl.flock()` for non-Windows. Raise RuntimeError if neither available.
+- **Risk**: Zero on Windows (no change). Adds safety on Linux/WSL.
 
-### Batch 14: Bug fixes — BUG-168, BUG-170, REF-40, REF-44
-**Scope**: Fix missing global in llama_server, atomic write in fear_greed, unused loop vars, contextlib.suppress
-**Files**: 4 files (llama_server.py, fear_greed.py, llm_batch.py, main.py)
-**Test**: Run relevant test files
-**Risk**: Zero
+#### H47: EU market open hardcoded to 07:00 UTC — no EU DST
+- **File**: `portfolio/market_timing.py:8`
+- **Problem**: In EU winter (CET), should be 08:00 UTC. Code uses 07:00 year-round.
+- **Fix**: Add `_eu_market_open_hour_utc(dt)` with EU DST logic (last Sunday of
+  March → last Sunday of October).
+- **Risk**: Zero — only affects market state classification.
 
-### Batch 15: Regime cache thread safety — BUG-169 + ARCH-30
-**Scope**: Add `_regime_lock` and wrap detect_regime() access patterns
-**Files**: 2 files (shared_state.py, indicators.py)
-**Test**: Write thread-safety tests, run existing indicator tests
-**Risk**: Zero
+### Batch 6: Ruff + Lint Cleanup
 
-### Batch 16: Variable naming + lint cleanup — REF-41, REF-42, REF-43
-**Scope**: Rename ambiguous `l` vars, merge isinstance, convert lambdas
-**Files**: 6 files
-**Test**: Run ruff check, run affected test files
-**Risk**: Zero
-
-### Batch 17: LLM batch parse verification — BUG-171
-**Scope**: Trace Ministral/Qwen3 cache read paths in signal_engine.py. Normalize if inconsistent.
-**Files**: 1-3 files depending on findings
-**Test**: Run signal_engine tests
-**Risk**: Low — depends on findings
-
-### Batch 18: Documentation update — SYSTEM_OVERVIEW.md, CHANGELOG.md
-**Scope**: Update docs to reflect all changes from this session
-**Files**: 2-3 doc files
-**Risk**: Zero
+- 1 F401 (unused import), 1 I001 (unsorted), 1 UP017, 1 UP035, 3 SIM114, 2 SIM105
+- **Risk**: Zero
 
 ---
 
-## 4. Deferred Items (carried forward)
+## 2. Deferred Items (NOT in this session)
 
-- **ARCH-17**: main.py re-exports 100+ symbols (breaking change risk)
-- **ARCH-18/BUG-162**: metals_loop.py 5174-line monolith (risks live trading)
-- **ARCH-19**: No CI/CD pipeline (needs GitHub Actions + Windows runner)
-- **ARCH-20**: No type checking/mypy (incremental adoption)
-- **ARCH-21**: autonomous.py function decomposition (stable, low ROI)
-- **ARCH-22**: agent_invocation.py class extraction (touches every caller)
-- **BUG-121**: news_event.py sector mapping hardcoded (low value)
-- **BUG-132**: orb_predictor.py no caching (low priority)
-- **BUG-149**: meta_learner orphaned — predict() never called
-- **BUG-164**: orb_predictor.py hardcodes UTC morning hours
-- **TEST-1**: gpu_gate.py zero test coverage (requires GPU mocking)
-- **TEST-3**: 26 pre-existing test failures (integration, config)
-- **FEAT-3**: Integrate meta_learner as signal #31
-- **E402**: 42 module-import-not-at-top-of-file (intentional delayed imports)
-- **SIM102**: 9 collapsible-if (subjective, most are readable as-is)
-- **SIM115**: 5 open-file-with-context-handler (some intentional)
-- ~10 silent `except Exception: pass` in non-critical paths (fishing, avanza scanner)
+### Critical (deferred — too risky for autonomous session)
+- **C3**: Position-size / stop volume invariant — wrong impl could block valid trades
+- **H11**: Warrant positions bypass cash accounting — structural portfolio model change
+- **H12-H15**: Silver fast-tick bugs — touches live metals_loop.py monolith
+- **H16**: Dual Avanza implementations — needs strategy decision
+
+### Architecture (too broad)
+- **A1-A4**: Cross-cutting themes from adversarial review
+- **ARCH-18**: metals_loop.py decomposition
+- **ARCH-19**: CI/CD pipeline
+
+### Signal accuracy (requires data)
+- **H2, H24, H49, H50**: Require accuracy data analysis
 
 ---
 
-## 5. Dependency & Ordering
+## 3. Implementation Order & Dependencies
 
 ```
-Batch 13 (ruff auto-fixes) → no dependencies, do first
-Batch 14 (bug fixes) → after Batch 13 (line numbers may shift)
-Batch 15 (regime lock) → independent of 13/14
-Batch 16 (variable naming) → after 13 (line numbers may shift)
-Batch 17 (LLM batch verify) → after 14 (depends on llm_batch.py state)
-Batch 18 (docs) → last (reflects final state)
+Batch 1 (Safety)       → No dependencies, do first
+  C2, H18              → avanza_control.py
+  H34, H35             → file_utils.py
 
-Run test suite after each batch.
+Batch 2 (Portfolio)    → After Batch 1 (file_utils changes)
+  C7, C8               → portfolio_mgr.py
+
+Batch 3 (Dead code)    → Independent of 1-2
+  C4, C6               → trade_guards.py, outcome_tracker.py
+
+Batch 4 (Math/Signal)  → Independent of 1-3
+  C9, C10, H26         → monte_carlo_risk.py, signal_engine.py, fear_greed.py
+
+Batch 5 (System)       → After Batch 4 (signal_engine changes)
+  C1, C5, H47          → loop_contract.py, main.py, market_timing.py
+
+Batch 6 (Lint)         → Last
+  Ruff auto-fixes      → Multiple files
 ```
 
 ### Risk Summary
 
 | Batch | Files Changed | Production Risk | Test Risk |
 |-------|--------------|-----------------|-----------|
-| 13 | 5 (modify) | Zero — auto-fix | Zero |
-| 14 | 4 (modify) | Zero — trivial fixes | Zero |
-| 15 | 2 (modify) | Zero — adding lock | Low — new tests |
-| 16 | 6 (modify) | Zero — rename/style | Zero |
-| 17 | 1-3 (modify) | Low — depends on findings | Low |
-| 18 | 2-3 (docs) | Zero | Zero |
+| 1 | 2 (avanza_control, file_utils) | Zero | Low (new tests) |
+| 2 | 1 (portfolio_mgr) | Low | Low (new tests) |
+| 3 | 2 (trade_guards, outcome_tracker) | Zero | Zero |
+| 4 | 3 (monte_carlo_risk, signal_engine, fear_greed) | Low | Medium |
+| 5 | 3 (loop_contract, main, market_timing) | Zero | Low |
+| 6 | ~8 (lint) | Zero | Zero |

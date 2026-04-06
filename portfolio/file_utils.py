@@ -14,6 +14,7 @@ def atomic_write_json(path, data, indent=2, ensure_ascii=True):
     """Atomically write JSON data to a file using tempfile + os.replace.
 
     Ensures the file is never left in a partially-written state.
+    Fsyncs before replace to guarantee durability on power loss (H34).
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -21,6 +22,8 @@ def atomic_write_json(path, data, indent=2, ensure_ascii=True):
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=indent, default=str, ensure_ascii=ensure_ascii)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, str(path))
     except BaseException:
         with suppress(OSError):
@@ -33,6 +36,7 @@ def load_json(path, default=None):
 
     Uses try/except instead of exists() check to avoid TOCTOU race.
     Handles OSError (permission denied, locked files) gracefully on Windows.
+    Logs WARNING on corrupt JSON so corruption is observable (H35).
     """
     path = Path(path)
     try:
@@ -45,7 +49,24 @@ def load_json(path, default=None):
         logger.debug("load_json: OS error reading %s, returning default", path.name)
         return default
     except (json.JSONDecodeError, ValueError):
+        # H35: Log corruption so it's observable — silent defaults hide data loss.
+        logger.warning("load_json: corrupt JSON in %s, returning default", path.name)
         return default
+
+
+def require_json(path):
+    """Load a JSON file, raising on corruption or missing file.
+
+    Unlike load_json(), this function does NOT silently return defaults.
+    Use for critical files where corruption must be surfaced (H35).
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        json.JSONDecodeError: If the file contains invalid JSON.
+        OSError: If the file cannot be read.
+    """
+    path = Path(path)
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def load_jsonl(path, limit=None):

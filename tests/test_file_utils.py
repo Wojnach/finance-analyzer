@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json, load_jsonl
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json, load_jsonl, require_json
 
 
 class TestAtomicWriteJson:
@@ -230,4 +230,79 @@ class TestAtomicAppendJsonl:
             atomic_append_jsonl(path, {"i": i})
         lines = path.read_text(encoding="utf-8").strip().splitlines()
         assert len(lines) == 5
-        assert [json.loads(l)["i"] for l in lines] == [0, 1, 2, 3, 4]
+        assert [json.loads(line)["i"] for line in lines] == [0, 1, 2, 3, 4]
+
+
+class TestAtomicWriteJsonFsync:
+    """H34: Verify fsync is called before os.replace."""
+
+    def test_fsync_called_before_replace(self, tmp_path):
+        """atomic_write_json must flush+fsync before rename for crash safety."""
+        path = tmp_path / "test.json"
+        call_order = []
+
+        orig_fsync = __import__("os").fsync
+        orig_replace = __import__("os").replace
+
+        def track_fsync(fd):
+            call_order.append("fsync")
+            return orig_fsync(fd)
+
+        def track_replace(src, dst):
+            call_order.append("replace")
+            return orig_replace(src, dst)
+
+        with patch("portfolio.file_utils.os.fsync", side_effect=track_fsync), \
+             patch("portfolio.file_utils.os.replace", side_effect=track_replace):
+            atomic_write_json(path, {"durable": True})
+
+        assert "fsync" in call_order
+        assert "replace" in call_order
+        assert call_order.index("fsync") < call_order.index("replace")
+
+
+class TestLoadJsonCorruptionLogging:
+    """H35: load_json should log WARNING on corrupt JSON."""
+
+    def test_logs_warning_on_corrupt_json(self, tmp_path, caplog):
+        path = tmp_path / "corrupt.json"
+        path.write_text("{invalid json", encoding="utf-8")
+        import logging
+        with caplog.at_level(logging.WARNING, logger="portfolio.file_utils"):
+            result = load_json(path)
+        assert result is None
+        assert "corrupt JSON" in caplog.text
+
+    def test_no_warning_on_missing_file(self, tmp_path, caplog):
+        path = tmp_path / "missing.json"
+        import logging
+        with caplog.at_level(logging.WARNING, logger="portfolio.file_utils"):
+            result = load_json(path)
+        assert result is None
+        assert "corrupt" not in caplog.text
+
+
+class TestRequireJson:
+    """H35: require_json raises on corruption instead of silently returning default."""
+
+    def test_loads_valid_json(self, tmp_path):
+        path = tmp_path / "data.json"
+        path.write_text('{"key": "value"}', encoding="utf-8")
+        assert require_json(path) == {"key": "value"}
+
+    def test_raises_on_missing_file(self, tmp_path):
+        path = tmp_path / "missing.json"
+        with pytest.raises(FileNotFoundError):
+            require_json(path)
+
+    def test_raises_on_corrupt_json(self, tmp_path):
+        path = tmp_path / "corrupt.json"
+        path.write_text("{invalid json", encoding="utf-8")
+        with pytest.raises(json.JSONDecodeError):
+            require_json(path)
+
+    def test_raises_on_empty_file(self, tmp_path):
+        path = tmp_path / "empty.json"
+        path.write_text("", encoding="utf-8")
+        with pytest.raises(json.JSONDecodeError):
+            require_json(path)
