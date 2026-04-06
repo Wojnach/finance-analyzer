@@ -24,7 +24,8 @@ import logging
 import math
 
 import numpy as np
-from scipy.stats import norm, t as t_dist
+from scipy.stats import norm
+from scipy.stats import t as t_dist
 
 from portfolio.monte_carlo import (
     MIN_VOLATILITY,
