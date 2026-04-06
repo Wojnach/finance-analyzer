@@ -2,6 +2,22 @@ ultrathink
 
 # Autonomous System Improvement Session
 
+## MANDATORY: Read Execution Protocol First
+
+Before doing ANY work, read and internalize `docs/GUIDELINES.md` — the canonical execution
+protocol. Follow it exactly: explore → plan → implement in batches → verify → ship.
+
+Key rules from the protocol:
+- **Use worktrees.** Isolate work: `git worktree add <path> -b improve/auto-session-<date>`.
+- **Implement in batches.** 5-10 files max per batch. Commit after each batch.
+- **Test everything.** `.venv/Scripts/python.exe -m pytest tests/ -n auto` after each batch.
+- **Commit, merge, push.** Use Windows git for push: `cmd.exe /c "cd /d Q:\finance-analyzer && git push"`
+- **Clean up worktrees.** `git worktree remove <path> && git branch -d <branch>` after merging.
+- **Do NOT ask for approval.** Make your best call, document reasoning in commits.
+- **Spend your entire context.** Do not stop early.
+
+---
+
 You are about to perform a deep, autonomous improvement session on this codebase. This is a long-running task — spend your entire output context working systematically. Do not stop early due to token budget concerns. Save progress and state to files before your context window refreshes.
 
 ## PROGRESS TRACKING (MANDATORY)
