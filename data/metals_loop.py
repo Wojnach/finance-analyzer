@@ -1894,11 +1894,16 @@ def _run_fish_engine_tick():
 
 
 def _fish_engine_execute_buy(decision, price):
-    """Execute a BUY decision from the fish engine."""
+    """Execute a BUY decision from the fish engine.
+
+    Position sizing uses Kelly criterion when available, falling back to
+    fixed budget (min(bp*0.95, 1500)) when Kelly data is unavailable.
+    """
     global _fish_engine
     direction = decision.get("direction", "LONG")
     ob_id = decision.get("instrument_ob", "1650161" if direction == "LONG" else "2286417")
     tactic = decision.get("reason", "")
+    leverage = 5.0  # BULL/BEAR SILVER X5
 
     try:
         from avanza_session import place_buy_order, get_quote, get_buying_power
@@ -1910,19 +1915,46 @@ def _fish_engine_execute_buy(decision, price):
             log(f"[fish] SKIP BUY: ask={ask}, bp={bp:.0f} (need >1000)")
             return
 
-        budget = min(bp * 0.95, 1500) * decision.get("size_scalar", 1.0)
-        if budget < 1000:
-            log(f"[fish] SKIP BUY: budget {budget:.0f} < 1000 SEK")
-            return
+        # Kelly-optimal sizing
+        kelly_rec = None
+        try:
+            from portfolio.kelly_metals import recommended_metals_size, format_kelly_line
+            consecutive = _fish_engine.consecutive_losses if _fish_engine else 0
+            kelly_rec = recommended_metals_size(
+                ticker="XAG-USD",
+                leverage=leverage,
+                buying_power_sek=bp,
+                ask_price_sek=ask,
+                consecutive_losses=consecutive,
+            )
+            if kelly_rec["units"] > 0:
+                volume = kelly_rec["units"]
+                budget = volume * ask
+                log(f"[fish] Kelly sizing: {format_kelly_line(kelly_rec)}")
+            else:
+                # Kelly says no edge or below minimum — skip trade
+                log(f"[fish] SKIP BUY: Kelly says no edge (k={kelly_rec['half_kelly_pct']:.1%}, "
+                    f"wr={kelly_rec['win_rate']:.1%})")
+                return
+        except Exception as kelly_err:
+            # Fallback to fixed sizing
+            log(f"[fish] Kelly unavailable ({kelly_err}), using fixed sizing")
+            budget = min(bp * 0.95, 1500) * decision.get("size_scalar", 1.0)
+            if budget < 1000:
+                log(f"[fish] SKIP BUY: budget {budget:.0f} < 1000 SEK")
+                return
+            volume = int(budget / ask)
 
-        volume = int(budget / ask)
         if volume < 5:
             return
 
         result = place_buy_order(ob_id, price=ask, volume=volume)
         status = result.get("orderRequestStatus", "?")
         nm = "BULL X5" if direction == "LONG" else "BEAR X5"
-        log(f"[fish] BUY {volume}u {nm}@{ask} = {volume*ask:.0f} SEK ({tactic}) [{status}]")
+        kelly_tag = ""
+        if kelly_rec:
+            kelly_tag = f" K:{kelly_rec['half_kelly_pct']*100:.1f}%"
+        log(f"[fish] BUY {volume}u {nm}@{ask} = {volume*ask:.0f} SEK ({tactic}{kelly_tag}) [{status}]")
 
         if status == "SUCCESS":
             _fish_engine.confirm_entry(direction, ask, volume, price)

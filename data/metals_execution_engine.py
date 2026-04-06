@@ -261,10 +261,29 @@ def _summary_filters(entry: dict) -> list[str]:
     return reasons
 
 
-def _planned_units(account: dict | None, ask: float) -> int:
+def _planned_units(account: dict | None, ask: float, ticker: str = "",
+                    leverage: float = 0.0, consecutive_losses: int = 0) -> int:
     buying_power = _safe_float((account or {}).get("buying_power"))
     if buying_power <= 0 or ask <= 0:
         return 0
+
+    # Try Kelly-optimal sizing when ticker and leverage are available
+    if ticker and leverage > 0:
+        try:
+            from portfolio.kelly_metals import recommended_metals_size
+            rec = recommended_metals_size(
+                ticker=ticker,
+                leverage=leverage,
+                buying_power_sek=buying_power,
+                ask_price_sek=ask,
+                consecutive_losses=consecutive_losses,
+            )
+            if rec["units"] > 0:
+                return rec["units"]
+        except Exception:
+            pass  # fall through to fixed sizing
+
+    # Fallback: fixed percentage allocation
     allocation = buying_power * POSITION_SIZE_PCT / 100.0
     if allocation < MIN_TRADE_SEK:
         return 0
@@ -406,7 +425,7 @@ def build_execution_recommendations(
             continue
 
         filter_reasons = _summary_filters(info)
-        planned_units = _planned_units(account, ask)
+        planned_units = _planned_units(account, ask, ticker=ticker, leverage=leverage)
         if planned_units <= 0:
             filter_reasons.append("insufficient buying power")
         if filter_reasons:
@@ -500,6 +519,7 @@ def build_execution_recommendations(
             "leverage": round(leverage, 3),
             "prob_up": round(prob_up, 4),
             "planned_units": planned_units,
+            "kelly_sizing": _kelly_sizing_summary(ticker, leverage, account, ask),
             "plan_features": {
                 "regime": signal_entry.get("regime"),
                 "squeeze_warning": bool(underlying_plan.get("squeeze_warning", False)),
@@ -513,3 +533,27 @@ def build_execution_recommendations(
         }
 
     return result
+
+
+def _kelly_sizing_summary(ticker: str, leverage: float,
+                           account: dict | None, ask: float) -> dict | None:
+    """Compute Kelly sizing summary for inclusion in recommendations."""
+    buying_power = _safe_float((account or {}).get("buying_power"))
+    if buying_power <= 0 or ask <= 0 or not ticker or leverage <= 0:
+        return None
+    try:
+        from portfolio.kelly_metals import recommended_metals_size
+        rec = recommended_metals_size(
+            ticker=ticker, leverage=leverage,
+            buying_power_sek=buying_power, ask_price_sek=ask,
+        )
+        return {
+            "half_kelly_pct": rec["half_kelly_pct"],
+            "win_rate": rec["win_rate"],
+            "position_sek": rec["position_sek"],
+            "units": rec["units"],
+            "monthly_growth_pct": rec["monthly_growth_pct"],
+            "source": rec["source"],
+        }
+    except Exception:
+        return None
