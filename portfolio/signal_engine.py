@@ -1314,6 +1314,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         for sig_name in _enhanced_entries:
             votes[sig_name] = "HOLD"
 
+    # C10: Capture raw pre-gate votes BEFORE any gating rewrites them to HOLD.
+    # This allows accuracy tracking for regime-gated signals, breaking the
+    # dead-signal trap where gated signals can never accumulate accuracy data.
+    raw_votes = dict(votes)
+
     # 3h horizon: gate slow signals that are noise at short timeframes
     if horizon in ("3h", "4h"):
         from portfolio.short_horizon import is_slow_signal_3h
@@ -1564,6 +1569,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     extra_info["_core_sell"] = core_sell
     extra_info["_core_active"] = core_active
     extra_info["_votes"] = votes
+    extra_info["_raw_votes"] = raw_votes  # C10: pre-gate votes for accuracy recovery
     extra_info["_regime"] = regime
     if horizon:
         extra_info["_horizon"] = horizon

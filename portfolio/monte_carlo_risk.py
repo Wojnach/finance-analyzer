@@ -24,7 +24,7 @@ import logging
 import math
 
 import numpy as np
-from scipy.stats import t as t_dist
+from scipy.stats import norm, t as t_dist
 
 from portfolio.monte_carlo import (
     MIN_VOLATILITY,
@@ -269,11 +269,17 @@ class PortfolioRiskSimulator:
         scale = np.sqrt(self.df / S)[:, np.newaxis]
         T_samples = W * scale
 
-        # Step 6: Transform to uniform via t CDF, then to target marginals
+        # Step 6: Transform to uniform via t CDF, then to Gaussian marginals
         # U = F_t(T; df) → uniform on [0,1]
         U = t_dist.cdf(T_samples, df=self.df)
 
         # Transform each marginal to GBM log-return
+        # C9 FIX: Use norm.ppf (Gaussian inverse CDF), NOT t_dist.ppf.
+        # Using t_dist.ppf(t_dist.cdf(x, df), df) is an identity transform —
+        # it round-trips back to the same t-distributed samples, inflating
+        # variance by ~sqrt(df/(df-2)) ≈ sqrt(2) at df=4. The correct
+        # t-copula + GBM approach is: t-copula for dependence structure,
+        # Gaussian marginals for the GBM diffusion term.
         returns = np.empty_like(U)
         for i, ticker in enumerate(self._tickers):
             pos = self._positions[ticker]
@@ -281,10 +287,9 @@ class PortfolioRiskSimulator:
             mu = pos.get("drift", 0.0)
 
             # Inverse normal CDF to get standard normal quantiles
-            Z_marginal = t_dist.ppf(U[:, i], df=self.df)
+            Z_marginal = norm.ppf(U[:, i])
 
             # GBM log-return: (mu - 0.5*sigma^2)*T + sigma*sqrt(T)*Z
-            # But Z here is t-distributed, capturing fat tails
             drift_term = (mu - 0.5 * sigma**2) * T
             vol_term = sigma * math.sqrt(T)
             returns[:, i] = drift_term + vol_term * Z_marginal
