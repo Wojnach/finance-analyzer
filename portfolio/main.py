@@ -72,6 +72,9 @@ def _acquire_singleton_lock():
     os.makedirs(os.path.dirname(_SINGLETON_LOCK_FILE), exist_ok=True)
     fh = open(_SINGLETON_LOCK_FILE, "a+", encoding="utf-8")
     try:
+        # Always lock byte 0 — "a+" mode positions at EOF for existing files,
+        # so without seek(0) two processes could lock different byte ranges.
+        fh.seek(0)
         if msvcrt is not None:
             msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
         else:

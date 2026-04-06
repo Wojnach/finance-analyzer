@@ -82,6 +82,11 @@ try:
 except ImportError:
     msvcrt = None
 
+try:
+    import fcntl  # Linux/WSL file locking for single-instance guard
+except ImportError:
+    fcntl = None
+
 # --- Optional modules (graceful fallback) ---
 try:
     if str(DATA_DIR) not in sys.path:
@@ -582,11 +587,15 @@ _vol_scalar_cache = {"value": 1.0, "ts": 0.0}  # hourly refresh
 _signal_action_history = deque(maxlen=10)  # last 10 XAG signal actions for flip detection
 
 def acquire_singleton_lock(lock_path=SINGLETON_LOCK_FILE):
-    """Acquire single-instance lock for metals loop (non-blocking)."""
+    """Acquire single-instance lock for metals loop (non-blocking).
+
+    Supports both Windows (msvcrt) and Linux/WSL (fcntl).
+    """
     global _singleton_lock_fh
     if _singleton_lock_fh is not None:
         return True
-    if msvcrt is None:
+    if msvcrt is None and fcntl is None:
+        log("WARNING: No file locking available (neither msvcrt nor fcntl)")
         return True
 
     lock_dir = os.path.dirname(lock_path)
@@ -595,7 +604,13 @@ def acquire_singleton_lock(lock_path=SINGLETON_LOCK_FILE):
 
     fh = open(lock_path, "a+", encoding="utf-8")
     try:
-        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        # Always lock byte 0 — "a+" mode positions at EOF for existing files,
+        # so without seek(0) two processes could lock different byte ranges.
+        fh.seek(0)
+        if msvcrt is not None:
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         fh.close()
         return False
@@ -620,6 +635,8 @@ def release_singleton_lock():
         if msvcrt is not None:
             _singleton_lock_fh.seek(0)
             msvcrt.locking(_singleton_lock_fh.fileno(), msvcrt.LK_UNLCK, 1)
+        elif fcntl is not None:
+            fcntl.flock(_singleton_lock_fh.fileno(), fcntl.LOCK_UN)
     except OSError:
         pass
     finally:
