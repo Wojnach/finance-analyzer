@@ -417,3 +417,118 @@ class TestValidatedState:
     def test_false_returns_default(self):
         result = portfolio_mgr._validated_state(False)
         assert result["cash_sek"] == 500_000
+
+
+# ===========================================================================
+# C7: Backup rotation
+# ===========================================================================
+
+class TestBackupRotation:
+    """C7: save_state creates rolling .bak backups."""
+
+    def test_save_creates_backup(self, tmp_path):
+        """First save of existing state creates .bak file."""
+        state_file = tmp_path / "portfolio_state.json"
+        original = _make_state(cash=100_000)
+        _write_state(state_file, original)
+
+        with patch.object(portfolio_mgr, "STATE_FILE", state_file):
+            portfolio_mgr.save_state(_make_state(cash=200_000))
+
+        bak = state_file.with_suffix(".json.bak")
+        assert bak.exists()
+        bak_data = json.loads(bak.read_text(encoding="utf-8"))
+        assert bak_data["cash_sek"] == 100_000
+
+    def test_backup_rotation(self, tmp_path):
+        """Multiple saves rotate .bak → .bak2 → .bak3."""
+        state_file = tmp_path / "portfolio_state.json"
+        _write_state(state_file, _make_state(cash=100_000))
+
+        with patch.object(portfolio_mgr, "STATE_FILE", state_file):
+            portfolio_mgr.save_state(_make_state(cash=200_000))
+            portfolio_mgr.save_state(_make_state(cash=300_000))
+
+        bak1 = state_file.with_suffix(".json.bak")
+        bak2 = state_file.with_suffix(".json.bak2")
+        assert bak1.exists()
+        assert bak2.exists()
+        # bak1 = previous state (200K), bak2 = oldest (100K)
+        assert json.loads(bak1.read_text(encoding="utf-8"))["cash_sek"] == 200_000
+        assert json.loads(bak2.read_text(encoding="utf-8"))["cash_sek"] == 100_000
+
+    def test_no_backup_on_missing_file(self, tmp_path):
+        """No backup created when state file doesn't exist yet."""
+        state_file = tmp_path / "portfolio_state.json"
+        with patch.object(portfolio_mgr, "STATE_FILE", state_file):
+            portfolio_mgr.save_state(_make_state(cash=500_000))
+        bak = state_file.with_suffix(".json.bak")
+        assert not bak.exists()
+
+
+class TestCorruptionRecovery:
+    """C7: load_state recovers from backups on corruption."""
+
+    def test_recovers_from_backup(self, tmp_path):
+        """Corrupt main file → recovers from .bak."""
+        state_file = tmp_path / "portfolio_state.json"
+        state_file.write_text("{corrupt", encoding="utf-8")
+        bak = state_file.with_suffix(".json.bak")
+        _write_state(bak, _make_state(cash=450_000))
+
+        with patch.object(portfolio_mgr, "STATE_FILE", state_file):
+            state = portfolio_mgr.load_state()
+        assert state["cash_sek"] == 450_000
+
+    def test_returns_defaults_when_all_corrupt(self, tmp_path):
+        """All files corrupt → returns fresh defaults."""
+        state_file = tmp_path / "portfolio_state.json"
+        state_file.write_text("{corrupt", encoding="utf-8")
+        bak = state_file.with_suffix(".json.bak")
+        bak.write_text("{also corrupt", encoding="utf-8")
+
+        with patch.object(portfolio_mgr, "STATE_FILE", state_file):
+            state = portfolio_mgr.load_state()
+        assert state["cash_sek"] == 500_000  # Default
+
+
+# ===========================================================================
+# C8: Atomic update_state
+# ===========================================================================
+
+class TestUpdateState:
+    """C8: update_state provides atomic read-modify-write."""
+
+    def test_basic_mutation(self, tmp_path):
+        """update_state applies a mutation function atomically."""
+        state_file = tmp_path / "portfolio_state.json"
+        _write_state(state_file, _make_state(cash=500_000))
+
+        def spend_cash(state):
+            state["cash_sek"] -= 100_000
+
+        with patch.object(portfolio_mgr, "STATE_FILE", state_file):
+            result = portfolio_mgr.update_state(spend_cash)
+        assert result["cash_sek"] == 400_000
+        # Verify persisted
+        saved = json.loads(state_file.read_text(encoding="utf-8"))
+        assert saved["cash_sek"] == 400_000
+
+    def test_creates_backup_on_update(self, tmp_path):
+        """update_state creates backup before saving."""
+        state_file = tmp_path / "portfolio_state.json"
+        _write_state(state_file, _make_state(cash=500_000))
+
+        with patch.object(portfolio_mgr, "STATE_FILE", state_file):
+            portfolio_mgr.update_state(lambda s: s)
+        bak = state_file.with_suffix(".json.bak")
+        assert bak.exists()
+
+    def test_bold_flag(self, tmp_path):
+        """update_state(bold=True) operates on Bold portfolio."""
+        state_file = tmp_path / "portfolio_state_bold.json"
+        _write_state(state_file, _make_state(cash=500_000))
+
+        with patch.object(portfolio_mgr, "BOLD_STATE_FILE", state_file):
+            result = portfolio_mgr.update_state(lambda s: s, bold=True)
+        assert result["cash_sek"] == 500_000

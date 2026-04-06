@@ -36,10 +36,17 @@ DATA_DIR = BASE_DIR / "data"
 logger = logging.getLogger("portfolio.loop")
 
 # --- Singleton guard (same pattern as metals_loop.py) ---
+# C5: Support both Windows (msvcrt) and Linux/WSL (fcntl) locking.
+# Previously, non-Windows silently returned True — no protection.
 try:
     import msvcrt
 except ImportError:
     msvcrt = None
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 _SINGLETON_LOCK_FILE = str(DATA_DIR / "main_loop.singleton.lock")
 _DUPLICATE_EXIT_CODE = 11
@@ -47,17 +54,28 @@ _singleton_lock_fh = None
 
 
 def _acquire_singleton_lock():
-    """Acquire single-instance lock for main loop (non-blocking)."""
+    """Acquire single-instance lock for main loop (non-blocking).
+
+    C5: Now supports both Windows (msvcrt) and Linux/WSL (fcntl).
+    Raises RuntimeError if neither locking mechanism is available.
+    """
     global _singleton_lock_fh
     if _singleton_lock_fh is not None:
         return True
-    if msvcrt is None:
-        return True
+
+    if msvcrt is None and fcntl is None:
+        logger.error("C5: No file locking available (neither msvcrt nor fcntl)")
+        raise RuntimeError(
+            "Singleton lock requires msvcrt (Windows) or fcntl (Linux/WSL)"
+        )
 
     os.makedirs(os.path.dirname(_SINGLETON_LOCK_FILE), exist_ok=True)
     fh = open(_SINGLETON_LOCK_FILE, "a+", encoding="utf-8")
     try:
-        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        if msvcrt is not None:
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         fh.close()
         return False

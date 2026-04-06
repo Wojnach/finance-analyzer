@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import portfolio.avanza_control as mod
 
 
@@ -127,6 +129,28 @@ class TestPlaceOrderNoPage:
         assert ok is False
         assert result["message"] == "Insufficient funds"
 
+    def test_invalid_side_raises(self):
+        """C2: Non-BUY/SELL side must raise ValueError, not fall through to SELL."""
+        with pytest.raises(ValueError, match="Invalid order side"):
+            mod.place_order_no_page("1625505", "856394", "HOLD", 24.50, 100)
+
+    def test_none_side_raises(self):
+        """C2: None side must raise ValueError."""
+        with pytest.raises(ValueError, match="Invalid order side"):
+            mod.place_order_no_page("1625505", "856394", None, 24.50, 100)
+
+    def test_empty_side_raises(self):
+        """C2: Empty string side must raise ValueError."""
+        with pytest.raises(ValueError, match="Invalid order side"):
+            mod.place_order_no_page("1625505", "856394", "", 24.50, 100)
+
+    @patch("portfolio.avanza_control._place_sell_order")
+    def test_lowercase_sell_works(self, mock_sell):
+        """C2: Lowercase 'sell' should still work (normalized to uppercase)."""
+        mock_sell.return_value = {"orderRequestStatus": "SUCCESS"}
+        ok, _ = mod.place_order_no_page("1625505", "856394", "sell", 25.00, 50)
+        assert ok is True
+
 
 class TestPlaceStopLossNoPage:
     @patch("portfolio.avanza_control._place_stop_loss_session")
@@ -177,3 +201,11 @@ class TestDeleteStopLossNoPage:
         ok, result = mod.delete_stop_loss_no_page("1625505", "SL-123")
         assert ok is False
         assert "error" in result
+
+    @patch("portfolio.avanza_control._api_delete")
+    def test_api_error_code_returns_false(self, mock_delete):
+        """H18: API returning errorCode should report failure, not success."""
+        mock_delete.return_value = {"errorCode": "NOT_FOUND", "message": "Stop not found"}
+        ok, result = mod.delete_stop_loss_no_page("1625505", "SL-123")
+        assert ok is False
+        assert result.get("errorCode") == "NOT_FOUND"

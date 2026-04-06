@@ -116,31 +116,58 @@ class TestTCopulaReturns:
         # but should be close for these parameters
         assert abs(empirical_corr - 0.8) < 0.05
 
-    def test_fat_tails_vs_gaussian(self):
-        """t-copula (df=4) should produce more extreme events than Gaussian."""
+    def test_marginals_are_gaussian(self):
+        """C9 fix: With proper t-copula, individual marginals should be Gaussian.
+
+        The t-copula captures joint tail dependence (simultaneous crashes),
+        but after C9 fix, individual returns use norm.ppf (Gaussian quantiles).
+        Kurtosis of individual marginals should be close to 3.0 (Gaussian).
+        """
         positions = {
             "A": {"shares": 1, "price_usd": 100, "volatility": 0.20, "drift": 0.0},
         }
         corr = np.array([[1.0]])
 
-        # t-copula with df=4 (fat tails)
+        sim = PortfolioRiskSimulator(
+            positions=positions, correlation_matrix=corr,
+            horizon_days=1, n_paths=50000, df=4, seed=42,
+        )
+        returns = sim.simulate_correlated_returns()
+
+        # Kurtosis should be near 3.0 (Gaussian), not ~6 (t with df=4)
+        kurtosis = float(np.mean(((returns - np.mean(returns)) / np.std(returns)) ** 4))
+        assert 2.5 < kurtosis < 3.5, f"Expected Gaussian kurtosis ~3, got {kurtosis:.2f}"
+
+    def test_joint_tail_dependence(self):
+        """t-copula should show more simultaneous extreme events than Gaussian copula."""
+        positions = {
+            "A": {"shares": 1, "price_usd": 100, "volatility": 0.20, "drift": 0.0},
+            "B": {"shares": 1, "price_usd": 100, "volatility": 0.20, "drift": 0.0},
+        }
+        corr = np.array([[1.0, 0.5], [0.5, 1.0]])
+
+        # t-copula with df=4 (strong tail dependence)
         sim_t = PortfolioRiskSimulator(
             positions=positions, correlation_matrix=corr,
             horizon_days=1, n_paths=50000, df=4, seed=42,
         )
         returns_t = sim_t.simulate_correlated_returns()
 
-        # High df → approaches Gaussian
+        # High df → approaches Gaussian copula (no tail dependence)
         sim_g = PortfolioRiskSimulator(
             positions=positions, correlation_matrix=corr,
-            horizon_days=1, n_paths=50000, df=100, seed=42,
+            horizon_days=1, n_paths=50000, df=200, seed=42,
         )
         returns_g = sim_g.simulate_correlated_returns()
 
-        # t(4) should have heavier tails → higher kurtosis
-        kurtosis_t = float(np.mean(((returns_t - np.mean(returns_t)) / np.std(returns_t)) ** 4))
-        kurtosis_g = float(np.mean(((returns_g - np.mean(returns_g)) / np.std(returns_g)) ** 4))
-        assert kurtosis_t > kurtosis_g
+        # Count simultaneous extreme events (both below 5th percentile)
+        thresh_t = np.percentile(returns_t, 5, axis=0)
+        thresh_g = np.percentile(returns_g, 5, axis=0)
+        joint_t = np.sum((returns_t[:, 0] < thresh_t[0]) & (returns_t[:, 1] < thresh_t[1]))
+        joint_g = np.sum((returns_g[:, 0] < thresh_g[0]) & (returns_g[:, 1] < thresh_g[1]))
+
+        # t-copula should produce more simultaneous crashes
+        assert joint_t > joint_g, f"t-copula joint extremes ({joint_t}) <= Gaussian ({joint_g})"
 
     def test_reproducible_with_seed(self):
         """Same seed → identical results."""

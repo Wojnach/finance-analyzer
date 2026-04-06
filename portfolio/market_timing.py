@@ -1,16 +1,55 @@
-"""Market timing utilities — DST-aware NYSE hours, market state detection."""
+"""Market timing utilities — DST-aware NYSE and EU hours, market state detection."""
 
 from datetime import UTC, date, datetime
 
 from portfolio.tickers import CRYPTO_SYMBOLS, METALS_SYMBOLS, STOCK_SYMBOLS, SYMBOLS
 
-# Market hours (UTC)
-MARKET_OPEN_HOUR = 7  # ~Frankfurt/London open
+# Backward compat: MARKET_OPEN_HOUR kept at 7 (summer value).
+# Callers that need DST-aware EU open should use _eu_market_open_hour_utc().
+MARKET_OPEN_HOUR = 7
 
 # Loop intervals by market state
 INTERVAL_MARKET_OPEN = 60     # 1 min — full speed
 INTERVAL_MARKET_CLOSED = 120  # 2 min — crypto only weekday nights
 INTERVAL_WEEKEND = 600        # 10 min — crypto only weekends
+
+
+def _is_eu_dst(dt):
+    """Check if a UTC datetime falls within EU Summer Time (CEST).
+
+    EU DST rule:
+      Starts: last Sunday of March at 01:00 UTC
+      Ends:   last Sunday of October at 01:00 UTC
+
+    Returns True during CEST (summer), False during CET (winter).
+    """
+    year = dt.year
+
+    # Last Sunday of March
+    mar31 = date(year, 3, 31)
+    last_sun_mar = 31 - (mar31.weekday() + 1) % 7
+    eu_dst_start = datetime(year, 3, last_sun_mar, 1, 0, tzinfo=UTC)
+
+    # Last Sunday of October
+    oct31 = date(year, 10, 31)
+    last_sun_oct = 31 - (oct31.weekday() + 1) % 7
+    eu_dst_end = datetime(year, 10, last_sun_oct, 1, 0, tzinfo=UTC)
+
+    return eu_dst_start <= dt < eu_dst_end
+
+
+def _eu_market_open_hour_utc(dt):
+    """Return the EU market open hour in UTC, adjusted for EU DST.
+
+    H47: London/Frankfurt open at 08:00 local time.
+    CEST (summer, BST=UTC+1): 08:00 local = 07:00 UTC
+    CET (winter, GMT=UTC+0): 08:00 local = 08:00 UTC
+
+    Previously hardcoded to 7 UTC year-round, which missed the winter hour.
+    """
+    if _is_eu_dst(dt):
+        return 7
+    return 8
 
 
 def _is_us_dst(dt):
@@ -53,17 +92,18 @@ def _market_close_hour_utc(dt):
 def _is_agent_window(now=None):
     """Check if current time is within the Layer 2 invocation window.
 
-    Window: EU market open (07:00 UTC) through US market close.
-    EDT (Mar-Nov): 07:00–20:00 UTC
-    EST (Nov-Mar): 07:00–21:00 UTC
+    Window: EU market open through US market close.
+    Summer: 07:00–20:00 UTC
+    Winter: 08:00–21:00 UTC
     Weekends: no agent invocation.
     """
     if now is None:
         now = datetime.now(UTC)
     if now.weekday() >= 5:
         return False
+    eu_open = _eu_market_open_hour_utc(now)
     close_hour = _market_close_hour_utc(now)
-    return MARKET_OPEN_HOUR <= now.hour < close_hour
+    return eu_open <= now.hour < close_hour
 
 
 def _market_open_hour_utc(dt):
@@ -136,7 +176,8 @@ def get_market_state():
     always_on = CRYPTO_SYMBOLS | METALS_SYMBOLS
     if weekday >= 5:
         return "weekend", always_on, INTERVAL_WEEKEND
+    eu_open = _eu_market_open_hour_utc(now)
     close_hour = _market_close_hour_utc(now)
-    if MARKET_OPEN_HOUR <= hour < close_hour:
+    if eu_open <= hour < close_hour:
         return "open", all_symbols, INTERVAL_MARKET_OPEN
     return "closed", always_on, INTERVAL_MARKET_CLOSED

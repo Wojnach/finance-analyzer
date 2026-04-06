@@ -295,9 +295,10 @@ def classify_tier(reasons, state=None):
     hours_since = (time.time() - last_full) / 3600
 
     now_utc = datetime.now(UTC)
-    from portfolio.market_timing import MARKET_OPEN_HOUR, _market_close_hour_utc
+    from portfolio.market_timing import _eu_market_open_hour_utc, _market_close_hour_utc
     close_hour = _market_close_hour_utc(now_utc)
-    market_open = now_utc.weekday() < 5 and MARKET_OPEN_HOUR <= now_utc.hour < close_hour
+    eu_open = _eu_market_open_hour_utc(now_utc)
+    market_open = now_utc.weekday() < 5 and eu_open <= now_utc.hour < close_hour
 
     if market_open and hours_since >= _FULL_REVIEW_MARKET_HOURS:
         return 3

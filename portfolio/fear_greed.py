@@ -35,31 +35,43 @@ def update_fear_streak(fg_value: int) -> dict:
 
     Called after each successful F&G fetch. Persists streak state to disk
     so it survives process restarts.
+
+    H26 fix: Only increments streak_days once per calendar day, not per fetch.
+    Previously, 1440 fetches/day inflated streak_days by 1440x.
     """
     data = load_json(_STREAK_FILE, default={}) or {}
 
-    now = datetime.now(UTC).isoformat()
+    now = datetime.now(UTC)
+    now_str = now.isoformat()
+    today_str = now.strftime("%Y-%m-%d")
     prev_type = data.get("streak_type", "neutral")
     prev_days = data.get("streak_days", 0)
+    last_date = data.get("last_date", "")
+
+    # H26: Only increment streak on date change (not every fetch)
+    is_new_day = today_str != last_date
 
     if fg_value <= EXTREME_FEAR_THRESHOLD:
         if prev_type == "extreme_fear":
-            data["streak_days"] = prev_days + 1
+            if is_new_day:
+                data["streak_days"] = prev_days + 1
         else:
             data = {"streak_type": "extreme_fear", "streak_days": 1,
-                    "streak_started": now}
+                    "streak_started": now_str}
     elif fg_value >= EXTREME_GREED_THRESHOLD:
         if prev_type == "extreme_greed":
-            data["streak_days"] = prev_days + 1
+            if is_new_day:
+                data["streak_days"] = prev_days + 1
         else:
             data = {"streak_type": "extreme_greed", "streak_days": 1,
-                    "streak_started": now}
+                    "streak_started": now_str}
     else:
         data = {"streak_type": "neutral", "streak_days": 0,
-                "streak_started": now}
+                "streak_started": now_str}
 
     data["last_value"] = fg_value
-    data["last_updated"] = now
+    data["last_updated"] = now_str
+    data["last_date"] = today_str
     try:
         atomic_write_json(_STREAK_FILE, data)
     except Exception:

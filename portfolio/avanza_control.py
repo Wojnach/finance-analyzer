@@ -315,8 +315,15 @@ def place_order_no_page(account_id, ob_id, side, price, volume):
 
     Returns:
         Tuple (ok: bool, result: dict) matching the page-based interface.
+
+    Raises:
+        ValueError: If *side* is not "BUY" or "SELL" (C2 fail-safe).
     """
     normalized_side = (side or "").strip().upper()
+    if normalized_side not in ("BUY", "SELL"):
+        raise ValueError(
+            f"Invalid order side: {side!r} (must be 'BUY' or 'SELL')"
+        )
     if normalized_side == "BUY":
         result = _place_buy_order(ob_id, price, volume, account_id)
     else:
@@ -367,7 +374,12 @@ def delete_stop_loss_no_page(account_id, stop_id):
     resolved_account_id = str(account_id or get_account_id())
     try:
         result = _api_delete(f"/_api/trading/stoploss/{resolved_account_id}/{stop_id}")
-        # api_delete returns {} on success (200 with empty body)
+        # H18: Check for error indicators in the response.
+        # API returns {} on success (200 with empty body).
+        # A non-empty response with error keys indicates failure.
+        if isinstance(result, dict) and result.get("errorCode"):
+            logger.warning("Delete stop-loss returned error for stop %s: %s", stop_id, result)
+            return False, result
         return True, result
     except Exception as e:
         logger.error("Delete stop-loss (no page) failed for stop %s: %s", stop_id, e, exc_info=True)

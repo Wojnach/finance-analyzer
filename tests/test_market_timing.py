@@ -278,9 +278,19 @@ class TestIsAgentWindowInside:
         now = datetime(2026, 2, 23, 12, 0, tzinfo=UTC)  # Monday
         assert _is_agent_window(now) is True
 
-    def test_wednesday_morning_edge(self):
-        # Wednesday 07:00 UTC (exactly the start = EU market open)
+    def test_wednesday_morning_edge_winter(self):
+        # H47: Wednesday 08:00 UTC in winter = EU market open (CET winter)
+        now = datetime(2026, 2, 25, 8, 0, tzinfo=UTC)  # Wednesday
+        assert _is_agent_window(now) is True
+
+    def test_wednesday_07_winter_before_eu_open(self):
+        # H47: 07:00 UTC in winter is BEFORE EU opens (opens at 08:00 UTC)
         now = datetime(2026, 2, 25, 7, 0, tzinfo=UTC)  # Wednesday
+        assert _is_agent_window(now) is False
+
+    def test_wednesday_07_summer_at_eu_open(self):
+        # H47: 07:00 UTC in summer is AT EU open (opens at 07:00 UTC in CEST)
+        now = datetime(2026, 7, 15, 7, 0, tzinfo=UTC)  # Wednesday in summer
         assert _is_agent_window(now) is True
 
     def test_friday_afternoon(self):
@@ -300,10 +310,20 @@ class TestIsAgentWindowInside:
         now = datetime(2026, 7, 7, 19, 30, tzinfo=UTC)  # Tuesday
         assert _is_agent_window(now) is True
 
-    def test_thursday_at_0700(self):
-        # Exactly at 07:00 (inclusive start = EU market open)
-        now = datetime(2026, 2, 26, 7, 0, tzinfo=UTC)  # Thursday
+    def test_thursday_at_0700_summer(self):
+        # Summer: EU open = 07:00 UTC (inclusive)
+        now = datetime(2026, 7, 9, 7, 0, tzinfo=UTC)  # Thursday summer
         assert _is_agent_window(now) is True
+
+    def test_thursday_at_0800_winter(self):
+        # Winter: EU open = 08:00 UTC (inclusive)
+        now = datetime(2026, 2, 26, 8, 0, tzinfo=UTC)  # Thursday winter
+        assert _is_agent_window(now) is True
+
+    def test_thursday_at_0700_winter_before_open(self):
+        # Winter: 07:00 UTC is BEFORE EU open (08:00)
+        now = datetime(2026, 2, 26, 7, 0, tzinfo=UTC)  # Thursday winter
+        assert _is_agent_window(now) is False
 
     def test_monday_one_minute_before_end_est(self):
         # In EST, end = 21:00 UTC, so 20:59 is still inside
@@ -412,14 +432,24 @@ class TestGetMarketStateOpen:
         assert interval == 60
 
     @patch("portfolio.market_timing.datetime")
-    def test_at_market_open_hour(self, mock_dt):
-        """Exactly at MARKET_OPEN_HOUR (7) => open."""
-        fake_now = datetime(2026, 2, 24, MARKET_OPEN_HOUR, 0, tzinfo=UTC)  # Tuesday
+    def test_at_eu_open_winter(self, mock_dt):
+        """H47: At EU open (08:00 UTC in winter) => open."""
+        fake_now = datetime(2026, 2, 24, 8, 0, tzinfo=UTC)  # Tuesday, winter
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
         state, symbols, interval = get_market_state()
         assert state == "open"
+
+    @patch("portfolio.market_timing.datetime")
+    def test_before_eu_open_winter(self, mock_dt):
+        """H47: At 07:00 UTC in winter => closed (EU opens at 08:00)."""
+        fake_now = datetime(2026, 2, 24, 7, 0, tzinfo=UTC)  # Tuesday, winter
+        mock_dt.now.return_value = fake_now
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+
+        state, _, interval = get_market_state()
+        assert state == "closed"
 
     @patch("portfolio.market_timing.datetime")
     def test_one_hour_before_close_edt(self, mock_dt):
@@ -715,9 +745,19 @@ class TestGetMarketStateBoundaries:
         assert state == "open"
 
     @patch("portfolio.market_timing.datetime")
-    def test_at_exactly_market_open(self, mock_dt):
-        """At MARKET_OPEN_HOUR (7) => open."""
-        fake_now = datetime(2026, 2, 24, 7, 0, tzinfo=UTC)  # Tuesday
+    def test_at_exactly_eu_open_summer(self, mock_dt):
+        """H47: At 07:00 UTC in summer (EU open) => open."""
+        fake_now = datetime(2026, 7, 7, 7, 0, tzinfo=UTC)  # Tuesday, summer
+        mock_dt.now.return_value = fake_now
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+
+        state, _, _ = get_market_state()
+        assert state == "open"
+
+    @patch("portfolio.market_timing.datetime")
+    def test_at_exactly_eu_open_winter(self, mock_dt):
+        """H47: At 08:00 UTC in winter (EU open) => open."""
+        fake_now = datetime(2026, 2, 24, 8, 0, tzinfo=UTC)  # Tuesday, winter
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
@@ -726,7 +766,7 @@ class TestGetMarketStateBoundaries:
 
     @patch("portfolio.market_timing.datetime")
     def test_one_hour_before_market_open(self, mock_dt):
-        """At hour 6 (one before MARKET_OPEN_HOUR 7) => closed."""
+        """At hour 6 => closed (before EU open in both summer and winter)."""
         fake_now = datetime(2026, 2, 24, 6, 0, tzinfo=UTC)  # Tuesday
         mock_dt.now.return_value = fake_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
