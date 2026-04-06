@@ -259,6 +259,16 @@ def get_all_guard_warnings(signals, patient_pf, bold_pf, config=None):
         for guard, warns in by_guard.items():
             summary_parts.append(f"{guard}: {len(warns)} warning(s)")
 
+    # C4: Warn if guard state is empty — means record_trade() was never called.
+    # This indicates the entire guard system is non-functional.
+    state = _load_state()
+    if not state.get("ticker_trades") and all_warnings == []:
+        logger.warning(
+            "C4: trade_guard_state.json has no recorded trades — "
+            "record_trade() has likely never been called. "
+            "Overtrading guards are NON-FUNCTIONAL."
+        )
+
     return {
         "warnings": all_warnings,
         "summary": "; ".join(summary_parts) if summary_parts else "All clear",

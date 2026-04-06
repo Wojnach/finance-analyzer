@@ -10,7 +10,6 @@ from portfolio.shared_state import _yfinance_limiter
 
 logger = logging.getLogger("portfolio.outcome_tracker")
 
-_MWU_HORIZON = "1d"  # which outcome horizon to use for MWU weight updates
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -400,47 +399,10 @@ def backfill_outcomes(max_entries=2000):
 
         entry["outcomes"] = outcomes
 
-        # MWU weight update: for each newly-confirmed 1d outcome, update
-        # signal weights based on whether each non-HOLD signal was correct.
-        if entry_updated:
-            try:
-                from portfolio.accuracy_stats import _vote_correct
-                from portfolio.signal_weights import SignalWeightManager
-
-                _mwu_mgr = SignalWeightManager()
-                _mwu_outcomes: dict[str, bool] = {}
-
-                for ticker, ticker_data in tickers.items():
-                    outcome_1d = outcomes.get(ticker, {}).get(_MWU_HORIZON)
-                    if outcome_1d is None:
-                        continue
-                    change_pct = outcome_1d.get("change_pct")
-                    if change_pct is None:
-                        continue
-                    signals = ticker_data.get("signals", {})
-                    for sig_name, vote in signals.items():
-                        if vote == "HOLD":
-                            continue
-                        correct = _vote_correct(vote, change_pct)
-                        if correct is None:
-                            continue  # neutral outcome — price didn't move enough
-                        # Accumulate: if a signal appears for multiple tickers,
-                        # aggregate as "correct if majority correct" — simple
-                        # approach: last value wins per (sig_name, ticker) pair.
-                        # Using compound key to avoid cross-ticker averaging.
-                        key = f"{sig_name}::{ticker}"
-                        _mwu_outcomes[key] = correct
-
-                if _mwu_outcomes:
-                    # Map compound keys back to signal names for the manager
-                    # The manager tracks per signal_name, so we aggregate across
-                    # tickers: a signal is updated once per (signal, ticker) pair.
-                    for compound_key, correct in _mwu_outcomes.items():
-                        sig_name = compound_key.split("::")[0]
-                        _mwu_mgr.update(sig_name, correct)
-                    _mwu_mgr.save()
-            except Exception:
-                logger.debug("MWU weight update failed", exc_info=True)
+        # C6: MWU weight update removed — SignalWeightManager.batch_update()
+        # wrote to data/signal_weights.json but signal_engine.py never read it.
+        # The entire MWU adaptation path was dead code producing disk I/O and
+        # CPU burn for zero effect. See Adversarial Review C6 for details.
 
         if entry_updated:
             updated += 1
