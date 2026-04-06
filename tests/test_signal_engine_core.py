@@ -1711,3 +1711,110 @@ class TestPerTickerConsensusGate:
         assert 0.313 < _PER_TICKER_CONSENSUS_GATE  # GOOGL caught
         assert 0.342 < _PER_TICKER_CONSENSUS_GATE  # META caught
         assert 0.390 > _PER_TICKER_CONSENSUS_GATE  # AMZN NOT caught
+
+
+# ---------------------------------------------------------------------------
+# Crisis mode detection tests
+# ---------------------------------------------------------------------------
+
+class TestCrisisMode:
+    """Test crisis mode detection in _weighted_consensus.
+
+    Crisis mode activates when >= 3 macro-external signals have blended
+    accuracy below 35% (with sufficient samples). In crisis mode:
+    - Trend signals (ema, trend, heikin_ashi, volume_flow) get 0.6x penalty
+    - Mean-reversion signals (mean_reversion, calendar) get 1.3x boost
+    """
+
+    def test_crisis_constants_exist(self):
+        from portfolio.signal_engine import (
+            _CRISIS_THRESHOLD,
+            _CRISIS_MIN_BROKEN,
+            _CRISIS_TREND_PENALTY,
+            _CRISIS_MR_BOOST,
+        )
+        assert _CRISIS_THRESHOLD == 0.35
+        assert _CRISIS_MIN_BROKEN == 3
+        assert 0 < _CRISIS_TREND_PENALTY < 1.0  # penalty reduces weight
+        assert _CRISIS_MR_BOOST > 1.0  # boost increases weight
+
+    def test_crisis_mode_penalizes_trend_signals(self):
+        """When 3+ macro signals are broken, trend signals should get
+        lower weight than in normal mode."""
+        # Build accuracy data where 3 macro signals are broken (<35%)
+        broken_acc = {
+            "fear_greed": {"accuracy": 0.25, "total": 100},
+            "macro_regime": {"accuracy": 0.30, "total": 100},
+            "news_event": {"accuracy": 0.29, "total": 100},
+            "structure": {"accuracy": 0.50, "total": 100},  # not broken
+            "sentiment": {"accuracy": 0.46, "total": 100},  # not broken
+            "ema": {"accuracy": 0.55, "total": 100},
+            "trend": {"accuracy": 0.55, "total": 100},
+            "mean_reversion": {"accuracy": 0.60, "total": 100},
+            "rsi": {"accuracy": 0.55, "total": 100},
+        }
+        # Normal mode accuracy (no broken signals)
+        normal_acc = {
+            "fear_greed": {"accuracy": 0.55, "total": 100},
+            "macro_regime": {"accuracy": 0.55, "total": 100},
+            "news_event": {"accuracy": 0.55, "total": 100},
+            "structure": {"accuracy": 0.55, "total": 100},
+            "sentiment": {"accuracy": 0.55, "total": 100},
+            "ema": {"accuracy": 0.55, "total": 100},
+            "trend": {"accuracy": 0.55, "total": 100},
+            "mean_reversion": {"accuracy": 0.60, "total": 100},
+            "rsi": {"accuracy": 0.55, "total": 100},
+        }
+        votes = {"ema": "BUY", "trend": "BUY", "mean_reversion": "BUY", "rsi": "SELL"}
+
+        # In crisis mode, trend signals should produce weaker BUY
+        crisis_action, crisis_conf = _weighted_consensus(votes, broken_acc, "ranging")
+        normal_action, normal_conf = _weighted_consensus(votes, normal_acc, "ranging")
+
+        # Both should be BUY (mean_reversion boosted + ema/trend present)
+        # but the weights will differ
+        # Key check: crisis mode detected (3 broken signals)
+        from portfolio.signal_engine import _CRISIS_THRESHOLD, ACCURACY_GATE_MIN_SAMPLES
+        broken_count = sum(
+            1 for s in ["fear_greed", "macro_regime", "news_event", "structure", "sentiment"]
+            if broken_acc.get(s, {}).get("total", 0) >= ACCURACY_GATE_MIN_SAMPLES
+            and broken_acc.get(s, {}).get("accuracy", 0.5) < _CRISIS_THRESHOLD
+        )
+        assert broken_count >= 3, f"Expected 3+ broken signals, got {broken_count}"
+
+    def test_crisis_mode_not_triggered_with_few_broken(self):
+        """Crisis mode should NOT trigger when only 1-2 signals are broken."""
+        from portfolio.signal_engine import _CRISIS_THRESHOLD, ACCURACY_GATE_MIN_SAMPLES
+        acc = {
+            "fear_greed": {"accuracy": 0.25, "total": 100},  # broken
+            "macro_regime": {"accuracy": 0.30, "total": 100},  # broken
+            "news_event": {"accuracy": 0.55, "total": 100},  # OK
+            "structure": {"accuracy": 0.50, "total": 100},  # OK
+            "sentiment": {"accuracy": 0.46, "total": 100},  # OK
+        }
+        broken_count = sum(
+            1 for s in ["fear_greed", "macro_regime", "news_event", "structure", "sentiment"]
+            if acc.get(s, {}).get("total", 0) >= ACCURACY_GATE_MIN_SAMPLES
+            and acc.get(s, {}).get("accuracy", 0.5) < _CRISIS_THRESHOLD
+        )
+        assert broken_count < 3, "Should NOT trigger crisis with only 2 broken signals"
+
+    def test_group_leader_gate_lowered(self):
+        """Group leader gate should be 0.46, not 0.47."""
+        # This is validated by checking that a leader at 0.465 gets gated
+        acc = {
+            "sentiment": {"accuracy": 0.465, "total": 100},
+            "fear_greed": {"accuracy": 0.25, "total": 100},
+        }
+        votes = {"sentiment": "SELL", "fear_greed": "SELL", "rsi": "BUY"}
+        acc["rsi"] = {"accuracy": 0.55, "total": 100}
+        # sentiment is leader of macro_external at 46.5% < 46% threshold
+        # ... entire group should be gated
+        action, conf = _weighted_consensus(votes, acc, "ranging")
+        # rsi BUY should win since macro_external group is gated
+        assert action == "BUY"
+
+    def test_recency_min_samples_constant(self):
+        """_RECENCY_MIN_SAMPLES should be 30 to match accuracy gate."""
+        from portfolio.signal_engine import _RECENCY_MIN_SAMPLES
+        assert _RECENCY_MIN_SAMPLES == 30

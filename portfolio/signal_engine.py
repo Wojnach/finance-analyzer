@@ -42,6 +42,17 @@ ACCURACY_GATE_MIN_SAMPLES = 30  # need enough data before gating
 _RECENCY_DIVERGENCE_THRESHOLD = 0.15  # 15% absolute divergence triggers fast blend
 _RECENCY_WEIGHT_NORMAL = 0.7
 _RECENCY_WEIGHT_FAST = 0.9
+_RECENCY_MIN_SAMPLES = 30  # match ACCURACY_GATE_MIN_SAMPLES (was 50 default)
+
+# Crisis regime: when multiple macro-external signals are simultaneously
+# degraded (recent accuracy < 35% with 50+ samples), the market is in a
+# regime that breaks fundamental assumptions (e.g., wartime, systemic crisis).
+# In crisis mode, apply extra penalty to trend-following signals and boost
+# mean-reversion/calendar signals.
+_CRISIS_THRESHOLD = 0.35  # signal accuracy below this counts as "broken"
+_CRISIS_MIN_BROKEN = 3  # need at least 3 broken macro signals for crisis flag
+_CRISIS_TREND_PENALTY = 0.6  # 0.6x weight for trend signals in crisis
+_CRISIS_MR_BOOST = 1.3  # 1.3x weight for mean-reversion in crisis
 
 # Per-ticker consensus gate: BUG-164.  Suppress all non-HOLD consensus for
 # tickers where the system's overall consensus is historically harmful.
@@ -580,7 +591,9 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # Prevents the "least bad" broken signal from voting.
     # 2026-03-31: macro_external group (fear_greed 25.9%, sentiment 46.8%,
     # news_event 29.5%) — even the leader is near noise.
-    _GROUP_LEADER_GATE_THRESHOLD = 0.47
+    # 2026-04-06: Lowered from 0.47 → 0.46 to catch borderline cases where
+    # sentiment (blended ~46.4%) barely escapes as group leader.
+    _GROUP_LEADER_GATE_THRESHOLD = 0.46
     group_gated_signals = set()
     for group_name, group_sigs in CORRELATION_GROUPS.items():
         leader = group_leaders.get(group_name)
@@ -603,6 +616,23 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             for s in group_sigs:
                 if s != leader and s in active_non_hold:
                     penalized_signals.add(s)
+
+    # Crisis mode detection: when multiple macro-external signals have degraded
+    # accuracy, the market is in an abnormal regime (war, systemic crisis) where
+    # trend-following breaks and mean-reversion becomes more reliable.
+    _MACRO_CRISIS_SIGNALS = {"fear_greed", "macro_regime", "structure", "news_event", "sentiment"}
+    broken_count = sum(
+        1 for s in _MACRO_CRISIS_SIGNALS
+        if accuracy_data.get(s, {}).get("total", 0) >= ACCURACY_GATE_MIN_SAMPLES
+        and accuracy_data.get(s, {}).get("accuracy", 0.5) < _CRISIS_THRESHOLD
+    )
+    crisis_mode = broken_count >= _CRISIS_MIN_BROKEN
+    if crisis_mode:
+        logger.info("Crisis mode detected: %d/%d macro signals below %.0f%% accuracy",
+                     broken_count, len(_MACRO_CRISIS_SIGNALS), _CRISIS_THRESHOLD * 100)
+
+    _TREND_SIGNALS = {"ema", "trend", "heikin_ashi", "volume_flow"}
+    _MR_SIGNALS = {"mean_reversion", "calendar"}
 
     for signal_name, vote in votes.items():
         if vote == "HOLD":
@@ -627,6 +657,12 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         # Horizon-specific weight adjustment
         if signal_name in horizon_mults:
             weight *= horizon_mults[signal_name]
+        # Crisis mode adjustments: penalize trend signals, boost mean-reversion
+        if crisis_mode:
+            if signal_name in _TREND_SIGNALS:
+                weight *= _CRISIS_TREND_PENALTY
+            elif signal_name in _MR_SIGNALS:
+                weight *= _CRISIS_MR_BOOST
         # Activation frequency normalization (rarity * bias correction)
         act_data = activation_rates.get(signal_name, {})
         norm_weight = act_data.get("normalized_weight", 1.0)
@@ -1442,6 +1478,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             divergence_threshold=_RECENCY_DIVERGENCE_THRESHOLD,
             normal_weight=_RECENCY_WEIGHT_NORMAL,
             fast_weight=_RECENCY_WEIGHT_FAST,
+            min_recent_samples=_RECENCY_MIN_SAMPLES,
         )
 
         activation_rates = load_cached_activation_rates()
