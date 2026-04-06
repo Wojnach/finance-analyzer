@@ -120,7 +120,7 @@ def write_agent_summary(
             "extra": extra_clean,
         }
         # Mark extended-hours data for stocks (yfinance prepost during off-hours)
-        if name in STOCK_SYMBOLS and _ss._current_market_state in ("closed", "weekend"):
+        if name in STOCK_SYMBOLS and _ss._current_market_state in ("closed", "weekend", "holiday"):
             sig_entry["extended_hours"] = True
         summary["signals"][name] = sig_entry
         if "fear_greed" in extra:

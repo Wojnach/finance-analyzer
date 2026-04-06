@@ -258,7 +258,7 @@ def _fetch_klines(source, interval, limit):
         return binance_klines(source["binance"], interval=interval, limit=limit)
     elif "alpaca" in source:
         ticker = source["alpaca"]
-        if _ss._current_market_state in ("closed", "weekend"):
+        if _ss._current_market_state in ("closed", "weekend", "holiday"):
             logger.debug("%s: using yfinance (market %s)", ticker, _ss._current_market_state)
             _ss._yfinance_limiter.wait()
             return yfinance_klines(ticker, interval=interval, limit=limit)
@@ -284,7 +284,7 @@ def _fetch_one_timeframe(source, source_key, label, interval, limit, ttl):
                 return (label, cached["data"])
     try:
         # yfinance is not thread-safe — serialize its calls
-        if "alpaca" in source and _ss._current_market_state in ("closed", "weekend"):
+        if "alpaca" in source and _ss._current_market_state in ("closed", "weekend", "holiday"):
             with _yfinance_lock:
                 df = _fetch_klines(source, interval, limit)
         else:

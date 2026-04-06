@@ -17,6 +17,10 @@ INTERVAL_MARKET_OPEN = 60     # 1 min — full speed
 INTERVAL_MARKET_CLOSED = 120  # 2 min — crypto only weekday nights
 INTERVAL_WEEKEND = 600        # 10 min — crypto only weekends
 
+# States where US stock markets are NOT trading — use this tuple instead of
+# hardcoding ("closed", "weekend") to avoid missing the "holiday" state.
+MARKET_CLOSED_STATES = ("closed", "weekend", "holiday")
+
 
 def _is_eu_dst(dt):
     """Check if a UTC datetime falls within EU Summer Time (CEST).
@@ -197,6 +201,7 @@ def swedish_market_holidays(year):
         easter + timedelta(days=1),                   # Easter Monday
         date(year, 5, 1),                             # May Day
         easter + timedelta(days=39),                  # Ascension Day
+        easter + timedelta(days=48),                  # Whitsun Eve (Pingstafton)
         date(year, 6, 6),                             # National Day
         midsummer_eve,                                # Midsummer Eve
         date(year, 12, 24),                           # Christmas Eve

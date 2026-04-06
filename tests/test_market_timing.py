@@ -956,6 +956,7 @@ class TestSwedishMarketHolidays:
             date(2026, 4, 6),    # Easter Monday
             date(2026, 5, 1),    # May Day
             date(2026, 5, 14),   # Ascension Day (Easter + 39)
+            date(2026, 5, 23),   # Whitsun Eve / Pingstafton (Easter + 49)
             date(2026, 6, 6),    # National Day
             date(2026, 6, 19),   # Midsummer Eve
             date(2026, 12, 24),  # Christmas Eve
@@ -978,10 +979,14 @@ class TestSwedishMarketHolidays:
         assert date(2027, 6, 25) in swedish_market_holidays(2027)
 
     def test_holiday_count(self):
-        """Swedish market has 12 holidays per year."""
+        """Swedish market has 13 holidays per year."""
         for year in range(2024, 2031):
             holidays = swedish_market_holidays(year)
-            assert len(holidays) == 12, f"Year {year}: expected 12, got {len(holidays)}"
+            assert len(holidays) == 13, f"Year {year}: expected 13, got {len(holidays)}"
+
+    def test_whitsun_eve_2026(self):
+        """Whitsun Eve (Pingstafton) 2026 = Sat May 23 (Easter + 49)."""
+        assert date(2026, 5, 23) in swedish_market_holidays(2026)
 
     def test_ascension_day_always_thursday(self):
         """Ascension Day is always a Thursday (Easter + 39 days)."""

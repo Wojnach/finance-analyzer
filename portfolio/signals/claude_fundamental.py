@@ -746,7 +746,7 @@ def compute_claude_fundamental_signal(df: pd.DataFrame, context: dict = None) ->
     # Cached results from the last open-hours refresh are still served during off-hours.
     from portfolio.market_timing import get_market_state
     market_state, _, _ = get_market_state()
-    skip_refresh = market_state in ("closed", "weekend")
+    skip_refresh = market_state in ("closed", "weekend", "holiday")
 
     cooldowns = _get_cooldowns(config)
 
