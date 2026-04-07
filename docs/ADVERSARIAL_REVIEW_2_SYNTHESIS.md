@@ -137,6 +137,34 @@ without any locking. Concurrent calls clobber each other.
 means CONFIRM could execute the wrong one.
 **Impact:** Wrong order confirmed with real money.
 
+#### N25. SQLite accuracy queries skip neutral outcome filter — accuracy inflation
+**Source:** Agent review (signals-core), finding B6
+**Files:** `portfolio/signal_db.py:271,302,330,370`
+**What:** All accuracy SQL queries in SignalDB count outcomes where `change_pct` is tiny
+(e.g., 0.01%) as correct for BUY signals (since 0.01 > 0). The JSONL-based accuracy in
+`accuracy_stats.py` applies `_MIN_CHANGE_PCT = 0.05` to filter neutral outcomes. Since
+SQLite is the preferred data source (`load_entries()` line 27-35), ALL accuracy numbers
+used for signal weighting may be systematically inflated.
+**Impact:** Overconfident signals → larger position sizes → increased financial risk.
+
+#### N26. No `change_pct` outlier validation — single corrupt price permanently skews accuracy
+**Source:** Agent review (signals-core), finding D1
+**Files:** `portfolio/outcome_tracker.py:374-378`
+**What:** No validation that `change_pct` is within reasonable bounds. A Binance flash-crash
+or yfinance split-adjusted price would produce extreme values (e.g., +10000%). These outliers
+are permanently stored and used in all accuracy calculations.
+**Impact:** One corrupt price event permanently classifies a signal as "correct" or "incorrect",
+distorting all downstream trading decisions.
+
+#### N27. NaN propagation in weighted consensus — NaN confidence in trade pipeline
+**Source:** Agent review (signals-core), finding E2
+**Files:** `portfolio/signal_engine.py:637-692`
+**What:** If accuracy_data returns 0/0=NaN for a signal, the weight becomes NaN. All
+subsequent `buy_weight += NaN` produces NaN. Final confidence is NaN, which propagates
+through penalty cascade into trade decisions.
+**Impact:** Entire consensus computation corrupted by one signal's NaN accuracy.
+**Fix:** Add `if not np.isfinite(weight): continue` after weight computation.
+
 #### N21. `_loading_keys` leak in `_cached_or_enqueue` — LLM signals permanently stale
 **Files:** `portfolio/shared_state.py:108-130`, `portfolio/llm_batch.py:65-100`
 **What:** `_cached_or_enqueue` adds keys to `_loading_keys` (line 123) to prevent
@@ -248,8 +276,29 @@ appended as they complete.
 - Concentration check cash-based (N12 in independent)
 - Trade guards no file locking (N10 partial)
 
+### Agent 1: signals-core (COMPLETED — 22 findings)
+
+**NEW findings not in independent review:**
+- **SQLite accuracy skips neutral filter** — `signal_db.py` queries don't apply
+  `_MIN_CHANGE_PCT=0.05`, inflating accuracy vs JSONL computation. Since SQLite is
+  preferred data source, ALL accuracy numbers may be systematically wrong. (B6)
+- **No `change_pct` validation** — a single corrupt Binance flash-crash price permanently
+  skews accuracy for that signal forever. No outlier detection. (D1)
+- **NaN propagation in weighted consensus** — if accuracy is 0/0=NaN, weight becomes NaN,
+  all subsequent additions produce NaN, confidence becomes NaN in trade pipeline. (E2)
+- **`generate_signal` crashes on missing indicator keys** — direct `ind["rsi"]` access
+  without `.get()` defaults. Any data quality issue → total signal failure for ticker. (B2)
+- **`signal_history.py` race condition** — read-modify-write without locking in
+  ThreadPoolExecutor. History entries silently lost. (R1)
+- **Utility boost can inflate accuracy by 1.5x** — signals catching a few lucky outliers
+  get dramatically overweighted. (C2)
+
+**Converged with independent review:**
+- ADX cache keyed by id(df) (B1 = N8)
+- Accuracy→gating feedback loop (D3 ≈ C10)
+- Signal weight optimizer dead code (A3 ≈ C6)
+
 **Agent subsystem assignments (remaining in progress):**
-1. `review-signals-core` — signal_engine.py + 11 supporting files
 2. `review-orchestration` — main.py + 8 supporting files
 4. `review-metals-core` — metals_loop.py + 14 supporting files
 5. `review-avanza-api` — avanza_session.py + 6 supporting files
