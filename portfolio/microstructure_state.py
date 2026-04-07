@@ -92,10 +92,13 @@ def record_ofi(ticker: str, ofi_val: float) -> None:
     _ofi_history[ticker].append(ofi_val)
 
 
-def get_ofi_zscore(ticker: str) -> float:
-    """Z-score of current OFI relative to its own rolling distribution.
+def get_ofi_zscore(ticker: str, current_ofi: float | None = None) -> float:
+    """Z-score of OFI relative to its own rolling distribution.
 
-    Normalizes OFI per asset so gold and BTC use comparable thresholds.
+    Scores ``current_ofi`` (or the latest recorded value) against the
+    historical distribution WITHOUT including the current value.
+    This prevents self-contamination that compresses z-scores toward zero.
+
     Returns 0.0 if insufficient history.
     """
     _ensure_buffer(ticker)
@@ -108,7 +111,8 @@ def get_ofi_zscore(ticker: str) -> float:
     std = arr.std()
     if std < 1e-12:
         return 0.0
-    return float((arr[-1] - mean) / std)
+    value = current_ofi if current_ofi is not None else arr[-1]
+    return float((value - mean) / std)
 
 
 def get_multiscale_ofi(ticker: str) -> dict:
@@ -125,11 +129,16 @@ def get_multiscale_ofi(ticker: str) -> dict:
     ofi_medium = compute_ofi(snapshots[-_OFI_WINDOW_MEDIUM:]) if n >= _OFI_WINDOW_MEDIUM else ofi_slow
     ofi_fast = compute_ofi(snapshots[-_OFI_WINDOW_FAST:]) if n >= _OFI_WINDOW_FAST else ofi_medium
 
-    # Flow acceleration: compare fast to slow (normalized by snapshot counts)
-    # Normalize per-snapshot to make windows comparable
-    fast_per_snap = ofi_fast / max(_OFI_WINDOW_FAST - 1, 1)
-    slow_per_snap = ofi_slow / max(n - 1, 1) if n > 1 else 0.0
-    flow_acceleration = fast_per_snap - slow_per_snap
+    # Flow acceleration: compare fast to slow (normalized by snapshot counts).
+    # Only meaningful when we have enough snapshots for distinct windows;
+    # during warmup (n < _OFI_WINDOW_FAST), fast==slow so acceleration
+    # would produce misleading non-zero values (code review MEDIUM-2).
+    if n >= _OFI_WINDOW_FAST:
+        fast_per_snap = ofi_fast / max(_OFI_WINDOW_FAST - 1, 1)
+        slow_per_snap = ofi_slow / max(n - 1, 1) if n > 1 else 0.0
+        flow_acceleration = fast_per_snap - slow_per_snap
+    else:
+        flow_acceleration = 0.0
 
     return {
         "ofi_fast": round(ofi_fast, 4),
@@ -158,8 +167,11 @@ def get_microstructure_state(ticker: str) -> dict:
     Returns dict with ofi, ofi_zscore, multiscale OFI, and spread_zscore.
     """
     ofi = get_rolling_ofi(ticker)
-    record_ofi(ticker, ofi)  # track for z-score (once per state retrieval)
-    ofi_z = get_ofi_zscore(ticker)
+    # Compute z-score BEFORE appending current value to history —
+    # scoring against a population that includes itself compresses
+    # the z-score toward zero (code review finding CRITICAL-1).
+    ofi_z = get_ofi_zscore(ticker, current_ofi=ofi)
+    record_ofi(ticker, ofi)
     sz = get_spread_zscore(ticker)
     ms_ofi = get_multiscale_ofi(ticker)
     _ensure_buffer(ticker)

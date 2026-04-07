@@ -229,7 +229,7 @@ def signal_accuracy_ewma(horizon="1d", halflife_days=5, entries=None):
     return result
 
 
-def signal_accuracy_cost_adjusted(horizon="1d", cost_bps=5.0, entries=None):
+def signal_accuracy_cost_adjusted(horizon="1d", cost_bps=10.0, entries=None):
     """Compute per-signal accuracy adjusted for transaction costs.
 
     A signal vote is only counted as correct if the price move exceeds
@@ -238,8 +238,10 @@ def signal_accuracy_cost_adjusted(horizon="1d", cost_bps=5.0, entries=None):
 
     Args:
         horizon: Outcome horizon to evaluate.
-        cost_bps: Estimated round-trip cost in basis points (default 5 bps).
-                  For metals warrants ~5-10 bps, crypto ~2-5 bps.
+        cost_bps: Estimated round-trip cost in basis points (default 10 bps).
+                  Must exceed _MIN_CHANGE_PCT (5 bps) to filter beyond
+                  the neutral outcome threshold. Metals warrants ~10 bps,
+                  crypto ~5 bps.
         entries: Pre-loaded entries list. If None, loads from disk.
 
     Returns:
