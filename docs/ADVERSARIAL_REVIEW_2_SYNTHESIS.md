@@ -1,0 +1,222 @@
+# Adversarial Review #2 — Synthesis
+**Date:** 2026-04-07
+**Baseline HEAD:** `ad13eca` (main branch)
+**Reviewers:** 8 parallel Claude Opus 4.6 agents + 1 independent Claude Opus 4.6 pass
+**Method:** 8 subsystem-specific adversarial agents (background) + independent manual review
+**Prior review:** `docs/ADVERSARIAL_REVIEW_SYNTHESIS.md` (2026-04-05, 85 findings)
+
+---
+
+## Delta Analysis: Prior Review C1-C10 Status
+
+| ID | Finding | Status | Evidence |
+|----|---------|--------|----------|
+| C1 | Self-heal grants Edit+Bash+Write | **FIXED** | `allowed_tools="Read,Grep,Glob"` (read-only) |
+| C2 | `place_order_no_page` fails open | **FIXED** | Strict validation added (line 323) |
+| C3 | No position-size / stop volume invariant | **STILL OPEN** | No `free_volume` check in any order path |
+| C4 | `record_trade()` has zero callers | **STILL OPEN** | Only golddigger's `record_trade_pnl()` exists |
+| C5 | Singleton lock no-ops on non-Windows | **FIXED** | Now supports both msvcrt and fcntl |
+| C6 | MWU signal weights written, never read | **STILL OPEN** | signal_engine.py never imports SignalWeightManager |
+| C7 | `load_state` silently regenerates defaults | **FIXED** | Rolling backups via `_rotate_backups()` |
+| C8 | Portfolio state no concurrency safety | **FIXED** | `update_state()` with per-file locks |
+| C9 | Monte Carlo t-copula identity transform | **FIXED** | Uses `norm.ppf(U)` now |
+| C10 | Regime-gated signals can't recover | **FIXED** | `raw_votes` captured pre-gate (line 1356) |
+
+**Score:** 6/10 fixed in 2 days. C3, C4, C6 remain open — all with real financial impact.
+
+---
+
+## NEW FINDINGS — Independent Review (April 7)
+
+### TIER 1: CRITICAL (Act Now)
+
+#### N1. `record_trade()` STILL has zero callers — overtrading guards completely non-functional
+**Source:** Confirmed re-verification of C4
+**Files:** `portfolio/trade_guards.py:171`
+**What:** grep for `record_trade(` across the entire portfolio directory returns only
+the definition and the C4 warning. Not a single BUY/SELL execution path calls it.
+**Impact:** The entire overtrading-guard subsystem (cooldowns, loss escalation, position
+rate limits) is dead code. The system has NO protection against overtrading.
+**Priority:** HIGHEST — this is a repeat finding from April 5 that was not fixed.
+
+#### N2. `atomic_append_jsonl` is NOT atomic — concurrent appenders can corrupt JSONL
+**Files:** `portfolio/file_utils.py:155-167`
+**What:** `open(path, "a")` + `write()` + `fsync()` is not protected by any file lock.
+When main loop and metals loop both append to the same JSONL file (e.g., signal_log.jsonl,
+telegram_messages.jsonl), their writes can interleave, producing partial JSON lines.
+**Impact:** Corrupted JSONL entries → accuracy tracking becomes unreliable, signal
+postmortem analysis produces wrong results, telegram log analysis fails.
+**Evidence:** `atomic_write_json` uses tempfile+replace (truly atomic). `atomic_append_jsonl`
+does NOT — it's a misnomer.
+
+#### N3. Two parallel signal systems (main loop vs metals loop) diverge silently
+**Files:** `portfolio/signal_engine.py` vs `data/metals_loop.py`
+**What:** The metals loop (5366 lines) has its OWN signal computation that doesn't use
+signal_engine.py. All improvements made to signal_engine (accuracy gating, regime gating,
+correlation groups, horizon-specific weights, crisis mode, per-ticker consensus gate) are
+NOT applied to metals signals. The metals loop trades REAL warrants with REAL money.
+**Impact:** Metals trades operate with an inferior, un-gated signal system while the main
+loop benefits from 30+ bug fixes and tuning iterations.
+
+#### N4. No account ID validation on Avanza order placement
+**Files:** `portfolio/avanza_session.py:371-379`
+**What:** `_place_order` defaults to ISK account 1625505 but accepts any `account_id`
+parameter without validation. No allowlist prevents orders on pension account 2674244.
+**Impact:** A parameter error could route a live order to the pension account.
+
+### TIER 2: HIGH (Fix This Sprint)
+
+#### N5. `check_drawdown` scans full history file every call — O(n) grows unbounded
+**Files:** `portfolio/risk_management.py:97-110`
+**What:** Reads `portfolio_value_history.jsonl` line by line. After 1 year: 500K+ entries.
+Uses raw `open()` + `json.loads()`, not `load_jsonl_tail()`.
+**Impact:** Increasingly slow drawdown checks; eventually causes cycle timeout.
+
+#### N6. `_compute_portfolio_value` falls back to entry price when live price unavailable
+**Files:** `portfolio/risk_management.py:46`
+**What:** Uses `avg_cost_usd` when ticker not in agent_summary. For a stock down 50%,
+this overstates portfolio value by 2x.
+**Impact:** Masks drawdown, prevents circuit breaker from triggering.
+
+#### N7. ~~Accuracy data mutation may corrupt shared cache~~ — DOWNGRADED to LOW
+**Files:** `portfolio/signal_engine.py:1518`
+**What:** Per-ticker accuracy overrides write directly into `accuracy_data`. HOWEVER,
+`blend_accuracy_data()` returns a new dict (verified: line 551 creates fresh dict),
+and `generate_signal()` is called once per ticker with its own copy. The regime
+accuracy overlay (line 1505) assigns shared references but utility boost (line 1555)
+creates copies via `{**accuracy_data[sig_name], ...}`.
+**Assessment:** Not a real bug in current code. Each ticker gets its own accuracy_data.
+Keeping as LOW for documentation: future refactoring that shares accuracy_data across
+tickers would introduce this bug.
+
+#### N8. `_adx_cache` keyed by `id(df)` — stale values after GC
+**Files:** `portfolio/signal_engine.py:25`
+**What:** `id(df)` returns memory address. After DataFrame GC, new DataFrame may get
+same id(), serving stale ADX from a different ticker.
+**Impact:** Incorrect ADX values → wrong regime detection → wrong signal gating.
+
+#### N9. metals_loop.py imports Playwright at module level
+**Files:** `data/metals_loop.py:54`
+**What:** Top-level `from playwright.sync_api import sync_playwright` — if Playwright
+is broken, the entire metals loop fails to start.
+**Impact:** Complete metals loop failure on Playwright issues.
+
+#### N10. `health.py` read-modify-write has no locking
+**Files:** `portfolio/health.py:16-36`
+**What:** `update_health()` and `update_signal_health_batch()` both do load→modify→write
+without any locking. Concurrent calls clobber each other.
+**Impact:** Health data loss, inaccurate monitoring.
+
+#### N11. Avanza `check_pending_orders` confirms FIFO, not by ID
+**Files:** `portfolio/avanza_orders.py:127-132`
+**What:** CONFIRM matches first pending order, not the intended one. Two pending orders
+means CONFIRM could execute the wrong one.
+**Impact:** Wrong order confirmed with real money.
+
+#### N21. `_loading_keys` leak in `_cached_or_enqueue` — LLM signals permanently stale
+**Files:** `portfolio/shared_state.py:108-130`, `portfolio/llm_batch.py:65-100`
+**What:** `_cached_or_enqueue` adds keys to `_loading_keys` (line 123) to prevent
+re-enqueue. Keys are only removed by `_update_cache()` (line 136). If `flush_llm_batch()`
+fails for a key (LLM inference error, import failure), that key stays in `_loading_keys`
+permanently. On every subsequent cycle, the key is never re-enqueued because
+`key not in _loading_keys` is False. The stale LLM result is served until it exceeds
+`_MAX_STALE_FACTOR` (3x TTL = 45 minutes), then None is returned forever.
+**Impact:** A single LLM inference failure permanently disables that ticker's Ministral/Qwen3
+signal for the session. Only a loop restart recovers it.
+**Fix:** Clean `_loading_keys` in `flush_llm_batch()` after processing, OR add a timeout
+to `_loading_keys` entries.
+
+### TIER 3: MEDIUM (Fix Next Sprint)
+
+#### N12. Post-cycle tasks run synchronously — cycle time bloat
+**Files:** `portfolio/main.py:262-371`
+
+#### N13. `econ_calendar.py` uses hardcoded FOMC dates (2026-2027 only)
+**Files:** `portfolio/signals/econ_calendar.py`
+
+#### N14. Trade guards use `severity: "warning"` — never "block"
+**Files:** `portfolio/trade_guards.py`
+
+#### N15. `sentiment.py` silent degradation on NewsAPI exhaustion
+**Files:** `portfolio/sentiment.py`
+
+#### N16. `fx_rates.py` minimal error handling for critical FX data
+**Files:** `portfolio/fx_rates.py`
+
+#### N17. Rate limiters use `time.sleep()` — blocks ThreadPoolExecutor workers
+**Files:** `portfolio/shared_state.py:167-174`
+
+#### N18. `_GROUP_LEADER_GATE_THRESHOLD` hardcoded inside function body
+**Files:** `portfolio/signal_engine.py:596`
+
+#### N19. Signal module interface inconsistency
+**Files:** `portfolio/signals/*.py` (23 modules, 3 calling conventions)
+
+#### N20. `prune_jsonl` reads entire file into memory
+**Files:** `portfolio/file_utils.py:232-276`
+
+---
+
+## Cross-Cutting Architectural Concerns
+
+### A1. Two Signal Systems (CRITICAL)
+The main loop and metals loop have independent signal computation. This is the single
+biggest architectural risk — every signal engine improvement since February only benefits
+the main loop. The metals loop, which trades REAL money, operates with an older, untuned
+signal system.
+
+### A2. ThreadPoolExecutor(8) + Module-Level Mutable State
+Multiple modules use module-level dicts protected by individual locks. The overall
+concurrency model is hard to reason about. Risk: deadlock between any two locks
+freezes the main loop forever.
+
+### A3. JSONL Append-Only Logs Without File Locking
+10+ JSONL files use `atomic_append_jsonl` which is neither truly atomic nor locked.
+Multiple processes (main loop, metals loop, outcome tracker) write to overlapping files.
+
+### A4. Config Symlink Risk
+`config.json` is a symlink to an external file. Mid-edit partial JSON could crash the loop.
+
+---
+
+## Recommendations (Priority Order)
+
+1. **Wire `record_trade()` into all execution paths** (C4/N1 — day 1)
+2. **Add file locking to `atomic_append_jsonl`** (N2 — day 1)
+3. **Validate account_id against allowlist** (N4 — day 1, 5 lines of code)
+4. **Refactor metals_loop to use signal_engine.py** (N3/A1 — week-long project)
+5. **Track peak_value in health_state.json** (N5 — day 1)
+6. **Add pre-trade volume invariant** (C3 — day 2)
+7. **Delete or wire SignalWeightManager** (C6 — day 1)
+8. **Deep-copy accuracy_data before mutation** (N7 — day 1)
+9. **Add locking to health.py read-modify-write** (N10 — day 1)
+10. **Fix Avanza order confirmation to use order ID** (N11 — day 1)
+
+---
+
+## Agent Review Results
+
+8 parallel adversarial review agents were launched (one per subsystem), each performing
+deep code-level analysis. Agent results will be appended in a follow-up commit when
+they complete. The independent review above provides the primary findings.
+
+**Agent subsystem assignments:**
+1. `review-signals-core` — signal_engine.py + 11 supporting files
+2. `review-orchestration` — main.py + 8 supporting files
+3. `review-portfolio-risk` — risk_management.py + 13 supporting files
+4. `review-metals-core` — metals_loop.py + 14 supporting files
+5. `review-avanza-api` — avanza_session.py + 6 supporting files
+6. `review-signals-modules` — 23 signal module files
+7. `review-data-external` — data_collector.py + 13 supporting files
+8. `review-infrastructure` — file_utils.py + 17 supporting files
+
+---
+
+## Verification Methodology
+
+Each finding was verified by:
+1. Reading the source file at the specific line number
+2. Grepping for callers/consumers of the identified function
+3. Cross-referencing against the prior April 5 review
+4. Checking git log for any fixes applied since April 5
+5. Assessing financial impact based on the system's stated purpose (real money trading)
