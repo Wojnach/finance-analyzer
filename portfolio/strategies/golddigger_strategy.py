@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
 
 from portfolio.file_utils import atomic_write_json, load_json
 from portfolio.golddigger.bot import GolddiggerBot
@@ -17,8 +16,8 @@ from portfolio.golddigger.config import DATA_DIR, GolddiggerConfig
 from portfolio.golddigger.data_provider import (
     MarketSnapshot,
     fetch_gold_price,
-    fetch_usdsek,
     fetch_us10y_context,
+    fetch_usdsek,
     read_event_risk,
 )
 from portfolio.strategies.base import SharedData, StrategyBase

@@ -9,6 +9,7 @@ Usage:
     python -m portfolio.golddigger --dry-run    # paper trade (default)
 """
 
+import contextlib
 import logging
 import os
 import time
@@ -353,11 +354,9 @@ def run(live: bool = False, once: bool = False):
                     logger.info("GoldDigger single-cycle complete (%s)", "action" if action else "hold")
                     break
                 _report.cycle_end = time.monotonic()
-                try:
+                with contextlib.suppress(Exception):
                     verify_and_act(_report, config or {}, tracker=_contract_tracker,
                                    verify_fn=verify_bot_contract, loop_name="golddigger")
-                except Exception:
-                    pass
                 time.sleep(cfg.poll_seconds)
 
             except KeyboardInterrupt:

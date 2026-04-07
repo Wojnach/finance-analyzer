@@ -1223,7 +1223,7 @@ def main() -> int:
                     _gen = deep_ctx.get("generated_at", "")
                     if _gen:
                         try:
-                            _age_s = (_dt.datetime.now(_dt.timezone.utc) - _dt.datetime.fromisoformat(_gen)).total_seconds()
+                            _age_s = (_dt.datetime.now(_dt.UTC) - _dt.datetime.fromisoformat(_gen)).total_seconds()
                             if _age_s > 7200:  # 2 hours
                                 print(f"  ⚠ Deep context STALE ({_age_s/3600:.1f}h old)")
                         except Exception:

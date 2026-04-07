@@ -158,9 +158,10 @@ def detect_regime(indicators, is_crypto=True):
         result = "ranging"
 
     # BUG-156: EMA crossover lags behind V-shaped recoveries.
-    if result == "trending-down" and close > 0 and ema21 > 0 and close > ema21:
-        result = "ranging"
-    elif result == "trending-up" and close > 0 and ema21 > 0 and close < ema21:
+    if (
+        (result == "trending-down" and close > 0 and ema21 > 0 and close > ema21)
+        or (result == "trending-up" and close > 0 and ema21 > 0 and close < ema21)
+    ):
         result = "ranging"
 
     with _ss._regime_lock:
