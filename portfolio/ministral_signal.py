@@ -8,6 +8,7 @@ Uses GPU gate to ensure exclusive GPU access during model load/inference.
 import json
 import logging
 import platform
+from contextlib import suppress
 from pathlib import Path
 
 from portfolio.gpu_gate import gpu_gate
@@ -90,12 +91,10 @@ def _call_model(context, lora_path=None):
 
 def get_ministral_signal(context):
     """Get trading signal from Ministral with GPU gating."""
-    try:
+    with suppress(Exception):
         killed = kill_orphaned_llama()
         if killed:
             logger.warning("Reaped %d orphaned llama process(es)", killed)
-    except Exception:
-        pass
     with gpu_gate("ministral", timeout=300) as acquired:
         if not acquired:
             logger.warning("GPU gate timeout — returning HOLD")

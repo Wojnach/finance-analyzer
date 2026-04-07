@@ -19,6 +19,7 @@ import datetime
 import json
 import logging
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -139,14 +140,12 @@ class SmartFishMonitor:
                 yf_ticker = driver.get("ticker")
                 if not yf_ticker:
                     continue
-                try:
+                with suppress(Exception):
                     t = yf.Ticker(yf_ticker)
                     info = t.fast_info
                     price = getattr(info, "last_price", None)
                     if price and price > 0:
                         result[name] = float(price)
-                except Exception:
-                    pass
         except ImportError:
             pass
         return result
@@ -218,7 +217,7 @@ class SmartFishMonitor:
             result["keltner_lower"] = _safe_float(price_levels.get("keltner_lower"))
 
         # --- Metals loop: LLM predictions ---
-        try:
+        with suppress(Exception):
             metals_log = BASE_DIR / "data" / "metals_signal_log.jsonl"
             lines = metals_log.read_text().strip().split("\n")
             if lines:
@@ -240,8 +239,6 @@ class SmartFishMonitor:
                     result["metals_rsi"] = _safe_float(metals_sig.get("rsi"))
                     result["metals_buy"] = metals_sig.get("buy_count", 0)
                     result["metals_sell"] = metals_sig.get("sell_count", 0)
-        except Exception:
-            pass
 
         return result
 

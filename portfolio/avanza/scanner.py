@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import suppress
 from dataclasses import dataclass
 
 from portfolio.avanza.types import _val
@@ -67,7 +68,7 @@ def _get_api():
         logger.debug("Scanner using TOTP client (thread-safe)")
         return _search, _instrument, _marketdata, True
     except Exception:
-        pass
+        logger.debug("TOTP client unavailable, falling back to BankID session")
 
     # Fall back to BankID session (Playwright — NOT thread-safe, must be sequential)
     try:
@@ -264,7 +265,7 @@ def scan_instruments(
             bid_vol = 0
             ask_vol = 0
             mm = False
-            try:
+            with suppress(Exception):
                 md = marketdata_fn(ob_id)
                 if isinstance(md, dict):
                     od = md.get("orderDepth", md.get("orderDepthLevels", {}))
@@ -276,8 +277,6 @@ def scan_instruments(
                         bid_vol = int(bid_side.get("volume", 0))
                         ask_vol = int(ask_side.get("volume", 0))
                     mm = md.get("marketMakerExpected", False)
-            except Exception:
-                pass
 
             return ScannedInstrument(
                 orderbook_id=ob_id,

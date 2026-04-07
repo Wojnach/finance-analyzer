@@ -23,6 +23,7 @@ import argparse
 import datetime
 import logging
 import math
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -1222,12 +1223,10 @@ def main() -> int:
                     import datetime as _dt
                     _gen = deep_ctx.get("generated_at", "")
                     if _gen:
-                        try:
+                        with suppress(Exception):
                             _age_s = (_dt.datetime.now(_dt.UTC) - _dt.datetime.fromisoformat(_gen)).total_seconds()
                             if _age_s > 7200:  # 2 hours
                                 print(f"  ⚠ Deep context STALE ({_age_s/3600:.1f}h old)")
-                        except Exception:
-                            pass
                     analyst = deep_ctx.get("analyst_targets", {})
                     if analyst:
                         targets = []
@@ -1388,8 +1387,8 @@ def main() -> int:
                 if detected_position:
                     break
         except Exception:
-            pass  # Avanza unavailable — check persisted state
-            try:
+            # Avanza unavailable — check persisted state
+            with suppress(Exception):
                 pos_state = load_json(BASE_DIR / "data" / "metals_positions_state.json") or {}
                 for key, pos in pos_state.items():
                     if pos.get("active") and any(t.lower().replace("-", "") in key.lower()
@@ -1406,8 +1405,6 @@ def main() -> int:
                         print(f"\n  Active position from state: {key}")
                         print("  Auto-starting smart monitor...\n")
                         break
-            except Exception:
-                pass
 
     if should_monitor and tickers:
         ticker = tickers[0]
