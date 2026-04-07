@@ -54,6 +54,14 @@ _CRISIS_MIN_BROKEN = 3  # need at least 3 broken macro signals for crisis flag
 _CRISIS_TREND_PENALTY = 0.6  # 0.6x weight for trend signals in crisis
 _CRISIS_MR_BOOST = 1.3  # 1.3x weight for mean-reversion in crisis
 
+# Directional bias penalty: signals with extreme BUY or SELL bias (>85% of
+# their non-HOLD votes in one direction) get penalized because their
+# "accuracy" may just reflect market drift rather than genuine edge.
+# E.g., calendar (100% BUY) in a ranging-up market looks accurate by luck.
+_BIAS_THRESHOLD = 0.85  # >85% BUY or >85% SELL triggers penalty
+_BIAS_PENALTY = 0.5  # 0.5x weight for extreme-bias signals
+_BIAS_MIN_ACTIVE = 30  # need enough active (non-HOLD) votes to judge bias
+
 # Per-ticker consensus gate: BUG-164.  Suppress all non-HOLD consensus for
 # tickers where the system's overall consensus is historically harmful.
 # AMD 24.8%, GOOGL 31.3%, META 34.2% — actively wrong.
@@ -602,12 +610,14 @@ _STATIC_CORRELATION_GROUPS = {
     "rare_technical": frozenset({"volatility_sig", "oscillators"}),
     # Discovered 2026-03-27: ema/trend corr=0.55, all share SELL bias (37-40%).
     # 2026-04-01: volume_flow added (corr +0.511 with heikin_ashi, permanent SELL lean)
-    "trend_direction": frozenset({"ema", "trend", "heikin_ashi", "volume_flow"}),
+    # 2026-04-07: macro_regime added (corr +0.520 with trend, both follow 200-SMA)
+    "trend_direction": frozenset({"ema", "trend", "heikin_ashi", "volume_flow", "macro_regime"}),
     # 2026-04-01 audit: fear_greed + macro_regime = +1.000 correlation (identical vote).
     # structure = +0.928 with both. sentiment/news_event degrade together with external
     # data quality. All external/macro-dependent signals in one group.
+    # 2026-04-07: macro_regime moved to trend_direction (better correlation fit).
     "macro_external": frozenset({
-        "fear_greed", "macro_regime", "structure",
+        "fear_greed", "structure",
         "sentiment", "news_event",
     }),
     # 2026-04-04: BUG-162 — candlestick-fibonacci correlation 0.708 on BTC.
@@ -615,6 +625,9 @@ _STATIC_CORRELATION_GROUPS = {
     # In ranging regime, fibonacci is the leader (68.2% recent); candlestick (44.5%)
     # gets 0.3x penalty to prevent double-counting.
     "pattern_based": frozenset({"candlestick", "fibonacci"}),
+    # 2026-04-07: mean_reversion + rsi correlation r=0.537 — both use RSI-based
+    # logic (RSI(2/3) in mean_reversion, RSI(14) in core rsi signal).
+    "rsi_based": frozenset({"mean_reversion", "rsi"}),
 }
 # Public alias for backward compatibility (used by tests and reporting)
 CORRELATION_GROUPS = _STATIC_CORRELATION_GROUPS
@@ -778,6 +791,14 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         # Correlation penalty: secondary signals in a group get reduced weight
         if signal_name in penalized_signals:
             weight *= _CORRELATION_PENALTY
+        # Directional bias penalty: signals with extreme BUY/SELL bias get
+        # an additional penalty beyond normalized_weight's built-in bias_penalty.
+        # This catches cases where a signal always votes one direction and its
+        # "accuracy" merely reflects market drift rather than genuine edge.
+        signal_bias = act_data.get("bias", 0.0)
+        signal_samples = act_data.get("samples", 0)
+        if signal_samples >= _BIAS_MIN_ACTIVE and signal_bias > _BIAS_THRESHOLD:
+            weight *= _BIAS_PENALTY
         if vote == "BUY":
             buy_weight += weight
         elif vote == "SELL":
