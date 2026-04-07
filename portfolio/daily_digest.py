@@ -75,11 +75,8 @@ def should_send_daily_digest(config):
             return False
 
     last = _get_last_daily_digest_time()
-    if last and (time.time() - last) < 72000:
-        # Don't send more than once per 20 hours
-        return False
-
-    return True
+    # Don't send more than once per 20 hours
+    return not (last and (time.time() - last) < 72000)
 
 
 def _format_price(price):
