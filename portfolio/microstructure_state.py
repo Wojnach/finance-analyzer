@@ -79,10 +79,17 @@ def get_rolling_ofi(ticker: str) -> float:
     snapshots = list(_snapshot_buffers[ticker])
     if len(snapshots) < _MIN_SNAPSHOTS_FOR_OFI:
         return 0.0
-    ofi_val = compute_ofi(snapshots)
-    # Track OFI history for z-score normalization
+    return compute_ofi(snapshots)
+
+
+def record_ofi(ticker: str, ofi_val: float) -> None:
+    """Record an OFI value for z-score history tracking.
+
+    Called once per cycle from get_microstructure_state to avoid
+    double-appending if get_rolling_ofi is called multiple times.
+    """
+    _ensure_buffer(ticker)
     _ofi_history[ticker].append(ofi_val)
-    return ofi_val
 
 
 def get_ofi_zscore(ticker: str) -> float:
@@ -151,6 +158,7 @@ def get_microstructure_state(ticker: str) -> dict:
     Returns dict with ofi, ofi_zscore, multiscale OFI, and spread_zscore.
     """
     ofi = get_rolling_ofi(ticker)
+    record_ofi(ticker, ofi)  # track for z-score (once per state retrieval)
     ofi_z = get_ofi_zscore(ticker)
     sz = get_spread_zscore(ticker)
     ms_ofi = get_multiscale_ofi(ticker)

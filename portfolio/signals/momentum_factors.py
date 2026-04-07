@@ -417,7 +417,7 @@ def compute_momentum_factors_signal(df: pd.DataFrame, context: dict | None = Non
 
     # Work on a clean copy to avoid mutating the caller's data
     # Apply seasonality detrending for metals tickers if profile available
-    df = _apply_seasonality(df.copy(), context)
+    df = _apply_seasonality(df, context)
     close = df["close"].astype(float)
 
     # -- Compute each sub-indicator ----------------------------------------
