@@ -491,10 +491,110 @@ def _validate_signal_result(result, sig_name=None, max_confidence=1.0):
     }
 
 
-# Correlation groups: signals that frequently agree (>90% in recent data).
-# Within a group, only the highest-accuracy signal gets full weight;
-# others get a penalty to prevent correlated signals inflating consensus.
-CORRELATION_GROUPS = {
+# Dynamic correlation group computation TTL and thresholds
+_DYNAMIC_CORR_TTL = 7200  # 2h cache for dynamic correlation groups
+_DYNAMIC_CORR_THRESHOLD = 0.7  # cluster signals with correlation > 0.7
+_DYNAMIC_CORR_MIN_SAMPLES = 30  # minimum signal log entries for reliable correlation
+
+
+def _compute_dynamic_correlation_groups() -> dict[str, frozenset[str]]:
+    """Compute signal correlation groups from recent signal_log data.
+
+    Reads the last 30 days of signal votes and computes pairwise correlation
+    between signal outputs (BUY=1, SELL=-1, HOLD=0). Clusters signals with
+    correlation > _DYNAMIC_CORR_THRESHOLD into groups.
+
+    Falls back to static CORRELATION_GROUPS if insufficient data.
+    """
+    try:
+        from portfolio.accuracy_stats import load_entries
+        from datetime import datetime, timedelta
+        entries = load_entries()
+        cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+        recent = [e for e in entries if e.get("ts", "") >= cutoff]
+        if len(recent) < _DYNAMIC_CORR_MIN_SAMPLES:
+            return _STATIC_CORRELATION_GROUPS
+
+        # Build signal vote matrix: each row is a (entry, ticker) pair
+        vote_map = {"BUY": 1, "SELL": -1, "HOLD": 0}
+        from portfolio.tickers import SIGNAL_NAMES as _SN
+        active_signals = [s for s in _SN if s not in DISABLED_SIGNALS]
+
+        rows = []
+        for entry in recent:
+            for _tk, tdata in entry.get("tickers", {}).items():
+                signals = tdata.get("signals", {})
+                row = {s: vote_map.get(signals.get(s, "HOLD"), 0) for s in active_signals}
+                rows.append(row)
+
+        if len(rows) < _DYNAMIC_CORR_MIN_SAMPLES:
+            return _STATIC_CORRELATION_GROUPS
+
+        df = pd.DataFrame(rows)
+        # Drop signals that are always HOLD (no variance)
+        df = df.loc[:, df.std() > 0.01]
+        if df.shape[1] < 3:
+            return _STATIC_CORRELATION_GROUPS
+
+        corr = df.corr()
+
+        # Simple greedy clustering: for each signal pair with corr > threshold,
+        # merge into same group
+        from collections import defaultdict
+        signal_to_group: dict[str, int] = {}
+        groups: dict[int, set] = defaultdict(set)
+        next_group = 0
+
+        sig_list = list(corr.columns)
+        for i, s1 in enumerate(sig_list):
+            for j, s2 in enumerate(sig_list):
+                if j <= i:
+                    continue
+                if corr.loc[s1, s2] > _DYNAMIC_CORR_THRESHOLD:
+                    g1 = signal_to_group.get(s1)
+                    g2 = signal_to_group.get(s2)
+                    if g1 is None and g2 is None:
+                        gid = next_group
+                        next_group += 1
+                        groups[gid] = {s1, s2}
+                        signal_to_group[s1] = gid
+                        signal_to_group[s2] = gid
+                    elif g1 is not None and g2 is None:
+                        groups[g1].add(s2)
+                        signal_to_group[s2] = g1
+                    elif g1 is None and g2 is not None:
+                        groups[g2].add(s1)
+                        signal_to_group[s1] = g2
+                    elif g1 != g2:
+                        # Merge groups
+                        merged = groups[g1] | groups[g2]
+                        groups[g1] = merged
+                        del groups[g2]
+                        for s in merged:
+                            signal_to_group[s] = g1
+
+        # Convert to named frozensets (only groups with 2+ members)
+        result = {}
+        for gid, members in groups.items():
+            if len(members) >= 2:
+                name = f"dynamic_{gid}"
+                result[name] = frozenset(members)
+
+        return result if result else _STATIC_CORRELATION_GROUPS
+
+    except Exception:
+        logger.debug("Dynamic correlation groups unavailable, using static", exc_info=True)
+        return _STATIC_CORRELATION_GROUPS
+
+
+def _get_correlation_groups() -> dict[str, frozenset[str]]:
+    """Get current correlation groups, preferring dynamic over static."""
+    return _cached("dynamic_corr_groups", _DYNAMIC_CORR_TTL,
+                   _compute_dynamic_correlation_groups)
+
+
+# Static correlation groups (fallback when dynamic computation unavailable).
+_STATIC_CORRELATION_GROUPS = {
     # BUG-153: Split low_activity_timing — calendar+econ_calendar are excellent
     # (62.8%/86.8%) while forecast+futures_flow are broken (36.1%/33.3%).
     # Mixing them risks forecast becoming leader and suppressing calendar.
@@ -516,6 +616,8 @@ CORRELATION_GROUPS = {
     # gets 0.3x penalty to prevent double-counting.
     "pattern_based": frozenset({"candlestick", "fibonacci"}),
 }
+# Public alias for backward compatibility (used by tests and reporting)
+CORRELATION_GROUPS = _STATIC_CORRELATION_GROUPS
 _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal weight
 
 
@@ -574,9 +676,11 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
 
     # Pre-compute which signal is the "leader" (highest accuracy) in each
     # correlation group, considering only signals that are actively voting.
+    # Prefer dynamic groups (from signal_log correlations) over static.
     active_non_hold = {s for s, v in votes.items() if v != "HOLD"}
+    _active_corr_groups = _get_correlation_groups()
     group_leaders = {}
-    for group_name, group_sigs in CORRELATION_GROUPS.items():
+    for group_name, group_sigs in _active_corr_groups.items():
         active_in_group = active_non_hold & group_sigs
         if len(active_in_group) <= 1:
             continue
@@ -595,7 +699,7 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # sentiment (blended ~46.4%) barely escapes as group leader.
     _GROUP_LEADER_GATE_THRESHOLD = 0.46
     group_gated_signals = set()
-    for group_name, group_sigs in CORRELATION_GROUPS.items():
+    for group_name, group_sigs in _active_corr_groups.items():
         leader = group_leaders.get(group_name)
         if leader:
             leader_stats = accuracy_data.get(leader, {})
@@ -610,7 +714,7 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
 
     # Build a set of signals that should get the correlation penalty
     penalized_signals = set()
-    for group_name, group_sigs in CORRELATION_GROUPS.items():
+    for group_name, group_sigs in _active_corr_groups.items():
         leader = group_leaders.get(group_name)
         if leader:
             for s in group_sigs:

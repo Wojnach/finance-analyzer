@@ -229,6 +229,73 @@ def signal_accuracy_ewma(horizon="1d", halflife_days=5, entries=None):
     return result
 
 
+def signal_accuracy_cost_adjusted(horizon="1d", cost_bps=5.0, entries=None):
+    """Compute per-signal accuracy adjusted for transaction costs.
+
+    A signal vote is only counted as correct if the price move exceeds
+    the estimated round-trip cost (spread + slippage).  This reveals
+    signals that are "technically correct" but unprofitable after execution.
+
+    Args:
+        horizon: Outcome horizon to evaluate.
+        cost_bps: Estimated round-trip cost in basis points (default 5 bps).
+                  For metals warrants ~5-10 bps, crypto ~2-5 bps.
+        entries: Pre-loaded entries list. If None, loads from disk.
+
+    Returns:
+        dict: {signal_name: {correct, total, accuracy, pct, cost_bps}}
+    """
+    if entries is None:
+        entries = load_entries()
+
+    # Cost threshold: moves below this are unprofitable even if directionally correct
+    cost_pct = cost_bps / 100.0  # convert bps to percentage
+
+    stats = {s: {"correct": 0, "total": 0} for s in SIGNAL_NAMES}
+
+    for entry in entries:
+        outcomes = entry.get("outcomes", {})
+        tickers = entry.get("tickers", {})
+
+        for ticker, tdata in tickers.items():
+            outcome = outcomes.get(ticker, {}).get(horizon)
+            if not outcome:
+                continue
+
+            change_pct = outcome.get("change_pct", 0)
+            signals = tdata.get("signals", {})
+
+            for sig_name in SIGNAL_NAMES:
+                vote = signals.get(sig_name, "HOLD")
+                if vote == "HOLD":
+                    continue
+
+                # Skip neutral outcomes (below minimum move)
+                if abs(change_pct) < _MIN_CHANGE_PCT:
+                    continue
+
+                stats[sig_name]["total"] += 1
+
+                # Cost-adjusted: correct only if move exceeds cost
+                if vote == "BUY" and change_pct > cost_pct:
+                    stats[sig_name]["correct"] += 1
+                elif vote == "SELL" and change_pct < -cost_pct:
+                    stats[sig_name]["correct"] += 1
+
+    result = {}
+    for sig_name in SIGNAL_NAMES:
+        s = stats[sig_name]
+        acc = s["correct"] / s["total"] if s["total"] > 0 else 0.0
+        result[sig_name] = {
+            "correct": s["correct"],
+            "total": s["total"],
+            "accuracy": acc,
+            "pct": round(acc * 100, 1),
+            "cost_bps": cost_bps,
+        }
+    return result
+
+
 def consensus_accuracy(horizon="1d", entries=None):
     if entries is None:
         entries = load_entries()
