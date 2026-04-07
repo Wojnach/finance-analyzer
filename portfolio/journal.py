@@ -246,8 +246,7 @@ def _detect_warnings(entries):
         for i in range(len(actions) - 2):
             a1, t1 = actions[i]
             a3, t3 = actions[i + 2]
-            if t1 and t3 and t1 == t3:
-                if (a1 == "BUY" and a3 == "SELL") or (a1 == "SELL" and a3 == "BUY"):
+            if t1 and t3 and t1 == t3 and ((a1 == "BUY" and a3 == "SELL") or (a1 == "SELL" and a3 == "BUY")):
                     warnings.append(
                         f"{strat}: whipsaw on {t1} ({a1}→{a3} within 3 entries)"
                     )

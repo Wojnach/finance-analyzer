@@ -320,11 +320,10 @@ def _ticker_prediction(ticker, sig, tf_entries):
     conviction = max(0.0, min(1.0, conviction))
 
     # Gating: suppress weak BUY consensus (too few or not dominant)
-    if action == "BUY":
-        if buy_count < _MIN_BUY_VOTES or (_BUY_MUST_DOMINATE and buy_count <= sell_count):
-            recommendation = "HOLD"
-            outlook = "neutral"
-            conviction = 0.0
+    if action == "BUY" and (buy_count < _MIN_BUY_VOTES or (_BUY_MUST_DOMINATE and buy_count <= sell_count)):
+        recommendation = "HOLD"
+        outlook = "neutral"
+        conviction = 0.0
 
     # Generate thesis
     parts = []

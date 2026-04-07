@@ -848,8 +848,7 @@ def _find_snapshot_near(snapshots, target_ts, max_delta_hours=36):
         try:
             snap_ts = datetime.fromisoformat(snap["ts"])
             delta = abs((snap_ts - target_ts).total_seconds()) / 3600
-            if delta <= max_delta_hours:
-                if best_delta is None or delta < best_delta:
+            if delta <= max_delta_hours and (best_delta is None or delta < best_delta):
                     best = snap
                     best_delta = delta
         except (ValueError, TypeError, KeyError):
