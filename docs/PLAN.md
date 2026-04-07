@@ -1,95 +1,61 @@
-# Microstructure Research Upgrade Plan
+# Fishing Position: Auto-Trailing Stop + EOD Sell
 
-**Date**: 2026-04-07
-**Branch**: research/microstructure-upgrade
-**Source**: Executive research summary on quantitative signals for 1-3h gold/silver forecasting
+## Date: 2026-04-08
 
-## Motivation
+## Problem
 
-A comprehensive research paper on short-term metals forecasting was analyzed against our
-existing 32-signal system. Finding: we have almost all the right raw signals but several
-calibration bugs, dead sub-signals, and a missing statistical preprocessing layer between
-raw data and signal voting.
+When the user places a fishing limit buy order manually and it fills, the metals
+loop treats it as a regular swing position: wide trailing stop, no EOD sell. The
+user wants intraday fishing to be: tight 5% cert trail, auto-sell at 21:55.
 
-## Batch 1: Quick Wins (fix broken/dead signals)
+## What to build (3 gaps)
 
-### 1a. Oil Fetch in Cross-Asset Signal
-- **File**: `portfolio/metals_cross_assets.py`
-- **Problem**: `oil_change_5d` hardcoded to `0.0` — dead sub-signal in 5-voter composite
-- **Fix**: Add `get_oil_data()` fetching `CL=F` via yfinance, include in `get_all_cross_asset_data()`
-- **File**: `portfolio/signals/metals_cross_asset.py`
-- **Fix**: Read oil from cross-asset data instead of macro dict fallback
+### 1. Tag fishing positions (`_fishing: true`)
+When detect_holdings discovers a new position whose ob_id is in the WARRANT_CATALOG
+(from fin_fish_config.py), tag it as `_fishing: true` in the POSITIONS dict.
 
-### 1b. GVZ as Active Voter
-- **File**: `portfolio/signals/metals_cross_asset.py`
-- **Problem**: GVZ sub-signal always votes HOLD (informational only)
-- **Fix**: High GVZ (>1.5 z) = BUY gold / SELL silver (fear/safe-haven), Low GVZ (<-1.0 z) = SELL gold / BUY silver (complacency)
+### 2. Tighter trailing stop for fishing positions
+The existing `compute_smart_trail_distance` uses 5% on the cert price as its base
+distance — this already matches the user's desired 5% trail. But TRAIL_START_PCT
+(1% gain before trailing begins) may be too conservative for fishing. Fishing
+positions should start trailing immediately (from entry) since they're already
+bought at a dip level.
 
-### 1c. OFI Z-Score Normalization
-- **Files**: `portfolio/microstructure_state.py`, `portfolio/signals/orderbook_flow.py`
-- **Problem**: OFI threshold = 5.0 for all assets. Gold vs BTC have different OFI scales
-- **Fix**: Track rolling OFI distribution per ticker, use z-score (+-1.5s) instead of absolute threshold
+### 3. EOD auto-sell at 21:55 for fishing positions
+Add a check in the main loop: if hour_cet >= 21:50 and any `_fishing` position
+is active, sell it via emergency_sell. Swing positions hold overnight; fishing
+positions don't.
 
-### 1d. VPIN Volatility Predictor
-- **File**: `portfolio/signals/orderbook_flow.py`
-- **Problem**: VPIN only confirms trade_flow direction — never initiates, never predicts vol
-- **Fix**: Add VPIN > 0.7 as `high_toxicity` flag in indicators for risk management consumption
+## Design
 
-## Batch 2: Feature Preprocessing Pipeline
+### Tagging (in detect_holdings, ~5 lines)
+Build a set of fishing ob_ids from WARRANT_CATALOG at module load.
+When a new position is added to POSITIONS, check if ob_id is in that set.
+If yes, add `_fishing: true` to the position dict.
 
-### 2a. Feature Normalizer Module
-- **New file**: `portfolio/feature_normalizer.py`
-- **Purpose**: Rolling z-score normalization for signal inputs, regime-adaptive thresholds
-- **Design**: Per-ticker, per-indicator rolling stats (mean, std) over 100-period window
+### Trailing (in update_smart_trailing_stops, ~3 lines)
+For positions with `_fishing: true`, set TRAIL_START_PCT to 0 (trail immediately).
+The base 5% distance is already correct.
 
-### 2b. Volatility-Scaled Momentum
-- **File**: `portfolio/signals/momentum_factors.py`
-- **Problem**: ROC-20 uses fixed +-5% thresholds — permanently triggered in high-vol, silent in low-vol
-- **Fix**: Normalize by realized vol: `z_mom = ROC_20 / sigma_20`, threshold at +-1.5s
+### EOD sell (new function + hook in main loop, ~20 lines)
+`_eod_sell_fishing_positions(page)`: at 21:50 CET, sell all `_fishing` positions.
+Uses existing `emergency_sell()` function. Sends Telegram notification.
 
-### 2c. Multi-Scale OFI
-- **File**: `portfolio/microstructure_state.py`
-- **Purpose**: 3-window OFI (5-snap fast, 15-snap medium, all slow) + flow acceleration metric
-- **Impact**: Captures flow derivative, not just level
+## Files changed
+- `data/metals_loop.py` — all 3 changes
+- `tests/test_fish_engine_integration.py` — tests for fishing tag + EOD
 
-### 2d. Seasonality Integration
-- **Files**: `portfolio/seasonality.py` (exists), signal pipeline
-- **Problem**: Seasonality module exists but isn't connected to signal inputs
-- **Fix**: Apply detrend_return() to metals momentum/mean-reversion signal inputs
+## What could break
+- False tagging: an ob_id in WARRANT_CATALOG that isn't a fishing position (e.g.,
+  the user buys a BULL X5 for a swing trade, not fishing). Mitigated: only new
+  positions auto-detected by detect_holdings get tagged, not pre-existing ones.
+- EOD sell at 21:50 could sell a position the user wants to hold overnight.
+  Mitigated: only `_fishing: true` positions get sold. User can manually remove
+  the flag by editing metals_positions_state.json.
 
-## Batch 3: Accuracy & Correlation Upgrades
-
-### 3a. Cost-Aware Accuracy
-- **File**: `portfolio/accuracy_stats.py`
-- **Problem**: Accuracy counts 0.06% moves as "correct" even when spread is 0.03%
-- **Fix**: Add cost_adjusted_accuracy: correct only if |move| > half_spread + slippage
-
-### 3b. Return Magnitude Tracking
-- **File**: `portfolio/accuracy_stats.py`
-- **Problem**: All correct predictions weighted equally (0.06% same as 3%)
-- **Fix**: Track avg_return_magnitude and return_sharpe per signal
-
-### 3c. Dynamic Correlation Grouping
-- **File**: `portfolio/signal_engine.py`
-- **Problem**: Static correlation groups (5 hardcoded) miss regime-dependent correlations
-- **Fix**: Compute rolling correlation from signal_log, cluster >0.7 corr signals dynamically
-
-## What Could Break
-
-1. **Oil yfinance fetch**: Could fail if CL=F ticker changes. Mitigated by existing try/except pattern.
-2. **OFI z-score**: During cold start (no history), z-score returns 0.0 = HOLD. Same as current behavior.
-3. **GVZ voting**: Changes from 4 to 5 active voters in cross-asset. Could shift consensus in edge cases.
-4. **Momentum thresholds**: Vol-scaling changes ROC thresholds. Some signals that were HOLD may become BUY/SELL.
-5. **Dynamic correlation groups**: Could produce different groupings than static. Fallback to static if <30 samples.
-
-## Execution Order
-
-1. Write plan (this file) — commit
-2. Batch 1 (4 quick wins) — implement in parallel subagents, commit
-3. Batch 1 tests — write and run, commit
-4. Batch 2 (4 preprocessing) — implement, commit
-5. Batch 2 tests — write and run, commit
-6. Batch 3 (3 accuracy/correlation) — implement, commit
-7. Batch 3 tests — write and run, commit
-8. Full test suite — fix any failures
-9. Merge into main, push, clean up worktree
+## Execution order
+1. Write tests first
+2. Implement in metals_loop.py (single batch — all changes are in one file)
+3. Run tests
+4. Code review
+5. Merge + push
