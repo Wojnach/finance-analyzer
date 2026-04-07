@@ -137,6 +137,22 @@ without any locking. Concurrent calls clobber each other.
 means CONFIRM could execute the wrong one.
 **Impact:** Wrong order confirmed with real money.
 
+#### N37. Zero OHLC validation — poison candles corrupt all signals
+**Source:** Agent review (data-external), finding 1.1
+**Files:** `portfolio/data_collector.py:86-97`
+**What:** Binance kline response parsed directly into DataFrame with `astype(float)`. No
+validation that close>0, high>=low, or volume>=0. Binance has historically returned
+price=0 during outages. One poison candle flows into compute_indicators → 32 signals.
+**Impact:** Division by zero in RSI/MACD/Bollinger, NaN/Inf propagation to trade decisions.
+
+#### N38. Timeframe cache serves arbitrarily stale data as fresh
+**Source:** Agent review (data-external), finding 3.1
+**Files:** `portfolio/data_collector.py:277-309`
+**What:** `_fetch_one_timeframe()` uses direct `_tool_cache` access bypassing
+`_MAX_STALE_FACTOR` from `_cached()`. If Binance down 24h, "12h" timeframe (TTL=300s)
+keeps serving 24h-old data as "fresh" because the cache entry was never invalidated.
+**Impact:** Layer 2 makes decisions on day-old data presented as current.
+
 #### N34. Emergency sell uses stale bid — position rides to knockout
 **Source:** Agent review (metals-core), finding RISK-1 — MOST DANGEROUS BUG IN REVIEW
 **Files:** `data/metals_loop.py:2636-2680`
@@ -464,10 +480,35 @@ appended as they complete.
 - God module (5366 lines) — N/A in independent but noted
 - Non-atomic I/O in metals_loop — partial convergence with N2
 
+### Agent 7: data-external (COMPLETED — 26 findings, 2 CRITICAL)
+
+**NEW CRITICAL findings — "garbage in, garbage out":**
+- **Zero OHLC validation on Binance candles** — price=0, high<low, NaN values all flow
+  directly into 32 signal computations. Binance has historically returned 0-price during
+  outages. One poison candle corrupts all signals for that ticker. (1.1)
+- **Timeframe cache serves stale data as fresh** — `_fetch_one_timeframe()` uses direct
+  cache access bypassing `_MAX_STALE_FACTOR`. If Binance down 24h, "12h" timeframe still
+  looks fresh to consumers. (3.1)
+
+**NEW HIGH findings:**
+- **FX rate hardcoded fallback 10.85 persists forever** — if SEK moves to 9.0 or 12.0,
+  ALL portfolio valuations wrong by 10-20%. No mechanism to stop trading on stale FX. (3.2)
+- **yfinance MultiIndex columns crash `get_stock_fear_greed()`** — stock F&G signal
+  missing for all 16 US stocks. Different from data_collector which handles MultiIndex. (5.1)
+- **Sentiment subprocess blocks main loop 7 minutes** — 120s+180s+120s sequential
+  timeouts. Main loop stalls, signals go stale, heartbeat looks dead. (8.2)
+- **On-chain data accepts 24h stale cache** — MVRV/SOPR votes on day-old data. (3.3)
+- **social_sentiment.py uses print() not logger** — Reddit failures invisible in prod. (5.2)
+- **social_sentiment.py uses raw urllib, no retry** — single failure = no social data. (5.3)
+
+**Converged with independent review:**
+- FX rates minimal error handling (N16 = 3.2)
+- Hardcoded FOMC dates (N13 = 3.4)
+- Sentiment silent degradation (N15 partial)
+
 **Agent subsystem assignments (remaining in progress):**
 2. `review-orchestration` — main.py + 8 supporting files
 6. `review-signals-modules` — 23 signal module files
-7. `review-data-external` — data_collector.py + 13 supporting files
 
 ---
 
