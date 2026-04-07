@@ -459,6 +459,12 @@ def _verify_position_holdings(page, positions):
                     pos["active"] = False
                     pos["sold_reason"] = "startup_verify_not_held"
                     pos["sold_ts"] = datetime.datetime.now(datetime.UTC).isoformat()
+
+            # Also reconcile fish engine position at startup
+            _startup_changes = []
+            _reconcile_fish_engine_position(held_ob_ids, _startup_changes)
+            for ch in _startup_changes:
+                log(f"  {ch}")
             return
         else:
             log(f"  Positions API returned: {result}")
@@ -1288,6 +1294,52 @@ if CATALOG_AVAILABLE:
                 "leverage": wv.get("leverage", 5.0),
             }
 
+def _reconcile_fish_engine_position(held_ob_ids, changes):
+    """Check fish engine position against actual Avanza holdings.
+
+    If the fish engine thinks it has a position but the ob_id is not in
+    held_ob_ids (from a successful Avanza API call), the position was
+    closed externally (stop-loss triggered, manual sell). Call
+    force_close_position to update engine state and log the exit.
+    """
+    global _fish_engine
+    if _fish_engine is None or not _fish_engine.has_position:
+        return
+
+    pos = _fish_engine.position
+    ob_id = pos.get("ob_id", "")
+    if not ob_id:
+        return
+
+    if ob_id in held_ob_ids:
+        return  # position still held, nothing to do
+
+    direction = pos.get("direction", "?")
+    entry_cert = pos.get("entry_cert", 0)
+    volume = pos.get("volume", 0)
+    nm = "BULL" if direction == "LONG" else "BEAR"
+
+    log(f"[fish] RECONCILE: {nm} {volume}u (ob_id={ob_id}) not found on Avanza — closing engine position")
+
+    _fish_engine.force_close_position("avanza_not_held", exit_cert_price=0)
+
+    # Persist state immediately
+    try:
+        atomic_write_json(str(DATA_DIR / "fish_engine_state.json"), _fish_engine.to_dict())
+    except Exception:
+        pass
+
+    pnl_est = -(entry_cert * volume) if entry_cert > 0 else 0
+    changes.append(f"FISH CLOSED: {nm} {volume}u (external, est P&L: {pnl_est:+.0f} SEK)")
+    send_telegram(
+        f"*FISH RECONCILE*\n"
+        f"{nm} {volume}u position no longer on Avanza\n"
+        f"Entry cert: {entry_cert} SEK\n"
+        f"Est. P&L: {pnl_est:+.0f} SEK (exit price unknown)\n"
+        f"Reason: stop-loss or manual sell"
+    )
+
+
 def detect_holdings(page):
     """Detect all held instruments on Avanza. Auto-add new ones to POSITIONS.
 
@@ -1381,6 +1433,9 @@ def detect_holdings(page):
                 pos["sold_ts"] = datetime.datetime.now(datetime.UTC).isoformat()
                 changes.append(f"SOLD {key}: no longer on Avanza")
                 log(f"Holdings: {key} no longer held on Avanza — deactivating")
+
+        # Reconcile fish engine position against Avanza holdings
+        _reconcile_fish_engine_position(held_ob_ids, changes)
 
         if changes:
             _save_positions(POSITIONS)
@@ -2044,7 +2099,7 @@ def _fish_engine_execute_sell(decision):
         log(f"[fish] SELL {volume}u {nm}@{bid} P&L:{pnl:+.0f} ({reason}) [{'OK' if success else 'FAIL'}]")
 
         if success:
-            _fish_engine.confirm_exit(pnl)
+            _fish_engine.confirm_exit(pnl, exit_cert_price=bid, exit_reason=reason)
             send_telegram(f"FISH EXIT: {nm} {volume}u@{bid} P&L:{pnl:+.0f} SEK ({reason})")
         else:
             log(f"[fish] SELL FAILED: {result}")
