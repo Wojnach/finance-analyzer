@@ -147,13 +147,13 @@ def _exchange_netflow_signal(netflow_data):
         "sum_7d": sum_7d,
     }
 
-    if trend in ("strong_accumulation",) or consecutive_neg >= _NETFLOW_ACCUM_DAYS:
+    if (
+        trend in ("strong_accumulation",)
+        or consecutive_neg >= _NETFLOW_ACCUM_DAYS
+        or (trend in ("accumulation",) and consecutive_neg >= 3)
+    ):
         return "BUY", indicators
-    elif trend in ("accumulation",) and consecutive_neg >= 3:
-        return "BUY", indicators
-    elif trend in ("strong_distribution",):
-        return "SELL", indicators
-    elif trend in ("distribution",) and consecutive_neg == 0:
+    elif trend in ("strong_distribution",) or (trend in ("distribution",) and consecutive_neg == 0):
         return "SELL", indicators
     return "HOLD", indicators
 

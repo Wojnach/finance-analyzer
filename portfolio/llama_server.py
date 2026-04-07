@@ -152,7 +152,7 @@ def _kill_server_by_pid():
                     os.kill(pid, 9)
                 time.sleep(1)
     except Exception:
-        pass
+        logger.debug("Failed to kill server pid=%s", pid)
 
 
 def _write_pid(proc, model_name):
@@ -177,7 +177,7 @@ def _read_pid_model():
                 pid_str, model = content.split(":", 1)
                 return int(pid_str), model
     except Exception:
-        pass
+        logger.debug("Failed to read PID file %s", _PID_FILE)
     return None, None
 
 

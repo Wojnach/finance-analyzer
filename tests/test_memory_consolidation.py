@@ -4,7 +4,6 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
-import pytest
 
 from portfolio.memory_consolidation import (
     MAX_OUTPUT_LINES,

@@ -1,6 +1,7 @@
 """Tests for strategy base protocol and SharedData."""
-import pytest
 from datetime import UTC, datetime
+
+import pytest
 
 from portfolio.strategies.base import SharedData, StrategyBase
 

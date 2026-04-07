@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-04-04
-Branch: improve/auto-session-2026-04-04
+Updated: 2026-04-07
+Branch: improve/auto-session-2026-04-07
 
 ## 1) Architecture Summary
 
@@ -344,3 +344,15 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - REF-43: Lambda assignments in `avanza_control.py`, `avanza_session.py` — **fixed 2026-04-04** (converted to def)
 - REF-44: `except Exception: pass` in `main.py` — **fixed 2026-04-04** (contextlib.suppress)
 - ~6,036 tests across 212+ test files (as of 2026-04-04), 79 pre-existing failures
+- BUG-171 (P2): ~14 remaining `except Exception: pass` silent swallowers — **fixed 2026-04-07** (contextlib.suppress + logger.debug)
+- BUG-172 (P3): `fin_fish.py` datetime.timezone.utc → datetime.UTC — **fixed 2026-04-07** (UP017)
+- BUG-173 (P3): `orchestrator.py` typing.Callable → collections.abc.Callable — **fixed 2026-04-07** (UP035)
+- BUG-174 (P3): Unused Path import in golddigger_strategy.py — **fixed 2026-04-07** (F401)
+- REF-45: 9 collapsible nested `if` statements (SIM102) — **fixed 2026-04-07**
+- REF-46: 3 if-with-same-arms (SIM114) — **fixed 2026-04-07** (combined with `or`)
+- REF-47: 2 suppressible-exception (SIM105) in bot runners — **fixed 2026-04-07** (contextlib.suppress)
+- REF-48: 91 ruff auto-fixes in test files (F401, I001, UP017, SIM300) — **fixed 2026-04-07**
+- REF-49: SIM103 needless bool in daily_digest.py — **fixed 2026-04-07**
+- Portfolio ruff violations: 74 → 56 (remaining: 51 E402 intentional + 5 SIM115 intentional)
+- Test ruff violations: 253 → 170 (remaining: F841 test vars, SIM117 style, E741 test naming)
+- ~6,138 tests, 85 pre-existing failures (as of 2026-04-07)

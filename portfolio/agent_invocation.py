@@ -6,6 +6,7 @@ import platform
 import shutil
 import subprocess
 import time
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -522,12 +523,10 @@ def check_agent_completion():
 
     # Post-process: extract fishing context from journal for metals fish engine
     if journal_written:
-        try:
+        with suppress(Exception):
             new_journal_entry = last_jsonl_entry(JOURNAL_FILE)
             if new_journal_entry:
                 _write_fishing_context(new_journal_entry)
-        except Exception:
-            pass
 
     logger.info(
         "Agent completed: status=%s exit=%d duration=%.1fs tier=%s journal=%s telegram=%s",

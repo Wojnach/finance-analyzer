@@ -1,6 +1,5 @@
 """Tests for portfolio.exposure_coach — exposure ceiling recommendations."""
 
-import pytest
 
 from portfolio.exposure_coach import MIN_CEILING, compute_exposure_recommendation
 

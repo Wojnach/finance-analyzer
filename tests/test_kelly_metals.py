@@ -5,7 +5,6 @@ _loss_reduction, format_kelly_line, leverage adjustment, edge cases.
 """
 
 import json
-import math
 import sqlite3
 
 import pytest
@@ -17,7 +16,6 @@ from portfolio.kelly_metals import (
     format_kelly_line,
     recommended_metals_size,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

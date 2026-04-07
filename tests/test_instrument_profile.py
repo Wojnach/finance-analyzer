@@ -1,9 +1,7 @@
 """Tests for portfolio.instrument_profile — per-metal signal trust and behavior."""
 
-import pytest
 
 from portfolio.instrument_profile import (
-    PROFILES,
     format_profile_briefing,
     get_cross_asset_drivers,
     get_ignored_signals,

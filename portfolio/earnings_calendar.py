@@ -10,6 +10,7 @@ Cache: per-ticker, 24h TTL (earnings dates don't change intraday).
 import logging
 import threading
 import time
+from contextlib import suppress
 from datetime import UTC, datetime
 
 from portfolio.tickers import STOCK_SYMBOLS
@@ -93,7 +94,7 @@ def _fetch_earnings_yfinance(ticker: str) -> dict | None:
         import yfinance as yf
 
         t = yf.Ticker(ticker)
-        try:
+        with suppress(Exception):
             cal = t.calendar
             if cal is not None and not (hasattr(cal, 'empty') and cal.empty):
                 if isinstance(cal, dict):
@@ -125,8 +126,6 @@ def _fetch_earnings_yfinance(ticker: str) -> dict | None:
                             "gate_active": 0 <= days_until <= GATE_DAYS,
                             "timing": "unknown",
                         }
-        except Exception:
-            pass
         return None
     except Exception:
         logger.debug("yfinance earnings fetch failed for %s", ticker, exc_info=True)

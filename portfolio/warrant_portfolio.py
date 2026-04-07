@@ -234,14 +234,13 @@ def record_warrant_transaction(config_key, action, units, price_sek, underlying_
                 "underlying_entry_price_usd": underlying_price_usd,
                 "name": name or config_key,
             }
-    elif action == "SELL":
-        if config_key in holdings:
-            existing = holdings[config_key]
-            remaining = existing.get("units", 0) - units
-            if remaining <= 0:
-                del holdings[config_key]
-            else:
-                existing["units"] = remaining
+    elif action == "SELL" and config_key in holdings:
+        existing = holdings[config_key]
+        remaining = existing.get("units", 0) - units
+        if remaining <= 0:
+            del holdings[config_key]
+        else:
+            existing["units"] = remaining
 
     save_warrant_state(state)
     logger.info("Warrant %s %s: %d units @ %.2f SEK", action, config_key, units, price_sek)

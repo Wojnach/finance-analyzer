@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import math
 import sys
-from unittest.mock import patch
 
 import pytest
 
@@ -21,7 +20,6 @@ from portfolio.fin_fish import (
     evaluate_warrants,
 )
 from portfolio.monte_carlo import MIN_VOLATILITY
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

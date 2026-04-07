@@ -1707,10 +1707,10 @@ class TestPerTickerConsensusGate:
         """Gate at 38% catches AMD (24.8%), GOOGL (31.3%), META (34.2%)
         but allows AMZN (39.0%) and above."""
         from portfolio.signal_engine import _PER_TICKER_CONSENSUS_GATE
-        assert 0.248 < _PER_TICKER_CONSENSUS_GATE  # AMD caught
-        assert 0.313 < _PER_TICKER_CONSENSUS_GATE  # GOOGL caught
-        assert 0.342 < _PER_TICKER_CONSENSUS_GATE  # META caught
-        assert 0.390 > _PER_TICKER_CONSENSUS_GATE  # AMZN NOT caught
+        assert _PER_TICKER_CONSENSUS_GATE > 0.248  # AMD caught
+        assert _PER_TICKER_CONSENSUS_GATE > 0.313  # GOOGL caught
+        assert _PER_TICKER_CONSENSUS_GATE > 0.342  # META caught
+        assert _PER_TICKER_CONSENSUS_GATE < 0.390  # AMZN NOT caught
 
 
 # ---------------------------------------------------------------------------
@@ -1728,10 +1728,10 @@ class TestCrisisMode:
 
     def test_crisis_constants_exist(self):
         from portfolio.signal_engine import (
-            _CRISIS_THRESHOLD,
             _CRISIS_MIN_BROKEN,
-            _CRISIS_TREND_PENALTY,
             _CRISIS_MR_BOOST,
+            _CRISIS_THRESHOLD,
+            _CRISIS_TREND_PENALTY,
         )
         assert _CRISIS_THRESHOLD == 0.35
         assert _CRISIS_MIN_BROKEN == 3

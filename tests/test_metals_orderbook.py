@@ -1,7 +1,6 @@
 """Tests for metals order book + trades fetcher."""
 from __future__ import annotations
 
-import json
 from unittest.mock import patch
 
 import pytest

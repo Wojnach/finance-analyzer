@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-04-07 (autonomous improvement session)
+- **BUG-171: Silent exception swallowing (P2)**: ~14 `except Exception: pass` patterns across 10 modules. Cleanup/teardown paths converted to `contextlib.suppress(Exception)`. Operational paths (llama_server, avanza/scanner) get `logger.debug()` for traceability.
+- **BUG-172: fin_fish.py deprecated datetime (P3)**: `datetime.timezone.utc` → `datetime.UTC` (UP017).
+- **BUG-173: orchestrator.py deprecated import (P3)**: `typing.Callable` → `collections.abc.Callable` (UP035).
+- **BUG-174: Unused import (P3)**: Removed unused `pathlib.Path` import from golddigger_strategy.py.
+- **REF-45: Collapsible if statements**: 9 SIM102 violations fixed across 8 files — nested ifs combined with `and`.
+- **REF-46: If-with-same-arms**: 3 SIM114 fixes — indicators.py, crypto_macro.py branches combined with `or`.
+- **REF-47: Suppressible exceptions**: 2 SIM105 fixes in bot runners — `try/except/pass` → `contextlib.suppress`.
+- **REF-48: Test file cleanup**: 91 auto-fixes in 34 test files (50 F401, 21 I001, 8 UP017, 4 SIM300, etc).
+- **REF-49: Needless bool**: SIM103 in daily_digest.py — return negated condition directly.
+- **Lint progress**: Portfolio ruff violations 74 → 56 (remaining: E402 intentional, SIM115 intentional). Test violations 253 → 170 (remaining: F841 test vars, SIM117 style, E741 naming).
+- Theme: Code Quality, Silent Failure Prevention, Lint Compliance.
+
 ## 2026-04-04 (autonomous improvement session)
 - **BUG-168: llama_server.py dead assignment (P3)**: `_ensure_model()` assigned `_local_model = name` without `global` declaration, creating and discarding a local variable. Fix: removed the dead assignment — PID file is the real cross-process guard.
 - **BUG-169: Regime cache thread safety (P3)**: `_regime_cache` in `shared_state.py` accessed without lock from 8 concurrent ThreadPoolExecutor threads. The check-then-clear pattern was racy. Fix: added `_regime_lock`, wrapped access in `indicators.detect_regime()`. Computation remains outside lock.

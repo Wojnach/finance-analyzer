@@ -65,7 +65,7 @@ def test_send_summary_skips_no_positions(monkeypatch):
 def test_send_summary_still_sends_with_open_positions(monkeypatch):
     trader = _make_trader()
     trader.check_count = 320
-    entry_ts = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).isoformat()
+    entry_ts = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=2)).isoformat()
     trader.state["positions"] = {
         "p1": {
             "warrant_name": "SILVER LONG",

@@ -7,6 +7,7 @@ Usage:
     python -m portfolio.elongir --once       # single poll cycle
 """
 
+import contextlib
 import logging
 import os
 import time
@@ -228,11 +229,9 @@ def run(once: bool = False) -> None:
                     break
 
                 _report.cycle_end = time.monotonic()
-                try:
+                with contextlib.suppress(Exception):
                     verify_and_act(_report, config or {}, tracker=_contract_tracker,
                                    verify_fn=verify_bot_contract, loop_name="elongir")
-                except Exception:
-                    pass
                 time.sleep(cfg.poll_seconds)
 
             except KeyboardInterrupt:

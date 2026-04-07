@@ -110,10 +110,9 @@ def _fetch_deribit_options(currency="BTC"):
     nearest_date = None
     for exp_str in expiry_data:
         d = _parse_expiry(exp_str)
-        if d and d >= now:
-            if nearest_date is None or d < nearest_date:
-                nearest_date = d
-                nearest_expiry = exp_str
+        if d and d >= now and (nearest_date is None or d < nearest_date):
+            nearest_date = d
+            nearest_expiry = exp_str
 
     if not nearest_expiry:
         # Fall back to first expiry with most OI

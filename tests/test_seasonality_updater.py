@@ -4,15 +4,15 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pandas as pd
-import pytest
 
 
 class TestUpdateSeasonalityProfiles:
     @patch("portfolio.seasonality_updater._fetch_hourly_klines")
     @patch("portfolio.seasonality_updater.save_profiles")
     def test_computes_and_saves_profiles(self, mock_save, mock_fetch):
-        from portfolio.seasonality_updater import update_seasonality_profiles
         import numpy as np
+
+        from portfolio.seasonality_updater import update_seasonality_profiles
 
         # Generate 10 days of hourly data
         idx = pd.date_range("2026-01-01", periods=240, freq="1h", tz="UTC")

@@ -1,12 +1,7 @@
 """Tests for portfolio.signal_postmortem — signal failure analysis."""
 
-import pytest
 
 from portfolio.signal_postmortem import (
-    DIVERGENCE_THRESHOLD,
-    MIN_SAMPLES,
-    STRONG_THRESHOLD,
-    WEAK_THRESHOLD,
     compute_regime_insights,
     compute_signal_health_report,
     compute_vote_correlation,

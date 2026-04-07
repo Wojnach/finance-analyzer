@@ -1,7 +1,5 @@
 """Tests for StrategyOrchestrator threading and lifecycle."""
 import time
-import pytest
-from datetime import UTC, datetime
 
 from portfolio.strategies.base import SharedData, StrategyBase
 
@@ -116,7 +114,7 @@ def test_orchestrator_isolates_errors():
 
 def test_orchestrator_halts_after_max_errors():
     """Strategy should be halted after MAX_CONSECUTIVE_ERRORS crashes."""
-    from portfolio.strategies.orchestrator import StrategyOrchestrator, MAX_CONSECUTIVE_ERRORS
+    from portfolio.strategies.orchestrator import MAX_CONSECUTIVE_ERRORS, StrategyOrchestrator
 
     crasher = CrashingStrategy()
     shared = SharedData(underlying_prices={}, fx_rate=10.5)

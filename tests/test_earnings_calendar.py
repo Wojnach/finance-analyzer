@@ -1,7 +1,7 @@
 """Tests for portfolio.earnings_calendar — earnings proximity gate."""
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 

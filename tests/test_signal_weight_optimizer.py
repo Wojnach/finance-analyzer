@@ -7,9 +7,9 @@ import pytest
 
 from portfolio.signal_weight_optimizer import (
     WalkForwardResult,
-    walk_forward_optimize,
-    save_results,
     load_results,
+    save_results,
+    walk_forward_optimize,
 )
 
 

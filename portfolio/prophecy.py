@@ -245,14 +245,16 @@ def evaluate_checkpoints(prices_usd):
             if target is None:
                 continue
 
-            met = False
-            if comparison == "above" and current_price >= target or comparison == "below" and current_price <= target:
-                met = True
-            elif comparison == "between":
-                # target_value should be [low, high]
-                if isinstance(target, (list, tuple)) and len(target) == 2:
-                    if target[0] <= current_price <= target[1]:
-                        met = True
+            met = (
+                (comparison == "above" and current_price >= target)
+                or (comparison == "below" and current_price <= target)
+                or (
+                    comparison == "between"
+                    and isinstance(target, (list, tuple))
+                    and len(target) == 2
+                    and target[0] <= current_price <= target[1]
+                )
+            )
 
             if met:
                 cp["status"] = "triggered"

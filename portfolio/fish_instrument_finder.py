@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+from contextlib import suppress
 from typing import Any
 
 logger = logging.getLogger("portfolio.fish_instrument_finder")
@@ -61,7 +62,7 @@ def _get_quote(ob_id: str) -> dict | None:
 
 def _get_warrant_details(ob_id: str) -> dict | None:
     """Get warrant details (barrier, leverage, parity) from Avanza API."""
-    try:
+    with suppress(Exception):
         from portfolio.avanza_session import api_get
         data = api_get(f"/_api/market-guide/warrant/{ob_id}")
         if data and isinstance(data, dict):
@@ -74,8 +75,6 @@ def _get_warrant_details(ob_id: str) -> dict | None:
                 "issuer": data.get("issuerName"),
                 "isin": data.get("isin"),
             }
-    except Exception:
-        pass
     return None
 
 

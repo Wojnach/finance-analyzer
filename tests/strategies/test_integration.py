@@ -1,8 +1,7 @@
 """End-to-end integration tests: orchestrator + strategy loading + both adapters."""
 import time
+
 import pytest
-from datetime import UTC, datetime
-from unittest.mock import patch
 
 from portfolio.strategies.base import SharedData
 from portfolio.strategies.orchestrator import StrategyOrchestrator, load_strategies
