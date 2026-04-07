@@ -922,7 +922,7 @@ class FishEngine:
             }
             if exit_reason:
                 entry["exit_reason"] = exit_reason
-            if pnl_sek:
+            if exit_reason or pnl_sek != 0:
                 entry["pnl_sek"] = round(pnl_sek, 2)
             atomic_append_jsonl(self._trade_log_path, entry)
         except Exception:

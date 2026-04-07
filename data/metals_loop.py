@@ -492,6 +492,11 @@ def _verify_position_holdings(page, positions):
         except Exception as e:
             log(f"  {key}: verify failed ({e}), keeping current state")
 
+    # Fish engine position cannot be reconciled without holdings API
+    if _fish_engine is not None and _fish_engine.has_position:
+        log("  WARNING: Positions API failed — cannot verify fish engine position. State unchanged.")
+        send_telegram("*FISH WARNING*\nPositions API unavailable at startup — cannot confirm whether position still held.")
+
 # Load positions (persisted state overrides defaults)
 POSITIONS = _load_positions()
 
@@ -1321,7 +1326,9 @@ def _reconcile_fish_engine_position(held_ob_ids, changes):
 
     log(f"[fish] RECONCILE: {nm} {volume}u (ob_id={ob_id}) not found on Avanza — closing engine position")
 
+    pnl_before = _fish_engine.session_pnl
     _fish_engine.force_close_position("avanza_not_held", exit_cert_price=0)
+    pnl_recorded = _fish_engine.session_pnl - pnl_before
 
     # Persist state immediately
     try:
@@ -1329,13 +1336,12 @@ def _reconcile_fish_engine_position(held_ob_ids, changes):
     except Exception:
         pass
 
-    pnl_est = -(entry_cert * volume) if entry_cert > 0 else 0
-    changes.append(f"FISH CLOSED: {nm} {volume}u (external, est P&L: {pnl_est:+.0f} SEK)")
+    changes.append(f"FISH CLOSED: {nm} {volume}u (external, est P&L: {pnl_recorded:+.0f} SEK)")
     send_telegram(
         f"*FISH RECONCILE*\n"
         f"{nm} {volume}u position no longer on Avanza\n"
         f"Entry cert: {entry_cert} SEK\n"
-        f"Est. P&L: {pnl_est:+.0f} SEK (exit price unknown)\n"
+        f"Est. P&L: {pnl_recorded:+.0f} SEK (exit price unknown)\n"
         f"Reason: stop-loss or manual sell"
     )
 
@@ -5025,6 +5031,10 @@ Positions: {pos_summary}{prob_summary}""")
                 _report.active_positions = sum(1 for pos in POSITIONS.values() if pos.get("active"))
                 _report.positions_priced = len(prices)
                 _report.position_prices_updated = _report.positions_priced >= _report.active_positions
+                # stops_verified: True when hardware stops are intentionally disabled
+                # (software trailing + momentum exits are the active guard), or when
+                # stop_order_state is populated (hardware stops placed).
+                _report.stops_verified = not STOP_ORDER_ENABLED or bool(stop_order_state)
 
                 # Update strategy shared data with fresh prices and cert data
                 if _strategy_shared_data is not None:
