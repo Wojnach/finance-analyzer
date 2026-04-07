@@ -90,12 +90,23 @@ This convergence increases confidence that these are real, systemic issues.
 
 ## Agent Review Cross-Critique
 
-*(To be populated when background agents complete their reviews. Each agent's
-findings will be compared against the independent review to identify:
-1. Findings only the agent found (agent-unique)
-2. Findings only the independent review found (independent-unique)
-3. Convergent findings (both found)
-4. Contradictory findings (one says it's fine, other says it's broken))*
+### Agent 3: portfolio-risk (20 findings — COMPLETED)
+
+**Agent-unique findings (not in independent review):**
+- `check_drawdown()` never called — circuit breaker dead code (N22) ← CRITICAL MISS
+- Sortino ratio denominator bug (N23) ← mathematical error
+- Circuit breaker HALF_OPEN stuck state (N24) ← state machine bug
+- Monte Carlo ATR-to-vol assumes fixed candle frequency
+- Kelly metrics non-FIFO P&L computation
+
+**Convergent findings (both found):**
+- record_trade() zero callers (CRITICAL) — highest-confidence finding
+- check_drawdown O(n) scan, fallback to entry price, concentration check
+
+**Assessment:** Agent found check_drawdown dead code which independent reviewer missed entirely.
+Strong convergence on the most critical finding (record_trade).
+
+*(Remaining 7 agents still running)*
 
 ---
 
