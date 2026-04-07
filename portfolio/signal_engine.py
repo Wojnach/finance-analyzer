@@ -1290,10 +1290,22 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             except Exception:
                 logger.warning("Macro context fetch failed", exc_info=True)
 
+        # Load seasonality profile for metals tickers (detrending)
+        seasonality_profile = None
+        if ticker in METALS_SYMBOLS:
+            try:
+                from portfolio.seasonality import get_profile
+                seasonality_profile = get_profile(ticker)
+            except Exception:
+                pass
+
         # Build context data once for signals that need it
         # BUG-144: Include regime so enhanced signals (forecast.py) can apply
         # regime-specific confidence discounts.
-        context_data = {"ticker": ticker, "config": config or {}, "macro": macro_data, "regime": regime}
+        context_data = {
+            "ticker": ticker, "config": config or {}, "macro": macro_data,
+            "regime": regime, "seasonality_profile": seasonality_profile,
+        }
 
         _signal_failures = []
         for sig_name, entry in _enhanced_entries.items():

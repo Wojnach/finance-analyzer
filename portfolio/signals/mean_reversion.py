@@ -379,7 +379,7 @@ def _half_life_mr(close: pd.Series, lookback: int = 60) -> tuple[float, float, s
 
 # ---- public API ------------------------------------------------------------
 
-def compute_mean_reversion_signal(df: pd.DataFrame) -> dict:
+def compute_mean_reversion_signal(df: pd.DataFrame, context: dict | None = None) -> dict:
     """Compute composite mean-reversion signal from OHLCV data.
 
     Parameters
@@ -388,6 +388,8 @@ def compute_mean_reversion_signal(df: pd.DataFrame) -> dict:
         Must contain columns ``open``, ``high``, ``low``, ``close``, ``volume``
         with at least 20 rows of numeric data for full computation (3 rows
         minimum for RSI-only sub-signals).
+    context : dict, optional
+        Signal context containing seasonality_profile for detrending.
 
     Returns
     -------
@@ -440,8 +442,24 @@ def compute_mean_reversion_signal(df: pd.DataFrame) -> dict:
     if len(df) < MIN_ROWS_RSI2:
         return hold_result
 
-    # Work on a clean copy to avoid mutating the caller's data
+    # Work on a clean copy; apply seasonality detrending for metals if available
     df = df.copy()
+    if context and context.get("seasonality_profile") and hasattr(df.index, "hour"):
+        try:
+            from portfolio.seasonality import detrend_return
+            profile = context["seasonality_profile"]
+            _close_col = col_map["close"]
+            returns = df[_close_col].astype(float).pct_change()
+            for i in range(1, len(df)):
+                hour = df.index[i].hour
+                raw_ret = returns.iloc[i]
+                if np.isfinite(raw_ret):
+                    adj_ret = detrend_return(raw_ret, hour, profile)
+                    df.iloc[i, df.columns.get_loc(_close_col)] = (
+                        df[_close_col].iloc[i - 1] * (1 + adj_ret)
+                    )
+        except Exception:
+            pass  # fall through to raw data
     close = df[col_map["close"]].astype(float)
     high = df[col_map["high"]].astype(float)
     low = df[col_map["low"]].astype(float)

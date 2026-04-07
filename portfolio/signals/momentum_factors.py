@@ -82,13 +82,18 @@ def _time_series_momentum(close: pd.Series) -> tuple[float, str]:
     return 0.0, "HOLD"
 
 
+_VOL_SCALED_ZSCORE_THRESHOLD = 1.5  # z-score threshold for vol-scaled momentum
+
+
 def _roc_20(close: pd.Series) -> tuple[float, str]:
-    """Rate of Change Momentum (ROC-20).
+    """Rate of Change Momentum (ROC-20), volatility-scaled.
 
     ROC = (close[-1] - close[-20]) / close[-20] * 100.
-    ROC > 5% = BUY (strong upward momentum).
-    ROC < -5% = SELL.
-    Between = HOLD.
+    Normalized by 20-period realized volatility: z_roc = ROC / sigma_20.
+    |z_roc| > 1.5 triggers signal (was fixed +-5%).
+
+    This makes momentum regime-adaptive: 5% is huge in low-vol but
+    noise in high-vol.  Vol-scaling fixes both extremes.
 
     Returns (roc_value, signal).
     """
@@ -103,9 +108,23 @@ def _roc_20(close: pd.Series) -> tuple[float, str]:
 
     roc = (current - past) / past * 100.0
 
-    if roc > 5.0:
+    # Compute 20-period realized volatility (annualized % std of returns)
+    returns = close.pct_change().iloc[-20:] * 100.0  # percentage returns
+    sigma_20 = returns.std()
+
+    # If vol is negligible or NaN, fall back to fixed thresholds
+    if not np.isfinite(sigma_20) or sigma_20 < 0.01:
+        if roc > 5.0:
+            return round(roc, 4), "BUY"
+        elif roc < -5.0:
+            return round(roc, 4), "SELL"
+        return round(roc, 4), "HOLD"
+
+    z_roc = roc / sigma_20
+
+    if z_roc > _VOL_SCALED_ZSCORE_THRESHOLD:
         return round(roc, 4), "BUY"
-    elif roc < -5.0:
+    elif z_roc < -_VOL_SCALED_ZSCORE_THRESHOLD:
         return round(roc, 4), "SELL"
     return round(roc, 4), "HOLD"
 
@@ -307,7 +326,39 @@ def _volume_weighted_momentum(df: pd.DataFrame) -> tuple[float, float, str]:
 
 # ---- public API ------------------------------------------------------------
 
-def compute_momentum_factors_signal(df: pd.DataFrame) -> dict:
+def _apply_seasonality(df: pd.DataFrame, context: dict | None) -> pd.DataFrame:
+    """Apply intraday seasonality detrending to close prices if profile available.
+
+    For metals tickers, removes hour-of-day return patterns to isolate
+    non-seasonal signal content.  Returns the original DataFrame if no
+    seasonality profile is available.
+    """
+    if context is None:
+        return df
+    profile = context.get("seasonality_profile")
+    if profile is None:
+        return df
+    if not hasattr(df.index, "hour"):
+        return df
+    try:
+        from portfolio.seasonality import detrend_return
+        detrended = df.copy()
+        returns = detrended["close"].pct_change()
+        for i in range(1, len(detrended)):
+            hour = detrended.index[i].hour
+            raw_ret = returns.iloc[i]
+            if np.isfinite(raw_ret):
+                adj_ret = detrend_return(raw_ret, hour, profile)
+                # Reconstruct close from detrended returns
+                detrended.iloc[i, detrended.columns.get_loc("close")] = (
+                    detrended["close"].iloc[i - 1] * (1 + adj_ret)
+                )
+        return detrended
+    except Exception:
+        return df
+
+
+def compute_momentum_factors_signal(df: pd.DataFrame, context: dict | None = None) -> dict:
     """Compute composite momentum-factor signal from OHLCV data.
 
     Parameters
@@ -315,6 +366,8 @@ def compute_momentum_factors_signal(df: pd.DataFrame) -> dict:
     df : pd.DataFrame
         Must contain columns ``open``, ``high``, ``low``, ``close``, ``volume``
         with at least 50 rows of numeric data.
+    context : dict, optional
+        Signal context containing seasonality_profile for detrending.
 
     Returns
     -------
@@ -363,7 +416,8 @@ def compute_momentum_factors_signal(df: pd.DataFrame) -> dict:
         return hold_result
 
     # Work on a clean copy to avoid mutating the caller's data
-    df = df.copy()
+    # Apply seasonality detrending for metals tickers if profile available
+    df = _apply_seasonality(df.copy(), context)
     close = df["close"].astype(float)
 
     # -- Compute each sub-indicator ----------------------------------------

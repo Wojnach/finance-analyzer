@@ -103,12 +103,15 @@ def _register_defaults():
         ("smart_money", "portfolio.signals.smart_money", "compute_smart_money_signal"),
         ("oscillators", "portfolio.signals.oscillators", "compute_oscillator_signal"),
         ("heikin_ashi", "portfolio.signals.heikin_ashi", "compute_heikin_ashi_signal"),
-        ("mean_reversion", "portfolio.signals.mean_reversion", "compute_mean_reversion_signal"),
         ("calendar", "portfolio.signals.calendar_seasonal", "compute_calendar_signal"),
-        ("momentum_factors", "portfolio.signals.momentum_factors", "compute_momentum_factors_signal"),
     ]
     for name, mod_path, func_name in defaults:
         register_enhanced(name, mod_path, func_name)
+    # mean_reversion and momentum_factors require context for seasonality detrending
+    register_enhanced("mean_reversion", "portfolio.signals.mean_reversion",
+                      "compute_mean_reversion_signal", requires_context=True)
+    register_enhanced("momentum_factors", "portfolio.signals.momentum_factors",
+                      "compute_momentum_factors_signal", requires_context=True)
     # macro_regime is special — requires_macro=True
     register_enhanced("macro_regime", "portfolio.signals.macro_regime",
                       "compute_macro_regime_signal", requires_macro=True)
