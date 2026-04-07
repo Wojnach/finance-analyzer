@@ -1129,10 +1129,14 @@ class TestExpandedCorrelationGroups:
         # With penalty, effective SELL weight is much lower
         # The correlation group prevents 3 correlated signals from inflating SELL
 
-    def test_macro_regime_in_macro_external_group(self):
-        """Verify macro_regime merged into macro_external group (corr +1.000 with fear_greed)."""
+    def test_macro_regime_in_trend_direction_group(self):
+        """Verify macro_regime moved to trend_direction group (corr +0.520 with trend).
+
+        2026-04-07: Moved from macro_external — better correlation fit with
+        trend (both follow 200-SMA direction) than with fear_greed.
+        """
         from portfolio.signal_engine import CORRELATION_GROUPS
-        assert "macro_regime" in CORRELATION_GROUPS["macro_external"]
+        assert "macro_regime" in CORRELATION_GROUPS["trend_direction"]
         assert "fear_greed" in CORRELATION_GROUPS["macro_external"]
         assert "structure" in CORRELATION_GROUPS["macro_external"]
 
