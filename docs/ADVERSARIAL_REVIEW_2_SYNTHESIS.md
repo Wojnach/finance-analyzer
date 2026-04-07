@@ -166,6 +166,35 @@ are explicitly not thread-safe per documentation.
 request to see another's response. Buy order response could be interpreted as stop-loss
 response.
 
+#### N31. `/mode` Telegram command destroys config.json symlink — TICKING TIME BOMB
+**Source:** Agent review (infrastructure), finding 8.2
+**Files:** `portfolio/telegram_poller.py:150-160`, `portfolio/file_utils.py:27`
+**What:** The `/mode` command reads config.json, modifies it, writes it back via
+`atomic_write_json`. But config.json is a symlink. `os.replace(tmp, str(path))` on a
+symlink replaces the SYMLINK ITSELF, not the target file. After one `/mode` command,
+config.json becomes a regular file and the external config at
+`C:\Users\Herc2\.config\finance-analyzer\config.json` is orphaned.
+**Impact:** One Telegram command permanently breaks the config setup. The external config
+(which contains API keys and is the canonical source) is disconnected.
+**Fix:** Resolve symlink before writing: `path = Path(path).resolve()`.
+
+#### N32. Telegram bot token leaked in retry log messages
+**Source:** Agent review (infrastructure), finding 3.1
+**Files:** `portfolio/http_retry.py:43-44, 47-48, 56-57, 60-61`
+**What:** `fetch_with_retry` logs the full URL on retry/failure. When called from
+`telegram_notifications.py`, the URL includes `bot<TOKEN>`. Logged at WARNING level.
+**Impact:** Anyone with log access can impersonate the Telegram bot.
+**Fix:** Redact URLs containing `api.telegram.org/bot` before logging.
+
+#### N33. Health monitor reports "healthy" when system is broken
+**Source:** Agent review (infrastructure), finding 7.1
+**Files:** `portfolio/health.py:215-245`
+**What:** `status` is "healthy" if heartbeat is fresh (<300s). But heartbeat updates at
+end of every cycle REGARDLESS of signal success. System can report healthy while all 32
+signals fail, Telegram is down, and agent is silent for days.
+**Impact:** Dashboard shows green while the system is effectively dead. User trusts status
+indicator and doesn't investigate.
+
 #### N25. SQLite accuracy queries skip neutral outcome filter — accuracy inflation
 **Source:** Agent review (signals-core), finding B6
 **Files:** `portfolio/signal_db.py:271,302,330,370`
@@ -356,12 +385,33 @@ appended as they complete.
 - FIFO order confirmation (N11 = F11)
 - api_delete treats 404 as success (noted in independent review)
 
+### Agent 8: infrastructure (COMPLETED — 22 findings, 0 CRITICAL but 3 HIGH)
+
+**NEW findings not in independent review:**
+- **`/mode` Telegram command destroys config.json symlink** — `atomic_write_json` on a
+  symlink replaces the symlink itself via `os.replace`, not the target file. One `/mode`
+  command permanently breaks external config. TICKING TIME BOMB. (8.2)
+- **Telegram bot token logged in retry warnings** — `fetch_with_retry` logs full URL
+  including `bot<TOKEN>` at WARNING level. Anyone with log access gets the token. (3.1)
+- **Health reports "healthy" when system is broken** — heartbeat updates regardless of
+  signal success. Dashboard shows green while all 32 signals fail, Telegram is down,
+  and agent is silent for days. (7.1)
+- **`weekly_digest.py` reads entire 68MB signal_log.jsonl** — OOM risk on constrained
+  systems. Only file that reads the full log for weekly data. (5.3)
+- **`claude_gate._clean_env()` copies all env vars to subprocess** — API keys in
+  environment accessible to Claude subprocess with Edit+Bash+Write tools. (3.2)
+
+**Converged with independent review:**
+- atomic_append_jsonl not truly atomic (1.1 = N2)
+- health.py read-modify-write race (2.3 = N10)
+- _loading_keys leak (2.2 = N21)
+- prune_jsonl reads entire file (8.3 = N20)
+
 **Agent subsystem assignments (remaining in progress):**
 2. `review-orchestration` — main.py + 8 supporting files
 4. `review-metals-core` — metals_loop.py + 14 supporting files
 6. `review-signals-modules` — 23 signal module files
 7. `review-data-external` — data_collector.py + 13 supporting files
-8. `review-infrastructure` — file_utils.py + 17 supporting files
 
 ---
 

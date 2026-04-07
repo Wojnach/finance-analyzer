@@ -1,7 +1,7 @@
 # Adversarial Review #2 — Prioritized Action Plan
 **Date:** 2026-04-07
 **Source:** Independent review + Agent reviews
-**Total findings:** 24+ (N1-N24, plus prior C3/C6 still open)
+**Total findings:** 33+ (N1-N33, plus prior C3/C6 still open)
 
 ---
 
@@ -45,7 +45,19 @@ Or simpler: clear ALL `_loading_keys` at start of each cycle in `main.py`.
 **Effort:** 30 minutes | **Impact:** Prevents health data loss
 **Where:** `portfolio/health.py` — add a module-level `threading.Lock()`.
 
-### 6. Fix Sortino ratio denominator (N23)
+### 6. Fix `/mode` symlink destruction — TICKING TIME BOMB (N31)
+**Effort:** 5 minutes | **Impact:** Prevents permanent config breakage
+**Where:** `portfolio/telegram_poller.py:150-160` — resolve symlink before write:
+```python
+resolved_path = Path(CONFIG_FILE).resolve()
+atomic_write_json(resolved_path, config)
+```
+
+### 7. Redact Telegram bot token from retry logs (N32)
+**Effort:** 15 minutes | **Impact:** Prevents credential leakage
+**Where:** `portfolio/http_retry.py` — mask URLs containing `api.telegram.org/bot`
+
+### 8. Fix Sortino ratio denominator (N23)
 **Effort:** 5 minutes | **Impact:** Correct risk-adjusted metrics
 **Where:** `portfolio/equity_curve.py:246` — change:
 ```python
