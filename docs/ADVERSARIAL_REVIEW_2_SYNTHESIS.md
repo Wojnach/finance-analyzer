@@ -137,6 +137,32 @@ without any locking. Concurrent calls clobber each other.
 means CONFIRM could execute the wrong one.
 **Impact:** Wrong order confirmed with real money.
 
+#### N34. Emergency sell uses stale bid — position rides to knockout
+**Source:** Agent review (metals-core), finding RISK-1 — MOST DANGEROUS BUG IN REVIEW
+**Files:** `data/metals_loop.py:2636-2680`
+**What:** `emergency_sell()` receives `bid` price from calling code, fetched seconds earlier.
+By the time the sell executes (CSRF fetch + API call = 2-5 seconds), a crashing market has
+already moved. The LIMIT sell at stale bid won't fill because current bid is now below. The
+position remains open while crashing toward the knockout barrier.
+**Impact:** Total position loss (knockout) in a scenario specifically designed to prevent it.
+**Fix:** Re-fetch bid immediately before placing sell, OR use market order for emergencies.
+
+#### N35. Chronos drift annualized 16x too high — fishing decisions dominated by error
+**Source:** Agent review (metals-core), finding MATH-2
+**Files:** `portfolio/price_targets.py:511` vs `portfolio/fin_fish.py:367`
+**What:** `price_targets.py` uses `sqrt(252)` (~15.87x) to annualize daily drift.
+`fin_fish.py` uses `252` (linear). Drift should be linear; sqrt is for volatility.
+One is wrong by a factor of 16x.
+**Impact:** Fishing system directional bias completely dominated by this 16x error.
+
+#### N36. No Binance staleness tracking — all decisions on frozen prices
+**Source:** Agent review (metals-core), finding REL-3
+**Files:** `data/metals_loop.py:1102-1148`
+**What:** Binance FAPI is the sole source for XAG/XAU prices. If Binance goes down,
+`_underlying_prices` retains stale values with no age check. All trailing stops,
+emergency sells, and fish engine decisions operate on frozen data.
+**Impact:** System blind during Binance outages — exactly when volatility spikes.
+
 #### N28. `metals_avanza_helpers.place_order()` has ZERO input validation
 **Source:** Agent review (avanza-api), finding F1
 **Files:** `data/metals_avanza_helpers.py:86-133`
@@ -407,9 +433,39 @@ appended as they complete.
 - _loading_keys leak (2.2 = N21)
 - prune_jsonl reads entire file (8.3 = N20)
 
+### Agent 4: metals-core (COMPLETED — 26 findings, 1 CRITICAL)
+
+**The most financially dangerous bug in the entire review:**
+- **Emergency sell uses stale bid price** — during a crash, `emergency_sell()` places a
+  LIMIT sell at a bid fetched seconds earlier. In a fast crash toward knockout, the bid
+  has already moved below. The order WON'T FILL and the position rides to total loss
+  (knockout). Should use market order or re-fetch bid immediately before placing. (RISK-1)
+
+**NEW HIGH/MEDIUM findings:**
+- **Chronos drift annualized 16x too high in fin_fish.py** — `price_targets.py` uses
+  `sqrt(252)` while `fin_fish.py` uses `252`. One is wrong by 16x, dominating all
+  fishing decisions. Drift should be linear (252), volatility uses sqrt. (MATH-2)
+- **No Binance staleness tracking** — if Binance FAPI goes down, prices silently freeze.
+  All decisions (stops, emergency sells) operate on stale data with no age check. (REL-3)
+- **Warrant P&L uses linear approximation** — ignores non-linear leverage near financing
+  level, underestimating losses by 3-6% at the worst possible moment. (MATH-4)
+- **ORB predictor hardcodes UTC winter time** — morning window wrong during CEST summer.
+  ORB predictions systematically wrong half the year. (STALE-2)
+- **Peak bids lost on restart** — trailing stop jumps to lower level after crash/restart,
+  giving back significant profits. (STATE-1)
+- **`page.evaluate` no timeout on emergency sell** — Avanza server hang = total position
+  loss as price crashes through knockout barrier. (EDGE-3)
+- **Stop distance 3% too close for 5x warrants** — uses `< 3.0` not `<= 3.0`, and 3%
+  underlying = 15% warrant move, within normal silver noise. (RISK-2)
+- **Snipe manager HARD_STOP_CERT_PCT = 5%** — at 5x leverage, 5% cert = 1% underlying.
+  Will trigger constantly on normal fluctuations. (RISK-3)
+
+**Converged with independent review:**
+- God module (5366 lines) — N/A in independent but noted
+- Non-atomic I/O in metals_loop — partial convergence with N2
+
 **Agent subsystem assignments (remaining in progress):**
 2. `review-orchestration` — main.py + 8 supporting files
-4. `review-metals-core` — metals_loop.py + 14 supporting files
 6. `review-signals-modules` — 23 signal module files
 7. `review-data-external` — data_collector.py + 13 supporting files
 
