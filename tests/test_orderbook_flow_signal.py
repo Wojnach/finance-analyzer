@@ -106,3 +106,54 @@ class TestComputeOrderbookFlowSignal:
             _make_df(), ticker="XAG-USD", config={}, macro={}
         )
         assert result["sub_signals"].get("trade_pressure") == "BUY"
+
+    @patch("portfolio.signals.orderbook_flow._get_microstructure_context")
+    def test_vpin_toxicity_flag(self, mock_ctx):
+        """VPIN > 0.7 should set high_toxicity=True in indicators."""
+        from portfolio.signals.orderbook_flow import compute_orderbook_flow_signal
+        mock_ctx.return_value = {
+            "depth_imbalance": 0.0,
+            "trade_imbalance_ratio": 0.0,
+            "vpin": 0.85,
+            "ofi": 0.0,
+            "ofi_zscore": 0.0,
+            "spread_zscore": 0.0,
+        }
+        result = compute_orderbook_flow_signal(
+            _make_df(), ticker="XAG-USD", config={}, macro={}
+        )
+        assert result["indicators"]["high_toxicity"] is True
+
+    @patch("portfolio.signals.orderbook_flow._get_microstructure_context")
+    def test_ofi_zscore_used_when_available(self, mock_ctx):
+        """When ofi_zscore > 1.5, OFI sub should vote BUY."""
+        from portfolio.signals.orderbook_flow import compute_orderbook_flow_signal
+        mock_ctx.return_value = {
+            "depth_imbalance": 0.0,
+            "trade_imbalance_ratio": 0.0,
+            "vpin": 0.3,
+            "ofi": 2.0,         # below absolute threshold (5.0)
+            "ofi_zscore": 2.0,  # above z-score threshold (1.5)
+            "spread_zscore": 0.0,
+        }
+        result = compute_orderbook_flow_signal(
+            _make_df(), ticker="XAG-USD", config={}, macro={}
+        )
+        assert result["sub_signals"]["ofi"] == "BUY"
+
+    @patch("portfolio.signals.orderbook_flow._get_microstructure_context")
+    def test_ofi_fallback_to_absolute(self, mock_ctx):
+        """When ofi_zscore=0.0 (cold start), should fall back to absolute threshold."""
+        from portfolio.signals.orderbook_flow import compute_orderbook_flow_signal
+        mock_ctx.return_value = {
+            "depth_imbalance": 0.0,
+            "trade_imbalance_ratio": 0.0,
+            "vpin": 0.3,
+            "ofi": 10.0,        # above absolute threshold (5.0)
+            "ofi_zscore": 0.0,  # zero → cold start, use absolute
+            "spread_zscore": 0.0,
+        }
+        result = compute_orderbook_flow_signal(
+            _make_df(), ticker="XAG-USD", config={}, macro={}
+        )
+        assert result["sub_signals"]["ofi"] == "BUY"

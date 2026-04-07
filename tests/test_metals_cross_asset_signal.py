@@ -84,3 +84,67 @@ class TestComputeMetalsCrossAssetSignal:
             _make_df(), ticker="XAG-USD", config={}, macro={}
         )
         assert result_gold != result_silver or True
+
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_gvz_high_buys_gold(self, mock_ctx):
+        """High GVZ (fear/uncertainty) should BUY gold, not HOLD."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = {
+            "copper_change_5d": 0.0,
+            "gvz_zscore": 2.5,
+            "gs_ratio_zscore": 0.0,
+            "spy_change_1d": 0.0,
+            "oil_change_5d": 0.0,
+        }
+        result = compute_metals_cross_asset_signal(
+            _make_df(), ticker="XAU-USD", config={}, macro={}
+        )
+        assert result["sub_signals"]["gvz"] == "BUY"
+
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_gvz_high_sells_silver(self, mock_ctx):
+        """High GVZ (fear) should SELL silver (not safe haven)."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = {
+            "copper_change_5d": 0.0,
+            "gvz_zscore": 2.5,
+            "gs_ratio_zscore": 0.0,
+            "spy_change_1d": 0.0,
+            "oil_change_5d": 0.0,
+        }
+        result = compute_metals_cross_asset_signal(
+            _make_df(), ticker="XAG-USD", config={}, macro={}
+        )
+        assert result["sub_signals"]["gvz"] == "SELL"
+
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_gvz_low_sells_gold(self, mock_ctx):
+        """Low GVZ (complacency) should SELL gold (no safe haven premium)."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = {
+            "copper_change_5d": 0.0,
+            "gvz_zscore": -1.5,
+            "gs_ratio_zscore": 0.0,
+            "spy_change_1d": 0.0,
+            "oil_change_5d": 0.0,
+        }
+        result = compute_metals_cross_asset_signal(
+            _make_df(), ticker="XAU-USD", config={}, macro={}
+        )
+        assert result["sub_signals"]["gvz"] == "SELL"
+
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_oil_data_used(self, mock_ctx):
+        """Oil momentum > 2% should result in oil sub_signal = BUY."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = {
+            "copper_change_5d": 0.0,
+            "gvz_zscore": 0.0,
+            "gs_ratio_zscore": 0.0,
+            "spy_change_1d": 0.0,
+            "oil_change_5d": 3.0,
+        }
+        result = compute_metals_cross_asset_signal(
+            _make_df(), ticker="XAU-USD", config={}, macro={}
+        )
+        assert result["sub_signals"]["oil"] == "BUY"

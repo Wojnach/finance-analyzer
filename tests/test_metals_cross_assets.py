@@ -75,6 +75,40 @@ class TestGoldSilverRatio:
         assert "zscore" in result
 
 
+class TestGetOilData:
+    @patch("portfolio.metals_cross_assets._yf_download")
+    def test_returns_price_and_change(self, mock_dl):
+        from portfolio.metals_cross_assets import get_oil_data
+        idx = pd.date_range("2026-03-01", periods=30, freq="B")
+        df = pd.DataFrame({"Close": list(range(60, 90))}, index=idx)
+        mock_dl.return_value = df
+
+        result = get_oil_data.__wrapped__()
+        assert result is not None
+        assert "price" in result
+        assert "change_1d_pct" in result
+        assert "change_5d_pct" in result
+
+    @patch("portfolio.metals_cross_assets._yf_download")
+    def test_returns_none_on_failure(self, mock_dl):
+        from portfolio.metals_cross_assets import get_oil_data
+        mock_dl.return_value = pd.DataFrame()
+        result = get_oil_data.__wrapped__()
+        assert result is None
+
+
+class TestGetAllCrossAssetData:
+    @patch("portfolio.metals_cross_assets._yf_download")
+    def test_includes_oil_key(self, mock_dl):
+        from portfolio.metals_cross_assets import get_all_cross_asset_data
+        idx = pd.date_range("2026-03-01", periods=30, freq="B")
+        df = pd.DataFrame({"Close": [100.0] * 30}, index=idx)
+        mock_dl.return_value = df
+
+        result = get_all_cross_asset_data()
+        assert "oil" in result
+
+
 class TestGetSPYReturn:
     @patch("portfolio.metals_cross_assets._yf_download")
     def test_returns_spy_change(self, mock_dl):

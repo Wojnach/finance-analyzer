@@ -6,10 +6,13 @@ import time
 import pytest
 
 from portfolio.microstructure_state import (
+    _ofi_history,
     _snapshot_buffers,
     _spread_buffers,
     accumulate_snapshot,
     get_microstructure_state,
+    get_multiscale_ofi,
+    get_ofi_zscore,
     get_rolling_ofi,
     get_spread_zscore,
     snapshot_count,
@@ -21,6 +24,7 @@ def _clear_buffers():
     """Clear ring buffers between tests."""
     _snapshot_buffers.clear()
     _spread_buffers.clear()
+    _ofi_history.clear()
 
 
 def _make_depth(best_bid, best_ask, bid_vol=10.0, ask_vol=10.0):
@@ -114,3 +118,61 @@ class TestGetMicrostructureState:
         assert state["ofi"] == 0.0
         assert state["spread_zscore"] == 0.0
         assert state["snapshot_count"] == 0
+
+
+class TestGetOfiZscore:
+    def test_insufficient_history_returns_zero(self):
+        """Less than 10 OFI readings should return 0.0."""
+        # Add a few snapshots and compute OFI to populate _ofi_history
+        for i in range(5):
+            accumulate_snapshot("XAG-USD", _make_depth(30.0 + i * 0.01, 30.5))
+        get_rolling_ofi("XAG-USD")  # populates _ofi_history with 1 entry
+        z = get_ofi_zscore("XAG-USD")
+        assert z == 0.0
+
+    def test_positive_zscore_for_high_ofi(self):
+        """Inject a high OFI after many normal ones — z-score should be positive."""
+        # Build baseline: 15 near-zero OFI readings
+        for val in [0.1, -0.1, 0.05, -0.05, 0.0, 0.1, -0.1, 0.05,
+                    -0.05, 0.0, 0.1, -0.1, 0.05, -0.05, 0.0]:
+            _ofi_history.setdefault("XAG-USD", __import__("collections").deque(maxlen=120))
+            _ofi_history["XAG-USD"].append(val)
+        # Add one very high OFI reading
+        _ofi_history["XAG-USD"].append(10.0)
+        z = get_ofi_zscore("XAG-USD")
+        assert z > 1.0
+
+    def test_negative_zscore_for_low_ofi(self):
+        """Inject a very low OFI after normal ones — z-score should be negative."""
+        from collections import deque
+        _ofi_history["XAG-USD"] = deque(maxlen=120)
+        for val in [0.1, -0.1, 0.05, -0.05, 0.0, 0.1, -0.1, 0.05,
+                    -0.05, 0.0, 0.1, -0.1, 0.05, -0.05, 0.0]:
+            _ofi_history["XAG-USD"].append(val)
+        # Add one very low OFI reading
+        _ofi_history["XAG-USD"].append(-10.0)
+        z = get_ofi_zscore("XAG-USD")
+        assert z < -1.0
+
+
+class TestGetMultiscaleOfi:
+    def test_returns_three_windows(self):
+        """Result should contain ofi_fast, ofi_medium, ofi_slow keys."""
+        for i in range(20):
+            accumulate_snapshot("XAG-USD", _make_depth(30.0 + i * 0.01, 30.5))
+        result = get_multiscale_ofi("XAG-USD")
+        assert "ofi_fast" in result
+        assert "ofi_medium" in result
+        assert "ofi_slow" in result
+        assert "flow_acceleration" in result
+
+    def test_flow_acceleration_positive_on_buying_surge(self):
+        """Fast buying more than slow average should give positive acceleration."""
+        # Build slow baseline with flat bids (zero OFI)
+        for i in range(15):
+            accumulate_snapshot("XAG-USD", _make_depth(30.0, 30.5, bid_vol=10.0))
+        # Recent fast window: rapidly improving bids (positive OFI)
+        for i in range(5):
+            accumulate_snapshot("XAG-USD", _make_depth(30.0 + (i + 1) * 0.1, 30.5, bid_vol=12.0))
+        result = get_multiscale_ofi("XAG-USD")
+        assert result["flow_acceleration"] > 0
