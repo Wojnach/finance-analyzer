@@ -1299,6 +1299,58 @@ if CATALOG_AVAILABLE:
                 "leverage": wv.get("leverage", 5.0),
             }
 
+# ---------------------------------------------------------------------------
+# Fishing position support — intraday positions get tight trail + EOD sell
+# ---------------------------------------------------------------------------
+# Build set of all fishing-related ob_ids from the fishing warrant catalog.
+# Positions matching these ob_ids are tagged _fishing=True by detect_holdings.
+FISHING_OB_IDS: set[str] = set()
+try:
+    from fin_fish_config import WARRANT_CATALOG as _FISH_CATALOG
+    for _wv in _FISH_CATALOG.values():
+        _ob = str(_wv.get("ob_id", ""))
+        if _ob:
+            FISHING_OB_IDS.add(_ob)
+except ImportError:
+    pass
+
+FISHING_TRAIL_START_PCT = 0.0       # trail immediately (no gain threshold)
+FISHING_EOD_SELL_MINUTE_CET = (21, 50)  # sell fishing positions at 21:50 CET
+
+
+def _eod_sell_fishing_positions(page):
+    """Sell all active fishing positions at end of day (21:50 CET).
+
+    Fishing positions are intraday only — never hold overnight.
+    Uses emergency_sell for immediate market execution.
+    """
+    sold = []
+    for key, pos in POSITIONS.items():
+        if not pos.get("active") or not pos.get("_fishing"):
+            continue
+        ob_id = pos.get("ob_id", "")
+        try:
+            price_data = fetch_price(page, ob_id, pos.get("api_type", "certificate"))
+            bid = (price_data or {}).get("bid", 0)
+            if bid > 0:
+                log(f"[fish-eod] Selling {key} at bid={bid} (EOD 21:50)")
+                emergency_sell(page, key, pos, bid)
+                sold.append(f"{key} @ {bid}")
+            else:
+                log(f"[fish-eod] No bid for {key}, attempting emergency sell at 0")
+                emergency_sell(page, key, pos, 0)
+                sold.append(f"{key} @ market")
+        except Exception as e:
+            log(f"[fish-eod] Error selling {key}: {e}")
+    if sold:
+        send_telegram(
+            "*FISH EOD SELL*\n"
+            + "\n".join(f"  {s}" for s in sold)
+            + "\nIntraday fishing positions closed for the day."
+        )
+    return sold
+
+
 def _reconcile_fish_engine_position(held_ob_ids, changes):
     """Check fish engine position against actual Avanza holdings.
 
@@ -1414,6 +1466,7 @@ def detect_holdings(page):
                     key = info["key"]
                     entry_price = holding["avg_price"] if holding["avg_price"] > 0 else 0
                     stop_price = round(entry_price * 0.95, 2) if entry_price > 0 else 0
+                    is_fishing = ob_id in FISHING_OB_IDS
                     POSITIONS[key] = {
                         "name": info["name"], "ob_id": ob_id,
                         "api_type": info["api_type"],
@@ -1422,10 +1475,12 @@ def detect_holdings(page):
                         "active": True,
                         "_underlying": info["underlying"],
                         "_leverage": info["leverage"],
+                        "_fishing": is_fishing,
                     }
-                    changes.append(f"NEW {key}: {holding['units']}u @ {entry_price} (auto-detected)")
+                    tag = " [FISHING]" if is_fishing else ""
+                    changes.append(f"NEW {key}: {holding['units']}u @ {entry_price} (auto-detected{tag})")
                     log(f"Holdings: NEW instrument detected: {key} = {info['name']} "
-                        f"({holding['units']}u @ {entry_price})")
+                        f"({holding['units']}u @ {entry_price}){tag}")
                 else:
                     log(f"Holdings: unknown ob_id {ob_id} ({holding.get('name', '?')}) — skipping")
 
@@ -1584,8 +1639,9 @@ def update_smart_trailing_stops(page, positions, stop_order_state, prices):
         old_stop = pos["stop"]
         pnl = pnl_pct(bid, entry)
 
-        # Only trail if in profit above threshold
-        if pnl < TRAIL_START_PCT:
+        # Fishing positions trail immediately; swing positions wait for profit
+        trail_threshold = FISHING_TRAIL_START_PCT if pos.get("_fishing") else TRAIL_START_PCT
+        if pnl < trail_threshold:
             continue
 
         new_stop, dist_used = compute_smart_trail_distance(key, bid, entry, old_stop)
@@ -4980,6 +5036,17 @@ Positions: {pos_summary}{prob_summary}""")
                             "\n".join(f"• {c}" for c in changes)
                         )
                     _report.holdings_reconciled = True
+
+                # --- FISHING EOD SELL (21:50 CET) ---
+                _h_cet_now = cet_hour()
+                _eod_h, _eod_m = FISHING_EOD_SELL_MINUTE_CET
+                if int(_h_cet_now) == _eod_h and (_h_cet_now % 1) * 60 >= _eod_m:
+                    _has_fishing = any(
+                        pos.get("active") and pos.get("_fishing")
+                        for pos in POSITIONS.values()
+                    )
+                    if _has_fishing:
+                        _eod_sell_fishing_positions(page)
 
                 if not is_market_hours():
                     # Update strategy shared data even outside market hours

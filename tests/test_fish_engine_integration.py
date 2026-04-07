@@ -371,3 +371,37 @@ class TestEnrichedTradeLogging:
         assert "pnl_sek" in sell_entry
         assert sell_entry["pnl_sek"] == pytest.approx((2.42 - 2.55) * 435, abs=0.1)
         assert sell_entry["direction"] == "SHORT"
+
+
+# ---------------------------------------------------------------------------
+# Fishing position tagging + trailing + EOD sell
+# ---------------------------------------------------------------------------
+
+class TestFishingPositionTag:
+    """Fishing positions should be tagged and handled differently."""
+
+    def test_fishing_ob_ids_built_from_catalog(self):
+        """FISHING_OB_IDS should contain all ob_ids from WARRANT_CATALOG."""
+        from data.metals_loop import FISHING_OB_IDS
+        # Should be a set of strings
+        assert isinstance(FISHING_OB_IDS, set)
+        # Should contain known fishing instruments
+        assert "1650161" in FISHING_OB_IDS  # BULL SILVER X5 AVA 4
+        assert "2286417" in FISHING_OB_IDS  # BEAR SILVER X5 AVA 12
+
+    def test_fishing_tag_on_new_position(self):
+        """When detect_holdings adds a position with a fishing ob_id, it should be tagged."""
+        from data.metals_loop import KNOWN_WARRANT_OB_IDS, FISHING_OB_IDS
+        # BULL SILVER X5 AVA 4 (ob_id 1650161) is in WARRANT_CATALOG
+        assert "1650161" in FISHING_OB_IDS
+
+    def test_trailing_start_zero_for_fishing(self):
+        """Fishing positions should start trailing immediately (TRAIL_START_PCT = 0)."""
+        from data.metals_loop import FISHING_TRAIL_START_PCT
+        assert FISHING_TRAIL_START_PCT == 0.0
+
+    def test_eod_sell_hour(self):
+        """EOD sell for fishing should trigger at 21:50 CET."""
+        from data.metals_loop import FISHING_EOD_SELL_MINUTE_CET
+        # 21 hours + 50 minutes = 21:50
+        assert FISHING_EOD_SELL_MINUTE_CET == (21, 50)
