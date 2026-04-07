@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import logging
+import math
 from pathlib import Path
 from typing import Any
 
@@ -339,15 +340,18 @@ def _compute_vol_and_drift(
     atr_pct = signal["atr_pct"]
     p_up = _safe_float((signal["focus"].get("3h") or {}).get("probability"), 0.5)
 
-    # Use the HIGHER of ATR-based vol vs realized vol from daily ranges
-    realized_atr_pct = atr_pct
+    # Hourly ATR path — volatility_from_atr assumes hourly candles
+    vol = volatility_from_atr(atr_pct)
+
+    # Daily range path — annualize daily sigma directly with sqrt(252)
+    # (volatility_from_atr uses sqrt(252/14) which is wrong for daily data)
     if daily_ranges and len(daily_ranges) >= 3:
         recent_ranges = [c["range_pct"] for c in daily_ranges[-5:] if c["range_pct"] > 0.5]
         if recent_ranges:
             avg_range = sum(recent_ranges) / len(recent_ranges)
-            realized_atr_pct = max(atr_pct, avg_range / 1.5)
-
-    vol = volatility_from_atr(realized_atr_pct)
+            daily_sigma = avg_range / 1.5 / 100.0
+            vol_from_daily = daily_sigma * math.sqrt(252.0)
+            vol = max(vol, vol_from_daily)
 
     # For LONG fishing we want P(dip) — use p_up as-is (lower p_up = more likely to dip)
     # For SHORT fishing we want P(spike) — invert: use 1-p_up
@@ -708,9 +712,17 @@ def evaluate_warrants(
     results = []
     for warrant in matching:
         barrier = warrant["barrier"]
-        leverage = warrant["leverage"]
         name = warrant["name"]
         is_daily_cert = warrant["api_type"] == "certificate" and barrier == 0
+
+        # Dynamic leverage: compute from spot and barrier for warrants.
+        # Config leverage is stale (set when cert was added, not at current price).
+        # Daily certs (no barrier) keep config leverage.
+        if not is_daily_cert and barrier > 0:
+            dist = abs(spot - barrier)
+            leverage = spot / dist if dist > 0 else warrant["leverage"]
+        else:
+            leverage = warrant["leverage"]
 
         # Barrier checks only for MINI warrants (barrier > 0)
         if not is_daily_cert and barrier > 0:
@@ -819,7 +831,21 @@ def evaluate_warrants(
             })
 
     results.sort(key=lambda x: x["ev_sek"], reverse=True)
-    return results
+
+    # Deduplicate: keep only the best warrant per price level (within 0.2%).
+    # Without this, the same level appears N times for N different warrants,
+    # drowning out other price levels in the output.
+    deduped: list[dict] = []
+    for r in results:
+        is_dup = False
+        for kept in deduped:
+            if abs(r["level"] - kept["level"]) / max(r["level"], 1e-9) < 0.002:
+                is_dup = True
+                break
+        if not is_dup:
+            deduped.append(r)
+
+    return deduped
 
 
 # ---------------------------------------------------------------------------
