@@ -935,12 +935,12 @@ class TestExitRules:
         assert "flip" in decision["exit_reason"]
 
     def test_metals_disagree_exit(self):
-        """3 consecutive metals disagrees triggers exit."""
+        """N consecutive metals disagrees triggers exit (15 after 2026-04-07 live test)."""
+        from data.fish_engine import EXIT_METALS_DISAGREE_COUNT
         t = 1000000.0
         engine = make_engine(t=t)
         _put_position(engine, direction="LONG", entry_underlying=75.0, entry_ts=t - 600)
-        # 3 ticks with metals_action=SELL while LONG
-        for _ in range(3):
+        for _ in range(EXIT_METALS_DISAGREE_COUNT):
             state = make_state(silver_price=75.1, metals_action="SELL")
             decision = engine.tick(state)
         assert decision["action"] == "SELL"
