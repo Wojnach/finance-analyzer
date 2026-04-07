@@ -532,8 +532,28 @@ appended as they complete.
 - Post-cycle synchronous bloat (N12)
 - `_extract_triggered_tickers` default to XAG-USD (noted)
 
-**Agent subsystem assignments (remaining in progress):**
-6. `review-signals-modules` — 23 signal module files (LAST AGENT)
+### Agent 6: signals-modules (COMPLETED — 28 findings, 4 HIGH) — ALL AGENTS DONE
+
+**NEW HIGH findings:**
+- **GVZ sub-signal always returns HOLD** — dead code in metals_cross_asset.py. Always
+  HOLD in all 3 branches, diluting other 4 sub-signal votes toward HOLD bias. (4.1)
+- **VWAP cumulative over entire DataFrame** — not session-based. On multi-day data,
+  converges to volume-weighted historical average, making sub-signal meaningless. (3.1)
+- **Claude Fundamental cooldown lockout** — cache timestamp set BEFORE thread spawns.
+  One Opus failure locks out the tier for 2 hours. No retry. (6.1)
+- **None data silently converted to 0.0** — metals_cross_asset treats failed copper
+  fetch as "no change" instead of "data unavailable". (2.1)
+
+**NEW MEDIUM findings:**
+- **Historical volatility sqrt(365) for stocks** — overstates stock vol by 20%. (1.4)
+- **Volume RSI uses SMA not Wilder smoothing** — thresholds calibrated for wrong method. (1.3)
+- **12 modules have no confidence cap** — can return 1.0 while 6 others capped at 0.6-0.7. (8.2)
+- **Gap fill fires on intraday noise** — 0.5% threshold appropriate for daily, not 15m. (3.2)
+- **RSI(2) and IBS+RSI(2) double-count** — same condition counted twice. (4.3)
+- **Econ calendar SELL-only bias** — can never vote BUY, permanent bearish lean. (4.2)
+- **Pivot points use previous bar, not previous day** — wrong on intraday. (5.2)
+- **3 different function signatures** — fragile plugin interface. (8.1)
+- **Forecast circuit breaker TTL 30s** — too short for GPU failure recovery. (6.2)
 
 ---
 
