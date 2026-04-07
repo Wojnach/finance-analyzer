@@ -233,3 +233,141 @@ class TestEngineState:
         assert engine2.position is not None
         assert engine2.position["ob_id"] == "2389098"
         assert engine2.position["volume"] == 558
+
+
+# ---------------------------------------------------------------------------
+# Position reconciliation — external close (stop-loss triggered on Avanza)
+# ---------------------------------------------------------------------------
+
+class TestForceClosePosition:
+    """force_close_position handles externally-triggered exits (stop-loss, manual sell)."""
+
+    def test_force_close_clears_position(self):
+        """After force close, engine should have no position."""
+        engine = _make_engine_with_position("LONG", entry_cert=4.50, volume=334)
+        assert engine.has_position is True
+
+        engine.force_close_position("stop_loss_triggered", exit_cert_price=4.20)
+
+        assert engine.has_position is False
+        assert engine.position is None
+
+    def test_force_close_records_pnl(self):
+        """Force close should compute and record P&L from entry vs exit cert price."""
+        engine = _make_engine_with_position("LONG", entry_cert=4.50, volume=334)
+
+        engine.force_close_position("stop_loss_triggered", exit_cert_price=4.20)
+
+        # P&L = (4.20 - 4.50) * 334 = -100.20
+        assert engine.session_pnl == pytest.approx(-100.20, abs=0.1)
+        assert engine.trade_count == 1
+        assert engine.loss_count == 1
+
+    def test_force_close_with_zero_exit_price(self):
+        """When exit price unknown (0), P&L should be estimated as full loss of entry amount."""
+        engine = _make_engine_with_position("SHORT", entry_cert=2.55, volume=435)
+
+        engine.force_close_position("auto_detect_not_held", exit_cert_price=0)
+
+        # With zero exit price, P&L = -(entry_cert * volume) = -1109.25
+        assert engine.session_pnl == pytest.approx(-2.55 * 435, abs=0.1)
+        assert engine.has_position is False
+
+    def test_force_close_winning_trade(self):
+        """Stop-loss might not mean a loss if price moved in our favor first."""
+        engine = _make_engine_with_position("LONG", entry_cert=4.50, volume=100)
+
+        engine.force_close_position("manual_sell", exit_cert_price=5.00)
+
+        # P&L = (5.00 - 4.50) * 100 = +50
+        assert engine.session_pnl == pytest.approx(50.0, abs=0.1)
+        assert engine.win_count == 1
+        assert engine.consecutive_losses == 0
+
+    def test_force_close_no_position_is_noop(self):
+        """Force close with no position should do nothing."""
+        engine = FishEngine(time_func=time.time)
+        assert engine.has_position is False
+
+        engine.force_close_position("spurious_close")
+
+        assert engine.session_pnl == 0.0
+        assert engine.trade_count == 0
+
+    def test_force_close_increments_consecutive_losses(self):
+        """Consecutive losses should increment on force-close loss."""
+        engine = _make_engine_with_position("LONG", entry_cert=4.50, volume=100)
+        engine.consecutive_losses = 1  # already had one loss
+
+        engine.force_close_position("stop_loss_triggered", exit_cert_price=4.00)
+
+        assert engine.consecutive_losses == 2
+
+    def test_force_close_logs_trade(self, tmp_path):
+        """Force close should write to trade log with exit_reason."""
+        log_path = str(tmp_path / "fish_trades.jsonl")
+        engine = FishEngine(time_func=time.time, trade_log_path=log_path)
+        engine.confirm_entry("LONG", 4.50, 334, 72.0)
+
+        engine.force_close_position("stop_loss_triggered", exit_cert_price=4.20)
+
+        import json
+        lines = (tmp_path / "fish_trades.jsonl").read_text().strip().split("\n")
+        # Should have 2 entries: BUY + SELL
+        assert len(lines) == 2
+        sell_entry = json.loads(lines[1])
+        assert sell_entry["action"] == "SELL"
+        assert sell_entry["exit_reason"] == "stop_loss_triggered"
+        assert sell_entry["price_sek"] == 4.20
+
+    def test_force_close_state_survives_roundtrip(self):
+        """After force close, serialized state should show no position."""
+        engine = _make_engine_with_position("LONG", entry_cert=4.50, volume=334)
+        engine.force_close_position("stop_loss_triggered", exit_cert_price=4.20)
+
+        state = engine.to_dict()
+        engine2 = FishEngine()
+        engine2.from_dict(state)
+
+        assert engine2.has_position is False
+        assert engine2.session_pnl == pytest.approx(-100.20, abs=0.1)
+        assert engine2.trade_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Enriched trade logging
+# ---------------------------------------------------------------------------
+
+class TestEnrichedTradeLogging:
+    """Trade log entries should contain complete trade data."""
+
+    def test_buy_log_has_direction_and_underlying(self, tmp_path):
+        """BUY log entry should include direction and underlying price."""
+        log_path = str(tmp_path / "fish_trades.jsonl")
+        engine = FishEngine(time_func=time.time, trade_log_path=log_path)
+
+        engine.confirm_entry("LONG", 4.50, 334, 72.0)
+
+        import json
+        lines = (tmp_path / "fish_trades.jsonl").read_text().strip().split("\n")
+        buy_entry = json.loads(lines[0])
+        assert buy_entry["action"] == "BUY"
+        assert buy_entry["direction"] == "LONG"
+        assert buy_entry["underlying_price"] == 72.0
+
+    def test_sell_log_has_pnl_and_reason(self, tmp_path):
+        """SELL log entry should include pnl_sek and exit_reason."""
+        log_path = str(tmp_path / "fish_trades.jsonl")
+        engine = FishEngine(time_func=time.time, trade_log_path=log_path)
+        engine.confirm_entry("SHORT", 2.55, 435, 72.05)
+
+        engine.force_close_position("stop_loss_triggered", exit_cert_price=2.42)
+
+        import json
+        lines = (tmp_path / "fish_trades.jsonl").read_text().strip().split("\n")
+        sell_entry = json.loads(lines[1])
+        assert sell_entry["action"] == "SELL"
+        assert sell_entry["exit_reason"] == "stop_loss_triggered"
+        assert "pnl_sek" in sell_entry
+        assert sell_entry["pnl_sek"] == pytest.approx((2.42 - 2.55) * 435, abs=0.1)
+        assert sell_entry["direction"] == "SHORT"

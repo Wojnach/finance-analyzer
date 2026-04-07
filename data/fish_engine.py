@@ -276,6 +276,8 @@ class FishEngine:
             volume,
             entry_price_cert,
             -(entry_price_cert * volume),
+            direction=direction,
+            underlying_price=underlying_price,
         )
 
         if self.mode == "straddle":
@@ -284,7 +286,12 @@ class FishEngine:
             else:
                 self.straddle_bear_filled = True
 
-    def confirm_exit(self, pnl: float, exit_cert_price: float = 0) -> None:
+    def confirm_exit(
+        self,
+        pnl: float,
+        exit_cert_price: float = 0,
+        exit_reason: str = "engine_exit",
+    ) -> None:
         """Caller confirms a SELL was executed. Updates session P&L."""
         if self.position is None:
             return
@@ -312,9 +319,37 @@ class FishEngine:
             volume,
             exit_cert_price,
             exit_cert_price * volume if exit_cert_price else 0,
+            direction=direction,
+            underlying_price=self.position.get("entry_underlying", 0),
+            exit_reason=exit_reason,
+            pnl_sek=pnl,
         )
 
         self.position = None
+
+    def force_close_position(
+        self, reason: str, exit_cert_price: float = 0
+    ) -> None:
+        """Handle externally-triggered exit (stop-loss on Avanza, manual sell).
+
+        Called by reconciliation when the engine thinks it has a position but
+        Avanza shows it's no longer held. Computes P&L from cert prices and
+        updates all internal state (session_pnl, trade_count, consecutive_losses).
+
+        If exit_cert_price is 0 (unknown), assumes full loss of entry amount.
+        """
+        if self.position is None:
+            return
+
+        entry_cert = self.position.get("entry_cert", 0)
+        volume = self.position.get("volume", 0)
+
+        if exit_cert_price > 0:
+            pnl = (exit_cert_price - entry_cert) * volume
+        else:
+            pnl = -(entry_cert * volume)
+
+        self.confirm_exit(pnl, exit_cert_price, exit_reason=reason)
 
     def set_mode(self, mode: str, floor: float = 0, ceil: float = 0) -> None:
         """Explicitly set the trading mode.
@@ -862,6 +897,11 @@ class FishEngine:
         price: float,
         amount: float,
         tactic: str = "",
+        *,
+        direction: str = "",
+        underlying_price: float = 0,
+        exit_reason: str = "",
+        pnl_sek: float = 0,
     ) -> None:
         """Rule 7: Log every trade with exact amounts."""
         try:
@@ -877,7 +917,13 @@ class FishEngine:
                 "tactic": tactic,
                 "session_pnl": round(self.session_pnl, 2),
                 "mode": self.mode,
+                "direction": direction,
+                "underlying_price": round(underlying_price, 4),
             }
+            if exit_reason:
+                entry["exit_reason"] = exit_reason
+            if pnl_sek:
+                entry["pnl_sek"] = round(pnl_sek, 2)
             atomic_append_jsonl(self._trade_log_path, entry)
         except Exception:
             logger.debug("Failed to log trade to %s", self._trade_log_path, exc_info=True)
