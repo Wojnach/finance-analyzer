@@ -1,7 +1,8 @@
 """Tests for Elongir strategy adapter."""
-import pytest
 from datetime import UTC, datetime
 from unittest.mock import patch
+
+import pytest
 
 from portfolio.strategies.base import SharedData
 

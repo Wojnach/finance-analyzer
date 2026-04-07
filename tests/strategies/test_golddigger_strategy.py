@@ -1,8 +1,9 @@
 """Tests for GoldDigger strategy adapter."""
 import json
-import pytest
 from datetime import UTC, datetime
 from pathlib import Path
+
+import pytest
 
 from portfolio.strategies.base import SharedData
 
@@ -48,8 +49,9 @@ def test_golddigger_strategy_creation(gd_config):
 
 
 def test_golddigger_strategy_builds_snapshot(gd_config, shared_data):
-    from portfolio.strategies.golddigger_strategy import GoldDiggerStrategy
     from unittest.mock import patch
+
+    from portfolio.strategies.golddigger_strategy import GoldDiggerStrategy
 
     s = GoldDiggerStrategy(gd_config)
     with patch("portfolio.strategies.golddigger_strategy.fetch_usdsek", return_value=10.5):
@@ -120,8 +122,9 @@ def test_golddigger_enqueue_appends(gd_config, tmp_path):
 
 def test_golddigger_tick_no_gold_returns_none(gd_config):
     """If gold price is 0 everywhere, tick returns None."""
-    from portfolio.strategies.golddigger_strategy import GoldDiggerStrategy
     from unittest.mock import patch
+
+    from portfolio.strategies.golddigger_strategy import GoldDiggerStrategy
 
     shared = SharedData(
         underlying_prices={"XAU-USD": 0.0},

@@ -7,7 +7,7 @@ import pytest
 
 from portfolio.avanza.auth import AvanzaAuth
 from portfolio.avanza.client import AvanzaClient
-from portfolio.avanza.scanner import scan_instruments, format_scan_results
+from portfolio.avanza.scanner import format_scan_results, scan_instruments
 
 
 @pytest.fixture(autouse=True)

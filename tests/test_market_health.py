@@ -1,16 +1,12 @@
 """Tests for portfolio.market_health — distribution days, FTD, breadth score."""
 
-import json
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from portfolio.market_health import (
     STATE_CONFIRMED_UPTREND,
     STATE_CORRECTING,
     STATE_FTD_CONFIRMED,
     STATE_RALLY_ATTEMPT,
-    ZONE_CAUTION,
     ZONE_DANGER,
     _classify_zone,
     compute_breadth_score,
@@ -18,7 +14,6 @@ from portfolio.market_health import (
     detect_ftd_state,
     get_confidence_penalty,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

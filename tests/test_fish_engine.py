@@ -8,25 +8,16 @@ mode detection (auto-switch after 3 losses), position tracking, state persistenc
 from __future__ import annotations
 
 import sys
-import time
-from datetime import datetime, timezone, timedelta
-from unittest.mock import patch
-
-import pytest
+from datetime import UTC, datetime, timedelta
 
 sys.path.insert(0, ".")
 from data.fish_engine import (
-    FishEngine,
-    COOLDOWN_NORMAL,
     COOLDOWN_HIGH_CONV,
-    EXIT_TP_PCT,
-    EXIT_SL_PCT,
-    MIN_VOTES,
-    LEVERAGE,
+    COOLDOWN_NORMAL,
     LONG_OB,
     SHORT_OB,
+    FishEngine,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -206,7 +197,7 @@ class TestLayer2VoteWeight:
     def test_layer2_bullish_adds_two_votes(self):
         """A bullish Layer 2 should count as 2 LONG votes (enough alone)."""
         engine = make_engine()
-        ts = datetime.now(timezone.utc).isoformat()
+        ts = datetime.now(UTC).isoformat()
         state = make_state(
             layer2_outlook="bullish",
             layer2_conviction=0.7,
@@ -221,7 +212,7 @@ class TestLayer2VoteWeight:
 
     def test_layer2_bearish_adds_two_votes(self):
         engine = make_engine()
-        ts = datetime.now(timezone.utc).isoformat()
+        ts = datetime.now(UTC).isoformat()
         state = make_state(
             layer2_outlook="bearish",
             layer2_conviction=0.6,
@@ -236,7 +227,7 @@ class TestLayer2VoteWeight:
     def test_layer2_low_conviction_ignored(self):
         """Conviction < 0.4 should discard Layer 2 vote."""
         engine = make_engine()
-        ts = datetime.now(timezone.utc).isoformat()
+        ts = datetime.now(UTC).isoformat()
         state = make_state(
             layer2_outlook="bullish",
             layer2_conviction=0.3,  # below 0.4 threshold
@@ -250,7 +241,7 @@ class TestLayer2VoteWeight:
         state = make_state(
             layer2_outlook="",
             layer2_conviction=0.9,
-            layer2_ts=datetime.now(timezone.utc).isoformat(),
+            layer2_ts=datetime.now(UTC).isoformat(),
         )
         decision = engine.tick(state)
         assert decision["action"] == "HOLD"
@@ -267,7 +258,7 @@ class TestLayer2Staleness:
     def test_fresh_layer2_accepted(self):
         """Timestamp within 4h is accepted."""
         engine = make_engine()
-        ts = datetime.now(timezone.utc).isoformat()
+        ts = datetime.now(UTC).isoformat()
         state = make_state(
             layer2_outlook="bullish",
             layer2_conviction=0.8,
@@ -279,7 +270,7 @@ class TestLayer2Staleness:
     def test_stale_layer2_ignored(self):
         """Timestamp older than 4h should be ignored."""
         engine = make_engine()
-        old_ts = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+        old_ts = (datetime.now(UTC) - timedelta(hours=5)).isoformat()
         state = make_state(
             layer2_outlook="bullish",
             layer2_conviction=0.9,
@@ -291,7 +282,7 @@ class TestLayer2Staleness:
     def test_exactly_4h_old_accepted(self):
         """Timestamp exactly 4h old should still be accepted (>4 check)."""
         engine = make_engine()
-        ts = (datetime.now(timezone.utc) - timedelta(hours=4)).isoformat()
+        ts = (datetime.now(UTC) - timedelta(hours=4)).isoformat()
         state = make_state(
             layer2_outlook="bullish",
             layer2_conviction=0.8,

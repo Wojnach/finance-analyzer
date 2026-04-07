@@ -14,7 +14,7 @@ Covers:
 import json
 import time
 from unittest import mock
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -24,7 +24,6 @@ from portfolio.loop_contract import (
     ESCALATION_THRESHOLD,
     MAX_CYCLE_DURATION_S,
     METALS_MAX_CYCLE_DURATION_S,
-    MIN_SUCCESS_RATE,
     SELF_HEAL_COOLDOWN_S,
     BotCycleReport,
     CycleReport,
@@ -37,7 +36,6 @@ from portfolio.loop_contract import (
     verify_contract,
     verify_metals_contract,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -1,8 +1,6 @@
 """Tests for multi-agent Layer 2 orchestration."""
 from __future__ import annotations
 
-import pytest
-
 
 class TestBuildSpecialistPrompts:
     def test_technical_prompt_includes_signals(self):

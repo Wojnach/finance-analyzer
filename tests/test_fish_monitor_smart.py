@@ -1,7 +1,7 @@
 """Tests for portfolio.fish_monitor_smart — signal-aware position monitoring."""
 
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
