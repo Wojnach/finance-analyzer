@@ -1887,12 +1887,13 @@ def _run_fish_engine_tick():
     decision = _fish_engine.tick(state)
 
     if decision["action"] == "HOLD":
-        # Log HOLD decisions periodically (every 5th tick to avoid spam)
+        # Log HOLD decisions periodically (every 5th cycle to avoid spam)
         reason = decision.get("reason", "")
-        if _fish_engine and hasattr(_fish_engine, '_mc_history'):
-            tick_count = len(_fish_engine._mc_history)
-            if tick_count <= 3 or tick_count % 5 == 0:
-                log(f"[fish] HOLD: {reason}")
+        _fish_hold_counter = getattr(_fish_engine, '_hold_tick_count', 0) + 1
+        if _fish_engine:
+            _fish_engine._hold_tick_count = _fish_hold_counter
+        if _fish_hold_counter <= 3 or _fish_hold_counter % 5 == 0:
+            log(f"[fish] HOLD: {reason}")
         return
 
     # Execute decision
