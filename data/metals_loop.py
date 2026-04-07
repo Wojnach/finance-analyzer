@@ -3170,12 +3170,13 @@ def _handle_buy_fill(page, order, exec_price, price_data):
         vol = POSITIONS[pos_key]["units"]
         ob_id_str = POSITIONS[pos_key].get("ob_id", order.get("ob_id"))
         try:
-            from portfolio.avanza_session import place_trailing_stop as _place_hw_trail
-            result = _place_hw_trail(
-                orderbook_id=ob_id_str,
-                trail_percent=HARDWARE_TRAILING_PCT,
+            result = place_stop_loss(
+                page, ACCOUNT_ID, ob_id_str,
+                trigger_price=HARDWARE_TRAILING_PCT,
+                sell_price=0,
                 volume=vol,
-                account_id=ACCOUNT_ID,
+                trigger_type="FOLLOW_DOWNWARDS",
+                value_type="PERCENTAGE",
                 valid_days=HARDWARE_TRAILING_VALID_DAYS,
             )
             if result.get("status") == "SUCCESS":

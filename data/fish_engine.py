@@ -501,7 +501,10 @@ class FishEngine:
         # Fishing is contrarian — when RSI is extreme, disagreement is expected.
         # Selling an oversold LONG or overbought SHORT on metals disagree
         # is exactly the wrong move (learned from 2026-04-07 live test: -590 SEK).
-        rsi_in_extreme = (d == "LONG" and rsi < 30) or (d == "SHORT" and rsi > 70)
+        # Note: the per-direction RSI exits above (RSI>70 for LONG, RSI<30 for SHORT)
+        # handle same-direction extremes. This guard covers the contrarian case:
+        # LONG held in oversold (RSI<30) or SHORT held in overbought (RSI>70).
+        rsi_in_extreme = rsi < 30 or rsi > 70
         if self.metals_disagree_count >= EXIT_METALS_DISAGREE_COUNT and not rsi_in_extreme:
             return self._sell(
                 f"MD{self.metals_disagree_count}",
