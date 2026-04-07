@@ -1,43 +1,43 @@
-# Session Progress — After-Hours Research 2026-04-06
+# Session Progress — Microstructure Research Upgrade 2026-04-07
 
-**Date:** 2026-04-06 (Sunday)
-**Branch:** `research/daily-2026-04-06`
+**Date:** 2026-04-07
+**Branch:** `research/microstructure-upgrade`
+**Source:** Quantitative signals research paper on 1-3h metals forecasting
 
-## What Was Done
+## Completed
 
-### Phase 0: Daily Review
-- System health: 0 errors, 42 cycles, all 21 signal modules at 100%
-- No trades today (Sunday), both portfolios all-HOLD since Apr 2
-- Prices: XAU $4,654, XAG $72.87, BTC $69,670, ETH $2,147
+### Batch 1: Quick Wins (4 changes, all tests passing)
+1. **Oil fetch**: Added `get_oil_data()` to metals_cross_assets.py — CL=F via yfinance
+2. **GVZ active voter**: High GVZ = BUY gold/SELL silver, low = inverse
+3. **OFI z-score**: Rolling OFI distribution per asset, ±1.5σ thresholds
+4. **Multi-scale OFI**: Fast/medium/slow windows + flow acceleration metric
+5. **VPIN toxicity flag**: VPIN > 0.7 → high_toxicity for risk management
 
-### Phase 1: Market Research
-- **Iran/Hormuz crisis** is the dominant macro driver
-- Trump Tuesday deadline for Iran to reopen Strait of Hormuz
-- Oil $110/bbl with $18 geopolitical premium (Goldman estimate)
-- CPI on Friday April 10
-- BTC at $70K on ceasefire hopes, F&G at 13 extreme fear
+### Batch 2: Feature Preprocessing (4 changes)
+1. **feature_normalizer.py**: Rolling z-score normalization, 100-period window
+2. **Vol-scaled ROC-20**: z_roc = ROC/sigma_20, ±1.5σ thresholds
+3. **Seasonality integration**: mean_reversion + momentum_factors accept context
+4. **Signal registry update**: Both signals now requires_context=True
 
-### Phase 2: Quant Research
-- 8 research topics explored
-- Top findings: adaptive signal weighting, crisis regime detection, silver AI demand
-- TradingAgents v0.2.3 with Claude 4.6 support (deferred)
+### Batch 3: Accuracy & Correlation (3 changes)
+1. **Cost-aware accuracy**: signal_accuracy_cost_adjusted(), 5bps default
+2. **Return magnitude**: Already existed as signal_utility() — no changes needed
+3. **Dynamic correlation groups**: Signal vote correlation matrix, 30-day rolling
 
-### Phase 3: Signal Audit
-- 6 signals collapsed below 40% recent accuracy
-- Root cause: geopolitical crisis breaks fundamental signal assumptions
-- Best recent: ministral (68%), fibonacci (68.2%), mean_reversion (65.4%)
+## Test Status
+- Batch 1: 43 tests passing (all new + existing)
+- Batch 2+3 tests: being written by subagent
 
-### Phase 6: Implementation (Batch 1)
-1. **Crisis mode detection**: 0.6x penalty on trend signals, 1.3x boost on mean-reversion when 3+ macro signals broken
-2. **Group leader gate**: Lowered from 0.47 to 0.46 to catch sentiment borderline
-3. **Recency min samples**: Lowered from 50 to 30 for faster accuracy adaptation
-4. **5 new tests** for crisis mode behavior
+## Commits
+1. `154885d` — docs: plan
+2. `476b080` — feat: batch 1
+3. `4f5e0c7` — feat: batch 2
+4. `8e92878` — feat: batch 3
+5. `ebf7934` — test: batch 1 tests
 
-## Deliverables Written
-- `data/daily_research_review.json` — Phase 0 system review
-- `data/daily_research_macro.json` — Phase 1 macro research
-- `data/daily_research_quant.json` — Phase 2 quant findings
-- `data/daily_research_ticker_deep_dive.json` — Phase 2 XAG + BTC deep dives
-- `data/daily_research_signal_audit.json` — Phase 3 signal audit
-- `data/morning_briefing.json` — Phase 4 morning briefing
-- `docs/RESEARCH_PLAN.md` — Phase 5 implementation plan
+## Remaining
+- Batch 2+3 test commit
+- Full test suite run
+- Rebase against main (parallel changes may exist)
+- Codex adversarial review
+- Merge into main + push
