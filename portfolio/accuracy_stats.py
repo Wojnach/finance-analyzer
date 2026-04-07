@@ -83,7 +83,9 @@ def signal_accuracy(horizon="1d", since=None, entries=None):
     """
     if entries is None:
         entries = load_entries()
-    stats = {s: {"correct": 0, "total": 0} for s in SIGNAL_NAMES}
+    stats = {s: {"correct": 0, "total": 0,
+                 "correct_buy": 0, "total_buy": 0,
+                 "correct_sell": 0, "total_sell": 0} for s in SIGNAL_NAMES}
 
     for entry in entries:
         if since and entry.get("ts", "") < since:
@@ -107,6 +109,14 @@ def signal_accuracy(horizon="1d", since=None, entries=None):
                 if result_val is None:
                     continue  # neutral outcome — don't count
                 stats[sig_name]["total"] += 1
+                if vote == "BUY":
+                    stats[sig_name]["total_buy"] += 1
+                    if result_val:
+                        stats[sig_name]["correct_buy"] += 1
+                else:
+                    stats[sig_name]["total_sell"] += 1
+                    if result_val:
+                        stats[sig_name]["correct_sell"] += 1
                 if result_val:
                     stats[sig_name]["correct"] += 1
 
@@ -114,11 +124,19 @@ def signal_accuracy(horizon="1d", since=None, entries=None):
     for sig_name in SIGNAL_NAMES:
         s = stats[sig_name]
         acc = s["correct"] / s["total"] if s["total"] > 0 else 0.0
+        buy_acc = s["correct_buy"] / s["total_buy"] if s["total_buy"] > 0 else 0.0
+        sell_acc = s["correct_sell"] / s["total_sell"] if s["total_sell"] > 0 else 0.0
         result[sig_name] = {
             "correct": s["correct"],
             "total": s["total"],
             "accuracy": acc,
             "pct": round(acc * 100, 1),
+            "correct_buy": s["correct_buy"],
+            "total_buy": s["total_buy"],
+            "buy_accuracy": round(buy_acc, 4),
+            "correct_sell": s["correct_sell"],
+            "total_sell": s["total_sell"],
+            "sell_accuracy": round(sell_acc, 4),
         }
     return result
 
