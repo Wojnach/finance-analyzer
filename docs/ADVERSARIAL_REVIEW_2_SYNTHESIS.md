@@ -64,6 +64,30 @@ loop benefits from 30+ bug fixes and tuning iterations.
 parameter without validation. No allowlist prevents orders on pension account 2674244.
 **Impact:** A parameter error could route a live order to the pension account.
 
+#### N22. `check_drawdown()` is NEVER called — drawdown circuit breaker is dead code
+**Source:** Agent review (portfolio-risk), verified against codebase
+**Files:** `portfolio/risk_management.py:53`
+**What:** `check_drawdown()` is the max drawdown circuit breaker (20% threshold). Grep
+reveals zero production callers — only test files call it. The main loop, agent_invocation,
+and autonomous.py never check drawdown before allowing trades.
+**Impact:** A catastrophic loss sequence will never be stopped. Combined with N1 (no
+overtrading guards), the system has ZERO automated risk protection in production.
+
+#### N23. Sortino ratio uses wrong denominator — underestimated by ~1.58x
+**Source:** Agent review (portfolio-risk)
+**Files:** `portfolio/equity_curve.py:246`
+**What:** Sortino downside deviation divides by `len(downside_returns)` instead of
+`len(all_returns)`. The standard formula includes zero contributions from positive days
+in the total count. With 60% positive days, error factor is sqrt(1/0.4) = 1.58x.
+**Impact:** Risk-adjusted performance metrics are systematically wrong.
+
+#### N24. Circuit breaker HALF_OPEN can get permanently stuck
+**Source:** Agent review (portfolio-risk)
+**Files:** `portfolio/circuit_breaker.py:83-93`
+**What:** If a HALF_OPEN probe crashes before recording success/failure, the
+`_half_open_probe_sent` flag stays True forever. All subsequent requests are blocked.
+**Impact:** A data source (Binance, Alpaca) could become permanently blocked until restart.
+
 ### TIER 2: HIGH (Fix This Sprint)
 
 #### N5. `check_drawdown` scans full history file every call — O(n) grows unbounded
@@ -196,14 +220,37 @@ Multiple processes (main loop, metals loop, outcome tracker) write to overlappin
 
 ## Agent Review Results
 
-8 parallel adversarial review agents were launched (one per subsystem), each performing
-deep code-level analysis. Agent results will be appended in a follow-up commit when
-they complete. The independent review above provides the primary findings.
+8 parallel adversarial review agents were launched (one per subsystem). Results are
+appended as they complete.
 
-**Agent subsystem assignments:**
+### Agent 3: portfolio-risk (COMPLETED — 20 findings)
+
+**NEW CRITICAL finding not in independent review:**
+- **`check_drawdown()` is NEVER called in production** — the 20% max drawdown circuit
+  breaker exists as code but is dead. No production path invokes it. The system will
+  trade through a 50%+ drawdown with no protection. (risk_management.py:53)
+
+**NEW HIGH findings:**
+- **Sortino ratio denominator bug** — uses `len(downside_returns)` instead of
+  `len(all_returns)`, systematically underestimating Sortino by ~1.58x. (equity_curve.py:246)
+- **Circuit breaker HALF_OPEN stuck state** — if a probe request crashes before recording
+  its outcome, the breaker stays in HALF_OPEN forever, permanently blocking the data
+  source. (circuit_breaker.py:83-93)
+- **ATR proximity check uses magic string "CHECK"** — works by accident but a refactor
+  could silently break held-position monitoring. (risk_management.py:769)
+- **Monte Carlo volatility estimation assumes fixed candle frequency** — if ATR is from
+  4h candles, volatility is overestimated by 2x. (monte_carlo.py:39-57)
+
+**Converged with independent review (confirmed):**
+- record_trade() zero callers (N1/C4)
+- check_drawdown O(n) scan (N5)
+- Fallback to entry price (N6)
+- Concentration check cash-based (N12 in independent)
+- Trade guards no file locking (N10 partial)
+
+**Agent subsystem assignments (remaining in progress):**
 1. `review-signals-core` — signal_engine.py + 11 supporting files
 2. `review-orchestration` — main.py + 8 supporting files
-3. `review-portfolio-risk` — risk_management.py + 13 supporting files
 4. `review-metals-core` — metals_loop.py + 14 supporting files
 5. `review-avanza-api` — avanza_session.py + 6 supporting files
 6. `review-signals-modules` — 23 signal module files
