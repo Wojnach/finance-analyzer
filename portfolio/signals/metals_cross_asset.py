@@ -52,7 +52,8 @@ def _get_cross_asset_context(ticker: str) -> dict | None:
     spy = data.get("spy")
     result["spy_change_1d"] = spy["change_1d_pct"] if spy else 0.0
 
-    result["oil_change_5d"] = 0.0
+    oil = data.get("oil")
+    result["oil_change_5d"] = oil["change_5d_pct"] if oil else 0.0
 
     return result
 
@@ -74,7 +75,8 @@ def compute_metals_cross_asset_signal(
     if ctx is None:
         return empty
 
-    if macro and isinstance(macro, dict):
+    # Oil data now fetched via get_all_cross_asset_data(); macro dict as fallback
+    if ctx["oil_change_5d"] == 0.0 and macro and isinstance(macro, dict):
         oil_ctx = macro.get("oil", {})
         if isinstance(oil_ctx, dict) and "change_5d_pct" in oil_ctx:
             ctx["oil_change_5d"] = oil_ctx["change_5d_pct"]
@@ -94,13 +96,13 @@ def compute_metals_cross_asset_signal(
     votes.append(sub_signals["copper"])
 
     # Sub 2: GVZ (Gold Volatility Index)
+    # High GVZ = fear/uncertainty → safe haven demand (BUY gold, SELL silver)
+    # Low GVZ = complacency → no safe haven premium (SELL gold, BUY silver)
     gvz = ctx["gvz_zscore"]
     if gvz > _GVZ_ZSCORE_HIGH:
-        # High implied vol -- breakout territory, caution
-        sub_signals["gvz"] = "HOLD"
+        sub_signals["gvz"] = "BUY" if not is_silver else "SELL"
     elif gvz < _GVZ_ZSCORE_LOW:
-        # Low implied vol -- calm market, trend-following favorable
-        sub_signals["gvz"] = "HOLD"
+        sub_signals["gvz"] = "SELL" if not is_silver else "BUY"
     else:
         sub_signals["gvz"] = "HOLD"
     votes.append(sub_signals["gvz"])

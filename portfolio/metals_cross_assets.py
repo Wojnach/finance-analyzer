@@ -130,6 +130,24 @@ def get_gold_silver_ratio() -> dict | None:
 
 
 @_nocache
+def get_oil_data() -> dict | None:
+    """WTI Crude Oil futures (CL=F) price and momentum."""
+    def _fetch():
+        df = _yf_download("CL=F", period="3mo", interval="1d")
+        if df.empty or "Close" not in df.columns:
+            return None
+        close = df["Close"].dropna()
+        if len(close) < 10:
+            return None
+        return {
+            "price": float(close.iloc[-1]),
+            "change_1d_pct": _pct_change(close, 1),
+            "change_5d_pct": _pct_change(close, 5),
+        }
+    return _cached("cross_oil", _CROSS_TTL, _fetch)
+
+
+@_nocache
 def get_spy_return() -> dict | None:
     """S&P 500 ETF (SPY) recent returns for risk-on/risk-off."""
     def _fetch():
@@ -154,4 +172,5 @@ def get_all_cross_asset_data() -> dict:
         "gvz": get_gvz(),
         "gold_silver_ratio": get_gold_silver_ratio(),
         "spy": get_spy_return(),
+        "oil": get_oil_data(),
     }

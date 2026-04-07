@@ -26,7 +26,9 @@ _APPLICABLE_TICKERS = {"XAU-USD", "XAG-USD", "BTC-USD", "ETH-USD"}
 _DEPTH_IMBALANCE_THRESHOLD = 0.5
 _TRADE_IMBALANCE_THRESHOLD = 0.3
 _VPIN_HIGH = 0.6
-_OFI_THRESHOLD = 5.0
+_VPIN_TOXICITY = 0.7  # threshold for flagging vol expansion risk
+_OFI_ZSCORE_THRESHOLD = 1.5  # z-score threshold (was absolute 5.0)
+_OFI_THRESHOLD = 5.0  # fallback when z-score unavailable
 _SPREAD_ZSCORE_DANGER = 2.0
 _TRADE_THROUGH_THRESHOLD = 2
 
@@ -58,15 +60,19 @@ def _get_microstructure_context(ticker: str) -> dict | None:
     if tfi is None:
         return None
 
-    # Read accumulated OFI and spread z-score from microstructure state
+    # Read accumulated OFI, OFI z-score, multiscale, and spread z-score
     ofi = 0.0
+    ofi_zscore = 0.0
     sz = 0.0
+    flow_acceleration = 0.0
     try:
         from portfolio.microstructure_state import load_persisted_state
         ms_state = load_persisted_state(ticker)
         if ms_state:
             ofi = ms_state.get("ofi", 0.0)
+            ofi_zscore = ms_state.get("ofi_zscore", 0.0)
             sz = ms_state.get("spread_zscore", 0.0)
+            flow_acceleration = ms_state.get("flow_acceleration", 0.0)
     except ImportError:
         pass
 
@@ -75,9 +81,11 @@ def _get_microstructure_context(ticker: str) -> dict | None:
         "trade_imbalance_ratio": tfi["imbalance_ratio"],
         "vpin": vpin if vpin is not None else 0.0,
         "ofi": ofi,
+        "ofi_zscore": ofi_zscore,
         "spread_zscore": sz,
         "spread_bps": depth.get("spread_bps", 0.0),
         "trade_throughs": tt,
+        "flow_acceleration": flow_acceleration,
     }
 
 
@@ -134,14 +142,23 @@ def compute_orderbook_flow_signal(
         sub_signals["vpin"] = "HOLD"
     votes.append(sub_signals["vpin"])
 
-    # Sub 4: OFI
+    # Sub 4: OFI — prefer z-score (asset-normalized), fallback to absolute
+    ofi_z = ctx.get("ofi_zscore", 0.0)
     ofi = ctx["ofi"]
-    if ofi > _OFI_THRESHOLD:
-        sub_signals["ofi"] = "BUY"
-    elif ofi < -_OFI_THRESHOLD:
-        sub_signals["ofi"] = "SELL"
-    else:
-        sub_signals["ofi"] = "HOLD"
+    if abs(ofi_z) > 0.01:  # z-score available (non-zero)
+        if ofi_z > _OFI_ZSCORE_THRESHOLD:
+            sub_signals["ofi"] = "BUY"
+        elif ofi_z < -_OFI_ZSCORE_THRESHOLD:
+            sub_signals["ofi"] = "SELL"
+        else:
+            sub_signals["ofi"] = "HOLD"
+    else:  # cold start fallback
+        if ofi > _OFI_THRESHOLD:
+            sub_signals["ofi"] = "BUY"
+        elif ofi < -_OFI_THRESHOLD:
+            sub_signals["ofi"] = "SELL"
+        else:
+            sub_signals["ofi"] = "HOLD"
     votes.append(sub_signals["ofi"])
 
     # Sub 5: Spread Health — always abstains (HOLD) because spread width
@@ -168,6 +185,10 @@ def compute_orderbook_flow_signal(
     if sz > _SPREAD_ZSCORE_DANGER:
         confidence *= 0.3
 
+    # VPIN toxicity flag: VPIN > 0.7 predicts volatility expansion
+    # (independent of direction — used by risk management for stop widening)
+    high_toxicity = vpin > _VPIN_TOXICITY
+
     return {
         "action": action,
         "confidence": round(confidence, 4),
@@ -176,7 +197,10 @@ def compute_orderbook_flow_signal(
             "depth_imbalance": round(di, 4),
             "trade_imbalance_ratio": round(tir, 4),
             "vpin": round(vpin, 4),
+            "high_toxicity": high_toxicity,
             "ofi": round(ofi, 4),
+            "ofi_zscore": round(ctx.get("ofi_zscore", 0.0), 4),
+            "flow_acceleration": round(ctx.get("flow_acceleration", 0.0), 4),
             "spread_zscore": round(sz, 4),
             "spread_bps": round(ctx.get("spread_bps", 0.0), 2),
             "buy_throughs": buy_tt,

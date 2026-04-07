@@ -23,10 +23,18 @@ _STATE_FILE = Path("data/microstructure_state.json")
 _MAX_SNAPSHOTS = 60  # ~30-60 min at 30-60s intervals
 _MIN_SNAPSHOTS_FOR_OFI = 3
 _MIN_SPREADS_FOR_ZSCORE = 10
+_MIN_OFI_HISTORY_FOR_ZSCORE = 10
+_MAX_OFI_HISTORY = 120  # ~2h of OFI readings for z-score normalization
+
+# Multi-scale OFI windows (snapshot counts)
+_OFI_WINDOW_FAST = 5   # ~5 min
+_OFI_WINDOW_MEDIUM = 15  # ~15 min
+# slow = all snapshots (full buffer)
 
 # In-memory ring buffers per ticker
 _snapshot_buffers: dict[str, deque] = {}
 _spread_buffers: dict[str, deque] = {}
+_ofi_history: dict[str, deque] = {}  # rolling OFI values for z-score
 
 
 def _ensure_buffer(ticker: str) -> None:
@@ -35,6 +43,8 @@ def _ensure_buffer(ticker: str) -> None:
         _snapshot_buffers[ticker] = deque(maxlen=_MAX_SNAPSHOTS)
     if ticker not in _spread_buffers:
         _spread_buffers[ticker] = deque(maxlen=_MAX_SNAPSHOTS)
+    if ticker not in _ofi_history:
+        _ofi_history[ticker] = deque(maxlen=_MAX_OFI_HISTORY)
 
 
 def accumulate_snapshot(ticker: str, depth: dict) -> None:
@@ -69,7 +79,57 @@ def get_rolling_ofi(ticker: str) -> float:
     snapshots = list(_snapshot_buffers[ticker])
     if len(snapshots) < _MIN_SNAPSHOTS_FOR_OFI:
         return 0.0
-    return compute_ofi(snapshots)
+    ofi_val = compute_ofi(snapshots)
+    # Track OFI history for z-score normalization
+    _ofi_history[ticker].append(ofi_val)
+    return ofi_val
+
+
+def get_ofi_zscore(ticker: str) -> float:
+    """Z-score of current OFI relative to its own rolling distribution.
+
+    Normalizes OFI per asset so gold and BTC use comparable thresholds.
+    Returns 0.0 if insufficient history.
+    """
+    _ensure_buffer(ticker)
+    history = list(_ofi_history[ticker])
+    if len(history) < _MIN_OFI_HISTORY_FOR_ZSCORE:
+        return 0.0
+    import numpy as np
+    arr = np.array(history, dtype=float)
+    mean = arr.mean()
+    std = arr.std()
+    if std < 1e-12:
+        return 0.0
+    return float((arr[-1] - mean) / std)
+
+
+def get_multiscale_ofi(ticker: str) -> dict:
+    """Compute OFI at 3 time scales: fast (~5min), medium (~15min), slow (full).
+
+    Returns dict with ofi_fast, ofi_medium, ofi_slow, and flow_acceleration
+    (fast z-score minus slow z-score — positive = accelerating buying).
+    """
+    _ensure_buffer(ticker)
+    snapshots = list(_snapshot_buffers[ticker])
+    n = len(snapshots)
+
+    ofi_slow = compute_ofi(snapshots) if n >= _MIN_SNAPSHOTS_FOR_OFI else 0.0
+    ofi_medium = compute_ofi(snapshots[-_OFI_WINDOW_MEDIUM:]) if n >= _OFI_WINDOW_MEDIUM else ofi_slow
+    ofi_fast = compute_ofi(snapshots[-_OFI_WINDOW_FAST:]) if n >= _OFI_WINDOW_FAST else ofi_medium
+
+    # Flow acceleration: compare fast to slow (normalized by snapshot counts)
+    # Normalize per-snapshot to make windows comparable
+    fast_per_snap = ofi_fast / max(_OFI_WINDOW_FAST - 1, 1)
+    slow_per_snap = ofi_slow / max(n - 1, 1) if n > 1 else 0.0
+    flow_acceleration = fast_per_snap - slow_per_snap
+
+    return {
+        "ofi_fast": round(ofi_fast, 4),
+        "ofi_medium": round(ofi_medium, 4),
+        "ofi_slow": round(ofi_slow, 4),
+        "flow_acceleration": round(flow_acceleration, 4),
+    }
 
 
 def get_spread_zscore(ticker: str) -> float | None:
@@ -88,13 +148,20 @@ def get_spread_zscore(ticker: str) -> float | None:
 def get_microstructure_state(ticker: str) -> dict:
     """Get current accumulated microstructure state for a ticker.
 
-    Returns dict with ofi and spread_zscore ready for the signal module.
+    Returns dict with ofi, ofi_zscore, multiscale OFI, and spread_zscore.
     """
     ofi = get_rolling_ofi(ticker)
+    ofi_z = get_ofi_zscore(ticker)
     sz = get_spread_zscore(ticker)
+    ms_ofi = get_multiscale_ofi(ticker)
     _ensure_buffer(ticker)
     return {
         "ofi": ofi,
+        "ofi_zscore": ofi_z,
+        "ofi_fast": ms_ofi["ofi_fast"],
+        "ofi_medium": ms_ofi["ofi_medium"],
+        "ofi_slow": ms_ofi["ofi_slow"],
+        "flow_acceleration": ms_ofi["flow_acceleration"],
         "spread_zscore": sz if sz is not None else 0.0,
         "snapshot_count": len(_snapshot_buffers[ticker]),
         "spread_count": len(_spread_buffers[ticker]),
