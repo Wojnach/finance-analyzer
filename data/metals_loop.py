@@ -1305,17 +1305,29 @@ if CATALOG_AVAILABLE:
 # Build set of all fishing-related ob_ids from the fishing warrant catalog.
 # Positions matching these ob_ids are tagged _fishing=True by detect_holdings.
 FISHING_OB_IDS: set[str] = set()
+_OVERNIGHT_OB_IDS: set[str] = set()
 try:
     from fin_fish_config import WARRANT_CATALOG as _FISH_CATALOG
+    try:
+        from fin_fish_config import OVERNIGHT_INSTRUMENTS as _OVERNIGHT_MAP
+        for _ov in _OVERNIGHT_MAP.values():
+            _ow = _FISH_CATALOG.get(_ov, {})
+            _oob = str(_ow.get("ob_id", ""))
+            if _oob:
+                _OVERNIGHT_OB_IDS.add(_oob)
+    except ImportError:
+        pass
     for _wv in _FISH_CATALOG.values():
         _ob = str(_wv.get("ob_id", ""))
-        if _ob:
+        if _ob and _ob not in _OVERNIGHT_OB_IDS:
             FISHING_OB_IDS.add(_ob)
 except ImportError:
-    pass
+    print("[WARN] fin_fish_config not found — FISHING_OB_IDS empty, fishing EOD sell disabled",
+          flush=True)
 
 FISHING_TRAIL_START_PCT = 0.0       # trail immediately (no gain threshold)
 FISHING_EOD_SELL_MINUTE_CET = (21, 50)  # sell fishing positions at 21:50 CET
+_eod_fishing_sold_today: str = ""   # date string guard — prevent repeated EOD sells
 
 
 def _eod_sell_fishing_positions(page):
@@ -1326,9 +1338,12 @@ def _eod_sell_fishing_positions(page):
     """
     sold = []
     for key, pos in POSITIONS.items():
-        if not pos.get("active") or not pos.get("_fishing"):
+        if not pos.get("active"):
             continue
         ob_id = pos.get("ob_id", "")
+        # Check _fishing flag OR ob_id in FISHING_OB_IDS (handles restart race)
+        if not pos.get("_fishing") and ob_id not in FISHING_OB_IDS:
+            continue
         try:
             price_data = fetch_price(page, ob_id, pos.get("api_type", "certificate"))
             bid = (price_data or {}).get("bid", 0)
@@ -5038,15 +5053,21 @@ Positions: {pos_summary}{prob_summary}""")
                     _report.holdings_reconciled = True
 
                 # --- FISHING EOD SELL (21:50 CET) ---
-                _h_cet_now = cet_hour()
+                global _eod_fishing_sold_today
                 _eod_h, _eod_m = FISHING_EOD_SELL_MINUTE_CET
-                if int(_h_cet_now) == _eod_h and (_h_cet_now % 1) * 60 >= _eod_m:
+                _h_raw, _, _ = get_cet_time()
+                _h_int = int(_h_raw)
+                _m_int = round((_h_raw % 1) * 60)
+                _today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+                if (_h_int == _eod_h and _m_int >= _eod_m
+                        and _eod_fishing_sold_today != _today_str):
                     _has_fishing = any(
-                        pos.get("active") and pos.get("_fishing")
+                        pos.get("active") and (pos.get("_fishing") or pos.get("ob_id", "") in FISHING_OB_IDS)
                         for pos in POSITIONS.values()
                     )
                     if _has_fishing:
                         _eod_sell_fishing_positions(page)
+                        _eod_fishing_sold_today = _today_str
 
                 if not is_market_hours():
                     # Update strategy shared data even outside market hours
