@@ -1,99 +1,60 @@
-# Plan: Market Holiday Awareness
+# Fix: Fishing Fill Probability Underestimation
 
-## Date: 2026-04-06
+## Date: 2026-04-07
 
 ## Problem
 
-`market_timing.py` only checks `weekday >= 5` for weekends. On public holidays
-(Easter Monday, Good Friday, Christmas, etc.), the system treats them as normal
-trading days:
+`fin_fish.py:_compute_vol_and_drift` feeds daily-range-derived volatility into
+`volatility_from_atr()` which annualizes assuming hourly ATR candles. This
+underestimates annual vol by 3.7x (sqrt(14)), making fill probabilities
+~10x too low. Result: only 1 fishing level passes the 5% min-fill filter
+instead of 5+, making the fishing tool nearly useless.
 
-- Main loop (`portfolio/main.py`) runs all 16 US stock tickers during "market hours"
-- Metals loop (`data/metals_loop.py`) treats Avanza as open, tries to place orders
-- Layer 2 agent can be invoked for stock triggers (wasting Claude CLI quota)
-- GPU signals run for stocks that can't trade
-- API quota wasted (Alpaca, Alpha Vantage, NewsAPI)
+## Root Cause
 
-## Affected Functions
+`_compute_vol_and_drift` computes `realized_atr_pct = avg_daily_range / 1.5`
+(a daily sigma estimate) then calls `volatility_from_atr(realized_atr_pct)`
+which does `atr_frac * sqrt(252/14)`. For a daily input, the correct
+annualization is `daily_sigma * sqrt(252)`, not `daily_sigma * sqrt(252/14)`.
 
-| Function | File | Issue |
-|----------|------|-------|
-| `is_us_stock_market_open()` | `portfolio/market_timing.py` | No holiday check |
-| `_is_agent_window()` | `portfolio/market_timing.py` | No holiday check |
-| `get_market_state()` | `portfolio/market_timing.py` | No holiday check |
-| `should_skip_gpu()` | `portfolio/market_timing.py` | Delegates to above |
-| `is_market_hours()` | `data/metals_loop.py` | No holiday check (Avanza) |
-| `is_avanza_open()` | `data/metals_loop.py` | Delegates to above |
+The `/14` factor is correct for the hourly ATR path (signal["atr_pct"]),
+but wrong for the daily range path.
 
-## Design
+## Fix Plan (2 files changed, 1 test file added)
 
-### 1. US Market Holidays (`is_us_market_holiday`)
+### Fix 1: Correct vol in `_compute_vol_and_drift` (portfolio/fin_fish.py:326-365)
 
-NYSE has 10 observed holidays. Some are fixed-date, some are floating (nth weekday
-of month). Easter (Good Friday) requires an Easter algorithm.
+- Keep the hourly ATR path through `volatility_from_atr()` unchanged
+- Add separate daily-range annualization: `daily_sigma * sqrt(252)`
+- Take the max of both (existing logic, just with correct math)
 
-Approach: compute holidays for a given year dynamically. No hardcoded date lists
-that go stale. Use the anonymous Gregorian Easter algorithm for Good Friday.
+### Fix 2: Best-warrant-per-level in report (portfolio/fin_fish.py:1026-1083)
 
-Holidays:
-- New Year's Day (Jan 1, observed)
-- MLK Day (3rd Monday Jan)
-- Presidents' Day (3rd Monday Feb)
-- Good Friday (Friday before Easter)
-- Memorial Day (last Monday May)
-- Juneteenth (Jun 19, observed)
-- Independence Day (Jul 4, observed)
-- Labor Day (1st Monday Sep)
-- Thanksgiving (4th Thursday Nov)
-- Christmas (Dec 25, observed)
+- In `format_report`, after getting `warrant_results`, deduplicate by level
+  (keep highest-EV warrant per unique price level). Shows different PRICE
+  LEVELS in the table instead of repeating one level across 6 instruments.
 
-"Observed" rule: if holiday falls on Saturday, observed Friday. If Sunday, observed Monday.
+### Fix 3: Dynamic leverage computation (portfolio/fin_fish.py:691-822)
 
-### 2. Swedish Market Holidays (`is_swedish_market_holiday`)
+- In `evaluate_warrants`, compute live leverage from spot and barrier
+  for MINI/TURBO warrants. Daily certs keep config leverage.
 
-Avanza/Nasdaq Stockholm holidays (subset that also closes Avanza warrants):
-- New Year's Day (Jan 1)
-- Epiphany (Jan 6)
-- Good Friday
-- Easter Monday
-- May Day (May 1)
-- Ascension Day (39 days after Easter)
-- National Day (Jun 6)
-- Midsummer Eve (Friday before Midsummer Day, which is Sat between Jun 20-26)
-- Christmas Eve (Dec 24)
-- Christmas Day (Dec 25)
-- Boxing Day (Dec 26)
-- New Year's Eve (Dec 31)
+### Non-goals
 
-### 3. Integration
+- NOT touching `volatility_from_atr()` — 4 other callers depend on it
+- NOT touching `fill_probability_buy()` — GBM math is correct
+- NOT adding instruments to catalog — separate task
 
-- Add `is_us_market_holiday(dt=None)` and `is_swedish_market_holiday(dt=None)` to
-  `portfolio/market_timing.py`
-- Wire into `is_us_stock_market_open()`: return False if holiday
-- Wire into `_is_agent_window()`: return False if US holiday
-- Wire into `get_market_state()`: treat US holidays like weekends for stocks
-- Add `is_swedish_market_holiday` import to `data/metals_loop.py`, wire into `is_market_hours()`
+### Tests
 
-### 4. What Could Break
+- `tests/test_fin_fish_vol.py`:
+  - `_compute_vol_and_drift` returns correct annual vol from daily ranges
+  - `compute_fishing_levels_bull` generates 5+ levels passing 5% filter
+  - `evaluate_warrants` returns distinct levels
+  - Dynamic leverage matches `spot / (spot - barrier)`
 
-- False positive holiday detection -> stocks skipped on normal trading day. Mitigated
-  by thorough testing with known 2026 calendar dates.
-- Easter algorithm bug -> wrong Good Friday/Easter Monday. Mitigated by testing
-  multiple years (2024-2030).
-- Metals/crypto should NOT be affected by holidays (Binance trades 24/7). Only
-  Avanza warrant trading and US stock processing should be gated.
+### Risk
 
-## Execution Order
-
-1. Write tests first (TDD) -- test known 2026 holidays
-2. Implement `_easter_sunday()`, `us_market_holidays()`, `swedish_market_holidays()`
-3. Wire into existing functions
-4. Update `metals_loop.py` `is_market_hours()`
-5. Run full test suite
-6. Merge and push
-
-## Files Modified
-
-- `portfolio/market_timing.py` -- add holiday functions, wire into existing
-- `data/metals_loop.py` -- wire Swedish holidays into `is_market_hours()`
-- `tests/test_market_timing.py` -- add holiday test cases
+- Other callers of fin_fish get higher fill probs -> more levels shown.
+  Correct behavior. FISHING_ENABLED=False is the safety gate.
+- `monte_carlo.py:volatility_from_atr` NOT changed -> zero blast radius.
