@@ -142,3 +142,89 @@ class TestSignalAccuracyCostAdjusted:
             assert stats["total"] == 0
             assert stats["correct"] == 0
             assert stats["accuracy"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# 3b. Directional accuracy tracking
+# ---------------------------------------------------------------------------
+
+class TestDirectionalAccuracy:
+
+    def test_buy_accuracy_tracked_separately(self, monkeypatch):
+        """BUY votes with positive change should increment correct_buy."""
+        from portfolio.accuracy_stats import signal_accuracy
+
+        entries = [_make_entry("BTC-USD", "rsi", "BUY", 1.0)]
+        monkeypatch.setattr(acc_mod, "load_entries", lambda: entries)
+
+        result = signal_accuracy(horizon="1d", entries=entries)
+        rsi = result["rsi"]
+        assert rsi["total_buy"] == 1
+        assert rsi["correct_buy"] == 1
+        assert rsi["buy_accuracy"] == 1.0
+        assert rsi["total_sell"] == 0
+        assert rsi["correct_sell"] == 0
+
+    def test_sell_accuracy_tracked_separately(self, monkeypatch):
+        """SELL votes with negative change should increment correct_sell."""
+        from portfolio.accuracy_stats import signal_accuracy
+
+        entries = [_make_entry("BTC-USD", "rsi", "SELL", -2.0)]
+        monkeypatch.setattr(acc_mod, "load_entries", lambda: entries)
+
+        result = signal_accuracy(horizon="1d", entries=entries)
+        rsi = result["rsi"]
+        assert rsi["total_sell"] == 1
+        assert rsi["correct_sell"] == 1
+        assert rsi["sell_accuracy"] == 1.0
+        assert rsi["total_buy"] == 0
+
+    def test_wrong_buy_increments_total_but_not_correct(self, monkeypatch):
+        """BUY vote with negative change should be total_buy=1, correct_buy=0."""
+        from portfolio.accuracy_stats import signal_accuracy
+
+        entries = [_make_entry("BTC-USD", "rsi", "BUY", -3.0)]
+        monkeypatch.setattr(acc_mod, "load_entries", lambda: entries)
+
+        result = signal_accuracy(horizon="1d", entries=entries)
+        rsi = result["rsi"]
+        assert rsi["total_buy"] == 1
+        assert rsi["correct_buy"] == 0
+        assert rsi["buy_accuracy"] == 0.0
+        assert rsi["total"] == 1
+        assert rsi["correct"] == 0
+
+    def test_mixed_buy_sell_accuracy(self, monkeypatch):
+        """Multiple votes in different directions should be tracked correctly."""
+        from portfolio.accuracy_stats import signal_accuracy
+
+        entries = [
+            _make_entry("BTC-USD", "rsi", "BUY", 1.0),   # correct BUY
+            _make_entry("BTC-USD", "rsi", "BUY", -1.0),  # wrong BUY
+            _make_entry("BTC-USD", "rsi", "SELL", -1.0),  # correct SELL
+        ]
+        monkeypatch.setattr(acc_mod, "load_entries", lambda: entries)
+
+        result = signal_accuracy(horizon="1d", entries=entries)
+        rsi = result["rsi"]
+        assert rsi["total_buy"] == 2
+        assert rsi["correct_buy"] == 1
+        assert rsi["buy_accuracy"] == 0.5
+        assert rsi["total_sell"] == 1
+        assert rsi["correct_sell"] == 1
+        assert rsi["sell_accuracy"] == 1.0
+        assert rsi["total"] == 3
+        assert rsi["correct"] == 2
+
+    def test_hold_not_counted_in_directional(self, monkeypatch):
+        """HOLD votes should not appear in buy or sell counts."""
+        from portfolio.accuracy_stats import signal_accuracy
+
+        entries = [_make_entry("BTC-USD", "rsi", "HOLD", 5.0)]
+        monkeypatch.setattr(acc_mod, "load_entries", lambda: entries)
+
+        result = signal_accuracy(horizon="1d", entries=entries)
+        rsi = result["rsi"]
+        assert rsi["total_buy"] == 0
+        assert rsi["total_sell"] == 0
+        assert rsi["total"] == 0
