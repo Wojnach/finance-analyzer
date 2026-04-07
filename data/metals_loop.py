@@ -557,7 +557,7 @@ _last_news_fetch_ts = 0.0         # timestamp of last metals news fetch
 NEWS_FETCH_INTERVAL = 1800        # fetch news every 30 min (1800s)
 
 # --- FISH ENGINE (integrated intraday fishing) ---
-FISH_ENGINE_ENABLED = False       # disabled by default — enable manually per session
+FISH_ENGINE_ENABLED = True       # disabled by default — enable manually per session
 _fish_engine = None               # FishEngine instance (lazy init)
 _loop_page = None                 # Playwright page ref, set by main loop at startup
 PROB_REPORT_INTERVAL = 5          # compute probability report every N checks (~2.5 min)
@@ -1931,7 +1931,8 @@ def _fish_engine_execute_buy(decision, price):
             log(f"[fish] SKIP BUY: no price data for {ob_id}")
             return
         ask = float(price_data.get("ask", price_data.get("sell", 0)) or 0)
-        bp = float(fetch_account_cash(_loop_page, ACCOUNT_ID) or 0)
+        acct = fetch_account_cash(_loop_page, ACCOUNT_ID)
+        bp = float(acct.get("buying_power", 0)) if isinstance(acct, dict) else float(acct or 0)
 
         if ask <= 0 or bp < 1000:
             log(f"[fish] SKIP BUY: ask={ask}, bp={bp:.0f} (need >1000)")
