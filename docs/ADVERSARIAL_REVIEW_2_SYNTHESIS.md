@@ -137,6 +137,35 @@ without any locking. Concurrent calls clobber each other.
 means CONFIRM could execute the wrong one.
 **Impact:** Wrong order confirmed with real money.
 
+#### N28. `metals_avanza_helpers.place_order()` has ZERO input validation
+**Source:** Agent review (avanza-api), finding F1
+**Files:** `data/metals_avanza_helpers.py:86-133`
+**What:** Zero validation on price, volume, or side. Accepts any values and sends directly
+to Avanza's live order API. The metals loop uses this unvalidated function via
+`avanza_control.place_order()`. Compare with `avanza_session._place_order()` which
+validates `volume >= 1` and `price > 0`.
+**Impact:** Malformed order sent to live brokerage. Worst case: Avanza interprets
+unexpectedly, creating unintended positions with real money.
+
+#### N29. `place_stop_loss()` has no 3% bid guard at API layer
+**Source:** Agent review (avanza-api), finding F2
+**Files:** `data/metals_avanza_helpers.py:136-194`
+**What:** The CLAUDE.md rule "NEVER place stop within 3% of bid" is only enforced in
+golddigger. The underlying `place_stop_loss()` function has no guard. Any caller
+(fin_snipe_manager, metals_loop) can place stop-losses that immediately trigger on
+normal market noise.
+**Impact:** Unnecessary forced sale at loss on volatile silver warrants.
+
+#### N30. Playwright context not thread-safe — CSRF corruption risk
+**Source:** Agent review (avanza-api), finding F5
+**Files:** `portfolio/avanza_session.py:33-37, 180-256`
+**What:** `_pw_lock` only guards Playwright context creation, not API calls. `api_get()`,
+`api_post()`, `api_delete()` all use shared context without locking. Playwright contexts
+are explicitly not thread-safe per documentation.
+**Impact:** Concurrent API calls can corrupt CSRF tokens, mix up responses, or cause one
+request to see another's response. Buy order response could be interpreted as stop-loss
+response.
+
 #### N25. SQLite accuracy queries skip neutral outcome filter — accuracy inflation
 **Source:** Agent review (signals-core), finding B6
 **Files:** `portfolio/signal_db.py:271,302,330,370`
@@ -298,10 +327,38 @@ appended as they complete.
 - Accuracy→gating feedback loop (D3 ≈ C10)
 - Signal weight optimizer dead code (A3 ≈ C6)
 
+### Agent 5: avanza-api (COMPLETED — 20 findings, 2 CRITICAL)
+
+**NEW CRITICAL findings — highest financial risk in the review:**
+- **`metals_avanza_helpers.place_order()` has ZERO validation** — price, volume, side
+  all unvalidated before hitting Avanza's live API. Contrast with `avanza_session._place_order()`
+  which validates both. The metals loop uses this unvalidated path. (F1)
+- **`place_stop_loss()` has no 3% bid guard at the API layer** — the CLAUDE.md rule
+  "NEVER place stop within 3% of bid" is only enforced in golddigger, not in the
+  underlying helper function. Any other caller (fin_snipe_manager, metals_loop) can
+  violate the rule. (F2)
+
+**NEW HIGH findings:**
+- **Playwright context not thread-safe** — `_pw_lock` only guards creation, not API calls.
+  Concurrent requests corrupt CSRF tokens or mix up responses. (F5)
+- **`get_buying_power()` fallback mixes pension + ISK data** — when account not found,
+  uses first category's total (could be pension) minus ISK positions. (F4)
+- **`get_positions()` returns ALL accounts** — no ISK filter by default, pension
+  positions included in portfolio calculations. (F3)
+- **No trading hours validation on ANY order function** — orders outside hours silently
+  proceed to API, may queue and fill at gap prices. (F7)
+- **`EXPIRY_BUFFER_MINUTES = 30` defined but never enforced** — session can expire
+  mid-order-placement. (F6)
+- **`get_account_id()` returns first ISK found** — may be wrong if multiple ISK accounts. (F8)
+
+**Converged with independent review:**
+- No account ID validation (N4 = F3 partial)
+- FIFO order confirmation (N11 = F11)
+- api_delete treats 404 as success (noted in independent review)
+
 **Agent subsystem assignments (remaining in progress):**
 2. `review-orchestration` — main.py + 8 supporting files
 4. `review-metals-core` — metals_loop.py + 14 supporting files
-5. `review-avanza-api` — avanza_session.py + 6 supporting files
 6. `review-signals-modules` — 23 signal module files
 7. `review-data-external` — data_collector.py + 13 supporting files
 8. `review-infrastructure` — file_utils.py + 17 supporting files
