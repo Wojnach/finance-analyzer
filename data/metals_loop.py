@@ -1931,19 +1931,23 @@ def _fish_engine_execute_buy(decision, price):
             log(f"[fish] SKIP BUY: no price data for {ob_id}")
             return
         ask = float(price_data.get("ask", price_data.get("sell", 0)) or 0)
-        # Fetch buying power — try page-based, fall back to cached account data
+        # Fetch buying power — try cached data, page-based, or fixed fallback
         bp = 0.0
-        try:
-            acct = fetch_account_cash(_loop_page, ACCOUNT_ID)
-            if isinstance(acct, dict):
-                bp = float(acct.get("buying_power", 0) or 0)
-            elif acct is not None:
-                bp = float(acct)
-        except Exception:
-            pass
-        # Fall back to cached account data from the main loop's periodic fetch
-        if bp <= 0 and cached_account_data:
+        if cached_account_data:
             bp = float(cached_account_data.get("buying_power", 0) or 0)
+        if bp <= 0:
+            try:
+                acct = fetch_account_cash(_loop_page, ACCOUNT_ID)
+                if isinstance(acct, dict):
+                    bp = float(acct.get("buying_power", 0) or 0)
+                elif acct is not None:
+                    bp = float(acct)
+            except Exception:
+                pass
+        if bp <= 0:
+            # Metals loop can't fetch cash — use safe fixed budget for fishing
+            bp = 1500.0
+            log("[fish] WARNING: buying power unknown, using 1500 SEK fallback")
 
         if ask <= 0 or bp < 1000:
             log(f"[fish] SKIP BUY: ask={ask}, bp={bp:.0f} (need >1000)")
