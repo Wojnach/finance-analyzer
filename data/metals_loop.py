@@ -1970,9 +1970,16 @@ def _fish_engine_execute_buy(decision, price):
                 volume = kelly_rec["units"]
                 log(f"[fish] Kelly sizing: {format_kelly_line(kelly_rec)}")
             else:
-                log(f"[fish] SKIP BUY: Kelly says no edge (k={kelly_rec['half_kelly_pct']:.1%}, "
-                    f"wr={kelly_rec['win_rate']:.1%})")
-                return
+                # Kelly says no edge — fall back to fixed sizing instead of skipping.
+                # Fishing is contrarian; Kelly's historical win rate may not reflect
+                # the current oversold/overbought setup.
+                log(f"[fish] Kelly says no edge (k={kelly_rec['half_kelly_pct']:.1%}, "
+                    f"wr={kelly_rec['win_rate']:.1%}), using fixed sizing")
+                budget = min(bp * 0.95, 1500) * decision.get("size_scalar", 1.0)
+                if budget < 1000:
+                    log(f"[fish] SKIP BUY: budget {budget:.0f} < 1000 SEK")
+                    return
+                volume = int(budget / ask)
         except Exception as kelly_err:
             log(f"[fish] Kelly unavailable ({kelly_err}), using fixed sizing")
             budget = min(bp * 0.95, 1500) * decision.get("size_scalar", 1.0)
