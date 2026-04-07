@@ -17,7 +17,6 @@ sys.path.insert(0, ".")
 
 from portfolio.fin_fish import (
     _compute_vol_and_drift,
-    _dedupe_and_rank,
     compute_fishing_levels_bull,
     evaluate_warrants,
 )
