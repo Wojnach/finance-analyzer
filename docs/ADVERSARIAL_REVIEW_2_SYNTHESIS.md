@@ -506,9 +506,34 @@ appended as they complete.
 - Hardcoded FOMC dates (N13 = 3.4)
 - Sentiment silent degradation (N15 partial)
 
+### Agent 2: orchestration (COMPLETED — 24 findings, 2 HIGH)
+
+**NEW HIGH findings:**
+- **`_maybe_send_digest` unprotected — cascade failure** — only unprotected call in
+  `_run_post_cycle`. Telegram timeout kills ALL post-cycle hooks: JSONL pruning (disk
+  exhaustion safeguard), Alpha Vantage refresh, crypto scheduler, signal postmortem.
+  One-line fix: wrap in `_track()`. (REL-1/BUG-7)
+- **Orphaned Claude CLI subprocess on crash** — no `atexit` handler for `_agent_proc`.
+  Python crash leaves Node.js Claude process running indefinitely. (CRASH-1)
+
+**NEW MEDIUM findings:**
+- **Layer 2 timeout only checked on new trigger** — timed-out T3 agent runs hours
+  past its 900s limit if market is quiet. `check_agent_completion` doesn't enforce
+  timeout, only polls for exit. (SUB-1)
+- **Stale config for all post-cycle hooks** — loaded once at startup line 861, never
+  refreshed. Config changes for digest/scheduler/AV require loop restart. (BUG-5)
+- **Swedish holiday check uses UTC date not CET** — 1-hour window (23:00-00:00 UTC)
+  where Swedish holidays are missed → Avanza order failures. (EDGE-3)
+- **Trigger baseline only updates on triggers** — slow 4% drift across 10 hours never
+  detected because each 0.4% increment is below 2% threshold. (STATE-1)
+- **Multi-agent specialist orphan on exception** — no `finally` cleanup. (SUB-3)
+
+**Converged with independent review:**
+- Post-cycle synchronous bloat (N12)
+- `_extract_triggered_tickers` default to XAG-USD (noted)
+
 **Agent subsystem assignments (remaining in progress):**
-2. `review-orchestration` — main.py + 8 supporting files
-6. `review-signals-modules` — 23 signal module files
+6. `review-signals-modules` — 23 signal module files (LAST AGENT)
 
 ---
 
