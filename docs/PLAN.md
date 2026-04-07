@@ -1,60 +1,88 @@
-# Fix: Fishing Fill Probability Underestimation
+# Fix: Fish Engine Integration — 6 Bugs From Live Test
 
 ## Date: 2026-04-07
 
 ## Problem
 
-`fin_fish.py:_compute_vol_and_drift` feeds daily-range-derived volatility into
-`volatility_from_atr()` which annualizes assuming hourly ATR candles. This
-underestimates annual vol by 3.7x (sqrt(14)), making fill probabilities
-~10x too low. Result: only 1 fishing level passes the 5% min-fill filter
-instead of 5+, making the fishing tool nearly useless.
+First live test of fish engine lost 590 SEK due to 6 integration bugs between
+`data/fish_engine.py` (decision logic, works correctly) and `data/metals_loop.py`
+(execution layer, broken wiring).
 
-## Root Cause
+## Root Causes (priority order)
 
-`_compute_vol_and_drift` computes `realized_atr_pct = avg_daily_range / 1.5`
-(a daily sigma estimate) then calls `volatility_from_atr(realized_atr_pct)`
-which does `atr_frac * sqrt(252/14)`. For a daily input, the correct
-annualization is `daily_sigma * sqrt(252)`, not `daily_sigma * sqrt(252/14)`.
+### Bug 1 — CRITICAL: fetch_price returns None, crashes execute functions
+`fetch_price(_loop_page, ob_id, "warrant")` returns None for engine instruments.
+Fix: use `fetch_price_with_fallback(_loop_page, ob_id)` which tries multiple
+api_types, and guard against None return.
 
-The `/14` factor is correct for the hourly ATR path (signal["atr_pct"]),
-but wrong for the daily range path.
+### Bug 2 — CRITICAL: trade_guard returns [] (empty list = no blocks), treated as False
+`bool([])` = False, blocking ALL trades permanently.
+Fix: `len(guard) == 0` means OK (already partially fixed on main, need to bring to worktree).
 
-## Fix Plan (2 files changed, 1 test file added)
+### Bug 3 — CRITICAL: EXIT_METALS_DISAGREE_COUNT too aggressive
+Was 3 (3 minutes), sold at exact bottom twice. Already changed to 15 on main.
+Additional fix: never trigger metals disagree exit when RSI < 30 (oversold) or RSI > 70
+(overbought) — those are the exact zones where contrarian fishing positions should hold.
 
-### Fix 1: Correct vol in `_compute_vol_and_drift` (portfolio/fin_fish.py:326-365)
+### Bug 4 — MODERATE: _loop_page scope / None guard
+Module-level `_loop_page` global was added on main. Need proper None guards in both
+execute functions. Already partially fixed.
 
-- Keep the hourly ATR path through `volatility_from_atr()` unchanged
-- Add separate daily-range annualization: `daily_sigma * sqrt(252)`
-- Take the max of both (existing logic, just with correct math)
+### Bug 5 — MODERATE: Telegram send_telegram wrong module
+Execute functions imported from `portfolio.telegram_notifications` instead of using
+the metals loop's own module-level `send_telegram` function (which respects mute config).
+Already fixed on main.
 
-### Fix 2: Best-warrant-per-level in report (portfolio/fin_fish.py:1026-1083)
+### Bug 6 — LOW: HOLD decisions not logged
+Engine returns HOLD ~98% of ticks but nothing was logged. Already added periodic
+HOLD logging on main.
 
-- In `format_report`, after getting `warrant_results`, deduplicate by level
-  (keep highest-EV warrant per unique price level). Shows different PRICE
-  LEVELS in the table instead of repeating one level across 6 instruments.
+## Implementation Plan
 
-### Fix 3: Dynamic leverage computation (portfolio/fin_fish.py:691-822)
+### Batch 1: Bring all main fixes into worktree + fix remaining bugs (data/metals_loop.py)
 
-- In `evaluate_warrants`, compute live leverage from spot and barrier
-  for MINI/TURBO warrants. Daily certs keep config leverage.
+Changes to `_fish_engine_execute_buy`:
+- Use `fetch_price_with_fallback(_loop_page, ob_id)` instead of `fetch_price`
+- Guard against None return
+- Use `fetch_account_cash(_loop_page, ACCOUNT_ID)` (add ACCOUNT_ID)
+- Use `place_order(_loop_page, ACCOUNT_ID, ...)` for buy
+- Add `_loop_page is None` guard
+
+Changes to `_fish_engine_execute_sell`:
+- Use `fetch_price_with_fallback(_loop_page, ob_id)` instead of `fetch_price`  
+- Guard against None return
+- Use `place_order(_loop_page, ACCOUNT_ID, ...)` for sell
+- Add `_loop_page is None` guard
+- Use module-level `send_telegram` (not import)
+- Cancel any active stop-losses for the position before selling
+
+Changes to `_run_fish_engine_tick`:
+- Fix spread calculation to use `fetch_price_with_fallback` instead of `avanza_session`
+- Fix trade_guard empty-list bug
+- Add periodic HOLD logging
+
+Module-level:
+- Add `_loop_page = None` global
+- Set `_loop_page = page` in Playwright init block
+- Keep `FISH_ENGINE_ENABLED = False` (user enables manually)
+
+### Batch 2: Smarter exit rules (data/fish_engine.py)
+
+- `EXIT_METALS_DISAGREE_COUNT = 15` (already on main)
+- Add RSI guard to metals disagree exit: skip when RSI < 30 or RSI > 70
+  (oversold/overbought = contrarian zone, don't exit on disagreement)
+- Add configurable `EXIT_METALS_DISAGREE_RSI_GUARD = True`
+
+### Batch 3: Tests (tests/test_fish_engine_integration.py)
+
+- Test _fish_engine_execute_sell with mock fetch_price returning None
+- Test _fish_engine_execute_sell with mock place_order returning failure
+- Test trade_guard empty-list handling
+- Test metals_disagree doesn't fire when RSI < 30
+- Test metals_disagree doesn't fire when RSI > 70
+- Test HOLD logging frequency
 
 ### Non-goals
-
-- NOT touching `volatility_from_atr()` — 4 other callers depend on it
-- NOT touching `fill_probability_buy()` — GBM math is correct
-- NOT adding instruments to catalog — separate task
-
-### Tests
-
-- `tests/test_fin_fish_vol.py`:
-  - `_compute_vol_and_drift` returns correct annual vol from daily ranges
-  - `compute_fishing_levels_bull` generates 5+ levels passing 5% filter
-  - `evaluate_warrants` returns distinct levels
-  - Dynamic leverage matches `spot / (spot - barrier)`
-
-### Risk
-
-- Other callers of fin_fish get higher fill probs -> more levels shown.
-  Correct behavior. FISHING_ENABLED=False is the safety gate.
-- `monte_carlo.py:volatility_from_atr` NOT changed -> zero blast radius.
+- NOT rewriting the engine tactics (they work, just need data)
+- NOT adding new instruments to the catalog (separate task)
+- NOT enabling FISH_ENGINE_ENABLED automatically (user flips it manually)

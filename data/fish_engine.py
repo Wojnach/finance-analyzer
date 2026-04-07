@@ -91,7 +91,7 @@ EXIT_LONG_RSI = 62
 EXIT_LONG_MC = 0.35
 EXIT_SHORT_RSI = 30
 EXIT_SIGNAL_FLIP_MARGIN = 4
-EXIT_METALS_DISAGREE_COUNT = 3
+EXIT_METALS_DISAGREE_COUNT = 15  # fishing is contrarian — expect disagreement, don't panic
 EXIT_TP_PCT = 2.0           # +2% underlying
 EXIT_SL_PCT = -3.0          # -3% underlying
 MAX_HOLD_NORMAL = 120       # minutes
@@ -497,11 +497,15 @@ class FishEngine:
                     high_conviction=True,
                 )
 
-        # Metals disagree: 3 consecutive
-        if self.metals_disagree_count >= EXIT_METALS_DISAGREE_COUNT:
+        # Metals disagree: N consecutive (but NOT in extreme RSI zones)
+        # Fishing is contrarian — when RSI is extreme, disagreement is expected.
+        # Selling an oversold LONG or overbought SHORT on metals disagree
+        # is exactly the wrong move (learned from 2026-04-07 live test: -590 SEK).
+        rsi_in_extreme = (d == "LONG" and rsi < 30) or (d == "SHORT" and rsi > 70)
+        if self.metals_disagree_count >= EXIT_METALS_DISAGREE_COUNT and not rsi_in_extreme:
             return self._sell(
                 f"MD{self.metals_disagree_count}",
-                f"metals disagree {self.metals_disagree_count} consecutive checks",
+                f"metals disagree {self.metals_disagree_count} consecutive checks (RSI={rsi:.0f})",
                 high_conviction=False,
             )
 

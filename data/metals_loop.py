@@ -164,6 +164,7 @@ try:
         check_session_alive,
         fetch_account_cash,
         fetch_price,
+        fetch_price_with_fallback,
         get_csrf,
         place_order,
         place_stop_loss,
@@ -558,6 +559,7 @@ NEWS_FETCH_INTERVAL = 1800        # fetch news every 30 min (1800s)
 # --- FISH ENGINE (integrated intraday fishing) ---
 FISH_ENGINE_ENABLED = False       # disabled by default — enable manually per session
 _fish_engine = None               # FishEngine instance (lazy init)
+_loop_page = None                 # Playwright page ref, set by main loop at startup
 PROB_REPORT_INTERVAL = 5          # compute probability report every N checks (~2.5 min)
 PROB_TELEGRAM_INTERVAL = 20       # send probability telegram every N checks (~10 min)
 session_alert_sent = False        # debounce: only send one alert per outage
@@ -1812,19 +1814,26 @@ def _run_fish_engine_tick():
     try:
         if RISK_AVAILABLE:
             guard = check_trade_guard("XAG-USD", "silver_fish")
-            trade_guard_ok = guard.get("allowed", True) if isinstance(guard, dict) else bool(guard)
+            # guard returns dict with "allowed" key, or list of blocks (empty = OK)
+            if isinstance(guard, dict):
+                trade_guard_ok = guard.get("allowed", True)
+            elif isinstance(guard, list):
+                trade_guard_ok = len(guard) == 0  # empty list = no blocks = OK
+            else:
+                trade_guard_ok = bool(guard)
     except Exception:
         pass
 
-    # Get spread from current quotes
+    # Get spread from current quotes (use metals loop's own page, not avanza_session)
     spread_pct = 0.3  # default
     try:
-        from avanza_session import get_quote as _aq
-        q = _aq("1650161")  # BULL X5 AVA 4
-        bid = float(q.get("buy", 0) or 0)
-        ask = float(q.get("sell", 0) or 0)
-        if bid > 0 and ask > 0:
-            spread_pct = (ask - bid) / bid * 100
+        if _loop_page is not None:
+            spread_data = fetch_price_with_fallback(_loop_page, "1650161")
+            if spread_data:
+                _bid = float(spread_data.get("bid", spread_data.get("buy", 0)) or 0)
+                _ask = float(spread_data.get("ask", spread_data.get("sell", 0)) or 0)
+                if _bid > 0 and _ask > 0:
+                    spread_pct = (_ask - _bid) / _bid * 100
     except Exception:
         pass
 
@@ -1878,7 +1887,13 @@ def _run_fish_engine_tick():
     decision = _fish_engine.tick(state)
 
     if decision["action"] == "HOLD":
-        return  # nothing to do
+        # Log HOLD decisions periodically (every 5th tick to avoid spam)
+        reason = decision.get("reason", "")
+        if _fish_engine and hasattr(_fish_engine, '_mc_history'):
+            tick_count = len(_fish_engine._mc_history)
+            if tick_count <= 3 or tick_count % 5 == 0:
+                log(f"[fish] HOLD: {reason}")
+        return
 
     # Execute decision
     if decision["action"] == "BUY":
@@ -1896,20 +1911,27 @@ def _run_fish_engine_tick():
 def _fish_engine_execute_buy(decision, price):
     """Execute a BUY decision from the fish engine.
 
+    Uses metals loop's own fetch_price_with_fallback + place_order via _loop_page.
     Position sizing uses Kelly criterion when available, falling back to
     fixed budget (min(bp*0.95, 1500)) when Kelly data is unavailable.
     """
     global _fish_engine
+    if _loop_page is None:
+        log("[fish] SKIP BUY: _loop_page not initialized yet")
+        return
+
     direction = decision.get("direction", "LONG")
     ob_id = decision.get("instrument_ob", "1650161" if direction == "LONG" else "2286417")
     tactic = decision.get("reason", "")
     leverage = 5.0  # BULL/BEAR SILVER X5
 
     try:
-        from avanza_session import place_buy_order, get_quote, get_buying_power
-        q = get_quote(ob_id)
-        ask = float(q.get("sell", 0))
-        bp = float(get_buying_power().get("buying_power", 0))
+        price_data = fetch_price_with_fallback(_loop_page, ob_id)
+        if not price_data:
+            log(f"[fish] SKIP BUY: no price data for {ob_id}")
+            return
+        ask = float(price_data.get("ask", price_data.get("sell", 0)) or 0)
+        bp = float(fetch_account_cash(_loop_page, ACCOUNT_ID) or 0)
 
         if ask <= 0 or bp < 1000:
             log(f"[fish] SKIP BUY: ask={ask}, bp={bp:.0f} (need >1000)")
@@ -1929,15 +1951,12 @@ def _fish_engine_execute_buy(decision, price):
             )
             if kelly_rec["units"] > 0:
                 volume = kelly_rec["units"]
-                budget = volume * ask
                 log(f"[fish] Kelly sizing: {format_kelly_line(kelly_rec)}")
             else:
-                # Kelly says no edge or below minimum — skip trade
                 log(f"[fish] SKIP BUY: Kelly says no edge (k={kelly_rec['half_kelly_pct']:.1%}, "
                     f"wr={kelly_rec['win_rate']:.1%})")
                 return
         except Exception as kelly_err:
-            # Fallback to fixed sizing
             log(f"[fish] Kelly unavailable ({kelly_err}), using fixed sizing")
             budget = min(bp * 0.95, 1500) * decision.get("size_scalar", 1.0)
             if budget < 1000:
@@ -1948,22 +1967,26 @@ def _fish_engine_execute_buy(decision, price):
         if volume < 5:
             return
 
-        result = place_buy_order(ob_id, price=ask, volume=volume)
-        status = result.get("orderRequestStatus", "?")
+        success, result = place_order(_loop_page, ACCOUNT_ID, ob_id, "BUY", ask, volume)
         nm = "BULL X5" if direction == "LONG" else "BEAR X5"
         kelly_tag = ""
         if kelly_rec:
             kelly_tag = f" K:{kelly_rec['half_kelly_pct']*100:.1f}%"
-        log(f"[fish] BUY {volume}u {nm}@{ask} = {volume*ask:.0f} SEK ({tactic}{kelly_tag}) [{status}]")
+        log(f"[fish] BUY {volume}u {nm}@{ask} = {volume*ask:.0f} SEK ({tactic}{kelly_tag}) [{'OK' if success else 'FAIL'}]")
 
-        if status == "SUCCESS":
+        if success:
             _fish_engine.confirm_entry(direction, ask, volume, price)
+            send_telegram(f"FISH BUY: {nm} {volume}u@{ask} = {volume*ask:.0f} SEK ({tactic})")
     except Exception as e:
         log(f"[fish] BUY error: {e}")
 
 
 def _fish_engine_execute_sell(decision):
-    """Execute a SELL decision from the fish engine."""
+    """Execute a SELL decision from the fish engine.
+
+    Uses metals loop's own fetch_price_with_fallback + place_order via _loop_page.
+    Sends Telegram on success or failure for manual intervention.
+    """
     global _fish_engine
     if not _fish_engine or not _fish_engine.has_position:
         return
@@ -1976,24 +1999,35 @@ def _fish_engine_execute_sell(decision):
     if not ob_id or volume <= 0:
         return
 
+    if _loop_page is None:
+        log("[fish] SKIP SELL: _loop_page not initialized yet")
+        return
+
     try:
-        from avanza_session import place_sell_order, get_quote
-        q = get_quote(ob_id)
-        bid = float(q.get("buy", 0))
+        price_data = fetch_price_with_fallback(_loop_page, ob_id)
+        if not price_data:
+            log(f"[fish] SELL skipped: no price data for {ob_id}")
+            return
+        bid = float(price_data.get("bid", price_data.get("buy", 0)) or 0)
         if bid <= 0:
+            log(f"[fish] SELL skipped: no bid for {ob_id}")
             return
 
-        result = place_sell_order(ob_id, price=bid, volume=volume)
-        status = result.get("orderRequestStatus", "?")
+        success, result = place_order(_loop_page, ACCOUNT_ID, ob_id, "SELL", bid, volume)
         entry_price = pos.get("entry_cert", 0)
         pnl = (bid - entry_price) * volume
-        nm = "BULL X5" if pos.get("direction") == "LONG" else "BEAR X5"
-        log(f"[fish] SELL {volume}u {nm}@{bid} P&L:{pnl:+.0f} ({reason}) [{status}]")
+        nm = "BULL" if pos.get("direction") == "LONG" else "BEAR"
+        log(f"[fish] SELL {volume}u {nm}@{bid} P&L:{pnl:+.0f} ({reason}) [{'OK' if success else 'FAIL'}]")
 
-        if status == "SUCCESS":
+        if success:
             _fish_engine.confirm_exit(pnl)
+            send_telegram(f"FISH EXIT: {nm} {volume}u@{bid} P&L:{pnl:+.0f} SEK ({reason})")
+        else:
+            log(f"[fish] SELL FAILED: {result}")
+            send_telegram(f"FISH SELL BLOCKED: {volume}u {nm}@{bid} ({reason}). Manual intervention needed!")
     except Exception as e:
         log(f"[fish] SELL error: {e}")
+        send_telegram(f"FISH SELL ERROR: {e}. Position may be stuck!")
 
 
 # ---------------------------------------------------------------------------
@@ -4580,6 +4614,8 @@ def main():
         browser = pw.chromium.launch(headless=True)
         ctx = browser.new_context(storage_state="data/avanza_storage_state.json")
         page = ctx.new_page()
+        global _loop_page
+        _loop_page = page  # expose to fish engine execute functions
         page.goto("https://www.avanza.se/min-ekonomi/oversikt.html", wait_until="domcontentloaded")
         page.wait_for_timeout(2000)
         log("Avanza session loaded")
