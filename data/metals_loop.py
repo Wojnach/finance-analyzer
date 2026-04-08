@@ -53,7 +53,7 @@ os.chdir(BASE_DIR)
 import requests
 from playwright.sync_api import sync_playwright
 
-from portfolio.file_utils import atomic_append_jsonl, atomic_write_json
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
 from portfolio.loop_contract import MetalsCycleReport, ViolationTracker, verify_and_act, verify_metals_contract
 from portfolio.market_timing import is_swedish_market_holiday
 
@@ -911,7 +911,9 @@ def _silver_fast_tick():
         if oldest > 0:
             vel = (price - oldest) / oldest * 100
             if vel <= SILVER_VELOCITY_ALERT_PCT:
-                vel_key = f"vel_{int(time.time() // 300)}"
+                # Use (now - 2s) so the key is stable for the full window,
+                # avoiding a double-fire when time.time() rolls over the 5-min epoch.
+                vel_key = f"vel_{int((time.time() - 2) // 300)}"
                 if vel_key not in _silver_alerted_levels:
                     _silver_alerted_levels.add(vel_key)
                     msg = (
@@ -1045,8 +1047,9 @@ def read_signal_data():
         mtime = os.path.getmtime(path)
         age_min = (time.time() - mtime) / 60
 
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
+        data = load_json(path)
+        if not data:
+            return {}
 
         result = {"age_min": round(age_min, 1)}
         for key in ["forecast_signals", "cumulative_gains"]:
@@ -1285,6 +1288,8 @@ KNOWN_WARRANT_OB_IDS = {
     "856394":  {"key": "gold", "name": "BULL GULD X8 N",
                 "api_type": "certificate", "underlying": "XAU-USD", "leverage": 8.0},
     "2286417": {"key": "bear_silver_x5", "name": "BEAR SILVER X5 AVA 12",
+                "api_type": "certificate", "underlying": "XAG-USD", "leverage": 5.0},
+    "1650161": {"key": "bull_silver_x5", "name": "BULL SILVER X5 AVA 4",
                 "api_type": "certificate", "underlying": "XAG-USD", "leverage": 5.0},
 }
 # Extend with WARRANT_CATALOG if available
@@ -4021,7 +4026,8 @@ def check_stop_order_fills(page, stop_state, positions):
                         order["status"] = "filled"
                         total_filled_units += order["units"]
                         any_filled = True
-                        log(f"STOP FILLED: {key} S{order['level']} {order['units']}u @ {order['price']}")
+                        fill_px = order.get('trigger', order.get('sell', '?'))
+                        log(f"STOP FILLED: {key} S{order['level']} {order['units']}u @ {fill_px}")
             except Exception as e:
                 log(f"Stop check error {key} S{order['level']}: {e}")
 
@@ -5933,7 +5939,7 @@ def main():
                 cert_prices={},
                 is_market_hours=False,
             )
-            _loaded_strategies = load_strategies(config_data)
+            _loaded_strategies = load_strategies(config)
             if _loaded_strategies:
                 _strategy_orchestrator = StrategyOrchestrator(
                     strategies=_loaded_strategies,
