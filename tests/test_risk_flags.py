@@ -48,7 +48,7 @@ class TestConcentrationRisk:
     def test_no_flag_when_below_threshold(self):
         pf = _make_portfolio(cash=400000)
         summary = _make_agent_summary({"BTC-USD": {"price": 60000}})
-        # Bold: 30% of 400K = 120K. Total portfolio ~400K. 120K/400K = 30% < 40%
+        # BUG-176: Bold: min(30% of 400K total, 400K cash) = 120K. 120K/400K = 30% < 40%
         result = check_concentration_risk("BTC-USD", "BUY", pf, summary, "bold")
         assert result is None
 
@@ -58,8 +58,8 @@ class TestConcentrationRisk:
             "BTC-USD": {"shares": 1.0, "avg_cost_usd": 60000}
         })
         summary = _make_agent_summary({"BTC-USD": {"price": 60000}}, fx_rate=10.0)
-        # Existing: 1.0 * 60K * 10 = 600K. Cash: 200K. Total: 800K.
-        # Bold alloc: 30% of 200K = 60K. New position: 660K. Concentration: 660K/800K = 82.5%
+        # BUG-176: Existing: 600K. Cash: 200K. Total: 800K.
+        # Bold alloc: min(30% of 800K, 200K cash) = 200K. New: 800K. Concentration: 100%
         result = check_concentration_risk("BTC-USD", "BUY", pf, summary, "bold")
         assert result is not None
         assert result["flag"] == "concentration"
@@ -70,8 +70,8 @@ class TestConcentrationRisk:
             "BTC-USD": {"shares": 0.5, "avg_cost_usd": 60000}
         })
         summary = _make_agent_summary({"BTC-USD": {"price": 60000}}, fx_rate=10.0)
-        # Existing: 0.5 * 60K * 10 = 300K. Cash: 200K. Total: 500K.
-        # Patient alloc: 15% of 200K = 30K. New position: 330K. Concentration: 66% > 40%
+        # BUG-176: Existing: 300K. Cash: 200K. Total: 500K.
+        # Patient alloc: min(15% of 500K, 200K cash) = 75K. New: 375K. Concentration: 75%
         result = check_concentration_risk("BTC-USD", "BUY", pf, summary, "patient")
         assert result is not None
         assert result["flag"] == "concentration"

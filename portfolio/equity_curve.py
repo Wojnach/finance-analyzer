@@ -240,8 +240,8 @@ def compute_metrics(curve: list[dict], strategy: str) -> dict:
                     sharpe = (mean_excess / daily_std_dec) * math.sqrt(252)
                     result["sharpe_ratio"] = round(sharpe, 4)
 
-            # Sortino ratio (using downside deviation)
-            downside_returns = [r / 100 - daily_rf for r in daily_rets if r / 100 < daily_rf]
+            # BUG-177: Sortino — use pre-computed daily_rets_dec for consistency with Sharpe
+            downside_returns = [r - daily_rf for r in daily_rets_dec if r < daily_rf]
             if downside_returns:
                 downside_var = sum(r ** 2 for r in downside_returns) / len(downside_returns)
                 downside_dev = math.sqrt(downside_var)
