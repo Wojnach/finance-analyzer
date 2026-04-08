@@ -2169,6 +2169,17 @@ def _fish_engine_execute_sell(decision):
             log(f"[fish] SELL skipped: no bid for {ob_id}")
             return
 
+        # Cancel any active stop-losses on this orderbook BEFORE the sell.
+        # Without this, Avanza rejects with short.sell.not.allowed because
+        # SL volume + SELL volume > position size.
+        if not _ensure_stops_cancelled_before_sell(_loop_page, ob_id):
+            log(f"[fish] SELL aborted: could not clear stops for {ob_id}")
+            send_telegram(
+                f"FISH SELL BLOCKED: stop cancel failed for {ob_id}. "
+                f"Manual intervention needed."
+            )
+            return
+
         success, result = place_order(_loop_page, ACCOUNT_ID, ob_id, "SELL", bid, volume)
         entry_price = pos.get("entry_cert", 0)
         pnl = (bid - entry_price) * volume
@@ -2791,6 +2802,19 @@ def emergency_sell(page, key, pos, bid):
     send_telegram(f"*L3 EMERGENCY SELL* {pos['name']}\nBid: {bid} | Entry: {pos['entry']}\nAuto-selling {pos['units']} units")
 
     try:
+        # Cancel any active stop-losses on this orderbook BEFORE the sell.
+        # Without this, Avanza rejects with short.sell.not.allowed because
+        # SL volume + SELL volume > position size. The reactive
+        # holdings-recheck path below remains as a safety net for the rare
+        # case where a stop fires DURING the cancel/sell sequence.
+        if not _ensure_stops_cancelled_before_sell(page, pos["ob_id"]):
+            log(f"  {key}: emergency sell aborted — stop cancel failed")
+            send_telegram(
+                f"*L3 SELL BLOCKED* {pos['name']}: stop cancel failed. "
+                f"Manual intervention needed."
+            )
+            return False
+
         # Get CSRF token
         cookies = page.context.cookies()
         csrf = None
@@ -2938,6 +2962,103 @@ def _cleanup_stop_orders_for(page, key):
             _save_stop_orders(stop_state)
     except Exception as e:
         log(f"  Stop order cleanup error for {key}: {e}")
+
+
+def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0) -> bool:
+    """Cancel ALL stop-loss orders for ``ob_id`` BEFORE placing a sell.
+
+    Avanza rejects sells with ``short.sell.not.allowed`` when the sum of
+    (active_stop_loss_volume + sell_volume) exceeds the position size — it
+    treats the overlap as an attempted short-sale. This helper makes sells
+    safe by ensuring zero stops remain on the orderbook before the sell call.
+
+    Two layers, both run on every call:
+
+    1. **Local cascade cancel** — uses the existing Playwright-based
+       ``_cancel_stop_orders`` path so the local ``metals_stop_orders.json``
+       state is consistent with reality. Identifies the position by ob_id
+       (since callers like the fish engine don't have a position key handy).
+
+    2. **Server-side cancel + verify poll** — calls
+       ``portfolio.avanza_session.cancel_all_stop_losses_for``, which
+       enumerates ALL active SLs for the orderbook (catching anything the
+       local state missed: manual stops, leftover from a previous session,
+       hardware trailing stops, etc.) and POLLS until none remain. Polling
+       is critical because Avanza's DELETE returns 200 immediately but the
+       encumbered volume is only released when the SL actually disappears
+       from the position view.
+
+    Returns:
+        ``True`` if all stops are confirmed cleared (or none existed),
+        ``False`` if any stop remains after the polling window. Callers
+        MUST treat ``False`` as a hard block on the dependent SELL —
+        proceeding anyway will produce ``short.sell.not.allowed``.
+    """
+    if not ob_id:
+        return True
+
+    ob_str = str(ob_id)
+
+    # Layer 1: local cascade cleanup. Find the matching POSITIONS key by ob_id.
+    # We do NOT delete the state entry here — _cleanup_stop_orders_for handles
+    # that AFTER the sell fills, so the post-sell housekeeping path stays
+    # untouched.
+    try:
+        matched_key = None
+        for k, p in POSITIONS.items():
+            if str(p.get("ob_id", "")) == ob_str:
+                matched_key = k
+                break
+        if matched_key:
+            stop_state = _load_stop_orders()
+            if matched_key in stop_state and stop_state[matched_key].get("orders"):
+                csrf = get_csrf(page)
+                if csrf:
+                    _cancel_stop_orders(page, matched_key, stop_state[matched_key], csrf)
+                    log(f"[stops] cancelled local cascade for {matched_key} ({ob_str}) pre-sell")
+    except Exception as e:
+        log(f"[stops] local cascade cancel error for ob {ob_str}: {e}")
+
+    # Layer 2: authoritative server-side cancel + poll verify.
+    try:
+        from portfolio.avanza_session import cancel_all_stop_losses_for
+
+        result = cancel_all_stop_losses_for(
+            ob_str,
+            account_id=ACCOUNT_ID,
+            max_wait=max_wait,
+        )
+    except Exception as e:
+        log(f"[stops] server cancel raised for {ob_str}: {e}")
+        return False
+
+    status = result.get("status", "FAILED")
+    cancelled = result.get("cancelled", []) or []
+    remaining = result.get("remaining", []) or []
+    elapsed = result.get("elapsed_seconds", 0.0)
+
+    if status == "SUCCESS":
+        if cancelled:
+            log(
+                f"[stops] cleared {len(cancelled)} stop(s) for {ob_str} in "
+                f"{elapsed:.2f}s (pre-sell verification OK)"
+            )
+        return True
+
+    # PARTIAL or FAILED — block the sell and surface the failure loudly.
+    log(
+        f"[stops] {status} pre-sell for {ob_str}: cancelled={cancelled} "
+        f"remaining={remaining} elapsed={elapsed:.2f}s"
+    )
+    try:
+        send_telegram(
+            f"*STOP CANCEL FAILED* ob={ob_str}\n"
+            f"status={status} remaining={len(remaining)}\n"
+            f"SELL aborted to avoid short.sell.not.allowed"
+        )
+    except Exception:
+        pass
+    return False
 
 
 def _load_stop_orders():
@@ -3194,6 +3315,22 @@ def process_trade_queue(page):
 
         # --- Execute ---
         log(f"  Executing {action} {warrant_name}: {order['volume']}u @ {exec_price}")
+
+        # SELL must clear any active stop-losses on the orderbook first,
+        # otherwise Avanza rejects with short.sell.not.allowed (sl_vol + sell_vol
+        # would exceed the position). BUYs are unaffected.
+        if action == "SELL":
+            if not _ensure_stops_cancelled_before_sell(page, order["ob_id"]):
+                log(f"  Order {order_id_short}: SELL aborted — could not clear stops")
+                order["status"] = "failed"
+                order["result"] = {"error": "stop_cancel_failed_pre_sell"}
+                order["executed_ts"] = now.isoformat()
+                send_telegram(
+                    f"*TRADE BLOCKED* {action} {warrant_name}\n"
+                    f"Stop cancel failed pre-sell. Manual intervention needed."
+                )
+                continue
+
         success, result = place_order(
             page, ACCOUNT_ID, order["ob_id"], order["action"],
             order["price"], order["volume"],
