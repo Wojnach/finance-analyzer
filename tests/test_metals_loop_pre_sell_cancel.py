@@ -556,9 +556,11 @@ class TestRestoreFullStopProtection:
         assert mod._restore_full_stop_protection("OB1", [{"id": "OLD"}]) is True
         assert order == ["clear", "rearm"]
 
-    def test_clear_failure_still_rearms_with_warning(self, monkeypatch):
-        """Codex-flagged tradeoff: if we can't cleanly clear the resized
-        stops, re-arm anyway and warn. Better over-coverage than naked."""
+    def test_clear_failure_aborts_restore_returns_false(self, monkeypatch):
+        """Codex round-6 finding 2: if the resized-stops clear fails, do NOT
+        proceed with rearm — that would leave both resized AND original
+        stops alive, recreating the over-encumbered bug. Return False so
+        the caller retains the snapshot for retry."""
         import metals_loop as mod
         alerts = []
         monkeypatch.setattr(mod, "send_telegram", lambda msg: alerts.append(msg))
@@ -573,9 +575,9 @@ class TestRestoreFullStopProtection:
             lambda snap: (rearm_called.__setitem__("n", 1), {"status": "SUCCESS", "rearmed": ["NEW"], "failed": []})[1],
         )
         ok = mod._restore_full_stop_protection("OB1", [{"id": "OLD"}])
-        assert ok is True
-        assert rearm_called["n"] == 1
-        assert any("RESTORE WARNING" in m for m in alerts)
+        assert ok is False
+        assert rearm_called["n"] == 0  # rearm must NOT have been called
+        assert any("RESTORE DEFERRED" in m for m in alerts)
 
     def test_rearm_partial_returns_false_for_retry(self, monkeypatch):
         """Codex round-5 finding 3: PARTIAL must NOT be treated as terminal
@@ -614,6 +616,78 @@ class TestRestoreFullStopProtection:
         ok = mod._restore_full_stop_protection("OB1", [{"id": "A"}])
         assert ok is False
         assert any("SPIKE RESTORE FAILED" in m for m in alerts)
+
+
+class TestSyncLocalStopState:
+    """Tests for _sync_local_stop_state_after_rearm — codex round-6 finding 3.
+    The local stop_order_state file must be updated with new broker IDs
+    after a re-arm, otherwise downstream code polls dead IDs."""
+
+    def test_no_match_no_op(self, monkeypatch, tmp_path):
+        """If no POSITIONS entry matches the ob_id, no state change."""
+        import metals_loop as mod
+        monkeypatch.setattr(mod, "POSITIONS", {})
+        save_called = {"n": 0}
+        monkeypatch.setattr(mod, "_save_stop_orders", lambda s: save_called.__setitem__("n", 1))
+        mod._sync_local_stop_state_after_rearm("OB1", [{"id": "OLD"}], ["NEW"])
+        assert save_called["n"] == 0
+
+    def test_replaces_existing_orders_with_new_ids(self, monkeypatch, tmp_path):
+        import metals_loop as mod
+        monkeypatch.setattr(mod, "POSITIONS", {
+            "silver_q0": {"ob_id": "OB1", "active": True}
+        })
+        existing_state = {
+            "silver_q0": {
+                "date": "2026-04-07",
+                "stop_base": 1.0,
+                "orders": [{"order_id": "DEAD_ID", "trigger": 0.95, "sell": 0.94, "units": 100, "status": "placed"}],
+            }
+        }
+        monkeypatch.setattr(mod, "_load_stop_orders", lambda: existing_state)
+        saved = {}
+        monkeypatch.setattr(mod, "_save_stop_orders", lambda s: saved.update(s))
+
+        snapshot = [
+            {"id": "OLD1", "trigger": {"value": 0.96}, "order": {"price": 0.95, "volume": 100}, "orderbook": {"id": "OB1"}},
+            {"id": "OLD2", "trigger": {"value": 0.92}, "order": {"price": 0.91, "volume": 100}, "orderbook": {"id": "OB1"}},
+        ]
+        mod._sync_local_stop_state_after_rearm("OB1", snapshot, ["NEW1", "NEW2"])
+
+        assert "silver_q0" in saved
+        new_orders = saved["silver_q0"]["orders"]
+        assert len(new_orders) == 2
+        assert new_orders[0]["order_id"] == "NEW1"
+        assert new_orders[1]["order_id"] == "NEW2"
+        assert new_orders[0]["trigger"] == 0.96
+        assert new_orders[1]["units"] == 100
+
+    def test_partial_rearm_pairs_only_available_ids(self, monkeypatch):
+        """If only some stops were re-armed, sync only those entries."""
+        import metals_loop as mod
+        monkeypatch.setattr(mod, "POSITIONS", {
+            "silver_q0": {"ob_id": "OB1", "active": True}
+        })
+        monkeypatch.setattr(mod, "_load_stop_orders", lambda: {})
+        saved = {}
+        monkeypatch.setattr(mod, "_save_stop_orders", lambda s: saved.update(s))
+
+        snapshot = [
+            {"id": "OLD1", "trigger": {"value": 0.96}, "order": {"price": 0.95, "volume": 100}, "orderbook": {"id": "OB1"}},
+            {"id": "OLD2", "trigger": {"value": 0.92}, "order": {"price": 0.91, "volume": 100}, "orderbook": {"id": "OB1"}},
+        ]
+        mod._sync_local_stop_state_after_rearm("OB1", snapshot, ["NEW1"])  # only 1 new id
+
+        assert len(saved["silver_q0"]["orders"]) == 1
+        assert saved["silver_q0"]["orders"][0]["order_id"] == "NEW1"
+
+    def test_empty_inputs_noop(self, monkeypatch):
+        import metals_loop as mod
+        save_called = {"n": 0}
+        monkeypatch.setattr(mod, "_save_stop_orders", lambda s: save_called.__setitem__("n", 1))
+        mod._sync_local_stop_state_after_rearm("OB1", [], ["NEW"])
+        mod._sync_local_stop_state_after_rearm("OB1", [{"id": "X"}], [])
+        assert save_called["n"] == 0
 
 
 class TestFetchLivePositionVolume:

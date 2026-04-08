@@ -3213,6 +3213,74 @@ def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0):
     return False, rollback_snapshot
 
 
+def _sync_local_stop_state_after_rearm(ob_id, snapshot, new_ids):
+    """Update ``metals_stop_orders.json`` to reflect re-armed stops.
+
+    CODEX-6 finding 3: re-arm places new stops at the broker but the
+    local state file still references the OLD (now-dead) IDs. Downstream
+    code like ``check_stop_order_fills`` and trailing-stop updates would
+    poll dead IDs and skip placing replacement stops because the local
+    state shows them as still active. After every successful re-arm,
+    rewrite the local entry with the new IDs and the original
+    trigger/sell/volume from the snapshot.
+
+    Best-effort — failures are logged but do not abort the calling sell
+    path. The post-sell ``_cleanup_stop_orders_for`` will clear stale
+    state if reconciliation detects the mismatch.
+    """
+    if not snapshot or not new_ids:
+        return
+    try:
+        ob_str = str(ob_id)
+        matched_key = None
+        for k, p in POSITIONS.items():
+            if str(p.get("ob_id", "")) == ob_str:
+                matched_key = k
+                break
+        if not matched_key:
+            return  # no local tracking to update
+
+        stop_state = _load_stop_orders()
+        existing = stop_state.get(matched_key, {})
+        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        new_orders = []
+        # Pair snapshot entries with new ids by position. rearm processes
+        # the snapshot in order so new_ids[i] corresponds to snapshot[i].
+        # If lengths differ (some failed), pair only as many as we have.
+        for idx, sl in enumerate(snapshot):
+            if idx >= len(new_ids):
+                break
+            if not isinstance(sl, dict):
+                continue
+            trigger = (sl.get("trigger") or {}).get("value")
+            order = sl.get("order") or {}
+            if trigger is None or not order:
+                continue
+            new_orders.append({
+                "level": idx + 1,
+                "order_id": new_ids[idx],
+                "trigger": trigger,
+                "sell": order.get("price"),
+                "units": order.get("volume"),
+                "status": "placed",
+            })
+        if not new_orders:
+            return
+        stop_state[matched_key] = {
+            "date": today_str,
+            "stop_base": new_orders[0].get("trigger"),
+            "orders": new_orders,
+            "placed_ts": datetime.datetime.now(datetime.UTC).isoformat(),
+        }
+        _save_stop_orders(stop_state)
+        log(
+            f"[stops] synced local state for {matched_key} ({ob_str}): "
+            f"{len(new_orders)} new order(s)"
+        )
+    except Exception as e:
+        log(f"[stops] local state sync failed for ob {ob_id}: {e}")
+
+
 def _rearm_stops_after_failed_sell(ob_id, snapshot):
     """Re-place the stop-losses we cancelled before a sell that did NOT fill.
 
@@ -3224,6 +3292,10 @@ def _rearm_stops_after_failed_sell(ob_id, snapshot):
     Idempotent and best-effort: failures are logged + alerted but do not
     raise. The position will still be naked if re-arm fails, but the alert
     surfaces it for manual intervention rather than going silent.
+
+    On any successful re-arm (full or partial), the local stop tracking
+    file is rewritten with the new broker IDs so downstream code does
+    not poll dead IDs.
     """
     if not snapshot:
         return
@@ -3245,6 +3317,11 @@ def _rearm_stops_after_failed_sell(ob_id, snapshot):
     status = result.get("status", "FAILED")
     rearmed = result.get("rearmed", []) or []
     failed = result.get("failed", []) or []
+
+    # Sync local state with the new broker IDs (best effort).
+    if rearmed:
+        _sync_local_stop_state_after_rearm(ob_id, snapshot, rearmed)
+
     if status == "SUCCESS":
         log(f"[stops] re-armed {len(rearmed)} stop(s) for ob {ob_id} after failed sell")
     else:
@@ -4209,49 +4286,49 @@ def place_spike_orders(page, positions, prices, targets):
             log(f"Spike order error for {key}: {e}")
 
         # Step 3: Re-arm protection on the unencumbered remainder.
-        # If the spike order placement failed, restore the FULL original
-        # stops (position is unchanged). If it succeeded, restore stops
-        # sized to (position_volume - spike_volume) so the spike volume
-        # remains room for the limit order to fill.
-        if spike_placed_ok and sl_snapshot:
-            remainder = max(0, position_volume - spike_volume)
-            if remainder > 0:
-                resized = _resize_snapshot_volume(sl_snapshot, remainder)
-                # CODEX-5 finding 2 (continued): require the resized rearm
-                # to actually succeed before treating the spike as live.
-                # If rearm fails, the unencumbered slice is naked — better
-                # to roll back the spike sell entirely than commit to a
-                # partially protected state.
-                rearm_ok = _rearm_resized_stops_with_check(ob_id, resized)
-                if rearm_ok:
-                    placed[key] = spike_order_id
-                    if sl_snapshot:
+        # CODEX-6 finding 1: ALWAYS persist placed[key] when the broker
+        # accepted the order. Without this, an empty snapshot path leaves
+        # the live spike SELL untracked — fill/cancel phases never see it.
+        if spike_placed_ok:
+            if sl_snapshot:
+                remainder = max(0, position_volume - spike_volume)
+                if remainder > 0:
+                    resized = _resize_snapshot_volume(sl_snapshot, remainder)
+                    # CODEX-5 finding 2: require the resized rearm to
+                    # actually succeed before treating the spike as live.
+                    # If rearm fails, the unencumbered slice is naked —
+                    # better to roll back the spike sell entirely than
+                    # commit to a partially protected state.
+                    rearm_ok = _rearm_resized_stops_with_check(ob_id, resized)
+                    if rearm_ok:
+                        placed[key] = spike_order_id
                         stop_snapshots[key] = sl_snapshot
-                else:
-                    log(
-                        f"[spike] resized rearm failed for {key} — rolling "
-                        f"back the spike sell to avoid naked unencumbered slice"
-                    )
-                    _rollback_spike_order_and_restore(spike_order_id, ob_id, sl_snapshot)
-                    # Spike not placed, drop snapshot
-                    stop_snapshots.pop(key, None)
-                    try:
-                        send_telegram(
-                            f"*SPIKE ROLLED BACK* {pos['name']}: rearm failed, "
-                            f"spike order cancelled, full stops restored."
+                    else:
+                        log(
+                            f"[spike] resized rearm failed for {key} — rolling "
+                            f"back the spike sell to avoid naked unencumbered slice"
                         )
-                    except Exception:
-                        pass
-            else:
-                # Spike volume covers full position — no remainder to protect.
-                placed[key] = spike_order_id
-                if sl_snapshot:
+                        _rollback_spike_order_and_restore(spike_order_id, ob_id, sl_snapshot)
+                        try:
+                            send_telegram(
+                                f"*SPIKE ROLLED BACK* {pos['name']}: rearm failed, "
+                                f"spike order cancelled, full stops restored."
+                            )
+                        except Exception:
+                            pass
+                        # Don't add to placed[] — order was rolled back
+                else:
+                    # Spike volume covers full position — no remainder to protect.
+                    placed[key] = spike_order_id
                     stop_snapshots[key] = sl_snapshot
+            else:
+                # No pre-existing stops on the orderbook (snapshot is empty).
+                # The spike order is live and there's nothing to restore on
+                # cancel — track it in placed[] but don't add to snapshots.
+                placed[key] = spike_order_id
         elif sl_snapshot:
-            # Spike placement failed: restore originals exactly. Drop the
-            # persisted snapshot since it's no longer needed for cancel.
+            # Spike placement failed: restore originals exactly.
             _rearm_stops_after_failed_sell(ob_id, sl_snapshot)
-            stop_snapshots.pop(key, None)
 
     return placed, stop_snapshots
 
@@ -4606,23 +4683,26 @@ def _restore_full_stop_protection(ob_id, original_snapshot) -> bool:
         return False
 
     # Clear the resized stops first so re-arming originals doesn't double-up.
+    # CODEX-6 finding 2: any non-SUCCESS clear is non-terminal — leaving
+    # resized + original stops alive simultaneously recreates the
+    # over-encumbered volume problem. Fail closed and let the caller
+    # retain the snapshot for retry on the next loop iteration.
     try:
         clear_result = cancel_all_stop_losses_for(str(ob_id), account_id=ACCOUNT_ID)
         if clear_result.get("status") != "SUCCESS":
             log(
                 f"[spike] cannot clear resized stops for {ob_id}: "
-                f"{clear_result.get('status')} — full restore may double-up"
+                f"{clear_result.get('status')} — abort restore, retain snapshot for retry"
             )
             try:
                 send_telegram(
-                    f"*SPIKE RESTORE WARNING* ob={ob_id}\n"
-                    f"Could not cleanly clear resized stops before re-arming "
-                    f"original snapshot — coverage may be inflated."
+                    f"*SPIKE RESTORE DEFERRED* ob={ob_id}\n"
+                    f"Could not cleanly clear resized stops; restore deferred "
+                    f"to next loop iteration to avoid double-encumbrance."
                 )
             except Exception:
                 pass
-            # Don't return — re-arm anyway, better over-coverage than
-            # leaving the spike volume slice naked.
+            return False  # caller keeps snapshot for retry
     except Exception as e:
         log(f"[spike] clear-resized-stops failed for {ob_id}: {e}")
         return False
