@@ -42,7 +42,7 @@ WARRANT_CATALOG = {
 # ---------------------------------------------------------------------------
 # Execution mode
 # ---------------------------------------------------------------------------
-DRY_RUN = True                # True = log decisions + Telegram without placing orders
+DRY_RUN = False               # True = log decisions + Telegram without placing orders
 BUY_MODE = "AUTO"             # "AUTO" or "CONFIRM" (Telegram confirmation for BUYs)
 SELL_MODE = "AUTO"            # SELLs always autonomous
 
@@ -50,6 +50,7 @@ SELL_MODE = "AUTO"            # SELLs always autonomous
 # Sizing & limits
 # ---------------------------------------------------------------------------
 ACCOUNT_ID = "1625505"
+INITIAL_BUDGET_SEK = 10000    # fallback budget when Avanza API fails to return cash
 POSITION_SIZE_PCT = 30        # % of available cash per trade
 MAX_CONCURRENT = 2            # max simultaneous positions
 TARGET_LEVERAGE = 5.0         # preferred leverage (user prefers 5x)

@@ -22,6 +22,7 @@ from metals_swing_config import (
     DRY_RUN,
     EOD_EXIT_MINUTES_BEFORE,
     HARD_STOP_UNDERLYING_PCT,
+    INITIAL_BUDGET_SEK,
     LOSS_ESCALATION,
     MACD_IMPROVING_CHECKS,
     MAX_CONCURRENT,
@@ -202,14 +203,23 @@ class SwingTrader:
              f"DRY_RUN={DRY_RUN}")
 
     def _sync_cash(self):
-        """Fetch real ISK buying power from Avanza and update state."""
+        """Fetch real ISK buying power from Avanza and update state.
+
+        Falls back to INITIAL_BUDGET_SEK when the API fails and no saved
+        balance exists (e.g. first startup with empty state file).
+        """
         acc = fetch_account_cash(self.page, ACCOUNT_ID)
         if acc and acc.get("buying_power") is not None:
             self.state["cash_sek"] = float(acc["buying_power"])
             _save_state(self.state)
             _log(f"Cash synced: {self.state['cash_sek']:.0f} SEK")
         else:
-            _log(f"Cash sync failed, using saved: {self.state['cash_sek']:.0f} SEK")
+            if self.state["cash_sek"] == 0:
+                self.state["cash_sek"] = float(INITIAL_BUDGET_SEK)
+                _save_state(self.state)
+                _log(f"Cash sync failed, using configured budget: {self.state['cash_sek']:.0f} SEK")
+            else:
+                _log(f"Cash sync failed, using saved: {self.state['cash_sek']:.0f} SEK")
 
     def evaluate_and_execute(self, prices, signal_data):
         """Main entry point — called every loop cycle during market hours.
@@ -219,6 +229,11 @@ class SwingTrader:
             signal_data: dict from read_signal_data() with XAG-USD/XAU-USD signals
         """
         self.check_count += 1
+
+        # Re-sync cash from Avanza every 30 checks (~30 min) to catch manual deposits
+        # and recover from initial API failures.
+        if self.check_count % 30 == 0:
+            self._sync_cash()
 
         # Check exits first (protect capital)
         self._check_exits(prices, signal_data)
