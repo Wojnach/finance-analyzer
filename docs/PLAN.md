@@ -38,4 +38,15 @@ Full codebase adversarial review — Round 3. Find new bugs, verify Round 2 fixe
 
 - [x] 8 agents running
 - [x] Synthesis → docs/ADVERSARIAL_REVIEW_3_SYNTHESIS.md
-- [ ] Fix top issues (Tier 1 next)
+- [ ] Fix Tier 1 issues (branch: fix/tier1-adversarial-r3)
+
+## Tier 1 Fixes (trivial, high impact)
+
+1. MIN_TRADE_SEK 500→1000 — `data/metals_swing_config.py:59`
+2. NFP Good Friday date(2026,4,3)→date(2026,4,2) — `portfolio/econ_dates.py:61`
+3. _silver_reset_session() never called — `data/metals_loop.py:6063`
+4. metals_context.json raw open() → atomic_write_json — `data/metals_loop.py:5078`
+5. SwingTrader _save_state raw open("w") → atomic_write_json — `data/metals_swing_trader.py:110`
+6. get_buying_power() wrong JSON keys — `portfolio/avanza_session.py:302`
+7. StopLossResult.from_api: stoplossOrderId key missing — `portfolio/avanza/types.py:212`
+8. cvar_99_sek key missing from compute_portfolio_var — `portfolio/monte_carlo_risk.py:503`
