@@ -174,30 +174,31 @@ per-module locks with a `concurrent.futures`-based task queue for I/O operations
 
 | Severity | Count | Source |
 |----------|-------|--------|
-| CRITICAL | 21 | 3 Claude + 2 portfolio-risk + 2 infra + 3 data-ext + 4 avanza + 4 signals-core + 3 orchestration |
-| HIGH | 52 | 17 Claude + 3 portfolio-risk + 6 infra + 6 sig-modules + 5 data-ext + 5 avanza + 6 sig-core + 4 orchestration |
-| MEDIUM | 43 | 16 Claude + 3 portfolio-risk + 3 infra + 6 sig-modules + 4 data-ext + 3 avanza + 4 sig-core + 4 orchestration |
-| LOW | 17 | 3 Claude + 2 portfolio-risk + 3 sig-modules + 2 data-ext + 1 avanza + 3 sig-core + 3 orchestration |
-| **Total** | **133** | 39 Claude + 10 portfolio-risk + 11 infra + 15 sig-modules + 14 data-ext + 13 avanza + 17 sig-core + 14 orchestration |
+| CRITICAL | 25 | 3 Claude + 2 port-risk + 2 infra + 3 data-ext + 4 avanza + 4 sig-core + 3 orch + 4 metals |
+| HIGH | 58 | 17 Claude + 3 port-risk + 6 infra + 6 sig-mod + 5 data-ext + 5 avanza + 6 sig-core + 4 orch + 6 metals |
+| MEDIUM | 48 | 16 Claude + 3 port-risk + 3 infra + 6 sig-mod + 4 data-ext + 3 avanza + 4 sig-core + 4 orch + 5 metals |
+| LOW | 19 | 3 Claude + 2 port-risk + 3 sig-mod + 2 data-ext + 1 avanza + 3 sig-core + 3 orch + 2 metals |
+| **Total** | **150** | 39 Claude + 111 from all 8 agents |
 
-All six completed agent reviews found critical issues the independent review missed:
-- **signals-core**: Per-ticker consensus cache horizon-blind (CS1), Ministral count mismatch
-  (CS2), SignalDB thread safety (CS3), accuracy cache race (CS4). Fear & Greed allows BUY
-  during 46-day fear streak (HCS2). Meta-learner deploys overfitting models (HCS5).
+## ALL 8 AGENTS COMPLETE
+
+Every agent found critical issues the independent review missed:
+- **metals-core**: `config_data` NameError CRASH (CM1, 100%), `order["price"]` KeyError
+  on stop fill (CM2, 100%), raw file I/O violating rule #4 (CM3). Silver alert thresholds
+  never reset (HM1). ORB constants wrong 6 months/year (HM3).
+- **signals-core**: Per-ticker consensus cache horizon-blind (CS1), F&G allows BUY during
+  46-day fear streak (HCS2), meta-learner deploys overfitting models (HCS5)
 - **avanza-api**: CONFIRM matches wrong order (CA1), stop ID always empty (HA4)
+- **orchestration**: classify_tier double-read → T3 spam (CO1), zombie threads (CO2)
 - **data-external**: Earnings config broken since day one (CD1), NFP Good Friday (HD1)
 - **portfolio-risk**: Trade guards never block (C3, C4)
 - **infrastructure**: GPU lock fd leak (CI1), journal non-atomic (CI2)
 - **signals-modules**: Structure all-history bias (HS1), NaN-to-BUY (HS3)
 
-Agent win rate: ~80%. Every agent found critical bugs the broad review missed. The
-signals-core agent found the deepest issues — interaction bugs between caches, gates,
-and overlays that are only visible through line-by-line tracing.
-
-- **orchestration**: classify_tier double-read race causes T3 spam (CO1), ThreadPoolExecutor
-  cancel no-op accumulates zombie threads (CO2), multi-agent blocks loop 150s (CO3)
-
-**Remaining 1 agent still running**: metals-core.
+Agent win rate: ~80%. The metals-core agent found 2 bugs with **100% confidence** —
+confirmed crash bugs (`NameError`, `KeyError`) that fire every time their paths execute.
+The dual-reviewer methodology proved its value: 111 of 150 findings (74%) came from
+agents, not the broad independent review.
 
 ---
 
