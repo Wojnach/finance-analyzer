@@ -215,6 +215,65 @@ class TestDrawdown:
         result = check_portfolio_drawdown(positions_high, prices_low)
         assert isinstance(result, dict)
 
+    def test_since_ts_filters_old_peaks(self, tmp_path):
+        """Session-relative peak: old all-time high must be ignored."""
+        import datetime
+        from metals_risk import HISTORY_FILE, check_portfolio_drawdown
+
+        # Old high-value entry from months ago
+        old_ts = "2026-01-01T10:00:00+00:00"
+        new_ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": old_ts, "total_value": 100000}) + "\n")
+            f.write(json.dumps({"ts": new_ts, "total_value": 2000}) + "\n")
+
+        positions = {"silver": {"active": True, "units": 100, "entry": 20.0}}
+        prices = {"silver": {"bid": 20.0}}  # current value = 2000
+
+        # since_ts = yesterday; should only include new_ts entry → peak = 2000
+        yesterday = time.time() - 86400
+        result = check_portfolio_drawdown(positions, prices, since_ts=yesterday)
+
+        assert result["peak_value"] == pytest.approx(2000, abs=1)
+        assert result["current_drawdown_pct"] == pytest.approx(0.0, abs=0.5)
+        assert not result["breached"]
+
+    def test_since_ts_no_entries_in_window(self, tmp_path):
+        """No entries in session window → peak falls back to current value, drawdown = 0."""
+        from metals_risk import HISTORY_FILE, check_portfolio_drawdown
+
+        # Write only old entries
+        old_ts = "2026-01-01T10:00:00+00:00"
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": old_ts, "total_value": 50000}) + "\n")
+
+        positions = {"silver": {"active": True, "units": 100, "entry": 20.0}}
+        prices = {"silver": {"bid": 20.0}}  # current value = 2000
+
+        # since_ts = now; no entries match → fallback to current value
+        result = check_portfolio_drawdown(positions, prices, since_ts=time.time())
+
+        assert result["current_drawdown_pct"] == pytest.approx(0.0, abs=0.5)
+        assert not result["breached"]
+
+    def test_since_ts_none_unchanged(self, tmp_path):
+        """Omitting since_ts preserves all-time behaviour (regression guard)."""
+        from metals_risk import HISTORY_FILE, check_portfolio_drawdown
+
+        # Write a very high historical peak
+        old_ts = "2026-01-01T10:00:00+00:00"
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": old_ts, "total_value": 100000}) + "\n")
+
+        positions = {"silver": {"active": True, "units": 100, "entry": 20.0}}
+        prices = {"silver": {"bid": 20.0}}  # value = 2000
+
+        result = check_portfolio_drawdown(positions, prices)  # since_ts=None
+
+        # With all-time peak at 100000, drawdown should be heavily negative
+        assert result["current_drawdown_pct"] < -10
+        assert result["peak_value"] == pytest.approx(100000, abs=1)
+
 
 # ---------------------------------------------------------------------------
 # log_portfolio_value
