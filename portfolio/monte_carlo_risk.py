@@ -501,6 +501,7 @@ def compute_portfolio_var(
         "var_95_sek": round(var95 * fx_rate, 2),
         "var_99_sek": round(var99 * fx_rate, 2),
         "cvar_95_sek": round(cvar95 * fx_rate, 2),
+        "cvar_99_sek": round(cvar99 * fx_rate, 2),
         "total_exposure_usd": round(total_exposure, 2),
         "total_exposure_sek": round(total_exposure * fx_rate, 2),
         "n_positions": len(tickers),

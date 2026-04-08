@@ -299,9 +299,9 @@ def get_buying_power(account_id: str | None = None) -> dict:
     """
     aid = str(account_id or DEFAULT_ACCOUNT_ID)
     data = api_get("/_api/account-overview/overview/categorizedAccounts")
-    for cat in data.get("categories", []):
+    for cat in data.get("categorizedAccounts", []):
         for acc in cat.get("accounts", []):
-            if str(acc.get("id", "")) == aid:
+            if str(acc.get("accountId", "")) == aid:
                 def _v(obj):
                     return obj.get("value", 0) if isinstance(obj, dict) else (obj or 0)
                 return {
@@ -311,7 +311,7 @@ def get_buying_power(account_id: str | None = None) -> dict:
                 }
     # Account not found by id — try matching with categorizedAccounts
     # (structure may nest accounts differently across Avanza updates)
-    total = data.get("categories", [{}])[0].get("totalValue", {})
+    total = data.get("categorizedAccounts", [{}])[0].get("totalValue", {})
     total_val = total.get("value", 0) if isinstance(total, dict) else 0
     positions = get_positions()
     pos_val = sum(p.get("value", 0) for p in positions if str(p.get("account_id")) == aid)

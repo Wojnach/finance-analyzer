@@ -58,7 +58,7 @@ NFP_DATES_2026 = [
     date(2026, 1, 2),
     date(2026, 2, 6),
     date(2026, 3, 6),
-    date(2026, 4, 3),
+    date(2026, 4, 2),   # BLS released April 2026 NFP on Apr 2 (Apr 3 = Good Friday, market closed)
     date(2026, 5, 1),
     date(2026, 6, 5),
     date(2026, 7, 2),

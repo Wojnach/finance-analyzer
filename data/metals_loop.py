@@ -5075,8 +5075,7 @@ def write_context(prices, trigger_reason, tier=2):
         "profit_sek": round(total_val - total_inv, 0),
     }
 
-    with open("data/metals_context.json", "w", encoding="utf-8") as f:
-        json.dump(ctx, f, indent=2, ensure_ascii=False)
+    atomic_write_json("data/metals_context.json", ctx, indent=2, ensure_ascii=False)
 
     return ctx
 
@@ -6061,6 +6060,7 @@ Positions: {pos_summary}{prob_summary}""")
                             stop_order_state = place_stop_loss_orders(page, POSITIONS)
                         # Initialize silver fast-tick if new silver position detected
                         if SILVER_FAST_TICK_ENABLED and _has_active_silver() and _silver_underlying_ref is None:
+                            _silver_reset_session()  # clear stale alert thresholds from prior position
                             _silver_init_ref()
                             log(f"Silver fast-tick activated: ref=${_silver_underlying_ref or '?'}")
                         send_telegram(

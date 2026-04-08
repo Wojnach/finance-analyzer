@@ -15,6 +15,7 @@ import os
 import time
 
 import requests
+from portfolio.file_utils import atomic_write_json
 from metals_swing_config import (
     ACCOUNT_ID,
     BUY_COOLDOWN_MINUTES,
@@ -109,8 +110,7 @@ def _default_state():
 
 def _save_state(state):
     try:
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2, ensure_ascii=False)
+        atomic_write_json(STATE_FILE, state, indent=2, ensure_ascii=False)
     except Exception as e:
         _log(f"State save error: {e}")
 
