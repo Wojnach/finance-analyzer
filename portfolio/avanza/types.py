@@ -209,7 +209,7 @@ class StopLossResult:
     def from_api(cls, raw: dict) -> StopLossResult:
         status = raw.get("status", raw.get("orderRequestStatus", ""))
         success = str(status).upper() in ("SUCCESS", "OK", "ACTIVE")
-        stop_id = str(raw.get("stopLossId", raw.get("stop_id", raw.get("id", ""))))
+        stop_id = str(raw.get("stoplossOrderId", raw.get("stopLossId", raw.get("stop_id", raw.get("id", "")))))
         return cls(
             success=success,
             stop_id=stop_id,
