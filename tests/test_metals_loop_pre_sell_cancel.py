@@ -34,6 +34,15 @@ def silence_telegram(monkeypatch):
     monkeypatch.setattr(mod, "send_telegram", lambda *a, **kw: None)
 
 
+def _stub_snapshot(monkeypatch, snapshot):
+    """Patch get_stop_losses_strict (used by _capture_stop_snapshot) to
+    return the given fixture data without hitting Avanza."""
+    monkeypatch.setattr(
+        "portfolio.avanza_session.get_stop_losses_strict",
+        lambda: snapshot,
+    )
+
+
 def _ok(cancelled=None, snapshot=None):
     """Build a SUCCESS server-side result."""
     return {
@@ -85,6 +94,11 @@ class TestEnsureStopsCancelledBeforeSell:
         """No matching POSITIONS key → skip local layer, still run server layer."""
         import metals_loop as mod
         monkeypatch.setattr(mod, "POSITIONS", {})
+        # Snapshot returns one matching stop so server cancel actually runs
+        _stub_snapshot(monkeypatch, [
+            {"id": "S1", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 0.95, "type": "LESS_OR_EQUAL"}, "order": {"price": 0.94, "volume": 100}},
+        ])
         called = {"server": False}
 
         def fake_server(ob_id, account_id=None, max_wait=3.0):
@@ -96,7 +110,9 @@ class TestEnsureStopsCancelledBeforeSell:
         ok, snap = mod._ensure_stops_cancelled_before_sell(None, "OB1")
         assert ok is True
         assert called["server"] is True
-        assert snap == []
+        # Rollback snapshot now contains only stops actually cancelled (S1)
+        assert len(snap) == 1
+        assert snap[0]["id"] == "S1"
 
     def test_matching_position_runs_both_layers_and_keeps_local_state(
         self, monkeypatch, silence_telegram, tmp_path
@@ -109,6 +125,12 @@ class TestEnsureStopsCancelledBeforeSell:
         monkeypatch.setattr(mod, "POSITIONS", {
             "silver_q0": {"ob_id": "OB1", "active": True, "name": "TEST"}
         })
+
+        # Pre-cancel snapshot returns one matching stop
+        _stub_snapshot(monkeypatch, [
+            {"id": "SERVER_S1", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 0.95, "type": "LESS_OR_EQUAL"}, "order": {"price": 0.94, "volume": 100}},
+        ])
 
         # Cascade stop state with one entry
         cascade_before = {
@@ -139,8 +161,9 @@ class TestEnsureStopsCancelledBeforeSell:
 
         ok, snap = mod._ensure_stops_cancelled_before_sell(object(), "OB1")
         assert ok is True
-        # Snapshot is propagated for caller to use in re-arm if sell fails
+        # Rollback snapshot is filtered to confirmed-cancelled stops
         assert len(snap) == 1
+        assert snap[0]["id"] == "SERVER_S1"
         assert local_called["n"] == 1
         # CRITICAL: must NOT save (which would delete) — _cleanup_stop_orders_for
         # handles state removal AFTER the sell fills
@@ -152,6 +175,11 @@ class TestEnsureStopsCancelledBeforeSell:
         monkeypatch.setattr(mod, "POSITIONS", {
             "silver_q0": {"ob_id": "OB1", "active": True}
         })
+        # Pre-cancel snapshot has one stop so server cancel runs
+        _stub_snapshot(monkeypatch, [
+            {"id": "S1", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 0.95}, "order": {"price": 0.94, "volume": 100}},
+        ])
         monkeypatch.setattr(mod, "_load_stop_orders", lambda: {"silver_q0": {"orders": []}})
 
         local_called = {"n": 0}
@@ -160,7 +188,7 @@ class TestEnsureStopsCancelledBeforeSell:
 
         monkeypatch.setattr(
             "portfolio.avanza_session.cancel_all_stop_losses_for",
-            lambda *a, **kw: _ok(),
+            lambda *a, **kw: _ok(cancelled=["S1"]),
         )
         ok, _ = mod._ensure_stops_cancelled_before_sell(object(), "OB1")
         assert ok is True
@@ -173,6 +201,10 @@ class TestEnsureStopsCancelledBeforeSell:
         monkeypatch.setattr(mod, "POSITIONS", {
             "silver_q0": {"ob_id": "OB1", "active": True}
         })
+        _stub_snapshot(monkeypatch, [
+            {"id": "S1", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 0.95}, "order": {"price": 0.94, "volume": 100}},
+        ])
 
         def boom(*a, **kw):
             raise RuntimeError("simulated cascade load failure")
@@ -180,7 +212,7 @@ class TestEnsureStopsCancelledBeforeSell:
 
         monkeypatch.setattr(
             "portfolio.avanza_session.cancel_all_stop_losses_for",
-            lambda *a, **kw: _ok(),
+            lambda *a, **kw: _ok(cancelled=["S1"]),
         )
         ok, _ = mod._ensure_stops_cancelled_before_sell(object(), "OB1")
         assert ok is True
@@ -192,14 +224,22 @@ class TestEnsureStopsCancelledBeforeSell:
 
         alerts = []
         monkeypatch.setattr(mod, "send_telegram", lambda msg: alerts.append(msg))
+        # Pre-cancel snapshot has 2 stops; server cancels neither
+        _stub_snapshot(monkeypatch, [
+            {"id": "S1", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 0.95}, "order": {"price": 0.94, "volume": 100}},
+            {"id": "S2", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 0.90}, "order": {"price": 0.89, "volume": 100}},
+        ])
         monkeypatch.setattr(
             "portfolio.avanza_session.cancel_all_stop_losses_for",
-            lambda *a, **kw: _failed(remaining=["S1", "S2"], snapshot=[{"id": "S1"}, {"id": "S2"}]),
+            lambda *a, **kw: _failed(remaining=["S1", "S2"]),
         )
         ok, snap = mod._ensure_stops_cancelled_before_sell(object(), "OB1")
         assert ok is False
-        # Snapshot is propagated even on FAILED so caller can attempt re-arm
-        assert len(snap) == 2
+        # FAILED → no stops were cancelled → rollback snapshot is empty
+        # (we don't re-arm stops that are still alive)
+        assert snap == []
         assert any("STOP CANCEL FAILED" in m for m in alerts)
         assert any("OB1" in m for m in alerts)
 
@@ -207,13 +247,23 @@ class TestEnsureStopsCancelledBeforeSell:
         """PARTIAL is also a hard block — some stops still encumber the volume."""
         import metals_loop as mod
         monkeypatch.setattr(mod, "POSITIONS", {})
+        _stub_snapshot(monkeypatch, [
+            {"id": "S1", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 0.95}, "order": {"price": 0.94, "volume": 100}},
+            {"id": "S2", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 0.90}, "order": {"price": 0.89, "volume": 100}},
+        ])
         monkeypatch.setattr(
             "portfolio.avanza_session.cancel_all_stop_losses_for",
-            lambda *a, **kw: _partial(cancelled=["S1"], remaining=["S2"], snapshot=[{"id": "S1"}, {"id": "S2"}]),
+            lambda *a, **kw: _partial(cancelled=["S1"], remaining=["S2"]),
         )
         ok, snap = mod._ensure_stops_cancelled_before_sell(object(), "OB1")
         assert ok is False
-        assert len(snap) == 2  # snapshot returned for re-arm
+        # CRITICAL: rollback snapshot must contain ONLY the cancelled stop (S1),
+        # NOT the still-alive S2. Re-arming S2 would create a duplicate and
+        # inflate encumbered volume.
+        assert len(snap) == 1
+        assert snap[0]["id"] == "S1"
 
     def test_server_exception_blocks_sell(self, monkeypatch, silence_telegram):
         """If the server cancel call itself raises, treat as FAILED."""
@@ -232,6 +282,10 @@ class TestEnsureStopsCancelledBeforeSell:
         another account's stops."""
         import metals_loop as mod
         monkeypatch.setattr(mod, "POSITIONS", {})
+        _stub_snapshot(monkeypatch, [
+            {"id": "S1", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 0.95}, "order": {"price": 0.94, "volume": 100}},
+        ])
         captured = {}
 
         def fake_server(ob_id, account_id=None, max_wait=3.0):
@@ -245,6 +299,80 @@ class TestEnsureStopsCancelledBeforeSell:
         assert captured["ob_id"] == "OB1"
         assert captured["account_id"] == mod.ACCOUNT_ID
         assert captured["max_wait"] == 5.5
+
+    def test_pre_cancel_snapshot_read_failure_blocks_sell(self, monkeypatch):
+        """If we cannot read the inventory before cancelling, refuse to
+        cancel — fail closed. Otherwise we'd cancel without a rollback path."""
+        import metals_loop as mod
+        monkeypatch.setattr(mod, "POSITIONS", {})
+        alerts = []
+        monkeypatch.setattr(mod, "send_telegram", lambda msg: alerts.append(msg))
+
+        def boom():
+            raise RuntimeError("session expired")
+        monkeypatch.setattr("portfolio.avanza_session.get_stop_losses_strict", boom)
+
+        # cancel_all_stop_losses_for must NOT be called — we never get past
+        # the snapshot step
+        called = {"cancel": False}
+        monkeypatch.setattr(
+            "portfolio.avanza_session.cancel_all_stop_losses_for",
+            lambda *a, **kw: (called.__setitem__("cancel", True), _ok())[1],
+        )
+
+        ok, snap = mod._ensure_stops_cancelled_before_sell(object(), "OB1")
+        assert ok is False
+        assert snap == []
+        assert called["cancel"] is False
+        assert any("STOP SNAPSHOT FAILED" in m for m in alerts)
+
+    def test_no_stops_short_circuits_to_success(self, monkeypatch, silence_telegram):
+        """Empty inventory → no need to cancel anything → SUCCESS without
+        invoking cancel_all_stop_losses_for."""
+        import metals_loop as mod
+        monkeypatch.setattr(mod, "POSITIONS", {})
+        _stub_snapshot(monkeypatch, [])
+
+        called = {"n": 0}
+        monkeypatch.setattr(
+            "portfolio.avanza_session.cancel_all_stop_losses_for",
+            lambda *a, **kw: (called.__setitem__("n", called["n"] + 1), _ok())[1],
+        )
+        ok, snap = mod._ensure_stops_cancelled_before_sell(object(), "OB1")
+        assert ok is True
+        assert snap == []
+        assert called["n"] == 0  # short-circuited
+
+    def test_partial_returns_only_confirmed_cancelled(self, monkeypatch, silence_telegram):
+        """Codex finding 2: PARTIAL must filter the rollback snapshot to
+        only the stops the server confirmed it cancelled. Re-arming the
+        full inventory would duplicate the still-active stops and
+        re-trigger the same volume-constraint bug."""
+        import metals_loop as mod
+        monkeypatch.setattr(mod, "POSITIONS", {})
+
+        # Pre-cancel: 3 stops on the orderbook
+        _stub_snapshot(monkeypatch, [
+            {"id": "A", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 1.0}, "order": {"price": 1.0, "volume": 100}},
+            {"id": "B", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 0.9}, "order": {"price": 0.9, "volume": 100}},
+            {"id": "C", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 0.8}, "order": {"price": 0.8, "volume": 100}},
+        ])
+
+        # Server confirms only A cancelled, B and C remain
+        monkeypatch.setattr(
+            "portfolio.avanza_session.cancel_all_stop_losses_for",
+            lambda *a, **kw: _partial(cancelled=["A"], remaining=["B", "C"]),
+        )
+        ok, snap = mod._ensure_stops_cancelled_before_sell(object(), "OB1")
+        assert ok is False
+        assert len(snap) == 1
+        assert snap[0]["id"] == "A"
+        # B and C must NOT be in the rollback set — they're still alive
+        assert all(s["id"] != "B" for s in snap)
+        assert all(s["id"] != "C" for s in snap)
 
 
 class TestRearmAfterFailedSell:
@@ -308,6 +436,73 @@ class TestRearmAfterFailedSell:
         mod._rearm_stops_after_failed_sell("OB1", [{"id": "OLD"}])
         assert any("RE-ARM FAILED" in m for m in alerts)
         assert any("naked" in m.lower() for m in alerts)
+
+
+class TestRestoreFullStopProtection:
+    """Tests for _restore_full_stop_protection — used by cancel_spike_orders
+    to roll back the partial protection that place_spike_orders left.
+    """
+
+    def test_empty_inputs_are_noop(self, monkeypatch):
+        import metals_loop as mod
+        called = {"n": 0}
+        monkeypatch.setattr(
+            "portfolio.avanza_session.cancel_all_stop_losses_for",
+            lambda *a, **kw: (called.__setitem__("n", called["n"] + 1), _ok())[1],
+        )
+        mod._restore_full_stop_protection("", [{"id": "X"}])
+        mod._restore_full_stop_protection("OB1", [])
+        mod._restore_full_stop_protection(None, None)
+        assert called["n"] == 0
+
+    def test_clears_then_rearms(self, monkeypatch, silence_telegram):
+        import metals_loop as mod
+        order = []
+        monkeypatch.setattr(
+            "portfolio.avanza_session.cancel_all_stop_losses_for",
+            lambda *a, **kw: (order.append("clear"), {"status": "SUCCESS", "cancelled": [], "remaining": [], "snapshot": [], "elapsed_seconds": 0.0})[1],
+        )
+        monkeypatch.setattr(
+            "portfolio.avanza_session.rearm_stop_losses_from_snapshot",
+            lambda snap: (order.append("rearm"), {"status": "SUCCESS", "rearmed": ["NEW1"], "failed": []})[1],
+        )
+        mod._restore_full_stop_protection("OB1", [{"id": "OLD"}])
+        assert order == ["clear", "rearm"]
+
+    def test_clear_failure_still_rearms_with_warning(self, monkeypatch):
+        """Codex-flagged tradeoff: if we can't cleanly clear the resized
+        stops, re-arm anyway and warn. Better over-coverage than naked."""
+        import metals_loop as mod
+        alerts = []
+        monkeypatch.setattr(mod, "send_telegram", lambda msg: alerts.append(msg))
+
+        rearm_called = {"n": 0}
+        monkeypatch.setattr(
+            "portfolio.avanza_session.cancel_all_stop_losses_for",
+            lambda *a, **kw: {"status": "FAILED", "cancelled": [], "remaining": ["X"], "snapshot": [], "elapsed_seconds": 0.0},
+        )
+        monkeypatch.setattr(
+            "portfolio.avanza_session.rearm_stop_losses_from_snapshot",
+            lambda snap: (rearm_called.__setitem__("n", 1), {"status": "SUCCESS", "rearmed": ["NEW"], "failed": []})[1],
+        )
+        mod._restore_full_stop_protection("OB1", [{"id": "OLD"}])
+        assert rearm_called["n"] == 1
+        assert any("RESTORE WARNING" in m for m in alerts)
+
+    def test_rearm_partial_alerts(self, monkeypatch):
+        import metals_loop as mod
+        alerts = []
+        monkeypatch.setattr(mod, "send_telegram", lambda msg: alerts.append(msg))
+        monkeypatch.setattr(
+            "portfolio.avanza_session.cancel_all_stop_losses_for",
+            lambda *a, **kw: {"status": "SUCCESS", "cancelled": [], "remaining": [], "snapshot": [], "elapsed_seconds": 0.0},
+        )
+        monkeypatch.setattr(
+            "portfolio.avanza_session.rearm_stop_losses_from_snapshot",
+            lambda snap: {"status": "PARTIAL", "rearmed": ["A"], "failed": ["B"]},
+        )
+        mod._restore_full_stop_protection("OB1", [{"id": "A"}, {"id": "B"}])
+        assert any("SPIKE RESTORE PARTIAL" in m for m in alerts)
 
 
 class TestResizeSnapshotVolume:

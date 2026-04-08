@@ -2988,6 +2988,37 @@ def _cleanup_stop_orders_for(page, key):
         log(f"  Stop order cleanup error for {key}: {e}")
 
 
+def _capture_stop_snapshot(ob_id):
+    """Read the live stop-loss inventory for ``ob_id`` BEFORE any cancel
+    side effect, returning ``(ok, snapshot)``.
+
+    Captured snapshots are used as the rollback record for the
+    cancel-then-sell sequence. Snapshotting AFTER any cancel would miss
+    stops that were already removed at the broker, leaving the rollback
+    incomplete and the position naked on a failed sell.
+
+    Returns ``(False, [])`` on read failure — fail closed: callers MUST
+    NOT proceed with the sell when the rollback record is unknown.
+    """
+    if not ob_id:
+        return True, []
+    ob_str = str(ob_id)
+    try:
+        from portfolio.avanza_session import get_stop_losses_strict
+        all_stops = get_stop_losses_strict()
+    except Exception as e:
+        log(f"[stops] pre-cancel snapshot read failed for {ob_str}: {e}")
+        return False, []
+    import copy as _copy
+    snapshot = [
+        _copy.deepcopy(sl)
+        for sl in all_stops
+        if isinstance(sl, dict)
+        and str((sl.get("orderbook") or {}).get("id")) == ob_str
+    ]
+    return True, snapshot
+
+
 def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0):
     """Cancel ALL stop-loss orders for ``ob_id`` BEFORE placing a sell.
 
@@ -2996,47 +3027,98 @@ def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0):
     treats the overlap as an attempted short-sale. This helper makes sells
     safe by ensuring zero stops remain on the orderbook before the sell call.
 
-    Two layers, both run on every call:
+    Sequence (order matters for rollback safety):
 
-    1. **Local cascade cancel** — uses the existing Playwright-based
-       ``_cancel_stop_orders`` path so the local ``metals_stop_orders.json``
-       state is consistent with reality. Identifies the position by ob_id
-       (since callers like the fish engine don't have a position key handy).
+    1. **Pre-cancel snapshot** via :func:`_capture_stop_snapshot`. Captured
+       BEFORE any cancel mutates broker state so the rollback record is
+       complete. If the snapshot read fails, the function fails closed —
+       safer to block the sell than to cancel without a rollback path.
 
-    2. **Server-side cancel + verify poll** — calls
-       ``portfolio.avanza_session.cancel_all_stop_losses_for``, which
+    2. **Server-side cancel + verify poll** via
+       :func:`portfolio.avanza_session.cancel_all_stop_losses_for`. This
        enumerates ALL active SLs for the orderbook (catching anything the
-       local state missed: manual stops, leftover from a previous session,
-       hardware trailing stops, etc.) and POLLS until none remain. Polling
-       is critical because Avanza's DELETE returns 200 immediately but the
-       encumbered volume is only released when the SL actually disappears
-       from the position view.
+       local state missed: manual stops, leftover from previous sessions,
+       hardware trailing stops, etc.) and POLLS until none remain.
+       Polling is critical because Avanza's DELETE returns 200 immediately
+       but the encumbered volume is only released when the SL actually
+       disappears from the position view.
+
+    3. **Local cascade housekeeping** via the existing Playwright
+       ``_cancel_stop_orders`` path. Runs LAST so the local state file
+       reflects the broker reality after step 2. Best-effort: any failure
+       just leaves the local state stale, which the post-sell
+       :func:`_cleanup_stop_orders_for` will tidy up.
 
     Returns:
-        Tuple of ``(ok: bool, snapshot: list[dict])``.
+        Tuple of ``(ok: bool, rollback_snapshot: list[dict])``.
 
         ``ok`` is ``True`` if all stops are confirmed cleared (or none
         existed), ``False`` if any stop remains after the polling window
-        OR the SL list could not be read reliably. Callers MUST treat
-        ``False`` as a hard block on the dependent SELL — proceeding
-        anyway will produce ``short.sell.not.allowed``.
+        OR the SL list could not be read reliably.
 
-        ``snapshot`` is the list of full stop-loss dicts that were
-        present at the start of the cancel sequence. Callers should
-        pass this to :func:`_rearm_stops_after_failed_sell` if the
-        dependent sell ultimately fails — otherwise the position is
-        left **naked** at the broker, which is a strictly worse failure
-        mode than the original ``short.sell.not.allowed`` error.
+        ``rollback_snapshot`` contains ONLY the stops that were actually
+        confirmed cancelled by the server. Re-arming this list cannot
+        produce duplicates of still-active stops — re-arming the
+        full pre-cancel snapshot would, which would inflate the
+        encumbered volume on a PARTIAL outcome and trigger
+        ``short.sell.not.allowed`` on the next sell attempt.
     """
     if not ob_id:
         return True, []
 
     ob_str = str(ob_id)
 
-    # Layer 1: local cascade cleanup. Find the matching POSITIONS key by ob_id.
-    # We do NOT delete the state entry here — _cleanup_stop_orders_for handles
-    # that AFTER the sell fills, so the post-sell housekeeping path stays
-    # untouched.
+    # STEP 1: Capture pre-cancel snapshot before any side effect.
+    snap_ok, pre_cancel_snapshot = _capture_stop_snapshot(ob_str)
+    if not snap_ok:
+        # Fail closed — we cannot safely cancel without a rollback record.
+        try:
+            send_telegram(
+                f"*STOP SNAPSHOT FAILED* ob={ob_str}\n"
+                f"Cannot read SL inventory; SELL aborted to avoid naked position."
+            )
+        except Exception:
+            pass
+        return False, []
+
+    if not pre_cancel_snapshot:
+        # No stops on this orderbook — sell is already safe.
+        return True, []
+
+    # STEP 2: Authoritative server-side cancel + poll verify.
+    try:
+        from portfolio.avanza_session import cancel_all_stop_losses_for
+
+        result = cancel_all_stop_losses_for(
+            ob_str,
+            account_id=ACCOUNT_ID,
+            max_wait=max_wait,
+        )
+    except Exception as e:
+        log(f"[stops] server cancel raised for {ob_str}: {e}")
+        # Conservative: assume nothing was cancelled. The pre-cancel
+        # snapshot is the upper bound on what we MAY need to roll back,
+        # but we don't know what actually happened. Returning the full
+        # snapshot is acceptable here only because we cannot determine
+        # which (if any) DELETEs took effect; the caller treats this as
+        # FAILED and the operator gets a Telegram alert.
+        return False, pre_cancel_snapshot
+
+    status = result.get("status", "FAILED")
+    cancelled_ids = set(result.get("cancelled", []) or [])
+    remaining = result.get("remaining", []) or []
+    elapsed = result.get("elapsed_seconds", 0.0)
+
+    # Build the rollback snapshot from the pre-cancel data, filtered to
+    # ONLY the stops the server confirmed it cancelled. This is the key
+    # invariant: never re-arm a stop that is still alive at the broker.
+    rollback_snapshot = [
+        sl for sl in pre_cancel_snapshot if sl.get("id", "") in cancelled_ids
+    ]
+
+    # STEP 3: Local cascade housekeeping (best-effort, after server cancel).
+    # The state entry stays — _cleanup_stop_orders_for handles deletion
+    # AFTER the sell fills.
     try:
         matched_key = None
         for k, p in POSITIONS.items():
@@ -3049,40 +3131,21 @@ def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0):
                 csrf = get_csrf(page)
                 if csrf:
                     _cancel_stop_orders(page, matched_key, stop_state[matched_key], csrf)
-                    log(f"[stops] cancelled local cascade for {matched_key} ({ob_str}) pre-sell")
+                    log(f"[stops] local cascade housekeeping for {matched_key} ({ob_str})")
     except Exception as e:
-        log(f"[stops] local cascade cancel error for ob {ob_str}: {e}")
-
-    # Layer 2: authoritative server-side cancel + poll verify.
-    try:
-        from portfolio.avanza_session import cancel_all_stop_losses_for
-
-        result = cancel_all_stop_losses_for(
-            ob_str,
-            account_id=ACCOUNT_ID,
-            max_wait=max_wait,
-        )
-    except Exception as e:
-        log(f"[stops] server cancel raised for {ob_str}: {e}")
-        return False, []
-
-    status = result.get("status", "FAILED")
-    cancelled = result.get("cancelled", []) or []
-    remaining = result.get("remaining", []) or []
-    snapshot = result.get("snapshot", []) or []
-    elapsed = result.get("elapsed_seconds", 0.0)
+        log(f"[stops] local cascade housekeeping error for ob {ob_str}: {e}")
 
     if status == "SUCCESS":
-        if cancelled:
+        if cancelled_ids:
             log(
-                f"[stops] cleared {len(cancelled)} stop(s) for {ob_str} in "
+                f"[stops] cleared {len(cancelled_ids)} stop(s) for {ob_str} in "
                 f"{elapsed:.2f}s (pre-sell verification OK)"
             )
-        return True, snapshot
+        return True, rollback_snapshot
 
     # PARTIAL or FAILED — block the sell and surface the failure loudly.
     log(
-        f"[stops] {status} pre-sell for {ob_str}: cancelled={cancelled} "
+        f"[stops] {status} pre-sell for {ob_str}: cancelled={list(cancelled_ids)} "
         f"remaining={remaining} elapsed={elapsed:.2f}s"
     )
     try:
@@ -3093,10 +3156,10 @@ def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0):
         )
     except Exception:
         pass
-    # Even on PARTIAL/FAILED, return the snapshot. Some callers may want to
-    # re-arm whatever WE cancelled before bailing — the partial state is
-    # still strictly worse than the original full coverage.
-    return False, snapshot
+    # Return only the stops we actually cancelled — re-arming the full
+    # pre-cancel snapshot here would create duplicates of the stops still
+    # alive at the broker, inflating encumbered volume.
+    return False, rollback_snapshot
 
 
 def _rearm_stops_after_failed_sell(ob_id, snapshot):
@@ -3962,7 +4025,13 @@ def check_momentum_exit(positions, prices, price_history_buf):
 def place_spike_orders(page, positions, prices, targets):
     """Place limit sell orders for US open spike capture.
 
-    Returns dict of {position_key: order_id} for placed orders.
+    Returns ``(placed, stop_snapshots)`` where:
+        - ``placed[key] = order_id`` for each successfully placed spike order
+        - ``stop_snapshots[key] = list[dict]`` of the FULL original stop-loss
+          dicts that were on the orderbook before the spike sequence ran.
+          The caller MUST persist these — :func:`cancel_spike_orders` uses
+          them to restore full-volume protection when an unfilled spike
+          order is later cancelled.
 
     **Volume-constraint handling**: spike sells are partial-volume limit
     orders that can sit unfilled for hours. When a position has active
@@ -3982,13 +4051,20 @@ def place_spike_orders(page, positions, prices, targets):
     On failure (cancel can't clear, or spike sell rejected), restore
     the original stops so the position is never left naked. The user
     is alerted via Telegram for any non-clean outcome.
+
+    On unfilled spike-cancel later in the day, the persisted
+    ``stop_snapshots[key]`` is what :func:`cancel_spike_orders` reads
+    to restore full-volume protection. Without that persistence the
+    spike volume slice would remain unprotected for the rest of the
+    session.
     """
     csrf = get_csrf(page)
     if not csrf:
         log("Spike: no CSRF token, skipping")
-        return {}
+        return {}, {}
 
     placed = {}
+    stop_snapshots: dict = {}
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
 
     for key, target in targets.items():
@@ -4003,7 +4079,9 @@ def place_spike_orders(page, positions, prices, targets):
             continue
 
         # Step 1: Cancel + snapshot existing stops. This frees the encumbered
-        # volume so our partial spike sell can be accepted.
+        # volume so our partial spike sell can be accepted. The returned
+        # snapshot will be persisted to spike_state so cancel_spike_orders
+        # can restore full coverage if the spike order goes unfilled.
         ok_clear, sl_snapshot = _ensure_stops_cancelled_before_sell(page, ob_id)
         if not ok_clear:
             log(f"Spike SELL aborted for {key}: could not clear stops on {ob_id}")
@@ -4014,6 +4092,14 @@ def place_spike_orders(page, positions, prices, targets):
             # Restore whatever we may have partially cancelled.
             _rearm_stops_after_failed_sell(ob_id, sl_snapshot)
             continue
+
+        # Persist the original snapshot for spike-cancel restoration.
+        # We do this regardless of whether the spike sell ultimately succeeds
+        # below — the snapshot is a record of what was at the broker before
+        # this function ran, and is the authoritative source for full
+        # restoration.
+        if sl_snapshot:
+            stop_snapshots[key] = sl_snapshot
 
         spike_placed_ok = False
         try:
@@ -4073,10 +4159,12 @@ def place_spike_orders(page, positions, prices, targets):
                 # Spike volume covers full position — no remainder to protect.
                 pass
         elif sl_snapshot:
-            # Spike placement failed: restore originals exactly.
+            # Spike placement failed: restore originals exactly. Drop the
+            # persisted snapshot since it's no longer needed for cancel.
             _rearm_stops_after_failed_sell(ob_id, sl_snapshot)
+            stop_snapshots.pop(key, None)
 
-    return placed
+    return placed, stop_snapshots
 
 
 def _resize_snapshot_volume(snapshot, new_volume: int) -> list:
@@ -4111,14 +4199,39 @@ def _resize_snapshot_volume(snapshot, new_volume: int) -> list:
     return out
 
 
-def cancel_spike_orders(page, spike_state):
-    """Cancel all unfilled spike orders."""
+def cancel_spike_orders(page, spike_state, positions=None):
+    """Cancel all unfilled spike orders AND restore full stop coverage.
+
+    When ``place_spike_orders`` ran earlier in the day, it cancelled the
+    full-volume stops on each position and re-armed them at
+    (position_volume - spike_volume). The "spike volume" slice of the
+    position has been unprotected ever since, justified only by the
+    pending spike LIMIT order that was reserving that slice for sale.
+
+    When the spike order is cancelled here without having filled, the
+    reservation goes away — but the resized stops do NOT automatically
+    grow back to cover the freed volume. Without a deliberate restore,
+    the spike volume slice remains naked for the rest of the session.
+
+    This function therefore performs two steps per cancelled order:
+
+      1. DELETE the spike LIMIT order via the trading-critical API.
+      2. If we persisted an original ``stop_snapshots[key]`` from
+         ``place_spike_orders``, atomically clear the resized stops and
+         re-arm the originals at full volume via
+         :func:`_restore_full_stop_protection`.
+
+    The ``positions`` argument is required when restoring stops, since
+    we need the orderbook ID. It's optional only for backward compat with
+    callers that don't care about restoration (e.g. test fixtures).
+    """
     csrf = get_csrf(page)
     if not csrf:
         log("Spike cancel: no CSRF token")
         return
 
     orders = spike_state.get("orders", {})
+    snapshots = spike_state.get("stop_snapshots", {}) or {}
     for key, order_id in list(orders.items()):
         if not order_id:
             continue
@@ -4140,6 +4253,103 @@ def cancel_spike_orders(page, spike_state):
             log(f"Spike cancel {key}: status={result.get('status')}")
         except Exception as e:
             log(f"Spike cancel error {key}: {e}")
+
+        # After the spike LIMIT order is cancelled, restore full-volume
+        # stops if we have a snapshot to restore from.
+        original_snapshot = snapshots.get(key) if isinstance(snapshots, dict) else None
+        if original_snapshot and positions is not None:
+            pos = positions.get(key, {})
+            ob_id = pos.get("ob_id")
+            if ob_id:
+                _restore_full_stop_protection(ob_id, original_snapshot)
+            else:
+                log(f"[spike] cannot restore stops for {key}: no ob_id")
+        elif original_snapshot:
+            log(f"[spike] snapshot present for {key} but no positions arg — stops NOT restored")
+
+    # Drop the snapshots from the state — they've been used.
+    spike_state["stop_snapshots"] = {}
+
+
+def _restore_full_stop_protection(ob_id, original_snapshot):
+    """Atomically clear current stops on ``ob_id`` and re-arm the originals.
+
+    Used by :func:`cancel_spike_orders` to roll back the partial protection
+    that ``place_spike_orders`` left behind. Without this, the spike-volume
+    slice of the position would remain unprotected after an unfilled spike
+    order is cancelled.
+
+    The "atomic" wording is loose: between the clear and the re-arm there
+    is a brief window where the position is naked. The window is bounded
+    by the cancel_all_stop_losses_for poll loop (typically <1s) and is
+    accepted as a risk because the alternative — overlapping resized +
+    original stops — would inflate encumbered volume past the position
+    size and trigger short.sell.not.allowed on subsequent operations.
+    """
+    if not ob_id or not original_snapshot:
+        return
+    try:
+        from portfolio.avanza_session import (
+            cancel_all_stop_losses_for,
+            rearm_stop_losses_from_snapshot,
+        )
+    except Exception as e:
+        log(f"[spike] cannot import session helpers for restore on {ob_id}: {e}")
+        return
+
+    # Clear the resized stops first so re-arming originals doesn't double-up.
+    try:
+        clear_result = cancel_all_stop_losses_for(str(ob_id), account_id=ACCOUNT_ID)
+        if clear_result.get("status") != "SUCCESS":
+            log(
+                f"[spike] cannot clear resized stops for {ob_id}: "
+                f"{clear_result.get('status')} — full restore may double-up"
+            )
+            try:
+                send_telegram(
+                    f"*SPIKE RESTORE WARNING* ob={ob_id}\n"
+                    f"Could not cleanly clear resized stops before re-arming "
+                    f"original snapshot — coverage may be inflated."
+                )
+            except Exception:
+                pass
+            # Don't return — re-arm anyway, better over-coverage than
+            # leaving the spike volume slice naked.
+    except Exception as e:
+        log(f"[spike] clear-resized-stops failed for {ob_id}: {e}")
+        return
+
+    try:
+        rearm_result = rearm_stop_losses_from_snapshot(original_snapshot)
+        status = rearm_result.get("status", "FAILED")
+        if status == "SUCCESS":
+            log(
+                f"[spike] restored full stop protection for {ob_id} "
+                f"({len(rearm_result.get('rearmed', []))} stops)"
+            )
+        else:
+            log(
+                f"[spike] partial/failed restore for {ob_id}: "
+                f"rearmed={rearm_result.get('rearmed')} failed={rearm_result.get('failed')}"
+            )
+            try:
+                send_telegram(
+                    f"*SPIKE RESTORE {status}* ob={ob_id}\n"
+                    f"rearmed={len(rearm_result.get('rearmed', []))} "
+                    f"failed={len(rearm_result.get('failed', []))}\n"
+                    f"Manual review required — position may be partially naked."
+                )
+            except Exception:
+                pass
+    except Exception as e:
+        log(f"[spike] re-arm raised for {ob_id}: {e}")
+        try:
+            send_telegram(
+                f"*SPIKE RESTORE FAILED* ob={ob_id}\nerror={e}\n"
+                f"Position has reduced protection. Manual intervention required."
+            )
+        except Exception:
+            pass
 
 
 def check_spike_fills(page, spike_state, positions):
@@ -5528,8 +5738,8 @@ Positions: {pos_summary}{prob_summary}""")
 
                     # Reset state on new day
                     if spike_st.get("date") != today_str:
-                        spike_st = {"orders": {}, "targets": {}, "date": today_str,
-                                    "placed": False, "cancelled": False}
+                        spike_st = {"orders": {}, "targets": {}, "stop_snapshots": {},
+                                    "date": today_str, "placed": False, "cancelled": False}
                         save_spike_state(spike_st)
 
                     # Phase 1: Place orders 15 min before the NYSE open, translated to Stockholm time
@@ -5542,9 +5752,10 @@ Positions: {pos_summary}{prob_summary}""")
                             for k, t in targets.items():
                                 log(f"  {k}: sell {t['units_to_sell']}u @ {t['target_price']} "
                                     f"(+{t['target_pnl_pct']:.1f}%)")
-                            placed = place_spike_orders(page, POSITIONS, prices, targets)
+                            placed, stop_snapshots = place_spike_orders(page, POSITIONS, prices, targets)
                             spike_st["orders"] = placed
                             spike_st["targets"] = targets
+                            spike_st["stop_snapshots"] = stop_snapshots
                             spike_st["placed"] = True
                             save_spike_state(spike_st)
                             send_telegram(
@@ -5565,6 +5776,13 @@ Positions: {pos_summary}{prob_summary}""")
                             filled = check_spike_fills(page, spike_st, POSITIONS)
                             for fk in filled:
                                 spike_st["orders"].pop(fk, None)
+                                # Drop the persisted snapshot — when a spike
+                                # fills, the position naturally shrinks to
+                                # match the resized stops. No restoration
+                                # needed; the snapshot would only be useful
+                                # for the unfilled-cancel path.
+                                if isinstance(spike_st.get("stop_snapshots"), dict):
+                                    spike_st["stop_snapshots"].pop(fk, None)
                                 # Update position units if partial sell
                                 if fk in POSITIONS and SPIKE_PARTIAL_PCT < 100:
                                     sold = spike_st.get("targets", {}).get(fk, {}).get("units_to_sell", 0)
@@ -5582,7 +5800,9 @@ Positions: {pos_summary}{prob_summary}""")
                     if spike_st["placed"] and not spike_st["cancelled"] and h_now >= spike_cancel_hour:
                         if spike_st.get("orders"):
                             log(f"Spike catcher: cancelling {len(spike_st['orders'])} unfilled orders")
-                            cancel_spike_orders(page, spike_st)
+                            # Pass POSITIONS so cancel_spike_orders can restore
+                            # full-volume stop protection from the persisted snapshots.
+                            cancel_spike_orders(page, spike_st, POSITIONS)
                             send_telegram(
                                 f"_Spike orders cancelled ({spike_sched['cancel_label']}, unfilled)_"
                             )
