@@ -1,112 +1,103 @@
-# Adversarial Review #2 — Prioritized Action Plan
-**Date:** 2026-04-07
-**Source:** Independent review + Agent reviews
-**Total findings:** 33+ (N1-N33, plus prior C3/C6 still open)
+# Adversarial Review Action Plan — 2026-04-08
 
----
+## Immediate Fixes (< 1 hour each, safe, no production risk)
 
-## IMMEDIATE (Day 1) — Dead Code Risk Protection
+### 1. Fix ADX cache key (C1)
+**File**: `portfolio/signal_engine.py:25`
+**What**: Replace `id(df)` with content-based key
+**Why**: Python reuses `id()` after GC — wrong ADX values affect trade decisions
+**How**: Use `hash((len(df), df["close"].iloc[-1], df["close"].iloc[0]))` as key
+**Risk**: None — changes only cache key, same computation
+**Tests**: Existing `test_signal_engine.py` ADX tests should still pass
 
-These are the highest-impact, lowest-effort fixes. The system has defense-in-depth
-architecture on paper but **none of the defensive layers are wired into production**.
+### 2. Add health file locking (H17)
+**File**: `portfolio/health.py`
+**What**: Add threading lock for read-modify-write in `update_health` and `update_signal_health_batch`
+**Why**: 8 ThreadPoolExecutor workers can overwrite each other's changes
+**How**: Import `_get_lock` pattern from `portfolio_mgr.py`
+**Risk**: Minimal — adds thread safety without changing behavior
+**Tests**: Add concurrent write test
 
-### 1. Wire `record_trade()` into all execution paths (N1/C4)
-**Effort:** 2 hours | **Impact:** Enables all overtrading guards
-**Files:** Create a post-trade hook in Layer 2 execution path.
-The challenge is Layer 2 runs as a Claude CLI subprocess — need to add
-`record_trade()` call wherever transactions are appended to portfolio state.
+### 3. Reset stack overflow counter on agent success (H5)
+**File**: `portfolio/agent_invocation.py:36-38`
+**What**: Reset `_consecutive_stack_overflows = 0` in `check_agent_completion()` on success
+**Why**: Counter only goes up, never down — transient crashes permanently disable Layer 2
+**How**: Add one line in `check_agent_completion()` when status == "success"
+**Risk**: None — only resets a safety counter
+**Tests**: Add unit test for counter reset
 
-### 2. Wire `check_drawdown()` into the main loop (N22)
-**Effort:** 1 hour | **Impact:** Enables drawdown circuit breaker
-**Where:** `portfolio/main.py` — call after computing portfolio value (line ~582).
-If breached, set a flag that Layer 2 reads to suppress BUY signals.
+### 4. Fix session expiry parse error (H11)
+**File**: `portfolio/avanza_session.py:76-77`
+**What**: Log warning instead of `pass` on `ValueError`
+**Why**: Corrupt expiry timestamp silently treated as "valid session"
+**How**: `except ValueError: logger.warning("Invalid expires_at: %s", expires_at)`
+**Risk**: None — logging only
+**Tests**: Add test with corrupt expiry string
 
-### 3. Add account ID validation (N4)
-**Effort:** 15 minutes | **Impact:** Prevents pension account orders
-**Where:** `portfolio/avanza_session.py:_place_order()` — add:
-```python
-ALLOWED_ACCOUNTS = {"1625505"}  # ISK only
-if str(account_id or DEFAULT_ACCOUNT_ID) not in ALLOWED_ACCOUNTS:
-    raise ValueError(f"Account {account_id} not in allowlist")
-```
+## Short-Term Fixes (This Month)
 
-### 4. Fix `_loading_keys` leak in `_cached_or_enqueue` (N21)
-**Effort:** 30 minutes | **Impact:** Prevents permanent LLM signal loss
-**Where:** `portfolio/shared_state.py` — add timeout check:
-```python
-# In _cached_or_enqueue, before checking _loading_keys:
-_LOADING_EXPIRE = 300  # 5 minutes
-# Clean stale loading keys
-stale = [k for k in _loading_keys if ...]  # need timestamp tracking
-```
-Or simpler: clear ALL `_loading_keys` at start of each cycle in `main.py`.
+### 5. Playwright error recovery (H12)
+**File**: `portfolio/avanza_session.py:181-287`
+**What**: Catch `PlaywrightError` in api_get/api_post/api_delete, call `close_playwright()`
+**Why**: Browser crash leaves non-None but unusable context
+**How**: Add `except Exception as e: if "Target page" in str(e) or ...: close_playwright()`
+**Risk**: Low — adds recovery path, doesn't change happy path
+**Tests**: Mock Playwright error, verify cleanup called
 
-### 5. Add locking to `health.py` read-modify-write (N10)
-**Effort:** 30 minutes | **Impact:** Prevents health data loss
-**Where:** `portfolio/health.py` — add a module-level `threading.Lock()`.
+### 6. Cap metals price history (H9)
+**File**: `data/metals_loop.py`
+**What**: Add `maxlen=1440` (24h at 60s) to price history deques
+**Why**: Unbounded growth → memory leak over weeks
+**How**: `_gold_price_history = deque(maxlen=1440)`
+**Risk**: None — deque maxlen is a standard Python pattern
+**Tests**: Verify deque doesn't grow beyond maxlen
 
-### 6. Fix `/mode` symlink destruction — TICKING TIME BOMB (N31)
-**Effort:** 5 minutes | **Impact:** Prevents permanent config breakage
-**Where:** `portfolio/telegram_poller.py:150-160` — resolve symlink before write:
-```python
-resolved_path = Path(CONFIG_FILE).resolve()
-atomic_write_json(resolved_path, config)
-```
+### 7. Account ID validation (H13)
+**File**: `portfolio/avanza_session.py`
+**What**: Validate account_id in `api_post` when path contains "order"
+**Why**: Prevents accidental trading on pension account 2674244
+**How**: `ALLOWED_ACCOUNTS = {"1625505"}; assert str(acct) in ALLOWED_ACCOUNTS`
+**Risk**: Low — could block legitimate orders if new account added (but that's the point)
+**Tests**: Test that pension account ID raises ValueError
 
-### 7. Redact Telegram bot token from retry logs (N32)
-**Effort:** 15 minutes | **Impact:** Prevents credential leakage
-**Where:** `portfolio/http_retry.py` — mask URLs containing `api.telegram.org/bot`
+### 8. Signal health quorum (CC1 mitigation)
+**File**: `portfolio/signal_engine.py` (end of `generate_signal`)
+**What**: Alert when fewer than 5 signals vote non-HOLD
+**Why**: "Graceful degradation" can silently reduce signal capacity below useful level
+**How**: Check `active_voters` and log warning + optional Telegram alert
+**Risk**: None — alerting only, doesn't change consensus logic
+**Tests**: Test with mock signals all returning HOLD
 
-### 8. Fix Sortino ratio denominator (N23)
-**Effort:** 5 minutes | **Impact:** Correct risk-adjusted metrics
-**Where:** `portfolio/equity_curve.py:246` — change:
-```python
-# BEFORE:
-downside_var = sum(r ** 2 for r in downside_returns) / len(downside_returns)
-# AFTER:
-downside_var = sum(r ** 2 for r in downside_returns) / len(daily_rets_dec)
-```
+## Medium-Term Improvements (This Quarter)
 
----
+### 9. Begin metals_loop.py decomposition (C2)
+**Phase 1**: Extract `StopLossManager` class (lines ~2920-3300)
+**Phase 2**: Extract `FishEngine` wrapper (lines ~2100-2300)
+**Phase 3**: Extract `MetalsOrderExecutor` (lines ~2800-2900)
+**Why**: 6561-line file with global state is the #1 reliability risk
+**Risk**: Medium — requires careful testing of each extraction
+**Estimated effort**: 3-5 sessions
 
-## SHORT-TERM (This Week)
+### 10. Calendar date expiry warning (M10)
+**File**: `portfolio/econ_dates.py`, `portfolio/fomc_dates.py`
+**What**: Add function to check latest date, warn if < 60 days away
+**Why**: Hardcoded dates through 2027 — silent failure in Jan 2028
+**How**: `check_calendar_freshness()` called at loop startup
+**Risk**: None — warning only
+**Tests**: Test with mocked date near expiry
 
-### 7. Add file locking to `atomic_append_jsonl` (N2)
-### 8. Fix circuit breaker HALF_OPEN stuck state (N24)
-### 9. Cache peak_value instead of scanning history (N5)
-### 10. Delete or wire `SignalWeightManager` (C6)
-### 11. Fix Avanza order confirmation to use order ID (N11)
-### 12. Add pre-trade volume invariant to order flow (C3)
+### 11. End-to-end signal pipeline test (CC2)
+**File**: New test `tests/test_signal_pipeline_e2e.py`
+**What**: One integration test exercising full `generate_signal` with real OHLCV
+**Why**: 750-line function with 20+ module dependencies, no integration test
+**How**: Use historical BTC-USD data, verify action/confidence are reasonable
+**Risk**: None — test only
+**Tests**: Self-evident
 
----
-
-## MEDIUM-TERM (This Month)
-
-### 13. Refactor metals_loop to use signal_engine.py (N3/A1)
-### 14. Add HALF_OPEN timeout to circuit breaker (N24)
-### 15. Fix Monte Carlo ATR-to-vol candle frequency assumption
-### 16. Upgrade FOMC dates to dynamic fetching (N13)
-### 17. Convert trade guards to `severity: "block"` (N14)
-### 18. Run post-cycle tasks asynchronously (N12)
-
----
-
-## Meta-Observation
-
-The most alarming finding is not any single bug — it's the **pattern** of defense
-layers that exist as code but are never activated:
-
-| Layer | Function | Status |
-|-------|----------|--------|
-| Overtrading guards | `record_trade()` + `check_overtrading_guards()` | DEAD CODE |
-| Drawdown breaker | `check_drawdown()` | DEAD CODE |
-| Signal weight adaptation | `SignalWeightManager.batch_update()` | DEAD CODE |
-| Trade guard blocking | `severity: "block"` | NEVER USED |
-
-The system **appears** well-protected but has **zero automated risk management** in production.
-All four safety nets exist in code, pass their tests, but are never wired into the runtime.
-
-This is a classic "defense theater" anti-pattern in trading systems. The fix priority should be:
-1. Wire the defenses (days 1-2)
-2. Add integration tests that verify the defenses FIRE in realistic scenarios
-3. Add a "defense status" dashboard panel showing which guards are active vs dormant
+### 12. Alpha Vantage daily budget (H16)
+**File**: `portfolio/shared_state.py`
+**What**: Add daily call counter with midnight reset
+**Why**: 5/min limiter allows 7200/day but free tier is 25/day
+**How**: Atomic counter with `datetime.date.today()` reset check
+**Risk**: Low — may throttle fundamentals refresh more aggressively
+**Tests**: Test counter reset at midnight
