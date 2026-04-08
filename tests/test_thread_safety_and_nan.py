@@ -179,3 +179,41 @@ class TestADXCacheThreadSafety:
             list(pool.map(compute_adx_for_ticker, range(20)))
 
         assert not errors, f"Errors during concurrent ADX computation: {errors}"
+
+    def test_adx_cache_lru_eviction(self):
+        """BUG-180: Cache eviction keeps newest 50% instead of clearing all."""
+        from portfolio import signal_engine as se
+
+        # Save and restore original cache state
+        original_cache = se._adx_cache.copy()
+        original_max = se._ADX_CACHE_MAX
+        try:
+            se._adx_cache.clear()
+            se._ADX_CACHE_MAX = 10  # small limit for testing
+
+            # Fill cache to capacity with known keys
+            for i in range(10):
+                se._adx_cache[f"key_{i}"] = float(i)
+
+            assert len(se._adx_cache) == 10
+
+            # Trigger eviction by computing one more ADX
+            df = pd.DataFrame({
+                "high": np.random.default_rng(999).random(50) * 100 + 100,
+                "low": np.random.default_rng(1000).random(50) * 100 + 90,
+                "close": np.random.default_rng(1001).random(50) * 100 + 95,
+            })
+            se._compute_adx(df)
+
+            # Oldest 50% (key_0 through key_4) should be evicted
+            assert "key_0" not in se._adx_cache
+            assert "key_4" not in se._adx_cache
+            # Newest keys should survive
+            assert "key_5" in se._adx_cache
+            assert "key_9" in se._adx_cache
+            # New entry added
+            assert len(se._adx_cache) <= 7  # 5 kept + 1 new + some margin
+        finally:
+            se._adx_cache.clear()
+            se._adx_cache.update(original_cache)
+            se._ADX_CACHE_MAX = original_max

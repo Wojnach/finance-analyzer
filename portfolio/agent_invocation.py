@@ -431,6 +431,24 @@ def _write_fishing_context(journal_entry):
 
     except Exception as e:
         logger.warning('Fishing context error: %s', e)
+        # BUG-181: Write neutral context on failure to prevent stale bias
+        try:
+            from datetime import UTC, datetime
+
+            from portfolio.file_utils import atomic_write_json
+            atomic_write_json('data/fishing_context.json', {
+                'timestamp': datetime.now(UTC).isoformat(),
+                'ticker': 'XAG-USD',
+                'direction_bias': 'neutral',
+                'bias_confidence': 0.0,
+                'bias_reasoning': f'Context extraction failed: {e}',
+                'allow_long': True,
+                'allow_short': True,
+                'tactic_vote': None,
+                'tactic_weight': 0.0,
+            })
+        except Exception:
+            pass  # last resort: can't even write neutral
 
 
 def check_agent_completion():

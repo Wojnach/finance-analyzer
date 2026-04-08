@@ -21,6 +21,9 @@ logger = logging.getLogger("portfolio.data_collector")
 binance_spot_cb = CircuitBreaker("binance_spot", failure_threshold=5, recovery_timeout=60)
 binance_fapi_cb = CircuitBreaker("binance_fapi", failure_threshold=5, recovery_timeout=60)
 alpaca_cb = CircuitBreaker("alpaca", failure_threshold=5, recovery_timeout=60)
+
+# BUG-179: Timeout for parallel timeframe fetches (seconds)
+_TF_POOL_TIMEOUT = 60
 ALPACA_INTERVAL_MAP = {
     "15m": ("15Min", 5),
     "1h": ("1Hour", 10),
@@ -315,17 +318,24 @@ def collect_timeframes(source):
     tfs = STOCK_TIMEFRAMES if is_stock else TIMEFRAMES
     source_key = source.get("alpaca") or source.get("binance") or source.get("binance_fapi")
 
-    # Submit all timeframe fetches to thread pool
+    # BUG-179: Submit all timeframe fetches with timeout to prevent hangs
     with ThreadPoolExecutor(max_workers=len(tfs), thread_name_prefix=f"tf_{source_key}") as pool:
         futures = {
             pool.submit(_fetch_one_timeframe, source, source_key, label, interval, limit, ttl): label
             for label, interval, limit, ttl in tfs
         }
         raw_results = []
-        for future in as_completed(futures):
-            result = future.result()
-            if result is not None:
-                raw_results.append(result)
+        try:
+            for future in as_completed(futures, timeout=_TF_POOL_TIMEOUT):
+                result = future.result()
+                if result is not None:
+                    raw_results.append(result)
+        except TimeoutError:
+            stuck = [lbl for f, lbl in futures.items() if not f.done()]
+            logger.error("BUG-179: Timeframe pool timeout for %s. Stuck: %s",
+                         source_key, stuck)
+            for f in futures:
+                f.cancel()
 
     # Maintain original timeframe order
     tf_order = {label: i for i, (label, _, _, _) in enumerate(tfs)}

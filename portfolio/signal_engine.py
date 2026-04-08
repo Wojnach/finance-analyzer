@@ -977,9 +977,12 @@ def _compute_adx(df, period=14):
         val = adx.iloc[-1]
         result = float(val) if pd.notna(val) and np.isfinite(val) else None
         # BUG-86: Thread-safe cache write with eviction
+        # BUG-180: LRU eviction — keep newest 50% instead of clearing all
         with _adx_lock:
             if len(_adx_cache) >= _ADX_CACHE_MAX:
-                _adx_cache.clear()
+                keys = list(_adx_cache.keys())
+                for k in keys[:len(keys) // 2]:
+                    del _adx_cache[k]
             _adx_cache[df_id] = result
         return result
     except Exception:

@@ -785,3 +785,55 @@ class TestIntervalMaps:
         assert "open" in _BINANCE_KLINE_COLS
         assert "close" in _BINANCE_KLINE_COLS
         assert "volume" in _BINANCE_KLINE_COLS
+
+
+# ---------------------------------------------------------------------------
+# BUG-179: collect_timeframes timeout protection
+# ---------------------------------------------------------------------------
+
+class TestCollectTimeframesTimeout:
+    """BUG-179: Verify collect_timeframes handles stuck fetches gracefully."""
+
+    @patch("portfolio.data_collector._TF_POOL_TIMEOUT", 0.1)
+    @patch("portfolio.data_collector._fetch_one_timeframe")
+    def test_timeout_returns_partial_results(self, mock_fetch):
+        """When some fetches hang, completed results are still returned."""
+        import threading
+
+        hang_event = threading.Event()
+
+        def _side_effect(source, key, label, interval, limit, ttl):
+            if label == "Now":
+                return (label, {"indicators": {"rsi": 50}, "action": None,
+                                "confidence": None, "_df": pd.DataFrame()})
+            # Simulate hang on other timeframes
+            hang_event.wait(timeout=5)
+            return None
+
+        mock_fetch.side_effect = _side_effect
+
+        results = collect_timeframes({"binance": "BTCUSDT"})
+        hang_event.set()  # unblock threads for cleanup
+
+        # Should have at least the "Now" result that completed
+        labels = [label for label, _ in results]
+        assert "Now" in labels
+
+    @patch("portfolio.data_collector._TF_POOL_TIMEOUT", 0.1)
+    @patch("portfolio.data_collector._fetch_one_timeframe")
+    def test_timeout_does_not_raise(self, mock_fetch):
+        """Timeout is caught internally, not propagated to caller."""
+        import threading
+        hang = threading.Event()
+
+        def _hang(*args):
+            hang.wait(timeout=5)
+            return None
+
+        mock_fetch.side_effect = _hang
+
+        # Should not raise
+        results = collect_timeframes({"binance": "BTCUSDT"})
+        hang.set()
+
+        assert isinstance(results, list)

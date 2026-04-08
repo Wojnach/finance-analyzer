@@ -273,3 +273,18 @@ def get_all_guard_warnings(signals, patient_pf, bold_pf, config=None):
         "warnings": all_warnings,
         "summary": "; ".join(summary_parts) if summary_parts else "All clear",
     }
+
+
+def should_block_trade(guard_result):
+    """Check if any guard warning has 'block' severity.
+
+    ARCH-29: Convenience function for Layer 2 go/no-go decisions.
+
+    Args:
+        guard_result: Return value from get_all_guard_warnings().
+
+    Returns:
+        True if any warning has severity="block", False otherwise.
+    """
+    warnings = guard_result.get("warnings", [])
+    return any(w.get("severity") == "block" for w in warnings)

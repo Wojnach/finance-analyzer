@@ -55,6 +55,18 @@ def _is_stale() -> bool:
         return True
 
 
+def _pid_alive(pid: int) -> bool:
+    """Check if a process is still running. BUG-182."""
+    if not pid:
+        return False
+    try:
+        import psutil
+        return psutil.pid_exists(pid)
+    except ImportError:
+        # Fallback: assume alive if we can't check
+        return True
+
+
 def _read_lock() -> dict:
     try:
         text = _GPU_LOCK_FILE.read_text(encoding="utf-8").strip()
@@ -123,8 +135,10 @@ def gpu_gate(model_name: str, timeout: float = 60):
                     # Re-entry from same process (shouldn't happen with thread lock, but safe)
                     file_acquired = True
                     break
-                if _is_stale():
-                    logger.warning("Breaking stale GPU lock: %s (pid=%s)", info.get("model"), info.get("pid"))
+                if _is_stale() and not _pid_alive(info.get("pid", 0)):
+                    # BUG-182: Only break stale lock if owning process is dead
+                    logger.warning("Breaking stale GPU lock: %s (pid=%s, dead)",
+                                   info.get("model"), info.get("pid"))
                     _release_lock()
                     continue  # retry atomic create
                 logger.debug("GPU file-locked by %s, waiting...", info.get("model", "?"))

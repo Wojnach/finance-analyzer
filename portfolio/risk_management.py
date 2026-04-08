@@ -580,9 +580,9 @@ def check_concentration_risk(ticker, action, portfolio, agent_summary, strategy=
     if total_value <= 0:
         return None
 
-    # Compute proposed position value
+    # BUG-176: Compute proposed allocation as % of total portfolio, capped at cash
     alloc_pct = 0.30 if strategy == "bold" else 0.15
-    proposed_alloc = cash * alloc_pct
+    proposed_alloc = min(total_value * alloc_pct, cash)
 
     # Existing position value for this ticker
     existing = holdings.get(ticker, {})

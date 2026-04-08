@@ -11,6 +11,7 @@ from portfolio.trade_guards import (
     check_overtrading_guards,
     get_all_guard_warnings,
     record_trade,
+    should_block_trade,
 )
 
 
@@ -338,3 +339,34 @@ class TestGetAllGuardWarnings:
             result = get_all_guard_warnings(signals, {}, {}, config)
             assert result["warnings"] == []
             assert "disabled" in result["summary"].lower()
+
+
+# --- ARCH-29: should_block_trade ---
+
+class TestShouldBlockTrade:
+    """ARCH-29: Convenience function for go/no-go decisions."""
+
+    def test_no_warnings_returns_false(self):
+        result = {"warnings": [], "summary": "All clear"}
+        assert should_block_trade(result) is False
+
+    def test_warning_severity_returns_false(self):
+        result = {"warnings": [{"severity": "warning", "guard": "cooldown"}]}
+        assert should_block_trade(result) is False
+
+    def test_block_severity_returns_true(self):
+        result = {"warnings": [{"severity": "block", "guard": "cooldown"}]}
+        assert should_block_trade(result) is True
+
+    def test_mixed_severities_returns_true(self):
+        result = {"warnings": [
+            {"severity": "warning", "guard": "rate_limit"},
+            {"severity": "block", "guard": "cooldown"},
+        ]}
+        assert should_block_trade(result) is True
+
+    def test_empty_dict_returns_false(self):
+        assert should_block_trade({}) is False
+
+    def test_missing_warnings_key_returns_false(self):
+        assert should_block_trade({"summary": "All clear"}) is False
