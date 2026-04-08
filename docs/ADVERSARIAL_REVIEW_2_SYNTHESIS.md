@@ -174,24 +174,27 @@ per-module locks with a `concurrent.futures`-based task queue for I/O operations
 
 | Severity | Count | Source |
 |----------|-------|--------|
-| CRITICAL | 14 | 3 Claude + 2 portfolio-risk + 2 infrastructure + 3 data-external + 4 avanza-api |
-| HIGH | 42 | 17 Claude + 3 portfolio-risk + 6 infrastructure + 6 signals-modules + 5 data-external + 5 avanza-api |
-| MEDIUM | 35 | 16 Claude + 3 portfolio-risk + 3 infrastructure + 6 signals-modules + 4 data-external + 3 avanza-api |
-| LOW | 11 | 3 Claude + 2 portfolio-risk + 3 signals-modules + 2 data-external + 1 avanza-api |
-| **Total** | **102** | 39 Claude + 10 portfolio-risk + 11 infrastructure + 15 signals-modules + 14 data-external + 13 avanza-api |
+| CRITICAL | 18 | 3 Claude + 2 portfolio-risk + 2 infrastructure + 3 data-external + 4 avanza-api + 4 signals-core |
+| HIGH | 48 | 17 Claude + 3 portfolio-risk + 6 infrastructure + 6 signals-modules + 5 data-external + 5 avanza-api + 6 signals-core |
+| MEDIUM | 39 | 16 Claude + 3 portfolio-risk + 3 infrastructure + 6 signals-modules + 4 data-external + 3 avanza-api + 4 signals-core |
+| LOW | 14 | 3 Claude + 2 portfolio-risk + 3 signals-modules + 2 data-external + 1 avanza-api + 3 signals-core |
+| **Total** | **119** | 39 Claude + 10 portfolio-risk + 11 infrastructure + 15 signals-modules + 14 data-external + 13 avanza-api + 17 signals-core |
 
-All five completed agent reviews found critical issues the independent review missed:
+All six completed agent reviews found critical issues the independent review missed:
+- **signals-core**: Per-ticker consensus cache horizon-blind (CS1), Ministral count mismatch
+  (CS2), SignalDB thread safety (CS3), accuracy cache race (CS4). Fear & Greed allows BUY
+  during 46-day fear streak (HCS2). Meta-learner deploys overfitting models (HCS5).
+- **avanza-api**: CONFIRM matches wrong order (CA1), stop ID always empty (HA4)
+- **data-external**: Earnings config broken since day one (CD1), NFP Good Friday (HD1)
 - **portfolio-risk**: Trade guards never block (C3, C4)
 - **infrastructure**: GPU lock fd leak (CI1), journal non-atomic (CI2)
 - **signals-modules**: Structure all-history bias (HS1), NaN-to-BUY (HS3)
-- **data-external**: Earnings config broken since day one (CD1), NFP Good Friday (HD1)
-- **avanza-api**: CONFIRM matches wrong order (CA1), stop ID always empty (HA4),
-  Telegram offset race (CA2), Playwright concurrent access race (CA3)
 
-Agent win rate: ~80%. The avanza-api agent was the strongest — found 4 CRITICAL order
-execution bugs including CONFIRM targeting the wrong order and stop-loss IDs always empty.
+Agent win rate: ~80%. Every agent found critical bugs the broad review missed. The
+signals-core agent found the deepest issues — interaction bugs between caches, gates,
+and overlays that are only visible through line-by-line tracing.
 
-**Remaining 3 agents still running**: signals-core, orchestration, metals-core.
+**Remaining 2 agents still running**: orchestration, metals-core.
 
 ---
 
