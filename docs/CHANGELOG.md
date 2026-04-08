@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-04-08 (autonomous improvement session)
+- **BUG-176: Concentration check uses cash-only allocation (P1)**: `risk_management.py:585` computed proposed allocation as `cash * alloc_pct` instead of `min(total_value * alloc_pct, cash)`. Now uses portfolio-proportional sizing, capped at available cash.
+- **BUG-177: Sortino ratio unit inconsistency (P3)**: `equity_curve.py:244` used inline `r / 100` while Sharpe used pre-computed `daily_rets_dec`. Math was correct but confusing. Now uses `daily_rets_dec` consistently.
+- **BUG-178: No timeout on main loop ThreadPoolExecutor (P1)**: `main.py:514` `as_completed(futures)` could hang indefinitely on stuck signal computation. Added 120s timeout with graceful degradation — timed-out tickers are cancelled, cycle continues with partial results.
+- **BUG-179: No timeout on data_collector ThreadPoolExecutor (P1)**: `data_collector.py:325` same issue for per-ticker timeframe collection. Added 60s timeout. Partial results returned for completed timeframes.
+- **BUG-180: ADX cache full-clear eviction (P2)**: `signal_engine.py:982` cleared all 200 cache entries on overflow. Now evicts oldest 50% (LRU-style using Python dict insertion order), keeping recent entries warm.
+- **BUG-181: Fishing context stale data on failure (P2)**: `agent_invocation.py:432` exception handler left old `fishing_context.json` on disk. Now writes neutral context (direction_bias=neutral, confidence=0) on failure to prevent stale bias misleading fish engine.
+- **BUG-182: GPU lock breaks stale without PID check (P2)**: `gpu_gate.py:126` broke stale locks based only on file mtime (>300s). Now validates owning PID is dead via `psutil.pid_exists()` before breaking, preventing legitimate long-running model loads from being interrupted.
+- **ARCH-29: Trade guard `should_block_trade()` helper**: Added convenience function to `trade_guards.py` that returns True if any warning has severity="block". Gives Layer 2 a clean go/no-go signal.
+- **New tests**: 16 new tests — ThreadPoolExecutor timeout (2), ADX LRU eviction (1), should_block_trade (6), GPU PID check (4), fishing context fallback (2), main helpers regression (1). All pass.
+- Theme: Reliability, Defensive Programming, Risk Accuracy.
+
 ## 2026-04-07 (autonomous improvement session)
 - **BUG-171: Silent exception swallowing (P2)**: ~14 `except Exception: pass` patterns across 10 modules. Cleanup/teardown paths converted to `contextlib.suppress(Exception)`. Operational paths (llama_server, avanza/scanner) get `logger.debug()` for traceability.
 - **BUG-172: fin_fish.py deprecated datetime (P3)**: `datetime.timezone.utc` → `datetime.UTC` (UP017).

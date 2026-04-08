@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-04-07
-Branch: improve/auto-session-2026-04-07
+Updated: 2026-04-08
+Branch: improve/auto-session-2026-04-08
 
 ## 1) Architecture Summary
 
@@ -196,7 +196,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - **Crash protection**: Exponential backoff (10s→5min), alert suppression after 5 crashes
 - **Graceful degradation**: Each signal/module wrapped in try/except, module warnings surfaced
 
-## 9) Known Issues (as of 2026-04-04)
+## 9) Known Issues (as of 2026-04-08)
 
 - BUG-15 through BUG-22: Fixed in 2026-03-08 session
 - BUG-23 through BUG-27: Fixed in 2026-03-09 session (signal validation, None ticker, OSError, heartbeat, pass cleanup)
@@ -354,5 +354,13 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - REF-48: 91 ruff auto-fixes in test files (F401, I001, UP017, SIM300) — **fixed 2026-04-07**
 - REF-49: SIM103 needless bool in daily_digest.py — **fixed 2026-04-07**
 - Portfolio ruff violations: 74 → 56 (remaining: 51 E402 intentional + 5 SIM115 intentional)
+- BUG-176 (P1): Concentration check used cash-only allocation — **fixed 2026-04-08** (uses total_value, capped at cash)
+- BUG-177 (P3): Sortino used inline r/100 instead of daily_rets_dec — **fixed 2026-04-08** (consistency)
+- BUG-178 (P1): Main loop ThreadPoolExecutor no timeout — **fixed 2026-04-08** (120s timeout + graceful degradation)
+- BUG-179 (P1): Data collector ThreadPoolExecutor no timeout — **fixed 2026-04-08** (60s timeout + partial results)
+- BUG-180 (P2): ADX cache eviction cleared all entries — **fixed 2026-04-08** (LRU eviction, keep newest 50%)
+- BUG-181 (P2): Fishing context stale on failure — **fixed 2026-04-08** (writes neutral context on exception)
+- BUG-182 (P2): GPU lock stale-break without PID check — **fixed 2026-04-08** (psutil.pid_exists validation)
+- ARCH-29: should_block_trade() helper in trade_guards.py — **added 2026-04-08**
 - Test ruff violations: 253 → 170 (remaining: F841 test vars, SIM117 style, E741 test naming)
 - ~6,138 tests, 85 pre-existing failures (as of 2026-04-07)
