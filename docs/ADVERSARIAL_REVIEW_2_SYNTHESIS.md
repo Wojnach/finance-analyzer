@@ -166,7 +166,7 @@ per-module locks with a `concurrent.futures`-based task queue for I/O operations
 | 5 | portfolio-risk | **MEDIUM** | Drawdown bypass on corruption, stale prices |
 | 6 | data-external | **MEDIUM** | Rate limit enforcement gaps, stale data |
 | 7 | infrastructure | **HIGH** | GPU lock deadlock, non-atomic journal, BaseException leak [upgraded by agent] |
-| 8 | signals-modules | **LOW** | Individual modules are well-structured; main risk is silent HOLD |
+| 8 | signals-modules | **HIGH** | All-history high/low bias, NaN→BUY, partial-NaN dropna [upgraded by agent] |
 
 ---
 
@@ -174,21 +174,23 @@ per-module locks with a `concurrent.futures`-based task queue for I/O operations
 
 | Severity | Count | Source |
 |----------|-------|--------|
-| CRITICAL | 7 | 3 Claude + 2 portfolio-risk agent + 2 infrastructure agent |
-| HIGH | 26 | 17 Claude + 3 portfolio-risk + 6 infrastructure |
-| MEDIUM | 22 | 16 Claude + 3 portfolio-risk + 3 infrastructure |
-| LOW | 5 | 3 Claude + 2 portfolio-risk |
-| **Total** | **60** | 39 Claude + 10 portfolio-risk agent + 11 infrastructure agent |
+| CRITICAL | 7 | 3 Claude + 2 portfolio-risk + 2 infrastructure |
+| HIGH | 32 | 17 Claude + 3 portfolio-risk + 6 infrastructure + 6 signals-modules |
+| MEDIUM | 28 | 16 Claude + 3 portfolio-risk + 3 infrastructure + 6 signals-modules |
+| LOW | 8 | 3 Claude + 2 portfolio-risk + 3 signals-modules |
+| **Total** | **75** | 39 Claude + 10 portfolio-risk + 11 infrastructure + 15 signals-modules |
 
-Both completed agent reviews were **stronger** than the independent review for their
-respective subsystems. The portfolio-risk agent found the trade_guards enforcement gap
-(C3, C4). The infrastructure agent found the GPU lock fd leak (CI1) and journal
-non-atomic write (CI2) — issues the independent review praised or missed entirely.
-Agent win rate: ~75-80% (agents found most important issues per subsystem).
+All three completed agent reviews were **stronger** than the independent review for
+their subsystems:
+- **portfolio-risk**: Trade guards never block (C3, C4)
+- **infrastructure**: GPU lock fd leak (CI1), journal non-atomic (CI2)
+- **signals-modules**: Structure all-history bias (HS1), NaN-to-BUY (HS3), dropna(how=all) (HS2)
 
-**Remaining 6 agents still running**: signals-core, orchestration, metals-core,
-avanza-api, signals-modules, data-external. Their findings will be incorporated
-in follow-up commits as they complete.
+Agent win rate: ~75-80% (agents found most important issues per subsystem, especially
+line-by-line indicator math that broad reviews miss).
+
+**Remaining 5 agents still running**: signals-core, orchestration, metals-core,
+avanza-api, data-external.
 
 ---
 
