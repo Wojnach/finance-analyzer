@@ -165,7 +165,7 @@ per-module locks with a `concurrent.futures`-based task queue for I/O operations
 | 4 | orchestration | **HIGH** | Agent lifecycle race conditions |
 | 5 | portfolio-risk | **MEDIUM** | Drawdown bypass on corruption, stale prices |
 | 6 | data-external | **MEDIUM** | Rate limit enforcement gaps, stale data |
-| 7 | infrastructure | **MEDIUM** | Health race condition, append atomicity |
+| 7 | infrastructure | **HIGH** | GPU lock deadlock, non-atomic journal, BaseException leak [upgraded by agent] |
 | 8 | signals-modules | **LOW** | Individual modules are well-structured; main risk is silent HOLD |
 
 ---
@@ -174,15 +174,21 @@ per-module locks with a `concurrent.futures`-based task queue for I/O operations
 
 | Severity | Count | Source |
 |----------|-------|--------|
-| CRITICAL | 5 | 3 Claude + 2 agent (trade_guards) |
-| HIGH | 20 | 17 Claude + 3 agent (Kelly, Sortino, lock) |
-| MEDIUM | 19 | 16 Claude + 3 agent |
-| LOW | 5 | 3 Claude + 2 agent |
-| **Total** | **49** | 39 Claude + 10 net-new from portfolio-risk agent |
+| CRITICAL | 7 | 3 Claude + 2 portfolio-risk agent + 2 infrastructure agent |
+| HIGH | 26 | 17 Claude + 3 portfolio-risk + 6 infrastructure |
+| MEDIUM | 22 | 16 Claude + 3 portfolio-risk + 3 infrastructure |
+| LOW | 5 | 3 Claude + 2 portfolio-risk |
+| **Total** | **60** | 39 Claude + 10 portfolio-risk agent + 11 infrastructure agent |
 
-The agent review of portfolio-risk was **stronger** than the independent review for
-that subsystem. The trade_guards findings (C3, C4) represent a complete failure of
-the overtrading prevention system that the independent review entirely missed.
+Both completed agent reviews were **stronger** than the independent review for their
+respective subsystems. The portfolio-risk agent found the trade_guards enforcement gap
+(C3, C4). The infrastructure agent found the GPU lock fd leak (CI1) and journal
+non-atomic write (CI2) — issues the independent review praised or missed entirely.
+Agent win rate: ~75-80% (agents found most important issues per subsystem).
+
+**Remaining 6 agents still running**: signals-core, orchestration, metals-core,
+avanza-api, signals-modules, data-external. Their findings will be incorporated
+in follow-up commits as they complete.
 
 ---
 

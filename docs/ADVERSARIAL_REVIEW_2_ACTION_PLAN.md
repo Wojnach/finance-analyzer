@@ -1,6 +1,33 @@
 # Adversarial Review Action Plan — 2026-04-08
 
-## URGENT Fixes (from agent review — trade guards completely broken)
+## URGENT Fixes (from agent reviews — critical gaps found)
+
+### Infrastructure Agent Findings:
+
+### 0x. Fix GPU lock fd leak on write failure (CI1)
+**File**: `portfolio/gpu_gate.py:126-128`
+**What**: Wrap `os.write(fd)` + `os.close(fd)` in `try/finally`
+**Why**: Write failure leaks fd + leaves lock file → 5-min GPU deadlock
+**How**: `try: os.write(fd, data); os.close(fd) except: os.close(fd); _release_lock(); raise`
+**Risk**: None — correctness fix for error path
+**Tests**: Mock disk-full scenario, verify lock is released
+
+### 0y. Make journal context file writes atomic (CI2)
+**File**: `portfolio/journal.py:568,580`
+**What**: Replace `Path.write_text()` with tempfile+replace pattern
+**Why**: Layer 2 reads partial context mid-write → garbled agent memory
+**How**: Use `atomic_write_json` or similar tempfile+os.replace pattern
+**Risk**: None — only changes write method, same content
+**Tests**: Verify context file is never empty/partial during write
+
+### 0z. Fix `_loading_keys` BaseException leak (HI4)
+**File**: `portfolio/shared_state.py:79-104`
+**What**: Use `try/finally` to always discard key from `_loading_keys`
+**Why**: `SystemExit`/`GeneratorExit` leaves key permanently "loading" → signal dead
+**How**: Replace `try/except KBI / except Exception` with `try/finally`
+**Risk**: None — ensures cleanup on all exit paths
+
+### Portfolio-Risk Agent Findings:
 
 ### 0a. Fix trade guards to actually block (C3/CR2)
 **File**: `portfolio/trade_guards.py`
