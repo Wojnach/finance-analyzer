@@ -1,128 +1,97 @@
-# Improvement Plan — Auto-Session 2026-04-07
+# Improvement Plan — Auto-Session 2026-04-08
 
-Updated: 2026-04-07
-Branch: improve/auto-session-2026-04-07
+Updated: 2026-04-08
+Branch: improve/auto-session-2026-04-08
 Status: Planning complete, ready for implementation
 
-**Source:** Deep exploration of 198 portfolio modules, 212+ test files, ruff analysis,
-and pattern review. Previous sessions fixed BUG-80 through BUG-170 + REF-16 through REF-44.
-This session addresses remaining code quality, silent exceptions, and lint compliance.
+**Source:** Deep exploration of all core modules, signal engine, portfolio management,
+risk management, data collection, infrastructure, and test suite. Previous sessions
+fixed BUG-80 through BUG-174 + REF-16 through REF-48. This session addresses critical
+calculation bugs, reliability gaps, and cache efficiency.
 
 ---
 
 ## 1. Bugs & Problems Found
 
-### BUG-171 (P2): ~14 remaining `except Exception: pass` silent swallowers
-- **Files**: agent_invocation.py:529, earnings_calendar.py:128, fin_fish.py:1229/1390/1409,
-  fish_instrument_finder.py:77, fish_monitor_smart.py:148/243, llama_server.py:154/179,
-  avanza/scanner.py:69/279, golddigger/runner.py:359, elongir/runner.py:234, ministral_signal.py:97
-- **Problem**: Silent exception swallowing hides bugs and makes debugging impossible.
-  Some are in cleanup/teardown code where suppression is appropriate, but several
-  are in operational paths where failures should at least be logged.
-- **Fix**: Convert cleanup-path `except Exception: pass` to `contextlib.suppress(Exception)`.
-  For operational paths, add `logger.debug()` so failures are traceable.
-- **Risk**: Zero — only changes error visibility, not behavior.
+### BUG-176 (P1): Concentration check uses cash-only allocation, ignoring total portfolio value
+- **File**: `portfolio/risk_management.py:584-585`
+- **Problem**: `proposed_alloc = cash * alloc_pct` calculates the proposed position size as a
+  percentage of *available cash* rather than *total portfolio value*. If a portfolio has 100K
+  cash and 400K in existing positions, `alloc_pct=0.15` yields 15K (3% of total) instead of
+  75K (15% of total). More critically, the concentration check compares
+  `(existing_value + proposed_alloc) / total_value`, but the proposed_alloc is too small
+  relative to a cash-heavy portfolio and too large relative to a fully-invested one.
+- **Fix**: Change `proposed_alloc = cash * alloc_pct` to `proposed_alloc = total_value * alloc_pct`,
+  capped at available cash. This makes the allocation proportional to total portfolio value.
+- **Impact**: Affects Layer 2 trade sizing. All existing callers pass through; the function
+  signature is unchanged. The concentration *warning* threshold (40%) still applies.
+- **Risk**: Low — existing behavior allowed inconsistent sizing. The fix is more accurate.
 
-### BUG-172 (P3): `fin_fish.py:1226` uses `datetime.timezone.utc` instead of `datetime.UTC`
-- **File**: `portfolio/fin_fish.py:1226`
-- **Problem**: Uses deprecated `_dt.timezone.utc` instead of `_dt.UTC` (Python 3.11+).
-- **Fix**: Replace with `_dt.UTC` (UP017).
-- **Risk**: Zero.
+### BUG-177 (P2): Sortino ratio unit mismatch makes downside detection ineffective
+- **File**: `portfolio/equity_curve.py:244`
+- **Problem**: `downside_returns = [r / 100 - daily_rf for r in daily_rets if r / 100 < daily_rf]`
+  — `daily_rets` are in percentage units (e.g., 1.5 for +1.5%), and `r/100 = 0.015`.
+  `daily_rf = 3.5% / 252 = 0.0001389`. The condition `0.015 < 0.0001389` is almost never
+  true, so `downside_returns` is nearly always empty, and Sortino is never computed.
+- **Fix**: Use `daily_rets_dec` (already computed on line 231) consistently for both Sharpe
+  and Sortino. Replace the filter with: `[r - daily_rf for r in daily_rets_dec if r < daily_rf]`.
+- **Impact**: Sortino ratio will now appear in equity curve reports (was silently missing).
+- **Risk**: Zero — Sortino was effectively dead code before.
 
-### BUG-173 (P3): `strategies/orchestrator.py:7` imports from `typing` instead of `collections.abc`
-- **File**: `portfolio/strategies/orchestrator.py:7`
-- **Problem**: `from typing import Callable` — deprecated, should be `from collections.abc import Callable`.
-- **Fix**: UP035 auto-fix.
-- **Risk**: Zero.
+### BUG-178 (P1): No timeout on ThreadPoolExecutor.as_completed() in main loop
+- **File**: `portfolio/main.py:514`
+- **Problem**: `for future in as_completed(futures):` has no timeout. If any ticker's signal
+  computation hangs, the entire 60s cycle blocks indefinitely.
+- **Fix**: Add `timeout=120` to `as_completed()` (2x the normal cycle time). Catch
+  `TimeoutError`, log which futures didn't complete, cancel them, and continue the cycle
+  with partial results.
+- **Impact**: Prevents indefinite hangs. Partial results already handled.
+- **Risk**: Low — a 120s timeout is generous. Timed-out tickers get no signal that cycle.
 
-### BUG-174 (P3): Unused import `Path` in `strategies/golddigger_strategy.py:12`
-- **File**: `portfolio/strategies/golddigger_strategy.py:12`
-- **Problem**: `pathlib.Path` imported but unused (F401).
-- **Fix**: Remove unused import.
-- **Risk**: Zero.
+### BUG-179 (P1): No timeout on ThreadPoolExecutor.as_completed() in data_collector
+- **File**: `portfolio/data_collector.py:325`
+- **Problem**: Same as BUG-178 but for per-ticker timeframe collection.
+- **Fix**: Add `timeout=60` to `as_completed()`. Catch `TimeoutError`, log, return partial.
+- **Impact**: Prevents per-ticker hangs from cascading to the main loop timeout.
+- **Risk**: Zero — partial timeframe data is already supported downstream.
 
-### BUG-175 (P3): Unsorted imports in `strategies/golddigger_strategy.py:7`
-- **File**: `portfolio/strategies/golddigger_strategy.py:7`
-- **Problem**: Import block not sorted per isort (I001).
-- **Fix**: Auto-sort.
-- **Risk**: Zero.
-
----
-
-## 2. Refactoring TODOs
-
-### REF-45: 9 collapsible nested `if` statements (SIM102)
-- **Files**: accuracy_stats.py:851, autonomous.py:323, crypto_macro_data.py:113,
-  daily_digest.py:78, journal.py:249, prophecy.py:251/253, risk_management.py:637,
-  warrant_portfolio.py:237
-- **Problem**: Nested `if` statements that can be combined with `and`.
-- **Fix**: Combine nested `if` into single `if X and Y:` where readability allows.
-  Skip if the combined condition becomes unreadable.
-- **Risk**: Zero — logic-preserving simplification.
-
-### REF-46: 3 SIM114 (if-with-same-arms) in indicators.py, crypto_macro.py
-- **Files**: indicators.py:161, crypto_macro.py:150/154
-- **Problem**: Adjacent `if`/`elif` branches with identical bodies.
-- **Fix**: Combine conditions with `or` operator.
-- **Risk**: Zero.
-
-### REF-47: 2 SIM105 (suppressible-exception) in bot runners
-- **Files**: elongir/runner.py:231, golddigger/runner.py:356
-- **Problem**: `try/except/pass` that should be `contextlib.suppress(Exception)`.
-- **Fix**: Use contextlib.suppress.
-- **Risk**: Zero.
-
-### REF-48: 253 ruff violations in test files (84 auto-fixable)
-- **Breakdown**: 69 F841 (unused vars), 50 F401 (unused imports), 42 SIM117 (multi-with),
-  35 E741 (ambiguous vars), 21 I001 (unsorted), 8 UP017, 4 SIM300, others.
-- **Fix**: Auto-fix the 84 safe fixes (F401, I001, UP017, SIM300). Manual review F841.
-- **Risk**: Zero for auto-fixes. Low for manual F841 (test assertions may use vars).
+### BUG-180 (P2): ADX cache eviction clears all 200 entries instead of LRU
+- **File**: `portfolio/signal_engine.py:981-982`
+- **Problem**: When `_adx_cache` reaches 200 entries, `_adx_cache.clear()` removes ALL
+  entries. With 20 tickers x 7 timeframes = 140 entries per cycle, overflow triggers often.
+- **Fix**: Replace with LRU-style eviction: evict oldest 50% of entries (Python 3.7+ dict
+  preserves insertion order). This keeps the most recent entries warm.
+- **Impact**: Reduces redundant ADX computation by ~50% when cache overflows.
+- **Risk**: Zero — cache is purely an optimization.
 
 ---
 
-## 3. Implementation Order & Dependencies
+## 2. Architecture Improvements
 
-```
-Batch 1 (Portfolio code lint)    → No dependencies, do first
-  BUG-172, BUG-173, BUG-174, BUG-175  → fin_fish.py, strategies/*.py
-  REF-46                                → indicators.py, crypto_macro.py
-  REF-47                                → elongir/runner.py, golddigger/runner.py
-
-Batch 2 (Silent exceptions)     → Independent of Batch 1
-  BUG-171                              → 14 files with except/pass patterns
-
-Batch 3 (Collapsible ifs)       → Independent
-  REF-45                                → 8 files with SIM102
-
-Batch 4 (Test cleanup)          → Independent
-  REF-48                                → tests/*.py auto-fix + manual F841
-
-Batch 5 (Remaining ruff auto-fix) → After Batch 1-4
-  Run `ruff check --fix` on full codebase for any remaining safe fixes
-```
-
-### Risk Summary
-
-| Batch | Files Changed | Production Risk | Test Risk |
-|-------|--------------|-----------------|-----------|
-| 1 | 5 (fin_fish, strategies/*, indicators, crypto_macro, runners) | Zero | Zero |
-| 2 | ~14 (silent exception files) | Zero | Zero |
-| 3 | 8 (SIM102 files) | Zero | Zero |
-| 4 | ~50+ (test files) | Zero | Low |
-| 5 | Variable | Zero | Zero |
+### ARCH-29: Trade guards add should_block_trade() helper
+- **File**: `portfolio/trade_guards.py`
+- **Problem**: `check_overtrading_guards()` returns warnings but has no convenience function
+  for go/no-go decisions. The C4 diagnostic warns guards are "NON-FUNCTIONAL".
+- **Fix**: Add `should_block_trade(warnings)` that returns True if any warning has
+  `severity="block"`. Purely additive — existing behavior unchanged.
+- **Risk**: Zero — additive function.
 
 ---
 
-## 4. Deferred Items (NOT in this session)
+## 3. Dependency/Ordering
 
-### Previously deferred (still valid)
-- **ARCH-17**: main.py ~120 re-exports — too many consumers, needs gradual migration
-- **ARCH-18**: metals_loop.py 4,553-line monolith — too risky for autonomous session
-- **ARCH-19**: CI/CD pipeline — requires infrastructure decisions
-- **ARCH-20**: mypy type checking — large effort, separate initiative
-- **BUG-132**: orb_predictor.py uncached 5000-candle fetch — performance, not correctness
-- **BUG-162**: metals_loop.py high bug density — coupled with ARCH-18
-- **E402**: 51 module-import-not-at-top violations — most are intentional lazy imports
-- **SIM115**: 5 open-file-with-context-handler — 3 are intentional (subprocess log handles)
-- **F841 in tests**: 69 unused variables — many are intentional (assert side effects)
-- **E741 in tests**: 35 ambiguous variable names — `l`, `O` etc. are common in test data
+### Batch 1: Critical calculation bugs (2 files + tests)
+1. `portfolio/risk_management.py` — BUG-176
+2. `portfolio/equity_curve.py` — BUG-177
+
+### Batch 2: Reliability timeouts (2 files + tests)
+1. `portfolio/main.py` — BUG-178
+2. `portfolio/data_collector.py` — BUG-179
+
+### Batch 3: Cache + trade guards (2 files + tests)
+1. `portfolio/signal_engine.py` — BUG-180
+2. `portfolio/trade_guards.py` — ARCH-29
+
+### Batch 4: Documentation
+1. `docs/SYSTEM_OVERVIEW.md` — Update with new bug IDs
+2. `docs/CHANGELOG.md` — Add session entries
