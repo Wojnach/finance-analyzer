@@ -575,13 +575,42 @@ def place_trailing_stop(
 
 
 def get_stop_losses() -> list[dict]:
-    """Get all active stop-loss orders."""
+    """Get all active stop-loss orders.
+
+    Returns ``[]`` on read failure for backward compatibility with
+    callers that treat empty as "nothing to monitor". Code that needs
+    to distinguish "no stops" from "could not read stops" must use
+    :func:`get_stop_losses_strict` instead — or a False return from
+    that function will leave the caller unable to make safety
+    decisions like cancel-before-sell.
+    """
     try:
         data = api_get("/_api/trading/stoploss")
         return data if isinstance(data, list) else []
     except RuntimeError:
         logger.warning("Could not fetch stop-losses")
         return []
+
+
+def get_stop_losses_strict() -> list[dict]:
+    """Get all active stop-loss orders, raising on any read failure.
+
+    Use this in safety-critical paths (e.g., before a sell) where
+    "could not read" must NOT be silently treated as "no stops exist".
+    A swallowed read error there would let the dependent sell proceed
+    against still-encumbered volume, producing the very
+    ``short.sell.not.allowed`` error this module exists to prevent.
+
+    Raises:
+        RuntimeError: if the underlying ``api_get`` call fails or
+            returns a non-list shape.
+    """
+    data = api_get("/_api/trading/stoploss")
+    if not isinstance(data, list):
+        raise RuntimeError(
+            f"Unexpected stop-loss response shape: {type(data).__name__}"
+        )
+    return data
 
 
 def cancel_stop_loss(stop_id: str, account_id: str | None = None) -> dict:
@@ -639,8 +668,14 @@ def cancel_all_stop_losses_for(
     immediately, but the encumbered volume on the position is not released
     until the SL actually disappears from the position view. Without polling,
     a follow-up SELL still gets ``short.sell.not.allowed``. We therefore
-    re-query ``get_stop_losses()`` every ``poll_interval`` seconds until
-    none remain for the target orderbook (or ``max_wait`` is exceeded).
+    re-query ``get_stop_losses_strict()`` every ``poll_interval`` seconds
+    until none remain for the target orderbook (or ``max_wait`` is exceeded).
+
+    **Fail-closed semantics**: if the stop-loss list cannot be read (network
+    error, 5xx, malformed response), the function returns ``status="FAILED"``
+    rather than silently treating "could not read" as "no stops exist".
+    A safety-critical caller deciding whether to proceed with a sell MUST
+    NOT be misled into believing the path is clear when reality is unknown.
 
     The function is idempotent and safe to call when no SLs exist — it
     short-circuits to ``status="SUCCESS"`` without any DELETE calls.
@@ -655,18 +690,25 @@ def cancel_all_stop_losses_for(
         Dict with:
             - ``status``: "SUCCESS" (cleared), "PARTIAL" (some cancelled, some
               still showing after timeout), or "FAILED" (no cancels succeeded
-              and stops still present).
+              and stops still present, OR the SL list could not be read).
             - ``cancelled``: list of stop_ids the DELETE call accepted.
             - ``remaining``: list of stop_ids still present after the wait.
+            - ``snapshot``: list of full stop-loss dicts that were present at
+              the start of the cancel sequence. Callers can use this to
+              **re-arm** identical stops if the dependent sell fails — the
+              cancel/sell sequence is otherwise rollbackable but leaves the
+              position naked on partial-completion failure.
             - ``elapsed_seconds``: float, total time spent in this call.
+            - ``error``: optional, present only when ``status="FAILED"`` due
+              to a read error rather than cancel failures.
     """
     started = time.monotonic()
     target_ob = str(orderbook_id)
     aid_filter = str(account_id) if account_id is not None else None
 
-    def _stops_for_ob() -> list[dict]:
+    def _filter_for_ob(stops: list[dict]) -> list[dict]:
         out = []
-        for sl in get_stop_losses():
+        for sl in stops:
             if not isinstance(sl, dict):
                 continue
             ob = (sl.get("orderbook") or {}).get("id")
@@ -679,14 +721,40 @@ def cancel_all_stop_losses_for(
             out.append(sl)
         return out
 
-    initial = _stops_for_ob()
+    # Initial fetch — fail closed on read errors. A safety-critical caller
+    # cannot tell "no stops" apart from "API down" without this distinction.
+    try:
+        all_stops = get_stop_losses_strict()
+    except Exception as exc:  # noqa: BLE001 — convert to structured failure
+        elapsed = time.monotonic() - started
+        logger.error(
+            "cancel_all_stop_losses_for(%s): cannot read stop-loss list: %s",
+            target_ob, exc,
+        )
+        return {
+            "status": "FAILED",
+            "cancelled": [],
+            "remaining": [],
+            "snapshot": [],
+            "elapsed_seconds": elapsed,
+            "error": f"read_error: {exc}",
+        }
+
+    initial = _filter_for_ob(all_stops)
     if not initial:
         return {
             "status": "SUCCESS",
             "cancelled": [],
             "remaining": [],
+            "snapshot": [],
             "elapsed_seconds": time.monotonic() - started,
         }
+
+    # Snapshot full dicts before cancelling so a caller can re-arm if the
+    # dependent sell fails downstream. We deep-copy to insulate against any
+    # downstream mutation of the returned structure.
+    import copy as _copy
+    snapshot = [_copy.deepcopy(sl) for sl in initial]
 
     # Issue cancels for every matching stop. Use the SL's own account id when
     # available — Avanza's DELETE endpoint requires the account that owns the
@@ -701,11 +769,24 @@ def cancel_all_stop_losses_for(
         if result.get("status") == "SUCCESS":
             cancelled.append(sid)
 
-    # Poll until cleared or timeout. Always do at least one re-query AFTER
-    # the cancels — DELETE responses don't guarantee state propagation.
+    # Poll until cleared or timeout. Re-query is also fail-closed — if the
+    # API stops responding mid-poll, treat the orderbook as "may still have
+    # stops" rather than declaring victory.
     remaining: list[str] = []
+    poll_read_failed = False
     while True:
-        still = _stops_for_ob()
+        try:
+            poll_stops = get_stop_losses_strict()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "cancel_all_stop_losses_for(%s): poll read failed: %s",
+                target_ob, exc,
+            )
+            poll_read_failed = True
+            # We don't know if the stops are gone. Fail closed.
+            remaining = [sl.get("id", "") for sl in initial if sl.get("id") and sl.get("id") not in cancelled]
+            break
+        still = _filter_for_ob(poll_stops)
         remaining = [s.get("id", "") for s in still if s.get("id")]
         if not remaining:
             break
@@ -714,13 +795,13 @@ def cancel_all_stop_losses_for(
         time.sleep(poll_interval)
 
     elapsed = time.monotonic() - started
-    if not remaining:
+    if not remaining and not poll_read_failed:
         status = "SUCCESS"
         logger.info(
             "cancel_all_stop_losses_for(%s): cleared %d stops in %.2fs",
             target_ob, len(cancelled), elapsed,
         )
-    elif cancelled:
+    elif cancelled and not poll_read_failed:
         status = "PARTIAL"
         logger.warning(
             "cancel_all_stop_losses_for(%s): PARTIAL — cancelled=%s remaining=%s elapsed=%.2fs",
@@ -729,15 +810,124 @@ def cancel_all_stop_losses_for(
     else:
         status = "FAILED"
         logger.error(
-            "cancel_all_stop_losses_for(%s): FAILED — no cancels succeeded, remaining=%s",
-            target_ob, remaining,
+            "cancel_all_stop_losses_for(%s): FAILED — cancelled=%s remaining=%s read_failed=%s",
+            target_ob, cancelled, remaining, poll_read_failed,
         )
     return {
         "status": status,
         "cancelled": cancelled,
         "remaining": remaining,
+        "snapshot": snapshot,
         "elapsed_seconds": elapsed,
     }
+
+
+def rearm_stop_losses_from_snapshot(snapshot: list[dict]) -> dict:
+    """Re-place stop-losses from the snapshot returned by
+    :func:`cancel_all_stop_losses_for`.
+
+    Used to roll back a cancel-then-sell sequence when the sell fails:
+    we cancelled the stops to clear the volume, the sell didn't go through,
+    and the position is now naked. Re-arming restores the original
+    protection so we are no worse off than before the attempt.
+
+    Notes on best-effort behavior:
+
+    - Each re-arm is independent. If one fails, the others still try.
+    - The new stop-loss IDs differ from the originals — Avanza issues
+      fresh IDs on every place. Callers tracking IDs in local state must
+      replace, not deduplicate.
+    - ``valid_days`` is computed from the snapshot's ``trigger.validUntil``
+      field where present, falling back to 8 days. The trigger semantics
+      and price/volume are preserved exactly.
+
+    Args:
+        snapshot: List of stop-loss dicts as returned in
+            ``cancel_all_stop_losses_for(...)["snapshot"]``.
+
+    Returns:
+        Dict with:
+            - ``status``: "SUCCESS" (all re-armed), "PARTIAL" (some failed),
+              "FAILED" (none succeeded), or "SUCCESS" (snapshot was empty).
+            - ``rearmed``: list of new stop_ids placed.
+            - ``failed``: list of original stop_ids that could not be re-armed.
+    """
+    if not snapshot:
+        return {"status": "SUCCESS", "rearmed": [], "failed": []}
+
+    rearmed: list[str] = []
+    failed: list[str] = []
+    today_iso = date.today()
+
+    for sl in snapshot:
+        if not isinstance(sl, dict):
+            continue
+        original_id = sl.get("id", "")
+        try:
+            ob_id = (sl.get("orderbook") or {}).get("id")
+            account = (sl.get("account") or {}).get("id")
+            trigger = sl.get("trigger") or {}
+            order = sl.get("order") or {}
+            trigger_value = trigger.get("value")
+            trigger_type = trigger.get("type", "LESS_OR_EQUAL")
+            value_type = trigger.get("valueType", "MONETARY")
+            sell_price = order.get("price")
+            volume = order.get("volume")
+
+            # Compute valid_days from validUntil if present, else default 8.
+            valid_days = 8
+            valid_until = trigger.get("validUntil")
+            if valid_until:
+                try:
+                    parsed = datetime.strptime(valid_until, "%Y-%m-%d").date()
+                    delta = (parsed - today_iso).days
+                    if delta > 0:
+                        valid_days = delta
+                except (ValueError, TypeError):
+                    pass
+
+            if not (ob_id and trigger_value is not None and sell_price is not None and volume):
+                logger.warning("rearm_stop_losses: snapshot entry missing fields: %s", sl)
+                failed.append(original_id)
+                continue
+
+            result = place_stop_loss(
+                orderbook_id=str(ob_id),
+                trigger_price=float(trigger_value),
+                sell_price=float(sell_price),
+                volume=int(volume),
+                account_id=account,
+                valid_days=valid_days,
+                trigger_type=str(trigger_type),
+                value_type=str(value_type),
+            )
+            if result.get("status") == "SUCCESS":
+                new_id = result.get("stoplossOrderId", "")
+                rearmed.append(new_id)
+                logger.info(
+                    "rearm_stop_losses: replaced %s -> %s (ob=%s vol=%s)",
+                    original_id, new_id, ob_id, volume,
+                )
+            else:
+                logger.warning(
+                    "rearm_stop_losses: place_stop_loss failed for original %s: %s",
+                    original_id, result,
+                )
+                failed.append(original_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "rearm_stop_losses: exception for original %s: %s",
+                original_id, exc, exc_info=True,
+            )
+            failed.append(original_id)
+
+    if not failed:
+        status = "SUCCESS"
+    elif rearmed:
+        status = "PARTIAL"
+    else:
+        status = "FAILED"
+    return {"status": status, "rearmed": rearmed, "failed": failed}
 
 
 def get_instrument_price(orderbook_id: str) -> dict[str, Any]:

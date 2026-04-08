@@ -2171,13 +2171,18 @@ def _fish_engine_execute_sell(decision):
 
         # Cancel any active stop-losses on this orderbook BEFORE the sell.
         # Without this, Avanza rejects with short.sell.not.allowed because
-        # SL volume + SELL volume > position size.
-        if not _ensure_stops_cancelled_before_sell(_loop_page, ob_id):
+        # SL volume + SELL volume > position size. We snapshot the cancelled
+        # stops so we can re-arm them if the sell itself fails (otherwise
+        # the position would be left naked at the broker).
+        ok_clear, sl_snapshot = _ensure_stops_cancelled_before_sell(_loop_page, ob_id)
+        if not ok_clear:
             log(f"[fish] SELL aborted: could not clear stops for {ob_id}")
             send_telegram(
                 f"FISH SELL BLOCKED: stop cancel failed for {ob_id}. "
                 f"Manual intervention needed."
             )
+            # Re-arm whatever was partially cancelled — best effort.
+            _rearm_stops_after_failed_sell(ob_id, sl_snapshot)
             return
 
         success, result = place_order(_loop_page, ACCOUNT_ID, ob_id, "SELL", bid, volume)
@@ -2192,6 +2197,9 @@ def _fish_engine_execute_sell(decision):
         else:
             log(f"[fish] SELL FAILED: {result}")
             send_telegram(f"FISH SELL BLOCKED: {volume}u {nm}@{bid} ({reason}). Manual intervention needed!")
+            # Sell failed → restore the stops we just cancelled so the
+            # position is not left naked at the broker.
+            _rearm_stops_after_failed_sell(ob_id, sl_snapshot)
     except Exception as e:
         log(f"[fish] SELL error: {e}")
         send_telegram(f"FISH SELL ERROR: {e}. Position may be stuck!")
@@ -2801,18 +2809,20 @@ def emergency_sell(page, key, pos, bid):
     log(f"!!! L3 EMERGENCY SELL: {key} at {bid} (entry: {pos['entry']}, stop: {pos['stop']})")
     send_telegram(f"*L3 EMERGENCY SELL* {pos['name']}\nBid: {bid} | Entry: {pos['entry']}\nAuto-selling {pos['units']} units")
 
+    sl_snapshot = []
     try:
         # Cancel any active stop-losses on this orderbook BEFORE the sell.
         # Without this, Avanza rejects with short.sell.not.allowed because
-        # SL volume + SELL volume > position size. The reactive
-        # holdings-recheck path below remains as a safety net for the rare
-        # case where a stop fires DURING the cancel/sell sequence.
-        if not _ensure_stops_cancelled_before_sell(page, pos["ob_id"]):
+        # SL volume + SELL volume > position size. We snapshot the cancelled
+        # stops so we can re-arm them if the sell itself fails.
+        ok_clear, sl_snapshot = _ensure_stops_cancelled_before_sell(page, pos["ob_id"])
+        if not ok_clear:
             log(f"  {key}: emergency sell aborted — stop cancel failed")
             send_telegram(
                 f"*L3 SELL BLOCKED* {pos['name']}: stop cancel failed. "
                 f"Manual intervention needed."
             )
+            _rearm_stops_after_failed_sell(pos["ob_id"], sl_snapshot)
             return False
 
         # Get CSRF token
@@ -2825,6 +2835,8 @@ def emergency_sell(page, key, pos, bid):
 
         if not csrf:
             log("EMERGENCY SELL FAILED: no CSRF token")
+            # Stops were already cancelled above — re-arm to avoid naked position
+            _rearm_stops_after_failed_sell(pos["ob_id"], sl_snapshot)
             return False
 
         today_str = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -2924,6 +2936,9 @@ def emergency_sell(page, key, pos, bid):
             if held_confirmed:
                 log(f"  {key}: short-sell-not-allowed but position still held — keeping active")
                 send_telegram(f"*L3 WARNING* {pos['name']}: SELL rejected but holding is still live. Kept active.")
+                # Position still live AND we cancelled stops earlier → re-arm
+                # to restore protection. Without this the position is naked.
+                _rearm_stops_after_failed_sell(pos["ob_id"], sl_snapshot)
                 return False
 
             log(f"  {key}: short-sell-not-allowed and not held — deactivating")
@@ -2938,15 +2953,24 @@ def emergency_sell(page, key, pos, bid):
             return True
 
         else:
-            # Other error — keep position active, may need manual intervention
+            # Other error — keep position active, may need manual intervention.
+            # Re-arm the stops we cancelled so the still-held position is
+            # not left naked at the broker.
             error_msg = body.get("message", body_str[:100])
             log(f"  {key}: sell failed with: {error_msg}")
             send_telegram(f"*L3 SELL FAILED* {pos['name']}: {error_msg}")
+            _rearm_stops_after_failed_sell(pos["ob_id"], sl_snapshot)
             return False
 
     except Exception as e:
         log(f"Emergency sell FAILED: {e}")
         send_telegram(f"*L3 SELL FAILED*: {e}")
+        # Outer exception: we don't know if the sell went through. The stops
+        # we may have cancelled at the top of the function need restoring.
+        try:
+            _rearm_stops_after_failed_sell(pos["ob_id"], sl_snapshot)
+        except Exception:
+            pass
         return False
 
 def _cleanup_stop_orders_for(page, key):
@@ -2964,7 +2988,7 @@ def _cleanup_stop_orders_for(page, key):
         log(f"  Stop order cleanup error for {key}: {e}")
 
 
-def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0) -> bool:
+def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0):
     """Cancel ALL stop-loss orders for ``ob_id`` BEFORE placing a sell.
 
     Avanza rejects sells with ``short.sell.not.allowed`` when the sum of
@@ -2989,13 +3013,23 @@ def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0) -> b
        from the position view.
 
     Returns:
-        ``True`` if all stops are confirmed cleared (or none existed),
-        ``False`` if any stop remains after the polling window. Callers
-        MUST treat ``False`` as a hard block on the dependent SELL —
-        proceeding anyway will produce ``short.sell.not.allowed``.
+        Tuple of ``(ok: bool, snapshot: list[dict])``.
+
+        ``ok`` is ``True`` if all stops are confirmed cleared (or none
+        existed), ``False`` if any stop remains after the polling window
+        OR the SL list could not be read reliably. Callers MUST treat
+        ``False`` as a hard block on the dependent SELL — proceeding
+        anyway will produce ``short.sell.not.allowed``.
+
+        ``snapshot`` is the list of full stop-loss dicts that were
+        present at the start of the cancel sequence. Callers should
+        pass this to :func:`_rearm_stops_after_failed_sell` if the
+        dependent sell ultimately fails — otherwise the position is
+        left **naked** at the broker, which is a strictly worse failure
+        mode than the original ``short.sell.not.allowed`` error.
     """
     if not ob_id:
-        return True
+        return True, []
 
     ob_str = str(ob_id)
 
@@ -3030,11 +3064,12 @@ def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0) -> b
         )
     except Exception as e:
         log(f"[stops] server cancel raised for {ob_str}: {e}")
-        return False
+        return False, []
 
     status = result.get("status", "FAILED")
     cancelled = result.get("cancelled", []) or []
     remaining = result.get("remaining", []) or []
+    snapshot = result.get("snapshot", []) or []
     elapsed = result.get("elapsed_seconds", 0.0)
 
     if status == "SUCCESS":
@@ -3043,7 +3078,7 @@ def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0) -> b
                 f"[stops] cleared {len(cancelled)} stop(s) for {ob_str} in "
                 f"{elapsed:.2f}s (pre-sell verification OK)"
             )
-        return True
+        return True, snapshot
 
     # PARTIAL or FAILED — block the sell and surface the failure loudly.
     log(
@@ -3058,7 +3093,56 @@ def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0) -> b
         )
     except Exception:
         pass
-    return False
+    # Even on PARTIAL/FAILED, return the snapshot. Some callers may want to
+    # re-arm whatever WE cancelled before bailing — the partial state is
+    # still strictly worse than the original full coverage.
+    return False, snapshot
+
+
+def _rearm_stops_after_failed_sell(ob_id, snapshot):
+    """Re-place the stop-losses we cancelled before a sell that did NOT fill.
+
+    Called from every sell path after :func:`_ensure_stops_cancelled_before_sell`
+    if the subsequent ``place_order`` fails. Without this, the position is
+    left naked at the broker — a materially worse outcome than the original
+    rejection we were trying to avoid.
+
+    Idempotent and best-effort: failures are logged + alerted but do not
+    raise. The position will still be naked if re-arm fails, but the alert
+    surfaces it for manual intervention rather than going silent.
+    """
+    if not snapshot:
+        return
+    try:
+        from portfolio.avanza_session import rearm_stop_losses_from_snapshot
+
+        result = rearm_stop_losses_from_snapshot(snapshot)
+    except Exception as e:
+        log(f"[stops] re-arm raised for ob {ob_id}: {e}")
+        try:
+            send_telegram(
+                f"*STOP RE-ARM FAILED* ob={ob_id}\nerror={e}\n"
+                f"Position is naked. Manual intervention required."
+            )
+        except Exception:
+            pass
+        return
+
+    status = result.get("status", "FAILED")
+    rearmed = result.get("rearmed", []) or []
+    failed = result.get("failed", []) or []
+    if status == "SUCCESS":
+        log(f"[stops] re-armed {len(rearmed)} stop(s) for ob {ob_id} after failed sell")
+    else:
+        log(f"[stops] re-arm {status} for ob {ob_id}: rearmed={rearmed} failed={failed}")
+        try:
+            send_telegram(
+                f"*STOP RE-ARM {status}* ob={ob_id}\n"
+                f"rearmed={len(rearmed)} failed={len(failed)}\n"
+                f"Manual review required — position protection may be incomplete."
+            )
+        except Exception:
+            pass
 
 
 def _load_stop_orders():
@@ -3319,8 +3403,12 @@ def process_trade_queue(page):
         # SELL must clear any active stop-losses on the orderbook first,
         # otherwise Avanza rejects with short.sell.not.allowed (sl_vol + sell_vol
         # would exceed the position). BUYs are unaffected.
+        sl_snapshot_for_rollback: list = []
         if action == "SELL":
-            if not _ensure_stops_cancelled_before_sell(page, order["ob_id"]):
+            ok_clear, sl_snapshot_for_rollback = _ensure_stops_cancelled_before_sell(
+                page, order["ob_id"]
+            )
+            if not ok_clear:
                 log(f"  Order {order_id_short}: SELL aborted — could not clear stops")
                 order["status"] = "failed"
                 order["result"] = {"error": "stop_cancel_failed_pre_sell"}
@@ -3329,6 +3417,8 @@ def process_trade_queue(page):
                     f"*TRADE BLOCKED* {action} {warrant_name}\n"
                     f"Stop cancel failed pre-sell. Manual intervention needed."
                 )
+                # Re-arm whatever was partially cancelled.
+                _rearm_stops_after_failed_sell(order["ob_id"], sl_snapshot_for_rollback)
                 continue
 
         success, result = place_order(
@@ -3381,6 +3471,10 @@ def process_trade_queue(page):
                 f"Error: {error_msg}\n"
                 f"_{order.get('reasoning', '')}_"
             )
+            # If this was a SELL we'd already cleared stops for, restore them
+            # so the still-held position is not naked at the broker.
+            if action == "SELL" and sl_snapshot_for_rollback:
+                _rearm_stops_after_failed_sell(order["ob_id"], sl_snapshot_for_rollback)
 
     _save_trade_queue(queue)
 
@@ -3869,6 +3963,25 @@ def place_spike_orders(page, positions, prices, targets):
     """Place limit sell orders for US open spike capture.
 
     Returns dict of {position_key: order_id} for placed orders.
+
+    **Volume-constraint handling**: spike sells are partial-volume limit
+    orders that can sit unfilled for hours. When a position has active
+    hardware/cascade stop-losses covering the FULL volume, placing a
+    50% spike sell would push the encumbered total to 150% — Avanza
+    rejects with ``short.sell.not.allowed``.
+
+    The fix: for each position we want to spike, atomically:
+
+      1. Snapshot the current stops (via _ensure_stops_cancelled_before_sell)
+         and cancel them all → 0% encumbered.
+      2. Place the spike sell (encumbers `units_to_sell`).
+      3. Re-arm cascade stops on the **remaining** unencumbered volume
+         (`position_volume - units_to_sell`). This protects the portion
+         of the position that the spike doesn't cover.
+
+    On failure (cancel can't clear, or spike sell rejected), restore
+    the original stops so the position is never left naked. The user
+    is alerted via Telegram for any non-clean outcome.
     """
     csrf = get_csrf(page)
     if not csrf:
@@ -3883,15 +3996,35 @@ def place_spike_orders(page, positions, prices, targets):
         if not pos or not pos.get("active"):
             continue
 
+        ob_id = pos.get("ob_id")
+        spike_volume = int(target.get("units_to_sell", 0))
+        position_volume = int(pos.get("units", 0))
+        if not ob_id or spike_volume <= 0:
+            continue
+
+        # Step 1: Cancel + snapshot existing stops. This frees the encumbered
+        # volume so our partial spike sell can be accepted.
+        ok_clear, sl_snapshot = _ensure_stops_cancelled_before_sell(page, ob_id)
+        if not ok_clear:
+            log(f"Spike SELL aborted for {key}: could not clear stops on {ob_id}")
+            send_telegram(
+                f"*SPIKE BLOCKED* {pos['name']}: stop cancel failed. "
+                f"Position protection unchanged."
+            )
+            # Restore whatever we may have partially cancelled.
+            _rearm_stops_after_failed_sell(ob_id, sl_snapshot)
+            continue
+
+        spike_placed_ok = False
         try:
             payload = {
                 "accountId": ACCOUNT_ID,
-                "orderbookId": pos["ob_id"],
+                "orderbookId": ob_id,
                 "side": "SELL",
                 "condition": "NORMAL",
                 "price": target["target_price"],
                 "validUntil": today_str,
-                "volume": target["units_to_sell"],
+                "volume": spike_volume,
             }
 
             result = page.evaluate("""async (args) => {
@@ -3917,7 +4050,8 @@ def place_spike_orders(page, positions, prices, targets):
                     order_id = ""
 
                 placed[key] = order_id
-                log(f"Spike SELL placed: {pos['name']} {target['units_to_sell']}u @ {target['target_price']} "
+                spike_placed_ok = True
+                log(f"Spike SELL placed: {pos['name']} {spike_volume}u @ {target['target_price']} "
                     f"(+{target['target_pnl_pct']:.1f}% from entry) [order: {order_id}]")
             else:
                 log(f"Spike SELL failed for {key}: status={status}, body={body[:200]}")
@@ -3925,7 +4059,56 @@ def place_spike_orders(page, positions, prices, targets):
         except Exception as e:
             log(f"Spike order error for {key}: {e}")
 
+        # Step 3: Re-arm protection on the unencumbered remainder.
+        # If the spike order placement failed, restore the FULL original
+        # stops (position is unchanged). If it succeeded, restore stops
+        # sized to (position_volume - spike_volume) so the spike volume
+        # remains room for the limit order to fill.
+        if spike_placed_ok and sl_snapshot:
+            remainder = max(0, position_volume - spike_volume)
+            if remainder > 0:
+                resized = _resize_snapshot_volume(sl_snapshot, remainder)
+                _rearm_stops_after_failed_sell(ob_id, resized)
+            else:
+                # Spike volume covers full position — no remainder to protect.
+                pass
+        elif sl_snapshot:
+            # Spike placement failed: restore originals exactly.
+            _rearm_stops_after_failed_sell(ob_id, sl_snapshot)
+
     return placed
+
+
+def _resize_snapshot_volume(snapshot, new_volume: int) -> list:
+    """Return a copy of ``snapshot`` with each stop's order volume capped
+    to ``new_volume``.
+
+    Used by the spike-orders path to re-arm protection on the volume
+    that's NOT encumbered by an open spike sell. The cascade structure
+    (multiple stops at different trigger prices) is preserved — each
+    layer just gets its volume reduced proportionally to its original
+    share of the total.
+
+    If a stop's original volume is already <= new_volume it is kept
+    unchanged. Otherwise it is set to new_volume. Multi-layer cascades
+    where the layers sum to more than new_volume will end up with
+    overlapping coverage — that is acceptable because Avanza only
+    rejects when sl_volume + sell_volume > position, not on multiple
+    stops covering the same units.
+    """
+    import copy as _copy
+    out = []
+    for sl in snapshot:
+        if not isinstance(sl, dict):
+            continue
+        copy = _copy.deepcopy(sl)
+        order = copy.get("order") or {}
+        original = int(order.get("volume", 0) or 0)
+        if original > new_volume:
+            order["volume"] = int(new_volume)
+            copy["order"] = order
+        out.append(copy)
+    return out
 
 
 def cancel_spike_orders(page, spike_state):

@@ -34,30 +34,33 @@ def silence_telegram(monkeypatch):
     monkeypatch.setattr(mod, "send_telegram", lambda *a, **kw: None)
 
 
-def _ok(cancelled=None):
+def _ok(cancelled=None, snapshot=None):
     """Build a SUCCESS server-side result."""
     return {
         "status": "SUCCESS",
         "cancelled": cancelled or [],
         "remaining": [],
+        "snapshot": snapshot or [],
         "elapsed_seconds": 0.1,
     }
 
 
-def _failed(remaining=None):
+def _failed(remaining=None, snapshot=None):
     return {
         "status": "FAILED",
         "cancelled": [],
         "remaining": remaining or ["S1"],
+        "snapshot": snapshot or [],
         "elapsed_seconds": 3.0,
     }
 
 
-def _partial(cancelled, remaining):
+def _partial(cancelled, remaining, snapshot=None):
     return {
         "status": "PARTIAL",
         "cancelled": cancelled,
         "remaining": remaining,
+        "snapshot": snapshot or [],
         "elapsed_seconds": 3.0,
     }
 
@@ -74,8 +77,8 @@ class TestEnsureStopsCancelledBeforeSell:
             "portfolio.avanza_session.cancel_all_stop_losses_for",
             lambda *a, **kw: (called.__setitem__("server", True), _ok())[1],
         )
-        assert mod._ensure_stops_cancelled_before_sell(None, "") is True
-        assert mod._ensure_stops_cancelled_before_sell(None, None) is True
+        assert mod._ensure_stops_cancelled_before_sell(None, "") == (True, [])
+        assert mod._ensure_stops_cancelled_before_sell(None, None) == (True, [])
         assert called["server"] is False
 
     def test_no_local_position_still_runs_server_cancel(self, monkeypatch, silence_telegram):
@@ -90,8 +93,10 @@ class TestEnsureStopsCancelledBeforeSell:
             return _ok(cancelled=["S1"])
 
         monkeypatch.setattr("portfolio.avanza_session.cancel_all_stop_losses_for", fake_server)
-        assert mod._ensure_stops_cancelled_before_sell(None, "OB1") is True
+        ok, snap = mod._ensure_stops_cancelled_before_sell(None, "OB1")
+        assert ok is True
         assert called["server"] is True
+        assert snap == []
 
     def test_matching_position_runs_both_layers_and_keeps_local_state(
         self, monkeypatch, silence_telegram, tmp_path
@@ -129,10 +134,13 @@ class TestEnsureStopsCancelledBeforeSell:
 
         monkeypatch.setattr(
             "portfolio.avanza_session.cancel_all_stop_losses_for",
-            lambda *a, **kw: _ok(cancelled=["SERVER_S1"]),
+            lambda *a, **kw: _ok(cancelled=["SERVER_S1"], snapshot=[{"id": "SERVER_S1"}]),
         )
 
-        assert mod._ensure_stops_cancelled_before_sell(object(), "OB1") is True
+        ok, snap = mod._ensure_stops_cancelled_before_sell(object(), "OB1")
+        assert ok is True
+        # Snapshot is propagated for caller to use in re-arm if sell fails
+        assert len(snap) == 1
         assert local_called["n"] == 1
         # CRITICAL: must NOT save (which would delete) — _cleanup_stop_orders_for
         # handles state removal AFTER the sell fills
@@ -154,7 +162,8 @@ class TestEnsureStopsCancelledBeforeSell:
             "portfolio.avanza_session.cancel_all_stop_losses_for",
             lambda *a, **kw: _ok(),
         )
-        assert mod._ensure_stops_cancelled_before_sell(object(), "OB1") is True
+        ok, _ = mod._ensure_stops_cancelled_before_sell(object(), "OB1")
+        assert ok is True
         assert local_called["n"] == 0  # local layer never invoked
 
     def test_local_cascade_error_does_not_block_sell(self, monkeypatch, silence_telegram):
@@ -173,7 +182,8 @@ class TestEnsureStopsCancelledBeforeSell:
             "portfolio.avanza_session.cancel_all_stop_losses_for",
             lambda *a, **kw: _ok(),
         )
-        assert mod._ensure_stops_cancelled_before_sell(object(), "OB1") is True
+        ok, _ = mod._ensure_stops_cancelled_before_sell(object(), "OB1")
+        assert ok is True
 
     def test_server_failed_blocks_sell_and_alerts(self, monkeypatch):
         """Server FAILED → return False AND send a Telegram alert."""
@@ -184,9 +194,12 @@ class TestEnsureStopsCancelledBeforeSell:
         monkeypatch.setattr(mod, "send_telegram", lambda msg: alerts.append(msg))
         monkeypatch.setattr(
             "portfolio.avanza_session.cancel_all_stop_losses_for",
-            lambda *a, **kw: _failed(remaining=["S1", "S2"]),
+            lambda *a, **kw: _failed(remaining=["S1", "S2"], snapshot=[{"id": "S1"}, {"id": "S2"}]),
         )
-        assert mod._ensure_stops_cancelled_before_sell(object(), "OB1") is False
+        ok, snap = mod._ensure_stops_cancelled_before_sell(object(), "OB1")
+        assert ok is False
+        # Snapshot is propagated even on FAILED so caller can attempt re-arm
+        assert len(snap) == 2
         assert any("STOP CANCEL FAILED" in m for m in alerts)
         assert any("OB1" in m for m in alerts)
 
@@ -196,9 +209,11 @@ class TestEnsureStopsCancelledBeforeSell:
         monkeypatch.setattr(mod, "POSITIONS", {})
         monkeypatch.setattr(
             "portfolio.avanza_session.cancel_all_stop_losses_for",
-            lambda *a, **kw: _partial(cancelled=["S1"], remaining=["S2"]),
+            lambda *a, **kw: _partial(cancelled=["S1"], remaining=["S2"], snapshot=[{"id": "S1"}, {"id": "S2"}]),
         )
-        assert mod._ensure_stops_cancelled_before_sell(object(), "OB1") is False
+        ok, snap = mod._ensure_stops_cancelled_before_sell(object(), "OB1")
+        assert ok is False
+        assert len(snap) == 2  # snapshot returned for re-arm
 
     def test_server_exception_blocks_sell(self, monkeypatch, silence_telegram):
         """If the server cancel call itself raises, treat as FAILED."""
@@ -208,7 +223,9 @@ class TestEnsureStopsCancelledBeforeSell:
         def raises(*a, **kw):
             raise RuntimeError("connection refused")
         monkeypatch.setattr("portfolio.avanza_session.cancel_all_stop_losses_for", raises)
-        assert mod._ensure_stops_cancelled_before_sell(object(), "OB1") is False
+        ok, snap = mod._ensure_stops_cancelled_before_sell(object(), "OB1")
+        assert ok is False
+        assert snap == []
 
     def test_passes_account_id_to_server_call(self, monkeypatch, silence_telegram):
         """ACCOUNT_ID must be propagated so we don't accidentally cancel
@@ -228,3 +245,92 @@ class TestEnsureStopsCancelledBeforeSell:
         assert captured["ob_id"] == "OB1"
         assert captured["account_id"] == mod.ACCOUNT_ID
         assert captured["max_wait"] == 5.5
+
+
+class TestRearmAfterFailedSell:
+    """Tests for _rearm_stops_after_failed_sell — the rollback safety net."""
+
+    def test_empty_snapshot_is_noop(self, monkeypatch):
+        import metals_loop as mod
+        called = {"n": 0}
+        monkeypatch.setattr(
+            "portfolio.avanza_session.rearm_stop_losses_from_snapshot",
+            lambda *a, **kw: (called.__setitem__("n", 1), {"status": "SUCCESS"})[1],
+        )
+        mod._rearm_stops_after_failed_sell("OB1", [])
+        assert called["n"] == 0  # never called for empty snapshot
+
+    def test_success_logs_only(self, monkeypatch):
+        import metals_loop as mod
+        alerts = []
+        monkeypatch.setattr(mod, "send_telegram", lambda msg: alerts.append(msg))
+        monkeypatch.setattr(
+            "portfolio.avanza_session.rearm_stop_losses_from_snapshot",
+            lambda snap: {"status": "SUCCESS", "rearmed": ["NEW1"], "failed": []},
+        )
+        mod._rearm_stops_after_failed_sell("OB1", [{"id": "OLD"}])
+        assert alerts == []  # no alert on clean re-arm
+
+    def test_partial_alerts(self, monkeypatch):
+        import metals_loop as mod
+        alerts = []
+        monkeypatch.setattr(mod, "send_telegram", lambda msg: alerts.append(msg))
+        monkeypatch.setattr(
+            "portfolio.avanza_session.rearm_stop_losses_from_snapshot",
+            lambda snap: {"status": "PARTIAL", "rearmed": ["NEW1"], "failed": ["OLD2"]},
+        )
+        mod._rearm_stops_after_failed_sell("OB1", [{"id": "OLD1"}, {"id": "OLD2"}])
+        assert any("RE-ARM PARTIAL" in m for m in alerts)
+        assert any("OB1" in m for m in alerts)
+
+    def test_total_failure_alerts(self, monkeypatch):
+        import metals_loop as mod
+        alerts = []
+        monkeypatch.setattr(mod, "send_telegram", lambda msg: alerts.append(msg))
+        monkeypatch.setattr(
+            "portfolio.avanza_session.rearm_stop_losses_from_snapshot",
+            lambda snap: {"status": "FAILED", "rearmed": [], "failed": ["OLD"]},
+        )
+        mod._rearm_stops_after_failed_sell("OB1", [{"id": "OLD"}])
+        assert any("RE-ARM FAILED" in m for m in alerts)
+
+    def test_exception_alerts_naked(self, monkeypatch):
+        import metals_loop as mod
+        alerts = []
+        monkeypatch.setattr(mod, "send_telegram", lambda msg: alerts.append(msg))
+        def raises(*a, **kw):
+            raise RuntimeError("API down")
+        monkeypatch.setattr(
+            "portfolio.avanza_session.rearm_stop_losses_from_snapshot",
+            raises,
+        )
+        # Must NOT raise — best effort with operator alert
+        mod._rearm_stops_after_failed_sell("OB1", [{"id": "OLD"}])
+        assert any("RE-ARM FAILED" in m for m in alerts)
+        assert any("naked" in m.lower() for m in alerts)
+
+
+class TestResizeSnapshotVolume:
+    def test_caps_volume_at_new_max(self):
+        import metals_loop as mod
+        snapshot = [
+            {"id": "S1", "order": {"volume": 1000, "price": 1.0}, "trigger": {"value": 0.9}, "orderbook": {"id": "OB1"}},
+            {"id": "S2", "order": {"volume": 500, "price": 1.0}, "trigger": {"value": 0.8}, "orderbook": {"id": "OB1"}},
+        ]
+        resized = mod._resize_snapshot_volume(snapshot, 750)
+        # S1 (1000) capped to 750, S2 (500) unchanged
+        assert resized[0]["order"]["volume"] == 750
+        assert resized[1]["order"]["volume"] == 500
+        # Originals must NOT be mutated
+        assert snapshot[0]["order"]["volume"] == 1000
+
+    def test_preserves_non_dict_filtering(self):
+        import metals_loop as mod
+        snapshot = [
+            "garbage",
+            None,
+            {"id": "GOOD", "order": {"volume": 100, "price": 1.0}, "trigger": {"value": 0.9}, "orderbook": {"id": "OB1"}},
+        ]
+        resized = mod._resize_snapshot_volume(snapshot, 50)
+        assert len(resized) == 1
+        assert resized[0]["order"]["volume"] == 50
