@@ -443,19 +443,19 @@ class TestRestoreFullStopProtection:
     to roll back the partial protection that place_spike_orders left.
     """
 
-    def test_empty_inputs_are_noop(self, monkeypatch):
+    def test_empty_inputs_return_false(self, monkeypatch):
         import metals_loop as mod
         called = {"n": 0}
         monkeypatch.setattr(
             "portfolio.avanza_session.cancel_all_stop_losses_for",
             lambda *a, **kw: (called.__setitem__("n", called["n"] + 1), _ok())[1],
         )
-        mod._restore_full_stop_protection("", [{"id": "X"}])
-        mod._restore_full_stop_protection("OB1", [])
-        mod._restore_full_stop_protection(None, None)
+        assert mod._restore_full_stop_protection("", [{"id": "X"}]) is False
+        assert mod._restore_full_stop_protection("OB1", []) is False
+        assert mod._restore_full_stop_protection(None, None) is False
         assert called["n"] == 0
 
-    def test_clears_then_rearms(self, monkeypatch, silence_telegram):
+    def test_clears_then_rearms_returns_true(self, monkeypatch, silence_telegram):
         import metals_loop as mod
         order = []
         monkeypatch.setattr(
@@ -466,7 +466,7 @@ class TestRestoreFullStopProtection:
             "portfolio.avanza_session.rearm_stop_losses_from_snapshot",
             lambda snap: (order.append("rearm"), {"status": "SUCCESS", "rearmed": ["NEW1"], "failed": []})[1],
         )
-        mod._restore_full_stop_protection("OB1", [{"id": "OLD"}])
+        assert mod._restore_full_stop_protection("OB1", [{"id": "OLD"}]) is True
         assert order == ["clear", "rearm"]
 
     def test_clear_failure_still_rearms_with_warning(self, monkeypatch):
@@ -485,11 +485,14 @@ class TestRestoreFullStopProtection:
             "portfolio.avanza_session.rearm_stop_losses_from_snapshot",
             lambda snap: (rearm_called.__setitem__("n", 1), {"status": "SUCCESS", "rearmed": ["NEW"], "failed": []})[1],
         )
-        mod._restore_full_stop_protection("OB1", [{"id": "OLD"}])
+        ok = mod._restore_full_stop_protection("OB1", [{"id": "OLD"}])
+        assert ok is True
         assert rearm_called["n"] == 1
         assert any("RESTORE WARNING" in m for m in alerts)
 
-    def test_rearm_partial_alerts(self, monkeypatch):
+    def test_rearm_partial_returns_true_with_alert(self, monkeypatch):
+        """PARTIAL means SOME re-arms succeeded — return True so the caller
+        drops the snapshot. The Telegram alert covers the gap."""
         import metals_loop as mod
         alerts = []
         monkeypatch.setattr(mod, "send_telegram", lambda msg: alerts.append(msg))
@@ -501,8 +504,192 @@ class TestRestoreFullStopProtection:
             "portfolio.avanza_session.rearm_stop_losses_from_snapshot",
             lambda snap: {"status": "PARTIAL", "rearmed": ["A"], "failed": ["B"]},
         )
-        mod._restore_full_stop_protection("OB1", [{"id": "A"}, {"id": "B"}])
+        ok = mod._restore_full_stop_protection("OB1", [{"id": "A"}, {"id": "B"}])
+        assert ok is True
         assert any("SPIKE RESTORE PARTIAL" in m for m in alerts)
+
+    def test_rearm_total_failure_returns_false(self, monkeypatch):
+        """FAILED with no rearmed stops → return False so the caller keeps
+        the snapshot for retry."""
+        import metals_loop as mod
+        alerts = []
+        monkeypatch.setattr(mod, "send_telegram", lambda msg: alerts.append(msg))
+        monkeypatch.setattr(
+            "portfolio.avanza_session.cancel_all_stop_losses_for",
+            lambda *a, **kw: {"status": "SUCCESS", "cancelled": [], "remaining": [], "snapshot": [], "elapsed_seconds": 0.0},
+        )
+        monkeypatch.setattr(
+            "portfolio.avanza_session.rearm_stop_losses_from_snapshot",
+            lambda snap: {"status": "FAILED", "rearmed": [], "failed": ["A"]},
+        )
+        ok = mod._restore_full_stop_protection("OB1", [{"id": "A"}])
+        assert ok is False
+        assert any("SPIKE RESTORE FAILED" in m for m in alerts)
+
+
+class TestFetchLivePositionVolume:
+    def test_none_ob_id_returns_none(self, monkeypatch):
+        import metals_loop as mod
+        assert mod._fetch_live_position_volume(None) is None
+        assert mod._fetch_live_position_volume("") is None
+
+    def test_returns_volume_for_held_position(self, monkeypatch):
+        import metals_loop as mod
+        monkeypatch.setattr(
+            "portfolio.avanza_session.get_positions",
+            lambda: [
+                {"orderbook_id": "OTHER", "volume": 999},
+                {"orderbook_id": "OB1", "volume": 60},
+            ],
+        )
+        assert mod._fetch_live_position_volume("OB1") == 60
+
+    def test_returns_zero_when_not_held(self, monkeypatch):
+        """Position not in holdings → 0 (sold/never held)."""
+        import metals_loop as mod
+        monkeypatch.setattr(
+            "portfolio.avanza_session.get_positions",
+            lambda: [{"orderbook_id": "OTHER", "volume": 100}],
+        )
+        assert mod._fetch_live_position_volume("OB1") == 0
+
+    def test_returns_none_on_api_error(self, monkeypatch):
+        """Critical: distinguish read-failure (None) from no-holding (0)."""
+        import metals_loop as mod
+        def boom():
+            raise RuntimeError("session expired")
+        monkeypatch.setattr("portfolio.avanza_session.get_positions", boom)
+        assert mod._fetch_live_position_volume("OB1") is None
+
+
+class TestCancelSpikeOrdersRestore:
+    """Tests for cancel_spike_orders' restore-and-retain behavior."""
+
+    def _make_state(self, orders=None, snapshots=None):
+        return {
+            "orders": orders or {"silver_q0": "ORDER1"},
+            "stop_snapshots": snapshots if snapshots is not None else {
+                "silver_q0": [
+                    {"id": "OLD1", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+                     "trigger": {"value": 1.0}, "order": {"price": 1.0, "volume": 100}}
+                ],
+            },
+            "targets": {},
+            "date": "2026-04-08",
+            "placed": True,
+            "cancelled": False,
+        }
+
+    def _fake_page(self, delete_status=200):
+        class FakePage:
+            def evaluate(self, _js, _args):
+                return {"status": delete_status, "body": ""}
+        return FakePage()
+
+    def test_failed_delete_keeps_snapshot(self, monkeypatch, silence_telegram):
+        """Codex finding 3 part 1: if the spike DELETE returns non-2xx,
+        the order is still open. Restoring stops would over-encumber."""
+        import metals_loop as mod
+        monkeypatch.setattr(mod, "get_csrf", lambda page: "TOKEN")
+        spike_state = self._make_state()
+        positions = {"silver_q0": {"ob_id": "OB1", "units": 100}}
+
+        restore_called = {"n": 0}
+        monkeypatch.setattr(mod, "_restore_full_stop_protection",
+                            lambda *a, **kw: (restore_called.__setitem__("n", 1), True)[1])
+        monkeypatch.setattr(mod, "_fetch_live_position_volume", lambda ob_id: 100)
+
+        mod.cancel_spike_orders(self._fake_page(delete_status=500), spike_state, positions)
+        # Restore must NOT have been called — order is still open
+        assert restore_called["n"] == 0
+        # Snapshot must be retained for retry
+        assert "silver_q0" in spike_state["stop_snapshots"]
+
+    def test_zero_live_volume_drops_snapshot_no_restore(self, monkeypatch, silence_telegram):
+        """If position is fully gone (0 live volume), no restore needed.
+        Drop the snapshot since nothing to retry."""
+        import metals_loop as mod
+        monkeypatch.setattr(mod, "get_csrf", lambda page: "TOKEN")
+        spike_state = self._make_state()
+        positions = {"silver_q0": {"ob_id": "OB1", "units": 100}}
+
+        restore_called = {"n": 0}
+        monkeypatch.setattr(mod, "_restore_full_stop_protection",
+                            lambda *a, **kw: (restore_called.__setitem__("n", 1), True)[1])
+        monkeypatch.setattr(mod, "_fetch_live_position_volume", lambda ob_id: 0)
+
+        mod.cancel_spike_orders(self._fake_page(delete_status=200), spike_state, positions)
+        assert restore_called["n"] == 0
+        assert "silver_q0" not in spike_state["stop_snapshots"]
+
+    def test_partial_fill_resizes_snapshot_to_live_volume(self, monkeypatch, silence_telegram):
+        """Codex finding 3 part 2: live position is smaller than original
+        (partial spike fill). Resize snapshot before restoring."""
+        import metals_loop as mod
+        monkeypatch.setattr(mod, "get_csrf", lambda page: "TOKEN")
+        spike_state = self._make_state()
+        positions = {"silver_q0": {"ob_id": "OB1", "units": 100}}
+
+        captured = {}
+        def fake_restore(ob_id, snap):
+            captured["ob_id"] = ob_id
+            captured["volumes"] = [s["order"]["volume"] for s in snap]
+            return True
+        monkeypatch.setattr(mod, "_restore_full_stop_protection", fake_restore)
+        monkeypatch.setattr(mod, "_fetch_live_position_volume", lambda ob_id: 60)
+
+        mod.cancel_spike_orders(self._fake_page(delete_status=200), spike_state, positions)
+        # Snapshot was capped at the live 60u volume, not the original 100u
+        assert captured["volumes"] == [60]
+        # Successful restore → snapshot dropped
+        assert "silver_q0" not in spike_state["stop_snapshots"]
+
+    def test_restore_failure_keeps_snapshot(self, monkeypatch, silence_telegram):
+        """Codex finding 3 part 3: failed restore must NOT drop the
+        snapshot — operator needs the rollback record."""
+        import metals_loop as mod
+        monkeypatch.setattr(mod, "get_csrf", lambda page: "TOKEN")
+        spike_state = self._make_state()
+        positions = {"silver_q0": {"ob_id": "OB1", "units": 100}}
+
+        monkeypatch.setattr(mod, "_restore_full_stop_protection", lambda *a, **kw: False)
+        monkeypatch.setattr(mod, "_fetch_live_position_volume", lambda ob_id: 100)
+
+        mod.cancel_spike_orders(self._fake_page(delete_status=200), spike_state, positions)
+        # Snapshot is RETAINED for next-iteration retry
+        assert "silver_q0" in spike_state["stop_snapshots"]
+
+    def test_volume_read_failure_keeps_snapshot(self, monkeypatch, silence_telegram):
+        """If we cannot read live volume, we don't know how to size the
+        restore. Keep the snapshot for retry."""
+        import metals_loop as mod
+        monkeypatch.setattr(mod, "get_csrf", lambda page: "TOKEN")
+        spike_state = self._make_state()
+        positions = {"silver_q0": {"ob_id": "OB1", "units": 100}}
+
+        restore_called = {"n": 0}
+        monkeypatch.setattr(mod, "_restore_full_stop_protection",
+                            lambda *a, **kw: (restore_called.__setitem__("n", 1), True)[1])
+        monkeypatch.setattr(mod, "_fetch_live_position_volume", lambda ob_id: None)
+
+        mod.cancel_spike_orders(self._fake_page(delete_status=200), spike_state, positions)
+        assert restore_called["n"] == 0
+        assert "silver_q0" in spike_state["stop_snapshots"]
+
+    def test_no_positions_arg_keeps_snapshot(self, monkeypatch, silence_telegram):
+        """Backward-compat: legacy callers without positions arg → keep
+        snapshot, log it, never restore."""
+        import metals_loop as mod
+        monkeypatch.setattr(mod, "get_csrf", lambda page: "TOKEN")
+        spike_state = self._make_state()
+
+        restore_called = {"n": 0}
+        monkeypatch.setattr(mod, "_restore_full_stop_protection",
+                            lambda *a, **kw: (restore_called.__setitem__("n", 1), True)[1])
+
+        mod.cancel_spike_orders(self._fake_page(delete_status=200), spike_state, None)
+        assert restore_called["n"] == 0
+        assert "silver_q0" in spike_state["stop_snapshots"]
 
 
 class TestResizeSnapshotVolume:

@@ -4213,17 +4213,31 @@ def cancel_spike_orders(page, spike_state, positions=None):
     grow back to cover the freed volume. Without a deliberate restore,
     the spike volume slice remains naked for the rest of the session.
 
-    This function therefore performs two steps per cancelled order:
+    This function therefore performs the following per spike entry:
 
       1. DELETE the spike LIMIT order via the trading-critical API.
-      2. If we persisted an original ``stop_snapshots[key]`` from
-         ``place_spike_orders``, atomically clear the resized stops and
-         re-arm the originals at full volume via
-         :func:`_restore_full_stop_protection`.
+         Capture the HTTP status — anything outside 2xx/404 means the
+         broker still has the order (or the call failed) and we MUST
+         NOT touch the stops.
+      2. Fetch the live position volume via ``get_positions()``. The
+         spike could have been partially filled before cancellation,
+         shrinking the position. Restoring the original full-volume
+         snapshot would exceed the live position size and Avanza would
+         reject the place_stop_loss with the same volume-constraint
+         error this branch is trying to fix.
+      3. Resize the original snapshot to the live volume via
+         ``_resize_snapshot_volume`` and call
+         ``_restore_full_stop_protection`` to atomically clear any
+         resized stops and re-arm the (resized) originals.
+      4. Only pop ``stop_snapshots[key]`` from state if the restore
+         succeeded. Failed/skipped restores keep the snapshot so the
+         next loop iteration can retry, and operators retain the
+         original record for manual recovery.
 
     The ``positions`` argument is required when restoring stops, since
-    we need the orderbook ID. It's optional only for backward compat with
-    callers that don't care about restoration (e.g. test fixtures).
+    we need the orderbook ID per position key. It's optional only for
+    backward compat with callers that don't care about restoration
+    (test fixtures).
     """
     csrf = get_csrf(page)
     if not csrf:
@@ -4232,10 +4246,15 @@ def cancel_spike_orders(page, spike_state, positions=None):
 
     orders = spike_state.get("orders", {})
     snapshots = spike_state.get("stop_snapshots", {}) or {}
+    if not isinstance(snapshots, dict):
+        snapshots = {}
+        spike_state["stop_snapshots"] = snapshots
+
     for key, order_id in list(orders.items()):
         if not order_id:
             continue
 
+        delete_status = 0
         try:
             result = page.evaluate("""async (args) => {
                 const [accountId, orderId, token] = args;
@@ -4249,29 +4268,94 @@ def cancel_spike_orders(page, spike_state, positions=None):
                 );
                 return {status: resp.status, body: await resp.text()};
             }""", [ACCOUNT_ID, order_id, csrf])
-
-            log(f"Spike cancel {key}: status={result.get('status')}")
+            delete_status = int(result.get("status", 0) or 0)
+            log(f"Spike cancel {key}: status={delete_status}")
         except Exception as e:
             log(f"Spike cancel error {key}: {e}")
+            delete_status = 0
 
-        # After the spike LIMIT order is cancelled, restore full-volume
-        # stops if we have a snapshot to restore from.
-        original_snapshot = snapshots.get(key) if isinstance(snapshots, dict) else None
-        if original_snapshot and positions is not None:
-            pos = positions.get(key, {})
-            ob_id = pos.get("ob_id")
-            if ob_id:
-                _restore_full_stop_protection(ob_id, original_snapshot)
-            else:
-                log(f"[spike] cannot restore stops for {key}: no ob_id")
-        elif original_snapshot:
+        # 2xx = deleted, 404 = already gone (also fine). Anything else
+        # leaves the order open and the stops MUST NOT be touched —
+        # restoring them would over-encumber the volume.
+        delete_ok = (200 <= delete_status < 300) or delete_status == 404
+        original_snapshot = snapshots.get(key)
+        if not delete_ok:
+            log(
+                f"[spike] DELETE for {key} returned {delete_status}; "
+                f"keeping stop snapshot for retry"
+            )
+            continue  # snapshot stays, retry next loop iteration
+
+        if not original_snapshot:
+            continue  # nothing to restore (no original stops captured)
+
+        if positions is None:
             log(f"[spike] snapshot present for {key} but no positions arg — stops NOT restored")
+            continue  # keep snapshot for caller to retry with positions
 
-    # Drop the snapshots from the state — they've been used.
-    spike_state["stop_snapshots"] = {}
+        pos = positions.get(key, {})
+        ob_id = pos.get("ob_id")
+        if not ob_id:
+            log(f"[spike] cannot restore stops for {key}: no ob_id; snapshot kept")
+            continue
+
+        # Re-fetch live position volume. The spike could have been
+        # partially filled before our cancel; restoring the original
+        # full-volume snapshot would exceed the live position size and
+        # the place_stop_loss would reject with short.sell.not.allowed.
+        live_volume = _fetch_live_position_volume(ob_id)
+        if live_volume is None:
+            log(
+                f"[spike] cannot read live volume for {ob_id}; "
+                f"keeping snapshot for {key} retry"
+            )
+            continue
+        if live_volume <= 0:
+            log(f"[spike] {key}: live position is 0; no restore needed, dropping snapshot")
+            snapshots.pop(key, None)
+            continue
+
+        sized_snapshot = _resize_snapshot_volume(original_snapshot, live_volume)
+        restore_ok = _restore_full_stop_protection(ob_id, sized_snapshot)
+        if restore_ok:
+            snapshots.pop(key, None)
+        else:
+            log(
+                f"[spike] restore failed for {key}; keeping snapshot for "
+                f"next loop retry"
+            )
 
 
-def _restore_full_stop_protection(ob_id, original_snapshot):
+def _fetch_live_position_volume(ob_id) -> int | None:
+    """Fetch the live volume for ``ob_id`` from Avanza's positions API.
+
+    Returns the volume as an int (0 if the position is no longer held)
+    or ``None`` if the API call fails — callers must distinguish "no
+    holding" from "could not read" because they require different
+    rollback decisions.
+    """
+    if not ob_id:
+        return None
+    try:
+        from portfolio.avanza_session import get_positions
+        positions = get_positions()
+    except Exception as e:
+        log(f"[spike] live volume fetch failed for {ob_id}: {e}")
+        return None
+    target = str(ob_id)
+    for p in positions:
+        if not isinstance(p, dict):
+            continue
+        if str(p.get("orderbook_id", "")) == target:
+            try:
+                return int(p.get("volume", 0) or 0)
+            except (TypeError, ValueError):
+                return 0
+    # Position not found in holdings → 0 (already sold/never held)
+    return 0
+
+
+def _restore_full_stop_protection(ob_id, original_snapshot) -> bool:
     """Atomically clear current stops on ``ob_id`` and re-arm the originals.
 
     Used by :func:`cancel_spike_orders` to roll back the partial protection
@@ -4285,9 +4369,14 @@ def _restore_full_stop_protection(ob_id, original_snapshot):
     accepted as a risk because the alternative — overlapping resized +
     original stops — would inflate encumbered volume past the position
     size and trigger short.sell.not.allowed on subsequent operations.
+
+    Returns ``True`` if at least one stop was successfully re-armed,
+    ``False`` if no stops were placed or any stage failed completely.
+    Callers can use the return value to decide whether to retain the
+    snapshot for retry on the next loop iteration.
     """
     if not ob_id or not original_snapshot:
-        return
+        return False
     try:
         from portfolio.avanza_session import (
             cancel_all_stop_losses_for,
@@ -4295,7 +4384,7 @@ def _restore_full_stop_protection(ob_id, original_snapshot):
         )
     except Exception as e:
         log(f"[spike] cannot import session helpers for restore on {ob_id}: {e}")
-        return
+        return False
 
     # Clear the resized stops first so re-arming originals doesn't double-up.
     try:
@@ -4317,30 +4406,36 @@ def _restore_full_stop_protection(ob_id, original_snapshot):
             # leaving the spike volume slice naked.
     except Exception as e:
         log(f"[spike] clear-resized-stops failed for {ob_id}: {e}")
-        return
+        return False
 
     try:
         rearm_result = rearm_stop_losses_from_snapshot(original_snapshot)
         status = rearm_result.get("status", "FAILED")
+        rearmed_count = len(rearm_result.get("rearmed", []) or [])
         if status == "SUCCESS":
             log(
                 f"[spike] restored full stop protection for {ob_id} "
-                f"({len(rearm_result.get('rearmed', []))} stops)"
+                f"({rearmed_count} stops)"
             )
-        else:
-            log(
-                f"[spike] partial/failed restore for {ob_id}: "
-                f"rearmed={rearm_result.get('rearmed')} failed={rearm_result.get('failed')}"
+            return True
+        log(
+            f"[spike] partial/failed restore for {ob_id}: "
+            f"rearmed={rearm_result.get('rearmed')} failed={rearm_result.get('failed')}"
+        )
+        try:
+            send_telegram(
+                f"*SPIKE RESTORE {status}* ob={ob_id}\n"
+                f"rearmed={rearmed_count} "
+                f"failed={len(rearm_result.get('failed', []))}\n"
+                f"Manual review required — position may be partially naked."
             )
-            try:
-                send_telegram(
-                    f"*SPIKE RESTORE {status}* ob={ob_id}\n"
-                    f"rearmed={len(rearm_result.get('rearmed', []))} "
-                    f"failed={len(rearm_result.get('failed', []))}\n"
-                    f"Manual review required — position may be partially naked."
-                )
-            except Exception:
-                pass
+        except Exception:
+            pass
+        # PARTIAL still means SOME protection was restored — return True so
+        # the caller drops the now-stale snapshot. The Telegram alert covers
+        # the gap. FAILED means nothing got placed, return False so caller
+        # keeps the snapshot for retry.
+        return rearmed_count > 0
     except Exception as e:
         log(f"[spike] re-arm raised for {ob_id}: {e}")
         try:
@@ -4350,6 +4445,7 @@ def _restore_full_stop_protection(ob_id, original_snapshot):
             )
         except Exception:
             pass
+        return False
 
 
 def check_spike_fills(page, spike_state, positions):

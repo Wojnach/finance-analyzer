@@ -813,6 +813,14 @@ def cancel_all_stop_losses_for(
             "cancel_all_stop_losses_for(%s): FAILED — cancelled=%s remaining=%s read_failed=%s",
             target_ob, cancelled, remaining, poll_read_failed,
         )
+        # Critical: when the verification poll failed, we don't actually
+        # know which DELETEs took effect. The list of DELETE-accepted ids
+        # in `cancelled` is broker-acknowledged but NOT verified-cleared.
+        # Treating those as rollback-safe would let callers re-arm stops
+        # that may still be live, duplicating encumbered volume on the
+        # next sell attempt. Drop the unverified ids on poll failure.
+        if poll_read_failed:
+            cancelled = []
     return {
         "status": status,
         "cancelled": cancelled,

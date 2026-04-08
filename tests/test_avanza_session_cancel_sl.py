@@ -119,8 +119,13 @@ class TestCancelAllStopLossesFor:
             with patch("portfolio.avanza_session.api_delete", return_value={"http_status": 200, "ok": True}):
                 result = avs.cancel_all_stop_losses_for("OB1")
         assert result["status"] == "FAILED"
-        # Snapshot is preserved so the caller can re-arm
+        # Snapshot is preserved so the caller can decide what to do
         assert len(result["snapshot"]) == 1
+        # CRITICAL (codex finding): cancelled MUST be empty when the
+        # verification poll failed. The DELETE was accepted by the broker
+        # but never confirmed cleared, so it is unsafe to claim those
+        # stops are gone.
+        assert result["cancelled"] == []
 
     def test_single_stop_cleared_on_first_poll(self):
         """1 SL exists → cancel succeeds → re-query shows it cleared."""
