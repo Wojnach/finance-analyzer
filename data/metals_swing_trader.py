@@ -15,6 +15,7 @@ import os
 import time
 
 import requests
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
 from metals_swing_config import (
     ACCOUNT_ID,
     BUY_COOLDOWN_MINUTES,
@@ -58,6 +59,9 @@ from portfolio.avanza_control import (
 
 SEND_PERIODIC_SUMMARY = False
 
+# TODO: fetch from Avanza API todayClosingTime (varies with DST)
+_EOD_CLOSE_CET = 21.0 + 55 / 60  # 21:55 CET
+
 
 def _log(msg):
     ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -85,13 +89,7 @@ def _cet_hour():
 
 def _load_state():
     """Load swing trader state from disk."""
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            _log(f"State load error: {e}")
-    return _default_state()
+    return load_json(STATE_FILE, default=_default_state())
 
 
 def _default_state():
@@ -109,8 +107,7 @@ def _default_state():
 
 def _save_state(state):
     try:
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2, ensure_ascii=False)
+        atomic_write_json(STATE_FILE, state, ensure_ascii=False)
     except Exception as e:
         _log(f"State save error: {e}")
 
@@ -131,11 +128,11 @@ def _send_telegram(msg):
     global _tg_config
     if _tg_config is None:
         try:
-            with open("config.json", encoding="utf-8") as f:
-                cfg = json.load(f)
+            cfg = load_json("config.json", default={})
             _tg_config = {
-                "token": cfg["telegram"]["token"],
-                "chat_id": cfg["telegram"]["chat_id"],
+                "token": cfg.get("telegram", {}).get("token", ""),
+                "chat_id": cfg.get("telegram", {}).get("chat_id", ""),
+                "mute_all": cfg.get("telegram", {}).get("mute_all", False),
             }
         except Exception:
             _tg_config = {}
@@ -144,15 +141,10 @@ def _send_telegram(msg):
         _log("Telegram not configured")
         return
 
-    # Check mute_all from config
-    try:
-        with open("config.json", encoding="utf-8") as f:
-            _mute = json.load(f).get("telegram", {}).get("mute_all", False)
-        if _mute:
-            _log(f"[TG muted] {msg[:80]}")
-            return
-    except Exception:
-        pass
+    # Check mute_all from cached config
+    if _tg_config.get("mute_all"):
+        _log(f"[TG muted] {msg[:80]}")
+        return
 
     try:
         requests.post(
@@ -170,16 +162,14 @@ def _send_telegram(msg):
 
 def _log_decision(decision):
     try:
-        with open(DECISIONS_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(decision, ensure_ascii=False) + "\n")
+        atomic_append_jsonl(DECISIONS_LOG, decision)
     except Exception as e:
         _log(f"Decision log error: {e}")
 
 
 def _log_trade(trade):
     try:
-        with open(TRADES_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(trade, ensure_ascii=False) + "\n")
+        atomic_append_jsonl(TRADES_LOG, trade)
     except Exception as e:
         _log(f"Trade log error: {e}")
 
@@ -358,8 +348,7 @@ class SwingTrader:
 
         # EOD check — don't buy near close
         h = _cet_hour()
-        close_cet = 21.0 + 55 / 60  # 21:55
-        minutes_to_close = (close_cet - h) * 60
+        minutes_to_close = (_EOD_CLOSE_CET - h) * 60
         if minutes_to_close < EOD_EXIT_MINUTES_BEFORE + 60:
             return False, f"Too close to EOD ({minutes_to_close:.0f}min left)"
 
@@ -568,8 +557,7 @@ class SwingTrader:
         """Check exit conditions on all open positions."""
         now = _now_utc()
         h = _cet_hour()
-        close_cet = 21.0 + 55 / 60  # 21:55 CET
-        minutes_to_close = (close_cet - h) * 60
+        minutes_to_close = (_EOD_CLOSE_CET - h) * 60
 
         to_remove = []
 

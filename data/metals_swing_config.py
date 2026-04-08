@@ -56,7 +56,7 @@ MAX_CONCURRENT = 2            # max simultaneous positions
 TARGET_LEVERAGE = 5.0         # preferred leverage (user prefers 5x)
 MIN_BARRIER_DISTANCE_PCT = 15 # minimum distance to barrier (knockout risk)
 MIN_SPREAD_PCT = 1.5          # max acceptable bid-ask spread %
-MIN_TRADE_SEK = 500           # minimum trade size
+MIN_TRADE_SEK = 1000          # minimum trade size (Avanza min courtage rule)
 
 # ---------------------------------------------------------------------------
 # Entry rules

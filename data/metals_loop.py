@@ -53,7 +53,7 @@ os.chdir(BASE_DIR)
 import requests
 from playwright.sync_api import sync_playwright
 
-from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json, load_jsonl_tail
 from portfolio.loop_contract import MetalsCycleReport, ViolationTracker, verify_and_act, verify_metals_contract
 from portfolio.market_timing import is_swedish_market_holiday
 
@@ -338,18 +338,10 @@ def _load_json_state(path, default, label):
     import copy
 
     fallback = copy.deepcopy(default)
-    if not os.path.exists(path):
+    result = load_json(path, default=None)
+    if result is None:
         return fallback
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError, ValueError) as e:
-        message = f"{label} load failed: {e}"
-        if "log" in globals():
-            log(message)
-        else:
-            print(message, flush=True)
-        return fallback
+    return result
 
 
 def _default_trade_queue():
@@ -501,9 +493,10 @@ def _verify_position_holdings(page, positions):
 POSITIONS = _load_positions()
 
 # Session start timestamp — anchors session-relative drawdown peak.
-# Reset to time.time() at main() entry so it reflects the actual startup,
-# not import time (which can differ by seconds if the module is pre-imported).
-_METALS_LOOP_START_TS: float = time.time()
+# Initialized to 0.0 at import time; set to time.time() in main() so it
+# reflects actual startup, not import time (avoids stale timestamp if module
+# is pre-imported). Call sites guard with "if _METALS_LOOP_START_TS > 0".
+_METALS_LOOP_START_TS: float = 0.0
 
 SHORT_INSTRUMENTS = {
     "bear_silver_x5": {
@@ -1642,7 +1635,7 @@ def _update_stop_orders_for(page, key, pos, stop_order_state):
 
     if orders:
         stop_order_state[key] = {
-            "date": datetime.datetime.now().strftime("%Y-%m-%d"),
+            "date": (datetime.datetime.now(_STOCKHOLM_TZ) if _STOCKHOLM_TZ else datetime.datetime.now()).strftime("%Y-%m-%d"),
             "stop_base": stop_base,
             "orders": orders,
         }
@@ -1903,30 +1896,23 @@ def _run_fish_engine_tick():
         journal_path = DATA_DIR.parent / 'data' / 'layer2_journal.jsonl'
         if not journal_path.exists():
             journal_path = DATA_DIR / 'layer2_journal.jsonl'
-        if journal_path.exists():
-            with open(str(journal_path), 'r', encoding='utf-8') as _jf:
-                lines = _jf.readlines()
-            lines = [l.strip() for l in lines if l.strip()]
-            # Scan last 10 entries for XAG-USD
-            for line in reversed(lines[-10:]):
-                try:
-                    entry = json.loads(line)
-                    tickers = entry.get('tickers', {})
-                    if 'XAG-USD' in tickers:
-                        xag_j = tickers['XAG-USD']
-                        layer2_outlook = xag_j.get('outlook', '')
-                        layer2_conviction = float(xag_j.get('conviction', 0))
-                        layer2_levels = xag_j.get('levels', [])
-                        layer2_ts = entry.get('ts', '')
-                        # Also check decisions for action
-                        for strategy in ('patient', 'bold'):
-                            dec = entry.get('decisions', {}).get(strategy, {})
-                            if dec.get('action') in ('BUY', 'SELL'):
-                                layer2_action = dec['action']
-                                break
+        lines_data = load_jsonl_tail(str(journal_path), max_entries=10)
+        # Scan last 10 entries for XAG-USD (newest last, so reverse)
+        for entry in reversed(lines_data):
+            tickers = entry.get('tickers', {})
+            if 'XAG-USD' in tickers:
+                xag_j = tickers['XAG-USD']
+                layer2_outlook = xag_j.get('outlook', '')
+                layer2_conviction = float(xag_j.get('conviction', 0))
+                layer2_levels = xag_j.get('levels', [])
+                layer2_ts = entry.get('ts', '')
+                # Also check decisions for action
+                for strategy in ('patient', 'bold'):
+                    dec = entry.get('decisions', {}).get(strategy, {})
+                    if dec.get('action') in ('BUY', 'SELL'):
+                        layer2_action = dec['action']
                         break
-                except Exception:
-                    continue
+                break
     except Exception:
         pass
 
@@ -1979,8 +1965,8 @@ def _run_fish_engine_tick():
     except Exception:
         pass
 
-    # Build state
-    now = datetime.datetime.now()
+    # Build state (use CET timezone so hour/minute are correct for Swedish market)
+    now = datetime.datetime.now(_STOCKHOLM_TZ) if _STOCKHOLM_TZ else datetime.datetime.now()
     f1d = xag_focus.get("1d", {})
     state = {
         "silver_price": xag_price,
@@ -2808,18 +2794,7 @@ def build_probability_telegram(prob_report, cet_str):
 def read_decision_history(n=5):
     """Read the last N decisions from metals_decisions.jsonl."""
     try:
-        path = "data/metals_decisions.jsonl"
-        if not os.path.exists(path):
-            return []
-        with open(path, encoding="utf-8") as f:
-            lines = f.readlines()
-        entries = []
-        for line in lines[-n:]:
-            try:
-                entries.append(json.loads(line.strip()))
-            except json.JSONDecodeError:
-                pass
-        return entries
+        return load_jsonl_tail("data/metals_decisions.jsonl", max_entries=n)
     except Exception as e:
         log(f"Decision history read error: {e}")
         return []
@@ -2867,7 +2842,7 @@ def emergency_sell(page, key, pos, bid):
             _rearm_stops_after_failed_sell(pos["ob_id"], sl_snapshot)
             return False
 
-        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        today_str = (datetime.datetime.now(_STOCKHOLM_TZ) if _STOCKHOLM_TZ else datetime.datetime.now()).strftime("%Y-%m-%d")
         result = page.evaluate("""async (args) => {
             const [payload, token] = args;
             const resp = await fetch('https://www.avanza.se/_api/trading-critical/rest/order/new', {
@@ -3270,7 +3245,7 @@ def _sync_local_stop_state_after_rearm(ob_id, snapshot, new_ids):
 
         stop_state = _load_stop_orders()
         existing = stop_state.get(matched_key, {})
-        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        today_str = (datetime.datetime.now(_STOCKHOLM_TZ) if _STOCKHOLM_TZ else datetime.datetime.now()).strftime("%Y-%m-%d")
         new_orders = []
         # Pair snapshot entries with new ids by position. rearm processes
         # the snapshot in order so new_ids[i] corresponds to snapshot[i].
@@ -3797,12 +3772,18 @@ def _handle_buy_fill(page, order, exec_price, price_data):
                               f"{HARDWARE_TRAILING_PCT}% trail, {vol}u")
             else:
                 log(f"  HW trailing stop FAILED for {pos_key}: {result}")
-                send_telegram(f"*WARNING* Hardware trailing stop failed for "
-                              f"{POSITIONS[pos_key]['name']} — set manually!")
+                send_telegram(
+                    f"*CRITICAL* Hardware trailing stop FAILED for "
+                    f"{POSITIONS[pos_key]['name']} — NAKED POSITION — no stop protection! "
+                    f"Set manually immediately!"
+                )
         except Exception as e:
             log(f"  HW trailing stop error for {pos_key}: {e}")
-            send_telegram(f"*WARNING* Hardware trailing stop error for "
-                          f"{POSITIONS[pos_key]['name']}: {e}")
+            send_telegram(
+                f"*CRITICAL* Hardware trailing stop ERROR for "
+                f"{POSITIONS[pos_key]['name']}: {e} — NAKED POSITION — no stop protection! "
+                f"Set manually immediately!"
+            )
 
     # Legacy cascade stop-loss (only if hardware trailing is OFF)
     if STOP_ORDER_ENABLED and not HARDWARE_TRAILING_ENABLED:
@@ -4988,7 +4969,7 @@ def write_context(prices, trigger_reason, tier=2):
         try:
             llm_sigs = get_llm_signals() if LLM_AVAILABLE else None
             ctx["risk"] = get_risk_summary(POSITIONS, prices, last_signal_data, llm_sigs,
-                                           since_ts=_METALS_LOOP_START_TS)
+                                           since_ts=_METALS_LOOP_START_TS if _METALS_LOOP_START_TS > 0 else None)
         except Exception as e:
             ctx["risk"] = {"error": str(e)}
 
@@ -5075,8 +5056,7 @@ def write_context(prices, trigger_reason, tier=2):
         "profit_sek": round(total_val - total_inv, 0),
     }
 
-    with open("data/metals_context.json", "w", encoding="utf-8") as f:
-        json.dump(ctx, f, indent=2, ensure_ascii=False)
+    atomic_write_json("data/metals_context.json", ctx, ensure_ascii=False)
 
     return ctx
 
@@ -5208,7 +5188,7 @@ def check_triggers(prices):
     # Drawdown circuit breaker
     if RISK_AVAILABLE and check_count % 10 == 0 and check_count > 0:
         try:
-            dd = check_portfolio_drawdown(POSITIONS, prices, since_ts=_METALS_LOOP_START_TS)
+            dd = check_portfolio_drawdown(POSITIONS, prices, since_ts=_METALS_LOOP_START_TS if _METALS_LOOP_START_TS > 0 else None)
             if dd.get("breached"):
                 reasons.append(f"EMERGENCY drawdown breached: {dd['current_drawdown_pct']:.1f}%")
             elif dd.get("level") == "WARNING":
@@ -5495,7 +5475,7 @@ def _build_autonomous_risk_data(positions_data, llm_signals):
     prices = {key: {"bid": pos["bid"]} for key, pos in positions_data.items()}
     risk_data = {}
     try:
-        drawdown = check_portfolio_drawdown(POSITIONS, prices, since_ts=_METALS_LOOP_START_TS)
+        drawdown = check_portfolio_drawdown(POSITIONS, prices, since_ts=_METALS_LOOP_START_TS if _METALS_LOOP_START_TS > 0 else None)
         drawdown_pct = drawdown.get("current_drawdown_pct")
         if isinstance(drawdown_pct, (int, float)):
             risk_data["drawdown_pct"] = round(drawdown_pct, 2)
@@ -6061,6 +6041,7 @@ Positions: {pos_summary}{prob_summary}""")
                             stop_order_state = place_stop_loss_orders(page, POSITIONS)
                         # Initialize silver fast-tick if new silver position detected
                         if SILVER_FAST_TICK_ENABLED and _has_active_silver() and _silver_underlying_ref is None:
+                            _silver_reset_session()
                             _silver_init_ref()
                             log(f"Silver fast-tick activated: ref=${_silver_underlying_ref or '?'}")
                         send_telegram(
@@ -6075,7 +6056,7 @@ Positions: {pos_summary}{prob_summary}""")
                 _h_raw, _, _ = get_cet_time()
                 _h_int = int(_h_raw)
                 _m_int = round((_h_raw % 1) * 60)
-                _today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+                _today_str = (datetime.datetime.now(_STOCKHOLM_TZ) if _STOCKHOLM_TZ else datetime.datetime.now()).strftime("%Y-%m-%d")
                 if (_h_int == _eod_h and _m_int >= _eod_m
                         and _eod_fishing_sold_today != _today_str):
                     _has_fishing = any(
@@ -6220,7 +6201,7 @@ Positions: {pos_summary}{prob_summary}""")
                     spike_sched = get_us_spike_schedule()
                     spike_place_hour = spike_sched["place_hour"]
                     spike_cancel_hour = spike_sched["cancel_hour"]
-                    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+                    today_str = (datetime.datetime.now(_STOCKHOLM_TZ) if _STOCKHOLM_TZ else datetime.datetime.now()).strftime("%Y-%m-%d")
                     spike_st = load_spike_state()
 
                     # Reset state on new day

@@ -24,7 +24,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from portfolio.file_utils import atomic_write_json, load_jsonl_tail
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json, load_jsonl_tail
 
 logger = logging.getLogger(__name__)
 
@@ -114,14 +114,15 @@ def _default_spike_state():
 
 def _load_json_state(path, default_factory, label):
     """Load a JSON state file with explicit logging on corrupt/unreadable content."""
-    if not os.path.exists(path):
+    from pathlib import Path
+    path_obj = Path(path)
+    result = load_json(path, default=None)
+    if result is None:
+        if path_obj.exists():
+            # File exists but load_json returned None — corrupt or unreadable.
+            logger.warning("%s load failed (corrupt or unreadable): %s", label, path)
         return default_factory()
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError, ValueError) as e:
-        logger.warning("%s load failed: %s", label, e)
-        return default_factory()
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -459,8 +460,7 @@ def log_portfolio_value(positions, prices):
     }
 
     try:
-        with open(HISTORY_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        atomic_append_jsonl(HISTORY_FILE, entry)
     except Exception as e:
         logger.warning(f"Failed to log portfolio value: {e}")
 
@@ -521,15 +521,10 @@ def check_portfolio_drawdown(positions, prices, since_ts=None):
     try:
         if since_ts is None:
             # Legacy behaviour: scan the whole file (backwards compatible).
-            if os.path.exists(HISTORY_FILE):
-                with open(HISTORY_FILE, encoding="utf-8") as f:
-                    for line in f:
-                        try:
-                            entry = json.loads(line)
-                            if entry.get("total_value", 0) > peak_value:
-                                peak_value = entry["total_value"]
-                        except Exception:
-                            pass
+            entries_all = load_jsonl_tail(HISTORY_FILE, max_entries=5000)
+            for entry in entries_all:
+                if entry.get("total_value", 0) > peak_value:
+                    peak_value = entry["total_value"]
         else:
             # Session-relative: only consider entries recorded since session start.
             # Use tail reader to avoid slurping huge historical files.
@@ -690,11 +685,9 @@ def compute_daily_range_stats(history_path="data/metals_history.json"):
     - recent_5d: last 5 days' ranges for context
     - trading_days: number of days in sample
     """
-    try:
-        with open(history_path, encoding="utf-8") as f:
-            hist = json.load(f)
-    except Exception as e:
-        logger.warning(f"Cannot load metals_history.json: {e}")
+    hist = load_json(str(history_path), default={})
+    if not hist:
+        logger.warning(f"Cannot load or empty: {history_path}")
         return {}
 
     result = {}
