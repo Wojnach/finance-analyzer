@@ -343,6 +343,93 @@ class TestEnsureStopsCancelledBeforeSell:
         assert snap == []
         assert called["n"] == 0  # short-circuited
 
+    def test_failed_with_reconcile_computes_diff_rollback(self, monkeypatch, silence_telegram):
+        """Codex round-5 finding 1: when verification poll fails the server
+        clears `cancelled`, but the DELETEs may have actually taken effect.
+        Reconcile by re-reading live stops and computing the diff against
+        the pre-cancel snapshot. Stops that disappeared between then and
+        now are the rollback set."""
+        import metals_loop as mod
+        monkeypatch.setattr(mod, "POSITIONS", {})
+
+        # Pre-cancel: 3 stops on the orderbook
+        pre_cancel = [
+            {"id": "A", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 1.0}, "order": {"price": 1.0, "volume": 100}},
+            {"id": "B", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 0.9}, "order": {"price": 0.9, "volume": 100}},
+            {"id": "C", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 0.8}, "order": {"price": 0.8, "volume": 100}},
+        ]
+        # First read = pre-cancel snapshot. Second read (reconcile) shows
+        # only A and C still alive — B's DELETE took effect.
+        snapshot_calls = [pre_cancel, [pre_cancel[0], pre_cancel[2]]]
+        monkeypatch.setattr(
+            "portfolio.avanza_session.get_stop_losses_strict",
+            lambda: snapshot_calls.pop(0),
+        )
+
+        # Server returns FAILED with empty cancelled (poll-read failed)
+        monkeypatch.setattr(
+            "portfolio.avanza_session.cancel_all_stop_losses_for",
+            lambda *a, **kw: {
+                "status": "FAILED",
+                "cancelled": [],
+                "remaining": [],
+                "snapshot": pre_cancel,
+                "elapsed_seconds": 1.0,
+            },
+        )
+
+        ok, snap = mod._ensure_stops_cancelled_before_sell(object(), "OB1")
+        assert ok is False
+        # Reconcile diff: only B disappeared → only B in rollback
+        assert len(snap) == 1
+        assert snap[0]["id"] == "B"
+
+    def test_failed_with_reconcile_failure_uses_full_pre_cancel_fallback(
+        self, monkeypatch, silence_telegram
+    ):
+        """If both verification AND reconcile fail, fall back to using the
+        full pre-cancel snapshot. Risks duplicates but avoids leaving the
+        position naked. Telegram alert covers the gap."""
+        import metals_loop as mod
+        monkeypatch.setattr(mod, "POSITIONS", {})
+        alerts = []
+        monkeypatch.setattr(mod, "send_telegram", lambda msg: alerts.append(msg))
+
+        pre_cancel = [
+            {"id": "A", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 1.0}, "order": {"price": 1.0, "volume": 100}},
+            {"id": "B", "orderbook": {"id": "OB1"}, "account": {"id": "1625505"},
+             "trigger": {"value": 0.9}, "order": {"price": 0.9, "volume": 100}},
+        ]
+        # First read succeeds (pre-cancel), second raises (reconcile fails)
+        side_effects = [pre_cancel, RuntimeError("session expired")]
+        def fake_strict():
+            v = side_effects.pop(0)
+            if isinstance(v, Exception):
+                raise v
+            return v
+        monkeypatch.setattr("portfolio.avanza_session.get_stop_losses_strict", fake_strict)
+
+        monkeypatch.setattr(
+            "portfolio.avanza_session.cancel_all_stop_losses_for",
+            lambda *a, **kw: {
+                "status": "FAILED",
+                "cancelled": [],
+                "remaining": [],
+                "snapshot": pre_cancel,
+                "elapsed_seconds": 1.0,
+            },
+        )
+
+        ok, snap = mod._ensure_stops_cancelled_before_sell(object(), "OB1")
+        assert ok is False
+        # Fallback: full pre-cancel snapshot for best-effort rollback
+        assert len(snap) == 2
+        assert any("STOP RECONCILE FAILED" in m for m in alerts)
+
     def test_partial_returns_only_confirmed_cancelled(self, monkeypatch, silence_telegram):
         """Codex finding 2: PARTIAL must filter the rollback snapshot to
         only the stops the server confirmed it cancelled. Re-arming the
@@ -490,9 +577,11 @@ class TestRestoreFullStopProtection:
         assert rearm_called["n"] == 1
         assert any("RESTORE WARNING" in m for m in alerts)
 
-    def test_rearm_partial_returns_true_with_alert(self, monkeypatch):
-        """PARTIAL means SOME re-arms succeeded — return True so the caller
-        drops the snapshot. The Telegram alert covers the gap."""
+    def test_rearm_partial_returns_false_for_retry(self, monkeypatch):
+        """Codex round-5 finding 3: PARTIAL must NOT be treated as terminal
+        success. Even if some re-arms succeeded, the failed subset means
+        part of the volume is naked — return False so the caller retains
+        the snapshot for retry on the next loop iteration."""
         import metals_loop as mod
         alerts = []
         monkeypatch.setattr(mod, "send_telegram", lambda msg: alerts.append(msg))
@@ -505,7 +594,7 @@ class TestRestoreFullStopProtection:
             lambda snap: {"status": "PARTIAL", "rearmed": ["A"], "failed": ["B"]},
         )
         ok = mod._restore_full_stop_protection("OB1", [{"id": "A"}, {"id": "B"}])
-        assert ok is True
+        assert ok is False  # NOT True — failed subset → keep snapshot
         assert any("SPIKE RESTORE PARTIAL" in m for m in alerts)
 
     def test_rearm_total_failure_returns_false(self, monkeypatch):

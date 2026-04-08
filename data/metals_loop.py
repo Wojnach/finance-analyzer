@@ -3116,6 +3116,57 @@ def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0):
         sl for sl in pre_cancel_snapshot if sl.get("id", "") in cancelled_ids
     ]
 
+    # CODEX-5 finding 1: when the verification poll failed, the server
+    # cleared `cancelled` (we cannot prove anything was actually cancelled).
+    # That leaves the rollback snapshot empty, which means a sell-fail
+    # downstream would have NOTHING to re-arm — but the DELETEs MAY have
+    # actually taken effect, so the position could be naked. Reconcile by
+    # re-reading the live SL list and computing the diff against the
+    # pre-cancel snapshot. Stops that are no longer present are the ones
+    # we need to re-arm; stops that ARE still present must NOT be re-armed.
+    if status == "FAILED" and not cancelled_ids and pre_cancel_snapshot:
+        try:
+            from portfolio.avanza_session import get_stop_losses_strict
+            current = get_stop_losses_strict()
+            current_ids = {
+                sl.get("id", "")
+                for sl in current
+                if isinstance(sl, dict)
+                and str((sl.get("orderbook") or {}).get("id")) == ob_str
+            }
+            # Anything in pre_cancel that is NOT currently present was
+            # successfully cancelled (the DELETE took effect). Those are
+            # the ones to re-arm if the dependent sell fails.
+            rollback_snapshot = [
+                sl for sl in pre_cancel_snapshot
+                if sl.get("id", "") and sl.get("id") not in current_ids
+            ]
+            log(
+                f"[stops] verification failed but reconcile succeeded for {ob_str}: "
+                f"computed {len(rollback_snapshot)} stop(s) need rollback"
+            )
+        except Exception as reconcile_exc:
+            # Reconcile also failed — fall back to the full pre-cancel
+            # snapshot. This risks re-arming duplicates if the DELETEs
+            # didn't take effect, but the alternative (empty rollback)
+            # risks leaving the position completely naked. Choose
+            # over-protection over no-protection; Telegram alert covers
+            # the gap so the operator can manually deduplicate.
+            log(
+                f"[stops] verification failed AND reconcile failed for {ob_str}: "
+                f"{reconcile_exc} — using pre-cancel snapshot as best-effort rollback"
+            )
+            rollback_snapshot = list(pre_cancel_snapshot)
+            try:
+                send_telegram(
+                    f"*STOP RECONCILE FAILED* ob={ob_str}\n"
+                    f"Verification + reconcile both failed. Rollback uses "
+                    f"pre-cancel snapshot — possible duplicate stops on retry. "
+                    f"Manual review recommended."
+                )
+            except Exception:
+                pass
+
     # STEP 3: Local cascade housekeeping (best-effort, after server cancel).
     # The state entry stays — _cleanup_stop_orders_for handles deletion
     # AFTER the sell fills.
@@ -4093,15 +4144,13 @@ def place_spike_orders(page, positions, prices, targets):
             _rearm_stops_after_failed_sell(ob_id, sl_snapshot)
             continue
 
-        # Persist the original snapshot for spike-cancel restoration.
-        # We do this regardless of whether the spike sell ultimately succeeds
-        # below — the snapshot is a record of what was at the broker before
-        # this function ran, and is the authoritative source for full
-        # restoration.
-        if sl_snapshot:
-            stop_snapshots[key] = sl_snapshot
+        # The snapshot is captured locally and only committed to
+        # ``stop_snapshots`` AFTER both the spike sell AND the resized
+        # remainder rearm succeed (see Step 3 below). This avoids leaking
+        # a snapshot for an attempt that ended up rolled back.
 
         spike_placed_ok = False
+        spike_order_id = ""
         try:
             payload = {
                 "accountId": ACCOUNT_ID,
@@ -4124,24 +4173,38 @@ def place_spike_orders(page, positions, prices, targets):
                 return {status: resp.status, body: await resp.text()};
             }""", [payload, csrf])
 
-            status = result.get("status", 0)
+            http_status = result.get("status", 0)
             body = result.get("body", "")
 
-            if status == 200 or status == 201:
-                # Try to parse orderId from response
-                try:
-                    resp_data = json.loads(body)
-                    order_id = resp_data.get("orderId", "")
-                except Exception:
-                    order_id = ""
+            # CODEX-5 finding 2: HTTP 200 alone is not enough — we must
+            # check the business-level orderRequestStatus. The rest of the
+            # repo treats only "SUCCESS" as a real placement, and a usable
+            # orderId is required for any later cancel or fill check.
+            request_status = ""
+            order_id = ""
+            try:
+                resp_data = json.loads(body) if body else {}
+                request_status = resp_data.get("orderRequestStatus", "")
+                order_id = resp_data.get("orderId", "")
+            except Exception:
+                pass
 
-                placed[key] = order_id
+            if (http_status in (200, 201)
+                    and request_status == "SUCCESS"
+                    and order_id):
                 spike_placed_ok = True
-                log(f"Spike SELL placed: {pos['name']} {spike_volume}u @ {target['target_price']} "
-                    f"(+{target['target_pnl_pct']:.1f}% from entry) [order: {order_id}]")
+                spike_order_id = order_id
+                log(
+                    f"Spike SELL placed: {pos['name']} {spike_volume}u @ "
+                    f"{target['target_price']} (+{target['target_pnl_pct']:.1f}% "
+                    f"from entry) [order: {order_id}]"
+                )
             else:
-                log(f"Spike SELL failed for {key}: status={status}, body={body[:200]}")
-
+                log(
+                    f"Spike SELL failed for {key}: http={http_status} "
+                    f"requestStatus={request_status!r} orderId={order_id!r} "
+                    f"body={body[:200]}"
+                )
         except Exception as e:
             log(f"Spike order error for {key}: {e}")
 
@@ -4154,10 +4217,36 @@ def place_spike_orders(page, positions, prices, targets):
             remainder = max(0, position_volume - spike_volume)
             if remainder > 0:
                 resized = _resize_snapshot_volume(sl_snapshot, remainder)
-                _rearm_stops_after_failed_sell(ob_id, resized)
+                # CODEX-5 finding 2 (continued): require the resized rearm
+                # to actually succeed before treating the spike as live.
+                # If rearm fails, the unencumbered slice is naked — better
+                # to roll back the spike sell entirely than commit to a
+                # partially protected state.
+                rearm_ok = _rearm_resized_stops_with_check(ob_id, resized)
+                if rearm_ok:
+                    placed[key] = spike_order_id
+                    if sl_snapshot:
+                        stop_snapshots[key] = sl_snapshot
+                else:
+                    log(
+                        f"[spike] resized rearm failed for {key} — rolling "
+                        f"back the spike sell to avoid naked unencumbered slice"
+                    )
+                    _rollback_spike_order_and_restore(spike_order_id, ob_id, sl_snapshot)
+                    # Spike not placed, drop snapshot
+                    stop_snapshots.pop(key, None)
+                    try:
+                        send_telegram(
+                            f"*SPIKE ROLLED BACK* {pos['name']}: rearm failed, "
+                            f"spike order cancelled, full stops restored."
+                        )
+                    except Exception:
+                        pass
             else:
                 # Spike volume covers full position — no remainder to protect.
-                pass
+                placed[key] = spike_order_id
+                if sl_snapshot:
+                    stop_snapshots[key] = sl_snapshot
         elif sl_snapshot:
             # Spike placement failed: restore originals exactly. Drop the
             # persisted snapshot since it's no longer needed for cancel.
@@ -4165,6 +4254,77 @@ def place_spike_orders(page, positions, prices, targets):
             stop_snapshots.pop(key, None)
 
     return placed, stop_snapshots
+
+
+def _rearm_resized_stops_with_check(ob_id, resized_snapshot) -> bool:
+    """Re-arm a resized snapshot and return True only if at least one
+    stop was successfully placed AND no FAILED outcomes occurred.
+
+    Differs from :func:`_rearm_stops_after_failed_sell` (which is
+    best-effort logging only) by returning a strict success bool that
+    callers can use to gate state commits.
+    """
+    if not resized_snapshot:
+        return True  # nothing to rearm — vacuously OK
+    try:
+        from portfolio.avanza_session import rearm_stop_losses_from_snapshot
+        result = rearm_stop_losses_from_snapshot(resized_snapshot)
+    except Exception as e:
+        log(f"[spike] resized rearm raised for {ob_id}: {e}")
+        return False
+    status = result.get("status", "FAILED")
+    if status == "SUCCESS":
+        log(
+            f"[spike] resized rearm SUCCESS for {ob_id} "
+            f"({len(result.get('rearmed', []))} stops)"
+        )
+        return True
+    log(
+        f"[spike] resized rearm {status} for {ob_id}: "
+        f"rearmed={result.get('rearmed')} failed={result.get('failed')}"
+    )
+    return False
+
+
+def _rollback_spike_order_and_restore(spike_order_id, ob_id, original_snapshot):
+    """Cancel a just-placed spike order and restore the original stops.
+
+    Used when the resized-stops rearm fails after the spike sell was
+    accepted. We are in an inconsistent state: spike sell live, no
+    matching protection on the remainder. The rollback returns the
+    position to its pre-spike state.
+
+    Best-effort: failures are logged + alerted but cannot be retried
+    inside this call (we don't have access to the loop state). The
+    operator is told via Telegram that manual recovery may be needed.
+    """
+    # Cancel the spike LIMIT order via the canonical POST cancel.
+    try:
+        from portfolio.avanza_session import cancel_order
+        cancel_result = cancel_order(str(spike_order_id), account_id=ACCOUNT_ID)
+        cancel_ok = (cancel_result or {}).get("orderRequestStatus") == "SUCCESS"
+        if not cancel_ok:
+            log(f"[spike] rollback cancel for {spike_order_id} returned: {cancel_result}")
+    except Exception as e:
+        log(f"[spike] rollback cancel raised for {spike_order_id}: {e}")
+        cancel_ok = False
+
+    if not cancel_ok:
+        try:
+            send_telegram(
+                f"*SPIKE ROLLBACK INCOMPLETE* order={spike_order_id}\n"
+                f"Could not cancel the just-placed spike sell. The order "
+                f"may still be live AND the original stops are gone. "
+                f"Manual cancel + stop restore required."
+            )
+        except Exception:
+            pass
+
+    # Restore the original full-volume stops regardless of cancel outcome —
+    # if the cancel failed but the order still fills, we want SOME protection
+    # on the position rather than none.
+    if original_snapshot:
+        _rearm_stops_after_failed_sell(ob_id, original_snapshot)
 
 
 def _resize_snapshot_volume(snapshot, new_volume: int) -> list:
@@ -4490,11 +4650,13 @@ def _restore_full_stop_protection(ob_id, original_snapshot) -> bool:
             )
         except Exception:
             pass
-        # PARTIAL still means SOME protection was restored — return True so
-        # the caller drops the now-stale snapshot. The Telegram alert covers
-        # the gap. FAILED means nothing got placed, return False so caller
-        # keeps the snapshot for retry.
-        return rearmed_count > 0
+        # CODEX-5 finding 3: PARTIAL must NOT be treated as terminal
+        # success. Even if SOME stops were re-armed, the failed subset
+        # leaves part of the volume naked. Returning False keeps the
+        # snapshot in retry state so the next loop iteration can attempt
+        # to restore the missing protection. Without this, one transient
+        # rearm failure permanently destroys the rollback record.
+        return False
     except Exception as e:
         log(f"[spike] re-arm raised for {ob_id}: {e}")
         try:
