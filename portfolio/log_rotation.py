@@ -44,8 +44,17 @@ ARCHIVE_DIR = DATA_DIR / "archive"
 # - compress: gzip archived/rotated files
 ROTATION_POLICIES = {
     "signal_log.jsonl": {
+        # H25/L3: Grows unboundedly (68MB+ in production). Age+size rotation.
         "max_age_days": 30,
         "max_size_mb": 50,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
+    "forecast_predictions.jsonl": {
+        # H25/L3: Forecast JSONL also grows without bound; keep 14 days.
+        "max_age_days": 14,
+        "max_size_mb": 10,
         "compress": True,
         "type": "jsonl",
         "ts_field": "ts",

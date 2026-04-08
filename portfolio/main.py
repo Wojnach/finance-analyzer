@@ -369,6 +369,22 @@ def _run_post_cycle(config, report=None):
         logger.warning("Signal postmortem failed: %s", e_pm)
         if report is not None:
             report.post_cycle_results["signal_postmortem"] = False
+    # H25/L3: Rotate unbounded JSONL files once per hour (every 60 cycles).
+    _cycle_id = getattr(_ss, "_run_cycle_id", 0)
+    if _cycle_id % 60 == 0:
+        try:
+            from portfolio.log_rotation import rotate_all
+            rotation_results = rotate_all()
+            rotated = [r for r in rotation_results if r.get("status") == "rotated"]
+            if rotated:
+                logger.info("Log rotation: %d file(s) rotated: %s",
+                            len(rotated), [r["file"] for r in rotated])
+            if report is not None:
+                report.post_cycle_results["log_rotation"] = True
+        except Exception as e_rot:
+            logger.warning("Log rotation failed: %s", e_rot)
+            if report is not None:
+                report.post_cycle_results["log_rotation"] = False
 
 
 # --- Main orchestrator ---
@@ -540,11 +556,18 @@ def run(force_report=False, active_symbols=None):
     # Ministral/Qwen3 cache misses were enqueued during parallel ticker processing.
     # Now flush them sequentially, grouped by model (one swap max).
     try:
-        from portfolio.llm_batch import flush_llm_batch
+        from portfolio.llm_batch import _lock as _llm_lock, _ministral_queue, _qwen3_queue, flush_llm_batch
         from portfolio.shared_state import MINISTRAL_TTL, _update_cache
+        # H24/SS2: Capture queued keys before flush to clear stuck loading keys.
+        with _llm_lock:
+            _queued_keys = {k for k, _ in _ministral_queue} | {k for k, _ in _qwen3_queue}
         batch_results = flush_llm_batch()
         for cache_key, result in batch_results.items():
             _update_cache(cache_key, result, ttl=MINISTRAL_TTL)
+        # Clear loading keys for items that didn't return results (retry next cycle).
+        for key in _queued_keys:
+            if key not in batch_results:
+                _update_cache(key, None, ttl=60)
         report.llm_batch_flushed = True
     except Exception as e_batch:
         logger.warning("LLM batch flush failed: %s", e_batch)

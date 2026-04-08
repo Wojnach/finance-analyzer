@@ -961,7 +961,9 @@ def _compute_adx(df, period=14):
     if df is None or not isinstance(df, pd.DataFrame) or len(df) < period * 2:
         return None
 
-    df_id = id(df)
+    # C1: Content-based key prevents GC-reuse collisions when a new DataFrame
+    # is allocated at the same address as a previously freed one.
+    df_id = (id(df), len(df), float(df["close"].iloc[-1]) if len(df) > 0 else 0.0)
     with _adx_lock:
         if df_id in _adx_cache:
             return _adx_cache[df_id]
@@ -1593,6 +1595,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # (regime already computed early in the function for F&G gating)
     accuracy_data = {}
     activation_rates = {}
+    # H3: Define acc_horizon before the try/except so the except block and
+    # subsequent code can reference it even if the import fails.
+    acc_horizon = horizon if horizon in ("3h", "4h", "12h") else "1d"
     try:
         from portfolio.accuracy_stats import (
             blend_accuracy_data,
@@ -1622,10 +1627,12 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 write_accuracy_cache(f"{acc_horizon}_recent", recent)
 
         # BUG-164: Per-ticker consensus accuracy (lazy-populate cache)
-        if not load_cached_accuracy("per_ticker_consensus"):
+        # H1: Key must include the horizon so 3h and 1d caches don't collide.
+        _ptc_key = f"per_ticker_consensus_{acc_horizon}"
+        if not load_cached_accuracy(_ptc_key):
             _ptc = per_ticker_accuracy(acc_horizon)
             if _ptc:
-                write_accuracy_cache("per_ticker_consensus", _ptc)
+                write_accuracy_cache(_ptc_key, _ptc)
 
         # ARCH-23: Use shared blend function (replaces inline logic).
         accuracy_data = blend_accuracy_data(
@@ -1639,6 +1646,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         activation_rates = load_cached_activation_rates()
     except Exception:
         logger.error("Accuracy stats load failed", exc_info=True)
+        # H3: Fail-closed: gate all signals (0% accuracy, 999 samples) rather than
+        # leaving accuracy_data = {} which bypasses the accuracy gate entirely.
+        accuracy_data = {sig: {"accuracy": 0.0, "total": 999} for sig in SIGNAL_NAMES}
 
     # Overlay regime-specific accuracy when available
     try:
@@ -1851,7 +1861,8 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         try:
             from portfolio.accuracy_stats import load_cached_accuracy
 
-            _ptc_acc = load_cached_accuracy("per_ticker_consensus")
+            # H1: Match the horizon-scoped key written above.
+            _ptc_acc = load_cached_accuracy(f"per_ticker_consensus_{acc_horizon}")
             if _ptc_acc:
                 _ptc_stats = _ptc_acc.get(ticker, {})
                 _ptc_total = _ptc_stats.get("total", 0)

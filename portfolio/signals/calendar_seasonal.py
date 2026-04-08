@@ -33,6 +33,9 @@ from portfolio.fomc_dates import (
     FOMC_ANNOUNCEMENT_DATES as _FOMC_ANNOUNCEMENT_DATES,
 )
 
+# H14: Cache max() at module level — was recomputed on every call (420 calls/cycle).
+_FOMC_MAX_DATE = max(_FOMC_ANNOUNCEMENT_DATES) if _FOMC_ANNOUNCEMENT_DATES else None
+
 # Maximum confidence for any calendar signal
 _MAX_CONFIDENCE = 0.6
 
@@ -250,7 +253,7 @@ def _fomc_drift(last_date: date) -> tuple[str, dict]:
     }
 
     # BUG-118: Warn when all FOMC dates are in the past (data staleness)
-    if _FOMC_ANNOUNCEMENT_DATES and last_date > max(_FOMC_ANNOUNCEMENT_DATES):
+    if _FOMC_MAX_DATE is not None and last_date > _FOMC_MAX_DATE:  # H14: cached
         logger.warning("calendar_seasonal: all FOMC dates are in the past — fomc_dates.py needs updating")
 
     for fomc_date in _FOMC_ANNOUNCEMENT_DATES:

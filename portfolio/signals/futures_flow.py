@@ -17,6 +17,7 @@ The ``context`` parameter is a dict with keys: ticker, config, macro.
 from __future__ import annotations
 
 import logging
+import math
 
 import pandas as pd
 
@@ -49,7 +50,7 @@ def _oi_trend(oi_history, df):
     if not oi_history or len(oi_history) < _MIN_HISTORY:
         return "HOLD"
 
-    recent_oi = [d["oi"] for d in oi_history[-_MIN_HISTORY:]]
+    recent_oi = [d.get("oi", 0) or 0 for d in oi_history[-_MIN_HISTORY:]]  # H16
     oi_change = (recent_oi[-1] - recent_oi[0]) / recent_oi[0] if recent_oi[0] else 0
 
     if oi_change <= 0.005:  # OI not meaningfully rising (< 0.5%)
@@ -57,12 +58,14 @@ def _oi_trend(oi_history, df):
 
     # Price direction from OHLCV dataframe
     if df is not None and len(df) >= _MIN_HISTORY:
-        price_start = df["close"].iloc[-_MIN_HISTORY]
-        price_end = df["close"].iloc[-1]
-        if price_start and price_end > price_start:
-            return "BUY"   # rising OI + rising price = new longs
-        elif price_start and price_end < price_start:
-            return "SELL"  # rising OI + falling price = new shorts
+        price_start = float(df["close"].iloc[-_MIN_HISTORY])
+        price_end = float(df["close"].iloc[-1])
+        # H35: NaN is truthy in Python; explicit guard required.
+        if not math.isnan(price_start) and not math.isnan(price_end):
+            if price_start and price_end > price_start:
+                return "BUY"   # rising OI + rising price = new longs
+            elif price_start and price_end < price_start:
+                return "SELL"  # rising OI + falling price = new shorts
 
     return "HOLD"
 
@@ -76,21 +79,23 @@ def _oi_divergence(oi_history, df):
     if not oi_history or len(oi_history) < _MIN_HISTORY:
         return "HOLD"
 
-    recent_oi = [d["oi"] for d in oi_history[-_MIN_HISTORY:]]
+    recent_oi = [d.get("oi", 0) or 0 for d in oi_history[-_MIN_HISTORY:]]  # H16
     oi_change = (recent_oi[-1] - recent_oi[0]) / recent_oi[0] if recent_oi[0] else 0
 
     if abs(oi_change) < 0.005:  # OI flat — no divergence
         return "HOLD"
 
     if df is not None and len(df) >= _MIN_HISTORY:
-        price_start = df["close"].iloc[-_MIN_HISTORY]
-        price_end = df["close"].iloc[-1]
-        price_change = (price_end - price_start) / price_start if price_start else 0
+        price_start = float(df["close"].iloc[-_MIN_HISTORY])
+        price_end = float(df["close"].iloc[-1])
+        # H35: Explicit NaN guard.
+        if not math.isnan(price_start) and not math.isnan(price_end) and price_start:
+            price_change = (price_end - price_start) / price_start
 
-        if price_change > 0.005 and oi_change < -0.005:
-            return "SELL"  # price up, OI down — bearish divergence
-        if price_change < -0.005 and oi_change < -0.005:
-            return "BUY"   # price down, OI down — de-risking, capitulation buy
+            if price_change > 0.005 and oi_change < -0.005:
+                return "SELL"  # price up, OI down — bearish divergence
+            if price_change < -0.005 and oi_change < -0.005:
+                return "BUY"   # price down, OI down — de-risking, capitulation buy
 
     return "HOLD"
 
@@ -178,7 +183,7 @@ def _oi_acceleration(oi_history, df):
     if not oi_history or len(oi_history) < _MIN_HISTORY * 2:
         return "HOLD"
 
-    oi_values = [d["oi"] for d in oi_history]
+    oi_values = [d.get("oi", 0) or 0 for d in oi_history]  # H16
 
     # First derivative: rate of change
     mid = len(oi_values) // 2
@@ -193,8 +198,11 @@ def _oi_acceleration(oi_history, df):
 
     # Check price alignment
     if df is not None and len(df) >= _MIN_HISTORY:
-        price_start = df["close"].iloc[-_MIN_HISTORY]
-        price_end = df["close"].iloc[-1]
+        price_start = float(df["close"].iloc[-_MIN_HISTORY])
+        price_end = float(df["close"].iloc[-1])
+        # H35: Explicit NaN guard.
+        if math.isnan(price_start) or math.isnan(price_end):
+            return "HOLD"
         price_up = price_end > price_start
 
         if acceleration > 0.005:  # OI accelerating

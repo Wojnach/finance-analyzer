@@ -124,8 +124,11 @@ def gpu_gate(model_name: str, timeout: float = 60):
             try:
                 # Atomic create — fails if file already exists (no TOCTOU race)
                 fd = os.open(str(_GPU_LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.write(fd, f"{model_name}|{os.getpid()}|{time.time()}|{threading.get_ident()}".encode())
-                os.close(fd)
+                # H23/CI1: Always close fd in finally to prevent leak if write raises.
+                try:
+                    os.write(fd, f"{model_name}|{os.getpid()}|{time.time()}|{threading.get_ident()}".encode())
+                finally:
+                    os.close(fd)
                 file_acquired = True
                 break
             except FileExistsError:

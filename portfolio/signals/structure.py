@@ -57,9 +57,11 @@ def _highlow_breakout(df: pd.DataFrame) -> tuple[str, dict]:
     if len(df) < _MIN_BARS_HIGHLOW:
         return "HOLD", indicators
 
-    high = df["high"].astype(float)
-    low = df["low"].astype(float)
-    close = df["close"].astype(float)
+    # H13: Cap to last 252 bars (1 year daily / ~3 months hourly).
+    lookback_df = df.iloc[-252:]
+    high = lookback_df["high"].astype(float)
+    low = lookback_df["low"].astype(float)
+    close = lookback_df["close"].astype(float)
 
     period_high = high.max()
     period_low = low.min()

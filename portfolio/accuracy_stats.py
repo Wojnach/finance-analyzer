@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -9,8 +10,11 @@ logger = logging.getLogger("portfolio.accuracy_stats")
 from datetime import UTC
 
 from portfolio.file_utils import atomic_write_json as _atomic_write_json
-from portfolio.file_utils import load_json
+from portfolio.file_utils import load_json, load_jsonl_tail
 from portfolio.tickers import DISABLED_SIGNALS, SIGNAL_NAMES
+
+# C2: Protect all read-modify-write cache operations from concurrent ticker threads
+_accuracy_write_lock = threading.Lock()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -36,19 +40,12 @@ def load_entries():
             db.close()
     except Exception as e:
         logger.debug("SQLite signal_db unavailable, falling back to JSONL: %s", e)
-    # Fallback to JSONL
+    # H2: Fallback to JSONL using atomic load_jsonl_tail (avoids raw open()).
+    # 50000 entries covers full accuracy computation; reading all 68MB risks OOM.
     if not SIGNAL_LOG.exists():
         return []
-    entries = []
-    with open(SIGNAL_LOG, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                try:
-                    entries.append(json.loads(line))
-                except json.JSONDecodeError:
-                    logger.debug("Skipping malformed signal_log line")
-    return entries
+    entries = load_jsonl_tail(SIGNAL_LOG, max_entries=50000)
+    return entries if entries else []
 
 
 _MIN_CHANGE_PCT = 0.05  # outcomes within ±0.05% are treated as neutral (skip)
@@ -702,15 +699,16 @@ def load_cached_accuracy(horizon="1d"):
 
 
 def write_accuracy_cache(horizon, data):
-    cache = load_json(ACCURACY_CACHE_FILE, default={})
-    if not isinstance(cache, dict):
-        cache = {}
-    cache[horizon] = data
-    # BUG-133: Write per-horizon timestamp so other horizons don't appear fresh.
-    cache[f"time_{horizon}"] = time.time()
-    # Keep legacy "time" key for backwards compat with older code paths.
-    cache["time"] = time.time()
-    _atomic_write_json(ACCURACY_CACHE_FILE, cache)
+    with _accuracy_write_lock:
+        cache = load_json(ACCURACY_CACHE_FILE, default={})
+        if not isinstance(cache, dict):
+            cache = {}
+        cache[horizon] = data
+        # BUG-133: Write per-horizon timestamp so other horizons don't appear fresh.
+        cache[f"time_{horizon}"] = time.time()
+        # Keep legacy "time" key for backwards compat with older code paths.
+        cache["time"] = time.time()
+        _atomic_write_json(ACCURACY_CACHE_FILE, cache)
 
 
 def _count_entries_with_outcomes(entries, horizon):
@@ -873,12 +871,13 @@ def write_regime_accuracy_cache(horizon, data):
 
     Merges with any existing horizons to avoid overwriting other cached data.
     """
-    cache = load_json(REGIME_ACCURACY_CACHE_FILE, default={})
-    if not isinstance(cache, dict):
-        cache = {}
-    cache[horizon] = data
-    cache["time"] = time.time()
-    _atomic_write_json(REGIME_ACCURACY_CACHE_FILE, cache)
+    with _accuracy_write_lock:
+        cache = load_json(REGIME_ACCURACY_CACHE_FILE, default={})
+        if not isinstance(cache, dict):
+            cache = {}
+        cache[horizon] = data
+        cache["time"] = time.time()
+        _atomic_write_json(REGIME_ACCURACY_CACHE_FILE, cache)
 
 
 ACCURACY_SNAPSHOTS_FILE = DATA_DIR / "accuracy_snapshots.jsonl"
@@ -1248,12 +1247,13 @@ def write_ticker_accuracy_cache(horizon, data):
 
     Merges with existing horizons to avoid overwriting other cached data.
     """
-    cache = load_json(TICKER_ACCURACY_CACHE_FILE, default={})
-    if not isinstance(cache, dict):
-        cache = {}
-    cache[horizon] = data
-    cache["time"] = time.time()
-    _atomic_write_json(TICKER_ACCURACY_CACHE_FILE, cache)
+    with _accuracy_write_lock:
+        cache = load_json(TICKER_ACCURACY_CACHE_FILE, default={})
+        if not isinstance(cache, dict):
+            cache = {}
+        cache[horizon] = data
+        cache["time"] = time.time()
+        _atomic_write_json(TICKER_ACCURACY_CACHE_FILE, cache)
 
 
 def accuracy_by_ticker_signal_cached(horizon="1d", min_samples=0):

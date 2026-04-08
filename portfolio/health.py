@@ -1,6 +1,7 @@
 """Health monitoring for the finance-analyzer Layer 1 loop."""
 
 import logging
+import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,28 +13,32 @@ logger = logging.getLogger(__name__)
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 HEALTH_FILE = DATA_DIR / "health_state.json"
 
+# C10/H17: Protect all read-modify-write sequences in health.py.
+_health_lock = threading.Lock()
+
 
 def update_health(cycle_count: int, signals_ok: int, signals_failed: int,
                   last_trigger_reason: str = None, error: str = None):
     """Called at end of each Layer 1 cycle to update health state."""
-    state = load_health()
-    state["last_heartbeat"] = datetime.now(UTC).isoformat()
-    state["cycle_count"] = cycle_count
-    state["signals_ok"] = signals_ok
-    state["signals_failed"] = signals_failed
-    state["uptime_seconds"] = time.time() - state.get("start_time", time.time())
-    if last_trigger_reason:
-        state["last_trigger_reason"] = last_trigger_reason
-        state["last_trigger_time"] = datetime.now(UTC).isoformat()
-        # Cache the invocation timestamp so check_agent_silence() can avoid
-        # re-parsing invocations.jsonl on every call.
-        state["last_invocation_ts"] = state["last_trigger_time"]
-    if error:
-        state["errors"] = state.get("errors", [])[-19:] + [
-            {"ts": datetime.now(UTC).isoformat(), "error": error}
-        ]
-        state["error_count"] = state.get("error_count", 0) + 1
-    atomic_write_json(HEALTH_FILE, state)
+    with _health_lock:
+        state = load_health()
+        state["last_heartbeat"] = datetime.now(UTC).isoformat()
+        state["cycle_count"] = cycle_count
+        state["signals_ok"] = signals_ok
+        state["signals_failed"] = signals_failed
+        state["uptime_seconds"] = time.time() - state.get("start_time", time.time())
+        if last_trigger_reason:
+            state["last_trigger_reason"] = last_trigger_reason
+            state["last_trigger_time"] = datetime.now(UTC).isoformat()
+            # Cache the invocation timestamp so check_agent_silence() can avoid
+            # re-parsing invocations.jsonl on every call.
+            state["last_invocation_ts"] = state["last_trigger_time"]
+        if error:
+            state["errors"] = state.get("errors", [])[-19:] + [
+                {"ts": datetime.now(UTC).isoformat(), "error": error}
+            ]
+            state["error_count"] = state.get("error_count", 0) + 1
+        atomic_write_json(HEALTH_FILE, state)
 
 
 def load_health() -> dict:
@@ -121,12 +126,13 @@ def update_module_failures(failures: list):
     """
     if not failures:
         return
-    state = load_health()
-    state["last_module_failures"] = {
-        "ts": datetime.now(UTC).isoformat(),
-        "modules": list(failures),
-    }
-    atomic_write_json(HEALTH_FILE, state)
+    with _health_lock:
+        state = load_health()
+        state["last_module_failures"] = {
+            "ts": datetime.now(UTC).isoformat(),
+            "modules": list(failures),
+        }
+        atomic_write_json(HEALTH_FILE, state)
 
 
 def update_signal_health(signal_name: str, success: bool):
@@ -146,33 +152,34 @@ def update_signal_health_batch(results: dict):
     """
     if not results:
         return
-    state = load_health()
-    sh = state.setdefault("signal_health", {})
-    now = datetime.now(UTC).isoformat()
+    with _health_lock:
+        state = load_health()
+        sh = state.setdefault("signal_health", {})
+        now = datetime.now(UTC).isoformat()
 
-    for signal_name, success in results.items():
-        entry = sh.setdefault(signal_name, {
-            "total_calls": 0,
-            "total_failures": 0,
-            "last_success": None,
-            "last_failure": None,
-            "recent_results": [],
-        })
-        entry["total_calls"] = entry.get("total_calls", 0) + 1
-        if success:
-            entry["last_success"] = now
-        else:
-            entry["total_failures"] = entry.get("total_failures", 0) + 1
-            entry["last_failure"] = now
+        for signal_name, success in results.items():
+            entry = sh.setdefault(signal_name, {
+                "total_calls": 0,
+                "total_failures": 0,
+                "last_success": None,
+                "last_failure": None,
+                "recent_results": [],
+            })
+            entry["total_calls"] = entry.get("total_calls", 0) + 1
+            if success:
+                entry["last_success"] = now
+            else:
+                entry["total_failures"] = entry.get("total_failures", 0) + 1
+                entry["last_failure"] = now
 
-        # Rolling window: keep last 50 results for recent success rate
-        recent = entry.get("recent_results", [])
-        recent.append(success)
-        if len(recent) > 50:
-            recent = recent[-50:]
-        entry["recent_results"] = recent
+            # Rolling window: keep last 50 results for recent success rate
+            recent = entry.get("recent_results", [])
+            recent.append(success)
+            if len(recent) > 50:
+                recent = recent[-50:]
+            entry["recent_results"] = recent
 
-    atomic_write_json(HEALTH_FILE, state)
+        atomic_write_json(HEALTH_FILE, state)
 
 
 def get_signal_health(signal_name: str = None) -> dict:

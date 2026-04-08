@@ -459,7 +459,7 @@ def compute_smart_money_signal(df: pd.DataFrame) -> dict[str, Any]:
     for col in required_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce").astype(float)
 
-    df = df.dropna(subset=list(required_cols), how="all")
+    df = df.dropna(subset=list(required_cols), how="any")  # H15: any NaN col = bad row
     if len(df) < MIN_ROWS:
         logger.info("smart_money: too many NaN rows, only %d remain", len(df))
         return default_result

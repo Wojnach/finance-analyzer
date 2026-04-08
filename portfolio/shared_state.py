@@ -27,6 +27,9 @@ _cache_lock = threading.Lock()
 # instead of calling the function redundantly.
 _loading_keys: set[str] = set()
 _LOADING_TIMEOUT = 120  # seconds to wait for a loading thread before giving up
+# C11/SS1: Track when each key was added to _loading_keys for eviction of
+# permanently stuck keys (batch flush crash before updating cache).
+_loading_timestamps: dict[str, float] = {}
 
 _MAX_STALE_FACTOR = 3  # return None if cached data is older than TTL * this factor
 
@@ -62,6 +65,15 @@ def _cached(key, ttl, func, *args):
                 for k in sorted_keys[:evict_count]:
                     del _tool_cache[k]
 
+        # C11/SS1: Evict stuck loading keys older than _LOADING_TIMEOUT seconds.
+        _now_evict = time.time()
+        stuck = [k for k, ts in _loading_timestamps.items()
+                 if _now_evict - ts > _LOADING_TIMEOUT]
+        for k in stuck:
+            _loading_keys.discard(k)
+            _loading_timestamps.pop(k, None)
+            logger.debug("[%s] evicted stuck loading key (timeout %ds)", k, _LOADING_TIMEOUT)
+
         # BUG-166: Dogpile prevention — if another thread is already loading
         # this key, return stale data instead of calling func redundantly.
         if key in _loading_keys:
@@ -75,6 +87,7 @@ def _cached(key, ttl, func, *args):
             logger.debug("[%s] no stale data, another thread loading — returning None", key)
             return None
         _loading_keys.add(key)
+        _loading_timestamps[key] = time.time()
 
     try:
         data = func(*args)
@@ -121,6 +134,8 @@ def _cached_or_enqueue(key, ttl, enqueue_fn, context):
         # Cache expired — enqueue for post-cycle batch (once, not every thread)
         if enqueue_fn and context is not None and key not in _loading_keys:
             _loading_keys.add(key)
+            # C11/SS1: Track enqueue time for stuck-key eviction.
+            _loading_timestamps[key] = time.time()
             enqueue_fn(key, context)
         # Return stale if available
         if key in _tool_cache:
@@ -134,6 +149,8 @@ def _update_cache(key, data, ttl=None):
     """Update a cache entry directly (for batch flush results)."""
     with _cache_lock:
         _loading_keys.discard(key)
+        # C11/SS1: Clean up timestamp when key is resolved.
+        _loading_timestamps.pop(key, None)
         _tool_cache[key] = {
             "data": data,
             "time": time.time(),

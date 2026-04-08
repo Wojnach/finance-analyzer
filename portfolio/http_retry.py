@@ -40,6 +40,13 @@ def fetch_with_retry(url, method="GET", retries=DEFAULT_RETRIES,
                 wait = backoff * (backoff_factor ** attempt)
                 jitter = random.uniform(0, wait * 0.1)
                 wait += jitter
+                # H26/HTTP1: Honour Telegram retry_after parameter for 429 responses.
+                if resp.status_code == 429:
+                    try:
+                        retry_after = resp.json().get("parameters", {}).get("retry_after", wait)
+                    except Exception:
+                        retry_after = wait
+                    wait = retry_after
                 logger.warning("HTTP %s from %s, retry %d/%d in %.1fs",
                                resp.status_code, url, attempt + 1, retries, wait)
                 time.sleep(wait)

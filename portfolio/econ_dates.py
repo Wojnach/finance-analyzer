@@ -154,14 +154,10 @@ def next_event(ref_date: date | None = None) -> dict | None:
             # Calculate hours until (approximate: assume 14:00 UTC release)
             evt_dt = datetime.combine(evt["date"], datetime.min.time().replace(hour=14),
                                       tzinfo=UTC)
+            # M5: Use datetime.now(UTC) so past-today events show hours_until=0.
             now = datetime.now(UTC)
-            if isinstance(ref_date, date) and not isinstance(ref_date, datetime):
-                ref_dt = datetime.combine(ref_date, datetime.min.time().replace(hour=14),
-                                          tzinfo=UTC)
-            else:
-                ref_dt = now
-            delta = evt_dt - ref_dt
-            hours = max(0, delta.total_seconds() / 3600)
+            delta = evt_dt - now
+            hours = max(0.0, delta.total_seconds() / 3600)
             return {
                 "date": evt["date"],
                 "type": evt["type"],
