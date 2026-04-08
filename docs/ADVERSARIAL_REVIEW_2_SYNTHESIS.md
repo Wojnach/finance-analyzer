@@ -174,11 +174,11 @@ per-module locks with a `concurrent.futures`-based task queue for I/O operations
 
 | Severity | Count | Source |
 |----------|-------|--------|
-| CRITICAL | 18 | 3 Claude + 2 portfolio-risk + 2 infrastructure + 3 data-external + 4 avanza-api + 4 signals-core |
-| HIGH | 48 | 17 Claude + 3 portfolio-risk + 6 infrastructure + 6 signals-modules + 5 data-external + 5 avanza-api + 6 signals-core |
-| MEDIUM | 39 | 16 Claude + 3 portfolio-risk + 3 infrastructure + 6 signals-modules + 4 data-external + 3 avanza-api + 4 signals-core |
-| LOW | 14 | 3 Claude + 2 portfolio-risk + 3 signals-modules + 2 data-external + 1 avanza-api + 3 signals-core |
-| **Total** | **119** | 39 Claude + 10 portfolio-risk + 11 infrastructure + 15 signals-modules + 14 data-external + 13 avanza-api + 17 signals-core |
+| CRITICAL | 21 | 3 Claude + 2 portfolio-risk + 2 infra + 3 data-ext + 4 avanza + 4 signals-core + 3 orchestration |
+| HIGH | 52 | 17 Claude + 3 portfolio-risk + 6 infra + 6 sig-modules + 5 data-ext + 5 avanza + 6 sig-core + 4 orchestration |
+| MEDIUM | 43 | 16 Claude + 3 portfolio-risk + 3 infra + 6 sig-modules + 4 data-ext + 3 avanza + 4 sig-core + 4 orchestration |
+| LOW | 17 | 3 Claude + 2 portfolio-risk + 3 sig-modules + 2 data-ext + 1 avanza + 3 sig-core + 3 orchestration |
+| **Total** | **133** | 39 Claude + 10 portfolio-risk + 11 infra + 15 sig-modules + 14 data-ext + 13 avanza + 17 sig-core + 14 orchestration |
 
 All six completed agent reviews found critical issues the independent review missed:
 - **signals-core**: Per-ticker consensus cache horizon-blind (CS1), Ministral count mismatch
@@ -194,7 +194,10 @@ Agent win rate: ~80%. Every agent found critical bugs the broad review missed. T
 signals-core agent found the deepest issues — interaction bugs between caches, gates,
 and overlays that are only visible through line-by-line tracing.
 
-**Remaining 2 agents still running**: orchestration, metals-core.
+- **orchestration**: classify_tier double-read race causes T3 spam (CO1), ThreadPoolExecutor
+  cancel no-op accumulates zombie threads (CO2), multi-agent blocks loop 150s (CO3)
+
+**Remaining 1 agent still running**: metals-core.
 
 ---
 
