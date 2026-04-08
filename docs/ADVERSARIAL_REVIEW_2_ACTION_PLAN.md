@@ -1,5 +1,31 @@
 # Adversarial Review Action Plan — 2026-04-08
 
+## URGENT Fixes (from agent review — trade guards completely broken)
+
+### 0a. Fix trade guards to actually block (C3/CR2)
+**File**: `portfolio/trade_guards.py`
+**What**: Change severity from `"warning"` to `"block"` for critical conditions
+**Why**: `should_block_trade()` always returns False — overtrading prevention is dead
+**How**: At minimum, consecutive_losses >= 3 → `"block"` severity
+**Risk**: Medium — may block legitimate trades if thresholds too aggressive
+**Tests**: Test `should_block_trade()` returns True after 3+ consecutive losses
+
+### 0b. Fix timezone-naive datetime comparison (C4/CR1)
+**File**: `portfolio/trade_guards.py:89, 146, 216`
+**What**: Normalize timezone after `fromisoformat()`
+**Why**: Python 3.10: TypeError caught by except → cooldown silently bypassed
+**How**: `if last_trade.tzinfo is None: last_trade = last_trade.replace(tzinfo=UTC)`
+**Risk**: None — correctness fix
+**Tests**: Test with both aware and naive timestamp strings
+
+### 0c. Fix Kelly sizing to use total portfolio value (H18/H-A2)
+**File**: `portfolio/kelly_sizing.py:241-243`
+**What**: Compute max_alloc against total portfolio value, not just cash
+**Why**: Cash-only denominator ignores open positions → over-concentration
+**How**: `total_value = cash + holdings_value; max_alloc = total_value * alloc_frac`
+**Risk**: Low — makes sizing more conservative
+**Tests**: Test with portfolio that has large unrealized positions
+
 ## Immediate Fixes (< 1 hour each, safe, no production risk)
 
 ### 1. Fix ADX cache key (C1)

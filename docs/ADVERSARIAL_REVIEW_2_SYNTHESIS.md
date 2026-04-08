@@ -37,12 +37,14 @@ thread-safe caches). However, several categories of risk were identified:
 
 ## Findings by Severity
 
-### CRITICAL (3 findings — can lose money or corrupt state)
+### CRITICAL (5 findings — can lose money or corrupt state)
 
 | ID | Subsystem | Finding | Evidence |
 |----|-----------|---------|----------|
 | C1 | signals-core | **ADX cache keyed by `id(df)` reuses GC'd memory addresses** | `signal_engine.py:25` — Python reuses `id()` values after GC. New DataFrames at same address get old ADX values. Affects Stage 2 volume/ADX gating which can allow or block trades incorrectly. |
 | C2 | metals-core | **6561-line god file with entangled global state** | `data/metals_loop.py` — Single file manages real-money trading, stop-losses, fish engine, Telegram, data fetching. Any uncaught exception can leave positions unprotected. `_loop_page` global Playwright page can die silently. |
+| C3 | portfolio-risk | **Trade guards never block — `should_block_trade()` always False** | `trade_guards.py:278-290` — Every warning uses `severity: "warning"`, never `"block"`. The enforcement gate is permanently open. Overtrading prevention is purely advisory. [Agent finding, 100% confidence] |
+| C4 | portfolio-risk | **Timezone-naive datetime comparison silently bypasses cooldowns** | `trade_guards.py:89` — `fromisoformat()` on aware timestamps is Python-version-dependent. On 3.10, `TypeError` caught by `except` → cooldown bypassed entirely. [Agent finding, 95% confidence] |
 | CC1 | cross-cutting | **Pervasive `except Exception: pass` masks real bugs** | 50+ instances across signal_engine, agent_invocation, reporting, main loop. Signal failures → silent HOLD. Accuracy errors → wrong weights. Risk checks bypass on import failure. System appears healthy while degraded. |
 
 ### HIGH (17 findings — silent failures, wrong decisions, exploitable gaps)
@@ -56,6 +58,9 @@ thread-safe caches). However, several categories of risk were identified:
 | H5 | orchestration | Stack overflow counter never resets — transient issue permanently disables Layer 2 |
 | H6 | portfolio-risk | Corrupt portfolio file → `load_json` returns `{}` → drawdown = 0% → circuit breaker disabled |
 | H7 | portfolio-risk | `_compute_portfolio_value` uses stale `avg_cost_usd` when no live price → hides losses |
+| H18 | portfolio-risk | Kelly sizing uses cash_sek only, not total portfolio value → over-concentration [Agent] |
+| H19 | portfolio-risk | Sortino ratio biased denominator (n_downside not n_total) → deflated ratio [Agent] |
+| H20 | portfolio-risk | `load_state()`/`save_state()` bypass `update_state()` lock → concurrent overwrites [Agent] |
 | H8 | metals-core | Fish engine sell: `_loop_page` non-None but detached Playwright page → unhandled crash |
 | H9 | metals-core | Price history deques grow unbounded — memory leak over weeks of operation |
 | H10 | metals-core | Kelly override: when Kelly says "no edge", code falls back to fixed 1500 SEK anyway |
@@ -162,6 +167,22 @@ per-module locks with a `concurrent.futures`-based task queue for I/O operations
 | 6 | data-external | **MEDIUM** | Rate limit enforcement gaps, stale data |
 | 7 | infrastructure | **MEDIUM** | Health race condition, append atomicity |
 | 8 | signals-modules | **LOW** | Individual modules are well-structured; main risk is silent HOLD |
+
+---
+
+## Updated Summary (Post Agent Cross-Critique)
+
+| Severity | Count | Source |
+|----------|-------|--------|
+| CRITICAL | 5 | 3 Claude + 2 agent (trade_guards) |
+| HIGH | 20 | 17 Claude + 3 agent (Kelly, Sortino, lock) |
+| MEDIUM | 19 | 16 Claude + 3 agent |
+| LOW | 5 | 3 Claude + 2 agent |
+| **Total** | **49** | 39 Claude + 10 net-new from portfolio-risk agent |
+
+The agent review of portfolio-risk was **stronger** than the independent review for
+that subsystem. The trade_guards findings (C3, C4) represent a complete failure of
+the overtrading prevention system that the independent review entirely missed.
 
 ---
 
