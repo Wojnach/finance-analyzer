@@ -90,14 +90,21 @@ def _get_microstructure_context(ticker: str) -> dict | None:
 
 
 def compute_orderbook_flow_signal(
-    df: Any, *, ticker: str = "", config: dict | None = None,
-    macro: dict | None = None, **kwargs,
+    df: Any, context: dict | None = None, **kwargs,
 ) -> dict:
-    """Compute orderbook flow composite signal."""
+    """Compute orderbook flow composite signal.
+
+    Args:
+        df: OHLCV DataFrame (unused — microstructure data fetched separately).
+        context: dict with keys {ticker, config, macro, regime}.
+    """
     empty = {
         "action": "HOLD", "confidence": 0.0,
         "sub_signals": {}, "indicators": {},
     }
+
+    context = context or {}
+    ticker = context.get("ticker", kwargs.get("ticker", ""))
 
     if ticker not in _APPLICABLE_TICKERS:
         return empty
