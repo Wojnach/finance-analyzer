@@ -185,10 +185,15 @@ def _fetch_newsapi_headlines(ticker, api_key, limit=10, query=None):
 
 
 def _fetch_newsapi_with_tracking(ticker, api_key, limit=10, query=None):
-    """Fetch from NewsAPI and track the call against daily quota."""
+    """Fetch from NewsAPI and track the call against daily quota.
+
+    H9/DC-R3-2: only count against budget when the fetch actually returned data
+    (not on empty responses or errors), preventing spurious budget exhaustion.
+    """
     from portfolio.shared_state import newsapi_track_call
     result = _fetch_newsapi_headlines(ticker, api_key, limit=limit, query=query)
-    newsapi_track_call()
+    if result:  # only count against budget when we actually got data
+        newsapi_track_call()
     return result
 
 

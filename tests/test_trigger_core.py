@@ -642,7 +642,8 @@ class TestClassifyTierConsensus:
         """A consensus trigger reason should classify as Tier 2."""
         state = {
             "last_full_review_time": time.time(),  # recent, so no T3 periodic
-            "today_date": trigger_mod._today_str(),  # not first-of-day
+            "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2  # not first-of-day
         }
         reasons = ["BTC-USD consensus BUY (80%)"]
         tier = classify_tier(reasons, state=state)
@@ -653,6 +654,7 @@ class TestClassifyTierConsensus:
         state = {
             "last_full_review_time": time.time(),
             "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
         }
         reasons = [
             "BTC-USD consensus BUY (80%)",
@@ -672,6 +674,7 @@ class TestClassifyTierSentiment:
         state = {
             "last_full_review_time": time.time(),
             "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
         }
         reasons = ["BTC-USD sentiment positive->negative (sustained)"]
         tier = classify_tier(reasons, state=state)
@@ -688,6 +691,7 @@ class TestClassifyTierFearGreed:
         state = {
             "last_full_review_time": time.time(),
             "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
         }
         reasons = ["F&G crossed 20 (25->18)"]
         tier = classify_tier(reasons, state=state)
@@ -698,6 +702,7 @@ class TestClassifyTierFearGreed:
         state = {
             "last_full_review_time": time.time(),
             "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
         }
         reasons = ["F&G crossed 80 (75->85)"]
         tier = classify_tier(reasons, state=state)
@@ -724,6 +729,7 @@ class TestClassifyTierFirstOfDay:
         state = {
             "last_full_review_time": time.time(),
             "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
         }
         reasons = ["cooldown (10min)"]
         tier = classify_tier(reasons, state=state)
@@ -740,6 +746,7 @@ class TestClassifyTierPriceMove:
         state = {
             "last_full_review_time": time.time(),
             "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
         }
         reasons = ["BTC-USD moved 3.5% up"]
         tier = classify_tier(reasons, state=state)
@@ -756,6 +763,7 @@ class TestClassifyTierPostTrade:
         state = {
             "last_full_review_time": time.time(),
             "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
         }
         reasons = ["post-trade reassessment"]
         tier = classify_tier(reasons, state=state)
@@ -774,6 +782,7 @@ class TestClassifyTierPeriodicReview:
             state = {
                 "last_full_review_time": time.time() - 14401,  # 4+ hours ago
                 "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
             }
             reasons = ["cooldown (10min)"]
             tier = classify_tier(reasons, state=state)
@@ -788,6 +797,7 @@ class TestClassifyTierPeriodicReview:
             state = {
                 "last_full_review_time": time.time() - 14401,  # 4+ hours ago
                 "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
             }
             reasons = ["crypto check-in (2h)"]
             tier = classify_tier(reasons, state=state)
@@ -802,6 +812,7 @@ class TestClassifyTierPeriodicReview:
             state = {
                 "last_full_review_time": time.time() - 7200,  # 2 hours ago
                 "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
             }
             reasons = ["cooldown (10min)"]
             tier = classify_tier(reasons, state=state)
@@ -820,6 +831,7 @@ class TestClassifyTierPriority:
         state = {
             "last_full_review_time": time.time(),
             "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
         }
         reasons = ["F&G crossed 20 (25->18)", "BTC-USD consensus BUY (80%)"]
         tier = classify_tier(reasons, state=state)
@@ -830,6 +842,7 @@ class TestClassifyTierPriority:
         state = {
             "last_full_review_time": time.time(),
             "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
         }
         reasons = ["BTC-USD consensus BUY (80%)", "BTC-USD sentiment positive->negative (sustained)"]
         tier = classify_tier(reasons, state=state)

@@ -109,10 +109,12 @@ def _fetch_yfinance_proxy(
 
     try:
         from portfolio.data_collector import yfinance_klines
-        from portfolio.shared_state import _yfinance_limiter
+        from portfolio.shared_state import _yfinance_limiter, yfinance_lock
 
         _yfinance_limiter.wait()
-        df = yfinance_klines(ticker, interval=interval, limit=max(lookback_bars, 2))
+        # H11/DC-R3-4: yfinance is not thread-safe; hold the shared lock
+        with yfinance_lock:
+            df = yfinance_klines(ticker, interval=interval, limit=max(lookback_bars, 2))
         if df is None or df.empty or "close" not in df.columns or "time" not in df.columns:
             return cached["value"] if cached else None
 

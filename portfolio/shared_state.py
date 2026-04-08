@@ -174,6 +174,12 @@ class _RateLimiter:
             self.last_call = time.time()
 
 
+# H11/DC-R3-4: yfinance is not thread-safe. This lock is shared across all
+# modules (fear_greed, golddigger/data_provider, data_collector) so that
+# concurrent calls from the 8-worker ThreadPoolExecutor are serialized.
+# data_collector.py imports this lock instead of defining its own.
+yfinance_lock = threading.Lock()
+
 # Alpaca IEX: 200 req/min → target 150/min to leave headroom
 _alpaca_limiter = _RateLimiter(150, "alpaca")
 # Binance: 1200 weight/min → very generous, but space out slightly

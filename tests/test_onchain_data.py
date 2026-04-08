@@ -126,6 +126,7 @@ class TestGetOnchainData:
         result = get_onchain_data()
         assert result is None
 
+    @patch("portfolio.onchain_data.load_json", return_value={})  # H12: bypass persistent cache
     @patch("portfolio.onchain_data._load_config_token")
     @patch("portfolio.onchain_data._fetch_mvrv")
     @patch("portfolio.onchain_data._fetch_sopr")
@@ -134,7 +135,7 @@ class TestGetOnchainData:
     @patch("portfolio.onchain_data._fetch_exchange_netflow")
     @patch("portfolio.onchain_data._fetch_liquidations")
     def test_aggregates_all_metrics(self, mock_liq, mock_net, mock_rp,
-                                    mock_nupl, mock_sopr, mock_mvrv, mock_token):
+                                    mock_nupl, mock_sopr, mock_mvrv, mock_token, mock_load_json):
         mock_token.return_value = "test_token"
         mock_mvrv.return_value = {"mvrv": 1.85, "mvrv_zscore": 0.42}
         mock_sopr.return_value = {"sopr": 1.02}
@@ -143,7 +144,7 @@ class TestGetOnchainData:
         mock_net.return_value = {"netflow": -1250.5}
         mock_liq.return_value = {"long_liquidations": 15e6, "short_liquidations": 8e6}
 
-        # Bypass cache
+        # Bypass in-memory cache
         import portfolio.shared_state as ss
         from portfolio.onchain_data import get_onchain_data
         cache_key = "onchain_btc"
@@ -158,6 +159,7 @@ class TestGetOnchainData:
         assert result["realized_price"] == 30500.0
         assert result["netflow"] == -1250.5
 
+    @patch("portfolio.onchain_data.load_json", return_value={})  # H12: bypass persistent cache
     @patch("portfolio.onchain_data._load_config_token")
     @patch("portfolio.onchain_data._fetch_mvrv")
     @patch("portfolio.onchain_data._fetch_sopr")
@@ -166,7 +168,7 @@ class TestGetOnchainData:
     @patch("portfolio.onchain_data._fetch_exchange_netflow")
     @patch("portfolio.onchain_data._fetch_liquidations")
     def test_partial_failure_still_returns(self, mock_liq, mock_net, mock_rp,
-                                           mock_nupl, mock_sopr, mock_mvrv, mock_token):
+                                           mock_nupl, mock_sopr, mock_mvrv, mock_token, mock_load_json):
         mock_token.return_value = "test_token"
         mock_mvrv.return_value = {"mvrv": 1.85, "mvrv_zscore": 0.42}
         mock_sopr.return_value = None  # failed

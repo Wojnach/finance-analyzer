@@ -250,7 +250,11 @@ def invoke_agent(reasons, tier=3):
             logger.info("Multi-agent T%d: launching 3 specialists for %s", tier, ticker)
             procs = launch_specialists(ticker, reasons)
             if procs:
-                results = wait_for_specialists(procs, timeout=150)
+                # C3/NEW-1: timeout reduced from 150s to 30s (configurable via
+                # layer2.specialist_timeout_s) to avoid blocking the main loop.
+                # TODO: run specialists in background thread, collect results async.
+                specialist_timeout = config.get("layer2", {}).get("specialist_timeout_s", 30)
+                results = wait_for_specialists(procs, timeout=specialist_timeout)
                 success_count = sum(1 for v in results.values() if v)
                 logger.info("Specialists complete: %d/%d succeeded", success_count, len(results))
                 # Even if some fail, proceed with synthesis using available reports
@@ -427,7 +431,8 @@ def _write_fishing_context(journal_entry):
 
         from portfolio.file_utils import atomic_write_json
 
-        atomic_write_json('data/fishing_context.json', context)
+        # H22/NEW-3: use DATA_DIR absolute path instead of relative 'data/...'
+        atomic_write_json(DATA_DIR / 'fishing_context.json', context)
 
     except Exception as e:
         logger.warning('Fishing context error: %s', e)
@@ -436,7 +441,7 @@ def _write_fishing_context(journal_entry):
             from datetime import UTC, datetime
 
             from portfolio.file_utils import atomic_write_json
-            atomic_write_json('data/fishing_context.json', {
+            atomic_write_json(DATA_DIR / 'fishing_context.json', {
                 'timestamp': datetime.now(UTC).isoformat(),
                 'ticker': 'XAG-USD',
                 'direction_bias': 'neutral',

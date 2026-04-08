@@ -273,8 +273,10 @@ def _fetch_klines(source, interval, limit):
 # --- Multi-timeframe collector ---
 
 
-# yfinance is not thread-safe; serialize calls with a lock
-_yfinance_lock = threading.Lock()
+# yfinance is not thread-safe; serialize calls with a shared lock.
+# H11/DC-R3-4: use the module-level lock from shared_state so all modules
+# (fear_greed, golddigger/data_provider, data_collector) share one lock.
+from portfolio.shared_state import yfinance_lock as _yfinance_lock
 
 
 def _fetch_one_timeframe(source, source_key, label, interval, limit, ttl):

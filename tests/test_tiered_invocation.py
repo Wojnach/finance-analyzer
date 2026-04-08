@@ -63,6 +63,8 @@ class TestClassifyTier(TriggerTestBase):
         state = {
             "last_full_review_time": time.time(),  # recent full review
             "today_date": _today_str(),  # already invoked today
+            # C4/NEW-2: last_trigger_date must match today so first-of-day T3 doesn't fire
+            "last_trigger_date": _today_str(),
         }
         state.update(overrides)
         return state
@@ -116,8 +118,12 @@ class TestClassifyTier(TriggerTestBase):
         assert classify_tier(reasons, state=state) == 3
 
     def test_first_of_day_returns_tier3(self):
-        """First invocation of the day should be Tier 3."""
-        state = self._make_state(today_date="2026-01-01")  # yesterday
+        """First real trigger of the day should be Tier 3.
+
+        C4/NEW-2: classify_tier now checks last_trigger_date (only set on real triggers).
+        Override both today_date and last_trigger_date to simulate first-of-day.
+        """
+        state = self._make_state(today_date="2026-01-01", last_trigger_date="2026-01-01")
         reasons = ["cooldown (10min)"]
         assert classify_tier(reasons, state=state) == 3
 

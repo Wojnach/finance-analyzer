@@ -101,6 +101,9 @@ def _base_state(last_full_review_offset=0):
     return {
         "last_full_review_time": time.time() - last_full_review_offset,
         "today_date": trigger_mod._today_str(),
+        # C4/NEW-2: classify_tier now checks last_trigger_date (set only on real
+        # triggers) instead of today_date (set every cycle).
+        "last_trigger_date": trigger_mod._today_str(),
     }
 
 
@@ -141,6 +144,7 @@ class TestClassifyTierThree:
             state = {
                 "last_full_review_time": time.time() - 7200,  # exactly 2h ago
                 "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
             }
             reasons = ["BTC-USD sentiment positive->negative (sustained)"]
             assert classify_tier(reasons, state=state) == 3
@@ -154,6 +158,7 @@ class TestClassifyTierThree:
             state = {
                 "last_full_review_time": time.time() - 7190,  # 10s short of 2h
                 "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
             }
             reasons = ["BTC-USD sentiment positive->negative (sustained)"]
             assert classify_tier(reasons, state=state) == 1
@@ -167,6 +172,7 @@ class TestClassifyTierThree:
             state = {
                 "last_full_review_time": time.time() - 14400,  # exactly 4h
                 "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
             }
             reasons = ["BTC-USD sentiment positive->negative (sustained)"]
             assert classify_tier(reasons, state=state) == 3
@@ -180,6 +186,7 @@ class TestClassifyTierThree:
             state = {
                 "last_full_review_time": time.time() - 14390,  # 10s short of 4h
                 "today_date": trigger_mod._today_str(),
+                "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
             }
             reasons = ["BTC-USD sentiment positive->negative (sustained)"]
             assert classify_tier(reasons, state=state) == 1
@@ -187,13 +194,19 @@ class TestClassifyTierThree:
             m.stop()
 
     def test_first_of_day_missing_today_date_in_state(self):
-        """When state has no today_date key, it should be treated as first-of-day -> tier 3."""
+        """When state has no last_trigger_date key, first-of-day T3 fires.
+
+        C4/NEW-2: classify_tier checks last_trigger_date (only set on real triggers).
+        """
         state = {"last_full_review_time": time.time()}
         reasons = ["BTC-USD sentiment positive->negative (sustained)"]
         assert classify_tier(reasons, state=state) == 3
 
     def test_first_of_day_yesterday_date(self):
-        """When today_date in state is yesterday, should be first-of-day -> tier 3."""
+        """When last_trigger_date in state is yesterday, should be first-of-day -> tier 3.
+
+        C4/NEW-2: classify_tier checks last_trigger_date, not today_date.
+        """
         state = {
             "last_full_review_time": time.time(),
             "today_date": "2020-01-01",
@@ -331,6 +344,8 @@ class TestClassifyTierStateFromFile:
         _seed_state(sf, {
             "last_full_review_time": time.time(),
             "today_date": trigger_mod._today_str(),
+            # C4/NEW-2: last_trigger_date must match today so first-of-day T3 doesn't fire
+            "last_trigger_date": trigger_mod._today_str(),
         })
         reasons = ["BTC-USD consensus BUY (80%)"]
         assert classify_tier(reasons, state=None) == 2

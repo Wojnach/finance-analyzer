@@ -109,8 +109,12 @@ def get_crypto_fear_greed() -> dict:
 def get_stock_fear_greed() -> dict:
     import yfinance as yf
 
-    vix = yf.Ticker("^VIX")
-    h = vix.history(period="5d")
+    from portfolio.shared_state import yfinance_lock
+
+    # H11/DC-R3-4: yfinance is not thread-safe; hold the shared lock
+    with yfinance_lock:
+        vix = yf.Ticker("^VIX")
+        h = vix.history(period="5d")
     if h.empty:
         return None
     vix_val = float(h["Close"].iloc[-1])

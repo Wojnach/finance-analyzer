@@ -39,11 +39,17 @@ def _fetch_earnings_alpha_vantage(ticker: str) -> dict | None:
         from portfolio.shared_state import _alpha_vantage_limiter
 
         config = load_config()
-        api_key = config.get("alpha_vantage_key", "")
+        # C9/DC-R3-1: key lives under config["alpha_vantage"]["api_key"], not
+        # the flat "alpha_vantage_key" key that doesn't exist.
+        api_key = config.get("alpha_vantage", {}).get("api_key", "")
         if not api_key:
             return None
 
         _alpha_vantage_limiter.wait()
+        # NOTE: earnings calls bypass alpha_vantage.py's _daily_budget_used counter
+        # because there is no public increment function exported from that module.
+        # Known limitation — earnings fetches consume 1 AV call each but are not
+        # reflected in the budget tracker.  Each ticker only fetches once per 24h.
         r = fetch_with_retry(
             "https://www.alphavantage.co/query",
             params={
