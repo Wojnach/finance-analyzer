@@ -123,7 +123,8 @@ class TestWeightedConsensusBasic:
         assert conf == pytest.approx(2 / 3, abs=0.01)
 
     def test_simple_sell_majority(self):
-        votes = {"rsi": "SELL", "macd": "SELL", "ema": "SELL", "bb": "BUY"}
+        # Use signals in different correlation groups to avoid penalty
+        votes = {"rsi": "SELL", "macd": "SELL", "ema": "SELL", "smart_money": "BUY"}
         action, conf = _weighted_consensus(votes, {}, "breakout")
         assert action == "SELL"
         # Neutral regime, no accuracy => all weight=0.5
@@ -237,17 +238,17 @@ class TestWeightedConsensusRegime:
         assert action == "SELL"
 
     def test_ranging_boosts_rsi_and_bb(self):
-        # Use momentum instead of candlestick — candlestick is regime-gated in ranging
-        votes = {"rsi": "BUY", "momentum": "SELL"}
+        # Use claude_fundamental as opponent — not in momentum_cluster, not regime-gated
+        votes = {"rsi": "BUY", "claude_fundamental": "SELL"}
         accuracy = {
             "rsi": {"accuracy": 0.6, "total": 50},
-            "momentum": {"accuracy": 0.6, "total": 50},
+            "claude_fundamental": {"accuracy": 0.6, "total": 50},
         }
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # rsi weight = 0.6 * 1.5 = 0.9, momentum weight = 0.6 * 1.3 = 0.78
-        # BUY=0.9, SELL=0.78 => BUY
+        # rsi weight = 0.6 * 1.5(ranging) = 0.9, claude_fundamental = 0.6 * 1.0 = 0.6
+        # BUY=0.9, SELL=0.6 => BUY
         assert action == "BUY"
-        expected = 0.9 / (0.9 + 0.78)
+        expected = 0.9 / (0.9 + 0.6)
         assert conf == pytest.approx(expected, abs=0.01)
 
     def test_high_vol_boosts_bb_and_volume(self):
@@ -282,22 +283,22 @@ class TestWeightedConsensusActivationRates:
     """Activation rate normalization (rarity * bias correction)."""
 
     def test_activation_rate_scales_weight(self):
-        # Use momentum instead of candlestick — candlestick is regime-gated in ranging
-        votes = {"rsi": "BUY", "momentum": "SELL"}
+        # Use claude_fundamental — not in momentum_cluster, not regime-gated in ranging
+        votes = {"rsi": "BUY", "claude_fundamental": "SELL"}
         accuracy = {
             "rsi": {"accuracy": 0.6, "total": 50},
-            "momentum": {"accuracy": 0.6, "total": 50},
+            "claude_fundamental": {"accuracy": 0.6, "total": 50},
         }
         activation = {
             "rsi": {"normalized_weight": 2.0},  # rare signal, boosted
-            "momentum": {"normalized_weight": 0.5},   # noisy signal, dampened
+            "claude_fundamental": {"normalized_weight": 0.5},   # noisy signal, dampened
         }
         action, conf = _weighted_consensus(votes, accuracy, "ranging", activation_rates=activation)
         # rsi: 0.6 * 1.5(ranging) * 2.0 = 1.8
-        # momentum: 0.6 * 1.3(ranging) * 0.5 = 0.39
-        # BUY=1.8, SELL=0.39 => BUY
+        # claude_fundamental: 0.6 * 1.0(ranging) * 0.5 = 0.3
+        # BUY=1.8, SELL=0.3 => BUY
         assert action == "BUY"
-        expected = 1.8 / (1.8 + 0.39)
+        expected = 1.8 / (1.8 + 0.3)
         assert conf == pytest.approx(expected, abs=0.01)
 
     def test_missing_activation_rate_defaults_to_1(self):
@@ -1138,7 +1139,8 @@ class TestExpandedCorrelationGroups:
         from portfolio.signal_engine import CORRELATION_GROUPS
         assert "macro_regime" in CORRELATION_GROUPS["trend_direction"]
         assert "fear_greed" in CORRELATION_GROUPS["macro_external"]
-        assert "structure" in CORRELATION_GROUPS["macro_external"]
+        # structure moved to volatility_cluster (2026-04-08: 94.2% with volatility_sig)
+        assert "structure" in CORRELATION_GROUPS["volatility_cluster"]
 
     def test_volume_flow_in_trend_direction_group(self):
         """Verify volume_flow merged into trend_direction group (corr +0.511 with heikin_ashi)."""
