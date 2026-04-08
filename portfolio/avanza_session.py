@@ -31,6 +31,9 @@ EXPIRY_BUFFER_MINUTES = 30
 # Default trading account
 DEFAULT_ACCOUNT_ID = "1625505"
 
+# Whitelist of permitted account IDs — never trade outside these
+ALLOWED_ACCOUNT_IDS = {"1625505"}
+
 # Module-level Playwright context (lazy-initialized, reused across calls)
 # BUG-129: Protected by _pw_lock to prevent concurrent access corruption
 _pw_lock = threading.Lock()
@@ -74,7 +77,7 @@ def load_session() -> dict:
                     "Run: python scripts/avanza_login.py"
                 )
         except ValueError:
-            pass  # Can't parse expiry, proceed anyway
+            logger.warning("Cannot parse expires_at %r — cannot verify expiry, proceeding with caution", expires_at)
 
     if not STORAGE_STATE_FILE.exists():
         raise AvanzaSessionError(
@@ -309,7 +312,7 @@ def get_buying_power(account_id: str | None = None) -> dict:
                     "total_value": _v(acc.get("totalValue", {})),
                     "own_capital": _v(acc.get("ownCapital", {})),
                 }
-    # Account not found by id — try matching with categorizedAccounts
+    # Account not found by accountId — fallback using categorizedAccounts top-level
     # (structure may nest accounts differently across Avanza updates)
     total = data.get("categorizedAccounts", [{}])[0].get("totalValue", {})
     total_val = total.get("value", 0) if isinstance(total, dict) else 0
@@ -369,8 +372,18 @@ def _place_order(
     if price <= 0:
         raise ValueError(f"price must be > 0, got {price}")
 
+    # H7: account whitelist guard
+    effective_account_id = str(account_id or DEFAULT_ACCOUNT_ID)
+    if effective_account_id not in ALLOWED_ACCOUNT_IDS:
+        raise ValueError(f"Refusing to trade on non-whitelisted account {effective_account_id!r}")
+
+    # H8: minimum order size guard
+    order_total = round(volume * price, 2)
+    if order_total < 1000.0:
+        raise ValueError(f"Order total {order_total:.2f} SEK below minimum 1000 SEK")
+
     payload = {
-        "accountId": str(account_id or DEFAULT_ACCOUNT_ID),
+        "accountId": effective_account_id,
         "orderbookId": str(orderbook_id),
         "side": side,
         "condition": "NORMAL",

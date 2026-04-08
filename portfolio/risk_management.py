@@ -9,11 +9,10 @@ Provides:
 """
 
 import datetime
-import json
 import logging
 import pathlib
 
-from portfolio.file_utils import atomic_append_jsonl, load_json
+from portfolio.file_utils import atomic_append_jsonl, load_json, load_jsonl_tail
 
 logger = logging.getLogger(__name__)
 
@@ -96,17 +95,13 @@ def check_drawdown(portfolio_path: str, max_drawdown_pct: float = 20.0,
 
     if history_path.exists():
         try:
-            with open(history_path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    entry = json.loads(line)
-                    value_key = "bold_value_sek" if is_bold else "patient_value_sek"
-                    val = entry.get(value_key, 0)
-                    if val > peak_value:
-                        peak_value = val
-        except (OSError, json.JSONDecodeError):
+            value_key = "bold_value_sek" if is_bold else "patient_value_sek"
+            entries = load_jsonl_tail(str(history_path), max_entries=2000)
+            for entry in entries:
+                val = entry.get(value_key, 0)
+                if val > peak_value:
+                    peak_value = val
+        except (OSError, ValueError):
             pass
 
     # Also compare against current value in case it's a new peak
@@ -180,11 +175,9 @@ def compute_stop_levels(holdings: dict, agent_summary: dict) -> dict:
         current_price = sig.get("price_usd", 0)
         atr_pct = sig.get("atr_pct", 0)
 
-        # 2x ATR stop-loss (floor at 1% of entry to prevent negative stops)
+        # 2x ATR stop-loss — cap ATR at 15% to prevent meaninglessly wide stops for warrants
+        atr_pct = min(atr_pct, 15.0)
         stop_price = entry_price * (1 - 2 * atr_pct / 100)
-        if stop_price <= 0:
-            logger.warning("%s: ATR %.1f%% exceeds 50%%, stop floored to 1%% of entry", ticker, atr_pct)
-            stop_price = entry_price * 0.01
 
         # Distance from current price to stop
         if stop_price > 0:

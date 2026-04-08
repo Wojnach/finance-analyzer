@@ -465,6 +465,7 @@ def compute_portfolio_var(
             "var_95_sek": 0.0,
             "var_99_sek": 0.0,
             "cvar_95_sek": 0.0,
+            "cvar_99_sek": 0.0,
             "total_exposure_usd": 0.0,
             "total_exposure_sek": 0.0,
             "n_positions": 0,
