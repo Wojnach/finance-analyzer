@@ -39,6 +39,8 @@ Full codebase adversarial review — Round 3. Find new bugs, verify Round 2 fixe
 - [x] 8 agents running
 - [x] Synthesis → docs/ADVERSARIAL_REVIEW_3_SYNTHESIS.md
 - [x] Fix Tier 1 issues — merged c6829ec, pushed
+- [x] Fix all 4 agent-found subsystems — merged, pushed (6ed9d5f)
+- [x] Adversarial review of Round 3 fixes — 9 new issues found and fixed (861f8d9)
 
 ## Tier 1 Fixes (trivial, high impact)
 
