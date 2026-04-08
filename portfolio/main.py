@@ -506,25 +506,35 @@ def run(force_report=False, active_symbols=None):
 
     max_workers = min(len(active_items), 8)
 
+    # BUG-178: Add timeout to prevent indefinite hangs from stuck tickers
+    _TICKER_POOL_TIMEOUT = 120  # 2x normal cycle time
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ticker") as pool:
         futures = {
             pool.submit(_process_ticker, name, source): name
             for name, source in active_items
         }
-        for future in as_completed(futures):
-            name, result = future.result()
-            if result is not None:
-                tf_data[name] = result["tfs"]
-                prices_usd[name] = result["price"]
-                signals[name] = {
-                    "action": result["action"],
-                    "confidence": result["confidence"],
-                    "indicators": result["ind"],
-                    "extra": result["extra"],
-                }
-                signals_ok += 1
-            else:
-                signals_failed += 1
+        try:
+            for future in as_completed(futures, timeout=_TICKER_POOL_TIMEOUT):
+                name, result = future.result()
+                if result is not None:
+                    tf_data[name] = result["tfs"]
+                    prices_usd[name] = result["price"]
+                    signals[name] = {
+                        "action": result["action"],
+                        "confidence": result["confidence"],
+                        "indicators": result["ind"],
+                        "extra": result["extra"],
+                    }
+                    signals_ok += 1
+                else:
+                    signals_failed += 1
+        except TimeoutError:
+            timed_out = [n for f, n in futures.items() if not f.done()]
+            logger.error("BUG-178: Ticker pool timeout after %ds. Stuck: %s",
+                         _TICKER_POOL_TIMEOUT, timed_out)
+            for f in futures:
+                f.cancel()
+            signals_failed += len(timed_out)
 
     # --- Post-cycle LLM batch flush ---
     # Ministral/Qwen3 cache misses were enqueued during parallel ticker processing.
