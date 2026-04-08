@@ -174,23 +174,23 @@ per-module locks with a `concurrent.futures`-based task queue for I/O operations
 
 | Severity | Count | Source |
 |----------|-------|--------|
-| CRITICAL | 7 | 3 Claude + 2 portfolio-risk + 2 infrastructure |
-| HIGH | 32 | 17 Claude + 3 portfolio-risk + 6 infrastructure + 6 signals-modules |
-| MEDIUM | 28 | 16 Claude + 3 portfolio-risk + 3 infrastructure + 6 signals-modules |
-| LOW | 8 | 3 Claude + 2 portfolio-risk + 3 signals-modules |
-| **Total** | **75** | 39 Claude + 10 portfolio-risk + 11 infrastructure + 15 signals-modules |
+| CRITICAL | 10 | 3 Claude + 2 portfolio-risk + 2 infrastructure + 3 data-external |
+| HIGH | 37 | 17 Claude + 3 portfolio-risk + 6 infrastructure + 6 signals-modules + 5 data-external |
+| MEDIUM | 32 | 16 Claude + 3 portfolio-risk + 3 infrastructure + 6 signals-modules + 4 data-external |
+| LOW | 10 | 3 Claude + 2 portfolio-risk + 3 signals-modules + 2 data-external |
+| **Total** | **89** | 39 Claude + 10 portfolio-risk + 11 infrastructure + 15 signals-modules + 14 data-external |
 
-All three completed agent reviews were **stronger** than the independent review for
+All four completed agent reviews were **stronger** than the independent review for
 their subsystems:
 - **portfolio-risk**: Trade guards never block (C3, C4)
 - **infrastructure**: GPU lock fd leak (CI1), journal non-atomic (CI2)
-- **signals-modules**: Structure all-history bias (HS1), NaN-to-BUY (HS3), dropna(how=all) (HS2)
+- **signals-modules**: Structure all-history bias (HS1), NaN-to-BUY (HS3)
+- **data-external**: Earnings config key broken since day one (CD1), NFP Good Friday (HD1),
+  unguarded API access crashes (CD2, CD3)
 
-Agent win rate: ~75-80% (agents found most important issues per subsystem, especially
-line-by-line indicator math that broad reviews miss).
+Agent win rate: ~80% (agents consistently found line-by-line bugs that broad reviews miss).
 
-**Remaining 5 agents still running**: signals-core, orchestration, metals-core,
-avanza-api, data-external.
+**Remaining 4 agents still running**: signals-core, orchestration, metals-core, avanza-api.
 
 ---
 
