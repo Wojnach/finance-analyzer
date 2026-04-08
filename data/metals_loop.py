@@ -500,6 +500,11 @@ def _verify_position_holdings(page, positions):
 # Load positions (persisted state overrides defaults)
 POSITIONS = _load_positions()
 
+# Session start timestamp — anchors session-relative drawdown peak.
+# Reset to time.time() at main() entry so it reflects the actual startup,
+# not import time (which can differ by seconds if the module is pre-imported).
+_METALS_LOOP_START_TS: float = time.time()
+
 SHORT_INSTRUMENTS = {
     "bear_silver_x5": {
         "name": "BEAR SILVER X5 AVA 12", "ob_id": "2286417", "api_type": "certificate",
@@ -4982,7 +4987,8 @@ def write_context(prices, trigger_reason, tier=2):
     if RISK_AVAILABLE:
         try:
             llm_sigs = get_llm_signals() if LLM_AVAILABLE else None
-            ctx["risk"] = get_risk_summary(POSITIONS, prices, last_signal_data, llm_sigs)
+            ctx["risk"] = get_risk_summary(POSITIONS, prices, last_signal_data, llm_sigs,
+                                           since_ts=_METALS_LOOP_START_TS)
         except Exception as e:
             ctx["risk"] = {"error": str(e)}
 
@@ -5202,7 +5208,7 @@ def check_triggers(prices):
     # Drawdown circuit breaker
     if RISK_AVAILABLE and check_count % 10 == 0 and check_count > 0:
         try:
-            dd = check_portfolio_drawdown(POSITIONS, prices)
+            dd = check_portfolio_drawdown(POSITIONS, prices, since_ts=_METALS_LOOP_START_TS)
             if dd.get("breached"):
                 reasons.append(f"EMERGENCY drawdown breached: {dd['current_drawdown_pct']:.1f}%")
             elif dd.get("level") == "WARNING":
@@ -5489,7 +5495,7 @@ def _build_autonomous_risk_data(positions_data, llm_signals):
     prices = {key: {"bid": pos["bid"]} for key, pos in positions_data.items()}
     risk_data = {}
     try:
-        drawdown = check_portfolio_drawdown(POSITIONS, prices)
+        drawdown = check_portfolio_drawdown(POSITIONS, prices, since_ts=_METALS_LOOP_START_TS)
         drawdown_pct = drawdown.get("current_drawdown_pct")
         if isinstance(drawdown_pct, (int, float)):
             risk_data["drawdown_pct"] = round(drawdown_pct, 2)
@@ -5746,7 +5752,8 @@ def invoke_claude(trigger_reasons, tier=2):
 def main():
     global check_count, last_signal_data, last_invoke_prices, startup_grace
     global claude_proc, claude_log_fh, claude_start, claude_timeout
-    global short_prices, daily_range_stats
+    global short_prices, daily_range_stats, _METALS_LOOP_START_TS
+    _METALS_LOOP_START_TS = time.time()
 
     # Prevent duplicate loop trees from concurrent launcher runs.
     if not acquire_singleton_lock():

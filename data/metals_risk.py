@@ -24,7 +24,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from portfolio.file_utils import atomic_write_json
+from portfolio.file_utils import atomic_write_json, load_jsonl_tail
 
 logger = logging.getLogger(__name__)
 
@@ -467,11 +467,38 @@ def log_portfolio_value(positions, prices):
     return entry
 
 
-def check_portfolio_drawdown(positions, prices):
+def _parse_entry_ts(entry):
+    """Parse a history entry's ``ts`` field into a Unix timestamp.
+
+    Entries log ISO-8601 strings (e.g. ``2026-04-08T18:32:46.968281+00:00``).
+    Returns ``None`` if the field is missing or unparseable — callers should
+    skip such entries rather than crash the loop.
+    """
+    ts = entry.get("ts")
+    if not ts:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(ts).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def check_portfolio_drawdown(positions, prices, since_ts=None):
     """Check if portfolio has breached drawdown limits.
 
+    Args:
+        positions: dict of position key -> state dict (``active``, ``units``, ``entry``).
+        prices: dict of position key -> price dict (``bid``).
+        since_ts: optional Unix timestamp. When provided, only history entries
+            whose ``ts`` is ``>= since_ts`` are considered when computing the
+            peak. Use this to make the drawdown session-relative so an old
+            peak from a previous (larger) session does not trigger a false
+            EMERGENCY breach. If no entries fall within the window, the peak
+            falls back to the current total value (drawdown = 0%). When
+            ``None``, behaviour is unchanged — the full history is scanned.
+
     Returns:
-        dict with drawdown status and metrics
+        dict with drawdown status and metrics.
     """
     total_val = 0
     total_inv = 0
@@ -490,16 +517,35 @@ def check_portfolio_drawdown(positions, prices):
 
     # Find peak from history
     peak_value = total_inv  # start at invested amount
+    window_had_entries = False
     try:
-        if os.path.exists(HISTORY_FILE):
-            with open(HISTORY_FILE, encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        entry = json.loads(line)
-                        if entry.get("total_value", 0) > peak_value:
-                            peak_value = entry["total_value"]
-                    except Exception:
-                        pass
+        if since_ts is None:
+            # Legacy behaviour: scan the whole file (backwards compatible).
+            if os.path.exists(HISTORY_FILE):
+                with open(HISTORY_FILE, encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            entry = json.loads(line)
+                            if entry.get("total_value", 0) > peak_value:
+                                peak_value = entry["total_value"]
+                        except Exception:
+                            pass
+        else:
+            # Session-relative: only consider entries recorded since session start.
+            # Use tail reader to avoid slurping huge historical files.
+            entries = load_jsonl_tail(HISTORY_FILE, max_entries=5000)
+            for entry in entries:
+                entry_ts = _parse_entry_ts(entry)
+                if entry_ts is None or entry_ts < since_ts:
+                    continue
+                window_had_entries = True
+                val = entry.get("total_value", 0)
+                if val > peak_value:
+                    peak_value = val
+            if not window_had_entries:
+                # Fresh session, no history yet — anchor peak to current value
+                # so drawdown reports 0% until we have real data points.
+                peak_value = total_val
     except Exception:
         pass
 
@@ -532,8 +578,17 @@ def check_portfolio_drawdown(positions, prices):
 # Combined Risk Summary (for metals_context.json)
 # ---------------------------------------------------------------------------
 
-def get_risk_summary(positions, prices, signal_data=None, llm_signals=None):
+def get_risk_summary(positions, prices, signal_data=None, llm_signals=None, since_ts=None):
     """Generate a compact risk summary for inclusion in metals_context.json.
+
+    Args:
+        positions: position state dict.
+        prices: price dict.
+        signal_data: optional signal snapshot.
+        llm_signals: optional LLM signal snapshot.
+        since_ts: optional Unix timestamp. Forwarded to
+            :func:`check_portfolio_drawdown` so the drawdown peak is
+            session-relative instead of all-time.
 
     Returns dict with:
     - monte_carlo: per-position simulation results
@@ -568,7 +623,7 @@ def get_risk_summary(positions, prices, signal_data=None, llm_signals=None):
 
     # 2. Drawdown check
     try:
-        result["drawdown"] = check_portfolio_drawdown(positions, prices)
+        result["drawdown"] = check_portfolio_drawdown(positions, prices, since_ts=since_ts)
     except Exception as e:
         result["drawdown"] = {"error": str(e)}
 
