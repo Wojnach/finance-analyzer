@@ -138,6 +138,9 @@ def _register_defaults():
     # Metals cross-asset — copper, GVZ, G/S ratio, SPY, oil (metals only); capped at 0.7
     register_enhanced("metals_cross_asset", "portfolio.signals.metals_cross_asset",
                       "compute_metals_cross_asset_signal", requires_context=True, max_confidence=0.7)
+    # COT positioning — CFTC speculative/commercial positioning, contrarian (metals only); capped at 0.7
+    register_enhanced("cot_positioning", "portfolio.signals.cot_positioning",
+                      "compute_cot_positioning_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()

@@ -63,7 +63,7 @@ YF_MAP = {t: t for t in STOCK_SYMBOLS}
 
 # Signals that are force-HOLD (disabled due to poor accuracy).
 # Kept in SIGNAL_NAMES for historical tracking but excluded from active reports.
-DISABLED_SIGNALS = {"ml", "funding", "crypto_macro"}
+DISABLED_SIGNALS = {"ml", "funding", "crypto_macro", "cot_positioning"}  # cot_positioning: pending live validation
 
 # Signals that require local GPU inference.
 # Skipped for US stocks outside market hours to save GPU resources.
@@ -106,4 +106,5 @@ SIGNAL_NAMES = [
     "crypto_macro",
     "orderbook_flow",
     "metals_cross_asset",
+    "cot_positioning",
 ]
