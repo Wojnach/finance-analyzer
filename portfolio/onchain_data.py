@@ -204,6 +204,26 @@ def get_onchain_data():
 
     Returns dict with all available metrics, or None if unavailable.
     """
+    # H12/DC-R3-5: On restart, seed the in-memory cache from the persistent cache
+    # if it is still fresh. This avoids firing 6 BGeometrics API calls immediately
+    # after every process restart (burns the 15 req/day budget).
+    persistent = load_json(CACHE_FILE, default={})
+    if persistent:
+        cache_ts = persistent.get("ts", 0) or persistent.get("_fetched_at", 0)
+        if time.time() - cache_ts < ONCHAIN_TTL:
+            # Still fresh — pre-populate the in-memory cache so _cached() returns
+            # immediately without hitting the API.
+            from portfolio.shared_state import _cache_lock, _tool_cache
+            with _cache_lock:
+                if "onchain_btc" not in _tool_cache:
+                    _tool_cache["onchain_btc"] = {
+                        "data": persistent,
+                        "time": cache_ts,
+                        "ttl": ONCHAIN_TTL,
+                    }
+                    logger.debug("On-chain: seeded in-memory cache from persistent (age %.0fs)",
+                                 time.time() - cache_ts)
+
     token = _load_config_token()
     if not token:
         # Try persistent cache even without token

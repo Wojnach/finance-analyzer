@@ -261,8 +261,11 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
             "sentiments": dict(sentiments),
             "time": time.time(),
         }
+        # C4/NEW-2: only update last_trigger_date when a real trigger fires, so that
+        # classify_tier() can correctly detect the first real trigger of the day.
+        state["last_trigger_date"] = _today_str()
 
-    # Track today_date for first-of-day detection
+    # Track today_date for other purposes
     state["today_date"] = _today_str()
 
     state["sustained_counts"] = sustained
@@ -286,6 +289,9 @@ def classify_tier(reasons, state=None):
     Tier 3 (Full Review): periodic review, F&G extreme, first of day.
     Tier 2 (Signal Analysis): new consensus, price moves, post-trade, signal flips.
     Tier 1 (Quick Check): sentiment noise, repeated triggers.
+
+    M10/NEW-4: pass state=<dict> to avoid a redundant disk read when the caller
+    already has the trigger state loaded. Falls back to loading from file if None.
     """
     if state is None:
         state = _load_state()
@@ -306,8 +312,10 @@ def classify_tier(reasons, state=None):
         return 1  # T1 quick check only — save T3 budget for market hours
     if any("F&G crossed" in r for r in reasons):
         return 3
-    if state.get("today_date") != _today_str():
-        return 3  # first invocation of the day
+    # C4/NEW-2: use last_trigger_date (set only on real triggers) instead of
+    # today_date (set every cycle) so the first-of-day T3 check works correctly.
+    if state.get("last_trigger_date") != _today_str():
+        return 3  # first real trigger of the day
 
     # Tier 2: new actionable signals
     tier2_patterns = ["consensus", "moved", "post-trade", "flipped"]
@@ -322,7 +330,7 @@ def update_tier_state(tier, state=None):
     """Update trigger state after a tier classification.
 
     Called by the main loop after classify_tier() to persist tier-specific state.
-    Accepts an optional state dict to avoid re-reading trigger_state.json.
+    M10/NEW-4: accepts an optional state dict to avoid re-reading trigger_state.json.
     """
     if state is None:
         state = _load_state()
