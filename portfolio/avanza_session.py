@@ -795,6 +795,19 @@ def cancel_all_stop_losses_for(
         time.sleep(poll_interval)
 
     elapsed = time.monotonic() - started
+
+    # CODEX-7 finding 1: critical filter — a DELETE-accepted id can still
+    # be in `remaining` if the verification poll observed it alive
+    # (broker rejected the cancel late, or the DELETE was acknowledged
+    # but never propagated). The set we expose to callers as the
+    # rollback set MUST be the VERIFIED-cleared set:
+    #     verified = cancelled - remaining
+    # Re-arming a stop that is still alive would create a duplicate
+    # at the broker, recreating the exact over-encumbered failure mode
+    # this whole module exists to prevent.
+    remaining_set = set(remaining)
+    cancelled = [c for c in cancelled if c not in remaining_set]
+
     if not remaining and not poll_read_failed:
         status = "SUCCESS"
         logger.info(
@@ -804,7 +817,7 @@ def cancel_all_stop_losses_for(
     elif cancelled and not poll_read_failed:
         status = "PARTIAL"
         logger.warning(
-            "cancel_all_stop_losses_for(%s): PARTIAL — cancelled=%s remaining=%s elapsed=%.2fs",
+            "cancel_all_stop_losses_for(%s): PARTIAL — verified_cancelled=%s remaining=%s elapsed=%.2fs",
             target_ob, cancelled, remaining, elapsed,
         )
     else:
@@ -813,12 +826,10 @@ def cancel_all_stop_losses_for(
             "cancel_all_stop_losses_for(%s): FAILED — cancelled=%s remaining=%s read_failed=%s",
             target_ob, cancelled, remaining, poll_read_failed,
         )
-        # Critical: when the verification poll failed, we don't actually
-        # know which DELETEs took effect. The list of DELETE-accepted ids
-        # in `cancelled` is broker-acknowledged but NOT verified-cleared.
-        # Treating those as rollback-safe would let callers re-arm stops
-        # that may still be live, duplicating encumbered volume on the
-        # next sell attempt. Drop the unverified ids on poll failure.
+        # When the verification poll failed, we don't actually know which
+        # DELETEs took effect. The list of DELETE-accepted ids is
+        # broker-acknowledged but NOT verified-cleared. Drop them all to
+        # be safe on the rollback side.
         if poll_read_failed:
             cancelled = []
     return {

@@ -2159,6 +2159,8 @@ def _fish_engine_execute_sell(decision):
         log("[fish] SKIP SELL: _loop_page not initialized yet")
         return
 
+    sl_snapshot = []
+    sell_acknowledged = False
     try:
         price_data = fetch_price_with_fallback(_loop_page, ob_id)
         if not price_data:
@@ -2183,9 +2185,11 @@ def _fish_engine_execute_sell(decision):
             )
             # Re-arm whatever was partially cancelled — best effort.
             _rearm_stops_after_failed_sell(ob_id, sl_snapshot)
+            sl_snapshot = []  # don't double-rearm in finally
             return
 
         success, result = place_order(_loop_page, ACCOUNT_ID, ob_id, "SELL", bid, volume)
+        sell_acknowledged = True  # we got a response, success or fail
         entry_price = pos.get("entry_cert", 0)
         pnl = (bid - entry_price) * volume
         nm = "BULL" if pos.get("direction") == "LONG" else "BEAR"
@@ -2194,15 +2198,29 @@ def _fish_engine_execute_sell(decision):
         if success:
             _fish_engine.confirm_exit(pnl, exit_cert_price=bid, exit_reason=reason)
             send_telegram(f"FISH EXIT: {nm} {volume}u@{bid} P&L:{pnl:+.0f} SEK ({reason})")
+            sl_snapshot = []  # sell filled, no rollback needed
         else:
             log(f"[fish] SELL FAILED: {result}")
             send_telegram(f"FISH SELL BLOCKED: {volume}u {nm}@{bid} ({reason}). Manual intervention needed!")
             # Sell failed → restore the stops we just cancelled so the
             # position is not left naked at the broker.
             _rearm_stops_after_failed_sell(ob_id, sl_snapshot)
+            sl_snapshot = []  # don't double-rearm in finally
     except Exception as e:
         log(f"[fish] SELL error: {e}")
         send_telegram(f"FISH SELL ERROR: {e}. Position may be stuck!")
+    finally:
+        # CODEX-7 finding 2: if anything raised AFTER stops were cancelled
+        # but BEFORE the sell was acknowledged (or even after acknowledgment
+        # if the success-handling path raised), the position would be left
+        # naked. The finally block ensures rollback is always attempted
+        # when sl_snapshot still references uncommitted state.
+        if sl_snapshot:
+            log(f"[fish] finally: re-arming {len(sl_snapshot)} stop(s) after exception path")
+            try:
+                _rearm_stops_after_failed_sell(ob_id, sl_snapshot)
+            except Exception as fe:
+                log(f"[fish] finally re-arm raised: {fe}")
 
 
 # ---------------------------------------------------------------------------
@@ -3610,14 +3628,33 @@ def process_trade_queue(page):
                 )
                 # Re-arm whatever was partially cancelled.
                 _rearm_stops_after_failed_sell(order["ob_id"], sl_snapshot_for_rollback)
+                sl_snapshot_for_rollback = []
                 continue
 
-        success, result = place_order(
-            page, ACCOUNT_ID, order["ob_id"], order["action"],
-            order["price"], order["volume"],
-        )
-        order["result"] = result
-        order["executed_ts"] = now.isoformat()
+        # CODEX-7 finding 2: place_order may raise. Wrap the call in a
+        # try/finally so the rollback always runs if stops were cancelled
+        # but the sell never reached an acknowledged state.
+        try:
+            success, result = place_order(
+                page, ACCOUNT_ID, order["ob_id"], order["action"],
+                order["price"], order["volume"],
+            )
+            order["result"] = result
+            order["executed_ts"] = now.isoformat()
+        except Exception as place_exc:
+            log(f"  Order {order_id_short}: place_order raised: {place_exc}")
+            order["status"] = "failed"
+            order["result"] = {"error": f"place_order_raised: {place_exc}"}
+            order["executed_ts"] = now.isoformat()
+            send_telegram(
+                f"*TRADE ERROR* {action} {warrant_name}\n"
+                f"place_order raised: {place_exc}\n"
+                f"_Stops being restored from rollback snapshot._"
+            )
+            if action == "SELL" and sl_snapshot_for_rollback:
+                _rearm_stops_after_failed_sell(order["ob_id"], sl_snapshot_for_rollback)
+                sl_snapshot_for_rollback = []
+            continue
 
         if success:
             order["status"] = "filled"
@@ -4371,11 +4408,18 @@ def _rollback_spike_order_and_restore(spike_order_id, ob_id, original_snapshot):
     matching protection on the remainder. The rollback returns the
     position to its pre-spike state.
 
-    Best-effort: failures are logged + alerted but cannot be retried
-    inside this call (we don't have access to the loop state). The
-    operator is told via Telegram that manual recovery may be needed.
+    CODEX-7 finding 3: only restore the original snapshot when the
+    cancel is positively confirmed. If cancel is uncertain, restoring
+    full stops on top of a still-live spike SELL would create the same
+    over-encumbered state we're trying to roll back from. Instead, we
+    re-query the order state to verify the spike is gone. If we still
+    cannot confirm, we leave the position in its current
+    (resized-stops, no full stops) state and alert the operator for
+    manual recovery — strictly worse than full coverage but strictly
+    better than over-encumbered.
     """
     # Cancel the spike LIMIT order via the canonical POST cancel.
+    cancel_ok = False
     try:
         from portfolio.avanza_session import cancel_order
         cancel_result = cancel_order(str(spike_order_id), account_id=ACCOUNT_ID)
@@ -4386,22 +4430,55 @@ def _rollback_spike_order_and_restore(spike_order_id, ob_id, original_snapshot):
         log(f"[spike] rollback cancel raised for {spike_order_id}: {e}")
         cancel_ok = False
 
-    if not cancel_ok:
-        try:
-            send_telegram(
-                f"*SPIKE ROLLBACK INCOMPLETE* order={spike_order_id}\n"
-                f"Could not cancel the just-placed spike sell. The order "
-                f"may still be live AND the original stops are gone. "
-                f"Manual cancel + stop restore required."
-            )
-        except Exception:
-            pass
+    if cancel_ok:
+        # Confirmed cancel — safe to restore full original stops.
+        if original_snapshot:
+            _rearm_stops_after_failed_sell(ob_id, original_snapshot)
+        return
 
-    # Restore the original full-volume stops regardless of cancel outcome —
-    # if the cancel failed but the order still fills, we want SOME protection
-    # on the position rather than none.
-    if original_snapshot:
-        _rearm_stops_after_failed_sell(ob_id, original_snapshot)
+    # Cancel was not confirmed. Verify by checking live order state.
+    # If the order is in a terminal state (CANCELLED/REJECTED/FILLED), the
+    # encumbrance is gone and we can restore originals. Otherwise we
+    # cannot safely restore — leave the operator a clear escalation path.
+    spike_terminal = False
+    try:
+        from portfolio.avanza_session import get_open_orders
+        open_orders = get_open_orders()
+        # If the order is no longer in the open list, treat as terminal.
+        spike_terminal = not any(
+            str(o.get("orderId", "")) == str(spike_order_id) for o in open_orders
+        )
+    except Exception as e:
+        log(f"[spike] rollback verification raised for {spike_order_id}: {e}")
+        spike_terminal = False
+
+    if spike_terminal:
+        log(
+            f"[spike] rollback cancel returned non-SUCCESS but order "
+            f"{spike_order_id} is no longer open — proceeding with restore"
+        )
+        if original_snapshot:
+            _rearm_stops_after_failed_sell(ob_id, original_snapshot)
+        return
+
+    # Could not confirm the spike is gone — alert and skip restore. The
+    # position keeps its resized stops (partial protection) which is
+    # strictly safer than restoring originals on top of a live spike sell.
+    log(
+        f"[spike] rollback cancel UNCONFIRMED for {spike_order_id}; "
+        f"leaving position with resized stops + live spike order. "
+        f"Manual recovery required."
+    )
+    try:
+        send_telegram(
+            f"*SPIKE ROLLBACK INCOMPLETE* order={spike_order_id}\n"
+            f"Could not confirm the just-placed spike sell is cancelled. "
+            f"Position has resized stops (partial protection). Original "
+            f"full-volume stops NOT restored to avoid over-encumbrance. "
+            f"Manual cancel + stop restore required."
+        )
+    except Exception:
+        pass
 
 
 def _resize_snapshot_volume(snapshot, new_volume: int) -> list:

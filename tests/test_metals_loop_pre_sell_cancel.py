@@ -462,6 +462,88 @@ class TestEnsureStopsCancelledBeforeSell:
         assert all(s["id"] != "C" for s in snap)
 
 
+class TestFishEngineExceptionSafety:
+    """Tests for codex round-7 finding 2: _fish_engine_execute_sell must
+    re-arm stops in the finally block if anything raises after the
+    cancel succeeded."""
+
+    def _setup_fish_engine(self, monkeypatch):
+        import metals_loop as mod
+        # Inject a fake fish engine with an active position
+        class FakeEngine:
+            has_position = True
+            position = {
+                "ob_id": "OB1",
+                "volume": 100,
+                "direction": "LONG",
+                "entry_cert": 1.0,
+            }
+            def confirm_exit(self, pnl, exit_cert_price, exit_reason):
+                pass
+        monkeypatch.setattr(mod, "_fish_engine", FakeEngine())
+        monkeypatch.setattr(mod, "_loop_page", object())
+        monkeypatch.setattr(mod, "send_telegram", lambda *a, **kw: None)
+        return mod
+
+    def test_finally_rearms_when_place_order_raises(self, monkeypatch):
+        """If place_order raises after we cancelled stops, the finally
+        block must re-arm the snapshot to avoid leaving the position naked."""
+        mod = self._setup_fish_engine(monkeypatch)
+        captured_snap = [{"id": "S1", "orderbook": {"id": "OB1"}, "trigger": {"value": 1.0}, "order": {"price": 1.0, "volume": 100}}]
+
+        monkeypatch.setattr(
+            mod, "_ensure_stops_cancelled_before_sell",
+            lambda page, ob_id: (True, captured_snap),
+        )
+        monkeypatch.setattr(
+            mod, "fetch_price_with_fallback",
+            lambda page, ob_id: {"bid": 1.5},
+        )
+        def boom(*a, **kw):
+            raise RuntimeError("network error")
+        monkeypatch.setattr(mod, "place_order", boom)
+
+        rearm_calls = []
+        monkeypatch.setattr(
+            mod, "_rearm_stops_after_failed_sell",
+            lambda ob_id, snap: rearm_calls.append((ob_id, snap)),
+        )
+
+        mod._fish_engine_execute_sell({"exit_reason": "test"})
+        # finally block must have invoked re-arm with the snapshot
+        assert len(rearm_calls) == 1
+        assert rearm_calls[0][0] == "OB1"
+        assert rearm_calls[0][1] == captured_snap
+
+    def test_no_double_rearm_on_explicit_path(self, monkeypatch):
+        """When the explicit failure branch already re-armed, the finally
+        block must NOT re-arm again."""
+        mod = self._setup_fish_engine(monkeypatch)
+        snap = [{"id": "S1", "orderbook": {"id": "OB1"}, "trigger": {"value": 1.0}, "order": {"price": 1.0, "volume": 100}}]
+
+        monkeypatch.setattr(
+            mod, "_ensure_stops_cancelled_before_sell",
+            lambda page, ob_id: (True, snap),
+        )
+        monkeypatch.setattr(
+            mod, "fetch_price_with_fallback",
+            lambda page, ob_id: {"bid": 1.5},
+        )
+        # place_order returns failure (no exception)
+        monkeypatch.setattr(mod, "place_order",
+                            lambda *a, **kw: (False, {"error": "rejected"}))
+
+        rearm_calls = []
+        monkeypatch.setattr(
+            mod, "_rearm_stops_after_failed_sell",
+            lambda ob_id, snap: rearm_calls.append((ob_id, snap)),
+        )
+
+        mod._fish_engine_execute_sell({"exit_reason": "test"})
+        # Exactly ONE re-arm — explicit failure branch only, finally is no-op
+        assert len(rearm_calls) == 1
+
+
 class TestRearmAfterFailedSell:
     """Tests for _rearm_stops_after_failed_sell — the rollback safety net."""
 

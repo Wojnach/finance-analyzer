@@ -167,6 +167,32 @@ class TestCancelAllStopLossesFor:
         assert result["remaining"] == []  # OB_OTHER's stop is not "remaining" for OB1
         assert mock_del.call_count == 2  # OB_OTHER untouched
 
+    def test_partial_filters_cancelled_to_verified_only(self):
+        """Codex round-7 finding 1: a stop id can appear in BOTH `cancelled`
+        (DELETE accepted) AND `remaining` (still alive in poll). The
+        returned `cancelled` MUST be filtered to only verified-cleared
+        ids — re-arming a still-alive stop creates a duplicate."""
+        # Server: 2 stops at start. Issue DELETE on both. Verification
+        # poll still shows S2 alive (broker rejected the cancel late).
+        # Each poll re-runs until timeout — return same state every time.
+        def fake_strict(*, _state={"calls": 0}):
+            _state["calls"] += 1
+            if _state["calls"] == 1:
+                return [_sl("S1", "OB1"), _sl("S2", "OB1")]
+            return [_sl("S2", "OB1")]  # S1 gone, S2 still alive — every subsequent poll
+        with patch("portfolio.avanza_session.get_stop_losses_strict", side_effect=fake_strict):
+            with patch("portfolio.avanza_session.api_delete", return_value={"http_status": 200, "ok": True}):
+                with patch("portfolio.avanza_session.time.sleep"):
+                    # Force timeout quickly: monotonic() jumps past max_wait on second call
+                    with patch("portfolio.avanza_session.time.monotonic",
+                               side_effect=[0.0, 0.0, 99.0, 99.0, 99.0]):
+                        result = avs.cancel_all_stop_losses_for("OB1", max_wait=3.0)
+        assert result["status"] == "PARTIAL"
+        # CRITICAL: cancelled must NOT include S2 — it's still alive
+        assert "S2" not in result["cancelled"]
+        assert result["cancelled"] == ["S1"]
+        assert result["remaining"] == ["S2"]
+
     def test_filters_by_account_id_when_specified(self):
         """SLs across multiple accounts → only target account is touched."""
         stops_state = [
@@ -199,17 +225,43 @@ class TestCancelAllStopLossesFor:
         # Should have slept at least twice (between the 3 stale polls)
         assert mock_sleep.call_count >= 2
 
-    def test_timeout_returns_partial(self):
-        """Cancel succeeded but stop never disappears from list → PARTIAL."""
+    def test_timeout_with_one_stop_returns_failed(self):
+        """Cancel API accepted DELETE, but stop never disappears from list.
+        After codex round-7 filter, S1 is in BOTH `cancelled` (DELETE OK) and
+        `remaining` (still alive), so the verified-cleared set is empty.
+        Status downgrades from PARTIAL to FAILED — no stops were verified
+        cleared, even though one DELETE was accepted."""
         # Always shows the stop, regardless of how many times we poll
         with patch("portfolio.avanza_session.get_stop_losses_strict", return_value=[_sl("S1", "OB1")]):
             with patch("portfolio.avanza_session.api_delete", return_value={"http_status": 200, "ok": True}):
                 with patch("portfolio.avanza_session.time.sleep"):
                     with patch("portfolio.avanza_session.time.monotonic", side_effect=[0.0, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]):
                         result = avs.cancel_all_stop_losses_for("OB1", max_wait=3.0, poll_interval=0.5)
-        assert result["status"] == "PARTIAL"
-        assert result["cancelled"] == ["S1"]
+        # FAILED, not PARTIAL — S1 was filtered out of cancelled because
+        # it's still in remaining
+        assert result["status"] == "FAILED"
+        assert result["cancelled"] == []
         assert result["remaining"] == ["S1"]
+
+    def test_partial_when_some_verified_cleared(self):
+        """Mix: 2 stops at start, 1 cleared verified, 1 still alive →
+        cancelled = [verified_one], remaining = [still_alive_one],
+        status = PARTIAL."""
+        # Each poll returns the same partial state until timeout
+        def fake_strict(*, _state={"calls": 0}):
+            _state["calls"] += 1
+            if _state["calls"] == 1:
+                return [_sl("S1", "OB1"), _sl("S2", "OB1")]
+            return [_sl("S2", "OB1")]
+        with patch("portfolio.avanza_session.get_stop_losses_strict", side_effect=fake_strict):
+            with patch("portfolio.avanza_session.api_delete", return_value={"http_status": 200, "ok": True}):
+                with patch("portfolio.avanza_session.time.sleep"):
+                    with patch("portfolio.avanza_session.time.monotonic",
+                               side_effect=[0.0, 0.0, 99.0, 99.0, 99.0]):
+                        result = avs.cancel_all_stop_losses_for("OB1", max_wait=1.0)
+        assert result["status"] == "PARTIAL"
+        assert result["cancelled"] == ["S1"]  # S2 filtered out
+        assert result["remaining"] == ["S2"]
 
     def test_timeout_no_cancels_returns_failed(self):
         """Every cancel returned 500 AND the stop never cleared → FAILED."""
