@@ -649,12 +649,18 @@ def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
             blended = w * rc_acc + (1 - w) * at_acc
         else:
             blended = at_acc
-        accuracy_data[sig_name] = {
+        result = {
             "accuracy": blended,
             "total": max(at_samples, rc_samples),
             "correct": at.get("correct", 0),
             "pct": round(blended * 100, 1),
         }
+        # Carry through directional accuracy for directional gating.
+        # Use all-time directional accuracy (more stable, larger samples).
+        for key in ("buy_accuracy", "sell_accuracy", "total_buy", "total_sell"):
+            if key in at:
+                result[key] = at[key]
+        accuracy_data[sig_name] = result
     return accuracy_data
 
 

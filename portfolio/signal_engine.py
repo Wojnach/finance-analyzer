@@ -36,6 +36,13 @@ _LOCAL_MODEL_LOOKBACK_DAYS = 30
 ACCURACY_GATE_THRESHOLD = 0.45
 ACCURACY_GATE_MIN_SAMPLES = 30  # need enough data before gating
 
+# Directional accuracy gate: signals whose BUY or SELL accuracy is below this
+# threshold get that direction force-HOLD'd while the other direction can still
+# vote.  E.g., qwen3 BUY=30% (gated) but SELL=74.2% (votes normally).
+# Uses the same min-samples threshold as the overall gate.
+_DIRECTIONAL_GATE_THRESHOLD = 0.35
+_DIRECTIONAL_GATE_MIN_SAMPLES = 30
+
 # Adaptive recency blend: when recent accuracy diverges from all-time by more
 # than this threshold, increase recent weight for faster regime adaptation.
 # Normal: 70% recent + 30% all-time. Fast: 90% recent + 10% all-time.
@@ -602,32 +609,28 @@ def _get_correlation_groups() -> dict[str, frozenset[str]]:
 
 
 # Static correlation groups (fallback when dynamic computation unavailable).
+# Updated 2026-04-08: empirical audit of 200 recent signal_log entries.
 _STATIC_CORRELATION_GROUPS = {
     # BUG-153: Split low_activity_timing — calendar+econ_calendar are excellent
     # (62.8%/86.8%) while forecast+futures_flow are broken (36.1%/33.3%).
-    # Mixing them risks forecast becoming leader and suppressing calendar.
     "low_activity_timing": frozenset({"calendar", "econ_calendar"}),
-    "rare_technical": frozenset({"volatility_sig", "oscillators"}),
+    # 2026-04-08: volume+volatility_sig agree 94.9%, vol_sig+oscillators similar.
+    # structure moved here (94.2% with volatility_sig, 88.6% with heikin_ashi).
+    "volatility_cluster": frozenset({"volatility_sig", "oscillators", "volume", "structure"}),
     # Discovered 2026-03-27: ema/trend corr=0.55, all share SELL bias (37-40%).
     # 2026-04-01: volume_flow added (corr +0.511 with heikin_ashi, permanent SELL lean)
     # 2026-04-07: macro_regime added (corr +0.520 with trend, both follow 200-SMA)
     "trend_direction": frozenset({"ema", "trend", "heikin_ashi", "volume_flow", "macro_regime"}),
-    # 2026-04-01 audit: fear_greed + macro_regime = +1.000 correlation (identical vote).
-    # structure = +0.928 with both. sentiment/news_event degrade together with external
-    # data quality. All external/macro-dependent signals in one group.
-    # 2026-04-07: macro_regime moved to trend_direction (better correlation fit).
+    # 2026-04-08: sentiment+momentum_factors agree 94.3%. sentiment+calendar 99.2%.
+    # fear_greed/news_event degrade together. momentum_factors added.
     "macro_external": frozenset({
-        "fear_greed", "structure",
-        "sentiment", "news_event",
+        "fear_greed", "sentiment", "news_event", "momentum_factors",
     }),
     # 2026-04-04: BUG-162 — candlestick-fibonacci correlation 0.708 on BTC.
-    # Both detect similar price patterns (retracement levels vs candle formations).
-    # In ranging regime, fibonacci is the leader (68.2% recent); candlestick (44.5%)
-    # gets 0.3x penalty to prevent double-counting.
     "pattern_based": frozenset({"candlestick", "fibonacci"}),
-    # 2026-04-07: mean_reversion + rsi correlation r=0.537 — both use RSI-based
-    # logic (RSI(2/3) in mean_reversion, RSI(14) in core rsi signal).
-    "rsi_based": frozenset({"mean_reversion", "rsi"}),
+    # 2026-04-08: rsi+bb agree 100%, bb+mean_reversion 100%, bb+momentum 98.8%.
+    # All use similar RSI/oversold-overbought logic. bb and momentum added.
+    "momentum_cluster": frozenset({"mean_reversion", "rsi", "bb", "momentum"}),
 }
 # Public alias for backward compatibility (used by tests and reporting)
 CORRELATION_GROUPS = _STATIC_CORRELATION_GROUPS
@@ -766,6 +769,18 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         # Accuracy gate: skip signals that are below threshold with enough data
         if samples >= ACCURACY_GATE_MIN_SAMPLES and acc < gate:
             gated_signals.append(signal_name)
+            continue
+        # Directional accuracy gate: gate individual BUY/SELL direction when
+        # direction-specific accuracy is very poor, even if overall accuracy passes.
+        # E.g., qwen3 overall=59.8% passes, but BUY=30.0% → gate BUY only.
+        if vote == "BUY":
+            dir_acc = stats.get("buy_accuracy", acc)
+            dir_n = stats.get("total_buy", 0)
+        else:
+            dir_acc = stats.get("sell_accuracy", acc)
+            dir_n = stats.get("total_sell", 0)
+        if dir_n >= _DIRECTIONAL_GATE_MIN_SAMPLES and dir_acc < _DIRECTIONAL_GATE_THRESHOLD:
+            gated_signals.append(f"{signal_name}_{vote}")
             continue
         # Weight = accuracy (or 0.5 default for new signals with insufficient data)
         weight = acc if samples >= 20 else 0.5

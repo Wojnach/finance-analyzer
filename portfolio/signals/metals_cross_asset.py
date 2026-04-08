@@ -59,14 +59,22 @@ def _get_cross_asset_context(ticker: str) -> dict | None:
 
 
 def compute_metals_cross_asset_signal(
-    df: Any, *, ticker: str = "", config: dict | None = None,
-    macro: dict | None = None, **kwargs,
+    df: Any, context: dict | None = None, **kwargs,
 ) -> dict:
-    """Compute cross-asset composite signal for metals."""
+    """Compute cross-asset composite signal for metals.
+
+    Args:
+        df: OHLCV DataFrame (unused — cross-asset data fetched separately).
+        context: dict with keys {ticker, config, macro, regime}.
+    """
     empty = {
         "action": "HOLD", "confidence": 0.0,
         "sub_signals": {}, "indicators": {},
     }
+
+    context = context or {}
+    ticker = context.get("ticker", kwargs.get("ticker", ""))
+    macro = context.get("macro")
 
     if ticker not in _METALS_TICKERS:
         return empty

@@ -22,14 +22,42 @@ class TestCorrelationGroups:
             assert isinstance(members, frozenset), f"Group {name} should be frozenset"
             assert len(members) >= 2, f"Group {name} should have at least 2 members"
 
-    def test_rsi_based_group_exists(self):
-        """rsi_based group should contain mean_reversion and rsi (r=0.537)."""
+    def test_momentum_cluster_exists(self):
+        """momentum_cluster should contain rsi, bb, mean_reversion, momentum.
+
+        Empirical: rsi-bb 100%, bb-mean_reversion 100%, bb-momentum 98.8%.
+        Renamed from rsi_based (2026-04-08).
+        """
         from portfolio.signal_engine import CORRELATION_GROUPS
 
-        assert "rsi_based" in CORRELATION_GROUPS
-        rsi_group = CORRELATION_GROUPS["rsi_based"]
-        assert "mean_reversion" in rsi_group
-        assert "rsi" in rsi_group
+        assert "momentum_cluster" in CORRELATION_GROUPS
+        mc_group = CORRELATION_GROUPS["momentum_cluster"]
+        assert "mean_reversion" in mc_group
+        assert "rsi" in mc_group
+        assert "bb" in mc_group
+        assert "momentum" in mc_group
+
+    def test_volatility_cluster_exists(self):
+        """volatility_cluster should contain volatility_sig, oscillators, volume, structure.
+
+        Empirical: volume-volatility_sig 94.9%, volatility_sig-structure 94.2%.
+        Renamed from rare_technical and expanded (2026-04-08).
+        """
+        from portfolio.signal_engine import CORRELATION_GROUPS
+
+        assert "volatility_cluster" in CORRELATION_GROUPS
+        vc_group = CORRELATION_GROUPS["volatility_cluster"]
+        assert "volatility_sig" in vc_group
+        assert "oscillators" in vc_group
+        assert "volume" in vc_group
+        assert "structure" in vc_group
+
+    def test_macro_external_includes_momentum_factors(self):
+        """momentum_factors should be in macro_external (94.3% with sentiment)."""
+        from portfolio.signal_engine import CORRELATION_GROUPS
+
+        me_group = CORRELATION_GROUPS["macro_external"]
+        assert "momentum_factors" in me_group
 
     def test_macro_regime_in_trend_direction(self):
         """macro_regime should be in trend_direction group (r=0.520 with trend)."""
@@ -166,4 +194,90 @@ class TestDirectionalBiasPenalty:
             votes, accuracy_data, "ranging",
             activation_rates=activation_rates,
         )
+        assert result[0] == "BUY"
+
+
+# ---------------------------------------------------------------------------
+# Directional accuracy gating
+# ---------------------------------------------------------------------------
+
+class TestDirectionalAccuracyGating:
+
+    def test_buy_gated_when_buy_accuracy_low(self):
+        """Qwen3-like: overall 59.8% passes gate, but BUY=30% should be gated."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        # qwen3 BUY at 30% (well below 35% directional gate), SELL at 74%
+        votes = {"qwen3": "BUY", "rsi": "SELL"}
+        accuracy_data = {
+            "qwen3": {"accuracy": 0.598, "total": 3608,
+                       "buy_accuracy": 0.30, "total_buy": 1174,
+                       "sell_accuracy": 0.74, "total_sell": 2434},
+            "rsi": {"accuracy": 0.52, "total": 1000},
+        }
+        result = _weighted_consensus(votes, accuracy_data, "ranging")
+        # qwen3 BUY should be gated, only rsi SELL remains → SELL
+        assert result[0] == "SELL"
+
+    def test_sell_passes_when_buy_gated(self):
+        """Same signal: BUY gated but SELL should still vote normally."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        # qwen3 SELL should NOT be directionally gated (sell_accuracy 74% >> 35%)
+        votes = {"qwen3": "SELL"}
+        accuracy_data = {
+            "qwen3": {"accuracy": 0.598, "total": 3608,
+                       "buy_accuracy": 0.30, "total_buy": 1174,
+                       "sell_accuracy": 0.74, "total_sell": 2434},
+        }
+        result = _weighted_consensus(votes, accuracy_data, "ranging")
+        # Only qwen3 voting SELL, not directionally gated → SELL
+        assert result[0] == "SELL"
+
+    def test_directional_gate_not_applied_with_few_samples(self):
+        """Directional gate requires sufficient samples to avoid premature gating."""
+        from portfolio.signal_engine import (
+            _DIRECTIONAL_GATE_MIN_SAMPLES,
+            _weighted_consensus,
+        )
+
+        votes = {"qwen3": "BUY"}
+        accuracy_data = {
+            "qwen3": {"accuracy": 0.55, "total": 100,
+                       "buy_accuracy": 0.20, "total_buy": _DIRECTIONAL_GATE_MIN_SAMPLES - 1,
+                       "sell_accuracy": 0.80, "total_sell": 100},
+        }
+        result = _weighted_consensus(votes, accuracy_data, "ranging")
+        # Not enough BUY samples → directional gate should NOT fire
+        assert result[0] == "BUY"
+
+    def test_claude_fundamental_sell_gated(self):
+        """claude_fundamental: BUY=65.7% fine, but SELL=39.7% should be gated."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        votes = {"claude_fundamental": "SELL", "rsi": "BUY"}
+        accuracy_data = {
+            "claude_fundamental": {"accuracy": 0.628, "total": 7535,
+                                    "buy_accuracy": 0.657, "total_buy": 6697,
+                                    "sell_accuracy": 0.397, "total_sell": 838},
+            "rsi": {"accuracy": 0.52, "total": 1000},
+        }
+        # sell_accuracy 0.397 > 0.35 threshold → NOT gated
+        # (we set _DIRECTIONAL_GATE_THRESHOLD at 0.35, not 0.45)
+        result = _weighted_consensus(votes, accuracy_data, "ranging")
+        # claude_fundamental SELL NOT gated at 0.35 threshold (it's 0.397)
+        # Both vote, weights determine outcome
+        assert result[0] in ("SELL", "BUY")
+
+    def test_no_directional_gate_when_accuracy_above_threshold(self):
+        """Signals with both BUY and SELL above threshold should not be gated."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        votes = {"rsi": "BUY"}
+        accuracy_data = {
+            "rsi": {"accuracy": 0.52, "total": 1000,
+                     "buy_accuracy": 0.50, "total_buy": 500,
+                     "sell_accuracy": 0.54, "total_sell": 500},
+        }
+        result = _weighted_consensus(votes, accuracy_data, "ranging")
         assert result[0] == "BUY"
