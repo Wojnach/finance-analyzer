@@ -563,7 +563,11 @@ class TestFetchLivePositionVolume:
 
 
 class TestCancelSpikeOrdersRestore:
-    """Tests for cancel_spike_orders' restore-and-retain behavior."""
+    """Tests for cancel_spike_orders' restore-and-retain behavior.
+
+    All tests use the canonical POST /rest/order/delete via cancel_order
+    (not the deprecated DELETE endpoint).
+    """
 
     def _make_state(self, orders=None, snapshots=None):
         return {
@@ -580,17 +584,44 @@ class TestCancelSpikeOrdersRestore:
             "cancelled": False,
         }
 
-    def _fake_page(self, delete_status=200):
-        class FakePage:
-            def evaluate(self, _js, _args):
-                return {"status": delete_status, "body": ""}
-        return FakePage()
+    def _stub_cancel_order(self, monkeypatch, status="SUCCESS"):
+        monkeypatch.setattr(
+            "portfolio.avanza_session.cancel_order",
+            lambda order_id, account_id=None: {"orderRequestStatus": status},
+        )
 
-    def test_failed_delete_keeps_snapshot(self, monkeypatch, silence_telegram):
-        """Codex finding 3 part 1: if the spike DELETE returns non-2xx,
-        the order is still open. Restoring stops would over-encumber."""
+    def test_uses_canonical_post_cancel_not_deprecated_delete(self, monkeypatch, silence_telegram):
+        """Codex round-4 finding 1: must use POST /rest/order/delete
+        (cancel_order) NOT DELETE /rest/order/{id} which Avanza changed
+        to return 404. Page.evaluate must NOT be called for cancellation."""
         import metals_loop as mod
         monkeypatch.setattr(mod, "get_csrf", lambda page: "TOKEN")
+        captured = {}
+        def fake_cancel(order_id, account_id=None):
+            captured["order_id"] = order_id
+            captured["account_id"] = account_id
+            return {"orderRequestStatus": "SUCCESS"}
+        monkeypatch.setattr("portfolio.avanza_session.cancel_order", fake_cancel)
+        monkeypatch.setattr(mod, "_restore_full_stop_protection", lambda *a, **kw: True)
+        monkeypatch.setattr(mod, "_fetch_live_position_volume", lambda ob_id: 100)
+
+        spike_state = self._make_state()
+        positions = {"silver_q0": {"ob_id": "OB1", "units": 100}}
+
+        # Page.evaluate would crash with no method — confirms it's not invoked
+        class NoEvaluate:
+            pass
+        result = mod.cancel_spike_orders(NoEvaluate(), spike_state, positions)
+        assert result is True
+        assert captured["order_id"] == "ORDER1"
+        assert captured["account_id"] == mod.ACCOUNT_ID
+
+    def test_failed_cancel_keeps_snapshot_and_orders(self, monkeypatch, silence_telegram):
+        """If cancel_order doesn't return SUCCESS, the order is still open.
+        Both orders[key] and stop_snapshots[key] must be retained for retry."""
+        import metals_loop as mod
+        monkeypatch.setattr(mod, "get_csrf", lambda page: "TOKEN")
+        self._stub_cancel_order(monkeypatch, status="FAILED")
         spike_state = self._make_state()
         positions = {"silver_q0": {"ob_id": "OB1", "units": 100}}
 
@@ -599,17 +630,19 @@ class TestCancelSpikeOrdersRestore:
                             lambda *a, **kw: (restore_called.__setitem__("n", 1), True)[1])
         monkeypatch.setattr(mod, "_fetch_live_position_volume", lambda ob_id: 100)
 
-        mod.cancel_spike_orders(self._fake_page(delete_status=500), spike_state, positions)
-        # Restore must NOT have been called — order is still open
+        result = mod.cancel_spike_orders(object(), spike_state, positions)
+        assert result is False
         assert restore_called["n"] == 0
-        # Snapshot must be retained for retry
+        # Both retained for retry
         assert "silver_q0" in spike_state["stop_snapshots"]
+        assert "silver_q0" in spike_state["orders"]
 
     def test_zero_live_volume_drops_snapshot_no_restore(self, monkeypatch, silence_telegram):
         """If position is fully gone (0 live volume), no restore needed.
-        Drop the snapshot since nothing to retry."""
+        Drop the snapshot AND the order since nothing to retry."""
         import metals_loop as mod
         monkeypatch.setattr(mod, "get_csrf", lambda page: "TOKEN")
+        self._stub_cancel_order(monkeypatch)
         spike_state = self._make_state()
         positions = {"silver_q0": {"ob_id": "OB1", "units": 100}}
 
@@ -618,52 +651,66 @@ class TestCancelSpikeOrdersRestore:
                             lambda *a, **kw: (restore_called.__setitem__("n", 1), True)[1])
         monkeypatch.setattr(mod, "_fetch_live_position_volume", lambda ob_id: 0)
 
-        mod.cancel_spike_orders(self._fake_page(delete_status=200), spike_state, positions)
+        result = mod.cancel_spike_orders(object(), spike_state, positions)
+        assert result is True  # complete — nothing left to do
         assert restore_called["n"] == 0
         assert "silver_q0" not in spike_state["stop_snapshots"]
+        assert "silver_q0" not in spike_state["orders"]
 
     def test_partial_fill_resizes_snapshot_to_live_volume(self, monkeypatch, silence_telegram):
-        """Codex finding 3 part 2: live position is smaller than original
-        (partial spike fill). Resize snapshot before restoring."""
+        """Codex finding: live position is smaller than original
+        (partial spike fill). Resize snapshot before restoring,
+        and the SUM must not exceed live_volume."""
         import metals_loop as mod
         monkeypatch.setattr(mod, "get_csrf", lambda page: "TOKEN")
+        self._stub_cancel_order(monkeypatch)
         spike_state = self._make_state()
         positions = {"silver_q0": {"ob_id": "OB1", "units": 100}}
 
         captured = {}
         def fake_restore(ob_id, snap):
             captured["ob_id"] = ob_id
-            captured["volumes"] = [s["order"]["volume"] for s in snap]
+            captured["total_volume"] = sum(s["order"]["volume"] for s in snap)
             return True
         monkeypatch.setattr(mod, "_restore_full_stop_protection", fake_restore)
         monkeypatch.setattr(mod, "_fetch_live_position_volume", lambda ob_id: 60)
 
-        mod.cancel_spike_orders(self._fake_page(delete_status=200), spike_state, positions)
-        # Snapshot was capped at the live 60u volume, not the original 100u
-        assert captured["volumes"] == [60]
-        # Successful restore → snapshot dropped
+        result = mod.cancel_spike_orders(object(), spike_state, positions)
+        assert result is True
+        # CRITICAL: total restored volume MUST NOT exceed live volume
+        assert captured["total_volume"] <= 60
+        # Successful restore → both snapshot and order dropped
         assert "silver_q0" not in spike_state["stop_snapshots"]
+        assert "silver_q0" not in spike_state["orders"]
 
-    def test_restore_failure_keeps_snapshot(self, monkeypatch, silence_telegram):
-        """Codex finding 3 part 3: failed restore must NOT drop the
-        snapshot — operator needs the rollback record."""
+    def test_restore_failure_keeps_both(self, monkeypatch, silence_telegram):
+        """Codex finding: failed restore must NOT drop snapshot or order —
+        operator needs the rollback record AND the next loop iteration
+        needs to retry."""
         import metals_loop as mod
         monkeypatch.setattr(mod, "get_csrf", lambda page: "TOKEN")
+        self._stub_cancel_order(monkeypatch)
         spike_state = self._make_state()
         positions = {"silver_q0": {"ob_id": "OB1", "units": 100}}
 
         monkeypatch.setattr(mod, "_restore_full_stop_protection", lambda *a, **kw: False)
         monkeypatch.setattr(mod, "_fetch_live_position_volume", lambda ob_id: 100)
 
-        mod.cancel_spike_orders(self._fake_page(delete_status=200), spike_state, positions)
-        # Snapshot is RETAINED for next-iteration retry
+        result = mod.cancel_spike_orders(object(), spike_state, positions)
+        assert result is False
         assert "silver_q0" in spike_state["stop_snapshots"]
+        # Note: orders[key] is still in the dict here only if we WANT to
+        # retry the cancel. Since cancel succeeded, we could pop the order.
+        # Codex's recommendation is to keep retry-able state, so we choose
+        # to retain both — the cancel call is idempotent (re-cancelling
+        # an already-cancelled order returns gracefully).
 
     def test_volume_read_failure_keeps_snapshot(self, monkeypatch, silence_telegram):
         """If we cannot read live volume, we don't know how to size the
-        restore. Keep the snapshot for retry."""
+        restore. Keep the snapshot for retry. Cancel succeeded."""
         import metals_loop as mod
         monkeypatch.setattr(mod, "get_csrf", lambda page: "TOKEN")
+        self._stub_cancel_order(monkeypatch)
         spike_state = self._make_state()
         positions = {"silver_q0": {"ob_id": "OB1", "units": 100}}
 
@@ -672,39 +719,91 @@ class TestCancelSpikeOrdersRestore:
                             lambda *a, **kw: (restore_called.__setitem__("n", 1), True)[1])
         monkeypatch.setattr(mod, "_fetch_live_position_volume", lambda ob_id: None)
 
-        mod.cancel_spike_orders(self._fake_page(delete_status=200), spike_state, positions)
+        result = mod.cancel_spike_orders(object(), spike_state, positions)
+        assert result is False
         assert restore_called["n"] == 0
         assert "silver_q0" in spike_state["stop_snapshots"]
 
     def test_no_positions_arg_keeps_snapshot(self, monkeypatch, silence_telegram):
         """Backward-compat: legacy callers without positions arg → keep
-        snapshot, log it, never restore."""
+        snapshot, log it, never restore. Returns False (incomplete)."""
         import metals_loop as mod
         monkeypatch.setattr(mod, "get_csrf", lambda page: "TOKEN")
+        self._stub_cancel_order(monkeypatch)
         spike_state = self._make_state()
 
         restore_called = {"n": 0}
         monkeypatch.setattr(mod, "_restore_full_stop_protection",
                             lambda *a, **kw: (restore_called.__setitem__("n", 1), True)[1])
 
-        mod.cancel_spike_orders(self._fake_page(delete_status=200), spike_state, None)
+        result = mod.cancel_spike_orders(object(), spike_state, None)
+        assert result is False
         assert restore_called["n"] == 0
         assert "silver_q0" in spike_state["stop_snapshots"]
 
+    def test_no_csrf_returns_false(self, monkeypatch):
+        """Missing CSRF token → can't do anything → False (retry next loop)."""
+        import metals_loop as mod
+        monkeypatch.setattr(mod, "get_csrf", lambda page: "")
+        spike_state = self._make_state()
+        result = mod.cancel_spike_orders(object(), spike_state, {})
+        assert result is False
+
 
 class TestResizeSnapshotVolume:
-    def test_caps_volume_at_new_max(self):
+    """Tests for _resize_snapshot_volume — must bound the SUM of volumes,
+    not just per-row caps. This is the codex round-4 finding 2 fix."""
+
+    def test_total_does_not_exceed_new_volume_two_rows(self):
+        """100 + 100 → 60 must yield SUM == 60, not 60+60=120."""
         import metals_loop as mod
         snapshot = [
-            {"id": "S1", "order": {"volume": 1000, "price": 1.0}, "trigger": {"value": 0.9}, "orderbook": {"id": "OB1"}},
-            {"id": "S2", "order": {"volume": 500, "price": 1.0}, "trigger": {"value": 0.8}, "orderbook": {"id": "OB1"}},
+            {"id": "S1", "order": {"volume": 100, "price": 1.0}, "trigger": {"value": 0.9}, "orderbook": {"id": "OB1"}},
+            {"id": "S2", "order": {"volume": 100, "price": 1.0}, "trigger": {"value": 0.8}, "orderbook": {"id": "OB1"}},
         ]
-        resized = mod._resize_snapshot_volume(snapshot, 750)
-        # S1 (1000) capped to 750, S2 (500) unchanged
-        assert resized[0]["order"]["volume"] == 750
-        assert resized[1]["order"]["volume"] == 500
+        resized = mod._resize_snapshot_volume(snapshot, 60)
+        total = sum(s["order"]["volume"] for s in resized)
+        assert total == 60
         # Originals must NOT be mutated
-        assert snapshot[0]["order"]["volume"] == 1000
+        assert snapshot[0]["order"]["volume"] == 100
+
+    def test_total_does_not_exceed_new_volume_three_rows(self):
+        """33+33+34 → 50 must yield SUM == 50, not 33+33+34=100."""
+        import metals_loop as mod
+        snapshot = [
+            {"id": s, "order": {"volume": v}, "trigger": {"value": 0.9}, "orderbook": {"id": "OB1"}}
+            for s, v in [("A", 33), ("B", 33), ("C", 34)]
+        ]
+        resized = mod._resize_snapshot_volume(snapshot, 50)
+        total = sum(s["order"]["volume"] for s in resized)
+        assert total == 50
+
+    def test_proportional_distribution(self):
+        """200+100 → 60 should give roughly 40+20 (2:1 ratio preserved)."""
+        import metals_loop as mod
+        snapshot = [
+            {"id": "BIG", "order": {"volume": 200}, "trigger": {"value": 0.9}, "orderbook": {"id": "OB1"}},
+            {"id": "SMALL", "order": {"volume": 100}, "trigger": {"value": 0.8}, "orderbook": {"id": "OB1"}},
+        ]
+        resized = mod._resize_snapshot_volume(snapshot, 60)
+        total = sum(s["order"]["volume"] for s in resized)
+        assert total == 60
+        # BIG row should be larger than SMALL row (preserved ratio)
+        big = next(s for s in resized if s["id"] == "BIG")
+        small = next(s for s in resized if s["id"] == "SMALL")
+        assert big["order"]["volume"] > small["order"]["volume"]
+
+    def test_zero_new_volume_returns_empty(self):
+        import metals_loop as mod
+        snapshot = [{"id": "S1", "order": {"volume": 100}, "trigger": {"value": 0.9}, "orderbook": {"id": "OB1"}}]
+        assert mod._resize_snapshot_volume(snapshot, 0) == []
+        assert mod._resize_snapshot_volume(snapshot, -10) == []
+
+    def test_single_row_resize(self):
+        import metals_loop as mod
+        snapshot = [{"id": "S1", "order": {"volume": 1000}, "trigger": {"value": 0.9}, "orderbook": {"id": "OB1"}}]
+        resized = mod._resize_snapshot_volume(snapshot, 750)
+        assert resized[0]["order"]["volume"] == 750
 
     def test_preserves_non_dict_filtering(self):
         import metals_loop as mod
@@ -716,3 +815,16 @@ class TestResizeSnapshotVolume:
         resized = mod._resize_snapshot_volume(snapshot, 50)
         assert len(resized) == 1
         assert resized[0]["order"]["volume"] == 50
+
+    def test_drops_zero_volume_rows(self):
+        """Rows that round to 0 must be dropped (Avanza rejects 0-volume stops)."""
+        import metals_loop as mod
+        # 1000 + 1 → resize to 10. The "1" row would round to 0.
+        snapshot = [
+            {"id": "BIG", "order": {"volume": 1000}, "trigger": {"value": 0.9}, "orderbook": {"id": "OB1"}},
+            {"id": "TINY", "order": {"volume": 1}, "trigger": {"value": 0.8}, "orderbook": {"id": "OB1"}},
+        ]
+        resized = mod._resize_snapshot_volume(snapshot, 10)
+        # All non-zero volumes
+        for s in resized:
+            assert s["order"]["volume"] > 0

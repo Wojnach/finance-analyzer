@@ -4168,39 +4168,89 @@ def place_spike_orders(page, positions, prices, targets):
 
 
 def _resize_snapshot_volume(snapshot, new_volume: int) -> list:
-    """Return a copy of ``snapshot`` with each stop's order volume capped
-    to ``new_volume``.
+    """Return a copy of ``snapshot`` proportionally distributed across rows
+    so the SUM of all stop volumes equals ``new_volume`` (or less, never more).
 
     Used by the spike-orders path to re-arm protection on the volume
-    that's NOT encumbered by an open spike sell. The cascade structure
-    (multiple stops at different trigger prices) is preserved — each
-    layer just gets its volume reduced proportionally to its original
-    share of the total.
+    that's NOT encumbered by an open spike sell, and by the cancel-restore
+    path when a partial spike fill has shrunk the position.
 
-    If a stop's original volume is already <= new_volume it is kept
-    unchanged. Otherwise it is set to new_volume. Multi-layer cascades
-    where the layers sum to more than new_volume will end up with
-    overlapping coverage — that is acceptable because Avanza only
-    rejects when sl_volume + sell_volume > position, not on multiple
-    stops covering the same units.
+    Critical invariant (codex finding): the SUM of resized volumes
+    must NOT exceed ``new_volume``. A previous implementation capped
+    each row independently, which left ``[100, 100]`` resized to ``60``
+    as ``[60, 60]`` (sum 120) — re-arming that produced the same
+    over-encumbered state we're trying to avoid.
+
+    Distribution: rows are resized proportionally to their share of the
+    original total. Rounding error is absorbed by the LAST row so the
+    sum stays at the target. Rows with 0 original volume are dropped.
+    Non-dict entries are filtered. Returns ``[]`` if ``new_volume <= 0``.
     """
     import copy as _copy
-    out = []
+    if new_volume is None or new_volume <= 0:
+        return []
+    valid = []
     for sl in snapshot:
         if not isinstance(sl, dict):
             continue
+        order = sl.get("order") or {}
+        try:
+            vol = int(order.get("volume", 0) or 0)
+        except (TypeError, ValueError):
+            vol = 0
+        if vol <= 0:
+            continue
+        valid.append((sl, vol))
+    if not valid:
+        return []
+
+    total_orig = sum(v for _, v in valid)
+    out = []
+    running = 0
+    for idx, (sl, orig) in enumerate(valid):
         copy = _copy.deepcopy(sl)
         order = copy.get("order") or {}
-        original = int(order.get("volume", 0) or 0)
-        if original > new_volume:
-            order["volume"] = int(new_volume)
-            copy["order"] = order
+        if idx == len(valid) - 1:
+            # Last row absorbs the remainder so the SUM lands exactly on
+            # new_volume regardless of integer rounding.
+            new_row = max(0, int(new_volume) - running)
+        else:
+            # Proportional share, floored. Use total_orig for stability.
+            share = int((int(new_volume) * orig) // total_orig)
+            new_row = max(0, share)
+            running += new_row
+        if new_row <= 0:
+            # Skip rows that round to zero — Avanza rejects 0-volume stops.
+            continue
+        order["volume"] = new_row
+        copy["order"] = order
         out.append(copy)
+
+    # Defensive: assert the invariant. If somehow violated (impossible by
+    # construction), drop excess from the tail.
+    final_total = sum((sl.get("order") or {}).get("volume", 0) for sl in out)
+    if final_total > new_volume:
+        # This branch should be unreachable; the proportional distribution
+        # plus last-row remainder logic guarantees sum <= new_volume.
+        excess = final_total - new_volume
+        if out:
+            last_order = out[-1].get("order") or {}
+            last_order["volume"] = max(0, last_order.get("volume", 0) - excess)
+            if last_order["volume"] <= 0:
+                out.pop()
     return out
 
 
-def cancel_spike_orders(page, spike_state, positions=None):
+def cancel_spike_orders(page, spike_state, positions=None) -> bool:
     """Cancel all unfilled spike orders AND restore full stop coverage.
+
+    Returns ``True`` if every spike order reached a terminal state
+    (cancelled or already gone) AND its stop protection was restored
+    successfully (or determined unnecessary). Returns ``False`` if any
+    order/restoration step failed and should be retried on the next
+    loop iteration. Callers MUST gate ``spike_state["cancelled"] = True``
+    on this return value, otherwise transient failures permanently
+    disable the retry path.
 
     When ``place_spike_orders`` ran earlier in the day, it cancelled the
     full-volume stops on each position and re-armed them at
@@ -4215,10 +4265,10 @@ def cancel_spike_orders(page, spike_state, positions=None):
 
     This function therefore performs the following per spike entry:
 
-      1. DELETE the spike LIMIT order via the trading-critical API.
-         Capture the HTTP status — anything outside 2xx/404 means the
-         broker still has the order (or the call failed) and we MUST
-         NOT touch the stops.
+      1. POST cancel via the canonical ``portfolio.avanza_session.cancel_order``
+         (NOT a DELETE on /rest/order/{id}, which Avanza changed to
+         return 404 on 2026-03-24). Only proceed when the response
+         confirms ``orderRequestStatus == "SUCCESS"``.
       2. Fetch the live position volume via ``get_positions()``. The
          spike could have been partially filled before cancellation,
          shrinking the position. Restoring the original full-volume
@@ -4226,23 +4276,22 @@ def cancel_spike_orders(page, spike_state, positions=None):
          reject the place_stop_loss with the same volume-constraint
          error this branch is trying to fix.
       3. Resize the original snapshot to the live volume via
-         ``_resize_snapshot_volume`` and call
+         ``_resize_snapshot_volume`` (which now bounds the SUM of
+         volumes, not just per-row caps) and call
          ``_restore_full_stop_protection`` to atomically clear any
          resized stops and re-arm the (resized) originals.
-      4. Only pop ``stop_snapshots[key]`` from state if the restore
-         succeeded. Failed/skipped restores keep the snapshot so the
-         next loop iteration can retry, and operators retain the
-         original record for manual recovery.
+      4. Only pop ``stop_snapshots[key]`` AND ``orders[key]`` from
+         state if the restore succeeded. Failed/skipped paths keep
+         both entries so the next loop iteration retries.
 
     The ``positions`` argument is required when restoring stops, since
     we need the orderbook ID per position key. It's optional only for
     backward compat with callers that don't care about restoration
     (test fixtures).
     """
-    csrf = get_csrf(page)
-    if not csrf:
+    if not get_csrf(page):
         log("Spike cancel: no CSRF token")
-        return
+        return False
 
     orders = spike_state.get("orders", {})
     snapshots = spike_state.get("stop_snapshots", {}) or {}
@@ -4250,57 +4299,60 @@ def cancel_spike_orders(page, spike_state, positions=None):
         snapshots = {}
         spike_state["stop_snapshots"] = snapshots
 
+    all_complete = True
+
     for key, order_id in list(orders.items()):
         if not order_id:
+            # Empty order id is harmless — drop from retry set.
+            orders.pop(key, None)
             continue
 
-        delete_status = 0
+        # Step 1: Cancel via the canonical POST endpoint. The repo's
+        # avanza_control.delete_order_live documents that Avanza changed
+        # the cancel API at some point — DELETE on /rest/order/{id} now
+        # returns 404 even for live orders. Use POST /rest/order/delete.
+        cancel_ok = False
         try:
-            result = page.evaluate("""async (args) => {
-                const [accountId, orderId, token] = args;
-                const resp = await fetch(
-                    'https://www.avanza.se/_api/trading-critical/rest/order/' + accountId + '/' + orderId,
-                    {
-                        method: 'DELETE',
-                        headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
-                        credentials: 'include',
-                    }
-                );
-                return {status: resp.status, body: await resp.text()};
-            }""", [ACCOUNT_ID, order_id, csrf])
-            delete_status = int(result.get("status", 0) or 0)
-            log(f"Spike cancel {key}: status={delete_status}")
+            from portfolio.avanza_session import cancel_order
+
+            cancel_result = cancel_order(str(order_id), account_id=ACCOUNT_ID)
+            cancel_status = (cancel_result or {}).get("orderRequestStatus", "")
+            cancel_ok = cancel_status == "SUCCESS"
+            log(f"Spike cancel {key}: status={cancel_status}")
         except Exception as e:
             log(f"Spike cancel error {key}: {e}")
-            delete_status = 0
+            cancel_ok = False
 
-        # 2xx = deleted, 404 = already gone (also fine). Anything else
-        # leaves the order open and the stops MUST NOT be touched —
-        # restoring them would over-encumber the volume.
-        delete_ok = (200 <= delete_status < 300) or delete_status == 404
-        original_snapshot = snapshots.get(key)
-        if not delete_ok:
+        if not cancel_ok:
             log(
-                f"[spike] DELETE for {key} returned {delete_status}; "
-                f"keeping stop snapshot for retry"
+                f"[spike] cancel for {key} did not return SUCCESS; "
+                f"keeping order_id and snapshot for retry"
             )
-            continue  # snapshot stays, retry next loop iteration
+            all_complete = False
+            continue  # leave orders[key] and snapshots[key] in place
 
+        # Cancel succeeded — the spike LIMIT order is gone. Now decide
+        # whether to restore the original stop coverage.
+        original_snapshot = snapshots.get(key)
         if not original_snapshot:
-            continue  # nothing to restore (no original stops captured)
+            # Successful cancel and nothing to restore — terminal.
+            orders.pop(key, None)
+            continue
 
         if positions is None:
             log(f"[spike] snapshot present for {key} but no positions arg — stops NOT restored")
+            all_complete = False
             continue  # keep snapshot for caller to retry with positions
 
         pos = positions.get(key, {})
         ob_id = pos.get("ob_id")
         if not ob_id:
             log(f"[spike] cannot restore stops for {key}: no ob_id; snapshot kept")
+            all_complete = False
             continue
 
-        # Re-fetch live position volume. The spike could have been
-        # partially filled before our cancel; restoring the original
+        # Step 2: Re-fetch live position volume. The spike could have
+        # been partially filled before our cancel; restoring the original
         # full-volume snapshot would exceed the live position size and
         # the place_stop_loss would reject with short.sell.not.allowed.
         live_volume = _fetch_live_position_volume(ob_id)
@@ -4309,21 +4361,28 @@ def cancel_spike_orders(page, spike_state, positions=None):
                 f"[spike] cannot read live volume for {ob_id}; "
                 f"keeping snapshot for {key} retry"
             )
+            all_complete = False
             continue
         if live_volume <= 0:
             log(f"[spike] {key}: live position is 0; no restore needed, dropping snapshot")
             snapshots.pop(key, None)
+            orders.pop(key, None)
             continue
 
+        # Step 3: Resize and restore.
         sized_snapshot = _resize_snapshot_volume(original_snapshot, live_volume)
         restore_ok = _restore_full_stop_protection(ob_id, sized_snapshot)
         if restore_ok:
             snapshots.pop(key, None)
+            orders.pop(key, None)
         else:
             log(
                 f"[spike] restore failed for {key}; keeping snapshot for "
                 f"next loop retry"
             )
+            all_complete = False
+
+    return all_complete
 
 
 def _fetch_live_position_volume(ob_id) -> int | None:
@@ -5892,17 +5951,32 @@ Positions: {pos_summary}{prob_summary}""")
                                 save_spike_state(spike_st)
                                 _save_positions(POSITIONS)  # persist after spike fills
 
-                    # Phase 3: Cancel unfilled 1h after the NYSE open
+                    # Phase 3: Cancel unfilled 1h after the NYSE open.
+                    # Idempotent + retry-aware: cancel_spike_orders only marks
+                    # entries terminal when both the cancel AND the stop
+                    # restore succeeded. We only flip cancelled=True once
+                    # the function reports all_complete; otherwise we leave
+                    # spike_st["cancelled"] as False so the next iteration
+                    # retries the failed entries.
                     if spike_st["placed"] and not spike_st["cancelled"] and h_now >= spike_cancel_hour:
                         if spike_st.get("orders"):
                             log(f"Spike catcher: cancelling {len(spike_st['orders'])} unfilled orders")
                             # Pass POSITIONS so cancel_spike_orders can restore
                             # full-volume stop protection from the persisted snapshots.
-                            cancel_spike_orders(page, spike_st, POSITIONS)
-                            send_telegram(
-                                f"_Spike orders cancelled ({spike_sched['cancel_label']}, unfilled)_"
-                            )
-                        spike_st["cancelled"] = True
+                            all_complete = cancel_spike_orders(page, spike_st, POSITIONS)
+                            if all_complete:
+                                send_telegram(
+                                    f"_Spike orders cancelled ({spike_sched['cancel_label']}, unfilled)_"
+                                )
+                                spike_st["cancelled"] = True
+                            else:
+                                log(
+                                    f"Spike cancel/restore incomplete: "
+                                    f"{len(spike_st.get('orders', {}))} retry pending"
+                                )
+                        else:
+                            # No orders to cancel — phase is done.
+                            spike_st["cancelled"] = True
                         save_spike_state(spike_st)
 
                 # Startup grace
