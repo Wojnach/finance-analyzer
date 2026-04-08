@@ -118,7 +118,10 @@ def check_pending_orders(config: dict) -> list[dict]:
     # Check for CONFIRM replies in Telegram
     confirmed = _check_telegram_confirm(config)
 
-    for order in pending:
+    # Sort by timestamp descending so CONFIRM matches the most recent pending order
+    pending_sorted = sorted(pending, key=lambda o: o.get("timestamp", ""), reverse=True)
+
+    for order in pending_sorted:
         if order["status"] != "pending_confirmation":
             continue
 

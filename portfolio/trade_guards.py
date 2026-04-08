@@ -87,12 +87,15 @@ def check_overtrading_guards(ticker, action, strategy, portfolio, config=None):
     if last_trade_str:
         try:
             last_trade = datetime.fromisoformat(last_trade_str)
+            # M8: ensure aware datetime before comparison with aware now
+            if last_trade.tzinfo is None:
+                last_trade = last_trade.replace(tzinfo=UTC)
             elapsed = (now - last_trade).total_seconds() / 60
             if elapsed < effective_cooldown:
                 remaining = effective_cooldown - elapsed
                 warnings.append({
                     "guard": "ticker_cooldown",
-                    "severity": "warning",
+                    "severity": "block",
                     "message": (
                         f"{ticker} traded {elapsed:.0f}m ago by {strategy}. "
                         f"Cooldown: {effective_cooldown:.0f}m (base {base_cooldown}m × {multiplier}x). "
@@ -144,6 +147,9 @@ def check_overtrading_guards(ticker, action, strategy, portfolio, config=None):
         for ts_str in timestamps:
             try:
                 ts = datetime.fromisoformat(ts_str)
+                # M8: ensure aware datetime before comparison with aware cutoff
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=UTC)
                 if ts >= cutoff:
                     recent.append(ts)
             except (ValueError, TypeError):
@@ -152,7 +158,7 @@ def check_overtrading_guards(ticker, action, strategy, portfolio, config=None):
         if len(recent) >= limit:
             warnings.append({
                 "guard": "position_rate_limit",
-                "severity": "warning",
+                "severity": "block",
                 "message": (
                     f"{strategy}: {len(recent)} new position(s) in last {window_h}h "
                     f"(limit: {limit})."

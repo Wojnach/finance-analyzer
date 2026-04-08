@@ -209,7 +209,7 @@ class StopLossResult:
     def from_api(cls, raw: dict) -> StopLossResult:
         status = raw.get("status", raw.get("orderRequestStatus", ""))
         success = str(status).upper() in ("SUCCESS", "OK", "ACTIVE")
-        stop_id = str(raw.get("stopLossId", raw.get("stop_id", raw.get("id", ""))))
+        stop_id = str(raw.get("stoplossOrderId", raw.get("stopLossId", raw.get("stop_id", raw.get("id", "")))))
         return cls(
             success=success,
             stop_id=stop_id,
@@ -335,7 +335,7 @@ class StopLoss:
         order_event = raw.get("orderEvent", raw.get("order", {}))
         return cls(
             stop_id=str(raw.get("id", raw.get("stopLossId", ""))),
-            orderbook_id=str(raw.get("orderBookId", raw.get("orderbookId", ""))),
+            orderbook_id=str((raw.get("orderbook") or {}).get("id", raw.get("orderBookId", raw.get("orderbookId", "")))),
             trigger_price=float(_val(trigger.get("value"), _val(raw.get("triggerPrice"), 0.0))),
             trigger_type=str(trigger.get("type", raw.get("triggerType", "LAST_PRICE"))),
             sell_price=float(_val(order_event.get("price"), _val(raw.get("sellPrice"), 0.0))),
