@@ -10,6 +10,7 @@ This is the preferred auth method until TOTP credentials are configured.
 import json
 import logging
 import threading
+import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -581,6 +582,162 @@ def get_stop_losses() -> list[dict]:
     except RuntimeError:
         logger.warning("Could not fetch stop-losses")
         return []
+
+
+def cancel_stop_loss(stop_id: str, account_id: str | None = None) -> dict:
+    """Cancel a single stop-loss order by ID.
+
+    Idempotent: HTTP 404 (already gone) is treated as success since the
+    end-state is identical from the caller's perspective.
+
+    Uses DELETE /_api/trading/stoploss/{accountId}/{stopId}, which is the
+    correct endpoint per portfolio/avanza_control.py:206. Do NOT use the
+    regular order cancel API — it returns "crossing prices" errors for
+    stop-losses (March 3 incident).
+
+    Args:
+        stop_id: Avanza stop-loss ID (e.g. "A2^1773297348702^1346781").
+        account_id: Avanza account ID. Defaults to ``DEFAULT_ACCOUNT_ID``.
+
+    Returns:
+        Dict with keys ``status`` ("SUCCESS"/"FAILED"), ``http_status`` (int),
+        and ``stop_id`` (str). Errors that prevent the call from running
+        (network, missing CSRF, etc.) yield ``status="FAILED"`` with
+        ``http_status=0`` and an ``error`` key describing the cause.
+    """
+    if not stop_id:
+        return {"status": "FAILED", "http_status": 0, "stop_id": "", "error": "empty stop_id"}
+    acct = str(account_id or DEFAULT_ACCOUNT_ID)
+    try:
+        result = api_delete(f"/_api/trading/stoploss/{acct}/{stop_id}")
+    except Exception as exc:  # noqa: BLE001 — propagate as structured failure
+        logger.error("cancel_stop_loss(%s) raised: %s", stop_id, exc, exc_info=True)
+        return {"status": "FAILED", "http_status": 0, "stop_id": stop_id, "error": str(exc)}
+    http_status = int(result.get("http_status", 0)) if isinstance(result, dict) else 0
+    # 2xx = deleted; 404 = already gone (triggered/expired/cancelled). Both succeed.
+    ok = (200 <= http_status < 300) or http_status == 404
+    if ok:
+        logger.info("cancel_stop_loss(%s) -> %s", stop_id, http_status)
+    else:
+        logger.warning("cancel_stop_loss(%s) failed: http=%s result=%s", stop_id, http_status, result)
+    return {
+        "status": "SUCCESS" if ok else "FAILED",
+        "http_status": http_status,
+        "stop_id": stop_id,
+    }
+
+
+def cancel_all_stop_losses_for(
+    orderbook_id: str,
+    account_id: str | None = None,
+    max_wait: float = 3.0,
+    poll_interval: float = 0.5,
+) -> dict:
+    """Cancel every active stop-loss for ``orderbook_id`` and verify clearance.
+
+    The "verify" step is the critical part: Avanza's DELETE returns 200 OK
+    immediately, but the encumbered volume on the position is not released
+    until the SL actually disappears from the position view. Without polling,
+    a follow-up SELL still gets ``short.sell.not.allowed``. We therefore
+    re-query ``get_stop_losses()`` every ``poll_interval`` seconds until
+    none remain for the target orderbook (or ``max_wait`` is exceeded).
+
+    The function is idempotent and safe to call when no SLs exist — it
+    short-circuits to ``status="SUCCESS"`` without any DELETE calls.
+
+    Args:
+        orderbook_id: Avanza orderbook ID to clear.
+        account_id: Account filter. ``None`` means accept any account.
+        max_wait: Maximum total wall-clock seconds to wait for clearance.
+        poll_interval: Seconds between re-query attempts.
+
+    Returns:
+        Dict with:
+            - ``status``: "SUCCESS" (cleared), "PARTIAL" (some cancelled, some
+              still showing after timeout), or "FAILED" (no cancels succeeded
+              and stops still present).
+            - ``cancelled``: list of stop_ids the DELETE call accepted.
+            - ``remaining``: list of stop_ids still present after the wait.
+            - ``elapsed_seconds``: float, total time spent in this call.
+    """
+    started = time.monotonic()
+    target_ob = str(orderbook_id)
+    aid_filter = str(account_id) if account_id is not None else None
+
+    def _stops_for_ob() -> list[dict]:
+        out = []
+        for sl in get_stop_losses():
+            if not isinstance(sl, dict):
+                continue
+            ob = (sl.get("orderbook") or {}).get("id")
+            if str(ob) != target_ob:
+                continue
+            if aid_filter is not None:
+                acct = (sl.get("account") or {}).get("id")
+                if str(acct) != aid_filter:
+                    continue
+            out.append(sl)
+        return out
+
+    initial = _stops_for_ob()
+    if not initial:
+        return {
+            "status": "SUCCESS",
+            "cancelled": [],
+            "remaining": [],
+            "elapsed_seconds": time.monotonic() - started,
+        }
+
+    # Issue cancels for every matching stop. Use the SL's own account id when
+    # available — Avanza's DELETE endpoint requires the account that owns the
+    # stop, which may differ from DEFAULT_ACCOUNT_ID for multi-account users.
+    cancelled: list[str] = []
+    for sl in initial:
+        sid = sl.get("id") or ""
+        if not sid:
+            continue
+        sl_acct = (sl.get("account") or {}).get("id") or account_id
+        result = cancel_stop_loss(sid, account_id=sl_acct)
+        if result.get("status") == "SUCCESS":
+            cancelled.append(sid)
+
+    # Poll until cleared or timeout. Always do at least one re-query AFTER
+    # the cancels — DELETE responses don't guarantee state propagation.
+    remaining: list[str] = []
+    while True:
+        still = _stops_for_ob()
+        remaining = [s.get("id", "") for s in still if s.get("id")]
+        if not remaining:
+            break
+        if (time.monotonic() - started) >= max_wait:
+            break
+        time.sleep(poll_interval)
+
+    elapsed = time.monotonic() - started
+    if not remaining:
+        status = "SUCCESS"
+        logger.info(
+            "cancel_all_stop_losses_for(%s): cleared %d stops in %.2fs",
+            target_ob, len(cancelled), elapsed,
+        )
+    elif cancelled:
+        status = "PARTIAL"
+        logger.warning(
+            "cancel_all_stop_losses_for(%s): PARTIAL — cancelled=%s remaining=%s elapsed=%.2fs",
+            target_ob, cancelled, remaining, elapsed,
+        )
+    else:
+        status = "FAILED"
+        logger.error(
+            "cancel_all_stop_losses_for(%s): FAILED — no cancels succeeded, remaining=%s",
+            target_ob, remaining,
+        )
+    return {
+        "status": status,
+        "cancelled": cancelled,
+        "remaining": remaining,
+        "elapsed_seconds": elapsed,
+    }
 
 
 def get_instrument_price(orderbook_id: str) -> dict[str, Any]:
