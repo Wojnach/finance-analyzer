@@ -912,4 +912,37 @@ class TestModuleConstants:
     def test_invocations_file_path(self):
         """INVOCATIONS_FILE is in the data directory."""
         assert ai.INVOCATIONS_FILE.name == "invocations.jsonl"
+
+
+# ===========================================================================
+# BUG-181: Fishing context writes neutral on failure
+# ===========================================================================
+
+class TestFishingContextFallback:
+
+    def test_writes_neutral_on_exception(self, monkeypatch):
+        """BUG-181: When fishing context extraction fails, write neutral context."""
+        written = {}
+
+        def mock_write(path, data):
+            written["path"] = path
+            written["data"] = data
+
+        # Patch at source module — local imports pick up this patch
+        monkeypatch.setattr("portfolio.file_utils.atomic_write_json", mock_write)
+
+        # Call with a journal entry that will fail (conviction not a number)
+        journal = {
+            "tickers": {"XAG-USD": {"outlook": "bullish", "conviction": "not_a_number"}}
+        }
+        ai._write_fishing_context(journal)
+
+        assert "data" in written, "Expected neutral context to be written on failure"
+        assert written["data"]["direction_bias"] == "neutral"
+        assert written["data"]["bias_confidence"] == 0.0
+
+    def test_no_xag_returns_without_writing(self, tmp_path):
+        """When no XAG-USD in journal, function returns early."""
+        # Should not raise
+        ai._write_fishing_context({"tickers": {"BTC-USD": {}}})
         assert ai.INVOCATIONS_FILE.parent == ai.DATA_DIR
