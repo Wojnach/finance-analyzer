@@ -55,9 +55,10 @@ def reset_session_start():
     Prevents uptime_seconds from inheriting a stale start_time
     from a previous session's health_state.json.
     """
-    state = load_health()
-    state["start_time"] = time.time()
-    atomic_write_json(HEALTH_FILE, state)
+    with _health_lock:
+        state = load_health()
+        state["start_time"] = time.time()
+        atomic_write_json(HEALTH_FILE, state)
 
 
 def check_staleness(max_age_seconds: int = 300) -> tuple:

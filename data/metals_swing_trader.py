@@ -15,7 +15,7 @@ import os
 import time
 
 import requests
-from portfolio.file_utils import atomic_write_json
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
 from metals_swing_config import (
     ACCOUNT_ID,
     BUY_COOLDOWN_MINUTES,
@@ -86,12 +86,9 @@ def _cet_hour():
 
 def _load_state():
     """Load swing trader state from disk."""
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            _log(f"State load error: {e}")
+    result = load_json(STATE_FILE)
+    if result is not None:
+        return result
     return _default_state()
 
 
@@ -170,16 +167,14 @@ def _send_telegram(msg):
 
 def _log_decision(decision):
     try:
-        with open(DECISIONS_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(decision, ensure_ascii=False) + "\n")
+        atomic_append_jsonl(DECISIONS_LOG, decision)
     except Exception as e:
         _log(f"Decision log error: {e}")
 
 
 def _log_trade(trade):
     try:
-        with open(TRADES_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(trade, ensure_ascii=False) + "\n")
+        atomic_append_jsonl(TRADES_LOG, trade)
     except Exception as e:
         _log(f"Trade log error: {e}")
 

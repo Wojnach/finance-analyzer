@@ -306,16 +306,19 @@ def classify_tier(reasons, state=None):
     eu_open = _eu_market_open_hour_utc(now_utc)
     market_open = now_utc.weekday() < 5 and eu_open <= now_utc.hour < close_hour
 
+    # C4/NEW-2: first-of-day T3 check must precede the off-hours periodic cap.
+    # An off-hours trigger 4+ hours after the last full review would otherwise
+    # return T1 early (line below), skipping the first-of-day T3 entirely.
+    if state.get("last_trigger_date") != _today_str():
+        return 3  # first real trigger of the day
+
+    if any("F&G crossed" in r for r in reasons):
+        return 3
+
     if market_open and hours_since >= _FULL_REVIEW_MARKET_HOURS:
         return 3
     if not market_open and hours_since >= _FULL_REVIEW_OFF_HOURS:
         return 1  # T1 quick check only — save T3 budget for market hours
-    if any("F&G crossed" in r for r in reasons):
-        return 3
-    # C4/NEW-2: use last_trigger_date (set only on real triggers) instead of
-    # today_date (set every cycle) so the first-of-day T3 check works correctly.
-    if state.get("last_trigger_date") != _today_str():
-        return 3  # first real trigger of the day
 
     # Tier 2: new actionable signals
     tier2_patterns = ["consensus", "moved", "post-trade", "flipped"]

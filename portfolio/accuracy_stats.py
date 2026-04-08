@@ -676,7 +676,8 @@ def load_cached_activation_rates():
             logger.debug("Activation rates cache corrupted, regenerating")
     rates = signal_activation_rates()
     try:
-        _atomic_write_json(cache_file, {"rates": rates, "time": time.time()})
+        with _accuracy_write_lock:
+            _atomic_write_json(cache_file, {"rates": rates, "time": time.time()})
     except Exception:
         logger.warning("Failed to write activation rates cache", exc_info=True)
     return rates
@@ -1133,7 +1134,8 @@ def signal_best_horizon_accuracy(min_samples=50, entries=None):
 
     # --- Write cache ---
     try:
-        _atomic_write_json(BEST_HORIZON_CACHE_FILE, {"time": time.time(), "data": result})
+        with _accuracy_write_lock:
+            _atomic_write_json(BEST_HORIZON_CACHE_FILE, {"time": time.time(), "data": result})
     except Exception:
         logger.debug("Failed to write best_horizon cache", exc_info=True)
 

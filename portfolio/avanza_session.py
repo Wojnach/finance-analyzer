@@ -314,7 +314,8 @@ def get_buying_power(account_id: str | None = None) -> dict:
                 }
     # Account not found by accountId — fallback using categorizedAccounts top-level
     # (structure may nest accounts differently across Avanza updates)
-    total = data.get("categorizedAccounts", [{}])[0].get("totalValue", {})
+    cats = data.get("categorizedAccounts", [])
+    total = cats[0].get("totalValue", {}) if cats else {}
     total_val = total.get("value", 0) if isinstance(total, dict) else 0
     positions = get_positions()
     pos_val = sum(p.get("value", 0) for p in positions if str(p.get("account_id")) == aid)
@@ -517,6 +518,8 @@ def place_stop_loss(
         Dict with status, stoplossOrderId.
     """
     acct = str(account_id or DEFAULT_ACCOUNT_ID)
+    if acct not in ALLOWED_ACCOUNT_IDS:
+        raise ValueError(f"Refusing to place stop-loss on non-whitelisted account {acct!r}")
     valid_until = (date.today() + timedelta(days=valid_days)).isoformat()
 
     payload = {

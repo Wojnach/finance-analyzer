@@ -215,12 +215,22 @@ def record_trade(ticker, direction, strategy, pnl_pct=None, config=None):
             state["new_position_timestamps"][strategy] = []
         state["new_position_timestamps"][strategy].append(now_str)
 
-        # Prune old timestamps (keep last 24h)
+        # Prune old timestamps (keep last 24h).
+        # M8: guard against naive timestamps from state written before the
+        # UTC-aware fix — fromisoformat on old entries returns naive datetimes
+        # that cannot be compared to the aware cutoff.
         cutoff = now - timedelta(hours=24)
-        state["new_position_timestamps"][strategy] = [
-            ts for ts in state["new_position_timestamps"][strategy]
-            if datetime.fromisoformat(ts) >= cutoff
-        ]
+        pruned = []
+        for ts in state["new_position_timestamps"][strategy]:
+            try:
+                dt = datetime.fromisoformat(ts)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=UTC)
+                if dt >= cutoff:
+                    pruned.append(ts)
+            except (ValueError, TypeError):
+                continue
+        state["new_position_timestamps"][strategy] = pruned
 
     _save_state(state)
 

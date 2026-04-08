@@ -137,12 +137,12 @@ class TestClassifyTierThree:
         ]
         assert classify_tier(reasons, state=state) == 3
 
-    def test_periodic_review_market_hours_at_exactly_2h(self):
-        """During market hours, exactly 2h since last full review should return tier 3."""
+    def test_periodic_review_market_hours_at_exactly_4h(self):
+        """During market hours, exactly 4h since last full review should return tier 3."""
         m, _ = _mock_market_hours()
         try:
             state = {
-                "last_full_review_time": time.time() - 7200,  # exactly 2h ago
+                "last_full_review_time": time.time() - 14400,  # exactly 4h ago
                 "today_date": trigger_mod._today_str(),
                 "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
             }
@@ -151,12 +151,12 @@ class TestClassifyTierThree:
         finally:
             m.stop()
 
-    def test_periodic_review_market_hours_just_under_2h(self):
-        """During market hours, just under 2h should NOT return tier 3."""
+    def test_periodic_review_market_hours_just_under_4h(self):
+        """During market hours, just under 4h should NOT return tier 3 for periodic review."""
         m, _ = _mock_market_hours()
         try:
             state = {
-                "last_full_review_time": time.time() - 7190,  # 10s short of 2h
+                "last_full_review_time": time.time() - 14390,  # 10s short of 4h
                 "today_date": trigger_mod._today_str(),
                 "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
             }
@@ -166,7 +166,7 @@ class TestClassifyTierThree:
             m.stop()
 
     def test_periodic_review_offhours_at_exactly_4h(self):
-        """During off-hours, exactly 4h since last full review should return tier 3."""
+        """During off-hours, exactly 4h since last full review returns tier 1 (budget cap)."""
         m, _ = _mock_offhours()
         try:
             state = {
@@ -175,7 +175,9 @@ class TestClassifyTierThree:
                 "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
             }
             reasons = ["BTC-USD sentiment positive->negative (sustained)"]
-            assert classify_tier(reasons, state=state) == 3
+            # Off-hours periodic review is capped at T1 to preserve T3 budget for
+            # market hours. First-of-day T3 still fires if last_trigger_date != today.
+            assert classify_tier(reasons, state=state) == 1
         finally:
             m.stop()
 

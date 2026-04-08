@@ -395,13 +395,24 @@ class TestPlaceStopLoss:
 
     @patch("portfolio.avanza_session.api_post")
     def test_custom_account_id(self, mock_post, session_file):
-        from portfolio.avanza_session import place_stop_loss
+        """Whitelisted account ID is accepted and propagated to the payload."""
+        from portfolio.avanza_session import ALLOWED_ACCOUNT_IDS, place_stop_loss
 
         mock_post.return_value = {"status": "SUCCESS", "stoplossOrderId": "SL-456"}
 
-        place_stop_loss("856394", 23.0, 22.5, 100, account_id="9999")
+        acct = next(iter(ALLOWED_ACCOUNT_IDS))
+        place_stop_loss("856394", 23.0, 22.5, 100, account_id=acct)
         payload = mock_post.call_args[0][1]
-        assert payload["accountId"] == "9999"
+        assert payload["accountId"] == acct
+
+    @patch("portfolio.avanza_session.api_post")
+    def test_non_whitelisted_account_raises(self, mock_post, session_file):
+        """Non-whitelisted account must be rejected before any API call."""
+        from portfolio.avanza_session import place_stop_loss
+
+        with pytest.raises(ValueError, match="non-whitelisted"):
+            place_stop_loss("856394", 23.0, 22.5, 100, account_id="9999")
+        mock_post.assert_not_called()
 
     @patch("portfolio.avanza_session.api_post")
     def test_follow_downwards_trigger_type(self, mock_post, session_file):

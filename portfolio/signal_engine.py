@@ -1644,40 +1644,44 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         )
 
         activation_rates = load_cached_activation_rates()
+        _accuracy_failed = False
     except Exception:
         logger.error("Accuracy stats load failed", exc_info=True)
         # H3: Fail-closed: gate all signals (0% accuracy, 999 samples) rather than
         # leaving accuracy_data = {} which bypasses the accuracy gate entirely.
         accuracy_data = {sig: {"accuracy": 0.0, "total": 999} for sig in SIGNAL_NAMES}
+        _accuracy_failed = True
 
-    # Overlay regime-specific accuracy when available
-    try:
-        from portfolio.accuracy_stats import (
-            load_cached_regime_accuracy,
-            signal_accuracy_by_regime,
-            write_regime_accuracy_cache,
-        )
-        # BUG-134: Use acc_horizon (not hardcoded "1d") so regime accuracy
-        # matches the prediction horizon (3h/4h/12h/1d).
-        regime_acc = load_cached_regime_accuracy(acc_horizon)
-        if not regime_acc:
-            regime_acc = signal_accuracy_by_regime(acc_horizon)
-            if regime_acc:
-                write_regime_accuracy_cache(acc_horizon, regime_acc)
-        current_regime_data = regime_acc.get(regime, {})
-        for sig_name, rdata in current_regime_data.items():
-            if rdata.get("total", 0) >= 30:
-                accuracy_data[sig_name] = rdata
-    except Exception:
-        logger.debug("Regime-conditional accuracy unavailable", exc_info=True)
+    # Overlay regime-specific accuracy when available.
+    # H3: Skip all overlays when primary load failed — they would silently restore
+    # real accuracy values for cached signals, negating the fail-closed gate.
+    if not _accuracy_failed:
+        try:
+            from portfolio.accuracy_stats import (
+                load_cached_regime_accuracy,
+                signal_accuracy_by_regime,
+                write_regime_accuracy_cache,
+            )
+            # BUG-134: Use acc_horizon (not hardcoded "1d") so regime accuracy
+            # matches the prediction horizon (3h/4h/12h/1d).
+            regime_acc = load_cached_regime_accuracy(acc_horizon)
+            if not regime_acc:
+                regime_acc = signal_accuracy_by_regime(acc_horizon)
+                if regime_acc:
+                    write_regime_accuracy_cache(acc_horizon, regime_acc)
+            current_regime_data = regime_acc.get(regime, {})
+            for sig_name, rdata in current_regime_data.items():
+                if rdata.get("total", 0) >= 30:
+                    accuracy_data[sig_name] = rdata
+        except Exception:
+            logger.debug("Regime-conditional accuracy unavailable", exc_info=True)
 
     # BUG-158: Override global accuracy with per-ticker accuracy for ALL signals.
     # Per-ticker variance is enormous: fear_greed is 93.8% on XAG-USD but 25.9%
     # globally. Using global accuracy throws away alpha on specific instruments.
-    # Use the cached per-ticker cross-tab (populated above for regime gating).
-    # Fall back to extra_info LLM-specific fields for backwards compat.
+    # H3: Skip when primary load failed to preserve fail-closed gate.
     _PER_TICKER_MIN_SAMPLES = 30
-    if _ticker_acc_data:
+    if not _accuracy_failed and _ticker_acc_data:
         for sig_name, t_stats in _ticker_acc_data.items():
             if t_stats.get("total", 0) >= _PER_TICKER_MIN_SAMPLES:
                 accuracy_data[sig_name] = {
@@ -1686,7 +1690,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                     "correct": t_stats.get("correct", 0),
                     "pct": t_stats.get("pct", round(t_stats["accuracy"] * 100, 1)),
                 }
-    else:
+    elif not _accuracy_failed:
         # Fallback: LLM-specific per-ticker data from extra_info
         for llm_sig in ("qwen3", "ministral"):
             per_ticker_acc = extra_info.get(f"{llm_sig}_accuracy")
@@ -1700,33 +1704,35 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 }
 
     # Utility boost: scale accuracy weight by return-based utility score.
-    # Signals that catch large moves (high avg_return) get a confidence boost
-    # capped at 1.5x, applied only when >= 30 samples exist and avg_return > 0.
-    try:
-        from portfolio.accuracy_stats import signal_utility
-        # BUG-135: Use acc_horizon (not hardcoded "1d") so utility boost
-        # reflects the actual prediction horizon's return profile.
-        utility_data = signal_utility(acc_horizon)
-        for sig_name in list(accuracy_data.keys()):
-            u = utility_data.get(sig_name, {})
-            u_score = u.get("avg_return", 0.0)
-            samples = u.get("samples", 0)
-            if samples >= 30 and u_score > 0:
-                boost = min(1.0 + u_score, 1.5)
-                if sig_name in accuracy_data:
-                    # BUG-136: Build a new dict instead of mutating in-place.
-                    # The accuracy_data may be a reference to cached alltime data.
-                    boosted_acc = min(accuracy_data[sig_name]["accuracy"] * boost, 0.95)
-                    accuracy_data[sig_name] = {
-                        **accuracy_data[sig_name],
-                        "accuracy": boosted_acc,
-                    }
-    except Exception:
-        logger.debug("Utility weighting unavailable", exc_info=True)
+    # Utility boost and best-horizon overlay.
+    # H3: Skip when primary load failed to preserve fail-closed gate.
+    if not _accuracy_failed:
+        try:
+            from portfolio.accuracy_stats import signal_utility
+            # BUG-135: Use acc_horizon (not hardcoded "1d") so utility boost
+            # reflects the actual prediction horizon's return profile.
+            utility_data = signal_utility(acc_horizon)
+            for sig_name in list(accuracy_data.keys()):
+                u = utility_data.get(sig_name, {})
+                u_score = u.get("avg_return", 0.0)
+                samples = u.get("samples", 0)
+                if samples >= 30 and u_score > 0:
+                    boost = min(1.0 + u_score, 1.5)
+                    if sig_name in accuracy_data:
+                        # BUG-136: Build a new dict instead of mutating in-place.
+                        # The accuracy_data may be a reference to cached alltime data.
+                        boosted_acc = min(accuracy_data[sig_name]["accuracy"] * boost, 0.95)
+                        accuracy_data[sig_name] = {
+                            **accuracy_data[sig_name],
+                            "accuracy": boosted_acc,
+                        }
+        except Exception:
+            logger.debug("Utility weighting unavailable", exc_info=True)
 
-    # Multi-horizon: optionally use each signal's best horizon accuracy
+    # Multi-horizon: optionally use each signal's best horizon accuracy.
+    # H3: Skip when primary load failed to preserve fail-closed gate.
     sig_cfg = (config or {}).get("signals", {})
-    if sig_cfg.get("use_best_horizon", False):
+    if not _accuracy_failed and sig_cfg.get("use_best_horizon", False):
         try:
             from portfolio.accuracy_stats import signal_best_horizon_accuracy
             best_hz = signal_best_horizon_accuracy(min_samples=50)

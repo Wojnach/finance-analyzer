@@ -511,7 +511,10 @@ def check_portfolio_drawdown(positions, prices, since_ts=None):
         total_inv += pos["entry"] * pos["units"]
 
     if total_inv == 0:
-        return {"breached": False, "current_drawdown_pct": 0, "level": "none"}
+        return {
+            "breached": False, "current_drawdown_pct": 0, "level": "none",
+            "current_pnl_pct": 0, "peak_value": 0, "current_value": 0, "invested_value": 0,
+        }
 
     current_pnl_pct = ((total_val / total_inv) - 1) * 100
 
