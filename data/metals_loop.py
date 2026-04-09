@@ -30,6 +30,7 @@ Run: .venv/Scripts/python.exe data/metals_loop.py
 import atexit
 import datetime
 import json
+import logging
 import os
 import platform
 import shutil
@@ -38,6 +39,13 @@ import sys
 import time
 import traceback
 from pathlib import Path
+
+# 2026-04-09: Python logging added alongside the existing print-based `log()`
+# helper (which writes to metals_loop_out.txt via _safe_print). `logger` is
+# used only by newly-added observability calls at bare-except sites that
+# previously swallowed errors silently. Existing log()/send_telegram() calls
+# are unchanged. Default level is WARNING; raise to DEBUG for verbose debug.
+logger = logging.getLogger("metals_loop")
 
 try:
     from zoneinfo import ZoneInfo
@@ -777,7 +785,7 @@ def _silver_fetch_xag():
             _underlying_prices["XAG-USD"] = price
             return price
     except Exception:
-        pass
+        logger.debug("_silver_fetch_xag: Binance FAPI call failed, using cached XAG-USD", exc_info=True)
     return _underlying_prices.get("XAG-USD")
 
 
@@ -1335,6 +1343,11 @@ except ImportError:
 FISHING_TRAIL_START_PCT = 0.0       # trail immediately (no gain threshold)
 FISHING_EOD_SELL_MINUTE_CET = (21, 50)  # sell fishing positions at 21:50 CET
 _eod_fishing_sold_today: str = ""   # date string guard — prevent repeated EOD sells
+# 2026-04-09: log-once set for unknown ob_ids in detect_holdings — previously
+# emitted every 30s when account held a warrant not in KNOWN_WARRANT_OB_IDS
+# (e.g. unrecognized issuer), flooding the log and hiding real issues. Only
+# warn the first time each unknown id appears per process lifetime.
+_WARNED_UNKNOWN_OB_IDS: set[str] = set()
 
 
 def _eod_sell_fishing_positions(page):
@@ -1408,7 +1421,7 @@ def _reconcile_fish_engine_position(held_ob_ids, changes):
     try:
         atomic_write_json(str(DATA_DIR / "fish_engine_state.json"), _fish_engine.to_dict())
     except Exception:
-        pass
+        logger.warning("_reconcile_fish_engine_position: fish_engine_state.json write failed ob_id=%s", ob_id, exc_info=True)
 
     changes.append(f"FISH CLOSED: {nm} {volume}u (external, est P&L: {pnl_recorded:+.0f} SEK)")
     send_telegram(
@@ -1504,7 +1517,9 @@ def detect_holdings(page):
                     log(f"Holdings: NEW instrument detected: {key} = {info['name']} "
                         f"({holding['units']}u @ {entry_price}){tag}")
                 else:
-                    log(f"Holdings: unknown ob_id {ob_id} ({holding.get('name', '?')}) — skipping")
+                    if ob_id not in _WARNED_UNKNOWN_OB_IDS:
+                        log(f"Holdings: unknown ob_id {ob_id} ({holding.get('name', '?')}) — skipping (suppressing further warnings for this id)")
+                        _WARNED_UNKNOWN_OB_IDS.add(ob_id)
 
         # Check for REMOVED instruments (held in POSITIONS but not on Avanza)
         for key, pos in POSITIONS.items():
@@ -1839,7 +1854,7 @@ def _run_fish_engine_tick():
                     _fish_engine.from_dict(state_data)  # instance method, restores state in-place
                     log(f"Fish engine restored: mode={_fish_engine.mode}, pnl={_fish_engine.session_pnl:+.0f}")
             except Exception:
-                pass
+                logger.warning("_run_fish_engine_tick: fish engine state restore failed, starting fresh", exc_info=True)
             log(f"Fish engine initialized: mode={_fish_engine.mode}")
         except ImportError as e:
             log(f"Fish engine import failed: {e}")
@@ -1857,6 +1872,7 @@ def _run_fish_engine_tick():
         if not summary:
             summary = _load_json_state(DATA_DIR / "agent_summary_compact.json", {}, "fish_sig2")
     except Exception:
+        logger.debug("_run_fish_engine_tick: agent_summary_compact load failed, using empty dict", exc_info=True)
         summary = {}
 
     xag_sig = (summary.get("signals") or {}).get("XAG-USD", {})
@@ -1885,7 +1901,7 @@ def _run_fish_engine_tick():
             event_hours = 999
         high_impact = bool(econ_ind.get("risk_high_impact_within_4h", False))
     except Exception:
-        pass
+        logger.debug("_run_fish_engine_tick: enhanced signals parse failed, defaulting news/econ to HOLD", exc_info=True)
 
     # Read Layer 2 journal for latest XAG-USD context
     layer2_outlook = ''
@@ -1920,9 +1936,10 @@ def _run_fish_engine_tick():
                                 break
                         break
                 except Exception:
+                    logger.debug("_run_fish_engine_tick: layer2 journal line parse failed, skipping", exc_info=True)
                     continue
     except Exception:
-        pass
+        logger.debug("_run_fish_engine_tick: layer2_journal.jsonl read failed, defaulting layer2_* to empty", exc_info=True)
 
     # Monte Carlo bands
     mc_bands_1d = xag_mc.get('price_bands_1d', {})
@@ -1943,7 +1960,7 @@ def _run_fish_engine_tick():
                 prophecy_conviction = float(belief.get('conviction', 0) or 0)
                 break
     except Exception:
-        pass
+        logger.debug("_run_fish_engine_tick: prophecy parse failed, defaulting to 0", exc_info=True)
 
     # Check trade guard from metals risk
     trade_guard_ok = True
@@ -1958,7 +1975,7 @@ def _run_fish_engine_tick():
             else:
                 trade_guard_ok = bool(guard)
     except Exception:
-        pass
+        logger.debug("_run_fish_engine_tick: check_trade_guard raised, defaulting trade_guard_ok=True", exc_info=True)
 
     # Get spread from current quotes (use metals loop's own page, not avanza_session)
     spread_pct = 0.3  # default
@@ -1971,7 +1988,7 @@ def _run_fish_engine_tick():
                 if _bid > 0 and _ask > 0:
                     spread_pct = (_ask - _bid) / _bid * 100
     except Exception:
-        pass
+        logger.debug("_run_fish_engine_tick: spread fetch (ob 1650161) failed, using default 0.3%%", exc_info=True)
 
     # Build state
     now = datetime.datetime.now()
@@ -2042,7 +2059,7 @@ def _run_fish_engine_tick():
     try:
         atomic_write_json(str(DATA_DIR / "fish_engine_state.json"), _fish_engine.to_dict())
     except Exception:
-        pass
+        logger.warning("_run_fish_engine_tick: post-decision fish_engine_state.json write failed", exc_info=True)
 
 
 def _fish_engine_execute_buy(decision, price):
@@ -2080,7 +2097,7 @@ def _fish_engine_execute_buy(decision, price):
                 elif acct is not None:
                     bp = float(acct)
             except Exception:
-                pass
+                logger.warning("_fish_engine_execute_buy: fetch_account_cash failed account_id=%s, falling back to 1500 SEK", ACCOUNT_ID, exc_info=True)
         if bp <= 0:
             # Metals loop can't fetch cash — use safe fixed budget for fishing
             bp = 1500.0
@@ -2459,7 +2476,7 @@ def compute_probability_report():
                             "confidence": round(cons.get("confidence", 0), 3),
                         }
             except Exception:
-                pass
+                logger.debug("compute_probability_report: get_llm_signals failed ticker=%s, entry defaults to flat", ticker, exc_info=True)
 
         # --- Combined direction probability ---
         up_score, down_score, total_weight = 0, 0, 0
@@ -2509,7 +2526,7 @@ def compute_probability_report():
                         down_score += w * 0.7
                         total_weight += w
             except Exception:
-                pass
+                logger.debug("compute_probability_report: get_fear_greed failed ticker=%s", ticker, exc_info=True)
 
             # On-chain bias for BTC
             if ticker == "BTC-USD":
@@ -2526,7 +2543,7 @@ def compute_probability_report():
                                 down_score += w * 0.6
                             total_weight += w
                 except Exception:
-                    pass
+                    logger.debug("compute_probability_report: get_onchain_summary failed ticker=%s", ticker, exc_info=True)
 
         # MSTR: price-only, no signals — use BTC correlation as proxy
         if ticker == "MSTR":
@@ -2598,7 +2615,7 @@ def compute_probability_report():
                             "samples": v["total"],
                         }
             except Exception:
-                pass
+                logger.debug("compute_probability_report: get_accuracy_report failed ticker=%s", ticker, exc_info=True)
 
         # --- Individual signal votes (from vote_detail) ---
         vote_detail = sig.get("vote_detail", "")
@@ -2625,7 +2642,7 @@ def _parse_vote_detail(vote_detail):
                 signals = [s.strip() for s in part[2:].split(",") if s.strip()]
                 result["sell"] = signals
     except Exception:
-        pass
+        logger.debug("_parse_vote_detail: vote_detail parse failed, returning empty", exc_info=True)
     return result
 
 
@@ -2677,7 +2694,7 @@ def build_probability_telegram(prob_report, cet_str):
             if fg:
                 fg_tag = f" · F&G {fg['value']}"
         except Exception:
-            pass
+            logger.debug("build_probability_telegram: get_fear_greed failed, omitting F&G tag", exc_info=True)
 
     first_line = f"*PROB* · {' · '.join(watch_parts)}{fg_tag}"
     lines = [first_line, ""]
@@ -2750,7 +2767,7 @@ def build_probability_telegram(prob_report, cet_str):
                         if nav:
                             lines.append(f"`  NAV: ${nav['nav_per_share']:.0f} prem:{nav['premium_pct']:+.0f}%`")
                 except Exception:
-                    pass
+                    logger.debug("build_probability_telegram: MSTR price/NAV fetch failed, skipping line", exc_info=True)
 
         lines.append("")
 
@@ -2989,7 +3006,7 @@ def emergency_sell(page, key, pos, bid):
         try:
             _rearm_stops_after_failed_sell(pos["ob_id"], sl_snapshot)
         except Exception:
-            pass
+            logger.error("emergency_sell: stop rearm inside outer failure path raised — position may be NAKED ob_id=%s key=%s", pos.get("ob_id"), key, exc_info=True)
         return False
 
 def _cleanup_stop_orders_for(page, key):
@@ -3097,7 +3114,7 @@ def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0):
                 f"Cannot read SL inventory; SELL aborted to avoid naked position."
             )
         except Exception:
-            pass
+            logger.debug("_ensure_stops_cancelled_before_sell: telegram notify failed ob=%s (snapshot-failed path)", ob_str, exc_info=True)
         return False, []
 
     if not pre_cancel_snapshot:
@@ -3184,7 +3201,7 @@ def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0):
                     f"Manual review recommended."
                 )
             except Exception:
-                pass
+                logger.debug("_ensure_stops_cancelled_before_sell: telegram notify failed ob=%s (reconcile-failed path)", ob_str, exc_info=True)
 
     # STEP 3: Local cascade housekeeping (best-effort, after server cancel).
     # The state entry stays — _cleanup_stop_orders_for handles deletion
@@ -3225,7 +3242,7 @@ def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0):
             f"SELL aborted to avoid short.sell.not.allowed"
         )
     except Exception:
-        pass
+        logger.debug("_ensure_stops_cancelled_before_sell: telegram notify failed ob=%s (cancel-failed path)", ob_str, exc_info=True)
     # Return only the stops we actually cancelled — re-arming the full
     # pre-cancel snapshot here would create duplicates of the stops still
     # alive at the broker, inflating encumbered volume.
@@ -3329,7 +3346,7 @@ def _rearm_stops_after_failed_sell(ob_id, snapshot):
                 f"Position is naked. Manual intervention required."
             )
         except Exception:
-            pass
+            logger.debug("_rearm_stops_after_failed_sell: telegram notify failed ob=%s (naked-position alert path)", ob_id, exc_info=True)
         return
 
     status = result.get("status", "FAILED")
@@ -3351,7 +3368,7 @@ def _rearm_stops_after_failed_sell(ob_id, snapshot):
                 f"Manual review required — position protection may be incomplete."
             )
         except Exception:
-            pass
+            logger.debug("_rearm_stops_after_failed_sell: telegram notify failed ob=%s (partial-rearm alert path)", ob_id, exc_info=True)
 
 
 def _load_stop_orders():
@@ -4352,7 +4369,7 @@ def place_spike_orders(page, positions, prices, targets):
                                 f"spike order cancelled, full stops restored."
                             )
                         except Exception:
-                            pass
+                            logger.debug("place_spike_orders: telegram notify failed key=%s (rollback-notice path)", key, exc_info=True)
                         # Don't add to placed[] — order was rolled back
                 else:
                     # Spike volume covers full position — no remainder to protect.
@@ -4478,7 +4495,7 @@ def _rollback_spike_order_and_restore(spike_order_id, ob_id, original_snapshot):
             f"Manual cancel + stop restore required."
         )
     except Exception:
-        pass
+        logger.debug("_rollback_spike_order_and_restore: telegram notify failed order=%s (rollback-incomplete path)", spike_order_id, exc_info=True)
 
 
 def _resize_snapshot_volume(snapshot, new_volume: int) -> list:
@@ -4778,7 +4795,7 @@ def _restore_full_stop_protection(ob_id, original_snapshot) -> bool:
                     f"to next loop iteration to avoid double-encumbrance."
                 )
             except Exception:
-                pass
+                logger.debug("_restore_full_stop_protection: telegram notify failed ob=%s (restore-deferred path)", ob_id, exc_info=True)
             return False  # caller keeps snapshot for retry
     except Exception as e:
         log(f"[spike] clear-resized-stops failed for {ob_id}: {e}")
@@ -4806,7 +4823,7 @@ def _restore_full_stop_protection(ob_id, original_snapshot) -> bool:
                 f"Manual review required — position may be partially naked."
             )
         except Exception:
-            pass
+            logger.debug("_restore_full_stop_protection: telegram notify failed ob=%s (restore-partial path)", ob_id, exc_info=True)
         # CODEX-5 finding 3: PARTIAL must NOT be treated as terminal
         # success. Even if SOME stops were re-armed, the failed subset
         # leaves part of the volume naked. Returning False keeps the
@@ -4822,7 +4839,7 @@ def _restore_full_stop_protection(ob_id, original_snapshot) -> bool:
                 f"Position has reduced protection. Manual intervention required."
             )
         except Exception:
-            pass
+            logger.debug("_restore_full_stop_protection: telegram notify failed ob=%s (restore-failed path)", ob_id, exc_info=True)
         return False
 
 
@@ -4902,7 +4919,7 @@ def log_invocation(tier, model, trigger, check_num, invoke_num, elapsed_s=None, 
     try:
         atomic_append_jsonl(INVOCATION_LOG, entry)
     except Exception:
-        pass
+        logger.warning("log_invocation: %s write failed tier=%s trigger=%s", INVOCATION_LOG, tier, trigger, exc_info=True)
 
 
 def write_context(prices, trigger_reason, tier=2):
@@ -4970,7 +4987,7 @@ def write_context(prices, trigger_reason, tier=2):
         try:
             ctx["llm_predictions"] = get_llm_summary()
         except Exception:
-            pass
+            logger.debug("write_context: get_llm_summary failed, leaving llm_predictions empty", exc_info=True)
 
     # Risk summary (Monte Carlo + drawdown + guards)
     if RISK_AVAILABLE:
@@ -5172,7 +5189,7 @@ def check_triggers(prices):
                 if fg_val <= 10 or fg_val >= 85:
                     reasons.append(f"F&G extreme: {fg_val} ({fg['classification']})")
         except Exception:
-            pass
+            logger.debug("check_triggers: get_fear_greed failed, skipping F&G trigger check", exc_info=True)
 
     # LLM consensus trigger (high confidence + proven accuracy)
     if LLM_AVAILABLE and check_count > 5:
@@ -5191,7 +5208,7 @@ def check_triggers(prices):
                     action = "BUY" if direction == "up" else "SELL"
                     reasons.append(f"LLM consensus {ticker}: {action} ({confidence:.0%})")
         except Exception:
-            pass
+            logger.debug("check_triggers: get_llm_signals/accuracy failed, skipping LLM consensus trigger", exc_info=True)
 
     # Drawdown circuit breaker
     if RISK_AVAILABLE and check_count % 10 == 0 and check_count > 0:
@@ -5202,7 +5219,7 @@ def check_triggers(prices):
             elif dd.get("level") == "WARNING":
                 reasons.append(f"drawdown warning: {dd['current_drawdown_pct']:.1f}%")
         except Exception:
-            pass
+            logger.warning("check_triggers: check_portfolio_drawdown failed — drawdown circuit breaker not evaluated this cycle", exc_info=True)
 
     # Heartbeat (every ~30 min)
     if check_count > 0 and check_count % HEARTBEAT_CHECKS == 0:
@@ -5555,7 +5572,7 @@ def _autonomous_decision(trigger_reasons, blocked_tier):
                 if llm_entry:
                     llm_data[ticker] = llm_entry
         except Exception:
-            pass
+            logger.debug("_autonomous_decision: get_llm_signals failed, llm_data stays empty", exc_info=True)
 
     prediction = _make_autonomous_prediction(signals_data, llm_data)
     thesis_status = _assess_thesis(positions_data, signals_data, trigger_reasons)
@@ -6043,7 +6060,7 @@ Positions: {pos_summary}{prob_summary}""")
                                         peak_bids[key] = p["bid"]
                                         last_invoke_prices[key] = p["bid"]
                                 except Exception:
-                                    pass
+                                    logger.warning("main_loop: fetch_price failed seeding peak_bid for %s ob_id=%s — trailing stop will use entry price", key, pos.get("ob_id"), exc_info=True)
                         if STOP_ORDER_ENABLED:
                             stop_order_state = place_stop_loss_orders(page, POSITIONS)
                         # Initialize silver fast-tick if new silver position detected
@@ -6148,7 +6165,7 @@ Positions: {pos_summary}{prob_summary}""")
                             if sp:
                                 short_prices[sk] = sp
                         except Exception:
-                            pass
+                            logger.debug("main_loop: short instrument fetch_price failed key=%s ob_id=%s", sk, si.get("ob_id"), exc_info=True)
 
                 # Read signal data periodically (every ~2 min)
                 if check_count % 4 == 0:
@@ -6200,7 +6217,7 @@ Positions: {pos_summary}{prob_summary}""")
                     try:
                         log_portfolio_value(POSITIONS, prices)
                     except Exception:
-                        pass
+                        logger.warning("main_loop: log_portfolio_value failed — drawdown circuit breaker will lag this cycle", exc_info=True)
 
                 # --- SPIKE CATCHER: US open limit sell orders ---
                 if SPIKE_ENABLED and RISK_AVAILABLE and daily_range_stats and check_count > 3:
@@ -6414,7 +6431,7 @@ Positions: {pos_summary}{prob_summary}""")
                         try:
                             acc_tag = f" ACC:[{get_accuracy_summary()}]"
                         except Exception:
-                            pass
+                            logger.debug("main_loop: get_accuracy_summary failed, omitting ACC tag", exc_info=True)
                     pos_str = ' | '.join(parts) if parts else "no positions"
                     log(f"#{check_count} [{cet}] {pos_str}{und_tag}{acc_tag}" +
                         (f" [TRIGGER: {reasons[0]}]" if triggered else ""))

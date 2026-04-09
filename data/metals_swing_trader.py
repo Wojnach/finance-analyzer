@@ -11,9 +11,16 @@ Usage from metals_loop.py:
 
 import datetime
 import json
+import logging
 import time
 
 import requests
+
+# 2026-04-09: Python logging added alongside the existing print-based `_log()`
+# helper. `logger` is only used by newly-added observability calls at
+# bare-except sites that previously swallowed errors silently. Existing
+# _log() / _send_telegram() calls are unchanged.
+logger = logging.getLogger("metals_swing_trader")
 from metals_swing_config import (
     ACCOUNT_ID,
     BUY_COOLDOWN_MINUTES,
@@ -176,6 +183,7 @@ def _send_telegram(msg):
                 "chat_id": cfg["telegram"]["chat_id"],
             }
         except Exception:
+            logger.warning("_send_telegram: config.json telegram block read failed, telegram disabled for this process", exc_info=True)
             _tg_config = {}
 
     if not _tg_config.get("token"):
@@ -190,7 +198,7 @@ def _send_telegram(msg):
             _log(f"[TG muted] {msg[:80]}")
             return
     except Exception:
-        pass
+        logger.debug("_send_telegram: mute_all check failed, proceeding with send", exc_info=True)
 
     try:
         requests.post(
@@ -1411,7 +1419,7 @@ class SwingTrader:
             if elapsed_min < required_min:
                 return False
         except Exception:
-            pass
+            logger.warning("SwingTrader._cooldown_cleared: corrupt last_buy_ts=%r — clearing cooldown", last_ts, exc_info=True)
 
         return True
 
