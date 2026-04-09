@@ -214,8 +214,21 @@ These are significant reliability improvements backed by 265 lines of tests.
 
 *Agent results will be merged below as they complete.*
 
-### Signals-Core Agent
-*(agent still running — integrate in follow-up commit)*
+### Signals-Core Agent — COMPLETE
+
+**Key findings (7 total: 4 HIGH, 3 MEDIUM):**
+
+| ID | Sev | Finding |
+|----|-----|---------|
+| SC-R4-1 | HIGH | **NEW**: `outcome_tracker.py` raw `open("rb")` + `os.replace` races with live loop `atomic_append_jsonl`. On Windows, `os.replace` on open file raises `PermissionError` — signal data loss during daily 18:00 backfill. |
+| SC-R4-2 | HIGH | M1 variant still open: `regime_accuracy_cache.json` and `ticker_signal_accuracy_cache.json` still use shared `"time"` key — stale accuracy data served as fresh for wrong horizon. |
+| SC-R4-3 | HIGH | **NEW**: `signal_accuracy_cost_adjusted` has bps/pct unit confusion — `cost_bps=5` disables cost filter silently. |
+| SC-R4-4 | HIGH | **NEW**: `signal_weight_optimizer.py:27` uses relative path `"data/models/..."` — results written to wrong directory under scheduled tasks, load always returns None. |
+| SC-R4-5 | MED | `forecast_accuracy.py` reads JSONL with raw `path.read_text().splitlines()` — Rule 4 violation (3 locations). |
+| SC-R4-6 | MED | `signal_history.py` — dead code module, has race condition if ever activated. |
+| SC-R4-7 | MED | `accuracy_stats.py` `_load_accuracy_snapshots` raw read — drift-detection alarm misses recent data. |
+
+**Round 3 verified**: C1 (CLOSED — 3-tuple key sufficient), C2 (CLOSED), H1 (CLOSED), H2 (CLOSED), H3 (CLOSED), M1 (PARTIAL — 2 cache files remain)
 
 ### Orchestration Agent — COMPLETE
 
@@ -343,7 +356,17 @@ checklist of all cadence-dependent constants:
 - **AV-R4-4 (fetch_positions returns all accounts)**: VALIDATED. The JS filter fails open
   on empty string — should fail closed.
 
-*(Remaining 5 agents still running — cross-critique will be extended in follow-up commit)*
+**Signals-core agent**:
+- **SC-R4-1 (outcome_tracker race)**: VALIDATED. The Windows `os.replace` on an open file
+  raising `PermissionError` is a real race during the daily 18:00 backfill. This explains
+  occasional `signal_log.jsonl` corruption reports.
+- **SC-R4-4 (relative path in optimizer)**: VALIDATED. Classic cwd-dependent path bug.
+  The optimizer silently writes to the wrong location and reads always return None.
+- **C1 upgrade**: The agent considers the 3-tuple key `(id(df), len(df), close[-1])`
+  sufficient for GC-reuse protection. I agree — the collision probability is astronomically
+  low in practice.
+
+*(Remaining 4 agents still running — cross-critique will be extended in follow-up commit)*
 
 ---
 
@@ -358,7 +381,8 @@ checklist of all cadence-dependent constants:
 | Orchestration agent new findings | 9 (1 CRIT, 3 HIGH, 4 MED, 1 LOW) |
 | Portfolio-risk agent new findings | 9 (5 CRIT, 4 HIGH) |
 | Avanza-API agent new findings | 8 (4 HIGH, 4 MED) |
-| **Total active findings** | **~46** |
+| Signals-core agent new findings | 7 (4 HIGH, 3 MED) |
+| **Total active findings** | **~53** |
 
 **Net progress**: Round 3 had 67 total findings. ~19 confirmed fixed, ~3 partially fixed.
 11 new findings discovered. Active finding count dropped from 67 to ~20.
