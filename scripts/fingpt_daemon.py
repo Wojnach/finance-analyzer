@@ -59,8 +59,20 @@ def _warm_load():
     """Acquire the GPU lock once, load the fingpt model, release. Returns (name, path, model)."""
     import fingpt_infer  # imported from /mnt/q/models via sys.path injection above
 
-    # Model selection mirrors fingpt_infer.predict_headlines lines 130-141
-    name, path = fingpt_infer._find_model()
+    # IMPORTANT: fingpt_infer._find_model() picks the first entry in dict
+    # order, which is finance-llama-8b (~5 GB VRAM). Running that as a
+    # persistent sidecar next to llama-server (another ~5 GB) exhausts the
+    # 10 GB RTX 3080 budget and starves Kronos/Chronos forecast inference
+    # — we measured this on first deploy (see merge 0e1697a, initial
+    # restart logs at 13:52-13:56 on 2026-04-09). Prefer the 1.2B sentiment
+    # model (~1.5 GB VRAM) explicitly when available; fall back to
+    # auto-detection only if the small model is missing.
+    _PREFERRED_MODEL = "fingpt-sentiment-1.2b"
+    preferred_path = fingpt_infer.MODEL_PATHS.get(_PREFERRED_MODEL)
+    if preferred_path is not None and Path(preferred_path).exists():
+        name, path = _PREFERRED_MODEL, str(preferred_path)
+    else:
+        name, path = fingpt_infer._find_model()
     if not path or not Path(path).exists():
         raise RuntimeError(f"No sentiment GGUF model found. Checked: {list(fingpt_infer.MODEL_PATHS.values())}")
 
