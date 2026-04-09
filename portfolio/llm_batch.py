@@ -223,7 +223,15 @@ def _flush_fingpt_phase(f_batch: list[tuple[str, str, dict]]) -> None:
                     "prompt": prompt,
                     "n_predict": 30,
                     "temperature": 0.1,
-                    "stop": ["\n", "<|eot_id|>"],
+                    # 2026-04-09 (fix/fingpt-parser-prompt): ["\n\n"] only.
+                    # Old stop ["\n", "<|eot_id|>"] was designed for the Llama-3
+                    # chat-format prompt that wiroai-finance-llama-8b doesn't
+                    # recognize. New CUMULATIVE_PROMPT is a plain-text one-shot
+                    # template that ends each section with a blank line, so
+                    # "\n\n" is the natural stop. The <|eot_id|> token was never
+                    # emitted by this model (it's not chat-tuned) so removing
+                    # it is a no-op.
+                    "stop": ["\n\n"],
                 })
                 meta.append((ab_key, sub_key, ctx, 0))
             else:
@@ -239,7 +247,13 @@ def _flush_fingpt_phase(f_batch: list[tuple[str, str, dict]]) -> None:
                         "prompt": template.format(headline=headline),
                         "n_predict": 20,
                         "temperature": 0.1,
-                        "stop": ["\n", "<|eot_id|>", "[INST]"],
+                        # 2026-04-09 (fix/fingpt-parser-prompt): ["\n\n"] only.
+                        # Same reason as the cumulative case above. The old
+                        # stop ["\n", "<|eot_id|>", "[INST]"] cut the few-shot
+                        # prompt apart at the first newline, which is exactly
+                        # where the expected answer word appears — so even a
+                        # correctly-answering model would have been silenced.
+                        "stop": ["\n\n"],
                     })
                     meta.append((ab_key, sub_key, ctx, i))
 
@@ -292,15 +306,14 @@ def _parse_fingpt_completion(text: str | None, fingpt_infer) -> dict | None:
     expects. Returns None on hard failure (the None bubbles up to the A/B
     logger which writes a tagged fingpt:error entry).
 
-    NOTE 2026-04-09: current observation is that this parser returns a
-    constant "neutral, 0.7 confidence" for almost every real headline in
-    the A/B log — see project_fingpt_parser_defaulting_neutral memory.
-    The root cause is in fingpt_infer._parse_sentiment / _estimate_confidence
-    or in the PROMPT_TEMPLATES["finance-llama-8b"] template not matching
-    the wiroai-finance-llama-8b-q4_k_m.gguf model output format. Scheduled
-    follow-up investigation after this PR merges. Fixing that bug will
-    immediately improve the A/B log quality without any further changes
-    here because this function only wraps the upstream parser's output.
+    2026-04-09 (fix/fingpt-parser-prompt): the original fingpt migration
+    left this wrapper untouched because the parser bug was upstream in
+    fingpt_infer._parse_sentiment / _estimate_confidence + the Llama-3
+    chat template in PROMPT_TEMPLATES["finance-llama-8b"]. That was all
+    fixed in the same commit as this comment update — wiroai-finance-llama-8b
+    is a completion model and the new few-shot plain-text templates make
+    it emit clean sentiment words. See /mnt/q/models/fingpt_infer.py for
+    the parser + template changes.
     """
     if text is None:
         return None
