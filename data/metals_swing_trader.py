@@ -129,10 +129,22 @@ def _log(msg):
     # 2026-04-09 Stage 1 shim: delegate to logger.info. The [SWING] tag is
     # preserved in the message body so existing grep-based operator workflows
     # (e.g. `grep SWING metals_loop_out.txt`) still work. The timestamp +
-    # level prefix comes from metals_loop.py's basicConfig (we share the
-    # process). See docs/LOG_MIGRATION_AUDIT_20260409.md for the migration
-    # plan context.
-    logger.info(f"[SWING] {msg}")
+    # level prefix comes from metals_loop.py's Stage 1 handler (we're a
+    # child logger under `metals_loop.swing_trader`, so we inherit level
+    # and propagate to the parent's _LazyStdoutHandler).
+    #
+    # Library fallback (codex review v4 finding MEDIUM, 2026-04-09): when
+    # this module is imported outside the metals_loop entrypoint AND no
+    # caplog/handler is attached, our logger inherits WARNING level from
+    # root by default and drops the INFO record. Fall back to a plain
+    # stdout print in that case so standalone imports still see operator
+    # output. Under pytest caplog at the `metals_loop` parent this branch
+    # is NOT taken — caplog sets level INFO and attaches a handler.
+    if logger.isEnabledFor(logging.INFO):
+        logger.info(f"[SWING] {msg}")
+    else:
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"[{ts}] [INFO] [SWING] {msg}", flush=True)
 
 
 def _now_utc():

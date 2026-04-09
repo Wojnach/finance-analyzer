@@ -70,21 +70,49 @@ from pathlib import Path
 
 
 class _LazyStdoutHandler(logging.StreamHandler):
-    """StreamHandler that re-resolves sys.stdout on every emit.
+    """StreamHandler with lazy stdout resolution + UnicodeEncodeError fallback.
 
-    Used by `_install_stage1_logging()`. Re-resolution makes the handler
-    capsys-friendly (pytest swaps sys.stdout per-test, but a normal
-    StreamHandler binds the reference at construction time and ends up
-    writing to the stale original). In production under metals-loop.bat,
-    sys.stdout is stable, so lazy resolution is a no-op cost.
+    Two behaviors on top of stdlib StreamHandler:
+
+    1. Re-resolves `sys.stdout` on every emit so pytest capsys (which
+       swaps sys.stdout per-test) works correctly. In production under
+       metals-loop.bat, sys.stdout is stable, so lazy resolution is a
+       no-op cost.
+
+    2. Catches UnicodeEncodeError from the underlying write and falls
+       back to an ASCII-sanitized form via `_safe_print`. Needed for
+       Windows non-UTF consoles when `sys.stdout.reconfigure()` wasn't
+       callable at startup (older Python or non-tty stream) — replaces
+       the old `_safe_print`-based safety net that was the only reason
+       `_safe_print` existed in the first place.
     """
 
     def __init__(self) -> None:
         super().__init__(stream=sys.stdout)
 
     def emit(self, record: logging.LogRecord) -> None:
+        # 1. Re-resolve sys.stdout for pytest capsys compatibility.
         self.stream = sys.stdout
-        super().emit(record)
+        # 2. Write directly (NOT via super().emit()) so we can catch
+        #    UnicodeEncodeError ourselves. super().emit() has its own
+        #    try/except that routes exceptions through self.handleError,
+        #    which would bypass our ASCII sanitization fallback.
+        try:
+            msg = self.format(record)
+            self.stream.write(msg + self.terminator)
+            self.flush()
+        except UnicodeEncodeError:
+            # Sanitize the formatted message to ASCII-replace and retry.
+            # Same idea as the old `_safe_print` fallback, now integrated
+            # into the logging path so every logger.* call benefits.
+            try:
+                safe = msg.encode("ascii", "replace").decode("ascii")
+                self.stream.write(safe + self.terminator)
+                self.flush()
+            except Exception:
+                self.handleError(record)
+        except Exception:
+            self.handleError(record)
 
 
 logger = logging.getLogger("metals_loop")
@@ -795,13 +823,27 @@ def send_telegram(msg):
 
 
 def log(msg):
-    # 2026-04-09 Stage 1 shim: delegate to logger.info so the output gets the
-    # unified [HH:MM:SS] [LEVEL] format from basicConfig. Existing call sites
-    # are unchanged — the old [HH:MM:SS] prefix is now added by the formatter.
-    # If logging.basicConfig hasn't been applied yet (shouldn't happen since
-    # it's at module top), the root logger's default lastResort handler will
-    # still print to stderr, which metals-loop.bat captures via 2>&1.
-    logger.info(msg)
+    # 2026-04-09 Stage 1 shim: delegate to logger.info when a handler is
+    # installed (production `__main__` path where _install_stage1_logging()
+    # ran, or test harness with caplog attached). The output gets the
+    # unified [HH:MM:SS] [LEVEL] format from our formatter.
+    #
+    # Library fallback (codex review v4 finding MEDIUM, 2026-04-09): when
+    # this module is imported outside `__main__` AND nothing attached a
+    # handler (no caplog, no embedding process setup), logger.info() is
+    # dropped because the metals_loop logger's effective level is WARNING
+    # (default) and Python's lastResort handler only emits WARNING+. That
+    # breaks imported/programmatic use where the old `log()` used to write
+    # to stdout unconditionally via `_safe_print`. Fall back to _safe_print
+    # in that case so the old stdout contract is preserved for library
+    # consumers. Under pytest caplog this branch is NOT taken — caplog
+    # attaches a handler, logger.hasHandlers() returns True, and the
+    # logger.info() path is used.
+    if logger.isEnabledFor(logging.INFO):
+        logger.info(msg)
+    else:
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        _safe_print(f"[{ts}] [INFO] {msg}")
 
 def pnl_pct(current, entry):
     if entry == 0: return 0
@@ -1728,17 +1770,17 @@ def _update_stop_orders_for(page, key, pos, stop_order_state):
                 log(f"  Stop S{level+1} {key}: trig={trigger_price} sell={sell_price} vol={level_units}")
             else:
                 log(f"  Stop S{level+1} FAILED for {key}")
-        except Exception:
-            # 2026-04-09 Stage 3: WARNING — per-level stop placement can
-            # fail independently (e.g. one level hits a validation error).
-            # Loop continues placing remaining levels; the orders list only
-            # contains successful placements so _save_stop_orders below
-            # persists what actually landed.
+        except Exception as e:
+            # 2026-04-09 Stage 3 + codex v4 finding HIGH: single-line
+            # warning, NO exc_info. Hot inner loop — per-level × per-position
+            # × per-cycle. Unthrottled tracebacks here can evict the
+            # [LLM] heartbeat lines from scripts/health_check.py's 200-line
+            # tail and trigger false restarts during an outage. Exception
+            # class + message is enough for diagnosis; the top-level
+            # catch-alls in this module preserve full tracebacks.
             logger.warning(
-                "_rebuild_stop_orders_for: Stop S%d placement failed key=%s",
-                level + 1,
-                key,
-                exc_info=True,
+                "_rebuild_stop_orders_for: Stop S%d failed key=%s: %s: %s",
+                level + 1, key, type(e).__name__, e,
             )
 
     if orders:
@@ -1787,17 +1829,14 @@ def update_smart_trailing_stops(page, positions, stop_order_state, prices):
                 if STOP_ORDER_ENABLED and stop_order_state:
                     try:
                         _update_stop_orders_for(page, key, pos, stop_order_state)
-                    except Exception:
-                        # 2026-04-09 Stage 3: WARNING — trailing stop
-                        # local position already updated; the hardware
-                        # stop at the broker is now lagging. Next cycle
-                        # should re-attempt. If this keeps firing the
-                        # broker stop is stale and protection is at the
-                        # OLD level — stack trace helps diagnose.
+                    except Exception as e:
+                        # 2026-04-09 Stage 3 + codex v4: single-line,
+                        # no exc_info. Hot inner loop (per position per
+                        # cycle). The top-level catch in _update_stop_orders_for
+                        # itself captures the full trace if needed.
                         logger.warning(
-                            "update_smart_trailing_stops: hardware stop sync failed key=%s — broker stop is stale",
-                            key,
-                            exc_info=True,
+                            "update_smart_trailing_stops: hardware stop sync failed key=%s — broker stop is stale: %s: %s",
+                            key, type(e).__name__, e,
                         )
 
 
@@ -4129,18 +4168,14 @@ def place_stop_loss_orders(page, positions):
                         "units": level_units,
                         "status": "failed",
                     })
-            except Exception:
-                # 2026-04-09 Stage 3: WARNING — individual level failure.
-                # Loop continues placing remaining levels; orders list
-                # captures what succeeded. Ruff noqa for BLE001 since the
-                # broad catch is intentional (place_stop_loss raises many
-                # types over Playwright and we don't want any to break
-                # the per-level retry loop).
+            except Exception as e:
+                # 2026-04-09 Stage 3 + codex v4: single-line, no exc_info.
+                # Hot inner loop (per level × per position × per cycle).
+                # Unthrottled tracebacks here can evict the [LLM]
+                # heartbeat lines from health_check.py's 200-line tail.
                 logger.warning(
-                    "_place_stop_orders_for_positions: Stop S%d placement failed key=%s",
-                    level + 1,
-                    key,
-                    exc_info=True,
+                    "_place_stop_orders_for_positions: Stop S%d failed key=%s: %s: %s",
+                    level + 1, key, type(e).__name__, e,
                 )
 
         state[key] = {
@@ -4185,17 +4220,16 @@ def _cancel_stop_orders(page, key, order_state, csrf=None):
             }""", [order_id, csrf])
             log(f"  Cancel stop S{order['level']} {key}: status={result.get('status')}")
             order["status"] = "cancelled"
-        except Exception:
-            # 2026-04-09 Stage 3: WARNING — cancel failure at a specific
-            # level; loop continues cancelling the rest. Order status
-            # stays "placed" so next cancel cycle will retry. Stack
-            # trace helps diagnose page.evaluate failures (session
-            # drift, Playwright transport, CSRF token expiry).
+        except Exception as e:
+            # 2026-04-09 Stage 3 + codex v4: single-line, no exc_info.
+            # Hot inner loop (per level × per position, can fire during
+            # cleanup cascades). Order status stays "placed" so next
+            # cancel cycle retries — logging the short exception is
+            # enough to diagnose without flooding the 200-line
+            # health_check tail.
             logger.warning(
-                "_cancel_stop_orders: cancel failed key=%s level=%s",
-                key,
-                order.get('level'),
-                exc_info=True,
+                "_cancel_stop_orders: cancel failed key=%s level=%s: %s: %s",
+                key, order.get('level'), type(e).__name__, e,
             )
 
 
@@ -4239,16 +4273,14 @@ def check_stop_order_fills(page, stop_state, positions):
                         any_filled = True
                         fill_px = order.get('trigger', order.get('sell', '?'))
                         log(f"STOP FILLED: {key} S{order['level']} {order['units']}u @ {fill_px}")
-            except Exception:
-                # 2026-04-09 Stage 3: WARNING — status check failure on
-                # a specific order; next cycle will retry. If the fill
-                # happened but we can't verify, next reconciliation will
-                # catch it via holdings diff.
+            except Exception as e:
+                # 2026-04-09 Stage 3 + codex v4: single-line, no exc_info.
+                # Hot inner loop (per level × per position × per cycle).
+                # Next cycle will retry the status check; holdings diff
+                # catches any missed fills via reconciliation.
                 logger.warning(
-                    "check_stop_order_fills: status check failed key=%s level=%s",
-                    key,
-                    order.get('level'),
-                    exc_info=True,
+                    "check_stop_order_fills: status check failed key=%s level=%s: %s: %s",
+                    key, order.get('level'), type(e).__name__, e,
                 )
 
         if any_filled:
