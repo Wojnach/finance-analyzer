@@ -288,8 +288,24 @@ These are significant reliability improvements backed by 265 lines of tests.
 
 **Verified Round 3**: C7 (FIXED), C8 (FIXED), H4 (FIXED), H5 (FIXED), H6 (FIXED), H7 (FIXED but bypassed by AV-R4-3), H8 (FIXED but bypassed by AV-R4-3), M2 (FIXED), M3 (STILL OPEN), M4 (FIXED)
 
-### Signals-Modules Agent
-*(agent still running — integrate in follow-up commit)*
+### Signals-Modules Agent — COMPLETE
+
+**Key findings (10 total: 2 CRITICAL, 5 HIGH, 3 MEDIUM):**
+
+| ID | Sev | Finding |
+|----|-----|---------|
+| SM-R4-1 | **CRIT** | H16 still open: `futures_flow.py:281` indicators block still uses bare `d["oi"]` — KeyError on missing key |
+| SM-R4-2 | **CRIT** | H35 still open: `_oi_trend` boolean short-circuit suppresses BUY/SELL when `price_start==0` |
+| SM-R4-3 | HIGH | M6 still open: 5 signals return empty `sub_signals: {}` for non-applicable tickers |
+| SM-R4-4 | HIGH | **NEW**: `calendar_seasonal` January double-vote — `_sell_in_may` and `_january_effect` both BUY in Jan, creating systematic 2-vote BUY bias for all 12 tickers |
+| SM-R4-5 | HIGH | H17 still open: VWAP cumulative from bar 0 — permanent directional bias |
+| SM-R4-6 | HIGH | **NEW**: `news_event` "cut" keyword treated as positive — layoffs/dividend cuts misclassified as BUY |
+| SM-R4-7 | HIGH | **NEW**: `crypto_macro` uses `OPTIONS_TTL` before definition — works but fragile |
+| SM-R4-8 | MED | `volatility._empty_result` omits `garch` sub-signal key — schema inconsistency |
+| SM-R4-9 | MED | `futures_flow._ls_extreme` bare dict access — KeyError risk |
+| SM-R4-10 | MED | `momentum._rsi_divergence` uses half-window min/max, not swing points — false signals |
+
+**Verified Round 3**: H13 (FIXED), H14 (FIXED), H15 (FIXED), H16 (PARTIAL), H35 (PARTIAL), H17 (STILL OPEN), M6 (STILL OPEN)
 
 ### Data-External Agent — COMPLETE
 
@@ -393,7 +409,14 @@ checklist of all cadence-dependent constants:
 - **DE-R4-6 (AV budget bypass)**: VALIDATED. 8 untracked earnings calls + 17 fundamentals
   = 25, exactly the daily limit. Any additional call triggers circuit breaker blackout.
 
-*(Remaining 3 agents still running — cross-critique will be extended in follow-up commit)*
+**Signals-modules agent**:
+- **SM-R4-4 (January double-vote)**: VALIDATED. Clever find — `_sell_in_may` includes
+  January in its "strong months" list, duplicating `_january_effect`. This creates a
+  permanent 2-vote BUY floor for all 12 tickers every January.
+- **SM-R4-6 (news "cut" keyword)**: VALIDATED. "cut" as a positive keyword is wrong
+  for most contexts (layoffs, budget cuts, dividend cuts). Only "rate cut" is positive.
+
+*(Remaining 2 agents still running — metals-core (15K lines) and infrastructure)*
 
 ---
 
@@ -410,7 +433,8 @@ checklist of all cadence-dependent constants:
 | Avanza-API agent new findings | 8 (4 HIGH, 4 MED) |
 | Signals-core agent new findings | 7 (4 HIGH, 3 MED) |
 | Data-external agent new findings | 8 (2 CRIT, 4 HIGH, 2 MED) |
-| **Total active findings** | **~61** |
+| Signals-modules agent new findings | 10 (2 CRIT, 5 HIGH, 3 MED) |
+| **Total active findings** | **~71** |
 
 **Net progress**: Round 3 had 67 total findings. ~19 confirmed fixed, ~3 partially fixed.
 11 new findings discovered. Active finding count dropped from 67 to ~20.
