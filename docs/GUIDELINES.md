@@ -14,7 +14,13 @@ ultrathink
 
 5. **DOCUMENT AS YOU GO.** Update any existing docs that your changes affect. Write findings and decisions into your plan doc.
 
-6. **VERIFY & SHIP.** Run full test suite + linters. Review your git log. Merge into main, commit, and push. This is MANDATORY — work that isn't merged and pushed didn't happen. Use `cmd.exe /c "cd /d Q:\finance-analyzer && git push"` for push (Windows git has the SSH keys, WSL git does not).
+6. **ADVERSARIAL REVIEW (codex).** After implementation is complete, commit a SHA and run `codex review --commit <SHA>`. Address every P1/P2 finding; decide P3 case-by-case and document reasoning in the follow-up commit. If a finding reveals a half-wired feature (e.g. SHORT entry added but exits still assume LONG), **disable the feature at the gate with a TODO** — never ship half-complete functionality.
+
+7. **TEST.** Run the full suite in parallel: `.venv/Scripts/python.exe -m pytest tests/ -n auto`. For focused work, run only the tests touching your files. If a test fails, run it in isolation (`pytest file::Class::test_name`) first — if it passes alone it's pre-existing state isolation, skip per the known-failure list in `docs/TESTING.md`. Never push red.
+
+8. **MERGE, COMMIT, PUSH.** Review your git log. Merge into main, commit any fix adjustments from steps 6–7, and push via Windows git: `cmd.exe /c "cd /d Q:\finance-analyzer && git push"` (Windows git has the SSH keys, WSL git does not). This is MANDATORY — work that isn't merged and pushed didn't happen.
+
+9. **RESTART LOOPS.** If your change touches code loaded by `data/metals_loop.py` or `portfolio/main.py --loop`, restart them so the new code takes effect: kill orphaned python processes first (the singleton lock is held by the running process, so a bare schtasks restart will hit exit code 11 and the bat wrapper will exit), then `cmd.exe /c "schtasks /run /tn PF-MetalsLoop"` and `cmd.exe /c "schtasks /run /tn PF-DataLoop"`. Tail `data/metals_loop_out.txt` and verify the new `SwingTrader init:` / `#1 Baseline established` lines appear with the expected catalog size.
 
 ## TESTING
 
