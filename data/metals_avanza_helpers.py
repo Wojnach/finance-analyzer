@@ -112,6 +112,18 @@ def fetch_account_cash(page, account_id):
     with diagnostic context — the JS layer returns a `_error` dict on
     iteration failure so we can distinguish "HTTP error" from "account ID
     not found" from "Avanza renamed a field" without guessing.
+
+    2026-04-09 afternoon (Fix 4b): Avanza changed the response shape. The
+    field used to be `data.categorizedAccounts` (array of category objects,
+    each with an `accounts` array). The new shape exposes three top-level
+    keys — `categories`, `accounts`, `loans` — where `accounts` is a flat
+    array of all user accounts. Diagnostic run at 18:41:11 CET confirmed:
+    `top_level_keys: ['categories', 'accounts', 'loans']`. We now try the
+    legacy categorized path first (forward-compat), then the new flat
+    `data.accounts` path, then the new `data.categories` path, taking
+    whichever finds the target account. Diagnostic on total miss includes
+    both the categorized count and the flat count so the next regression
+    is equally easy to spot.
     """
     try:
         result = page.evaluate("""async (accountId) => {
@@ -123,27 +135,92 @@ def fetch_account_cash(page, account_id):
                 return {_error: 'http', status: resp.status};
             }
             const data = await resp.json();
-            const cats = data.categorizedAccounts || [];
+            const v = (x) => (x && typeof x === 'object' && 'value' in x) ? x.value : x;
             const ids_seen = [];
-            for (const cat of cats) {
+            let sample_account_keys = null;
+
+            // 2026-04-09 Fix 4c: Avanza changed the per-account id field.
+            // The old shape used `acc.accountId`; the new shape uses `acc.id`
+            // (other Avanza endpoints like position-data/positions already
+            // use `acc.id` — see fetch_positions at line ~86 in this file).
+            // Try every known ID field in order; on total miss, return the
+            // actual key list of the first account we saw so the next
+            // diagnostic cycle immediately reveals any further renames.
+            const getAccId = (acc) => {
+                if (!acc) return null;
+                return acc.accountId
+                    || acc.id
+                    || acc.accountNumber
+                    || acc.number
+                    || null;
+            };
+
+            // Same treatment for the balance field — we haven't confirmed
+            // yet that `buyingPower` survived the 2026-04-09 shape change,
+            // so try common alternates if the primary field is missing.
+            // `v()` unwraps {value: N} → N when Avanza wraps numeric fields.
+            const getBalance = (acc, primary, alternates) => {
+                if (acc == null) return undefined;
+                const p = v(acc[primary]);
+                if (p != null) return p;
+                for (const alt of alternates) {
+                    const x = v(acc[alt]);
+                    if (x != null) return x;
+                }
+                return undefined;
+            };
+
+            const makeResult = (acc) => ({
+                buying_power: getBalance(acc, 'buyingPower',
+                    ['buyingPowerAvailable', 'availableCash', 'availableFunds']),
+                total_value: getBalance(acc, 'totalValue',
+                    ['accountTotalValue', 'totalHoldings']),
+                own_capital: getBalance(acc, 'ownCapital',
+                    ['netDeposit', 'selfOwnedCapital']),
+            });
+
+            const checkAccount = (acc) => {
+                if (sample_account_keys === null && acc && typeof acc === 'object') {
+                    sample_account_keys = Object.keys(acc);
+                }
+                const id = getAccId(acc);
+                if (id != null) ids_seen.push(String(id));
+                if (String(id) === accountId) return makeResult(acc);
+                return null;
+            };
+
+            // Path A (legacy, pre-2026-04-09): data.categorizedAccounts
+            const legacyCats = data.categorizedAccounts || [];
+            for (const cat of legacyCats) {
                 for (const acc of (cat.accounts || [])) {
-                    if (acc && acc.accountId != null) {
-                        ids_seen.push(String(acc.accountId));
-                    }
-                    if (String(acc.accountId) === accountId) {
-                        const v = (x) => (x && typeof x === 'object' && 'value' in x) ? x.value : x;
-                        return {
-                            buying_power: v(acc.buyingPower),
-                            total_value: v(acc.totalValue),
-                            own_capital: v(acc.ownCapital),
-                        };
-                    }
+                    const r = checkAccount(acc);
+                    if (r) return r;
                 }
             }
+
+            // Path B (new flat shape, 2026-04-09): data.accounts
+            const flatAccounts = data.accounts || [];
+            for (const acc of flatAccounts) {
+                const r = checkAccount(acc);
+                if (r) return r;
+            }
+
+            // Path C (new categorized shape, 2026-04-09): data.categories
+            const newCats = data.categories || [];
+            for (const cat of newCats) {
+                for (const acc of (cat.accounts || [])) {
+                    const r = checkAccount(acc);
+                    if (r) return r;
+                }
+            }
+
             return {
                 _error: 'no_account_match',
-                num_categories: cats.length,
+                legacy_category_count: legacyCats.length,
+                flat_account_count: flatAccounts.length,
+                new_category_count: newCats.length,
                 ids_seen: ids_seen,
+                sample_account_keys: sample_account_keys,
                 top_level_keys: Object.keys(data),
             };
         }""", account_id)
