@@ -171,7 +171,16 @@ def main():
     # Get cert prices and compute volumes
     try:
         from portfolio.avanza_session import get_quote, get_buying_power
-        bp = float(get_buying_power().get('buying_power', 0))
+        # 2026-04-09: get_buying_power() now returns dict|None after Fleet v2
+        # Agent A's multi-shape fix (commit 6a20c7d). Was always dict before.
+        # Fail loud on None instead of silently crashing in the except below —
+        # Avanza shape drift is the only realistic trigger and the user needs
+        # to see the diagnostic, not a cryptic 'NoneType has no attribute get'.
+        _bp_result = get_buying_power()
+        if _bp_result is None:
+            log_msg('ABORT: get_buying_power() returned None — Avanza session may need refresh or API shape drift')
+            return
+        bp = float(_bp_result.get('buying_power', 0))
         budget = args.budget if args.budget > 0 else bp * 0.45  # 45% per side
 
         bull_q = get_quote(BULL_OB)

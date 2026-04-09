@@ -428,7 +428,15 @@ def buy_position(direction, price, size_scalar=1.0, tactic=''):
                 log_msg(f'SKIP: spread {spread_pct:.1f}% > {MAX_SPREAD_PCT}% limit')
                 return None
 
-        bp = float(get_buying_power().get('buying_power', 0))
+        # 2026-04-09: get_buying_power() now returns dict|None after Fleet v2
+        # Agent A's multi-shape fix (commit 6a20c7d). Was always dict before.
+        # None here means Avanza API shape drift or session dead — fail loud
+        # and return, don't sniff 0 budget into the rule-1 check below.
+        _bp_result = get_buying_power()
+        if _bp_result is None:
+            log_msg('SKIP: get_buying_power() returned None — Avanza session may need refresh')
+            return None
+        bp = float(_bp_result.get('buying_power', 0))
 
         # Rule 1: Minimum order 1,000 SEK for courtage-free
         budget = min(bp * 0.95, 1500) * size_scalar
