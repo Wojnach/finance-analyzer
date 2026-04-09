@@ -50,13 +50,13 @@ test lines). The fingpt daemon (+246 lines) is architecturally sound but has pro
 | C5 | `should_block_trade()` always False | **FIXED** | ticker_cooldown + position_rate_limit now use `severity: "block"` |
 | C6 | `check_drawdown()` never called | **STILL OPEN** | Not wired into main.py or Layer 2 path |
 | C7 | `get_buying_power()` wrong keys | **FIXED** | Correct `categorizedAccounts`, `accountId`, `buyingPower` |
-| C8 | CONFIRM executes oldest order | **NEEDS VERIFY** | Not checked in this round |
+| C8 | CONFIRM executes oldest order | **FIXED** | `avanza_orders.py:122` sorts by timestamp descending |
 | C9 | `earnings_calendar` wrong config key | **FIXED** | Uses nested `.get("alpha_vantage", {}).get("api_key")` |
 | C10 | `health.py` race on `update_health` | **FIXED** | `_health_lock` wraps all R-M-W paths |
 | C11 | `_loading_keys` stuck permanently | **FIXED** | `_loading_timestamps` + eviction after 120s |
 | C12 | `log_portfolio_value` raw `open("a")` | **STILL OPEN** | `metals_loop.py:4949` unchanged |
 | C13 | `_METALS_LOOP_START_TS` import-time init | **PARTIAL** | `main()` reassigns via global, but fragile |
-| C14 | Naked position on stop-loss fail | **NEEDS VERIFY** | Not checked in this round |
+| C14 | Naked position on stop-loss fail | **STILL OPEN** | `_set_stop_loss` logs+alerts but no retry or fallback. Position live without stop. |
 | C15 | SwingTrader raw `open("w")` state | **FIXED** | Uses `atomic_write_json()` |
 
 **Score: 9 fixed, 3 partial, 2 still open, 1 needs verify = ~73% addressed**
