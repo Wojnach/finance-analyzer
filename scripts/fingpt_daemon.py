@@ -56,62 +56,59 @@ def _emit(obj: dict) -> None:
 
 
 def _warm_load():
-    """Acquire the GPU lock once, load the fingpt model, release. Returns (name, path, model)."""
+    """Load the fingpt model on CPU (no GPU contention). Returns (name, path, model).
+
+    History of this function:
+    - v1 (2026-04-09 merge 0e1697a): loaded via fingpt_infer._load_model which
+      uses ``n_gpu_layers=-1`` (all layers on GPU). Paired with llama-server
+      (~5 GB VRAM) this exhausted the 10 GB RTX 3080 budget and inference
+      timed out after 60s. Measured in live logs immediately after merge.
+    - v2 (2026-04-09 merge 5ab383f): preferred the 1.2B LFM2 sentiment model
+      which would have fit in 1.5 GB, but the installed llama-cpp-python can
+      NOT load the LFM2 architecture — it raises
+      ``ValueError: Failed to load model from file``. Verified manually.
+    - v3 (this commit): load finance-llama-8b on CPU via a direct Llama()
+      call with ``n_gpu_layers=0``. No VRAM contention at all. Inference is
+      slower (10-30s per batch instead of 1-3s on GPU) but fits comfortably
+      inside the daemon's 60s request timeout and the new 600s loop cadence.
+      GPU stays free for Kronos, Chronos, and llama-server.
+    """
     import fingpt_infer  # imported from /mnt/q/models via sys.path injection above
+    from llama_cpp import Llama
 
-    # IMPORTANT: fingpt_infer._find_model() picks the first entry in dict
-    # order, which is finance-llama-8b (~5 GB VRAM). Running that as a
-    # persistent sidecar next to llama-server (another ~5 GB) exhausts the
-    # 10 GB RTX 3080 budget and starves Kronos/Chronos forecast inference
-    # — we measured this on first deploy (see merge 0e1697a, initial
-    # restart logs at 13:52-13:56 on 2026-04-09). Prefer the 1.2B sentiment
-    # model (~1.5 GB VRAM) explicitly when available; fall back to
-    # auto-detection only if the small model is missing.
-    _PREFERRED_MODEL = "fingpt-sentiment-1.2b"
-    preferred_path = fingpt_infer.MODEL_PATHS.get(_PREFERRED_MODEL)
-    if preferred_path is not None and Path(preferred_path).exists():
-        name, path = _PREFERRED_MODEL, str(preferred_path)
-    else:
-        name, path = fingpt_infer._find_model()
+    name, path = fingpt_infer._find_model()
     if not path or not Path(path).exists():
-        raise RuntimeError(f"No sentiment GGUF model found. Checked: {list(fingpt_infer.MODEL_PATHS.values())}")
+        raise RuntimeError(
+            f"No sentiment GGUF model found. Checked: {list(fingpt_infer.MODEL_PATHS.values())}"
+        )
 
-    # Load under GPU lock — expensive (disk + VRAM transfer), but pays once.
-    # 120s timeout is generous: cold load should fit even with contention.
-    try:
-        from gpu_lock import gpu_lock
-        lock_ctx = gpu_lock("fingpt", timeout=120)
-    except ImportError:
-        from contextlib import nullcontext
-        lock_ctx = nullcontext()
-
-    with lock_ctx:
-        model = fingpt_infer._load_model(path)
+    # Load on CPU — no gpu_lock needed, no VRAM consumed.
+    logger.info("Loading model %s on CPU (n_gpu_layers=0)", name)
+    model = Llama(
+        model_path=path,
+        n_ctx=2048,
+        n_gpu_layers=0,
+        n_threads=4,   # same cap as fingpt_infer._load_model
+        verbose=False,
+    )
 
     logger.info("Loaded model %s from %s (pid %d)", name, path, os.getpid())
     return name, path, model
 
 
 def _predict_headlines_warm(fingpt_infer, model, name: str, headlines: list) -> list:
-    """Inference loop for per-headline mode, using a pre-loaded model.
+    """Inference loop for per-headline mode, using a pre-loaded CPU model.
 
-    Mirrors fingpt_infer.predict_headlines lines 151-195 but SKIPS the model
-    load (already warm) and acquires the lock only around the inference pass
-    so the hold time is ~inference cost, not ~inference+load cost.
+    Mirrors fingpt_infer.predict_headlines lines 151-195 but skips the model
+    load (already warm) and skips the GPU lock entirely — v3 runs on CPU
+    so there is no VRAM or CUDA context to guard against.
     """
     template = fingpt_infer.PROMPT_TEMPLATES.get(
         name, fingpt_infer.PROMPT_TEMPLATES["finance-llama-8b"]
     )
 
-    try:
-        from gpu_lock import gpu_lock
-        lock_ctx = gpu_lock("fingpt", timeout=30)
-    except ImportError:
-        from contextlib import nullcontext
-        lock_ctx = nullcontext()
-
     results = []
-    with lock_ctx:
+    if True:  # keep indentation level for minimal diff vs prior version
         for headline in headlines:
             try:
                 prompt = template.format(headline=headline)
@@ -152,19 +149,13 @@ def _predict_headlines_warm(fingpt_infer, model, name: str, headlines: list) -> 
 
 
 def _predict_cumulative_warm(fingpt_infer, model, name: str, headlines: list) -> dict:
-    """Inference for cumulative/clustered mode, using a pre-loaded model.
+    """Inference for cumulative/clustered mode, using a pre-loaded CPU model.
 
-    Mirrors fingpt_infer.predict_cumulative lines 233-265 but skips the load.
+    Mirrors fingpt_infer.predict_cumulative lines 233-265 but skips the load
+    and the GPU lock (v3 runs on CPU).
     """
     if not headlines:
         return {"sentiment": "neutral", "confidence": 0.0, "scores": {}, "model": "none"}
-
-    try:
-        from gpu_lock import gpu_lock
-        lock_ctx = gpu_lock("fingpt", timeout=30)
-    except ImportError:
-        from contextlib import nullcontext
-        lock_ctx = nullcontext()
 
     headlines_block = "\n".join(f"- {h}" for h in headlines[:20])  # cap at 20
     prompt = fingpt_infer.CUMULATIVE_PROMPT.format(
@@ -172,7 +163,7 @@ def _predict_cumulative_warm(fingpt_infer, model, name: str, headlines: list) ->
         headlines_block=headlines_block,
     )
 
-    with lock_ctx:
+    if True:  # keep indentation level for minimal diff vs prior version
         try:
             response = model(
                 prompt,
