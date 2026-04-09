@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-04-08
-Branch: improve/auto-session-2026-04-08
+Updated: 2026-04-09
+Branch: improve/auto-session-2026-04-09
 
 ## 1) Architecture Summary
 
@@ -136,11 +136,10 @@ main.loop()
 4. Dynamic MIN_VOTERS: trending=3, high-vol=4, ranging=5
 5. Unanimity penalty: 90%+ agreement → 0.6x, 80-90% → 0.75x (high unanimity = already priced in)
 
-### Signal Inventory (32 total: all tracked)
+### Signal Inventory (34 total: all tracked, 30 active)
 - **Core active (9)**: RSI, MACD, EMA, BB, Fear&Greed, Sentiment, Ministral-8B, Qwen3-8B, Volume
-- **Core disabled (2)**: ML Classifier (28.2%), Funding Rate (27.0%)
-- **Enhanced composite (21)**: Trend, Momentum, Volume Flow, Volatility, Candlestick, Structure, Fibonacci, Smart Money, Oscillators, Heikin-Ashi, Mean Reversion, Calendar, Macro Regime, Momentum Factors, News Event, Econ Calendar, Forecast, Claude Fundamental, Futures Flow, Crypto Macro, Orderbook Flow, Metals Cross-Asset
-- **Note**: BUG-160 fixed (2026-04-01) — all 3 previously untracked signals (crypto_macro, orderbook_flow, metals_cross_asset) added to SIGNAL_NAMES
+- **Core disabled (4)**: ML Classifier (28.2%), Funding Rate (27.0%), Crypto Macro, COT Positioning (pending live validation)
+- **Enhanced composite (21)**: Trend, Momentum, Volume Flow, Volatility, Candlestick, Structure, Fibonacci, Smart Money, Oscillators, Heikin-Ashi, Mean Reversion, Calendar, Macro Regime, Momentum Factors, News Event, Econ Calendar, Forecast, Claude Fundamental, Futures Flow, Orderbook Flow, Metals Cross-Asset
 
 ## 6) Configuration
 
@@ -364,3 +363,9 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - ARCH-29: should_block_trade() helper in trade_guards.py — **added 2026-04-08**
 - Test ruff violations: 253 → 170 (remaining: F841 test vars, SIM117 style, E741 test naming)
 - ~6,138 tests, 85 pre-existing failures (as of 2026-04-07)
+- BUG-183 (P2): Dead code after return in metals_swing_trader.py `_regime_confirmed()` — **fixed 2026-04-09** (removed unreachable lines referencing undefined `signal_data`)
+- BUG-184 (P2): Duplicate test `test_btc_leads_eth` shadowed BUY test case (F811) — **fixed 2026-04-09** (renamed to `test_btc_leads_eth_sell`)
+- REF-50: 64 ruff auto-fix violations across 24 files (I001, F401, F541, SIM114, UP017) — **fixed 2026-04-09**
+- REF-51: 9 unused vars/imports in metals_loop.py (F841×6, F401×3) — **fixed 2026-04-09**
+- Total ruff violations: 382 → 309 (remaining: 69 E402 intentional, 73 F841 test vars, 55 SIM117 cosmetic, 40 E741 test naming, 29 SIM105 metals_loop monolith, rest cosmetic)
+- ~6,449 tests (as of 2026-04-09)
