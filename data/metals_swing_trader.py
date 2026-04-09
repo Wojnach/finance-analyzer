@@ -28,12 +28,15 @@ from metals_swing_config import (
     MACD_IMPROVING_CHECKS,
     MAX_CONCURRENT,
     MAX_HOLD_HOURS,
+    MIN_ACCEPTABLE_LEVERAGE,
     MIN_BARRIER_DISTANCE_PCT,
+    MIN_BUY_CONFIDENCE,
     MIN_BUY_TF_RATIO,
     MIN_BUY_VOTERS,
     MIN_SPREAD_PCT,
     MIN_TRADE_SEK,
     POSITION_SIZE_PCT,
+    REGIME_CONFIRM_CHECKS,
     RSI_ENTRY_HIGH,
     RSI_ENTRY_LOW,
     SIGNAL_REVERSAL_EXIT,
@@ -46,8 +49,15 @@ from metals_swing_config import (
     TRADES_LOG,
     TRAILING_DISTANCE_PCT,
     TRAILING_START_PCT,
-    WARRANT_CATALOG,
+    WARRANT_CATALOG as STATIC_WARRANT_CATALOG,
 )
+
+# Dynamic warrant catalog refresher — replaces the stale hardcoded list.
+try:
+    from metals_warrant_refresh import load_catalog_or_fetch
+    _REFRESHER_AVAILABLE = True
+except ImportError:
+    _REFRESHER_AVAILABLE = False
 
 from portfolio.avanza_control import (
     delete_stop_loss,
@@ -191,11 +201,42 @@ class SwingTrader:
         self.state = _load_state()
         self.check_count = 0
 
+        # Track consecutive signal history per ticker (action, regime) — used
+        # to reject single-check regime flips from trending-down → ranging BUY.
+        # Keyed by ticker; value is a list of (action, regime) tuples.
+        self.regime_history: dict[str, list[tuple[str, str]]] = {}
+
+        # Load dynamic warrant catalog (live refresh from Avanza). Falls back
+        # to the static hardcoded catalog if the refresh fails entirely.
+        self.warrant_catalog = self._load_warrant_catalog()
+
         # Sync cash from Avanza on init
         self._sync_cash()
         _log(f"SwingTrader init: cash={self.state['cash_sek']:.0f} SEK, "
              f"positions={len(self.state['positions'])}, "
+             f"catalog={len(self.warrant_catalog)} warrants, "
              f"DRY_RUN={DRY_RUN}")
+
+    def _load_warrant_catalog(self) -> dict:
+        """Load dynamic warrant catalog, falling back to static config.
+
+        The refresher fetches live data from Avanza and filters dead/knocked
+        out warrants. If it returns an empty dict (total network failure),
+        we fall back to the static config catalog so the trader can still
+        operate (with whatever stale entries it contains).
+        """
+        if not _REFRESHER_AVAILABLE:
+            _log("Refresher unavailable — using static catalog")
+            return dict(STATIC_WARRANT_CATALOG)
+        try:
+            catalog = load_catalog_or_fetch()
+        except Exception as e:  # noqa: BLE001
+            _log(f"Catalog refresh raised {type(e).__name__}: {e} — using static")
+            return dict(STATIC_WARRANT_CATALOG)
+        if not catalog:
+            _log("Refresher returned empty — using static catalog")
+            return dict(STATIC_WARRANT_CATALOG)
+        return catalog
 
     def _sync_cash(self):
         """Fetch real ISK buying power from Avanza and update state.
@@ -230,6 +271,19 @@ class SwingTrader:
         if self.check_count % 30 == 0:
             self._sync_cash()
 
+        # Periodic catalog refresh (every 360 checks ≈ 6h with 60s loop)
+        if self.check_count % 360 == 0:
+            try:
+                fresh = self._load_warrant_catalog()
+                if fresh:
+                    self.warrant_catalog = fresh
+                    _log(f"Catalog auto-refreshed: {len(self.warrant_catalog)} warrants")
+            except Exception as e:  # noqa: BLE001
+                _log(f"Catalog auto-refresh failed: {e}")
+
+        # Update regime history BEFORE entry checks so the gate sees the latest state.
+        self._update_regime_history(signal_data)
+
         # Check exits first (protect capital)
         self._check_exits(prices, signal_data)
 
@@ -238,6 +292,32 @@ class SwingTrader:
 
         # Track MACD history for improving-checks requirement
         self._update_macd_history(signal_data)
+
+    def _update_regime_history(self, signal_data):
+        """Append (action, regime) snapshot per ticker, capped at last 10 entries."""
+        if not signal_data:
+            return
+        for ticker in ("XAG-USD", "XAU-USD"):
+            sig = signal_data.get(ticker)
+            if not sig:
+                continue
+            entry = (sig.get("action", "HOLD"), sig.get("regime", "unknown"))
+            hist = self.regime_history.setdefault(ticker, [])
+            hist.append(entry)
+            # Keep last 10 to bound memory
+            if len(hist) > 10:
+                self.regime_history[ticker] = hist[-10:]
+
+    def _regime_confirmed(self, ticker: str, action: str, regime: str) -> bool:
+        """Return True if the (action, regime) pair held for REGIME_CONFIRM_CHECKS in a row.
+
+        Rejects single-check flips like trending-down → ranging BUY in one tick.
+        """
+        hist = self.regime_history.get(ticker, [])
+        if len(hist) < REGIME_CONFIRM_CHECKS:
+            return False
+        recent = hist[-REGIME_CONFIRM_CHECKS:]
+        return all(a == action and r == regime for a, r in recent)
 
         # Periodic summary
         if SEND_PERIODIC_SUMMARY and self.check_count % TELEGRAM_SUMMARY_INTERVAL == 0:
@@ -311,22 +391,47 @@ class SwingTrader:
             self._execute_buy(warrant, units, ask_price, underlying_ticker, sig, total_cost)
 
     def _evaluate_entry(self, sig, ticker):
-        """Check if signal data meets entry criteria. Returns (ok, reason)."""
+        """Check if signal data meets entry criteria. Returns (ok, reason).
+
+        Gates today (post-SG-incident hardening):
+        - action in {BUY, SELL} with matching direction
+        - confidence >= MIN_BUY_CONFIDENCE (user rule: no sub-60% trades)
+        - majority_count > minority_count (not just majority_count >= MIN)
+        - RSI in entry zone
+        - MACD improving for N checks
+        - regime stable for N consecutive checks (no single-check flips)
+        """
         buy_count = sig.get("buy_count", 0)
         sell_count = sig.get("sell_count", 0)
         rsi = sig.get("rsi", 50)
         action = sig.get("action", "HOLD")
+        confidence = float(sig.get("confidence", 0) or 0)
 
-        # Direction check — need BUY consensus (LONG) or SELL consensus (SHORT)
-        # For now, only LONG entries (warrants available are mostly LONG)
+        # Direction check — LONG needs BUY, SHORT needs SELL. Anything else skipped.
         if action == "BUY":
-            voter_count = buy_count
+            majority = buy_count
+            minority = sell_count
+            direction = "LONG"
+        elif action == "SELL":
+            majority = sell_count
+            minority = buy_count
+            direction = "SHORT"
         else:
-            return False, f"action={action} (need BUY consensus)"
+            return False, f"action={action} (need BUY or SELL consensus)"
 
-        # Minimum voter threshold
-        if voter_count < MIN_BUY_VOTERS:
-            return False, f"buy_count={buy_count} < {MIN_BUY_VOTERS}"
+        # User rule: no signal trades below 60% calibrated confidence
+        if confidence < MIN_BUY_CONFIDENCE:
+            return False, f"confidence {confidence:.2f} < {MIN_BUY_CONFIDENCE}"
+
+        # Require strict majority, not just minimum voters. The 2026-04-09
+        # incident fired BUY with buy=3 sell=4 because only MIN_BUY_VOTERS
+        # was checked. Now we also require majority > minority.
+        if majority <= minority:
+            return False, f"no strict majority: {direction}={majority} vs other={minority}"
+
+        # Minimum voter threshold (belt-and-suspenders alongside majority check)
+        if majority < MIN_BUY_VOTERS:
+            return False, f"{direction}_count={majority} < {MIN_BUY_VOTERS}"
 
         # Timeframe alignment
         tf = sig.get("timeframes", {})
@@ -351,6 +456,14 @@ class SwingTrader:
                 return False, f"MACD not improving for {MACD_IMPROVING_CHECKS} checks"
         # If not enough MACD history yet, skip this check (allow entry)
 
+        # Regime confirmation — require N consecutive (action, regime) checks.
+        # The 2026-04-09 incident fired BUY in one cycle after 20+ trending-down
+        # checks; the regime flipped to "ranging" + action flipped to "BUY" in
+        # a single tick. Reject these single-check flips.
+        regime = sig.get("regime", "unknown")
+        if not self._regime_confirmed(ticker, action, regime):
+            return False, f"regime not confirmed: need {REGIME_CONFIRM_CHECKS}x ({action},{regime})"
+
         # EOD check — don't buy near close
         h = _cet_hour()
         close_cet = 21.0 + 55 / 60  # 21:55
@@ -361,10 +474,25 @@ class SwingTrader:
         return True, "entry criteria met"
 
     def _select_warrant(self, underlying, direction):
-        """Pick best warrant by leverage proximity to 5x, barrier distance, spread."""
+        """Pick best warrant by leverage/barrier/spread/issuer.
+
+        Uses the dynamic catalog (refreshed from Avanza at startup). Candidates
+        are scored on four factors:
+        - leverage proximity to TARGET_LEVERAGE (weight 0.35)
+        - barrier distance (weight 0.30)
+        - bid-ask spread (weight 0.15)
+        - issuer fee preference: AVA products get 1.0, others 0.5 (weight 0.20)
+
+        AVA-issued warrants have 0 SEK courtage on Avanza while SG/VT/BNP
+        charge regular courtage — the fee_score penalizes non-AVA products.
+
+        Fails closed: returns None if the best candidate's leverage is below
+        MIN_ACCEPTABLE_LEVERAGE, so the trader SKIPs instead of falling back
+        to a 1.5x tracker (which was the 2026-04-09 SG incident).
+        """
         candidates = []
-        for key, w in WARRANT_CATALOG.items():
-            if w["underlying"] != underlying or w["direction"] != direction:
+        for key, w in self.warrant_catalog.items():
+            if w.get("underlying") != underlying or w.get("direction") != direction:
                 continue
 
             data = fetch_price(self.page, w["ob_id"], w["api_type"])
@@ -377,17 +505,18 @@ class SwingTrader:
                 continue
 
             spread_pct = (ask - bid) / bid * 100
-            live_leverage = data.get("leverage") or w["leverage"]
-            live_barrier = data.get("barrier") or w["barrier"]
+            live_leverage = data.get("leverage") or w.get("leverage")
+            live_barrier = data.get("barrier") or w.get("barrier")
 
-            # Barrier distance (LONG: how far price is above barrier)
+            # Barrier distance — LONG: price above barrier, SHORT: price below barrier.
             barrier_dist = 999
-            if live_barrier and live_barrier > 0 and direction == "LONG":
+            if live_barrier and live_barrier > 0:
                 underlying_price = data.get("underlying", 0)
                 if underlying_price > 0:
-                    barrier_dist = (underlying_price - live_barrier) / underlying_price * 100
-                else:
-                    barrier_dist = (bid / live_barrier - 1) * 100 if live_barrier > 0 else 999
+                    if direction == "LONG":
+                        barrier_dist = (underlying_price - live_barrier) / underlying_price * 100
+                    else:  # SHORT
+                        barrier_dist = (live_barrier - underlying_price) / underlying_price * 100
 
             # Filter: minimum thresholds
             if barrier_dist < MIN_BARRIER_DISTANCE_PCT:
@@ -397,11 +526,19 @@ class SwingTrader:
                 _log(f"  {w['name']}: spread too wide ({spread_pct:.1f}% > {MIN_SPREAD_PCT}%)")
                 continue
 
-            # Score: prefer leverage close to 5x, far from barrier, tight spread
+            # Score: prefer leverage near target, far from barrier, tight spread, AVA issuer
             leverage_score = 1.0 / (1 + abs(live_leverage - TARGET_LEVERAGE))
             barrier_score = min(barrier_dist / 30, 1.0)
             spread_score = 1.0 / (1 + spread_pct)
-            score = leverage_score * 0.4 + barrier_score * 0.4 + spread_score * 0.2
+            # isAza=True → 0 courtage on Avanza; other issuers pay regular fees
+            is_aza = bool(w.get("isAza", False))
+            fee_score = 1.0 if is_aza else 0.5
+            score = (
+                leverage_score * 0.35
+                + barrier_score * 0.30
+                + spread_score * 0.15
+                + fee_score * 0.20
+            )
 
             candidates.append({
                 **w,
@@ -413,16 +550,30 @@ class SwingTrader:
                 "barrier_dist": barrier_dist,
                 "spread_pct": spread_pct,
                 "underlying_price": data.get("underlying", 0),
+                "is_aza": is_aza,
                 "score": score,
             })
 
         if not candidates:
+            _log(f"  No valid {direction} candidates for {underlying} in catalog "
+                 f"(catalog size: {len(self.warrant_catalog)})")
             return None
 
         best = max(candidates, key=lambda w: w["score"])
-        _log(f"  Selected: {best['name']} lev={best['live_leverage']:.1f}x "
+
+        # Fail-closed: if the best candidate is under-leveraged, SKIP the trade
+        # entirely rather than silently buy a low-leverage tracker. The 2026-04-09
+        # SG incident bought 1.75x because it was the only candidate that passed
+        # the barrier gate — now we explicitly reject that degenerate case.
+        if best["live_leverage"] < MIN_ACCEPTABLE_LEVERAGE:
+            _log(f"  SKIP_BUY: best candidate {best['name']} has lev "
+                 f"{best['live_leverage']:.2f}x < MIN_ACCEPTABLE_LEVERAGE "
+                 f"({MIN_ACCEPTABLE_LEVERAGE}). Not falling back to a tracker.")
+            return None
+
+        _log(f"  Selected: {best['name']} lev={best['live_leverage']:.2f}x "
              f"barrier={best['barrier_dist']:.1f}% spread={best['spread_pct']:.2f}% "
-             f"score={best['score']:.3f}")
+             f"AVA={best['is_aza']} score={best['score']:.3f}")
         return best
 
     def _execute_buy(self, warrant, units, ask_price, underlying_ticker, sig, total_cost):
@@ -609,10 +760,17 @@ class SwingTrader:
                         leverage=pos.get("leverage", 5.0),
                         financing_level=pos.get("financing_level"),
                     )
+                    # NOTE: MarketSnapshot.bid is documented as the underlying's
+                    # USD bid (not the warrant SEK bid). Passing the warrant bid
+                    # here was the source of the 2026-04-09 -2430 SEK fake-loss
+                    # bug — _compute_pnl_sek treated warrant_bid_sek as if it
+                    # were a silver USD price and computed a -46% "move".
+                    # Pass None so the optimizer uses market.price (the correct
+                    # underlying USD reference) for the market-exit estimate.
                     opt_market = MarketSnapshot(
                         asof_ts=_now_utc(),
                         price=underlying_price,
-                        bid=current_bid if current_bid > 0 else None,
+                        bid=None,
                         usdsek=10.85,
                     )
                     exit_plan = compute_exit_plan(

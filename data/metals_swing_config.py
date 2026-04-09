@@ -54,7 +54,9 @@ INITIAL_BUDGET_SEK = 10000    # fallback budget when Avanza API fails to return 
 POSITION_SIZE_PCT = 30        # % of available cash per trade
 MAX_CONCURRENT = 2            # max simultaneous positions
 TARGET_LEVERAGE = 5.0         # preferred leverage (user prefers 5x)
-MIN_BARRIER_DISTANCE_PCT = 15 # minimum distance to barrier (knockout risk)
+MIN_ACCEPTABLE_LEVERAGE = 3.0 # SKIP_BUY if best candidate is below this (fail-closed)
+MIN_BARRIER_DISTANCE_PCT = 10 # minimum distance to barrier (was 15, but that excluded
+                              # all high-lev AVA MINIs and forced fallbacks to trackers)
 MIN_SPREAD_PCT = 1.5          # max acceptable bid-ask spread %
 MIN_TRADE_SEK = 1000          # minimum trade size (Avanza min courtage threshold)
 
@@ -62,10 +64,13 @@ MIN_TRADE_SEK = 1000          # minimum trade size (Avanza min courtage threshol
 # Entry rules
 # ---------------------------------------------------------------------------
 MIN_BUY_VOTERS = 3            # minimum agreeing BUY signals
-MIN_BUY_TF_RATIO = 0.43      # 3/7 timeframes must agree
+MIN_BUY_CONFIDENCE = 0.60     # minimum calibrated signal confidence (user rule: no sub-60% trades)
+MIN_BUY_TF_RATIO = 0.43       # 3/7 timeframes must agree
 RSI_ENTRY_LOW = 35            # RSI buy zone lower bound
 RSI_ENTRY_HIGH = 68           # RSI buy zone upper bound (avoid overbought)
-MACD_IMPROVING_CHECKS = 2    # MACD must be improving for N consecutive checks
+MACD_IMPROVING_CHECKS = 2     # MACD must be improving for N consecutive checks
+REGIME_CONFIRM_CHECKS = 2     # require N consecutive BUY checks in same regime
+                              # (rejects single-check flips from trending-down → ranging BUY)
 
 # ---------------------------------------------------------------------------
 # Exit rules
