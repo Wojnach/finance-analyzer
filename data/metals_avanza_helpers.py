@@ -10,6 +10,9 @@ their own browser instance.
 
 import datetime
 import json
+import logging
+
+logger = logging.getLogger("metals_avanza_helpers")
 
 
 def get_csrf(page):
@@ -46,7 +49,10 @@ def fetch_price(page, ob_id, api_type):
             };
         }""", [ob_id, api_type])
         return result
-    except Exception:
+    except Exception as e:
+        logger.warning(
+            "fetch_price: exception=%r", e, exc_info=True,
+        )
         return None
 
 
@@ -91,15 +97,21 @@ def fetch_positions(page, account_id):
             return out;
         }""", str(account_id) if account_id else "")
         return result if isinstance(result, dict) else None
-    except Exception:
+    except Exception as e:
+        logger.warning(
+            "fetch_positions: exception=%r", e, exc_info=True,
+        )
         return None
 
 
 def fetch_account_cash(page, account_id):
     """Fetch ISK buying power from Avanza accounts API.
 
-    Returns dict with: buying_power, total_value, own_capital.
-    Returns None on failure.
+    Returns dict with: buying_power, total_value, own_capital on success.
+    Returns None on failure. Failure modes are logged via the module logger
+    with diagnostic context — the JS layer returns a `_error` dict on
+    iteration failure so we can distinguish "HTTP error" from "account ID
+    not found" from "Avanza renamed a field" without guessing.
     """
     try:
         result = page.evaluate("""async (accountId) => {
@@ -107,10 +119,17 @@ def fetch_account_cash(page, account_id):
                 'https://www.avanza.se/_api/account-overview/overview/categorizedAccounts',
                 {credentials: 'include'}
             );
-            if (resp.status !== 200) return null;
+            if (resp.status !== 200) {
+                return {_error: 'http', status: resp.status};
+            }
             const data = await resp.json();
-            for (const cat of (data.categorizedAccounts || [])) {
+            const cats = data.categorizedAccounts || [];
+            const ids_seen = [];
+            for (const cat of cats) {
                 for (const acc of (cat.accounts || [])) {
+                    if (acc && acc.accountId != null) {
+                        ids_seen.push(String(acc.accountId));
+                    }
                     if (String(acc.accountId) === accountId) {
                         const v = (x) => (x && typeof x === 'object' && 'value' in x) ? x.value : x;
                         return {
@@ -121,11 +140,35 @@ def fetch_account_cash(page, account_id):
                     }
                 }
             }
-            return null;
+            return {
+                _error: 'no_account_match',
+                num_categories: cats.length,
+                ids_seen: ids_seen,
+                top_level_keys: Object.keys(data),
+            };
         }""", account_id)
-        return result
-    except Exception:
+    except Exception as e:
+        logger.warning(
+            "fetch_account_cash: page.evaluate raised %r",
+            e, exc_info=True,
+        )
         return None
+
+    if result is None:
+        logger.warning(
+            "fetch_account_cash: page.evaluate returned None "
+            "(navigation issue or Playwright session drift?)"
+        )
+        return None
+
+    if isinstance(result, dict) and result.get("_error"):
+        logger.warning(
+            "fetch_account_cash: diagnostic failure account_id=%s result=%s",
+            account_id, result,
+        )
+        return None
+
+    return result  # success path — {buying_power, total_value, own_capital}
 
 
 def place_order(page, account_id, ob_id, side, price, volume):
@@ -175,6 +218,9 @@ def place_order(page, account_id, ob_id, side, price, volume):
             "order_id": order_id,
         }
     except Exception as e:
+        logger.warning(
+            "place_order: exception=%r", e, exc_info=True,
+        )
         return False, {"error": str(e)}
 
 
@@ -235,7 +281,10 @@ def place_stop_loss(page, account_id, ob_id, trigger_price, sell_price, volume,
         success = body.get("status") == "SUCCESS"
         stop_id = body.get("stoplossOrderId", "")
         return success, stop_id
-    except Exception:
+    except Exception as e:
+        logger.warning(
+            "place_stop_loss: exception=%r", e, exc_info=True,
+        )
         return False, ""
 
 
@@ -277,6 +326,9 @@ def delete_order(page, account_id, order_id):
             "order_id": order_id,
         }
     except Exception as e:
+        logger.warning(
+            "delete_order: exception=%r", e, exc_info=True,
+        )
         return False, {"error": str(e)}
 
 
@@ -309,6 +361,9 @@ def delete_stop_loss(page, account_id, stop_id):
         success = 200 <= http_status < 300
         return success, {"http_status": http_status}
     except Exception as e:
+        logger.warning(
+            "delete_stop_loss: exception=%r", e, exc_info=True,
+        )
         return False, {"error": str(e)}
 
 
@@ -323,5 +378,8 @@ def check_session_alive(page):
             return resp.status;
         }""")
         return result == 200
-    except Exception:
+    except Exception as e:
+        logger.warning(
+            "check_session_alive: exception=%r", e, exc_info=True,
+        )
         return False
