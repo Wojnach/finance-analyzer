@@ -232,9 +232,28 @@ def test_different_models_load_independently(fake_torch_and_transformers):
     assert not bert_sentiment.is_loaded("Trading-Hero-LLM")
 
 
-def test_cuda_available_uses_gpu(fake_torch_and_transformers):
+def test_default_stays_on_cpu_even_with_cuda(fake_torch_and_transformers, monkeypatch):
+    """2026-04-09 hotfix: default behaviour keeps BERT on CPU to avoid VRAM
+    contention with llama-server. GPU path requires BERT_SENTIMENT_USE_GPU=1.
+    """
     from portfolio import bert_sentiment
     fake_torch_and_transformers["torch"]._cuda_available = True
+    monkeypatch.delenv("BERT_SENTIMENT_USE_GPU", raising=False)
+
+    bert_sentiment.predict("CryptoBERT", ["test"])
+    entry = bert_sentiment._models["CryptoBERT"]
+    device = entry[2]
+    assert device == "cpu"
+
+
+def test_env_var_opt_in_moves_to_gpu(fake_torch_and_transformers, monkeypatch):
+    """Setting BERT_SENTIMENT_USE_GPU=1 should re-enable GPU path when CUDA
+    is available. Used for manual opt-in when VRAM pressure is known to be
+    safe (e.g. if Chronos or llama-server are retired).
+    """
+    from portfolio import bert_sentiment
+    fake_torch_and_transformers["torch"]._cuda_available = True
+    monkeypatch.setenv("BERT_SENTIMENT_USE_GPU", "1")
 
     bert_sentiment.predict("CryptoBERT", ["test"])
     entry = bert_sentiment._models["CryptoBERT"]
@@ -242,9 +261,13 @@ def test_cuda_available_uses_gpu(fake_torch_and_transformers):
     assert device == "cuda"
 
 
-def test_cuda_unavailable_falls_back_to_cpu(fake_torch_and_transformers):
+def test_cuda_unavailable_falls_back_to_cpu(fake_torch_and_transformers, monkeypatch):
+    """Even with BERT_SENTIMENT_USE_GPU=1, if CUDA is not available we must
+    still return "cpu" and not crash.
+    """
     from portfolio import bert_sentiment
     fake_torch_and_transformers["torch"]._cuda_available = False
+    monkeypatch.setenv("BERT_SENTIMENT_USE_GPU", "1")
 
     bert_sentiment.predict("CryptoBERT", ["test"])
     entry = bert_sentiment._models["CryptoBERT"]

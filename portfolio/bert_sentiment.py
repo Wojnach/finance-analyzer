@@ -177,19 +177,38 @@ def _load_model(name: str) -> tuple[Any, Any, str, threading.Lock]:
     # security-scanner false positive on a substring match.
     model.train(False)
 
-    # Move to GPU if available. Catch errors so a CUDA failure on one model
-    # doesn't bring the whole module down — we just fall back to CPU for
-    # that model (still an improvement over subprocess spawn).
+    # 2026-04-09 (hotfix): BERT models now stay on CPU by default.
+    #
+    # Initial deployment tried to move BERT models to CUDA for ~5-20x per-call
+    # inference speedup, but that created a VRAM contention problem with
+    # llama-server's model swap phase (LLM batch Phase 1/2/3). The budget:
+    #   BERT (3 models) ~1.5 GB + Chronos-2 ~3.5 GB + llama-server 5 GB
+    #   = ~10 GB = the entire RTX 3080 10GB budget, no margin.
+    # With BERT + Chronos resident, llama-server's 5 GB finance-llama-8b load
+    # was timing out / retrying for 200+ s per swap, making cycles LONGER
+    # than the pre-migration subprocess baseline. See portfolio.log for the
+    # 21:30 (262s) and 21:48 (429s) cycles on 2026-04-09.
+    #
+    # The main architectural win — removing ~30-60 s/cycle of subprocess
+    # spawn + cold-load overhead — does NOT depend on GPU inference. CPU
+    # forward pass for a 125M BERT is ~100-300 ms per headline, vs ~5-20 ms
+    # on GPU: the GPU speedup only saves ~2-3 s/cycle on top. Not worth the
+    # VRAM contention.
+    #
+    # Set BERT_SENTIMENT_USE_GPU=1 in the environment to opt back in to GPU
+    # (e.g. for testing if VRAM pressure has eased by retiring Chronos or
+    # similar). Default: CPU.
+    use_gpu = os.environ.get("BERT_SENTIMENT_USE_GPU", "").strip() in ("1", "true", "TRUE", "yes")
     device = "cpu"
-    if torch.cuda.is_available():
+    if use_gpu and torch.cuda.is_available():
         try:
             model = model.to("cuda")
             device = "cuda"
-            logger.info("BERT model %s moved to CUDA", name)
+            logger.info("BERT model %s moved to CUDA (BERT_SENTIMENT_USE_GPU=1)", name)
         except Exception as e:
             logger.warning("BERT model %s failed to move to CUDA, staying on CPU: %s", name, e)
     else:
-        logger.info("CUDA unavailable - BERT model %s will run on CPU", name)
+        logger.info("BERT model %s staying on CPU (default, avoids VRAM contention with llama-server)", name)
 
     return tokenizer, model, device, threading.Lock()
 
