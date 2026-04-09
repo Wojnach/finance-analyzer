@@ -251,4 +251,5 @@ class TestMetalsSignalConfig:
             "atr_pct": 2.24,
         }
         action, conf, extra = generate_signal(ind, ticker="BTC-USD")
-        assert extra["_total_applicable"] == 29
+        # 29 base + funding re-enabled (was DISABLED) + onchain new = 31
+        assert extra["_total_applicable"] == 31

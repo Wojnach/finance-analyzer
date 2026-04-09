@@ -1621,11 +1621,11 @@ class TestTrendingUpRegimeGating:
     """BUG-152: SELL-biased signals must be gated in trending-up at 1d."""
 
     def test_trending_up_gates_sell_biased_signals_at_default(self):
-        """All 6 SELL-biased signals should be gated at _default/1d in trending-up."""
+        """All 7 signals should be gated at _default/1d in trending-up (incl. funding)."""
         from portfolio.signal_engine import _get_regime_gated
         gated = _get_regime_gated("trending-up")
         expected = {"trend", "ema", "volume_flow", "macro_regime",
-                    "momentum_factors", "claude_fundamental"}
+                    "momentum_factors", "claude_fundamental", "funding"}
         assert expected == gated
 
     def test_trending_up_does_not_gate_sell_biased_at_3h(self):

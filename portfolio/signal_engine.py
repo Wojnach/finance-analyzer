@@ -440,7 +440,7 @@ def _get_horizon_weights(horizon: str | None) -> dict[str, float]:
 
 
 # Signals that only apply to specific asset classes
-_CRYPTO_ONLY_SIGNALS = {"futures_flow", "funding", "crypto_macro"}
+_CRYPTO_ONLY_SIGNALS = {"futures_flow", "funding", "crypto_macro", "onchain"}
 _METALS_ONLY_SIGNALS = {"metals_cross_asset"}
 _NON_STOCK_SIGNALS = {"orderbook_flow"}  # metals + crypto only
 
