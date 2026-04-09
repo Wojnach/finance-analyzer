@@ -60,11 +60,26 @@ def send_telegram(msg):
 
 
 def get_cet_time():
-    """Get current CET/CEST time from timeapi.io, fallback to zoneinfo (DST-safe).
+    """Get current Stockholm time from timeapi.io, fallback to zoneinfo (DST-safe).
+
+    The time_string carries the real tzname (CET in winter, CEST in summer)
+    so downstream Telegram/log output matches wall-clock DST. This is the
+    canonical implementation — metals_loop.py and metals_swing_trader.py
+    import from here (ARCH-12 dedup, 2026-04-09).
 
     Returns:
         tuple: (hour_float, time_string, source)
     """
+    # Resolve DST-aware label once up-front so both the network and fallback
+    # branches emit the same tzname (CET/CEST) to callers.
+    tz_label = "CET"
+    try:
+        from zoneinfo import ZoneInfo
+        _tz = ZoneInfo("Europe/Stockholm")
+        tz_label = datetime.datetime.now(_tz).tzname() or "CET"
+    except Exception:
+        _tz = None
+
     try:
         r = requests.get(
             "http://timeapi.io/api/time/current/zone?timeZone=Europe/Stockholm",
@@ -74,7 +89,7 @@ def get_cet_time():
             data = r.json()
             h = data["hour"]
             m = data["minute"]
-            return h + m / 60, f"{h:02d}:{m:02d} CET", "timeapi"
+            return h + m / 60, f"{h:02d}:{m:02d} {tz_label}", "timeapi"
     except Exception as e:
         global _WARNED_TIMEAPI
         if not _WARNED_TIMEAPI:
@@ -86,12 +101,14 @@ def get_cet_time():
             _WARNED_TIMEAPI = True
     # Fallback: zoneinfo handles DST correctly (CET/CEST)
     try:
-        from zoneinfo import ZoneInfo
-        now = datetime.datetime.now(ZoneInfo("Europe/Stockholm"))
+        if _tz is None:
+            from zoneinfo import ZoneInfo
+            _tz = ZoneInfo("Europe/Stockholm")
+        now = datetime.datetime.now(_tz)
         h = now.hour
         m = now.minute
-        return h + m / 60, f"{h:02d}:{m:02d} CET", "zoneinfo"
-    except ImportError:
+        return h + m / 60, f"{h:02d}:{m:02d} {now.tzname() or tz_label}", "zoneinfo"
+    except Exception:
         # Last resort: UTC+1 (wrong during summer DST)
         now = datetime.datetime.now(datetime.UTC)
         h = (now.hour + 1) % 24

@@ -56,9 +56,16 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
+# data/ also on sys.path so bare-module imports (metals_llm, metals_shared, ...)
+# resolve here. Previously this was done lazily inside the LLM try-block below;
+# hoisted to top-level so critical shared helpers (get_cet_time) can be imported
+# as hard deps without a try-block. (2026-04-09 ARCH-12 dedup.)
+if str(DATA_DIR) not in sys.path:
+    sys.path.insert(0, str(DATA_DIR))
 os.chdir(BASE_DIR)
 
 import requests
+from metals_shared import get_cet_time
 from playwright.sync_api import sync_playwright
 
 from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
@@ -255,14 +262,6 @@ EMERGENCY_SELL_ENABLED = False  # default OFF: requires explicit enablement
 
 _STOCKHOLM_TZ = ZoneInfo("Europe/Stockholm") if ZoneInfo else None
 _US_EASTERN_TZ = ZoneInfo("America/New_York") if ZoneInfo else None
-
-# 2026-04-09: log-once guard for timeapi.io failures in the metals_loop.py
-# copy of get_cet_time() (there's a DUPLICATE implementation in
-# data/metals_shared.py:62 with its own guard). Both guards are needed
-# because each module has its own memory; without this, timeapi.io
-# warnings fire every cycle from this copy even after metals_shared.py's
-# guard has tripped.
-_WARNED_TIMEAPI_METALS_LOOP: bool = False
 
 # Trade queue (Layer 2 writes intent, Layer 1 executes)
 TRADE_QUEUE_ENABLED = True
@@ -943,52 +942,6 @@ def _silver_fast_tick():
                     log(f"*** SILVER VELOCITY: {vel:.1f}% ***")
                     if SILVER_VELOCITY_TELEGRAM:
                         send_telegram(msg)
-
-
-def get_cet_time():
-    """Get current Stockholm time from timeapi.io, fallback to zoneinfo (DST-safe)."""
-    tz_label = "CET"
-    if _STOCKHOLM_TZ is not None:
-        try:
-            tz_label = datetime.datetime.now(_STOCKHOLM_TZ).tzname() or "CET"
-        except Exception:
-            pass
-    try:
-        r = requests.get(
-            "http://timeapi.io/api/time/current/zone?timeZone=Europe/Stockholm",
-            timeout=3
-        )
-        if r.status_code == 200:
-            data = r.json()
-            h = data["hour"]
-            m = data["minute"]
-            return h + m / 60, f"{h:02d}:{m:02d} {tz_label}", "timeapi"
-    except Exception as e:
-        # 2026-04-09: log-once guard — this is the SECOND get_cet_time() in the
-        # codebase (the other is data/metals_shared.py:62). Both need the
-        # suppress-repeated-warnings pattern, otherwise we get 2 noise lines
-        # per cycle instead of 2 per process run. Guard is module-level
-        # (_WARNED_TIMEAPI_METALS_LOOP) to stay independent of metals_shared's.
-        global _WARNED_TIMEAPI_METALS_LOOP
-        if not _WARNED_TIMEAPI_METALS_LOOP:
-            print(
-                f"[WARN] timeapi.io failed: {e} "
-                "(suppressing further warnings; using zoneinfo fallback)",
-                flush=True,
-            )
-            _WARNED_TIMEAPI_METALS_LOOP = True
-    # Fallback: zoneinfo handles DST correctly (CET/CEST)
-    try:
-        now = datetime.datetime.now(_STOCKHOLM_TZ)
-        h = now.hour
-        m = now.minute
-        return h + m / 60, f"{h:02d}:{m:02d} {now.tzname() or tz_label}", "zoneinfo"
-    except Exception:
-        # Last resort: UTC+1 (wrong during summer DST)
-        now = datetime.datetime.now(datetime.UTC)
-        h = (now.hour + 1) % 24
-        m = now.minute
-        return h + m / 60, f"{h:02d}:{m:02d} CET", "system_utc+1"
 
 
 def get_us_spike_schedule(now=None):
