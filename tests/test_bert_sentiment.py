@@ -70,20 +70,27 @@ def fake_torch_and_transformers(monkeypatch):
             return self._v
 
     def _fake_softmax(logits, dim):
-        # logits is a 2D list [[a, b, c]]; return a tensor-like for [[softmaxed]]
-        data = logits._data[0] if hasattr(logits, "_data") else logits[0]
-        exp = [pow(2.71828, v) for v in data]
-        total = sum(exp) or 1.0
-        normalized = [v / total for v in exp]
-        # Return a wrapper that indexes to a _FakeTensor of the row
-        class _Wrapper:
+        # logits._data is a list of rows (list of floats). Return a batch
+        # wrapper that indexes rows back to _FakeTensor instances so the
+        # batched predict path can do probs[i] per input.
+        rows = logits._data if hasattr(logits, "_data") else logits
+
+        class _BatchWrapper:
             def __init__(self, rows):
-                self._rows = rows
+                # Softmax each row independently
+                self._rows = []
+                for row in rows:
+                    exp = [pow(2.71828, v) for v in row]
+                    total = sum(exp) or 1.0
+                    self._rows.append([v / total for v in exp])
 
             def __getitem__(self, idx):
                 return _FakeTensor(self._rows[idx])
 
-        return _Wrapper([normalized])
+            def __len__(self):
+                return len(self._rows)
+
+        return _BatchWrapper(rows)
 
     fake_torch.softmax = _fake_softmax
 
@@ -98,18 +105,26 @@ def fake_torch_and_transformers(monkeypatch):
     fake_transformers = types.ModuleType("transformers")
 
     class _FakeLogits:
-        def __init__(self, values):
-            self._data = [values]
+        def __init__(self, rows):
+            # rows is a list of per-text logit vectors
+            self._data = rows
 
     class _FakeOutput:
-        def __init__(self, logits_values):
-            self.logits = _FakeLogits(logits_values)
+        def __init__(self, rows):
+            self.logits = _FakeLogits(rows)
 
     class _FakeModel:
         load_count = 0
         forward_count = 0
+        # Optional hook tests can use to trigger a per-text loop from the
+        # batched path: if _batched_raises is True, __call__ raises when
+        # given a batch of 2+ texts.
+        _batched_raises = False
 
         def __init__(self, logits_values):
+            # logits_values is a single per-text logit vector [a, b, c];
+            # the model repeats it for every text in the input batch so
+            # every text in a given test run gets the same prediction.
             self._logits_values = logits_values
             self._device = "cpu"
 
@@ -123,16 +138,29 @@ def fake_torch_and_transformers(monkeypatch):
 
         def __call__(self, **inputs):
             _FakeModel.forward_count += 1
-            return _FakeOutput(self._logits_values)
+            # Figure out the batch size from the first input tensor
+            first = next(iter(inputs.values()))
+            batch_size = len(first) if hasattr(first, "__len__") else 1
+            if _FakeModel._batched_raises and batch_size > 1:
+                raise RuntimeError("simulated batched failure")
+            rows = [list(self._logits_values) for _ in range(batch_size)]
+            return _FakeOutput(rows)
 
     class _FakeTokenizer:
         def __init__(self):
             self.calls = 0
 
-        def __call__(self, text, **kwargs):
+        def __call__(self, text_or_texts, **kwargs):
             self.calls += 1
-            # Return a dict of fake tensors; keys don't matter for the fake
-            return {"input_ids": _FakeTensor([1, 2, 3])}
+            # Accept either a single string or a list of strings. Return a
+            # dict of fake tensors whose outer length matches the batch.
+            if isinstance(text_or_texts, str):
+                batch = [text_or_texts]
+            else:
+                batch = list(text_or_texts)
+            # We only need the outer length for the model's batch-size
+            # detection, so a list of placeholder tokens is enough.
+            return {"input_ids": _FakeTensor([i for i in range(len(batch))])}
 
     class _FakeAutoTokenizer:
         @staticmethod
@@ -354,38 +382,67 @@ def test_concurrent_predict_same_model(fake_torch_and_transformers):
     assert len(results["b"]) == 1
 
 
-def test_per_headline_failure_emits_neutral_placeholder(fake_torch_and_transformers):
-    """If a single headline raises during forward pass, we should still return
-    a full result list with a zero-confidence neutral entry for the failed one.
+def test_batched_failure_falls_back_to_per_text(fake_torch_and_transformers):
+    """If the batched forward pass fails, predict() should fall back to a
+    per-text loop and still return one result per input headline.
     """
     from portfolio import bert_sentiment
+    FakeModel = fake_torch_and_transformers["FakeModel"]
 
-    # Trigger a load first
+    # Trigger a load first (single text, so batched-raises doesn't fire yet)
     bert_sentiment.predict("CryptoBERT", ["warmup"])
 
-    # Now monkeypatch the cached model's __call__ to raise
+    # Now force batched calls to raise; per-text (batch_size=1) still works.
+    FakeModel._batched_raises = True
+    try:
+        result = bert_sentiment.predict("CryptoBERT", ["headline one", "headline two"])
+        assert len(result) == 2
+        for entry in result:
+            assert entry["sentiment"] in {"positive", "negative", "neutral"}
+            assert 0.0 <= entry["confidence"] <= 1.0
+    finally:
+        FakeModel._batched_raises = False
+
+
+def test_per_text_fallback_handles_single_failure(fake_torch_and_transformers):
+    """In the per-text fallback path, if one headline raises during forward
+    pass, we still return one result per input with a neutral placeholder
+    for the failed one.
+    """
+    from portfolio import bert_sentiment
+    FakeModel = fake_torch_and_transformers["FakeModel"]
+
+    # Warm the cache
+    bert_sentiment.predict("CryptoBERT", ["warmup"])
+
+    # Force the batched path to fail so we enter _predict_per_text
+    FakeModel._batched_raises = True
+
+    # Patch the cached model's __call__ so the first TWO calls raise (call 1
+    # is the batched attempt triggered by _batched_raises, call 2 is the
+    # first per-text call — we want that one to also fail so the neutral
+    # placeholder branch runs). Calls 3+ succeed.
     _tok, model, _dev, _lock = bert_sentiment._models["CryptoBERT"]
-
     call_count = {"n": 0}
-    original_call = model.__call__
+    original_call = type(model).__call__
 
-    def flaky_call(**kwargs):
+    def flaky_call(self, **kwargs):
         call_count["n"] += 1
-        if call_count["n"] == 1:
-            raise RuntimeError("simulated per-headline failure")
-        return original_call(**kwargs)
+        if call_count["n"] <= 2:
+            raise RuntimeError(f"simulated failure on call {call_count['n']}")
+        return original_call(self, **kwargs)
 
-    # Monkeypatch the instance
-    model.__class__.__call__ = lambda self, **kw: flaky_call(**kw)
+    type(model).__call__ = flaky_call
 
     try:
         result = bert_sentiment.predict("CryptoBERT", ["bad headline", "good headline"])
         assert len(result) == 2
-        # First one should be the neutral placeholder from the error path
+        # First one should be the neutral placeholder from the per-text error path
         assert result[0]["sentiment"] == "neutral"
         assert result[0]["confidence"] == 0.0
-        # Second one should be a real result
+        # Second one should be a real result (call 3+ succeeds)
         assert result[1]["sentiment"] in {"positive", "negative", "neutral"}
+        assert result[1]["confidence"] > 0.0
     finally:
-        # Restore so other tests don't break
-        model.__class__.__call__ = lambda self, **kw: original_call(**kw)
+        type(model).__call__ = original_call
+        FakeModel._batched_raises = False

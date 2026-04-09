@@ -242,9 +242,17 @@ def predict(model_name: str, texts: list[str]) -> list[dict]:
           "confidence": <float>, "scores": {"positive": .., "negative": ..,
           "neutral": ..}}, ...]
 
-    On per-headline failure (e.g. tokenizer edge case on some unicode),
-    emits a zero-confidence neutral placeholder for that headline. On load
-    failure, raises so the caller can fall back to subprocess.
+    2026-04-09 (hotfix 2): uses BATCHED tokenize + forward pass. The three
+    legacy subprocess scripts (cryptobert_infer.py / trading_hero_infer.py
+    / finbert_infer.py) all pass the full text list to the tokenizer in
+    one call, which gives one forward pass over a padded tensor instead
+    of N sequential passes. On CPU the speedup is ~5-10x per call because
+    the BERT kernel launch overhead is amortized across the batch.
+
+    If the batched path fails (e.g. OOM on a huge batch, or tokenizer
+    edge case), we fall back to a per-text loop so the caller still gets
+    one result per input. A final safety net emits a zero-confidence
+    neutral placeholder if even the per-text path fails.
     """
     if not texts:
         return []
@@ -259,57 +267,104 @@ def predict(model_name: str, texts: list[str]) -> list[dict]:
     max_length = config["max_length"]
     label_map = config["label_map"]
 
-    results: list[dict] = []
-    # Hold the per-model lock for the whole batch. Batches are small (~5-30
-    # headlines) and forward pass is ~5-20 ms each, so the lock is held for
-    # ~100-600 ms max. Still far better than subprocess cold-load.
+    # Hold the per-model lock for the whole batch. Batched forward pass
+    # takes ~100-500 ms on CPU for N<=30 headlines, much better than the
+    # N sequential passes the earlier version of this code did.
     with lock:
-        for text in texts:
-            try:
-                inputs = tokenizer(
-                    text,
-                    return_tensors="pt",
-                    truncation=True,
-                    padding=True,
-                    max_length=max_length,
-                )
-                if device == "cuda":
-                    inputs = {k: v.to("cuda") for k, v in inputs.items()}
-                with torch.no_grad():
-                    outputs = model(**inputs)
-                probs = torch.softmax(outputs.logits, dim=1)[0]
-                label_idx = int(torch.argmax(probs).item())
-                sentiment = label_map[label_idx]
+        try:
+            return _predict_batched(
+                texts, tokenizer, model, device, max_length, label_map, torch,
+            )
+        except Exception as e:
+            logger.warning(
+                "BERT %s batched predict failed, falling back to per-text loop: %s",
+                model_name, e,
+            )
+            return _predict_per_text(
+                texts, tokenizer, model, device, max_length, label_map, torch, model_name,
+            )
 
-                # Build the scores dict keyed by canonical sentiment so the
-                # downstream _aggregate_sentiments code sees the same shape
-                # it got from the subprocess path.
-                scores = {
-                    label_map[i]: float(probs[i].item())
-                    for i in range(len(label_map))
-                }
-                confidence = float(probs[label_idx].item())
 
-                results.append({
-                    "text": text[:100],
-                    "sentiment": sentiment,
-                    "confidence": confidence,
-                    "scores": scores,
-                })
-            except Exception as e:
-                # Per-headline failure: log and emit a neutral placeholder so
-                # the aggregator doesn't choke on a missing entry.
-                logger.warning(
-                    "BERT %s predict failed for text %r: %s",
-                    model_name, text[:60], e,
-                )
-                results.append({
-                    "text": text[:100],
-                    "sentiment": "neutral",
-                    "confidence": 0.0,
-                    "scores": {"positive": 0.33, "negative": 0.33, "neutral": 0.34},
-                })
+def _predict_batched(texts, tokenizer, model, device, max_length, label_map, torch):
+    """Single tokenizer + forward pass over the whole batch."""
+    inputs = tokenizer(
+        texts,
+        return_tensors="pt",
+        truncation=True,
+        padding=True,
+        max_length=max_length,
+    )
+    if device == "cuda":
+        inputs = {k: v.to("cuda") for k, v in inputs.items()}
+    with torch.no_grad():
+        outputs = model(**inputs)
+    probs = torch.softmax(outputs.logits, dim=1)  # shape [N, num_labels]
 
+    results: list[dict] = []
+    num_labels = len(label_map)
+    for i, text in enumerate(texts):
+        row = probs[i]
+        label_idx = int(torch.argmax(row).item())
+        sentiment = label_map[label_idx]
+        scores = {
+            label_map[j]: float(row[j].item())
+            for j in range(num_labels)
+        }
+        confidence = float(row[label_idx].item())
+        results.append({
+            "text": text[:100],
+            "sentiment": sentiment,
+            "confidence": confidence,
+            "scores": scores,
+        })
+    return results
+
+
+def _predict_per_text(texts, tokenizer, model, device, max_length, label_map, torch, model_name):
+    """Fallback: one forward pass per text. Slower but more resilient to
+    edge-case failures in the batched path (e.g. OOM on a huge batch or
+    tokenizer error on one odd input).
+    """
+    results: list[dict] = []
+    num_labels = len(label_map)
+    for text in texts:
+        try:
+            inputs = tokenizer(
+                text,
+                return_tensors="pt",
+                truncation=True,
+                padding=True,
+                max_length=max_length,
+            )
+            if device == "cuda":
+                inputs = {k: v.to("cuda") for k, v in inputs.items()}
+            with torch.no_grad():
+                outputs = model(**inputs)
+            probs = torch.softmax(outputs.logits, dim=1)[0]
+            label_idx = int(torch.argmax(probs).item())
+            sentiment = label_map[label_idx]
+            scores = {
+                label_map[i]: float(probs[i].item())
+                for i in range(num_labels)
+            }
+            confidence = float(probs[label_idx].item())
+            results.append({
+                "text": text[:100],
+                "sentiment": sentiment,
+                "confidence": confidence,
+                "scores": scores,
+            })
+        except Exception as e:
+            logger.warning(
+                "BERT %s per-text predict failed for %r: %s",
+                model_name, text[:60], e,
+            )
+            results.append({
+                "text": text[:100],
+                "sentiment": "neutral",
+                "confidence": 0.0,
+                "scores": {"positive": 0.33, "negative": 0.33, "neutral": 0.34},
+            })
     return results
 
 
