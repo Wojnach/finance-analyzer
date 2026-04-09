@@ -37,6 +37,11 @@
 |-------|---------|----------|
 | C11 | `_loading_keys` permanently stuck | `_loading_timestamps` added; stuck keys evicted after `_LOADING_TIMEOUT = 120s` |
 | H18 | Raw `open()` in `check_drawdown` | Now uses `load_json()` and `load_jsonl_tail()` |
+| H13 | `structure._highlow_breakout` all-history bias | Now capped to last 252 bars at line 61 |
+| H19 | Sortino denominator wrong | Now divides by `len(daily_rets_dec)` (line 245), explicitly refs H19 |
+| H23 | GPU lock fd leak on `os.write()` failure | `try/finally: os.close(fd)` at lines 128-131 |
+| H25 | Log rotation not integrated | `log_rotation.rotate_all` called hourly in `main.py:382` |
+| H26 | Telegram `retry_after` ignored | `http_retry.py:43-49` parses `retry_after` from 429 response |
 
 ### STILL OPEN (confirmed not fixed)
 
@@ -45,9 +50,7 @@
 | C3 | `wait_for_specialists()` blocks main loop 150s | Still called synchronously from `agent_invocation.py:257` |
 | C6 | `check_drawdown()` never called in live path | Not in `main.py` or any Layer 2 invoke path |
 | C12 | `log_portfolio_value()` raw `open(HISTORY_FILE, "a")` | `metals_loop.py:4949` still uses raw `open()` |
-| H13 | `structure._highlow_breakout` all-history bias | No lookback cap applied |
 | H17 | `volume_flow._compute_vwap` cumulative from bar 0 | Not session-scoped |
-| H19 | Sortino denominator divides by `len(downside_returns)` | Not `len(all_returns)` |
 | H31 | `POSITIONS` dict access without lock | Main loop + fast-tick still share without `threading.Lock` |
 | H32 | `_silver_reset_session()` never called | Defined but no call site |
 | M12 | SwingTrader hardcodes `close_cet = 21.0 + 55/60` | Lines 767 and 1037. Violates "check API for todayClosingTime" rule |
@@ -123,6 +126,13 @@ SHORT, `from_peak_pct` is already negative when giving back SHORT profit (underl
 up), so this double-negative may cause the trailing stop to fire prematurely.
 **Impact**: When SHORT is enabled, trailing stop may fire on small bounces. Currently gated by
 `SHORT_ENABLED = False`, so no production impact yet.
+
+#### IC-R4-11: `macro_context.py` new code has raw `open(CONFIG_FILE)` (confidence: 100%)
+**File**: `portfolio/macro_context.py:197`
+**Finding**: The FRED fallback function `_fred_10y_fallback()` (added 2026-04-09) reads config
+with raw `open(CONFIG_FILE, encoding="utf-8")`. This is new code written TODAY that violates
+Rule 4. Should use `load_json(CONFIG_FILE)`.
+**Impact**: Minor — config.json is rarely written concurrently. But new code should follow rules.
 
 ### MEDIUM
 
