@@ -256,8 +256,22 @@ These are significant reliability improvements backed by 265 lines of tests.
 ### Metals-Core Agent
 *(agent still running — integrate in follow-up commit)*
 
-### Avanza-API Agent
-*(agent still running — integrate in follow-up commit)*
+### Avanza-API Agent — COMPLETE
+
+**Key findings (8 total: 4 HIGH, 4 MEDIUM):**
+
+| ID | Sev | Finding |
+|----|-----|---------|
+| AV-R4-1 | HIGH | M3 still open: TOTP `AvanzaAuth` singleton has no expiry — stale session places orders silently |
+| AV-R4-2 | HIGH | **NEW**: CONFIRM ambiguity — multiple pending orders routes confirmation to wrong order |
+| AV-R4-3 | HIGH | **NEW**: `avanza_orders.py` resolves `place_buy/sell_order` to `avanza_client` (unguarded), **bypassing H7 account whitelist and H8 1000 SEK minimum**. The CONFIRM workflow circumvents both Round 3 fixes. |
+| AV-R4-4 | HIGH | **NEW**: `fetch_positions` returns ALL accounts when `account_id` empty — pension isolation violated |
+| AV-R4-5 | MED | `cancel_order()` returns bool vs OrderResult — callers may mishandle |
+| AV-R4-6 | MED | `get_buying_power()` searches wrong primary key `accountId` when API uses `id` |
+| AV-R4-7 | MED | Tick rules cached forever — stale tables cause order rejections after instrument roll |
+| AV-R4-8 | MED | `api_get`/`api_post` raise RuntimeError on 429/5xx with no retry |
+
+**Verified Round 3**: C7 (FIXED), C8 (FIXED), H4 (FIXED), H5 (FIXED), H6 (FIXED), H7 (FIXED but bypassed by AV-R4-3), H8 (FIXED but bypassed by AV-R4-3), M2 (FIXED), M3 (STILL OPEN), M4 (FIXED)
 
 ### Signals-Modules Agent
 *(agent still running — integrate in follow-up commit)*
@@ -319,7 +333,17 @@ checklist of all cadence-dependent constants:
   underestimation is ~43% over weekends, which is material for crypto/metals.
 - **PR-R4-9 (averaged underlying entry price)**: VALIDATED — real P&L calculation bug.
 
-*(Remaining 6 agents still running — cross-critique will be extended in follow-up commit)*
+**Avanza-API agent**:
+- **AV-R4-3 (CONFIRM bypasses guards)**: VALIDATED and CRITICAL. This is a pattern problem:
+  `avanza_control.py` re-exports BOTH guarded (session) and unguarded (client) functions
+  under the same names. The CONFIRM workflow picks up the unguarded versions. This means
+  the H7 (account whitelist) and H8 (1000 SEK minimum) fixes are present but not on the
+  actual execution path for human-confirmed orders. This is the same "disconnected safety"
+  pattern as PR-R4-4 (record_trade never called) — guards exist but aren't wired in.
+- **AV-R4-4 (fetch_positions returns all accounts)**: VALIDATED. The JS filter fails open
+  on empty string — should fail closed.
+
+*(Remaining 5 agents still running — cross-critique will be extended in follow-up commit)*
 
 ---
 
@@ -333,7 +357,8 @@ checklist of all cadence-dependent constants:
 | New findings in Round 4 | ~11 (IC-R4-1 through IC-R4-11) |
 | Orchestration agent new findings | 9 (1 CRIT, 3 HIGH, 4 MED, 1 LOW) |
 | Portfolio-risk agent new findings | 9 (5 CRIT, 4 HIGH) |
-| **Total active findings** | **~38** |
+| Avanza-API agent new findings | 8 (4 HIGH, 4 MED) |
+| **Total active findings** | **~46** |
 
 **Net progress**: Round 3 had 67 total findings. ~19 confirmed fixed, ~3 partially fixed.
 11 new findings discovered. Active finding count dropped from 67 to ~20.
