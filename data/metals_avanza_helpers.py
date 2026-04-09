@@ -112,6 +112,18 @@ def fetch_account_cash(page, account_id):
     with diagnostic context — the JS layer returns a `_error` dict on
     iteration failure so we can distinguish "HTTP error" from "account ID
     not found" from "Avanza renamed a field" without guessing.
+
+    2026-04-09 afternoon (Fix 4b): Avanza changed the response shape. The
+    field used to be `data.categorizedAccounts` (array of category objects,
+    each with an `accounts` array). The new shape exposes three top-level
+    keys — `categories`, `accounts`, `loans` — where `accounts` is a flat
+    array of all user accounts. Diagnostic run at 18:41:11 CET confirmed:
+    `top_level_keys: ['categories', 'accounts', 'loans']`. We now try the
+    legacy categorized path first (forward-compat), then the new flat
+    `data.accounts` path, then the new `data.categories` path, taking
+    whichever finds the target account. Diagnostic on total miss includes
+    both the categorized count and the flat count so the next regression
+    is equally easy to spot.
     """
     try:
         result = page.evaluate("""async (accountId) => {
@@ -123,26 +135,45 @@ def fetch_account_cash(page, account_id):
                 return {_error: 'http', status: resp.status};
             }
             const data = await resp.json();
-            const cats = data.categorizedAccounts || [];
+            const v = (x) => (x && typeof x === 'object' && 'value' in x) ? x.value : x;
             const ids_seen = [];
-            for (const cat of cats) {
+
+            const makeResult = (acc) => ({
+                buying_power: v(acc.buyingPower),
+                total_value: v(acc.totalValue),
+                own_capital: v(acc.ownCapital),
+            });
+
+            // Path A (legacy, pre-2026-04-09): data.categorizedAccounts
+            const legacyCats = data.categorizedAccounts || [];
+            for (const cat of legacyCats) {
                 for (const acc of (cat.accounts || [])) {
-                    if (acc && acc.accountId != null) {
-                        ids_seen.push(String(acc.accountId));
-                    }
-                    if (String(acc.accountId) === accountId) {
-                        const v = (x) => (x && typeof x === 'object' && 'value' in x) ? x.value : x;
-                        return {
-                            buying_power: v(acc.buyingPower),
-                            total_value: v(acc.totalValue),
-                            own_capital: v(acc.ownCapital),
-                        };
-                    }
+                    if (acc && acc.accountId != null) ids_seen.push(String(acc.accountId));
+                    if (String(acc.accountId) === accountId) return makeResult(acc);
                 }
             }
+
+            // Path B (new flat shape, 2026-04-09): data.accounts
+            const flatAccounts = data.accounts || [];
+            for (const acc of flatAccounts) {
+                if (acc && acc.accountId != null) ids_seen.push(String(acc.accountId));
+                if (String(acc.accountId) === accountId) return makeResult(acc);
+            }
+
+            // Path C (new categorized shape, 2026-04-09): data.categories
+            const newCats = data.categories || [];
+            for (const cat of newCats) {
+                for (const acc of (cat.accounts || [])) {
+                    if (acc && acc.accountId != null) ids_seen.push(String(acc.accountId));
+                    if (String(acc.accountId) === accountId) return makeResult(acc);
+                }
+            }
+
             return {
                 _error: 'no_account_match',
-                num_categories: cats.length,
+                legacy_category_count: legacyCats.length,
+                flat_account_count: flatAccounts.length,
+                new_category_count: newCats.length,
                 ids_seen: ids_seen,
                 top_level_keys: Object.keys(data),
             };
