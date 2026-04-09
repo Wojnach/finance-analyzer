@@ -1,8 +1,9 @@
 """Smart trigger system — detects meaningful market changes to reduce noise.
 
-Layer 1 runs every minute during market hours. Layer 2 is invoked when:
+Layer 1 runs on a 10-minute cadence during every market state (see
+``portfolio/market_timing.py:INTERVAL_MARKET_OPEN``). Layer 2 is invoked when:
 - Signal consensus: any ticker NEWLY reaches BUY or SELL from HOLD
-- Signal flip sustained for SUSTAINED_CHECKS consecutive cycles (~3 min)
+- Signal flip sustained for SUSTAINED_CHECKS consecutive cycles (see below)
 - Price moved >2% since last trigger
 - Fear & Greed crossed extreme threshold (20 or 80)
 - Sentiment reversal: sustained for SUSTAINED_CHECKS cycles (filters oscillation)
@@ -31,7 +32,19 @@ PORTFOLIO_BOLD_FILE = BASE_DIR / "data" / "portfolio_state_bold.json"
 
 PRICE_THRESHOLD = 0.02  # 2% move
 FG_THRESHOLDS = (20, 80)  # extreme fear / extreme greed boundaries
-SUSTAINED_CHECKS = 3  # consecutive cycles a signal must hold before triggering
+# A signal flip triggers Layer 2 when EITHER of these holds:
+#   - SUSTAINED_CHECKS consecutive cycles show the new action, OR
+#   - SUSTAINED_DURATION_S seconds of wall-clock time have elapsed since
+#     the flip first appeared.
+# The count path is the original behavior (unchanged at the 60s cadence).
+# The duration path is new (added 2026-04-09 with the cadence bump to 600s);
+# at 600s cadence the count path would require ≥30 min of sustained flip
+# before triggering, which effectively disables the trigger for fast-moving
+# events. The duration gate bounds the worst case to ~1 cycle after flip
+# (≈10 min at 600s cadence, ≈2 min at 60s cadence — both unchanged or better
+# than the old count-only behavior).
+SUSTAINED_CHECKS = 3
+SUSTAINED_DURATION_S = 120
 
 # Startup grace period — after a restart, the first loop iteration updates the
 # baseline without triggering Layer 2. This prevents spurious T3 full reviews
@@ -167,8 +180,14 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
             triggered_consensus[ticker] = action
     state["triggered_consensus"] = triggered_consensus
 
-    # 2. Signal flip — only if sustained for SUSTAINED_CHECKS consecutive cycles
+    # 2. Signal flip — triggers when the new action has been seen for
+    #    SUSTAINED_CHECKS consecutive cycles OR for SUSTAINED_DURATION_S
+    #    wall-clock seconds, whichever comes first. The duration gate was
+    #    added 2026-04-09 so the trigger still fires within ~1 cycle at
+    #    long cadences (e.g. 600s); at the historical 60s cadence the count
+    #    gate still dominates and behavior is unchanged.
     prev_triggered = prev.get("signals", {})
+    _flip_now_ts = time.time()
     for ticker, sig in signals.items():
         current_action = sig["action"]
         prev_count = sustained.get(ticker, {})
@@ -176,19 +195,25 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
             sustained[ticker] = {
                 "action": current_action,
                 "count": prev_count["count"] + 1,
+                "started_ts": prev_count.get("started_ts", _flip_now_ts),
             }
         else:
-            sustained[ticker] = {"action": current_action, "count": 1}
+            sustained[ticker] = {
+                "action": current_action,
+                "count": 1,
+                "started_ts": _flip_now_ts,
+            }
 
         triggered_action = prev_triggered.get(ticker, {}).get("action")
-        if (
-            triggered_action
-            and current_action != triggered_action
-            and sustained[ticker]["count"] >= SUSTAINED_CHECKS
-        ):
-            reasons.append(
-                f"{ticker} flipped {triggered_action}->{current_action} (sustained)"
+        if triggered_action and current_action != triggered_action:
+            count_ok = sustained[ticker]["count"] >= SUSTAINED_CHECKS
+            duration_ok = (
+                (_flip_now_ts - sustained[ticker]["started_ts"]) >= SUSTAINED_DURATION_S
             )
+            if count_ok or duration_ok:
+                reasons.append(
+                    f"{ticker} flipped {triggered_action}->{current_action} (sustained)"
+                )
 
     # 3. Price move >2% since last trigger
     prev_prices = prev.get("prices", {})
@@ -214,23 +239,31 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
                 reasons.append(f"F&G crossed {threshold} ({old_val}->{val})")
                 break
 
-    # 5. Sentiment reversal — sustained for SUSTAINED_CHECKS cycles
-    #    Prevents rapid oscillation (e.g. a ticker flipping every cycle) from
-    #    triggering. Only fires when sentiment is stable in the new direction
-    #    for SUSTAINED_CHECKS consecutive cycles.
+    # 5. Sentiment reversal — same OR-debounce as section 2: SUSTAINED_CHECKS
+    #    consecutive cycles OR SUSTAINED_DURATION_S wall-clock seconds.
     sustained_sent = state.get("sustained_sentiment", {})
     stable_sent = state.get("stable_sentiment", {})
+    _sent_now_ts = time.time()
     for ticker, sent in sentiments.items():
         prev_sc = sustained_sent.get(ticker, {})
         if prev_sc.get("value") == sent:
             sustained_sent[ticker] = {
                 "value": sent,
                 "count": prev_sc.get("count", 0) + 1,
+                "started_ts": prev_sc.get("started_ts", _sent_now_ts),
             }
         else:
-            sustained_sent[ticker] = {"value": sent, "count": 1}
+            sustained_sent[ticker] = {
+                "value": sent,
+                "count": 1,
+                "started_ts": _sent_now_ts,
+            }
 
-        if sustained_sent[ticker]["count"] >= SUSTAINED_CHECKS:
+        _sent_count_ok = sustained_sent[ticker]["count"] >= SUSTAINED_CHECKS
+        _sent_duration_ok = (
+            (_sent_now_ts - sustained_sent[ticker]["started_ts"]) >= SUSTAINED_DURATION_S
+        )
+        if _sent_count_ok or _sent_duration_ok:
             last_stable = stable_sent.get(ticker)
             if (
                 last_stable

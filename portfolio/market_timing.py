@@ -12,10 +12,14 @@ from portfolio.tickers import CRYPTO_SYMBOLS, METALS_SYMBOLS, STOCK_SYMBOLS, SYM
 # Callers that need DST-aware EU open should use _eu_market_open_hour_utc().
 MARKET_OPEN_HOUR = 7
 
-# Loop intervals by market state
-INTERVAL_MARKET_OPEN = 60     # 1 min — full speed
-INTERVAL_MARKET_CLOSED = 120  # 2 min — crypto only weekday nights
-INTERVAL_WEEKEND = 600        # 10 min — crypto only weekends
+# Loop intervals by market state.
+# 2026-04-09: all bumped to 600s (10 min). The reduced 5-ticker universe +
+# warm fingpt daemon means we no longer need a 60s fast tick — giving the
+# loop breathing room eliminates cadence overruns without losing anything
+# meaningful. Weekend was already 600s. See docs/PLAN_FINGPT_DAEMON.md.
+INTERVAL_MARKET_OPEN = 600    # 10 min — previously 60s (pre-daemon era)
+INTERVAL_MARKET_CLOSED = 600  # 10 min — previously 120s
+INTERVAL_WEEKEND = 600        # 10 min — unchanged
 
 # States where US stock markets are NOT trading — use this tuple instead of
 # hardcoding ("closed", "weekend") to avoid missing the "holiday" state.

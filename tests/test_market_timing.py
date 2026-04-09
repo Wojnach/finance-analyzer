@@ -421,7 +421,7 @@ class TestGetMarketStateOpen:
 
         state, symbols, interval = get_market_state()
         assert state == "open"
-        assert interval == INTERVAL_MARKET_OPEN  # 60
+        assert interval == INTERVAL_MARKET_OPEN  # 600
         assert isinstance(symbols, set)
         assert len(symbols) > 0
 
@@ -434,7 +434,7 @@ class TestGetMarketStateOpen:
 
         state, symbols, interval = get_market_state()
         assert state == "open"
-        assert interval == 60
+        assert interval == INTERVAL_MARKET_OPEN
 
     @patch("portfolio.market_timing.datetime")
     def test_at_eu_open_winter(self, mock_dt):
@@ -493,7 +493,7 @@ class TestGetMarketStateClosed:
 
         state, symbols, interval = get_market_state()
         assert state == "closed"
-        assert interval == INTERVAL_MARKET_CLOSED  # 300
+        assert interval == INTERVAL_MARKET_CLOSED
         assert isinstance(symbols, set)
 
     @patch("portfolio.market_timing.datetime")
@@ -505,7 +505,7 @@ class TestGetMarketStateClosed:
 
         state, _, interval = get_market_state()
         assert state == "closed"
-        assert interval == 120
+        assert interval == INTERVAL_MARKET_CLOSED
 
     @patch("portfolio.market_timing.datetime")
     def test_weekday_after_close_est(self, mock_dt):
@@ -516,7 +516,7 @@ class TestGetMarketStateClosed:
 
         state, _, interval = get_market_state()
         assert state == "closed"
-        assert interval == 120
+        assert interval == INTERVAL_MARKET_CLOSED
 
     @patch("portfolio.market_timing.datetime")
     def test_weekday_at_midnight(self, mock_dt):
@@ -547,7 +547,7 @@ class TestGetMarketStateClosed:
 
         state, _, interval = get_market_state()
         assert state == "closed"
-        assert interval == 120
+        assert interval == INTERVAL_MARKET_CLOSED
 
 
 # ===========================================================================
@@ -653,7 +653,7 @@ class TestGetMarketStateSymbols:
         state, symbols, interval = get_market_state()
         assert state == "closed"
         assert symbols == CRYPTO_SYMBOLS | METALS_SYMBOLS
-        assert interval == 120
+        assert interval == INTERVAL_MARKET_CLOSED
 
 
 # ===========================================================================
@@ -665,10 +665,13 @@ class TestConstants:
         assert MARKET_OPEN_HOUR == 7
 
     def test_interval_market_open(self):
-        assert INTERVAL_MARKET_OPEN == 60
+        # Bumped 60 → 600 on 2026-04-09 — see portfolio/market_timing.py
+        # comment block and docs/PLAN_FINGPT_DAEMON.md for rationale.
+        assert INTERVAL_MARKET_OPEN == 600
 
     def test_interval_market_closed(self):
-        assert INTERVAL_MARKET_CLOSED == 120
+        # Bumped 120 → 600 on 2026-04-09 — same batch as INTERVAL_MARKET_OPEN.
+        assert INTERVAL_MARKET_CLOSED == 600
 
     def test_interval_weekend(self):
         assert INTERVAL_WEEKEND == 600

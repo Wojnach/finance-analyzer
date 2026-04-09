@@ -369,9 +369,15 @@ def _run_post_cycle(config, report=None):
         logger.warning("Signal postmortem failed: %s", e_pm)
         if report is not None:
             report.post_cycle_results["signal_postmortem"] = False
-    # H25/L3: Rotate unbounded JSONL files once per hour (every 60 cycles).
-    _cycle_id = getattr(_ss, "_run_cycle_id", 0)
-    if _cycle_id % 60 == 0:
+    # H25/L3: Rotate unbounded JSONL files approximately once per hour.
+    # Was cycle-count-based (every 60 cycles assumed 60s cadence = 1h). After
+    # the 2026-04-09 cadence bump to 600s that would become once per 10h, so
+    # this is now driven by wall-clock via a monotonic timestamp tracked on
+    # shared_state so it survives cross-module access within one process.
+    _now_rot_ts = time.monotonic()
+    _last_rot_ts = getattr(_ss, "_last_log_rotation_ts", None)
+    should_rotate_logs = _last_rot_ts is None or (_now_rot_ts - _last_rot_ts) >= 3600
+    if should_rotate_logs:
         try:
             from portfolio.log_rotation import rotate_all
             rotation_results = rotate_all()
@@ -381,6 +387,7 @@ def _run_post_cycle(config, report=None):
                             len(rotated), [r["file"] for r in rotated])
             if report is not None:
                 report.post_cycle_results["log_rotation"] = True
+            _ss._last_log_rotation_ts = _now_rot_ts
         except Exception as e_rot:
             logger.warning("Log rotation failed: %s", e_rot)
             if report is not None:

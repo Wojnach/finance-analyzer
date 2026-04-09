@@ -15,10 +15,13 @@ Phase 3B: Cumulative headline clustering — groups related headlines and scores
 them as a batch for richer "drumbeat effect" detection.
 """
 
+import atexit
 import json
 import logging
 import platform
+import queue
 import subprocess
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -264,36 +267,239 @@ def _run_model(script, texts):
     return json.loads(proc.stdout)
 
 
-def _run_fingpt(texts, model_name=None, cumulative=False, ticker="unknown"):
-    """Run FinGPT sentiment inference via llama-cpp-python subprocess.
+# ── Warm FinGPT daemon client ──────────────────────────────────────────────
+# Rather than spawning a fresh subprocess per call (which cold-loads the
+# 1.2 GB GGUF model every time and holds the GPU file-lock for 70-90s), we
+# talk to a single long-lived daemon process that loads the model once.
+# Protocol is NDJSON over stdin/stdout; see scripts/fingpt_daemon.py.
+#
+# Module-level singleton with a thread-lock because get_sentiment() is called
+# from ThreadPoolExecutor workers in main.py. The daemon itself processes one
+# request at a time, so the lock is not a throughput regression — it's the
+# same serialization the GPU lock already imposed, just with ~1-3s hold
+# instead of ~70-90s per call.
 
-    Uses FINGPT_PYTHON (the .venv-llm venv with llama-cpp-python CUDA).
+_FINGPT_DAEMON_SCRIPT = str(
+    Path(__file__).resolve().parent.parent / "scripts" / "fingpt_daemon.py"
+)
+_fingpt_daemon_proc: subprocess.Popen | None = None
+_fingpt_daemon_reader: "_DaemonReader | None" = None
+_fingpt_daemon_lock = threading.Lock()
+_fingpt_request_id = 0
+_FINGPT_READY_TIMEOUT_S = 180  # model warm-load + startup
+_FINGPT_REQUEST_TIMEOUT_S = 60  # per-request inference ceiling
+
+
+class _DaemonReader(threading.Thread):
+    """Background reader that pipes daemon stdout lines into a queue.
+
+    Without this, a hung model would leave the main thread blocked inside
+    ``stdout.readline()`` while holding ``_fingpt_daemon_lock``, which would
+    starve every ThreadPoolExecutor worker that tries to compute sentiment.
+    Using a bounded ``queue.get(timeout=...)`` lets the client detect the
+    hang and kill the daemon.
+
+    One None sentinel is pushed on EOF/exception; all subsequent reads will
+    return None immediately (the sentinel is re-enqueued on each read so the
+    queue stays non-empty).
+    """
+
+    def __init__(self, proc: subprocess.Popen):
+        super().__init__(daemon=True, name="fingpt-daemon-reader")
+        self._proc = proc
+        self._q: "queue.Queue[str | None]" = queue.Queue()
+
+    def run(self) -> None:
+        try:
+            while True:
+                line = self._proc.stdout.readline()
+                if not line:
+                    break
+                self._q.put(line)
+        except Exception as exc:
+            logger.debug("Fingpt daemon reader exception: %s", exc)
+        finally:
+            self._q.put(None)
+
+    def readline(self, timeout: float) -> str | None:
+        """Return the next stdout line, or None on timeout / EOF.
+
+        Once EOF is observed, subsequent calls return None immediately
+        because we re-enqueue the sentinel for the next reader.
+        """
+        try:
+            line = self._q.get(timeout=timeout)
+        except queue.Empty:
+            return None
+        if line is None:
+            # Re-post sentinel so subsequent reads also observe EOF cheaply.
+            self._q.put(None)
+            return None
+        return line
+
+
+def _spawn_fingpt_daemon() -> tuple[subprocess.Popen, "_DaemonReader"]:
+    """Launch the daemon subprocess and wait for its 'ready' handshake.
+
+    Caller must hold ``_fingpt_daemon_lock``. Returns ``(proc, reader)``.
+    The reader is a background thread pumping stdout lines into a bounded
+    queue, which is how every subsequent read enforces a timeout.
+    """
+    logger.info("Spawning FinGPT warm daemon: %s", _FINGPT_DAEMON_SCRIPT)
+    proc = subprocess.Popen(
+        [FINGPT_PYTHON, _FINGPT_DAEMON_SCRIPT],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=None,  # pass through to parent stderr so we see warm-load logs
+        text=True,
+        bufsize=1,  # line-buffered
+    )
+    reader = _DaemonReader(proc)
+    reader.start()
+
+    # Wait for the "ready" handshake line. The daemon loads the model on
+    # startup (~30-60s cold) so this must be generous — bounded by
+    # _FINGPT_READY_TIMEOUT_S (180s).
+    ready_line = reader.readline(timeout=_FINGPT_READY_TIMEOUT_S)
+    if ready_line is None:
+        # Timeout or EOF before handshake arrived — the daemon is dead or hung.
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        raise RuntimeError(
+            "FinGPT daemon did not emit ready handshake within "
+            f"{_FINGPT_READY_TIMEOUT_S}s"
+        )
+    try:
+        handshake = json.loads(ready_line)
+    except json.JSONDecodeError as exc:
+        proc.kill()
+        raise RuntimeError(
+            f"FinGPT daemon emitted non-JSON handshake: {ready_line!r}"
+        ) from exc
+    if not handshake.get("ready"):
+        proc.kill()
+        raise RuntimeError(f"FinGPT daemon failed to warm up: {handshake}")
+    logger.info("FinGPT warm daemon ready (model=%s, pid=%d)",
+                handshake.get("model"), proc.pid)
+    return proc, reader
+
+
+def _ensure_fingpt_daemon() -> tuple[subprocess.Popen, "_DaemonReader"]:
+    """Return the live daemon process + reader, spawning it lazily and
+    restarting both if the process has died. Caller must hold
+    ``_fingpt_daemon_lock``."""
+    global _fingpt_daemon_proc, _fingpt_daemon_reader
+    if _fingpt_daemon_proc is not None and _fingpt_daemon_proc.poll() is None:
+        return _fingpt_daemon_proc, _fingpt_daemon_reader  # type: ignore[return-value]
+    if _fingpt_daemon_proc is not None:
+        logger.warning("FinGPT daemon exited (code=%s), restarting",
+                       _fingpt_daemon_proc.returncode)
+        _fingpt_daemon_proc = None
+        _fingpt_daemon_reader = None
+    _fingpt_daemon_proc, _fingpt_daemon_reader = _spawn_fingpt_daemon()
+    return _fingpt_daemon_proc, _fingpt_daemon_reader
+
+
+def _stop_fingpt_daemon() -> None:
+    """Graceful shutdown hook — closes stdin and waits briefly for exit."""
+    global _fingpt_daemon_proc, _fingpt_daemon_reader
+    with _fingpt_daemon_lock:
+        if _fingpt_daemon_proc is None or _fingpt_daemon_proc.poll() is not None:
+            _fingpt_daemon_proc = None
+            _fingpt_daemon_reader = None
+            return
+        try:
+            _fingpt_daemon_proc.stdin.write(json.dumps({"quit": True}) + "\n")
+            _fingpt_daemon_proc.stdin.flush()
+            _fingpt_daemon_proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            _fingpt_daemon_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _fingpt_daemon_proc.kill()
+        _fingpt_daemon_proc = None
+        _fingpt_daemon_reader = None
+
+
+atexit.register(_stop_fingpt_daemon)
+
+
+def _run_fingpt(texts, model_name=None, cumulative=False, ticker="unknown"):
+    """Run FinGPT sentiment inference via the warm daemon.
+
+    Model is loaded once at daemon spawn; subsequent calls incur only the
+    inference cost (~1-3s per batch). On daemon crash or timeout, the client
+    retries once with a fresh daemon before giving up (the caller has a
+    FinBERT fallback path that handles a second failure gracefully).
 
     Args:
         texts: List of headline strings
-        model_name: Which GGUF model to use (auto-detect if None)
+        model_name: Ignored in the daemon client — daemon picks the first
+            available model at startup. Kept in the signature for backward
+            compat with existing call sites.
         cumulative: If True, run cumulative analysis instead of per-headline
         ticker: Ticker for cumulative context
 
     Returns:
         List of sentiment result dicts (per-headline) or single dict (cumulative)
     """
-    cmd = [FINGPT_PYTHON, FINGPT_SCRIPT]
-    if model_name:
-        cmd.extend(["--model", model_name])
-    if cumulative:
-        cmd.extend(["--cumulative", "--ticker", ticker])
+    global _fingpt_request_id, _fingpt_daemon_proc, _fingpt_daemon_reader
+    # model_name is intentionally unused — daemon auto-detects
+    _ = model_name
 
-    proc = subprocess.run(
-        cmd,
-        input=json.dumps(texts),
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"FinGPT failed: {proc.stderr[:200]}")
-    return json.loads(proc.stdout)
+    req_body = {
+        "mode": "cumulative" if cumulative else "headlines",
+        "texts": texts,
+        "ticker": ticker,
+    }
+
+    for attempt in (1, 2):
+        with _fingpt_daemon_lock:
+            try:
+                proc, reader = _ensure_fingpt_daemon()
+                _fingpt_request_id += 1
+                sent_req_id = _fingpt_request_id
+                req_body["request_id"] = sent_req_id
+                proc.stdin.write(json.dumps(req_body) + "\n")
+                proc.stdin.flush()
+                resp_line = reader.readline(timeout=_FINGPT_REQUEST_TIMEOUT_S)
+                if resp_line is None:
+                    raise RuntimeError(
+                        f"FinGPT daemon timeout/EOF after "
+                        f"{_FINGPT_REQUEST_TIMEOUT_S}s (req_id={sent_req_id})"
+                    )
+                resp = json.loads(resp_line)
+                if "error" in resp:
+                    raise RuntimeError(f"FinGPT daemon error: {resp['error']}")
+                # Validate the echo matches — guards against any protocol
+                # desync (daemon emitting a prior response, a stray log line,
+                # etc.). Missing request_id in response is tolerated for
+                # backward compat with daemon versions that don't echo it.
+                echoed = resp.get("request_id")
+                if echoed is not None and echoed != sent_req_id:
+                    raise RuntimeError(
+                        f"FinGPT daemon response request_id mismatch: "
+                        f"sent {sent_req_id}, got {echoed}"
+                    )
+                return resp["result"]
+            except (BrokenPipeError, RuntimeError, json.JSONDecodeError) as exc:
+                logger.warning(
+                    "FinGPT daemon request failed (attempt %d): %s", attempt, exc
+                )
+                # Mark the daemon dead so the next attempt respawns it.
+                if _fingpt_daemon_proc is not None:
+                    try:
+                        _fingpt_daemon_proc.kill()
+                    except Exception:
+                        pass
+                _fingpt_daemon_proc = None
+                _fingpt_daemon_reader = None
+                if attempt == 2:
+                    raise RuntimeError(f"FinGPT failed after retry: {exc}") from exc
+    raise RuntimeError("FinGPT unreachable")  # unreachable, satisfies type checker
 
 
 def _run_finbert(texts):
