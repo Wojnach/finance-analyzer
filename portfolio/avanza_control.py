@@ -20,6 +20,9 @@ from data.metals_avanza_helpers import (
     fetch_account_cash as _fetch_account_cash,
 )
 from data.metals_avanza_helpers import (
+    fetch_positions as _fetch_page_positions,
+)
+from data.metals_avanza_helpers import (
     fetch_price as _fetch_page_price,
 )
 from data.metals_avanza_helpers import (
@@ -108,6 +111,18 @@ def fetch_account_cash(page, account_id: str | None = None):
     """Fetch buying power for an account via the authenticated browser session."""
     resolved_account_id = str(account_id or get_account_id())
     return _fetch_account_cash(page, resolved_account_id)
+
+
+def fetch_page_positions(page, account_id: str | None = None):
+    """Fetch current positions keyed by orderbook id via the page session.
+
+    Returns dict[ob_id -> {name, units, value, avg_price, api_type}] on
+    success, or None on transient failure. An empty dict `{}` is a valid
+    response meaning the account is flat — callers should distinguish it
+    from None.
+    """
+    resolved_account_id = str(account_id or get_account_id())
+    return _fetch_page_positions(page, resolved_account_id)
 
 
 def place_order(page, account_id: str | None, ob_id: str, side: str, price: float, volume: int):
@@ -394,6 +409,7 @@ __all__ = [
     "delete_stop_loss",
     "delete_stop_loss_no_page",
     "fetch_account_cash",
+    "fetch_page_positions",
     "fetch_price",
     "fetch_price_no_page",
     "fetch_price_no_page_with_fallback",

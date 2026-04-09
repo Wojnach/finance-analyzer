@@ -50,6 +50,51 @@ def fetch_price(page, ob_id, api_type):
         return None
 
 
+def fetch_positions(page, account_id):
+    """Fetch current positions for an Avanza account, keyed by orderbook id.
+
+    Used by the swing trader to reconcile its internal position state against
+    what Avanza actually holds. Returns `None` on transient failure so the
+    caller can distinguish "session down" from "legitimately empty account"
+    (which returns `{}`).
+
+    Returns:
+        dict[str, dict] | None — map of orderbook_id → {name, units, value,
+        avg_price, api_type}. Empty dict means the account has no positions.
+        None means the API call failed and the caller should retry later.
+    """
+    try:
+        result = page.evaluate("""async (accountId) => {
+            const resp = await fetch(
+                'https://www.avanza.se/_api/position-data/positions',
+                {credentials: 'include'}
+            );
+            if (resp.status !== 200) return null;
+            const data = await resp.json();
+            const v = (x) => (x && typeof x === 'object' && 'value' in x) ? x.value : x;
+            const out = {};
+            for (const entry of (data.withOrderbook || [])) {
+                const inst = entry.instrument || {};
+                const ob = inst.orderbook || {};
+                const acc = entry.account || {};
+                if (accountId && String(acc.id || '') !== accountId) continue;
+                const obId = String(ob.id || '');
+                if (!obId) continue;
+                out[obId] = {
+                    name: inst.name || ob.name || '',
+                    units: v(entry.volume) || 0,
+                    value: v(entry.value) || 0,
+                    avg_price: v(entry.averageAcquiredPrice) || 0,
+                    api_type: (inst.type || '').toLowerCase(),
+                };
+            }
+            return out;
+        }""", str(account_id) if account_id else "")
+        return result if isinstance(result, dict) else None
+    except Exception:
+        return None
+
+
 def fetch_account_cash(page, account_id):
     """Fetch ISK buying power from Avanza accounts API.
 
