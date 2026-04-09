@@ -1,3 +1,91 @@
+# Session Progress — Metals Bug Fleet v2 2026-04-09 evening
+
+## Status: COMPLETE (3 agent fixes shipped + log migration audit)
+
+### Fleet v2 headline
+
+Three parallel agents (A/B/C) each shipped one fix on branch
+`fix/metals-fleet-v2-apr09`, merged to main as commits 6a20c7d, 6b42431,
+6c72628. Agent D produced a read-only audit with no code changes. All
+fixes live across PF-MetalsLoop + PF-DataLoop + PF-GoldDigger (all three
+restarted after merge).
+
+**Commits**:
+1. `6a20c7d` fix(avanza): port multi-shape fallback to get_buying_power (bug C7)
+2. `6b42431` fix(golddigger): drop stale cache + log-once for yfinance proxy failures
+3. `6c72628` refactor(metals): consolidate duplicate get_cet_time (dedup + DST fix)
+
+### Fleet v2 details
+
+**Agent A — `portfolio/avanza_session.py:get_buying_power`** (+305/-26):
+Ports the 3-path + multi-field-ID pattern from `metals_avanza_helpers.py`
+(shipped 873b2df this afternoon). Handles legacy categorizedAccounts, new
+flat `data.accounts`, new `data.categories`. Tries four ID fields
+(accountId/id/accountNumber/number) and balance-field alternates. Added
+10-test `TestGetBuyingPower` suite (53/53 tests pass). **Contract change**:
+return type is now `dict | None`. Two scripts (`fish_straddle.py:174`,
+`fish_monitor_live.py:431`) need None-guards as a follow-up — they'll
+crash loudly instead of sizing trades off 0 SEK (safer failure mode).
+
+**Agent B — `portfolio/golddigger/data_provider.py:_fetch_yfinance_proxy`**
+(+47/-7): Returns None on stale bars instead of masking outage with cached
+stale value. This unblocks the existing `fetch_us10y_context →
+fetch_us10y(DGS10)` FRED fallback path, which was previously unreachable.
+DXY gets same benefit for free (falls through to `read_macro_context()`).
+Log-once per cache_key via `_PROXY_STALE_WARNED` dict. Happy path (fresh
+`^TNX` bar) byte-identical. All 107 golddigger tests pass. Affects
+**both** PF-DataLoop (via `macro_context.py`) and PF-GoldDigger (direct
+import) — both restarted.
+
+**Agent C — `data/metals_loop.py` + `data/metals_shared.py`** (-60/+30 net):
+Removes the duplicate `get_cet_time()` copy in metals_loop.py (along with
+`_WARNED_TIMEAPI_METALS_LOOP` and the comment block from f557f9f),
+imports canonical version from metals_shared instead. **Found real
+behavior difference**: metals_loop.py had DST-aware tz labeling (CEST in
+summer), metals_shared.py had hardcoded "CET". Ported DST logic into
+metals_shared — canonical version is now strictly better. Telegram + log
+output will correctly show "CEST" during DST months. Hoisted DATA_DIR
+sys.path insert to top of metals_loop.py so the hard import works.
+Smoke-tested: returns `(19.42, '19:25 CEST', 'zoneinfo')`.
+
+**Agent D — Migration audit** (`docs/LOG_MIGRATION_AUDIT_20260409.md`):
+Read-only audit of 290 `log()` sites in metals_loop.py and 48 `_log()`
+sites in metals_swing_trader.py. Key finding: **no machine parser depends
+on the custom format** (only `health_check.py` reads the file, and it
+only substring-matches `[LLM] Chronos`/`[LLM] Ministral` emitted by
+`metals_llm.py`, not in-scope files). Recommends 6-stage partial
+migration (~6-8 hours). One real gotcha: `_safe_print` Windows Unicode
+wrapper must be preserved. **Decision: DEFER** — out of scope for this
+session. User can act on the audit report in a future dedicated session.
+
+### Live state at handoff
+
+- PF-MetalsLoop: running, `cash_sync_ok=True`, `buying_power=1515.77 SEK`,
+  catalog=115 warrants, `DRY_RUN=False`. XAG + XAU BUY 100% consensus.
+- PF-DataLoop: running, cycle ~57s, signals healthy, GPU gate cycling
+  Chronos/Kronos cleanly.
+- PF-GoldDigger: running in SIGNAL-ONLY mode, no open position, "Entry
+  blocked: low volume" on each poll (legit market state). No TNX/proxy
+  spam since restart — Agent B's log-once working.
+- 3 new commits on main: 6a20c7d, 6b42431, 6c72628.
+
+### Deferred follow-ups (from Fleet v2 work)
+
+- **`fish_straddle.py:174` + `fish_monitor_live.py:431` None-guards** —
+  these two scripts will now crash on broken `get_buying_power()` calls
+  instead of silently trading at 0 cash. Safer, but should be fixed.
+- **Log migration stage 1** (infrastructure + shim) per
+  `docs/LOG_MIGRATION_AUDIT_20260409.md` — 1-hour zero-risk task, could
+  be tackled next session.
+- **XAU SHORT canary activation** — still user-gated, awaiting
+  observation window.
+- **ARCH-18 metals_loop.py decomposition** — multi-session effort.
+- **Duplicate python process mystery** — two global Python PIDs keep
+  spawning alongside venv ones for each loop. Killed manually each
+  restart, source unknown. Not investigated.
+
+---
+
 # Session Progress — Metals Bug Fleet 2026-04-09 afternoon
 
 ## Status: COMPLETE (cash sync recovered, noise suppressed, logging audit)
@@ -223,3 +311,31 @@ data/metals_loop.py
 ### 2026-04-09 16:55 UTC | hotfix/post-llmbatch-timeouts
 3ac7b81 hotfix(main): _TICKER_POOL_TIMEOUT 500 → 180 after fingpt daemon retirement
 portfolio/main.py
+
+### 2026-04-09 17:10 UTC | main
+5de675c docs(session): metals bug fleet 2026-04-09 afternoon + v2 handoff
+docs/SESSION_PROGRESS.md
+
+### 2026-04-09 17:26 UTC | fix/metals-fleet-v2-apr09
+6a20c7d fix(avanza): port multi-shape fallback to get_buying_power (bug C7)
+portfolio/avanza_session.py
+tests/test_avanza_session.py
+
+### 2026-04-09 17:26 UTC | fix/metals-fleet-v2-apr09
+6b42431 fix(golddigger): drop stale cache + log-once for yfinance proxy failures
+portfolio/golddigger/data_provider.py
+
+### 2026-04-09 17:27 UTC | fix/metals-fleet-v2-apr09
+6c72628 refactor(metals): consolidate duplicate get_cet_time (dedup + DST fix)
+data/metals_loop.py
+data/metals_shared.py
+
+### 2026-04-09 17:30 UTC | fix/fingpt-parser-prompt
+b680c7b fix(fingpt): rewrite prompts for wiroai-finance-llama-8b base model
+docs/PLAN.md
+portfolio/llm_batch.py
+
+### 2026-04-09 17:31 UTC | 
+fde9cf8 fix(fingpt): rewrite prompts for wiroai-finance-llama-8b base model
+docs/PLAN.md
+portfolio/llm_batch.py
