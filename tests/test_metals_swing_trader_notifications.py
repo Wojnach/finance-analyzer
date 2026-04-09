@@ -15,11 +15,16 @@ def _make_trader():
     trader.page = object()
     trader.state = mst._default_state()
     trader.check_count = 0
+    # __init__ also seeds these — bypassing __init__ via __new__ requires
+    # re-creating them so methods that touch them don't AttributeError.
+    trader.regime_history = {}
+    trader.warrant_catalog = {}
 
     # Avoid side effects and external dependencies during unit tests.
     trader._check_exits = lambda prices, signal_data: None
     trader._check_entries = lambda prices, signal_data: None
     trader._update_macd_history = lambda signal_data: None
+    trader._update_regime_history = lambda signal_data: None
     return trader
 
 

@@ -43,6 +43,7 @@ from metals_swing_config import (
     STOP_LOSS_VALID_DAYS,
     TAKE_PROFIT_UNDERLYING_PCT,
     TARGET_LEVERAGE,
+    TELEGRAM_SUMMARY_INTERVAL,
     TRADES_LOG,
     TRAILING_DISTANCE_PCT,
     TRAILING_START_PCT,
@@ -294,6 +295,11 @@ class SwingTrader:
         # Track MACD history for improving-checks requirement
         self._update_macd_history(signal_data)
 
+        # Periodic Telegram summary (when SEND_PERIODIC_SUMMARY enabled).
+        # Restored after f6b491c accidentally dropped this call site.
+        if SEND_PERIODIC_SUMMARY and self.check_count % TELEGRAM_SUMMARY_INTERVAL == 0:
+            self._send_summary(signal_data)
+
     def _update_regime_history(self, signal_data):
         """Append (action, regime) snapshot per ticker, capped at last 10 entries."""
         if not signal_data:
@@ -391,12 +397,19 @@ class SwingTrader:
         """Check if signal data meets entry criteria. Returns (ok, reason).
 
         Gates today (post-SG-incident hardening):
-        - action in {BUY, SELL} with matching direction
+        - action == BUY (SHORT entries gated until _check_exits is direction-aware)
         - confidence >= MIN_BUY_CONFIDENCE (user rule: no sub-60% trades)
         - majority_count > minority_count (not just majority_count >= MIN)
         - RSI in entry zone
-        - MACD improving for N checks
+        - MACD improving (LONG) or declining (SHORT) for N checks
         - regime stable for N consecutive checks (no single-check flips)
+
+        TODO(short-side): SHORT entries are accepted by the catalog (115 warrants
+        include SHORT MINIs) and direction-aware checks below are wired, but
+        _check_exits still uses LONG-only math (positive und_change = profit,
+        peak_underlying tracks max, etc). Enable SELL→SHORT here only after
+        _check_exits, peak/trough tracking, and exit_optimizer all flip on the
+        position's "direction" field. See codex review of f6b491c.
         """
         buy_count = sig.get("buy_count", 0)
         sell_count = sig.get("sell_count", 0)
@@ -404,17 +417,15 @@ class SwingTrader:
         action = sig.get("action", "HOLD")
         confidence = float(sig.get("confidence", 0) or 0)
 
-        # Direction check — LONG needs BUY, SHORT needs SELL. Anything else skipped.
+        # Direction check — LONG needs BUY. SHORT entries blocked at gate (see TODO above).
         if action == "BUY":
             majority = buy_count
             minority = sell_count
             direction = "LONG"
         elif action == "SELL":
-            majority = sell_count
-            minority = buy_count
-            direction = "SHORT"
+            return False, f"action=SELL — SHORT entries gated (TODO: direction-aware exits)"
         else:
-            return False, f"action={action} (need BUY or SELL consensus)"
+            return False, f"action={action} (need BUY consensus)"
 
         # User rule: no signal trades below 60% calibrated confidence
         if confidence < MIN_BUY_CONFIDENCE:
@@ -430,27 +441,39 @@ class SwingTrader:
         if majority < MIN_BUY_VOTERS:
             return False, f"{direction}_count={majority} < {MIN_BUY_VOTERS}"
 
-        # Timeframe alignment
+        # Timeframe alignment — count timeframes voting in our direction.
         tf = sig.get("timeframes", {})
         if tf:
-            buy_tfs = sum(1 for v in tf.values() if v == "BUY")
+            target_label = "BUY" if direction == "LONG" else "SELL"
+            aligned_tfs = sum(1 for v in tf.values() if v == target_label)
             total_tfs = len(tf)
-            if total_tfs > 0 and buy_tfs / total_tfs < MIN_BUY_TF_RATIO:
-                return False, f"TF alignment {buy_tfs}/{total_tfs} < {MIN_BUY_TF_RATIO:.0%}"
+            if total_tfs > 0 and aligned_tfs / total_tfs < MIN_BUY_TF_RATIO:
+                return False, f"TF alignment {aligned_tfs}/{total_tfs} {target_label} < {MIN_BUY_TF_RATIO:.0%}"
 
-        # RSI zone
-        if rsi < RSI_ENTRY_LOW:
-            return False, f"RSI {rsi:.1f} < {RSI_ENTRY_LOW} (oversold, wait for bounce)"
-        if rsi > RSI_ENTRY_HIGH:
-            return False, f"RSI {rsi:.1f} > {RSI_ENTRY_HIGH} (overbought)"
+        # RSI zone (LONG: not oversold, not overbought; SHORT: mirrored)
+        if direction == "LONG":
+            if rsi < RSI_ENTRY_LOW:
+                return False, f"RSI {rsi:.1f} < {RSI_ENTRY_LOW} (oversold, wait for bounce)"
+            if rsi > RSI_ENTRY_HIGH:
+                return False, f"RSI {rsi:.1f} > {RSI_ENTRY_HIGH} (overbought)"
+        else:  # SHORT — mirror the zone (high RSI = overbought = good short entry)
+            if rsi > 100 - RSI_ENTRY_LOW:
+                return False, f"RSI {rsi:.1f} > {100 - RSI_ENTRY_LOW} (overbought reversal, wait)"
+            if rsi < 100 - RSI_ENTRY_HIGH:
+                return False, f"RSI {rsi:.1f} < {100 - RSI_ENTRY_HIGH} (already oversold)"
 
-        # MACD improving
+        # MACD trend — LONG needs MACD rising, SHORT needs MACD falling.
         macd_hist = self.state.get("macd_history", {}).get(ticker, [])
         if len(macd_hist) >= MACD_IMPROVING_CHECKS:
             recent = macd_hist[-MACD_IMPROVING_CHECKS:]
-            improving = all(recent[i] > recent[i - 1] for i in range(1, len(recent)))
-            if not improving:
-                return False, f"MACD not improving for {MACD_IMPROVING_CHECKS} checks"
+            if direction == "LONG":
+                trending = all(recent[i] > recent[i - 1] for i in range(1, len(recent)))
+                if not trending:
+                    return False, f"MACD not improving for {MACD_IMPROVING_CHECKS} checks"
+            else:  # SHORT
+                trending = all(recent[i] < recent[i - 1] for i in range(1, len(recent)))
+                if not trending:
+                    return False, f"MACD not declining for {MACD_IMPROVING_CHECKS} checks"
         # If not enough MACD history yet, skip this check (allow entry)
 
         # Regime confirmation — require N consecutive (action, regime) checks.

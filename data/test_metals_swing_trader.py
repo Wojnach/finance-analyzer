@@ -77,9 +77,14 @@ class MockContext:
 
 
 def make_signal(action="HOLD", buy_count=0, sell_count=0, rsi=50,
-                macd_hist=0, regime="range-bound", confidence=0.5,
+                macd_hist=0, regime="range-bound", confidence=0.65,
                 timeframes=None):
-    """Create a signal dict matching read_signal_data() output."""
+    """Create a signal dict matching read_signal_data() output.
+
+    Default confidence is 0.65 (above the post-SG-incident MIN_BUY_CONFIDENCE
+    of 0.60) so tests asserting "valid BUY → entry" don't have to pass it
+    explicitly. Tests exercising the confidence gate set it lower.
+    """
     return {
         "action": action,
         "buy_count": buy_count,
@@ -100,8 +105,16 @@ def make_signal(action="HOLD", buy_count=0, sell_count=0, rsi=50,
     }
 
 
-def make_trader(cash=10000, positions=None, macd_history=None, consecutive_losses=0):
-    """Create a SwingTrader with preset state (no Avanza API calls)."""
+def make_trader(cash=10000, positions=None, macd_history=None, consecutive_losses=0,
+                regime_history=None, warrant_catalog=None):
+    """Create a SwingTrader with preset state (no Avanza API calls).
+
+    The trader skips __init__ via __new__, so we manually set the attributes
+    that __init__ would have set: warrant_catalog (loaded by _load_warrant_catalog)
+    and regime_history (initialized empty in __init__). Tests for the entry
+    path get a pre-seeded regime_history that satisfies _regime_confirmed by
+    default; tests for the regime gate itself override it.
+    """
     prices = {
         "2043157": {
             "bid": 10.0, "ask": 10.10, "last": 10.05,
@@ -127,6 +140,22 @@ def make_trader(cash=10000, positions=None, macd_history=None, consecutive_losse
     trader.page = page
     trader.state = _load_state()
     trader.check_count = 0
+    # Default regime history seeds REGIME_CONFIRM_CHECKS BUY/range-bound entries
+    # so tests for non-regime gates pass without manual setup. Tests that
+    # exercise the regime gate pass an explicit regime_history={...}.
+    if regime_history is None:
+        from metals_swing_config import REGIME_CONFIRM_CHECKS
+        seed = [("BUY", "range-bound")] * REGIME_CONFIRM_CHECKS
+        trader.regime_history = {"XAG-USD": list(seed), "XAU-USD": list(seed)}
+    else:
+        trader.regime_history = regime_history
+    # Tests that don't override get the static catalog (3 entries — same as
+    # the production fallback when the dynamic refresher returns nothing).
+    if warrant_catalog is None:
+        from metals_swing_config import WARRANT_CATALOG
+        trader.warrant_catalog = dict(WARRANT_CATALOG)
+    else:
+        trader.warrant_catalog = warrant_catalog
     return trader
 
 

@@ -166,14 +166,18 @@ def _make_key(name: str) -> str:
     return (name or "").replace(" ", "_").upper()
 
 
-def refresh_warrant_catalog() -> dict[str, dict]:
+def refresh_warrant_catalog() -> tuple[dict[str, dict], set[tuple[str, str]]]:
     """Fetch live warrant universe for all configured queries.
 
-    Returns a dict keyed by canonical warrant name (same shape as the static
-    WARRANT_CATALOG in metals_swing_config.py). Empty dict on total failure —
-    the caller should fall back to the static catalog in that case.
+    Returns:
+        (catalog, covered_pairs) where catalog is keyed by canonical warrant
+        name and covered_pairs is the set of (underlying, direction) tuples
+        that successfully produced at least one valid candidate. The caller
+        uses covered_pairs to detect partial failures and merge with the
+        previous cache for any uncovered pair, instead of overwriting it.
     """
     catalog: dict[str, dict] = {}
+    covered: set[tuple[str, str]] = set()
     for underlying, direction, query in SEARCH_QUERIES:
         hits = _search_warrants(query)
         if not hits:
@@ -207,7 +211,15 @@ def refresh_warrant_catalog() -> dict[str, dict]:
                 "barrier_dist_pct": round(_barrier_distance_pct(probe, direction), 2),
                 "last_probe": _now_utc().isoformat(),
             }
-    return catalog
+            covered.add((underlying, direction))
+    return catalog, covered
+
+
+# Set of all (underlying, direction) pairs the refresher tries to cover.
+# Used by load_catalog_or_fetch to detect partial-failure refreshes.
+ALL_PAIRS: frozenset[tuple[str, str]] = frozenset(
+    (underlying, direction) for (underlying, direction, _query) in SEARCH_QUERIES
+)
 
 
 def _write_cache(catalog: dict[str, dict]) -> None:
@@ -238,11 +250,49 @@ def _is_stale(payload: dict[str, Any]) -> bool:
     return age > datetime.timedelta(hours=payload.get("ttl_hours", TTL_HOURS))
 
 
+def _merge_with_cache(
+    fresh: dict[str, dict],
+    covered: set[tuple[str, str]],
+    cached: dict[str, Any] | None,
+) -> dict[str, dict]:
+    """Merge a (possibly partial) fresh catalog with the previous cache.
+
+    For each (underlying, direction) pair the fresh refresh DID cover, use
+    the fresh entries (they replace whatever was cached). For pairs the
+    fresh refresh did NOT cover (search failed or returned all-rejected),
+    fall back to the previous cache so we don't lose coverage of e.g. gold
+    shorts during a transient API hiccup.
+    """
+    if not cached:
+        return fresh
+    cached_warrants = cached.get("warrants") or {}
+    if not cached_warrants:
+        return fresh
+    uncovered = ALL_PAIRS - covered
+    if not uncovered:
+        return fresh
+    merged = dict(fresh)
+    rescued = 0
+    for key, w in cached_warrants.items():
+        pair = (w.get("underlying"), w.get("direction"))
+        if pair in uncovered and key not in merged:
+            merged[key] = w
+            rescued += 1
+    if rescued:
+        logger.warning(
+            "partial refresh: rescued %d entries for uncovered pairs %s",
+            rescued, sorted(uncovered),
+        )
+    return merged
+
+
 def load_catalog_or_fetch(force_refresh: bool = False) -> dict[str, dict]:
     """Return warrant catalog, refreshing from Avanza when the cache is stale.
 
     On any error (network, search failure, empty result), falls back to the
-    last-known-good cache and logs a warning. If no cache exists at all,
+    last-known-good cache and logs a warning. Partial refreshes (some pairs
+    succeed, others fail) merge with the previous cache so dropped pairs
+    don't disappear from the trader's universe. If no cache exists at all,
     returns an empty dict — the caller must handle that by falling back to
     metals_swing_config.WARRANT_CATALOG.
     """
@@ -256,17 +306,26 @@ def load_catalog_or_fetch(force_refresh: bool = False) -> dict[str, dict]:
 
     logger.info("refreshing warrant catalog from Avanza...")
     try:
-        fresh = refresh_warrant_catalog()
+        fresh, covered = refresh_warrant_catalog()
     except Exception as exc:  # noqa: BLE001
         logger.warning("refresh failed: %s", exc)
-        fresh = {}
+        fresh, covered = {}, set()
 
     if fresh:
-        _write_cache(fresh)
-        logger.info("catalog refreshed: %d warrants", len(fresh))
-        return fresh
+        # Merge with previous cache for any (underlying, direction) pair the
+        # fresh refresh did not cover — protects against partial-failure cache
+        # wipes (e.g. all silver shorts succeed, all gold shorts fail).
+        merged = _merge_with_cache(fresh, covered, cached)
+        _write_cache(merged)
+        if merged is not fresh and len(merged) > len(fresh):
+            logger.info("catalog refreshed: %d fresh + %d rescued = %d total",
+                        len(fresh), len(merged) - len(fresh), len(merged))
+        else:
+            logger.info("catalog refreshed: %d warrants (covered %d/%d pairs)",
+                        len(merged), len(covered), len(ALL_PAIRS))
+        return merged
 
-    # Refresh failed — fall back to last-known-good cache if we have one.
+    # Refresh failed entirely — fall back to last-known-good cache if we have one.
     if cached and cached.get("warrants"):
         logger.warning("refresh failed, using stale cache (%d warrants)", len(cached["warrants"]))
         return cached["warrants"]
