@@ -38,7 +38,7 @@ class TestShouldGateEarnings:
             "timing": "after_close",
         }
 
-        assert should_gate_earnings("NVDA") is True
+        assert should_gate_earnings("MSTR") is True
 
     @patch("portfolio.earnings_calendar._fetch_earnings_date")
     def test_gate_inactive_far_out(self, mock_fetch):
@@ -51,13 +51,13 @@ class TestShouldGateEarnings:
             "timing": "unknown",
         }
 
-        assert should_gate_earnings("NVDA") is False
+        assert should_gate_earnings("MSTR") is False
 
     @patch("portfolio.earnings_calendar._fetch_earnings_date")
     def test_gate_inactive_no_data(self, mock_fetch):
         """Gate is inactive when no earnings data available."""
         mock_fetch.return_value = None
-        assert should_gate_earnings("NVDA") is False
+        assert should_gate_earnings("MSTR") is False
 
     def test_non_stock_always_false(self):
         """Crypto and metals are never gated."""
@@ -86,7 +86,7 @@ class TestGetEarningsProximity:
             "timing": "unknown",
         }
 
-        result = get_earnings_proximity("PLTR")
+        result = get_earnings_proximity("MSTR")
         assert result is not None
         assert result["earnings_date"] == "2026-04-15"
         assert result["days_until"] == 15
@@ -110,8 +110,8 @@ class TestGetEarningsProximity:
             "timing": "unknown",
         }
 
-        get_earnings_proximity("MU")
-        get_earnings_proximity("MU")
+        get_earnings_proximity("MSTR")
+        get_earnings_proximity("MSTR")
 
         assert mock_fetch.call_count == 1
 
@@ -125,8 +125,13 @@ class TestGetEarningsProximity:
             "timing": "unknown",
         }
 
-        get_earnings_proximity("MU")
-        get_earnings_proximity("NVDA")
+        # After the Apr-09 ticker reduction only MSTR remains in STOCK_SYMBOLS,
+        # so we can't exercise cache-miss across two distinct stock tickers
+        # via the guard. Patch STOCK_SYMBOLS with two synthetic entries to
+        # verify the caching behavior still works for any valid stock-set.
+        with patch("portfolio.earnings_calendar.STOCK_SYMBOLS", {"MSTR", "AAA"}):
+            get_earnings_proximity("MSTR")
+            get_earnings_proximity("AAA")
 
         assert mock_fetch.call_count == 2
 
@@ -150,8 +155,9 @@ class TestGetAllEarningsProximity:
         assert isinstance(result, dict)
         # Should have entries for stock tickers (those that returned data)
         assert len(result) > 0
+        from portfolio.tickers import STOCK_SYMBOLS
         for ticker in result:
-            assert ticker in {"PLTR", "NVDA", "MU", "SMCI", "TSM", "TTWO", "VRT", "MSTR"}
+            assert ticker in STOCK_SYMBOLS
 
     @patch("portfolio.earnings_calendar._fetch_earnings_date")
     def test_excludes_none_results(self, mock_fetch):
@@ -177,7 +183,7 @@ class TestGateEdgeCases:
             "gate_active": True,
             "timing": "after_close",
         }
-        assert should_gate_earnings("NVDA") is True
+        assert should_gate_earnings("MSTR") is True
 
     @patch("portfolio.earnings_calendar._fetch_earnings_date")
     def test_earnings_exactly_at_gate_boundary(self, mock_fetch):
@@ -189,7 +195,7 @@ class TestGateEdgeCases:
             "gate_active": True,
             "timing": "unknown",
         }
-        assert should_gate_earnings("NVDA") is True
+        assert should_gate_earnings("MSTR") is True
 
     @patch("portfolio.earnings_calendar._fetch_earnings_date")
     def test_earnings_one_past_gate(self, mock_fetch):
@@ -201,4 +207,4 @@ class TestGateEdgeCases:
             "gate_active": False,
             "timing": "unknown",
         }
-        assert should_gate_earnings("NVDA") is False
+        assert should_gate_earnings("MSTR") is False
