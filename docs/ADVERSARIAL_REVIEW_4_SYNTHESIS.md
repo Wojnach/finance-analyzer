@@ -81,11 +81,13 @@ test lines). The fingpt daemon (+246 lines) is architecturally sound but has pro
 
 ## NEW Findings (Round 4)
 
-### CRITICAL (3)
+### CRITICAL (5)
 
 | ID | Subsystem | Finding | Conf |
 |----|-----------|---------|------|
 | OR-R4-1 | orchestration | **`loop_contract.py:23` MAX_CYCLE_DURATION_S=180 not updated for 600s cadence.** Every normal cycle exceeds 180s → constant CRITICAL violations → self-heal sessions fire every 30 min, wasting Claude budget continuously. **One-line fix: set to 650.** | 95% |
+| PR-R4-4 | portfolio-risk | **`record_trade()` never called from production code.** The entire overtrading prevention system (ticker cooldowns, position rate limits, consecutive-loss escalation) is disconnected. Guards read state that is never populated. Both C5 fix and C6 fix are moot if `record_trade()` never fires. | 85% |
+| PR-R4-1 | portfolio-risk | **C6 reconfirmed: `check_drawdown()` never called in live path.** Combined with PR-R4-4, BOTH risk gates (drawdown + overtrading) are paper-only. The portfolio has ZERO automated risk protection at runtime. | 100% |
 | IC-R4-1 | metals-core | **`metals_execution_engine.py` MIN_TRADE_SEK=500 bypass.** Config was fixed to 1000, but `metals_execution_engine.py:33` has its own fallback `MIN_TRADE_SEK = 500.0`. Sub-1000 SEK orders waste courtage. | 92% |
 | IC-R4-2 | orchestration | **`trigger.py` SUSTAINED_DURATION_S=120 negates sustained checks at 600s cadence.** At 600s cadence, one cycle already exceeds 120s, so the duration gate fires on single-check flips. SUSTAINED_CHECKS=3 is effectively bypassed. Layer 2 fires on noise. | 95% |
 
@@ -188,13 +190,15 @@ These are significant reliability improvements backed by 265 lines of tests.
 4. **IC-R4-11**: `macro_context.py:197` — replace `open(CONFIG_FILE)` with `load_json(CONFIG_FILE)`
 5. **IC-R4-5**: `metals_loop.py:4949,6470` — replace raw `open()` with `load_json()`/`load_jsonl_tail()`
 
-### Tier 2: Fix This Week
+### Tier 2: Fix This Week (RISK GATES — both are disconnected)
 
-5. **C6**: Wire `check_drawdown()` into `main.py` or agent invocation
-6. **C3**: Background thread for `wait_for_specialists` (TODO already in code)
-7. **IC-R4-4**: SwingTrader `_send_telegram` — cache config at init, not per-call
-8. **H31**: Add `threading.Lock` to POSITIONS dict in metals_loop
-9. **M12**: Replace hardcoded `close_cet` with API `todayClosingTime`
+5. **PR-R4-1/C6**: Wire `check_drawdown()` into reporting.py or agent_invocation.py
+6. **PR-R4-4**: Wire `record_trade()` into portfolio_mgr.py save_state or agent_invocation post-trade
+7. **PR-R4-7**: `kelly_sizing.py:291` + `trade_validation.py:33` — MIN_TRADE_SEK → 1000
+8. **C3**: Background thread for `wait_for_specialists` (TODO already in code)
+9. **IC-R4-4**: SwingTrader `_send_telegram` — cache config at init, not per-call
+10. **H31**: Add `threading.Lock` to POSITIONS dict in metals_loop
+11. **M12**: Replace hardcoded `close_cet` with API `todayClosingTime`
 
 ### Tier 3: Fix This Month
 
@@ -229,8 +233,23 @@ These are significant reliability improvements backed by 265 lines of tests.
 
 **Verified Round 3 items**: C3 (partial), C4 (FIXED), H22 (FIXED), M10 (partial)
 
-### Portfolio-Risk Agent
-*(agent still running — integrate in follow-up commit)*
+### Portfolio-Risk Agent — COMPLETE
+
+**Key findings (9 total: 5 CRITICAL, 4 HIGH):**
+
+| ID | Sev | Finding |
+|----|-----|---------|
+| PR-R4-1 | **CRIT** | C6 confirmed: `check_drawdown()` never called in live path. 20% circuit breaker is inert. |
+| PR-R4-2 | **CRIT** | H21 confirmed: `_compute_portfolio_value` uses entry price when live unavailable → wrong drawdown |
+| PR-R4-3 | **CRIT** | M9 confirmed: ATR stop floor allows 30% loss; 99% last-resort stop useless for warrants |
+| PR-R4-4 | **CRIT** | **NEW**: `record_trade()` never called from production. Entire overtrading prevention (cooldowns, rate limits, loss escalation) is disconnected — exists only on paper. |
+| PR-R4-5 | **CRIT** | **NEW**: `portfolio_validator.py:259` uses raw `open()` — Rule 4 violation in the validator itself |
+| PR-R4-6 | HIGH | `warrant_portfolio.py:96` naming hazard: `implied_pnl_pct` is decimal, not percentage |
+| PR-R4-7 | HIGH | **NEW**: Kelly sizing uses 500 SEK minimum (should be 1000) — same bypass as IC-R4-1 |
+| PR-R4-8 | HIGH | Monte Carlo uses 252 trading days for 24/7 crypto/metals — underestimates weekend VaR |
+| PR-R4-9 | HIGH | Partial sell doesn't update `underlying_entry_price_usd` → wrong P&L on averaged positions |
+
+**Verified Round 3 items**: C5 (FIXED), C6 (STILL OPEN), H18 (FIXED), H19 (FIXED), H20 (FIXED), H21 (STILL OPEN), M8 (FIXED), M9 (STILL OPEN)
 
 ### Metals-Core Agent
 *(agent still running — integrate in follow-up commit)*
@@ -285,7 +304,20 @@ checklist of all cadence-dependent constants:
 4. Sentiment duration gate → may need cadence-proportional adjustment
 5. (Metals loop unchanged at 60s — cash sync every 30 checks = 30 min, correct)
 
-*(Remaining 7 agents still running — cross-critique will be extended in follow-up commit)*
+**Portfolio-risk agent**:
+- **PR-R4-4 (`record_trade()` never called)**: VALIDATED. I missed this entirely. Combined
+  with C6 (drawdown not called), this means the ENTIRE risk management subsystem is
+  disconnected from production. The C5 fix (adding `severity: "block"`) is moot because
+  `record_trade()` never populates the state that the guards check. This is the most
+  important systemic finding in Round 4.
+- **PR-R4-7 (Kelly 500 SEK minimum)**: VALIDATED. This is the THIRD instance of the
+  MIN_TRADE_SEK=500 problem: config (fixed), metals_execution_engine (IC-R4-1, not fixed),
+  kelly_sizing (not fixed), trade_validation (not fixed). The 1000 SEK rule has 3 bypass paths.
+- **PR-R4-8 (Monte Carlo 252 vs 365 for 24/7)**: VALIDATED but lower priority — the VaR
+  underestimation is ~43% over weekends, which is material for crypto/metals.
+- **PR-R4-9 (averaged underlying entry price)**: VALIDATED — real P&L calculation bug.
+
+*(Remaining 6 agents still running — cross-critique will be extended in follow-up commit)*
 
 ---
 
@@ -298,7 +330,8 @@ checklist of all cadence-dependent constants:
 | Still open from Round 3 | ~6 (C6, C12, H17, H31, M12, C14/C8 unverified) |
 | New findings in Round 4 | ~11 (IC-R4-1 through IC-R4-11) |
 | Orchestration agent new findings | 9 (1 CRIT, 3 HIGH, 4 MED, 1 LOW) |
-| **Total active findings** | **~29** |
+| Portfolio-risk agent new findings | 9 (5 CRIT, 4 HIGH) |
+| **Total active findings** | **~38** |
 
 **Net progress**: Round 3 had 67 total findings. ~19 confirmed fixed, ~3 partially fixed.
 11 new findings discovered. Active finding count dropped from 67 to ~20.
