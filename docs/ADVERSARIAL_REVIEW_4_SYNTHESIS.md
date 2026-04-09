@@ -25,9 +25,11 @@ findings from Round 3, **11+ are confirmed fixed**. Key achievements:
 - Buying power (C7): correct JSON keys
 - Stuck loading keys (C11): timeout-based eviction
 
-**Remaining systemic risks**: C3 (wait_for_specialists still synchronous), C6 (drawdown
-circuit breaker still disconnected), metals_loop raw `open()` at 2 locations, and several
-lower-severity persistent issues.
+**Critical systemic risk discovered**: BOTH risk gates are disconnected from production.
+`check_drawdown()` (C6/PR-R4-1) and `record_trade()` (PR-R4-4) are never called from live
+code. The entire risk management subsystem (drawdown circuit breaker + overtrading prevention)
+exists only on paper. Additionally, the 1000 SEK minimum trade size has 3 bypass paths
+(IC-R4-1, PR-R4-7). The loop contract threshold (OR-R4-1) is actively burning Claude budget.
 
 **New code quality**: The swing trader overhaul (+510 lines) introduced robust reliability
 features (reconciliation, fill verification, sell-failed cooldown) and is well-tested (+265
