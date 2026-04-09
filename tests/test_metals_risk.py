@@ -218,11 +218,12 @@ class TestDrawdown:
     def test_since_ts_filters_old_peaks(self, tmp_path):
         """Session-relative peak: old all-time high must be ignored."""
         import datetime
+
         from metals_risk import HISTORY_FILE, check_portfolio_drawdown
 
         # Old high-value entry from months ago
         old_ts = "2026-01-01T10:00:00+00:00"
-        new_ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        new_ts = datetime.datetime.now(datetime.UTC).isoformat()
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
             f.write(json.dumps({"ts": old_ts, "total_value": 100000}) + "\n")
             f.write(json.dumps({"ts": new_ts, "total_value": 2000}) + "\n")

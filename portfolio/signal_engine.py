@@ -522,8 +522,9 @@ def _compute_dynamic_correlation_groups() -> dict[str, frozenset[str]]:
     Falls back to static CORRELATION_GROUPS if insufficient data.
     """
     try:
-        from portfolio.accuracy_stats import load_entries
         from datetime import datetime, timedelta
+
+        from portfolio.accuracy_stats import load_entries
         entries = load_entries()
         cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
         recent = [e for e in entries if e.get("ts", "") >= cutoff]

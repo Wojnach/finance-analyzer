@@ -209,6 +209,7 @@ class TestMetalsSignalConfig:
     def test_stocks_total_applicable(self):
         """Stocks should have 26 applicable signals when GPU signals are included."""
         from unittest.mock import patch
+
         from portfolio.main import generate_signal
         ind = {
             "close": 130.0,

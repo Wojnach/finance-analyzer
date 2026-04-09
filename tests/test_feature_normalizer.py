@@ -1,8 +1,6 @@
 """Tests for portfolio.feature_normalizer — rolling z-score normalization."""
 
-import math
 
-import numpy as np
 import pytest
 
 from portfolio import feature_normalizer as fn

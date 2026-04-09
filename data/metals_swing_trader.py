@@ -11,11 +11,9 @@ Usage from metals_loop.py:
 
 import datetime
 import json
-import os
 import time
 
 import requests
-from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
 from metals_swing_config import (
     ACCOUNT_ID,
     BUY_COOLDOWN_MINUTES,
@@ -45,12 +43,15 @@ from metals_swing_config import (
     STOP_LOSS_VALID_DAYS,
     TAKE_PROFIT_UNDERLYING_PCT,
     TARGET_LEVERAGE,
-    TELEGRAM_SUMMARY_INTERVAL,
     TRADES_LOG,
     TRAILING_DISTANCE_PCT,
     TRAILING_START_PCT,
+)
+from metals_swing_config import (
     WARRANT_CATALOG as STATIC_WARRANT_CATALOG,
 )
+
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
 
 # Dynamic warrant catalog refresher — replaces the stale hardcoded list.
 try:

@@ -19,7 +19,7 @@ sys.path.insert(0, "Q:/finance-analyzer")
 
 # Load the model ONCE at startup
 try:
-    from portfolio.forecast_signal import forecast_chronos, _get_chronos_pipeline
+    from portfolio.forecast_signal import _get_chronos_pipeline, forecast_chronos
 
     pipeline = _get_chronos_pipeline()
     if pipeline is None:

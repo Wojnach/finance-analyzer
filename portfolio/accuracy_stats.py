@@ -294,9 +294,7 @@ def signal_accuracy_cost_adjusted(horizon="1d", cost_bps=10.0, entries=None):
                 stats[sig_name]["total"] += 1
 
                 # Cost-adjusted: correct only if move exceeds cost
-                if vote == "BUY" and change_pct > cost_pct:
-                    stats[sig_name]["correct"] += 1
-                elif vote == "SELL" and change_pct < -cost_pct:
+                if vote == "BUY" and change_pct > cost_pct or vote == "SELL" and change_pct < -cost_pct:
                     stats[sig_name]["correct"] += 1
 
     result = {}

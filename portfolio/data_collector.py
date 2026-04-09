@@ -1,7 +1,6 @@
 """Data collection — Binance, Alpaca, yfinance kline fetchers + multi-timeframe collector."""
 
 import logging
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime

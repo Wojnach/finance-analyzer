@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import sys
 import time
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -23,7 +22,6 @@ from data.fish_engine import (
     EXIT_METALS_DISAGREE_COUNT,
     FishEngine,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -391,7 +389,7 @@ class TestFishingPositionTag:
 
     def test_fishing_tag_on_new_position(self):
         """When detect_holdings adds a position with a fishing ob_id, it should be tagged."""
-        from data.metals_loop import KNOWN_WARRANT_OB_IDS, FISHING_OB_IDS
+        from data.metals_loop import FISHING_OB_IDS
         # BULL SILVER X5 AVA 4 (ob_id 1650161) is in WARRANT_CATALOG
         assert "1650161" in FISHING_OB_IDS
 

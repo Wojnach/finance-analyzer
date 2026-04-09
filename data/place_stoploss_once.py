@@ -5,8 +5,8 @@ NEVER use /_api/trading-critical/rest/order/new for stop-losses.
 
 Usage: .venv/Scripts/python.exe data/place_stoploss_once.py [--dry-run]
 """
-import sys
 import datetime
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -102,9 +102,9 @@ def safety_checks(order: dict) -> list[str]:
     if sell >= trigger:
         errors.append(f"Sell {sell} >= trigger {trigger}")
     if order["volume"] <= 0:
-        errors.append(f"Volume must be positive")
+        errors.append("Volume must be positive")
     if sell <= 0:
-        errors.append(f"Sell price must be positive")
+        errors.append("Sell price must be positive")
     return errors
 
 
@@ -167,14 +167,14 @@ def main():
     print("  Session OK")
 
     # Step 1: Delete old single stop-losses
-    print(f"\n[2] Deleting old stop-losses...")
+    print("\n[2] Deleting old stop-losses...")
     for sid in DELETE_IDS:
         r = delete_stoploss(sid)
         status = "DRY RUN" if r.get("dry_run") else ("OK" if r.get("ok") else f"FAIL {r}")
         print(f"  {sid}: {status}")
 
     # Step 2: Place cascading stops
-    print(f"\n[3] Placing 6 cascading stop-losses...")
+    print("\n[3] Placing 6 cascading stop-losses...")
     results = []
     for i, order in enumerate(ORDERS, 1):
         label = order["label"]

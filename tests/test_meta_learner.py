@@ -28,9 +28,8 @@ class TestSQLiteCleanup:
         conn.execute("CREATE TABLE dummy (id INTEGER)")
         conn.close()
 
-        with mock.patch.object(meta_learner, "SIGNAL_DB", db_path):
-            with pytest.raises(Exception):
-                meta_learner._load_data("1d")
+        with mock.patch.object(meta_learner, "SIGNAL_DB", db_path), pytest.raises(Exception):
+            meta_learner._load_data("1d")
 
         # The key test: after the exception, no connections should be leaked.
         # We verify by successfully connecting and performing an operation

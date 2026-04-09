@@ -556,7 +556,8 @@ def run(force_report=False, active_symbols=None):
     # Ministral/Qwen3 cache misses were enqueued during parallel ticker processing.
     # Now flush them sequentially, grouped by model (one swap max).
     try:
-        from portfolio.llm_batch import _lock as _llm_lock, _ministral_queue, _qwen3_queue, flush_llm_batch
+        from portfolio.llm_batch import _lock as _llm_lock
+        from portfolio.llm_batch import _ministral_queue, _qwen3_queue, flush_llm_batch
         from portfolio.shared_state import MINISTRAL_TTL, _update_cache
         # H24/SS2: Capture queued keys before flush to clear stuck loading keys.
         with _llm_lock:

@@ -1,10 +1,8 @@
 """Tests for portfolio.accuracy_stats — cost-adjusted signal accuracy."""
 
-import pytest
 
 import portfolio.accuracy_stats as acc_mod
 from portfolio.accuracy_stats import signal_accuracy_cost_adjusted
-
 
 # ---------------------------------------------------------------------------
 # Helper: build fake signal log entries

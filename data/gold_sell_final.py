@@ -1,12 +1,13 @@
 """Delete existing orders then sell BULL GULD X20 AVA 6."""
-import sys, json, time
+import json
+import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from portfolio.avanza_session import (
     api_get,
-    api_post,
     cancel_order,
     get_instrument_price,
     place_sell_order,

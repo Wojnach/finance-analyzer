@@ -1,12 +1,11 @@
 """Tests for the COT positioning signal module."""
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.cot_positioning import (
     _compute_cot_index,
-    _sub_cot_index,
     _sub_commercial_change,
+    _sub_cot_index,
     _sub_managed_money,
     _sub_real_yield,
     compute_cot_positioning_signal,

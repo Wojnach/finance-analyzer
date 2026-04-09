@@ -131,7 +131,6 @@ def _start_ministral_server():
             bufsize=1,  # line-buffered
         )
         # Wait for MINISTRAL_READY on stderr (model loaded)
-        import select
         deadline = time.time() + 60  # 60s timeout for model load
         while time.time() < deadline:
             if proc.poll() is not None:

@@ -5,7 +5,6 @@ verifies that the fix now produces a log message instead of silently swallowing 
 """
 
 import logging
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # --- BUG-61: autonomous.py compact summary load ---

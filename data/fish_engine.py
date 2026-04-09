@@ -436,9 +436,7 @@ class FishEngine:
         )
 
         # Track metals disagree
-        if d == "LONG" and metals_action == "SELL":
-            self.metals_disagree_count += 1
-        elif d == "SHORT" and metals_action == "BUY":
+        if d == "LONG" and metals_action == "SELL" or d == "SHORT" and metals_action == "BUY":
             self.metals_disagree_count += 1
         else:
             self.metals_disagree_count = 0
@@ -818,9 +816,9 @@ class FishEngine:
         # Check staleness -- ignore if >4h old
         if ts:
             try:
-                from datetime import datetime as _dt, timezone, timedelta
+                from datetime import datetime as _dt
                 entry_time = _dt.fromisoformat(ts.replace('Z', '+00:00'))
-                age_hours = (_dt.now(timezone.utc) - entry_time).total_seconds() / 3600
+                age_hours = (_dt.now(datetime.UTC) - entry_time).total_seconds() / 3600
                 if age_hours > 4:
                     return None
             except Exception:

@@ -2,13 +2,11 @@
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.momentum_factors import (
     _roc_20,
     compute_momentum_factors_signal,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper

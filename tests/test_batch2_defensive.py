@@ -9,8 +9,6 @@ BUG-27: redundant pass removed from trigger.py (code cleanup, no behavioral test
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 
 class TestBug24NewsEventNoneTicker:
     """BUG-24: _fetch_headlines must not crash on None/empty ticker."""

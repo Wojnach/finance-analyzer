@@ -12,7 +12,6 @@ import pytest
 
 import portfolio.avanza_session as avs
 
-
 # Helpers ------------------------------------------------------------------
 
 def _sl(stop_id, ob_id, account_id="1625505"):

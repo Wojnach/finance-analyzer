@@ -1,5 +1,7 @@
 """Debug gold sell: verify position, check IDs, retry order."""
-import sys, json, datetime
+import datetime
+import json
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -8,9 +10,7 @@ from portfolio.avanza_session import (
     api_get,
     api_post,
     cancel_order,
-    get_positions,
     verify_session,
-    _get_csrf,
 )
 
 ACCOUNT_ID = "1625505"
@@ -88,7 +88,7 @@ for order in orders_list:
         print(f"    Delete result: {del_result}")
 
 # Step 5: Place sell order using VERIFIED ob_id and account
-print(f"\n=== STEP 5: Place SELL order ===")
+print("\n=== STEP 5: Place SELL order ===")
 print(f"  Using: ob_id={gold_pos['ob_id']}, acct={gold_pos['acct']}, vol={gold_pos['vol']}")
 
 sell_price = price_summary.get("bidPrice") or price_summary.get("lastPrice")
@@ -108,5 +108,5 @@ print(f"  Payload: {json.dumps(payload)}")
 
 result = api_post("/_api/trading-critical/rest/order/new", payload)
 
-print(f"\n=== RESULT ===")
+print("\n=== RESULT ===")
 print(f"  Result: {json.dumps(result, indent=2)}")
