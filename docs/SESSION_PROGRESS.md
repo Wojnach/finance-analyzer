@@ -1,3 +1,157 @@
+# Session Progress — Overnight log migration + fish None-guards 2026-04-09 late night
+
+## Status: SHIPPED (14 commits on main, 7 codex review rounds addressed)
+
+### Overnight summary
+
+Autonomous `/fgl` session launched by user going to bed. Tackled the
+two concrete Fleet v2 follow-ups from `docs/LOG_MIGRATION_AUDIT_20260409.md`:
+
+1. **Fish script None-guards** — scripts/fish_straddle.py + scripts/fish_monitor_live.py
+   were calling `get_buying_power().get('buying_power', 0)` without a None
+   guard. After Fleet v2 Agent A's contract change (6a20c7d) the function
+   returns dict|None on failure. Both sites now fail loud with explicit
+   diagnostic + early return.
+
+2. **Log migration stages 1-3** — the first three stages of Agent D's
+   6-stage plan:
+   - Stage 1: shim infrastructure (`log()`/`_log()` delegate to logger.info)
+   - Stage 2: swing_trader ERROR sites → logger.exception/warning
+   - Stage 3-A: metals_loop emergency + stops ERROR sites (~12 sites)
+   - Stage 3-B: metals_loop catch-all ERROR sites (~14 sites)
+
+### Commits (all on main, merged via FF after rebase onto BERT+fingpt work)
+
+| # | Commit | Description |
+|---|---|---|
+| 1 | `4894a59` | plan(overnight): Fleet v2 follow-ups + log migration stages 1-3 |
+| 2 | `7dc6cf9` | fix(fish): None-guard get_buying_power() call sites |
+| 3 | `8245bb5` | feat(metals): log migration Stage 1 — shim log()/_log() |
+| 4 | `0572497` | feat(metals): log migration Stage 2 — swing_trader ERROR sites |
+| 5 | `bc06e0b` | feat(metals): log migration Stage 3-A — emergency + stops ERROR |
+| 6 | `becb342` | feat(metals): log migration Stage 3-B — 14 catch-all ERROR |
+| 7 | `dcb04bd` | fix(metals): capsys-safe lazy stdout handler + update shim test |
+| 8 | `fa782c3` | fix(metals): codex v1 — scoped loggers, no root mutation |
+| 9 | `5c3df15` | fix(metals): codex v2 — library-discipline logging setup |
+| 10 | `02e9c7a` | fix(metals): codex v3 — metals_swing_trader as child logger |
+| 11 | `f2be45b` | fix(metals): codex v4 — log volume + library fallback + unicode |
+| 12 | `a5a5df7` | fix(metals): codex v5 — hasHandlers gate + [SWING] provenance |
+| 13 | `2aff9e1` | fix(metals): codex v6 — walk ancestors + propagate=False |
+| 14 | `4699448` | fix(metals): codex v7 — duplicate _has_ancestor_emitter locally |
+
+Rebased onto the BERT in-process + fingpt parser work from parallel
+sessions (43d2417). Final merged commit on main: `9317849`.
+
+### Logging architecture after Stage 1
+
+**Library discipline** — modules are handler-free at import time:
+- `metals_loop.py`: `logger = getLogger("metals_loop")`, no handler setup
+  at import. `_install_stage1_logging()` runs only under `if __name__
+  == "__main__":`.
+- `metals_swing_trader.py`: `logger = getLogger("metals_loop.swing_trader")`
+  — a CHILD of metals_loop in the dotted hierarchy. Inherits level AND
+  propagates records to the parent's Stage 1 handler.
+
+**`_install_stage1_logging()` does** (only under `__main__`):
+- `sys.stdout/stderr.reconfigure(utf-8, replace)` (Unicode safety)
+- Attaches a `_LazyStdoutHandler` to the `metals_loop` logger only
+- Sets `logger.setLevel(INFO)` and `propagate=False` (single output owner,
+  no double-emission with embedding processes that have root handlers)
+- Idempotent via `_metals_loop_stage1` marker attribute
+
+**`_LazyStdoutHandler`** — StreamHandler subclass with:
+- Re-resolves `sys.stdout` on every emit (pytest capsys compat)
+- Catches `UnicodeEncodeError` and retries with ASCII-sanitized message
+  (old `_safe_print` safety net integrated into logging path)
+
+**`log()` and `_log()` shims** — delegate to `logger.info()` when a
+non-NullHandler emitter exists in the ancestor chain (via
+`_has_ancestor_emitter()` walk that skips NullHandlers + checks level).
+Otherwise fall back to direct stdout print via `_safe_print` (metals_loop)
+or plain `print()` (metals_swing_trader).
+
+Truth table:
+| Caller context | Branch taken |
+|---|---|
+| Production `__main__` (Stage 1 installed) | logger path (handler fires) |
+| pytest `caplog.at_level(logger='metals_loop')` | logger path (caplog handler) |
+| Library import, no setup | fallback → stdout |
+| External NullHandler on root | fallback → stdout |
+| External root ERROR-level handler | fallback → stdout |
+
+### Codex adversarial review findings addressed (16 total)
+
+All HIGH/MEDIUM findings from 7 rounds of `/codex:adversarial-review`:
+
+1. [HIGH v1] Root logger handlers clobbered at import → scoped setup
+2. [MED v1] metals_swing_trader silent standalone → child logger
+3. [HIGH v2] `propagate=False` blocks parent telemetry → walk-ancestors
+4. [HIGH v3] Sibling logger doesn't inherit level → dotted child name
+5. [HIGH v4] Hot-loop tracebacks could evict `[LLM]` heartbeat lines →
+   5 sites demoted to single-line warnings (no exc_info)
+6. [MED v4] `log()` drops records when imported without handler →
+   library fallback to `_safe_print`
+7. [MED v4] `_LazyStdoutHandler` loses Unicode fallback on `reconfigure`
+   failure → integrated UnicodeEncodeError retry in emit()
+8. [HIGH v5] `isEnabledFor(INFO)` insufficient gate → `hasHandlers() && isEnabledFor()`
+9. [MED v5] Migrated swing_trader errors lost `[SWING]` tag → 10 prefixes added
+10. [MED v6] `hasHandlers()` passes for NullHandler / ERROR-level handlers →
+    `_has_ancestor_emitter()` walk with level + NullHandler awareness
+11. [MED v6] Stage 1 install left `propagate=True` → duplicate records
+    with embedding root handler → `propagate=False` after install
+12. [HIGH v7] `_log()` lazy-imported metals_loop → Playwright + cwd mutation
+    as side effect → duplicate `_has_ancestor_emitter` locally
+
+Plus 4 internal fixes found during inline test iterations (capsys-stale
+references, direct stream write for UnicodeEncodeError catch, etc.).
+
+### Live state at handoff
+
+- Main HEAD: `9317849` (FF-merge from rebased overnight branch)
+- PF-MetalsLoop: restarted, healthy — `[23:13:32] [INFO] [SWING] Cash
+  synced: 4834 SEK` + `SwingTrader init: cash=4834 SEK, cash_sync_ok=True,
+  catalog=115 warrants, DRY_RUN=False` in new format
+- PF-DataLoop: restarted, cycling normally (signals + GPU gate + forecast)
+- Test suite: 6376/6379 passing (3 pre-existing flakes: test_meta_learner,
+  test_signal_improvements, test_metals_llm_orphan — all state-isolation
+  known failures per TESTING.md, unrelated to this branch)
+- Worktree: `/mnt/q/finance-analyzer-overnight` cleaned up
+- Branch: `fgl/overnight-log-migration-20260409` deleted (local)
+
+### Deferred follow-ups (stages 4-6 of Agent D's migration plan)
+
+Out of scope for this session but ready to pick up:
+- **Stage 4**: DEBUG sites (~20) → `logger.debug()` with env-gated level
+- **Stage 5**: WARNING sites (~50) → `logger.warning(...)`
+- **Stage 6**: Retire `log()`/`_log()` shims via bulk replace after
+  stages 1-5 prove stable
+
+Also deferred:
+- `metals_llm.py` `[LLM]` print migration (requires `scripts/health_check.py`
+  substring-match update in the same session)
+- ARCH-18 `metals_loop.py` decomposition (multi-session)
+- Batch 5 remaining ~35 low-value catch-all sites (network transients, etc.)
+
+### Lessons worth carrying forward
+
+- **Codex adversarial review is aggressive**: 7 rounds surfaced 16
+  findings on a single infrastructure change. Each round is worth
+  running as long as it keeps finding real issues. Stopping rule: when
+  findings become purely theoretical or scope-creep beyond the task.
+- **Library discipline is non-negotiable**: modules that are imported
+  into test harnesses and embedding processes should NEVER call
+  `basicConfig`, modify root handlers, or disable propagation at
+  import time. Handler configuration belongs in `__main__` only.
+- **Dotted logger names form a real hierarchy**: using
+  `metals_loop.swing_trader` instead of `metals_swing_trader` gives
+  you inheritance for free. Much cleaner than manual handler setup on
+  both modules.
+- **`logger.hasHandlers()` is not the same as "a record will be emitted"**.
+  Walk the ancestor chain AND check handler levels AND skip NullHandlers
+  if you need that guarantee.
+
+---
+
 # Session Progress — Fingpt parser + BERT in-process migration 2026-04-09 late evening
 
 ## Status: SHIPPED (2 back-to-back migrations + 2 hotfixes)
@@ -470,4 +624,93 @@ tests/test_unified_loop.py
 
 ### 2026-04-09 20:16 UTC | fgl/overnight-log-migration-20260409
 02e9c7a fix(metals): codex review v3 — metals_swing_trader as child logger
+data/metals_swing_trader.py
+
+### 2026-04-09 20:28 UTC | main
+43d2417 docs(session): record fingpt parser + BERT in-process migration 2026-04-09 late evening
+docs/SESSION_PROGRESS.md
+
+### 2026-04-09 20:29 UTC | fgl/overnight-log-migration-20260409
+f2be45b fix(metals): codex review v4 — log volume + library fallback + unicode
+data/metals_loop.py
+data/metals_swing_trader.py
+
+### 2026-04-09 20:43 UTC | fgl/overnight-log-migration-20260409
+a5a5df7 fix(metals): codex review v5 — hasHandlers gate + [SWING] provenance
+data/metals_loop.py
+data/metals_swing_trader.py
+
+### 2026-04-09 20:55 UTC | fgl/overnight-log-migration-20260409
+2aff9e1 fix(metals): codex review v6 — walk ancestors + propagate=False
+data/metals_loop.py
+data/metals_swing_trader.py
+
+### 2026-04-09 21:04 UTC | fgl/overnight-log-migration-20260409
+4699448 fix(metals): codex review v7 — duplicate _has_ancestor_emitter locally
+data/metals_swing_trader.py
+
+### 2026-04-09 21:11 UTC | 
+070fdb1 plan(overnight): Fleet v2 follow-ups + log migration stages 1-3
+docs/PLAN-OVERNIGHT-20260409.md
+
+### 2026-04-09 21:11 UTC | 
+6bc66ad fix(fish): None-guard get_buying_power() call sites (Fleet v2 followup)
+scripts/fish_monitor_live.py
+scripts/fish_straddle.py
+
+### 2026-04-09 21:11 UTC | 
+b222384 feat(metals): log migration Stage 1 — shim log()/_log() to logger.info
+data/metals_loop.py
+data/metals_swing_trader.py
+
+### 2026-04-09 21:11 UTC | 
+f4ced52 feat(metals): log migration Stage 2 — swing_trader ERROR sites → logger.exception
+data/metals_swing_trader.py
+
+### 2026-04-09 21:11 UTC | 
+f7c9741 feat(metals): log migration Stage 3-A — emergency + stops ERROR sites
+data/metals_loop.py
+
+### 2026-04-09 21:11 UTC | 
+903b05c feat(metals): log migration Stage 3-B — 14 catch-all ERROR sites
+data/metals_loop.py
+
+### 2026-04-09 21:11 UTC | 
+de82b30 fix(metals): capsys-safe lazy stdout handler + update shim test
+data/metals_loop.py
+tests/test_unified_loop.py
+
+### 2026-04-09 21:11 UTC | 
+91de651 fix(metals): codex review findings — scoped loggers, no root mutation
+data/metals_loop.py
+data/metals_swing_trader.py
+
+### 2026-04-09 21:11 UTC | 
+9eb0d36 fix(metals): codex review v2 — library-discipline logging setup
+data/metals_loop.py
+data/metals_swing_trader.py
+tests/test_metals_loop_functions.py
+tests/test_unified_loop.py
+
+### 2026-04-09 21:12 UTC | 
+eb1d15e fix(metals): codex review v3 — metals_swing_trader as child logger
+data/metals_swing_trader.py
+
+### 2026-04-09 21:12 UTC | 
+ccbc270 fix(metals): codex review v4 — log volume + library fallback + unicode
+data/metals_loop.py
+data/metals_swing_trader.py
+
+### 2026-04-09 21:12 UTC | 
+3496447 fix(metals): codex review v5 — hasHandlers gate + [SWING] provenance
+data/metals_loop.py
+data/metals_swing_trader.py
+
+### 2026-04-09 21:12 UTC | 
+2e5a6d7 fix(metals): codex review v6 — walk ancestors + propagate=False
+data/metals_loop.py
+data/metals_swing_trader.py
+
+### 2026-04-09 21:12 UTC | 
+9317849 fix(metals): codex review v7 — duplicate _has_ancestor_emitter locally
 data/metals_swing_trader.py
