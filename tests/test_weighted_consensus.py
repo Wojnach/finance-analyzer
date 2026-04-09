@@ -450,13 +450,14 @@ class TestSmallSample:
 # ===========================================================================
 
 class TestRegimeWeights:
-    def test_trending_up_boosts_ema(self):
-        votes = {"ema": "BUY", "rsi": "SELL"}
-        acc = _acc_dict(["ema", "rsi"], 0.6, 50)
+    def test_trending_up_boosts_heikin_ashi(self):
+        # ema is REGIME-GATED in trending-up (BUG-152); test heikin_ashi (1.2x, not gated)
+        votes = {"heikin_ashi": "BUY", "rsi": "SELL"}
+        acc = _acc_dict(["heikin_ashi", "rsi"], 0.6, 50)
         action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # ema: 0.6 * 1.5 = 0.9, rsi: 0.6 * 0.7 = 0.42
+        # heikin_ashi: 0.6 * 1.2 = 0.72, rsi: 0.6 * 0.7 = 0.42
         assert action == "BUY"
-        assert conf == pytest.approx(0.9 / (0.9 + 0.42), abs=0.01)
+        assert conf == pytest.approx(0.72 / (0.72 + 0.42), abs=0.01)
 
     def test_trending_up_boosts_macd(self):
         votes = {"macd": "BUY", "rsi": "SELL"}
@@ -474,22 +475,23 @@ class TestRegimeWeights:
         _, conf_down = _weighted_consensus(votes, acc, "trending-down")
         assert conf_up == conf_down
 
-    def test_ranging_boosts_rsi_bb(self):
-        # Use candlestick instead of ema — ema is regime-gated in ranging (daily+)
-        votes = {"rsi": "BUY", "candlestick": "SELL"}
-        acc = _acc_dict(["rsi", "candlestick"], 0.6, 50)
+    def test_ranging_boosts_rsi(self):
+        # candlestick is now regime-gated in ranging (BUG-161); use sentiment (1.0x, not gated)
+        votes = {"rsi": "BUY", "sentiment": "SELL"}
+        acc = _acc_dict(["rsi", "sentiment"], 0.6, 50)
         action, conf = _weighted_consensus(votes, acc, "ranging")
-        # rsi: 0.6 * 1.5 = 0.9, candlestick: 0.6 * 1.0 = 0.6
+        # rsi: 0.6 * 1.5 = 0.9, sentiment: 0.6 * 1.0 = 0.6
         assert action == "BUY"
         assert conf == pytest.approx(0.9 / (0.9 + 0.6), abs=0.01)
 
     def test_ranging_boosts_bb(self):
+        # macd in ranging gets 1.3x (not 0.5x); update expected accordingly
         votes = {"bb": "SELL", "macd": "BUY"}
         acc = _acc_dict(["bb", "macd"], 0.6, 50)
         action, conf = _weighted_consensus(votes, acc, "ranging")
-        # bb: 0.6 * 1.5 = 0.9, macd: 0.6 * 0.5 = 0.3
+        # bb: 0.6 * 1.5 = 0.9, macd: 0.6 * 1.3 = 0.78
         assert action == "SELL"
-        assert conf == pytest.approx(0.9 / 1.2, abs=0.01)
+        assert conf == pytest.approx(0.9 / (0.9 + 0.78), abs=0.01)
 
     def test_highvol_boosts_bb_volume(self):
         votes = {"bb": "BUY", "ema": "SELL"}
@@ -534,10 +536,11 @@ class TestRegimeWeights:
 
     def test_regime_weight_stacks_with_accuracy(self):
         """High accuracy + favorable regime = large effective weight."""
-        votes = {"ema": "BUY"}
-        acc = {"ema": _acc(0.9, 100)}
+        # ema is gated in trending-up; use macd (1.3x, not gated)
+        votes = {"macd": "BUY"}
+        acc = {"macd": _acc(0.9, 100)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # 0.9 * 1.5 = 1.35 effective weight
+        # 0.9 * 1.3 = 1.17 effective weight, sole voter
         assert action == "BUY"
         assert conf == 1.0  # sole voter
 
@@ -600,11 +603,12 @@ class TestActivationRates:
         assert conf == 1.0
 
     def test_activation_stacks_with_regime(self):
-        votes = {"ema": "BUY"}
-        acc = {"ema": _acc(0.6, 50)}
-        activation = {"ema": {"normalized_weight": 2.0}}
+        # ema is gated in trending-up; use macd (1.3x, not gated)
+        votes = {"macd": "BUY"}
+        acc = {"macd": _acc(0.6, 50)}
+        activation = {"macd": {"normalized_weight": 2.0}}
         action, conf = _weighted_consensus(votes, acc, "trending-up", activation)
-        # 0.6 * 1.5 (regime) * 2.0 (activation) = 1.8
+        # 0.6 * 1.3 (regime) * 2.0 (activation) = 1.56 — sole voter
         assert action == "BUY"
         assert conf == 1.0
 
@@ -728,24 +732,25 @@ class TestEdgeCases:
 
     def test_all_factors_combined(self):
         """Accuracy + gate + regime + activation all working together."""
-        votes = {"ema": "BUY", "bad_rsi": "BUY", "bb": "SELL"}
+        # ema is gated in trending-up; use heikin_ashi (1.2x, not gated) as BUY voter
+        votes = {"heikin_ashi": "BUY", "bad_rsi": "BUY", "bb": "SELL"}
         acc = {
-            "ema": _acc(0.7, 100),
+            "heikin_ashi": _acc(0.7, 100),
             "bad_rsi": _acc(0.3, 100),  # gated (0.3 < 0.45, 100 >= 30)
             "bb": _acc(0.6, 50),
         }
         activation = {
-            "ema": {"normalized_weight": 1.5},
+            "heikin_ashi": {"normalized_weight": 1.5},
             "bad_rsi": {"normalized_weight": 0.8},
             "bb": {"normalized_weight": 1.0},
         }
         action, conf = _weighted_consensus(votes, acc, "trending-up", activation)
-        # ema BUY: 0.7 * 1.5 (regime) * 1.5 (act) = 1.575
-        # bad_rsi: gated -> skipped entirely
+        # heikin_ashi BUY: 0.7 * 1.2 (regime) * 1.5 (act) = 1.26
+        # bad_rsi: gated → skipped entirely
         # bb SELL: 0.6 * 0.7 (regime for bb in trending-up) * 1.0 (act) = 0.42
-        # BUY total: 1.575, SELL total: 0.42
+        # BUY total: 1.26, SELL total: 0.42
         assert action == "BUY"
-        assert conf == pytest.approx(1.575 / (1.575 + 0.42), abs=0.01)
+        assert conf == pytest.approx(1.26 / (1.26 + 0.42), abs=0.01)
 
     def test_confidence_never_exceeds_1(self):
         votes = {"s1": "BUY"}

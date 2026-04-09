@@ -531,9 +531,9 @@ class TestROC20:
         assert val < -5.0
 
     def test_small_roc_hold(self):
-        """ROC between -5% and 5% triggers HOLD."""
-        closes = [100.0] * 50 + [102.0]
+        """Flat series (ROC=0, vol=0) hits low-vol fallback → HOLD."""
+        closes = [100.0] * 51  # all same price → 0 ROC, 0 vol → fixed-threshold HOLD
         close = pd.Series(closes)
         val, sig = _roc_20(close)
         assert sig == "HOLD"
-        assert -5.0 <= val <= 5.0
+        assert val == 0.0

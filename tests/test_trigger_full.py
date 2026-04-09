@@ -142,7 +142,7 @@ class TestClassifyTierThree:
         m, _ = _mock_market_hours()
         try:
             state = {
-                "last_full_review_time": time.time() - 14400,  # exactly 4h ago
+                "last_full_review_time": time.time() - 4 * 3600,  # exactly 4h ago
                 "today_date": trigger_mod._today_str(),
                 "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
             }
@@ -151,12 +151,12 @@ class TestClassifyTierThree:
         finally:
             m.stop()
 
-    def test_periodic_review_market_hours_just_under_4h(self):
-        """During market hours, just under 4h should NOT return tier 3 for periodic review."""
+    def test_periodic_review_market_hours_just_under_2h(self):
+        """During market hours, just under 2h should NOT return tier 3."""
         m, _ = _mock_market_hours()
         try:
             state = {
-                "last_full_review_time": time.time() - 14390,  # 10s short of 4h
+                "last_full_review_time": time.time() - 7190,  # 10s short of 2h
                 "today_date": trigger_mod._today_str(),
                 "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
             }
@@ -165,8 +165,8 @@ class TestClassifyTierThree:
         finally:
             m.stop()
 
-    def test_periodic_review_offhours_at_exactly_4h(self):
-        """During off-hours, exactly 4h since last full review returns tier 1 (budget cap)."""
+    def test_periodic_review_offhours_returns_tier1(self):
+        """During off-hours, ≥4h since last full review returns tier 1 (saves T3 budget for market hours)."""
         m, _ = _mock_offhours()
         try:
             state = {
@@ -175,9 +175,7 @@ class TestClassifyTierThree:
                 "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
             }
             reasons = ["BTC-USD sentiment positive->negative (sustained)"]
-            # Off-hours periodic review is capped at T1 to preserve T3 budget for
-            # market hours. First-of-day T3 still fires if last_trigger_date != today.
-            assert classify_tier(reasons, state=state) == 1
+            assert classify_tier(reasons, state=state) == 1  # off-hours caps at T1
         finally:
             m.stop()
 

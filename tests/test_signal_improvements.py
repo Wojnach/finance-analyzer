@@ -128,8 +128,8 @@ class TestNamedVotes:
         assert "ministral" in votes
         # custom_lora fully disabled (20.9% accuracy, 97% SELL bias)
         assert "custom_lora" not in votes
-        # 10 core (11 - custom_lora) + 23 enhanced composite signals (incl. forecast + claude_fundamental + futures_flow + orderbook_flow) = 33
-        assert len(votes) == 33
+        # 10 core (11 - custom_lora) + 24 enhanced composite signals (incl. forecast + claude_fundamental + futures_flow + orderbook_flow + cot_positioning) = 34
+        assert len(votes) == 34
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_buy_count_matches_votes(self, _mock):
@@ -177,7 +177,8 @@ class TestLogSignalSnapshotUsesPassedVotes:
 class TestAgentSummaryATR:
     @mock.patch("portfolio.reporting._atomic_write_json")
     @mock.patch("portfolio.reporting._cached", side_effect=_null_cached)
-    def test_atr_in_agent_summary(self, _mock_cached, _mock_write):
+    @mock.patch("portfolio.api_utils.load_config", return_value={})
+    def test_atr_in_agent_summary(self, _mock_config, _mock_cached, _mock_write):
         ind = make_indicators()
         signals = {
             "MSTR": {
@@ -447,7 +448,8 @@ class TestCrossAssetSignals:
 class TestAgentSummaryAllFields:
     @mock.patch("portfolio.reporting._atomic_write_json")
     @mock.patch("portfolio.reporting._cached", side_effect=_null_cached)
-    def test_includes_all_new_fields(self, _mock_cached, _mock_write):
+    @mock.patch("portfolio.api_utils.load_config", return_value={})
+    def test_includes_all_new_fields(self, _mock_config, _mock_cached, _mock_write):
         ind = make_indicators()
         signals = {
             "BTC-USD": {

@@ -131,11 +131,11 @@ class TestVolatilitySignal:
         result = compute_volatility_signal(_make_ohlcv())
         _assert_valid_signal(result)
 
-    def test_has_6_sub_signals(self):
+    def test_has_7_sub_signals(self):
         from portfolio.signals.volatility import compute_volatility_signal
         result = compute_volatility_signal(_make_ohlcv())
         expected_subs = {"bb_squeeze", "bb_breakout", "atr_expansion",
-                        "keltner", "historical_vol", "donchian"}
+                        "keltner", "historical_vol", "donchian", "garch"}
         assert set(result["sub_signals"].keys()) == expected_subs
 
     def test_empty_df(self):

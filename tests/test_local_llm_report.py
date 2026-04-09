@@ -8,7 +8,7 @@ def test_build_local_llm_report_recommendations(tmp_path, monkeypatch):
     pred_path = tmp_path / "forecast_predictions.jsonl"
     pred_entries = [
         {
-            "ts": "2026-03-09T12:00:00+00:00",
+            "ts": "2026-04-07T12:00:00+00:00",  # recent entry, well within 30-day window
             "gating_action": "raw",
             "subsignal_gating": {
                 "chronos_1h": {"gating": "held"},

@@ -347,7 +347,8 @@ class TestForecastSignalsInSummary:
              patch("portfolio.reporting.portfolio_value", return_value=500000), \
              patch("portfolio.reporting.detect_regime", return_value="ranging"), \
              patch("portfolio.reporting.get_enhanced_signals", return_value={}), \
-             patch("portfolio.reporting.AGENT_SUMMARY_FILE", Path("/tmp/fake_summary.json")):
+             patch("portfolio.reporting.AGENT_SUMMARY_FILE", Path("/tmp/fake_summary.json")), \
+             patch("portfolio.api_utils.load_config", return_value={}):
 
             # Patch the AGENT_SUMMARY_FILE.exists() to return False
             with patch.object(Path, "exists", return_value=False):
@@ -403,7 +404,8 @@ class TestForecastSignalsInSummary:
              patch("portfolio.reporting.portfolio_value", return_value=500000), \
              patch("portfolio.reporting.detect_regime", return_value="ranging"), \
              patch("portfolio.reporting.get_enhanced_signals", return_value={}), \
-             patch("portfolio.reporting.AGENT_SUMMARY_FILE", Path("/tmp/fake_summary.json")):
+             patch("portfolio.reporting.AGENT_SUMMARY_FILE", Path("/tmp/fake_summary.json")), \
+             patch("portfolio.api_utils.load_config", return_value={}):
             with patch.object(Path, "exists", return_value=False):
                 summary = write_agent_summary(
                     signals, {"BTC-USD": 67000.0}, 10.0, state, {}, []
@@ -429,7 +431,8 @@ class TestForecastSignalsInSummary:
              patch("portfolio.reporting.portfolio_value", return_value=500000), \
              patch("portfolio.reporting.detect_regime", return_value="ranging"), \
              patch("portfolio.reporting.get_enhanced_signals", return_value={}), \
-             patch("portfolio.reporting.AGENT_SUMMARY_FILE", Path("/tmp/fake_summary.json")):
+             patch("portfolio.reporting.AGENT_SUMMARY_FILE", Path("/tmp/fake_summary.json")), \
+             patch("portfolio.api_utils.load_config", return_value={}):
             with patch.object(Path, "exists", return_value=False):
                 summary = write_agent_summary(
                     signals, {"BTC-USD": 67000.0}, 10.0, state, {}, []

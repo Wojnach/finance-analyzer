@@ -450,25 +450,22 @@ class TestAutonomousDecision:
     """Tests for _autonomous_decision end-to-end behavior."""
 
     def test_writes_decision_to_jsonl(self, tmp_path):
-        """Autonomous decisions should be logged to metals_decisions.jsonl."""
+        """Autonomous decisions should be logged to metals_decisions.jsonl via atomic_append_jsonl."""
         import metals_loop as ml
         ml.CLAUDE_ENABLED = False
         ml.price_history = [{"silver_sg": 48.3}]
-        decisions_file = tmp_path / "metals_decisions.jsonl"
 
         with patch.object(ml, "send_telegram"), \
              patch.object(ml, "cet_time_str", return_value="10:00 CET"), \
-             patch("metals_loop.open", mock_open()) as mock_file:
-            # Point the open to our tmp file
-            mock_file.return_value.__enter__ = mock_file.return_value
-            mock_file.return_value.__exit__ = MagicMock(return_value=False)
+             patch("metals_loop.atomic_append_jsonl") as mock_append:
 
             ml._autonomous_decision(["heartbeat"], 1)
 
-            # Verify file was opened for appending
-            mock_file.assert_called_with(
-                "data/metals_decisions.jsonl", "a", encoding="utf-8"
-            )
+            # Verify atomic_append_jsonl was called with the decisions file
+            calls = mock_append.call_args_list
+            decision_calls = [c for c in calls if "metals_decisions.jsonl" in str(c)]
+            assert len(decision_calls) >= 1, \
+                f"Expected atomic_append_jsonl called with metals_decisions.jsonl, got: {calls}"
 
     def test_decision_has_source_autonomous(self, tmp_path):
         """Decision log entries should have source='autonomous'."""

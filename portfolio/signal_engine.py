@@ -694,7 +694,7 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # correlation group, considering only signals that are actively voting.
     # Prefer dynamic groups (from signal_log correlations) over static.
     active_non_hold = {s for s, v in votes.items() if v != "HOLD"}
-    _active_corr_groups = _get_correlation_groups()
+    _active_corr_groups = _get_correlation_groups() or _STATIC_CORRELATION_GROUPS
     group_leaders = {}
     for group_name, group_sigs in _active_corr_groups.items():
         active_in_group = active_non_hold & group_sigs

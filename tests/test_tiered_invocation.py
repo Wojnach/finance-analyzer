@@ -143,11 +143,7 @@ class TestClassifyTier(TriggerTestBase):
 
     @mock.patch("portfolio.trigger.datetime")
     def test_periodic_offhours_returns_tier1(self, mock_dt):
-        """4h+ since last full review during off-hours -> Tier 1 (budget conservation).
-
-        Off-hours periodic reviews are capped at T1 to save T3 budget for market hours.
-        First-of-day T3 is still honored (checked before the cap).
-        """
+        """4h+ since last full review during off-hours -> Tier 1 (saves T3 budget for market hours)."""
         # Simulate Saturday 10:00 UTC (weekend)
         fake_now = datetime(2026, 2, 21, 10, 0, 0, tzinfo=UTC)
         mock_dt.now.return_value = fake_now
@@ -157,13 +153,18 @@ class TestClassifyTier(TriggerTestBase):
             last_full_review_time=time.time() - 5 * 3600,  # 5h ago
         )
         reasons = ["crypto check-in (2h)"]
-        assert classify_tier(reasons, state=state) == 1
+        assert classify_tier(reasons, state=state) == 1  # off-hours caps at T1
 
-    def test_no_last_full_review_returns_tier3(self):
-        """Missing last_full_review_time should trigger Tier 3."""
+    @mock.patch("portfolio.trigger.datetime")
+    def test_no_last_full_review_returns_tier3(self, mock_dt):
+        """Missing last_full_review_time during market hours should trigger Tier 3."""
+        # Mock market hours so the test is deterministic
+        fake_now = datetime(2026, 2, 17, 10, 0, 0, tzinfo=UTC)
+        mock_dt.now.return_value = fake_now
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
         state = {"today_date": _today_str()}  # no last_full_review_time
         reasons = ["cooldown (10min)"]
-        # time.time() - 0 will be huge, so this should be T3
+        # time.time() - 0 >> 4h threshold during market hours → T3
         assert classify_tier(reasons, state=state) == 3
 
     def test_tier2_takes_precedence_over_tier1(self):

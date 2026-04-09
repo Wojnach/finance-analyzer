@@ -212,9 +212,15 @@ class TestQwen3Signal:
         import portfolio.qwen3_signal as qs
         assert hasattr(qs, "get_qwen3_signal")
 
-    @patch("portfolio.qwen3_signal.subprocess.run")
-    def test_get_qwen3_signal_success(self, mock_run):
+    @patch("portfolio.qwen3_signal.kill_orphaned_llama", return_value=0)
+    @patch("portfolio.gpu_gate.get_vram_usage", return_value={"free_mb": 10000})
+    @patch("portfolio.qwen3_signal.query_llama_server", return_value=None)
+    @patch("portfolio.qwen3_signal.run_safe")
+    @patch("portfolio.qwen3_signal.gpu_gate")
+    def test_get_qwen3_signal_success(self, mock_gate, mock_run, mock_llama, mock_vram, mock_kill):
         """Successful subprocess call should return parsed result."""
+        mock_gate.return_value.__enter__ = MagicMock(return_value=True)
+        mock_gate.return_value.__exit__ = MagicMock(return_value=False)
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout='{"action": "BUY", "reasoning": "strong momentum", "model": "Qwen3-8B"}',
@@ -226,9 +232,15 @@ class TestQwen3Signal:
         assert result["action"] == "BUY"
         assert result["model"] == "Qwen3-8B"
 
-    @patch("portfolio.qwen3_signal.subprocess.run")
-    def test_get_qwen3_signal_failure(self, mock_run):
+    @patch("portfolio.qwen3_signal.kill_orphaned_llama", return_value=0)
+    @patch("portfolio.gpu_gate.get_vram_usage", return_value={"free_mb": 10000})
+    @patch("portfolio.qwen3_signal.query_llama_server", return_value=None)
+    @patch("portfolio.qwen3_signal.run_safe")
+    @patch("portfolio.qwen3_signal.gpu_gate")
+    def test_get_qwen3_signal_failure(self, mock_gate, mock_run, mock_llama, mock_vram, mock_kill):
         """Failed subprocess should raise RuntimeError."""
+        mock_gate.return_value.__enter__ = MagicMock(return_value=True)
+        mock_gate.return_value.__exit__ = MagicMock(return_value=False)
         mock_run.return_value = MagicMock(
             returncode=1,
             stdout="",
@@ -239,9 +251,15 @@ class TestQwen3Signal:
         with pytest.raises(RuntimeError, match="Qwen3 failed"):
             get_qwen3_signal({"ticker": "BTC", "price_usd": 68000})
 
-    @patch("portfolio.qwen3_signal.subprocess.run")
-    def test_get_qwen3_signal_invalid_json(self, mock_run):
+    @patch("portfolio.qwen3_signal.kill_orphaned_llama", return_value=0)
+    @patch("portfolio.gpu_gate.get_vram_usage", return_value={"free_mb": 10000})
+    @patch("portfolio.qwen3_signal.query_llama_server", return_value=None)
+    @patch("portfolio.qwen3_signal.run_safe")
+    @patch("portfolio.qwen3_signal.gpu_gate")
+    def test_get_qwen3_signal_invalid_json(self, mock_gate, mock_run, mock_llama, mock_vram, mock_kill):
         """Invalid JSON output should raise RuntimeError."""
+        mock_gate.return_value.__enter__ = MagicMock(return_value=True)
+        mock_gate.return_value.__exit__ = MagicMock(return_value=False)
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout="not json at all",

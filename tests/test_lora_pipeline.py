@@ -56,13 +56,14 @@ class TestPromptFormat:
     def test_prompt_matches_inference_structure(self):
         import inspect
 
-        from portfolio.ministral_trader import predict
+        from portfolio.ministral_trader import _build_prompt
 
-        source = inspect.getsource(predict)
-        assert "1-hour candles" in source
+        source = inspect.getsource(_build_prompt)
         assert "15-minute" not in source
         assert "ema_gap_pct" in source
         assert "sentiment_confidence" in source
+        # Multi-timeframe context is present (replaces old 1-hour candles verbiage)
+        assert "timeframe" in source.lower()
 
 
 class TestNoDoubleInst:

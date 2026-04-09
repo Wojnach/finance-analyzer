@@ -11,12 +11,17 @@ from portfolio.config_validator import validate_config, validate_config_file
 
 
 def _valid_config():
-    """Minimal valid config with all required keys."""
+    """Minimal valid config with all required and optional keys."""
     return {
         "telegram": {"token": "123:ABC", "chat_id": "456"},
         "alpaca": {"key": "ak_test", "secret": "sk_test"},
         "mistral_api_key": "mk_test",
         "iskbets": {"min_bigbet_conditions": 2},
+        # Optional keys — required for no-warn test
+        "newsapi_key": "nk_test",
+        "alpha_vantage": {"api_key": "av_test"},
+        "golddigger": {"fred_api_key": "fred_test"},
+        "bgeometrics": {"api_token": "bg_test"},
     }
 
 

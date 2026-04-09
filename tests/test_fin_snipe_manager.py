@@ -147,12 +147,14 @@ def test_plan_exit_reprices_sell_in_two_steps():
     snap = _snapshot(
         position_volume=12,
         position_average_price=12.86,
-        current_bid=12.10,
-        current_ask=12.12,
-        current_last=12.11,
-        current_instrument_price=12.11,
-        current_underlying=86.30,
+        # Current price significantly above entry so stop is far below (>1% distance)
+        current_bid=14.50,
+        current_ask=14.52,
+        current_last=14.51,
+        current_instrument_price=14.51,
+        current_underlying=95.00,
         open_orders=[
+            # Stale sell order at 12.74 — below current bid of 14.50, needs repricing
             {"orderId": "sell-1", "side": "SELL", "state": "ACTIVE", "price": 12.74, "volume": 12},
         ],
     )
