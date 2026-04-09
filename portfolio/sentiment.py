@@ -15,11 +15,9 @@ Phase 3B: Cumulative headline clustering — groups related headlines and scores
 them as a batch for richer "drumbeat effect" detection.
 """
 
-import atexit
 import json
 import logging
 import platform
-import queue
 import subprocess
 import threading
 from datetime import UTC, datetime
@@ -37,15 +35,11 @@ if platform.system() == "Windows":
     CRYPTOBERT_SCRIPT = r"Q:\models\cryptobert_infer.py"
     TRADING_HERO_SCRIPT = r"Q:\models\trading_hero_infer.py"
     FINBERT_SCRIPT = r"Q:\models\finbert_infer.py"
-    FINGPT_PYTHON = r"Q:\models\.venv-llm\Scripts\python.exe"
-    FINGPT_SCRIPT = r"Q:\models\fingpt_infer.py"
 else:
     MODELS_PYTHON = "/home/deck/models/.venv/bin/python"
     CRYPTOBERT_SCRIPT = "/home/deck/models/cryptobert_infer.py"
     TRADING_HERO_SCRIPT = "/home/deck/models/trading_hero_infer.py"
     FINBERT_SCRIPT = "/home/deck/models/finbert_infer.py"
-    FINGPT_PYTHON = "/home/deck/models/.venv-llm/bin/python"
-    FINGPT_SCRIPT = "/home/deck/models/fingpt_infer.py"
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 AB_LOG_FILE = DATA_DIR / "sentiment_ab_log.jsonl"
@@ -267,257 +261,171 @@ def _run_model(script, texts):
     return json.loads(proc.stdout)
 
 
-# ── Warm FinGPT daemon client ──────────────────────────────────────────────
-# Rather than spawning a fresh subprocess per call (which cold-loads the
-# 1.2 GB GGUF model every time and holds the GPU file-lock for 70-90s), we
-# talk to a single long-lived daemon process that loads the model once.
-# Protocol is NDJSON over stdin/stdout; see scripts/fingpt_daemon.py.
+# ── Deferred fingpt A/B buffering ──────────────────────────────────────────
+# Fingpt is a SHADOW sentiment signal — it never votes. Its output lands in
+# data/sentiment_ab_log.jsonl alongside the primary model's vote (CryptoBERT
+# for crypto, Trading-Hero-LLM for stocks) for accuracy comparison.
 #
-# Module-level singleton with a thread-lock because get_sentiment() is called
-# from ThreadPoolExecutor workers in main.py. The daemon itself processes one
-# request at a time, so the lock is not a throughput regression — it's the
-# same serialization the GPU lock already imposed, just with ~1-3s hold
-# instead of ~70-90s per call.
-
-_FINGPT_DAEMON_SCRIPT = str(
-    Path(__file__).resolve().parent.parent / "scripts" / "fingpt_daemon.py"
-)
-_fingpt_daemon_proc: subprocess.Popen | None = None
-_fingpt_daemon_reader: "_DaemonReader | None" = None
-_fingpt_daemon_lock = threading.Lock()
-_fingpt_request_id = 0
-_FINGPT_READY_TIMEOUT_S = 180  # model warm-load + startup
-# Per-request inference ceiling. Bumped from 60s → 180s on 2026-04-09 after
-# the warm-daemon deploy moved inference to CPU (finance-llama-8b Q4 on
-# i7-11700K w/ n_threads=4). A single per-headline or cumulative batch on
-# this setup commonly takes 60-150s; 60s was too tight and triggered a
-# spawn-kill-spawn loop in the daemon client. 180s fits typical batches
-# with room to spare.
+# Historical note (2026-04-09, feat/fingpt-in-llmbatch):
+# - v1: inline subprocess per call, cold-loading the GGUF every time (70-90s
+#   GPU lock holds, broke the cycle budget)
+# - v2: warm NDJSON daemon (scripts/fingpt_daemon.py) on GPU full offload
+#   (OOM'd with llama-server also resident)
+# - v3: warm NDJSON daemon on CPU (60-150s/cycle inference, forced
+#   _FINGPT_REQUEST_TIMEOUT_S 60→180 and _TICKER_POOL_TIMEOUT 120→500 hotfix
+#   bumps; worked but ugly)
+# - v4 (current): fingpt runs in portfolio.llm_batch as Phase 3 of the
+#   shared llama_server rotation on port 8787, with full -ngl 99 GPU
+#   offload like ministral3 and qwen3. Retires ~250 LOC of daemon +
+#   client code.
 #
-# Fingpt is a SHADOW sentiment signal — see get_sentiment() docstring at
-# line 651. Its output is logged to data/sentiment_ab_log.jsonl for A/B
-# accuracy tracking but is NEVER used in signal voting. The primary
-# sentiment votes come from CryptoBERT (crypto) or Trading-Hero-LLM
-# (stocks), both much faster. So even though fingpt can now take 2-3 min
-# per cycle at the new cadence, it does not influence any trade decisions.
+# Because fingpt now runs post-cycle in a batched phase, its results arrive
+# AFTER get_sentiment() has already returned to the signal engine. The
+# primary model and FinBERT shadow are still computed inline, but their A/B
+# log write is DEFERRED: get_sentiment() stashes the primary + finbert shadow
+# + the raw headlines + the enqueued fingpt sub_keys into
+# _pending_ab_entries[ab_key] and returns. Once flush_llm_batch() completes
+# in main.py, sentiment.flush_ab_log() walks the pending entries, merges the
+# batched fingpt results into each, and writes the final A/B log rows.
 #
-# The proper long-term fix is the option-3 refactor: serve fingpt from
-# the shared GPU via llama_server on port 8787 (same coordination pattern
-# ministral/qwen3 already use) so inference returns to 1-3s per batch and
-# this timeout can drop back toward 30s.
-_FINGPT_REQUEST_TIMEOUT_S = 180  # per-request inference ceiling (CPU-mode fingpt)
+# This preserves the EXACT schema of sentiment_ab_log.jsonl that downstream
+# accuracy tracking consumes: one row per get_sentiment() call, with a
+# shadow[] array containing fingpt per-headline + cumulative + finbert.
+#
+# Known open issue: sentiment_ab_log.jsonl shows fingpt returning constant
+# "neutral, 0.7 confidence" for every real headline — see the
+# project_fingpt_parser_defaulting_neutral memory. That is a parser / prompt
+# bug in /mnt/q/models/fingpt_infer.py, NOT a problem with this migration.
+# Scheduled as the immediate follow-up after this PR merges.
+
+_pending_ab_entries: dict[str, dict] = {}
+_pending_ab_lock = threading.Lock()
 
 
-class _DaemonReader(threading.Thread):
-    """Background reader that pipes daemon stdout lines into a queue.
+def _stash_ab_context(
+    ab_key: str,
+    ticker: str,
+    primary_result: dict,
+    all_articles: list[dict],
+    diss_mult: float,
+) -> None:
+    """Store the inline portion of an A/B entry until the batched fingpt
+    results arrive in flush_ab_log(). Called from get_sentiment().
 
-    Without this, a hung model would leave the main thread blocked inside
-    ``stdout.readline()`` while holding ``_fingpt_daemon_lock``, which would
-    starve every ThreadPoolExecutor worker that tries to compute sentiment.
-    Using a bounded ``queue.get(timeout=...)`` lets the client detect the
-    hang and kill the daemon.
-
-    One None sentinel is pushed on EOF/exception; all subsequent reads will
-    return None immediately (the sentinel is re-enqueued on each read so the
-    queue stays non-empty).
+    Thread-safe — multiple ThreadPoolExecutor workers call this concurrently.
     """
-
-    def __init__(self, proc: subprocess.Popen):
-        super().__init__(daemon=True, name="fingpt-daemon-reader")
-        self._proc = proc
-        self._q: "queue.Queue[str | None]" = queue.Queue()
-
-    def run(self) -> None:
-        try:
-            while True:
-                line = self._proc.stdout.readline()
-                if not line:
-                    break
-                self._q.put(line)
-        except Exception as exc:
-            logger.debug("Fingpt daemon reader exception: %s", exc)
-        finally:
-            self._q.put(None)
-
-    def readline(self, timeout: float) -> str | None:
-        """Return the next stdout line, or None on timeout / EOF.
-
-        Once EOF is observed, subsequent calls return None immediately
-        because we re-enqueue the sentinel for the next reader.
-        """
-        try:
-            line = self._q.get(timeout=timeout)
-        except queue.Empty:
-            return None
-        if line is None:
-            # Re-post sentinel so subsequent reads also observe EOF cheaply.
-            self._q.put(None)
-            return None
-        return line
+    with _pending_ab_lock:
+        _pending_ab_entries[ab_key] = {
+            "ticker": ticker,
+            "primary_result": primary_result,
+            "finbert_shadow": None,  # filled in below by get_sentiment
+            "all_articles": all_articles,
+            "diss_mult": diss_mult,
+            "fingpt_headlines_raw": None,  # filled in by Phase 3
+            "fingpt_cumulatives_raw": {},  # sub_key → raw dict, filled in by Phase 3
+        }
 
 
-def _spawn_fingpt_daemon() -> tuple[subprocess.Popen, "_DaemonReader"]:
-    """Launch the daemon subprocess and wait for its 'ready' handshake.
+def _stash_finbert_shadow(ab_key: str, finbert_shadow: dict | None) -> None:
+    """Attach the inline FinBERT shadow result to a pending A/B entry."""
+    with _pending_ab_lock:
+        entry = _pending_ab_entries.get(ab_key)
+        if entry is not None:
+            entry["finbert_shadow"] = finbert_shadow
 
-    Caller must hold ``_fingpt_daemon_lock``. Returns ``(proc, reader)``.
-    The reader is a background thread pumping stdout lines into a bounded
-    queue, which is how every subsequent read enforces a timeout.
+
+def _stash_fingpt_result(ab_key: str, sub_key: str, result) -> None:
+    """Called from portfolio.llm_batch._flush_fingpt_phase with the parsed
+    fingpt result for one (ab_key, sub_key) tuple.
+
+    sub_key is either "headlines" (result is a list of per-headline dicts)
+    or "cumul:<N>" (result is a single cumulative dict).
     """
-    logger.info("Spawning FinGPT warm daemon: %s", _FINGPT_DAEMON_SCRIPT)
-    proc = subprocess.Popen(
-        [FINGPT_PYTHON, _FINGPT_DAEMON_SCRIPT],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=None,  # pass through to parent stderr so we see warm-load logs
-        text=True,
-        bufsize=1,  # line-buffered
-    )
-    reader = _DaemonReader(proc)
-    reader.start()
-
-    # Wait for the "ready" handshake line. The daemon loads the model on
-    # startup (~30-60s cold) so this must be generous — bounded by
-    # _FINGPT_READY_TIMEOUT_S (180s).
-    ready_line = reader.readline(timeout=_FINGPT_READY_TIMEOUT_S)
-    if ready_line is None:
-        # Timeout or EOF before handshake arrived — the daemon is dead or hung.
-        try:
-            proc.kill()
-        except Exception:
-            pass
-        raise RuntimeError(
-            "FinGPT daemon did not emit ready handshake within "
-            f"{_FINGPT_READY_TIMEOUT_S}s"
-        )
-    try:
-        handshake = json.loads(ready_line)
-    except json.JSONDecodeError as exc:
-        proc.kill()
-        raise RuntimeError(
-            f"FinGPT daemon emitted non-JSON handshake: {ready_line!r}"
-        ) from exc
-    if not handshake.get("ready"):
-        proc.kill()
-        raise RuntimeError(f"FinGPT daemon failed to warm up: {handshake}")
-    logger.info("FinGPT warm daemon ready (model=%s, pid=%d)",
-                handshake.get("model"), proc.pid)
-    return proc, reader
-
-
-def _ensure_fingpt_daemon() -> tuple[subprocess.Popen, "_DaemonReader"]:
-    """Return the live daemon process + reader, spawning it lazily and
-    restarting both if the process has died. Caller must hold
-    ``_fingpt_daemon_lock``."""
-    global _fingpt_daemon_proc, _fingpt_daemon_reader
-    if _fingpt_daemon_proc is not None and _fingpt_daemon_proc.poll() is None:
-        return _fingpt_daemon_proc, _fingpt_daemon_reader  # type: ignore[return-value]
-    if _fingpt_daemon_proc is not None:
-        logger.warning("FinGPT daemon exited (code=%s), restarting",
-                       _fingpt_daemon_proc.returncode)
-        _fingpt_daemon_proc = None
-        _fingpt_daemon_reader = None
-    _fingpt_daemon_proc, _fingpt_daemon_reader = _spawn_fingpt_daemon()
-    return _fingpt_daemon_proc, _fingpt_daemon_reader
-
-
-def _stop_fingpt_daemon() -> None:
-    """Graceful shutdown hook — closes stdin and waits briefly for exit."""
-    global _fingpt_daemon_proc, _fingpt_daemon_reader
-    with _fingpt_daemon_lock:
-        if _fingpt_daemon_proc is None or _fingpt_daemon_proc.poll() is not None:
-            _fingpt_daemon_proc = None
-            _fingpt_daemon_reader = None
+    with _pending_ab_lock:
+        entry = _pending_ab_entries.get(ab_key)
+        if entry is None:
+            # get_sentiment was never called for this key this cycle — can
+            # happen if enqueue_fingpt ran but the parent get_sentiment
+            # raised before _stash_ab_context. Drop silently.
             return
-        try:
-            _fingpt_daemon_proc.stdin.write(json.dumps({"quit": True}) + "\n")
-            _fingpt_daemon_proc.stdin.flush()
-            _fingpt_daemon_proc.stdin.close()
-        except Exception:
-            pass
-        try:
-            _fingpt_daemon_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            _fingpt_daemon_proc.kill()
-        _fingpt_daemon_proc = None
-        _fingpt_daemon_reader = None
+        if sub_key == "headlines":
+            entry["fingpt_headlines_raw"] = result
+        elif sub_key.startswith("cumul:"):
+            entry["fingpt_cumulatives_raw"][sub_key] = result
 
 
-atexit.register(_stop_fingpt_daemon)
+def flush_ab_log() -> None:
+    """Walk _pending_ab_entries, merge batched fingpt results into shadow
+    arrays, write one JSONL row per entry, and clear the buffer.
 
+    Called once per cycle by main.py immediately after flush_llm_batch()
+    finishes Phase 3. Safe to call even if some fingpt results are missing
+    (the server returned None for that prompt) — those slots just get
+    dropped from the shadow array, same as the daemon-era behavior of
+    logging a fingpt:error entry.
 
-def _run_fingpt(texts, model_name=None, cumulative=False, ticker="unknown"):
-    """Run FinGPT sentiment inference via the warm daemon.
-
-    Model is loaded once at daemon spawn; subsequent calls incur only the
-    inference cost (~1-3s per batch). On daemon crash or timeout, the client
-    retries once with a fresh daemon before giving up (the caller has a
-    FinBERT fallback path that handles a second failure gracefully).
-
-    Args:
-        texts: List of headline strings
-        model_name: Ignored in the daemon client — daemon picks the first
-            available model at startup. Kept in the signature for backward
-            compat with existing call sites.
-        cumulative: If True, run cumulative analysis instead of per-headline
-        ticker: Ticker for cumulative context
-
-    Returns:
-        List of sentiment result dicts (per-headline) or single dict (cumulative)
+    Thread-safe: acquires _pending_ab_lock for the entry snapshot, then
+    clears the buffer under the same lock so no subsequent cycle can see
+    leftover state.
     """
-    global _fingpt_request_id, _fingpt_daemon_proc, _fingpt_daemon_reader
-    # model_name is intentionally unused — daemon auto-detects
-    _ = model_name
+    with _pending_ab_lock:
+        entries_snapshot = dict(_pending_ab_entries)
+        _pending_ab_entries.clear()
 
-    req_body = {
-        "mode": "cumulative" if cumulative else "headlines",
-        "texts": texts,
-        "ticker": ticker,
-    }
+    if not entries_snapshot:
+        return
 
-    for attempt in (1, 2):
-        with _fingpt_daemon_lock:
-            try:
-                proc, reader = _ensure_fingpt_daemon()
-                _fingpt_request_id += 1
-                sent_req_id = _fingpt_request_id
-                req_body["request_id"] = sent_req_id
-                proc.stdin.write(json.dumps(req_body) + "\n")
-                proc.stdin.flush()
-                resp_line = reader.readline(timeout=_FINGPT_REQUEST_TIMEOUT_S)
-                if resp_line is None:
-                    raise RuntimeError(
-                        f"FinGPT daemon timeout/EOF after "
-                        f"{_FINGPT_REQUEST_TIMEOUT_S}s (req_id={sent_req_id})"
-                    )
-                resp = json.loads(resp_line)
-                if "error" in resp:
-                    raise RuntimeError(f"FinGPT daemon error: {resp['error']}")
-                # Validate the echo matches — guards against any protocol
-                # desync (daemon emitting a prior response, a stray log line,
-                # etc.). Missing request_id in response is tolerated for
-                # backward compat with daemon versions that don't echo it.
-                echoed = resp.get("request_id")
-                if echoed is not None and echoed != sent_req_id:
-                    raise RuntimeError(
-                        f"FinGPT daemon response request_id mismatch: "
-                        f"sent {sent_req_id}, got {echoed}"
-                    )
-                return resp["result"]
-            except (BrokenPipeError, RuntimeError, json.JSONDecodeError) as exc:
-                logger.warning(
-                    "FinGPT daemon request failed (attempt %d): %s", attempt, exc
-                )
-                # Mark the daemon dead so the next attempt respawns it.
-                if _fingpt_daemon_proc is not None:
+    for ab_key, entry in entries_snapshot.items():
+        try:
+            shadow: list[dict] = []
+
+            # Fingpt per-headline → aggregate via _aggregate_sentiments the
+            # same way the old inline path did. If the raw list is missing
+            # (server returned nothing), skip the entry silently.
+            fingpt_raw = entry.get("fingpt_headlines_raw")
+            if fingpt_raw:
+                # Filter out None entries (per-prompt failures).
+                usable = [r for r in fingpt_raw if r is not None]
+                if usable:
                     try:
-                        _fingpt_daemon_proc.kill()
+                        fg_overall, fg_avg = _aggregate_sentiments(
+                            usable,
+                            headlines=entry["all_articles"],
+                            dissemination_mult=entry.get("diss_mult", 1.0),
+                        )
+                        shadow.append({
+                            "model": usable[0].get("model", "fingpt:finance-llama-8b"),
+                            "sentiment": fg_overall,
+                            "confidence": round(fg_avg[fg_overall], 4),
+                            "avg_scores": {k: round(v, 4) for k, v in fg_avg.items()},
+                        })
                     except Exception:
-                        pass
-                _fingpt_daemon_proc = None
-                _fingpt_daemon_reader = None
-                if attempt == 2:
-                    raise RuntimeError(f"FinGPT failed after retry: {exc}") from exc
-    raise RuntimeError("FinGPT unreachable")  # unreachable, satisfies type checker
+                        logger.debug(
+                            "fingpt headlines aggregation failed for %s", ab_key,
+                            exc_info=True,
+                        )
+
+            # Fingpt cumulative clusters → one shadow entry per cluster.
+            for _sub_key in sorted(entry.get("fingpt_cumulatives_raw", {})):
+                cum = entry["fingpt_cumulatives_raw"][_sub_key]
+                if cum is None:
+                    continue
+                shadow.append({
+                    "model": cum.get("model", "fingpt:cumulative"),
+                    "sentiment": cum.get("sentiment", "neutral"),
+                    "confidence": cum.get("confidence", 0.0),
+                    "headline_count": cum.get("headline_count", 0),
+                })
+
+            # FinBERT shadow (already aggregated inline during get_sentiment).
+            finbert = entry.get("finbert_shadow")
+            if finbert is not None:
+                shadow.append(finbert)
+
+            if shadow:
+                _log_ab_result(entry["ticker"], entry["primary_result"], shadow)
+        except Exception:
+            logger.debug("flush_ab_log: entry %s failed", ab_key, exc_info=True)
 
 
 def _run_finbert(texts):
@@ -745,51 +653,54 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
     }
 
     # --- Shadow models (A/B testing — logged only, don't affect consensus) ---
-    shadow_results = []
+    #
+    # 2026-04-09: The A/B log write used to happen inline at the bottom of
+    # this function. It is now DEFERRED to flush_ab_log() which is called
+    # post-cycle from main.py after flush_llm_batch() completes Phase 3
+    # (fingpt sentiment). Rationale: fingpt used to run in a bespoke NDJSON
+    # daemon (scripts/fingpt_daemon.py, now retired) blocking inside this
+    # function; moving fingpt into portfolio.llm_batch's shared llama_server
+    # rotation means the fingpt result does not arrive until AFTER
+    # get_sentiment() has returned. Rather than duplicate the A/B log entry
+    # or block on the batch, we stash the primary + finbert + context here
+    # and let flush_ab_log() assemble the final row.
+    #
+    # The primary model's voting result is still computed and returned
+    # SYNCHRONOUSLY — batching only affects the shadow log, not the vote.
+    ab_key = f"{short}:{datetime.now(UTC).isoformat()}"
+    _stash_ab_context(ab_key, short, primary_result, all_articles, diss_mult)
 
-    # Shadow: FinGPT (per-headline)
+    # Shadow: FinGPT — enqueue for post-cycle Phase 3 execution. Zero-cost
+    # here; the actual inference runs via llama_server finance-llama-8b
+    # rotation after the ticker pool completes.
     try:
-        fingpt_results = _run_fingpt(titles)
-        if fingpt_results:
-            fg_overall, fg_avg = _aggregate_sentiments(
-                fingpt_results, headlines=all_articles, dissemination_mult=diss_mult
-            )
-            shadow_results.append({
-                "model": fingpt_results[0].get("model", "fingpt") if fingpt_results else "fingpt",
-                "sentiment": fg_overall,
-                "confidence": round(fg_avg[fg_overall], 4),
-                "avg_scores": {k: round(v, 4) for k, v in fg_avg.items()},
-            })
-    except Exception as e:
-        logger.debug("FinGPT shadow failed: %s", e)
-
-    # Shadow: FinGPT cumulative (clustered headlines)
-    try:
+        from portfolio.llm_batch import enqueue_fingpt
+        enqueue_fingpt(
+            ab_key, "headlines",
+            {"mode": "headlines", "texts": titles, "ticker": short},
+        )
         clusters = _cluster_headlines(all_articles)
-        for cluster in clusters:
+        for idx, cluster in enumerate(clusters):
             if len(cluster) >= 3:
                 cluster_titles = [a["title"] for a in cluster]
-                cum_result = _run_fingpt(
-                    cluster_titles, cumulative=True, ticker=short
+                enqueue_fingpt(
+                    ab_key, f"cumul:{idx}",
+                    {"mode": "cumulative", "texts": cluster_titles, "ticker": short},
                 )
-                if cum_result and isinstance(cum_result, dict):
-                    shadow_results.append({
-                        "model": "fingpt:cumulative",
-                        "sentiment": cum_result.get("sentiment", "neutral"),
-                        "confidence": cum_result.get("confidence", 0.0),
-                        "headline_count": len(cluster),
-                    })
     except Exception as e:
-        logger.debug("FinGPT cumulative shadow failed: %s", e)
+        logger.debug("FinGPT enqueue failed: %s", e)
 
-    # Shadow: FinBERT (CPU, fast)
+    # Shadow: FinBERT (CPU, fast) — still runs inline because it's cheap
+    # and on CPU (no model swap cost) and we'd rather not add a fourth
+    # phase to llm_batch for an already-shadow-of-shadow signal. Stash its
+    # aggregated entry into the pending A/B buffer so flush_ab_log sees it.
     try:
         finbert_results = _run_finbert(titles)
         if finbert_results:
             fb_overall, fb_avg = _aggregate_sentiments(
                 finbert_results, headlines=all_articles, dissemination_mult=diss_mult
             )
-            shadow_results.append({
+            _stash_finbert_shadow(ab_key, {
                 "model": "FinBERT",
                 "sentiment": fb_overall,
                 "confidence": round(fb_avg[fb_overall], 4),
@@ -797,10 +708,6 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
             })
     except Exception as e:
         logger.debug("FinBERT shadow failed: %s", e)
-
-    # Log A/B comparison
-    if shadow_results:
-        _log_ab_result(short, primary_result, shadow_results)
 
     return primary_result
 

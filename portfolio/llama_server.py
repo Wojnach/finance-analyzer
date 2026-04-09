@@ -66,6 +66,25 @@ _MODEL_CONFIGS = {
             else "/home/deck/models/cryptotrader-lm/cryptotrader-lm-lora.gguf",
         ],
     },
+    # finance-llama-8b: sentiment shadow model. Added 2026-04-09 as part of the
+    # fingpt → llm_batch rotation migration. Previously this GGUF was loaded by a
+    # bespoke NDJSON daemon (scripts/fingpt_daemon.py), first on GPU all-layers
+    # (OOM'd with llama-server resident), then on CPU (60-150s inference, forced
+    # _TICKER_POOL_TIMEOUT and _FINGPT_REQUEST_TIMEOUT hotfix bumps). Moving it
+    # into the shared llama_server rotation lets fingpt use full GPU offload
+    # (-ngl 99) in its own phase of flush_llm_batch() after ministral3 and qwen3,
+    # adding ~one extra swap per cycle (~10-25 s) but dropping fingpt inference
+    # from ~100-150 s to ~10-30 s per cycle — net ~70-120 s saved. Path pulled
+    # from fingpt_infer.MODEL_PATHS["finance-llama-8b"] at Q:\models\fingpt_infer.py
+    # to keep a single source of truth.
+    "finance-llama-8b": {
+        "model": (
+            r"Q:\models\finance-llama-8b-gguf\wiroai-finance-llama-8b-q4_k_m.gguf"
+            if platform.system() == "Windows"
+            else "/home/deck/models/finance-llama-8b-gguf/wiroai-finance-llama-8b-q4_k_m.gguf"
+        ),
+        "extra_args": [],
+    },
 }
 
 # In-process state (each importing process tracks its own view)
