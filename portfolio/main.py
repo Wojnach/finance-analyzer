@@ -529,8 +529,29 @@ def run(force_report=False, active_symbols=None):
 
     max_workers = max(1, min(len(active_items), 8))
 
-    # BUG-178: Add timeout to prevent indefinite hangs from stuck tickers
-    _TICKER_POOL_TIMEOUT = 120  # 2x normal cycle time
+    # BUG-178: Add timeout to prevent indefinite hangs from stuck tickers.
+    #
+    # Bumped 2026-04-09 from 120s → 500s in concert with the cadence change
+    # (60s → 600s, see portfolio/market_timing.py INTERVAL_MARKET_OPEN) and
+    # the CPU-mode fingpt warm daemon. The old 120s was "2x normal cycle
+    # time" when the cycle target was 60s; it's no longer representative.
+    #
+    # Why 500s specifically: at 600s cadence with the CPU fingpt daemon,
+    # the slowest per-ticker sig times we measured on 2026-04-09 were
+    # ~370s (MSTR/BTC/ETH when they serialize through the fingpt daemon
+    # lock — fingpt is one process on CPU, so 5 tickers × ~75s serialize
+    # to ~375s tail latency). 500s leaves a ~130s safety margin against
+    # that worst case, and still leaves ~100s of headroom inside the 600s
+    # loop cadence for post-cycle work (agent_summary write, trigger
+    # detection, L2 invoke, log rotation). The loop itself should never
+    # hit this timeout in steady state — it's a guard against a genuinely
+    # stuck ticker, not a cap on normal CPU-fingpt latency.
+    #
+    # If the loop drops back to a faster cadence in the future (e.g. after
+    # the option-3 fingpt-on-GPU refactor — see the _FINGPT_REQUEST_TIMEOUT_S
+    # comment in portfolio/sentiment.py), drop this back to ~2x the new
+    # cadence so it stays "2x normal" again.
+    _TICKER_POOL_TIMEOUT = 500
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ticker") as pool:
         futures = {
             pool.submit(_process_ticker, name, source): name
