@@ -581,8 +581,13 @@ def run(force_report=False, active_symbols=None):
             signals_failed += len(timed_out)
 
     # --- Post-cycle LLM batch flush ---
-    # Ministral/Qwen3 cache misses were enqueued during parallel ticker processing.
-    # Now flush them sequentially, grouped by model (one swap max).
+    # Ministral/Qwen3/fingpt cache misses were enqueued during parallel
+    # ticker processing. Now flush them sequentially, grouped by model
+    # (max 2 swaps: ministral → qwen3 → fingpt). Fingpt phase added
+    # 2026-04-09 as part of feat/fingpt-in-llmbatch which retired the
+    # bespoke scripts/fingpt_daemon.py. The sentiment A/B log write is
+    # also deferred: flush_ab_log() below walks sentiment._pending_ab_entries
+    # and assembles the final rows once Phase 3 has stashed fingpt results.
     try:
         from portfolio.llm_batch import _lock as _llm_lock
         from portfolio.llm_batch import _ministral_queue, _qwen3_queue, flush_llm_batch
@@ -597,6 +602,12 @@ def run(force_report=False, active_symbols=None):
         for key in _queued_keys:
             if key not in batch_results:
                 _update_cache(key, None, ttl=60)
+        # Now that Phase 3 (fingpt) has stashed its results into
+        # sentiment._pending_ab_entries via _stash_fingpt_result, write out
+        # the sentiment_ab_log.jsonl rows for this cycle. Must run AFTER
+        # flush_llm_batch so the fingpt shadow data is available.
+        from portfolio.sentiment import flush_ab_log
+        flush_ab_log()
         report.llm_batch_flushed = True
     except Exception as e_batch:
         logger.warning("LLM batch flush failed: %s", e_batch)
