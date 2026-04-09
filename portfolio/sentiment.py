@@ -287,7 +287,25 @@ _fingpt_daemon_reader: "_DaemonReader | None" = None
 _fingpt_daemon_lock = threading.Lock()
 _fingpt_request_id = 0
 _FINGPT_READY_TIMEOUT_S = 180  # model warm-load + startup
-_FINGPT_REQUEST_TIMEOUT_S = 60  # per-request inference ceiling
+# Per-request inference ceiling. Bumped from 60s → 180s on 2026-04-09 after
+# the warm-daemon deploy moved inference to CPU (finance-llama-8b Q4 on
+# i7-11700K w/ n_threads=4). A single per-headline or cumulative batch on
+# this setup commonly takes 60-150s; 60s was too tight and triggered a
+# spawn-kill-spawn loop in the daemon client. 180s fits typical batches
+# with room to spare.
+#
+# Fingpt is a SHADOW sentiment signal — see get_sentiment() docstring at
+# line 651. Its output is logged to data/sentiment_ab_log.jsonl for A/B
+# accuracy tracking but is NEVER used in signal voting. The primary
+# sentiment votes come from CryptoBERT (crypto) or Trading-Hero-LLM
+# (stocks), both much faster. So even though fingpt can now take 2-3 min
+# per cycle at the new cadence, it does not influence any trade decisions.
+#
+# The proper long-term fix is the option-3 refactor: serve fingpt from
+# the shared GPU via llama_server on port 8787 (same coordination pattern
+# ministral/qwen3 already use) so inference returns to 1-3s per batch and
+# this timeout can drop back toward 30s.
+_FINGPT_REQUEST_TIMEOUT_S = 180  # per-request inference ceiling (CPU-mode fingpt)
 
 
 class _DaemonReader(threading.Thread):
