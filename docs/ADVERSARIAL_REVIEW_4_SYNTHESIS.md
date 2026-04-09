@@ -83,7 +83,7 @@ test lines). The fingpt daemon (+246 lines) is architecturally sound but has pro
 
 ## NEW Findings (Round 4)
 
-### CRITICAL (7)
+### CRITICAL (8+)
 
 | ID | Subsystem | Finding | Conf |
 |----|-----------|---------|------|
@@ -94,6 +94,7 @@ test lines). The fingpt daemon (+246 lines) is architecturally sound but has pro
 | IC-R4-2 | orchestration | **`trigger.py` SUSTAINED_DURATION_S=120 negates sustained checks at 600s cadence.** At 600s cadence, one cycle already exceeds 120s, so the duration gate fires on single-check flips. SUSTAINED_CHECKS=3 is effectively bypassed. Layer 2 fires on noise. | 95% |
 | DE-R4-1 | data-external | **`sentiment.py:138` yfinance called without `yfinance_lock`.** Same H11 bug in new code. ThreadPoolExecutor workers race on non-thread-safe yfinance, causing data corruption. | 95% |
 | DE-R4-2 | data-external | **fingpt daemon retry holds `_fingpt_daemon_lock` for up to 360s.** All concurrent sentiment calls blocked. 12 tickers × potential 360s = loop stall measured in hours. Violates "loop must run 100% of the time" rule. | 90% |
+| MC-R4-1 | metals-core | **Swing trader cancels stop AFTER sell — Avanza requires BEFORE.** `_execute_sell:1341` cancels stop post-sell, but Avanza's position-encumbrance rejects sell on encumbered positions. Main loop has `_ensure_stops_cancelled_before_sell()` with rollback — swing trader doesn't. | 90% |
 
 ### HIGH (5)
 
@@ -268,8 +269,17 @@ These are significant reliability improvements backed by 265 lines of tests.
 
 **Verified Round 3 items**: C5 (FIXED), C6 (STILL OPEN), H18 (FIXED), H19 (FIXED), H20 (FIXED), H21 (STILL OPEN), M8 (FIXED), M9 (STILL OPEN)
 
-### Metals-Core Agent
-*(agent still running — integrate in follow-up commit)*
+### Metals-Core Agent — COMPLETE (result truncated — partial integration)
+
+The agent ran 498s with 98 tool calls on 15,588 lines. Result was truncated in delivery.
+Key finding extracted from the delivered insight:
+
+| ID | Sev | Finding |
+|----|-----|---------|
+| MC-R4-1 | **CRIT** | **NEW**: Swing trader cancels stop-loss AFTER sell (`_execute_sell:1341`), but Avanza requires cancel BEFORE sell (position-encumbrance). Main loop learned this from the Mar 3 incident and built `_ensure_stops_cancelled_before_sell()` with rollback — but the swing trader was written independently and didn't inherit that institutional knowledge. Sell orders on encumbered positions will fail. |
+
+**Note**: The full metals-core review likely contained additional findings from its 98 tool
+calls across 17 files. A follow-up review of this subsystem is recommended.
 
 ### Avanza-API Agent — COMPLETE
 
@@ -441,7 +451,13 @@ checklist of all cadence-dependent constants:
 - **IF-R4-6 (68MB signal_log read)**: VALIDATED. Combined with LLM inference, this can
   cause OOM on the 16GB system.
 
-*(Remaining 1 agent still running — metals-core (15K lines))*
+**Metals-core agent** (result truncated — partial):
+- **MC-R4-1 (cancel-after-sell order sequencing)**: VALIDATED. This is a direct money-at-risk
+  bug. The main metals loop has `_ensure_stops_cancelled_before_sell()` but the swing trader
+  calls `_delete_stop_loss()` AFTER `place_order(SELL)`. On Avanza, the position is encumbered
+  by the stop-loss, so the SELL fails. This leaves the trader believing it sold when it didn't.
+
+**All 8 agents complete.**
 
 ---
 
@@ -460,7 +476,8 @@ checklist of all cadence-dependent constants:
 | Data-external agent new findings | 8 (2 CRIT, 4 HIGH, 2 MED) |
 | Signals-modules agent new findings | 10 (2 CRIT, 5 HIGH, 3 MED) |
 | Infrastructure agent new findings | 9 (6 HIGH, 3 MED) |
-| **Total active findings** | **~80** |
+| Metals-core agent new findings | 1+ CRIT (result truncated) |
+| **Total active findings** | **~81+** |
 
 **Net progress**: Round 3 had 67 total findings. ~19 confirmed fixed, ~3 partially fixed.
 11 new findings discovered. Active finding count dropped from 67 to ~20.
