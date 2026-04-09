@@ -36,6 +36,17 @@ _yield_cache: dict = {"value": None, "time": 0, "series_id": None}
 _YIELD_CACHE_TTL = 900  # 15 min (daily data, but catch updates sooner)
 _proxy_cache: dict[str, dict] = {}
 
+# 2026-04-09: log-once state for yfinance proxy → fallback transitions.
+# yfinance ^TNX has been returning 16h+ stale bars, flooding logs every cycle.
+# `_WARNED_TNX_STALE` covers the ^TNX/rates path specifically (task requested
+# a flag by that name). `_PROXY_STALE_WARNED` extends the same log-once idea
+# to any proxy cache_key that crosses into staleness, so DXY etc. benefit too.
+# Mirrors macro_context.py:_fred_10y_fallback (same yfinance ^TNX outage,
+# different call path — that helper patches the shared treasury fetch, this
+# one patches the golddigger intraday rates context).
+_WARNED_TNX_STALE: bool = False
+_PROXY_STALE_WARNED: dict[str, bool] = {}
+
 
 @dataclass
 class MarketSnapshot:
@@ -102,6 +113,7 @@ def _fetch_yfinance_proxy(
     max_bar_age_minutes: float,
 ) -> dict | None:
     """Fetch an intraday market proxy via yfinance with cache + staleness checks."""
+    global _WARNED_TNX_STALE
     now = time.time()
     cached = _proxy_cache.get(cache_key)
     if cached and now - cached["time"] < ttl_seconds:
@@ -130,13 +142,30 @@ def _fetch_yfinance_proxy(
             (datetime.now(UTC) - last_time).total_seconds() / 60.0,
         )
         if bar_age_minutes > max_bar_age_minutes:
-            logger.warning(
-                "Proxy %s stale: %.1f min old (limit %.1f)",
-                ticker,
-                bar_age_minutes,
-                max_bar_age_minutes,
-            )
-            return cached["value"] if cached else None
+            # 2026-04-09: yfinance ^TNX has been stuck on 16h+ stale bars,
+            # and the old behavior of returning the last cached value here
+            # masked the outage from `fetch_us10y_context` — so callers never
+            # fell through to the FRED DGS10 fallback and logs flooded with
+            # per-cycle warnings. Drop the stale cache entry, return None,
+            # and log ONCE per cache_key per recovery cycle. Upstream callers
+            # (fetch_us10y_context, fetch_dxy_context) already handle None
+            # by routing to their respective fallbacks (FRED, macro_context).
+            # Same pattern as macro_context.py:_fred_10y_fallback, different
+            # code path. See also task log docs/SESSION_PROGRESS.md 2026-04-09.
+            if not _PROXY_STALE_WARNED.get(cache_key, False):
+                logger.warning(
+                    "Proxy %s stale: %.1f min old (limit %.1f) — dropping cache, "
+                    "caller will fall back. Further stale events for this proxy "
+                    "will stay silent until recovery.",
+                    ticker,
+                    bar_age_minutes,
+                    max_bar_age_minutes,
+                )
+                _PROXY_STALE_WARNED[cache_key] = True
+            _proxy_cache.pop(cache_key, None)
+            if ticker == "^TNX":
+                _WARNED_TNX_STALE = True
+            return None
 
         change_pct = 0.0
         if base_close > 0:
@@ -151,6 +180,17 @@ def _fetch_yfinance_proxy(
             "as_of": last_time.isoformat(),
         }
         _proxy_cache[cache_key] = {"value": result, "time": now}
+        # 2026-04-09: on fresh recovery after a prior stale run, log once and
+        # clear the per-cache_key warned flag so the next outage re-warns.
+        if _PROXY_STALE_WARNED.get(cache_key, False):
+            logger.info(
+                "Proxy %s recovered (bar %.1f min old) — resuming cache",
+                ticker,
+                bar_age_minutes,
+            )
+            _PROXY_STALE_WARNED[cache_key] = False
+            if ticker == "^TNX":
+                _WARNED_TNX_STALE = False
         return result
     except Exception as e:
         logger.warning("Intraday proxy fetch failed for %s: %s", ticker, e)
