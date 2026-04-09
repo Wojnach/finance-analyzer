@@ -141,6 +141,9 @@ def _register_defaults():
     # COT positioning — CFTC speculative/commercial positioning, contrarian (metals only); capped at 0.7
     register_enhanced("cot_positioning", "portfolio.signals.cot_positioning",
                       "compute_cot_positioning_signal", requires_context=True, max_confidence=0.7)
+    # Credit spread risk — HY OAS from FRED as cross-asset risk appetite gauge; capped at 0.7
+    register_enhanced("credit_spread_risk", "portfolio.signals.credit_spread",
+                      "compute_credit_spread_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
