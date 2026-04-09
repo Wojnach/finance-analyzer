@@ -161,8 +161,11 @@ def _default_state():
 def _save_state(state):
     try:
         atomic_write_json(STATE_FILE, state, indent=2, ensure_ascii=False)
-    except Exception as e:
-        _log(f"State save error: {e}")
+    except Exception:
+        # 2026-04-09 Stage 2: use logger.exception for free stack trace.
+        # State save failure risks data loss (positions won't persist across
+        # restarts), so this is ERROR-level, not WARNING.
+        logger.exception("_save_state: atomic_write_json failed — position state may drift")
 
 
 def _delete_stop_loss(page, stop_id):
@@ -211,8 +214,12 @@ def _send_telegram(msg):
             json={"chat_id": _tg_config["chat_id"], "text": msg, "parse_mode": "Markdown"},
             timeout=10,
         )
-    except Exception as e:
-        _log(f"Telegram error: {e}")
+    except Exception:
+        # 2026-04-09 Stage 2: WARNING (not ERROR) because Telegram is a
+        # notification channel — losing one message is a degradation, not
+        # data loss. exc_info=True preserves the stack for debugging network
+        # issues, auth drift, rate-limit responses, etc.
+        logger.warning("_send_telegram: requests.post to Telegram API failed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -222,15 +229,21 @@ def _send_telegram(msg):
 def _log_decision(decision):
     try:
         atomic_append_jsonl(DECISIONS_LOG, decision)
-    except Exception as e:
-        _log(f"Decision log error: {e}")
+    except Exception:
+        # 2026-04-09 Stage 2: ERROR-level — audit trail loss on write failure.
+        # decisions_log.jsonl is how we reconstruct swing trader behavior
+        # post-hoc; silent drops mean we lose visibility into trade reasoning.
+        logger.exception("_log_decision: atomic_append_jsonl failed — decision audit lost")
 
 
 def _log_trade(trade):
     try:
         atomic_append_jsonl(TRADES_LOG, trade)
-    except Exception as e:
-        _log(f"Trade log error: {e}")
+    except Exception:
+        # 2026-04-09 Stage 2: ERROR-level — audit trail loss. Same rationale
+        # as _log_decision but for executed trades (metals_trades.jsonl is the
+        # source of truth for P&L attribution and accuracy backfill).
+        logger.exception("_log_trade: atomic_append_jsonl failed — trade audit lost")
 
 
 # ---------------------------------------------------------------------------
@@ -365,8 +378,16 @@ class SwingTrader:
                 if fresh:
                     self.warrant_catalog = fresh
                     _log(f"Catalog auto-refreshed: {len(self.warrant_catalog)} warrants")
-            except Exception as e:  # noqa: BLE001
-                _log(f"Catalog auto-refresh failed: {e}")
+            except Exception:  # noqa: BLE001
+                # 2026-04-09 Stage 2: WARNING — auto-refresh failure falls
+                # back to cached catalog, so this is a degradation not a
+                # blocker. Stack trace via exc_info helps diagnose Avanza
+                # API shape drift (the most common cause of refresh break).
+                logger.warning(
+                    "_evaluate: periodic catalog auto-refresh failed, continuing with cached catalog (%d warrants)",
+                    len(self.warrant_catalog),
+                    exc_info=True,
+                )
 
         # Position reconciliation against Avanza holdings (Fix 2, 2026-04-09).
         # Runs UNCONDITIONALLY on the first call after init to catch startup
@@ -453,8 +474,16 @@ class SwingTrader:
             if stop_id and stop_id != "DRY_RUN":
                 try:
                     _delete_stop_loss(self.page, stop_id)
-                except Exception as e:  # noqa: BLE001
-                    _log(f"  Phantom stop-loss cancel failed: {e}")
+                except Exception:  # noqa: BLE001
+                    # 2026-04-09 Stage 2: WARNING — best-effort cleanup of
+                    # an orphan stop-loss. If this fails the next reconcile
+                    # cycle will retry. Stack trace helps diagnose persistent
+                    # failures (e.g. stop-loss API auth drift).
+                    logger.warning(
+                        "_reconcile_swing_positions: phantom stop-loss cancel failed stop_id=%s",
+                        stop_id,
+                        exc_info=True,
+                    )
             del self.state["positions"][pos_id]
         if phantoms:
             _save_state(self.state)
@@ -522,16 +551,31 @@ class SwingTrader:
             if buy_order_id:
                 try:
                     delete_order_live(self.page, ACCOUNT_ID, buy_order_id)
-                except Exception as e:  # noqa: BLE001
-                    _log(f"  Buy order cancel failed: {e}")
+                except Exception:  # noqa: BLE001
+                    # 2026-04-09 Stage 2: WARNING — best-effort rollback
+                    # cancel. Failure here means the order may still exist
+                    # on Avanza after we've already cleaned up our state;
+                    # reconciliation next cycle will catch the divergence.
+                    logger.warning(
+                        "_verify_recent_fills: rollback buy-order cancel failed buy_order_id=%s",
+                        buy_order_id,
+                        exc_info=True,
+                    )
 
             # Cancel the stop-loss if one was placed
             stop_id = pos.get("stop_order_id")
             if stop_id and stop_id != "DRY_RUN":
                 try:
                     _delete_stop_loss(self.page, stop_id)
-                except Exception as e:  # noqa: BLE001
-                    _log(f"  Stop-loss cancel failed: {e}")
+                except Exception:  # noqa: BLE001
+                    # 2026-04-09 Stage 2: WARNING — same pattern as the
+                    # buy-order cancel above. Best-effort cleanup in the
+                    # rollback path; reconcile next cycle is the safety net.
+                    logger.warning(
+                        "_verify_recent_fills: rollback stop-loss cancel failed stop_id=%s",
+                        stop_id,
+                        exc_info=True,
+                    )
 
             # Restore cash and remove position
             self.state["cash_sek"] += cost
@@ -1187,8 +1231,15 @@ class SwingTrader:
                     # Override: if stop hit probability is very high
                     elif exit_plan.stop_hit_prob > 0.30:
                         exit_reason = f"EXIT_OPTIMIZER: stop hit prob {exit_plan.stop_hit_prob:.0%} > 30% (EV {exit_plan.recommended.ev_sek:+,.0f} SEK)"
-            except Exception as e:
-                _log(f"Exit optimizer error: {e}")
+            except Exception:
+                # 2026-04-09 Stage 2: WARNING — exit optimizer is a bonus
+                # layer; failure falls through to rule-based exit logic
+                # below (take profit / trailing / stop / barrier). exc_info
+                # surfaces whatever broke inside the probabilistic model.
+                logger.warning(
+                    "_check_exits: exit_optimizer raised — falling back to rule-based exit logic",
+                    exc_info=True,
+                )
 
             # 1. Take profit
             if not exit_reason and und_change_pct >= TAKE_PROFIT_UNDERLYING_PCT:
