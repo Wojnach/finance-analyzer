@@ -1650,8 +1650,18 @@ def _update_stop_orders_for(page, key, pos, stop_order_state):
                 log(f"  Stop S{level+1} {key}: trig={trigger_price} sell={sell_price} vol={level_units}")
             else:
                 log(f"  Stop S{level+1} FAILED for {key}")
-        except Exception as e:
-            log(f"  Stop S{level+1} error {key}: {e}")
+        except Exception:
+            # 2026-04-09 Stage 3: WARNING — per-level stop placement can
+            # fail independently (e.g. one level hits a validation error).
+            # Loop continues placing remaining levels; the orders list only
+            # contains successful placements so _save_stop_orders below
+            # persists what actually landed.
+            logger.warning(
+                "_rebuild_stop_orders_for: Stop S%d placement failed key=%s",
+                level + 1,
+                key,
+                exc_info=True,
+            )
 
     if orders:
         stop_order_state[key] = {
@@ -1699,8 +1709,18 @@ def update_smart_trailing_stops(page, positions, stop_order_state, prices):
                 if STOP_ORDER_ENABLED and stop_order_state:
                     try:
                         _update_stop_orders_for(page, key, pos, stop_order_state)
-                    except Exception as e:
-                        log(f"Stop order update failed for {key}: {e}")
+                    except Exception:
+                        # 2026-04-09 Stage 3: WARNING — trailing stop
+                        # local position already updated; the hardware
+                        # stop at the broker is now lagging. Next cycle
+                        # should re-attempt. If this keeps firing the
+                        # broker stop is stale and protection is at the
+                        # OLD level — stack trace helps diagnose.
+                        logger.warning(
+                            "update_smart_trailing_stops: hardware stop sync failed key=%s — broker stop is stale",
+                            key,
+                            exc_info=True,
+                        )
 
 
 # ---------------------------------------------------------------------------
@@ -2967,8 +2987,17 @@ def emergency_sell(page, key, pos, bid):
                 held_confirmed = bool(verify and verify.get("held") is True)
                 if held_confirmed and verify.get("units") is not None:
                     pos["units"] = int(verify["units"])
-            except Exception as e:
-                log(f"  {key}: holdings re-check failed after short-sell-not-allowed: {e}")
+            except Exception:
+                # 2026-04-09 Stage 3: WARNING — we fall through to the
+                # !held_confirmed path on any raise, so this is non-fatal
+                # but we want the stack trace to diagnose why the verify
+                # JS exec'd on the page raised (Playwright session drift
+                # during a failed sell is the most common cause).
+                logger.warning(
+                    "emergency_sell: holdings re-check failed after short-sell-not-allowed key=%s",
+                    key,
+                    exc_info=True,
+                )
 
             if held_confirmed:
                 log(f"  {key}: short-sell-not-allowed but position still held — keeping active")
@@ -3000,7 +3029,14 @@ def emergency_sell(page, key, pos, bid):
             return False
 
     except Exception as e:
-        log(f"Emergency sell FAILED: {e}")
+        # 2026-04-09 Stage 3: ERROR — emergency sell IS the critical path.
+        # Using logger.exception for the full stack trace while keeping the
+        # separate log(f"...: {e}") preserved as a short operator-friendly
+        # line. send_telegram still fires so the user gets the alert with
+        # the short form. exc_info goes to metals_loop_out.txt for
+        # post-mortem root-cause. ob_id + key extras help match the stack
+        # to the affected position in state files.
+        logger.exception("emergency_sell: top-level failure key=%s ob_id=%s", key, pos.get("ob_id"))
         send_telegram(f"*L3 SELL FAILED*: {e}")
         # Outer exception: we don't know if the sell went through. The stops
         # we may have cancelled at the top of the function need restoring.
@@ -3021,8 +3057,16 @@ def _cleanup_stop_orders_for(page, key):
                 log(f"  Cancelled stale stop orders for {key} (position sold)")
             del stop_state[key]
             _save_stop_orders(stop_state)
-    except Exception as e:
-        log(f"  Stop order cleanup error for {key}: {e}")
+    except Exception:
+        # 2026-04-09 Stage 3: WARNING — best-effort post-sell cleanup. If
+        # this fails the stops may linger locally or at the broker, but the
+        # sell itself already succeeded. Next reconcile cycle should pick
+        # up any drift. exc_info preserves the stack for diagnosis.
+        logger.warning(
+            "_cleanup_stop_orders_for: cleanup failed key=%s — stop state may be stale",
+            key,
+            exc_info=True,
+        )
 
 
 def _capture_stop_snapshot(ob_id):
@@ -3043,8 +3087,13 @@ def _capture_stop_snapshot(ob_id):
     try:
         from portfolio.avanza_session import get_stop_losses_strict
         all_stops = get_stop_losses_strict()
-    except Exception as e:
-        log(f"[stops] pre-cancel snapshot read failed for {ob_str}: {e}")
+    except Exception:
+        # 2026-04-09 Stage 3: ERROR — snapshot read is a hard dependency
+        # for the cancel-then-sell sequence. Failing it blocks the sell
+        # (fail-closed), so the stack trace matters for diagnosing repeat
+        # failures (auth drift, Avanza shape change, network). The
+        # return False path is safer than proceeding without rollback.
+        logger.exception("_capture_stop_snapshot: get_stop_losses_strict raised for %s — sell will be blocked", ob_str)
         return False, []
     import copy as _copy
     snapshot = [
@@ -3131,8 +3180,14 @@ def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0):
             account_id=ACCOUNT_ID,
             max_wait=max_wait,
         )
-    except Exception as e:
-        log(f"[stops] server cancel raised for {ob_str}: {e}")
+    except Exception:
+        # 2026-04-09 Stage 3: ERROR — server cancel failing means we
+        # cannot determine SL state and the caller's sell path is
+        # blocked. Stack trace helps diagnose (HTTP failure vs auth
+        # drift vs transport). Conservative: return the full snapshot
+        # as the rollback record since we don't know which DELETEs
+        # took effect.
+        logger.exception("_ensure_stops_cancelled_before_sell: cancel_all_stop_losses_for raised for %s", ob_str)
         # Conservative: assume nothing was cancelled. The pre-cancel
         # snapshot is the upper bound on what we MAY need to roll back,
         # but we don't know what actually happened. Returning the full
@@ -3220,8 +3275,16 @@ def _ensure_stops_cancelled_before_sell(page, ob_id, max_wait: float = 3.0):
                 if csrf:
                     _cancel_stop_orders(page, matched_key, stop_state[matched_key], csrf)
                     log(f"[stops] local cascade housekeeping for {matched_key} ({ob_str})")
-    except Exception as e:
-        log(f"[stops] local cascade housekeeping error for ob {ob_str}: {e}")
+    except Exception:
+        # 2026-04-09 Stage 3: WARNING — local state sync is best-effort
+        # AFTER the server cancel already succeeded. If this fails the
+        # local state file stays stale but broker reality is correct;
+        # _cleanup_stop_orders_for handles tidy-up after the sell fills.
+        logger.warning(
+            "_ensure_stops_cancelled_before_sell: local cascade housekeeping failed for ob %s",
+            ob_str,
+            exc_info=True,
+        )
 
     if status == "SUCCESS":
         if cancelled_ids:
@@ -3313,8 +3376,17 @@ def _sync_local_stop_state_after_rearm(ob_id, snapshot, new_ids):
             f"[stops] synced local state for {matched_key} ({ob_str}): "
             f"{len(new_orders)} new order(s)"
         )
-    except Exception as e:
-        log(f"[stops] local state sync failed for ob {ob_id}: {e}")
+    except Exception:
+        # 2026-04-09 Stage 3: WARNING — best-effort rewrite of local
+        # stop state after re-arm. If this fails downstream check/update
+        # code may poll dead IDs until the next reconcile cycle. Not a
+        # blocker for trading; stack trace helps diagnose serialization
+        # or _load_stop_orders failures.
+        logger.warning(
+            "_sync_local_stop_state_after_rearm: rewrite failed ob_id=%s — local state may be stale",
+            ob_id,
+            exc_info=True,
+        )
 
 
 def _rearm_stops_after_failed_sell(ob_id, snapshot):
@@ -3340,7 +3412,13 @@ def _rearm_stops_after_failed_sell(ob_id, snapshot):
 
         result = rearm_stop_losses_from_snapshot(snapshot)
     except Exception as e:
-        log(f"[stops] re-arm raised for ob {ob_id}: {e}")
+        # 2026-04-09 Stage 3: ERROR — re-arm failure leaves the position
+        # naked at the broker. This is materially the worst failure mode
+        # in the stops subsystem; the stack trace is essential for
+        # post-mortem and the Telegram alert is already wired to ping
+        # the operator. Keep `e` in the Telegram text (short form) and
+        # let exc_info carry the full trace to the log file.
+        logger.exception("_rearm_stops_after_failed_sell: re-arm raised ob_id=%s — position is NAKED", ob_id)
         try:
             send_telegram(
                 f"*STOP RE-ARM FAILED* ob={ob_id}\nerror={e}\n"
@@ -3380,8 +3458,14 @@ def _save_stop_orders(state):
     """Save stop order state to disk."""
     try:
         atomic_write_json(STOP_ORDER_FILE, state, ensure_ascii=False)
-    except Exception as e:
-        log(f"Stop order state save failed: {e}")
+    except Exception:
+        # 2026-04-09 Stage 3: ERROR — stop order state persistence
+        # failure risks drift between local tracking and broker reality.
+        # On restart the loop reloads this file; a failed save now means
+        # the next cycle may re-place already-existing stops (dupes) or
+        # miss re-placing needed ones. Stack trace helps diagnose atomic
+        # write failures (disk full, permission, race).
+        logger.exception("_save_stop_orders: atomic_write_json failed — stop tracking may drift on restart")
 
 
 # ---------------------------------------------------------------------------
@@ -3807,7 +3891,12 @@ def _handle_buy_fill(page, order, exec_price, price_data):
                 send_telegram(f"*WARNING* Hardware trailing stop failed for "
                               f"{POSITIONS[pos_key]['name']} — set manually!")
         except Exception as e:
-            log(f"  HW trailing stop error for {pos_key}: {e}")
+            # 2026-04-09 Stage 3: ERROR — hardware trailing stop failure
+            # leaves the NEW position without broker-level protection.
+            # Telegram alert still fires with the short form; exc_info
+            # gives the operator a stack trace to diagnose persistent
+            # failures (API shape, stop-loss endpoint auth, etc.).
+            logger.exception("_handle_buy_fill: hardware trailing stop placement raised pos_key=%s", pos_key)
             send_telegram(f"*WARNING* Hardware trailing stop error for "
                           f"{POSITIONS[pos_key]['name']}: {e}")
 
@@ -3951,8 +4040,19 @@ def place_stop_loss_orders(page, positions):
                         "units": level_units,
                         "status": "failed",
                     })
-            except Exception as e:
-                log(f"  Stop S{level+1} error: {key} — {e}")
+            except Exception:
+                # 2026-04-09 Stage 3: WARNING — individual level failure.
+                # Loop continues placing remaining levels; orders list
+                # captures what succeeded. Ruff noqa for BLE001 since the
+                # broad catch is intentional (place_stop_loss raises many
+                # types over Playwright and we don't want any to break
+                # the per-level retry loop).
+                logger.warning(
+                    "_place_stop_orders_for_positions: Stop S%d placement failed key=%s",
+                    level + 1,
+                    key,
+                    exc_info=True,
+                )
 
         state[key] = {
             "date": today_str,
@@ -3996,8 +4096,18 @@ def _cancel_stop_orders(page, key, order_state, csrf=None):
             }""", [order_id, csrf])
             log(f"  Cancel stop S{order['level']} {key}: status={result.get('status')}")
             order["status"] = "cancelled"
-        except Exception as e:
-            log(f"  Cancel stop error {key} S{order['level']}: {e}")
+        except Exception:
+            # 2026-04-09 Stage 3: WARNING — cancel failure at a specific
+            # level; loop continues cancelling the rest. Order status
+            # stays "placed" so next cancel cycle will retry. Stack
+            # trace helps diagnose page.evaluate failures (session
+            # drift, Playwright transport, CSRF token expiry).
+            logger.warning(
+                "_cancel_stop_orders: cancel failed key=%s level=%s",
+                key,
+                order.get('level'),
+                exc_info=True,
+            )
 
 
 def check_stop_order_fills(page, stop_state, positions):
@@ -4040,8 +4150,17 @@ def check_stop_order_fills(page, stop_state, positions):
                         any_filled = True
                         fill_px = order.get('trigger', order.get('sell', '?'))
                         log(f"STOP FILLED: {key} S{order['level']} {order['units']}u @ {fill_px}")
-            except Exception as e:
-                log(f"Stop check error {key} S{order['level']}: {e}")
+            except Exception:
+                # 2026-04-09 Stage 3: WARNING — status check failure on
+                # a specific order; next cycle will retry. If the fill
+                # happened but we can't verify, next reconciliation will
+                # catch it via holdings diff.
+                logger.warning(
+                    "check_stop_order_fills: status check failed key=%s level=%s",
+                    key,
+                    order.get('level'),
+                    exc_info=True,
+                )
 
         if any_filled:
             filled_keys.append(key)
