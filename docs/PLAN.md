@@ -1,54 +1,43 @@
-# Round 3 Dual Adversarial Review
-**Date**: 2026-04-08
+# Round 4 Dual Adversarial Review — 2026-04-09
 
-## Goal
+## Context
+- Round 3 (2026-04-08): 67 findings (15 CRITICAL, 35 HIGH, 16 MEDIUM, 1 LOW)
+- ~22 Round 2 findings still open in Round 3
+- Since Round 3: ~2,056 lines changed across 16 files
+- Key changes: metals_swing_trader overhaul (+510), fingpt daemon (+246), sentiment.py rewrite (+260)
 
-Full codebase adversarial review — Round 3. Find new bugs, verify Round 2 fixes held.
-8 parallel Claude code-reviewer subagents (one per subsystem) + synthesis.
+## Goals
+1. Verify which Round 3 findings were fixed by recent commits
+2. Review all new code since Round 3 (16 changed files)
+3. Find new bugs introduced by the changes
+4. Deep cross-cutting analysis of persistent patterns
+5. Produce actionable synthesis with severity rankings
 
-## Fixed Since Round 2
+## 8 Subsystem Partition
 
-- CM1: config_data NameError → FIXED (d534fc1)
-- CM2: order["price"] KeyError → FIXED (d534fc1)
-- CM3: raw open() in read_signal_data → FIXED (d534fc1)
-- CM4: velocity alert double-fire epoch boundary → FIXED (d534fc1)
-- C1: ADX cache id(df) → FIXED (c1f5bb6)
-- Drawdown all-time peak false -93.6% → FIXED (bfc716f)
-- DRY_RUN=False, INITIAL_BUDGET_SEK cash fallback → FIXED (af0ed78)
-- KNOWN_WARRANT ob_id 1650161 missing → FIXED (d534fc1)
+| # | Subsystem | ~Lines | Focus for Round 4 |
+|---|-----------|--------|-------------------|
+| 1 | signals-core | 5,892 | C1 ADX cache, C2 accuracy race, H1 horizon key, H3 fail-open |
+| 2 | orchestration | 4,981 | C3 wait_for_specialists, C4 T3 dead, main.py changes, trigger.py changes |
+| 3 | portfolio-risk | 4,410 | C5 guard always open, C6 drawdown disconnected, H19 Sortino, H20 CVaR |
+| 4 | metals-core | 15,588 | **HEAVY**: swing_trader overhaul, C12-C15, H27-H34, 15+ Rule 4 violations |
+| 5 | avanza-api | 4,487 | C7 buying power, C8 CONFIRM order, H4 stop ID, new fetch_positions |
+| 6 | signals-modules | 10,597 | H13 structure, H14 calendar, H15 smart_money, H17 VWAP, H35 futures_flow |
+| 7 | data-external | 3,683 | C9 earnings, H10 NFP, H11 yfinance lock, H12 onchain budget, sentiment.py rewrite |
+| 8 | infrastructure | 6,136 | C10 health race, C11 loading_keys, H23 GPU lock, H25 log rotation, H26 Telegram |
 
-## Subsystems
+## Methodology
+- 8 parallel code-reviewer agents (one per subsystem)
+- 1 independent manual review (cross-cutting focus)
+- Cross-critique in both directions
+- Synthesis with severity classification and action plan
 
-| Agent | Files |
-|-------|-------|
-| metals-core | data/metals_loop.py, data/metals_risk.py, data/metals_swing_trader.py |
-| signals-core | portfolio/signal_engine.py, signal_registry.py, accuracy_stats.py |
-| orchestration | portfolio/main.py, agent_invocation.py, trigger.py |
-| portfolio-risk | portfolio/risk_management.py, trade_guards.py, portfolio_mgr.py |
-| avanza-api | portfolio/avanza_session.py, avanza_orders.py |
-| data-external | portfolio/data_collector.py, fear_greed.py, sentiment.py, alpha_vantage.py |
-| infrastructure | portfolio/file_utils.py, health.py, shared_state.py |
-| signals-modules | portfolio/signals/*.py (21 modules) |
-
-## Output
-
-`docs/ADVERSARIAL_REVIEW_3_SYNTHESIS.md`
-
-## Status
-
-- [x] 8 agents running
-- [x] Synthesis → docs/ADVERSARIAL_REVIEW_3_SYNTHESIS.md
-- [x] Fix Tier 1 issues — merged c6829ec, pushed
-- [x] Fix all 4 agent-found subsystems — merged, pushed (6ed9d5f)
-- [x] Adversarial review of Round 3 fixes — 9 new issues found and fixed (861f8d9)
-
-## Tier 1 Fixes (trivial, high impact)
-
-1. MIN_TRADE_SEK 500→1000 — `data/metals_swing_config.py:59`
-2. NFP Good Friday date(2026,4,3)→date(2026,4,2) — `portfolio/econ_dates.py:61`
-3. _silver_reset_session() never called — `data/metals_loop.py:6063`
-4. metals_context.json raw open() → atomic_write_json — `data/metals_loop.py:5078`
-5. SwingTrader _save_state raw open("w") → atomic_write_json — `data/metals_swing_trader.py:110`
-6. get_buying_power() wrong JSON keys — `portfolio/avanza_session.py:302`
-7. StopLossResult.from_api: stoplossOrderId key missing — `portfolio/avanza/types.py:212`
-8. cvar_99_sek key missing from compute_portfolio_var — `portfolio/monte_carlo_risk.py:503`
+## Execution
+1. Write plan ✓
+2. Commit plan
+3. Launch 8 agents in parallel (background)
+4. Read key changed files + write independent review
+5. Collect agent results
+6. Cross-critique
+7. Write synthesis doc
+8. Commit all, merge, push, clean up
