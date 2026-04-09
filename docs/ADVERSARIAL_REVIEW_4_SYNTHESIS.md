@@ -324,8 +324,23 @@ These are significant reliability improvements backed by 265 lines of tests.
 
 **Verified Round 3**: C9 (FIXED), H9 (FIXED), H10 (FIXED), H11 (FIXED in 3 files, but NEW violations in sentiment.py + earnings_calendar.py), H12 (FIXED)
 
-### Infrastructure Agent
-*(agent still running — integrate in follow-up commit)*
+### Infrastructure Agent — COMPLETE
+
+**Key findings (9 total: 6 HIGH, 3 MEDIUM):**
+
+| ID | Sev | Finding |
+|----|-----|---------|
+| IF-R4-1 | HIGH | **NEW**: `shared_state.py:98` `_loading_timestamps` not cleaned on KeyboardInterrupt — minor leak |
+| IF-R4-2 | HIGH | **NEW**: `telegram_poller.py:149` raw `open(config.json)` — on decode error, `cfg={}` then `atomic_write_json` **overwrites config.json with empty dict, destroying all API keys** |
+| IF-R4-3 | HIGH | **NEW**: `dashboard/app.py:67` `_cached_read()` no dogpile prevention — thundering herd on concurrent requests |
+| IF-R4-4 | HIGH | **NEW**: Digest state written AFTER send — crash causes duplicate Telegram flood |
+| IF-R4-5 | HIGH | **NEW**: `backup.py` never called — portfolio state files never backed up |
+| IF-R4-6 | HIGH | **NEW**: `weekly_digest.py:154` reads entire 68MB+ `signal_log.jsonl` with no limit — OOM risk |
+| IF-R4-7 | MED | **NEW**: `journal.py:568` `CONTEXT_FILE.write_text()` non-atomic — corrupt Layer 2 context on crash |
+| IF-R4-8 | MED | **NEW**: `dashboard/app.py:671` token comparison timing side-channel + CORS `*` |
+| IF-R4-9 | MED | **NEW**: `log_rotation.py:235` uses fixed `.tmp` filename instead of `mkstemp` |
+
+**Verified Round 3**: C10 (FIXED), C11 (FIXED), H23 (FIXED), H24 (FIXED), H25 (FIXED), H26 (FIXED)
 
 ---
 
@@ -416,7 +431,17 @@ checklist of all cadence-dependent constants:
 - **SM-R4-6 (news "cut" keyword)**: VALIDATED. "cut" as a positive keyword is wrong
   for most contexts (layoffs, budget cuts, dividend cuts). Only "rate cut" is positive.
 
-*(Remaining 2 agents still running — metals-core (15K lines) and infrastructure)*
+**Infrastructure agent**:
+- **IF-R4-2 (config.json wipe)**: VALIDATED and CRITICAL-adjacent. The telegram poller's
+  error handler sets `cfg = {}` on decode error, then writes it back — destroying all API
+  keys. This is the most dangerous single-line bug in the review: one corrupted read of
+  config.json during a concurrent write wipes the entire configuration.
+- **IF-R4-5 (backup never called)**: VALIDATED. backup.py is dead code in production.
+  Portfolio state has zero backup protection.
+- **IF-R4-6 (68MB signal_log read)**: VALIDATED. Combined with LLM inference, this can
+  cause OOM on the 16GB system.
+
+*(Remaining 1 agent still running — metals-core (15K lines))*
 
 ---
 
@@ -434,7 +459,8 @@ checklist of all cadence-dependent constants:
 | Signals-core agent new findings | 7 (4 HIGH, 3 MED) |
 | Data-external agent new findings | 8 (2 CRIT, 4 HIGH, 2 MED) |
 | Signals-modules agent new findings | 10 (2 CRIT, 5 HIGH, 3 MED) |
-| **Total active findings** | **~71** |
+| Infrastructure agent new findings | 9 (6 HIGH, 3 MED) |
+| **Total active findings** | **~80** |
 
 **Net progress**: Round 3 had 67 total findings. ~19 confirmed fixed, ~3 partially fixed.
 11 new findings discovered. Active finding count dropped from 67 to ~20.
