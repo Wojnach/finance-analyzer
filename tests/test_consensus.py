@@ -55,8 +55,9 @@ class TestMinVotersConstants:
         assert MIN_VOTERS_CRYPTO == 3
 
     def test_stock_symbols_defined(self):
-        assert "PLTR" in STOCK_SYMBOLS
-        assert "NVDA" in STOCK_SYMBOLS
+        # After Apr 09 ticker reduction, MSTR is the only stock retained
+        # (kept as BTC NAV-premium reference for metals_loop). See
+        # portfolio/tickers.py for the full rationale.
         assert "MSTR" in STOCK_SYMBOLS
 
     def test_crypto_symbols_defined(self):
@@ -120,7 +121,7 @@ class TestStockConsensus:
             price_vs_bb="above_upper",  # above upper band → SELL vote
         )
         action, conf, extra = generate_signal(
-            ind, ticker="PLTR", config=_NO_PENALTIES,
+            ind, ticker="MSTR", config=_NO_PENALTIES,
         )
         assert extra["_sell_count"] >= 3
         assert action == "SELL"
@@ -136,7 +137,7 @@ class TestStockConsensus:
             ema21=130.0,  # no gap → abstains
             price_vs_bb="inside",  # inside → abstains
         )
-        action, conf, extra = generate_signal(ind, ticker="NVDA")
+        action, conf, extra = generate_signal(ind, ticker="MSTR")
         assert extra["_voters"] == 1
         assert action == "HOLD"
 

@@ -13,25 +13,20 @@ SYMBOLS = {
     # Metals (Binance futures)
     "XAU-USD": {"binance_fapi": "XAUUSDT"},
     "XAG-USD": {"binance_fapi": "XAGUSDT"},
-    # US Equities (Alpaca IEX) — focused set (Mar 15 cleanup)
-    "PLTR": {"alpaca": "PLTR"},
-    "NVDA": {"alpaca": "NVDA"},
-    "MU": {"alpaca": "MU"},
-    "SMCI": {"alpaca": "SMCI"},
-    "TSM": {"alpaca": "TSM"},
-    "TTWO": {"alpaca": "TTWO"},
-    "VRT": {"alpaca": "VRT"},
+    # US Equities (Alpaca IEX) — MSTR kept as BTC NAV-premium reference for metals_loop
     "MSTR": {"alpaca": "MSTR"},
     # Removed Mar 15: AMD, GOOGL, AMZN, AAPL, AVGO, META, SOUN, LMT
+    # Removed Apr 09: PLTR, NVDA, MU, SMCI, TSM, TTWO, VRT
+    #   Reduces main loop load to stay under 60s cadence. Cycle p50 was 143s with
+    #   12 tickers — dropping to 5 is expected to bring p50 under target. MSTR retained
+    #   because data/metals_loop.py uses it for BTC NAV-premium tracking.
 }
 
 # ── Asset-class subsets ───────────────────────────────────────────────────
 
 CRYPTO_SYMBOLS = {"BTC-USD", "ETH-USD"}
 METALS_SYMBOLS = {"XAU-USD", "XAG-USD"}
-STOCK_SYMBOLS = {
-    "PLTR", "NVDA", "MU", "SMCI", "TSM", "TTWO", "VRT", "MSTR",
-}
+STOCK_SYMBOLS = {"MSTR"}
 
 # All known tickers (union of all subsets)
 ALL_TICKERS = CRYPTO_SYMBOLS | METALS_SYMBOLS | STOCK_SYMBOLS

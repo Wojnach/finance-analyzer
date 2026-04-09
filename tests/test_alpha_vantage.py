@@ -299,11 +299,19 @@ class TestBatchRefresh:
         # Reset circuit breaker to clean state
         alpha_vantage._cb._state = _CBState.CLOSED
         alpha_vantage._cb._failure_count = 0
-        mock_fetch.return_value = None  # simulate failure
-        config = self._make_config()
-        count = refresh_fundamentals_batch(config)
-        assert count == 0
-        assert not alpha_vantage._cb.allow_request()
+        # Temporarily lower failure_threshold so we trip even when STOCK_SYMBOLS
+        # has fewer entries than the default threshold (post Apr-09 reduction
+        # left only MSTR, so a single failure must be enough to trip).
+        orig_threshold = alpha_vantage._cb.failure_threshold
+        alpha_vantage._cb.failure_threshold = 1
+        try:
+            mock_fetch.return_value = None  # simulate failure
+            config = self._make_config()
+            count = refresh_fundamentals_batch(config)
+            assert count == 0
+            assert not alpha_vantage._cb.allow_request()
+        finally:
+            alpha_vantage._cb.failure_threshold = orig_threshold
 
     @patch("portfolio.alpha_vantage._fetch_overview")
     @patch("portfolio.alpha_vantage._save_persistent_cache")

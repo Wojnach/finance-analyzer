@@ -219,7 +219,7 @@ def get_all_futures_data(ticker):
 
 if __name__ == "__main__":
     import json
-    for t in ["BTC-USD", "ETH-USD", "NVDA"]:
+    for t in ["BTC-USD", "ETH-USD"]:
         print(f"\n=== {t} ===")
         result = get_all_futures_data(t)
         if result is None:
