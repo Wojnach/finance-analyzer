@@ -133,13 +133,16 @@ def _log(msg):
     # child logger under `metals_loop.swing_trader`, so we inherit level
     # and propagate to the parent's _LazyStdoutHandler).
     #
-    # Library fallback (codex review v5 finding HIGH, 2026-04-09): must
-    # check BOTH `hasHandlers()` and `isEnabledFor(INFO)` — using effective
-    # level alone drops records when an outer caller sets level without
-    # attaching handlers. Under pytest caplog.at_level on `metals_loop`,
-    # caplog attaches a handler to the parent and raises level; both
-    # conditions are met here by inheritance, and the logger path is used.
-    if logger.hasHandlers() and logger.isEnabledFor(logging.INFO):
+    # Codex review v6 finding MEDIUM (2026-04-09): the visibility check
+    # walks ancestor handlers and skips NullHandlers / ERROR-level
+    # filters, so we only use the logger path when a record will
+    # actually emit somewhere. Under pytest caplog.at_level on
+    # "metals_loop", caplog adds a capture handler to the parent; the
+    # walk finds it via propagation and takes the logger path. Without
+    # setup, the fallback path writes directly to stdout.
+    from metals_loop import _has_ancestor_emitter
+
+    if logger.isEnabledFor(logging.INFO) and _has_ancestor_emitter(logger, logging.INFO):
         logger.info(f"[SWING] {msg}")
     else:
         ts = datetime.datetime.now().strftime("%H:%M:%S")

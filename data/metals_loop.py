@@ -147,8 +147,48 @@ def _install_stage1_logging() -> None:
         )
         logger.addHandler(_handler)
     logger.setLevel(logging.INFO)
-    # propagate defaults to True — don't override. Parent/root handlers
-    # (if any) can still capture our records.
+    # Codex review v6 finding MEDIUM (2026-04-09): set propagate=False
+    # after install so records don't duplicate when an embedding process
+    # has its own root handler. Our Stage 1 handler is now the sole
+    # output owner for `metals_loop` and its children (including
+    # `metals_loop.swing_trader`). Telemetry consumers that want these
+    # records should attach a handler directly to `metals_loop`, not to
+    # root.
+    logger.propagate = False
+
+
+def _has_ancestor_emitter(lg: logging.Logger, target_level: int) -> bool:
+    """Walk the logger hierarchy to find a handler that would emit `target_level`.
+
+    Used by log() and metals_swing_trader._log() to decide whether
+    logger.info() will actually produce visible output, or whether to
+    fall back to a direct stdout print.
+
+    Codex review v6 finding MEDIUM (2026-04-09): the naive check
+    `logger.hasHandlers() and isEnabledFor(INFO)` passes for an ancestor
+    NullHandler or an ERROR-level StreamHandler — both scenarios drop
+    INFO records silently. This walk handles:
+
+    * NullHandler — skipped (it's a no-op absorbing handler)
+    * Level-filtered handlers — only returns True if level permits target
+    * propagate=False — stops walking when an ancestor blocks propagation
+
+    Returns True only when we're confident an INFO record will actually
+    land in at least one handler.
+    """
+    current = lg
+    while current is not None:
+        for h in current.handlers:
+            if isinstance(h, logging.NullHandler):
+                continue
+            # Handler level 0 (NOTSET) means "accept whatever the logger
+            # passes through"; any other level must be <= target to emit.
+            if h.level == logging.NOTSET or h.level <= target_level:
+                return True
+        if not current.propagate:
+            break
+        current = current.parent
+    return False
 
 try:
     from zoneinfo import ZoneInfo
@@ -823,25 +863,28 @@ def send_telegram(msg):
 
 
 def log(msg):
-    # 2026-04-09 Stage 1 shim: delegate to logger.info when a handler is
-    # installed AND logging is INFO-enabled. Otherwise fall back to a
-    # direct stdout print so the old unconditional-stdout contract is
-    # preserved for library/programmatic use.
+    # 2026-04-09 Stage 1 shim: delegate to logger.info when we can prove
+    # an INFO-permissive, non-null handler exists in the logger hierarchy.
+    # Otherwise fall back to direct stdout via _safe_print so the old
+    # unconditional-stdout contract is preserved for library/programmatic
+    # use.
     #
-    # Codex review v5 finding HIGH (2026-04-09): the previous implementation
-    # gated on `isEnabledFor(INFO)` alone, which returns True even when no
-    # handler is attached (e.g. external code set the root level to INFO
-    # without adding handlers). In that state logger.info() would silently
-    # drop the record. The fix requires BOTH conditions — a handler is
-    # actually present, AND the level permits INFO. Either alone is
-    # insufficient.
+    # Codex review v6 finding MEDIUM (2026-04-09): `logger.hasHandlers()`
+    # + `isEnabledFor(INFO)` is insufficient — an ancestor NullHandler
+    # or an ERROR-level StreamHandler satisfies both checks but still
+    # silently drops INFO records. `_has_ancestor_emitter()` walks
+    # handlers and their levels (and respects propagate=False) to
+    # confirm at least one handler will actually emit this record.
     #
     # Branch truth table:
-    # - Production __main__ (handler installed, level=INFO): logger path ✓
-    # - pytest caplog.at_level('metals_loop', INFO): handler + level ✓
+    # - Production __main__ (handler installed, level=INFO): logger ✓
+    # - pytest caplog.at_level('metals_loop', INFO): caplog adds a
+    #   LogCaptureHandler to metals_loop → logger path ✓
     # - Library import, no setup: no handler → fallback → stdout ✓
-    # - External handlerless INFO setup: no handler → fallback → stdout ✓
-    if logger.hasHandlers() and logger.isEnabledFor(logging.INFO):
+    # - External NullHandler on root: skipped → no emitter → fallback ✓
+    # - External root StreamHandler(ERROR): level too high → fallback ✓
+    # - External root INFO-enabled handler: emitter present → logger ✓
+    if logger.isEnabledFor(logging.INFO) and _has_ancestor_emitter(logger, logging.INFO):
         logger.info(msg)
     else:
         ts = datetime.datetime.now().strftime("%H:%M:%S")
