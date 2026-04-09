@@ -256,6 +256,14 @@ EMERGENCY_SELL_ENABLED = False  # default OFF: requires explicit enablement
 _STOCKHOLM_TZ = ZoneInfo("Europe/Stockholm") if ZoneInfo else None
 _US_EASTERN_TZ = ZoneInfo("America/New_York") if ZoneInfo else None
 
+# 2026-04-09: log-once guard for timeapi.io failures in the metals_loop.py
+# copy of get_cet_time() (there's a DUPLICATE implementation in
+# data/metals_shared.py:62 with its own guard). Both guards are needed
+# because each module has its own memory; without this, timeapi.io
+# warnings fire every cycle from this copy even after metals_shared.py's
+# guard has tripped.
+_WARNED_TIMEAPI_METALS_LOOP: bool = False
+
 # Trade queue (Layer 2 writes intent, Layer 1 executes)
 TRADE_QUEUE_ENABLED = True
 TRADE_QUEUE_FILE = "data/metals_trade_queue.json"
@@ -956,7 +964,19 @@ def get_cet_time():
             m = data["minute"]
             return h + m / 60, f"{h:02d}:{m:02d} {tz_label}", "timeapi"
     except Exception as e:
-        print(f"[WARN] timeapi.io failed: {e}", flush=True)
+        # 2026-04-09: log-once guard — this is the SECOND get_cet_time() in the
+        # codebase (the other is data/metals_shared.py:62). Both need the
+        # suppress-repeated-warnings pattern, otherwise we get 2 noise lines
+        # per cycle instead of 2 per process run. Guard is module-level
+        # (_WARNED_TIMEAPI_METALS_LOOP) to stay independent of metals_shared's.
+        global _WARNED_TIMEAPI_METALS_LOOP
+        if not _WARNED_TIMEAPI_METALS_LOOP:
+            print(
+                f"[WARN] timeapi.io failed: {e} "
+                "(suppressing further warnings; using zoneinfo fallback)",
+                flush=True,
+            )
+            _WARNED_TIMEAPI_METALS_LOOP = True
     # Fallback: zoneinfo handles DST correctly (CET/CEST)
     try:
         now = datetime.datetime.now(_STOCKHOLM_TZ)
