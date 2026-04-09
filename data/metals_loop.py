@@ -40,11 +40,34 @@ import time
 import traceback
 from pathlib import Path
 
-# 2026-04-09: Python logging added alongside the existing print-based `log()`
-# helper (which writes to metals_loop_out.txt via _safe_print). `logger` is
-# used only by newly-added observability calls at bare-except sites that
-# previously swallowed errors silently. Existing log()/send_telegram() calls
-# are unchanged. Default level is WARNING; raise to DEBUG for verbose debug.
+# 2026-04-09 Stage 1 log migration (docs/LOG_MIGRATION_AUDIT_20260409.md):
+# The existing print-based `log()` / `_safe_print()` helpers were the only
+# log output path in this process before 2026-04-09 afternoon. Fleet v1 added
+# `logger` + 43 bare-except observability calls. This stage wires the root
+# logger so `log()` / `_log()` become thin shims that delegate to
+# `logger.info()` — all future 290+ call sites get timestamps + level prefix
+# automatically, and the handful of logger.warning/error calls in the file
+# format consistently with the `log()` output.
+#
+# Unicode safety: `_safe_print` (defined below) was handling
+# UnicodeEncodeError on Windows non-UTF consoles. Reconfigure stdout/stderr
+# to utf-8 replace BEFORE configuring the root logger so the new
+# StreamHandler inherits a safe encoding. `_safe_print` stays in the file
+# for the two remaining direct call sites (lines inside send_telegram and
+# the silver fast-tick error path).
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, OSError):
+    # Older Python or non-tty stream — _safe_print fallback still catches.
+    pass
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+    force=True,  # override any prior basicConfig from imported modules
+)
 logger = logging.getLogger("metals_loop")
 
 try:
@@ -715,8 +738,13 @@ def send_telegram(msg):
 
 
 def log(msg):
-    ts = datetime.datetime.now().strftime("%H:%M:%S")
-    _safe_print(f"[{ts}] {msg}")
+    # 2026-04-09 Stage 1 shim: delegate to logger.info so the output gets the
+    # unified [HH:MM:SS] [LEVEL] format from basicConfig. Existing call sites
+    # are unchanged — the old [HH:MM:SS] prefix is now added by the formatter.
+    # If logging.basicConfig hasn't been applied yet (shouldn't happen since
+    # it's at module top), the root logger's default lastResort handler will
+    # still print to stderr, which metals-loop.bat captures via 2>&1.
+    logger.info(msg)
 
 def pnl_pct(current, entry):
     if entry == 0: return 0

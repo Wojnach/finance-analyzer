@@ -109,8 +109,13 @@ RECON_FAILURE_STREAK_ALERT = 10  # alert on Telegram after N consecutive failure
 
 
 def _log(msg):
-    ts = datetime.datetime.now().strftime("%H:%M:%S")
-    print(f"[{ts}] [SWING] {msg}", flush=True)
+    # 2026-04-09 Stage 1 shim: delegate to logger.info. The [SWING] tag is
+    # preserved in the message body so existing grep-based operator workflows
+    # (e.g. `grep SWING metals_loop_out.txt`) still work. The timestamp +
+    # level prefix comes from metals_loop.py's basicConfig (we share the
+    # process). See docs/LOG_MIGRATION_AUDIT_20260409.md for the migration
+    # plan context.
+    logger.info(f"[SWING] {msg}")
 
 
 def _now_utc():
