@@ -118,7 +118,7 @@ class TestVoteCountIntegrity:
         """For stocks, total applicable = 26 (incl. qwen3 + forecast GPU signals)."""
         ind = make_indicators(close=130.0)
         df = make_ohlcv_df(n=250, close_base=130.0)
-        _, _, extra = generate_signal(ind, ticker="NVDA", df=df)
+        _, _, extra = generate_signal(ind, ticker="MSTR", df=df)
 
         assert extra["_total_applicable"] == 26
 
