@@ -24,6 +24,7 @@ def _load_config():
 
 
 _config = None
+_WARNED_TIMEAPI: bool = False
 
 
 def _get_config():
@@ -75,7 +76,14 @@ def get_cet_time():
             m = data["minute"]
             return h + m / 60, f"{h:02d}:{m:02d} CET", "timeapi"
     except Exception as e:
-        print(f"[WARN] timeapi.io failed: {e}", flush=True)
+        global _WARNED_TIMEAPI
+        if not _WARNED_TIMEAPI:
+            print(
+                f"[WARN] timeapi.io failed: {e} "
+                "(suppressing further warnings; using zoneinfo fallback)",
+                flush=True,
+            )
+            _WARNED_TIMEAPI = True
     # Fallback: zoneinfo handles DST correctly (CET/CEST)
     try:
         from zoneinfo import ZoneInfo
