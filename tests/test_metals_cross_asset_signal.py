@@ -24,6 +24,7 @@ class TestComputeMetalsCrossAssetSignal:
             "copper_change_5d": 2.5,
             "gvz_zscore": -1.5,
             "gs_ratio_zscore": 2.0,
+            "gs_ratio_velocity": -3.0,
             "spy_change_1d": 1.5,
             "oil_change_5d": 3.0,
         }
@@ -40,6 +41,7 @@ class TestComputeMetalsCrossAssetSignal:
             "copper_change_5d": -3.0,
             "gvz_zscore": 2.5,
             "gs_ratio_zscore": -2.0,
+            "gs_ratio_velocity": 3.0,
             "spy_change_1d": -2.0,
             "oil_change_5d": -4.0,
         }
@@ -74,6 +76,7 @@ class TestComputeMetalsCrossAssetSignal:
             "copper_change_5d": 0.0,
             "gvz_zscore": 0.0,
             "gs_ratio_zscore": 2.0,
+            "gs_ratio_velocity": 0.0,
             "spy_change_1d": 0.0,
             "oil_change_5d": 0.0,
         }
@@ -93,6 +96,7 @@ class TestComputeMetalsCrossAssetSignal:
             "copper_change_5d": 0.0,
             "gvz_zscore": 2.5,
             "gs_ratio_zscore": 0.0,
+            "gs_ratio_velocity": 0.0,
             "spy_change_1d": 0.0,
             "oil_change_5d": 0.0,
         }
@@ -109,6 +113,7 @@ class TestComputeMetalsCrossAssetSignal:
             "copper_change_5d": 0.0,
             "gvz_zscore": 2.5,
             "gs_ratio_zscore": 0.0,
+            "gs_ratio_velocity": 0.0,
             "spy_change_1d": 0.0,
             "oil_change_5d": 0.0,
         }
@@ -125,6 +130,7 @@ class TestComputeMetalsCrossAssetSignal:
             "copper_change_5d": 0.0,
             "gvz_zscore": -1.5,
             "gs_ratio_zscore": 0.0,
+            "gs_ratio_velocity": 0.0,
             "spy_change_1d": 0.0,
             "oil_change_5d": 0.0,
         }
@@ -141,6 +147,7 @@ class TestComputeMetalsCrossAssetSignal:
             "copper_change_5d": 0.0,
             "gvz_zscore": 0.0,
             "gs_ratio_zscore": 0.0,
+            "gs_ratio_velocity": 0.0,
             "spy_change_1d": 0.0,
             "oil_change_5d": 3.0,
         }
@@ -148,3 +155,72 @@ class TestComputeMetalsCrossAssetSignal:
             _make_df(), ticker="XAU-USD", config={}, macro={}
         )
         assert result["sub_signals"]["oil"] == "BUY"
+
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_gs_velocity_falling_buys_silver(self, mock_ctx):
+        """Falling G/S ratio (silver outperforming) → BUY silver."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = {
+            "copper_change_5d": 0.0,
+            "gvz_zscore": 0.0,
+            "gs_ratio_zscore": 0.0,
+            "gs_ratio_velocity": -3.5,
+            "spy_change_1d": 0.0,
+            "oil_change_5d": 0.0,
+        }
+        result = compute_metals_cross_asset_signal(
+            _make_df(), ticker="XAG-USD", config={}, macro={}
+        )
+        assert result["sub_signals"]["gs_velocity"] == "BUY"
+
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_gs_velocity_rising_sells_silver(self, mock_ctx):
+        """Rising G/S ratio (gold outperforming) → SELL silver."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = {
+            "copper_change_5d": 0.0,
+            "gvz_zscore": 0.0,
+            "gs_ratio_zscore": 0.0,
+            "gs_ratio_velocity": 3.5,
+            "spy_change_1d": 0.0,
+            "oil_change_5d": 0.0,
+        }
+        result = compute_metals_cross_asset_signal(
+            _make_df(), ticker="XAG-USD", config={}, macro={}
+        )
+        assert result["sub_signals"]["gs_velocity"] == "SELL"
+
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_gs_velocity_rising_buys_gold(self, mock_ctx):
+        """Rising G/S ratio (gold outperforming) → BUY gold."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = {
+            "copper_change_5d": 0.0,
+            "gvz_zscore": 0.0,
+            "gs_ratio_zscore": 0.0,
+            "gs_ratio_velocity": 3.5,
+            "spy_change_1d": 0.0,
+            "oil_change_5d": 0.0,
+        }
+        result = compute_metals_cross_asset_signal(
+            _make_df(), ticker="XAU-USD", config={}, macro={}
+        )
+        assert result["sub_signals"]["gs_velocity"] == "BUY"
+
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_gs_velocity_in_indicators(self, mock_ctx):
+        """gs_velocity_5d should appear in indicators output."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = {
+            "copper_change_5d": 0.0,
+            "gvz_zscore": 0.0,
+            "gs_ratio_zscore": 0.0,
+            "gs_ratio_velocity": -2.5,
+            "spy_change_1d": 0.0,
+            "oil_change_5d": 0.0,
+        }
+        result = compute_metals_cross_asset_signal(
+            _make_df(), ticker="XAG-USD", config={}, macro={}
+        )
+        assert "gs_velocity_5d" in result["indicators"]
+        assert result["indicators"]["gs_velocity_5d"] == -2.5

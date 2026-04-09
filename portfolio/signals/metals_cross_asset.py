@@ -1,11 +1,12 @@
 """Cross-asset signal for metals -- correlated market indicators.
 
-Signal #32.  Combines 5 cross-asset sub-indicators via majority vote:
+Signal #32.  Combines 6 cross-asset sub-indicators via majority vote:
     1. Copper Momentum: copper up -> industrial demand -> silver bullish
     2. GVZ (Gold VIX): high implied vol signals breakout/reversal
     3. Gold/Silver Ratio: mean-reversion signal (high = silver cheap)
-    4. SPY Momentum: risk-on/risk-off gauge
-    5. Oil Momentum: inflation expectations proxy
+    4. G/S Ratio Velocity: 5d rate of change — falling = silver outperforming
+    5. SPY Momentum: risk-on/risk-off gauge
+    6. Oil Momentum: inflation expectations proxy
 
 Applicable to XAU-USD and XAG-USD only.
 Gold and silver interpret some signals differently (e.g. G/S ratio).
@@ -27,6 +28,7 @@ _GVZ_ZSCORE_LOW = -1.0
 _GS_RATIO_ZSCORE = 1.5
 _SPY_MOVE_PCT = 0.8
 _OIL_MOVE_PCT = 2.0
+_GS_VELOCITY_PCT = 2.0  # 5d change threshold for G/S ratio velocity
 
 
 def _get_cross_asset_context(ticker: str) -> dict | None:
@@ -48,6 +50,7 @@ def _get_cross_asset_context(ticker: str) -> dict | None:
 
     gs = data.get("gold_silver_ratio")
     result["gs_ratio_zscore"] = gs["zscore"] if gs else 0.0
+    result["gs_ratio_velocity"] = gs["change_5d_pct"] if gs else 0.0
 
     spy = data.get("spy")
     result["spy_change_1d"] = spy["change_1d_pct"] if spy else 0.0
@@ -136,7 +139,28 @@ def compute_metals_cross_asset_signal(
             sub_signals["gs_ratio"] = "HOLD"
     votes.append(sub_signals["gs_ratio"])
 
-    # Sub 4: SPY Momentum (risk-on/risk-off)
+    # Sub 4: G/S Ratio Velocity (5d rate of change)
+    # Falling G/S ratio = silver outperforming gold = bullish silver
+    # Rising G/S ratio = gold outperforming silver = bearish silver
+    gs_vel = ctx["gs_ratio_velocity"]
+    if is_silver:
+        if gs_vel < -_GS_VELOCITY_PCT:
+            sub_signals["gs_velocity"] = "BUY"   # Silver gaining vs gold
+        elif gs_vel > _GS_VELOCITY_PCT:
+            sub_signals["gs_velocity"] = "SELL"   # Silver losing vs gold
+        else:
+            sub_signals["gs_velocity"] = "HOLD"
+    else:
+        # For gold: rising G/S = gold outperforming -> BUY gold
+        if gs_vel > _GS_VELOCITY_PCT:
+            sub_signals["gs_velocity"] = "BUY"
+        elif gs_vel < -_GS_VELOCITY_PCT:
+            sub_signals["gs_velocity"] = "SELL"
+        else:
+            sub_signals["gs_velocity"] = "HOLD"
+    votes.append(sub_signals["gs_velocity"])
+
+    # Sub 5: SPY Momentum (risk-on/risk-off)  [was Sub 4 before velocity added]
     spy = ctx["spy_change_1d"]
     if spy > _SPY_MOVE_PCT:
         # Risk-on: silver benefits (industrial), gold neutral
@@ -148,7 +172,7 @@ def compute_metals_cross_asset_signal(
         sub_signals["spy_risk"] = "HOLD"
     votes.append(sub_signals["spy_risk"])
 
-    # Sub 5: Oil Momentum (inflation expectations)
+    # Sub 6: Oil Momentum (inflation expectations)  [was Sub 5]
     oil = ctx["oil_change_5d"]
     if oil > _OIL_MOVE_PCT:
         sub_signals["oil"] = "BUY"
@@ -168,6 +192,7 @@ def compute_metals_cross_asset_signal(
             "copper_5d": round(cu, 2),
             "gvz_zscore": round(gvz, 2),
             "gs_ratio_zscore": round(gsr, 2),
+            "gs_velocity_5d": round(gs_vel, 2),
             "spy_1d": round(spy, 2),
             "oil_5d": round(oil, 2),
         },
