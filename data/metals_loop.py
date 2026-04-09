@@ -824,22 +824,24 @@ def send_telegram(msg):
 
 def log(msg):
     # 2026-04-09 Stage 1 shim: delegate to logger.info when a handler is
-    # installed (production `__main__` path where _install_stage1_logging()
-    # ran, or test harness with caplog attached). The output gets the
-    # unified [HH:MM:SS] [LEVEL] format from our formatter.
+    # installed AND logging is INFO-enabled. Otherwise fall back to a
+    # direct stdout print so the old unconditional-stdout contract is
+    # preserved for library/programmatic use.
     #
-    # Library fallback (codex review v4 finding MEDIUM, 2026-04-09): when
-    # this module is imported outside `__main__` AND nothing attached a
-    # handler (no caplog, no embedding process setup), logger.info() is
-    # dropped because the metals_loop logger's effective level is WARNING
-    # (default) and Python's lastResort handler only emits WARNING+. That
-    # breaks imported/programmatic use where the old `log()` used to write
-    # to stdout unconditionally via `_safe_print`. Fall back to _safe_print
-    # in that case so the old stdout contract is preserved for library
-    # consumers. Under pytest caplog this branch is NOT taken — caplog
-    # attaches a handler, logger.hasHandlers() returns True, and the
-    # logger.info() path is used.
-    if logger.isEnabledFor(logging.INFO):
+    # Codex review v5 finding HIGH (2026-04-09): the previous implementation
+    # gated on `isEnabledFor(INFO)` alone, which returns True even when no
+    # handler is attached (e.g. external code set the root level to INFO
+    # without adding handlers). In that state logger.info() would silently
+    # drop the record. The fix requires BOTH conditions — a handler is
+    # actually present, AND the level permits INFO. Either alone is
+    # insufficient.
+    #
+    # Branch truth table:
+    # - Production __main__ (handler installed, level=INFO): logger path ✓
+    # - pytest caplog.at_level('metals_loop', INFO): handler + level ✓
+    # - Library import, no setup: no handler → fallback → stdout ✓
+    # - External handlerless INFO setup: no handler → fallback → stdout ✓
+    if logger.hasHandlers() and logger.isEnabledFor(logging.INFO):
         logger.info(msg)
     else:
         ts = datetime.datetime.now().strftime("%H:%M:%S")

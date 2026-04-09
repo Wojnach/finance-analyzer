@@ -133,14 +133,13 @@ def _log(msg):
     # child logger under `metals_loop.swing_trader`, so we inherit level
     # and propagate to the parent's _LazyStdoutHandler).
     #
-    # Library fallback (codex review v4 finding MEDIUM, 2026-04-09): when
-    # this module is imported outside the metals_loop entrypoint AND no
-    # caplog/handler is attached, our logger inherits WARNING level from
-    # root by default and drops the INFO record. Fall back to a plain
-    # stdout print in that case so standalone imports still see operator
-    # output. Under pytest caplog at the `metals_loop` parent this branch
-    # is NOT taken — caplog sets level INFO and attaches a handler.
-    if logger.isEnabledFor(logging.INFO):
+    # Library fallback (codex review v5 finding HIGH, 2026-04-09): must
+    # check BOTH `hasHandlers()` and `isEnabledFor(INFO)` — using effective
+    # level alone drops records when an outer caller sets level without
+    # attaching handlers. Under pytest caplog.at_level on `metals_loop`,
+    # caplog attaches a handler to the parent and raises level; both
+    # conditions are met here by inheritance, and the logger path is used.
+    if logger.hasHandlers() and logger.isEnabledFor(logging.INFO):
         logger.info(f"[SWING] {msg}")
     else:
         ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -194,7 +193,7 @@ def _save_state(state):
         # 2026-04-09 Stage 2: use logger.exception for free stack trace.
         # State save failure risks data loss (positions won't persist across
         # restarts), so this is ERROR-level, not WARNING.
-        logger.exception("_save_state: atomic_write_json failed — position state may drift")
+        logger.exception("[SWING] _save_state: atomic_write_json failed — position state may drift")
 
 
 def _delete_stop_loss(page, stop_id):
@@ -220,7 +219,7 @@ def _send_telegram(msg):
                 "chat_id": cfg["telegram"]["chat_id"],
             }
         except Exception:
-            logger.warning("_send_telegram: config.json telegram block read failed, telegram disabled for this process", exc_info=True)
+            logger.warning("[SWING] _send_telegram: config.json telegram block read failed, telegram disabled for this process", exc_info=True)
             _tg_config = {}
 
     if not _tg_config.get("token"):
@@ -248,7 +247,7 @@ def _send_telegram(msg):
         # notification channel — losing one message is a degradation, not
         # data loss. exc_info=True preserves the stack for debugging network
         # issues, auth drift, rate-limit responses, etc.
-        logger.warning("_send_telegram: requests.post to Telegram API failed", exc_info=True)
+        logger.warning("[SWING] _send_telegram: requests.post to Telegram API failed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +261,7 @@ def _log_decision(decision):
         # 2026-04-09 Stage 2: ERROR-level — audit trail loss on write failure.
         # decisions_log.jsonl is how we reconstruct swing trader behavior
         # post-hoc; silent drops mean we lose visibility into trade reasoning.
-        logger.exception("_log_decision: atomic_append_jsonl failed — decision audit lost")
+        logger.exception("[SWING] _log_decision: atomic_append_jsonl failed — decision audit lost")
 
 
 def _log_trade(trade):
@@ -272,7 +271,7 @@ def _log_trade(trade):
         # 2026-04-09 Stage 2: ERROR-level — audit trail loss. Same rationale
         # as _log_decision but for executed trades (metals_trades.jsonl is the
         # source of truth for P&L attribution and accuracy backfill).
-        logger.exception("_log_trade: atomic_append_jsonl failed — trade audit lost")
+        logger.exception("[SWING] _log_trade: atomic_append_jsonl failed — trade audit lost")
 
 
 # ---------------------------------------------------------------------------
@@ -413,7 +412,7 @@ class SwingTrader:
                 # blocker. Stack trace via exc_info helps diagnose Avanza
                 # API shape drift (the most common cause of refresh break).
                 logger.warning(
-                    "_evaluate: periodic catalog auto-refresh failed, continuing with cached catalog (%d warrants)",
+                    "[SWING] _evaluate: periodic catalog auto-refresh failed, continuing with cached catalog (%d warrants)",
                     len(self.warrant_catalog),
                     exc_info=True,
                 )
@@ -509,7 +508,7 @@ class SwingTrader:
                     # cycle will retry. Stack trace helps diagnose persistent
                     # failures (e.g. stop-loss API auth drift).
                     logger.warning(
-                        "_reconcile_swing_positions: phantom stop-loss cancel failed stop_id=%s",
+                        "[SWING] _reconcile_swing_positions: phantom stop-loss cancel failed stop_id=%s",
                         stop_id,
                         exc_info=True,
                     )
@@ -586,7 +585,7 @@ class SwingTrader:
                     # on Avanza after we've already cleaned up our state;
                     # reconciliation next cycle will catch the divergence.
                     logger.warning(
-                        "_verify_recent_fills: rollback buy-order cancel failed buy_order_id=%s",
+                        "[SWING] _verify_recent_fills: rollback buy-order cancel failed buy_order_id=%s",
                         buy_order_id,
                         exc_info=True,
                     )
@@ -601,7 +600,7 @@ class SwingTrader:
                     # buy-order cancel above. Best-effort cleanup in the
                     # rollback path; reconcile next cycle is the safety net.
                     logger.warning(
-                        "_verify_recent_fills: rollback stop-loss cancel failed stop_id=%s",
+                        "[SWING] _verify_recent_fills: rollback stop-loss cancel failed stop_id=%s",
                         stop_id,
                         exc_info=True,
                     )
@@ -1266,7 +1265,7 @@ class SwingTrader:
                 # below (take profit / trailing / stop / barrier). exc_info
                 # surfaces whatever broke inside the probabilistic model.
                 logger.warning(
-                    "_check_exits: exit_optimizer raised — falling back to rule-based exit logic",
+                    "[SWING] _check_exits: exit_optimizer raised — falling back to rule-based exit logic",
                     exc_info=True,
                 )
 
@@ -1504,7 +1503,7 @@ class SwingTrader:
             if elapsed_min < required_min:
                 return False
         except Exception:
-            logger.warning("SwingTrader._cooldown_cleared: corrupt last_buy_ts=%r — clearing cooldown", last_ts, exc_info=True)
+            logger.warning("[SWING] SwingTrader._cooldown_cleared: corrupt last_buy_ts=%r — clearing cooldown", last_ts, exc_info=True)
 
         return True
 
