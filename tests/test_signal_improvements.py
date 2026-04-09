@@ -428,7 +428,7 @@ class TestCrossAssetSignals:
         assert leads["ETH-USD"]["leader"] == "BTC-USD"
         assert leads["ETH-USD"]["leader_action"] == "BUY"
 
-    def test_btc_leads_eth(self):
+    def test_btc_leads_eth_sell(self):
         signals = {
             "BTC-USD": {"action": "SELL"},
             "ETH-USD": {"action": "HOLD"},

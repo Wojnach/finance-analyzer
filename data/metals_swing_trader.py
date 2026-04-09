@@ -319,10 +319,6 @@ class SwingTrader:
         recent = hist[-REGIME_CONFIRM_CHECKS:]
         return all(a == action and r == regime for a, r in recent)
 
-        # Periodic summary
-        if SEND_PERIODIC_SUMMARY and self.check_count % TELEGRAM_SUMMARY_INTERVAL == 0:
-            self._send_summary(signal_data)
-
     # -------------------------------------------------------------------
     # Entry logic
     # -------------------------------------------------------------------
