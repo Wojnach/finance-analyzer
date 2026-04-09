@@ -402,26 +402,31 @@ def test_safe_print_fallback_on_unicode_encode_error(monkeypatch):
     assert "?" in calls["msgs"][-1]
 
 
-def test_log_routes_to_logger_info(capsys):
+def test_log_routes_to_logger_info(caplog):
     """log() is a shim for logger.info after the 2026-04-09 Stage 1 log
-    migration. Verifies the shim writes the message to stdout with the
-    [INFO] level prefix from basicConfig.
+    migration. Verifies the shim emits an INFO record on the `metals_loop`
+    logger. Uses caplog (not capsys) because Stage 1 discipline keeps the
+    module handler-free on import — the real handler is installed only
+    under `if __name__ == "__main__":` in production.
 
     Previously this test monkeypatched `_safe_print` and asserted log()
     called it — that check no longer applies because log() now delegates
     to Python logging. `_safe_print` still exists for the two direct
     call sites in send_telegram and the silver fast-tick error path.
     """
+    import logging
+
     import metals_loop as ml
 
-    ml.log("XAG ↑ 62%")
-    captured = capsys.readouterr()
+    with caplog.at_level(logging.INFO, logger="metals_loop"):
+        ml.log("XAG ↑ 62%")
 
-    # stdout should contain the message and the INFO-level prefix; the
-    # [HH:MM:SS] prefix varies so we just check for the level and the
-    # message text.
-    assert "XAG ↑ 62%" in captured.out
-    assert "[INFO]" in captured.out
+    # caplog.records captures the LogRecord objects; caplog.text has the
+    # formatted output. Either works; we check both for clarity.
+    assert any("XAG ↑ 62%" in rec.getMessage() for rec in caplog.records), (
+        "log() should emit on the metals_loop logger"
+    )
+    assert any(rec.levelname == "INFO" for rec in caplog.records if "XAG" in rec.getMessage())
 
 
 def test_singleton_lock_blocks_second_instance(tmp_path):

@@ -12,60 +12,30 @@ Usage from metals_loop.py:
 import datetime
 import json
 import logging
-import sys
 import time
 
 import requests
 
 # 2026-04-09 Stage 1 log migration (docs/LOG_MIGRATION_AUDIT_20260409.md):
-# `_log()` is now a shim that delegates to logger.info(). In production this
-# module runs inside metals_loop.py's process, where metals_loop has already
-# attached a stdout handler to its `metals_loop` logger — but THIS module
-# uses a separate `metals_swing_trader` logger, so we need our own handler
-# attached here or standalone imports/tests see nothing.
+# `_log()` is a thin shim that delegates to `logger.info()`. This module is
+# ALWAYS imported from `metals_loop.py` in production (never run directly),
+# and metals_loop's `_install_stage1_logging()` attaches the stdout handler
+# to its `metals_loop` logger at __main__ time.
 #
-# Codex adversarial review finding MEDIUM (2026-04-09): the previous version
-# left _log() silent when metals_swing_trader was imported standalone (no
-# handler on any ancestor). This re-creates a silent-failure gap for
-# operator-visible BUY/SELL/Stop-loss FAILED messages when the module is
-# imported outside the unified loop path. Fix: attach a scoped handler to
-# the `metals_swing_trader` logger specifically, set propagate=False so it
-# does not bubble to root.
-
-
-class _LazyStdoutHandler(logging.StreamHandler):
-    """Re-resolve sys.stdout on every emit — capsys-friendly.
-
-    See data/metals_loop.py for the rationale. Duplicated here because
-    metals_swing_trader is imported before metals_loop in some paths
-    (e.g. unit tests that target just the swing trader).
-    """
-
-    def __init__(self) -> None:
-        super().__init__(stream=sys.stdout)
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self.stream = sys.stdout
-        super().emit(record)
-
-
+# Library discipline (codex adversarial review finding HIGH, 2026-04-09):
+# this module must NOT install any handlers itself. If it did, pytest
+# `caplog`, structured file handlers in an embedding process, and any
+# parent telemetry would either be double-captured (handler + propagation)
+# or bypassed (propagation disabled). Instead we leave the logger bare —
+# `logger.propagate` stays True so records flow up to whatever parent
+# handler the caller has configured (metals_loop in production, pytest
+# caplog in tests, or a custom entrypoint in embeddings).
+#
+# Standalone runs: if there is no parent handler, Python's lastResort
+# handler prints WARNING+ to stderr; INFO/DEBUG records are dropped.
+# That's an acceptable trade-off for correct library behavior — any
+# caller that needs the INFO output can attach their own handler.
 logger = logging.getLogger("metals_swing_trader")
-
-# Scoped setup — attach handler to the `metals_swing_trader` logger only,
-# never to root. propagate=False prevents double-output when metals_loop
-# also has its own handler on its own logger. Idempotent via marker.
-if not any(getattr(h, "_metals_swing_stage1", False) for h in logger.handlers):
-    _handler = _LazyStdoutHandler()
-    _handler._metals_swing_stage1 = True
-    _handler.setFormatter(
-        logging.Formatter(
-            fmt="[%(asctime)s] [%(levelname)s] %(message)s",
-            datefmt="%H:%M:%S",
-        )
-    )
-    logger.addHandler(_handler)
-    logger.setLevel(logging.INFO)
-    logger.propagate = False
 from metals_swing_config import (
     ACCOUNT_ID,
     BUY_COOLDOWN_MINUTES,

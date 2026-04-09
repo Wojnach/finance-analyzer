@@ -78,18 +78,26 @@ class TestPositionLoadSave:
             # The save/load may reset, check it at least doesn't crash
             pass
 
-    def test_load_positions_bad_json_logs_and_falls_back(self, tmp_path, capsys):
+    def test_load_positions_bad_json_logs_and_falls_back(self, tmp_path, caplog):
+        # 2026-04-09 Stage 1 log migration: log() → logger.info, so the
+        # assertion uses caplog (not capsys). metals_loop.py is import-clean
+        # wrt handlers — caplog.at_level attaches its capture to the
+        # metals_loop logger specifically.
+        import logging
+
         import metals_loop as mod
 
         with open(mod.POSITIONS_STATE_FILE, "w", encoding="utf-8") as f:
             f.write("{bad json")
 
-        positions = mod._load_positions()
-        captured = capsys.readouterr()
+        with caplog.at_level(logging.INFO, logger="metals_loop"):
+            positions = mod._load_positions()
 
         assert isinstance(positions, dict)
         assert positions
-        assert "Position state load failed" in captured.out
+        assert any(
+            "Position state load failed" in rec.getMessage() for rec in caplog.records
+        )
 
     def test_save_preserves_sell_metadata(self, tmp_path):
         import metals_loop as mod
@@ -199,11 +207,19 @@ class TestSharedFunctions:
         assert mod.pnl_pct(90, 100) == pytest.approx(-10.0)
         assert mod.pnl_pct(100, 0) == 0
 
-    def test_log_prints(self, capsys):
+    def test_log_prints(self, caplog):
+        # 2026-04-09 Stage 1 log migration: log() → logger.info, so this
+        # test asserts the INFO record arrives on the metals_loop logger
+        # instead of checking raw stdout. See the top-of-file library
+        # discipline comment in data/metals_loop.py for the rationale.
+        import logging
+
         import metals_loop as mod
-        mod.log("test message")
-        captured = capsys.readouterr()
-        assert "test message" in captured.out
+
+        with caplog.at_level(logging.INFO, logger="metals_loop"):
+            mod.log("test message")
+
+        assert any("test message" in rec.getMessage() for rec in caplog.records)
 
     def test_is_avanza_open(self):
         import metals_loop as mod
