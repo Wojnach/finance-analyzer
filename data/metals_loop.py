@@ -93,7 +93,6 @@ try:
         sys.path.insert(0, str(DATA_DIR))
     from metals_llm import (
         get_llm_accuracy,
-        get_llm_age,
         get_llm_signals,
         get_llm_summary,
         start_llm_thread,
@@ -116,7 +115,6 @@ try:
         log_portfolio_value,
         record_metals_trade,
         save_spike_state,
-        simulate_all_positions,
     )
     RISK_AVAILABLE = True
 except ImportError as e:
@@ -191,7 +189,6 @@ try:
         get_crypto_news,
         get_fear_greed,
         get_onchain_summary,
-        is_us_market_hours,
     )
     CRYPTO_DATA_AVAILABLE = True
 except ImportError as e:
@@ -1867,9 +1864,6 @@ def _run_fish_engine_tick():
     xag_mc = (summary.get("monte_carlo") or {}).get("XAG-USD", {})
     xag_focus = (summary.get("focus_probabilities") or {}).get("XAG-USD", {})
 
-    # Read metals loop's own signals
-    metals_sig = last_signal_data.get("XAG-USD", {}) if last_signal_data else {}
-
     # Read fish_precomputed for gold change, orb, vol_scalar
     fish_pre = _load_json_state(DATA_DIR / "fish_precomputed.json", {}, "fish_pre")
 
@@ -1904,7 +1898,7 @@ def _run_fish_engine_tick():
         if not journal_path.exists():
             journal_path = DATA_DIR / 'layer2_journal.jsonl'
         if journal_path.exists():
-            with open(str(journal_path), 'r', encoding='utf-8') as _jf:
+            with open(str(journal_path), encoding='utf-8') as _jf:
                 lines = _jf.readlines()
             lines = [l.strip() for l in lines if l.strip()]
             # Scan last 10 entries for XAG-USD
@@ -2099,7 +2093,7 @@ def _fish_engine_execute_buy(decision, price):
         # Kelly-optimal sizing
         kelly_rec = None
         try:
-            from portfolio.kelly_metals import recommended_metals_size, format_kelly_line
+            from portfolio.kelly_metals import format_kelly_line, recommended_metals_size
             consecutive = _fish_engine.consecutive_losses if _fish_engine else 0
             kelly_rec = recommended_metals_size(
                 ticker="XAG-USD",
@@ -2170,7 +2164,6 @@ def _fish_engine_execute_sell(decision):
         return
 
     sl_snapshot = []
-    sell_acknowledged = False
     try:
         price_data = fetch_price_with_fallback(_loop_page, ob_id)
         if not price_data:
@@ -2199,7 +2192,6 @@ def _fish_engine_execute_sell(decision):
             return
 
         success, result = place_order(_loop_page, ACCOUNT_ID, ob_id, "SELL", bid, volume)
-        sell_acknowledged = True  # we got a response, success or fail
         entry_price = pos.get("entry_cert", 0)
         pnl = (bid - entry_price) * volume
         nm = "BULL" if pos.get("direction") == "LONG" else "BEAR"
@@ -2423,7 +2415,6 @@ def compute_probability_report():
         sig = last_signal_data.get(ticker, {})
         buy_count = sig.get("buy_count", 0)
         sell_count = sig.get("sell_count", 0)
-        voters = sig.get("voters", 0)
         if buy_count + sell_count > 0:
             entry["signal_up_pct"] = round(buy_count / (buy_count + sell_count) * 100, 1)
             entry["signal_action"] = sig.get("action", "HOLD")
@@ -3269,7 +3260,6 @@ def _sync_local_stop_state_after_rearm(ob_id, snapshot, new_ids):
             return  # no local tracking to update
 
         stop_state = _load_stop_orders()
-        existing = stop_state.get(matched_key, {})
         today_str = datetime.datetime.now().strftime("%Y-%m-%d")
         new_orders = []
         # Pair snapshot entries with new ids by position. rearm processes
@@ -3755,7 +3745,6 @@ def _handle_buy_fill(page, order, exec_price, price_data):
             f"avg entry {old_entry}->{avg_entry:.4f}")
     else:
         # New position
-        catalog_info = WARRANT_CATALOG.get(wkey, {})
         POSITIONS[pos_key] = {
             "name": order.get("warrant_name", wkey),
             "ob_id": order.get("ob_id"),
@@ -5886,7 +5875,6 @@ def main():
         _SEASONALITY_AVAILABLE = False
         try:
             from portfolio.seasonality_updater import update_seasonality_profiles
-            from portfolio.seasonality import get_profile
             _SEASONALITY_AVAILABLE = True
             _seasonality_profiles = update_seasonality_profiles()
             if _seasonality_profiles:
@@ -5936,8 +5924,8 @@ def main():
         _strategy_orchestrator = None
         _strategy_shared_data = None
         try:
-            from portfolio.strategies.orchestrator import StrategyOrchestrator, load_strategies
             from portfolio.strategies.base import SharedData as _StrategySharedData
+            from portfolio.strategies.orchestrator import StrategyOrchestrator, load_strategies
 
             _strategy_shared_data = _StrategySharedData(
                 underlying_prices=_underlying_prices,
