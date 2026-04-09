@@ -402,19 +402,26 @@ def test_safe_print_fallback_on_unicode_encode_error(monkeypatch):
     assert "?" in calls["msgs"][-1]
 
 
-def test_log_uses_safe_print(monkeypatch):
+def test_log_routes_to_logger_info(capsys):
+    """log() is a shim for logger.info after the 2026-04-09 Stage 1 log
+    migration. Verifies the shim writes the message to stdout with the
+    [INFO] level prefix from basicConfig.
+
+    Previously this test monkeypatched `_safe_print` and asserted log()
+    called it — that check no longer applies because log() now delegates
+    to Python logging. `_safe_print` still exists for the two direct
+    call sites in send_telegram and the silver fast-tick error path.
+    """
     import metals_loop as ml
 
-    seen = []
-
-    def capture(msg):
-        seen.append(msg)
-
-    monkeypatch.setattr(ml, "_safe_print", capture)
     ml.log("XAG ↑ 62%")
+    captured = capsys.readouterr()
 
-    assert seen
-    assert "XAG ↑ 62%" in seen[0]
+    # stdout should contain the message and the INFO-level prefix; the
+    # [HH:MM:SS] prefix varies so we just check for the level and the
+    # message text.
+    assert "XAG ↑ 62%" in captured.out
+    assert "[INFO]" in captured.out
 
 
 def test_singleton_lock_blocks_second_instance(tmp_path):

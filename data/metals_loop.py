@@ -62,12 +62,38 @@ except (AttributeError, OSError):
     # Older Python or non-tty stream — _safe_print fallback still catches.
     pass
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
-    force=True,  # override any prior basicConfig from imported modules
+# Custom handler that re-resolves sys.stdout on every emit. Without this,
+# the StreamHandler binds to sys.stdout at handler construction time, which
+# breaks pytest's capsys fixture (capsys swaps sys.stdout per-test but the
+# bound reference stays on the old object). Lazy resolution makes the
+# handler capsys-friendly AND preserves the production behavior of writing
+# to whatever stdout the wrapping metals-loop.bat has set up.
+class _LazyStdoutHandler(logging.StreamHandler):
+    def __init__(self) -> None:
+        super().__init__(stream=sys.stdout)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.stream = sys.stdout
+        super().emit(record)
+
+
+# Manual root logger config (basicConfig with stream=sys.stdout binds the
+# reference eagerly; we want the _LazyStdoutHandler instead).
+_root = logging.getLogger()
+# Clear any pre-existing handlers (e.g. from imported modules that called
+# basicConfig) so we win the format war on this process.
+for _h in list(_root.handlers):
+    _root.removeHandler(_h)
+_handler = _LazyStdoutHandler()
+_handler.setFormatter(
+    logging.Formatter(
+        fmt="[%(asctime)s] [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
 )
+_root.addHandler(_handler)
+_root.setLevel(logging.INFO)
+
 logger = logging.getLogger("metals_loop")
 
 try:
