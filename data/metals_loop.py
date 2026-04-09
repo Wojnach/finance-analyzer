@@ -43,18 +43,26 @@ from pathlib import Path
 # 2026-04-09 Stage 1 log migration (docs/LOG_MIGRATION_AUDIT_20260409.md):
 # The existing print-based `log()` / `_safe_print()` helpers were the only
 # log output path in this process before 2026-04-09 afternoon. Fleet v1 added
-# `logger` + 43 bare-except observability calls. This stage wires the root
-# logger so `log()` / `_log()` become thin shims that delegate to
+# `logger` + 43 bare-except observability calls. This stage wires a scoped
+# `metals_loop` logger so `log()` becomes a thin shim that delegates to
 # `logger.info()` — all future 290+ call sites get timestamps + level prefix
 # automatically, and the handful of logger.warning/error calls in the file
 # format consistently with the `log()` output.
 #
-# Unicode safety: `_safe_print` (defined below) was handling
-# UnicodeEncodeError on Windows non-UTF consoles. Reconfigure stdout/stderr
-# to utf-8 replace BEFORE configuring the root logger so the new
-# StreamHandler inherits a safe encoding. `_safe_print` stays in the file
-# for the two remaining direct call sites (lines inside send_telegram and
-# the silver fast-tick error path).
+# Scoping discipline (codex adversarial review finding HIGH, 2026-04-09):
+# DO NOT touch the root logger. Importing this module must not clobber any
+# pre-existing root handlers — doing so silently disables parent-process
+# telemetry (pytest caplog, file/structured logging in other processes,
+# etc.). Attach the handler to the `metals_loop` logger specifically, set
+# propagate=False so it does not bubble up to root, and leave root
+# untouched. Standalone pytest can still observe output because the
+# handler is on our named logger, not root.
+#
+# Unicode safety: `_safe_print` (defined below) handles UnicodeEncodeError
+# on Windows non-UTF consoles. Reconfigure stdout/stderr to utf-8 replace
+# BEFORE attaching the handler so the new StreamHandler inherits a safe
+# encoding. `_safe_print` stays in the file for the two remaining direct
+# call sites (send_telegram TG error + silver fast-tick error path).
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -62,12 +70,13 @@ except (AttributeError, OSError):
     # Older Python or non-tty stream — _safe_print fallback still catches.
     pass
 
+
 # Custom handler that re-resolves sys.stdout on every emit. Without this,
 # the StreamHandler binds to sys.stdout at handler construction time, which
 # breaks pytest's capsys fixture (capsys swaps sys.stdout per-test but the
 # bound reference stays on the old object). Lazy resolution makes the
-# handler capsys-friendly AND preserves the production behavior of writing
-# to whatever stdout the wrapping metals-loop.bat has set up.
+# handler capsys-friendly AND preserves production behavior of writing to
+# whatever stdout the wrapping metals-loop.bat has set up.
 class _LazyStdoutHandler(logging.StreamHandler):
     def __init__(self) -> None:
         super().__init__(stream=sys.stdout)
@@ -77,24 +86,24 @@ class _LazyStdoutHandler(logging.StreamHandler):
         super().emit(record)
 
 
-# Manual root logger config (basicConfig with stream=sys.stdout binds the
-# reference eagerly; we want the _LazyStdoutHandler instead).
-_root = logging.getLogger()
-# Clear any pre-existing handlers (e.g. from imported modules that called
-# basicConfig) so we win the format war on this process.
-for _h in list(_root.handlers):
-    _root.removeHandler(_h)
-_handler = _LazyStdoutHandler()
-_handler.setFormatter(
-    logging.Formatter(
-        fmt="[%(asctime)s] [%(levelname)s] %(message)s",
-        datefmt="%H:%M:%S",
-    )
-)
-_root.addHandler(_handler)
-_root.setLevel(logging.INFO)
-
 logger = logging.getLogger("metals_loop")
+
+# Scoped setup — attach handler to the `metals_loop` logger only, NEVER
+# to root. propagate=False prevents double-output if the caller also
+# configured the root logger. Idempotent: if re-imported (e.g. pytest
+# reimporting), checks for an existing Stage1 handler first.
+if not any(getattr(h, "_metals_loop_stage1", False) for h in logger.handlers):
+    _handler = _LazyStdoutHandler()
+    _handler._metals_loop_stage1 = True  # marker for idempotent re-import
+    _handler.setFormatter(
+        logging.Formatter(
+            fmt="[%(asctime)s] [%(levelname)s] %(message)s",
+            datefmt="%H:%M:%S",
+        )
+    )
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
 
 try:
     from zoneinfo import ZoneInfo
