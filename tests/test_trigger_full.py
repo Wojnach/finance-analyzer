@@ -137,12 +137,12 @@ class TestClassifyTierThree:
         ]
         assert classify_tier(reasons, state=state) == 3
 
-    def test_periodic_review_market_hours_at_exactly_2h(self):
-        """During market hours, exactly 2h since last full review should return tier 3."""
+    def test_periodic_review_market_hours_at_exactly_4h(self):
+        """During market hours, exactly 4h since last full review should return tier 3."""
         m, _ = _mock_market_hours()
         try:
             state = {
-                "last_full_review_time": time.time() - 7200,  # exactly 2h ago
+                "last_full_review_time": time.time() - 4 * 3600,  # exactly 4h ago
                 "today_date": trigger_mod._today_str(),
                 "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
             }
@@ -165,8 +165,8 @@ class TestClassifyTierThree:
         finally:
             m.stop()
 
-    def test_periodic_review_offhours_at_exactly_4h(self):
-        """During off-hours, exactly 4h since last full review should return tier 3."""
+    def test_periodic_review_offhours_returns_tier1(self):
+        """During off-hours, ≥4h since last full review returns tier 1 (saves T3 budget for market hours)."""
         m, _ = _mock_offhours()
         try:
             state = {
@@ -175,7 +175,7 @@ class TestClassifyTierThree:
                 "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
             }
             reasons = ["BTC-USD sentiment positive->negative (sustained)"]
-            assert classify_tier(reasons, state=state) == 3
+            assert classify_tier(reasons, state=state) == 1  # off-hours caps at T1
         finally:
             m.stop()
 

@@ -39,11 +39,11 @@ _FORECAST_TTL = 300  # 5 minutes
 # Confidence cap (same as news_event, econ_calendar)
 _MAX_CONFIDENCE = 0.7
 
-# Default Chronos timeout (seconds) — prevents hangs
-_CHRONOS_TIMEOUT = 120
+# Default Chronos timeout (seconds) — reduced from 120 to avoid long hangs
+_CHRONOS_TIMEOUT = 60
 
-# Default Kronos subprocess timeout (seconds) — lower since it usually fails fast
-_KRONOS_TIMEOUT = 90
+# Default Kronos subprocess timeout (seconds) — reduced from 90; fails fast
+_KRONOS_TIMEOUT = 30
 
 # Forecast models master switch. Set to True to disable all model calls (early-return HOLD).
 # Circuit breakers remain as secondary protection — auto-trip on failure, 5min TTL.

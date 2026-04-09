@@ -429,8 +429,10 @@ class TestBuildTelegram:
 
     def test_buy_mode_hides_hold_sell_summary(self):
         msg = self._call(hold_count=10, sell_count=2)
-        assert "hold" not in msg.lower()
-        assert " sell" not in msg.lower()
+        # Vote counts like "5 buy / 1 sell" are fine — the summary "N with sell signals"
+        # and "N holds" should be hidden in BUY mode
+        assert "with hold" not in msg.lower()
+        assert "with sell" not in msg.lower()
 
     def test_sell_mode_hides_hold_sell_summary(self):
         actionable = {"BTC-USD": _make_signal("SELL", buy_count=1, sell_count=5, close=67000)}

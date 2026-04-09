@@ -47,24 +47,28 @@ class TestBug24NewsEventNoneTicker:
 
 
 class TestBug25LoadJsonOSError:
-    """BUG-25: load_json must propagate OSError (not swallow it)."""
+    """BUG-25 / BUG-139: load_json returns default on OSError (Windows compat).
+    require_json is the function that propagates OSError for critical files."""
 
-    def test_load_json_permission_error_propagates(self, tmp_path):
+    def test_load_json_permission_error_returns_default(self, tmp_path):
+        """BUG-139: PermissionError (file locked by antivirus) → returns default."""
         from portfolio.file_utils import load_json
         path = tmp_path / "test.json"
         path.write_text('{"key": "value"}', encoding="utf-8")
 
         with patch.object(Path, "read_text", side_effect=PermissionError("Access denied")):
-            with pytest.raises(PermissionError):
-                load_json(path, default={})
+            result = load_json(path, default={"fallback": True})
+        assert result == {"fallback": True}
 
-    def test_load_json_oserror_propagates(self, tmp_path):
+    def test_load_json_oserror_returns_default(self, tmp_path):
+        """BUG-139: OSError → returns default (graceful degradation on Windows)."""
         from portfolio.file_utils import load_json
         path = tmp_path / "test.json"
         path.write_text('{"key": "value"}', encoding="utf-8")
 
-        with patch.object(Path, "read_text", side_effect=OSError("Disk full")), pytest.raises(OSError):
-            load_json(path, default={})
+        with patch.object(Path, "read_text", side_effect=OSError("Disk full")):
+            result = load_json(path, default={"fallback": True})
+        assert result == {"fallback": True}
 
     def test_load_json_still_handles_missing_file(self, tmp_path):
         from portfolio.file_utils import load_json

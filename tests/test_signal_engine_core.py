@@ -258,7 +258,14 @@ class TestWeightedConsensusRegime:
             "volume": {"accuracy": 0.6, "total": 50},
             "ema": {"accuracy": 0.6, "total": 50},
         }
-        action, conf = _weighted_consensus(votes, accuracy, "high-vol")
+        # Patch _get_correlation_groups to use static groups (avoid live disk cache
+        # returning dynamic groups like {bb, volume} that cause correlation penalties)
+        from portfolio.signal_engine import _STATIC_CORRELATION_GROUPS
+        with mock.patch(
+            "portfolio.signal_engine._get_correlation_groups",
+            return_value=_STATIC_CORRELATION_GROUPS,
+        ):
+            action, conf = _weighted_consensus(votes, accuracy, "high-vol")
         # bb: 0.6*1.5=0.9, volume: 0.6*1.3=0.78, ema: 0.6*0.5=0.3
         # BUY=0.9+0.78=1.68, SELL=0.3
         assert action == "BUY"

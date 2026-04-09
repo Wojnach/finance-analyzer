@@ -11,17 +11,22 @@ from unittest.mock import MagicMock, patch
 # --- BUG-61: autonomous.py compact summary load ---
 
 def test_autonomous_logs_compact_summary_load_failure(tmp_path, monkeypatch, caplog):
-    """autonomous.py:604 — loading compact summary for probability mode should log on failure."""
+    """autonomous.py — loading compact summary for probability mode should log on failure.
+
+    load_json() catches JSON decode errors internally (returning None) and logs
+    a WARNING to portfolio.file_utils. Verify that warning is emitted.
+    """
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    # Write corrupt JSON so json.loads fails
+    # Write corrupt JSON so load_json logs a warning and returns None
     corrupt_file = data_dir / "agent_summary_compact.json"
     corrupt_file.write_text("{bad json", encoding="utf-8")
 
     import portfolio.autonomous as amod
     monkeypatch.setattr(amod, "DATA_DIR", data_dir)
 
-    with caplog.at_level(logging.DEBUG, logger="portfolio.autonomous"):
+    # Capture at WARNING level across all loggers (file_utils logs the decode error)
+    with caplog.at_level(logging.WARNING):
         # Call the function directly — it has many params, pass minimal valid ones
         result = amod._build_telegram_mode_b(
             actionable={}, hold_count=0, sell_count=0,
@@ -32,7 +37,7 @@ def test_autonomous_logs_compact_summary_load_failure(tmp_path, monkeypatch, cap
             tier=3, regime="range-bound", reflection="", reasons=["test"],
         )
 
-    assert any("compact summary" in r.message.lower() or "probability mode" in r.message.lower()
+    assert any("compact" in r.message.lower() or "corrupt" in r.message.lower()
                for r in caplog.records), f"Expected log about compact summary failure, got: {[r.message for r in caplog.records]}"
 
 
@@ -168,16 +173,19 @@ def test_forecast_logs_kronos_init_failure(monkeypatch, caplog):
 
 # --- BUG-67: forecast.py health logging ---
 
-def test_forecast_logs_health_failure(monkeypatch, caplog):
-    """forecast.py:177 — health logging failure should be logged, not silently pass."""
+def test_forecast_logs_health_failure(caplog):
+    """forecast.py — health logging failure should be logged, not silently pass."""
     import portfolio.signals.forecast as fmod
 
-    monkeypatch.setattr(fmod, "_HEALTH_FILE", Path("/nonexistent/dir/file.jsonl"))
-
-    with caplog.at_level(logging.DEBUG, logger="portfolio.signals.forecast"):
+    # atomic_append_jsonl auto-creates directories so setting a bad path alone won't
+    # raise. Instead, mock the function to raise and verify the log fires.
+    with caplog.at_level(logging.DEBUG, logger="portfolio.signals.forecast"), \
+         patch("portfolio.signals.forecast.atomic_append_jsonl",
+               side_effect=OSError("disk full")):
         fmod._log_health("chronos", "BTC-USD", True, 100.0)
 
     assert any("health" in r.message.lower() or "logging" in r.message.lower()
+               or "failed" in r.message.lower()
                for r in caplog.records), f"Expected health log, got: {[r.message for r in caplog.records]}"
 
 

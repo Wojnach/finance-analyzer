@@ -184,7 +184,7 @@ class TestMetalsSignalConfig:
     """Tests for metals-specific signal configuration."""
 
     def test_metals_total_applicable(self):
-        """Metals should have 25 applicable signals (7 original + 18 enhanced)."""
+        """Metals should have 28 applicable signals (incl. orderbook_flow + metals_cross_asset + forecast + qwen3)."""
         from portfolio.main import generate_signal
         # Create minimal indicators
         ind = {
@@ -204,10 +204,11 @@ class TestMetalsSignalConfig:
             "atr_pct": 0.57,
         }
         action, conf, extra = generate_signal(ind, ticker="XAU-USD")
-        assert extra["_total_applicable"] == 25  # 7 original + 18 enhanced
+        assert extra["_total_applicable"] == 28
 
     def test_stocks_total_applicable(self):
-        """Stocks should have 25 applicable signals (7 original + 18 enhanced)."""
+        """Stocks should have 26 applicable signals when GPU signals are included."""
+        from unittest.mock import patch
         from portfolio.main import generate_signal
         ind = {
             "close": 130.0,
@@ -225,11 +226,12 @@ class TestMetalsSignalConfig:
             "atr": 3.0,
             "atr_pct": 2.3,
         }
-        action, conf, extra = generate_signal(ind, ticker="MSTR")
-        assert extra["_total_applicable"] == 25  # 7 original + 18 enhanced
+        with patch("portfolio.market_timing.should_skip_gpu", return_value=False):
+            action, conf, extra = generate_signal(ind, ticker="MSTR")
+        assert extra["_total_applicable"] == 26
 
     def test_crypto_total_applicable(self):
-        """Crypto should have 26 applicable signals (8 core + 18 enhanced)."""
+        """Crypto should have 29 applicable signals (incl. futures_flow, qwen3, forecast; ml/funding/cot disabled)."""
         from portfolio.main import generate_signal
         ind = {
             "close": 67000.0,
@@ -248,4 +250,4 @@ class TestMetalsSignalConfig:
             "atr_pct": 2.24,
         }
         action, conf, extra = generate_signal(ind, ticker="BTC-USD")
-        assert extra["_total_applicable"] == 27  # 8 core + 19 enhanced (incl. futures_flow; custom_lora, ml, funding disabled)
+        assert extra["_total_applicable"] == 29

@@ -520,7 +520,7 @@ def run(force_report=False, active_symbols=None):
             logger.error("%s: %s", name, e, exc_info=True)
             return name, None
 
-    max_workers = min(len(active_items), 8)
+    max_workers = max(1, min(len(active_items), 8))
 
     # BUG-178: Add timeout to prevent indefinite hangs from stuck tickers
     _TICKER_POOL_TIMEOUT = 120  # 2x normal cycle time

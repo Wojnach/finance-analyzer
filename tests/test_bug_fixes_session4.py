@@ -119,9 +119,10 @@ class TestBug32HttpRetryNone:
 
 class TestBug33MessageStoreSendCategories:
 
-    def test_invocation_not_in_send_categories(self):
+    def test_invocation_in_send_categories(self):
+        """invocation is a valid Telegram category for Layer 2 transaction notifications."""
         from portfolio.message_store import SEND_CATEGORIES
-        assert "invocation" not in SEND_CATEGORIES
+        assert "invocation" in SEND_CATEGORIES
 
     def test_analysis_in_send_categories(self):
         from portfolio.message_store import SEND_CATEGORIES

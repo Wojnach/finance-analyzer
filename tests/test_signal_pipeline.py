@@ -112,9 +112,10 @@ class TestVoteCountIntegrity:
         assert buy_count == sum(1 for v in votes.values() if v == "BUY")
         assert sell_count == sum(1 for v in votes.values() if v == "SELL")
 
+    @mock.patch("portfolio.market_timing.should_skip_gpu", return_value=False)
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
-    def test_stock_vote_counts(self, _mock):
-        """For stocks, total applicable = 24 (7 core + 17 enhanced)."""
+    def test_stock_vote_counts(self, _mock, _gpu_mock):
+        """For stocks, total applicable = 26 (incl. qwen3 + forecast GPU signals)."""
         ind = make_indicators(close=130.0)
         df = make_ohlcv_df(n=250, close_base=130.0)
         _, _, extra = generate_signal(ind, ticker="NVDA", df=df)
@@ -130,9 +131,10 @@ class TestVoteCountIntegrity:
 
         assert extra["_total_applicable"] == 28
 
+    @mock.patch("portfolio.market_timing.should_skip_gpu", return_value=False)
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
-    def test_all_stock_symbols_have_26_applicable(self, _mock):
-        """Every stock symbol should have exactly 26 total applicable signals."""
+    def test_all_stock_symbols_have_26_applicable(self, _mock, _gpu_mock):
+        """Every stock symbol should have exactly 26 total applicable signals (GPU included)."""
         ind = make_indicators(close=100.0)
         df = make_ohlcv_df(n=250, close_base=100.0)
 
@@ -418,7 +420,8 @@ class TestWriteAgentSummary:
             captured["data"] = data
 
         with mock.patch("portfolio.reporting._cached", side_effect=_null_cached), \
-             mock.patch("portfolio.reporting._atomic_write_json", side_effect=capture_write):
+             mock.patch("portfolio.reporting._atomic_write_json", side_effect=capture_write), \
+             mock.patch("portfolio.api_utils.load_config", return_value={}):
             write_agent_summary(signals, {"BTC-USD": 69000.0}, 10.50, state,
                               {"BTC-USD": []})
 

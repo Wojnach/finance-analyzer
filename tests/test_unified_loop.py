@@ -156,11 +156,8 @@ class TestReadSignalData:
                 "BTC-USD": {"Now": "SELL", "12h": "HOLD"},
             },
         }
-        mock_open = MagicMock()
-        mock_open.return_value.__enter__ = lambda s: s
-        mock_open.return_value.__exit__ = MagicMock(return_value=False)
-        with patch("builtins.open", mock_open), \
-             patch("metals_loop.json.load", return_value=data):
+        # read_signal_data now uses load_json (not json.load), mock at that level
+        with patch("metals_loop.load_json", return_value=data):
             result = read_signal_data()
             assert "BTC-USD" in result
             assert result["BTC-USD"]["action"] == "SELL"
@@ -199,11 +196,7 @@ class TestReadSignalData:
                 },
             },
         }
-        mock_open = MagicMock()
-        mock_open.return_value.__enter__ = lambda s: s
-        mock_open.return_value.__exit__ = MagicMock(return_value=False)
-        with patch("builtins.open", mock_open), \
-             patch("metals_loop.json.load", return_value=data):
+        with patch("metals_loop.load_json", return_value=data):
             result = read_signal_data()
             assert result["forecast_signals"]["XAG-USD"]["chronos_24h_pct"] == 6.5
             assert result["cumulative_gains"]["XAG-USD"]["1d"] == 1.2

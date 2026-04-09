@@ -5,6 +5,7 @@ Integration tests (marked @pytest.mark.integration) run locally with live models
 """
 
 import json
+from unittest import mock
 
 import pytest
 from conftest import make_candles, make_indicators
@@ -156,35 +157,44 @@ class TestGenerateSignal:
         assert action == "HOLD"
         assert extra["_voters"] < MIN_VOTERS_CRYPTO
 
-    def test_buy_on_rsi_oversold_ema_up(self):
+    @mock.patch("portfolio.signal_engine._cached",
+                side_effect=lambda k, t, f, *a: {} if ("accuracy" in k or "activation_rates" in k) else None)
+    def test_buy_on_rsi_oversold_ema_up(self, _mock):
+        # RSI=25(BUY) + MACD crossover(BUY) + BB below_lower(BUY) → 3 voters → BUY
         ind = make_indicators(
             rsi=25,
             macd_hist=1.0,
             macd_hist_prev=-1.0,
-            ema9=70000,
-            ema21=69000,
+            ema9=69000,
+            ema21=69000,  # no EMA gap; EMA gated in ranging anyway
             price_vs_bb="below_lower",
         )
-        action, conf, extra = generate_signal(ind)
+        action, conf, extra = generate_signal(ind, config={"confidence_penalties": {"enabled": False}})
         assert action == "BUY"
         assert conf > 0.5
 
-    def test_sell_on_rsi_overbought_ema_down(self):
+    @mock.patch("portfolio.signal_engine._cached",
+                side_effect=lambda k, t, f, *a: {} if ("accuracy" in k or "activation_rates" in k) else None)
+    def test_sell_on_rsi_overbought_ema_down(self, _mock):
+        # RSI=75(SELL) + MACD crossover(SELL) + BB above_upper(SELL) → 3 voters → SELL
         ind = make_indicators(
             rsi=75,
             macd_hist=-1.0,
             macd_hist_prev=1.0,
-            ema9=68000,
-            ema21=69000,
+            ema9=69000,
+            ema21=69000,  # no EMA gap; EMA gated in ranging anyway
             price_vs_bb="above_upper",
         )
-        action, conf, extra = generate_signal(ind)
+        action, conf, extra = generate_signal(ind, config={"confidence_penalties": {"enabled": False}})
         assert action == "SELL"
         assert conf > 0.5
 
-    def test_ema_always_votes(self):
+    @mock.patch("portfolio.signal_engine._cached",
+                side_effect=lambda k, t, f, *a: {} if ("accuracy" in k or "activation_rates" in k) else None)
+    def test_rsi_votes_alone(self, _mock):
+        """RSI=25 (oversold) provides at least 1 active vote."""
         ind = make_indicators(
-            rsi=50, macd_hist=0.5, macd_hist_prev=0.3, price_vs_bb="inside"
+            rsi=25, macd_hist=1.0, macd_hist_prev=2.0, price_vs_bb="inside"
         )
         _, _, extra = generate_signal(ind)
         assert extra["_voters"] >= 1
@@ -238,26 +248,18 @@ class TestSentimentAggregation:
 class TestCryptoCompareAPI:
     def test_empty_dict_response_handled(self):
         """CryptoCompare sometimes returns Data:{} instead of Data:[]"""
-        import unittest.mock as mock
-
-        mock_resp = mock.MagicMock()
-        mock_resp.json.return_value = {"Data": {}, "Type": 100}
-
-        with mock.patch("portfolio.sentiment.fetch_with_retry", return_value=mock_resp):
+        # sentiment now uses fetch_json; also block Yahoo fallback to isolate the test
+        with mock.patch("portfolio.sentiment.fetch_json", return_value={"Data": {}, "Type": 100}), \
+             mock.patch("portfolio.sentiment._fetch_crypto_headlines_yahoo_fallback", return_value=[]):
             result = _fetch_crypto_headlines("BTC")
         assert result == []
 
     def test_normal_list_response(self):
-        import unittest.mock as mock
-
         fake_articles = [
             {"title": "BTC pumps", "source": "Test", "published_on": 1700000000},
             {"title": "ETH dips", "source": "Test", "published_on": 1700001000},
         ]
-        mock_resp = mock.MagicMock()
-        mock_resp.json.return_value = {"Data": fake_articles, "Type": 100}
-
-        with mock.patch("portfolio.sentiment.fetch_with_retry", return_value=mock_resp):
+        with mock.patch("portfolio.sentiment.fetch_json", return_value={"Data": fake_articles, "Type": 100}):
             result = _fetch_crypto_headlines("BTC", limit=5)
         assert len(result) == 2
         assert result[0]["title"] == "BTC pumps"
@@ -466,17 +468,24 @@ class TestMinistralSignalWrapper:
 
 class TestTriggerSystem:
     def setup_method(self):
+        import portfolio.trigger as trigger_mod
         from portfolio.trigger import STATE_FILE
 
         self.state_file = STATE_FILE
+        self._trigger_mod = trigger_mod
         if self.state_file.exists():
             self._backup = self.state_file.read_text()
         else:
             self._backup = None
         if self.state_file.exists():
             self.state_file.unlink()
+        # Reset grace period so each test starts with a clean slate.
+        # Tests that call check_triggers once to "seed" state rely on the grace
+        # period seeding state["last"] without triggering Layer 2.
+        trigger_mod._startup_grace_active = True
 
     def teardown_method(self):
+        self._trigger_mod._startup_grace_active = True  # reset for next test
         if self._backup:
             self.state_file.write_text(self._backup)
         elif self.state_file.exists():
@@ -489,13 +498,21 @@ class TestTriggerSystem:
         }
 
     def test_first_run_triggers_cooldown(self):
+        """Startup grace seeds baseline on first call; BUY consensus triggers on second."""
         from portfolio.trigger import check_triggers
 
+        # First call: startup grace period seeds state without triggering
         triggered, reasons = check_triggers(
             self._make_signals(), {"BTC-USD": 69000, "ETH-USD": 2000}, {}, {}
         )
+        assert not triggered  # grace period returns False to avoid spurious T3
+
+        # Second call with BUY signal: new consensus from HOLD triggers
+        triggered, reasons = check_triggers(
+            self._make_signals("BUY"), {"BTC-USD": 69000, "ETH-USD": 2000}, {}, {}
+        )
         assert triggered
-        assert any("cooldown" in r or "check-in" in r for r in reasons)
+        assert any("consensus" in r.lower() or "BUY" in r for r in reasons)
 
     def test_no_change_no_trigger(self):
         from portfolio.trigger import check_triggers
@@ -558,8 +575,10 @@ class TestTriggerSystem:
 
         sigs = self._make_signals()
         prices = {"BTC-USD": 69000, "ETH-USD": 2000}
-        # Sustain "positive" for SUSTAINED_CHECKS cycles to establish stable baseline
-        for _ in range(SUSTAINED_CHECKS):
+        # Sustain "positive" for SUSTAINED_CHECKS+1 cycles: grace period consumes
+        # the first call without updating sustained_sentiment, so we need one extra
+        # cycle to reach SUSTAINED_CHECKS genuine "positive" iterations.
+        for _ in range(SUSTAINED_CHECKS + 1):
             check_triggers(sigs, prices, {}, {"BTC-USD": "positive"})
         # Sustain "negative" for SUSTAINED_CHECKS cycles to trigger reversal
         for _ in range(SUSTAINED_CHECKS):

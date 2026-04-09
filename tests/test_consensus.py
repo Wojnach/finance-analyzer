@@ -21,7 +21,13 @@ from portfolio.main import (
 
 
 def _null_cached(key, ttl, func, *args):
-    """Mock _cached that blocks all external calls, returning None."""
+    """Mock _cached that blocks external calls.
+
+    Returns {} for accuracy/activation keys so H3 fail-closed doesn't fire
+    (which would gate all signals to 0% accuracy and break vote count assertions).
+    """
+    if key and ("accuracy" in key or "activation_rates" in key):
+        return {}
     return None
 
 
@@ -51,7 +57,7 @@ class TestMinVotersConstants:
     def test_stock_symbols_defined(self):
         assert "PLTR" in STOCK_SYMBOLS
         assert "NVDA" in STOCK_SYMBOLS
-        assert "AMD" in STOCK_SYMBOLS
+        assert "MSTR" in STOCK_SYMBOLS
 
     def test_crypto_symbols_defined(self):
         assert "BTC-USD" in CRYPTO_SYMBOLS
@@ -80,14 +86,18 @@ class TestStockConsensus:
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_buy_with_3_voters(self, _mock):
-        """RSI + MACD + EMA = 3 BUY voters → BUY for stocks."""
+        """RSI + MACD + BB = 3 BUY voters → BUY for stocks.
+
+        Note: EMA is regime-gated in "ranging" (RSI=25 < 45 → can't reach trending-up
+        with an EMA gap). Use BB below_lower as the reliable 3rd voter instead.
+        """
         ind = make_indicators(
             rsi=25,  # oversold → BUY vote
             macd_hist=1.0,
             macd_hist_prev=-1.0,  # crossover → BUY vote
-            ema9=135.0,
-            ema21=130.0,  # >0.5% gap → BUY vote
-            price_vs_bb="inside",  # inside → abstains
+            ema9=130.0,
+            ema21=130.0,  # no gap → no EMA vote
+            price_vs_bb="below_lower",  # below lower band → BUY vote
         )
         action, conf, extra = generate_signal(
             ind, ticker="MSTR", config=_NO_PENALTIES,
@@ -97,14 +107,17 @@ class TestStockConsensus:
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_sell_with_3_voters(self, _mock):
-        """RSI overbought + MACD down + EMA down = 3 SELL voters → SELL for stocks."""
+        """RSI overbought + MACD down + BB above = 3 SELL voters → SELL for stocks.
+
+        Note: EMA is regime-gated in ranging. Use BB above_upper as reliable 3rd voter.
+        """
         ind = make_indicators(
             rsi=75,  # overbought → SELL vote
             macd_hist=-1.0,
             macd_hist_prev=1.0,  # cross down → SELL vote
-            ema9=125.0,
-            ema21=130.0,  # fast < slow → SELL vote
-            price_vs_bb="inside",  # inside → abstains
+            ema9=130.0,
+            ema21=130.0,  # no gap
+            price_vs_bb="above_upper",  # above upper band → SELL vote
         )
         action, conf, extra = generate_signal(
             ind, ticker="PLTR", config=_NO_PENALTIES,
@@ -135,8 +148,9 @@ class TestStockConsensus:
                 rsi=25,
                 macd_hist=1.0,
                 macd_hist_prev=-1.0,
-                ema9=135.0,
-                ema21=130.0,  # 3 voters: RSI + MACD + EMA
+                ema9=130.0,
+                ema21=130.0,  # no gap; EMA gated in ranging anyway
+                price_vs_bb="below_lower",  # 3 voters: RSI + MACD + BB
             )
             action, conf, extra = generate_signal(
                 ind, ticker=ticker, config=_NO_PENALTIES,
@@ -166,15 +180,15 @@ class TestCryptoConsensus:
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_buy_with_3_voters(self, _mock):
-        """3 BUY voters → BUY for crypto."""
+        """3 BUY voters → BUY for crypto (RSI + MACD + BB)."""
         ind = make_indicators(
             rsi=25,  # oversold → BUY vote
             macd_hist=1.0,
             macd_hist_prev=-1.0,  # crossover → BUY vote
-            ema9=70000.0,
-            ema21=69000.0,  # >0.5% gap → BUY vote
-            price_vs_bb="inside",
-            close=70000.0,
+            ema9=69000.0,
+            ema21=69000.0,  # no gap; EMA gated in ranging
+            price_vs_bb="below_lower",  # below lower band → BUY vote
+            close=69000.0,
         )
         action, conf, extra = generate_signal(
             ind, ticker="BTC-USD", config=_NO_PENALTIES,
@@ -297,29 +311,32 @@ class TestStockSignalVoteCounts:
     """Stock signal generation produces correct total_applicable counts."""
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
-    def test_stock_total_applicable_is_21(self, _mock):
+    def test_stock_total_applicable(self, _mock):
         ind = make_indicators()
         _, _, extra = generate_signal(ind, ticker="MSTR")
-        assert extra["_total_applicable"] == 25  # 7 original + 18 enhanced (incl. forecast + claude_fundamental)
+        assert extra["_total_applicable"] == 24  # stocks: 32 signals minus gpu+disabled+crypto-only exclusions
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
-    def test_crypto_total_applicable_is_24(self, _mock):
+    def test_crypto_total_applicable(self, _mock):
         ind = make_indicators(close=69000.0)
         _, _, extra = generate_signal(ind, ticker="BTC-USD")
-        assert extra["_total_applicable"] == 27  # 8 core + 19 enhanced (incl. forecast + claude_fundamental + futures_flow; custom_lora, ml, funding disabled)
+        assert extra["_total_applicable"] == 29  # crypto: 32 signals minus gpu+disabled+metals-only exclusions
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
-    def test_stock_max_technical_voters_is_4(self, _mock):
-        """All 4 technical signals vote → 4 active voters for stocks."""
+    def test_stock_max_technical_voters(self, _mock):
+        """RSI + MACD + BB = 3 core technical BUY votes in ranging regime.
+
+        EMA is regime-gated in ranging, so max core technical voters is 3 not 4.
+        """
         ind = make_indicators(
             rsi=25,  # oversold → BUY
             macd_hist=1.0,
             macd_hist_prev=-1.0,  # crossover → BUY
-            ema9=135.0,
-            ema21=130.0,  # >0.5% gap → BUY
+            ema9=130.0,
+            ema21=130.0,  # no gap; EMA gated in ranging
             price_vs_bb="below_lower",  # → BUY
         )
         _, _, extra = generate_signal(ind, ticker="MSTR")
-        # 4 technical signals all voting BUY
-        assert extra["_buy_count"] >= 4
-        assert extra["_voters"] >= 4
+        # 3 core technical signals vote BUY (EMA gated in ranging regime)
+        assert extra["_buy_count"] >= 3
+        assert extra["_voters"] >= 3

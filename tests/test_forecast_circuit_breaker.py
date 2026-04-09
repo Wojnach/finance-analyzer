@@ -77,9 +77,11 @@ class TestKronosCircuitBreaker:
         assert result is None
         assert _kronos_circuit_open()
 
+    @patch("portfolio.gpu_gate.get_vram_usage", return_value=None)
     @patch("portfolio.signals.forecast.subprocess.run")
-    def test_skips_when_tripped(self, mock_run):
-        """After tripping, subsequent calls should NOT invoke subprocess."""
+    def test_skips_when_tripped(self, mock_run, _mock_vram):
+        """After tripping, subsequent calls should NOT invoke subprocess.
+        get_vram_usage is mocked to prevent it from also calling subprocess.run."""
         mock_run.side_effect = TimeoutError("timed out")
         _run_kronos([{"close": 100}] * 50)  # trips breaker
         assert mock_run.call_count == 1
