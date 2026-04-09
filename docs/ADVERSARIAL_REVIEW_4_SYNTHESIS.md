@@ -83,7 +83,7 @@ test lines). The fingpt daemon (+246 lines) is architecturally sound but has pro
 
 ## NEW Findings (Round 4)
 
-### CRITICAL (5)
+### CRITICAL (7)
 
 | ID | Subsystem | Finding | Conf |
 |----|-----------|---------|------|
@@ -92,6 +92,8 @@ test lines). The fingpt daemon (+246 lines) is architecturally sound but has pro
 | PR-R4-1 | portfolio-risk | **C6 reconfirmed: `check_drawdown()` never called in live path.** Combined with PR-R4-4, BOTH risk gates (drawdown + overtrading) are paper-only. The portfolio has ZERO automated risk protection at runtime. | 100% |
 | IC-R4-1 | metals-core | **`metals_execution_engine.py` MIN_TRADE_SEK=500 bypass.** Config was fixed to 1000, but `metals_execution_engine.py:33` has its own fallback `MIN_TRADE_SEK = 500.0`. Sub-1000 SEK orders waste courtage. | 92% |
 | IC-R4-2 | orchestration | **`trigger.py` SUSTAINED_DURATION_S=120 negates sustained checks at 600s cadence.** At 600s cadence, one cycle already exceeds 120s, so the duration gate fires on single-check flips. SUSTAINED_CHECKS=3 is effectively bypassed. Layer 2 fires on noise. | 95% |
+| DE-R4-1 | data-external | **`sentiment.py:138` yfinance called without `yfinance_lock`.** Same H11 bug in new code. ThreadPoolExecutor workers race on non-thread-safe yfinance, causing data corruption. | 95% |
+| DE-R4-2 | data-external | **fingpt daemon retry holds `_fingpt_daemon_lock` for up to 360s.** All concurrent sentiment calls blocked. 12 tickers × potential 360s = loop stall measured in hours. Violates "loop must run 100% of the time" rule. | 90% |
 
 ### HIGH (5)
 
@@ -289,8 +291,22 @@ These are significant reliability improvements backed by 265 lines of tests.
 ### Signals-Modules Agent
 *(agent still running — integrate in follow-up commit)*
 
-### Data-External Agent
-*(agent still running — integrate in follow-up commit)*
+### Data-External Agent — COMPLETE
+
+**Key findings (8 total: 2 CRITICAL, 4 HIGH, 2 MEDIUM):**
+
+| ID | Sev | Finding |
+|----|-----|---------|
+| DE-R4-1 | **CRIT** | **NEW**: `sentiment.py:138` `_fetch_yahoo_headlines()` calls yfinance WITHOUT `yfinance_lock` — same H11 bug in the new sentiment rewrite. Concurrent corruption from ThreadPoolExecutor. |
+| DE-R4-2 | **CRIT** | **NEW**: fingpt daemon retry holds `_fingpt_daemon_lock` for up to **360s** (180s timeout × 2 attempts). Stalls ALL concurrent sentiment calls, causing 6× cycle overrun. |
+| DE-R4-3 | HIGH | **NEW**: Multiple cumulative cluster calls each hold lock 180s. 4 clusters = 720s of sequential blocking. |
+| DE-R4-4 | HIGH | **NEW**: `earnings_calendar.py:102` calls yfinance without `yfinance_lock` — another H11 variant. |
+| DE-R4-5 | HIGH | fingpt_daemon.py `if True:` dead structure — maintenance/regression risk. |
+| DE-R4-6 | HIGH | **NEW**: earnings fetches bypass Alpha Vantage budget counter — 8 untracked calls can exhaust 25/day limit. |
+| DE-R4-7 | MED | No backoff on persistent daemon spawn failure — 180s stall per call until manual fix. |
+| DE-R4-8 | MED | `crypto_macro_data.py` raw `open()` in 2 JSONL readers — Rule 4 violation. |
+
+**Verified Round 3**: C9 (FIXED), H9 (FIXED), H10 (FIXED), H11 (FIXED in 3 files, but NEW violations in sentiment.py + earnings_calendar.py), H12 (FIXED)
 
 ### Infrastructure Agent
 *(agent still running — integrate in follow-up commit)*
@@ -366,7 +382,18 @@ checklist of all cadence-dependent constants:
   sufficient for GC-reuse protection. I agree — the collision probability is astronomically
   low in practice.
 
-*(Remaining 4 agents still running — cross-critique will be extended in follow-up commit)*
+**Data-external agent**:
+- **DE-R4-1 (yfinance lock missing in sentiment.py)**: VALIDATED. I noted the `if True:`
+  style issue but MISSED that the H11 fix was not applied to the new sentiment rewrite.
+  The agent found TWO new yfinance lock violations (sentiment.py + earnings_calendar.py).
+- **DE-R4-2 (360s lock hold)**: VALIDATED and CRITICAL. My IC-R4-6 noted the protocol
+  fragility but missed the catastrophic lock-hold duration. The daemon retry while holding
+  `_fingpt_daemon_lock` for 360s is a reliability time bomb. Combined with 12 tickers,
+  this can stall the loop for 72 minutes on a persistent daemon failure.
+- **DE-R4-6 (AV budget bypass)**: VALIDATED. 8 untracked earnings calls + 17 fundamentals
+  = 25, exactly the daily limit. Any additional call triggers circuit breaker blackout.
+
+*(Remaining 3 agents still running — cross-critique will be extended in follow-up commit)*
 
 ---
 
@@ -382,7 +409,8 @@ checklist of all cadence-dependent constants:
 | Portfolio-risk agent new findings | 9 (5 CRIT, 4 HIGH) |
 | Avanza-API agent new findings | 8 (4 HIGH, 4 MED) |
 | Signals-core agent new findings | 7 (4 HIGH, 3 MED) |
-| **Total active findings** | **~53** |
+| Data-external agent new findings | 8 (2 CRIT, 4 HIGH, 2 MED) |
+| **Total active findings** | **~61** |
 
 **Net progress**: Round 3 had 67 total findings. ~19 confirmed fixed, ~3 partially fixed.
 11 new findings discovered. Active finding count dropped from 67 to ~20.
