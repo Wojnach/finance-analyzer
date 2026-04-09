@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from portfolio.indicators import detect_regime
-from portfolio.shared_state import FEAR_GREED_TTL, MINISTRAL_TTL, SENTIMENT_TTL, VOLUME_TTL, _cached, _cached_or_enqueue
+from portfolio.shared_state import FEAR_GREED_TTL, FUNDING_RATE_TTL, MINISTRAL_TTL, SENTIMENT_TTL, VOLUME_TTL, _cached, _cached_or_enqueue
 from portfolio.signal_registry import get_enhanced_signals, load_signal_func
 from portfolio.signal_utils import true_range
 from portfolio.tickers import CRYPTO_SYMBOLS, DISABLED_SIGNALS, GPU_SIGNALS, METALS_SYMBOLS, SIGNAL_NAMES, STOCK_SYMBOLS
@@ -221,10 +221,14 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
             # 2026-04-04: BUG-161/163 — oscillators 34-39% per-ticker,
             # candlestick 44.5% recent (292 sam). Both noise in ranging.
             "oscillators", "candlestick",
+            # 2026-04-09: funding 29.9% at 1d (536 sam) but 74.2% at 3h (535 sam).
+            # Gate at 1d, let it vote at 3h/4h.
+            "funding",
         }),
         # 3h: news_event 58.5%, smart_money 53.1% — decent at short horizons.
         # volatility_sig 47.2%, forecast 47.2% — marginal, let accuracy gate
         # handle them dynamically at 3h.
+        # funding 74.2% at 3h (535 sam) — NOT gated here.
         "3h": frozenset({"fear_greed", "macro_regime"}),
         "4h": frozenset({"fear_greed", "macro_regime"}),
     },
@@ -233,9 +237,11 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
         # Gating at 1d prevents false SELL consensus during breakouts.
         # trend ~0%, ema ~11%, volume_flow ~10%, macro_regime 11.1%, momentum_factors low
         # claude_fundamental 5.9% trending-up (34 samples) — BUG-154
+        # 2026-04-09: funding gated at 1d (29.9%), active at 3h (74.2%)
         "_default": frozenset({
             "trend", "ema", "volume_flow", "macro_regime",
             "momentum_factors", "claude_fundamental",
+            "funding",
         }),
         # mean_reversion 3h_recent=45.5% — gate on short horizons
         # SELL-biased signals work short-term even in uptrends — do NOT gate at 3h
@@ -249,14 +255,20 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
         # on MSTR/PLTR in trending-down. These are SELL-biased and catastrophically
         # wrong when the downtrend classification is stale or stocks are recovering.
         # BUG-165: smart_money 10.0% in trending-down (130 samples) — worst signal
+        # 2026-04-09: funding gated at 1d, active at 3h
         "_default": frozenset({
             "bb", "claude_fundamental",
             "volume_flow", "macro_regime", "ema", "trend", "heikin_ashi",
             "smart_money",  # BUG-165: 10.0% accuracy in trending-down
+            "funding",
         }),
         # 3h: trend signals may still work short-term; keep mean_reversion gated
         "3h": frozenset({"mean_reversion", "bb", "claude_fundamental"}),
         "4h": frozenset({"mean_reversion", "bb", "claude_fundamental"}),
+    },
+    "high-vol": {
+        # 2026-04-09: funding gated at 1d, active at 3h
+        "_default": frozenset({"funding"}),
     },
 }
 
@@ -1311,10 +1323,22 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # accuracy monitoring but never votes.
     votes["ml"] = "HOLD"
 
-    # Funding Rate — disabled: 27.0% accuracy (512 samples, 1d horizon).
-    # Contrarian logic consistently wrong in current regime. Still tracked for
-    # accuracy monitoring but never votes.
+    # Funding Rate — 29.9% accuracy at 1d but 74.2% at 3h (535 samples).
+    # Re-enabled 2026-04-09: horizon-gated via REGIME_GATED_SIGNALS (_default
+    # gates it at 1d across all regimes; active only at 3h/4h horizons).
+    # Crypto-only (BTC, ETH). The regime gate handles suppression at 1d.
     votes["funding"] = "HOLD"
+    if ticker and ticker in CRYPTO_SYMBOLS:
+        try:
+            from portfolio.funding_rate import get_funding_rate
+
+            fr = _cached(f"funding_{ticker}", FUNDING_RATE_TTL, get_funding_rate, ticker)
+            if fr:
+                extra_info["funding_rate"] = fr["rate_pct"]
+                extra_info["funding_action"] = fr["action"]
+                votes["funding"] = fr["action"]
+        except ImportError:
+            logger.debug("Optional module %s not available", "funding_rate")
 
     # Volume Confirmation (spike + price direction = vote)
     votes["volume"] = "HOLD"
