@@ -112,13 +112,19 @@ def _kill_by_port():
 
 
 def _is_llama_server_process(pid):
-    """Verify a PID is actually a llama-server process before killing it."""
+    """Verify a PID is actually a llama-server process before killing it.
+
+    Uses `tasklist` on Windows (wmic was deprecated in Win11 and removed
+    from PATH, causing WinError 2 spam — fixed 2026-04-09).
+    """
     try:
         if platform.system() == "Windows":
             result = subprocess.run(
-                ["wmic", "process", "where", f"ProcessId={pid}", "get", "Name"],
+                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
                 capture_output=True, text=True, timeout=5,
             )
+            # CSV format: "name.exe","PID","session","session#","mem"
+            # Empty/"INFO: No tasks..." line when PID doesn't exist.
             return "llama-server" in result.stdout.lower()
         else:
             with open(f"/proc/{pid}/cmdline") as f:

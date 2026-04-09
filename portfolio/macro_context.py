@@ -176,8 +176,42 @@ def get_volume_signal(ticker):
 from portfolio.fomc_dates import FOMC_DATES_ISO as FOMC_DATES
 
 
+def _fred_10y_fallback():
+    """FRED DGS10 fallback when yfinance ^TNX fails.
+
+    Added 2026-04-09 after yfinance ^TNX fetch started returning None for
+    extended periods (16h stale), triggering `TypeError('NoneType' object is
+    not subscriptable')` from this function's callers.
+
+    Returns a dict in the same shape as the yfinance path would for the "10y"
+    key — {yield_pct, change_5d} — or None if FRED is also unavailable.
+    Reuses `portfolio.golddigger.data_provider.fetch_us10y`, which already
+    has its own 1h cache + circuit breaker.
+    """
+    try:
+        import json as _json
+
+        from portfolio.golddigger.data_provider import fetch_us10y
+        fred_key = ""
+        try:
+            with open(CONFIG_FILE, encoding="utf-8") as f:
+                fred_key = _json.load(f).get("golddigger", {}).get("fred_api_key", "") or ""
+        except Exception:
+            return None
+        if not fred_key:
+            return None
+        yield_decimal = fetch_us10y(fred_key, series_id="DGS10")
+        if yield_decimal is None:
+            return None
+        # fetch_us10y returns decimal (0.0425); yfinance path uses pct (4.25).
+        return {"yield_pct": round(yield_decimal * 100, 3), "change_5d": 0.0}
+    except Exception:
+        logger.warning("FRED fallback failed for 10y", exc_info=True)
+        return None
+
+
 def _fetch_treasury():
-    """Fetch treasury yield data from yfinance."""
+    """Fetch treasury yield data from yfinance, with FRED fallback for 10y."""
     import yfinance as yf
 
     tickers = {"10y": "^TNX", "2y": "2YY=F", "30y": "^TYX"}
@@ -202,6 +236,15 @@ def _fetch_treasury():
             }
         except Exception:
             logger.warning("Treasury fetch failed for %s", label, exc_info=True)
+
+    # FRED fallback for 10y when yfinance ^TNX is down (common symptom:
+    # No data / NoneType errors). Other maturities don't have a clean FRED
+    # fallback via this helper, so they stay yfinance-only.
+    if "10y" not in result:
+        fallback = _fred_10y_fallback()
+        if fallback is not None:
+            logger.info("Treasury 10y: using FRED fallback (%.3f%%)", fallback["yield_pct"])
+            result["10y"] = fallback
 
     if "10y" in result and "2y" in result:
         spread = result["10y"]["yield_pct"] - result["2y"]["yield_pct"]
