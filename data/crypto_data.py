@@ -35,6 +35,13 @@ NEWS_TTL = 300             # 5 min
 MSTR_PRICE_TTL = 60        # 1 min (only during US hours)
 ONCHAIN_TTL = 3600         # 1 hour
 
+# Log-once guard for CryptoCompare news failures — prevents log spam when the
+# endpoint is broken for extended periods. First failure logs with a
+# "(suppressing further)" marker; subsequent failures are silenced until the
+# process restarts. Added 2026-04-09 after slice-TypeError incident spammed
+# warnings every news-fetch cycle.
+_WARNED_CRYPTO_NEWS: bool = False
+
 
 def _cached(key, ttl):
     """Return cached data if still fresh, else None."""
@@ -98,7 +105,14 @@ def get_crypto_news(limit=10):
             timeout=10,
         )
         if r.status_code == 200:
-            articles = r.json().get("Data", [])[:limit]
+            data = r.json().get("Data", [])
+            if not isinstance(data, list):
+                logger.warning(
+                    "CryptoCompare returned non-list Data (type=%s); treating as empty",
+                    type(data).__name__,
+                )
+                data = []
+            articles = data[:limit]
             result = []
             for a in articles:
                 result.append({
@@ -110,7 +124,10 @@ def get_crypto_news(limit=10):
             _set_cache("crypto_news", result)
             return result
     except Exception as e:
-        logger.warning(f"CryptoCompare news error: {e}")
+        global _WARNED_CRYPTO_NEWS
+        if not _WARNED_CRYPTO_NEWS:
+            logger.warning("CryptoCompare news error (suppressing further): %s", e)
+            _WARNED_CRYPTO_NEWS = True
     return []
 
 
