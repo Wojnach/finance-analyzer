@@ -531,27 +531,27 @@ def run(force_report=False, active_symbols=None):
 
     # BUG-178: Add timeout to prevent indefinite hangs from stuck tickers.
     #
-    # Bumped 2026-04-09 from 120s → 500s in concert with the cadence change
-    # (60s → 600s, see portfolio/market_timing.py INTERVAL_MARKET_OPEN) and
-    # the CPU-mode fingpt warm daemon. The old 120s was "2x normal cycle
-    # time" when the cycle target was 60s; it's no longer representative.
+    # Timeline:
+    # - original: 120s (assumed 60s cycle cadence)
+    # - 2026-04-09 (CPU fingpt daemon era): 500s — bumped because the CPU
+    #   fingpt daemon was serializing every ticker's sentiment behind its
+    #   own global lock, stretching per-ticker latency to ~75s × 5 tickers
+    #   = ~375s tail. 500s was 2x that max.
+    # - 2026-04-09 (current, post feat/fingpt-in-llmbatch): 180s. The
+    #   fingpt daemon is retired; fingpt now runs in portfolio.llm_batch
+    #   as a post-cycle phase via llama_server full GPU offload. Per-ticker
+    #   work no longer serializes on fingpt. Live measurement after the
+    #   merge showed cycles dropping from ~472s to ~226s with 45s/ticker
+    #   average. 180s = 4x the observed per-ticker average and 2x the
+    #   target "slow" cycle of 90s, which gives a comfortable safety
+    #   margin for genuinely stuck tickers (network timeouts, yfinance
+    #   blocking) without being so loose that a real hang goes unnoticed.
     #
-    # Why 500s specifically: at 600s cadence with the CPU fingpt daemon,
-    # the slowest per-ticker sig times we measured on 2026-04-09 were
-    # ~370s (MSTR/BTC/ETH when they serialize through the fingpt daemon
-    # lock — fingpt is one process on CPU, so 5 tickers × ~75s serialize
-    # to ~375s tail latency). 500s leaves a ~130s safety margin against
-    # that worst case, and still leaves ~100s of headroom inside the 600s
-    # loop cadence for post-cycle work (agent_summary write, trigger
-    # detection, L2 invoke, log rotation). The loop itself should never
-    # hit this timeout in steady state — it's a guard against a genuinely
-    # stuck ticker, not a cap on normal CPU-fingpt latency.
-    #
-    # If the loop drops back to a faster cadence in the future (e.g. after
-    # the option-3 fingpt-on-GPU refactor — see the _FINGPT_REQUEST_TIMEOUT_S
-    # comment in portfolio/sentiment.py), drop this back to ~2x the new
-    # cadence so it stays "2x normal" again.
-    _TICKER_POOL_TIMEOUT = 500
+    # If cycles start creeping above ~180s again, the first place to look
+    # is an added signal/LLM in the ticker path — do NOT bump this timeout
+    # without understanding why, it's meant to fire on hangs not on
+    # legitimate slow processing.
+    _TICKER_POOL_TIMEOUT = 180
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ticker") as pool:
         futures = {
             pool.submit(_process_ticker, name, source): name
