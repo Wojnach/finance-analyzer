@@ -81,10 +81,11 @@ test lines). The fingpt daemon (+246 lines) is architecturally sound but has pro
 
 ## NEW Findings (Round 4)
 
-### CRITICAL (2)
+### CRITICAL (3)
 
 | ID | Subsystem | Finding | Conf |
 |----|-----------|---------|------|
+| OR-R4-1 | orchestration | **`loop_contract.py:23` MAX_CYCLE_DURATION_S=180 not updated for 600s cadence.** Every normal cycle exceeds 180s → constant CRITICAL violations → self-heal sessions fire every 30 min, wasting Claude budget continuously. **One-line fix: set to 650.** | 95% |
 | IC-R4-1 | metals-core | **`metals_execution_engine.py` MIN_TRADE_SEK=500 bypass.** Config was fixed to 1000, but `metals_execution_engine.py:33` has its own fallback `MIN_TRADE_SEK = 500.0`. Sub-1000 SEK orders waste courtage. | 92% |
 | IC-R4-2 | orchestration | **`trigger.py` SUSTAINED_DURATION_S=120 negates sustained checks at 600s cadence.** At 600s cadence, one cycle already exceeds 120s, so the duration gate fires on single-check flips. SUSTAINED_CHECKS=3 is effectively bypassed. Layer 2 fires on noise. | 95% |
 
@@ -181,10 +182,11 @@ These are significant reliability improvements backed by 265 lines of tests.
 
 ### Tier 1: Fix NOW (trivial, high impact)
 
-1. **IC-R4-2**: `trigger.py:47` — `SUSTAINED_DURATION_S = 700` (match 600s cadence + buffer)
-2. **IC-R4-1**: `metals_execution_engine.py:33` — `MIN_TRADE_SEK = 1000.0` (fallback too)
-3. **IC-R4-11**: `macro_context.py:197` — replace `open(CONFIG_FILE)` with `load_json(CONFIG_FILE)`
-4. **IC-R4-5**: `metals_loop.py:4949,6470` — replace raw `open()` with `load_json()`/`load_jsonl_tail()`
+1. **OR-R4-1**: `loop_contract.py:23` — `MAX_CYCLE_DURATION_S = 650` (match 600s cadence + buffer). **Currently burning Claude budget every 30 minutes.**
+2. **IC-R4-2**: `trigger.py:47` — `SUSTAINED_DURATION_S = 700` (match 600s cadence + buffer)
+3. **IC-R4-1**: `metals_execution_engine.py:33` — `MIN_TRADE_SEK = 1000.0` (fallback too)
+4. **IC-R4-11**: `macro_context.py:197` — replace `open(CONFIG_FILE)` with `load_json(CONFIG_FILE)`
+5. **IC-R4-5**: `metals_loop.py:4949,6470` — replace raw `open()` with `load_json()`/`load_jsonl_tail()`
 
 ### Tier 2: Fix This Week
 
@@ -207,38 +209,83 @@ These are significant reliability improvements backed by 265 lines of tests.
 *Agent results will be merged below as they complete.*
 
 ### Signals-Core Agent
-*(pending)*
+*(agent still running — integrate in follow-up commit)*
 
-### Orchestration Agent
-*(pending)*
+### Orchestration Agent — COMPLETE
+
+**Key findings (9 total: 1 CRITICAL, 3 HIGH, 4 MEDIUM, 1 LOW):**
+
+| ID | Sev | Finding |
+|----|-----|---------|
+| OR-R4-1 | **CRIT** | `loop_contract.py:23` `MAX_CYCLE_DURATION_S=180` not updated for 600s cadence. Every normal cycle triggers CRITICAL violation → self-heal sessions waste Claude budget continuously. **Single-line fix: set to 650.** |
+| OR-R4-2 | HIGH | M10 still open — `classify_tier`/`update_tier_state` called without `state=` param, 3 disk reads per triggered cycle |
+| OR-R4-3 | HIGH | Sustained-flip trigger uses `None` as baseline action — second cycle after startup generates phantom flip reasons |
+| OR-R4-4 | HIGH | C3 still open — `wait_for_specialists` still synchronous (30s block) |
+| OR-R4-5 | MED | Safeguard check at `% 100` fires every ~16.7h instead of ~1.7h due to cadence change |
+| OR-R4-6 | MED | Sentiment duration gate (120s) fires T1 off-hours every cycle on non-neutral oscillation |
+| OR-R4-7 | MED | trigger_consensus pruning via `_current_tickers` correctly runs in `check_triggers`; downgraded |
+| OR-R4-8 | MED | `crypto_scheduler.py:310` uses local time instead of UTC in JSONL log |
+| OR-R4-9 | LOW | Module-level `_agent_tier`/`_agent_reasons` not cleared after timeout kill |
+
+**Verified Round 3 items**: C3 (partial), C4 (FIXED), H22 (FIXED), M10 (partial)
 
 ### Portfolio-Risk Agent
-*(pending)*
+*(agent still running — integrate in follow-up commit)*
 
 ### Metals-Core Agent
-*(pending)*
+*(agent still running — integrate in follow-up commit)*
 
 ### Avanza-API Agent
-*(pending)*
+*(agent still running — integrate in follow-up commit)*
 
 ### Signals-Modules Agent
-*(pending)*
+*(agent still running — integrate in follow-up commit)*
 
 ### Data-External Agent
-*(pending)*
+*(agent still running — integrate in follow-up commit)*
 
 ### Infrastructure Agent
-*(pending)*
+*(agent still running — integrate in follow-up commit)*
 
 ---
 
 ## Cross-Critique
 
 ### Direction A: Independent Review Critiques Agent Findings
-*(pending agent completion)*
+
+**Orchestration agent (OR-R4-1 through OR-R4-9)**:
+- **OR-R4-1 (MAX_CYCLE_DURATION_S=180)**: VALIDATED. I missed this entirely because I
+  didn't read `loop_contract.py`. This is the most actionable finding in Round 4 — it's
+  actively burning Claude budget right now. The agent correctly identified the cascading
+  effect of the cadence change.
+- **OR-R4-3 (phantom flip triggers)**: VALIDATED with caveat. The startup grace period
+  does protect the first cycle, but the agent correctly identifies that the second cycle
+  has no protection if no real trigger fired on cycle 1. At 600s cadence, this means a
+  20-minute window of potential phantom triggers.
+- **OR-R4-5 (safeguard check frequency)**: VALIDATED. Another cadence ripple effect I
+  missed. The `% 100` check should be wall-clock-based, not cycle-count-based.
+- **OR-R4-6 (sentiment off-hours T1 spam)**: VALIDATED but less severe than stated. At
+  600s cadence, this is at most one T1 per 10 minutes off-hours, and T1 invocations are
+  the lightest (120s/15 turns). Still wasteful but not a budget-burner.
+- **OR-R4-7 (trigger consensus pruning)**: Agent correctly self-corrected and downgraded.
+  Good adversarial discipline.
 
 ### Direction B: Agent Findings Critique Independent Review
-*(pending agent completion)*
+
+**Cadence change completeness**: My IC-R4-2 (SUSTAINED_DURATION_S=120) identified one
+cadence ripple. The orchestration agent found THREE more (OR-R4-1, OR-R4-5, OR-R4-6).
+This suggests a systematic audit of all hardcoded thresholds referencing time or cycle
+counts is needed — not just the ones we individually found.
+
+**Theme: "600s cadence change audit"** — The combined findings suggest creating a
+checklist of all cadence-dependent constants:
+1. `MAX_CYCLE_DURATION_S = 180` → should be ~650
+2. `SUSTAINED_DURATION_S = 120` → should be ~700
+3. `_ss._run_cycle_id % 100` → should use wall-clock
+4. Sentiment duration gate → may need cadence-proportional adjustment
+5. (Metals loop unchanged at 60s — cash sync every 30 checks = 30 min, correct)
+
+*(Remaining 7 agents still running — cross-critique will be extended in follow-up commit)*
 
 ---
 
@@ -250,7 +297,8 @@ These are significant reliability improvements backed by 265 lines of tests.
 | Partially fixed | ~3 (C1, C3, C13) |
 | Still open from Round 3 | ~6 (C6, C12, H17, H31, M12, C14/C8 unverified) |
 | New findings in Round 4 | ~11 (IC-R4-1 through IC-R4-11) |
-| **Total active findings** | **~20** |
+| Orchestration agent new findings | 9 (1 CRIT, 3 HIGH, 4 MED, 1 LOW) |
+| **Total active findings** | **~29** |
 
 **Net progress**: Round 3 had 67 total findings. ~19 confirmed fixed, ~3 partially fixed.
 11 new findings discovered. Active finding count dropped from 67 to ~20.

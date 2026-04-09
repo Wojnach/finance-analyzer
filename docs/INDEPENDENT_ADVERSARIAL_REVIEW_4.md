@@ -42,6 +42,7 @@
 | H23 | GPU lock fd leak on `os.write()` failure | `try/finally: os.close(fd)` at lines 128-131 |
 | H25 | Log rotation not integrated | `log_rotation.rotate_all` called hourly in `main.py:382` |
 | H26 | Telegram `retry_after` ignored | `http_retry.py:43-49` parses `retry_after` from 429 response |
+| H32 | `_silver_reset_session()` never called | Now called at `metals_loop.py:6051` on position close |
 
 ### STILL OPEN (confirmed not fixed)
 
@@ -52,7 +53,6 @@
 | C12 | `log_portfolio_value()` raw `open(HISTORY_FILE, "a")` | `metals_loop.py:4949` still uses raw `open()` |
 | H17 | `volume_flow._compute_vwap` cumulative from bar 0 | Not session-scoped |
 | H31 | `POSITIONS` dict access without lock | Main loop + fast-tick still share without `threading.Lock` |
-| H32 | `_silver_reset_session()` never called | Defined but no call site |
 | M12 | SwingTrader hardcodes `close_cet = 21.0 + 55/60` | Lines 767 and 1037. Violates "check API for todayClosingTime" rule |
 
 ---
