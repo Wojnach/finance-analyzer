@@ -3,19 +3,19 @@
 ## Overview
 
 Autonomous two-layer trading system. Layer 1 (Python, 60s loop) collects market data, computes
-30 signals across 7 timeframes for 20 instruments, and detects meaningful triggers. Layer 2
-(Claude CLI subprocess) is invoked on triggers to make trade decisions for two simulated
-portfolios (Patient & Bold, each starting 500K SEK). A separate metals subsystem trades
-Avanza warrants independently.
+30 active signals (34 modules registered, 4 force-HOLD) across 7 timeframes for 12 Tier-1
+instruments, and detects meaningful triggers. Layer 2 (Claude CLI subprocess) is invoked on
+triggers to make trade decisions for two simulated portfolios (Patient & Bold, each starting
+500K SEK). A separate metals subsystem trades Avanza warrants independently.
 
-The system tracks crypto (BTC, ETH), metals (XAU, XAG), and 16 US stocks via Binance, Alpaca,
+The system tracks crypto (BTC, ETH), metals (XAU, XAG), and 8 US stocks via Binance, Alpaca,
 and Avanza. All decisions are logged to journals, accuracy is tracked, and notifications go to
 Telegram. A Flask dashboard serves real-time data on port 5055.
 
 ## Architecture
 
 ### Layer 1: Data Loop (`portfolio/main.py`)
-- 60s cycle: fetch OHLCV → compute indicators → run 30 signals → detect triggers → write summaries
+- 60s cycle: fetch OHLCV → compute indicators → run 30 active signals → detect triggers → write summaries
 - Parallel ticker processing (ThreadPoolExecutor, 8 workers)
 - Crash recovery: exponential backoff (10s→5min), Telegram alerts (first 5 only)
 - Entry: `.venv/Scripts/python.exe -u portfolio/main.py --loop` (via `scripts/win/pf-loop.bat`)
@@ -45,9 +45,9 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 - **GoldDigger** (`portfolio/golddigger/`): Gold certificate trading (dry-run/live via Avanza)
 - **Elongir** (`portfolio/elongir/`): Equity trading bot (separate signal system)
 
-## Signal System (32 Signals)
+## Signal System (34 Modules · 30 Active)
 
-### Core Active (8)
+### Core Active (9)
 1. RSI(14) — Oversold <30 BUY, overbought >70 SELL
 2. MACD(12,26,9) — Histogram crossover
 3. EMA(9,21) — Trend following, 0.5% deadband
@@ -55,14 +55,14 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 5. Fear & Greed — Contrarian (≤20 BUY, ≥80 SELL)
 6. Sentiment — CryptoBERT (crypto) / Trading-Hero-LLM (stocks), keyword-weighted
 7. Ministral-8B — Local LLM reasoning via llama-cpp-python
-8. Volume Confirmation — Spike >1.5x avg confirms direction
+8. Qwen3-8B — Local LLM reasoning, 61.8% at 3h (added 2026-03-29, GPU-gated)
+9. Volume Confirmation — Spike >1.5x avg confirms direction
 
-### Core Disabled (3)
-9. ML Classifier (28.2%) — worse than coin flip
-10. Funding Rate (27.0%) — contrarian logic wrong
-11. Custom LoRA (20.9%) — 97% SELL bias
+### Core Disabled (2)
+10. ML Classifier (28.2%) — worse than coin flip
+11. Funding Rate (27.0%) — contrarian logic wrong
 
-### Enhanced Composite (21 modules in `portfolio/signals/`)
+### Enhanced Active (21 modules in `portfolio/signals/`)
 12. Trend — Golden/Death Cross, Supertrend, Ichimoku, ADX
 13. Momentum — Stochastic, StochRSI, CCI, Williams %R, ROC, PPO
 14. Volume Flow — OBV, VWAP, A/D, CMF, MFI
@@ -85,6 +85,10 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 31. Orderbook Flow — Depth imbalance, trade flow, VPIN, OFI, spread health (metals+crypto)
 32. Metals Cross-Asset — Copper, GVZ, Gold/Silver ratio, SPY, Oil (metals only)
 
+### Enhanced Disabled (2)
+33. Crypto Macro — Options max pain, gold-BTC rotation, exchange reserves (crypto only) — registered but force-HOLD via DISABLED_SIGNALS
+34. COT Positioning — CFTC speculative/commercial positioning, contrarian (metals only) — registered but force-HOLD pending live validation
+
 ### Signal Mechanics
 - **MIN_VOTERS = 3** (all asset classes). Consensus = active voters (BUY+SELL), not total.
 - **Accuracy gate**: signals below 45% accuracy (30+ samples) are force-HOLD (not inverted — inversion causes whiplash)
@@ -95,12 +99,14 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 
 ## Instruments
 
-### Tier 1: Full signals (30 signals × 7 timeframes)
+### Tier 1: Full signals (30 active × 7 timeframes)
 | Asset Class | Tickers | Source |
 |-------------|---------|--------|
 | Crypto 24/7 | BTC-USD, ETH-USD | Binance spot |
 | Metals 24/7 | XAU-USD, XAG-USD | Binance FAPI |
-| US Stocks | PLTR, NVDA, AMD, GOOGL, AMZN, AAPL, AVGO, META, MU, SOUN, SMCI, TSM, TTWO, VRT, LMT, MSTR | Alpaca |
+| US Stocks | PLTR, NVDA, MU, SMCI, TSM, TTWO, VRT, MSTR | Alpaca |
+
+(Removed Mar 15 cleanup: AMD, GOOGL, AMZN, AAPL, AVGO, META, SOUN, LMT)
 
 ### Tier 2: Avanza price-only (no signals)
 SAAB-B, SEB-C, INVE-B
@@ -115,8 +121,8 @@ XBT-TRACKER (→BTC), ETH-TRACKER (→ETH), MINI-SILVER (→XAG 5x), MINI-TSMC (
 `trigger.py` (change detection), `market_timing.py` (DST-aware hours)
 
 ### Signal Pipeline
-`signal_engine.py` (32-signal voting), `signal_registry.py` (plugin discovery),
-`signals/*.py` (21 enhanced modules), `accuracy_stats.py` (hit rates),
+`signal_engine.py` (34-signal voting, 30 active), `signal_registry.py` (plugin discovery),
+`signals/*.py` (23 enhanced modules), `accuracy_stats.py` (hit rates),
 `outcome_tracker.py` (backfill), `forecast_accuracy.py` (model health)
 
 ### Data & External
