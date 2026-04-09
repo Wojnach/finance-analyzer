@@ -436,8 +436,13 @@ def _save_positions(positions):
                 state[key][field] = pos[field]
     try:
         atomic_write_json(POSITIONS_STATE_FILE, state, ensure_ascii=False)
-    except Exception as e:
-        log(f"Position state save failed: {e}")
+    except Exception:
+        # 2026-04-09 Stage 3: ERROR — position state persistence failure.
+        # Same risk profile as metals_swing_trader._save_state — on
+        # restart the loop reloads positions from this file; a failed
+        # save now means positions may drift between broker reality and
+        # local tracking on next restart.
+        logger.exception("_save_positions: atomic_write_json failed — positions may drift on restart")
 
 def _verify_position_holdings(page, positions):
     """At startup, verify actual Avanza holdings match our position state.
@@ -868,8 +873,11 @@ def _silver_persist_ref(silver_key, ref_price):
         if silver_key in state:
             state[silver_key]["underlying_entry"] = round(ref_price, 4)
             atomic_write_json(POSITIONS_STATE_FILE, state)
-    except Exception as e:
-        log(f"Silver ref persist error: {e}")
+    except Exception:
+        # 2026-04-09 Stage 3: WARNING — silver reference persist is used
+        # for fast-tick baseline. Loss of persistence on a single cycle
+        # just resets the baseline on next silver entry. Not data loss.
+        logger.warning("_silver_persist_underlying_ref: persist failed for %s", silver_key, exc_info=True)
 
 
 def _silver_reset_session():
@@ -1101,8 +1109,13 @@ def read_signal_data():
                 result[ticker]["timeframes"] = timeframes[ticker]
 
         return result
-    except Exception as e:
-        log(f"Signal read error: {e}")
+    except Exception:
+        # 2026-04-09 Stage 3: WARNING — signal read failure. The caller
+        # falls back to an empty dict which downstream code handles
+        # gracefully (signal data is stale for one cycle). Stack trace
+        # helps diagnose agent_summary_compact parse failures or file
+        # read issues.
+        logger.warning("_read_signals: agent_summary_compact read/parse failed", exc_info=True)
         return {}
 
 # ---------------------------------------------------------------------------
@@ -1200,9 +1213,18 @@ def _accumulate_orderbook_snapshots():
             depth = get_orderbook_depth(ticker, limit=20)
             if depth:
                 accumulate_snapshot(ticker, depth)
-        except Exception as e:
+        except Exception:
+            # 2026-04-09 Stage 3: WARNING — preserved 1-in-30 throttling
+            # so this doesn't blow up the log file. Microstructure
+            # snapshots are best-effort rolling accumulation — skipping
+            # a few doesn't break signal computation, just degrades
+            # VPIN/OFI slightly.
             if _microstructure_persist_counter % 30 == 0:  # log rarely
-                log(f"Microstructure snapshot error for {ticker}: {e}")
+                logger.warning(
+                    "_accumulate_microstructure: get_orderbook_depth failed for %s",
+                    ticker,
+                    exc_info=True,
+                )
     _microstructure_persist_counter += 1
     if _microstructure_persist_counter % 5 == 0:  # persist every ~2.5-5 min
         try:
@@ -1539,8 +1561,12 @@ def detect_holdings(page):
         if changes:
             _save_positions(POSITIONS)
 
-    except Exception as e:
-        log(f"Holdings detection error: {e}")
+    except Exception:
+        # 2026-04-09 Stage 3: ERROR — holdings detection feeds the
+        # entire position reconciliation cycle. A failure here means
+        # we don't know what we hold, which cascades into wrong exit
+        # decisions, wrong stop-loss arming, and mis-sized spike orders.
+        logger.exception("detect_holdings: outer failure — position reconciliation skipped this cycle")
 
     return changes
 
@@ -2175,8 +2201,12 @@ def _fish_engine_execute_buy(decision, price):
         if success:
             _fish_engine.confirm_entry(direction, ask, volume, price)
             send_telegram(f"FISH BUY: {nm} {volume}u@{ask} = {volume*ask:.0f} SEK ({tactic})")
-    except Exception as e:
-        log(f"[fish] BUY error: {e}")
+    except Exception:
+        # 2026-04-09 Stage 3: ERROR — fish BUY failure in a live-trading
+        # path. May be recoverable next cycle but we want the stack trace
+        # to diagnose persistent failures (place_order, get_buying_power,
+        # session drift). Fish engine stays without a position on failure.
+        logger.exception("_fish_engine_execute_buy: fish BUY path raised")
 
 
 def _fish_engine_execute_sell(decision):
@@ -2247,7 +2277,11 @@ def _fish_engine_execute_sell(decision):
             _rearm_stops_after_failed_sell(ob_id, sl_snapshot)
             sl_snapshot = []  # don't double-rearm in finally
     except Exception as e:
-        log(f"[fish] SELL error: {e}")
+        # 2026-04-09 Stage 3: ERROR — fish SELL failure can leave the
+        # position stuck and potentially naked (finally block handles
+        # re-arm). Telegram keeps the short form with the operator-
+        # visible exception; logger.exception captures the full trace.
+        logger.exception("_fish_engine_execute_sell: fish SELL path raised ob_id=%s", ob_id)
         send_telegram(f"FISH SELL ERROR: {e}. Position may be stuck!")
     finally:
         # CODEX-7 finding 2: if anything raised AFTER stops were cancelled
@@ -2259,8 +2293,11 @@ def _fish_engine_execute_sell(decision):
             log(f"[fish] finally: re-arming {len(sl_snapshot)} stop(s) after exception path")
             try:
                 _rearm_stops_after_failed_sell(ob_id, sl_snapshot)
-            except Exception as fe:
-                log(f"[fish] finally re-arm raised: {fe}")
+            except Exception:
+                # 2026-04-09 Stage 3: ERROR — re-arm inside fish's
+                # finally means the position is NAKED at the broker.
+                # Critical stack trace for post-mortem.
+                logger.exception("_fish_engine_execute_sell: finally re-arm raised ob_id=%s — position may be NAKED", ob_id)
 
 
 # ---------------------------------------------------------------------------
@@ -5624,8 +5661,12 @@ def _build_autonomous_risk_data(positions_data, llm_signals):
         drawdown_pct = drawdown.get("current_drawdown_pct")
         if isinstance(drawdown_pct, (int, float)):
             risk_data["drawdown_pct"] = round(drawdown_pct, 2)
-    except Exception as e:
-        log(f"Autonomous drawdown summary failed: {e}")
+    except Exception:
+        # 2026-04-09 Stage 3: WARNING — drawdown summary is advisory
+        # context for the autonomous decision. Failure means the
+        # decision path runs without drawdown context, which is a
+        # degradation not a blocker.
+        logger.warning("_autonomous_decision: drawdown summary computation failed", exc_info=True)
 
     return risk_data
 
@@ -5730,8 +5771,12 @@ def _autonomous_decision(trigger_reasons, blocked_tier):
     }
     try:
         atomic_append_jsonl("data/metals_decisions.jsonl", decision)
-    except Exception as e:
-        log(f"Decision log error: {e}")
+    except Exception:
+        # 2026-04-09 Stage 3: ERROR — metals_decisions.jsonl is the audit
+        # trail for autonomous (Layer 1) decisions. Same severity as
+        # _log_trade/_log_decision in metals_swing_trader.py: silent drop
+        # = permanent visibility loss into decision reasoning.
+        logger.exception("_autonomous_decision: metals_decisions.jsonl append failed — decision audit lost")
 
     # --- 4. Send Telegram (throttled for routine HOLDs) ---
     global _last_auto_telegram
@@ -5865,8 +5910,12 @@ def invoke_claude(trigger_reasons, tier=2):
             send_telegram(f"_Metals L2 T{tier} ({tier_label}): {reason_str}_")
 
         return True
-    except Exception as e:
-        log(f"Claude invocation failed: {e}")
+    except Exception:
+        # 2026-04-09 Stage 3: ERROR — Claude CLI invocation failure
+        # means Layer 2 decision is lost for this cycle. Stack trace
+        # helps diagnose subprocess.Popen failures (path, PATH env,
+        # file permissions on the log file, etc.).
+        logger.exception("_invoke_claude: subprocess.Popen raised")
         if log_fh:
             try:
                 log_fh.close()
@@ -6051,8 +6100,13 @@ def main():
                 swing_trader = SwingTrader(page)
                 log(f"Swing trader: ACTIVE (cash={swing_trader.state['cash_sek']:.0f} SEK, "
                     f"DRY_RUN={swing_trader.state.get('_dry', 'see config')})")
-            except Exception as e:
-                log(f"Swing trader init failed: {e}")
+            except Exception:
+                # 2026-04-09 Stage 3: ERROR — swing trader init failure
+                # is a MAJOR functionality loss (zero metals warrant
+                # trading this session). Stack trace helps diagnose
+                # config load failures, catalog load failures, cash
+                # sync failures, Avanza session drift.
+                logger.exception("main_loop: SwingTrader init failed — metals warrant trading disabled this session")
                 swing_trader = None
         else:
             log("Swing trader: NOT available (import failed)")
@@ -6488,8 +6542,13 @@ Positions: {pos_summary}{prob_summary}""")
                 if swing_trader:
                     try:
                         swing_trader.evaluate_and_execute(prices, last_signal_data)
-                    except Exception as e:
-                        log(f"Swing trader error: {e}")
+                    except Exception:
+                        # 2026-04-09 Stage 3: ERROR — swing trader
+                        # per-cycle exception means no exit checks, no
+                        # entry evaluation, nothing. Critical for
+                        # active positions. Continues main loop so the
+                        # next cycle can retry.
+                        logger.exception("main_loop: swing_trader.evaluate_and_execute raised — this cycle's trade decisions skipped")
 
                 # Check triggers
                 triggered, reasons = check_triggers(prices)
@@ -6599,8 +6658,13 @@ Positions: {pos_summary}{prob_summary}""")
                             finally:
                                 if _tq_lock:
                                     _tq_lock.release()
-                        except Exception as e:
-                            log(f"Trade queue processing error: {e}")
+                        except Exception:
+                            # 2026-04-09 Stage 3: ERROR — trade queue
+                            # processing failure risks dropping Layer 2
+                            # trade intents. Stack trace helps diagnose
+                            # lock contention, state corruption, or
+                            # order dispatch issues.
+                            logger.exception("main_loop: trade queue processing raised")
 
                     if os.path.exists("data/metals_trades.jsonl"):
                         try:
