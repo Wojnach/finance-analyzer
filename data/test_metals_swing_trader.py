@@ -140,6 +140,13 @@ def make_trader(cash=10000, positions=None, macd_history=None, consecutive_losse
     trader.page = page
     trader.state = _load_state()
     trader.check_count = 0
+    # Reliability flags (Fix 1/2/4, 2026-04-09) — tests preseed cash via the
+    # state and don't go through _sync_cash, so we mark it ok. The other
+    # reliability flags default via class-level attributes (safe).
+    trader.cash_sync_ok = True
+    trader.cash_sync_was_ok = True
+    trader.recon_failure_streak = 0
+    trader.reconciled_once = True  # skip startup reconciliation in tests
     # Default regime history seeds REGIME_CONFIRM_CHECKS BUY/range-bound entries
     # so tests for non-regime gates pass without manual setup. Tests that
     # exercise the regime gate pass an explicit regime_history={...}.
@@ -445,6 +452,264 @@ class TestIntegration:
         # Check trade was logged
         assert os.path.exists(cfg.TRADES_LOG)
         assert os.path.exists(cfg.DECISIONS_LOG)
+
+
+# ---------------------------------------------------------------------------
+# Reliability fix tests (2026-04-09)
+# ---------------------------------------------------------------------------
+
+
+class TestReliabilityFixes:
+    """Tests for Fixes 1-4 + 8 added 2026-04-09."""
+
+    def test_cash_sync_ok_gates_entries(self):
+        """Fix 1: entries refused while cash_sync_ok is False."""
+        trader = make_trader(cash=10000, macd_history={"XAG-USD": [0.1, 0.2, 0.3]})
+        trader.cash_sync_ok = False  # simulate sync failure
+        sig = make_signal(
+            action="BUY", buy_count=5, rsi=50, confidence=0.7,
+            timeframes={"Now": "BUY", "12h": "BUY", "2d": "BUY",
+                        "7d": "BUY", "1mo": "HOLD", "3mo": "HOLD", "6mo": "HOLD"},
+        )
+        trader._check_entries({}, {"XAG-USD": sig})
+        assert len(trader.state["positions"]) == 0, \
+            "Entry should be blocked when cash_sync_ok is False"
+
+    def test_phantom_position_reconciled_before_exits(self):
+        """Fix 2: phantom position (not on Avanza) gets pruned by _reconcile_swing_positions."""
+        # Seed a position that isn't in the mock Avanza holdings
+        trader = make_trader(cash=10000)
+        trader.state["positions"]["ghost_pos"] = {
+            "warrant_key": "GHOST",
+            "warrant_name": "GHOST WARRANT",
+            "ob_id": "999999",  # NOT in mock holdings
+            "api_type": "certificate",
+            "underlying": "XAG-USD",
+            "direction": "LONG",
+            "units": 100,
+            "entry_price": 15.0,
+            "entry_underlying": 39.0,
+            "entry_ts": _now_utc().isoformat(),
+            "peak_underlying": 39.0,
+            "trailing_active": False,
+            "stop_order_id": None,
+            "leverage": 5.0,
+            "fill_verified": True,
+        }
+        _save_state(trader.state)
+
+        # Mock fetch_positions → empty dict (valid "flat account" answer)
+        import metals_swing_trader as mst
+        mst.fetch_page_positions = lambda page, acc: {}
+
+        trader._reconcile_swing_positions()
+        assert "ghost_pos" not in trader.state["positions"], \
+            "Phantom position should be pruned by reconciliation"
+
+    def test_phantom_reconciliation_skipped_on_none(self):
+        """Fix 2: transient fetch failure (None) does NOT prune positions."""
+        trader = make_trader(cash=10000)
+        trader.state["positions"]["real_pos"] = {
+            "warrant_key": "REAL", "warrant_name": "REAL", "ob_id": "123",
+            "api_type": "certificate", "underlying": "XAG-USD", "direction": "LONG",
+            "units": 10, "entry_price": 15.0, "entry_underlying": 39.0,
+            "entry_ts": _now_utc().isoformat(), "peak_underlying": 39.0,
+            "trailing_active": False, "stop_order_id": None, "leverage": 5.0,
+            "fill_verified": True,
+        }
+        _save_state(trader.state)
+
+        # Mock fetch_positions → None (transient failure)
+        import metals_swing_trader as mst
+        mst.fetch_page_positions = lambda page, acc: None
+
+        trader._reconcile_swing_positions()
+        assert "real_pos" in trader.state["positions"], \
+            "Positions must NOT be pruned on transient fetch failure"
+        assert trader.recon_failure_streak == 1, \
+            "Failure streak should increment on None result"
+
+    def test_corrupt_entry_ts_position_dropped(self):
+        """Fix 3: position with unparseable entry_ts is dropped, not retried."""
+        trader = make_trader(cash=10000)
+        trader.state["positions"]["corrupt_pos"] = {
+            "warrant_key": "X", "warrant_name": "CORRUPT", "ob_id": "1",
+            "api_type": "certificate", "underlying": "XAG-USD", "direction": "LONG",
+            "units": 1, "entry_price": 10.0, "entry_underlying": 87.0,
+            "entry_ts": "not-a-valid-timestamp",  # corrupt!
+            "peak_underlying": 87.0, "trailing_active": False,
+            "stop_order_id": None, "leverage": 5.0, "fill_verified": True,
+        }
+        _save_state(trader.state)
+        trader._check_exits({"2043157": {"underlying": 87.0}}, {})
+        assert "corrupt_pos" not in trader.state["positions"], \
+            "Position with corrupt entry_ts should be dropped"
+
+    def test_sell_failed_cooldown_prevents_cascade(self):
+        """Fix 3b: failed SELL sets sell_failed_at, skipped on next cycle."""
+        import metals_swing_trader as mst
+        trader = make_trader(cash=10000)
+        # Seed a position that's been held long enough to hit TIME_LIMIT
+        from metals_swing_config import MAX_HOLD_HOURS
+        old_ts = (_now_utc() - datetime.timedelta(hours=MAX_HOLD_HOURS + 1)).isoformat()
+        trader.state["positions"]["sell_test"] = {
+            "warrant_key": "X", "warrant_name": "TEST", "ob_id": "2043157",
+            "api_type": "certificate", "underlying": "XAG-USD", "direction": "LONG",
+            "units": 10, "entry_price": 10.0, "entry_underlying": 87.0,
+            "entry_ts": old_ts, "peak_underlying": 87.0,
+            "trailing_active": False, "stop_order_id": None, "leverage": 5.0,
+            "fill_verified": True,
+        }
+        _save_state(trader.state)
+
+        # Override DRY_RUN for this one test so _execute_sell actually hits place_order path
+        mst.DRY_RUN = False
+        # Mock place_order to return failure
+        original_place = mst.place_order
+        mst.place_order = lambda *a, **kw: (False, {"error": "mock fail", "parsed": {}})
+        try:
+            trader._check_exits({"2043157": {"bid": 10.0, "underlying": 87.0}}, {})
+            # Position still in state (sell failed), but sell_failed_at set
+            assert "sell_test" in trader.state["positions"]
+            assert "sell_failed_at" in trader.state["positions"]["sell_test"]
+
+            # Second cycle within cooldown → skip, no retry
+            call_count = [0]
+            def counting_place(*a, **kw):
+                call_count[0] += 1
+                return (False, {"error": "should not be called", "parsed": {}})
+            mst.place_order = counting_place
+            trader._check_exits({"2043157": {"bid": 10.0, "underlying": 87.0}}, {})
+            assert call_count[0] == 0, "place_order should NOT be called during cooldown"
+        finally:
+            mst.place_order = original_place
+            mst.DRY_RUN = True
+
+    def test_unfilled_order_rollback(self):
+        """Fix 4: unfilled BUY rolled back after FILL_VERIFY_MAX_AGE_S."""
+        import metals_swing_trader as mst
+        trader = make_trader(cash=5000)
+        # Seed a position aged past the rollback threshold
+        old_ts = (_now_utc() - datetime.timedelta(seconds=mst.FILL_VERIFY_MAX_AGE_S + 5)).isoformat()
+        trader.state["positions"]["unfilled_pos"] = {
+            "warrant_key": "X", "warrant_name": "UNFILLED",
+            "ob_id": "888", "api_type": "certificate",
+            "underlying": "XAG-USD", "direction": "LONG",
+            "units": 10, "entry_price": 10.0, "entry_underlying": 87.0,
+            "entry_ts": old_ts, "peak_underlying": 87.0,
+            "trailing_active": False, "stop_order_id": None,
+            "leverage": 5.0, "fill_verified": False, "buy_order_id": "order-x",
+        }
+        _save_state(trader.state)
+        cash_before = trader.state["cash_sek"]
+
+        # Mock fetch_positions → empty (position not held on Avanza)
+        mst.fetch_page_positions = lambda page, acc: {}
+        # Mock delete_order_live and _delete_stop_loss to no-op
+        mst.delete_order_live = lambda *a, **kw: (True, {})
+
+        trader._verify_recent_fills()
+
+        assert "unfilled_pos" not in trader.state["positions"], \
+            "Unfilled position should be rolled back"
+        expected_restored = cash_before + 10 * 10.0
+        assert trader.state["cash_sek"] == expected_restored, \
+            f"Cash should be restored: expected {expected_restored}, got {trader.state['cash_sek']}"
+
+    def test_short_entry_gated_by_default(self):
+        """Fix 8: SHORT entries blocked when SHORT_ENABLED=False (default)."""
+        import metals_swing_trader as mst
+        assert mst.SHORT_ENABLED is False, "SHORT should ship disabled by default"
+        trader = make_trader(cash=10000, macd_history={
+            "XAG-USD": [0.3, 0.2, 0.1],  # declining → good for SHORT
+        })
+        # Seed SELL regime history for the XAG-USD path
+        from metals_swing_config import REGIME_CONFIRM_CHECKS
+        trader.regime_history = {
+            "XAG-USD": [("SELL", "range-bound")] * REGIME_CONFIRM_CHECKS,
+            "XAU-USD": [("SELL", "range-bound")] * REGIME_CONFIRM_CHECKS,
+        }
+        sig = make_signal(
+            action="SELL", sell_count=5, buy_count=1, rsi=50, confidence=0.7,
+            timeframes={"Now": "SELL", "12h": "SELL", "2d": "SELL",
+                        "7d": "SELL", "1mo": "HOLD", "3mo": "HOLD", "6mo": "HOLD"},
+        )
+        trader._check_entries({}, {"XAG-USD": sig})
+        assert len(trader.state["positions"]) == 0, \
+            "SHORT entry should be blocked when SHORT_ENABLED=False"
+
+    def test_short_canary_empty_allowlist_blocks(self):
+        """Fix 8: empty SHORT_CANARY_WARRANTS blocks all SHORT entries."""
+        import metals_swing_trader as mst
+        trader = make_trader(cash=10000, macd_history={
+            "XAG-USD": [0.3, 0.2, 0.1],
+        })
+        from metals_swing_config import REGIME_CONFIRM_CHECKS
+        trader.regime_history = {
+            "XAG-USD": [("SELL", "range-bound")] * REGIME_CONFIRM_CHECKS,
+            "XAU-USD": [("SELL", "range-bound")] * REGIME_CONFIRM_CHECKS,
+        }
+        sig = make_signal(
+            action="SELL", sell_count=5, buy_count=1, rsi=50, confidence=0.7,
+            timeframes={"Now": "SELL", "12h": "SELL", "2d": "SELL",
+                        "7d": "SELL", "1mo": "HOLD", "3mo": "HOLD", "6mo": "HOLD"},
+        )
+        # Enable SHORT but keep allowlist empty
+        original_enabled = mst.SHORT_ENABLED
+        original_allowlist = mst.SHORT_CANARY_WARRANTS
+        try:
+            mst.SHORT_ENABLED = True
+            mst.SHORT_CANARY_WARRANTS = frozenset()
+            trader._check_entries({}, {"XAG-USD": sig})
+            assert len(trader.state["positions"]) == 0, \
+                "SHORT entry blocked when allowlist empty even with SHORT_ENABLED=True"
+        finally:
+            mst.SHORT_ENABLED = original_enabled
+            mst.SHORT_CANARY_WARRANTS = original_allowlist
+
+    def test_short_exit_take_profit_direction_aware(self):
+        """Fix 8: SHORT position with underlying DOWN 2% → TAKE_PROFIT fires."""
+        from metals_swing_config import TAKE_PROFIT_UNDERLYING_PCT
+        trader = make_trader(cash=10000)
+        # Entry at XAG 87.0; now at 87.0 * (1 - (TP+0.5)/100) → past TP
+        # threshold. For a SHORT, that's a PROFIT (underlying fell).
+        entry_und = 87.0
+        current_und = entry_und * (1 - (TAKE_PROFIT_UNDERLYING_PCT + 0.5) / 100)
+        trader.state["positions"]["short_test"] = {
+            "warrant_key": "X", "warrant_name": "SHORT TEST", "ob_id": "2043157",
+            "api_type": "certificate", "underlying": "XAG-USD", "direction": "SHORT",
+            "units": 10, "entry_price": 10.0, "entry_underlying": entry_und,
+            "entry_ts": _now_utc().isoformat(), "peak_underlying": entry_und,
+            "trough_underlying": current_und, "trailing_active": False,
+            "stop_order_id": None, "leverage": 5.0, "fill_verified": True,
+        }
+        _save_state(trader.state)
+        # _get_underlying_price keys on "silver"/"gold" in the prices dict key,
+        # not on ob_id. Use a silver-keyed entry so it picks up the test value.
+        prices = {"silver_fake": {"bid": 10.0, "underlying": current_und}}
+        trader._check_exits(prices, {})
+        assert "short_test" not in trader.state["positions"], \
+            f"SHORT TAKE_PROFIT should fire when underlying drops past -{TAKE_PROFIT_UNDERLYING_PCT}%"
+
+    def test_long_exit_take_profit_still_works(self):
+        """Regression: LONG TAKE_PROFIT still works after Fix 8 refactor."""
+        from metals_swing_config import TAKE_PROFIT_UNDERLYING_PCT
+        trader = make_trader(cash=10000)
+        entry_und = 87.0
+        current_und = entry_und * (1 + (TAKE_PROFIT_UNDERLYING_PCT + 0.5) / 100)
+        trader.state["positions"]["long_test"] = {
+            "warrant_key": "X", "warrant_name": "LONG TEST", "ob_id": "2043157",
+            "api_type": "certificate", "underlying": "XAG-USD", "direction": "LONG",
+            "units": 10, "entry_price": 10.0, "entry_underlying": entry_und,
+            "entry_ts": _now_utc().isoformat(), "peak_underlying": current_und,
+            "trailing_active": False, "stop_order_id": None, "leverage": 5.0,
+            "fill_verified": True,
+        }
+        _save_state(trader.state)
+        prices = {"silver_fake": {"bid": 12.0, "underlying": current_und}}
+        trader._check_exits(prices, {})
+        assert "long_test" not in trader.state["positions"], \
+            "LONG TAKE_PROFIT regression — should still fire"
 
 
 if __name__ == "__main__":

@@ -62,14 +62,43 @@ except ImportError:
     _REFRESHER_AVAILABLE = False
 
 from portfolio.avanza_control import (
+    delete_order_live,
     delete_stop_loss,
     fetch_account_cash,
+    fetch_page_positions,
     fetch_price,
     place_order,
     place_stop_loss,
 )
 
 SEND_PERIODIC_SUMMARY = False
+
+# --- SHORT support (Fix 8, 2026-04-09) ---
+# XAU (and occasionally XAG) has been printing SELL signals all day with no
+# way to act on them because _check_exits was LONG-only. Fix 8 adds direction-
+# aware exit math. Ships disabled by default — the user flips SHORT_ENABLED
+# to True and populates SHORT_CANARY_WARRANTS with a single low-leverage
+# warrant key to activate SHORT entries on a canary instrument only.
+#
+# When ready to open up the whole catalog, either drop the allowlist (keep
+# SHORT_ENABLED=True) or move the list to config.json.
+SHORT_ENABLED: bool = False
+SHORT_CANARY_WARRANTS: frozenset[str] = frozenset()
+
+# --- Reliability thresholds (added 2026-04-09) ---
+# Fill verification — how long to wait before checking Avanza for a recent buy,
+# and how long before rolling back an unfilled order.
+FILL_VERIFY_MIN_AGE_S = 15   # first verification check after this many seconds
+FILL_VERIFY_MAX_AGE_S = 90   # rollback if still unfilled after this many seconds
+
+# Sell-failed cooldown — if _execute_sell() fails, suppress exit re-evaluation
+# on the same position for this many seconds to avoid tight cascade loops.
+SELL_FAILED_COOLDOWN_SECONDS = 300  # 5 minutes
+
+# Reconciliation — how often to cross-check swing state positions against
+# Avanza holdings, and how many consecutive failures before alerting.
+RECON_THROTTLE_CYCLES = 3    # run every N cycles (after the first unconditional one)
+RECON_FAILURE_STREAK_ALERT = 10  # alert on Telegram after N consecutive failures
 
 
 def _log(msg):
@@ -198,6 +227,15 @@ def _log_trade(trade):
 class SwingTrader:
     """Autonomous rule-based swing trader for metals warrants on Avanza."""
 
+    # Class-level defaults for reliability tracking (Fix 1/2/4, 2026-04-09).
+    # Declared at class level so tests that bypass __init__ (e.g. via a
+    # factory helper) inherit safe defaults instead of crashing on
+    # AttributeError. Instance __init__ overrides these.
+    cash_sync_ok: bool = False
+    cash_sync_was_ok: bool = False
+    recon_failure_streak: int = 0
+    reconciled_once: bool = False
+
     def __init__(self, page):
         self.page = page
         self.state = _load_state()
@@ -208,6 +246,19 @@ class SwingTrader:
         # Keyed by ticker; value is a list of (action, regime) tuples.
         self.regime_history: dict[str, list[tuple[str, str]]] = {}
 
+        # Reliability tracking (added 2026-04-09):
+        #   cash_sync_ok      — False until _sync_cash() confirms a live fetch.
+        #                       _check_entries refuses to place orders while False.
+        #   cash_sync_was_ok  — previous state, for transition detection (Telegram).
+        #   recon_failure_streak — consecutive failed position reconciliations.
+        #   reconciled_once   — ensures reconciliation runs unconditionally on
+        #                       the first evaluate_and_execute call (catches
+        #                       startup phantoms).
+        self.cash_sync_ok: bool = False
+        self.cash_sync_was_ok: bool = False
+        self.recon_failure_streak: int = 0
+        self.reconciled_once: bool = False
+
         # Load dynamic warrant catalog (live refresh from Avanza). Falls back
         # to the static hardcoded catalog if the refresh fails entirely.
         self.warrant_catalog = self._load_warrant_catalog()
@@ -215,6 +266,7 @@ class SwingTrader:
         # Sync cash from Avanza on init
         self._sync_cash()
         _log(f"SwingTrader init: cash={self.state['cash_sek']:.0f} SEK, "
+             f"cash_sync_ok={self.cash_sync_ok}, "
              f"positions={len(self.state['positions'])}, "
              f"catalog={len(self.warrant_catalog)} warrants, "
              f"DRY_RUN={DRY_RUN}")
@@ -243,6 +295,9 @@ class SwingTrader:
     def _sync_cash(self):
         """Fetch real ISK buying power from Avanza and update state.
 
+        Sets self.cash_sync_ok to True on success, False on failure. While
+        False, _check_entries refuses to place new orders (Fix 1, 2026-04-09).
+
         Falls back to INITIAL_BUDGET_SEK when the API fails and no saved
         balance exists (e.g. first startup with empty state file).
         """
@@ -251,13 +306,30 @@ class SwingTrader:
             self.state["cash_sek"] = float(acc["buying_power"])
             _save_state(self.state)
             _log(f"Cash synced: {self.state['cash_sek']:.0f} SEK")
+            self.cash_sync_ok = True
+            if not self.cash_sync_was_ok:
+                # Transition False → True: announce recovery (skip on first sync).
+                if self.check_count > 0:
+                    _send_telegram(
+                        f"_SWING: cash sync recovered — {self.state['cash_sek']:.0f} SEK_"
+                    )
+                self.cash_sync_was_ok = True
+            return
+
+        # Failure path — degrade safely.
+        self.cash_sync_ok = False
+        if self.state["cash_sek"] == 0:
+            self.state["cash_sek"] = float(INITIAL_BUDGET_SEK)
+            _save_state(self.state)
+            _log(f"Cash sync failed, using configured budget: {self.state['cash_sek']:.0f} SEK")
         else:
-            if self.state["cash_sek"] == 0:
-                self.state["cash_sek"] = float(INITIAL_BUDGET_SEK)
-                _save_state(self.state)
-                _log(f"Cash sync failed, using configured budget: {self.state['cash_sek']:.0f} SEK")
-            else:
-                _log(f"Cash sync failed, using saved: {self.state['cash_sek']:.0f} SEK")
+            _log(f"Cash sync failed, using saved: {self.state['cash_sek']:.0f} SEK")
+        if self.cash_sync_was_ok:
+            # Transition True → False: alert once per failure streak.
+            _send_telegram(
+                "⚠ _SWING: cash sync failed — entries paused until recovery_"
+            )
+            self.cash_sync_was_ok = False
 
     def evaluate_and_execute(self, prices, signal_data):
         """Main entry point — called every loop cycle during market hours.
@@ -283,6 +355,19 @@ class SwingTrader:
             except Exception as e:  # noqa: BLE001
                 _log(f"Catalog auto-refresh failed: {e}")
 
+        # Position reconciliation against Avanza holdings (Fix 2, 2026-04-09).
+        # Runs UNCONDITIONALLY on the first call after init to catch startup
+        # phantoms, then throttled to every RECON_THROTTLE_CYCLES cycles.
+        # Must run BEFORE _check_exits so phantoms are pruned before the exit
+        # loop has a chance to fire on them and trigger a cascade.
+        if (not self.reconciled_once) or (self.check_count % RECON_THROTTLE_CYCLES == 0):
+            self._reconcile_swing_positions()
+            self.reconciled_once = True
+
+        # Fill verification for recent BUYs (Fix 4, 2026-04-09). Runs before
+        # _check_exits so unfilled positions don't enter the exit path.
+        self._verify_recent_fills()
+
         # Update regime history BEFORE entry checks so the gate sees the latest state.
         self._update_regime_history(signal_data)
 
@@ -299,6 +384,152 @@ class SwingTrader:
         # Restored after f6b491c accidentally dropped this call site.
         if SEND_PERIODIC_SUMMARY and self.check_count % TELEGRAM_SUMMARY_INTERVAL == 0:
             self._send_summary(signal_data)
+
+    # -------------------------------------------------------------------
+    # Reliability: reconciliation & fill verification (2026-04-09)
+    # -------------------------------------------------------------------
+
+    def _reconcile_swing_positions(self):
+        """Cross-check swing state positions against Avanza holdings; prune phantoms.
+
+        Fix 2 (2026-04-09). Before this method existed, swing state positions
+        had no reconciliation path — a phantom position from a prior run could
+        live forever in self.state["positions"] and cause a SELL cascade when
+        _check_exits tried to close it (see 08:25 UTC incident).
+
+        Failure semantics:
+          - fetch_page_positions returns None     → transient; increment streak
+          - fetch_page_positions returns {}       → valid "flat account"; prune all
+          - fetch_page_positions returns {ob:...} → prune anything not in the set
+        """
+        held = fetch_page_positions(self.page, ACCOUNT_ID)
+        if held is None:
+            self.recon_failure_streak += 1
+            if self.recon_failure_streak == RECON_FAILURE_STREAK_ALERT:
+                _log(f"Reconciliation failed {self.recon_failure_streak} cycles in a row")
+                _send_telegram(
+                    f"⚠ _SWING: position reconciliation failing for "
+                    f"{self.recon_failure_streak} cycles — session may be dead_"
+                )
+            return
+        # Success — reset streak
+        if self.recon_failure_streak >= RECON_FAILURE_STREAK_ALERT:
+            _send_telegram("_SWING: position reconciliation recovered_")
+        self.recon_failure_streak = 0
+
+        if not self.state.get("positions"):
+            return  # nothing to reconcile
+
+        held_ob_ids = set(held.keys())
+        phantoms = []
+        for pos_id, pos in list(self.state["positions"].items()):
+            if str(pos.get("ob_id", "")) not in held_ob_ids:
+                phantoms.append((pos_id, pos))
+
+        for pos_id, pos in phantoms:
+            name = pos.get("warrant_name", pos_id)
+            units = pos.get("units", 0)
+            entry = pos.get("entry_price", 0)
+            _log(f"PHANTOM CLEARED: {name} (was {units}u @ {entry}) — not on Avanza")
+            _send_telegram(
+                f"⚠ *SWING PHANTOM CLEARED* {name}\n"
+                f"`{units}u @ {entry} — not held on Avanza, removing from state`"
+            )
+            # Cancel any orphan stop-loss attached to the phantom
+            stop_id = pos.get("stop_order_id")
+            if stop_id and stop_id != "DRY_RUN":
+                try:
+                    _delete_stop_loss(self.page, stop_id)
+                except Exception as e:  # noqa: BLE001
+                    _log(f"  Phantom stop-loss cancel failed: {e}")
+            del self.state["positions"][pos_id]
+        if phantoms:
+            _save_state(self.state)
+
+    def _verify_recent_fills(self):
+        """Verify recently-placed BUY orders actually resulted in held positions.
+
+        Fix 4 (2026-04-09). Before this method existed, a BUY order that
+        returned `success=True` from place_order was trusted as filled even
+        if Avanza never held the position (e.g. limit order expired
+        unfilled). This caused the 06:17 UTC ghost trade.
+
+        For each position with fill_verified == False:
+          - age < FILL_VERIFY_MIN_AGE_S: skip, let Avanza settle
+          - FILL_VERIFY_MIN_AGE_S <= age < FILL_VERIFY_MAX_AGE_S: check holdings.
+            If found, mark fill_verified. If not found, keep waiting.
+          - age >= FILL_VERIFY_MAX_AGE_S and still not found: roll back.
+            Cancel the buy order, cancel the stop-loss, restore cash, delete
+            the position from state, send Telegram alert.
+        """
+        unverified_ids = [
+            pid for pid, p in self.state.get("positions", {}).items()
+            if not p.get("fill_verified", False)
+        ]
+        if not unverified_ids:
+            return
+
+        held = None  # fetched lazily, only if at least one position is old enough
+        for pos_id in unverified_ids:
+            pos = self.state["positions"].get(pos_id)
+            if not pos:
+                continue
+            try:
+                entry_ts = datetime.datetime.fromisoformat(pos["entry_ts"])
+            except (KeyError, ValueError, TypeError):
+                # Corrupt entry_ts — let Fix 3 entry_ts hardening handle it.
+                continue
+            age_s = (_now_utc() - entry_ts).total_seconds()
+            if age_s < FILL_VERIFY_MIN_AGE_S:
+                continue
+
+            if held is None:
+                held = fetch_page_positions(self.page, ACCOUNT_ID)
+                if held is None:
+                    return  # transient, retry next cycle
+
+            if pos.get("ob_id") in held:
+                pos["fill_verified"] = True
+                _save_state(self.state)
+                _log(f"FILL VERIFIED: {pos.get('warrant_name', pos_id)} after {age_s:.0f}s")
+                continue
+
+            if age_s < FILL_VERIFY_MAX_AGE_S:
+                continue  # not yet timed out, keep waiting
+
+            # Rollback — order never filled within the max window.
+            name = pos.get("warrant_name", pos_id)
+            units = pos.get("units", 0)
+            entry_price = pos.get("entry_price", 0)
+            cost = units * entry_price
+            _log(f"UNFILLED after {age_s:.0f}s: {name} — rolling back")
+
+            # Cancel the buy order if we have its id (best-effort)
+            buy_order_id = pos.get("buy_order_id")
+            if buy_order_id:
+                try:
+                    delete_order_live(self.page, ACCOUNT_ID, buy_order_id)
+                except Exception as e:  # noqa: BLE001
+                    _log(f"  Buy order cancel failed: {e}")
+
+            # Cancel the stop-loss if one was placed
+            stop_id = pos.get("stop_order_id")
+            if stop_id and stop_id != "DRY_RUN":
+                try:
+                    _delete_stop_loss(self.page, stop_id)
+                except Exception as e:  # noqa: BLE001
+                    _log(f"  Stop-loss cancel failed: {e}")
+
+            # Restore cash and remove position
+            self.state["cash_sek"] += cost
+            del self.state["positions"][pos_id]
+            _save_state(self.state)
+
+            _send_telegram(
+                f"⚠ *SWING UNFILLED ROLLBACK* {name}\n"
+                f"`{units}u @ {entry_price} = {cost:.0f} SEK restored`\n"
+                f"`Order didn't fill within {FILL_VERIFY_MAX_AGE_S}s`"
+            )
 
     def _update_regime_history(self, signal_data):
         """Append (action, regime) snapshot per ticker, capped at last 10 entries."""
@@ -333,6 +564,20 @@ class SwingTrader:
     def _check_entries(self, prices, signal_data):
         """Scan for BUY opportunities on XAG-USD and XAU-USD."""
         if not signal_data:
+            return
+
+        # Fix 1 (2026-04-09): refuse entries while cash sync is broken.
+        # Exit path continues unaffected — protection > perfect accounting.
+        if not self.cash_sync_ok:
+            if self.check_count % 30 == 0:  # log reminder every ~30 min
+                _log("Entries paused: cash sync not ok (awaiting recovery)")
+            return
+
+        # Fix 2 (2026-04-09): pause entries while reconciliation is failing
+        # — we can't trust our view of Avanza holdings.
+        if self.recon_failure_streak >= RECON_FAILURE_STREAK_ALERT:
+            if self.check_count % 30 == 0:
+                _log(f"Entries paused: reconciliation failing ({self.recon_failure_streak} cycles)")
             return
 
         active_count = len(self.state["positions"])
@@ -373,6 +618,36 @@ class SwingTrader:
                 _log(f"No valid warrant for {underlying_ticker} {direction}")
                 continue
 
+            # Fix 8 canary gate (2026-04-09): for SHORT entries, require the
+            # warrant key to be in the canary allowlist. This exercises the
+            # full SHORT code path in prod on a single low-risk instrument
+            # before opening the whole catalog. Leave SHORT_CANARY_WARRANTS
+            # empty to keep SHORT entries fully disabled even when
+            # SHORT_ENABLED=True — canary opt-in is explicit.
+            if direction == "SHORT":
+                if not SHORT_CANARY_WARRANTS:
+                    decision = {
+                        "ts": _now_utc().isoformat(),
+                        "check": self.check_count,
+                        "underlying": underlying_ticker,
+                        "action": "SKIP_BUY",
+                        "reason": "SHORT canary allowlist empty — no warrant whitelisted",
+                        "signal": _compact_signal(sig),
+                    }
+                    _log_decision(decision)
+                    continue
+                if warrant["key"] not in SHORT_CANARY_WARRANTS:
+                    decision = {
+                        "ts": _now_utc().isoformat(),
+                        "check": self.check_count,
+                        "underlying": underlying_ticker,
+                        "action": "SKIP_BUY",
+                        "reason": f"SHORT canary-gated: {warrant['key']} not in allowlist",
+                        "signal": _compact_signal(sig),
+                    }
+                    _log_decision(decision)
+                    continue
+
             # Calculate position size
             cash = self.state["cash_sek"]
             alloc = cash * POSITION_SIZE_PCT / 100
@@ -390,26 +665,25 @@ class SwingTrader:
 
             total_cost = units * ask_price
 
-            # Execute BUY
-            self._execute_buy(warrant, units, ask_price, underlying_ticker, sig, total_cost)
+            # Execute BUY (direction passed through for state recording)
+            self._execute_buy(warrant, units, ask_price, underlying_ticker, sig, total_cost, direction)
 
     def _evaluate_entry(self, sig, ticker):
         """Check if signal data meets entry criteria. Returns (ok, reason).
 
-        Gates today (post-SG-incident hardening):
-        - action == BUY (SHORT entries gated until _check_exits is direction-aware)
+        Gates today (post-SG-incident hardening + 2026-04-09 SHORT unlock):
+        - action == BUY (LONG) or action == SELL (SHORT, if SHORT_ENABLED)
         - confidence >= MIN_BUY_CONFIDENCE (user rule: no sub-60% trades)
         - majority_count > minority_count (not just majority_count >= MIN)
-        - RSI in entry zone
+        - RSI in entry zone (LONG) or mirrored zone (SHORT)
         - MACD improving (LONG) or declining (SHORT) for N checks
         - regime stable for N consecutive checks (no single-check flips)
 
-        TODO(short-side): SHORT entries are accepted by the catalog (115 warrants
-        include SHORT MINIs) and direction-aware checks below are wired, but
-        _check_exits still uses LONG-only math (positive und_change = profit,
-        peak_underlying tracks max, etc). Enable SELL→SHORT here only after
-        _check_exits, peak/trough tracking, and exit_optimizer all flip on the
-        position's "direction" field. See codex review of f6b491c.
+        SHORT path (Fix 8, 2026-04-09): direction-aware exits are now wired
+        in _check_exits so SHORT entries can be safely opened. Gated to
+        SHORT_CANARY_WARRANTS for canary observation before full rollout.
+        The warrant-level canary check happens in _check_entries after
+        warrant selection, not here (this method doesn't know the warrant).
         """
         buy_count = sig.get("buy_count", 0)
         sell_count = sig.get("sell_count", 0)
@@ -417,15 +691,19 @@ class SwingTrader:
         action = sig.get("action", "HOLD")
         confidence = float(sig.get("confidence", 0) or 0)
 
-        # Direction check — LONG needs BUY. SHORT entries blocked at gate (see TODO above).
+        # Direction check — LONG needs BUY, SHORT needs SELL + SHORT_ENABLED.
         if action == "BUY":
             majority = buy_count
             minority = sell_count
             direction = "LONG"
         elif action == "SELL":
-            return False, f"action=SELL — SHORT entries gated (TODO: direction-aware exits)"
+            if not SHORT_ENABLED:
+                return False, "action=SELL — SHORT disabled (SHORT_ENABLED=False)"
+            majority = sell_count
+            minority = buy_count
+            direction = "SHORT"
         else:
-            return False, f"action={action} (need BUY consensus)"
+            return False, f"action={action} (need BUY or SELL consensus)"
 
         # User rule: no signal trades below 60% calibrated confidence
         if confidence < MIN_BUY_CONFIDENCE:
@@ -596,12 +874,19 @@ class SwingTrader:
              f"AVA={best['is_aza']} score={best['score']:.3f}")
         return best
 
-    def _execute_buy(self, warrant, units, ask_price, underlying_ticker, sig, total_cost):
-        """Execute a BUY order and set stop-loss."""
+    def _execute_buy(self, warrant, units, ask_price, underlying_ticker, sig, total_cost, direction="LONG"):
+        """Execute a BUY order and set stop-loss.
+
+        `direction` is "LONG" or "SHORT" — determines whether _check_exits
+        interprets profit as underlying rising (LONG) or falling (SHORT).
+        For SHORT, the user still BUYs an inverse warrant (BEAR/MINI S) on
+        Avanza — the warrant itself is a long position, just inversely
+        correlated with the underlying.
+        """
         pos_id = f"pos_{int(time.time())}"
 
         _log(f"BUY {warrant['name']}: {units}u @ {ask_price} = {total_cost:.0f} SEK "
-             f"(underlying: {underlying_ticker}, lev: {warrant['live_leverage']:.1f}x)")
+             f"(underlying: {underlying_ticker}, dir: {direction}, lev: {warrant['live_leverage']:.1f}x)")
 
         trade_record = {
             "ts": _now_utc().isoformat(),
@@ -610,6 +895,7 @@ class SwingTrader:
             "warrant_key": warrant["key"],
             "warrant_name": warrant["name"],
             "underlying": underlying_ticker,
+            "direction": direction,
             "units": units,
             "price": ask_price,
             "total_sek": round(total_cost, 2),
@@ -619,6 +905,7 @@ class SwingTrader:
             "dry_run": DRY_RUN,
         }
 
+        result = None
         if DRY_RUN:
             _log(f"  [DRY RUN] Would place BUY order: {units}u @ {ask_price}")
             trade_record["result"] = "DRY_RUN"
@@ -633,22 +920,34 @@ class SwingTrader:
 
         _log_trade(trade_record)
 
-        # Update state
+        # Update state. `fill_verified` defaults False — _verify_recent_fills
+        # will flip it True once Avanza confirms the position, or roll back
+        # the order after FILL_VERIFY_MAX_AGE_S if the order never filled
+        # (Fix 4, 2026-04-09). `buy_order_id` is captured from the order
+        # result so rollback can cancel the order. `direction` is recorded
+        # for direction-aware exit logic (Fix 8).
         underlying_price = warrant.get("underlying_price", 0)
+        buy_order_id = None
+        if isinstance(result, dict):
+            buy_order_id = result.get("order_id") or result.get("parsed", {}).get("orderId")
         self.state["positions"][pos_id] = {
             "warrant_key": warrant["key"],
             "warrant_name": warrant["name"],
             "ob_id": warrant["ob_id"],
             "api_type": warrant["api_type"],
             "underlying": underlying_ticker,
+            "direction": direction,  # "LONG" or "SHORT"
             "units": units,
             "entry_price": ask_price,
             "entry_underlying": underlying_price,
             "entry_ts": _now_utc().isoformat(),
-            "peak_underlying": underlying_price,
+            "peak_underlying": underlying_price,      # LONG: tracks max
+            "trough_underlying": underlying_price,    # SHORT: tracks min
             "trailing_active": False,
             "stop_order_id": None,
-            "leverage": warrant["live_leverage"],
+            "leverage": abs(warrant["live_leverage"]),  # always magnitude
+            "fill_verified": DRY_RUN,  # DRY_RUN positions count as verified
+            "buy_order_id": buy_order_id,
         }
         self.state["cash_sek"] -= total_cost
         self.state["last_buy_ts"] = _now_utc().isoformat()
@@ -738,8 +1037,41 @@ class SwingTrader:
         minutes_to_close = (close_cet - h) * 60
 
         to_remove = []
+        corrupt_ids = []  # positions with unusable entry_ts — drop without selling
 
         for pos_id, pos in list(self.state["positions"].items()):
+            # Fix 3b (2026-04-09): sell-failed cooldown. If a previous SELL
+            # attempt on this position failed, skip exit re-evaluation for a
+            # few minutes. Prevents tight cascade loops where the same
+            # position keeps hitting the same failing SELL path every cycle.
+            sell_failed_at = pos.get("sell_failed_at")
+            if sell_failed_at:
+                try:
+                    age = (now - datetime.datetime.fromisoformat(sell_failed_at)).total_seconds()
+                    if age < SELL_FAILED_COOLDOWN_SECONDS:
+                        continue
+                    # Cooldown expired — clear flags and retry
+                    pos.pop("sell_failed_at", None)
+                    pos.pop("sell_failed_reason", None)
+                except (ValueError, TypeError):
+                    # Corrupt timestamp — just clear the flag and retry
+                    pos.pop("sell_failed_at", None)
+                    pos.pop("sell_failed_reason", None)
+
+            # Fix 3 (2026-04-09): entry_ts hardening. If entry_ts is missing or
+            # unparseable, the position is phantom/corrupt — drop it without
+            # attempting a sell. Don't default to "now" or a synthetic value.
+            try:
+                entry_ts = datetime.datetime.fromisoformat(pos["entry_ts"])
+            except (KeyError, ValueError, TypeError) as e:
+                _log(f"CORRUPT POS DROPPED: {pos_id} invalid entry_ts: {e}")
+                _send_telegram(
+                    f"⚠ _SWING: dropped corrupt position {pos.get('warrant_name', pos_id)} "
+                    f"— invalid entry_ts ({e})_"
+                )
+                corrupt_ids.append(pos_id)
+                continue
+
             # Get current underlying price
             underlying_price = self._get_underlying_price(pos, prices)
             if underlying_price <= 0:
@@ -749,13 +1081,37 @@ class SwingTrader:
             if entry_und <= 0:
                 continue
 
-            # Track peak
-            if underlying_price > pos.get("peak_underlying", 0):
-                pos["peak_underlying"] = underlying_price
-
-            und_change_pct = (underlying_price - entry_und) / entry_und * 100
-            peak_und = pos.get("peak_underlying", entry_und)
-            from_peak_pct = (underlying_price - peak_und) / peak_und * 100 if peak_und > 0 else 0
+            # Direction-aware extreme tracking + profit/loss computation
+            # (Fix 8, 2026-04-09). For LONG, "extreme" = max underlying seen
+            # since entry; profit = (current - entry)/entry. For SHORT,
+            # "extreme" = min underlying seen; profit = (entry - current)/entry.
+            # `und_change_pct` below is direction-aware "profit percentage":
+            # positive = in profit, negative = in drawdown, regardless of
+            # direction. This keeps the downstream TAKE_PROFIT / HARD_STOP /
+            # TRAILING_STOP conditions unchanged — they still check "profit
+            # vs threshold" but the profit definition flips for SHORT.
+            direction = pos.get("direction", "LONG")  # default for legacy positions
+            if direction == "LONG":
+                if underlying_price > pos.get("peak_underlying", 0):
+                    pos["peak_underlying"] = underlying_price
+                und_change_pct = (underlying_price - entry_und) / entry_und * 100
+                extreme_und = pos.get("peak_underlying", entry_und)
+                # from_peak: how far underlying has retraced DOWN from its max
+                from_peak_pct = (underlying_price - extreme_und) / extreme_und * 100 if extreme_und > 0 else 0
+            else:  # SHORT
+                # Initialize trough if missing (legacy positions that somehow
+                # got marked SHORT without a trough field)
+                if "trough_underlying" not in pos or pos.get("trough_underlying", 0) <= 0:
+                    pos["trough_underlying"] = entry_und
+                if underlying_price < pos["trough_underlying"]:
+                    pos["trough_underlying"] = underlying_price
+                und_change_pct = (entry_und - underlying_price) / entry_und * 100
+                extreme_und = pos.get("trough_underlying", entry_und)
+                # from_peak: how far underlying has retraced UP from its min
+                # (this is a LOSS for a SHORT, so sign convention matches LONG
+                # where retracement from peak is a LOSS — both are negative
+                # when we're giving back profit).
+                from_peak_pct = (extreme_und - underlying_price) / extreme_und * 100 if extreme_und > 0 else 0
 
             # Get current warrant price for P&L
             warrant_data = fetch_price(self.page, pos["ob_id"], pos["api_type"])
@@ -764,12 +1120,16 @@ class SwingTrader:
             exit_reason = None
 
             # --- Exit optimizer: probabilistic exit assessment ---
+            # SHORT positions SKIP the optimizer entirely (Fix 8, 2026-04-09 —
+            # Option A): Position dataclass is LONG-only and would compute
+            # inverted EV, potentially steering toward bad exits. SHORTs fall
+            # through to the simple exit rules below.
             try:
                 from portfolio.cost_model import get_cost_model
                 from portfolio.exit_optimizer import MarketSnapshot, Position, compute_exit_plan
                 from portfolio.session_calendar import get_session_info
                 sess = get_session_info("warrant", underlying=pos.get("underlying"))
-                if sess.is_open and sess.remaining_minutes >= 2:
+                if direction == "LONG" and sess.is_open and sess.remaining_minutes >= 2:
                     opt_pos = Position(
                         symbol=pos.get("underlying", ""),
                         qty=pos.get("units", 0),
@@ -831,19 +1191,24 @@ class SwingTrader:
             if not exit_reason and und_change_pct <= -HARD_STOP_UNDERLYING_PCT:
                 exit_reason = f"HARD_STOP: underlying {und_change_pct:.2f}% <= -{HARD_STOP_UNDERLYING_PCT}%"
 
-            # 4. Signal reversal
+            # 4. Signal reversal (direction-aware, Fix 8 2026-04-09).
+            # LONG exits on SELL consensus; SHORT exits on BUY consensus.
             if not exit_reason and SIGNAL_REVERSAL_EXIT and signal_data:
                 sig = signal_data.get(pos["underlying"], {})
-                sell_count = sig.get("sell_count", 0)
+                if direction == "LONG":
+                    rev_count = sig.get("sell_count", 0)
+                    rev_label = "SELL"
+                else:
+                    rev_count = sig.get("buy_count", 0)
+                    rev_label = "BUY"
                 tf = sig.get("timeframes", {})
-                sell_tfs = sum(1 for v in tf.values() if v == "SELL") if tf else 0
+                rev_tfs = sum(1 for v in tf.values() if v == rev_label) if tf else 0
                 total_tfs = len(tf) if tf else 7
-                if sell_count >= MIN_BUY_VOTERS and total_tfs > 0 and sell_tfs / total_tfs >= MIN_BUY_TF_RATIO:
-                    exit_reason = f"SIGNAL_REVERSAL: {sell_count}S, {sell_tfs}/{total_tfs} TFs SELL"
+                if rev_count >= MIN_BUY_VOTERS and total_tfs > 0 and rev_tfs / total_tfs >= MIN_BUY_TF_RATIO:
+                    exit_reason = f"SIGNAL_REVERSAL: {rev_count}{rev_label[0]}, {rev_tfs}/{total_tfs} TFs {rev_label}"
 
-            # 5. Time limit
+            # 5. Time limit (entry_ts already parsed at top of loop)
             if not exit_reason:
-                entry_ts = datetime.datetime.fromisoformat(pos["entry_ts"])
                 held_hours = (now - entry_ts).total_seconds() / 3600
                 if held_hours >= MAX_HOLD_HOURS:
                     exit_reason = f"TIME_LIMIT: held {held_hours:.1f}h >= {MAX_HOLD_HOURS}h"
@@ -852,13 +1217,21 @@ class SwingTrader:
             if not exit_reason and minutes_to_close <= EOD_EXIT_MINUTES_BEFORE:
                 exit_reason = f"EOD_EXIT: {minutes_to_close:.0f}min to close"
 
-            # 7. Momentum exit — 3 consecutive declining underlying prices
+            # 7. Momentum exit (direction-aware, Fix 8 2026-04-09).
+            # LONG exits on 3 consecutive declines (underlying going against
+            # us); SHORT exits on 3 consecutive rises.
             if not exit_reason and len(self.state.get("_und_history", {}).get(pos["underlying"], [])) >= 3:
                 hist = self.state["_und_history"][pos["underlying"]][-3:]
-                if all(hist[i] < hist[i - 1] for i in range(1, len(hist))):
-                    decline_rate = (hist[-1] - hist[0]) / hist[0] * 100
-                    if decline_rate < -0.3:  # at least -0.3% over 3 checks
-                        exit_reason = f"MOMENTUM_EXIT: 3 declining checks ({decline_rate:.2f}%)"
+                if direction == "LONG":
+                    monotonic = all(hist[i] < hist[i - 1] for i in range(1, len(hist)))
+                    move_rate = (hist[-1] - hist[0]) / hist[0] * 100
+                    if monotonic and move_rate < -0.3:
+                        exit_reason = f"MOMENTUM_EXIT: 3 declining checks ({move_rate:.2f}%)"
+                else:  # SHORT
+                    monotonic = all(hist[i] > hist[i - 1] for i in range(1, len(hist)))
+                    move_rate = (hist[-1] - hist[0]) / hist[0] * 100
+                    if monotonic and move_rate > 0.3:
+                        exit_reason = f"MOMENTUM_EXIT: 3 rising checks ({move_rate:+.2f}%)"
 
             if exit_reason:
                 self._execute_sell(pos_id, pos, current_bid, underlying_price, exit_reason)
@@ -876,7 +1249,25 @@ class SwingTrader:
                     if len(hist) > 10:
                         hist.pop(0)
 
-        if to_remove:
+        # Fix 3b (2026-04-09): actually delete positions that were sold OR
+        # flagged corrupt. Prior to this fix, `to_remove.append(pos_id)` was
+        # populated but never iterated — `_execute_sell` handled deletion on
+        # success but returned early on failure, leaving phantom positions
+        # in state forever and causing the 08:25 UTC cascade.
+        dirty = False
+        for pos_id in to_remove:
+            if pos_id in self.state["positions"]:
+                # Only remove positions where _execute_sell succeeded.
+                # Failed sells leave sell_failed_at set — respected via the
+                # cooldown at the top of the loop next cycle. See Fix 3b.
+                if not self.state["positions"][pos_id].get("sell_failed_at"):
+                    del self.state["positions"][pos_id]
+                    dirty = True
+        for pos_id in corrupt_ids:
+            if pos_id in self.state["positions"]:
+                del self.state["positions"][pos_id]
+                dirty = True
+        if dirty:
             _save_state(self.state)
 
     def _execute_sell(self, pos_id, pos, current_bid, underlying_price, reason):
@@ -888,6 +1279,17 @@ class SwingTrader:
 
         _log(f"SELL {pos['warrant_name']}: {units}u @ {current_bid} = {proceeds:.0f} SEK "
              f"(PnL: {warrant_pnl_pct:+.1f}%) — {reason}")
+
+        # Safe held_hours calculation — _check_exits has already validated
+        # entry_ts (Fix 3), but this method can be called from other paths
+        # so we guard here too.
+        try:
+            held_hours = round(
+                (_now_utc() - datetime.datetime.fromisoformat(pos["entry_ts"])).total_seconds() / 3600,
+                2,
+            )
+        except (KeyError, ValueError, TypeError):
+            held_hours = 0.0
 
         trade_record = {
             "ts": _now_utc().isoformat(),
@@ -905,7 +1307,7 @@ class SwingTrader:
             "underlying_price": underlying_price,
             "entry_underlying": pos.get("entry_underlying", 0),
             "reason": reason,
-            "held_hours": round((_now_utc() - datetime.datetime.fromisoformat(pos["entry_ts"])).total_seconds() / 3600, 2),
+            "held_hours": held_hours,
             "dry_run": DRY_RUN,
         }
 
@@ -919,6 +1321,18 @@ class SwingTrader:
                 _log(f"  SELL FAILED: {result}")
                 _log_trade(trade_record)
                 _send_telegram(f"*SWING SELL FAILED* {pos['warrant_name']}\n{result.get('parsed', {}).get('message', str(result)[:100])}")
+                # Fix 3b (2026-04-09): mark the failure time so _check_exits
+                # will skip re-evaluating this position for
+                # SELL_FAILED_COOLDOWN_SECONDS. Prevents the cascade bug
+                # where a failing SELL re-fired every cycle.
+                pos["sell_failed_at"] = _now_utc().isoformat()
+                parsed_msg = ""
+                try:
+                    parsed_msg = str(result.get("parsed", {}).get("message", ""))[:200]
+                except (AttributeError, TypeError):
+                    parsed_msg = str(result)[:200]
+                pos["sell_failed_reason"] = parsed_msg
+                _save_state(self.state)
                 return
 
         _log_trade(trade_record)
