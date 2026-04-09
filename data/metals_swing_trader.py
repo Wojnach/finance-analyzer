@@ -38,6 +38,34 @@ import requests
 # custom embedding, the caller is free to attach their own handlers to
 # either `metals_loop` or `metals_loop.swing_trader` directly.
 logger = logging.getLogger("metals_loop.swing_trader")
+
+
+def _has_ancestor_emitter(lg: logging.Logger, target_level: int) -> bool:
+    """Walk the logger hierarchy for a handler that would emit target_level.
+
+    Codex review v7 finding HIGH (2026-04-09): this is a local duplicate
+    of metals_loop._has_ancestor_emitter. The previous version lazy-
+    imported that helper inside `_log()` at call time, which in turn
+    imported metals_loop — dragging in Playwright as a hard dependency
+    and changing cwd, breaking every standalone/unit-test use of this
+    module. Duplicating the 15-line helper here keeps _log() side-effect
+    free and allows metals_swing_trader to be imported in isolation
+    without pulling in the full metals_loop stack.
+
+    See data/metals_loop.py:_has_ancestor_emitter for the upstream
+    docstring — they stay in sync by code review, not by runtime link.
+    """
+    current = lg
+    while current is not None:
+        for h in current.handlers:
+            if isinstance(h, logging.NullHandler):
+                continue
+            if h.level == logging.NOTSET or h.level <= target_level:
+                return True
+        if not current.propagate:
+            break
+        current = current.parent
+    return False
 from metals_swing_config import (
     ACCOUNT_ID,
     BUY_COOLDOWN_MINUTES,
@@ -133,15 +161,14 @@ def _log(msg):
     # child logger under `metals_loop.swing_trader`, so we inherit level
     # and propagate to the parent's _LazyStdoutHandler).
     #
-    # Codex review v6 finding MEDIUM (2026-04-09): the visibility check
-    # walks ancestor handlers and skips NullHandlers / ERROR-level
-    # filters, so we only use the logger path when a record will
-    # actually emit somewhere. Under pytest caplog.at_level on
-    # "metals_loop", caplog adds a capture handler to the parent; the
-    # walk finds it via propagation and takes the logger path. Without
-    # setup, the fallback path writes directly to stdout.
-    from metals_loop import _has_ancestor_emitter
-
+    # Codex review v6/v7 (2026-04-09): the visibility check walks
+    # ancestor handlers via our LOCAL _has_ancestor_emitter (above) —
+    # NOT a lazy import from metals_loop, because that would drag in
+    # Playwright and mutate cwd as a side effect of a simple log call.
+    # Under pytest caplog.at_level on "metals_loop", caplog adds a
+    # capture handler to the parent; the walk finds it via propagation
+    # and takes the logger path. Without setup, the fallback path
+    # writes directly to stdout.
     if logger.isEnabledFor(logging.INFO) and _has_ancestor_emitter(logger, logging.INFO):
         logger.info(f"[SWING] {msg}")
     else:
