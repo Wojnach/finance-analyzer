@@ -237,6 +237,78 @@ def test_thread_safe_concurrent_calls_serialize():
     assert len(req_ids_sent) == n_threads  # no lost writes
 
 
+def test_request_id_mismatch_raises_after_retry():
+    """If the daemon echoes the wrong request_id we should surface the
+    desync rather than silently returning wrong results."""
+    spawn_count = [0]
+
+    def factory(*args, **kwargs):
+        spawn_count[0] += 1
+        # Every spawn returns a fake that responds with a bogus request_id
+        return _FakePopen(script=[
+            {"ready": True, "model": "fake-model"},
+            {"request_id": 999, "result": ["bogus"]},  # never matches sent id
+        ])
+
+    with mock.patch("portfolio.sentiment.subprocess.Popen", side_effect=factory):
+        with pytest.raises(RuntimeError, match="FinGPT failed after retry"):
+            sentiment._run_fingpt(["h1"])
+    assert spawn_count[0] == 2  # original spawn + one retry
+
+
+def test_missing_request_id_tolerated_backward_compat():
+    """If the daemon response omits request_id entirely, we accept the
+    result (older daemon versions may not echo it)."""
+    fake = _FakePopen(script=[
+        {"ready": True, "model": "fake-model"},
+        {"result": [{"sentiment": "positive", "confidence": 0.9}]},  # no request_id
+    ])
+    with mock.patch("portfolio.sentiment.subprocess.Popen", _spawn_returning(fake)):
+        result = sentiment._run_fingpt(["hello"])
+    assert result == [{"sentiment": "positive", "confidence": 0.9}]
+
+
+def test_request_timeout_kills_daemon_and_retries():
+    """If the daemon hangs (stdout produces no line before the timeout),
+    the client must kill it, restart, and surface an error only after
+    both attempts fail."""
+    spawn_count = [0]
+
+    def factory(*args, **kwargs):
+        spawn_count[0] += 1
+        # Fake that only returns the ready handshake — no response line.
+        # reader.readline() will time out waiting for one.
+        return _FakePopen(script=[{"ready": True, "model": "fake-model"}])
+
+    # Shrink the request timeout so the test runs in milliseconds, not seconds.
+    with (
+        mock.patch("portfolio.sentiment.subprocess.Popen", side_effect=factory),
+        mock.patch("portfolio.sentiment._FINGPT_REQUEST_TIMEOUT_S", 0.05),
+    ):
+        with pytest.raises(RuntimeError, match="FinGPT failed after retry"):
+            sentiment._run_fingpt(["hello"])
+    assert spawn_count[0] == 2  # original + one retry
+
+
+def test_spawn_timeout_kills_daemon():
+    """If the daemon never emits a ready handshake within
+    _FINGPT_READY_TIMEOUT_S, startup must fail fast with a helpful error."""
+    spawn_count = [0]
+
+    def factory(*args, **kwargs):
+        spawn_count[0] += 1
+        # Fake that never emits anything at all.
+        return _FakePopen(script=[])
+
+    with (
+        mock.patch("portfolio.sentiment.subprocess.Popen", side_effect=factory),
+        mock.patch("portfolio.sentiment._FINGPT_READY_TIMEOUT_S", 0.05),
+    ):
+        with pytest.raises(RuntimeError, match="FinGPT failed after retry"):
+            sentiment._run_fingpt(["hello"])
+    assert spawn_count[0] == 2  # 2 spawn attempts, both timed out
+
+
 def test_stop_daemon_is_idempotent():
     """_stop_fingpt_daemon should tolerate being called when no daemon is running."""
     assert sentiment._fingpt_daemon_proc is None

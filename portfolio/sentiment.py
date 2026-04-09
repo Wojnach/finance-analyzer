@@ -19,6 +19,7 @@ import atexit
 import json
 import logging
 import platform
+import queue
 import subprocess
 import threading
 from datetime import UTC, datetime
@@ -282,17 +283,67 @@ _FINGPT_DAEMON_SCRIPT = str(
     Path(__file__).resolve().parent.parent / "scripts" / "fingpt_daemon.py"
 )
 _fingpt_daemon_proc: subprocess.Popen | None = None
+_fingpt_daemon_reader: "_DaemonReader | None" = None
 _fingpt_daemon_lock = threading.Lock()
 _fingpt_request_id = 0
 _FINGPT_READY_TIMEOUT_S = 180  # model warm-load + startup
 _FINGPT_REQUEST_TIMEOUT_S = 60  # per-request inference ceiling
 
 
-def _spawn_fingpt_daemon() -> subprocess.Popen:
+class _DaemonReader(threading.Thread):
+    """Background reader that pipes daemon stdout lines into a queue.
+
+    Without this, a hung model would leave the main thread blocked inside
+    ``stdout.readline()`` while holding ``_fingpt_daemon_lock``, which would
+    starve every ThreadPoolExecutor worker that tries to compute sentiment.
+    Using a bounded ``queue.get(timeout=...)`` lets the client detect the
+    hang and kill the daemon.
+
+    One None sentinel is pushed on EOF/exception; all subsequent reads will
+    return None immediately (the sentinel is re-enqueued on each read so the
+    queue stays non-empty).
+    """
+
+    def __init__(self, proc: subprocess.Popen):
+        super().__init__(daemon=True, name="fingpt-daemon-reader")
+        self._proc = proc
+        self._q: "queue.Queue[str | None]" = queue.Queue()
+
+    def run(self) -> None:
+        try:
+            while True:
+                line = self._proc.stdout.readline()
+                if not line:
+                    break
+                self._q.put(line)
+        except Exception as exc:
+            logger.debug("Fingpt daemon reader exception: %s", exc)
+        finally:
+            self._q.put(None)
+
+    def readline(self, timeout: float) -> str | None:
+        """Return the next stdout line, or None on timeout / EOF.
+
+        Once EOF is observed, subsequent calls return None immediately
+        because we re-enqueue the sentinel for the next reader.
+        """
+        try:
+            line = self._q.get(timeout=timeout)
+        except queue.Empty:
+            return None
+        if line is None:
+            # Re-post sentinel so subsequent reads also observe EOF cheaply.
+            self._q.put(None)
+            return None
+        return line
+
+
+def _spawn_fingpt_daemon() -> tuple[subprocess.Popen, "_DaemonReader"]:
     """Launch the daemon subprocess and wait for its 'ready' handshake.
 
-    Caller must hold _fingpt_daemon_lock. Returns a Popen with stdin/stdout
-    as text pipes; stderr flows to the parent's stderr (daemon logs there).
+    Caller must hold ``_fingpt_daemon_lock``. Returns ``(proc, reader)``.
+    The reader is a background thread pumping stdout lines into a bounded
+    queue, which is how every subsequent read enforces a timeout.
     """
     logger.info("Spawning FinGPT warm daemon: %s", _FINGPT_DAEMON_SCRIPT)
     proc = subprocess.Popen(
@@ -303,42 +354,61 @@ def _spawn_fingpt_daemon() -> subprocess.Popen:
         text=True,
         bufsize=1,  # line-buffered
     )
+    reader = _DaemonReader(proc)
+    reader.start()
 
     # Wait for the "ready" handshake line. The daemon loads the model on
-    # startup (~30-60s cold) so this must be generous.
-    ready_line = proc.stdout.readline()
-    if not ready_line:
-        raise RuntimeError("FinGPT daemon exited before emitting ready handshake")
+    # startup (~30-60s cold) so this must be generous — bounded by
+    # _FINGPT_READY_TIMEOUT_S (180s).
+    ready_line = reader.readline(timeout=_FINGPT_READY_TIMEOUT_S)
+    if ready_line is None:
+        # Timeout or EOF before handshake arrived — the daemon is dead or hung.
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        raise RuntimeError(
+            "FinGPT daemon did not emit ready handshake within "
+            f"{_FINGPT_READY_TIMEOUT_S}s"
+        )
     try:
         handshake = json.loads(ready_line)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"FinGPT daemon emitted non-JSON handshake: {ready_line!r}") from exc
+        proc.kill()
+        raise RuntimeError(
+            f"FinGPT daemon emitted non-JSON handshake: {ready_line!r}"
+        ) from exc
     if not handshake.get("ready"):
+        proc.kill()
         raise RuntimeError(f"FinGPT daemon failed to warm up: {handshake}")
     logger.info("FinGPT warm daemon ready (model=%s, pid=%d)",
                 handshake.get("model"), proc.pid)
-    return proc
+    return proc, reader
 
 
-def _ensure_fingpt_daemon() -> subprocess.Popen:
-    """Return the live daemon process, spawning it lazily and restarting it
-    if it has died. Caller must hold _fingpt_daemon_lock."""
-    global _fingpt_daemon_proc
+def _ensure_fingpt_daemon() -> tuple[subprocess.Popen, "_DaemonReader"]:
+    """Return the live daemon process + reader, spawning it lazily and
+    restarting both if the process has died. Caller must hold
+    ``_fingpt_daemon_lock``."""
+    global _fingpt_daemon_proc, _fingpt_daemon_reader
     if _fingpt_daemon_proc is not None and _fingpt_daemon_proc.poll() is None:
-        return _fingpt_daemon_proc
+        return _fingpt_daemon_proc, _fingpt_daemon_reader  # type: ignore[return-value]
     if _fingpt_daemon_proc is not None:
         logger.warning("FinGPT daemon exited (code=%s), restarting",
                        _fingpt_daemon_proc.returncode)
         _fingpt_daemon_proc = None
-    _fingpt_daemon_proc = _spawn_fingpt_daemon()
-    return _fingpt_daemon_proc
+        _fingpt_daemon_reader = None
+    _fingpt_daemon_proc, _fingpt_daemon_reader = _spawn_fingpt_daemon()
+    return _fingpt_daemon_proc, _fingpt_daemon_reader
 
 
 def _stop_fingpt_daemon() -> None:
     """Graceful shutdown hook — closes stdin and waits briefly for exit."""
-    global _fingpt_daemon_proc
+    global _fingpt_daemon_proc, _fingpt_daemon_reader
     with _fingpt_daemon_lock:
         if _fingpt_daemon_proc is None or _fingpt_daemon_proc.poll() is not None:
+            _fingpt_daemon_proc = None
+            _fingpt_daemon_reader = None
             return
         try:
             _fingpt_daemon_proc.stdin.write(json.dumps({"quit": True}) + "\n")
@@ -351,6 +421,7 @@ def _stop_fingpt_daemon() -> None:
         except subprocess.TimeoutExpired:
             _fingpt_daemon_proc.kill()
         _fingpt_daemon_proc = None
+        _fingpt_daemon_reader = None
 
 
 atexit.register(_stop_fingpt_daemon)
@@ -360,9 +431,9 @@ def _run_fingpt(texts, model_name=None, cumulative=False, ticker="unknown"):
     """Run FinGPT sentiment inference via the warm daemon.
 
     Model is loaded once at daemon spawn; subsequent calls incur only the
-    inference cost (~1-3s per batch). On daemon crash, the client retries
-    once with a fresh daemon before giving up (the caller has a FinBERT
-    fallback path that handles a second failure gracefully).
+    inference cost (~1-3s per batch). On daemon crash or timeout, the client
+    retries once with a fresh daemon before giving up (the caller has a
+    FinBERT fallback path that handles a second failure gracefully).
 
     Args:
         texts: List of headline strings
@@ -375,7 +446,7 @@ def _run_fingpt(texts, model_name=None, cumulative=False, ticker="unknown"):
     Returns:
         List of sentiment result dicts (per-headline) or single dict (cumulative)
     """
-    global _fingpt_request_id
+    global _fingpt_request_id, _fingpt_daemon_proc, _fingpt_daemon_reader
     # model_name is intentionally unused — daemon auto-detects
     _ = model_name
 
@@ -388,17 +459,31 @@ def _run_fingpt(texts, model_name=None, cumulative=False, ticker="unknown"):
     for attempt in (1, 2):
         with _fingpt_daemon_lock:
             try:
-                proc = _ensure_fingpt_daemon()
+                proc, reader = _ensure_fingpt_daemon()
                 _fingpt_request_id += 1
-                req_body["request_id"] = _fingpt_request_id
+                sent_req_id = _fingpt_request_id
+                req_body["request_id"] = sent_req_id
                 proc.stdin.write(json.dumps(req_body) + "\n")
                 proc.stdin.flush()
-                resp_line = proc.stdout.readline()
-                if not resp_line:
-                    raise RuntimeError("FinGPT daemon returned empty response")
+                resp_line = reader.readline(timeout=_FINGPT_REQUEST_TIMEOUT_S)
+                if resp_line is None:
+                    raise RuntimeError(
+                        f"FinGPT daemon timeout/EOF after "
+                        f"{_FINGPT_REQUEST_TIMEOUT_S}s (req_id={sent_req_id})"
+                    )
                 resp = json.loads(resp_line)
                 if "error" in resp:
                     raise RuntimeError(f"FinGPT daemon error: {resp['error']}")
+                # Validate the echo matches — guards against any protocol
+                # desync (daemon emitting a prior response, a stray log line,
+                # etc.). Missing request_id in response is tolerated for
+                # backward compat with daemon versions that don't echo it.
+                echoed = resp.get("request_id")
+                if echoed is not None and echoed != sent_req_id:
+                    raise RuntimeError(
+                        f"FinGPT daemon response request_id mismatch: "
+                        f"sent {sent_req_id}, got {echoed}"
+                    )
                 return resp["result"]
             except (BrokenPipeError, RuntimeError, json.JSONDecodeError) as exc:
                 logger.warning(
@@ -410,7 +495,8 @@ def _run_fingpt(texts, model_name=None, cumulative=False, ticker="unknown"):
                         _fingpt_daemon_proc.kill()
                     except Exception:
                         pass
-                globals()["_fingpt_daemon_proc"] = None
+                _fingpt_daemon_proc = None
+                _fingpt_daemon_reader = None
                 if attempt == 2:
                     raise RuntimeError(f"FinGPT failed after retry: {exc}") from exc
     raise RuntimeError("FinGPT unreachable")  # unreachable, satisfies type checker

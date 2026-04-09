@@ -493,7 +493,7 @@ class TestGetMarketStateClosed:
 
         state, symbols, interval = get_market_state()
         assert state == "closed"
-        assert interval == INTERVAL_MARKET_CLOSED  # 300
+        assert interval == INTERVAL_MARKET_CLOSED
         assert isinstance(symbols, set)
 
     @patch("portfolio.market_timing.datetime")
