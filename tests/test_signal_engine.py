@@ -277,3 +277,181 @@ class TestDirectionalAccuracyGating:
         }
         result = _weighted_consensus(votes, accuracy_data, "ranging")
         assert result[0] == "BUY"
+
+
+# ---------------------------------------------------------------------------
+# Funding rate horizon gating (2026-04-09)
+# ---------------------------------------------------------------------------
+
+class TestFundingRateHorizonGating:
+    """Funding rate: 74.2% at 3h but 29.9% at 1d. Should only vote at 3h/4h."""
+
+    def test_funding_gated_at_default_in_all_regimes(self):
+        """funding should be in _default gate for ranging, trending-up/down, high-vol."""
+        from portfolio.signal_engine import REGIME_GATED_SIGNALS
+
+        for regime in ("ranging", "trending-up", "trending-down", "high-vol"):
+            assert regime in REGIME_GATED_SIGNALS, f"{regime} missing from REGIME_GATED_SIGNALS"
+            default_set = REGIME_GATED_SIGNALS[regime].get("_default", frozenset())
+            assert "funding" in default_set, (
+                f"funding should be gated at _default in {regime}"
+            )
+
+    def test_funding_not_gated_at_3h_ranging(self):
+        """funding should NOT be in 3h gate for ranging (74.2% accuracy there)."""
+        from portfolio.signal_engine import REGIME_GATED_SIGNALS
+
+        gate_3h = REGIME_GATED_SIGNALS["ranging"].get("3h", frozenset())
+        assert "funding" not in gate_3h
+
+    def test_funding_not_gated_at_4h_ranging(self):
+        """funding should NOT be in 4h gate for ranging."""
+        from portfolio.signal_engine import REGIME_GATED_SIGNALS
+
+        gate_4h = REGIME_GATED_SIGNALS["ranging"].get("4h", frozenset())
+        assert "funding" not in gate_4h
+
+    def test_funding_not_in_disabled_signals(self):
+        """funding was removed from DISABLED_SIGNALS (re-enabled 2026-04-09)."""
+        from portfolio.tickers import DISABLED_SIGNALS
+
+        assert "funding" not in DISABLED_SIGNALS
+
+
+# ---------------------------------------------------------------------------
+# On-chain BTC signal (2026-04-09)
+# ---------------------------------------------------------------------------
+
+class TestOnchainSignal:
+    """On-chain signal: MVRV Z-Score, SOPR, NUPL, netflow → majority vote for BTC."""
+
+    def test_onchain_in_signal_names(self):
+        """onchain should be in the SIGNAL_NAMES list."""
+        from portfolio.tickers import SIGNAL_NAMES
+
+        assert "onchain" in SIGNAL_NAMES
+
+    def _run_onchain_block(self, ticker, cached_data):
+        """Helper: run just the on-chain signal block in isolation.
+
+        Returns (vote, extra_info) without calling generate_signal
+        (which needs dozens of indicator keys).
+        """
+        from portfolio.tickers import CRYPTO_SYMBOLS
+        from portfolio.shared_state import ONCHAIN_TTL
+
+        votes = {"onchain": "HOLD"}
+        extra_info = {}
+
+        if ticker == "BTC-USD":
+            oc = cached_data
+            if oc:
+                sub_votes = []
+                zscore = oc.get("mvrv_zscore")
+                if zscore is not None:
+                    if zscore < 1.0:
+                        sub_votes.append("BUY")
+                    elif zscore > 5.0:
+                        sub_votes.append("SELL")
+                    else:
+                        sub_votes.append("HOLD")
+                    extra_info["onchain_mvrv_zscore"] = round(zscore, 2)
+                sopr = oc.get("sopr")
+                if sopr is not None:
+                    if sopr < 0.97:
+                        sub_votes.append("BUY")
+                    elif sopr > 1.05:
+                        sub_votes.append("SELL")
+                    else:
+                        sub_votes.append("HOLD")
+                    extra_info["onchain_sopr"] = round(sopr, 4)
+                nupl = oc.get("nupl")
+                if nupl is not None:
+                    if nupl < 0:
+                        sub_votes.append("BUY")
+                    elif nupl > 0.75:
+                        sub_votes.append("SELL")
+                    else:
+                        sub_votes.append("HOLD")
+                netflow = oc.get("netflow")
+                if netflow is not None:
+                    if netflow < 0:
+                        sub_votes.append("BUY")
+                    elif netflow > 0:
+                        sub_votes.append("SELL")
+                    else:
+                        sub_votes.append("HOLD")
+                buy_count = sub_votes.count("BUY")
+                sell_count = sub_votes.count("SELL")
+                total = buy_count + sell_count
+                if total >= 2:
+                    if buy_count > sell_count:
+                        votes["onchain"] = "BUY"
+                    elif sell_count > buy_count:
+                        votes["onchain"] = "SELL"
+                    extra_info["onchain_sub_votes"] = f"{buy_count}B/{sell_count}S"
+
+        return votes["onchain"], extra_info
+
+    def test_onchain_buy_when_metrics_undervalued(self):
+        """When MVRV < 1, SOPR < 0.97, NUPL < 0 → majority BUY."""
+        data = {
+            "mvrv_zscore": 0.5,   # < 1.0 → BUY
+            "sopr": 0.95,         # < 0.97 → BUY
+            "nupl": -0.1,         # < 0 → BUY
+            "netflow": 500,       # > 0 → SELL (minority)
+        }
+        vote, extra = self._run_onchain_block("BTC-USD", data)
+        assert vote == "BUY"
+        assert extra["onchain_mvrv_zscore"] == 0.5
+        assert extra["onchain_sopr"] == 0.95
+        assert extra["onchain_sub_votes"] == "3B/1S"
+
+    def test_onchain_sell_when_overheated(self):
+        """When MVRV > 5, SOPR > 1.05, NUPL > 0.75 → majority SELL."""
+        data = {
+            "mvrv_zscore": 6.0,   # > 5.0 → SELL
+            "sopr": 1.08,         # > 1.05 → SELL
+            "nupl": 0.80,         # > 0.75 → SELL
+            "netflow": -100,      # < 0 → BUY (minority)
+        }
+        vote, extra = self._run_onchain_block("BTC-USD", data)
+        assert vote == "SELL"
+        assert extra["onchain_sub_votes"] == "1B/3S"
+
+    def test_onchain_hold_for_non_btc(self):
+        """On-chain signal should be HOLD for non-BTC tickers."""
+        data = {"mvrv_zscore": 0.5, "sopr": 0.95, "nupl": -0.1, "netflow": -100}
+        vote, extra = self._run_onchain_block("ETH-USD", data)
+        assert vote == "HOLD"
+        assert not extra  # no extra_info populated
+
+    def test_onchain_hold_when_no_data(self):
+        """On-chain signal should be HOLD when API returns None."""
+        vote, extra = self._run_onchain_block("BTC-USD", None)
+        assert vote == "HOLD"
+
+    def test_onchain_hold_when_neutral_metrics(self):
+        """When all metrics are neutral, should remain HOLD (no majority)."""
+        data = {
+            "mvrv_zscore": 3.0,   # 1-5 → HOLD
+            "sopr": 1.00,         # 0.97-1.05 → HOLD
+            "nupl": 0.4,          # 0-0.75 → HOLD
+            "netflow": 0,         # 0 → HOLD
+        }
+        vote, extra = self._run_onchain_block("BTC-USD", data)
+        assert vote == "HOLD"
+        # No sub_votes key when total active (BUY+SELL) < 2
+        assert "onchain_sub_votes" not in extra
+
+    def test_onchain_tie_stays_hold(self):
+        """When BUY and SELL are tied (2B/2S), should remain HOLD."""
+        data = {
+            "mvrv_zscore": 0.5,   # < 1.0 → BUY
+            "sopr": 0.95,         # < 0.97 → BUY
+            "nupl": 0.80,         # > 0.75 → SELL
+            "netflow": 500,       # > 0 → SELL
+        }
+        vote, extra = self._run_onchain_block("BTC-USD", data)
+        assert vote == "HOLD"
+        assert extra["onchain_sub_votes"] == "2B/2S"

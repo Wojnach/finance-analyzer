@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from portfolio.indicators import detect_regime
-from portfolio.shared_state import FEAR_GREED_TTL, FUNDING_RATE_TTL, MINISTRAL_TTL, SENTIMENT_TTL, VOLUME_TTL, _cached, _cached_or_enqueue
+from portfolio.shared_state import FEAR_GREED_TTL, FUNDING_RATE_TTL, MINISTRAL_TTL, ONCHAIN_TTL, SENTIMENT_TTL, VOLUME_TTL, _cached, _cached_or_enqueue
 from portfolio.signal_registry import get_enhanced_signals, load_signal_func
 from portfolio.signal_utils import true_range
 from portfolio.tickers import CRYPTO_SYMBOLS, DISABLED_SIGNALS, GPU_SIGNALS, METALS_SYMBOLS, SIGNAL_NAMES, STOCK_SYMBOLS
@@ -1339,6 +1339,68 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 votes["funding"] = fr["action"]
         except ImportError:
             logger.debug("Optional module %s not available", "funding_rate")
+
+    # On-Chain BTC Signal — MVRV Z-Score, SOPR, NUPL, Exchange Netflow.
+    # BTC-only. Data from BGeometrics (12h cache, 15 req/day).
+    # Added 2026-04-09: promotes existing on-chain data to a voting signal.
+    votes["onchain"] = "HOLD"
+    if ticker == "BTC-USD":
+        try:
+            from portfolio.onchain_data import get_onchain_data
+
+            oc = _cached("onchain_btc_signal", ONCHAIN_TTL, get_onchain_data)
+            if oc:
+                sub_votes = []
+                # MVRV Z-Score: <1 undervalued (BUY), >5 overheated (SELL)
+                zscore = oc.get("mvrv_zscore")
+                if zscore is not None:
+                    if zscore < 1.0:
+                        sub_votes.append("BUY")
+                    elif zscore > 5.0:
+                        sub_votes.append("SELL")
+                    else:
+                        sub_votes.append("HOLD")
+                    extra_info["onchain_mvrv_zscore"] = round(zscore, 2)
+                # SOPR: <0.97 capitulation (BUY), >1.05 profit-taking (SELL)
+                sopr = oc.get("sopr")
+                if sopr is not None:
+                    if sopr < 0.97:
+                        sub_votes.append("BUY")
+                    elif sopr > 1.05:
+                        sub_votes.append("SELL")
+                    else:
+                        sub_votes.append("HOLD")
+                    extra_info["onchain_sopr"] = round(sopr, 4)
+                # NUPL: <0 capitulation (BUY), >0.75 euphoria (SELL)
+                nupl = oc.get("nupl")
+                if nupl is not None:
+                    if nupl < 0:
+                        sub_votes.append("BUY")
+                    elif nupl > 0.75:
+                        sub_votes.append("SELL")
+                    else:
+                        sub_votes.append("HOLD")
+                # Exchange netflow: negative = accumulation (BUY)
+                netflow = oc.get("netflow")
+                if netflow is not None:
+                    if netflow < 0:
+                        sub_votes.append("BUY")
+                    elif netflow > 0:
+                        sub_votes.append("SELL")
+                    else:
+                        sub_votes.append("HOLD")
+                # Majority vote
+                buy_count = sub_votes.count("BUY")
+                sell_count = sub_votes.count("SELL")
+                total = buy_count + sell_count
+                if total >= 2:
+                    if buy_count > sell_count:
+                        votes["onchain"] = "BUY"
+                    elif sell_count > buy_count:
+                        votes["onchain"] = "SELL"
+                    extra_info["onchain_sub_votes"] = f"{buy_count}B/{sell_count}S"
+        except ImportError:
+            logger.debug("Optional module %s not available", "onchain_data")
 
     # Volume Confirmation (spike + price direction = vote)
     votes["volume"] = "HOLD"

@@ -105,4 +105,5 @@ SIGNAL_NAMES = [
     "metals_cross_asset",
     "cot_positioning",
     "credit_spread_risk",
+    "onchain",
 ]
