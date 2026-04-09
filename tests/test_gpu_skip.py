@@ -89,30 +89,28 @@ class TestShouldSkipGpu:
         assert should_skip_gpu("XAG-USD", now=self._off_hours()) is False
 
     def test_stock_skipped_off_hours(self):
-        assert should_skip_gpu("NVDA", now=self._off_hours()) is True
+        # MSTR is the only stock in STOCK_SYMBOLS after the Apr-09 reduction.
         assert should_skip_gpu("MSTR", now=self._off_hours()) is True
-        assert should_skip_gpu("MU", now=self._off_hours()) is True
 
     def test_stock_not_skipped_during_hours(self):
-        assert should_skip_gpu("NVDA", now=self._market_hours()) is False
         assert should_skip_gpu("MSTR", now=self._market_hours()) is False
 
     def test_config_disables_feature(self):
         cfg = {"gpu_signals": {"skip_stocks_offhours": False}}
-        assert should_skip_gpu("NVDA", config=cfg, now=self._off_hours()) is False
+        assert should_skip_gpu("MSTR", config=cfg, now=self._off_hours()) is False
 
     def test_config_buffers(self):
         # 13:10 UTC = 20 min before NYSE open (EDT 13:30)
         pre_open = datetime(2026, 6, 10, 13, 10, tzinfo=UTC)
 
         # Default buffer (30 min) — should NOT skip (within buffer)
-        assert should_skip_gpu("NVDA", now=pre_open) is False
+        assert should_skip_gpu("MSTR", now=pre_open) is False
 
         # No buffer — should skip (market not open yet)
         cfg = {"gpu_signals": {"pre_market_buffer_min": 0}}
-        assert should_skip_gpu("NVDA", config=cfg, now=pre_open) is True
+        assert should_skip_gpu("MSTR", config=cfg, now=pre_open) is True
 
     def test_weekend_stocks_skipped(self):
         weekend = datetime(2026, 6, 13, 15, 0, tzinfo=UTC)  # Saturday
-        assert should_skip_gpu("NVDA", now=weekend) is True
+        assert should_skip_gpu("MSTR", now=weekend) is True
         assert should_skip_gpu("BTC-USD", now=weekend) is False
