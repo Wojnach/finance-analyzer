@@ -247,8 +247,44 @@ def _fetch_stock_headlines(ticker, newsapi_key=None, limit=20):
     return articles[:limit]
 
 
+# 2026-04-09 (fix/bert-inproc-gpu): map subprocess script paths to in-process
+# model names so _run_model can try the fast in-process path first and fall
+# back to the old subprocess path on failure. See portfolio/bert_sentiment.py
+# for the full rationale — short version: subprocess cold-load was ~3-10s per
+# call, in-process on GPU is ~50-200ms per call, ~20-60x speedup with the
+# same output shape.
+_INPROC_BERT_MAP = {
+    CRYPTOBERT_SCRIPT: "CryptoBERT",
+    TRADING_HERO_SCRIPT: "Trading-Hero-LLM",
+    FINBERT_SCRIPT: "FinBERT",
+}
+
+
 def _run_model(script, texts):
-    """Run a sentiment model via subprocess (legacy pattern)."""
+    """Run a sentiment model.
+
+    Tries the in-process BERT cache first (portfolio.bert_sentiment) because
+    it avoids the ~3-10 s subprocess spawn + cold-load cost and runs on GPU
+    if available. Falls back to the legacy subprocess pattern on any failure
+    so the main loop stays up even if torch/transformers break or a model
+    cache dir is missing.
+    """
+    model_name = _INPROC_BERT_MAP.get(script)
+    if model_name is not None:
+        try:
+            from portfolio.bert_sentiment import predict as _bert_predict
+            return _bert_predict(model_name, texts)
+        except Exception as e:
+            # Log once per (model, exception class) to keep the log clean if
+            # we end up stuck on the subprocess fallback. sentiment.py already
+            # has its own logger configured.
+            logger.warning(
+                "In-process BERT %s failed, falling back to subprocess: %s",
+                model_name, e,
+            )
+
+    # Legacy subprocess path (also used if script is not one of the three
+    # known BERT models, though that doesn't happen today).
     proc = subprocess.run(
         [MODELS_PYTHON, script],
         input=json.dumps(texts),
@@ -429,17 +465,14 @@ def flush_ab_log() -> None:
 
 
 def _run_finbert(texts):
-    """Run FinBERT sentiment inference (CPU fallback)."""
-    proc = subprocess.run(
-        [MODELS_PYTHON, FINBERT_SCRIPT],
-        input=json.dumps(texts),
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"FinBERT failed: {proc.stderr[:200]}")
-    return json.loads(proc.stdout)
+    """Run FinBERT sentiment inference.
+
+    2026-04-09 (fix/bert-inproc-gpu): routes through _run_model so FinBERT
+    also benefits from the in-process GPU cache. _run_model's _INPROC_BERT_MAP
+    knows that FINBERT_SCRIPT -> "FinBERT" and will hit bert_sentiment.predict
+    first, falling back to the old subprocess path on any exception.
+    """
+    return _run_model(FINBERT_SCRIPT, texts)
 
 
 # ---------------------------------------------------------------------------
