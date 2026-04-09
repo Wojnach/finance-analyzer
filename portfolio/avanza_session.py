@@ -293,37 +293,161 @@ def api_delete(path: str) -> Any:
 # --- Trading convenience functions ---
 
 
-def get_buying_power(account_id: str | None = None) -> dict:
+def get_buying_power(account_id: str | None = None) -> dict | None:
     """Get buying power and account value for an account.
 
+    2026-04-09 (Bug C7 fix): ported the multi-shape + multi-field-ID fallback
+    pattern from ``data/metals_avanza_helpers.fetch_account_cash`` after Avanza
+    changed the ``/_api/account-overview/overview/categorizedAccounts`` response
+    shape mid-day. The endpoint used to return a single top-level key
+    ``categorizedAccounts`` (an array of categories each with an ``accounts``
+    child). The new shape exposes three top-level keys simultaneously:
+    ``categories`` (new categorized path), ``accounts`` (flat list of all user
+    accounts), and ``loans``. At the same time, the per-account ID field
+    renamed from ``accountId`` to ``id`` (the other Avanza endpoints such as
+    ``position-data/positions`` already use ``id`` — see ``get_positions``).
+
+    Previously this function assumed the legacy shape + legacy ID field, so on
+    the new shape the iteration walked an empty list, then hit ``cats[0]`` on
+    an empty list (IndexError) or — if the shape still exposed the legacy key
+    but with no matches — silently returned fake numbers derived from the
+    first category's totalValue. That made callers like ``fish_straddle`` and
+    ``fish_monitor_live`` size positions off wrong cash balances.
+
+    We now try all three shapes (legacy categorized → flat → new categorized)
+    and all four known ID fields (``accountId``, ``id``, ``accountNumber``,
+    ``number``), taking whichever finds the target account first. On any
+    failure path we return ``None`` so callers can distinguish "API call failed"
+    from "balance is legitimately zero" — callers must now explicitly handle
+    the ``None`` case (previously they silently got ``buying_power=0``, which
+    was a dangerous silent failure).
+
+    Args:
+        account_id: Avanza account ID (default: ``DEFAULT_ACCOUNT_ID``).
+
     Returns:
-        Dict with buying_power, total_value, own_capital (all in SEK).
-        Returns empty dict on failure.
+        Dict with ``buying_power``, ``total_value``, ``own_capital`` (all SEK)
+        on success. ``None`` on any failure (HTTP error, account not found,
+        shape drift, etc.). Failures are logged with enough diagnostic context
+        (sample keys, counts per shape) to identify the next shape drift
+        without guessing.
     """
     aid = str(account_id or DEFAULT_ACCOUNT_ID)
-    data = api_get("/_api/account-overview/overview/categorizedAccounts")
-    for cat in data.get("categorizedAccounts", []):
-        for acc in cat.get("accounts", []):
-            if str(acc.get("accountId", "")) == aid:
-                def _v(obj):
-                    return obj.get("value", 0) if isinstance(obj, dict) else (obj or 0)
-                return {
-                    "buying_power": _v(acc.get("buyingPower", {})),
-                    "total_value": _v(acc.get("totalValue", {})),
-                    "own_capital": _v(acc.get("ownCapital", {})),
-                }
-    # Account not found by accountId — fallback using categorizedAccounts top-level
-    # (structure may nest accounts differently across Avanza updates)
-    cats = data.get("categorizedAccounts", [])
-    total = cats[0].get("totalValue", {}) if cats else {}
-    total_val = total.get("value", 0) if isinstance(total, dict) else 0
-    positions = get_positions()
-    pos_val = sum(p.get("value", 0) for p in positions if str(p.get("account_id")) == aid)
-    return {
-        "buying_power": round(total_val - pos_val, 2),
-        "total_value": total_val,
-        "own_capital": total_val,
-    }
+
+    try:
+        data = api_get("/_api/account-overview/overview/categorizedAccounts")
+    except Exception as e:
+        logger.warning(
+            "get_buying_power: api_get raised account_id=%s exception=%r",
+            aid, e,
+        )
+        return None
+
+    if not isinstance(data, dict):
+        logger.warning(
+            "get_buying_power: unexpected response type account_id=%s type=%s",
+            aid, type(data).__name__,
+        )
+        return None
+
+    def _v(obj):
+        """Unwrap Avanza {value: N} wrappers → N, else return obj as-is."""
+        if isinstance(obj, dict) and "value" in obj:
+            return obj["value"]
+        return obj
+
+    def _get_acc_id(acc: dict) -> str | None:
+        """Try every known ID field in order — matches fetch_account_cash.
+
+        Order preserved from the reference JS implementation so a regression
+        hitting one file makes the other equally easy to diagnose.
+        """
+        if not isinstance(acc, dict):
+            return None
+        for key in ("accountId", "id", "accountNumber", "number"):
+            val = acc.get(key)
+            if val is not None:
+                return str(val)
+        return None
+
+    def _get_balance(acc: dict, primary: str, alternates: tuple[str, ...]):
+        """Try primary balance field, fall back to alternates.
+
+        2026-04-09: we haven't confirmed whether `buyingPower` survived the
+        shape change, so we try common alternates if the primary is missing.
+        Mirrors getBalance() in fetch_account_cash.
+        """
+        p = _v(acc.get(primary))
+        if p is not None:
+            return p
+        for alt in alternates:
+            x = _v(acc.get(alt))
+            if x is not None:
+                return x
+        return None
+
+    def _make_result(acc: dict) -> dict:
+        return {
+            "buying_power": _get_balance(
+                acc, "buyingPower",
+                ("buyingPowerAvailable", "availableCash", "availableFunds"),
+            ),
+            "total_value": _get_balance(
+                acc, "totalValue",
+                ("accountTotalValue", "totalHoldings"),
+            ),
+            "own_capital": _get_balance(
+                acc, "ownCapital",
+                ("netDeposit", "selfOwnedCapital"),
+            ),
+        }
+
+    ids_seen: list[str] = []
+    sample_account_keys: list[str] | None = None
+
+    def _check_account(acc: dict) -> dict | None:
+        nonlocal sample_account_keys
+        if sample_account_keys is None and isinstance(acc, dict):
+            sample_account_keys = list(acc.keys())
+        acc_id = _get_acc_id(acc)
+        if acc_id is not None:
+            ids_seen.append(acc_id)
+        if acc_id == aid:
+            return _make_result(acc)
+        return None
+
+    # Path A (legacy, pre-2026-04-09): data.categorizedAccounts[].accounts[]
+    legacy_cats = data.get("categorizedAccounts") or []
+    for cat in legacy_cats:
+        for acc in (cat.get("accounts") or []):
+            r = _check_account(acc)
+            if r is not None:
+                return r
+
+    # Path B (new flat shape, 2026-04-09): data.accounts[]
+    flat_accounts = data.get("accounts") or []
+    for acc in flat_accounts:
+        r = _check_account(acc)
+        if r is not None:
+            return r
+
+    # Path C (new categorized shape, 2026-04-09): data.categories[].accounts[]
+    new_cats = data.get("categories") or []
+    for cat in new_cats:
+        for acc in (cat.get("accounts") or []):
+            r = _check_account(acc)
+            if r is not None:
+                return r
+
+    # Total miss — log the full diagnostic so the next shape drift is obvious.
+    logger.warning(
+        "get_buying_power: no_account_match account_id=%s "
+        "legacy_category_count=%d flat_account_count=%d new_category_count=%d "
+        "ids_seen=%s sample_account_keys=%s top_level_keys=%s",
+        aid, len(legacy_cats), len(flat_accounts), len(new_cats),
+        ids_seen, sample_account_keys, list(data.keys()),
+    )
+    return None
 
 
 def place_buy_order(

@@ -496,6 +496,161 @@ class TestGetStopLosses:
         assert get_stop_losses() == []
 
 
+class TestGetBuyingPower:
+    """Tests for get_buying_power — multi-shape response parsing (Bug C7 fix).
+
+    As of 2026-04-09 Avanza's ``/_api/account-overview/overview/categorizedAccounts``
+    endpoint may return any of three shapes (legacy categorized, new flat, new
+    categorized) and may use any of four ID field names. These tests exercise
+    each shape plus failure modes.
+    """
+
+    _ACCT = "1625505"
+
+    def _make_acc(self, acc_id_field="accountId", acc_id="1625505"):
+        """Build a minimal account record with the given ID field."""
+        return {
+            acc_id_field: acc_id,
+            "buyingPower": {"value": 12345.0},
+            "totalValue": {"value": 54321.0},
+            "ownCapital": {"value": 42000.0},
+        }
+
+    @patch("portfolio.avanza_session.api_get")
+    def test_legacy_categorized_shape(self, mock_api_get, session_file):
+        """Path A: legacy data.categorizedAccounts[].accounts[] with accountId."""
+        from portfolio.avanza_session import get_buying_power
+
+        mock_api_get.return_value = {
+            "categorizedAccounts": [
+                {"accounts": [self._make_acc("accountId", self._ACCT)]},
+            ],
+        }
+        result = get_buying_power(self._ACCT)
+        assert result is not None
+        assert result["buying_power"] == 12345.0
+        assert result["total_value"] == 54321.0
+        assert result["own_capital"] == 42000.0
+
+    @patch("portfolio.avanza_session.api_get")
+    def test_new_flat_shape(self, mock_api_get, session_file):
+        """Path B: new data.accounts[] flat shape with id field."""
+        from portfolio.avanza_session import get_buying_power
+
+        mock_api_get.return_value = {
+            "categories": [],
+            "accounts": [self._make_acc("id", self._ACCT)],
+            "loans": [],
+        }
+        result = get_buying_power(self._ACCT)
+        assert result is not None
+        assert result["buying_power"] == 12345.0
+        assert result["total_value"] == 54321.0
+        assert result["own_capital"] == 42000.0
+
+    @patch("portfolio.avanza_session.api_get")
+    def test_new_categorized_shape(self, mock_api_get, session_file):
+        """Path C: new data.categories[].accounts[] shape with id field."""
+        from portfolio.avanza_session import get_buying_power
+
+        mock_api_get.return_value = {
+            "categories": [
+                {"accounts": [self._make_acc("id", self._ACCT)]},
+            ],
+            "accounts": [],
+            "loans": [],
+        }
+        result = get_buying_power(self._ACCT)
+        assert result is not None
+        assert result["buying_power"] == 12345.0
+
+    @patch("portfolio.avanza_session.api_get")
+    def test_alternate_id_field_accountnumber(self, mock_api_get, session_file):
+        """Multi-field ID fallback: accountNumber works when accountId/id missing."""
+        from portfolio.avanza_session import get_buying_power
+
+        mock_api_get.return_value = {
+            "accounts": [self._make_acc("accountNumber", self._ACCT)],
+        }
+        result = get_buying_power(self._ACCT)
+        assert result is not None
+        assert result["buying_power"] == 12345.0
+
+    @patch("portfolio.avanza_session.api_get")
+    def test_alternate_balance_field(self, mock_api_get, session_file):
+        """Multi-field balance fallback: buyingPowerAvailable works when buyingPower missing."""
+        from portfolio.avanza_session import get_buying_power
+
+        mock_api_get.return_value = {
+            "accounts": [
+                {
+                    "id": self._ACCT,
+                    "buyingPowerAvailable": {"value": 9999.0},
+                    "accountTotalValue": {"value": 50000.0},
+                    "netDeposit": {"value": 40000.0},
+                },
+            ],
+        }
+        result = get_buying_power(self._ACCT)
+        assert result is not None
+        assert result["buying_power"] == 9999.0
+        assert result["total_value"] == 50000.0
+        assert result["own_capital"] == 40000.0
+
+    @patch("portfolio.avanza_session.api_get")
+    def test_account_not_found_returns_none(self, mock_api_get, session_file):
+        """Target account not present in any shape → None (not silent zero)."""
+        from portfolio.avanza_session import get_buying_power
+
+        mock_api_get.return_value = {
+            "accounts": [self._make_acc("id", "9999")],  # wrong ID
+        }
+        assert get_buying_power(self._ACCT) is None
+
+    @patch("portfolio.avanza_session.api_get")
+    def test_api_get_raises_returns_none(self, mock_api_get, session_file):
+        """HTTP / session errors from api_get → None, never raise."""
+        from portfolio.avanza_session import get_buying_power
+
+        mock_api_get.side_effect = RuntimeError("Avanza API error 500: boom")
+        assert get_buying_power(self._ACCT) is None
+
+    @patch("portfolio.avanza_session.api_get")
+    def test_unexpected_response_type_returns_none(self, mock_api_get, session_file):
+        """Non-dict top-level response → None."""
+        from portfolio.avanza_session import get_buying_power
+
+        mock_api_get.return_value = ["not", "a", "dict"]
+        assert get_buying_power(self._ACCT) is None
+
+    @patch("portfolio.avanza_session.api_get")
+    def test_empty_response_returns_none(self, mock_api_get, session_file):
+        """Empty dict (no shapes populated) → None."""
+        from portfolio.avanza_session import get_buying_power
+
+        mock_api_get.return_value = {}
+        assert get_buying_power(self._ACCT) is None
+
+    @patch("portfolio.avanza_session.api_get")
+    def test_unwrapped_balance_value(self, mock_api_get, session_file):
+        """If Avanza returns raw number instead of {value: N}, unwrap still works."""
+        from portfolio.avanza_session import get_buying_power
+
+        mock_api_get.return_value = {
+            "accounts": [
+                {
+                    "id": self._ACCT,
+                    "buyingPower": 12345.0,  # raw number, not wrapped
+                    "totalValue": 54321.0,
+                    "ownCapital": 42000.0,
+                },
+            ],
+        }
+        result = get_buying_power(self._ACCT)
+        assert result is not None
+        assert result["buying_power"] == 12345.0
+
+
 class TestApiDelete:
     @patch("portfolio.avanza_session._get_csrf", return_value="csrf-token")
     @patch("portfolio.avanza_session._get_playwright_context")
