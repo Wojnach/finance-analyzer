@@ -18,24 +18,26 @@ import requests
 
 # 2026-04-09 Stage 1 log migration (docs/LOG_MIGRATION_AUDIT_20260409.md):
 # `_log()` is a thin shim that delegates to `logger.info()`. This module is
-# ALWAYS imported from `metals_loop.py` in production (never run directly),
-# and metals_loop's `_install_stage1_logging()` attaches the stdout handler
-# to its `metals_loop` logger at __main__ time.
+# ALWAYS imported from `metals_loop.py` in production, never run directly.
 #
-# Library discipline (codex adversarial review finding HIGH, 2026-04-09):
-# this module must NOT install any handlers itself. If it did, pytest
-# `caplog`, structured file handlers in an embedding process, and any
-# parent telemetry would either be double-captured (handler + propagation)
-# or bypassed (propagation disabled). Instead we leave the logger bare —
-# `logger.propagate` stays True so records flow up to whatever parent
-# handler the caller has configured (metals_loop in production, pytest
-# caplog in tests, or a custom entrypoint in embeddings).
+# Logger namespace (codex adversarial review finding HIGH round 3,
+# 2026-04-09): the logger is named `metals_loop.swing_trader` so it is a
+# CHILD of metals_loop's logger in Python's dotted hierarchy. Child loggers
+# inherit the parent's effective level and propagate records up to the
+# parent's handlers, which means metals_loop.py's `_install_stage1_logging()`
+# (installed only under `if __name__ == "__main__":`) automatically
+# configures level AND handler for this module too. Without the dotted
+# parent name, `metals_swing_trader` would be a sibling of `metals_loop`
+# and would NOT inherit level — its INFO records would be filtered by the
+# default WARNING level, dropping `[SWING] Cash synced`, `[SWING] BUY`,
+# etc. from metals_loop_out.txt.
 #
-# Standalone runs: if there is no parent handler, Python's lastResort
-# handler prints WARNING+ to stderr; INFO/DEBUG records are dropped.
-# That's an acceptable trade-off for correct library behavior — any
-# caller that needs the INFO output can attach their own handler.
-logger = logging.getLogger("metals_swing_trader")
+# Library discipline: this module still does NOT install any handlers
+# itself. Under pytest, `caplog.at_level(logging.INFO, logger="metals_loop")`
+# on the parent captures records from this child via propagation. Under a
+# custom embedding, the caller is free to attach their own handlers to
+# either `metals_loop` or `metals_loop.swing_trader` directly.
+logger = logging.getLogger("metals_loop.swing_trader")
 from metals_swing_config import (
     ACCOUNT_ID,
     BUY_COOLDOWN_MINUTES,
