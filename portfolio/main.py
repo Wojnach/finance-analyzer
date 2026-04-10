@@ -634,6 +634,35 @@ def run(force_report=False, active_symbols=None):
         _run_elapsed / max(signals_ok + signals_failed, 1),
     )
 
+    # BUG-178 slow-cycle diagnostic (added 2026-04-10, diag/bug178-end-of-
+    # cycle-snapshot). The ticker pool BUG-178 handler already logs per-ticker
+    # last_signal state on its 180 s timeout, but cycles that stay under 180 s
+    # never fire the handler — so slow paths in the 120-180 s range hide from
+    # us. Fire a warning-level diagnostic when a cycle exceeds 120 s so we
+    # capture per-ticker phase state retrospectively.
+    #
+    # Each value in last_sigs is (sig_name, elapsed_since_set) where sig_name
+    # is one of: __pre_dispatch__ (hung in sentiment/fear_greed/LLM enqueue),
+    # a concrete enhanced signal name (hung in the dispatch loop on that one),
+    # or __post_dispatch__ (hung in accuracy_stats / consensus / per-ticker
+    # gating). The `elapsed_since_set` value is how long ago the tracker was
+    # updated — if the cycle total is 150 s but elapsed_since_set for a
+    # ticker is only 2 s, the slow code is AFTER the last-tracked marker;
+    # if elapsed_since_set is ~150 s, the thread was stuck at that marker.
+    if _run_elapsed > 120:
+        try:
+            from portfolio.signal_engine import get_last_signal as _get_last
+            # Use signals.keys() because those are the tickers that successfully
+            # returned from the pool. Timed-out tickers are already named by the
+            # BUG-178 handler's Last signals log line.
+            last_sigs = {n: _get_last(n) for n in signals.keys()}
+            logger.warning(
+                "Slow cycle diagnostic: %.1fs total, last signals tracked: %s",
+                _run_elapsed, last_sigs,
+            )
+        except Exception as e:
+            logger.debug("Slow cycle diagnostic failed: %s", e)
+
     # BUG-85: Flush batched sentiment state to disk once per cycle (not per-ticker)
     try:
         from portfolio.signal_engine import flush_sentiment_state

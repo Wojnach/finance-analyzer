@@ -516,3 +516,115 @@ class TestLastSignalDiagnostic:
         result = get_last_signal("ETH-USD")
         assert result is not None
         assert result[0] == "second_signal"
+
+
+class TestGenerateSignalPhaseMarkers:
+    """BUG-178 slow-cycle diagnostic: phase markers written by generate_signal.
+
+    generate_signal() must update _last_signal_per_ticker with
+    __pre_dispatch__ before the enhanced-signal dispatch loop and
+    __post_dispatch__ after, so the main.py slow-cycle diagnostic can
+    distinguish hangs in the three distinct phases.
+    """
+
+    def test_generate_signal_writes_pre_and_post_dispatch_markers(self):
+        """After generate_signal runs, the tracker should show __post_dispatch__.
+
+        Uses the full generate_signal pipeline with a synthetic indicator dict
+        and checks that the tracker's recorded last_signal is either
+        __post_dispatch__ (normal fast path) or a concrete signal name (if the
+        dispatch loop bailed early). In no case should it still be
+        __pre_dispatch__ on a successful completion.
+        """
+        import pandas as pd
+        import numpy as np
+
+        from portfolio.signal_engine import generate_signal, get_last_signal
+
+        # Minimal indicator dict with everything generate_signal touches.
+        ind = {
+            "close": 100.0, "rsi": 50.0, "rsi_p20": 30.0, "rsi_p80": 70.0,
+            "macd_hist": 0.0, "macd_hist_prev": 0.0,
+            "ema9": 100.0, "ema21": 100.0, "sma20": 100.0, "sma50": 100.0,
+            "bb_upper": 110.0, "bb_lower": 90.0, "bb_mid": 100.0,
+            "price_vs_bb": "inside", "volume": 1_000_000, "volume_sma20": 1_000_000,
+            "atr": 1.0, "adx": 20.0, "high": 101.0, "low": 99.0, "open": 100.0,
+        }
+        # Small df — mostly for the enhanced-signals dispatch loop.
+        df = pd.DataFrame({
+            "open": np.full(50, 100.0), "high": np.full(50, 101.0),
+            "low": np.full(50, 99.0), "close": np.full(50, 100.0),
+            "volume": np.full(50, 1_000_000),
+        })
+
+        generate_signal(ind, ticker="BTC-USD", df=df)
+
+        last = get_last_signal("BTC-USD")
+        assert last is not None
+        sig_name, _ = last
+        # Post-successful-completion, the tracker should show the post-dispatch
+        # marker — proves the loop ran to the end.
+        assert sig_name == "__post_dispatch__", (
+            f"Expected __post_dispatch__ after a clean generate_signal run, "
+            f"got {sig_name!r}. If this is a concrete signal name, the dispatch "
+            f"loop bailed early; if __pre_dispatch__, the loop never started."
+        )
+
+    def test_generate_signal_skips_markers_when_ticker_none(self):
+        """Phase markers are gated on `ticker` being truthy.
+
+        When generate_signal is called without a ticker (edge case for tests
+        and legacy callers), the tracker must not record anything under an
+        empty-string key — that would pollute the dict for all future lookups.
+        """
+        import pandas as pd
+        import numpy as np
+
+        from portfolio import signal_engine
+
+        # Snapshot current tracker state so we can verify no new entry appears.
+        with signal_engine._last_signal_lock:
+            keys_before = set(signal_engine._last_signal_per_ticker.keys())
+
+        ind = {
+            "close": 100.0, "rsi": 50.0, "rsi_p20": 30.0, "rsi_p80": 70.0,
+            "macd_hist": 0.0, "macd_hist_prev": 0.0,
+            "ema9": 100.0, "ema21": 100.0, "sma20": 100.0, "sma50": 100.0,
+            "bb_upper": 110.0, "bb_lower": 90.0, "bb_mid": 100.0,
+            "price_vs_bb": "inside", "volume": 1_000_000, "volume_sma20": 1_000_000,
+            "atr": 1.0, "adx": 20.0, "high": 101.0, "low": 99.0, "open": 100.0,
+        }
+        df = pd.DataFrame({
+            "open": np.full(50, 100.0), "high": np.full(50, 101.0),
+            "low": np.full(50, 99.0), "close": np.full(50, 100.0),
+            "volume": np.full(50, 1_000_000),
+        })
+
+        signal_engine.generate_signal(ind, ticker=None, df=df)
+
+        with signal_engine._last_signal_lock:
+            keys_after = set(signal_engine._last_signal_per_ticker.keys())
+        new_keys = keys_after - keys_before
+        # No empty-string or None keys should have been added.
+        assert "" not in new_keys
+        assert None not in new_keys
+
+    def test_post_dispatch_marker_overwrites_dispatch_loop_marker(self):
+        """The post-dispatch marker must always supersede the dispatch loop.
+
+        Regression: earlier iterations wrote `_set_last_signal` only inside
+        the dispatch loop, leaving the tracker pointing at whichever signal
+        ran last. The post-dispatch phase marker must overwrite it.
+        """
+        from portfolio.signal_engine import _set_last_signal, get_last_signal
+
+        # Simulate the tracker state after the dispatch loop ran
+        # metals_cross_asset as its final signal.
+        _set_last_signal("XAU-USD", "metals_cross_asset")
+        result = get_last_signal("XAU-USD")
+        assert result[0] == "metals_cross_asset"
+
+        # Simulate the post-dispatch marker write that our fix adds
+        _set_last_signal("XAU-USD", "__post_dispatch__")
+        result = get_last_signal("XAU-USD")
+        assert result[0] == "__post_dispatch__"

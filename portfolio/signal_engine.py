@@ -1190,6 +1190,20 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     votes = {}
     extra_info = {}
 
+    # BUG-178 diagnostic phase marker (added 2026-04-10, diag/bug178-end-of-cycle-snapshot).
+    # The per-ticker last-signal tracker is updated inside the enhanced-signal
+    # dispatch loop, but slow cycles can also hang BEFORE the loop (sentiment,
+    # fear_greed, news_event, _cached() macro fetches) or AFTER it (accuracy_stats
+    # loading, weighted consensus, per-ticker gate). Writing `__pre_dispatch__`
+    # here and `__post_dispatch__` after the loop gives the end-of-cycle slow
+    # diagnostic in main.py three distinct phases to point at:
+    #   - __pre_dispatch__  → hang is in the pre-loop block
+    #   - <signal name>     → hang is in the dispatch loop at that signal
+    #   - __post_dispatch__ → hang is in accuracy/consensus code after the loop
+    # The double-underscore prefix is reserved; no registered signal uses it.
+    if ticker:
+        _set_last_signal(ticker, "__pre_dispatch__")
+
     # Check if GPU-intensive signals should be skipped (stocks outside market hours)
     from portfolio.market_timing import should_skip_gpu
     skip_gpu = should_skip_gpu(ticker, config=config) if ticker else False
@@ -1620,7 +1634,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                     continue
                 # BUG-178 diagnostic: track which signal each ticker is currently
                 # running so main.py's pool-timeout handler can name the culprit.
-                _set_last_signal(ticker, sig_name)
+                # Ticker guard added 2026-04-10 in the phase-marker diag commit
+                # to prevent leaking a None-keyed entry when callers pass
+                # ticker=None (legacy test harnesses and backtester paths).
+                if ticker:
+                    _set_last_signal(ticker, sig_name)
                 if entry.get("requires_context"):
                     result = compute_fn(df, context=context_data)
                 elif entry.get("requires_macro"):
@@ -1663,6 +1681,14 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     else:
         for sig_name in _enhanced_entries:
             votes[sig_name] = "HOLD"
+
+    # BUG-178 diagnostic phase marker (added 2026-04-10, see docstring above
+    # at the __pre_dispatch__ writer). We made it through the enhanced-signal
+    # dispatch loop; any remaining slow code is in the post-dispatch accuracy /
+    # consensus path. The end-of-cycle diagnostic in main.py uses this marker
+    # to identify WHICH phase is slow on cycles > 120 s.
+    if ticker:
+        _set_last_signal(ticker, "__post_dispatch__")
 
     # C10: Capture raw pre-gate votes BEFORE any gating rewrites them to HOLD.
     # This allows accuracy tracking for regime-gated signals, breaking the
