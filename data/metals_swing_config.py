@@ -81,16 +81,33 @@ TRAILING_DISTANCE_PCT = 1.0        # trail 1% behind underlying peak
 HARD_STOP_UNDERLYING_PCT = 2.0     # -2% underlying = hard exit
 SIGNAL_REVERSAL_EXIT = True        # exit on SELL consensus with >= MIN_BUY_VOTERS
 # 2026-04-10: user removed the 5h time limit in favor of an EOD-only forced
-# sell (~21:45 CET, just before US market close). Set to 24h so the safety
-# net still exists for catastrophic edge cases (position orphaned by a crash)
-# but intraday exits are rule-driven (TAKE_PROFIT, TRAILING, HARD_STOP, SIGNAL_REVERSAL,
-# MOMENTUM, EXIT_OPTIMIZER). EOD_EXIT_MINUTES_BEFORE now fires at 21:45 CET
-# (10 min before the hardcoded 21:55 close in metals_swing_trader._check_exits).
-# TODO: the 21:55 close_cet in _check_exits is hardcoded — DST handling is
-# deferred. The .claude/rules/metals-avanza.md rule says to pull from Avanza's
-# todayClosingTime API, but no helper exists yet. Next session.
+# sell just before US market close. Set to 24h so the safety net still
+# exists for catastrophic edge cases (position orphaned by a crash) but
+# intraday exits are rule-driven (TAKE_PROFIT, TRAILING, HARD_STOP,
+# SIGNAL_REVERSAL, MOMENTUM, EXIT_OPTIMIZER).
+#
+# *** EOD_EXIT_MINUTES_BEFORE and the DST gap trap ***
+#
+# The check in metals_swing_trader._check_exits compares minutes_to_close
+# against this value, where close_cet is HARDCODED to 21:55 CET at
+# metals_swing_trader.py:1156. That hardcode is correct for ~51 weeks/year
+# (standard DST-aligned US close = 22:00 CET → 21:55 "practical close").
+# During the DST gap weeks (roughly Mar 8-29 and Oct 25-Nov 1) US is on DST
+# while EU is not, shifting the real close down to 21:00 CET. With a 10-min
+# buffer, EOD would fire at 21:45 — 45 MINUTES AFTER real close, so orders
+# would not execute and positions would bleed overnight.
+#
+# To be safe during DST gaps AND still close reasonably near the real close
+# in normal weeks, use a 25-min buffer:
+#   - Normal weeks: real close 22:00, EOD fires at 21:30 (30 min early).
+#   - DST gap: real close 21:00, EOD fires at 20:30 (30 min early — still in
+#     the trading window).
+# This is a compromise until dynamic todayClosingTime lookup is added (see
+# .claude/rules/metals-avanza.md). TODO: ship get_session_close_cet() in
+# portfolio/avanza_session.py and set this back to 10.
 MAX_HOLD_HOURS = 24                # 24h safety net only — real time-based exit is EOD
-EOD_EXIT_MINUTES_BEFORE = 10       # force exit 10 min before market close (was 55 → exit too early)
+EOD_EXIT_MINUTES_BEFORE = 25       # exits 25 min before hardcoded 21:55 close (21:30 CET).
+                                   # DST-gap-safe; revert to 10 once dynamic close lookup ships.
 
 # ---------------------------------------------------------------------------
 # Cooldowns

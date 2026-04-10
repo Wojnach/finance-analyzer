@@ -390,11 +390,19 @@ class SwingTrader:
         Falls back to INITIAL_BUDGET_SEK when the API fails and no saved
         balance exists (e.g. first startup with empty state file).
         """
+        # 2026-04-10: capture pre-sync value so the log line shows the delta.
+        # Stale cash vs. real Avanza cash can diverge between syncs (manual
+        # buys, dividends, deposits) and the delta is the first thing you
+        # want to see when debugging "why did the trader size X SEK?" after
+        # a surprise trade or rejection.
+        cash_before = float(self.state.get("cash_sek") or 0)
         acc = fetch_account_cash(self.page, ACCOUNT_ID)
         if acc and acc.get("buying_power") is not None:
             self.state["cash_sek"] = float(acc["buying_power"])
             _save_state(self.state)
-            _log(f"Cash synced: {self.state['cash_sek']:.0f} SEK")
+            delta = self.state["cash_sek"] - cash_before
+            delta_str = f" (Δ{delta:+.0f} SEK)" if abs(delta) >= 1 else ""
+            _log(f"Cash synced: {self.state['cash_sek']:.0f} SEK{delta_str}")
             self.cash_sync_ok = True
             if not self.cash_sync_was_ok:
                 # Transition False → True: announce recovery (skip on first sync).
@@ -783,32 +791,124 @@ class SwingTrader:
             #   3. Cap at 95% of cash so we leave a small courtage buffer.
             #   4. If Kelly says "no edge" (position_sek == 0), respect it
             #      and skip the entry.
-            #   5. If Kelly raises (import failure, DB missing, etc.), fall
-            #      back to the original fixed-30% logic so entries never
-            #      lose a fallback path.
+            #   5. If Kelly raises ImportError, fall back to POSITION_SIZE_PCT.
+            #      Runtime errors (TypeError, ValueError, sqlite errors) are
+            #      NOT silently swallowed — fallback still fires but logged
+            #      at WARNING with full stack trace so regressions surface.
+            #   6. Kelly return dict is validated for shape + finite numerics
+            #      BEFORE the first arithmetic — protects against NaN/inf
+            #      position_sek bombs and missing keys.
+            #
+            # Adversarial review findings addressed in this block:
+            #   B2  agent_summary shape mismatch → now wrapped as
+            #       {"signals": signal_data}.
+            #   B3  Kelly was using static catalog leverage instead of
+            #       live_leverage → now uses warrant["live_leverage"] first.
+            #   L1  cash <= 0 (overdraft) → early-return with explicit log.
+            #   S1  broad except Exception → split into ImportError vs
+            #       other runtime errors.
+            #   S2  no Kelly return validation → validated below.
+            #   S4  ask_price <= 0 silent skip → now logs.
+            #   LG1 fallback path silent → now logs which branch fired.
+            #   LG2 Kelly sizing log missing inputs → now includes
+            #       cash/lev/cl/source.
+            import math as _math
+
             cash = self.state["cash_sek"]
-            ask_price = warrant["live_ask"]
-            if ask_price <= 0:
+            if cash <= 0:
+                _log(
+                    f"SKIP {underlying_ticker}: non-positive cash "
+                    f"(cash={cash:.0f} SEK) — entries paused"
+                )
                 continue
 
+            ask_price = warrant.get("live_ask") or 0
+            if ask_price <= 0:
+                _log(
+                    f"SKIP {underlying_ticker}: invalid ask_price={ask_price} "
+                    f"for {warrant.get('name', '?')} — aborting entry"
+                )
+                continue
+
+            # Prefer live_leverage (updated per-cycle by fetch_price) over the
+            # static catalog value. Falls back to catalog, then 5.0, only if
+            # both are missing/zero.
+            kelly_leverage = float(
+                warrant.get("live_leverage")
+                or warrant.get("leverage")
+                or 5.0
+            )
+
             kelly_rec = None
+            fallback_reason: str | None = None
             try:
                 from portfolio.kelly_metals import recommended_metals_size
                 kelly_rec = recommended_metals_size(
                     ticker=underlying_ticker,
-                    leverage=float(warrant.get("leverage") or 5.0),
+                    leverage=kelly_leverage,
                     buying_power_sek=cash,
                     ask_price_sek=ask_price,
                     consecutive_losses=int(self.state.get("consecutive_losses", 0)),
-                    agent_summary=signal_data,
+                    # B2 fix: kelly expects agent_summary["signals"][ticker], but
+                    # signal_data is already keyed by ticker at top level. Wrap
+                    # it so Kelly's weighted_confidence fallback path can find
+                    # the ticker when accuracy_cache and signal_log.db are both
+                    # empty or below 30 samples.
+                    agent_summary={"signals": signal_data} if signal_data else None,
                     horizon="1d",
                 )
-            except Exception as kelly_err:  # noqa: BLE001
+            except ImportError as kelly_err:
+                fallback_reason = f"import failed: {kelly_err}"
                 logger.warning(
-                    "[SWING] Kelly sizing unavailable for %s: %s — "
-                    "falling back to fixed POSITION_SIZE_PCT",
-                    underlying_ticker, kelly_err, exc_info=True,
+                    "[SWING] Kelly import failed for %s: %s — "
+                    "falling back to POSITION_SIZE_PCT",
+                    underlying_ticker, kelly_err,
                 )
+            except Exception as kelly_err:  # noqa: BLE001
+                # Non-import errors are Kelly bugs or bad inputs — we fall
+                # back so the swing trader doesn't go dormant, but log at
+                # ERROR with a stack trace so regressions surface.
+                fallback_reason = f"runtime error: {type(kelly_err).__name__}: {kelly_err}"
+                logger.error(
+                    "[SWING] Kelly runtime error for %s — falling back to "
+                    "POSITION_SIZE_PCT (this is a Kelly regression, investigate)",
+                    underlying_ticker, exc_info=True,
+                )
+
+            # S2: validate Kelly return shape before acting on it. A malformed
+            # dict here means Kelly (or one of its inputs) is broken; we treat
+            # it as a runtime error and use the fallback path.
+            if kelly_rec is not None:
+                required_keys = ("position_sek", "half_kelly_pct", "win_rate")
+                if not isinstance(kelly_rec, dict) or not all(k in kelly_rec for k in required_keys):
+                    logger.error(
+                        "[SWING] Kelly returned malformed dict for %s: %r — "
+                        "falling back to POSITION_SIZE_PCT",
+                        underlying_ticker, kelly_rec,
+                    )
+                    fallback_reason = "malformed kelly dict"
+                    kelly_rec = None
+                else:
+                    try:
+                        pos_sek = float(kelly_rec["position_sek"])
+                        if not _math.isfinite(pos_sek) or pos_sek < 0:
+                            logger.error(
+                                "[SWING] Kelly returned invalid position_sek=%r "
+                                "for %s — falling back to POSITION_SIZE_PCT",
+                                kelly_rec.get("position_sek"), underlying_ticker,
+                            )
+                            fallback_reason = "non-finite position_sek"
+                            kelly_rec = None
+                        else:
+                            kelly_rec["position_sek"] = pos_sek  # normalized
+                    except (TypeError, ValueError) as norm_err:
+                        logger.error(
+                            "[SWING] Kelly position_sek not numeric for %s: %s — "
+                            "falling back to POSITION_SIZE_PCT",
+                            underlying_ticker, norm_err,
+                        )
+                        fallback_reason = "non-numeric position_sek"
+                        kelly_rec = None
 
             if kelly_rec and kelly_rec.get("position_sek", 0) > 0:
                 kelly_alloc = float(kelly_rec["position_sek"])
@@ -818,38 +918,61 @@ class SwingTrader:
                 alloc = min(alloc, cash * 0.95)
                 _log(
                     f"Kelly sizing {underlying_ticker}: "
-                    f"kelly_half={kelly_rec.get('half_kelly_pct', 0) * 100:.1f}% "
-                    f"win_rate={kelly_rec.get('win_rate', 0) * 100:.1f}% "
-                    f"rec={kelly_alloc:.0f} SEK → alloc={alloc:.0f} SEK"
+                    f"cash={cash:.0f} lev={kelly_leverage:.2f}x "
+                    f"cl={self.state.get('consecutive_losses', 0)} "
+                    f"half_k={kelly_rec.get('half_kelly_pct', 0) * 100:.1f}% "
+                    f"wr={kelly_rec.get('win_rate', 0) * 100:.1f}% "
+                    f"src={kelly_rec.get('source', '?')} "
+                    f"rec={kelly_alloc:.0f} → alloc={alloc:.0f} SEK"
                 )
             elif kelly_rec is not None:
                 # Kelly explicitly said no edge. Respect it and skip.
                 _log(
                     f"Kelly says no edge for {underlying_ticker}: "
-                    f"kelly_half={kelly_rec.get('half_kelly_pct', 0) * 100:.1f}% "
-                    f"win_rate={kelly_rec.get('win_rate', 0) * 100:.1f}% — skipping"
+                    f"half_k={kelly_rec.get('half_kelly_pct', 0) * 100:.1f}% "
+                    f"wr={kelly_rec.get('win_rate', 0) * 100:.1f}% "
+                    f"src={kelly_rec.get('source', '?')} — skipping"
                 )
                 continue
             else:
-                # Kelly module failed to load. Fall back to the original
-                # fixed POSITION_SIZE_PCT logic so entries still work.
+                # Kelly unavailable (import failed, runtime error, or
+                # malformed return). Fall back to fixed POSITION_SIZE_PCT
+                # so entries still work. LG1: log which branch fired so an
+                # operator reading metals_loop_out.txt can tell Kelly-failed
+                # from Kelly-not-called.
                 alloc = cash * POSITION_SIZE_PCT / 100
+                _log(
+                    f"Kelly FALLBACK for {underlying_ticker}: "
+                    f"reason=({fallback_reason or 'unknown'}) "
+                    f"alloc={alloc:.0f} SEK "
+                    f"(fixed {POSITION_SIZE_PCT}% of cash={cash:.0f})"
+                )
 
             if alloc < MIN_TRADE_SEK:
                 _log(
-                    f"Insufficient cash: cash={cash:.0f} SEK, "
-                    f"alloc={alloc:.0f} SEK < min={MIN_TRADE_SEK:.0f} SEK"
+                    f"Insufficient cash for {underlying_ticker}: "
+                    f"cash={cash:.0f} SEK, alloc={alloc:.0f} SEK "
+                    f"< min={MIN_TRADE_SEK:.0f} SEK (need ≥{MIN_TRADE_SEK/0.30:.0f} SEK for 30% fallback)"
                 )
                 continue
 
             units = int(alloc / ask_price)
             if units < 1:
+                _log(
+                    f"SKIP {underlying_ticker}: alloc={alloc:.0f} / ask={ask_price:.2f} "
+                    f"= {alloc / ask_price:.2f} units, below 1-unit minimum"
+                )
                 continue
 
             total_cost = units * ask_price
 
-            # Execute BUY (direction passed through for state recording)
-            self._execute_buy(warrant, units, ask_price, underlying_ticker, sig, total_cost, direction)
+            # Execute BUY (direction passed through for state recording).
+            # Kelly rec is passed through so _execute_buy can attach it to
+            # the trade journal for post-hoc sizing analysis.
+            self._execute_buy(
+                warrant, units, ask_price, underlying_ticker, sig,
+                total_cost, direction, kelly_rec=kelly_rec,
+            )
 
     def _evaluate_entry(self, sig, ticker):
         """Check if signal data meets entry criteria. Returns (ok, reason).
@@ -1057,7 +1180,7 @@ class SwingTrader:
              f"AVA={best['is_aza']} score={best['score']:.3f}")
         return best
 
-    def _execute_buy(self, warrant, units, ask_price, underlying_ticker, sig, total_cost, direction="LONG"):
+    def _execute_buy(self, warrant, units, ask_price, underlying_ticker, sig, total_cost, direction="LONG", kelly_rec=None):
         """Execute a BUY order and set stop-loss.
 
         `direction` is "LONG" or "SHORT" — determines whether _check_exits
@@ -1065,6 +1188,12 @@ class SwingTrader:
         For SHORT, the user still BUYs an inverse warrant (BEAR/MINI S) on
         Avanza — the warrant itself is a long position, just inversely
         correlated with the underlying.
+
+        `kelly_rec` (2026-04-10) is the Kelly sizing dict from the caller,
+        or None if Kelly was unavailable. It's attached to trade_record
+        for post-hoc sizing analysis — future debugging of "why did it
+        size this position at N SEK?" can read the Kelly metadata directly
+        from metals_swing_trades.jsonl.
         """
         pos_id = f"pos_{int(time.time())}"
 
@@ -1086,6 +1215,23 @@ class SwingTrader:
             "leverage": warrant["live_leverage"],
             "signal": _compact_signal(sig),
             "dry_run": DRY_RUN,
+            # 2026-04-10 adversarial review: attach Kelly sizing metadata
+            # for post-hoc audit. Lets us answer "why did Kelly size this
+            # at N SEK?" six months later without re-running the model.
+            "kelly": (
+                {
+                    "sizing_path": "kelly",
+                    "half_kelly_pct": kelly_rec.get("half_kelly_pct"),
+                    "win_rate": kelly_rec.get("win_rate"),
+                    "position_sek_rec": kelly_rec.get("position_sek"),
+                    "source": kelly_rec.get("source"),
+                    "avg_win_pct": kelly_rec.get("avg_win_pct"),
+                    "avg_loss_pct": kelly_rec.get("avg_loss_pct"),
+                    "consecutive_losses": kelly_rec.get("consecutive_losses"),
+                }
+                if kelly_rec
+                else {"sizing_path": "fallback_fixed_pct"}
+            ),
         }
 
         result = None

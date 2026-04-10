@@ -325,7 +325,12 @@ class TestExitLogic:
 
     def test_time_limit(self):
         """Exit when held > MAX_HOLD_HOURS."""
-        pos = self._make_position(und_entry=87.0, hours_ago=6)
+        # 2026-04-10: MAX_HOLD_HOURS was raised from 5 to 24 as part of the
+        # EOD-only exit plan (user doesn't want time-based exits to front-run
+        # rule-based ones). Parameterize against the config value instead of
+        # hardcoding 6 hours so this test stays resilient to future changes.
+        from metals_swing_config import MAX_HOLD_HOURS
+        pos = self._make_position(und_entry=87.0, hours_ago=MAX_HOLD_HOURS + 1)
         trader = make_trader(cash=5000, positions={"pos_1": pos})
         trader._check_exits({}, {"XAG-USD": make_signal()})
         assert len(trader.state["positions"]) == 0
