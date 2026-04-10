@@ -27,21 +27,23 @@ through BUG-181). The main areas of concern are:
 7. **[P2] Timezone consistency** — 8 naive datetime.now() calls in metals_loop
 8. **[P2] Windows-specific atomicity** — JSONL append lacks true atomicity on NTFS
 
-**CRITICAL UPDATE**: 10 P0 findings identified across 4 subsystems:
-- **avanza-api** (2 P0): Playwright thread-safety corruption, TOTP pension account trades
-- **portfolio-risk** (3 P0): Trade guards entirely non-functional (record_trade never called),
-  drawdown peak blind after 33h, portfolio_validator raw json.load TOCTOU
-- **signals-modules** (2 P0): Gap-fill signal fires BUY during gap-down crashes (inverted),
-  GARCH missing from empty_result schema
-- **infrastructure** (3 P0): Log rotation data loss on crash, zombie Claude processes on
-  TimeoutExpired, no concurrency lock in claude_gate (34h outage Feb 18-19 root cause)
+**FINAL: 16 P0 findings identified across 5 subsystems (ALL 8 AGENTS COMPLETE):**
+- **metals-core** (6 P0): usdsek=1.0 (all SEK P&L wrong by 10x), HARD_STOP=5% (fires on noise),
+  ORB window 1h wrong during CEST, entry_ts=now() disabling hold-time risk flag, 2x raw open()
+- **portfolio-risk** (3 P0): Trade guards dead (record_trade never called), drawdown peak blind
+  after 33h, portfolio_validator raw json.load
+- **infrastructure** (3 P0): Log rotation data loss, zombie Claude on timeout, no concurrency lock
+- **avanza-api** (2 P0): Playwright thread-safety, TOTP pension account trades
+- **signals-modules** (2 P0): Gap-fill inverted BUY during crashes, GARCH missing from schema
 
 The trade guards finding (A-PR-1) is arguably the most impactful of the entire review:
 the system has ZERO overtrading protection because `record_trade()` exists but is never
 called from any production code path.
 
-**Agent review update**: 7 of 8 agent reviews complete. Running total: 127+ findings
-(10 P0, 40+ P1, 61+ P2, 22+ P3). 1 agent still running (metals-core, 19K lines).
+**ALL 8 AGENT REVIEWS COMPLETE.** Final total: **148 findings** across the full codebase.
+(16 P0, 52 P1, 56 P2, 24 P3). The metals-core agent (19K lines, 430s review) found the
+most financially impactful bugs: usdsek=1.0 and HARD_STOP_CERT_PCT=0.05 are actively
+causing money loss RIGHT NOW.
 
 ---
 
@@ -52,12 +54,12 @@ called from any production code path.
 | signals-core | 5,640 | 17 | 4 | 9 | 4 | Fair — directional gate bypassed |
 | orchestration | 6,412 | 16 | 3 | 9 | 4 | Fair — TimeoutError bug, stale config |
 | portfolio-risk | 4,281 | 19 | 3+6 | 6 | 3 | **CRITICAL** — 3 P0: guards dead, peak blind |
-| metals-core | 19,014 | 6 | 1 | 3 | 2 | Fair — God file, timezone issues |
+| metals-core | 19,014 | 27 | 6+9 | 7 | 4 | **CRITICAL** — 6 P0: usdsek=1, stop=5%, DST |
 | avanza-api | 2,298 | 16 | 2 | 10 | 4 | **CRITICAL** — 2 P0 findings |
 | signals-modules | 10,949 | 19 | 2+8 | 7 | 2 | **CRITICAL** — gap-fill inverted, FOMC conflict |
 | data-external | 6,062 | 12 | 5 | 7 | 0 | Fair — budget drain, yfinance compat |
 | infrastructure | 5,721 | 22 | 3+8 | 8 | 3 | **CRITICAL** — zombie Claude, no concurrency lock |
-| **Total** | **60,377** | **127+** | **40+** | **61+** | **22+** | |
+| **Total** | **60,377** | **148** | **52** | **65** | **24** | |
 
 ---
 
@@ -305,8 +307,14 @@ See `AGENT_REVIEW_PORTFOLIO_RISK.md` for full details. **3 P0 CRITICAL findings:
 - **A-PR-7 [P1]**: Concentration limit warning never blocks trades
 - **A-PR-10 [P2]**: Monte Carlo ATR annualization wrong for hourly candles (5x understatement)
 
-### Agent: review-metals-core
-*(Pending — will be updated when agent completes)*
+### Agent: review-metals-core — COMPLETE (21 findings: 6 P0, 9 P1, 4 P2, 2 P3)
+See `AGENT_REVIEW_METALS_CORE.md` for full details. **MOST DANGEROUS SUBSYSTEM.**
+- **A-MC-1 [P0]**: HARD_STOP_CERT_PCT=0.05 → 5% cert stop = 1% underlying. Fires on normal noise.
+- **A-MC-2 [P0]**: usdsek=1.0 hardcoded → all exit optimizer SEK calculations wrong by 10x
+- **A-MC-3 [P0]**: ORB window hardcoded CET winter → 1 hour wrong during CEST (active NOW)
+- **A-MC-4 [P0]**: entry_ts=now() always → HOLD_TIME_EXTENDED permanently disabled
+- **A-MC-8 [P1]**: MIN_STOP_DISTANCE_PCT=1.0 violates 3% rule
+- **A-MC-13 [P1]**: iskbets gate defaults APPROVE on parse failure — no protection during errors
 
 ### Agent: review-avanza-api — COMPLETE (13 findings: 2 P0, 7 P1, 3 P2, 1 P3)
 See `AGENT_REVIEW_AVANZA_API.md` for full details. **MOST CRITICAL SUBSYSTEM.**
