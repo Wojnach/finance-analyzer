@@ -1,90 +1,79 @@
 {
-  "date": "2026-04-05",
-  "generated_at": "2026-04-05T21:30:00+00:00",
-  "system_health": {
-    "status": "excellent",
-    "cycle_count": 120,
-    "error_count": 0,
-    "uptime_hours": 34.6,
-    "all_signal_modules": "green (0 failures across 21 modules)",
-    "last_module_failures": {
-      "date": "2026-04-04",
-      "modules": ["monte_carlo", "price_targets", "equity_curve"]
-    }
-  },
+  "date": "2026-04-10",
+  "generated_at": "2026-04-10T21:32:00Z",
   "trades_today": [],
-  "layer2_decisions_today": 0,
-  "layer2_last_decision": {
-    "date": "2026-04-03",
-    "trigger": "ETH-USD flipped BUY->SELL (sustained)",
-    "action": "HOLD (both strategies)"
-  },
-  "latest_prices": {
-    "XAU-USD": {"price": 4642.36, "consensus": "HOLD", "buy_sell": "1B/7S", "regime": "ranging"},
-    "XAG-USD": {"price": 72.34, "consensus": "HOLD", "buy_sell": "2B/5S", "regime": "ranging"},
-    "BTC-USD": {"price": 67431.70, "consensus": "BUY", "buy_sell": "5B/2S", "regime": "ranging"},
-    "ETH-USD": {"price": 2058.96, "consensus": "BUY", "buy_sell": "5B/1S", "regime": "ranging"}
+  "layer2_decisions_today": [
+    "No new Layer 2 decisions today (last journal entries from 2026-04-03, all HOLD)"
+  ],
+  "last_trigger": {
+    "time": "2026-04-10T21:04:08Z",
+    "reason": "XAG-USD consensus BUY (57%)",
+    "prices": {
+      "XAU-USD": 4750.80,
+      "XAG-USD": 76.02,
+      "BTC-USD": 73317.91,
+      "ETH-USD": 2254.64
+    }
   },
   "signals_that_were_right": [
-    {"signal": "fibonacci", "recent_accuracy": 68.2, "all_time": 42.5, "note": "Massive improvement in ranging regime"},
-    {"signal": "mean_reversion", "recent_accuracy": 65.4, "all_time": 52.2, "note": "Thriving in range-bound market"},
-    {"signal": "ministral", "recent_accuracy": 68.0, "all_time": 58.6, "note": "LLM signal improving"},
-    {"signal": "bb", "recent_accuracy": 60.8, "all_time": 53.8, "note": "Bollinger Bands working well"},
-    {"signal": "macd", "recent_accuracy": 58.7, "all_time": 43.4, "note": "Reversed from poor to good recently"},
-    {"signal": "calendar", "recent_accuracy": 62.8, "all_time": 56.9, "note": "Stable strong performer"}
+    {"signal": "econ_calendar", "accuracy_1d": 65.2, "samples": 4224, "note": "Strongest high-sample signal. SELL-only, contrarian risk-off near events."},
+    {"signal": "claude_fundamental", "accuracy_1d": 62.7, "samples": 8440, "note": "BUY accuracy 66.3%, SELL only 34.7%. Strong BUY signal."},
+    {"signal": "qwen3", "accuracy_1d": 60.0, "samples": 3623, "note": "SELL accuracy 74.3% outstanding. BUY accuracy only 30.4%."},
+    {"signal": "ministral", "accuracy_1d": 58.5, "samples": 5821, "note": "Recent 7d accuracy surged to 68.0% (125 samples)."},
+    {"signal": "fear_greed", "accuracy_1d": 58.6, "samples": 10232, "note": "BUY-only contrarian. Recent 7d CRASHED to 25.9%."},
+    {"signal": "calendar", "accuracy_1d": 58.5, "samples": 6740, "note": "Day-of-week, turnaround patterns."},
+    {"signal": "bb", "accuracy_1d": 54.3, "samples": 7478, "note": "Recent 7d jumped to 60.8% (293 samples)."},
+    {"signal": "momentum_factors", "accuracy_1d": 54.6, "samples": 14221, "note": "Solid across both directions."},
+    {"signal": "metals_cross_asset", "accuracy_1d": 79.2, "samples": 48, "note": "CAUTION: Only 48 samples. Small-sample illusion likely."}
   ],
   "signals_that_were_wrong": [
-    {"signal": "fear_greed", "recent_accuracy": 25.9, "all_time": 58.6, "note": "CATASTROPHIC drop — contrarian logic failing in extreme fear + metals-up"},
-    {"signal": "macro_regime", "recent_accuracy": 30.3, "all_time": 47.1, "note": "Failing badly in current environment"},
-    {"signal": "news_event", "recent_accuracy": 29.5, "all_time": 51.8, "note": "Headline-driven signals unreliable"},
-    {"signal": "structure", "recent_accuracy": 36.1, "all_time": 51.9, "note": "Breakout detection fails in ranging"},
-    {"signal": "forecast", "recent_accuracy": 36.1, "all_time": 47.5, "note": "Time-series models failing"},
-    {"signal": "volatility_sig", "recent_accuracy": 35.0, "all_time": 47.1, "note": "Vol regime detection wrong"},
-    {"signal": "smart_money", "recent_accuracy": 39.6, "all_time": 53.6, "note": "SMC patterns unreliable currently"},
-    {"signal": "ema", "recent_accuracy": 40.8, "all_time": 50.0, "note": "Trend-following fails in ranging"},
-    {"signal": "trend", "recent_accuracy": 40.7, "all_time": 45.5, "note": "Trend signals degrading further"},
-    {"signal": "momentum_factors", "recent_accuracy": 41.4, "all_time": 55.7, "note": "Big drop — momentum fails in chop"},
-    {"signal": "heikin_ashi", "recent_accuracy": 42.0, "all_time": 49.8, "note": "HA smoothing masking whipsaw"}
+    {"signal": "funding", "accuracy_1d": 29.9, "samples": 536, "note": "Far below coin flip. Already horizon-gated."},
+    {"signal": "futures_flow", "accuracy_1d": 36.3, "samples": 1051, "note": "Both directions ~36%. Should be force-HOLD."},
+    {"signal": "ml", "accuracy_1d": 41.7, "samples": 1714, "note": "Already disabled."},
+    {"signal": "fibonacci", "accuracy_1d": 42.3, "samples": 14185, "note": "Large sample, consistently bad. SELL accuracy 35.9%."},
+    {"signal": "macd", "accuracy_1d": 43.6, "samples": 5728, "note": "Below 45% threshold. Recent 7d improved to 58.7%."},
+    {"signal": "oscillators", "accuracy_1d": 44.9, "samples": 5049, "note": "Borderline. SELL accuracy 35.2%."},
+    {"signal": "volatility_sig", "accuracy_1d": 45.3, "samples": 4414, "note": "Borderline, both directions weak."},
+    {"signal": "orderbook_flow", "accuracy_1d": 45.3, "samples": 139, "note": "BUY 98.3% vs SELL 6.3%. Sell logic likely broken."},
+    {"signal": "trend", "accuracy_1d": 45.4, "samples": 13346, "note": "Below threshold. Large sample."},
+    {"signal": "macro_regime", "accuracy_1d": 46.6, "samples": 25654, "note": "BUY accuracy 38.9% is terrible."},
+    {"signal": "sentiment", "accuracy_1d": 45.8, "samples": 38791, "note": "Largest sample. Both directions underperforming."},
+    {"signal": "forecast", "accuracy_1d": 47.5, "samples": 6065, "note": "Kronos+Chronos below coin flip."}
   ],
   "accuracy_changes": {
-    "biggest_improvements_recent": {
-      "fibonacci": "+25.7pp (42.5->68.2)",
-      "macd": "+15.3pp (43.4->58.7)",
-      "mean_reversion": "+13.2pp (52.2->65.4)",
-      "ministral": "+9.4pp (58.6->68.0)",
-      "bb": "+7.0pp (53.8->60.8)"
+    "recent_7d_improvements": {
+      "ministral": {"all_time": 58.5, "recent_7d": 68.0, "delta": "+9.5pp"},
+      "bb": {"all_time": 54.3, "recent_7d": 60.8, "delta": "+6.5pp"},
+      "macd": {"all_time": 43.6, "recent_7d": 58.7, "delta": "+15.1pp"}
     },
-    "biggest_degradations_recent": {
-      "fear_greed": "-32.7pp (58.6->25.9)",
-      "news_event": "-22.3pp (51.8->29.5)",
-      "macro_regime": "-16.8pp (47.1->30.3)",
-      "structure": "-15.8pp (51.9->36.1)",
-      "momentum_factors": "-14.3pp (55.7->41.4)",
-      "smart_money": "-14.0pp (53.6->39.6)",
-      "volatility_sig": "-12.1pp (47.1->35.0)"
-    }
+    "recent_7d_degradations": {
+      "fear_greed": {"all_time": 58.6, "recent_7d": 25.9, "delta": "-32.7pp"},
+      "ema": {"all_time": 49.9, "recent_7d": 40.8, "delta": "-9.1pp"}
+    },
+    "key_finding": "Fear & Greed collapsed from 58.6% to 25.9% in 7d. Contrarian BUY in prolonged fear failing."
   },
   "metals_signal_accuracy": {
-    "main_XAG_1h": {"accuracy": 64.8, "samples": 210, "note": "Best metals model but small sample"},
-    "main_BTC_1h": {"accuracy": 55.4, "samples": 5410},
-    "llm_BTC_1h": {"accuracy": 57.8, "samples": 2418},
-    "llm_XAG_1h": {"accuracy": 49.6, "samples": 1674, "note": "Below coin flip"},
-    "main_ETH_1h": {"accuracy": 46.0, "samples": 4343, "note": "Poor"},
-    "chronos_1h_ETH_1h": {"accuracy": 40.6, "samples": 1942, "note": "Worst Chronos performer"}
+    "main_BTC_3h": {"accuracy": 59.2, "samples": 8038},
+    "main_BTC_1h": {"accuracy": 56.0, "samples": 8108},
+    "main_ETH_3h": {"accuracy": 50.7, "samples": 6979},
+    "main_XAG_1h": {"accuracy": 65.4, "samples": 214},
+    "ministral_BTC_1h": {"accuracy": 70.5, "samples": 590},
+    "ministral_BTC_3h": {"accuracy": 62.9, "samples": 590}
   },
   "system_errors": [
-    "monte_carlo, price_targets, equity_curve module failures on 2026-04-04 (resolved)"
+    "Module failures at 08:37 UTC: monte_carlo, price_targets, equity_curve (non-critical)",
+    "No signal module failures (all 23 modules 100% success)"
   ],
   "key_observations": [
-    "ALL instruments in 'ranging' regime — system-wide chop, no clear trends",
-    "No Layer 2 decisions since Apr 3 — system correctly staying flat",
-    "XAU heavy SELL pressure (1B/7S) despite bullish macro thesis — short-term correction",
-    "BTC/ETH showing BUY signals (5B/2S, 5B/1S) but both retreating from recent highs",
-    "CRITICAL: 11 signals have recent 7d accuracy below 45% — half the array failing in ranging regime",
-    "Mean-reversion + fibonacci are regime winners (65-68% recent) — classic ranging market behavior",
-    "Fear&Greed contrarian logic INVERTED: extreme fear but metals still up, crypto still dropping",
-    "Silver $72 = pullback from $80+ highs. $120 target still active. Gold/silver ratio compression thesis intact",
-    "BTC retreated to $67K from $75K trigger. $85K/$100K checkpoints pending",
-    "No metals trades since early March — month-long observation mode"
+    "SYSTEM STABILITY: Excellent. 0 errors, all signals running perfectly.",
+    "ALL HOLD: Both strategies holding all cash since Apr 3.",
+    "XAG-USD BUY SIGNAL: Silver BUY consensus (57%, 7B/4S) at $76.02.",
+    "FEAR_GREED COLLAPSE: 25.9% recent vs 58.6% all-time. Structural shift.",
+    "DIRECTIONAL ASYMMETRIES: qwen3 SELL 74.3% vs BUY 30.4%. claude_fundamental BUY 66.3% vs SELL 34.7%. Direction-gating needed.",
+    "FIBONACCI BAD: 42.3% on 14K samples. Should be force-HOLD.",
+    "FUTURES_FLOW BROKEN: 36.3% on 1K samples. Below gate.",
+    "ORDERBOOK_FLOW SELL BROKEN: BUY 98.3% vs SELL 6.3%. Investigate.",
+    "ALL RANGING: All instruments in ranging regime. Low conviction.",
+    "12 OF 32 ACTIVE SIGNALS BELOW 50%: Half the voting signals are worse than coin flip at 1d horizon."
   ]
 }

@@ -1,305 +1,125 @@
 {
-  "date": "2026-04-05",
-  "tickers_analyzed": ["ETH-USD", "XAG-USD", "BTC-USD"],
+  "date": "2026-04-10",
+  "generated_at": "2026-04-11T00:00:00Z",
+  "tickers_analyzed": ["XAG-USD", "MSTR", "BTC-USD"],
   "deep_dives": [
     {
-      "ticker": "ETH-USD",
-      "current_accuracy": "46% main_ETH_1h (below coin flip)",
+      "ticker": "XAG-USD",
+      "price": 76.02,
+      "consensus": "BUY (57%, 7B/4S)",
+      "regime": "ranging",
       "key_predictive_features": [
-        "BTC price and BTC dominance (ETH/BTC ratio at 5-year low of 0.027, down 75% from ATH)",
-        "DeFi TVL on Ethereum L1 ($68-70B as of late 2025, #1 chain but L2s cannibalizing fee revenue)",
-        "ETH staking yield (~3.1% average, 29.4% of supply staked = 35.6M ETH locked)",
-        "Gas fees (average $3.78 per tx in 2025, down from $5.90 in Mar 2024 due to L2 migration)",
-        "Blob fees from L2s (EIP-4844 cut L2 costs 50-90%, reducing L1 fee burn)",
-        "Active addresses and network activity (stagnated since 2021 per CryptoQuant)",
-        "ETH ETF inflows/outflows (US spot ETFs now trading, institutional demand weakening)",
-        "Layer-2 TVL growth (projected to exceed L1 DeFi TVL by Q3 2026, $150B vs $130B)",
-        "Macro risk-on/risk-off (ETH more risk-on than BTC, correlates with tech stocks)"
+        "fear_greed: 91.3% accuracy (287 sam) — best single signal for silver",
+        "claude_fundamental: 72.3% (1003 sam) — quality/valuation analysis",
+        "forecast (Chronos): 74.6% (67 sam) — small sample but promising",
+        "macro_regime: 64.9% (1454 sam) — silver responds to macro (200-SMA, DXY, yields)",
+        "econ_calendar: 61.7% (522 sam) — event-driven risk-off helps silver",
+        "metals_cross_asset: 100% (31 sam) — too few samples to trust"
       ],
       "fundamental_drivers": [
-        {
-          "driver": "ETH/BTC ratio at multi-year lows",
-          "detail": "At 0.019-0.027 range, on par with 2019-2020 bear market averages. 57% decline from Aug 2025 ATH of $4,953 to ~$2,140 in late March 2026. Capital concentration in Bitcoin via ETFs rather than rotation into ETH.",
-          "signal_implication": "ETH underperformance relative to BTC is structural (institutional preference for BTC). Signals calibrated on ETH-specific data may fail because ETH price is now largely BTC-derivative. Our ETH signals should incorporate BTC momentum as a leading indicator."
-        },
-        {
-          "driver": "L2 value extraction problem",
-          "detail": "L2s (Arbitrum, Base, Optimism) now capture most transaction fees. EIP-4844 blobs reduced L1 posting costs 50-90%. Ethereum L1 fee burn has collapsed, weakening the deflationary narrative. ETH may become net-inflationary.",
-          "signal_implication": "Traditional on-chain metrics (gas fees, transaction count) are less predictive because activity has migrated to L2s. Need to track AGGREGATE activity (L1 + all L2s) for meaningful ETH demand signal."
-        },
-        {
-          "driver": "Staking yield compression",
-          "detail": "With 29.4% staked and growing, yield compresses toward 2.5-3%. Makes ETH less attractive vs risk-free rates. Liquid staking derivatives (Lido stETH) add sell pressure when unstaking.",
-          "signal_implication": "Staking rate changes (increasing/decreasing) could be a leading indicator. Rapid staking increase = bullish (supply tightening). Rapid unstaking = bearish (yield-seeking capital leaving)."
-        },
-        {
-          "driver": "ETF flows now dominate",
-          "detail": "US spot ETH ETFs are trading but seeing weaker inflows than BTC ETFs. Institutional demand for ETH is declining. ETH has become a 'second-tier' institutional allocation after BTC.",
-          "signal_implication": "ETF flow data (daily inflows/outflows) should be a new signal for ETH. When ETF flows turn positive, ETH rallies; when negative, it lags BTC further."
-        }
+        "Gold-silver ratio: was 90, now compressed to ~62. Thesis: further compression to 50.",
+        "Industrial demand: solar panel installations accelerating (IEA 2026 projections)",
+        "Central bank buying: record pace continued through Q1 2026",
+        "Supply deficit: mine output declining, recycling insufficient",
+        "Geopolitical premium: Middle East, Ukraine conflicts ongoing"
       ],
       "cross_asset_correlations": {
-        "BTC-USD": "High positive correlation (~0.85-0.90), but weakening. ETH/BTC ratio declining means ETH underperforms in both rallies and selloffs.",
-        "NASDAQ/QQQ": "Moderate positive (~0.65). ETH trades more like a tech stock than a store of value.",
-        "DeFi_TVL": "Positive but lagging. TVL changes lead ETH price by 1-3 weeks.",
-        "USD_DXY": "Negative correlation (-0.50 to -0.60). Strong dollar = weak ETH.",
-        "US_10Y_Yield": "Negative when yields rising (ETH is long-duration risk asset). Positive during yield curve steepening."
+        "gold": "Primary driver. XAU at $4,750 — all-time high territory. XAG follows with leverage.",
+        "DXY": "Inverse correlation. Weak USD = strong silver. DXY strength would hurt thesis.",
+        "real_yields": "Inverse. Rising real yields compress precious metals. Fed policy critical.",
+        "copper": "Industrial demand proxy. Copper strength confirms industrial thesis for silver."
       },
       "seasonal_patterns": [
-        "Historically strong in Q1 (January effect) and late Q4 (year-end crypto rally)",
-        "Weak in Q3 (summer doldrums)",
-        "Post-Merge (Sep 2022): supply dynamics changed seasonal patterns",
-        "ETH tends to rally 2-4 weeks AFTER BTC breakouts (capital rotation lag)"
+        "Silver typically strong in Q2 (Indian wedding season demand)",
+        "Mining supply seasonal lull in Q1 carries into Q2",
+        "April historically neutral for silver"
       ],
-      "papers_and_models": [
-        {
-          "title": "Machine Learning-Driven Multi-Factor Quantitative Model for Ethereum",
-          "source": "ACM ICGAIB 2025 (dl.acm.org/doi/10.1145/3766918.3766922)",
-          "finding": "Combines RSI, MACD, on-chain metrics (gas usage, active addresses), and X/Twitter sentiment. Backtest Q4 2021 - Q3 2024: 97% annualized return, Sharpe 2.5, information ratio 1.2. Key: social sentiment was the strongest alpha source for ETH specifically."
-        },
-        {
-          "title": "Ethereum Price Prediction with ETF Flow Analysis",
-          "source": "Powerdrill Bloom AI (powerdrill.ai/blog/ethereum-price-prediction)",
-          "finding": "AI-powered model integrating ETF flows, on-chain liquidity, and Pectra upgrade catalysts. Projects $4,000-$5,000 range for 2026 in base case with strong ETF inflows."
-        },
-        {
-          "title": "CryptoQuant ETH/BTC Ratio Analysis",
-          "source": "CoinDesk (coindesk.com/markets/2025/05/08/)",
-          "finding": "ETH/BTC ratio signals ETH is 'extremely undervalued' but headwinds remain. Network activity and core usage metrics stagnated since 2021. Institutional demand weakening with declining staked ETH in investment products."
-        }
+      "signals_to_suppress_for_this_ticker": [
+        "ministral: 20.4% (98 sam) — catastrophic. Per-ticker override should suppress.",
+        "sentiment: 32.9% (140 sam) — CryptoBERT terrible for metals.",
+        "oscillators: 36.9% (453 sam) — pattern noise in ranging metals.",
+        "structure: 35.5% (541 sam) — structural signals fail for commodities.",
+        "smart_money: 36.3% (234 sam) — BOS/CHoCH doesn't apply well to metals."
       ],
       "recommended_new_signals": [
-        {
-          "signal": "ETH/BTC Ratio Momentum",
-          "description": "Track 7-day and 30-day rate of change of ETH/BTC ratio. BUY when ratio is rising from multi-year low (mean reversion). SELL when ratio is falling (BTC outperformance continuation). This captures the fundamental capital rotation dynamic.",
-          "expected_accuracy": "55-60%",
-          "effort": "easy"
-        },
-        {
-          "signal": "Aggregate L1+L2 Activity",
-          "description": "Combine Ethereum L1 active addresses + L2 (Arbitrum, Base, Optimism) active addresses via DefiLlama API. Rising aggregate activity = bullish ETH demand. Currently our on-chain metrics only capture L1, missing 60%+ of actual activity.",
-          "expected_accuracy": "55-65%",
-          "effort": "medium"
-        },
-        {
-          "signal": "ETH ETF Flow Tracker",
-          "description": "Daily ETF inflow/outflow data for US spot ETH ETFs. Positive 3-day cumulative flow = BUY. Negative = SELL. ETF flows are the marginal price driver for institutional-grade crypto assets.",
-          "expected_accuracy": "55-60%",
-          "effort": "medium"
-        },
-        {
-          "signal": "Social Sentiment (X/Twitter) for ETH",
-          "description": "The ML multi-factor paper found social sentiment was the strongest single alpha source for ETH. Our current sentiment uses CryptoBERT on general crypto news. ETH-specific social sentiment (tweets mentioning $ETH, Ethereum, DeFi) could be more predictive.",
-          "expected_accuracy": "50-55%",
-          "effort": "medium"
-        }
+        "COT positioning (already registered, force-HOLD): speculative/commercial ratio for silver futures",
+        "ETF flow data: SLV/SIVR daily flows predict short-term direction",
+        "COMEX warehouse stocks: physical delivery demand signal"
       ],
-      "implementation_notes": "ETH's 46% accuracy is likely caused by: (1) BTC-derivative price action making ETH-specific signals unreliable -- fixing this requires adding BTC momentum as a leading input to ETH signals, (2) L2 migration making traditional on-chain metrics misleading -- need aggregate L1+L2 data, (3) ETH/BTC ratio at structural lows making directional predictions harder -- the instrument is caught between BTC gravity and its own fundamentals. Priority fix: add ETH/BTC ratio momentum as a signal and weight BTC signals heavily when predicting ETH."
+      "implementation_notes": "Per-ticker directional gating implemented tonight will help. ministral at 20.4% will be gated by the per-ticker accuracy override (below 45% gate). The 91.3% fear_greed accuracy on XAG is exempted from regime gating via BUG-158."
     },
     {
-      "ticker": "XAG-USD",
-      "current_accuracy": "49.6% LLM accuracy, but main_XAG_1h is 64.8%",
+      "ticker": "MSTR",
+      "price": 131.43,
+      "consensus": "SELL (74%)",
+      "regime": "ranging",
       "key_predictive_features": [
-        "Gold/Silver ratio (currently contracted from 2025 highs, historically a strong mean-reversion signal)",
-        "Industrial demand (solar PV >200M oz/yr, EVs, semiconductors, AI data centers)",
-        "Supply deficit (6th consecutive year, estimated 100-120M oz annual deficit)",
-        "Federal Reserve interest rate decisions (silver has zero yield, inversely correlated with real rates)",
-        "US Dollar Index (DXY) -- strong negative correlation",
-        "COT positioning (commercial hedger vs speculator net positions)",
-        "Copper prices (industrial demand proxy, high correlation with silver)",
-        "VIX/GVZ (gold/silver volatility indices)",
-        "Avanza warrant bid/ask spreads and market maker positioning"
+        "econ_calendar: 89.4% (442 sam) — extraordinary. MSTR plunges on macro risk events.",
+        "ministral: 71.7% (254 sam) — LLM reasoning works well for stock-like instruments.",
+        "momentum: 66.2% (473 sam) — momentum indicators effective for MSTR.",
+        "candlestick: 65.1% (332 sam) — pattern recognition works for equities.",
+        "qwen3: 63.6% (401 sam) — second LLM also effective."
       ],
       "fundamental_drivers": [
-        {
-          "driver": "Structural supply deficit",
-          "detail": "6th consecutive year of structural deficit (100-120M oz). Mine production flat while industrial demand at records. Solar PV alone consumes 200M+ oz/year. Silver surged 140% in 2025 and hit ATH above $117 in Jan 2026.",
-          "signal_implication": "Long-term bullish bias. Dips are buying opportunities for our $120 target thesis (0.8 conviction). Supply deficit means price floor is rising each year."
-        },
-        {
-          "driver": "Industrial demand transformation",
-          "detail": "Silver demand driven by electrification: solar PV, EVs, power grid upgrades, semiconductors, AI data centers. This is structural, not cyclical. China's solar installations are the single largest demand driver.",
-          "signal_implication": "China PMI and solar installation data could be leading indicators for silver. Track monthly China solar capacity additions (positive = bullish silver)."
-        },
-        {
-          "driver": "Gold/Silver ratio as mean-reversion signal",
-          "detail": "When ratio contracted sharply in late 2025/early 2026, it signaled silver closing the valuation gap vs gold. Elevated ratio = silver underpriced. The ratio is one of the most reliable mean-reversion indicators in precious metals.",
-          "signal_implication": "Our metals_cross_asset signal already tracks gold/silver ratio. Could be enhanced: BUY when ratio > 80 (silver cheap vs gold), SELL when ratio < 60 (silver expensive). Add 14-day RSI on the ratio itself for timing."
-        },
-        {
-          "driver": "Federal Reserve policy path",
-          "detail": "Silver has zero yield, so lower interest rates reduce opportunity cost of holding. Fed cutting rates = bullish silver. Fed hiking/holding = bearish. Real yields (nominal - inflation) are the key metric, not nominal rates.",
-          "signal_implication": "Our econ_calendar signal (86.8% accuracy) already captures FOMC proximity. Could enhance with real yield tracking (FRED 10Y TIPS yield) as a continuous signal rather than event-based."
-        }
+        "BTC price: MSTR is a leveraged BTC proxy. BTC at $73.3K in range.",
+        "NAV premium/discount: MSTR trades at varying premium to BTC holdings. Premium compression = SELL.",
+        "Saylor acquisition pace: continued BTC buying with convertible notes.",
+        "Interest rate environment: high rates = higher cost of MSTR convertible debt."
       ],
       "cross_asset_correlations": {
-        "XAU-USD": "Very high positive (~0.85-0.90). Gold leads silver by 1-5 days in major moves.",
-        "Copper (HG=F)": "Moderate positive (~0.65). Both driven by industrial demand. Copper breakout often precedes silver.",
-        "DXY": "Strong negative (-0.70 to -0.80). Dollar strength is the biggest headwind for silver.",
-        "US_10Y_Real_Yield": "Strong negative (-0.60). Rising real yields = bearish silver.",
-        "SPY": "Weak positive (~0.30). Silver has mixed safe-haven/industrial character.",
-        "VIX": "Weak negative in normal times, can flip positive during commodity-driven panics."
+        "BTC-USD": "Primary driver. ~0.85 correlation but with leverage and NAV premium.",
+        "NASDAQ": "Secondary driver. Risk-on/risk-off sentiment.",
+        "Convertible bond market": "Funding cost indicator for Saylor strategy."
       },
-      "seasonal_patterns": [
-        "January and July historically deliver strongest monthly returns",
-        "Q1 and Q4 show seasonal strength (Indian wedding season demand, year-end rebalancing)",
-        "September-October typically weakest (post-summer industrial demand lull)",
-        "Silver tends to outperform gold in H2 of bull markets (beta play)",
-        "FOMC meeting months show elevated volatility -- silver often gaps on rate decisions"
-      ],
-      "papers_and_models": [
-        {
-          "title": "Gold/Silver Ratio as Trading Signal",
-          "source": "MetalsEdge (metalsedge.com/gold-and-silver-cot-reports/)",
-          "finding": "COT reports reveal commercial hedger positioning. When commercials are heavily short, it typically signals a top. When commercials reduce shorts, it signals a bottom. The COT index (speculator net - commercial net) is a reliable contrarian indicator."
-        },
-        {
-          "title": "Donchian Channel Breakout for Silver",
-          "source": "LightningChart (lightningchart.com/blog/trader/donchian-channels/)",
-          "finding": "Donchian 20-period channels are effective for silver's trending nature. Buy on upper channel break with volume confirmation. In range-bound markets, use channel boundaries as MR targets. Silver's volatility makes wider channel periods (40-55) more reliable."
-        },
-        {
-          "title": "Silver Price Forecast: $70 Is the New Normal",
-          "source": "Mitrade (mitrade.com/insights/commodities/commodity-others/silver-futures-trends)",
-          "finding": "Structural analysis projects silver in $70-120 range for 2026. Key catalysts: continued supply deficit, industrial demand growth, and monetary easing. Dec 2026 consensus projection: $83.93-$89.13."
-        }
+      "signals_to_suppress_for_this_ticker": [
+        "ema: 46.3% (618 sam) — borderline, EMA crossovers unreliable for MSTR.",
+        "claude_fundamental: 47.0% (705 sam) — fundamental analysis less useful for BTC proxy.",
+        "fear_greed: 49.0% (208 sam) — coin flip for stocks."
       ],
       "recommended_new_signals": [
-        {
-          "signal": "COT Positioning Momentum",
-          "description": "Track weekly CFTC COT data for silver futures. When commercial hedger net short positions decrease (commercials less bearish), it's bullish. When speculator net longs reach extreme levels, it's bearish (crowded trade). Use 4-week rate of change of net positions.",
-          "expected_accuracy": "55-65%",
-          "effort": "medium"
-        },
-        {
-          "signal": "Gold/Silver Ratio RSI",
-          "description": "Apply RSI(14) to the gold/silver ratio itself. When ratio RSI > 70 (silver cheap vs gold), BUY silver. When ratio RSI < 30 (silver expensive vs gold), SELL. This adds timing precision to the existing metals_cross_asset ratio signal.",
-          "expected_accuracy": "60-65%",
-          "effort": "easy"
-        },
-        {
-          "signal": "Real Yield Tracker",
-          "description": "Track 10Y TIPS real yield from FRED. When real yield is falling (3-day SMA declining), BUY silver. When rising, SELL. Real yields are the single best macro predictor for precious metals. We already have FRED API integration for treasury yields.",
-          "expected_accuracy": "55-60%",
-          "effort": "easy"
-        },
-        {
-          "signal": "Copper/Silver Lead-Lag",
-          "description": "Copper breakouts lead silver by 1-3 days. Track copper's 3-day momentum. When copper breaks above 20-day high, BUY silver. When copper breaks below 20-day low, SELL silver. Exploits the industrial demand correlation with a timing edge.",
-          "expected_accuracy": "55-60%",
-          "effort": "easy"
-        }
+        "MSTR NAV premium/discount: compare market cap to BTC holdings value",
+        "BTC consensus passthrough: weight MSTR decisions by BTC signal consensus"
       ],
-      "implementation_notes": "XAG's split accuracy (49.6% LLM vs 64.8% main_1h) suggests the main signal pipeline works but LLM-based signals (Ministral 18.9%, sentiment 4.5%) are catastrophically wrong for silver. Priority fixes: (1) Disable LLM signals for XAG or dramatically downweight them, (2) Add COT data as a new signal source -- it's the single most-requested feature for precious metals, (3) Enhance gold/silver ratio with RSI timing, (4) Add real yield tracking via FRED TIPS endpoint. Silver in ranging regime benefits most from mean_reversion (65.4%) and fibonacci (68.2%) -- these should get 2.0x weight for XAG specifically."
+      "implementation_notes": "MSTR is well-served by current signals. econ_calendar at 89.4% and ministral at 71.7% are exceptional. Per-ticker override already active."
     },
     {
       "ticker": "BTC-USD",
-      "current_accuracy": "55.4% main accuracy, price fell from $75K to $67K recently",
+      "price": 73317.91,
+      "consensus": "SELL (5S/6B, narrow)",
+      "regime": "ranging",
       "key_predictive_features": [
-        "ETF inflows/outflows (now the DOMINANT price driver, routinely $500M+ daily)",
-        "MVRV ratio (currently below 3.0, room to run before overvaluation)",
-        "SOPR (Spent Output Profit Ratio -- not yet at maximum-loss green zone)",
-        "Exchange flows (net exchange deposits vs withdrawals)",
-        "Realized price ($62K, structural floor absent severe stress)",
-        "HODL waves (long-term holders accumulating during weakness)",
-        "Bitcoin dominance (peaked at 61% in Feb 2026, now rolling over)",
-        "Funding rates on perpetual futures (sentiment gauge)",
-        "Hash rate and mining difficulty (miner capitulation signals)",
-        "US macro: Fed funds rate, DXY, 10Y yield, risk appetite"
+        "claude_fundamental: 73.0% (930 sam) — best signal for BTC. BUY-biased.",
+        "econ_calendar: 64.4% (526 sam) — macro events predict BTC selloffs.",
+        "calendar: 62.5% (301 sam) — day-of-week effects present.",
+        "bb: 61.8% (241 sam) — Bollinger Band breakout effective for BTC.",
+        "fear_greed: 61.0% (1250 sam) — contrarian BUY in extreme fear. Large sample."
       ],
       "fundamental_drivers": [
-        {
-          "driver": "ETF flows supersede halving cycle",
-          "detail": "The April 2024 halving reduced supply by ~450 BTC/day (~$40M). But ETFs routinely move $500M+ daily, and peak days see $1B+ (equivalent to 25 days of mining supply). ETF flows now move more capital in a month than miners produce in a year. The 4-year halving cycle has been superseded by institutional flow dynamics.",
-          "signal_implication": "Our futures_flow signal captures exchange-level data but not ETF flows. Adding daily BTC ETF flow tracking would capture the single most important marginal price driver. When ETFs buy, price rises regardless of on-chain metrics."
-        },
-        {
-          "driver": "Post-halving cycle mutation",
-          "detail": "BTC reached ATH of $126,198 in Oct 2025. The 2024-2025 post-halving cycle saw a decline in 2025, breaking prior patterns. Cycle bottom window: Nov 2026-Jan 2027 with 77-86% drawdown range historically, but current cycle is milder. MVRV below 3.0 suggests not yet euphoric. Realized price at $62K provides floor.",
-          "signal_implication": "On-chain cycle models (MVRV, SOPR, NUPL) are still directionally useful but their precision has degraded. BTC at $67K with realized price at $62K means only ~8% above average cost basis -- limited downside but also limited short-term upside without catalyst."
-        },
-        {
-          "driver": "Bitcoin dominance and altcoin rotation",
-          "detail": "BTC dominance peaked at 61% in Feb 2026 and is rolling over. Last time dominance peaked above 60% and reversed was Nov 2020, followed by the most explosive altcoin season. Volume dominance declining from 45-50% toward 30-35%. Bernstein confirms this is an elongated bull cycle with altcoin rotation starting.",
-          "signal_implication": "Declining BTC dominance is actually BEARISH for BTC relative returns (capital rotating to alts) but may be BULLISH in absolute terms if it signals healthy risk appetite. Our signal system should track BTC.D as a regime indicator: falling dominance = risk-on (favor alts/ETH), rising dominance = risk-off (favor BTC)."
-        },
-        {
-          "driver": "2026 probability-weighted scenarios",
-          "detail": "Base case (50%): $90K-$120K range-bound consolidation. Bull case (25%): $120K-$180K on 401(k) launches and Fed cuts. Bear case (20%): $60K-$80K on macro deterioration. Expected value: ~$109K. The $80K ETF cost basis establishes a practical floor.",
-          "signal_implication": "At current $67K, BTC is in the lower range of the bear case scenario. Either the bear case is playing out (macro deterioration) or this is a buying opportunity if base/bull case materializes. The asymmetry favors long: downside to $60K (-10%) vs upside to $109K expected value (+63%)."
-        }
+        "Halving cycle: April 2024 halving, historically peaks 12-18 months post-halving.",
+        "ETF flows: sustained institutional demand via BTC ETFs.",
+        "Fed policy: rate cut expectations = liquidity tailwind.",
+        "Geopolitical safe haven: BTC increasingly seen as digital gold."
       ],
       "cross_asset_correlations": {
-        "SPY/QQQ": "Moderate positive (~0.50-0.60), increased since ETF approval. BTC now trades on macro risk.",
-        "Gold (XAU)": "Low positive (~0.30). BTC is NOT a consistent safe haven despite 'digital gold' narrative.",
-        "DXY": "Moderate negative (-0.50). Dollar strength suppresses BTC.",
-        "US_10Y_Yield": "Weak negative (-0.30). Rising yields hurt all duration assets.",
-        "ETH-USD": "High positive (~0.85-0.90) but BTC leads.",
-        "MSTR": "Very high positive (~0.90+). MSTR is a leveraged BTC proxy."
+        "NASDAQ": "0.5-0.7 correlation. Risk-on proxy.",
+        "DXY": "Inverse. Weak dollar = strong BTC.",
+        "Gold": "Correlation increasing. Both benefiting from de-dollarization narrative."
       },
-      "seasonal_patterns": [
-        "Historically strong in Q4 and Q1 (October-March)",
-        "April has mixed results (tax-loss selling in US)",
-        "May-September historically weaker ('sell in May')",
-        "Post-halving year (2025): historically the strongest year in the cycle, but 2025 broke pattern",
-        "FOMC meetings create 2-3 day volatility windows",
-        "Weekend and after-hours moves are significant for crypto (24/7 trading)"
-      ],
-      "papers_and_models": [
-        {
-          "title": "2026 Outlook: The End of the Four-Year Cycle",
-          "source": "Amberdata (blog.amberdata.io/2026-outlook-the-end-of-the-four-year-cycle-clone)",
-          "finding": "ETF flows have superseded halving as the marginal price driver. MVRV below 3.0, realized price at $62K as floor. Base case $90-120K, bull $120-180K. The cycle has mutated but not ended. On-chain metrics show 'de-risked but fragile' market."
-        },
-        {
-          "title": "Bitcoin Halving: One Year Later",
-          "source": "Fidelity Digital Assets (fidelitydigitalassets.com/research-and-insights/2024-bitcoin-halving-one-year-later)",
-          "finding": "Post-halving analysis shows reduced mining supply impact vs institutional demand. Three high-profit peaks in current cycle (Mar 2024, Nov 2024, Jul 2025). Cycle behavior more muted than previous due to increased market cap and institutional participation."
-        },
-        {
-          "title": "Bitcoin Cycles: ARK Invest Analysis",
-          "source": "ARK Invest (ark-invest.com/articles/analyst-research/bitcoin-cycles-entering-2025)",
-          "finding": "On-chain analysis framework using MVRV, SOPR, NUPL for cycle positioning. Current cycle shows lower volatility and more gradual appreciation compared to 2017 and 2021 cycles."
-        },
-        {
-          "title": "Is Bitcoin's Four-Year Cycle Dead?",
-          "source": "TradingKey (tradingkey.com)",
-          "finding": "The halving cycle's influence has diminished as BTC matures into a macro asset. Institutional adoption (ETFs, corporate treasuries), reduced absolute halving rewards, and larger market cap have smoothed cyclical behavior."
-        }
+      "signals_to_suppress_for_this_ticker": [
+        "forecast: 29.3% (58 sam) — Chronos terrible for BTC. Small sample confirms.",
+        "ema: 32.4% (173 sam) — EMA crossovers fail in BTC ranging.",
+        "ministral: 33.1% (130 sam) — LLM reasoning poor for BTC specifically.",
+        "macro_regime: 34.4% (797 sam) — large sample, consistently bad for BTC.",
+        "oscillators: 34.1% (349 sam) — pattern oscillators fail for crypto.",
+        "smart_money: 34.9% (238 sam) — BOS/CHoCH poor for 24/7 crypto markets."
       ],
       "recommended_new_signals": [
-        {
-          "signal": "BTC ETF Flow Tracker",
-          "description": "Track daily aggregate BTC ETF inflows/outflows (BlackRock IBIT, Fidelity FBTC, etc.). When 3-day cumulative flow is positive and accelerating, BUY. When negative and accelerating, SELL. This is THE marginal price driver. Data available from CoinGlass or similar aggregators.",
-          "expected_accuracy": "60-65%",
-          "effort": "medium"
-        },
-        {
-          "signal": "MVRV Zone Classifier",
-          "description": "Classify BTC into MVRV zones: <1.0 = deep value (strong BUY), 1.0-2.0 = accumulation (BUY), 2.0-3.0 = neutral (HOLD), 3.0-3.7 = overheated (SELL), >3.7 = euphoria (strong SELL). Currently below 3.0 = room to run. We already have MVRV from BGeometrics but it's not used as a zone classifier.",
-          "expected_accuracy": "55-65%",
-          "effort": "easy"
-        },
-        {
-          "signal": "BTC Dominance Momentum",
-          "description": "Track 7-day rate of change of BTC.D (Bitcoin dominance). Rising BTC.D = risk-off (capital flowing to BTC from alts), falling BTC.D = risk-on (capital flowing from BTC to alts). For BTC specifically: falling dominance is neutral-to-bearish for BTC but bullish for the overall market. Data from CoinGecko API.",
-          "expected_accuracy": "50-55%",
-          "effort": "easy"
-        },
-        {
-          "signal": "Realized Price Proximity",
-          "description": "When BTC price approaches realized price ($62K), it historically represents a strong buying opportunity (cost basis of all holders). Distance from realized price as a signal: <10% above = BUY zone, >50% above = caution zone. Current BTC at $67K is only ~8% above realized price -- historically a strong floor.",
-          "expected_accuracy": "60-70%",
-          "effort": "easy"
-        },
-        {
-          "signal": "Hash Rate / Mining Difficulty Trend",
-          "description": "Track 14-day SMA of hash rate. Declining hash rate (miner capitulation) often precedes price bottoms. Rising hash rate (miner confidence) confirms uptrends. Hash ribbons (short MA crossing long MA) is a well-known buy signal.",
-          "expected_accuracy": "55-60%",
-          "effort": "medium"
-        }
+        "On-chain (MVRV/SOPR/NUPL): already computed, registered as signal module.",
+        "Exchange netflow: net outflow = accumulation = bullish.",
+        "Options skew: put/call ratio and max pain level.",
+        "ETF flow data: daily BTC ETF inflow/outflow."
       ],
-      "implementation_notes": "BTC at $67K with 55.4% main accuracy and price down from $75K. The system is slightly better than coin flip but not capturing the move well. Root causes: (1) ETF flows now dominate price action but we don't track them -- this is the #1 missing feature, (2) Our on-chain signals (MVRV, SOPR) exist via BGeometrics but are used as simple threshold signals rather than zone classifiers with historical context, (3) BTC cycle models have degraded because the 4-year halving cycle has mutated -- institutional flows supersede mining supply. Priority: Add ETF flow tracking and upgrade MVRV from threshold to zone classifier. The BTC 12h BUY phantom (known noise per MEMORY.md) should continue to be ignored. At $67K with $62K realized price, the risk/reward is asymmetrically bullish for patient positions."
+      "implementation_notes": "BTC has the most signals to suppress (6 below 35%). Per-ticker gating is critical here. The per-ticker override from accuracy_stats is already active, so these should be gated."
     }
   ]
 }
