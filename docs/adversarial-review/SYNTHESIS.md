@@ -18,14 +18,19 @@ atomic I/O patterns, fail-closed accuracy gating, circuit breakers for APIs, and
 crash recovery. The system has been significantly hardened through iterative bug fixes (BUG-85
 through BUG-181). The main areas of concern are:
 
-1. **Subprocess governance** — 3 modules bypass the centralized claude_gate
-2. **Timezone consistency** — 8 naive datetime.now() calls in metals_loop
-3. **Stop-loss safety** — Hardware trailing stop failure has no automatic fallback
-4. **Windows-specific atomicity** — JSONL append lacks true atomicity on NTFS
-5. **Portfolio drawdown blind spot** — Fallback to stale prices masks real drawdowns
+1. **Directional accuracy gate silently disabled** — Per-ticker accuracy override drops buy/sell fields [NEW from agent review]
+2. **Subprocess governance** — 3 modules bypass the centralized claude_gate
+3. **Timezone consistency** — 8 naive datetime.now() calls in metals_loop
+4. **Stop-loss safety** — Hardware trailing stop failure has no automatic fallback
+5. **Windows-specific atomicity** — JSONL append lacks true atomicity on NTFS
+6. **Portfolio drawdown blind spot** — Fallback to stale prices masks real drawdowns
 
 No P0 (critical/money-losing) findings. The system has multiple layers of defense
 that prevent any single bug from causing catastrophic financial loss.
+
+**Agent review update**: The signals-core agent review completed and found 5 additional P1/P2
+findings that the independent review missed, including the most impactful finding of the entire
+review: the directional accuracy gate is silently disabled for all primary instruments.
 
 ---
 
@@ -33,7 +38,7 @@ that prevent any single bug from causing catastrophic financial loss.
 
 | Subsystem | Lines | Findings | P1 | P2 | P3 | Health |
 |-----------|-------|----------|----|----|----|----|
-| signals-core | 5,640 | 7 | 0 | 5 | 2 | Good — well-gated, fail-closed |
+| signals-core | 5,640 | 17 | 4 | 9 | 4 | Fair — directional gate bypassed |
 | orchestration | 6,412 | 4 | 0 | 2 | 2 | Good — robust crash recovery |
 | portfolio-risk | 4,281 | 4 | 1 | 2 | 1 | Fair — drawdown blind spot |
 | metals-core | 19,014 | 6 | 1 | 3 | 2 | Fair — God file, timezone issues |
@@ -41,11 +46,47 @@ that prevent any single bug from causing catastrophic financial loss.
 | signals-modules | 10,949 | 3 | 0 | 1 | 2 | Good — consistent pattern |
 | data-external | 6,062 | 2 | 0 | 2 | 0 | Good — rate-limited, cached |
 | infrastructure | 5,721 | 8 | 2 | 3 | 3 | Fair — atomicity + gate bypass |
-| **Total** | **60,377** | **37** | **4+** | **21+** | **12+** | |
+| **Total** | **60,377** | **47+** | **8+** | **25+** | **14+** | |
 
 ---
 
 ## Top Priority Findings (Recommended Fixes)
+
+### Priority 0 (NEW): Fix directional accuracy gate disabled by per-ticker override [P1]
+
+**File**: `portfolio/signal_engine.py:1840-1849`
+
+**Problem**: When per-ticker accuracy data overrides global accuracy, the constructed dict
+only includes `accuracy`, `total`, `correct`, `pct`. The keys `buy_accuracy`, `sell_accuracy`,
+`total_buy`, `total_sell` are DROPPED. The directional gate in `_weighted_consensus()` (lines
+829-837) uses `stats.get("buy_accuracy", acc)` which falls back to overall accuracy.
+
+**Impact**: Signals with extreme directional bias are NOT gated. Example: qwen3 has BUY=30%
+accuracy (should be gated below 35% threshold) but SELL=74%. With per-ticker data, `dir_acc`
+falls back to ~50% overall, so the 35% gate never fires. The signal votes BUY freely.
+
+**Fix**: Either:
+(a) Extend `accuracy_by_ticker_signal` in `accuracy_stats.py` to compute per-direction
+accuracy per-ticker, OR
+(b) In the override block at line 1844, preserve directional fields from the global data:
+```python
+global_stats = accuracy_data.get(sig_name, {})
+accuracy_data[sig_name] = {
+    "accuracy": t_stats["accuracy"],
+    "total": t_stats["total"],
+    "correct": t_stats.get("correct", 0),
+    "pct": t_stats.get("pct", ...),
+    # Preserve directional accuracy from global data
+    "buy_accuracy": global_stats.get("buy_accuracy", t_stats["accuracy"]),
+    "sell_accuracy": global_stats.get("sell_accuracy", t_stats["accuracy"]),
+    "total_buy": global_stats.get("total_buy", 0),
+    "total_sell": global_stats.get("total_sell", 0),
+}
+```
+
+**Effort**: 30 minutes. Low risk — additive fix.
+
+---
 
 ### Priority 1: Fix subprocess governance [P1, 3 files]
 
@@ -190,8 +231,13 @@ The review also identified several excellent defensive patterns worth preserving
 *Eight parallel adversarial review agents were launched, one per subsystem. Their findings
 are being cross-referenced against the independent review above.*
 
-### Agent: review-signals-core
-*(Pending — will be updated when agent completes)*
+### Agent: review-signals-core — COMPLETE (10 findings: 4 P1, 4 P2, 2 P3)
+See `AGENT_REVIEW_SIGNALS_CORE.md` for full details. Key findings:
+- **A-SC-1 [P1]**: Per-ticker accuracy override strips `buy_accuracy`/`sell_accuracy` → directional gate disabled
+- **A-SC-2 [P1]**: Regime accuracy cache shared timestamp → cross-horizon contamination
+- **A-SC-3 [P1]**: Ministral applicable count says crypto-only but code runs for all tickers
+- **A-SC-5 [P2]**: `blend_accuracy_data` uses `max()` for sample count → inflated gate threshold
+- **A-SC-6 [P2]**: `signal_history.py` read-modify-write race under ThreadPoolExecutor
 
 ### Agent: review-orchestration
 *(Pending — will be updated when agent completes)*
