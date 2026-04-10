@@ -27,19 +27,21 @@ through BUG-181). The main areas of concern are:
 7. **[P2] Timezone consistency** — 8 naive datetime.now() calls in metals_loop
 8. **[P2] Windows-specific atomicity** — JSONL append lacks true atomicity on NTFS
 
-**CRITICAL UPDATE**: 7 P0 (critical/money-losing) findings identified across 3 subsystems:
+**CRITICAL UPDATE**: 10 P0 findings identified across 4 subsystems:
 - **avanza-api** (2 P0): Playwright thread-safety corruption, TOTP pension account trades
 - **portfolio-risk** (3 P0): Trade guards entirely non-functional (record_trade never called),
   drawdown peak blind after 33h, portfolio_validator raw json.load TOCTOU
 - **signals-modules** (2 P0): Gap-fill signal fires BUY during gap-down crashes (inverted),
   GARCH missing from empty_result schema
+- **infrastructure** (3 P0): Log rotation data loss on crash, zombie Claude processes on
+  TimeoutExpired, no concurrency lock in claude_gate (34h outage Feb 18-19 root cause)
 
 The trade guards finding (A-PR-1) is arguably the most impactful of the entire review:
 the system has ZERO overtrading protection because `record_trade()` exists but is never
 called from any production code path.
 
-**Agent review update**: 6 of 8 agent reviews complete. Running total: 113+ findings
-(7 P0, 34+ P1, 56+ P2, 22+ P3). 2 agents still running (metals-core, infrastructure).
+**Agent review update**: 7 of 8 agent reviews complete. Running total: 127+ findings
+(10 P0, 40+ P1, 61+ P2, 22+ P3). 1 agent still running (metals-core, 19K lines).
 
 ---
 
@@ -54,8 +56,8 @@ called from any production code path.
 | avanza-api | 2,298 | 16 | 2 | 10 | 4 | **CRITICAL** — 2 P0 findings |
 | signals-modules | 10,949 | 19 | 2+8 | 7 | 2 | **CRITICAL** — gap-fill inverted, FOMC conflict |
 | data-external | 6,062 | 12 | 5 | 7 | 0 | Fair — budget drain, yfinance compat |
-| infrastructure | 5,721 | 8 | 2 | 3 | 3 | Fair — atomicity + gate bypass |
-| **Total** | **60,377** | **113+** | **34+** | **56+** | **22+** | |
+| infrastructure | 5,721 | 22 | 3+8 | 8 | 3 | **CRITICAL** — zombie Claude, no concurrency lock |
+| **Total** | **60,377** | **127+** | **40+** | **61+** | **22+** | |
 
 ---
 
@@ -333,8 +335,14 @@ See `AGENT_REVIEW_DATA_EXTERNAL.md` for full details. Key findings:
 - **A-DE-6 [P2]**: sentiment.py subprocess fallback uses wrong Python venv (.venv instead of .venv-llm)
 - **A-DE-8 [P2]**: llama_server.py lock PID check uses substring match — PID "123" matches "1234"
 
-### Agent: review-infrastructure
-*(Pending — will be updated when agent completes)*
+### Agent: review-infrastructure — COMPLETE (14 findings: 3 P0, 6 P1, 5 P2)
+See `AGENT_REVIEW_INFRASTRUCTURE.md` for full details. Key findings:
+- **A-IN-1 [P0]**: Log rotation non-atomic archive write — data loss on crash mid-rotation
+- **A-IN-2 [P0]**: claude_gate zombie process on TimeoutExpired — process not killed
+- **A-IN-3 [P0]**: No concurrency lock in claude_gate — simultaneous invocations possible
+- **A-IN-4 [P1]**: health.check_staleness crashes on naive timestamps
+- **A-IN-7 [P1]**: message_throttle TOCTOU race bypasses cooldown
+- **A-IN-9 [P1]**: shared_state._cached suppresses KeyboardInterrupt — Ctrl+C doesn't stop loop
 
 ---
 
