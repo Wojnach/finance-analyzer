@@ -470,8 +470,16 @@ class TestFlushAdvancesCounter:
         self, reset_rotation_counter, fake_fingpt_infer, fake_llama_server, stash_recorder,
     ):
         """A flush that processes at least one phase must bump counter by 1."""
-        from portfolio.llm_batch import enqueue_fingpt, flush_llm_batch, _fingpt_queue, _lock
+        from portfolio.llm_batch import (
+            enqueue_fingpt, flush_llm_batch,
+            _ministral_queue, _qwen3_queue, _fingpt_queue, _lock,
+        )
+        # Code-review finding N2: clear ALL three queues defensively so any
+        # leftover ministral/qwen3 item from another test doesn't trip the
+        # fake server's assert on model name.
         with _lock:
+            _ministral_queue.clear()
+            _qwen3_queue.clear()
             _fingpt_queue.clear()
 
         fake_llama_server["response"] = ["positive"]
@@ -605,4 +613,56 @@ class TestCachedOrEnqueueRotationGate:
         )
         assert result == "cached_vote"
         assert enqueues == []  # fresh cache, no enqueue regardless of rotation
+        self._clear_cache(key)
+
+    def test_cached_none_triggers_force_enqueue_off_cycle(self):
+        """Code-review finding N1: when main.py wrote _update_cache(key, None)
+        as a retry cooldown after a failed LLM flush, the rotation gate must
+        treat this as 'stale not available' and force-enqueue instead of
+        returning None silently.
+
+        Setup: age=1800s (30 min), TTL=900s → stale within max_stale_factor=5
+        (max stale = 4500s = 75 min). Cached data is None. Rotation off-cycle.
+        Expected: force enqueue because None is not a valid stale fallback.
+        """
+        from portfolio.shared_state import _cached_or_enqueue
+        key = "test_llm_none_cache"
+        self._setup_cache(key, age_seconds=1800, data=None)  # stale path
+
+        enqueues = []
+        def fake_enqueue(k, ctx):
+            enqueues.append((k, ctx))
+
+        # Rotation says off-cycle, but cached data is None → should force-enqueue
+        result = _cached_or_enqueue(
+            key, ttl=900, enqueue_fn=fake_enqueue, context={"x": 1},
+            should_enqueue_fn=lambda: False,
+            max_stale_factor=5,
+        )
+        assert result is None  # None cached was not treated as stale
+        assert len(enqueues) == 1  # force-enqueued for retry
+        self._clear_cache(key)
+
+    def test_cached_none_fresh_ttl_still_returns_none(self):
+        """Complement to the above: while the cache is still FRESH (age < ttl),
+        a None entry is preserved as the short-lived failure cooldown. Do not
+        re-enqueue during this window — that was the original intent of
+        main.py writing _update_cache(key, None, ttl=60).
+        """
+        from portfolio.shared_state import _cached_or_enqueue
+        key = "test_llm_none_fresh"
+        self._setup_cache(key, age_seconds=30, data=None)  # fresh path
+
+        enqueues = []
+        def fake_enqueue(k, ctx):
+            enqueues.append((k, ctx))
+
+        result = _cached_or_enqueue(
+            key, ttl=900, enqueue_fn=fake_enqueue, context={"x": 1},
+            should_enqueue_fn=lambda: False,
+            max_stale_factor=5,
+        )
+        # Fresh path: returns the cached None, no enqueue (legacy behavior).
+        assert result is None
+        assert enqueues == []
         self._clear_cache(key)

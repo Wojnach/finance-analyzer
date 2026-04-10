@@ -154,13 +154,22 @@ def _cached_or_enqueue(key, ttl, enqueue_fn, context,
         # Check stale availability BEFORE deciding whether to enqueue, because
         # the rotation gate can only safely skip enqueue when we have stale
         # fallback to return. If stale is exhausted we must force-enqueue.
+        #
+        # 2026-04-10 code-review finding N1: also treat cached `data is None`
+        # as "stale NOT available". main.py writes _update_cache(key, None)
+        # when a flush fails as a short-lived retry cooldown; without this
+        # check, the rotation gate would skip enqueue on those None entries
+        # and the caller would see None for up to 3 rotation cycles
+        # (~3 minutes) before retry. The extra `is not None` guard force-
+        # enqueues on failed-cache entries matching legacy recovery behavior.
         stale_data = None
         stale_available = False
         if key in _tool_cache:
             age = now - _tool_cache[key]["time"]
-            if age <= ttl * effective_stale_factor:
+            cached_data = _tool_cache[key]["data"]
+            if age <= ttl * effective_stale_factor and cached_data is not None:
                 stale_available = True
-                stale_data = _tool_cache[key]["data"]
+                stale_data = cached_data
 
         # Decide whether to enqueue:
         # - Default (no should_enqueue_fn): always enqueue (legacy behavior)
