@@ -945,3 +945,51 @@ docs/SESSION_PROGRESS.md
 data/metals_swing_trader.py
 data/test_metals_swing_trader.py
 tests/test_metals_swing_sizing.py
+
+### 2026-04-10 17:37 UTC | diag/bug178-end-of-cycle-snapshot
+e7f2607 diag(bug178): log last signal and phase marker on slow cycles
+portfolio/main.py
+portfolio/signal_engine.py
+tests/test_signal_engine.py
+
+### 2026-04-10 17:39 UTC | fix/macd-precision
+8eba760 fix(signals): bump macd_hist precision 2→5 decimals to unblock MACD gate
+portfolio/reporting.py
+portfolio/signal_engine.py
+tests/test_metals_swing_sizing.py
+
+### 2026-04-10 17:39 UTC | 
+5a13ed6 fix(signals): bump macd_hist precision 2→5 decimals to unblock MACD gate
+portfolio/reporting.py
+portfolio/signal_engine.py
+tests/test_metals_swing_sizing.py
+
+### 2026-04-10 17:42 UTC | phase-marker diagnostic fired — dogpile culprit identified
+- First slow cycle after merge `68d22ba` (diag/bug178-end-of-cycle-snapshot):
+  142.4 s at 19:42:26 UTC. Diagnostic line printed:
+  ```
+  Slow cycle diagnostic: 142.4s total, last signals tracked: {
+    'MSTR': ('__post_dispatch__', 106.5),
+    'ETH-USD': ('__post_dispatch__', 100.5),
+    'BTC-USD': ('__post_dispatch__', 100.2),
+    'XAG-USD': ('__post_dispatch__', 97.4),
+    'XAU-USD': ('__post_dispatch__', 95.4)
+  }
+  ```
+- **ALL 5 tickers stuck in `__post_dispatch__` for ~100 s**. The secondary
+  slow path is POST-DISPATCH code in `signal_engine.generate_signal` — after
+  the enhanced-signal loop, before the function returns.
+- **Root cause (high-confidence hypothesis)**: dogpile on `load_cached_accuracy`.
+  `signal_engine.generate_signal` lines 1801-1820 make multiple cache lookups
+  (`load_cached_accuracy`, `load_cached_regime_accuracy`, `per_ticker_accuracy`
+  cache, `signal_utility`) with NO dogpile prevention. When ANY of these
+  caches expire (TTL=3600 s), all 5 ticker threads fall through
+  simultaneously to `signal_accuracy()` → `load_entries()` (SQLite, pulls up
+  to 50 000 entries) and race to rebuild. The `_accuracy_write_lock` then
+  serializes the writes, but the reads are already duplicated. That's why
+  slow cycles fire every ~6-10 cycles (= cache expiry boundary).
+- **Next session should**: wrap the affected cache reads in the existing
+  `shared_state._cached()` dogpile-prevention helper, OR add a module-level
+  lock in `accuracy_stats.py` so only one thread computes on miss while
+  others return stale. Both are low-risk and should eliminate the 100 s hang.
+- Task #18 complete. Task #19 opened for the dogpile fix.
