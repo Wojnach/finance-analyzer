@@ -111,7 +111,15 @@ def write_agent_summary(
             "confluence_score": extra.get("_confluence_score", 0.0),
             "price_usd": ind["close"],
             "rsi": round(ind["rsi"], 1),
-            "macd_hist": round(ind["macd_hist"], 2),
+            # 2026-04-10: bumped from 2 → 5 decimals. MACD for low-magnitude
+            # tickers like XAG (around -0.04 to -0.05) was rounding to the
+            # same value for long stretches, which made
+            # metals_swing_trader._evaluate_entry's `all(recent[i] > recent[i-1])`
+            # MACD-improving gate a near-permanent blocker (17/19 flat pairs
+            # in live state today). Finer precision lets the gate see real
+            # per-tick drift and fire as intended. Display consumers that
+            # read this field should format to their own preferred width.
+            "macd_hist": round(ind["macd_hist"], 5),
             "bb_position": ind["price_vs_bb"],
             "atr": round(ind.get("atr", 0), 4),
             "atr_pct": round(ind.get("atr_pct", 0), 2),
@@ -143,7 +151,13 @@ def write_agent_summary(
                             entry["confidence"] if label != "Now" else sig["confidence"]
                         ),
                         "rsi": round(ei["rsi"], 1),
-                        "macd_hist": round(ei["macd_hist"], 2),
+                        # 2026-04-10: same 5-decimal bump as line 114. The
+                        # per-timeframe macd_hist is displayed in agent_summary
+                        # for readability but isn't consumed by the swing
+                        # trader's MACD-improving gate (that reads the
+                        # top-level signals[name].macd_hist). Keeping them
+                        # symmetric in precision.
+                        "macd_hist": round(ei["macd_hist"], 5),
                         "ema_bullish": ei["ema9"] > ei["ema21"],
                         "bb_position": ei["price_vs_bb"],
                     }

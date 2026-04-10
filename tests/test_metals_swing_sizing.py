@@ -902,3 +902,145 @@ def test_eod_exit_does_not_fire_outside_buffer(monkeypatch):
         f"EOD should NOT fire at 15:00 CET (minutes_to_close={((21.9167 - 15.0) * 60):.0f}), "
         f"got: {eod_sells}"
     )
+
+
+# ---------------------------------------------------------------------------
+# 2026-04-10 MACD precision fix — regression guards for rounding + gate
+# ---------------------------------------------------------------------------
+
+
+def test_reporting_macd_hist_uses_5_decimal_precision():
+    """Pin portfolio/reporting.py's MACD precision at 5 decimals.
+
+    Root-cause regression: before this fix, reporting rounded macd_hist
+    to 2 decimals, which for low-magnitude tickers (XAG MACD ≈ -0.04)
+    meant the MACD-improving gate in metals_swing_trader._evaluate_entry
+    saw 17/19 flat consecutive pairs in a 20-entry history and rejected
+    essentially every entry attempt that made it past the confidence gate.
+
+    This test reads reporting.py source and asserts the rounding constant
+    hasn't regressed. A textual assertion is fragile but the full pipeline
+    test is not worth the fixture complexity for one line of code.
+    """
+    import pathlib
+    src = pathlib.Path("portfolio/reporting.py").read_text(encoding="utf-8")
+    # The two rounding sites (signals[name] entry at ~line 114, timeframes at ~line 146).
+    # Both must round at >= 4 decimals so MACD drift is visible.
+    assert 'round(ind["macd_hist"], 5)' in src, (
+        "portfolio/reporting.py:114 top-level signals[name].macd_hist rounding "
+        "must be at 5 decimals. Anything ≤2 decimals creates 17/19 flat-pair "
+        "history for XAG and permanently blocks the swing trader's MACD-improving "
+        "entry gate. See 2026-04-10 fix notes."
+    )
+    assert 'round(ei["macd_hist"], 5)' in src, (
+        "portfolio/reporting.py:154 per-timeframe macd_hist rounding should "
+        "match the top-level precision for consistency."
+    )
+
+
+def test_signal_engine_ticker_summary_macd_precision():
+    """Pin portfolio/signal_engine.py's ticker_summary MACD precision."""
+    import pathlib
+    src = pathlib.Path("portfolio/signal_engine.py").read_text(encoding="utf-8")
+    assert 'round(ind["macd_hist"], 5)' in src, (
+        "portfolio/signal_engine.py:955 ticker_summary macd_hist rounding "
+        "must be at 5 decimals. See 2026-04-10 fix notes."
+    )
+
+
+def _make_trader_for_real_evaluate_entry(macd_hist_list):
+    """Build a trader with seeded MACD history and REAL _evaluate_entry.
+
+    Unlike _make_trader() which stubs _evaluate_entry to always return True,
+    this factory restores the real method so the gate logic is actually
+    exercised. All OTHER entry gates are seeded to pass so the MACD gate
+    is the only possible blocker.
+    """
+    trader = _make_trader(cash=5000)
+    # Restore the real _evaluate_entry method bound to this instance.
+    trader._evaluate_entry = mst.SwingTrader._evaluate_entry.__get__(
+        trader, mst.SwingTrader
+    )
+    # Seed state for all the real gates the method checks:
+    trader.state["macd_history"] = {"XAG-USD": list(macd_hist_list)}
+    trader.state["cash_sek"] = 5000  # above MIN_TRADE_SEK
+    # regime_history satisfies _regime_confirmed (requires N consecutive matches).
+    from metals_swing_config import REGIME_CONFIRM_CHECKS
+    trader.regime_history = {
+        "XAG-USD": [("BUY", "ranging")] * REGIME_CONFIRM_CHECKS,
+    }
+    return trader
+
+
+def _make_long_buy_signal(confidence=0.77):
+    """Signal dict shaped for _evaluate_entry's LONG-BUY path (all other gates pass)."""
+    return {
+        "action": "BUY",
+        "buy_count": 7,
+        "sell_count": 4,
+        "confidence": confidence,
+        "weighted_confidence": confidence,
+        "rsi": 46.4,  # inside [35, 68] entry zone
+        "macd_hist": -0.04128,  # not actually read by _evaluate_entry
+        "regime": "ranging",
+    }
+
+
+def test_macd_improving_gate_passes_on_fine_grained_drift(monkeypatch):
+    """After the 5-decimal precision fix, fine MACD drift must satisfy
+    the strictly-increasing gate. Before the fix, these two values would
+    both round to the same 2-decimal number and fail the gate.
+
+    Tests `_evaluate_entry` directly so the real gate fires.
+
+    Note: "rising" means LESS negative → -0.04128 then -0.04123 is rising.
+    """
+    # Values that differ at the 5-decimal level but collapse at 2 decimals.
+    # -0.04128 → -0.04123 is rising (-0.04128 < -0.04123).
+    trader = _make_trader_for_real_evaluate_entry([-0.04128, -0.04123])
+    ok, reason = trader._evaluate_entry(_make_long_buy_signal(), "XAG-USD")
+    assert ok, (
+        f"MACD-improving gate should accept fine-grained rising values "
+        f"(-0.04128 → -0.04123), got: reason={reason!r}"
+    )
+
+
+def test_macd_improving_gate_blocks_flat_history():
+    """Sanity: the gate MUST still block truly flat MACD (equal floats).
+    The precision fix shouldn't loosen the gate's semantics — it should
+    only give the gate real data to work with.
+    """
+    trader = _make_trader_for_real_evaluate_entry([-0.04123, -0.04123])
+    ok, reason = trader._evaluate_entry(_make_long_buy_signal(), "XAG-USD")
+    assert not ok, "Genuinely flat MACD must still block the gate"
+    assert "MACD not improving" in reason, (
+        f"Expected 'MACD not improving' rejection, got: {reason!r}"
+    )
+
+
+def test_macd_improving_gate_blocks_declining():
+    """Sanity: a declining MACD must block LONG entry."""
+    trader = _make_trader_for_real_evaluate_entry([-0.04123, -0.04150])  # falling
+    ok, reason = trader._evaluate_entry(_make_long_buy_signal(), "XAG-USD")
+    assert not ok, "Declining MACD must block LONG entry"
+    assert "MACD not improving" in reason, (
+        f"Expected 'MACD not improving' rejection, got: {reason!r}"
+    )
+
+
+def test_macd_improving_gate_old_2decimal_rounding_would_have_failed_fine_drift():
+    """Regression demo: demonstrates the exact scenario the precision fix
+    addresses. If someone re-rounds macd_hist to 2 decimals upstream, both
+    entries of history collapse to -0.04 and the gate fails.
+    """
+    # Simulate the pre-fix condition: what reporting.py used to write.
+    pre_fix_history = [round(-0.04123, 2), round(-0.04128, 2)]  # [-0.04, -0.04]
+    assert pre_fix_history[0] == pre_fix_history[1], (
+        "Sanity: pre-fix 2-decimal rounding collapses fine drift"
+    )
+    trader = _make_trader_for_real_evaluate_entry(pre_fix_history)
+    ok, reason = trader._evaluate_entry(_make_long_buy_signal(), "XAG-USD")
+    assert not ok and "MACD not improving" in reason, (
+        "Pre-fix 2-decimal rounding creates flat history that blocks the "
+        "gate — this is what the 5-decimal fix addresses"
+    )

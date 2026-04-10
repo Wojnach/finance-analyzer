@@ -952,7 +952,9 @@ def _build_llm_context(ticker, ind, timeframes, extra_info):
         "ticker": ticker.replace("-USD", ""),
         "price_usd": ind["close"],
         "rsi": round(ind["rsi"], 1),
-        "macd_hist": round(ind["macd_hist"], 2),
+        # 2026-04-10: bumped to 5 decimals — see portfolio/reporting.py:114
+        # for the root-cause explanation (MACD-improving gate rounding).
+        "macd_hist": round(ind["macd_hist"], 5),
         "ema_bullish": ind["ema9"] > ind["ema21"],
         "ema_gap_pct": round(ema_gap, 2),
         "bb_position": ind["price_vs_bb"],
