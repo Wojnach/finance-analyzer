@@ -837,3 +837,55 @@ data/metals_loop.py
 a168952 perf(llm_batch): address review findings N1+N2 on rotation gate
 portfolio/shared_state.py
 tests/test_llm_batch.py
+
+### 2026-04-10 12:46 UTC | main
+91b731d docs(session): perf/llama-swap-reduction shipped + measured (rotation working)
+docs/SESSION_PROGRESS.md
+
+### 2026-04-10 13:27 UTC | fix/metals-swing-sizing-and-time-limit
+2a65d21 fix(metals): Kelly-based sizing + EOD-only exit for swing trader
+data/metals_swing_config.py
+data/metals_swing_trader.py
+tests/test_metals_swing_sizing.py
+
+### 2026-04-10 13:54 UTC | fix/metals-adversarial-review
+3844ace fix(metals): adversarial review follow-ups — 3 bugs + 4 silent failures + logging
+data/metals_swing_config.py
+data/metals_swing_trader.py
+data/test_metals_swing_trader.py
+tests/test_metals_swing_sizing.py
+
+### 2026-04-10 14:17 UTC | fix/bug178-disabled-signals
+8d5b412 fix(signal_engine): respect DISABLED_SIGNALS in dispatch loop (BUG-178 root cause)
+docs/PLAN.md
+portfolio/main.py
+portfolio/signal_engine.py
+tests/test_signal_engine.py
+
+### 2026-04-10 14:23 UTC | bug178 fix shipped + measured
+- Merge `d3712f5` → main → push
+- Pre-fix: 49 BUG-178 events since 2026-04-09 (45 yesterday, 4 today by 14:18 UTC)
+- Root cause: signal_engine dispatch loop ignored DISABLED_SIGNALS, so
+  crypto_macro / cot_positioning / credit_spread_risk were doing network
+  I/O every cycle. CLAUDE.md said they were "force-HOLD pending validation"
+  but the compute path ran them anyway.
+- Fix: skip DISABLED_SIGNALS in dispatch loop (mirror skip_gpu pattern).
+- Diagnostic: per-ticker last-signal tracker; BUG-178 handler now logs
+  which signal each stuck ticker was running (so any future hang names
+  the culprit instead of just listing the stuck tickers).
+- Measurement: first post-restart cycle 16:23:34 UTC = 5 OK / 0 failed
+  in 208 s (41.6 s/ticker avg, warmup phase). Per-ticker times:
+  - MSTR: 41.3 s sig (was: 169 s)
+  - XAU-USD: 57.7 s sig
+  - XAG-USD: 69.5 s sig
+  - BTC-USD: ~70 s sig
+  - ETH-USD: 71.7 s sig
+- Tests: 4 new in test_signal_engine.py + 321 adjacent tests pass.
+- Investigation pivoted from Chronos VRAM contention (premise rejected,
+  see project_chronos_vram_contention.md memory) to BUG-178 silent hangs
+  after measuring Chronos GPU latency at ~50 ms p50. Closed task #16,
+  opened + closed task #17.
+- Schtasks restart caveat: `schtasks /run /tn PF-DataLoop` did NOT actually
+  restart the loop because the singleton lock was held by old PID 28604
+  from 10:34 AM start. Required manual `Stop-Process -Id 28604 -Force`
+  before `schtasks /run` worked. Worth knowing for future restarts.
