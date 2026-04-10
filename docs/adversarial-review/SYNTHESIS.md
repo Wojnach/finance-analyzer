@@ -27,14 +27,17 @@ through BUG-181). The main areas of concern are:
 7. **[P2] Timezone consistency** — 8 naive datetime.now() calls in metals_loop
 8. **[P2] Windows-specific atomicity** — JSONL append lacks true atomicity on NTFS
 
-**CRITICAL UPDATE**: 2 P0 (critical/money-losing) findings identified by the avanza-api
-agent review. The Playwright context thread-safety issue can cause corrupt trade responses
-when concurrent API calls are made. The TOTP account whitelist gap can route orders to the
-pension account. Both require IMMEDIATE remediation.
+**CRITICAL UPDATE**: 5 P0 (critical/money-losing) findings identified across 2 subsystems:
+- **avanza-api** (2 P0): Playwright thread-safety corruption, TOTP pension account trades
+- **portfolio-risk** (3 P0): Trade guards entirely non-functional (record_trade never called),
+  drawdown peak blind after 33h, portfolio_validator raw json.load TOCTOU
 
-**Agent review update**: 2 of 8 agent reviews complete (signals-core: 10 findings,
-avanza-api: 13 findings). The avanza-api review is the most alarming — it found the only
-P0 issues in the entire codebase.
+The trade guards finding (A-PR-1) is arguably the most impactful of the entire review:
+the system has ZERO overtrading protection because `record_trade()` exists but is never
+called from any production code path.
+
+**Agent review update**: 5 of 8 agent reviews complete. Running total: 97+ findings
+(5 P0, 24+ P1, 50+ P2, 22+ P3).
 
 ---
 
@@ -44,13 +47,13 @@ P0 issues in the entire codebase.
 |-----------|-------|----------|----|----|----|----|
 | signals-core | 5,640 | 17 | 4 | 9 | 4 | Fair — directional gate bypassed |
 | orchestration | 6,412 | 16 | 3 | 9 | 4 | Fair — TimeoutError bug, stale config |
-| portfolio-risk | 4,281 | 4 | 1 | 2 | 1 | Fair — drawdown blind spot |
+| portfolio-risk | 4,281 | 19 | 3+6 | 6 | 3 | **CRITICAL** — 3 P0: guards dead, peak blind |
 | metals-core | 19,014 | 6 | 1 | 3 | 2 | Fair — God file, timezone issues |
 | avanza-api | 2,298 | 16 | 2 | 10 | 4 | **CRITICAL** — 2 P0 findings |
 | signals-modules | 10,949 | 3 | 0 | 1 | 2 | Good — consistent pattern |
 | data-external | 6,062 | 12 | 5 | 7 | 0 | Fair — budget drain, yfinance compat |
 | infrastructure | 5,721 | 8 | 2 | 3 | 3 | Fair — atomicity + gate bypass |
-| **Total** | **60,377** | **82+** | **18+** | **44+** | **20+** | |
+| **Total** | **60,377** | **97+** | **24+** | **50+** | **22+** | |
 
 ---
 
@@ -289,8 +292,14 @@ See `AGENT_REVIEW_ORCHESTRATION.md` for full details. Key findings:
 - **A-OR-5 [P2]**: Stale config in post-cycle — config changes require restart
 - **A-OR-7 [P2]**: BUY↔SELL flips poison trigger consensus — rapid crypto oscillations miss signals
 
-### Agent: review-portfolio-risk
-*(Pending — will be updated when agent completes)*
+### Agent: review-portfolio-risk — COMPLETE (15 findings: 3 P0, 6 P1, 4 P2, 2 P3)
+See `AGENT_REVIEW_PORTFOLIO_RISK.md` for full details. **3 P0 CRITICAL findings:**
+- **A-PR-1 [P0]**: `record_trade()` never called in production — entire trade guard system dead
+- **A-PR-2 [P0]**: Drawdown peak scans only last 2000 entries (~33h) — misses true historical peak
+- **A-PR-3 [P0]**: portfolio_validator.py raw json.load() — TOCTOU race with concurrent save
+- **A-PR-6 [P1]**: Kelly P&L uses all-time average instead of FIFO — wrong win probability
+- **A-PR-7 [P1]**: Concentration limit warning never blocks trades
+- **A-PR-10 [P2]**: Monte Carlo ATR annualization wrong for hourly candles (5x understatement)
 
 ### Agent: review-metals-core
 *(Pending — will be updated when agent completes)*
