@@ -118,7 +118,8 @@ def _cached(key, ttl, func, *args):
         return None
 
 
-def _cached_or_enqueue(key, ttl, enqueue_fn, context):
+def _cached_or_enqueue(key, ttl, enqueue_fn, context,
+                        should_enqueue_fn=None, max_stale_factor=None):
     """Check cache — if fresh return it, if expired enqueue for batch and return stale.
 
     Unlike _cached(), this never calls the model directly. On miss, it adds
@@ -126,23 +127,79 @@ def _cached_or_enqueue(key, ttl, enqueue_fn, context):
 
     Dogpile prevention (Codex finding #5): uses _loading_keys to avoid
     re-enqueuing the same key every cycle if the batch flush hasn't run yet.
+
+    2026-04-10 (perf/llama-swap-reduction) — two new optional parameters to
+    support rotation scheduling of LLM signals:
+
+    - should_enqueue_fn: callable returning bool. If provided and the cache
+      is stale-but-present, skip the enqueue when the callback says "no"
+      (rotation off-cycle). If stale data is NOT available, force-enqueue
+      regardless of the callback — we cannot leave the caller empty-handed
+      when no stale fallback exists. Default None means "always enqueue",
+      which preserves the pre-rotation behavior for every existing caller.
+
+    - max_stale_factor: integer override for how stale data can be returned,
+      in multiples of ttl. Default None means use the module-level
+      _MAX_STALE_FACTOR. LLM rotation passes 5 here so each rotated vote
+      can stay valid across the full rotation cycle (3 * TTL) plus slippage.
     """
     now = time.time()
+    effective_stale_factor = (
+        max_stale_factor if max_stale_factor is not None else _MAX_STALE_FACTOR
+    )
     with _cache_lock:
         if key in _tool_cache and now - _tool_cache[key]["time"] < ttl:
             return _tool_cache[key]["data"]
-        # Cache expired — enqueue for post-cycle batch (once, not every thread)
-        if enqueue_fn and context is not None and key not in _loading_keys:
+
+        # Check stale availability BEFORE deciding whether to enqueue, because
+        # the rotation gate can only safely skip enqueue when we have stale
+        # fallback to return. If stale is exhausted we must force-enqueue.
+        stale_data = None
+        stale_available = False
+        if key in _tool_cache:
+            age = now - _tool_cache[key]["time"]
+            if age <= ttl * effective_stale_factor:
+                stale_available = True
+                stale_data = _tool_cache[key]["data"]
+
+        # Decide whether to enqueue:
+        # - Default (no should_enqueue_fn): always enqueue (legacy behavior)
+        # - Callback returns True: enqueue (rotation on-cycle, or force path)
+        # - Callback returns False AND stale available: skip (rotation off-cycle,
+        #   stale fallback carries us until next on-cycle)
+        # - Callback returns False AND stale NOT available: enqueue anyway
+        #   (fresh cold path; caller has no fallback, we must refresh)
+        if should_enqueue_fn is None:
+            should_enq = True
+        else:
+            try:
+                should_enq = bool(should_enqueue_fn()) or not stale_available
+            except Exception as e:
+                logger.warning(
+                    "[%s] should_enqueue_fn raised, defaulting to enqueue: %s",
+                    key, e,
+                )
+                should_enq = True
+
+        if should_enq and enqueue_fn and context is not None and key not in _loading_keys:
             _loading_keys.add(key)
             # C11/SS1: Track enqueue time for stuck-key eviction.
             _loading_timestamps[key] = time.time()
             enqueue_fn(key, context)
+
         # Return stale if available
-        if key in _tool_cache:
-            age = now - _tool_cache[key]["time"]
-            if age <= ttl * _MAX_STALE_FACTOR:
-                return _tool_cache[key]["data"]
+        if stale_available:
+            return stale_data
     return None
+
+
+# 2026-04-10 (perf/llama-swap-reduction): monotonic counter of full-LLM
+# batch flushes that actually processed work. Drives rotation scheduling in
+# portfolio.llm_batch.is_llm_on_cycle — incremented at the end of
+# flush_llm_batch() iff at least one phase had queued items. In-memory only,
+# resets to 0 on process start; on restart the rotation deterministically
+# restarts at ministral with a cold-start warmup cycle that runs all LLMs.
+_full_llm_cycle_count = 0
 
 
 def _update_cache(key, data, ttl=None):

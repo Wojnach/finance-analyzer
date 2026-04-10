@@ -19,6 +19,7 @@ The monkeypatches replace:
 from __future__ import annotations
 
 import sys
+import time
 import types
 
 import pytest
@@ -369,3 +370,239 @@ def test_flush_ab_log_empty_buffer_is_noop(tmp_path, monkeypatch):
 
     sentiment_mod.flush_ab_log()
     assert not tmp_log.exists()
+
+
+# ---------------------------------------------------------------------------
+# Rotation scheduling (perf/llama-swap-reduction, 2026-04-10)
+# ---------------------------------------------------------------------------
+#
+# Verifies that is_llm_on_cycle() rotates across ministral → qwen3 → fingpt
+# as the shared_state counter advances, and that flush_llm_batch() advances
+# the counter by exactly 1 when any phase had queued work.
+
+
+@pytest.fixture
+def reset_rotation_counter():
+    """Reset the module-level rotation counter before and after each test."""
+    from portfolio import shared_state as _ss
+    original = _ss._full_llm_cycle_count
+    _ss._full_llm_cycle_count = 0
+    yield _ss
+    _ss._full_llm_cycle_count = original
+
+
+class TestRotationSchedule:
+    """is_llm_on_cycle drives which LLM runs each flush. Warmup (counter==0)
+    runs all; from counter==1 onward, rotation: ministral → qwen3 → fingpt → …
+    """
+
+    def test_warmup_runs_all_llms(self, reset_rotation_counter):
+        from portfolio.llm_batch import is_llm_on_cycle
+        reset_rotation_counter._full_llm_cycle_count = 0
+        assert is_llm_on_cycle("ministral") is True
+        assert is_llm_on_cycle("qwen3") is True
+        assert is_llm_on_cycle("fingpt") is True
+
+    def test_counter_1_runs_ministral_only(self, reset_rotation_counter):
+        from portfolio.llm_batch import is_llm_on_cycle
+        reset_rotation_counter._full_llm_cycle_count = 1
+        assert is_llm_on_cycle("ministral") is True
+        assert is_llm_on_cycle("qwen3") is False
+        assert is_llm_on_cycle("fingpt") is False
+
+    def test_counter_2_runs_qwen3_only(self, reset_rotation_counter):
+        from portfolio.llm_batch import is_llm_on_cycle
+        reset_rotation_counter._full_llm_cycle_count = 2
+        assert is_llm_on_cycle("ministral") is False
+        assert is_llm_on_cycle("qwen3") is True
+        assert is_llm_on_cycle("fingpt") is False
+
+    def test_counter_3_runs_fingpt_only(self, reset_rotation_counter):
+        from portfolio.llm_batch import is_llm_on_cycle
+        reset_rotation_counter._full_llm_cycle_count = 3
+        assert is_llm_on_cycle("ministral") is False
+        assert is_llm_on_cycle("qwen3") is False
+        assert is_llm_on_cycle("fingpt") is True
+
+    def test_counter_4_wraps_to_ministral(self, reset_rotation_counter):
+        """After a full rotation, counter=4 should land back on ministral."""
+        from portfolio.llm_batch import is_llm_on_cycle
+        reset_rotation_counter._full_llm_cycle_count = 4
+        assert is_llm_on_cycle("ministral") is True
+        assert is_llm_on_cycle("qwen3") is False
+        assert is_llm_on_cycle("fingpt") is False
+
+    def test_full_six_cycle_rotation(self, reset_rotation_counter):
+        """Over cycles 1..6, each LLM runs exactly twice (2 full rotations)."""
+        from portfolio.llm_batch import is_llm_on_cycle
+        counts = {"ministral": 0, "qwen3": 0, "fingpt": 0}
+        for counter in range(1, 7):
+            reset_rotation_counter._full_llm_cycle_count = counter
+            for name in counts:
+                if is_llm_on_cycle(name):
+                    counts[name] += 1
+        assert counts == {"ministral": 2, "qwen3": 2, "fingpt": 2}
+
+    def test_unknown_llm_name_raises(self, reset_rotation_counter):
+        """Programming errors should fail loudly, not silently skip."""
+        from portfolio.llm_batch import is_llm_on_cycle
+        reset_rotation_counter._full_llm_cycle_count = 1
+        with pytest.raises(ValueError):
+            is_llm_on_cycle("not_a_real_llm")
+
+
+class TestFlushAdvancesCounter:
+    """flush_llm_batch() must bump _full_llm_cycle_count after processing
+    work; an empty flush must not bump the counter (no cycle was spent).
+    """
+
+    def test_empty_flush_does_not_advance_counter(self, reset_rotation_counter):
+        from portfolio.llm_batch import flush_llm_batch, _ministral_queue, _qwen3_queue, _fingpt_queue, _lock
+        with _lock:
+            _ministral_queue.clear()
+            _qwen3_queue.clear()
+            _fingpt_queue.clear()
+        reset_rotation_counter._full_llm_cycle_count = 5
+        flush_llm_batch()
+        assert reset_rotation_counter._full_llm_cycle_count == 5
+
+    def test_nonempty_flush_advances_counter(
+        self, reset_rotation_counter, fake_fingpt_infer, fake_llama_server, stash_recorder,
+    ):
+        """A flush that processes at least one phase must bump counter by 1."""
+        from portfolio.llm_batch import enqueue_fingpt, flush_llm_batch, _fingpt_queue, _lock
+        with _lock:
+            _fingpt_queue.clear()
+
+        fake_llama_server["response"] = ["positive"]
+        enqueue_fingpt(
+            "BTC:rot-test", "headlines",
+            {"mode": "headlines", "ticker": "BTC", "texts": ["h1"]},
+        )
+        reset_rotation_counter._full_llm_cycle_count = 2
+        flush_llm_batch()
+        assert reset_rotation_counter._full_llm_cycle_count == 3
+
+
+class TestCachedOrEnqueueRotationGate:
+    """_cached_or_enqueue's should_enqueue_fn parameter lets callers skip
+    enqueue when rotation says off-cycle, as long as stale data is available.
+    """
+
+    def _setup_cache(self, key, age_seconds, data="cached_vote"):
+        """Put a fake cache entry at the given age."""
+        from portfolio import shared_state as _ss
+        _ss._tool_cache[key] = {
+            "data": data,
+            "time": time.time() - age_seconds,
+            "ttl": 900,
+        }
+        _ss._loading_keys.discard(key)
+        _ss._loading_timestamps.pop(key, None)
+
+    def _clear_cache(self, key):
+        from portfolio import shared_state as _ss
+        _ss._tool_cache.pop(key, None)
+        _ss._loading_keys.discard(key)
+        _ss._loading_timestamps.pop(key, None)
+
+    def test_off_cycle_skips_enqueue_and_returns_stale(self):
+        """When rotation says off-cycle and stale data is available, enqueue
+        should be skipped and the stale data returned."""
+        from portfolio.shared_state import _cached_or_enqueue
+        key = "test_llm_off"
+        self._setup_cache(key, age_seconds=1800)  # 30 min, within 5x stale
+
+        enqueues = []
+        def fake_enqueue(k, ctx):
+            enqueues.append((k, ctx))
+
+        result = _cached_or_enqueue(
+            key, ttl=900, enqueue_fn=fake_enqueue, context={"x": 1},
+            should_enqueue_fn=lambda: False,
+            max_stale_factor=5,
+        )
+        assert result == "cached_vote"
+        assert enqueues == []  # skipped because off-cycle with stale fallback
+        self._clear_cache(key)
+
+    def test_on_cycle_enqueues_and_returns_stale(self):
+        """When rotation says on-cycle, enqueue should fire and stale data
+        should be returned (caller gets stale now, fresh next flush)."""
+        from portfolio.shared_state import _cached_or_enqueue
+        key = "test_llm_on"
+        self._setup_cache(key, age_seconds=1800)  # stale but within window
+
+        enqueues = []
+        def fake_enqueue(k, ctx):
+            enqueues.append((k, ctx))
+
+        result = _cached_or_enqueue(
+            key, ttl=900, enqueue_fn=fake_enqueue, context={"x": 1},
+            should_enqueue_fn=lambda: True,
+            max_stale_factor=5,
+        )
+        assert result == "cached_vote"
+        assert len(enqueues) == 1
+        self._clear_cache(key)
+
+    def test_off_cycle_force_enqueues_when_no_stale(self):
+        """When rotation says off-cycle BUT stale is NOT available, enqueue
+        MUST fire anyway — the caller has no fallback value so we cannot
+        leave them empty-handed."""
+        from portfolio.shared_state import _cached_or_enqueue
+        key = "test_llm_cold_off"
+        self._clear_cache(key)  # no cache at all
+
+        enqueues = []
+        def fake_enqueue(k, ctx):
+            enqueues.append((k, ctx))
+
+        result = _cached_or_enqueue(
+            key, ttl=900, enqueue_fn=fake_enqueue, context={"x": 1},
+            should_enqueue_fn=lambda: False,
+            max_stale_factor=5,
+        )
+        assert result is None  # no data to return, first-ever enqueue
+        assert len(enqueues) == 1  # forced enqueue because no stale fallback
+        self._clear_cache(key)
+
+    def test_stale_beyond_max_stale_factor_returns_none(self):
+        """Stale data older than ttl * max_stale_factor is not returned; the
+        call should force-enqueue and return None (cold start semantic)."""
+        from portfolio.shared_state import _cached_or_enqueue
+        key = "test_llm_too_old"
+        # 1 hour old with TTL 900 × max_stale_factor 2 = 30 min max → too old
+        self._setup_cache(key, age_seconds=3600)
+
+        enqueues = []
+        def fake_enqueue(k, ctx):
+            enqueues.append((k, ctx))
+
+        result = _cached_or_enqueue(
+            key, ttl=900, enqueue_fn=fake_enqueue, context={"x": 1},
+            should_enqueue_fn=lambda: False,
+            max_stale_factor=2,  # 1800 s max stale, 3600 s age exceeds it
+        )
+        assert result is None  # stale too old to return
+        assert len(enqueues) == 1  # force-enqueued
+        self._clear_cache(key)
+
+    def test_fresh_cache_returns_without_enqueue(self):
+        """Fresh cache (age < ttl) bypasses rotation entirely — no enqueue."""
+        from portfolio.shared_state import _cached_or_enqueue
+        key = "test_llm_fresh"
+        self._setup_cache(key, age_seconds=60)  # very fresh
+
+        enqueues = []
+        def fake_enqueue(k, ctx):
+            enqueues.append((k, ctx))
+
+        result = _cached_or_enqueue(
+            key, ttl=900, enqueue_fn=fake_enqueue, context={"x": 1},
+            should_enqueue_fn=lambda: False,
+            max_stale_factor=5,
+        )
+        assert result == "cached_vote"
+        assert enqueues == []  # fresh cache, no enqueue regardless of rotation
+        self._clear_cache(key)

@@ -37,6 +37,69 @@ _qwen3_queue: list[tuple[str, dict]] = []       # (cache_key, context)
 _fingpt_queue: list[tuple[str, str, dict]] = []
 
 
+# 2026-04-10 (perf/llama-swap-reduction) — ROTATION SCHEDULING
+#
+# Rotation across the three llama-server LLMs reduces the LLM batch phase
+# from running all 3 models every cycle (~85 s: 40 s Ministral + 19 s Qwen3
+# + 9 s fingpt + 15-18 s of swaps) to running ONE model per cycle (~25-40 s
+# depending on which one). Each LLM still gets a fresh vote every 3rd full-
+# LLM batch, and _cached_or_enqueue returns stale data on the off-cycle 2
+# of 3 cycles (max staleness is bounded by max_stale_factor=5 passed at the
+# call site in signal_engine.py / sentiment.py).
+#
+# Design decisions (see docs/PLAN.md / plan file for full rationale):
+#
+# 1. Counter lives in shared_state._full_llm_cycle_count, increments AFTER
+#    flush when the batch actually had work. In-memory only — restart resets
+#    to 0 and triggers a warmup cycle that runs all three models to establish
+#    a baseline before the rotation begins.
+#
+# 2. Rotation gate sits at the _cached_or_enqueue caller via should_enqueue_fn,
+#    NOT inside enqueue_ministral/qwen3 themselves, because the enqueue helpers
+#    also need to be callable directly (from sentiment.py for fingpt) without
+#    going through _cached_or_enqueue. Gating inside the enqueue functions
+#    would also poison _loading_keys when the rotation skips.
+#
+# 3. Counter advances once per flush-with-work, not once per loop iteration.
+#    That way rotation is driven by actual LLM invocations, not by idle cache-
+#    hit cycles where nothing needs to run.
+#
+# 4. Warmup: on the very first flush after process start (counter == 0), ALL
+#    LLMs run so we have a full baseline before rotation kicks in. Subsequent
+#    flushes rotate.
+_LLM_ROTATION: tuple[str, ...] = ("ministral", "qwen3", "fingpt")
+
+
+def is_llm_on_cycle(llm_name: str) -> bool:
+    """Return True if `llm_name` is scheduled to run during the current cycle.
+
+    Called at enqueue time to decide whether to skip the enqueue. The current
+    cycle's slot is `(shared_state._full_llm_cycle_count - 1) % 3` because
+    the counter advances AFTER the flush — at enqueue time, the counter
+    represents "how many flushes have already completed" and the next slot
+    is `counter % 3`, but we want to treat "counter == 0" as a warmup in
+    which everything runs. So:
+
+        counter == 0  → warmup → every LLM returns True
+        counter == 1  → slot 0 → ministral only
+        counter == 2  → slot 1 → qwen3 only
+        counter == 3  → slot 2 → fingpt only
+        counter == 4  → slot 0 → ministral again
+        ...
+
+    Unknown llm_name raises ValueError (from tuple.index) — that's a
+    programming error we want to catch in tests rather than silently
+    return False.
+    """
+    from portfolio import shared_state as _ss
+    count = _ss._full_llm_cycle_count
+    if count == 0:
+        return True  # warmup — run everything the first time through
+    idx = _LLM_ROTATION.index(llm_name)  # raises ValueError for bad names
+    slot = (count - 1) % len(_LLM_ROTATION)
+    return slot == idx
+
+
 def enqueue_ministral(cache_key, context):
     """Add a Ministral cache miss to the batch queue."""
     with _lock:
@@ -105,6 +168,11 @@ def flush_llm_batch():
     Returns dict of {cache_key: result} for cache updates — ministral and
     qwen3 results only. Fingpt results are stashed into sentiment._pending_ab_entries
     via _stash_fingpt_result() and emitted later by sentiment.flush_ab_log().
+
+    2026-04-10 (perf/llama-swap-reduction): after processing, advances the
+    rotation counter in shared_state._full_llm_cycle_count if at least one
+    phase had queued work. This is what makes is_llm_on_cycle() rotate through
+    ministral → qwen3 → fingpt across successive flushes.
     """
     with _lock:
         m_batch = list(_ministral_queue)
@@ -116,6 +184,18 @@ def flush_llm_batch():
 
     if not m_batch and not q_batch and not f_batch:
         return {}
+
+    # Log which LLMs actually ran this cycle vs which were rotation-gated
+    # out at the call site. Useful for debugging rotation behaviour in logs.
+    from portfolio import shared_state as _ss
+    rotation_slot = (
+        "warmup" if _ss._full_llm_cycle_count == 0
+        else _LLM_ROTATION[(_ss._full_llm_cycle_count - 1) % len(_LLM_ROTATION)]
+    )
+    logger.info(
+        "LLM batch start: rotation_slot=%s counter=%d queues M=%d Q=%d F=%d",
+        rotation_slot, _ss._full_llm_cycle_count, len(m_batch), len(q_batch), len(f_batch),
+    )
 
     results = {}
     t0 = time.monotonic()
@@ -177,6 +257,13 @@ def flush_llm_batch():
     elapsed = time.monotonic() - t0
     logger.info("LLM batch: %d results in %.1fs (M:%d Q:%d F:%d)",
                 len(results), elapsed, len(m_batch), len(q_batch), len(f_batch))
+
+    # Advance rotation counter — next flush will target the next LLM in rotation.
+    # Only bumped when at least one phase had work (we already returned early
+    # for an empty flush above). Wrapping behaviour in is_llm_on_cycle handles
+    # arbitrary large counters.
+    _ss._full_llm_cycle_count += 1
+
     return results
 
 
