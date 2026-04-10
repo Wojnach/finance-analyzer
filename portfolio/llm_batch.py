@@ -196,8 +196,8 @@ def _flush_fingpt_phase(f_batch: list[tuple[str, str, dict]]) -> None:
         # response parsers that were originally used by the retired daemon.
         # Imported here (lazy) so a missing Q:\models path degrades gracefully
         # — if the import fails, fingpt just doesn't run this cycle.
-        import sys
         import platform
+        import sys
         if platform.system() == "Windows":
             _models_dir = r"Q:\models"
         else:

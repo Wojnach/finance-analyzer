@@ -140,7 +140,7 @@ def _load_model(name: str) -> tuple[Any, Any, str, threading.Lock]:
     # Lazy import so the main loop doesn't pay the torch import cost at
     # startup if no ticker ever calls get_sentiment this run.
     import torch
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
     config = _MODEL_CONFIGS[name]
     cache_dir = _resolve_cache_dir(config)
