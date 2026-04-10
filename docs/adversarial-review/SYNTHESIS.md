@@ -43,14 +43,14 @@ P0 issues in the entire codebase.
 | Subsystem | Lines | Findings | P1 | P2 | P3 | Health |
 |-----------|-------|----------|----|----|----|----|
 | signals-core | 5,640 | 17 | 4 | 9 | 4 | Fair — directional gate bypassed |
-| orchestration | 6,412 | 4 | 0 | 2 | 2 | Good — robust crash recovery |
+| orchestration | 6,412 | 16 | 3 | 9 | 4 | Fair — TimeoutError bug, stale config |
 | portfolio-risk | 4,281 | 4 | 1 | 2 | 1 | Fair — drawdown blind spot |
 | metals-core | 19,014 | 6 | 1 | 3 | 2 | Fair — God file, timezone issues |
 | avanza-api | 2,298 | 16 | 2 | 10 | 4 | **CRITICAL** — 2 P0 findings |
 | signals-modules | 10,949 | 3 | 0 | 1 | 2 | Good — consistent pattern |
 | data-external | 6,062 | 2 | 0 | 2 | 0 | Good — rate-limited, cached |
 | infrastructure | 5,721 | 8 | 2 | 3 | 3 | Fair — atomicity + gate bypass |
-| **Total** | **60,377** | **60+** | **10+** | **32+** | **18+** | |
+| **Total** | **60,377** | **72+** | **13+** | **39+** | **20+** | |
 
 ---
 
@@ -280,8 +280,14 @@ See `AGENT_REVIEW_SIGNALS_CORE.md` for full details. Key findings:
 - **A-SC-5 [P2]**: `blend_accuracy_data` uses `max()` for sample count → inflated gate threshold
 - **A-SC-6 [P2]**: `signal_history.py` read-modify-write race under ThreadPoolExecutor
 
-### Agent: review-orchestration
-*(Pending — will be updated when agent completes)*
+### Agent: review-orchestration — COMPLETE (12 findings: 3 P1, 7 P2, 2 P3)
+See `AGENT_REVIEW_ORCHESTRATION.md` for full details. Key findings:
+- **A-OR-1 [P1]**: Wrong `TimeoutError` type caught — ticker hangs crash the loop on Python <3.11
+- **A-OR-2 [P1]**: classify_tier/update_tier_state TOCTOU — three independent reads of trigger_state.json
+- **A-OR-3 [P1]**: Multi-agent mode blocks main loop 30s synchronously
+- **A-OR-4 [P2]**: `_maybe_send_digest` not wrapped in `_track` — crash aborts all post-cycle tasks
+- **A-OR-5 [P2]**: Stale config in post-cycle — config changes require restart
+- **A-OR-7 [P2]**: BUY↔SELL flips poison trigger consensus — rapid crypto oscillations miss signals
 
 ### Agent: review-portfolio-risk
 *(Pending — will be updated when agent completes)*
