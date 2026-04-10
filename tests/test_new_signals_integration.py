@@ -63,6 +63,11 @@ class TestMetalsCrossAssetIntegration:
             "copper_change_5d": 1.0,
             "gvz_zscore": 0.5,
             "gs_ratio_zscore": 0.3,
+            # 2026-04-10: added with the G/S velocity sub-signal (c3903bf).
+            # 0.5 sits inside the ±_GS_VELOCITY_PCT band so the sub-signal
+            # returns HOLD, keeping this test's overall-result assertion
+            # (BUY/SELL/HOLD) trivially true.
+            "gs_ratio_velocity": 0.5,
             "spy_change_1d": 0.5,
             "oil_change_5d": 1.0,
         }
