@@ -1,3 +1,49 @@
+# Session Progress — Dual Adversarial Review 2026-04-10
+
+## Status: SHIPPED (independent review), AGENTS PENDING
+
+Full dual adversarial review of the entire finance-analyzer codebase (135 files, ~60K lines) across 8 subsystems. Independent manual analysis found 37 findings (7 P1, 20 P2, 10 P3). No P0 critical/money-losing issues.
+
+### What shipped (1 commit, pushed)
+- `4a0f344` docs(review): adversarial review — independent analysis + synthesis
+  - `docs/adversarial-review/INDEPENDENT_REVIEW.md` — 37 findings across 8 subsystems
+  - `docs/adversarial-review/SYNTHESIS.md` — prioritized fix list, health scorecard, methodology
+  - `docs/adversarial-review/CROSS_CRITIQUE.md` — framework for dual-review cross-referencing
+
+### Top 5 findings
+1. **Subprocess governance** — bigbet.py, iskbets.py, agent_invocation.py bypass claude_gate.py
+2. **Hardware trailing stop failure** — no fallback to legacy cascade stops in metals_loop
+3. **Timezone consistency** — 8 naive datetime.now() calls in metals_loop
+4. **Portfolio drawdown blind spot** — fallback to avg_cost_usd masks crashes
+5. **JSONL append atomicity** — not truly atomic on Windows/NTFS
+
+### 8 parallel agent reviews
+- **signals-core**: COMPLETE — 10 findings (4 P1, 4 P2, 2 P3). Cross-critiqued and integrated.
+  - Top finding: per-ticker accuracy override strips directional fields, disabling directional gate
+- **orchestration**: Still running
+- **portfolio-risk**: Still running
+- **metals-core**: Still running (19K lines — largest subsystem)
+- **avanza-api**: Still running
+- **signals-modules**: Still running
+- **data-external**: Still running
+- **infrastructure**: Still running
+
+Agent findings from signals-core integrated in commit 21dca8b.
+
+### Positive patterns found
+- Fail-closed accuracy gate (signal_engine.py:1807)
+- 28 thread locks across the codebase
+- Dogpile prevention in shared_state.py
+- Circuit breaker pattern for API calls
+- Kelly criterion properly guarded against edge cases
+
+### Next priorities
+- Fix the 5 findings above
+- Integrate agent review results when they complete
+- Cross-critique: identify agreement/disagreement between independent and agent reviews
+
+---
+
 # Session Progress — perf/llama-swap-reduction 2026-04-10
 
 ## Status: SHIPPED + MEASURED (merged d21ec5f, 17 rotation cycles confirmed working, ~62% reduction in mean LLM batch phase time)
@@ -889,3 +935,13 @@ tests/test_signal_engine.py
   restart the loop because the singleton lock was held by old PID 28604
   from 10:34 AM start. Required manual `Stop-Process -Id 28604 -Force`
   before `schtasks /run` worked. Worth knowing for future restarts.
+
+### 2026-04-10 14:25 UTC | main
+dc7683d docs(session): bug178 fix shipped + measured (49 events / day → 0)
+docs/SESSION_PROGRESS.md
+
+### 2026-04-10 14:57 UTC | fix/metals-finish-review
+9804a55 fix(metals): adversarial review round 2 — L3 + S3 + 4 test gaps
+data/metals_swing_trader.py
+data/test_metals_swing_trader.py
+tests/test_metals_swing_sizing.py
