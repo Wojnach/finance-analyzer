@@ -768,15 +768,78 @@ class SwingTrader:
                     _log_decision(decision)
                     continue
 
-            # Calculate position size
+            # Calculate position size — Kelly-optimal with MIN_TRADE_SEK floor.
+            #
+            # 2026-04-10: replaces fixed POSITION_SIZE_PCT (30%) sizing which
+            # structurally failed when cash * 30% < MIN_TRADE_SEK (i.e. cash
+            # below ~3333 SEK). Kelly sizing already lives in
+            # portfolio/kelly_metals and is used by the fish engine at
+            # metals_loop.py:2343 — integrate the same pattern here:
+            #   1. Ask Kelly for the optimal half-Kelly fraction using live
+            #      win_rate, avg_win, avg_loss from the signal log DB.
+            #   2. Floor the recommendation at MIN_TRADE_SEK (Avanza min
+            #      courtage threshold) because kelly_metals has its own
+            #      lower floor of 500 SEK.
+            #   3. Cap at 95% of cash so we leave a small courtage buffer.
+            #   4. If Kelly says "no edge" (position_sek == 0), respect it
+            #      and skip the entry.
+            #   5. If Kelly raises (import failure, DB missing, etc.), fall
+            #      back to the original fixed-30% logic so entries never
+            #      lose a fallback path.
             cash = self.state["cash_sek"]
-            alloc = cash * POSITION_SIZE_PCT / 100
-            if alloc < MIN_TRADE_SEK:
-                _log(f"Insufficient cash: {cash:.0f} SEK (need {MIN_TRADE_SEK})")
-                continue
-
             ask_price = warrant["live_ask"]
             if ask_price <= 0:
+                continue
+
+            kelly_rec = None
+            try:
+                from portfolio.kelly_metals import recommended_metals_size
+                kelly_rec = recommended_metals_size(
+                    ticker=underlying_ticker,
+                    leverage=float(warrant.get("leverage") or 5.0),
+                    buying_power_sek=cash,
+                    ask_price_sek=ask_price,
+                    consecutive_losses=int(self.state.get("consecutive_losses", 0)),
+                    agent_summary=signal_data,
+                    horizon="1d",
+                )
+            except Exception as kelly_err:  # noqa: BLE001
+                logger.warning(
+                    "[SWING] Kelly sizing unavailable for %s: %s — "
+                    "falling back to fixed POSITION_SIZE_PCT",
+                    underlying_ticker, kelly_err, exc_info=True,
+                )
+
+            if kelly_rec and kelly_rec.get("position_sek", 0) > 0:
+                kelly_alloc = float(kelly_rec["position_sek"])
+                # Floor at MIN_TRADE_SEK (Avanza min courtage threshold).
+                alloc = max(kelly_alloc, float(MIN_TRADE_SEK))
+                # Cap at 95% of cash — leave a buffer for courtage / slippage.
+                alloc = min(alloc, cash * 0.95)
+                _log(
+                    f"Kelly sizing {underlying_ticker}: "
+                    f"kelly_half={kelly_rec.get('half_kelly_pct', 0) * 100:.1f}% "
+                    f"win_rate={kelly_rec.get('win_rate', 0) * 100:.1f}% "
+                    f"rec={kelly_alloc:.0f} SEK → alloc={alloc:.0f} SEK"
+                )
+            elif kelly_rec is not None:
+                # Kelly explicitly said no edge. Respect it and skip.
+                _log(
+                    f"Kelly says no edge for {underlying_ticker}: "
+                    f"kelly_half={kelly_rec.get('half_kelly_pct', 0) * 100:.1f}% "
+                    f"win_rate={kelly_rec.get('win_rate', 0) * 100:.1f}% — skipping"
+                )
+                continue
+            else:
+                # Kelly module failed to load. Fall back to the original
+                # fixed POSITION_SIZE_PCT logic so entries still work.
+                alloc = cash * POSITION_SIZE_PCT / 100
+
+            if alloc < MIN_TRADE_SEK:
+                _log(
+                    f"Insufficient cash: cash={cash:.0f} SEK, "
+                    f"alloc={alloc:.0f} SEK < min={MIN_TRADE_SEK:.0f} SEK"
+                )
                 continue
 
             units = int(alloc / ask_price)
