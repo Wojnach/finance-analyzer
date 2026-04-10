@@ -18,19 +18,23 @@ atomic I/O patterns, fail-closed accuracy gating, circuit breakers for APIs, and
 crash recovery. The system has been significantly hardened through iterative bug fixes (BUG-85
 through BUG-181). The main areas of concern are:
 
-1. **Directional accuracy gate silently disabled** — Per-ticker accuracy override drops buy/sell fields [NEW from agent review]
-2. **Subprocess governance** — 3 modules bypass the centralized claude_gate
-3. **Timezone consistency** — 8 naive datetime.now() calls in metals_loop
-4. **Stop-loss safety** — Hardware trailing stop failure has no automatic fallback
-5. **Windows-specific atomicity** — JSONL append lacks true atomicity on NTFS
-6. **Portfolio drawdown blind spot** — Fallback to stale prices masks real drawdowns
+1. **[P0] Playwright context thread-unsafe** — Concurrent API calls corrupt trade responses [NEW from avanza-api agent]
+2. **[P0] TOTP path has no account whitelist** — Pension account 2674244 can receive orders [NEW from avanza-api agent]
+3. **[P1] Directional accuracy gate silently disabled** — Per-ticker accuracy override drops buy/sell fields [from signals-core agent]
+4. **[P1] Subprocess governance** — 3 modules bypass the centralized claude_gate
+5. **[P1] Stop-loss safety** — Hardware trailing stop failure has no automatic fallback
+6. **[P1] Portfolio drawdown blind spot** — Fallback to stale prices masks real drawdowns
+7. **[P2] Timezone consistency** — 8 naive datetime.now() calls in metals_loop
+8. **[P2] Windows-specific atomicity** — JSONL append lacks true atomicity on NTFS
 
-No P0 (critical/money-losing) findings. The system has multiple layers of defense
-that prevent any single bug from causing catastrophic financial loss.
+**CRITICAL UPDATE**: 2 P0 (critical/money-losing) findings identified by the avanza-api
+agent review. The Playwright context thread-safety issue can cause corrupt trade responses
+when concurrent API calls are made. The TOTP account whitelist gap can route orders to the
+pension account. Both require IMMEDIATE remediation.
 
-**Agent review update**: The signals-core agent review completed and found 5 additional P1/P2
-findings that the independent review missed, including the most impactful finding of the entire
-review: the directional accuracy gate is silently disabled for all primary instruments.
+**Agent review update**: 2 of 8 agent reviews complete (signals-core: 10 findings,
+avanza-api: 13 findings). The avanza-api review is the most alarming — it found the only
+P0 issues in the entire codebase.
 
 ---
 
@@ -42,17 +46,54 @@ review: the directional accuracy gate is silently disabled for all primary instr
 | orchestration | 6,412 | 4 | 0 | 2 | 2 | Good — robust crash recovery |
 | portfolio-risk | 4,281 | 4 | 1 | 2 | 1 | Fair — drawdown blind spot |
 | metals-core | 19,014 | 6 | 1 | 3 | 2 | Fair — God file, timezone issues |
-| avanza-api | 2,298 | 3 | 0 | 3 | 0 | Fair — session management gaps |
+| avanza-api | 2,298 | 16 | 2 | 10 | 4 | **CRITICAL** — 2 P0 findings |
 | signals-modules | 10,949 | 3 | 0 | 1 | 2 | Good — consistent pattern |
 | data-external | 6,062 | 2 | 0 | 2 | 0 | Good — rate-limited, cached |
 | infrastructure | 5,721 | 8 | 2 | 3 | 3 | Fair — atomicity + gate bypass |
-| **Total** | **60,377** | **47+** | **8+** | **25+** | **14+** | |
+| **Total** | **60,377** | **60+** | **10+** | **32+** | **18+** | |
 
 ---
 
 ## Top Priority Findings (Recommended Fixes)
 
-### Priority 0 (NEW): Fix directional accuracy gate disabled by per-ticker override [P1]
+### EMERGENCY: Fix Playwright context thread safety [P0, avanza_session.py]
+
+**File**: `portfolio/avanza_session.py:183-291`
+
+**Problem**: `_pw_lock` is only held during Playwright context *creation*. All API calls
+(`api_get`, `api_post`, `api_delete`) use `ctx.request.*` WITHOUT holding the lock.
+Playwright's sync_api is NOT thread-safe. The metals loop's 10s fast-tick thread and
+the main loop's 8-worker ThreadPoolExecutor can make concurrent requests, corrupting
+internal HTTP state. A BUY confirmation could be consumed by a different request.
+
+**Impact**: Corrupt trade responses. Order failures, double-executions, wrong-asset trades.
+
+**Fix**: Wrap the entire body of each `api_get/api_post/api_delete` function with
+`with _pw_lock:`. This serializes all Playwright API calls.
+
+**Effort**: 15 minutes. CRITICAL — must be done before next trading session.
+
+---
+
+### EMERGENCY: Add account whitelist to TOTP path [P0, avanza_client.py]
+
+**File**: `portfolio/avanza_client.py:220-320`
+
+**Problem**: `get_account_id()` discovers the ISK account by scanning for "ISK" in
+accountType. There is NO hardcoded allowlist against "1625505". If Avanza re-orders
+accounts in the API response, pension account 2674244 could receive real-money trades.
+The `avanza_session.py` path has `ALLOWED_ACCOUNT_IDS`, but the TOTP fallback path does not.
+
+**Impact**: Trades on pension account. Regulatory risk, tax implications, wrong risk profile.
+
+**Fix**: Add `assert account_id == "1625505"` in `get_account_id()` before caching.
+Also filter `get_positions()` and `get_portfolio_value()` to account "1625505" only.
+
+**Effort**: 15 minutes. CRITICAL — must be done before next trading session.
+
+---
+
+### Priority 0a: Fix directional accuracy gate disabled by per-ticker override [P1]
 
 **File**: `portfolio/signal_engine.py:1840-1849`
 
@@ -248,8 +289,15 @@ See `AGENT_REVIEW_SIGNALS_CORE.md` for full details. Key findings:
 ### Agent: review-metals-core
 *(Pending — will be updated when agent completes)*
 
-### Agent: review-avanza-api
-*(Pending — will be updated when agent completes)*
+### Agent: review-avanza-api — COMPLETE (13 findings: 2 P0, 7 P1, 3 P2, 1 P3)
+See `AGENT_REVIEW_AVANZA_API.md` for full details. **MOST CRITICAL SUBSYSTEM.**
+- **A-AV-1 [P0]**: Playwright context used outside lock — concurrent requests corrupt trades
+- **A-AV-2 [P0]**: TOTP path has no account whitelist — pension account can receive orders
+- **A-AV-3 [P1]**: get_positions/get_portfolio_value include pension account data
+- **A-AV-4 [P1]**: Single CONFIRM matches wrong (most-recent) order
+- **A-AV-5 [P1]**: Confirmed orders use TOTP path, not BankID session
+- **A-AV-6 [P1]**: get_quote() hardcodes "stock" type — wrong price for warrants
+- **A-AV-9 [P1]**: Pending orders TOCTOU race — potential double execution
 
 ### Agent: review-signals-modules
 *(Pending — will be updated when agent completes)*

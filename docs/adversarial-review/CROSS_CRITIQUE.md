@@ -2,7 +2,7 @@
 
 **Date**: 2026-04-10
 **Format**: Independent review (I) vs Agent reviews (A) — each side critiques the other
-**Status**: signals-core agent complete; 7 agents still running
+**Status**: signals-core + avanza-api agents complete; 6 agents still running
 
 ---
 
@@ -24,6 +24,18 @@ The independent review noted the accuracy gate but didn't trace how `total` is c
 
 ### 1.5 Independent MISSED: Ministral Applicable Count Mismatch [A-SC-3, P1]
 The independent review noted the `_compute_applicable_count` function but didn't compare it against the actual vote-setting code. The comment "all tickers" vs the count function's "crypto-only" exclusion is a real inconsistency.
+
+### 1.6 Independent UNDERRATED: Playwright Context Thread Safety [A-AV-1, P0 vs I-AV-3 P2]
+The independent review flagged "Playwright context is module-level singleton without health check" as P2. The avanza-api agent identified the MUCH more severe issue: `_pw_lock` is only held during context *creation*, not during API calls. This means concurrent requests from multiple threads can corrupt Playwright's internal HTTP state. The independent review missed that the lock scope is too narrow — it focused on the health check (what happens after the context dies) rather than the fundamental thread-safety issue (what happens while the context is alive).
+
+### 1.7 Independent UNDERRATED: Account Whitelist Gap [A-AV-2, P0 vs I-AV-2 P2]
+The independent review flagged the account whitelist gap as P2 ("relies on trust chain"). The avanza-api agent correctly identified this as P0 — the TOTP path (`avanza_client._place_order`) has NO account check at all, and if Avanza re-orders accounts in the API response, trades execute on the pension account. The independent review's P2 rating was too mild for a finding that could cause real-money trades on the wrong account.
+
+### 1.8 Independent MISSED: Pending Orders TOCTOU Race [A-AV-9, P1]
+The independent review examined `avanza_orders.py` but focused on the confirmation flow, not the concurrent-access race condition on the pending orders file. The agent correctly identified that concurrent calls to `check_pending_orders()` could double-execute an order.
+
+### 1.9 Independent MISSED: get_positions/get_portfolio_value Include Pension Account [A-AV-3, P1]
+The independent review didn't check whether `avanza_client` functions filter by account ID. The agent found they iterate ALL accounts, inflating portfolio value and position data.
 
 ---
 
@@ -96,9 +108,12 @@ All 10 agent findings for signals-core are **valid and well-evidenced**. Specifi
 
 ## Summary
 
-The dual review found **47+ unique findings** across both reviewers:
-- **5 new P1 findings** from the agent that the independent review missed (directional gate, regime cache, ministral count, signal_history race, blend sample inflation)
-- **4 P1 findings** from the independent review that the agent couldn't find (different subsystem scope)
-- **Strong agreement** on the overall health assessment: the system is well-hardened, with the main risks in data consistency, not catastrophic logic errors.
+The dual review found **60+ unique findings** across both reviewers (2 agents complete, 6 pending):
+- **2 P0 findings** from the avanza-api agent that the independent review UNDERRATED (Playwright thread safety, account whitelist)
+- **5 new P1 findings** from the signals-core agent that the independent review missed
+- **4 new P1 findings** from the avanza-api agent that the independent review missed entirely
+- **4 P1 findings** from the independent review that agents couldn't find (different subsystem scope)
 
-The most impactful finding across both reviews is **A-SC-1: Per-ticker accuracy strips directional fields**, which silently disables a safety gate designed to prevent directionally-biased signals from voting.
+**The most impactful finding** across both reviews is **A-AV-1: Playwright context used outside lock** (P0), which can cause corrupt trade responses when concurrent API calls are made. The **second most impactful** is **A-AV-2: TOTP path has no account whitelist** (P0), which can route orders to the pension account.
+
+The independent review's overall health assessment was too optimistic for the avanza-api subsystem. The agent review correctly identified it as the weakest link in the system's financial safety chain.
