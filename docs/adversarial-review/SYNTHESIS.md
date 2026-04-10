@@ -27,17 +27,19 @@ through BUG-181). The main areas of concern are:
 7. **[P2] Timezone consistency** — 8 naive datetime.now() calls in metals_loop
 8. **[P2] Windows-specific atomicity** — JSONL append lacks true atomicity on NTFS
 
-**CRITICAL UPDATE**: 5 P0 (critical/money-losing) findings identified across 2 subsystems:
+**CRITICAL UPDATE**: 7 P0 (critical/money-losing) findings identified across 3 subsystems:
 - **avanza-api** (2 P0): Playwright thread-safety corruption, TOTP pension account trades
 - **portfolio-risk** (3 P0): Trade guards entirely non-functional (record_trade never called),
   drawdown peak blind after 33h, portfolio_validator raw json.load TOCTOU
+- **signals-modules** (2 P0): Gap-fill signal fires BUY during gap-down crashes (inverted),
+  GARCH missing from empty_result schema
 
 The trade guards finding (A-PR-1) is arguably the most impactful of the entire review:
 the system has ZERO overtrading protection because `record_trade()` exists but is never
 called from any production code path.
 
-**Agent review update**: 5 of 8 agent reviews complete. Running total: 97+ findings
-(5 P0, 24+ P1, 50+ P2, 22+ P3).
+**Agent review update**: 6 of 8 agent reviews complete. Running total: 113+ findings
+(7 P0, 34+ P1, 56+ P2, 22+ P3). 2 agents still running (metals-core, infrastructure).
 
 ---
 
@@ -50,10 +52,10 @@ called from any production code path.
 | portfolio-risk | 4,281 | 19 | 3+6 | 6 | 3 | **CRITICAL** — 3 P0: guards dead, peak blind |
 | metals-core | 19,014 | 6 | 1 | 3 | 2 | Fair — God file, timezone issues |
 | avanza-api | 2,298 | 16 | 2 | 10 | 4 | **CRITICAL** — 2 P0 findings |
-| signals-modules | 10,949 | 3 | 0 | 1 | 2 | Good — consistent pattern |
+| signals-modules | 10,949 | 19 | 2+8 | 7 | 2 | **CRITICAL** — gap-fill inverted, FOMC conflict |
 | data-external | 6,062 | 12 | 5 | 7 | 0 | Fair — budget drain, yfinance compat |
 | infrastructure | 5,721 | 8 | 2 | 3 | 3 | Fair — atomicity + gate bypass |
-| **Total** | **60,377** | **97+** | **24+** | **50+** | **22+** | |
+| **Total** | **60,377** | **113+** | **34+** | **56+** | **22+** | |
 
 ---
 
@@ -314,8 +316,14 @@ See `AGENT_REVIEW_AVANZA_API.md` for full details. **MOST CRITICAL SUBSYSTEM.**
 - **A-AV-6 [P1]**: get_quote() hardcodes "stock" type — wrong price for warrants
 - **A-AV-9 [P1]**: Pending orders TOCTOU race — potential double execution
 
-### Agent: review-signals-modules
-*(Pending — will be updated when agent completes)*
+### Agent: review-signals-modules — COMPLETE (16 findings: 2 P0, 8 P1, 6 P2)
+See `AGENT_REVIEW_SIGNALS_MODULES.md` for full details. Key findings:
+- **A-SM-1 [P0]**: Gap-fill signal fires BUY on continuing gap-down — inverted logic
+- **A-SM-2 [P0]**: GARCH missing from _empty_result schema — inconsistent sub_signals
+- **A-SM-3 [P1]**: FOMC drift (BUY) vs FOMC proximity (SELL) — direct contradiction 32 days/year
+- **A-SM-4 [P1]**: sqrt(365) vs sqrt(252) annualization makes GARCH ratio meaningless
+- **A-SM-6 [P1]**: Donchian upper includes current bar — lookback bias (structure.py does it right)
+- **A-SM-7 [P1]**: "cut" keyword as positive — job/budget cuts score as BUY during stress
 
 ### Agent: review-data-external — COMPLETE (10 findings: 5 P1, 5 P2)
 See `AGENT_REVIEW_DATA_EXTERNAL.md` for full details. Key findings:
