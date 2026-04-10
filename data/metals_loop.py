@@ -6775,6 +6775,31 @@ Positions: {pos_summary}{prob_summary}""")
                             bid = prices[key].get('bid', 0)
                             pnl_val = pnl_pct(bid, pos["entry"])
                             parts.append(f"{key}:{bid}({pnl_val:+.1f}%)")
+                    # 2026-04-10: also include swing trader positions in the
+                    # cycle summary. Swing state lives in a separate dict
+                    # (data/metals_swing_state.json) and was invisible to
+                    # this summary line — every cycle logged "no positions"
+                    # even when holding a live warrant, which made the loop
+                    # look broken at a glance.
+                    if swing_trader:
+                        try:
+                            swing_positions = getattr(swing_trader, "state", {}).get("positions", {})
+                            for _spos in swing_positions.values():
+                                wname = _spos.get("warrant_key") or "swing"
+                                under = _spos.get("underlying")
+                                cur_und = _underlying_prices.get(under, 0) if under else 0
+                                ent_und = _spos.get("entry_underlying", 0) or 0
+                                if cur_und and ent_und:
+                                    lev = _spos.get("leverage") or 1.0
+                                    direction = _spos.get("direction", "LONG")
+                                    pnl_val = ((cur_und - ent_und) / ent_und * 100) * lev
+                                    if direction == "SHORT":
+                                        pnl_val = -pnl_val
+                                    parts.append(f"SWING:{wname}({pnl_val:+.1f}%)")
+                                else:
+                                    parts.append(f"SWING:{wname}")
+                        except Exception:
+                            logger.debug("main_loop: swing summary build failed", exc_info=True)
                     cet = cet_time_str()
                     # Underlying prices + probability (all tracked)
                     und_tag = ""
