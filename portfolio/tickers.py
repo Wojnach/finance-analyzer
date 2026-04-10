@@ -58,7 +58,7 @@ YF_MAP = {t: t for t in STOCK_SYMBOLS}
 
 # Signals that are force-HOLD (disabled due to poor accuracy).
 # Kept in SIGNAL_NAMES for historical tracking but excluded from active reports.
-DISABLED_SIGNALS = {"ml", "crypto_macro", "cot_positioning", "credit_spread_risk"}  # credit_spread_risk: pending live validation
+DISABLED_SIGNALS = {"ml", "crypto_macro", "cot_positioning", "credit_spread_risk", "futures_basis"}  # futures_basis: pending live validation (added 2026-04-10)
 # funding: removed from DISABLED — 74.2% at 3h (535 samples) but 29.9% at 1d.
 # Horizon-gated via REGIME_GATED_SIGNALS to only vote at 3h/4h.
 
@@ -106,4 +106,5 @@ SIGNAL_NAMES = [
     "cot_positioning",
     "credit_spread_risk",
     "onchain",
+    "futures_basis",
 ]

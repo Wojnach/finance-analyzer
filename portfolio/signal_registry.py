@@ -144,6 +144,9 @@ def _register_defaults():
     # Credit spread risk — HY OAS from FRED as cross-asset risk appetite gauge; capped at 0.7
     register_enhanced("credit_spread_risk", "portfolio.signals.credit_spread",
                       "compute_credit_spread_signal", requires_context=True, max_confidence=0.7)
+    # Futures basis regime — mark-index spread, contango/backwardation detection; capped at 0.7
+    register_enhanced("futures_basis", "portfolio.signals.futures_basis",
+                      "compute_futures_basis_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
