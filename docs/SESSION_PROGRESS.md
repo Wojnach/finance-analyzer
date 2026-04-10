@@ -1,4 +1,87 @@
-# Session Progress — Overnight log migration + fish None-guards 2026-04-09 late night
+# Session Progress — perf/llama-swap-reduction 2026-04-10
+
+## Status: SHIPPED + MEASURED (merged d21ec5f, 17 rotation cycles confirmed working, ~62% reduction in mean LLM batch phase time)
+
+User asked "we want all LLMs on GPU" and after I initially proposed BERT GPU migration, pushed back with "how many seconds does BERT take on the cpu?" and "how about looking into if we cana reduce the llama-server swap overhead?" Investigation showed BERT is ~0.5 s/cycle on CPU (negligible) and corrected my initial wrong estimate of llama-server swap overhead (70-120s/cycle): the real swap time is 15-18 s/cycle, with Ministral *inference* (40 s/cycle) being the actual bottleneck.
+
+### What shipped (3 commits merged as d21ec5f)
+1. **`7264889` perf(llama_server): active VRAM poll + KV cache reuse** — Replaces `time.sleep(4)` in `_start_server` with `_wait_for_vram_reclaim()` that polls `nvidia-smi` every 100 ms until ≥5.5 GB free, with 4s ceiling fallback. Adds `cache_prompt: True` to every `/completion` request for KV cache reuse across same-prefix batches. 11 new tests.
+2. **`3062c01` perf(llm_batch): rotation scheduling for llama-server LLMs** — Rotates ministral → qwen3 → fingpt across successive batch flushes. Cold-start warmup runs all 3 once, then rotation kicks in. Uses new `shared_state._full_llm_cycle_count` counter + extended `_cached_or_enqueue(should_enqueue_fn=, max_stale_factor=)` signature. `max_stale_factor=5` at call sites gives 75 min stale tolerance covering the 45-60 min rotation period with slack. 14 new tests.
+3. **`a168952` perf: address review findings N1+N2** — Treat cached `data is None` as "stale not available" so failed-flush cooldown cache entries auto-retry on next cycle regardless of rotation gate. Defensive test cleanup.
+
+### Code review
+- `pr-review-toolkit:code-reviewer` subagent: **NO BLOCKERS**, 6 minor nits (2 fixed: N1 None-cache handling, N2 test queue cleanup; 4 cosmetic left).
+- 25 new tests, 281 adjacent tests pass, full suite: 6437 passed / 7 pre-existing failures (verified unrelated).
+
+### Live measurement (4 hours, 17 rotation cycles)
+- Old `PF-DataLoop` process PID 5956 was running since 2026-04-09 23:12 and ignored `schtasks /end`. Had to `powershell Stop-Process -Id 5956 -Force` to actually kill it. New process started at 10:34:22.
+- **Warmup cycle (counter=0)** at 10:36:09: all 3 LLMs ran as expected. Total LLM batch 369.5 s, Signal loop done 475.6 s. Slow because of pre-existing Chronos+llama-server VRAM contention (Chronos resident at ~3.5 GB + llama-server at ~5 GB on a 10 GB card). Same pattern as the PRE-RESTART slow cycles (10:03=510 s, 10:15=489 s, 10:20=489 s) — NOT a regression from my changes.
+- **17 rotation cycles confirmed (11:03 → 14:34)**: counter=1 ministral → 2 qwen3 → 3 fingpt → 4 ministral → … all the way to counter=17 qwen3. Every cycle ran exactly ONE LLM as designed.
+- **Mean LLM batch phase: ~32 s** (vs 85 s baseline = **62% reduction**)
+  - ministral-only cycles: 42-58 s (mean ~50 s)
+  - qwen3-only cycles: 25-29 s (mean ~27 s)
+  - fingpt-only cycles: 19-21 s (mean ~20 s)
+- **Mean Signal loop done: ~85 s** on full-LLM cycles (vs 150 s baseline = **43% reduction**)
+- **Lever 1 (active VRAM poll)**: First swap 4 s (vs 5-6 s baseline). Smaller win than expected because Chronos VRAM pressure caps the gain.
+- **Stability**: zero "fingpt phase failed" warnings, zero "In-process BERT failed" warnings, all 17 rotation cycles successful. 2 partial-failure cycles (1 OK / 4 failed) at 11:56 and 14:06 were ticker fetch failures unrelated to LLM changes.
+
+### Result: shipped, measured, rotation working as designed
+- Memory updated: `project_llama_swap_reduction.md`
+- Worktree cleaned up, branch deleted, main at d21ec5f
+
+### Root cause of VRAM pressure (deferred)
+Chronos-2 (~3.5 GB) stays resident in main.py's process between forecast calls. llama-server (~5 GB) needs to swap 8B models in/out. With PyTorch overhead, total is ~10+ GB on a 10.24 GB card. This predates my changes (the 10:03/10:15/10:20 slow cycles pre-ship). Possible fixes: (a) move Chronos to CPU (slow), (b) retire Chronos, (c) add an eager unload/reload gate around Chronos calls, (d) run Chronos in a separate process with its own VRAM budget.
+
+---
+
+# Session Progress — Auto-Improve Session 2026-04-10 (earlier)
+
+## Status: COMPLETE (7 commits merged + pushed)
+
+### What shipped
+1. **CLAUDE.md refresh** — Updated signal counts (30→32 active, 34→36 total), ticker list (12→5 instruments after Apr 9 reduction), applicable counts (crypto=31, stocks=26, metals=28), added funding rate re-enable + on-chain BTC + credit_spread_risk entries.
+2. **SYSTEM_OVERVIEW.md refresh** — Signal system (36 signals, 32 active, 4 disabled), test count (159→242 files), ticker table (MSTR only for stocks), signal inventory.
+3. **Import sorting** — Ruff I001 auto-fix in 3 files (bert_sentiment, llm_batch, signal_engine).
+4. **Metals lint cleanup** — 4× contextlib.suppress(), 2× any() builtin, 5× collapsed nested if across metals_loop.py + metals_swing_trader.py. Zero behavioral change.
+5. **Test fix** — Crypto applicable count 29→31 in test_consensus.py (was failing on main).
+
+### Test results
+- Branch: 29 failures (all pre-existing) / 6512 passed
+- Main before merge: 37 failures / 6531 passed
+- Net: reduced failures by fixing consensus assertion, no new regressions
+
+### Next priorities
+- COT positioning re-enable if CFTC data quality improves
+- HMM-based regime detection research
+- Walk-forward Bayesian optimization for REGIME_WEIGHTS
+- Remaining ruff violations: 87 (mostly E402 lazy imports, SIM117 cosmetic — intentional)
+
+---
+
+# Previous Session — After-Hours Research Agent 2026-04-09→10
+
+## Status: COMPLETE (4 commits merged + pushed)
+
+### What shipped (overnight research session)
+1. **Funding Rate 3h-only** — removed from DISABLED_SIGNALS, horizon-gated via REGIME_GATED_SIGNALS. 74.2% at 3h (535 sam), blocked at 1d (29.9%). Crypto-only.
+2. **On-Chain BTC Signal (#35)** — MVRV Z-Score, SOPR, NUPL, exchange netflow promoted to voting signal. Sub-metric majority vote. BTC-only, uses existing 12h cache.
+3. **G/S Ratio Velocity** — 6th sub-indicator added to metals_cross_asset. 5d rate of change of gold/silver ratio. Captures momentum alongside mean-reversion zscore.
+4. **Test count fixes** — Updated 5 test files for new signal counts (36 total, 31 crypto, 28 metals, 26 stocks). 15 new tests added.
+
+### What to monitor
+- Onchain signal accuracy over first 24h (new, zero history)
+- Funding signal activations at 3h horizon in live loop
+- G/S velocity threshold (±2%) — may need tuning
+- CPI release today — high volatility expected
+
+### Next priorities
+- Consider COT positioning re-enable if CFTC data quality improves
+- HMM-based regime detection research
+- Walk-forward Bayesian optimization for REGIME_WEIGHTS
+
+---
+
+# Previous Session — Overnight log migration + fish None-guards 2026-04-09 late night
 
 ## Status: SHIPPED (14 commits on main, 7 codex review rounds addressed)
 
@@ -714,3 +797,43 @@ data/metals_swing_trader.py
 ### 2026-04-09 21:12 UTC | 
 9317849 fix(metals): codex review v7 — duplicate _has_ancestor_emitter locally
 data/metals_swing_trader.py
+
+### 2026-04-09 21:15 UTC | main
+2866fe8 docs(session): overnight log migration + fish None-guards handoff
+docs/SESSION_PROGRESS.md
+
+### 2026-04-10 07:49 UTC | fix/metals-catalog-refresh-sync-playwright
+fdd788e fix(metals): route warrant refresh through loop page to avoid sync_playwright conflict
+data/metals_swing_trader.py
+data/metals_warrant_refresh.py
+tests/test_metals_warrant_refresh.py
+
+### 2026-04-10 07:55 UTC | perf/llama-swap-reduction
+7264889 perf(llama_server): active VRAM poll + KV cache reuse
+portfolio/llama_server.py
+tests/test_llama_server.py
+
+### 2026-04-10 08:04 UTC | perf/llama-swap-reduction
+3062c01 perf(llm_batch): rotation scheduling for llama-server LLMs
+portfolio/llm_batch.py
+portfolio/sentiment.py
+portfolio/shared_state.py
+portfolio/signal_engine.py
+tests/test_llm_batch.py
+
+### 2026-04-10 08:13 UTC | fix/metals-cleanup-apr10
+add91cb fix(tests): add gs_ratio_velocity key to metals cross_asset mock
+tests/test_new_signals_integration.py
+
+### 2026-04-10 08:15 UTC | fix/metals-cleanup-apr10
+d1fcb40 fix(metals): detect_holdings recognizes swing-managed warrants
+data/metals_loop.py
+
+### 2026-04-10 08:16 UTC | fix/metals-cleanup-apr10
+1040d7d fix(metals): cycle status line shows swing trader positions
+data/metals_loop.py
+
+### 2026-04-10 08:30 UTC | perf/llama-swap-reduction
+a168952 perf(llm_batch): address review findings N1+N2 on rotation gate
+portfolio/shared_state.py
+tests/test_llm_batch.py
