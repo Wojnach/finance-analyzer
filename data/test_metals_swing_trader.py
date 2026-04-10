@@ -147,6 +147,13 @@ def make_trader(cash=10000, positions=None, macd_history=None, consecutive_losse
     trader.cash_sync_was_ok = True
     trader.recon_failure_streak = 0
     trader.reconciled_once = True  # skip startup reconciliation in tests
+    # 2026-04-10 adversarial review round 2: JIT cash sync tracker +
+    # Kelly no-edge counter. Tests that bypass __init__ must set these
+    # explicitly or _check_entries AttributeErrors before reaching the
+    # tested branch. Stub _sync_cash so the JIT path doesn't hit MockPage.
+    trader._jit_sync_tick = -1
+    trader.kelly_no_edge_count = {}
+    trader._sync_cash = lambda: None
     # Default regime history seeds REGIME_CONFIRM_CHECKS BUY/range-bound entries
     # so tests for non-regime gates pass without manual setup. Tests that
     # exercise the regime gate pass an explicit regime_history={...}.

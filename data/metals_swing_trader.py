@@ -152,6 +152,11 @@ SELL_FAILED_COOLDOWN_SECONDS = 300  # 5 minutes
 RECON_THROTTLE_CYCLES = 3    # run every N cycles (after the first unconditional one)
 RECON_FAILURE_STREAK_ALERT = 10  # alert on Telegram after N consecutive failures
 
+# 2026-04-10 adversarial review S3: how often (in check_count ticks) the
+# periodic "Kelly rejected N BUY candidates" Telegram fires. 60 checks at
+# the 60s main loop cadence = ~1 hour. Only sends if the counter is >0.
+TELEGRAM_NO_EDGE_INTERVAL = 60
+
 
 def _log(msg):
     # 2026-04-09 Stage 1 shim: delegate to logger.info. The [SWING] tag is
@@ -342,6 +347,18 @@ class SwingTrader:
         self.cash_sync_was_ok: bool = False
         self.recon_failure_streak: int = 0
         self.reconciled_once: bool = False
+
+        # 2026-04-10 adversarial review L3: tracks the last check_count that
+        # ran a JIT cash sync in _check_entries. Ensures we sync at most once
+        # per tick even when both XAG and XAU pass _evaluate_entry.
+        self._jit_sync_tick: int = -1
+
+        # 2026-04-10 adversarial review S3: per-ticker counter of consecutive
+        # "Kelly no-edge" rejections, emitted as a Telegram summary every
+        # TELEGRAM_NO_EDGE_INTERVAL checks (default: hourly). Answers the
+        # operator's "why isn't it buying?" question without requiring a
+        # log file dive.
+        self.kelly_no_edge_count: dict[str, int] = {}
 
         # Load dynamic warrant catalog (live refresh from Avanza). Falls back
         # to the static hardcoded catalog if the refresh fails entirely.
@@ -692,7 +709,23 @@ class SwingTrader:
     def _check_entries(self, prices, signal_data):
         """Scan for BUY opportunities on XAG-USD and XAU-USD."""
         if not signal_data:
+            _log("_check_entries: no signal_data — skipping (one-cycle stale expected)")
             return
+
+        # 2026-04-10 adversarial review L3: just-in-time cash sync before
+        # sizing. The 30-min periodic sync is fine as a heartbeat, but when
+        # signals DO pass the entry gates we want Kelly to size against
+        # the freshest possible cash value — the user or another bot may
+        # have moved money in/out of Avanza in the last 30 min, and with
+        # the new 95% cap an over-size order could get rejected.
+        #
+        # Gated to once per check_count tick (not per-ticker) so we don't
+        # double-sync when both XAG and XAU pass _evaluate_entry in the
+        # same cycle. Falls back silently if sync fails — cash_sync_ok
+        # gate below still protects us.
+        if self._jit_sync_tick != self.check_count:
+            self._jit_sync_tick = self.check_count
+            self._sync_cash()
 
         # Fix 1 (2026-04-09): refuse entries while cash sync is broken.
         # Exit path continues unaffected — protection > perfect accounting.
@@ -927,11 +960,17 @@ class SwingTrader:
                 )
             elif kelly_rec is not None:
                 # Kelly explicitly said no edge. Respect it and skip.
+                # S3: bump the no-edge counter so the periodic summary at
+                # the end of _check_entries can report it on Telegram.
+                self.kelly_no_edge_count[underlying_ticker] = (
+                    self.kelly_no_edge_count.get(underlying_ticker, 0) + 1
+                )
                 _log(
                     f"Kelly says no edge for {underlying_ticker}: "
                     f"half_k={kelly_rec.get('half_kelly_pct', 0) * 100:.1f}% "
                     f"wr={kelly_rec.get('win_rate', 0) * 100:.1f}% "
-                    f"src={kelly_rec.get('source', '?')} — skipping"
+                    f"src={kelly_rec.get('source', '?')} — skipping "
+                    f"(streak: {self.kelly_no_edge_count[underlying_ticker]})"
                 )
                 continue
             else:
@@ -973,6 +1012,31 @@ class SwingTrader:
                 warrant, units, ask_price, underlying_ticker, sig,
                 total_cost, direction, kelly_rec=kelly_rec,
             )
+            # Reset no-edge streak for this ticker on a successful BUY.
+            self.kelly_no_edge_count.pop(underlying_ticker, None)
+
+        # 2026-04-10 adversarial review S3: periodic "why isn't it buying?"
+        # summary. When Kelly consistently returns position_sek=0 the user
+        # has no visible signal that sizing is blocking trades — they see
+        # cycles tick by and wonder why. Emit a Telegram summary once per
+        # hour (every 60 checks at the 60s main loop cadence) when any
+        # ticker has accumulated a non-zero no-edge streak. Guard against
+        # check_count=0 so the very first tick doesn't flush the counter
+        # before it's had a chance to accumulate anything.
+        if self.check_count > 0 and self.check_count % TELEGRAM_NO_EDGE_INTERVAL == 0:
+            nonzero = {k: v for k, v in self.kelly_no_edge_count.items() if v > 0}
+            if nonzero:
+                parts = [f"{k.split('-')[0]}: {v}×" for k, v in nonzero.items()]
+                _send_telegram(
+                    f"_SWING: Kelly rejected {', '.join(parts)} (no edge) in last "
+                    f"{TELEGRAM_NO_EDGE_INTERVAL} checks — widen MIN_BUY_CONFIDENCE "
+                    f"or wait for stronger signals_"
+                )
+                _log(
+                    f"Kelly no-edge hourly summary: {dict(nonzero)} — "
+                    f"telegram sent, counters reset"
+                )
+                self.kelly_no_edge_count.clear()
 
     def _evaluate_entry(self, sig, ticker):
         """Check if signal data meets entry criteria. Returns (ok, reason).

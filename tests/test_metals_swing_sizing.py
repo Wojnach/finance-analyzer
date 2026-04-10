@@ -31,6 +31,14 @@ def _make_trader(cash: float = 2418.91, losses: int = 0):
     trader.recon_failure_streak = 0
     trader.check_count = 0
     trader.regime_history = {}
+    # 2026-04-10 adversarial review round 2 attrs — tests bypass __init__
+    # via __new__, so we must set these explicitly or _check_entries
+    # AttributeErrors out before reaching the tested branch.
+    trader._jit_sync_tick = -1
+    trader.kelly_no_edge_count = {}
+    # Stub _sync_cash so the JIT sync branch doesn't hit real Avanza.
+    # Tests that need to observe _sync_cash calls can override this stub.
+    trader._sync_cash = lambda: None
     trader.warrant_catalog = {
         "MINI_L_SILVER_AVA_TEST": {
             "ob_id": "9999999",
@@ -527,3 +535,370 @@ def test_trade_record_includes_kelly_metadata(monkeypatch):
     assert kelly_rec["half_kelly_pct"] == 0.12
     assert kelly_rec["win_rate"] == 0.58
     assert kelly_rec["source"] == "test-source"
+
+
+# ---------------------------------------------------------------------------
+# 2026-04-10 adversarial review round 2: L3 / S3 / T1 / T4 / T5 / T6
+# ---------------------------------------------------------------------------
+
+
+def test_max_hold_hours_is_safety_net():
+    """T5: MAX_HOLD_HOURS should be a safety net, not a primary exit.
+
+    User explicitly removed the 5h time limit in favor of EOD-only exit
+    (commit 2a65d21). If a future change tightens this back below 12h,
+    this test breaks and forces a deliberate review.
+    """
+    from metals_swing_config import MAX_HOLD_HOURS
+    assert MAX_HOLD_HOURS >= 12, (
+        f"MAX_HOLD_HOURS={MAX_HOLD_HOURS} too low. User wants EOD-only "
+        f"forced exit; this constant should be a 12+ hour safety net, "
+        f"not a primary time-based exit rule. See commits 2a65d21 and "
+        f"3844ace for context."
+    )
+
+
+def test_jit_cash_sync_fires_before_kelly(monkeypatch):
+    """L3/T4: _check_entries must call _sync_cash before Kelly so sizing
+    uses the freshest buying_power, not 30-min-stale state."""
+    trader = _make_trader(cash=5000)
+    _capture_buy(trader)
+
+    # Track order of calls
+    call_order: list[str] = []
+
+    original_sync = trader._sync_cash
+
+    def _tracking_sync():
+        call_order.append("sync")
+        original_sync()
+
+    trader._sync_cash = _tracking_sync
+
+    def _tracking_kelly(**kwargs):
+        call_order.append("kelly")
+        return {"position_sek": 1500.0, "half_kelly_pct": 0.1, "win_rate": 0.55, "units": 107}
+
+    monkeypatch.setattr("portfolio.kelly_metals.recommended_metals_size", _tracking_kelly)
+
+    # First tick: sync should fire before Kelly
+    trader._check_entries(prices={}, signal_data=_signal_buy_xag())
+    assert "sync" in call_order, "_sync_cash was not called"
+    assert "kelly" in call_order, "Kelly was not called"
+    assert call_order.index("sync") < call_order.index("kelly"), (
+        f"Sync must fire BEFORE Kelly, got order={call_order}"
+    )
+
+
+def test_jit_cash_sync_only_once_per_tick(monkeypatch):
+    """L3: multiple tickers passing _evaluate_entry in the same tick must
+    only trigger ONE sync — not one per ticker."""
+    trader = _make_trader(cash=5000)
+    _capture_buy(trader)
+    # Force the trader to have a stale tick so JIT sync fires
+    trader._jit_sync_tick = -1
+
+    sync_count = [0]
+    original_sync = trader._sync_cash
+
+    def _counting_sync():
+        sync_count[0] += 1
+        original_sync()
+
+    trader._sync_cash = _counting_sync
+
+    monkeypatch.setattr(
+        "portfolio.kelly_metals.recommended_metals_size",
+        lambda **kwargs: {"position_sek": 1500.0, "half_kelly_pct": 0.1, "win_rate": 0.55, "units": 107},
+    )
+
+    # Simulate both XAG and XAU passing _evaluate_entry
+    signal = {
+        "XAG-USD": _signal_buy_xag()["XAG-USD"],
+        "XAU-USD": _signal_buy_xag()["XAG-USD"],  # same shape, different ticker
+    }
+    trader.check_count = 5  # Make sure _jit_sync_tick comparison fires
+    trader._check_entries(prices={}, signal_data=signal)
+    assert sync_count[0] == 1, f"Expected 1 sync, got {sync_count[0]}"
+
+
+def test_kelly_no_edge_counter_increments(monkeypatch):
+    """S3: kelly_no_edge_count tracks consecutive Kelly-rejected tickers."""
+    trader = _make_trader(cash=5000)
+    _capture_buy(trader)
+
+    def _no_edge_kelly(**kwargs):
+        return {"position_sek": 0.0, "half_kelly_pct": 0.01, "win_rate": 0.48}
+
+    monkeypatch.setattr("portfolio.kelly_metals.recommended_metals_size", _no_edge_kelly)
+
+    assert trader.kelly_no_edge_count == {}
+    trader._check_entries(prices={}, signal_data=_signal_buy_xag())
+    # XAG got no-edge rejected
+    assert trader.kelly_no_edge_count.get("XAG-USD") == 1
+
+    # Next tick: counter increments
+    trader.check_count += 1
+    trader._check_entries(prices={}, signal_data=_signal_buy_xag())
+    assert trader.kelly_no_edge_count.get("XAG-USD") == 2
+
+
+def test_kelly_no_edge_counter_resets_on_successful_buy(monkeypatch):
+    """S3: a successful BUY should clear the no-edge counter for that ticker."""
+    trader = _make_trader(cash=5000)
+    _capture_buy(trader)
+    trader.kelly_no_edge_count["XAG-USD"] = 5  # simulate prior streak
+
+    def _good_kelly(**kwargs):
+        return {"position_sek": 1500.0, "half_kelly_pct": 0.12, "win_rate": 0.58, "units": 107}
+
+    monkeypatch.setattr("portfolio.kelly_metals.recommended_metals_size", _good_kelly)
+
+    trader._check_entries(prices={}, signal_data=_signal_buy_xag())
+    assert "XAG-USD" not in trader.kelly_no_edge_count, (
+        "Successful BUY should clear the no-edge counter"
+    )
+
+
+def test_kelly_no_edge_hourly_telegram_fires(monkeypatch):
+    """S3: when check_count % TELEGRAM_NO_EDGE_INTERVAL == 0 and the
+    no-edge counter is non-zero, a Telegram summary should be sent."""
+    import metals_swing_trader as mst
+
+    trader = _make_trader(cash=5000)
+    _capture_buy(trader)
+    trader.check_count = mst.TELEGRAM_NO_EDGE_INTERVAL  # triggers the summary
+    trader.kelly_no_edge_count = {"XAG-USD": 42, "XAU-USD": 38}
+
+    telegrams_sent: list[str] = []
+    monkeypatch.setattr(mst, "_send_telegram", lambda msg: telegrams_sent.append(msg))
+
+    # Kelly returns no-edge so nothing executes but the summary still runs
+    monkeypatch.setattr(
+        "portfolio.kelly_metals.recommended_metals_size",
+        lambda **kwargs: {"position_sek": 0.0, "half_kelly_pct": 0.01, "win_rate": 0.48},
+    )
+
+    trader._check_entries(prices={}, signal_data=_signal_buy_xag())
+
+    assert any("Kelly rejected" in m for m in telegrams_sent), (
+        f"Expected 'Kelly rejected' telegram, got: {telegrams_sent}"
+    )
+    # Counter should be cleared after summary fires (but may be incremented by the current tick)
+    # The summary happens AFTER the per-ticker loop, so the current tick's
+    # increments get cleared too.
+    assert trader.kelly_no_edge_count == {}
+
+
+def test_kelly_no_edge_telegram_silent_when_counter_empty(monkeypatch):
+    """S3: summary must NOT fire when no tickers have a no-edge streak."""
+    import metals_swing_trader as mst
+
+    trader = _make_trader(cash=5000)
+    _capture_buy(trader)
+    trader.check_count = mst.TELEGRAM_NO_EDGE_INTERVAL
+    # Empty counter — no-edge summary should be silent
+    trader.kelly_no_edge_count = {}
+
+    telegrams_sent: list[str] = []
+    monkeypatch.setattr(mst, "_send_telegram", lambda msg: telegrams_sent.append(msg))
+
+    # Kelly succeeds
+    monkeypatch.setattr(
+        "portfolio.kelly_metals.recommended_metals_size",
+        lambda **kwargs: {"position_sek": 1500.0, "half_kelly_pct": 0.12, "win_rate": 0.58, "units": 107},
+    )
+
+    trader._check_entries(prices={}, signal_data=_signal_buy_xag())
+
+    no_edge_telegrams = [m for m in telegrams_sent if "Kelly rejected" in m]
+    assert no_edge_telegrams == [], (
+        f"No-edge telegram should not fire on empty counter, got: {no_edge_telegrams}"
+    )
+
+
+def test_agent_summary_wrapped_reaches_real_kelly_weighted_confidence_path(monkeypatch):
+    """T1: end-to-end integration test for B2.
+
+    Forces Kelly's first two win-rate sources (accuracy cache, signal_log.db)
+    to return nothing, then verifies that the REAL recommended_metals_size
+    (not a stub) successfully reaches and uses the weighted_confidence from
+    our wrapped signal_data.
+
+    If B2 regresses (someone unwraps agent_summary), Kelly will fall
+    through to _DEFAULT_WIN_RATE=0.52 and this test catches it.
+    """
+    import portfolio.kelly_metals as km
+
+    trader = _make_trader(cash=5000)
+    _capture_buy(trader)
+
+    # Disable the first two win-rate sources so Kelly MUST use agent_summary
+    monkeypatch.setattr(km, "_get_ticker_accuracy", lambda t: None)
+    monkeypatch.setattr(km, "_get_outcome_stats", lambda t, horizon: None)
+
+    # Track what win_rate Kelly ended up using
+    real_kelly = km.recommended_metals_size
+    used_win_rates: list[float] = []
+
+    def _tracking_kelly(**kwargs):
+        result = real_kelly(**kwargs)
+        used_win_rates.append(float(result.get("win_rate", 0)))
+        return result
+
+    monkeypatch.setattr(
+        "portfolio.kelly_metals.recommended_metals_size",
+        _tracking_kelly,
+    )
+
+    # Signal with a specific weighted_confidence that Kelly should pick up.
+    signal = {
+        "XAG-USD": {
+            "action": "BUY",
+            "buy_count": 7,
+            "sell_count": 4,
+            "confidence": 0.77,
+            "weighted_confidence": 0.65,  # Kelly should use this
+            "rsi": 46.4,
+            "macd": -0.05,
+            "regime": "ranging",
+        }
+    }
+
+    trader._check_entries(prices={}, signal_data=signal)
+
+    assert len(used_win_rates) >= 1, "Kelly should have been called at least once"
+    actual_wr = used_win_rates[0]
+    # If B2 regresses, agent_summary is unwrapped and Kelly can't find the
+    # ticker in signal_data.get("signals", {}) → falls through to default 0.52.
+    # With the fix, Kelly finds XAG-USD via agent_summary["signals"]["XAG-USD"]
+    # and uses weighted_confidence=0.65.
+    assert actual_wr == 0.65, (
+        f"Kelly should have used weighted_confidence=0.65 from wrapped "
+        f"signal_data, got {actual_wr}. If 0.52, agent_summary wrapping "
+        f"is broken again (B2 regression)."
+    )
+
+
+def test_eod_exit_fires_at_configured_buffer(monkeypatch):
+    """T6: _check_exits must force-sell positions when minutes_to_close
+    drops below EOD_EXIT_MINUTES_BEFORE.
+
+    This pins the wall-clock behavior of the EOD exit rule. With buffer=25
+    and hardcoded close_cet=21:55, EOD should fire at any _cet_hour >= 21.5.
+    """
+    import metals_swing_trader as mst
+    from metals_swing_config import EOD_EXIT_MINUTES_BEFORE
+
+    trader = _make_trader(cash=5000)
+
+    # Seed a position that would otherwise sail through all exit rules
+    trader.state["positions"]["pos_eod_test"] = {
+        "warrant_key": "MINI_L_SILVER_AVA_TEST",
+        "warrant_name": "MINI L SILVER AVA TEST",
+        "ob_id": "9999999",
+        "api_type": "warrant",
+        "underlying": "XAG-USD",
+        "direction": "LONG",
+        "units": 100,
+        "entry_price": 10.0,
+        "entry_underlying": 75.0,
+        "entry_ts": mst._now_utc().isoformat(),
+        "peak_underlying": 75.0,
+        "trough_underlying": 75.0,
+        "trailing_active": False,
+        "stop_order_id": None,
+        "leverage": 5.0,
+        "fill_verified": True,
+    }
+
+    # Capture the sell call instead of hitting Avanza.
+    # Real signature: _execute_sell(pos_id, pos, current_bid, underlying_price, reason)
+    sell_calls: list[tuple] = []
+
+    def _mock_sell(pos_id, pos, current_bid, underlying_price, reason):
+        sell_calls.append((pos_id, reason, current_bid))
+        trader.state["positions"].pop(pos_id, None)
+
+    trader._execute_sell = _mock_sell
+
+    # Stub fetch_price so _check_exits can get a current price
+    monkeypatch.setattr(
+        mst, "fetch_price",
+        lambda page, ob_id, api_type: {"bid": 10.5, "ask": 10.6, "underlying": 75.0},
+    )
+
+    # Inside-buffer hour: 21:55 - 20min = 21:35 CET → minutes_to_close = 20,
+    # which is < EOD_EXIT_MINUTES_BEFORE (25) → EOD should fire.
+    close_cet = 21.0 + 55 / 60
+    inside_buffer_hour = close_cet - (EOD_EXIT_MINUTES_BEFORE - 5) / 60.0
+
+    monkeypatch.setattr(mst, "_cet_hour", lambda: inside_buffer_hour)
+
+    # Use a HOLD signal so SIGNAL_REVERSAL doesn't fire before EOD
+    signal = {"XAG-USD": {"action": "HOLD", "buy_count": 0, "sell_count": 0,
+                          "confidence": 0.3, "rsi": 50, "regime": "ranging"}}
+
+    trader._check_exits({}, signal)
+
+    # Should have fired EOD exit
+    assert len(sell_calls) >= 1, (
+        f"Expected EOD_EXIT to fire at hour={inside_buffer_hour:.3f} "
+        f"(minutes_to_close={((close_cet - inside_buffer_hour) * 60):.0f}, "
+        f"buffer={EOD_EXIT_MINUTES_BEFORE}), got no sells"
+    )
+    reasons = [reason for (_, reason, _) in sell_calls]
+    assert any("EOD" in str(r) for r in reasons), (
+        f"Expected EOD in sell reason, got: {reasons}"
+    )
+
+
+def test_eod_exit_does_not_fire_outside_buffer(monkeypatch):
+    """T6: EOD must NOT fire when minutes_to_close > buffer (normal trading)."""
+    import metals_swing_trader as mst
+
+    trader = _make_trader(cash=5000)
+    trader.state["positions"]["pos_eod_test"] = {
+        "warrant_key": "MINI_L_SILVER_AVA_TEST",
+        "warrant_name": "MINI L SILVER AVA TEST",
+        "ob_id": "9999999",
+        "api_type": "warrant",
+        "underlying": "XAG-USD",
+        "direction": "LONG",
+        "units": 100,
+        "entry_price": 10.0,
+        "entry_underlying": 75.0,
+        "entry_ts": mst._now_utc().isoformat(),
+        "peak_underlying": 75.0,
+        "trough_underlying": 75.0,
+        "trailing_active": False,
+        "stop_order_id": None,
+        "leverage": 5.0,
+        "fill_verified": True,
+    }
+
+    sell_calls: list[tuple] = []
+
+    def _mock_sell(pos_id, pos, reason, current_price, sig=None):
+        sell_calls.append((pos_id, reason, current_price))
+        trader.state["positions"].pop(pos_id, None)
+
+    trader._execute_sell = _mock_sell
+    monkeypatch.setattr(
+        mst, "fetch_price",
+        lambda page, ob_id, api_type: {"bid": 10.5, "ask": 10.6, "underlying": 75.0},
+    )
+
+    # Mid-session hour: 15:00 CET → minutes_to_close ≈ 415 min >> buffer
+    monkeypatch.setattr(mst, "_cet_hour", lambda: 15.0)
+
+    signal = {"XAG-USD": {"action": "HOLD", "buy_count": 0, "sell_count": 0,
+                          "confidence": 0.3, "rsi": 50, "regime": "ranging"}}
+
+    trader._check_exits({}, signal)
+
+    eod_sells = [r for (_, r, _) in sell_calls if "EOD" in str(r)]
+    assert eod_sells == [], (
+        f"EOD should NOT fire at 15:00 CET (minutes_to_close={((21.9167 - 15.0) * 60):.0f}), "
+        f"got: {eod_sells}"
+    )
