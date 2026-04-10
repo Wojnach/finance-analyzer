@@ -102,6 +102,79 @@ class TestAccuracyByTickerSignal:
         assert btc_rsi["correct"] == 2  # first BUY correct, second BUY wrong, SELL correct
         assert abs(btc_rsi["accuracy"] - 2 / 3) < 0.001
 
+    def test_directional_accuracy_fields(self, monkeypatch):
+        """Per-ticker accuracy should include buy/sell directional breakdown."""
+        entries = [
+            _make_entry("2026-01-01T00:00:00", {
+                "BTC-USD": _ticker_signals("BUY", {"rsi": "BUY"}),
+            }, {"BTC-USD": _outcome(5.0)}),     # BUY correct
+            _make_entry("2026-01-02T00:00:00", {
+                "BTC-USD": _ticker_signals("BUY", {"rsi": "BUY"}),
+            }, {"BTC-USD": _outcome(-2.0)}),    # BUY wrong
+            _make_entry("2026-01-03T00:00:00", {
+                "BTC-USD": _ticker_signals("SELL", {"rsi": "SELL"}),
+            }, {"BTC-USD": _outcome(-3.0)}),    # SELL correct
+            _make_entry("2026-01-04T00:00:00", {
+                "BTC-USD": _ticker_signals("SELL", {"rsi": "SELL"}),
+            }, {"BTC-USD": _outcome(1.0)}),     # SELL wrong
+        ]
+        from portfolio import accuracy_stats
+        monkeypatch.setattr(accuracy_stats, "load_entries", lambda: entries)
+
+        result = accuracy_stats.accuracy_by_ticker_signal("1d")
+        btc_rsi = result["BTC-USD"]["rsi"]
+
+        # Overall: 2 correct out of 4
+        assert btc_rsi["total"] == 4
+        assert btc_rsi["correct"] == 2
+
+        # Directional: BUY 1/2 = 50%, SELL 1/2 = 50%
+        assert btc_rsi["total_buy"] == 2
+        assert btc_rsi["correct_buy"] == 1
+        assert btc_rsi["buy_accuracy"] == 0.5
+        assert btc_rsi["total_sell"] == 2
+        assert btc_rsi["correct_sell"] == 1
+        assert btc_rsi["sell_accuracy"] == 0.5
+
+    def test_directional_accuracy_asymmetry(self, monkeypatch):
+        """Verify asymmetric BUY/SELL accuracy is captured per ticker."""
+        entries = [
+            # 3 BUY votes: 1 correct, 2 wrong → buy_accuracy = 33.3%
+            _make_entry("2026-01-01T00:00:00", {
+                "XAG-USD": _ticker_signals("BUY", {"ministral": "BUY"}),
+            }, {"XAG-USD": _outcome(1.0)}),     # correct
+            _make_entry("2026-01-02T00:00:00", {
+                "XAG-USD": _ticker_signals("BUY", {"ministral": "BUY"}),
+            }, {"XAG-USD": _outcome(-2.0)}),    # wrong
+            _make_entry("2026-01-03T00:00:00", {
+                "XAG-USD": _ticker_signals("BUY", {"ministral": "BUY"}),
+            }, {"XAG-USD": _outcome(-1.0)}),    # wrong
+            # 2 SELL votes: 2 correct → sell_accuracy = 100%
+            _make_entry("2026-01-04T00:00:00", {
+                "XAG-USD": _ticker_signals("SELL", {"ministral": "SELL"}),
+            }, {"XAG-USD": _outcome(-3.0)}),    # correct
+            _make_entry("2026-01-05T00:00:00", {
+                "XAG-USD": _ticker_signals("SELL", {"ministral": "SELL"}),
+            }, {"XAG-USD": _outcome(-1.0)}),    # correct
+        ]
+        from portfolio import accuracy_stats
+        monkeypatch.setattr(accuracy_stats, "load_entries", lambda: entries)
+
+        result = accuracy_stats.accuracy_by_ticker_signal("1d")
+        xag = result["XAG-USD"]["ministral"]
+
+        # Overall: 3 correct out of 5 = 60%
+        assert xag["total"] == 5
+        assert xag["correct"] == 3
+
+        # BUY: 1/3 = 33.3%, SELL: 2/2 = 100%
+        assert xag["total_buy"] == 3
+        assert xag["correct_buy"] == 1
+        assert abs(xag["buy_accuracy"] - 1 / 3) < 0.01
+        assert xag["total_sell"] == 2
+        assert xag["correct_sell"] == 2
+        assert xag["sell_accuracy"] == 1.0
+
     def test_sell_correct(self, monkeypatch):
         """SELL vote with negative change should be correct."""
         entries = [

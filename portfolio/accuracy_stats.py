@@ -1143,16 +1143,21 @@ def signal_best_horizon_accuracy(min_samples=50, entries=None):
 def accuracy_by_ticker_signal(horizon="1d", min_samples=0):
     """Compute per-ticker per-signal accuracy cross-tabulation.
 
-    Returns nested dict: {ticker: {signal_name: {correct, total, accuracy, pct}}}
+    Returns nested dict: {ticker: {signal_name: {correct, total, accuracy, pct,
+        correct_buy, total_buy, buy_accuracy, correct_sell, total_sell, sell_accuracy}}}
     Only includes signals that voted BUY or SELL (HOLD excluded).
+    Directional fields (buy_accuracy, sell_accuracy) enable per-ticker directional
+    gating in signal_engine._weighted_consensus().
 
     Args:
         horizon: Outcome horizon ("1d", "3d", "5d", "10d").
         min_samples: Minimum votes required to include a signal for a ticker.
     """
     entries = load_entries()
-    # {ticker: {signal: {correct, total}}}
-    stats = defaultdict(lambda: defaultdict(lambda: {"correct": 0, "total": 0}))
+    # {ticker: {signal: {correct, total, correct_buy, total_buy, correct_sell, total_sell}}}
+    _empty = lambda: {"correct": 0, "total": 0, "correct_buy": 0, "total_buy": 0,
+                       "correct_sell": 0, "total_sell": 0}
+    stats = defaultdict(lambda: defaultdict(_empty))
 
     for entry in entries:
         outcomes = entry.get("outcomes", {})
@@ -1172,9 +1177,18 @@ def accuracy_by_ticker_signal(horizon="1d", min_samples=0):
                 result_val = _vote_correct(vote, change_pct)
                 if result_val is None:
                     continue
-                stats[ticker][sig_name]["total"] += 1
-                if result_val:
-                    stats[ticker][sig_name]["correct"] += 1
+                s = stats[ticker][sig_name]
+                s["total"] += 1
+                if vote == "BUY":
+                    s["total_buy"] += 1
+                    if result_val:
+                        s["correct"] += 1
+                        s["correct_buy"] += 1
+                else:
+                    s["total_sell"] += 1
+                    if result_val:
+                        s["correct"] += 1
+                        s["correct_sell"] += 1
 
     result = {}
     for ticker, sig_stats in stats.items():
@@ -1183,11 +1197,19 @@ def accuracy_by_ticker_signal(horizon="1d", min_samples=0):
             if s["total"] < min_samples:
                 continue
             acc = s["correct"] / s["total"] if s["total"] > 0 else 0.0
+            buy_acc = s["correct_buy"] / s["total_buy"] if s["total_buy"] > 0 else 0.0
+            sell_acc = s["correct_sell"] / s["total_sell"] if s["total_sell"] > 0 else 0.0
             ticker_result[sig_name] = {
                 "correct": s["correct"],
                 "total": s["total"],
                 "accuracy": acc,
                 "pct": round(acc * 100, 1),
+                "correct_buy": s["correct_buy"],
+                "total_buy": s["total_buy"],
+                "buy_accuracy": round(buy_acc, 4),
+                "correct_sell": s["correct_sell"],
+                "total_sell": s["total_sell"],
+                "sell_accuracy": round(sell_acc, 4),
             }
         if ticker_result:
             result[ticker] = ticker_result

@@ -80,7 +80,10 @@ ACCURACY_GATE_MIN_SAMPLES = 30  # need enough data before gating
 # threshold get that direction force-HOLD'd while the other direction can still
 # vote.  E.g., qwen3 BUY=30% (gated) but SELL=74.2% (votes normally).
 # Uses the same min-samples threshold as the overall gate.
-_DIRECTIONAL_GATE_THRESHOLD = 0.35
+# 2026-04-10: raised from 0.35 → 0.40 to catch macro_regime BUY (38.9%),
+# fibonacci SELL (35.9%), futures_flow both (36-37%).  Now with per-ticker
+# directional data, this gate also works per-instrument.
+_DIRECTIONAL_GATE_THRESHOLD = 0.40
 _DIRECTIONAL_GATE_MIN_SAMPLES = 30
 
 # Adaptive recency blend: when recent accuracy diverges from all-time by more
@@ -1869,12 +1872,21 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     if not _accuracy_failed and _ticker_acc_data:
         for sig_name, t_stats in _ticker_acc_data.items():
             if t_stats.get("total", 0) >= _PER_TICKER_MIN_SAMPLES:
-                accuracy_data[sig_name] = {
+                override = {
                     "accuracy": t_stats["accuracy"],
                     "total": t_stats["total"],
                     "correct": t_stats.get("correct", 0),
                     "pct": t_stats.get("pct", round(t_stats["accuracy"] * 100, 1)),
                 }
+                # Copy directional fields for per-ticker directional gating.
+                # Without these, _weighted_consensus directional gate falls back
+                # to overall per-ticker accuracy, missing direction-specific
+                # weaknesses (e.g., ministral BUY 15% on XAG even if overall 20%).
+                for field in ("correct_buy", "total_buy", "buy_accuracy",
+                              "correct_sell", "total_sell", "sell_accuracy"):
+                    if field in t_stats:
+                        override[field] = t_stats[field]
+                accuracy_data[sig_name] = override
     elif not _accuracy_failed:
         # Fallback: LLM-specific per-ticker data from extra_info
         for llm_sig in ("qwen3", "ministral"):

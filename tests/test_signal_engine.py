@@ -248,7 +248,7 @@ class TestDirectionalAccuracyGating:
         assert result[0] == "BUY"
 
     def test_claude_fundamental_sell_gated(self):
-        """claude_fundamental: BUY=65.7% fine, but SELL=39.7% should be gated."""
+        """claude_fundamental: BUY=65.7% fine, but SELL=39.7% should be gated at 0.40."""
         from portfolio.signal_engine import _weighted_consensus
 
         votes = {"claude_fundamental": "SELL", "rsi": "BUY"}
@@ -258,12 +258,25 @@ class TestDirectionalAccuracyGating:
                                     "sell_accuracy": 0.397, "total_sell": 838},
             "rsi": {"accuracy": 0.52, "total": 1000},
         }
-        # sell_accuracy 0.397 > 0.35 threshold → NOT gated
-        # (we set _DIRECTIONAL_GATE_THRESHOLD at 0.35, not 0.45)
+        # sell_accuracy 0.397 < 0.40 threshold → gated (raised from 0.35 on 2026-04-10)
         result = _weighted_consensus(votes, accuracy_data, "ranging")
-        # claude_fundamental SELL NOT gated at 0.35 threshold (it's 0.397)
-        # Both vote, weights determine outcome
-        assert result[0] in ("SELL", "BUY")
+        # claude_fundamental SELL gated, only rsi BUY remains → BUY
+        assert result[0] == "BUY"
+
+    def test_macro_regime_buy_gated_at_40pct(self):
+        """macro_regime: overall 46.6% passes accuracy gate, but BUY=38.9% gated."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        votes = {"macro_regime": "BUY", "rsi": "SELL"}
+        accuracy_data = {
+            "macro_regime": {"accuracy": 0.466, "total": 25654,
+                              "buy_accuracy": 0.389, "total_buy": 8963,
+                              "sell_accuracy": 0.508, "total_sell": 16691},
+            "rsi": {"accuracy": 0.52, "total": 1000},
+        }
+        result = _weighted_consensus(votes, accuracy_data, "ranging")
+        # macro_regime BUY at 38.9% < 40% threshold → gated, only rsi SELL remains
+        assert result[0] == "SELL"
 
     def test_no_directional_gate_when_accuracy_above_threshold(self):
         """Signals with both BUY and SELL above threshold should not be gated."""
