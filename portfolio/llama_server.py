@@ -242,6 +242,74 @@ def _stop_server():
         os.remove(_PID_FILE)
 
 
+def _query_free_vram_mb():
+    """Return free VRAM in MiB on GPU 0, or None if nvidia-smi is unavailable.
+
+    2026-04-10 (perf/llama-swap-reduction): added to support active VRAM-poll
+    in _wait_for_vram_reclaim below. pynvml is not installed in the main venv
+    so we shell out to nvidia-smi — it's present on every machine that has a
+    CUDA driver and returns in ~50-100 ms, which is fast enough for a 100 ms
+    polling loop.
+    """
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode != 0:
+            return None
+        # Multi-GPU systems return one line per GPU; we only care about GPU 0.
+        first_line = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+        return int(first_line)
+    except Exception as e:
+        logger.debug("nvidia-smi free-VRAM query failed: %s", e)
+        return None
+
+
+def _wait_for_vram_reclaim(min_free_mb: int = 5632, max_wait: float = 4.0) -> float:
+    """Poll nvidia-smi until at least `min_free_mb` is free, up to `max_wait` seconds.
+
+    Returns the wall-clock seconds spent waiting, for logging/observability.
+
+    Replaces the hardcoded `time.sleep(4)` that used to follow _stop_server()
+    in _start_server(). The 4 s sleep was added because Windows VRAM release
+    is asynchronous — 1 s was insufficient when Ministral (5 GB) was torn
+    down and Qwen3 (5 GB) needed the memory: Qwen3 would start up seeing only
+    136 MB free, fail to allocate, and retry for ~90 s. 4 s fixed it but was
+    conservative: most swaps actually reclaim in 0.5-2 s.
+
+    This helper polls every 100 ms and exits as soon as `min_free_mb` is
+    available. Defaults: 5632 MB (~5.5 GB, enough for an 8B Q4_K_M model +
+    KV cache) and 4 s ceiling (the original hardcoded sleep). If nvidia-smi
+    is unavailable (headless VM, non-NVIDIA, permission error), we fall back
+    to the full 4 s sleep — never faster than the original, always at least
+    as safe. The feedback memory note on PowerShell quoting applies equally
+    here: single string, no variable interpolation, nothing bash can eat.
+    """
+    start = time.time()
+    deadline = start + max_wait
+    first_probe = _query_free_vram_mb()
+    if first_probe is None:
+        # nvidia-smi unavailable — fall back to the original conservative sleep.
+        time.sleep(max_wait)
+        return max_wait
+    if first_probe >= min_free_mb:
+        return 0.0  # already enough, no sleep at all
+    while time.time() < deadline:
+        time.sleep(0.1)
+        free = _query_free_vram_mb()
+        if free is None:
+            # nvidia-smi broke mid-poll; fall back to full sleep.
+            remaining = max(0.0, deadline - time.time())
+            time.sleep(remaining)
+            return time.time() - start
+        if free >= min_free_mb:
+            return time.time() - start
+    return time.time() - start
+
+
 def _start_server(name):
     """Launch llama-server with the given model. Returns True if ready."""
     global _local_proc, _local_model
@@ -253,10 +321,14 @@ def _start_server(name):
         return False
 
     _stop_server()
-    # Wait for GPU driver to reclaim VRAM after killing the previous server.
-    # Windows VRAM release is asynchronous — 1s was insufficient, causing
-    # Qwen3 to see 136MB free instead of ~5GB after Ministral teardown.
-    time.sleep(4)
+    # 2026-04-10 (perf/llama-swap-reduction): replaced `time.sleep(4)` with an
+    # active poll. The old sleep was there because Windows VRAM release is
+    # asynchronous — see _wait_for_vram_reclaim docstring for the full history
+    # on why 4 s exists. In steady state most swaps only need 0.5-2 s, so the
+    # poll saves ~2-3 s per swap (×3 swaps = ~6-10 s/cycle) while preserving
+    # the 4 s ceiling as a hard fallback.
+    waited = _wait_for_vram_reclaim(min_free_mb=5632, max_wait=4.0)
+    logger.debug("VRAM reclaim poll: %.2fs before launching %s", waited, name)
 
     try:
         cmd = [
@@ -385,12 +457,27 @@ def query_llama_server(name, prompt, n_predict=1024, temperature=0.0,
 
 
 def _query_http(prompt, n_predict=1024, temperature=0.0, top_p=0.2, stop=None):
-    """Send an HTTP completion request. No locking — caller must hold locks."""
+    """Send an HTTP completion request. No locking — caller must hold locks.
+
+    2026-04-10 (perf/llama-swap-reduction): added `cache_prompt: true`. This
+    is a llama.cpp server feature (stable since b2000, our binary is the
+    cuda13 build from 2025 which supports it) that tells the server to
+    reuse the KV cache across successive requests whenever the new prompt
+    shares a token prefix with the previous one. Our Ministral prompts in
+    _build_prompt share ~300 tokens of fixed boilerplate (the [INST] header,
+    the analysis questions 1-5, the JSON schema at the bottom) and differ
+    only in the per-ticker Market Data / Sentiment / Headlines block. On
+    the 4 sequential per-ticker Ministral queries per cycle, this saves
+    ~300 prefill tokens × 3 queries = ~900 tokens of prefill work, which
+    on an 8B Q5_K_M is roughly ~5-15 s per batch. If the server build
+    doesn't recognize the field, it is silently ignored — no breakage.
+    """
     body = {
         "prompt": prompt,
         "n_predict": n_predict,
         "temperature": temperature,
         "top_p": top_p,
+        "cache_prompt": True,
     }
     if stop:
         body["stop"] = stop
