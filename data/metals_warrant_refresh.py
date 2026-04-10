@@ -16,23 +16,88 @@ Why this exists:
 
 Usage:
     from metals_warrant_refresh import load_catalog_or_fetch
-    catalog = load_catalog_or_fetch()  # dict keyed by warrant name
+    catalog = load_catalog_or_fetch(page)  # dict keyed by warrant name
+    # `page` is the metals_loop's Playwright page so we can reuse its browser
+    # context without opening a second sync_playwright instance in the same
+    # thread (which deadlocks — see 2026-04-10 fix notes below).
     # Falls back to the static config catalog if the refresh fails.
 """
 
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 from typing import Any
 
-from portfolio.avanza_session import api_get, api_post
 from portfolio.file_utils import atomic_write_json, load_json
 
 logger = logging.getLogger("metals_warrant_refresh")
 
 CATALOG_FILE = "data/metals_warrant_catalog.json"
 TTL_HOURS = 6
+API_BASE = "https://www.avanza.se"
+
+
+# --- Page-based HTTP helpers (2026-04-10 sync_playwright fix) ---
+#
+# Previously this module imported api_get / api_post from
+# portfolio.avanza_session, which calls sync_playwright().start() to build its
+# OWN browser context. Inside the metals_loop process the primary
+# sync_playwright instance is already open at data/metals_loop.py:6090, and
+# Playwright's sync API only supports ONE instance per thread — the second
+# .start() attempt fails with "Sync API inside the asyncio loop" (playwright's
+# internal loop, not a user asyncio loop). Every warrant search has been
+# failing silently at startup since f6b491c shipped on 2026-04-05, and the
+# try/except fallback in _search_warrants hid it behind a stale cache.
+#
+# The fix: reuse the metals_loop's page object. The caller passes `page` down;
+# we issue HTTP via page.context.request, which shares cookies + CSRF with the
+# existing browser context for free. Mirror the fetch_account_cash(page, ...)
+# pattern already used in data/metals_avanza_helpers.py.
+
+
+def _csrf_from_page(page) -> str | None:
+    """Extract AZACSRF cookie from the page's browser context."""
+    try:
+        for c in page.context.cookies():
+            if c.get("name") == "AZACSRF":
+                return c.get("value")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("_csrf_from_page: cookie read failed: %s", exc)
+    return None
+
+
+def _page_api_post(page, path: str, payload: dict) -> Any | None:
+    """POST to an Avanza API endpoint via the loop's existing page context."""
+    url = f"{API_BASE}{path}" if path.startswith("/") else path
+    headers = {"Content-Type": "application/json"}
+    csrf = _csrf_from_page(page)
+    if csrf:
+        headers["X-SecurityToken"] = csrf
+    resp = page.context.request.post(url, data=json.dumps(payload), headers=headers)
+    if not resp.ok:
+        logger.debug("_page_api_post %s -> HTTP %s", path, resp.status)
+        return None
+    try:
+        return resp.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("_page_api_post %s: JSON decode failed: %s", path, exc)
+        return None
+
+
+def _page_api_get(page, path: str) -> Any | None:
+    """GET from an Avanza API endpoint via the loop's existing page context."""
+    url = f"{API_BASE}{path}" if path.startswith("/") else path
+    resp = page.context.request.get(url)
+    if not resp.ok:
+        logger.debug("_page_api_get %s -> HTTP %s", path, resp.status)
+        return None
+    try:
+        return resp.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("_page_api_get %s: JSON decode failed: %s", path, exc)
+        return None
 
 # Search queries -> (underlying, direction) tuples. Avanza's filtered-search
 # returns only 10 hits per query (hard API cap), so we use digit-prefixed
@@ -69,10 +134,14 @@ def _now_utc() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
 
 
-def _search_warrants(query: str, limit: int = 40) -> list[dict]:
+def _search_warrants(query: str, page, limit: int = 40) -> list[dict]:
     """Call Avanza filtered-search and return hit list (may be capped at 10)."""
     try:
-        result = api_post("/_api/search/filtered-search", {"query": query, "limit": limit})
+        result = _page_api_post(
+            page,
+            "/_api/search/filtered-search",
+            {"query": query, "limit": limit},
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("search %r failed: %s", query, exc)
         return []
@@ -81,14 +150,14 @@ def _search_warrants(query: str, limit: int = 40) -> list[dict]:
     return [h for h in result.get("hits", []) if h.get("type") == "WARRANT"]
 
 
-def _probe_warrant(ob_id: str) -> dict | None:
+def _probe_warrant(ob_id: str, page) -> dict | None:
     """Fetch full warrant detail from market-guide API.
 
     Returns None on 404 (dead/delisted) or any other error, so callers can
     drop the candidate without special-casing.
     """
     try:
-        data = api_get(f"/_api/market-guide/warrant/{ob_id}")
+        data = _page_api_get(page, f"/_api/market-guide/warrant/{ob_id}")
     except Exception as exc:  # noqa: BLE001
         logger.debug("probe %s failed: %s", ob_id, exc)
         return None
@@ -166,8 +235,13 @@ def _make_key(name: str) -> str:
     return (name or "").replace(" ", "_").upper()
 
 
-def refresh_warrant_catalog() -> tuple[dict[str, dict], set[tuple[str, str]]]:
+def refresh_warrant_catalog(page) -> tuple[dict[str, dict], set[tuple[str, str]]]:
     """Fetch live warrant universe for all configured queries.
+
+    Args:
+        page: The active Playwright ``page`` from the metals loop's primary
+            sync_playwright context. HTTP calls go through ``page.context.request``
+            so no second sync_playwright instance is created.
 
     Returns:
         (catalog, covered_pairs) where catalog is keyed by canonical warrant
@@ -179,7 +253,7 @@ def refresh_warrant_catalog() -> tuple[dict[str, dict], set[tuple[str, str]]]:
     catalog: dict[str, dict] = {}
     covered: set[tuple[str, str]] = set()
     for underlying, direction, query in SEARCH_QUERIES:
-        hits = _search_warrants(query)
+        hits = _search_warrants(query, page)
         if not hits:
             logger.warning("no hits for %r", query)
             continue
@@ -188,7 +262,7 @@ def refresh_warrant_catalog() -> tuple[dict[str, dict], set[tuple[str, str]]]:
             ob_id = str(hit.get("orderBookId") or "")
             if not ob_id:
                 continue
-            probe = _probe_warrant(ob_id)
+            probe = _probe_warrant(ob_id, page)
             if not probe:
                 continue
             ok, reason = _is_valid_candidate(probe, direction)
@@ -286,8 +360,17 @@ def _merge_with_cache(
     return merged
 
 
-def load_catalog_or_fetch(force_refresh: bool = False) -> dict[str, dict]:
+def load_catalog_or_fetch(page=None, force_refresh: bool = False) -> dict[str, dict]:
     """Return warrant catalog, refreshing from Avanza when the cache is stale.
+
+    Args:
+        page: Active Playwright ``page`` from the metals loop. Required for a
+            live refresh. If ``None``, skips the refresh entirely and returns
+            whatever is in the cache (or ``{}``) — this keeps the function
+            callable from contexts that don't own a page, such as the
+            __main__ dry-run block or tests.
+        force_refresh: When True and a page is provided, always refresh even
+            if the cache is fresh.
 
     On any error (network, search failure, empty result), falls back to the
     last-known-good cache and logs a warning. Partial refreshes (some pairs
@@ -304,9 +387,13 @@ def load_catalog_or_fetch(force_refresh: bool = False) -> dict[str, dict]:
             logger.info("using cached catalog: %d warrants (age: fresh)", len(warrants))
             return warrants
 
+    if page is None:
+        logger.warning("no page provided; cannot refresh live — returning cache only")
+        return (cached or {}).get("warrants") or {}
+
     logger.info("refreshing warrant catalog from Avanza...")
     try:
-        fresh, covered = refresh_warrant_catalog()
+        fresh, covered = refresh_warrant_catalog(page)
     except Exception as exc:  # noqa: BLE001
         logger.warning("refresh failed: %s", exc)
         fresh, covered = {}, set()
@@ -336,8 +423,19 @@ def load_catalog_or_fetch(force_refresh: bool = False) -> dict[str, dict]:
 
 if __name__ == "__main__":
     # Allow manual invocation for testing/refreshing cache.
+    # Spins up its own sync_playwright — safe in standalone because there's
+    # no competing instance like there is inside metals_loop.
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    catalog = load_catalog_or_fetch(force_refresh=True)
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        ctx = browser.new_context(storage_state="data/avanza_storage_state.json")
+        _page = ctx.new_page()
+        _page.goto("https://www.avanza.se/min-ekonomi/oversikt.html", wait_until="domcontentloaded")
+        _page.wait_for_timeout(2000)
+        catalog = load_catalog_or_fetch(_page, force_refresh=True)
+
     print(f"\n=== Refreshed catalog: {len(catalog)} warrants ===")
     for key, w in sorted(catalog.items(), key=lambda kv: (kv[1]["underlying"], kv[1]["direction"], -kv[1]["leverage"])):
         print(f"  {key:<30s} {w['underlying']}  {w['direction']:<5s}  "

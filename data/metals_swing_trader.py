@@ -367,7 +367,12 @@ class SwingTrader:
             _log("Refresher unavailable — using static catalog")
             return dict(STATIC_WARRANT_CATALOG)
         try:
-            catalog = load_catalog_or_fetch()
+            # Thread the metals_loop page object through so the refresher can
+            # reuse the existing sync_playwright context (page.context.request),
+            # instead of importing portfolio.avanza_session.api_post which tries
+            # to open a second sync_playwright and crashes with "Sync API inside
+            # the asyncio loop". See 2026-04-10 fix notes in metals_warrant_refresh.py.
+            catalog = load_catalog_or_fetch(self.page)
         except Exception as e:  # noqa: BLE001
             _log(f"Catalog refresh raised {type(e).__name__}: {e} — using static")
             return dict(STATIC_WARRANT_CATALOG)
