@@ -1425,14 +1425,22 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     if ticker and not skip_gpu:
         short_ticker = ticker.replace("-USD", "")
         try:
-            from portfolio.llm_batch import enqueue_ministral
+            from portfolio.llm_batch import enqueue_ministral, is_llm_on_cycle
 
             ctx = _build_llm_context(ticker, ind, timeframes, extra_info)
+            # 2026-04-10 (perf/llama-swap-reduction): gate the enqueue with
+            # rotation predicate. When ministral is off-cycle this cycle,
+            # _cached_or_enqueue skips the enqueue and returns stale data.
+            # max_stale_factor=5 gives 5 * 15 min = 75 min of stale tolerance,
+            # comfortably covering the 3-cycle rotation period (~45-60 min
+            # depending on cycle slippage) with slack.
             ms = _cached_or_enqueue(
                 f"ministral_{short_ticker}",
                 MINISTRAL_TTL,
                 enqueue_ministral,
                 ctx,
+                should_enqueue_fn=lambda: is_llm_on_cycle("ministral"),
+                max_stale_factor=5,
             )
             if ms:
                 orig = ms.get("original") or ms
@@ -1464,7 +1472,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     if ticker and qwen3_enabled and not skip_gpu:
         short_ticker = ticker.replace("-USD", "")
         try:
-            from portfolio.llm_batch import enqueue_qwen3
+            from portfolio.llm_batch import enqueue_qwen3, is_llm_on_cycle
 
             ctx = _build_llm_context(ticker, ind, timeframes, extra_info)
             # Qwen3 gets asset_type for prompt diversification
@@ -1474,11 +1482,15 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 ctx["asset_type"] = "precious metal"
             else:
                 ctx["asset_type"] = "stock"
+            # 2026-04-10 (perf/llama-swap-reduction): rotation gate via
+            # is_llm_on_cycle; see ministral block above for rationale.
             q3 = _cached_or_enqueue(
                 f"qwen3_{short_ticker}",
                 MINISTRAL_TTL,
                 enqueue_qwen3,
                 ctx,
+                should_enqueue_fn=lambda: is_llm_on_cycle("qwen3"),
+                max_stale_factor=5,
             )
             if q3:
                 raw_action = q3.get("action", "HOLD")

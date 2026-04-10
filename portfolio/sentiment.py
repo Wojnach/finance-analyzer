@@ -706,20 +706,30 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
     # Shadow: FinGPT — enqueue for post-cycle Phase 3 execution. Zero-cost
     # here; the actual inference runs via llama_server finance-llama-8b
     # rotation after the ticker pool completes.
+    #
+    # 2026-04-10 (perf/llama-swap-reduction): gated by is_llm_on_cycle. Unlike
+    # ministral/qwen3 (which go through _cached_or_enqueue's should_enqueue_fn),
+    # fingpt enqueues directly because it doesn't use the signal cache — it
+    # only writes to the A/B shadow log. When off-cycle, skip the enqueue
+    # entirely so the llama_server phase 3 skips the fingpt model swap +
+    # inference cost. Fingpt is a shadow signal, so skipping 2 of 3 cycles
+    # just reduces A/B sample density from every cycle to every 3rd cycle,
+    # which is fine for long-running statistical comparison.
     try:
-        from portfolio.llm_batch import enqueue_fingpt
-        enqueue_fingpt(
-            ab_key, "headlines",
-            {"mode": "headlines", "texts": titles, "ticker": short},
-        )
-        clusters = _cluster_headlines(all_articles)
-        for idx, cluster in enumerate(clusters):
-            if len(cluster) >= 3:
-                cluster_titles = [a["title"] for a in cluster]
-                enqueue_fingpt(
-                    ab_key, f"cumul:{idx}",
-                    {"mode": "cumulative", "texts": cluster_titles, "ticker": short},
-                )
+        from portfolio.llm_batch import enqueue_fingpt, is_llm_on_cycle
+        if is_llm_on_cycle("fingpt"):
+            enqueue_fingpt(
+                ab_key, "headlines",
+                {"mode": "headlines", "texts": titles, "ticker": short},
+            )
+            clusters = _cluster_headlines(all_articles)
+            for idx, cluster in enumerate(clusters):
+                if len(cluster) >= 3:
+                    cluster_titles = [a["title"] for a in cluster]
+                    enqueue_fingpt(
+                        ab_key, f"cumul:{idx}",
+                        {"mode": "cumulative", "texts": cluster_titles, "ticker": short},
+                    )
     except Exception as e:
         logger.debug("FinGPT enqueue failed: %s", e)
 

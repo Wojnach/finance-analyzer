@@ -211,3 +211,162 @@ class TestStopServer:
         ls._local_model = "qwen3"
         ls.stop_server("ministral3")
         mock_stop.assert_not_called()
+
+
+class TestVramReclaimPoll:
+    """perf/llama-swap-reduction: VRAM reclaim active poll replaces time.sleep(4).
+
+    The helper saves ~2-3 s per swap when VRAM is already reclaimed, while
+    keeping the 4 s ceiling as a hard fallback if nvidia-smi is unavailable
+    or VRAM simply hasn't reclaimed yet.
+    """
+
+    @patch("portfolio.llama_server._query_free_vram_mb")
+    def test_exits_immediately_when_enough_free(self, mock_query):
+        """If first probe already shows ≥ min_free_mb, helper returns 0.0 (no sleep)."""
+        from portfolio.llama_server import _wait_for_vram_reclaim
+        mock_query.return_value = 9000  # 9 GB free, way above 5.5 GB threshold
+        waited = _wait_for_vram_reclaim(min_free_mb=5632, max_wait=4.0)
+        assert waited == 0.0
+        assert mock_query.call_count == 1
+
+    @patch("portfolio.llama_server._query_free_vram_mb")
+    def test_falls_back_to_full_sleep_when_nvidia_smi_unavailable(self, mock_query):
+        """If nvidia-smi returns None, helper sleeps the full max_wait as before."""
+        from portfolio.llama_server import _wait_for_vram_reclaim
+        mock_query.return_value = None
+        # Use a tiny max_wait so the test doesn't actually sleep 4 s
+        waited = _wait_for_vram_reclaim(min_free_mb=5632, max_wait=0.05)
+        assert waited >= 0.04  # close to 0.05 s, allowing timing slop
+
+    @patch("portfolio.llama_server._query_free_vram_mb")
+    @patch("portfolio.llama_server.time.sleep")
+    def test_polls_until_vram_available(self, mock_sleep, mock_query):
+        """Helper polls repeatedly while VRAM is below threshold, exits when reclaimed."""
+        from portfolio.llama_server import _wait_for_vram_reclaim
+        # Sequence: first probe is low, second probe is high — exit after one poll.
+        mock_query.side_effect = [1000, 1000, 6000]
+        waited = _wait_for_vram_reclaim(min_free_mb=5632, max_wait=4.0)
+        # Should have polled at least twice (first probe + at least one loop iter)
+        assert mock_query.call_count >= 2
+        assert waited >= 0.0
+        # sleep was called with 0.1 s increments
+        assert any(call.args[0] == 0.1 for call in mock_sleep.call_args_list)
+
+    @patch("portfolio.llama_server._query_free_vram_mb")
+    @patch("portfolio.llama_server.time.sleep")
+    def test_exits_at_max_wait_if_vram_never_reclaims(self, mock_sleep, mock_query):
+        """If VRAM never frees up, helper respects max_wait ceiling and returns."""
+        from portfolio.llama_server import _wait_for_vram_reclaim
+        # Always report insufficient free VRAM
+        mock_query.return_value = 500
+        waited = _wait_for_vram_reclaim(min_free_mb=5632, max_wait=0.3)
+        # Should have spent close to max_wait, then given up
+        assert waited >= 0.0
+        assert waited <= 0.5  # allowing some timing slop
+
+    @patch("portfolio.llama_server.subprocess.run")
+    def test_query_free_vram_parses_nvidia_smi_output(self, mock_run):
+        """_query_free_vram_mb should parse nvidia-smi csv output to int MiB."""
+        from portfolio.llama_server import _query_free_vram_mb
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "8192\n"
+        mock_run.return_value = mock_result
+        assert _query_free_vram_mb() == 8192
+
+    @patch("portfolio.llama_server.subprocess.run")
+    def test_query_free_vram_handles_multi_gpu(self, mock_run):
+        """Multi-GPU systems return one line per GPU; we only care about GPU 0."""
+        from portfolio.llama_server import _query_free_vram_mb
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "8192\n4096\n"  # GPU 0 has 8 GB, GPU 1 has 4 GB
+        mock_run.return_value = mock_result
+        assert _query_free_vram_mb() == 8192
+
+    @patch("portfolio.llama_server.subprocess.run")
+    def test_query_free_vram_returns_none_on_nvidia_smi_failure(self, mock_run):
+        """Any nvidia-smi failure (non-zero exit, missing binary, timeout) returns None."""
+        from portfolio.llama_server import _query_free_vram_mb
+        mock_result = MagicMock()
+        mock_result.returncode = 1  # nvidia-smi failed
+        mock_result.stdout = ""
+        mock_run.return_value = mock_result
+        assert _query_free_vram_mb() is None
+
+    @patch("portfolio.llama_server.subprocess.run")
+    def test_query_free_vram_returns_none_on_exception(self, mock_run):
+        """Missing nvidia-smi binary raises FileNotFoundError; we treat as unavailable."""
+        from portfolio.llama_server import _query_free_vram_mb
+        mock_run.side_effect = FileNotFoundError("nvidia-smi not on PATH")
+        assert _query_free_vram_mb() is None
+
+
+class TestCachePromptReuse:
+    """perf/llama-swap-reduction: cache_prompt: true in HTTP body enables KV
+    cache reuse across successive requests sharing a prompt prefix.
+
+    The parameter is passed to llama.cpp server's /completion endpoint. On
+    older server builds that don't recognize it, the field is silently
+    ignored — no breakage on fallback.
+    """
+
+    @patch("portfolio.llama_server._requests")
+    def test_query_http_includes_cache_prompt_true(self, mock_req):
+        """Every HTTP body sent to /completion must include cache_prompt: True."""
+        from portfolio.llama_server import _query_http
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"content": "ok"}
+        mock_req.post.return_value = mock_response
+
+        _query_http("some prompt", n_predict=100)
+        call_args = mock_req.post.call_args
+        body = call_args.kwargs["json"]
+        assert body.get("cache_prompt") is True, (
+            f"cache_prompt not enabled in body: {body}"
+        )
+
+    @patch("portfolio.llama_server._requests")
+    def test_query_http_preserves_cache_prompt_with_stop_tokens(self, mock_req):
+        """cache_prompt must still be present when stop tokens are passed."""
+        from portfolio.llama_server import _query_http
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"content": "ok"}
+        mock_req.post.return_value = mock_response
+
+        _query_http("prompt", stop=["\n\n", "[INST]"])
+        body = mock_req.post.call_args.kwargs["json"]
+        assert body.get("cache_prompt") is True
+        assert body.get("stop") == ["\n\n", "[INST]"]
+
+    @patch("portfolio.llama_server._ensure_model", return_value=True)
+    @patch("portfolio.llama_server._acquire_file_lock")
+    @patch("portfolio.llama_server._release_file_lock")
+    @patch("portfolio.llama_server._requests")
+    def test_query_llama_server_batch_passes_cache_prompt(
+        self, mock_req, mock_release, mock_acquire, mock_ensure
+    ):
+        """Each request in a batch should carry cache_prompt — critical for the
+        Ministral phase where 4 per-ticker prompts share ~300 tokens of prefix.
+        """
+        from portfolio.llama_server import query_llama_server_batch
+        mock_fh = MagicMock()
+        mock_acquire.return_value = mock_fh
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"content": "ok"}
+        mock_req.post.return_value = mock_response
+
+        prompts = [
+            {"prompt": "[INST]prefix BTC data[/INST]"},
+            {"prompt": "[INST]prefix ETH data[/INST]"},
+            {"prompt": "[INST]prefix XAU data[/INST]"},
+        ]
+        results = query_llama_server_batch("ministral3", prompts)
+        assert len(results) == 3
+        # Every post call must have cache_prompt in its body
+        for call in mock_req.post.call_args_list:
+            assert call.kwargs["json"].get("cache_prompt") is True
