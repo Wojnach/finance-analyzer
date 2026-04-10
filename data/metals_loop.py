@@ -28,6 +28,7 @@ Features:
 Run: .venv/Scripts/python.exe data/metals_loop.py
 """
 import atexit
+import contextlib
 import datetime
 import json
 import logging
@@ -818,10 +819,8 @@ def release_singleton_lock():
     except OSError:
         pass
     finally:
-        try:
+        with contextlib.suppress(Exception):
             _singleton_lock_fh.close()
-        except Exception:
-            pass
         _singleton_lock_fh = None
 
 def _safe_print(msg):
@@ -935,10 +934,7 @@ def _sleep_for_cycle(cycle_started, interval_s, label):
 
 def _has_active_silver():
     """Return True if any active silver position exists."""
-    for key, pos in POSITIONS.items():
-        if "silver" in key.lower() and pos.get("active"):
-            return True
-    return False
+    return any("silver" in key.lower() and pos.get("active") for key, pos in POSITIONS.items())
 
 
 def _get_active_silver():
@@ -3000,22 +2996,21 @@ def build_probability_telegram(prob_report, cet_str):
                     lines.append(f"`  ETH/BTC: {ratio:.4f}`")
 
         # MSTR-specific context
-        if ticker == "MSTR":
-            if CRYPTO_DATA_AVAILABLE:
-                try:
-                    mstr_data = fetch_mstr_price()
-                    if mstr_data:
-                        chg = mstr_data.get("change_pct", 0)
-                        state = mstr_data.get("market_state", "CLOSED")
-                        state_tag = "" if state == "REGULAR" else f" ({state.lower()})"
-                        lines.append(f"`  {chg:+.1f}% today{state_tag}`")
-                    btc_p = _underlying_prices.get("BTC-USD", 0)
-                    if btc_p > 0:
-                        nav = compute_mstr_btc_nav(price, btc_p)
-                        if nav:
-                            lines.append(f"`  NAV: ${nav['nav_per_share']:.0f} prem:{nav['premium_pct']:+.0f}%`")
-                except Exception:
-                    logger.debug("build_probability_telegram: MSTR price/NAV fetch failed, skipping line", exc_info=True)
+        if ticker == "MSTR" and CRYPTO_DATA_AVAILABLE:
+            try:
+                mstr_data = fetch_mstr_price()
+                if mstr_data:
+                    chg = mstr_data.get("change_pct", 0)
+                    state = mstr_data.get("market_state", "CLOSED")
+                    state_tag = "" if state == "REGULAR" else f" ({state.lower()})"
+                    lines.append(f"`  {chg:+.1f}% today{state_tag}`")
+                btc_p = _underlying_prices.get("BTC-USD", 0)
+                if btc_p > 0:
+                    nav = compute_mstr_btc_nav(price, btc_p)
+                    if nav:
+                        lines.append(f"`  NAV: ${nav['nav_per_share']:.0f} prem:{nav['premium_pct']:+.0f}%`")
+            except Exception:
+                logger.debug("build_probability_telegram: MSTR price/NAV fetch failed, skipping line", exc_info=True)
 
         lines.append("")
 
@@ -3071,10 +3066,8 @@ def read_decision_history(n=5):
             lines = f.readlines()
         entries = []
         for line in lines[-n:]:
-            try:
+            with contextlib.suppress(json.JSONDecodeError):
                 entries.append(json.loads(line.strip()))
-            except json.JSONDecodeError:
-                pass
         return entries
     except Exception as e:
         log(f"Decision history read error: {e}")
@@ -5562,9 +5555,8 @@ def check_triggers(prices):
             logger.warning("check_triggers: check_portfolio_drawdown failed — drawdown circuit breaker not evaluated this cycle", exc_info=True)
 
     # Heartbeat (every ~30 min)
-    if check_count > 0 and check_count % HEARTBEAT_CHECKS == 0:
-        if not reasons:
-            reasons.append("periodic heartbeat")
+    if check_count > 0 and check_count % HEARTBEAT_CHECKS == 0 and not reasons:
+        reasons.append("periodic heartbeat")
 
     # End of day (CET-based)
     h_cet = cet_hour()
@@ -6100,10 +6092,8 @@ def invoke_claude(trigger_reasons, tier=2):
         # file permissions on the log file, etc.).
         logger.exception("_invoke_claude: subprocess.Popen raised")
         if log_fh:
-            try:
+            with contextlib.suppress(OSError):
                 log_fh.close()
-            except OSError:
-                pass
         return False
 
 def main():
@@ -6620,30 +6610,29 @@ Positions: {pos_summary}{prob_summary}""")
                             save_spike_state(spike_st)
 
                     # Phase 2: Check for fills (every 2nd check while orders active)
-                    if spike_st["placed"] and not spike_st["cancelled"] and check_count % 2 == 0:
-                        if spike_st.get("orders"):
-                            filled = check_spike_fills(page, spike_st, POSITIONS)
-                            for fk in filled:
-                                spike_st["orders"].pop(fk, None)
-                                # Drop the persisted snapshot — when a spike
-                                # fills, the position naturally shrinks to
-                                # match the resized stops. No restoration
-                                # needed; the snapshot would only be useful
-                                # for the unfilled-cancel path.
-                                if isinstance(spike_st.get("stop_snapshots"), dict):
-                                    spike_st["stop_snapshots"].pop(fk, None)
-                                # Update position units if partial sell
-                                if fk in POSITIONS and SPIKE_PARTIAL_PCT < 100:
-                                    sold = spike_st.get("targets", {}).get(fk, {}).get("units_to_sell", 0)
-                                    POSITIONS[fk]["units"] = max(0, POSITIONS[fk]["units"] - sold)
-                                    if POSITIONS[fk]["units"] == 0:
-                                        POSITIONS[fk]["active"] = False
-                                if RISK_AVAILABLE and fk in spike_st.get("targets", {}):
-                                    record_metals_trade(fk, "SELL",
-                                                        pnl_pct_value=spike_st["targets"][fk].get("target_pnl_pct", 0))
-                            if filled:
-                                save_spike_state(spike_st)
-                                _save_positions(POSITIONS)  # persist after spike fills
+                    if spike_st["placed"] and not spike_st["cancelled"] and check_count % 2 == 0 and spike_st.get("orders"):
+                        filled = check_spike_fills(page, spike_st, POSITIONS)
+                        for fk in filled:
+                            spike_st["orders"].pop(fk, None)
+                            # Drop the persisted snapshot — when a spike
+                            # fills, the position naturally shrinks to
+                            # match the resized stops. No restoration
+                            # needed; the snapshot would only be useful
+                            # for the unfilled-cancel path.
+                            if isinstance(spike_st.get("stop_snapshots"), dict):
+                                spike_st["stop_snapshots"].pop(fk, None)
+                            # Update position units if partial sell
+                            if fk in POSITIONS and SPIKE_PARTIAL_PCT < 100:
+                                sold = spike_st.get("targets", {}).get(fk, {}).get("units_to_sell", 0)
+                                POSITIONS[fk]["units"] = max(0, POSITIONS[fk]["units"] - sold)
+                                if POSITIONS[fk]["units"] == 0:
+                                    POSITIONS[fk]["active"] = False
+                            if RISK_AVAILABLE and fk in spike_st.get("targets", {}):
+                                record_metals_trade(fk, "SELL",
+                                                    pnl_pct_value=spike_st["targets"][fk].get("target_pnl_pct", 0))
+                        if filled:
+                            save_spike_state(spike_st)
+                            _save_positions(POSITIONS)  # persist after spike fills
 
                     # Phase 3: Cancel unfilled 1h after the NYSE open.
                     # Idempotent + retry-aware: cancel_spike_orders only marks
@@ -6849,10 +6838,8 @@ Positions: {pos_summary}{prob_summary}""")
                                    elapsed_s=elapsed, rc=retcode)
                     claude_proc = None
                     if claude_log_fh:
-                        try:
+                        with contextlib.suppress(OSError):
                             claude_log_fh.close()
-                        except OSError:
-                            pass
                         claude_log_fh = None
 
                     if TRADE_QUEUE_ENABLED:

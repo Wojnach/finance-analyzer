@@ -1383,13 +1383,12 @@ class SwingTrader:
         # in state forever and causing the 08:25 UTC cascade.
         dirty = False
         for pos_id in to_remove:
-            if pos_id in self.state["positions"]:
-                # Only remove positions where _execute_sell succeeded.
-                # Failed sells leave sell_failed_at set — respected via the
-                # cooldown at the top of the loop next cycle. See Fix 3b.
-                if not self.state["positions"][pos_id].get("sell_failed_at"):
-                    del self.state["positions"][pos_id]
-                    dirty = True
+            # Only remove positions where _execute_sell succeeded.
+            # Failed sells leave sell_failed_at set — respected via the
+            # cooldown at the top of the loop next cycle. See Fix 3b.
+            if pos_id in self.state["positions"] and not self.state["positions"][pos_id].get("sell_failed_at"):
+                del self.state["positions"][pos_id]
+                dirty = True
         for pos_id in corrupt_ids:
             if pos_id in self.state["positions"]:
                 del self.state["positions"][pos_id]
@@ -1465,10 +1464,9 @@ class SwingTrader:
         _log_trade(trade_record)
 
         # Cancel hardware stop-loss
-        if pos.get("stop_order_id") and pos["stop_order_id"] != "DRY_RUN":
-            if not DRY_RUN:
-                ok = _delete_stop_loss(self.page, pos["stop_order_id"])
-                _log(f"  Stop-loss cancelled: {ok}")
+        if pos.get("stop_order_id") and pos["stop_order_id"] != "DRY_RUN" and not DRY_RUN:
+            ok = _delete_stop_loss(self.page, pos["stop_order_id"])
+            _log(f"  Stop-loss cancelled: {ok}")
 
         # Update state
         pnl_sek = proceeds - (units * entry_price)
@@ -1516,10 +1514,7 @@ class SwingTrader:
 
     def _has_position(self, underlying_ticker):
         """Check if we already have a position in this underlying."""
-        for pos in self.state["positions"].values():
-            if pos["underlying"] == underlying_ticker:
-                return True
-        return False
+        return any(pos["underlying"] == underlying_ticker for pos in self.state["positions"].values())
 
     def _cooldown_cleared(self):
         """Check if BUY cooldown has elapsed (with loss escalation)."""

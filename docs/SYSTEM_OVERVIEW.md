@@ -1,11 +1,11 @@
 # System Overview
 
-Updated: 2026-04-09
-Branch: improve/auto-session-2026-04-09
+Updated: 2026-04-10
+Branch: improve/auto-session-2026-04-10
 
 ## 1) Architecture Summary
 
-Two-layer autonomous trading system with 32 signals (all tracked), 20 instruments, and dual-strategy portfolio management.
+Two-layer autonomous trading system with 36 signals (32 active, 4 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
 
 - **Layer 1** (`portfolio/main.py`): Continuous 60s loop — data collection, signal generation, trigger detection, summary writing.
 - **Layer 2** (`portfolio/agent_invocation.py`): Claude subprocess — reads summaries, makes trade decisions, writes journals, sends Telegram.
@@ -32,11 +32,11 @@ Two-layer autonomous trading system with 32 signals (all tracked), 20 instrument
 - `market_timing.py` (141 lines): DST-aware US market hours, agent invocation window, market state (open/closed/weekend)
 - `config_validator.py`: Startup config validation
 
-### Signal System (32 signals: 9 core + 22 enhanced + 2 disabled)
-- `signal_engine.py` (1,538 lines): 32-signal voting, weighted consensus, accuracy gating, 5-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + ADX cache
+### Signal System (36 signals: 12 core + 24 enhanced, 32 active + 4 disabled)
+- `signal_engine.py` (~1,988 lines): 36-signal voting, weighted consensus, accuracy gating, 5-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + ADX cache
 - `signal_registry.py` (135 lines): Plugin-based signal discovery via importlib, lazy loading
 - `signal_utils.py` (130 lines): Shared helpers — SMA, EMA, RSI, majority_vote
-- `signals/*.py` (19 modules): Enhanced composite signals, each with 4-8 sub-indicators
+- `signals/*.py` (24 modules): Enhanced composite signals, each with 4-8 sub-indicators
 - `accuracy_stats.py` (636 lines): Per-signal hit rate tracking, accuracy cache, activation rates
 - `outcome_tracker.py` (391 lines): Signal snapshot logging, price backfill for accuracy
 
@@ -136,10 +136,13 @@ main.loop()
 4. Dynamic MIN_VOTERS: trending=3, high-vol=4, ranging=5
 5. Unanimity penalty: 90%+ agreement → 0.6x, 80-90% → 0.75x (high unanimity = already priced in)
 
-### Signal Inventory (34 total: all tracked, 30 active)
-- **Core active (9)**: RSI, MACD, EMA, BB, Fear&Greed, Sentiment, Ministral-8B, Qwen3-8B, Volume
-- **Core disabled (4)**: ML Classifier (28.2%), Funding Rate (27.0%), Crypto Macro, COT Positioning (pending live validation)
-- **Enhanced composite (21)**: Trend, Momentum, Volume Flow, Volatility, Candlestick, Structure, Fibonacci, Smart Money, Oscillators, Heikin-Ashi, Mean Reversion, Calendar, Macro Regime, Momentum Factors, News Event, Econ Calendar, Forecast, Claude Fundamental, Futures Flow, Orderbook Flow, Metals Cross-Asset
+### Signal Inventory (36 total: 32 active, 4 disabled)
+- **Core active (10)**: RSI, MACD, EMA, BB, Fear&Greed, Sentiment, Ministral-8B, Qwen3-8B, Volume, Funding Rate (3h-only, 74.2%)
+- **Core active BTC-only (1)**: On-Chain BTC (MVRV, SOPR, NUPL, Netflow)
+- **Core disabled (1)**: ML Classifier (28.2%)
+- **Enhanced composite (21 active)**: Trend, Momentum, Volume Flow, Volatility, Candlestick, Structure, Fibonacci, Smart Money, Oscillators, Heikin-Ashi, Mean Reversion, Calendar, Macro Regime, Momentum Factors, News Event, Econ Calendar, Forecast, Claude Fundamental, Futures Flow, Orderbook Flow, Metals Cross-Asset
+- **Enhanced disabled (3)**: Crypto Macro, COT Positioning, Credit Spread Risk (all pending live validation)
+- **Applicable per asset**: crypto=31, metals=28, stocks=26
 
 ## 6) Configuration
 
@@ -157,7 +160,7 @@ Primary config: `config.json` (not in repo). Key domains:
 | Service | Config Key | Tier | Purpose |
 |---------|-----------|------|---------|
 | Binance | `exchange.key/secret` | Free | Crypto spot + FAPI futures (BTC, ETH, XAU, XAG) |
-| Alpaca | `alpaca.key/secret` | Paper | US stock OHLCV data (15 NASDAQ/NYSE tickers) |
+| Alpaca | `alpaca.key/secret` | Paper | US stock OHLCV data (MSTR only, reduced from 15 tickers on Apr 9) |
 | Telegram | `telegram.token/chat_id` | Free | All Layer 2 notifications + digest |
 | Alpha Vantage | `alpha_vantage.api_key` | Free (25/day) | Stock fundamentals (P/E, revenue, analyst targets) |
 | NewsAPI | `newsapi_key` | Free (100/day) | Stock headlines for sentiment + news_event signal |
@@ -175,7 +178,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 
 ## 7) Test Surface
 
-- ~5,994 tests across 159 test files (156 main + 1 integration + 2 unit)
+- ~5,994 tests across 242 test files
 - Sequential: ~16 min; Parallel (`-n auto`): ~5.5 min (2.9x speedup on 8 workers)
 - 26 pre-existing failures (integration/strategy, consensus thresholds, forecast config)
 - Config: `pyproject.toml` → `[tool.pytest.ini_options]`
@@ -240,7 +243,7 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - REF-13: 112 ruff lint violations (unused imports, f-strings, reimports) — fixed 2026-03-18
 - REF-14: 15 dead variable assignments across 13 modules — fixed 2026-03-18
 - ARCH-16: Golddigger/elongir duplicated config loading (deferred — localized, may diverge)
-- ~5,994 tests across 159 test files
+- ~5,994 tests across 242 test files
 - BUG-85 (P1): Thread-unsafe `_prev_sentiment` + per-ticker serialization data loss in signal_engine.py — fixed 2026-03-20
 - BUG-86 (P2): Thread-unsafe `_adx_cache` in signal_engine.py — fixed 2026-03-20
 - BUG-87 (P1): NaN propagation from compute_indicators into JSON and signals — fixed 2026-03-20
