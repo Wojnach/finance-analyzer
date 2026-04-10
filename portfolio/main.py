@@ -574,8 +574,22 @@ def run(force_report=False, active_symbols=None):
                     signals_failed += 1
         except TimeoutError:
             timed_out = [n for f, n in futures.items() if not f.done()]
-            logger.error("BUG-178: Ticker pool timeout after %ds. Stuck: %s",
-                         _TICKER_POOL_TIMEOUT, timed_out)
+            # BUG-178 diagnostic (added 2026-04-10): per-ticker last-signal
+            # tracker reveals which enhanced signal each stuck ticker was
+            # running when the 180s pool timeout fired. Surfaces silent
+            # hangs that never trip the [SLOW] >1s logger because the
+            # signal never returns. The dispatch loop in signal_engine.py
+            # writes _last_signal_per_ticker[ticker] right before each
+            # compute_fn() call. Format: {ticker: (sig_name, elapsed_seconds)}.
+            try:
+                from portfolio.signal_engine import get_last_signal as _get_last
+                last_sigs = {n: _get_last(n) for n in timed_out}
+            except Exception:
+                last_sigs = {}
+            logger.error(
+                "BUG-178: Ticker pool timeout after %ds. Stuck: %s. Last signals: %s",
+                _TICKER_POOL_TIMEOUT, timed_out, last_sigs,
+            )
             for f in futures:
                 f.cancel()
             signals_failed += len(timed_out)
