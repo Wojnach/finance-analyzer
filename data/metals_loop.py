@@ -1476,6 +1476,45 @@ if CATALOG_AVAILABLE:
                 "leverage": wv.get("leverage", 5.0),
             }
 
+# 2026-04-10: also extend with the DYNAMIC catalog on disk.
+# data/metals_warrant_catalog.json is written by SwingTrader's refresher
+# (metals_warrant_refresh.py) and holds 100+ live warrants refreshed every
+# 6h. Previously detect_holdings was blind to these and logged every
+# swing-managed position as "unknown ob_id — skipping", which made the
+# loop LOOK like it was neglecting the user's positions even though
+# SwingTrader was managing them correctly via its own state file.
+#
+# Entries from the dynamic catalog get tagged with _managed_by=swing_trader
+# so detect_holdings knows to log them at debug level and NOT add them to
+# the legacy POSITIONS dict (which would duplicate trailing-stop /
+# momentum-exit logic).
+try:
+    import json as _json_mod
+    with open("data/metals_warrant_catalog.json", encoding="utf-8") as _dyn_fh:
+        _dyn_cache = _json_mod.load(_dyn_fh)
+    _dyn_warrants = (_dyn_cache or {}).get("warrants") or {}
+    _dyn_added = 0
+    for _wk, _wv in _dyn_warrants.items():
+        _ob = str(_wv.get("ob_id") or "")
+        if _ob and _ob not in KNOWN_WARRANT_OB_IDS:
+            KNOWN_WARRANT_OB_IDS[_ob] = {
+                "key": _wk,
+                "name": _wv.get("name", _wk),
+                "api_type": _wv.get("api_type", "warrant"),
+                "underlying": _wv.get("underlying", "XAG-USD"),
+                "leverage": _wv.get("leverage") or 1.0,
+                "_managed_by": "swing_trader",
+            }
+            _dyn_added += 1
+    if _dyn_added:
+        logger.info(
+            "KNOWN_WARRANT_OB_IDS: loaded %d swing-managed ob_ids from dynamic catalog",
+            _dyn_added,
+        )
+    del _json_mod, _dyn_cache, _dyn_warrants, _dyn_added
+except (FileNotFoundError, ValueError, KeyError) as _dyn_exc:
+    logger.debug("dynamic warrant catalog load at module init failed: %s", _dyn_exc)
+
 # ---------------------------------------------------------------------------
 # Fishing position support — intraday positions get tight trail + EOD sell
 # ---------------------------------------------------------------------------
@@ -1659,7 +1698,22 @@ def detect_holdings(page):
             else:
                 # Brand new instrument — check if we recognize it
                 info = KNOWN_WARRANT_OB_IDS.get(ob_id)
-                if info:
+                if info and info.get("_managed_by") == "swing_trader":
+                    # 2026-04-10: SwingTrader manages this via its own state
+                    # file (data/metals_swing_state.json). Do NOT add it to
+                    # the legacy POSITIONS dict — that would trigger
+                    # duplicate trailing-stop and momentum-exit logic on top
+                    # of SwingTrader's own management. Log once at debug so
+                    # operators can see the reconciliation happened without
+                    # the misleading "unknown — skipping" warning.
+                    if ob_id not in _WARNED_UNKNOWN_OB_IDS:
+                        logger.debug(
+                            "Holdings: ob_id %s (%s) is swing-managed — "
+                            "skipping legacy POSITIONS tracking",
+                            ob_id, info.get("name", "?"),
+                        )
+                        _WARNED_UNKNOWN_OB_IDS.add(ob_id)
+                elif info:
                     key = info["key"]
                     entry_price = holding["avg_price"] if holding["avg_price"] > 0 else 0
                     stop_price = round(entry_price * 0.95, 2) if entry_price > 0 else 0
