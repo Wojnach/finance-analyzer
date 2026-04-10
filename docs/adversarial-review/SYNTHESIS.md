@@ -48,9 +48,9 @@ P0 issues in the entire codebase.
 | metals-core | 19,014 | 6 | 1 | 3 | 2 | Fair — God file, timezone issues |
 | avanza-api | 2,298 | 16 | 2 | 10 | 4 | **CRITICAL** — 2 P0 findings |
 | signals-modules | 10,949 | 3 | 0 | 1 | 2 | Good — consistent pattern |
-| data-external | 6,062 | 2 | 0 | 2 | 0 | Good — rate-limited, cached |
+| data-external | 6,062 | 12 | 5 | 7 | 0 | Fair — budget drain, yfinance compat |
 | infrastructure | 5,721 | 8 | 2 | 3 | 3 | Fair — atomicity + gate bypass |
-| **Total** | **60,377** | **72+** | **13+** | **39+** | **20+** | |
+| **Total** | **60,377** | **82+** | **18+** | **44+** | **20+** | |
 
 ---
 
@@ -308,8 +308,13 @@ See `AGENT_REVIEW_AVANZA_API.md` for full details. **MOST CRITICAL SUBSYSTEM.**
 ### Agent: review-signals-modules
 *(Pending — will be updated when agent completes)*
 
-### Agent: review-data-external
-*(Pending — will be updated when agent completes)*
+### Agent: review-data-external — COMPLETE (10 findings: 5 P1, 5 P2)
+See `AGENT_REVIEW_DATA_EXTERNAL.md` for full details. Key findings:
+- **A-DE-1 [P1]**: Alpha Vantage earnings calls bypass the 25/day budget counter
+- **A-DE-4 [P1]**: fear_greed.py missing yfinance MultiIndex flatten — stock F&G signal silently dead
+- **A-DE-5 [P1]**: onchain_data.py cache seeding crashes on old-format cache (ISO string as epoch)
+- **A-DE-6 [P2]**: sentiment.py subprocess fallback uses wrong Python venv (.venv instead of .venv-llm)
+- **A-DE-8 [P2]**: llama_server.py lock PID check uses substring match — PID "123" matches "1234"
 
 ### Agent: review-infrastructure
 *(Pending — will be updated when agent completes)*
