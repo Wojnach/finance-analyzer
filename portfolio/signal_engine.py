@@ -34,6 +34,37 @@ _LOCAL_MODEL_ACCURACY_TTL = 1800
 _adx_cache: dict[int, float | None] = {}
 _adx_lock = threading.Lock()  # BUG-86: protect concurrent access from ThreadPoolExecutor
 _ADX_CACHE_MAX = 200  # prevent unbounded growth
+
+# BUG-178 diagnostics: per-ticker last-signal tracker.
+# Updated right before each enhanced signal's compute_fn() is called so that
+# when the BUG-178 ticker pool timeout fires, main.py can ask which signal
+# each stuck ticker was running. Surfaces silent hangs (signals that never
+# complete and therefore never trip the [SLOW] >1s logger).
+# Added 2026-04-10 after a 49-event BUG-178 audit traced silent hangs to the
+# disabled-signals dispatch path. Cheap (single dict write per signal call).
+_last_signal_per_ticker: dict[str, tuple[str, float]] = {}
+_last_signal_lock = threading.Lock()
+
+
+def _set_last_signal(ticker: str, sig_name: str) -> None:
+    """Record the signal currently being computed for a ticker (BUG-178 diag)."""
+    with _last_signal_lock:
+        _last_signal_per_ticker[ticker] = (sig_name, time.monotonic())
+
+
+def get_last_signal(ticker: str) -> tuple[str, float] | None:
+    """Return (sig_name, elapsed_seconds) for the most recent signal start
+    on this ticker, or None if no signal has been recorded.
+
+    Used by main.py's BUG-178 timeout handler to identify which signal hung.
+    """
+    with _last_signal_lock:
+        entry = _last_signal_per_ticker.get(ticker)
+    if entry is None:
+        return None
+    sig_name, started = entry
+    return sig_name, time.monotonic() - started
+
 _LOCAL_MODEL_HOLD_THRESHOLD = 0.55
 _LOCAL_MODEL_MIN_SAMPLES = 30
 _LOCAL_MODEL_LOOKBACK_DAYS = 30
@@ -1562,6 +1593,21 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
 
         _signal_failures = []
         for sig_name, entry in _enhanced_entries.items():
+            # BUG-178 fix (2026-04-10): respect DISABLED_SIGNALS in the dispatch
+            # loop. Previously this loop iterated *every* registered enhanced
+            # signal regardless of disabled status, which meant the three
+            # "registered but force-HOLD pending live validation" signals
+            # (crypto_macro, cot_positioning, credit_spread_risk) were doing
+            # network I/O on every cycle. Their late position in iteration
+            # order matches the silent gap before all 49 BUG-178 events
+            # observed 2026-04-09/10 (last [SLOW] log line is always the
+            # signal *before* this set, then 150+s of silence). Skipping them
+            # restores the documented behavior. Other DISABLED_SIGNALS-aware
+            # call sites: count_active_signals():468, dynamic correlation:558,
+            # accuracy_stats.py, ticker_accuracy.py, backtester.py, reporting.py.
+            if sig_name in DISABLED_SIGNALS:
+                votes[sig_name] = "HOLD"
+                continue
             # Skip GPU-intensive enhanced signals for stocks outside market hours
             if skip_gpu and sig_name in GPU_SIGNALS:
                 votes[sig_name] = "HOLD"
@@ -1572,6 +1618,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 if compute_fn is None:
                     votes[sig_name] = "HOLD"
                     continue
+                # BUG-178 diagnostic: track which signal each ticker is currently
+                # running so main.py's pool-timeout handler can name the culprit.
+                _set_last_signal(ticker, sig_name)
                 if entry.get("requires_context"):
                     result = compute_fn(df, context=context_data)
                 elif entry.get("requires_macro"):

@@ -455,3 +455,64 @@ class TestOnchainSignal:
         vote, extra = self._run_onchain_block("BTC-USD", data)
         assert vote == "HOLD"
         assert extra["onchain_sub_votes"] == "2B/2S"
+
+
+# ---------------------------------------------------------------------------
+# BUG-178 fixes (2026-04-10)
+# ---------------------------------------------------------------------------
+
+class TestDispatchLoopRespectsDisabledSignals:
+    """Regression: enhanced-signal dispatch loop must skip DISABLED_SIGNALS.
+
+    Before 2026-04-10, the dispatch loop iterated every registered enhanced
+    signal regardless of disabled status. This caused 49 BUG-178 ticker
+    pool timeouts on 2026-04-09/10 because the disabled signals
+    (crypto_macro, cot_positioning, credit_spread_risk) were doing network
+    I/O on every cycle.
+    """
+
+    def test_disabled_signals_have_force_hold_in_dispatch_loop(self):
+        """The dispatch loop must short-circuit on DISABLED_SIGNALS."""
+        import inspect
+
+        from portfolio import signal_engine
+        from portfolio.tickers import DISABLED_SIGNALS
+
+        src = inspect.getsource(signal_engine.generate_signal)
+        # The fix: dispatch loop must check DISABLED_SIGNALS before calling compute_fn
+        assert "if sig_name in DISABLED_SIGNALS" in src, (
+            "Dispatch loop must skip disabled signals to prevent BUG-178 hangs"
+        )
+        # Defense in depth: at least one disabled signal must exist (otherwise
+        # the check is dead code we should remove)
+        assert len(DISABLED_SIGNALS) > 0
+
+
+class TestLastSignalDiagnostic:
+    """BUG-178 diagnostic: per-ticker last-signal tracker."""
+
+    def test_set_and_get_last_signal_round_trip(self):
+        from portfolio.signal_engine import _set_last_signal, get_last_signal
+
+        _set_last_signal("BTC-USD", "test_signal_xyz")
+        result = get_last_signal("BTC-USD")
+        assert result is not None
+        sig_name, elapsed = result
+        assert sig_name == "test_signal_xyz"
+        assert elapsed >= 0.0
+        assert elapsed < 5.0  # should be near-instant
+
+    def test_get_last_signal_unknown_ticker_returns_none(self):
+        from portfolio.signal_engine import get_last_signal
+
+        result = get_last_signal("__nonexistent_ticker__")
+        assert result is None
+
+    def test_set_overwrites_previous(self):
+        from portfolio.signal_engine import _set_last_signal, get_last_signal
+
+        _set_last_signal("ETH-USD", "first_signal")
+        _set_last_signal("ETH-USD", "second_signal")
+        result = get_last_signal("ETH-USD")
+        assert result is not None
+        assert result[0] == "second_signal"
