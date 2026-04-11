@@ -190,11 +190,33 @@ design gap) and metals thread safety (architectural debt).
 
 ---
 
-## Agent Review Status
+## Agent Review Results
 
-8 subsystem review agents were launched in parallel. Agent results will be incorporated
-into this synthesis when they complete. The independent review above covers the
-cross-cutting systemic issues that individual subsystem reviewers may miss.
+### portfolio-risk agent (COMPLETE — 10 findings)
+
+The portfolio-risk agent confirmed both P0 findings (SO-1, IR-2) and discovered
+**7 NEW findings** not caught by the independent review:
+
+| ID | Sev | File | Finding |
+|----|-----|------|---------|
+| PR-R5-3 | P1 | warrant_portfolio.py:218 | Average-in BUY doesn't update underlying_entry_price_usd — stale P&L baseline for leveraged warrants |
+| PR-R5-4 | P1 | trade_validation.py:32 | Min order default 500 SEK vs Avanza floor 1000 SEK — validation passes orders broker rejects |
+| PR-R5-5 | P1 | risk_management.py:791 | "CHECK" sentinel in atr_stop_proximity — works by accident |
+| PR-R5-6 | P1 | equity_curve.py:233 | Sharpe guard uses percentage-unit vol for decimal computation — dead guard |
+| PR-R5-7 | P1 | kelly_sizing.py:95 | Fee asymmetry: BUY includes fee, SELL is post-fee — Kelly win rate biased |
+| PR-R5-8 | P2 | monte_carlo_risk.py:211 | shares != 0 allows negative shares in VaR — inverts P&L |
+| PR-R5-9 | P2 | kelly_metals.py:215 | Near-zero avg_loss → 95% position sizing from noisy data |
+
+**Cross-critique**: PR-R5-3 (warrant averaging) is the most impactful new finding —
+1% underlying error compounds to 5% P&L error on 5x leverage. PR-R5-4 (min order floor)
+is actionable immediately. PR-R5-5 through PR-R5-7 are code correctness issues that
+don't cause money loss but should be cleaned up.
+
+### Other agents (7 remaining — still in progress)
+
+The signals-core, orchestration, metals-core, avanza-api, signals-modules, data-external,
+and infrastructure agents are still running their deep file-by-file reviews. Results will
+be added as they complete.
 
 ---
 
