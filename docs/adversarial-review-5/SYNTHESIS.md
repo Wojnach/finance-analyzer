@@ -181,7 +181,7 @@ All 11 fixes from the fix/queue-2026-04-11 branch have been verified:
 | 2 | 2026-04-07 | ~40 | 4 | 12 | ~20% of R1 |
 | 3 | 2026-04-08 | 67 | 15 | 35 | ~70% of R2 |
 | 4 | 2026-04-09 | 67 | 15 | 35 | ~73% of R3 |
-| 5 | 2026-04-11 | 28+ | 2 | 13 | 100% of targeted P0/P1 batch |
+| 5 | 2026-04-11 | 35+ | 3 | 19 | 100% of targeted P0/P1 batch |
 
 **Trend**: Fix rate has improved dramatically. Round 5 found only 12 total findings
 (vs 67 in Rounds 3-4), and all 11 targeted fixes from the fix queue are verified correct.
@@ -230,10 +230,27 @@ The signals-modules agent found 9 findings including a **critical sentiment inve
 **SM-R5-7 is a direct signal inversion** — any headline with "cut" (except "rate cut"/
 "guidance cut") gets counted as bullish. "Job cuts reported" → positive sentiment → BUY vote.
 
-### Other agents (6 remaining — still in progress)
+### data-external agent (COMPLETE — 7 findings)
 
-The signals-core, orchestration, metals-core, avanza-api, data-external, and
-infrastructure agents are still running. Results will be added as they complete.
+The data-external agent found 7 findings including an **incomplete A-DE-5 fix**:
+
+| ID | Sev | File | Finding |
+|----|-----|------|---------|
+| DE-R5-1 | P0 | onchain_data.py:101 | A-DE-5 fix missed fallback path — _load_onchain_cache still raw-subtracts ISO timestamps |
+| DE-R5-2 | P1 | microstructure_state.py:191 | persist_state() double-appends OFI every 5th cycle → z-score corruption |
+| DE-R5-3 | P1 | ml_signal.py:12-154 | FEATURES_PATH never loaded at inference → silent feature-order mismatch |
+| DE-R5-4 | P1 | macro_context.py:38,226 | Same yfinance MultiIndex bug as A-DE-4 but in DXY/treasury fetch |
+| DE-R5-5 | P1 | forecast_signal.py:218 | Chronos-2 pred_df length not validated before iloc |
+| DE-R5-6 | P1 | funding_rate.py:23 | KeyError on Binance error response kills 74.2% accuracy signal |
+| DE-R5-7 | P1 | feature_normalizer.py:37-39 | _buffers dict not thread-safe — race in check-then-set |
+
+**Key insight**: DE-R5-1 and DE-R5-4 show the **incomplete fix pattern** — today's fixes
+(A-DE-4, A-DE-5) were applied to one code path but the same bug exists in parallel paths.
+
+### Other agents (5 remaining — still in progress)
+
+The signals-core, orchestration, metals-core, avanza-api, and infrastructure agents
+are still running. Results will be added as they complete.
 
 ---
 
