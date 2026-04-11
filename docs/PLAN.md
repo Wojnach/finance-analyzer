@@ -56,8 +56,11 @@ Worktree: `/mnt/q/finance-analyzer-fixq`
 
 ### Batch 3 — Logic bugs (medium risk, P0/P1, requires tests)
 
-- [ ] **A-SM-1** Fix gap-fill BUY direction during continuing gap-down
-      (find module via grep on "gap_fill"). Currently buys into crashes.
+- [x] **A-SM-1** Investigated: synthesis was a false positive (existing
+      `fill_pct < 0.3` already handled the case, verified with concrete trace).
+      Added explicit `if fill_pct < 0: HOLD` guard for clarity + 3 regression
+      tests covering all 4 (gap_dir × day_dir) quadrants.
+      → commit `c595ab0`
 - [ ] **A-SM-2** Add GARCH key to volatility `_empty_result` schema in
       `portfolio/signals/volatility.py`. Inconsistent sub_signals.
 - [ ] **A-MC-4** Use real `entry_ts` from holdings instead of `now()` in
