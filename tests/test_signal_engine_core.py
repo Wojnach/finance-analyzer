@@ -916,10 +916,12 @@ class TestCorrelationDedup:
         assert _RECENCY_WEIGHT_FAST == 0.9
         assert _RECENCY_WEIGHT_NORMAL == 0.7
 
-    def test_accuracy_gate_at_045(self):
-        """Verify gate threshold is 0.45."""
+    def test_accuracy_gate_at_047(self):
+        """Verify gate threshold is 0.47 (raised 0.45 → 0.47 on 2026-04-11
+        to gate the 4 signals sitting in the 45-47% coin-flip-adjacent
+        band per the 2026-04-10 audit)."""
         from portfolio.signal_engine import ACCURACY_GATE_THRESHOLD
-        assert ACCURACY_GATE_THRESHOLD == 0.45
+        assert ACCURACY_GATE_THRESHOLD == 0.47
 
 
 # ===========================================================================
