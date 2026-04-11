@@ -58,7 +58,21 @@ YF_MAP = {t: t for t in STOCK_SYMBOLS}
 
 # Signals that are force-HOLD (disabled due to poor accuracy).
 # Kept in SIGNAL_NAMES for historical tracking but excluded from active reports.
-DISABLED_SIGNALS = {"ml", "crypto_macro", "cot_positioning", "credit_spread_risk", "futures_basis", "hurst_regime"}  # hurst_regime: pending live validation (added 2026-04-11)
+DISABLED_SIGNALS = {
+    "ml",               # 41.7% accuracy (1714 sam) — worse than coin flip
+    "cot_positioning",  # 0 accuracy samples — pending live validation
+    "futures_basis",    # 0 accuracy samples — pending live validation
+    "hurst_regime",     # pending live validation (added 2026-04-11)
+    "orderbook_flow",   # 2026-04-11: 51.1% accuracy (360 sam), 93.3% activation rate,
+                        # no recent data. Pure noise in every consensus decision.
+                        # Re-evaluate after 2 weeks of accuracy data collection.
+}
+# 2026-04-11 research session changes:
+# - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
+# - credit_spread_risk ENABLED: 66.9% accuracy (257 sam), BUY 80.3%. Directional
+#   gate at 40% will auto-gate SELL (49.1%) while allowing strong BUY votes.
+# - crypto_macro ENABLED: 56.5% accuracy (1273 sam). BUY-biased (93%) so bias
+#   penalty (0.5x) applies. Provides crypto-specific on-chain edge.
 # funding: removed from DISABLED — 74.2% at 3h (535 samples) but 29.9% at 1d.
 # Horizon-gated via REGIME_GATED_SIGNALS to only vote at 3h/4h.
 

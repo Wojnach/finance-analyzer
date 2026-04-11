@@ -277,8 +277,10 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
         # volatility_sig 47.2%, forecast 47.2% — marginal, let accuracy gate
         # handle them dynamically at 3h.
         # funding 74.2% at 3h (535 sam) — NOT gated here.
-        "3h": frozenset({"fear_greed", "macro_regime"}),
-        "4h": frozenset({"fear_greed", "macro_regime"}),
+        # 2026-04-11: sentiment added — 33.8% at 3h_recent (3629 sam). The 0.5x
+        # horizon weight is insufficient; this signal actively harms 3h consensus.
+        "3h": frozenset({"fear_greed", "macro_regime", "sentiment"}),
+        "4h": frozenset({"fear_greed", "macro_regime", "sentiment"}),
     },
     "trending-up": {
         # BUG-152: SELL-biased signals have 0-11% accuracy in trending-up.
@@ -696,6 +698,13 @@ _STATIC_CORRELATION_GROUPS = {
 # Public alias for backward compatibility (used by tests and reporting)
 CORRELATION_GROUPS = _STATIC_CORRELATION_GROUPS
 _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal weight
+# Per-cluster overrides: momentum_cluster signals agree 88-100% of the time.
+# With 4 signals at 0.3x, the cluster gets 1.0 + 3*0.3 = 1.9x effective weight.
+# Tightening to 0.15x gives 1.0 + 3*0.15 = 1.45x — still rewards cluster but
+# reduces redundancy inflation. Other clusters keep the default 0.3x.
+_CLUSTER_CORRELATION_PENALTIES: dict[str, float] = {
+    "momentum_cluster": 0.15,
+}
 
 
 def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
@@ -789,14 +798,15 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
                     group_name, leader, leader_acc * 100, _GROUP_LEADER_GATE_THRESHOLD * 100,
                 )
 
-    # Build a set of signals that should get the correlation penalty
-    penalized_signals = set()
+    # Build a mapping of signal → correlation penalty (per-cluster override)
+    penalized_signals: dict[str, float] = {}
     for group_name, group_sigs in _active_corr_groups.items():
         leader = group_leaders.get(group_name)
         if leader:
+            penalty = _CLUSTER_CORRELATION_PENALTIES.get(group_name, _CORRELATION_PENALTY)
             for s in group_sigs:
                 if s != leader and s in active_non_hold:
-                    penalized_signals.add(s)
+                    penalized_signals[s] = penalty
 
     # Crisis mode detection: when multiple macro-external signals have degraded
     # accuracy, the market is in an abnormal regime (war, systemic crisis) where
@@ -876,7 +886,7 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             weight *= _ACTIVITY_RATE_PENALTY
         # Correlation penalty: secondary signals in a group get reduced weight
         if signal_name in penalized_signals:
-            weight *= _CORRELATION_PENALTY
+            weight *= penalized_signals[signal_name]
         # Directional bias penalty: signals with extreme BUY/SELL bias get
         # an additional penalty beyond normalized_weight's built-in bias_penalty.
         # This catches cases where a signal always votes one direction and its

@@ -641,3 +641,87 @@ class TestGenerateSignalPhaseMarkers:
         _set_last_signal("XAU-USD", "__post_dispatch__")
         result = get_last_signal("XAU-USD")
         assert result[0] == "__post_dispatch__"
+
+
+# ---------------------------------------------------------------------------
+# 2026-04-11 Research Session: Signal gating and correlation penalty changes
+# ---------------------------------------------------------------------------
+
+class TestOrderbookFlowDisabled:
+    """orderbook_flow was disabled 2026-04-11: 93.3% active, 51.1% accuracy, no
+    recent data. Pure noise in every consensus decision."""
+
+    def test_orderbook_flow_in_disabled_signals(self):
+        from portfolio.tickers import DISABLED_SIGNALS
+        assert "orderbook_flow" in DISABLED_SIGNALS
+
+    def test_orderbook_flow_not_in_consensus(self):
+        """Disabled signals must produce HOLD in the dispatch loop."""
+        from portfolio.tickers import DISABLED_SIGNALS
+        assert "orderbook_flow" in DISABLED_SIGNALS
+
+
+class TestCreditSpreadRiskEnabled:
+    """credit_spread_risk re-enabled 2026-04-11: 66.9% accuracy (257 sam),
+    BUY 80.3%. Directional gate auto-gates weak SELL direction (49.1%)."""
+
+    def test_credit_spread_risk_not_disabled(self):
+        from portfolio.tickers import DISABLED_SIGNALS
+        assert "credit_spread_risk" not in DISABLED_SIGNALS
+
+
+class TestCryptoMacroEnabled:
+    """crypto_macro re-enabled 2026-04-11: 56.5% accuracy (1273 sam). BUY-biased
+    (93%) so bias penalty (0.5x) applies. Provides crypto-specific on-chain edge."""
+
+    def test_crypto_macro_not_disabled(self):
+        from portfolio.tickers import DISABLED_SIGNALS
+        assert "crypto_macro" not in DISABLED_SIGNALS
+
+
+class TestSentimentGatedAt3hRanging:
+    """sentiment gated at 3h in ranging: 33.8% at 3h_recent (3629 sam). The 0.5x
+    horizon weight was insufficient — explicit regime gating is clearer."""
+
+    def test_sentiment_gated_at_3h_ranging(self):
+        from portfolio.signal_engine import REGIME_GATED_SIGNALS
+        gated_3h = REGIME_GATED_SIGNALS["ranging"]["3h"]
+        assert "sentiment" in gated_3h
+
+    def test_sentiment_gated_at_4h_ranging(self):
+        from portfolio.signal_engine import REGIME_GATED_SIGNALS
+        gated_4h = REGIME_GATED_SIGNALS["ranging"]["4h"]
+        assert "sentiment" in gated_4h
+
+    def test_sentiment_not_gated_at_default_ranging(self):
+        """sentiment at 1d (46.8%) is borderline — let the accuracy gate handle it
+        dynamically rather than hard-gating."""
+        from portfolio.signal_engine import REGIME_GATED_SIGNALS
+        gated_default = REGIME_GATED_SIGNALS["ranging"]["_default"]
+        assert "sentiment" not in gated_default
+
+
+class TestPerClusterCorrelationPenalties:
+    """2026-04-11: momentum_cluster penalty tightened from 0.3x to 0.15x.
+    RSI/BB/MeanReversion/Momentum agree 88-100%, so 0.3x still gave 1.9x
+    combined weight. With 0.15x: 1.0 + 3*0.15 = 1.45x."""
+
+    def test_cluster_penalties_dict_exists(self):
+        from portfolio.signal_engine import _CLUSTER_CORRELATION_PENALTIES
+        assert isinstance(_CLUSTER_CORRELATION_PENALTIES, dict)
+
+    def test_momentum_cluster_has_tighter_penalty(self):
+        from portfolio.signal_engine import (
+            _CLUSTER_CORRELATION_PENALTIES,
+            _CORRELATION_PENALTY,
+        )
+        assert "momentum_cluster" in _CLUSTER_CORRELATION_PENALTIES
+        assert _CLUSTER_CORRELATION_PENALTIES["momentum_cluster"] < _CORRELATION_PENALTY
+
+    def test_momentum_cluster_penalty_is_015(self):
+        from portfolio.signal_engine import _CLUSTER_CORRELATION_PENALTIES
+        assert _CLUSTER_CORRELATION_PENALTIES["momentum_cluster"] == 0.15
+
+    def test_default_penalty_unchanged(self):
+        from portfolio.signal_engine import _CORRELATION_PENALTY
+        assert _CORRELATION_PENALTY == 0.3
