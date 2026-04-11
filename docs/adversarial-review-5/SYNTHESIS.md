@@ -181,7 +181,7 @@ All 11 fixes from the fix/queue-2026-04-11 branch have been verified:
 | 2 | 2026-04-07 | ~40 | 4 | 12 | ~20% of R1 |
 | 3 | 2026-04-08 | 67 | 15 | 35 | ~70% of R2 |
 | 4 | 2026-04-09 | 67 | 15 | 35 | ~73% of R3 |
-| 5 | 2026-04-11 | 52+ | 6 | 28 | 100% of targeted P0/P1 batch |
+| 5 | 2026-04-11 | 57+ | 6 | 31 | 100% of targeted P0/P1 batch |
 
 **Trend**: Fix rate has improved dramatically. Round 5 found only 12 total findings
 (vs 67 in Rounds 3-4), and all 11 targeted fixes from the fix queue are verified correct.
@@ -280,9 +280,22 @@ overrides the accuracy gate by always applying max 1.5x to any signal with posit
 **OR-R5-1 is the most critical orchestration finding** — the primary Layer 2 launcher
 bypasses claude_gate entirely, accumulating zombie processes on every T3 timeout.
 
-### Other agents (3 remaining — still in progress)
+### avanza-api agent (COMPLETE — 5 findings)
 
-The metals-core, avanza-api, and infrastructure agents are still running.
+| ID | Sev | File | Finding |
+|----|-----|------|---------|
+| AV-R5-1 | P1 | avanza_session.py:591 | get_positions() returns ALL accounts — pension still visible in BankID path |
+| AV-R5-2 | P1 | avanza_client.py:326 | _place_order missing 1000 SEK minimum guard |
+| AV-R5-3 | P1 | avanza_session.py:551 | cancel_order has no ALLOWED_ACCOUNT_IDS guard |
+| AV-R5-4 | P2 | scripts/avanza_login.py:256 | Session file written non-atomically |
+| AV-R5-5 | P2 | avanza_session.py:126 | Expired session → tight Chromium spawn loop |
+
+**Pension account firewall has 2 remaining holes**: cancel_order (no guard) and
+get_positions in the BankID session path (no account filter).
+
+### Other agents (2 remaining — still in progress)
+
+The metals-core and infrastructure agents are still running.
 
 ---
 
