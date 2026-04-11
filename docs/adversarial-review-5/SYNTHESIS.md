@@ -181,7 +181,7 @@ All 11 fixes from the fix/queue-2026-04-11 branch have been verified:
 | 2 | 2026-04-07 | ~40 | 4 | 12 | ~20% of R1 |
 | 3 | 2026-04-08 | 67 | 15 | 35 | ~70% of R2 |
 | 4 | 2026-04-09 | 67 | 15 | 35 | ~73% of R3 |
-| 5 | 2026-04-11 | 57+ | 6 | 31 | 100% of targeted P0/P1 batch |
+| 5 | 2026-04-11 | 64+ | 6 | 33 | 100% of targeted P0/P1 batch |
 
 **Trend**: Fix rate has improved dramatically. Round 5 found only 12 total findings
 (vs 67 in Rounds 3-4), and all 11 targeted fixes from the fix queue are verified correct.
@@ -293,9 +293,24 @@ bypasses claude_gate entirely, accumulating zombie processes on every T3 timeout
 **Pension account firewall has 2 remaining holes**: cancel_order (no guard) and
 get_positions in the BankID session path (no account filter).
 
-### Other agents (2 remaining — still in progress)
+### infrastructure agent (COMPLETE — 7 findings)
 
-The metals-core and infrastructure agents are still running.
+| ID | Sev | File | Finding |
+|----|-----|------|---------|
+| IN-R5-1 | P1 | journal.py:568 | Layer 2 context file non-atomic write — crash empties trading memory |
+| IN-R5-2 | P1 | log_rotation.py:235 | No fsync in rotate_jsonl — power-loss could empty journal files |
+| IN-R5-3 | P2 | shared_state.py:94 | _loading_timestamps not cleaned on success — slow memory growth |
+| IN-R5-4 | P2 | telegram_poller.py:151 | **Config wipe hazard**: raw open + empty fallback overwrites ALL API keys |
+| IN-R5-5 | P2 | message_throttle.py:57 | TOCTOU race allows duplicate Telegram sends |
+| IN-R5-6 | P3 | dashboard/app.py:672 | Timing-vulnerable token comparison |
+| IN-R5-7 | P3 | config_validator.py:58 | Raw open() at startup — antivirus lock crash |
+
+**IN-R5-4 interacts with IR-8**: /mode breaks symlink → next /mode with corrupt config
+wipes all API keys. Two-step disaster chain.
+
+### metals-core agent (STILL IN PROGRESS)
+
+The metals-core agent (largest subsystem at ~19K lines across 20 files) is still running.
 
 ---
 
