@@ -21,9 +21,10 @@ Worktree: `/mnt/q/finance-analyzer-fixq`
 
 ### Batch 1 — Defensive additive fixes (low risk, P0)
 
-- [ ] **A-AV-1** Wrap `api_get`/`api_post`/`api_delete` bodies in `_pw_lock`
+- [x] **A-AV-1** Wrap `api_get`/`api_post`/`api_delete` bodies in `_pw_lock`
       (`portfolio/avanza_session.py:184-291`). Prevents Playwright corruption
       when metals 10s fast-tick + main 8-worker pool race on the context.
+      → commit `7ad33cf` (RLock + 4 thread-safety tests, 57/57 pass)
 - [ ] **A-AV-2** Add hardcoded account whitelist in `get_account_id()`
       (`portfolio/avanza_client.py:223-244`). Reject anything != "1625505".
       Mirror the `ALLOWED_ACCOUNT_IDS` pattern from `avanza_session.py`.
