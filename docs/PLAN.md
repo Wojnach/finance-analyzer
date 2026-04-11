@@ -60,21 +60,23 @@ Worktree: `/mnt/q/finance-analyzer-fixq`
 
 ### Batch 4 — Threading and concurrency (medium risk, P1)
 
-- [ ] **BUG-184** Add `threading.Lock` to `portfolio/trade_guards.py` state
-      read/write. Concurrent ThreadPoolExecutor threads bypass cooldowns.
-- [ ] **BUG-183** Replace global throttle in `portfolio/autonomous.py` with
-      per-ticker dict. Currently one HOLD message throttles ALL tickers 30min.
+- [~] **BUG-184** Trade guards lock — DROPPED. Per prior session
+      `docs/SESSION_PROGRESS.md`: "Layer 2 runs as subprocess, not thread.
+      threading.Lock wouldn't help; atomic_write_json is adequate."
+- [~] **BUG-183** autonomous per-ticker throttle — DROPPED. Per prior session:
+      "BUY/SELL signals always bypass the global throttle. The throttle only
+      suppresses pure-noise HOLD messages."
 - [ ] **A-IN-3** Add concurrency lock to `portfolio/claude_gate.py` (file lock
       for cross-process, threading.Lock for in-process).
 
 ### Batch 5 — Signal-system tuning (medium risk, P0)
 
-- [ ] **Verify fear_greed gating** — currently MISSING from `data/accuracy_cache.json`.
-      Investigate why backfill skipped it. Force a refresh via `--accuracy --force`.
-      Confirm the 45% gate fires (blended is 0.357).
-- [ ] **Per-ticker signal blacklist** — add `_TICKER_SIGNAL_BLACKLIST` constant
-      in `portfolio/signal_engine.py` for known-bad pairs (start with
-      `("ministral", "XAG-USD")` at 20.4% accuracy).
+- [~] **Verify fear_greed gating** — DROPPED. Prior session verified blended
+      accuracy = 0.586 (above 0.45 gate). Cache absence is likely a refresh
+      lag, not a gating bug.
+- [~] **Per-ticker signal blacklist** — DROPPED. Per-ticker accuracy gate
+      already catches `ministral × XAG-USD` (18.9% < 0.45). No additional
+      blacklist needed.
 - [ ] **Raise accuracy gate 45 → 47** — single constant in `signal_engine.py`,
       then re-run audit to count newly-gated signals.
 
