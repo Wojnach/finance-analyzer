@@ -838,8 +838,18 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         if dir_n >= _DIRECTIONAL_GATE_MIN_SAMPLES and dir_acc < _DIRECTIONAL_GATE_THRESHOLD:
             gated_signals.append(f"{signal_name}_{vote}")
             continue
-        # Weight = accuracy (or 0.5 default for new signals with insufficient data)
-        weight = acc if samples >= 20 else 0.5
+        # BUG-182: Use direction-specific accuracy as weight when available.
+        # A signal with overall 60% accuracy may be 30% for BUY and 75% for SELL.
+        # Using overall accuracy over-weights the weak direction.
+        _DIR_WEIGHT_MIN_SAMPLES = 20
+        if vote == "BUY" and stats.get("total_buy", 0) >= _DIR_WEIGHT_MIN_SAMPLES:
+            weight = stats["buy_accuracy"]
+        elif vote == "SELL" and stats.get("total_sell", 0) >= _DIR_WEIGHT_MIN_SAMPLES:
+            weight = stats["sell_accuracy"]
+        elif samples >= 20:
+            weight = acc
+        else:
+            weight = 0.5
         # Regime adjustment
         weight *= regime_mults.get(signal_name, 1.0)
         # Horizon-specific weight adjustment

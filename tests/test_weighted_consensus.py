@@ -782,3 +782,120 @@ class TestEdgeCases:
         action, conf = _weighted_consensus(votes, acc, "trending-up")
         assert action == "BUY"
         assert conf == 1.0
+
+
+# ===========================================================================
+# Category 13: Direction-specific weight scaling (BUG-182)
+# ===========================================================================
+
+class TestDirectionalWeightScaling:
+    """BUG-182: _weighted_consensus should use buy_accuracy/sell_accuracy as
+    the signal weight instead of overall accuracy when directional data is
+    available with sufficient samples."""
+
+    def test_buy_uses_buy_accuracy_as_weight(self):
+        """A BUY vote should be weighted by buy_accuracy, not overall."""
+        votes = {"qwen3": "BUY", "rsi": "SELL"}
+        acc = {
+            # buy_accuracy 0.45 passes the 0.40 directional gate
+            "qwen3": {"accuracy": 0.65, "total": 100,
+                      "buy_accuracy": 0.45, "total_buy": 40,
+                      "sell_accuracy": 0.80, "total_sell": 60},
+            "rsi": {"accuracy": 0.55, "total": 100,
+                    "buy_accuracy": 0.55, "total_buy": 50,
+                    "sell_accuracy": 0.55, "total_sell": 50},
+        }
+        action, conf = _weighted_consensus(votes, acc, "breakout")
+        # qwen3 BUY weight = buy_accuracy = 0.45 (not overall 0.65)
+        # rsi SELL weight = sell_accuracy = 0.55
+        # SELL conf = 0.55 / (0.45 + 0.55) = 0.55
+        assert action == "SELL"
+        assert conf == pytest.approx(0.55 / 1.0, abs=0.02)
+
+    def test_sell_uses_sell_accuracy_as_weight(self):
+        """A SELL vote should be weighted by sell_accuracy, not overall."""
+        votes = {"qwen3": "SELL", "rsi": "BUY"}
+        acc = {
+            "qwen3": {"accuracy": 0.60, "total": 100,
+                      "buy_accuracy": 0.30, "total_buy": 40,
+                      "sell_accuracy": 0.75, "total_sell": 60},
+            "rsi": {"accuracy": 0.55, "total": 100,
+                    "buy_accuracy": 0.55, "total_buy": 50,
+                    "sell_accuracy": 0.55, "total_sell": 50},
+        }
+        action, conf = _weighted_consensus(votes, acc, "breakout")
+        # qwen3 SELL weight = sell_accuracy = 0.75
+        # rsi BUY weight = buy_accuracy = 0.55
+        # SELL conf = 0.75 / (0.75 + 0.55) ≈ 0.577
+        assert action == "SELL"
+        assert conf == pytest.approx(0.75 / 1.30, abs=0.02)
+
+    def test_falls_back_to_overall_when_directional_samples_low(self):
+        """When directional samples < 20, fall back to overall accuracy."""
+        votes = {"sig1": "BUY", "sig2": "SELL"}
+        acc = {
+            "sig1": {"accuracy": 0.60, "total": 100,
+                     "buy_accuracy": 0.30, "total_buy": 10,  # < 20
+                     "sell_accuracy": 0.75, "total_sell": 90},
+            "sig2": {"accuracy": 0.55, "total": 100,
+                     "buy_accuracy": 0.55, "total_buy": 50,
+                     "sell_accuracy": 0.55, "total_sell": 50},
+        }
+        action, conf = _weighted_consensus(votes, acc, "breakout")
+        # sig1 BUY: total_buy=10 < 20 → fallback to overall 0.60
+        # sig2 SELL: total_sell=50 >= 20 → use sell_accuracy 0.55
+        # BUY conf = 0.60 / (0.60 + 0.55) ≈ 0.522
+        assert action == "BUY"
+        assert conf == pytest.approx(0.60 / 1.15, abs=0.02)
+
+    def test_falls_back_to_overall_when_no_directional_keys(self):
+        """Legacy accuracy data without directional fields uses overall."""
+        votes = {"sig1": "BUY", "sig2": "SELL"}
+        acc = {
+            "sig1": {"accuracy": 0.70, "total": 100},  # no buy/sell keys
+            "sig2": {"accuracy": 0.55, "total": 100},
+        }
+        action, conf = _weighted_consensus(votes, acc, "breakout")
+        # sig1 BUY: no total_buy → fallback to overall 0.70
+        # sig2 SELL: no total_sell → fallback to overall 0.55
+        assert action == "BUY"
+        assert conf == pytest.approx(0.70 / 1.25, abs=0.02)
+
+    def test_directional_weight_flips_consensus(self):
+        """Direction-specific weights can flip consensus vs overall accuracy.
+
+        Without BUG-182 fix: sig_a BUY weight=0.70, sig_b SELL weight=0.55 → BUY wins.
+        With BUG-182 fix: sig_a BUY weight=0.40 (buy_accuracy), sig_b SELL weight=0.55 → SELL wins.
+        """
+        votes = {"sig_a": "BUY", "sig_b": "SELL"}
+        acc = {
+            "sig_a": {"accuracy": 0.70, "total": 200,
+                      "buy_accuracy": 0.40, "total_buy": 80,
+                      "sell_accuracy": 0.85, "total_sell": 120},
+            "sig_b": {"accuracy": 0.55, "total": 100,
+                      "buy_accuracy": 0.55, "total_buy": 50,
+                      "sell_accuracy": 0.55, "total_sell": 50},
+        }
+        action, conf = _weighted_consensus(votes, acc, "breakout")
+        # sig_a BUY weight = buy_accuracy = 0.40
+        # sig_b SELL weight = sell_accuracy = 0.55
+        # SELL wins: 0.55 / (0.40 + 0.55) ≈ 0.579
+        assert action == "SELL"
+        assert conf == pytest.approx(0.55 / 0.95, abs=0.02)
+
+    def test_directional_zero_accuracy_zeroes_weight(self):
+        """A signal with 0% directional accuracy contributes zero weight."""
+        votes = {"bad_dir": "BUY", "good": "SELL"}
+        acc = {
+            "bad_dir": {"accuracy": 0.50, "total": 100,
+                        "buy_accuracy": 0.0, "total_buy": 30,
+                        "sell_accuracy": 0.80, "total_sell": 70},
+            "good": {"accuracy": 0.55, "total": 50,
+                     "buy_accuracy": 0.55, "total_buy": 25,
+                     "sell_accuracy": 0.55, "total_sell": 25},
+        }
+        action, conf = _weighted_consensus(votes, acc, "breakout")
+        # bad_dir BUY: buy_accuracy=0.0 → weight=0.0
+        # good SELL: sell_accuracy=0.55 → weight=0.55
+        assert action == "SELL"
+        assert conf == 1.0
