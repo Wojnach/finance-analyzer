@@ -682,3 +682,169 @@ class TestApiDelete:
 
         with pytest.raises(AvanzaSessionError, match="401"):
             api_delete("/_api/test")
+
+
+class TestPlaywrightLockSerialization:
+    """A-AV-1 (2026-04-11): api_get/api_post/api_delete must serialize all
+    Playwright access through _pw_lock. Without it, the metals 10s fast-tick
+    thread + main loop's 8-worker pool race on ctx.request.* and corrupt
+    trade responses.
+
+    These tests don't try to reproduce the race directly (it would be flaky)
+    — instead they assert the *invariant* that the lock is held during the
+    critical section by counting concurrent overlap. With the lock, max
+    concurrency observed must be 1.
+    """
+
+    def test_lock_is_reentrant_rlock(self):
+        """The lock must be an RLock so api_get can acquire it and then
+        call _get_playwright_context which also acquires it."""
+        import threading
+        from portfolio.avanza_session import _pw_lock
+        # threading.RLock is a factory, not a class — check via behavior:
+        # RLock allows the same thread to acquire twice without blocking.
+        acquired_twice = [False]
+        def double_acquire():
+            with _pw_lock:
+                with _pw_lock:
+                    acquired_twice[0] = True
+        t = threading.Thread(target=double_acquire)
+        t.start()
+        t.join(timeout=1.0)
+        assert acquired_twice[0], "Lock is not reentrant — would deadlock api_get"
+
+    @patch("portfolio.avanza_session._get_playwright_context")
+    def test_concurrent_api_get_serialized(self, mock_get_ctx, session_file):
+        """Run 10 api_get calls concurrently and verify they never overlap."""
+        import threading
+        import time
+        from portfolio.avanza_session import api_get
+
+        active = [0]
+        max_active = [0]
+        active_lock = threading.Lock()
+
+        def fake_get(url):
+            # Simulate Playwright doing internal state mutation
+            with active_lock:
+                active[0] += 1
+                if active[0] > max_active[0]:
+                    max_active[0] = active[0]
+            time.sleep(0.01)  # hold the "request" briefly
+            with active_lock:
+                active[0] -= 1
+            resp = MagicMock()
+            resp.status = 200
+            resp.ok = True
+            resp.json.return_value = {"ok": True}
+            return resp
+
+        mock_ctx = MagicMock()
+        mock_ctx.request.get.side_effect = fake_get
+        mock_get_ctx.return_value = mock_ctx
+
+        threads = [threading.Thread(target=api_get, args=("/_api/test",)) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5.0)
+
+        # If _pw_lock serializes correctly, max concurrent ctx.request.get
+        # calls should be exactly 1. Without the lock it would be ~10.
+        assert max_active[0] == 1, (
+            f"Expected serialized access (max=1), got max={max_active[0]} "
+            "concurrent ctx.request.get calls — _pw_lock not held during request"
+        )
+
+    @patch("portfolio.avanza_session._get_csrf", return_value="csrf-token")
+    @patch("portfolio.avanza_session._get_playwright_context")
+    def test_concurrent_api_post_serialized(self, mock_get_ctx, mock_csrf, session_file):
+        """Same invariant for api_post."""
+        import threading
+        import time
+        from portfolio.avanza_session import api_post
+
+        active = [0]
+        max_active = [0]
+        active_lock = threading.Lock()
+
+        def fake_post(url, **kwargs):
+            with active_lock:
+                active[0] += 1
+                if active[0] > max_active[0]:
+                    max_active[0] = active[0]
+            time.sleep(0.01)
+            with active_lock:
+                active[0] -= 1
+            resp = MagicMock()
+            resp.status = 200
+            resp.ok = True
+            resp.text.return_value = '{"ok": true}'
+            return resp
+
+        mock_ctx = MagicMock()
+        mock_ctx.request.post.side_effect = fake_post
+        mock_get_ctx.return_value = mock_ctx
+
+        threads = [threading.Thread(target=api_post, args=("/_api/test", {"a": 1})) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5.0)
+
+        assert max_active[0] == 1, (
+            f"api_post not serialized: max concurrent={max_active[0]}"
+        )
+
+    @patch("portfolio.avanza_session._get_csrf", return_value="csrf-token")
+    @patch("portfolio.avanza_session._get_playwright_context")
+    def test_concurrent_mixed_get_post_delete_serialized(self, mock_get_ctx, mock_csrf, session_file):
+        """Mixed api_get/api_post/api_delete must all serialize through the
+        same lock — that's the actual race condition in production
+        (one ticker reads positions while another places an order)."""
+        import threading
+        import time
+        from portfolio.avanza_session import api_get, api_post, api_delete
+
+        active = [0]
+        max_active = [0]
+        active_lock = threading.Lock()
+
+        def make_fake(method_name):
+            def fake(url, **kwargs):
+                with active_lock:
+                    active[0] += 1
+                    if active[0] > max_active[0]:
+                        max_active[0] = active[0]
+                time.sleep(0.005)
+                with active_lock:
+                    active[0] -= 1
+                resp = MagicMock()
+                resp.status = 200
+                resp.ok = True
+                resp.json.return_value = {}
+                resp.text.return_value = "{}"
+                return resp
+            return fake
+
+        mock_ctx = MagicMock()
+        mock_ctx.request.get.side_effect = make_fake("get")
+        mock_ctx.request.post.side_effect = make_fake("post")
+        mock_ctx.request.delete.side_effect = make_fake("delete")
+        mock_get_ctx.return_value = mock_ctx
+
+        threads = []
+        for _ in range(5):
+            threads.append(threading.Thread(target=api_get, args=("/_api/positions",)))
+            threads.append(threading.Thread(target=api_post, args=("/_api/order/new", {"x": 1})))
+            threads.append(threading.Thread(target=api_delete, args=("/_api/order/123",)))
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5.0)
+
+        assert max_active[0] == 1, (
+            f"Mixed api_*/api_*/api_* not serialized: max concurrent={max_active[0]}. "
+            "All three methods must share _pw_lock or trades will corrupt."
+        )

@@ -21,6 +21,15 @@ logger = logging.getLogger("portfolio.avanza_client")
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_FILE = BASE_DIR / "config.json"
 
+# A-AV-2 (2026-04-11): Hardcoded account whitelist. The TOTP path scans for
+# any account whose accountType contains "ISK", which means a future Avanza
+# response containing a *new* ISK-shaped account (e.g. a child's ISK or a
+# corporate ISK) could be picked up as the trading account. Worse, the
+# pension account (2674244) was previously reachable through some code paths
+# without filtering. Mirror the ALLOWED_ACCOUNT_IDS pattern from
+# avanza_session.py: anything not in this set is rejected, period.
+ALLOWED_ACCOUNT_IDS: set[str] = {"1625505"}
+
 # Singleton client instance (avanza-api library)
 _client = None
 # Cached signal that a BankID Playwright session has already been verified.
@@ -170,7 +179,11 @@ def get_positions() -> list[dict]:
     client = get_client()
     overview = client.get_overview()
     positions = []
+    # A-AV-2: only return positions from whitelisted accounts so the pension
+    # account (or any future-added account) never leaks into the trading view.
     for account in overview.get("accounts", []):
+        if str(account.get("accountId", "")) not in ALLOWED_ACCOUNT_IDS:
+            continue
         for pos in account.get("positions", []):
             positions.append({
                 "account": account.get("name", ""),
@@ -187,15 +200,20 @@ def get_positions() -> list[dict]:
 
 
 def get_portfolio_value() -> float:
-    """Get total portfolio value in SEK across all Avanza accounts.
+    """Get total portfolio value in SEK for whitelisted Avanza accounts only.
+
+    A-AV-2: Filters to ALLOWED_ACCOUNT_IDS so pension/other-account values
+    never inflate the "trading" portfolio value used for sizing.
 
     Returns:
-        Total portfolio value in SEK
+        Total portfolio value in SEK across whitelisted accounts
     """
     client = get_client()
     overview = client.get_overview()
     total = 0.0
     for account in overview.get("accounts", []):
+        if str(account.get("accountId", "")) not in ALLOWED_ACCOUNT_IDS:
+            continue
         total += account.get("totalValue", 0)
     return total
 
@@ -221,30 +239,42 @@ _account_id: str | None = None
 
 
 def get_account_id() -> str:
-    """Get ISK account ID from Avanza overview (cached after first call).
+    """Get the trading account ID from Avanza overview (cached).
 
-    Scans all accounts and returns the first one whose type contains 'ISK'.
+    Scans accounts of type ISK and returns the first one *that is also in
+    ALLOWED_ACCOUNT_IDS*. Any ISK account not in the whitelist is rejected.
+    This prevents accidental trades on a future-added child ISK, corporate
+    ISK, or any account Avanza re-orders into the response.
 
     Returns:
-        Account ID string
+        Account ID string (guaranteed to be in ALLOWED_ACCOUNT_IDS)
 
     Raises:
-        RuntimeError: if no ISK account is found
+        RuntimeError: if no whitelisted ISK account is found
     """
     global _account_id
     if _account_id is not None:
         return _account_id
     client = get_client()
     overview = client.get_overview()
+    seen_ids: list[str] = []
     for account in overview.get("accounts", []):
         atype = account.get("accountType", "")
-        if "ISK" in atype.upper():
-            _account_id = str(account["accountId"])
-            logger.info("Found ISK account: %s", _account_id)
+        if "ISK" not in atype.upper():
+            continue
+        candidate = str(account.get("accountId", ""))
+        seen_ids.append(candidate)
+        # A-AV-2: enforce whitelist BEFORE caching, so a rogue first-call
+        # cannot poison the singleton with a non-whitelisted account.
+        if candidate in ALLOWED_ACCOUNT_IDS:
+            _account_id = candidate
+            logger.info("Found whitelisted ISK account: %s", _account_id)
             return _account_id
     raise RuntimeError(
-        "No ISK account found in Avanza overview. "
-        f"Account types: {[a.get('accountType') for a in overview.get('accounts', [])]}"
+        "No whitelisted ISK account found in Avanza overview. "
+        f"ISK account IDs seen: {seen_ids}. Whitelist: {sorted(ALLOWED_ACCOUNT_IDS)}. "
+        "If this is a legitimate new account, update ALLOWED_ACCOUNT_IDS in "
+        "portfolio/avanza_client.py — never trade on auto-discovered accounts."
     )
 
 

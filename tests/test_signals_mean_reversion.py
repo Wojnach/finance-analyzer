@@ -379,6 +379,54 @@ class TestGapFill:
         gap_pct, fill_pct, signal = _gap_fill(open_prices, close, high, low)
         assert signal == "HOLD"
 
+    def test_gap_down_continuing_down_is_hold_not_buy(self):
+        """A-SM-1 (2026-04-11) regression guard: gap down where price
+        CONTINUES DOWN must return HOLD, NOT BUY. The synthesis flagged
+        this as a P0 inversion. Investigation showed the existing math
+        already handles it (negative fill_pct is < 0.3), but we now have
+        an explicit `if fill_pct < 0: HOLD` guard so a future refactor
+        can't reintroduce the inversion. This test exhaustively covers
+        all four (gap_dir, day_dir) quadrants."""
+        # prev_close=100, today_open=95 (-5% gap-down), today_close=90 (continues -5%)
+        open_prices = pd.Series([100.0, 95.0])
+        close = pd.Series([100.0, 90.0])
+        high = pd.Series([101.0, 95.5])
+        low = pd.Series([99.0, 89.0])
+
+        gap_pct, fill_pct, signal = _gap_fill(open_prices, close, high, low)
+        assert signal == "HOLD", (
+            f"Gap-down continuing down must HOLD; got {signal} "
+            f"(gap_pct={gap_pct:.4f}, fill_pct={fill_pct:.4f}). "
+            "A-SM-1 inversion regression — check the negative-fill_pct guard."
+        )
+        assert gap_pct < 0  # confirm test setup is gap-down
+        assert fill_pct < 0  # confirm price moved further from prev_close
+
+    def test_gap_down_small_continuation_is_hold(self):
+        """A-SM-1 boundary: even a SMALL continuation in the gap direction
+        must HOLD, not BUY."""
+        # prev_close=100, today_open=95, today_close=94 (small additional drop)
+        open_prices = pd.Series([100.0, 95.0])
+        close = pd.Series([100.0, 94.0])
+        high = pd.Series([101.0, 95.5])
+        low = pd.Series([99.0, 93.5])
+
+        _, fill_pct, signal = _gap_fill(open_prices, close, high, low)
+        assert signal == "HOLD"
+        assert fill_pct < 0  # negative because price widened the gap
+
+    def test_gap_up_continuing_up_is_hold_not_sell(self):
+        """A-SM-1 symmetric: gap-up + price-continuing-up must HOLD,
+        not SELL."""
+        open_prices = pd.Series([100.0, 105.0])
+        close = pd.Series([100.0, 110.0])  # ran further away
+        high = pd.Series([101.0, 110.5])
+        low = pd.Series([99.0, 104.5])
+
+        _, fill_pct, signal = _gap_fill(open_prices, close, high, low)
+        assert signal == "HOLD"
+        assert fill_pct < 0
+
     def test_crypto_higher_threshold(self):
         """With 1% threshold for crypto, a 0.5% gap does not trigger."""
         open_prices = pd.Series([100.0, 100.6])  # 0.6% gap

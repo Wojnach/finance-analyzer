@@ -36,7 +36,14 @@ ALLOWED_ACCOUNT_IDS = {"1625505"}
 
 # Module-level Playwright context (lazy-initialized, reused across calls)
 # BUG-129: Protected by _pw_lock to prevent concurrent access corruption
-_pw_lock = threading.Lock()
+# A-AV-1 (2026-04-11): Upgraded to RLock so api_get/api_post/api_delete can
+# wrap their *entire* request flow under the lock — they call
+# _get_playwright_context() (which itself acquires the lock) inside the
+# critical section. The previous Lock would deadlock; RLock is reentrant
+# for the same thread. Without this, Playwright's sync_api was being used
+# concurrently from main loop's 8-worker pool + metals 10s fast-tick,
+# corrupting trade responses (e.g. CONFIRM stolen by wrong request).
+_pw_lock = threading.RLock()
 _pw_instance = None
 _pw_browser = None
 _pw_context = None
@@ -168,10 +175,13 @@ def verify_session() -> bool:
     Returns:
         True if session is valid, False otherwise.
     """
+    # A-AV-1: Hold _pw_lock for the entire context+request flow.
+    # ctx.request.* is NOT thread-safe; concurrent callers must serialize.
     try:
-        ctx = _get_playwright_context()
-        resp = ctx.request.get(f"{API_BASE}/_api/position-data/positions")
-        return resp.ok
+        with _pw_lock:
+            ctx = _get_playwright_context()
+            resp = ctx.request.get(f"{API_BASE}/_api/position-data/positions")
+            return resp.ok
     except Exception as e:
         logger.warning("Session verification failed: %s", e)
         close_playwright()
@@ -193,27 +203,32 @@ def api_get(path: str, **kwargs) -> Any:
     Raises:
         AvanzaSessionError: if session is invalid.
     """
-    ctx = _get_playwright_context()
-    url = f"{API_BASE}{path}" if path.startswith("/") else path
-    resp = ctx.request.get(url)
-    if resp.status == 401:
-        close_playwright()
-        raise AvanzaSessionError(
-            "Session returned 401 Unauthorized. "
-            "Run: python scripts/avanza_login.py"
-        )
-    if not resp.ok:
-        raise RuntimeError(f"Avanza API error {resp.status}: {resp.text()[:500]}")
-    return resp.json()
+    # A-AV-1: Hold _pw_lock for the entire request. Playwright's sync_api
+    # is NOT thread-safe and the metals fast-tick + main 8-worker pool race.
+    with _pw_lock:
+        ctx = _get_playwright_context()
+        url = f"{API_BASE}{path}" if path.startswith("/") else path
+        resp = ctx.request.get(url)
+        if resp.status == 401:
+            close_playwright()
+            raise AvanzaSessionError(
+                "Session returned 401 Unauthorized. "
+                "Run: python scripts/avanza_login.py"
+            )
+        if not resp.ok:
+            raise RuntimeError(f"Avanza API error {resp.status}: {resp.text()[:500]}")
+        return resp.json()
 
 
 def _get_csrf() -> str:
     """Extract CSRF token from Playwright context cookies."""
-    ctx = _get_playwright_context()
-    for c in ctx.cookies():
-        if c["name"] == "AZACSRF":
-            return c["value"]
-    raise AvanzaSessionError("No AZACSRF cookie found — session may be invalid")
+    # A-AV-1: ctx.cookies() reads Playwright internal state — needs lock.
+    with _pw_lock:
+        ctx = _get_playwright_context()
+        for c in ctx.cookies():
+            if c["name"] == "AZACSRF":
+                return c["value"]
+        raise AvanzaSessionError("No AZACSRF cookie found — session may be invalid")
 
 
 def api_post(path: str, payload: dict) -> Any:
@@ -228,36 +243,39 @@ def api_post(path: str, payload: dict) -> Any:
     Returns:
         Parsed JSON response.
     """
-    ctx = _get_playwright_context()
-    csrf = _get_csrf()
-    url = f"{API_BASE}{path}" if path.startswith("/") else path
-    resp = ctx.request.post(
-        url,
-        data=json.dumps(payload),
-        headers={
-            "Content-Type": "application/json",
-            "X-SecurityToken": csrf,
-        },
-    )
-    if resp.status == 401:
-        close_playwright()
-        raise AvanzaSessionError(
-            "Session returned 401 Unauthorized. "
-            "Run: python scripts/avanza_login.py"
+    # A-AV-1: Hold lock across CSRF read + POST so a concurrent request
+    # cannot rotate the cookie jar mid-flight.
+    with _pw_lock:
+        ctx = _get_playwright_context()
+        csrf = _get_csrf()
+        url = f"{API_BASE}{path}" if path.startswith("/") else path
+        resp = ctx.request.post(
+            url,
+            data=json.dumps(payload),
+            headers={
+                "Content-Type": "application/json",
+                "X-SecurityToken": csrf,
+            },
         )
-    if resp.status == 403:
-        close_playwright()
-        raise AvanzaSessionError(
-            "Session returned 403 Forbidden — CSRF token may be stale. "
-            "Run: python scripts/avanza_login.py"
-        )
-    body = resp.text()
-    try:
-        return json.loads(body)
-    except (json.JSONDecodeError, TypeError):
-        if not resp.ok:
-            raise RuntimeError(f"Avanza API error {resp.status}: {body[:500]}") from None
-        return {"raw": body}
+        if resp.status == 401:
+            close_playwright()
+            raise AvanzaSessionError(
+                "Session returned 401 Unauthorized. "
+                "Run: python scripts/avanza_login.py"
+            )
+        if resp.status == 403:
+            close_playwright()
+            raise AvanzaSessionError(
+                "Session returned 403 Forbidden — CSRF token may be stale. "
+                "Run: python scripts/avanza_login.py"
+            )
+        body = resp.text()
+        try:
+            return json.loads(body)
+        except (json.JSONDecodeError, TypeError):
+            if not resp.ok:
+                raise RuntimeError(f"Avanza API error {resp.status}: {body[:500]}") from None
+            return {"raw": body}
 
 
 def api_delete(path: str) -> Any:
@@ -271,23 +289,25 @@ def api_delete(path: str) -> Any:
     Returns:
         Dict with ``http_status`` and ``ok`` keys.
     """
-    ctx = _get_playwright_context()
-    csrf = _get_csrf()
-    url = f"{API_BASE}{path}" if path.startswith("/") else path
-    resp = ctx.request.delete(
-        url,
-        headers={
-            "Content-Type": "application/json",
-            "X-SecurityToken": csrf,
-        },
-    )
-    if resp.status == 401:
-        close_playwright()
-        raise AvanzaSessionError(
-            "Session returned 401 Unauthorized. "
-            "Run: python scripts/avanza_login.py"
+    # A-AV-1: Hold lock across CSRF read + DELETE.
+    with _pw_lock:
+        ctx = _get_playwright_context()
+        csrf = _get_csrf()
+        url = f"{API_BASE}{path}" if path.startswith("/") else path
+        resp = ctx.request.delete(
+            url,
+            headers={
+                "Content-Type": "application/json",
+                "X-SecurityToken": csrf,
+            },
         )
-    return {"http_status": resp.status, "ok": 200 <= resp.status < 300 or resp.status == 404}
+        if resp.status == 401:
+            close_playwright()
+            raise AvanzaSessionError(
+                "Session returned 401 Unauthorized. "
+                "Run: python scripts/avanza_login.py"
+            )
+        return {"http_status": resp.status, "ok": 200 <= resp.status < 300 or resp.status == 404}
 
 
 # --- Trading convenience functions ---

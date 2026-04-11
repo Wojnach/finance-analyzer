@@ -144,6 +144,24 @@ class TestVolatilitySignal:
         assert result["action"] == "HOLD"
         assert result["confidence"] == 0.0
 
+    def test_empty_df_schema_matches_success_path(self):
+        """A-SM-2 (2026-04-11): the empty/_empty_result path must return
+        the same sub_signals key set as the success path. Previously
+        'garch' was only present in the success path, so any downstream
+        code iterating over keys hit a KeyError on the empty branch."""
+        from portfolio.signals.volatility import compute_volatility_signal
+        ok = compute_volatility_signal(_make_ohlcv())
+        empty = compute_volatility_signal(_make_empty_df())
+        assert set(empty["sub_signals"].keys()) == set(ok["sub_signals"].keys()), (
+            f"Empty path sub_signals diverge from success path. "
+            f"Empty extra: {set(empty['sub_signals']) - set(ok['sub_signals'])}; "
+            f"Success extra: {set(ok['sub_signals']) - set(empty['sub_signals'])}"
+        )
+        # And the indicator keys, since A-SM-2 also added garch_vol/realized_vol/garch_ratio
+        for key in ("garch_vol", "realized_vol", "garch_ratio"):
+            assert key in empty["indicators"], f"Empty result missing indicator {key}"
+            assert key in ok["indicators"], f"Success result missing indicator {key}"
+
     def test_insufficient_data(self):
         from portfolio.signals.volatility import compute_volatility_signal
         result = compute_volatility_signal(_make_ohlcv(n=10))

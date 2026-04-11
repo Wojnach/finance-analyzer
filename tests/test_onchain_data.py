@@ -3,6 +3,8 @@
 import time
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -296,3 +298,69 @@ class TestOnchainCache:
         _save_onchain_cache(test_data)
         loaded = _load_onchain_cache(max_age_seconds=3600)
         assert loaded is None
+
+
+# ============================================================================
+# A-DE-5: _coerce_epoch — defensive timestamp parsing
+# ============================================================================
+
+class TestCoerceEpoch:
+    """A-DE-5 (2026-04-11): Old onchain_cache.json files stored "ts" as
+    an ISO 8601 string instead of an epoch number. The previous code did
+    `time.time() - cache_ts` which crashes with TypeError on a string,
+    silently disabling the on-chain BTC voter on every restart that hit
+    an old cache."""
+
+    def test_int_passthrough(self):
+        from portfolio.onchain_data import _coerce_epoch
+        assert _coerce_epoch(1712345678) == 1712345678.0
+
+    def test_float_passthrough(self):
+        from portfolio.onchain_data import _coerce_epoch
+        assert _coerce_epoch(1712345678.5) == 1712345678.5
+
+    def test_numeric_string_parsed(self):
+        from portfolio.onchain_data import _coerce_epoch
+        assert _coerce_epoch("1712345678") == 1712345678.0
+
+    def test_iso_string_parsed_to_epoch(self):
+        from datetime import datetime, timezone
+        from portfolio.onchain_data import _coerce_epoch
+        ts = "2026-04-09T12:00:00+00:00"
+        expected = datetime(2026, 4, 9, 12, 0, 0, tzinfo=timezone.utc).timestamp()
+        assert _coerce_epoch(ts) == pytest.approx(expected)
+
+    def test_iso_z_suffix_parsed(self):
+        from datetime import datetime, timezone
+        from portfolio.onchain_data import _coerce_epoch
+        ts = "2026-04-09T12:00:00Z"
+        expected = datetime(2026, 4, 9, 12, 0, 0, tzinfo=timezone.utc).timestamp()
+        assert _coerce_epoch(ts) == pytest.approx(expected)
+
+    def test_garbage_returns_zero(self):
+        from portfolio.onchain_data import _coerce_epoch
+        assert _coerce_epoch("not a date") == 0.0
+        assert _coerce_epoch(None) == 0.0
+        assert _coerce_epoch({"weird": "shape"}) == 0.0
+        assert _coerce_epoch([]) == 0.0
+
+    def test_empty_string_returns_zero(self):
+        from portfolio.onchain_data import _coerce_epoch
+        assert _coerce_epoch("") == 0.0
+
+    def test_get_onchain_data_does_not_crash_on_iso_ts_cache(self, tmp_path, monkeypatch):
+        """A-DE-5 end-to-end: write a cache with an ISO-string ts. The
+        seeding code in get_onchain_data() must NOT crash when reading
+        it back. Without _coerce_epoch, time.time() - "2026-04-09T..."
+        raises TypeError."""
+        import portfolio.onchain_data as od
+        cache_file = tmp_path / "onchain_cache.json"
+        cache_file.write_text(
+            '{"mvrv": 1.5, "ts": "2026-04-09T12:00:00Z"}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(od, "CACHE_FILE", cache_file)
+        # Force the no-token fast path so we don't hit the API in tests.
+        monkeypatch.setattr(od, "_load_config_token", lambda: None)
+        # This must not raise TypeError anymore:
+        od.get_onchain_data()

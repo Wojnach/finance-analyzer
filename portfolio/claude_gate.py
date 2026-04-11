@@ -24,7 +24,9 @@ Usage::
 import json
 import logging
 import os
+import platform
 import shutil
+import signal
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -33,6 +35,8 @@ from pathlib import Path
 from portfolio.file_utils import atomic_append_jsonl, load_jsonl
 
 logger = logging.getLogger("portfolio.claude_gate")
+
+import threading
 
 # ---------------------------------------------------------------------------
 # Master kill switch.  Set to False to block ALL Claude Code invocations
@@ -44,6 +48,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 CONFIG_FILE = BASE_DIR / "config.json"
 INVOCATIONS_LOG = DATA_DIR / "claude_invocations.jsonl"
+
+# A-IN-3 (2026-04-11): In-process concurrency lock. Without this, the main
+# loop's 8-worker ticker pool + the metals loop's fast-tick + signal
+# subprocesses can all call invoke_claude in parallel. The Claude CLI is
+# expensive (sonnet ~30s, opus ~3-5min) and the rate limiter is per-day,
+# not per-second — uncoordinated parallel invocations can:
+#   1. Race past the kill switch (CLAUDE_ENABLED check is non-atomic)
+#   2. Spawn 5+ concurrent Claude processes, each holding ~500MB RAM
+#   3. Confuse the invocation log (timestamps interleave)
+# Serializing in-process invocations is the simplest robust fix. For
+# cross-process coordination (multiple Python processes), see the file
+# lock TODO below.
+_invoke_lock = threading.Lock()
 
 # Rate-limit threshold: warn when daily invocations exceed this count.
 _DAILY_WARN_THRESHOLD = 50
@@ -103,6 +120,111 @@ def _count_today_invocations() -> int:
         if ts.startswith(today_str):
             count += 1
     return count
+
+
+# A-IN-2 (2026-04-11): The previous code used `subprocess.run(timeout=...)`.
+# CPython's run() does kill the *direct* child on TimeoutExpired, but the
+# Claude CLI is a Node.js process that spawns its own helpers (MCP servers,
+# the actual claude API client process, etc.). Killing the direct child
+# leaves all of its descendants running as zombies on Windows. Over a long
+# session this leaks file handles, sockets, and (worst) GPU VRAM held by
+# any local-LLM helpers Claude may have spawned.
+#
+# Fix: explicitly Popen with a new process group/session so we can kill the
+# entire tree, not just the direct child. On Windows we use taskkill /T /F
+# (kills the whole tree by PID); on Unix we use os.killpg(SIGKILL) on the
+# process group started via start_new_session=True.
+def _popen_kwargs_for_tree_kill() -> dict:
+    """Return Popen kwargs that allow tree-killing the spawned process."""
+    if platform.system() == "Windows":
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    return {"start_new_session": True}
+
+
+def _kill_process_tree(proc: subprocess.Popen, *, label: str = "claude") -> None:
+    """Kill a Popen process and all of its descendants. Best-effort:
+    falls back to proc.kill() if the platform-specific path fails.
+    Always returns; never raises."""
+    if proc.poll() is not None:
+        return  # already exited
+    pid = proc.pid
+    try:
+        if platform.system() == "Windows":
+            # taskkill /T = terminate this PID and all child processes,
+            # /F = force, /PID = the parent PID. Capture stderr to keep
+            # logs clean if the process already exited between poll() and here.
+            res = subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(pid)],
+                capture_output=True, timeout=5,
+            )
+            if res.returncode not in (0, 128):  # 128 = "process not found"
+                logger.warning(
+                    "%s tree kill via taskkill returned %d (stderr=%r) — "
+                    "falling back to proc.kill()",
+                    label, res.returncode, res.stderr.decode("utf-8", "replace")[:200],
+                )
+                proc.kill()
+        else:
+            try:
+                pgid = os.getpgid(pid)
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, OSError) as e:
+                logger.warning("%s killpg(%d) failed: %s — falling back to proc.kill()", label, pid, e)
+                proc.kill()
+    except Exception as e:
+        # Last-ditch fallback so a kill failure never propagates.
+        logger.error("%s tree kill encountered unexpected error: %s — proc.kill()", label, e)
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
+def _run_with_tree_kill(
+    cmd: list[str],
+    *,
+    timeout: float,
+    env: dict | None,
+    cwd: str,
+    label: str,
+) -> tuple[int, str, str, bool]:
+    """Run a subprocess with proper timeout + tree-kill cleanup.
+
+    Returns:
+        (returncode, stdout, stderr, timed_out)
+
+    On timeout, kills the entire process tree (not just the direct child)
+    and waits up to 5s for the tree to actually exit before returning.
+    Logs an error if the tree refused to exit.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
+        text=True,
+        env=env,
+        cwd=cwd,
+        **_popen_kwargs_for_tree_kill(),
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+        return proc.returncode, stdout or "", stderr or "", False
+    except subprocess.TimeoutExpired:
+        logger.warning("%s timed out after %ds — killing process tree (pid=%d)",
+                       label, timeout, proc.pid)
+        _kill_process_tree(proc, label=label)
+        # Drain pipes after kill so the OS can release them.
+        try:
+            stdout, stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            logger.error("%s process tree did not exit within 5s of kill — possible zombie", label)
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            stdout, stderr = "", ""
+        return -1, stdout or "", stderr or "", True
 
 
 # ---------------------------------------------------------------------------
@@ -205,20 +327,23 @@ def invoke_claude(
     status = "error"
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=_clean_env(),
-            cwd=working_dir,
-            stdin=subprocess.DEVNULL,
-        )
-        exit_code = result.returncode
-        status = "invoked" if exit_code == 0 else "error"
-    except subprocess.TimeoutExpired:
-        status = "timeout"
-        logger.warning("Claude invocation timed out after %ds — caller=%s", timeout, caller)
+        # A-IN-3: serialize all in-process Claude invocations so the
+        # 8-worker ticker pool / metals fast-tick / signal subprocesses
+        # don't spawn 5 concurrent expensive Claude processes.
+        # A-IN-2: tree-killing helper for grandchild cleanup on timeout.
+        with _invoke_lock:
+            rc, _stdout, _stderr, timed_out = _run_with_tree_kill(
+                cmd,
+                timeout=timeout,
+                env=_clean_env(),
+                cwd=working_dir,
+                label=f"claude({caller})",
+            )
+        if timed_out:
+            status = "timeout"
+        else:
+            exit_code = rc
+            status = "invoked" if exit_code == 0 else "error"
     except Exception as e:
         status = "error"
         logger.error("Claude invocation failed — caller=%s: %s", caller, e)
@@ -287,21 +412,21 @@ def invoke_claude_text(
     status = "error"
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=_clean_env(),
-            cwd=str(BASE_DIR),
-            stdin=subprocess.DEVNULL,
-        )
-        exit_code = result.returncode
-        text = result.stdout or ""
-        status = "invoked" if exit_code == 0 else "error"
-    except subprocess.TimeoutExpired:
-        status = "timeout"
-        logger.warning("Claude text invocation timed out after %ds — caller=%s", timeout, caller)
+        # A-IN-3 + A-IN-2: serialized + tree-killing.
+        with _invoke_lock:
+            rc, stdout, _stderr, timed_out = _run_with_tree_kill(
+                cmd,
+                timeout=timeout,
+                env=_clean_env(),
+                cwd=str(BASE_DIR),
+                label=f"claude_text({caller})",
+            )
+        if timed_out:
+            status = "timeout"
+        else:
+            exit_code = rc
+            text = stdout
+            status = "invoked" if exit_code == 0 else "error"
     except Exception as e:
         logger.error("Claude text invocation failed — caller=%s: %s", caller, e)
 

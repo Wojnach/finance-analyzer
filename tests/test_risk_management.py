@@ -232,6 +232,64 @@ class TestCheckDrawdown:
         # Falls back to cash only
         assert result["current_value"] == 300_000
 
+    def test_peak_walks_full_history_not_just_last_2000(self, tmp_path, monkeypatch):
+        """A-PR-2 (2026-04-11): The drawdown peak scan must walk the FULL
+        history file, not just the most recent 2000 entries. Previously
+        the tail-only scan went blind to peaks older than ~33h, so a real
+        drawdown after a 2-day rally never tripped the circuit breaker.
+
+        This test seeds a history file with the true peak as entry #1
+        (the OLDEST entry) and 2500 newer lower entries on top of it.
+        With the old (tail-only) code the peak would be lost. With the
+        fix the streaming scan finds it."""
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+
+        pf_path = tmp_path / "portfolio_state.json"
+        _write_json(pf_path, _make_portfolio(cash=400_000))
+
+        history_lines = []
+        # The TRUE peak — written first, will be 2500+ entries deep when done
+        history_lines.append({"patient_value_sek": 999_000, "bold_value_sek": 0})
+        # 2500 lower entries on top (well past the old 2000-entry tail window)
+        for i in range(2500):
+            history_lines.append({"patient_value_sek": 500_000 + i, "bold_value_sek": 0})
+
+        _write_jsonl(tmp_path / "portfolio_value_history.jsonl", history_lines)
+
+        result = check_drawdown(str(pf_path),
+                                agent_summary_path=str(tmp_path / "nonexistent.json"))
+        # The 999K peak from line 1 must still be detected.
+        assert result["peak_value"] == 999_000, (
+            f"Streaming peak scan missed the 999K peak that was 2500 entries "
+            f"behind the tail; got peak={result['peak_value']}. "
+            "Has A-PR-2 been reverted to load_jsonl_tail(max_entries=2000)?"
+        )
+        # Drawdown: (999000 - 400000) / 999000 * 100 ~= 59.96%
+        assert abs(result["current_drawdown_pct"] - 59.9600) < 0.01
+
+    def test_peak_streaming_handles_malformed_lines(self, tmp_path, monkeypatch):
+        """A-PR-2: malformed JSON lines must be skipped, not crash."""
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+
+        pf_path = tmp_path / "portfolio_state.json"
+        _write_json(pf_path, _make_portfolio(cash=480_000))
+
+        history_path = tmp_path / "portfolio_value_history.jsonl"
+        history_path.write_text(
+            '{"patient_value_sek": 600000}\n'
+            '{not valid json\n'
+            '{"patient_value_sek": 550000}\n'
+            '\n'
+            '{"patient_value_sek": 700000}\n',
+            encoding="utf-8",
+        )
+
+        result = check_drawdown(str(pf_path),
+                                agent_summary_path=str(tmp_path / "nonexistent.json"))
+        # Should pick up the 700K from the 4th valid entry, ignoring the
+        # malformed line and the empty line.
+        assert result["peak_value"] == 700_000
+
 
 # ===================================================================
 # compute_stop_levels

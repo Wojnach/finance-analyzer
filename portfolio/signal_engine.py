@@ -73,7 +73,12 @@ _LOCAL_MODEL_LOOKBACK_DAYS = 30
 # force-HOLD (treated like DISABLED_SIGNALS but dynamically). A signal at
 # 44% is noise, not a reliable contrarian indicator — inverting it just
 # produces different noise with whiplash as accuracy oscillates around 50%.
-ACCURACY_GATE_THRESHOLD = 0.45
+# 2026-04-11 (A-PR-batch-5): raised 0.45 → 0.47. The signal audit on
+# 2026-04-10 found four signals sitting in the 45-47% band that the
+# previous gate let through (volatility_sig 0.453, trend 0.454, etc.).
+# Tightening the gate by 2pp removes ~4 coin-flip-adjacent signals from
+# consensus while leaving the well-performing tier untouched.
+ACCURACY_GATE_THRESHOLD = 0.47
 ACCURACY_GATE_MIN_SAMPLES = 30  # need enough data before gating
 
 # Directional accuracy gate: signals whose BUY or SELL accuracy is below this

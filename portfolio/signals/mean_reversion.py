@@ -213,8 +213,21 @@ def _gap_fill(open_prices: pd.Series, close: pd.Series,
     fill_amount = today_open - today_close  # positive if price moved down from open
     fill_pct = fill_amount / gap_distance   # positive means filling the gap
 
+    # A-SM-1 (2026-04-11): Explicit guard against the gap *widening*.
+    # The synthesis raised this as a P0 inversion bug (false BUY on
+    # continuing gap-down). Investigation showed the existing
+    # `fill_pct < 0.3` branch already handles it correctly because
+    # gap_distance is negative on gap-down, so positive fill_amount /
+    # negative gap_distance = negative fill_pct, which is < 0.3 → HOLD.
+    # The synthesis was a false positive. But the implicit handling
+    # is fragile to future refactors, so make it explicit: any negative
+    # fill_pct is a gap-widening (price moving FURTHER from prev_close)
+    # and must never produce a directional vote.
+    if fill_pct < 0:
+        return safe_float(gap_pct), safe_float(fill_pct), "HOLD"
+
     if fill_pct < 0.3:
-        # Gap not filling yet
+        # Gap not filling fast enough yet
         return safe_float(gap_pct), safe_float(fill_pct), "HOLD"
 
     # Gap up + filling (price falling back) = SELL

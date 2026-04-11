@@ -424,6 +424,11 @@ def _empty_result(reason: str = "") -> dict[str, Any]:
     return {
         "action": "HOLD",
         "confidence": 0.0,
+        # A-SM-2 (2026-04-11): "garch" was missing from this schema. The
+        # main compute path adds it via sub_signals["garch"] = ..., so any
+        # downstream consumer iterating over keys saw inconsistent shapes
+        # depending on whether the signal succeeded or fell into the empty
+        # path. Now both branches return the same key set.
         "sub_signals": {
             "bb_squeeze": "HOLD",
             "bb_breakout": "HOLD",
@@ -431,6 +436,7 @@ def _empty_result(reason: str = "") -> dict[str, Any]:
             "keltner": "HOLD",
             "historical_vol": "HOLD",
             "donchian": "HOLD",
+            "garch": "HOLD",
         },
         "indicators": {
             "bb_width": 0.0,
@@ -442,5 +448,11 @@ def _empty_result(reason: str = "") -> dict[str, Any]:
             "hist_vol": 0.0,
             "donchian_upper": 0.0,
             "donchian_lower": 0.0,
+            # A-SM-2: also include the GARCH indicator keys produced by
+            # the success path so consumers don't KeyError on the empty
+            # path.
+            "garch_vol": 0.0,
+            "realized_vol": 0.0,
+            "garch_ratio": 0.0,
         },
     }

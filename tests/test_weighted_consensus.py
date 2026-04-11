@@ -36,7 +36,9 @@ def _acc_dict(names, accuracy=0.6, total=50):
 
 class TestConstants:
     def test_accuracy_gate_threshold(self):
-        assert ACCURACY_GATE_THRESHOLD == 0.45
+        # 2026-04-11: raised 0.45 → 0.47 to gate the 4 signals sitting in
+        # the 45-47% coin-flip-adjacent band per the 2026-04-10 audit.
+        assert ACCURACY_GATE_THRESHOLD == 0.47
 
     def test_accuracy_gate_min_samples(self):
         assert ACCURACY_GATE_MIN_SAMPLES == 30
@@ -177,18 +179,18 @@ class TestAccuracyGate:
         assert action == "HOLD"
         assert conf == 0.0
 
-    def test_044_accuracy_gated(self):
-        """Signal at 0.44 accuracy with 50 samples -> gated (0.44 < 0.45)."""
+    def test_046_accuracy_gated(self):
+        """2026-04-11 (gate raised 0.45→0.47): 0.46 < 0.47 -> gated."""
         votes = {"low": "BUY"}
-        acc = {"low": _acc(0.44, 50)}
+        acc = {"low": _acc(0.46, 50)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
         assert action == "HOLD"
         assert conf == 0.0
 
-    def test_045_accuracy_not_gated(self):
-        """Signal at 0.45 accuracy with 50 samples -> NOT gated, votes normally."""
+    def test_047_accuracy_not_gated(self):
+        """Signal at 0.47 accuracy with 50 samples -> AT new boundary, not gated."""
         votes = {"borderline": "BUY"}
-        acc = {"borderline": _acc(0.45, 50)}
+        acc = {"borderline": _acc(0.47, 50)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
         assert action == "BUY"
         assert conf == 1.0
@@ -211,7 +213,7 @@ class TestAccuracyGate:
         assert conf == 1.0
 
     def test_exactly_30_samples_gated_if_below_threshold(self):
-        """30 samples >= 30 min -> gated when accuracy < 0.45."""
+        """30 samples >= 30 min -> gated when accuracy < 0.47 (raised 2026-04-11)."""
         votes = {"enough": "BUY"}
         acc = {"enough": _acc(0.40, 30)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
@@ -306,52 +308,54 @@ class TestAccuracyGate:
         assert conf == 1.0
 
     def test_low_accuracy_buy_stays_buy(self):
-        """No inversion: a 0.46 accuracy BUY stays BUY (not flipped to SELL)."""
+        """No inversion: a 0.48 accuracy BUY stays BUY (not flipped to SELL).
+        2026-04-11: bumped from 0.46 → 0.48 since gate raised to 0.47."""
         votes = {"sig": "BUY"}
-        acc = {"sig": _acc(0.46, 50)}
+        acc = {"sig": _acc(0.48, 50)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
         assert action == "BUY"
 
     def test_low_accuracy_sell_stays_sell(self):
-        """No inversion: a 0.46 accuracy SELL stays SELL (not flipped to BUY)."""
+        """No inversion: a 0.48 accuracy SELL stays SELL (not flipped to BUY)."""
         votes = {"sig": "SELL"}
-        acc = {"sig": _acc(0.46, 50)}
+        acc = {"sig": _acc(0.48, 50)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
         assert action == "SELL"
 
 
 # ===========================================================================
-# Category 6: Gate boundary (accuracy at exactly 0.45)
+# Category 6: Gate boundary (accuracy at exactly 0.47)
+# 2026-04-11: gate raised 0.45 → 0.47
 # ===========================================================================
 
 class TestBoundaryAccuracy:
-    def test_exactly_45_percent_not_gated(self):
-        """0.45 accuracy with enough samples is at the boundary -> NOT gated."""
+    def test_exactly_47_percent_not_gated(self):
+        """0.47 accuracy with enough samples is at the new boundary -> NOT gated."""
         votes = {"borderline": "BUY"}
-        acc = {"borderline": _acc(0.45, 50)}
+        acc = {"borderline": _acc(0.47, 50)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
         assert action == "BUY"
 
-    def test_45_percent_weight_is_045(self):
-        """At 45% accuracy, weight = 0.45."""
+    def test_47_percent_weight_is_047(self):
+        """At 47% accuracy, weight = 0.47."""
         votes = {"low": "BUY", "good": "SELL"}
-        acc = {"low": _acc(0.45, 50), "good": _acc(0.80, 100)}
+        acc = {"low": _acc(0.47, 50), "good": _acc(0.80, 100)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
-        # BUY weight: 0.45, SELL weight: 0.80
+        # BUY weight: 0.47, SELL weight: 0.80
         assert action == "SELL"
-        assert conf == pytest.approx(0.80 / (0.45 + 0.80), abs=0.01)
+        assert conf == pytest.approx(0.80 / (0.47 + 0.80), abs=0.01)
 
-    def test_just_below_45_gated(self):
-        """0.4499 accuracy with enough samples -> gated."""
+    def test_just_below_47_gated(self):
+        """0.4699 accuracy with enough samples -> gated."""
         votes = {"sig": "BUY"}
-        acc = {"sig": _acc(0.4499, 50)}
+        acc = {"sig": _acc(0.4699, 50)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
         assert action == "HOLD"
         assert conf == 0.0
 
-    def test_just_above_45_not_gated(self):
+    def test_just_above_47_not_gated(self):
         votes = {"sig": "BUY"}
-        acc = {"sig": _acc(0.4501, 50)}
+        acc = {"sig": _acc(0.4701, 50)}
         action, conf = _weighted_consensus(votes, acc, "trending-up")
         assert action == "BUY"
 

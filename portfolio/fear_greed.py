@@ -107,6 +107,7 @@ def get_crypto_fear_greed() -> dict:
 
 
 def get_stock_fear_greed() -> dict:
+    import pandas as pd
     import yfinance as yf
 
     from portfolio.shared_state import yfinance_lock
@@ -117,7 +118,23 @@ def get_stock_fear_greed() -> dict:
         h = vix.history(period="5d")
     if h.empty:
         return None
-    vix_val = float(h["Close"].iloc[-1])
+    # A-DE-4 (2026-04-11): Newer yfinance versions sometimes return columns
+    # as a MultiIndex even for single-ticker Ticker.history() calls
+    # (especially for index symbols like ^VIX). Without this flatten,
+    # `h["Close"]` returns a DataFrame instead of a Series, .iloc[-1]
+    # then returns a row of values, and `float(...)` raises TypeError —
+    # which the calling code swallows, leaving the stock F&G signal
+    # silently dead. Defensive flatten: if MultiIndex, take the level-0
+    # names (Open/High/Low/Close/Volume).
+    if isinstance(h.columns, pd.MultiIndex):
+        h.columns = h.columns.get_level_values(0)
+    close_series = h["Close"]
+    # Belt-and-suspenders: if Close is somehow still 2-D (duplicate column
+    # after the flatten — possible if yfinance returned overlapping levels),
+    # squeeze to 1-D before .iloc[-1].
+    if hasattr(close_series, "iloc") and getattr(close_series, "ndim", 1) > 1:
+        close_series = close_series.iloc[:, 0]
+    vix_val = float(close_series.iloc[-1])
     if vix_val >= 40:
         value = 5
     elif vix_val >= 30:
