@@ -4,9 +4,10 @@ Validates portfolio state files for data integrity, ensuring that cash,
 holdings, fees, and transaction records are all internally consistent.
 """
 
-import json
 import pathlib
 from collections import defaultdict
+
+from portfolio.file_utils import load_json
 
 
 def validate_portfolio(portfolio: dict) -> list[str]:
@@ -255,13 +256,18 @@ def validate_portfolio_file(path: str) -> list[str]:
     Returns:
         list of error message strings (empty = valid).
     """
-    try:
-        with open(path, encoding="utf-8") as f:
-            portfolio = json.load(f)
-    except FileNotFoundError:
+    # A-PR-3 (2026-04-11): Use file_utils.load_json instead of raw open()+
+    # json.load(). The raw path had a TOCTOU race with concurrent saves
+    # from portfolio_mgr.atomic_write_json: a partial write could be read
+    # mid-flight, producing a JSONDecodeError that propagated as a "valid
+    # but malformed" portfolio. load_json() retries on transient JSON
+    # decode failures and uses the same atomic-rename window as the writer.
+    p = pathlib.Path(path)
+    if not p.exists():
         return [f"Portfolio file not found: {path}"]
-    except json.JSONDecodeError as e:
-        return [f"Invalid JSON in {path}: {e}"]
+    portfolio = load_json(p)
+    if portfolio is None:
+        return [f"Invalid or unreadable JSON in {path}"]
 
     return validate_portfolio(portfolio)
 
