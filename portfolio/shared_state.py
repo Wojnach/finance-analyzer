@@ -18,7 +18,7 @@ _tool_cache = {}
 _RETRY_COOLDOWN = 60
 
 
-_CACHE_MAX_SIZE = 256  # evict expired entries when cache exceeds this size
+_CACHE_MAX_SIZE = 512  # evict expired entries when cache exceeds this size
 _cache_lock = threading.Lock()
 
 # BUG-166: Dogpile/thundering-herd prevention.

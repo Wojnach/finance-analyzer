@@ -23,8 +23,9 @@ from portfolio.signal_utils import ema, majority_vote, sma, true_range
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Minimum rows required.  BB squeeze lookback (120) is the binding constraint,
-# plus a small buffer for warm-up of the underlying 20-period indicators.
+# Minimum rows required.  BB squeeze ideally uses 120-period avg width, but
+# degrades gracefully with fewer rows (uses whatever is available via iloc).
+# 50 rows provides enough warm-up for the 20-period BB + basic statistics.
 # ---------------------------------------------------------------------------
 MIN_ROWS = 50
 

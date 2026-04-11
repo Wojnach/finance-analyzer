@@ -240,9 +240,9 @@ class TestCacheEviction:
     def test_evicts_expired_entries(self, mock_time):
         mock_time.time.return_value = 1000.0
 
-        # Fill cache with 260 entries (> 256 max)
+        # Fill cache with 516 entries (> 512 max)
         # Include ttl so TTL-aware eviction works: threshold = ttl * _MAX_STALE_FACTOR = 60 * 3 = 180s
-        for i in range(260):
+        for i in range(516):
             shared_state._tool_cache[f"old_{i}"] = {"data": i, "time": 1000.0, "ttl": 60}
 
         # Advance time so all entries exceed ttl * stale_factor (age=4000 > 180)
@@ -260,8 +260,8 @@ class TestCacheEviction:
     def test_does_not_evict_non_expired_entries(self, mock_time):
         mock_time.time.return_value = 5000.0
 
-        # Fill with 260 entries, all recent (not expired at 3600s threshold)
-        for i in range(260):
+        # Fill with 516 entries, all recent (not expired at 3600s threshold)
+        for i in range(516):
             shared_state._tool_cache[f"recent_{i}"] = {"data": i, "time": 4500.0}
 
         # Call _cached() — age-based eviction finds nothing stale, then LRU fallback trims.
@@ -274,13 +274,13 @@ class TestCacheEviction:
     def test_no_eviction_when_under_max_size(self, mock_time):
         mock_time.time.return_value = 1000.0
 
-        # Fill with only 10 entries (well under 256)
+        # Fill with only 10 entries (well under 512)
         for i in range(10):
             shared_state._tool_cache[f"k_{i}"] = {"data": i, "time": 1.0}  # very old
 
         mock_time.time.return_value = 5000.0
 
-        # Even though entries are old, no eviction because cache size <= 256
+        # Even though entries are old, no eviction because cache size <= 512
         result = _cached("new", 60, lambda: "x")
         assert result == "x"
         # Old entries survive because size check comes first
@@ -291,14 +291,14 @@ class TestCacheEviction:
         """Only entries exceeding ttl * stale_factor are evicted; fresh entries survive."""
         mock_time.time.return_value = 5000.0
 
-        # 200 old entries (time=1000, age=4000s > ttl=60 * 3 = 180s threshold)
-        for i in range(200):
+        # 460 old entries (time=1000, age=4000s > ttl=60 * 3 = 180s threshold)
+        for i in range(460):
             shared_state._tool_cache[f"old_{i}"] = {"data": i, "time": 1000.0, "ttl": 60}
         # 60 fresh entries (time=4500, age=500s < default ttl=3600 * 3 = 10800s threshold)
         for i in range(60):
             shared_state._tool_cache[f"fresh_{i}"] = {"data": i, "time": 4500.0}
 
-        assert len(shared_state._tool_cache) == 260
+        assert len(shared_state._tool_cache) == 520
 
         result = _cached("trigger", 60, lambda: "val")
         assert result == "val"
@@ -549,7 +549,7 @@ class TestTTLConstants:
 
 class TestModuleState:
     def test_cache_max_size(self):
-        assert shared_state._CACHE_MAX_SIZE == 256
+        assert shared_state._CACHE_MAX_SIZE == 512
 
     def test_retry_cooldown(self):
         assert shared_state._RETRY_COOLDOWN == 60
