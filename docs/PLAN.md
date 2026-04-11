@@ -50,8 +50,9 @@ Worktree: `/mnt/q/finance-analyzer-fixq`
 - [x] **A-DE-4** Add yfinance MultiIndex flatten in `portfolio/fear_greed.py`
       stock path. Stock F&G signal is silently dead.
       → commit `1a8381f` (defensive flatten + 4 new tests)
-- [ ] **A-DE-5** Fix `portfolio/onchain_data.py` cache crash on old-format
+- [x] **A-DE-5** Fix `portfolio/onchain_data.py` cache crash on old-format
       ISO-string-as-epoch entries. Add format-detection fallback.
+      → commit `aecec90` (`_coerce_epoch` helper, 8 tests, end-to-end coverage)
 
 ### Batch 3 — Logic bugs (medium risk, P0/P1, requires tests)
 
