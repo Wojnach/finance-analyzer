@@ -147,7 +147,23 @@ and continued thread-safety gaps in the metals subsystem.
   a concurrent reconciliation marks a position inactive — one change is lost.
 - **Fix**: Same as IR-SO-2 — a threading.Lock() around all POSITIONS mutations.
 
-### IR-8: shared_state cache eviction under lock [P3]
+### IR-8: /mode command breaks config.json symlink [P1]
+- **File**: `portfolio/telegram_poller.py:160`
+- **Code**: `atomic_write_json(config_path, cfg)` where `config_path` is the
+  config.json symlink
+- **Impact**: config.json is a SYMLINK to the external file
+  `C:\Users\Herc2\.config\finance-analyzer\config.json` (contains API keys).
+  `atomic_write_json` creates a temp file in the same directory and calls
+  `os.replace(tmp, config.json)`. On Windows, `os.replace` replaces the symlink
+  itself (not the target) — this turns config.json from a symlink into a regular
+  file. After using `/mode`, the system reads a local copy that is disconnected
+  from the external config. Any external config changes (API key rotation, setting
+  changes) are silently ignored.
+- **Fix**: Either (a) detect symlink and write through it:
+  `resolved = config_path.resolve()` then `atomic_write_json(resolved, cfg)`,
+  or (b) don't persist mode to config.json — use a separate state file.
+
+### IR-9: shared_state cache eviction under lock [P3]
 - **File**: `portfolio/shared_state.py:54-66`
 - **Impact**: Cache eviction (sorting 512+ entries, checking timestamps) runs
   while holding _cache_lock. All other threads are blocked from cache reads during
@@ -183,10 +199,10 @@ and continued thread-safety gaps in the metals subsystem.
 | Severity | Still-Open | New | Total |
 |----------|-----------|-----|-------|
 | P0 | 1 (check_drawdown) | 0 | 1 |
-| P1 | 3 (POSITIONS lock, naked position, record_trade) | 3 (fx_rate, record_trade, fill race) | 4 unique |
-| P2 | 2 (raw open, VWAP) | 4 (streaming open, config open, START_TS, cache eviction→P3) | 5 |
-| P3 | 0 | 2 (extract_ticker, cache eviction) | 2 |
-| **Total** | **6** | **8** | **12 unique** |
+| P1 | 3 (POSITIONS lock, naked position, record_trade) | 4 (fx_rate, record_trade, fill race, symlink) | 5 unique |
+| P2 | 2 (raw open, VWAP) | 4 (streaming open, config open, START_TS, extract_ticker) | 5 |
+| P3 | 0 | 1 (cache eviction) | 1 |
+| **Total** | **6** | **9** | **12 unique** |
 
 Note: IR-SO-2 and IR-7 are the same root cause (POSITIONS lock), and IR-SO-1 and IR-2
 are complementary (both risk gates disconnected).
