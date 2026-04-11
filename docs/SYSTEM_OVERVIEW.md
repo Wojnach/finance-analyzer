@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-04-10
-Branch: improve/auto-session-2026-04-10
+Updated: 2026-04-11
+Branch: improve/auto-session-2026-04-11
 
 ## 1) Architecture Summary
 
@@ -121,7 +121,8 @@ main.loop()
 - Global confidence cap: 0.80 (70-80% bracket has best actual accuracy at 57-59%)
 
 ### Weighted Consensus
-- Weight = accuracy_weight × regime_mult × horizon_mult × activation_norm × activity_cap × correlation_penalty
+- Weight = directional_accuracy_weight × regime_mult × horizon_mult × activation_norm × activity_cap × correlation_penalty
+- **Directional accuracy** (BUG-182, 2026-04-11): BUY votes weighted by `buy_accuracy`, SELL by `sell_accuracy`. Falls back to overall accuracy when directional samples < 20. Prevents signals with asymmetric accuracy (e.g., qwen3 BUY 30% vs SELL 74%) from being over-weighted in their weak direction.
 - Regime weights: trending → trust EMA/MACD more; ranging → trust RSI/BB more
 - Regime gating: horizon-aware — some signals gated in certain regimes only for specific prediction horizons
 - Horizon weights: dynamic (computed from accuracy cache ratio this_horizon/cross_horizon) with static fallback
