@@ -147,6 +147,9 @@ def _register_defaults():
     # Futures basis regime — mark-index spread, contango/backwardation detection; capped at 0.7
     register_enhanced("futures_basis", "portfolio.signals.futures_basis",
                       "compute_futures_basis_signal", requires_context=True, max_confidence=0.7)
+    # Hurst regime detector — R/S analysis for trending/MR/random-walk classification
+    register_enhanced("hurst_regime", "portfolio.signals.hurst_regime",
+                      "compute_hurst_regime_signal", requires_context=True)
 
 
 _register_defaults()
