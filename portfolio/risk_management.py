@@ -9,12 +9,46 @@ Provides:
 """
 
 import datetime
+import json
 import logging
 import pathlib
 
 from portfolio.file_utils import atomic_append_jsonl, load_json, load_jsonl_tail
 
 logger = logging.getLogger(__name__)
+
+
+def _streaming_max(history_path: pathlib.Path, value_key: str, floor: float) -> float:
+    """A-PR-2 (2026-04-11): Walk an ENTIRE JSONL file line-by-line and
+    return the maximum value at `value_key`. Replaces the prior approach
+    of `load_jsonl_tail(max_entries=2000)` which only saw the last ~33h
+    of history (2000 entries × ~60s cycle = ~33h). After 33h the true
+    historical peak fell off the back and drawdown silently collapsed
+    to the recent local peak — meaning a real drawdown after a 2-day
+    rally was invisible to the circuit breaker.
+
+    Streams line-by-line so memory stays O(1) regardless of file size.
+    Returns `floor` (typically initial_value) if file missing/empty.
+    """
+    if not history_path.exists():
+        return floor
+    peak = floor
+    try:
+        with open(history_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                val = entry.get(value_key, 0)
+                if val > peak:
+                    peak = val
+    except OSError as e:
+        logger.warning("Could not stream history file %s: %s", history_path.name, e)
+    return peak
 
 DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 
@@ -88,21 +122,16 @@ def check_drawdown(portfolio_path: str, max_drawdown_pct: float = 20.0,
             current_value = portfolio.get("cash_sek", initial_value)
 
     # Determine peak value from history file or initial value
-    peak_value = initial_value
     history_path = DATA_DIR / "portfolio_value_history.jsonl"
     pf_name = pathlib.Path(portfolio_path).stem  # e.g. "portfolio_state" or "portfolio_state_bold"
     is_bold = "bold" in pf_name
+    value_key = "bold_value_sek" if is_bold else "patient_value_sek"
 
-    if history_path.exists():
-        try:
-            value_key = "bold_value_sek" if is_bold else "patient_value_sek"
-            entries = load_jsonl_tail(str(history_path), max_entries=2000)
-            for entry in entries:
-                val = entry.get(value_key, 0)
-                if val > peak_value:
-                    peak_value = val
-        except (OSError, ValueError):
-            pass
+    # A-PR-2: Stream the FULL history (not just last 2000 entries) to find
+    # the true historical peak. The 2000-entry tail only covered ~33h, so
+    # any rally older than that fell off the back and the drawdown circuit
+    # breaker became blind to multi-day peaks.
+    peak_value = _streaming_max(history_path, value_key, floor=initial_value)
 
     # Also compare against current value in case it's a new peak
     if current_value > peak_value:

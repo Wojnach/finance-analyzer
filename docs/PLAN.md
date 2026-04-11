@@ -40,8 +40,10 @@ Worktree: `/mnt/q/finance-analyzer-fixq`
 
 ### Batch 2 — Data correctness (low risk, P0)
 
-- [ ] **A-MC-2** Replace hardcoded `usdsek=1.0` with `fx_rates.usd_to_sek()`
-      in `data/metals_loop.py` (find via grep). All SEK P&L currently wrong by ~10x.
+- [x] **A-MC-2** Replace hardcoded `usdsek=1.0` with `fetch_usd_sek()`
+      in `portfolio/fin_snipe_manager.py:420` (was actually here, not metals_loop).
+      All exit_optimizer SEK rewards previously wrong by ~10x.
+      → commit `7597650` (live FX rate + AST regression guard, 48/48 pass)
 - [ ] **A-PR-2** Fix drawdown peak scan in `portfolio/risk_management.py` to
       walk full equity history, not just the last 2000 entries (~33h window).
 - [ ] **A-DE-4** Add yfinance MultiIndex flatten in `portfolio/fear_greed.py`
