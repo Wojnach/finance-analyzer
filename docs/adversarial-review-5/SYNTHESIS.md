@@ -181,7 +181,7 @@ All 11 fixes from the fix/queue-2026-04-11 branch have been verified:
 | 2 | 2026-04-07 | ~40 | 4 | 12 | ~20% of R1 |
 | 3 | 2026-04-08 | 67 | 15 | 35 | ~70% of R2 |
 | 4 | 2026-04-09 | 67 | 15 | 35 | ~73% of R3 |
-| 5 | 2026-04-11 | 64+ | 6 | 33 | 100% of targeted P0/P1 batch |
+| 5 | 2026-04-11 | ~66 | ~8 | ~33 | 100% of targeted P0/P1 batch |
 
 **Trend**: Fix rate has improved dramatically. Round 5 found only 12 total findings
 (vs 67 in Rounds 3-4), and all 11 targeted fixes from the fix queue are verified correct.
@@ -308,9 +308,40 @@ get_positions in the BankID session path (no account filter).
 **IN-R5-4 interacts with IR-8**: /mode breaks symlink → next /mode with corrupt config
 wipes all API keys. Two-step disaster chain.
 
-### metals-core agent (STILL IN PROGRESS)
+### metals-core agent (COMPLETE — 6 findings, 2 CRITICAL)
 
-The metals-core agent (largest subsystem at ~19K lines across 20 files) is still running.
+| ID | Sev | File | Finding |
+|----|-----|------|---------|
+| MC-C1 | **CRITICAL** | metals_swing_trader.py:1717 | **_execute_sell doesn't cancel stop first** — Avanza rejects sell, position stuck |
+| MC-C2 | CRITICAL | metals_swing_trader.py:1547 | usdsek=10.85 hardcoded — A-MC-2 fix not propagated to SwingTrader |
+| MC-I1 | P1 | metals_loop.py:2227 | Fish engine naive datetime.now() → wrong in CEST (1h offset) |
+| MC-I2 | P1 | metals_loop.py:2547 | ORB window hardcoded for winter → wrong in summer |
+| MC-I3 | P2 | metals_loop.py:6051 | Raw open() for agent log — file handle leak |
+| MC-I4 | P2 | metals_signal_tracker.py:190 | Raw reads of entire JSONL every 10 cycles |
+
+**MC-C1 is the highest-priority finding of the entire review** — SwingTrader sell orders
+fail silently because hardware stops aren't cancelled first. Same class as the March 3 incident.
+
+---
+
+## ALL 8 AGENTS COMPLETE — Final Totals
+
+| Source | P0/CRIT | P1 | P2 | P3 | Total |
+|--------|---------|----|----|----|----|
+| Independent review | 1 | 8 | 5 | 1 | 15 |
+| portfolio-risk agent | 2 | 5 | 2 | 1 | 10 |
+| signals-modules agent | 1 | 3 | 3 | 2 | 9 |
+| data-external agent | 1 | 6 | 0 | 0 | 7 |
+| signals-core agent | 0 | 2 | 5 | 2 | 9 |
+| orchestration agent | 3 | 5 | 0 | 0 | 8 |
+| avanza-api agent | 0 | 3 | 2 | 0 | 5 |
+| infrastructure agent | 0 | 2 | 3 | 2 | 7 |
+| metals-core agent | 2 | 2 | 2 | 0 | 6 |
+| **TOTAL (deduplicated)** | **~8** | **~33** | **~18** | **~7** | **~66** |
+
+Note: Some findings overlap between independent review and agents (e.g., check_drawdown
+was found by independent + portfolio-risk + orchestration agents). Deduplicated unique
+count is approximately 66 findings.
 
 ---
 
