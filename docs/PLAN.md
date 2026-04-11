@@ -29,8 +29,10 @@ Worktree: `/mnt/q/finance-analyzer-fixq`
       (`portfolio/avanza_client.py:223-244`). Reject anything != "1625505".
       Mirror the `ALLOWED_ACCOUNT_IDS` pattern from `avanza_session.py`.
       → commit `0daa2ef` (whitelist + filters in get_positions/get_portfolio_value, 7 new tests, 231/231 pass)
-- [ ] **A-PR-3** Replace raw `json.load()` with `file_utils.load_json()` in
+- [x] **A-PR-3** Replace raw `json.load()` with `file_utils.load_json()` in
       `portfolio/portfolio_validator.py`. TOCTOU race with concurrent saves.
+      → commit `f07469c` (new tests/test_portfolio_validator.py with AST
+      regression guard, 7/7 pass)
 - [ ] **A-IN-2** Kill subprocess on `TimeoutExpired` in `portfolio/claude_gate.py`
       (zombie cleanup). Add `proc.kill(); proc.wait()` in the timeout handler.
 
