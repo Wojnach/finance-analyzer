@@ -91,8 +91,9 @@ Worktree: `/mnt/q/finance-analyzer-fixq`
 - [~] **Per-ticker signal blacklist** — DROPPED. Per-ticker accuracy gate
       already catches `ministral × XAG-USD` (18.9% < 0.45). No additional
       blacklist needed.
-- [ ] **Raise accuracy gate 45 → 47** — single constant in `signal_engine.py`,
+- [x] **Raise accuracy gate 45 → 47** — single constant in `signal_engine.py`,
       then re-run audit to count newly-gated signals.
+      → commit `6c7e289` (gates ~4 additional 45-47% signals; 37 tests pass)
 
 ## DEFERRED (too risky for autonomous overnight)
 
