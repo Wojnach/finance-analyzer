@@ -25,9 +25,10 @@ Worktree: `/mnt/q/finance-analyzer-fixq`
       (`portfolio/avanza_session.py:184-291`). Prevents Playwright corruption
       when metals 10s fast-tick + main 8-worker pool race on the context.
       → commit `7ad33cf` (RLock + 4 thread-safety tests, 57/57 pass)
-- [ ] **A-AV-2** Add hardcoded account whitelist in `get_account_id()`
+- [x] **A-AV-2** Add hardcoded account whitelist in `get_account_id()`
       (`portfolio/avanza_client.py:223-244`). Reject anything != "1625505".
       Mirror the `ALLOWED_ACCOUNT_IDS` pattern from `avanza_session.py`.
+      → commit `0daa2ef` (whitelist + filters in get_positions/get_portfolio_value, 7 new tests, 231/231 pass)
 - [ ] **A-PR-3** Replace raw `json.load()` with `file_utils.load_json()` in
       `portfolio/portfolio_validator.py`. TOCTOU race with concurrent saves.
 - [ ] **A-IN-2** Kill subprocess on `TimeoutExpired` in `portfolio/claude_gate.py`
