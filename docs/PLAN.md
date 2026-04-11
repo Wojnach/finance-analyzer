@@ -65,8 +65,10 @@ Worktree: `/mnt/q/finance-analyzer-fixq`
       `portfolio/signals/volatility.py`. Inconsistent sub_signals.
       → commit `a75e8f7` (also added garch_vol/realized_vol/garch_ratio
       to indicators + cross-path schema regression test)
-- [ ] **A-MC-4** Use real `entry_ts` from holdings instead of `now()` in
-      metals_loop HOLD_TIME_EXTENDED check.
+- [x] **A-MC-4** Use real `entry_ts` from instrument_state instead of `now()`
+      in fin_snipe_manager. Persists on first non-zero observation, clears
+      on position close. HOLD_TIME_EXTENDED now actually fires.
+      → commit `ceab91b`
 
 ### Batch 4 — Threading and concurrency (medium risk, P1)
 

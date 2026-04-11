@@ -191,3 +191,71 @@ class TestKillProcessTreeIdempotent:
         assert proc.poll() is not None  # confirmed exited
         # This must not raise.
         claude_gate._kill_process_tree(proc, label="exited-test")
+
+
+class TestInvokeLockSerialization:
+    """A-IN-3 (2026-04-11): in-process invocations must serialize through
+    _invoke_lock so the 8-worker ticker pool can't spawn 5 concurrent
+    Claude processes."""
+
+    def test_invoke_lock_exists_and_is_a_lock(self):
+        import threading
+        # Should be a Lock or RLock object
+        assert hasattr(claude_gate, "_invoke_lock")
+        # It should support context-manager protocol
+        with claude_gate._invoke_lock:
+            pass
+
+    def test_concurrent_invokes_serialize(self, monkeypatch, tmp_path):
+        """Spawn 5 threads that all call invoke_claude. Mock the
+        _run_with_tree_kill helper to track concurrency. Max concurrent
+        executions must be exactly 1 — the lock serializes them."""
+        import threading
+        import time
+
+        # Block the kill switch / config / claude lookup so we always
+        # reach the locked subprocess section.
+        monkeypatch.setattr(claude_gate, "CLAUDE_ENABLED", True)
+        monkeypatch.setattr(claude_gate, "_load_config_layer2_enabled", lambda: True)
+        monkeypatch.setattr(claude_gate, "_find_claude_cmd", lambda: "/fake/claude")
+        # Redirect log writes to a temp dir so they don't poison the real log.
+        monkeypatch.setattr(claude_gate, "INVOCATIONS_LOG", tmp_path / "log.jsonl")
+        monkeypatch.setattr(claude_gate, "_count_today_invocations", lambda: 0)
+
+        active = [0]
+        max_active = [0]
+        active_lock = threading.Lock()
+
+        def fake_run_with_tree_kill(*args, **kwargs):
+            with active_lock:
+                active[0] += 1
+                if active[0] > max_active[0]:
+                    max_active[0] = active[0]
+            time.sleep(0.05)  # hold the "claude process" briefly
+            with active_lock:
+                active[0] -= 1
+            return (0, "ok", "", False)
+
+        monkeypatch.setattr(claude_gate, "_run_with_tree_kill", fake_run_with_tree_kill)
+
+        results = []
+        def worker(i):
+            ok, code = claude_gate.invoke_claude(
+                prompt=f"prompt {i}",
+                caller=f"test-{i}",
+                timeout=1,
+            )
+            results.append((ok, code))
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert max_active[0] == 1, (
+            f"Expected serialized invocations (max=1), got max={max_active[0]} "
+            "concurrent _run_with_tree_kill calls — _invoke_lock not held"
+        )
+        assert len(results) == 5
+        assert all(ok for ok, _ in results)

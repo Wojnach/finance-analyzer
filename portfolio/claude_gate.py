@@ -36,6 +36,8 @@ from portfolio.file_utils import atomic_append_jsonl, load_jsonl
 
 logger = logging.getLogger("portfolio.claude_gate")
 
+import threading
+
 # ---------------------------------------------------------------------------
 # Master kill switch.  Set to False to block ALL Claude Code invocations
 # across the entire codebase — no exceptions.
@@ -46,6 +48,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 CONFIG_FILE = BASE_DIR / "config.json"
 INVOCATIONS_LOG = DATA_DIR / "claude_invocations.jsonl"
+
+# A-IN-3 (2026-04-11): In-process concurrency lock. Without this, the main
+# loop's 8-worker ticker pool + the metals loop's fast-tick + signal
+# subprocesses can all call invoke_claude in parallel. The Claude CLI is
+# expensive (sonnet ~30s, opus ~3-5min) and the rate limiter is per-day,
+# not per-second — uncoordinated parallel invocations can:
+#   1. Race past the kill switch (CLAUDE_ENABLED check is non-atomic)
+#   2. Spawn 5+ concurrent Claude processes, each holding ~500MB RAM
+#   3. Confuse the invocation log (timestamps interleave)
+# Serializing in-process invocations is the simplest robust fix. For
+# cross-process coordination (multiple Python processes), see the file
+# lock TODO below.
+_invoke_lock = threading.Lock()
 
 # Rate-limit threshold: warn when daily invocations exceed this count.
 _DAILY_WARN_THRESHOLD = 50
@@ -312,15 +327,18 @@ def invoke_claude(
     status = "error"
 
     try:
-        # A-IN-2: tree-killing helper, not subprocess.run, so the entire
-        # claude+helper-process tree gets terminated on timeout.
-        rc, _stdout, _stderr, timed_out = _run_with_tree_kill(
-            cmd,
-            timeout=timeout,
-            env=_clean_env(),
-            cwd=working_dir,
-            label=f"claude({caller})",
-        )
+        # A-IN-3: serialize all in-process Claude invocations so the
+        # 8-worker ticker pool / metals fast-tick / signal subprocesses
+        # don't spawn 5 concurrent expensive Claude processes.
+        # A-IN-2: tree-killing helper for grandchild cleanup on timeout.
+        with _invoke_lock:
+            rc, _stdout, _stderr, timed_out = _run_with_tree_kill(
+                cmd,
+                timeout=timeout,
+                env=_clean_env(),
+                cwd=working_dir,
+                label=f"claude({caller})",
+            )
         if timed_out:
             status = "timeout"
         else:
@@ -394,14 +412,15 @@ def invoke_claude_text(
     status = "error"
 
     try:
-        # A-IN-2: tree-killing helper.
-        rc, stdout, _stderr, timed_out = _run_with_tree_kill(
-            cmd,
-            timeout=timeout,
-            env=_clean_env(),
-            cwd=str(BASE_DIR),
-            label=f"claude_text({caller})",
-        )
+        # A-IN-3 + A-IN-2: serialized + tree-killing.
+        with _invoke_lock:
+            rc, stdout, _stderr, timed_out = _run_with_tree_kill(
+                cmd,
+                timeout=timeout,
+                env=_clean_env(),
+                cwd=str(BASE_DIR),
+                label=f"claude_text({caller})",
+            )
         if timed_out:
             status = "timeout"
         else:
