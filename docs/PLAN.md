@@ -33,8 +33,10 @@ Worktree: `/mnt/q/finance-analyzer-fixq`
       `portfolio/portfolio_validator.py`. TOCTOU race with concurrent saves.
       → commit `f07469c` (new tests/test_portfolio_validator.py with AST
       regression guard, 7/7 pass)
-- [ ] **A-IN-2** Kill subprocess on `TimeoutExpired` in `portfolio/claude_gate.py`
-      (zombie cleanup). Add `proc.kill(); proc.wait()` in the timeout handler.
+- [x] **A-IN-2** Kill subprocess **tree** on `TimeoutExpired` in `portfolio/claude_gate.py`
+      (zombie cleanup including grandchildren — Node helpers, MCP servers,
+      local-LLM processes). Refactored to Popen + tree-kill helper.
+      → commit `122658b` (8 tests, grandchild kill verified on Windows)
 
 ### Batch 2 — Data correctness (low risk, P0)
 
