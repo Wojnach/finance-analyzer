@@ -221,13 +221,17 @@ class TestGetPositions:
     """Tests for get_positions()."""
 
     def test_extracts_positions_from_overview(self, config_file):
-        """Positions are correctly extracted from the overview response."""
+        """Positions are correctly extracted from the overview response.
+
+        A-AV-2: Uses the whitelisted account 1625505 — non-whitelisted
+        accounts in the same overview are filtered out.
+        """
         mock_client = MagicMock()
         mock_client.get_overview.return_value = {
             "accounts": [
                 {
                     "name": "ISK",
-                    "accountId": "111",
+                    "accountId": "1625505",  # whitelisted
                     "totalValue": 100000,
                     "positions": [
                         {
@@ -243,9 +247,12 @@ class TestGetPositions:
                 },
                 {
                     "name": "AF",
-                    "accountId": "222",
+                    "accountId": "222",  # not whitelisted — must be ignored
                     "totalValue": 50000,
-                    "positions": [],
+                    "positions": [
+                        {"name": "Should Not Appear", "orderbookId": "X", "volume": 1,
+                         "value": 1, "profit": 0, "profitPercent": 0, "currency": "SEK"}
+                    ],
                 },
             ]
         }
@@ -266,7 +273,7 @@ class TestGetPositions:
         mock_client = MagicMock()
         mock_client.get_overview.return_value = {
             "accounts": [
-                {"name": "ISK", "accountId": "111", "totalValue": 0, "positions": []}
+                {"name": "ISK", "accountId": "1625505", "totalValue": 0, "positions": []}
             ]
         }
         _MockAvanzaClass.return_value = mock_client
@@ -275,6 +282,39 @@ class TestGetPositions:
             positions = mod.get_positions()
 
         assert positions == []
+
+    def test_filters_pension_account(self, config_file):
+        """A-AV-2: Pension account 2674244 must NEVER appear in positions
+        even if Avanza returns it as ISK-typed."""
+        mock_client = MagicMock()
+        mock_client.get_overview.return_value = {
+            "accounts": [
+                {
+                    "name": "Pension",
+                    "accountId": "2674244",
+                    "accountType": "Investeringssparkonto_ISK",  # ISK-shaped!
+                    "totalValue": 999999,
+                    "positions": [
+                        {"name": "Pension Holding", "orderbookId": "P1", "volume": 1,
+                         "value": 999999, "profit": 0, "profitPercent": 0, "currency": "SEK"}
+                    ],
+                },
+                {
+                    "name": "Trading ISK",
+                    "accountId": "1625505",
+                    "totalValue": 100000,
+                    "positions": [],
+                },
+            ]
+        }
+        _MockAvanzaClass.return_value = mock_client
+
+        with patch.object(mod, "CONFIG_FILE", config_file):
+            positions = mod.get_positions()
+
+        # No pension positions leaked through
+        assert all(p["account_id"] == "1625505" for p in positions)
+        assert not any("Pension" in p.get("name", "") for p in positions)
 
     def test_uses_session_positions_when_available(self):
         """BankID session path should use portfolio.avanza_session directly."""
@@ -290,14 +330,16 @@ class TestGetPositions:
 class TestGetPortfolioValue:
     """Tests for get_portfolio_value()."""
 
-    def test_sums_all_account_values(self, config_file):
-        """Total value is the sum of all account totalValue fields."""
+    def test_sums_only_whitelisted_accounts(self, config_file):
+        """A-AV-2: Only whitelisted accounts contribute to the total.
+        Non-whitelisted accounts (AF, KF, pension) must be excluded."""
         mock_client = MagicMock()
         mock_client.get_overview.return_value = {
             "accounts": [
-                {"name": "ISK", "accountId": "111", "totalValue": 100000},
-                {"name": "AF", "accountId": "222", "totalValue": 50000},
-                {"name": "KF", "accountId": "333", "totalValue": 25000},
+                {"name": "ISK", "accountId": "1625505", "totalValue": 100000},
+                {"name": "AF", "accountId": "222", "totalValue": 50000},  # excluded
+                {"name": "KF", "accountId": "333", "totalValue": 25000},  # excluded
+                {"name": "Pension", "accountId": "2674244", "totalValue": 999999},  # excluded
             ]
         }
         _MockAvanzaClass.return_value = mock_client
@@ -305,12 +347,15 @@ class TestGetPortfolioValue:
         with patch.object(mod, "CONFIG_FILE", config_file):
             value = mod.get_portfolio_value()
 
-        assert value == 175000.0
+        # Only the 100000 from 1625505, NOT 1175000
+        assert value == 100000.0
 
 
 # --- Helper to set up a client with ISK account ---
+# A-AV-2: defaults to the whitelisted account "1625505". Tests that need a
+# non-whitelisted scenario should pass account_id explicitly.
 
-def _make_client_with_isk(config_file, account_id="9999", account_type="ISK"):
+def _make_client_with_isk(config_file, account_id="1625505", account_type="ISK"):
     """Create a mock client that returns an overview with an ISK account."""
     mock_client = MagicMock()
     mock_client.get_overview.return_value = {
@@ -329,13 +374,13 @@ def _make_client_with_isk(config_file, account_id="9999", account_type="ISK"):
 
 
 class TestGetAccountId:
-    """Tests for get_account_id()."""
+    """Tests for get_account_id() — A-AV-2 whitelist enforcement."""
 
-    def test_returns_isk_account_id(self, config_file):
-        _make_client_with_isk(config_file, account_id="12345")
+    def test_returns_whitelisted_isk_account_id(self, config_file):
+        _make_client_with_isk(config_file, account_id="1625505")
         with patch.object(mod, "CONFIG_FILE", config_file):
             aid = mod.get_account_id()
-        assert aid == "12345"
+        assert aid == "1625505"
 
     def test_caches_after_first_call(self, config_file):
         mock_client = _make_client_with_isk(config_file)
@@ -354,22 +399,82 @@ class TestGetAccountId:
             ]
         }
         _MockAvanzaClass.return_value = mock_client
-        with patch.object(mod, "CONFIG_FILE", config_file), pytest.raises(RuntimeError, match="No ISK account"):
+        with patch.object(mod, "CONFIG_FILE", config_file), pytest.raises(RuntimeError, match="No whitelisted ISK"):
             mod.get_account_id()
 
-    def test_finds_isk_among_multiple_accounts(self, config_file):
+    def test_finds_whitelisted_among_multiple_accounts(self, config_file):
+        """If multiple ISK accounts exist, only the whitelisted one is returned."""
         mock_client = MagicMock()
         mock_client.get_overview.return_value = {
             "accounts": [
                 {"name": "AF", "accountId": "111", "accountType": "Aktie_Fondkonto",
                  "totalValue": 0, "positions": []},
-                {"name": "ISK", "accountId": "222", "accountType": "Investeringssparkonto_ISK",
+                {"name": "ISK", "accountId": "1625505", "accountType": "Investeringssparkonto_ISK",
                  "totalValue": 50000, "positions": []},
             ]
         }
         _MockAvanzaClass.return_value = mock_client
         with patch.object(mod, "CONFIG_FILE", config_file):
-            assert mod.get_account_id() == "222"
+            assert mod.get_account_id() == "1625505"
+
+    def test_rejects_non_whitelisted_isk_account(self, config_file):
+        """A-AV-2: An ISK-typed account NOT in ALLOWED_ACCOUNT_IDS must be
+        rejected, even if it's the only ISK in the response. This prevents
+        a future-added account (or pension reclassified as ISK) from being
+        traded on."""
+        mock_client = MagicMock()
+        mock_client.get_overview.return_value = {
+            "accounts": [
+                {"name": "Stranger ISK", "accountId": "9999999",
+                 "accountType": "Investeringssparkonto_ISK",
+                 "totalValue": 50000, "positions": []},
+            ]
+        }
+        _MockAvanzaClass.return_value = mock_client
+        with patch.object(mod, "CONFIG_FILE", config_file), \
+             pytest.raises(RuntimeError, match="No whitelisted ISK"):
+            mod.get_account_id()
+
+    def test_rejects_pension_2674244_even_if_iskish(self, config_file):
+        """A-AV-2: The actual pension account ID 2674244 must be rejected
+        even if Avanza tags it as ISK-typed."""
+        mock_client = MagicMock()
+        mock_client.get_overview.return_value = {
+            "accounts": [
+                {"name": "Pension", "accountId": "2674244",
+                 "accountType": "Investeringssparkonto_ISK",
+                 "totalValue": 999999, "positions": []},
+            ]
+        }
+        _MockAvanzaClass.return_value = mock_client
+        with patch.object(mod, "CONFIG_FILE", config_file), \
+             pytest.raises(RuntimeError, match="No whitelisted ISK"):
+            mod.get_account_id()
+
+    def test_picks_whitelisted_when_pension_listed_first(self, config_file):
+        """A-AV-2: If Avanza re-orders the response and pension comes first,
+        we still pick the correct whitelisted account."""
+        mock_client = MagicMock()
+        mock_client.get_overview.return_value = {
+            "accounts": [
+                {"name": "Pension", "accountId": "2674244",
+                 "accountType": "Investeringssparkonto_ISK",
+                 "totalValue": 999999, "positions": []},
+                {"name": "Trading ISK", "accountId": "1625505",
+                 "accountType": "Investeringssparkonto_ISK",
+                 "totalValue": 100000, "positions": []},
+            ]
+        }
+        _MockAvanzaClass.return_value = mock_client
+        with patch.object(mod, "CONFIG_FILE", config_file):
+            assert mod.get_account_id() == "1625505"
+
+    def test_allowed_account_ids_constant_exists(self):
+        """A-AV-2: The constant must be a frozen set-like object listing
+        only the trading account."""
+        assert hasattr(mod, "ALLOWED_ACCOUNT_IDS")
+        assert "1625505" in mod.ALLOWED_ACCOUNT_IDS
+        assert "2674244" not in mod.ALLOWED_ACCOUNT_IDS
 
 
 class TestPlaceBuyOrder:
@@ -454,7 +559,7 @@ class TestGetOrderStatus:
         with patch.object(mod, "CONFIG_FILE", config_file):
             status = mod.get_order_status("ORD-1")
         assert status["state"] == "FILLED"
-        mock_client.get_order.assert_called_once_with("9999", "ORD-1")
+        mock_client.get_order.assert_called_once_with("1625505", "ORD-1")
 
 
 class TestDeleteOrder:
@@ -470,4 +575,4 @@ class TestDeleteOrder:
         with patch.object(mod, "CONFIG_FILE", config_file):
             result = mod.delete_order("ORD-1")
         assert result["orderRequestStatus"] == "SUCCESS"
-        mock_client.delete_order.assert_called_once_with("9999", "ORD-1")
+        mock_client.delete_order.assert_called_once_with("1625505", "ORD-1")
