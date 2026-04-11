@@ -78,8 +78,10 @@ Worktree: `/mnt/q/finance-analyzer-fixq`
 - [~] **BUG-183** autonomous per-ticker throttle — DROPPED. Per prior session:
       "BUY/SELL signals always bypass the global throttle. The throttle only
       suppresses pure-noise HOLD messages."
-- [ ] **A-IN-3** Add concurrency lock to `portfolio/claude_gate.py` (file lock
-      for cross-process, threading.Lock for in-process).
+- [x] **A-IN-3** Added in-process `_invoke_lock` (threading.Lock) wrapping
+      both invoke_claude / invoke_claude_text. Max in-process concurrency
+      now 1. Cross-process file lock deferred (separate concern).
+      → commit `e0a4605` (5-thread serialization test passes)
 
 ### Batch 5 — Signal-system tuning (medium risk, P0)
 
