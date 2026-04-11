@@ -181,7 +181,7 @@ All 11 fixes from the fix/queue-2026-04-11 branch have been verified:
 | 2 | 2026-04-07 | ~40 | 4 | 12 | ~20% of R1 |
 | 3 | 2026-04-08 | 67 | 15 | 35 | ~70% of R2 |
 | 4 | 2026-04-09 | 67 | 15 | 35 | ~73% of R3 |
-| 5 | 2026-04-11 | 44+ | 3 | 23 | 100% of targeted P0/P1 batch |
+| 5 | 2026-04-11 | 52+ | 6 | 28 | 100% of targeted P0/P1 batch |
 
 **Trend**: Fix rate has improved dramatically. Round 5 found only 12 total findings
 (vs 67 in Rounds 3-4), and all 11 targeted fixes from the fix queue are verified correct.
@@ -264,9 +264,25 @@ The signals-core agent found 9 findings including the **utility boost saturation
 **SC-R5-2 is the highest-impact signals-core finding** — the utility boost effectively
 overrides the accuracy gate by always applying max 1.5x to any signal with positive returns.
 
-### Other agents (4 remaining — still in progress)
+### orchestration agent (COMPLETE — 8 findings)
 
-The orchestration, metals-core, avanza-api, and infrastructure agents are still running.
+| ID | Sev | File | Finding |
+|----|-----|------|---------|
+| OR-R5-1 | P0 | agent_invocation.py:302 | **Layer 2 bypasses claude_gate** — bare Popen, no tree-kill, zombies on timeout |
+| OR-R5-2 | P0 | main.py:949 | fromisoformat crash on Python ≤3.10 — crash detection silently broken |
+| OR-R5-3 | P0 | main.py (none) | check_drawdown still never called — confirmed 3rd time |
+| OR-R5-4 | P1 | agent_invocation.py:241 | Shared specialist deadline starves later procs |
+| OR-R5-5 | P1 | claude_gate + loop_contract | Self-heal blocks main loop 180s during T3 |
+| OR-R5-6 | P1 | main.py:740 | classify_tier/update_tier_state double state load |
+| OR-R5-7 | P1 | multi_agent_layer2.py:153 | File handle leak on specialist Popen failure |
+| OR-R5-8 | P1 | crypto_scheduler.py:310 | Local timezone instead of UTC |
+
+**OR-R5-1 is the most critical orchestration finding** — the primary Layer 2 launcher
+bypasses claude_gate entirely, accumulating zombie processes on every T3 timeout.
+
+### Other agents (3 remaining — still in progress)
+
+The metals-core, avanza-api, and infrastructure agents are still running.
 
 ---
 
