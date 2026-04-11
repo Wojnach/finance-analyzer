@@ -44,8 +44,9 @@ Worktree: `/mnt/q/finance-analyzer-fixq`
       in `portfolio/fin_snipe_manager.py:420` (was actually here, not metals_loop).
       All exit_optimizer SEK rewards previously wrong by ~10x.
       → commit `7597650` (live FX rate + AST regression guard, 48/48 pass)
-- [ ] **A-PR-2** Fix drawdown peak scan in `portfolio/risk_management.py` to
+- [x] **A-PR-2** Fix drawdown peak scan in `portfolio/risk_management.py` to
       walk full equity history, not just the last 2000 entries (~33h window).
+      → commit `174eca0` (new `_streaming_max` helper, 47/47 pass)
 - [ ] **A-DE-4** Add yfinance MultiIndex flatten in `portfolio/fear_greed.py`
       stock path. Stock F&G signal is silently dead.
 - [ ] **A-DE-5** Fix `portfolio/onchain_data.py` cache crash on old-format
