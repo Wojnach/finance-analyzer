@@ -61,8 +61,10 @@ Worktree: `/mnt/q/finance-analyzer-fixq`
       Added explicit `if fill_pct < 0: HOLD` guard for clarity + 3 regression
       tests covering all 4 (gap_dir × day_dir) quadrants.
       → commit `c595ab0`
-- [ ] **A-SM-2** Add GARCH key to volatility `_empty_result` schema in
+- [x] **A-SM-2** Add GARCH key to volatility `_empty_result` schema in
       `portfolio/signals/volatility.py`. Inconsistent sub_signals.
+      → commit `a75e8f7` (also added garch_vol/realized_vol/garch_ratio
+      to indicators + cross-path schema regression test)
 - [ ] **A-MC-4** Use real `entry_ts` from holdings instead of `now()` in
       metals_loop HOLD_TIME_EXTENDED check.
 

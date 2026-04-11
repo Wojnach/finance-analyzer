@@ -395,6 +395,11 @@ def _compute_exit_target(snapshot: dict, instrument_state: dict) -> dict[str, An
         or not session.is_open
         or session.remaining_minutes < 2
     ):
+        # A-MC-4: When the position is closed, drop the persisted entry_ts
+        # so a future re-entry starts a fresh hold-time clock instead of
+        # inheriting the old position's age.
+        if position_volume <= 0 and "entry_ts" in instrument_state:
+            instrument_state.pop("entry_ts", None)
         return result
 
     try:
@@ -410,13 +415,40 @@ def _compute_exit_target(snapshot: dict, instrument_state: dict) -> dict[str, An
         # API failure (matching fx_rates' own fallback behavior).
         from portfolio.fx_rates import fetch_usd_sek
         live_usdsek = fetch_usd_sek() or 10.85
+        # A-MC-4 (2026-04-11): Real entry timestamp instead of `now()`.
+        # Previously fin_snipe_manager always passed entry_ts=now() to the
+        # exit_optimizer, which made `hold_hours = (now - entry_ts) ≈ 0`
+        # for every cycle. The HOLD_TIME_EXTENDED risk flag at
+        # exit_optimizer.py:390-393 fires only when hold_hours > 5, so it
+        # never fired — the flag was permanently disabled despite being
+        # in the live code path.
+        #
+        # Fix: persist the entry timestamp in instrument_state on first
+        # observation of a non-zero position, then read it back on
+        # subsequent calls. Bootstrap behavior: existing positions get
+        # entry_ts = "first time we see them after this fix ships", which
+        # is acceptable — it just means HOLD_TIME_EXTENDED becomes
+        # available 5h after restart for already-open positions, vs.
+        # never. New positions get the real first-observation time.
+        entry_ts_iso = instrument_state.get("entry_ts")
+        if entry_ts_iso:
+            try:
+                position_entry_ts = dt.datetime.fromisoformat(entry_ts_iso)
+                if position_entry_ts.tzinfo is None:
+                    position_entry_ts = position_entry_ts.replace(tzinfo=dt.UTC)
+            except (TypeError, ValueError):
+                position_entry_ts = dt.datetime.now(dt.UTC)
+                instrument_state["entry_ts"] = position_entry_ts.isoformat()
+        else:
+            position_entry_ts = dt.datetime.now(dt.UTC)
+            instrument_state["entry_ts"] = position_entry_ts.isoformat()
         plan = compute_exit_plan(
             Position(
                 symbol=snapshot["ticker"],
                 qty=position_volume,
                 entry_price_sek=position_avg,
                 entry_underlying_usd=_estimate_entry_underlying(snapshot, instrument_state),
-                entry_ts=dt.datetime.now(dt.UTC),
+                entry_ts=position_entry_ts,
                 instrument_type="warrant",
                 leverage=leverage,
                 financing_level=None,
