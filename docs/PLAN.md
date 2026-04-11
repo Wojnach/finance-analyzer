@@ -47,8 +47,9 @@ Worktree: `/mnt/q/finance-analyzer-fixq`
 - [x] **A-PR-2** Fix drawdown peak scan in `portfolio/risk_management.py` to
       walk full equity history, not just the last 2000 entries (~33h window).
       → commit `174eca0` (new `_streaming_max` helper, 47/47 pass)
-- [ ] **A-DE-4** Add yfinance MultiIndex flatten in `portfolio/fear_greed.py`
+- [x] **A-DE-4** Add yfinance MultiIndex flatten in `portfolio/fear_greed.py`
       stock path. Stock F&G signal is silently dead.
+      → commit `1a8381f` (defensive flatten + 4 new tests)
 - [ ] **A-DE-5** Fix `portfolio/onchain_data.py` cache crash on old-format
       ISO-string-as-epoch entries. Add format-detection fallback.
 

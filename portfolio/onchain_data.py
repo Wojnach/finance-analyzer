@@ -15,6 +15,7 @@ Usage:
 
 import logging
 import time
+from datetime import datetime
 from pathlib import Path
 
 from portfolio.api_utils import load_config as _load_config
@@ -23,6 +24,37 @@ from portfolio.http_retry import fetch_json
 from portfolio.shared_state import _cached
 
 logger = logging.getLogger("portfolio.onchain_data")
+
+
+def _coerce_epoch(value) -> float:
+    """A-DE-5 (2026-04-11): Coerce a cache timestamp to a unix-epoch float.
+
+    Older versions of onchain_cache.json stored "ts" as an ISO 8601 string
+    instead of an epoch number. The seeding code below does
+    `time.time() - cache_ts < TTL` which crashes with TypeError when ts is
+    a string. This helper accepts:
+        - int / float           → returned as float
+        - "1712345678"          → parsed as float
+        - "2026-04-11T..."      → parsed via datetime.fromisoformat
+        - anything else / fail  → 0.0 (treated as ancient → cache miss)
+
+    Returning 0 on failure is safe: it forces a cache miss, which costs
+    one extra API call but never silently breaks the on-chain voter.
+    """
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str) and value:
+        try:
+            return float(value)
+        except ValueError:
+            pass
+        try:
+            # Handle "Z" suffix for UTC zulu time
+            iso = value.replace("Z", "+00:00")
+            return datetime.fromisoformat(iso).timestamp()
+        except (ValueError, TypeError):
+            pass
+    return 0.0
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -209,7 +241,13 @@ def get_onchain_data():
     # after every process restart (burns the 15 req/day budget).
     persistent = load_json(CACHE_FILE, default={})
     if persistent:
-        cache_ts = persistent.get("ts", 0) or persistent.get("_fetched_at", 0)
+        # A-DE-5 (2026-04-11): Defensive timestamp parse. Older versions of
+        # this cache stored "ts" as an ISO 8601 string instead of an epoch
+        # float. The arithmetic on line below crashes with TypeError when
+        # ts is a string, which then propagates up and silently disables
+        # the on-chain BTC voter on the next restart. Detect and convert.
+        raw_ts = persistent.get("ts", 0) or persistent.get("_fetched_at", 0)
+        cache_ts = _coerce_epoch(raw_ts)
         if time.time() - cache_ts < ONCHAIN_TTL:
             # Still fresh — pre-populate the in-memory cache so _cached() returns
             # immediately without hitting the API.
