@@ -181,7 +181,7 @@ All 11 fixes from the fix/queue-2026-04-11 branch have been verified:
 | 2 | 2026-04-07 | ~40 | 4 | 12 | ~20% of R1 |
 | 3 | 2026-04-08 | 67 | 15 | 35 | ~70% of R2 |
 | 4 | 2026-04-09 | 67 | 15 | 35 | ~73% of R3 |
-| 5 | 2026-04-11 | 35+ | 3 | 19 | 100% of targeted P0/P1 batch |
+| 5 | 2026-04-11 | 44+ | 3 | 23 | 100% of targeted P0/P1 batch |
 
 **Trend**: Fix rate has improved dramatically. Round 5 found only 12 total findings
 (vs 67 in Rounds 3-4), and all 11 targeted fixes from the fix queue are verified correct.
@@ -247,10 +247,26 @@ The data-external agent found 7 findings including an **incomplete A-DE-5 fix**:
 **Key insight**: DE-R5-1 and DE-R5-4 show the **incomplete fix pattern** — today's fixes
 (A-DE-4, A-DE-5) were applied to one code path but the same bug exists in parallel paths.
 
-### Other agents (5 remaining — still in progress)
+### signals-core agent (COMPLETE — 9 findings)
 
-The signals-core, orchestration, metals-core, avanza-api, and infrastructure agents
-are still running. Results will be added as they complete.
+The signals-core agent found 9 findings including the **utility boost saturation bug**:
+
+| ID | Sev | File | Finding |
+|----|-----|------|---------|
+| SC-R5-2 | P1 | signal_engine.py:1929 | **Utility boost always max 1.5x** — avg_return in raw %, not fraction. 48% accuracy → 72% boosted |
+| SC-R5-1 | P1 | accuracy_stats.py:291 | Cost-adjusted accuracy deflated: neutral threshold 0.05% < cost threshold 0.10% |
+| SC-R5-3 | P2 | accuracy_stats.py:851 | Regime/ticker caches share single timestamp (BUG-133 fix not propagated) |
+| SC-R5-4 | P2 | forecast_accuracy.py:294 | backfill_forecast_outcomes truncates predictions file on max_entries |
+| SC-R5-5 | P2 | signal_history.py:53 | update_history no lock under ThreadPoolExecutor — lost writes |
+| SC-R5-6 | P2 | signal_engine.py:1466 | On-chain BTC tied vote behavior undocumented |
+| SC-R5-7 | P2 | outcome_tracker.py:84 | Sentiment vote reconstruction missing hysteresis |
+
+**SC-R5-2 is the highest-impact signals-core finding** — the utility boost effectively
+overrides the accuracy gate by always applying max 1.5x to any signal with positive returns.
+
+### Other agents (4 remaining — still in progress)
+
+The orchestration, metals-core, avanza-api, and infrastructure agents are still running.
 
 ---
 
