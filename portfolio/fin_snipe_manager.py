@@ -400,6 +400,16 @@ def _compute_exit_target(snapshot: dict, instrument_state: dict) -> dict[str, An
     try:
         market_summary = _summarize_market(snapshot)
         underlying_summary = market_summary.get("underlying") or {}
+        # A-MC-2 (2026-04-11): was hardcoded `usdsek=1.0` which made every
+        # SEK calculation downstream of compute_exit_plan wrong by ~10x.
+        # exit_optimizer.py:312 multiplies underlying USD by usdsek to get
+        # warrant value in SEK, and uses that in the optimizer's reward
+        # function — so usdsek=1.0 understated SEK values by an order of
+        # magnitude. Fetch the live rate (with the same 15-min cache the
+        # rest of the system uses) and fall back to 10.85 only on total
+        # API failure (matching fx_rates' own fallback behavior).
+        from portfolio.fx_rates import fetch_usd_sek
+        live_usdsek = fetch_usd_sek() or 10.85
         plan = compute_exit_plan(
             Position(
                 symbol=snapshot["ticker"],
@@ -417,7 +427,7 @@ def _compute_exit_target(snapshot: dict, instrument_state: dict) -> dict[str, An
                 bid=float(underlying_summary.get("bid") or current_underlying),
                 ask=float(underlying_summary.get("ask") or current_underlying),
                 atr_pct=atr_pct if atr_pct > 0 else None,
-                usdsek=1.0,
+                usdsek=live_usdsek,
                 drift=0.0,
             ),
             session.session_end,

@@ -974,3 +974,28 @@ def test_notify_critical_loads_config_safely(tmp_path, monkeypatch):
     mgr._notify_critical("test_cat", "test leak fix")
     assert len(sent) == 1
     assert "test leak fix" in sent[0]
+
+
+def test_no_hardcoded_usdsek_one_in_fin_snipe_manager():
+    """A-MC-2 (2026-04-11) regression guard: fin_snipe_manager.py must NOT
+    contain `usdsek=1.0` literal — that bug made every SEK calculation
+    wrong by ~10x. The fix uses fetch_usd_sek() with a 10.85 fallback.
+
+    AST-based so the test can't be tricked by comments mentioning the
+    pattern textually."""
+    import ast
+    from pathlib import Path
+    from portfolio import fin_snipe_manager
+
+    src = Path(fin_snipe_manager.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg == "usdsek":
+            # Allow Name (variable), Call (function-call), or Attribute.
+            # Forbid Constant(1.0).
+            if isinstance(node.value, ast.Constant) and node.value.value == 1.0:
+                raise AssertionError(
+                    f"fin_snipe_manager.py line {node.lineno}: hardcoded "
+                    f"usdsek=1.0 detected. Use fetch_usd_sek() instead "
+                    f"(A-MC-2)."
+                )
