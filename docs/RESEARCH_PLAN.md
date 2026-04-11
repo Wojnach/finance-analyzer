@@ -58,13 +58,28 @@ After-hours research session findings from Phase 0 signal audit:
 - Synthesize all findings into `data/morning_briefing.json`
 - Send Telegram summary
 
-### Tier 3: Defer to backlog
+### Tier 2b: Next Session P0 (from quant research agent)
 
-- Walk-forward signal weight optimizer
-- IC-based dynamic signal weighting (instead of accuracy-based)
-- HMM regime blending (replace discrete regime labels with continuous probabilities)
-- Transformer price prediction pipeline
-- Multi-agent debate system
+**6. Direction-Specific Weight Scaling** [EASY, +2-4pp]
+- Use `buy_accuracy`/`sell_accuracy` as weight in `_weighted_consensus` instead of overall accuracy
+- When qwen3 votes SELL → weight at 74.3%; when BUY → weight at 30.4% (currently both ~60%)
+- ~5-line change in signal_engine.py:838: `weight = dir_acc if dir_n >= 20 else (acc if samples >= 20 else 0.5)`
+- **Status**: Data foundation shipped tonight (per-ticker directional accuracy). This is the natural next step.
+
+**7. Verify Fear & Greed Is Actually Gated** [EASY, CRITICAL]
+- Blended accuracy: 0.7 * 0.259 + 0.3 * 0.586 = 0.357 — below 0.45 gate
+- It SHOULD be force-HOLD'd but need to verify accuracy_cache.json has been refreshed
+- If not gated, fear_greed is actively poisoning consensus with constant BUY signals in sustained fear
+
+### Tier 3: Defer to backlog (prioritized by quant research)
+
+- **P1**: MSTR-BTC proxy signal inheritance (+5-8pp on MSTR, new module)
+- **P1**: XAG cross-asset feature enrichment (DXY, copper lead, real yields)
+- **P2**: IC-based dynamic signal weighting (Spearman correlation, not hit rate)
+- **P2**: HMM regime blending (probabilistic 3-4 state, per-instrument)
+- **P3**: Dynamic correlation groups (hierarchical clustering on agreement matrix)
+- **P3**: Adaptive position sizing (Half-Kelly + ATR vol targeting)
+- **P3**: Walk-forward validation framework (parameter stability check)
 
 ## Execution Order
 

@@ -1,219 +1,83 @@
 {
-  "date": "2026-04-05",
-  "research_topics": [
-    "Regime-adaptive signal weighting",
-    "Walk-forward optimization for signal ensembles",
-    "Signal correlation pruning",
-    "Mean-reversion signals for ranging markets",
-    "Adaptive Bollinger Band / Keltner Channel strategies",
-    "Volatility-targeted position sizing (Kelly alternatives)",
-    "Regime-based stop-loss adjustment",
-    "Equity curve trading / drawdown circuit breakers",
-    "Multi-agent LLM trading systems (TradingAgents)"
-  ],
-  "findings": [
+  "date": "2026-04-10",
+  "generated_at": "2026-04-11T00:10:00+02:00",
+  "session_type": "after-hours-research",
+  "research_topics": 8,
+  "priority_ranking": [
     {
-      "topic": "Regime-Adaptive Signal Weighting via HMM",
-      "finding": "A 2025 framework combines Hidden Markov Models with ensemble tree models (bagging + boosting) for regime detection, then trains regime-specific ML models. The HMM detects 3 states (bull/bear/neutral) using features: returns, volatility, VIX, MA50-MA200 spread, 10Y yield. A hybrid voting classifier integrates HMM with ensemble learners for robust regime classification. Python package 'hidden-regime' on PyPI provides pipeline-based architecture with financial pipelines, regime characterization, and trading signals.",
-      "relevance_to_us": "Our current regime detection uses a simple EMA9/EMA21 spread + ATR threshold (4 states). Upgrading to HMM-based detection with macro features would better capture regime transitions. The 'hidden-regime' PyPI package could be integrated directly. Our REGIME_WEIGHTS dict already has per-regime multipliers -- HMM would improve WHEN those multipliers activate.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://blog.quantinsti.com/regime-adaptive-trading-python/ and https://www.aimspress.com/article/id/69045d2fba35de34708adb5d"
+      "rank": "P0",
+      "title": "Direction-specific weight scaling",
+      "difficulty": "Easy",
+      "expected_impact": "+2-4pp consensus accuracy",
+      "description": "Use buy_accuracy/sell_accuracy as weight in _weighted_consensus instead of overall accuracy. When qwen3 votes SELL, weight it at 74.3%; when BUY, weight at 30.4%. Currently both get ~60%.",
+      "implementation": "~5-line change in signal_engine.py _weighted_consensus at line 838. Change: weight = dir_acc if dir_n >= 20 else (acc if samples >= 20 else 0.5)",
+      "affected_signals": ["qwen3 (BUY 30.4% vs SELL 74.3%)", "claude_fundamental (BUY 66.3% vs SELL 34.7%)", "econ_calendar (SELL 65.2% vs BUY ~45%)"],
+      "status": "READY — tonight's per-ticker directional accuracy work provides the data foundation"
     },
     {
-      "topic": "RAM-Net: Meta-Learning for Regime-Aware Sample Weighting",
-      "finding": "RAM-Net (ACM ICAIF 2025) dynamically assigns sample weights conditioned on both loss patterns and current market regime. Instead of static regime multipliers, it uses a meta-learning architecture that reinterprets historical data according to relevance under prevailing market conditions. Enables upweighting training samples that resemble current conditions.",
-      "relevance_to_us": "Our signal accuracy is computed with a fixed 70/30 recent/all-time blend (_RECENCY_WEIGHT_NORMAL = 0.7). RAM-Net's approach suggests we should weight historical signal accuracy by regime similarity, not just recency. A signal that worked well in the LAST ranging period is more relevant than one that worked last week in a trending period.",
-      "implementation_difficulty": "hard",
-      "expected_impact": "high",
-      "source": "https://doi.org/10.1145/3768292.3770374"
+      "rank": "P1",
+      "title": "MSTR-BTC proxy signal inheritance",
+      "difficulty": "Medium",
+      "expected_impact": "+5-8pp on MSTR",
+      "description": "MSTR has 1.31-1.41 beta to BTC, >0.80 daily correlation. Import BTC consensus into MSTR with beta scaling. Add mNAV premium tracking (>2.0 = SELL bias, <1.3 = BUY bias).",
+      "implementation": "New mstr_btc_proxy.py module (~150 lines). Needs mNAV data.",
+      "sources": ["erickimphotography.com MSTR-BTC quantitative analysis", "VanEck MSTR premium analysis", "Kerrisdale Capital short thesis"]
     },
     {
-      "topic": "Hybrid AI Trading with Regime Gating and Composite Scoring",
-      "finding": "A 2026 paper (ComSIA/Springer LNNS) combines ML predictions, technical confirmation (price > EMA-50 + bullish MACD), and mean-reversion (RSI < 30) into a composite score requiring >= 2 for entry. Regime acts as gate: trades only in bullish regimes. Results: 135.49% return vs 8.64% baseline, Sharpe 1.68 vs 0.48, max drawdown -15.6% vs -19.84%. Position sizing via ATR: 0.01 * cash / ATR.",
-      "relevance_to_us": "We already have composite scoring and regime gating (REGIME_GATED_SIGNALS). The key insight is their composite score threshold requiring agreement from DIFFERENT signal categories (ML + technical + MR). Our MIN_VOTERS=3 is similar but doesn't enforce category diversity. Adding a 'must have votes from >= 2 signal categories' rule could reduce false consensus from correlated signals.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "https://arxiv.org/html/2601.19504v1"
+      "rank": "P1",
+      "title": "XAG cross-asset feature enrichment",
+      "difficulty": "Easy-Medium",
+      "expected_impact": "+3-6pp on XAG-USD",
+      "description": "Add DXY as explicit feature (strongest macro driver of silver), copper as leading indicator (1-2 day lead), real yields inversion threshold. Paper: tree-based classifiers achieve 85-90% directional accuracy at 20-day horizons for gold/silver.",
+      "sources": ["MDPI: Predicting Gold and Silver Direction Using Tree-Based Classifiers", "MDPI: Silver Price Forecasting Using XGBoost"]
     },
     {
-      "topic": "Walk-Forward Optimization with Bayesian Optimization",
-      "finding": "A Python WFO implementation uses Bayesian Optimization for parameter tuning within rolling in-sample windows, validated on out-of-sample. Combining LLMs for hypothesis generation, genetic programming for parameter optimization, and neural networks for regime detection -- all validated through WFO -- yields honest Sharpe of 0.33. XGBoost + walk-forward specifically addresses concept drift.",
-      "relevance_to_us": "Our REGIME_WEIGHTS, ACCURACY_GATE_THRESHOLD, _CORRELATION_PENALTY, and _RECENCY_WEIGHT values are all manually tuned. Walk-forward optimization would automatically re-tune these on a rolling basis (e.g., every 30 days on last 90 days, validate on next 30). This directly addresses 11/30 signals having <45% recent accuracy -- they may have been tuned for a different regime.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://github.com/TonyMa1/walk-forward-backtester and https://arxiv.org/html/2512.12924v1"
+      "rank": "P2",
+      "title": "IC-based signal weighting",
+      "difficulty": "Medium",
+      "expected_impact": "+2-5pp",
+      "description": "Replace accuracy (hit rate) with Information Coefficient (Spearman rank correlation of predicted vs actual returns). IC captures both direction AND magnitude. Good ICs are 0.02-0.08; above 0.15 suggests overfitting.",
+      "implementation": "New compute_rolling_ic() in accuracy_stats.py. Convert votes to numerical predictions: predicted_return = confidence * sign(vote). Rolling 30-day Spearman correlation."
     },
     {
-      "topic": "Signal Correlation Pruning via PCA and Correlation Filtering",
-      "finding": "Best practice: (1) Compute pairwise correlation matrix of signal outputs over rolling window, (2) Apply PCA to identify redundant signals, (3) Within each cluster keep only highest-accuracy signal, (4) LASSO regularization naturally zeros out redundant signals. Practical approach: correlation check to remove similar signals, take top uncorrelated performers into ensemble.",
-      "relevance_to_us": "We have 5 manual CORRELATION_GROUPS. An automated rolling 30-day pairwise Pearson correlation (signal outputs as BUY=1/HOLD=0/SELL=-1) would discover NEW correlations and dissolve stale ones. Current groups may miss undiscovered correlations (momentum_factors + oscillators? fibonacci + mean_reversion?).",
-      "implementation_difficulty": "medium",
-      "expected_impact": "medium",
-      "source": "https://johfischer.com/2021/08/06/correlation-based-feature-selection-in-python-from-scratch/"
+      "rank": "P2",
+      "title": "HMM regime detection",
+      "difficulty": "Medium",
+      "expected_impact": "+3-5pp",
+      "description": "Replace deterministic detect_regime() with probabilistic 3-4 state Gaussian HMM. Output regime probability vector instead of binary label. Use hmmlearn.GaussianHMM, rolling 252d window per instrument."
     },
     {
-      "topic": "Mean-Reversion in Ranging Markets: Z-Score + OU Half-Life Monitoring",
-      "finding": "Mean reversion has 65-75% win rate in ranging markets (matching our observed 65.4%). Best indicators: Z-score (more precise than RSI), RSI(2) for ultra-short-term, IBS for intraday, OU half-life for persistence. A 2025 SSRN paper refines half-life estimation. Key risk: MR fails catastrophically on regime shift. Forex spends 70-80% of time in consolidation. Dynamic OU half-life monitoring detects when MR is breaking down (half-life increasing = regime shifting).",
-      "relevance_to_us": "Our mean_reversion already has RSI(2), RSI(3), IBS, BB %B, and OU half-life. What's MISSING: (1) Z-score MR signal (more granular than RSI), (2) Regime-conditional stop-losses for MR trades, (3) Dynamic OU half-life monitoring to detect regime shift early -- when half-life increases 2x above 30-day average, emit warning.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5310321 and https://medium.com/@setupalpha.capital/trend-following-vs-mean-reversion-which-strategy-wins-in-2026-9513565b73f7"
+      "rank": "P3",
+      "title": "Dynamic correlation groups",
+      "difficulty": "Medium",
+      "expected_impact": "+1-2pp",
+      "description": "Replace static _STATIC_CORRELATION_GROUPS with hierarchical clustering on 32x32 signal vote agreement matrix. Current groups may be stale."
     },
     {
-      "topic": "BB/KC Squeeze for Range-Bound Markets",
-      "finding": "When Bollinger Bands contract INSIDE Keltner Channels, it signals extreme low volatility (squeeze). This compression acts as a coiled spring. In range-bound markets, outer KC bands act as dynamic S/R for MR trades. KC mean-reversion on S&P 500: 77% win rate, 288 trades, CAGR 6.3%, profit factor 2.0. Combining RSI + volume alongside squeeze validates breakout direction.",
-      "relevance_to_us": "Our volatility signal has BB Squeeze detection but no Keltner Channel overlay. Adding KC for squeeze-within-squeeze pattern would improve precision. In ranging regime, BB/KC squeeze could serve as TIMING signal -- MR trades during squeeze, breakout trades on squeeze release.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "https://www.quantifiedstrategies.com/keltner-bands-trading-strategies/"
+      "rank": "P3",
+      "title": "Adaptive position sizing (Half-Kelly + ATR)",
+      "difficulty": "Medium",
+      "expected_impact": "-20-30% max drawdown",
+      "description": "Fractional Kelly (25-50%) + volatility targeting. Regime-conditioned: reduce to 60% in high-vol, increase to 120% in low-vol trending."
     },
     {
-      "topic": "Kelly-VAPS: Volatility-Adjusted Position Sizing",
-      "finding": "Kelly-VAPS bridges Kelly Criterion with ATR-based volatility adjustment. Fractional Kelly (0.25-0.5x) reduces volatility while maintaining growth. A 2025 gold futures paper achieved Sharpe 2.88 using fractional impact-adjusted Kelly with ATR exits. Formula: position_size = 0.25 * kelly_fraction * equity / (ATR * tick_value). For crypto (>30% vol), use 0.25x Kelly.",
-      "relevance_to_us": "Current position sizing is confidence-based. Kelly-VAPS would make sizing volatility-aware: smaller in high-ATR environments (BTC at $67K with high vol), larger in low-vol (stable XAU). MR trades should be sized larger (high win rate) but with tight stops.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://www.mql5.com/en/code/71390 and https://medium.com/@tmapendembe_28659/kelly-criterion-for-crypto-traders-a-modern-approach-to-volatile-markets-a0cda654caa9"
-    },
-    {
-      "topic": "Regime-Based Stop-Loss Adjustment",
-      "finding": "Stop-losses IMPROVE risk-adjusted returns in trending but REDUCE returns in mean-reverting regimes. Trailing stops with dynamic thresholds outperform fixed (Sharpe 1.28 vs 0.92 on commodities). Recommended: calm markets 1.5-2x ATR, volatile 2.5-3x ATR. In MR regimes, wider stop-loss policies outperform only when bull-regime volatility is low.",
-      "relevance_to_us": "Our risk_management.py uses ATR-based stops without regime adjustment. In current ranging regime, stops may trigger on normal oscillation. Widening to 2.5-3x ATR in ranging and tightening to 1.5x in trending would reduce false stop-outs. For MR trades, stops should be beyond range boundary (Donchian 55) not ATR-based.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "high",
-      "source": "https://blog.harbourfronts.com/2025/08/11/the-impact-of-market-regimes-on-stop-loss-performance/"
-    },
-    {
-      "topic": "Equity Curve Trading: Serial Correlation Detection",
-      "finding": "Equity curve strategies reduce drawdown ONLY where returns show serial correlation (losses beget losses). Implementation: track equity curve MA, reduce position sizes by 25-30% when equity drops below MA, set alerts at 75% of drawdown limit. Anti-pattern: ECT is HARMFUL when returns are mean-reverting (which is common in MR strategies).",
-      "relevance_to_us": "Our check_drawdown() has binary 20% threshold. Adding graduated scale (75% of limit = reduce 25%; 90% = reduce 50%) would be more nuanced. Should test whether our equity curve shows serial correlation before applying ECT.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "https://www.mql5.com/en/blogs/post/765252"
-    },
-    {
-      "topic": "TradingAgents: Multi-Agent LLM Framework with Bull/Bear Debate",
-      "finding": "TradingAgents v0.2.0 (Feb 2026) deploys 7 specialized agents: 4 analysts, bull/bear researchers who debate in natural language, a trader, and 3-perspective risk management team. Built on LangGraph. Results: AAPL 26.62% return, Sharpe 8.21, max drawdown 0.91%. Architecture: structured outputs for control + natural language for debate. Agents query global state directly. Key benefit: debate format surfaces risks single-agent misses.",
-      "relevance_to_us": "Our Layer 2 is a single Claude instance. TradingAgents pattern suggests: (1) Bull researcher argues FOR trade, (2) Bear argues AGAINST, (3) Risk manager evaluates. Could implement as 3 sequential claude -p calls with specialized prompts where each sees previous arguments. Would reduce Layer 2's tendency toward either excessive caution or aggression.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://github.com/TauricResearch/TradingAgents and https://arxiv.org/abs/2412.20138"
-    },
-    {
-      "topic": "Adaptive Regime Boundary via RL Controller",
-      "finding": "March 2026 paper proposes autoencoder-gated dual transformers with Soft Actor-Critic RL to continuously optimize the BOUNDARY between regimes, not just signal weights within each. Achieves 0.59% MAPE. Key: when volatility is low, a 0.3% spread might be 'trending', but when vol is high, 0.5% is noise. The boundary itself must be adaptive.",
-      "relevance_to_us": "Our regime boundary is a fixed 0.5% EMA spread threshold. ALL instruments currently classified as 'ranging' -- possibly because threshold is too aggressive. A rolling-percentile approach to regime thresholds (e.g., 0.5% = 60th percentile of recent spreads means 'ranging', not a fixed cutoff) would reduce misclassification.",
-      "implementation_difficulty": "hard",
-      "expected_impact": "medium",
-      "source": "https://arxiv.org/abs/2603.19136"
-    },
-    {
-      "topic": "Dual MR + Trend Portfolio with Rebalancing Bonus",
-      "finding": "MR has 65-75% win rate with capped payoff (concave, short vol); trend following has 10-40% win rate with massive payoff (convex, long vol). 50/50 monthly rebalanced portfolio captures 'rebalancing bonus' via volatility harvesting. MR thrives in current choppy conditions; trend following gets whipped.",
-      "relevance_to_us": "Currently one consensus per ticker with MR + trend signals all voting together. Should compute TWO consensus scores: MR-consensus and TREND-consensus. In ranging regime, only MR-consensus drives decisions. In trending, only TREND-consensus. Eliminates trend signals (40-44% accuracy) diluting MR signals (65-68%) in ranging markets.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://medium.com/@setupalpha.capital/trend-following-vs-mean-reversion-which-strategy-wins-in-2026-9513565b73f7"
+      "rank": "P3",
+      "title": "Walk-forward validation framework",
+      "difficulty": "Hard",
+      "expected_impact": "+1-3pp + parameter confidence",
+      "description": "Replay signal_log.db through consensus engine with different parameter sets. 60d train, 15d test windows. Validate: ACCURACY_GATE, DIRECTIONAL_GATE, REGIME_WEIGHTS, CORRELATION_PENALTY, RECENCY_WEIGHT."
     }
   ],
-  "recommended_improvements": [
-    {
-      "title": "Dual-Consensus Architecture: Separate MR and Trend Voting Pools",
-      "description": "Split the 32-signal voting into two parallel consensus pools: MR-pool (mean_reversion, fibonacci, bb, rsi, calendar, econ_calendar) and TREND-pool (ema, macd, trend, momentum_factors, heikin_ashi, structure, smart_money). In ranging regime, only MR-pool votes count. In trending, only TREND-pool. In high-vol, both with equal weight. This eliminates trend signals (40-44% accuracy in ranging) diluting high-performing MR signals (65-68%). The regime selector already exists; this separates voting downstream. Neutral signals (volume, sentiment, ministral, qwen3, claude_fundamental) vote in both pools.",
-      "priority": 1,
-      "effort_days": 2,
-      "files_affected": [
-        "portfolio/signal_engine.py"
-      ]
-    },
-    {
-      "title": "Regime-Adaptive Stop-Loss Multipliers",
-      "description": "Add regime-based ATR multiplier to risk_management.py: ranging=2.5x ATR (wider to survive oscillation), trending=1.5x ATR (tighter to protect profits), high-vol=3.0x ATR (widest to avoid noise). For MR trades, set stops beyond Donchian 55 high/low rather than ATR-based. Research shows stop-losses reduce returns in MR regimes with fixed thresholds but improve with dynamic ones. Smallest change with highest ROI.",
-      "priority": 2,
-      "effort_days": 1,
-      "files_affected": [
-        "portfolio/risk_management.py",
-        "portfolio/trade_guards.py"
-      ]
-    },
-    {
-      "title": "Automated Rolling Correlation Matrix for Signal Pruning",
-      "description": "Compute 30-day rolling pairwise Pearson correlation of signal outputs (BUY=1, HOLD=0, SELL=-1) per ticker. Auto-discover correlation groups when r > 0.6. Replace manually-maintained CORRELATION_GROUPS with dynamically-computed groups. Log discovered correlations to JSONL. Only highest-accuracy signal per auto-detected group gets full weight. Run as part of daily accuracy update cycle.",
-      "priority": 3,
-      "effort_days": 3,
-      "files_affected": [
-        "portfolio/signal_engine.py",
-        "portfolio/accuracy_stats.py"
-      ]
-    },
-    {
-      "title": "Walk-Forward Optimization for Regime Weights",
-      "description": "Monthly WFO re-optimizing REGIME_WEIGHTS, ACCURACY_GATE_THRESHOLD, _CORRELATION_PENALTY using last 90 days of signal_log as in-sample and next 30 days as out-of-sample. Use optuna (Bayesian optimization) to maximize accuracy. Only adopt new weights if they improve out-of-sample. Run as scheduled task (PF-WFO, monthly). Addresses root problem: manually-set regime weights may be stale.",
-      "priority": 4,
-      "effort_days": 5,
-      "files_affected": [
-        "portfolio/signal_engine.py",
-        "portfolio/accuracy_stats.py"
-      ]
-    },
-    {
-      "title": "HMM-Based Regime Detection Upgrade",
-      "description": "Replace EMA9/EMA21 spread + ATR threshold with Gaussian HMM (hmmlearn) trained on: 20-day returns, 20-day volatility, VIX, EMA spread, ADX. 1 year training data, 3-4 states mapped to existing regime labels. Retrain monthly. May resolve why ALL instruments are classified 'ranging' -- fixed 0.5% threshold may be wrong for current market volatility.",
-      "priority": 5,
-      "effort_days": 4,
-      "files_affected": [
-        "portfolio/indicators.py",
-        "portfolio/signal_engine.py"
-      ]
-    },
-    {
-      "title": "Kelly-VAPS Position Sizing",
-      "description": "Replace confidence-based sizing with fractional Kelly (0.25x) adjusted by ATR: position_size = 0.25 * kelly_fraction * equity / (ATR_14 * fx_rate). Kelly fraction from per-ticker accuracy data. Naturally sizes larger for high-accuracy tickers (XAG 64.8%) and smaller for low (ETH 46%). Cap 5% per position.",
-      "priority": 6,
-      "effort_days": 2,
-      "files_affected": [
-        "portfolio/risk_management.py",
-        "portfolio/portfolio_mgr.py"
-      ]
-    },
-    {
-      "title": "Z-Score MR Sub-Signal + OU Half-Life Monitor",
-      "description": "Add z-score sub-indicator to mean_reversion.py: z = (price - SMA_20) / std_20. BUY at z < -2.0, SELL at z > 2.0. Add dynamic OU half-life monitoring: when half-life > 2x its 30-day average, emit regime-shift warning. More granular than RSI for MR timing.",
-      "priority": 7,
-      "effort_days": 1,
-      "files_affected": [
-        "portfolio/signals/mean_reversion.py"
-      ]
-    },
-    {
-      "title": "Keltner Channel Overlay for Enhanced Squeeze Detection",
-      "description": "Add KC (EMA-20, 1.5x ATR) to volatility.py. Detect BB-inside-KC squeeze. In ranging, use KC as dynamic MR targets. On squeeze release, switch to breakout mode. Enhances existing BB Squeeze with second volatility envelope.",
-      "priority": 8,
-      "effort_days": 1,
-      "files_affected": [
-        "portfolio/signals/volatility.py"
-      ]
-    },
-    {
-      "title": "Graduated Drawdown Circuit Breaker",
-      "description": "Replace binary 20% threshold with graduated response: -10% = reduce sizes 25%, -15% = reduce 50%, -18% = reduce 75%, -20% = full halt. Test returns for serial correlation before applying equity curve trading. MR strategies often have mean-reverting returns, making ECT harmful.",
-      "priority": 9,
-      "effort_days": 2,
-      "files_affected": [
-        "portfolio/risk_management.py",
-        "portfolio/equity_curve.py"
-      ]
-    },
-    {
-      "title": "Multi-Agent Debate Layer 2 Architecture",
-      "description": "Restructure Layer 2 from single Claude invocation to 3-stage debate: (1) Bull Agent argues FOR trade, (2) Bear Agent sees Bull's argument and argues AGAINST, (3) Decision Agent sees both + risk metrics and decides. Each stage is separate claude -p call with specialized prompts. Mirrors TradingAgents' proven approach (Sharpe 8.21). Debate format naturally surfaces risks single-agent misses.",
-      "priority": 10,
-      "effort_days": 5,
-      "files_affected": [
-        "portfolio/agent_invocation.py",
-        "docs/TRADING_PLAYBOOK.md"
-      ]
-    }
+  "critical_finding": {
+    "title": "Fear & Greed blended accuracy is below gate",
+    "detail": "0.7 * 0.259 (recent) + 0.3 * 0.586 (all-time) = 0.357. This is below the 0.45 accuracy gate. Fear & Greed SHOULD already be force-HOLD'd. Verify accuracy cache has been refreshed.",
+    "action": "Check if fear_greed is actually being gated in live loop. If not, the accuracy cache may be stale or the blending formula is different."
+  },
+  "key_papers": [
+    {"title": "Predicting Gold and Silver Price Direction Using Tree-Based Classifiers", "source": "MDPI", "finding": "85-90% directional accuracy at 20-day horizons"},
+    {"title": "Combined ML for Stock Selection Based on Dynamic IC Weighting", "source": "arxiv 2508.18592", "finding": "IC-based weighting produces ~4x returns vs single-model"},
+    {"title": "Regime-Switching Factor Investing with HMM", "source": "MDPI", "finding": "+1-4% annualized returns over buy-and-hold"},
+    {"title": "Statistical Jump Model for Regime Detection", "source": "arxiv 2402.05272", "finding": "Outperforms HMM on drawdown reduction"},
+    {"title": "Kelly, VIX, and Hybrid Position Sizing", "source": "arxiv 2508.16598", "finding": "Half-Kelly captures 75% growth with 50% less drawdown"}
   ]
 }

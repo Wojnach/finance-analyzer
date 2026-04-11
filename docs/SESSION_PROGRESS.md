@@ -1,104 +1,93 @@
-# Session Progress — Fix-Queue 2026-04-11 (Adversarial-Review P0 Batch)
+# Session Progress — Adversarial Review Round 5 (2026-04-11)
 
-## Status: SHIPPING
+## Status: COMPLETED
 
-Autonomous fix-queue session driven by `/fgl` protocol. Worked through the
-P0/P1 findings from the 2026-04-10 8-agent adversarial review
-(`docs/adversarial-review/SYNTHESIS.md`) plus the auto-session 2026-04-11
-improvement plan.
+Full dual adversarial review of the finance-analyzer codebase. 8 subsystems, independent
+review + parallel agent reviews, cross-critique, synthesis.
 
-Branch: `fix/queue-2026-04-11` (worktree at `/mnt/q/finance-analyzer-fixq`)
+### What shipped (4 commits, pushed to main)
+- `c299acc` docs: adversarial review round 5 plan
+- `c467f13` docs: independent adversarial review round 5
+- `383c718` docs: adversarial review round 5 — synthesis + independent review
+- `a948733` docs: add portfolio-risk agent review + update synthesis
 
-## What shipped (11 fixes + test/plan housekeeping = 23 commits)
+### Key findings (19 total: 3 P0, 10 P1, 7 P2, 1 P3)
 
-### Batch 1 — Defensive additive fixes (low risk, P0)
+**Independent review (12 findings)**:
+- SO-1 [P0]: check_drawdown() STILL dead code — 3 rounds open, #1 priority
+- IR-1 [P1]: fx_rate=1.0 fallback would cause 10x portfolio miscalculation
+- IR-2 [P1]: record_trade() never called — both risk gates disconnected
+- IR-8 [P1]: /mode command breaks config.json symlink on Windows
+- SO-2 [P1]: POSITIONS dict thread-safety in metals_loop
+- SO-3 [P1]: Naked position on stop-loss failure
+- IR-7 [P1]: _handle_buy_fill POSITIONS race window
+- + 5 P2/P3 findings
 
-1. **`7ad33cf`** fix(avanza): A-AV-1 wrap api_get/post/delete in `_pw_lock`
-   - Upgraded `_pw_lock` from `Lock` to `RLock` (reentrant)
-   - Wrapped all 5 Playwright touch points in `with _pw_lock:`
-   - 4 new thread-safety tests prove max-concurrent = 1 across api_get/post/delete
+**Portfolio-risk agent (10 findings, 7 NEW)**:
+- PR-R5-3 [P1]: warrant_portfolio averaging doesn't update underlying entry price
+- PR-R5-4 [P1]: trade_validation min order 500 vs Avanza 1000 SEK
+- PR-R5-5 [P1]: atr_stop_proximity "CHECK" sentinel
+- PR-R5-6 [P1]: Sharpe ratio dead guard
+- PR-R5-7 [P1]: Kelly fee asymmetry
+- PR-R5-8 [P2]: Monte Carlo negative shares allowed
+- PR-R5-9 [P2]: Kelly metals near-zero loss → 95% position
 
-2. **`0daa2ef`** fix(avanza): A-AV-2 hardcode account whitelist in TOTP path
-   - New `ALLOWED_ACCOUNT_IDS = {"1625505"}` constant in `avanza_client.py`
-   - `get_account_id()` enforces whitelist before caching → pension account 2674244 cannot be reached
-   - `get_positions()` and `get_portfolio_value()` filter to whitelist
-   - 7 new tests including the actual pension-ID rejection scenario
+### What's next
+- **#1 PRIORITY**: Wire check_drawdown() into main.py (fix IR-1 first to prevent phantom drawdown)
+- **#2**: Wire record_trade() into Layer 2 journal path
+- **#3**: Add POSITIONS lock in metals_loop.py
+- **#4**: Fix warrant_portfolio averaging-in (PR-R5-3)
+- **#5**: Fix trade_validation min order floor (PR-R5-4)
 
-3. **`f07469c`** fix(validator): A-PR-3 use `file_utils.load_json` instead of raw `open()`
-   - Replaces TOCTOU-prone raw json.load with atomic-aware loader
-   - New `tests/test_portfolio_validator.py` with AST-based regression guard
+### Previous session notes (2026-04-10)
 
-4. **`122658b`** fix(claude_gate): A-IN-2 kill subprocess **tree** on TimeoutExpired
-   - Refactored to `Popen` + `_run_with_tree_kill` helper with platform-specific tree-kill
-   - Windows: `taskkill /T /F /PID`; Unix: `os.killpg(SIGKILL)` on `start_new_session=True`
-   - 8 new tests including a verified **grandchild kill on Windows**
+### What shipped (2 commits, pushed)
+- `6ec4be9` feat(signals): per-ticker directional accuracy + raise directional gate to 40%
+  - `accuracy_stats.py`: `accuracy_by_ticker_signal()` now returns `buy_accuracy`/`sell_accuracy` per ticker×signal
+  - `signal_engine.py`: BUG-158 override propagates directional fields; `_DIRECTIONAL_GATE_THRESHOLD` raised 0.35 → 0.40
+  - New tests: directional accuracy fields, asymmetry test, macro_regime BUY gating at 40%
+- `0d81282` docs(research): after-hours session 2026-04-10 — signal audit + research plan
 
-### Batch 2 — Data correctness (low risk, P0)
+### Signal audit key findings
+- 12/32 active signals below 50% accuracy at 1d horizon
+- Extreme per-ticker variance: ministral 71.7% on MSTR vs 20.4% on XAG (51.3pp)
+- 6 directional asymmetries >15pp (biggest: qwen3 BUY 30.4% vs SELL 74.3%)
+- Volatility cluster (volatility_sig, oscillators, volume, structure) has 94.9% agreement rate — all underperforming
+- Momentum cluster (rsi, bb, mean_reversion) has 100% agreement rate — best-performing
+- 14 signals gated in ranging regime, only 18 active
 
-5. **`7597650`** fix(fin_snipe): A-MC-2 use `fetch_usd_sek()` instead of `usdsek=1.0`
-   - Was actually in `fin_snipe_manager.py:420`, not metals_loop
-   - Live FX rate via `portfolio.fx_rates.fetch_usd_sek` (15-min cached, 10.85 fallback)
-   - Exit-optimizer SEK rewards previously wrong by ~10x
-   - AST regression guard
+### Implementation impact
+- macro_regime BUY (38.9%) now gated at 0.40 threshold — previously passed both gates
+- fibonacci SELL (35.9%) now caught by raised threshold
+- Per-ticker directional data flows through BUG-158 override → directional gate in `_weighted_consensus()`
+- 68 tests passed (50 signal_engine + 18 ticker_signal_accuracy)
 
-6. **`174eca0`** fix(risk): A-PR-2 stream full history for drawdown peak
-   - Previously `load_jsonl_tail(max_entries=2000)` lost peaks older than ~33h
-   - New `_streaming_max(history_path, value_key, floor)` walks the entire JSONL line-by-line
-   - Regression test seeds 999K peak as oldest entry with 2500 lower entries on top
+### Research deliverables written
+- `data/daily_research_signal_audit.json` — full signal audit with recommendations
+- `data/daily_research_ticker_deep_dive.json` — XAG-USD, MSTR, BTC-USD deep dives
+- `data/daily_research_macro.json` — macro research (Hormuz, CPI, sentiment, Fed)
+- `data/morning_briefing.json` — Apr 11 morning briefing
+- `docs/RESEARCH_PLAN.md` — updated implementation plan
 
-7. **`1a8381f`** fix(fear_greed): A-DE-4 flatten yfinance MultiIndex columns for VIX
-   - Newer yfinance returns MultiIndex even on single Ticker.history() — silently killed the stock F&G signal
-   - Defensive flatten + 4 new tests covering MultiIndex shape
+### Quant research findings (from background agent)
+- **P0 next session**: Direction-specific weight scaling — use buy_accuracy/sell_accuracy as weights in _weighted_consensus (~5-line change). Data foundation shipped tonight.
+- **Critical**: Fear & Greed blended accuracy = 0.357, below 0.45 gate. Should already be force-HOLD'd — VERIFY.
+- **P1**: MSTR-BTC proxy signal inheritance (beta 1.31-1.41, correlation >0.80). +5-8pp on MSTR.
+- **P1**: XAG cross-asset enrichment (DXY, copper lead, real yields). Paper: 85-90% directional accuracy at 20d.
+- **P2**: IC-based weighting (Spearman correlation, not hit rate). Paper: ~4x returns vs single-model.
+- **P2**: HMM regime detection (probabilistic, per-instrument). Paper: +1-4% annualized.
 
-8. **`aecec90`** fix(onchain): A-DE-5 coerce ISO-string ts in onchain cache to epoch
-   - New `_coerce_epoch()` helper handles int/float/numeric-string/ISO-string/garbage
-   - Fixes silent on-chain BTC voter death after restart with old cache
-   - 8 new tests including end-to-end ISO-cache reload
+### Signal audit deep findings (from background agent)
+- 10 signal pairs have 100% agreement rate — completely redundant as independent voters
+- Trending-up: oscillators (24.4%), momentum_factors (23.7%) vote SELL into uptrends — catastrophic
+- Trending-down: news_event (0%), econ_calendar (2.7%) near-zero
+- Recommendation: raise accuracy gate to 48% (gates 4 additional coin-flip signals)
 
-### Batch 3 — Logic bugs (medium risk, P0/P1)
-
-9. **`c595ab0`** fix(signals): A-SM-1 explicit guard against gap-fill firing on widening gap
-   - **A-SM-1 was a false positive** — investigation showed existing `fill_pct < 0.3` already handled the case (math: positive/negative = negative < 0.3 → HOLD)
-   - Added explicit `if fill_pct < 0: HOLD` for clarity + 3 regression tests covering all 4 (gap_dir × day_dir) quadrants
-
-10. **`a75e8f7`** fix(volatility): A-SM-2 GARCH in `_empty_result` schema
-    - Empty path was missing `garch` sub_signal + `garch_vol`/`realized_vol`/`garch_ratio` indicators
-    - Cross-path schema regression test
-
-11. **`ceab91b`** fix(fin_snipe): A-MC-4 persist real `entry_ts` so HOLD_TIME_EXTENDED works
-    - Was `entry_ts=now()` every cycle → `hold_hours ≈ 0` → flag never fired
-    - Now persisted in `instrument_state` on first non-zero observation, cleared on close
-    - Bootstrap: existing positions get entry_ts = first cycle after fix (acceptable)
-
-### Batch 4 — Concurrency
-
-12. **`e0a4605`** fix(claude_gate): A-IN-3 in-process invocation lock
-    - Module-level `_invoke_lock` (threading.Lock) wraps the actual subprocess call inside both invoke_claude / invoke_claude_text
-    - 8-worker ticker pool can no longer spawn 5+ concurrent expensive Claude processes
-    - 5-thread serialization test verifies max-concurrent = 1
-
-### Batch 5 — Signal-system tuning
-
-13. **`6c7e289`** fix(signals): raise `ACCURACY_GATE_THRESHOLD` 0.45 → 0.47
-    - Gates the 4 signals sitting in the 45-47% coin-flip-adjacent band per the 2026-04-10 audit
-    - Companion test fixes in `d55f8fe`
-
-## Tasks dropped per prior-session findings (4)
-
-- **BUG-184** trade_guards lock — Layer 2 runs as subprocess, not thread. atomic_write_json adequate.
-- **BUG-183** autonomous per-ticker throttle — BUY/SELL signals already bypass the global throttle.
-- **fear_greed gate verification** — prior session verified blended = 0.586, correctly ungated.
-- **per-ticker signal blacklist** — per-ticker accuracy gate already catches `ministral × XAG` (18.9%).
-
-## Test status
-
-- **All ~617 tests in changed areas pass** — 100% green for everything I touched.
-- **29 pre-existing failures** in unrelated areas (test_strategy.py freqtrade ModuleNotFoundError ×7, test_meta_learner signal-count mismatch, test_forecast_circuit_breaker integration, test_metals_llm_orphan JobObject, test_signal_improvements vote-count + low-sample neutral-weight from BUG-182). All confirmed pre-existing on `main` HEAD before this branch — verified by checking out parent commits and re-running.
-
-## Next session priorities
-
-1. Update the ~7 pre-existing test failures (count drift after recent signal additions, BUG-182 behavior change in `test_low_sample_uses_neutral_weight`)
-2. Codex adversarial review on this branch (`/codex:adversarial-review --wait --scope branch --effort xhigh`)
-3. After merge: restart `PF-DataLoop` so the new `_invoke_lock` and accuracy gate take effect
-4. Monitor 48h for: drawdown circuit breaker firing rate, on-chain voter restart resilience, HOLD_TIME_EXTENDED metals exits
-5. Cross-process file lock on `claude_gate` (deferred from A-IN-3 — only in-process is shipped)
+### Next priorities
+1. **P0**: Direction-specific weight scaling (use directional accuracy as weight, ~5 lines)
+2. **P0**: Verify fear_greed is actually gated (blended 0.357 < 0.45 gate)
+3. Per-ticker signal blacklisting (ministral on XAG 20.4%)
+4. Raise accuracy gate to 47-48%
+5. MSTR-BTC proxy signal module
+6. Monitor directional gating impact over 48h
+7. Bank earnings week: GS Mon, JPM/WFC/C Tue, BAC/MS Wed

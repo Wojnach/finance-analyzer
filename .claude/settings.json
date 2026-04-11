@@ -7,6 +7,9 @@
       "WebFetch(*)",
       "WebSearch(*)",
       "NotebookEdit(*)"
+    ],
+    "additionalDirectories": [
+      "/mnt/q/models/"
     ]
   },
   "hooks": {

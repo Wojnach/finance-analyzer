@@ -17,10 +17,10 @@
   },
   "silver_sg": {
     "active": false,
-    "units": 441,
-    "entry": 52.0,
-    "stop": 46.0,
-    "sold_ts": "2026-03-09T22:59:04.115011+00:00",
-    "sold_reason": "startup_verify_not_held"
+    "units": 75,
+    "entry": 39.59,
+    "stop": 37.61,
+    "sold_ts": "2026-04-09T07:17:19.508480+00:00",
+    "sold_reason": "auto_detect_not_held"
   }
 }

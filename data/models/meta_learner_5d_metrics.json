@@ -1,12 +1,12 @@
 {
   "horizon": "5d",
-  "train_samples": 810,
-  "test_samples": 233,
-  "train_accuracy": 0.6037,
-  "test_accuracy": 0.6781,
-  "test_auc": 0.6862,
-  "test_logloss": 0.6683,
-  "class_balance": 0.4401,
-  "features": 37,
-  "trained_at": "2026-03-27T12:56:49.082038+00:00"
+  "train_samples": 1139,
+  "test_samples": 196,
+  "train_accuracy": 0.6304,
+  "test_accuracy": 0.4337,
+  "test_auc": 0.579,
+  "test_logloss": 0.7262,
+  "class_balance": 0.4772,
+  "features": 44,
+  "trained_at": "2026-04-10T18:00:30.509853+00:00"
 }
