@@ -181,7 +181,7 @@ All 11 fixes from the fix/queue-2026-04-11 branch have been verified:
 | 2 | 2026-04-07 | ~40 | 4 | 12 | ~20% of R1 |
 | 3 | 2026-04-08 | 67 | 15 | 35 | ~70% of R2 |
 | 4 | 2026-04-09 | 67 | 15 | 35 | ~73% of R3 |
-| 5 | 2026-04-11 | 12 | 1 | 5 | 100% of targeted P0/P1 batch |
+| 5 | 2026-04-11 | 28+ | 2 | 13 | 100% of targeted P0/P1 batch |
 
 **Trend**: Fix rate has improved dramatically. Round 5 found only 12 total findings
 (vs 67 in Rounds 3-4), and all 11 targeted fixes from the fix queue are verified correct.
@@ -212,11 +212,28 @@ The portfolio-risk agent confirmed both P0 findings (SO-1, IR-2) and discovered
 is actionable immediately. PR-R5-5 through PR-R5-7 are code correctness issues that
 don't cause money loss but should be cleaned up.
 
-### Other agents (7 remaining — still in progress)
+### signals-modules agent (COMPLETE — 9 findings)
 
-The signals-core, orchestration, metals-core, avanza-api, signals-modules, data-external,
-and infrastructure agents are still running their deep file-by-file reviews. Results will
-be added as they complete.
+The signals-modules agent found 9 findings including a **critical sentiment inversion**:
+
+| ID | Sev | File | Finding |
+|----|-----|------|---------|
+| SM-R5-5 | P0 | forecast.py:100-103 | Prediction dedup eviction never implemented — memory leak |
+| SM-R5-7 | P1 | news_event.py:255-265 | **"cut" fallthrough BUY**: "job cut", "profit cut", "rating cut" counted as POSITIVE sentiment |
+| SM-R5-2 | P1 | crypto_macro.py:228 | OPTIONS_TTL used before definition — NameError risk |
+| SM-R5-8 | P2 | cot_positioning.py:54-58 | Relative paths — silent HOLD if CWD wrong |
+| SM-R5-9 | P2 | credit_spread.py:283-289 | Raw open("config.json") — Rule 4 violation |
+| SM-R5-10 | P2 | volatility.py:86-93 | BB squeeze + breakout double-count on release |
+| SM-R5-11 | P3 | volume_flow.py:289 | Default price_up=True on NaN → BUY bias |
+| SM-R5-12 | P3 | futures_flow.py:65 | price_start truthy guard too broad |
+
+**SM-R5-7 is a direct signal inversion** — any headline with "cut" (except "rate cut"/
+"guidance cut") gets counted as bullish. "Job cuts reported" → positive sentiment → BUY vote.
+
+### Other agents (6 remaining — still in progress)
+
+The signals-core, orchestration, metals-core, avanza-api, data-external, and
+infrastructure agents are still running. Results will be added as they complete.
 
 ---
 
