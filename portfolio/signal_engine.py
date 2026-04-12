@@ -80,6 +80,13 @@ _LOCAL_MODEL_LOOKBACK_DAYS = 30
 # consensus while leaving the well-performing tier untouched.
 ACCURACY_GATE_THRESHOLD = 0.47
 ACCURACY_GATE_MIN_SAMPLES = 30  # need enough data before gating
+# 2026-04-12: Tiered gate for high-confidence coin-flips. With 5000+ samples,
+# a signal at 49.8% is coin-flip with p < 0.001 — no amount of waiting will
+# fix it. Raising the gate to 50% for established signals removes structure
+# (49.8%, 12K sam), heikin_ashi (49.6%, 23K sam) etc. while letting newer
+# signals with <5000 samples prove themselves at the standard 47% threshold.
+_ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD = 0.50
+_ACCURACY_GATE_HIGH_SAMPLE_MIN = 5000
 
 # Directional accuracy gate: signals whose BUY or SELL accuracy is below this
 # threshold get that direction force-HOLD'd while the other direction can still
@@ -850,8 +857,13 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         stats = accuracy_data.get(signal_name, {})
         acc = stats.get("accuracy", 0.5)
         samples = stats.get("total", 0)
-        # Accuracy gate: skip signals that are below threshold with enough data
-        if samples >= ACCURACY_GATE_MIN_SAMPLES and acc < gate:
+        # Accuracy gate: skip signals that are below threshold with enough data.
+        # Tiered: established signals (5000+ samples) use a tighter 50% gate;
+        # newer signals use the standard 47% gate.
+        effective_gate = gate
+        if samples >= _ACCURACY_GATE_HIGH_SAMPLE_MIN:
+            effective_gate = max(gate, _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD)
+        if samples >= ACCURACY_GATE_MIN_SAMPLES and acc < effective_gate:
             gated_signals.append(signal_name)
             continue
         # Directional accuracy gate: gate individual BUY/SELL direction when
