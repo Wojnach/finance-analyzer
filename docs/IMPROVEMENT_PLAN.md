@@ -2,7 +2,7 @@
 
 Updated: 2026-04-12
 Branch: improve/auto-session-2026-04-12
-Status: **IN PROGRESS**
+Status: **COMPLETE**
 
 Previous session (2026-04-11): shipped directional accuracy weights (BUG-182),
 per-ticker throttle, trade guards locking. All verified in codebase.
