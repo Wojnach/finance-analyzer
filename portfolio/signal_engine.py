@@ -272,6 +272,10 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
             # 2026-04-09: funding 29.9% at 1d (536 sam) but 74.2% at 3h (535 sam).
             # Gate at 1d, let it vote at 3h/4h.
             "funding",
+            # 2026-04-12: econ_calendar 34.2% in ranging (1911 sam). SELL-only signal
+            # is actively harmful in range-bound markets. 62.8% overall is inflated by
+            # unknown-regime (86.8%, 2562 sam) and trending-up (25.9%) dominance.
+            "econ_calendar",
         }),
         # 3h: news_event 58.5%, smart_money 53.1% — decent at short horizons.
         # volatility_sig 47.2%, forecast 47.2% — marginal, let accuracy gate
@@ -674,9 +678,10 @@ def _get_correlation_groups() -> dict[str, frozenset[str]]:
 # Static correlation groups (fallback when dynamic computation unavailable).
 # Updated 2026-04-08: empirical audit of 200 recent signal_log entries.
 _STATIC_CORRELATION_GROUPS = {
-    # BUG-153: Split low_activity_timing — calendar+econ_calendar are excellent
-    # (62.8%/86.8%) while forecast+futures_flow are broken (36.1%/33.3%).
-    "low_activity_timing": frozenset({"calendar", "econ_calendar"}),
+    # 2026-04-12: Removed low_activity_timing cluster. calendar (BUY-only, 84.2%
+    # ranging) and econ_calendar (SELL-only, 34.2% ranging) have opposite directions
+    # and divergent regime profiles — they should not be correlated.
+    # econ_calendar now regime-gated in ranging. calendar votes independently.
     # 2026-04-08: volume+volatility_sig agree 94.9%, vol_sig+oscillators similar.
     # structure moved here (94.2% with volatility_sig, 88.6% with heikin_ashi).
     "volatility_cluster": frozenset({"volatility_sig", "oscillators", "volume", "structure"}),
@@ -704,6 +709,14 @@ _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal wei
 # reduces redundancy inflation. Other clusters keep the default 0.3x.
 _CLUSTER_CORRELATION_PENALTIES: dict[str, float] = {
     "momentum_cluster": 0.15,
+    # 2026-04-12: volatility_cluster (volatility_sig 45.3%, oscillators 45.0%,
+    # volume 52.1%, structure 49.8%) agree 88-95%. At 0.3x the cluster gets 2.2x
+    # effective weight for signals averaging ~48%. Tighten to 0.15x → 1.45x.
+    "volatility_cluster": 0.15,
+    # 2026-04-12: trend_direction (5 members, 0.3x) gets 2.2x effective weight.
+    # Most members are regime-gated at 1d in ranging but not at 3h, still contributing
+    # significant correlated weight. Tighten to 0.2x → 1.0 + 4*0.2 = 1.8x.
+    "trend_direction": 0.2,
 }
 
 

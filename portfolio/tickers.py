@@ -67,6 +67,9 @@ DISABLED_SIGNALS = {
     "orderbook_flow",   # 2026-04-11: 51.1% accuracy (360 sam), 93.3% activation rate,
                         # no recent data. Pure noise in every consensus decision.
                         # Re-evaluate after 2 weeks of accuracy data collection.
+    "forecast",         # 2026-04-12: 36.1% recent 1d (183 sam), 38.3% recent 3h (368 sam),
+                        # 39.0% in ranging (310 sam). Chronos/Kronos degraded below usefulness
+                        # at ALL horizons and ALL regimes. Wastes GPU compute.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.

@@ -14,7 +14,9 @@ class TestCorrelationGroups:
 
         assert isinstance(CORRELATION_GROUPS, dict)
         # Check a few known static groups
-        assert "low_activity_timing" in CORRELATION_GROUPS
+        # low_activity_timing removed 2026-04-12: calendar (BUY-only) and
+        # econ_calendar (SELL-only) have opposite directions and divergent
+        # regime profiles — not a valid correlation cluster.
         assert "pattern_based" in CORRELATION_GROUPS
         # Values should be frozensets
         for name, members in CORRELATION_GROUPS.items():
