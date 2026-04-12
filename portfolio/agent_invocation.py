@@ -168,23 +168,26 @@ def invoke_agent(reasons, tier=3):
             kill_ok = True
             if platform.system() == "Windows":
                 # BUG-92: Check taskkill return code to detect kill failure
+                # BUG-189: rc=128 means process already exited — treat as success
                 result = subprocess.run(
                     ["taskkill", "/F", "/T", "/PID", str(_agent_proc.pid)],
                     capture_output=True,
                 )
-                if result.returncode != 0:
+                if result.returncode not in (0, 128):
                     logger.error(
                         "taskkill failed (rc=%d): %s",
                         result.returncode, result.stderr.decode(errors="replace").strip(),
                     )
                     kill_ok = False
+                elif result.returncode == 128:
+                    logger.info("Agent pid=%s already exited (rc=128)", _agent_proc.pid)
             else:
                 _agent_proc.kill()
             try:
-                _agent_proc.wait(timeout=10)
+                _agent_proc.wait(timeout=15)  # BUG-189: 15s for Claude CLI Node.js teardown
             except subprocess.TimeoutExpired:
                 if kill_ok:
-                    logger.error("Agent pid=%s did not exit after kill+wait", _agent_proc.pid)
+                    logger.error("Agent pid=%s did not exit after kill+15s wait", _agent_proc.pid)
                 kill_ok = False
             if _agent_log:
                 _agent_log.close()
