@@ -63,6 +63,7 @@ DISABLED_SIGNALS = {
     "cot_positioning",  # 0 accuracy samples — pending live validation
     "futures_basis",    # 0 accuracy samples — pending live validation
     "hurst_regime",     # pending live validation (added 2026-04-11)
+    "shannon_entropy",  # pending live validation (added 2026-04-12)
     "orderbook_flow",   # 2026-04-11: 51.1% accuracy (360 sam), 93.3% activation rate,
                         # no recent data. Pure noise in every consensus decision.
                         # Re-evaluate after 2 weeks of accuracy data collection.
@@ -122,4 +123,5 @@ SIGNAL_NAMES = [
     "onchain",
     "futures_basis",
     "hurst_regime",
+    "shannon_entropy",
 ]

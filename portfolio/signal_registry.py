@@ -150,6 +150,9 @@ def _register_defaults():
     # Hurst regime detector — R/S analysis for trending/MR/random-walk classification
     register_enhanced("hurst_regime", "portfolio.signals.hurst_regime",
                       "compute_hurst_regime_signal", requires_context=True)
+    # Shannon entropy — market noise/predictability filter; low entropy = trending
+    register_enhanced("shannon_entropy", "portfolio.signals.shannon_entropy",
+                      "compute_shannon_entropy_signal")
 
 
 _register_defaults()
