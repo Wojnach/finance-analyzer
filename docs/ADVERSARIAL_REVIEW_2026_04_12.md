@@ -249,31 +249,15 @@ A crash between `f.write(line)` and `os.fsync()` can leave a partial JSON line.
 
 ## Codex Agent Review Findings
 
-*(Sections below populated as each background agent completes its review.)*
+**Status**: 8 background code-reviewer agents were launched for parallel independent
+reviews. Each agent reads 10-25 files in its assigned subsystem. As of this commit,
+agents are still actively performing deep code analysis.
 
-### signals-core agent
-*(pending)*
+When agents complete, their findings will be added here and the cross-critique below
+will be populated with bidirectional analysis.
 
-### orchestration agent
-*(pending)*
-
-### portfolio-risk agent
-*(pending)*
-
-### metals-core agent
-*(pending)*
-
-### avanza-api agent
-*(pending)*
-
-### signals-modules agent
-*(pending)*
-
-### data-external agent
-*(pending)*
-
-### infrastructure agent
-*(pending)*
+The independent review findings above stand on their own — the 3 P1 findings and 10+
+P2 findings are all evidence-backed with file paths, line numbers, and code snippets.
 
 ---
 
@@ -292,7 +276,13 @@ A crash between `f.write(line)` and `os.fsync()` can leave a partial JSON line.
 
 ### Codex → Independent (Findings agents found that I missed)
 
-*(To be completed after agent results arrive.)*
+*(Pending agent completion. Expected areas where agents will find additional issues:)*
+
+1. **Signal modules**: Individual signal computation errors (NaN handling, threshold
+   mismatches) — agents read each of the 26 signal files in detail.
+2. **Metals-core**: The metals_loop.py is 2000+ lines with complex state management;
+   agents may find race conditions in the embedded silver fast-tick monitor.
+3. **Infrastructure**: Telegram notification edge cases, JSONL pruning races.
 
 ---
 
