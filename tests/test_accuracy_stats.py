@@ -226,3 +226,80 @@ class TestDirectionalAccuracy:
         assert rsi["total_buy"] == 0
         assert rsi["total_sell"] == 0
         assert rsi["total"] == 0
+
+
+# ---------------------------------------------------------------------------
+# BUG-186: Blended accuracy correct field consistency
+# ---------------------------------------------------------------------------
+
+class TestBlendAccuracyData:
+    """Tests for blend_accuracy_data() — verifies correct/total matches accuracy."""
+
+    def test_correct_derived_from_blended_accuracy(self):
+        """BUG-186: correct should equal round(blended_accuracy * total)."""
+        from portfolio.accuracy_stats import blend_accuracy_data
+
+        alltime = {"rsi": {"accuracy": 0.5, "total": 100, "correct": 50}}
+        recent = {"rsi": {"accuracy": 0.9, "total": 40, "correct": 36}}
+        result = blend_accuracy_data(alltime, recent, min_recent_samples=30)
+        rsi = result["rsi"]
+        # blended = 0.7 * 0.9 + 0.3 * 0.5 = 0.78
+        # total = max(100, 40) = 100
+        # correct should be round(0.78 * 100) = 78, NOT 50 (all-time)
+        assert rsi["correct"] == round(rsi["accuracy"] * rsi["total"])
+
+    def test_correct_total_ratio_equals_accuracy(self):
+        """The ratio correct/total should approximately equal accuracy."""
+        from portfolio.accuracy_stats import blend_accuracy_data
+
+        alltime = {"ema": {"accuracy": 0.6, "total": 200, "correct": 120}}
+        recent = {"ema": {"accuracy": 0.8, "total": 50, "correct": 40}}
+        result = blend_accuracy_data(alltime, recent, min_recent_samples=30)
+        ema = result["ema"]
+        if ema["total"] > 0:
+            ratio = ema["correct"] / ema["total"]
+            assert abs(ratio - ema["accuracy"]) < 0.02  # within rounding tolerance
+
+    def test_blend_with_insufficient_recent_samples(self):
+        """When recent samples < min, use alltime accuracy directly."""
+        from portfolio.accuracy_stats import blend_accuracy_data
+
+        alltime = {"rsi": {"accuracy": 0.65, "total": 100, "correct": 65}}
+        recent = {"rsi": {"accuracy": 0.9, "total": 5, "correct": 4}}  # < 30
+        result = blend_accuracy_data(alltime, recent, min_recent_samples=30)
+        rsi = result["rsi"]
+        assert rsi["accuracy"] == 0.65  # alltime used directly
+        assert rsi["correct"] == round(0.65 * 100)
+
+    def test_blend_carries_directional_fields(self):
+        """Directional accuracy fields from alltime should be preserved."""
+        from portfolio.accuracy_stats import blend_accuracy_data
+
+        alltime = {
+            "rsi": {
+                "accuracy": 0.55, "total": 100, "correct": 55,
+                "buy_accuracy": 0.60, "total_buy": 50,
+                "sell_accuracy": 0.50, "total_sell": 50,
+            }
+        }
+        recent = {"rsi": {"accuracy": 0.70, "total": 40, "correct": 28}}
+        result = blend_accuracy_data(alltime, recent, min_recent_samples=30)
+        rsi = result["rsi"]
+        assert rsi["buy_accuracy"] == 0.60
+        assert rsi["sell_accuracy"] == 0.50
+        assert rsi["total_buy"] == 50
+
+    def test_empty_inputs_return_empty(self):
+        """Both empty → empty result."""
+        from portfolio.accuracy_stats import blend_accuracy_data
+
+        assert blend_accuracy_data({}, {}) == {}
+        assert blend_accuracy_data(None, None) == {}
+
+    def test_alltime_only_returns_alltime(self):
+        """No recent data → alltime used directly."""
+        from portfolio.accuracy_stats import blend_accuracy_data
+
+        alltime = {"rsi": {"accuracy": 0.6, "total": 100, "correct": 60}}
+        result = blend_accuracy_data(alltime, None)
+        assert result == alltime
