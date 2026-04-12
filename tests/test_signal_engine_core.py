@@ -864,44 +864,39 @@ class TestCorrelationDedup:
         assert conf == 1.0  # Both vote BUY so 100% consensus
 
     def test_correlated_group_reduces_apparent_confidence(self):
-        """When 3 correlated signals + 1 independent signal disagree,
+        """When correlated signals + 1 independent signal disagree,
         the correlation penalty should reduce the correlated side's weight."""
         votes = {
-            "calendar": "BUY",
-            "econ_calendar": "BUY",
-            "forecast": "BUY",
+            "candlestick": "BUY",
+            "fibonacci": "BUY",
             "rsi": "SELL",
         }
         accuracy = {
-            "calendar": {"accuracy": 0.63, "total": 600},
-            "econ_calendar": {"accuracy": 0.87, "total": 2500},
-            "forecast": {"accuracy": 0.48, "total": 5000},
+            "candlestick": {"accuracy": 0.63, "total": 600},
+            "fibonacci": {"accuracy": 0.87, "total": 2500},
             "rsi": {"accuracy": 0.53, "total": 800},
         }
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # forecast at 0.48 < 0.47 gate => gated
-        # econ_calendar: leader, full weight = 0.87
-        # calendar: penalized 0.3x = 0.63 * 0.3 * 1.2 (ranging) = 0.2268
+        # fibonacci: leader (0.87), full weight
+        # candlestick: penalized 0.3x = 0.63 * 0.3 * 1.2 (ranging) = 0.2268
         # rsi: SELL weight = 0.53 * 1.5 (ranging) = 0.795
         # BUY: 0.87 + 0.2268 = 1.0968, SELL: 0.795
         # BUY wins but with reduced confidence
         assert action == "BUY"
-        # Confidence = BUY / (BUY + SELL) — should be less than 1.0
         assert conf < 1.0
 
     def test_no_penalty_when_group_signals_vote_differently(self):
         """If signals in the same group vote opposite directions,
         they each count as independent."""
-        votes = {"calendar": "BUY", "econ_calendar": "SELL"}
+        votes = {"candlestick": "BUY", "fibonacci": "SELL"}
         accuracy = {
-            "calendar": {"accuracy": 0.63, "total": 600},
-            "econ_calendar": {"accuracy": 0.87, "total": 2500},
+            "candlestick": {"accuracy": 0.63, "total": 600},
+            "fibonacci": {"accuracy": 0.87, "total": 2500},
         }
         action, conf = _weighted_consensus(votes, accuracy, "ranging")
-        # Both are in same group and both are active.
-        # Leader: econ_calendar (0.87), penalized: calendar
-        # But they vote differently — penalty still applies to the secondary
-        # econ_calendar SELL weight = 0.87, calendar BUY weight = 0.63 * 0.3 * 1.2 = 0.2268
+        # Both in pattern_based group. Leader: fibonacci (0.87).
+        # candlestick penalized 0.3x even though voting opposite.
+        # fibonacci SELL = 0.87, candlestick BUY = 0.63 * 0.3 * 1.2 = 0.2268
         # SELL wins
         assert action == "SELL"
 
@@ -1684,23 +1679,25 @@ class TestTrendingDownRegimeGating:
 
 
 class TestCorrelationGroupSplit:
-    """BUG-153: low_activity_timing should not contain forecast/futures_flow."""
+    """low_activity_timing cluster removed 2026-04-12.
 
-    def test_low_activity_group_excludes_forecast(self):
-        from portfolio.signal_engine import CORRELATION_GROUPS
-        assert "forecast" not in CORRELATION_GROUPS["low_activity_timing"]
+    calendar (BUY-only, 84.2% ranging) and econ_calendar (SELL-only, 34.2%
+    ranging) had opposite directions and divergent regime profiles.
+    """
 
-    def test_low_activity_group_excludes_futures_flow(self):
+    def test_low_activity_timing_cluster_removed(self):
         from portfolio.signal_engine import CORRELATION_GROUPS
-        assert "futures_flow" not in CORRELATION_GROUPS["low_activity_timing"]
+        assert "low_activity_timing" not in CORRELATION_GROUPS
 
-    def test_low_activity_group_keeps_calendar(self):
+    def test_calendar_not_in_any_cluster(self):
         from portfolio.signal_engine import CORRELATION_GROUPS
-        assert "calendar" in CORRELATION_GROUPS["low_activity_timing"]
+        for name, members in CORRELATION_GROUPS.items():
+            assert "calendar" not in members, f"calendar found in {name}"
 
-    def test_low_activity_group_keeps_econ_calendar(self):
+    def test_econ_calendar_not_in_any_cluster(self):
         from portfolio.signal_engine import CORRELATION_GROUPS
-        assert "econ_calendar" in CORRELATION_GROUPS["low_activity_timing"]
+        for name, members in CORRELATION_GROUPS.items():
+            assert "econ_calendar" not in members, f"econ_calendar found in {name}"
 
 
 class TestPerTickerConsensusGate:
