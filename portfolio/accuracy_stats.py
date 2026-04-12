@@ -644,10 +644,11 @@ def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
             blended = w * rc_acc + (1 - w) * at_acc
         else:
             blended = at_acc
+        total = max(at_samples, rc_samples)
         result = {
             "accuracy": blended,
-            "total": max(at_samples, rc_samples),
-            "correct": at.get("correct", 0),
+            "total": total,
+            "correct": int(round(blended * total)),  # BUG-186: derive from blended accuracy
             "pct": round(blended * 100, 1),
         }
         # Carry through directional accuracy for directional gating.
