@@ -92,13 +92,53 @@ def _read_journal(path: Path) -> list[dict]:
     return entries
 
 
+def _empty_state() -> dict:
+    return {"by_category": {}, "recursion_counter": 0}
+
+
 def _load_state() -> dict:
+    """Load dispatcher state. On corruption, returns a *conservative*
+    default: a 1-hour blanket cooldown across all categories. Without
+    that guard, a corrupt state file would clear all cooldowns and let
+    the next dispatcher tick fire every category — including any that
+    were intentionally backed-off. The conservative default also makes
+    corruption visible in critical_errors.jsonl rather than silently
+    accepted.
+    """
     if not STATE_FILE.exists():
-        return {"by_category": {}, "recursion_counter": 0}
+        return _empty_state()
     try:
         return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {"by_category": {}, "recursion_counter": 0}
+    except (OSError, json.JSONDecodeError) as e:
+        # Record the corruption so the user (and any downstream startup
+        # check) sees what happened. _append_critical is import-safe so
+        # this won't cascade if the corruption is part of a broader
+        # filesystem issue.
+        try:
+            _append_critical({
+                "ts": _now().isoformat(),
+                "level": "critical",
+                "category": "fix_agent_state_corrupt",
+                "caller": "fix_agent_dispatcher",
+                "resolution": None,
+                "message": (
+                    "fix_agent_state.json failed to parse — applying 1h "
+                    "blanket cooldown to prevent runaway spawns. Inspect "
+                    "the state file and either fix it or delete it."
+                ),
+                "context": {"error": str(e)},
+            })
+        except Exception:
+            pass
+        # Conservative default: block ALL spawns for 1 hour via the
+        # global blocked_until_global field. check_gates honours this
+        # before any per-category logic.
+        return {
+            "by_category": {},
+            "recursion_counter": 0,
+            "blocked_until_global": (_now() + timedelta(hours=1)).isoformat(),
+            "_corrupt_loaded_at": _now().isoformat(),
+        }
 
 
 def _save_state(state: dict) -> None:
@@ -140,22 +180,29 @@ def _find_unresolved(entries: list[dict], lookback_h: int) -> list[dict]:
 
 
 def _append_critical(entry: dict) -> None:
-    """Append a record to critical_errors.jsonl.
+    """Append a record to critical_errors.jsonl via the same atomic
+    helper the main loop uses (``portfolio.file_utils.atomic_append_jsonl``).
 
-    Uses ``portfolio.file_utils.atomic_append_jsonl`` when available —
-    the main loop's claude_gate.record_critical_error ALSO writes to this
-    file concurrently, and plain ``open("a")`` can interleave mid-line on
-    Windows NTFS, corrupting the JSONL. We fall back to the simple append
-    only if the package can't be imported (e.g. running as a standalone
-    script from outside the repo).
+    The main loop's ``claude_gate.record_critical_error`` writes to this
+    file concurrently from multiple processes — using the same primitive
+    here keeps interleaving semantics consistent.
+
+    If the import fails (broken install), we LOG and SKIP rather than
+    falling back to a non-atomic ``open("a")`` — silent corruption of the
+    journal that surfaces critical errors to every Claude session would
+    be worse than dropping a single dispatcher record.
     """
     CRITICAL_ERRORS_LOG.parent.mkdir(parents=True, exist_ok=True)
     try:
         from portfolio.file_utils import atomic_append_jsonl
-        atomic_append_jsonl(CRITICAL_ERRORS_LOG, entry)
     except ImportError:
-        with open(CRITICAL_ERRORS_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
+        logger.error(
+            "portfolio.file_utils unavailable — dispatcher cannot safely "
+            "append to critical_errors.jsonl. Skipping record: %r",
+            entry.get("category"),
+        )
+        return
+    atomic_append_jsonl(CRITICAL_ERRORS_LOG, entry)
 
 
 # ---------------------------------------------------------------------------
@@ -168,15 +215,34 @@ class GateDecision:
     reason: str  # machine-readable short tag, e.g. "cooldown" / "ok"
 
 
-def check_gates(category: str, state: dict, now: datetime | None = None) -> GateDecision:
-    """Decide whether a fix attempt for *category* is permitted right now."""
+def check_gates(
+    category: str,
+    state: dict,
+    now: datetime | None = None,
+    *,
+    caller_depth: int | None = None,
+) -> GateDecision:
+    """Decide whether a fix attempt for *category* is permitted right now.
+
+    ``caller_depth`` is the dispatcher's snapshot of the recursion env
+    var taken at run() startup. Passing it explicitly (rather than
+    re-reading os.environ here) keeps sibling categories from being
+    treated as recursion when the dispatcher mutates os.environ around
+    each invoke_claude call.
+    """
     now = now or _now()
 
     if KILL_SWITCH.exists():
         return GateDecision(False, "disabled_by_kill_switch")
 
-    depth = int(os.environ.get(RECURSION_ENV, "0") or "0")
-    if depth >= MAX_RECURSION_DEPTH:
+    # Global block — set by _load_state when the state file was corrupt.
+    global_block = _parse_iso(state.get("blocked_until_global"))
+    if global_block and global_block > now:
+        return GateDecision(False, "global_cooldown")
+
+    if caller_depth is None:
+        caller_depth = int(os.environ.get(RECURSION_ENV, "0") or "0")
+    if caller_depth >= MAX_RECURSION_DEPTH:
         return GateDecision(False, "recursion_depth_exceeded")
 
     cat_state = state.get("by_category", {}).get(category, {})
@@ -296,7 +362,7 @@ def run(
     caller_recursion_depth = int(os.environ.get(RECURSION_ENV, "0") or "0")
 
     for category, cat_entries in by_category.items():
-        decision = check_gates(category, state)
+        decision = check_gates(category, state, caller_depth=caller_recursion_depth)
         if not decision.allowed:
             logger.info("Skipping category=%s (%s)", category, decision.reason)
             _append_critical({

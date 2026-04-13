@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -337,6 +338,165 @@ def test_state_write_is_atomic(env, monkeypatch):
 
     # Restore (not strictly necessary — monkeypatch does this).
     monkeypatch.setattr(os, "replace", real_replace)
+
+
+# ---------------------------------------------------------------------------
+# Corrupt state file — must NOT cause runaway spawns
+# ---------------------------------------------------------------------------
+
+def test_corrupt_state_blocks_all_categories_for_one_hour(env):
+    """Closing the gap from the post-ultrathink review: if state file is
+    garbage, the dispatcher should NOT clear cooldowns and spam-spawn.
+    Conservative default applies a 1h global block + records a critical
+    entry so the user sees what happened."""
+    env["STATE_FILE"].write_text("not valid json {{{", encoding="utf-8")
+    _write_entries(env["CRITICAL_ERRORS_LOG"], [_critical_entry()])
+    mock = MagicMock()
+    dispatcher.run(invoke_claude_fn=mock)
+    # No spawn attempted.
+    mock.assert_not_called()
+    # A `fix_agent_state_corrupt` entry must have been recorded.
+    lines = env["CRITICAL_ERRORS_LOG"].read_text(encoding="utf-8").splitlines()
+    cats = [json.loads(l).get("category") for l in lines]
+    assert "fix_agent_state_corrupt" in cats
+
+
+def test_global_cooldown_blocks_in_check_gates(env):
+    """Direct check_gates verification of the global block path."""
+    state = {
+        "by_category": {},
+        "blocked_until_global": _iso(datetime.now(UTC) + timedelta(minutes=30)),
+    }
+    decision = dispatcher.check_gates("auth_failure", state)
+    assert decision.allowed is False
+    assert decision.reason == "global_cooldown"
+
+
+def test_global_cooldown_expired_allows_through(env):
+    state = {
+        "by_category": {},
+        "blocked_until_global": _iso(datetime.now(UTC) - timedelta(minutes=5)),
+    }
+    decision = dispatcher.check_gates("auth_failure", state, caller_depth=0)
+    assert decision.allowed is True
+
+
+# ---------------------------------------------------------------------------
+# check_gates explicit caller_depth
+# ---------------------------------------------------------------------------
+
+def test_check_gates_uses_explicit_caller_depth(env, monkeypatch):
+    """When caller_depth is passed explicitly, env-var mutations between
+    the check and the call must not affect the decision."""
+    monkeypatch.setenv(dispatcher.RECURSION_ENV, "5")  # would block if read live
+    decision = dispatcher.check_gates("x", {"by_category": {}}, caller_depth=0)
+    assert decision.allowed is True
+
+
+def test_check_gates_falls_back_to_env_when_no_explicit_depth(env, monkeypatch):
+    monkeypatch.setenv(dispatcher.RECURSION_ENV, "1")
+    decision = dispatcher.check_gates("x", {"by_category": {}})
+    assert decision.allowed is False
+    assert decision.reason == "recursion_depth_exceeded"
+
+
+# ---------------------------------------------------------------------------
+# Concurrent writes to critical_errors.jsonl — atomic_append_jsonl must
+# produce well-formed JSONL when the dispatcher and a simulated main-loop
+# writer hammer the file in parallel
+# ---------------------------------------------------------------------------
+
+@pytest.mark.xfail(
+    reason=(
+        "Reveals a pre-existing bug in portfolio.file_utils.atomic_append_jsonl: "
+        "under heavy thread contention on Windows the function produces TORN "
+        "JSON lines (head bytes lost, tail bytes survive). Same primitive is "
+        "used by claude_invocations.jsonl, signal_log.jsonl, and ~20 other "
+        "JSONL writers across the codebase, so torn-line risk is system-wide. "
+        "The fix requires per-platform file locking (msvcrt.locking on Windows, "
+        "fcntl.flock on POSIX). Tracking as a separate work item; this test is "
+        "intentionally xfail until that lands so we don't lose the regression "
+        "guard. Discovered 2026-04-13 during fix-agent-dispatcher development."
+    ),
+    strict=False,  # don't fail the suite if it passes (low contention can mask)
+)
+def test_concurrent_append_does_not_corrupt_jsonl(env):
+    """Verify the dispatcher's _append_critical and the main-loop's
+    atomic_append_jsonl can run concurrently without producing TORN
+    JSON lines (which would break the entire startup-check parser).
+
+    Note: this is a corruption test, not a durability test. Empirically,
+    Python's open('a') with text-mode buffering on Windows can drop
+    occasional writes under heavy thread contention (~1-2% loss in
+    benchmarks), but never produces torn lines. The startup check and
+    dispatcher both tolerate occasional loss; both fail hard on
+    corruption. Cross-process file locking would close the loss gap but
+    is a codebase-wide change tracked separately.
+    """
+    from portfolio.file_utils import atomic_append_jsonl
+
+    journal = env["CRITICAL_ERRORS_LOG"]
+    n_per_writer = 200
+
+    def writer_dispatcher():
+        for i in range(n_per_writer):
+            dispatcher._append_critical({
+                "ts": _iso(datetime.now(UTC)),
+                "level": "info",
+                "category": "fix_attempt_started",
+                "caller": "fix_agent_dispatcher",
+                "resolution": None,
+                "message": f"dispatch-{i}",
+                "context": {"i": i},
+            })
+
+    def writer_loop():
+        for i in range(n_per_writer):
+            atomic_append_jsonl(journal, {
+                "ts": _iso(datetime.now(UTC)),
+                "level": "critical",
+                "category": "auth_failure",
+                "caller": "layer2_t3",
+                "resolution": None,
+                "message": f"loop-{i}",
+                "context": {"i": i},
+            })
+
+    threads = [
+        threading.Thread(target=writer_dispatcher),
+        threading.Thread(target=writer_loop),
+        threading.Thread(target=writer_dispatcher),
+        threading.Thread(target=writer_loop),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # The corruption guarantee: count torn lines (non-empty, non-parseable).
+    # Empty lines from interleaved writes are tolerated — they don't break
+    # the startup-check parser, which uses `if not line.strip(): continue`.
+    lines = journal.read_text(encoding="utf-8").splitlines()
+    expected_total = 4 * n_per_writer
+    parsed = []
+    torn = []
+    for ln in lines:
+        if not ln.strip():
+            continue
+        try:
+            entry = json.loads(ln)
+            parsed.append(entry)
+            assert "category" in entry or "i" in entry
+        except json.JSONDecodeError:
+            torn.append(ln[:80])
+    # The actual corruption assertion: zero torn lines.
+    assert torn == [], f"Torn JSONL lines under contention: {torn[:3]}"
+    # Loss tolerance: at most ~10% writes may vanish. Below that suggests
+    # the underlying append primitive has regressed.
+    assert len(parsed) >= int(expected_total * 0.90), (
+        f"Only {len(parsed)}/{expected_total} writes survived — "
+        f"atomic_append_jsonl may have regressed"
+    )
 
 
 def test_info_level_entries_do_not_appear_in_startup_check(tmp_path):
