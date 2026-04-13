@@ -91,8 +91,6 @@ def _fetch_vix_data() -> dict | None:
 
 
 def _backwardation_flag(ratio: float) -> str:
-    if ratio >= _STRONG_BACKWARDATION:
-        return "SELL"
     if ratio >= _BACKWARDATION_THRESHOLD:
         return "SELL"
     if ratio < _DEEP_CONTANGO:
@@ -102,12 +100,8 @@ def _backwardation_flag(ratio: float) -> str:
 
 def _contango_depth(ratio: float) -> str:
     depth = 1.0 - ratio
-    if depth > 0.15:
-        return "BUY"
     if depth > 0.10:
         return "BUY"
-    if depth < -0.05:
-        return "SELL"
     if depth < 0.0:
         return "SELL"
     return "HOLD"

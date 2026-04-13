@@ -104,6 +104,7 @@ class TestRatioSlope:
     def test_rising_slope_sell(self):
         series = [0.90, 0.91, 0.92, 0.93, 0.94, 0.95, 0.97]
         slope, action = _ratio_slope_5d(series)
+        assert action == "SELL"
         assert slope > 0
 
     def test_falling_slope_buy(self):
