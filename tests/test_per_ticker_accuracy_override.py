@@ -317,3 +317,126 @@ class TestPerTickerAccuracyOverride:
 
         # Should use fallback LLM data
         assert accuracy_data["qwen3"]["accuracy"] == 0.90
+
+
+# ---------------------------------------------------------------------------
+# Tests for SC-I-001: _weighted_consensus must honour regime_gated_override
+# ---------------------------------------------------------------------------
+
+class TestRegimeGatedOverride:
+    """SC-I-001: _weighted_consensus must not re-gate signals exempted by BUG-158."""
+
+    def test_override_preserves_exempted_signal(self):
+        """When regime_gated_override omits fear_greed, it should keep its vote."""
+        from portfolio.signal_engine import _weighted_consensus, _get_regime_gated
+
+        votes = {
+            "fear_greed": "BUY",
+            "rsi": "BUY",
+            "ema": "BUY",
+            "macd": "BUY",
+        }
+        accuracy_data = {
+            "fear_greed": {"accuracy": 0.94, "total": 50},
+            "rsi": {"accuracy": 0.55, "total": 100},
+            "ema": {"accuracy": 0.52, "total": 100},
+            "macd": {"accuracy": 0.51, "total": 100},
+        }
+        full_gated = _get_regime_gated("ranging", "1d")
+        assert "fear_greed" in full_gated, "Sanity: fear_greed is in ranging gated set"
+
+        # Without override: fear_greed gets re-gated to HOLD
+        action_no_override, _ = _weighted_consensus(
+            dict(votes), dict(accuracy_data), "ranging", horizon="1d",
+        )
+        # With override: fear_greed exempted (not in override set)
+        override = full_gated - {"fear_greed"}
+        action_with_override, _ = _weighted_consensus(
+            dict(votes), dict(accuracy_data), "ranging", horizon="1d",
+            regime_gated_override=override,
+        )
+        # The override version should have more BUY weight (fear_greed 94% contributing)
+        # Both should produce BUY since rsi/ema/macd are not in the gated set
+        assert action_with_override == "BUY"
+
+    def test_override_none_falls_back_to_default(self):
+        """When override is None, _weighted_consensus should compute regime gating normally."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        votes = {"fear_greed": "BUY", "rsi": "BUY", "ema": "SELL"}
+        accuracy_data = {
+            "fear_greed": {"accuracy": 0.60, "total": 100},
+            "rsi": {"accuracy": 0.55, "total": 100},
+            "ema": {"accuracy": 0.55, "total": 100},
+        }
+        # With None override (default): should behave as before
+        action, _ = _weighted_consensus(
+            dict(votes), accuracy_data, "ranging", horizon="1d",
+            regime_gated_override=None,
+        )
+        # fear_greed gated in ranging → only rsi(BUY) vs ema(SELL) remain
+        assert action in ("BUY", "SELL", "HOLD")
+
+    def test_empty_override_gates_nothing(self):
+        """An empty override set should gate no signals."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        votes = {"fear_greed": "BUY", "rsi": "BUY", "ema": "BUY"}
+        accuracy_data = {
+            "fear_greed": {"accuracy": 0.94, "total": 100},
+            "rsi": {"accuracy": 0.55, "total": 100},
+            "ema": {"accuracy": 0.55, "total": 100},
+        }
+        action, conf = _weighted_consensus(
+            dict(votes), accuracy_data, "ranging", horizon="1d",
+            regime_gated_override=set(),
+        )
+        assert action == "BUY"
+        assert conf > 0
+
+
+# ---------------------------------------------------------------------------
+# Tests for CROSS-001: outcome_tracker should use _raw_votes
+# ---------------------------------------------------------------------------
+
+class TestOutcomeTrackerRawVotes:
+    """CROSS-001: outcome_tracker should read _raw_votes for accuracy tracking."""
+
+    def test_raw_votes_preferred_over_gated(self):
+        """When _raw_votes available, outcome_tracker should use pre-gate votes."""
+        extra = {
+            "_votes": {"fear_greed": "HOLD", "rsi": "BUY"},
+            "_raw_votes": {"fear_greed": "BUY", "rsi": "BUY"},
+            "_regime": "ranging",
+        }
+        passed_votes = extra.get("_raw_votes", extra.get("_votes"))
+        assert passed_votes["fear_greed"] == "BUY", "Should use raw (pre-gate) vote"
+        assert passed_votes["rsi"] == "BUY"
+
+    def test_fallback_to_votes_when_no_raw(self):
+        """When _raw_votes not present, should fall back to _votes."""
+        extra = {
+            "_votes": {"rsi": "BUY", "ema": "SELL"},
+            "_regime": "ranging",
+        }
+        passed_votes = extra.get("_raw_votes", extra.get("_votes"))
+        assert passed_votes["rsi"] == "BUY"
+        assert passed_votes["ema"] == "SELL"
+
+    def test_raw_votes_includes_gated_signal(self):
+        """_raw_votes should preserve the original vote for a regime-gated signal."""
+        extra = {
+            "_votes": {
+                "fear_greed": "HOLD",
+                "rsi": "BUY",
+                "trend": "HOLD",
+            },
+            "_raw_votes": {
+                "fear_greed": "BUY",
+                "rsi": "BUY",
+                "trend": "SELL",
+            },
+        }
+        passed_votes = extra.get("_raw_votes", extra.get("_votes"))
+        assert passed_votes["fear_greed"] == "BUY", "Gated signal should show original vote"
+        assert passed_votes["trend"] == "SELL", "Gated signal should show original vote"

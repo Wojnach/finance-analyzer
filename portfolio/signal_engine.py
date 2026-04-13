@@ -728,7 +728,8 @@ _CLUSTER_CORRELATION_PENALTIES: dict[str, float] = {
 
 
 def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
-                        accuracy_gate=None, max_signals=None, horizon=None):
+                        accuracy_gate=None, max_signals=None, horizon=None,
+                        regime_gated_override=None):
     """Compute weighted consensus using accuracy, regime, and activation frequency.
 
     Weight per signal = accuracy_weight * regime_mult * normalized_weight
@@ -765,7 +766,9 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
 
     # Regime gating: force-HOLD signals that produce negative alpha in this regime.
     # BUG-149: now horizon-aware — e.g., trend works at 3h in ranging (61.6%)
-    regime_gated = _get_regime_gated(regime, horizon)
+    # SC-I-001: when caller provides regime_gated_override (with BUG-158 per-ticker
+    # exemptions already applied), use it instead of recomputing from scratch.
+    regime_gated = regime_gated_override if regime_gated_override is not None else _get_regime_gated(regime, horizon)
     votes = {k: ("HOLD" if k in regime_gated else v) for k, v in votes.items()}
 
     # Top-N gate: only let the top max_signals (by accuracy) participate
@@ -1998,6 +2001,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         accuracy_gate=accuracy_gate,
         max_signals=max_signals,
         horizon=horizon,
+        regime_gated_override=regime_gated_effective,
     )
 
     # Apply core gate AND MIN_VOTERS gate to weighted consensus too

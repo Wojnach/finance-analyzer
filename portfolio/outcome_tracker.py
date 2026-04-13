@@ -119,7 +119,9 @@ def log_signal_snapshot(signals_dict, prices_usd, fx_rate, trigger_reasons):
         extra = sig_data.get("extra", {})
         price = prices_usd.get(ticker, indicators.get("close"))
 
-        passed_votes = extra.get("_votes")
+        # CROSS-001: use _raw_votes (pre-gate) so accuracy accumulates for
+        # regime-gated signals, breaking the dead-signal trap.
+        passed_votes = extra.get("_raw_votes", extra.get("_votes"))
         if passed_votes:
             signals = {name: passed_votes.get(name, "HOLD") for name in SIGNAL_NAMES}
         else:
