@@ -59,17 +59,17 @@ class TestMetalsCrossAssetIntegration:
 
     @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
     def test_runs_for_gold(self, mock_ctx):
+        # 2026-04-13: Context keys renamed as part of intraday horizon
+        # realignment. Values chosen so every sub-signal returns HOLD,
+        # preserving this test's trivial BUY/SELL/HOLD assertion.
         mock_ctx.return_value = {
-            "copper_change_5d": 1.0,
+            "_using_intraday": False,  # daily-path thresholds
+            "copper_change_pct": 1.0,
             "gvz_zscore": 0.5,
             "gs_ratio_zscore": 0.3,
-            # 2026-04-10: added with the G/S velocity sub-signal (c3903bf).
-            # 0.5 sits inside the ±_GS_VELOCITY_PCT band so the sub-signal
-            # returns HOLD, keeping this test's overall-result assertion
-            # (BUY/SELL/HOLD) trivially true.
-            "gs_ratio_velocity": 0.5,
-            "spy_change_1d": 0.5,
-            "oil_change_5d": 1.0,
+            "gs_velocity_pct": 0.5,    # inside ±_GS_VELOCITY_DAILY_PCT band
+            "spy_change_pct": 0.5,
+            "oil_change_pct": 1.0,
         }
         from portfolio.signal_registry import get_enhanced_signals, load_signal_func
 
