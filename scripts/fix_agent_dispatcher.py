@@ -102,8 +102,13 @@ def _load_state() -> dict:
 
 
 def _save_state(state: dict) -> None:
+    """Atomic state-file write — tmp + rename. A mid-write crash must
+    never leave a corrupt JSON that would break the next dispatcher run."""
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    tmp = STATE_FILE.with_suffix(STATE_FILE.suffix + ".tmp")
+    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    # os.replace is atomic on Windows + POSIX when src/dest are on the same volume.
+    os.replace(tmp, STATE_FILE)
 
 
 def _find_unresolved(entries: list[dict], lookback_h: int) -> list[dict]:
@@ -135,13 +140,22 @@ def _find_unresolved(entries: list[dict], lookback_h: int) -> list[dict]:
 
 
 def _append_critical(entry: dict) -> None:
-    """Append to critical_errors.jsonl — mirrors
-    ``portfolio.claude_gate.record_critical_error`` but without the
-    in-process logger dependency, so this script stays importable in
-    isolation (tests, manual runs)."""
+    """Append a record to critical_errors.jsonl.
+
+    Uses ``portfolio.file_utils.atomic_append_jsonl`` when available —
+    the main loop's claude_gate.record_critical_error ALSO writes to this
+    file concurrently, and plain ``open("a")`` can interleave mid-line on
+    Windows NTFS, corrupting the JSONL. We fall back to the simple append
+    only if the package can't be imported (e.g. running as a standalone
+    script from outside the repo).
+    """
     CRITICAL_ERRORS_LOG.parent.mkdir(parents=True, exist_ok=True)
-    with open(CRITICAL_ERRORS_LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
+    try:
+        from portfolio.file_utils import atomic_append_jsonl
+        atomic_append_jsonl(CRITICAL_ERRORS_LOG, entry)
+    except ImportError:
+        with open(CRITICAL_ERRORS_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
 
 
 # ---------------------------------------------------------------------------

@@ -67,6 +67,13 @@ def find_unresolved(entries: list[dict], *, days: int, now: datetime | None = No
 
     unresolved = []
     for e in entries:
+        # Only surface critical-level entries. The fix_agent_dispatcher
+        # (added 2026-04-13) writes info-level fix_attempt_started /
+        # fix_attempt_completed lines to the same journal for audit
+        # purposes; those aren't user-actionable and would create
+        # rolling noise on every Claude session start.
+        if e.get("level") != "critical":
+            continue
         if e.get("resolution") is not None:
             continue
         if e.get("ts") in resolved_ts:

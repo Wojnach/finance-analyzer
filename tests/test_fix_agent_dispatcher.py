@@ -305,3 +305,63 @@ def test_build_fix_prompt_includes_category_and_entries():
     assert "layer2_t3" in prompt
     assert "resolves_ts" in prompt   # Agent is told to append resolution line
     assert "NOT:" in prompt          # Allow-list constraints must appear
+
+
+# ---------------------------------------------------------------------------
+# Atomic state write — mid-write crash must not corrupt the state file
+# ---------------------------------------------------------------------------
+
+def test_state_write_is_atomic(env, monkeypatch):
+    """If os.replace is interrupted, the original state file stays intact.
+    We simulate a write crash and verify the *existing* state file wasn't
+    mutated partway through."""
+    original_state = {"by_category": {"x": {"consecutive_failures": 0}}}
+    env["STATE_FILE"].write_text(json.dumps(original_state), encoding="utf-8")
+
+    # Replace os.replace with a crasher. The tmp file gets written but
+    # the rename fails — the real STATE_FILE must remain unchanged.
+    real_replace = os.replace
+    def crash_replace(src, dst):
+        raise OSError("simulated crash during rename")
+    monkeypatch.setattr(os, "replace", crash_replace)
+
+    with pytest.raises(OSError):
+        dispatcher._save_state({"by_category": {"y": {"consecutive_failures": 99}}})
+
+    # Original file must be untouched.
+    assert json.loads(env["STATE_FILE"].read_text(encoding="utf-8")) == original_state
+    # And a tmp file may exist — clean up for the next test.
+    tmp = env["STATE_FILE"].with_suffix(env["STATE_FILE"].suffix + ".tmp")
+    if tmp.exists():
+        tmp.unlink()
+
+    # Restore (not strictly necessary — monkeypatch does this).
+    monkeypatch.setattr(os, "replace", real_replace)
+
+
+def test_info_level_entries_do_not_appear_in_startup_check(tmp_path):
+    """Regression guard for the 2026-04-13 dispatcher fix: info-level
+    fix_attempt_* entries must NOT surface via check_critical_errors.py,
+    otherwise every 10-min dispatcher tick would add noise to every new
+    Claude session's startup."""
+    sys.path.insert(0, str(_REPO_ROOT / "scripts"))
+    import check_critical_errors as cce  # noqa: E402
+
+    now = datetime.now(UTC)
+    journal = tmp_path / "crit.jsonl"
+    journal.write_text("\n".join([
+        json.dumps({"ts": _iso(now - timedelta(minutes=5)), "level": "info",
+                    "category": "fix_attempt_started", "caller": "fix_agent_dispatcher",
+                    "resolution": None, "message": "spawning",  "context": {}}),
+        json.dumps({"ts": _iso(now - timedelta(minutes=5)), "level": "info",
+                    "category": "fix_attempt_completed", "caller": "fix_agent_dispatcher",
+                    "resolution": None, "message": "done", "context": {}}),
+        json.dumps({"ts": _iso(now - timedelta(hours=1)), "level": "critical",
+                    "category": "auth_failure", "caller": "layer2_t3",
+                    "resolution": None, "message": "the real issue", "context": {}}),
+    ]) + "\n", encoding="utf-8")
+
+    unresolved = cce.find_unresolved(cce._load_entries(journal), days=7)
+    # The two info lines must NOT appear; only the critical one.
+    assert len(unresolved) == 1
+    assert unresolved[0]["category"] == "auth_failure"
