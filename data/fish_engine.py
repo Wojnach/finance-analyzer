@@ -177,6 +177,16 @@ class FishEngine:
         self.orb_range_low = 0.0
         self.orb_range_formed = False
 
+        # 2026-04-13 (Bug 3): underlying peak tracking. ORB tactic was
+        # firing LONG even after the underlying had reversed from peak —
+        # today's BULL buy at 8.16 was -4.7% below the 17:38 peak of 8.31.
+        # Track session peak/trough so _vote_orb can veto continuation
+        # votes during an active pullback.
+        self.underlying_peak_price = 0.0
+        self.underlying_peak_ts = 0.0
+        self.underlying_trough_price = float("inf")
+        self.underlying_trough_ts = 0.0
+
         # Trade log path
         self._trade_log_path = trade_log_path
 
@@ -240,6 +250,16 @@ class FishEngine:
         silver_price = state.get("silver_price", 0)
         if silver_price <= 0:
             return self._hold("no silver price")
+
+        # 2026-04-13 (Bug 3): track session peak/trough on every tick.
+        # _vote_orb uses these to veto LONG breakouts during an active
+        # pullback (or SHORT breakouts during an active rally).
+        if silver_price > self.underlying_peak_price:
+            self.underlying_peak_price = silver_price
+            self.underlying_peak_ts = now
+        if silver_price < self.underlying_trough_price:
+            self.underlying_trough_price = silver_price
+            self.underlying_trough_ts = now
 
         # --- If we have a position, evaluate exit ---
         if self.position is not None:
@@ -616,7 +636,7 @@ class FishEngine:
         self._vote_gold_lead(state, votes, is_dead_zone)
 
         # --- Tactic 4: ORB breakout ---
-        self._vote_orb(silver_price, votes)
+        self._vote_orb(silver_price, votes, now)
 
         # --- Tactic 5: Temporal pattern ---
         self._vote_temporal(hour, day_of_week, votes)
@@ -649,6 +669,13 @@ class FishEngine:
 
         size_scalar = max(0.25, min(2.0, size_scalar))
 
+        # 2026-04-13 (Bug 1): stamp signal_ts on every directional decision
+        # so the execute path can reject stale signals. Today's BULL_SILVER
+        # BUY executed 3 min after the signal first fired because buying
+        # power gated the execute — by the time cash was available the
+        # entry price had already dropped -4.7% from the breakout peak.
+        signal_ts = now
+
         if len(longs) >= MIN_VOTES and len(longs) > len(shorts):
             confidence = min(1.0, len(longs) / 4.0)
             # Chronos confidence modifier
@@ -668,6 +695,7 @@ class FishEngine:
                 "confidence": round(confidence, 2),
                 "instrument_ob": self.long_ob,
                 "hold_minutes": 0,
+                "signal_ts": signal_ts,
             }
 
         if len(shorts) >= MIN_VOTES and len(shorts) > len(longs):
@@ -687,6 +715,7 @@ class FishEngine:
                 "size_scalar": round(size_scalar, 2),
                 "exit_reason": None,
                 "confidence": round(confidence, 2),
+                "signal_ts": signal_ts,
                 "instrument_ob": self.short_ob,
                 "hold_minutes": 0,
             }
@@ -772,15 +801,59 @@ class FishEngine:
             if not is_dead_zone or confidence >= 0.7:
                 votes["gold_lead"] = "SHORT"
 
-    def _vote_orb(self, silver_price: float, votes: dict) -> None:
-        """Tactic 4: Price breaks morning range."""
+    def _vote_orb(self, silver_price: float, votes: dict, now: float = 0.0) -> None:
+        """Tactic 4: Price breaks morning range.
+
+        2026-04-13 (Bug 3): peak-drawdown veto. ORB previously fired
+        LONG on any price above ``orb_range_high`` regardless of
+        whether the underlying had already peaked and reversed. This
+        gate suppresses the LONG vote when the session peak is recent
+        (< 5 min) AND price is more than 0.3% below it — that combo
+        signals a reversal, not a continuation breakout. Mirror for
+        SHORT (recent trough + price > 0.3% above it = bounce, not
+        breakdown).
+
+        Both thresholds are tunable via env vars
+        ``FISH_PEAK_DRAWDOWN_VETO_PCT`` and ``FISH_PEAK_VETO_AGE_SEC``
+        and the entire veto can be disabled with
+        ``FISH_PEAK_DRAWDOWN_VETO_ENABLED=0`` for backtest comparison.
+
+        The ``now`` argument defaults to 0.0 for backward compatibility
+        with callers that haven't been updated. When 0.0, the veto is
+        skipped (peak_age is meaningless without a real timestamp).
+        """
         if not self.orb_range_formed:
             return
         if self.orb_range_high <= self.orb_range_low:
             return
+
+        import os
+        veto_enabled = os.environ.get("FISH_PEAK_DRAWDOWN_VETO_ENABLED", "1") not in ("0", "false", "False", "")
+        veto_age_sec = float(os.environ.get("FISH_PEAK_VETO_AGE_SEC", "300"))
+        veto_drawdown_pct = float(os.environ.get("FISH_PEAK_DRAWDOWN_VETO_PCT", "0.3")) / 100.0
+
         if silver_price > self.orb_range_high:
+            # LONG breakout candidate — guard against post-peak chase.
+            if (veto_enabled and now > 0
+                    and self.underlying_peak_price > 0
+                    and self.underlying_peak_ts > 0):
+                peak_age = now - self.underlying_peak_ts
+                drawdown = (self.underlying_peak_price - silver_price) / self.underlying_peak_price
+                if peak_age < veto_age_sec and drawdown > veto_drawdown_pct:
+                    # In an active pullback from a fresh peak — do NOT
+                    # vote LONG. Don't add to `votes` at all so the
+                    # higher-level vote count reflects the suppression.
+                    return
             votes["orb"] = "LONG"
         elif silver_price < self.orb_range_low:
+            # SHORT breakdown candidate — guard against post-trough bounce.
+            if (veto_enabled and now > 0
+                    and self.underlying_trough_price not in (0.0, float("inf"))
+                    and self.underlying_trough_ts > 0):
+                trough_age = now - self.underlying_trough_ts
+                bounce = (silver_price - self.underlying_trough_price) / self.underlying_trough_price
+                if trough_age < veto_age_sec and bounce > veto_drawdown_pct:
+                    return
             votes["orb"] = "SHORT"
 
     def _vote_temporal(self, hour: int, day_of_week: int, votes: dict) -> None:
