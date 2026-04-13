@@ -158,6 +158,9 @@ def _register_defaults():
     # Shannon entropy — market noise/predictability filter; low entropy = trending
     register_enhanced("shannon_entropy", "portfolio.signals.shannon_entropy",
                       "compute_shannon_entropy_signal")
+    # VIX term structure — contango/backwardation regime detection; capped at 0.7
+    register_enhanced("vix_term_structure", "portfolio.signals.vix_term_structure",
+                      "compute_vix_term_structure_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
