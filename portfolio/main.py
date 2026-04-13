@@ -552,47 +552,44 @@ def run(force_report=False, active_symbols=None):
     # without understanding why, it's meant to fire on hangs not on
     # legitimate slow processing.
     _TICKER_POOL_TIMEOUT = 180
-    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ticker") as pool:
-        futures = {
-            pool.submit(_process_ticker, name, source): name
-            for name, source in active_items
-        }
+    # OR-I-001: avoid context manager — __exit__ calls shutdown(wait=True)
+    # which blocks the loop when threads hang past the timeout.
+    pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ticker")
+    futures = {
+        pool.submit(_process_ticker, name, source): name
+        for name, source in active_items
+    }
+    try:
+        for future in as_completed(futures, timeout=_TICKER_POOL_TIMEOUT):
+            name, result = future.result()
+            if result is not None:
+                tf_data[name] = result["tfs"]
+                prices_usd[name] = result["price"]
+                signals[name] = {
+                    "action": result["action"],
+                    "confidence": result["confidence"],
+                    "indicators": result["ind"],
+                    "extra": result["extra"],
+                }
+                signals_ok += 1
+            else:
+                signals_failed += 1
+    except TimeoutError:
+        timed_out = [n for f, n in futures.items() if not f.done()]
         try:
-            for future in as_completed(futures, timeout=_TICKER_POOL_TIMEOUT):
-                name, result = future.result()
-                if result is not None:
-                    tf_data[name] = result["tfs"]
-                    prices_usd[name] = result["price"]
-                    signals[name] = {
-                        "action": result["action"],
-                        "confidence": result["confidence"],
-                        "indicators": result["ind"],
-                        "extra": result["extra"],
-                    }
-                    signals_ok += 1
-                else:
-                    signals_failed += 1
-        except TimeoutError:
-            timed_out = [n for f, n in futures.items() if not f.done()]
-            # BUG-178 diagnostic (added 2026-04-10): per-ticker last-signal
-            # tracker reveals which enhanced signal each stuck ticker was
-            # running when the 180s pool timeout fired. Surfaces silent
-            # hangs that never trip the [SLOW] >1s logger because the
-            # signal never returns. The dispatch loop in signal_engine.py
-            # writes _last_signal_per_ticker[ticker] right before each
-            # compute_fn() call. Format: {ticker: (sig_name, elapsed_seconds)}.
-            try:
-                from portfolio.signal_engine import get_last_signal as _get_last
-                last_sigs = {n: _get_last(n) for n in timed_out}
-            except Exception:
-                last_sigs = {}
-            logger.error(
-                "BUG-178: Ticker pool timeout after %ds. Stuck: %s. Last signals: %s",
-                _TICKER_POOL_TIMEOUT, timed_out, last_sigs,
-            )
-            for f in futures:
-                f.cancel()
-            signals_failed += len(timed_out)
+            from portfolio.signal_engine import get_last_signal as _get_last
+            last_sigs = {n: _get_last(n) for n in timed_out}
+        except Exception:
+            last_sigs = {}
+        logger.error(
+            "BUG-178: Ticker pool timeout after %ds. Stuck: %s. Last signals: %s",
+            _TICKER_POOL_TIMEOUT, timed_out, last_sigs,
+        )
+        for f in futures:
+            f.cancel()
+        signals_failed += len(timed_out)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
     # --- Post-cycle LLM batch flush ---
     # Ministral/Qwen3/fingpt cache misses were enqueued during parallel
