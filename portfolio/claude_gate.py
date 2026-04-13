@@ -48,6 +48,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 CONFIG_FILE = BASE_DIR / "config.json"
 INVOCATIONS_LOG = DATA_DIR / "claude_invocations.jsonl"
+# 2026-04-13: Append-only journal of failures that EVERY future Claude Code
+# session must see. Intentionally separate from claude_invocations.jsonl so
+# hooks and startup scripts can cheaply poll it without parsing routine
+# invocation noise. Consumed by scripts/check_critical_errors.py, which is
+# referenced from CLAUDE.md to guarantee surfacing at session start.
+CRITICAL_ERRORS_LOG = DATA_DIR / "critical_errors.jsonl"
 
 # A-IN-3 (2026-04-11): In-process concurrency lock. Without this, the main
 # loop's 8-worker ticker pool + the metals loop's fast-tick + signal
@@ -96,6 +102,89 @@ def _clean_env() -> dict:
     env.pop("CLAUDECODE", None)
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)
     return env
+
+
+# 2026-04-13: Detector for silent auth failures. The `--bare` flag (removed
+# from agent_invocation.py and multi_agent_layer2.py on 2026-04-13) disables
+# OAuth/keychain auth and requires ANTHROPIC_API_KEY. Since this user runs
+# on a Max subscription with no API key, `--bare` caused every Layer 2
+# invocation between 2026-03-27 and 2026-04-13 to print "Not logged in —
+# Please run /login" on stdout and exit 0. Nothing surfaced the failure
+# because exit_code=0 was treated as success across all three invocation
+# paths. Do not re-add `--bare`. If a new CLI flag or env tweak
+# re-introduces this class of silent auth error, this detector should
+# catch it.
+_AUTH_ERROR_MARKERS = ("Not logged in", "Please run /login", "Invalid API key")
+
+
+def record_critical_error(
+    category: str,
+    caller: str,
+    message: str,
+    context: dict | None = None,
+) -> None:
+    """Append a critical error to ``data/critical_errors.jsonl``.
+
+    The journal is the single source of truth consulted by
+    ``scripts/check_critical_errors.py`` at Claude session start (via
+    CLAUDE.md). Writing here guarantees the failure is visible to every
+    future Claude session until it's resolved with a follow-up entry.
+
+    Never raises — logging failures here must not cascade into the caller.
+    """
+    try:
+        entry = {
+            "ts": datetime.now(UTC).isoformat(),
+            "level": "critical",
+            "category": category,
+            "caller": caller,
+            "resolution": None,
+            "message": message,
+            "context": context or {},
+        }
+        atomic_append_jsonl(CRITICAL_ERRORS_LOG, entry)
+    except Exception as e:
+        logger.error("Failed to write critical_errors.jsonl: %s", e)
+
+
+def detect_auth_failure(output: str, caller: str, context: dict | None = None) -> bool:
+    """Scan subprocess output for claude-CLI auth errors and escalate.
+
+    Returns True if an auth failure pattern is detected. On match, logs at
+    CRITICAL level AND records the failure to ``critical_errors.jsonl`` so
+    future Claude sessions see it via the CLAUDE.md startup check. Callers
+    should downgrade ``success`` to False and mark the invocation status as
+    ``auth_error`` so the failure also shows up in the invocation log.
+
+    Deliberately logger.critical rather than an exception — the finance
+    loop runs 24/7 and raising here would tear down a tick. The
+    critical-level log + critical_errors.jsonl entry + invocation-log
+    status="auth_error" together make the failure impossible to miss.
+    """
+    if not output:
+        return False
+    for marker in _AUTH_ERROR_MARKERS:
+        if marker in output:
+            logger.critical(
+                "[AUTH_FAILURE] caller=%s — claude CLI printed %r. "
+                "OAuth session not being read. Likely causes: "
+                "--bare flag re-added, ANTHROPIC_API_KEY set to an invalid "
+                "value, or ~/.claude/.credentials.json expired/missing. "
+                "Run `claude` interactively to re-login.",
+                caller, marker,
+            )
+            record_critical_error(
+                category="auth_failure",
+                caller=caller,
+                message=(
+                    f"claude CLI subprocess printed {marker!r} — OAuth session "
+                    f"not being read. Check for --bare flag, invalid "
+                    f"ANTHROPIC_API_KEY, or expired ~/.claude/.credentials.json."
+                ),
+                context={**(context or {}), "marker": marker},
+            )
+            return True
+    return False
 
 
 def _find_claude_cmd() -> str | None:
@@ -344,6 +433,17 @@ def invoke_claude(
         else:
             exit_code = rc
             status = "invoked" if exit_code == 0 else "error"
+            # 2026-04-13: Silent-failure detector. claude CLI can exit 0 while
+            # printing "Not logged in" when OAuth/keychain auth can't be read
+            # (e.g. --bare flag, missing ANTHROPIC_API_KEY). Override status
+            # so the failure surfaces instead of being lost to exit_code=0.
+            if detect_auth_failure(
+                (_stdout or "") + (_stderr or ""),
+                caller,
+                context={"model": model, "max_turns": max_turns, "exit_code": exit_code},
+            ):
+                status = "auth_error"
+                exit_code = exit_code or 1
     except Exception as e:
         status = "error"
         logger.error("Claude invocation failed — caller=%s: %s", caller, e)
@@ -365,7 +465,7 @@ def invoke_claude(
         caller, model, status, exit_code, duration,
     )
 
-    return exit_code == 0, exit_code
+    return status == "invoked", exit_code
 
 
 def invoke_claude_text(
@@ -427,6 +527,18 @@ def invoke_claude_text(
             exit_code = rc
             text = stdout
             status = "invoked" if exit_code == 0 else "error"
+            # 2026-04-13: Same auth-failure detection as invoke_claude — see
+            # the comment there for the full context. Need to scan both
+            # stdout and stderr because the CLI can write "Not logged in"
+            # to either depending on version.
+            if detect_auth_failure(
+                (stdout or "") + (_stderr or ""),
+                caller,
+                context={"model": model, "max_turns": 1, "exit_code": exit_code},
+            ):
+                status = "auth_error"
+                exit_code = exit_code or 1
+                text = ""  # don't let the error message leak into the caller's "text"
     except Exception as e:
         logger.error("Claude text invocation failed — caller=%s: %s", caller, e)
 
@@ -442,7 +554,7 @@ def invoke_claude_text(
         caller, model, status, exit_code, duration, len(text),
     )
 
-    return text, exit_code == 0, exit_code
+    return text, status == "invoked", exit_code
 
 
 def get_invocation_stats() -> dict:

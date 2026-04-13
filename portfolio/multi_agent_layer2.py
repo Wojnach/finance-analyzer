@@ -25,6 +25,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from portfolio.claude_gate import detect_auth_failure
+
 logger = logging.getLogger("portfolio.multi_agent_layer2")
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -144,11 +146,15 @@ def launch_specialists(
 
     for name, prompt in prompts.items():
         spec = SPECIALISTS[name]
+        # 2026-04-13: DO NOT add `--bare` here either. Same reason as
+        # agent_invocation.py: `--bare` disables OAuth/keychain auth and
+        # requires ANTHROPIC_API_KEY. User runs Max-subscription OAuth only.
+        # Commit 857fd45 (2026-04-01) added `--bare` to specialist launches;
+        # removed 2026-04-13 after confirming it broke all specialist runs.
         cmd = [
             claude_cmd, "-p", prompt,
             "--allowedTools", "Read,Write",
             "--max-turns", str(spec["max_turns"]),
-            "--bare",
         ]
         try:
             log_path = DATA_DIR / f"_specialist_{name}.log"
@@ -199,6 +205,20 @@ def wait_for_specialists(
             log_fh = getattr(proc, "_log_fh", None)
             if log_fh:
                 log_fh.close()
+
+        # 2026-04-13: Auth-error scan — specialist log is truncated per run
+        # ("w" mode in launch_specialists), so reading the whole file is safe.
+        # Override success to False if auth failure detected so synthesis
+        # doesn't proceed with an empty specialist report masquerading as OK.
+        try:
+            log_path = DATA_DIR / f"_specialist_{name}.log"
+            if log_path.exists():
+                text = log_path.read_text(encoding="utf-8", errors="replace")
+                if detect_auth_failure(text, caller=f"layer2_specialist_{name}",
+                                       context={"specialist": name}):
+                    results[name] = False
+        except Exception as e:
+            logger.warning("Auth-error scan of specialist %s log failed: %s", name, e)
 
     return results
 

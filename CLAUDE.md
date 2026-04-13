@@ -1,5 +1,33 @@
 # Portfolio Intelligence — Finance Analyzer
 
+## ⚠ STARTUP CHECK — READ FIRST
+
+Before doing anything else in this session:
+
+```
+.venv/Scripts/python.exe scripts/check_critical_errors.py
+```
+
+If the script exits non-zero, it has found unresolved critical errors in
+`data/critical_errors.jsonl` from the last 7 days. These represent
+failure modes the loop can't recover from on its own (e.g. the ~3-week
+silent Layer 2 auth outage of March–April 2026 that went undetected
+because `claude -p --bare` exited 0 while printing "Not logged in").
+
+When unresolved errors exist:
+
+1. Surface the list to the user verbatim before continuing.
+2. Ask whether to address them first, or proceed with the user's request.
+3. Do not silently ignore them.
+
+To resolve an entry, append a follow-up line to `data/critical_errors.jsonl`:
+
+```json
+{"ts":"<now>","level":"info","category":"resolution","caller":"<same>","resolution":"<what you did>","resolves_ts":"<original ts>","message":"<short>","context":{}}
+```
+
+The journal is append-only. Never mutate earlier entries.
+
 ## Overview
 
 Autonomous two-layer trading system. Layer 1 (Python, 60s loop) collects market data, computes

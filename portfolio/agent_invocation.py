@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from portfolio.api_utils import load_config as _load_config
+from portfolio.claude_gate import detect_auth_failure
 from portfolio.file_utils import atomic_append_jsonl, last_jsonl_entry, load_jsonl
 from portfolio.message_store import send_or_store
 from portfolio.telegram_notifications import escape_markdown_v1
@@ -25,6 +26,7 @@ TELEGRAM_FILE = DATA_DIR / "telegram_messages.jsonl"
 
 _agent_proc = None
 _agent_log = None
+_agent_log_start_offset = 0  # byte offset of agent.log at invoke time, for auth-error scan on completion
 _agent_start = 0
 _agent_timeout = 900  # per-invocation timeout (set from tier config)
 _agent_tier = None  # tier of the currently running agent
@@ -274,11 +276,17 @@ def invoke_agent(reasons, tier=3):
     # Try direct claude invocation first; fall back to bat file for T3
     claude_cmd = shutil.which("claude")
     if claude_cmd:
+        # 2026-04-13: DO NOT add `--bare`. It disables OAuth/keychain auth
+        # and only accepts ANTHROPIC_API_KEY. This user runs on a Max
+        # subscription with no API key, so `--bare` silently breaks every
+        # invocation ("Not logged in" to stdout, exit 0). Commit b4bb57d
+        # added it on 2026-03-27; removed on 2026-04-13 after 3 weeks of
+        # silent Layer 2 failures. See portfolio/claude_gate.py
+        # (detect_auth_failure) for the runtime guard.
         cmd = [
             claude_cmd, "-p", prompt,
             "--allowedTools", "Edit,Read,Bash,Write",
             "--max-turns", str(max_turns),
-            "--bare",
         ]
     else:
         # Fallback: use pf-agent.bat (always Tier 3)
@@ -291,7 +299,13 @@ def invoke_agent(reasons, tier=3):
 
     log_fh = None
     try:
-        log_fh = open(DATA_DIR / "agent.log", "a", encoding="utf-8")
+        agent_log_path = DATA_DIR / "agent.log"
+        # Capture the current file size BEFORE opening in append mode, so
+        # check_agent_completion() can read only this invocation's output
+        # (for auth-error detection) and not the entire log history.
+        global _agent_log_start_offset
+        _agent_log_start_offset = agent_log_path.stat().st_size if agent_log_path.exists() else 0
+        log_fh = open(agent_log_path, "a", encoding="utf-8")
         # Strip Claude Code session markers to avoid "nested session" error
         # when the parent process tree has Claude Code running
         agent_env = os.environ.copy()
@@ -510,8 +524,35 @@ def check_agent_completion():
     if _telegram_ts_before is None:
         telegram_sent = False
 
+    # 2026-04-13: Scan agent.log for auth-error markers (see claude_gate.py
+    # detect_auth_failure). Claude CLI can exit 0 while printing "Not logged
+    # in" to stdout — that's exactly the 3-week silent Layer 2 outage that
+    # motivated this detection. We captured _agent_log_start_offset before
+    # spawning the subprocess, so we only scan output from this invocation.
+    auth_error_detected = False
+    try:
+        agent_log_path = DATA_DIR / "agent.log"
+        if agent_log_path.exists():
+            with open(agent_log_path, "rb") as f:
+                f.seek(_agent_log_start_offset)
+                new_output = f.read().decode("utf-8", errors="replace")
+            auth_error_detected = detect_auth_failure(
+                new_output,
+                caller=f"layer2_t{_agent_tier}",
+                context={
+                    "tier": _agent_tier,
+                    "exit_code": exit_code,
+                    "duration_s": duration_s,
+                    "reasons": (_agent_reasons or [])[:5],
+                },
+            )
+    except Exception as e:
+        logger.warning("Auth-error scan of agent.log failed: %s", e)
+
     # Determine status
-    if exit_code != 0:
+    if auth_error_detected:
+        status = "auth_error"
+    elif exit_code != 0:
         status = "failed"
     elif journal_written and telegram_sent:
         status = "success"
