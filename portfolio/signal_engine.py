@@ -133,7 +133,7 @@ _PER_TICKER_CONSENSUS_MIN_SAMPLES = 50
 # Per-ticker signal disable: force HOLD for specific signal+ticker combos
 # where accuracy data shows the signal is actively harmful for that instrument.
 _TICKER_DISABLED_SIGNALS = {
-    "ETH-USD": frozenset({"news_event"}),  # 39.2% accuracy, 100% SELL bias
+    "ETH-USD": frozenset({"news_event", "qwen3"}),  # news_event 39.2% SELL bias; qwen3 40% on ETH despite 60% overall
 }
 
 # --- Signal (full 32-signal for "Now" timeframe) ---
@@ -720,6 +720,12 @@ _STATIC_CORRELATION_GROUPS = {
     # 2026-04-08: rsi+bb agree 100%, bb+mean_reversion 100%, bb+momentum 98.8%.
     # All use similar RSI/oversold-overbought logic. bb and momentum added.
     "momentum_cluster": frozenset({"mean_reversion", "rsi", "bb", "momentum"}),
+    # 2026-04-13: claude_fundamental + crypto_macro + structure agree 92-100%
+    # but were not in any cluster — all voting at full weight despite near-total
+    # redundancy. claude_fundamental (61.9%) is leader; structure (49.8%) and
+    # crypto_macro (55.5%) are followers. Note: structure is also in
+    # volatility_cluster — dynamic groups may reassign it, which is fine.
+    "fundamental_cluster": frozenset({"claude_fundamental", "crypto_macro", "structure"}),
 }
 # Public alias for backward compatibility (used by tests and reporting)
 CORRELATION_GROUPS = _STATIC_CORRELATION_GROUPS
