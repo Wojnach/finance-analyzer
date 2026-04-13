@@ -7,17 +7,23 @@ trigger a self-healing Claude Code session.
 Supports: main loop, metals loop, GoldDigger, Elongir.
 """
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = BASE_DIR / "data"
 CONTRACT_STATE_FILE = DATA_DIR / "contract_state.json"
 CONTRACT_LOG_FILE = DATA_DIR / "contract_violations.jsonl"
+CONFIG_FILE = BASE_DIR / "config.json"
+HEALTH_STATE_FILE = DATA_DIR / "health_state.json"
+LAYER2_JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
+CLAUDE_INVOCATIONS_FILE = DATA_DIR / "claude_invocations.jsonl"
 
 # Thresholds
 MAX_CYCLE_DURATION_S = 180
@@ -25,6 +31,15 @@ MIN_SUCCESS_RATE = 0.5
 SIGNAL_DROP_THRESHOLD = 0.3  # >30% drop in voter count = warning
 ESCALATION_THRESHOLD = 3     # consecutive warnings → CRITICAL
 SELF_HEAL_COOLDOWN_S = 1800  # 30 minutes between sessions
+
+# Layer 2 journal-activity contract (2026-04-13). Motivated by the 3-week
+# silent outage 2026-03-27 → 2026-04-13 where --bare broke OAuth auth and
+# every Layer 2 invocation exited 0 without writing a journal entry. The
+# contract fires when triggers happen but journal stays empty — a class-
+# of-failure check that would catch future silent-stall bugs, not just
+# this specific auth case.
+LAYER2_TRIGGER_LOOKBACK_S = 6 * 3600   # only complain if trigger was recent
+LAYER2_JOURNAL_GRACE_S = 60 * 60       # grace period post-trigger for agent to journal
 
 
 @dataclass
@@ -60,6 +75,145 @@ class Violation:
     severity: str  # "CRITICAL" or "WARNING"
     message: str
     details: dict = field(default_factory=dict)
+
+
+def _read_json(path: Path) -> dict | None:
+    """Best-effort JSON read. Returns None on any error — contract checks
+    must never fail noisily or block the loop."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _parse_iso(ts: str | None) -> datetime | None:
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts)
+    except (ValueError, TypeError):
+        return None
+
+
+def _last_jsonl_entry(path: Path) -> dict | None:
+    """Return the last parseable JSON line from a JSONL file, or None.
+    Reads the whole file — acceptable because these journals are small
+    (hundreds of KB at most) and the check runs at cycle cadence (60s)."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            last = None
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    last = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+            return last
+    except OSError:
+        return None
+
+
+def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation]:
+    """Contract: if Layer 2 is enabled and a trigger fired in the last 6h,
+    the Layer 2 agent must have written a journal entry within 1h of that
+    trigger.
+
+    Returns ``[]`` when the contract passes OR when preconditions don't
+    apply (Layer 2 disabled, no recent trigger, missing state files).
+    Never raises — all file-read failures degrade to "contract passes"
+    because we cannot distinguish a healthy-but-uninstrumented system
+    from a silently-broken one at this level, and false-positive alerts
+    would erode trust in the contract framework.
+    """
+    now = now or datetime.now(UTC)
+
+    # Precondition 1: Layer 2 must be enabled.
+    cfg = _read_json(CONFIG_FILE) or {}
+    if not cfg.get("layer2", {}).get("enabled", True):
+        return []
+
+    # Precondition 2: a trigger must have fired recently.
+    health = _read_json(HEALTH_STATE_FILE)
+    if not health:
+        return []
+    last_trigger = _parse_iso(health.get("last_trigger_time"))
+    if last_trigger is None:
+        return []
+    trigger_age_s = (now - last_trigger).total_seconds()
+    if trigger_age_s > LAYER2_TRIGGER_LOOKBACK_S or trigger_age_s < 0:
+        return []
+
+    # Precondition 3: the trigger must be old enough that the agent has
+    # had its grace window to actually journal. Complaining before the
+    # grace window elapses would spam on every cycle immediately after a
+    # fresh trigger.
+    if trigger_age_s < LAYER2_JOURNAL_GRACE_S:
+        return []
+
+    # Check: journal entry since the trigger?
+    latest_journal_entry = _last_jsonl_entry(LAYER2_JOURNAL_FILE)
+    journal_ts = None
+    if latest_journal_entry:
+        journal_ts = _parse_iso(
+            latest_journal_entry.get("timestamp")
+            or latest_journal_entry.get("ts")
+        )
+    if journal_ts is not None and journal_ts >= last_trigger:
+        return []  # Journal was written after the trigger. Contract passes.
+
+    # Violation. Try to enrich the message with whether a recent auth
+    # failure was logged — it's the most common root cause, and telling
+    # the user "auth_error was already recorded" saves them investigation.
+    latest_inv = _last_jsonl_entry(CLAUDE_INVOCATIONS_FILE)
+    inv_context = {}
+    if latest_inv:
+        inv_context = {
+            "last_invocation_status": latest_inv.get("status"),
+            "last_invocation_caller": latest_inv.get("caller"),
+            "last_invocation_ts": latest_inv.get("timestamp"),
+        }
+
+    violation = Violation(
+        invariant="layer2_journal_activity",
+        severity="CRITICAL",
+        message=(
+            f"Layer 2 trigger fired {trigger_age_s / 60:.0f}m ago "
+            f"({health.get('last_trigger_reason', '?')}) but no journal "
+            f"entry has been written since. Agent may be failing silently. "
+            f"Check data/agent.log and data/critical_errors.jsonl."
+        ),
+        details={
+            "trigger_time": health.get("last_trigger_time"),
+            "trigger_age_s": round(trigger_age_s),
+            "trigger_reason": health.get("last_trigger_reason"),
+            "last_journal_ts": (
+                latest_journal_entry.get("timestamp") or latest_journal_entry.get("ts")
+                if latest_journal_entry else None
+            ),
+            **inv_context,
+        },
+    )
+
+    # Also record to critical_errors.jsonl so the CLAUDE.md STARTUP CHECK
+    # surfaces this to every future Claude session. The contract's own
+    # Telegram alerting is per-cycle; critical_errors is persistent until
+    # explicitly resolved.
+    try:
+        from portfolio.claude_gate import record_critical_error
+        record_critical_error(
+            category="contract_violation",
+            caller="layer2_journal_activity",
+            message=violation.message,
+            context=violation.details,
+        )
+    except Exception as e:
+        # Never let record_critical_error failures break the contract check.
+        logger.warning("record_critical_error failed in contract check: %s", e)
+
+    return [violation]
 
 
 def verify_contract(report: CycleReport, previous_signal_counts: dict | None = None) -> list[Violation]:
@@ -234,6 +388,11 @@ def verify_contract(report: CycleReport, previous_signal_counts: dict | None = N
             ),
             details={"failed_tasks": failed_tasks},
         ))
+
+    # 11. Layer 2 journal activity — stateful file-read check, independent
+    # of the cycle report. Catches the "trigger fired but agent silently
+    # failed" pattern. See check_layer2_journal_activity() for details.
+    violations.extend(check_layer2_journal_activity())
 
     return violations
 
