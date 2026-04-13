@@ -106,8 +106,13 @@ SIGNAL_REVERSAL_EXIT = True        # exit on SELL consensus with >= MIN_BUY_VOTE
 # .claude/rules/metals-avanza.md). TODO: ship get_session_close_cet() in
 # portfolio/avanza_session.py and set this back to 10.
 MAX_HOLD_HOURS = 24                # 24h safety net only — real time-based exit is EOD
-EOD_EXIT_MINUTES_BEFORE = 25       # exits 25 min before hardcoded 21:55 close (21:30 CET).
-                                   # DST-gap-safe; revert to 10 once dynamic close lookup ships.
+EOD_EXIT_MINUTES_BEFORE = 0        # 2026-04-13 user override: disabled EOD blind exit.
+                                   # Statistical basis: XAG 1d UP base rate 55.7%, current
+                                   # SELL consensus only 32.5% accurate at 1d horizon (n=813).
+                                   # Holding overnight is probabilistically favorable. The
+                                   # smart breakeven evaluator (rule 1b in _check_exits) +
+                                   # HARD_STOP + TRAILING still manage risk.
+                                   # REVERT to 25 after current position closes.
 
 # ---------------------------------------------------------------------------
 # Cooldowns
