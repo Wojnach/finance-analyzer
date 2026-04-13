@@ -6131,14 +6131,22 @@ def main():
         )
     log(f"Invocation log: {INVOCATION_LOG}")
 
+    # 2026-04-13: wrap raw Playwright Page in ResilientPage so the inevitable
+    # TargetClosedError (browser dies on OS sleep / memory pressure / external
+    # BankID re-auth) auto-teardowns + relaunches + reloads storage_state and
+    # retries the failing page.evaluate() once. Previously the loop ran for days
+    # emitting TargetClosedError on every cycle with zero trades. See
+    # docs/AVANZA_RESILIENCE_PLAN.md.
+    from portfolio.avanza_resilient_page import ResilientPage
+
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
-        ctx = browser.new_context(storage_state="data/avanza_storage_state.json")
-        page = ctx.new_page()
+        page = ResilientPage.open(
+            pw,
+            storage_state_path="data/avanza_storage_state.json",
+            headless=True,
+        )
         global _loop_page
         _loop_page = page  # expose to fish engine execute functions
-        page.goto("https://www.avanza.se/min-ekonomi/oversikt.html", wait_until="domcontentloaded")
-        page.wait_for_timeout(2000)
         log("Avanza session loaded")
 
         # Check session health at startup
@@ -6950,7 +6958,9 @@ Positions: {pos_summary}{prob_summary}""")
                     _strategy_orchestrator.stop()
                 except Exception as e:
                     print(f"[WARN] Strategy orchestrator stop failed: {e}", flush=True)
-            browser.close()
+            # 2026-04-13: ResilientPage owns browser+ctx internally (see
+            # avanza_resilient_page.py). Shutdown teardown goes through it.
+            page.close()
             release_singleton_lock()
             log(f"Loop stopped: {check_count} checks, {invoke_count} invocations")
 

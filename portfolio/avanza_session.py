@@ -13,8 +13,10 @@ import threading
 import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from portfolio.avanza_order_lock import avanza_order_lock
+from portfolio.avanza_resilient_page import is_browser_dead_error
 from portfolio.file_utils import load_json
 
 logger = logging.getLogger("portfolio.avanza_session")
@@ -188,6 +190,42 @@ def verify_session() -> bool:
         return False
 
 
+# 2026-04-13: Auto-recovery wrapper for api_get/api_post/api_delete.
+# The singleton Playwright browser held in _pw_context occasionally dies
+# mid-flight (OS sleep, memory pressure, external BankID re-auth by the
+# user, cookie-jar corruption under heavy concurrency). When that happens
+# every subsequent ctx.request.* call throws TargetClosedError until the
+# process restarts. The pre-existing 401/403 path already knows to call
+# close_playwright() so the next request re-launches; we extend the same
+# pattern to browser-dead errors.
+#
+# Keeps the singleton + _pw_lock (BUG-129 / A-AV-1). The whole retry runs
+# under the RLock so a concurrent thread cannot partially observe the
+# teardown/relaunch. _get_playwright_context also acquires the lock but
+# it's reentrant for the same thread.
+def _with_browser_recovery(op: Callable[[Any], Any], *, op_name: str) -> Any:
+    """Run ``op(ctx)`` under ``_pw_lock``; on browser-dead error, teardown +
+    relaunch + retry once. Propagate all other exceptions unchanged.
+
+    ``op`` is called with the current Playwright context. The op is responsible
+    for making the actual ctx.request.* call and handling HTTP-level errors.
+    """
+    with _pw_lock:
+        ctx = _get_playwright_context()
+        try:
+            return op(ctx)
+        except Exception as exc:
+            if not is_browser_dead_error(exc):
+                raise
+            logger.warning(
+                "avanza_session: browser dead on %s (%r) — teardown + relaunch + retry",
+                op_name, exc,
+            )
+            close_playwright()
+            ctx = _get_playwright_context()
+            return op(ctx)
+
+
 # --- API convenience functions ---
 
 
@@ -205,9 +243,11 @@ def api_get(path: str, **kwargs) -> Any:
     """
     # A-AV-1: Hold _pw_lock for the entire request. Playwright's sync_api
     # is NOT thread-safe and the metals fast-tick + main 8-worker pool race.
-    with _pw_lock:
-        ctx = _get_playwright_context()
-        url = f"{API_BASE}{path}" if path.startswith("/") else path
+    # 2026-04-13: Wrapped in _with_browser_recovery so TargetClosedError
+    # (browser died mid-flight) triggers a teardown + relaunch + retry.
+    url = f"{API_BASE}{path}" if path.startswith("/") else path
+
+    def _op(ctx):
         resp = ctx.request.get(url)
         if resp.status == 401:
             close_playwright()
@@ -219,9 +259,23 @@ def api_get(path: str, **kwargs) -> Any:
             raise RuntimeError(f"Avanza API error {resp.status}: {resp.text()[:500]}")
         return resp.json()
 
+    return _with_browser_recovery(_op, op_name=f"GET {path}")
 
-def _get_csrf() -> str:
-    """Extract CSRF token from Playwright context cookies."""
+
+def _get_csrf(ctx=None) -> str:
+    """Extract CSRF token from Playwright context cookies.
+
+    If ``ctx`` is provided (e.g. from inside an already-locked _with_recovery
+    block) it is used directly — avoids re-entering the RLock and avoids a
+    stale context reference after a relaunch. Otherwise acquires the lock
+    and fetches a fresh context.
+    """
+    if ctx is not None:
+        for c in ctx.cookies():
+            if c["name"] == "AZACSRF":
+                return c["value"]
+        raise AvanzaSessionError("No AZACSRF cookie found — session may be invalid")
+
     # A-AV-1: ctx.cookies() reads Playwright internal state — needs lock.
     with _pw_lock:
         ctx = _get_playwright_context()
@@ -245,13 +299,17 @@ def api_post(path: str, payload: dict) -> Any:
     """
     # A-AV-1: Hold lock across CSRF read + POST so a concurrent request
     # cannot rotate the cookie jar mid-flight.
-    with _pw_lock:
-        ctx = _get_playwright_context()
-        csrf = _get_csrf()
-        url = f"{API_BASE}{path}" if path.startswith("/") else path
+    # 2026-04-13: Wrapped in _with_browser_recovery. CSRF is read from the
+    # same ctx used for the POST, so a relaunch picks up fresh cookies in
+    # both places atomically (no stale-CSRF-against-fresh-context mismatch).
+    url = f"{API_BASE}{path}" if path.startswith("/") else path
+    body_data = json.dumps(payload)
+
+    def _op(ctx):
+        csrf = _get_csrf(ctx)
         resp = ctx.request.post(
             url,
-            data=json.dumps(payload),
+            data=body_data,
             headers={
                 "Content-Type": "application/json",
                 "X-SecurityToken": csrf,
@@ -277,6 +335,8 @@ def api_post(path: str, payload: dict) -> Any:
                 raise RuntimeError(f"Avanza API error {resp.status}: {body[:500]}") from None
             return {"raw": body}
 
+    return _with_browser_recovery(_op, op_name=f"POST {path}")
+
 
 def api_delete(path: str) -> Any:
     """Make an authenticated DELETE request to Avanza API.
@@ -290,10 +350,11 @@ def api_delete(path: str) -> Any:
         Dict with ``http_status`` and ``ok`` keys.
     """
     # A-AV-1: Hold lock across CSRF read + DELETE.
-    with _pw_lock:
-        ctx = _get_playwright_context()
-        csrf = _get_csrf()
-        url = f"{API_BASE}{path}" if path.startswith("/") else path
+    # 2026-04-13: Wrapped in _with_browser_recovery (see api_get/api_post).
+    url = f"{API_BASE}{path}" if path.startswith("/") else path
+
+    def _op(ctx):
+        csrf = _get_csrf(ctx)
         resp = ctx.request.delete(
             url,
             headers={
@@ -308,6 +369,8 @@ def api_delete(path: str) -> Any:
                 "Run: python scripts/avanza_login.py"
             )
         return {"http_status": resp.status, "ok": 200 <= resp.status < 300 or resp.status == 404}
+
+    return _with_browser_recovery(_op, op_name=f"DELETE {path}")
 
 
 # --- Trading convenience functions ---
@@ -536,7 +599,11 @@ def _place_order(
         "validUntil": valid_until or date.today().isoformat(),
         "volume": volume,
     }
-    result = api_post("/_api/trading-critical/rest/order/new", payload)
+    # 2026-04-13: cross-process lock — metals_loop + golddigger + fin_snipe
+    # must not race on buying_power. 2s fail-fast; busy peer aborts the order
+    # (caller retries next cycle).
+    with avanza_order_lock(op=f"place_order/{side}/{orderbook_id}"):
+        result = api_post("/_api/trading-critical/rest/order/new", payload)
     status = result.get("orderRequestStatus", "UNKNOWN")
     if status != "SUCCESS":
         logger.warning("Order %s failed: %s — %s", side, status, result.get("message", ""))
@@ -557,7 +624,10 @@ def cancel_order(order_id: str, account_id: str | None = None) -> dict:
         "accountId": str(account_id or DEFAULT_ACCOUNT_ID),
         "orderId": str(order_id),
     }
-    return api_post("/_api/trading-critical/rest/order/delete", payload)
+    # 2026-04-13: cross-process order lock — cancel is a mutation, same
+    # concurrency concern as place_order (don't want two cancels racing).
+    with avanza_order_lock(op=f"cancel_order/{order_id}"):
+        return api_post("/_api/trading-critical/rest/order/delete", payload)
 
 
 def get_open_orders(account_id: str | None = None) -> list[dict]:
@@ -686,7 +756,11 @@ def place_stop_loss(
             "shortSellingAllowed": False,
         },
     }
-    result = api_post("/_api/trading/stoploss/new", payload)
+    # 2026-04-13: cross-process order lock. Stop-loss placement is
+    # especially race-sensitive because cancel-before-place flows are
+    # common (see user memory: cancel existing stop BEFORE placing new sell).
+    with avanza_order_lock(op=f"place_stop_loss/{orderbook_id}"):
+        result = api_post("/_api/trading/stoploss/new", payload)
     status = result.get("status", "UNKNOWN")
     if status == "SUCCESS":
         logger.info(
@@ -798,7 +872,10 @@ def cancel_stop_loss(stop_id: str, account_id: str | None = None) -> dict:
         return {"status": "FAILED", "http_status": 0, "stop_id": "", "error": "empty stop_id"}
     acct = str(account_id or DEFAULT_ACCOUNT_ID)
     try:
-        result = api_delete(f"/_api/trading/stoploss/{acct}/{stop_id}")
+        # 2026-04-13: cross-process order lock — SL cancel is mutating.
+        # See cancel_order / place_stop_loss for rationale.
+        with avanza_order_lock(op=f"cancel_stop_loss/{stop_id}"):
+            result = api_delete(f"/_api/trading/stoploss/{acct}/{stop_id}")
     except Exception as exc:  # noqa: BLE001 — propagate as structured failure
         logger.error("cancel_stop_loss(%s) raised: %s", stop_id, exc, exc_info=True)
         return {"status": "FAILED", "http_status": 0, "stop_id": stop_id, "error": str(exc)}
