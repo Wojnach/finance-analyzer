@@ -127,6 +127,7 @@ SIGNAL_NAMES = [
     "crypto_macro",
     "orderbook_flow",
     "metals_cross_asset",
+    "dxy_cross_asset",
     "cot_positioning",
     "credit_spread_risk",
     "onchain",
