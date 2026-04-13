@@ -15,6 +15,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
+from portfolio.avanza_order_lock import avanza_order_lock
 from portfolio.avanza_resilient_page import is_browser_dead_error
 from portfolio.file_utils import load_json
 
@@ -598,7 +599,11 @@ def _place_order(
         "validUntil": valid_until or date.today().isoformat(),
         "volume": volume,
     }
-    result = api_post("/_api/trading-critical/rest/order/new", payload)
+    # 2026-04-13: cross-process lock — metals_loop + golddigger + fin_snipe
+    # must not race on buying_power. 2s fail-fast; busy peer aborts the order
+    # (caller retries next cycle).
+    with avanza_order_lock(op=f"place_order/{side}/{orderbook_id}"):
+        result = api_post("/_api/trading-critical/rest/order/new", payload)
     status = result.get("orderRequestStatus", "UNKNOWN")
     if status != "SUCCESS":
         logger.warning("Order %s failed: %s — %s", side, status, result.get("message", ""))
@@ -619,7 +624,10 @@ def cancel_order(order_id: str, account_id: str | None = None) -> dict:
         "accountId": str(account_id or DEFAULT_ACCOUNT_ID),
         "orderId": str(order_id),
     }
-    return api_post("/_api/trading-critical/rest/order/delete", payload)
+    # 2026-04-13: cross-process order lock — cancel is a mutation, same
+    # concurrency concern as place_order (don't want two cancels racing).
+    with avanza_order_lock(op=f"cancel_order/{order_id}"):
+        return api_post("/_api/trading-critical/rest/order/delete", payload)
 
 
 def get_open_orders(account_id: str | None = None) -> list[dict]:
@@ -748,7 +756,11 @@ def place_stop_loss(
             "shortSellingAllowed": False,
         },
     }
-    result = api_post("/_api/trading/stoploss/new", payload)
+    # 2026-04-13: cross-process order lock. Stop-loss placement is
+    # especially race-sensitive because cancel-before-place flows are
+    # common (see user memory: cancel existing stop BEFORE placing new sell).
+    with avanza_order_lock(op=f"place_stop_loss/{orderbook_id}"):
+        result = api_post("/_api/trading/stoploss/new", payload)
     status = result.get("status", "UNKNOWN")
     if status == "SUCCESS":
         logger.info(
@@ -860,7 +872,10 @@ def cancel_stop_loss(stop_id: str, account_id: str | None = None) -> dict:
         return {"status": "FAILED", "http_status": 0, "stop_id": "", "error": "empty stop_id"}
     acct = str(account_id or DEFAULT_ACCOUNT_ID)
     try:
-        result = api_delete(f"/_api/trading/stoploss/{acct}/{stop_id}")
+        # 2026-04-13: cross-process order lock — SL cancel is mutating.
+        # See cancel_order / place_stop_loss for rationale.
+        with avanza_order_lock(op=f"cancel_stop_loss/{stop_id}"):
+            result = api_delete(f"/_api/trading/stoploss/{acct}/{stop_id}")
     except Exception as exc:  # noqa: BLE001 — propagate as structured failure
         logger.error("cancel_stop_loss(%s) raised: %s", stop_id, exc, exc_info=True)
         return {"status": "FAILED", "http_status": 0, "stop_id": stop_id, "error": str(exc)}

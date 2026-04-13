@@ -12,6 +12,8 @@ import datetime
 import json
 import logging
 
+from portfolio.avanza_order_lock import avanza_order_lock
+
 logger = logging.getLogger("metals_avanza_helpers")
 
 
@@ -270,16 +272,20 @@ def place_order(page, account_id, ob_id, side, price, volume):
     }
 
     try:
-        result = page.evaluate("""async (args) => {
-            const [payload, token] = args;
-            const resp = await fetch('https://www.avanza.se/_api/trading-critical/rest/order/new', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
-                credentials: 'include',
-                body: JSON.stringify(payload),
-            });
-            return {status: resp.status, body: await resp.text()};
-        }""", [payload, csrf])
+        # 2026-04-13: cross-process order lock — prevents metals_loop,
+        # golddigger, main.py (via avanza_session) from racing on buying_power.
+        # Busy peer: OrderLockBusyError bubbles up (caller retries next cycle).
+        with avanza_order_lock(op=f"place_order/{side}/{ob_id}"):
+            result = page.evaluate("""async (args) => {
+                const [payload, token] = args;
+                const resp = await fetch('https://www.avanza.se/_api/trading-critical/rest/order/new', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
+                    credentials: 'include',
+                    body: JSON.stringify(payload),
+                });
+                return {status: resp.status, body: await resp.text()};
+            }""", [payload, csrf])
 
         body = {}
         try:
@@ -338,16 +344,18 @@ def place_stop_loss(page, account_id, ob_id, trigger_price, sell_price, volume,
     }
 
     try:
-        result = page.evaluate("""async (args) => {
-            const [payload, token] = args;
-            const resp = await fetch('https://www.avanza.se/_api/trading/stoploss/new', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
-                credentials: 'include',
-                body: JSON.stringify(payload),
-            });
-            return {status: resp.status, body: await resp.text()};
-        }""", [payload, csrf])
+        # 2026-04-13: cross-process order lock (see place_order rationale).
+        with avanza_order_lock(op=f"place_stop_loss/{ob_id}"):
+            result = page.evaluate("""async (args) => {
+                const [payload, token] = args;
+                const resp = await fetch('https://www.avanza.se/_api/trading/stoploss/new', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
+                    credentials: 'include',
+                    body: JSON.stringify(payload),
+                });
+                return {status: resp.status, body: await resp.text()};
+            }""", [payload, csrf])
 
         body = {}
         try:
@@ -379,16 +387,18 @@ def delete_order(page, account_id, order_id):
         return False, {"error": "no CSRF token"}
 
     try:
-        result = page.evaluate("""async (args) => {
-            const [accountId, orderId, token] = args;
-            const resp = await fetch('https://www.avanza.se/_api/trading-critical/rest/order/delete', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
-                credentials: 'include',
-                body: JSON.stringify({accountId: accountId, orderId: orderId}),
-            });
-            return {status: resp.status, body: await resp.text()};
-        }""", [account_id, order_id, csrf])
+        # 2026-04-13: cross-process order lock (see place_order rationale).
+        with avanza_order_lock(op=f"delete_order/{order_id}"):
+            result = page.evaluate("""async (args) => {
+                const [accountId, orderId, token] = args;
+                const resp = await fetch('https://www.avanza.se/_api/trading-critical/rest/order/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-SecurityToken': token},
+                    credentials: 'include',
+                    body: JSON.stringify({accountId: accountId, orderId: orderId}),
+                });
+                return {status: resp.status, body: await resp.text()};
+            }""", [account_id, order_id, csrf])
 
         body = {}
         try:

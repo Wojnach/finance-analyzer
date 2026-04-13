@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import logging
 
+from portfolio.avanza_order_lock import avanza_order_lock
+
 logger = logging.getLogger("portfolio.avanza_control")
 
 from data.metals_avanza_helpers import (
@@ -168,25 +170,27 @@ def delete_order_live(page, account_id: str | None, order_id: str):
 
     resolved_account_id = str(account_id or get_account_id())
     try:
-        result = page.evaluate(
-            """async (args) => {
-                const [accountId, orderId, token] = args;
-                const resp = await fetch(
-                    'https://www.avanza.se/_api/trading-critical/rest/order/delete',
-                    {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-SecurityToken': token,
-                        },
-                        credentials: 'include',
-                        body: JSON.stringify({accountId: accountId, orderId: orderId}),
-                    }
-                );
-                return {status: resp.status, body: await resp.text()};
-            }""",
-            [resolved_account_id, order_id, csrf],
-        )
+        # 2026-04-13: cross-process order lock (see metals_avanza_helpers.place_order).
+        with avanza_order_lock(op=f"delete_order_live/{order_id}"):
+            result = page.evaluate(
+                """async (args) => {
+                    const [accountId, orderId, token] = args;
+                    const resp = await fetch(
+                        'https://www.avanza.se/_api/trading-critical/rest/order/delete',
+                        {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-SecurityToken': token,
+                            },
+                            credentials: 'include',
+                            body: JSON.stringify({accountId: accountId, orderId: orderId}),
+                        }
+                    );
+                    return {status: resp.status, body: await resp.text()};
+                }""",
+                [resolved_account_id, order_id, csrf],
+            )
         http_status = int(result.get("status") or 0)
         body_text = result.get("body", "")
         parsed = {}
@@ -214,21 +218,23 @@ def delete_stop_loss(page, account_id: str | None, stop_id: str):
 
     resolved_account_id = str(account_id or get_account_id())
     try:
-        result = page.evaluate(
-            """async (args) => {
-                const [accountId, stopId, token] = args;
-                const resp = await fetch(
-                    'https://www.avanza.se/_api/trading/stoploss/' + accountId + '/' + stopId,
-                    {
-                        method: 'DELETE',
-                        headers: {'X-SecurityToken': token},
-                        credentials: 'include',
-                    }
-                );
-                return {status: resp.status, body: await resp.text()};
-            }""",
-            [resolved_account_id, stop_id, csrf],
-        )
+        # 2026-04-13: cross-process order lock. SL delete is mutating.
+        with avanza_order_lock(op=f"delete_stop_loss/{stop_id}"):
+            result = page.evaluate(
+                """async (args) => {
+                    const [accountId, stopId, token] = args;
+                    const resp = await fetch(
+                        'https://www.avanza.se/_api/trading/stoploss/' + accountId + '/' + stopId,
+                        {
+                            method: 'DELETE',
+                            headers: {'X-SecurityToken': token},
+                            credentials: 'include',
+                        }
+                    );
+                    return {status: resp.status, body: await resp.text()};
+                }""",
+                [resolved_account_id, stop_id, csrf],
+            )
         http_status = int(result.get("status") or 0)
         # 2xx = deleted successfully.  404 = stop already gone (triggered/expired/cancelled).
         # Both mean the stop no longer exists, which is the goal of a cancel.
