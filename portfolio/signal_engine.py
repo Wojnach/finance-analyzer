@@ -130,6 +130,12 @@ _BIAS_MIN_ACTIVE = 30  # need enough active (non-HOLD) votes to judge bias
 _PER_TICKER_CONSENSUS_GATE = 0.38  # below 38% = force HOLD
 _PER_TICKER_CONSENSUS_MIN_SAMPLES = 50
 
+# Per-ticker signal disable: force HOLD for specific signal+ticker combos
+# where accuracy data shows the signal is actively harmful for that instrument.
+_TICKER_DISABLED_SIGNALS = {
+    "ETH-USD": frozenset({"news_event"}),  # 39.2% accuracy, 100% SELL bias
+}
+
 # --- Signal (full 32-signal for "Now" timeframe) ---
 
 MIN_VOTERS_CRYPTO = 3  # crypto has 30 signals (8 core + 22 enhanced; ml disabled) — need 3
@@ -1678,6 +1684,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             # call sites: count_active_signals():468, dynamic correlation:558,
             # accuracy_stats.py, ticker_accuracy.py, backtester.py, reporting.py.
             if sig_name in DISABLED_SIGNALS:
+                votes[sig_name] = "HOLD"
+                continue
+            if sig_name in _TICKER_DISABLED_SIGNALS.get(ticker, ()):
                 votes[sig_name] = "HOLD"
                 continue
             # Skip GPU-intensive enhanced signals for stocks outside market hours

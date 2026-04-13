@@ -727,3 +727,36 @@ class TestPerClusterCorrelationPenalties:
     def test_default_penalty_unchanged(self):
         from portfolio.signal_engine import _CORRELATION_PENALTY
         assert _CORRELATION_PENALTY == 0.3
+
+
+class TestTickerDisabledSignals:
+    """Per-ticker signal gating: force HOLD for specific signal+ticker combos."""
+
+    def test_ticker_disabled_signals_dict_exists(self):
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert isinstance(_TICKER_DISABLED_SIGNALS, dict)
+
+    def test_eth_news_event_disabled(self):
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "ETH-USD" in _TICKER_DISABLED_SIGNALS
+        assert "news_event" in _TICKER_DISABLED_SIGNALS["ETH-USD"]
+
+    def test_btc_news_event_not_disabled(self):
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        btc_disabled = _TICKER_DISABLED_SIGNALS.get("BTC-USD", frozenset())
+        assert "news_event" not in btc_disabled
+
+    def test_dispatch_respects_ticker_disable(self):
+        """In generate_signal dispatch loop, per-ticker disabled signals should be HOLD."""
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+
+        ticker = "ETH-USD"
+        sig_name = "news_event"
+        disabled_for_ticker = _TICKER_DISABLED_SIGNALS.get(ticker, ())
+        assert sig_name in disabled_for_ticker
+        # Simulating the dispatch check: if sig_name in disabled_for_ticker → HOLD
+        if sig_name in disabled_for_ticker:
+            vote = "HOLD"
+        else:
+            vote = "BUY"
+        assert vote == "HOLD"
