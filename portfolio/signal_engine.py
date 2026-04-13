@@ -133,7 +133,7 @@ _PER_TICKER_CONSENSUS_MIN_SAMPLES = 50
 # Per-ticker signal disable: force HOLD for specific signal+ticker combos
 # where accuracy data shows the signal is actively harmful for that instrument.
 _TICKER_DISABLED_SIGNALS = {
-    "ETH-USD": frozenset({"news_event"}),  # 39.2% accuracy, 100% SELL bias
+    "ETH-USD": frozenset({"news_event", "qwen3"}),  # news_event 39.2% SELL bias; qwen3 40% on ETH despite 60% overall
 }
 
 # --- Signal (full 32-signal for "Now" timeframe) ---
@@ -305,15 +305,17 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
         # trend ~0%, ema ~11%, volume_flow ~10%, macro_regime 11.1%, momentum_factors low
         # claude_fundamental 5.9% trending-up (34 samples) — BUG-154
         # 2026-04-09: funding gated at 1d (29.9%), active at 3h (74.2%)
+        # 2026-04-13: fear_greed 25.9% at 1d (170 sam) — destructive in ALL regimes at 1d
         "_default": frozenset({
             "trend", "ema", "volume_flow", "macro_regime",
             "momentum_factors", "claude_fundamental",
-            "funding",
+            "funding", "fear_greed",
         }),
         # mean_reversion 3h_recent=45.5% — gate on short horizons
         # SELL-biased signals work short-term even in uptrends — do NOT gate at 3h
-        "3h": frozenset({"mean_reversion"}),
-        "4h": frozenset({"mean_reversion"}),
+        # 2026-04-13: sentiment 33.8% at 3h (3629 sam) — destructive at 3h in ALL regimes
+        "3h": frozenset({"mean_reversion", "sentiment"}),
+        "4h": frozenset({"mean_reversion", "sentiment"}),
     },
     "trending-down": {
         # BUG-155: bb 21.7% in trending-down (false reversal signals)
@@ -323,19 +325,25 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
         # wrong when the downtrend classification is stale or stocks are recovering.
         # BUG-165: smart_money 10.0% in trending-down (130 samples) — worst signal
         # 2026-04-09: funding gated at 1d, active at 3h
+        # 2026-04-13: fear_greed 25.9% at 1d (170 sam) — destructive in ALL regimes at 1d
         "_default": frozenset({
             "bb", "claude_fundamental",
             "volume_flow", "macro_regime", "ema", "trend", "heikin_ashi",
             "smart_money",  # BUG-165: 10.0% accuracy in trending-down
-            "funding",
+            "funding", "fear_greed",
         }),
         # 3h: trend signals may still work short-term; keep mean_reversion gated
-        "3h": frozenset({"mean_reversion", "bb", "claude_fundamental"}),
-        "4h": frozenset({"mean_reversion", "bb", "claude_fundamental"}),
+        # 2026-04-13: sentiment 33.8% at 3h (3629 sam) — destructive at 3h in ALL regimes
+        "3h": frozenset({"mean_reversion", "bb", "claude_fundamental", "sentiment"}),
+        "4h": frozenset({"mean_reversion", "bb", "claude_fundamental", "sentiment"}),
     },
     "high-vol": {
         # 2026-04-09: funding gated at 1d, active at 3h
-        "_default": frozenset({"funding"}),
+        # 2026-04-13: fear_greed 25.9% at 1d (170 sam) — destructive in ALL regimes at 1d
+        "_default": frozenset({"funding", "fear_greed"}),
+        # 2026-04-13: sentiment 33.8% at 3h (3629 sam) — destructive at 3h in ALL regimes
+        "3h": frozenset({"sentiment"}),
+        "4h": frozenset({"sentiment"}),
     },
 }
 
@@ -712,6 +720,12 @@ _STATIC_CORRELATION_GROUPS = {
     # 2026-04-08: rsi+bb agree 100%, bb+mean_reversion 100%, bb+momentum 98.8%.
     # All use similar RSI/oversold-overbought logic. bb and momentum added.
     "momentum_cluster": frozenset({"mean_reversion", "rsi", "bb", "momentum"}),
+    # 2026-04-13: claude_fundamental + crypto_macro + structure agree 92-100%
+    # but were not in any cluster — all voting at full weight despite near-total
+    # redundancy. claude_fundamental (61.9%) is leader; structure (49.8%) and
+    # crypto_macro (55.5%) are followers. Note: structure is also in
+    # volatility_cluster — dynamic groups may reassign it, which is fine.
+    "fundamental_cluster": frozenset({"claude_fundamental", "crypto_macro", "structure"}),
 }
 # Public alias for backward compatibility (used by tests and reporting)
 CORRELATION_GROUPS = _STATIC_CORRELATION_GROUPS

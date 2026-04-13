@@ -84,9 +84,9 @@ class TestSignalNamesImport:
         assert ml_names is tickers_names
 
     def test_signal_names_count(self):
-        """Signal names should have 36 signals (added onchain, credit_spread_risk)."""
+        """Signal names count matches tickers.SIGNAL_NAMES."""
         from portfolio.meta_learner import SIGNAL_NAMES
-        assert len(SIGNAL_NAMES) == 36
+        assert len(SIGNAL_NAMES) == 41
 
 
 # ===========================================================================

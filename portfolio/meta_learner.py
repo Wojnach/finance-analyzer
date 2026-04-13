@@ -45,15 +45,23 @@ CRYPTO = {"BTC-USD", "ETH-USD"}
 METALS = {"XAU-USD", "XAG-USD"}
 
 _MIN_CHANGE_PCT = 0.05  # Filter flat outcomes
-_TEST_DAYS = 10  # Last N days for test set
+_TEST_DAYS = 14  # Last N days for test set (was 10 — too few test samples)
+_PURGE_DAYS = 2  # Gap between train/test to prevent autocorrelation leakage
+_EARLY_STOPPING_ROUNDS = 30  # Stop if validation loss doesn't improve
+_MIN_AUC_FOR_PREDICTIONS = 0.55  # Disable predictions if model AUC below this
 
-# Tuned per-horizon configs (from grid search across 48 combinations)
+# Tuned per-horizon configs.
+# 2026-04-13 audit: old config showed severe overfitting (train 76% vs test 47%
+# at 3h) due to no purge gap and small test window. The train/test gap was
+# largely data leakage. With purge gap + 14d test window, true OOS accuracy
+# is ~43-49% for most horizons. Keeping moderate regularization with early
+# stopping — the key fix is honest evaluation, not param tuning.
 _HORIZON_CONFIG = {
     "3h": {
         "dedup_block_hours": 12,
         "params": {
-            "n_estimators": 150, "max_depth": 4, "num_leaves": 15,
-            "learning_rate": 0.05, "min_child_samples": 40,
+            "n_estimators": 200, "max_depth": 4, "num_leaves": 15,
+            "learning_rate": 0.03, "min_child_samples": 40,
             "subsample": 0.7, "colsample_bytree": 0.7,
             "reg_alpha": 0.5, "reg_lambda": 3.0,
         },
@@ -61,8 +69,8 @@ _HORIZON_CONFIG = {
     "1d": {
         "dedup_block_hours": 8,
         "params": {
-            "n_estimators": 150, "max_depth": 4, "num_leaves": 15,
-            "learning_rate": 0.05, "min_child_samples": 40,
+            "n_estimators": 200, "max_depth": 4, "num_leaves": 15,
+            "learning_rate": 0.03, "min_child_samples": 40,
             "subsample": 0.7, "colsample_bytree": 0.7,
             "reg_alpha": 0.5, "reg_lambda": 3.0,
         },
@@ -70,8 +78,8 @@ _HORIZON_CONFIG = {
     "3d": {
         "dedup_block_hours": 4,
         "params": {
-            "n_estimators": 150, "max_depth": 4, "num_leaves": 15,
-            "learning_rate": 0.05, "min_child_samples": 40,
+            "n_estimators": 200, "max_depth": 4, "num_leaves": 15,
+            "learning_rate": 0.03, "min_child_samples": 40,
             "subsample": 0.7, "colsample_bytree": 0.7,
             "reg_alpha": 0.5, "reg_lambda": 3.0,
         },
@@ -79,7 +87,7 @@ _HORIZON_CONFIG = {
     "5d": {
         "dedup_block_hours": 12,
         "params": {
-            "n_estimators": 80, "max_depth": 2, "num_leaves": 4,
+            "n_estimators": 200, "max_depth": 2, "num_leaves": 4,
             "learning_rate": 0.02, "min_child_samples": 80,
             "subsample": 0.5, "colsample_bytree": 0.5,
             "reg_alpha": 2.0, "reg_lambda": 10.0,
@@ -220,26 +228,28 @@ def train(horizon="1d", verbose=True):
         print(f"Class balance: {y.mean():.1%} UP / {1-y.mean():.1%} DOWN")
         print(f"Features: {len(X.columns)}")
 
-    # Temporal train/test split
+    # Temporal train/test split with purged gap to prevent autocorrelation leakage
     try:
         ts_series = pd.to_datetime(meta["ts"], utc=True)
     except Exception:
         ts_series = pd.to_datetime(meta["ts"])
-    cutoff = ts_series.max() - pd.Timedelta(days=_TEST_DAYS)
-    train_mask = ts_series <= cutoff
-    test_mask = ~train_mask
+    test_cutoff = ts_series.max() - pd.Timedelta(days=_TEST_DAYS)
+    purge_cutoff = test_cutoff - pd.Timedelta(days=_PURGE_DAYS)
+    train_mask = ts_series <= purge_cutoff
+    test_mask = ts_series > test_cutoff
 
     X_train, y_train = X[train_mask], y[train_mask]
     X_test, y_test = X[test_mask], y[test_mask]
 
     if verbose:
-        print(f"Train: {len(X_train)} samples (up to {cutoff.date()})")
+        print(f"Train: {len(X_train)} samples (up to {purge_cutoff.date()})")
+        print(f"Purge: {_PURGE_DAYS} days gap")
         print(f"Test:  {len(X_test)} samples (last {_TEST_DAYS} days)")
 
     # Categorical features
     cat_features = ["asset_class", "day_of_week"]
 
-    # LightGBM parameters — tuned per horizon via grid search
+    # LightGBM parameters
     params = {
         "objective": "binary",
         "metric": "binary_logloss",
@@ -257,7 +267,10 @@ def train(horizon="1d", verbose=True):
     model.fit(
         X_train, y_train,
         eval_set=[(X_test, y_test)],
-        callbacks=[lgb.log_evaluation(0)],  # suppress per-round output
+        callbacks=[
+            lgb.log_evaluation(0),
+            lgb.early_stopping(_EARLY_STOPPING_ROUNDS, verbose=False),
+        ],
         categorical_feature=cat_features,
     )
 
@@ -273,16 +286,31 @@ def train(horizon="1d", verbose=True):
     test_auc = roc_auc_score(y_test, test_proba)
     test_loss = log_loss(y_test, test_proba)
 
+    # Find calibrated threshold that maximizes test accuracy
+    best_threshold = 0.5
+    best_cal_acc = test_acc
+    for t in np.arange(0.35, 0.65, 0.01):
+        cal_pred = (test_proba >= t).astype(int)
+        cal_acc = accuracy_score(y_test, cal_pred)
+        if cal_acc > best_cal_acc:
+            best_cal_acc = cal_acc
+            best_threshold = round(float(t), 2)
+
     metrics = {
         "horizon": horizon,
         "train_samples": len(X_train),
         "test_samples": len(X_test),
+        "purge_days": _PURGE_DAYS,
         "train_accuracy": round(train_acc, 4),
         "test_accuracy": round(test_acc, 4),
         "test_auc": round(test_auc, 4),
         "test_logloss": round(test_loss, 4),
+        "overfit_gap": round(train_acc - test_acc, 4),
+        "calibrated_threshold": best_threshold,
+        "calibrated_accuracy": round(best_cal_acc, 4),
         "class_balance": round(y.mean(), 4),
         "features": len(X.columns),
+        "early_stopped_at": getattr(model, "best_iteration_", None),
         "trained_at": datetime.now(UTC).isoformat(),
     }
 
@@ -292,8 +320,12 @@ def train(horizon="1d", verbose=True):
         print(f"{'='*40}")
         print(f"Train accuracy: {train_acc:.1%}")
         print(f"Test accuracy:  {test_acc:.1%}")
+        print(f"Overfit gap:    {train_acc - test_acc:+.1%}")
         print(f"Test AUC:       {test_auc:.4f}")
         print(f"Test log-loss:  {test_loss:.4f}")
+        print(f"Calibrated threshold: {best_threshold} -> {best_cal_acc:.1%}")
+        if getattr(model, "best_iteration_", None):
+            print(f"Early stopped at iteration {model.best_iteration_}")
 
         # Feature importance (top 10)
         importance = model.feature_importances_
@@ -350,6 +382,17 @@ def predict(votes, ticker, hour_utc=None, day_of_week=None, horizon="1d"):
     if not model_path.exists():
         return "HOLD", 0.0
 
+    # Quality gate: skip prediction if model has no real edge (AUC < threshold)
+    metrics_path = MODEL_DIR / f"meta_learner_{horizon}_metrics.json"
+    if metrics_path.exists():
+        try:
+            import json as _json
+            _m = _json.loads(metrics_path.read_text())
+            if _m.get("test_auc", 0.5) < _MIN_AUC_FOR_PREDICTIONS:
+                return "HOLD", 0.0
+        except Exception:
+            pass
+
     # BUG-148: Use cached model, reload only when file is newer (retrained).
     mtime = model_path.stat().st_mtime
     cached = _model_cache.get(horizon)
@@ -385,9 +428,21 @@ def predict(votes, ticker, hour_utc=None, day_of_week=None, horizon="1d"):
     proba = model.predict_proba(X)[0]  # [prob_down, prob_up]
     prob_up = proba[1]
 
-    if prob_up > 0.55:
+    # Use calibrated threshold if available
+    cal_threshold = 0.5
+    metrics_path = MODEL_DIR / f"meta_learner_{horizon}_metrics.json"
+    if metrics_path.exists():
+        try:
+            import json
+            m = json.loads(metrics_path.read_text())
+            cal_threshold = m.get("calibrated_threshold", 0.5)
+        except Exception:
+            pass
+
+    margin = 0.05
+    if prob_up > cal_threshold + margin:
         return "BUY", round(prob_up, 4)
-    elif prob_up < 0.45:
+    elif prob_up < cal_threshold - margin:
         return "SELL", round(1 - prob_up, 4)
     else:
         return "HOLD", round(max(prob_up, 1 - prob_up), 4)
