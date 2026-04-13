@@ -28,6 +28,25 @@ To resolve an entry, append a follow-up line to `data/critical_errors.jsonl`:
 
 The journal is append-only. Never mutate earlier entries.
 
+### Auto-spawn fix agent
+
+The `PF-FixAgentDispatcher` scheduled task (every 10 min) spawns a Claude
+fix agent when unresolved critical entries exist, with per-category
+cooldown + exponential backoff (30m → 2h → 12h → effectively disabled).
+Tool allow-list: `Read,Edit,Bash` — the agent never commits or pushes.
+
+If you see repeated `fix_agent_failed` entries in the journal, the
+dispatcher has given up on that category — manual investigation is
+required. If you need to stop auto-spawn entirely (e.g. during an
+outage or experimentation):
+
+```
+touch data/fix_agent.disabled
+```
+
+Remove the file to re-enable. See
+`docs/plans/2026-04-13-auto-spawn-fix-agent.md` for the full design.
+
 ## Overview
 
 Autonomous two-layer trading system. Layer 1 (Python, 60s loop) collects market data, computes
