@@ -2366,11 +2366,33 @@ def _fish_engine_execute_buy(decision, price):
     Uses metals loop's own fetch_price_with_fallback + place_order via _loop_page.
     Position sizing uses Kelly criterion when available, falling back to
     fixed budget (min(bp*0.95, 1500)) when Kelly data is unavailable.
+
+    2026-04-13 (Bug 1): reject decisions whose underlying signal is older
+    than FISH_MAX_SIGNAL_AGE_SEC (default 120s). Today's BULL buy fired
+    3 min after the ORB breakout, at a price -4.7% below the breakout
+    peak — stale-signal chase. ``decision["signal_ts"]`` is stamped by
+    ``fish_engine._evaluate_entry``. A missing field is treated as fresh
+    to preserve backward compatibility with callers that construct a
+    decision dict manually (tests, force-close paths).
     """
     global _fish_engine
     if _loop_page is None:
         log("[fish] SKIP BUY: _loop_page not initialized yet")
         return
+
+    # Signal-age guard (Bug 1)
+    max_signal_age = float(
+        __import__("os").environ.get("FISH_MAX_SIGNAL_AGE_SEC", "120")
+    )
+    signal_ts = decision.get("signal_ts")
+    if signal_ts is not None:
+        age = time.time() - float(signal_ts)
+        if age > max_signal_age:
+            log(
+                f"[fish] SKIP BUY: signal stale ({age:.0f}s > "
+                f"{max_signal_age:.0f}s threshold)"
+            )
+            return
 
     direction = decision.get("direction", "LONG")
     ob_id = decision.get("instrument_ob", "1650161" if direction == "LONG" else "2286417")
@@ -3363,23 +3385,59 @@ def _capture_stop_snapshot(ob_id):
     stops that were already removed at the broker, leaving the rollback
     incomplete and the position naked on a failed sell.
 
+    2026-04-13 (Bug 2a): retry once with a fresh Playwright context on
+    the first failure. Today's BULL_SILVER_X5_AVA_4 position was stuck
+    because ``get_stop_losses_strict`` raised Playwright "sync API
+    inside asyncio loop" during a fish-engine sell path. A stale
+    browser-context handle is the most common transient cause
+    (mirrors the TargetClosedError pattern fixed in commit aff3e90).
+    ``close_playwright()`` forces the singleton to re-launch on next
+    use, which rescues the retry without changing any contract. If
+    the retry also fails, fall through to the original fail-closed
+    path so the sell is still blocked rather than proceeding without
+    a rollback record.
+
     Returns ``(False, [])`` on read failure — fail closed: callers MUST
     NOT proceed with the sell when the rollback record is unknown.
     """
     if not ob_id:
         return True, []
     ob_str = str(ob_id)
-    try:
+
+    def _fetch_stops():
         from portfolio.avanza_session import get_stop_losses_strict
-        all_stops = get_stop_losses_strict()
-    except Exception:
-        # 2026-04-09 Stage 3: ERROR — snapshot read is a hard dependency
-        # for the cancel-then-sell sequence. Failing it blocks the sell
-        # (fail-closed), so the stack trace matters for diagnosing repeat
-        # failures (auth drift, Avanza shape change, network). The
-        # return False path is safer than proceeding without rollback.
-        logger.exception("_capture_stop_snapshot: get_stop_losses_strict raised for %s — sell will be blocked", ob_str)
-        return False, []
+        return get_stop_losses_strict()
+
+    try:
+        all_stops = _fetch_stops()
+    except Exception as first_exc:  # noqa: BLE001 — we want to retry everything
+        logger.warning(
+            "_capture_stop_snapshot: first attempt raised for %s (%r) — "
+            "closing Playwright context and retrying once",
+            ob_str, first_exc,
+        )
+        try:
+            from portfolio.avanza_session import close_playwright
+            close_playwright()
+        except Exception:
+            logger.debug(
+                "_capture_stop_snapshot: close_playwright failed between "
+                "attempts for %s — retrying anyway", ob_str, exc_info=True,
+            )
+        time.sleep(1.0)
+        try:
+            all_stops = _fetch_stops()
+        except Exception:
+            # 2026-04-09 Stage 3: ERROR — snapshot read is a hard dependency
+            # for the cancel-then-sell sequence. Failing it blocks the sell
+            # (fail-closed), so the stack trace matters for diagnosing repeat
+            # failures (auth drift, Avanza shape change, network). The
+            # return False path is safer than proceeding without rollback.
+            logger.exception(
+                "_capture_stop_snapshot: get_stop_losses_strict raised for %s "
+                "BOTH attempts — sell will be blocked", ob_str,
+            )
+            return False, []
     import copy as _copy
     snapshot = [
         _copy.deepcopy(sl)
