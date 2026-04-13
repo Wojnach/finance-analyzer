@@ -47,38 +47,41 @@ METALS = {"XAU-USD", "XAG-USD"}
 _MIN_CHANGE_PCT = 0.05  # Filter flat outcomes
 _TEST_DAYS = 14  # Last N days for test set (was 10 — too few test samples)
 _PURGE_DAYS = 2  # Gap between train/test to prevent autocorrelation leakage
-_EARLY_STOPPING_ROUNDS = 20  # Stop if validation loss doesn't improve
+_EARLY_STOPPING_ROUNDS = 30  # Stop if validation loss doesn't improve
+_MIN_AUC_FOR_PREDICTIONS = 0.55  # Disable predictions if model AUC below this
 
 # Tuned per-horizon configs.
-# 2026-04-13 audit: severe overfitting (train 76% vs test 47% at 3h).
-# Fix: reduce max_depth 4→3, increase min_child_samples 40→60 for 3h/1d/3d,
-# increase regularization (reg_alpha, reg_lambda), add early stopping.
+# 2026-04-13 audit: old config showed severe overfitting (train 76% vs test 47%
+# at 3h) due to no purge gap and small test window. The train/test gap was
+# largely data leakage. With purge gap + 14d test window, true OOS accuracy
+# is ~43-49% for most horizons. Keeping moderate regularization with early
+# stopping — the key fix is honest evaluation, not param tuning.
 _HORIZON_CONFIG = {
     "3h": {
         "dedup_block_hours": 12,
         "params": {
-            "n_estimators": 300, "max_depth": 3, "num_leaves": 8,
-            "learning_rate": 0.03, "min_child_samples": 60,
-            "subsample": 0.6, "colsample_bytree": 0.6,
-            "reg_alpha": 2.0, "reg_lambda": 5.0,
+            "n_estimators": 200, "max_depth": 4, "num_leaves": 15,
+            "learning_rate": 0.03, "min_child_samples": 40,
+            "subsample": 0.7, "colsample_bytree": 0.7,
+            "reg_alpha": 0.5, "reg_lambda": 3.0,
         },
     },
     "1d": {
         "dedup_block_hours": 8,
         "params": {
-            "n_estimators": 300, "max_depth": 3, "num_leaves": 8,
-            "learning_rate": 0.03, "min_child_samples": 60,
-            "subsample": 0.6, "colsample_bytree": 0.6,
-            "reg_alpha": 1.5, "reg_lambda": 5.0,
+            "n_estimators": 200, "max_depth": 4, "num_leaves": 15,
+            "learning_rate": 0.03, "min_child_samples": 40,
+            "subsample": 0.7, "colsample_bytree": 0.7,
+            "reg_alpha": 0.5, "reg_lambda": 3.0,
         },
     },
     "3d": {
         "dedup_block_hours": 4,
         "params": {
-            "n_estimators": 300, "max_depth": 3, "num_leaves": 8,
-            "learning_rate": 0.03, "min_child_samples": 60,
-            "subsample": 0.6, "colsample_bytree": 0.6,
-            "reg_alpha": 1.5, "reg_lambda": 5.0,
+            "n_estimators": 200, "max_depth": 4, "num_leaves": 15,
+            "learning_rate": 0.03, "min_child_samples": 40,
+            "subsample": 0.7, "colsample_bytree": 0.7,
+            "reg_alpha": 0.5, "reg_lambda": 3.0,
         },
     },
     "5d": {
@@ -378,6 +381,17 @@ def predict(votes, ticker, hour_utc=None, day_of_week=None, horizon="1d"):
     model_path = MODEL_DIR / f"meta_learner_{horizon}.joblib"
     if not model_path.exists():
         return "HOLD", 0.0
+
+    # Quality gate: skip prediction if model has no real edge (AUC < threshold)
+    metrics_path = MODEL_DIR / f"meta_learner_{horizon}_metrics.json"
+    if metrics_path.exists():
+        try:
+            import json as _json
+            _m = _json.loads(metrics_path.read_text())
+            if _m.get("test_auc", 0.5) < _MIN_AUC_FOR_PREDICTIONS:
+                return "HOLD", 0.0
+        except Exception:
+            pass
 
     # BUG-148: Use cached model, reload only when file is newer (retrained).
     mtime = model_path.stat().st_mtime
