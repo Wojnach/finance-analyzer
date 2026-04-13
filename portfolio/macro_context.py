@@ -22,6 +22,9 @@ def _alpaca_headers():
 
 
 DXY_TTL = 3600
+# 2026-04-13: Intraday DXY cache is 3 min — 60m bars refresh at each hour
+# boundary and we want to re-query shortly after the new bar closes.
+DXY_INTRADAY_TTL = 180
 TREASURY_TTL_VAL = 3600
 
 
@@ -57,6 +60,94 @@ def _fetch_dxy():
 
 def get_dxy():
     return _cached("dxy", DXY_TTL, _fetch_dxy)
+
+
+# --- Intraday DXY (2026-04-13) ---------------------------------------------
+# The daily _fetch_dxy above feeds a daily-resolution sub-signal inside
+# macro_regime. For 1-3h metals prediction (silver had 46.4% consensus
+# accuracy at 3h despite DXY's R² ~0.6 inverse correlation with silver),
+# we need 60m-bar DXY data. Primary source is yfinance DX-Y.NYB intraday;
+# fallback is EURUSD=X which makes up ~57.6% of DXY weight and gives us
+# a usable synth when the primary pseudo-ticker's intraday feed hiccups.
+
+
+def _dxy_features_from_close(close, *, source: str) -> dict | None:
+    """Build the intraday DXY payload from a pandas Close series."""
+    import math
+
+    if close is None or len(close) < 2:
+        return None
+    last = float(close.iloc[-1])
+    if math.isnan(last):
+        return None
+
+    def _pct(periods: int) -> float:
+        if len(close) < periods + 1:
+            return float("nan")
+        prior = float(close.iloc[-1 - periods])
+        if prior == 0 or math.isnan(prior):
+            return float("nan")
+        return (last / prior - 1) * 100
+
+    change_1h = _pct(1)
+    change_3h = _pct(3)
+
+    return {
+        "value": round(last, 4),
+        "change_1h_pct": round(change_1h, 4) if not math.isnan(change_1h) else None,
+        "change_3h_pct": round(change_3h, 4) if not math.isnan(change_3h) else None,
+        "source": source,
+    }
+
+
+def _fetch_dxy_intraday():
+    """Fetch intraday DXY (60m bars). Fallback chain: primary index → EURUSD synth."""
+    import yfinance as yf
+    import pandas as pd
+
+    def _download(ticker: str):
+        _yfinance_limiter.wait()
+        try:
+            df = yf.download(
+                ticker,
+                period="5d",
+                interval="60m",
+                progress=False,
+                auto_adjust=True,
+            )
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.droplevel(1)
+            if df.empty or "Close" not in df.columns:
+                return None
+            return df["Close"].dropna()
+        except Exception as exc:
+            logger.debug("yfinance intraday fetch failed for %s: %s", ticker, exc)
+            return None
+
+    # Primary: DX-Y.NYB intraday 60m
+    close = _download("DX-Y.NYB")
+    result = _dxy_features_from_close(close, source="DX-Y.NYB")
+    if result is not None and result.get("change_1h_pct") is not None:
+        return result
+
+    # Fallback: synthesize from EURUSD=X spot.
+    # DXY weights EUR at ~57.6%; the single-factor approximation
+    # DXY ≈ c × EURUSD^(-0.576) captures the bulk of DXY's directional
+    # variance. The constant 58.0 does NOT match real DXY levels (~99) —
+    # it is arbitrary. Only ``change_1h_pct`` / ``change_3h_pct`` from
+    # this synth path are usable — the ``value`` field is meaningless.
+    # Downstream consumers (signals/dxy_cross_asset.py) only read the
+    # change fields, so this is safe.
+    eurusd = _download("EURUSD=X")
+    if eurusd is None or len(eurusd) == 0:
+        return None
+    synth = 58.0 * (eurusd ** -0.576)
+    return _dxy_features_from_close(synth, source="EURUSD=X-synth")
+
+
+def get_dxy_intraday():
+    """Cached accessor for intraday DXY features."""
+    return _cached("dxy_intraday", DXY_INTRADAY_TTL, _fetch_dxy_intraday)
 
 
 def _fetch_klines(ticker):
