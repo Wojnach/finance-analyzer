@@ -138,6 +138,11 @@ def _register_defaults():
     # Metals cross-asset — copper, GVZ, G/S ratio, SPY, oil (metals only); capped at 0.7
     register_enhanced("metals_cross_asset", "portfolio.signals.metals_cross_asset",
                       "compute_metals_cross_asset_signal", requires_context=True, max_confidence=0.7)
+    # DXY cross-asset — intraday USD index inverse correlation (metals only); capped at 0.8
+    # 2026-04-13: added standalone signal to capture DXY R²~0.6 vs silver at
+    # 1-3h horizon. Complements macro_regime's daily DXY sub-indicator.
+    register_enhanced("dxy_cross_asset", "portfolio.signals.dxy_cross_asset",
+                      "compute_dxy_cross_asset_signal", requires_context=True, max_confidence=0.8)
     # COT positioning — CFTC speculative/commercial positioning, contrarian (metals only); capped at 0.7
     register_enhanced("cot_positioning", "portfolio.signals.cot_positioning",
                       "compute_cot_positioning_signal", requires_context=True, max_confidence=0.7)

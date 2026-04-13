@@ -731,7 +731,15 @@ session_healthy = True            # tracks Avanza session health
 _last_auto_telegram = 0           # timestamp of last autonomous Telegram (for throttling)
 AUTO_TELEGRAM_COOLDOWN = 1800     # 30 min between routine autonomous messages
 _last_news_fetch_ts = 0.0         # timestamp of last metals news fetch
-NEWS_FETCH_INTERVAL = 1800        # fetch news every 30 min (1800s)
+NEWS_FETCH_INTERVAL = 1800        # fetch news every 30 min (default, no silver position)
+# 2026-04-13: when a silver position is active, news can move the market
+# faster than the 30-min default allows. Poll every 5 min instead.
+# Envelope: 288 calls/day worst-case (all day with position held), 72/hour —
+# well under NewsAPI free tier 100/day cap, which only counts calls that
+# actually hit the network; cache hits don't consume budget.
+NEWS_FETCH_INTERVAL_ACTIVE_SILVER = int(
+    __import__("os").environ.get("NEWS_POLL_SEC_ACTIVE_SILVER", "300")
+)
 
 # --- FISH ENGINE (integrated intraday fishing) ---
 FISH_ENGINE_ENABLED = True       # disabled by default — enable manually per session
@@ -1042,6 +1050,18 @@ def _silver_fast_tick():
     if silver_key is None:
         return
 
+    # 2026-04-13: Opportunistic XAG microstructure snapshot at 10s cadence.
+    # Cycle-level _accumulate_orderbook_snapshots already runs this every
+    # ~60s; the fast-tick adds 5x more snapshots while a position is held,
+    # giving OFI/VPIN better resolution. Gated by _FAST_TICK_ORDERBOOK env
+    # toggle for ops to disable if FAPI rate-limit pressure shows up.
+    # Best-effort: never blocks the price-check or alerts below.
+    if _FAST_TICK_ORDERBOOK:
+        try:
+            _accumulate_orderbook_snapshot_for("XAG-USD")
+        except Exception:
+            pass  # outer log gate inside the helper handles repeated failures
+
     price = _silver_fetch_xag()
     if price is None or price <= 0:
         return
@@ -1333,6 +1353,51 @@ except ImportError:
 
 _MICROSTRUCTURE_TICKERS = ["XAG-USD", "XAU-USD"]  # metals only for now
 _microstructure_persist_counter = 0
+# Independent log-throttle counter for the per-ticker fast-tick path.
+# Keeping it separate from _microstructure_persist_counter so the 1-in-30
+# log gate inside _accumulate_orderbook_snapshot_for measures fast-tick
+# call count, not cycle count. Without this, the cycle-level counter
+# (incremented once per 60s) would freeze the fast-tick's % 30 check at
+# whatever modulo it happens to land on, producing either no logs ever
+# or every fast-tick logging unthrottled.
+_snapshot_for_call_counter = 0
+# 2026-04-13: opt-in fast-tick microstructure accumulation. When True,
+# _silver_fast_tick triggers an XAG-only orderbook snapshot every 10s
+# instead of just the once-per-cycle 60s snapshot. Improves OFI / VPIN
+# resolution when a silver position is active. Env var lets ops toggle
+# without code changes if Binance FAPI rate-limit pressure shows up.
+_FAST_TICK_ORDERBOOK = (
+    __import__("os").environ.get("ORDERBOOK_FAST_TICK", "1") not in ("0", "false", "False", "")
+)
+
+def _accumulate_orderbook_snapshot_for(ticker: str) -> None:
+    """Single-ticker orderbook snapshot accumulator.
+
+    2026-04-13: factored out of _accumulate_orderbook_snapshots so the
+    silver fast-tick (10s cadence) can poll XAG depth without paying the
+    cost of XAU on every fast tick. Failures are logged at WARNING with
+    1-in-30 throttling so a transient FAPI outage doesn't blow the log.
+
+    Uses its own _snapshot_for_call_counter — NOT the cycle-level
+    _microstructure_persist_counter — so the throttle gate measures actual
+    helper invocations rather than cycle ticks.
+    """
+    global _snapshot_for_call_counter
+    if not _MICROSTRUCTURE_AVAILABLE:
+        return
+    try:
+        depth = get_orderbook_depth(ticker, limit=20)
+        if depth:
+            accumulate_snapshot(ticker, depth)
+    except Exception:
+        _snapshot_for_call_counter += 1
+        if _snapshot_for_call_counter % 30 == 0:
+            logger.warning(
+                "_accumulate_microstructure: get_orderbook_depth failed for %s",
+                ticker,
+                exc_info=True,
+            )
+
 
 def _accumulate_orderbook_snapshots():
     """Poll order book depth and accumulate snapshots for OFI computation.
@@ -6911,8 +6976,16 @@ Positions: {pos_summary}{prob_summary}""")
                         except Exception as e:
                             log(f"Signal tracker backfill error: {e}")
 
-                # --- PERIODIC NEWS FETCH (every ~30 min) ---
-                if time.time() - _last_news_fetch_ts >= NEWS_FETCH_INTERVAL:
+                # --- PERIODIC NEWS FETCH (30 min idle / 5 min with active silver) ---
+                # 2026-04-13: dynamic cadence. When a silver position is held,
+                # we poll every 5 min so news catalysts (inflation prints,
+                # geopolitical headlines) surface to the signal set within one
+                # or two main cycles instead of up to 30 min later.
+                news_interval = (
+                    NEWS_FETCH_INTERVAL_ACTIVE_SILVER if _has_active_silver()
+                    else NEWS_FETCH_INTERVAL
+                )
+                if time.time() - _last_news_fetch_ts >= news_interval:
                     try:
                         _fetch_metals_news()
                     except Exception as e:

@@ -8,6 +8,13 @@ Fetches correlated markets that carry predictive information for
     - Gold/Silver ratio: mean-reverting ratio, extreme readings signal
 
 All data fetched via yfinance with caching to avoid rate limits.
+
+2026-04-13: Added intraday (60m bar) fetchers next to the existing daily
+ones after 4,916-sample measurement showed metals_cross_asset at 29.1%
+on XAG 3h — root cause was 5-day lookbacks evaluated against 3h outcomes
+(see docs/AVANZA_RESILIENCE_PLAN.md follow-up). Daily fetchers preserved
+for longer-horizon callers; the metals_cross_asset signal switched to
+intraday by default.
 """
 from __future__ import annotations
 
@@ -22,6 +29,9 @@ logger = logging.getLogger("portfolio.metals_cross_assets")
 
 _CROSS_TTL = 300
 _GVZ_TTL = 600
+# Intraday TTL is shorter — 60m bars refresh at the start of each hour,
+# and we want to re-query shortly after the bar closes to pick up the new row.
+_CROSS_INTRADAY_TTL = 180
 
 
 def _yf_download(ticker: str, period: str = "3mo", interval: str = "1d") -> pd.DataFrame:
@@ -166,11 +176,111 @@ def get_spy_return() -> dict | None:
 
 
 def get_all_cross_asset_data() -> dict:
-    """Fetch all cross-asset features in one call."""
+    """Fetch all cross-asset features in one call (daily bars)."""
     return {
         "copper": get_copper_data(),
         "gvz": get_gvz(),
         "gold_silver_ratio": get_gold_silver_ratio(),
         "spy": get_spy_return(),
         "oil": get_oil_data(),
+    }
+
+
+# --- Intraday variants (60m bars, for 1-3h prediction horizons) ---
+#
+# yfinance 60m interval supports up to 730 days of history. We use 5d
+# period which yields ~35 hourly bars — enough for 3h change (3 bars) and
+# intraday rolling stats. On weekends/holidays the last ~2 days of bars
+# may be sparse; `_pct_change` returns NaN and signal votes HOLD.
+
+
+@_nocache
+def get_copper_intraday() -> dict | None:
+    """Copper 60m bars. Exposes change_1h_pct + change_3h_pct."""
+    def _fetch():
+        df = _yf_download("HG=F", period="5d", interval="60m")
+        if df.empty or "Close" not in df.columns:
+            return None
+        close = df["Close"].dropna()
+        if len(close) < 4:
+            return None
+        return {
+            "price": float(close.iloc[-1]),
+            "change_1h_pct": _pct_change(close, 1),
+            "change_3h_pct": _pct_change(close, 3),
+        }
+    return _cached("cross_copper_intraday", _CROSS_INTRADAY_TTL, _fetch)
+
+
+@_nocache
+def get_gold_silver_ratio_intraday() -> dict | None:
+    """Gold/Silver ratio 60m bars. Exposes ratio_change_3h_pct."""
+    def _fetch():
+        gold_df = _yf_download("GC=F", period="5d", interval="60m")
+        silver_df = _yf_download("SI=F", period="5d", interval="60m")
+        if gold_df.empty or silver_df.empty:
+            return None
+        gold_close = gold_df["Close"].dropna()
+        silver_close = silver_df["Close"].dropna()
+        if len(gold_close) < 4 or len(silver_close) < 4:
+            return None
+        common = gold_close.index.intersection(silver_close.index)
+        if len(common) < 4:
+            return None
+        ratio = gold_close.loc[common] / silver_close.loc[common]
+        return {
+            "ratio": float(ratio.iloc[-1]),
+            "change_1h_pct": _pct_change(ratio, 1),
+            "change_3h_pct": _pct_change(ratio, 3),
+        }
+    return _cached("cross_gs_ratio_intraday", _CROSS_INTRADAY_TTL, _fetch)
+
+
+@_nocache
+def get_oil_intraday() -> dict | None:
+    """WTI crude 60m bars."""
+    def _fetch():
+        df = _yf_download("CL=F", period="5d", interval="60m")
+        if df.empty or "Close" not in df.columns:
+            return None
+        close = df["Close"].dropna()
+        if len(close) < 4:
+            return None
+        return {
+            "price": float(close.iloc[-1]),
+            "change_1h_pct": _pct_change(close, 1),
+            "change_3h_pct": _pct_change(close, 3),
+        }
+    return _cached("cross_oil_intraday", _CROSS_INTRADAY_TTL, _fetch)
+
+
+@_nocache
+def get_spy_intraday() -> dict | None:
+    """SPY 60m bars — captures intraday risk-on/risk-off."""
+    def _fetch():
+        df = _yf_download("SPY", period="5d", interval="60m")
+        if df.empty or "Close" not in df.columns:
+            return None
+        close = df["Close"].dropna()
+        if len(close) < 4:
+            return None
+        return {
+            "price": float(close.iloc[-1]),
+            "change_1h_pct": _pct_change(close, 1),
+            "change_3h_pct": _pct_change(close, 3),
+        }
+    return _cached("cross_spy_intraday", _CROSS_INTRADAY_TTL, _fetch)
+
+
+def get_all_cross_asset_intraday() -> dict:
+    """Fetch all intraday (60m) cross-asset features in one call.
+
+    GVZ is intentionally absent — it's a daily-published index with no
+    intraday bars. Callers should still read `get_gvz()` for GVZ context.
+    """
+    return {
+        "copper": get_copper_intraday(),
+        "gold_silver_ratio": get_gold_silver_ratio_intraday(),
+        "spy": get_spy_intraday(),
+        "oil": get_oil_intraday(),
     }
