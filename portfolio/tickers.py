@@ -60,7 +60,13 @@ YF_MAP = {t: t for t in STOCK_SYMBOLS}
 # Kept in SIGNAL_NAMES for historical tracking but excluded from active reports.
 DISABLED_SIGNALS = {
     "ml",               # 41.7% accuracy (1714 sam) — worse than coin flip
-    "cot_positioning",  # 0 accuracy samples — pending live validation
+    # "cot_positioning" re-enabled 2026-04-13 for shadow validation (was
+    # force-HOLD pending live validation, 0 samples). COT is a weekly signal
+    # (CFTC Friday release) — expected to contribute mostly at 3d/5d horizons
+    # where the system already has edge (XAG 5d consensus 61.2%). The
+    # existing accuracy gate in signal_engine.py auto-disables any signal
+    # below 45% accuracy once 30+ samples accumulate, so re-enabling is
+    # self-correcting.
     "futures_basis",    # 0 accuracy samples — pending live validation
     "hurst_regime",     # pending live validation (added 2026-04-11)
     "shannon_entropy",  # pending live validation (added 2026-04-12)
