@@ -86,10 +86,10 @@ class CircuitBreaker:
                     return True
                 return False
 
-            # BUG-93: HALF_OPEN — allow exactly one probe request
-            if not self._half_open_probe_sent:
-                self._half_open_probe_sent = True
-                return True
+            # BUG-93/BUG-187: HALF_OPEN — the probe request is always sent via
+            # the OPEN→HALF_OPEN transition above (which sets probe_sent=True and
+            # returns True). This branch handles the case where a second request
+            # arrives while still in HALF_OPEN (waiting for success/failure).
             return False
 
     def get_status(self) -> dict:

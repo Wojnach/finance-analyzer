@@ -1,83 +1,127 @@
-# Improvement Plan — Auto-Session 2026-04-13
+# Improvement Plan — Auto-Session 2026-04-12
 
-Updated: 2026-04-13
-Branch: improve/auto-session-2026-04-13
-Status: **IN PROGRESS**
+Updated: 2026-04-12
+Branch: improve/auto-session-2026-04-12
+Status: **COMPLETE**
+
+Previous session (2026-04-11): shipped directional accuracy weights (BUG-182),
+per-ticker throttle, trade guards locking. All verified in codebase.
 
 ## Session Context
 
-Continuing from the 2026-04-12 after-hours research session which shipped 6 signal quality
-improvements (forecast disabled, econ_calendar gated, tiered accuracy gate, cluster penalties).
-Three P1 adversarial review findings remain unfixed. This session addresses them plus one P2
-signal gating improvement.
+Deep exploration by 6 parallel agents found 22+ potential issues. After manual verification
+against the actual code, many were false positives (see "Rejected" below). This plan covers
+only verified, confirmed bugs and improvements.
+
+### False Positives Rejected (agents were wrong)
+- `structure.py` highlow breakout: CORRECT breakout/momentum logic (not mean-reversion)
+- `crypto_macro.py` OPTIONS_TTL: Valid Python (module-level vars resolved at call time)
+- `oscillators.py` Aroon: Off-by-one claim was wrong (argmax math checks out)
+- `equity_curve.py` Sortino: Standard formula divides by total observations (correct)
+- `hurst_regime.py` fill_method=None: Works fine in pandas 2.3.3
+- `kelly_sizing.py` edge cases: Documented intentional behavior
 
 ---
 
 ## 1. Bugs & Problems Found
 
-### P1: SC-I-001 — _weighted_consensus() re-gates BUG-158-exempt signals
-- **File**: `portfolio/signal_engine.py` lines 768-769 vs 1778-1791
-- **Bug**: `generate_signal()` exempts high-accuracy per-ticker signals from regime gating
-  (BUG-158), but `_weighted_consensus()` unconditionally re-applies regime gating at line 769,
-  negating the exemption.
-- **Impact**: Per-ticker alpha recovery lost (e.g., fear_greed 93.8% on XAG-USD in ranging).
-- **Fix**: Add `regime_gated_override` parameter to `_weighted_consensus()`. Pass
-  `regime_gated_effective` from `generate_signal()`.
-- **Risk**: Low — additive param with None default.
+### BUG-185: Directional accuracy KeyError risk (MEDIUM)
+- **File**: `portfolio/signal_engine.py:861,863`
+- **Issue**: `stats["buy_accuracy"]` accessed without `.get()`. If the key is missing (cache
+  corruption or version mismatch), raises KeyError. The `total_buy >= 20` guard passes but
+  `buy_accuracy` could be absent in a corrupt cache entry.
+- **Fix**: Use `stats.get("buy_accuracy", acc)` with fallback to overall accuracy.
+- **Impact**: Theoretical crash in weighted consensus. Unlikely but zero-cost to fix.
 
-### P1: CROSS-001 — outcome_tracker reads post-gated votes for accuracy tracking
-- **File**: `portfolio/outcome_tracker.py` line 122
-- **Bug**: `extra.get("_votes")` reads post-gated votes. Regime-gated signals appear as HOLD,
-  so accuracy never accumulates. This defeats the C10 raw_votes fix and creates a circular
-  dependency: can't exempt without accuracy data → can't track accuracy because gated.
-- **Impact**: Dead-signal trap for all regime-gated signals.
-- **Fix**: `extra.get("_raw_votes", extra.get("_votes"))` — raw first, gated fallback.
-- **Risk**: Low — _raw_votes is superset of information.
+### BUG-186: Blended accuracy `correct` field inconsistency (LOW)
+- **File**: `portfolio/accuracy_stats.py:650`
+- **Issue**: `correct` uses all-time count while `accuracy` is a blended value. The ratio
+  `correct/total` ≠ `accuracy`. Downstream reporting uses this value.
+- **Fix**: Compute `correct` from blended accuracy: `int(round(blended * total))`.
+- **Impact**: Reporting inconsistency only. Gating decisions use `accuracy` field directly.
 
-### P1: OR-I-001 — ThreadPoolExecutor with-block blocks main loop on hung threads
-- **File**: `portfolio/main.py` lines 555-596
-- **Bug**: `with ThreadPoolExecutor(...) as pool:` — `__exit__()` calls `shutdown(wait=True)`,
-  blocking the loop even after the 180s timeout fires and futures are cancelled.
-- **Impact**: Single stuck API call can hang the entire loop indefinitely.
-- **Fix**: Manual executor lifecycle. `pool.shutdown(wait=False, cancel_futures=True)` after
-  timeout (Python 3.9+). Add 5s grace period via `shutdown(wait=True)` with short timeout
-  wrapper as best-effort cleanup.
-- **Risk**: Medium — must prevent thread leaks. Mitigated by cancel_futures=True and grace period.
+### BUG-187: Circuit breaker HALF_OPEN dead code (LOW)
+- **File**: `portfolio/circuit_breaker.py:89-92`
+- **Issue**: The HALF_OPEN probe branch (`if not self._half_open_probe_sent`) never executes.
+  The OPEN→HALF_OPEN transition at line 84-86 sets the flag AND returns True. Lines 89-92
+  are unreachable.
+- **Fix**: Remove dead code, add comment explaining probe is handled in OPEN→HALF_OPEN.
+- **Impact**: Code clarity only.
 
-## 2. Signal Improvements
+### BUG-188: Redundant acc_horizon assignment (LOW)
+- **File**: `portfolio/signal_engine.py:1826`
+- **Issue**: Same computation at line 1813 and 1826. Line 1826 inside try block is redundant.
+- **Fix**: Remove line 1826, add comment referencing line 1813.
+- **Impact**: Code clarity only.
 
-### P2: Gate news_event for ETH-USD
-- **Issue**: 39.2% accuracy on ETH-USD, 100% SELL bias. Actively harmful.
-- **Fix**: Add per-ticker signal disable dict: `_TICKER_DISABLED_SIGNALS = {"ETH-USD": {"news_event"}}`.
-  Apply in `generate_signal()`.
-- **Risk**: Low — single ticker-signal pair.
+### BUG-189: Agent invocation orphaned process risk (MEDIUM)
+- **File**: `portfolio/agent_invocation.py:198-201`
+- **Issue**: When taskkill fails, `_agent_proc` is set to None. Next cycle can spawn a
+  new agent while old process may still be running. Two concurrent agents writing to
+  same journal/Telegram. Also: taskkill rc=128 (process already exited) incorrectly
+  treated as failure.
+- **Fix**: Treat rc=128 as success. Track orphaned PIDs for cleanup.
+- **Impact**: Prevents duplicate decisions on taskkill failure.
 
----
-
-## 3. Implementation Batches
-
-### Batch 1: SC-I-001 + CROSS-001 (2 files, tightly coupled)
-1. `portfolio/signal_engine.py` — add `regime_gated_override` to `_weighted_consensus()`
-2. `portfolio/outcome_tracker.py` — switch to `_raw_votes`
-3. Tests for both fixes
-
-### Batch 2: OR-I-001 (1 file)
-1. `portfolio/main.py` — replace context manager with manual executor lifecycle
-2. Test verifying loop continues after timeout
-
-### Batch 3: news_event ETH gating (1 file)
-1. `portfolio/signal_engine.py` — add `_TICKER_DISABLED_SIGNALS`
-2. Test for per-ticker gating
-
-### Batch 4: Full test suite + cleanup
-1. Run full parallel test suite
-2. Fix any regressions
-3. Update SYSTEM_OVERVIEW.md
+### BUG-190: Digest loads entire invocations.jsonl (LOW)
+- **File**: `portfolio/digest.py`
+- **Issue**: Uses `load_jsonl()` which reads entire file, unlike signal_log which uses
+  `load_jsonl_tail()`. Performance degrades over time.
+- **Fix**: Replace with `load_jsonl_tail()`.
 
 ---
 
-## 4. Risk Assessment
+## 2. Architecture Improvements
 
-- **Batch 1**: Low risk — additive parameter, fallback behavior unchanged
-- **Batch 2**: Medium risk — executor lifecycle change, but well-understood Python pattern
-- **Batch 3**: Low risk — additive gating dict, no behavioral change for non-ETH tickers
+None needed this session — previous sessions addressed the major ones (directional weights,
+per-ticker throttle, trade guards locking).
+
+---
+
+## 3. Useful Features
+
+### FEAT-A: Edge case test coverage for signal engine
+Add tests for:
+- Directional accuracy gating with missing keys (covers BUG-185)
+- Blended accuracy edge cases (covers BUG-186)
+- Circuit breaker probe lifecycle (covers BUG-187)
+- Per-ticker directional gating verification
+
+---
+
+## 4. Refactoring TODOs
+
+- Remove circuit breaker dead code
+- Remove redundant signal_engine assignment
+- Use `.get()` for safety in directional accuracy access
+
+---
+
+## 5. Ordering — Batches
+
+### Batch 1: Safety Fixes (3 files, ~15 lines changed)
+1. `portfolio/signal_engine.py` — `.get()` safety (BUG-185) + remove redundant line (BUG-188)
+2. `portfolio/accuracy_stats.py` — Fix `correct` field in blend (BUG-186)
+3. `portfolio/circuit_breaker.py` — Remove dead code (BUG-187)
+
+### Batch 2: Agent Invocation Reliability (1 file, ~15 lines changed)
+4. `portfolio/agent_invocation.py` — Graceful taskkill handling (BUG-189)
+
+### Batch 3: Performance (1 file, ~3 lines changed)
+5. `portfolio/digest.py` — Use tail read for invocations (BUG-190)
+
+### Batch 4: Test Coverage (~100 lines added)
+6. Tests for directional gating edge cases
+7. Tests for circuit breaker probe lifecycle
+8. Tests for blended accuracy edge cases
+
+---
+
+## 6. Risk Assessment
+
+- **Batch 1** (safety fixes): Zero risk — defensive `.get()`, dead code removal, math fix.
+  All changes are backwards-compatible.
+- **Batch 2** (agent invocation): Low risk — improves recovery behavior. No change to
+  happy path.
+- **Batch 3** (digest performance): Zero risk — same data, faster access.
+- **Batch 4** (tests): Zero risk — additive only.

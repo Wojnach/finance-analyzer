@@ -296,3 +296,78 @@ class TestThreadSafety:
 
         # At least one should have gotten through
         assert any(results)
+
+
+class TestProbeLifecycle:
+    """BUG-187: Verify HALF_OPEN probe is sent exactly once via OPEN transition."""
+
+    def test_probe_sent_on_open_to_half_open(self):
+        """First allow_request after recovery timeout returns True (probe)."""
+        cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=5)
+        cb.record_failure()
+        assert cb.state == State.OPEN
+
+        with patch("portfolio.circuit_breaker.time.monotonic",
+                   return_value=cb._last_failure_time + 6):
+            assert cb.allow_request() is True
+            assert cb.state == State.HALF_OPEN
+            assert cb._half_open_probe_sent is True
+
+    def test_second_request_blocked_in_half_open(self):
+        """After probe, further requests are blocked until success/failure."""
+        cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=5)
+        cb.record_failure()
+
+        t = cb._last_failure_time + 6
+        with patch("portfolio.circuit_breaker.time.monotonic", return_value=t):
+            cb.allow_request()  # probe — True
+            assert cb.allow_request() is False  # blocked
+            assert cb.allow_request() is False  # still blocked
+
+    def test_probe_flag_reset_on_success(self):
+        """After success in HALF_OPEN, flag is cleared for next cycle."""
+        cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=5)
+        cb.record_failure()
+
+        with patch("portfolio.circuit_breaker.time.monotonic",
+                   return_value=cb._last_failure_time + 6):
+            cb.allow_request()  # probe
+        cb.record_success()
+
+        assert cb.state == State.CLOSED
+        assert cb._half_open_probe_sent is False
+
+    def test_probe_flag_reset_on_failure(self):
+        """After failure in HALF_OPEN, flag is cleared (back to OPEN)."""
+        cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=5)
+        cb.record_failure()
+
+        with patch("portfolio.circuit_breaker.time.monotonic",
+                   return_value=cb._last_failure_time + 6):
+            cb.allow_request()  # probe
+        cb.record_failure()  # probe failed
+
+        assert cb.state == State.OPEN
+        assert cb._half_open_probe_sent is False
+
+    def test_full_recovery_cycle(self):
+        """CLOSED → OPEN → HALF_OPEN → CLOSED, verifying probe at each step."""
+        cb = CircuitBreaker("test", failure_threshold=2, recovery_timeout=10)
+
+        # Phase 1: CLOSED → OPEN
+        cb.record_failure()
+        cb.record_failure()
+        assert cb.state == State.OPEN
+
+        # Phase 2: OPEN → HALF_OPEN (probe)
+        with patch("portfolio.circuit_breaker.time.monotonic",
+                   return_value=cb._last_failure_time + 11):
+            probe_result = cb.allow_request()
+        assert probe_result is True
+        assert cb.state == State.HALF_OPEN
+
+        # Phase 3: HALF_OPEN → CLOSED (probe success)
+        cb.record_success()
+        assert cb.state == State.CLOSED
+        assert cb._failure_count == 0
+        assert cb.allow_request() is True  # normal traffic resumes

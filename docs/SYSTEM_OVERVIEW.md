@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-04-13
-Branch: improve/auto-session-2026-04-13
+Updated: 2026-04-12
+Branch: improve/auto-session-2026-04-12
 
 ## 1) Architecture Summary
 
@@ -26,7 +26,7 @@ Two-layer autonomous trading system with 36 signals (32 active, 4 disabled), 5 T
 ## 3) Module Map (~142 portfolio modules)
 
 ### Orchestration (5 modules)
-- `main.py` (~920 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, parallel ticker processing via ThreadPoolExecutor(8), non-blocking shutdown (OR-I-001)
+- `main.py` (909 lines): Loop lifecycle, crash backoff (10s→5min), health heartbeat, parallel ticker processing via ThreadPoolExecutor(8)
 - `agent_invocation.py` (489 lines): Layer 2 subprocess lifecycle, tiered prompts (T1/T2/T3), timeout killing, completion tracking, stack overflow auto-disable
 - `trigger.py` (330 lines): Change detection — consensus flip, price >2%, F&G threshold, sentiment reversal, post-trade
 - `market_timing.py` (141 lines): DST-aware US market hours, agent invocation window, market state (open/closed/weekend)
@@ -38,7 +38,7 @@ Two-layer autonomous trading system with 36 signals (32 active, 4 disabled), 5 T
 - `signal_utils.py` (130 lines): Shared helpers — SMA, EMA, RSI, majority_vote
 - `signals/*.py` (24 modules): Enhanced composite signals, each with 4-8 sub-indicators
 - `accuracy_stats.py` (636 lines): Per-signal hit rate tracking, accuracy cache, activation rates
-- `outcome_tracker.py` (391 lines): Signal snapshot logging, price backfill for accuracy. Uses `_raw_votes` (pre-gate) for tracking (CROSS-001 fix)
+- `outcome_tracker.py` (391 lines): Signal snapshot logging, price backfill for accuracy
 
 ### Data Collection (3 modules)
 - `data_collector.py` (299 lines): Binance spot/FAPI, Alpaca, yfinance; circuit breakers; 7 timeframes
@@ -116,7 +116,7 @@ main.loop()
 - MIN_VOTERS = 3 (all asset classes)
 - Core gate: at least 1 core signal must be active for non-HOLD
 - Confidence = active_voters_in_direction / total_active_voters
-- Accuracy gate: tiered — 47% for signals with <5000 samples, 50% for 5000+ samples (30+ samples minimum)
+- Accuracy gate: signals below 45% accuracy (30+ samples) are force-HOLD (not inverted)
 - Recency-weighted: 70% recent (7d) + 30% all-time; fast blend (90/10) on 15%+ divergence
 - Global confidence cap: 0.80 (70-80% bracket has best actual accuracy at 57-59%)
 
@@ -124,9 +124,9 @@ main.loop()
 - Weight = directional_accuracy_weight × regime_mult × horizon_mult × activation_norm × activity_cap × correlation_penalty
 - **Directional accuracy** (BUG-182, 2026-04-11): BUY votes weighted by `buy_accuracy`, SELL by `sell_accuracy`. Falls back to overall accuracy when directional samples < 20. Prevents signals with asymmetric accuracy (e.g., qwen3 BUY 30% vs SELL 74%) from being over-weighted in their weak direction.
 - Regime weights: trending → trust EMA/MACD more; ranging → trust RSI/BB more
-- Regime gating: horizon-aware — some signals gated in certain regimes only for specific prediction horizons. Per-ticker exemption (BUG-158): signals with ≥60% accuracy on a specific ticker are exempt from regime gating for that ticker. SC-I-001 fix: `regime_gated_override` parameter threads the exempted set through to `_weighted_consensus()` to prevent double-gating.
+- Regime gating: horizon-aware — some signals gated in certain regimes only for specific prediction horizons
 - Horizon weights: dynamic (computed from accuracy cache ratio this_horizon/cross_horizon) with static fallback
-- Correlation groups: within groups of correlated signals, only the best-accuracy signal gets full weight; others get cluster-specific penalty (momentum 0.15x, volatility 0.15x, trend_direction 0.2x, default 0.3x)
+- Correlation groups: within groups of correlated signals, only the best-accuracy signal gets full weight; others get 0.3x
 - Activity rate cap: signals with >70% activation rate get 0.5x penalty
 - Activation rates: rare, balanced signals get bonus; noisy/biased get penalty
 
@@ -137,13 +137,12 @@ main.loop()
 4. Dynamic MIN_VOTERS: trending=3, high-vol=4, ranging=5
 5. Unanimity penalty: 90%+ agreement → 0.6x, 80-90% → 0.75x (high unanimity = already priced in)
 
-### Signal Inventory (36 total: 32 active, 7 disabled)
-- **Core active (10)**: RSI, MACD, EMA, BB, Fear&Greed, Sentiment, Ministral-8B, Qwen3-8B, Volume, Funding Rate (3h/4h only, 74.2%)
+### Signal Inventory (36 total: 32 active, 4 disabled)
+- **Core active (10)**: RSI, MACD, EMA, BB, Fear&Greed, Sentiment, Ministral-8B, Qwen3-8B, Volume, Funding Rate (3h-only, 74.2%)
 - **Core active BTC-only (1)**: On-Chain BTC (MVRV, SOPR, NUPL, Netflow)
-- **Core disabled (1)**: ML Classifier (41.7%)
-- **Enhanced composite (20 active)**: Trend, Momentum, Volume Flow, Volatility, Candlestick, Structure, Fibonacci, Smart Money, Oscillators, Heikin-Ashi, Mean Reversion, Calendar, Macro Regime, Momentum Factors, News Event, Econ Calendar, Claude Fundamental, Futures Flow, Credit Spread Risk, Metals Cross-Asset
-- **Enhanced disabled (7)**: Forecast (36.1%), Orderbook Flow (51.1%, 93% activation), Crypto Macro (pending), COT Positioning (pending), Hurst Regime (pending), Shannon Entropy (pending), Futures Basis (pending)
-- **Per-ticker disabled**: news_event for ETH-USD (39.2%, 100% SELL bias)
+- **Core disabled (1)**: ML Classifier (28.2%)
+- **Enhanced composite (21 active)**: Trend, Momentum, Volume Flow, Volatility, Candlestick, Structure, Fibonacci, Smart Money, Oscillators, Heikin-Ashi, Mean Reversion, Calendar, Macro Regime, Momentum Factors, News Event, Econ Calendar, Forecast, Claude Fundamental, Futures Flow, Orderbook Flow, Metals Cross-Asset
+- **Enhanced disabled (3)**: Crypto Macro, COT Positioning, Credit Spread Risk (all pending live validation)
 - **Applicable per asset**: crypto=31, metals=28, stocks=26
 
 ## 6) Configuration

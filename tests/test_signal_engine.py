@@ -293,6 +293,32 @@ class TestDirectionalAccuracyGating:
         result = _weighted_consensus(votes, accuracy_data, "ranging")
         assert result[0] == "BUY"
 
+    def test_missing_buy_accuracy_key_falls_back_to_overall(self):
+        """BUG-185: Missing buy_accuracy key should not crash; uses overall acc."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        # total_buy present (>= 20) but buy_accuracy missing — simulates cache corruption
+        votes = {"rsi": "BUY"}
+        accuracy_data = {
+            "rsi": {"accuracy": 0.55, "total": 200,
+                     "total_buy": 100},  # buy_accuracy intentionally absent
+        }
+        # Should not raise KeyError; falls back to overall accuracy (0.55)
+        result = _weighted_consensus(votes, accuracy_data, "ranging")
+        assert result[0] == "BUY"
+
+    def test_missing_sell_accuracy_key_falls_back_to_overall(self):
+        """BUG-185: Missing sell_accuracy key should not crash; uses overall acc."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        votes = {"rsi": "SELL"}
+        accuracy_data = {
+            "rsi": {"accuracy": 0.55, "total": 200,
+                     "total_sell": 100},  # sell_accuracy intentionally absent
+        }
+        result = _weighted_consensus(votes, accuracy_data, "ranging")
+        assert result[0] == "SELL"
+
 
 # ---------------------------------------------------------------------------
 # Funding rate horizon gating (2026-04-09)

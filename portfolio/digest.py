@@ -62,7 +62,8 @@ def _build_digest_message():
     cutoff = now - timedelta(seconds=DIGEST_INTERVAL)
 
     # --- Invocations (Layer 1 trigger → Layer 2) ---
-    entries = load_jsonl(INVOCATIONS_FILE, limit=500)
+    # BUG-190: Use tail read for efficiency (invocations.jsonl grows unbounded)
+    entries = load_jsonl_tail(INVOCATIONS_FILE, max_entries=500)
     recent = []
     for e in entries:
         ts_str = e.get("ts", "")
@@ -96,7 +97,7 @@ def _build_digest_message():
                 reason_counts["other"] += 1
 
     # --- Layer 2 decisions from journal ---
-    journal = load_jsonl(JOURNAL_FILE, limit=500)
+    journal = load_jsonl_tail(JOURNAL_FILE, max_entries=500)
     recent_journal = []
     for e in journal:
         ts_str = e.get("ts", "")

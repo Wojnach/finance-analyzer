@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-04-12 (autonomous improvement session)
+- **BUG-185: Directional accuracy KeyError safety (P2)**: `signal_engine.py:861,863` accessed `stats["buy_accuracy"]` without `.get()`. Falls back to overall accuracy if key is missing (cache corruption defense).
+- **BUG-186: Blended accuracy `correct` field (P3)**: `accuracy_stats.py:650` `correct` count was always from all-time data even when `accuracy` was a 70/30 recent/alltime blend. Now derives `correct = round(blended * total)` so `correct/total ≈ accuracy`.
+- **BUG-187: Circuit breaker dead code (P3)**: `circuit_breaker.py:89-92` HALF_OPEN probe branch was unreachable — probe is always sent via OPEN→HALF_OPEN transition. Replaced with comment explaining probe lifecycle.
+- **BUG-188: Redundant acc_horizon (P3)**: `signal_engine.py:1826` duplicate computation removed (already computed at line 1813).
+- **BUG-189: Windows taskkill rc=128 (P2)**: `agent_invocation.py:175` treated rc=128 (process already exited) as failure, blocking Layer 2 for the cycle. Now treated as success. Wait timeout increased 10s→15s for Claude CLI Node.js teardown.
+- **BUG-190: Digest tail read (P3)**: `digest.py:65,99` used `load_jsonl()` (full file read) for invocations and journal. Replaced with `load_jsonl_tail()` (reads last 512KB only).
+- **New tests**: 13 new tests — directional accuracy missing keys (2), blend accuracy consistency (6), circuit breaker probe lifecycle (5). All pass.
+- Theme: Safety, Reliability, Performance.
+
 ## 2026-04-08 (autonomous improvement session)
 - **BUG-176: Concentration check uses cash-only allocation (P1)**: `risk_management.py:585` computed proposed allocation as `cash * alloc_pct` instead of `min(total_value * alloc_pct, cash)`. Now uses portfolio-proportional sizing, capped at available cash.
 - **BUG-177: Sortino ratio unit inconsistency (P3)**: `equity_curve.py:244` used inline `r / 100` while Sharpe used pre-computed `daily_rets_dec`. Math was correct but confusing. Now uses `daily_rets_dec` consistently.

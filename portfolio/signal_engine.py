@@ -906,9 +906,9 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         # Using overall accuracy over-weights the weak direction.
         _DIR_WEIGHT_MIN_SAMPLES = 20
         if vote == "BUY" and stats.get("total_buy", 0) >= _DIR_WEIGHT_MIN_SAMPLES:
-            weight = stats["buy_accuracy"]
+            weight = stats.get("buy_accuracy", acc)  # BUG-185: .get() for cache safety
         elif vote == "SELL" and stats.get("total_sell", 0) >= _DIR_WEIGHT_MIN_SAMPLES:
-            weight = stats["sell_accuracy"]
+            weight = stats.get("sell_accuracy", acc)  # BUG-185: .get() for cache safety
         elif samples >= 20:
             weight = acc
         else:
@@ -1873,8 +1873,8 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             write_accuracy_cache,
         )
 
-        # Select accuracy horizon — use 3h accuracy when predicting 3h moves
-        acc_horizon = horizon if horizon in ("3h", "4h", "12h") else "1d"
+        # BUG-188: acc_horizon already computed at line 1813 before this try block.
+        # Removed redundant re-computation.
 
         # Load all-time accuracy
         alltime = load_cached_accuracy(acc_horizon)
