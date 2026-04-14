@@ -9,10 +9,15 @@ import json
 import logging
 import threading
 import time
+from datetime import UTC, datetime
+from pathlib import Path
 
+from portfolio.file_utils import atomic_append_jsonl
 from portfolio.http_retry import fetch_with_retry
 
 logger = logging.getLogger("portfolio.telegram_poller")
+
+INBOUND_LOG = Path(__file__).resolve().parent.parent / "data" / "telegram_inbound.jsonl"
 
 
 class TelegramPoller:
@@ -73,36 +78,69 @@ class TelegramPoller:
         if not msg:
             return
 
-        # Only process messages from our chat_id
+        # Only process messages from our chat_id. Drop others without logging —
+        # no point persisting spam from strangers who can't affect state.
         chat = msg.get("chat", {})
         if str(chat.get("id")) != self.chat_id:
             return
 
-        # Ignore messages older than 60s at startup (prevent stale command processing)
-        msg_date = msg.get("date", 0)
-        if msg_date < self._startup_time - 60:
-            return
+        # Accumulate log outcome; single append in finally so we log every
+        # inbound message exactly once, even if parse/dispatch raises.
+        outcome = {"cmd": None, "processed": False, "drop_reason": None}
+        try:
+            # Stale filter: ignore messages older than 60s at startup so we don't
+            # re-execute commands after a loop restart. Still log them — useful
+            # for reconstructing what the user sent during downtime.
+            msg_date = msg.get("date", 0)
+            if msg_date < self._startup_time - 60:
+                outcome["drop_reason"] = "stale_at_startup"
+                return
 
-        text = (msg.get("text") or "").strip()
-        if not text:
-            return
+            text = (msg.get("text") or "").strip()
+            if not text:
+                outcome["drop_reason"] = "empty_text"
+                return
 
-        # Parse command
-        cmd, args = self._parse_command(text)
-        if cmd is None:
-            return
+            cmd, args = self._parse_command(text)
+            outcome["cmd"] = cmd
+            if cmd is None:
+                outcome["drop_reason"] = "unrecognized"
+                return
 
-        # Handle system commands internally
-        if cmd == "mode":
-            response = self._handle_mode_command(args)
+            outcome["processed"] = True
+            if cmd == "mode":
+                response = self._handle_mode_command(args)
+            else:
+                response = self.on_command(cmd, args, self.config)
             if response:
                 self._send_reply(response)
-            return
+        finally:
+            self._log_inbound(update, msg, **outcome)
 
-        # Delegate ISKBETS commands to handler
-        response = self.on_command(cmd, args, self.config)
-        if response:
-            self._send_reply(response)
+    def _log_inbound(self, update, msg, cmd, processed, drop_reason):
+        """Persist one inbound message to data/telegram_inbound.jsonl.
+
+        Rotation registered in portfolio/log_rotation.py (90d / 20 MB).
+        """
+        try:
+            sender = msg.get("from") or {}
+            entry = {
+                "ts": datetime.now(UTC).isoformat(),
+                "update_id": update.get("update_id"),
+                "message_id": msg.get("message_id"),
+                "msg_date": msg.get("date"),
+                "from": {
+                    "id": sender.get("id"),
+                    "username": sender.get("username"),
+                },
+                "text": msg.get("text") or "",
+                "cmd": cmd,
+                "processed": processed,
+                "drop_reason": drop_reason,
+            }
+            atomic_append_jsonl(INBOUND_LOG, entry)
+        except Exception as e:
+            logger.warning("Inbound log write failed: %s", e)
 
     def _parse_command(self, text):
         """Parse ISKBETS and system commands from message text.

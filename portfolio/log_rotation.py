@@ -78,6 +78,13 @@ ROTATION_POLICIES = {
         "type": "jsonl",
         "ts_field": "ts",
     },
+    "telegram_inbound.jsonl": {
+        "max_age_days": 90,
+        "max_size_mb": 20,
+        "compress": True,
+        "type": "jsonl",
+        "ts_field": "ts",
+    },
     "ab_test_log.jsonl": {
         "max_age_days": 30,
         "max_size_mb": 20,
