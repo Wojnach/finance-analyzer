@@ -77,6 +77,9 @@ DISABLED_SIGNALS = {
     "forecast",         # 2026-04-12: 36.1% recent 1d (183 sam), 38.3% recent 3h (368 sam),
                         # 39.0% in ranging (310 sam). Chronos/Kronos degraded below usefulness
                         # at ALL horizons and ALL regimes. Wastes GPU compute.
+    "oscillators",      # 2026-04-14: below 45% on ALL tickers at 1d (BTC 35.8%, ETH 36.3%,
+                        # XAG 34.9%, XAU 40.2%, MSTR 42.6%; 5065 total sam). Also weak at
+                        # 3h (34-45% per ticker). Regime-gated in ranging but noise everywhere.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.

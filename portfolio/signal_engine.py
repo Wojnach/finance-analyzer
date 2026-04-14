@@ -134,6 +134,9 @@ _PER_TICKER_CONSENSUS_MIN_SAMPLES = 50
 # where accuracy data shows the signal is actively harmful for that instrument.
 _TICKER_DISABLED_SIGNALS = {
     "ETH-USD": frozenset({"news_event", "qwen3"}),  # news_event 39.2% SELL bias; qwen3 40% on ETH despite 60% overall
+    "XAG-USD": frozenset({"ministral", "credit_spread_risk", "metals_cross_asset"}),
+    "XAU-USD": frozenset({"ministral"}),
+    "MSTR": frozenset({"credit_spread_risk"}),
 }
 
 # --- Signal (full 32-signal for "Now" timeframe) ---
@@ -342,6 +345,10 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
         # 2026-04-13: fear_greed 25.9% at 1d (170 sam) — destructive in ALL regimes at 1d
         "_default": frozenset({"funding", "fear_greed"}),
         # 2026-04-13: sentiment 33.8% at 3h (3629 sam) — destructive at 3h in ALL regimes
+        "3h": frozenset({"sentiment"}),
+        "4h": frozenset({"sentiment"}),
+    },
+    "unknown": {
         "3h": frozenset({"sentiment"}),
         "4h": frozenset({"sentiment"}),
     },

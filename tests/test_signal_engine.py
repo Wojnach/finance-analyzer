@@ -786,3 +786,63 @@ class TestTickerDisabledSignals:
         else:
             vote = "BUY"
         assert vote == "HOLD"
+
+    def test_xag_ministral_disabled(self):
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "XAG-USD" in _TICKER_DISABLED_SIGNALS
+        assert "ministral" in _TICKER_DISABLED_SIGNALS["XAG-USD"]
+
+    def test_xag_credit_spread_risk_disabled(self):
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "credit_spread_risk" in _TICKER_DISABLED_SIGNALS["XAG-USD"]
+
+    def test_xag_metals_cross_asset_disabled(self):
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "metals_cross_asset" in _TICKER_DISABLED_SIGNALS["XAG-USD"]
+
+    def test_xau_ministral_disabled(self):
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "XAU-USD" in _TICKER_DISABLED_SIGNALS
+        assert "ministral" in _TICKER_DISABLED_SIGNALS["XAU-USD"]
+
+    def test_mstr_credit_spread_risk_disabled(self):
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "MSTR" in _TICKER_DISABLED_SIGNALS
+        assert "credit_spread_risk" in _TICKER_DISABLED_SIGNALS["MSTR"]
+
+    def test_btc_ministral_not_disabled(self):
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        btc_disabled = _TICKER_DISABLED_SIGNALS.get("BTC-USD", frozenset())
+        assert "ministral" not in btc_disabled
+
+
+class TestOscillatorsDisabled:
+    """BUG-193: oscillators globally disabled — below 45% on all tickers."""
+
+    def test_oscillators_in_disabled_signals(self):
+        from portfolio.tickers import DISABLED_SIGNALS
+        assert "oscillators" in DISABLED_SIGNALS
+
+    def test_oscillators_still_in_signal_names(self):
+        from portfolio.tickers import SIGNAL_NAMES
+        assert "oscillators" in SIGNAL_NAMES
+
+
+class TestSentimentUnknownRegimeGating:
+    """BUG-194: sentiment gated at 3h/4h in unknown regime."""
+
+    def test_sentiment_gated_3h_unknown(self):
+        from portfolio.signal_engine import REGIME_GATED_SIGNALS
+        unknown = REGIME_GATED_SIGNALS.get("unknown", {})
+        assert "sentiment" in unknown.get("3h", frozenset())
+
+    def test_sentiment_gated_4h_unknown(self):
+        from portfolio.signal_engine import REGIME_GATED_SIGNALS
+        unknown = REGIME_GATED_SIGNALS.get("unknown", {})
+        assert "sentiment" in unknown.get("4h", frozenset())
+
+    def test_sentiment_not_gated_1d_unknown(self):
+        from portfolio.signal_engine import REGIME_GATED_SIGNALS
+        unknown = REGIME_GATED_SIGNALS.get("unknown", {})
+        default_gated = unknown.get("_default", frozenset())
+        assert "sentiment" not in default_gated
