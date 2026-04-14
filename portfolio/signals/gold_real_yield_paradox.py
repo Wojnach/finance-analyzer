@@ -14,6 +14,7 @@ Source: AHA Signals GYDI tracker; Valadkhani 2024 MSI-VAR.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any
 
@@ -36,6 +37,7 @@ _APPLICABLE_TICKERS = frozenset({
 })
 
 _yield_cache: dict = {}
+_yield_cache_lock = threading.Lock()
 
 
 def _get_fred_key(context: dict | None) -> str:
@@ -54,12 +56,13 @@ def _get_fred_key(context: dict | None) -> str:
 def _fetch_real_yield(fred_api_key: str) -> list[float] | None:
     """Fetch 10Y TIPS real yield from FRED. Returns list newest-first."""
     now = time.time()
-    if (
-        _yield_cache.get("key") == fred_api_key
-        and _yield_cache.get("data")
-        and now - _yield_cache.get("time", 0) < _CACHE_TTL
-    ):
-        return _yield_cache["data"]
+    with _yield_cache_lock:
+        if (
+            _yield_cache.get("key") == fred_api_key
+            and _yield_cache.get("data")
+            and now - _yield_cache.get("time", 0) < _CACHE_TTL
+        ):
+            return _yield_cache["data"]
 
     if not fred_api_key:
         logger.debug("No FRED API key for real yield fetch")
@@ -101,9 +104,10 @@ def _fetch_real_yield(fred_api_key: str) -> list[float] | None:
                 continue
 
         if values:
-            _yield_cache["key"] = fred_api_key
-            _yield_cache["data"] = values
-            _yield_cache["time"] = now
+            with _yield_cache_lock:
+                _yield_cache["key"] = fred_api_key
+                _yield_cache["data"] = values
+                _yield_cache["time"] = now
             logger.debug("Real yield fetched: %d obs, current=%.3f", len(values), values[0])
             return values
 
@@ -114,9 +118,8 @@ def _fetch_real_yield(fred_api_key: str) -> list[float] | None:
 
 
 def _paradox_spread(gold_returns_30d: float, yield_change_30d: float) -> tuple[str, dict]:
-    """Sub-indicator 1: both gold return and yield change are positive."""
+    """Sub-indicator 1: gold and yield both rising (paradox regime = BUY)."""
     both_positive = gold_returns_30d > 0 and yield_change_30d > 0
-    both_negative = gold_returns_30d < 0 and yield_change_30d < 0
 
     if both_positive:
         magnitude = (
@@ -124,12 +127,12 @@ def _paradox_spread(gold_returns_30d: float, yield_change_30d: float) -> tuple[s
             + min(abs(yield_change_30d) / 0.75, 1.0) * 50
         )
         action = "BUY"
-    elif both_negative:
+    elif gold_returns_30d < 0 and yield_change_30d < 0:
         magnitude = (
             min(abs(gold_returns_30d) / 0.10, 1.0) * 50
             + min(abs(yield_change_30d) / 0.75, 1.0) * 50
-        )
-        action = "SELL"
+        ) * 0.5
+        action = "HOLD"
     else:
         magnitude = 0.0
         action = "HOLD"
@@ -188,7 +191,8 @@ def _momentum_split(
     gold_mom = gold_sma50 / gold_sma200 - 1 if gold_sma200 > 0 else 0.0
 
     yield_current = yield_values[0]
-    yield_sma50 = sum(yield_values[:50]) / min(50, len(yield_values))
+    prior_yields = yield_values[1:51]
+    yield_sma50 = sum(prior_yields) / len(prior_yields) if prior_yields else yield_current
     yield_mom = yield_current - yield_sma50
 
     gold_up = gold_mom > 0.005
@@ -257,10 +261,10 @@ def compute_gold_real_yield_paradox_signal(
     fred_key = _get_fred_key(context)
     if not fred_key:
         try:
-            import json
-            with open("config.json", encoding="utf-8") as f:
-                cfg = json.load(f)
-            fred_key = cfg.get("golddigger", {}).get("fred_api_key", "") or ""
+            from portfolio.file_utils import load_json
+            cfg = load_json("config.json")
+            if cfg:
+                fred_key = cfg.get("golddigger", {}).get("fred_api_key", "") or ""
         except Exception:
             pass
 
@@ -283,7 +287,7 @@ def compute_gold_real_yield_paradox_signal(
     yield_daily_changes = np.array([
         yield_values[i] - yield_values[i + 1]
         for i in range(min_len)
-    ])
+    ])[::-1]  # reverse: FRED is newest-first, gold is oldest-first
     gold_daily_returns = gold_daily_returns[-min_len:]
 
     baseline_corr = _compute_baseline_correlation(gold_daily_returns, yield_daily_changes)

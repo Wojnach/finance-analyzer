@@ -120,8 +120,8 @@ class TestSignalInterface:
         assert isinstance(result, dict)
 
     @patch("portfolio.signals.gold_real_yield_paradox._fetch_real_yield", return_value=None)
-    @patch("builtins.open", side_effect=FileNotFoundError)
-    def test_no_fred_key_returns_hold(self, _mock_open, _mock_fetch):
+    @patch("portfolio.signals.gold_real_yield_paradox.load_json", side_effect=FileNotFoundError, create=True)
+    def test_no_fred_key_returns_hold(self, _mock_load, _mock_fetch):
         df = _make_df()
         ctx = {"ticker": "XAU-USD", "config": {}}
         result = compute_gold_real_yield_paradox_signal(df, context=ctx)
@@ -144,9 +144,9 @@ class TestSubIndicators:
         assert action == "BUY"
         assert ind["paradox_score"] > 0
 
-    def test_paradox_spread_both_negative(self):
+    def test_paradox_spread_both_negative_is_hold(self):
         action, ind = _paradox_spread(-0.05, -0.3)
-        assert action == "SELL"
+        assert action == "HOLD"
         assert ind["paradox_score"] > 0
 
     def test_paradox_spread_diverging(self):
