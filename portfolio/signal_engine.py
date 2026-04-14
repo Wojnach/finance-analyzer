@@ -706,33 +706,29 @@ def _get_correlation_groups() -> dict[str, frozenset[str]]:
 # Static correlation groups (fallback when dynamic computation unavailable).
 # Updated 2026-04-08: empirical audit of 200 recent signal_log entries.
 _STATIC_CORRELATION_GROUPS = {
-    # 2026-04-12: Removed low_activity_timing cluster. calendar (BUY-only, 84.2%
-    # ranging) and econ_calendar (SELL-only, 34.2% ranging) have opposite directions
-    # and divergent regime profiles — they should not be correlated.
-    # econ_calendar now regime-gated in ranging. calendar votes independently.
-    # 2026-04-08: volume+volatility_sig agree 94.9%, vol_sig+oscillators similar.
-    # structure moved here (94.2% with volatility_sig, 88.6% with heikin_ashi).
-    "volatility_cluster": frozenset({"volatility_sig", "oscillators", "volume", "structure"}),
-    # Discovered 2026-03-27: ema/trend corr=0.55, all share SELL bias (37-40%).
-    # 2026-04-01: volume_flow added (corr +0.511 with heikin_ashi, permanent SELL lean)
-    # 2026-04-07: macro_regime added (corr +0.520 with trend, both follow 200-SMA)
-    "trend_direction": frozenset({"ema", "trend", "heikin_ashi", "volume_flow", "macro_regime"}),
-    # 2026-04-08: sentiment+momentum_factors agree 94.3%. sentiment+calendar 99.2%.
-    # fear_greed/news_event degrade together. momentum_factors added.
-    "macro_external": frozenset({
-        "fear_greed", "sentiment", "news_event", "momentum_factors",
+    # 2026-04-14: Measured correlation analysis (300 snapshots, 1308 obs):
+    # volatility_sig only weakly correlates with volume (r=0.38). Oscillators
+    # moved to trend_direction (0.463 with heikin_ashi, 83.4% agreement).
+    # Structure moved to trend_direction (0.608 with trend, 96.5% with macro_regime).
+    "volatility_cluster": frozenset({"volatility_sig", "volume"}),
+    # 2026-04-14: Mega trend cluster. Measured correlations: trend+macro_regime
+    # r=0.730 (99.7% agree), trend+structure r=0.608 (90.7%), trend+momentum_factors
+    # r=0.593 (90.4%), trend+heikin_ashi r=0.587 (85.4%), oscillators+heikin_ashi
+    # r=0.463 (83.4%). All 8 signals measure trend direction via different methods.
+    "trend_direction": frozenset({
+        "ema", "trend", "heikin_ashi", "volume_flow", "macro_regime",
+        "momentum_factors", "structure", "oscillators",
     }),
+    # 2026-04-14: Reduced after momentum_factors moved to trend_direction.
+    # Remaining members share macro/sentiment degradation patterns.
+    "macro_external": frozenset({"fear_greed", "sentiment", "news_event"}),
     # 2026-04-04: BUG-162 — candlestick-fibonacci correlation 0.708 on BTC.
     "pattern_based": frozenset({"candlestick", "fibonacci"}),
     # 2026-04-08: rsi+bb agree 100%, bb+mean_reversion 100%, bb+momentum 98.8%.
-    # All use similar RSI/oversold-overbought logic. bb and momentum added.
     "momentum_cluster": frozenset({"mean_reversion", "rsi", "bb", "momentum"}),
-    # 2026-04-13: claude_fundamental + crypto_macro + structure agree 92-100%
-    # but were not in any cluster — all voting at full weight despite near-total
-    # redundancy. claude_fundamental (61.9%) is leader; structure (49.8%) and
-    # crypto_macro (55.5%) are followers. Note: structure is also in
-    # volatility_cluster — dynamic groups may reassign it, which is fine.
-    "fundamental_cluster": frozenset({"claude_fundamental", "crypto_macro", "structure"}),
+    # 2026-04-13: claude_fundamental + crypto_macro agree 92-100%.
+    # structure removed (now in trend_direction where correlations are stronger).
+    "fundamental_cluster": frozenset({"claude_fundamental", "crypto_macro"}),
 }
 # Public alias for backward compatibility (used by tests and reporting)
 CORRELATION_GROUPS = _STATIC_CORRELATION_GROUPS
@@ -743,14 +739,11 @@ _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal wei
 # reduces redundancy inflation. Other clusters keep the default 0.3x.
 _CLUSTER_CORRELATION_PENALTIES: dict[str, float] = {
     "momentum_cluster": 0.15,
-    # 2026-04-12: volatility_cluster (volatility_sig 45.3%, oscillators 45.0%,
-    # volume 52.1%, structure 49.8%) agree 88-95%. At 0.3x the cluster gets 2.2x
-    # effective weight for signals averaging ~48%. Tighten to 0.15x → 1.45x.
-    "volatility_cluster": 0.15,
-    # 2026-04-12: trend_direction (5 members, 0.3x) gets 2.2x effective weight.
-    # Most members are regime-gated at 1d in ranging but not at 3h, still contributing
-    # significant correlated weight. Tighten to 0.2x → 1.0 + 4*0.2 = 1.8x.
-    "trend_direction": 0.2,
+    # 2026-04-14: volatility_cluster reduced to 2 members — default 0.3x is fine.
+    # 2026-04-14: trend_direction now 8 members (was 5). At 0.12x per follower:
+    # effective weight = 1.0 + 7*0.12 = 1.84x. Previous 5-member at 0.2x gave
+    # 1.0 + 4*0.2 = 1.8x. Similar total but spread across more correlated signals.
+    "trend_direction": 0.12,
 }
 
 

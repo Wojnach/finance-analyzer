@@ -39,26 +39,33 @@ class TestCorrelationGroups:
         assert "momentum" in mc_group
 
     def test_volatility_cluster_exists(self):
-        """volatility_cluster should contain volatility_sig, oscillators, volume, structure.
+        """volatility_cluster contains volatility_sig and volume.
 
-        Empirical: volume-volatility_sig 94.9%, volatility_sig-structure 94.2%.
-        Renamed from rare_technical and expanded (2026-04-08).
+        2026-04-14: oscillators and structure moved to trend_direction based
+        on measured correlations (oscillators+heikin_ashi r=0.463, 83.4% agree;
+        structure+trend r=0.608, 96.5% agree with macro_regime).
         """
         from portfolio.signal_engine import CORRELATION_GROUPS
 
         assert "volatility_cluster" in CORRELATION_GROUPS
         vc_group = CORRELATION_GROUPS["volatility_cluster"]
         assert "volatility_sig" in vc_group
-        assert "oscillators" in vc_group
         assert "volume" in vc_group
-        assert "structure" in vc_group
 
-    def test_macro_external_includes_momentum_factors(self):
-        """momentum_factors should be in macro_external (94.3% with sentiment)."""
+    def test_trend_direction_expanded_members(self):
+        """trend_direction should include momentum_factors, structure, oscillators.
+
+        2026-04-14: Measured correlations show these belong in trend cluster:
+        momentum_factors+macro_regime r=0.621 (91.5% agree),
+        structure+trend r=0.608 (90.7% agree),
+        oscillators+heikin_ashi r=0.463 (83.4% agree).
+        """
         from portfolio.signal_engine import CORRELATION_GROUPS
 
-        me_group = CORRELATION_GROUPS["macro_external"]
-        assert "momentum_factors" in me_group
+        td_group = CORRELATION_GROUPS["trend_direction"]
+        assert "momentum_factors" in td_group
+        assert "structure" in td_group
+        assert "oscillators" in td_group
 
     def test_macro_regime_in_trend_direction(self):
         """macro_regime should be in trend_direction group (r=0.520 with trend)."""
