@@ -265,16 +265,18 @@ def _fetch_oil_futures(symbol, period="6mo"):
     Returns price data + TSMOM + Donchian + MA crossovers + realised vol +
     Fibonacci + RSI.
     """
-    import yfinance as yf
+    # 2026-04-14: route via price_source (CL=F → Binance FAPI, USO → Alpaca)
+    from portfolio.price_source import fetch_klines
 
-    ticker = yf.Ticker(symbol)
-    hist = ticker.history(period=period)
+    _LIMIT = {"1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "2y": 730}
+    limit = _LIMIT.get(period, 90)
+    hist = fetch_klines(symbol, interval="1d", limit=limit, period=period)
 
-    if hist.empty:
+    if hist is None or hist.empty:
         return None
 
-    closes = hist["Close"].dropna()
-    volumes = hist["Volume"].dropna()
+    closes = hist["close"].dropna()
+    volumes = hist["volume"].dropna()
     if len(closes) < 10:
         return None
 
@@ -397,16 +399,19 @@ def _fetch_oil_futures(symbol, period="6mo"):
 
 
 def _fetch_ovx():
-    """Fetch OVX (CBOE Oil Volatility Index) via yfinance."""
-    import yfinance as yf
+    """Fetch OVX (CBOE Oil Volatility Index).
 
-    ticker = yf.Ticker("^OVX")
-    hist = ticker.history(period="3mo")
+    2026-04-14: Routed through price_source — ^OVX is CBOE-proprietary,
+    so the router uses yfinance for it (no free real-time alternative).
+    """
+    from portfolio.price_source import fetch_klines
 
-    if hist.empty:
+    hist = fetch_klines("^OVX", interval="1d", limit=90, period="3mo")
+
+    if hist is None or hist.empty:
         return None
 
-    closes = hist["Close"].dropna()
+    closes = hist["close"].dropna()
     if len(closes) < 2:
         return None
 
@@ -441,17 +446,20 @@ def _fetch_ovx():
 
 
 def _fetch_etf_data(symbol):
-    """Fetch ETF data (USO) via yfinance — investment flow proxy."""
-    import yfinance as yf
+    """Fetch ETF data (USO etc.) — investment flow proxy.
 
-    etf = yf.Ticker(symbol)
-    hist = etf.history(period="1mo")
+    2026-04-14: Routed via price_source — ETFs use Alpaca primary
+    (real-time IEX feed) instead of yfinance's 15-min delay.
+    """
+    from portfolio.price_source import fetch_klines
 
-    if hist.empty:
+    hist = fetch_klines(symbol, interval="1d", limit=30, period="1mo")
+
+    if hist is None or hist.empty:
         return None
 
-    closes = hist["Close"].dropna()
-    volumes = hist["Volume"].dropna()
+    closes = hist["close"].dropna()
+    volumes = hist["volume"].dropna()
 
     if len(closes) < 2:
         return None
@@ -948,14 +956,16 @@ def _try_garch(market):
 
     try:
         import numpy as np
-        import yfinance as yf
 
-        ticker = yf.Ticker("CL=F")
-        hist = ticker.history(period="1y")
-        if hist.empty or len(hist) < 100:
+        # 2026-04-14: route via price_source (CL=F → Binance FAPI for
+        # real-time, yfinance fallback if Binance unavailable).
+        from portfolio.price_source import fetch_klines
+
+        hist = fetch_klines("CL=F", interval="1d", limit=365, period="1y")
+        if hist is None or hist.empty or len(hist) < 100:
             return None
 
-        closes = hist["Close"].dropna()
+        closes = hist["close"].dropna()
         returns = np.diff(np.log(closes.values)) * 100  # pct log returns
 
         from arch import arch_model

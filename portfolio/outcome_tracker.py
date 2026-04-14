@@ -195,14 +195,16 @@ def _fetch_current_price(ticker):
         return float(r.json()["price"])
 
     if ticker in YF_MAP:
-        import yfinance as yf
+        # 2026-04-14: route through canonical price_source (Alpaca for
+        # stocks, yfinance emergency fallback). Previously bypassed
+        # Alpaca entirely — added a 15-min delay to every stock outcome
+        # backfill call.
+        from portfolio.price_source import fetch_klines
 
-        _yfinance_limiter.wait()
-        t = yf.Ticker(YF_MAP[ticker])
-        h = t.history(period="5d")
-        if h.empty:
+        h = fetch_klines(YF_MAP[ticker], interval="1d", limit=5, period="5d")
+        if h is None or h.empty:
             return None
-        return float(h["Close"].iloc[-1])
+        return float(h["close"].iloc[-1])
 
     return None
 
@@ -251,6 +253,13 @@ def _fetch_historical_price(ticker, target_ts):
         return float(data[0][4])
 
     if ticker in YF_MAP:
+        # 2026-04-14: historical price-at-timestamp needs a date window
+        # that price_source.fetch_klines's `limit`-based contract can't
+        # express precisely. Keep direct yfinance here — the call is
+        # only for outcome backfill (non-hot-path; 15-min delay is
+        # acceptable for an outcome at target_ts already in the past).
+        # To migrate, add start/end support to price_source and update
+        # this block.
         import yfinance as yf
 
         _yfinance_limiter.wait()
