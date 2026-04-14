@@ -281,3 +281,48 @@ class TestDogpilePrevention:
 
         assert call_counts["a"] == 1
         assert call_counts["b"] == 1
+
+
+class TestCachedOrEnqueueExceptionSafety:
+    """BUG-191: enqueue_fn exception must release _loading_keys to avoid 120s stale windows."""
+
+    def test_enqueue_exception_releases_loading_key(self):
+        from portfolio.shared_state import (
+            _cached_or_enqueue,
+            _cache_lock,
+            _loading_keys,
+            _loading_timestamps,
+        )
+        with _cache_lock:
+            _loading_keys.discard("test_bug191")
+            _loading_timestamps.pop("test_bug191", None)
+
+        def failing_enqueue(key, ctx):
+            raise RuntimeError("GPU OOM simulated")
+
+        result = _cached_or_enqueue("test_bug191", 60, failing_enqueue, {"ticker": "BTC-USD"})
+        assert result is None
+        with _cache_lock:
+            assert "test_bug191" not in _loading_keys
+            assert "test_bug191" not in _loading_timestamps
+
+    def test_enqueue_success_keeps_loading_key(self):
+        from portfolio.shared_state import (
+            _cached_or_enqueue,
+            _cache_lock,
+            _loading_keys,
+            _loading_timestamps,
+        )
+        with _cache_lock:
+            _loading_keys.discard("test_bug191_ok")
+            _loading_timestamps.pop("test_bug191_ok", None)
+
+        enqueue_called = []
+
+        def ok_enqueue(key, ctx):
+            enqueue_called.append(key)
+
+        result = _cached_or_enqueue("test_bug191_ok", 60, ok_enqueue, {"ticker": "BTC-USD"})
+        assert len(enqueue_called) == 1
+        with _cache_lock:
+            assert "test_bug191_ok" in _loading_keys

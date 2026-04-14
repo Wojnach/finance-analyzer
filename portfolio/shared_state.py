@@ -194,7 +194,12 @@ def _cached_or_enqueue(key, ttl, enqueue_fn, context,
             _loading_keys.add(key)
             # C11/SS1: Track enqueue time for stuck-key eviction.
             _loading_timestamps[key] = time.time()
-            enqueue_fn(key, context)
+            try:
+                enqueue_fn(key, context)
+            except Exception as e:
+                _loading_keys.discard(key)
+                _loading_timestamps.pop(key, None)
+                logger.warning("[%s] enqueue_fn raised, key released: %s", key, e)
 
         # Return stale if available
         if stale_available:
