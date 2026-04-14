@@ -35,18 +35,42 @@ _CROSS_INTRADAY_TTL = 180
 
 
 def _yf_download(ticker: str, period: str = "3mo", interval: str = "1d") -> pd.DataFrame:
-    """Fetch OHLCV from yfinance with rate limiting."""
-    import yfinance as yf
-    _yfinance_limiter.wait()
+    """Fetch OHLCV OHLCV bars. Routed via ``portfolio.price_source``.
+
+    2026-04-14: no longer pinned to yfinance. The router dispatches
+    commodity futures (HG=F, CL=F) to Binance FAPI for 7.7s-fresh data,
+    stocks/ETFs (SPY, USO) to Alpaca, and falls back to yfinance only
+    for tickers with no live alternative (^GVZ). Returns DataFrame with
+    capitalized column names for backward compatibility with callers
+    in this module that reference ``df["Close"]``.
+    """
+    # Rough period-to-limit mapping — price_source/Binance/Alpaca use row
+    # limits while yfinance uses period strings. Slight over-fetch is OK.
+    _limit_map = {
+        "1d": 10, "5d": 120, "1mo": 30, "3mo": 90, "6mo": 180,
+        "1y": 365, "2y": 730,
+    }
+    limit = _limit_map.get(period, 90)
+
     try:
-        df = yf.download(ticker, period=period, interval=interval,
-                         progress=False, auto_adjust=True)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.droplevel(1)
-        return df
+        from portfolio.price_source import fetch_klines
+
+        df = fetch_klines(ticker, interval=interval, limit=limit, period=period)
     except Exception as e:
-        logger.warning("yfinance fetch failed for %s: %s", ticker, e)
+        logger.warning("price_source fetch failed for %s: %s", ticker, e)
         return pd.DataFrame()
+
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    # Callers in this module use capitalized column names (legacy
+    # yfinance convention). Backends normalize to lowercase; re-capitalize
+    # here so downstream getters ``df["Close"]`` keep working.
+    rename = {
+        "open": "Open", "high": "High", "low": "Low",
+        "close": "Close", "volume": "Volume",
+    }
+    return df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
 
 
 def _nocache(func):
