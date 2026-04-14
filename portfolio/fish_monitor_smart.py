@@ -131,23 +131,26 @@ class SmartFishMonitor:
         return None
 
     def _fetch_cross_asset_prices(self) -> dict[str, float]:
-        """Fetch cross-asset driver prices via yfinance (cached)."""
+        """Fetch cross-asset driver prices.
+
+        2026-04-14: routed via price_source — commodity drivers (SI=F,
+        GC=F, CL=F) hit Binance FAPI for real-time, ETFs hit Alpaca,
+        CBOE indices fall back to yfinance only when needed.
+        """
+        from portfolio.price_source import fetch_klines
+
         drivers = get_cross_asset_drivers(self.ticker)
         result = {}
-        try:
-            import yfinance as yf
-            for name, driver in drivers.items():
-                yf_ticker = driver.get("ticker")
-                if not yf_ticker:
-                    continue
-                with suppress(Exception):
-                    t = yf.Ticker(yf_ticker)
-                    info = t.fast_info
-                    price = getattr(info, "last_price", None)
-                    if price and price > 0:
-                        result[name] = float(price)
-        except ImportError:
-            pass
+        for name, driver in drivers.items():
+            ticker = driver.get("ticker")
+            if not ticker:
+                continue
+            with suppress(Exception):
+                df = fetch_klines(ticker, interval="1d", limit=2)
+                if df is not None and not df.empty:
+                    price = float(df["close"].iloc[-1])
+                    if price > 0:
+                        result[name] = price
         return result
 
     # ------------------------------------------------------------------
@@ -243,17 +246,20 @@ class SmartFishMonitor:
         return result
 
     def _compute_z_score(self) -> float | None:
-        """Compute current z-score for mean reversion tracking."""
+        """Compute current z-score for mean reversion tracking.
+
+        2026-04-14: routed via price_source — SI=F/GC=F → Binance FAPI 15m bars.
+        """
         try:
-            import yfinance as yf
+            from portfolio.price_source import fetch_klines
             ticker_map = {"XAG-USD": "SI=F", "XAU-USD": "GC=F"}
-            yf_sym = ticker_map.get(self.ticker)
-            if not yf_sym:
+            sym = ticker_map.get(self.ticker)
+            if not sym:
                 return None
-            df = yf.download(yf_sym, period="5d", interval="15m", progress=False)
-            if df.empty or len(df) < 20:
+            df = fetch_klines(sym, interval="15m", limit=120, period="5d")
+            if df is None or df.empty or len(df) < 20:
                 return None
-            close = df["Close"].values if "Close" in df.columns else df.iloc[:, 0].values
+            close = df["close"].values
             close = close.flatten() if hasattr(close, "flatten") else close
             mean = float(np.mean(close[-60:]))
             std = float(np.std(close[-60:]))
@@ -265,17 +271,20 @@ class SmartFishMonitor:
             return None
 
     def _compute_half_life(self) -> float | None:
-        """Compute Ornstein-Uhlenbeck half-life from recent data."""
+        """Compute Ornstein-Uhlenbeck half-life from recent data.
+
+        2026-04-14: routed via price_source — SI=F/GC=F → Binance FAPI 15m bars.
+        """
         try:
-            import yfinance as yf
+            from portfolio.price_source import fetch_klines
             ticker_map = {"XAG-USD": "SI=F", "XAU-USD": "GC=F"}
-            yf_sym = ticker_map.get(self.ticker)
-            if not yf_sym:
+            sym = ticker_map.get(self.ticker)
+            if not sym:
                 return None
-            df = yf.download(yf_sym, period="5d", interval="15m", progress=False)
-            if df.empty or len(df) < 30:
+            df = fetch_klines(sym, interval="15m", limit=120, period="5d")
+            if df is None or df.empty or len(df) < 30:
                 return None
-            close = df["Close"].values if "Close" in df.columns else df.iloc[:, 0].values
+            close = df["close"].values
             close = close.flatten() if hasattr(close, "flatten") else close
             log_prices = np.log(close[-60:])
             y = np.diff(log_prices)

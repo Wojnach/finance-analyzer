@@ -59,12 +59,17 @@ _CBOE_VOL_INDICES = frozenset({
 })
 
 # Tickers for which yfinance is the only available free data source.
-# The router raises a WARNING when any of these fires so we can quantify
-# how much yfinance dependency remains.
+# Calls to these emit DEBUG (not WARNING) so legitimate use doesn't
+# pollute the log; calls for non-allowed tickers emit WARNING so we
+# can quantify residual leakage.
 _YFINANCE_LAST_RESORT = frozenset({
     "HG=F",          # copper — no Binance perpetual
-    "DX-Y.NYB",      # DXY pseudo-ticker (we also have an Alpha Vantage fallback)
-    "EURUSD=X",      # FX — Alpha Vantage is paid for intraday
+    "DX-Y.NYB",      # DXY pseudo-ticker (Alpha Vantage FX is paid intraday)
+    "EURUSD=X",      # FX — Alpha Vantage paid intraday
+    "^TNX",          # 10y treasury yield (CBOE; FRED has daily DGS10 fallback)
+    "^TYX",          # 30y treasury yield
+    "2YY=F",         # 2y treasury yield futures pseudo-ticker
+    "^FVX",          # 5y treasury yield
 }) | _CBOE_VOL_INDICES
 
 
@@ -114,15 +119,21 @@ def _fetch_alpaca(ticker: str, interval: str, limit: int) -> pd.DataFrame:
 def _fetch_yfinance(
     ticker: str, interval: str, period: str | None = None, limit: int | None = None,
 ) -> pd.DataFrame:
-    """Yfinance last-resort fetcher. Emits a WARNING every call so we can see
-    how much yfinance residue is left in the system."""
+    """Yfinance fetcher. Allowed-list tickers emit DEBUG; everything else
+    emits WARNING so we can quantify residual leakage."""
     import yfinance as yf
 
-    logger.warning(
-        "price_source: falling back to yfinance for %s (interval=%s, period=%s). "
-        "This source lags 10-15 min; upstream caller should be on Binance/Alpaca/FRED if possible.",
-        ticker, interval, period,
-    )
+    if ticker in _YFINANCE_LAST_RESORT:
+        logger.debug(
+            "price_source: yfinance for %s (interval=%s, period=%s) — allowed (no live alt)",
+            ticker, interval, period,
+        )
+    else:
+        logger.warning(
+            "price_source: falling back to yfinance for %s (interval=%s, period=%s). "
+            "This source lags 10-15 min; upstream caller should be on Binance/Alpaca/FRED if possible.",
+            ticker, interval, period,
+        )
     p = period or "5d"
     df = yf.download(
         ticker, period=p, interval=interval,

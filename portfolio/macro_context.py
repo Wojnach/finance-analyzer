@@ -29,16 +29,20 @@ TREASURY_TTL_VAL = 3600
 
 
 def _fetch_dxy():
-    """Fetch DXY data from yfinance."""
-    import yfinance as yf
+    """Fetch DXY data.
 
-    _yfinance_limiter.wait()
-    t = yf.Ticker("DX-Y.NYB")
-    h = t.history(period="30d")
-    if h.empty:
+    2026-04-14: routed via price_source — DXY (DX-Y.NYB) is in the
+    yfinance allowed-fallback list (no free real-time alternative),
+    but this preserves a single upgrade point for the day a real-time
+    DXY feed becomes available.
+    """
+    from portfolio.price_source import fetch_klines
+
+    h = fetch_klines("DX-Y.NYB", interval="1d", limit=30, period="30d")
+    if h is None or h.empty:
         return None
 
-    close = h["Close"]
+    close = h["close"]
     current = float(close.iloc[-1])
     sma20 = float(close.rolling(20).mean().iloc[-1])
     pct_5d = (
@@ -101,27 +105,22 @@ def _dxy_features_from_close(close, *, source: str) -> dict | None:
 
 
 def _fetch_dxy_intraday():
-    """Fetch intraday DXY (60m bars). Fallback chain: primary index → EURUSD synth."""
-    import yfinance as yf
-    import pandas as pd
+    """Fetch intraday DXY (60m bars). Fallback chain: primary index → EURUSD synth.
+
+    2026-04-14: routed via price_source — DXY and EURUSD=X are both in
+    the yfinance allowed-fallback list (no free real-time alternative).
+    The router preserves the same fallback logic but centralizes it.
+    """
+    from portfolio.price_source import fetch_klines
 
     def _download(ticker: str):
-        _yfinance_limiter.wait()
         try:
-            df = yf.download(
-                ticker,
-                period="5d",
-                interval="60m",
-                progress=False,
-                auto_adjust=True,
-            )
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.droplevel(1)
-            if df.empty or "Close" not in df.columns:
+            df = fetch_klines(ticker, interval="60m", limit=120, period="5d")
+            if df is None or df.empty or "close" not in df.columns:
                 return None
-            return df["Close"].dropna()
+            return df["close"].dropna()
         except Exception as exc:
-            logger.debug("yfinance intraday fetch failed for %s: %s", ticker, exc)
+            logger.debug("price_source intraday fetch failed for %s: %s", ticker, exc)
             return None
 
     # Primary: DX-Y.NYB intraday 60m
@@ -302,19 +301,23 @@ def _fred_10y_fallback():
 
 
 def _fetch_treasury():
-    """Fetch treasury yield data from yfinance, with FRED fallback for 10y."""
-    import yfinance as yf
+    """Fetch treasury yield data, with FRED fallback for 10y.
+
+    2026-04-14: routed via price_source. Treasury tickers (^TNX, ^TYX)
+    are CBOE-style indices with no free intraday alternative; the router
+    sends them through yfinance. 2YY=F is a futures pseudo-ticker also
+    with no free alternative.
+    """
+    from portfolio.price_source import fetch_klines
 
     tickers = {"10y": "^TNX", "2y": "2YY=F", "30y": "^TYX"}
     result = {}
     for label, sym in tickers.items():
         try:
-            _yfinance_limiter.wait()
-            t = yf.Ticker(sym)
-            h = t.history(period="30d")
-            if h.empty:
+            h = fetch_klines(sym, interval="1d", limit=30, period="30d")
+            if h is None or h.empty:
                 continue
-            close = h["Close"]
+            close = h["close"]
             current = float(close.iloc[-1])
             pct_5d = (
                 float((close.iloc[-1] / close.iloc[-5] - 1) * 100)

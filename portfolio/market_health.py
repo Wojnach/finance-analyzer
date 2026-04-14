@@ -71,21 +71,24 @@ def _fetch_index_data(symbol: str, period: str = "90d") -> dict | None:
     except Exception:
         logger.debug("Alpaca fetch failed for %s, trying yfinance fallback", symbol)
 
-    # Fallback: yfinance (for when Alpaca circuit is open or rate limited)
+    # Fallback path via the canonical price-source router. Handles
+    # Alpaca retry + yfinance emergency fallback internally.
+    # 2026-04-14: swapped direct yfinance call for price_source router.
     try:
-        import yfinance as yf
+        from portfolio.price_source import fetch_klines
 
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period=period)
-        if hist.empty or len(hist) < 10:
+        _LIMIT = {"1d": 2, "5d": 10, "1mo": 30, "3mo": 90, "6mo": 180, "1y": 365}
+        limit = _LIMIT.get(period, 90)
+        hist = fetch_klines(symbol, interval="1d", limit=limit, period=period)
+        if hist is None or hist.empty or len(hist) < 10:
             return None
 
         return {
-            "closes": hist["Close"].tolist(),
-            "volumes": hist["Volume"].tolist(),
-            "highs": hist["High"].tolist(),
-            "lows": hist["Low"].tolist(),
-            "opens": hist["Open"].tolist(),
+            "closes": hist["close"].tolist(),
+            "volumes": hist["volume"].tolist(),
+            "highs": hist["high"].tolist(),
+            "lows": hist["low"].tolist(),
+            "opens": hist["open"].tolist(),
         }
     except Exception:
         logger.warning("Failed to fetch %s data", symbol, exc_info=True)

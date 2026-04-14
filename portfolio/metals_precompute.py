@@ -277,19 +277,19 @@ def _safe_fetch(name, fetch_fn, *args):
 
 
 def _fetch_futures(symbol):
-    """Fetch futures price context (GC=F or SI=F) via yfinance.
+    """Fetch futures price context (GC=F or SI=F).
 
-    Returns 3-month OHLCV with Fibonacci retracements and SMAs.
+    2026-04-14: routed via price_source — GC=F/SI=F → Binance FAPI for
+    real-time (7.7s freshness vs yfinance's 15-min delay).
     """
-    import yfinance as yf
+    from portfolio.price_source import fetch_klines
 
-    ticker = yf.Ticker(symbol)
-    hist = ticker.history(period="3mo")
+    hist = fetch_klines(symbol, interval="1d", limit=90, period="3mo")
 
-    if hist.empty:
+    if hist is None or hist.empty:
         return None
 
-    closes = hist["Close"].dropna()
+    closes = hist["close"].dropna()
     if len(closes) < 5:
         return None
 
@@ -340,17 +340,20 @@ def _fetch_futures(symbol):
 
 
 def _fetch_etf_data(symbol):
-    """Fetch ETF data (GLD or SLV) via yfinance -- investment flow proxy."""
-    import yfinance as yf
+    """Fetch ETF data (GLD or SLV) — investment flow proxy.
 
-    etf = yf.Ticker(symbol)
-    hist = etf.history(period="1mo")
+    2026-04-14: ETFs route through price_source → Alpaca primary
+    (real-time IEX feed) instead of yfinance's 15-min delay.
+    """
+    from portfolio.price_source import fetch_klines
 
-    if hist.empty:
+    hist = fetch_klines(symbol, interval="1d", limit=30, period="1mo")
+
+    if hist is None or hist.empty:
         return None
 
-    closes = hist["Close"].dropna()
-    volumes = hist["Volume"].dropna()
+    closes = hist["close"].dropna()
+    volumes = hist["volume"].dropna()
 
     if len(closes) < 2:
         return None
