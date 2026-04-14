@@ -321,7 +321,7 @@ class TestStockSignalVoteCounts:
     def test_crypto_total_applicable(self, _mock):
         ind = make_indicators(close=69000.0)
         _, _, extra = generate_signal(ind, ticker="BTC-USD")
-        assert extra["_total_applicable"] == 31  # crypto: 36 signals minus gpu+disabled+metals-only exclusions
+        assert extra["_total_applicable"] == 32  # crypto: 36 registered minus gpu+disabled+metals-only exclusions
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_max_technical_voters(self, _mock):
