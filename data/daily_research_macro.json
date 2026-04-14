@@ -1,46 +1,45 @@
 {
-  "date": "2026-04-10",
-  "generated_at": "2026-04-10T21:45:00Z",
-  "market_summary": "Markets closed mixed on Apr 10 as two major macro shocks hit simultaneously: March CPI surged to 3.3% annualized (0.9% m/m, highest since Apr 2024) driven by a 21.2% gasoline spike from the Iran war/Strait of Hormuz disruption, while UMich consumer sentiment cratered to a record-low 47.6. Core CPI was benign at 2.6% y/y (below forecast), suggesting inflation is energy-driven not broad-based. The Strait of Hormuz remains effectively closed despite a fragile US-Iran ceasefire -- only 5 ships transited in the first 24 hours vs the pre-war average of 100+/day. Trump accused Iran of violating the deal. Dow -0.56%, S&P -0.11%, Nasdaq +0.35%. Oil stayed elevated (WTI ~$98.7, Brent ~$96.7). DXY weakened to ~98.9 area. Gold held near $4,750, silver at $76 heading for a 3rd weekly gain. BTC rebounded 2.5% to ~$73K on strong ETF inflows ($358M, led by BlackRock $269M). Morgan Stanley launched its spot BTC ETF (MSBT) this week, adding competitive pressure.",
-  "key_events_next_week": [
-    "Mon Apr 13: Goldman Sachs Q1 earnings (kickoff of bank earnings season)",
-    "Tue Apr 14: JPMorgan Chase, Wells Fargo, Citigroup Q1 earnings; PPI and Core PPI data release",
-    "Wed Apr 15: Bank of America, Morgan Stanley Q1 earnings",
-    "Apr 28-29: FOMC meeting (10.3% prob of hike, ~0% prob of cut -- likely hold at 3.5-3.75%)",
-    "Ongoing: Strait of Hormuz reopening negotiations -- any escalation/de-escalation is the dominant macro driver",
-    "Ongoing: USTR Section 301 hearings on China (April-May) -- potential new tariff trigger",
-    "IMF meetings starting Apr 13 -- global coordination on energy crisis, fiscal outlook"
+  "date": "2026-04-14",
+  "generated_at": "2026-04-14T21:34:00.098825+00:00",
+  "market_summary": "Risk-on day driven by Iran peace talks optimism. S&P 500 +1.1%, Nasdaq +1.8%. Oil dropped $6 to $93 as ceasefire held and negotiations resumed. JPMorgan beat Q1 expectations (EPS $5.94, +13% YoY) but Wells Fargo missed. Tech led gains (Oracle +5%, NVDA/PLTR continuing climb). Bitcoin +5.2% to $74.4K, ETH +8.1% to $2.37K on risk-on sentiment. Gold pulled back from $4.9K range, silver stabilizing ~$75.90.",
+  "key_events_tomorrow": [
+    "April 15: No major scheduled releases (PPI was today Apr 14, Retail Sales Apr 21)",
+    "April 15: Tax Day USA \u2014 potential volatility from fund flows and tax-loss selling",
+    "April 15: Continued US-Iran negotiations \u2014 ceasefire expiry approaching",
+    "April 21: Advance Monthly Retail Sales for March 2026",
+    "Next FOMC: Check schedule \u2014 potential May/June meeting window"
   ],
   "overnight_risks": [
-    "Strait of Hormuz ceasefire collapse -- Iran claims US violated deal, Trump claims Iran violated deal; only 5 ships transited, strait effectively closed. Any escalation sends oil above $105 and risk assets down sharply",
-    "Iran may have mined the strait -- Iranian navy released map showing mine locations and designated safe lanes closer to Iranian mainland",
-    "Saudi production capacity reduced by 600K bpd from attacks, East-West Pipeline throughput cut 700K bpd -- supply recovery not immediate even if ceasefire holds",
-    "Record-low consumer sentiment (47.6) may trigger Monday risk-off if weekend headlines worsen",
-    "Asia semiconductor exposure -- Taiwan/Korea markets already down 10-19% on energy supply disruption fears; further Hormuz closure threatens LNG supplies critical for chip manufacturing",
-    "Bank earnings starting Monday could reveal credit stress from energy price shock"
+    "US-Iran ceasefire fragile \u2014 Trump announced Hormuz blockade on Iranian oil, but both sides still negotiating",
+    "Oil at $93-100 \u2014 any breakdown in talks could spike to $110+ quickly",
+    "Asia open: risk-on continuation likely given US session strength",
+    "Tax Day selling pressure possible \u2014 some forced liquidation",
+    "MSTR added 13,927 BTC for $1B at avg $71.9K \u2014 if BTC drops below 70K, unrealized loss pressure"
   ],
   "instrument_news": {
-    "XAG-USD": "Silver at $76.02, heading for 3rd consecutive weekly gain. Gold-silver ratio compressed to ~63:1 (down from 100+ in 2025). Key support at $50, resistance toward $77-80 near term. Silver fell 40% from $121.64 Jan 29 peak due to CME margin hikes, hawkish Fed repricing, and leveraged long liquidation -- now rebuilding. Industrial demand remains strong: 680 Moz/year, 60% of total demand, with 120-125 Moz from solar alone. COMEX inventory tightening supports supply-squeeze thesis. Weaker dollar and safe-haven flows both supportive. BUY consensus at 57% from system is aligned with structural bull case. Risk: if Hormuz reopens fully, oil crash could drag all commodities temporarily. Analyst targets: $100 by end-2026 (FXEmpire), $104 by year-end (CoinCodex).",
-    "XAU-USD": "Gold at $4,750 area, near all-time highs. Structural bull cycle remains intact: central banks bought 1,100+ tonnes in 2025 (3rd year above 1,000t), 2026 pace at ~760t annualized. USD share of global FX reserves fell to lowest since 1994 (~40%), gold share rose to highest since 1991 (~30%). ETF inflows: 78 tonnes in first 2 months of 2026 vs 45t same period 2025. JPMorgan expects ~190t/quarter from central banks + 275t annual ETF demand. Goldman/JPM range: $4,000-$6,300. SSGA bull case: $5,000+. Iran crisis/Hormuz closure is strong near-term tailwind. SELL consensus from system may reflect short-term overbought conditions (RSI) but structural bid is enormous. Risk: Hormuz resolution could trigger 3-5% pullback as energy premium unwinds, but central bank buying provides floor.",
-    "BTC-USD": "BTC at $73,318, up 2.5% today on geopolitical de-escalation hopes and massive ETF inflows. $358M flowed into spot BTC ETFs on Apr 9, with BlackRock IBIT taking $269M (best day in 5 weeks). IBIT has $1.5B YTD inflows despite BTC falling from $97K high. Morgan Stanley launched MSBT ETF on Apr 8 with 0.14% expense ratio (vs IBIT 0.25%), adding competitive dynamics. Technical: holding above 38.2% Fib at $71,780 -- targets $73,388-$74,300 if maintained, $69,500 support if lost. SELL consensus from system reflects ranging conditions. Macro headwinds: 3.3% CPI, record-low sentiment, oil shock. But institutional demand via ETFs is structural support. Iran ceasefire stability is key short-term catalyst.",
-    "ETH-USD": "ETH at $2,254, underperforming BTC (ETH/BTC ratio weak). Ethereum Foundation staked 70,000 ETH ($143M), shifting from selling to earning yield ($3.9-5.4M/year) -- modestly bullish for supply dynamics. BitMine Immersion accumulated 4.8M ETH (3.98% of supply), expanded buyback to $4B. Pectra-era Hegota upgrade proposed with 4 networking EIPs including erasure-coded broadcast (6x faster payload delivery). SELL consensus from system. ETH needs BTC to break higher first (ETH follows BTC thesis). Key levels: $2,000 support, $2,150 near-term resistance.",
-    "MSTR": "Strategy (MSTR) at $127.87, down slightly from $128.86 prev close. Day range $127.40-$132.28. 52-week range $104.17-$457.22 -- stock is down ~72% from 52-week high, tracking BTC weakness with leverage. Bank earnings next week (GS Mon, JPM Tue) could move broader equity sentiment. M&A activity surging (40% deal value increase in Q1) -- positive for financial sector but MSTR trades as BTC proxy. If BTC holds $71,780 and pushes toward $74K+, MSTR likely recovers toward $135-140. Downside risk if BTC loses $69,500 -- MSTR could test $115-120 area."
+    "BTC-USD": "At $74.4K (+5.2%). Strategy/MSTR added 13.9K BTC for $1B at $71.9K avg. Total holdings now 766,970 BTC (~$58B). ATH was $128.2K (Oct 2025). TD Cowen target $140K by late 2026. Risk-on sentiment helping but still well below ATH.",
+    "ETH-USD": "At $2.37K (+8.1%). Outperforming BTC this week (+12.4% vs +8.1% weekly). ETH/BTC ratio recovering but still at multi-year lows. Conservative estimates $10K, bullish $40K long-term.",
+    "MSTR": "At ~$140 (+5%). Added 13.9K BTC. TD Cowen raised PT to $385 from $350. Sumitomo Mitsui cut holdings. Pure BTC proxy trade \u2014 moves with BTC + leverage premium. Analysts coverage initiated at Jefferies/BTIG.",
+    "XAU-USD": "Pulled back to $4,740-4,766 from recent highs. JPM forecast $5,055/oz by Q4 2026. Bullish above $4,900, key resistance at $5,060. Support at $4,700. Central bank buying continues at record pace.",
+    "XAG-USD": "Stabilizing at $75.90, above 0.5 Fib at $75.54. Bullish above $73.80, targeting $79 and $90. 6th consecutive annual supply deficit (67M oz). Industrial demand (solar/EV/AI) creating structural shortage."
   },
-  "metals_outlook": "Metals remain in a structural bull market driven by three pillars: (1) Central bank gold buying at 1,000+ tonnes/year, with USD reserve share at 30-year lows; (2) Safe-haven demand from Iran war, Hormuz closure, and record-low consumer sentiment; (3) Silver industrial demand story (solar/EVs/AI at 680 Moz/year). The gold-silver ratio at 63:1 suggests silver is fairly valued vs gold near-term but could compress further to 50:1 if silver catches up. Key risk: a full Hormuz reopening could trigger a commodity-wide peace dividend pullback of 3-8% in gold and 5-12% in silver (silver more volatile). However, central bank buying provides a structural floor for gold, and industrial demand provides a floor for silver. The Supreme Court IEEPA tariff ruling limits Trump ability to impose new tariffs, but Section 301 investigations into China are underway (hearings Apr-May) and a 10% baseline tariff under Section 122 remains in effect. Net assessment: bullish medium-term, cautious on weekend gap risk from Hormuz headlines.",
-  "oil_outlook": "Oil is the dominant macro variable right now. WTI at ~$98.7, Brent at ~$96.7 -- both elevated but off the crisis peaks. The Strait of Hormuz handles 20% of global oil/LNG flows and is effectively closed despite the ceasefire. Saudi production capacity reduced by 600K bpd, East-West Pipeline cut 700K bpd. Even a full reopening will not restore supply immediately. Iran has mined parts of the strait and is demanding ships get Iranian permission plus pay tolls. Oil up 50%+ since conflict started. OPEC+ is a secondary factor -- geopolitics dominate. If ceasefire collapses: $105-$120 WTI is realistic. If ceasefire holds and shipping normalizes over 2-4 weeks: $80-$85 WTI target. This oil price drives the entire CPI/Fed/sentiment/metals/risk narrative. March CPI showed 21.2% gasoline price surge -- more months of this would force Fed to consider hikes.",
-  "crypto_outlook": "BTC is caught between institutional demand (ETF inflows at $358M/day, Morgan Stanley entering market) and macro headwinds (3.3% CPI, record-low sentiment, oil shock, Fed on hold with slight hike risk). The structural case is strong: IBIT has $55B AUM, MSBT just launched with lower fees, and exchange supply is falling. But BTC needs the risk environment to stabilize for a sustained move above $75K. The $71,780 Fibonacci level is the line in the sand -- above it, $74-75K is achievable; below it, $69,500 and potentially $65K come into play. ETH is lagging, trading as a high-beta BTC play. The Ethereum Foundation shift to staking is modestly positive for ETH supply dynamics long-term. Key catalysts: Hormuz resolution (risk-on = BTC up), bank earnings (credit stress = BTC down), Fed April meeting (any hawkish surprise = BTC down). Net: cautiously bullish if $71,780 holds.",
-  "sentiment_shift": "Major bearish sentiment shift today: UMich consumer sentiment hit ALL-TIME record low at 47.6 (below the Biden-era inflation trough of 50). One-year inflation expectations jumped to 4.8% (+1pp from March). One-year business conditions plunged 20%. This is the most fearful consumers have been since surveys began. However, most responses were collected BEFORE the Apr 7 ceasefire, so the final April reading may improve. CPI at 3.3% headline is ugly but core at 2.6% is actually encouraging -- suggesting the inflation is energy-driven, not structural. The market is pricing in zero Fed cuts for 2026 (51% chance of no cuts by December, up from 5% last month). The setup is one of extreme fear (contrarian bullish for risk assets) but with a genuine fundamental risk (Hormuz closure is a real supply shock, not sentiment-driven). For metals: extreme fear + real inflation = goldilocks. For crypto: extreme fear + institutional inflows = cautious opportunity. For stocks: bank earnings next week will determine if the economy can absorb the oil shock.",
-  "fed_status": {
-    "current_rate": "3.50-3.75%",
-    "next_meeting": "April 28-29, 2026",
-    "market_pricing": "~0% chance of cut, 10.3% chance of hike",
-    "year_end_outlook": "51.3% chance rates unchanged by December, 35.7% chance of one 25bp cut",
-    "key_risk": "Persistent Hormuz-driven energy inflation could force Fed to hike, which would be devastating for risk assets"
-  },
-  "trade_war_status": {
-    "supreme_court_ruling": "Feb 20 -- IEEPA tariffs struck down 6-3; limits presidential tariff authority",
-    "current_tariffs": "10% baseline under Section 122 (Trade Act 1974) on all imports; US-China at 10% via Busan deal through Nov 2026",
-    "new_investigations": "USTR Section 301 investigations into China excess capacity + forced labor -- hearings April-May",
-    "risk": "If Section 301 finds action required, new tariffs on Chinese goods could reignite trade war before Nov deadline"
+  "metals_outlook": "Gold correcting from highs but structural bull intact. JPM $5,055 Q4 target. Silver supply deficit persists for 6th year. COT data (Apr 7): Gold specs 205K long vs 49K short (4.2:1 ratio, still heavily bullish but reducing). Silver specs 33K long vs 9K short (3.5:1 ratio, stable). Key: Gold needs to hold $4,700, silver needs to hold $73.80 for continued uptrend.",
+  "oil_outlook": "WTI dropped to $93 from $99 as Iran ceasefire optimism grew. Brent around $100. OPEC+ output fell 7.9M bpd in March due to Hormuz shutdown. US blockade on Iranian oil shipments adds supply risk. Floor near $90-95. Binary risk: peace = $85, escalation = $110+.",
+  "sentiment_shift": "Dramatic risk-on shift. Fear fading as Iran signals willingness to negotiate 5-year nuclear moratorium. Markets recapturing pre-war levels. F&G likely improving from 21 (extreme fear) range. But ceasefire fragile \u2014 could reverse on any escalation headline.",
+  "cot_positioning": {
+    "gold": {
+      "spec_long": 205368,
+      "spec_short": 49063,
+      "net_long": 156305,
+      "ratio": "4.2:1",
+      "trend": "reducing longs (-2234), adding shorts (+4663)"
+    },
+    "silver": {
+      "spec_long": 32810,
+      "spec_short": 9393,
+      "net_long": 23417,
+      "ratio": "3.5:1",
+      "trend": "slightly reducing longs (-653), reducing shorts (-166)"
+    }
   }
 }

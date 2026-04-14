@@ -1,79 +1,94 @@
 {
-  "date": "2026-04-10",
-  "generated_at": "2026-04-10T21:32:00Z",
-  "trades_today": [],
-  "layer2_decisions_today": [
-    "No new Layer 2 decisions today (last journal entries from 2026-04-03, all HOLD)"
-  ],
-  "last_trigger": {
-    "time": "2026-04-10T21:04:08Z",
-    "reason": "XAG-USD consensus BUY (57%)",
-    "prices": {
-      "XAU-USD": 4750.80,
-      "XAG-USD": 76.02,
-      "BTC-USD": 73317.91,
-      "ETH-USD": 2254.64
+  "date": "2026-04-14",
+  "generated_at": "2026-04-14T21:32:37.630925+00:00",
+  "system_health": {
+    "status": "healthy",
+    "cycle_count": 44,
+    "error_count": 0,
+    "uptime_hours": 7.3,
+    "all_signals_ok": true,
+    "last_module_failures": {
+      "ts": "2026-04-10",
+      "modules": [
+        "monte_carlo",
+        "price_targets",
+        "equity_curve"
+      ]
     }
   },
+  "trades_today": [
+    {
+      "time": "2026-04-14T19:10:04Z",
+      "strategy": "bold",
+      "action": "BUY",
+      "ticker": "ETH-USD",
+      "trigger": "ETH-USD BUY(80%)"
+    }
+  ],
+  "layer2_decisions_today": {
+    "total_invocations": 20,
+    "patient_actions": {
+      "HOLD": 20
+    },
+    "bold_actions": {
+      "HOLD": 19,
+      "BUY": 1
+    },
+    "last_trigger": "ETH-USD consensus SELL (65%) at 21:17 UTC"
+  },
   "signals_that_were_right": [
-    {"signal": "econ_calendar", "accuracy_1d": 65.2, "samples": 4224, "note": "Strongest high-sample signal. SELL-only, contrarian risk-off near events."},
-    {"signal": "claude_fundamental", "accuracy_1d": 62.7, "samples": 8440, "note": "BUY accuracy 66.3%, SELL only 34.7%. Strong BUY signal."},
-    {"signal": "qwen3", "accuracy_1d": 60.0, "samples": 3623, "note": "SELL accuracy 74.3% outstanding. BUY accuracy only 30.4%."},
-    {"signal": "ministral", "accuracy_1d": 58.5, "samples": 5821, "note": "Recent 7d accuracy surged to 68.0% (125 samples)."},
-    {"signal": "fear_greed", "accuracy_1d": 58.6, "samples": 10232, "note": "BUY-only contrarian. Recent 7d CRASHED to 25.9%."},
-    {"signal": "calendar", "accuracy_1d": 58.5, "samples": 6740, "note": "Day-of-week, turnaround patterns."},
-    {"signal": "bb", "accuracy_1d": 54.3, "samples": 7478, "note": "Recent 7d jumped to 60.8% (293 samples)."},
-    {"signal": "momentum_factors", "accuracy_1d": 54.6, "samples": 14221, "note": "Solid across both directions."},
-    {"signal": "metals_cross_asset", "accuracy_1d": 79.2, "samples": 48, "note": "CAUTION: Only 48 samples. Small-sample illusion likely."}
+    "funding (74.2% at 3h, 535 sam) \u2014 best individual signal",
+    "calendar (67.9% at 3h, 4928 sam) \u2014 strong seasonal/calendar effects",
+    "econ_calendar (59.9% at 3h) \u2014 economic event proximity works",
+    "qwen3 (59.4% at 3h, 61.8% recent) \u2014 local LLM performing well",
+    "news_event (70% recent 3h!) \u2014 surging in recent period",
+    "XAU-USD consensus 55.6% at 3h \u2014 decent for metals",
+    "XAG-USD consensus 53.5% at 3h \u2014 slightly above random"
   ],
   "signals_that_were_wrong": [
-    {"signal": "funding", "accuracy_1d": 29.9, "samples": 536, "note": "Far below coin flip. Already horizon-gated."},
-    {"signal": "futures_flow", "accuracy_1d": 36.3, "samples": 1051, "note": "Both directions ~36%. Should be force-HOLD."},
-    {"signal": "ml", "accuracy_1d": 41.7, "samples": 1714, "note": "Already disabled."},
-    {"signal": "fibonacci", "accuracy_1d": 42.3, "samples": 14185, "note": "Large sample, consistently bad. SELL accuracy 35.9%."},
-    {"signal": "macd", "accuracy_1d": 43.6, "samples": 5728, "note": "Below 45% threshold. Recent 7d improved to 58.7%."},
-    {"signal": "oscillators", "accuracy_1d": 44.9, "samples": 5049, "note": "Borderline. SELL accuracy 35.2%."},
-    {"signal": "volatility_sig", "accuracy_1d": 45.3, "samples": 4414, "note": "Borderline, both directions weak."},
-    {"signal": "orderbook_flow", "accuracy_1d": 45.3, "samples": 139, "note": "BUY 98.3% vs SELL 6.3%. Sell logic likely broken."},
-    {"signal": "trend", "accuracy_1d": 45.4, "samples": 13346, "note": "Below threshold. Large sample."},
-    {"signal": "macro_regime", "accuracy_1d": 46.6, "samples": 25654, "note": "BUY accuracy 38.9% is terrible."},
-    {"signal": "sentiment", "accuracy_1d": 45.8, "samples": 38791, "note": "Largest sample. Both directions underperforming."},
-    {"signal": "forecast", "accuracy_1d": 47.5, "samples": 6065, "note": "Kronos+Chronos below coin flip."}
+    "trend (40.3% at 3h, 11125 sam) \u2014 actively harmful, below coin flip",
+    "oscillators (43.0% at 3h) \u2014 worse than random",
+    "fibonacci (43.3% at 3h) \u2014 consistently bad",
+    "macd (43.7% at 3h) \u2014 bad BUY accuracy",
+    "sentiment (33.8% recent 3h!) \u2014 catastrophically wrong recently",
+    "forecast (38.3% recent 3h) \u2014 time-series models degrading",
+    "fear_greed (25.9% recent 1d) \u2014 contrarian approach failing recently",
+    "ETH-USD consensus only 48.1% at 3h \u2014 below coin flip",
+    "MSTR consensus only 46.5% at 3h \u2014 below coin flip"
   ],
   "accuracy_changes": {
-    "recent_7d_improvements": {
-      "ministral": {"all_time": 58.5, "recent_7d": 68.0, "delta": "+9.5pp"},
-      "bb": {"all_time": 54.3, "recent_7d": 60.8, "delta": "+6.5pp"},
-      "macd": {"all_time": 43.6, "recent_7d": 58.7, "delta": "+15.1pp"}
+    "improving": {
+      "news_event": "all-time 58.5% -> recent 70.0% (3h)",
+      "ema": "all-time 49.1% -> recent 62.9% (3h)",
+      "trend": "all-time 40.3% -> recent 61.6% (3h)",
+      "ministral": "all-time 52.3% -> recent 62.6% (3h)",
+      "fibonacci": "all-time 42.3% -> recent 68.2% (1d)"
     },
-    "recent_7d_degradations": {
-      "fear_greed": {"all_time": 58.6, "recent_7d": 25.9, "delta": "-32.7pp"},
-      "ema": {"all_time": 49.9, "recent_7d": 40.8, "delta": "-9.1pp"}
-    },
-    "key_finding": "Fear & Greed collapsed from 58.6% to 25.9% in 7d. Contrarian BUY in prolonged fear failing."
+    "degrading": {
+      "sentiment": "all-time 46.5% -> recent 33.8% (3h) \u2014 CRITICAL",
+      "forecast": "all-time 49.5% -> recent 38.3% (3h)",
+      "fear_greed": "all-time 53.9% -> recent 25.9% (1d) \u2014 CRITICAL",
+      "news_event_1d": "all-time 55.3% -> recent 29.5% (1d) \u2014 divergence from 3h",
+      "macro_regime": "all-time 46.6% -> recent 30.3% (1d)"
+    }
   },
-  "metals_signal_accuracy": {
-    "main_BTC_3h": {"accuracy": 59.2, "samples": 8038},
-    "main_BTC_1h": {"accuracy": 56.0, "samples": 8108},
-    "main_ETH_3h": {"accuracy": 50.7, "samples": 6979},
-    "main_XAG_1h": {"accuracy": 65.4, "samples": 214},
-    "ministral_BTC_1h": {"accuracy": 70.5, "samples": 590},
-    "ministral_BTC_3h": {"accuracy": 62.9, "samples": 590}
+  "system_errors": [],
+  "metals_model_accuracy": {
+    "llm_XAG_1h": "48.4% (1797 sam)",
+    "llm_XAG_3h": "40.9% (1585 sam) \u2014 WORSE than random",
+    "chronos_1h_XAG_1h": "47.1% (1103 sam)",
+    "chronos_3h_XAG_1h": "47.6% (1205 sam)"
   },
-  "system_errors": [
-    "Module failures at 08:37 UTC: monte_carlo, price_targets, equity_curve (non-critical)",
-    "No signal module failures (all 23 modules 100% success)"
-  ],
   "key_observations": [
-    "SYSTEM STABILITY: Excellent. 0 errors, all signals running perfectly.",
-    "ALL HOLD: Both strategies holding all cash since Apr 3.",
-    "XAG-USD BUY SIGNAL: Silver BUY consensus (57%, 7B/4S) at $76.02.",
-    "FEAR_GREED COLLAPSE: 25.9% recent vs 58.6% all-time. Structural shift.",
-    "DIRECTIONAL ASYMMETRIES: qwen3 SELL 74.3% vs BUY 30.4%. claude_fundamental BUY 66.3% vs SELL 34.7%. Direction-gating needed.",
-    "FIBONACCI BAD: 42.3% on 14K samples. Should be force-HOLD.",
-    "FUTURES_FLOW BROKEN: 36.3% on 1K samples. Below gate.",
-    "ORDERBOOK_FLOW SELL BROKEN: BUY 98.3% vs SELL 6.3%. Investigate.",
-    "ALL RANGING: All instruments in ranging regime. Low conviction.",
-    "12 OF 32 ACTIVE SIGNALS BELOW 50%: Half the voting signals are worse than coin flip at 1d horizon."
+    "HUGE accuracy divergence between all-time and recent for many signals \u2014 regime shift underway",
+    "Sentiment signal in freefall (33.8% recent 3h) \u2014 should be gated or disabled",
+    "News_event surging to 70% recently \u2014 consider upweighting",
+    "Trend signal improving dramatically (40.3% all-time -> 61.6% recent) \u2014 market becoming more trending",
+    "Fear & Greed contrarian approach failing (25.9% recent 1d) \u2014 market not mean-reverting as expected",
+    "ETH-USD and MSTR consensus below coin flip \u2014 signals not useful for these tickers at 3h",
+    "Metals LLM predictions (Ministral) for XAG at 3h are 40.9% \u2014 actively harmful",
+    "Bold made 1 trade (BUY ETH), Patient stayed all HOLD \u2014 conservative stance appropriate given low accuracy",
+    "All prophecy checkpoints for silver 5/0/0 triggered \u2014 20 target remains pending",
+    "BTC 5K checkpoint triggered but 5K/00K still pending \u2014 range-bound behavior continues"
   ]
 }

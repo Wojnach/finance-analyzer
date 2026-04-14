@@ -1,107 +1,37 @@
-# Research Implementation Plan — 2026-04-10 After-Hours Session
+# After-Hours Research Plan — 2026-04-14
 
-## Context
+## Research Findings Summary
 
-After-hours research session findings from Phase 0 signal audit:
-- **Regime**: All 4 instruments in ranging. Low conviction environment.
-- **System health**: Perfect — 0 errors, all 23 signal modules 100%.
-- **Key finding**: Per-ticker accuracy reveals massive hidden variance.
-  Global accuracy masks that ministral is 71.7% on MSTR but 20.4% on XAG.
-  The per-ticker override (BUG-158) is working but missing directional fields.
-- **12 of 32 active signals below 50%** at 1d global accuracy.
-- **Directional gate too permissive**: 0.35 threshold misses macro_regime BUY (38.9%).
+### Signal Audit KEY FINDINGS
+1. **Mega trend cluster**: trend+macro_regime+structure+heikin_ashi+momentum_factors+oscillators+volatility_sig — 8 signals with 85-99.7% mutual agreement
+2. **Sentiment in freefall**: 33.8% recent 3h accuracy
+3. **Calendar/econ_calendar**: 0% agreement — perfectly opposing, cancel each other
+4. **Directional bias**: claude_fundamental 10:1 BUY:SELL, structure 11.5:1, calendar BUY-only
+5. **Hyperactive**: volume_flow 87.7%, mean_reversion 76.7%, momentum 72.7%
+6. **MSTR at 46.5%** — generic signals on a BTC proxy don't work
+7. **ETH at 48.1%** — follows BTC 97% of the time
 
-## Bugs & Problems Found
+## Implementation Plan
 
-1. **Per-ticker accuracy override missing directional fields** (signal_engine.py:1870-1877)
-   - Override copies `accuracy`, `total`, `correct` — but NOT `buy_accuracy`, `sell_accuracy`, `total_buy`, `total_sell`
-   - Result: directional gate (line 826-837) falls back to overall per-ticker accuracy
-   - Impact: directional asymmetries like ministral BUY 51.6% vs SELL 59.8% are invisible per-ticker
+### Batch 1: Correlation group realignment
+**Files:** `portfolio/signal_engine.py`
+- Move `momentum_factors` from `macro_external` to `trend_direction` (0.593-0.621 corr with cluster)
+- Remove `structure` from `volatility_cluster` (belongs in `trend_direction`: 0.608 with trend)
+- Add `oscillators` to `trend_direction` (0.463 with heikin_ashi, 83.4% agreement)
+- Tighten `trend_direction` penalty from 0.2 to 0.12 (now 8 members, need strict penalty)
+- Keep `structure` also in `fundamental_cluster` (dynamic groups will pick best fit)
 
-2. **`accuracy_by_ticker_signal()` lacks directional breakdown** (ticker_accuracy.py:16-74)
-   - Only returns overall accuracy per ticker+signal
-   - Cannot distinguish BUY vs SELL accuracy per ticker
+### Batch 2: Directional bias penalty
+**Files:** `portfolio/signal_engine.py`
+- Add directional bias detection in `_weighted_consensus`
+- Signals with >90% one-directional activity get 0.5x weight penalty
+- Affected: calendar (100% BUY), econ_calendar (100% SELL), news_event (100% SELL)
 
-3. **Module failures**: monte_carlo, price_targets, equity_curve (08:37 UTC) — non-critical, recurring.
+### Batch 3: Research deliverables commit
+- Commit all JSON research outputs
 
-## Improvements Prioritized (Impact × Ease)
-
-### Tier 1: Implement NOW (high impact, easy)
-
-**1. Per-Ticker Directional Accuracy** [MEDIUM EFFORT, HIGHEST IMPACT]
-- Extend `accuracy_by_ticker_signal()` to return `buy_accuracy`, `sell_accuracy`, `total_buy`, `total_sell`
-- Extend the BUG-158 per-ticker override (line 1870) to copy these directional fields
-- This enables the directional gate to work per-ticker, preventing:
-  - ministral voting BUY on XAG (20.4% overall → BUY likely worse)
-  - macro_regime voting BUY on BTC (34.4% overall → BUY accuracy likely terrible)
-- Files: `portfolio/ticker_accuracy.py`, `portfolio/signal_engine.py`
-
-**2. Raise Directional Gate Threshold** [EASY, HIGH IMPACT]
-- Current: `_DIRECTIONAL_GATE_THRESHOLD = 0.35`
-- Proposed: `_DIRECTIONAL_GATE_THRESHOLD = 0.40`
-- Additional signals caught: macro_regime BUY (38.9%), fibonacci SELL (35.9%), futures_flow (36-37%)
-- macro_regime BUY currently passes overall gate (46.6%) but BUY direction is 38.9% — actively harmful
-- Files: `portfolio/signal_engine.py` (1 line)
-
-**3. Per-Ticker Directional Accuracy Cache** [MEDIUM EFFORT, HIGH IMPACT]
-- The cached version (`accuracy_by_ticker_signal_cached()`) needs to include directional data
-- This populates the data for improvement #1 to consume
-- Files: `portfolio/accuracy_stats.py` (if cached there)
-
-### Tier 2: Implement if time permits
-
-**4. Signal Audit Deliverable** [EASY]
-- Write `data/daily_research_signal_audit.json` with correlation analysis, regime performance
-- Purely informational, no code changes
-
-**5. Morning Briefing** [EASY]
-- Synthesize all findings into `data/morning_briefing.json`
-- Send Telegram summary
-
-### Tier 2b: Next Session P0 (from quant research agent)
-
-**6. Direction-Specific Weight Scaling** [EASY, +2-4pp]
-- Use `buy_accuracy`/`sell_accuracy` as weight in `_weighted_consensus` instead of overall accuracy
-- When qwen3 votes SELL → weight at 74.3%; when BUY → weight at 30.4% (currently both ~60%)
-- ~5-line change in signal_engine.py:838: `weight = dir_acc if dir_n >= 20 else (acc if samples >= 20 else 0.5)`
-- **Status**: Data foundation shipped tonight (per-ticker directional accuracy). This is the natural next step.
-
-**7. Verify Fear & Greed Is Actually Gated** [EASY, CRITICAL]
-- Blended accuracy: 0.7 * 0.259 + 0.3 * 0.586 = 0.357 — below 0.45 gate
-- It SHOULD be force-HOLD'd but need to verify accuracy_cache.json has been refreshed
-- If not gated, fear_greed is actively poisoning consensus with constant BUY signals in sustained fear
-
-### Tier 3: Defer to backlog (prioritized by quant research)
-
-- **P1**: MSTR-BTC proxy signal inheritance (+5-8pp on MSTR, new module)
-- **P1**: XAG cross-asset feature enrichment (DXY, copper lead, real yields)
-- **P2**: IC-based dynamic signal weighting (Spearman correlation, not hit rate)
-- **P2**: HMM regime blending (probabilistic 3-4 state, per-instrument)
-- **P3**: Dynamic correlation groups (hierarchical clustering on agreement matrix)
-- **P3**: Adaptive position sizing (Half-Kelly + ATR vol targeting)
-- **P3**: Walk-forward validation framework (parameter stability check)
-
-## Execution Order
-
-### Batch 1: Per-Ticker Directional Accuracy (2 files + tests)
-1. `portfolio/ticker_accuracy.py` — add directional fields to `accuracy_by_ticker_signal()`
-2. `portfolio/signal_engine.py` — extend BUG-158 override to copy directional fields
-3. `tests/test_ticker_accuracy.py` — test directional accuracy computation
-4. `tests/test_signal_engine.py` — test directional gating with per-ticker data
-
-### Batch 2: Directional Gate Threshold (1 file + tests)
-1. `portfolio/signal_engine.py` — raise `_DIRECTIONAL_GATE_THRESHOLD` from 0.35 to 0.40
-2. `tests/test_signal_engine.py` — verify macro_regime BUY gets gated at 38.9%
-
-### Batch 3: Research Deliverables (data files only)
-1. `data/daily_research_signal_audit.json` — Phase 3 deliverable
-2. `data/daily_research_macro.json` — Phase 1 deliverable (from background agent)
-3. `data/daily_research_quant.json` — Phase 2 deliverable (from background agent)
-4. `data/daily_research_ticker_deep_dive.json` — Phase 2 deep dive
-5. `data/morning_briefing.json` — Phase 8 deliverable
-
-## Risk Assessment
-
-- **Per-ticker directional accuracy**: Low risk — additive data, fail-closed (falls back to global accuracy if per-ticker data unavailable).
-- **Directional gate 0.35→0.40**: Low risk — only affects 3-4 additional signal×direction pairs. The accuracy gate at 45% already catches most bad signals. This catches the ones that pass overall but have a terrible weak direction.
-- **No config.json changes**: No API key or threshold changes to production config.
+## Deferred
+- IC-based weighting — needs rolling IC infrastructure
+- HMM regime detection — complex, separate session
+- MSTR BTC-proxy — needs shared state refactoring
+- ATR position sizing — portfolio_mgr changes

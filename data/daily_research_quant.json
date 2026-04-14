@@ -1,83 +1,122 @@
 {
-  "date": "2026-04-10",
-  "generated_at": "2026-04-11T00:10:00+02:00",
-  "session_type": "after-hours-research",
-  "research_topics": 8,
-  "priority_ranking": [
+  "date": "2026-04-14",
+  "generated_at": "2026-04-14T21:36:25.692379+00:00",
+  "research_topics": [
+    "IC-based dynamic signal weighting",
+    "HMM regime detection for signal selection",
+    "Multi-agent debate systems (TradingAgents, Apex Quant)",
+    "Signal correlation pruning via PCA",
+    "ATR-based volatility-targeting position sizing",
+    "Sentiment analysis degradation and recalibration",
+    "Walk-forward optimization for continuous parameter tuning"
+  ],
+  "findings": [
     {
-      "rank": "P0",
-      "title": "Direction-specific weight scaling",
-      "difficulty": "Easy",
-      "expected_impact": "+2-4pp consensus accuracy",
-      "description": "Use buy_accuracy/sell_accuracy as weight in _weighted_consensus instead of overall accuracy. When qwen3 votes SELL, weight it at 74.3%; when BUY, weight at 30.4%. Currently both get ~60%.",
-      "implementation": "~5-line change in signal_engine.py _weighted_consensus at line 838. Change: weight = dir_acc if dir_n >= 20 else (acc if samples >= 20 else 0.5)",
-      "affected_signals": ["qwen3 (BUY 30.4% vs SELL 74.3%)", "claude_fundamental (BUY 66.3% vs SELL 34.7%)", "econ_calendar (SELL 65.2% vs BUY ~45%)"],
-      "status": "READY — tonight's per-ticker directional accuracy work provides the data foundation"
+      "topic": "IC-based Dynamic Signal Weighting",
+      "finding": "Factor weights dynamically adjusted based on rolling Information Coefficient (IC = correlation between signal and future returns). When a signals recent IC declines, its weight automatically decreases toward zero. Empirical results show IC-weighted strategies outperform equal-weighted.",
+      "relevance_to_us": "CRITICAL - our system uses equal voting (1 signal = 1 vote). Signals with 40% accuracy get same vote weight as 74% signals. IC-based weighting would naturally downweight failing signals like trend (40.3%) and upweight funding (74.2%).",
+      "implementation_difficulty": "medium",
+      "expected_impact": "high",
+      "source": "arxiv.org/html/2508.18592v1"
     },
     {
-      "rank": "P1",
-      "title": "MSTR-BTC proxy signal inheritance",
-      "difficulty": "Medium",
-      "expected_impact": "+5-8pp on MSTR",
-      "description": "MSTR has 1.31-1.41 beta to BTC, >0.80 daily correlation. Import BTC consensus into MSTR with beta scaling. Add mNAV premium tracking (>2.0 = SELL bias, <1.3 = BUY bias).",
-      "implementation": "New mstr_btc_proxy.py module (~150 lines). Needs mNAV data.",
-      "sources": ["erickimphotography.com MSTR-BTC quantitative analysis", "VanEck MSTR premium analysis", "Kerrisdale Capital short thesis"]
+      "topic": "HMM Regime Detection + Regime-Filtered Signal Selection",
+      "finding": "HMM with 2-3 states trained on returns+volatility. Different signal subsets activated per regime. Regime-adaptive position sizing reduces in high-vol regimes.",
+      "relevance_to_us": "HIGH - we detect regime but dont use it to SELECT which signals to trust. Trend signal is 40.3% overall but 61.6% recently - likely trending regime where it works.",
+      "implementation_difficulty": "hard",
+      "expected_impact": "high",
+      "source": "medium.com/@pta.forwork, quantstart.com"
     },
     {
-      "rank": "P1",
-      "title": "XAG cross-asset feature enrichment",
-      "difficulty": "Easy-Medium",
-      "expected_impact": "+3-6pp on XAG-USD",
-      "description": "Add DXY as explicit feature (strongest macro driver of silver), copper as leading indicator (1-2 day lead), real yields inversion threshold. Paper: tree-based classifiers achieve 85-90% directional accuracy at 20-day horizons for gold/silver.",
-      "sources": ["MDPI: Predicting Gold and Silver Direction Using Tree-Based Classifiers", "MDPI: Silver Price Forecasting Using XGBoost"]
+      "topic": "Multi-Agent Debate (TradingAgents / Apex Quant)",
+      "finding": "Bull and Bear agents debate with structured rounds. TradingAgents v0.2.3 supports Claude 4.6. Apex Quant uses 3 personas. Both show improved Sharpe ratio vs single-agent.",
+      "relevance_to_us": "MEDIUM - our Layer 2 already uses bull/bear debate but single-pass. Could add structured 2-round debate.",
+      "implementation_difficulty": "hard",
+      "expected_impact": "medium",
+      "source": "arxiv.org/abs/2412.20138"
     },
     {
-      "rank": "P2",
-      "title": "IC-based signal weighting",
-      "difficulty": "Medium",
-      "expected_impact": "+2-5pp",
-      "description": "Replace accuracy (hit rate) with Information Coefficient (Spearman rank correlation of predicted vs actual returns). IC captures both direction AND magnitude. Good ICs are 0.02-0.08; above 0.15 suggests overfitting.",
-      "implementation": "New compute_rolling_ic() in accuracy_stats.py. Convert votes to numerical predictions: predicted_return = confidence * sign(vote). Rolling 30-day Spearman correlation."
+      "topic": "Signal Correlation Pruning via PCA",
+      "finding": "PCA compresses correlated signals, reducing dimensionality. Filter-based feature selection removes redundant features. RL-based alpha weighting outperforms equal-weighted.",
+      "relevance_to_us": "HIGH - 32 active signals, many likely correlated (trend+EMA+heikin_ashi, momentum+oscillators+momentum_factors). Pruning reduces noise.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "high",
+      "source": "arxiv.org/html/2508.18592v1"
     },
     {
-      "rank": "P2",
-      "title": "HMM regime detection",
-      "difficulty": "Medium",
-      "expected_impact": "+3-5pp",
-      "description": "Replace deterministic detect_regime() with probabilistic 3-4 state Gaussian HMM. Output regime probability vector instead of binary label. Use hmmlearn.GaussianHMM, rolling 252d window per instrument."
+      "topic": "ATR-Based Position Sizing",
+      "finding": "Position size = dollar_risk / (ATR * multiplier). ADX modifies multiplier. Q1 2026 study: ATR-based risk management reduced drawdowns by 43% vs fixed-lot.",
+      "relevance_to_us": "HIGH - we use fixed budget allocations. ATR-based sizing would naturally reduce positions in volatile markets.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "medium",
+      "source": "alphaexcapital.com, quantifiedstrategies.com"
     },
     {
-      "rank": "P3",
-      "title": "Dynamic correlation groups",
-      "difficulty": "Medium",
-      "expected_impact": "+1-2pp",
-      "description": "Replace static _STATIC_CORRELATION_GROUPS with hierarchical clustering on 32x32 signal vote agreement matrix. Current groups may be stale."
+      "topic": "Sentiment Signal Degradation",
+      "finding": "Sentiment scores often lack robust predictive power for real-time trading. Continuous recalibration needed. GNN-based models improve over traditional NLP.",
+      "relevance_to_us": "CRITICAL - sentiment crashed from 46.5% to 33.8% recent 3h. CryptoBERT may need recalibration or gating.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "high",
+      "source": "arxiv.org/html/2507.09739v1"
     },
     {
-      "rank": "P3",
-      "title": "Adaptive position sizing (Half-Kelly + ATR)",
-      "difficulty": "Medium",
-      "expected_impact": "-20-30% max drawdown",
-      "description": "Fractional Kelly (25-50%) + volatility targeting. Regime-conditioned: reduce to 60% in high-vol, increase to 120% in low-vol trending."
-    },
-    {
-      "rank": "P3",
-      "title": "Walk-forward validation framework",
-      "difficulty": "Hard",
-      "expected_impact": "+1-3pp + parameter confidence",
-      "description": "Replay signal_log.db through consensus engine with different parameter sets. 60d train, 15d test windows. Validate: ACCURACY_GATE, DIRECTIONAL_GATE, REGIME_WEIGHTS, CORRELATION_PENALTY, RECENCY_WEIGHT."
+      "topic": "Walk-Forward Optimization",
+      "finding": "Rolling-window: optimize in-sample, test out-of-sample, slide forward. Prevents overfitting. Best practice for production trading systems.",
+      "relevance_to_us": "MEDIUM - signal parameters are static. WFO could re-optimize periodically. High implementation cost for marginal gains.",
+      "implementation_difficulty": "hard",
+      "expected_impact": "medium",
+      "source": "blog.quantinsti.com"
     }
   ],
-  "critical_finding": {
-    "title": "Fear & Greed blended accuracy is below gate",
-    "detail": "0.7 * 0.259 (recent) + 0.3 * 0.586 (all-time) = 0.357. This is below the 0.45 accuracy gate. Fear & Greed SHOULD already be force-HOLD'd. Verify accuracy cache has been refreshed.",
-    "action": "Check if fear_greed is actually being gated in live loop. If not, the accuracy cache may be stale or the blending formula is different."
-  },
-  "key_papers": [
-    {"title": "Predicting Gold and Silver Price Direction Using Tree-Based Classifiers", "source": "MDPI", "finding": "85-90% directional accuracy at 20-day horizons"},
-    {"title": "Combined ML for Stock Selection Based on Dynamic IC Weighting", "source": "arxiv 2508.18592", "finding": "IC-based weighting produces ~4x returns vs single-model"},
-    {"title": "Regime-Switching Factor Investing with HMM", "source": "MDPI", "finding": "+1-4% annualized returns over buy-and-hold"},
-    {"title": "Statistical Jump Model for Regime Detection", "source": "arxiv 2402.05272", "finding": "Outperforms HMM on drawdown reduction"},
-    {"title": "Kelly, VIX, and Hybrid Position Sizing", "source": "arxiv 2508.16598", "finding": "Half-Kelly captures 75% growth with 50% less drawdown"}
+  "recommended_improvements": [
+    {
+      "title": "IC-based dynamic signal weighting (replace equal voting)",
+      "description": "Compute rolling 7-day IC for each signal. Use IC as vote weight instead of equal 1.0. Auto-downweight failing signals.",
+      "priority": 1,
+      "effort_days": 2,
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/accuracy_stats.py"
+      ]
+    },
+    {
+      "title": "Gate sentiment signal when recent accuracy < 40%",
+      "description": "Auto-gate sentiment when 7-day accuracy drops below 40%. Currently at 33.8% - actively harmful.",
+      "priority": 2,
+      "effort_days": 0.5,
+      "files_affected": [
+        "portfolio/signal_engine.py"
+      ]
+    },
+    {
+      "title": "Signal correlation matrix and redundancy detection",
+      "description": "Compute pairwise correlation of signal outputs over 30-day window. Warn when correlation > 0.8.",
+      "priority": 3,
+      "effort_days": 1,
+      "files_affected": [
+        "portfolio/accuracy_stats.py",
+        "portfolio/signal_engine.py"
+      ]
+    },
+    {
+      "title": "ATR-based position sizing",
+      "description": "Replace fixed budget with ATR-scaled sizing. Regime-adjusted multipliers.",
+      "priority": 4,
+      "effort_days": 1,
+      "files_affected": [
+        "portfolio/risk_management.py",
+        "portfolio/portfolio_mgr.py"
+      ]
+    },
+    {
+      "title": "Recency-weighted accuracy for auto-gating",
+      "description": "Use 70% recent 7d + 30% all-time for gate decision instead of all-time only.",
+      "priority": 5,
+      "effort_days": 1,
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/accuracy_stats.py"
+      ]
+    }
   ]
 }

@@ -1,86 +1,290 @@
 {
-  "date": "2026-04-10",
+  "date": "2026-04-14",
+  "generated_at": "2026-04-14T21:39:53.832636+00:00",
   "top_signals": [
-    {"name": "econ_calendar", "accuracy_1d": 65.2, "samples": 4224, "note": "SELL-only near events. BTC 64.4%, ETH 72.1%, XAG 61.7%, XAU 68.7%, MSTR 89.4%."},
-    {"name": "claude_fundamental", "accuracy_1d": 62.7, "samples": 8440, "note": "BUY 66.3%, SELL 34.7%. BTC 73.0%, XAG 72.3%, XAU 69.7%. MSTR only 47.0%."},
-    {"name": "qwen3", "accuracy_1d": 60.0, "samples": 3623, "note": "SELL 74.3% vs BUY 30.4%. MSTR 63.6%, XAG 61.1%. ETH terrible (39.4%)."},
-    {"name": "ministral", "accuracy_1d": 58.5, "samples": 5821, "note": "Recent 7d: 68.0%. MSTR 71.7% excellent. XAG 20.4% catastrophic."},
-    {"name": "fear_greed", "accuracy_1d": 58.6, "samples": 10232, "note": "XAG 91.3%, XAU 84.5%, ETH 66.3%, BTC 61.0%. MSTR only 49.0%. Recent global 25.9%."},
-    {"name": "calendar", "accuracy_1d": 58.5, "samples": 6740, "note": "BTC 62.5%, ETH 52.9%. XAG only 47.2%, XAU 43.7%."},
-    {"name": "bb", "accuracy_1d": 54.3, "samples": 7478, "note": "Recent 60.8%. BTC 61.8%, MSTR 59.1%. XAU only 42.6%."},
-    {"name": "mean_reversion", "accuracy_1d": 52.7, "samples": 20771, "note": "Recent 65.4%. BUY 62.0% much better than SELL 47.0%."}
+    {
+      "name": "funding",
+      "accuracy_3h": 74.2,
+      "samples": 535,
+      "notes": "Best signal by far. Crypto-only, 3h/4h horizon gated."
+    },
+    {
+      "name": "calendar",
+      "accuracy_3h": 67.9,
+      "samples": 4928,
+      "notes": "Strong BUY-only signal. Never votes SELL."
+    },
+    {
+      "name": "econ_calendar",
+      "accuracy_3h": 59.9,
+      "samples": 2402,
+      "notes": "Strong SELL-only signal (risk-off near events). Anti-correlated with calendar."
+    },
+    {
+      "name": "qwen3",
+      "accuracy_3h": 59.4,
+      "samples": 3385,
+      "notes": "Best LLM signal. BUY accuracy only 30% but SELL accuracy 74%."
+    },
+    {
+      "name": "news_event",
+      "accuracy_3h": 58.5,
+      "accuracy_recent": 70.0,
+      "samples": 4904,
+      "notes": "SELL-only signal. Surging to 70% recently."
+    },
+    {
+      "name": "rsi",
+      "accuracy_3h": 55.3,
+      "samples": 23381,
+      "notes": "Solid workhorse. 50% activity rate - most active core signal."
+    },
+    {
+      "name": "ministral",
+      "accuracy_3h": 52.3,
+      "accuracy_recent": 62.6,
+      "samples": 5827,
+      "notes": "Improving recently. Low activity (1.5%)."
+    },
+    {
+      "name": "mean_reversion",
+      "accuracy_3h": 53.1,
+      "samples": 13916,
+      "notes": "Decent but 76.7% activity rate (hyperactive)."
+    },
+    {
+      "name": "smart_money",
+      "accuracy_3h": 53.1,
+      "accuracy_recent": 63.2,
+      "samples": 6245,
+      "notes": "Improving recently. Good activity rate (36.7%)."
+    }
   ],
   "worst_signals": [
-    {"name": "funding", "accuracy_1d": 29.9, "samples": 536, "note": "Already horizon-gated (active only at 3h where 74.2%)."},
-    {"name": "futures_flow", "accuracy_1d": 36.3, "samples": 1051, "note": "Both directions ~36%. BTC 37.3%. Fully gated by accuracy gate."},
-    {"name": "fibonacci", "accuracy_1d": 42.3, "samples": 14185, "note": "SELL accuracy 35.9%. Recent 68.2% saves it via blending. XAG 45.7%, BTC 46.3%."},
-    {"name": "macd", "accuracy_1d": 43.6, "samples": 5728, "note": "Recent 58.7% (rescue). XAG 53.0%, BTC 50.4%."},
-    {"name": "oscillators", "accuracy_1d": 44.9, "samples": 5049, "note": "SELL 35.2%. XAG 36.9%, BTC 34.1%, XAU 37.7%. Consistently bad."},
-    {"name": "trend", "accuracy_1d": 45.4, "samples": 13346, "note": "BUY 40.8%. XAG 55.8% decent, BTC 43.1% bad. Large per-ticker variance."},
-    {"name": "sentiment", "accuracy_1d": 45.8, "samples": 38791, "note": "Largest sample. XAG 32.9%, ETH marginal. XAU 57.7% decent."},
-    {"name": "macro_regime", "accuracy_1d": 46.6, "samples": 25654, "note": "BUY 38.9% (now gated at 40%). XAG 64.9% vs BTC 34.4%. Per-ticker matters most."},
-    {"name": "forecast", "accuracy_1d": 47.5, "samples": 6065, "note": "XAG 74.6% great vs BTC 29.3% terrible. Chronos works for metals, not crypto."},
-    {"name": "heikin_ashi", "accuracy_1d": 49.6, "samples": 23001, "note": "XAG 54.1%, XAU 54.8%. BTC 43.7% bad."}
+    {
+      "name": "trend",
+      "accuracy_3h": 40.3,
+      "accuracy_recent_3h": 61.6,
+      "samples": 11125,
+      "notes": "WORST all-time at 3h. But surging to 61.6% recently! Regime-dependent - works in trends, fails in ranges."
+    },
+    {
+      "name": "oscillators",
+      "accuracy_3h": 43.0,
+      "samples": 1366,
+      "notes": "Consistently bad. 83.4% agreement with heikin_ashi - redundant AND bad."
+    },
+    {
+      "name": "fibonacci",
+      "accuracy_3h": 43.3,
+      "samples": 8811,
+      "notes": "Bad overall. 17.1% agreement with mean_reversion (systematic disagreement). But 68.2% recent 1d - improving."
+    },
+    {
+      "name": "macd",
+      "accuracy_3h": 43.7,
+      "samples": 4952,
+      "notes": "Only 7.4% active. When it does vote, its wrong 56% of the time."
+    },
+    {
+      "name": "macro_regime",
+      "accuracy_3h": 45.1,
+      "samples": 20305,
+      "notes": "99.7% agreement with trend signal - essentially duplicate vote. Both bad at 3h."
+    },
+    {
+      "name": "sentiment",
+      "accuracy_3h": 46.5,
+      "accuracy_recent_3h": 33.8,
+      "samples": 38852,
+      "notes": "CRITICAL - crashed from 46.5% to 33.8% recently. 9.2% activity, 8.4% BUY only. Actively harmful."
+    },
+    {
+      "name": "forecast",
+      "accuracy_3h": 49.5,
+      "accuracy_recent_3h": 38.3,
+      "samples": 368,
+      "notes": "Time-series models (Chronos) degrading. Only 1.6% active."
+    },
+    {
+      "name": "fear_greed",
+      "accuracy_3h": 53.9,
+      "accuracy_recent_1d": 25.9,
+      "samples": 10232,
+      "notes": "All-time ok (53.9%) but recent 1d crashed to 25.9%. Contrarian approach failing."
+    }
   ],
-  "directional_asymmetries": [
-    {"signal": "qwen3", "buy_acc": 30.4, "sell_acc": 74.3, "gap": 43.9, "recommendation": "BUY already gated at 35%. SELL is our best single-direction signal."},
-    {"signal": "claude_fundamental", "buy_acc": 66.3, "sell_acc": 34.7, "gap": 31.6, "recommendation": "SELL now gated at 40% (was 35%). BUY is strongest LLM signal."},
-    {"signal": "orderbook_flow", "buy_acc": 98.3, "sell_acc": 6.3, "gap": 92.0, "recommendation": "SELL gated at 35%. BUY has only 59 samples — may be small-sample illusion."},
-    {"signal": "momentum", "buy_acc": 63.1, "sell_acc": 44.6, "gap": 18.5, "recommendation": "SELL at 44.6% escapes 40% gate but is noise. Consider 42% threshold long-term."},
-    {"signal": "mean_reversion", "buy_acc": 62.0, "sell_acc": 47.0, "gap": 15.0, "recommendation": "SELL marginal. BUY is a strong contrarian signal."},
-    {"signal": "macro_regime", "buy_acc": 38.9, "sell_acc": 50.8, "gap": 11.9, "recommendation": "BUY now gated at 40% threshold. SELL is coin-flip — marginal value."}
-  ],
-  "per_ticker_extremes": {
-    "ministral": {"best": "MSTR 71.7% (254 sam)", "worst": "XAG 20.4% (98 sam)", "gap": "51.3pp"},
-    "macro_regime": {"best": "XAG 64.9% (1454 sam)", "worst": "BTC 34.4% (797 sam)", "gap": "30.5pp"},
-    "fear_greed": {"best": "XAG 91.3% (287 sam)", "worst": "MSTR 49.0% (208 sam)", "gap": "42.3pp"},
-    "forecast": {"best": "XAG 74.6% (67 sam)", "worst": "BTC 29.3% (58 sam)", "gap": "45.3pp"},
-    "trend": {"best": "XAG 55.8% (593 sam)", "worst": "BTC 43.1% (564 sam)", "gap": "12.7pp"},
-    "qwen3": {"best": "MSTR 63.6% (401 sam)", "worst": "ETH 39.4% (221 sam)", "gap": "24.2pp"}
-  },
   "correlation_clusters": [
-    {"signals": ["volatility_sig", "oscillators", "volume", "structure"], "group": "volatility_cluster", "note": "94.9% agreement rate. All underperforming."},
-    {"signals": ["ema", "trend", "heikin_ashi", "volume_flow", "macro_regime"], "group": "trend_direction", "note": "SELL-biased, all 45-50% accuracy. Group leader gated at 46%."},
-    {"signals": ["fear_greed", "sentiment", "news_event", "momentum_factors"], "group": "macro_external", "note": "Degraded together. Group leader gate at 46% catches them."},
-    {"signals": ["candlestick", "fibonacci"], "group": "pattern_based", "note": "0.708 correlation on BTC."},
-    {"signals": ["mean_reversion", "rsi", "bb", "momentum"], "group": "momentum_cluster", "note": "100% agreement rate for rsi+bb+mean_reversion. Best-performing cluster."}
+    {
+      "name": "mega_trend_cluster",
+      "members": [
+        "trend",
+        "macro_regime",
+        "structure",
+        "heikin_ashi",
+        "momentum_factors",
+        "oscillators",
+        "volatility_sig"
+      ],
+      "highest_correlation": "trend + macro_regime = 0.730 (99.7% vote agreement)",
+      "problem": "8 signals voting nearly identically. This is 8 votes for the price of 1. Massively inflates trend-following consensus.",
+      "recommendation": "Designate trend OR heikin_ashi as cluster leader. Penalize remaining 6 signals at 0.15-0.2x weight."
+    },
+    {
+      "name": "calendar_conflict",
+      "members": [
+        "calendar",
+        "econ_calendar"
+      ],
+      "highest_correlation": "r = -0.588, 0% agreement",
+      "problem": "calendar is always BUY. econ_calendar is always SELL. They perfectly cancel each other. Net information = zero.",
+      "recommendation": "These are actually measuring different things and shouldnt be in consensus together. Calendar seasonal BUY tendency and event-risk SELL tendency are both valid but need separate treatment."
+    },
+    {
+      "name": "reversal_cluster",
+      "members": [
+        "rsi",
+        "mean_reversion",
+        "fibonacci",
+        "volume_flow"
+      ],
+      "highest_correlation": "rsi + mean_reversion = 0.507 (88.1% agreement)",
+      "problem": "fibonacci systematically disagrees with mean_reversion (17.1% agreement) and is wrong (43.3%). Creates noise.",
+      "recommendation": "Gate fibonacci more aggressively. RSI + mean_reversion provide valid reversal signal."
+    }
+  ],
+  "activity_rate_issues": [
+    {
+      "signal": "volume_flow",
+      "rate": 87.7,
+      "issue": "Way above 70% cap. 56.3% BUY bias. Should be penalized for hyperactivity."
+    },
+    {
+      "signal": "mean_reversion",
+      "rate": 76.7,
+      "issue": "Above 70% cap. 45.0% SELL heavy."
+    },
+    {
+      "signal": "momentum",
+      "rate": 72.7,
+      "issue": "Above 70% cap. Roughly balanced BUY/SELL."
+    },
+    {
+      "signal": "fibonacci",
+      "rate": 63.0,
+      "issue": "High activity + low accuracy (43.3%) = high noise."
+    },
+    {
+      "signal": "claude_fundamental",
+      "rate": 65.7,
+      "issue": "59.7% BUY, only 6.0% SELL. Extreme bullish bias."
+    }
+  ],
+  "directional_bias_issues": [
+    {
+      "signal": "calendar",
+      "buy_rate": 33.4,
+      "sell_rate": 0.0,
+      "issue": "ONLY BUY. Never SELL. Not a real signal - its a permanent bull vote."
+    },
+    {
+      "signal": "econ_calendar",
+      "buy_rate": 0.0,
+      "sell_rate": 33.4,
+      "issue": "ONLY SELL. Never BUY. Not a real signal - its a permanent bear vote."
+    },
+    {
+      "signal": "news_event",
+      "buy_rate": 0.0,
+      "sell_rate": 12.8,
+      "issue": "ONLY SELL. Good accuracy (58.5%) but unidirectional."
+    },
+    {
+      "signal": "claude_fundamental",
+      "buy_rate": 59.7,
+      "sell_rate": 6.0,
+      "issue": "10:1 BUY:SELL ratio. Heavily bullish biased."
+    },
+    {
+      "signal": "structure",
+      "buy_rate": 41.5,
+      "sell_rate": 3.6,
+      "issue": "11.5:1 BUY:SELL ratio. Almost never calls SELL."
+    },
+    {
+      "signal": "momentum_factors",
+      "buy_rate": 40.1,
+      "sell_rate": 7.8,
+      "issue": "5:1 BUY:SELL ratio."
+    },
+    {
+      "signal": "sentiment",
+      "buy_rate": 8.4,
+      "sell_rate": 0.8,
+      "issue": "10:1 BUY:SELL ratio. Almost never SELL. AND 33.8% recent accuracy."
+    }
   ],
   "regime_performance": {
+    "trending_up": {
+      "benefiting_signals": [
+        "trend (61.6% recent)",
+        "ema (62.9% recent)",
+        "heikin_ashi",
+        "momentum_factors"
+      ],
+      "struggling_signals": [
+        "mean_reversion",
+        "fibonacci",
+        "oscillators"
+      ],
+      "notes": "Trend-following signals improving recently, suggesting market is in trending regime"
+    },
     "ranging": {
-      "note": "Current regime for all instruments.",
-      "best_signals": ["mean_reversion (65.4% recent)", "fibonacci (68.2% recent)", "ministral (68.0% recent)", "bb (60.8% recent)"],
-      "worst_signals": ["fear_greed (25.9% recent)", "macro_regime (30.3% recent)", "news_event (29.5% recent)", "smart_money (39.6% recent)"],
-      "gated_signals_default": ["trend", "momentum_factors", "ema", "heikin_ashi", "structure", "fear_greed", "macro_regime", "news_event", "volatility_sig", "forecast", "smart_money", "oscillators", "candlestick", "funding"],
-      "note2": "14 signals gated in ranging _default. Only 18 active. With per-ticker exemptions (BUG-158), metals get some back."
-    }
-  },
-  "gate_threshold_analysis": {
-    "current_45pct": {
-      "gated_count_blended": 9,
-      "signals": ["fear_greed (35.7%)", "ema (43.6%)", "trend (42.1%)", "oscillators (44.8%)", "macro_regime (35.2%)", "volatility_sig (38.1%)", "forecast (39.5%)", "smart_money (43.5%)", "heikin_ashi (44.3%)"]
-    },
-    "proposed_48pct": {
-      "additional_gated": 2,
-      "would_add": ["sentiment (46.5%)", "forecast already gated"],
-      "note": "Marginal improvement. sentiment at 46.5% is borderline — 38K samples, consistently underperforming."
-    },
-    "proposed_50pct": {
-      "additional_gated": 3,
-      "would_add": ["ema (already gated at 43.6%)", "heikin_ashi (already gated)", "candlestick might be caught"],
-      "note": "Aggressive. Would gate half of active signals. Not recommended — too many signals removed reduces ensemble diversity."
+      "benefiting_signals": [
+        "rsi",
+        "bb",
+        "mean_reversion",
+        "smart_money"
+      ],
+      "struggling_signals": [
+        "trend",
+        "macro_regime",
+        "ema",
+        "heikin_ashi"
+      ],
+      "notes": "Mean-reversion signals work in ranging, trend signals fail"
     }
   },
   "recommendations": [
-    {"title": "Per-ticker directional accuracy", "priority": 1, "description": "IMPLEMENTED: accuracy_by_ticker_signal() now returns directional fields. signal_engine override copies them.", "expected_impact": "High — prevents signals from voting in their weak direction per ticker."},
-    {"title": "Directional gate 0.35 to 0.40", "priority": 2, "description": "IMPLEMENTED: catches macro_regime BUY (38.9%), fibonacci SELL (35.9%).", "expected_impact": "Medium — 3-4 additional signal×direction pairs gated."},
-    {"title": "Consider raising accuracy gate to 47%", "priority": 3, "description": "Would additionally gate sentiment (46.5% blended, 38K samples). Currently just above threshold.", "expected_impact": "Low-medium — sentiment is consistently weak but removing it reduces voter count."},
-    {"title": "Investigate momentum SELL direction", "priority": 4, "description": "momentum SELL at 44.6% escapes 40% directional gate. BUY 63.1% is strong. Could add a 42% directional gate later.", "expected_impact": "Low — momentum SELL rarely votes in ranging (regime-weighted 1.3x BUY focus)."},
-    {"title": "Per-ticker signal blacklisting", "priority": 5, "description": "ministral on XAG (20.4%) should be fully suppressed, not just directionally gated. Consider explicit ticker×signal blacklist.", "expected_impact": "Medium — prevents catastrophic signal votes."}
-  ],
-  "implemented_tonight": [
-    "per-ticker directional accuracy fields in accuracy_stats.accuracy_by_ticker_signal()",
-    "directional field propagation in signal_engine BUG-158 override",
-    "directional gate threshold raised from 0.35 to 0.40",
-    "new tests for directional accuracy asymmetry and macro_regime BUY gating"
+    {
+      "priority": 1,
+      "action": "Verify sentiment is being gated",
+      "detail": "Sentiment at 33.8% recent should be gated by 47% threshold. Check if recency-weighted blend is catching this or if all-time (46.5%) is keeping it barely alive.",
+      "impact": "high"
+    },
+    {
+      "priority": 2,
+      "action": "Tighten correlation penalties for mega_trend_cluster",
+      "detail": "8 signals (trend, macro_regime, structure, heikin_ashi, momentum_factors, oscillators, volatility_sig) are 85-99.7% correlated. Current static groups may not fully capture this. Verify dynamic correlation is detecting this cluster.",
+      "impact": "high"
+    },
+    {
+      "priority": 3,
+      "action": "Address calendar/econ_calendar cancellation",
+      "detail": "These two signals perfectly cancel. Calendar BUY + econ_calendar SELL = zero net. Consider treating as separate utility signals rather than consensus voters.",
+      "impact": "medium"
+    },
+    {
+      "priority": 4,
+      "action": "Gate or downweight one-directional signals",
+      "detail": "calendar (BUY-only), econ_calendar (SELL-only), news_event (SELL-only) should have directional bias penalty. They inflate one side of consensus.",
+      "impact": "medium"
+    },
+    {
+      "priority": 5,
+      "action": "Verify activity rate cap is working",
+      "detail": "volume_flow (87.7%), mean_reversion (76.7%), momentum (72.7%) all exceed 70% cap. Check that 0.5x penalty is being applied correctly.",
+      "impact": "medium"
+    }
   ]
 }
