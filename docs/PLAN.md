@@ -1,13 +1,41 @@
-# PLAN — Outstanding Issue Fix Queue (2026-04-11)
+# PLAN — Dual Adversarial Review Round 5 (2026-04-14)
 
 ## Context
 
-Continuation of after-hours signal audit (2026-04-10) + adversarial review
-(8 agents, 148 findings in `docs/adversarial-review/SYNTHESIS.md`).
-Driven by ralph-loop autonomous iteration started 2026-04-11.
+Round 5 adversarial review. Previous rounds: R1 (2026-04-06), R2 (2026-04-07),
+R3 (2026-04-08), R4 (2026-04-09). Fix queue completed 2026-04-11.
 
-Branch: `fix/queue-2026-04-11`
-Worktree: `/mnt/q/finance-analyzer-fixq`
+Branch: `review/adversarial-2026-04-14`
+Worktree: `Q:/finance-analyzer-adversarial`
+
+## Open from R4 (still CRITICAL)
+- C6: `check_drawdown()` never called — risk gates disconnected from prod
+- C12: `log_portfolio_value` raw `open("a")` in metals_loop.py
+- C14: Naked position on stop-loss fail — no retry/fallback
+
+## Method
+1. 8 parallel agent reviewers (feature-dev:code-reviewer), one per subsystem
+2. Independent manual cross-cutting review (orthogonal focus)
+3. Cross-critique: agents vs manual, manual vs agents
+4. Synthesis doc with prioritized findings
+
+## Subsystems
+| # | Name | Files | Focus Areas |
+|---|------|-------|-------------|
+| 1 | signals-core | 13 | Voting math, accuracy gating, weight calc |
+| 2 | orchestration | 11 | Loop lifecycle, trigger logic, Claude invocation |
+| 3 | portfolio-risk | 14 | Risk disconnection, kelly sizing, trade guards |
+| 4 | metals-core | 16 | Swing state, exit opt, ORB, fin_snipe races |
+| 5 | avanza-api | 21 | Session races, order flow, account filtering |
+| 6 | signals-modules | 31 | Signal correctness, HOLD-vs-noise, edge cases |
+| 7 | data-external | 21 | API failures, stale data, cache corruption |
+| 8 | infrastructure | 26 | File I/O safety, telegram reliability, health |
+
+## Priority Classification
+- **P1 CRITICAL**: Data/money loss, security, silent failures, race conditions
+- **P2 HIGH**: Logic bugs, incorrect calculations, missing error handling
+- **P3 MEDIUM**: Code quality, dead code, misleading naming
+- **P4 LOW**: Style, minor improvements
 
 ## Already Verified Done (do not repeat)
 
