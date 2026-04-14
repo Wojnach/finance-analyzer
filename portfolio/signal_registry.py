@@ -161,6 +161,9 @@ def _register_defaults():
     # VIX term structure — contango/backwardation regime detection; capped at 0.7
     register_enhanced("vix_term_structure", "portfolio.signals.vix_term_structure",
                       "compute_vix_term_structure_signal", requires_context=True, max_confidence=0.7)
+    # Gold real yield paradox — GYDI regime detector (metals only); capped at 0.7
+    register_enhanced("gold_real_yield_paradox", "portfolio.signals.gold_real_yield_paradox",
+                      "compute_gold_real_yield_paradox_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()

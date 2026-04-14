@@ -71,6 +71,7 @@ DISABLED_SIGNALS = {
     "hurst_regime",     # pending live validation (added 2026-04-11)
     "shannon_entropy",  # pending live validation (added 2026-04-12)
     "vix_term_structure",  # pending live validation (added 2026-04-13)
+    "gold_real_yield_paradox",  # pending live validation (added 2026-04-14)
     "orderbook_flow",   # 2026-04-11: 51.1% accuracy (360 sam), 93.3% activation rate,
                         # no recent data. Pure noise in every consensus decision.
                         # Re-evaluate after 2 weeks of accuracy data collection.
@@ -139,4 +140,5 @@ SIGNAL_NAMES = [
     "hurst_regime",
     "shannon_entropy",
     "vix_term_structure",
+    "gold_real_yield_paradox",
 ]
