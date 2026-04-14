@@ -107,13 +107,22 @@ class TelegramPoller:
                 outcome["drop_reason"] = "unrecognized"
                 return
 
-            outcome["processed"] = True
-            if cmd == "mode":
-                response = self._handle_mode_command(args)
-            else:
-                response = self.on_command(cmd, args, self.config)
-            if response:
-                self._send_reply(response)
+            # Dispatch can raise (Avanza session, volume math, network) — we
+            # want processed=True to mean "dispatch completed", not "dispatch
+            # was attempted". On raise, tag drop_reason with the exception
+            # type so the audit log reflects the actual outcome, then re-raise
+            # to preserve the old error-propagation behavior.
+            try:
+                if cmd == "mode":
+                    response = self._handle_mode_command(args)
+                else:
+                    response = self.on_command(cmd, args, self.config)
+                if response:
+                    self._send_reply(response)
+                outcome["processed"] = True
+            except Exception as exc:
+                outcome["drop_reason"] = f"raised:{type(exc).__name__}"
+                raise
         finally:
             self._log_inbound(update, msg, **outcome)
 
@@ -126,6 +135,7 @@ class TelegramPoller:
             sender = msg.get("from") or {}
             entry = {
                 "ts": datetime.now(UTC).isoformat(),
+                "direction": "inbound",
                 "update_id": update.get("update_id"),
                 "message_id": msg.get("message_id"),
                 "msg_date": msg.get("date"),
