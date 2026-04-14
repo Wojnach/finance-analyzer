@@ -75,7 +75,11 @@ REGIME_CONFIRM_CHECKS = 2     # require N consecutive BUY checks in same regime
 # ---------------------------------------------------------------------------
 # Exit rules
 # ---------------------------------------------------------------------------
-TAKE_PROFIT_UNDERLYING_PCT = 2.0   # +2% underlying = exit (+~10% on 5x warrant)
+TAKE_PROFIT_UNDERLYING_PCT = 3.0   # 2026-04-14 raised from 2.0 — was exiting too early on
+                                   # intraday noise during strong trends. 3.0% underlying =
+                                   # ~+15% warrant on 5x / ~+14% on 4.75x. If user wants
+                                   # even more room, raise further; user's note: "we can
+                                   # always buy in again" — rebuy on pullback after exit.
 TRAILING_START_PCT = 1.5           # start trailing after 1.5% underlying gain
 TRAILING_DISTANCE_PCT = 1.0        # trail 1% behind underlying peak
 HARD_STOP_UNDERLYING_PCT = 2.0     # -2% underlying = hard exit
