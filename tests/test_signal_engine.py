@@ -846,3 +846,36 @@ class TestSentimentUnknownRegimeGating:
         unknown = REGIME_GATED_SIGNALS.get("unknown", {})
         default_gated = unknown.get("_default", frozenset())
         assert "sentiment" not in default_gated
+
+
+class TestMSTRSignalBlacklist:
+    """MSTR-specific per-ticker blacklisting for catastrophic signals."""
+
+    def test_mstr_macro_regime_disabled(self):
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "macro_regime" in _TICKER_DISABLED_SIGNALS["MSTR"]
+
+    def test_mstr_trend_disabled(self):
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "trend" in _TICKER_DISABLED_SIGNALS["MSTR"]
+
+    def test_mstr_volatility_sig_disabled(self):
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "volatility_sig" in _TICKER_DISABLED_SIGNALS["MSTR"]
+
+
+class TestCorrelationPenaltyMultiGroup:
+    """Signals in multiple correlation groups get the harshest penalty."""
+
+    def test_multi_group_signal_gets_min_penalty(self):
+        from portfolio.signal_engine import _weighted_consensus
+        votes = {"rsi": "BUY", "structure": "BUY", "volatility_sig": "BUY",
+                 "claude_fundamental": "BUY"}
+        accuracy = {
+            "rsi": {"accuracy": 0.55, "total": 100},
+            "structure": {"accuracy": 0.50, "total": 100},
+            "volatility_sig": {"accuracy": 0.48, "total": 100},
+            "claude_fundamental": {"accuracy": 0.62, "total": 100},
+        }
+        action, conf = _weighted_consensus(votes, accuracy, "unknown")
+        assert action == "BUY"

@@ -136,7 +136,7 @@ _TICKER_DISABLED_SIGNALS = {
     "ETH-USD": frozenset({"news_event", "qwen3"}),  # news_event 39.2% SELL bias; qwen3 40% on ETH despite 60% overall
     "XAG-USD": frozenset({"ministral", "credit_spread_risk", "metals_cross_asset"}),
     "XAU-USD": frozenset({"ministral"}),
-    "MSTR": frozenset({"credit_spread_risk"}),
+    "MSTR": frozenset({"credit_spread_risk", "macro_regime", "trend", "volatility_sig"}),
 }
 
 # --- Signal (full 32-signal for "Now" timeframe) ---
@@ -848,7 +848,8 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
                     group_name, leader, leader_acc * 100, _GROUP_LEADER_GATE_THRESHOLD * 100,
                 )
 
-    # Build a mapping of signal → correlation penalty (per-cluster override)
+    # Build a mapping of signal → correlation penalty (per-cluster override).
+    # When a signal is in multiple groups, use the harshest (lowest) penalty.
     penalized_signals: dict[str, float] = {}
     for group_name, group_sigs in _active_corr_groups.items():
         leader = group_leaders.get(group_name)
@@ -856,7 +857,7 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             penalty = _CLUSTER_CORRELATION_PENALTIES.get(group_name, _CORRELATION_PENALTY)
             for s in group_sigs:
                 if s != leader and s in active_non_hold:
-                    penalized_signals[s] = penalty
+                    penalized_signals[s] = min(penalized_signals.get(s, 1.0), penalty)
 
     # Crisis mode detection: when multiple macro-external signals have degraded
     # accuracy, the market is in an abnormal regime (war, systemic crisis) where
