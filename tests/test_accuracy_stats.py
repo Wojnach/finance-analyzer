@@ -303,3 +303,222 @@ class TestBlendAccuracyData:
         alltime = {"rsi": {"accuracy": 0.6, "total": 100, "correct": 60}}
         result = blend_accuracy_data(alltime, None)
         assert result == alltime
+
+
+# ---------------------------------------------------------------------------
+# Core function: _vote_correct
+# ---------------------------------------------------------------------------
+
+class TestVoteCorrect:
+
+    def test_buy_positive_is_correct(self):
+        from portfolio.accuracy_stats import _vote_correct
+        assert _vote_correct("BUY", 1.5) is True
+
+    def test_buy_negative_is_wrong(self):
+        from portfolio.accuracy_stats import _vote_correct
+        assert _vote_correct("BUY", -1.5) is False
+
+    def test_sell_negative_is_correct(self):
+        from portfolio.accuracy_stats import _vote_correct
+        assert _vote_correct("SELL", -2.0) is True
+
+    def test_sell_positive_is_wrong(self):
+        from portfolio.accuracy_stats import _vote_correct
+        assert _vote_correct("SELL", 2.0) is False
+
+    def test_neutral_zone_returns_none(self):
+        from portfolio.accuracy_stats import _vote_correct
+        assert _vote_correct("BUY", 0.03) is None
+        assert _vote_correct("SELL", -0.03) is None
+        assert _vote_correct("BUY", 0.0) is None
+
+    def test_custom_neutral_threshold(self):
+        from portfolio.accuracy_stats import _vote_correct
+        assert _vote_correct("BUY", 0.08, min_change_pct=0.10) is None
+        assert _vote_correct("BUY", 0.12, min_change_pct=0.10) is True
+
+    def test_boundary_at_threshold(self):
+        from portfolio.accuracy_stats import _vote_correct
+        assert _vote_correct("BUY", 0.05) is True
+        assert _vote_correct("BUY", 0.049) is None
+
+
+# ---------------------------------------------------------------------------
+# Core function: signal_accuracy
+# ---------------------------------------------------------------------------
+
+class TestSignalAccuracy:
+
+    def test_empty_entries_returns_zero_for_all(self, monkeypatch):
+        from portfolio.accuracy_stats import signal_accuracy
+        monkeypatch.setattr(acc_mod, "load_entries", lambda: [])
+        result = signal_accuracy(horizon="1d", entries=[])
+        for sig, stats in result.items():
+            assert stats["total"] == 0
+            assert stats["accuracy"] == 0.0
+
+    def test_single_correct_buy(self, monkeypatch):
+        from portfolio.accuracy_stats import signal_accuracy
+        entries = [_make_entry("BTC-USD", "macd", "BUY", 2.5)]
+        result = signal_accuracy(horizon="1d", entries=entries)
+        assert result["macd"]["total"] == 1
+        assert result["macd"]["correct"] == 1
+        assert result["macd"]["accuracy"] == 1.0
+
+    def test_single_wrong_sell(self, monkeypatch):
+        from portfolio.accuracy_stats import signal_accuracy
+        entries = [_make_entry("ETH-USD", "ema", "SELL", 3.0)]
+        result = signal_accuracy(horizon="1d", entries=entries)
+        assert result["ema"]["total"] == 1
+        assert result["ema"]["correct"] == 0
+        assert result["ema"]["accuracy"] == 0.0
+
+    def test_multiple_signals_independent(self, monkeypatch):
+        from portfolio.accuracy_stats import signal_accuracy
+        entry = {
+            "ts": "2026-03-15T12:00:00+00:00",
+            "tickers": {
+                "BTC-USD": {
+                    "signals": {"rsi": "BUY", "macd": "SELL", "ema": "HOLD"},
+                    "consensus": "BUY",
+                },
+            },
+            "outcomes": {"BTC-USD": {"1d": {"change_pct": 1.5}}},
+        }
+        result = signal_accuracy(horizon="1d", entries=[entry])
+        assert result["rsi"]["total"] == 1
+        assert result["rsi"]["correct"] == 1
+        assert result["macd"]["total"] == 1
+        assert result["macd"]["correct"] == 0
+        assert result["ema"]["total"] == 0
+
+    def test_since_filter(self, monkeypatch):
+        from portfolio.accuracy_stats import signal_accuracy
+        old = _make_entry("BTC-USD", "rsi", "BUY", 1.0)
+        old["ts"] = "2026-01-01T00:00:00+00:00"
+        new = _make_entry("BTC-USD", "rsi", "BUY", -1.0)
+        new["ts"] = "2026-04-01T00:00:00+00:00"
+        result = signal_accuracy(horizon="1d", since="2026-03-01", entries=[old, new])
+        assert result["rsi"]["total"] == 1
+        assert result["rsi"]["correct"] == 0
+
+    def test_multi_ticker_entry(self, monkeypatch):
+        from portfolio.accuracy_stats import signal_accuracy
+        entry = {
+            "ts": "2026-03-15T12:00:00+00:00",
+            "tickers": {
+                "BTC-USD": {"signals": {"rsi": "BUY"}, "consensus": "BUY"},
+                "ETH-USD": {"signals": {"rsi": "SELL"}, "consensus": "SELL"},
+            },
+            "outcomes": {
+                "BTC-USD": {"1d": {"change_pct": 2.0}},
+                "ETH-USD": {"1d": {"change_pct": -1.0}},
+            },
+        }
+        result = signal_accuracy(horizon="1d", entries=[entry])
+        assert result["rsi"]["total"] == 2
+        assert result["rsi"]["correct"] == 2
+
+    def test_missing_outcome_skipped(self, monkeypatch):
+        from portfolio.accuracy_stats import signal_accuracy
+        entry = {
+            "ts": "2026-03-15T12:00:00+00:00",
+            "tickers": {"BTC-USD": {"signals": {"rsi": "BUY"}, "consensus": "BUY"}},
+            "outcomes": {},
+        }
+        result = signal_accuracy(horizon="1d", entries=[entry])
+        assert result["rsi"]["total"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Core function: consensus_accuracy
+# ---------------------------------------------------------------------------
+
+class TestConsensusAccuracy:
+
+    def test_correct_consensus(self, monkeypatch):
+        from portfolio.accuracy_stats import consensus_accuracy
+        entries = [_make_entry("BTC-USD", "rsi", "BUY", 2.0)]
+        result = consensus_accuracy(horizon="1d", entries=entries)
+        assert result["total"] == 1
+        assert result["correct"] == 1
+        assert result["accuracy"] == 1.0
+
+    def test_wrong_consensus(self, monkeypatch):
+        from portfolio.accuracy_stats import consensus_accuracy
+        entries = [_make_entry("BTC-USD", "rsi", "SELL", 2.0)]
+        result = consensus_accuracy(horizon="1d", entries=entries)
+        assert result["total"] == 1
+        assert result["correct"] == 0
+
+    def test_hold_consensus_skipped(self, monkeypatch):
+        from portfolio.accuracy_stats import consensus_accuracy
+        entry = {
+            "ts": "2026-03-15T12:00:00+00:00",
+            "tickers": {"BTC-USD": {"signals": {"rsi": "HOLD"}, "consensus": "HOLD"}},
+            "outcomes": {"BTC-USD": {"1d": {"change_pct": 5.0}}},
+        }
+        result = consensus_accuracy(horizon="1d", entries=[entry])
+        assert result["total"] == 0
+
+    def test_empty_entries(self, monkeypatch):
+        from portfolio.accuracy_stats import consensus_accuracy
+        result = consensus_accuracy(horizon="1d", entries=[])
+        assert result["total"] == 0
+        assert result["accuracy"] == 0.0
+
+    def test_multiple_tickers_counted(self, monkeypatch):
+        from portfolio.accuracy_stats import consensus_accuracy
+        entry = {
+            "ts": "2026-03-15T12:00:00+00:00",
+            "tickers": {
+                "BTC-USD": {"signals": {}, "consensus": "BUY"},
+                "ETH-USD": {"signals": {}, "consensus": "SELL"},
+            },
+            "outcomes": {
+                "BTC-USD": {"1d": {"change_pct": 1.0}},
+                "ETH-USD": {"1d": {"change_pct": 1.0}},
+            },
+        }
+        result = consensus_accuracy(horizon="1d", entries=[entry])
+        assert result["total"] == 2
+        assert result["correct"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Core function: per_ticker_accuracy
+# ---------------------------------------------------------------------------
+
+class TestPerTickerAccuracy:
+
+    def test_basic_per_ticker(self, monkeypatch):
+        from portfolio.accuracy_stats import per_ticker_accuracy
+        entries = [
+            _make_entry("BTC-USD", "rsi", "BUY", 1.0),
+            _make_entry("ETH-USD", "rsi", "SELL", -1.0),
+        ]
+        result = per_ticker_accuracy(horizon="1d", entries=entries)
+        assert "BTC-USD" in result
+        assert result["BTC-USD"]["correct"] == 1
+        assert result["BTC-USD"]["total"] == 1
+        assert "ETH-USD" in result
+        assert result["ETH-USD"]["correct"] == 1
+
+    def test_mixed_accuracy_per_ticker(self, monkeypatch):
+        from portfolio.accuracy_stats import per_ticker_accuracy
+        entries = [
+            _make_entry("BTC-USD", "rsi", "BUY", 1.0),
+            _make_entry("BTC-USD", "rsi", "BUY", -1.0),
+            _make_entry("BTC-USD", "rsi", "BUY", 2.0),
+        ]
+        result = per_ticker_accuracy(horizon="1d", entries=entries)
+        btc = result["BTC-USD"]
+        assert btc["total"] == 3
+        assert btc["correct"] == 2
+        assert abs(btc["accuracy"] - 2 / 3) < 0.01
+
+    def test_empty_returns_empty(self, monkeypatch):
+        from portfolio.accuracy_stats import per_ticker_accuracy
+        result = per_ticker_accuracy(horizon="1d", entries=[])
+        assert result == {}
