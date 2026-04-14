@@ -1,16 +1,24 @@
 {
-  "session_started": "2026-04-11T08:00:01.6805287Z",
-  "current_phase": "DONE",
-  "status": "done",
+  "session_started": "2026-04-14T06:00:00Z",
+  "current_phase": "PHASE 5: VERIFY & SHIP",
+  "status": "in_progress",
   "phases_completed": [
     "PHASE 0: SETUP",
     "PHASE 1: EXPLORE",
     "PHASE 2: PLAN",
     "PHASE 3: IMPLEMENT",
-    "PHASE 4: DOCUMENTATION",
-    "PHASE 5: VERIFY & SHIP"
+    "PHASE 4: DOCUMENTATION"
   ],
-  "notes": "Merged 4 commits (ea48a19..d4be274), pushed, loops restarted. BUG-182 directional weights + cache size + volatility comment fix.",
-  "phase_started": "2026-04-11T08:10:22.445882+00:00",
-  "last_update": "2026-04-11T09:02:00.000000+00:00"
+  "commits": [
+    "2884075 docs: improvement plan for auto-session 2026-04-14",
+    "e45faa1 fix(signals): expand per-ticker blacklist + disable oscillators globally",
+    "9bfafc5 fix(cache): release dogpile loading key on enqueue exception (BUG-191)",
+    "0e76aa7 test(accuracy): add 22 tests for core accuracy calculation functions",
+    "aacbcd3 fix(signals): MSTR blacklist + correlation multi-group penalty fix"
+  ],
+  "bugs_fixed": ["BUG-191", "BUG-192", "BUG-193", "BUG-194", "BUG-195"],
+  "tests_added": 37,
+  "tests_total_changed_files": 125,
+  "phase_started": "2026-04-14T06:00:00Z",
+  "last_update": "2026-04-14T07:00:00Z"
 }
