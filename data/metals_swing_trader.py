@@ -790,7 +790,7 @@ class SwingTrader:
             legacy = load_json(LEGACY_POSITIONS_FILE, {}) or {}
             if isinstance(legacy, dict):
                 changed = False
-                for k, v in legacy.items():
+                for v in legacy.values():
                     if (
                         isinstance(v, dict)
                         and str(v.get("ob_id", "")) == ob_id_str
