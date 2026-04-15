@@ -172,10 +172,14 @@ _DIRECTIONAL_GATE_MIN_SAMPLES = 30
 
 # Adaptive recency blend: when recent accuracy diverges from all-time by more
 # than this threshold, increase recent weight for faster regime adaptation.
-# Normal: 70% recent + 30% all-time. Fast: 90% recent + 10% all-time.
+# Normal: 75% recent + 25% all-time. Fast: 95% recent + 5% all-time.
+# 2026-04-15: raised normal 0.70→0.75, fast 0.90→0.95. Audit found signals
+# like trend (40.3% alltime → 61.6% recent) where the alltime anchor
+# was dragging blended accuracy 5-8pp below actual recent performance,
+# diluting consensus quality during regime shifts.
 _RECENCY_DIVERGENCE_THRESHOLD = 0.15  # 15% absolute divergence triggers fast blend
-_RECENCY_WEIGHT_NORMAL = 0.7
-_RECENCY_WEIGHT_FAST = 0.9
+_RECENCY_WEIGHT_NORMAL = 0.75
+_RECENCY_WEIGHT_FAST = 0.95
 _RECENCY_MIN_SAMPLES = 30  # match ACCURACY_GATE_MIN_SAMPLES (was 50 default)
 
 # Crisis regime: when multiple macro-external signals are simultaneously
@@ -205,10 +209,13 @@ _PER_TICKER_CONSENSUS_MIN_SAMPLES = 50
 # Per-ticker signal disable: force HOLD for specific signal+ticker combos
 # where accuracy data shows the signal is actively harmful for that instrument.
 _TICKER_DISABLED_SIGNALS = {
-    "ETH-USD": frozenset({"news_event", "qwen3"}),  # news_event 39.2% SELL bias; qwen3 40% on ETH despite 60% overall
-    "XAG-USD": frozenset({"ministral", "credit_spread_risk", "metals_cross_asset"}),
-    "XAU-USD": frozenset({"ministral"}),
-    "MSTR": frozenset({"credit_spread_risk", "macro_regime", "trend", "volatility_sig"}),
+    # 2026-04-15 audit: per-ticker 3h accuracy gating.
+    "ETH-USD": frozenset({"news_event", "qwen3", "smart_money"}),  # smart_money 38.2% (555 sam)
+    "BTC-USD": frozenset({"smart_money", "heikin_ashi"}),  # smart_money 39.0% (557), heikin_ashi 42.1% (1422)
+    "XAG-USD": frozenset({"ministral", "credit_spread_risk", "metals_cross_asset", "smart_money"}),  # smart_money 41.8% (558)
+    "XAU-USD": frozenset({"ministral", "metals_cross_asset"}),  # metals_cross_asset 42.9% (198 sam)
+    "MSTR": frozenset({"credit_spread_risk", "macro_regime", "trend", "volatility_sig",
+                        "claude_fundamental", "volume", "sentiment"}),  # claude_fund 33.2%, vol 35.6%, sent 37.8%
 }
 
 # --- Signal (full 32-signal for "Now" timeframe) ---
