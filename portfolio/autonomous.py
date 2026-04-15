@@ -714,9 +714,19 @@ def _build_telegram_mode_b(actionable, hold_count, sell_count, patient_state, bo
             f"{_prob_str(p1d)} in 1d  {_prob_str(p3d)} in 3d`"
         )
 
-        # Accuracy + 7d gain
-        acc = p1d.get("accuracy", 0)
-        samples = p1d.get("samples", 0)
+        # Accuracy + 7d gain.
+        # focus_probabilities[ticker]["1d"] has no horizon-level "accuracy"/"samples";
+        # those live in signal_details[]. Aggregate via weighted mean so the display
+        # reflects the same voters that produced the probability.
+        details = p1d.get("signal_details", []) or []
+        samples = int(p1d.get("total_samples", 0) or 0)
+        if details:
+            weights = [float(d.get("weight", 0) or 0) for d in details]
+            accs = [float(d.get("accuracy", 0) or 0) for d in details]
+            tot_w = sum(weights) or 1.0
+            acc = 100.0 * sum(a * w for a, w in zip(accs, weights)) / tot_w
+        else:
+            acc = 0.0
         gain_7d = gains.get("7d", 0)
         lines.append(f"`  accuracy: {acc:.0f}% at 1d ({samples} samples) | 7d move: {gain_7d:+.1f}%`")
 
