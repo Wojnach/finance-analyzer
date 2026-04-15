@@ -56,7 +56,7 @@ JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
 
 
 def _build_digest_message():
-    from portfolio.file_utils import load_jsonl, load_jsonl_tail
+    from portfolio.file_utils import load_jsonl_tail
 
     now = datetime.now(UTC)
     cutoff = now - timedelta(seconds=DIGEST_INTERVAL)

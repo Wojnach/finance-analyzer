@@ -23,7 +23,7 @@ from functools import wraps
 
 import pandas as pd
 
-from portfolio.shared_state import _cached, _yfinance_limiter
+from portfolio.shared_state import _cached
 
 logger = logging.getLogger("portfolio.metals_cross_assets")
 

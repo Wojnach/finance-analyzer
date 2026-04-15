@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from portfolio.signal_utils import majority_vote, safe_float, sma
+from portfolio.signal_utils import majority_vote
 
 logger = logging.getLogger(__name__)
 

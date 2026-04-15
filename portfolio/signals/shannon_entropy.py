@@ -24,7 +24,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from portfolio.signal_utils import ema, majority_vote, safe_float
+from portfolio.signal_utils import ema, safe_float
 
 MIN_ROWS = 60
 

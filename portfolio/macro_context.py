@@ -6,7 +6,7 @@ import pandas as pd
 from portfolio.api_utils import ALPACA_BASE, BINANCE_BASE, BINANCE_FAPI_BASE, get_alpaca_headers
 from portfolio.http_retry import fetch_with_retry
 from portfolio.shared_state import VOLUME_TTL as _VOLUME_TTL
-from portfolio.shared_state import _alpaca_limiter, _binance_limiter, _cached, _yfinance_limiter
+from portfolio.shared_state import _alpaca_limiter, _binance_limiter, _cached
 
 logger = logging.getLogger("portfolio.macro_context")
 

@@ -13,7 +13,7 @@ import json
 import logging
 import pathlib
 
-from portfolio.file_utils import atomic_append_jsonl, load_json, load_jsonl_tail
+from portfolio.file_utils import atomic_append_jsonl, load_json
 
 logger = logging.getLogger(__name__)
 
