@@ -676,8 +676,14 @@ def test_ingest_skips_placement_when_split_coverage_sufficient(tmp_path, monkeyp
     monkeypatch.setattr(mst, "DRY_RUN", False)
     # No single-volume match
     monkeypatch.setattr(mst, "_find_existing_stop", lambda ob, u: None)
-    # But split coverage adds up
-    monkeypatch.setattr(mst, "_sum_existing_stops_volume", lambda ob: 97)
+    # But split coverage adds up — provide the full list so ingest can adopt
+    monkeypatch.setattr(
+        mst, "_collect_existing_stops_for",
+        lambda ob, account_id=None: [
+            {"id": "SPLIT_1", "volume": 50},
+            {"id": "SPLIT_2", "volume": 47},
+        ],
+    )
 
     set_stop_calls = []
     trader._set_stop_loss = lambda pid: set_stop_calls.append(pid)
@@ -692,6 +698,7 @@ def test_ingest_skips_placement_when_split_coverage_sufficient(tmp_path, monkeyp
     pos = trader.state["positions"][pos_id]
     assert pos["stop_adopted"] is True
     assert pos["stop_split_coverage"] == 97
+    assert pos["adopted_stop_ids"] == ["SPLIT_1", "SPLIT_2"]
 
 
 def test_retry_deferred_stops_places_after_read_recovery(tmp_path, monkeypatch, patched_state_file):
@@ -780,6 +787,71 @@ def test_retry_deferred_stops_leaves_marker_when_still_failing(tmp_path, monkeyp
     pos = trader.state["positions"]["pos_deferred"]
     assert pos["stop_order_id"] is None
     assert "stop_read_failed_ts" in pos
+
+
+def test_ingest_persists_adopted_split_stop_ids(tmp_path, monkeypatch, patched_state_file, patched_legacy_state):
+    """Codex review round 8 P1: all cascade stop IDs must be kept for cancellation."""
+    trader = _make_trader(tmp_path)
+    monkeypatch.setattr(mst, "DRY_RUN", False)
+    monkeypatch.setattr(mst, "_find_existing_stop", lambda ob, u: None)
+    monkeypatch.setattr(
+        mst, "_collect_existing_stops_for",
+        lambda ob, account_id=None: [
+            {"id": "SPLIT_A", "volume": 32},
+            {"id": "SPLIT_B", "volume": 32},
+            {"id": "SPLIT_C", "volume": 33},
+        ],
+    )
+
+    pos_id = trader.ingest_position(
+        ob_id="1650161", units=97, entry_price=10.27,
+        underlying_price=78.95, set_stop_loss=True,
+    )
+
+    assert pos_id is not None
+    pos = trader.state["positions"][pos_id]
+    assert pos["adopted_stop_ids"] == ["SPLIT_A", "SPLIT_B", "SPLIT_C"]
+    # Primary stop_order_id points at one for backward-compat
+    assert pos["stop_order_id"] == "SPLIT_A"
+    assert pos["stop_adopted"] is True
+    assert pos["stop_split_coverage"] == 97
+
+
+def test_execute_sell_cancels_all_adopted_stop_ids(tmp_path, monkeypatch, patched_state_file):
+    """Codex review round 8 P1: _execute_sell must cancel each adopted stop."""
+    trader = _make_trader(tmp_path)
+    monkeypatch.setattr(mst, "DRY_RUN", False)
+
+    # Pre-seed a migrated+adopted position with 3 cascade stops
+    pos_id = "pos_cascade"
+    trader.state["positions"][pos_id] = {
+        "warrant_key": "bull_silver_x5",
+        "warrant_name": "BULL SILVER X5 AVA 4",
+        "ob_id": "1650161",
+        "api_type": "certificate",
+        "underlying": "XAG-USD",
+        "direction": "LONG",
+        "units": 97,
+        "entry_price": 10.27,
+        "entry_underlying": 78.95,
+        "entry_ts": "2026-04-15T12:00:00+00:00",
+        "stop_order_id": "SPLIT_A",
+        "adopted_stop_ids": ["SPLIT_A", "SPLIT_B", "SPLIT_C"],
+        "stop_adopted": True,
+    }
+
+    cancelled = []
+    monkeypatch.setattr(mst, "_delete_stop_loss", lambda page, sid: cancelled.append(sid) or True)
+    monkeypatch.setattr(
+        mst, "place_order",
+        lambda page, acct, ob, side, price, vol: (True, {"order_id": "SELL_1"}),
+    )
+
+    trader._execute_sell(pos_id, trader.state["positions"][pos_id],
+                        current_bid=10.14, underlying_price=78.50,
+                        reason="TEST_CASCADE_CANCEL")
+
+    assert cancelled == ["SPLIT_A", "SPLIT_B", "SPLIT_C"]
 
 
 def test_ingest_defers_stop_placement_when_read_fails(tmp_path, monkeypatch, patched_state_file, patched_legacy_state):
