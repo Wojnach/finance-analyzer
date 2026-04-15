@@ -13,7 +13,8 @@ CRYPTO_TICKERS = {"BTC", "ETH", "BTC-USD", "ETH-USD"}
 # signals during prolonged extreme sentiment regimes (e.g., 46-day fear streaks).
 EXTREME_FEAR_THRESHOLD = 20
 EXTREME_GREED_THRESHOLD = 80
-_STREAK_FILE = Path("data/fear_greed_streak.json")
+_BASE_DIR = Path(__file__).resolve().parent.parent
+_STREAK_FILE = _BASE_DIR / "data" / "fear_greed_streak.json"
 
 
 def get_sustained_fear_days() -> int:

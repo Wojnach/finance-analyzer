@@ -24,7 +24,8 @@ from portfolio.file_utils import atomic_write_json, load_json
 
 logger = logging.getLogger("portfolio.linear_factor")
 
-_MODEL_FILE = Path("data/models/linear_factor_weights.json")
+_BASE_DIR = Path(__file__).resolve().parent.parent
+_MODEL_FILE = _BASE_DIR / "data" / "models" / "linear_factor_weights.json"
 
 
 class LinearFactorModel:

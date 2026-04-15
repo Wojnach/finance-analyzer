@@ -18,7 +18,8 @@ from portfolio.file_utils import atomic_write_json, load_json
 
 logger = logging.getLogger("portfolio.seasonality")
 
-_STATE_FILE = Path("data/seasonality_profiles.json")
+_BASE_DIR = Path(__file__).resolve().parent.parent
+_STATE_FILE = _BASE_DIR / "data" / "seasonality_profiles.json"
 _MIN_DAYS = 5  # minimum trading days to compute profiles
 
 

@@ -24,7 +24,8 @@ from portfolio.linear_factor import LinearFactorModel
 
 logger = logging.getLogger("portfolio.signal_weight_optimizer")
 
-_RESULTS_FILE = Path("data/models/walkforward_results.json")
+_BASE_DIR = Path(__file__).resolve().parent.parent
+_RESULTS_FILE = _BASE_DIR / "data" / "models" / "walkforward_results.json"
 
 
 @dataclass

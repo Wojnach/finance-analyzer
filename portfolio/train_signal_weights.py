@@ -27,7 +27,8 @@ from portfolio.signal_weight_optimizer import (
 
 logger = logging.getLogger("portfolio.train_signal_weights")
 
-_SIGNAL_LOG = Path("data/signal_log.jsonl")
+_BASE_DIR = Path(__file__).resolve().parent.parent
+_SIGNAL_LOG = _BASE_DIR / "data" / "signal_log.jsonl"
 _VOTE_MAP = {"BUY": 1.0, "SELL": -1.0, "HOLD": 0.0}
 
 # Signals to include as features (skip disabled/broken ones)

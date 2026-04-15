@@ -19,7 +19,8 @@ from portfolio.microstructure import compute_ofi, spread_zscore
 
 logger = logging.getLogger("portfolio.microstructure_state")
 
-_STATE_FILE = Path("data/microstructure_state.json")
+_BASE_DIR = Path(__file__).resolve().parent.parent
+_STATE_FILE = _BASE_DIR / "data" / "microstructure_state.json"
 _MAX_SNAPSHOTS = 60  # ~30-60 min at 30-60s intervals
 _MIN_SNAPSHOTS_FOR_OFI = 3
 _MIN_SPREADS_FOR_ZSCORE = 10
