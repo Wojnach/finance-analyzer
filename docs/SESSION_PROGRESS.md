@@ -51,49 +51,64 @@ pattern, not stuck work.
 
 ---
 
-# Session Progress — Auto-Improvement Session (2026-04-14)
+# Session Progress — Auto-Improve 2026-04-15
 
-## Status: SHIPPED
+## Status: COMPLETE (merged + pushed)
 
-Deep codebase exploration by 4 parallel agents. Cross-referenced findings with live
-accuracy data (accuracy_cache.json, ticker_signal_accuracy_cache.json). Implemented
-5 bug fixes, 1 architecture fix, and 37 new tests.
+Autonomous improvement session: 5 phases, 8 commits, 28 files changed.
 
-### What shipped (5 commits on improve/auto-session-2026-04-14)
+### What shipped
+- **BUG-196: Absolute path resolution** — 6 modules (`microstructure_state`, `fear_greed`, `seasonality`, `linear_factor`, `signal_weight_optimizer`, `train_signal_weights`) used fragile `Path("data/...")` relative paths. All converted to `Path(__file__).resolve().parent.parent / "data"`.
+- **BUG-197: DRY trigger sustained gate** — Duplicated sustained-debounce logic in `trigger.py` (signal flip + sentiment reversal) extracted into `_update_sustained()` helper.
+- **BUG-198: Signal registry import caching** — Failed signal imports retried every 60s cycle (35 warnings/cycle). Added sentinel-based caching with 5-min TTL cooldown.
+- **BUG-199: Dead timestamp code** — Removed unused `ts_str_clean` variable in `agent_invocation.py`; simplified to Python 3.12's native `fromisoformat()`.
+- **12 new tests** — 8 for `_update_sustained` (count/duration gates, reset, independence), 4 for import caching (sentinel, cooldown, retry, clear).
+- **Ruff cleanup** — 9 unused imports removed (F401), 8 violations fixed (UP035, SIM102, SIM105, SIM118, E731, I001). Violations reduced 67→59.
 
-1. `2884075` docs: improvement plan for auto-session 2026-04-14
-2. `e45faa1` fix(signals): expand per-ticker blacklist + disable oscillators globally
-   - BUG-192: Added XAG-USD (ministral 18.9%, credit_spread_risk 21.2%, metals_cross_asset 39.8%),
-     XAU-USD (ministral 43.2%), MSTR (credit_spread_risk 6.5%) to `_TICKER_DISABLED_SIGNALS`
-   - BUG-193: Added oscillators to global DISABLED_SIGNALS (35-43% across all tickers, 5065 samples)
-   - BUG-194: Gated sentiment at 3h/4h in "unknown" regime (33.8%, 3629 samples)
-   - 15 new tests in test_signal_engine.py (69 total, was 54)
-3. `9bfafc5` fix(cache): release dogpile loading key on enqueue exception (BUG-191)
-   - Prevents 120s stale-signal windows after GPU load failures
-   - 2 new tests in test_shared_state_cache.py (15 total, was 13)
-4. `0e76aa7` test(accuracy): add 22 tests for core accuracy calculation functions
-   - TestVoteCorrect (7), TestSignalAccuracy (7), TestConsensusAccuracy (5), TestPerTickerAccuracy (3)
-   - accuracy_stats.py now has 41 tests (was 19)
-5. `aacbcd3` fix(signals): MSTR blacklist + correlation multi-group penalty fix
-   - BUG-195: Added MSTR macro_regime, trend, volatility_sig to blacklist
-   - Fixed correlation penalty: multi-group signals now get harshest (min) penalty, not last-wins
-   - 4 new tests (TestMSTRSignalBlacklist, TestCorrelationPenaltyMultiGroup)
+### Test results
+- 139 targeted tests: all pass
+- 7046 full suite: all pass (36 pre-existing failures unchanged)
 
-### Test impact
-- 125 tests pass across 3 changed test files (69 + 41 + 15)
-- 37 new tests added this session
+### What's next
+- IC-based dynamic signal weighting (highest impact from research session)
+- MSTR BTC-proxy consensus
+- HMM regime detection
+- Per-ticker signal gating implementation
 
-### Deferred (documented in IMPROVEMENT_PLAN.md)
-- IC-based signal weighting (P2)
-- HMM regime detection (P2)
-- MSTR-BTC proxy signal (P1)
-- Metals position sync on startup
-- Cancel-sell-rearm atomicity
-- prune_jsonl streaming rewrite
+### 2026-04-15 10:57 UTC | fix/bug178-instrumentation-and-timeout
+e2ee124 docs(plans): BUG-178 instrumentation + ticker pool timeout bump
+docs/plans/2026-04-15-bug178-instrumentation-timeout.md
 
-### Previous session (2026-04-12)
-Adversarial review round 5: 19 findings (3 P0, 10 P1, 7 P2).
-Top priority: wire check_drawdown(), wire record_trade(), POSITIONS lock.
+### 2026-04-15 11:16 UTC | fix/bug178-instrumentation-and-timeout
+afe34ee feat(bug178): phase-level timing inside generate_signal post-dispatch
+portfolio/main.py
+portfolio/signal_engine.py
+tests/test_phase_log.py
 
-### Previous session (2026-04-10)
-Per-ticker directional accuracy + raised directional gate to 40%.
+### 2026-04-15 11:18 UTC | fix/bug178-instrumentation-and-timeout
+3655c1d perf(accuracy_stats): in-memory TTL cache for signal_utility
+portfolio/accuracy_stats.py
+tests/test_signal_utility_cache.py
+
+### 2026-04-15 11:19 UTC | fix/bug178-instrumentation-and-timeout
+f4719f0 fix(main): bump _TICKER_POOL_TIMEOUT 180 → 360 with 2026-04-15 rationale
+portfolio/main.py
+
+### 2026-04-15 11:20 UTC | fix/bug178-instrumentation-and-timeout
+4811ce6 docs(session-progress): BUG-178 timeout + instrumentation session notes
+docs/SESSION_PROGRESS.md
+
+### 2026-04-15 11:21 UTC | fix/bug178-instrumentation-and-timeout
+27e6dd2 style(tests): ruff B007 — use .values() instead of unused key in utility cache test
+tests/test_signal_utility_cache.py
+
+### 2026-04-15 11:24 UTC | fix/bug178-instrumentation-and-timeout
+4ad689b fix(review): address 3 adversarial-review findings
+portfolio/accuracy_stats.py
+portfolio/signal_engine.py
+tests/conftest.py
+tests/test_phase_log.py
+
+### 2026-04-15 11:25 UTC | fix/bug178-instrumentation-and-timeout
+ced95ff docs(accuracy): correct cache-invalidation comment cadence (6h → daily)
+portfolio/accuracy_stats.py
