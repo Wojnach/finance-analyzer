@@ -1,4 +1,5 @@
 """Tests for portfolio.signal_registry — plugin-style signal registration."""
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -6,6 +7,8 @@ import pytest
 from portfolio.signal_registry import (
     _CORE_SIGNALS,
     _ENHANCED_SIGNALS,
+    _FAILED_IMPORT_COOLDOWN,
+    _FAILED_IMPORT_SENTINEL,
     get_enhanced_signals,
     get_signal_names,
     load_signal_func,
@@ -174,6 +177,61 @@ class TestLoadSignalFunc:
         with patch("importlib.import_module", return_value=mock_mod):
             result = load_signal_func(entry)
             assert result is None
+
+
+class TestFailedImportCaching:
+    """Tests for BUG-198: cache failed imports to prevent log spam."""
+
+    def _make_entry(self, name="broken"):
+        return {
+            "name": name,
+            "func": None,
+            "module_path": "nonexistent.module.does.not.exist",
+            "func_name": "compute_broken",
+        }
+
+    def test_first_failure_returns_none_and_caches_sentinel(self):
+        entry = self._make_entry()
+        result = load_signal_func(entry)
+        assert result is None
+        assert entry["func"] is _FAILED_IMPORT_SENTINEL
+        assert "_fail_ts" in entry
+
+    def test_second_call_within_cooldown_returns_none_without_reimport(self):
+        entry = self._make_entry()
+        load_signal_func(entry)  # first call — imports and fails
+
+        with patch("importlib.import_module") as mock_import:
+            result = load_signal_func(entry)
+            mock_import.assert_not_called()
+        assert result is None
+
+    def test_retry_after_cooldown_expires(self):
+        entry = self._make_entry()
+        load_signal_func(entry)  # first call — fails and caches
+
+        # Simulate cooldown expiry
+        entry["_fail_ts"] = time.monotonic() - _FAILED_IMPORT_COOLDOWN - 1
+
+        with patch("importlib.import_module", side_effect=ImportError("still broken")):
+            result = load_signal_func(entry)
+        assert result is None
+        assert entry["func"] is _FAILED_IMPORT_SENTINEL
+
+    def test_retry_after_cooldown_succeeds(self):
+        entry = self._make_entry()
+        load_signal_func(entry)  # first call — fails
+
+        entry["_fail_ts"] = time.monotonic() - _FAILED_IMPORT_COOLDOWN - 1
+
+        mock_mod = MagicMock()
+        mock_func = MagicMock()
+        mock_mod.compute_broken = mock_func
+        with patch("importlib.import_module", return_value=mock_mod):
+            result = load_signal_func(entry)
+        assert result is mock_func
+        assert entry["func"] is mock_func
+        assert "_fail_ts" not in entry
 
 
 class TestDefaultRegistration:

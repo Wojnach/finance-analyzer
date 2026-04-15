@@ -31,6 +31,8 @@ import pytest
 import portfolio.trigger as trigger_mod
 from portfolio.trigger import (
     SUSTAINED_CHECKS,
+    SUSTAINED_DURATION_S,
+    _update_sustained,
     check_triggers,
     classify_tier,
     update_tier_state,
@@ -1127,3 +1129,62 @@ class TestCheckRecentTrade:
         result = trigger_mod._check_recent_trade(state)
         assert result is True
         assert state["last_checked_tx_count"]["patient"] == 2
+
+
+# ---------------------------------------------------------------------------
+# _update_sustained unit tests
+# ---------------------------------------------------------------------------
+
+class TestUpdateSustained:
+    """Unit tests for the shared sustained-debounce helper."""
+
+    def test_first_call_initializes_count(self):
+        state = {}
+        count_ok, duration_ok = _update_sustained(state, "BTC", "BUY", 1000.0)
+        assert state["BTC"]["value"] == "BUY"
+        assert state["BTC"]["count"] == 1
+        assert state["BTC"]["started_ts"] == 1000.0
+        assert not count_ok
+        assert not duration_ok
+
+    def test_same_value_increments_count(self):
+        state = {"BTC": {"value": "BUY", "count": 1, "started_ts": 1000.0}}
+        count_ok, _ = _update_sustained(state, "BTC", "BUY", 1010.0)
+        assert state["BTC"]["count"] == 2
+        assert state["BTC"]["started_ts"] == 1000.0  # preserved
+        assert not count_ok  # need 3
+
+    def test_count_gate_fires_at_threshold(self):
+        state = {"BTC": {"value": "BUY", "count": SUSTAINED_CHECKS - 1, "started_ts": 1000.0}}
+        count_ok, _ = _update_sustained(state, "BTC", "BUY", 1010.0)
+        assert count_ok
+
+    def test_different_value_resets_count(self):
+        state = {"BTC": {"value": "BUY", "count": 5, "started_ts": 900.0}}
+        count_ok, duration_ok = _update_sustained(state, "BTC", "SELL", 1000.0)
+        assert state["BTC"]["value"] == "SELL"
+        assert state["BTC"]["count"] == 1
+        assert state["BTC"]["started_ts"] == 1000.0
+        assert not count_ok
+        assert not duration_ok
+
+    def test_duration_gate_fires_after_threshold(self):
+        started = 1000.0
+        now = started + SUSTAINED_DURATION_S
+        state = {"BTC": {"value": "BUY", "count": 1, "started_ts": started}}
+        _, duration_ok = _update_sustained(state, "BTC", "BUY", now)
+        assert duration_ok
+
+    def test_duration_gate_does_not_fire_before_threshold(self):
+        started = 1000.0
+        now = started + SUSTAINED_DURATION_S - 1
+        state = {"BTC": {"value": "BUY", "count": 1, "started_ts": started}}
+        _, duration_ok = _update_sustained(state, "BTC", "BUY", now)
+        assert not duration_ok
+
+    def test_independent_keys(self):
+        state = {}
+        _update_sustained(state, "BTC", "BUY", 1000.0)
+        _update_sustained(state, "ETH", "SELL", 1000.0)
+        assert state["BTC"]["value"] == "BUY"
+        assert state["ETH"]["value"] == "SELL"
