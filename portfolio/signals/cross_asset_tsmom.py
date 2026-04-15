@@ -11,13 +11,13 @@ filtered TSMOM yields 45% higher Sharpe than standard TSMOM.
     4. Equity momentum (SPY) — 3-month equity market returns
 
 Cross-asset pairs:
-    XAU-USD  -> TLT  (gold follows bonds in risk-off)
-    XAG-USD  -> XAU  (silver follows gold)
-    BTC-USD  -> SPY  (crypto correlates with risk-on)
-    ETH-USD  -> BTC  (ETH follows BTC)
-    MSTR     -> BTC  (MSTR is leveraged BTC)
+    XAU-USD  -> TLT   (gold follows bonds in risk-off)
+    XAG-USD  -> GC=F  (silver follows gold futures, 24h coverage)
+    BTC-USD  -> SPY   (crypto correlates with risk-on)
+    ETH-USD  -> BTC   (ETH follows BTC)
+    MSTR     -> BTC   (MSTR is leveraged BTC)
 
-Data: yfinance for TLT/SPY (free, no API key). Cached 1 hour.
+Data: yfinance for TLT/SPY/GC=F/BTC-USD (free, no API key). Cached 1 hour.
 """
 from __future__ import annotations
 
@@ -42,13 +42,13 @@ _EQUITY_LOOKBACK = 63
 
 _CROSS_PAIRS = {
     "XAU-USD": "TLT",
-    "XAG-USD": "GLD",
+    "XAG-USD": "GC=F",
     "BTC-USD": "SPY",
     "ETH-USD": "BTC-USD",
     "MSTR": "BTC-USD",
 }
 
-_YF_TICKERS = ["TLT", "SPY", "GLD", "BTC-USD"]
+_YF_TICKERS = ["TLT", "SPY", "GC=F", "BTC-USD"]
 
 
 def _fetch_yf_returns() -> dict[str, dict] | None:
@@ -93,6 +93,9 @@ def _fetch_yf_returns() -> dict[str, dict] | None:
 
                 result[t] = {"ret_63d": ret_63d, "ret_252d": ret_252d}
 
+            missing = set(_YF_TICKERS) - set(result)
+            if missing:
+                logger.warning("cross_asset_tsmom: missing tickers %s", missing)
             return result if result else None
         except Exception as e:
             logger.warning("cross_asset_tsmom yfinance fetch failed: %s", e)
@@ -108,9 +111,12 @@ def _compute_own_tsmom(close: pd.Series) -> str:
     if lookback < 20:
         return "HOLD"
 
-    cur = float(close.iloc[-1])
-    prev = float(close.iloc[-lookback - 1])
-    if prev <= 0 or np.isnan(cur) or np.isnan(prev):
+    try:
+        cur = float(close.iloc[-1])
+        prev = float(close.iloc[-lookback - 1])
+    except (TypeError, ValueError):
+        return "HOLD"
+    if prev <= 0 or not np.isfinite(cur) or not np.isfinite(prev):
         return "HOLD"
 
     ret = cur / prev - 1

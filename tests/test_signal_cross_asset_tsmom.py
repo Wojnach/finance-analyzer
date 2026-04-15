@@ -28,12 +28,12 @@ def _make_df(n=300, trend=0.0):
     })
 
 
-def _make_yf_data(tlt_ret=0.02, spy_ret=0.03, gld_ret=0.01, btc_ret=0.05):
+def _make_yf_data(tlt_ret=0.02, spy_ret=0.03, gcf_ret=0.01, btc_ret=0.05):
     """Create mock yfinance return data."""
     return {
         "TLT": {"ret_63d": tlt_ret, "ret_252d": tlt_ret * 3},
         "SPY": {"ret_63d": spy_ret, "ret_252d": spy_ret * 3},
-        "GLD": {"ret_63d": gld_ret, "ret_252d": gld_ret * 3},
+        "GC=F": {"ret_63d": gcf_ret, "ret_252d": gcf_ret * 3},
         "BTC-USD": {"ret_63d": btc_ret, "ret_252d": btc_ret * 3},
     }
 
@@ -121,12 +121,12 @@ class TestWithContext:
         assert result["indicators"]["cross_pair_ticker"] == "TLT"
 
     @patch("portfolio.signals.cross_asset_tsmom._fetch_yf_returns")
-    def test_xag_uses_gld_cross_pair(self, mock_yf):
+    def test_xag_uses_gcf_cross_pair(self, mock_yf):
         mock_yf.return_value = _make_yf_data()
         df = _make_df()
         ctx = {"ticker": "XAG-USD", "asset_class": "metals"}
         result = compute_cross_asset_tsmom_signal(df, context=ctx)
-        assert result["indicators"]["cross_pair_ticker"] == "GLD"
+        assert result["indicators"]["cross_pair_ticker"] == "GC=F"
 
     @patch("portfolio.signals.cross_asset_tsmom._fetch_yf_returns")
     def test_btc_uses_spy_cross_pair(self, mock_yf):
@@ -189,7 +189,7 @@ class TestSubIndicators:
         assert _compute_own_tsmom(close) == "HOLD"
 
     def test_cross_pair_positive(self):
-        yf_data = _make_yf_data(gld_ret=0.05)
+        yf_data = _make_yf_data(gcf_ret=0.05)
         assert _compute_cross_pair("XAG-USD", yf_data) == "BUY"
 
     def test_cross_pair_negative(self):
