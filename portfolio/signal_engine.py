@@ -65,6 +65,59 @@ def get_last_signal(ticker: str) -> tuple[str, float] | None:
     sig_name, started = entry
     return sig_name, time.monotonic() - started
 
+
+# BUG-178 phase log (added 2026-04-15): records per-ticker phase durations
+# inside generate_signal()'s post-dispatch code. The __post_dispatch__ marker
+# above was too coarse — it collapsed 7+ distinct post-dispatch operations
+# (accuracy load, weighted consensus, penalties, linear factor, etc.) into
+# a single "after dispatch" bucket, so slow cycles with elapsed_since_set
+# ~170s out of a 180s pool timeout gave us zero signal about which phase
+# was actually slow.
+#
+# Each phase records (phase_name, duration_seconds). main.py's slow-cycle
+# diagnostic reads this log when the pool timeout fires so we can see the
+# full phase breakdown retrospectively. Bounded per-ticker (replaced on
+# each generate_signal call) so memory is constant.
+_phase_log_per_ticker: dict[str, list[tuple[str, float]]] = {}
+_phase_log_lock = threading.Lock()
+
+_PHASE_WARN_THRESHOLD_S = 2.0
+
+
+def _reset_phase_log(ticker: str) -> None:
+    """Clear the phase log for a ticker at the start of generate_signal."""
+    if not ticker:
+        return
+    with _phase_log_lock:
+        _phase_log_per_ticker[ticker] = []
+
+
+def _record_phase(ticker: str, phase: str, start_mono: float) -> float:
+    """Record a phase completion for a ticker. Returns the phase duration.
+
+    Logs WARNING if duration > _PHASE_WARN_THRESHOLD_S so that slow
+    individual phases (e.g., cold accuracy_stats load, lock contention)
+    are visible in portfolio.log without waiting for a BUG-178 timeout.
+    """
+    if not ticker:
+        return 0.0
+    dur = time.monotonic() - start_mono
+    with _phase_log_lock:
+        _phase_log_per_ticker.setdefault(ticker, []).append((phase, dur))
+    if dur > _PHASE_WARN_THRESHOLD_S:
+        logger.warning("[SLOW-PHASE] %s/%s: %.1fs", ticker, phase, dur)
+    return dur
+
+
+def get_phase_log(ticker: str) -> list[tuple[str, float]]:
+    """Return the phase breakdown for a ticker's last generate_signal call.
+
+    Used by main.py's BUG-178 slow-cycle diagnostic to dump per-phase timing
+    when the ticker pool times out. Returns an empty list if no log exists.
+    """
+    with _phase_log_lock:
+        return list(_phase_log_per_ticker.get(ticker, []))
+
 _LOCAL_MODEL_HOLD_THRESHOLD = 0.55
 _LOCAL_MODEL_MIN_SAMPLES = 30
 _LOCAL_MODEL_LOOKBACK_DAYS = 30
@@ -1280,8 +1333,13 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     #   - <signal name>     → hang is in the dispatch loop at that signal
     #   - __post_dispatch__ → hang is in accuracy/consensus code after the loop
     # The double-underscore prefix is reserved; no registered signal uses it.
+    #
+    # 2026-04-15 (bug178-instrumentation-timeout): also reset the per-phase log
+    # so the post-dispatch code can record granular timing between __post_dispatch__
+    # and the return. See _record_phase() and _reset_phase_log() above.
     if ticker:
         _set_last_signal(ticker, "__pre_dispatch__")
+        _reset_phase_log(ticker)
 
     # Check if GPU-intensive signals should be skipped (stocks outside market hours)
     from portfolio.market_timing import should_skip_gpu
@@ -1772,6 +1830,12 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     if ticker:
         _set_last_signal(ticker, "__post_dispatch__")
 
+    # BUG-178 phase timing (added 2026-04-15): _phase_start_*  track wall
+    # time at the boundary between named post-dispatch phases so _record_phase()
+    # can log per-phase duration. See module-level _phase_log_per_ticker and
+    # main.py's slow-cycle diagnostic for how this log is consumed.
+    _phase_start = time.monotonic()
+
     # C10: Capture raw pre-gate votes BEFORE any gating rewrites them to HOLD.
     # This allows accuracy tracking for regime-gated signals, breaking the
     # dead-signal trap where gated signals can never accumulate accuracy data.
@@ -1816,6 +1880,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     for sig_name in regime_gated_effective:
         if sig_name in votes and votes[sig_name] != "HOLD":
             votes[sig_name] = "HOLD"
+
+    if ticker:
+        _record_phase(ticker, "regime_gate", _phase_start)
+        _phase_start = time.monotonic()
 
     # Derive buy/sell counts from named votes (post-gating)
     buy = sum(1 for v in votes.values() if v == "BUY")
@@ -1917,6 +1985,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         accuracy_data = {sig: {"accuracy": 0.0, "total": 999} for sig in SIGNAL_NAMES}
         _accuracy_failed = True
 
+    if ticker:
+        _record_phase(ticker, "acc_load", _phase_start)
+        _phase_start = time.monotonic()
+
     # Overlay regime-specific accuracy when available.
     # H3: Skip all overlays when primary load failed — they would silently restore
     # real accuracy values for cached signals, negating the fail-closed gate.
@@ -2003,6 +2075,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         except Exception:
             logger.debug("Utility weighting unavailable", exc_info=True)
 
+    if ticker:
+        _record_phase(ticker, "utility_overlay", _phase_start)
+        _phase_start = time.monotonic()
+
     # Multi-horizon: optionally use each signal's best horizon accuracy.
     # H3: Skip when primary load failed to preserve fail-closed gate.
     sig_cfg = (config or {}).get("signals", {})
@@ -2027,6 +2103,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         horizon=horizon,
         regime_gated_override=regime_gated_effective,
     )
+
+    if ticker:
+        _record_phase(ticker, "weighted_consensus", _phase_start)
+        _phase_start = time.monotonic()
 
     # Apply core gate AND MIN_VOTERS gate to weighted consensus too
     if core_active == 0 or active_voters < min_voters:
@@ -2070,6 +2150,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     )
     if penalty_log:
         extra_info["_penalty_log"] = penalty_log
+
+    if ticker:
+        _record_phase(ticker, "penalties", _phase_start)
+        _phase_start = time.monotonic()
 
     # --- Market health confidence penalty ---
     # Penalizes BUY signals when broad market is unhealthy (distribution days,
@@ -2134,6 +2218,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     except Exception:
         pass  # graceful degradation — no trained model = no adjustment
 
+    if ticker:
+        _record_phase(ticker, "linear_factor", _phase_start)
+        _phase_start = time.monotonic()
+
     # --- Per-ticker consensus accuracy gate ---
     # BUG-164: AMD 24.8%, GOOGL 31.3%, META 34.2% consensus accuracy.
     # The system is actively harmful on these tickers.  Gate consensus
@@ -2172,5 +2260,8 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     if horizon in ("3h", "4h"):
         from portfolio.short_horizon import CONFIDENCE_CAP_3H
         conf = min(conf, CONFIDENCE_CAP_3H)
+
+    if ticker:
+        _record_phase(ticker, "consensus_gate", _phase_start)
 
     return action, conf, extra_info

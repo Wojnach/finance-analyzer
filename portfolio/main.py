@@ -578,13 +578,29 @@ def run(force_report=False, active_symbols=None):
         timed_out = [n for f, n in futures.items() if not f.done()]
         try:
             from portfolio.signal_engine import get_last_signal as _get_last
+            from portfolio.signal_engine import get_phase_log as _get_phase_log
             last_sigs = {n: _get_last(n) for n in timed_out}
+            # 2026-04-15: also dump per-ticker phase breakdown when the pool
+            # times out. This tells us WHICH post-dispatch phase
+            # (acc_load / utility_overlay / weighted_consensus / penalties /
+            # linear_factor / consensus_gate / regime_gate) burned the time,
+            # so we can target the real bottleneck instead of coarsely blaming
+            # __post_dispatch__.
+            phase_logs = {n: _get_phase_log(n) for n in timed_out}
         except Exception:
             last_sigs = {}
+            phase_logs = {}
         logger.error(
             "BUG-178: Ticker pool timeout after %ds. Stuck: %s. Last signals: %s",
             _TICKER_POOL_TIMEOUT, timed_out, last_sigs,
         )
+        for name, phases in phase_logs.items():
+            if phases:
+                # Format as 'phase=dur_s' pairs, one ticker per line. Keep on
+                # one log line per ticker so Windows Event Log / tail -f stays
+                # readable when 5 tickers time out simultaneously.
+                phase_str = " ".join(f"{p}={d:.1f}s" for p, d in phases)
+                logger.error("BUG-178 phases [%s]: %s", name, phase_str)
         for f in futures:
             f.cancel()
         signals_failed += len(timed_out)
@@ -649,6 +665,7 @@ def run(force_report=False, active_symbols=None):
     if _run_elapsed > 120:
         try:
             from portfolio.signal_engine import get_last_signal as _get_last
+            from portfolio.signal_engine import get_phase_log as _get_phase_log
             # Use signals.keys() because those are the tickers that successfully
             # returned from the pool. Timed-out tickers are already named by the
             # BUG-178 handler's Last signals log line.
@@ -657,6 +674,17 @@ def run(force_report=False, active_symbols=None):
                 "Slow cycle diagnostic: %.1fs total, last signals tracked: %s",
                 _run_elapsed, last_sigs,
             )
+            # 2026-04-15: also dump the post-dispatch phase breakdown for each
+            # ticker that returned successfully. On a slow cycle the phase log
+            # reveals which named phase (acc_load, utility_overlay, weighted_-
+            # consensus, penalties, linear_factor, consensus_gate, regime_gate)
+            # burned the budget — otherwise we only see the aggregate and can't
+            # target the fix.
+            for name in signals:
+                phases = _get_phase_log(name)
+                if phases:
+                    phase_str = " ".join(f"{p}={d:.1f}s" for p, d in phases)
+                    logger.warning("Slow cycle phases [%s]: %s", name, phase_str)
         except Exception as e:
             logger.debug("Slow cycle diagnostic failed: %s", e)
 
