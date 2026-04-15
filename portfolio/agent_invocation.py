@@ -687,12 +687,9 @@ def get_completion_stats(hours=24):
             continue
 
         try:
-            # Parse ISO-8601 timestamp
-            ts_str_clean = ts_str.replace("+00:00", "+0000").replace("Z", "+0000")
-            if "+" in ts_str_clean[10:]:
-                dt = datetime.fromisoformat(ts_str)
-            else:
-                dt = datetime.fromisoformat(ts_str).replace(tzinfo=UTC)
+            dt = datetime.fromisoformat(ts_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
             entry_ts = dt.timestamp()
         except (ValueError, TypeError):
             continue

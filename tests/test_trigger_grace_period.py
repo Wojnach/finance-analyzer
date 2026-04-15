@@ -160,7 +160,7 @@ class TestGracePeriodPreservesState:
         """Grace period should NOT reset sustained signal counts."""
         state = {
             _GRACE_PERIOD_KEY: 99999,
-            "sustained_counts": {"BTC-USD": {"action": "BUY", "count": 5}},
+            "sustained_counts": {"BTC-USD": {"value": "BUY", "count": 5}},
             "last": {"prices": {}, "signals": {}},
         }
         isolate.write_text(json.dumps(state), encoding="utf-8")

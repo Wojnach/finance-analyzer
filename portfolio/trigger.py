@@ -53,6 +53,34 @@ _GRACE_PERIOD_KEY = "last_loop_pid"  # stored in trigger_state.json
 _startup_grace_active = True  # True until first check_triggers call completes
 
 
+def _update_sustained(
+    state_dict: dict, key: str, value, now_ts: float
+) -> tuple[bool, bool]:
+    """Update sustained-debounce state for a key and return gate results.
+
+    Shared by signal flip (section 2) and sentiment reversal (section 5).
+    Increments count if value unchanged, resets if changed. Returns
+    (count_ok, duration_ok) indicating whether either debounce gate passed.
+    """
+    prev = state_dict.get(key, {})
+    if prev.get("value") == value:
+        state_dict[key] = {
+            "value": value,
+            "count": prev["count"] + 1,
+            "started_ts": prev.get("started_ts", now_ts),
+        }
+    else:
+        state_dict[key] = {
+            "value": value,
+            "count": 1,
+            "started_ts": now_ts,
+        }
+    entry = state_dict[key]
+    count_ok = entry["count"] >= SUSTAINED_CHECKS
+    duration_ok = (now_ts - entry["started_ts"]) >= SUSTAINED_DURATION_S
+    return count_ok, duration_ok
+
+
 def _today_str():
     return datetime.now(UTC).strftime("%Y-%m-%d")
 
@@ -190,26 +218,12 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
     _flip_now_ts = time.time()
     for ticker, sig in signals.items():
         current_action = sig["action"]
-        prev_count = sustained.get(ticker, {})
-        if prev_count.get("action") == current_action:
-            sustained[ticker] = {
-                "action": current_action,
-                "count": prev_count["count"] + 1,
-                "started_ts": prev_count.get("started_ts", _flip_now_ts),
-            }
-        else:
-            sustained[ticker] = {
-                "action": current_action,
-                "count": 1,
-                "started_ts": _flip_now_ts,
-            }
+        count_ok, duration_ok = _update_sustained(
+            sustained, ticker, current_action, _flip_now_ts,
+        )
 
         triggered_action = prev_triggered.get(ticker, {}).get("action")
         if triggered_action and current_action != triggered_action:
-            count_ok = sustained[ticker]["count"] >= SUSTAINED_CHECKS
-            duration_ok = (
-                (_flip_now_ts - sustained[ticker]["started_ts"]) >= SUSTAINED_DURATION_S
-            )
             if count_ok or duration_ok:
                 reasons.append(
                     f"{ticker} flipped {triggered_action}->{current_action} (sustained)"
@@ -239,31 +253,15 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
                 reasons.append(f"F&G crossed {threshold} ({old_val}->{val})")
                 break
 
-    # 5. Sentiment reversal — same OR-debounce as section 2: SUSTAINED_CHECKS
-    #    consecutive cycles OR SUSTAINED_DURATION_S wall-clock seconds.
+    # 5. Sentiment reversal — same OR-debounce as section 2.
     sustained_sent = state.get("sustained_sentiment", {})
     stable_sent = state.get("stable_sentiment", {})
     _sent_now_ts = time.time()
     for ticker, sent in sentiments.items():
-        prev_sc = sustained_sent.get(ticker, {})
-        if prev_sc.get("value") == sent:
-            sustained_sent[ticker] = {
-                "value": sent,
-                "count": prev_sc.get("count", 0) + 1,
-                "started_ts": prev_sc.get("started_ts", _sent_now_ts),
-            }
-        else:
-            sustained_sent[ticker] = {
-                "value": sent,
-                "count": 1,
-                "started_ts": _sent_now_ts,
-            }
-
-        _sent_count_ok = sustained_sent[ticker]["count"] >= SUSTAINED_CHECKS
-        _sent_duration_ok = (
-            (_sent_now_ts - sustained_sent[ticker]["started_ts"]) >= SUSTAINED_DURATION_S
+        count_ok, duration_ok = _update_sustained(
+            sustained_sent, ticker, sent, _sent_now_ts,
         )
-        if _sent_count_ok or _sent_duration_ok:
+        if count_ok or duration_ok:
             last_stable = stable_sent.get(ticker)
             if (
                 last_stable

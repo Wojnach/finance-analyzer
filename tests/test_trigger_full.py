@@ -409,7 +409,7 @@ class TestUpdateTierState:
             "last_trigger_time": 12345.0,
             "today_date": "2026-02-26",
             "triggered_consensus": {"BTC-USD": "BUY"},
-            "sustained_counts": {"BTC-USD": {"action": "BUY", "count": 2}},
+            "sustained_counts": {"BTC-USD": {"value": "BUY", "count": 2}},
         })
 
         update_tier_state(3)

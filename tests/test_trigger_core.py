@@ -916,7 +916,7 @@ class TestStatePersistence:
         check_triggers({"BTC-USD": _sig("BUY")}, prices, {}, {})
 
         state = json.loads(sf.read_text(encoding="utf-8"))
-        assert state["sustained_counts"]["BTC-USD"]["action"] == "BUY"
+        assert state["sustained_counts"]["BTC-USD"]["value"] == "BUY"
         assert state["sustained_counts"]["BTC-USD"]["count"] == 2
 
     def test_prices_saved_on_trigger(self, isolate_state_files):
