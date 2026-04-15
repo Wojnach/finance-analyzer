@@ -1840,17 +1840,36 @@ def detect_holdings(page):
                 swing_live = _get_live_swing_trader()
                 # Codex review round 4 P1: fishing instruments must stay
                 # in the legacy POSITIONS dict so _eod_sell_fishing_positions
-                # and the fish-engine trail can still manage them. Without
-                # this exemption, an ob_id that's both in KNOWN_WARRANT_OB_IDS
-                # (with _managed_by=swing_trader) AND FISHING_OB_IDS would
-                # be skipped here AND skipped by _migrate_orphans, leaving
-                # it invisible to every exit path — including EOD safety.
+                # and the fish-engine trail can still manage them.
                 is_fishing = ob_id in FISHING_OB_IDS
+
+                # Codex review round 5 P1: skip legacy tracking ONLY
+                # when swing has actually ingested this ob_id into its
+                # state. Merely being tagged _managed_by=swing_trader
+                # isn't enough — if _migrate_orphans fails this cycle
+                # (fetch_page_positions transiently None, missing
+                # underlying price, etc.) the holding ends up in neither
+                # POSITIONS nor swing_state, invisible to every exit.
+                # Fall through to the legacy branch as a safety net
+                # until swing confirms ownership.
+                swing_has_pos = False
+                if swing_live is not None:
+                    try:
+                        swing_has_pos = any(
+                            str(p.get("ob_id", "")) == ob_id
+                            for p in swing_live.state.get("positions", {}).values()
+                        )
+                    except Exception:
+                        logger.debug(
+                            "detect_holdings: swing state read failed for ob_id=%s",
+                            ob_id, exc_info=True,
+                        )
                 swing_owned = (
                     info
                     and info.get("_managed_by") == "swing_trader"
                     and SWING_TRADER_AVAILABLE
                     and swing_live is not None
+                    and swing_has_pos
                     and not is_fishing
                 )
                 if swing_owned:

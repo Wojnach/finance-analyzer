@@ -228,6 +228,16 @@ def _lookup_legacy_underlying_entry(ob_id: str) -> float:
                 continue
             if str(v.get("ob_id", "")) != str(ob_id):
                 continue
+            # Codex review round 5 P2: inactive/migrated entries are
+            # stale — on a later manual REBUY of the same warrant, the
+            # legacy record still has the PREVIOUS trade's entry
+            # underlying. Using it would shift every risk calculation
+            # on the new position off a stale baseline. Only trust
+            # entries still marked active AND without a sold_reason.
+            if not v.get("active"):
+                continue
+            if v.get("sold_reason"):
+                continue
             und = v.get("underlying_entry") or v.get("entry_underlying")
             if isinstance(und, (int, float)) and und > 0:
                 return float(und)
@@ -1112,8 +1122,20 @@ class SwingTrader:
             # main loop's price fetch cycle).
             und_price = self._get_ticker_underlying_price(underlying, prices)
             if (not und_price or und_price <= 0):
+                # Codex review round 5 P1: resolve api_type from the
+                # canonical source for this ob_id. Previously the
+                # fallback hardcoded "warrant" which fails for
+                # certificate instruments (e.g. bull_silver_x5 — the
+                # exact case this feature targets).
+                api_type = "warrant"
+                if meta is not None:
+                    api_type = meta.get("api_type", api_type)
+                else:
+                    for _v in self.warrant_catalog.values():
+                        if str(_v.get("ob_id")) == ob_id_str:
+                            api_type = _v.get("api_type", api_type)
+                            break
                 try:
-                    api_type = (meta or {}).get("api_type", "warrant") if meta else "warrant"
                     data = fetch_price(self.page, ob_id_str, api_type)
                     if isinstance(data, dict):
                         und_price = data.get("underlying") or 0

@@ -667,6 +667,26 @@ def test_lookup_legacy_underlying_entry_returns_stored_value(tmp_path, monkeypat
     assert mst._lookup_legacy_underlying_entry("9999999") == 0.0
 
 
+def test_lookup_legacy_underlying_entry_ignores_migrated_record(tmp_path, monkeypatch):
+    """Codex review round 5 P2: don't return stale entry from a migrated (inactive) record."""
+    import json
+    legacy_path = tmp_path / "metals_positions_state.json"
+    legacy_path.write_text(json.dumps({
+        "bull_silver_x5": {
+            "active": False, "units": 97, "entry": 10.27,
+            "stop": 9.76, "ob_id": "1650161",
+            "underlying_entry": 78.95,
+            "sold_reason": "migrated_to_swing",
+            "sold_ts": "2026-04-15T12:00:00+00:00",
+        },
+    }))
+    monkeypatch.setattr(mst, "LEGACY_POSITIONS_FILE", str(legacy_path))
+
+    # Previous trade was migrated; a REBUY of the same ob_id must not
+    # reuse the stale entry_underlying.
+    assert mst._lookup_legacy_underlying_entry("1650161") == 0.0
+
+
 def test_migrate_orphans_preserves_true_entry_underlying(tmp_path, monkeypatch, patched_state_file, patched_legacy_state):
     """Codex review round 4 P1: migration uses legacy underlying_entry when present."""
     # Enrich patched_legacy_state fixture with underlying_entry field
