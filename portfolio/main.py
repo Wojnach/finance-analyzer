@@ -537,21 +537,42 @@ def run(force_report=False, active_symbols=None):
     #   fingpt daemon was serializing every ticker's sentiment behind its
     #   own global lock, stretching per-ticker latency to ~75s × 5 tickers
     #   = ~375s tail. 500s was 2x that max.
-    # - 2026-04-09 (current, post feat/fingpt-in-llmbatch): 180s. The
-    #   fingpt daemon is retired; fingpt now runs in portfolio.llm_batch
-    #   as a post-cycle phase via llama_server full GPU offload. Per-ticker
-    #   work no longer serializes on fingpt. Live measurement after the
-    #   merge showed cycles dropping from ~472s to ~226s with 45s/ticker
-    #   average. 180s = 4x the observed per-ticker average and 2x the
-    #   target "slow" cycle of 90s, which gives a comfortable safety
-    #   margin for genuinely stuck tickers (network timeouts, yfinance
-    #   blocking) without being so loose that a real hang goes unnoticed.
+    # - 2026-04-09 (post feat/fingpt-in-llmbatch): 180s. The fingpt daemon
+    #   was retired; fingpt moved to portfolio.llm_batch as a post-cycle
+    #   phase via llama_server full GPU offload. Per-ticker work no longer
+    #   serialized on fingpt. Live measurement after the merge showed
+    #   cycles dropping from ~472s to ~226s with 45s/ticker average.
+    #   180s = 4x the observed per-ticker average and 2x the target "slow"
+    #   cycle of 90s, a comfortable safety margin for genuinely stuck
+    #   tickers (network timeouts, yfinance blocking).
+    # - 2026-04-15: 360s. Telegram alerts at 10:34 showed recurring BUG-178
+    #   pool-timeout cycles across 2026-04-14/15 with the 5 zombie threads
+    #   completing 330-525s into the cycle, all 5 within ~10s of each
+    #   other — the signature of a shared-resource wait rather than truly
+    #   stuck work. Since 2026-04-09 the ticker path has grown (vix_term_-
+    #   structure, DXY intraday cross-asset, per-ticker signal gating,
+    #   fundamental correlation cluster, per-ticker directional accuracy,
+    #   ETH qwen3 gate) and the llama_server rotation (2026-04-10) means
+    #   signals occasionally pull stale/miss data under contention bursts.
+    #   The old 180s was measured when the system had 12 tickers; with 5
+    #   tickers and more per-ticker work the cost moved legitimately, not
+    #   because something is "stuck". 360s is 2.8x the observed p50-slow
+    #   (~130s) and 0.7x the observed p95-slow (~525s), leaving 240s of
+    #   margin inside the 600s cadence for post-cycle LLM batch, trigger
+    #   detection, journal, and telegram. Loop contract's own cycle_dur
+    #   check at 600s remains the catch-all for genuine hangs. Batch 1 of
+    #   this fix (phase-level instrumentation in signal_engine) and batch
+    #   2 (signal_utility TTL cache) ship together so we can see per-phase
+    #   timing in future slow cycles and the next bump decision is
+    #   grounded in data, not guesswork. See docs/plans/2026-04-15-bug178-
+    #   instrumentation-timeout.md for the full rationale.
     #
-    # If cycles start creeping above ~180s again, the first place to look
-    # is an added signal/LLM in the ticker path — do NOT bump this timeout
-    # without understanding why, it's meant to fire on hangs not on
-    # legitimate slow processing.
-    _TICKER_POOL_TIMEOUT = 180
+    # If cycles start creeping above ~360s again, the first place to look
+    # is the BUG-178 phase log dumped by the slow-cycle diagnostic below —
+    # acc_load, utility_overlay, weighted_consensus, penalties, linear_-
+    # factor, and consensus_gate are each tagged in portfolio.log so a
+    # real bottleneck is identifiable without guessing.
+    _TICKER_POOL_TIMEOUT = 360
     # OR-I-001: avoid context manager — __exit__ calls shutdown(wait=True)
     # which blocks the loop when threads hang past the timeout.
     pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ticker")
