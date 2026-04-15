@@ -385,7 +385,7 @@ except ImportError:
         return 1.0, []
 
 # --- CONFIG ---
-CLAUDE_ENABLED = False        # Master switch: set True to re-enable Claude invocations
+CLAUDE_ENABLED = True         # 2026-04-15: re-enabled metals Layer 2 (user request)
 CHECK_INTERVAL = 60           # target seconds between checks
 TRIGGER_PRICE_MOVE = 5.0      # % move from last invocation to trigger (was 2.0)
 TRIGGER_TRAILING = 8.0        # % drop from peak to trigger (was 3.0)
@@ -763,7 +763,7 @@ NEWS_FETCH_INTERVAL_ACTIVE_SILVER = int(
 )
 
 # --- FISH ENGINE (integrated intraday fishing) ---
-FISH_ENGINE_ENABLED = True       # disabled by default — enable manually per session
+FISH_ENGINE_ENABLED = False      # 2026-04-15: disabled after 12 consecutive losses (-12,257 SEK session). Re-enable only after 6 known integration bugs fixed (docs ref: project_fish_engine_live_test.md)
 _fish_engine = None               # FishEngine instance (lazy init)
 _loop_page = None                 # Playwright page ref, set by main loop at startup
 PROB_REPORT_INTERVAL = 5          # compute probability report every N checks (~2.5 min)
