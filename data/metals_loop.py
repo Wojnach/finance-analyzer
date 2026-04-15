@@ -296,10 +296,31 @@ except ImportError as e:
 
 try:
     from metals_swing_trader import SwingTrader
+    import metals_swing_trader as _swing_mod
     SWING_TRADER_AVAILABLE = True
 except ImportError as e:
     print(f"[WARN] swing trader import failed: {e}", flush=True)
     SWING_TRADER_AVAILABLE = False
+    _swing_mod = None
+
+
+# Module-level reference to the live SwingTrader instance, set by main()
+# after successful __init__. detect_holdings() reads this via
+# _get_live_swing_trader() to decide whether to defer to swing for a
+# position. Stays None when main() hasn't initialized swing_trader yet
+# (e.g. during test imports).
+_LIVE_SWING_TRADER = None
+
+
+def _set_live_swing_trader(inst):
+    """Register the live SwingTrader instance for detect_holdings to see."""
+    global _LIVE_SWING_TRADER
+    _LIVE_SWING_TRADER = inst
+
+
+def _get_live_swing_trader():
+    """Return the registered SwingTrader instance, or None if not initialized."""
+    return _LIVE_SWING_TRADER
 
 try:
     from metals_execution_engine import build_execution_recommendations, hours_to_metals_close
@@ -1513,18 +1534,43 @@ def get_underlying_momentum(ticker, lookback=10):
 # Dynamic holdings detection — auto-detect instruments bought by user
 # ---------------------------------------------------------------------------
 # Known warrant orderbook IDs → ticker mapping
+#
+# 2026-04-15: added `_managed_by: "swing_trader"` to all five hardcoded
+# entries so detect_holdings() below routes auto-detected holdings through
+# SwingTrader.ingest_position() instead of adding them to the legacy
+# POSITIONS dict. The legacy trailing-stop path is dead-gated via
+# STOP_ORDER_ENABLED=False + HARDWARE_TRAILING_ENABLED=True, so any
+# position that lands in POSITIONS without an explicit migration gets
+# zero exit protection (the bull_silver_x5 incident earlier today is
+# exactly this). See docs/PLAN-orphan-positions.md.
 KNOWN_WARRANT_OB_IDS = {
     "2334960": {"key": "silver301", "name": "MINI L SILVER AVA 301",
-                "api_type": "warrant", "underlying": "XAG-USD", "leverage": 4.3},
+                "api_type": "warrant", "underlying": "XAG-USD", "leverage": 4.3,
+                "_managed_by": "swing_trader"},
     "2043157": {"key": "silver_sg", "name": "MINI L SILVER SG",
-                "api_type": "warrant", "underlying": "XAG-USD", "leverage": 1.56},
+                "api_type": "warrant", "underlying": "XAG-USD", "leverage": 1.56,
+                "_managed_by": "swing_trader"},
     "856394":  {"key": "gold", "name": "BULL GULD X8 N",
-                "api_type": "certificate", "underlying": "XAU-USD", "leverage": 8.0},
+                "api_type": "certificate", "underlying": "XAU-USD", "leverage": 8.0,
+                "_managed_by": "swing_trader"},
     "2286417": {"key": "bear_silver_x5", "name": "BEAR SILVER X5 AVA 12",
-                "api_type": "certificate", "underlying": "XAG-USD", "leverage": 5.0},
+                "api_type": "certificate", "underlying": "XAG-USD", "leverage": 5.0,
+                "_managed_by": "swing_trader"},
     "1650161": {"key": "bull_silver_x5", "name": "BULL SILVER X5 AVA 4",
-                "api_type": "certificate", "underlying": "XAG-USD", "leverage": 5.0},
+                "api_type": "certificate", "underlying": "XAG-USD", "leverage": 5.0,
+                "_managed_by": "swing_trader"},
 }
+
+
+def lookup_known_warrant(ob_id):
+    """Return KNOWN_WARRANT_OB_IDS metadata by ob_id, or None.
+
+    Public module-level helper so other modules (SwingTrader) can perform
+    the lookup without reaching into internals. Returns a dict with at
+    least `key`, `name`, `api_type`, `underlying`, `leverage` and an
+    optional `_managed_by` marker.
+    """
+    return KNOWN_WARRANT_OB_IDS.get(str(ob_id))
 # Extend with WARRANT_CATALOG if available
 if CATALOG_AVAILABLE:
     for wk, wv in WARRANT_CATALOG.items():
@@ -1605,6 +1651,17 @@ except ImportError:
 FISHING_TRAIL_START_PCT = 0.0       # trail immediately (no gain threshold)
 FISHING_EOD_SELL_MINUTE_CET = (21, 50)  # sell fishing positions at 21:50 CET
 _eod_fishing_sold_today: str = ""   # date string guard — prevent repeated EOD sells
+
+# 2026-04-15: push FISHING_OB_IDS into metals_swing_trader so its
+# _migrate_orphans() skips fish-engine-owned positions. Direct attribute
+# assignment is fine here — metals_swing_trader declares an empty default
+# set at module scope that we overwrite. If the import failed above this
+# becomes a no-op (guarded via getattr).
+if _swing_mod is not None:
+    try:
+        _swing_mod.FISHING_OB_IDS = FISHING_OB_IDS
+    except Exception:
+        logger.debug("Could not propagate FISHING_OB_IDS to swing_trader", exc_info=True)
 # 2026-04-09: log-once set for unknown ob_ids in detect_holdings — previously
 # emitted every 30s when account held a warrant not in KNOWN_WARRANT_OB_IDS
 # (e.g. unrecognized issuer), flooding the log and hiding real issues. Only
@@ -1739,6 +1796,45 @@ def detect_holdings(page):
             if ob_id in existing_ob_ids:
                 key = existing_ob_ids[ob_id]
                 pos = POSITIONS[key]
+                # Codex review 2026-04-15 P1: do NOT reactivate entries
+                # that were migrated to SwingTrader. Without this guard
+                # the 30s holdings diff flips `active` back to True on
+                # the next scan, which puts the position under BOTH
+                # legacy management (this dict) AND swing management
+                # (swing_state.positions) — reopening the duplicate
+                # stop / duplicate sell race the migration was meant
+                # to close.
+                #
+                # Codex review round 6 P1: but ONLY if swing actually
+                # still owns this ob_id. On a later rebuy, the legacy
+                # row carries sold_reason=migrated_to_swing from the
+                # PREVIOUS trade; the fresh holding would otherwise be
+                # silently dropped. If swing doesn't currently track
+                # it, clear the migration tombstone and fall through to
+                # reactivation so the position lands somewhere visible.
+                if pos.get("sold_reason") == "migrated_to_swing":
+                    _swing_live_check = _get_live_swing_trader()
+                    _swing_has_pos = False
+                    if _swing_live_check is not None:
+                        try:
+                            _swing_has_pos = any(
+                                str(p.get("ob_id", "")) == ob_id
+                                for p in _swing_live_check.state.get("positions", {}).values()
+                            )
+                        except Exception:
+                            logger.debug(
+                                "detect_holdings: swing state probe failed ob_id=%s",
+                                ob_id, exc_info=True,
+                            )
+                    if _swing_has_pos:
+                        continue
+                    # Stale migration marker — swing no longer tracks it.
+                    # Strip the tombstone so the reactivation path below
+                    # can put this rebuy back under legacy management.
+                    pos.pop("sold_reason", None)
+                    pos.pop("sold_ts", None)
+                    pos.pop("migrated_pos_id", None)
+                    log(f"Holdings: stale migration marker cleared for {key} (rebuy)")
                 # Reactivate if was sold
                 if not pos["active"]:
                     pos["active"] = True
@@ -1759,7 +1855,53 @@ def detect_holdings(page):
             else:
                 # Brand new instrument — check if we recognize it
                 info = KNOWN_WARRANT_OB_IDS.get(ob_id)
-                if info and info.get("_managed_by") == "swing_trader":
+                # Codex review 2026-04-15 P1: only skip legacy tracking
+                # when SwingTrader is actually available AND initialized.
+                # If SwingTrader failed to import/init, the _managed_by
+                # tag on KNOWN_WARRANT_OB_IDS would otherwise leave the
+                # position completely unmanaged (neither legacy POSITIONS
+                # nor swing state tracks it, so no exit path runs). Fall
+                # through to the legacy branch as a safety net.
+                #
+                # `swing_trader` is a local in main_loop; detect_holdings
+                # can't see it directly. Use the module-level "live"
+                # reference set by main after successful init.
+                swing_live = _get_live_swing_trader()
+                # Codex review round 4 P1: fishing instruments must stay
+                # in the legacy POSITIONS dict so _eod_sell_fishing_positions
+                # and the fish-engine trail can still manage them.
+                is_fishing = ob_id in FISHING_OB_IDS
+
+                # Codex review round 5 P1: skip legacy tracking ONLY
+                # when swing has actually ingested this ob_id into its
+                # state. Merely being tagged _managed_by=swing_trader
+                # isn't enough — if _migrate_orphans fails this cycle
+                # (fetch_page_positions transiently None, missing
+                # underlying price, etc.) the holding ends up in neither
+                # POSITIONS nor swing_state, invisible to every exit.
+                # Fall through to the legacy branch as a safety net
+                # until swing confirms ownership.
+                swing_has_pos = False
+                if swing_live is not None:
+                    try:
+                        swing_has_pos = any(
+                            str(p.get("ob_id", "")) == ob_id
+                            for p in swing_live.state.get("positions", {}).values()
+                        )
+                    except Exception:
+                        logger.debug(
+                            "detect_holdings: swing state read failed for ob_id=%s",
+                            ob_id, exc_info=True,
+                        )
+                swing_owned = (
+                    info
+                    and info.get("_managed_by") == "swing_trader"
+                    and SWING_TRADER_AVAILABLE
+                    and swing_live is not None
+                    and swing_has_pos
+                    and not is_fishing
+                )
+                if swing_owned:
                     # 2026-04-10: SwingTrader manages this via its own state
                     # file (data/metals_swing_state.json). Do NOT add it to
                     # the legacy POSITIONS dict — that would trigger
@@ -6402,6 +6544,11 @@ def main():
         if SWING_TRADER_AVAILABLE:
             try:
                 swing_trader = SwingTrader(page)
+                # Codex review 2026-04-15 P1: register the live instance
+                # so detect_holdings() can tell init succeeded. Without
+                # this, a failed init leaves _managed_by=swing_trader
+                # orphans completely unmanaged.
+                _set_live_swing_trader(swing_trader)
                 log(f"Swing trader: ACTIVE (cash={swing_trader.state['cash_sek']:.0f} SEK, "
                     f"DRY_RUN={swing_trader.state.get('_dry', 'see config')})")
             except Exception:
