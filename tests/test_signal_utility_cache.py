@@ -115,7 +115,7 @@ class TestCorrectness:
         bypass the cache AND return zeros (not touch disk)."""
         invalidate_signal_utility_cache()
         result = signal_utility("1d", entries=[])
-        for sig, stats in result.items():
+        for stats in result.values():
             assert stats["samples"] == 0
             assert stats["total_return"] == 0.0
             assert stats["avg_return"] == 0.0
