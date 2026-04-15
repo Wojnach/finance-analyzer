@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-04-15 (autonomous improvement session)
+- **BUG-196: Relative path fragility (P2)**: 6 modules (`microstructure_state`, `fear_greed`, `seasonality`, `linear_factor`, `signal_weight_optimizer`, `train_signal_weights`) used `Path("data/...")` relative to CWD instead of `Path(__file__).resolve().parent.parent / "data"`. Now all 6 use the absolute pattern, matching the 40+ other modules.
+- **BUG-197: Dead timestamp code (P3)**: `agent_invocation.py:691` computed `ts_str_clean` but never used it — Python 3.12 `fromisoformat()` handles `+00:00` and `Z` natively. Simplified to direct `fromisoformat()` call.
+- **BUG-198: Signal registry import spam (P2)**: `signal_registry.py:78-89` re-attempted broken imports on every call (35×/cycle). Now caches failures with 5-min cooldown via sentinel value. Warning logged once per cooldown.
+- **BUG-199: Trigger sustained gate duplication (P3)**: Extracted shared `_update_sustained()` helper from signal flip (section 2) and sentiment reversal (section 5) in `trigger.py`. Reduces 40 lines to 20, ensures changes apply to both paths.
+- **Lint cleanup**: 9 unused imports removed (F401 → 0), 8 ruff violations fixed (UP035, SIM102, SIM105, SIM118, E731, I001). Portfolio ruff violations 67 → 59 (remaining: 54 E402 intentional, 5 SIM115 intentional).
+- **New tests**: 12 new tests — `_update_sustained` unit tests (8), signal registry import caching (4). All pass.
+- Theme: Path Safety, Code Quality, DRY, Lint Compliance.
+
 ## 2026-04-12 (autonomous improvement session)
 - **BUG-185: Directional accuracy KeyError safety (P2)**: `signal_engine.py:861,863` accessed `stats["buy_accuracy"]` without `.get()`. Falls back to overall accuracy if key is missing (cache corruption defense).
 - **BUG-186: Blended accuracy `correct` field (P3)**: `accuracy_stats.py:650` `correct` count was always from all-time data even when `accuracy` was a 70/30 recent/alltime blend. Now derives `correct = round(blended * total)` so `correct/total ≈ accuracy`.
