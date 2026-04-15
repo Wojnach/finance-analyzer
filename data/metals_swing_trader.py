@@ -163,6 +163,13 @@ TELEGRAM_NO_EDGE_INTERVAL = 60
 # to manage a specific position manually). See docs/PLAN-orphan-positions.md.
 SWING_INGEST_ORPHANS: bool = True
 
+# Periodic re-migration interval (in check ticks, ~60s each). Codex review
+# P1 (2026-04-15): the one-shot flag previously disabled migration forever
+# after first success, which meant manual buys during a session never got
+# adopted. Re-running every 30 ticks (~30 min) catches mid-session holdings
+# without spamming fetch_page_positions.
+SWING_INGEST_RECHECK_INTERVAL: int = 30
+
 # Path to the legacy POSITIONS dict file. Overridable in tests via monkeypatch.
 # Kept as a module-level constant rather than literal because some tests
 # redirect it to a tmp_path (xdist safety, per CLAUDE.md).
@@ -547,21 +554,31 @@ class SwingTrader:
                     exc_info=True,
                 )
 
-        # Orphan ingestion (2026-04-15). One-shot on first tick where we
-        # have live prices (underlying spot seeds peak_underlying for the
-        # trailing-stop math). Runs BEFORE reconciliation: if we've just
-        # adopted a position, _reconcile_swing_positions shouldn't then
-        # prune it as a phantom.
-        if not self._orphans_migrated:
+        # Orphan ingestion (2026-04-15). Runs BEFORE reconciliation: if
+        # we've just adopted a position, _reconcile_swing_positions
+        # shouldn't then prune it as a phantom.
+        #
+        # Codex review P1: only flip the one-shot flag on "success"; the
+        # "partial" branch (missing underlying price, None from fetch)
+        # retries next tick. Even after success, re-check periodically
+        # to catch positions bought manually during the session.
+        should_migrate = (
+            not self._orphans_migrated
+            or (self.check_count % SWING_INGEST_RECHECK_INTERVAL == 0)
+        )
+        if should_migrate:
             try:
-                self._migrate_orphans(prices)
+                status = self._migrate_orphans(prices)
             except Exception:
                 logger.exception(
                     "[SWING] evaluate_and_execute: _migrate_orphans raised — "
                     "continuing without adoption (will retry next tick)"
                 )
             else:
-                self._orphans_migrated = True
+                # Mark "migrated" only on terminal states — partial leaves
+                # the flag clear so the next tick retries immediately.
+                if status in ("success", "disabled"):
+                    self._orphans_migrated = True
 
         # Position reconciliation against Avanza holdings (Fix 2, 2026-04-09).
         # Runs UNCONDITIONALLY on the first call after init to catch startup
@@ -733,7 +750,12 @@ class SwingTrader:
                 "leverage": float(fallback.get("leverage") or 1.0),
             }
 
-        pos_id = f"pos_{int(time.time())}"
+        # Codex review 2026-04-15 P2: include ob_id in the key to avoid
+        # second-level collisions when _migrate_orphans adopts multiple
+        # positions within the same second on startup. The previous
+        # `pos_{int(time.time())}` collided silently and overwrote the
+        # earlier adoption in self.state["positions"].
+        pos_id = f"pos_{int(time.time())}_{ob_id_str}"
 
         _log(
             f"INGEST {meta['name']}: {units}u @ {entry_price} "
@@ -786,6 +808,14 @@ class SwingTrader:
         # Mark legacy metals_positions_state.json entry inactive so the
         # legacy exit machinery stops touching it. Best-effort — if the
         # legacy file doesn't exist (fresh checkout), silently continue.
+        #
+        # Codex review 2026-04-15 P1: ALSO mutate the in-memory POSITIONS
+        # dict. The disk write alone is insufficient because metals_loop
+        # already loaded POSITIONS at process init and mutations to the
+        # file on disk don't re-load until next restart. Without this, the
+        # running legacy momentum-exit path (metals_loop.py:4641) can
+        # still fire emergency_sell on the same position SwingTrader now
+        # owns — causing a double SELL or stop-loss cancellation race.
         try:
             legacy = load_json(LEGACY_POSITIONS_FILE, {}) or {}
             if isinstance(legacy, dict):
@@ -814,6 +844,37 @@ class SwingTrader:
                 ob_id_str, exc_info=True,
             )
 
+        # In-memory mutation of metals_loop.POSITIONS (Codex P1 fix).
+        # Lazy-import so the swing_trader module stays importable in tests
+        # without dragging in Playwright. Silent fail is acceptable — the
+        # disk write above is the durable source of truth; this only
+        # protects the CURRENT process from racing on a stale in-memory
+        # flag until next loop restart.
+        try:
+            import metals_loop as _ml
+            _positions = getattr(_ml, "POSITIONS", None)
+            if isinstance(_positions, dict):
+                for _k, _v in _positions.items():
+                    if (
+                        isinstance(_v, dict)
+                        and str(_v.get("ob_id", "")) == ob_id_str
+                        and _v.get("active")
+                    ):
+                        _v["active"] = False
+                        _v["sold_reason"] = "migrated_to_swing"
+                        _v["sold_ts"] = _now_utc().isoformat()
+                        _v["migrated_pos_id"] = pos_id
+                        _log(
+                            f"ingest_position: in-memory POSITIONS[{_k}] "
+                            f"deactivated (ob {ob_id_str})"
+                        )
+        except Exception:
+            logger.debug(
+                "ingest_position: in-memory POSITIONS mutation skipped "
+                "(metals_loop not importable or no POSITIONS attribute)",
+                exc_info=True,
+            )
+
         # Place Avanza hardware stop-loss — adopted position gets the same
         # broker-side protection as a freshly-opened one. DRY_RUN path
         # returns early to keep tests deterministic and avoid live calls.
@@ -833,34 +894,39 @@ class SwingTrader:
 
         return pos_id
 
-    def _migrate_orphans(self, prices: dict) -> None:
+    def _migrate_orphans(self, prices: dict) -> str:
         """Ingest Avanza positions not yet tracked in swing_state.
 
-        Called once per process from the top of evaluate_and_execute on the
-        first tick where we have live prices. For each Avanza holding whose
-        ob_id is NOT already tracked in self.state["positions"], look up
-        the warrant in KNOWN_WARRANT_OB_IDS. If found and not fishing-owned,
-        call self.ingest_position().
+        Called from evaluate_and_execute. Returns one of:
+          "success" — no deferred orphans; caller can disable one-shot flag.
+          "partial" — at least one orphan was skipped with "retry next tick"
+                       (transient: missing price, None from fetch). Caller
+                       should leave the one-shot flag clear and retry.
+          "disabled" — SWING_INGEST_ORPHANS=False.
 
-        Gated by SWING_INGEST_ORPHANS config flag — set False to disable.
+        Codex review 2026-04-15 P1: previously the one-shot flag was set
+        on any normal return, which permanently disabled retries for the
+        "no underlying price" and "fetch_page_positions returned None"
+        branches. Returning a status lets the caller decide.
         """
         if not SWING_INGEST_ORPHANS:
             _log("_migrate_orphans: disabled via SWING_INGEST_ORPHANS=False")
-            return
+            return "disabled"
 
         held = fetch_page_positions(self.page, ACCOUNT_ID)
         if held is None:
             _log("_migrate_orphans: fetch_page_positions returned None — will retry")
-            return
+            return "partial"
         if not held:
             _log("_migrate_orphans: account is flat, nothing to adopt")
-            return
+            return "success"
 
         existing_ob_ids = {
             str(p.get("ob_id", "")) for p in self.state["positions"].values()
         }
 
         ingested_count = 0
+        deferred_count = 0
         for ob_id, holding in held.items():
             ob_id_str = str(ob_id)
             if ob_id_str in existing_ob_ids:
@@ -895,17 +961,33 @@ class SwingTrader:
                 name = meta.get("name", holding.get("name", f"ob_{ob_id_str}"))
 
             direction = _infer_direction(name)
-            und_price_info = prices.get(underlying) if isinstance(prices, dict) else None
-            if isinstance(und_price_info, dict):
-                und_price = und_price_info.get("price_usd") or und_price_info.get("bid") or 0
-            else:
-                und_price = und_price_info or 0
+
+            # Codex review 2026-04-15 P1: `prices` is keyed by position
+            # NAME (e.g. silver301), NOT by ticker. prices.get("XAG-USD")
+            # is always None. Use the existing ticker-aware helper, and
+            # fall back to a live warrant price fetch for truly orphaned
+            # positions (prices dict empty for this underlying — happens
+            # when the state-wiped legacy POSITIONS no longer drives the
+            # main loop's price fetch cycle).
+            und_price = self._get_ticker_underlying_price(underlying, prices)
+            if (not und_price or und_price <= 0):
+                try:
+                    api_type = (meta or {}).get("api_type", "warrant") if meta else "warrant"
+                    data = fetch_price(self.page, ob_id_str, api_type)
+                    if isinstance(data, dict):
+                        und_price = data.get("underlying") or 0
+                except Exception:
+                    logger.debug(
+                        "_migrate_orphans: fallback fetch_price raised for ob %s",
+                        ob_id_str, exc_info=True,
+                    )
 
             if not und_price or und_price <= 0:
                 _log(
                     f"_migrate_orphans: no underlying price for {underlying} — "
                     f"skip orphan {ob_id_str}, will retry next tick"
                 )
+                deferred_count += 1
                 continue
 
             units = int(holding.get("units") or 0)
@@ -927,9 +1009,13 @@ class SwingTrader:
             )
             if pos_id:
                 ingested_count += 1
+                # Track newly-ingested ob_id so subsequent iterations in
+                # this same loop don't re-adopt via a stale existing set.
+                existing_ob_ids.add(ob_id_str)
 
         if ingested_count:
             _log(f"_migrate_orphans: adopted {ingested_count} orphan position(s)")
+        return "partial" if deferred_count else "success"
 
     def _verify_recent_fills(self):
         """Verify recently-placed BUY orders actually resulted in held positions.

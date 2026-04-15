@@ -384,9 +384,46 @@ def test_migrate_orphans_ingests_orphan(tmp_path, monkeypatch, patched_state_fil
         }},
     )
 
-    trader._migrate_orphans(prices={"XAG-USD": {"price_usd": 78.95}})
+    # Codex review 2026-04-15 P1: `prices` is keyed by position name
+    # (e.g. silver301), not by ticker. Keys containing "silver" map to
+    # XAG-USD via _get_ticker_underlying_price's heuristic.
+    trader._migrate_orphans(prices={"silver_ref": {"underlying": 78.95}})
 
     # Position should now be in swing state
+    assert any(
+        pos["ob_id"] == "1650161"
+        for pos in trader.state["positions"].values()
+    )
+
+
+def test_migrate_orphans_uses_fetch_price_fallback_for_underlying(tmp_path, monkeypatch, patched_state_file, patched_legacy_state):
+    """Codex review 2026-04-15 P1: when prices dict lacks the underlying
+    (e.g. state-wiped orphan with no legacy POSITIONS entry driving the
+    main loop's price fetch), fall back to fetch_price(page, ob_id)."""
+    trader = _make_trader(tmp_path)
+    monkeypatch.setattr(mst, "DRY_RUN", True)
+    monkeypatch.setattr(
+        mst, "_lookup_known_warrant",
+        lambda ob: _known_warrants_fixture().get(str(ob)),
+        raising=False,
+    )
+    monkeypatch.setattr(mst, "FISHING_OB_IDS", set(), raising=False)
+    monkeypatch.setattr(
+        mst, "fetch_page_positions",
+        lambda page, acct: {"1650161": {
+            "name": "BULL SILVER X5 AVA 4", "units": 97,
+            "value": 984.05, "avg_price": 10.27, "api_type": "certificate",
+        }},
+    )
+    monkeypatch.setattr(
+        mst, "fetch_price",
+        lambda page, ob, api_type: {"bid": 10.25, "underlying": 78.95},
+    )
+
+    # Empty prices dict forces fetch_price fallback
+    status = trader._migrate_orphans(prices={})
+
+    assert status == "success"
     assert any(
         pos["ob_id"] == "1650161"
         for pos in trader.state["positions"].values()
@@ -453,9 +490,70 @@ def test_migrate_orphans_handles_none_from_fetch(tmp_path, monkeypatch, patched_
     monkeypatch.setattr(mst, "fetch_page_positions", lambda p, a: None)
 
     # Should not raise; no state change
-    trader._migrate_orphans(prices={"XAG-USD": {"price_usd": 78.95}})
+    status = trader._migrate_orphans(prices={"XAG-USD": {"price_usd": 78.95}})
 
     assert trader.state["positions"] == {}
+    assert status == "partial"
+
+
+def test_migrate_orphans_returns_partial_when_underlying_missing(tmp_path, monkeypatch, patched_state_file):
+    """Codex review 2026-04-15 P1: partial status blocks one-shot disable."""
+    trader = _make_trader(tmp_path)
+    monkeypatch.setattr(mst, "DRY_RUN", True)
+    monkeypatch.setattr(
+        mst, "_lookup_known_warrant",
+        lambda ob: _known_warrants_fixture().get(str(ob)),
+        raising=False,
+    )
+    monkeypatch.setattr(mst, "FISHING_OB_IDS", set(), raising=False)
+    # fetch_page_positions returns a known orphan...
+    monkeypatch.setattr(
+        mst, "fetch_page_positions",
+        lambda p, a: {"1650161": {
+            "name": "BULL SILVER X5 AVA 4", "units": 97,
+            "value": 984.05, "avg_price": 10.27, "api_type": "certificate",
+        }},
+    )
+    # ...but fetch_price fallback also fails, so we truly cannot seed und_price
+    monkeypatch.setattr(mst, "fetch_price", lambda p, ob, at: None)
+
+    status = trader._migrate_orphans(prices={})
+
+    assert status == "partial"
+    # Nothing adopted because underlying price unavailable
+    assert all(pos["ob_id"] != "1650161" for pos in trader.state["positions"].values())
+
+
+def test_migrate_orphans_returns_success_on_empty_account(tmp_path, monkeypatch, patched_state_file):
+    trader = _make_trader(tmp_path)
+    monkeypatch.setattr(mst, "fetch_page_positions", lambda p, a: {})
+
+    status = trader._migrate_orphans(prices={})
+
+    assert status == "success"
+
+
+def test_migrate_orphans_returns_disabled_when_flag_off(tmp_path, monkeypatch, patched_state_file):
+    trader = _make_trader(tmp_path)
+    monkeypatch.setattr(mst, "SWING_INGEST_ORPHANS", False)
+
+    status = trader._migrate_orphans(prices={})
+
+    assert status == "disabled"
+
+
+def test_ingest_includes_ob_id_in_pos_id(tmp_path, monkeypatch, patched_state_file, patched_legacy_state):
+    """Codex review 2026-04-15 P2: pos_id must include ob_id to avoid collisions."""
+    trader = _make_trader(tmp_path)
+    monkeypatch.setattr(mst, "DRY_RUN", True)
+
+    pos_id = trader.ingest_position(
+        ob_id="2379768", units=10, entry_price=14.7,
+        underlying_price=79.42, set_stop_loss=False,
+    )
+
+    assert pos_id is not None
+    assert "2379768" in pos_id
 
 
 # ---------------------------------------------------------------------------
