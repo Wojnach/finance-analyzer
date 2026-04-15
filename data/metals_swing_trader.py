@@ -157,6 +157,66 @@ RECON_FAILURE_STREAK_ALERT = 10  # alert on Telegram after N consecutive failure
 # the 60s main loop cadence = ~1 hour. Only sends if the counter is >0.
 TELEGRAM_NO_EDGE_INTERVAL = 60
 
+# 2026-04-15 orphan ingestion: master switch for _migrate_orphans.
+# Set False to disable adoption of Avanza-held positions that aren't in
+# swing_state.positions (e.g. during experiments or if the operator wants
+# to manage a specific position manually). See docs/PLAN-orphan-positions.md.
+SWING_INGEST_ORPHANS: bool = True
+
+# Path to the legacy POSITIONS dict file. Overridable in tests via monkeypatch.
+# Kept as a module-level constant rather than literal because some tests
+# redirect it to a tmp_path (xdist safety, per CLAUDE.md).
+LEGACY_POSITIONS_FILE: str = "data/metals_positions_state.json"
+
+# Fishing ob_ids — populated lazily when metals_loop imports us. The module
+# itself has no dependency on fin_fish_config; metals_loop populates this
+# set via module attribute assignment before the loop starts running.
+# Empty default means "no fishing overlap" which is safe for unit tests.
+FISHING_OB_IDS: set[str] = set()
+
+
+def _lookup_known_warrant(ob_id):
+    """Return KNOWN_WARRANT_OB_IDS metadata by ob_id, or None.
+
+    Lazy-imports from metals_loop to avoid pulling Playwright into every
+    module that imports metals_swing_trader (tests, standalone tooling).
+    Returns None cleanly when metals_loop is unavailable or the ob_id isn't
+    in the hardcoded dict.
+
+    Tests can monkeypatch this function directly to supply a fixture.
+    """
+    try:
+        import metals_loop  # lazy: metals_loop imports Playwright at module scope
+    except Exception:
+        logger.debug(
+            "_lookup_known_warrant: metals_loop import failed — no fallback catalog",
+            exc_info=True,
+        )
+        return None
+    known = getattr(metals_loop, "KNOWN_WARRANT_OB_IDS", None)
+    if not isinstance(known, dict):
+        return None
+    return known.get(str(ob_id))
+
+
+def _infer_direction(name: str) -> str:
+    """Guess position direction from warrant display name.
+
+    Heuristic — covers the current catalog and common patterns:
+      BEAR* / MINI S* / TURBO S* / SHORT* → SHORT
+      otherwise                           → LONG
+
+    The SHORT flag drives exit math (_check_exits uses different pnl
+    calculations for SHORT). If the heuristic misfires on a new
+    instrument, the operator can correct via a state edit and the fix
+    sticks because ingestion is one-shot per position.
+    """
+    n = (name or "").upper().strip()
+    short_markers = ("BEAR", "MINI S ", "TURBO S ", "SHORT", "MINI S_", "TURBO S_")
+    if any(n.startswith(m) or m in n for m in short_markers):
+        return "SHORT"
+    return "LONG"
+
 
 def _log(msg):
     # 2026-04-09 Stage 1 shim: delegate to logger.info. The [SWING] tag is
@@ -360,6 +420,12 @@ class SwingTrader:
         # log file dive.
         self.kelly_no_edge_count: dict[str, int] = {}
 
+        # 2026-04-15 orphan ingestion: set True after _migrate_orphans has
+        # run its one-shot pass. Flipped by evaluate_and_execute on first
+        # tick where we have live prices (underlying spot is needed to seed
+        # peak_underlying correctly for trailing-stop math).
+        self._orphans_migrated: bool = False
+
         # Load dynamic warrant catalog (live refresh from Avanza). Falls back
         # to the static hardcoded catalog if the refresh fails entirely.
         self.warrant_catalog = self._load_warrant_catalog()
@@ -477,6 +543,22 @@ class SwingTrader:
                     exc_info=True,
                 )
 
+        # Orphan ingestion (2026-04-15). One-shot on first tick where we
+        # have live prices (underlying spot seeds peak_underlying for the
+        # trailing-stop math). Runs BEFORE reconciliation: if we've just
+        # adopted a position, _reconcile_swing_positions shouldn't then
+        # prune it as a phantom.
+        if not self._orphans_migrated:
+            try:
+                self._migrate_orphans(prices)
+            except Exception:
+                logger.exception(
+                    "[SWING] evaluate_and_execute: _migrate_orphans raised — "
+                    "continuing without adoption (will retry next tick)"
+                )
+            else:
+                self._orphans_migrated = True
+
         # Position reconciliation against Avanza holdings (Fix 2, 2026-04-09).
         # Runs UNCONDITIONALLY on the first call after init to catch startup
         # phantoms, then throttled to every RECON_THROTTLE_CYCLES cycles.
@@ -575,6 +657,275 @@ class SwingTrader:
             del self.state["positions"][pos_id]
         if phantoms:
             _save_state(self.state)
+
+    # -------------------------------------------------------------------
+    # Orphan ingestion (2026-04-15)
+    # -------------------------------------------------------------------
+
+    def ingest_position(
+        self,
+        ob_id: str,
+        units: int,
+        entry_price: float,
+        underlying_price: float,
+        direction: str = "LONG",
+        set_stop_loss: bool = True,
+    ) -> str | None:
+        """Adopt an already-held Avanza position into SwingTrader management.
+
+        Intended for startup orphan migration — a position exists on Avanza
+        but is not yet in swing_state.positions (e.g. opened via the legacy
+        POSITIONS path, survived a state wipe, or carried over between
+        process restarts).
+
+        Returns pos_id on success, or None if:
+          - catalog lookup fails for this ob_id
+          - a swing position with this ob_id already exists (no duplicates)
+
+        Does NOT decrement cash_sek — the purchase was not charged this
+        session. Places an Avanza hardware stop-loss via _set_stop_loss()
+        when set_stop_loss=True and not DRY_RUN, so the adopted position
+        gets the same broker-side protection as a freshly-opened one.
+        """
+        ob_id_str = str(ob_id)
+
+        # Reject duplicate: any existing swing position with this ob_id.
+        for existing_pos_id, existing in self.state["positions"].items():
+            if str(existing.get("ob_id", "")) == ob_id_str:
+                _log(
+                    f"ingest_position: ob_id {ob_id_str} already managed as "
+                    f"{existing_pos_id} — skipping"
+                )
+                return None
+
+        # Look up warrant metadata — prefer dynamic/static swing catalog
+        # (it has live_leverage, spread_pct, etc.), fall back to the
+        # metals_loop KNOWN_WARRANT_OB_IDS hardcoded dict for entries that
+        # never made it into the refreshed catalog (e.g. certificates).
+        meta = None
+        for wk, wv in self.warrant_catalog.items():
+            if str(wv.get("ob_id")) == ob_id_str:
+                meta = {
+                    "key": wk,
+                    "name": wv.get("name", wk),
+                    "api_type": wv.get("api_type", "warrant"),
+                    "underlying": wv.get("underlying", "XAG-USD"),
+                    "leverage": float(wv.get("leverage") or wv.get("live_leverage") or 1.0),
+                }
+                break
+        if meta is None:
+            fallback = _lookup_known_warrant(ob_id_str)
+            if fallback is None:
+                _log(
+                    f"ingest_position: ob_id {ob_id_str} not in swing catalog "
+                    f"or KNOWN_WARRANT_OB_IDS — cannot adopt"
+                )
+                return None
+            meta = {
+                "key": fallback.get("key", f"unknown_{ob_id_str}"),
+                "name": fallback.get("name", f"ob_{ob_id_str}"),
+                "api_type": fallback.get("api_type", "certificate"),
+                "underlying": fallback.get("underlying", "XAG-USD"),
+                "leverage": float(fallback.get("leverage") or 1.0),
+            }
+
+        pos_id = f"pos_{int(time.time())}"
+
+        _log(
+            f"INGEST {meta['name']}: {units}u @ {entry_price} "
+            f"(underlying: {meta['underlying']}@{underlying_price}, "
+            f"dir: {direction}, lev: {meta['leverage']:.1f}x)"
+        )
+
+        self.state["positions"][pos_id] = {
+            "warrant_key": meta["key"],
+            "warrant_name": meta["name"],
+            "ob_id": ob_id_str,
+            "api_type": meta["api_type"],
+            "underlying": meta["underlying"],
+            "direction": direction,
+            "units": int(units),
+            "entry_price": float(entry_price),
+            "entry_underlying": float(underlying_price),
+            "entry_ts": _now_utc().isoformat(),
+            "peak_underlying": float(underlying_price),
+            "trough_underlying": float(underlying_price),
+            "trailing_active": False,
+            "stop_order_id": None,
+            "leverage": abs(meta["leverage"]),
+            # Position already lives on Avanza — fill verification is moot.
+            "fill_verified": True,
+            "buy_order_id": None,
+            "ingested": True,
+            "ingested_ts": _now_utc().isoformat(),
+        }
+        _save_state(self.state)
+
+        trade_record = {
+            "ts": _now_utc().isoformat(),
+            "action": "INGEST",
+            "pos_id": pos_id,
+            "warrant_key": meta["key"],
+            "warrant_name": meta["name"],
+            "ob_id": ob_id_str,
+            "underlying": meta["underlying"],
+            "direction": direction,
+            "units": int(units),
+            "entry_price": float(entry_price),
+            "underlying_price": float(underlying_price),
+            "leverage": meta["leverage"],
+            "ingested": True,
+            "dry_run": DRY_RUN,
+        }
+        _log_trade(trade_record)
+
+        # Mark legacy metals_positions_state.json entry inactive so the
+        # legacy exit machinery stops touching it. Best-effort — if the
+        # legacy file doesn't exist (fresh checkout), silently continue.
+        try:
+            legacy = load_json(LEGACY_POSITIONS_FILE, {}) or {}
+            if isinstance(legacy, dict):
+                changed = False
+                for k, v in legacy.items():
+                    if (
+                        isinstance(v, dict)
+                        and str(v.get("ob_id", "")) == ob_id_str
+                        and v.get("active")
+                    ):
+                        v["active"] = False
+                        v["sold_reason"] = "migrated_to_swing"
+                        v["sold_ts"] = _now_utc().isoformat()
+                        v["migrated_pos_id"] = pos_id
+                        changed = True
+                if changed:
+                    atomic_write_json(LEGACY_POSITIONS_FILE, legacy, indent=2)
+                    _log(
+                        f"ingest_position: legacy POSITIONS entry for "
+                        f"ob {ob_id_str} marked migrated_to_swing"
+                    )
+        except Exception:
+            logger.warning(
+                "ingest_position: legacy state migration failed ob_id=%s — "
+                "swing now owns the position but legacy flag may still read active",
+                ob_id_str, exc_info=True,
+            )
+
+        # Place Avanza hardware stop-loss — adopted position gets the same
+        # broker-side protection as a freshly-opened one. DRY_RUN path
+        # returns early to keep tests deterministic and avoid live calls.
+        if set_stop_loss and not DRY_RUN:
+            self._set_stop_loss(pos_id)
+
+        stop_txt = ""
+        pos_after = self.state["positions"].get(pos_id, {})
+        if pos_after.get("stop_order_id"):
+            stop_txt = f" | stop: {pos_after['stop_order_id']}"
+        _send_telegram(
+            f"{'*[DRY] ' if DRY_RUN else '*'}SWING INGEST* {meta['name']}\n"
+            f"`{units}u @ {entry_price} — adopted orphan position`\n"
+            f"`Underlying: {meta['underlying']} @ {underlying_price:.2f} | "
+            f"Lev: {meta['leverage']:.1f}x | Dir: {direction}`{stop_txt}"
+        )
+
+        return pos_id
+
+    def _migrate_orphans(self, prices: dict) -> None:
+        """Ingest Avanza positions not yet tracked in swing_state.
+
+        Called once per process from the top of evaluate_and_execute on the
+        first tick where we have live prices. For each Avanza holding whose
+        ob_id is NOT already tracked in self.state["positions"], look up
+        the warrant in KNOWN_WARRANT_OB_IDS. If found and not fishing-owned,
+        call self.ingest_position().
+
+        Gated by SWING_INGEST_ORPHANS config flag — set False to disable.
+        """
+        if not SWING_INGEST_ORPHANS:
+            _log("_migrate_orphans: disabled via SWING_INGEST_ORPHANS=False")
+            return
+
+        held = fetch_page_positions(self.page, ACCOUNT_ID)
+        if held is None:
+            _log("_migrate_orphans: fetch_page_positions returned None — will retry")
+            return
+        if not held:
+            _log("_migrate_orphans: account is flat, nothing to adopt")
+            return
+
+        existing_ob_ids = {
+            str(p.get("ob_id", "")) for p in self.state["positions"].values()
+        }
+
+        ingested_count = 0
+        for ob_id, holding in held.items():
+            ob_id_str = str(ob_id)
+            if ob_id_str in existing_ob_ids:
+                continue
+            if ob_id_str in FISHING_OB_IDS:
+                _log(f"_migrate_orphans: ob {ob_id_str} is fishing-owned — skip")
+                continue
+
+            meta = _lookup_known_warrant(ob_id_str)
+            if meta is None:
+                # Also check swing's own catalog — a position we bought via
+                # _execute_buy but lost state for would be findable here.
+                in_swing_catalog = any(
+                    str(v.get("ob_id")) == ob_id_str
+                    for v in self.warrant_catalog.values()
+                )
+                if not in_swing_catalog:
+                    _log(
+                        f"_migrate_orphans: unknown ob {ob_id_str} "
+                        f"({holding.get('name', '?')}) — skip"
+                    )
+                    continue
+                underlying = next(
+                    (v.get("underlying", "XAG-USD")
+                     for v in self.warrant_catalog.values()
+                     if str(v.get("ob_id")) == ob_id_str),
+                    "XAG-USD",
+                )
+                name = holding.get("name", f"ob_{ob_id_str}")
+            else:
+                underlying = meta.get("underlying", "XAG-USD")
+                name = meta.get("name", holding.get("name", f"ob_{ob_id_str}"))
+
+            direction = _infer_direction(name)
+            und_price_info = prices.get(underlying) if isinstance(prices, dict) else None
+            if isinstance(und_price_info, dict):
+                und_price = und_price_info.get("price_usd") or und_price_info.get("bid") or 0
+            else:
+                und_price = und_price_info or 0
+
+            if not und_price or und_price <= 0:
+                _log(
+                    f"_migrate_orphans: no underlying price for {underlying} — "
+                    f"skip orphan {ob_id_str}, will retry next tick"
+                )
+                continue
+
+            units = int(holding.get("units") or 0)
+            avg_price = float(holding.get("avg_price") or 0)
+            if units <= 0 or avg_price <= 0:
+                _log(
+                    f"_migrate_orphans: invalid units/price ({units}/{avg_price}) "
+                    f"for ob {ob_id_str} — skip"
+                )
+                continue
+
+            pos_id = self.ingest_position(
+                ob_id=ob_id_str,
+                units=units,
+                entry_price=avg_price,
+                underlying_price=float(und_price),
+                direction=direction,
+                set_stop_loss=True,
+            )
+            if pos_id:
+                ingested_count += 1
+
+        if ingested_count:
+            _log(f"_migrate_orphans: adopted {ingested_count} orphan position(s)")
 
     def _verify_recent_fills(self):
         """Verify recently-placed BUY orders actually resulted in held positions.
