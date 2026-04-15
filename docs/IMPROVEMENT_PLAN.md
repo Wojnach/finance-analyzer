@@ -1,108 +1,128 @@
-# Improvement Plan — Auto-Session 2026-04-14
+# Improvement Plan — Auto-Session 2026-04-15
 
-Updated: 2026-04-14
-Branch: improve/auto-session-2026-04-14
+Updated: 2026-04-15
+Branch: improve/auto-session-2026-04-15
 Status: **IN PROGRESS**
 
-Previous session (2026-04-13): shipped regime-universal signal gating, honest
-meta-learner validation, fundamental correlation cluster, ETH qwen3 gate.
+Previous session (2026-04-14): shipped signal gating (BUG-192–195), dogpile
+exception safety (BUG-191), 22 accuracy tests, correlation realignment.
 
 ## Session Context
 
-Deep exploration by 4 parallel agents analyzed: signal accuracy/gating, core loop
-architecture, metals subsystem, and test coverage. Findings cross-referenced with
-accuracy_cache.json and ticker_signal_accuracy_cache.json (live data).
+Deep exploration by 4 parallel agents analyzed: core orchestration (main.py,
+agent_invocation.py, trigger.py, market_timing.py, signal_engine.py),
+signal modules (31 files), data/portfolio/risk modules, metals subsystem,
+dashboard, and reporting. Cross-referenced with live accuracy_cache.json.
+
+Agent findings were verified — several false positives filtered:
+- OBV integer overflow (not realistic, 5 orders of magnitude from int64 max)
+- Knock-out distance formula (correct: (price-financing)/price = % drop to KO)
+- Smart money missing try-except (already has them per sub-indicator)
+- agent_invocation.py timestamp parsing bug (Python 3.12 handles +00:00/Z natively)
 
 ---
 
 ## 1. Bugs & Problems Found
 
-### BUG-191: Dogpile stuck key on enqueue exception (HIGH)
-- **File**: `portfolio/shared_state.py:193-197`
-- **Issue**: If `enqueue_fn()` raises, `key` stays in `_loading_keys` for 120s.
-  All subsequent requests for that key return stale data instead of refetching.
-  Affects: ministral, qwen3, sentiment (GPU signals that can fail on load).
-- **Fix**: Wrap `enqueue_fn()` in try/except, discard key on failure.
-- **Impact**: Prevents 120s stale-signal windows after GPU load failures.
+### BUG-196: Relative path fragility in 6 modules (MEDIUM)
+- **Files**:
+  - `portfolio/microstructure_state.py:22` → `Path("data/microstructure_state.json")`
+  - `portfolio/fear_greed.py:16` → `Path("data/fear_greed_streak.json")`
+  - `portfolio/seasonality.py:21` → `Path("data/seasonality_profiles.json")`
+  - `portfolio/linear_factor.py:27` → `Path("data/models/linear_factor_weights.json")`
+  - `portfolio/signal_weight_optimizer.py:27` → `Path("data/models/walkforward_results.json")`
+  - `portfolio/train_signal_weights.py:30` → `Path("data/signal_log.jsonl")`
+- **Issue**: These use relative `Path("data/...")` instead of absolute `BASE_DIR / "data" / ...`.
+  If CWD changes (e.g., subprocess, test runner), paths break silently.
+  Most other modules (40+) correctly use `Path(__file__).resolve().parent.parent / "data"`.
+- **Fix**: Add `BASE_DIR = Path(__file__).resolve().parent.parent` and use `DATA_DIR = BASE_DIR / "data"`.
+- **Impact**: Prevents silent file-not-found in edge cases. Zero behavior change when CWD is correct.
 
-### BUG-192: Per-ticker signal blacklist incomplete (HIGH)
-- **File**: `portfolio/signal_engine.py:135-137`
-- **Issue**: `_TICKER_DISABLED_SIGNALS` only has ETH-USD entries. Missing:
-  - XAG-USD: ministral (18.9%, 95 sam) — catastrophic on silver
-  - XAG-USD: credit_spread_risk (21.2%, 80 sam, SELL-only) — pure noise
-  - MSTR: credit_spread_risk (6.5%, 31 sam) — actively harmful
-  - XAU-USD: ministral (43.2%, 81 sam) — below gate for metals
-- **Fix**: Expand `_TICKER_DISABLED_SIGNALS` with per-ticker accuracy data.
-- **Impact**: Removes 4 actively harmful signal-ticker combinations.
+### BUG-197: Dead timestamp cleaning code in agent_invocation.py (LOW)
+- **File**: `portfolio/agent_invocation.py:691`
+- **Issue**: `ts_str_clean` is computed (replacing `+00:00` → `+0000`, `Z` → `+0000`) but never used —
+  line 693 passes original `ts_str` to `fromisoformat()`. In Python 3.12, `fromisoformat()` handles
+  both `+00:00` and `Z` natively, so the code works but is misleading dead code.
+- **Fix**: Remove `ts_str_clean` and the conditional, use `fromisoformat()` directly.
+- **Impact**: Cleaner code, no behavior change.
 
-### BUG-193: Oscillators globally below gate across all tickers (MEDIUM)
-- **File**: `portfolio/tickers.py:61-80`
-- **Issue**: oscillators accuracy at 1d: BTC 35.8%, ETH 36.3%, XAG 34.9%,
-  XAU 40.2%, MSTR 42.6%. All below 45% gate. 5065 total samples — not
-  small-sample. Already regime-gated in ranging but active in other regimes.
-  At 3h: XAG 34.3%, ETH 41.6%, XAU 44.7%.
-- **Fix**: Add to DISABLED_SIGNALS (like ml, forecast). The accuracy gate
-  catches it dynamically but explicit disable is clearer and removes it
-  from compute.
-- **Impact**: Removes noise signal, reduces consensus pollution.
+### BUG-198: Signal registry re-imports on every failure (MEDIUM)
+- **File**: `portfolio/signal_registry.py:78-89`
+- **Issue**: `load_signal_func()` returns `None` on import failure but doesn't cache the failure.
+  On next call, it re-attempts the import. With 5 tickers × 7 timeframes × per-cycle,
+  a broken signal module logs ~35 warnings per cycle (every 60-600s).
+- **Fix**: Cache `None` on import failure with a TTL so the warning is logged once, not 35× per cycle.
+- **Impact**: Reduces log spam from broken signal modules. No behavior change (still returns None/HOLD).
 
-### BUG-194: Sentiment below gate at 3h for ALL tickers (MEDIUM)
-- **File**: `portfolio/signal_engine.py:268-348`
-- **Issue**: sentiment 3h_recent = 33.8% (3629 sam). Already regime-gated
-  at 3h in trending-up/trending-down/high-vol but NOT in unknown regime.
-- **Fix**: Gate sentiment at 3h in ALL regimes via REGIME_GATED_SIGNALS.
-- **Impact**: Removes consistently harmful signal at short horizons.
+### BUG-199: Trigger sustained gate logic duplicated (LOW)
+- **File**: `portfolio/trigger.py:189-216` and `portfolio/trigger.py:242-278`
+- **Issue**: Signal flip (section 2) and sentiment reversal (section 5) use identical
+  count+duration debounce logic (SUSTAINED_CHECKS consecutive cycles OR SUSTAINED_DURATION_S
+  wall-clock seconds). Copy-pasted, changes to one require changes to the other.
+- **Fix**: Extract `_update_sustained(state_dict, key, value, now_ts)` helper returning
+  `(count_ok, duration_ok)`.
+- **Impact**: Maintenance improvement. Reduces risk of future divergence.
 
-### BUG-195: metals_cross_asset on XAG below gate (MEDIUM)
-- **File**: signal_engine.py per-ticker accuracy
-- **Issue**: XAG-USD metals_cross_asset = 39.8% (166 sam), 100% BUY bias.
-  Bias penalty already applies but signal still votes.
-- **Fix**: Add XAG-USD metals_cross_asset to _TICKER_DISABLED_SIGNALS.
-- **Impact**: Removes 40% BUY-biased noise from XAG consensus.
+### BUG-200: Dashboard CORS allows all origins (LOW)
+- **File**: `dashboard/app.py:42`
+- **Issue**: `Access-Control-Allow-Origin: *` allows any website to make API requests.
+  Combined with optional auth (no token configured = public access), portfolio data
+  is readable from any origin.
+- **Note**: Dashboard runs on local network only (port 5055), so practical risk is low.
+  Flagging for awareness — not changing since user accesses from phone on LAN.
 
 ---
 
 ## 2. Architecture Improvements
 
-### ARCH-1: Dogpile exception safety (shared_state.py)
-Wrap `enqueue_fn` call in try/except within `_cached_or_enqueue()`.
-3-line fix that prevents 120s stale data windows.
+### ARCH-3: Consistent path resolution pattern
+Standardize all modules to use `BASE_DIR = Path(__file__).resolve().parent.parent`
+pattern already used by 40+ modules. Fixes BUG-196.
 
-### ARCH-2: Signal phase markers for BUG-178 diagnostics
-Add `_set_last_signal(ticker, "__phase_name__")` calls around pre-dispatch,
-dispatch loop, and post-dispatch phases. Helps identify hangs in phases
-the current diagnostics can't see.
+### ARCH-4: Trigger debounce helper
+Extract shared `_update_sustained()` from trigger.py to DRY the sustained gate logic.
+Fixes BUG-199.
 
 ---
 
-## 3. Useful Features
+## 3. Test Coverage
 
-### FEAT-1: accuracy_stats test coverage (HIGH VALUE)
-accuracy_stats.py: 1,401 LOC, 19 tests. Core functions untested.
-Adding 15-20 tests protects the most critical calculation module.
+### TEST-1: trigger.py sustained gate tests (HIGH VALUE)
+trigger.py has extensive tests for consensus triggers but the sustained flip + sentiment
+reversal debounce (count OR duration) paths are undertested. Adding 6-8 tests protects
+the refactored helper.
+
+### TEST-2: microstructure_state.py path resolution tests
+Verify that the fixed absolute paths work correctly regardless of CWD.
+
+### TEST-3: signal_registry.py failed import caching test
+Verify that a broken signal module is only warned about once, not 35× per cycle.
 
 ---
 
 ## 4. Ordering — Batches
 
-### Batch 1: Signal gating fixes (BUG-192, BUG-193, BUG-194, BUG-195)
-Files: `portfolio/signal_engine.py`, `portfolio/tickers.py`
-Tests: `tests/test_signal_engine.py`
+### Batch 1: Path hardening (BUG-196)
+Files: `portfolio/microstructure_state.py`, `portfolio/fear_greed.py`,
+`portfolio/seasonality.py`, `portfolio/linear_factor.py`,
+`portfolio/signal_weight_optimizer.py`, `portfolio/train_signal_weights.py`
+Tests: Existing tests should pass; add 2 path-resolution smoke tests.
 
-### Batch 2: Dogpile exception safety (BUG-191) + phase markers (ARCH-2)
-Files: `portfolio/shared_state.py`, `portfolio/signal_engine.py`
-Tests: `tests/test_shared_state.py`, `tests/test_signal_engine.py`
+### Batch 2: Dead code + DRY trigger (BUG-197, BUG-199)
+Files: `portfolio/agent_invocation.py`, `portfolio/trigger.py`
+Tests: `tests/test_trigger_core.py` — add 6-8 sustained gate tests
 
-### Batch 3: accuracy_stats test coverage (FEAT-1)
-Files: `tests/test_accuracy_stats.py`
+### Batch 3: Signal registry error caching (BUG-198)
+Files: `portfolio/signal_registry.py`
+Tests: `tests/test_signal_registry.py` or inline
 
 ---
 
 ## Deferred (not this session)
 
+- Dashboard CORS restriction (BUG-200) — user accesses from phone on LAN, needs `*`
+- Dashboard default-require-auth — would break existing setup
 - IC-based signal weighting (P2 — needs validation framework)
 - HMM regime detection (P2 — needs model tuning)
 - MSTR-BTC proxy signal (P1 — needs mNAV data source)
-- Metals position sync on startup (HIGH — needs live testing)
-- Cancel→sell→rearm atomicity (MEDIUM — needs Avanza API testing)
-- prune_jsonl streaming rewrite (MEDIUM — performance, not correctness)
+- Graceful shutdown (KeyboardInterrupt handler) — low impact, 5-min heartbeat recovery exists
