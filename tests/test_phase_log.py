@@ -113,5 +113,40 @@ class TestGetPhaseLog:
         assert ("tampered", 99.0) not in fresh
 
 
+class TestEviction:
+    """Bounded growth guard added 2026-04-15 after adversarial review.
+
+    Without the cap, every distinct ticker name ever passed to
+    _reset_phase_log would permanently accumulate a list. Production has
+    5 tickers so this doesn't matter, but tests and probes can invent
+    arbitrary ticker names.
+    """
+
+    def test_exceeds_cap_triggers_eviction(self):
+        from portfolio.signal_engine import _PHASE_LOG_MAX_TICKERS, _phase_log_per_ticker
+        # Prime with more tickers than the cap.
+        for i in range(_PHASE_LOG_MAX_TICKERS + 10):
+            _reset_phase_log(f"EVICT-TEST-{i}-USD")
+        # After the cap is exceeded, dict size must be bounded.
+        assert len(_phase_log_per_ticker) <= _PHASE_LOG_MAX_TICKERS, (
+            f"phase log dict grew beyond cap: {len(_phase_log_per_ticker)}"
+        )
+
+    def test_repeated_reset_same_ticker_no_eviction(self):
+        """Resetting the same ticker repeatedly must NOT evict other
+        tickers (we only evict when ADDING a new ticker past the cap)."""
+        from portfolio.signal_engine import _phase_log_per_ticker
+        _reset_phase_log("STABLE-TEST1-USD")
+        _reset_phase_log("STABLE-TEST2-USD")
+        initial_size = len(_phase_log_per_ticker)
+        for _ in range(100):
+            _reset_phase_log("STABLE-TEST1-USD")
+        # STABLE-TEST1-USD should still be present; STABLE-TEST2-USD too
+        # (dict didn't grow — no new keys added).
+        assert "STABLE-TEST1-USD" in _phase_log_per_ticker
+        assert "STABLE-TEST2-USD" in _phase_log_per_ticker
+        assert len(_phase_log_per_ticker) == initial_size
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

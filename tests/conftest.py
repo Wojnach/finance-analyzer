@@ -13,6 +13,38 @@ def pytest_configure(config):
     )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_signal_utility_cache():
+    """Clear the signal_utility in-memory cache around each test.
+
+    Added 2026-04-15 alongside the BUG-178 TTL cache on signal_utility().
+    Many existing tests in tests/test_signal_utility.py (and any future
+    tests that do the same) patch portfolio.accuracy_stats.load_entries
+    and then call signal_utility("1d") WITHOUT passing entries=
+    explicitly. Before the cache landed, each such call went through
+    load_entries and saw the patched data. After the cache landed the
+    FIRST test in the worker populated _signal_utility_cache with its
+    mocked result, and every subsequent test in the same worker read
+    that stale value and silently ignored its own load_entries patch.
+
+    Clearing before AND after each test makes the fixture order-
+    independent:
+      - before: protects against state leaked from a prior test or
+        module import
+      - after: protects against this test's state leaking into others
+    """
+    try:
+        from portfolio.accuracy_stats import invalidate_signal_utility_cache
+    except ImportError:
+        yield
+        return
+    invalidate_signal_utility_cache()
+    try:
+        yield
+    finally:
+        invalidate_signal_utility_cache()
+
+
 # ---------------------------------------------------------------------------
 # Indicator dictionary helpers
 # ---------------------------------------------------------------------------

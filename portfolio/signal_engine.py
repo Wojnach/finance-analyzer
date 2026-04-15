@@ -83,12 +83,31 @@ _phase_log_lock = threading.Lock()
 
 _PHASE_WARN_THRESHOLD_S = 2.0
 
+# Defensive bound on the number of distinct ticker keys kept. In production
+# this is 5 (Tier-1 symbols); tests and probes may pass arbitrary names and
+# slowly grow the dict. When we exceed the cap, prune the least-recently-
+# used entries (reset cycles refresh them, so LRU by last-reset is fine).
+# Prior callers were silently leaking one small list per unique ticker name.
+_PHASE_LOG_MAX_TICKERS = 64
+
 
 def _reset_phase_log(ticker: str) -> None:
-    """Clear the phase log for a ticker at the start of generate_signal."""
+    """Clear the phase log for a ticker at the start of generate_signal.
+
+    Also enforces _PHASE_LOG_MAX_TICKERS by pruning older entries when the
+    dict grows past the cap — cheap per-call O(n) but n is bounded and the
+    prune happens at most once per generate_signal invocation.
+    """
     if not ticker:
         return
     with _phase_log_lock:
+        if len(_phase_log_per_ticker) >= _PHASE_LOG_MAX_TICKERS and ticker not in _phase_log_per_ticker:
+            # Evict oldest half — we don't need true LRU, just bounded memory.
+            # `iter(dict)` yields insertion order in CPython 3.7+; dropping
+            # the first half gives us amortized O(1) per call.
+            evict_count = len(_phase_log_per_ticker) // 2
+            for old_key in list(_phase_log_per_ticker)[:evict_count]:
+                del _phase_log_per_ticker[old_key]
         _phase_log_per_ticker[ticker] = []
 
 

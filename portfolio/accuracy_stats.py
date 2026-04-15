@@ -32,15 +32,25 @@ HORIZONS = ["3h", "4h", "12h", "1d", "3d", "5d", "10d"]
 # fresh process, antivirus scan) 5 concurrent ticker threads each pay the
 # 3-4s cold read, which can compound under file-cache page-in contention.
 #
+# Invalidation is pure TTL (300s) — there is NO mtime check against
+# signal_log.db, so a backfill that writes new outcomes mid-cycle is only
+# visible to signal_utility after the TTL expires. This is an explicit
+# trade: outcome backfill already runs on a 6h cadence (PF-OutcomeCheck
+# scheduled task), so a 5-minute staleness window is dominated by the
+# 6-hour write cadence. Code paths that need immediately-fresh utility
+# (tests, outcome_tracker) must either pass entries= explicitly (which
+# bypasses the cache) or call invalidate_signal_utility_cache().
+#
 # 300s TTL matches the shortest LLM rotation period and is well below the
-# 3600s ACCURACY_CACHE_TTL used for the disk-backed caches. The lock guards
-# the (value, timestamp) tuple so two threads racing to refresh can't
-# double-compute. Dogpile: the lock is held ONLY for the swap, not for the
-# compute — the slow signal_utility() call happens outside the lock, so
-# other threads waiting on the lock see the fresh value the moment the
-# first thread returns. The cost of an occasional double-compute on a
-# TTL-boundary race is much lower than the cost of holding a global lock
-# through a 3.6s disk scan.
+# 3600s ACCURACY_CACHE_TTL used for the disk-backed caches. The lock
+# guards the (timestamp, value) tuple so two threads racing to refresh
+# can't corrupt the dict. Dogpile behavior: the lock is held ONLY for the
+# swap, NOT for the compute — the slow signal_utility() call happens
+# outside the lock, so other threads waiting on the lock see the fresh
+# value the moment the first thread returns. Two threads that both miss
+# on a TTL-boundary race will each recompute once (one wasted walk), but
+# neither blocks the other. This is cheaper than holding a global lock
+# through a 3.6s disk scan and funneling every ticker thread through it.
 _SIGNAL_UTILITY_CACHE_TTL = 300.0
 _signal_utility_cache: dict[str, tuple[float, dict]] = {}
 _signal_utility_cache_lock = threading.Lock()
