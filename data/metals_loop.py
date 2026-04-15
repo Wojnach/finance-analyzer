@@ -303,6 +303,25 @@ except ImportError as e:
     SWING_TRADER_AVAILABLE = False
     _swing_mod = None
 
+
+# Module-level reference to the live SwingTrader instance, set by main()
+# after successful __init__. detect_holdings() reads this via
+# _get_live_swing_trader() to decide whether to defer to swing for a
+# position. Stays None when main() hasn't initialized swing_trader yet
+# (e.g. during test imports).
+_LIVE_SWING_TRADER = None
+
+
+def _set_live_swing_trader(inst):
+    """Register the live SwingTrader instance for detect_holdings to see."""
+    global _LIVE_SWING_TRADER
+    _LIVE_SWING_TRADER = inst
+
+
+def _get_live_swing_trader():
+    """Return the registered SwingTrader instance, or None if not initialized."""
+    return _LIVE_SWING_TRADER
+
 try:
     from metals_execution_engine import build_execution_recommendations, hours_to_metals_close
     EXECUTION_ENGINE_AVAILABLE = True
@@ -1797,7 +1816,25 @@ def detect_holdings(page):
             else:
                 # Brand new instrument — check if we recognize it
                 info = KNOWN_WARRANT_OB_IDS.get(ob_id)
-                if info and info.get("_managed_by") == "swing_trader":
+                # Codex review 2026-04-15 P1: only skip legacy tracking
+                # when SwingTrader is actually available AND initialized.
+                # If SwingTrader failed to import/init, the _managed_by
+                # tag on KNOWN_WARRANT_OB_IDS would otherwise leave the
+                # position completely unmanaged (neither legacy POSITIONS
+                # nor swing state tracks it, so no exit path runs). Fall
+                # through to the legacy branch as a safety net.
+                #
+                # `swing_trader` is a local in main_loop; detect_holdings
+                # can't see it directly. Use the module-level "live"
+                # reference set by main after successful init.
+                swing_live = _get_live_swing_trader()
+                swing_owned = (
+                    info
+                    and info.get("_managed_by") == "swing_trader"
+                    and SWING_TRADER_AVAILABLE
+                    and swing_live is not None
+                )
+                if swing_owned:
                     # 2026-04-10: SwingTrader manages this via its own state
                     # file (data/metals_swing_state.json). Do NOT add it to
                     # the legacy POSITIONS dict — that would trigger
@@ -6440,6 +6477,11 @@ def main():
         if SWING_TRADER_AVAILABLE:
             try:
                 swing_trader = SwingTrader(page)
+                # Codex review 2026-04-15 P1: register the live instance
+                # so detect_holdings() can tell init succeeded. Without
+                # this, a failed init leaves _managed_by=swing_trader
+                # orphans completely unmanaged.
+                _set_live_swing_trader(swing_trader)
                 log(f"Swing trader: ACTIVE (cash={swing_trader.state['cash_sek']:.0f} SEK, "
                     f"DRY_RUN={swing_trader.state.get('_dry', 'see config')})")
             except Exception:

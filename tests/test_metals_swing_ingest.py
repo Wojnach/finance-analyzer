@@ -556,6 +556,52 @@ def test_ingest_includes_ob_id_in_pos_id(tmp_path, monkeypatch, patched_state_fi
     assert "2379768" in pos_id
 
 
+def test_ingest_adopts_existing_avanza_stop_and_skips_placement(tmp_path, monkeypatch, patched_state_file, patched_legacy_state):
+    """Codex review 2026-04-15 P1: reuse existing broker stop instead of placing a duplicate."""
+    trader = _make_trader(tmp_path)
+    monkeypatch.setattr(mst, "DRY_RUN", False)
+    # Pretend Avanza already has a stop on this ob_id
+    monkeypatch.setattr(mst, "_find_existing_stop", lambda ob, u: "EXISTING_STOP_999")
+
+    set_stop_calls = []
+    trader._set_stop_loss = lambda pid: set_stop_calls.append(pid)
+
+    pos_id = trader.ingest_position(
+        ob_id="2379768", units=97, entry_price=14.7,
+        underlying_price=79.42, set_stop_loss=True,
+    )
+
+    assert pos_id is not None
+    # Must NOT call _set_stop_loss when an existing stop was found
+    assert set_stop_calls == []
+    pos = trader.state["positions"][pos_id]
+    assert pos["stop_order_id"] == "EXISTING_STOP_999"
+    assert pos["stop_adopted"] is True
+
+
+def test_ingest_places_new_stop_when_no_existing(tmp_path, monkeypatch, patched_state_file, patched_legacy_state):
+    """Sanity check for the inverse path — placing a new stop when none exists."""
+    trader = _make_trader(tmp_path)
+    monkeypatch.setattr(mst, "DRY_RUN", False)
+    monkeypatch.setattr(mst, "_find_existing_stop", lambda ob, u: None)
+
+    set_stop_calls = []
+    def _fake_set(pid):
+        set_stop_calls.append(pid)
+        trader.state["positions"][pid]["stop_order_id"] = "NEW_STOP_123"
+    trader._set_stop_loss = _fake_set
+
+    pos_id = trader.ingest_position(
+        ob_id="2379768", units=97, entry_price=14.7,
+        underlying_price=79.42, set_stop_loss=True,
+    )
+
+    assert pos_id is not None
+    assert set_stop_calls == [pos_id]
+    assert trader.state["positions"][pos_id]["stop_order_id"] == "NEW_STOP_123"
+    assert trader.state["positions"][pos_id].get("stop_adopted") is not True
+
+
 # ---------------------------------------------------------------------------
 # _infer_direction
 # ---------------------------------------------------------------------------

@@ -206,6 +206,47 @@ def _lookup_known_warrant(ob_id):
     return known.get(str(ob_id))
 
 
+def _find_existing_stop(ob_id: str, units: int) -> str | None:
+    """Return an existing Avanza stop-loss id for this ob_id, or None.
+
+    2026-04-15 Codex review P1: when ingest_position adopts a position
+    that already has a legacy hardware stop on Avanza, placing a new
+    stop would either be rejected (volume reserved) or leave two live
+    stops. Callers use this to prefer adoption over duplicate placement.
+
+    Tolerates read failures by returning None — the caller falls through
+    to _set_stop_loss, which has its own failure handling. Tests can
+    monkeypatch this function directly.
+    """
+    try:
+        from portfolio.avanza_session import get_stop_losses
+    except Exception:
+        logger.debug("_find_existing_stop: avanza_session import failed", exc_info=True)
+        return None
+    try:
+        stops = get_stop_losses() or []
+    except Exception:
+        logger.debug("_find_existing_stop: get_stop_losses raised", exc_info=True)
+        return None
+    for s in stops:
+        if not isinstance(s, dict):
+            continue
+        # Avanza stop schemas differ across endpoints — check the common
+        # nested paths. If we can't locate an ob_id, skip (safer than
+        # accidentally adopting an unrelated stop).
+        ob = (
+            s.get("orderbookId")
+            or (s.get("orderbook") or {}).get("id")
+            or (s.get("instrument") or {}).get("orderbookId")
+        )
+        if str(ob or "") != str(ob_id):
+            continue
+        stop_id = s.get("id") or s.get("stopLossId")
+        if stop_id:
+            return str(stop_id)
+    return None
+
+
 def _infer_direction(name: str) -> str:
     """Guess position direction from warrant display name.
 
@@ -844,16 +885,28 @@ class SwingTrader:
                 ob_id_str, exc_info=True,
             )
 
-        # In-memory mutation of metals_loop.POSITIONS (Codex P1 fix).
-        # Lazy-import so the swing_trader module stays importable in tests
-        # without dragging in Playwright. Silent fail is acceptable — the
-        # disk write above is the durable source of truth; this only
-        # protects the CURRENT process from racing on a stale in-memory
-        # flag until next loop restart.
+        # In-memory mutation of the live POSITIONS dict (Codex P1 fix).
+        #
+        # Subtle Python gotcha: when `data/metals_loop.py` runs as the
+        # process entry point it becomes `__main__`, not `metals_loop`.
+        # `import metals_loop` at runtime creates a SEPARATE module
+        # object with its own freshly-loaded POSITIONS — mutating that
+        # does nothing for the running main loop. We must locate the
+        # live instance via `sys.modules`.
+        #
+        # Check __main__ first (production), then metals_loop (pytest +
+        # standalone imports). Fall through silently if neither has
+        # POSITIONS — the disk write above is the durable truth.
         try:
-            import metals_loop as _ml
-            _positions = getattr(_ml, "POSITIONS", None)
-            if isinstance(_positions, dict):
+            import sys as _sys
+            for _modname in ("__main__", "metals_loop"):
+                _mod = _sys.modules.get(_modname)
+                if _mod is None:
+                    continue
+                _positions = getattr(_mod, "POSITIONS", None)
+                if not isinstance(_positions, dict):
+                    continue
+                _mutated = False
                 for _k, _v in _positions.items():
                     if (
                         isinstance(_v, dict)
@@ -864,22 +917,43 @@ class SwingTrader:
                         _v["sold_reason"] = "migrated_to_swing"
                         _v["sold_ts"] = _now_utc().isoformat()
                         _v["migrated_pos_id"] = pos_id
+                        _mutated = True
                         _log(
-                            f"ingest_position: in-memory POSITIONS[{_k}] "
+                            f"ingest_position: in-memory {_modname}.POSITIONS[{_k}] "
                             f"deactivated (ob {ob_id_str})"
                         )
+                if _mutated:
+                    # Covered the live module; stop scanning other modnames.
+                    break
         except Exception:
             logger.debug(
-                "ingest_position: in-memory POSITIONS mutation skipped "
-                "(metals_loop not importable or no POSITIONS attribute)",
+                "ingest_position: in-memory POSITIONS mutation skipped",
                 exc_info=True,
             )
 
         # Place Avanza hardware stop-loss — adopted position gets the same
         # broker-side protection as a freshly-opened one. DRY_RUN path
         # returns early to keep tests deterministic and avoid live calls.
+        #
+        # Codex review 2026-04-15 P1: if Avanza ALREADY has a stop on
+        # this ob_id (e.g. placed by the legacy engine before migration),
+        # calling _set_stop_loss() will either be rejected because the
+        # full volume is already reserved, or leave two live stops that
+        # can trigger in sequence. Worse, _execute_sell only cancels our
+        # `stop_order_id`, leaving the legacy stop orphaned after a
+        # swing exit. Check for existing stops first and adopt instead.
         if set_stop_loss and not DRY_RUN:
-            self._set_stop_loss(pos_id)
+            existing_stop_id = _find_existing_stop(ob_id_str, units)
+            if existing_stop_id:
+                self.state["positions"][pos_id]["stop_order_id"] = existing_stop_id
+                self.state["positions"][pos_id]["stop_adopted"] = True
+                _save_state(self.state)
+                _log(
+                    f"ingest_position: adopted existing Avanza stop {existing_stop_id} "
+                    f"for ob {ob_id_str} — no new stop placed"
+                )
+            else:
+                self._set_stop_loss(pos_id)
 
         stop_txt = ""
         pos_after = self.state["positions"].get(pos_id, {})
