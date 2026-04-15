@@ -1796,6 +1796,16 @@ def detect_holdings(page):
             if ob_id in existing_ob_ids:
                 key = existing_ob_ids[ob_id]
                 pos = POSITIONS[key]
+                # Codex review 2026-04-15 P1: do NOT reactivate entries
+                # that were migrated to SwingTrader. Without this guard
+                # the 30s holdings diff flips `active` back to True on
+                # the next scan, which puts the position under BOTH
+                # legacy management (this dict) AND swing management
+                # (swing_state.positions) — reopening the duplicate
+                # stop / duplicate sell race the migration was meant
+                # to close.
+                if pos.get("sold_reason") == "migrated_to_swing":
+                    continue
                 # Reactivate if was sold
                 if not pos["active"]:
                     pos["active"] = True

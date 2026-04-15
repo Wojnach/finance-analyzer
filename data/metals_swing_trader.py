@@ -163,12 +163,15 @@ TELEGRAM_NO_EDGE_INTERVAL = 60
 # to manage a specific position manually). See docs/PLAN-orphan-positions.md.
 SWING_INGEST_ORPHANS: bool = True
 
-# Periodic re-migration interval (in check ticks, ~60s each). Codex review
-# P1 (2026-04-15): the one-shot flag previously disabled migration forever
-# after first success, which meant manual buys during a session never got
-# adopted. Re-running every 30 ticks (~30 min) catches mid-session holdings
-# without spamming fetch_page_positions.
-SWING_INGEST_RECHECK_INTERVAL: int = 30
+# Periodic re-migration interval (in check ticks, ~60s each). Codex
+# review round 3 P1 (2026-04-15): 30-tick interval left a new manual
+# buy unprotected for up to ~30 minutes — too wide for leveraged x5
+# certs where the hard stop is -15% underlying. Moved to 3 ticks
+# (~3 min) so a newly-held position gets ingested and stop-placed
+# before its first leverage-amplified intraday swing. fetch_page_positions
+# is already called by _reconcile_swing_positions every RECON_THROTTLE_CYCLES
+# (default 3), so this adds no extra Avanza traffic at the common case.
+SWING_INGEST_RECHECK_INTERVAL: int = 3
 
 # Path to the legacy POSITIONS dict file. Overridable in tests via monkeypatch.
 # Kept as a module-level constant rather than literal because some tests
@@ -232,16 +235,21 @@ def _find_existing_stop(ob_id: str, units: int) -> str | None:
         if not isinstance(s, dict):
             continue
         # Avanza stop schemas differ across endpoints — check the common
-        # nested paths. If we can't locate an ob_id, skip (safer than
-        # accidentally adopting an unrelated stop).
+        # nested paths. Both camelCase spellings (`orderBookId` and
+        # `orderbookId`) appear in the Avanza API depending on the
+        # endpoint version; Codex review round 3 P2 flagged the missing
+        # camelCase spelling as a blind spot that would cause duplicate
+        # stop placement on migration.
         ob = (
-            s.get("orderbookId")
+            s.get("orderBookId")
+            or s.get("orderbookId")
             or (s.get("orderbook") or {}).get("id")
             or (s.get("instrument") or {}).get("orderbookId")
+            or (s.get("instrument") or {}).get("orderBookId")
         )
         if str(ob or "") != str(ob_id):
             continue
-        stop_id = s.get("id") or s.get("stopLossId")
+        stop_id = s.get("id") or s.get("stopLossId") or s.get("stoplossId")
         if stop_id:
             return str(stop_id)
     return None

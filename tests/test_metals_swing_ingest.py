@@ -579,6 +579,48 @@ def test_ingest_adopts_existing_avanza_stop_and_skips_placement(tmp_path, monkey
     assert pos["stop_adopted"] is True
 
 
+def test_find_existing_stop_matches_orderbookid_camelcase(monkeypatch):
+    """Codex review round 3 P2: Avanza uses both orderBookId and orderbookId."""
+    monkeypatch.setattr(
+        "portfolio.avanza_session.get_stop_losses",
+        lambda: [
+            {"id": "STOP_CAMEL", "orderBookId": "1650161"},
+            {"id": "STOP_SNAKE", "orderbookId": "9999999"},
+        ],
+        raising=False,
+    )
+
+    assert mst._find_existing_stop("1650161", 97) == "STOP_CAMEL"
+    assert mst._find_existing_stop("9999999", 50) == "STOP_SNAKE"
+
+
+def test_find_existing_stop_matches_nested_orderbook():
+    """Nested {orderbook: {id}} schema."""
+    import portfolio.avanza_session
+    original = getattr(portfolio.avanza_session, "get_stop_losses", None)
+    try:
+        portfolio.avanza_session.get_stop_losses = lambda: [
+            {"id": "STOP_NESTED", "orderbook": {"id": "1650161"}},
+        ]
+        assert mst._find_existing_stop("1650161", 97) == "STOP_NESTED"
+    finally:
+        if original:
+            portfolio.avanza_session.get_stop_losses = original
+
+
+def test_find_existing_stop_returns_none_when_no_match():
+    import portfolio.avanza_session
+    original = getattr(portfolio.avanza_session, "get_stop_losses", None)
+    try:
+        portfolio.avanza_session.get_stop_losses = lambda: [
+            {"id": "STOP_OTHER", "orderBookId": "9999999"},
+        ]
+        assert mst._find_existing_stop("1650161", 97) is None
+    finally:
+        if original:
+            portfolio.avanza_session.get_stop_losses = original
+
+
 def test_ingest_places_new_stop_when_no_existing(tmp_path, monkeypatch, patched_state_file, patched_legacy_state):
     """Sanity check for the inverse path — placing a new stop when none exists."""
     trader = _make_trader(tmp_path)
