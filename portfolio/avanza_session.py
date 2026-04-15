@@ -11,9 +11,10 @@ import json
 import logging
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from portfolio.avanza_order_lock import avanza_order_lock
 from portfolio.avanza_resilient_page import is_browser_dead_error

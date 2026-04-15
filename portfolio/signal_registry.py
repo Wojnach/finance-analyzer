@@ -88,9 +88,8 @@ def load_signal_func(entry: dict) -> Callable | None:
     cached = entry.get("func")
     if cached is not None and cached is not _FAILED_IMPORT_SENTINEL:
         return cached
-    if cached is _FAILED_IMPORT_SENTINEL:
-        if time.monotonic() - entry.get("_fail_ts", 0) < _FAILED_IMPORT_COOLDOWN:
-            return None
+    if cached is _FAILED_IMPORT_SENTINEL and time.monotonic() - entry.get("_fail_ts", 0) < _FAILED_IMPORT_COOLDOWN:
+        return None
     try:
         mod = importlib.import_module(entry["module_path"])
         func = getattr(mod, entry["func_name"])

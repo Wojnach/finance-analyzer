@@ -1156,8 +1156,9 @@ def accuracy_by_ticker_signal(horizon="1d", min_samples=0):
     """
     entries = load_entries()
     # {ticker: {signal: {correct, total, correct_buy, total_buy, correct_sell, total_sell}}}
-    _empty = lambda: {"correct": 0, "total": 0, "correct_buy": 0, "total_buy": 0,
-                       "correct_sell": 0, "total_sell": 0}
+    def _empty():
+        return {"correct": 0, "total": 0, "correct_buy": 0, "total_buy": 0,
+                "correct_sell": 0, "total_sell": 0}
     stats = defaultdict(lambda: defaultdict(_empty))
 
     for entry in entries:

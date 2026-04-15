@@ -223,11 +223,10 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
         )
 
         triggered_action = prev_triggered.get(ticker, {}).get("action")
-        if triggered_action and current_action != triggered_action:
-            if count_ok or duration_ok:
-                reasons.append(
-                    f"{ticker} flipped {triggered_action}->{current_action} (sustained)"
-                )
+        if triggered_action and current_action != triggered_action and (count_ok or duration_ok):
+            reasons.append(
+                f"{ticker} flipped {triggered_action}->{current_action} (sustained)"
+            )
 
     # 3. Price move >2% since last trigger
     prev_prices = prev.get("prices", {})

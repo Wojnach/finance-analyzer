@@ -652,7 +652,7 @@ def run(force_report=False, active_symbols=None):
             # Use signals.keys() because those are the tickers that successfully
             # returned from the pool. Timed-out tickers are already named by the
             # BUG-178 handler's Last signals log line.
-            last_sigs = {n: _get_last(n) for n in signals.keys()}
+            last_sigs = {n: _get_last(n) for n in signals}
             logger.warning(
                 "Slow cycle diagnostic: %.1fs total, last signals tracked: %s",
                 _run_elapsed, last_sigs,

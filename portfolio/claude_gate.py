@@ -21,6 +21,7 @@ Usage::
     )
 """
 
+import contextlib
 import json
 import logging
 import os
@@ -263,10 +264,8 @@ def _kill_process_tree(proc: subprocess.Popen, *, label: str = "claude") -> None
     except Exception as e:
         # Last-ditch fallback so a kill failure never propagates.
         logger.error("%s tree kill encountered unexpected error: %s — proc.kill()", label, e)
-        try:
+        with contextlib.suppress(Exception):
             proc.kill()
-        except Exception:
-            pass
 
 
 def _run_with_tree_kill(
@@ -308,10 +307,8 @@ def _run_with_tree_kill(
             stdout, stderr = proc.communicate(timeout=5)
         except subprocess.TimeoutExpired:
             logger.error("%s process tree did not exit within 5s of kill — possible zombie", label)
-            try:
+            with contextlib.suppress(Exception):
                 proc.kill()
-            except Exception:
-                pass
             stdout, stderr = "", ""
         return -1, stdout or "", stderr or "", True
 
