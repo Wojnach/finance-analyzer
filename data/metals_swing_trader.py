@@ -256,6 +256,62 @@ def _lookup_legacy_underlying_entry(ob_id: str) -> float:
     return 0.0
 
 
+def _sum_existing_stops_volume(ob_id: str, account_id: str | None = None) -> int:
+    """Return total Avanza stop-loss volume covering an ob_id on our account.
+
+    Codex review round 7 P2: legacy place_stop_loss_orders spreads a
+    single position across STOP_ORDER_LEVELS cascading partial stops.
+    An exact-volume match in _find_existing_stop misses them all,
+    causing ingest_position to attempt a new full-volume placement on
+    top of already-reserved units. Summing lets us recognize the
+    "protected but by multiple stops" case and skip placement safely.
+
+    Returns 0 on any read failure (caller decides fallback).
+    """
+    try:
+        from portfolio.avanza_session import get_stop_losses_strict
+    except Exception:
+        return 0
+    try:
+        stops = get_stop_losses_strict() or []
+    except Exception:
+        return 0
+
+    want_account = str(account_id) if account_id else str(ACCOUNT_ID)
+    total = 0
+    for s in stops:
+        if not isinstance(s, dict):
+            continue
+        ob = (
+            s.get("orderBookId")
+            or s.get("orderbookId")
+            or (s.get("orderbook") or {}).get("id")
+            or (s.get("instrument") or {}).get("orderbookId")
+            or (s.get("instrument") or {}).get("orderBookId")
+        )
+        if str(ob or "") != str(ob_id):
+            continue
+        stop_account = (
+            s.get("accountId")
+            or s.get("account_id")
+            or (s.get("account") or {}).get("id")
+        )
+        if stop_account and str(stop_account) != want_account:
+            continue
+        vol = (
+            s.get("volume")
+            or s.get("quantity")
+            or (s.get("orderEvent") or {}).get("volume")
+            or (s.get("orderbook") or {}).get("volume")
+        )
+        try:
+            if vol is not None:
+                total += int(vol)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
 def _find_existing_stop(ob_id: str, units: int, account_id: str | None = None) -> str | None:
     """Return an existing Avanza stop-loss id for this ob_id, or None.
 
@@ -701,6 +757,12 @@ class SwingTrader:
                     exc_info=True,
                 )
 
+        # Retry stop placement for positions flagged stop_read_failed_ts
+        # at ingestion time (Codex review round 6 P2 + round 7 P1).
+        # Without this, a transient get_stop_losses_strict failure during
+        # ingestion would permanently leave the position naked.
+        self._retry_deferred_stops()
+
         # Orphan ingestion (2026-04-15). Runs BEFORE reconciliation: if
         # we've just adopted a position, _reconcile_swing_positions
         # shouldn't then prune it as a phantom.
@@ -1050,7 +1112,28 @@ class SwingTrader:
         # swing exit. Check for existing stops first and adopt instead.
         if set_stop_loss and not DRY_RUN:
             existing_stop_id = _find_existing_stop(ob_id_str, units)
-            if existing_stop_id == _STOP_READ_FAILED:
+            # Codex review round 7 P2: check total covered volume too.
+            # Legacy `place_stop_loss_orders()` splits protection into
+            # STOP_ORDER_LEVELS cascading partial stops, none of which
+            # match the full `units` exactly. If the sum covers us,
+            # the position IS protected — don't place on top.
+            if existing_stop_id is None:
+                covered = _sum_existing_stops_volume(ob_id_str)
+                if covered >= units:
+                    self.state["positions"][pos_id]["stop_order_id"] = None
+                    self.state["positions"][pos_id]["stop_adopted"] = True
+                    self.state["positions"][pos_id]["stop_split_coverage"] = covered
+                    _save_state(self.state)
+                    _log(
+                        f"ingest_position: {covered}u of stop coverage exists for ob "
+                        f"{ob_id_str} via split/cascade stops — skipping new placement"
+                    )
+                    # Skip the rest of the placement branch
+                    existing_stop_id = "__SPLIT_COVERAGE__"
+
+            if existing_stop_id == "__SPLIT_COVERAGE__":
+                pass  # already handled above
+            elif existing_stop_id == _STOP_READ_FAILED:
                 # Codex review round 6 P2: stop-loss read failed. Place
                 # nothing this cycle — a duplicate stop (if Avanza
                 # already has one) is worse than deferring. Trailing
@@ -1087,6 +1170,61 @@ class SwingTrader:
         )
 
         return pos_id
+
+    def _retry_deferred_stops(self) -> None:
+        """Re-attempt hardware stop placement for positions that deferred it.
+
+        Codex review round 7 P1: ingest_position records `stop_read_failed_ts`
+        when get_stop_losses_strict raised — but nothing later consumed
+        that marker, so a transient stop-read failure could leave the
+        position naked forever. This method runs every tick and, for
+        each position with the marker and no stop_order_id, re-queries
+        the stop-loss API. On success it either adopts an existing stop
+        or places a fresh one, then clears the marker.
+        """
+        if DRY_RUN:
+            return
+        for pos_id, pos in list(self.state.get("positions", {}).items()):
+            if pos.get("stop_order_id"):
+                continue
+            if not pos.get("stop_read_failed_ts"):
+                continue
+            ob_id_str = str(pos.get("ob_id", ""))
+            units = int(pos.get("units") or 0)
+            if not ob_id_str or units <= 0:
+                continue
+
+            existing = _find_existing_stop(ob_id_str, units)
+            if existing == _STOP_READ_FAILED:
+                # Still failing; leave marker in place, try again next tick.
+                continue
+            if existing is None:
+                covered = _sum_existing_stops_volume(ob_id_str)
+                if covered >= units:
+                    pos["stop_adopted"] = True
+                    pos["stop_split_coverage"] = covered
+                    pos.pop("stop_read_failed_ts", None)
+                    _save_state(self.state)
+                    _log(
+                        f"_retry_deferred_stops: {ob_id_str} covered by split stops "
+                        f"({covered}u) — marker cleared"
+                    )
+                    continue
+                # No existing stop, place fresh.
+                self._set_stop_loss(pos_id)
+                if self.state["positions"][pos_id].get("stop_order_id"):
+                    self.state["positions"][pos_id].pop("stop_read_failed_ts", None)
+                    _save_state(self.state)
+                    _log(f"_retry_deferred_stops: placed fresh stop for {ob_id_str}")
+            else:
+                pos["stop_order_id"] = existing
+                pos["stop_adopted"] = True
+                pos.pop("stop_read_failed_ts", None)
+                _save_state(self.state)
+                _log(
+                    f"_retry_deferred_stops: adopted existing stop {existing} "
+                    f"for {ob_id_str}"
+                )
 
     def _migrate_orphans(self, prices: dict) -> str:
         """Ingest Avanza positions not yet tracked in swing_state.

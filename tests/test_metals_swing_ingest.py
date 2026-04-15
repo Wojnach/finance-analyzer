@@ -650,6 +650,138 @@ def test_find_existing_stop_returns_sentinel_on_read_failure(monkeypatch):
     assert result == mst._STOP_READ_FAILED
 
 
+def test_sum_existing_stops_volume_sums_split_cascade(monkeypatch):
+    """Codex review round 7 P2: cascading stops must be recognized."""
+    monkeypatch.setattr(
+        "portfolio.avanza_session.get_stop_losses_strict",
+        lambda: [
+            {"id": "S1", "orderBookId": "1650161",
+             "accountId": mst.ACCOUNT_ID, "volume": 32},
+            {"id": "S2", "orderBookId": "1650161",
+             "accountId": mst.ACCOUNT_ID, "volume": 32},
+            {"id": "S3", "orderBookId": "1650161",
+             "accountId": mst.ACCOUNT_ID, "volume": 33},
+            # Different ob_id — ignored
+            {"id": "S4", "orderBookId": "9999999",
+             "accountId": mst.ACCOUNT_ID, "volume": 100},
+        ],
+        raising=False,
+    )
+    assert mst._sum_existing_stops_volume("1650161") == 97
+
+
+def test_ingest_skips_placement_when_split_coverage_sufficient(tmp_path, monkeypatch, patched_state_file, patched_legacy_state):
+    """Codex review round 7 P2: skip new placement if split stops cover units."""
+    trader = _make_trader(tmp_path)
+    monkeypatch.setattr(mst, "DRY_RUN", False)
+    # No single-volume match
+    monkeypatch.setattr(mst, "_find_existing_stop", lambda ob, u: None)
+    # But split coverage adds up
+    monkeypatch.setattr(mst, "_sum_existing_stops_volume", lambda ob: 97)
+
+    set_stop_calls = []
+    trader._set_stop_loss = lambda pid: set_stop_calls.append(pid)
+
+    pos_id = trader.ingest_position(
+        ob_id="1650161", units=97, entry_price=10.27,
+        underlying_price=78.95, set_stop_loss=True,
+    )
+
+    assert pos_id is not None
+    assert set_stop_calls == []  # must not place a new stop
+    pos = trader.state["positions"][pos_id]
+    assert pos["stop_adopted"] is True
+    assert pos["stop_split_coverage"] == 97
+
+
+def test_retry_deferred_stops_places_after_read_recovery(tmp_path, monkeypatch, patched_state_file):
+    """Codex review round 7 P1: marker-flagged positions get retried."""
+    trader = _make_trader(tmp_path)
+    monkeypatch.setattr(mst, "DRY_RUN", False)
+
+    # Pre-seed a position with stop_read_failed_ts and no stop_order_id
+    trader.state["positions"]["pos_deferred"] = {
+        "warrant_name": "BULL SILVER X5 AVA 4",
+        "ob_id": "1650161",
+        "units": 97,
+        "entry_price": 10.27,
+        "stop_order_id": None,
+        "stop_read_failed_ts": "2026-04-15T12:00:00+00:00",
+    }
+    _save_state = lambda s: None
+    monkeypatch.setattr(mst, "_save_state", _save_state)
+
+    # Now Avanza read succeeds; no existing stop
+    monkeypatch.setattr(mst, "_find_existing_stop", lambda ob, u: None)
+    monkeypatch.setattr(mst, "_sum_existing_stops_volume", lambda ob: 0)
+
+    placed = []
+    def _fake_set(pid):
+        placed.append(pid)
+        trader.state["positions"][pid]["stop_order_id"] = "FRESH_STOP_42"
+    trader._set_stop_loss = _fake_set
+
+    trader._retry_deferred_stops()
+
+    assert placed == ["pos_deferred"]
+    assert trader.state["positions"]["pos_deferred"]["stop_order_id"] == "FRESH_STOP_42"
+    assert "stop_read_failed_ts" not in trader.state["positions"]["pos_deferred"]
+
+
+def test_retry_deferred_stops_adopts_existing_on_recovery(tmp_path, monkeypatch, patched_state_file):
+    """After read recovery, if an Avanza stop exists, adopt it."""
+    trader = _make_trader(tmp_path)
+    monkeypatch.setattr(mst, "DRY_RUN", False)
+
+    trader.state["positions"]["pos_deferred"] = {
+        "warrant_name": "BULL SILVER X5 AVA 4",
+        "ob_id": "1650161",
+        "units": 97,
+        "entry_price": 10.27,
+        "stop_order_id": None,
+        "stop_read_failed_ts": "2026-04-15T12:00:00+00:00",
+    }
+    monkeypatch.setattr(mst, "_save_state", lambda s: None)
+    monkeypatch.setattr(mst, "_find_existing_stop", lambda ob, u: "EXISTING_777")
+
+    placed = []
+    trader._set_stop_loss = lambda pid: placed.append(pid)
+
+    trader._retry_deferred_stops()
+
+    assert placed == []  # no new placement
+    pos = trader.state["positions"]["pos_deferred"]
+    assert pos["stop_order_id"] == "EXISTING_777"
+    assert pos["stop_adopted"] is True
+    assert "stop_read_failed_ts" not in pos
+
+
+def test_retry_deferred_stops_leaves_marker_when_still_failing(tmp_path, monkeypatch, patched_state_file):
+    """If read still fails, marker stays put for next tick."""
+    trader = _make_trader(tmp_path)
+    monkeypatch.setattr(mst, "DRY_RUN", False)
+
+    trader.state["positions"]["pos_deferred"] = {
+        "warrant_name": "BULL SILVER X5 AVA 4",
+        "ob_id": "1650161",
+        "units": 97,
+        "entry_price": 10.27,
+        "stop_order_id": None,
+        "stop_read_failed_ts": "2026-04-15T12:00:00+00:00",
+    }
+    monkeypatch.setattr(mst, "_find_existing_stop", lambda ob, u: mst._STOP_READ_FAILED)
+
+    placed = []
+    trader._set_stop_loss = lambda pid: placed.append(pid)
+
+    trader._retry_deferred_stops()
+
+    assert placed == []
+    pos = trader.state["positions"]["pos_deferred"]
+    assert pos["stop_order_id"] is None
+    assert "stop_read_failed_ts" in pos
+
+
 def test_ingest_defers_stop_placement_when_read_fails(tmp_path, monkeypatch, patched_state_file, patched_legacy_state):
     """Codex review round 6 P2: on stop-read failure, don't place a new stop."""
     trader = _make_trader(tmp_path)
