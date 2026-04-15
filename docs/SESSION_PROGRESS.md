@@ -1,3 +1,56 @@
+# Session Progress — BUG-178 Timeout + Instrumentation (2026-04-15)
+
+## Status: IN REVIEW
+
+Telegram at 10:34 fired `LOOP ERRORS (884s cycle) 5 ticker(s) failed entirely` plus
+`LOOP CONTRACT (main) — 1 critical violation: min_success_rate 0%`. Investigation traced
+this to the 180s `_TICKER_POOL_TIMEOUT` (dropped 2026-04-09 after fingpt daemon retirement)
+firing on legitimate slow work now that the ticker path has grown with vix_term_structure,
+DXY intraday, per-ticker gating, directional accuracy, and fundamental correlation signals.
+Zombie threads complete 330-525s into the cycle, all 5 within ~10s — shared-resource wait
+pattern, not stuck work.
+
+### Shipping (branch fix/bug178-instrumentation-and-timeout)
+
+1. `e2ee124` docs(plans): instrumentation + timeout plan
+2. `afe34ee` feat(bug178): phase-level timing inside generate_signal post-dispatch
+   - New `_phase_log_per_ticker`, `_record_phase`, `get_phase_log`, `_reset_phase_log` in
+     signal_engine.py with lock-guarded per-ticker list
+   - Phases recorded: regime_gate, acc_load, utility_overlay, weighted_consensus,
+     penalties, linear_factor, consensus_gate
+   - `[SLOW-PHASE]` WARNING when any single phase > 2.0s (gated, zero noise on fast cycles)
+   - BUG-178 pool-timeout handler and slow-cycle diagnostic both dump per-ticker phase
+     breakdown so future failures show WHICH phase burned the time
+   - 10 new tests in tests/test_phase_log.py (all green)
+3. `3655c1d` perf(accuracy_stats): in-memory TTL cache for signal_utility
+   - signal_utility walked the full signal log (~6.3K snapshots / ~92K ticker rows) on
+     every ticker, every cycle. Cold cost: ~3.6s. With 5 parallel threads contending for
+     the 108MB signal_log.db file cache, this legitimately blocked.
+   - Split into public cache-wrapper + private `_compute_signal_utility` so explicit-
+     entries callers (tests) bypass the cache. 300s TTL matches LLM rotation period.
+   - Swap-outside-compute pattern: lock held only for the (time,value) swap, never for
+     the 3.6s compute. At most one double-compute on TTL-boundary race.
+   - 9 new tests in tests/test_signal_utility_cache.py (all green)
+4. `f4719f0` fix(main): _TICKER_POOL_TIMEOUT 180 → 360 with full 2026-04-15 rationale
+   - 2.8x p50-slow, 0.7x p95-slow; 240s margin inside 600s cadence
+   - Comment rewrite preserves 120→500→180→360 timeline + why for each
+   - Points to phase log + plan doc for future debugging
+
+### Tests
+- 41 test_accuracy_stats.py tests pass (covers signal_utility correctness)
+- 10 new test_phase_log.py tests pass
+- 9 new test_signal_utility_cache.py tests pass
+- 119 non-tmp_path tests pass in the broader suite; 16 pre-existing Windows-tmp errors
+  unrelated to this change
+- Full-file `test_signal_engine.py` hangs pre-existing on main and on this branch;
+  individual test classes that cover the changed code all pass
+
+### Deferred
+- Windows `tasklist /FI "PID eq X"` 5s subprocess timeouts in llama_server.py — real but
+  orthogonal. Defensive fix proposed; not shipped with this PR to keep scope tight.
+
+---
+
 # Session Progress — Auto-Improvement Session (2026-04-14)
 
 ## Status: SHIPPED
