@@ -5,6 +5,7 @@ discovers all signals from the registry instead of hardcoded lists.
 """
 import importlib
 import logging
+import time
 from collections.abc import Callable
 
 logger = logging.getLogger("portfolio.signal_registry")
@@ -75,17 +76,31 @@ def get_signal_names() -> list:
     return core + enhanced
 
 
+_FAILED_IMPORT_SENTINEL = object()
+_FAILED_IMPORT_COOLDOWN = 300  # retry broken imports after 5 min
+
 def load_signal_func(entry: dict) -> Callable | None:
-    """Lazy-load and cache the compute function for a signal."""
-    if entry.get("func") is not None:
-        return entry["func"]
+    """Lazy-load and cache the compute function for a signal.
+
+    On import failure, caches the failure for _FAILED_IMPORT_COOLDOWN seconds
+    so the warning is logged once, not 35× per cycle (5 tickers × 7 TFs).
+    """
+    cached = entry.get("func")
+    if cached is not None and cached is not _FAILED_IMPORT_SENTINEL:
+        return cached
+    if cached is _FAILED_IMPORT_SENTINEL:
+        if time.monotonic() - entry.get("_fail_ts", 0) < _FAILED_IMPORT_COOLDOWN:
+            return None
     try:
         mod = importlib.import_module(entry["module_path"])
         func = getattr(mod, entry["func_name"])
         entry["func"] = func
+        entry.pop("_fail_ts", None)
         return func
     except Exception as e:
         logger.warning("Failed to load signal %s: %s", entry['name'], e)
+        entry["func"] = _FAILED_IMPORT_SENTINEL
+        entry["_fail_ts"] = time.monotonic()
         return None
 
 
