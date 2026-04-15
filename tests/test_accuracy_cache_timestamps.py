@@ -122,9 +122,9 @@ class TestBlendAccuracyData:
         alltime = {"rsi": {"accuracy": 0.50, "total": 200, "correct": 100, "pct": 50.0}}
         recent = {"rsi": {"accuracy": 0.80, "total": 100, "correct": 80, "pct": 80.0}}
 
-        # Divergence = 0.30 > 0.15 threshold → fast blend: 90% recent + 10% alltime
+        # Divergence = 0.30 > 0.15 threshold → fast blend: 95% recent + 5% alltime
         result = blend_accuracy_data(alltime, recent)
-        expected = 0.9 * 0.80 + 0.1 * 0.50  # = 0.77
+        expected = 0.95 * 0.80 + 0.05 * 0.50  # = 0.785
         assert abs(result["rsi"]["accuracy"] - expected) < 0.01
 
     def test_blend_uses_alltime_when_recent_insufficient(self):

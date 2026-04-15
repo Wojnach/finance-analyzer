@@ -908,8 +908,8 @@ class TestCorrelationDedup:
             _RECENCY_WEIGHT_NORMAL,
         )
         assert _RECENCY_DIVERGENCE_THRESHOLD == 0.15
-        assert _RECENCY_WEIGHT_FAST == 0.9
-        assert _RECENCY_WEIGHT_NORMAL == 0.7
+        assert _RECENCY_WEIGHT_FAST == 0.95
+        assert _RECENCY_WEIGHT_NORMAL == 0.75
 
     def test_accuracy_gate_at_047(self):
         """Verify gate threshold is 0.47 (raised 0.45 → 0.47 on 2026-04-11
