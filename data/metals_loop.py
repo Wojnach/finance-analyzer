@@ -1838,11 +1838,20 @@ def detect_holdings(page):
                 # can't see it directly. Use the module-level "live"
                 # reference set by main after successful init.
                 swing_live = _get_live_swing_trader()
+                # Codex review round 4 P1: fishing instruments must stay
+                # in the legacy POSITIONS dict so _eod_sell_fishing_positions
+                # and the fish-engine trail can still manage them. Without
+                # this exemption, an ob_id that's both in KNOWN_WARRANT_OB_IDS
+                # (with _managed_by=swing_trader) AND FISHING_OB_IDS would
+                # be skipped here AND skipped by _migrate_orphans, leaving
+                # it invisible to every exit path — including EOD safety.
+                is_fishing = ob_id in FISHING_OB_IDS
                 swing_owned = (
                     info
                     and info.get("_managed_by") == "swing_trader"
                     and SWING_TRADER_AVAILABLE
                     and swing_live is not None
+                    and not is_fishing
                 )
                 if swing_owned:
                     # 2026-04-10: SwingTrader manages this via its own state

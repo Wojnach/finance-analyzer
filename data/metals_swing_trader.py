@@ -209,7 +209,37 @@ def _lookup_known_warrant(ob_id):
     return known.get(str(ob_id))
 
 
-def _find_existing_stop(ob_id: str, units: int) -> str | None:
+def _lookup_legacy_underlying_entry(ob_id: str) -> float:
+    """Return legacy POSITIONS[key].underlying_entry for an ob_id, or 0.
+
+    Codex review round 4 P1: orphans that existed before this process
+    started often have a valid entry underlying persisted in the legacy
+    state file. Using that value preserves the adopted position's true
+    P&L reference, so take-profit / hard-stop / trailing logic evaluates
+    against the ORIGINAL buy rather than "whatever spot happens to be
+    right now".
+    """
+    try:
+        legacy = load_json(LEGACY_POSITIONS_FILE, {}) or {}
+        if not isinstance(legacy, dict):
+            return 0.0
+        for v in legacy.values():
+            if not isinstance(v, dict):
+                continue
+            if str(v.get("ob_id", "")) != str(ob_id):
+                continue
+            und = v.get("underlying_entry") or v.get("entry_underlying")
+            if isinstance(und, (int, float)) and und > 0:
+                return float(und)
+    except Exception:
+        logger.debug(
+            "_lookup_legacy_underlying_entry: legacy state read failed ob=%s",
+            ob_id, exc_info=True,
+        )
+    return 0.0
+
+
+def _find_existing_stop(ob_id: str, units: int, account_id: str | None = None) -> str | None:
     """Return an existing Avanza stop-loss id for this ob_id, or None.
 
     2026-04-15 Codex review P1: when ingest_position adopts a position
@@ -231,6 +261,7 @@ def _find_existing_stop(ob_id: str, units: int) -> str | None:
     except Exception:
         logger.debug("_find_existing_stop: get_stop_losses raised", exc_info=True)
         return None
+    want_account = str(account_id) if account_id else str(ACCOUNT_ID)
     for s in stops:
         if not isinstance(s, dict):
             continue
@@ -249,6 +280,34 @@ def _find_existing_stop(ob_id: str, units: int) -> str | None:
         )
         if str(ob or "") != str(ob_id):
             continue
+
+        # Codex review round 4 P2: also verify account + volume. A stop
+        # on the same ob_id but owned by a different account (multi-
+        # account operator) or covering only a partial slice of the
+        # holding must NOT be adopted — _execute_sell would later try
+        # to cancel the wrong stop id, and the swing position would be
+        # silently underprotected on the volume gap.
+        stop_account = (
+            s.get("accountId")
+            or s.get("account_id")
+            or (s.get("account") or {}).get("id")
+        )
+        if stop_account and str(stop_account) != want_account:
+            continue
+
+        stop_volume = (
+            s.get("volume")
+            or s.get("quantity")
+            or (s.get("orderbook") or {}).get("volume")
+        )
+        if stop_volume is not None:
+            try:
+                if int(stop_volume) != int(units):
+                    continue
+            except (TypeError, ValueError):
+                # Unrecognizable volume shape — skip to be safe
+                continue
+
         stop_id = s.get("id") or s.get("stopLossId") or s.get("stoplossId")
         if stop_id:
             return str(stop_id)
@@ -1081,11 +1140,19 @@ class SwingTrader:
                 )
                 continue
 
+            # Codex review round 4 P1: don't blindly overwrite
+            # entry_underlying with current spot — that resets every
+            # trailing/TP/hard-stop calculation on the adopted position
+            # as if it had just been opened. If the legacy POSITIONS
+            # state persists an underlying_entry, use it.
+            true_entry_und = _lookup_legacy_underlying_entry(ob_id_str)
+            entry_und_for_ingest = true_entry_und or float(und_price)
+
             pos_id = self.ingest_position(
                 ob_id=ob_id_str,
                 units=units,
                 entry_price=avg_price,
-                underlying_price=float(und_price),
+                underlying_price=entry_und_for_ingest,
                 direction=direction,
                 set_stop_loss=True,
             )

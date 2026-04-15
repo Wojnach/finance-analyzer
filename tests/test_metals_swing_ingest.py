@@ -621,6 +621,85 @@ def test_find_existing_stop_returns_none_when_no_match():
             portfolio.avanza_session.get_stop_losses = original
 
 
+def test_find_existing_stop_rejects_wrong_account(monkeypatch):
+    """Codex review round 4 P2: don't adopt another account's stop."""
+    monkeypatch.setattr(
+        "portfolio.avanza_session.get_stop_losses",
+        lambda: [
+            {"id": "STOP_OTHER_ACCT", "orderBookId": "1650161",
+             "accountId": "9999999", "volume": 97},
+            {"id": "STOP_OUR_ACCT", "orderBookId": "1650161",
+             "accountId": mst.ACCOUNT_ID, "volume": 97},
+        ],
+        raising=False,
+    )
+    assert mst._find_existing_stop("1650161", 97) == "STOP_OUR_ACCT"
+
+
+def test_find_existing_stop_rejects_wrong_volume(monkeypatch):
+    """Codex review round 4 P2: don't adopt a partial-volume stop."""
+    monkeypatch.setattr(
+        "portfolio.avanza_session.get_stop_losses",
+        lambda: [
+            {"id": "STOP_PARTIAL", "orderBookId": "1650161",
+             "accountId": mst.ACCOUNT_ID, "volume": 50},  # covers only 50 of 97
+        ],
+        raising=False,
+    )
+    # We hold 97u; a 50u stop must not be adopted
+    assert mst._find_existing_stop("1650161", 97) is None
+
+
+def test_lookup_legacy_underlying_entry_returns_stored_value(tmp_path, monkeypatch):
+    """Codex review round 4 P1: preserve the true entry underlying from legacy state."""
+    import json
+    legacy_path = tmp_path / "metals_positions_state.json"
+    legacy_path.write_text(json.dumps({
+        "bull_silver_x5": {
+            "active": True, "units": 97, "entry": 10.27,
+            "stop": 9.76, "ob_id": "1650161",
+            "underlying_entry": 78.95,
+        },
+    }))
+    monkeypatch.setattr(mst, "LEGACY_POSITIONS_FILE", str(legacy_path))
+
+    assert mst._lookup_legacy_underlying_entry("1650161") == 78.95
+    assert mst._lookup_legacy_underlying_entry("9999999") == 0.0
+
+
+def test_migrate_orphans_preserves_true_entry_underlying(tmp_path, monkeypatch, patched_state_file, patched_legacy_state):
+    """Codex review round 4 P1: migration uses legacy underlying_entry when present."""
+    # Enrich patched_legacy_state fixture with underlying_entry field
+    import json
+    legacy_data = json.loads(patched_legacy_state.read_text())
+    legacy_data["bull_silver_x5"]["underlying_entry"] = 78.95
+    patched_legacy_state.write_text(json.dumps(legacy_data))
+
+    trader = _make_trader(tmp_path)
+    monkeypatch.setattr(mst, "DRY_RUN", True)
+    monkeypatch.setattr(
+        mst, "_lookup_known_warrant",
+        lambda ob: _known_warrants_fixture().get(str(ob)),
+        raising=False,
+    )
+    monkeypatch.setattr(mst, "FISHING_OB_IDS", set(), raising=False)
+    monkeypatch.setattr(
+        mst, "fetch_page_positions",
+        lambda p, a: {"1650161": {
+            "name": "BULL SILVER X5 AVA 4", "units": 97,
+            "value": 984.05, "avg_price": 10.27, "api_type": "certificate",
+        }},
+    )
+
+    # Provide a CURRENT spot very different from the entry (80.50 vs 78.95).
+    # _migrate_orphans must prefer the legacy stored entry (78.95).
+    trader._migrate_orphans(prices={"silver_ref": {"underlying": 80.50}})
+
+    ingested = [p for p in trader.state["positions"].values() if p.get("ob_id") == "1650161"]
+    assert len(ingested) == 1
+    assert ingested[0]["entry_underlying"] == 78.95  # legacy value, not current 80.50
+
+
 def test_ingest_places_new_stop_when_no_existing(tmp_path, monkeypatch, patched_state_file, patched_legacy_state):
     """Sanity check for the inverse path — placing a new stop when none exists."""
     trader = _make_trader(tmp_path)
