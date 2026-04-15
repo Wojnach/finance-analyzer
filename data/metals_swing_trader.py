@@ -209,6 +209,13 @@ def _lookup_known_warrant(ob_id):
     return known.get(str(ob_id))
 
 
+# Sentinel for _find_existing_stop: return value meaning "stop-loss
+# read failed — caller must NOT place a new stop this cycle". Distinct
+# from None (which means "confirmed no existing stop"). Kept as a
+# module-level string constant so test code can assert on identity.
+_STOP_READ_FAILED = "__STOP_READ_FAILED__"
+
+
 def _lookup_legacy_underlying_entry(ob_id: str) -> float:
     """Return legacy POSITIONS[key].underlying_entry for an ob_id, or 0.
 
@@ -261,16 +268,28 @@ def _find_existing_stop(ob_id: str, units: int, account_id: str | None = None) -
     to _set_stop_loss, which has its own failure handling. Tests can
     monkeypatch this function directly.
     """
+    # Codex review round 6 P2: fail CLOSED on read failure.
+    # get_stop_losses() swallows errors and returns [], which callers
+    # would mistake for "no stop exists" and then place a duplicate.
+    # Use the strict variant that raises. On failure we return a
+    # sentinel (empty string) the caller treats as "don't know — don't
+    # place a new stop this cycle"; next cycle retries.
     try:
-        from portfolio.avanza_session import get_stop_losses
+        from portfolio.avanza_session import get_stop_losses_strict
     except Exception:
         logger.debug("_find_existing_stop: avanza_session import failed", exc_info=True)
         return None
     try:
-        stops = get_stop_losses() or []
+        stops = get_stop_losses_strict() or []
     except Exception:
-        logger.debug("_find_existing_stop: get_stop_losses raised", exc_info=True)
-        return None
+        logger.warning(
+            "_find_existing_stop: get_stop_losses_strict raised — "
+            "cannot safely decide; skipping stop placement this cycle",
+            exc_info=True,
+        )
+        # Sentinel: empty string means "unknown / don't place a new stop".
+        # Caller compares with `if existing_stop_id == _STOP_READ_FAILED`.
+        return _STOP_READ_FAILED
     want_account = str(account_id) if account_id else str(ACCOUNT_ID)
     for s in stops:
         if not isinstance(s, dict):
@@ -305,18 +324,28 @@ def _find_existing_stop(ob_id: str, units: int, account_id: str | None = None) -
         if stop_account and str(stop_account) != want_account:
             continue
 
+        # Codex review round 6 P2: Avanza parser in portfolio/avanza/types.py
+        # reads volume from orderEvent.volume. Without this path the
+        # matcher silently treats partial-volume stops as "no volume
+        # info" and adopts them, leaving the swing position
+        # underprotected on the uncovered slice.
         stop_volume = (
             s.get("volume")
             or s.get("quantity")
+            or (s.get("orderEvent") or {}).get("volume")
             or (s.get("orderbook") or {}).get("volume")
         )
-        if stop_volume is not None:
-            try:
-                if int(stop_volume) != int(units):
-                    continue
-            except (TypeError, ValueError):
-                # Unrecognizable volume shape — skip to be safe
+        if stop_volume is None:
+            # Missing volume info is ambiguous — don't adopt. Safer to
+            # let the caller decide (skip placement this cycle, or
+            # retry next cycle when the API returns a fuller shape).
+            continue
+        try:
+            if int(stop_volume) != int(units):
                 continue
+        except (TypeError, ValueError):
+            # Unrecognizable volume shape — skip to be safe
+            continue
 
         stop_id = s.get("id") or s.get("stopLossId") or s.get("stoplossId")
         if stop_id:
@@ -1021,7 +1050,21 @@ class SwingTrader:
         # swing exit. Check for existing stops first and adopt instead.
         if set_stop_loss and not DRY_RUN:
             existing_stop_id = _find_existing_stop(ob_id_str, units)
-            if existing_stop_id:
+            if existing_stop_id == _STOP_READ_FAILED:
+                # Codex review round 6 P2: stop-loss read failed. Place
+                # nothing this cycle — a duplicate stop (if Avanza
+                # already has one) is worse than deferring. Trailing
+                # logic will retry via _set_stop_loss once a price tick
+                # changes state. Mark the position so operators and
+                # future reconcile passes know stop state is unknown.
+                self.state["positions"][pos_id]["stop_order_id"] = None
+                self.state["positions"][pos_id]["stop_read_failed_ts"] = _now_utc().isoformat()
+                _save_state(self.state)
+                _log(
+                    f"ingest_position: stop-loss API read failed for ob {ob_id_str} — "
+                    f"deferring placement (will retry next cycle)"
+                )
+            elif existing_stop_id:
                 self.state["positions"][pos_id]["stop_order_id"] = existing_stop_id
                 self.state["positions"][pos_id]["stop_adopted"] = True
                 _save_state(self.state)

@@ -1804,8 +1804,37 @@ def detect_holdings(page):
                 # (swing_state.positions) — reopening the duplicate
                 # stop / duplicate sell race the migration was meant
                 # to close.
+                #
+                # Codex review round 6 P1: but ONLY if swing actually
+                # still owns this ob_id. On a later rebuy, the legacy
+                # row carries sold_reason=migrated_to_swing from the
+                # PREVIOUS trade; the fresh holding would otherwise be
+                # silently dropped. If swing doesn't currently track
+                # it, clear the migration tombstone and fall through to
+                # reactivation so the position lands somewhere visible.
                 if pos.get("sold_reason") == "migrated_to_swing":
-                    continue
+                    _swing_live_check = _get_live_swing_trader()
+                    _swing_has_pos = False
+                    if _swing_live_check is not None:
+                        try:
+                            _swing_has_pos = any(
+                                str(p.get("ob_id", "")) == ob_id
+                                for p in _swing_live_check.state.get("positions", {}).values()
+                            )
+                        except Exception:
+                            logger.debug(
+                                "detect_holdings: swing state probe failed ob_id=%s",
+                                ob_id, exc_info=True,
+                            )
+                    if _swing_has_pos:
+                        continue
+                    # Stale migration marker — swing no longer tracks it.
+                    # Strip the tombstone so the reactivation path below
+                    # can put this rebuy back under legacy management.
+                    pos.pop("sold_reason", None)
+                    pos.pop("sold_ts", None)
+                    pos.pop("migrated_pos_id", None)
+                    log(f"Holdings: stale migration marker cleared for {key} (rebuy)")
                 # Reactivate if was sold
                 if not pos["active"]:
                     pos["active"] = True

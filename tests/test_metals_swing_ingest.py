@@ -241,6 +241,8 @@ def test_ingest_skips_unknown_ob_id_and_returns_none(tmp_path, monkeypatch, patc
 def test_ingest_calls_set_stop_loss_when_requested(tmp_path, monkeypatch, patched_state_file, patched_legacy_state):
     trader = _make_trader(tmp_path)
     monkeypatch.setattr(mst, "DRY_RUN", False)
+    # No pre-existing Avanza stop → ingest places a new one.
+    monkeypatch.setattr(mst, "_find_existing_stop", lambda ob, u: None)
 
     called = []
 
@@ -582,10 +584,12 @@ def test_ingest_adopts_existing_avanza_stop_and_skips_placement(tmp_path, monkey
 def test_find_existing_stop_matches_orderbookid_camelcase(monkeypatch):
     """Codex review round 3 P2: Avanza uses both orderBookId and orderbookId."""
     monkeypatch.setattr(
-        "portfolio.avanza_session.get_stop_losses",
+        "portfolio.avanza_session.get_stop_losses_strict",
         lambda: [
-            {"id": "STOP_CAMEL", "orderBookId": "1650161"},
-            {"id": "STOP_SNAKE", "orderbookId": "9999999"},
+            {"id": "STOP_CAMEL", "orderBookId": "1650161",
+             "accountId": mst.ACCOUNT_ID, "volume": 97},
+            {"id": "STOP_SNAKE", "orderbookId": "9999999",
+             "accountId": mst.ACCOUNT_ID, "volume": 50},
         ],
         raising=False,
     )
@@ -597,34 +601,94 @@ def test_find_existing_stop_matches_orderbookid_camelcase(monkeypatch):
 def test_find_existing_stop_matches_nested_orderbook():
     """Nested {orderbook: {id}} schema."""
     import portfolio.avanza_session
-    original = getattr(portfolio.avanza_session, "get_stop_losses", None)
+    original = getattr(portfolio.avanza_session, "get_stop_losses_strict", None)
     try:
-        portfolio.avanza_session.get_stop_losses = lambda: [
-            {"id": "STOP_NESTED", "orderbook": {"id": "1650161"}},
+        portfolio.avanza_session.get_stop_losses_strict = lambda: [
+            {"id": "STOP_NESTED", "orderbook": {"id": "1650161"},
+             "accountId": mst.ACCOUNT_ID, "volume": 97},
         ]
         assert mst._find_existing_stop("1650161", 97) == "STOP_NESTED"
     finally:
         if original:
-            portfolio.avanza_session.get_stop_losses = original
+            portfolio.avanza_session.get_stop_losses_strict = original
+
+
+def test_find_existing_stop_reads_volume_from_orderevent(monkeypatch):
+    """Codex review round 6 P2: Avanza's orderEvent.volume path."""
+    monkeypatch.setattr(
+        "portfolio.avanza_session.get_stop_losses_strict",
+        lambda: [
+            {"id": "STOP_VIA_ORDER_EVENT", "orderBookId": "1650161",
+             "accountId": mst.ACCOUNT_ID, "orderEvent": {"volume": 97}},
+        ],
+        raising=False,
+    )
+    assert mst._find_existing_stop("1650161", 97) == "STOP_VIA_ORDER_EVENT"
+
+
+def test_find_existing_stop_rejects_missing_volume(monkeypatch):
+    """Codex review round 6 P2: volume ambiguity = don't adopt."""
+    monkeypatch.setattr(
+        "portfolio.avanza_session.get_stop_losses_strict",
+        lambda: [
+            {"id": "STOP_NO_VOL", "orderBookId": "1650161",
+             "accountId": mst.ACCOUNT_ID},  # no volume anywhere
+        ],
+        raising=False,
+    )
+    assert mst._find_existing_stop("1650161", 97) is None
+
+
+def test_find_existing_stop_returns_sentinel_on_read_failure(monkeypatch):
+    """Codex review round 6 P2: fail closed — return _STOP_READ_FAILED."""
+    def _raise():
+        raise RuntimeError("Avanza API read failed")
+    monkeypatch.setattr(
+        "portfolio.avanza_session.get_stop_losses_strict", _raise, raising=False,
+    )
+    result = mst._find_existing_stop("1650161", 97)
+    assert result == mst._STOP_READ_FAILED
+
+
+def test_ingest_defers_stop_placement_when_read_fails(tmp_path, monkeypatch, patched_state_file, patched_legacy_state):
+    """Codex review round 6 P2: on stop-read failure, don't place a new stop."""
+    trader = _make_trader(tmp_path)
+    monkeypatch.setattr(mst, "DRY_RUN", False)
+    monkeypatch.setattr(mst, "_find_existing_stop", lambda ob, u: mst._STOP_READ_FAILED)
+
+    set_stop_calls = []
+    trader._set_stop_loss = lambda pid: set_stop_calls.append(pid)
+
+    pos_id = trader.ingest_position(
+        ob_id="2379768", units=97, entry_price=14.7,
+        underlying_price=79.42, set_stop_loss=True,
+    )
+
+    assert pos_id is not None
+    # Must NOT place a new stop when we can't verify no pre-existing stop
+    assert set_stop_calls == []
+    pos = trader.state["positions"][pos_id]
+    assert pos["stop_order_id"] is None
+    assert "stop_read_failed_ts" in pos
 
 
 def test_find_existing_stop_returns_none_when_no_match():
     import portfolio.avanza_session
-    original = getattr(portfolio.avanza_session, "get_stop_losses", None)
+    original = getattr(portfolio.avanza_session, "get_stop_losses_strict", None)
     try:
-        portfolio.avanza_session.get_stop_losses = lambda: [
+        portfolio.avanza_session.get_stop_losses_strict = lambda: [
             {"id": "STOP_OTHER", "orderBookId": "9999999"},
         ]
         assert mst._find_existing_stop("1650161", 97) is None
     finally:
         if original:
-            portfolio.avanza_session.get_stop_losses = original
+            portfolio.avanza_session.get_stop_losses_strict = original
 
 
 def test_find_existing_stop_rejects_wrong_account(monkeypatch):
     """Codex review round 4 P2: don't adopt another account's stop."""
     monkeypatch.setattr(
-        "portfolio.avanza_session.get_stop_losses",
+        "portfolio.avanza_session.get_stop_losses_strict",
         lambda: [
             {"id": "STOP_OTHER_ACCT", "orderBookId": "1650161",
              "accountId": "9999999", "volume": 97},
@@ -639,7 +703,7 @@ def test_find_existing_stop_rejects_wrong_account(monkeypatch):
 def test_find_existing_stop_rejects_wrong_volume(monkeypatch):
     """Codex review round 4 P2: don't adopt a partial-volume stop."""
     monkeypatch.setattr(
-        "portfolio.avanza_session.get_stop_losses",
+        "portfolio.avanza_session.get_stop_losses_strict",
         lambda: [
             {"id": "STOP_PARTIAL", "orderBookId": "1650161",
              "accountId": mst.ACCOUNT_ID, "volume": 50},  # covers only 50 of 97
