@@ -296,10 +296,12 @@ except ImportError as e:
 
 try:
     from metals_swing_trader import SwingTrader
+    import metals_swing_trader as _swing_mod
     SWING_TRADER_AVAILABLE = True
 except ImportError as e:
     print(f"[WARN] swing trader import failed: {e}", flush=True)
     SWING_TRADER_AVAILABLE = False
+    _swing_mod = None
 
 try:
     from metals_execution_engine import build_execution_recommendations, hours_to_metals_close
@@ -1513,18 +1515,43 @@ def get_underlying_momentum(ticker, lookback=10):
 # Dynamic holdings detection — auto-detect instruments bought by user
 # ---------------------------------------------------------------------------
 # Known warrant orderbook IDs → ticker mapping
+#
+# 2026-04-15: added `_managed_by: "swing_trader"` to all five hardcoded
+# entries so detect_holdings() below routes auto-detected holdings through
+# SwingTrader.ingest_position() instead of adding them to the legacy
+# POSITIONS dict. The legacy trailing-stop path is dead-gated via
+# STOP_ORDER_ENABLED=False + HARDWARE_TRAILING_ENABLED=True, so any
+# position that lands in POSITIONS without an explicit migration gets
+# zero exit protection (the bull_silver_x5 incident earlier today is
+# exactly this). See docs/PLAN-orphan-positions.md.
 KNOWN_WARRANT_OB_IDS = {
     "2334960": {"key": "silver301", "name": "MINI L SILVER AVA 301",
-                "api_type": "warrant", "underlying": "XAG-USD", "leverage": 4.3},
+                "api_type": "warrant", "underlying": "XAG-USD", "leverage": 4.3,
+                "_managed_by": "swing_trader"},
     "2043157": {"key": "silver_sg", "name": "MINI L SILVER SG",
-                "api_type": "warrant", "underlying": "XAG-USD", "leverage": 1.56},
+                "api_type": "warrant", "underlying": "XAG-USD", "leverage": 1.56,
+                "_managed_by": "swing_trader"},
     "856394":  {"key": "gold", "name": "BULL GULD X8 N",
-                "api_type": "certificate", "underlying": "XAU-USD", "leverage": 8.0},
+                "api_type": "certificate", "underlying": "XAU-USD", "leverage": 8.0,
+                "_managed_by": "swing_trader"},
     "2286417": {"key": "bear_silver_x5", "name": "BEAR SILVER X5 AVA 12",
-                "api_type": "certificate", "underlying": "XAG-USD", "leverage": 5.0},
+                "api_type": "certificate", "underlying": "XAG-USD", "leverage": 5.0,
+                "_managed_by": "swing_trader"},
     "1650161": {"key": "bull_silver_x5", "name": "BULL SILVER X5 AVA 4",
-                "api_type": "certificate", "underlying": "XAG-USD", "leverage": 5.0},
+                "api_type": "certificate", "underlying": "XAG-USD", "leverage": 5.0,
+                "_managed_by": "swing_trader"},
 }
+
+
+def lookup_known_warrant(ob_id):
+    """Return KNOWN_WARRANT_OB_IDS metadata by ob_id, or None.
+
+    Public module-level helper so other modules (SwingTrader) can perform
+    the lookup without reaching into internals. Returns a dict with at
+    least `key`, `name`, `api_type`, `underlying`, `leverage` and an
+    optional `_managed_by` marker.
+    """
+    return KNOWN_WARRANT_OB_IDS.get(str(ob_id))
 # Extend with WARRANT_CATALOG if available
 if CATALOG_AVAILABLE:
     for wk, wv in WARRANT_CATALOG.items():
@@ -1605,6 +1632,17 @@ except ImportError:
 FISHING_TRAIL_START_PCT = 0.0       # trail immediately (no gain threshold)
 FISHING_EOD_SELL_MINUTE_CET = (21, 50)  # sell fishing positions at 21:50 CET
 _eod_fishing_sold_today: str = ""   # date string guard — prevent repeated EOD sells
+
+# 2026-04-15: push FISHING_OB_IDS into metals_swing_trader so its
+# _migrate_orphans() skips fish-engine-owned positions. Direct attribute
+# assignment is fine here — metals_swing_trader declares an empty default
+# set at module scope that we overwrite. If the import failed above this
+# becomes a no-op (guarded via getattr).
+if _swing_mod is not None:
+    try:
+        _swing_mod.FISHING_OB_IDS = FISHING_OB_IDS
+    except Exception:
+        logger.debug("Could not propagate FISHING_OB_IDS to swing_trader", exc_info=True)
 # 2026-04-09: log-once set for unknown ob_ids in detect_holdings — previously
 # emitted every 30s when account held a warrant not in KNOWN_WARRANT_OB_IDS
 # (e.g. unrecognized issuer), flooding the log and hiding real issues. Only

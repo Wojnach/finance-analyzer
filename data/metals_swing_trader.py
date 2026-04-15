@@ -384,6 +384,10 @@ class SwingTrader:
     cash_sync_was_ok: bool = False
     recon_failure_streak: int = 0
     reconciled_once: bool = False
+    # 2026-04-15 orphan ingestion: set True after _migrate_orphans has run
+    # its one-shot pass. Class-level default protects tests that bypass
+    # __init__ via SwingTrader.__new__ (see test_metals_swing_sizing.py).
+    _orphans_migrated: bool = False
 
     def __init__(self, page):
         self.page = page
