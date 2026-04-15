@@ -24,6 +24,27 @@ BEST_HORIZON_CACHE_FILE = DATA_DIR / "best_horizon_cache.json"
 ACCURACY_CACHE_TTL = 3600
 HORIZONS = ["3h", "4h", "12h", "1d", "3d", "5d", "10d"]
 
+# In-memory cache for signal_utility (added 2026-04-15, BUG-178 mitigation).
+# signal_utility() walks every entry in the signal log (~6320 snapshots / ~92K
+# ticker rows as of this writing) and costs ~3.6s cold and <50ms hot. It's
+# called from generate_signal() on every ticker, every cycle, with NO
+# disk-backed cache — so when the OS file cache is cold (memory pressure,
+# fresh process, antivirus scan) 5 concurrent ticker threads each pay the
+# 3-4s cold read, which can compound under file-cache page-in contention.
+#
+# 300s TTL matches the shortest LLM rotation period and is well below the
+# 3600s ACCURACY_CACHE_TTL used for the disk-backed caches. The lock guards
+# the (value, timestamp) tuple so two threads racing to refresh can't
+# double-compute. Dogpile: the lock is held ONLY for the swap, not for the
+# compute — the slow signal_utility() call happens outside the lock, so
+# other threads waiting on the lock see the fresh value the moment the
+# first thread returns. The cost of an occasional double-compute on a
+# TTL-boundary race is much lower than the cost of holding a global lock
+# through a 3.6s disk scan.
+_SIGNAL_UTILITY_CACHE_TTL = 300.0
+_signal_utility_cache: dict[str, tuple[float, dict]] = {}
+_signal_utility_cache_lock = threading.Lock()
+
 
 def load_entries():
     """Load signal log entries. Prefers SQLite if available, falls back to JSONL."""
@@ -462,6 +483,35 @@ def signal_utility(horizon="1d", entries=None):
         dict: {signal_name: {avg_return, total_return, samples, utility_score}}
         where utility_score = avg_return * sqrt(samples).
         Signals with no data get zeros.
+
+    2026-04-15 (BUG-178 mitigation): when `entries` is None, the result is
+    cached for _SIGNAL_UTILITY_CACHE_TTL seconds keyed by horizon. The cold
+    walk costs ~3.6s on a 6K-snapshot log; with 5 ticker threads per cycle
+    and the OS file cache occasionally cold, this was a legitimate
+    per-cycle cost. Passing an explicit `entries` list bypasses the cache
+    (preserves the old behavior for test fixtures that want a specific
+    entries snapshot).
+    """
+    if entries is None:
+        now = time.time()
+        with _signal_utility_cache_lock:
+            cached = _signal_utility_cache.get(horizon)
+            if cached and now - cached[0] < _SIGNAL_UTILITY_CACHE_TTL:
+                return cached[1]
+        # Cache miss or expired — compute outside the lock to avoid
+        # serializing all threads behind the slow path.
+        result = _compute_signal_utility(horizon, None)
+        with _signal_utility_cache_lock:
+            _signal_utility_cache[horizon] = (time.time(), result)
+        return result
+    # Explicit entries — bypass cache (caller controls the dataset).
+    return _compute_signal_utility(horizon, entries)
+
+
+def _compute_signal_utility(horizon, entries):
+    """Actual utility computation. Extracted from signal_utility so the
+    cache wrapper can call it without re-entering the cached function
+    (and so test fixtures passing explicit entries can hit the raw path).
     """
     import math
 
@@ -511,6 +561,17 @@ def signal_utility(horizon="1d", entries=None):
             "utility_score": utility,
         }
     return result
+
+
+def invalidate_signal_utility_cache():
+    """Clear the signal_utility in-memory cache.
+
+    Primarily exists so tests and outcome-backfill code can force a refresh
+    after writing new outcomes. Production code does NOT need to call this —
+    the 300s TTL is the source of truth.
+    """
+    with _signal_utility_cache_lock:
+        _signal_utility_cache.clear()
 
 
 def best_worst_signals(horizon="1d", acc=None):
