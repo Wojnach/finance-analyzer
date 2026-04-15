@@ -35,11 +35,12 @@ HORIZONS = ["3h", "4h", "12h", "1d", "3d", "5d", "10d"]
 # Invalidation is pure TTL (300s) — there is NO mtime check against
 # signal_log.db, so a backfill that writes new outcomes mid-cycle is only
 # visible to signal_utility after the TTL expires. This is an explicit
-# trade: outcome backfill already runs on a 6h cadence (PF-OutcomeCheck
-# scheduled task), so a 5-minute staleness window is dominated by the
-# 6-hour write cadence. Code paths that need immediately-fresh utility
-# (tests, outcome_tracker) must either pass entries= explicitly (which
-# bypasses the cache) or call invalidate_signal_utility_cache().
+# trade: outcome backfill runs daily at 18:00 local via the PF-OutcomeCheck
+# scheduled task (see docs/operational-runbook.md), so a 5-minute staleness
+# window is dominated by the 24-hour write cadence. Code paths that need
+# immediately-fresh utility (tests, outcome_tracker, post-backfill reports)
+# must either pass entries= explicitly (which bypasses the cache) or call
+# invalidate_signal_utility_cache() after the write.
 #
 # 300s TTL matches the shortest LLM rotation period and is well below the
 # 3600s ACCURACY_CACHE_TTL used for the disk-backed caches. The lock
