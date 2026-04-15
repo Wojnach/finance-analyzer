@@ -256,6 +256,59 @@ def _lookup_legacy_underlying_entry(ob_id: str) -> float:
     return 0.0
 
 
+def _collect_existing_stops_for(ob_id: str, account_id: str | None = None) -> list[dict]:
+    """Return all stop-loss orders covering an ob_id on our account.
+
+    Each dict has keys `id` and `volume`. Returns [] on read failure —
+    callers MUST distinguish this from "no stops exist" by calling
+    get_stop_losses_strict themselves if they need to fail closed.
+    """
+    try:
+        from portfolio.avanza_session import get_stop_losses_strict
+    except Exception:
+        return []
+    try:
+        stops = get_stop_losses_strict() or []
+    except Exception:
+        return []
+
+    want_account = str(account_id) if account_id else str(ACCOUNT_ID)
+    out = []
+    for s in stops:
+        if not isinstance(s, dict):
+            continue
+        ob = (
+            s.get("orderBookId")
+            or s.get("orderbookId")
+            or (s.get("orderbook") or {}).get("id")
+            or (s.get("instrument") or {}).get("orderbookId")
+            or (s.get("instrument") or {}).get("orderBookId")
+        )
+        if str(ob or "") != str(ob_id):
+            continue
+        stop_account = (
+            s.get("accountId")
+            or s.get("account_id")
+            or (s.get("account") or {}).get("id")
+        )
+        if stop_account and str(stop_account) != want_account:
+            continue
+        sid = s.get("id") or s.get("stopLossId") or s.get("stoplossId")
+        vol = (
+            s.get("volume")
+            or s.get("quantity")
+            or (s.get("orderEvent") or {}).get("volume")
+            or (s.get("orderbook") or {}).get("volume")
+        )
+        if not sid or vol is None:
+            continue
+        try:
+            out.append({"id": str(sid), "volume": int(vol)})
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def _sum_existing_stops_volume(ob_id: str, account_id: str | None = None) -> int:
     """Return total Avanza stop-loss volume covering an ob_id on our account.
 
@@ -1118,15 +1171,25 @@ class SwingTrader:
             # match the full `units` exactly. If the sum covers us,
             # the position IS protected — don't place on top.
             if existing_stop_id is None:
-                covered = _sum_existing_stops_volume(ob_id_str)
-                if covered >= units:
-                    self.state["positions"][pos_id]["stop_order_id"] = None
+                # Codex review round 8 P1: persist individual stop IDs
+                # so _execute_sell can cancel each one. Previously we
+                # stored only `stop_adopted=True` which left the legacy
+                # cascade stops live after a swing exit.
+                split_stops = _collect_existing_stops_for(ob_id_str)
+                covered = sum(s["volume"] for s in split_stops)
+                if covered >= units and split_stops:
+                    ids = [s["id"] for s in split_stops]
+                    # Pick the first id as primary so existing code paths
+                    # that read `stop_order_id` still see something; the
+                    # full list is in adopted_stop_ids.
+                    self.state["positions"][pos_id]["stop_order_id"] = ids[0]
+                    self.state["positions"][pos_id]["adopted_stop_ids"] = ids
                     self.state["positions"][pos_id]["stop_adopted"] = True
                     self.state["positions"][pos_id]["stop_split_coverage"] = covered
                     _save_state(self.state)
                     _log(
-                        f"ingest_position: {covered}u of stop coverage exists for ob "
-                        f"{ob_id_str} via split/cascade stops — skipping new placement"
+                        f"ingest_position: adopted {len(ids)} split/cascade stops "
+                        f"(total {covered}u) for ob {ob_id_str}: {ids}"
                     )
                     # Skip the rest of the placement branch
                     existing_stop_id = "__SPLIT_COVERAGE__"
@@ -2529,10 +2592,29 @@ class SwingTrader:
 
         _log_trade(trade_record)
 
-        # Cancel hardware stop-loss
-        if pos.get("stop_order_id") and pos["stop_order_id"] != "DRY_RUN" and not DRY_RUN:
-            ok = _delete_stop_loss(self.page, pos["stop_order_id"])
-            _log(f"  Stop-loss cancelled: {ok}")
+        # Cancel hardware stop-loss(es). Codex review round 8 P1: if
+        # this position was adopted with multiple cascading stops from
+        # a legacy engine, adopted_stop_ids holds the full list and we
+        # must cancel each one. Without this, legacy cascade stops
+        # stay live on Avanza after the swing SELL, reserving volume
+        # against a rebuy of the same ob_id.
+        if not DRY_RUN:
+            adopted_ids = pos.get("adopted_stop_ids")
+            if adopted_ids and isinstance(adopted_ids, list):
+                for _sid in adopted_ids:
+                    if not _sid or _sid == "DRY_RUN":
+                        continue
+                    try:
+                        ok = _delete_stop_loss(self.page, _sid)
+                        _log(f"  Adopted stop cancelled {_sid}: {ok}")
+                    except Exception:
+                        logger.warning(
+                            "[SWING] _execute_sell: adopted stop cancel failed stop_id=%s",
+                            _sid, exc_info=True,
+                        )
+            elif pos.get("stop_order_id") and pos["stop_order_id"] != "DRY_RUN":
+                ok = _delete_stop_loss(self.page, pos["stop_order_id"])
+                _log(f"  Stop-loss cancelled: {ok}")
 
         # Update state
         pnl_sek = proceeds - (units * entry_price)

@@ -1815,18 +1815,52 @@ def detect_holdings(page):
                 if pos.get("sold_reason") == "migrated_to_swing":
                     _swing_live_check = _get_live_swing_trader()
                     _swing_has_pos = False
+                    _swing_pos_id = None
                     if _swing_live_check is not None:
                         try:
-                            _swing_has_pos = any(
-                                str(p.get("ob_id", "")) == ob_id
-                                for p in _swing_live_check.state.get("positions", {}).values()
-                            )
+                            for _pid, _p in _swing_live_check.state.get("positions", {}).items():
+                                if str(_p.get("ob_id", "")) == ob_id:
+                                    _swing_has_pos = True
+                                    _swing_pos_id = _pid
+                                    break
                         except Exception:
                             logger.debug(
                                 "detect_holdings: swing state probe failed ob_id=%s",
                                 ob_id, exc_info=True,
                             )
                     if _swing_has_pos:
+                        # Codex review round 8 P1: reconcile manual
+                        # volume changes on swing-owned holdings. If the
+                        # operator partially sold or added units on
+                        # Avanza after migration, detect_holdings is the
+                        # only place that sees it — _migrate_orphans and
+                        # _reconcile_swing_positions both skip known
+                        # ob_ids. Without this update, _execute_sell
+                        # would submit the stale size.
+                        try:
+                            swing_pos = _swing_live_check.state["positions"][_swing_pos_id]
+                            new_units = int(holding.get("units") or 0)
+                            old_units = int(swing_pos.get("units") or 0)
+                            if new_units > 0 and new_units != old_units:
+                                swing_pos["units"] = new_units
+                                swing_pos["units_reconciled_ts"] = datetime.datetime.now(datetime.UTC).isoformat()
+                                changes.append(
+                                    f"SWING UNITS CHANGED ob={ob_id}: {old_units} -> {new_units}"
+                                )
+                                log(f"Holdings: swing pos {_swing_pos_id} units {old_units} -> {new_units}")
+                                try:
+                                    from metals_swing_trader import _save_state as _swing_save
+                                    _swing_save(_swing_live_check.state)
+                                except Exception:
+                                    logger.debug(
+                                        "detect_holdings: swing _save_state import/call failed",
+                                        exc_info=True,
+                                    )
+                        except Exception:
+                            logger.debug(
+                                "detect_holdings: swing units reconcile raised ob_id=%s",
+                                ob_id, exc_info=True,
+                            )
                         continue
                     # Stale migration marker — swing no longer tracks it.
                     # Strip the tombstone so the reactivation path below
