@@ -178,6 +178,9 @@ def _register_defaults():
     # Gold real yield paradox — GYDI regime detector (metals only); capped at 0.7
     register_enhanced("gold_real_yield_paradox", "portfolio.signals.gold_real_yield_paradox",
                       "compute_gold_real_yield_paradox_signal", requires_context=True, max_confidence=0.7)
+    # Cross-asset TSMOM — bond/equity momentum predicts target asset direction; capped at 0.7
+    register_enhanced("cross_asset_tsmom", "portfolio.signals.cross_asset_tsmom",
+                      "compute_cross_asset_tsmom_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
