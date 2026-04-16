@@ -157,8 +157,14 @@ ACCURACY_GATE_MIN_SAMPLES = 30  # need enough data before gating
 # fix it. Raising the gate to 50% for established signals removes structure
 # (49.8%, 12K sam), heikin_ashi (49.6%, 23K sam) etc. while letting newer
 # signals with <5000 samples prove themselves at the standard 47% threshold.
+# 2026-04-16: raised high-sample min 5000 -> 10000. Investigation of W15/W16
+# consensus collapse found the 5000 threshold catching signals during regime
+# transitions where 5000 samples is too few to distinguish true coin-flip
+# from transient degradation. 10000 samples reduces false-positive gating
+# (e.g., a signal at 49.5% over 6000 samples may still have real edge in
+# specific regimes that the aggregate accuracy hides).
 _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD = 0.50
-_ACCURACY_GATE_HIGH_SAMPLE_MIN = 5000
+_ACCURACY_GATE_HIGH_SAMPLE_MIN = 10000
 
 # Directional accuracy gate: signals whose BUY or SELL accuracy is below this
 # threshold get that direction force-HOLD'd while the other direction can still
@@ -172,14 +178,18 @@ _DIRECTIONAL_GATE_MIN_SAMPLES = 30
 
 # Adaptive recency blend: when recent accuracy diverges from all-time by more
 # than this threshold, increase recent weight for faster regime adaptation.
-# Normal: 75% recent + 25% all-time. Fast: 95% recent + 5% all-time.
-# 2026-04-15: raised normal 0.70→0.75, fast 0.90→0.95. Audit found signals
-# like trend (40.3% alltime → 61.6% recent) where the alltime anchor
-# was dragging blended accuracy 5-8pp below actual recent performance,
-# diluting consensus quality during regime shifts.
+# Normal: 70% recent + 30% all-time. Fast: 90% recent + 10% all-time.
+# 2026-04-15: raised normal 0.70→0.75, fast 0.90→0.95 to better capture
+# recent-regime signals like trend (40.3% alltime → 61.6% recent).
+# 2026-04-16: REVERTED to 0.70/0.90. The 0.75/0.95 tuning amplified noise
+# during the W12-W13 crash -> W14-W16 recovery transition. A 7-day window
+# with only 170 samples was dominating a 10K-sample all-time baseline,
+# triggering gates on signals whose "bad recent" was just the crash tail
+# rolling through the window. 0.70/0.90 gives regime adaptation while
+# leaving enough all-time anchor to damp single-week noise.
 _RECENCY_DIVERGENCE_THRESHOLD = 0.15  # 15% absolute divergence triggers fast blend
-_RECENCY_WEIGHT_NORMAL = 0.75
-_RECENCY_WEIGHT_FAST = 0.95
+_RECENCY_WEIGHT_NORMAL = 0.70
+_RECENCY_WEIGHT_FAST = 0.90
 _RECENCY_MIN_SAMPLES = 30  # match ACCURACY_GATE_MIN_SAMPLES (was 50 default)
 
 # Crisis regime: when multiple macro-external signals are simultaneously
@@ -208,14 +218,29 @@ _PER_TICKER_CONSENSUS_MIN_SAMPLES = 50
 
 # Per-ticker signal disable: force HOLD for specific signal+ticker combos
 # where accuracy data shows the signal is actively harmful for that instrument.
+# 2026-04-15 audit built entries from 3h accuracy data; 2026-04-16 investigation
+# found horizon mismatch causing W15/W16 consensus collapse (MSTR 1d dropped
+# to 21.9% because 5 of 7 blacklisted signals were 66-81% accurate at 1d).
+# Batch 4 will introduce per-horizon blacklists. For now (Batch 1), the MSTR
+# entry is trimmed to the two signals that are bad across ALL measured
+# horizons (claude_fundamental 47.8% 1d / 33.2% 3h, credit_spread_risk 44.2%
+# 1d). The other 5 entries (macro_regime/trend/volatility_sig/volume/sentiment)
+# are removed: at 1d they show 62-81% accuracy and were gating the very
+# signals that would have correctly called MSTR's +8.4% W16 rally.
 _TICKER_DISABLED_SIGNALS = {
-    # 2026-04-15 audit: per-ticker 3h accuracy gating.
+    # 2026-04-15 audit: per-ticker 3h accuracy gating. Retained until Batch 4.
     "ETH-USD": frozenset({"news_event", "qwen3", "smart_money"}),  # smart_money 38.2% (555 sam)
     "BTC-USD": frozenset({"smart_money", "heikin_ashi"}),  # smart_money 39.0% (557), heikin_ashi 42.1% (1422)
     "XAG-USD": frozenset({"ministral", "credit_spread_risk", "metals_cross_asset", "smart_money"}),  # smart_money 41.8% (558)
     "XAU-USD": frozenset({"ministral", "metals_cross_asset"}),  # metals_cross_asset 42.9% (198 sam)
-    "MSTR": frozenset({"credit_spread_risk", "macro_regime", "trend", "volatility_sig",
-                        "claude_fundamental", "volume", "sentiment"}),  # claude_fund 33.2%, vol 35.6%, sent 37.8%
+    # 2026-04-16: Trimmed from 7 entries to 2. Full history:
+    #   Apr 14 (aacbcd3): added {macro_regime, trend, volatility_sig, volume, sentiment,
+    #     claude_fundamental, credit_spread_risk} based on 3h accuracy.
+    #   Apr 16: removed 5 entries — at 1d horizon (where consensus trades) they were
+    #     62-81% accurate. Blacklist was horizon-mismatched, causing W15/W16 collapse.
+    #   Kept: claude_fundamental (47.8% 1d / 33.2% 3h — bad at both horizons).
+    #   Kept: credit_spread_risk (44.2% 1d — still under threshold).
+    "MSTR": frozenset({"claude_fundamental", "credit_spread_risk"}),
 }
 
 # --- Signal (full 32-signal for "Now" timeframe) ---
