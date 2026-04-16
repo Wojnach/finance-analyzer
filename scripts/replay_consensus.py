@@ -94,12 +94,22 @@ def _simulate_consensus_with_new_rules(tickers_snapshot: dict, horizon: str) -> 
     )
     from portfolio.signal_engine import _weighted_consensus
 
+    # 2026-04-16 review (silent-failure-hunter P1): narrow the exception window
+    # and surface failures. The previous bare `except Exception` silently
+    # defaulted the cache to {}, which would make every simulated signal pass
+    # the accuracy gate with a 0.5 default — producing a misleadingly optimistic
+    # replay that looks great because nothing is gated. Now the cache-load
+    # failure raises RuntimeError so the caller records it as a fatal error
+    # instead of quietly proceeding.
     try:
         alltime = load_cached_accuracy(horizon) or {}
         recent = load_cached_accuracy(f"{horizon}_recent") or {}
-        acc_data_global = blend_accuracy_data(alltime, recent)
-    except Exception:  # pragma: no cover — defensive
-        acc_data_global = {}
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"replay_consensus: failed to load accuracy cache for {horizon!r} - {exc}. "
+            "Aborting replay rather than returning bogus numbers.",
+        ) from exc
+    acc_data_global = blend_accuracy_data(alltime, recent)
 
     result = {}
     for ticker, tdata in tickers_snapshot.items():
@@ -108,6 +118,10 @@ def _simulate_consensus_with_new_rules(tickers_snapshot: dict, horizon: str) -> 
         if not votes:
             result[ticker] = {"consensus": "HOLD", "conf": 0.0}
             continue
+        # 2026-04-16 review (silent-failure-hunter P1): per-ticker failures now
+        # record an explicit error row so the caller can count them and so
+        # _verdict_correct won't silently drop the row. Upstream `replay()`
+        # surfaces the error count in the summary output.
         try:
             action, conf = _weighted_consensus(
                 votes,
@@ -116,7 +130,7 @@ def _simulate_consensus_with_new_rules(tickers_snapshot: dict, horizon: str) -> 
                 horizon=horizon,
                 ticker=ticker,
             )
-        except Exception as exc:  # pragma: no cover — defensive
+        except (KeyError, ValueError, TypeError) as exc:
             result[ticker] = {"consensus": "ERROR", "conf": 0.0, "error": str(exc)}
             continue
         result[ticker] = {"consensus": action, "conf": round(conf, 4)}
@@ -131,6 +145,10 @@ def replay(days: int, horizon: str) -> dict:
     agree_count = 0
     disagree_count = 0
     total_scored = 0
+    # 2026-04-16 review: count per-ticker simulate errors so the summary can
+    # surface them. Previously ERROR consensus rows silently dropped out.
+    sim_error_count = 0
+    sim_error_samples: list[tuple[str, str]] = []  # up to 5 (ticker, error) pairs
 
     for entry in entries:
         outcomes = entry.get("outcomes", {})
@@ -140,7 +158,12 @@ def replay(days: int, horizon: str) -> dict:
         simulated = _simulate_consensus_with_new_rules(tickers, horizon)
         for ticker, tdata in tickers.items():
             actual = tdata.get("consensus", "HOLD")
-            sim = simulated.get(ticker, {}).get("consensus", "HOLD")
+            sim_entry = simulated.get(ticker, {})
+            sim = sim_entry.get("consensus", "HOLD")
+            if sim == "ERROR":
+                sim_error_count += 1
+                if len(sim_error_samples) < 5:
+                    sim_error_samples.append((ticker, sim_entry.get("error", "")))
 
             outcome = outcomes.get(ticker, {}).get(horizon)
             if not isinstance(outcome, dict):
@@ -161,6 +184,9 @@ def replay(days: int, horizon: str) -> dict:
                 if sim_correct:
                     simulated_buckets[ticker][0] += 1
 
+            if sim == "ERROR":
+                # Don't score disagreement against a broken simulation row.
+                continue
             if actual == sim:
                 agree_count += 1
             else:
@@ -188,6 +214,10 @@ def replay(days: int, horizon: str) -> dict:
         "horizon": horizon,
         "entries_considered": len(entries),
         "rows_scored": total_scored,
+        "simulation_errors": {
+            "count": sim_error_count,
+            "samples": [{"ticker": t, "error": e} for t, e in sim_error_samples],
+        },
         "consensus_agreement": {
             "agree": agree_count,
             "disagree": disagree_count,
@@ -218,6 +248,14 @@ def _print_report(summary: dict) -> None:
     print(f"Replay window: {summary['window_days']}d @ horizon {summary['horizon']}")
     print(f"Entries considered: {summary['entries_considered']}")
     print(f"Rows scored: {summary['rows_scored']}")
+    sim_err = summary.get("simulation_errors", {})
+    err_count = sim_err.get("count", 0)
+    if err_count:
+        samples = sim_err.get("samples", [])
+        parts = [f"{s.get('ticker', '?')}:{(s.get('error') or '')[:40]}" for s in samples]
+        print(f"[WARNING] Simulation errors: {err_count} "
+              f"(first {len(samples)}: {', '.join(parts)}) "
+              "- numbers below UNDER-REPORT the true simulated state.")
     agree = summary["consensus_agreement"]
     print(f"Agreement (actual vs simulated): "
           f"{agree['agree']}/{agree['agree'] + agree['disagree']} "
