@@ -34,8 +34,9 @@ and notify via the same plumbing as every other contract violation.
 | Piece | What |
 |---|---|
 | `portfolio/accuracy_degradation.py` (new) | Snapshot save, hourly check, severity classifier, daily summary builder |
-| `portfolio/accuracy_stats.py` | Optional `extras` kwarg on `save_accuracy_snapshot()`, new `consensus_accuracy()` helper |
-| `portfolio/forecast_accuracy.py` | New `cached_forecast_accuracy()` 1h-TTL wrapper |
+| `portfolio/accuracy_stats.py` | Optional `extras` kwarg on `save_accuracy_snapshot()`, new `consensus_accuracy()` helper, snapshot stores BOTH lifetime AND recent-7d per scope |
+| `portfolio/forecast_accuracy.py` | New `cached_forecast_accuracy()` 1h-TTL wrapper, parameterized for `days=7` recent-window |
+| `portfolio/econ_dates.py` | New `recent_high_impact_events(hours)` helper for backward FOMC/CPI window |
 | `portfolio/loop_contract.py` | New `check_signal_accuracy_degradation()` invariant slotted at end of `verify_contract()` |
 | `portfolio/main.py` | Two `_track()` calls in post-cycle path (snapshot save + summary send), gated by hour-of-day |
 | `data/accuracy_snapshots.jsonl` | Extended schema (signals/per_ticker/forecast/consensus blocks); back-compat with old single-block |
@@ -66,14 +67,85 @@ and notify via the same plumbing as every other contract violation.
   - 3+ signals dropping in the same check, OR
   - Aggregate consensus drop (single check, single condition).
 
+## Accuracy source — recent-window, not all-time
+
+**Codex P1 #1**: Reusing `signal_accuracy("1d")` (lifetime aggregate)
+buries fast degradations on mature signals — a 12-hour collapse barely
+moves a 5000-sample lifetime mean. The detector must compare
+**recent-window accuracy** to catch the failure mode the user actually
+cares about.
+
+- Snapshot stores BOTH lifetime AND recent-7d accuracy for each scope.
+- The degradation comparison is **recent-7d-now vs recent-7d-from-7d-ago**
+  (i.e. compare the freshest week to the previous week).
+- All-time accuracy is kept for context in the daily summary, never as
+  the comparison source.
+- Implementation: `signal_accuracy_recent("1d", days=7)`,
+  `accuracy_by_signal_ticker(name, "1d", days=7)`, etc. — all already
+  exist.
+
+## Throttle must NOT clear ViolationTracker state
+
+**Codex P1 #2**: `ViolationTracker.update()` clears consecutive counts
+when an invariant is **absent** from the violation list. The naive
+hourly-throttle that returns `[]` between full checks would clear the
+escalation count on every cycle, making the planned "3 consecutive
+fires → CRITICAL" path unreachable.
+
+- The hourly throttle skips the **expensive compute** but must replay
+  the most recent full-check Violation list so `ViolationTracker` sees
+  it every cycle.
+- Cached Violation list lives in `degradation_alert_state.json` under
+  `last_full_check.violations` along with `last_check_time`.
+- 24h per-signal cooldown is a separate concern: it gates **Telegram
+  re-emission**, not the contract violation visibility. The Violation
+  stays in the list (preserving escalation), but the daily-summary path
+  and any user-facing message consults the cooldown.
+
+## FOMC/CPI blackout — both forward AND backward window
+
+**Codex P2 #3**: `econ_dates.events_within_hours()` only iterates
+**future** events (`if evt["date"] < ref_date: continue`). The plan's
+"±24h" intent would still alert during the 24h **after** the release —
+exactly when post-event volatility shakes accuracy.
+
+- Add a new helper `econ_dates.recent_high_impact_events(hours)` that
+  returns events whose `evt_dt` is in `[now - hours, now]`.
+- Blackout = either `events_within_hours(24)` non-empty (pre-event)
+  OR `recent_high_impact_events(24)` non-empty (post-event).
+- Filter to high-impact event types (FOMC, CPI, NFP) only — minor data
+  releases shouldn't blank the detector.
+
+## Forecast scope split — Chronos/Kronos via forecast_accuracy, Ministral/Qwen3 via signal_log
+
+**Codex P2 #4**: Ministral and Qwen3 are tracked in the main signal log
+(`accuracy_by_signal_ticker("ministral"|"qwen3", "1d", days=N)`), NOT in
+`forecast_predictions.jsonl`. The plan as written would silently omit
+them or measure from the wrong file.
+
+- Snapshot `signals` block: per-signal recent-7d accuracy via
+  `signal_accuracy_recent("1d", days=7)` — Ministral and Qwen3 appear
+  here naturally because they are registered enhanced signals.
+- Snapshot `forecast` block: only Chronos/Kronos sub-signals via
+  `compute_forecast_accuracy(horizon, days=7,
+  use_raw_sub_signals=True)`.
+- Daily summary forecast line: split clearly — `Forecast: chronos X% ·
+  kronos Y%` and `LLM: ministral A% · qwen3 B%`.
+
 ## Anti-noise gates (all mandatory)
 
 - Min historical samples ≥ 100 AND min current samples ≥ 100 per signal.
 - Snapshot age ≥ 6 days (don't alert until we have a real baseline).
-- Per-signal 24h cooldown via state file.
-- Hourly throttle: short-circuit `[]` if < 55 min since last full check
-  (per-cycle cost ~0.1ms).
-- Skip during FOMC/CPI ±24h windows.
+- Per-signal **Telegram-emission** 24h cooldown via state file.
+  The Violation itself is still emitted to ViolationTracker every cycle
+  (see throttle note above).
+- Hourly **compute** throttle: skip the expensive aggregate/per-ticker/
+  forecast accuracy recomputation if < 55 min since last full check.
+  Replay cached Violation list so ViolationTracker keeps consecutive
+  counts.
+- Skip during high-impact FOMC/CPI/NFP windows: forward 24h
+  (`events_within_hours(24)`) OR backward 24h
+  (`recent_high_impact_events(24)`).
 
 ## Telegram formats
 
@@ -89,17 +161,18 @@ and notify via the same plumbing as every other contract violation.
 
 ```
 *ACCURACY DAILY* · 2026-04-16
-`Consensus: 56% (Δ -2.1pp 7d) · 880 sam`
-`Forecast:  chronos 51% · kronos 49% · ministral 53% · qwen3 47%`
+`Consensus: 56% recent7d (Δ -2.1pp vs prev 7d) · 880 sam`
+`Forecast:  chronos 51% · kronos 49%`
+`LLM:       ministral 53% · qwen3 47%`
 
-*Degraded (>15pp drop, <50% abs)*
+*Degraded (>15pp drop vs prev 7d, <50% recent abs)*
 `rsi       62% -> 44% (-18pp, 1240 sam)`
 `macd_btc  61% -> 42% (-19pp, 210  sam)`
 
-*Improved (>10pp gain)*
+*Improved (>10pp gain vs prev 7d)*
 `obv       48% -> 61% (+13pp, 980  sam)`
 
-`Snapshot age: 7.0d · 27 signals tracked`
+`Snapshot age: 7.0d · 27 signals tracked · window: recent-7d`
 ```
 
 ## Codex integration
@@ -126,21 +199,32 @@ restart loop via `pf-restart.bat loop` → cleanup worktree.
 
 `tests/test_accuracy_degradation.py` (all `tmp_path` + monkeypatch):
 
-1. `test_snapshot_writes_all_four_scopes`
+1. `test_snapshot_writes_all_four_scopes_with_lifetime_and_recent`
 2. `test_snapshot_back_compat_reads_single_block_old_snapshots`
-3. `test_degradation_below_threshold_no_alert` (10pp drop)
-4. `test_degradation_above_threshold_emits_warning` (18pp + 44%)
-5. `test_three_signals_escalates_to_critical`
-6. `test_consensus_drop_emits_critical`
-7. `test_min_samples_gate_skips_low_n` (50 historical / 120 current)
-8. `test_snapshot_age_under_6d_gate_returns_empty`
-9. `test_fomc_blackout_skips_check`
-10. `test_24h_cooldown_per_signal_blocks_repeat`
-11. `test_24h_cooldown_expires_at_25h_re_alerts`
-12. `test_hourly_throttle_short_circuits_when_recent`
-13. `test_per_ticker_alert_format_uses_ticker_signal_key`
-14. `test_forecast_alert_format_uses_forecast_prefix_key`
-15. `test_summary_contains_consensus_top_drops_top_gains`
+3. `test_degradation_compares_recent_window_not_lifetime`
+   — Assert comparison uses `signal_accuracy_recent`, not `signal_accuracy`.
+4. `test_degradation_below_threshold_no_alert` (10pp drop)
+5. `test_degradation_above_threshold_emits_warning` (18pp + 44%)
+6. `test_three_signals_escalates_to_critical`
+7. `test_consensus_drop_emits_critical`
+8. `test_ministral_tracked_via_signal_log_not_forecast_file`
+9. `test_qwen3_tracked_via_signal_log_not_forecast_file`
+10. `test_chronos_kronos_tracked_via_forecast_accuracy`
+11. `test_min_samples_gate_skips_low_n` (50 historical / 120 current)
+12. `test_snapshot_age_under_6d_gate_returns_empty`
+13. `test_post_event_fomc_blackout_skips_check`
+    — Event was 12h ago; check still blacked out.
+14. `test_pre_event_fomc_blackout_skips_check`
+    — Event is 18h from now; check blacked out.
+15. `test_24h_cooldown_per_signal_blocks_telegram_repeat_but_violation_still_present`
+    — Violation in list (preserves ViolationTracker escalation) but no
+      Telegram re-emit.
+16. `test_24h_cooldown_expires_at_25h_re_alerts_telegram`
+17. `test_hourly_throttle_replays_cached_violations_does_not_return_empty`
+    — Key defense against ViolationTracker reset.
+18. `test_per_ticker_alert_format_uses_ticker_signal_key`
+19. `test_forecast_alert_format_uses_forecast_prefix_key`
+20. `test_summary_contains_consensus_top_drops_top_gains_and_split_llm_line`
 
 `tests/test_loop_contract_accuracy.py`:
 
