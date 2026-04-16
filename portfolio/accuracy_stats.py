@@ -16,6 +16,21 @@ from portfolio.tickers import DISABLED_SIGNALS, SIGNAL_NAMES
 # C2: Protect all read-modify-write cache operations from concurrent ticker threads
 _accuracy_write_lock = threading.Lock()
 
+# BUG-178 (2026-04-16): thundering-herd protection. The disk-backed accuracy
+# caches expire on a 1h TTL; on the first cycle after expiry, all 5 ticker
+# threads race through load_cached_accuracy() → None → signal_accuracy() and
+# each pays the 7s+ cost of loading 50,000 signal-log entries from SQLite.
+# Wall time was measured at 215s for a 5-thread race vs 7s single-threaded —
+# 30x amplification driven by GIL + DB + file-I/O serialization. The
+# get_or_compute_*() helpers below use double-checked locking: cache hits
+# take the fast path with no lock acquisition; only the first miss-thread
+# computes, and the others wait on _accuracy_compute_lock and then read the
+# freshly-populated cache. The lock is held THROUGH the compute (unlike the
+# signal_utility cache below) because cache-miss is rare (~once per hour
+# per horizon) and serializing 4 threads through a 7s wait is far cheaper
+# than 4 redundant 50000-entry SQL scans.
+_accuracy_compute_lock = threading.Lock()
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 SIGNAL_LOG = DATA_DIR / "signal_log.jsonl"
@@ -783,6 +798,67 @@ def write_accuracy_cache(horizon, data):
         _atomic_write_json(ACCURACY_CACHE_FILE, cache)
 
 
+# BUG-178 (2026-04-16) cache-miss wrappers. See _accuracy_compute_lock comment
+# at the top of this module for the rationale. Callers that previously did
+# `cached = load_cached_accuracy(h); if not cached: cached = signal_accuracy(h);
+# write_accuracy_cache(h, cached)` should call these instead so the compute
+# is done at most once across all racing ticker threads.
+
+def get_or_compute_accuracy(horizon: str):
+    """Return cached all-time accuracy, computing it once if cache is cold.
+
+    Thread-safe via double-checked locking — first miss-thread computes,
+    others wait on _accuracy_compute_lock and then read the populated cache.
+    """
+    cached = load_cached_accuracy(horizon)
+    if cached:
+        return cached
+    with _accuracy_compute_lock:
+        cached = load_cached_accuracy(horizon)
+        if cached:
+            return cached
+        result = signal_accuracy(horizon)
+        if result:
+            write_accuracy_cache(horizon, result)
+        return result
+
+
+def get_or_compute_recent_accuracy(horizon: str, days: int = 7):
+    """Cached recent-window (default 7d) accuracy, computed at most once."""
+    cache_key = f"{horizon}_recent"
+    cached = load_cached_accuracy(cache_key)
+    if cached:
+        return cached
+    with _accuracy_compute_lock:
+        cached = load_cached_accuracy(cache_key)
+        if cached:
+            return cached
+        result = signal_accuracy_recent(horizon, days=days)
+        if result:
+            write_accuracy_cache(cache_key, result)
+        return result
+
+
+def get_or_compute_per_ticker_accuracy(horizon: str):
+    """Cached per-ticker consensus accuracy, computed at most once.
+
+    Cache key matches the BUG-164 lazy-populate convention used by
+    signal_engine.py:_ptc_key.
+    """
+    cache_key = f"per_ticker_consensus_{horizon}"
+    cached = load_cached_accuracy(cache_key)
+    if cached:
+        return cached
+    with _accuracy_compute_lock:
+        cached = load_cached_accuracy(cache_key)
+        if cached:
+            return cached
+        result = per_ticker_accuracy(horizon)
+        if result:
+            write_accuracy_cache(cache_key, result)
+        return result
+
+
 def _count_entries_with_outcomes(entries, horizon):
     count = 0
     for entry in entries:
@@ -1352,37 +1428,42 @@ def write_ticker_accuracy_cache(horizon, data):
         _atomic_write_json(TICKER_ACCURACY_CACHE_FILE, cache)
 
 
+def _filter_min_samples(data, min_samples):
+    if min_samples <= 0:
+        return data
+    return {
+        ticker: {
+            sig: sdata for sig, sdata in sigs.items()
+            if sdata.get("total", 0) >= min_samples
+        }
+        for ticker, sigs in data.items()
+    }
+
+
 def accuracy_by_ticker_signal_cached(horizon="1d", min_samples=0):
     """Cached version of accuracy_by_ticker_signal().
 
     Checks the ticker accuracy cache first; on miss, computes from the
-    full signal log and writes the cache.
+    full signal log and writes the cache. BUG-178 (2026-04-16): the
+    cache-miss compute path is now serialized via _accuracy_compute_lock
+    so concurrent ticker threads can't all redundantly walk the 50,000-
+    entry signal log when the 1h TTL expires.
     """
     cached = load_cached_ticker_accuracy(horizon)
     if cached:
-        if min_samples > 0:
-            return {
-                ticker: {
-                    sig: data for sig, data in sigs.items()
-                    if data.get("total", 0) >= min_samples
-                }
-                for ticker, sigs in cached.items()
-            }
-        return cached
+        return _filter_min_samples(cached, min_samples)
 
-    data = accuracy_by_ticker_signal(horizon, min_samples=0)
-    if data:
-        write_ticker_accuracy_cache(horizon, data)
+    with _accuracy_compute_lock:
+        # Re-check after acquiring the lock — another thread may have
+        # populated the cache while we waited.
+        cached = load_cached_ticker_accuracy(horizon)
+        if cached:
+            return _filter_min_samples(cached, min_samples)
 
-    if min_samples > 0:
-        return {
-            ticker: {
-                sig: sdata for sig, sdata in sigs.items()
-                if sdata.get("total", 0) >= min_samples
-            }
-            for ticker, sigs in data.items()
-        }
-    return data
+        data = accuracy_by_ticker_signal(horizon, min_samples=0)
+        if data:
+            write_ticker_accuracy_cache(horizon, data)
+        return _filter_min_samples(data, min_samples)
 
 
 def probability_calibration(horizon="1d", buckets=None, since=None):

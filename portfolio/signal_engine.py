@@ -1960,38 +1960,22 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     try:
         from portfolio.accuracy_stats import (
             blend_accuracy_data,
-            load_cached_accuracy,
+            get_or_compute_accuracy,
+            get_or_compute_per_ticker_accuracy,
+            get_or_compute_recent_accuracy,
             load_cached_activation_rates,
-            per_ticker_accuracy,
-            signal_accuracy,
-            signal_accuracy_recent,
-            write_accuracy_cache,
         )
 
-        # BUG-188: acc_horizon already computed at line 1813 before this try block.
-        # Removed redundant re-computation.
-
-        # Load all-time accuracy
-        alltime = load_cached_accuracy(acc_horizon)
-        if not alltime:
-            alltime = signal_accuracy(acc_horizon)
-            if alltime:
-                write_accuracy_cache(acc_horizon, alltime)
-
-        # Load recent accuracy (7d window) — more responsive to regime changes
-        recent = load_cached_accuracy(f"{acc_horizon}_recent")
-        if not recent:
-            recent = signal_accuracy_recent(acc_horizon, days=7)
-            if recent:
-                write_accuracy_cache(f"{acc_horizon}_recent", recent)
-
-        # BUG-164: Per-ticker consensus accuracy (lazy-populate cache)
-        # H1: Key must include the horizon so 3h and 1d caches don't collide.
-        _ptc_key = f"per_ticker_consensus_{acc_horizon}"
-        if not load_cached_accuracy(_ptc_key):
-            _ptc = per_ticker_accuracy(acc_horizon)
-            if _ptc:
-                write_accuracy_cache(_ptc_key, _ptc)
+        # BUG-178 (2026-04-16): the get_or_compute_* helpers serialize the
+        # cache-miss compute via _accuracy_compute_lock so 5 parallel ticker
+        # threads don't each pay the 7s+ cost of loading 50,000 signal-log
+        # entries when the 1h TTL expires (was 215s wall before the fix).
+        # See accuracy_stats.py for the lock rationale.
+        alltime = get_or_compute_accuracy(acc_horizon)
+        recent = get_or_compute_recent_accuracy(acc_horizon, days=7)
+        # BUG-164 lazy-populate per-ticker consensus accuracy — _ptc_key
+        # convention preserved by get_or_compute_per_ticker_accuracy.
+        get_or_compute_per_ticker_accuracy(acc_horizon)
 
         # ARCH-23: Use shared blend function (replaces inline logic).
         accuracy_data = blend_accuracy_data(
