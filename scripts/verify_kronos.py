@@ -4,6 +4,7 @@ Runs on CPU only (no GPU, no fan spin), 1 thread, lowest priority.
 Tests both crypto (Binance) and stock (Alpaca) candle loading paths.
 """
 
+import contextlib
 import json
 import os
 import sys
@@ -14,10 +15,8 @@ os.environ["CUDA_VISIBLE_DEVICES"] = ""
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
-try:
+with contextlib.suppress(OSError, AttributeError):
     os.nice(19)
-except (OSError, AttributeError):
-    pass
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -36,7 +35,7 @@ def verify_candle_loading():
     print("=" * 60)
     print("KRONOS VERIFICATION — Candle Loading")
     print("=" * 60)
-    print(f"Mode: CPU only, 1 thread, nice=19\n")
+    print("Mode: CPU only, 1 thread, nice=19\n")
 
     results = {}
     for ticker, (source, asset_class) in test_tickers.items():
@@ -75,10 +74,10 @@ def verify_kronos_inference():
         random.seed(42 + i)
         o = base_price + random.uniform(-5, 5)
         h = o + random.uniform(0, 10)
-        l = o - random.uniform(0, 10)
+        lo = o - random.uniform(0, 10)
         c = o + random.uniform(-5, 5)
         v = random.uniform(100, 1000)
-        candles.append({"open": o, "high": h, "low": l, "close": c, "volume": v})
+        candles.append({"open": o, "high": h, "low": lo, "close": c, "volume": v})
 
     # Find Kronos inference script
     kronos_script = None
@@ -93,7 +92,7 @@ def verify_kronos_inference():
 
     print(f"  Script: {kronos_script}")
     print(f"  Candles: {len(candles)}")
-    print(f"  Running on CPU (CUDA_VISIBLE_DEVICES='')...", flush=True)
+    print("  Running on CPU (CUDA_VISIBLE_DEVICES='')...", flush=True)
 
     payload = json.dumps({
         "candles": candles,
@@ -177,7 +176,7 @@ def verify_kronos_inference():
 
 def main():
     print(f"Kronos Verification — {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"CPU only | 1 thread | nice=19\n")
+    print("CPU only | 1 thread | nice=19\n")
 
     candle_results = verify_candle_loading()
     inference_result = verify_kronos_inference()
