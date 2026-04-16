@@ -160,3 +160,56 @@ tests/test_phase_log.py
 ### 2026-04-15 11:25 UTC | fix/bug178-instrumentation-and-timeout
 ced95ff docs(accuracy): correct cache-invalidation comment cadence (6h → daily)
 portfolio/accuracy_stats.py
+
+
+## Session 2026-04-16 — Accuracy degradation tracker
+
+### Context
+W15/W16 Tier-1 1d consensus collapsed from 52-56% to 36-41% (see
+memory/project_accuracy_degradation_20260416.md). The 11 main-loop
+runtime contracts in loop_contract.py check execution health, not
+decision quality, so the collapse went undetected for two weeks.
+accuracy_stats.py shipped a save_accuracy_snapshot/check_accuracy_changes
+pair months ago but they were never wired up.
+
+### Shipped (branch feat/accuracy-degradation, /fgl protocol)
+0. `33e5847 docs(plan): accuracy degradation tracker`
+1. **Codex pre-impl adversarial review** — 4 valid findings (P1#1, P1#2,
+   P2#3, P2#4). All addressed in `16c8128`.
+2. `bb8bba5 feat(accuracy): batch 1 — snapshot infra`
+   - `save_accuracy_snapshot(extras=...)` for arbitrary scope blocks
+   - `consensus_accuracy(days=...)` recent-window variant
+   - `cached_forecast_accuracy()` 1h-TTL wrapper
+   - `econ_dates.recent_high_impact_events(hours)` backward window
+3. `2381dc2 feat(accuracy): batch 2 — degradation tracker module + tests`
+   - `portfolio/accuracy_degradation.py` with check_degradation,
+     save_full_accuracy_snapshot, daily summary builder, severity
+     classifier. Throttle replays cached violations so ViolationTracker
+     escalation works (Codex P1#2).
+4. `1637960 feat(loop): batch 3 — wire degradation tracker into the main loop`
+   - loop_contract.verify_contract() invariant #12
+   - main.py post-cycle daily snapshot + summary _track() entries
+   - check_degradation() always writes last_full_check_time after
+     passing throttle/blackout gates (was a real bug)
+
+### Tests
+- 4 batches added 38 tests, all green
+- 191 in the affected neighborhood (loop_contract, accuracy_stats,
+  accuracy_compute_lock, econ_dates, forecast_accuracy)
+- E2E verified: scripts/_e2e_degradation_check.py injects 7-day-old
+  baseline + stubs current state to a clear collapse, asserts CRITICAL
+  violation + throttle replay + daily summary preview
+
+### Telegram formats
+Contract path: piggybacks the existing
+  `*LOOP CONTRACT (main)* — N critical violation(s)` style.
+Daily summary: new `*ACCURACY DAILY*` body via category=daily_digest,
+  consensus + forecast + LLM split lines, top drops, top gains.
+
+### Anti-noise gates
+- 100/100 sample minimums (historical/current)
+- 6-day baseline minimum
+- 24h per-signal Telegram cooldown (Violation list still includes ALL
+  alerts so ViolationTracker keeps escalation count alive)
+- 55-min hourly compute throttle with cached-violation replay
+- FOMC/CPI/NFP ±24h blackout (forward AND backward)

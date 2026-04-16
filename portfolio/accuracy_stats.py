@@ -358,9 +358,32 @@ def signal_accuracy_cost_adjusted(horizon="1d", cost_bps=10.0, entries=None):
     return result
 
 
-def consensus_accuracy(horizon="1d", entries=None):
+def consensus_accuracy(horizon="1d", entries=None, days=None):
+    """Aggregate consensus decision accuracy across all tickers.
+
+    For each signal-log entry that has an outcome at `horizon`, check if
+    the per-ticker `tdata["consensus"]` BUY/SELL call matched actual
+    direction. HOLD calls are skipped (no direction to score).
+
+    BUG-178/W15-W16 follow-up (2026-04-16): added optional `days` kwarg
+    for the recent-window variant the degradation tracker needs. The
+    existing `entries` kwarg is preserved for callers that already pass
+    a pre-loaded list. When both are passed, `entries` wins (caller has
+    already filtered).
+
+    Args:
+        horizon: Outcome horizon ("3h", "4h", "12h", "1d", "3d", "5d", "10d").
+        entries: Pre-loaded entries list (skips both load_entries() and
+            the days filter — caller is assumed to have filtered already).
+        days: Optional lookback window in days. Ignored if entries is
+            provided. None = lifetime aggregate.
+    """
     if entries is None:
         entries = load_entries()
+        if days is not None:
+            from datetime import datetime, timedelta
+            cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+            entries = [e for e in entries if e.get("ts", "") >= cutoff]
     correct = 0
     total = 0
 
@@ -432,13 +455,19 @@ def per_ticker_accuracy(horizon="1d", entries=None):
     return result
 
 
-def accuracy_by_signal_ticker(signal_name, horizon="1d", days=None):
+def accuracy_by_signal_ticker(signal_name, horizon="1d", days=None, entries=None):
     """Compute per-ticker accuracy for one signal.
 
     Args:
         signal_name: Signal name present in SIGNAL_NAMES.
         horizon: Outcome horizon to evaluate.
         days: Optional lookback window in days.
+        entries: Pre-loaded entries list. BUG-178/W15-W16 follow-up
+            (2026-04-16 review): callers that iterate over many signal
+            names (e.g. accuracy_degradation._per_ticker_recent) must
+            pass a single pre-loaded list instead of letting each call
+            re-scan the 50,000-entry SQLite file. Skipping that knob
+            blew cycle time by ~290s in the original implementation.
 
     Returns:
         dict: {ticker: {"accuracy": float, "samples": int, "correct": int}}
@@ -446,7 +475,8 @@ def accuracy_by_signal_ticker(signal_name, horizon="1d", days=None):
     if signal_name not in SIGNAL_NAMES:
         return {}
 
-    entries = load_entries()
+    if entries is None:
+        entries = load_entries()
     cutoff = None
     if days is not None:
         from datetime import datetime, timedelta
@@ -1031,12 +1061,25 @@ def write_regime_accuracy_cache(horizon, data):
 ACCURACY_SNAPSHOTS_FILE = DATA_DIR / "accuracy_snapshots.jsonl"
 
 
-def save_accuracy_snapshot():
+def save_accuracy_snapshot(extras=None):
     """Save current per-signal accuracy as a timestamped snapshot.
 
     Appends one JSON line to accuracy_snapshots.jsonl with the current
     accuracy for each signal at the 1d horizon. Used by check_accuracy_changes()
-    to detect significant shifts over time.
+    and accuracy_degradation.check_degradation() to detect significant shifts
+    over time.
+
+    Args:
+        extras: Optional dict of extra blocks to merge into the snapshot.
+            BUG-178/W15-W16 follow-up (2026-04-16): the degradation tracker
+            needs more than the lifetime per-signal block. Callers can pass
+            recent-window per-signal accuracy, per-ticker per-signal blocks,
+            forecast model accuracy, and aggregate consensus accuracy by
+            providing keys like "signals_recent", "per_ticker", "forecast",
+            "consensus", etc. Unknown keys are accepted as-is so future
+            scopes can be added without churning this function. Old single-
+            block snapshots remain readable — the loader treats absent
+            keys as missing.
     """
     from datetime import datetime
 
@@ -1048,9 +1091,14 @@ def save_accuracy_snapshot():
             for name, data in acc.items()
         },
     }
+    if extras:
+        for key, value in extras.items():
+            snapshot[key] = value
     from portfolio.file_utils import atomic_append_jsonl
     atomic_append_jsonl(ACCURACY_SNAPSHOTS_FILE, snapshot)
     return snapshot
+
+
 
 
 def _load_accuracy_snapshots():

@@ -290,6 +290,21 @@ def _run_post_cycle(config, report=None):
         _track("daily_digest", maybe_send_daily_digest, config)
     except Exception as e_dd:
         logger.warning("daily digest import failed: %s", e_dd)
+    # BUG-178/W15-W16 follow-up (2026-04-16): daily snapshot writer + the
+    # daily Telegram summary. Both internally guard once-per-day at the
+    # configured UTC hour (notification.accuracy_snapshot_hour_utc, default
+    # 6) and no-op every other call. The hourly degradation check itself
+    # is wired into loop_contract.verify_contract().
+    try:
+        from portfolio.accuracy_degradation import (
+            maybe_save_daily_snapshot,
+            maybe_send_degradation_summary,
+        )
+        _track("accuracy_snapshot", maybe_save_daily_snapshot, config)
+        _track("accuracy_degradation_summary",
+               maybe_send_degradation_summary, config)
+    except Exception as e_deg:
+        logger.warning("accuracy degradation import failed: %s", e_deg)
     try:
         from portfolio.message_throttle import flush_and_send
         _track("message_throttle", flush_and_send, config)
