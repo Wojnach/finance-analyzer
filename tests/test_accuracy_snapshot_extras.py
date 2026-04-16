@@ -162,47 +162,46 @@ class TestCachedForecastAccuracy:
 
 
 class TestRecentHighImpactEvents:
+    """All tests pin ref_time so the assertions don't depend on the
+    wall clock — events_at_2pm_UTC + ref_time of 8pm same day puts the
+    event 6h in the past, well inside the 24h window."""
 
     def test_event_within_window_returned(self, monkeypatch):
-        # Simulated FOMC at 2pm UTC 6h ago
-        six_h_ago = (datetime.now(UTC) - timedelta(hours=6)).date()
+        ref = datetime(2026, 4, 16, 20, 0, tzinfo=UTC)
         fake_events = [
-            {"date": six_h_ago, "type": "FOMC", "impact": "high"},
+            {"date": ref.date(), "type": "FOMC", "impact": "high"},
         ]
         monkeypatch.setattr(econ_mod, "ECON_EVENTS", fake_events)
 
-        result = econ_mod.recent_high_impact_events(24)
-        # The synthetic entry uses today's date in `date()` so the helper
-        # treats it as 14:00 UTC of that date. May be inside or outside the
-        # 24h window depending on current clock; assert structure correctness.
-        for item in result:
-            assert item["impact"] == "high"
-            assert item["hours_since"] >= 0
+        result = econ_mod.recent_high_impact_events(24, ref_time=ref)
+        assert len(result) == 1
+        assert result[0]["impact"] == "high"
+        assert result[0]["hours_since"] == 6.0  # 20:00 - 14:00
 
     def test_old_event_excluded(self, monkeypatch):
-        old_date = (datetime.now(UTC) - timedelta(days=5)).date()
+        ref = datetime(2026, 4, 16, 20, 0, tzinfo=UTC)
+        old_date = (ref - timedelta(days=5)).date()
         fake_events = [{"date": old_date, "type": "CPI", "impact": "high"}]
         monkeypatch.setattr(econ_mod, "ECON_EVENTS", fake_events)
 
-        result = econ_mod.recent_high_impact_events(24)
+        result = econ_mod.recent_high_impact_events(24, ref_time=ref)
         assert result == []
 
     def test_low_impact_filtered(self, monkeypatch):
-        recent_date = (datetime.now(UTC) - timedelta(hours=2)).date()
-        fake_events = [{"date": recent_date, "type": "PMI", "impact": "low"}]
+        ref = datetime(2026, 4, 16, 20, 0, tzinfo=UTC)
+        fake_events = [{"date": ref.date(), "type": "PMI", "impact": "low"}]
         monkeypatch.setattr(econ_mod, "ECON_EVENTS", fake_events)
 
-        result = econ_mod.recent_high_impact_events(24)
+        result = econ_mod.recent_high_impact_events(24, ref_time=ref)
         assert result == []
 
     def test_filter_can_be_widened(self, monkeypatch):
-        recent_date = (datetime.now(UTC) - timedelta(hours=2)).date()
-        fake_events = [{"date": recent_date, "type": "PMI", "impact": "medium"}]
+        ref = datetime(2026, 4, 16, 20, 0, tzinfo=UTC)
+        fake_events = [{"date": ref.date(), "type": "PMI", "impact": "medium"}]
         monkeypatch.setattr(econ_mod, "ECON_EVENTS", fake_events)
 
-        result = econ_mod.recent_high_impact_events(24, impact_filter=("medium", "high"))
-        # Same caveat as the first test — synthetic dates may fall outside
-        # the window depending on current clock, but if returned it must
-        # carry the filtered impact.
-        for item in result:
-            assert item["impact"] in ("medium", "high")
+        result = econ_mod.recent_high_impact_events(
+            24, impact_filter=("medium", "high"), ref_time=ref,
+        )
+        assert len(result) == 1
+        assert result[0]["impact"] == "medium"

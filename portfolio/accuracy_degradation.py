@@ -117,20 +117,32 @@ def save_full_accuracy_snapshot(*, days: int = 7) -> dict[str, Any]:
     Returns the snapshot dict for inspection. Safe to call repeatedly —
     each call appends a new line. Caller is responsible for once-per-day
     gating (see maybe_save_daily_snapshot).
+
+    BUG-178/W15-W16 review (2026-04-16): loads the signal log ONCE and
+    threads pre-loaded `entries` through every per-signal/per-ticker/
+    consensus call. Without the share, _per_ticker_recent alone re-scans
+    the 50,000-row file 41 times, blowing snapshot wall time.
     """
+    from datetime import timedelta as _td
+
     from portfolio.accuracy_stats import (
         accuracy_by_ticker_signal_cached,
         consensus_accuracy,
+        load_entries,
         save_accuracy_snapshot,
-        signal_accuracy_recent,
+        signal_accuracy,
     )
     from portfolio.forecast_accuracy import cached_forecast_accuracy
 
     extras: dict[str, Any] = {}
 
+    cutoff = (datetime.now(UTC) - _td(days=days)).isoformat()
+    all_entries = load_entries()
+    recent_entries = [e for e in all_entries if e.get("ts", "") >= cutoff]
+
     # Recent-window per-signal accuracy (Codex P1#1)
     try:
-        recent = signal_accuracy_recent("1d", days=days)
+        recent = signal_accuracy("1d", entries=recent_entries)
         extras["signals_recent"] = {
             name: {"accuracy": data["accuracy"], "total": data["total"]}
             for name, data in recent.items()
@@ -138,7 +150,8 @@ def save_full_accuracy_snapshot(*, days: int = 7) -> dict[str, Any]:
     except Exception as e:
         logger.warning("Recent signal_accuracy snapshot failed: %s", e)
 
-    # Per-ticker per-signal — both lifetime and recent windows
+    # Per-ticker per-signal — lifetime via cached helper (1h TTL inside),
+    # recent via shared-entries scan
     try:
         per_ticker_lifetime = accuracy_by_ticker_signal_cached("1d")
         extras["per_ticker"] = _compact_per_ticker(per_ticker_lifetime)
@@ -146,12 +159,16 @@ def save_full_accuracy_snapshot(*, days: int = 7) -> dict[str, Any]:
         logger.warning("Lifetime per-ticker accuracy snapshot failed: %s", e)
 
     try:
-        per_ticker_recent = _per_ticker_recent("1d", days=days)
+        per_ticker_recent = _per_ticker_recent(
+            "1d", days=days, entries=recent_entries,
+        )
         extras["per_ticker_recent"] = _compact_per_ticker(per_ticker_recent)
     except Exception as e:
         logger.warning("Recent per-ticker accuracy snapshot failed: %s", e)
 
-    # Forecast (Chronos/Kronos) — Codex P2#4 split
+    # Forecast (Chronos/Kronos) — Codex P2#4 split. Forecast uses its
+    # own JSONL (forecast_predictions), not signal_log, so we can't share
+    # entries here.
     try:
         forecast_recent = cached_forecast_accuracy(
             horizon="24h", days=days, use_raw_sub_signals=True,
@@ -163,30 +180,47 @@ def save_full_accuracy_snapshot(*, days: int = 7) -> dict[str, Any]:
     except Exception as e:
         logger.warning("Forecast accuracy snapshot failed: %s", e)
 
-    # Aggregate consensus — both lifetime and recent
+    # Aggregate consensus — lifetime over all entries, recent over shared list
     try:
-        extras["consensus"] = consensus_accuracy("1d")
-        extras["consensus_recent"] = consensus_accuracy("1d", days=days)
+        extras["consensus"] = consensus_accuracy("1d", entries=all_entries)
+        extras["consensus_recent"] = consensus_accuracy(
+            "1d", entries=recent_entries,
+        )
     except Exception as e:
         logger.warning("Consensus accuracy snapshot failed: %s", e)
 
-    # save_accuracy_snapshot() also writes the lifetime `signals` block
+    # save_accuracy_snapshot() also writes the lifetime `signals` block.
+    # That helper still does its own load_entries() — acceptable cost
+    # (one extra scan / day).
     return save_accuracy_snapshot(extras=extras)
 
 
-def _per_ticker_recent(horizon: str, days: int) -> dict:
+def _per_ticker_recent(horizon: str, days: int, *, entries=None) -> dict:
     """Per-ticker per-signal accuracy on a recent-N-day window.
 
     accuracy_by_ticker_signal_cached only exposes the lifetime aggregate;
     for the recent-window variant we compute it inline from
     accuracy_by_signal_ticker(name, horizon, days=days), inverting the
     indexing so the result is keyed by ticker first.
+
+    BUG-178/W15-W16 follow-up review (2026-04-16): pre-loaded `entries`
+    is mandatory for the hot path. Without it, this function calls
+    accuracy_by_signal_ticker once per signal (~41 entries in
+    SIGNAL_NAMES today), each one re-scanning the entire 50,000-row
+    signal log. That ~290s of redundant compute would blow the
+    180s MAX_CYCLE_DURATION_S contract every time the degradation
+    check runs from verify_contract.
     """
-    from portfolio.accuracy_stats import accuracy_by_signal_ticker
+    from portfolio.accuracy_stats import accuracy_by_signal_ticker, load_entries
+
+    if entries is None:
+        entries = load_entries()
 
     result: dict[str, dict[str, dict]] = {}
     for sig_name in SIGNAL_NAMES:
-        per_ticker = accuracy_by_signal_ticker(sig_name, horizon=horizon, days=days)
+        per_ticker = accuracy_by_signal_ticker(
+            sig_name, horizon=horizon, days=days, entries=entries,
+        )
         for ticker, stats in per_ticker.items():
             samples = stats.get("samples", stats.get("total", 0))
             if samples <= 0:
@@ -313,11 +347,20 @@ def check_degradation(now: datetime | None = None,
     if elapsed < throttle_seconds:
         return _hydrate_cached_violations(state)
 
-    # FOMC/CPI/NFP blackout (forward + backward)
+    # FOMC/CPI/NFP blackout (forward + backward).
+    # BUG-178/W15-W16 review (2026-04-16, P2#4): return [] rather than
+    # replaying cached violations. Otherwise a 24h+ blackout (FOMC week,
+    # NFP-on-Friday-then-CPI-on-Monday) keeps replaying alerts from
+    # before the blackout, and ViolationTracker would happily escalate
+    # the same stale alert to CRITICAL after 3 cycles.
     if _is_econ_blackout():
         logger.info("Degradation check skipped: econ blackout window active")
-        # Don't update last_full_check_time — we want a real check after blackout.
-        return _hydrate_cached_violations(state)
+        # Clear the cached violation list so post-blackout checks start
+        # from a known-fresh slate.
+        if state.get("last_full_check_violations"):
+            state["last_full_check_violations"] = []
+            _save_alert_state(state)
+        return []
 
     snapshots = _load_snapshots()
     baseline = _find_baseline_snapshot(snapshots, now) if snapshots else None
@@ -386,18 +429,28 @@ def _diff_against_baseline(*, baseline: dict, now: datetime,
                            min_samples_current: int) -> list[dict]:
     """Return alert dicts for each scope where the degradation gate fires."""
     from portfolio.accuracy_stats import (
-        accuracy_by_signal_ticker,
         consensus_accuracy,
-        signal_accuracy_recent,
+        load_entries,
+        signal_accuracy,
     )
     from portfolio.forecast_accuracy import cached_forecast_accuracy
+
+    # BUG-178/W15-W16 review (2026-04-16): load entries ONCE and share
+    # across the per-signal / per-ticker / consensus diffs. Without
+    # entry-sharing _per_ticker_recent re-scans the 50,000-entry SQLite
+    # file once per signal name (~41 scans), blowing the 180s cycle
+    # budget every time the degradation check runs.
+    from datetime import timedelta as _td
+    cutoff = (now - _td(days=int(BASELINE_TARGET_DAYS))).isoformat()
+    all_entries = load_entries()
+    recent_entries = [e for e in all_entries if e.get("ts", "") >= cutoff]
 
     alerts: list[dict] = []
 
     # 1) Per-signal global (recent-window now vs recent-window in baseline)
     try:
         old_signals = baseline.get("signals_recent") or {}
-        new_signals = signal_accuracy_recent("1d", days=int(BASELINE_TARGET_DAYS))
+        new_signals = signal_accuracy("1d", entries=recent_entries)
         for sig_name, new_data in new_signals.items():
             old_data = old_signals.get(sig_name)
             alert = _maybe_alert(
@@ -418,10 +471,12 @@ def _diff_against_baseline(*, baseline: dict, now: datetime,
     except Exception as e:
         logger.warning("Per-signal degradation diff failed: %s", e)
 
-    # 2) Per-ticker per-signal
+    # 2) Per-ticker per-signal — share entries to avoid 41x re-scan
     try:
         old_per = baseline.get("per_ticker_recent") or {}
-        new_per = _per_ticker_recent("1d", days=int(BASELINE_TARGET_DAYS))
+        new_per = _per_ticker_recent(
+            "1d", days=int(BASELINE_TARGET_DAYS), entries=recent_entries,
+        )
         for ticker, sigs in new_per.items():
             old_for_ticker = old_per.get(ticker, {}) or {}
             for sig_name, new_data in sigs.items():
@@ -469,10 +524,11 @@ def _diff_against_baseline(*, baseline: dict, now: datetime,
     except Exception as e:
         logger.warning("Forecast degradation diff failed: %s", e)
 
-    # 4) Aggregate consensus
+    # 4) Aggregate consensus — share entries (consensus_accuracy honors
+    # `entries` and skips both load_entries() and the days filter)
     try:
         old_consensus = baseline.get("consensus_recent")
-        new_consensus = consensus_accuracy("1d", days=int(BASELINE_TARGET_DAYS))
+        new_consensus = consensus_accuracy("1d", entries=recent_entries)
         alert = _maybe_alert(
             key="consensus",
             scope="consensus",
@@ -606,6 +662,12 @@ def maybe_save_daily_snapshot(config: dict | None = None,
     Returns True when a snapshot was written this call. Driven by main.py
     in the post-cycle path, gated by configurable hour-of-day so the
     snapshot lands after the daily PF-OutcomeCheck backfill runs.
+
+    BUG-178/W15-W16 review (2026-04-16, P2#3): on success this also
+    invalidates the degradation check throttle (last_full_check_time=0)
+    so the next contract cycle re-runs the full check against the
+    freshly-written snapshot rather than replaying the cached
+    violation list that compared against the previous baseline.
     """
     now = now or datetime.now(UTC)
     cfg_section = (config or {}).get("notification", {}) if config else {}
@@ -628,12 +690,26 @@ def maybe_save_daily_snapshot(config: dict | None = None,
 
     state["last_snapshot_date_utc"] = today_str
     _save_snapshot_state(state)
+
+    # Force the next contract cycle to re-check against the new snapshot.
+    alert_state = _load_alert_state()
+    alert_state["last_full_check_time"] = 0.0
+    alert_state["last_full_check_violations"] = []
+    _save_alert_state(alert_state)
     return True
 
 
 def maybe_send_degradation_summary(config: dict | None = None,
                                    now: datetime | None = None) -> bool:
-    """Send the daily Telegram summary iff today's hasn't been sent yet."""
+    """Send the daily Telegram summary iff today's hasn't been sent yet.
+
+    BUG-178/W15-W16 review (2026-04-16, P1#2): refuses to build a
+    summary if the latest snapshot is older than today's expected
+    snapshot. Without this guard a silent snapshot failure would
+    cause the summary to ship yesterday's data labeled as today's
+    "Δ vs prev 7d", and on a recurring failure the same stale data
+    would shout day after day.
+    """
     now = now or datetime.now(UTC)
     cfg_section = (config or {}).get("notification", {}) if config else {}
     target_hour = int(cfg_section.get(
@@ -653,6 +729,18 @@ def maybe_send_degradation_summary(config: dict | None = None,
         if not snapshots:
             return False
         latest = snapshots[-1]
+        # Refuse to ship stale data: today's snapshot must already exist.
+        try:
+            latest_ts = datetime.fromisoformat(latest.get("ts", ""))
+        except (ValueError, TypeError):
+            latest_ts = None
+        if latest_ts is None or latest_ts.date() != now.date():
+            logger.warning(
+                "Daily summary skipped: latest snapshot %s is not from today (%s). "
+                "Snapshot writer likely failed; check accuracy_snapshot_state.json.",
+                latest.get("ts"), now.date().isoformat(),
+            )
+            return False
         baseline = _find_baseline_snapshot(snapshots, now)
         body = build_daily_summary(latest=latest, baseline=baseline, now=now)
     except Exception as e:
@@ -696,10 +784,13 @@ def build_daily_summary(*, latest: dict, baseline: dict | None,
         f"{consensus_total} sam`"
     )
 
+    # Forecast block: explicit allowlist instead of Ministral/Qwen3
+    # exclusion, so a future renamed model doesn't silently misclassify
+    # (review P3#7).
     forecast = latest.get("forecast_recent") or {}
     forecast_pairs = [
         (k, v.get("accuracy", 0.0)) for k, v in forecast.items()
-        if not k.startswith("ministral") and not k.startswith("qwen3")
+        if k.startswith("chronos") or k.startswith("kronos")
     ]
     if forecast_pairs:
         rendered = " · ".join(

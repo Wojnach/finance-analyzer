@@ -53,14 +53,27 @@ def _make_snapshot(*, ts: datetime, signals_recent=None,
 
 def _stub_current(monkeypatch, *, signals=None, per_ticker=None,
                   forecast=None, consensus=None):
+    """Stub the four data sources read by check_degradation.
+
+    BUG-178/W15-W16 review (2026-04-16) refactor: the diff function now
+    threads pre-loaded `entries=` through every call to share a single
+    signal-log scan across scopes. Stubs must accept the entries kwarg
+    even though they ignore it.
+    """
+    # signal_accuracy is the source for the recent-window per-signal block
+    # (was signal_accuracy_recent before the perf refactor).
     if signals is not None:
+        def _stub_signal(horizon="1d", since=None, entries=None):
+            return signals
         monkeypatch.setattr(
-            "portfolio.accuracy_stats.signal_accuracy_recent",
-            lambda h="1d", days=7: signals,
+            "portfolio.accuracy_stats.signal_accuracy", _stub_signal,
         )
+        # The lifetime call inside save_accuracy_snapshot also uses this
+        # function — leave the stub returning the same dict; harmless.
     if per_ticker is not None:
-        monkeypatch.setattr(deg, "_per_ticker_recent",
-                            lambda horizon, days: per_ticker)
+        def _stub_per_ticker(horizon, days, *, entries=None):
+            return per_ticker
+        monkeypatch.setattr(deg, "_per_ticker_recent", _stub_per_ticker)
     if forecast is not None:
         monkeypatch.setattr(
             "portfolio.forecast_accuracy.cached_forecast_accuracy",
@@ -102,11 +115,23 @@ class TestSaveFullAccuracySnapshot:
         }
         monkeypatch.setattr(acc_mod, "signal_accuracy", lambda h="1d": lifetime_sigs)
 
-        # Recent-window source
-        monkeypatch.setattr(
-            acc_mod, "signal_accuracy_recent",
-            lambda h, days=7: {"rsi": {"accuracy": 0.49, "total": 280}},
-        )
+        # Recent-window source. After the perf refactor (2026-04-16
+        # post-impl review) save_full_accuracy_snapshot calls
+        # signal_accuracy(entries=recent_entries), not
+        # signal_accuracy_recent. The stub above for signal_accuracy
+        # already returns lifetime_sigs; replace it with a smarter stub
+        # that distinguishes lifetime (entries=None) from recent
+        # (entries=non-None).
+        def _stub_signal_accuracy(horizon="1d", since=None, entries=None):
+            if entries is None:
+                return lifetime_sigs
+            return {"rsi": {"accuracy": 0.49, "total": 280,
+                            "correct": 0, "pct": 49.0,
+                            "correct_buy": 0, "total_buy": 0,
+                            "buy_accuracy": 0.0,
+                            "correct_sell": 0, "total_sell": 0,
+                            "sell_accuracy": 0.0}}
+        monkeypatch.setattr(acc_mod, "signal_accuracy", _stub_signal_accuracy)
 
         # Per-ticker lifetime + recent
         monkeypatch.setattr(
@@ -115,8 +140,9 @@ class TestSaveFullAccuracySnapshot:
         )
         monkeypatch.setattr(
             deg, "_per_ticker_recent",
-            lambda horizon, days: {"BTC-USD": {"rsi": {"accuracy": 0.51,
-                                                       "total": 56}}},
+            lambda horizon, days, *, entries=None: {
+                "BTC-USD": {"rsi": {"accuracy": 0.51, "total": 56}}
+            },
         )
 
         # Forecast (Chronos/Kronos)
@@ -128,12 +154,24 @@ class TestSaveFullAccuracySnapshot:
             },
         )
 
-        # Consensus
+        # Consensus. After the perf refactor save_full_accuracy_snapshot
+        # passes entries= (not days=) for both calls — distinguish by
+        # which entries list the function received. We stub load_entries
+        # to return [], so all_entries=[] and recent_entries=[]. The
+        # stub returns different shapes based on call order so the test
+        # can still assert lifetime vs recent landed in distinct snapshot
+        # keys.
+        monkeypatch.setattr(acc_mod, "load_entries", lambda: [])
+        consensus_calls = {"n": 0}
+        consensus_returns = [
+            {"accuracy": 0.56, "total": 8800, "correct": 4928},  # lifetime
+            {"accuracy": 0.52, "total": 220, "correct": 114},    # recent
+        ]
+
         def stub_consensus(horizon="1d", entries=None, days=None):
-            base = {"accuracy": 0.56, "total": 8800, "correct": 4928}
-            if days is not None:
-                return {"accuracy": 0.52, "total": 220, "correct": 114}
-            return base
+            idx = consensus_calls["n"]
+            consensus_calls["n"] += 1
+            return consensus_returns[idx % len(consensus_returns)]
         monkeypatch.setattr(acc_mod, "consensus_accuracy", stub_consensus)
 
         snap = deg.save_full_accuracy_snapshot()
@@ -464,11 +502,18 @@ class TestThrottleReplay:
 
         calls = {"n": 0}
 
-        def stub_recent(h, days=7):
+        # After the perf refactor signal_accuracy is the recent-window
+        # source (called with entries=recent_entries from the diff).
+        def stub_signal(horizon="1d", since=None, entries=None):
             calls["n"] += 1
-            return {"rsi": {"accuracy": 0.42, "total": 280}}
+            return {"rsi": {"accuracy": 0.42, "total": 280,
+                            "correct": 0, "pct": 42.0,
+                            "correct_buy": 0, "total_buy": 0,
+                            "buy_accuracy": 0.0,
+                            "correct_sell": 0, "total_sell": 0,
+                            "sell_accuracy": 0.0}}
 
-        monkeypatch.setattr(acc_mod, "signal_accuracy_recent", stub_recent)
+        monkeypatch.setattr(acc_mod, "signal_accuracy", stub_signal)
 
         deg.check_degradation()
         deg.check_degradation()
@@ -520,6 +565,106 @@ class TestScopeKeys:
 # ---------------------------------------------------------------------------
 # 9) Daily summary builder
 # ---------------------------------------------------------------------------
+
+class TestPostReviewFixes:
+    """Coverage for the post-impl adversarial-review fixes."""
+
+    def test_stale_latest_snapshot_blocks_summary(self, monkeypatch, tmp_path):
+        """P1#2: refuse to send a summary built on yesterday's snapshot."""
+        _isolate_state(monkeypatch, tmp_path)
+        # Yesterday's snapshot — snapshot writer must have failed today
+        yday = (datetime.now(UTC) - timedelta(days=1)).replace(
+            hour=6, minute=0, second=0, microsecond=0,
+        )
+        old_snap = _make_snapshot(
+            ts=yday,
+            signals_recent={"rsi": {"accuracy": 0.55, "total": 200}},
+            consensus_recent={"accuracy": 0.55, "total": 500},
+        )
+        _write_baseline(monkeypatch, tmp_path, old_snap)
+
+        # Capture the send_or_store call attempt (or lack thereof)
+        sends: list = []
+        monkeypatch.setattr(
+            "portfolio.message_store.send_or_store",
+            lambda body, category=None: sends.append((body, category)),
+        )
+
+        # now is well past target hour
+        now = datetime.now(UTC).replace(hour=10)
+        sent = deg.maybe_send_degradation_summary(config={}, now=now)
+        assert sent is False
+        assert sends == []  # nothing went out
+
+    def test_blackout_clears_cached_violations(self, monkeypatch, tmp_path):
+        """P2#4: blackout must NOT replay stale cached violations."""
+        _isolate_state(monkeypatch, tmp_path)
+
+        # Pre-populate state with a cached CRITICAL violation from before
+        # the blackout window opened
+        from portfolio.file_utils import atomic_write_json
+        atomic_write_json(deg.ALERT_STATE_FILE, {
+            "last_full_check_time": time.time() - 10,  # very recent
+            "last_full_check_violations": [
+                {"invariant": deg.DEGRADATION_INVARIANT,
+                 "severity": deg.SEVERITY_CRITICAL,
+                 "message": "stale alert from before blackout",
+                 "details": {}}
+            ],
+            "last_alert_per_signal": {},
+            "last_summary_send_time": 0.0,
+        })
+
+        # Activate blackout
+        monkeypatch.setattr(
+            "portfolio.econ_dates.events_within_hours", lambda h: [],
+        )
+        monkeypatch.setattr(
+            "portfolio.econ_dates.recent_high_impact_events",
+            lambda h, impact_filter=("high",), ref_time=None: [
+                {"date": datetime.now(UTC).date(), "type": "FOMC",
+                 "impact": "high", "hours_since": 12.0},
+            ],
+        )
+
+        # Force throttle expiry so the function gets past the throttle gate
+        result = deg.check_degradation(throttle_seconds=0.0)
+        assert result == []  # blackout returns [], not the cached CRITICAL
+
+        # And the cache must be cleared
+        from portfolio.file_utils import load_json
+        state = load_json(deg.ALERT_STATE_FILE)
+        assert state["last_full_check_violations"] == []
+
+    def test_snapshot_save_invalidates_throttle(self, monkeypatch, tmp_path):
+        """P2#3: a successful daily snapshot must reset last_full_check_time."""
+        _isolate_state(monkeypatch, tmp_path)
+
+        # Pre-populate alert state with a recent throttle timestamp
+        from portfolio.file_utils import atomic_write_json
+        atomic_write_json(deg.ALERT_STATE_FILE, {
+            "last_full_check_time": time.time() - 10,
+            "last_full_check_violations": [{"k": "stale"}],
+            "last_alert_per_signal": {},
+            "last_summary_send_time": 0.0,
+        })
+
+        # Stub save_full_accuracy_snapshot to succeed without touching disk
+        monkeypatch.setattr(
+            deg, "save_full_accuracy_snapshot",
+            lambda **_: {"ts": datetime.now(UTC).isoformat()},
+        )
+
+        now = datetime.now(UTC).replace(hour=10)
+        wrote = deg.maybe_save_daily_snapshot(config={}, now=now)
+        assert wrote is True
+
+        # Check throttle was invalidated
+        from portfolio.file_utils import load_json
+        state = load_json(deg.ALERT_STATE_FILE)
+        assert state["last_full_check_time"] == 0.0
+        assert state["last_full_check_violations"] == []
+
 
 class TestDailySummary:
 

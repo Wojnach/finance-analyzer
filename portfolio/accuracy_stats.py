@@ -455,13 +455,19 @@ def per_ticker_accuracy(horizon="1d", entries=None):
     return result
 
 
-def accuracy_by_signal_ticker(signal_name, horizon="1d", days=None):
+def accuracy_by_signal_ticker(signal_name, horizon="1d", days=None, entries=None):
     """Compute per-ticker accuracy for one signal.
 
     Args:
         signal_name: Signal name present in SIGNAL_NAMES.
         horizon: Outcome horizon to evaluate.
         days: Optional lookback window in days.
+        entries: Pre-loaded entries list. BUG-178/W15-W16 follow-up
+            (2026-04-16 review): callers that iterate over many signal
+            names (e.g. accuracy_degradation._per_ticker_recent) must
+            pass a single pre-loaded list instead of letting each call
+            re-scan the 50,000-entry SQLite file. Skipping that knob
+            blew cycle time by ~290s in the original implementation.
 
     Returns:
         dict: {ticker: {"accuracy": float, "samples": int, "correct": int}}
@@ -469,7 +475,8 @@ def accuracy_by_signal_ticker(signal_name, horizon="1d", days=None):
     if signal_name not in SIGNAL_NAMES:
         return {}
 
-    entries = load_entries()
+    if entries is None:
+        entries = load_entries()
     cutoff = None
     if days is not None:
         from datetime import datetime, timedelta

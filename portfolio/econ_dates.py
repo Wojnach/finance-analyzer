@@ -191,7 +191,8 @@ def events_within_hours(hours: float, ref_date: date | None = None) -> list[dict
     return results
 
 
-def recent_high_impact_events(hours: float, impact_filter=("high",)) -> list[dict]:
+def recent_high_impact_events(hours: float, impact_filter=("high",),
+                              ref_time: datetime | None = None) -> list[dict]:
     """Return high-impact events that occurred within the last `hours`.
 
     BUG-178/W15-W16 follow-up (2026-04-16): events_within_hours() above
@@ -207,12 +208,15 @@ def recent_high_impact_events(hours: float, impact_filter=("high",)) -> list[dic
         impact_filter: Tuple of impact levels to include. Default is
             ("high",) — minor data releases shouldn't silence the
             tracker.
+        ref_time: Optional reference time for the "now" anchor.
+            Tests pass an explicit value so assertions don't depend on
+            wall-clock; production callers should leave this None.
 
     Returns:
-        list[dict]: Events whose evt_dt is in [now - hours, now], with
-            keys date/type/impact/hours_since (positive number).
+        list[dict]: Events whose evt_dt is in [ref_time - hours, ref_time],
+            with keys date/type/impact/hours_since (positive number).
     """
-    now = datetime.now(UTC)
+    now = ref_time if ref_time is not None else datetime.now(UTC)
     results = []
     for evt in ECON_EVENTS:
         if evt.get("impact") not in impact_filter:
