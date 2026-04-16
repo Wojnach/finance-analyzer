@@ -216,6 +216,23 @@ _BIAS_MIN_ACTIVE = 30  # need enough active (non-HOLD) votes to judge bias
 _PER_TICKER_CONSENSUS_GATE = 0.38  # below 38% = force HOLD
 _PER_TICKER_CONSENSUS_MIN_SAMPLES = 50
 
+# Voter-count circuit breaker (2026-04-16, Batch 2 of accuracy gating reconfig).
+# When cascaded gates would leave fewer than _MIN_ACTIVE_VOTERS_SOFT active voters
+# for a ticker, progressively relax the accuracy gate by _GATE_RELAXATION_STEP
+# until the voter floor is met or _GATE_RELAXATION_MAX is reached. Rationale:
+# losing voter diversity is worse than letting a borderline signal vote, because
+# the consensus is a weighted sum of possibly-correlated signals — 3 correlated
+# voters aren't as informative as 5 independent ones.
+#
+# Expected impact: kicks in during regime transitions where the 47% gate is
+# silencing several voters whose recent accuracy dipped to 45-47%. Keeps at
+# least 5 voters active by relaxing the gate by up to 6pp (to 41% floor).
+# Signals with directional or per-ticker gating are NOT un-gated by this —
+# only the overall accuracy gate is relaxed.
+_MIN_ACTIVE_VOTERS_SOFT = 5
+_GATE_RELAXATION_STEP = 0.02  # relax by 2pp per step
+_GATE_RELAXATION_MAX = 0.06   # cap at 6pp below base gate (0.47 -> 0.41)
+
 # Per-ticker signal disable: force HOLD for specific signal+ticker combos
 # where accuracy data shows the signal is actively harmful for that instrument.
 # 2026-04-15 audit built entries from 3h accuracy data; 2026-04-16 investigation
@@ -851,6 +868,103 @@ _CLUSTER_CORRELATION_PENALTIES: dict[str, float] = {
 }
 
 
+def _count_active_voters_at_gate(votes, accuracy_data, excluded, group_gated,
+                                  base_gate, relaxation):
+    """Count how many signals would pass gating at gate=(base_gate - relaxation).
+
+    Counts only voters that survive the full gate cascade:
+      1) excluded (top-N)
+      2) group-gated (correlation leader below group-leader gate)
+      3) accuracy gate at (base - relaxation), tiered for high-sample signals
+      4) directional gate (unchanged by relaxation)
+
+    Returns int — the number of signals still voting BUY/SELL.
+    """
+    gate_val = base_gate - relaxation
+    high_gate_val = _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD - relaxation
+    active = 0
+    for signal_name, vote in votes.items():
+        if vote == "HOLD":
+            continue
+        if signal_name in excluded:
+            continue
+        if signal_name in group_gated:
+            continue
+        stats = accuracy_data.get(signal_name, {})
+        acc = stats.get("accuracy", 0.5)
+        samples = stats.get("total", 0)
+        effective_gate = gate_val
+        if samples >= _ACCURACY_GATE_HIGH_SAMPLE_MIN:
+            effective_gate = max(gate_val, high_gate_val)
+        if samples >= ACCURACY_GATE_MIN_SAMPLES and acc < effective_gate:
+            continue
+        # Directional gate is not relaxed by the circuit breaker — those gates
+        # catch signals that are actively wrong in one direction.
+        if vote == "BUY":
+            dir_acc = stats.get("buy_accuracy", acc)
+            dir_n = stats.get("total_buy", 0)
+        else:
+            dir_acc = stats.get("sell_accuracy", acc)
+            dir_n = stats.get("total_sell", 0)
+        if dir_n >= _DIRECTIONAL_GATE_MIN_SAMPLES and dir_acc < _DIRECTIONAL_GATE_THRESHOLD:
+            continue
+        active += 1
+    return active
+
+
+def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_gate):
+    """Compute circuit-breaker relaxation to preserve voter diversity.
+
+    Progressively tests relaxation values 0, step, 2*step, ..., up to
+    _GATE_RELAXATION_MAX. Returns the smallest relaxation that yields at
+    least _MIN_ACTIVE_VOTERS_SOFT active voters, or _GATE_RELAXATION_MAX
+    if the floor still isn't met (caller proceeds with the relaxed gate
+    either way — diversity matters even if we can't fully restore it).
+
+    Pre-condition: the circuit breaker only engages when the total number of
+    non-HOLD candidate votes (before accuracy/directional gating) is at least
+    _MIN_ACTIVE_VOTERS_SOFT. If fewer signals want to vote in the first place,
+    relaxing the gate cannot restore diversity — we'd only be letting single
+    borderline signals escape that the gate is designed to catch. This
+    preserves the gate's behavior in low-signal scenarios (e.g., unit tests
+    with 1-2 votes) while still triggering during regime transitions where
+    many signals are borderline.
+
+    Returns float — relaxation in absolute accuracy points (e.g., 0.02).
+    """
+    # Count candidate non-HOLD signals that haven't been excluded/group-gated.
+    # These are the signals the accuracy gate could potentially filter.
+    candidates = sum(
+        1 for sn, v in votes.items()
+        if v != "HOLD" and sn not in excluded and sn not in group_gated
+    )
+    if candidates < _MIN_ACTIVE_VOTERS_SOFT:
+        # Too few candidate signals for relaxation to meaningfully improve
+        # diversity. Keep the gate at its base threshold.
+        return 0.0
+
+    # Quick path: if base gate already yields enough voters, no relaxation.
+    baseline = _count_active_voters_at_gate(
+        votes, accuracy_data, excluded, group_gated, base_gate, 0.0,
+    )
+    if baseline >= _MIN_ACTIVE_VOTERS_SOFT:
+        return 0.0
+    relaxation = 0.0
+    # Integer steps up to and including max — use int steps to avoid float drift.
+    n_steps = int(round(_GATE_RELAXATION_MAX / _GATE_RELAXATION_STEP))
+    for i in range(1, n_steps + 1):
+        candidate_rel = round(i * _GATE_RELAXATION_STEP, 6)
+        active = _count_active_voters_at_gate(
+            votes, accuracy_data, excluded, group_gated, base_gate, candidate_rel,
+        )
+        relaxation = candidate_rel
+        if active >= _MIN_ACTIVE_VOTERS_SOFT:
+            return relaxation
+    # Floor not met even at max relaxation — still return the max so callers
+    # benefit from the extra voters we did recover.
+    return relaxation
+
+
 def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
                         accuracy_gate=None, max_signals=None, horizon=None,
                         regime_gated_override=None):
@@ -973,6 +1087,24 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     _TREND_SIGNALS = {"ema", "trend", "heikin_ashi", "volume_flow"}
     _MR_SIGNALS = {"mean_reversion", "calendar"}
 
+    # Voter-count circuit breaker (Batch 2 of 2026-04-16 accuracy gating reconfig).
+    # Only the overall accuracy gate is relaxable — directional and correlation
+    # gates still fire. Prevents regime-transition over-gating that silenced
+    # ~8 voters in W15/W16.
+    relaxation = _compute_gate_relaxation(
+        votes=votes,
+        accuracy_data=accuracy_data,
+        excluded=excluded,
+        group_gated=group_gated_signals,
+        base_gate=gate,
+    )
+    if relaxation > 0:
+        logger.debug(
+            "Circuit breaker: relaxing accuracy gate by %.0fpp "
+            "(base=%.2f -> effective=%.2f) to preserve voter diversity",
+            relaxation * 100, gate, gate - relaxation,
+        )
+
     for signal_name, vote in votes.items():
         if vote == "HOLD":
             continue
@@ -986,11 +1118,15 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         acc = stats.get("accuracy", 0.5)
         samples = stats.get("total", 0)
         # Accuracy gate: skip signals that are below threshold with enough data.
-        # Tiered: established signals (5000+ samples) use a tighter 50% gate;
-        # newer signals use the standard 47% gate.
-        effective_gate = gate
+        # Tiered: established signals (10000+ samples) use a tighter 50% gate;
+        # newer signals use the standard 47% gate. Circuit-breaker relaxation
+        # (Batch 2 2026-04-16) subtracts uniformly from both tiers.
+        effective_gate = gate - relaxation
         if samples >= _ACCURACY_GATE_HIGH_SAMPLE_MIN:
-            effective_gate = max(gate, _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD)
+            effective_gate = max(
+                gate - relaxation,
+                _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD - relaxation,
+            )
         if samples >= ACCURACY_GATE_MIN_SAMPLES and acc < effective_gate:
             gated_signals.append(signal_name)
             continue
