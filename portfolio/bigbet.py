@@ -175,7 +175,17 @@ def invoke_layer2_eval(ticker, direction, conditions, signals, tf_data, prices_u
         elapsed = time.time() - t0
         output = result.stdout.strip()
 
-        if result.returncode == 0 and output:
+        # BUG-200 (2026-04-16): Route through detect_auth_failure. This site
+        # bypasses claude_gate's invoke_claude wrapper, so a "Not logged in"
+        # stdout with exit 0 would otherwise be passed to the response parser
+        # (which returns None) without ever escalating the auth failure to
+        # critical_errors.jsonl. Escalate first, return safe default if hit.
+        from portfolio.claude_gate import detect_auth_failure
+        scan = f"{output}\n{result.stderr or ''}"
+        if detect_auth_failure(scan, caller="bigbet_layer2", context={"ticker": ticker, "direction": direction}):
+            logger.warning("BIG BET L2: auth failure detected for %s %s — returning None", ticker, direction)
+            probability, reasoning = None, ""
+        elif result.returncode == 0 and output:
             probability, reasoning = _parse_eval_response(output)
             logger.info("BIG BET L2: %s %s — %s/10 (%.1fs)", ticker, direction, probability, elapsed)
         else:

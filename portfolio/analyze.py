@@ -280,6 +280,15 @@ def run_analysis(ticker):
         elapsed = time.time() - t0
         output = result.stdout.strip()
 
+        # BUG-200/201 pattern (2026-04-16): auth-failure check before trusting
+        # output. Manual-CLI path, but recording to critical_errors still
+        # helps future Claude sessions notice when auth expires.
+        from portfolio.claude_gate import detect_auth_failure
+        scan = f"{output}\n{result.stderr or ''}"
+        if detect_auth_failure(scan, caller="analyze_cli", context={"ticker": ticker}):
+            print(f"Claude auth failure while analyzing {ticker}. Run `claude` interactively to re-login.")
+            return
+
         if result.returncode != 0 or not output:
             print(f"Claude returned code {result.returncode}")
             if result.stderr:

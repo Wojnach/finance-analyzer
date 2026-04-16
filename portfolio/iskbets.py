@@ -323,7 +323,16 @@ def invoke_layer2_gate(ticker, price, conditions, signals, tf_data, atr, iskbets
         elapsed = time.time() - t0
         output = result.stdout.strip()
 
-        if result.returncode == 0 and output:
+        # BUG-201 (2026-04-16): Route through detect_auth_failure. This gate
+        # defaults to approved=True, so a "Not logged in" stdout would
+        # otherwise be interpreted as gate-approved for a warrant trade.
+        # Auth failure MUST override the default-approve policy.
+        from portfolio.claude_gate import detect_auth_failure
+        scan = f"{output}\n{result.stderr or ''}"
+        if detect_auth_failure(scan, caller="iskbets_l2_gate", context={"ticker": ticker, "price": price}):
+            logger.warning("ISKBETS L2 GATE: auth failure detected for %s — overriding default-approve to SKIP", ticker)
+            approved, reasoning = False, "auth failure"
+        elif result.returncode == 0 and output:
             approved, reasoning = _parse_gate_response(output)
         else:
             logger.warning("ISKBETS L2 GATE: claude returned code %s", result.returncode)
