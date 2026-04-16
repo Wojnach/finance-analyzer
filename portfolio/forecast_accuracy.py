@@ -6,6 +6,8 @@ and computes per-model per-ticker per-horizon accuracy statistics.
 
 import json
 import logging
+import threading
+import time
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -17,6 +19,51 @@ logger = logging.getLogger("portfolio.forecast_accuracy")
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 PREDICTIONS_FILE = DATA_DIR / "forecast_predictions.jsonl"
 HEALTH_FILE = DATA_DIR / "forecast_health.jsonl"
+
+# BUG-178/W15-W16 follow-up (2026-04-16): per-cycle in-memory cache for
+# compute_forecast_accuracy(). The accuracy_degradation tracker calls this
+# every cycle (throttled to every ~hour for the full check); each call walks
+# forecast_predictions.jsonl. Cache the result for 1h so the hot path is a
+# dict lookup. Mirrors the signal_utility cache pattern in accuracy_stats.py:
+# lock guards the (timestamp, value) swap, NOT the compute, so two threads
+# racing past TTL each recompute once but neither blocks the other.
+_FORECAST_ACCURACY_CACHE_TTL = 3600.0
+_forecast_accuracy_cache: dict[tuple, tuple[float, dict]] = {}
+_forecast_accuracy_cache_lock = threading.Lock()
+
+
+def cached_forecast_accuracy(horizon="24h", days=7, use_raw_sub_signals=True):
+    """Cached wrapper around compute_forecast_accuracy().
+
+    Keyed by (horizon, days, use_raw_sub_signals). 1h TTL — long enough to
+    keep cycle-level callers fast, short enough to surface fresh outcomes
+    after the daily backfill. Tests and callers that need immediately-fresh
+    data can call compute_forecast_accuracy() directly.
+    """
+    key = (horizon, days, use_raw_sub_signals)
+    now = time.time()
+    with _forecast_accuracy_cache_lock:
+        cached = _forecast_accuracy_cache.get(key)
+        if cached and now - cached[0] < _FORECAST_ACCURACY_CACHE_TTL:
+            return cached[1]
+    # Compute outside the lock so other horizons aren't blocked.
+    result = compute_forecast_accuracy(
+        horizon=horizon, days=days, use_raw_sub_signals=use_raw_sub_signals,
+    )
+    with _forecast_accuracy_cache_lock:
+        _forecast_accuracy_cache[key] = (now, result)
+    return result
+
+
+def invalidate_forecast_accuracy_cache():
+    """Clear the in-memory forecast accuracy cache.
+
+    Called by tests or by code paths that just wrote new outcomes (e.g.
+    after a manual backfill). Production code rarely needs this — the 1h
+    TTL handles natural staleness.
+    """
+    with _forecast_accuracy_cache_lock:
+        _forecast_accuracy_cache.clear()
 
 
 def load_predictions(predictions_file=None):

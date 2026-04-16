@@ -189,3 +189,42 @@ def events_within_hours(hours: float, ref_date: date | None = None) -> list[dict
                 "hours_until": round(hrs, 1),
             })
     return results
+
+
+def recent_high_impact_events(hours: float, impact_filter=("high",)) -> list[dict]:
+    """Return high-impact events that occurred within the last `hours`.
+
+    BUG-178/W15-W16 follow-up (2026-04-16): events_within_hours() above
+    only iterates FUTURE events (skips evt["date"] < ref_date). The
+    accuracy degradation tracker needs the BACKWARD window too so it
+    can blanket-suppress alerts during the post-event volatility hangover
+    after FOMC/CPI/NFP — those releases routinely whipsaw signals for
+    12-24 hours after the print, exactly when the lifetime-vs-recent
+    delta would otherwise look like a degradation.
+
+    Args:
+        hours: How far back to look. Typical: 24.0.
+        impact_filter: Tuple of impact levels to include. Default is
+            ("high",) — minor data releases shouldn't silence the
+            tracker.
+
+    Returns:
+        list[dict]: Events whose evt_dt is in [now - hours, now], with
+            keys date/type/impact/hours_since (positive number).
+    """
+    now = datetime.now(UTC)
+    results = []
+    for evt in ECON_EVENTS:
+        if evt.get("impact") not in impact_filter:
+            continue
+        evt_dt = datetime.combine(evt["date"], datetime.min.time().replace(hour=14),
+                                  tzinfo=UTC)
+        delta_hrs = (now - evt_dt).total_seconds() / 3600
+        if 0 <= delta_hrs <= hours:
+            results.append({
+                "date": evt["date"],
+                "type": evt["type"],
+                "impact": evt["impact"],
+                "hours_since": round(delta_hrs, 1),
+            })
+    return results
