@@ -958,31 +958,34 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
 
     Progressively tests relaxation values 0, step, 2*step, ..., up to
     _GATE_RELAXATION_MAX. Returns the smallest relaxation that yields at
-    least _MIN_ACTIVE_VOTERS_SOFT active voters, or _GATE_RELAXATION_MAX
-    if the floor still isn't met (caller proceeds with the relaxed gate
-    either way — diversity matters even if we can't fully restore it).
+    least _MIN_ACTIVE_VOTERS_SOFT active voters.
 
-    Pre-condition: the circuit breaker only engages when the total number of
-    non-HOLD candidate votes (before accuracy/directional gating) is at least
-    _MIN_ACTIVE_VOTERS_SOFT. If fewer signals want to vote in the first place,
-    relaxing the gate cannot restore diversity — we'd only be letting single
-    borderline signals escape that the gate is designed to catch. This
-    preserves the gate's behavior in low-signal scenarios (e.g., unit tests
-    with 1-2 votes) while still triggering during regime transitions where
-    many signals are borderline.
+    Pre-condition (2026-04-16 review, Reviewer 1 I1 + Reviewer 2 P2-5):
+    the circuit breaker engages only when max relaxation would actually
+    yield >= floor. Otherwise we're in one of:
+      (a) a low-signal scenario (e.g. unit tests with 1-2 votes) where
+          relaxation cannot restore diversity — we'd just be letting single
+          borderline signals escape the gate is designed to catch;
+      (b) a genuine regime break where many signals have legitimately
+          dropped below 41% — relaxing the gate opens it to signals that
+          should stay gated, and masks the regime event in the logs.
+    In both (a) and (b), returning 0 preserves the strict gate. The original
+    behavior (returning _GATE_RELAXATION_MAX even when floor unmet) is
+    replaced because it was indistinguishable in the logs from a successful
+    relaxation and could silently let bad signals vote in a crisis.
 
-    Returns float — relaxation in absolute accuracy points (e.g., 0.02).
+    Also uses `_count_active_voters_at_gate` (which applies directional gating)
+    for the pre-condition, not raw candidate count. A signal that is gated by
+    the directional filter cannot be un-gated by relaxation, so it shouldn't
+    count toward the relaxation decision.
+
+    Returns float - relaxation in absolute accuracy points (e.g., 0.02).
     """
-    # Count candidate non-HOLD signals that haven't been excluded/group-gated.
-    # These are the signals the accuracy gate could potentially filter.
-    candidates = sum(
-        1 for sn, v in votes.items()
-        if v != "HOLD" and sn not in excluded and sn not in group_gated
-    )
-    if candidates < _MIN_ACTIVE_VOTERS_SOFT:
-        # Too few candidate signals for relaxation to meaningfully improve
-        # diversity. Keep the gate at its base threshold.
-        return 0.0
+    # Defensive: caller may pass None for either set (older call paths or a
+    # future refactor). Treat as empty to avoid `in None` TypeErrors in a
+    # hot consensus path. Reviewer 2 P3 suggestion.
+    excluded = excluded or set()
+    group_gated = group_gated or set()
 
     # Quick path: if base gate already yields enough voters, no relaxation.
     baseline = _count_active_voters_at_gate(
@@ -990,20 +993,31 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     )
     if baseline >= _MIN_ACTIVE_VOTERS_SOFT:
         return 0.0
-    relaxation = 0.0
-    # Integer steps up to and including max — use int steps to avoid float drift.
+
+    # Pre-condition check via max relaxation: if even the most generous gate
+    # cannot recover the voter floor, relaxation is not the right tool. This
+    # ALSO accounts for directional gating (unlike a raw candidate count),
+    # so signals gated on BUY-accuracy=30% don't inflate the pre-condition.
+    best_possible = _count_active_voters_at_gate(
+        votes, accuracy_data, excluded, group_gated,
+        base_gate, _GATE_RELAXATION_MAX,
+    )
+    if best_possible < _MIN_ACTIVE_VOTERS_SOFT:
+        return 0.0
+
+    # Integer steps up to and including max - use int steps to avoid float drift.
     n_steps = int(round(_GATE_RELAXATION_MAX / _GATE_RELAXATION_STEP))
     for i in range(1, n_steps + 1):
         candidate_rel = round(i * _GATE_RELAXATION_STEP, 6)
         active = _count_active_voters_at_gate(
             votes, accuracy_data, excluded, group_gated, base_gate, candidate_rel,
         )
-        relaxation = candidate_rel
         if active >= _MIN_ACTIVE_VOTERS_SOFT:
-            return relaxation
-    # Floor not met even at max relaxation — still return the max so callers
-    # benefit from the extra voters we did recover.
-    return relaxation
+            return candidate_rel
+    # Unreachable: we've already confirmed max relaxation yields >= floor.
+    # Return max defensively against floating-point drift between the
+    # best_possible check and the step loop (e.g. relaxation boundary tie).
+    return _GATE_RELAXATION_MAX
 
 
 def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
