@@ -303,10 +303,11 @@ class TestInvokeAgentHappyPath:
              patch("portfolio.agent_invocation.send_or_store"), \
              patch("portfolio.agent_invocation.escape_markdown_v1", side_effect=lambda x: x), \
              patch("builtins.open", mock_open()):
-            before = time.time()
+            before = time.monotonic()
             invoke_agent(["test"], tier=1)
-            after = time.time()
+            after = time.monotonic()
 
+        # BUG-203 (2026-04-16): _agent_start uses time.monotonic() now.
         assert before <= ai._agent_start <= after
 
     @patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude")
@@ -386,7 +387,7 @@ class TestInvokeAgentBusyDetection:
         proc.poll.return_value = None  # still running
         proc.pid = 100
         ai._agent_proc = proc
-        ai._agent_start = time.time()  # just started
+        ai._agent_start = time.monotonic()  # just started
         ai._agent_timeout = 900
 
         result = invoke_agent(["test"], tier=1)
@@ -399,7 +400,7 @@ class TestInvokeAgentBusyDetection:
         proc.poll.return_value = None
         proc.pid = 100
         ai._agent_proc = proc
-        ai._agent_start = time.time()
+        ai._agent_start = time.monotonic()
         ai._agent_timeout = 900
 
         with patch("portfolio.agent_invocation.subprocess.Popen") as mock_p:
@@ -412,7 +413,7 @@ class TestInvokeAgentBusyDetection:
         old_proc.poll.return_value = 0  # completed (exit code 0)
         old_proc.pid = 50
         ai._agent_proc = old_proc
-        ai._agent_start = time.time() - 60
+        ai._agent_start = time.monotonic() - 60
 
         with patch("portfolio.agent_invocation.shutil.which", return_value="/usr/bin/claude"), \
              patch("portfolio.agent_invocation.subprocess.Popen") as mock_p, \
@@ -441,7 +442,7 @@ class TestInvokeAgentTimeout:
         proc.pid = 200
         proc.wait.return_value = 0
         ai._agent_proc = proc
-        ai._agent_start = time.time() - 1000  # well past timeout
+        ai._agent_start = time.monotonic() - 1000  # well past timeout
         ai._agent_timeout = 120
 
         with patch("portfolio.agent_invocation.platform.system", return_value="Windows"), \
@@ -470,7 +471,7 @@ class TestInvokeAgentTimeout:
         proc.pid = 300
         proc.wait.return_value = 0
         ai._agent_proc = proc
-        ai._agent_start = time.time() - 1000
+        ai._agent_start = time.monotonic() - 1000
         ai._agent_timeout = 120
 
         with patch("portfolio.agent_invocation.platform.system", return_value="Linux"), \
@@ -495,7 +496,7 @@ class TestInvokeAgentTimeout:
         log_fh = MagicMock()
         ai._agent_proc = proc
         ai._agent_log = log_fh
-        ai._agent_start = time.time() - 1000
+        ai._agent_start = time.monotonic() - 1000
         ai._agent_timeout = 120
 
         with patch("portfolio.agent_invocation.platform.system", return_value="Linux"), \
@@ -520,7 +521,7 @@ class TestInvokeAgentTimeout:
             cmd="claude", timeout=10
         )
         ai._agent_proc = proc
-        ai._agent_start = time.time() - 1000
+        ai._agent_start = time.monotonic() - 1000
         ai._agent_timeout = 120
 
         with patch("portfolio.agent_invocation.platform.system", return_value="Linux"), \
@@ -857,7 +858,7 @@ class TestStaleLogCleanup:
         old_log = MagicMock()
         ai._agent_proc = old_proc
         ai._agent_log = old_log
-        ai._agent_start = time.time() - 60
+        ai._agent_start = time.monotonic() - 60
 
         mock_popen_cls.return_value = MagicMock(pid=11)
 

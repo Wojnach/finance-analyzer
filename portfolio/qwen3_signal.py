@@ -151,7 +151,9 @@ def get_qwen3_signal(context):
         if killed:
             logger.warning("Reaped %d orphaned llama process(es)", killed)
     except Exception:
-        pass
+        # BUG-204: log rather than swallow — if the reaper itself breaks,
+        # VRAM leaks will be invisible otherwise.
+        logger.debug("kill_orphaned_llama failed", exc_info=True)
     with gpu_gate("qwen3", timeout=300) as acquired:
         if not acquired:
             logger.warning("GPU gate timeout — returning HOLD")

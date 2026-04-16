@@ -1,6 +1,7 @@
 """Portfolio Intelligence Dashboard — lightweight Flask API + frontend."""
 
 import functools
+import logging
 import math
 import threading
 import time
@@ -10,6 +11,8 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask, jsonify, request, send_from_directory
 from flask.json.provider import DefaultJSONProvider
+
+logger = logging.getLogger(__name__)
 
 
 def _json_safe(value):
@@ -1180,7 +1183,9 @@ def api_market_health():
                 if mh:
                     result["market_health"] = mh
             except Exception:
-                pass
+                # BUG-205: log at debug so a broken market_health source is
+                # diagnosable instead of silently omitting the field.
+                logger.debug("market_health enrichment failed", exc_info=True)
 
         if summary:
             if "exposure_recommendation" in summary:

@@ -164,7 +164,8 @@ def invoke_agent(reasons, tier=3):
     timeout = tier_cfg["timeout"]
 
     if _agent_proc and _agent_proc.poll() is None:
-        elapsed = time.time() - _agent_start
+        # BUG-203: use monotonic clock for elapsed — wall clock is NTP-jump-prone.
+        elapsed = time.monotonic() - _agent_start
         if elapsed > _agent_timeout:
             logger.info("Agent pid=%s timed out (%.0fs), killing", _agent_proc.pid, elapsed)
             kill_ok = True
@@ -325,7 +326,7 @@ def invoke_agent(reasons, tier=3):
         )
         _agent_log = log_fh  # transfer ownership on success
         log_fh = None  # prevent cleanup below from closing it
-        _agent_start = time.time()
+        _agent_start = time.monotonic()
         _agent_timeout = timeout
         _agent_tier = tier
         _agent_reasons = list(reasons)
@@ -493,7 +494,7 @@ def check_agent_completion():
         return None
 
     # Process has finished — collect completion info
-    duration_s = round(time.time() - _agent_start, 1)
+    duration_s = round(time.monotonic() - _agent_start, 1)
     completed_at = datetime.now(UTC).isoformat()
 
     # BUG-97: _last_jsonl_ts can raise OSError if file is locked on Windows
