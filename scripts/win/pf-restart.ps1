@@ -3,7 +3,7 @@
   Cleanly restart a PF scheduled task (DataLoop, MetalsLoop, or both).
 
 .DESCRIPTION
-  `schtasks /end <task>` only signals the wrapper batch script — the
+  `schtasks /end <task>` only signals the wrapper batch script - the
   child python.exe spawned by `START /B /WAIT` survives as an orphan,
   keeping the old code in memory and blocking the file-singleton lock
   the new instance tries to acquire (exit code 11). Result: schtasks
@@ -17,9 +17,9 @@
     3. Calls schtasks /end + /run on the corresponding task name.
 
 .PARAMETER Target
-  loop   — restart PF-DataLoop (main signal cycle)
-  metals — restart PF-MetalsLoop (metals warrant trading)
-  all    — restart both
+  loop   - restart PF-DataLoop (main signal cycle)
+  metals - restart PF-MetalsLoop (metals warrant trading)
+  all    - restart both
   Default: loop.
 
 .EXAMPLE
@@ -67,7 +67,7 @@ foreach ($t in $targets) {
     }
 
     # Stop the scheduled task wrapper (cmd.exe running pf-*.bat). Safe even
-    # if it's already gone — schtasks returns 1 in that case which we ignore.
+    # if it's already gone - schtasks returns 1 in that case which we ignore.
     & schtasks.exe /end /tn $t.Task 2>&1 | Out-Null
 
     # Start fresh
@@ -88,6 +88,6 @@ foreach ($t in $targets) {
             Write-Host "  $($t.Task): PID $($p.ProcessId) started $([datetime]$p.CreationDate)" -ForegroundColor Green
         }
     } else {
-        Write-Warning "  $($t.Task): no python.exe found yet — task may still be starting"
+        Write-Warning "  $($t.Task): no python.exe found yet - task may still be starting"
     }
 }
