@@ -39,7 +39,14 @@ SELF_HEAL_COOLDOWN_S = 1800  # 30 minutes between sessions
 # of-failure check that would catch future silent-stall bugs, not just
 # this specific auth case.
 LAYER2_TRIGGER_LOOKBACK_S = 6 * 3600   # only complain if trigger was recent
-LAYER2_JOURNAL_GRACE_S = 60 * 60       # grace period post-trigger for agent to journal
+# Tightened 2026-04-16 from 60m → 18m. T3 (Full) timeout is 900s (15m); the
+# longest real Layer 2 invocation we ever observe finishes well under that.
+# A 60m grace let three consecutive overnight auth-silent outages pass
+# undetected (Apr 14–16). 18m = T3 cap + 3m slack for subprocess startup,
+# Telegram delivery, and journal flush — enough that a healthy slow session
+# still passes, short enough that an all-nighter of silent failures gets
+# caught before markets open.
+LAYER2_JOURNAL_GRACE_S = 18 * 60       # grace period post-trigger for agent to journal
 
 
 @dataclass

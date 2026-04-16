@@ -82,6 +82,17 @@ def test_no_violation_when_no_recent_trigger(contract_env):
     assert loop_contract.check_layer2_journal_activity() == []
 
 
+def test_grace_window_is_18_minutes(contract_env):
+    """BUG-202 (2026-04-16): pin the grace window to 18 min.
+
+    The constant was 60m before — a value that predates T3's 15-min
+    subprocess timeout and let three consecutive overnight auth-silent
+    outages pass undetected (Apr 14–16). If someone widens it again,
+    this test forces them to justify it in review.
+    """
+    assert loop_contract.LAYER2_JOURNAL_GRACE_S == 18 * 60
+
+
 def test_no_violation_before_grace_window_elapses(contract_env):
     """Trigger just fired 10 minutes ago — agent still has time to journal."""
     tmp_path, p = contract_env
