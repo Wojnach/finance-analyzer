@@ -167,31 +167,52 @@ class TestComputeGateRelaxation:
         # wait — 0.45 < 0.45 is False, so they pass at 0.45 gate. So relaxation 0.02 suffices.
         assert rel == pytest.approx(0.02)
 
-    def test_returns_zero_when_unfillable_even_at_max_relaxation(self):
-        """2026-04-16 review fix: when max relaxation cannot restore the voter
-        floor, return 0 instead of max. Original behavior let signals below 41%
-        vote during genuine regime breaks, masking the event. New behavior
-        keeps the strict gate and lets the caller decide HOLD is appropriate.
+    def test_returns_zero_when_relaxation_recovers_no_additional_voters(self):
+        """Genuine regime break: max relaxation recovers 0 additional voters
+        beyond baseline (all sub-47% signals are also sub-41%). The strict
+        gate should stay on - relaxing would let actively-broken signals vote.
 
-        Scenario: 5 candidate signals but only 2 above the gate at max
-        relaxation (0.41). Floor of 5 cannot be met — keep gate strict.
+        Scenario: 2 signals above any gate + 3 signals at 0.30 that are
+        below the 0.41 relaxed gate AND the 0.40 directional gate. Max
+        relaxation recovers nothing new beyond the 2 baseline voters.
         """
         votes = {f"s{i}": "BUY" for i in range(5)}
         accuracy = {
             "s0": self._make_stats(0.60),  # passes at any gate
             "s1": self._make_stats(0.60),  # passes at any gate
-            "s2": self._make_stats(0.30),  # unreachable even at 0.41
-            "s3": self._make_stats(0.30),  # unreachable
-            "s4": self._make_stats(0.30),  # unreachable
+            "s2": self._make_stats(0.30),  # below 0.41 and directionally gated
+            "s3": self._make_stats(0.30),
+            "s4": self._make_stats(0.30),
         }
-        for sig in ("s2", "s3", "s4"):
-            accuracy[sig]["buy_accuracy"] = 0.50
-            accuracy[sig]["sell_accuracy"] = 0.50
         rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
         assert rel == 0.0, (
-            "When max relaxation cannot recover the voter floor, the "
-            "circuit breaker should NOT engage - that's a regime break "
-            "signal, not a relaxation opportunity."
+            "When max relaxation recovers 0 additional voters, the circuit "
+            "breaker should NOT engage - that's a genuine regime break, "
+            "not a relaxation opportunity."
+        )
+
+    def test_partial_recovery_when_one_signal_unrecoverable(self):
+        """Codex P2 (2026-04-16 follow-up): a single irrecoverable outlier
+        must NOT veto relaxation for the rest. Previously best_possible<floor
+        short-circuited to 0.0, suppressing the recovery of 4 valid voters.
+
+        Scenario: 4 BUY signals at 0.42 (recoverable at relaxation>=0.06)
+        + 1 SELL signal at 0.30 (unrecoverable). best_possible=4<5=floor,
+        but relaxation still recovers those 4 vs baseline of 0. Should
+        return max relaxation to preserve partial recovery.
+        """
+        votes = {f"s{i}": "BUY" for i in range(4)}
+        votes["s4"] = "SELL"
+        accuracy = {f"s{i}": self._make_stats(0.42) for i in range(4)}
+        # s4 is directionally gated (buy_acc irrelevant for SELL vote) - use
+        # overall=0.30 to also fail the overall gate. With sell_acc=0.30, the
+        # directional gate (threshold 0.40) fires on SELL direction too.
+        accuracy["s4"] = self._make_stats(0.30)
+        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
+        assert rel == pytest.approx(_GATE_RELAXATION_MAX), (
+            "Partial recovery (4 recoverable + 1 irrecoverable) should "
+            "return max relaxation, not veto to 0. A single bad signal "
+            "must not block recovery of the recoverable majority."
         )
 
     def test_no_relaxation_when_few_candidate_signals(self):

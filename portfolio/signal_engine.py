@@ -960,49 +960,47 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     _GATE_RELAXATION_MAX. Returns the smallest relaxation that yields at
     least _MIN_ACTIVE_VOTERS_SOFT active voters.
 
-    Pre-condition (2026-04-16 review, Reviewer 1 I1 + Reviewer 2 P2-5):
-    the circuit breaker engages only when max relaxation would actually
-    yield >= floor. Otherwise we're in one of:
-      (a) a low-signal scenario (e.g. unit tests with 1-2 votes) where
-          relaxation cannot restore diversity — we'd just be letting single
-          borderline signals escape the gate is designed to catch;
-      (b) a genuine regime break where many signals have legitimately
-          dropped below 41% — relaxing the gate opens it to signals that
-          should stay gated, and masks the regime event in the logs.
-    In both (a) and (b), returning 0 preserves the strict gate. The original
-    behavior (returning _GATE_RELAXATION_MAX even when floor unmet) is
-    replaced because it was indistinguishable in the logs from a successful
-    relaxation and could silently let bad signals vote in a crisis.
+    Decision tree:
+      - baseline >= floor                    -> 0.0 (no relaxation needed)
+      - best_possible <= baseline            -> 0.0 (relaxation doesn't help;
+                                                either a low-signal scenario
+                                                or a genuine regime break
+                                                where remaining signals are
+                                                below even the 41% relaxed
+                                                gate — letting them vote
+                                                would be wrong)
+      - best_possible >= floor               -> smallest step that meets floor
+      - baseline < best_possible < floor     -> _GATE_RELAXATION_MAX (partial
+                                                recovery: a single
+                                                irrecoverable outlier must
+                                                not veto relaxation for the
+                                                rest - Codex P2 fix)
 
-    Also uses `_count_active_voters_at_gate` (which applies directional gating)
-    for the pre-condition, not raw candidate count. A signal that is gated by
-    the directional filter cannot be un-gated by relaxation, so it shouldn't
-    count toward the relaxation decision.
+    Uses `_count_active_voters_at_gate` which applies directional gating,
+    so signals gated on BUY-accuracy=30% don't inflate the decision.
 
     Returns float - relaxation in absolute accuracy points (e.g., 0.02).
     """
-    # Defensive: caller may pass None for either set (older call paths or a
-    # future refactor). Treat as empty to avoid `in None` TypeErrors in a
-    # hot consensus path. Reviewer 2 P3 suggestion.
+    # Defensive: caller may pass None for either set (older paths or a future
+    # refactor). Treat as empty to avoid `in None` TypeErrors in a hot path.
     excluded = excluded or set()
     group_gated = group_gated or set()
 
-    # Quick path: if base gate already yields enough voters, no relaxation.
     baseline = _count_active_voters_at_gate(
         votes, accuracy_data, excluded, group_gated, base_gate, 0.0,
     )
     if baseline >= _MIN_ACTIVE_VOTERS_SOFT:
         return 0.0
 
-    # Pre-condition check via max relaxation: if even the most generous gate
-    # cannot recover the voter floor, relaxation is not the right tool. This
-    # ALSO accounts for directional gating (unlike a raw candidate count),
-    # so signals gated on BUY-accuracy=30% don't inflate the pre-condition.
+    # If max relaxation doesn't recover any additional voters, relaxation
+    # is not the right tool: either (a) no signals at all, or (b) genuine
+    # regime break where every sub-47% signal is also sub-41%. Either way,
+    # return 0 to keep the strict gate.
     best_possible = _count_active_voters_at_gate(
         votes, accuracy_data, excluded, group_gated,
         base_gate, _GATE_RELAXATION_MAX,
     )
-    if best_possible < _MIN_ACTIVE_VOTERS_SOFT:
+    if best_possible <= baseline:
         return 0.0
 
     # Integer steps up to and including max - use int steps to avoid float drift.
@@ -1014,9 +1012,11 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
         )
         if active >= _MIN_ACTIVE_VOTERS_SOFT:
             return candidate_rel
-    # Unreachable: we've already confirmed max relaxation yields >= floor.
-    # Return max defensively against floating-point drift between the
-    # best_possible check and the step loop (e.g. relaxation boundary tie).
+    # Partial-recovery case (Codex P2 fix): best_possible > baseline but
+    # still < floor. A single irrecoverable outlier shouldn't veto recovery
+    # of the recoverable majority - apply max relaxation to get as many
+    # voters back as possible. Logs still carry the relaxation value so
+    # operators can distinguish this from a clean relaxation-to-floor.
     return _GATE_RELAXATION_MAX
 
 
