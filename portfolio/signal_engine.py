@@ -235,30 +235,71 @@ _GATE_RELAXATION_MAX = 0.06   # cap at 6pp below base gate (0.47 -> 0.41)
 
 # Per-ticker signal disable: force HOLD for specific signal+ticker combos
 # where accuracy data shows the signal is actively harmful for that instrument.
-# 2026-04-15 audit built entries from 3h accuracy data; 2026-04-16 investigation
-# found horizon mismatch causing W15/W16 consensus collapse (MSTR 1d dropped
-# to 21.9% because 5 of 7 blacklisted signals were 66-81% accurate at 1d).
-# Batch 4 will introduce per-horizon blacklists. For now (Batch 1), the MSTR
-# entry is trimmed to the two signals that are bad across ALL measured
-# horizons (claude_fundamental 47.8% 1d / 33.2% 3h, credit_spread_risk 44.2%
-# 1d). The other 5 entries (macro_regime/trend/volatility_sig/volume/sentiment)
-# are removed: at 1d they show 62-81% accuracy and were gating the very
-# signals that would have correctly called MSTR's +8.4% W16 rally.
-_TICKER_DISABLED_SIGNALS = {
-    # 2026-04-15 audit: per-ticker 3h accuracy gating. Retained until Batch 4.
-    "ETH-USD": frozenset({"news_event", "qwen3", "smart_money"}),  # smart_money 38.2% (555 sam)
-    "BTC-USD": frozenset({"smart_money", "heikin_ashi"}),  # smart_money 39.0% (557), heikin_ashi 42.1% (1422)
-    "XAG-USD": frozenset({"ministral", "credit_spread_risk", "metals_cross_asset", "smart_money"}),  # smart_money 41.8% (558)
-    "XAU-USD": frozenset({"ministral", "metals_cross_asset"}),  # metals_cross_asset 42.9% (198 sam)
-    # 2026-04-16: Trimmed from 7 entries to 2. Full history:
-    #   Apr 14 (aacbcd3): added {macro_regime, trend, volatility_sig, volume, sentiment,
-    #     claude_fundamental, credit_spread_risk} based on 3h accuracy.
-    #   Apr 16: removed 5 entries — at 1d horizon (where consensus trades) they were
-    #     62-81% accurate. Blacklist was horizon-mismatched, causing W15/W16 collapse.
-    #   Kept: claude_fundamental (47.8% 1d / 33.2% 3h — bad at both horizons).
-    #   Kept: credit_spread_risk (44.2% 1d — still under threshold).
-    "MSTR": frozenset({"claude_fundamental", "credit_spread_risk"}),
+#
+# 2026-04-16 (Batch 4): horizon-specific per-ticker blacklists via
+# _TICKER_DISABLED_BY_HORIZON. Structure:
+#   {"3h": {ticker: frozenset(bad_signals_at_3h)},
+#    "1d": {ticker: frozenset(bad_signals_at_1d)},
+#    "_default": {ticker: frozenset(bad_at_ALL_horizons)}}
+#
+# Compute-time (signal dispatch loop): uses the _default list only. Signals
+# compute once per ticker per cycle and their vote is reused across horizons,
+# so disabling at compute time requires the signal to be bad at EVERY horizon.
+# Horizon-specific entries do NOT skip compute (the vote still exists, but
+# is force-HOLD'd per-horizon at consensus time).
+#
+# Consensus-time: when building consensus for horizon H, apply
+# (_default[ticker] | _TICKER_DISABLED_BY_HORIZON[H][ticker]).
+#
+# Why this structure: the Apr 14 MSTR blacklist was built from 3h accuracy
+# data but applied globally, causing W15/W16 consensus collapse (1d dropped
+# to 21.9%). 5 of 7 blacklisted MSTR signals were 66-81% accurate at 1d.
+# Batch 1 trimmed the list to 2 entries; Batch 4 (this) enables per-horizon
+# entries so future audits can say "bad at 3h, fine at 1d" without global
+# penalty.
+_TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
+    # Disabled at ALL horizons — bad everywhere, safe to skip even at compute.
+    "_default": {
+        # 2026-04-15 audit: per-ticker 3h accuracy gating, retained pending
+        # per-horizon audit of 1d/3d/5d behaviors.
+        "ETH-USD": frozenset({"news_event", "qwen3", "smart_money"}),
+        "BTC-USD": frozenset({"smart_money", "heikin_ashi"}),
+        "XAG-USD": frozenset({"ministral", "credit_spread_risk",
+                              "metals_cross_asset", "smart_money"}),
+        "XAU-USD": frozenset({"ministral", "metals_cross_asset"}),
+        # 2026-04-16: trimmed from 7 to 2 (Batch 1). Full history in commit
+        # fd504d4. Kept: bad at both 3h (33.2%) and 1d (47.8%).
+        "MSTR": frozenset({"claude_fundamental", "credit_spread_risk"}),
+    },
+    # Horizon-specific entries populated by future audits. Empty today —
+    # Batch 4 delivers the mechanism, not the data. Adding an entry here
+    # force-HOLDs the signal at that horizon only; the signal still computes
+    # and participates in other horizons' consensus.
+    "3h": {},
+    "4h": {},
+    "12h": {},
+    "1d": {},
+    "3d": {},
+    "5d": {},
+    "10d": {},
 }
+
+
+def _get_horizon_disabled_signals(ticker: str | None, horizon: str | None) -> frozenset:
+    """Return signals to force-HOLD for (ticker, horizon). Union of default + horizon-specific."""
+    if not ticker:
+        return frozenset()
+    default_set = _TICKER_DISABLED_BY_HORIZON["_default"].get(ticker, frozenset())
+    if not horizon:
+        return default_set
+    horizon_set = _TICKER_DISABLED_BY_HORIZON.get(horizon, {}).get(ticker, frozenset())
+    return default_set | horizon_set
+
+
+# Backward-compat alias: the compute-time (signal dispatch) gate. Equal to the
+# _default list — the minimum set of signals that are bad at every horizon.
+# Existing callers reference this name; keep it as a view of _default.
+_TICKER_DISABLED_SIGNALS = _TICKER_DISABLED_BY_HORIZON["_default"]
 
 # --- Signal (full 32-signal for "Now" timeframe) ---
 
@@ -967,7 +1008,7 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
 
 def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
                         accuracy_gate=None, max_signals=None, horizon=None,
-                        regime_gated_override=None):
+                        regime_gated_override=None, ticker=None):
     """Compute weighted consensus using accuracy, regime, and activation frequency.
 
     Weight per signal = accuracy_weight * regime_mult * normalized_weight
@@ -1008,6 +1049,14 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # exemptions already applied), use it instead of recomputing from scratch.
     regime_gated = regime_gated_override if regime_gated_override is not None else _get_regime_gated(regime, horizon)
     votes = {k: ("HOLD" if k in regime_gated else v) for k, v in votes.items()}
+
+    # Horizon-specific per-ticker blacklist (2026-04-16, Batch 4). Extends the
+    # compute-time _default blacklist with horizon-specific entries. Compute time
+    # can't see horizon (one vote reused across 3h/4h/12h/1d/3d/5d/10d consensus),
+    # so per-horizon gating must happen here.
+    horizon_disabled = _get_horizon_disabled_signals(ticker, horizon)
+    if horizon_disabled:
+        votes = {k: ("HOLD" if k in horizon_disabled else v) for k, v in votes.items()}
 
     # Top-N gate: only let the top max_signals (by accuracy) participate
     active_votes = {k: v for k, v in votes.items() if v != "HOLD"}
@@ -2273,6 +2322,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         max_signals=max_signals,
         horizon=horizon,
         regime_gated_override=regime_gated_effective,
+        ticker=ticker,
     )
 
     if ticker:
