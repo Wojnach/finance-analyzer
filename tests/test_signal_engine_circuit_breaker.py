@@ -167,34 +167,51 @@ class TestComputeGateRelaxation:
         # wait — 0.45 < 0.45 is False, so they pass at 0.45 gate. So relaxation 0.02 suffices.
         assert rel == pytest.approx(0.02)
 
-    def test_caps_at_max_when_unfillable(self):
-        """5 candidate signals (meeting pre-condition) but only 2 above gate
-        even with max relaxation — caps at max relaxation."""
+    def test_returns_zero_when_unfillable_even_at_max_relaxation(self):
+        """2026-04-16 review fix: when max relaxation cannot restore the voter
+        floor, return 0 instead of max. Original behavior let signals below 41%
+        vote during genuine regime breaks, masking the event. New behavior
+        keeps the strict gate and lets the caller decide HOLD is appropriate.
+
+        Scenario: 5 candidate signals but only 2 above the gate at max
+        relaxation (0.41). Floor of 5 cannot be met — keep gate strict.
+        """
         votes = {f"s{i}": "BUY" for i in range(5)}
         accuracy = {
-            "s0": self._make_stats(0.60),  # passes
-            "s1": self._make_stats(0.60),  # passes
-            "s2": self._make_stats(0.30),  # unreachable (directional gate fires too)
+            "s0": self._make_stats(0.60),  # passes at any gate
+            "s1": self._make_stats(0.60),  # passes at any gate
+            "s2": self._make_stats(0.30),  # unreachable even at 0.41
             "s3": self._make_stats(0.30),  # unreachable
             "s4": self._make_stats(0.30),  # unreachable
         }
-        # For s2/s3/s4 to be purely accuracy-gated (not directional-gated),
-        # set their directional accuracy above the directional threshold (0.40).
         for sig in ("s2", "s3", "s4"):
             accuracy[sig]["buy_accuracy"] = 0.50
             accuracy[sig]["sell_accuracy"] = 0.50
         rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
-        assert rel == pytest.approx(_GATE_RELAXATION_MAX)
+        assert rel == 0.0, (
+            "When max relaxation cannot recover the voter floor, the "
+            "circuit breaker should NOT engage - that's a regime break "
+            "signal, not a relaxation opportunity."
+        )
 
     def test_no_relaxation_when_few_candidate_signals(self):
-        """Pre-condition guard: if fewer than _MIN_ACTIVE_VOTERS_SOFT non-HOLD
-        candidates exist, circuit breaker stays off (relaxation=0). This
-        preserves gate behavior for low-signal scenarios like tests with
-        single voters, where relaxation wouldn't restore diversity anyway."""
-        votes = {"s0": "BUY"}  # only one candidate
-        accuracy = {"s0": self._make_stats(0.30)}  # well below gate
+        """Pre-condition guard: single voter scenario. Max relaxation can't
+        recover the floor (only 1 candidate, floor is 5), so returns 0."""
+        votes = {"s0": "BUY"}
+        accuracy = {"s0": self._make_stats(0.30)}
         rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
         assert rel == 0.0
+
+    def test_handles_none_excluded_and_group_gated(self):
+        """Defensive: None for excluded/group_gated shouldn't crash the hot
+        consensus path. Reviewer 2 P3 suggestion - treat None as empty."""
+        votes = {f"s{i}": "BUY" for i in range(6)}
+        accuracy = {f"s{i}": self._make_stats(0.60) for i in range(6)}
+        # Should not raise TypeError from `in None`
+        rel = _compute_gate_relaxation(
+            votes, accuracy, excluded=None, group_gated=None, base_gate=0.47,
+        )
+        assert rel == 0.0  # 6 signals all pass; no relaxation needed
 
 
 class TestCircuitBreakerIntegration:
