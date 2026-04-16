@@ -1,24 +1,15 @@
 {
-  "session_started": "2026-04-14T06:00:00Z",
-  "current_phase": "PHASE 5: VERIFY & SHIP",
-  "status": "in_progress",
-  "phases_completed": [
-    "PHASE 0: SETUP",
-    "PHASE 1: EXPLORE",
-    "PHASE 2: PLAN",
-    "PHASE 3: IMPLEMENT",
-    "PHASE 4: DOCUMENTATION"
-  ],
-  "commits": [
-    "2884075 docs: improvement plan for auto-session 2026-04-14",
-    "e45faa1 fix(signals): expand per-ticker blacklist + disable oscillators globally",
-    "9bfafc5 fix(cache): release dogpile loading key on enqueue exception (BUG-191)",
-    "0e76aa7 test(accuracy): add 22 tests for core accuracy calculation functions",
-    "aacbcd3 fix(signals): MSTR blacklist + correlation multi-group penalty fix"
-  ],
-  "bugs_fixed": ["BUG-191", "BUG-192", "BUG-193", "BUG-194", "BUG-195"],
-  "tests_added": 37,
-  "tests_total_changed_files": 125,
-  "phase_started": "2026-04-14T06:00:00Z",
-  "last_update": "2026-04-14T07:00:00Z"
+  "session_started": "2026-04-16T08:00:00Z",
+  "current_phase": "PHASE 0: SETUP",
+  "phase_started": "2026-04-16T08:00:00Z",
+  "last_update": "2026-04-16T08:00:00Z",
+  "status": "running",
+  "notes": "Worktree created at Q:/fa-improve-20260416 on branch improve/auto-session-2026-04-16. Surfaced 2 unresolved critical errors (auth_failure requires interactive user OAuth; journal_silence is downstream). Starting Phase 1 exploration.",
+  "phases_completed": [],
+  "worktree_path": "Q:/fa-improve-20260416",
+  "branch": "improve/auto-session-2026-04-16",
+  "unresolved_criticals_at_start": [
+    "2026-04-16T05:58:09Z layer2_journal_activity (275m silence)",
+    "2026-04-16T07:21:11Z layer2_t3 auth_failure (Not logged in)"
+  ]
 }

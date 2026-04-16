@@ -373,3 +373,14 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - REF-51: 9 unused vars/imports in metals_loop.py (F841×6, F401×3) — **fixed 2026-04-09**
 - Total ruff violations: 382 → 309 (remaining: 69 E402 intentional, 73 F841 test vars, 55 SIM117 cosmetic, 40 E741 test naming, 29 SIM105 metals_loop monolith, rest cosmetic)
 - ~6,449 tests (as of 2026-04-09)
+- BUG-196 (P2): Relative `Path("data/...")` in 6 modules — **fixed 2026-04-15** (BASE_DIR absolute resolution)
+- BUG-197 (P3): Dead `ts_str_clean` in `agent_invocation.py` — **fixed 2026-04-15** (Python 3.12 `fromisoformat` native)
+- BUG-198 (P2): Signal registry retried failed imports every cycle (~35 warnings/cycle) — **fixed 2026-04-15** (sentinel-based cache, 5-min TTL cooldown)
+- BUG-199 (P3): Trigger sustained gate logic duplicated in 2 places — **fixed 2026-04-15** (extracted `_update_sustained` helper)
+- BUG-178 (P1 follow-on): `_TICKER_POOL_TIMEOUT` too tight after fingpt retirement — **fixed 2026-04-15** (180 → 360s with phase-log instrumentation + accuracy_stats utility cache)
+- BUG-200 (P1): `bigbet.py` bypasses `detect_auth_failure` — **fixed 2026-04-16**
+- BUG-201 (P1): `iskbets.py` bypasses `detect_auth_failure` + default-approve safety gap — **fixed 2026-04-16**
+- BUG-202 (P1): `LAYER2_JOURNAL_GRACE_S` 3600s too long (overnight silent outages 2026-04-14→16) — **fixed 2026-04-16** (900s = T3 timeout)
+- BUG-203 (P3): `agent_invocation.py` elapsed timing uses `time.time()` — **fixed 2026-04-16** (`time.monotonic()` for elapsed)
+- BUG-204 (P3): `qwen3_signal.py` silent GPU-reaper exception — **fixed 2026-04-16** (logger.debug)
+- BUG-205 (P3): `dashboard/app.py` silent market_health exception — **fixed 2026-04-16** (logger.debug)
