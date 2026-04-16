@@ -749,7 +749,12 @@ def maybe_send_degradation_summary(config: dict | None = None,
 
     try:
         from portfolio.message_store import send_or_store
-        send_or_store(body, category="daily_digest")
+        # send_or_store(msg, config, category=...) — config is REQUIRED
+        # (needs telegram.token + telegram.chat_id). Production bug found
+        # 2026-04-16 first cycle after the merge: passing only `category=`
+        # raised TypeError, the wrapper try/except caught it but the daily
+        # summary never went out. Pass the loop's config dict through.
+        send_or_store(body, config or {}, category="daily_digest")
     except Exception as e:
         logger.warning("Daily summary send failed: %s", e)
         return False

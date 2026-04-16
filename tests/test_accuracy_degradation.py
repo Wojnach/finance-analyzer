@@ -583,11 +583,12 @@ class TestPostReviewFixes:
         )
         _write_baseline(monkeypatch, tmp_path, old_snap)
 
-        # Capture the send_or_store call attempt (or lack thereof)
+        # Capture the send_or_store call attempt (or lack thereof).
+        # Real signature is send_or_store(msg, config, category=...).
         sends: list = []
         monkeypatch.setattr(
             "portfolio.message_store.send_or_store",
-            lambda body, category=None: sends.append((body, category)),
+            lambda body, config, category=None: sends.append((body, category)),
         )
 
         # now is well past target hour
