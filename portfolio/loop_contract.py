@@ -401,7 +401,34 @@ def verify_contract(report: CycleReport, previous_signal_counts: dict | None = N
     # failed" pattern. See check_layer2_journal_activity() for details.
     violations.extend(check_layer2_journal_activity())
 
+    # 12. Signal accuracy degradation (BUG-178/W15-W16 follow-up, 2026-04-16).
+    # Stateful file-read check that compares the recent-7d accuracy across
+    # signals/per-ticker/forecast/consensus to a snapshot from 7 days ago.
+    # Internally hourly-throttled (replays cached violations on cycles in
+    # between full re-checks so the ViolationTracker consecutive-fire count
+    # is preserved — Codex P1#2). Try/except wrapped: if anything in the
+    # accuracy stack is broken we'd rather miss a degradation alert than
+    # take down the entire main loop's contract framework.
+    violations.extend(check_signal_accuracy_degradation_safe())
+
     return violations
+
+
+def check_signal_accuracy_degradation_safe() -> list[Violation]:
+    """Wrapped accuracy degradation check that never raises.
+
+    The contract framework calls us every cycle. If the accuracy stack
+    is in a bad state (cache corruption, missing snapshot file, malformed
+    JSON entry), returning [] keeps the rest of the framework working
+    while a separate WARNING gets logged so the next session sees what
+    happened.
+    """
+    try:
+        from portfolio.accuracy_degradation import check_degradation
+        return check_degradation()
+    except Exception as e:
+        logger.warning("signal accuracy degradation check failed: %s", e)
+        return []
 
 
 # ---------------------------------------------------------------------------

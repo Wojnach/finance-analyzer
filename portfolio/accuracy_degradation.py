@@ -320,29 +320,28 @@ def check_degradation(now: datetime | None = None,
         return _hydrate_cached_violations(state)
 
     snapshots = _load_snapshots()
-    if not snapshots:
-        return []
+    baseline = _find_baseline_snapshot(snapshots, now) if snapshots else None
+    age_days = _snapshot_age_days(baseline, now) if baseline else 0.0
 
-    baseline = _find_baseline_snapshot(snapshots, now)
-    if baseline is None:
-        return []
+    # Compute violations (empty list on the no-baseline / too-young paths)
+    if baseline and age_days >= MIN_SNAPSHOT_AGE_DAYS:
+        alerts = _diff_against_baseline(
+            baseline=baseline,
+            now=now,
+            drop_threshold_pp=drop_threshold_pp,
+            absolute_floor_pct=absolute_floor_pct,
+            min_samples_historical=min_samples_historical,
+            min_samples_current=min_samples_current,
+        )
+        violations = _alerts_to_violations(alerts, age_days=age_days)
+    else:
+        violations = []
 
-    age_days = _snapshot_age_days(baseline, now)
-    if age_days < MIN_SNAPSHOT_AGE_DAYS:
-        return []
-
-    alerts = _diff_against_baseline(
-        baseline=baseline,
-        now=now,
-        drop_threshold_pp=drop_threshold_pp,
-        absolute_floor_pct=absolute_floor_pct,
-        min_samples_historical=min_samples_historical,
-        min_samples_current=min_samples_current,
-    )
-
-    violations = _alerts_to_violations(alerts, age_days=age_days)
-
-    # Update state — full check ran, cache result for throttled cycles
+    # Always update last_full_check_time after passing the throttle + blackout
+    # gates — even when the no-baseline / too-young branches produced []. Skipping
+    # the state write would let the throttle re-fire every cycle, defeating the
+    # whole point. The cached violations list is also written so the next
+    # throttled cycle replays exactly what verify_contract saw this time.
     state["last_full_check_time"] = time.time()
     state["last_full_check_violations"] = [_violation_to_dict(v) for v in violations]
     _save_alert_state(state)
