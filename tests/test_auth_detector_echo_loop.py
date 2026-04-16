@@ -120,6 +120,39 @@ class TestEchoedMarkerRejected:
         assert cg.detect_auth_failure(output, caller="test") is False
 
 
+class TestStdoutStderrSeparation:
+    """Codex P2 follow-up: detect_auth_failure() now sees each stream
+    independently from invoke_claude / invoke_claude_text, so a marker
+    on stderr can't be hidden by stdout content."""
+
+    def test_marker_on_stderr_after_busy_stdout_detected(self, monkeypatch, tmp_path):
+        """Repro of Codex's exact scenario: 20 lines of stdout, then
+        stderr has the marker. With the old concat, the marker would be
+        pushed past the 16-line limit. Scanned independently, stderr
+        starts at line 1 and the marker is detected."""
+        monkeypatch.setattr(cg, "CRITICAL_ERRORS_LOG", tmp_path / "ce.jsonl")
+        stderr_only = "Not logged in\n"
+        # Simulating what invoke_claude now does (separate stream call)
+        assert cg.detect_auth_failure(stderr_only, caller="t") is True
+
+    def test_marker_at_top_of_stdout_detected(self, monkeypatch, tmp_path):
+        """The other Codex case: marker on stdout line 1, stderr empty."""
+        monkeypatch.setattr(cg, "CRITICAL_ERRORS_LOG", tmp_path / "ce.jsonl")
+        stdout = "Not logged in\n" + "\n".join(f"line {i}" for i in range(20))
+        assert cg.detect_auth_failure(stdout, caller="t") is True
+
+    def test_marker_concatenated_into_last_stdout_line_does_not_count(
+        self, monkeypatch, tmp_path
+    ):
+        """If a caller still concatenates stdout+stderr without a newline,
+        the marker glued onto a stdout line MUST be ignored (start-of-line
+        check). This locks in safety for any third caller that hasn't
+        been updated."""
+        monkeypatch.setattr(cg, "CRITICAL_ERRORS_LOG", tmp_path / "ce.jsonl")
+        merged_no_newline = "some stdoutNot logged in"
+        assert cg.detect_auth_failure(merged_no_newline, caller="t") is False
+
+
 class TestEdgeCases:
 
     def test_empty_output_returns_false(self, monkeypatch, tmp_path):

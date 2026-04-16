@@ -493,11 +493,21 @@ def invoke_claude(
             # printing "Not logged in" when OAuth/keychain auth can't be read
             # (e.g. --bare flag, missing ANTHROPIC_API_KEY). Override status
             # so the failure surfaces instead of being lost to exit_code=0.
-            if detect_auth_failure(
-                (_stdout or "") + (_stderr or ""),
-                caller,
+            # BUG-ECHO follow-up (Codex P2 finding 2026-04-16): scan stdout
+            # and stderr SEPARATELY rather than concatenating without a
+            # newline. Concat-without-newline could merge the marker into
+            # the last stdout line ("...stdoutNot logged in"), defeating
+            # the start-of-line check shipped today. Scanning each stream
+            # independently preserves both streams' line-1 position.
+            stdout_hit = detect_auth_failure(
+                _stdout or "", caller,
                 context={"model": model, "max_turns": max_turns, "exit_code": exit_code},
-            ):
+            )
+            stderr_hit = detect_auth_failure(
+                _stderr or "", caller,
+                context={"model": model, "max_turns": max_turns, "exit_code": exit_code},
+            ) if not stdout_hit else False
+            if stdout_hit or stderr_hit:
                 status = "auth_error"
                 exit_code = exit_code or 1
     except Exception as e:
@@ -587,11 +597,19 @@ def invoke_claude_text(
             # the comment there for the full context. Need to scan both
             # stdout and stderr because the CLI can write "Not logged in"
             # to either depending on version.
-            if detect_auth_failure(
-                (stdout or "") + (_stderr or ""),
-                caller,
+            # BUG-ECHO follow-up (Codex P2 finding 2026-04-16): scan each
+            # stream independently so concat-without-newline can't merge
+            # the marker into the last stdout line. See invoke_claude for
+            # the full rationale.
+            stdout_hit = detect_auth_failure(
+                stdout or "", caller,
                 context={"model": model, "max_turns": 1, "exit_code": exit_code},
-            ):
+            )
+            stderr_hit = detect_auth_failure(
+                _stderr or "", caller,
+                context={"model": model, "max_turns": 1, "exit_code": exit_code},
+            ) if not stdout_hit else False
+            if stdout_hit or stderr_hit:
                 status = "auth_error"
                 exit_code = exit_code or 1
                 text = ""  # don't let the error message leak into the caller's "text"
