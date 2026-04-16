@@ -1,3 +1,91 @@
+# Session Progress — Health Check + XAU Trigger Noise Triage (2026-04-16 afternoon)
+
+## Status: READ-ONLY DIAGNOSTIC — NO CODE CHANGES
+
+Session started ~13:45 CET; snapshot written ~15:25 CET (~1h35m elapsed). User prompt:
+"can we check that everything is working as intended all the loops and that the system
+is capable of trading". Crash-recovery snapshot per user request: "document everything
+you are doing locally in case you or any subagents crash".
+
+### Verified state (as of 13:20 UTC / 15:20 CET)
+
+| Component | State | Evidence |
+|---|---|---|
+| PF-DataLoop | Running | heartbeat 09:13 UTC cycle 81, fresh <=6min |
+| PF-MetalsLoop | Running | swing decisions every ~60s |
+| Claude CLI | v2.1.107 | `C:\Users\Herc2\.local\bin\claude.exe` |
+| Layer 2 journal | alive | 1,616 entries, last 13:20 UTC |
+| SwingTrader | idle | 6,155 SEK cash, 0 positions, 12 session trades, correctly gating XAU conf 0.57 and XAG HOLD |
+| Patient | ok | 497K SEK cash, ETH 3.47sh @ $2,332 (bought 10:13 UTC today) |
+| Bold | ok | 224K SEK cash + BTC 0.201sh @ $74,556 + ETH 4.52sh @ $2,319 |
+| PF-Dashboard | Disabled | port 5055 not listening (not trade-critical) |
+
+### Diagnostic correction made mid-session
+
+I initially mis-read file mtime on `data/layer2_journal.jsonl` and concluded Layer 2
+was dead all day. WRONG. Layer 2 has been actively producing journal entries since the
+10:32 UTC loop restart — 20+ entries written today. The mtime mislead was corrected
+after seeing fresh Telegram analysis traffic starting 10:05 UTC.
+
+### Outstanding unresolved items (not touched this session)
+
+1. **Critical error `2026-04-16T05:58:09 contract_violation`** still marked unresolved
+   in `data/critical_errors.jsonl`. Gap self-healed post-10:32 restart. Could append
+   a resolution entry but I did not — user has not instructed.
+2. **Overnight Layer 2 silent-failure pattern** (Apr 14 timeout, Apr 15 error, Apr 16
+   silent) is a known recurring issue. Each morning recovers. Today's recovery was
+   derailed by a fix-agent asking "proceed or investigate?" (see `data/agent.log`
+   tail) — against the saved `feedback_be_decisive` memory. Not investigated further.
+3. **PF-Dashboard scheduled task Disabled** — leave or re-enable? User has not asked.
+
+### Open decision awaiting user input
+
+User asked: "Want me to raise the XAU trigger-voter minimum to cut this down?"
+Today: 10 XAU triggers, all returned HOLD. Raw confidence 30-48% with 5/28 voters
+at floor (3B/2S). Five options presented with pros/cons:
+
+| Opt | Change | Blast radius |
+|---|---|---|
+| A | Raise `MIN_VOTERS_STOCK` 3->6 for metals only | signal_engine.py; affects SwingTrader + autonomous + trigger |
+| B | Add trigger-level confidence floor >=0.50 | trigger.py section 1 only; doesn't affect sustained flips |
+| C | Per-ticker re-trigger cooldown (90 min) | trigger.py + trigger_state.json schema |
+| D | Fix consensus: require `abs(buy-sell) >= max(2, voters/3)` | signal_engine.py global; tests + regression |
+| E | Do nothing | zero |
+
+**I recommended C or E.** User has NOT picked. No implementation has started.
+
+Key risks to forewarn whichever option we take:
+- XAU near ATH ($4,820) — any threshold raise delays breakout alerts
+- F&G-23 extreme-fear BUY entries today were at 44% confidence — a 50% floor would
+  have blocked Bold's BTC/ETH fills
+- Semantic drift between `signal_log` (consensus) and `trigger_state` (triggered_consensus)
+  could cause `layer2_journal_activity` contract_violation false positives
+
+### Telegram traffic audit (today through 13:25 UTC)
+
+- 51 messages logged total; 26 sent to user, 25 logged-only
+- Breakdown: 21 invocation (logged), 19 analysis (sent), 3 error, 2 digest,
+  2 crypto_report, 2 health, 1 trade, 1 daily_digest
+- Cadence ~1 visible every 12 min is driven by **signal triggers**, not a fixed timer
+- **Primary noise source today: XAU whipsawing BUY/HOLD/SELL 10 times in 5h**
+
+### Files touched this session
+
+None. Pure read-only diagnostic. No git changes. No worktree created.
+
+### If this session crashes — pick up here
+
+1. Read this block of `docs/SESSION_PROGRESS.md`
+2. Re-check `data/critical_errors.jsonl` for new entries since 13:25 UTC
+3. Ask user to pick between Option C (per-ticker cooldown) and Option E (do nothing)
+4. DO NOT auto-implement — user has not confirmed
+5. If user picks C: create worktree `fa-xau-cooldown` on branch `fix/xau-trigger-cooldown`,
+   modify `portfolio/trigger.py` section 1 to add `state["triggered_consensus_ts"][ticker]` check
+   against a new `CONSENSUS_RETRIGGER_COOLDOWN_S = 90 * 60` constant, add tests in
+   `tests/test_trigger.py`, then codex review -> merge -> restart loops
+
+---
+
 # Session Progress — Auth-Failure Bypass + Contract Tightening (2026-04-16)
 
 ## Status: MERGED (pending)
@@ -161,7 +249,6 @@ tests/test_phase_log.py
 ced95ff docs(accuracy): correct cache-invalidation comment cadence (6h → daily)
 portfolio/accuracy_stats.py
 
-
 ## Session 2026-04-16 — Accuracy degradation tracker
 
 ### Context
@@ -213,3 +300,90 @@ Daily summary: new `*ACCURACY DAILY*` body via category=daily_digest,
   alerts so ViolationTracker keeps escalation count alive)
 - 55-min hourly compute throttle with cached-violation replay
 - FOMC/CPI/NFP ±24h blackout (forward AND backward)
+
+
+## Auto-commit log (parallel sessions, post-commit hook)
+
+### 2026-04-16 10:31 UTC | fix/bug178-accuracy-thundering-herd
+492d478 fix(BUG-178): serialize accuracy cache-miss compute, add pf-restart helper
+portfolio/accuracy_stats.py
+portfolio/signal_engine.py
+scripts/win/pf-restart.bat
+scripts/win/pf-restart.ps1
+tests/test_accuracy_compute_lock.py
+
+### 2026-04-16 10:32 UTC | main
+95d6823 fix(pf-restart): replace em-dashes with ASCII for PS5 compatibility
+scripts/win/pf-restart.ps1
+
+### 2026-04-16 12:55 UTC | feat/accuracy-degradation
+33e5847 docs(plan): accuracy degradation tracker
+docs/plans/2026-04-16-accuracy-degradation-tracker.md
+
+### 2026-04-16 13:05 UTC | feat/accuracy-degradation
+16c8128 docs(plan): address Codex pre-impl adversarial findings
+docs/plans/2026-04-16-accuracy-degradation-tracker.md
+
+### 2026-04-16 13:10 UTC | feat/accuracy-degradation
+bb8bba5 feat(accuracy): batch 1 — snapshot infra for degradation tracker
+portfolio/accuracy_stats.py
+portfolio/econ_dates.py
+portfolio/forecast_accuracy.py
+tests/test_accuracy_snapshot_extras.py
+
+### 2026-04-16 13:15 UTC | feat/accuracy-degradation
+2381dc2 feat(accuracy): batch 2 — degradation tracker module + tests
+portfolio/accuracy_degradation.py
+tests/test_accuracy_degradation.py
+
+### 2026-04-16 13:16 UTC | fix/accuracy-gating-20260416
+b88e3ed docs(plan): accuracy gating reconfiguration plan
+docs/PLAN.md
+
+### 2026-04-16 13:18 UTC | feat/accuracy-degradation
+1637960 feat(loop): batch 3 — wire degradation tracker into the main loop
+portfolio/accuracy_degradation.py
+portfolio/loop_contract.py
+portfolio/main.py
+tests/test_loop_contract_accuracy.py
+
+### 2026-04-16 13:21 UTC | fix/accuracy-gating-20260416
+fd504d4 fix(signals): revert recency weights + trim MSTR horizon-mismatched blacklist
+portfolio/accuracy_stats.py
+portfolio/signal_engine.py
+tests/test_accuracy_cache_timestamps.py
+tests/test_signal_engine.py
+tests/test_signal_engine_core.py
+
+### 2026-04-16 13:22 UTC | feat/accuracy-degradation
+007ddc6 docs: batch 4 — degradation tracker session notes + e2e verification
+docs/SESSION_PROGRESS.md
+scripts/_e2e_degradation_check.py
+
+### 2026-04-16 13:26 UTC | fix/accuracy-gating-20260416
+04e0ae2 feat(signals): circuit breaker - relax accuracy gate when voter count drops below floor
+portfolio/signal_engine.py
+tests/test_signal_engine_circuit_breaker.py
+
+### 2026-04-16 13:32 UTC | fix/accuracy-gating-20260416
+898c38e feat(signals): horizon-specific per-ticker blacklist - prevents horizon-mismatch regressions
+portfolio/signal_engine.py
+tests/test_horizon_specific_blacklist.py
+
+### 2026-04-16 13:34 UTC | fix/accuracy-gating-20260416
+c3f0916 tools(signals): counterfactual replay + session progress log
+data/consensus_replay_20260416.json
+scripts/replay_consensus.py
+
+### 2026-04-16 13:35 UTC | fix/accuracy-gating-20260416
+4b89214 docs(progress): overwrite SESSION_PROGRESS.md with accuracy-gating batch state
+docs/SESSION_PROGRESS.md
+
+### 2026-04-16 13:37 UTC | feat/accuracy-degradation
+a7c8c08 fix(accuracy): post-impl review — perf, stale guard, blackout reset
+docs/SESSION_PROGRESS_2026-04-16_degradation_in_flight.md
+portfolio/accuracy_degradation.py
+portfolio/accuracy_stats.py
+portfolio/econ_dates.py
+tests/test_accuracy_degradation.py
+tests/test_accuracy_snapshot_extras.py
