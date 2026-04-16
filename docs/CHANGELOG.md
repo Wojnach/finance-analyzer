@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-04-16 (autonomous improvement session)
+- **BUG-200: Layer 2 auth-failure bypass in bigbet (P1)**: `bigbet.invoke_layer2_eval` called `subprocess.run(["claude", "-p", ...])` directly, bypassing `detect_auth_failure` — when OAuth expired, claude exited 0 with "Not logged in" on stdout but the bypass meant no `critical_errors.jsonl` entry. Startup check never surfaced the issue. Fixed: scan stdout+stderr before trusting parse, return `(None, "")` + record critical entry with `caller="bigbet_layer2"` on auth failure.
+- **BUG-201: iskbets default-approve safety gap (P0)**: `iskbets.invoke_layer2_gate` had the same bypass, but `_parse_gate_response` defaults `approved=True` when it can't find a DECISION line — "Not logged in" output would have been interpreted as APPROVED for a warrant trade. Fixed: auth failure detection overrides default-approve to `approved=False` before the parser sees the output.
+- **BUG-201b: analyze CLI auth-failure silence (P2)**: `analyze.run_analysis` (manual CLI path) had the same bypass. Doesn't run autonomously but still records critical entry + prints user-visible re-login hint so `check_critical_errors.py` surfaces the issue in the next session.
+- **BUG-202: LAYER2_JOURNAL_GRACE_S too wide (P1)**: `loop_contract.py:42` used 60-minute grace before the journal-activity contract fires. Three consecutive overnight auth-silent outages (Apr 14–16) fell inside the grace window and went undetected. Tightened to 18 min (T3's 15-min subprocess cap + 3 min slack for spawn/Telegram/journal flush). Pin test added.
+- **BUG-203: Wall-clock elapsed in agent_invocation (P3)**: `_agent_start = time.time()` + `elapsed = time.time() - _agent_start` was NTP-jump-susceptible. Switched to `time.monotonic()` for elapsed math. Wall clock still used for log-entry timestamps.
+- **BUG-204: Silent exception in qwen3 GPU reaper (P3)**: `try: kill_orphaned_llama() except Exception: pass` made VRAM leaks invisible if the reaper itself broke. Promoted to `logger.debug(exc_info=True)`.
+- **BUG-205: Silent exception in dashboard market_health (P3)**: Same treatment for the optional `market_health` enrichment in `dashboard/app.py`. Added module-level logger.
+- **New tests**: 6 new tests — `test_auth_failure_bypass` (5: bigbet/iskbets/analyze paths + healthy-output negatives), `test_grace_window_is_18_minutes` pin. All pass.
+- **Lint cleanup**: `scripts/verify_kronos.py` — SIM105, F541, E741 fixed.
+- **Root cause**: Three consecutive overnight Layer 2 outages — detection infrastructure (`detect_auth_failure`, `record_critical_error`, journal-activity contract) was sound but bypass sites prevented escalation and the grace window hid the silent-stall signal.
+- Theme: Auth-Failure Detection, Silent-Failure Visibility.
+
 ## 2026-04-15 (autonomous improvement session)
 - **BUG-196: Relative path fragility (P2)**: 6 modules (`microstructure_state`, `fear_greed`, `seasonality`, `linear_factor`, `signal_weight_optimizer`, `train_signal_weights`) used `Path("data/...")` relative to CWD instead of `Path(__file__).resolve().parent.parent / "data"`. Now all 6 use the absolute pattern, matching the 40+ other modules.
 - **BUG-197: Dead timestamp code (P3)**: `agent_invocation.py:691` computed `ts_str_clean` but never used it — Python 3.12 `fromisoformat()` handles `+00:00` and `Z` natively. Simplified to direct `fromisoformat()` call.

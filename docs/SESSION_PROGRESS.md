@@ -1,3 +1,51 @@
+# Session Progress — Auth-Failure Bypass + Contract Tightening (2026-04-16)
+
+## Status: MERGED (pending)
+
+Three consecutive overnight Layer 2 outages (Apr 14-16): each day's 04:00-08:00 CET
+window produced no Layer 2 invocations. Root cause: `claude -p` OAuth session expired,
+claude returned exit 0 with "Not logged in" on stdout, and three direct `subprocess.run`
+call sites bypassed `claude_gate.detect_auth_failure`. `iskbets._parse_gate_response`
+additionally defaulted `approved=True` on parse miss — a real safety gap for warrant
+trades, not just a detection gap. The `LAYER2_JOURNAL_GRACE_S = 60m` predated T3's
+15-min subprocess cap, so the journal-activity contract didn't fire for 60+ minutes
+post-trigger, losing the detection signal overnight.
+
+### Shipped (branch improve/auto-session-2026-04-16)
+
+1. `9722a0f docs: improvement plan for auto-session 2026-04-16`
+2. `15ab78e fix(auth): route bigbet/iskbets/analyze through detect_auth_failure`
+   - `bigbet.invoke_layer2_eval` → `(None, "")` + critical entry on auth fail
+   - `iskbets.invoke_layer2_gate` → `approved=False` overrides default-approve
+   - `analyze.run_analysis` → user-visible re-login hint + critical entry
+   - 5 new tests in `tests/test_auth_failure_bypass.py`
+3. `93a032f fix(contract): tighten LAYER2_JOURNAL_GRACE_S 60m -> 18m (BUG-202)`
+   - 15m (T3 cap) + 3m slack. Pin test prevents silent widening.
+4. `c4b3f45 chore: monotonic clock for elapsed, log silent excepts (BUG-203-205)`
+   - `agent_invocation._agent_start` → `time.monotonic()` for elapsed math
+   - qwen3 GPU reaper + dashboard market_health → `logger.debug(exc_info=True)`
+5. `ef5f6ae style: ruff cleanup scripts/verify_kronos.py (SIM105, F541, E741)`
+
+### Tests
+- All 5 new auth-bypass tests pass
+- 12 `test_layer2_journal_contract` tests pass (1 new pin + 11 existing)
+- 61/62 `test_agent_invocation` pass (1 pre-existing fallback-to-bat failure unrelated)
+- 97/97 `test_dashboard` pass
+- 150/150 `test_bigbet + test_iskbets + test_analyze + test_claude_gate` pass
+
+### What's next
+- User must re-authenticate Claude CLI interactively (`claude` in terminal) — the
+  code changes detect and surface auth failures but cannot refresh the OAuth token.
+- After re-auth, restart `PF-DataLoop` via `schtasks /run /tn "PF-DataLoop"`.
+- Monitor `data/critical_errors.jsonl` over the next 24h to confirm the journal
+  contract fires at 18 min and auth failures from bigbet/iskbets/analyze paths
+  record to the journal.
+
+### Blockers
+- None on the code side. Pending interactive OAuth re-login from the user.
+
+---
+
 # Session Progress — BUG-178 Timeout + Instrumentation (2026-04-15)
 
 ## Status: IN REVIEW
