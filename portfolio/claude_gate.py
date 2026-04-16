@@ -117,6 +117,49 @@ def _clean_env() -> dict:
 # catch it.
 _AUTH_ERROR_MARKERS = ("Not logged in", "Please run /login", "Invalid API key")
 
+# 2026-04-16: feedback-loop fix. CLAUDE.md tells every agent to surface
+# unresolved critical_errors.jsonl entries verbatim at session start. Those
+# entries CONTAIN the literal string "Not logged in", so the substring scan
+# below was treating every echo as a new auth failure, journaling it,
+# triggering the next agent to re-surface, ad infinitum (today's entries
+# 13:45:45 + 14:15:01 are both echoes, not real failures).
+#
+# The fix narrows the match: a marker only counts when it's the START of a
+# line, NOT preceded by quote/backtick/paren/blockquote, with no leading
+# indentation, AND within the first _AUTH_SCAN_LINE_LIMIT lines of output.
+# Real Claude CLI auth errors print as standalone preamble — they never
+# appear deep in agent chat. Echoes always appear quoted, indented, in
+# code blocks, or wrapped in conversational context.
+_AUTH_SCAN_LINE_LIMIT = 16
+# Characters that, when they precede the marker, mean "this is quoted, not
+# CLI output". `'` `"` and `` ` `` cover plain quotes; `(` covers
+# parentheticals; `>` covers Markdown blockquotes; `[` covers JSON-style
+# log entries (`["ts": ..., "message": "...Not logged in..."]`); whitespace
+# at line start covers code-block indentation.
+_AUTH_MARKER_PREFIX_REJECT = ("'", '"', "`", "(", ">", "[", " ", "\t")
+
+
+def _is_real_auth_marker_line(line: str, marker: str) -> bool:
+    """Return True if `line` looks like an actual CLI auth-error line.
+
+    The CLI prints markers as standalone lines without quoting. Anything
+    quoted, indented, blockquoted, or embedded in conversational text is
+    almost certainly an echo of a previously-journaled error.
+    """
+    if not line:
+        return False
+    # Reject lines that begin with a wrapper character before the marker.
+    if line[0] in _AUTH_MARKER_PREFIX_REJECT:
+        return False
+    # The marker must appear at the very start (after any leading wrapper
+    # check above has already passed — i.e. no leading whitespace).
+    if not line.startswith(marker):
+        return False
+    # Defense in depth: even if startswith matches, reject if any wrapper
+    # char appears in the slice BEFORE the marker (handles bullet lists
+    # like `- Not logged in` that tests pre-empt by checking line[0]).
+    return True
+
 
 def record_critical_error(
     category: str,
@@ -164,8 +207,24 @@ def detect_auth_failure(output: str, caller: str, context: dict | None = None) -
     """
     if not output:
         return False
-    for marker in _AUTH_ERROR_MARKERS:
-        if marker in output:
+
+    # Scan only the top of the output. Real CLI auth errors print as
+    # preamble before any agent turn output; echoes always appear later
+    # in conversational chat. See _AUTH_SCAN_LINE_LIMIT comment above
+    # for the full feedback-loop rationale (BUG-ECHO 2026-04-16).
+    candidate_lines = output.splitlines()[:_AUTH_SCAN_LINE_LIMIT]
+    in_fenced_code_block = False
+    for line in candidate_lines:
+        # Track Markdown fenced code blocks (```). Lines inside the block
+        # are quoted content even if they don't have leading whitespace.
+        if line.startswith("```"):
+            in_fenced_code_block = not in_fenced_code_block
+            continue
+        if in_fenced_code_block:
+            continue
+        for marker in _AUTH_ERROR_MARKERS:
+            if not _is_real_auth_marker_line(line, marker):
+                continue
             logger.critical(
                 "[AUTH_FAILURE] caller=%s — claude CLI printed %r. "
                 "OAuth session not being read. Likely causes: "
