@@ -271,14 +271,33 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
         # fd504d4. Kept: bad at both 3h (33.2%) and 1d (47.8%).
         "MSTR": frozenset({"claude_fundamental", "credit_spread_risk"}),
     },
-    # Horizon-specific entries populated by future audits. Empty today —
-    # Batch 4 delivers the mechanism, not the data. Adding an entry here
-    # force-HOLDs the signal at that horizon only; the signal still computes
-    # and participates in other horizons' consensus.
-    "3h": {},
+    # 2026-04-16 after-hours audit: signals that PASS global gate (>0.47)
+    # but FAIL per-ticker (<0.45 with >=50 samples).
+    # Source: accuracy_by_ticker_signal_cached() cross-referenced with
+    # global accuracy. Each entry justified by per-ticker accuracy data:
+    #
+    # 3h: BTC volatility_sig 43.3%/342, bb 44.8%/536;
+    #     ETH credit_spread_risk 43.5%/186;
+    #     XAU credit_spread_risk 38.8%/170;
+    #     XAG forecast 40.3%/248, qwen3 44.8%/413;
+    #     MSTR volume 35.6%/1400, volatility_sig 42.9%/319.
+    # 1d: BTC news_event 40.8%/671, forecast 42.0%/300;
+    #     XAU candlestick 43.3%/656;
+    #     MSTR ema 41.4%/1405, bb 44.5%/245.
+    "3h": {
+        "BTC-USD": frozenset({"volatility_sig", "bb"}),
+        "ETH-USD": frozenset({"credit_spread_risk"}),
+        "XAU-USD": frozenset({"credit_spread_risk"}),
+        "XAG-USD": frozenset({"forecast", "qwen3"}),
+        "MSTR": frozenset({"volume", "volatility_sig"}),
+    },
     "4h": {},
     "12h": {},
-    "1d": {},
+    "1d": {
+        "BTC-USD": frozenset({"news_event", "forecast"}),
+        "XAU-USD": frozenset({"candlestick"}),
+        "MSTR": frozenset({"ema", "bb"}),
+    },
     "3d": {},
     "5d": {},
     "10d": {},

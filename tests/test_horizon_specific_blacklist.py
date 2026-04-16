@@ -45,29 +45,31 @@ class TestGetHorizonDisabledSignals:
         result = _get_horizon_disabled_signals("MSTR", horizon=None)
         assert result == frozenset({"claude_fundamental", "credit_spread_risk"})
 
-    def test_returns_default_only_when_horizon_empty(self):
-        # No entries in "1d" map for MSTR today -> returns _default.
+    def test_returns_default_union_horizon_for_mstr_1d(self):
+        # MSTR has 1d-specific entries (ema, bb) added 2026-04-16 after-hours.
         result = _get_horizon_disabled_signals("MSTR", horizon="1d")
-        assert result == frozenset({"claude_fundamental", "credit_spread_risk"})
+        assert result == frozenset({
+            "claude_fundamental", "credit_spread_risk",  # _default
+            "ema", "bb",  # 1d-specific
+        })
 
-    def test_unions_horizon_specific_with_default(self, monkeypatch):
-        """Temporarily add a 3h-specific entry for MSTR and verify union.
-
-        2026-04-16 review quality fix: use monkeypatch.setitem instead of
-        try/finally manual mutation. Safer under pytest-xdist parallelism
-        where another worker could observe the mutated global between the
-        assignment and the cleanup.
-        """
-        monkeypatch.setitem(
-            _TICKER_DISABLED_BY_HORIZON["3h"], "MSTR", frozenset({"volatility_sig"}),
-        )
+    def test_unions_horizon_specific_with_default(self):
+        """3h-specific entries for MSTR (volume, volatility_sig) union with _default."""
         result = _get_horizon_disabled_signals("MSTR", horizon="3h")
-        assert result == frozenset(
-            {"claude_fundamental", "credit_spread_risk", "volatility_sig"}
+        assert result == frozenset({
+            "claude_fundamental", "credit_spread_risk",  # _default
+            "volume", "volatility_sig",  # 3h-specific
+        })
+
+    def test_monkeypatch_horizon_entry_for_unknown_ticker(self, monkeypatch):
+        """Adding a synthetic horizon entry via monkeypatch still unions correctly."""
+        monkeypatch.setitem(
+            _TICKER_DISABLED_BY_HORIZON["4h"], "FAKE-TICKER", frozenset({"rsi"}),
         )
-        # 1d unaffected
-        result_1d = _get_horizon_disabled_signals("MSTR", horizon="1d")
-        assert result_1d == frozenset({"claude_fundamental", "credit_spread_risk"})
+        result = _get_horizon_disabled_signals("FAKE-TICKER", horizon="4h")
+        assert result == frozenset({"rsi"})
+        result_1d = _get_horizon_disabled_signals("FAKE-TICKER", horizon="1d")
+        assert result_1d == frozenset()
 
     def test_empty_frozenset_for_unknown_ticker(self):
         result = _get_horizon_disabled_signals("UNKNOWN-TICKER", horizon="1d")
@@ -166,6 +168,67 @@ class TestWeightedConsensusAppliesHorizonBlacklist:
         )
         # claude_fundamental NOT gated (no ticker -> no blacklist lookup) -> BUY
         assert action == "BUY"
+
+
+class TestAfterHoursAuditEntries:
+    """2026-04-16 after-hours audit populated 3h/1d horizon-specific entries.
+    Pin the exact entries to catch accidental mutation or drift."""
+
+    def test_3h_btc(self):
+        result = _get_horizon_disabled_signals("BTC-USD", "3h")
+        expected_default = {"smart_money", "heikin_ashi"}
+        expected_3h = {"volatility_sig", "bb"}
+        assert result == frozenset(expected_default | expected_3h)
+
+    def test_3h_eth(self):
+        result = _get_horizon_disabled_signals("ETH-USD", "3h")
+        expected_default = {"news_event", "qwen3", "smart_money"}
+        expected_3h = {"credit_spread_risk"}
+        assert result == frozenset(expected_default | expected_3h)
+
+    def test_3h_xau(self):
+        result = _get_horizon_disabled_signals("XAU-USD", "3h")
+        expected_default = {"ministral", "metals_cross_asset"}
+        expected_3h = {"credit_spread_risk"}
+        assert result == frozenset(expected_default | expected_3h)
+
+    def test_3h_xag(self):
+        result = _get_horizon_disabled_signals("XAG-USD", "3h")
+        expected_default = {"ministral", "credit_spread_risk", "metals_cross_asset",
+                            "smart_money"}
+        expected_3h = {"forecast", "qwen3"}
+        assert result == frozenset(expected_default | expected_3h)
+
+    def test_3h_mstr(self):
+        result = _get_horizon_disabled_signals("MSTR", "3h")
+        expected_default = {"claude_fundamental", "credit_spread_risk"}
+        expected_3h = {"volume", "volatility_sig"}
+        assert result == frozenset(expected_default | expected_3h)
+
+    def test_1d_btc(self):
+        result = _get_horizon_disabled_signals("BTC-USD", "1d")
+        expected_default = {"smart_money", "heikin_ashi"}
+        expected_1d = {"news_event", "forecast"}
+        assert result == frozenset(expected_default | expected_1d)
+
+    def test_1d_xau(self):
+        result = _get_horizon_disabled_signals("XAU-USD", "1d")
+        expected_default = {"ministral", "metals_cross_asset"}
+        expected_1d = {"candlestick"}
+        assert result == frozenset(expected_default | expected_1d)
+
+    def test_1d_mstr(self):
+        result = _get_horizon_disabled_signals("MSTR", "1d")
+        expected_default = {"claude_fundamental", "credit_spread_risk"}
+        expected_1d = {"ema", "bb"}
+        assert result == frozenset(expected_default | expected_1d)
+
+    def test_4h_has_no_entries_yet(self):
+        """4h horizon still empty — no data-driven entries yet."""
+        for ticker in ("BTC-USD", "ETH-USD", "XAU-USD", "XAG-USD", "MSTR"):
+            result = _get_horizon_disabled_signals(ticker, "4h")
+            default = _TICKER_DISABLED_BY_HORIZON["_default"].get(ticker, frozenset())
+            assert result == default, f"4h should only have _default for {ticker}"
 
 
 class TestGenerateSignalHorizonBlacklistE2E:
