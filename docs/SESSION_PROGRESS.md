@@ -524,3 +524,6 @@ portfolio/accuracy_stats.py
 portfolio/econ_dates.py
 tests/test_accuracy_degradation.py
 tests/test_accuracy_snapshot_extras.py
+
+### 2026-04-16 13:59 UTC | main
+a739a56 Merge fix/accuracy-gating-20260416: accuracy gating reconfiguration
