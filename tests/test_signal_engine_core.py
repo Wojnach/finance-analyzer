@@ -901,15 +901,21 @@ class TestCorrelationDedup:
         assert action == "SELL"
 
     def test_adaptive_recency_fast_track(self):
-        """When divergence > 15%, the blend should use 90% recent weight."""
+        """When divergence > 15%, the blend should use 90% recent weight.
+
+        2026-04-16: restored 0.70/0.90 from 0.75/0.95. The tighter tuning
+        amplified noise during the W12-W13 crash -> W14-W16 recovery
+        transition. A 7-day window with only 170 samples was dominating a
+        10K-sample all-time baseline.
+        """
         from portfolio.signal_engine import (
             _RECENCY_DIVERGENCE_THRESHOLD,
             _RECENCY_WEIGHT_FAST,
             _RECENCY_WEIGHT_NORMAL,
         )
         assert _RECENCY_DIVERGENCE_THRESHOLD == 0.15
-        assert _RECENCY_WEIGHT_FAST == 0.95
-        assert _RECENCY_WEIGHT_NORMAL == 0.75
+        assert _RECENCY_WEIGHT_FAST == 0.90
+        assert _RECENCY_WEIGHT_NORMAL == 0.70
 
     def test_accuracy_gate_at_047(self):
         """Verify gate threshold is 0.47 (raised 0.45 → 0.47 on 2026-04-11
@@ -1143,8 +1149,11 @@ class TestExpandedCorrelationGroups:
         from portfolio.signal_engine import CORRELATION_GROUPS
         assert "macro_regime" in CORRELATION_GROUPS["trend_direction"]
         assert "fear_greed" in CORRELATION_GROUPS["macro_external"]
-        # structure moved to volatility_cluster (2026-04-08: 94.2% with volatility_sig)
-        assert "structure" in CORRELATION_GROUPS["volatility_cluster"]
+        # 2026-04-14 (bf6f03c): structure moved from volatility_cluster to
+        # trend_direction after correlation audit (r=0.608 with trend, 96.5%
+        # with macro_regime). Test assertion updated 2026-04-16 alongside the
+        # accuracy-gating fix batch (was pre-existing stale assertion).
+        assert "structure" in CORRELATION_GROUPS["trend_direction"]
 
     def test_volume_flow_in_trend_direction_group(self):
         """Verify volume_flow merged into trend_direction group (corr +0.511 with heikin_ashi)."""

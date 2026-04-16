@@ -157,8 +157,14 @@ ACCURACY_GATE_MIN_SAMPLES = 30  # need enough data before gating
 # fix it. Raising the gate to 50% for established signals removes structure
 # (49.8%, 12K sam), heikin_ashi (49.6%, 23K sam) etc. while letting newer
 # signals with <5000 samples prove themselves at the standard 47% threshold.
+# 2026-04-16: raised high-sample min 5000 -> 10000. Investigation of W15/W16
+# consensus collapse found the 5000 threshold catching signals during regime
+# transitions where 5000 samples is too few to distinguish true coin-flip
+# from transient degradation. 10000 samples reduces false-positive gating
+# (e.g., a signal at 49.5% over 6000 samples may still have real edge in
+# specific regimes that the aggregate accuracy hides).
 _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD = 0.50
-_ACCURACY_GATE_HIGH_SAMPLE_MIN = 5000
+_ACCURACY_GATE_HIGH_SAMPLE_MIN = 10000
 
 # Directional accuracy gate: signals whose BUY or SELL accuracy is below this
 # threshold get that direction force-HOLD'd while the other direction can still
@@ -172,14 +178,18 @@ _DIRECTIONAL_GATE_MIN_SAMPLES = 30
 
 # Adaptive recency blend: when recent accuracy diverges from all-time by more
 # than this threshold, increase recent weight for faster regime adaptation.
-# Normal: 75% recent + 25% all-time. Fast: 95% recent + 5% all-time.
-# 2026-04-15: raised normal 0.70→0.75, fast 0.90→0.95. Audit found signals
-# like trend (40.3% alltime → 61.6% recent) where the alltime anchor
-# was dragging blended accuracy 5-8pp below actual recent performance,
-# diluting consensus quality during regime shifts.
+# Normal: 70% recent + 30% all-time. Fast: 90% recent + 10% all-time.
+# 2026-04-15: raised normal 0.70→0.75, fast 0.90→0.95 to better capture
+# recent-regime signals like trend (40.3% alltime → 61.6% recent).
+# 2026-04-16: REVERTED to 0.70/0.90. The 0.75/0.95 tuning amplified noise
+# during the W12-W13 crash -> W14-W16 recovery transition. A 7-day window
+# with only 170 samples was dominating a 10K-sample all-time baseline,
+# triggering gates on signals whose "bad recent" was just the crash tail
+# rolling through the window. 0.70/0.90 gives regime adaptation while
+# leaving enough all-time anchor to damp single-week noise.
 _RECENCY_DIVERGENCE_THRESHOLD = 0.15  # 15% absolute divergence triggers fast blend
-_RECENCY_WEIGHT_NORMAL = 0.75
-_RECENCY_WEIGHT_FAST = 0.95
+_RECENCY_WEIGHT_NORMAL = 0.70
+_RECENCY_WEIGHT_FAST = 0.90
 _RECENCY_MIN_SAMPLES = 30  # match ACCURACY_GATE_MIN_SAMPLES (was 50 default)
 
 # Crisis regime: when multiple macro-external signals are simultaneously
@@ -206,17 +216,90 @@ _BIAS_MIN_ACTIVE = 30  # need enough active (non-HOLD) votes to judge bias
 _PER_TICKER_CONSENSUS_GATE = 0.38  # below 38% = force HOLD
 _PER_TICKER_CONSENSUS_MIN_SAMPLES = 50
 
+# Voter-count circuit breaker (2026-04-16, Batch 2 of accuracy gating reconfig).
+# When cascaded gates would leave fewer than _MIN_ACTIVE_VOTERS_SOFT active voters
+# for a ticker, progressively relax the accuracy gate by _GATE_RELAXATION_STEP
+# until the voter floor is met or _GATE_RELAXATION_MAX is reached. Rationale:
+# losing voter diversity is worse than letting a borderline signal vote, because
+# the consensus is a weighted sum of possibly-correlated signals — 3 correlated
+# voters aren't as informative as 5 independent ones.
+#
+# Expected impact: kicks in during regime transitions where the 47% gate is
+# silencing several voters whose recent accuracy dipped to 45-47%. Keeps at
+# least 5 voters active by relaxing the gate by up to 6pp (to 41% floor).
+# Signals with directional or per-ticker gating are NOT un-gated by this —
+# only the overall accuracy gate is relaxed.
+_MIN_ACTIVE_VOTERS_SOFT = 5
+_GATE_RELAXATION_STEP = 0.02  # relax by 2pp per step
+_GATE_RELAXATION_MAX = 0.06   # cap at 6pp below base gate (0.47 -> 0.41)
+
 # Per-ticker signal disable: force HOLD for specific signal+ticker combos
 # where accuracy data shows the signal is actively harmful for that instrument.
-_TICKER_DISABLED_SIGNALS = {
-    # 2026-04-15 audit: per-ticker 3h accuracy gating.
-    "ETH-USD": frozenset({"news_event", "qwen3", "smart_money"}),  # smart_money 38.2% (555 sam)
-    "BTC-USD": frozenset({"smart_money", "heikin_ashi"}),  # smart_money 39.0% (557), heikin_ashi 42.1% (1422)
-    "XAG-USD": frozenset({"ministral", "credit_spread_risk", "metals_cross_asset", "smart_money"}),  # smart_money 41.8% (558)
-    "XAU-USD": frozenset({"ministral", "metals_cross_asset"}),  # metals_cross_asset 42.9% (198 sam)
-    "MSTR": frozenset({"credit_spread_risk", "macro_regime", "trend", "volatility_sig",
-                        "claude_fundamental", "volume", "sentiment"}),  # claude_fund 33.2%, vol 35.6%, sent 37.8%
+#
+# 2026-04-16 (Batch 4): horizon-specific per-ticker blacklists via
+# _TICKER_DISABLED_BY_HORIZON. Structure:
+#   {"3h": {ticker: frozenset(bad_signals_at_3h)},
+#    "1d": {ticker: frozenset(bad_signals_at_1d)},
+#    "_default": {ticker: frozenset(bad_at_ALL_horizons)}}
+#
+# Compute-time (signal dispatch loop): uses the _default list only. Signals
+# compute once per ticker per cycle and their vote is reused across horizons,
+# so disabling at compute time requires the signal to be bad at EVERY horizon.
+# Horizon-specific entries do NOT skip compute (the vote still exists, but
+# is force-HOLD'd per-horizon at consensus time).
+#
+# Consensus-time: when building consensus for horizon H, apply
+# (_default[ticker] | _TICKER_DISABLED_BY_HORIZON[H][ticker]).
+#
+# Why this structure: the Apr 14 MSTR blacklist was built from 3h accuracy
+# data but applied globally, causing W15/W16 consensus collapse (1d dropped
+# to 21.9%). 5 of 7 blacklisted MSTR signals were 66-81% accurate at 1d.
+# Batch 1 trimmed the list to 2 entries; Batch 4 (this) enables per-horizon
+# entries so future audits can say "bad at 3h, fine at 1d" without global
+# penalty.
+_TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
+    # Disabled at ALL horizons — bad everywhere, safe to skip even at compute.
+    "_default": {
+        # 2026-04-15 audit: per-ticker 3h accuracy gating, retained pending
+        # per-horizon audit of 1d/3d/5d behaviors.
+        "ETH-USD": frozenset({"news_event", "qwen3", "smart_money"}),
+        "BTC-USD": frozenset({"smart_money", "heikin_ashi"}),
+        "XAG-USD": frozenset({"ministral", "credit_spread_risk",
+                              "metals_cross_asset", "smart_money"}),
+        "XAU-USD": frozenset({"ministral", "metals_cross_asset"}),
+        # 2026-04-16: trimmed from 7 to 2 (Batch 1). Full history in commit
+        # fd504d4. Kept: bad at both 3h (33.2%) and 1d (47.8%).
+        "MSTR": frozenset({"claude_fundamental", "credit_spread_risk"}),
+    },
+    # Horizon-specific entries populated by future audits. Empty today —
+    # Batch 4 delivers the mechanism, not the data. Adding an entry here
+    # force-HOLDs the signal at that horizon only; the signal still computes
+    # and participates in other horizons' consensus.
+    "3h": {},
+    "4h": {},
+    "12h": {},
+    "1d": {},
+    "3d": {},
+    "5d": {},
+    "10d": {},
 }
+
+
+def _get_horizon_disabled_signals(ticker: str | None, horizon: str | None) -> frozenset:
+    """Return signals to force-HOLD for (ticker, horizon). Union of default + horizon-specific."""
+    if not ticker:
+        return frozenset()
+    default_set = _TICKER_DISABLED_BY_HORIZON["_default"].get(ticker, frozenset())
+    if not horizon:
+        return default_set
+    horizon_set = _TICKER_DISABLED_BY_HORIZON.get(horizon, {}).get(ticker, frozenset())
+    return default_set | horizon_set
+
+
+# Backward-compat alias: the compute-time (signal dispatch) gate. Equal to the
+# _default list — the minimum set of signals that are bad at every horizon.
+# Existing callers reference this name; keep it as a view of _default.
+_TICKER_DISABLED_SIGNALS = _TICKER_DISABLED_BY_HORIZON["_default"]
 
 # --- Signal (full 32-signal for "Now" timeframe) ---
 
@@ -826,9 +909,106 @@ _CLUSTER_CORRELATION_PENALTIES: dict[str, float] = {
 }
 
 
+def _count_active_voters_at_gate(votes, accuracy_data, excluded, group_gated,
+                                  base_gate, relaxation):
+    """Count how many signals would pass gating at gate=(base_gate - relaxation).
+
+    Counts only voters that survive the full gate cascade:
+      1) excluded (top-N)
+      2) group-gated (correlation leader below group-leader gate)
+      3) accuracy gate at (base - relaxation), tiered for high-sample signals
+      4) directional gate (unchanged by relaxation)
+
+    Returns int — the number of signals still voting BUY/SELL.
+    """
+    gate_val = base_gate - relaxation
+    high_gate_val = _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD - relaxation
+    active = 0
+    for signal_name, vote in votes.items():
+        if vote == "HOLD":
+            continue
+        if signal_name in excluded:
+            continue
+        if signal_name in group_gated:
+            continue
+        stats = accuracy_data.get(signal_name, {})
+        acc = stats.get("accuracy", 0.5)
+        samples = stats.get("total", 0)
+        effective_gate = gate_val
+        if samples >= _ACCURACY_GATE_HIGH_SAMPLE_MIN:
+            effective_gate = max(gate_val, high_gate_val)
+        if samples >= ACCURACY_GATE_MIN_SAMPLES and acc < effective_gate:
+            continue
+        # Directional gate is not relaxed by the circuit breaker — those gates
+        # catch signals that are actively wrong in one direction.
+        if vote == "BUY":
+            dir_acc = stats.get("buy_accuracy", acc)
+            dir_n = stats.get("total_buy", 0)
+        else:
+            dir_acc = stats.get("sell_accuracy", acc)
+            dir_n = stats.get("total_sell", 0)
+        if dir_n >= _DIRECTIONAL_GATE_MIN_SAMPLES and dir_acc < _DIRECTIONAL_GATE_THRESHOLD:
+            continue
+        active += 1
+    return active
+
+
+def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_gate):
+    """Compute circuit-breaker relaxation to preserve voter diversity.
+
+    Progressively tests relaxation values 0, step, 2*step, ..., up to
+    _GATE_RELAXATION_MAX. Returns the smallest relaxation that yields at
+    least _MIN_ACTIVE_VOTERS_SOFT active voters, or _GATE_RELAXATION_MAX
+    if the floor still isn't met (caller proceeds with the relaxed gate
+    either way — diversity matters even if we can't fully restore it).
+
+    Pre-condition: the circuit breaker only engages when the total number of
+    non-HOLD candidate votes (before accuracy/directional gating) is at least
+    _MIN_ACTIVE_VOTERS_SOFT. If fewer signals want to vote in the first place,
+    relaxing the gate cannot restore diversity — we'd only be letting single
+    borderline signals escape that the gate is designed to catch. This
+    preserves the gate's behavior in low-signal scenarios (e.g., unit tests
+    with 1-2 votes) while still triggering during regime transitions where
+    many signals are borderline.
+
+    Returns float — relaxation in absolute accuracy points (e.g., 0.02).
+    """
+    # Count candidate non-HOLD signals that haven't been excluded/group-gated.
+    # These are the signals the accuracy gate could potentially filter.
+    candidates = sum(
+        1 for sn, v in votes.items()
+        if v != "HOLD" and sn not in excluded and sn not in group_gated
+    )
+    if candidates < _MIN_ACTIVE_VOTERS_SOFT:
+        # Too few candidate signals for relaxation to meaningfully improve
+        # diversity. Keep the gate at its base threshold.
+        return 0.0
+
+    # Quick path: if base gate already yields enough voters, no relaxation.
+    baseline = _count_active_voters_at_gate(
+        votes, accuracy_data, excluded, group_gated, base_gate, 0.0,
+    )
+    if baseline >= _MIN_ACTIVE_VOTERS_SOFT:
+        return 0.0
+    relaxation = 0.0
+    # Integer steps up to and including max — use int steps to avoid float drift.
+    n_steps = int(round(_GATE_RELAXATION_MAX / _GATE_RELAXATION_STEP))
+    for i in range(1, n_steps + 1):
+        candidate_rel = round(i * _GATE_RELAXATION_STEP, 6)
+        active = _count_active_voters_at_gate(
+            votes, accuracy_data, excluded, group_gated, base_gate, candidate_rel,
+        )
+        relaxation = candidate_rel
+        if active >= _MIN_ACTIVE_VOTERS_SOFT:
+            return relaxation
+    # Floor not met even at max relaxation — still return the max so callers
+    # benefit from the extra voters we did recover.
+    return relaxation
+
+
 def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
                         accuracy_gate=None, max_signals=None, horizon=None,
-                        regime_gated_override=None):
+                        regime_gated_override=None, ticker=None):
     """Compute weighted consensus using accuracy, regime, and activation frequency.
 
     Weight per signal = accuracy_weight * regime_mult * normalized_weight
@@ -869,6 +1049,14 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # exemptions already applied), use it instead of recomputing from scratch.
     regime_gated = regime_gated_override if regime_gated_override is not None else _get_regime_gated(regime, horizon)
     votes = {k: ("HOLD" if k in regime_gated else v) for k, v in votes.items()}
+
+    # Horizon-specific per-ticker blacklist (2026-04-16, Batch 4). Extends the
+    # compute-time _default blacklist with horizon-specific entries. Compute time
+    # can't see horizon (one vote reused across 3h/4h/12h/1d/3d/5d/10d consensus),
+    # so per-horizon gating must happen here.
+    horizon_disabled = _get_horizon_disabled_signals(ticker, horizon)
+    if horizon_disabled:
+        votes = {k: ("HOLD" if k in horizon_disabled else v) for k, v in votes.items()}
 
     # Top-N gate: only let the top max_signals (by accuracy) participate
     active_votes = {k: v for k, v in votes.items() if v != "HOLD"}
@@ -948,6 +1136,24 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     _TREND_SIGNALS = {"ema", "trend", "heikin_ashi", "volume_flow"}
     _MR_SIGNALS = {"mean_reversion", "calendar"}
 
+    # Voter-count circuit breaker (Batch 2 of 2026-04-16 accuracy gating reconfig).
+    # Only the overall accuracy gate is relaxable — directional and correlation
+    # gates still fire. Prevents regime-transition over-gating that silenced
+    # ~8 voters in W15/W16.
+    relaxation = _compute_gate_relaxation(
+        votes=votes,
+        accuracy_data=accuracy_data,
+        excluded=excluded,
+        group_gated=group_gated_signals,
+        base_gate=gate,
+    )
+    if relaxation > 0:
+        logger.debug(
+            "Circuit breaker: relaxing accuracy gate by %.0fpp "
+            "(base=%.2f -> effective=%.2f) to preserve voter diversity",
+            relaxation * 100, gate, gate - relaxation,
+        )
+
     for signal_name, vote in votes.items():
         if vote == "HOLD":
             continue
@@ -961,11 +1167,15 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         acc = stats.get("accuracy", 0.5)
         samples = stats.get("total", 0)
         # Accuracy gate: skip signals that are below threshold with enough data.
-        # Tiered: established signals (5000+ samples) use a tighter 50% gate;
-        # newer signals use the standard 47% gate.
-        effective_gate = gate
+        # Tiered: established signals (10000+ samples) use a tighter 50% gate;
+        # newer signals use the standard 47% gate. Circuit-breaker relaxation
+        # (Batch 2 2026-04-16) subtracts uniformly from both tiers.
+        effective_gate = gate - relaxation
         if samples >= _ACCURACY_GATE_HIGH_SAMPLE_MIN:
-            effective_gate = max(gate, _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD)
+            effective_gate = max(
+                gate - relaxation,
+                _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD - relaxation,
+            )
         if samples >= ACCURACY_GATE_MIN_SAMPLES and acc < effective_gate:
             gated_signals.append(signal_name)
             continue
@@ -2112,6 +2322,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         max_signals=max_signals,
         horizon=horizon,
         regime_gated_override=regime_gated_effective,
+        ticker=ticker,
     )
 
     if ticker:

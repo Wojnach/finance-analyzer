@@ -114,6 +114,8 @@ class TestBlendAccuracyData:
 
         result = blend_accuracy_data(alltime, recent)
         # Default: 70% recent + 30% alltime = 0.7*0.70 + 0.3*0.60 = 0.67
+        # (2026-04-16: restored to 0.70 after the 0.75 tuning amplified noise
+        # during the W12-W13 crash -> W14-W16 recovery transition.)
         assert abs(result["rsi"]["accuracy"] - 0.67) < 0.01
 
     def test_blend_fast_on_divergence(self):
@@ -122,9 +124,11 @@ class TestBlendAccuracyData:
         alltime = {"rsi": {"accuracy": 0.50, "total": 200, "correct": 100, "pct": 50.0}}
         recent = {"rsi": {"accuracy": 0.80, "total": 100, "correct": 80, "pct": 80.0}}
 
-        # Divergence = 0.30 > 0.15 threshold → fast blend: 95% recent + 5% alltime
+        # Divergence = 0.30 > 0.15 threshold -> fast blend: 90% recent + 10% alltime
+        # (2026-04-16: restored from 0.95 back to 0.90 to keep an all-time anchor
+        # that damps single-week noise during regime transitions.)
         result = blend_accuracy_data(alltime, recent)
-        expected = 0.95 * 0.80 + 0.05 * 0.50  # = 0.785
+        expected = 0.90 * 0.80 + 0.10 * 0.50  # = 0.77
         assert abs(result["rsi"]["accuracy"] - expected) < 0.01
 
     def test_blend_uses_alltime_when_recent_insufficient(self):

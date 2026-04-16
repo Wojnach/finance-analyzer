@@ -856,19 +856,54 @@ class TestSentimentUnknownRegimeGating:
 
 
 class TestMSTRSignalBlacklist:
-    """MSTR-specific per-ticker blacklisting for catastrophic signals."""
+    """MSTR-specific per-ticker blacklisting.
 
-    def test_mstr_macro_regime_disabled(self):
-        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
-        assert "macro_regime" in _TICKER_DISABLED_SIGNALS["MSTR"]
+    2026-04-16: Trimmed from 7 entries to 2. The Apr 14 audit built the
+    blacklist from 3h accuracy data and applied it at all horizons. At
+    the 1d horizon where consensus trades, the original 5 removed signals
+    (macro_regime, trend, volatility_sig, volume, sentiment) were 62-81%
+    accurate and were silencing the votes that would have correctly called
+    MSTR's +8.4% W16 rally. Kept: claude_fundamental (47.8% 1d / 33.2% 3h
+    - bad at both horizons) and credit_spread_risk (44.2% 1d).
+    """
 
-    def test_mstr_trend_disabled(self):
+    def test_mstr_macro_regime_NOT_disabled(self):
+        # 2026-04-16: macro_regime removed from MSTR blacklist.
+        # At 1d horizon it shows 81.4% accuracy on MSTR (last 7d, n=43).
+        # The Apr 14 blacklist was built from 3h data (32.5%) and applied
+        # globally — horizon mismatch caused W15/W16 consensus collapse.
         from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
-        assert "trend" in _TICKER_DISABLED_SIGNALS["MSTR"]
+        assert "macro_regime" not in _TICKER_DISABLED_SIGNALS["MSTR"]
 
-    def test_mstr_volatility_sig_disabled(self):
+    def test_mstr_trend_NOT_disabled(self):
+        # 2026-04-16: trend removed from MSTR blacklist (71.2% at 1d, n=59).
         from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
-        assert "volatility_sig" in _TICKER_DISABLED_SIGNALS["MSTR"]
+        assert "trend" not in _TICKER_DISABLED_SIGNALS["MSTR"]
+
+    def test_mstr_volatility_sig_NOT_disabled(self):
+        # 2026-04-16: volatility_sig removed (66.7% at 1d, n=42).
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "volatility_sig" not in _TICKER_DISABLED_SIGNALS["MSTR"]
+
+    def test_mstr_sentiment_NOT_disabled(self):
+        # 2026-04-16: sentiment removed (80.0% at 1d, n=80).
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "sentiment" not in _TICKER_DISABLED_SIGNALS["MSTR"]
+
+    def test_mstr_volume_NOT_disabled(self):
+        # 2026-04-16: volume removed (62.3% at 1d, n=77).
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "volume" not in _TICKER_DISABLED_SIGNALS["MSTR"]
+
+    def test_mstr_claude_fundamental_still_disabled(self):
+        # Retained: 47.8% at 1d / 33.2% at 3h - bad at both horizons.
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "claude_fundamental" in _TICKER_DISABLED_SIGNALS["MSTR"]
+
+    def test_mstr_credit_spread_risk_still_disabled(self):
+        # Retained: 44.2% at 1d.
+        from portfolio.signal_engine import _TICKER_DISABLED_SIGNALS
+        assert "credit_spread_risk" in _TICKER_DISABLED_SIGNALS["MSTR"]
 
 
 class TestCorrelationPenaltyMultiGroup:

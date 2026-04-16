@@ -1,0 +1,230 @@
+"""Tests for the voter-count circuit breaker (Batch 2 of 2026-04-16 accuracy
+gating reconfiguration).
+
+The circuit breaker relaxes the accuracy gate when cascaded gates would leave
+too few active voters, preserving voter diversity during regime transitions.
+It does NOT relax the directional or correlation gates.
+"""
+
+import pytest
+
+from portfolio.signal_engine import (
+    ACCURACY_GATE_THRESHOLD,
+    _GATE_RELAXATION_MAX,
+    _GATE_RELAXATION_STEP,
+    _MIN_ACTIVE_VOTERS_SOFT,
+    _compute_gate_relaxation,
+    _count_active_voters_at_gate,
+    _weighted_consensus,
+)
+
+
+class TestCircuitBreakerConstants:
+    """Guardrail: the constants are sane and will not silently regress."""
+
+    def test_min_voters_soft_at_5(self):
+        assert _MIN_ACTIVE_VOTERS_SOFT == 5
+
+    def test_relaxation_step_at_2pp(self):
+        assert _GATE_RELAXATION_STEP == pytest.approx(0.02)
+
+    def test_relaxation_max_at_6pp(self):
+        assert _GATE_RELAXATION_MAX == pytest.approx(0.06)
+
+    def test_max_is_multiple_of_step(self):
+        """Step must divide max cleanly so iteration reaches the exact cap.
+
+        Use a ratio check because float modulo leaves residual noise
+        (0.06 % 0.02 == 0.019999... in IEEE-754).
+        """
+        ratio = _GATE_RELAXATION_MAX / _GATE_RELAXATION_STEP
+        assert ratio == pytest.approx(round(ratio), abs=1e-9)
+
+
+class TestCountActiveVotersAtGate:
+    """Helper correctness: counts active voters at a given relaxation level."""
+
+    def _make_stats(self, acc, total=100, buy_acc=None, sell_acc=None,
+                    total_buy=50, total_sell=50):
+        """Build one signal's stats dict."""
+        return {
+            "accuracy": acc,
+            "total": total,
+            "buy_accuracy": buy_acc if buy_acc is not None else acc,
+            "sell_accuracy": sell_acc if sell_acc is not None else acc,
+            "total_buy": total_buy,
+            "total_sell": total_sell,
+        }
+
+    def test_all_pass_at_base_gate(self):
+        votes = {f"s{i}": "BUY" for i in range(5)}
+        accuracy = {f"s{i}": self._make_stats(0.60) for i in range(5)}
+        active = _count_active_voters_at_gate(votes, accuracy, set(), set(), 0.47, 0.0)
+        assert active == 5
+
+    def test_none_pass_when_all_below_gate(self):
+        votes = {f"s{i}": "BUY" for i in range(5)}
+        accuracy = {f"s{i}": self._make_stats(0.40) for i in range(5)}
+        active = _count_active_voters_at_gate(votes, accuracy, set(), set(), 0.47, 0.0)
+        assert active == 0
+
+    def test_relaxation_lets_borderline_signals_pass(self):
+        """Signals at 0.45 fail 0.47 gate but pass with 0.02 relaxation."""
+        votes = {f"s{i}": "BUY" for i in range(5)}
+        accuracy = {f"s{i}": self._make_stats(0.45) for i in range(5)}
+        # At base gate 0.47 — all gated.
+        assert _count_active_voters_at_gate(
+            votes, accuracy, set(), set(), 0.47, 0.0,
+        ) == 0
+        # With 0.02 relaxation — effective gate 0.45, all pass (acc < 0.45 is False).
+        assert _count_active_voters_at_gate(
+            votes, accuracy, set(), set(), 0.47, 0.02,
+        ) == 5
+
+    def test_hold_votes_not_counted(self):
+        votes = {"s1": "BUY", "s2": "HOLD", "s3": "SELL"}
+        accuracy = {s: self._make_stats(0.60) for s in ("s1", "s2", "s3")}
+        active = _count_active_voters_at_gate(votes, accuracy, set(), set(), 0.47, 0.0)
+        assert active == 2
+
+    def test_excluded_signals_not_counted(self):
+        votes = {f"s{i}": "BUY" for i in range(5)}
+        accuracy = {f"s{i}": self._make_stats(0.60) for i in range(5)}
+        active = _count_active_voters_at_gate(
+            votes, accuracy, excluded={"s0", "s1"}, group_gated=set(),
+            base_gate=0.47, relaxation=0.0,
+        )
+        assert active == 3
+
+    def test_group_gated_signals_not_counted(self):
+        votes = {f"s{i}": "BUY" for i in range(5)}
+        accuracy = {f"s{i}": self._make_stats(0.60) for i in range(5)}
+        active = _count_active_voters_at_gate(
+            votes, accuracy, excluded=set(), group_gated={"s2", "s3"},
+            base_gate=0.47, relaxation=0.0,
+        )
+        assert active == 3
+
+    def test_directional_gate_not_relaxed(self):
+        """A signal with buy_accuracy=0.30 should be gated even at max relaxation."""
+        votes = {"rsi": "BUY"}
+        accuracy = {
+            "rsi": self._make_stats(0.55, buy_acc=0.30, total_buy=50),
+        }
+        # Even with max relaxation, directional gate (threshold 0.40) fires.
+        active = _count_active_voters_at_gate(
+            votes, accuracy, set(), set(), 0.47, _GATE_RELAXATION_MAX,
+        )
+        assert active == 0
+
+    def test_insufficient_samples_not_gated(self):
+        """Signals with fewer than ACCURACY_GATE_MIN_SAMPLES samples always count.
+
+        Use total_buy=5 so the directional gate (min_samples=30) also doesn't
+        fire — otherwise a 0.30 buy_accuracy with 50 samples would gate via
+        the directional path, masking the overall-gate behavior we want to test.
+        """
+        votes = {"new_sig": "BUY"}
+        accuracy = {"new_sig": self._make_stats(0.30, total=10, total_buy=5, total_sell=5)}
+        active = _count_active_voters_at_gate(
+            votes, accuracy, set(), set(), 0.47, 0.0,
+        )
+        assert active == 1
+
+
+class TestComputeGateRelaxation:
+    """The relaxation chooser: smallest relaxation that meets voter floor."""
+
+    def _make_stats(self, acc, total=100):
+        return {
+            "accuracy": acc, "total": total,
+            "buy_accuracy": acc, "sell_accuracy": acc,
+            "total_buy": total // 2, "total_sell": total // 2,
+        }
+
+    def test_no_relaxation_when_floor_already_met(self):
+        votes = {f"s{i}": "BUY" for i in range(6)}
+        accuracy = {f"s{i}": self._make_stats(0.60) for i in range(6)}
+        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
+        assert rel == 0.0
+
+    def test_one_step_relaxation_when_some_signals_at_45pct(self):
+        """5 signals at 0.60, 3 at 0.45 — base gate lets 5 through (>=5),
+        so no relaxation needed."""
+        votes = {f"s{i}": "BUY" for i in range(8)}
+        accuracy = {f"s{i}": self._make_stats(0.60) for i in range(5)}
+        accuracy.update({f"s{i}": self._make_stats(0.45) for i in range(5, 8)})
+        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
+        assert rel == 0.0
+
+    def test_relaxes_by_step_when_only_4_above_base(self):
+        """4 signals at 0.60, 3 at 0.45 — base allows 4 (< 5), relax to 0.45 adds them."""
+        votes = {f"s{i}": "BUY" for i in range(7)}
+        accuracy = {f"s{i}": self._make_stats(0.60) for i in range(4)}
+        accuracy.update({f"s{i}": self._make_stats(0.45) for i in range(4, 7)})
+        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
+        # With 0.02 relaxation: effective gate 0.45, those at 0.45 fail (acc < 0.45 False),
+        # wait — 0.45 < 0.45 is False, so they pass at 0.45 gate. So relaxation 0.02 suffices.
+        assert rel == pytest.approx(0.02)
+
+    def test_caps_at_max_when_unfillable(self):
+        """5 candidate signals (meeting pre-condition) but only 2 above gate
+        even with max relaxation — caps at max relaxation."""
+        votes = {f"s{i}": "BUY" for i in range(5)}
+        accuracy = {
+            "s0": self._make_stats(0.60),  # passes
+            "s1": self._make_stats(0.60),  # passes
+            "s2": self._make_stats(0.30),  # unreachable (directional gate fires too)
+            "s3": self._make_stats(0.30),  # unreachable
+            "s4": self._make_stats(0.30),  # unreachable
+        }
+        # For s2/s3/s4 to be purely accuracy-gated (not directional-gated),
+        # set their directional accuracy above the directional threshold (0.40).
+        for sig in ("s2", "s3", "s4"):
+            accuracy[sig]["buy_accuracy"] = 0.50
+            accuracy[sig]["sell_accuracy"] = 0.50
+        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
+        assert rel == pytest.approx(_GATE_RELAXATION_MAX)
+
+    def test_no_relaxation_when_few_candidate_signals(self):
+        """Pre-condition guard: if fewer than _MIN_ACTIVE_VOTERS_SOFT non-HOLD
+        candidates exist, circuit breaker stays off (relaxation=0). This
+        preserves gate behavior for low-signal scenarios like tests with
+        single voters, where relaxation wouldn't restore diversity anyway."""
+        votes = {"s0": "BUY"}  # only one candidate
+        accuracy = {"s0": self._make_stats(0.30)}  # well below gate
+        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
+        assert rel == 0.0
+
+
+class TestCircuitBreakerIntegration:
+    """End-to-end: does _weighted_consensus emit votes when relaxation kicks in?"""
+
+    def _build_case(self, accuracies):
+        votes = {f"s{i}": "BUY" for i in range(len(accuracies))}
+        accuracy = {
+            f"s{i}": {
+                "accuracy": acc, "total": 200,
+                "buy_accuracy": acc, "sell_accuracy": acc,
+                "total_buy": 100, "total_sell": 100,
+            }
+            for i, acc in enumerate(accuracies)
+        }
+        return votes, accuracy
+
+    def test_integration_preserves_buy_consensus_when_relaxed(self):
+        """4 signals at 0.55, 3 at 0.46 — under base gate (0.47) only 4 active;
+        circuit breaker relaxes to 0.45, letting 3 more vote. BUY consensus preserved."""
+        votes, accuracy = self._build_case([0.55, 0.55, 0.55, 0.55, 0.46, 0.46, 0.46])
+        action, conf = _weighted_consensus(
+            votes, accuracy, regime="unknown",
+        )
+        assert action == "BUY"
+        assert conf > 0.5
+
+    def test_integration_no_relaxation_when_enough_voters(self):
+        """All 6 above base gate — relaxation stays at 0."""
+        votes, accuracy = self._build_case([0.60, 0.60, 0.60, 0.60, 0.60, 0.60])
+        action, conf = _weighted_consensus(votes, accuracy, regime="unknown")
+        assert action == "BUY"
+        assert conf > 0.5

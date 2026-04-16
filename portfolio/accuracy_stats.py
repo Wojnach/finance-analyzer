@@ -722,7 +722,7 @@ def signal_activation_rates(entries=None):
 
 
 def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
-                        normal_weight=0.75, fast_weight=0.95,
+                        normal_weight=0.70, fast_weight=0.90,
                         min_recent_samples=50):
     """Blend all-time and recent accuracy using adaptive recency weighting.
 

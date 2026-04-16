@@ -1,0 +1,446 @@
+{
+  "3h": {
+    "replayed_at": "2026-04-16T13:33:46.629819+00:00",
+    "window_days": 14,
+    "horizon": "3h",
+    "entries_considered": 1013,
+    "rows_scored": 6968,
+    "consensus_agreement": {
+      "agree": 3116,
+      "disagree": 3852,
+      "agree_pct": 44.72
+    },
+    "actual_per_ticker": {
+      "ETH-USD": {
+        "hits": 314,
+        "total": 630,
+        "accuracy_pct": 49.84
+      },
+      "XAG-USD": {
+        "hits": 309,
+        "total": 576,
+        "accuracy_pct": 53.65
+      },
+      "BTC-USD": {
+        "hits": 305,
+        "total": 621,
+        "accuracy_pct": 49.11
+      },
+      "VRT": {
+        "hits": 56,
+        "total": 211,
+        "accuracy_pct": 26.54
+      },
+      "MU": {
+        "hits": 181,
+        "total": 301,
+        "accuracy_pct": 60.13
+      },
+      "XAU-USD": {
+        "hits": 246,
+        "total": 594,
+        "accuracy_pct": 41.41
+      },
+      "TTWO": {
+        "hits": 185,
+        "total": 270,
+        "accuracy_pct": 68.52
+      },
+      "PLTR": {
+        "hits": 179,
+        "total": 271,
+        "accuracy_pct": 66.05
+      },
+      "MSTR": {
+        "hits": 222,
+        "total": 490,
+        "accuracy_pct": 45.31
+      },
+      "TSM": {
+        "hits": 183,
+        "total": 274,
+        "accuracy_pct": 66.79
+      },
+      "NVDA": {
+        "hits": 137,
+        "total": 245,
+        "accuracy_pct": 55.92
+      },
+      "SMCI": {
+        "hits": 157,
+        "total": 284,
+        "accuracy_pct": 55.28
+      }
+    },
+    "simulated_per_ticker": {
+      "ETH-USD": {
+        "hits": 439,
+        "total": 953,
+        "accuracy_pct": 46.07
+      },
+      "PLTR": {
+        "hits": 161,
+        "total": 365,
+        "accuracy_pct": 44.11
+      },
+      "NVDA": {
+        "hits": 243,
+        "total": 365,
+        "accuracy_pct": 66.58
+      },
+      "SMCI": {
+        "hits": 199,
+        "total": 365,
+        "accuracy_pct": 54.52
+      },
+      "XAG-USD": {
+        "hits": 449,
+        "total": 954,
+        "accuracy_pct": 47.06
+      },
+      "BTC-USD": {
+        "hits": 455,
+        "total": 973,
+        "accuracy_pct": 46.76
+      },
+      "VRT": {
+        "hits": 146,
+        "total": 365,
+        "accuracy_pct": 40.0
+      },
+      "MU": {
+        "hits": 243,
+        "total": 363,
+        "accuracy_pct": 66.94
+      },
+      "MSTR": {
+        "hits": 270,
+        "total": 589,
+        "accuracy_pct": 45.84
+      },
+      "XAU-USD": {
+        "hits": 391,
+        "total": 955,
+        "accuracy_pct": 40.94
+      },
+      "TSM": {
+        "hits": 154,
+        "total": 364,
+        "accuracy_pct": 42.31
+      },
+      "TTWO": {
+        "hits": 241,
+        "total": 354,
+        "accuracy_pct": 68.08
+      }
+    },
+    "aggregate_accuracy": {
+      "actual": {
+        "hits": 2474,
+        "total": 4767,
+        "pct": 51.9
+      },
+      "simulated": {
+        "hits": 3391,
+        "total": 6965,
+        "pct": 48.69
+      }
+    }
+  },
+  "1d": {
+    "replayed_at": "2026-04-16T13:33:47.683469+00:00",
+    "window_days": 14,
+    "horizon": "1d",
+    "entries_considered": 1013,
+    "rows_scored": 6176,
+    "consensus_agreement": {
+      "agree": 2728,
+      "disagree": 3448,
+      "agree_pct": 44.17
+    },
+    "actual_per_ticker": {
+      "ETH-USD": {
+        "hits": 309,
+        "total": 587,
+        "accuracy_pct": 52.64
+      },
+      "XAG-USD": {
+        "hits": 256,
+        "total": 543,
+        "accuracy_pct": 47.15
+      },
+      "BTC-USD": {
+        "hits": 292,
+        "total": 588,
+        "accuracy_pct": 49.66
+      },
+      "VRT": {
+        "hits": 33,
+        "total": 151,
+        "accuracy_pct": 21.85
+      },
+      "MU": {
+        "hits": 127,
+        "total": 234,
+        "accuracy_pct": 54.27
+      },
+      "XAU-USD": {
+        "hits": 236,
+        "total": 563,
+        "accuracy_pct": 41.92
+      },
+      "TTWO": {
+        "hits": 179,
+        "total": 211,
+        "accuracy_pct": 84.83
+      },
+      "PLTR": {
+        "hits": 143,
+        "total": 206,
+        "accuracy_pct": 69.42
+      },
+      "MSTR": {
+        "hits": 230,
+        "total": 468,
+        "accuracy_pct": 49.15
+      },
+      "TSM": {
+        "hits": 187,
+        "total": 220,
+        "accuracy_pct": 85.0
+      },
+      "NVDA": {
+        "hits": 100,
+        "total": 215,
+        "accuracy_pct": 46.51
+      },
+      "SMCI": {
+        "hits": 127,
+        "total": 222,
+        "accuracy_pct": 57.21
+      }
+    },
+    "simulated_per_ticker": {
+      "ETH-USD": {
+        "hits": 427,
+        "total": 896,
+        "accuracy_pct": 47.66
+      },
+      "PLTR": {
+        "hits": 117,
+        "total": 285,
+        "accuracy_pct": 41.05
+      },
+      "NVDA": {
+        "hits": 204,
+        "total": 286,
+        "accuracy_pct": 71.33
+      },
+      "SMCI": {
+        "hits": 144,
+        "total": 287,
+        "accuracy_pct": 50.17
+      },
+      "XAG-USD": {
+        "hits": 507,
+        "total": 896,
+        "accuracy_pct": 56.58
+      },
+      "BTC-USD": {
+        "hits": 480,
+        "total": 918,
+        "accuracy_pct": 52.29
+      },
+      "VRT": {
+        "hits": 101,
+        "total": 287,
+        "accuracy_pct": 35.19
+      },
+      "MU": {
+        "hits": 206,
+        "total": 284,
+        "accuracy_pct": 72.54
+      },
+      "MSTR": {
+        "hits": 306,
+        "total": 555,
+        "accuracy_pct": 55.14
+      },
+      "XAU-USD": {
+        "hits": 431,
+        "total": 899,
+        "accuracy_pct": 47.94
+      },
+      "TSM": {
+        "hits": 162,
+        "total": 287,
+        "accuracy_pct": 56.45
+      },
+      "TTWO": {
+        "hits": 214,
+        "total": 276,
+        "accuracy_pct": 77.54
+      }
+    },
+    "aggregate_accuracy": {
+      "actual": {
+        "hits": 2219,
+        "total": 4208,
+        "pct": 52.73
+      },
+      "simulated": {
+        "hits": 3299,
+        "total": 6156,
+        "pct": 53.59
+      }
+    }
+  },
+  "3d": {
+    "replayed_at": "2026-04-16T13:33:48.664816+00:00",
+    "window_days": 14,
+    "horizon": "3d",
+    "entries_considered": 1013,
+    "rows_scored": 4668,
+    "consensus_agreement": {
+      "agree": 2234,
+      "disagree": 2434,
+      "agree_pct": 47.86
+    },
+    "actual_per_ticker": {
+      "ETH-USD": {
+        "hits": 281,
+        "total": 495,
+        "accuracy_pct": 56.77
+      },
+      "XAG-USD": {
+        "hits": 219,
+        "total": 449,
+        "accuracy_pct": 48.78
+      },
+      "BTC-USD": {
+        "hits": 270,
+        "total": 497,
+        "accuracy_pct": 54.33
+      },
+      "VRT": {
+        "hits": 19,
+        "total": 112,
+        "accuracy_pct": 16.96
+      },
+      "MU": {
+        "hits": 82,
+        "total": 136,
+        "accuracy_pct": 60.29
+      },
+      "XAU-USD": {
+        "hits": 223,
+        "total": 485,
+        "accuracy_pct": 45.98
+      },
+      "TTWO": {
+        "hits": 110,
+        "total": 127,
+        "accuracy_pct": 86.61
+      },
+      "PLTR": {
+        "hits": 90,
+        "total": 131,
+        "accuracy_pct": 68.7
+      },
+      "MSTR": {
+        "hits": 159,
+        "total": 404,
+        "accuracy_pct": 39.36
+      },
+      "TSM": {
+        "hits": 120,
+        "total": 131,
+        "accuracy_pct": 91.6
+      },
+      "NVDA": {
+        "hits": 85,
+        "total": 141,
+        "accuracy_pct": 60.28
+      },
+      "SMCI": {
+        "hits": 43,
+        "total": 116,
+        "accuracy_pct": 37.07
+      }
+    },
+    "simulated_per_ticker": {
+      "ETH-USD": {
+        "hits": 445,
+        "total": 773,
+        "accuracy_pct": 57.57
+      },
+      "PLTR": {
+        "hits": 49,
+        "total": 152,
+        "accuracy_pct": 32.24
+      },
+      "NVDA": {
+        "hits": 115,
+        "total": 154,
+        "accuracy_pct": 74.68
+      },
+      "SMCI": {
+        "hits": 57,
+        "total": 154,
+        "accuracy_pct": 37.01
+      },
+      "XAG-USD": {
+        "hits": 366,
+        "total": 773,
+        "accuracy_pct": 47.35
+      },
+      "BTC-USD": {
+        "hits": 457,
+        "total": 776,
+        "accuracy_pct": 58.89
+      },
+      "VRT": {
+        "hits": 20,
+        "total": 153,
+        "accuracy_pct": 13.07
+      },
+      "MU": {
+        "hits": 139,
+        "total": 152,
+        "accuracy_pct": 91.45
+      },
+      "MSTR": {
+        "hits": 274,
+        "total": 472,
+        "accuracy_pct": 58.05
+      },
+      "XAU-USD": {
+        "hits": 336,
+        "total": 775,
+        "accuracy_pct": 43.35
+      },
+      "TSM": {
+        "hits": 135,
+        "total": 154,
+        "accuracy_pct": 87.66
+      },
+      "TTWO": {
+        "hits": 125,
+        "total": 143,
+        "accuracy_pct": 87.41
+      }
+    },
+    "aggregate_accuracy": {
+      "actual": {
+        "hits": 1701,
+        "total": 3224,
+        "pct": 52.76
+      },
+      "simulated": {
+        "hits": 2518,
+        "total": 4631,
+        "pct": 54.37
+      }
+    }
+  }
+}
