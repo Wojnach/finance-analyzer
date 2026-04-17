@@ -649,3 +649,23 @@ tests/test_accuracy_snapshot_extras.py
 
 ### 2026-04-16 13:59 UTC | main
 a739a56 Merge fix/accuracy-gating-20260416: accuracy gating reconfiguration
+
+### 2026-04-17 10:30 UTC | feat/momentum-entries
+Momentum-entries: close 4 metals-loop gaps exposed by 2026-04-17 silver breakout
+
+- feat(metals): adaptive sizing floor on Kelly-fallback path
+  `data/metals_swing_trader.py` `tests/test_metals_swing_sizing.py` (+4 tests)
+- feat(metals): entry-side fast-tick upside-momentum detector
+  `data/metals_loop.py` `tests/test_metals_entry_fasttick.py` (8 new tests)
+  Writes `data/metals_momentum_state.json` on +0.8%/3min XAG or +0.4%/3min
+  XAU breakouts with rvol>=1.5 (NOT gated on active position).
+- feat(metals): swing-trader momentum-entry path
+  `data/metals_swing_trader.py` `data/metals_swing_config.py`
+  `tests/test_metals_swing_momentum.py` (13 new tests)
+  MIN_BUY_CONFIDENCE 0.60→0.50 and MIN_BUY_VOTERS 3→2 when a fresh LONG
+  momentum candidate matches. Other gates (RSI, MACD, regime, TF) unchanged.
+- feat(metals): permanently deprecate fish engine with two-step revival guard
+  `data/metals_loop.py` `tests/test_fish_engine_deprecated.py` (5 new tests)
+
+Plan: `docs/plans/2026-04-17-momentum-entries-plan.md`
+Batches: 4 shipped, tests green (64/64 new + 28 silver fast-tick regression-fixed).
