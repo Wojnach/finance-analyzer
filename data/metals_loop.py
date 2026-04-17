@@ -2062,9 +2062,18 @@ def _update_stop_orders_for(page, key, pos, stop_order_state):
     units = pos["units"]
     stop_base = pos["stop"]
 
-    # Safety: check stop distance from current bid
+    # Safety: check stop distance from current bid.
+    # 2026-04-17 adversarial review: fail-closed when fetch_price returns
+    # None (auth/network failure). Previously `cur_bid = (cur_price_data or
+    # {}).get("bid", 0)` then `if cur_bid > 0:` silently skipped the
+    # distance guard, allowing stop orders to be placed against a stale
+    # `stop_base` with no "too close to market" protection.
     cur_price_data = fetch_price(page, pos["ob_id"], pos.get("api_type", "warrant"))
-    cur_bid = (cur_price_data or {}).get("bid", 0)
+    if cur_price_data is None:
+        log(f"  SKIP stop update {key}: fetch_price returned None — "
+            f"refusing to place stops without a live bid (fail-closed).")
+        return
+    cur_bid = cur_price_data.get("bid", 0)
     if cur_bid > 0:
         distance_pct = (cur_bid - stop_base) / cur_bid * 100
         if distance_pct < 3.0:

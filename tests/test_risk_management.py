@@ -217,8 +217,14 @@ class TestCheckDrawdown:
                                 agent_summary_path=str(tmp_path / "nonexistent.json"))
         assert result["current_value"] == 450_000
 
-    def test_missing_agent_summary_falls_back_to_cash(self, tmp_path, monkeypatch):
-        """When agent_summary.json is missing, falls back to cash for value."""
+    def test_missing_agent_summary_falls_back_to_cash(self, tmp_path, monkeypatch, caplog):
+        """When agent_summary.json is missing, falls back to cash for value.
+
+        2026-04-17 adversarial review: the fallback must also emit a
+        WARNING so oncall/dashboards can see the stale-feed blind spot —
+        cash-only valuation is NOT truly conservative when live holdings
+        are underwater.
+        """
         monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
 
         pf_path = tmp_path / "portfolio_state.json"
@@ -227,10 +233,19 @@ class TestCheckDrawdown:
             holdings={"BTC-USD": {"shares": 1, "avg_cost_usd": 50_000}},
         ))
 
-        result = check_drawdown(str(pf_path),
-                                agent_summary_path=str(tmp_path / "nonexistent.json"))
+        import logging
+        with caplog.at_level(logging.WARNING, logger="portfolio.risk_management"):
+            result = check_drawdown(
+                str(pf_path),
+                agent_summary_path=str(tmp_path / "nonexistent.json"),
+            )
         # Falls back to cash only
         assert result["current_value"] == 300_000
+        # Blind-spot warning must be emitted
+        assert any(
+            "agent_summary empty" in rec.message and rec.levelno == logging.WARNING
+            for rec in caplog.records
+        ), f"Expected WARNING about agent_summary empty; got {[r.message for r in caplog.records]}"
 
     def test_peak_walks_full_history_not_just_last_2000(self, tmp_path, monkeypatch):
         """A-PR-2 (2026-04-11): The drawdown peak scan must walk the FULL

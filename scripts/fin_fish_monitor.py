@@ -397,7 +397,18 @@ def monitor_trade(
                         capture_output=True, text=True, timeout=60,
                         cwd=str(ROOT),
                     )
-                    if result.stdout.strip():
+                    # 2026-04-17 adversarial review: check exit code so
+                    # crashes don't go invisible — the 3-week Layer 2
+                    # auth outage used exactly this pattern (exit 0 +
+                    # empty stdout + "Not logged in" on stderr).
+                    if result.returncode != 0:
+                        log.warning(
+                            "Fin fish exited %d: stderr=%r stdout=%r",
+                            result.returncode,
+                            (result.stderr or "").strip()[:200],
+                            (result.stdout or "").strip()[:200],
+                        )
+                    elif result.stdout.strip():
                         log.info("Fin fish: %s", result.stdout.strip()[:200])
                 except Exception as e:
                     log.warning("Fin fish run failed: %s", e)

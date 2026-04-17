@@ -322,9 +322,18 @@ def _kill_process_tree(proc: subprocess.Popen, *, label: str = "claude") -> None
                 proc.kill()
     except Exception as e:
         # Last-ditch fallback so a kill failure never propagates.
-        logger.error("%s tree kill encountered unexpected error: %s — proc.kill()", label, e)
-        with contextlib.suppress(Exception):
+        logger.error(
+            "%s tree kill encountered unexpected error: %s — proc.kill()",
+            label, e, exc_info=True,
+        )
+        try:
             proc.kill()
+        except Exception as kill_err:  # 2026-04-17: surface orphan risk
+            logger.error(
+                "%s proc.kill() also failed after tree-kill error: %s — "
+                "process pid=%s may be orphaned",
+                label, kill_err, getattr(proc, "pid", "?"),
+            )
 
 
 def _run_with_tree_kill(
