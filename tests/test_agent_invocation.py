@@ -710,9 +710,24 @@ class TestJournalContext:
 
 class TestBatFallback:
 
-    def test_fallback_to_bat_when_claude_not_found(self):
-        """When claude is not on PATH, falls back to pf-agent.bat."""
+    def test_fallback_to_bat_when_claude_not_found(self, tmp_path, monkeypatch):
+        """When claude is not on PATH, falls back to pf-agent.bat.
+
+        2026-04-17: redirect DATA_DIR to tmp_path and create a stub
+        agent.log — agent_invocation.py calls agent_log_path.stat()
+        before open(), which the builtins.open mock doesn't intercept.
+        Also mock perception_gate + journal.write_context — they read
+        config.json / agent.log directly in worktree environments.
+        """
         bat_path = ai.BASE_DIR / "scripts" / "win" / "pf-agent.bat"
+
+        tmp_data = tmp_path / "data"
+        tmp_data.mkdir()
+        (tmp_data / "agent.log").write_text("", encoding="utf-8")
+        monkeypatch.setattr(ai, "DATA_DIR", tmp_data)
+        monkeypatch.setattr(ai, "JOURNAL_FILE", tmp_data / "layer2_journal.jsonl")
+        monkeypatch.setattr(ai, "TELEGRAM_FILE", tmp_data / "telegram_messages.jsonl")
+        monkeypatch.setattr(ai, "INVOCATIONS_FILE", tmp_data / "claude_invocations.jsonl")
 
         with patch("portfolio.agent_invocation.shutil.which", return_value=None), \
              patch.object(Path, "exists", return_value=True), \
@@ -720,7 +735,8 @@ class TestBatFallback:
              patch("portfolio.agent_invocation._load_config", return_value={}), \
              patch("portfolio.agent_invocation.send_or_store"), \
              patch("portfolio.agent_invocation.escape_markdown_v1", side_effect=lambda x: x), \
-             patch("builtins.open", mock_open()):
+             patch("portfolio.perception_gate.should_invoke", return_value=(True, "mocked")), \
+             patch("portfolio.journal.write_context", return_value=0):
             mock_p.return_value = MagicMock(pid=1)
             result = invoke_agent(["test"], tier=3)
 

@@ -1615,6 +1615,20 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
 
 
 def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, horizon=None):
+    # CRITICAL-2 guard (2026-04-17 adversarial review): empty/None ticker
+    # slipped through scattered `if ticker:` checks in production before.
+    # All real callers (main.py:486, agent_invocation, backtester) pass a
+    # non-empty string; only tests/test_signal_engine.py:651 passes None
+    # intentionally (BUG-178 regression guard for tracker pollution).
+    # Warn on empty so future regressions surface rather than silently
+    # degrading the signal pipeline.
+    if not ticker:
+        logger.warning(
+            "generate_signal called with empty ticker=%r — "
+            "tracker/phase updates will be skipped",
+            ticker,
+        )
+
     votes = {}
     extra_info = {}
 

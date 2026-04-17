@@ -226,12 +226,20 @@ class TestForecastFullPathEnabled:
         """Bypass _cached so mocks are called directly."""
         return fn(*args)
 
+    @patch("portfolio.signals.forecast._gate_subsignal_votes_by_accuracy",
+           side_effect=lambda raw, ticker, config_forecast=None: (dict(raw), {}))
     @patch("portfolio.signals.forecast._cached")
     @patch("portfolio.signals.forecast._run_chronos")
     @patch("portfolio.signals.forecast._run_kronos")
     @patch("portfolio.signals.forecast._load_candles_ohlcv")
-    def test_full_path_loads_candles_and_calls_models(self, mock_candles, mock_kronos, mock_chronos, mock_cached):
-        """With _FORECAST_MODELS_DISABLED=False, candles are loaded and both models called."""
+    def test_full_path_loads_candles_and_calls_models(self, mock_candles, mock_kronos, mock_chronos, mock_cached, mock_gate):
+        """With _FORECAST_MODELS_DISABLED=False, candles are loaded and both models called.
+
+        2026-04-17: patch _gate_subsignal_votes_by_accuracy to pass raw
+        votes through — the accuracy gate was added after this test was
+        written and would otherwise force sub-signals to HOLD when the
+        test's mocked ticker has no historical accuracy data.
+        """
         mock_cached.side_effect = self._bypass_cache
         mock_candles.return_value = [{"close": float(100 + i)} for i in range(80)]
         mock_kronos.return_value = {
@@ -263,12 +271,18 @@ class TestForecastFullPathEnabled:
         # 1h gets 2x weight: [BUY,BUY,SELL, BUY,BUY,SELL] → 4 BUY vs 2 SELL → BUY
         assert result["action"] == "BUY"
 
+    @patch("portfolio.signals.forecast._gate_subsignal_votes_by_accuracy",
+           side_effect=lambda raw, ticker, config_forecast=None: (dict(raw), {}))
     @patch("portfolio.signals.forecast._cached")
     @patch("portfolio.signals.forecast._run_chronos")
     @patch("portfolio.signals.forecast._run_kronos")
     @patch("portfolio.signals.forecast._load_candles_ohlcv")
-    def test_full_path_majority_buy(self, mock_candles, mock_kronos, mock_chronos, mock_cached):
-        """When 3/4 sub-signals are BUY, composite action should be BUY."""
+    def test_full_path_majority_buy(self, mock_candles, mock_kronos, mock_chronos, mock_cached, mock_gate):
+        """When 3/4 sub-signals are BUY, composite action should be BUY.
+
+        2026-04-17: patch _gate_subsignal_votes_by_accuracy (same
+        rationale as test_full_path_loads_candles_and_calls_models).
+        """
         mock_cached.side_effect = self._bypass_cache
         mock_candles.return_value = [{"close": float(100 + i)} for i in range(80)]
         mock_kronos.return_value = {

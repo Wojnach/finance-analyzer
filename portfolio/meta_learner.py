@@ -383,15 +383,13 @@ def predict(votes, ticker, hour_utc=None, day_of_week=None, horizon="1d"):
         return "HOLD", 0.0
 
     # Quality gate: skip prediction if model has no real edge (AUC < threshold)
+    # 2026-04-17: use load_json from file_utils (test_io_safety_sweep).
     metrics_path = MODEL_DIR / f"meta_learner_{horizon}_metrics.json"
     if metrics_path.exists():
-        try:
-            import json as _json
-            _m = _json.loads(metrics_path.read_text())
-            if _m.get("test_auc", 0.5) < _MIN_AUC_FOR_PREDICTIONS:
-                return "HOLD", 0.0
-        except Exception:
-            pass
+        from portfolio.file_utils import load_json
+        _m = load_json(metrics_path, default={})
+        if _m.get("test_auc", 0.5) < _MIN_AUC_FOR_PREDICTIONS:
+            return "HOLD", 0.0
 
     # BUG-148: Use cached model, reload only when file is newer (retrained).
     mtime = model_path.stat().st_mtime
@@ -428,16 +426,14 @@ def predict(votes, ticker, hour_utc=None, day_of_week=None, horizon="1d"):
     proba = model.predict_proba(X)[0]  # [prob_down, prob_up]
     prob_up = proba[1]
 
-    # Use calibrated threshold if available
+    # Use calibrated threshold if available.
+    # 2026-04-17: use load_json from file_utils (test_io_safety_sweep).
     cal_threshold = 0.5
     metrics_path = MODEL_DIR / f"meta_learner_{horizon}_metrics.json"
     if metrics_path.exists():
-        try:
-            import json
-            m = json.loads(metrics_path.read_text())
-            cal_threshold = m.get("calibrated_threshold", 0.5)
-        except Exception:
-            pass
+        from portfolio.file_utils import load_json
+        m = load_json(metrics_path, default={})
+        cal_threshold = m.get("calibrated_threshold", 0.5)
 
     margin = 0.05
     if prob_up > cal_threshold + margin:

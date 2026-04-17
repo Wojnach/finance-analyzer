@@ -291,7 +291,11 @@ class TestBug92TaskkillFailure:
         proc.wait.side_effect = subprocess.TimeoutExpired(cmd="taskkill", timeout=10)
 
         ai._agent_proc = proc
-        ai._agent_start = time.time() - 1000
+        # 2026-04-17: agent_invocation uses time.monotonic() (BUG-203) not
+        # time.time(). The old wall-clock seed made `elapsed = monotonic -
+        # walltime` hugely negative, so the timeout branch never fired and
+        # `_agent_proc` stayed populated.
+        ai._agent_start = time.monotonic() - 1000
         ai._agent_timeout = 100
         ai._agent_tier = 1
         ai._agent_reasons = ["test"]
