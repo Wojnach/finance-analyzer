@@ -255,10 +255,29 @@ def place_order(page, account_id, ob_id, side, price, volume):
 
     Returns (success: bool, result: dict).
     Result dict contains: http_status, parsed (response body), order_id.
+
+    Returns (False, {"error": ...}) for refusal cases: missing CSRF,
+    or order total below the 1000 SEK courtage threshold. The latter
+    matches the `raise ValueError` convention in
+    `portfolio/avanza_session.py:place_order` — but since metals-loop
+    callers handle (ok, result) tuples and retry next cycle, a soft
+    refusal keeps the loop resilient.
     """
     csrf = get_csrf(page)
     if not csrf:
         return False, {"error": "no CSRF token"}
+
+    # 2026-04-17: 1000 SEK min-courtage guard.
+    try:
+        total = round(float(price) * float(volume), 2)
+    except (TypeError, ValueError):
+        total = 0.0
+    if total < 1000.0:
+        logger.error(
+            "place_order refused: total %.2f SEK < 1000 SEK (side=%s ob=%s vol=%s price=%s)",
+            total, side, ob_id, volume, price,
+        )
+        return False, {"error": f"order total {total:.2f} SEK below minimum 1000 SEK"}
 
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
     payload = {
@@ -319,6 +338,21 @@ def place_stop_loss(page, account_id, ob_id, trigger_price, sell_price, volume,
     csrf = get_csrf(page)
     if not csrf:
         return False, ""
+
+    # 2026-04-17: warn (don't refuse) on sub-1000 SEK stop legs —
+    # metals_loop cascades stops into ≤3 legs and per-leg value can
+    # legitimately fall below the courtage threshold. Surfacing via
+    # log lets callers audit fee impact without breaking cascading.
+    try:
+        leg_total = round(float(sell_price) * float(volume), 2)
+    except (TypeError, ValueError):
+        leg_total = 0.0
+    if 0 < leg_total < 1000.0:
+        logger.warning(
+            "place_stop_loss leg %.2f SEK below 1000 SEK courtage threshold "
+            "(vol=%s sell=%s ob=%s)",
+            leg_total, volume, sell_price, ob_id,
+        )
 
     valid_until = (datetime.datetime.now()
                    + datetime.timedelta(days=valid_days)).strftime("%Y-%m-%d")

@@ -76,7 +76,8 @@ class TestPlaceOrder:
             "orderId": "ORD-123",
             "message": "",
         }
-        result = place_order("BUY", "2213050", price=5.80, volume=100)
+        # 5.80 * 200 = 1160 SEK — above 1000 SEK courtage floor
+        result = place_order("BUY", "2213050", price=5.80, volume=200)
         assert isinstance(result, OrderResult)
         assert result.success is True
         assert result.order_id == "ORD-123"
@@ -102,7 +103,8 @@ class TestPlaceOrder:
             "orderId": "ORD-456",
             "message": "",
         }
-        place_order("SELL", "123", price=10.0, volume=50, account_id="9999999")
+        # 10 * 100 = 1000 SEK exactly — at courtage floor
+        place_order("SELL", "123", price=10.0, volume=100, account_id="9999999")
         call_args = mock_avanza.place_order.call_args
         assert call_args[0][0] == "9999999"
 
@@ -118,13 +120,20 @@ class TestPlaceOrder:
         with pytest.raises(ValueError, match="price must be > 0"):
             place_order("BUY", "123", price=-5.0, volume=10)
 
+    def test_min_order_size_guard(self, mock_avanza):
+        """Unified package must enforce the same 1000 SEK min-courtage
+        guard that `portfolio/avanza_session.py:place_order` has."""
+        with pytest.raises(ValueError, match="below minimum 1000 SEK"):
+            place_order("BUY", "123", price=5.0, volume=50)  # 250 SEK total
+
     def test_custom_condition(self, mock_avanza):
         mock_avanza.place_order.return_value = {
             "orderRequestStatus": "SUCCESS",
             "orderId": "ORD-789",
             "message": "",
         }
-        place_order("BUY", "123", price=10.0, volume=5, condition="FILL_OR_KILL")
+        # 10 * 100 = 1000 SEK exactly — at courtage floor
+        place_order("BUY", "123", price=10.0, volume=100, condition="FILL_OR_KILL")
         call_kwargs = mock_avanza.place_order.call_args
         # Compare by .value to avoid xdist mock contamination of avanza.constants
         assert call_kwargs[1]["condition"].value == "FILL_OR_KILL"

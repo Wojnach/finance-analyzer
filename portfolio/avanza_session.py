@@ -737,6 +737,19 @@ def place_stop_loss(
         raise ValueError(f"Refusing to place stop-loss on non-whitelisted account {acct!r}")
     valid_until = (date.today() + timedelta(days=valid_days)).isoformat()
 
+    # 2026-04-17: stops below Avanza's 1000 SEK min-courtage threshold still
+    # succeed at the API but carry outsized fees. Cascaded-stop callers
+    # (metals_loop) can legitimately produce sub-1000 legs, so warn rather
+    # than raise — surface fee inefficiency without breaking live stops.
+    if value_type == "MONETARY" and sell_price > 0:
+        leg_total = round(volume * sell_price, 2)
+        if leg_total < 1000.0:
+            logger.warning(
+                "place_stop_loss leg %.2f SEK below 1000 SEK courtage threshold "
+                "(vol=%d sell=%.3f ob=%s)",
+                leg_total, volume, sell_price, orderbook_id,
+            )
+
     payload = {
         "parentStopLossId": "0",
         "accountId": acct,

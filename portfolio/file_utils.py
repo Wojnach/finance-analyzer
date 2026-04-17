@@ -7,6 +7,17 @@ from collections import deque
 from contextlib import suppress
 from pathlib import Path
 
+# Cross-platform file-locking primitives for `atomic_append_jsonl`.
+# Same pattern as `portfolio/process_lock.py`.
+try:
+    import msvcrt as _msvcrt  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - non-Windows
+    _msvcrt = None  # type: ignore[assignment]
+try:
+    import fcntl as _fcntl  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - Windows
+    _fcntl = None  # type: ignore[assignment]
+
 logger = logging.getLogger("portfolio.file_utils")
 
 
@@ -153,18 +164,58 @@ def load_jsonl_tail(path, max_entries=500, tail_bytes=512_000):
 
 
 def atomic_append_jsonl(path, entry):
-    """Append a single JSON entry to a JSONL file.
+    """Append a single JSON entry to a JSONL file with atomic semantics
+    across threads and processes.
 
-    Uses a write-then-append pattern so partial writes don't corrupt
-    existing data. Flushes and fsyncs to ensure durability on crash.
+    Implementation: binary-append (``"ab"``) + an exclusive file-range
+    lock held for the duration of the ``write + flush + fsync``
+    sequence. Windows CRT does not guarantee ``O_APPEND`` atomicity (unlike
+    POSIX), so without the lock heavy thread contention can produce
+    torn lines (head bytes lost, tail bytes survive). The locking fix
+    unxfails ``tests/test_fix_agent_dispatcher.py::test_concurrent_append_does_not_corrupt_jsonl``
+    (2026-04-13 regression).
+
+    The same primitive is used by ~20 JSONL writers across the codebase
+    (signal_log, claude_invocations, critical_errors, telegram_messages,
+    accuracy_snapshots, etc.) so this fix eliminates torn-line risk
+    system-wide.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(entry, ensure_ascii=False) + "\n"
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(line)
-        f.flush()
-        os.fsync(f.fileno())
+    data = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
+    with open(path, "ab") as f:
+        fd = f.fileno()
+        locked_win = False
+        try:
+            if _msvcrt is not None:
+                # Windows: lock byte 0 (LK_LOCK is blocking). Writes in
+                # append mode always go to EOF regardless of the file
+                # pointer, so seeking to 0 just to lock is safe.
+                try:
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    _msvcrt.locking(fd, _msvcrt.LK_LOCK, 1)
+                    locked_win = True
+                except OSError:
+                    # Locking a non-existent byte 0 on a brand-new empty
+                    # file can fail; extend by one byte then retry once.
+                    f.write(b"")
+                    f.flush()
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    _msvcrt.locking(fd, _msvcrt.LK_LOCK, 1)
+                    locked_win = True
+            elif _fcntl is not None:
+                _fcntl.flock(fd, _fcntl.LOCK_EX)
+            f.write(data)
+            f.flush()
+            os.fsync(fd)
+        finally:
+            if locked_win and _msvcrt is not None:
+                try:
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    _msvcrt.locking(fd, _msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
+            # fcntl.flock releases automatically on close.
 
 
 def atomic_write_jsonl(path, entries):

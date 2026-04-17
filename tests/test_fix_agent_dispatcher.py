@@ -406,20 +406,6 @@ def test_check_gates_falls_back_to_env_when_no_explicit_depth(env, monkeypatch):
 # writer hammer the file in parallel
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    reason=(
-        "Reveals a pre-existing bug in portfolio.file_utils.atomic_append_jsonl: "
-        "under heavy thread contention on Windows the function produces TORN "
-        "JSON lines (head bytes lost, tail bytes survive). Same primitive is "
-        "used by claude_invocations.jsonl, signal_log.jsonl, and ~20 other "
-        "JSONL writers across the codebase, so torn-line risk is system-wide. "
-        "The fix requires per-platform file locking (msvcrt.locking on Windows, "
-        "fcntl.flock on POSIX). Tracking as a separate work item; this test is "
-        "intentionally xfail until that lands so we don't lose the regression "
-        "guard. Discovered 2026-04-13 during fix-agent-dispatcher development."
-    ),
-    strict=False,  # don't fail the suite if it passes (low contention can mask)
-)
 def test_concurrent_append_does_not_corrupt_jsonl(env):
     """Verify the dispatcher's _append_critical and the main-loop's
     atomic_append_jsonl can run concurrently without producing TORN

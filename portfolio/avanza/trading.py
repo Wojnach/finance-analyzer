@@ -60,12 +60,22 @@ def place_order(
         :class:`~portfolio.avanza.types.OrderResult`.
 
     Raises:
-        ValueError: If volume < 1 or price <= 0.
+        ValueError: If volume < 1, price <= 0, or order total < 1000 SEK.
     """
     if volume < 1:
         raise ValueError(f"volume must be >= 1, got {volume}")
     if price <= 0:
         raise ValueError(f"price must be > 0, got {price}")
+
+    # 2026-04-17: match portfolio/avanza_session.py:590 convention — orders
+    # below 1000 SEK pay the Avanza courtage minimum and are almost always
+    # a caller bug. Unified-package callers should hit the same guard as
+    # the legacy path.
+    order_total = round(volume * price, 2)
+    if order_total < 1000.0:
+        raise ValueError(
+            f"Order total {order_total:.2f} SEK below minimum 1000 SEK"
+        )
 
     client = AvanzaClient.get_instance()
     acct = account_id or client.account_id
@@ -229,6 +239,19 @@ def place_stop_loss(
     client = AvanzaClient.get_instance()
     acct = account_id or client.account_id
     valid_until = date.today() + timedelta(days=valid_days)
+
+    # 2026-04-17: warn (don't raise) on sub-1000 SEK stop legs. Metals-loop
+    # cascaded stops split a position into ≤3 legs; per-leg value may
+    # legitimately fall below the courtage threshold. Surfacing via log
+    # lets callers audit fee impact without breaking live cascading logic.
+    if value_type == "MONETARY" and sell_price > 0:
+        leg_total = round(volume * sell_price, 2)
+        if leg_total < 1000.0:
+            logger.warning(
+                "place_stop_loss leg %.2f SEK below 1000 SEK courtage threshold "
+                "(vol=%d sell=%.3f ob=%s)",
+                leg_total, volume, sell_price, ob_id,
+            )
 
     trigger = StopLossTrigger(
         type=StopLossTriggerType(trigger_type),
