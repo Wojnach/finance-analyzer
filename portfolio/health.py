@@ -100,7 +100,11 @@ def check_agent_silence(max_market_seconds: int = 7200,
     if not last_ts:
         return {"silent": True, "age_seconds": float("inf"), "threshold": max_market_seconds, "market_open": False}
 
-    last = datetime.fromisoformat(last_ts)
+    try:
+        last = datetime.fromisoformat(last_ts)
+    except (ValueError, TypeError):
+        logger.warning("Corrupt last_invocation_ts in health state: %r", last_ts)
+        return {"silent": True, "age_seconds": float("inf"), "threshold": max_market_seconds, "market_open": False}
     now = datetime.now(UTC)
     age = (now - last).total_seconds()
 

@@ -155,11 +155,21 @@ def _last_weekday(year, month, weekday):
     return last_day - timedelta(days=offset)
 
 
+# Holiday set cache — avoids recalculating Easter + date arithmetic every cycle.
+# Keyed by (country, year). Invalidated implicitly on year boundary since the
+# key includes the year.
+_holiday_cache: dict[tuple[str, int], set] = {}
+
+
 def us_market_holidays(year):
     """Return the set of NYSE holiday dates for a given year.
 
     Covers all 10 NYSE holidays including observed-date shifts.
+    Results are cached per year.
     """
+    key = ("us", year)
+    if key in _holiday_cache:
+        return _holiday_cache[key]
     easter = _easter_sunday(year)
     holidays = {
         _observed(date(year, 1, 1)),                 # New Year's Day
@@ -173,6 +183,7 @@ def us_market_holidays(year):
         _nth_weekday(year, 11, 3, 4),                 # Thanksgiving (4th Thu Nov)
         _observed(date(year, 12, 25)),                # Christmas
     }
+    _holiday_cache[key] = holidays
     return holidays
 
 
@@ -188,7 +199,11 @@ def swedish_market_holidays(year):
     """Return the set of Nasdaq Stockholm / Avanza holiday dates for a given year.
 
     Covers full days when Avanza warrant trading is closed.
+    Results are cached per year.
     """
+    key = ("se", year)
+    if key in _holiday_cache:
+        return _holiday_cache[key]
     easter = _easter_sunday(year)
 
     # Midsummer Eve: Friday before Midsummer Day (Saturday between Jun 20-26)
@@ -213,6 +228,7 @@ def swedish_market_holidays(year):
         date(year, 12, 26),                           # Boxing Day
         date(year, 12, 31),                           # New Year's Eve
     }
+    _holiday_cache[key] = holidays
     return holidays
 
 

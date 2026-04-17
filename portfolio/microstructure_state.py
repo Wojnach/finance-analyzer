@@ -10,6 +10,7 @@ data/microstructure_state.json for cross-process access.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -32,7 +33,10 @@ _OFI_WINDOW_FAST = 5   # ~5 min
 _OFI_WINDOW_MEDIUM = 15  # ~15 min
 # slow = all snapshots (full buffer)
 
-# In-memory ring buffers per ticker
+# In-memory ring buffers per ticker.
+# Protected by _buffer_lock — metals_loop fast-tick (10s) and main cycle
+# (60s) can both call accumulate_snapshot / get_state concurrently.
+_buffer_lock = threading.Lock()
 _snapshot_buffers: dict[str, deque] = {}
 _spread_buffers: dict[str, deque] = {}
 _ofi_history: dict[str, deque] = {}  # rolling OFI values for z-score
@@ -58,7 +62,6 @@ def accumulate_snapshot(ticker: str, depth: dict) -> None:
     """
     if depth is None:
         return
-    _ensure_buffer(ticker)
     snapshot = {
         "best_bid": depth["best_bid"],
         "best_ask": depth["best_ask"],
@@ -66,8 +69,10 @@ def accumulate_snapshot(ticker: str, depth: dict) -> None:
         "asks": depth["asks"][:5],
         "ts": depth.get("ts", int(time.time() * 1000)),
     }
-    _snapshot_buffers[ticker].append(snapshot)
-    _spread_buffers[ticker].append(depth["spread"])
+    with _buffer_lock:
+        _ensure_buffer(ticker)
+        _snapshot_buffers[ticker].append(snapshot)
+        _spread_buffers[ticker].append(depth["spread"])
 
 
 def get_rolling_ofi(ticker: str) -> float:
@@ -76,8 +81,9 @@ def get_rolling_ofi(ticker: str) -> float:
     Returns cumulative OFI over the last N snapshots.
     Returns 0.0 if insufficient history.
     """
-    _ensure_buffer(ticker)
-    snapshots = list(_snapshot_buffers[ticker])
+    with _buffer_lock:
+        _ensure_buffer(ticker)
+        snapshots = list(_snapshot_buffers[ticker])
     if len(snapshots) < _MIN_SNAPSHOTS_FOR_OFI:
         return 0.0
     return compute_ofi(snapshots)
@@ -89,8 +95,9 @@ def record_ofi(ticker: str, ofi_val: float) -> None:
     Called once per cycle from get_microstructure_state to avoid
     double-appending if get_rolling_ofi is called multiple times.
     """
-    _ensure_buffer(ticker)
-    _ofi_history[ticker].append(ofi_val)
+    with _buffer_lock:
+        _ensure_buffer(ticker)
+        _ofi_history[ticker].append(ofi_val)
 
 
 def get_ofi_zscore(ticker: str, current_ofi: float | None = None) -> float:
@@ -102,8 +109,9 @@ def get_ofi_zscore(ticker: str, current_ofi: float | None = None) -> float:
 
     Returns 0.0 if insufficient history.
     """
-    _ensure_buffer(ticker)
-    history = list(_ofi_history[ticker])
+    with _buffer_lock:
+        _ensure_buffer(ticker)
+        history = list(_ofi_history[ticker])
     if len(history) < _MIN_OFI_HISTORY_FOR_ZSCORE:
         return 0.0
     import numpy as np
@@ -122,8 +130,9 @@ def get_multiscale_ofi(ticker: str) -> dict:
     Returns dict with ofi_fast, ofi_medium, ofi_slow, and flow_acceleration
     (fast z-score minus slow z-score — positive = accelerating buying).
     """
-    _ensure_buffer(ticker)
-    snapshots = list(_snapshot_buffers[ticker])
+    with _buffer_lock:
+        _ensure_buffer(ticker)
+        snapshots = list(_snapshot_buffers[ticker])
     n = len(snapshots)
 
     ofi_slow = compute_ofi(snapshots) if n >= _MIN_SNAPSHOTS_FOR_OFI else 0.0
@@ -155,8 +164,9 @@ def get_spread_zscore(ticker: str) -> float | None:
     Returns z-score of current spread vs recent history.
     Returns None if insufficient data.
     """
-    _ensure_buffer(ticker)
-    spreads = list(_spread_buffers[ticker])
+    with _buffer_lock:
+        _ensure_buffer(ticker)
+        spreads = list(_spread_buffers[ticker])
     if len(spreads) < _MIN_SPREADS_FOR_ZSCORE:
         return None
     return spread_zscore(spreads)
@@ -175,7 +185,10 @@ def get_microstructure_state(ticker: str) -> dict:
     record_ofi(ticker, ofi)
     sz = get_spread_zscore(ticker)
     ms_ofi = get_multiscale_ofi(ticker)
-    _ensure_buffer(ticker)
+    with _buffer_lock:
+        _ensure_buffer(ticker)
+        snap_count = len(_snapshot_buffers[ticker])
+        spread_count = len(_spread_buffers[ticker])
     return {
         "ofi": ofi,
         "ofi_zscore": ofi_z,
@@ -184,8 +197,8 @@ def get_microstructure_state(ticker: str) -> dict:
         "ofi_slow": ms_ofi["ofi_slow"],
         "flow_acceleration": ms_ofi["flow_acceleration"],
         "spread_zscore": sz if sz is not None else 0.0,
-        "snapshot_count": len(_snapshot_buffers[ticker]),
-        "spread_count": len(_spread_buffers[ticker]),
+        "snapshot_count": snap_count,
+        "spread_count": spread_count,
     }
 
 
@@ -218,5 +231,6 @@ def load_persisted_state(ticker: str) -> dict | None:
 
 def snapshot_count(ticker: str) -> int:
     """Return current snapshot buffer size for a ticker."""
-    _ensure_buffer(ticker)
-    return len(_snapshot_buffers[ticker])
+    with _buffer_lock:
+        _ensure_buffer(ticker)
+        return len(_snapshot_buffers[ticker])

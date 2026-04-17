@@ -36,8 +36,29 @@ _telegram_ts_before = None  # last telegram timestamp before agent started
 
 # Stack overflow detection — exit code 3221225794 = Windows STATUS_STACK_OVERFLOW (0xC00000FD)
 _STACK_OVERFLOW_EXIT_CODE = 3221225794
-_consecutive_stack_overflows = 0
 _MAX_STACK_OVERFLOWS = 5  # auto-disable after this many consecutive stack overflow crashes
+_STACK_OVERFLOW_FILE = DATA_DIR / "stack_overflow_counter.json"
+
+
+def _load_stack_overflow_counter() -> int:
+    """Load persisted stack overflow counter. Returns 0 if missing/corrupt."""
+    from portfolio.file_utils import load_json
+    data = load_json(_STACK_OVERFLOW_FILE)
+    if data and isinstance(data.get("count"), int):
+        return data["count"]
+    return 0
+
+
+def _save_stack_overflow_counter(count: int) -> None:
+    """Persist stack overflow counter to survive loop restarts."""
+    from portfolio.file_utils import atomic_write_json
+    atomic_write_json(_STACK_OVERFLOW_FILE, {
+        "count": count,
+        "updated": datetime.now(UTC).isoformat(),
+    })
+
+
+_consecutive_stack_overflows = _load_stack_overflow_counter()
 
 # Per-tier configuration
 TIER_CONFIG = {
@@ -617,6 +638,7 @@ def check_agent_completion():
     global _consecutive_stack_overflows
     if exit_code == _STACK_OVERFLOW_EXIT_CODE:
         _consecutive_stack_overflows += 1
+        _save_stack_overflow_counter(_consecutive_stack_overflows)
         logger.error(
             "Claude CLI stack overflow (exit %d), %d consecutive. "
             "Check project root for problematic files or update Claude Code.",
@@ -640,7 +662,9 @@ def check_agent_completion():
     else:
         # BUG-95: Reset counter on any non-stack-overflow completion (success or otherwise).
         # This prevents false positive auto-disable when the consecutive chain is broken.
-        _consecutive_stack_overflows = 0
+        if _consecutive_stack_overflows > 0:
+            _consecutive_stack_overflows = 0
+            _save_stack_overflow_counter(0)
 
     # Clean up
     if _agent_log:

@@ -1169,17 +1169,27 @@ class TestUpdateSustained:
         assert not duration_ok
 
     def test_duration_gate_fires_after_threshold(self):
-        started = 1000.0
-        now = started + SUSTAINED_DURATION_S
-        state = {"BTC": {"value": "BUY", "count": 1, "started_ts": started}}
-        _, duration_ok = _update_sustained(state, "BTC", "BUY", now)
+        mono_start = 5000.0
+        with mock.patch("portfolio.trigger.time") as mock_time:
+            # First call: establish _mono_start
+            mock_time.monotonic.return_value = mono_start
+            state = {}
+            _update_sustained(state, "BTC", "BUY", 1000.0)
+            # Second call: monotonic advanced past threshold
+            mock_time.monotonic.return_value = mono_start + SUSTAINED_DURATION_S
+            _, duration_ok = _update_sustained(state, "BTC", "BUY", 2000.0)
         assert duration_ok
 
     def test_duration_gate_does_not_fire_before_threshold(self):
-        started = 1000.0
-        now = started + SUSTAINED_DURATION_S - 1
-        state = {"BTC": {"value": "BUY", "count": 1, "started_ts": started}}
-        _, duration_ok = _update_sustained(state, "BTC", "BUY", now)
+        mono_start = 5000.0
+        with mock.patch("portfolio.trigger.time") as mock_time:
+            # First call: establish _mono_start
+            mock_time.monotonic.return_value = mono_start
+            state = {}
+            _update_sustained(state, "BTC", "BUY", 1000.0)
+            # Second call: monotonic NOT yet past threshold
+            mock_time.monotonic.return_value = mono_start + SUSTAINED_DURATION_S - 1
+            _, duration_ok = _update_sustained(state, "BTC", "BUY", 2000.0)
         assert not duration_ok
 
     def test_independent_keys(self):

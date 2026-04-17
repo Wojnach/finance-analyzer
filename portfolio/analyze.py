@@ -267,7 +267,7 @@ def run_analysis(ticker):
 
     print(f"Analyzing {ticker}...\n")
 
-    t0 = time.time()
+    t0 = time.monotonic()
     try:
         result = subprocess.run(
             ["claude", "-p", prompt, "--max-turns", "1"],
@@ -277,7 +277,7 @@ def run_analysis(ticker):
             env=_clean_env(),
             stdin=subprocess.DEVNULL,
         )
-        elapsed = time.time() - t0
+        elapsed = time.monotonic() - t0
         output = result.stdout.strip()
 
         # BUG-200/201 pattern (2026-04-16): auth-failure check before trusting
@@ -311,7 +311,7 @@ def run_analysis(ticker):
             print(f"Telegram failed: {e}")
 
     except subprocess.TimeoutExpired:
-        elapsed = time.time() - t0
+        elapsed = time.monotonic() - t0
         print(f"Claude timed out after {elapsed:.0f}s")
     except FileNotFoundError:
         print("claude not found in PATH")

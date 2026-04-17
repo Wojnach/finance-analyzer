@@ -61,23 +61,32 @@ def _update_sustained(
     Shared by signal flip (section 2) and sentiment reversal (section 5).
     Increments count if value unchanged, resets if changed. Returns
     (count_ok, duration_ok) indicating whether either debounce gate passed.
+
+    Duration tracking uses time.monotonic() internally to avoid NTP-jump
+    false negatives. The wall-clock ``now_ts`` is stored for persistence
+    but not used for duration math. On process restart, monotonic origin
+    resets and the duration gate conservatively starts fresh (correct
+    behavior — a restart already resets the sustained counter).
     """
+    mono_now = time.monotonic()
     prev = state_dict.get(key, {})
     if prev.get("value") == value:
         state_dict[key] = {
             "value": value,
             "count": prev["count"] + 1,
             "started_ts": prev.get("started_ts", now_ts),
+            "_mono_start": prev.get("_mono_start", mono_now),
         }
     else:
         state_dict[key] = {
             "value": value,
             "count": 1,
             "started_ts": now_ts,
+            "_mono_start": mono_now,
         }
     entry = state_dict[key]
     count_ok = entry["count"] >= SUSTAINED_CHECKS
-    duration_ok = (now_ts - entry["started_ts"]) >= SUSTAINED_DURATION_S
+    duration_ok = (mono_now - entry["_mono_start"]) >= SUSTAINED_DURATION_S
     return count_ok, duration_ok
 
 

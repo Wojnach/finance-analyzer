@@ -157,11 +157,13 @@ def _supertrend(high: pd.Series, low: pd.Series, close: pd.Series,
             else:
                 lower_band[i] = lower_band[i - 1]
 
-        # Direction & supertrend value
+        # Direction & supertrend value.
+        # Use the direction array for state transitions — NOT float equality
+        # on supertrend/upper_band which is unreliable with numpy floats.
         if i == 0 or np.isnan(supertrend[i - 1]):
             direction[i] = 1
             supertrend[i] = lower_band[i]
-        elif supertrend[i - 1] == upper_band[i - 1]:
+        elif direction[i - 1] == -1:
             # Previously in downtrend
             if close_arr[i] > upper_band[i]:
                 direction[i] = 1

@@ -449,6 +449,16 @@ def backfill_outcomes(max_entries=2000):
             os.unlink(tmp)
         raise
 
+    # Invalidate signal utility cache so the next cycle picks up fresh
+    # accuracy data immediately rather than waiting for the 300s TTL.
+    if updated > 0:
+        try:
+            from portfolio.accuracy_stats import invalidate_signal_utility_cache
+            invalidate_signal_utility_cache()
+            logger.info("Signal utility cache invalidated after backfill (%d entries)", updated)
+        except Exception:
+            logger.debug("Could not invalidate signal utility cache", exc_info=True)
+
     return updated
 
 
