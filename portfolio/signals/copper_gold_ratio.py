@@ -34,7 +34,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from portfolio.signal_utils import majority_vote, safe_float, sma
+from portfolio.signal_utils import majority_vote, safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -157,8 +157,12 @@ def _copper_gold_spread(combined: pd.DataFrame, periods: int = 20) -> float:
     """Difference in percentage returns (copper_ret - gold_ret)."""
     if len(combined) < periods + 1:
         return 0.0
-    copper_ret = combined["copper"].iloc[-1] / combined["copper"].iloc[-1 - periods] - 1
-    gold_ret = combined["gold"].iloc[-1] / combined["gold"].iloc[-1 - periods] - 1
+    copper_base = combined["copper"].iloc[-1 - periods]
+    gold_base = combined["gold"].iloc[-1 - periods]
+    if np.isnan(copper_base) or np.isnan(gold_base) or abs(copper_base) < 1e-10 or abs(gold_base) < 1e-10:
+        return 0.0
+    copper_ret = combined["copper"].iloc[-1] / copper_base - 1
+    gold_ret = combined["gold"].iloc[-1] / gold_base - 1
     return float(copper_ret - gold_ret)
 
 

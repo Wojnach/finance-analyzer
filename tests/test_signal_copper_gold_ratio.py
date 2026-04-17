@@ -236,3 +236,14 @@ class TestSubSignalVoting:
         df = _make_df()
         result = compute_copper_gold_ratio_signal(df)
         assert result["action"] in ("BUY", "SELL", "HOLD")
+
+    @patch("portfolio.signals.copper_gold_ratio._fetch_ratio_data")
+    def test_nan_at_spread_base_period(self, mock_fetch):
+        """NaN at the spread base-period anchor row should not crash."""
+        data = _make_ratio_df(200, "neutral")
+        data.iloc[-21, data.columns.get_loc("copper")] = np.nan
+        data["ratio"] = data["copper"] / data["gold"]
+        mock_fetch.return_value = data
+        df = _make_df()
+        result = compute_copper_gold_ratio_signal(df)
+        assert result["action"] in ("BUY", "SELL", "HOLD")
