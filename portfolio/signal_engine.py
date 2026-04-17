@@ -1005,6 +1005,28 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     excluded = excluded or set()
     group_gated = group_gated or set()
 
+    # TWO pre-conditions work together to block the two escape modes Codex
+    # identified in successive review rounds. Both are needed:
+    #
+    #  Guard A: sparse-candidate count (raw non-HOLD after exclusions).
+    #    Blocks scenarios with few total candidates where relaxation would
+    #    re-enable consensus against the system's design (e.g., 3 signals
+    #    at 0.46 should stay HOLD, not relax to 0.41 and vote BUY - the
+    #    outer MIN_VOTERS quorum is only 3, so 3 relaxed voters IS a
+    #    consensus, but it's 3 borderline voters we don't want).
+    #
+    #  Guard B: effective-recovery check (post directional gating).
+    #    Blocks scenarios with 5+ raw candidates where directional gating
+    #    leaves only one borderline voter. Without this, 4 dir-gated +
+    #    1 at 0.46 would pass Guard A but the lone 0.46 signal would
+    #    escape via relaxation.
+    candidates = sum(
+        1 for sn, v in votes.items()
+        if v != "HOLD" and sn not in excluded and sn not in group_gated
+    )
+    if candidates < _MIN_ACTIVE_VOTERS_SOFT:
+        return 0.0
+
     baseline = _count_active_voters_at_gate(
         votes, accuracy_data, excluded, group_gated, base_gate, 0.0,
     )
@@ -1015,16 +1037,8 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
         votes, accuracy_data, excluded, group_gated,
         base_gate, _GATE_RELAXATION_MAX,
     )
-
-    # Suppress relaxation when the most it could achieve is one lone voter.
-    # Codex P2 follow-up (2026-04-17): the previous raw-candidate check let
-    # a 5-candidate scenario with 4 directionally gated signals + 1 borderline
-    # signal at 0.46 slip through - candidate count passed (5), but only 1
-    # voter was actually recoverable, and relaxation let that lone signal
-    # flip the consensus. By checking effective voters at max relaxation and
-    # requiring at least 2, the lone-signal escape is blocked while the
-    # earlier P2 partial-recovery case (4 recoverable + 1 irrecoverable)
-    # still works.
+    # Guard B: require at least 2 effective voters at max relaxation.
+    # Catches the "many candidates but most directionally gated" case.
     if best_possible < 2:
         return 0.0
 

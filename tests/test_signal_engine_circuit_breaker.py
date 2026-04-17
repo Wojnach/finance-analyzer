@@ -191,6 +191,27 @@ class TestComputeGateRelaxation:
             "not a relaxation opportunity."
         )
 
+    def test_sparse_voter_scenario_stays_hold(self):
+        """Codex P2 round 3 (2026-04-17): 3 BUY candidates all at 0.46,
+        no directional gating. Before this guard, best_possible=3 passes
+        the >=2 check and relaxation would lower the gate to 0.45,
+        letting all 3 vote and flipping from HOLD to BUY.
+
+        The outer MIN_VOTERS quorum is only 3, so 3 relaxed voters IS a
+        consensus - that's exactly the case the raw-candidate guard
+        (candidates >= 5) is designed to block. Both guards are needed
+        together: raw-count for sparse cases, effective-count for
+        dir-gated cases.
+        """
+        votes = {f"s{i}": "BUY" for i in range(3)}  # only 3 candidates
+        accuracy = {f"s{i}": self._make_stats(0.46) for i in range(3)}
+        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
+        assert rel == 0.0, (
+            "A sparse 3-voter scenario must NOT trigger relaxation even "
+            "when all 3 are recoverable - the outer MIN_VOTERS quorum "
+            "would flip HOLD to consensus on three borderline voters."
+        )
+
     def test_lone_recoverable_signal_blocked_from_escape(self):
         """Codex P2 follow-up (2026-04-17): 5 candidate signals where 4 are
         directionally gated (buy_accuracy=0.30) and only 1 is recoverable
