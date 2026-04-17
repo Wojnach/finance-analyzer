@@ -156,6 +156,17 @@ class TestAgentInvocationIntegration:
     @patch("portfolio.agent_invocation._log_trigger")
     @patch("portfolio.journal.write_context", return_value=0)
     def test_gate_skips_invocation(self, mock_ctx, mock_log, mock_summary, mock_config):
+        # 2026-04-17: reset module-level agent_invocation state. Under
+        # xdist, other tests leave `_agent_proc` populated so invoke_agent
+        # early-returns at the "already running" branch and never calls
+        # _log_trigger("skipped_gate"). Clearing here makes this test
+        # hermetic regardless of worker ordering.
+        import portfolio.agent_invocation as ai
+        ai._agent_proc = None
+        ai._agent_start = 0
+        ai._agent_timeout = 0
+        ai._agent_log = None
+
         from portfolio.agent_invocation import invoke_agent
         result = invoke_agent(["cooldown"], tier=1)
         assert result is False

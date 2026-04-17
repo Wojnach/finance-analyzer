@@ -315,7 +315,7 @@ class TestStockSignalVoteCounts:
     def test_stock_total_applicable(self, _mock):
         ind = make_indicators()
         _, _, extra = generate_signal(ind, ticker="MSTR")
-        assert extra["_total_applicable"] == 26  # stocks: 36 registered minus gpu+disabled+crypto-only exclusions
+        assert extra["_total_applicable"] == 27  # stocks: 43 registered minus disabled+crypto+metals+non-stock exclusions (2026-04-17)
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_total_applicable(self, _mock):

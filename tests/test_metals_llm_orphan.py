@@ -2,6 +2,38 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _reset_metals_llm_globals():
+    """Reset module-level subprocess handles between tests.
+
+    2026-04-17: under xdist, another test in the suite imports
+    data.metals_llm and leaves ``_chronos_proc`` / ``_chronos_job`` /
+    ``_ministral_proc`` / ``_ministral_job`` populated, causing
+    TestJobObjectIntegration::test_start_chronos_uses_popen_in_job
+    to see a stale proc and skip the popen_in_job path. Resetting
+    before and after each test in this file eliminates the flake.
+    """
+    try:
+        import data.metals_llm as mlm
+    except ImportError:
+        yield
+        return
+    attrs = ("_chronos_proc", "_chronos_job",
+            "_ministral_proc", "_ministral_job")
+    saved = {a: getattr(mlm, a, None) for a in attrs}
+    for a in attrs:
+        if hasattr(mlm, a):
+            setattr(mlm, a, None)
+    try:
+        yield
+    finally:
+        for a, v in saved.items():
+            if hasattr(mlm, a):
+                setattr(mlm, a, None)
+
 
 class TestSweepOrphanedServers:
     """Test _sweep_orphaned_servers() startup cleanup."""
@@ -53,7 +85,13 @@ class TestJobObjectIntegration:
         mock_proc.poll.return_value = None
         mock_proc.stderr.readline.return_value = "CHRONOS_READY"
 
-        with patch("portfolio.subprocess_utils.popen_in_job", return_value=(mock_proc, 42)) as mock_pij:
+        # 2026-04-17: also mock get_vram_usage — without this, the function
+        # reads real GPU state, and when another test/process is using VRAM
+        # (llama-server was loaded during a parallel test), the
+        # "insufficient VRAM" early-return fires and popen_in_job is never
+        # called. Caused the xdist isolation flake in full-suite runs.
+        with patch("portfolio.gpu_gate.get_vram_usage", return_value={"free_mb": 5000}), \
+             patch("portfolio.subprocess_utils.popen_in_job", return_value=(mock_proc, 42)) as mock_pij:
             result = mlm._start_chronos_server()
             assert result is mock_proc
             assert mlm._chronos_job == 42
