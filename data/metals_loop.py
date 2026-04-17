@@ -788,7 +788,59 @@ NEWS_FETCH_INTERVAL_ACTIVE_SILVER = int(
 )
 
 # --- FISH ENGINE (integrated intraday fishing) ---
-FISH_ENGINE_ENABLED = False      # 2026-04-15: disabled after 12 consecutive losses (-12,257 SEK session). Re-enable only after 6 known integration bugs fixed (docs ref: project_fish_engine_live_test.md)
+#
+# Fish engine permanently deprecated 2026-04-17.
+#
+# Timeline:
+#   2026-04-07: first live test, 6 integration bugs cost 590 SEK.
+#   2026-04-09: all 6 bugs fixed; position reconciliation added.
+#   2026-04-15: subsequent session lost 12,257 SEK across 12 consecutive
+#               trades with the integration working correctly.
+#
+# The previous disable comment said "re-enable only after 6 bugs fixed".
+# That framing misdirects: the bugs ARE fixed, and the strategy itself
+# has no measurable edge given current signal quality. Re-enabling based
+# on "the bugs are fixed" is insufficient — the bugs were fixed and the
+# strategy still lost 12K SEK.
+#
+# The swing trader's new momentum-entry path (2026-04-17) supersedes the
+# fish engine for upside-breakout entries: it reuses the same signal
+# infrastructure, sizes via Kelly, respects the cash/courtage floor, and
+# relies on the auditable _evaluate_entry gates rather than a separate
+# unaudited decision tree.
+#
+# Do NOT re-enable without:
+#   1. 30+ paper trades with positive expectancy under the current
+#      signal regime.
+#   2. Documented justification in docs/plans/<date>-fish-engine-revival.md.
+#   3. Removal of both FISH_ENGINE_ENABLED=False AND _assert_fish_engine_allowed.
+#
+# The two-step requirement (flag + assertion removal) is intentional: a
+# single-line change cannot reactivate a known-losing strategy.
+FISH_ENGINE_ENABLED = False
+
+
+def _assert_fish_engine_allowed() -> None:
+    """Guard raised at every fish-engine execution site.
+
+    If someone flips ``FISH_ENGINE_ENABLED = True`` without also removing
+    this assertion and the call sites below, the first execution path
+    raises loudly instead of silently activating a losing strategy.
+
+    Kept as a function (not a module-level assert) so it is testable and
+    so future operators who intentionally revive the engine have to make
+    a deliberate, auditable change (delete the function AND remove the
+    call at every use site). See the FISH_ENGINE_ENABLED declaration for
+    the full revival checklist.
+    """
+    if FISH_ENGINE_ENABLED:
+        raise RuntimeError(
+            "Fish engine deprecated 2026-04-17 — see FISH_ENGINE_ENABLED "
+            "declaration-site comment for the 2026-04-15 12,257 SEK loss "
+            "context and revival requirements before re-enabling."
+        )
+
+
 _fish_engine = None               # FishEngine instance (lazy init)
 _loop_page = None                 # Playwright page ref, set by main loop at startup
 PROB_REPORT_INTERVAL = 5          # compute probability report every N checks (~2.5 min)
@@ -2604,6 +2656,13 @@ def _run_fish_engine_tick():
     Builds a state dict from metals loop data, calls the engine,
     and executes any buy/sell decisions via Avanza.
     """
+    # 2026-04-17 deprecation guard: belt-and-suspenders. The outer
+    # `if FISH_ENGINE_ENABLED:` check at the call site already gates this,
+    # but we re-assert here so that any direct/test-time invocation also
+    # raises if the flag is flipped without removing this check. See the
+    # FISH_ENGINE_ENABLED declaration for full revival requirements.
+    _assert_fish_engine_allowed()
+
     global _fish_engine
 
     # Lazy init
