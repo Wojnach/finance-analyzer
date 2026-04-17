@@ -7,6 +7,17 @@ from collections import deque
 from contextlib import suppress
 from pathlib import Path
 
+# Cross-platform file-locking primitives for `atomic_append_jsonl`.
+# Same pattern as `portfolio/process_lock.py`.
+try:
+    import msvcrt as _msvcrt  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - non-Windows
+    _msvcrt = None  # type: ignore[assignment]
+try:
+    import fcntl as _fcntl  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - Windows
+    _fcntl = None  # type: ignore[assignment]
+
 logger = logging.getLogger("portfolio.file_utils")
 
 
@@ -153,18 +164,67 @@ def load_jsonl_tail(path, max_entries=500, tail_bytes=512_000):
 
 
 def atomic_append_jsonl(path, entry):
-    """Append a single JSON entry to a JSONL file.
+    """Append a single JSON entry to a JSONL file with atomic semantics
+    across threads and processes.
 
-    Uses a write-then-append pattern so partial writes don't corrupt
-    existing data. Flushes and fsyncs to ensure durability on crash.
+    Implementation: binary-append (``"ab"``) to the target + an
+    exclusive lock on a *sidecar* lockfile held for the duration of
+    the ``write + flush + fsync`` sequence. Windows CRT does not
+    guarantee ``O_APPEND`` atomicity (unlike POSIX), so without a lock
+    heavy thread contention can produce torn lines (head bytes lost,
+    tail bytes survive).
+
+    Sidecar-lockfile pattern (``<path>.lock``) — not the target file
+    itself — guarantees a non-empty, lockable byte-range exists even
+    when the target file is brand-new / size 0. This closes the race
+    window Codex flagged on 2026-04-17: two first-writers opening
+    the freshly-created target simultaneously could both have
+    failed the empty-file ``msvcrt.locking(fd, LK_LOCK, 1)`` call and
+    interleaved their writes.
+
+    This primitive is used by ~20 JSONL writers across the codebase
+    (signal_log, claude_invocations, critical_errors, telegram_messages,
+    accuracy_snapshots, etc.) so the fix eliminates torn-line risk
+    system-wide. Unxfails
+    ``tests/test_fix_agent_dispatcher.py::test_concurrent_append_does_not_corrupt_jsonl``.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(entry, ensure_ascii=False) + "\n"
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(line)
-        f.flush()
-        os.fsync(f.fileno())
+    data = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
+
+    # Sidecar lockfile — always non-empty so locking never fails on
+    # size-0 targets. Pre-create if missing; single byte is enough.
+    lock_path = path.parent / f".{path.name}.lock"
+    if not lock_path.exists():
+        try:
+            with open(lock_path, "ab") as lf:
+                if lf.tell() == 0:
+                    lf.write(b"\0")
+        except OSError:
+            pass  # best-effort; lock open below will retry
+
+    with open(lock_path, "rb+") as lock_f:
+        lfd = lock_f.fileno()
+        win_locked = False
+        try:
+            if _msvcrt is not None:
+                os.lseek(lfd, 0, os.SEEK_SET)
+                _msvcrt.locking(lfd, _msvcrt.LK_LOCK, 1)  # blocking
+                win_locked = True
+            elif _fcntl is not None:
+                _fcntl.flock(lfd, _fcntl.LOCK_EX)
+            with open(path, "ab") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+        finally:
+            if win_locked and _msvcrt is not None:
+                try:
+                    os.lseek(lfd, 0, os.SEEK_SET)
+                    _msvcrt.locking(lfd, _msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
+            # fcntl.flock releases automatically on close.
 
 
 def atomic_write_jsonl(path, entries):

@@ -2053,6 +2053,17 @@ def _update_stop_orders_for(page, key, pos, stop_order_state):
         log(f"  Stop update for {key}: no CSRF token")
         return
 
+    # 2026-04-17 adversarial review + codex P1: fetch the live bid
+    # BEFORE touching the existing stop orders. The initial revision
+    # cancelled first and then early-returned on `None` price, which
+    # left the position completely unprotected during auth/network
+    # failure windows. Fail-closed here preserves the existing stops.
+    cur_price_data = fetch_price(page, pos["ob_id"], pos.get("api_type", "warrant"))
+    if cur_price_data is None:
+        log(f"  SKIP stop update {key}: fetch_price returned None — "
+            f"keeping existing stops intact (fail-closed).")
+        return
+
     # Cancel existing orders
     existing = stop_order_state.get(key, {})
     if existing.get("orders"):
@@ -2062,9 +2073,8 @@ def _update_stop_orders_for(page, key, pos, stop_order_state):
     units = pos["units"]
     stop_base = pos["stop"]
 
-    # Safety: check stop distance from current bid
-    cur_price_data = fetch_price(page, pos["ob_id"], pos.get("api_type", "warrant"))
-    cur_bid = (cur_price_data or {}).get("bid", 0)
+    # Safety: check stop distance from current bid.
+    cur_bid = cur_price_data.get("bid", 0)
     if cur_bid > 0:
         distance_pct = (cur_bid - stop_base) / cur_bid * 100
         if distance_pct < 3.0:

@@ -255,10 +255,30 @@ def place_order(page, account_id, ob_id, side, price, volume):
 
     Returns (success: bool, result: dict).
     Result dict contains: http_status, parsed (response body), order_id.
+
+    Returns (False, {"error": ...}) only for hard refusals like a
+    missing CSRF token. Orders below the 1000 SEK courtage threshold
+    are logged as WARNINGs but NOT refused — metals swing-trader
+    callers floor budget-to-whole-units (`units = int(alloc / ask)`),
+    which can legitimately produce sub-1000 SEK BUYs on expensive
+    warrants even when the allocation was exactly 1000 SEK. Refusing
+    would strand floor-sized entries (codex P2 2026-04-17).
     """
     csrf = get_csrf(page)
     if not csrf:
         return False, {"error": "no CSRF token"}
+
+    # 2026-04-17: 1000 SEK min-courtage threshold — warn but proceed.
+    try:
+        total = round(float(price) * float(volume), 2)
+    except (TypeError, ValueError):
+        total = 0.0
+    if 0 < total < 1000.0:
+        logger.warning(
+            "place_order: %s total %.2f SEK below 1000 SEK courtage threshold "
+            "(ob=%s vol=%s price=%s) — proceeding (fees elevated)",
+            side, total, ob_id, volume, price,
+        )
 
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
     payload = {
@@ -319,6 +339,21 @@ def place_stop_loss(page, account_id, ob_id, trigger_price, sell_price, volume,
     csrf = get_csrf(page)
     if not csrf:
         return False, ""
+
+    # 2026-04-17: warn (don't refuse) on sub-1000 SEK stop legs —
+    # metals_loop cascades stops into ≤3 legs and per-leg value can
+    # legitimately fall below the courtage threshold. Surfacing via
+    # log lets callers audit fee impact without breaking cascading.
+    try:
+        leg_total = round(float(sell_price) * float(volume), 2)
+    except (TypeError, ValueError):
+        leg_total = 0.0
+    if 0 < leg_total < 1000.0:
+        logger.warning(
+            "place_stop_loss leg %.2f SEK below 1000 SEK courtage threshold "
+            "(vol=%s sell=%s ob=%s)",
+            leg_total, volume, sell_price, ob_id,
+        )
 
     valid_until = (datetime.datetime.now()
                    + datetime.timedelta(days=valid_days)).strftime("%Y-%m-%d")

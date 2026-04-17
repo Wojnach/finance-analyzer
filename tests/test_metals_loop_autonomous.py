@@ -582,7 +582,12 @@ class TestAutonomousDecision:
 
         real_open = open
         def patched_open(path, *args, **kwargs):
-            if "metals_decisions" in str(path):
+            # 2026-04-17: atomic_append_jsonl now uses a sidecar
+            # lockfile (e.g. ".metals_decisions.jsonl.lock"). Exclude
+            # it from redirection so it doesn't collide with the
+            # target file.
+            path_str = str(path)
+            if "metals_decisions" in path_str and ".lock" not in path_str:
                 return real_open(decisions_file, *args, **kwargs)
             return real_open(path, *args, **kwargs)
 

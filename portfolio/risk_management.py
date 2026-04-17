@@ -118,7 +118,24 @@ def check_drawdown(portfolio_path: str, max_drawdown_pct: float = 20.0,
         if summary:
             current_value = _compute_portfolio_value(portfolio, summary)
         else:
-            # Fallback: cash only (conservative estimate)
+            # Fallback: cash only. This is NOT truly conservative —
+            # it ignores unrealized P&L on holdings. If the price
+            # feed is stale while holdings are underwater, the
+            # drawdown reading will look tiny and the circuit
+            # breaker will never trip. Surface the blind spot via
+            # WARNING so dashboards/oncall can see "feed stale"
+            # rather than silently trusting the number. (2026-04-17
+            # adversarial review.)
+            holding_count = sum(
+                1 for h in portfolio.get("holdings", {}).values()
+                if h.get("shares", 0) > 0
+            )
+            logger.warning(
+                "check_drawdown: agent_summary empty at %s — falling "
+                "back to cash-only value for %d live position(s). "
+                "Drawdown circuit breaker reading may be optimistic.",
+                agent_summary_path, holding_count,
+            )
             current_value = portfolio.get("cash_sek", initial_value)
 
     # Determine peak value from history file or initial value
