@@ -1005,33 +1005,33 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     excluded = excluded or set()
     group_gated = group_gated or set()
 
-    # Pre-condition (raw candidate count). Preserves behavior in low-signal
-    # scenarios - a single borderline signal cannot escape the gate via
-    # relaxation, because the breaker simply never engages below the floor
-    # of candidate votes. Production Tier-1 tickers routinely have 10-15
-    # non-HOLD candidates, so this gate only suppresses relaxation in unit
-    # tests and edge cases.
-    candidates = sum(
-        1 for sn, v in votes.items()
-        if v != "HOLD" and sn not in excluded and sn not in group_gated
-    )
-    if candidates < _MIN_ACTIVE_VOTERS_SOFT:
-        return 0.0
-
     baseline = _count_active_voters_at_gate(
         votes, accuracy_data, excluded, group_gated, base_gate, 0.0,
     )
     if baseline >= _MIN_ACTIVE_VOTERS_SOFT:
         return 0.0
 
-    # If max relaxation doesn't recover any additional voters beyond
-    # baseline, relaxation is useless: either no signals at all, or genuine
-    # regime break where every sub-47% signal is also sub-41%. Either way,
-    # keep the strict gate so the event shows up in logs.
     best_possible = _count_active_voters_at_gate(
         votes, accuracy_data, excluded, group_gated,
         base_gate, _GATE_RELAXATION_MAX,
     )
+
+    # Suppress relaxation when the most it could achieve is one lone voter.
+    # Codex P2 follow-up (2026-04-17): the previous raw-candidate check let
+    # a 5-candidate scenario with 4 directionally gated signals + 1 borderline
+    # signal at 0.46 slip through - candidate count passed (5), but only 1
+    # voter was actually recoverable, and relaxation let that lone signal
+    # flip the consensus. By checking effective voters at max relaxation and
+    # requiring at least 2, the lone-signal escape is blocked while the
+    # earlier P2 partial-recovery case (4 recoverable + 1 irrecoverable)
+    # still works.
+    if best_possible < 2:
+        return 0.0
+
+    # If max relaxation doesn't recover any additional voters beyond
+    # baseline, relaxation is useless: genuine regime break where every
+    # sub-47% signal is also sub-41%. Keep the strict gate so the event
+    # shows up in logs.
     if best_possible <= baseline:
         return 0.0
 

@@ -191,6 +191,41 @@ class TestComputeGateRelaxation:
             "not a relaxation opportunity."
         )
 
+    def test_lone_recoverable_signal_blocked_from_escape(self):
+        """Codex P2 follow-up (2026-04-17): 5 candidate signals where 4 are
+        directionally gated (buy_accuracy=0.30) and only 1 is recoverable
+        at 0.46. The raw-candidate check passes (5 candidates) but max
+        relaxation can only recover 1 voter. Without a best_possible>=2
+        guard, the breaker would relax to 0.06 and let that lone borderline
+        signal flip consensus from HOLD to BUY. Must return 0.0.
+        """
+        votes = {f"s{i}": "BUY" for i in range(5)}
+        # 4 signals with buy_accuracy=0.30 (directionally gated even at
+        # max relaxation since _DIRECTIONAL_GATE_THRESHOLD=0.40 is not
+        # relaxed).
+        for i in range(4):
+            stats = self._make_stats(0.60)
+            stats["buy_accuracy"] = 0.30
+            votes[f"s{i}"] = "BUY"
+            stats["total_buy"] = 50
+            votes[f"s{i}"] = "BUY"
+            _ = stats  # keep for accuracy dict
+        accuracy = {}
+        for i in range(4):
+            accuracy[f"s{i}"] = {
+                "accuracy": 0.60, "total": 100,
+                "buy_accuracy": 0.30, "sell_accuracy": 0.60,
+                "total_buy": 50, "total_sell": 50,
+            }
+        # 1 borderline signal at 0.46 that would pass at max relaxation.
+        accuracy["s4"] = self._make_stats(0.46)
+        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
+        assert rel == 0.0, (
+            "A single recoverable signal with 4 directionally-gated companions "
+            "must NOT trigger relaxation - that's the exact lone-borderline "
+            "escape the accuracy gate is designed to prevent."
+        )
+
     def test_partial_recovery_when_one_signal_unrecoverable(self):
         """Codex P2 (2026-04-16 follow-up): a single irrecoverable outlier
         must NOT veto relaxation for the rest. Previously best_possible<floor
