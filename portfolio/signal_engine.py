@@ -1289,37 +1289,68 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     #             {"total": 200} - the gate sees no accuracy, the downstream
     #             code default to the safe fallback. The row no longer
     #             masquerades as a 50%-accurate mature signal.
+    # Codex round 13 (2026-04-17): a poisoned accuracy must invalidate its
+    # PAIRED sample count too. Otherwise `{"accuracy": None, "total": 200}`
+    # becomes `{"total": 200}` which downstream still reads as a mature
+    # 50% signal (accuracy defaults to 0.5, samples=200 clears the gate).
+    # Drop-together semantics: overall acc poisoned -> drop (accuracy, total);
+    # buy_accuracy poisoned -> drop (buy_accuracy, total_buy); likewise for
+    # sell. Fields whose pair is clean but themselves clean pass through.
+    import math as _math
+
+    def _coerce_sample_count(val):
+        """Return int >= 0, or None if val is missing/poisoned/invalid."""
+        if val is None:
+            return None
+        try:
+            f = float(val)
+        except (TypeError, ValueError):
+            return None
+        if _math.isnan(f) or _math.isinf(f) or f < 0:
+            return None
+        return int(f)
+
+    _PAIRED = (
+        ("accuracy", "total"),
+        ("buy_accuracy", "total_buy"),
+        ("sell_accuracy", "total_sell"),
+    )
     if accuracy_data:
         _sanitized = {}
         for _k, _v in accuracy_data.items():
             if not isinstance(_v, dict):
                 _sanitized[_k] = {}
                 continue
-            _clean = {}
-            for _field, _val in _v.items():
-                if _field in ("accuracy", "buy_accuracy", "sell_accuracy"):
-                    # Keep only if the value is a valid finite float. If
-                    # poisoned, omit so downstream default fallbacks apply.
-                    _coerced = _safe_accuracy(_val, default=None)
-                    if _coerced is not None:
-                        _clean[_field] = _coerced
-                    # Poisoned -> field omitted -> .get(key, default) uses default.
-                elif _field in ("total", "total_buy", "total_sell"):
-                    # Non-numeric or negative -> omit entirely. Downstream
-                    # samples defaults to 0 which means the signal bypasses
-                    # the min-samples gate (same as a fresh signal).
-                    try:
-                        _f = float(_val) if _val is not None else None
-                    except (TypeError, ValueError):
-                        _f = None
-                    if _f is None:
-                        continue
-                    import math as _math
-                    if _math.isnan(_f) or _math.isinf(_f) or _f < 0:
-                        continue
-                    _clean[_field] = int(_f)
+            _clean = dict(_v)  # start from a copy, then prune.
+            for _acc_key, _cnt_key in _PAIRED:
+                _acc_has = _acc_key in _clean
+                _cnt_has = _cnt_key in _clean
+                if _acc_has:
+                    _clean_acc = _safe_accuracy(_clean.get(_acc_key), default=None)
                 else:
-                    _clean[_field] = _val
+                    _clean_acc = None
+                if _cnt_has:
+                    _clean_cnt = _coerce_sample_count(_clean.get(_cnt_key))
+                else:
+                    _clean_cnt = None
+                # Decide whether to keep each field:
+                #   Both clean      -> keep both.
+                #   Only acc clean  -> keep acc; drop cnt (if it was present-and-poisoned).
+                #   Only cnt clean  -> drop BOTH (count without trustworthy accuracy
+                #                      must not promote the row to a mature signal).
+                #   Neither clean   -> drop both.
+                if _clean_acc is not None and _clean_cnt is not None:
+                    _clean[_acc_key] = _clean_acc
+                    _clean[_cnt_key] = _clean_cnt
+                elif _clean_acc is not None and not _cnt_has:
+                    # Accuracy present (clean), count field absent - keep acc.
+                    _clean[_acc_key] = _clean_acc
+                else:
+                    # Poisoned accuracy OR poisoned count: drop both so the
+                    # row doesn't masquerade as a mature signal. Downstream
+                    # .get() calls then use their safe defaults.
+                    _clean.pop(_acc_key, None)
+                    _clean.pop(_cnt_key, None)
             _sanitized[_k] = _clean
         accuracy_data = _sanitized
     else:
