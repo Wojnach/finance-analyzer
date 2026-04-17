@@ -128,6 +128,45 @@ class TestIskbetsHeadlessEnv:
         assert captured.get("env", {}).get("PF_HEADLESS_AGENT") == "1"
 
 
+class TestMultiAgentSpecialistHeadlessEnv:
+    """Codex P1 #1 follow-up (2026-04-17): the three specialists that
+    launch when config.layer2.multi_agent=true ALSO need PF_HEADLESS_AGENT=1.
+    Without this, they hit the same blocking-prompt failure mode as the
+    single-agent path."""
+
+    def test_specialists_spawn_with_headless_flag(self, monkeypatch, tmp_path):
+        import portfolio.multi_agent_layer2 as mal
+
+        captured_envs = []
+
+        def fake_popen(cmd, **kwargs):
+            captured_envs.append(kwargs.get("env", {}))
+            mock_p = MagicMock()
+            mock_p.pid = 11111 + len(captured_envs)
+            return mock_p
+
+        monkeypatch.setattr(mal.subprocess, "Popen", fake_popen)
+        # Keys must match SPECIALISTS dict, or launch_specialists raises KeyError
+        monkeypatch.setattr(
+            mal, "build_specialist_prompts",
+            lambda ticker, reasons: {
+                name: f"prompt-{name}" for name in mal.SPECIALISTS
+            },
+        )
+        monkeypatch.setattr(
+            mal.shutil, "which",
+            lambda name: "/fake/claude",
+        )
+        # Log dir in tmp_path
+        monkeypatch.setattr(mal, "DATA_DIR", tmp_path)
+
+        mal.launch_specialists("BTC-USD", ["test-trigger"])
+
+        assert len(captured_envs) == 3, "expected 3 specialists launched"
+        for env in captured_envs:
+            assert env.get("PF_HEADLESS_AGENT") == "1"
+
+
 class TestAnalyzeHeadlessEnv:
 
     def test_clean_env_sets_flag(self, monkeypatch):

@@ -25,6 +25,7 @@ def _reset_state():
     ai._agent_proc = None
     ai._agent_log = None
     ai._agent_start = 0
+    ai._agent_start_wall = 0.0
     ai._agent_timeout = 0
     ai._agent_tier = None
     ai._agent_reasons = None
@@ -92,15 +93,17 @@ class TestCheckAgentCompletionNeverNegative:
             "into the invocation log / critical_errors.jsonl."
         )
 
-    def test_timeout_path_clamps_duration_s(self, monkeypatch):
-        """Still-running agent past timeout: the timeout result dict must
-        also never carry a negative duration_s."""
+    def test_timeout_path_without_wall_fallback_safely_skips(self, monkeypatch):
+        """Still-running agent past timeout, poisoned monotonic AND no
+        wall-clock fallback: the timeout branch skips rather than
+        hallucinating a timeout. Next cycle will retry."""
         _reset_state()
         mock_proc = MagicMock()
-        mock_proc.poll.return_value = None  # still running
+        mock_proc.poll.return_value = None
         mock_proc.pid = 99999
         ai._agent_proc = mock_proc
         ai._agent_start = time.time()  # POISONED
+        ai._agent_start_wall = 0.0  # no fallback
         ai._agent_timeout = 120
         ai._agent_tier = 1
         ai._agent_reasons = ["startup"]
@@ -110,16 +113,40 @@ class TestCheckAgentCompletionNeverNegative:
         fake_run.return_value.returncode = 0
         monkeypatch.setattr(ai.subprocess, "run", fake_run)
 
-        # With poisoned _agent_start, _safe_elapsed_s() returns 0.0, so
-        # elapsed > _agent_timeout is False, so the timeout branch does
-        # NOT fire — the function returns None as "still running".
-        # This is the safe behavior: better to wait for the real timeout
-        # (or the next trigger to kill it) than to hallucinate a timeout
-        # with broken timestamps.
         result = ai.check_agent_completion()
         assert result is None
-        # Agent still held
         assert ai._agent_proc is mock_proc
+
+    def test_timeout_path_with_wall_fallback_kills_agent(self, monkeypatch):
+        """Codex P2 #2 (2026-04-17): when monotonic is poisoned BUT the
+        wall-clock fallback is good and shows elapsed > timeout, the kill
+        path MUST still fire. Without this the P1B timeout guarantee is
+        silently disabled by the P2B clamp."""
+        _reset_state()
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_proc.pid = 99999
+        ai._agent_proc = mock_proc
+        ai._agent_start = time.time()  # POISONED monotonic
+        # Wall-clock fallback shows 200s elapsed (past 120s T1 timeout)
+        ai._agent_start_wall = time.time() - 200.0
+        ai._agent_timeout = 120
+        ai._agent_tier = 1
+        ai._agent_reasons = ["startup"]
+        ai._journal_ts_before = "2026-04-17T10:00:00+00:00"
+        ai._telegram_ts_before = "2026-04-17T10:00:00+00:00"
+
+        monkeypatch.setattr(ai, "_log_trigger", lambda *a, **kw: None)
+        fake_run = MagicMock()
+        fake_run.return_value.returncode = 0
+        monkeypatch.setattr(ai.subprocess, "run", fake_run)
+
+        result = ai.check_agent_completion()
+        assert result is not None
+        assert result["status"] == "timeout"
+        # duration_s should be non-negative and reflect the wall elapsed
+        assert result["duration_s"] >= 200.0
+        assert ai._agent_proc is None
 
 
 class TestAuthErrorContextNeverNegative:
@@ -156,9 +183,13 @@ class TestAuthErrorContextNeverNegative:
 
         result = ai.check_agent_completion()
         assert result is not None
+        # Invariant is non-negative. Exact value depends on whether a
+        # wall-clock fallback was available — here _agent_start_wall=0
+        # (no fallback) so duration_s clamps to 0.0.
+        assert result["duration_s"] >= 0.0
         assert result["duration_s"] == 0.0
         # The context passed to detect_auth_failure must also be clean
-        assert seen_context.get("duration_s", 0.0) == 0.0, (
+        assert seen_context.get("duration_s", 0.0) >= 0.0, (
             f"duration_s in critical_errors.jsonl context must be >= 0, "
             f"got {seen_context.get('duration_s')}"
         )

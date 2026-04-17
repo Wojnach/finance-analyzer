@@ -14,25 +14,29 @@ failure modes the loop can't recover from on its own (e.g. the ~3-week
 silent Layer 2 auth outage of March–April 2026 that went undetected
 because `claude -p --bare` exited 0 while printing "Not logged in").
 
-When unresolved errors exist:
+**Before the steps below — are you running headless?**
+If the `PF_HEADLESS_AGENT` environment variable is set to `"1"`, you are
+running as a Layer 2 / bigbet / iskbets / analyze / multi-agent-specialist
+subprocess with NO interactive stdin. The interactive protocol below does
+not apply. Instead:
+
+1. Log the unresolved critical errors as a one-line summary inside your
+   journal entry / trade rationale so they stay surfaced.
+2. Proceed with the trigger task — do NOT ask "how would you like to proceed?".
+   Any prompt that blocks on user input will hang the subprocess until the
+   tier timeout fires with zero work done (exact failure pattern in
+   `data/agent.log` on 2026-04-16, commits `877221a` / `7c9cf36e` /
+   `08d6ea3b`).
+3. If the unresolved errors are directly on the task you were spawned to
+   handle (e.g. a trigger that's already failed once), note it in your
+   decision but still execute.
+
+Interactive sessions (no `PF_HEADLESS_AGENT` env var set) follow these three
+steps when unresolved errors exist:
 
 1. Surface the list to the user verbatim before continuing.
 2. Ask whether to address them first, or proceed with the user's request.
 3. Do not silently ignore them.
-
-**Headless subprocess exception (P2, 2026-04-17):** If the `PF_HEADLESS_AGENT`
-environment variable is set to `"1"`, you are running as a Layer 2 / bigbet /
-iskbets / analyze subprocess with NO interactive stdin. In that case:
-
-1. Log the unresolved critical errors as a one-line summary inside your
-   journal entry / trade rationale so they're still surfaced.
-2. Proceed with the trigger task — do NOT ask "how would you like to proceed?".
-   Any such prompt will block the subprocess until the tier timeout with
-   zero work done (exactly the failure pattern in `data/agent.log` on
-   2026-04-16 that motivated this conditional).
-3. If the unresolved errors are directly on the task you were spawned to
-   handle (e.g. a trigger that's already failed once), note it in your
-   decision but still execute.
 
 To resolve an entry, append a follow-up line to `data/critical_errors.jsonl`:
 
