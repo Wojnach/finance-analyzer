@@ -143,6 +143,12 @@ def launch_specialists(
     agent_env.pop("CLAUDECODE", None)
     agent_env.pop("CLAUDE_CODE_ENTRYPOINT", None)
     agent_env["NODE_OPTIONS"] = "--stack-size=16384"
+    # P2 follow-up (Codex P1 #1, 2026-04-17): specialists spawn as headless
+    # subprocesses with no interactive stdin, same as invoke_agent. Without
+    # this, when multi_agent=true fires, three specialist Claude sessions
+    # hit CLAUDE.md's STARTUP CHECK, see unresolved critical errors, and
+    # hang asking "How would you like to proceed?" until specialist_timeout_s.
+    agent_env["PF_HEADLESS_AGENT"] = "1"
 
     for name, prompt in prompts.items():
         spec = SPECIALISTS[name]

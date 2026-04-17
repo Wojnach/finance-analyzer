@@ -28,6 +28,13 @@ _agent_proc = None
 _agent_log = None
 _agent_log_start_offset = 0  # byte offset of agent.log at invoke time, for auth-error scan on completion
 _agent_start = 0
+# P2B follow-up (Codex P2 #2, 2026-04-17): fallback wall-clock timestamp
+# for timeout enforcement when `_agent_start` (monotonic) gets poisoned.
+# The clamp alone could silently disable the P1B T1 timeout check; this
+# fallback lets _safe_elapsed_s() recover a plausible elapsed from wall
+# clock so the hung agent still gets killed. Always set alongside
+# _agent_start so the pair are in sync.
+_agent_start_wall = 0.0
 _agent_timeout = 900  # per-invocation timeout (set from tier config)
 _agent_tier = None  # tier of the currently running agent
 _agent_reasons = None  # trigger reasons for the current invocation
@@ -158,8 +165,128 @@ def _safe_last_jsonl_ts(path, label):
         return None
 
 
+def _safe_elapsed_s():
+    """Return elapsed-since-invoke seconds, robust to a poisoned _agent_start.
+
+    P2B (2026-04-17): yesterday's 2026-04-16T13:45:45 critical_errors.jsonl
+    entry had duration_s=-1776254571.5 (matches time.monotonic() - time.time()).
+    Indicates some historical path seeded _agent_start with an epoch
+    timestamp instead of a monotonic value. Clamping at the source +
+    logging a diagnostic keeps downstream consumers trustworthy and
+    surfaces the bug if it recurs.
+
+    Codex P2 #2 follow-up (2026-04-17): a naive clamp-to-0 silently
+    disabled the P1B timeout path — `elapsed > _agent_timeout` can never
+    be true when elapsed is always 0. Fall back to `_agent_start_wall`
+    (set alongside `_agent_start` at spawn) so we still recover a
+    plausible elapsed and the hung-agent kill still fires. If both
+    clocks are corrupted, return 0 — that's the pre-existing failure
+    mode, not a worse state.
+    """
+    raw = time.monotonic() - _agent_start
+    if raw >= 0:
+        return raw
+    # Monotonic is poisoned — try the wall-clock fallback.
+    if _agent_start_wall > 0:
+        wall_elapsed = time.time() - _agent_start_wall
+        if wall_elapsed >= 0:
+            logger.warning(
+                "BUG-P2B: monotonic elapsed negative (raw=%.1fs, "
+                "_agent_start=%.1f); falling back to wall-clock "
+                "(%.1fs since _agent_start_wall=%.1f). "
+                "Indicates _agent_start was seeded with a non-monotonic value.",
+                raw, _agent_start, wall_elapsed, _agent_start_wall,
+            )
+            return wall_elapsed
+    # Both clocks bad — clamp to 0 and warn loudly.
+    logger.warning(
+        "BUG-P2B: negative elapsed AND no wall-clock fallback "
+        "(raw=%.1fs, _agent_start=%.1f, _agent_start_wall=%.1f) — "
+        "clamping to 0. Timeout enforcement will not fire this cycle.",
+        raw, _agent_start, _agent_start_wall,
+    )
+    return 0.0
+
+
+def _kill_overrun_agent(fallback_reasons=None, fallback_tier=None):
+    """Kill the running _agent_proc and clear module state.
+
+    P1B (2026-04-17): extracted from ``try_invoke_agent`` so it can also
+    be called from ``check_agent_completion``. Previously the timeout
+    check lived only inside try_invoke_agent, meaning a hung agent could
+    run indefinitely if no new triggers fired (yesterday evidence: T1
+    invoked 16:04:58 with timeout=120s completed at 16:15:01 = 603s).
+
+    Logs the trigger with status="timeout" and clears ``_agent_proc`` /
+    ``_agent_log`` on the way out.
+
+    Args:
+        fallback_reasons: Reason list to use for the trigger log entry if
+            ``_agent_reasons`` is empty (caller context for the missing
+            _reasons.).
+        fallback_tier: Tier to log if ``_agent_tier`` is None.
+
+    Returns:
+        bool: True if the kill succeeded (or the process had already
+        exited). False if the kill command itself failed — caller must
+        NOT spawn a replacement in that case because the old process
+        may still be holding resources.
+    """
+    global _agent_proc, _agent_log
+
+    if _agent_proc is None:
+        return True
+
+    pid = _agent_proc.pid
+    elapsed = _safe_elapsed_s()
+    logger.info("Agent pid=%s timed out (%.0fs), killing", pid, elapsed)
+
+    kill_ok = True
+    if platform.system() == "Windows":
+        # BUG-92: Check taskkill return code to detect kill failure
+        # BUG-189: rc=128 means process already exited — treat as success
+        result = subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(pid)],
+            capture_output=True,
+        )
+        if result.returncode not in (0, 128):
+            logger.error(
+                "taskkill failed (rc=%d): %s",
+                result.returncode,
+                result.stderr.decode(errors="replace").strip(),
+            )
+            kill_ok = False
+        elif result.returncode == 128:
+            logger.info("Agent pid=%s already exited (rc=128)", pid)
+    else:
+        _agent_proc.kill()
+    try:
+        _agent_proc.wait(timeout=15)  # BUG-189: 15s for Claude CLI Node.js teardown
+    except subprocess.TimeoutExpired:
+        if kill_ok:
+            logger.error("Agent pid=%s did not exit after kill+15s wait", pid)
+        kill_ok = False
+
+    if _agent_log:
+        try:
+            _agent_log.close()
+        except Exception as e:
+            logger.warning("Agent log close failed: %s", e)
+        _agent_log = None
+
+    # BUG-91: Log the timed-out invocation before returning
+    _log_trigger(
+        _agent_reasons or fallback_reasons or [],
+        "timeout",
+        tier=_agent_tier or fallback_tier,
+    )
+
+    _agent_proc = None
+    return kill_ok
+
+
 def invoke_agent(reasons, tier=3):
-    global _agent_proc, _agent_log, _agent_start, _agent_timeout
+    global _agent_proc, _agent_log, _agent_start, _agent_start_wall, _agent_timeout
     global _agent_tier, _agent_reasons, _journal_ts_before, _telegram_ts_before
 
     # Check if Layer 2 is auto-disabled due to consecutive stack overflows
@@ -186,47 +313,22 @@ def invoke_agent(reasons, tier=3):
 
     if _agent_proc and _agent_proc.poll() is None:
         # BUG-203: use monotonic clock for elapsed — wall clock is NTP-jump-prone.
-        elapsed = time.monotonic() - _agent_start
+        # P2B (2026-04-17): via _safe_elapsed_s() so a poisoned _agent_start
+        # can't cause a negative elapsed that silently skips the timeout.
+        elapsed = _safe_elapsed_s()
         if elapsed > _agent_timeout:
-            logger.info("Agent pid=%s timed out (%.0fs), killing", _agent_proc.pid, elapsed)
-            kill_ok = True
-            if platform.system() == "Windows":
-                # BUG-92: Check taskkill return code to detect kill failure
-                # BUG-189: rc=128 means process already exited — treat as success
-                result = subprocess.run(
-                    ["taskkill", "/F", "/T", "/PID", str(_agent_proc.pid)],
-                    capture_output=True,
-                )
-                if result.returncode not in (0, 128):
-                    logger.error(
-                        "taskkill failed (rc=%d): %s",
-                        result.returncode, result.stderr.decode(errors="replace").strip(),
-                    )
-                    kill_ok = False
-                elif result.returncode == 128:
-                    logger.info("Agent pid=%s already exited (rc=128)", _agent_proc.pid)
-            else:
-                _agent_proc.kill()
-            try:
-                _agent_proc.wait(timeout=15)  # BUG-189: 15s for Claude CLI Node.js teardown
-            except subprocess.TimeoutExpired:
-                if kill_ok:
-                    logger.error("Agent pid=%s did not exit after kill+15s wait", _agent_proc.pid)
-                kill_ok = False
-            if _agent_log:
-                _agent_log.close()
-                _agent_log = None
-            # BUG-91: Log the timed-out invocation before spawning a new one
-            _log_trigger(
-                _agent_reasons or reasons, "timeout",
-                tier=_agent_tier or tier,
+            # P1B (2026-04-17): helper so check_agent_completion can share
+            # the kill path — see _kill_overrun_agent docstring.
+            kill_ok = _kill_overrun_agent(
+                fallback_reasons=reasons, fallback_tier=tier,
             )
-            # BUG-92: If kill failed, don't spawn new agent (old one may still be running)
+            # BUG-92: If kill failed, don't spawn new agent (old one may
+            # still be running)
             if not kill_ok:
-                logger.error("Not spawning new agent — old process may still be running")
-                _agent_proc = None
+                logger.error(
+                    "Not spawning new agent — old process may still be running"
+                )
                 return False
-            _agent_proc = None
         else:
             logger.info(
                 "Agent still running (pid %s, %.0fs), skipping",
@@ -338,6 +440,14 @@ def invoke_agent(reasons, tier=3):
         agent_env.pop("CLAUDE_CODE_ENTRYPOINT", None)
         # Increase Node.js stack size to prevent stack overflow in Claude CLI
         agent_env["NODE_OPTIONS"] = "--stack-size=16384"
+        # P2 (2026-04-17): mark this subprocess as headless so CLAUDE.md's
+        # STARTUP CHECK protocol doesn't ask "How would you like to proceed?"
+        # when it finds unresolved critical_errors.jsonl entries. The agent
+        # has no stdin (pipe only), so any prompt that blocks on user input
+        # makes it hit the tier timeout with zero work done. The CLAUDE.md
+        # conditional turns that into "log the unresolved entries in your
+        # journal entry and proceed with the trigger task".
+        agent_env["PF_HEADLESS_AGENT"] = "1"
         _agent_proc = subprocess.Popen(
             cmd,
             cwd=str(BASE_DIR),
@@ -348,6 +458,7 @@ def invoke_agent(reasons, tier=3):
         _agent_log = log_fh  # transfer ownership on success
         log_fh = None  # prevent cleanup below from closing it
         _agent_start = time.monotonic()
+        _agent_start_wall = time.time()  # wall-clock fallback for P2B
         _agent_timeout = timeout
         _agent_tier = tier
         _agent_reasons = list(reasons)
@@ -523,11 +634,20 @@ def check_agent_completion():
     """Check if a running agent has completed and log completion info.
 
     Returns:
-        dict with completion info (status, exit_code, duration_s, tier,
-        journal_written, telegram_sent), or None if no agent is running
-        or the agent is still in progress.
+        dict with the following keys (None if no agent is running or the
+        agent is still in progress and under its timeout):
+
+        * ``status`` — "success", "incomplete", "failed", "auth_error",
+          "timeout" (P1B, 2026-04-17), or "stack_overflow"
+        * ``exit_code`` — int or None (None on timeout-kill path)
+        * ``duration_s`` — float, always >= 0 (P2B clamp)
+        * ``tier`` — int, the tier of the completed agent
+        * ``reasons`` — list[str], the triggers for this invocation
+        * ``journal_written`` — bool
+        * ``telegram_sent`` — bool
+        * ``completed_at`` — ISO-8601 UTC timestamp
     """
-    global _agent_proc, _agent_log, _agent_start
+    global _agent_proc, _agent_log, _agent_start, _agent_start_wall
     global _agent_tier, _agent_reasons, _journal_ts_before, _telegram_ts_before
 
     if _agent_proc is None:
@@ -535,11 +655,34 @@ def check_agent_completion():
 
     exit_code = _agent_proc.poll()
     if exit_code is None:
-        # Still running
+        # Still running. P1B (2026-04-17): enforce the wall-clock timeout
+        # here too — the lazy check in try_invoke_agent only fires when a
+        # new trigger arrives, so a hung agent could run indefinitely if
+        # no new triggers came through (yesterday: T1 timeout=120s ran
+        # 603s). Share the same kill helper used by try_invoke_agent to
+        # keep kill semantics identical.
+        elapsed = _safe_elapsed_s()
+        if _agent_timeout and elapsed > _agent_timeout:
+            killed_tier = _agent_tier
+            killed_reasons = list(_agent_reasons or [])
+            _kill_overrun_agent()
+            return {
+                "status": "timeout",
+                "exit_code": None,
+                "duration_s": round(elapsed, 1),
+                "tier": killed_tier,
+                "reasons": killed_reasons,
+                "journal_written": False,
+                "telegram_sent": False,
+                "completed_at": datetime.now(UTC).isoformat(),
+            }
         return None
 
-    # Process has finished — collect completion info
-    duration_s = round(time.monotonic() - _agent_start, 1)
+    # Process has finished — collect completion info.
+    # P2B (2026-04-17): via _safe_elapsed_s() so a poisoned _agent_start
+    # can't produce the negative duration_s seen in yesterday's 13:45:45
+    # auth_failure entry (-1776254571.5, matching time.monotonic() - time.time()).
+    duration_s = round(_safe_elapsed_s(), 1)
     completed_at = datetime.now(UTC).isoformat()
 
     # BUG-97: _last_jsonl_ts can raise OSError if file is locked on Windows
@@ -613,6 +756,11 @@ def check_agent_completion():
         "exit_code": exit_code,
         "duration_s": duration_s,
         "tier": _agent_tier,
+        # Codex P2 #3 follow-up (2026-04-17): include `reasons` so the
+        # completion-path and timeout-path dicts have symmetric shape.
+        # Callers that dispatch on reasons shouldn't need to know which
+        # path produced the dict.
+        "reasons": list(_agent_reasons or []),
         "completed_at": completed_at,
         "journal_written": journal_written,
         "telegram_sent": telegram_sent,
@@ -699,6 +847,7 @@ def check_agent_completion():
     _agent_proc = None
     _agent_log = None
     _agent_start = 0
+    _agent_start_wall = 0.0
     _agent_tier = None
     _agent_reasons = None
     _journal_ts_before = None
@@ -714,8 +863,17 @@ def get_completion_stats(hours=24):
         hours: Number of hours to look back (default 24).
 
     Returns:
-        dict with keys: total, success, incomplete, failed, completion_rate.
-        Returns zeroed stats if no data is available.
+        dict with keys: total, success, incomplete, failed, timeout,
+        auth_error, completion_rate.  Returns zeroed stats if no data is
+        available.
+
+    Codex P2 #4 follow-up (2026-04-17): "timeout" and "auth_error" were
+    being dropped entirely by the status filter. Before P1B, timeouts
+    only fired when a new trigger arrived, so they were rare. After
+    P1B check_agent_completion enforces timeout every cycle — these
+    are now meaningful failure categories that belong in the health
+    rollup. Added as distinct buckets to preserve history and keep
+    completion_rate honest (timeouts count as failures for rate).
     """
     entries = load_jsonl(INVOCATIONS_FILE)
     cutoff = datetime.now(UTC).timestamp() - (hours * 3600)
@@ -724,11 +882,13 @@ def get_completion_stats(hours=24):
     success = 0
     incomplete = 0
     failed = 0
+    timeout = 0
+    auth_error = 0
 
+    tracked_statuses = ("success", "incomplete", "failed", "timeout", "auth_error")
     for entry in entries:
-        # Only count entries that have a completion status (not "invoked" or "skipped_gate")
         entry_status = entry.get("status", "")
-        if entry_status not in ("success", "incomplete", "failed"):
+        if entry_status not in tracked_statuses:
             continue
 
         ts_str = entry.get("ts", "")
@@ -753,6 +913,10 @@ def get_completion_stats(hours=24):
             incomplete += 1
         elif entry_status == "failed":
             failed += 1
+        elif entry_status == "timeout":
+            timeout += 1
+        elif entry_status == "auth_error":
+            auth_error += 1
 
     completion_rate = (success / total * 100) if total > 0 else 0.0
 
@@ -761,5 +925,7 @@ def get_completion_stats(hours=24):
         "success": success,
         "incomplete": incomplete,
         "failed": failed,
+        "timeout": timeout,
+        "auth_error": auth_error,
         "completion_rate": round(completion_rate, 1),
     }
