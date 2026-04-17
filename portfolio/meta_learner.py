@@ -382,12 +382,19 @@ def predict(votes, ticker, hour_utc=None, day_of_week=None, horizon="1d"):
     if not model_path.exists():
         return "HOLD", 0.0
 
-    # Quality gate: skip prediction if model has no real edge (AUC < threshold)
-    # 2026-04-17: use load_json from file_utils (test_io_safety_sweep).
+    # Quality gate: skip prediction if model has no real edge (AUC < threshold).
+    # 2026-04-17: route through load_json (satisfies test_io_safety_sweep).
+    # Codex P2 2026-04-17: load_json returns the parsed JSON as-is for valid
+    # files, so a non-dict payload (``null`` / ``[]`` / string) would raise
+    # AttributeError on ``.get()``. Guard explicitly — prefer fail-closed
+    # (HOLD) to crashing every predict() call when the metrics file is
+    # malformed but parseable.
     metrics_path = MODEL_DIR / f"meta_learner_{horizon}_metrics.json"
     if metrics_path.exists():
         from portfolio.file_utils import load_json
         _m = load_json(metrics_path, default={})
+        if not isinstance(_m, dict):
+            return "HOLD", 0.0
         if _m.get("test_auc", 0.5) < _MIN_AUC_FOR_PREDICTIONS:
             return "HOLD", 0.0
 
@@ -427,13 +434,15 @@ def predict(votes, ticker, hour_utc=None, day_of_week=None, horizon="1d"):
     prob_up = proba[1]
 
     # Use calibrated threshold if available.
-    # 2026-04-17: use load_json from file_utils (test_io_safety_sweep).
+    # 2026-04-17: route through load_json (test_io_safety_sweep). Codex P2:
+    # guard against non-dict payloads (see the _m check above for rationale).
     cal_threshold = 0.5
     metrics_path = MODEL_DIR / f"meta_learner_{horizon}_metrics.json"
     if metrics_path.exists():
         from portfolio.file_utils import load_json
         m = load_json(metrics_path, default={})
-        cal_threshold = m.get("calibrated_threshold", 0.5)
+        if isinstance(m, dict):
+            cal_threshold = m.get("calibrated_threshold", 0.5)
 
     margin = 0.05
     if prob_up > cal_threshold + margin:
