@@ -73,6 +73,29 @@ REGIME_CONFIRM_CHECKS = 2     # require N consecutive BUY checks in same regime
                               # (rejects single-check flips from trending-down → ranging BUY)
 
 # ---------------------------------------------------------------------------
+# Momentum-entry override (2026-04-17)
+# ---------------------------------------------------------------------------
+# When metals_loop's entry-side fast-tick detects an upside breakout it writes
+# a momentum candidate to MOMENTUM_STATE_FILE. If the swing trader sees a
+# fresh candidate for the ticker it is evaluating, the snapshot-conviction
+# gates relax: momentum has already price-confirmed what the voter count
+# would eventually confirm on its own 2-3 cycles later (by which time the
+# move is often half over).
+#
+# The relaxed override only touches MIN_BUY_CONFIDENCE and MIN_BUY_VOTERS.
+# RSI zone, MACD-improving, regime-confirm, and TF-alignment stay at their
+# regular thresholds — those reject *false* breakouts and the user still
+# benefits from them during momentum bursts.
+#
+# SHORT-side momentum is not yet supported. The fast-tick only writes LONG
+# candidates; SHORT_ENABLED=False so there is no production path.
+MOMENTUM_ENTRY_ENABLED = True
+MOMENTUM_MIN_BUY_CONFIDENCE = 0.50   # relaxed from MIN_BUY_CONFIDENCE=0.60
+MOMENTUM_MIN_BUY_VOTERS = 2          # relaxed from MIN_BUY_VOTERS=3
+MOMENTUM_CANDIDATE_TTL_SEC = 300     # candidates older than 5 min are ignored
+MOMENTUM_STATE_FILE = "data/metals_momentum_state.json"
+
+# ---------------------------------------------------------------------------
 # Exit rules
 # ---------------------------------------------------------------------------
 TAKE_PROFIT_UNDERLYING_PCT = 3.0   # 2026-04-14 raised from 2.0 — was exiting too early on

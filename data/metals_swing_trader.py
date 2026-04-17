@@ -12,6 +12,7 @@ Usage from metals_loop.py:
 import datetime
 import json
 import logging
+import os
 import time
 
 import requests
@@ -85,6 +86,11 @@ from metals_swing_config import (
     MIN_BUY_VOTERS,
     MIN_SPREAD_PCT,
     MIN_TRADE_SEK,
+    MOMENTUM_CANDIDATE_TTL_SEC,
+    MOMENTUM_ENTRY_ENABLED,
+    MOMENTUM_MIN_BUY_CONFIDENCE,
+    MOMENTUM_MIN_BUY_VOTERS,
+    MOMENTUM_STATE_FILE,
     POSITION_SIZE_PCT,
     REGIME_CONFIRM_CHECKS,
     RSI_ENTRY_HIGH,
@@ -1559,6 +1565,95 @@ class SwingTrader:
         return all(a == action and r == regime for a, r in recent)
 
     # -------------------------------------------------------------------
+    # Momentum-entry integration (2026-04-17)
+    #
+    # metals_loop writes momentum candidates to MOMENTUM_STATE_FILE via its
+    # entry-side fast-tick. When a fresh unconsumed LONG candidate exists
+    # for the ticker we're evaluating, _evaluate_entry relaxes the
+    # MIN_BUY_CONFIDENCE and MIN_BUY_VOTERS gates — price has already
+    # confirmed the direction faster than the snapshot evaluator ever
+    # could.
+    # -------------------------------------------------------------------
+
+    def _check_momentum_candidate(self, ticker: str) -> dict | None:
+        """Return a fresh unconsumed LONG momentum candidate, else None.
+
+        Freshness rules:
+          - `triggered_at` parses as ISO-8601 and is within
+            MOMENTUM_CANDIDATE_TTL_SEC of now.
+          - `consumed_at` is None.
+          - `direction` is LONG (SHORT candidates are not currently written
+            by the fast-tick, but defend anyway).
+
+        Non-fresh or absent returns None. Any load/parse error is logged at
+        DEBUG and treated as no-candidate (fail-safe: if we can't read the
+        file we fall back to the normal gates, not the relaxed ones).
+        """
+        if not MOMENTUM_ENTRY_ENABLED:
+            return None
+        if not os.path.exists(MOMENTUM_STATE_FILE):
+            return None
+        try:
+            state = load_json(MOMENTUM_STATE_FILE) or {}
+        except Exception:
+            logger.debug(
+                "_check_momentum_candidate: load failed for %s",
+                MOMENTUM_STATE_FILE,
+                exc_info=True,
+            )
+            return None
+        cand = state.get(ticker)
+        if not cand or not isinstance(cand, dict):
+            return None
+        if cand.get("direction") != "LONG":
+            return None
+        if cand.get("consumed_at"):
+            return None
+        try:
+            triggered_iso = cand.get("triggered_at")
+            triggered_dt = datetime.datetime.fromisoformat(triggered_iso)
+        except (TypeError, ValueError):
+            return None
+        now_utc = datetime.datetime.now(datetime.UTC)
+        if triggered_dt.tzinfo is None:
+            # Treat naive timestamps as UTC — defensive; _write always emits UTC.
+            triggered_dt = triggered_dt.replace(tzinfo=datetime.UTC)
+        age_sec = (now_utc - triggered_dt).total_seconds()
+        if age_sec > MOMENTUM_CANDIDATE_TTL_SEC:
+            return None
+        return cand
+
+    def _consume_momentum_candidate(self, ticker: str) -> None:
+        """Mark a ticker's momentum candidate consumed.
+
+        Called after a successful `_execute_buy` so the same burst doesn't
+        re-trigger a relaxed entry on the next cycle. Non-fatal on failure —
+        the TTL is the backstop.
+        """
+        if not os.path.exists(MOMENTUM_STATE_FILE):
+            return
+        try:
+            state = load_json(MOMENTUM_STATE_FILE) or {}
+        except Exception:
+            logger.warning(
+                "_consume_momentum_candidate: load failed",
+                exc_info=True,
+            )
+            return
+        cand = state.get(ticker)
+        if not cand or not isinstance(cand, dict):
+            return
+        cand["consumed_at"] = datetime.datetime.now(datetime.UTC).isoformat()
+        try:
+            atomic_write_json(MOMENTUM_STATE_FILE, state, ensure_ascii=False)
+        except Exception:
+            logger.warning(
+                "_consume_momentum_candidate: atomic_write_json failed for %s",
+                ticker,
+                exc_info=True,
+            )
+
+    # -------------------------------------------------------------------
     # Entry logic
     # -------------------------------------------------------------------
 
@@ -1886,6 +1981,10 @@ class SwingTrader:
             )
             # Reset no-edge streak for this ticker on a successful BUY.
             self.kelly_no_edge_count.pop(underlying_ticker, None)
+            # Mark any momentum candidate consumed so the same burst doesn't
+            # re-trigger a relaxed entry on the next cycle. TTL is still the
+            # backstop if this fails for any reason.
+            self._consume_momentum_candidate(underlying_ticker)
 
         # 2026-04-10 adversarial review S3: periodic "why isn't it buying?"
         # summary. When Kelly consistently returns position_sek=0 the user
@@ -1926,6 +2025,15 @@ class SwingTrader:
         SHORT_CANARY_WARRANTS for canary observation before full rollout.
         The warrant-level canary check happens in _check_entries after
         warrant selection, not here (this method doesn't know the warrant).
+
+        Momentum override (2026-04-17): if metals_loop's entry-side fast-tick
+        has written a fresh LONG candidate for this ticker, the confidence
+        and voter minimums relax to MOMENTUM_MIN_BUY_CONFIDENCE and
+        MOMENTUM_MIN_BUY_VOTERS. Price confirmation from the breakout
+        velocity does the job the extra voters were there to do. Other
+        gates (RSI, MACD, regime confirm, TF alignment) remain at their
+        regular thresholds — they catch false breakouts, which is exactly
+        what you want active when momentum-relaxed.
         """
         buy_count = sig.get("buy_count", 0)
         sell_count = sig.get("sell_count", 0)
@@ -1947,19 +2055,36 @@ class SwingTrader:
         else:
             return False, f"action={action} (need BUY or SELL consensus)"
 
-        # User rule: no signal trades below 60% calibrated confidence
-        if confidence < MIN_BUY_CONFIDENCE:
-            return False, f"confidence {confidence:.2f} < {MIN_BUY_CONFIDENCE}"
+        # Momentum override — LONG only (fast-tick doesn't write SHORT today).
+        momentum = None
+        if direction == "LONG":
+            momentum = self._check_momentum_candidate(ticker)
+        if momentum:
+            min_conf = MOMENTUM_MIN_BUY_CONFIDENCE
+            min_voters = MOMENTUM_MIN_BUY_VOTERS
+            conf_label = f"{min_conf} (momentum-relaxed from {MIN_BUY_CONFIDENCE})"
+            voters_label = f"{min_voters} (momentum-relaxed from {MIN_BUY_VOTERS})"
+        else:
+            min_conf = MIN_BUY_CONFIDENCE
+            min_voters = MIN_BUY_VOTERS
+            conf_label = f"{min_conf}"
+            voters_label = f"{min_voters}"
+
+        # Confidence gate
+        if confidence < min_conf:
+            return False, f"confidence {confidence:.2f} < {conf_label}"
 
         # Require strict majority, not just minimum voters. The 2026-04-09
         # incident fired BUY with buy=3 sell=4 because only MIN_BUY_VOTERS
-        # was checked. Now we also require majority > minority.
+        # was checked. Now we also require majority > minority. Momentum does
+        # NOT relax this — even a breakout should have more voters agreeing
+        # than disagreeing before we take the trade.
         if majority <= minority:
             return False, f"no strict majority: {direction}={majority} vs other={minority}"
 
-        # Minimum voter threshold (belt-and-suspenders alongside majority check)
-        if majority < MIN_BUY_VOTERS:
-            return False, f"{direction}_count={majority} < {MIN_BUY_VOTERS}"
+        # Minimum voter threshold (belt-and-suspenders alongside majority check).
+        if majority < min_voters:
+            return False, f"{direction}_count={majority} < {voters_label}"
 
         # Timeframe alignment — count timeframes voting in our direction.
         tf = sig.get("timeframes", {})
