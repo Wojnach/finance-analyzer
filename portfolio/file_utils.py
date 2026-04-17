@@ -191,18 +191,20 @@ def atomic_append_jsonl(path, entry):
                 # Windows: lock byte 0 (LK_LOCK is blocking). Writes in
                 # append mode always go to EOF regardless of the file
                 # pointer, so seeking to 0 just to lock is safe.
+                # 2026-04-17 codex P2: on brand-new empty files
+                # (size 0) locking byte 0 can fail with EINVAL. We
+                # proceed WITHOUT the lock in that case — a single
+                # creator writer cannot contend with itself, and the
+                # next appender will find a non-empty file and lock
+                # successfully. The lock's purpose is preventing
+                # *interleaving* under contention, which can't happen
+                # when the file has zero bytes.
                 try:
                     os.lseek(fd, 0, os.SEEK_SET)
                     _msvcrt.locking(fd, _msvcrt.LK_LOCK, 1)
                     locked_win = True
                 except OSError:
-                    # Locking a non-existent byte 0 on a brand-new empty
-                    # file can fail; extend by one byte then retry once.
-                    f.write(b"")
-                    f.flush()
-                    os.lseek(fd, 0, os.SEEK_SET)
-                    _msvcrt.locking(fd, _msvcrt.LK_LOCK, 1)
-                    locked_win = True
+                    locked_win = False  # skip lock on empty file
             elif _fcntl is not None:
                 _fcntl.flock(fd, _fcntl.LOCK_EX)
             f.write(data)

@@ -397,19 +397,27 @@ def monitor_trade(
                         capture_output=True, text=True, timeout=60,
                         cwd=str(ROOT),
                     )
-                    # 2026-04-17 adversarial review: check exit code so
-                    # crashes don't go invisible — the 3-week Layer 2
-                    # auth outage used exactly this pattern (exit 0 +
-                    # empty stdout + "Not logged in" on stderr).
+                    # 2026-04-17 adversarial review (codex P2): check
+                    # exit code AND surface stderr even on exit 0. The
+                    # 3-week Layer 2 auth outage used exactly the
+                    # "returncode==0 + empty stdout + auth error on
+                    # stderr" pattern, so a non-empty stderr must also
+                    # raise a warning regardless of exit code.
+                    stderr_txt = (result.stderr or "").strip()
+                    stdout_txt = (result.stdout or "").strip()
                     if result.returncode != 0:
                         log.warning(
                             "Fin fish exited %d: stderr=%r stdout=%r",
                             result.returncode,
-                            (result.stderr or "").strip()[:200],
-                            (result.stdout or "").strip()[:200],
+                            stderr_txt[:200], stdout_txt[:200],
                         )
-                    elif result.stdout.strip():
-                        log.info("Fin fish: %s", result.stdout.strip()[:200])
+                    elif stderr_txt:
+                        log.warning(
+                            "Fin fish exit=0 but stderr non-empty: %r",
+                            stderr_txt[:200],
+                        )
+                    elif stdout_txt:
+                        log.info("Fin fish: %s", stdout_txt[:200])
                 except Exception as e:
                     log.warning("Fin fish run failed: %s", e)
                 last_fish_run = now_ts

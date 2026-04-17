@@ -257,27 +257,36 @@ def place_order(page, account_id, ob_id, side, price, volume):
     Result dict contains: http_status, parsed (response body), order_id.
 
     Returns (False, {"error": ...}) for refusal cases: missing CSRF,
-    or order total below the 1000 SEK courtage threshold. The latter
-    matches the `raise ValueError` convention in
+    or BUY orders below the 1000 SEK courtage threshold. For BUYs
+    this matches the `raise ValueError` convention in
     `portfolio/avanza_session.py:place_order` — but since metals-loop
     callers handle (ok, result) tuples and retry next cycle, a soft
-    refusal keeps the loop resilient.
+    refusal keeps the loop resilient. SELLs are never refused on
+    size (a drawn-down position may have <1000 SEK notional but must
+    still be exitable — codex P1 2026-04-17); only a WARNING is
+    logged to surface the fee impact.
     """
     csrf = get_csrf(page)
     if not csrf:
         return False, {"error": "no CSRF token"}
 
-    # 2026-04-17: 1000 SEK min-courtage guard.
+    # 2026-04-17: 1000 SEK min-courtage guard. BUY: refuse. SELL: warn.
     try:
         total = round(float(price) * float(volume), 2)
     except (TypeError, ValueError):
         total = 0.0
-    if total < 1000.0:
-        logger.error(
-            "place_order refused: total %.2f SEK < 1000 SEK (side=%s ob=%s vol=%s price=%s)",
-            total, side, ob_id, volume, price,
+    if 0 < total < 1000.0:
+        if str(side).upper() == "BUY":
+            logger.error(
+                "place_order refused: BUY total %.2f SEK < 1000 SEK (ob=%s vol=%s price=%s)",
+                total, ob_id, volume, price,
+            )
+            return False, {"error": f"order total {total:.2f} SEK below minimum 1000 SEK"}
+        logger.warning(
+            "place_order: SELL total %.2f SEK below 1000 SEK courtage threshold "
+            "(ob=%s vol=%s price=%s) — exit path proceeds anyway",
+            total, ob_id, volume, price,
         )
-        return False, {"error": f"order total {total:.2f} SEK below minimum 1000 SEK"}
 
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
     payload = {
