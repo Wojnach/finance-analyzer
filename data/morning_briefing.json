@@ -1,101 +1,94 @@
 {
-  "date": "2026-04-11",
-  "generated_at": "2026-04-10T23:52:00+02:00",
-  "session_type": "after-hours-research",
-  "market_outlook": "cautious-bullish",
-  "confidence": 0.62,
-  "headline": "Per-ticker directional gating shipped. Metals at ATH, BTC holding $73K. Bank earnings week ahead — Hormuz dominates.",
-
+  "date": "2026-04-17",
+  "generated_at": "2026-04-17T21:51:42.730520+00:00",
+  "market_outlook": "bullish",
+  "confidence": 0.65,
+  "rationale": "Risk-on momentum from Hormuz reopening. S&P 500 new ATH 7,126. DXY weakening (97.70). Gold holding near $4,878 despite risk-on (structural bid). Whale BTC accumulation massive (270K in 30 days). ETH ETF inflows rotating in. BUT: ceasefire expires Monday April 21 \u2014 binary event that could reverse everything.",
   "key_levels": {
-    "XAG-USD": {"support": 72.00, "resistance": 80.00, "current": 76.02, "note": "3rd weekly gain. G/S ratio compressed to ~63 (from 100+ in 2025). BUY consensus 57%. fear_greed 91.3% accuracy on XAG is the system's best single signal. ministral (20.4%) now directionally gated. Industrial demand: 680 Moz/year, 120-125 Moz solar alone."},
-    "XAU-USD": {"support": 4500, "resistance": 4900, "current": 4750, "note": "Near ATH. Central bank buying 760t annualized in 2026. USD share of global FX reserves at 30-year low. Goldman/JPM range: $4,000-$6,300. System SELL may reflect RSI overbought — structural bid enormous."},
-    "BTC-USD": {"support": 69500, "resistance": 75000, "current": 73318, "note": "Up 2.5% on ETF inflows ($358M, BlackRock $269M). Morgan Stanley MSBT launched. Holding 38.2% Fib at $71,780. claude_fundamental 73.0% is best BTC signal. 6 signals gated below 35% per-ticker."},
-    "ETH-USD": {"support": 2000, "resistance": 2300, "current": 2254, "note": "ETH/BTC ratio weak. Foundation staked 70K ETH. Follows BTC — wait for BTC breakout."},
-    "MSTR": {"support": 115, "resistance": 140, "current": 131.43, "note": "SELL consensus 74%. econ_calendar 89.4% accuracy — extraordinary. BTC proxy with leverage. Bank earnings next week matter."}
+    "BTC-USD": {
+      "support": 73990,
+      "resistance": 85000,
+      "current": 77328,
+      "note": "Whale accumulation, neg funding. $85K next checkpoint. Watch $76.7K ATR stop (Bold)."
+    },
+    "ETH-USD": {
+      "support": 2297,
+      "resistance": 2500,
+      "current": 2430,
+      "note": "Approaching $2,500 prophecy checkpoint. ETF inflows strong. Below-coinflip consensus (47.7%) \u2014 confidence penalty now active."
+    },
+    "MSTR": {
+      "support": 148,
+      "resistance": 180,
+      "current": 166.46,
+      "note": "+29% in 7d, overextended. Multi-TF SELL. 780K BTC holdings, avg cost $75.6K. Below-coinflip consensus (45.9%)."
+    },
+    "XAU-USD": {
+      "support": 4750,
+      "resistance": 4950,
+      "current": 4855,
+      "note": "Holding near ATH despite risk-on = very bullish. Central banks 1,200+ tonnes pace. GLD 920t."
+    },
+    "XAG-USD": {
+      "support": 78,
+      "resistance": 85,
+      "current": 81.44,
+      "note": "Broke $80. 6th supply deficit year. Fresnillo cut -9%. China strategic classification. Prophecy $120, 0.8 conviction."
+    }
   },
-
   "trade_ideas": [
     {
-      "instrument": "XAG-USD",
-      "direction": "LONG (thesis hold)",
-      "rationale": "Silver $76, structural bull case intact. G/S ratio 63 compressing toward 50 target. fear_greed 91.3% accuracy validates contrarian thesis. Tonight's directional gating removes ministral BUY noise (20.4%) from XAG consensus. Industrial demand (solar) provides floor.",
-      "entry_zone": "$72-74 (pullback to support)",
-      "target": "$80 near-term, $120 thesis target",
-      "stop": "$68",
-      "confidence": 0.68
+      "instrument": "BTC-USD",
+      "direction": "LONG (hold)",
+      "rationale": "Whale accumulation 270K BTC in 30 days. Exchange reserves 7yr low. Neg funding = squeeze potential. F&G extreme fear = contrarian bullish. Hold above ATR stops.",
+      "entry_zone": "Already in (Bold: $74,556)",
+      "target": "$85,000 (checkpoint)",
+      "stop": "$73,990 (2x ATR)",
+      "confidence": 0.65
     },
     {
-      "instrument": "XAU-USD",
-      "direction": "HOLD (at ATH resistance)",
-      "rationale": "Gold at $4,750, near ATH. Structural bid from central banks (1,100+ tonnes/year) and ETF inflows. But RSI overbought short-term. Wait for pullback or breakout confirmation. Hormuz escalation = higher, resolution = 3-5% pullback.",
-      "entry_zone": "$4,500-4,600 (pullback)",
-      "target": "$5,000",
-      "stop": "$4,300",
+      "instrument": "ETH-USD",
+      "direction": "LONG (hold)",
+      "rationale": "ETF inflows $187M/week rotating from BTC. Morgan Stanley ETH trust filing. On-chain +41% WoW. Approaching $2,500 prophecy checkpoint. BUT: consensus accuracy 47.7% \u2014 new penalty applied.",
+      "entry_zone": "Already in (Patient: $2,331, Bold: $2,319)",
+      "target": "$2,500 (prophecy checkpoint)",
+      "stop": "$2,297-$2,309 (ATR)",
       "confidence": 0.55
     },
     {
-      "instrument": "BTC-USD",
-      "direction": "HOLD (accumulation zone)",
-      "rationale": "BTC $73K, ranging. Strong ETF inflows ($358M) suggest institutional accumulation. claude_fundamental (73%) and econ_calendar (64.4%) are best BTC signals — both now with per-ticker directional accuracy. 6 sub-35% signals gated per-ticker. Wait for $75K breakout or $69.5K support test.",
-      "entry_zone": "Above $75K (breakout) or $69,500 (support)",
-      "target": "$85,000",
-      "stop": "$67,000",
-      "confidence": 0.48
+      "instrument": "XAG-USD",
+      "direction": "LONG (watch)",
+      "rationale": "Supply deficit deepening. Broke $80. Mexico moratorium + China strategic + Fresnillo cut. If ceasefire fails Monday, metals spike. No position \u2014 wait for high-confidence entry.",
+      "entry_zone": "$78-79 pullback or $83 breakout confirmation",
+      "target": "$89 (short-term), $120 (prophecy)",
+      "stop": "$76",
+      "confidence": 0.6
     }
   ],
-
-  "week_ahead_catalysts": [
-    "Mon Apr 13: Goldman Sachs Q1 earnings — bank earnings kickoff. Credit stress from oil shock?",
-    "Tue Apr 14: JPM, Wells Fargo, Citi Q1 earnings + PPI data release",
-    "Wed Apr 15: Bank of America, Morgan Stanley Q1 earnings",
-    "Apr 28-29: FOMC meeting — 0% cut prob, 10.3% hike prob. Fed on hold at 3.50-3.75%",
-    "Ongoing: Strait of Hormuz — effectively closed despite ceasefire. 5 ships/day vs 100+ normal. THE dominant macro variable.",
-    "Ongoing: USTR Section 301 China hearings (April-May) — potential new tariff trigger",
-    "IMF meetings starting Apr 13 — global coordination on energy crisis"
+  "system_improvements_implemented": [
+    "Per-ticker consensus accuracy penalty (Stage 6): ETH-USD gets 0.608x confidence, MSTR 0.536x. Prevents acting on below-coinflip consensus.",
+    "7 new tests added for the penalty cascade."
   ],
-
-  "system_improvements_shipped": [
-    "Per-ticker directional accuracy: accuracy_by_ticker_signal() now returns buy_accuracy/sell_accuracy fields per ticker×signal pair. Enables the directional gate to suppress individual BUY/SELL votes based on per-ticker history.",
-    "Directional gate threshold raised: 0.35 → 0.40. Now catches macro_regime BUY (38.9%) and fibonacci SELL (35.9%) that previously passed.",
-    "BUG-158 override propagation: per-ticker override now copies directional fields (correct_buy, total_buy, buy_accuracy, etc.) so directional gating works with per-ticker data, not just global averages.",
-    "New tests: directional accuracy fields, directional asymmetry (BUY 33% vs SELL 100%), macro_regime BUY gating at 40%."
+  "system_improvements_proposed": [
+    "IC-based signal weighting (priority 1, 3 days) \u2014 replace binary accuracy gating with continuous IC",
+    "Regime-conditioned per-signal weights (priority 2, 5 days) \u2014 learn per-signal regime performance",
+    "mRMR signal correlation pruning (priority 3, 2 days) \u2014 identify truly independent signals",
+    "ATR volatility position sizing (priority 4, 2 days) \u2014 scale positions inversely with vol"
   ],
-
-  "signal_audit_summary": {
-    "total_signals": 36,
-    "active_signals": 32,
-    "disabled": ["ml", "crypto_macro", "cot_positioning", "credit_spread_risk"],
-    "top_overall": {"econ_calendar": "65.2% (4224 sam)", "claude_fundamental": "62.7% (8440 sam)", "qwen3": "60.0% (3623 sam)"},
-    "worst_overall": {"funding": "29.9% (536 sam, but 74.2% at 3h)", "futures_flow": "36.3% (1051 sam)", "fibonacci": "42.3% (14185 sam)"},
-    "per_ticker_extremes": {
-      "biggest_gap": "ministral: MSTR 71.7% vs XAG 20.4% (51.3pp spread)",
-      "fear_greed": "XAG 91.3% vs MSTR 49.0% (42.3pp)",
-      "forecast": "XAG 74.6% vs BTC 29.3% (45.3pp)"
-    },
-    "directional_asymmetries": {
-      "qwen3": "BUY 30.4% vs SELL 74.3% (43.9pp gap)",
-      "claude_fundamental": "BUY 66.3% vs SELL 34.7% (31.6pp gap)",
-      "orderbook_flow": "BUY 98.3% (59 sam) vs SELL 6.3% (92pp gap, small sample)"
-    },
-    "signals_gated_in_ranging": 14,
-    "correlation_clusters": ["volatility_cluster (94.9% agreement, all underperforming)", "momentum_cluster (100% agreement rsi+bb+mr, best-performing)"],
-    "regime": "ranging for all instruments"
-  },
-
   "risk_warnings": [
-    "CRITICAL: Strait of Hormuz effectively closed despite ceasefire. Any escalation → oil $105+, risk-off. Any resolution → 3-8% commodity pullback.",
-    "HIGH: Record-low UMich sentiment (47.6) — extreme fear is contrarian bullish but signals genuine economic distress.",
-    "HIGH: Bank earnings next week (GS, JPM, WFC, C, BAC, MS) — credit stress from oil shock would hit all risk assets.",
-    "MEDIUM: CPI 3.3% headline but core 2.6% — energy-driven, not broad-based. More months of Hormuz closure = more hot CPI prints = Fed hike risk.",
-    "LOW: Per-ticker directional gating is NEW. Monitor first 48h for unexpected signal suppression (too many signals gated = reduced ensemble diversity)."
+    "CRITICAL: US-Iran ceasefire expires Monday April 21. Binary event. If fails: oil $100+, BTC back to $70K, risk-off.",
+    "MSTR overextended +29% in 7 days \u2014 multi-TF SELL consensus. Not held, but proxy risk for BTC longs.",
+    "ETH/MSTR consensus accuracy below coinflip \u2014 system is net-negative on these tickers. New penalty mitigates but doesnt solve.",
+    "Earnings week: GOOGL + TSLA Apr 22, MSFT Apr 28, AMZN + META Apr 29, AAPL Apr 30.",
+    "F&G at 21 may be stale \u2014 crypto market recovered from 8 to 56 by Apr 16. Verify live reading Monday."
   ],
-
-  "next_session_priorities": [
-    "Monitor directional gating impact: check if consensus quality improves (fewer bad signal votes)",
-    "Per-ticker signal blacklisting: ministral on XAG (20.4%) should be fully suppressed, not just directionally gated",
-    "Raise accuracy gate to 47%: would additionally gate sentiment (46.5%, 38K samples). Worth testing.",
-    "Research: HMM-based regime detection to replace static ranging/trending classification",
-    "Research: IC-based signal weighting (Information Coefficient) for dynamic weight allocation",
-    "Monitor bank earnings impact on MSTR and crypto sentiment"
+  "research_highlights": [
+    "Signal accuracy regime shift: fear_greed crashed 58.6% to 25.9% at 1d, fibonacci surged 42.5% to 68.2%. Ranging market rewards pattern/mean-reversion, punishes macro.",
+    "Correlation cluster already handled: calendar/macro_regime/structure/momentum_factors at 0.12x penalty. Architecture is correct.",
+    "Gold NOT selling on peace news = structural bid from central banks. Very bullish signal.",
+    "BTC whale wallets accumulated 270K BTC in 30 days (largest since 2013). Exchange reserves at 7-year low.",
+    "Silver supply: 6th consecutive deficit year. Fresnillo cut guidance 9%. Mexico moratorium. China classified silver as strategic.",
+    "Per-ticker deep dives: XAG G/S ratio mean-reversion has Sharpe 0.68-0.73. BTC MVRV Z-Score at 1.2 = accumulation zone.",
+    "LLM signals (Ministral 62-68%, Qwen3 60-62%) consistently outperforming traditional technical indicators."
   ]
 }

@@ -1,37 +1,81 @@
-# After-Hours Research Plan — 2026-04-14
+# After-Hours Research Plan — 2026-04-17
 
-## Research Findings Summary
+## Findings Summary
 
-### Signal Audit KEY FINDINGS
-1. **Mega trend cluster**: trend+macro_regime+structure+heikin_ashi+momentum_factors+oscillators+volatility_sig — 8 signals with 85-99.7% mutual agreement
-2. **Sentiment in freefall**: 33.8% recent 3h accuracy
-3. **Calendar/econ_calendar**: 0% agreement — perfectly opposing, cancel each other
-4. **Directional bias**: claude_fundamental 10:1 BUY:SELL, structure 11.5:1, calendar BUY-only
-5. **Hyperactive**: volume_flow 87.7%, mean_reversion 76.7%, momentum 72.7%
-6. **MSTR at 46.5%** — generic signals on a BTC proxy don't work
-7. **ETH at 48.1%** — follows BTC 97% of the time
+### Phase 0: System Review
+- System healthy, all 28 signal modules OK, 21 cycles, 0 errors
+- Both portfolios profitable: Patient +4.2% ETH, Bold +3.7% BTC / +4.7% ETH
+- No trades executed, all HOLD decisions (correct — ranging regime)
+
+### Phase 1: Market Research
+- **CRITICAL**: US-Iran ceasefire expires Monday April 21 — binary event
+- S&P 500 record 7,126, Nasdaq 13-straight gain
+- Oil crashed 11.5% (Hormuz reopening)
+- BTC whale accumulation: 270K BTC in 30 days (largest since 2013)
+- Gold holding $4,878 despite risk-on = very bullish structural bid
+- Silver broke $80, supply deficit deepening (6th year)
+- DXY fell to 97.70, dollar weakness tailwind for metals + crypto
+- ETH ETF inflows rotating in ($187M/week)
+- MSTR: 3 BTC purchases in April, 780K total holdings
+
+### Phase 3: Signal Audit
+1. **Directional asymmetry** — Qwen3 BUY=30.3% (gated), SELL=74.3%. Claude_fundamental BUY=65.5%, SELL=33.6% (gated). System already gates at 40%; raising to 45% catches `momentum` SELL (45.0%).
+2. **Correlation clusters** — Already well-handled. `trend_direction` has 8 signals at 0.12x penalty. Dynamic clustering from signal_log correlations.
+3. **Per-ticker consensus BELOW coin flip** — ETH-USD: 47.7-49.6%. MSTR: 45.9-47.2%. System is net negative on these. Need per-ticker gate.
+4. **Zero-sample signals** — 8 signals (cot_positioning, futures_basis, hurst_regime, shannon_entropy, vix_term_structure, gold_real_yield_paradox, cross_asset_tsmom, copper_gold_ratio) have 0 BUY/SELL votes at ALL horizons. Always HOLD = wasting compute.
+5. **Regime shift** — Fear & Greed crashed 58.6% -> 25.9% at 1d recent. Trend surged 40.3% -> 61.6% at 3h recent. Mean-reversion and pattern signals outperforming macro signals.
+
+---
 
 ## Implementation Plan
 
-### Batch 1: Correlation group realignment
-**Files:** `portfolio/signal_engine.py`
-- Move `momentum_factors` from `macro_external` to `trend_direction` (0.593-0.621 corr with cluster)
-- Remove `structure` from `volatility_cluster` (belongs in `trend_direction`: 0.608 with trend)
-- Add `oscillators` to `trend_direction` (0.463 with heikin_ashi, 83.4% agreement)
-- Tighten `trend_direction` penalty from 0.2 to 0.12 (now 8 members, need strict penalty)
-- Keep `structure` also in `fundamental_cluster` (dynamic groups will pick best fit)
+### Batch 1: Signal Gating Improvements (signal_engine.py)
+**Files**: `portfolio/signal_engine.py`
 
-### Batch 2: Directional bias penalty
-**Files:** `portfolio/signal_engine.py`
-- Add directional bias detection in `_weighted_consensus`
-- Signals with >90% one-directional activity get 0.5x weight penalty
-- Affected: calendar (100% BUY), econ_calendar (100% SELL), news_event (100% SELL)
+1. **Raise directional gate threshold from 0.40 -> 0.45**
+   - Catches `momentum` SELL at 45.0% (currently ungated)
+   - Also catches any other borderline cases in the 40-45% range
+   - Risk: may over-gate some signals with marginal directional accuracy. But 45% is still below coin flip — these directions are noise.
+   - Verify: assertion at line 383 that relaxed overall gate > directional gate still holds
 
-### Batch 3: Research deliverables commit
-- Commit all JSON research outputs
+2. **Add per-ticker consensus accuracy gate**
+   - When per-ticker consensus accuracy at this horizon is < 50% with 500+ samples, log a warning and apply confidence penalty (0.5x)
+   - Don't force HOLD (too aggressive) — just reduce confidence so Layer 2 sees the signal is untrustworthy
+   - Needs per-ticker accuracy data passed into consensus function (already available via `ticker` param)
 
-## Deferred
-- IC-based weighting — needs rolling IC infrastructure
-- HMM regime detection — complex, separate session
-- MSTR BTC-proxy — needs shared state refactoring
-- ATR position sizing — portfolio_mgr changes
+### Batch 2: Zero-Sample Signal Investigation
+**Files**: `portfolio/signals/*.py` (read-only investigation)
+
+- Audit why 8 signals always vote HOLD — are they gated by horizon, asset class, or always missing data?
+- If they're always HOLD: add them to a `NEVER_VOTED_SIGNALS` log entry for monitoring
+- Don't disable them — they may start voting when conditions change
+
+### Batch 3: Tests
+**Files**: `tests/test_signal_engine.py`
+
+- Test directional gate at new 0.45 threshold
+- Test per-ticker confidence penalty
+
+### Batch 4: Research Deliverables
+**Files**: `data/morning_briefing.json`
+
+- Write morning briefing combining all phase findings
+- Send Telegram notification
+
+---
+
+## What NOT to implement (deferred)
+
+- **Regime-adaptive signal selection** — System already has 70/30->90/10 recency blending + crisis mode. Good enough for now.
+- **IC-based weighting** — IC module exists (`ic_computation.py`). Integration is medium effort, defer to next session.
+- **Walk-forward validation** — Needs backtesting infra, not a quick fix.
+- **New signal modules** — Wait for Phase 2 quant research results.
+
+## Execution Order
+
+1. Create worktree: `research/daily-2026-04-17`
+2. Batch 1: signal_engine.py changes + run tests
+3. Batch 2: zero-sample signal investigation (read-only)
+4. Batch 3: new tests
+5. Merge to main, push
+6. Write morning briefing

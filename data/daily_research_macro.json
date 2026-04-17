@@ -1,45 +1,73 @@
 {
-  "date": "2026-04-14",
-  "generated_at": "2026-04-14T21:34:00.098825+00:00",
-  "market_summary": "Risk-on day driven by Iran peace talks optimism. S&P 500 +1.1%, Nasdaq +1.8%. Oil dropped $6 to $93 as ceasefire held and negotiations resumed. JPMorgan beat Q1 expectations (EPS $5.94, +13% YoY) but Wells Fargo missed. Tech led gains (Oracle +5%, NVDA/PLTR continuing climb). Bitcoin +5.2% to $74.4K, ETH +8.1% to $2.37K on risk-on sentiment. Gold pulled back from $4.9K range, silver stabilizing ~$75.90.",
+  "date": "2026-04-17",
+  "generated_at": "2026-04-17T21:00:00Z",
+  "market_summary": "Massive risk-on day. Iran declared Strait of Hormuz 'completely open' for commercial traffic, triggering broad rally. S&P 500 hit fresh record at 7,126. Nasdaq Composite 13th straight gain (longest since 1992). Russell 2000 new ATH at 2,776.90. Oil cratered: WTI -11.5% to $83.78, Brent -10.8% to $88.67 — second-largest single-day drop since war began. Energy stocks (XOM, BP, CVX) sold off hard. Dollar weakened to 97.70 (DXY), third consecutive weekly decline. Bitcoin surged past $77K on risk-on momentum. Gold held near $4,878 despite risk-on, showing structural bid. Silver broke above $80. Fed rate at 3.50-3.75%, one cut still expected in 2026 but timing unclear due to war-driven inflation uncertainty.",
   "key_events_tomorrow": [
-    "April 15: No major scheduled releases (PPI was today Apr 14, Retail Sales Apr 21)",
-    "April 15: Tax Day USA \u2014 potential volatility from fund flows and tax-loss selling",
-    "April 15: Continued US-Iran negotiations \u2014 ceasefire expiry approaching",
-    "April 21: Advance Monthly Retail Sales for March 2026",
-    "Next FOMC: Check schedule \u2014 potential May/June meeting window"
+    "April 18 (Saturday): Markets closed. No scheduled releases.",
+    "April 21 (Monday): US-Iran ceasefire expires — CRITICAL binary event. Either extended or escalation resumes.",
+    "April 21: Capital One Q1 earnings (after close), Halliburton Q1 earnings (morning)",
+    "April 22: Alphabet (GOOGL) Q1 earnings, Tesla (TSLA) Q1 earnings — major market movers",
+    "April 28: Microsoft Q1 earnings",
+    "April 29: Amazon, Meta Platforms, Block earnings",
+    "April 30: Apple Q1 earnings",
+    "OPEC+ next meeting: May 3 — review of 206K bpd April output hike",
+    "Next FOMC: May 5-6 (expected hold at 3.50-3.75%)"
   ],
   "overnight_risks": [
-    "US-Iran ceasefire fragile \u2014 Trump announced Hormuz blockade on Iranian oil, but both sides still negotiating",
-    "Oil at $93-100 \u2014 any breakdown in talks could spike to $110+ quickly",
-    "Asia open: risk-on continuation likely given US session strength",
-    "Tax Day selling pressure possible \u2014 some forced liquidation",
-    "MSTR added 13,927 BTC for $1B at avg $71.9K \u2014 if BTC drops below 70K, unrealized loss pressure"
+    "US-Iran ceasefire expires April 21 — THE dominant risk. If not extended, oil spikes back toward $100+, risk-off across all assets. Weekend headlines critical.",
+    "Asia session Friday was cautious: Nikkei -1.75% to 58,476 (profit-taking after record high), CSI300 -0.17%, Hang Seng -1.01%. Suggests some skepticism about ceasefire durability.",
+    "Oil crash -11% today may trigger forced covering in energy longs and commodity funds — potential secondary effects on metals positioning.",
+    "Bitcoin rally past $77K may face resistance at $78K double-top — ceasefire euphoria fading per CoinDesk analysis.",
+    "Earnings week ahead (GOOGL, TSLA, MSFT, AMZN, META, AAPL) could dominate sentiment and overshadow geopolitics.",
+    "MSTR holding 780,897 BTC at avg cost $75,577 — currently underwater. Any BTC pullback to $73K creates significant NAV pressure."
   ],
   "instrument_news": {
-    "BTC-USD": "At $74.4K (+5.2%). Strategy/MSTR added 13.9K BTC for $1B at $71.9K avg. Total holdings now 766,970 BTC (~$58B). ATH was $128.2K (Oct 2025). TD Cowen target $140K by late 2026. Risk-on sentiment helping but still well below ATH.",
-    "ETH-USD": "At $2.37K (+8.1%). Outperforming BTC this week (+12.4% vs +8.1% weekly). ETH/BTC ratio recovering but still at multi-year lows. Conservative estimates $10K, bullish $40K long-term.",
-    "MSTR": "At ~$140 (+5%). Added 13.9K BTC. TD Cowen raised PT to $385 from $350. Sumitomo Mitsui cut holdings. Pure BTC proxy trade \u2014 moves with BTC + leverage premium. Analysts coverage initiated at Jefferies/BTIG.",
-    "XAU-USD": "Pulled back to $4,740-4,766 from recent highs. JPM forecast $5,055/oz by Q4 2026. Bullish above $4,900, key resistance at $5,060. Support at $4,700. Central bank buying continues at record pace.",
-    "XAG-USD": "Stabilizing at $75.90, above 0.5 Fib at $75.54. Bullish above $73.80, targeting $79 and $90. 6th consecutive annual supply deficit (67M oz). Industrial demand (solar/EV/AI) creating structural shortage."
+    "BTC-USD": "Surged past $77K on Hormuz reopening risk-on wave, +5% in 24h. But CoinDesk notes ceasefire boost 'fizzling out' as traders want real-world results. Whale accumulation massive: 270,000 BTC accumulated by 1000+ BTC wallets in past 30 days (largest since 2013). Exchange reserves at 7-year low (2.21M BTC, 5.88% of supply). BTC ETFs saw $325M outflows on April 13 as capital rotated to ETH ETFs. Double-top resistance near $76-78K. Institutional accumulation strong but retail fear persists.",
+    "ETH-USD": "Outperforming BTC as ETF flows rotate in. Weekly ETH ETF inflows hit $187M (strongest of 2026, reversing 3 weeks of $308M outflows). Single-day $120M inflow on Apr 7 alongside Morgan Stanley S-1 filing for dedicated ETH trust. Cumulative ETH ETF inflows now $11.68B. BlackRock ETHA dominates with $6.5B AUM. On-chain activity jumped 41% week-over-week. ETH/BTC ratio recovering.",
+    "MSTR": "Rallied from ~$119 to ~$166 in 7 days (+29%). Three BTC purchases in April: (1) 4,871 BTC for $330M at avg $67.7K on Apr 1-5, (2) 13,927 BTC for $1B at avg $71.9K on Apr 13, (3) 22,337 BTC (largest 2026 purchase) funded via STRC preferred shares. Total holdings now 780,897 BTC at avg cost $75,577. Trading at massive discount to analyst consensus target of $367.64 (180% implied upside). TD Cowen, Jefferies, BTIG all bullish. Pure leveraged BTC proxy — BTC rally directly lifts MSTR.",
+    "XAU-USD": "Held near $4,878 despite massive risk-on day — shows structural bid. Previous ATH was $5,594.82 (Jan 29, 2026). Gold is NOT selling off on peace optimism, suggesting central bank buying and ETF flows provide floor. GLD holdings rose to 920 tonnes (up from 840 at year-end). Central bank purchases on track for 1,200+ tonnes in 2026. JPM/Goldman forecast $4,000-$6,300 range. UBP reaffirms $6,000 target. COT: producer/commercial positions remain bullish.",
+    "XAG-USD": "Broke above $80 for first time in weeks. 6th consecutive annual supply deficit projected (150-200M oz shortfall in 2026). Fresnillo (world's #1 primary silver producer) cut 2026 guidance 9% to 42-46.5 Moz. Mexico mining moratorium continues (25% of global supply). China classified silver as strategic material, tightening exports. Oil crash helps silver via lower mining costs, but structural deficit unchanged. Michael Oliver predicting $500/oz long-term. Near-term forecast: potential move to $89 by Apr 23."
   },
-  "metals_outlook": "Gold correcting from highs but structural bull intact. JPM $5,055 Q4 target. Silver supply deficit persists for 6th year. COT data (Apr 7): Gold specs 205K long vs 49K short (4.2:1 ratio, still heavily bullish but reducing). Silver specs 33K long vs 9K short (3.5:1 ratio, stable). Key: Gold needs to hold $4,700, silver needs to hold $73.80 for continued uptrend.",
-  "oil_outlook": "WTI dropped to $93 from $99 as Iran ceasefire optimism grew. Brent around $100. OPEC+ output fell 7.9M bpd in March due to Hormuz shutdown. US blockade on Iranian oil shipments adds supply risk. Floor near $90-95. Binary risk: peace = $85, escalation = $110+.",
-  "sentiment_shift": "Dramatic risk-on shift. Fear fading as Iran signals willingness to negotiate 5-year nuclear moratorium. Markets recapturing pre-war levels. F&G likely improving from 21 (extreme fear) range. But ceasefire fragile \u2014 could reverse on any escalation headline.",
+  "metals_outlook": "Gold structural bull intact — holding near $4,878 even on massive risk-on day (Hormuz open). Central bank buying 1,200+ tonnes pace in 2026. GLD holdings 920t, up 80t since year-end. COT still bullish (producer/commercial). Key: gold NOT selling off on peace news = very strong signal. Silver broke $80, supply deficit deepening (6th year). Fresnillo guidance cut -9%, Mexico moratorium, China strategic classification all tightening supply. If ceasefire fails Monday, both metals spike. If ceasefire holds, gold may consolidate $4,700-4,900 but silver's industrial demand (solar/EV/AI) provides independent bid.",
+  "oil_outlook": "WTI crashed 11.5% to $83.78 on Hormuz reopening. Brent -10.8% to $88.67. Second-largest single-day drop since war began. But ceasefire expires April 21 — binary event. OPEC+ added 206K bpd in April (SA +62K, Russia +62K). Next OPEC+ meeting May 3. If ceasefire holds: WTI floor near $80-85. If ceasefire fails: rapid spike back to $95-105. Energy stocks (XOM, BP, CVX) sold off hard. EIA noted sharp Q1 crude price increases. Oil crash helps disinflation narrative, supports Fed cut case.",
+  "sentiment_shift": "Fear & Greed Index recovered dramatically: from 8 (extreme fear, early April) to 56 (greed) by April 16. One of the fastest sentiment swings in crypto history. The Apr 17 reading of 21 cited in the system may be stale or from a different index variant. The shift from single-digit fear to greed reflects: (1) Hormuz reopening, (2) oil crash easing inflation fears, (3) BTC whale accumulation, (4) ETH ETF inflows rotating. However, ceasefire expiry on April 21 is a sentiment cliff — if it fails, expect rapid reversal back to extreme fear.",
+  "dxy_analysis": "DXY fell to 97.70, down 0.52% on the day. Third consecutive weekly decline (-2.38% over past month). Dollar weakness driven by: (1) reduced safe-haven demand as Hormuz reopens, (2) oil crash easing inflation expectations, (3) lower probability of additional Fed tightening. Fed funds at 3.50-3.75%, one cut expected in 2026. Dollar weakness is tailwind for gold, silver, BTC, and all risk assets. Key level: if DXY breaks below 97, could accelerate to 95 — very bullish for metals and crypto.",
+  "swedish_market": "Riksbank held rate at 1.75% for 4th consecutive meeting (March). Core inflation (CPIF ex-energy) dropped to 1.1% in March — lowest since July 2021. Swedish Spring Budget presented April 13 with SEK 7.7B in measures. VAT on food halved in April 2026 (temporarily lowers inflation). SEK was best-performing G10 currency in 2025 (+16.8% vs USD). Economy growing 2.5% in 2026. Avanza warrant trading hours: 08:15-21:55 CET. Oil crash positive for Swedish consumers and inflation outlook.",
   "cot_positioning": {
     "gold": {
+      "note": "COT data as of Apr 7 (latest available). Producer/commercial positions remain bullish with no signs of trend reversal despite elevated prices.",
       "spec_long": 205368,
       "spec_short": 49063,
       "net_long": 156305,
       "ratio": "4.2:1",
-      "trend": "reducing longs (-2234), adding shorts (+4663)"
+      "trend": "reducing longs slightly, adding shorts — but still heavily net long"
     },
     "silver": {
+      "note": "COT data as of Apr 7. Stable positioning.",
       "spec_long": 32810,
       "spec_short": 9393,
       "net_long": 23417,
       "ratio": "3.5:1",
-      "trend": "slightly reducing longs (-653), reducing shorts (-166)"
+      "trend": "slightly reducing longs and shorts — stable bullish positioning"
     }
-  }
+  },
+  "earnings_next_week": [
+    {"date": "2026-04-21", "company": "Capital One Financial", "ticker": "COF"},
+    {"date": "2026-04-21", "company": "Halliburton", "ticker": "HAL"},
+    {"date": "2026-04-22", "company": "Alphabet", "ticker": "GOOGL"},
+    {"date": "2026-04-22", "company": "Tesla", "ticker": "TSLA"},
+    {"date": "2026-04-28", "company": "Microsoft", "ticker": "MSFT"},
+    {"date": "2026-04-29", "company": "Amazon", "ticker": "AMZN"},
+    {"date": "2026-04-29", "company": "Meta Platforms", "ticker": "META"},
+    {"date": "2026-04-29", "company": "Block", "ticker": "XYZ"},
+    {"date": "2026-04-30", "company": "Apple", "ticker": "AAPL"}
+  ],
+  "critical_binary_events": [
+    {
+      "event": "US-Iran ceasefire expiry",
+      "date": "2026-04-21",
+      "if_positive": "Oil stays $80-85, risk-on continues, DXY breaks 97, BTC targets $80K, gold consolidates $4,700-4,900",
+      "if_negative": "Oil spikes to $100+, Hormuz re-blocked, risk-off across board, BTC back to $70K, gold spikes to $5,000+, F&G crashes back to extreme fear"
+    }
+  ]
 }

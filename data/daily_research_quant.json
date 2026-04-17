@@ -1,121 +1,178 @@
 {
-  "date": "2026-04-14",
-  "generated_at": "2026-04-14T21:36:25.692379+00:00",
+  "date": "2026-04-17",
   "research_topics": [
-    "IC-based dynamic signal weighting",
-    "HMM regime detection for signal selection",
-    "Multi-agent debate systems (TradingAgents, Apex Quant)",
-    "Signal correlation pruning via PCA",
-    "ATR-based volatility-targeting position sizing",
-    "Sentiment analysis degradation and recalibration",
-    "Walk-forward optimization for continuous parameter tuning"
+    "Regime-Adaptive Signal Weighting",
+    "Walk-Forward Signal Validation",
+    "Information Coefficient (IC) Weighting",
+    "LLM Trading Agents",
+    "Volatility-Targeting Position Sizing",
+    "Signal Correlation Pruning"
   ],
   "findings": [
     {
-      "topic": "IC-based Dynamic Signal Weighting",
-      "finding": "Factor weights dynamically adjusted based on rolling Information Coefficient (IC = correlation between signal and future returns). When a signals recent IC declines, its weight automatically decreases toward zero. Empirical results show IC-weighted strategies outperform equal-weighted.",
-      "relevance_to_us": "CRITICAL - our system uses equal voting (1 signal = 1 vote). Signals with 40% accuracy get same vote weight as 74% signals. IC-based weighting would naturally downweight failing signals like trend (40.3%) and upweight funding (74.2%).",
+      "topic": "Regime-Adaptive Signal Weighting",
+      "finding": "RAM-Net (Regime Aware Meta-weight Net) is a meta-learning framework that dynamically assigns sample weights conditioned on both loss patterns and current market regime. It reinterprets historical data according to relevance under prevailing conditions, distinguishing regime-specific noise from informative signals. QuantInsti published a full Python walkthrough combining HMM (2-state: low-vol, high-vol) with separate Random Forest classifiers per regime. The ensemble-HMM approach matched SPY total return (+50%) in 2024-2026 OOS with identical Sharpe while avoiding high-vol drawdowns.",
+      "relevance_to_us": "CRITICAL. Our system uses static regime penalties (ranging 0.75x, high-vol 0.80x). These are hardcoded multipliers that don't learn. We should train per-regime signal weight vectors. The HMM + specialist model pattern directly addresses our F&G crash (58.6% -> 25.9%) and Fibonacci surge (42.5% -> 68.2%). We already have hurst_regime.py and regime_alerts.py as regime detectors -- they just don't feed back into signal weighting.",
       "implementation_difficulty": "medium",
       "expected_impact": "high",
-      "source": "arxiv.org/html/2508.18592v1"
+      "source": "https://dl.acm.org/doi/10.1145/3768292.3770374"
     },
     {
-      "topic": "HMM Regime Detection + Regime-Filtered Signal Selection",
-      "finding": "HMM with 2-3 states trained on returns+volatility. Different signal subsets activated per regime. Regime-adaptive position sizing reduces in high-vol regimes.",
-      "relevance_to_us": "HIGH - we detect regime but dont use it to SELECT which signals to trust. Trend signal is 40.3% overall but 61.6% recently - likely trending regime where it works.",
-      "implementation_difficulty": "hard",
+      "topic": "Regime-Adaptive Signal Weighting",
+      "finding": "Multi-model ensemble-HMM voting framework for regime shift detection. Tree-based ensemble + HMM identifies transitions between bull/bear/neutral with hybrid voting. The rho-T score represents probability-weighted likelihood of positive return based on historical win rate of current regime. Key implementation: train HMM on 4-year rolling window of daily returns, predict regime probabilities, route to specialist models.",
+      "relevance_to_us": "We already have 7 regime types in regime_alerts.py. The missing piece is connecting regime state to per-signal accuracy lookups. Adding a regime column to signal_log.db and computing per-regime accuracy is a quick win. Our accuracy_stats.py tracks per-signal hit rates but doesn't condition on regime.",
+      "implementation_difficulty": "easy",
       "expected_impact": "high",
-      "source": "medium.com/@pta.forwork, quantstart.com"
+      "source": "https://www.aimspress.com/article/id/69045d2fba35de34708adb5d"
     },
     {
-      "topic": "Multi-Agent Debate (TradingAgents / Apex Quant)",
-      "finding": "Bull and Bear agents debate with structured rounds. TradingAgents v0.2.3 supports Claude 4.6. Apex Quant uses 3 personas. Both show improved Sharpe ratio vs single-agent.",
-      "relevance_to_us": "MEDIUM - our Layer 2 already uses bull/bear debate but single-pass. Could add structured 2-round debate.",
-      "implementation_difficulty": "hard",
+      "topic": "Walk-Forward Signal Validation",
+      "finding": "Combinatorial Purged Cross-Validation (CPCV) generates multiple random train-test partitions with purge gaps, producing a distribution of OOS performance. Uses CombinatorialPurgedSplit(n_splits=100-1000, train_size_pct=0.7, test_size_pct=0.1, purge_size=10). Output: Probabilistic Sharpe Ratio (PSR) distribution -- select via weighted median of top 5 candidates. Lower Probability of Backtest Overfitting (PBO) and superior Deflated Sharpe Ratio vs traditional walk-forward. Caveat: cannot anticipate true structural breaks.",
+      "relevance_to_us": "We have walk_forward_optimize() in signal_weight_optimizer.py (30d train, 7d test) and purge gap in meta_learner.py (_PURGE_DAYS=2). But we use single-path walk-forward, not CPCV. The meta_learner audit (2026-04-13) found severe overfitting (train 76% vs test 47% at 3h). CPCV would give us confidence intervals on weight stability instead of single-point estimates.",
+      "implementation_difficulty": "medium",
       "expected_impact": "medium",
-      "source": "arxiv.org/abs/2412.20138"
+      "source": "https://www.quantbeckman.com/p/with-code-combinatorial-purged-cross"
     },
     {
-      "topic": "Signal Correlation Pruning via PCA",
-      "finding": "PCA compresses correlated signals, reducing dimensionality. Filter-based feature selection removes redundant features. RL-based alpha weighting outperforms equal-weighted.",
-      "relevance_to_us": "HIGH - 32 active signals, many likely correlated (trend+EMA+heikin_ashi, momentum+oscillators+momentum_factors). Pruning reduces noise.",
+      "topic": "Walk-Forward Signal Validation",
+      "finding": "Anchored walk-forward (expanding training window) vs sliding walk-forward (fixed window). Anchored uses more data but may include stale regimes. Sliding is better for regime-shift-prone markets. Walk-forward remains the industry standard for realistic trading simulation even though CPCV shows better overfitting mitigation.",
+      "relevance_to_us": "Our walk-forward uses sliding windows (fixed 30d/7d). Given our regime-shift problem, sliding is correct. But for signals with limited samples (COT, on-chain) where more data helps, an anchored variant would be useful.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "low",
+      "source": "https://arxiv.org/html/2512.12924v1"
+    },
+    {
+      "topic": "Information Coefficient (IC) Weighting",
+      "finding": "IC-based dynamic weighting outperforms competing methods with returns nearly 4x higher than single ML algorithm and 2x higher than evaluation-metric-based weighting. Rolling historical IC (correlation of predicted vs actual returns) dynamically adjusts weights. Key advantage over accuracy: IC captures magnitude, not just direction. A signal correctly predicting 10% moves but missing 0.5% moves has poor accuracy but excellent IC. IC degrades gracefully while accuracy can flip 58% to 26% on small samples.",
+      "relevance_to_us": "CRITICAL. Our system uses accuracy (hit rate) for gating and weighting -- exactly the problem causing dramatic regime shifts. IC gives: (1) continuous quality metric instead of binary gate, (2) natural magnitude handling, (3) more stable weighting. The 47% accuracy gate with 6pp relaxation circuit breaker is a symptom of using the wrong metric. Implementation: compute rank correlation of signal confidence vs realized return per signal/ticker/horizon.",
       "implementation_difficulty": "medium",
       "expected_impact": "high",
-      "source": "arxiv.org/html/2508.18592v1"
+      "source": "https://medium.com/coding-nexus/mastering-the-information-coefficient-your-key-to-smarter-factor-investing-244531e45538"
     },
     {
-      "topic": "ATR-Based Position Sizing",
-      "finding": "Position size = dollar_risk / (ATR * multiplier). ADX modifies multiplier. Q1 2026 study: ATR-based risk management reduced drawdowns by 43% vs fixed-lot.",
-      "relevance_to_us": "HIGH - we use fixed budget allocations. ATR-based sizing would naturally reduce positions in volatile markets.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "alphaexcapital.com, quantifiedstrategies.com"
-    },
-    {
-      "topic": "Sentiment Signal Degradation",
-      "finding": "Sentiment scores often lack robust predictive power for real-time trading. Continuous recalibration needed. GNN-based models improve over traditional NLP.",
-      "relevance_to_us": "CRITICAL - sentiment crashed from 46.5% to 33.8% recent 3h. CryptoBERT may need recalibration or gating.",
+      "topic": "Information Coefficient (IC) Weighting",
+      "finding": "IC stability (IC_IR = mean(IC) / std(IC)) is as important as magnitude. A signal with IC=0.03 but IC_IR=0.5 is more valuable than IC=0.08 with IC_IR=0.2. Rolling IC windows of 60-120 observations recommended for stability assessment. Before changing models, verify signal delivers positive and stable IC across time, sectors, and sizes.",
+      "relevance_to_us": "We should compute IC_IR for all 33 signals. This identifies consistently informative signals (high IC_IR) vs occasionally lucky ones (high IC but low IC_IR). Our LLM signals (60-68% accuracy) likely have high IC_IR while F&G (crashed from 58% to 26%) likely has low IC_IR -- confirming they should be weighted differently regardless of recent accuracy.",
       "implementation_difficulty": "easy",
       "expected_impact": "high",
-      "source": "arxiv.org/html/2507.09739v1"
+      "source": "https://arxiv.org/pdf/2010.08601"
     },
     {
-      "topic": "Walk-Forward Optimization",
-      "finding": "Rolling-window: optimize in-sample, test out-of-sample, slide forward. Prevents overfitting. Best practice for production trading systems.",
-      "relevance_to_us": "MEDIUM - signal parameters are static. WFO could re-optimize periodically. High implementation cost for marginal gains.",
+      "topic": "LLM Trading Agents",
+      "finding": "TradingAgents v0.2.3 (March 2026): 7 specialized roles (Fundamentals, Sentiment, News, Technical + Researcher + Trader + Risk Manager) built on LangGraph. Supports GPT-5.x, Gemini 3.x, Claude 4.x, Grok 4.x. Communication via structured reports, not unstructured dialogue. AgenticTrading uses DAG Planner Agent for task decomposition, MCP for top-down control, A2A for peer communication. Memory Agent as shared contextual hub.",
+      "relevance_to_us": "Our Layer 2 is a single Claude agent handling all roles. Multi-role decomposition is interesting but overkill -- we already have specialized signals. The key insight is structured report format between agents, reducing information loss. Our agent_summary_compact.json serves a similar purpose. The Memory Agent concept is relevant to our vector_memory.py and memory_consolidation.py modules.",
       "implementation_difficulty": "hard",
       "expected_impact": "medium",
-      "source": "blog.quantinsti.com"
+      "source": "https://github.com/TauricResearch/TradingAgents"
+    },
+    {
+      "topic": "LLM Trading Agents",
+      "finding": "FinGPT v3: LoRA-finetuned LLMs achieving best scores on most financial sentiment datasets with low cost. FinRobot: open-source AI agent platform for financial analysis. Key finding: domain-specific LoRA fine-tuning on financial text significantly outperforms general-purpose LLMs for sentiment tasks. Active development through 2026.",
+      "relevance_to_us": "We use CryptoBERT and Trading-Hero-LLM for sentiment. FinGPT's LoRA approach validates our unsloth fine-tuning plan (deferred). Fine-tuning Ministral-8B or Qwen3-8B on our signal_log.db data could push local LLM accuracy from 60-68% toward 70%+.",
+      "implementation_difficulty": "hard",
+      "expected_impact": "medium",
+      "source": "https://github.com/AI4Finance-Foundation/FinGPT"
+    },
+    {
+      "topic": "Volatility-Targeting Position Sizing",
+      "finding": "Core formula: Position Size = Account Risk Dollars / (ATR x ATR Multiplier). When ATR increases by X%, reduce position by same percentage. Parameters: 14-period ATR, 2.0-3.0x multiplier, 1-2% risk per trade. When 14-day ATR > 6-month median, drop risk by 25-50%. Vol parity: each asset sleeve contributes equal risk regardless of individual volatility.",
+      "relevance_to_us": "Our risk_management.py has ATR-based stops but position sizing is NOT volatility-normalized. Bold strategy especially needs this -- it lost money during high-vol periods. For warrants with 5x leverage: effective_ATR = underlying_ATR x leverage_factor. Formula is trivial to implement.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "high",
+      "source": "https://quantstrategy.io/blog/using-atr-to-adjust-position-size-volatility-based-risk/"
+    },
+    {
+      "topic": "Volatility-Targeting Position Sizing",
+      "finding": "Volatility targeting equalizes risk across time (scales position inversely with current vol), while volatility parity equalizes risk across assets. Pyramiding adds to winners but increases correlation risk. Single-asset uses vol targeting; multi-asset uses vol parity. Best approach depends on portfolio structure.",
+      "relevance_to_us": "We trade 5 instruments across two portfolios. Vol parity would normalize allocation so XAG (high vol) gets smaller position than XAU (lower vol). Currently positions don't account for cross-asset vol differences. With 5x leverage warrants, vol parity is especially important.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "high",
+      "source": "https://concretumgroup.com/position-sizing-in-trend-following-comparing-volatility-targeting-volatility-parity-and-pyramiding/"
+    },
+    {
+      "topic": "Signal Correlation Pruning",
+      "finding": "mRMR (Minimum Redundancy Maximum Relevance) selects features maximally relevant to target while minimally redundant with each other. Available via smazzanti/mrmr package and feature-engine library. Uber uses it in production ML. Also: noise-free mutual information (removing noise entropy) improves feature selection. Combining Pearson correlation (linear) with normalized MI (nonlinear) captures complex dependencies.",
+      "relevance_to_us": "CRITICAL. We have 33 active signals but many are correlated (RSI + Stochastic, MACD + PPO, multiple momentum oscillators). Redundant signals inflate voting power. mRMR on signal_log.db per-ticker per-horizon would identify minimum non-redundant subset. A correlation-group gate exists per .claude/rules/signals.md -- mRMR would make it principled. Could reduce effective signals from 33 to 15-20 independent ones.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "high",
+      "source": "https://github.com/smazzanti/mrmr"
+    },
+    {
+      "topic": "Signal Correlation Pruning",
+      "finding": "For time series, hybridization of PCA and kernel regression based on MI addresses finding suitable target variables. Pruning redundant features before model training improves both accuracy and interpretability. Feature selection using MI with correlation coefficient: combine linear and nonlinear measures in ensemble evaluation function.",
+      "relevance_to_us": "We should compute a signal correlation matrix and identify groups with >0.7 pairwise correlation. Within each group, keep only the highest-IC signal and gate the rest. Our meta_learner.py (LightGBM) could use mRMR as pre-processing to reduce overfitting from correlated features.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "medium",
+      "source": "https://www.mdpi.com/2078-2489/16/9/724"
     }
   ],
   "recommended_improvements": [
     {
-      "title": "IC-based dynamic signal weighting (replace equal voting)",
-      "description": "Compute rolling 7-day IC for each signal. Use IC as vote weight instead of equal 1.0. Auto-downweight failing signals.",
+      "title": "IC-Based Signal Weighting (replace accuracy gating)",
+      "description": "Replace binary accuracy gating (47% threshold) with continuous IC-based weighting. Compute rolling IC (rank correlation of signal confidence vs realized return) and IC_IR (IC stability) for all 33 signals per ticker per horizon. Weight signals by IC_IR instead of accuracy. Gate on IC_IR < 0.1 instead of accuracy < 47%. This directly addresses regime-shift accuracy crashes and circuit breaker complexity.",
       "priority": 1,
+      "effort_days": 3,
+      "files_affected": [
+        "portfolio/accuracy_stats.py",
+        "portfolio/signal_engine.py",
+        "portfolio/outcome_tracker.py",
+        "portfolio/signal_db.py"
+      ]
+    },
+    {
+      "title": "Regime-Conditioned Signal Weights",
+      "description": "Add regime column to signal_log.db. Compute per-regime accuracy and IC for each signal. Train per-regime weight vectors using walk-forward optimizer. Replace hardcoded 0.75x/0.80x regime penalties with learned multipliers. Use HMM (2-3 states) on returns+vol to classify regime, feeding back into signal_engine.py weighting.",
+      "priority": 2,
+      "effort_days": 5,
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/signal_weight_optimizer.py",
+        "portfolio/accuracy_stats.py",
+        "portfolio/regime_alerts.py",
+        "portfolio/signal_db.py",
+        "portfolio/indicators.py"
+      ]
+    },
+    {
+      "title": "mRMR Signal Correlation Pruning",
+      "description": "Run mRMR on signal_log.db to identify minimum non-redundant signal subset per ticker per horizon. Compute pairwise signal correlations and mutual information. Auto-gate redundant signals (>0.7 correlation with a higher-IC signal). Reduces effective count from 33 to ~15-20 truly independent signals, improving consensus quality. Use smazzanti/mrmr package.",
+      "priority": 3,
       "effort_days": 2,
       "files_affected": [
         "portfolio/signal_engine.py",
+        "portfolio/meta_learner.py",
         "portfolio/accuracy_stats.py"
       ]
     },
     {
-      "title": "Gate sentiment signal when recent accuracy < 40%",
-      "description": "Auto-gate sentiment when 7-day accuracy drops below 40%. Currently at 33.8% - actively harmful.",
-      "priority": 2,
-      "effort_days": 0.5,
-      "files_affected": [
-        "portfolio/signal_engine.py"
-      ]
-    },
-    {
-      "title": "Signal correlation matrix and redundancy detection",
-      "description": "Compute pairwise correlation of signal outputs over 30-day window. Warn when correlation > 0.8.",
-      "priority": 3,
-      "effort_days": 1,
-      "files_affected": [
-        "portfolio/accuracy_stats.py",
-        "portfolio/signal_engine.py"
-      ]
-    },
-    {
-      "title": "ATR-based position sizing",
-      "description": "Replace fixed budget with ATR-scaled sizing. Regime-adjusted multipliers.",
+      "title": "ATR-Based Volatility Position Sizing",
+      "description": "Implement position_size = (account_risk * risk_pct) / (ATR_14 * multiplier * leverage). Add vol-parity across instruments so each contributes equal risk. For warrants: effective_ATR = underlying_ATR * leverage_factor. When 14d ATR > 6-month median, auto-reduce risk by 25%. Integrate into trade_guards.py and risk_management.py.",
       "priority": 4,
-      "effort_days": 1,
+      "effort_days": 2,
       "files_affected": [
         "portfolio/risk_management.py",
+        "portfolio/trade_guards.py",
         "portfolio/portfolio_mgr.py"
       ]
     },
     {
-      "title": "Recency-weighted accuracy for auto-gating",
-      "description": "Use 70% recent 7d + 30% all-time for gate decision instead of all-time only.",
+      "title": "CPCV Upgrade for Walk-Forward Optimizer",
+      "description": "Upgrade signal_weight_optimizer.py from single-path walk-forward to Combinatorial Purged Cross-Validation. Generate 100+ train-test partitions with purge gaps. Output weight confidence intervals and PSR distribution instead of single-point estimates. Use PSR 10th percentile for robust parameter selection.",
       "priority": 5,
-      "effort_days": 1,
+      "effort_days": 3,
       "files_affected": [
-        "portfolio/signal_engine.py",
-        "portfolio/accuracy_stats.py"
+        "portfolio/signal_weight_optimizer.py",
+        "portfolio/meta_learner.py"
+      ]
+    },
+    {
+      "title": "FinGPT LoRA Fine-tuning for Local LLMs",
+      "description": "Fine-tune Ministral-8B or Qwen3-8B on signal_log.db decision data using LoRA/QLoRA (unsloth). Train on historical signal snapshots labeled with actual outcomes. Could push local LLM accuracy from 60-68% toward 70%+. Validated by FinGPT's success. Use existing plan from memory/unsloth_finetune_plan.md.",
+      "priority": 6,
+      "effort_days": 5,
+      "files_affected": [
+        "portfolio/signals/ministral_signal.py",
+        "portfolio/signals/qwen3_signal.py"
       ]
     }
   ]

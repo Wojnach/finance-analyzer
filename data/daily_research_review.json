@@ -1,94 +1,118 @@
 {
-  "date": "2026-04-14",
-  "generated_at": "2026-04-14T21:32:37.630925+00:00",
+  "date": "2026-04-17",
+  "generated_at": "2026-04-17T21:33:20.915008+00:00",
   "system_health": {
     "status": "healthy",
-    "cycle_count": 44,
+    "cycle_count": 21,
     "error_count": 0,
-    "uptime_hours": 7.3,
+    "uptime_seconds": 12340,
     "all_signals_ok": true,
-    "last_module_failures": {
-      "ts": "2026-04-10",
-      "modules": [
-        "monte_carlo",
-        "price_targets",
-        "equity_curve"
-      ]
-    }
+    "last_module_failures": [
+      "monte_carlo",
+      "price_targets",
+      "equity_curve"
+    ],
+    "module_failure_time": "2026-04-17T14:14:12Z"
   },
   "trades_today": [
-    {
-      "time": "2026-04-14T19:10:04Z",
-      "strategy": "bold",
-      "action": "BUY",
-      "ticker": "ETH-USD",
-      "trigger": "ETH-USD BUY(80%)"
-    }
+    "No new trades executed. Both strategies held positions.",
+    "Patient: HOLD ETH-USD (entry $2,331, current $2,430, +4.2%)",
+    "Bold: HOLD BTC-USD (entry $74,556, current $77,328, +3.7%) + ETH-USD (entry $2,319, current $2,430, +4.7%)"
   ],
-  "layer2_decisions_today": {
-    "total_invocations": 20,
-    "patient_actions": {
-      "HOLD": 20
-    },
-    "bold_actions": {
-      "HOLD": 19,
-      "BUY": 1
-    },
-    "last_trigger": "ETH-USD consensus SELL (65%) at 21:17 UTC"
+  "metals_trades_today": "No metals trades since March 5. System dormant on metals execution.",
+  "prices_at_close": {
+    "BTC-USD": 77328.0,
+    "ETH-USD": 2429.5,
+    "MSTR": 166.46,
+    "XAG-USD": 81.44,
+    "XAU-USD": 4854.72,
+    "fx_usd_sek": 9.1574
   },
+  "regime": "ranging",
+  "fear_greed_index": 21,
+  "layer2_invocations": "15+ invocations today, all resulted in HOLD decisions",
   "signals_that_were_right": [
-    "funding (74.2% at 3h, 535 sam) \u2014 best individual signal",
-    "calendar (67.9% at 3h, 4928 sam) \u2014 strong seasonal/calendar effects",
-    "econ_calendar (59.9% at 3h) \u2014 economic event proximity works",
-    "qwen3 (59.4% at 3h, 61.8% recent) \u2014 local LLM performing well",
-    "news_event (70% recent 3h!) \u2014 surging in recent period",
-    "XAU-USD consensus 55.6% at 3h \u2014 decent for metals",
-    "XAG-USD consensus 53.5% at 3h \u2014 slightly above random"
+    "Contrarian fear thesis (F&G 21) \u2014 BTC +2.8%, ETH +2.7% recovery validated",
+    "BTC negative funding (-0.013) \u2014 short squeeze potential confirmed by price recovery",
+    "Fibonacci recent accuracy surge to 68.2% at 1d \u2014 regime shift captured",
+    "Ministral recent accuracy 68.0% at 1d, 62.6% at 3h \u2014 LLM signals outperforming",
+    "Mean reversion 65.4% recent at 1d \u2014 correct signal for ranging market"
   ],
   "signals_that_were_wrong": [
-    "trend (40.3% at 3h, 11125 sam) \u2014 actively harmful, below coin flip",
-    "oscillators (43.0% at 3h) \u2014 worse than random",
-    "fibonacci (43.3% at 3h) \u2014 consistently bad",
-    "macd (43.7% at 3h) \u2014 bad BUY accuracy",
-    "sentiment (33.8% recent 3h!) \u2014 catastrophically wrong recently",
-    "forecast (38.3% recent 3h) \u2014 time-series models degrading",
-    "fear_greed (25.9% recent 1d) \u2014 contrarian approach failing recently",
-    "ETH-USD consensus only 48.1% at 3h \u2014 below coin flip",
-    "MSTR consensus only 46.5% at 3h \u2014 below coin flip"
+    "Fear & Greed 1d recent: crashed to 25.9% (from 58.6% all-time) \u2014 contrarian logic failing in sustained fear",
+    "Macro regime 1d recent: 30.3% \u2014 macro signals broken in ranging",
+    "News event 1d recent: 29.5% \u2014 headline analysis not predicting well at 1d",
+    "Forecast 1d recent: 36.1% \u2014 time-series models failing",
+    "Structure 1d recent: 36.1% \u2014 structural breakout signals unreliable",
+    "Trend 1d recent: 40.7% \u2014 trend signals wrong in ranging (but 3h recent 61.6%!)"
   ],
   "accuracy_changes": {
-    "improving": {
-      "news_event": "all-time 58.5% -> recent 70.0% (3h)",
-      "ema": "all-time 49.1% -> recent 62.9% (3h)",
-      "trend": "all-time 40.3% -> recent 61.6% (3h)",
-      "ministral": "all-time 52.3% -> recent 62.6% (3h)",
-      "fibonacci": "all-time 42.3% -> recent 68.2% (1d)"
+    "biggest_improvements_recent": {
+      "fibonacci_1d": {
+        "all_time": 42.5,
+        "recent": 68.2,
+        "delta": "+25.7pp"
+      },
+      "trend_3h": {
+        "all_time": 40.3,
+        "recent": 61.6,
+        "delta": "+21.3pp"
+      },
+      "ministral_1d": {
+        "all_time": 58.6,
+        "recent": 68.0,
+        "delta": "+9.4pp"
+      },
+      "news_event_3h": {
+        "all_time": 58.5,
+        "recent": 70.0,
+        "delta": "+11.5pp"
+      },
+      "ema_3h": {
+        "all_time": 52.4,
+        "recent": 62.9,
+        "delta": "+10.5pp"
+      }
     },
-    "degrading": {
-      "sentiment": "all-time 46.5% -> recent 33.8% (3h) \u2014 CRITICAL",
-      "forecast": "all-time 49.5% -> recent 38.3% (3h)",
-      "fear_greed": "all-time 53.9% -> recent 25.9% (1d) \u2014 CRITICAL",
-      "news_event_1d": "all-time 55.3% -> recent 29.5% (1d) \u2014 divergence from 3h",
-      "macro_regime": "all-time 46.6% -> recent 30.3% (1d)"
+    "biggest_declines_recent": {
+      "fear_greed_1d": {
+        "all_time": 58.6,
+        "recent": 25.9,
+        "delta": "-32.7pp"
+      },
+      "macro_regime_1d": {
+        "all_time": 46.6,
+        "recent": 30.3,
+        "delta": "-16.3pp"
+      },
+      "news_event_1d": {
+        "all_time": 50.0,
+        "recent": 29.5,
+        "delta": "-20.5pp"
+      },
+      "sentiment_3h": {
+        "all_time": 45.1,
+        "recent": 33.8,
+        "delta": "-11.3pp"
+      },
+      "forecast_3h": {
+        "all_time": 47.2,
+        "recent": 38.3,
+        "delta": "-8.9pp"
+      }
     }
   },
-  "system_errors": [],
-  "metals_model_accuracy": {
-    "llm_XAG_1h": "48.4% (1797 sam)",
-    "llm_XAG_3h": "40.9% (1585 sam) \u2014 WORSE than random",
-    "chronos_1h_XAG_1h": "47.1% (1103 sam)",
-    "chronos_3h_XAG_1h": "47.6% (1205 sam)"
-  },
+  "system_errors": [
+    "Critical error (resolved): Layer 2 journal lag for XAU-USD BUY trigger \u2014 agent completed but journal write delayed",
+    "Module failures: monte_carlo, price_targets, equity_curve (at 14:14 UTC, non-recurring)"
+  ],
   "key_observations": [
-    "HUGE accuracy divergence between all-time and recent for many signals \u2014 regime shift underway",
-    "Sentiment signal in freefall (33.8% recent 3h) \u2014 should be gated or disabled",
-    "News_event surging to 70% recently \u2014 consider upweighting",
-    "Trend signal improving dramatically (40.3% all-time -> 61.6% recent) \u2014 market becoming more trending",
-    "Fear & Greed contrarian approach failing (25.9% recent 1d) \u2014 market not mean-reverting as expected",
-    "ETH-USD and MSTR consensus below coin flip \u2014 signals not useful for these tickers at 3h",
-    "Metals LLM predictions (Ministral) for XAG at 3h are 40.9% \u2014 actively harmful",
-    "Bold made 1 trade (BUY ETH), Patient stayed all HOLD \u2014 conservative stance appropriate given low accuracy",
-    "All prophecy checkpoints for silver 5/0/0 triggered \u2014 20 target remains pending",
-    "BTC 5K checkpoint triggered but 5K/00K still pending \u2014 range-bound behavior continues"
+    "REGIME SHIFT: Dramatic accuracy divergence between all-time and recent 7d \u2014 ranging market rewards mean-reversion/pattern signals, punishes macro/sentiment",
+    "LLM SIGNALS OUTPERFORMING: Ministral (68% 1d, 62.6% 3h) and Qwen3 (59.8% 1d, 61.8% 3h) are consistently top-tier recent performers",
+    "FEAR & GREED PARADOX: F&G signal crashed to 25.9% 1d recent despite extreme fear (21) being a contrarian bullish signal \u2014 the signal fires too early/too often in sustained fear",
+    "MSTR OVEREXTENDED: +29% 7d, multi-TF SELL consensus. Not held but noteworthy divergence from BTC",
+    "PROPHECY TRACKING: Silver $81.44 (4/5 checkpoints hit, $120 target). BTC $77.3K (1/4 checkpoints hit, approaching $85K). ETH $2,430 (0/3 checkpoints hit, approaching $2,500)",
+    "PORTFOLIO HEALTH: Both strategies profitable. Patient +4.2% on ETH. Bold +3.7% BTC, +4.7% ETH. All above ATR stops.",
+    "NO NEW SIGNALS FOR 0% ACCURACY SIGNALS: cot_positioning, futures_basis, hurst_regime, shannon_entropy, vix_term_structure, gold_real_yield_paradox, cross_asset_tsmom, copper_gold_ratio \u2014 these have 0 samples at 1d, likely not generating BUY/SELL votes or too new"
   ]
 }
