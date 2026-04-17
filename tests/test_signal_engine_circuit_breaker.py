@@ -256,6 +256,52 @@ class TestComputeGateRelaxation:
         )
         assert rel == pytest.approx(_GATE_RELAXATION_MAX)
 
+    def test_ranging_5raw_4recoverable_1irrecoverable_relaxes(self):
+        """Codex round 7 (2026-04-17): 5 raw candidates in ranging where
+        4 are recoverable and 1 is directionally gated. Raw candidates
+        (5) meets ranging dynamic_min (5), so downstream passes. Lone-
+        signal guard: bp=4 >= 2. Should relax to MAX for partial recovery.
+        Previously blocked by the too-strict `bp >= regime_quorum` check.
+        """
+        votes = {f"s{i}": "BUY" for i in range(5)}
+        accuracy = {f"s{i}": self._make_stats(0.46) for i in range(4)}
+        # s4 directionally gated (buy_accuracy=0.30).
+        accuracy["s4"] = {
+            "accuracy": 0.60, "total": 100,
+            "buy_accuracy": 0.30, "sell_accuracy": 0.60,
+            "total_buy": 50, "total_sell": 50,
+        }
+        rel = _compute_gate_relaxation(
+            votes, accuracy, set(), set(), 0.47, regime="ranging",
+        )
+        assert rel == pytest.approx(_GATE_RELAXATION_MAX)
+
+    def test_ranging_5raw_lone_recoverable_stays_hold(self):
+        """Lone-signal escape in ranging: 5 raw candidates, 4 directionally
+        gated, only 1 recoverable at 0.46. Raw (5) meets ranging quorum,
+        so downstream would NOT block via dynamic_min, but relaxation
+        would let a single accuracy-passing signal drive consensus.
+        The lone-signal guard (bp >= 2) must block this.
+        """
+        votes = {f"s{i}": "BUY" for i in range(5)}
+        # 4 signals directionally gated.
+        accuracy = {}
+        for i in range(4):
+            accuracy[f"s{i}"] = {
+                "accuracy": 0.60, "total": 100,
+                "buy_accuracy": 0.30, "sell_accuracy": 0.60,
+                "total_buy": 50, "total_sell": 50,
+            }
+        # 1 borderline recoverable signal.
+        accuracy["s4"] = self._make_stats(0.46)
+        rel = _compute_gate_relaxation(
+            votes, accuracy, set(), set(), 0.47, regime="ranging",
+        )
+        assert rel == 0.0, (
+            "A single effective voter (bp=1) cannot be the basis of a "
+            "relaxed consensus, regardless of raw candidate count."
+        )
+
     def test_lone_recoverable_signal_blocked_from_escape(self):
         """Codex P2 follow-up (2026-04-17): 5 candidate signals where 4 are
         directionally gated (buy_accuracy=0.30) and only 1 is recoverable

@@ -1025,6 +1025,19 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     excluded = excluded or set()
     group_gated = group_gated or set()
 
+    # Match downstream's raw-voter dynamic_min check. `apply_confidence_penalties`
+    # force-HOLDs the action when `extra_info["_voters"]` (= raw buy+sell count
+    # after regime gating, BEFORE accuracy gating) is below the regime quorum.
+    # If the raw candidate count can't meet that quorum, relaxation is
+    # pointless - downstream will HOLD regardless.
+    min_regime_quorum = _dynamic_min_voters_for_regime(regime)
+    candidates = sum(
+        1 for sn, v in votes.items()
+        if v != "HOLD" and sn not in excluded and sn not in group_gated
+    )
+    if candidates < min_regime_quorum:
+        return 0.0
+
     baseline = _count_active_voters_at_gate(
         votes, accuracy_data, excluded, group_gated, base_gate, 0.0,
     )
@@ -1036,27 +1049,18 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
         base_gate, _GATE_RELAXATION_MAX,
     )
 
-    # Regime-aware precondition on EFFECTIVE voters (post directional gating).
-    # Block relaxation unless max relaxation could recover enough voters to
-    # meet the regime's final quorum. Hardcoding 4 (MIN_VOTERS_CRYPTO + 1)
-    # was too strict in trending markets where dynamic_min=3; relaxation to
-    # 3 there is legitimate and produces an actionable consensus. Codex
-    # round 6 (2026-04-17) flagged that a 5-candidate slate with 3 recoverable
-    # voters in trending-up should not be blocked by this guard.
+    # Lone-signal escape guard. Even when raw candidates meet the downstream
+    # quorum, directional gating can leave only one recoverable voter. If the
+    # relaxed consensus would be driven by a single accuracy-passing signal,
+    # relaxation opens the gate for noise to masquerade as consensus. Require
+    # at least 2 effective voters at max relaxation.
     #
-    # Thresholds:
-    #   trending-up/down: bp >= 3 (dynamic_min=3, no margin needed)
-    #   high-vol:         bp >= 4 (dynamic_min=4)
-    #   ranging/unknown:  bp >= 5 (dynamic_min=5 = soft floor)
-    #
-    # All the Codex-identified escape modes still blocked:
-    #   - lone signal at 0.46 with 4 dir-gated companions -> bp=1, blocked
-    #   - sparse 3-voter at 0.46 in ranging -> bp=3 < 5, blocked
-    #   - 3 recoverable + 1 irrecoverable in ranging -> bp=3 < 5, blocked
-    # NEW behavior (Codex round 6 fix):
-    #   - 3 recoverable in trending-up -> bp=3 >= 3, relaxes (actionable)
-    min_recovery_floor = _dynamic_min_voters_for_regime(regime)
-    if best_possible < min_recovery_floor:
+    # Example blocked: 5 raw candidates in ranging, 4 directionally gated at
+    # buy_accuracy=0.30 + 1 borderline at 0.46. Without this guard, relaxation
+    # admits the lone 0.46 signal and _weighted_consensus emits a BUY from a
+    # single voter while downstream _voters=5 passes the dynamic_min check.
+    _LONE_SIGNAL_FLOOR = 2
+    if best_possible < _LONE_SIGNAL_FLOOR:
         return 0.0
 
     # Regime break: relaxation recovers nothing beyond baseline. Keep the
