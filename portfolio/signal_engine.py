@@ -1005,26 +1005,33 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     excluded = excluded or set()
     group_gated = group_gated or set()
 
-    # TWO pre-conditions work together to block the two escape modes Codex
-    # identified in successive review rounds. Both are needed:
+    # TWO pre-conditions work together to block the escape modes Codex
+    # identified across successive review rounds. Both are needed:
     #
     #  Guard A: sparse-candidate count (raw non-HOLD after exclusions).
-    #    Blocks scenarios with few total candidates where relaxation would
-    #    re-enable consensus against the system's design (e.g., 3 signals
-    #    at 0.46 should stay HOLD, not relax to 0.41 and vote BUY - the
-    #    outer MIN_VOTERS quorum is only 3, so 3 relaxed voters IS a
-    #    consensus, but it's 3 borderline voters we don't want).
+    #    Threshold is _MIN_ACTIVE_VOTERS_SOFT - 1 (= 4) rather than the
+    #    soft floor (5) so 4-voter scenarios can still recover. Rationale:
+    #    the OUTER consensus quorum is MIN_VOTERS_CRYPTO/STOCK = 3; a
+    #    4-voter recovery leaves a 1-voter margin above the quorum, which
+    #    is legitimate diversity. Dropping below 4 (= quorum + 1) is the
+    #    real "too sparse" zone where relaxation would just flip HOLD to
+    #    a weak consensus on borderline voters.
+    #    Example blocked: 3 BUY at 0.46 -> stays HOLD (would otherwise be
+    #    exactly at quorum with no margin).
+    #    Example allowed: 4 BUY at 0.46 -> relaxation recovers all 4 for
+    #    a 4-voter BUY (1-voter margin above quorum).
     #
     #  Guard B: effective-recovery check (post directional gating).
-    #    Blocks scenarios with 5+ raw candidates where directional gating
+    #    Blocks scenarios with many raw candidates where directional gating
     #    leaves only one borderline voter. Without this, 4 dir-gated +
     #    1 at 0.46 would pass Guard A but the lone 0.46 signal would
     #    escape via relaxation.
+    _SPARSE_CANDIDATE_FLOOR = _MIN_ACTIVE_VOTERS_SOFT - 1  # = 4 = MIN_VOTERS + 1
     candidates = sum(
         1 for sn, v in votes.items()
         if v != "HOLD" and sn not in excluded and sn not in group_gated
     )
-    if candidates < _MIN_ACTIVE_VOTERS_SOFT:
+    if candidates < _SPARSE_CANDIDATE_FLOOR:
         return 0.0
 
     baseline = _count_active_voters_at_gate(

@@ -191,26 +191,31 @@ class TestComputeGateRelaxation:
             "not a relaxation opportunity."
         )
 
-    def test_sparse_voter_scenario_stays_hold(self):
-        """Codex P2 round 3 (2026-04-17): 3 BUY candidates all at 0.46,
-        no directional gating. Before this guard, best_possible=3 passes
-        the >=2 check and relaxation would lower the gate to 0.45,
-        letting all 3 vote and flipping from HOLD to BUY.
-
-        The outer MIN_VOTERS quorum is only 3, so 3 relaxed voters IS a
-        consensus - that's exactly the case the raw-candidate guard
-        (candidates >= 5) is designed to block. Both guards are needed
-        together: raw-count for sparse cases, effective-count for
-        dir-gated cases.
+    def test_sparse_3_voter_scenario_stays_hold(self):
+        """Codex round 3: 3 BUY candidates all at 0.46 should NOT trigger
+        relaxation. The outer MIN_VOTERS=3 quorum means 3 relaxed voters
+        equals an exact-quorum consensus with no margin - relaxing here
+        would flip HOLD to BUY on three borderline voters.
         """
-        votes = {f"s{i}": "BUY" for i in range(3)}  # only 3 candidates
+        votes = {f"s{i}": "BUY" for i in range(3)}
         accuracy = {f"s{i}": self._make_stats(0.46) for i in range(3)}
         rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
-        assert rel == 0.0, (
-            "A sparse 3-voter scenario must NOT trigger relaxation even "
-            "when all 3 are recoverable - the outer MIN_VOTERS quorum "
-            "would flip HOLD to consensus on three borderline voters."
-        )
+        assert rel == 0.0
+
+    def test_four_voter_scenario_relaxes(self):
+        """Codex round 4 (2026-04-17): 4 BUY candidates all at 0.46 SHOULD
+        trigger relaxation. 4 voters is MIN_VOTERS (3) + 1 margin - the
+        legitimate partial-recovery zone. Previous threshold of 5 blocked
+        this incorrectly, regressing a behavior the partial-recovery
+        branch supported.
+        """
+        votes = {f"s{i}": "BUY" for i in range(4)}
+        accuracy = {f"s{i}": self._make_stats(0.46) for i in range(4)}
+        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
+        # 0.46 passes at relaxation >= 0.02 (effective gate 0.45). Smallest
+        # step that meets the floor is 0.02 only if bp >= floor (5). Here
+        # bp=4 < floor=5, so falls through to partial-recovery -> MAX.
+        assert rel == pytest.approx(_GATE_RELAXATION_MAX)
 
     def test_lone_recoverable_signal_blocked_from_escape(self):
         """Codex P2 follow-up (2026-04-17): 5 candidate signals where 4 are
