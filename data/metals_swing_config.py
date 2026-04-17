@@ -107,6 +107,34 @@ TRAILING_START_PCT = 1.5           # start trailing after 1.5% underlying gain
 TRAILING_DISTANCE_PCT = 1.0        # trail 1% behind underlying peak
 HARD_STOP_UNDERLYING_PCT = 2.0     # -2% underlying = hard exit
 SIGNAL_REVERSAL_EXIT = True        # exit on SELL consensus with >= MIN_BUY_VOTERS
+
+# 2026-04-17 momentum-exit tuning pass. Background: MINI L SILVER AVA 331
+# bought 13:33 CET (6B/1S, conf 0.603) and sold 55 seconds later as
+# "MOMENTUM_EXIT: 3 declining checks (-0.64%)". Silver rallied +5.4% off
+# the sell price. Three compounding bugs:
+#
+#   1. Pre-entry history contaminates exit check — ``_und_history`` isn't
+#      reset on entry, so ticks from before the buy triggered the exit
+#      on the same cycle that verified the fill.
+#   2. No minimum hold — rule evaluates from t=0 of the position.
+#   3. -0.3% over 3×60s ticks is below the XAG/XAU noise floor (typical
+#      60s tick 0.03-0.13%; three can sum to >0.3% on pure noise).
+#
+# Fix: hard stop + trailing + signal-reversal still fire from t=0. Only
+# the 3-tick counter-trend heuristic waits for a minimum hold AND
+# requires a larger cumulative move. ``_und_history`` is cleared on
+# entry at ``metals_swing_trader._execute_buy``.
+MOMENTUM_EXIT_MIN_HOLD_SECONDS = 300   # 5 min hold before 3-tick counter-trend
+                                       # rule can fire. Hard stop + trailing +
+                                       # signal reversal still active from t=0,
+                                       # so real catastrophic moves still exit
+                                       # fast via HARD_STOP (-2% underlying).
+                                       # 5m ≈ 5 post-entry 60s ticks — leaves
+                                       # 2-3 cycles past the minimum 3-tick
+                                       # window while still blocking the
+                                       # fill-verification-same-cycle exit.
+MOMENTUM_EXIT_THRESHOLD_PCT = 0.8      # Min cumulative counter-trend move over
+                                       # the 3-tick window. Raised from 0.3.
 # 2026-04-10: user removed the 5h time limit in favor of an EOD-only forced
 # sell just before US market close. Set to 24h so the safety net still
 # exists for catastrophic edge cases (position orphaned by a crash) but

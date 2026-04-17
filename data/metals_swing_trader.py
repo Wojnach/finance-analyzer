@@ -88,6 +88,8 @@ from metals_swing_config import (
     MIN_TRADE_SEK,
     MOMENTUM_CANDIDATE_TTL_SEC,
     MOMENTUM_ENTRY_ENABLED,
+    MOMENTUM_EXIT_MIN_HOLD_SECONDS,
+    MOMENTUM_EXIT_THRESHOLD_PCT,
     MOMENTUM_MIN_BUY_CONFIDENCE,
     MOMENTUM_MIN_BUY_VOTERS,
     MOMENTUM_STATE_FILE,
@@ -2343,6 +2345,16 @@ class SwingTrader:
         self.state["last_buy_ts"] = _now_utc().isoformat()
         self.state["total_trades"] += 1
         self.state["session_trades"] += 1
+
+        # 2026-04-17: reset the underlying-price history so the 3-tick
+        # momentum-exit rule starts fresh at entry. Without this, ticks
+        # collected BEFORE the buy can immediately trigger an exit on
+        # the same cycle the fill confirms (MINI L SILVER AVA 331
+        # 2026-04-17T11:34 incident — bought + sold within 55 seconds
+        # on a -0.64% pre-entry pullback). See metals_swing_config
+        # MOMENTUM_EXIT_MIN_HOLD_SECONDS for the paired time gate.
+        self.state.setdefault("_und_history", {})[underlying_ticker] = []
+
         _save_state(self.state)
 
         # Place hardware stop-loss
@@ -2614,20 +2626,29 @@ class SwingTrader:
             if not exit_reason and minutes_to_close <= EOD_EXIT_MINUTES_BEFORE:
                 exit_reason = f"EOD_EXIT: {minutes_to_close:.0f}min to close"
 
-            # 7. Momentum exit (direction-aware, Fix 8 2026-04-09).
+            # 7. Momentum exit (direction-aware, Fix 8 2026-04-09; tuned
+            # 2026-04-17 after MINI L SILVER AVA 331 insta-exit incident).
             # LONG exits on 3 consecutive declines (underlying going against
-            # us); SHORT exits on 3 consecutive rises.
-            if not exit_reason and len(self.state.get("_und_history", {}).get(pos["underlying"], [])) >= 3:
+            # us); SHORT exits on 3 consecutive rises. Only fires after the
+            # minimum hold window — pre-entry history contamination + fill-
+            # verification-same-cycle exits were killing winners within 60s
+            # of entry. Hard stop, trailing stop, and signal reversal still
+            # fire from t=0, so genuine catastrophic moves still exit fast.
+            held_seconds = (now - entry_ts).total_seconds()
+            min_hold_ok = held_seconds >= MOMENTUM_EXIT_MIN_HOLD_SECONDS
+            if (not exit_reason
+                    and min_hold_ok
+                    and len(self.state.get("_und_history", {}).get(pos["underlying"], [])) >= 3):
                 hist = self.state["_und_history"][pos["underlying"]][-3:]
                 if direction == "LONG":
                     monotonic = all(hist[i] < hist[i - 1] for i in range(1, len(hist)))
                     move_rate = (hist[-1] - hist[0]) / hist[0] * 100
-                    if monotonic and move_rate < -0.3:
+                    if monotonic and move_rate < -MOMENTUM_EXIT_THRESHOLD_PCT:
                         exit_reason = f"MOMENTUM_EXIT: 3 declining checks ({move_rate:.2f}%)"
                 else:  # SHORT
                     monotonic = all(hist[i] > hist[i - 1] for i in range(1, len(hist)))
                     move_rate = (hist[-1] - hist[0]) / hist[0] * 100
-                    if monotonic and move_rate > 0.3:
+                    if monotonic and move_rate > MOMENTUM_EXIT_THRESHOLD_PCT:
                         exit_reason = f"MOMENTUM_EXIT: 3 rising checks ({move_rate:+.2f}%)"
 
             if exit_reason:
