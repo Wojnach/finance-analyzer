@@ -353,6 +353,24 @@ def invoke_agent(reasons, tier=3):
         _agent_reasons = list(reasons)
         _journal_ts_before = _safe_last_jsonl_ts(JOURNAL_FILE, "journal")
         _telegram_ts_before = _safe_last_jsonl_ts(TELEGRAM_FILE, "telegram")
+        # 2026-04-17: Publish the tier into health_state so loop_contract
+        # can pick the right per-tier grace window for the journal-activity
+        # check. Without this, the contract defaults to T3 grace (20m),
+        # which is conservative but can delay detection when an all-T1
+        # cadence runs silent. See loop_contract._get_layer2_grace_s() for
+        # the consumer and LAYER2_JOURNAL_GRACE_S_BY_TIER for the table.
+        # Best-effort: never fail the invocation because health_state is
+        # unwriteable (atomic_write_json handles the happy path; any
+        # exception is logged and swallowed).
+        try:
+            from portfolio.file_utils import atomic_write_json, load_json
+            health_path = DATA_DIR / "health_state.json"
+            health = load_json(health_path, default={}) or {}
+            health["last_invocation_tier"] = tier
+            health["last_invocation_tier_ts"] = datetime.now(UTC).isoformat()
+            atomic_write_json(health_path, health)
+        except Exception as e:
+            logger.warning("health_state tier publish failed: %s", e)
         logger.info(
             "Agent T%d invoked pid=%s max_turns=%d timeout=%ds (%s)",
             tier, _agent_proc.pid, max_turns, timeout,
