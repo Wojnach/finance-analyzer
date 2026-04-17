@@ -199,14 +199,6 @@ def replay(days: int, horizon: str) -> dict:
             if change_pct is None:
                 continue
 
-            # Codex round-10 P3 (2026-04-17 follow-up): count regime only for
-            # rows that actually contribute to the scored sample. Previously
-            # we incremented before outcome validation, so rows without a
-            # horizon outcome inflated the regime distribution - the
-            # "trending/high-vol under-exercised" warning could false-negative
-            # if unscored trending rows dominated the raw count.
-            regime_counter[tdata.get("regime", "unknown")] += 1
-
             actual_correct = _verdict_correct(actual, change_pct)
             sim_correct = _verdict_correct(sim, change_pct)
 
@@ -220,8 +212,20 @@ def replay(days: int, horizon: str) -> dict:
                     simulated_buckets[ticker][0] += 1
 
             if sim == "ERROR":
-                # Don't score disagreement against a broken simulation row.
+                # Don't score disagreement against a broken simulation row,
+                # and (Codex round 11 P3) don't count the regime either -
+                # ERROR rows contribute to sim_error_count but not to
+                # rows_scored, so they shouldn't inflate regime_distribution.
                 continue
+
+            # Codex round 11 P3: regime counter increments only for rows
+            # that actually contribute to rows_scored (past outcome validation
+            # AND past ERROR check). Previously an ERROR-simulation row still
+            # inflated the regime distribution, false-negativing the
+            # "under-exercised regime" warning in exactly the runs where
+            # replay was already degraded.
+            regime_counter[tdata.get("regime", "unknown")] += 1
+
             if actual == sim:
                 agree_count += 1
             else:

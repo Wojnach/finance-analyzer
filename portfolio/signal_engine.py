@@ -1275,18 +1275,28 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     activation_rates = activation_rates or {}
     horizon_mults = _get_horizon_weights(horizon)
 
-    # Codex round-10 P1 (2026-04-17 follow-up): sanitize accuracy_data ONCE
-    # at function entry. Previously _count_active_voters_at_gate had its
-    # own defensive coercion, but the rest of this function still did
-    # `accuracy_data.get(sig).get(...)` — a None value at accuracy_data[sig]
-    # would crash with AttributeError at the top-N sort, group-leader
-    # selection, crisis-mode check, or main gating loop. Sanitizing once
-    # here makes every downstream call safe.
+    # Codex round 10/11 (2026-04-17 follow-up): deep-sanitize accuracy_data
+    # at function entry. Round 10 fix only coerced non-dict container values
+    # to {}; round 11 found that dict-valued entries with poisoned numeric
+    # fields (e.g. {"accuracy": None, "buy_accuracy": nan}) still crashed
+    # downstream comparisons/multiplications. Now every numeric field used
+    # by gating/weighting code is coerced through _safe_accuracy or
+    # _safe_sample_count so no None/NaN/inf leaks into the hot path.
     if accuracy_data:
-        accuracy_data = {
-            k: (v if isinstance(v, dict) else {})
-            for k, v in accuracy_data.items()
-        }
+        _sanitized = {}
+        for _k, _v in accuracy_data.items():
+            if not isinstance(_v, dict):
+                _sanitized[_k] = {}
+                continue
+            _clean = dict(_v)
+            for _acc_key in ("accuracy", "buy_accuracy", "sell_accuracy"):
+                if _acc_key in _clean:
+                    _clean[_acc_key] = _safe_accuracy(_clean.get(_acc_key), default=0.5)
+            for _cnt_key in ("total", "total_buy", "total_sell"):
+                if _cnt_key in _clean:
+                    _clean[_cnt_key] = _safe_sample_count(_clean.get(_cnt_key))
+            _sanitized[_k] = _clean
+        accuracy_data = _sanitized
     else:
         accuracy_data = {}
 
