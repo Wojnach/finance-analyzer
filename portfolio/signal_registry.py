@@ -181,6 +181,11 @@ def _register_defaults():
     # Cross-asset TSMOM — bond/equity momentum predicts target asset direction; capped at 0.7
     register_enhanced("cross_asset_tsmom", "portfolio.signals.cross_asset_tsmom",
                       "compute_cross_asset_tsmom_signal", requires_context=True, max_confidence=0.7)
+    # Copper/gold ratio — intermarket regime indicator (all assets); capped at 0.7
+    # 2026-04-17: cross-asset signal, inverts direction for metals (falling ratio = gold strength).
+    # 94% recession prediction accuracy, 0.85 correlation with 10Y yields.
+    register_enhanced("copper_gold_ratio", "portfolio.signals.copper_gold_ratio",
+                      "compute_copper_gold_ratio_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()

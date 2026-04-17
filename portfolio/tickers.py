@@ -73,6 +73,7 @@ DISABLED_SIGNALS = {
     "vix_term_structure",  # pending live validation (added 2026-04-13)
     "gold_real_yield_paradox",  # pending live validation (added 2026-04-14)
     "cross_asset_tsmom",  # pending live validation (added 2026-04-15)
+    "copper_gold_ratio",  # pending live validation (added 2026-04-17)
     "orderbook_flow",   # 2026-04-11: 51.1% accuracy (360 sam), 93.3% activation rate,
                         # no recent data. Pure noise in every consensus decision.
                         # Re-evaluate after 2 weeks of accuracy data collection.
@@ -143,4 +144,5 @@ SIGNAL_NAMES = [
     "vix_term_structure",
     "gold_real_yield_paradox",
     "cross_asset_tsmom",
+    "copper_gold_ratio",
 ]
