@@ -55,12 +55,49 @@ class TestSanitizationDropsPoisonedFields:
         action_m, conf_m = _weighted_consensus(
             votes, accuracy_missing, regime="trending-up",
         )
-        # Same consensus outcome because poisoned field is dropped -> behaves
-        # like missing field -> default 0.5 fallback applies identically.
+        # Both produce equivalent consensus because the poisoned row ends
+        # up with {accuracy, total} both dropped (round-13 fix), matching
+        # case B where the whole row was absent. Without round-13 the
+        # poisoned row would have total=200 kept and the gate behavior
+        # would differ.
         assert action_p == action_m, (
-            "Poisoned accuracy must be dropped (not promoted to 0.5 default) "
-            f"so it behaves the same as a missing field. Got action_p={action_p}, "
-            f"action_m={action_m}"
+            "Poisoned-accuracy row must behave as absent (round-13 drop-pair "
+            f"semantics). Got action_p={action_p}, action_m={action_m}"
+        )
+
+    def test_round13_paired_drop_when_total_valid_but_accuracy_poisoned(self):
+        """Codex round 13 exact scenario: {"accuracy": None, "total": 200}
+        must have BOTH accuracy and total dropped by the sanitizer, so the
+        row bypasses the min-samples gate rather than masquerading as a
+        mature 50% signal. Test by checking that such a row doesn't
+        contribute to the consensus the way a mature 0.5-signal would.
+        """
+        # Build two scenarios that should produce IDENTICAL consensus if the
+        # round-13 drop-pair semantics are correct:
+        #   A: poisoned-row (None accuracy, valid total) mixed in
+        #   B: same row with {accuracy, total} BOTH absent
+        votes = {"poison": "BUY", "s1": "BUY", "s2": "BUY", "s3": "BUY"}
+        accuracy_a = {
+            "poison": {"accuracy": None, "total": 200},
+            "s1": {"accuracy": 0.60, "total": 200},
+            "s2": {"accuracy": 0.60, "total": 200},
+            "s3": {"accuracy": 0.60, "total": 200},
+        }
+        accuracy_b = {
+            "poison": {},  # both fields absent
+            "s1": {"accuracy": 0.60, "total": 200},
+            "s2": {"accuracy": 0.60, "total": 200},
+            "s3": {"accuracy": 0.60, "total": 200},
+        }
+        action_a, conf_a = _weighted_consensus(
+            votes, accuracy_a, regime="trending-up",
+        )
+        action_b, conf_b = _weighted_consensus(
+            votes, accuracy_b, regime="trending-up",
+        )
+        assert (action_a, round(conf_a, 4)) == (action_b, round(conf_b, 4)), (
+            f"Round-13: poisoned-accuracy + valid-total must be equivalent to "
+            f"both-fields-absent. Got A={action_a},{conf_a} vs B={action_b},{conf_b}"
         )
 
     def test_nan_directional_falls_back_to_overall(self):
