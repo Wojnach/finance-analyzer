@@ -158,6 +158,31 @@ def _safe_last_jsonl_ts(path, label):
         return None
 
 
+def _safe_elapsed_s():
+    """Return time.monotonic() - _agent_start clamped to >= 0.
+
+    P2B (2026-04-17): yesterday's 2026-04-16T13:45:45 critical_errors.jsonl
+    entry had duration_s=-1776254571.5 (matches time.monotonic() - time.time()).
+    Indicates some historical path seeded _agent_start with an epoch
+    timestamp instead of a monotonic value. Current code is clean, but
+    any future regression (e.g. a test that mutates the module global
+    and leaks state) would re-introduce the poison. Clamping at the
+    source + logging a diagnostic keeps the downstream invocation log
+    and critical_errors.jsonl context blocks trustworthy, and surfaces
+    the real bug if it recurs.
+    """
+    raw = time.monotonic() - _agent_start
+    if raw < 0:
+        logger.warning(
+            "BUG-P2B: negative elapsed from _agent_start (raw=%.1fs, "
+            "_agent_start=%.1f) — clamping to 0. Indicates _agent_start was "
+            "seeded with a non-monotonic clock value.",
+            raw, _agent_start,
+        )
+        return 0.0
+    return raw
+
+
 def _kill_overrun_agent(fallback_reasons=None, fallback_tier=None):
     """Kill the running _agent_proc and clear module state.
 
@@ -188,7 +213,7 @@ def _kill_overrun_agent(fallback_reasons=None, fallback_tier=None):
         return True
 
     pid = _agent_proc.pid
-    elapsed = time.monotonic() - _agent_start
+    elapsed = _safe_elapsed_s()
     logger.info("Agent pid=%s timed out (%.0fs), killing", pid, elapsed)
 
     kill_ok = True
@@ -263,7 +288,9 @@ def invoke_agent(reasons, tier=3):
 
     if _agent_proc and _agent_proc.poll() is None:
         # BUG-203: use monotonic clock for elapsed — wall clock is NTP-jump-prone.
-        elapsed = time.monotonic() - _agent_start
+        # P2B (2026-04-17): via _safe_elapsed_s() so a poisoned _agent_start
+        # can't cause a negative elapsed that silently skips the timeout.
+        elapsed = _safe_elapsed_s()
         if elapsed > _agent_timeout:
             # P1B (2026-04-17): helper so check_agent_completion can share
             # the kill path — see _kill_overrun_agent docstring.
@@ -599,7 +626,7 @@ def check_agent_completion():
         # no new triggers came through (yesterday: T1 timeout=120s ran
         # 603s). Share the same kill helper used by try_invoke_agent to
         # keep kill semantics identical.
-        elapsed = time.monotonic() - _agent_start
+        elapsed = _safe_elapsed_s()
         if _agent_timeout and elapsed > _agent_timeout:
             killed_tier = _agent_tier
             killed_reasons = list(_agent_reasons or [])
@@ -616,8 +643,11 @@ def check_agent_completion():
             }
         return None
 
-    # Process has finished — collect completion info
-    duration_s = round(time.monotonic() - _agent_start, 1)
+    # Process has finished — collect completion info.
+    # P2B (2026-04-17): via _safe_elapsed_s() so a poisoned _agent_start
+    # can't produce the negative duration_s seen in yesterday's 13:45:45
+    # auth_failure entry (-1776254571.5, matching time.monotonic() - time.time()).
+    duration_s = round(_safe_elapsed_s(), 1)
     completed_at = datetime.now(UTC).isoformat()
 
     # BUG-97: _last_jsonl_ts can raise OSError if file is locked on Windows
