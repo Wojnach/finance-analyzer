@@ -1,3 +1,80 @@
+# Session Progress — Adversarial Review (2026-04-17)
+
+**Session start:** 2026-04-17 early morning CET
+**Branch:** `research/adversarial-2026-04-17`
+**Worktree:** `Q:/finance-analyzer-adv`
+**Base SHA:** `99206ffa` (main)
+
+## What shipped (6 commits, 13 files, +346/-40)
+
+Triggered by user request: "adversarial review of the codebase, find problems,
+bugs, TODOs, fix them all by spawning an agents team". Followed `/fgl` protocol
+(explore → plan → batch implement → Codex review → merge).
+
+### Recon — 6 parallel Explore agents
+TODO audit, silent-failure scan, Layer 2 RCA, known-bug triage, money-path
+audit, test-quality audit. Most P1-labelled findings from agents turned out
+to be **historical markers for already-shipped fixes** (e.g. BUG-201 auth
+gate, BUG-122 load_jsonl_tail, detect_auth_failure wiring). Verified every
+claim with direct file reads before committing.
+
+### Verified P1 findings → fixed this session
+
+1. **atomic_append_jsonl torn-line bug** (Windows, 20+ writers affected)
+   - `portfolio/file_utils.py`: text-mode `"a"` + O_APPEND was not atomic on
+     Windows; added sidecar-lockfile (`<dir>/.<name>.lock`) + binary-append.
+   - Unxfails `tests/test_fix_agent_dispatcher.py::test_concurrent_append_does_not_corrupt_jsonl`.
+2. **`place_stop_loss` missing min-courtage guard** (3 modules)
+   - `portfolio/avanza_session.py`, `portfolio/avanza/trading.py`,
+     `data/metals_avanza_helpers.py`: add 1000 SEK WARNING logs on
+     sub-threshold stop legs (cascaded stops legitimately produce <1000
+     per-leg, so warn not raise).
+3. **`place_order` missing guard in unified Avanza package**
+   - `portfolio/avanza/trading.py`: add `raise ValueError` to match
+     `avanza_session.py:590` convention.
+4. **metals_loop stop-orders placed on stale price**
+   - `data/metals_loop.py`: when `fetch_price()` returns None, fail-closed
+     BEFORE cancelling existing stops — preserves protection.
+
+### Verified P2 findings → fixed
+
+5. **Drawdown circuit breaker optimistic cash fallback** — `portfolio/risk_management.py`
+   now logs WARNING listing live-position count when falling back.
+6. **`fin_fish_monitor.py` silent subprocess** — check exit code AND stderr
+   on exit 0 (Layer 2 auth-outage signature).
+7. **`claude_gate._kill_process_tree` orphan-proc risk** — log with exc_info
+   and surface pid on second-kill failure.
+
+### Codex adversarial review
+
+Two rounds of `codex review --base main`. 4 + 3 findings; 6 actioned (2 of
+the 3 round-3 findings were test pollution in unstaged working-tree data
+files, not branch changes).
+
+### Deferred (documented in plan)
+
+- Layer 2 overnight timeout-cascades (recurring pattern, needs loop-contract
+  redesign; 2 open critical-errors entries resolved as "documented, deferred").
+- Fish engine 6 bugs (already disabled at module level).
+- CRITICAL-2 ticker="" (production-safe: `main.py:486` always passes ticker).
+
+### Tests
+- 307 in affected neighbourhood all pass
+- Full suite: 7202 passed, 16 pre-existing failures (verified on main) + 1
+  test-isolation flake in test_fish_engine unrelated to this work.
+- 1 test updated (`tests/test_metals_loop_autonomous.py`) to exclude sidecar
+  lockfile from its `builtins.open` monkey-patch.
+
+### What's next
+- Merge branch to main, push via Windows git.
+- Restart `PF-DataLoop` + `PF-MetalsLoop` so new atomic-append + fail-closed
+  stop-logic + drawdown WARNING reach the running loops.
+- Clean up worktree + branch.
+- Monitor critical-errors journal for the next 24h to verify no new
+  torn-line entries (should be impossible with sidecar locks).
+
+---
+
 # Session Progress — Accuracy Gating Reconfiguration (2026-04-16 late-afternoon)
 
 **Session start:** ~13:30 CET (after user noticed consensus accuracy dropped)
