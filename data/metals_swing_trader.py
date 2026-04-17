@@ -1835,19 +1835,35 @@ class SwingTrader:
                 # so entries still work. LG1: log which branch fired so an
                 # operator reading metals_loop_out.txt can tell Kelly-failed
                 # from Kelly-not-called.
-                alloc = cash * POSITION_SIZE_PCT / 100
+                raw_alloc = cash * POSITION_SIZE_PCT / 100
+                # 2026-04-17 adaptive sizing: floor the fallback at
+                # MIN_TRADE_SEK so small-cash accounts can still clear the
+                # Avanza courtage minimum (cash=2822 SEK × 30% = 847 SEK
+                # silently rejected entries with full signal conviction on
+                # 2026-04-17 silver breakout). Kelly-primary path already
+                # floors at line 1805; this mirrors that behaviour on the
+                # fallback leg so both paths are size-consistent. Capped at
+                # 95% cash to preserve the courtage buffer.
+                alloc = max(raw_alloc, float(MIN_TRADE_SEK))
+                alloc = min(alloc, cash * 0.95)
                 _log(
                     f"Kelly FALLBACK for {underlying_ticker}: "
                     f"reason=({fallback_reason or 'unknown'}) "
-                    f"alloc={alloc:.0f} SEK "
-                    f"(fixed {POSITION_SIZE_PCT}% of cash={cash:.0f})"
+                    f"raw={raw_alloc:.0f} → alloc={alloc:.0f} SEK "
+                    f"(fixed {POSITION_SIZE_PCT}% of cash={cash:.0f}, "
+                    f"floored at MIN_TRADE_SEK, capped at 95% cash)"
                 )
 
             if alloc < MIN_TRADE_SEK:
+                # Reached when cash * 0.95 < MIN_TRADE_SEK: cash is small
+                # enough that even the 95%-cap holds alloc below the courtage
+                # floor. Applies to both Kelly path (kelly_alloc capped below
+                # min) and fallback path (raw_alloc + 95% cap below min).
                 _log(
                     f"Insufficient cash for {underlying_ticker}: "
                     f"cash={cash:.0f} SEK, alloc={alloc:.0f} SEK "
-                    f"< min={MIN_TRADE_SEK:.0f} SEK (need ≥{MIN_TRADE_SEK/0.30:.0f} SEK for 30% fallback)"
+                    f"< min={MIN_TRADE_SEK:.0f} SEK (need cash ≥ "
+                    f"{MIN_TRADE_SEK/0.95:.0f} SEK for floor to clear 95% cap)"
                 )
                 continue
 

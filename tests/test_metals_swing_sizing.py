@@ -1044,3 +1044,133 @@ def test_macd_improving_gate_old_2decimal_rounding_would_have_failed_fine_drift(
         "Pre-fix 2-decimal rounding creates flat history that blocks the "
         "gate — this is what the 5-decimal fix addresses"
     )
+
+
+# ---------------------------------------------------------------------------
+# 2026-04-17 adaptive-sizing: Kelly-fallback path floor
+# ---------------------------------------------------------------------------
+
+
+def test_fallback_alloc_floors_at_min_trade_sek(monkeypatch):
+    """cash=2822, POSITION_SIZE_PCT=30 → raw 847 < MIN_TRADE_SEK=1000.
+
+    Pre-fix: alloc=847 fell into the `if alloc < MIN_TRADE_SEK` skip branch,
+    silently rejecting entries with full signal conviction (the 2026-04-17
+    silver breakout was the specific incident that motivated this fix).
+    Post-fix: alloc floored to 1000 on the fallback path, trade goes through.
+    """
+    trader = _make_trader(cash=2822)
+    captured = _capture_buy(trader)
+
+    # Force the Kelly-fallback branch by raising ImportError.
+    monkeypatch.setattr(
+        "portfolio.kelly_metals.recommended_metals_size",
+        lambda **kwargs: (_ for _ in ()).throw(
+            ImportError("mock: trigger fallback path"),
+        ),
+    )
+
+    trader._check_entries(prices={}, signal_data=_signal_buy_xag())
+
+    assert len(captured) == 1, (
+        f"Fallback with cash=2822 and 30% should now place BUY "
+        f"(alloc floored to 1000); got {len(captured)} trades"
+    )
+    # alloc=1000, units = int(1000/14) = 71.
+    assert captured[0]["units"] == 71
+
+
+def test_fallback_alloc_capped_at_95_pct_of_cash(monkeypatch):
+    """cash=10000, POSITION_SIZE_PCT=30 → raw 3000 > floor. Cap at 9500.
+
+    Verifies the fallback path also applies the 95% cash cap (Kelly-primary
+    path already does this; the fix makes the two paths consistent).
+    """
+    # Configure a large POSITION_SIZE_PCT scenario by monkey-patching it —
+    # we can't easily raise POSITION_SIZE_PCT past 95 without touching the
+    # config, so simulate via a large raw alloc being capped.
+    import metals_swing_trader as mst
+    monkeypatch.setattr(mst, "POSITION_SIZE_PCT", 99)
+
+    trader = _make_trader(cash=10000)
+    captured = _capture_buy(trader)
+
+    # Force fallback.
+    monkeypatch.setattr(
+        "portfolio.kelly_metals.recommended_metals_size",
+        lambda **kwargs: (_ for _ in ()).throw(
+            ImportError("mock: trigger fallback path"),
+        ),
+    )
+
+    trader._check_entries(prices={}, signal_data=_signal_buy_xag())
+
+    assert len(captured) == 1
+    # raw=9900, floor→9900, capped at 10000*0.95=9500 → 9500.
+    # units = int(9500 / 14) = 678.
+    assert captured[0]["units"] == 678, (
+        f"Expected 678 units (alloc=9500 at cap), got {captured[0]['units']}"
+    )
+
+
+def test_fallback_skips_when_cash_below_feasibility_floor(monkeypatch, caplog):
+    """cash=900: cash*0.95=855 < MIN_TRADE_SEK=1000 → skip with "Insufficient" log.
+
+    Covers the legitimate case where the account genuinely can't afford the
+    courtage floor — we must still skip, not silently buy below the minimum.
+    """
+    import logging
+
+    trader = _make_trader(cash=900)
+    captured = _capture_buy(trader)
+
+    # Force fallback.
+    monkeypatch.setattr(
+        "portfolio.kelly_metals.recommended_metals_size",
+        lambda **kwargs: (_ for _ in ()).throw(
+            ImportError("mock: trigger fallback path"),
+        ),
+    )
+
+    with caplog.at_level(logging.INFO, logger="metals_loop.swing_trader"):
+        trader._check_entries(prices={}, signal_data=_signal_buy_xag())
+
+    assert captured == [], (
+        "cash=900 cannot support MIN_TRADE_SEK=1000 even with floor+cap; "
+        "entry must skip."
+    )
+    msgs = [rec.getMessage() for rec in caplog.records]
+    assert any("Insufficient cash" in m for m in msgs), (
+        f"Expected 'Insufficient cash' log on infeasible cash, got: {msgs}"
+    )
+
+
+def test_fallback_log_shows_raw_and_floored_alloc(monkeypatch, caplog):
+    """Fallback log must expose the raw 30%-of-cash figure alongside the
+    floored/capped alloc so the operator can see why allocation changed.
+    """
+    import logging
+
+    trader = _make_trader(cash=2822)
+    _capture_buy(trader)
+
+    monkeypatch.setattr(
+        "portfolio.kelly_metals.recommended_metals_size",
+        lambda **kwargs: (_ for _ in ()).throw(
+            ImportError("mock: trigger fallback path"),
+        ),
+    )
+
+    with caplog.at_level(logging.INFO, logger="metals_loop.swing_trader"):
+        trader._check_entries(prices={}, signal_data=_signal_buy_xag())
+
+    msgs = [rec.getMessage() for rec in caplog.records]
+    fb_logs = [m for m in msgs if "Kelly FALLBACK" in m]
+    assert fb_logs, f"Missing fallback log: {msgs}"
+    log_line = fb_logs[0]
+    # New format exposes both the raw number and the final alloc.
+    assert "raw=" in log_line, f"Expected 'raw=' in log, got: {log_line}"
+    assert "alloc=" in log_line
+    assert "floored" in log_line or "capped" in log_line, (
+        f"Expected floor/cap annotation in log, got: {log_line}"
+    )
