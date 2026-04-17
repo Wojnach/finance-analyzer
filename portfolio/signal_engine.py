@@ -1026,16 +1026,17 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     group_gated = group_gated or set()
 
     # Match downstream's raw-voter dynamic_min check. `apply_confidence_penalties`
-    # force-HOLDs the action when `extra_info["_voters"]` (= raw buy+sell count
-    # after regime gating, BEFORE accuracy gating) is below the regime quorum.
-    # If the raw candidate count can't meet that quorum, relaxation is
-    # pointless - downstream will HOLD regardless.
+    # force-HOLDs the action when `extra_info["_voters"]` is below the regime
+    # quorum. `_voters` is computed as raw buy+sell count after regime gating
+    # but BEFORE top-N exclusion and correlation-group gating, so this check
+    # must count the same way: non-HOLD votes from the post-regime dict
+    # WITHOUT subtracting `excluded` or `group_gated`. Codex round 8 fix
+    # (2026-04-17): the previous version subtracted those and could block
+    # legitimate 5-raw-voter slates where top-N or correlation trimmed down
+    # to 4 recoverable - downstream would still pass on raw=5.
     min_regime_quorum = _dynamic_min_voters_for_regime(regime)
-    candidates = sum(
-        1 for sn, v in votes.items()
-        if v != "HOLD" and sn not in excluded and sn not in group_gated
-    )
-    if candidates < min_regime_quorum:
+    raw_candidates = sum(1 for v in votes.values() if v != "HOLD")
+    if raw_candidates < min_regime_quorum:
         return 0.0
 
     baseline = _count_active_voters_at_gate(

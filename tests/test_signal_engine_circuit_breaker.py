@@ -276,6 +276,28 @@ class TestComputeGateRelaxation:
         )
         assert rel == pytest.approx(_GATE_RELAXATION_MAX)
 
+    def test_ranging_5raw_with_top_n_excluded_still_relaxes(self):
+        """Codex round 8 (2026-04-17): top-N exclusion must not shrink the
+        raw-candidate count used for the regime-quorum check. Downstream's
+        `extra_info['_voters']` is post-regime but PRE top-N, so the
+        circuit-breaker's raw count must match.
+
+        Scenario: 5 raw BUY votes in ranging, top-N excludes 1 (simulating
+        max_active_signals=4). Without the round-8 fix, candidates would
+        drop to 4 < ranging quorum 5 and relaxation would incorrectly be
+        blocked even though downstream _voters=5 passes.
+        """
+        votes = {f"s{i}": "BUY" for i in range(5)}
+        accuracy = {f"s{i}": self._make_stats(0.46) for i in range(5)}
+        # top-N excludes s4 (lowest-accuracy signal).
+        rel = _compute_gate_relaxation(
+            votes, accuracy, excluded={"s4"}, group_gated=set(),
+            base_gate=0.47, regime="ranging",
+        )
+        # raw=5 >= 5, bp=4 (s4 excluded) >= 2, bp > baseline(0) -> relax.
+        # bp < soft floor (5) -> partial-recovery MAX.
+        assert rel == pytest.approx(_GATE_RELAXATION_MAX)
+
     def test_ranging_5raw_lone_recoverable_stays_hold(self):
         """Lone-signal escape in ranging: 5 raw candidates, 4 directionally
         gated, only 1 recoverable at 0.46. Raw (5) meets ranging quorum,
