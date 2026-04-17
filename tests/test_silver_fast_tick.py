@@ -336,8 +336,13 @@ class TestSleepWithSilverTicks:
         tick_count = [0]
         original_tick = mod._silver_fast_tick
         monkeypatch.setattr(mod, "_silver_fast_tick", lambda: tick_count.__setitem__(0, tick_count[0] + 1))
+        # 2026-04-17: entry ticks are always-on now. Stub them so this test
+        # focuses strictly on the exit-tick gating behaviour and does not
+        # leak real HTTP calls.
+        monkeypatch.setattr(mod, "_silver_entry_fast_tick", lambda: None)
+        monkeypatch.setattr(mod, "_gold_entry_fast_tick", lambda: None)
 
-        # Sleep for 0.05s with no silver — should not tick
+        # Sleep for 0.05s with no silver — exit tick should NOT fire.
         start = time.monotonic()
         mod._sleep_for_cycle(start - 0.05, 0.1, "test")
         assert tick_count[0] == 0
@@ -352,6 +357,13 @@ class TestSleepWithSilverTicks:
 
         monkeypatch.setattr(mod, "_silver_fast_tick", mock_tick)
         monkeypatch.setattr(mod, "_has_active_silver", lambda: True)
+        # 2026-04-17: _sleep_for_cycle now also runs the entry-side fast-ticks
+        # (SILVER_ENTRY_FAST_TICK / GOLD_ENTRY_FAST_TICK). Without stubbing,
+        # those hit Binance FAPI on every loop iteration and consume most of
+        # the 0.3s budget, reducing exit-tick counts. Stub them to no-ops so
+        # this test measures the exit-tick cadence in isolation.
+        monkeypatch.setattr(mod, "_silver_entry_fast_tick", lambda: None)
+        monkeypatch.setattr(mod, "_gold_entry_fast_tick", lambda: None)
         # Use a very short interval so test runs fast
         monkeypatch.setattr(mod, "SILVER_FAST_TICK_INTERVAL", 0.05)
 
