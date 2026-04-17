@@ -721,9 +721,16 @@ def signal_activation_rates(entries=None):
     return result
 
 
+# P2-B (2026-04-17 adversarial review): default min_recent_samples was 50
+# while production (signal_engine) passes 30. Default lowered so non-prod
+# callers (backtester, replay script) match live behavior rather than
+# silently dropping the blended value for signals with 30-49 recent samples.
+_BLEND_DEFAULT_MIN_RECENT_SAMPLES = 30
+
+
 def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
                         normal_weight=0.70, fast_weight=0.90,
-                        min_recent_samples=50):
+                        min_recent_samples=_BLEND_DEFAULT_MIN_RECENT_SAMPLES):
     """Blend all-time and recent accuracy using adaptive recency weighting.
 
     When recent accuracy diverges sharply from all-time (> divergence_threshold),

@@ -304,11 +304,37 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
 }
 
 
+# P2-H (2026-04-17): module-load validation of _TICKER_DISABLED_BY_HORIZON
+# shape. Catches structural errors (missing _default, invalid horizon keys,
+# non-frozenset values) at import time rather than silently at runtime.
+_VALID_HORIZON_KEYS = frozenset({"_default", "3h", "4h", "12h", "1d", "3d", "5d", "10d"})
+assert "_default" in _TICKER_DISABLED_BY_HORIZON, (
+    "_TICKER_DISABLED_BY_HORIZON missing required '_default' key")
+for _k, _inner in _TICKER_DISABLED_BY_HORIZON.items():
+    assert _k in _VALID_HORIZON_KEYS, (
+        f"_TICKER_DISABLED_BY_HORIZON has unknown horizon key {_k!r}; "
+        f"valid keys: {sorted(_VALID_HORIZON_KEYS)}")
+    assert isinstance(_inner, dict), (
+        f"_TICKER_DISABLED_BY_HORIZON[{_k!r}] must be a dict")
+    for _tk, _sigs in _inner.items():
+        assert isinstance(_sigs, frozenset), (
+            f"_TICKER_DISABLED_BY_HORIZON[{_k!r}][{_tk!r}] must be a "
+            f"frozenset (got {type(_sigs).__name__})")
+del _k, _inner
+
+
 def _get_horizon_disabled_signals(ticker: str | None, horizon: str | None) -> frozenset:
-    """Return signals to force-HOLD for (ticker, horizon). Union of default + horizon-specific."""
+    """Return signals to force-HOLD for (ticker, horizon). Union of default + horizon-specific.
+
+    P3-1 (2026-04-17): uses .get('_default', {}) defensively instead of []
+    subscript. If _default is ever removed at runtime (shouldn't happen —
+    module-load assertion prevents it — but defensive), we return an empty
+    set rather than crash the hot consensus path.
+    """
     if not ticker:
         return frozenset()
-    default_set = _TICKER_DISABLED_BY_HORIZON["_default"].get(ticker, frozenset())
+    default_map = _TICKER_DISABLED_BY_HORIZON.get("_default", {})
+    default_set = default_map.get(ticker, frozenset())
     if not horizon:
         return default_set
     horizon_set = _TICKER_DISABLED_BY_HORIZON.get(horizon, {}).get(ticker, frozenset())
@@ -324,6 +350,50 @@ _TICKER_DISABLED_SIGNALS = _TICKER_DISABLED_BY_HORIZON["_default"]
 
 MIN_VOTERS_CRYPTO = 3  # crypto has 30 signals (8 core + 22 enhanced; ml disabled) — need 3
 MIN_VOTERS_STOCK = 3  # stocks have 24-26 signals (7 core + 17-19 enhanced, GPU-dependent) — need 3
+
+# P2-F (2026-04-17 adversarial review): derived floors used by the
+# circuit-breaker precondition. Placing here (after MIN_VOTERS_*) keeps the
+# relationship explicit and prevents silent drift if the base MIN_VOTERS_*
+# changes.
+_MIN_VOTERS_BASE = max(MIN_VOTERS_CRYPTO, MIN_VOTERS_STOCK)
+# Slate viability floor: the post-exclusion candidate count below which
+# relaxation would produce a consensus thinner than any asset class's quorum.
+_POST_EXCLUSION_MIN = _MIN_VOTERS_BASE
+# Lone-signal escape floor: raised from 2 to _MIN_VOTERS_BASE (3) because a
+# 2-voter relaxed consensus is still thinner than any asset class's outer
+# quorum, so letting it emit trades was inconsistent with the system's
+# design. Codex rounds 6-9 each flagged variants of this issue.
+_LONE_SIGNAL_FLOOR = _MIN_VOTERS_BASE
+
+# P2-G (2026-04-17): module-load assertions on constant relationships.
+# These catch misconfigurations at import time rather than producing silent
+# wrong behavior at runtime.
+assert MIN_VOTERS_CRYPTO > 0 and MIN_VOTERS_STOCK > 0, (
+    "MIN_VOTERS_* must be positive")
+assert _POST_EXCLUSION_MIN <= _MIN_ACTIVE_VOTERS_SOFT, (
+    f"_POST_EXCLUSION_MIN ({_POST_EXCLUSION_MIN}) must be <= "
+    f"_MIN_ACTIVE_VOTERS_SOFT ({_MIN_ACTIVE_VOTERS_SOFT}); "
+    f"otherwise the circuit breaker requires more candidates than it can "
+    f"ever accept."
+)
+assert _GATE_RELAXATION_STEP > 0, (
+    "_GATE_RELAXATION_STEP must be positive (else ZeroDivisionError in "
+    "circuit-breaker step-count math).")
+assert _GATE_RELAXATION_MAX > 0, "_GATE_RELAXATION_MAX must be positive."
+assert (ACCURACY_GATE_THRESHOLD - _GATE_RELAXATION_MAX) > _DIRECTIONAL_GATE_THRESHOLD, (
+    f"Relaxed overall accuracy gate "
+    f"({ACCURACY_GATE_THRESHOLD - _GATE_RELAXATION_MAX:.2f}) must remain "
+    f"above _DIRECTIONAL_GATE_THRESHOLD ({_DIRECTIONAL_GATE_THRESHOLD}); "
+    f"otherwise directional gating becomes tighter than the relaxed "
+    f"accuracy gate and the claim that the directional gate is NEVER "
+    f"relaxed becomes meaningless."
+)
+# Step must divide max cleanly so iteration lands on the intended max.
+_rel_ratio = _GATE_RELAXATION_MAX / _GATE_RELAXATION_STEP
+assert abs(_rel_ratio - round(_rel_ratio)) < 1e-9, (
+    f"_GATE_RELAXATION_STEP ({_GATE_RELAXATION_STEP}) must divide "
+    f"_GATE_RELAXATION_MAX ({_GATE_RELAXATION_MAX}) cleanly.")
+del _rel_ratio
 
 # Core signals that must have at least 1 active voter for non-HOLD consensus.
 # Enhanced signals can strengthen/weaken but never create consensus alone.
@@ -1010,21 +1080,46 @@ def _count_active_voters_at_gate(votes, accuracy_data, excluded, group_gated,
     return active
 
 
+def _normalize_regime(regime):
+    """P2-D (2026-04-17): normalize regime strings to a canonical lowercase form.
+
+    Protects against case/typo variants ("TRENDING-UP", " trending-up ",
+    "trending_up") that would otherwise silently fall through to the
+    strictest-quorum default. Returns None unchanged.
+    """
+    if regime is None:
+        return None
+    if not isinstance(regime, str):
+        return regime  # Let downstream default handle non-strings.
+    normalized = regime.strip().lower().replace("_", "-")
+    # Common alias fixups.
+    if normalized in ("trendingup", "trending"):
+        normalized = "trending-up"
+    elif normalized == "trendingdown":
+        normalized = "trending-down"
+    elif normalized in ("highvol", "high-volatility", "high_vol"):
+        normalized = "high-vol"
+    return normalized
+
+
 def _dynamic_min_voters_for_regime(regime):
-    """Regime-dependent final quorum, mirrored from apply_confidence_penalties.
+    """Regime-dependent final quorum. Single source of truth - called by both
+    the circuit breaker and apply_confidence_penalties.
 
     This is the minimum voter count the OUTER consensus path requires before
     emitting a non-HOLD action. The circuit breaker uses it to size its
     recovery floor so relaxation is only engaged when it could reach the
     regime's actual quorum.
 
-    2026-04-17: extracted for the circuit-breaker recovery-floor decision
-    (Codex round 6 review). Keeping the values in lockstep with
-    apply_confidence_penalties is a manual discipline — update both together.
+    2026-04-17 (P2-C/P2-D): de-duplicated. apply_confidence_penalties
+    previously had an inline copy at line ~1623 that had to stay in lockstep
+    manually - now it calls this helper. Also accepts case/typo-variant
+    regime strings via _normalize_regime.
     """
-    if regime in ("trending-up", "trending-down"):
+    canonical = _normalize_regime(regime)
+    if canonical in ("trending-up", "trending-down"):
         return 3
-    if regime == "high-vol":
+    if canonical == "high-vol":
         return 4
     return 5  # ranging, unknown, None
 
@@ -1089,7 +1184,8 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     if raw_candidates < min_regime_quorum:
         return 0.0
 
-    _POST_EXCLUSION_MIN = 3  # = MIN_VOTERS_CRYPTO = MIN_VOTERS_STOCK base floor
+    # P2-F (2026-04-17): derived from MIN_VOTERS_CRYPTO/STOCK rather than
+    # hardcoded. If the base quorum changes, this follows automatically.
     post_exclusion_candidates = sum(
         1 for sn, v in votes.items()
         if v != "HOLD" and sn not in excluded and sn not in group_gated
@@ -1109,16 +1205,13 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     )
 
     # Lone-signal escape guard. Even when raw candidates meet the downstream
-    # quorum, directional gating can leave only one recoverable voter. If the
-    # relaxed consensus would be driven by a single accuracy-passing signal,
-    # relaxation opens the gate for noise to masquerade as consensus. Require
-    # at least 2 effective voters at max relaxation.
-    #
-    # Example blocked: 5 raw candidates in ranging, 4 directionally gated at
-    # buy_accuracy=0.30 + 1 borderline at 0.46. Without this guard, relaxation
-    # admits the lone 0.46 signal and _weighted_consensus emits a BUY from a
-    # single voter while downstream _voters=5 passes the dynamic_min check.
-    _LONE_SIGNAL_FLOOR = 2
+    # quorum, directional gating can leave a thin set of recoverable voters.
+    # P2-A (2026-04-17): raised from 2 to MIN_VOTERS_BASE (3). A 2-voter
+    # "consensus" is still exposure-worthy in trending markets where
+    # dynamic_min=3 — but any relaxation that only recovers 2 voters from a
+    # large slate is catching signals that the downstream quorum would
+    # accept as a weak consensus. Require at least as many as the base
+    # MIN_VOTERS_* to avoid creating "relaxed" sub-quorum consensuses.
     if best_possible < _LONE_SIGNAL_FLOOR:
         return 0.0
 
@@ -1655,14 +1748,10 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
     conf = min(1.0, conf)
 
     # --- Stage 4: Dynamic MIN_VOTERS ---
+    # P2-C (2026-04-17): delegate to shared helper to avoid drift with the
+    # circuit breaker's recovery-floor logic. Same semantic as before.
     active_voters = extra_info.get("_voters", 0)
-
-    if regime in ("trending-up", "trending-down"):
-        dynamic_min = 3
-    elif regime == "high-vol":
-        dynamic_min = 4
-    else:  # ranging or unknown
-        dynamic_min = 5
+    dynamic_min = _dynamic_min_voters_for_regime(regime)
 
     if action != "HOLD" and active_voters < dynamic_min:
         penalty_log.append({
