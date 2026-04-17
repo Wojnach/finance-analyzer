@@ -1745,13 +1745,15 @@ def _compute_adx(df, period=14):
 
 
 def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df, config):
-    """Apply a 4-stage multiplicative confidence penalty cascade.
+    """Apply a 6-stage multiplicative confidence penalty cascade.
 
     Stages:
       1. Regime penalty — dampens confidence in choppy/volatile markets
       2. Volume/ADX gate — rejects low-conviction signals
       3. Trap detection — catches bull/bear traps (price vs volume divergence)
       4. Dynamic MIN_VOTERS — raises the bar in uncertain markets
+      5. Unanimity penalty — over-agreement often means the move is priced in
+      6. Per-ticker consensus — penalizes tickers where ensemble accuracy < 50%
 
     Returns (action, conf, penalty_log) where penalty_log is a list of applied penalties.
     """
@@ -1857,6 +1859,29 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
             elif agreement_ratio >= 0.8:  # 80-90% agreement
                 conf *= 0.75
                 penalty_log.append({"stage": "unanimity", "agreement": round(agreement_ratio, 3), "mult": 0.75})
+
+    # --- Stage 6: Per-ticker consensus accuracy penalty ---
+    # RES-2026-04-17: The consensus system has below-coinflip accuracy for some
+    # tickers (ETH-USD 47.7% at 3h, MSTR 45.9%). When this happens, the ensemble
+    # is net-negative — acting on its signals loses money. Apply a confidence
+    # penalty proportional to how far below 50% the consensus accuracy is.
+    # Don't force HOLD (too aggressive) — just reduce confidence.
+    _PTC_MIN_SAMPLES = 500
+    _PTC_PENALTY_THRESHOLD = 0.50
+    if action != "HOLD":
+        ptc_acc = extra_info.get("_ptc_accuracy")
+        ptc_samples = extra_info.get("_ptc_samples", 0)
+        if ptc_acc is not None and ptc_samples >= _PTC_MIN_SAMPLES and ptc_acc < _PTC_PENALTY_THRESHOLD:
+            # Scale penalty: 50% acc → 0.7x, 45% acc → 0.5x, 40% acc → 0.3x
+            ptc_mult = max(0.3, 0.7 + (ptc_acc - _PTC_PENALTY_THRESHOLD) * 4.0)
+            conf *= ptc_mult
+            penalty_log.append({
+                "stage": "per_ticker_consensus",
+                "ticker": ticker,
+                "ptc_accuracy": round(ptc_acc, 4),
+                "ptc_samples": ptc_samples,
+                "mult": round(ptc_mult, 4),
+            })
 
     # Clamp confidence to [0, 1]
     conf = max(0.0, min(1.0, conf))
@@ -2522,7 +2547,17 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         recent = get_or_compute_recent_accuracy(acc_horizon, days=7)
         # BUG-164 lazy-populate per-ticker consensus accuracy — _ptc_key
         # convention preserved by get_or_compute_per_ticker_accuracy.
-        get_or_compute_per_ticker_accuracy(acc_horizon)
+        _ptc_data = get_or_compute_per_ticker_accuracy(acc_horizon)
+        # RES-2026-04-17: Pass per-ticker consensus accuracy into extra_info
+        # so apply_confidence_penalties can penalize tickers where the consensus
+        # system itself has below-coinflip accuracy (e.g. ETH-USD 47.7% at 3h,
+        # MSTR 45.9%). The consensus is the aggregated output, not individual
+        # signals — if it's below 50%, the ensemble is net-negative for this ticker.
+        if _ptc_data and ticker and isinstance(_ptc_data, dict):
+            _ticker_ptc = _ptc_data.get(ticker)
+            if isinstance(_ticker_ptc, dict):
+                extra_info["_ptc_accuracy"] = _ticker_ptc.get("accuracy")
+                extra_info["_ptc_samples"] = _ticker_ptc.get("total", 0)
 
         # ARCH-23: Use shared blend function (replaces inline logic).
         accuracy_data = blend_accuracy_data(

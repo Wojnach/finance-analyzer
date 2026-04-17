@@ -729,3 +729,83 @@ class TestFullCascade:
         )
         assert action == "HOLD"
         assert any(p["stage"] == "dynamic_min_voters" for p in log)
+
+
+class TestPerTickerConsensusPenalty:
+    """Tests for Stage 6: per-ticker consensus accuracy penalty."""
+
+    def test_penalty_applied_when_ptc_below_50pct(self):
+        """ETH-USD at 47.7% consensus accuracy should get penalized."""
+        extra = _base_extra(voters=6, buy_count=4, sell_count=2,
+                            _ptc_accuracy=0.477, _ptc_samples=3000)
+        action, conf, log = apply_confidence_penalties(
+            "BUY", 0.8, "trending-up", {}, extra, "ETH-USD", None, {}
+        )
+        assert action == "BUY"
+        ptc_entries = [p for p in log if p["stage"] == "per_ticker_consensus"]
+        assert len(ptc_entries) == 1
+        assert ptc_entries[0]["ptc_accuracy"] == 0.477
+        # 0.7 + (0.477 - 0.50) * 4.0 = 0.7 - 0.092 = 0.608
+        assert abs(ptc_entries[0]["mult"] - 0.608) < 0.01
+
+    def test_no_penalty_when_ptc_above_50pct(self):
+        """XAG-USD at 54.3% should NOT get penalized."""
+        extra = _base_extra(voters=6, buy_count=4, sell_count=2,
+                            _ptc_accuracy=0.543, _ptc_samples=2000)
+        action, conf, log = apply_confidence_penalties(
+            "BUY", 0.8, "trending-up", {}, extra, "XAG-USD", None, {}
+        )
+        ptc_entries = [p for p in log if p["stage"] == "per_ticker_consensus"]
+        assert len(ptc_entries) == 0
+
+    def test_no_penalty_when_insufficient_samples(self):
+        """Below 500 samples, don't apply penalty (noisy data)."""
+        extra = _base_extra(voters=6, buy_count=4, sell_count=2,
+                            _ptc_accuracy=0.40, _ptc_samples=100)
+        action, conf, log = apply_confidence_penalties(
+            "BUY", 0.8, "trending-up", {}, extra, "ETH-USD", None, {}
+        )
+        ptc_entries = [p for p in log if p["stage"] == "per_ticker_consensus"]
+        assert len(ptc_entries) == 0
+
+    def test_no_penalty_when_ptc_missing(self):
+        """When no per-ticker data exists, skip silently."""
+        extra = _base_extra(voters=6, buy_count=4, sell_count=2)
+        action, conf, log = apply_confidence_penalties(
+            "BUY", 0.8, "trending-up", {}, extra, "NEW-TICKER", None, {}
+        )
+        ptc_entries = [p for p in log if p["stage"] == "per_ticker_consensus"]
+        assert len(ptc_entries) == 0
+
+    def test_penalty_floors_at_03(self):
+        """Very bad consensus (40%) should floor at 0.3x, not go lower."""
+        extra = _base_extra(voters=6, buy_count=4, sell_count=2,
+                            _ptc_accuracy=0.35, _ptc_samples=1000)
+        action, conf, log = apply_confidence_penalties(
+            "BUY", 0.8, "trending-up", {}, extra, "GRRR", None, {}
+        )
+        ptc_entries = [p for p in log if p["stage"] == "per_ticker_consensus"]
+        assert len(ptc_entries) == 1
+        assert ptc_entries[0]["mult"] == 0.3
+
+    def test_hold_skips_ptc_penalty(self):
+        """HOLD action should bypass per-ticker penalty."""
+        extra = _base_extra(voters=6, buy_count=4, sell_count=2,
+                            _ptc_accuracy=0.40, _ptc_samples=2000)
+        action, conf, log = apply_confidence_penalties(
+            "HOLD", 0.0, "ranging", {}, extra, "ETH-USD", None, {}
+        )
+        ptc_entries = [p for p in log if p["stage"] == "per_ticker_consensus"]
+        assert len(ptc_entries) == 0
+
+    def test_sell_also_penalized(self):
+        """SELL signals on bad-consensus tickers also get penalized."""
+        extra = _base_extra(voters=6, buy_count=2, sell_count=4,
+                            _ptc_accuracy=0.459, _ptc_samples=1900)
+        action, conf, log = apply_confidence_penalties(
+            "SELL", 0.7, "trending-down", {}, extra, "MSTR", None, {}
+        )
+        ptc_entries = [p for p in log if p["stage"] == "per_ticker_consensus"]
+        assert len(ptc_entries) == 1
+        # 0.7 + (0.459 - 0.50) * 4.0 = 0.7 - 0.164 = 0.536
+        assert abs(ptc_entries[0]["mult"] - 0.536) < 0.01
