@@ -187,8 +187,6 @@ def replay(days: int, horizon: str) -> dict:
             actual = tdata.get("consensus", "HOLD")
             sim_entry = simulated.get(ticker, {})
             sim = sim_entry.get("consensus", "HOLD")
-            # Track regime label on this ticker (for "unknown" prevalence).
-            regime_counter[tdata.get("regime", "unknown")] += 1
             if sim == "ERROR":
                 sim_error_count += 1
                 if len(sim_error_samples) < 5:
@@ -200,6 +198,14 @@ def replay(days: int, horizon: str) -> dict:
             change_pct = outcome.get("change_pct")
             if change_pct is None:
                 continue
+
+            # Codex round-10 P3 (2026-04-17 follow-up): count regime only for
+            # rows that actually contribute to the scored sample. Previously
+            # we incremented before outcome validation, so rows without a
+            # horizon outcome inflated the regime distribution - the
+            # "trending/high-vol under-exercised" warning could false-negative
+            # if unscored trending rows dominated the raw count.
+            regime_counter[tdata.get("regime", "unknown")] += 1
 
             actual_correct = _verdict_correct(actual, change_pct)
             sim_correct = _verdict_correct(sim, change_pct)
