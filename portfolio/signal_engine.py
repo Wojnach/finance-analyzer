@@ -928,6 +928,40 @@ _CLUSTER_CORRELATION_PENALTIES: dict[str, float] = {
 }
 
 
+def _safe_accuracy(value, default):
+    """Coerce an accuracy value to a clean float, mapping None/NaN/inf to `default`.
+
+    2026-04-17 (P1-C): the live consensus path previously crashed with
+    TypeError when `accuracy_data[sig]` held explicit None (e.g., from a
+    half-written cache), and with a silent fall-through-as-valid when it
+    held NaN (every comparison with NaN is False). This helper normalizes.
+    """
+    import math
+    if value is None:
+        return default
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return default
+    if math.isnan(f) or math.isinf(f):
+        return default
+    return f
+
+
+def _safe_sample_count(value):
+    """Coerce a sample count to a non-negative int; None/NaN/negative -> 0."""
+    import math
+    if value is None:
+        return 0
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return 0
+    if math.isnan(f) or math.isinf(f) or f < 0:
+        return 0
+    return int(f)
+
+
 def _count_active_voters_at_gate(votes, accuracy_data, excluded, group_gated,
                                   base_gate, relaxation):
     """Count how many signals would pass gating at gate=(base_gate - relaxation).
@@ -950,9 +984,13 @@ def _count_active_voters_at_gate(votes, accuracy_data, excluded, group_gated,
             continue
         if signal_name in group_gated:
             continue
-        stats = accuracy_data.get(signal_name, {})
-        acc = stats.get("accuracy", 0.5)
-        samples = stats.get("total", 0)
+        stats = accuracy_data.get(signal_name) or {}
+        # P1-C (2026-04-17 adversarial review): coerce None / NaN values to
+        # safe defaults. The live path previously crashed with TypeError when
+        # `accuracy_data[sig]` contained explicit None values (e.g., from a
+        # half-written cache). Replay had `except TypeError` but live didn't.
+        acc = _safe_accuracy(stats.get("accuracy"), default=0.5)
+        samples = _safe_sample_count(stats.get("total"))
         effective_gate = gate_val
         if samples >= _ACCURACY_GATE_HIGH_SAMPLE_MIN:
             effective_gate = max(gate_val, high_gate_val)
@@ -961,11 +999,11 @@ def _count_active_voters_at_gate(votes, accuracy_data, excluded, group_gated,
         # Directional gate is not relaxed by the circuit breaker — those gates
         # catch signals that are actively wrong in one direction.
         if vote == "BUY":
-            dir_acc = stats.get("buy_accuracy", acc)
-            dir_n = stats.get("total_buy", 0)
+            dir_acc = _safe_accuracy(stats.get("buy_accuracy"), default=acc)
+            dir_n = _safe_sample_count(stats.get("total_buy"))
         else:
-            dir_acc = stats.get("sell_accuracy", acc)
-            dir_n = stats.get("total_sell", 0)
+            dir_acc = _safe_accuracy(stats.get("sell_accuracy"), default=acc)
+            dir_n = _safe_sample_count(stats.get("total_sell"))
         if dir_n >= _DIRECTIONAL_GATE_MIN_SAMPLES and dir_acc < _DIRECTIONAL_GATE_THRESHOLD:
             continue
         active += 1
@@ -2230,6 +2268,19 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 sig_name, regime, ticker, t_acc * 100, t_samples,
             )
     for sig_name in regime_gated_effective:
+        if sig_name in votes and votes[sig_name] != "HOLD":
+            votes[sig_name] = "HOLD"
+
+    # P1-B (2026-04-17 adversarial review): apply horizon-specific blacklist
+    # HERE, before buy/sell counting, so `active_voters` reflects the post-
+    # horizon-disable state. Previously this gating only happened inside
+    # _weighted_consensus, leaving `extra_info["_voters"]` stale - Stage 4's
+    # dynamic_min check could pass a 5-voter count even though only 2 voters
+    # actually drove the consensus. _weighted_consensus still applies the
+    # same gating internally (idempotent: HOLD->HOLD is a no-op) as defense
+    # in depth for callers that bypass generate_signal.
+    horizon_disabled_effective = _get_horizon_disabled_signals(ticker, horizon)
+    for sig_name in horizon_disabled_effective:
         if sig_name in votes and votes[sig_name] != "HOLD":
             votes[sig_name] = "HOLD"
 
