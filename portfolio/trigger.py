@@ -355,9 +355,7 @@ def _reason_is_downshiftable(reason: str, threshold: float) -> bool:
     if m:
         conf_pct = int(m.group(1))
         return conf_pct < threshold * 100
-    if _FADE_FLIP_RE.search(reason):
-        return True
-    return False
+    return bool(_FADE_FLIP_RE.search(reason))
 
 
 def _should_downshift_to_t1(reasons, threshold: float | None = None) -> bool:
