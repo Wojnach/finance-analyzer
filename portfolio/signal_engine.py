@@ -1025,18 +1025,38 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     excluded = excluded or set()
     group_gated = group_gated or set()
 
-    # Match downstream's raw-voter dynamic_min check. `apply_confidence_penalties`
-    # force-HOLDs the action when `extra_info["_voters"]` is below the regime
-    # quorum. `_voters` is computed as raw buy+sell count after regime gating
-    # but BEFORE top-N exclusion and correlation-group gating, so this check
-    # must count the same way: non-HOLD votes from the post-regime dict
-    # WITHOUT subtracting `excluded` or `group_gated`. Codex round 8 fix
-    # (2026-04-17): the previous version subtracted those and could block
-    # legitimate 5-raw-voter slates where top-N or correlation trimmed down
-    # to 4 recoverable - downstream would still pass on raw=5.
+    # Three guards, in increasing strictness, all applied:
+    #
+    #   Guard A (raw vs regime quorum):
+    #     Matches downstream's `apply_confidence_penalties` which checks
+    #     `extra_info["_voters"]` against dynamic_min. `_voters` is raw
+    #     non-HOLD count post-regime, pre top-N/group-gate, so this check
+    #     must NOT subtract `excluded` or `group_gated`.
+    #
+    #   Guard B (post-exclusion slate viability):
+    #     Downstream's raw `_voters` doesn't account for top-N or
+    #     correlation-group exclusions. If the POST-exclusion slate is
+    #     below MIN_VOTERS_BASE (3) — the floor across all asset classes —
+    #     a relaxed consensus would be built from a too-thin slate even
+    #     though downstream would accept the raw count. Codex round 9
+    #     (2026-04-17) caught this with a 3-signal correlation cluster
+    #     gated out, leaving only 2 voters to drive consensus.
+    #
+    #   Guard C (lone-signal escape):
+    #     Even with a large post-exclusion slate, directional gating can
+    #     leave a single accuracy-passing signal. `best_possible >= 2`
+    #     catches this case.
     min_regime_quorum = _dynamic_min_voters_for_regime(regime)
     raw_candidates = sum(1 for v in votes.values() if v != "HOLD")
     if raw_candidates < min_regime_quorum:
+        return 0.0
+
+    _POST_EXCLUSION_MIN = 3  # = MIN_VOTERS_CRYPTO = MIN_VOTERS_STOCK base floor
+    post_exclusion_candidates = sum(
+        1 for sn, v in votes.items()
+        if v != "HOLD" and sn not in excluded and sn not in group_gated
+    )
+    if post_exclusion_candidates < _POST_EXCLUSION_MIN:
         return 0.0
 
     baseline = _count_active_voters_at_gate(

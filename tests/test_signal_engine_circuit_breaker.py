@@ -276,6 +276,25 @@ class TestComputeGateRelaxation:
         )
         assert rel == pytest.approx(_GATE_RELAXATION_MAX)
 
+    def test_group_gate_thin_slate_stays_hold(self):
+        """Codex round 9 (2026-04-17): 5 raw candidates where a correlation
+        cluster group-gates 3 of them, leaving only 2 post-exclusion. Even
+        though raw count (5) meets the ranging quorum (5), the post-exclusion
+        slate (2) is too thin to drive meaningful consensus via relaxation.
+        Must return 0.0 to block the escape.
+        """
+        votes = {f"s{i}": "BUY" for i in range(5)}
+        accuracy = {f"s{i}": self._make_stats(0.46) for i in range(5)}
+        # 3 signals group-gated (simulates macro_external cluster collapse).
+        rel = _compute_gate_relaxation(
+            votes, accuracy, excluded=set(), group_gated={"s0", "s1", "s2"},
+            base_gate=0.47, regime="ranging",
+        )
+        assert rel == 0.0, (
+            "Post-exclusion slate of 2 voters is too thin for relaxation "
+            "regardless of raw count or regime quorum."
+        )
+
     def test_ranging_5raw_with_top_n_excluded_still_relaxes(self):
         """Codex round 8 (2026-04-17): top-N exclusion must not shrink the
         raw-candidate count used for the regime-quorum check. Downstream's
