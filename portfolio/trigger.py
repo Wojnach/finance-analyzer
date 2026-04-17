@@ -17,6 +17,7 @@ another trigger has already fired.
 
 import logging
 import os
+import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -321,6 +322,58 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
 _FULL_REVIEW_MARKET_HOURS = 4
 _FULL_REVIEW_OFF_HOURS = 4  # Off-hours caps at T1, not T3
 
+# Option P (2026-04-17): confidence-aware tier downshift.
+# When every reason in a T2 trigger is either a low-conviction consensus
+# crossing (<TIER_DOWNSHIFT_CONFIDENCE) or a fade flip (*->HOLD sustained),
+# downshift T2 -> T1 to save Claude token budget. T3 triggers (first-of-day,
+# F&G extreme, periodic full review) are NEVER downshifted. Sustained
+# direction flips (BUY<->SELL) and non-consensus triggers (post-trade, price
+# move, sentiment) block downshift. Setting this to 0.0 disables downshift
+# without code change.
+TIER_DOWNSHIFT_CONFIDENCE = 0.40
+
+# Precompiled patterns for downshift eligibility analysis on reason strings
+# produced by check_triggers(). Reason shape stays stable across releases;
+# if the format ever changes, these miss -> downshift fails open (tier
+# stays T2, safe over-invocation rather than under-invocation).
+_CONSENSUS_CONF_RE = re.compile(r'consensus (?:BUY|SELL) \((\d+)%\)')
+_FADE_FLIP_RE = re.compile(r'flipped (?:BUY|SELL)->HOLD \(sustained\)')
+
+
+def _reason_is_downshiftable(reason: str, threshold: float) -> bool:
+    """Return True if this reason is low-conviction enough to allow T2->T1.
+
+    A reason qualifies if it is either:
+      - A consensus crossing with confidence < threshold, or
+      - A fade flip (*->HOLD sustained).
+
+    Any other reason type (direction flip, post-trade, price move, F&G,
+    sentiment, startup) returns False and blocks downshift for the whole
+    reason list.
+    """
+    m = _CONSENSUS_CONF_RE.search(reason)
+    if m:
+        conf_pct = int(m.group(1))
+        return conf_pct < threshold * 100
+    if _FADE_FLIP_RE.search(reason):
+        return True
+    return False
+
+
+def _should_downshift_to_t1(reasons, threshold: float = TIER_DOWNSHIFT_CONFIDENCE) -> bool:
+    """Decide whether a T2 tier should be downshifted to T1.
+
+    Returns True only when every reason is either a low-conviction consensus
+    crossing or a fade flip — i.e. all reasons are individually downshiftable.
+    A single high-conviction or non-consensus reason blocks downshift.
+
+    Empty reason list returns False (no downshift). Called only after
+    classify_tier() has already chosen T2 — T1 and T3 are never affected.
+    """
+    if not reasons:
+        return False
+    return all(_reason_is_downshiftable(r, threshold) for r in reasons)
+
 
 def classify_tier(reasons, state=None):
     """Classify trigger reasons into invocation tier (1=quick, 2=signal, 3=full).
@@ -362,6 +415,12 @@ def classify_tier(reasons, state=None):
     # Tier 2: new actionable signals
     tier2_patterns = ["consensus", "moved", "post-trade", "flipped"]
     if any(p in r for r in reasons for p in tier2_patterns):
+        # Option P (2026-04-17): downshift T2 -> T1 when every reason is
+        # low-conviction (consensus <40% confidence or *->HOLD fade flip).
+        # Preserves trigger firing + signal/accuracy data; only cuts Claude
+        # analysis depth on signals that reliably return HOLD anyway.
+        if _should_downshift_to_t1(reasons):
+            return 1
         return 2
 
     # Tier 1: cooldowns, sentiment noise, repeated triggers
