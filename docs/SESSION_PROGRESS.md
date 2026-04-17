@@ -1,3 +1,48 @@
+# Session Progress — Auto-Improve #2 (2026-04-17)
+
+**Session start:** 2026-04-17 afternoon CET
+**Branch:** `improve/auto-session-2026-04-17`
+**Worktree:** `Q:/finance-analyzer-improve`
+**Base SHA:** `61c7c4ec` (main, post-adversarial-review merge)
+
+## What shipped (3 commits, 16 files, +442/-46)
+
+Autonomous 6-phase improvement session. 5 parallel Explore agents scanned for
+bugs, performance issues, thread safety, and code quality. Cross-verified all
+findings; filtered ~5 false positives.
+
+### Bug fixes (P1–P6)
+1. **P1 — trigger.py monotonic clock**: `_update_sustained()` duration gate used
+   `time.time()`, vulnerable to NTP jumps. Switched to `time.monotonic()`.
+2. **P2 — agent_invocation.py stack overflow persistence**: In-memory counter
+   reset on loop restart. Now persisted to `data/stack_overflow_counter.json`.
+3. **P3 — microstructure_state.py thread safety**: Snapshot buffers (deque)
+   accessed from multiple threads without locking. Added `threading.Lock()`.
+4. **P4 — signals/trend.py Supertrend float equality**: Compared numpy floats
+   with `==` for direction detection. Replaced with integer direction state.
+5. **P5 — health.py fromisoformat crash**: Corrupt `last_invocation_ts` caused
+   unhandled ValueError. Added try/except guard.
+6. **P6 — outcome_tracker.py stale accuracy cache**: After backfill wrote new
+   outcomes, signal utility cache wasn't invalidated until 300s TTL. Now
+   invalidated immediately.
+
+### Performance + Quality
+7. **PERF-1 — market_timing.py holiday caching**: Easter + date arithmetic
+   recalculated every 60s cycle. Cached per `(country, year)`.
+8. **CQ-2 — analyze.py monotonic clock**: 3 instances of `time.time()` for
+   elapsed measurement switched to `time.monotonic()`.
+
+### Lint cleanup
+9. **4 ruff violations fixed**: Import sorting (I001×2), unused import (F401),
+   `datetime.timezone.utc` → `datetime.UTC` (UP017).
+
+### Tests
+- 5 new test files, 17 new tests covering all fixes
+- 2 existing tests in `test_trigger_core.py` updated for monotonic mock
+- 254 tests pass across affected modules, 0 regressions
+
+---
+
 # Session Progress — Adversarial Review (2026-04-17)
 
 **Session start:** 2026-04-17 early morning CET
