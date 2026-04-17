@@ -158,6 +158,83 @@ def _safe_last_jsonl_ts(path, label):
         return None
 
 
+def _kill_overrun_agent(fallback_reasons=None, fallback_tier=None):
+    """Kill the running _agent_proc and clear module state.
+
+    P1B (2026-04-17): extracted from ``try_invoke_agent`` so it can also
+    be called from ``check_agent_completion``. Previously the timeout
+    check lived only inside try_invoke_agent, meaning a hung agent could
+    run indefinitely if no new triggers fired (yesterday evidence: T1
+    invoked 16:04:58 with timeout=120s completed at 16:15:01 = 603s).
+
+    Logs the trigger with status="timeout" and clears ``_agent_proc`` /
+    ``_agent_log`` on the way out.
+
+    Args:
+        fallback_reasons: Reason list to use for the trigger log entry if
+            ``_agent_reasons`` is empty (caller context for the missing
+            _reasons.).
+        fallback_tier: Tier to log if ``_agent_tier`` is None.
+
+    Returns:
+        bool: True if the kill succeeded (or the process had already
+        exited). False if the kill command itself failed — caller must
+        NOT spawn a replacement in that case because the old process
+        may still be holding resources.
+    """
+    global _agent_proc, _agent_log
+
+    if _agent_proc is None:
+        return True
+
+    pid = _agent_proc.pid
+    elapsed = time.monotonic() - _agent_start
+    logger.info("Agent pid=%s timed out (%.0fs), killing", pid, elapsed)
+
+    kill_ok = True
+    if platform.system() == "Windows":
+        # BUG-92: Check taskkill return code to detect kill failure
+        # BUG-189: rc=128 means process already exited — treat as success
+        result = subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(pid)],
+            capture_output=True,
+        )
+        if result.returncode not in (0, 128):
+            logger.error(
+                "taskkill failed (rc=%d): %s",
+                result.returncode,
+                result.stderr.decode(errors="replace").strip(),
+            )
+            kill_ok = False
+        elif result.returncode == 128:
+            logger.info("Agent pid=%s already exited (rc=128)", pid)
+    else:
+        _agent_proc.kill()
+    try:
+        _agent_proc.wait(timeout=15)  # BUG-189: 15s for Claude CLI Node.js teardown
+    except subprocess.TimeoutExpired:
+        if kill_ok:
+            logger.error("Agent pid=%s did not exit after kill+15s wait", pid)
+        kill_ok = False
+
+    if _agent_log:
+        try:
+            _agent_log.close()
+        except Exception as e:
+            logger.warning("Agent log close failed: %s", e)
+        _agent_log = None
+
+    # BUG-91: Log the timed-out invocation before returning
+    _log_trigger(
+        _agent_reasons or fallback_reasons or [],
+        "timeout",
+        tier=_agent_tier or fallback_tier,
+    )
+
+    _agent_proc = None
+    return kill_ok
+
+
 def invoke_agent(reasons, tier=3):
     global _agent_proc, _agent_log, _agent_start, _agent_timeout
     global _agent_tier, _agent_reasons, _journal_ts_before, _telegram_ts_before
@@ -188,45 +265,18 @@ def invoke_agent(reasons, tier=3):
         # BUG-203: use monotonic clock for elapsed — wall clock is NTP-jump-prone.
         elapsed = time.monotonic() - _agent_start
         if elapsed > _agent_timeout:
-            logger.info("Agent pid=%s timed out (%.0fs), killing", _agent_proc.pid, elapsed)
-            kill_ok = True
-            if platform.system() == "Windows":
-                # BUG-92: Check taskkill return code to detect kill failure
-                # BUG-189: rc=128 means process already exited — treat as success
-                result = subprocess.run(
-                    ["taskkill", "/F", "/T", "/PID", str(_agent_proc.pid)],
-                    capture_output=True,
-                )
-                if result.returncode not in (0, 128):
-                    logger.error(
-                        "taskkill failed (rc=%d): %s",
-                        result.returncode, result.stderr.decode(errors="replace").strip(),
-                    )
-                    kill_ok = False
-                elif result.returncode == 128:
-                    logger.info("Agent pid=%s already exited (rc=128)", _agent_proc.pid)
-            else:
-                _agent_proc.kill()
-            try:
-                _agent_proc.wait(timeout=15)  # BUG-189: 15s for Claude CLI Node.js teardown
-            except subprocess.TimeoutExpired:
-                if kill_ok:
-                    logger.error("Agent pid=%s did not exit after kill+15s wait", _agent_proc.pid)
-                kill_ok = False
-            if _agent_log:
-                _agent_log.close()
-                _agent_log = None
-            # BUG-91: Log the timed-out invocation before spawning a new one
-            _log_trigger(
-                _agent_reasons or reasons, "timeout",
-                tier=_agent_tier or tier,
+            # P1B (2026-04-17): helper so check_agent_completion can share
+            # the kill path — see _kill_overrun_agent docstring.
+            kill_ok = _kill_overrun_agent(
+                fallback_reasons=reasons, fallback_tier=tier,
             )
-            # BUG-92: If kill failed, don't spawn new agent (old one may still be running)
+            # BUG-92: If kill failed, don't spawn new agent (old one may
+            # still be running)
             if not kill_ok:
-                logger.error("Not spawning new agent — old process may still be running")
-                _agent_proc = None
+                logger.error(
+                    "Not spawning new agent — old process may still be running"
+                )
                 return False
-            _agent_proc = None
         else:
             logger.info(
                 "Agent still running (pid %s, %.0fs), skipping",
@@ -535,7 +585,27 @@ def check_agent_completion():
 
     exit_code = _agent_proc.poll()
     if exit_code is None:
-        # Still running
+        # Still running. P1B (2026-04-17): enforce the wall-clock timeout
+        # here too — the lazy check in try_invoke_agent only fires when a
+        # new trigger arrives, so a hung agent could run indefinitely if
+        # no new triggers came through (yesterday: T1 timeout=120s ran
+        # 603s). Share the same kill helper used by try_invoke_agent to
+        # keep kill semantics identical.
+        elapsed = time.monotonic() - _agent_start
+        if _agent_timeout and elapsed > _agent_timeout:
+            killed_tier = _agent_tier
+            killed_reasons = list(_agent_reasons or [])
+            _kill_overrun_agent()
+            return {
+                "status": "timeout",
+                "exit_code": None,
+                "duration_s": round(elapsed, 1),
+                "tier": killed_tier,
+                "reasons": killed_reasons,
+                "journal_written": False,
+                "telegram_sent": False,
+                "completed_at": datetime.now(UTC).isoformat(),
+            }
         return None
 
     # Process has finished — collect completion info
