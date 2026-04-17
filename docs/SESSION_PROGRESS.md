@@ -1,3 +1,73 @@
+# Session Progress — Option P Tier Downshift (2026-04-17 evening)
+
+**Session start:** Shelved discussion from earlier session (2026-04-16). User
+decision: "alright, so lets implement P. Plan ahead and follow /fgl".
+
+**Status:** MERGED + PUSHED as `83316405` on `main`. Loop restart pending.
+
+## What shipped
+
+Branch `fix/tier-downshift-low-conviction`, worktree `/mnt/q/finance-analyzer-tiershift`.
+
+- `2c3f8ab3` — `docs/PLAN-tier-downshift.md` (design + risks + batches)
+- `9846571c` — `portfolio/trigger.py`: `TIER_DOWNSHIFT_CONFIDENCE = 0.40`
+  constant, `_reason_is_downshiftable()` + `_should_downshift_to_t1()`
+  helpers, downshift applied in `classify_tier()` after T2 is chosen
+- `a7b7dfc6` — 22 tests in `tests/test_trigger_core.py`. Fixes default-arg
+  capture so `TIER_DOWNSHIFT_CONFIDENCE` is patchable at runtime. Updates
+  `tests/test_trigger_full.py::test_flipped_reason_returns_tier_2` to use
+  a direction flip and adds `test_fade_flip_downshifts_to_tier_1`
+- `0df4c6d0` — ruff SIM103 cleanup
+
+## Behavior change
+
+`classify_tier()` downshifts T2 → T1 when every trigger reason is either
+(a) a consensus crossing with confidence <40%, or (b) a fade flip
+(`*->HOLD sustained`). Any high-conviction consensus, direction flip
+(BUY↔SELL), price move, post-trade, F&G, or sentiment reason in the list
+blocks the downshift. T3 triggers (first-of-day, F&G extreme, periodic
+full review) are unaffected.
+
+## Downstream consumers reviewed (self-review)
+
+| Consumer | Impact |
+|---|---|
+| `agent_invocation.invoke_agent` | `TIER_CONFIG[1]` = 15 turns / 120s vs T2's 40 turns / 600s |
+| `reporting.write_tiered_summary` | Writes smaller t1 context file — additional input-token savings |
+| `main.py` logging + `_log_trigger` | Observability preserved — effective tier is logged |
+| `update_tier_state` | No-op for T1 (T3 timer untouched) |
+| `autonomous._classify_tickers` | Documented behavioral change: if Layer 2 is later disabled, downshift narrows autonomous tickers. Layer 2 currently enabled, so dormant. |
+| `perception_gate.should_invoke` | Consensus bypasses gate; fade flips may be further skipped if gate enabled — extra savings |
+
+## Test status
+
+- 22 new tests PASS
+- Trigger suite: 173/174 (1 pre-existing: `test_sustained_counts_persist`)
+- Full suite from worktree: 7080 pass, 30 fail. 2 are worktree-env
+  (missing config.json symlink); 28 are pre-existing signal-count
+  assertions from the earlier accgate session
+
+## Codex adversarial review
+
+Hit usage limit (same issue accgate session hit earlier today). Self-review
+covered correctness, observability, regex safety, thread safety,
+autonomous-mode interaction, reporting downstream. Post-merge codex replay
+recommended when usage resets.
+
+## Parallel-session coordination
+
+My work touched only `portfolio/trigger.py` and test files — no overlap
+with accgate (`signal_engine.py`) or adversarial-round-2 (signal circuit
+breaker). Clean 4-commit rebase onto post-merge main `eaa7c564`.
+
+## Next
+
+1. Restart `PF-DataLoop` for new logic to take effect
+2. Monitor `data/invocations.jsonl` over 24h to measure actual savings
+3. Clean up worktree + branch
+
+---
+
 # Session Progress — Adversarial Review Round 2 (2026-04-17 late afternoon)
 
 **Session start:** 2026-04-17 late afternoon CET (user follow-up: "fix everything you found")
@@ -729,3 +799,142 @@ tests/test_accuracy_snapshot_extras.py
 
 ### 2026-04-16 13:59 UTC | main
 a739a56 Merge fix/accuracy-gating-20260416: accuracy gating reconfiguration
+
+### 2026-04-17 09:15 UTC | main
+88454b94 fix(signals): block lone-signal escape via best_possible>=2 precondition
+data/auto-improve-progress.json
+portfolio/signal_engine.py
+tests/test_signal_engine_circuit_breaker.py
+
+### 2026-04-17 09:21 UTC | main
+eadbbbf6 fix(signals): add sparse-voter guard alongside effective-recovery guard
+portfolio/signal_engine.py
+tests/test_signal_engine_circuit_breaker.py
+
+### 2026-04-17 09:29 UTC | main
+1ea23eb6 fix(signals): loosen sparse-candidate floor to MIN_VOTERS+1 (=4)
+portfolio/signal_engine.py
+tests/test_signal_engine_circuit_breaker.py
+
+### 2026-04-17 09:35 UTC | research/adversarial-round-2-20260417
+84b22526 fix(loop_contract): per-tier dynamic grace + in-flight suppression
+portfolio/agent_invocation.py
+portfolio/loop_contract.py
+tests/test_loop_contract_grace.py
+
+### 2026-04-17 09:35 UTC | main
+3cb769eb fix(signals): unify circuit-breaker precondition to best_possible>=4
+portfolio/signal_engine.py
+tests/test_signal_engine_circuit_breaker.py
+
+### 2026-04-17 09:40 UTC | research/adversarial-round-2-20260417
+a2942a3f fix(adv-round2): remaining pre-existing test failures + orphan cleanup
+CLAUDE.md
+portfolio/backup.py
+portfolio/meta_learner.py
+portfolio/migrate_signal_log.py
+portfolio/signal_engine.py
+tests/test_agent_completion.py
+tests/test_agent_invocation.py
+tests/test_batch2_fixes.py
+tests/test_forecast_circuit_breaker.py
+tests/test_macro_regime_integration.py
+tests/test_meta_learner.py
+tests/test_metals.py
+tests/test_signal_improvements.py
+tests/test_signal_pipeline.py
+
+### 2026-04-17 09:45 UTC | main
+b1d1b5f1 fix(signals): regime-aware circuit-breaker recovery floor
+portfolio/signal_engine.py
+tests/test_signal_engine_circuit_breaker.py
+
+### 2026-04-17 09:53 UTC | main
+4a25af68 fix(signals): dual-guard precondition matching downstream quorum semantic
+portfolio/signal_engine.py
+tests/test_signal_engine_circuit_breaker.py
+
+### 2026-04-17 09:55 UTC | research/adversarial-round-2-20260417
+a6dfd009 fix(adv-round2): address 2 Codex findings on Layer 2 grace fix
+portfolio/agent_invocation.py
+portfolio/loop_contract.py
+tests/test_loop_contract_grace.py
+
+### 2026-04-17 09:59 UTC | main
+6689d27b fix(signals): count raw votes pre-exclusion to match downstream _voters
+portfolio/signal_engine.py
+tests/test_signal_engine_circuit_breaker.py
+
+### 2026-04-17 10:05 UTC | research/adversarial-round-2-20260417
+b4d0f39e fix(meta_learner): guard against non-dict metrics JSON (Codex P2)
+portfolio/meta_learner.py
+
+### 2026-04-17 10:06 UTC | main
+7c9f4ad1 fix(signals): three-guard circuit-breaker precondition
+portfolio/signal_engine.py
+tests/test_signal_engine_circuit_breaker.py
+
+### 2026-04-17 10:12 UTC | fix/tier-downshift-low-conviction
+5df11944 docs(plan): option P tier downshift for low-conviction triggers
+docs/PLAN-tier-downshift.md
+
+### 2026-04-17 10:13 UTC | research/adversarial-round-2-20260417
+838cc7b9 docs(progress): session notes for adversarial round 2
+docs/SESSION_PROGRESS.md
+
+### 2026-04-17 10:14 UTC | fix/tier-downshift-low-conviction
+fc6f4f57 feat(trigger): option P - downshift T2 to T1 for low-conviction triggers
+portfolio/trigger.py
+
+### 2026-04-17 10:15 UTC | feat/momentum-entries
+32844388 docs(plan): momentum-entries — close 4 metals-loop gaps
+docs/plans/2026-04-17-momentum-entries-plan.md
+
+### 2026-04-17 10:17 UTC | fix/tier-downshift-low-conviction
+703bb0ad test(trigger): option P downshift coverage + fix default-arg capture
+portfolio/trigger.py
+tests/test_trigger_core.py
+tests/test_trigger_full.py
+
+### 2026-04-17 10:17 UTC | feat/momentum-entries
+df13c065 feat(metals): adaptive sizing floor on Kelly-fallback path
+data/metals_swing_trader.py
+tests/test_metals_swing_sizing.py
+
+### 2026-04-17 10:20 UTC | feat/momentum-entries
+eec98b0d feat(metals): entry-side fast-tick upside-momentum detector
+data/metals_loop.py
+tests/test_metals_entry_fasttick.py
+
+### 2026-04-17 10:24 UTC | feat/momentum-entries
+529b1a06 feat(metals): swing-trader momentum-entry path
+data/metals_swing_config.py
+data/metals_swing_trader.py
+tests/test_metals_swing_momentum.py
+
+### 2026-04-17 10:26 UTC | feat/momentum-entries
+99b4a228 feat(metals): permanently deprecate fish engine with two-step revival guard
+data/metals_loop.py
+tests/test_fish_engine_deprecated.py
+
+### 2026-04-17 10:27 UTC | fix/tier-downshift-low-conviction
+9a396824 style(trigger): ruff SIM103 - direct bool return in _reason_is_downshiftable
+portfolio/trigger.py
+
+### 2026-04-17 10:27 UTC | 
+2c3f8ab3 docs(plan): option P tier downshift for low-conviction triggers
+docs/PLAN-tier-downshift.md
+
+### 2026-04-17 10:27 UTC | 
+9846571c feat(trigger): option P - downshift T2 to T1 for low-conviction triggers
+portfolio/trigger.py
+
+### 2026-04-17 10:27 UTC | 
+a7b7dfc6 test(trigger): option P downshift coverage + fix default-arg capture
+portfolio/trigger.py
+tests/test_trigger_core.py
+tests/test_trigger_full.py
+
+### 2026-04-17 10:27 UTC | 
+0df4c6d0 style(trigger): ruff SIM103 - direct bool return in _reason_is_downshiftable
+portfolio/trigger.py
