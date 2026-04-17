@@ -802,24 +802,35 @@ def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
             "correct": int(round(blended * total)),  # BUG-186
             "pct": round(blended * 100, 1),
         }
-        # Merge directional keys from the larger-sample source per key.
-        # Prevents silent gate-bypass when a key exists only in `recent`.
-        for key in ("buy_accuracy", "sell_accuracy"):
-            if key in at and key in rc:
-                # Prefer the source with more directional samples for this side.
-                side_total = "total_buy" if key == "buy_accuracy" else "total_sell"
-                at_side = at.get(side_total, 0) or 0
-                rc_side = rc.get(side_total, 0) or 0
-                result[key] = at[key] if at_side >= rc_side else rc[key]
-            elif key in at:
-                result[key] = at[key]
-            elif key in rc:
-                result[key] = rc[key]
-        for key in ("total_buy", "total_sell"):
-            at_v = at.get(key, 0) or 0
-            rc_v = rc.get(key, 0) or 0
-            if at_v or rc_v:
-                result[key] = max(at_v, rc_v)
+        # Codex round 11 P2 (2026-04-17 follow-up): directional stats must
+        # follow the same sample-floor rule as `accuracy`. Without this,
+        # a recent-only signal with 20-29 one-sided votes still influenced
+        # _weighted_consensus's directional gate/weighting at its raw
+        # recent directional accuracy, even though the overall `accuracy`
+        # field had already been set back to neutral 0.5. Omit directional
+        # keys entirely for immature signals so downstream callers see the
+        # `.get('buy_accuracy', acc)` fallback.
+        _directionals_trustworthy = (
+            at_samples > 0 or rc_samples >= min_recent_samples
+        )
+        if _directionals_trustworthy:
+            # Merge directional keys from the larger-sample source per key.
+            # Prevents silent gate-bypass when a key exists only in `recent`.
+            for key in ("buy_accuracy", "sell_accuracy"):
+                if key in at and key in rc:
+                    side_total = "total_buy" if key == "buy_accuracy" else "total_sell"
+                    at_side = at.get(side_total, 0) or 0
+                    rc_side = rc.get(side_total, 0) or 0
+                    result[key] = at[key] if at_side >= rc_side else rc[key]
+                elif key in at:
+                    result[key] = at[key]
+                elif key in rc:
+                    result[key] = rc[key]
+            for key in ("total_buy", "total_sell"):
+                at_v = at.get(key, 0) or 0
+                rc_v = rc.get(key, 0) or 0
+                if at_v or rc_v:
+                    result[key] = max(at_v, rc_v)
         accuracy_data[sig_name] = result
     return accuracy_data
 
