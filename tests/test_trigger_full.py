@@ -255,10 +255,21 @@ class TestClassifyTierTwo:
         assert classify_tier(reasons, state=state) == 2
 
     def test_flipped_reason_returns_tier_2(self):
-        """The 'flipped' keyword (sustained signal flip) should classify as tier 2."""
+        """A direction flip (BUY<->SELL) should classify as tier 2.
+
+        Note: Option P (2026-04-17) downshifts fade flips (*->HOLD) to T1;
+        this test intentionally uses a direction flip, which is a meaningful
+        state change and should remain T2.
+        """
+        state = _base_state()
+        reasons = ["BTC-USD flipped BUY->SELL (sustained)"]
+        assert classify_tier(reasons, state=state) == 2
+
+    def test_fade_flip_downshifts_to_tier_1(self):
+        """Option P: a fade flip (*->HOLD sustained) downshifts T2 to T1."""
         state = _base_state()
         reasons = ["BTC-USD flipped BUY->HOLD (sustained)"]
-        assert classify_tier(reasons, state=state) == 2
+        assert classify_tier(reasons, state=state) == 1
 
     def test_mixed_tier2_and_tier1_returns_tier_2(self):
         """When reasons contain both tier 2 and tier 1 patterns, tier 2 wins."""

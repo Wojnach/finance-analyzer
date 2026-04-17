@@ -360,7 +360,7 @@ def _reason_is_downshiftable(reason: str, threshold: float) -> bool:
     return False
 
 
-def _should_downshift_to_t1(reasons, threshold: float = TIER_DOWNSHIFT_CONFIDENCE) -> bool:
+def _should_downshift_to_t1(reasons, threshold: float | None = None) -> bool:
     """Decide whether a T2 tier should be downshifted to T1.
 
     Returns True only when every reason is either a low-conviction consensus
@@ -369,10 +369,16 @@ def _should_downshift_to_t1(reasons, threshold: float = TIER_DOWNSHIFT_CONFIDENC
 
     Empty reason list returns False (no downshift). Called only after
     classify_tier() has already chosen T2 — T1 and T3 are never affected.
+
+    threshold=None (default) looks up TIER_DOWNSHIFT_CONFIDENCE at call time,
+    allowing runtime overrides via mock.patch or module-attribute reassignment
+    (the module-level constant is the single config knob). Passing an explicit
+    float overrides for testing.
     """
     if not reasons:
         return False
-    return all(_reason_is_downshiftable(r, threshold) for r in reasons)
+    effective = TIER_DOWNSHIFT_CONFIDENCE if threshold is None else threshold
+    return all(_reason_is_downshiftable(r, effective) for r in reasons)
 
 
 def classify_tier(reasons, state=None):
