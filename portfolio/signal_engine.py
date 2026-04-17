@@ -1275,26 +1275,51 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     activation_rates = activation_rates or {}
     horizon_mults = _get_horizon_weights(horizon)
 
-    # Codex round 10/11 (2026-04-17 follow-up): deep-sanitize accuracy_data
-    # at function entry. Round 10 fix only coerced non-dict container values
-    # to {}; round 11 found that dict-valued entries with poisoned numeric
-    # fields (e.g. {"accuracy": None, "buy_accuracy": nan}) still crashed
-    # downstream comparisons/multiplications. Now every numeric field used
-    # by gating/weighting code is coerced through _safe_accuracy or
-    # _safe_sample_count so no None/NaN/inf leaks into the hot path.
+    # Codex round 10/11/12 (2026-04-17 follow-up): deep-sanitize accuracy_data
+    # at function entry.
+    #   Round 10: coerced non-dict container values to {}.
+    #   Round 11: found dict values with poisoned numeric fields still
+    #             crashed. Added per-field coercion.
+    #   Round 12: coerce-with-0.5-default silently promoted partially-
+    #             written cache rows ({"accuracy": null, "total": 200}) into
+    #             mature 50% signals that cleared the min-samples gate.
+    #             Now: if a numeric field is poisoned, DROP that field so
+    #             downstream `.get(..., default)` falls back cleanly. A row
+    #             whose overall accuracy is poisoned but total=200 becomes
+    #             {"total": 200} - the gate sees no accuracy, the downstream
+    #             code default to the safe fallback. The row no longer
+    #             masquerades as a 50%-accurate mature signal.
     if accuracy_data:
         _sanitized = {}
         for _k, _v in accuracy_data.items():
             if not isinstance(_v, dict):
                 _sanitized[_k] = {}
                 continue
-            _clean = dict(_v)
-            for _acc_key in ("accuracy", "buy_accuracy", "sell_accuracy"):
-                if _acc_key in _clean:
-                    _clean[_acc_key] = _safe_accuracy(_clean.get(_acc_key), default=0.5)
-            for _cnt_key in ("total", "total_buy", "total_sell"):
-                if _cnt_key in _clean:
-                    _clean[_cnt_key] = _safe_sample_count(_clean.get(_cnt_key))
+            _clean = {}
+            for _field, _val in _v.items():
+                if _field in ("accuracy", "buy_accuracy", "sell_accuracy"):
+                    # Keep only if the value is a valid finite float. If
+                    # poisoned, omit so downstream default fallbacks apply.
+                    _coerced = _safe_accuracy(_val, default=None)
+                    if _coerced is not None:
+                        _clean[_field] = _coerced
+                    # Poisoned -> field omitted -> .get(key, default) uses default.
+                elif _field in ("total", "total_buy", "total_sell"):
+                    # Non-numeric or negative -> omit entirely. Downstream
+                    # samples defaults to 0 which means the signal bypasses
+                    # the min-samples gate (same as a fresh signal).
+                    try:
+                        _f = float(_val) if _val is not None else None
+                    except (TypeError, ValueError):
+                        _f = None
+                    if _f is None:
+                        continue
+                    import math as _math
+                    if _math.isnan(_f) or _math.isinf(_f) or _f < 0:
+                        continue
+                    _clean[_field] = int(_f)
+                else:
+                    _clean[_field] = _val
             _sanitized[_k] = _clean
         accuracy_data = _sanitized
     else:
