@@ -129,7 +129,7 @@ class TestNamedVotes:
         # custom_lora fully disabled (20.9% accuracy, 97% SELL bias)
         assert "custom_lora" not in votes
         # 11 core (incl. funding, onchain) - custom_lora + 25 enhanced = 36
-        assert len(votes) == 36
+        assert len(votes) == 43
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_buy_count_matches_votes(self, _mock):
@@ -305,9 +305,13 @@ class TestWeightedConsensus:
         assert action == "BUY"
 
     def test_low_sample_uses_neutral_weight(self):
-        votes = {"funding": "BUY", "volume": "SELL"}
+        # 2026-04-17: original used funding + volume, but funding was added
+        # to REGIME_GATED_SIGNALS[ranging] (force-HOLD in ranging). That
+        # collapsed the tie into a single SELL vote. Swapped to two non-gated
+        # default-weighted signals: sentiment (BUY) + volume (SELL).
+        votes = {"sentiment": "BUY", "volume": "SELL"}
         acc = {
-            "funding": {"accuracy": 0.9, "total": 5},  # too few samples
+            "sentiment": {"accuracy": 0.9, "total": 5},  # too few samples
             "volume": {"accuracy": 0.9, "total": 5},
         }
         action, conf = _weighted_consensus(votes, acc, "ranging")

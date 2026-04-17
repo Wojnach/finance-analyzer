@@ -23,7 +23,16 @@ CONTRACT_LOG_FILE = DATA_DIR / "contract_violations.jsonl"
 CONFIG_FILE = BASE_DIR / "config.json"
 HEALTH_STATE_FILE = DATA_DIR / "health_state.json"
 LAYER2_JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
+# Global Claude CLI log — written by claude_gate for ALL callers
+# (claude_fundamental, bigbet, iskbets, self-heal, etc.). Used here only
+# for *enriching* violation context with last_invocation_caller.
 CLAUDE_INVOCATIONS_FILE = DATA_DIR / "claude_invocations.jsonl"
+# Layer-2-specific invocation log — written by agent_invocation._log_trigger
+# and check_agent_completion. Has entries with tier=1/2/3 + status. Used for
+# the in-flight suppression check because it ONLY contains Layer 2 events
+# and won't false-positive suppress on an unrelated claude_fundamental run
+# (Codex P1 2026-04-17).
+LAYER2_INVOCATIONS_FILE = DATA_DIR / "invocations.jsonl"
 
 # Thresholds
 MAX_CYCLE_DURATION_S = 180
@@ -46,7 +55,56 @@ LAYER2_TRIGGER_LOOKBACK_S = 6 * 3600   # only complain if trigger was recent
 # Telegram delivery, and journal flush — enough that a healthy slow session
 # still passes, short enough that an all-nighter of silent failures gets
 # caught before markets open.
+#
+# Retained as a legacy single-value default; the active code path uses
+# LAYER2_JOURNAL_GRACE_S_BY_TIER + _get_layer2_grace_s() below (2026-04-17).
 LAYER2_JOURNAL_GRACE_S = 18 * 60       # grace period post-trigger for agent to journal
+
+# 2026-04-17: Per-tier dynamic grace. Background: two overnight entries at
+# 2026-04-16T23:11 and 2026-04-17T05:19 both showed last_invocation_status
+# = "timeout" (not auth_failure). When T3 (900s = 15m) itself times out and
+# respawns, the wall-clock gap trigger→journal can exceed the flat 18m
+# grace because the *next* invocation has barely started. The fix is
+# two-pronged: (1) derive grace from the actual tier of the most recent
+# invocation (T3 needs more slack than T1), and (2) additionally suppress
+# the alert while an invocation is demonstrably in flight (precondition 4).
+#
+# Each grace value = tier timeout + ~5min slack for subprocess startup,
+# context load, first Claude round-trip, journal flush, and Telegram send.
+# Default (when tier is absent from health_state) is T3 — fail-safe in the
+# sense that the longer window won't mask auth failures (those still
+# produce status != "invoked" entries that precondition 4 evaluates), and
+# it won't delay detection past market open (US open is 13:30 UTC ≈
+# 15:30 CET, so a 20m grace from an overnight trigger at 02:00 is well
+# inside the 7+ hour buffer).
+LAYER2_JOURNAL_GRACE_S_BY_TIER = {
+    1: 3 * 60,    # T1 timeout 120s + 3m slack
+    2: 12 * 60,   # T2 timeout 600s + 2m slack
+    3: 20 * 60,   # T3 timeout 900s + 5m slack
+}
+# Default grace when health_state has no last_invocation_tier recorded.
+# Uses T3 grace as the conservative choice (longer window) since silent
+# auth failures still get caught via precondition 4 (which inspects the
+# most recent invocation status rather than age alone).
+LAYER2_JOURNAL_GRACE_S_DEFAULT = LAYER2_JOURNAL_GRACE_S_BY_TIER[3]
+
+
+def _get_layer2_grace_s(health: dict | None) -> int:
+    """Return the per-tier grace window in seconds.
+
+    Reads ``last_invocation_tier`` from health_state and maps it to the
+    per-tier table. Falls back to ``LAYER2_JOURNAL_GRACE_S_DEFAULT`` (T3
+    grace) when the key is absent, unreadable, or not 1/2/3 — a fail-safe
+    that prefers false-negatives (under-alerting) over false-positives
+    during the narrow window while agent_invocation.py is populating the
+    new field. See 2026-04-17 design note above.
+    """
+    if not health:
+        return LAYER2_JOURNAL_GRACE_S_DEFAULT
+    tier = health.get("last_invocation_tier")
+    if not isinstance(tier, int):
+        return LAYER2_JOURNAL_GRACE_S_DEFAULT
+    return LAYER2_JOURNAL_GRACE_S_BY_TIER.get(tier, LAYER2_JOURNAL_GRACE_S_DEFAULT)
 
 
 @dataclass
@@ -156,9 +214,44 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     # Precondition 3: the trigger must be old enough that the agent has
     # had its grace window to actually journal. Complaining before the
     # grace window elapses would spam on every cycle immediately after a
-    # fresh trigger.
-    if trigger_age_s < LAYER2_JOURNAL_GRACE_S:
+    # fresh trigger. 2026-04-17: grace is now per-tier — see
+    # _get_layer2_grace_s() above for rationale.
+    grace_s = _get_layer2_grace_s(health)
+    if trigger_age_s < grace_s:
         return []
+
+    # Precondition 4 (2026-04-17): suppress the alert while an invocation
+    # is demonstrably in flight. When T3 (900s) times out and respawns,
+    # the prior "timeout" entry is already written, but the NEW invocation
+    # is a fresh "invoked" line that hasn't reached completion yet. The
+    # journal can't possibly be written until that invocation finishes,
+    # so firing the contract now would be a false-positive race. We treat
+    # a most-recent "invoked" entry younger than the tier grace as "still
+    # working" and wait for it to complete. Any non-"invoked" terminal
+    # status (success/incomplete/failed/auth_error/timeout) falls through
+    # to the real check — those are the cases the contract is meant to
+    # catch.
+    #
+    # IMPORTANT (Codex P1 2026-04-17): use LAYER2_INVOCATIONS_FILE (the
+    # Layer 2-specific log from agent_invocation), NOT the global
+    # claude_invocations.jsonl. The latter is written by claude_gate for
+    # unrelated callers (claude_fundamental, bigbet, iskbets, self-heal)
+    # whose "invoked" entries would wrongly suppress the L2 journal alert
+    # and mask genuine Layer 2 silent failures.
+    latest_l2_inv = _last_jsonl_entry(LAYER2_INVOCATIONS_FILE)
+    if latest_l2_inv and latest_l2_inv.get("status") == "invoked":
+        inv_ts = _parse_iso(
+            latest_l2_inv.get("timestamp") or latest_l2_inv.get("ts")
+        )
+        if inv_ts is not None:
+            inv_age_s = (now - inv_ts).total_seconds()
+            if 0 <= inv_age_s < grace_s:
+                return []
+
+    # For violation context only (non-blocking): read the global claude
+    # log to surface last_invocation_caller in the alert message. This is
+    # informational — it does NOT gate the alert.
+    latest_inv = _last_jsonl_entry(CLAUDE_INVOCATIONS_FILE)
 
     # Check: journal entry since the trigger?
     latest_journal_entry = _last_jsonl_entry(LAYER2_JOURNAL_FILE)
@@ -174,7 +267,7 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     # Violation. Try to enrich the message with whether a recent auth
     # failure was logged — it's the most common root cause, and telling
     # the user "auth_error was already recorded" saves them investigation.
-    latest_inv = _last_jsonl_entry(CLAUDE_INVOCATIONS_FILE)
+    # (latest_inv was already fetched for precondition 4.)
     inv_context = {}
     if latest_inv:
         inv_context = {
@@ -200,6 +293,10 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
                 latest_journal_entry.get("timestamp") or latest_journal_entry.get("ts")
                 if latest_journal_entry else None
             ),
+            # 2026-04-17: include effective grace + tier so postmortems can
+            # tell at a glance which tier's budget was in play.
+            "grace_s": grace_s,
+            "last_invocation_tier": health.get("last_invocation_tier"),
             **inv_context,
         },
     )

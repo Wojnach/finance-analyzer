@@ -382,16 +382,21 @@ def predict(votes, ticker, hour_utc=None, day_of_week=None, horizon="1d"):
     if not model_path.exists():
         return "HOLD", 0.0
 
-    # Quality gate: skip prediction if model has no real edge (AUC < threshold)
+    # Quality gate: skip prediction if model has no real edge (AUC < threshold).
+    # 2026-04-17: route through load_json (satisfies test_io_safety_sweep).
+    # Codex P2 2026-04-17: load_json returns the parsed JSON as-is for valid
+    # files, so a non-dict payload (``null`` / ``[]`` / string) would raise
+    # AttributeError on ``.get()``. Guard explicitly — prefer fail-closed
+    # (HOLD) to crashing every predict() call when the metrics file is
+    # malformed but parseable.
     metrics_path = MODEL_DIR / f"meta_learner_{horizon}_metrics.json"
     if metrics_path.exists():
-        try:
-            import json as _json
-            _m = _json.loads(metrics_path.read_text())
-            if _m.get("test_auc", 0.5) < _MIN_AUC_FOR_PREDICTIONS:
-                return "HOLD", 0.0
-        except Exception:
-            pass
+        from portfolio.file_utils import load_json
+        _m = load_json(metrics_path, default={})
+        if not isinstance(_m, dict):
+            return "HOLD", 0.0
+        if _m.get("test_auc", 0.5) < _MIN_AUC_FOR_PREDICTIONS:
+            return "HOLD", 0.0
 
     # BUG-148: Use cached model, reload only when file is newer (retrained).
     mtime = model_path.stat().st_mtime
@@ -428,16 +433,16 @@ def predict(votes, ticker, hour_utc=None, day_of_week=None, horizon="1d"):
     proba = model.predict_proba(X)[0]  # [prob_down, prob_up]
     prob_up = proba[1]
 
-    # Use calibrated threshold if available
+    # Use calibrated threshold if available.
+    # 2026-04-17: route through load_json (test_io_safety_sweep). Codex P2:
+    # guard against non-dict payloads (see the _m check above for rationale).
     cal_threshold = 0.5
     metrics_path = MODEL_DIR / f"meta_learner_{horizon}_metrics.json"
     if metrics_path.exists():
-        try:
-            import json
-            m = json.loads(metrics_path.read_text())
+        from portfolio.file_utils import load_json
+        m = load_json(metrics_path, default={})
+        if isinstance(m, dict):
             cal_threshold = m.get("calibrated_threshold", 0.5)
-        except Exception:
-            pass
 
     margin = 0.05
     if prob_up > cal_threshold + margin:

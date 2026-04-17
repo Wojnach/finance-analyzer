@@ -1,3 +1,83 @@
+# Session Progress — Adversarial Review Round 2 (2026-04-17 late afternoon)
+
+**Session start:** 2026-04-17 late afternoon CET (user follow-up: "fix everything you found")
+**Branch:** `research/adversarial-round-2-20260417`
+**Worktree:** `Q:/finance-analyzer-adv2`
+**Base SHA:** `eadbbbf6` (main)
+
+## What shipped (6 commits, 18 files, +350/-210)
+
+Follow-up to the morning's `research/adversarial-2026-04-17` merge. User
+pushed back on the "deferred" list; this session closes all the
+remaining tractable items via 3 parallel research agents + 3 parallel
+worker agents + direct fixes, following `/fgl`.
+
+### Fixes shipped
+
+1. **Layer 2 overnight timeout-cascade grace widening.** Replaced flat
+   18m grace in `loop_contract.py` with per-tier dynamic grace
+   (T1=3m, T2=12m, T3=20m, default=T3) + a 4th precondition that
+   suppresses the alert while a Layer 2 subprocess is demonstrably
+   in flight (reads `invocations.jsonl` — Layer 2-specific, not the
+   global `claude_invocations.jsonl`). agent_invocation publishes the
+   effective tier (forced to 3 when falling back to pf-agent.bat) to
+   `health_state.json`. 16 new tests in `test_loop_contract_grace.py`.
+
+2. **16 pre-existing test failures triaged and fixed.** Signal-count
+   assertions updated (41→43, 26→27, 36→43, etc). `time.time()`→
+   `time.monotonic()` in 2 tests that broke after the BUG-203
+   monotonic-clock conversion. `test_low_sample_uses_neutral_weight`
+   swapped `funding`→`sentiment` (funding was added to
+   `REGIME_GATED_SIGNALS[ranging]`). `test_forecast_circuit_breaker`
+   tests now patch the accuracy-gating function. `test_get_dxy_mocked`
+   mocks `price_source.fetch_klines` (refactored 2026-04-14). The
+   fallback-to-bat test redirects DATA_DIR to tmp_path + mocks the
+   perception gate and journal.write_context.
+
+3. **CRITICAL-2 ticker="" early warning** in `signal_engine.generate_signal`
+   — warn (don't raise) on empty ticker so future regressions surface.
+
+4. **meta_learner.py raw json.loads → load_json** (2 sites). Unbreaks
+   `test_io_safety_sweep::test_no_raw_reads_in_portfolio`. Codex P2
+   follow-up: guard against non-dict JSON payloads
+   (fail-closed = HOLD) since load_json returns parsed JSON as-is.
+
+5. **Orphan module deletion**: `portfolio/backup.py` (93 LOC, never
+   imported) and `portfolio/migrate_signal_log.py` (54 LOC, one-time
+   migration completed Feb 2026 — signal_db.py is now primary).
+
+6. **CLAUDE.md COT doc drift** — COT was re-enabled 2026-04-13 but the
+   doc still listed it under "Enhanced Disabled". Moved to "Enhanced
+   Active"; bumped 32→33 active, 4→3 force-HOLD.
+
+### Codex adversarial review (3 rounds)
+
+- **Round 1** (after initial implementation): 4 findings, all addressed:
+  place_order refusal broke SELL exits, place_stop_loss min guard,
+  file_utils retry path broke, fin_fish stderr on exit 0.
+- **Round 2** (after Layer 2 fix): 2 findings, both addressed:
+  in-flight check on wrong log, fallback tier not set to 3.
+- **Round 3** (meta_learner guard): usage limit hit; manually verified
+  the non-dict guard; working-tree test-pollution findings were in
+  uncommitted data files that force-remove cleans up.
+
+### Tests
+- 7015 passed / 1 xdist isolation flake (passes in isolation:
+  `test_metals_llm_orphan::test_start_chronos_uses_popen_in_job`) /
+  1 skipped. No new regressions.
+- All 16 originally-failing tests from the morning session now pass.
+
+### What's next
+- Merge to main, push via cmd.exe.
+- Restart `PF-DataLoop` + `PF-MetalsLoop` for the new grace logic + L2
+  tier publishing + metals helpers to take effect.
+- Monitor `data/critical_errors.jsonl` for 24h — the per-tier grace +
+  in-flight check should eliminate overnight timeout-cascade false
+  positives while still catching real silent failures.
+- Clean up worktree + branch.
+
+---
+
 # Session Progress — Auto-Improve #2 (2026-04-17)
 
 **Session start:** 2026-04-17 afternoon CET

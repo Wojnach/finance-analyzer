@@ -309,27 +309,26 @@ class TestDXYMocked:
     """Test DXY data flow with mocked yfinance API."""
 
     def test_get_dxy_mocked(self):
-        """get_dxy() should parse yfinance data correctly."""
+        """get_dxy() should parse price_source.fetch_klines output.
+
+        2026-04-17: macro_context._fetch_dxy was refactored 2026-04-14 to
+        route via portfolio.price_source.fetch_klines instead of calling
+        yfinance directly. Mocking `sys.modules["yfinance"]` no longer
+        intercepts it. Mock fetch_klines to return a close-only DataFrame.
+        """
         import portfolio.shared_state as ss
         from portfolio.macro_context import get_dxy
 
         # Clear DXY cache so get_dxy() actually fetches
         ss._tool_cache.pop("dxy", None)
 
-        # Create mock ticker with history
-        mock_history = pd.DataFrame({
-            "Close": [97.0, 97.5, 98.0, 97.8, 97.2, 97.1] * 5,
+        mock_klines = pd.DataFrame({
+            "close": [97.0, 97.5, 98.0, 97.8, 97.2, 97.1] * 5,
         })
 
-        mock_ticker = mock.MagicMock()
-        mock_ticker.history.return_value = mock_history
-
-        # yfinance is imported locally inside get_dxy() as
-        # "import yfinance as yf", so we mock the yfinance module itself.
-        with mock.patch.dict("sys.modules", {"yfinance": mock.MagicMock()}) as _:
-            import sys
-            mock_yf = sys.modules["yfinance"]
-            mock_yf.Ticker.return_value = mock_ticker
+        with mock.patch(
+            "portfolio.price_source.fetch_klines", return_value=mock_klines,
+        ):
             result = get_dxy()
 
         assert result is not None

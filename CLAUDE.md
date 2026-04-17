@@ -50,7 +50,7 @@ Remove the file to re-enable. See
 ## Overview
 
 Autonomous two-layer trading system. Layer 1 (Python, 60s loop) collects market data, computes
-32 active signals (36 modules registered, 4 force-HOLD) across 7 timeframes for 5 Tier-1
+33 active signals (36 modules registered, 3 force-HOLD) across 7 timeframes for 5 Tier-1
 instruments, and detects meaningful triggers. Layer 2 (Claude CLI subprocess) is invoked on
 triggers to make trade decisions for two simulated portfolios (Patient & Bold, each starting
 500K SEK). A separate metals subsystem trades Avanza warrants independently.
@@ -62,7 +62,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 ## Architecture
 
 ### Layer 1: Data Loop (`portfolio/main.py`)
-- 60s cycle: fetch OHLCV → compute indicators → run 32 active signals → detect triggers → write summaries
+- 60s cycle: fetch OHLCV → compute indicators → run 33 active signals → detect triggers → write summaries
 - Parallel ticker processing (ThreadPoolExecutor, 8 workers)
 - Crash recovery: exponential backoff (10s→5min), Telegram alerts (first 5 only)
 - Entry: `.venv/Scripts/python.exe -u portfolio/main.py --loop` (via `scripts/win/pf-loop.bat`)
@@ -92,7 +92,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 - **GoldDigger** (`portfolio/golddigger/`): Gold certificate trading (dry-run/live via Avanza)
 - **Elongir** (`portfolio/elongir/`): Equity trading bot (separate signal system)
 
-## Signal System (36 Modules · 32 Active)
+## Signal System (36 Modules · 33 Active)
 
 ### Core Active (10)
 1. RSI(14) — Oversold <30 BUY, overbought >70 SELL
@@ -135,9 +135,11 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 32. Orderbook Flow — Depth imbalance, trade flow, VPIN, OFI, spread health (metals+crypto)
 33. Metals Cross-Asset — Copper, GVZ, Gold/Silver ratio velocity, SPY, Oil (metals only)
 
-### Enhanced Disabled (3)
-34. Crypto Macro — Options max pain, gold-BTC rotation, exchange reserves (crypto only) — registered but force-HOLD via DISABLED_SIGNALS
-35. COT Positioning — CFTC speculative/commercial positioning, contrarian (metals only) — registered but force-HOLD pending live validation
+### Enhanced Active (1 additional)
+34. COT Positioning — CFTC speculative/commercial positioning, contrarian (metals only). Re-enabled 2026-04-13 for shadow validation; weekly cadence (CFTC Friday release).
+
+### Enhanced Disabled (2)
+35. Crypto Macro — Options max pain, gold-BTC rotation, exchange reserves (crypto only) — registered but force-HOLD via DISABLED_SIGNALS
 36. Credit Spread Risk — Credit spread monitoring — registered but force-HOLD pending live validation
 
 ### Signal Mechanics

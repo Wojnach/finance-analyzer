@@ -115,33 +115,33 @@ class TestVoteCountIntegrity:
     @mock.patch("portfolio.market_timing.should_skip_gpu", return_value=False)
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_vote_counts(self, _mock, _gpu_mock):
-        """For stocks, total applicable = 26 (incl. qwen3 + forecast GPU signals)."""
+        """For stocks, total applicable = 27 (incl. qwen3 + forecast GPU signals)."""
         ind = make_indicators(close=130.0)
         df = make_ohlcv_df(n=250, close_base=130.0)
         _, _, extra = generate_signal(ind, ticker="MSTR", df=df)
 
-        assert extra["_total_applicable"] == 26
+        assert extra["_total_applicable"] == 27
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_metal_vote_counts(self, _mock):
-        """For metals, total applicable = 27 (was 28; forecast disabled 2026-04-12)."""
+        """For metals, total applicable = 28 (was 28; forecast disabled 2026-04-12)."""
         ind = make_indicators(close=2000.0)
         df = make_ohlcv_df(n=250, close_base=2000.0)
         _, _, extra = generate_signal(ind, ticker="XAU-USD", df=df)
 
-        assert extra["_total_applicable"] == 27
+        assert extra["_total_applicable"] == 28
 
     @mock.patch("portfolio.market_timing.should_skip_gpu", return_value=False)
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
-    def test_all_stock_symbols_have_26_applicable(self, _mock, _gpu_mock):
-        """Every stock symbol should have exactly 26 total applicable signals (GPU included)."""
+    def test_all_stock_symbols_have_27_applicable(self, _mock, _gpu_mock):
+        """Every stock symbol should have exactly 27 total applicable signals (GPU included)."""
         ind = make_indicators(close=100.0)
         df = make_ohlcv_df(n=250, close_base=100.0)
 
         for ticker in list(STOCK_SYMBOLS)[:5]:  # test a sample
             _, _, extra = generate_signal(ind, ticker=ticker, df=df)
-            assert extra["_total_applicable"] == 26, \
-                f"{ticker} has {extra['_total_applicable']} total applicable, expected 26"
+            assert extra["_total_applicable"] == 27, \
+                f"{ticker} has {extra['_total_applicable']} total applicable, expected 27"
 
 
 # ---------------------------------------------------------------------------

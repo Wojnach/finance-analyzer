@@ -229,7 +229,7 @@ class TestMetalsSignalConfig:
         }
         with patch("portfolio.market_timing.should_skip_gpu", return_value=False):
             action, conf, extra = generate_signal(ind, ticker="MSTR")
-        assert extra["_total_applicable"] == 26
+        assert extra["_total_applicable"] == 27
 
     def test_crypto_total_applicable(self):
         """Crypto should have 29 applicable signals (incl. futures_flow, qwen3, forecast; ml/funding/cot disabled)."""
@@ -252,4 +252,4 @@ class TestMetalsSignalConfig:
         }
         action, conf, extra = generate_signal(ind, ticker="BTC-USD")
         # 29 base + funding re-enabled (was DISABLED) + onchain new = 31
-        assert extra["_total_applicable"] == 31
+        assert extra["_total_applicable"] == 32

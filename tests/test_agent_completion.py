@@ -196,7 +196,7 @@ class TestCheckAgentSuccess:
         proc = MagicMock()
         proc.poll.return_value = 0
         ai._agent_proc = proc
-        ai._agent_start = time.time() - 45.7
+        ai._agent_start = time.monotonic() - 45.7
         ai._agent_tier = 1
 
         result = check_agent_completion()
