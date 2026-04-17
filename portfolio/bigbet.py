@@ -166,11 +166,18 @@ def invoke_layer2_eval(ticker, direction, conditions, signals, tf_data, prices_u
     reasoning = ""
 
     try:
+        # P2 (2026-04-17): PF_HEADLESS_AGENT=1 so the Claude subprocess skips
+        # the "ask user about unresolved critical errors" step in CLAUDE.md's
+        # STARTUP CHECK. This path has no interactive stdin.
+        import os
+        bigbet_env = os.environ.copy()
+        bigbet_env["PF_HEADLESS_AGENT"] = "1"
         result = subprocess.run(
             ["claude", "-p", prompt, "--max-turns", "1"],
             capture_output=True,
             text=True,
             timeout=30,
+            env=bigbet_env,
         )
         elapsed = time.time() - t0
         output = result.stdout.strip()

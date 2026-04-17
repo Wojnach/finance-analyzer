@@ -21,9 +21,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 def _clean_env():
-    """Return env dict without CLAUDECODE to avoid nested-session errors."""
+    """Return env dict without CLAUDECODE to avoid nested-session errors.
+
+    P2 (2026-04-17): sets PF_HEADLESS_AGENT=1 so the Claude subprocess
+    skips the "ask the user about unresolved critical errors" branch in
+    CLAUDE.md's STARTUP CHECK. /fin-analyze is invoked both from the
+    main loop (no stdin) AND interactively by the user via the CLI. In
+    the interactive case CLAUDE.md's conditional still surfaces the
+    errors — it just doesn't block the subprocess path on a fake-user
+    response.
+    """
     env = os.environ.copy()
     env.pop("CLAUDECODE", None)
+    env["PF_HEADLESS_AGENT"] = "1"
     return env
 DATA_DIR = BASE_DIR / "data"
 AGENT_SUMMARY_FILE = DATA_DIR / "agent_summary.json"

@@ -314,11 +314,17 @@ def invoke_layer2_gate(ticker, price, conditions, signals, tf_data, atr, iskbets
     reasoning = ""
 
     try:
+        # P2 (2026-04-17): headless subprocess, skip CLAUDE.md startup-check
+        # "how would you like to proceed?" prompt.
+        import os
+        iskbets_env = os.environ.copy()
+        iskbets_env["PF_HEADLESS_AGENT"] = "1"
         result = subprocess.run(
             ["claude", "-p", prompt, "--max-turns", "1"],
             capture_output=True,
             text=True,
             timeout=30,
+            env=iskbets_env,
         )
         elapsed = time.time() - t0
         output = result.stdout.strip()

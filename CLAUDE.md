@@ -20,6 +20,20 @@ When unresolved errors exist:
 2. Ask whether to address them first, or proceed with the user's request.
 3. Do not silently ignore them.
 
+**Headless subprocess exception (P2, 2026-04-17):** If the `PF_HEADLESS_AGENT`
+environment variable is set to `"1"`, you are running as a Layer 2 / bigbet /
+iskbets / analyze subprocess with NO interactive stdin. In that case:
+
+1. Log the unresolved critical errors as a one-line summary inside your
+   journal entry / trade rationale so they're still surfaced.
+2. Proceed with the trigger task — do NOT ask "how would you like to proceed?".
+   Any such prompt will block the subprocess until the tier timeout with
+   zero work done (exactly the failure pattern in `data/agent.log` on
+   2026-04-16 that motivated this conditional).
+3. If the unresolved errors are directly on the task you were spawned to
+   handle (e.g. a trigger that's already failed once), note it in your
+   decision but still execute.
+
 To resolve an entry, append a follow-up line to `data/critical_errors.jsonl`:
 
 ```json

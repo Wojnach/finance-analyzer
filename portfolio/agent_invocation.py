@@ -388,6 +388,14 @@ def invoke_agent(reasons, tier=3):
         agent_env.pop("CLAUDE_CODE_ENTRYPOINT", None)
         # Increase Node.js stack size to prevent stack overflow in Claude CLI
         agent_env["NODE_OPTIONS"] = "--stack-size=16384"
+        # P2 (2026-04-17): mark this subprocess as headless so CLAUDE.md's
+        # STARTUP CHECK protocol doesn't ask "How would you like to proceed?"
+        # when it finds unresolved critical_errors.jsonl entries. The agent
+        # has no stdin (pipe only), so any prompt that blocks on user input
+        # makes it hit the tier timeout with zero work done. The CLAUDE.md
+        # conditional turns that into "log the unresolved entries in your
+        # journal entry and proceed with the trigger task".
+        agent_env["PF_HEADLESS_AGENT"] = "1"
         _agent_proc = subprocess.Popen(
             cmd,
             cwd=str(BASE_DIR),
