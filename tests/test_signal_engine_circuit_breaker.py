@@ -193,9 +193,7 @@ class TestComputeGateRelaxation:
 
     def test_sparse_3_voter_scenario_stays_hold(self):
         """Codex round 3: 3 BUY candidates all at 0.46 should NOT trigger
-        relaxation. The outer MIN_VOTERS=3 quorum means 3 relaxed voters
-        equals an exact-quorum consensus with no margin - relaxing here
-        would flip HOLD to BUY on three borderline voters.
+        relaxation. best_possible=3 < MIN_VOTERS+1=4, blocked.
         """
         votes = {f"s{i}": "BUY" for i in range(3)}
         accuracy = {f"s{i}": self._make_stats(0.46) for i in range(3)}
@@ -204,18 +202,38 @@ class TestComputeGateRelaxation:
 
     def test_four_voter_scenario_relaxes(self):
         """Codex round 4 (2026-04-17): 4 BUY candidates all at 0.46 SHOULD
-        trigger relaxation. 4 voters is MIN_VOTERS (3) + 1 margin - the
-        legitimate partial-recovery zone. Previous threshold of 5 blocked
-        this incorrectly, regressing a behavior the partial-recovery
-        branch supported.
+        trigger relaxation. best_possible=4 >= MIN_VOTERS+1=4 threshold.
+        Legitimate partial-recovery zone with 1-voter margin above the
+        outer quorum (3).
         """
         votes = {f"s{i}": "BUY" for i in range(4)}
         accuracy = {f"s{i}": self._make_stats(0.46) for i in range(4)}
         rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
-        # 0.46 passes at relaxation >= 0.02 (effective gate 0.45). Smallest
-        # step that meets the floor is 0.02 only if bp >= floor (5). Here
         # bp=4 < floor=5, so falls through to partial-recovery -> MAX.
         assert rel == pytest.approx(_GATE_RELAXATION_MAX)
+
+    def test_four_candidates_three_recoverable_stays_hold(self):
+        """Codex round 5 (2026-04-17): 4 raw candidates where one is
+        directionally gated (3 effective recoverable voters) must NOT
+        trigger relaxation. best_possible=3 < 4 threshold, blocked.
+        Previously with `bp >= 2` this would have fallen through to
+        partial-recovery MAX and emitted consensus on 3 exact-quorum
+        voters with no margin.
+        """
+        votes = {f"s{i}": "BUY" for i in range(4)}
+        # 3 recoverable at 0.46 + 1 directionally gated at buy_accuracy=0.30
+        accuracy = {f"s{i}": self._make_stats(0.46) for i in range(3)}
+        accuracy["s3"] = {
+            "accuracy": 0.60, "total": 100,
+            "buy_accuracy": 0.30, "sell_accuracy": 0.60,
+            "total_buy": 50, "total_sell": 50,
+        }
+        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
+        assert rel == 0.0, (
+            "4 candidates with only 3 effective recoverable voters must "
+            "not trigger relaxation - recovered consensus would be at-quorum "
+            "(3) with no margin, exactly the escape mode Codex round 5 flagged."
+        )
 
     def test_lone_recoverable_signal_blocked_from_escape(self):
         """Codex P2 follow-up (2026-04-17): 5 candidate signals where 4 are

@@ -1005,35 +1005,6 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     excluded = excluded or set()
     group_gated = group_gated or set()
 
-    # TWO pre-conditions work together to block the escape modes Codex
-    # identified across successive review rounds. Both are needed:
-    #
-    #  Guard A: sparse-candidate count (raw non-HOLD after exclusions).
-    #    Threshold is _MIN_ACTIVE_VOTERS_SOFT - 1 (= 4) rather than the
-    #    soft floor (5) so 4-voter scenarios can still recover. Rationale:
-    #    the OUTER consensus quorum is MIN_VOTERS_CRYPTO/STOCK = 3; a
-    #    4-voter recovery leaves a 1-voter margin above the quorum, which
-    #    is legitimate diversity. Dropping below 4 (= quorum + 1) is the
-    #    real "too sparse" zone where relaxation would just flip HOLD to
-    #    a weak consensus on borderline voters.
-    #    Example blocked: 3 BUY at 0.46 -> stays HOLD (would otherwise be
-    #    exactly at quorum with no margin).
-    #    Example allowed: 4 BUY at 0.46 -> relaxation recovers all 4 for
-    #    a 4-voter BUY (1-voter margin above quorum).
-    #
-    #  Guard B: effective-recovery check (post directional gating).
-    #    Blocks scenarios with many raw candidates where directional gating
-    #    leaves only one borderline voter. Without this, 4 dir-gated +
-    #    1 at 0.46 would pass Guard A but the lone 0.46 signal would
-    #    escape via relaxation.
-    _SPARSE_CANDIDATE_FLOOR = _MIN_ACTIVE_VOTERS_SOFT - 1  # = 4 = MIN_VOTERS + 1
-    candidates = sum(
-        1 for sn, v in votes.items()
-        if v != "HOLD" and sn not in excluded and sn not in group_gated
-    )
-    if candidates < _SPARSE_CANDIDATE_FLOOR:
-        return 0.0
-
     baseline = _count_active_voters_at_gate(
         votes, accuracy_data, excluded, group_gated, base_gate, 0.0,
     )
@@ -1044,15 +1015,30 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
         votes, accuracy_data, excluded, group_gated,
         base_gate, _GATE_RELAXATION_MAX,
     )
-    # Guard B: require at least 2 effective voters at max relaxation.
-    # Catches the "many candidates but most directionally gated" case.
-    if best_possible < 2:
+
+    # Single unified precondition on EFFECTIVE voters (post directional gating).
+    # Block relaxation unless max relaxation could recover >= MIN_VOTERS + 1 = 4
+    # voters. Rationale: the outer MIN_VOTERS_CRYPTO/STOCK quorum is 3, so
+    # recovering to exactly 3 means the relaxed consensus is at-or-below
+    # quorum with no noise margin. Requiring 4 ensures a legitimate 1-voter
+    # margin above the quorum.
+    #
+    # This single check replaces the earlier two-guard design (raw-candidate
+    # count + best_possible>=2) because bp is always <= raw_candidates, so the
+    # raw check is redundant when bp is the controlling threshold. Handles all
+    # the Codex-identified escape modes:
+    #   - lone signal at 0.46 with 4 dir-gated companions -> bp=1 < 4, blocked
+    #   - sparse 3-voter all at 0.46 -> bp=3 < 4, blocked
+    #   - 3 recoverable + 1 irrecoverable (4 candidates) -> bp=3 < 4, blocked
+    #   - 4 recoverable at 0.46 -> bp=4 >= 4, relaxes (MIN_VOTERS+1 margin)
+    #   - 4 recoverable + 1 irrecoverable (5 candidates) -> bp=4 >= 4, relaxes
+    _MIN_RECOVERY_FLOOR = _MIN_ACTIVE_VOTERS_SOFT - 1  # = 4 = MIN_VOTERS + 1
+    if best_possible < _MIN_RECOVERY_FLOOR:
         return 0.0
 
-    # If max relaxation doesn't recover any additional voters beyond
-    # baseline, relaxation is useless: genuine regime break where every
-    # sub-47% signal is also sub-41%. Keep the strict gate so the event
-    # shows up in logs.
+    # Regime break: relaxation recovers nothing beyond baseline. Keep the
+    # strict gate so the event shows up in logs rather than silently opening
+    # to sub-41% signals.
     if best_possible <= baseline:
         return 0.0
 
