@@ -492,6 +492,31 @@ SILVER_VELOCITY_WINDOW = 18      # 18 × 10s = 3 min rolling window
 SILVER_VELOCITY_ALERT_PCT = -0.8 # % drop threshold over the velocity window
 SILVER_VELOCITY_TELEGRAM = True  # send Telegram on velocity alerts
 
+# --- ENTRY-SIDE FAST-TICK (upside-momentum detector, 2026-04-17) ---
+# Mirror of the exit-side velocity alert but in the opposite direction and
+# NOT gated on having an active position. When a breakout is detected we write
+# a momentum candidate to ENTRY_MOMENTUM_STATE_FILE; metals_swing_trader reads
+# this file and relaxes the usual MIN_BUY_CONFIDENCE/MIN_BUY_VOTERS gates when
+# a fresh candidate matches the ticker and direction.
+#
+# Motivation: the 2026-04-17 silver rip moved +1.3% in 20 min on volume ratio
+# 2.2x while the swing trader's snapshot-based gates required
+# MIN_BUY_CONFIDENCE=0.60 AND 2-consecutive regime-confirm checks. Those
+# thresholds are correct for range entries but silently reject breakout
+# entries that move faster than the confirmation cadence.
+SILVER_ENTRY_FAST_TICK_ENABLED = True
+SILVER_ENTRY_VELOCITY_WINDOW = 18          # 18 × 10s = 3 min (matches exit window)
+SILVER_ENTRY_VELOCITY_ALERT_PCT = 0.8      # +% rise required over the window
+SILVER_ENTRY_MIN_RVOL = 1.5                # require volume ratio ≥ this (vol confirm)
+SILVER_ENTRY_DEDUP_WINDOW_SEC = 300        # one trigger per 5 min max
+GOLD_ENTRY_FAST_TICK_ENABLED = True
+GOLD_ENTRY_VELOCITY_WINDOW = 18            # same 3-min window
+GOLD_ENTRY_VELOCITY_ALERT_PCT = 0.4        # gold's typical range is ~half of silver's
+GOLD_ENTRY_MIN_RVOL = 1.5
+GOLD_ENTRY_DEDUP_WINDOW_SEC = 300
+ENTRY_MOMENTUM_STATE_FILE = os.path.join("data", "metals_momentum_state.json")
+ENTRY_MOMENTUM_TELEGRAM = True
+
 # --- POSITIONS (defaults — overridden by persisted state on startup) ---
 POSITIONS_DEFAULTS = {
     "gold": {
@@ -763,7 +788,59 @@ NEWS_FETCH_INTERVAL_ACTIVE_SILVER = int(
 )
 
 # --- FISH ENGINE (integrated intraday fishing) ---
-FISH_ENGINE_ENABLED = False      # 2026-04-15: disabled after 12 consecutive losses (-12,257 SEK session). Re-enable only after 6 known integration bugs fixed (docs ref: project_fish_engine_live_test.md)
+#
+# Fish engine permanently deprecated 2026-04-17.
+#
+# Timeline:
+#   2026-04-07: first live test, 6 integration bugs cost 590 SEK.
+#   2026-04-09: all 6 bugs fixed; position reconciliation added.
+#   2026-04-15: subsequent session lost 12,257 SEK across 12 consecutive
+#               trades with the integration working correctly.
+#
+# The previous disable comment said "re-enable only after 6 bugs fixed".
+# That framing misdirects: the bugs ARE fixed, and the strategy itself
+# has no measurable edge given current signal quality. Re-enabling based
+# on "the bugs are fixed" is insufficient — the bugs were fixed and the
+# strategy still lost 12K SEK.
+#
+# The swing trader's new momentum-entry path (2026-04-17) supersedes the
+# fish engine for upside-breakout entries: it reuses the same signal
+# infrastructure, sizes via Kelly, respects the cash/courtage floor, and
+# relies on the auditable _evaluate_entry gates rather than a separate
+# unaudited decision tree.
+#
+# Do NOT re-enable without:
+#   1. 30+ paper trades with positive expectancy under the current
+#      signal regime.
+#   2. Documented justification in docs/plans/<date>-fish-engine-revival.md.
+#   3. Removal of both FISH_ENGINE_ENABLED=False AND _assert_fish_engine_allowed.
+#
+# The two-step requirement (flag + assertion removal) is intentional: a
+# single-line change cannot reactivate a known-losing strategy.
+FISH_ENGINE_ENABLED = False
+
+
+def _assert_fish_engine_allowed() -> None:
+    """Guard raised at every fish-engine execution site.
+
+    If someone flips ``FISH_ENGINE_ENABLED = True`` without also removing
+    this assertion and the call sites below, the first execution path
+    raises loudly instead of silently activating a losing strategy.
+
+    Kept as a function (not a module-level assert) so it is testable and
+    so future operators who intentionally revive the engine have to make
+    a deliberate, auditable change (delete the function AND remove the
+    call at every use site). See the FISH_ENGINE_ENABLED declaration for
+    the full revival checklist.
+    """
+    if FISH_ENGINE_ENABLED:
+        raise RuntimeError(
+            "Fish engine deprecated 2026-04-17 — see FISH_ENGINE_ENABLED "
+            "declaration-site comment for the 2026-04-15 12,257 SEK loss "
+            "context and revival requirements before re-enabling."
+        )
+
+
 _fish_engine = None               # FishEngine instance (lazy init)
 _loop_page = None                 # Playwright page ref, set by main loop at startup
 PROB_REPORT_INTERVAL = 5          # compute probability report every N checks (~2.5 min)
@@ -785,6 +862,11 @@ _silver_session_high = None
 _silver_consecutive_down = 0
 _silver_prev_price = None
 _silver_underlying_ref = None        # XAG-USD price at position entry (reference for alerts)
+
+# --- Entry-side fast-tick state (2026-04-17 positive-velocity detector) ---
+_xag_entry_prices = deque(maxlen=SILVER_ENTRY_VELOCITY_WINDOW)
+_xau_entry_prices = deque(maxlen=GOLD_ENTRY_VELOCITY_WINDOW)
+_entry_last_trigger_ts: dict[str, float] = {}   # {"XAG-USD": monotonic, "XAU-USD": monotonic}
 
 # --- Fish precompute state ---
 _gold_price_history = deque(maxlen=12)  # ~12 minutes at 60s cycle, for 5-min change
@@ -924,14 +1006,28 @@ def pnl_pct(current, entry):
 
 
 def _sleep_for_cycle(cycle_started, interval_s, label):
-    """Sleep until the next scheduled cycle start, running silver fast ticks.
+    """Sleep until the next scheduled cycle start, running fast ticks.
 
-    This keeps cadence anchored to cycle start time rather than drifting by
-    `interval + work_duration` on every iteration.  During the sleep window,
-    runs 10-second silver fast ticks for any active silver position.
+    Cadence is anchored to cycle start time rather than drifting by
+    ``interval + work_duration`` every iteration. During the sleep window we
+    run two classes of 10s fast ticks:
+
+    - Exit-side silver tick (``_silver_fast_tick``): fires only when a silver
+      position is active. Runs the downside-velocity alerts and threshold
+      warnings that protect an existing position.
+    - Entry-side ticks (``_silver_entry_fast_tick`` / ``_gold_entry_fast_tick``):
+      detect upside-velocity breakouts and write momentum candidates. Always
+      runs (if enabled) because the point is to trigger new entries.
+
+    If neither class is active (all fast-tick flags disabled AND no silver
+    position), we do a simple drift-free sleep and return.
     """
-    if not SILVER_FAST_TICK_ENABLED or not _has_active_silver():
-        # No silver position — simple sleep
+    exit_tick_active = SILVER_FAST_TICK_ENABLED and _has_active_silver()
+    entry_tick_active = (
+        SILVER_ENTRY_FAST_TICK_ENABLED or GOLD_ENTRY_FAST_TICK_ENABLED
+    )
+    if not (exit_tick_active or entry_tick_active):
+        # No fast-tick work to do — simple sleep
         elapsed = time.monotonic() - cycle_started
         remaining = interval_s - elapsed
         if remaining > 0:
@@ -940,7 +1036,7 @@ def _sleep_for_cycle(cycle_started, interval_s, label):
         log(f"{label} overran by {abs(remaining):.1f}s; continuing immediately")
         return
 
-    # Silver fast-tick sub-loop during sleep
+    # Fast-tick sub-loop during sleep
     min_remaining = SILVER_FAST_TICK_INTERVAL * 0.5  # don't bother if less than half a tick left
     while True:
         elapsed = time.monotonic() - cycle_started
@@ -951,10 +1047,21 @@ def _sleep_for_cycle(cycle_started, interval_s, label):
         if tick_sleep <= 0:
             break
         time.sleep(tick_sleep)
-        try:
-            _silver_fast_tick()
-        except Exception as e:
-            _safe_print(f"[silver tick] error: {e}")
+        if exit_tick_active:
+            try:
+                _silver_fast_tick()
+            except Exception as e:
+                _safe_print(f"[silver tick] error: {e}")
+        if SILVER_ENTRY_FAST_TICK_ENABLED:
+            try:
+                _silver_entry_fast_tick()
+            except Exception as e:
+                _safe_print(f"[silver entry tick] error: {e}")
+        if GOLD_ENTRY_FAST_TICK_ENABLED:
+            try:
+                _gold_entry_fast_tick()
+            except Exception as e:
+                _safe_print(f"[gold entry tick] error: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -991,6 +1098,231 @@ def _silver_fetch_xag():
     except Exception:
         logger.debug("_silver_fetch_xag: Binance FAPI call failed, using cached XAG-USD", exc_info=True)
     return _underlying_prices.get("XAG-USD")
+
+
+def _gold_fetch_xau():
+    """Fetch just XAU-USD from Binance FAPI. Mirror of ``_silver_fetch_xag``."""
+    try:
+        r = requests.get(
+            f"{BINANCE_FAPI_TICKER}?symbol=XAUUSDT", timeout=5
+        )
+        if r.status_code == 200:
+            price = float(r.json()["price"])
+            _underlying_prices["XAU-USD"] = price
+            return price
+    except Exception:
+        logger.debug("_gold_fetch_xau: Binance FAPI call failed, using cached XAU-USD", exc_info=True)
+    return _underlying_prices.get("XAU-USD")
+
+
+# ---------------------------------------------------------------------------
+# Entry-side fast-tick (2026-04-17 upside-momentum detector)
+#
+# Mirror of the exit-side silver fast-tick but direction-reversed and
+# position-agnostic. Designed to catch coordinated risk-on bursts (e.g. BTC
+# squeeze → silver follows) that the snapshot-based swing trader gates miss
+# because the regime/voter confirm takes 2 cycles while the move is 20 min
+# long. When a velocity breakout is detected we write a momentum candidate
+# to ENTRY_MOMENTUM_STATE_FILE; metals_swing_trader consumes this file.
+# ---------------------------------------------------------------------------
+
+
+def _load_momentum_state() -> dict:
+    """Load the entry-momentum state file, returning empty dict on first use."""
+    try:
+        if os.path.exists(ENTRY_MOMENTUM_STATE_FILE):
+            return load_json(ENTRY_MOMENTUM_STATE_FILE) or {}
+    except Exception:
+        logger.warning(
+            "_load_momentum_state: read failed, starting fresh",
+            exc_info=True,
+        )
+    return {}
+
+
+def _write_momentum_candidate(
+    ticker: str,
+    direction: str,
+    velocity_pct: float,
+    price: float,
+    rvol: float,
+    ttl_sec: int,
+) -> None:
+    """Atomically write a momentum candidate for ticker.
+
+    Preserves existing entries for other tickers so BTC candidates (added
+    later) don't stomp silver candidates and vice versa. Schema:
+
+      {"XAG-USD": {"direction": "LONG", "velocity_pct": 0.92, ...}}
+    """
+    state = _load_momentum_state()
+    state[ticker] = {
+        "direction": direction,
+        "velocity_pct": round(velocity_pct, 3),
+        "price_at_trigger": round(price, 4),
+        "rvol": round(rvol, 2),
+        "triggered_at": datetime.datetime.now(datetime.UTC).isoformat(),
+        "consumed_at": None,
+        "ttl_sec": ttl_sec,
+    }
+    try:
+        atomic_write_json(ENTRY_MOMENTUM_STATE_FILE, state, ensure_ascii=False)
+    except Exception:
+        # Non-fatal: candidate will simply not be consumed this cycle. Log
+        # so the operator can see if this recurs across cycles.
+        logger.warning(
+            "_write_momentum_candidate: atomic_write_json failed for %s — candidate dropped",
+            ticker,
+            exc_info=True,
+        )
+
+
+def _fetch_rvol(ticker: str) -> float:
+    """Fetch relative volume ratio (last 1h volume / 24h avg) from Binance FAPI.
+
+    Returns 1.0 on any error — neutral (neither confirms nor rejects momentum).
+    A dedicated RVOL fetch is unavoidable because the main loop's per-cycle
+    volume_ratio is computed from the signal engine and not exposed in any
+    shared module state that the fast-tick can reach without a cycle hit.
+    """
+    try:
+        # Use the 24h klines endpoint: last 1h volume vs. average of the
+        # preceding 24 hours. Lightweight — single request, one response.
+        symbol = "XAGUSDT" if ticker == "XAG-USD" else "XAUUSDT"
+        r = requests.get(
+            f"{BINANCE_FAPI_TICKER.rsplit('/', 1)[0]}/klines?"
+            f"symbol={symbol}&interval=1h&limit=25",
+            timeout=5,
+        )
+        if r.status_code != 200:
+            return 1.0
+        bars = r.json()
+        if not bars or len(bars) < 2:
+            return 1.0
+        # Kline index 5 is volume (base asset). Last bar is the currently
+        # forming hour; compare its volume against the mean of the previous
+        # 24 closed bars.
+        last_vol = float(bars[-1][5])
+        prev_vols = [float(b[5]) for b in bars[:-1]]
+        avg_vol = sum(prev_vols) / len(prev_vols)
+        if avg_vol <= 0:
+            return 1.0
+        return last_vol / avg_vol
+    except Exception:
+        logger.debug(
+            "_fetch_rvol: rvol fetch failed for %s, defaulting to 1.0",
+            ticker,
+            exc_info=True,
+        )
+        return 1.0
+
+
+def _entry_fast_tick(
+    ticker: str,
+    fetch_fn,
+    prices_deque: deque,
+    threshold_pct: float,
+    min_rvol: float,
+    dedup_sec: int,
+    ttl_sec: int = 300,
+) -> None:
+    """Generic entry-side fast-tick: detect positive velocity breakouts.
+
+    Mirror of ``_silver_fast_tick`` but direction-reversed. Runs every
+    SILVER_FAST_TICK_INTERVAL seconds regardless of whether the user holds a
+    position — the point is to trigger entry decisions.
+
+    Steps:
+      1. Fetch live price; append to rolling deque.
+      2. When deque is full, compute velocity = (newest - oldest) / oldest * 100.
+      3. If velocity >= threshold_pct AND rvol >= min_rvol AND dedup elapsed,
+         write a momentum candidate and optionally send Telegram.
+
+    The rvol gate is the primary false-positive defense — a velocity breakout
+    on thin liquidity (e.g. off-hours spike) would write a candidate without
+    it. RVOL is re-fetched per trigger (NOT per tick) because we only hit the
+    rvol endpoint when velocity alone already qualifies — cheap.
+    """
+    price = fetch_fn()
+    if price is None or price <= 0:
+        return
+    prices_deque.append(price)
+    if len(prices_deque) < prices_deque.maxlen:
+        return  # not enough data yet
+    oldest = prices_deque[0]
+    if oldest <= 0:
+        return
+    velocity_pct = (price - oldest) / oldest * 100
+    if velocity_pct < threshold_pct:
+        return
+
+    # Velocity clears the bar — now verify with rvol and dedup.
+    now_mono = time.monotonic()
+    last_ts = _entry_last_trigger_ts.get(ticker, 0.0)
+    if now_mono - last_ts < dedup_sec:
+        return  # still within dedup window
+
+    rvol = _fetch_rvol(ticker)
+    if rvol < min_rvol:
+        logger.info(
+            "entry_fast_tick %s: velocity=%.2f%% cleared threshold but rvol=%.2f < %.2f — suppressed",
+            ticker, velocity_pct, rvol, min_rvol,
+        )
+        return
+
+    # Trigger: record dedup, write candidate, notify.
+    _entry_last_trigger_ts[ticker] = now_mono
+    _write_momentum_candidate(
+        ticker=ticker,
+        direction="LONG",
+        velocity_pct=velocity_pct,
+        price=price,
+        rvol=rvol,
+        ttl_sec=ttl_sec,
+    )
+    log(
+        f"*** ENTRY MOMENTUM {ticker}: {velocity_pct:+.2f}% in "
+        f"{prices_deque.maxlen * SILVER_FAST_TICK_INTERVAL}s, rvol={rvol:.2f}, "
+        f"price={price:.2f} ***"
+    )
+    if ENTRY_MOMENTUM_TELEGRAM:
+        try:
+            send_telegram(
+                f"*ENTRY MOMENTUM: {ticker} {velocity_pct:+.2f}% in "
+                f"{prices_deque.maxlen * SILVER_FAST_TICK_INTERVAL}s*\n"
+                f"`price ${price:.2f} | rvol {rvol:.2f}x`\n"
+                f"_LONG candidate written; swing trader may relax entry gates_"
+            )
+        except Exception:
+            logger.debug("entry_fast_tick telegram failed", exc_info=True)
+
+
+def _silver_entry_fast_tick() -> None:
+    """Silver-specific entry fast-tick (runs during fast-tick sub-loop)."""
+    if not SILVER_ENTRY_FAST_TICK_ENABLED:
+        return
+    _entry_fast_tick(
+        ticker="XAG-USD",
+        fetch_fn=_silver_fetch_xag,
+        prices_deque=_xag_entry_prices,
+        threshold_pct=SILVER_ENTRY_VELOCITY_ALERT_PCT,
+        min_rvol=SILVER_ENTRY_MIN_RVOL,
+        dedup_sec=SILVER_ENTRY_DEDUP_WINDOW_SEC,
+    )
+
+
+def _gold_entry_fast_tick() -> None:
+    """Gold-specific entry fast-tick (runs during fast-tick sub-loop)."""
+    if not GOLD_ENTRY_FAST_TICK_ENABLED:
+        return
+    _entry_fast_tick(
+        ticker="XAU-USD",
+        fetch_fn=_gold_fetch_xau,
+        prices_deque=_xau_entry_prices,
+        threshold_pct=GOLD_ENTRY_VELOCITY_ALERT_PCT,
+        min_rvol=GOLD_ENTRY_MIN_RVOL,
+        dedup_sec=GOLD_ENTRY_DEDUP_WINDOW_SEC,
+    )
 
 
 def _silver_init_ref():
@@ -2324,6 +2656,13 @@ def _run_fish_engine_tick():
     Builds a state dict from metals loop data, calls the engine,
     and executes any buy/sell decisions via Avanza.
     """
+    # 2026-04-17 deprecation guard: belt-and-suspenders. The outer
+    # `if FISH_ENGINE_ENABLED:` check at the call site already gates this,
+    # but we re-assert here so that any direct/test-time invocation also
+    # raises if the flag is flipped without removing this check. See the
+    # FISH_ENGINE_ENABLED declaration for full revival requirements.
+    _assert_fish_engine_allowed()
+
     global _fish_engine
 
     # Lazy init
