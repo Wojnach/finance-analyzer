@@ -166,8 +166,8 @@ def test_momentum_exit_ignores_below_threshold_noise(monkeypatch):
 def test_momentum_exit_threshold_constant_pinned():
     """Pin config constants so a future tune-down doesn't silently regress
     into the 2026-04-17 incident territory."""
-    assert cfg.MOMENTUM_EXIT_MIN_HOLD_SECONDS >= 600, \
-        "min-hold must be >= 10 minutes"
+    assert cfg.MOMENTUM_EXIT_MIN_HOLD_SECONDS >= 300, \
+        "min-hold must be >= 5 minutes (enough for 3 new ticks post-entry)"
     assert cfg.MOMENTUM_EXIT_THRESHOLD_PCT >= 0.8, \
         "threshold must be >= 0.8% to stay above XAG/XAU noise"
 

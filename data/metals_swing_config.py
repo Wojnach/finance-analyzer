@@ -124,9 +124,15 @@ SIGNAL_REVERSAL_EXIT = True        # exit on SELL consensus with >= MIN_BUY_VOTE
 # the 3-tick counter-trend heuristic waits for a minimum hold AND
 # requires a larger cumulative move. ``_und_history`` is cleared on
 # entry at ``metals_swing_trader._execute_buy``.
-MOMENTUM_EXIT_MIN_HOLD_SECONDS = 600   # 10 min hold before 3-tick counter-trend
+MOMENTUM_EXIT_MIN_HOLD_SECONDS = 300   # 5 min hold before 3-tick counter-trend
                                        # rule can fire. Hard stop + trailing +
-                                       # signal reversal still active from t=0.
+                                       # signal reversal still active from t=0,
+                                       # so real catastrophic moves still exit
+                                       # fast via HARD_STOP (-2% underlying).
+                                       # 5m ≈ 5 post-entry 60s ticks — leaves
+                                       # 2-3 cycles past the minimum 3-tick
+                                       # window while still blocking the
+                                       # fill-verification-same-cycle exit.
 MOMENTUM_EXIT_THRESHOLD_PCT = 0.8      # Min cumulative counter-trend move over
                                        # the 3-tick window. Raised from 0.3.
 # 2026-04-10: user removed the 5h time limit in favor of an EOD-only forced
