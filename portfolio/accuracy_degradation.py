@@ -428,19 +428,19 @@ def _diff_against_baseline(*, baseline: dict, now: datetime,
                            min_samples_historical: int,
                            min_samples_current: int) -> list[dict]:
     """Return alert dicts for each scope where the degradation gate fires."""
-    from portfolio.accuracy_stats import (
-        consensus_accuracy,
-        load_entries,
-        signal_accuracy,
-    )
-    from portfolio.forecast_accuracy import cached_forecast_accuracy
-
     # BUG-178/W15-W16 review (2026-04-16): load entries ONCE and share
     # across the per-signal / per-ticker / consensus diffs. Without
     # entry-sharing _per_ticker_recent re-scans the 50,000-entry SQLite
     # file once per signal name (~41 scans), blowing the 180s cycle
     # budget every time the degradation check runs.
     from datetime import timedelta as _td
+
+    from portfolio.accuracy_stats import (
+        consensus_accuracy,
+        load_entries,
+        signal_accuracy,
+    )
+    from portfolio.forecast_accuracy import cached_forecast_accuracy
     cutoff = (now - _td(days=int(BASELINE_TARGET_DAYS))).isoformat()
     all_entries = load_entries()
     recent_entries = [e for e in all_entries if e.get("ts", "") >= cutoff]

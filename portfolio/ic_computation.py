@@ -11,8 +11,8 @@ import math
 import time
 from pathlib import Path
 
-from portfolio.file_utils import load_json, atomic_write_json, load_jsonl_tail
-from portfolio.tickers import SIGNAL_NAMES, DISABLED_SIGNALS
+from portfolio.file_utils import atomic_write_json, load_json
+from portfolio.tickers import DISABLED_SIGNALS, SIGNAL_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +220,7 @@ def _load_entries(days=None):
     entries = load_entries()
     if days and entries:
         import datetime
-        cutoff = (datetime.datetime.now(datetime.timezone.utc)
+        cutoff = (datetime.datetime.now(datetime.UTC)
                   - datetime.timedelta(days=days)).isoformat()
         entries = [e for e in entries if e.get("ts", "") >= cutoff]
     return entries
