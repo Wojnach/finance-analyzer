@@ -1,198 +1,134 @@
-# Improvement Plan — Auto-Session 2026-04-16
+# Improvement Plan — Auto-Session 2026-04-17
 
-Updated: 2026-04-16
-Branch: `improve/auto-session-2026-04-16`
-Worktree: `Q:/fa-improve-20260416`
+Updated: 2026-04-17
+Branch: `improve/auto-session-2026-04-17`
+Worktree: `Q:/finance-analyzer-improve`
 
-## Session Context
+## Methodology
 
-Three consecutive overnight Layer 2 outages (2026-04-14 through 16) — each ~4-5h
-silent. Pattern: a trigger fires ~01:00 UTC, the claude CLI subprocess returns
-exit 0 while printing "Not logged in", and the system doesn't detect the failure
-until ~05:00 UTC when the `layer2_journal_activity` contract finally fires (60 min
-grace + cycle latency + trigger age > grace).
-
-Existing detection infrastructure is correctly built (`detect_auth_failure` in
-`claude_gate.py`, `check_layer2_journal_activity` in `loop_contract.py`,
-`scripts/check_critical_errors.py` surface at session start), but it has two
-**gaps** that keep the detection slow:
-
-1. **Bypass sites.** `bigbet.py`, `iskbets.py`, and `analyze.py` invoke
-   `claude -p` with direct `subprocess.run()` — skipping `claude_gate` entirely.
-   Auth failures from these paths are never recorded, so they never reach
-   `critical_errors.jsonl` to kick off the startup-check surfacing chain.
-2. **Slow grace window.** `LAYER2_JOURNAL_GRACE_S = 3600` (1 hour) gives too
-   much room. Valid T3 invocations complete in <=900s (15 min); anything past
-   that is definitionally a stall. The grace period should match the real
-   upper bound on a healthy invocation, not the observed worst case.
-
-This session fixes both. It also picks up three small quality fixes that
-agents surfaced while exploring.
-
----
+Five parallel exploration agents examined: core loop/orchestration, signal engine/accuracy,
+data layer/file I/O, metals subsystem/Avanza, and dashboard/test infrastructure. Findings
+were verified against source code. False positives from agents were filtered out.
 
 ## 1. Bugs & Problems Found
 
-### BUG-200: bigbet.py bypasses detect_auth_failure (P1)
-- **File**: `portfolio/bigbet.py:168-192`
-- **Issue**: `invoke_layer2_eval()` calls `subprocess.run(["claude", "-p", ...])`
-  directly and only checks `result.returncode == 0 and output`. When auth
-  expires, claude exits 0 with stdout = `"Not logged in -- Please run /login"`.
-  The response parser can't extract a number, so the function degrades to
-  returning `(None, "")` -- but **the auth failure is never recorded** to
-  `critical_errors.jsonl`, so `check_critical_errors.py` never surfaces it.
-  Bigbet runs BEFORE Layer 2 on some code paths, so its silent failure can
-  precede the slower contract detection by hours.
-- **Fix**: After subprocess completes, call
-  `detect_auth_failure(result.stdout + result.stderr, caller="bigbet_layer2")`
-  before parsing the output. If True, return the safe default and exit.
-- **Impact**: Auth failures from the bigbet path now trigger the same
-  `critical_errors.jsonl` escalation as the main Layer 2 path, bringing
-  detection latency from "never" to "next cycle".
+### P1 — trigger.py: wall-clock in sustained gate causes NTP-jump false negatives
 
-### BUG-201: iskbets.py bypasses detect_auth_failure (P1)
-- **File**: `portfolio/iskbets.py:304-353`
-- **Issue**: Identical pattern to BUG-200. Worse consequence: the function
-  **defaults to `approved=True`** when parsing fails, meaning an auth-failure
-  output could be interpreted as gate-approved for a warrant trade. This is
-  a real safety gap, not just a detection gap.
-- **Fix**: Same as BUG-200 -- call `detect_auth_failure` after subprocess.
-  On auth failure, return `(False, "auth failure")` -- the default-approve
-  policy should NEVER pass an auth-failed output.
-- **Impact**: Prevents auth-failed outputs from becoming approved gate
-  decisions. Surfaces auth_failure to the critical journal immediately.
+**File:** `portfolio/trigger.py:57-81`
+**Issue:** `_update_sustained()` stores and compares `started_ts` via `time.time()` (wall clock).
+If NTP daemon adjusts the clock backward, `now_ts - entry["started_ts"]` goes negative and
+the duration gate fails even if the signal has been sustained for minutes.
+**Impact:** Sustained signal flips (consensus change triggers) can silently fail to fire.
+**Fix:** Use `time.monotonic()` for duration tracking. Store a separate `_monotonic_ts` in
+the state entry. The `started_ts` wall-clock field is preserved for persistence/debugging;
+a new `_mono_start` field handles duration math. On process restart, `_mono_start` is
+re-initialized (unknown — treat as "just started"), which is the correct behavior since
+a restart already resets the sustained counter.
 
-### BUG-202: LAYER2_JOURNAL_GRACE_S is 1h (P1 contributing)
-- **File**: `portfolio/loop_contract.py:42`
-- **Issue**: Grace period is 3600s. Layer 2 T3 invocation timeout is 900s
-  (15 min). Any invocation that takes longer than 900s has already been
-  killed by the timeout. So 900s is the tightest-meaningful grace window.
-  1h was a safety margin but empirically produces 4-5h detection windows
-  (trigger at 01:00 + 60m grace = earliest detection 02:00, but we've seen
-  05:00 consistently -- the extra gap is cycle cadence + stale state reads).
-  Tightening to 15 min (900s) brings worst-case detection to ~15-20 min
-  after the trigger instead of 60-300 min.
-- **Fix**: `LAYER2_JOURNAL_GRACE_S = 15 * 60` with an inline comment
-  explaining the 900s = T3 timeout justification.
-- **Impact**: Overnight silent failures detected in 15-20 min instead of
-  hours. No false positives expected: T3 invocations genuinely complete
-  within 900s or they're killed.
+### P2 — agent_invocation.py: stack overflow counter not persisted
 
-### BUG-203: agent_invocation.py elapsed uses time.time() (P3)
-- **File**: `portfolio/agent_invocation.py`
-- **Issue**: Wall-clock `time.time()` is susceptible to NTP jumps. For
-  measuring "how long has the agent been running", `time.monotonic()` is
-  the right primitive. Current bug severity is low on Windows (NTP jumps
-  small), but it's the correct fix and trivial to apply.
-- **Fix**: Replace `time.time()` with `time.monotonic()` for elapsed-
-  duration calculations only. Keep `time.time()` where a real wall-clock
-  timestamp is needed (log entries, journal records).
-- **Impact**: Small robustness improvement for timeout correctness.
+**File:** `portfolio/agent_invocation.py:39-40,617-643`
+**Issue:** `_consecutive_stack_overflows` is an in-memory global that counts consecutive
+Claude CLI stack overflow crashes. After 5, Layer 2 is auto-disabled. But on loop restart
+(code deploy, crash, schtasks restart), the counter resets to 0, re-enabling Layer 2 even
+if the underlying cause (large file in project root, etc.) persists.
+**Impact:** Crash loop: restart -> 5 stack overflows -> disable -> restart -> repeat.
+**Fix:** Persist counter to `data/stack_overflow_counter.json` via `atomic_write_json()`.
+Load on module import. Clear on successful non-stack-overflow completion.
 
-### BUG-204: qwen3_signal.py silent exception in GPU reaper (P3)
-- **File**: `portfolio/qwen3_signal.py` (~line 153)
-- **Issue**: `except Exception: pass` around GPU process reaper. Reaper
-  failures are invisible -- if the reaper itself is broken, VRAM leaks
-  silently.
-- **Fix**: Replace with `logger.debug("GPU reaper failed", exc_info=True)`.
-- **Impact**: Diagnostic improvement only. Leaks would still happen but
-  now observable.
+### P3 — microstructure_state.py: unprotected concurrent buffer access
 
-### BUG-205: dashboard/app.py silent exception in market_health (P3)
-- **File**: `dashboard/app.py` (~line 1182)
-- **Issue**: `except Exception: pass` around optional market_health
-  enrichment. If the enrichment source is broken, API silently omits the
-  field without any trace.
-- **Fix**: Replace with `logger.debug` form. Same as BUG-204.
-- **Impact**: Diagnostic only.
+**File:** `portfolio/microstructure_state.py:36-38`
+**Issue:** `_snapshot_buffers`, `_spread_buffers`, `_ofi_history` are plain dicts accessed by
+both the metals_loop 10s fast-tick thread and the main 60s cycle (via `accumulate_snapshot`
+and `get_state`). Python dicts are thread-safe for individual operations but deque
+append + iterate patterns can raise RuntimeError.
+**Impact:** Potential `RuntimeError: deque mutated during iteration` in OFI computation.
+**Fix:** Add `threading.Lock()` around buffer mutations and reads in public functions.
 
----
+### P4 — trend.py: Supertrend direction inferred from float equality
 
-## 2. Architecture Notes
+**File:** `portfolio/signals/trend.py:164`
+**Issue:** `supertrend[i - 1] == upper_band[i - 1]` compares numpy floats with `==`.
+Floating-point arithmetic can produce epsilon differences, causing the equality check
+to fail and the direction to be incorrectly determined.
+**Impact:** Supertrend direction flip can be missed, producing wrong trend signal.
+**Fix:** Use the `direction` array (already allocated) for state transitions instead of
+inferring from float equality. Replace `supertrend[i-1] == upper_band[i-1]` with
+`direction[i-1] == -1` (was downtrend).
 
-All proposed changes preserve the existing modularity. The auth-failure
-detector in `claude_gate.py` is already well-factored; the fix is simply
-routing the three bypass sites through it. No new abstractions needed.
+### P5 — health.py: unguarded fromisoformat in agent silence check
 
-The `LAYER2_JOURNAL_GRACE_S` constant is the only single point of truth for
-the detection window; tightening it here automatically tightens all callers.
-Keep the value as a module-level constant, not in config, to prevent
-accidental loosening during an incident.
+**File:** `portfolio/health.py:103`
+**Issue:** `datetime.fromisoformat(last_ts)` can raise `ValueError` on corrupt state file.
+**Impact:** Agent silence detection crashes, propagating exception to caller.
+**Fix:** Wrap in try-except, return `silent=True` on parse error (fail-closed).
 
----
+### P6 — outcome_tracker.py: backfill doesn't invalidate signal utility cache
 
-## 3. Test Coverage Additions
+**File:** `portfolio/outcome_tracker.py` (end of `backfill_outcomes`)
+**Issue:** After writing new outcomes to signal_log, the signal_utility TTL cache in
+accuracy_stats.py (300s TTL) isn't invalidated. Next cycle sees stale utility scores.
+**Impact:** Signal utility weights lag by up to 5 minutes after outcome backfill.
+**Fix:** Call `invalidate_signal_utility_cache()` at end of `backfill_outcomes()`.
 
-### TEST-A: Auth failure detection at bigbet + iskbets
-- `tests/test_bigbet_auth_failure.py` (new) -- mock `subprocess.run` to
-  return `"Not logged in"` with exit 0; verify the function returns the
-  safe default AND that `detect_auth_failure` was invoked (critical_errors
-  entry written).
-- `tests/test_iskbets_auth_failure.py` (new) -- same pattern. Additionally,
-  verify that the default-approve policy is overridden to `approved=False`
-  on auth failure.
+## 2. Performance Improvements
 
-### TEST-B: Layer 2 journal grace window
-- Extend `tests/test_loop_contract.py` (or new test file) with 2-3 tests
-  covering:
-  - Trigger age < 15 min (grace) -> no violation
-  - Trigger age = 15 min + 1s, no journal -> violation recorded
-  - Trigger with recent journal (post-trigger) -> no violation
+### PERF-1 — market_timing.py: cache holiday sets per year
 
-### TEST-C: Monotonic time in agent_invocation
-- Deferred -- the change is internal to functions that use `time.time()` as
-  a local epoch, not exposed via API. Existing tests of invocation timeout
-  still pass.
+**File:** `portfolio/market_timing.py:158-216`
+**Issue:** `us_market_holidays()` and `swedish_market_holidays()` recompute the full
+holiday set including Easter calculation on every call. Called every 60s cycle.
+**Impact:** Unnecessary CPU: divmod + date arithmetic 1440 times/day.
+**Fix:** Module-level `_holiday_cache` dict keyed by `(country, year)`. Auto-invalidates
+on year boundary.
 
----
+## 3. Code Quality
 
-## 4. Ordering -- Batches
+### CQ-1 — Ruff auto-fixable lint violations
 
-### Batch 1: Bigbet + iskbets auth routing (BUG-200, BUG-201)
-- `portfolio/bigbet.py` + `portfolio/iskbets.py` (+ `portfolio/analyze.py` if
-  the same pattern)
-- New tests: `tests/test_bigbet_auth_failure.py`, `tests/test_iskbets_auth_failure.py`
+4 auto-fixable violations + manual SIM103/UP017:
+- 2 x I001 (unsorted imports): `accuracy_degradation.py:431`, `metals_loop.py:298`
+- 1 x F401 (unused import): identified during exploration
+- 1 x SIM103 (needless bool): portfolio module
+- 1 x UP017 (datetime-timezone-utc): portfolio module
 
-### Batch 2: Journal grace window tightening (BUG-202)
-- `portfolio/loop_contract.py`
-- Tests: extend `tests/test_loop_contract.py`
+E402 (54 occurrences) are intentional lazy imports — leave as-is.
 
-### Batch 3: Monotonic time + silent exception logging (BUG-203-205)
-- `portfolio/agent_invocation.py`
-- `portfolio/qwen3_signal.py`
-- `dashboard/app.py`
+### CQ-2 — analyze.py: use monotonic clock for elapsed timing
 
-### Batch 4 (optional): Ruff F541 in scripts/verify_kronos.py
-- `scripts/verify_kronos.py` -- 7 f-strings without placeholders (cosmetic).
+**File:** `portfolio/analyze.py:270,280,314`
+**Issue:** Uses `time.time()` for elapsed measurement. Should use `time.monotonic()`.
+**Fix:** Replace 3 call sites.
 
----
+## 4. Deferred (Not This Session)
 
-## 5. Deferred
+- **metals_loop.py decomposition** — 7295 lines, 94 functions. Needs careful multi-session
+  refactoring with live trading path testing. Too risky for autonomous session.
+- **Dashboard CORS restriction** — Intentional LAN-access design. Requires user input on
+  whether to restrict.
+- **Dashboard auth default** — "No token = open access" is backwards-compatible design.
+  Changing default requires user approval.
 
-The following surfaced during exploration but are out of scope:
+## 5. Batch Plan
 
-- **fin_fish.py / metals_precompute.py / oil_precompute.py / reporting.py test
-  coverage.** All >1000 lines with zero unit tests. Adding meaningful tests
-  requires fixture work for Avanza sessions and Binance FAPI responses.
-  Deferred -- track as TEST-4 for a future session.
-- **Direct subprocess in `analyze.py:273`.** Same pattern as bigbet/iskbets
-  but `analyze.py` is a manual CLI tool invoked by the user, not an
-  autonomous signal path. Lower priority; bundle with Batch 1 if time permits.
-- **Scheduled `check_critical_errors.py` notifier.** Could fire a Telegram
-  alert every hour if unresolved errors exist, independent of Claude session
-  starts. Deferred -- the existing session-start surfacing chain is adequate
-  once Batches 1-2 land.
+### Batch 1: Bug Fixes (5 files, 5 new test files)
+| File | Change | Risk |
+|------|--------|------|
+| `portfolio/trigger.py` | P1: monotonic clock in `_update_sustained()` | LOW |
+| `portfolio/agent_invocation.py` | P2: persist stack overflow counter | LOW |
+| `portfolio/microstructure_state.py` | P3: thread safety for buffers | LOW |
+| `portfolio/signals/trend.py` | P4: fix Supertrend float equality | MEDIUM |
+| `portfolio/health.py` | P5: guard fromisoformat parse | LOW |
 
----
+### Batch 2: Perf + Cache + Quality (3 files)
+| File | Change | Risk |
+|------|--------|------|
+| `portfolio/market_timing.py` | PERF-1: cache holiday sets | LOW |
+| `portfolio/outcome_tracker.py` | P6: invalidate utility cache | LOW |
+| `portfolio/analyze.py` | CQ-2: monotonic clock | LOW |
 
-## 6. Impact Assessment
-
-- **BUG-200/201 fix:** Additive. The code path already has the safe default
-  fallback; we're just adding the escalation. No behavior change for healthy
-  invocations.
-- **BUG-202 fix:** Tightens the detection window only. No effect on healthy
-  cycles. False-positive risk is low because T3 timeout already caps
-  healthy invocation duration at 900s.
-- **BUG-203-205:** Diagnostic only. No behavior change.
-
-Each batch is independently shippable and independently revertable.
+### Batch 3: Lint Cleanup
+| File | Change | Risk |
+|------|--------|------|
+| Various | CQ-1: ruff auto-fix | LOW |
