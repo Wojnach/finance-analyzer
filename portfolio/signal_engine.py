@@ -1275,6 +1275,21 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     activation_rates = activation_rates or {}
     horizon_mults = _get_horizon_weights(horizon)
 
+    # Codex round-10 P1 (2026-04-17 follow-up): sanitize accuracy_data ONCE
+    # at function entry. Previously _count_active_voters_at_gate had its
+    # own defensive coercion, but the rest of this function still did
+    # `accuracy_data.get(sig).get(...)` — a None value at accuracy_data[sig]
+    # would crash with AttributeError at the top-N sort, group-leader
+    # selection, crisis-mode check, or main gating loop. Sanitizing once
+    # here makes every downstream call safe.
+    if accuracy_data:
+        accuracy_data = {
+            k: (v if isinstance(v, dict) else {})
+            for k, v in accuracy_data.items()
+        }
+    else:
+        accuracy_data = {}
+
     # Regime gating: force-HOLD signals that produce negative alpha in this regime.
     # BUG-149: now horizon-aware — e.g., trend works at 3h in ranging (61.6%)
     # SC-I-001: when caller provides regime_gated_override (with BUG-158 per-ticker

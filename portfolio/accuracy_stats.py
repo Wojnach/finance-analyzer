@@ -749,10 +749,16 @@ def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
     """
     if not alltime and not recent:
         return {}
+    # Codex round-10 P2 (2026-04-17 follow-up): don't early-return recent
+    # without going through the blend loop - the min_recent_samples floor
+    # must apply to recent-only signals too (a 20-sample signal with recent
+    # accuracy=0.80 should default to neutral 0.5, not vote at 0.80).
+    # Treating empty alltime/recent as {} keeps the loop's per-signal
+    # sample-threshold logic authoritative.
     if not alltime:
-        return recent or {}
+        alltime = {}
     if not recent:
-        return alltime
+        recent = {}
 
     # P1-D (2026-04-17 adversarial review): iterate over the UNION of signal
     # names, not just alltime. Previously a signal present only in `recent`
@@ -772,14 +778,22 @@ def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
 
         # Blend only when recent has enough samples AND alltime exists;
         # otherwise fall back to whichever source has data.
+        # Codex round-10 P2 (2026-04-17 follow-up): previously a recent-only
+        # signal with <min_recent_samples samples fell through to rc_acc,
+        # letting an immature signal's raw recent accuracy drive consensus.
+        # Now we require min_recent_samples even for recent-only signals,
+        # falling back to a neutral 0.5 otherwise (matches pre-patch
+        # semantics for signals below the recent-sample floor).
         if rc_samples >= min_recent_samples and at_samples > 0:
             divergence = abs(rc_acc - at_acc)
             w = fast_weight if divergence > divergence_threshold else normal_weight
             blended = w * rc_acc + (1 - w) * at_acc
         elif at_samples > 0:
             blended = at_acc
+        elif rc_samples >= min_recent_samples:
+            blended = rc_acc  # recent-only signal with enough samples
         else:
-            blended = rc_acc  # recent-only signal
+            blended = 0.5  # immature signal: neutral default
 
         total = max(at_samples, rc_samples)
         result = {
