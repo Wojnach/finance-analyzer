@@ -39,11 +39,18 @@ LOG_FILE = _ROOT / "data" / "signal_log.jsonl"
 
 
 def _load_entries(days: int):
-    """Stream signal_log entries from the last N days."""
+    """Stream signal_log entries from the last N days.
+
+    P3-8 (2026-04-17 adversarial review): return (entries, parse_error_count)
+    so callers can surface malformed-row prevalence. A corrupted log
+    previously silently produced fewer rows while the summary still claimed
+    "30d window".
+    """
     if not LOG_FILE.exists():
         raise FileNotFoundError(f"Missing signal log: {LOG_FILE}")
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     entries = []
+    parse_errors = 0
     with LOG_FILE.open("r", encoding="utf-8", errors="replace") as fh:
         for line in fh:
             line = line.strip()
@@ -52,16 +59,18 @@ def _load_entries(days: int):
             try:
                 e = json.loads(line)
             except json.JSONDecodeError:
+                parse_errors += 1
                 continue
             ts = e.get("ts", "")
             try:
                 dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-            except ValueError:
+            except (ValueError, AttributeError, TypeError):
+                parse_errors += 1
                 continue
             if dt < cutoff:
                 continue
             entries.append(e)
-    return entries
+    return entries, parse_errors
 
 
 def _verdict_correct(consensus: str, change_pct: float) -> bool | None:
@@ -109,6 +118,17 @@ def _simulate_consensus_with_new_rules(tickers_snapshot: dict, horizon: str) -> 
             f"replay_consensus: failed to load accuracy cache for {horizon!r} - {exc}. "
             "Aborting replay rather than returning bogus numbers.",
         ) from exc
+    # P3-5/P3-4 (2026-04-17 adversarial review): when both caches are missing
+    # (load_cached_accuracy returns None not raises), the previous narrow-
+    # except branch silently produced an empty blend. Every simulated signal
+    # would then default to 0.5 accuracy and vote freely - misleading but
+    # silent. Raise explicitly so the caller knows to run the loop first.
+    if not alltime and not recent:
+        raise RuntimeError(
+            f"replay_consensus: accuracy cache empty/missing for {horizon!r}. "
+            "Run the loop at least once to populate the cache before replay, "
+            "or point LOG_FILE at a workspace with populated accuracy_cache.json."
+        )
     acc_data_global = blend_accuracy_data(alltime, recent)
 
     result = {}
@@ -118,10 +138,11 @@ def _simulate_consensus_with_new_rules(tickers_snapshot: dict, horizon: str) -> 
         if not votes:
             result[ticker] = {"consensus": "HOLD", "conf": 0.0}
             continue
-        # 2026-04-16 review (silent-failure-hunter P1): per-ticker failures now
-        # record an explicit error row so the caller can count them and so
-        # _verdict_correct won't silently drop the row. Upstream `replay()`
-        # surfaces the error count in the summary output.
+        # P2-J (2026-04-17 adversarial review): broaden exception catch.
+        # Previously narrow (KeyError/ValueError/TypeError) let AttributeError,
+        # RuntimeError, etc. escape and crash the full replay loop. For a
+        # per-ticker simulation error we want to record and continue; only
+        # the outer RuntimeError on cache-load stays fail-fast.
         try:
             action, conf = _weighted_consensus(
                 votes,
@@ -130,7 +151,7 @@ def _simulate_consensus_with_new_rules(tickers_snapshot: dict, horizon: str) -> 
                 horizon=horizon,
                 ticker=ticker,
             )
-        except (KeyError, ValueError, TypeError) as exc:
+        except Exception as exc:
             result[ticker] = {"consensus": "ERROR", "conf": 0.0, "error": str(exc)}
             continue
         result[ticker] = {"consensus": action, "conf": round(conf, 4)}
@@ -139,7 +160,7 @@ def _simulate_consensus_with_new_rules(tickers_snapshot: dict, horizon: str) -> 
 
 def replay(days: int, horizon: str) -> dict:
     """Run the replay and return a summary dict."""
-    entries = _load_entries(days)
+    entries, parse_errors = _load_entries(days)
     actual_buckets = defaultdict(lambda: [0, 0])  # ticker -> [hits, total]
     simulated_buckets = defaultdict(lambda: [0, 0])
     agree_count = 0
@@ -149,6 +170,12 @@ def replay(days: int, horizon: str) -> dict:
     # surface them. Previously ERROR consensus rows silently dropped out.
     sim_error_count = 0
     sim_error_samples: list[tuple[str, str]] = []  # up to 5 (ticker, error) pairs
+    # P1-A (2026-04-17 adversarial review): surface how often the regime
+    # field was missing from signal_log. When most rows use "unknown"
+    # regime, the circuit breaker's trending/high-vol paths are not
+    # exercised - the replay result is a lower-bound estimate for those
+    # paths.
+    regime_counter = defaultdict(int)
 
     for entry in entries:
         outcomes = entry.get("outcomes", {})
@@ -160,6 +187,8 @@ def replay(days: int, horizon: str) -> dict:
             actual = tdata.get("consensus", "HOLD")
             sim_entry = simulated.get(ticker, {})
             sim = sim_entry.get("consensus", "HOLD")
+            # Track regime label on this ticker (for "unknown" prevalence).
+            regime_counter[tdata.get("regime", "unknown")] += 1
             if sim == "ERROR":
                 sim_error_count += 1
                 if len(sim_error_samples) < 5:
@@ -213,6 +242,8 @@ def replay(days: int, horizon: str) -> dict:
         "window_days": days,
         "horizon": horizon,
         "entries_considered": len(entries),
+        "parse_errors": parse_errors,
+        "regime_distribution": dict(regime_counter),
         "rows_scored": total_scored,
         "simulation_errors": {
             "count": sim_error_count,
@@ -247,7 +278,25 @@ def replay(days: int, horizon: str) -> dict:
 def _print_report(summary: dict) -> None:
     print(f"Replay window: {summary['window_days']}d @ horizon {summary['horizon']}")
     print(f"Entries considered: {summary['entries_considered']}")
+    if summary.get("parse_errors", 0):
+        print(f"[WARNING] Parse errors (skipped rows): {summary['parse_errors']}")
     print(f"Rows scored: {summary['rows_scored']}")
+    # P1-A surface: show regime distribution so the reader knows which
+    # circuit-breaker paths were exercised. "unknown" regime uses the
+    # strictest quorum (5) - if that dominates, the trending/high-vol
+    # recovery paths weren't tested by this replay.
+    regime_dist = summary.get("regime_distribution", {})
+    if regime_dist:
+        total_regime = sum(regime_dist.values())
+        top = sorted(regime_dist.items(), key=lambda x: -x[1])[:4]
+        parts = [f"{r}={n}({n*100//max(total_regime,1)}%)" for r, n in top]
+        print(f"Regime distribution: {', '.join(parts)}")
+        unknown_pct = regime_dist.get("unknown", 0) * 100 // max(total_regime, 1)
+        if unknown_pct > 50:
+            print(f"[WARNING] {unknown_pct}% of rows have regime='unknown' — "
+                  "the circuit-breaker's trending/high-vol recovery paths "
+                  "are under-exercised. Replay result is a lower-bound "
+                  "estimate for those regimes.")
     sim_err = summary.get("simulation_errors", {})
     err_count = sim_err.get("count", 0)
     if err_count:

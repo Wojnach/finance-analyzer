@@ -254,10 +254,14 @@ class TestGenerateSignalHorizonBlacklistE2E:
         )
 
     def test_mstr_claude_fundamental_is_hold_at_every_horizon(self, monkeypatch):
-        """MSTR _default blacklist contains claude_fundamental. Verify the
-        signal is HOLD'd at 3h, 1d, and 3d when generate_signal runs -
-        proving ticker=MSTR threads through to _weighted_consensus and the
-        horizon-disabled lookup fires.
+        """P1-F (2026-04-17 adversarial-review): the previous assertion only
+        checked `isinstance(extra, dict)` and re-called the helper. Now
+        actually spy on _weighted_consensus to capture the votes AFTER all
+        gating, then assert claude_fundamental appears as HOLD there.
+
+        This catches a refactor that drops the horizon-disable lookup inside
+        _weighted_consensus but leaves the helper intact - a pure-helper test
+        would pass spuriously.
         """
         from unittest import mock
 
@@ -266,29 +270,48 @@ class TestGenerateSignalHorizonBlacklistE2E:
 
         df = self._make_df(150)
 
-        # Stub out caches so the test doesn't hit real data sources.
         monkeypatch.setattr("portfolio.market_timing.should_skip_gpu",
                             mock.MagicMock(return_value=True))
         monkeypatch.setattr("portfolio.shared_state._cached",
                             mock.MagicMock(return_value=None))
 
+        # Spy on _weighted_consensus to capture the post-gated votes dict.
+        captured_votes: dict = {}
+        real_fn = se._weighted_consensus
+
+        def _spy(votes, *args, **kwargs):
+            # The votes dict inside _weighted_consensus is mutated by
+            # horizon-disable + regime-gate BEFORE consensus. We capture
+            # a snapshot at call time.
+            captured_votes["snapshot"] = dict(votes)
+            return real_fn(votes, *args, **kwargs)
+
+        monkeypatch.setattr("portfolio.signal_engine._weighted_consensus", _spy)
+
         for horizon in ("3h", "1d"):
+            captured_votes.clear()
             ind = compute_indicators(df, horizon=horizon if horizon == "3h" else None)
-            _, _, extra = se.generate_signal(
+            se.generate_signal(
                 ind, ticker="MSTR", df=df,
                 horizon=horizon if horizon == "3h" else None,
             )
-            # Whatever the signal-level logic decides, the consensus must
-            # see claude_fundamental as HOLD because MSTR _default blacklist
-            # is applied at consensus time.
-            # We inspect the recorded votes dict via extra_info if exposed;
-            # otherwise this is a smoke test that the path runs without error.
-            assert isinstance(extra, dict)  # generate_signal returned a dict
-            # Horizon-disabled signals for MSTR must include claude_fundamental.
-            # This pins the _default lookup path.
-            disabled = se._get_horizon_disabled_signals("MSTR", horizon)
-            assert "claude_fundamental" in disabled, (
-                f"claude_fundamental should be disabled for MSTR at {horizon}"
+            # The OUTER caller already applies horizon-disable (P1-B fix),
+            # so by the time _weighted_consensus receives votes, blacklisted
+            # MSTR signals should be HOLD.
+            snapshot = captured_votes.get("snapshot", {})
+            assert snapshot, f"spy didn't capture votes at horizon={horizon}"
+            # claude_fundamental is in _default blacklist for MSTR.
+            cf = snapshot.get("claude_fundamental")
+            assert cf == "HOLD", (
+                f"At horizon={horizon}, claude_fundamental should be HOLD "
+                f"post-gating (was {cf!r}). Horizon-disable failed to "
+                f"propagate through the pipeline."
+            )
+            # credit_spread_risk also in _default for MSTR.
+            csr = snapshot.get("credit_spread_risk")
+            assert csr == "HOLD", (
+                f"At horizon={horizon}, credit_spread_risk should be HOLD "
+                f"post-gating (was {csr!r})."
             )
 
     def test_generate_signal_passes_ticker_into_weighted_consensus(self, monkeypatch):
