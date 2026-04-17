@@ -1198,3 +1198,207 @@ class TestUpdateSustained:
         _update_sustained(state, "ETH", "SELL", 1000.0)
         assert state["BTC"]["value"] == "BUY"
         assert state["ETH"]["value"] == "SELL"
+
+
+# ---------------------------------------------------------------------------
+# 17. Option P (2026-04-17): confidence-aware tier downshift T2 -> T1
+# ---------------------------------------------------------------------------
+
+class TestTierDownshiftHelpers:
+    """Unit tests for _reason_is_downshiftable and _should_downshift_to_t1."""
+
+    def test_low_conviction_consensus_is_downshiftable(self):
+        """30% consensus is below 40% threshold -> downshiftable."""
+        from portfolio.trigger import _reason_is_downshiftable
+        assert _reason_is_downshiftable("XAU-USD consensus BUY (30%)", 0.40) is True
+
+    def test_high_conviction_consensus_blocks_downshift(self):
+        """80% consensus is well above threshold -> NOT downshiftable."""
+        from portfolio.trigger import _reason_is_downshiftable
+        assert _reason_is_downshiftable("BTC-USD consensus BUY (80%)", 0.40) is False
+
+    def test_boundary_confidence_blocks_downshift(self):
+        """40% consensus equals threshold -> NOT downshiftable (strict <)."""
+        from portfolio.trigger import _reason_is_downshiftable
+        assert _reason_is_downshiftable("ETH-USD consensus BUY (40%)", 0.40) is False
+
+    def test_fade_flip_is_downshiftable(self):
+        """*->HOLD sustained is a fade flip, safe to downshift."""
+        from portfolio.trigger import _reason_is_downshiftable
+        assert _reason_is_downshiftable(
+            "XAU-USD flipped BUY->HOLD (sustained)", 0.40,
+        ) is True
+        assert _reason_is_downshiftable(
+            "MSTR flipped SELL->HOLD (sustained)", 0.40,
+        ) is True
+
+    def test_direction_flip_blocks_downshift(self):
+        """BUY<->SELL is a meaningful direction change, NOT downshiftable."""
+        from portfolio.trigger import _reason_is_downshiftable
+        assert _reason_is_downshiftable(
+            "XAG-USD flipped BUY->SELL (sustained)", 0.40,
+        ) is False
+        assert _reason_is_downshiftable(
+            "XAU-USD flipped SELL->BUY (sustained)", 0.40,
+        ) is False
+
+    def test_price_move_blocks_downshift(self):
+        """Price-move triggers deserve analysis regardless of confidence."""
+        from portfolio.trigger import _reason_is_downshiftable
+        assert _reason_is_downshiftable("BTC-USD moved 2.5% up", 0.40) is False
+
+    def test_post_trade_blocks_downshift(self):
+        """Post-trade reassessment deserves full analysis."""
+        from portfolio.trigger import _reason_is_downshiftable
+        assert _reason_is_downshiftable("post-trade reassessment", 0.40) is False
+
+    def test_unknown_reason_blocks_downshift(self):
+        """Unrecognized reason string fails safe -> no downshift."""
+        from portfolio.trigger import _reason_is_downshiftable
+        assert _reason_is_downshiftable("some new trigger type", 0.40) is False
+
+    def test_all_low_conviction_mixed_types_downshifts(self):
+        """Low-conv consensus + fade flip together are both downshiftable."""
+        from portfolio.trigger import _should_downshift_to_t1
+        reasons = [
+            "XAU-USD consensus BUY (30%)",
+            "MSTR flipped SELL->HOLD (sustained)",
+        ]
+        assert _should_downshift_to_t1(reasons) is True
+
+    def test_single_high_conviction_blocks_downshift(self):
+        """One high-conviction reason among low-conviction blocks downshift."""
+        from portfolio.trigger import _should_downshift_to_t1
+        reasons = [
+            "XAU-USD consensus BUY (30%)",
+            "BTC-USD consensus BUY (80%)",
+        ]
+        assert _should_downshift_to_t1(reasons) is False
+
+    def test_direction_flip_among_fades_blocks_downshift(self):
+        """A direction flip is meaningful even if other reasons are fades."""
+        from portfolio.trigger import _should_downshift_to_t1
+        reasons = [
+            "XAU-USD flipped BUY->HOLD (sustained)",
+            "XAG-USD flipped BUY->SELL (sustained)",
+        ]
+        assert _should_downshift_to_t1(reasons) is False
+
+    def test_empty_reasons_returns_false(self):
+        """Empty list does not downshift — no reasons to evaluate."""
+        from portfolio.trigger import _should_downshift_to_t1
+        assert _should_downshift_to_t1([]) is False
+
+
+class TestTierDownshiftClassify:
+    """Integration tests: classify_tier applies downshift correctly."""
+
+    def _steady_state(self):
+        """State where T3 (periodic, first-of-day) and F&G are inactive."""
+        return {
+            "last_full_review_time": time.time(),
+            "today_date": trigger_mod._today_str(),
+            "last_trigger_date": trigger_mod._today_str(),  # C4/NEW-2
+        }
+
+    def test_low_conviction_consensus_downshifts_t2_to_t1(self):
+        """XAU 30% consensus alone -> T1 (was T2 before Option P)."""
+        tier = classify_tier(
+            ["XAU-USD consensus BUY (30%)"],
+            state=self._steady_state(),
+        )
+        assert tier == 1
+
+    def test_high_conviction_consensus_stays_t2(self):
+        """BTC 80% consensus stays at T2 — not downshifted."""
+        tier = classify_tier(
+            ["BTC-USD consensus BUY (80%)"],
+            state=self._steady_state(),
+        )
+        assert tier == 2
+
+    def test_mixed_low_and_high_stays_t2(self):
+        """Mixed low/high conviction — high-conviction reason keeps T2."""
+        tier = classify_tier(
+            [
+                "XAU-USD consensus BUY (30%)",
+                "BTC-USD flipped BUY->SELL (sustained)",
+            ],
+            state=self._steady_state(),
+        )
+        assert tier == 2
+
+    def test_fade_flip_only_downshifts(self):
+        """Fade flip alone -> T1 (was T2)."""
+        tier = classify_tier(
+            ["XAU-USD flipped BUY->HOLD (sustained)"],
+            state=self._steady_state(),
+        )
+        assert tier == 1
+
+    def test_low_conv_consensus_plus_fade_downshifts(self):
+        """All-downshiftable combination -> T1."""
+        tier = classify_tier(
+            [
+                "XAU-USD consensus BUY (30%)",
+                "MSTR flipped SELL->HOLD (sustained)",
+            ],
+            state=self._steady_state(),
+        )
+        assert tier == 1
+
+    def test_price_move_blocks_downshift(self):
+        """Price move triggers always get T2 analysis."""
+        tier = classify_tier(
+            ["XAU-USD moved 2.5% up"],
+            state=self._steady_state(),
+        )
+        assert tier == 2
+
+    def test_fg_crossing_stays_t3_not_downshifted(self):
+        """F&G crossings are T3 — downshift must NOT fire even if low-conv
+        reason is also present."""
+        tier = classify_tier(
+            [
+                "F&G crossed 20 (25->18)",
+                "XAU-USD consensus BUY (30%)",
+            ],
+            state=self._steady_state(),
+        )
+        assert tier == 3
+
+    def test_first_of_day_stays_t3_not_downshifted(self):
+        """First-of-day is T3 — downshift must NOT fire on first trigger."""
+        state = {
+            "last_full_review_time": time.time(),
+            "today_date": "2020-01-01",  # irrelevant to first-of-day check
+            "last_trigger_date": "2020-01-01",  # different from today
+        }
+        tier = classify_tier(["XAU-USD consensus BUY (30%)"], state=state)
+        assert tier == 3
+
+    def test_boundary_40pct_stays_t2(self):
+        """40% is the boundary — strict less-than means 40% stays T2."""
+        tier = classify_tier(
+            ["XAU-USD consensus BUY (40%)"],
+            state=self._steady_state(),
+        )
+        assert tier == 2
+
+    def test_threshold_constant_patch_takes_effect_at_runtime(self):
+        """TIER_DOWNSHIFT_CONFIDENCE is read at call time (not frozen in
+        default args). Patching it to 0.0 makes every consensus reason
+        ineligible (strictly less than 0% is impossible). Fade flips are
+        threshold-independent and continue to downshift — by design, since
+        a fade has no confidence value to compare against."""
+        with mock.patch.object(trigger_mod, "TIER_DOWNSHIFT_CONFIDENCE", 0.0):
+            # Consensus-only at 30% now stays T2 (was T1 at threshold=0.40).
+            assert classify_tier(
+                ["XAU-USD consensus BUY (30%)"],
+                state=self._steady_state(),
+            ) == 2
+            # Fade flip still downshifts regardless of threshold.
+            assert classify_tier(
+                ["XAU-USD flipped BUY->HOLD (sustained)"],
+                state=self._steady_state(),
+            ) == 1
