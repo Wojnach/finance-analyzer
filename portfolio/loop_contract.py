@@ -23,7 +23,16 @@ CONTRACT_LOG_FILE = DATA_DIR / "contract_violations.jsonl"
 CONFIG_FILE = BASE_DIR / "config.json"
 HEALTH_STATE_FILE = DATA_DIR / "health_state.json"
 LAYER2_JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
+# Global Claude CLI log — written by claude_gate for ALL callers
+# (claude_fundamental, bigbet, iskbets, self-heal, etc.). Used here only
+# for *enriching* violation context with last_invocation_caller.
 CLAUDE_INVOCATIONS_FILE = DATA_DIR / "claude_invocations.jsonl"
+# Layer-2-specific invocation log — written by agent_invocation._log_trigger
+# and check_agent_completion. Has entries with tier=1/2/3 + status. Used for
+# the in-flight suppression check because it ONLY contains Layer 2 events
+# and won't false-positive suppress on an unrelated claude_fundamental run
+# (Codex P1 2026-04-17).
+LAYER2_INVOCATIONS_FILE = DATA_DIR / "invocations.jsonl"
 
 # Thresholds
 MAX_CYCLE_DURATION_S = 180
@@ -222,15 +231,27 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     # status (success/incomplete/failed/auth_error/timeout) falls through
     # to the real check — those are the cases the contract is meant to
     # catch.
-    latest_inv = _last_jsonl_entry(CLAUDE_INVOCATIONS_FILE)
-    if latest_inv and latest_inv.get("status") == "invoked":
+    #
+    # IMPORTANT (Codex P1 2026-04-17): use LAYER2_INVOCATIONS_FILE (the
+    # Layer 2-specific log from agent_invocation), NOT the global
+    # claude_invocations.jsonl. The latter is written by claude_gate for
+    # unrelated callers (claude_fundamental, bigbet, iskbets, self-heal)
+    # whose "invoked" entries would wrongly suppress the L2 journal alert
+    # and mask genuine Layer 2 silent failures.
+    latest_l2_inv = _last_jsonl_entry(LAYER2_INVOCATIONS_FILE)
+    if latest_l2_inv and latest_l2_inv.get("status") == "invoked":
         inv_ts = _parse_iso(
-            latest_inv.get("timestamp") or latest_inv.get("ts")
+            latest_l2_inv.get("timestamp") or latest_l2_inv.get("ts")
         )
         if inv_ts is not None:
             inv_age_s = (now - inv_ts).total_seconds()
             if 0 <= inv_age_s < grace_s:
                 return []
+
+    # For violation context only (non-blocking): read the global claude
+    # log to surface last_invocation_caller in the alert message. This is
+    # informational — it does NOT gate the alert.
+    latest_inv = _last_jsonl_entry(CLAUDE_INVOCATIONS_FILE)
 
     # Check: journal entry since the trigger?
     latest_journal_entry = _last_jsonl_entry(LAYER2_JOURNAL_FILE)

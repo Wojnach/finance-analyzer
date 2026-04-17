@@ -364,9 +364,15 @@ def invoke_agent(reasons, tier=3):
         # exception is logged and swallowed).
         try:
             from portfolio.file_utils import atomic_write_json, load_json
+            # 2026-04-17 Codex P2: when claude is missing from PATH we fall
+            # back to pf-agent.bat which is unconditionally T3 regardless of
+            # the requested tier. Record the *effective* tier so the
+            # per-tier grace window in loop_contract reflects what's
+            # actually running.
+            effective_tier = 3 if not claude_cmd else tier
             health_path = DATA_DIR / "health_state.json"
             health = load_json(health_path, default={}) or {}
-            health["last_invocation_tier"] = tier
+            health["last_invocation_tier"] = effective_tier
             health["last_invocation_tier_ts"] = datetime.now(UTC).isoformat()
             atomic_write_json(health_path, health)
         except Exception as e:

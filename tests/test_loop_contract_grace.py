@@ -53,6 +53,10 @@ def contract_env(tmp_path, monkeypatch):
         "HEALTH_STATE_FILE": tmp_path / "data" / "health_state.json",
         "LAYER2_JOURNAL_FILE": tmp_path / "data" / "layer2_journal.jsonl",
         "CLAUDE_INVOCATIONS_FILE": tmp_path / "data" / "claude_invocations.jsonl",
+        # 2026-04-17 Codex P1 follow-up: in-flight suppression reads the
+        # Layer-2-specific log, not the global claude log, to avoid being
+        # false-negatived by unrelated claude_fundamental/bigbet calls.
+        "LAYER2_INVOCATIONS_FILE": tmp_path / "data" / "invocations.jsonl",
     }
     for name, p in paths.items():
         monkeypatch.setattr(loop_contract, name, p)
@@ -135,6 +139,11 @@ def test_t1_grace_suppresses_alert_at_4m(contract_env):
     })
     # Empty journal (post-grace, agent should have journaled but an
     # in-flight T1 invocation is still running — covered by precondition 4).
+    # Write to BOTH files: LAYER2_INVOCATIONS_FILE for in-flight check,
+    # CLAUDE_INVOCATIONS_FILE for violation-context enrichment.
+    l2_entry = {"ts": _iso(now - timedelta(minutes=1)),
+                "reasons": ["quick check"], "status": "invoked", "tier": 1}
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [l2_entry])
     _write_jsonl(p["CLAUDE_INVOCATIONS_FILE"], [
         {"timestamp": _iso(now - timedelta(minutes=1)),
          "caller": "layer2_t1", "status": "invoked", "tier": 1},
@@ -204,11 +213,18 @@ def test_in_flight_suppresses_alert(contract_env):
         "last_trigger_reason": "ETH-USD consensus BUY (57%)",
         "last_invocation_tier": 3,
     })
+    # L2-specific log drives the in-flight check. Most recent entry:
+    # fresh "invoked" after a prior "timeout" → cascade in progress.
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(now - timedelta(minutes=20)),
+         "reasons": ["ETH"], "status": "timeout", "tier": 3},
+        {"ts": _iso(invoked_ts),
+         "reasons": ["ETH"], "status": "invoked", "tier": 3},
+    ])
+    # Mirror into claude_invocations for violation-context enrichment.
     _write_jsonl(p["CLAUDE_INVOCATIONS_FILE"], [
-        # Prior invocation timed out (terminal state).
         {"timestamp": _iso(now - timedelta(minutes=20)),
          "caller": "layer2_t3", "status": "timeout", "tier": 3},
-        # New one is in-flight — don't alert while it works.
         {"timestamp": _iso(invoked_ts),
          "caller": "layer2_t3", "status": "invoked", "tier": 3},
     ])
@@ -271,6 +287,10 @@ def test_in_flight_invoked_older_than_grace_does_not_suppress(contract_env):
         "last_trigger_reason": "stuck invocation",
         "last_invocation_tier": 3,
     })
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(invoked_ts),
+         "reasons": ["stuck"], "status": "invoked", "tier": 3},
+    ])
     _write_jsonl(p["CLAUDE_INVOCATIONS_FILE"], [
         {"timestamp": _iso(invoked_ts),
          "caller": "layer2_t3", "status": "invoked", "tier": 3},
