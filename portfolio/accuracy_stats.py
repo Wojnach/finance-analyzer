@@ -721,9 +721,16 @@ def signal_activation_rates(entries=None):
     return result
 
 
+# P2-B (2026-04-17 adversarial review): default min_recent_samples was 50
+# while production (signal_engine) passes 30. Default lowered so non-prod
+# callers (backtester, replay script) match live behavior rather than
+# silently dropping the blended value for signals with 30-49 recent samples.
+_BLEND_DEFAULT_MIN_RECENT_SAMPLES = 30
+
+
 def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
                         normal_weight=0.70, fast_weight=0.90,
-                        min_recent_samples=50):
+                        min_recent_samples=_BLEND_DEFAULT_MIN_RECENT_SAMPLES):
     """Blend all-time and recent accuracy using adaptive recency weighting.
 
     When recent accuracy diverges sharply from all-time (> divergence_threshold),
@@ -747,32 +754,58 @@ def blend_accuracy_data(alltime, recent, divergence_threshold=0.15,
     if not recent:
         return alltime
 
+    # P1-D (2026-04-17 adversarial review): iterate over the UNION of signal
+    # names, not just alltime. Previously a signal present only in `recent`
+    # was silently dropped, and directional keys (buy_accuracy, sell_accuracy,
+    # total_buy, total_sell) were copied only from `at` - so a signal with
+    # sell_accuracy=0.28 over 400 samples in recent but no alltime entry
+    # silently passed the directional gate because total_sell defaulted to 0.
     accuracy_data = {}
-    for sig_name in alltime:
-        at = alltime.get(sig_name, {})
-        rc = recent.get(sig_name, {})
-        at_acc = at.get("accuracy", 0.5)
-        rc_acc = rc.get("accuracy", 0.5)
-        rc_samples = rc.get("total", 0)
-        at_samples = at.get("total", 0)
-        if rc_samples >= min_recent_samples:
+    all_signal_names = set(alltime) | set(recent)
+    for sig_name in all_signal_names:
+        at = alltime.get(sig_name) or {}
+        rc = recent.get(sig_name) or {}
+        at_acc = at.get("accuracy", 0.5) if at else 0.5
+        rc_acc = rc.get("accuracy", 0.5) if rc else 0.5
+        rc_samples = rc.get("total", 0) if rc else 0
+        at_samples = at.get("total", 0) if at else 0
+
+        # Blend only when recent has enough samples AND alltime exists;
+        # otherwise fall back to whichever source has data.
+        if rc_samples >= min_recent_samples and at_samples > 0:
             divergence = abs(rc_acc - at_acc)
             w = fast_weight if divergence > divergence_threshold else normal_weight
             blended = w * rc_acc + (1 - w) * at_acc
-        else:
+        elif at_samples > 0:
             blended = at_acc
+        else:
+            blended = rc_acc  # recent-only signal
+
         total = max(at_samples, rc_samples)
         result = {
             "accuracy": blended,
             "total": total,
-            "correct": int(round(blended * total)),  # BUG-186: derive from blended accuracy
+            "correct": int(round(blended * total)),  # BUG-186
             "pct": round(blended * 100, 1),
         }
-        # Carry through directional accuracy for directional gating.
-        # Use all-time directional accuracy (more stable, larger samples).
-        for key in ("buy_accuracy", "sell_accuracy", "total_buy", "total_sell"):
-            if key in at:
+        # Merge directional keys from the larger-sample source per key.
+        # Prevents silent gate-bypass when a key exists only in `recent`.
+        for key in ("buy_accuracy", "sell_accuracy"):
+            if key in at and key in rc:
+                # Prefer the source with more directional samples for this side.
+                side_total = "total_buy" if key == "buy_accuracy" else "total_sell"
+                at_side = at.get(side_total, 0) or 0
+                rc_side = rc.get(side_total, 0) or 0
+                result[key] = at[key] if at_side >= rc_side else rc[key]
+            elif key in at:
                 result[key] = at[key]
+            elif key in rc:
+                result[key] = rc[key]
+        for key in ("total_buy", "total_sell"):
+            at_v = at.get(key, 0) or 0
+            rc_v = rc.get(key, 0) or 0
+            if at_v or rc_v:
+                result[key] = max(at_v, rc_v)
         accuracy_data[sig_name] = result
     return accuracy_data
 
