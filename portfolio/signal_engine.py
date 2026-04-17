@@ -972,7 +972,27 @@ def _count_active_voters_at_gate(votes, accuracy_data, excluded, group_gated,
     return active
 
 
-def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_gate):
+def _dynamic_min_voters_for_regime(regime):
+    """Regime-dependent final quorum, mirrored from apply_confidence_penalties.
+
+    This is the minimum voter count the OUTER consensus path requires before
+    emitting a non-HOLD action. The circuit breaker uses it to size its
+    recovery floor so relaxation is only engaged when it could reach the
+    regime's actual quorum.
+
+    2026-04-17: extracted for the circuit-breaker recovery-floor decision
+    (Codex round 6 review). Keeping the values in lockstep with
+    apply_confidence_penalties is a manual discipline — update both together.
+    """
+    if regime in ("trending-up", "trending-down"):
+        return 3
+    if regime == "high-vol":
+        return 4
+    return 5  # ranging, unknown, None
+
+
+def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_gate,
+                              regime=None):
     """Compute circuit-breaker relaxation to preserve voter diversity.
 
     Progressively tests relaxation values 0, step, 2*step, ..., up to
@@ -1016,24 +1036,27 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
         base_gate, _GATE_RELAXATION_MAX,
     )
 
-    # Single unified precondition on EFFECTIVE voters (post directional gating).
-    # Block relaxation unless max relaxation could recover >= MIN_VOTERS + 1 = 4
-    # voters. Rationale: the outer MIN_VOTERS_CRYPTO/STOCK quorum is 3, so
-    # recovering to exactly 3 means the relaxed consensus is at-or-below
-    # quorum with no noise margin. Requiring 4 ensures a legitimate 1-voter
-    # margin above the quorum.
+    # Regime-aware precondition on EFFECTIVE voters (post directional gating).
+    # Block relaxation unless max relaxation could recover enough voters to
+    # meet the regime's final quorum. Hardcoding 4 (MIN_VOTERS_CRYPTO + 1)
+    # was too strict in trending markets where dynamic_min=3; relaxation to
+    # 3 there is legitimate and produces an actionable consensus. Codex
+    # round 6 (2026-04-17) flagged that a 5-candidate slate with 3 recoverable
+    # voters in trending-up should not be blocked by this guard.
     #
-    # This single check replaces the earlier two-guard design (raw-candidate
-    # count + best_possible>=2) because bp is always <= raw_candidates, so the
-    # raw check is redundant when bp is the controlling threshold. Handles all
-    # the Codex-identified escape modes:
-    #   - lone signal at 0.46 with 4 dir-gated companions -> bp=1 < 4, blocked
-    #   - sparse 3-voter all at 0.46 -> bp=3 < 4, blocked
-    #   - 3 recoverable + 1 irrecoverable (4 candidates) -> bp=3 < 4, blocked
-    #   - 4 recoverable at 0.46 -> bp=4 >= 4, relaxes (MIN_VOTERS+1 margin)
-    #   - 4 recoverable + 1 irrecoverable (5 candidates) -> bp=4 >= 4, relaxes
-    _MIN_RECOVERY_FLOOR = _MIN_ACTIVE_VOTERS_SOFT - 1  # = 4 = MIN_VOTERS + 1
-    if best_possible < _MIN_RECOVERY_FLOOR:
+    # Thresholds:
+    #   trending-up/down: bp >= 3 (dynamic_min=3, no margin needed)
+    #   high-vol:         bp >= 4 (dynamic_min=4)
+    #   ranging/unknown:  bp >= 5 (dynamic_min=5 = soft floor)
+    #
+    # All the Codex-identified escape modes still blocked:
+    #   - lone signal at 0.46 with 4 dir-gated companions -> bp=1, blocked
+    #   - sparse 3-voter at 0.46 in ranging -> bp=3 < 5, blocked
+    #   - 3 recoverable + 1 irrecoverable in ranging -> bp=3 < 5, blocked
+    # NEW behavior (Codex round 6 fix):
+    #   - 3 recoverable in trending-up -> bp=3 >= 3, relaxes (actionable)
+    min_recovery_floor = _dynamic_min_voters_for_regime(regime)
+    if best_possible < min_recovery_floor:
         return 0.0
 
     # Regime break: relaxation recovers nothing beyond baseline. Keep the
@@ -1199,6 +1222,7 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         excluded=excluded,
         group_gated=group_gated_signals,
         base_gate=gate,
+        regime=regime,
     )
     if relaxation > 0:
         logger.debug(

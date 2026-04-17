@@ -191,49 +191,70 @@ class TestComputeGateRelaxation:
             "not a relaxation opportunity."
         )
 
-    def test_sparse_3_voter_scenario_stays_hold(self):
-        """Codex round 3: 3 BUY candidates all at 0.46 should NOT trigger
-        relaxation. best_possible=3 < MIN_VOTERS+1=4, blocked.
+    def test_sparse_3_voter_ranging_stays_hold(self):
+        """Ranging regime: 3 BUY candidates all at 0.46 should NOT trigger
+        relaxation. Ranging dynamic_min=5, bp=3 < 5, blocked. If relaxation
+        engaged, the recovered consensus would be below the ranging quorum
+        anyway (force-HOLD downstream) - but blocking here avoids the
+        pointless relaxation.
         """
         votes = {f"s{i}": "BUY" for i in range(3)}
         accuracy = {f"s{i}": self._make_stats(0.46) for i in range(3)}
-        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
+        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47, regime="ranging")
         assert rel == 0.0
 
-    def test_four_voter_scenario_relaxes(self):
-        """Codex round 4 (2026-04-17): 4 BUY candidates all at 0.46 SHOULD
-        trigger relaxation. best_possible=4 >= MIN_VOTERS+1=4 threshold.
-        Legitimate partial-recovery zone with 1-voter margin above the
-        outer quorum (3).
+    def test_sparse_3_voter_trending_relaxes(self):
+        """Codex round 6 (2026-04-17): trending regime has dynamic_min=3,
+        so 3 recoverable voters reaches the regime quorum. Should relax.
+        Previously this was incorrectly blocked by the hardcoded MIN_VOTERS+1=4
+        threshold, which didn't account for regime-specific quorums.
+        """
+        votes = {f"s{i}": "BUY" for i in range(3)}
+        accuracy = {f"s{i}": self._make_stats(0.46) for i in range(3)}
+        rel = _compute_gate_relaxation(
+            votes, accuracy, set(), set(), 0.47, regime="trending-up",
+        )
+        # bp=3, dynamic_min=3, 3>=3 -> engage. bp<floor(5) -> partial-recovery MAX.
+        assert rel == pytest.approx(_GATE_RELAXATION_MAX)
+
+    def test_five_candidates_three_recoverable_trending_relaxes(self):
+        """Codex round 6 exact scenario: 5 raw votes with 3 recoverable 0.46
+        voters and 2 directionally gated voters in trending-up must still
+        be actionable. bp=3 meets trending quorum of 3.
+        """
+        votes = {f"s{i}": "BUY" for i in range(5)}
+        accuracy = {f"s{i}": self._make_stats(0.46) for i in range(3)}
+        # 2 directionally gated voters (buy_accuracy=0.30 with enough samples).
+        for i in (3, 4):
+            accuracy[f"s{i}"] = {
+                "accuracy": 0.60, "total": 100,
+                "buy_accuracy": 0.30, "sell_accuracy": 0.60,
+                "total_buy": 50, "total_sell": 50,
+            }
+        rel = _compute_gate_relaxation(
+            votes, accuracy, set(), set(), 0.47, regime="trending-up",
+        )
+        assert rel == pytest.approx(_GATE_RELAXATION_MAX)
+
+    def test_four_voter_ranging_stays_hold(self):
+        """Ranging regime: 4 BUY candidates at 0.46 still below ranging
+        quorum (5). bp=4 < dynamic_min=5, blocked. Relaxation here would
+        be pointless because the downstream dynamic_min_voters check would
+        force-HOLD anyway.
         """
         votes = {f"s{i}": "BUY" for i in range(4)}
         accuracy = {f"s{i}": self._make_stats(0.46) for i in range(4)}
-        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
-        # bp=4 < floor=5, so falls through to partial-recovery -> MAX.
-        assert rel == pytest.approx(_GATE_RELAXATION_MAX)
+        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47, regime="ranging")
+        assert rel == 0.0
 
-    def test_four_candidates_three_recoverable_stays_hold(self):
-        """Codex round 5 (2026-04-17): 4 raw candidates where one is
-        directionally gated (3 effective recoverable voters) must NOT
-        trigger relaxation. best_possible=3 < 4 threshold, blocked.
-        Previously with `bp >= 2` this would have fallen through to
-        partial-recovery MAX and emitted consensus on 3 exact-quorum
-        voters with no margin.
-        """
+    def test_four_voter_high_vol_relaxes(self):
+        """High-vol regime: dynamic_min=4. 4 recoverable voters meets quorum."""
         votes = {f"s{i}": "BUY" for i in range(4)}
-        # 3 recoverable at 0.46 + 1 directionally gated at buy_accuracy=0.30
-        accuracy = {f"s{i}": self._make_stats(0.46) for i in range(3)}
-        accuracy["s3"] = {
-            "accuracy": 0.60, "total": 100,
-            "buy_accuracy": 0.30, "sell_accuracy": 0.60,
-            "total_buy": 50, "total_sell": 50,
-        }
-        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
-        assert rel == 0.0, (
-            "4 candidates with only 3 effective recoverable voters must "
-            "not trigger relaxation - recovered consensus would be at-quorum "
-            "(3) with no margin, exactly the escape mode Codex round 5 flagged."
+        accuracy = {f"s{i}": self._make_stats(0.46) for i in range(4)}
+        rel = _compute_gate_relaxation(
+            votes, accuracy, set(), set(), 0.47, regime="high-vol",
         )
+        assert rel == pytest.approx(_GATE_RELAXATION_MAX)
 
     def test_lone_recoverable_signal_blocked_from_escape(self):
         """Codex P2 follow-up (2026-04-17): 5 candidate signals where 4 are
@@ -287,11 +308,14 @@ class TestComputeGateRelaxation:
         # overall=0.30 to also fail the overall gate. With sell_acc=0.30, the
         # directional gate (threshold 0.40) fires on SELL direction too.
         accuracy["s4"] = self._make_stats(0.30)
-        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
+        # Regime-aware: in trending-up the dynamic_min=3 quorum allows bp=4
+        # recovery (4 >= 3). In ranging this would be blocked (4 < 5).
+        rel = _compute_gate_relaxation(
+            votes, accuracy, set(), set(), 0.47, regime="trending-up",
+        )
         assert rel == pytest.approx(_GATE_RELAXATION_MAX), (
             "Partial recovery (4 recoverable + 1 irrecoverable) should "
-            "return max relaxation, not veto to 0. A single bad signal "
-            "must not block recovery of the recoverable majority."
+            "return max relaxation in trending regime where quorum=3."
         )
 
     def test_no_relaxation_when_few_candidate_signals(self):
