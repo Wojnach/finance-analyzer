@@ -1257,6 +1257,26 @@ class TestTierDownshiftHelpers:
         from portfolio.trigger import _reason_is_downshiftable
         assert _reason_is_downshiftable("some new trigger type", 0.40) is False
 
+    def test_substring_collision_on_consensus_blocked(self):
+        """Regex is word-anchored — a future reason containing 'nonconsensus'
+        or 'preconsensus' must NOT trigger downshift via substring match.
+        Regression guard for the adversarial-review finding (2026-04-17)."""
+        from portfolio.trigger import _reason_is_downshiftable
+        assert _reason_is_downshiftable(
+            "XAU-USD nonconsensus BUY (30%)", 0.40,
+        ) is False
+        assert _reason_is_downshiftable(
+            "XAU-USD preconsensus BUY (30%)", 0.40,
+        ) is False
+
+    def test_substring_collision_on_flipped_blocked(self):
+        """Word-anchored 'flipped' — a future reason like 'preflipped' must
+        NOT match as a fade flip."""
+        from portfolio.trigger import _reason_is_downshiftable
+        assert _reason_is_downshiftable(
+            "XAU-USD preflipped BUY->HOLD (sustained)", 0.40,
+        ) is False
+
     def test_all_low_conviction_mixed_types_downshifts(self):
         """Low-conv consensus + fade flip together are both downshiftable."""
         from portfolio.trigger import _should_downshift_to_t1

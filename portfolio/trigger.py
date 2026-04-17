@@ -336,8 +336,15 @@ TIER_DOWNSHIFT_CONFIDENCE = 0.40
 # produced by check_triggers(). Reason shape stays stable across releases;
 # if the format ever changes, these miss -> downshift fails open (tier
 # stays T2, safe over-invocation rather than under-invocation).
-_CONSENSUS_CONF_RE = re.compile(r'consensus (?:BUY|SELL) \((\d+)%\)')
-_FADE_FLIP_RE = re.compile(r'flipped (?:BUY|SELL)->HOLD \(sustained\)')
+#
+# Word boundaries (\b) on "consensus" and "flipped" prevent substring
+# collisions — e.g. a hypothetical future reason containing "nonconsensus"
+# or "preflipped" would NOT accidentally match and trigger a downshift.
+# Current check_triggers has no such reasons, but anchoring is cheap
+# insurance against future regressions. Added 2026-04-17 after an
+# adversarial self-review surfaced the issue.
+_CONSENSUS_CONF_RE = re.compile(r'\bconsensus (?:BUY|SELL) \((\d+)%\)')
+_FADE_FLIP_RE = re.compile(r'\bflipped (?:BUY|SELL)->HOLD \(sustained\)')
 
 
 def _reason_is_downshiftable(reason: str, threshold: float) -> bool:
