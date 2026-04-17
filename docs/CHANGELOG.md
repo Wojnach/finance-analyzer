@@ -1,5 +1,48 @@
 # Changelog
 
+## 2026-04-17 (momentum-entries session)
+
+- **Feature: entry-side upside-momentum detector (metals_loop.py)**:
+  Mirrors the exit-side `_silver_fast_tick` in the opposite direction and
+  is NOT gated on having an active position. Writes momentum candidates
+  to `data/metals_momentum_state.json` when silver rises ≥0.8%/3min or
+  gold rises ≥0.4%/3min with RVOL ≥1.5 and a 5-minute dedup window.
+  8 new tests in `tests/test_metals_entry_fasttick.py`.
+- **Feature: swing-trader momentum-entry path (metals_swing_trader.py,
+  metals_swing_config.py)**: On a fresh LONG momentum candidate, relax
+  `MIN_BUY_CONFIDENCE` (0.60 → 0.50) and `MIN_BUY_VOTERS` (3 → 2). All
+  other entry gates (RSI zone, MACD improving, regime confirm, TF
+  alignment, strict majority) unchanged — those defend against false
+  breakouts which is exactly what you want active under momentum. After
+  `_execute_buy` the candidate is marked consumed so the same burst does
+  not re-trigger. 13 new tests in `tests/test_metals_swing_momentum.py`.
+- **Fix: adaptive sizing on Kelly-fallback path (metals_swing_trader.py)**:
+  Fallback branch `alloc = cash * POSITION_SIZE_PCT / 100` had no
+  `MIN_TRADE_SEK` floor; with `cash=2822 SEK × 30% = 847 SEK` entries
+  were silently rejected by the `alloc < MIN_TRADE_SEK` skip branch.
+  Now mirrors Kelly-primary behaviour: floor at 1000 SEK, cap at 95% of
+  cash, skip only when `cash × 0.95 < MIN_TRADE_SEK`. 4 new tests in
+  `tests/test_metals_swing_sizing.py`.
+- **Deprecation: fish engine permanent (metals_loop.py)**: Replace the
+  stale "re-enable after 6 bugs fixed" comment with the 2026-04-15
+  12,257 SEK loss context and a two-step revival guard — future
+  operators must flip `FISH_ENGINE_ENABLED` AND remove
+  `_assert_fish_engine_allowed` to re-activate. The 6 integration bugs
+  ARE fixed; the strategy itself has no measurable edge. Swing trader's
+  new momentum-entry path supersedes it for upside breakouts. 5 new
+  tests in `tests/test_fish_engine_deprecated.py`.
+- **Root cause context**: 2026-04-17 silver breakout moved +1.3% in
+  20 min on RVOL 2.2x while the metals loop's fast-tick machinery was
+  dark (gated on active silver position) and the swing trader's
+  snapshot gates required two regime-confirm cycles (by which time the
+  move was half over). Four architectural gaps — sizing floor, absent
+  entry detector, no momentum entry path, stale fish-engine comment —
+  compounded into a silently-rejected full-conviction trade.
+- **Plan**: `docs/plans/2026-04-17-momentum-entries-plan.md`
+- **Test delta**: +30 new tests, 1 regression test fixed; 92/92 touched
+  tests green.
+- Theme: Breakout Entry Detection, Adaptive Sizing, Deprecation Hygiene.
+
 ## 2026-04-16 (autonomous improvement session)
 - **BUG-200: Layer 2 auth-failure bypass in bigbet (P1)**: `bigbet.invoke_layer2_eval` called `subprocess.run(["claude", "-p", ...])` directly, bypassing `detect_auth_failure` — when OAuth expired, claude exited 0 with "Not logged in" on stdout but the bypass meant no `critical_errors.jsonl` entry. Startup check never surfaced the issue. Fixed: scan stdout+stderr before trusting parse, return `(None, "")` + record critical entry with `caller="bigbet_layer2"` on auth failure.
 - **BUG-201: iskbets default-approve safety gap (P0)**: `iskbets.invoke_layer2_gate` had the same bypass, but `_parse_gate_response` defaults `approved=True` when it can't find a DECISION line — "Not logged in" output would have been interpreted as APPROVED for a warrant trade. Fixed: auth failure detection overrides default-approve to `approved=False` before the parser sees the output.
