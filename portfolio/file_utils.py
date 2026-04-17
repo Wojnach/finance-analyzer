@@ -167,54 +167,61 @@ def atomic_append_jsonl(path, entry):
     """Append a single JSON entry to a JSONL file with atomic semantics
     across threads and processes.
 
-    Implementation: binary-append (``"ab"``) + an exclusive file-range
-    lock held for the duration of the ``write + flush + fsync``
-    sequence. Windows CRT does not guarantee ``O_APPEND`` atomicity (unlike
-    POSIX), so without the lock heavy thread contention can produce
-    torn lines (head bytes lost, tail bytes survive). The locking fix
-    unxfails ``tests/test_fix_agent_dispatcher.py::test_concurrent_append_does_not_corrupt_jsonl``
-    (2026-04-13 regression).
+    Implementation: binary-append (``"ab"``) to the target + an
+    exclusive lock on a *sidecar* lockfile held for the duration of
+    the ``write + flush + fsync`` sequence. Windows CRT does not
+    guarantee ``O_APPEND`` atomicity (unlike POSIX), so without a lock
+    heavy thread contention can produce torn lines (head bytes lost,
+    tail bytes survive).
 
-    The same primitive is used by ~20 JSONL writers across the codebase
+    Sidecar-lockfile pattern (``<path>.lock``) — not the target file
+    itself — guarantees a non-empty, lockable byte-range exists even
+    when the target file is brand-new / size 0. This closes the race
+    window Codex flagged on 2026-04-17: two first-writers opening
+    the freshly-created target simultaneously could both have
+    failed the empty-file ``msvcrt.locking(fd, LK_LOCK, 1)`` call and
+    interleaved their writes.
+
+    This primitive is used by ~20 JSONL writers across the codebase
     (signal_log, claude_invocations, critical_errors, telegram_messages,
-    accuracy_snapshots, etc.) so this fix eliminates torn-line risk
-    system-wide.
+    accuracy_snapshots, etc.) so the fix eliminates torn-line risk
+    system-wide. Unxfails
+    ``tests/test_fix_agent_dispatcher.py::test_concurrent_append_does_not_corrupt_jsonl``.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     data = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
-    with open(path, "ab") as f:
-        fd = f.fileno()
-        locked_win = False
+
+    # Sidecar lockfile — always non-empty so locking never fails on
+    # size-0 targets. Pre-create if missing; single byte is enough.
+    lock_path = path.parent / f".{path.name}.lock"
+    if not lock_path.exists():
+        try:
+            with open(lock_path, "ab") as lf:
+                if lf.tell() == 0:
+                    lf.write(b"\0")
+        except OSError:
+            pass  # best-effort; lock open below will retry
+
+    with open(lock_path, "rb+") as lock_f:
+        lfd = lock_f.fileno()
+        win_locked = False
         try:
             if _msvcrt is not None:
-                # Windows: lock byte 0 (LK_LOCK is blocking). Writes in
-                # append mode always go to EOF regardless of the file
-                # pointer, so seeking to 0 just to lock is safe.
-                # 2026-04-17 codex P2: on brand-new empty files
-                # (size 0) locking byte 0 can fail with EINVAL. We
-                # proceed WITHOUT the lock in that case — a single
-                # creator writer cannot contend with itself, and the
-                # next appender will find a non-empty file and lock
-                # successfully. The lock's purpose is preventing
-                # *interleaving* under contention, which can't happen
-                # when the file has zero bytes.
-                try:
-                    os.lseek(fd, 0, os.SEEK_SET)
-                    _msvcrt.locking(fd, _msvcrt.LK_LOCK, 1)
-                    locked_win = True
-                except OSError:
-                    locked_win = False  # skip lock on empty file
+                os.lseek(lfd, 0, os.SEEK_SET)
+                _msvcrt.locking(lfd, _msvcrt.LK_LOCK, 1)  # blocking
+                win_locked = True
             elif _fcntl is not None:
-                _fcntl.flock(fd, _fcntl.LOCK_EX)
-            f.write(data)
-            f.flush()
-            os.fsync(fd)
+                _fcntl.flock(lfd, _fcntl.LOCK_EX)
+            with open(path, "ab") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
         finally:
-            if locked_win and _msvcrt is not None:
+            if win_locked and _msvcrt is not None:
                 try:
-                    os.lseek(fd, 0, os.SEEK_SET)
-                    _msvcrt.locking(fd, _msvcrt.LK_UNLCK, 1)
+                    os.lseek(lfd, 0, os.SEEK_SET)
+                    _msvcrt.locking(lfd, _msvcrt.LK_UNLCK, 1)
                 except OSError:
                     pass
             # fcntl.flock releases automatically on close.
