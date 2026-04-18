@@ -86,7 +86,7 @@ class TestSignalNamesImport:
     def test_signal_names_count(self):
         """Signal names count matches tickers.SIGNAL_NAMES."""
         from portfolio.meta_learner import SIGNAL_NAMES
-        assert len(SIGNAL_NAMES) == 43
+        assert len(SIGNAL_NAMES) == 44  # 2026-04-18: copper_gold_ratio added
 
 
 # ===========================================================================

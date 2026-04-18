@@ -297,12 +297,17 @@ class TestBlendAccuracyData:
         assert blend_accuracy_data(None, None) == {}
 
     def test_alltime_only_returns_alltime(self):
-        """No recent data → alltime used directly."""
+        """No recent data → alltime used directly (2026-04-18: now also
+        gets a derived `pct` field = accuracy * 100)."""
         from portfolio.accuracy_stats import blend_accuracy_data
 
         alltime = {"rsi": {"accuracy": 0.6, "total": 100, "correct": 60}}
         result = blend_accuracy_data(alltime, None)
-        assert result == alltime
+        # Same core fields, plus the new derived pct
+        assert result["rsi"]["accuracy"] == 0.6
+        assert result["rsi"]["total"] == 100
+        assert result["rsi"]["correct"] == 60
+        assert result["rsi"]["pct"] == 60.0
 
 
 # ---------------------------------------------------------------------------
