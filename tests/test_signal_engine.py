@@ -67,6 +67,13 @@ class TestCorrelationGroups:
         assert "structure" in td_group
         assert "oscillators" in td_group
 
+    def test_macd_in_trend_direction(self):
+        """macd should be in trend_direction group (91.9% agreement with ema)."""
+        from portfolio.signal_engine import CORRELATION_GROUPS
+
+        td_group = CORRELATION_GROUPS["trend_direction"]
+        assert "macd" in td_group, "MACD is derived from EMAs; 91.9% agreement with ema"
+
     def test_macro_regime_in_trend_direction(self):
         """macro_regime should be in trend_direction group (r=0.520 with trend)."""
         from portfolio.signal_engine import CORRELATION_GROUPS
