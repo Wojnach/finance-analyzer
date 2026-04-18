@@ -186,6 +186,11 @@ def _register_defaults():
     # 94% recession prediction accuracy, 0.85 correlation with 10Y yields.
     register_enhanced("copper_gold_ratio", "portfolio.signals.copper_gold_ratio",
                       "compute_copper_gold_ratio_signal", requires_context=True, max_confidence=0.7)
+    # Statistical Jump Model regime — jump detection + persistence penalty (all assets)
+    # 2026-04-18: addresses failing macro_regime (46.6% at 1d, 30.3% metals).
+    # Source: Shu, Yu, Mulvey 2024 (12 citations). Persistence penalty prevents whiplash.
+    register_enhanced("statistical_jump_regime", "portfolio.signals.statistical_jump_regime",
+                      "compute_statistical_jump_regime_signal")
 
 
 _register_defaults()
