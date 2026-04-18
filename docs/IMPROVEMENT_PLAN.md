@@ -1,134 +1,109 @@
-# Improvement Plan — Auto-Session 2026-04-17
+# Improvement Plan — Auto Session 2026-04-18
 
-Updated: 2026-04-17
-Branch: `improve/auto-session-2026-04-17`
-Worktree: `Q:/finance-analyzer-improve`
+Based on deep exploration of signal_engine.py (3000+ lines), accuracy_stats.py,
+ic_computation.py, and research data from the 2026-04-17 after-hours session.
 
-## Methodology
+## Priority Order
 
-Five parallel exploration agents examined: core loop/orchestration, signal engine/accuracy,
-data layer/file I/O, metals subsystem/Avanza, and dashboard/test infrastructure. Findings
-were verified against source code. False positives from agents were filtered out.
+### Batch 1: IC-Based Weight Multiplier (HIGHEST IMPACT)
 
-## 1. Bugs & Problems Found
+**Problem:** Current weighting uses directional accuracy as primary signal weight.
+This misses return magnitude prediction. Phantom performers (calendar 58.9% acc,
+IC=0.000; econ_calendar 62.6% acc, IC=0.000) get high weight despite zero
+predictive power for move size. Genuinely good signals (ministral IC=0.094,
+momentum IC=0.063) are underweighted relative to their true value.
 
-### P1 — trigger.py: wall-clock in sustained gate causes NTP-jump false negatives
+**Files:** `portfolio/signal_engine.py` (insert after line 1519 in `_weighted_consensus()`)
 
-**File:** `portfolio/trigger.py:57-81`
-**Issue:** `_update_sustained()` stores and compares `started_ts` via `time.time()` (wall clock).
-If NTP daemon adjusts the clock backward, `now_ts - entry["started_ts"]` goes negative and
-the duration gate fails even if the signal has been sustained for minutes.
-**Impact:** Sustained signal flips (consensus change triggers) can silently fail to fire.
-**Fix:** Use `time.monotonic()` for duration tracking. Store a separate `_monotonic_ts` in
-the state entry. The `started_ts` wall-clock field is preserved for persistence/debugging;
-a new `_mono_start` field handles duration math. On process restart, `_mono_start` is
-re-initialized (unknown — treat as "just started"), which is the correct behavior since
-a restart already resets the sustained counter.
+**Changes:**
+1. Add `_get_ic_data(horizon)` — lazy-cached IC loader using existing `ic_computation.py`
+2. Add `_compute_ic_mult(ic, icir, samples)` — clamps to [0.6, 1.5]
+3. Apply IC multiplier after accuracy weight, before regime mult
+4. Add zero-IC penalty: signals with |IC| < 0.01 and samples > 500 get 0.85x
+5. Pass `horizon` and `ticker` to IC lookup for per-ticker IC (Phase 2 data available)
 
-### P2 — agent_invocation.py: stack overflow counter not persisted
+**Impact:**
+- ministral IC=0.094 → 1.19x boost
+- momentum IC=0.063 → 1.13x boost  
+- calendar IC=0.000 → 0.85x penalty (zero-IC)
+- econ_calendar IC=0.000 → 0.85x penalty
 
-**File:** `portfolio/agent_invocation.py:39-40,617-643`
-**Issue:** `_consecutive_stack_overflows` is an in-memory global that counts consecutive
-Claude CLI stack overflow crashes. After 5, Layer 2 is auto-disabled. But on loop restart
-(code deploy, crash, schtasks restart), the counter resets to 0, re-enabling Layer 2 even
-if the underlying cause (large file in project root, etc.) persists.
-**Impact:** Crash loop: restart -> 5 stack overflows -> disable -> restart -> repeat.
-**Fix:** Persist counter to `data/stack_overflow_counter.json` via `atomic_write_json()`.
-Load on module import. Clear on successful non-stack-overflow completion.
+**Risk:** LOW — IC cache already exists (1h TTL), multiplicative factor won't break
+existing consensus logic.
 
-### P3 — microstructure_state.py: unprotected concurrent buffer access
+**Tests:** `tests/test_ic_weighting.py` — tests for ic_mult math, stability filter,
+integration with `_weighted_consensus()`.
 
-**File:** `portfolio/microstructure_state.py:36-38`
-**Issue:** `_snapshot_buffers`, `_spread_buffers`, `_ofi_history` are plain dicts accessed by
-both the metals_loop 10s fast-tick thread and the main 60s cycle (via `accumulate_snapshot`
-and `get_state`). Python dicts are thread-safe for individual operations but deque
-append + iterate patterns can raise RuntimeError.
-**Impact:** Potential `RuntimeError: deque mutated during iteration` in OFI computation.
-**Fix:** Add `threading.Lock()` around buffer mutations and reads in public functions.
+---
 
-### P4 — trend.py: Supertrend direction inferred from float equality
+### Batch 2: Fix Dynamic Correlation + Add Orphaned Signals (HIGH IMPACT)
 
-**File:** `portfolio/signals/trend.py:164`
-**Issue:** `supertrend[i - 1] == upper_band[i - 1]` compares numpy floats with `==`.
-Floating-point arithmetic can produce epsilon differences, causing the equality check
-to fail and the direction to be incorrectly determined.
-**Impact:** Supertrend direction flip can be missed, producing wrong trend signal.
-**Fix:** Use the `direction` array (already allocated) for state transitions instead of
-inferring from float equality. Replace `supertrend[i-1] == upper_band[i-1]` with
-`direction[i-1] == -1` (was downtrend).
+**Problem 1:** Dynamic correlation is dead code. Pearson correlation on vote encoding
+(BUY=1, HOLD=0, SELL=-1) is diluted by 70-90% HOLD dominance. Max observed Pearson
+r=0.538 (ema↔trend), but these signals agree 100% on non-HOLD votes. The 0.7
+threshold is unreachable → always falls back to static groups.
 
-### P5 — health.py: unguarded fromisoformat in agent silence check
+**Problem 2:** 10 signal pairs have 90-100% agreement but aren't in any static group:
+- fear_greed↔calendar (100%, 501 sam)
+- fear_greed↔funding (100%, 543 sam)
+- news_event↔econ_calendar (100%, 714 sam)
+- funding↔calendar (100%, 104 sam)
+- fear_greed↔claude_fundamental (92.7%, 1241 sam)
 
-**File:** `portfolio/health.py:103`
-**Issue:** `datetime.fromisoformat(last_ts)` can raise `ValueError` on corrupt state file.
-**Impact:** Agent silence detection crashes, propagating exception to caller.
-**Fix:** Wrap in try-except, return `silent=True` on parse error (fail-closed).
+**Files:** `portfolio/signal_engine.py`
 
-### P6 — outcome_tracker.py: backfill doesn't invalidate signal utility cache
+**Changes:**
+1. Replace Pearson correlation in `_compute_dynamic_correlation_groups()` with
+   agreement rate (only counting non-HOLD pairs)
+2. Change threshold from 0.7 (Pearson) to 0.85 (agreement rate)
+3. Add orphaned signals to static groups:
+   - Expand `macro_external` → `{"fear_greed", "sentiment", "news_event", "calendar",
+     "econ_calendar", "funding"}` (6 members)
+   - Set penalty to 0.15x (like momentum_cluster) since 6 members is large
 
-**File:** `portfolio/outcome_tracker.py` (end of `backfill_outcomes`)
-**Issue:** After writing new outcomes to signal_log, the signal_utility TTL cache in
-accuracy_stats.py (300s TTL) isn't invalidated. Next cycle sees stale utility scores.
-**Impact:** Signal utility weights lag by up to 5 minutes after outcome backfill.
-**Fix:** Call `invalidate_signal_utility_cache()` at end of `backfill_outcomes()`.
+**Risk:** MEDIUM — changing correlation groups affects vote weights for all signals.
+Static group changes are safe (additive). Dynamic correlation fix needs careful testing.
 
-## 2. Performance Improvements
+---
 
-### PERF-1 — market_timing.py: cache holiday sets per year
+### Batch 3: Disabled Signal Rescue (MEDIUM IMPACT)
 
-**File:** `portfolio/market_timing.py:158-216`
-**Issue:** `us_market_holidays()` and `swedish_market_holidays()` recompute the full
-holiday set including Easter calculation on every call. Called every 60s cycle.
-**Impact:** Unnecessary CPU: divmod + date arithmetic 1440 times/day.
-**Fix:** Module-level `_holiday_cache` dict keyed by `(country, year)`. Auto-invalidates
-on year boundary.
+**Problem:** Global `DISABLED_SIGNALS` hides per-ticker value.
+ML on ETH-USD: 55.1% at 3h (1206 samples) — genuine edge hidden by BTC's 26.4%.
 
-## 3. Code Quality
+**Files:** `portfolio/signal_engine.py`
 
-### CQ-1 — Ruff auto-fixable lint violations
+**Changes:**
+1. Add `_DISABLED_SIGNAL_OVERRIDES` set with (signal, ticker) tuples
+2. In `_weighted_consensus()`, check overrides before applying DISABLED_SIGNALS gate
+3. Override: `("ml", "ETH-USD")` — 55.1% at 3h with 1206 samples
 
-4 auto-fixable violations + manual SIM103/UP017:
-- 2 x I001 (unsorted imports): `accuracy_degradation.py:431`, `metals_loop.py:298`
-- 1 x F401 (unused import): identified during exploration
-- 1 x SIM103 (needless bool): portfolio module
-- 1 x UP017 (datetime-timezone-utc): portfolio module
+**Risk:** LOW — signals already computed, just unblocked. Accuracy gate auto-protects.
 
-E402 (54 occurrences) are intentional lazy imports — leave as-is.
+---
 
-### CQ-2 — analyze.py: use monotonic clock for elapsed timing
+### Batch 4: Confidence Calibration Compression (MEDIUM IMPACT)
 
-**File:** `portfolio/analyze.py:270,280,314`
-**Issue:** Uses `time.time()` for elapsed measurement. Should use `time.monotonic()`.
-**Fix:** Replace 3 call sites.
+**Problem:** Confidence is massively overconfident above 60%:
+- 60-69% conf → 49% actual (16pp gap)
+- 80-89% conf → 53% actual (32pp gap)
 
-## 4. Deferred (Not This Session)
+**Files:** `portfolio/signal_engine.py` (in `apply_confidence_penalties`)
 
-- **metals_loop.py decomposition** — 7295 lines, 94 functions. Needs careful multi-session
-  refactoring with live trading path testing. Too risky for autonomous session.
-- **Dashboard CORS restriction** — Intentional LAN-access design. Requires user input on
-  whether to restrict.
-- **Dashboard auth default** — "No token = open access" is backwards-compatible design.
-  Changing default requires user approval.
+**Changes:**
+1. Add Stage 7: Confidence Compression after Stage 6
+2. Compress: `conf = 0.55 + (conf - 0.55) * 0.3` for conf > 0.55
+3. Maps: 60% → 56.5%, 70% → 59.5%, 80% → 62.5%
 
-## 5. Batch Plan
+**Risk:** LOW — only reduces confidence, never increases.
 
-### Batch 1: Bug Fixes (5 files, 5 new test files)
-| File | Change | Risk |
-|------|--------|------|
-| `portfolio/trigger.py` | P1: monotonic clock in `_update_sustained()` | LOW |
-| `portfolio/agent_invocation.py` | P2: persist stack overflow counter | LOW |
-| `portfolio/microstructure_state.py` | P3: thread safety for buffers | LOW |
-| `portfolio/signals/trend.py` | P4: fix Supertrend float equality | MEDIUM |
-| `portfolio/health.py` | P5: guard fromisoformat parse | LOW |
+## Dependency Order
 
-### Batch 2: Perf + Cache + Quality (3 files)
-| File | Change | Risk |
-|------|--------|------|
-| `portfolio/market_timing.py` | PERF-1: cache holiday sets | LOW |
-| `portfolio/outcome_tracker.py` | P6: invalidate utility cache | LOW |
-| `portfolio/analyze.py` | CQ-2: monotonic clock | LOW |
+Batch 1 → Batch 2 → Batch 3 → Batch 4 (sequential, each committed separately)
 
-### Batch 3: Lint Cleanup
-| File | Change | Risk |
-|------|--------|------|
-| Various | CQ-1: ruff auto-fix | LOW |
+## Deferred
+
+- Contrarian signal inversion (ml IC=-0.321): needs backtesting
+- Regime-conditioned per-signal weights: regime detection has lag
+- credit_spread_risk re-enable: investigate why disabled first
+- Per-ticker IC weighting: Phase 2, needs more validation
