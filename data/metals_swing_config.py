@@ -96,6 +96,56 @@ MOMENTUM_CANDIDATE_TTL_SEC = 300     # candidates older than 5 min are ignored
 MOMENTUM_STATE_FILE = "data/metals_momentum_state.json"
 
 # ---------------------------------------------------------------------------
+# Entry-gate hardening (2026-04-18 — post-mortem for the
+# MINI L SILVER AVA 336 loss of -5.07% / -50.56 SEK on 2026-04-17).
+#
+# The standard entry gates passed at the edge (conf 0.66 just above 0.60;
+# RSI 68 exactly at RSI_ENTRY_HIGH; MACD +0.015 barely positive after
+# decaying from +0.22). Three new gates address specific equation bugs
+# exposed by that trade. Full debate including steelman counter-arguments
+# in docs/plans/2026-04-18-entry-gates.md.
+#
+# NB: these gates apply to the standard-gate path only. The momentum-
+# override path (fresh fast-tick breakout candidate) stays on the relaxed
+# MOMENTUM_MIN_BUY_CONFIDENCE / MOMENTUM_MIN_BUY_VOTERS thresholds and
+# skips these three — momentum trades explicitly need to catch
+# fast-moving breakouts without 2-cycle persistence lag.
+
+# Gate A — signal persistence. Require confidence >= MIN_BUY_CONFIDENCE
+# for N consecutive cycles. The 2026-04-17 trade had conf
+# 0.40 -> 0.80 -> 0.66 -> 0.00 across 70 minutes; a 2-cycle requirement
+# blocks any single-cycle phantom spike while costing at most ~2 min of
+# entry lag.
+SIGNAL_PERSISTENCE_CHECKS = 2
+
+# Gate B — MACD decay. Reject entries where current MACD is less than
+# MACD_DECAY_MIN_RATIO of the max |MACD| over the last
+# MACD_DECAY_PEAK_LOOKBACK cycles. Catches "fading momentum after peak":
+# on 2026-04-17 MACD decayed from +0.22 to +0.001 over an hour, then
+# ticked up +0.001 -> +0.015 (+14x in % terms, noise in absolute
+# terms). Ratio to recent peak would have been 7% -> rejected. Asset-
+# agnostic (no fixed threshold that would need per-symbol tuning).
+MACD_DECAY_PEAK_LOOKBACK = 20        # capped at current macd_history length
+MACD_DECAY_MIN_RATIO = 0.30          # current |MACD| must be >= 30% of recent peak |MACD|
+
+# Gate C — RSI slope / recent-dip. RSI alone at 68 says nothing about
+# momentum direction; combined with slope it does. Accept if EITHER:
+#   - RSI is not falling over RSI_SLOPE_LOOKBACK_CHECKS (current >=
+#     value N cycles ago), OR
+#   - RSI dipped below RSI_DIP_BELOW_LEVEL in the last
+#     RSI_DIP_LOOKBACK_CHECKS (proves we're buying a pullback, not the
+#     tail end of a rally).
+# Yesterday RSI went 79 -> 77 -> 75 -> 72 -> 68 -> 66 -> 68 (declining),
+# never reaching 55 -> would have been rejected.
+RSI_SLOPE_LOOKBACK_CHECKS = 5        # ≈5 min
+RSI_DIP_LOOKBACK_CHECKS = 20         # ≈20 min
+RSI_DIP_BELOW_LEVEL = 55             # must have touched <= 55 recently OR be rising
+
+# History buffers for the new gates. Mirrored on MACD history (length 20).
+CONFIDENCE_HISTORY_MAX = 20
+RSI_HISTORY_MAX = 30                 # covers both lookbacks comfortably
+
+# ---------------------------------------------------------------------------
 # Exit rules
 # ---------------------------------------------------------------------------
 TAKE_PROFIT_UNDERLYING_PCT = 3.0   # 2026-04-14 raised from 2.0 — was exiting too early on

@@ -86,6 +86,9 @@ from metals_swing_config import (
     MIN_BUY_VOTERS,
     MIN_SPREAD_PCT,
     MIN_TRADE_SEK,
+    CONFIDENCE_HISTORY_MAX,
+    MACD_DECAY_MIN_RATIO,
+    MACD_DECAY_PEAK_LOOKBACK,
     MOMENTUM_CANDIDATE_TTL_SEC,
     MOMENTUM_ENTRY_ENABLED,
     MOMENTUM_EXIT_MIN_HOLD_SECONDS,
@@ -93,6 +96,11 @@ from metals_swing_config import (
     MOMENTUM_MIN_BUY_CONFIDENCE,
     MOMENTUM_MIN_BUY_VOTERS,
     MOMENTUM_STATE_FILE,
+    RSI_DIP_BELOW_LEVEL,
+    RSI_DIP_LOOKBACK_CHECKS,
+    RSI_HISTORY_MAX,
+    RSI_SLOPE_LOOKBACK_CHECKS,
+    SIGNAL_PERSISTENCE_CHECKS,
     POSITION_SIZE_PCT,
     REGIME_CONFIRM_CHECKS,
     RSI_ENTRY_HIGH,
@@ -549,6 +557,9 @@ def _default_state():
         "total_pnl_sek": 0,
         "session_trades": 0,
         "macd_history": {},
+        # 2026-04-18 entry-gate hardening (see metals_swing_config.py):
+        "confidence_history": {},
+        "rsi_history": {},
     }
 
 
@@ -872,8 +883,11 @@ class SwingTrader:
         # Then check entries
         self._check_entries(prices, signal_data)
 
-        # Track MACD history for improving-checks requirement
+        # Track MACD / confidence / RSI history for the hardening gates
+        # (see 2026-04-18 entry-gate hardening in metals_swing_config.py).
         self._update_macd_history(signal_data)
+        self._update_confidence_history(signal_data)
+        self._update_rsi_history(signal_data)
 
         # Periodic Telegram summary (when SEND_PERIODIC_SUMMARY enabled).
         # Restored after f6b491c accidentally dropped this call site.
@@ -2123,6 +2137,123 @@ class SwingTrader:
                     return False, f"MACD not declining for {MACD_IMPROVING_CHECKS} checks"
         # If not enough MACD history yet, skip this check (allow entry)
 
+        # --- 2026-04-18 entry-gate hardening (3 new gates, standard-path only). ---
+        # Skipped when the momentum override fired — momentum trades want to
+        # catch fast moves without persistence lag. See
+        # docs/plans/2026-04-18-entry-gates.md for the full debate.
+        if not momentum:
+            # Gate A — signal persistence. Confidence must be >= min_conf for
+            # at least SIGNAL_PERSISTENCE_CHECKS consecutive cycles (this one
+            # included) AND the prior action must match the current direction.
+            # Blocks single-cycle phantom spikes like the 2026-04-17 trade
+            # where conf briefly touched 0.66 and collapsed to 0.00 ten minutes
+            # after the fill. Codex follow-up 2026-04-18: also check that the
+            # prior cycle's action was the same — a SELL@0.65 followed by
+            # BUY@0.70 is a flip, not persistence, and must be rejected.
+            conf_hist = self.state.get("confidence_history", {}).get(ticker, [])
+            # Append current (action, confidence) BEFORE the check so the
+            # window includes this cycle. The state is saved after
+            # _evaluate_entry regardless of result; ring is capped at
+            # CONFIDENCE_HISTORY_MAX by _update_confidence_history().
+            recent_pairs = conf_hist[-(SIGNAL_PERSISTENCE_CHECKS - 1):] if SIGNAL_PERSISTENCE_CHECKS > 1 else []
+            window = recent_pairs + [{"action": action, "confidence": confidence}]
+            if len(window) >= SIGNAL_PERSISTENCE_CHECKS:
+                def _entry_action_and_conf(entry):
+                    # Tolerate legacy float-only entries (pre-2026-04-18
+                    # Codex follow-up) so we don't crash on a state file
+                    # written by an older build mid-rollout.
+                    if isinstance(entry, dict):
+                        return entry.get("action"), float(entry.get("confidence", 0.0))
+                    return action, float(entry)  # legacy: assume current action
+                # All cycles in the window must have conf ≥ threshold
+                # AND action == current action (legacy float entries get
+                # the benefit of the doubt — one-cycle migration window).
+                all_ok = True
+                for entry in window:
+                    act, conf = _entry_action_and_conf(entry)
+                    if conf < min_conf:
+                        all_ok = False
+                        break
+                    if isinstance(entry, dict) and act != action:
+                        all_ok = False
+                        break
+                if not all_ok:
+                    summary = [
+                        (e.get("action"), round(float(e.get("confidence", 0.0)), 2))
+                        if isinstance(e, dict) else ("legacy", round(float(e), 2))
+                        for e in window
+                    ]
+                    return False, (
+                        f"signal persistence: conf {confidence:.2f} action {action} "
+                        f"passed but prior {SIGNAL_PERSISTENCE_CHECKS - 1} cycle(s) "
+                        f"weren't persistent (window={summary})"
+                    )
+            # If we don't have enough history yet (first cycle after restart),
+            # allow the trade — the 2-cycle cost can't be paid on cold start.
+
+        if not momentum:
+            # Gate B — MACD decay vs recent peak. Auto-scales to asset (no
+            # fixed threshold needed). On 2026-04-17, MACD peaked at +0.22
+            # and entry was at +0.015 -> ratio 7%, rejected. Codex
+            # follow-up 2026-04-18: _update_macd_history() runs AFTER
+            # _check_entries(), so macd_hist[-1] is the PRIOR cycle, not
+            # this one. Use the current sig's macd_hist instead and
+            # compare against the peak of the prior history (which is the
+            # right semantics: "is this candidate's MACD still meaningful
+            # vs the recent run-up?").
+            current_macd = sig.get("macd_hist")
+            if current_macd is None:
+                current_macd = sig.get("macd")  # fallback
+            if current_macd is not None and len(macd_hist) >= 1:
+                lookback = min(MACD_DECAY_PEAK_LOOKBACK, len(macd_hist))
+                # Include the current tick in the peak window so we always
+                # have at least one sample; this is the max of (prior N, current).
+                window_vals = macd_hist[-lookback:] + [float(current_macd)]
+                recent_peak = max(abs(v) for v in window_vals)
+                current_abs = abs(float(current_macd))
+                if recent_peak > 0 and current_abs / recent_peak < MACD_DECAY_MIN_RATIO:
+                    ratio_pct = current_abs / recent_peak * 100
+                    return False, (
+                        f"MACD decay: |current| {current_abs:.4f} is {ratio_pct:.0f}% of "
+                        f"recent peak {recent_peak:.4f} (min {MACD_DECAY_MIN_RATIO * 100:.0f}%)"
+                    )
+
+        if not momentum:
+            # Gate C — RSI slope / recent-dip. Accept if RSI is not falling
+            # OR if it dipped below RSI_DIP_BELOW_LEVEL recently. The 2026-04-17
+            # trade had RSI 79 -> 77 -> 75 -> 72 -> 68 -> 66 -> 68 (declining,
+            # never reached 55) — both branches would reject. Passes if we
+            # don't have enough RSI history yet.
+            rsi_hist = self.state.get("rsi_history", {}).get(ticker, [])
+            # Append current BEFORE the check, same reasoning as Gate A.
+            rsi_hist_plus = rsi_hist + [rsi]
+            slope_ok = False
+            dip_ok = False
+            if len(rsi_hist_plus) > RSI_SLOPE_LOOKBACK_CHECKS:
+                past_rsi = rsi_hist_plus[-RSI_SLOPE_LOOKBACK_CHECKS - 1]
+                if direction == "LONG":
+                    slope_ok = rsi >= past_rsi
+                else:  # SHORT: RSI should be falling (not rising) for a short entry
+                    slope_ok = rsi <= past_rsi
+            else:
+                slope_ok = True  # insufficient history — don't gate on slope
+            if len(rsi_hist_plus) >= 2:
+                recent = rsi_hist_plus[-RSI_DIP_LOOKBACK_CHECKS:]
+                if direction == "LONG":
+                    dip_ok = min(recent) <= RSI_DIP_BELOW_LEVEL
+                else:  # SHORT: want a recent spike above (100 - level)
+                    dip_ok = max(recent) >= 100 - RSI_DIP_BELOW_LEVEL
+            else:
+                dip_ok = True  # insufficient history — don't gate on dip
+
+            if not (slope_ok or dip_ok):
+                return False, (
+                    f"RSI no slope/dip: current {rsi:.1f}, "
+                    f"{RSI_SLOPE_LOOKBACK_CHECKS}-cycle ago {past_rsi:.1f}, "
+                    f"{RSI_DIP_LOOKBACK_CHECKS}-cycle min/max "
+                    f"{min(recent):.1f}/{max(recent):.1f} — looks like late-rally/tail-of-move"
+                )
+
         # Regime confirmation — require N consecutive (action, regime) checks.
         # The 2026-04-09 incident fired BUY in one cycle after 20+ trending-down
         # checks; the regime flipped to "ranging" + action flipped to "BUY" in
@@ -2894,6 +3025,50 @@ class SwingTrader:
             if len(history) > 20:
                 history.pop(0)
 
+        _save_state(self.state)
+
+    def _update_confidence_history(self, signal_data):
+        """Track (action, confidence) pairs across checks for Gate A.
+
+        2026-04-18 Codex follow-up: the persistence gate needs to see the
+        SAME action across cycles — a SELL@0.65 followed by BUY@0.70 is a
+        flip, not persistence. Store both fields per cycle.
+        """
+        if not signal_data:
+            return
+        if "confidence_history" not in self.state:
+            self.state["confidence_history"] = {}
+        for ticker in ["XAG-USD", "XAU-USD"]:
+            sig = signal_data.get(ticker)
+            if not sig:
+                continue
+            conf = sig.get("confidence")
+            action = sig.get("action")
+            if conf is None or action is None:
+                continue
+            history = self.state["confidence_history"].setdefault(ticker, [])
+            history.append({"action": action, "confidence": float(conf)})
+            if len(history) > CONFIDENCE_HISTORY_MAX:
+                history.pop(0)
+        _save_state(self.state)
+
+    def _update_rsi_history(self, signal_data):
+        """Track RSI values across checks (Gate C, 2026-04-18)."""
+        if not signal_data:
+            return
+        if "rsi_history" not in self.state:
+            self.state["rsi_history"] = {}
+        for ticker in ["XAG-USD", "XAU-USD"]:
+            sig = signal_data.get(ticker)
+            if not sig:
+                continue
+            rsi = sig.get("rsi")
+            if rsi is None:
+                continue
+            history = self.state["rsi_history"].setdefault(ticker, [])
+            history.append(float(rsi))
+            if len(history) > RSI_HISTORY_MAX:
+                history.pop(0)
         _save_state(self.state)
 
     def _send_summary(self, signal_data):
