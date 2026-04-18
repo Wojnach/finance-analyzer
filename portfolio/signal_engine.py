@@ -210,6 +210,19 @@ _BIAS_THRESHOLD = 0.85  # >85% BUY or >85% SELL triggers penalty
 _BIAS_PENALTY = 0.5  # 0.5x weight for extreme-bias signals
 _BIAS_MIN_ACTIVE = 30  # need enough active (non-HOLD) votes to judge bias
 
+# IC-based weight multiplier (2026-04-18): adjusts signal weight based on
+# Information Coefficient — the rank correlation between a signal's votes and
+# actual return magnitude. A signal with 55% accuracy but IC=0.15 catches big
+# moves; one with 58% accuracy but IC=0.00 is riding market drift.
+_IC_ALPHA = 2.0         # IC sensitivity: IC=0.10 → 1.20x boost
+_IC_MULT_FLOOR = 0.6    # never zero out a signal via IC alone
+_IC_MULT_CAP = 1.5      # cap to prevent IC from dominating
+_IC_MIN_SAMPLES = 100   # need reliable IC estimate
+_IC_STABILITY_MIN = 0.10  # minimum |ICIR| to trust the IC value
+_IC_ZERO_PENALTY = 0.85   # phantom performers (|IC|<0.01, 500+ samples) get 0.85x
+_IC_ZERO_MIN_SAMPLES = 500  # sample floor for zero-IC penalty
+_IC_DATA_TTL = 3600     # IC cache TTL (matches ic_computation.py)
+
 # Per-ticker consensus gate: BUG-164.  Suppress all non-HOLD consensus for
 # tickers where the system's overall consensus is historically harmful.
 # AMD 24.8%, GOOGL 31.3%, META 34.2% — actively wrong.
@@ -1238,12 +1251,72 @@ def _compute_gate_relaxation(votes, accuracy_data, excluded, group_gated, base_g
     return _GATE_RELAXATION_MAX
 
 
+# ---------------------------------------------------------------------------
+# IC-based weight multiplier (2026-04-18)
+# ---------------------------------------------------------------------------
+
+def _compute_ic_mult(ic: float, icir: float, samples: int) -> float:
+    """Compute IC-based weight multiplier for a signal.
+
+    Returns a multiplicative adjustment based on the signal's Information
+    Coefficient:
+    - IC > 0 with stable ICIR → boost (catches big moves)
+    - IC ≈ 0 with many samples → slight penalty (phantom performer)
+    - IC < 0 with stable ICIR → penalty (contrarian, accuracy gate handles)
+    - Insufficient data or unstable → 1.0 (no adjustment)
+
+    Clamped to [_IC_MULT_FLOOR, _IC_MULT_CAP].
+    """
+    if samples < _IC_MIN_SAMPLES:
+        return 1.0
+    # Zero-IC penalty for phantom performers: signals with many samples but
+    # no return-magnitude predictive power (e.g., calendar, econ_calendar).
+    if abs(ic) < 0.01 and samples >= _IC_ZERO_MIN_SAMPLES:
+        return _IC_ZERO_PENALTY
+    if abs(icir) < _IC_STABILITY_MIN:
+        return 1.0
+    raw = 1.0 + _IC_ALPHA * ic
+    return max(_IC_MULT_FLOOR, min(_IC_MULT_CAP, raw))
+
+
+# IC data cache: reuse ic_computation.py infrastructure with in-memory TTL.
+_ic_data_cache: dict = {}
+_ic_data_lock = threading.Lock()
+
+
+def _get_ic_data(horizon: str) -> dict | None:
+    """Load IC data for the given horizon, computing if cache is stale.
+
+    Returns the full cache dict {"global": {...}, "per_ticker": {...}}
+    or None if IC data is unavailable.
+    """
+    now = time.time()
+    with _ic_data_lock:
+        cached = _ic_data_cache.get(horizon)
+        if cached and now - cached.get("_loaded_at", 0) < _IC_DATA_TTL:
+            return cached
+
+    try:
+        from portfolio.ic_computation import compute_and_cache_ic, load_cached_ic
+        cache = load_cached_ic(horizon)
+        if cache is None:
+            cache = compute_and_cache_ic(horizon)
+        if cache:
+            cache["_loaded_at"] = now
+            with _ic_data_lock:
+                _ic_data_cache[horizon] = cache
+            return cache
+    except Exception:
+        logger.debug("IC data unavailable for %s", horizon, exc_info=True)
+    return None
+
+
 def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
                         accuracy_gate=None, max_signals=None, horizon=None,
                         regime_gated_override=None, ticker=None):
-    """Compute weighted consensus using accuracy, regime, and activation frequency.
+    """Compute weighted consensus using accuracy, IC, regime, and activation frequency.
 
-    Weight per signal = accuracy_weight * regime_mult * normalized_weight
+    Weight per signal = accuracy_weight * ic_mult * regime_mult * normalized_weight
                         * horizon_mult * activity_cap
     where normalized_weight = rarity_bonus * bias_penalty (from activation rates).
     Rare, balanced signals get more weight; noisy/biased signals get less.
@@ -1468,6 +1541,13 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             relaxation * 100, gate, gate - relaxation,
         )
 
+    # IC-based weight multiplier (2026-04-18): load IC data once per consensus
+    # call. Returns {"global": {sig: {ic, icir, samples}}, "per_ticker": {...}}
+    # or None if IC computation is unavailable.
+    ic_cache = _get_ic_data(horizon) if horizon else None
+    ic_global = ic_cache.get("global", {}) if ic_cache else {}
+    ic_per_ticker = ic_cache.get("per_ticker", {}) if ic_cache else {}
+
     for signal_name, vote in votes.items():
         if vote == "HOLD":
             continue
@@ -1517,6 +1597,22 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             weight = acc
         else:
             weight = 0.5
+        # IC-based weight adjustment: boost signals with high return-magnitude
+        # predictive power, penalize phantom performers with zero IC.
+        if ic_global:
+            # Prefer per-ticker IC when available with enough samples
+            _ic_info = None
+            if ticker and ic_per_ticker:
+                _ic_info = ic_per_ticker.get(ticker, {}).get(signal_name)
+                if _ic_info and _ic_info.get("samples", 0) < _IC_MIN_SAMPLES:
+                    _ic_info = None  # fall back to global
+            if _ic_info is None:
+                _ic_info = ic_global.get(signal_name, {})
+            _ic = _ic_info.get("ic", 0.0)
+            _icir = _ic_info.get("icir", 0.0)
+            _ic_n = _ic_info.get("samples", 0)
+            ic_mult = _compute_ic_mult(_ic, _icir, _ic_n)
+            weight *= ic_mult
         # Regime adjustment
         weight *= regime_mults.get(signal_name, 1.0)
         # Horizon-specific weight adjustment
