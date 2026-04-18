@@ -2144,22 +2144,49 @@ class SwingTrader:
         if not momentum:
             # Gate A — signal persistence. Confidence must be >= min_conf for
             # at least SIGNAL_PERSISTENCE_CHECKS consecutive cycles (this one
-            # included). Blocks single-cycle phantom spikes like the 2026-04-17
-            # trade where conf briefly touched 0.66 and then collapsed to 0.00
-            # ten minutes after the fill.
+            # included) AND the prior action must match the current direction.
+            # Blocks single-cycle phantom spikes like the 2026-04-17 trade
+            # where conf briefly touched 0.66 and collapsed to 0.00 ten minutes
+            # after the fill. Codex follow-up 2026-04-18: also check that the
+            # prior cycle's action was the same — a SELL@0.65 followed by
+            # BUY@0.70 is a flip, not persistence, and must be rejected.
             conf_hist = self.state.get("confidence_history", {}).get(ticker, [])
-            # Append current confidence BEFORE the check so the check includes
-            # this cycle. Mutating state here is OK — the caller saves state
-            # after _evaluate_entry regardless of result, and the ring is
-            # capped at CONFIDENCE_HISTORY_MAX.
-            recent_conf = conf_hist[-(SIGNAL_PERSISTENCE_CHECKS - 1):] if SIGNAL_PERSISTENCE_CHECKS > 1 else []
-            recent_conf_with_current = recent_conf + [confidence]
-            if len(recent_conf_with_current) >= SIGNAL_PERSISTENCE_CHECKS:
-                if not all(c >= min_conf for c in recent_conf_with_current):
+            # Append current (action, confidence) BEFORE the check so the
+            # window includes this cycle. The state is saved after
+            # _evaluate_entry regardless of result; ring is capped at
+            # CONFIDENCE_HISTORY_MAX by _update_confidence_history().
+            recent_pairs = conf_hist[-(SIGNAL_PERSISTENCE_CHECKS - 1):] if SIGNAL_PERSISTENCE_CHECKS > 1 else []
+            window = recent_pairs + [{"action": action, "confidence": confidence}]
+            if len(window) >= SIGNAL_PERSISTENCE_CHECKS:
+                def _entry_action_and_conf(entry):
+                    # Tolerate legacy float-only entries (pre-2026-04-18
+                    # Codex follow-up) so we don't crash on a state file
+                    # written by an older build mid-rollout.
+                    if isinstance(entry, dict):
+                        return entry.get("action"), float(entry.get("confidence", 0.0))
+                    return action, float(entry)  # legacy: assume current action
+                # All cycles in the window must have conf ≥ threshold
+                # AND action == current action (legacy float entries get
+                # the benefit of the doubt — one-cycle migration window).
+                all_ok = True
+                for entry in window:
+                    act, conf = _entry_action_and_conf(entry)
+                    if conf < min_conf:
+                        all_ok = False
+                        break
+                    if isinstance(entry, dict) and act != action:
+                        all_ok = False
+                        break
+                if not all_ok:
+                    summary = [
+                        (e.get("action"), round(float(e.get("confidence", 0.0)), 2))
+                        if isinstance(e, dict) else ("legacy", round(float(e), 2))
+                        for e in window
+                    ]
                     return False, (
-                        f"signal persistence: conf {confidence:.2f} passed but prior "
-                        f"{SIGNAL_PERSISTENCE_CHECKS - 1} cycle(s) below {min_conf} "
-                        f"({[round(c, 2) for c in recent_conf_with_current]})"
+                        f"signal persistence: conf {confidence:.2f} action {action} "
+                        f"passed but prior {SIGNAL_PERSISTENCE_CHECKS - 1} cycle(s) "
+                        f"weren't persistent (window={summary})"
                     )
             # If we don't have enough history yet (first cycle after restart),
             # allow the trade — the 2-cycle cost can't be paid on cold start.
@@ -2167,12 +2194,23 @@ class SwingTrader:
         if not momentum:
             # Gate B — MACD decay vs recent peak. Auto-scales to asset (no
             # fixed threshold needed). On 2026-04-17, MACD peaked at +0.22
-            # and entry was at +0.015 -> ratio 7%, rejected. Passes if we
-            # don't have enough history yet.
-            if len(macd_hist) >= 2:
+            # and entry was at +0.015 -> ratio 7%, rejected. Codex
+            # follow-up 2026-04-18: _update_macd_history() runs AFTER
+            # _check_entries(), so macd_hist[-1] is the PRIOR cycle, not
+            # this one. Use the current sig's macd_hist instead and
+            # compare against the peak of the prior history (which is the
+            # right semantics: "is this candidate's MACD still meaningful
+            # vs the recent run-up?").
+            current_macd = sig.get("macd_hist")
+            if current_macd is None:
+                current_macd = sig.get("macd")  # fallback
+            if current_macd is not None and len(macd_hist) >= 1:
                 lookback = min(MACD_DECAY_PEAK_LOOKBACK, len(macd_hist))
-                recent_peak = max(abs(v) for v in macd_hist[-lookback:])
-                current_abs = abs(macd_hist[-1])
+                # Include the current tick in the peak window so we always
+                # have at least one sample; this is the max of (prior N, current).
+                window_vals = macd_hist[-lookback:] + [float(current_macd)]
+                recent_peak = max(abs(v) for v in window_vals)
+                current_abs = abs(float(current_macd))
                 if recent_peak > 0 and current_abs / recent_peak < MACD_DECAY_MIN_RATIO:
                     ratio_pct = current_abs / recent_peak * 100
                     return False, (
@@ -2990,7 +3028,12 @@ class SwingTrader:
         _save_state(self.state)
 
     def _update_confidence_history(self, signal_data):
-        """Track signal confidence across checks (Gate A, 2026-04-18)."""
+        """Track (action, confidence) pairs across checks for Gate A.
+
+        2026-04-18 Codex follow-up: the persistence gate needs to see the
+        SAME action across cycles — a SELL@0.65 followed by BUY@0.70 is a
+        flip, not persistence. Store both fields per cycle.
+        """
         if not signal_data:
             return
         if "confidence_history" not in self.state:
@@ -3000,10 +3043,11 @@ class SwingTrader:
             if not sig:
                 continue
             conf = sig.get("confidence")
-            if conf is None:
+            action = sig.get("action")
+            if conf is None or action is None:
                 continue
             history = self.state["confidence_history"].setdefault(ticker, [])
-            history.append(float(conf))
+            history.append({"action": action, "confidence": float(conf)})
             if len(history) > CONFIDENCE_HISTORY_MAX:
                 history.pop(0)
         _save_state(self.state)

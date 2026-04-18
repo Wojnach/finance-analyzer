@@ -32,7 +32,11 @@ def _make_trader():
     trader.state = mst._default_state()
     trader.regime_history = {"XAG-USD": [("BUY", "trending-up")] * 3}
     trader.state["macd_history"] = {"XAG-USD": [0.1, 0.11, 0.12, 0.13]}
-    trader.state["confidence_history"] = {"XAG-USD": [0.7, 0.7, 0.7]}
+    trader.state["confidence_history"] = {"XAG-USD": [
+        {"action": "BUY", "confidence": 0.7},
+        {"action": "BUY", "confidence": 0.7},
+        {"action": "BUY", "confidence": 0.7},
+    ]}
     trader.state["rsi_history"] = {"XAG-USD": [45, 50, 52, 53, 54, 55]}
     trader.check_count = 10
     return trader
@@ -88,7 +92,9 @@ def test_gate_A_blocks_single_cycle_phantom_spike(monkeypatch):
     monkeypatch.setattr(mst, "_cet_hour", lambda: 14.0)
     trader = _make_trader()
     trader._check_momentum_candidate = lambda t: None
-    trader.state["confidence_history"]["XAG-USD"] = [0.40]  # prior cycle below
+    trader.state["confidence_history"]["XAG-USD"] = [
+        {"action": "BUY", "confidence": 0.40},
+    ]
     ok, reason = trader._evaluate_entry(_signal(confidence=0.70), "XAG-USD")
     assert not ok
     assert "signal persistence" in reason
@@ -99,7 +105,10 @@ def test_gate_A_passes_with_two_consecutive_strong_cycles(monkeypatch):
     monkeypatch.setattr(mst, "_cet_hour", lambda: 14.0)
     trader = _make_trader()
     trader._check_momentum_candidate = lambda t: None
-    trader.state["confidence_history"]["XAG-USD"] = [0.65, 0.70]
+    trader.state["confidence_history"]["XAG-USD"] = [
+        {"action": "BUY", "confidence": 0.65},
+        {"action": "BUY", "confidence": 0.70},
+    ]
     ok, reason = trader._evaluate_entry(_signal(confidence=0.70), "XAG-USD")
     assert ok, f"persistent signal should pass; got: {reason}"
 
@@ -121,7 +130,9 @@ def test_gate_A_bypassed_by_momentum_override(monkeypatch):
     trader = _make_trader()
     # Fresh momentum candidate for XAG-USD (LONG)
     trader._check_momentum_candidate = lambda t: {"direction": "LONG", "ts": 0}
-    trader.state["confidence_history"]["XAG-USD"] = [0.40]  # prior below threshold
+    trader.state["confidence_history"]["XAG-USD"] = [
+        {"action": "BUY", "confidence": 0.40},
+    ]
     # Momentum threshold is 0.50 (relaxed); confidence 0.55 passes
     ok, reason = trader._evaluate_entry(_signal(confidence=0.55), "XAG-USD")
     assert ok, f"momentum override should bypass Gate A; got: {reason}"
@@ -154,7 +165,9 @@ def test_gate_B_passes_when_macd_near_peak(monkeypatch):
     trader.state["macd_history"]["XAG-USD"] = [
         0.15, 0.16, 0.18, 0.20, 0.21, 0.22, 0.20, 0.19, 0.17, 0.18
     ]
-    ok, reason = trader._evaluate_entry(_signal(macd=0.18), "XAG-USD")
+    # Codex 2026-04-18: gate reads current sig's macd_hist, not prior-cycle
+    # state history. Set macd_hist=0.18 to match the "near peak" intent.
+    ok, reason = trader._evaluate_entry(_signal(macd=0.18, macd_hist=0.18), "XAG-USD")
     assert ok, f"MACD near peak should pass; got: {reason}"
 
 
@@ -224,9 +237,10 @@ def test_counterfactual_2026_04_17_silver_blocked(monkeypatch):
     trader.state["macd_history"]["XAG-USD"] = [
         0.22, 0.221, 0.216, 0.215, 0.215, 0.20, 0.15, 0.08, 0.03, 0.008, 0.001, 0.015
     ]
-    # Real confidence trace (0.40→0.80→0.66 oscillating)
+    # Real confidence trace (0.40→0.80→0.66 oscillating), all BUY action
     trader.state["confidence_history"]["XAG-USD"] = [
-        0.40, 0.37, 0.32, 0.37, 0.74, 0.66, 0.66, 0.80, 0.80, 0.66
+        {"action": "BUY", "confidence": c}
+        for c in [0.40, 0.37, 0.32, 0.37, 0.74, 0.66, 0.66, 0.80, 0.80, 0.66]
     ]
     # Real RSI trace: 79 → 68 (declining through the hour)
     trader.state["rsi_history"]["XAG-USD"] = [
@@ -257,8 +271,39 @@ def test_update_confidence_history_caps_at_max(monkeypatch):
         trader._update_confidence_history(sig_data)
     hist = trader.state["confidence_history"]["XAG-USD"]
     assert len(hist) == cfg.CONFIDENCE_HISTORY_MAX
-    # Oldest entries dropped — last value must be the most recent one appended
-    assert abs(hist[-1] - (0.60 + (cfg.CONFIDENCE_HISTORY_MAX + 4) * 0.001)) < 1e-6
+    # Entries are dicts with action + confidence (Codex 2026-04-18 follow-up).
+    assert isinstance(hist[-1], dict)
+    assert hist[-1]["action"] == "BUY"
+    last_conf = hist[-1]["confidence"]
+    assert abs(last_conf - (0.60 + (cfg.CONFIDENCE_HISTORY_MAX + 4) * 0.001)) < 1e-6
+
+
+def test_gate_A_blocks_action_flip_even_with_high_confidence(monkeypatch):
+    """Codex 2026-04-18: a SELL@0.70 followed by BUY@0.70 is a flip, not
+    persistence. Prior action != current action → reject. Tests the per-
+    cycle action tracking added on top of the numeric-confidence gate."""
+    monkeypatch.setattr(mst, "_cet_hour", lambda: 14.0)
+    trader = _make_trader()
+    trader._check_momentum_candidate = lambda t: None
+    trader.state["confidence_history"]["XAG-USD"] = [
+        {"action": "SELL", "confidence": 0.70},  # prior was SELL with high conf
+    ]
+    ok, reason = trader._evaluate_entry(_signal(confidence=0.70, action="BUY"), "XAG-USD")
+    assert not ok
+    assert "signal persistence" in reason
+
+
+def test_gate_A_tolerates_legacy_float_entries(monkeypatch):
+    """Migration window: a state file from the prior build has legacy
+    float entries in confidence_history. We must not crash; legacy
+    entries are treated as same-action (benefit of the doubt for one
+    cycle until the ring gets overwritten)."""
+    monkeypatch.setattr(mst, "_cet_hour", lambda: 14.0)
+    trader = _make_trader()
+    trader._check_momentum_candidate = lambda t: None
+    trader.state["confidence_history"]["XAG-USD"] = [0.70]  # legacy float
+    ok, reason = trader._evaluate_entry(_signal(confidence=0.70), "XAG-USD")
+    assert ok, f"legacy entries must not crash; got: {reason}"
 
 
 def test_update_rsi_history_caps_at_max(monkeypatch):
