@@ -335,6 +335,55 @@ def test_skipped_offhours_suppresses_alert(contract_env):
     assert loop_contract.check_layer2_journal_activity() == []
 
 
+def test_skipped_busy_does_NOT_suppress(contract_env):
+    """Codex P1 2026-04-18: skipped_busy is written on real failure paths
+    (couldn't kill old agent, no agent binary, etc). Must NOT be treated
+    as a legitimate skip — those would mask silent failures. Only
+    offhours/gate/stack_overflow qualify."""
+    tmp_path, p = contract_env
+    now = datetime.now(UTC)
+    trigger_ts = now - timedelta(minutes=25)
+
+    _write_json(p["CONFIG_FILE"], {"layer2": {"enabled": True}})
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(trigger_ts),
+        "last_trigger_reason": "XAU-USD consensus BUY",
+        "last_invocation_tier": 3,
+    })
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(now - timedelta(minutes=20)),
+         "reasons": ["X"], "status": "skipped_busy", "tier": 3},
+    ])
+    p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
+    p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
+
+    violations = loop_contract.check_layer2_journal_activity()
+    assert len(violations) == 1, "skipped_busy must not suppress the alert"
+
+
+def test_skipped_gate_suppresses_alert(contract_env):
+    """skipped_gate (perception gate decided not to invoke) IS a
+    legitimate non-run and should suppress."""
+    tmp_path, p = contract_env
+    now = datetime.now(UTC)
+    trigger_ts = now - timedelta(minutes=25)
+
+    _write_json(p["CONFIG_FILE"], {"layer2": {"enabled": True}})
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(trigger_ts),
+        "last_trigger_reason": "XAU-USD consensus BUY",
+        "last_invocation_tier": 3,
+    })
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(now - timedelta(minutes=20)),
+         "reasons": ["X"], "status": "skipped_gate", "tier": 3},
+    ])
+    p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
+    p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
+
+    assert loop_contract.check_layer2_journal_activity() == []
+
+
 def test_stale_skipped_does_not_suppress(contract_env):
     """A skipped_* entry from BEFORE the trigger doesn't prove the
     current trigger was skipped — the contract must still fire. This
@@ -395,6 +444,45 @@ def test_second_call_for_same_trigger_does_not_fire(contract_env):
     # Second call — same trigger_time — should be deduped
     v2 = loop_contract.check_layer2_journal_activity()
     assert v2 == []
+
+
+def test_dedup_marker_survives_violation_tracker_save(contract_env):
+    """Codex P1 2026-04-18: ViolationTracker._save() previously rewrote
+    CONTRACT_STATE_FILE with only its own 3 keys, wiping the new
+    layer2_last_violation_trigger_ts dedup marker on the next cycle.
+    This test pins the preserve-unknown-keys behavior."""
+    tmp_path, p = contract_env
+    now = datetime.now(UTC)
+    trigger_ts = now - timedelta(minutes=25)
+
+    _write_json(p["CONFIG_FILE"], {"layer2": {"enabled": True}})
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(trigger_ts),
+        "last_trigger_reason": "ETH-USD consensus BUY",
+        "last_invocation_tier": 3,
+    })
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(now - timedelta(minutes=22)),
+         "reasons": ["x"], "status": "timeout", "tier": 3},
+    ])
+    p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
+    p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
+
+    # Fire a violation — writes layer2_last_violation_trigger_ts to state
+    v1 = loop_contract.check_layer2_journal_activity()
+    assert len(v1) == 1
+
+    # Simulate ViolationTracker doing its own save cycle
+    from portfolio.file_utils import load_json
+    tracker = loop_contract.ViolationTracker(state_file=p["CONTRACT_STATE_FILE"])
+    tracker.update(v1, None)
+
+    # Dedup marker must still be there after the save
+    final_state = load_json(p["CONTRACT_STATE_FILE"])
+    assert "layer2_last_violation_trigger_ts" in final_state
+    assert final_state["layer2_last_violation_trigger_ts"] == _iso(trigger_ts)
+    # And the tracker's own keys are also present
+    assert "consecutive" in final_state
 
 
 def test_new_trigger_after_dedup_fires(contract_env):

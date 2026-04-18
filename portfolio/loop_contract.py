@@ -249,19 +249,27 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
                 return []
 
     # Precondition 4b (2026-04-18): suppress the alert when the most recent
-    # L2 invocation was SKIPPED for a legitimate reason. The standard skip
-    # statuses (skipped_offhours, skipped_busy, skipped_gate,
-    # skipped_stack_overflow) all mean the agent correctly decided NOT to
-    # run — there is no journal-write obligation in that case. Overnight
-    # runs of the loop during skipped_offhours were generating dozens of
-    # false-positive violations against legitimately-skipped triggers.
+    # L2 invocation was SKIPPED for a legitimate reason — but only for
+    # skips that represent intentional non-runs, NOT for skips that hide
+    # agent failures.
+    #
+    # skipped_offhours           — market closed, intentional non-run ✓
+    # skipped_gate               — perception gate decided not to invoke ✓
+    # skipped_stack_overflow     — pre-flight guard before spawning ✓
+    # skipped_busy               — EXCLUDED. Codex P1 2026-04-18: main.py
+    #   logs skipped_busy whenever invoke_agent() returns False, which
+    #   includes real failure paths ("couldn't kill old agent", "no agent
+    #   binary"). Suppressing those would mask silent failures.
     #
     # Only suppress for skip-statuses newer than the trigger that would
     # otherwise fire the violation. A stale skipped entry from hours ago
     # doesn't tell us anything about the current trigger's state.
+    _LEGITIMATE_SKIP_STATUSES = (
+        "skipped_offhours", "skipped_gate", "skipped_stack_overflow",
+    )
     if latest_l2_inv:
         skip_status = str(latest_l2_inv.get("status", ""))
-        if skip_status.startswith("skipped_"):
+        if skip_status in _LEGITIMATE_SKIP_STATUSES:
             inv_ts = _parse_iso(
                 latest_l2_inv.get("timestamp") or latest_l2_inv.get("ts")
             )
@@ -880,12 +888,15 @@ class ViolationTracker:
             self._previous_signal_counts = counts
 
     def _save(self):
-        from portfolio.file_utils import atomic_write_json
-        atomic_write_json(self._state_file, {
-            "consecutive": self._consecutive,
-            "last_heal_time": self._last_heal_time,
-            "previous_signal_counts": self._previous_signal_counts,
-        })
+        # Preserve unknown keys so other writers to CONTRACT_STATE_FILE can
+        # coexist (e.g. check_layer2_journal_activity writes
+        # layer2_last_violation_trigger_ts here — Codex P1 2026-04-18).
+        from portfolio.file_utils import atomic_write_json, load_json
+        existing = load_json(self._state_file, default={}) or {}
+        existing["consecutive"] = self._consecutive
+        existing["last_heal_time"] = self._last_heal_time
+        existing["previous_signal_counts"] = self._previous_signal_counts
+        atomic_write_json(self._state_file, existing)
 
 
 _LOOP_FILES = {
