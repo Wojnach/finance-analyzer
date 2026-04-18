@@ -1018,8 +1018,12 @@ _STATIC_CORRELATION_GROUPS = {
     # r=0.730 (99.7% agree), trend+structure r=0.608 (90.7%), trend+momentum_factors
     # r=0.593 (90.4%), trend+heikin_ashi r=0.587 (85.4%), oscillators+heikin_ashi
     # r=0.463 (83.4%). All 8 signals measure trend direction via different methods.
+    # 2026-04-18: Added macd — 91.9% agreement with ema (197 sam), 87.8% with bb,
+    # 85.3% with sentiment. MACD is mathematically derived from the same EMAs that
+    # drive the ema signal, so near-perfect correlation is expected. Was orphaned
+    # and getting full 1.0x weight despite being redundant.
     "trend_direction": frozenset({
-        "ema", "trend", "heikin_ashi", "volume_flow", "macro_regime",
+        "ema", "macd", "trend", "heikin_ashi", "volume_flow", "macro_regime",
         "momentum_factors", "structure", "oscillators",
     }),
     # 2026-04-18: Expanded from 3→6 members. Research (2026-04-17 after-hours)
