@@ -243,7 +243,8 @@ class TestRegimePenalties:
         regime_entries = [p for p in log if p["stage"] == "regime"]
         assert len(regime_entries) == 1
         assert regime_entries[0]["mult"] == 0.75
-        assert conf == pytest.approx(0.8 * 0.75, abs=0.01)
+        # 0.8 * 0.75 = 0.60, then Stage 7 compression: 0.55 + (0.60-0.55)*0.3 = 0.565
+        assert conf == pytest.approx(0.565, abs=0.01)
 
     def test_high_vol_applies_080x(self):
         extra = _base_extra(voters=5, buy_count=3, sell_count=2)
@@ -259,7 +260,8 @@ class TestRegimePenalties:
         action, conf, log = apply_confidence_penalties(
             "BUY", 0.7, "trending-up", {}, extra, "BTC-USD", None, {}
         )
-        assert conf == pytest.approx(0.7 * 1.10, abs=0.01)
+        # 0.7 * 1.10 = 0.77, then Stage 7: 0.55 + (0.77-0.55)*0.3 = 0.616
+        assert conf == pytest.approx(0.616, abs=0.01)
         regime_entries = [p for p in log if p["stage"] == "regime"]
         assert len(regime_entries) == 1
         assert regime_entries[0]["aligned"] is True
@@ -270,7 +272,8 @@ class TestRegimePenalties:
         action, conf, log = apply_confidence_penalties(
             "SELL", 0.7, "trending-down", {}, extra, "BTC-USD", None, {}
         )
-        assert conf == pytest.approx(0.7 * 1.10, abs=0.01)
+        # 0.7 * 1.10 = 0.77, then Stage 7: 0.55 + (0.77-0.55)*0.3 = 0.616
+        assert conf == pytest.approx(0.616, abs=0.01)
         regime_entries = [p for p in log if p["stage"] == "regime"]
         assert regime_entries[0]["aligned"] is True
 
@@ -279,17 +282,18 @@ class TestRegimePenalties:
         action, conf, log = apply_confidence_penalties(
             "SELL", 0.7, "trending-up", {}, extra, "BTC-USD", None, {}
         )
-        # No regime bonus for counter-trend
+        # No regime bonus for counter-trend. 0.7, then Stage 7: 0.55+(0.7-0.55)*0.3=0.595
         assert not any(p.get("aligned") for p in log)
-        assert conf == pytest.approx(0.7, abs=0.01)
+        assert conf == pytest.approx(0.595, abs=0.01)
 
     def test_trending_down_buy_no_bonus(self):
         extra = _base_extra(voters=5, buy_count=3, sell_count=2)
         action, conf, log = apply_confidence_penalties(
             "BUY", 0.7, "trending-down", {}, extra, "BTC-USD", None, {}
         )
+        # 0.7, then Stage 7: 0.55 + (0.7-0.55)*0.3 = 0.595
         assert not any(p.get("aligned") for p in log)
-        assert conf == pytest.approx(0.7, abs=0.01)
+        assert conf == pytest.approx(0.595, abs=0.01)
 
     def test_hold_passes_through_regime_unchanged(self):
         """HOLD action: regime penalty still applies to conf but action stays HOLD."""
@@ -366,8 +370,9 @@ class TestVolumeGate:
         action, conf, log = apply_confidence_penalties(
             "BUY", 0.7, "trending-up", {}, extra, "BTC-USD", None, {}
         )
-        # 0.7 * 1.10 (regime) * 1.15 (volume) = 0.8855
-        assert conf > 0.7
+        # 0.7 * 1.10 (regime) * 1.15 (volume) = 0.8855, then
+        # Stage 7: 0.55 + (0.8855-0.55)*0.3 = 0.6507
+        assert conf > 0.6
         assert any(p["stage"] == "volume_boost" for p in log)
 
     def test_volume_exactly_15_not_boosted(self):
@@ -618,7 +623,11 @@ class TestConfidenceClamping:
         action, conf, log = apply_confidence_penalties(
             "BUY", 1.0, "trending-up", {}, extra, "BTC-USD", None, {}
         )
-        assert conf == 1.0
+        # After Stage 7 compression, max conf is well below 1.0
+        # 1.0 * 1.10 (regime) * 1.15 (volume) = 1.265, clamped to 1.0
+        # Then Stage 7: 0.55 + (1.0-0.55)*0.3 = 0.685
+        assert conf <= 1.0  # basic clamp
+        assert conf < 0.70  # compression keeps it below old 1.0
 
 
 # --- 7. HOLD passthrough ---

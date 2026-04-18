@@ -365,7 +365,8 @@ class TestPenaltiesStage1Regime:
         action, conf, log = apply_confidence_penalties(
             "BUY", 0.8, "ranging", {}, extra, "BTC-USD", None, {},
         )
-        assert conf == pytest.approx(0.8 * 0.75, abs=0.01)
+        # Stage 1: 0.8 * 0.75 = 0.60; Stage 7 compression: 0.55 + (0.60 - 0.55) * 0.3 = 0.565
+        assert conf == pytest.approx(0.565, abs=0.01)
         assert any(p["stage"] == "regime" and p["mult"] == 0.75 for p in log)
 
     def test_high_vol_multiplies_by_080(self):
@@ -373,7 +374,8 @@ class TestPenaltiesStage1Regime:
         action, conf, log = apply_confidence_penalties(
             "BUY", 0.8, "high-vol", {}, extra, "BTC-USD", None, {},
         )
-        assert conf == pytest.approx(0.8 * 0.80, abs=0.01)
+        # Stage 1: 0.8 * 0.80 = 0.64; Stage 7 compression: 0.55 + (0.64 - 0.55) * 0.3 = 0.577
+        assert conf == pytest.approx(0.577, abs=0.01)
         assert any(p["stage"] == "regime" and p["mult"] == 0.80 for p in log)
 
     def test_trending_up_buy_aligned_bonus(self):
@@ -381,7 +383,8 @@ class TestPenaltiesStage1Regime:
         action, conf, log = apply_confidence_penalties(
             "BUY", 0.7, "trending-up", {}, extra, "BTC-USD", None, {},
         )
-        assert conf == pytest.approx(0.7 * 1.10, abs=0.01)
+        # Stage 1: 0.7 * 1.10 = 0.77; Stage 7 compression: 0.55 + (0.77 - 0.55) * 0.3 = 0.616
+        assert conf == pytest.approx(0.616, abs=0.01)
         assert any(p.get("aligned") is True for p in log)
 
     def test_trending_down_sell_aligned_bonus(self):
@@ -391,7 +394,8 @@ class TestPenaltiesStage1Regime:
         )
         # Stage 1 aligned bonus: 0.7 * 1.10 = 0.77
         # Stage 5 unanimity: 4/5 = 80% agreement → 0.75x penalty → 0.77 * 0.75 = 0.5775
-        assert conf == pytest.approx(0.7 * 1.10 * 0.75, abs=0.01)
+        # Stage 7 compression: 0.55 + (0.5775 - 0.55) * 0.3 = 0.55825
+        assert conf == pytest.approx(0.558, abs=0.01)
 
     def test_trending_up_sell_no_bonus(self):
         extra = _base_extra(voters=5, buy_count=1, sell_count=4)
@@ -435,7 +439,8 @@ class TestPenaltiesStage2VolumeGate:
             "BUY", 0.7, "trending-up", {}, extra, "BTC-USD", None, {},
         )
         # Stage 1: 0.7 * 1.1 = 0.77; Stage 2: 0.77 * 1.15 = 0.8855
-        assert conf == pytest.approx(0.7 * 1.10 * 1.15, abs=0.01)
+        # Stage 7 compression: 0.55 + (0.8855 - 0.55) * 0.3 = 0.6507
+        assert conf == pytest.approx(0.6507, abs=0.01)
         assert any(p["stage"] == "volume_boost" for p in log)
 
     def test_hold_action_skips_volume_gate(self):
@@ -620,8 +625,9 @@ class TestPenaltiesConfidenceClamping:
         # 0.95 * 1.1 = 1.045 → clamped to 1.0 (Stage 3 BUG-90 clamp)
         # volume boost 2.0 → 1.15x: 1.0 * 1.15 → clamped to 1.0
         # Stage 5 unanimity: 8/10 = 80% agreement → 0.75x penalty → 1.0 * 0.75 = 0.75
+        # Stage 7 compression: 0.55 + (0.75 - 0.55) * 0.3 = 0.61
         assert conf <= 1.0
-        assert conf == pytest.approx(0.75)
+        assert conf == pytest.approx(0.61)
 
     def test_confidence_clamped_to_min_0(self):
         extra = _base_extra(voters=6, volume_ratio=0.3)
@@ -1699,15 +1705,18 @@ class TestCorrelationGroupSplit:
         from portfolio.signal_engine import CORRELATION_GROUPS
         assert "low_activity_timing" not in CORRELATION_GROUPS
 
-    def test_calendar_not_in_any_cluster(self):
+    def test_calendar_in_macro_external(self):
+        """2026-04-18: calendar moved to macro_external (100% agreement with
+        fear_greed on 501 samples). Previous test asserted calendar was NOT
+        in any cluster — that's no longer correct."""
         from portfolio.signal_engine import CORRELATION_GROUPS
-        for name, members in CORRELATION_GROUPS.items():
-            assert "calendar" not in members, f"calendar found in {name}"
+        assert "calendar" in CORRELATION_GROUPS["macro_external"]
 
-    def test_econ_calendar_not_in_any_cluster(self):
+    def test_econ_calendar_in_macro_external(self):
+        """2026-04-18: econ_calendar moved to macro_external (100% agreement
+        with news_event on 714 samples)."""
         from portfolio.signal_engine import CORRELATION_GROUPS
-        for name, members in CORRELATION_GROUPS.items():
-            assert "econ_calendar" not in members, f"econ_calendar found in {name}"
+        assert "econ_calendar" in CORRELATION_GROUPS["macro_external"]
 
 
 class TestPerTickerConsensusGate:
