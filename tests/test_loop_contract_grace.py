@@ -57,6 +57,8 @@ def contract_env(tmp_path, monkeypatch):
         # Layer-2-specific log, not the global claude log, to avoid being
         # false-negatived by unrelated claude_fundamental/bigbet calls.
         "LAYER2_INVOCATIONS_FILE": tmp_path / "data" / "invocations.jsonl",
+        # 2026-04-18 violation-dedup (precondition 5) reads/writes this.
+        "CONTRACT_STATE_FILE": tmp_path / "data" / "contract_state.json",
     }
     for name, p in paths.items():
         monkeypatch.setattr(loop_contract, name, p)
@@ -300,6 +302,223 @@ def test_in_flight_invoked_older_than_grace_does_not_suppress(contract_env):
 
     violations = loop_contract.check_layer2_journal_activity()
     assert len(violations) == 1
+
+
+# ---------------------------------------------------------------------------
+# Precondition 4b — skipped_* status suppresses the alert (2026-04-18)
+# ---------------------------------------------------------------------------
+
+def test_skipped_offhours_suppresses_alert(contract_env):
+    """Overnight: Layer 2 correctly skipped off-hours → no journal write
+    is expected, so the contract must not fire. Prior bug: 12 overnight
+    violations were fired against triggers the loop had legitimately
+    skipped."""
+    tmp_path, p = contract_env
+    now = datetime.now(UTC)
+    trigger_ts = now - timedelta(minutes=25)
+    skipped_ts = now - timedelta(minutes=20)  # AFTER the trigger
+
+    _write_json(p["CONFIG_FILE"], {"layer2": {"enabled": True}})
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(trigger_ts),
+        "last_trigger_reason": "XAU-USD consensus BUY (80%)",
+        "last_invocation_tier": 3,
+    })
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(skipped_ts),
+         "reasons": ["XAU-USD consensus BUY (80%)"],
+         "status": "skipped_offhours", "tier": 2},
+    ])
+    p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
+    p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
+
+    assert loop_contract.check_layer2_journal_activity() == []
+
+
+def test_skipped_busy_does_NOT_suppress(contract_env):
+    """Codex P1 2026-04-18: skipped_busy is written on real failure paths
+    (couldn't kill old agent, no agent binary, etc). Must NOT be treated
+    as a legitimate skip — those would mask silent failures. Only
+    offhours/gate/stack_overflow qualify."""
+    tmp_path, p = contract_env
+    now = datetime.now(UTC)
+    trigger_ts = now - timedelta(minutes=25)
+
+    _write_json(p["CONFIG_FILE"], {"layer2": {"enabled": True}})
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(trigger_ts),
+        "last_trigger_reason": "XAU-USD consensus BUY",
+        "last_invocation_tier": 3,
+    })
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(now - timedelta(minutes=20)),
+         "reasons": ["X"], "status": "skipped_busy", "tier": 3},
+    ])
+    p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
+    p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
+
+    violations = loop_contract.check_layer2_journal_activity()
+    assert len(violations) == 1, "skipped_busy must not suppress the alert"
+
+
+def test_skipped_gate_suppresses_alert(contract_env):
+    """skipped_gate (perception gate decided not to invoke) IS a
+    legitimate non-run and should suppress."""
+    tmp_path, p = contract_env
+    now = datetime.now(UTC)
+    trigger_ts = now - timedelta(minutes=25)
+
+    _write_json(p["CONFIG_FILE"], {"layer2": {"enabled": True}})
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(trigger_ts),
+        "last_trigger_reason": "XAU-USD consensus BUY",
+        "last_invocation_tier": 3,
+    })
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(now - timedelta(minutes=20)),
+         "reasons": ["X"], "status": "skipped_gate", "tier": 3},
+    ])
+    p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
+    p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
+
+    assert loop_contract.check_layer2_journal_activity() == []
+
+
+def test_stale_skipped_does_not_suppress(contract_env):
+    """A skipped_* entry from BEFORE the trigger doesn't prove the
+    current trigger was skipped — the contract must still fire. This
+    protects against a single stale skipped entry from hours ago
+    masking a genuine new silent-failure."""
+    tmp_path, p = contract_env
+    now = datetime.now(UTC)
+    trigger_ts = now - timedelta(minutes=25)
+    # skipped entry is OLDER than the trigger
+    stale_skipped_ts = trigger_ts - timedelta(minutes=10)
+
+    _write_json(p["CONFIG_FILE"], {"layer2": {"enabled": True}})
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(trigger_ts),
+        "last_trigger_reason": "XAU-USD consensus BUY",
+        "last_invocation_tier": 3,
+    })
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(stale_skipped_ts),
+         "reasons": ["old"], "status": "skipped_offhours", "tier": 1},
+    ])
+    p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
+    p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
+
+    violations = loop_contract.check_layer2_journal_activity()
+    assert len(violations) == 1
+
+
+# ---------------------------------------------------------------------------
+# Precondition 5 — violation dedup per trigger (2026-04-18)
+# ---------------------------------------------------------------------------
+
+def test_second_call_for_same_trigger_does_not_fire(contract_env):
+    """Once we've fired a violation for a given trigger_time, subsequent
+    cycles must not re-fire. Without this, the same trigger generated
+    dozens of duplicate alerts in the overnight 2026-04-17 window."""
+    tmp_path, p = contract_env
+    now = datetime.now(UTC)
+    trigger_ts = now - timedelta(minutes=25)
+
+    _write_json(p["CONFIG_FILE"], {"layer2": {"enabled": True}})
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(trigger_ts),
+        "last_trigger_reason": "ETH-USD consensus BUY",
+        "last_invocation_tier": 3,
+    })
+    # No skip, no in-flight — the violation should fire first call
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(now - timedelta(minutes=22)),
+         "reasons": ["ETH-USD consensus BUY"],
+         "status": "timeout", "tier": 3},
+    ])
+    p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
+    p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
+
+    v1 = loop_contract.check_layer2_journal_activity()
+    assert len(v1) == 1
+    # Second call — same trigger_time — should be deduped
+    v2 = loop_contract.check_layer2_journal_activity()
+    assert v2 == []
+
+
+def test_dedup_marker_survives_violation_tracker_save(contract_env):
+    """Codex P1 2026-04-18: ViolationTracker._save() previously rewrote
+    CONTRACT_STATE_FILE with only its own 3 keys, wiping the new
+    layer2_last_violation_trigger_ts dedup marker on the next cycle.
+    This test pins the preserve-unknown-keys behavior."""
+    tmp_path, p = contract_env
+    now = datetime.now(UTC)
+    trigger_ts = now - timedelta(minutes=25)
+
+    _write_json(p["CONFIG_FILE"], {"layer2": {"enabled": True}})
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(trigger_ts),
+        "last_trigger_reason": "ETH-USD consensus BUY",
+        "last_invocation_tier": 3,
+    })
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(now - timedelta(minutes=22)),
+         "reasons": ["x"], "status": "timeout", "tier": 3},
+    ])
+    p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
+    p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
+
+    # Fire a violation — writes layer2_last_violation_trigger_ts to state
+    v1 = loop_contract.check_layer2_journal_activity()
+    assert len(v1) == 1
+
+    # Simulate ViolationTracker doing its own save cycle
+    from portfolio.file_utils import load_json
+    tracker = loop_contract.ViolationTracker(state_file=p["CONTRACT_STATE_FILE"])
+    tracker.update(v1, None)
+
+    # Dedup marker must still be there after the save
+    final_state = load_json(p["CONTRACT_STATE_FILE"])
+    assert "layer2_last_violation_trigger_ts" in final_state
+    assert final_state["layer2_last_violation_trigger_ts"] == _iso(trigger_ts)
+    # And the tracker's own keys are also present
+    assert "consecutive" in final_state
+
+
+def test_new_trigger_after_dedup_fires(contract_env):
+    """Dedup only applies to the SAME trigger_time. A fresh trigger
+    (new timestamp) should fire a new violation even if the prior one
+    was for a similar reason."""
+    tmp_path, p = contract_env
+    now = datetime.now(UTC)
+    first_trigger_ts = now - timedelta(minutes=40)
+
+    _write_json(p["CONFIG_FILE"], {"layer2": {"enabled": True}})
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(first_trigger_ts),
+        "last_trigger_reason": "ETH-USD consensus BUY",
+        "last_invocation_tier": 3,
+    })
+    _write_jsonl(p["LAYER2_INVOCATIONS_FILE"], [
+        {"ts": _iso(now - timedelta(minutes=35)),
+         "reasons": ["ETH-USD consensus BUY"],
+         "status": "timeout", "tier": 3},
+    ])
+    p["LAYER2_JOURNAL_FILE"].parent.mkdir(parents=True, exist_ok=True)
+    p["LAYER2_JOURNAL_FILE"].write_text("", encoding="utf-8")
+
+    # First fire
+    assert len(loop_contract.check_layer2_journal_activity()) == 1
+
+    # A fresh trigger arrives
+    second_trigger_ts = now - timedelta(minutes=25)
+    _write_json(p["HEALTH_STATE_FILE"], {
+        "last_trigger_time": _iso(second_trigger_ts),
+        "last_trigger_reason": "ETH-USD consensus BUY",  # same reason
+        "last_invocation_tier": 3,
+    })
+    # Dedup must NOT suppress — trigger_time changed
+    assert len(loop_contract.check_layer2_journal_activity()) == 1
 
 
 # ---------------------------------------------------------------------------

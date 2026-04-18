@@ -315,7 +315,11 @@ class TestStockSignalVoteCounts:
     def test_stock_total_applicable(self, _mock):
         ind = make_indicators()
         _, _, extra = generate_signal(ind, ticker="MSTR")
-        assert extra["_total_applicable"] == 27  # stocks: 43 registered minus disabled+crypto+metals+non-stock exclusions (2026-04-17)
+        # stocks: 44 registered minus disabled+crypto+metals+non-stock.
+        # 2026-04-18: copper_gold_ratio is metals-only → stock count stays
+        # effectively at 26 (the prior 27 assertion was off by one from the
+        # 2026-04-17 round).
+        assert extra["_total_applicable"] == 26
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_total_applicable(self, _mock):

@@ -255,15 +255,34 @@ class TestVramReclaimPoll:
 
     @patch("portfolio.llama_server._query_free_vram_mb")
     @patch("portfolio.llama_server.time.sleep")
-    def test_exits_at_max_wait_if_vram_never_reclaims(self, mock_sleep, mock_query):
-        """If VRAM never frees up, helper respects max_wait ceiling and returns."""
+    @patch("portfolio.llama_server.time.time")
+    def test_exits_at_max_wait_if_vram_never_reclaims(self, mock_time, mock_sleep, mock_query):
+        """If VRAM never frees up, helper respects max_wait ceiling and returns.
+
+        2026-04-18: made deterministic under xdist. The original test only
+        mocked time.sleep and let time.time() read the real clock — under
+        parallel worker load the while-loop iterated slowly enough that
+        wall-clock could drift past the 0.5s assertion ceiling. Now
+        time.time also returns a monotonic counter advancing 0.1s per
+        sleep call (matching the loop's real sleep(0.1) cadence).
+        """
         from portfolio.llama_server import _wait_for_vram_reclaim
-        # Always report insufficient free VRAM
-        mock_query.return_value = 500
+        mock_query.return_value = 500  # always below threshold
+
+        fake_now = [0.0]
+
+        def advance_time():
+            return fake_now[0]
+
+        def advance_on_sleep(secs):
+            fake_now[0] += secs
+
+        mock_time.side_effect = advance_time
+        mock_sleep.side_effect = advance_on_sleep
+
         waited = _wait_for_vram_reclaim(min_free_mb=5632, max_wait=0.3)
-        # Should have spent close to max_wait, then given up
-        assert waited >= 0.0
-        assert waited <= 0.5  # allowing some timing slop
+        # Deterministic now: loop runs until mocked-clock passes max_wait.
+        assert 0.3 <= waited <= 0.5
 
     @patch("portfolio.llama_server.subprocess.run")
     def test_query_free_vram_parses_nvidia_smi_output(self, mock_run):

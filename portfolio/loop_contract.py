@@ -248,6 +248,36 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
             if 0 <= inv_age_s < grace_s:
                 return []
 
+    # Precondition 4b (2026-04-18): suppress the alert when the most recent
+    # L2 invocation was SKIPPED for a legitimate reason — but only for
+    # skips that represent intentional non-runs, NOT for skips that hide
+    # agent failures.
+    #
+    # skipped_offhours           — market closed, intentional non-run ✓
+    # skipped_gate               — perception gate decided not to invoke ✓
+    # skipped_stack_overflow     — pre-flight guard before spawning ✓
+    # skipped_busy               — EXCLUDED. Codex P1 2026-04-18: main.py
+    #   logs skipped_busy whenever invoke_agent() returns False, which
+    #   includes real failure paths ("couldn't kill old agent", "no agent
+    #   binary"). Suppressing those would mask silent failures.
+    #
+    # Only suppress for skip-statuses newer than the trigger that would
+    # otherwise fire the violation. A stale skipped entry from hours ago
+    # doesn't tell us anything about the current trigger's state.
+    _LEGITIMATE_SKIP_STATUSES = (
+        "skipped_offhours", "skipped_gate", "skipped_stack_overflow",
+    )
+    if latest_l2_inv:
+        skip_status = str(latest_l2_inv.get("status", ""))
+        if skip_status in _LEGITIMATE_SKIP_STATUSES:
+            inv_ts = _parse_iso(
+                latest_l2_inv.get("timestamp") or latest_l2_inv.get("ts")
+            )
+            # Skip only if the invocation was logged AFTER the trigger —
+            # that means the loop saw the trigger and chose to skip it.
+            if inv_ts is not None and inv_ts >= last_trigger:
+                return []
+
     # For violation context only (non-blocking): read the global claude
     # log to surface last_invocation_caller in the alert message. This is
     # informational — it does NOT gate the alert.
@@ -263,6 +293,25 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
         )
     if journal_ts is not None and journal_ts >= last_trigger:
         return []  # Journal was written after the trigger. Contract passes.
+
+    # Precondition 5 (2026-04-18): violation dedup. The contract runs every
+    # loop cycle once grace elapses, so without dedup the same trigger
+    # fires the same violation every cycle (observed on 2026-04-17 where a
+    # single XAU-USD trigger at 22:42 fired violations at 22:53, 23:03,
+    # 23:13 etc — same reason, age +10m each). Track the last
+    # (trigger_time, triggered_reason) we already fired for; only fire a
+    # NEW violation when the trigger itself is new or when a journal entry
+    # has been written since the last violation (which would reset the
+    # dedup state implicitly next cycle via the earlier journal check).
+    contract_state = _read_json(CONTRACT_STATE_FILE) or {}
+    last_fired_trigger_ts = contract_state.get("layer2_last_violation_trigger_ts")
+    current_trigger_iso = health.get("last_trigger_time")
+    if last_fired_trigger_ts and current_trigger_iso == last_fired_trigger_ts:
+        # Same trigger already alerted on. Stay silent until a new trigger
+        # fires OR until a journal entry catches up (journal_ts >= last_trigger
+        # check above will return [] next cycle and reset the dedup on the
+        # subsequent new trigger).
+        return []
 
     # Violation. Try to enrich the message with whether a recent auth
     # failure was logged — it's the most common root cause, and telling
@@ -316,6 +365,16 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     except Exception as e:
         # Never let record_critical_error failures break the contract check.
         logger.warning("record_critical_error failed in contract check: %s", e)
+
+    # Persist the dedup marker so we don't re-fire on this same trigger.
+    # Wrapped in best-effort: a failed state write reverts to today's
+    # per-cycle firing (harmless noise), but won't break the contract.
+    try:
+        from portfolio.file_utils import atomic_write_json as _atomic_write_json
+        contract_state["layer2_last_violation_trigger_ts"] = current_trigger_iso
+        _atomic_write_json(CONTRACT_STATE_FILE, contract_state)
+    except Exception as e:
+        logger.warning("contract dedup state write failed: %s", e)
 
     return [violation]
 
@@ -829,12 +888,15 @@ class ViolationTracker:
             self._previous_signal_counts = counts
 
     def _save(self):
-        from portfolio.file_utils import atomic_write_json
-        atomic_write_json(self._state_file, {
-            "consecutive": self._consecutive,
-            "last_heal_time": self._last_heal_time,
-            "previous_signal_counts": self._previous_signal_counts,
-        })
+        # Preserve unknown keys so other writers to CONTRACT_STATE_FILE can
+        # coexist (e.g. check_layer2_journal_activity writes
+        # layer2_last_violation_trigger_ts here — Codex P1 2026-04-18).
+        from portfolio.file_utils import atomic_write_json, load_json
+        existing = load_json(self._state_file, default={}) or {}
+        existing["consecutive"] = self._consecutive
+        existing["last_heal_time"] = self._last_heal_time
+        existing["previous_signal_counts"] = self._previous_signal_counts
+        atomic_write_json(self._state_file, existing)
 
 
 _LOOP_FILES = {
