@@ -1900,6 +1900,7 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
       4. Dynamic MIN_VOTERS — raises the bar in uncertain markets
       5. Unanimity penalty — over-agreement often means the move is priced in
       6. Per-ticker consensus — penalizes tickers where ensemble accuracy < 50%
+      7. Calibration compression — compress overconfident predictions to honest levels
 
     Returns (action, conf, penalty_log) where penalty_log is a list of applied penalties.
     """
@@ -2028,6 +2029,24 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
                 "ptc_samples": ptc_samples,
                 "mult": round(ptc_mult, 4),
             })
+
+    # --- Stage 7: Confidence calibration compression ---
+    # RES-2026-04-18: Calibration analysis shows confidence is meaningless
+    # above 60% — all bands (60-69%, 70-79%, 80-89%) have ~50% actual
+    # accuracy. The system is massively overconfident. Compress high-confidence
+    # predictions to honest levels while preserving relative ordering.
+    # Formula: conf = 0.55 + (conf - 0.55) * 0.3  (for conf > 0.55)
+    # Maps: 60% → 56.5%, 70% → 59.5%, 80% → 62.5%, 90% → 65.5%
+    _CALIBRATION_THRESHOLD = 0.55
+    _CALIBRATION_COMPRESSION = 0.3
+    if action != "HOLD" and conf > _CALIBRATION_THRESHOLD:
+        raw_conf = conf
+        conf = _CALIBRATION_THRESHOLD + (conf - _CALIBRATION_THRESHOLD) * _CALIBRATION_COMPRESSION
+        penalty_log.append({
+            "stage": "calibration_compression",
+            "raw_conf": round(raw_conf, 4),
+            "compressed_conf": round(conf, 4),
+        })
 
     # Clamp confidence to [0, 1]
     conf = max(0.0, min(1.0, conf))
