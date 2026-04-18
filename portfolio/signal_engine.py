@@ -866,16 +866,41 @@ def _validate_signal_result(result, sig_name=None, max_confidence=1.0):
 
 # Dynamic correlation group computation TTL and thresholds
 _DYNAMIC_CORR_TTL = 7200  # 2h cache for dynamic correlation groups
-_DYNAMIC_CORR_THRESHOLD = 0.7  # cluster signals with correlation > 0.7
+# 2026-04-18: changed from Pearson r > 0.7 to agreement rate > 0.85.
+# Pearson on vote encoding (BUY=1, HOLD=0, SELL=-1) was diluted by 70-90%
+# HOLD dominance — max observed r=0.538 (ema↔trend), making the 0.7
+# threshold unreachable and dynamic groups always falling back to static.
+# Agreement rate only counts pairs where at least one signal voted non-HOLD.
+_DYNAMIC_CORR_THRESHOLD = 0.85  # agreement rate threshold for clustering
 _DYNAMIC_CORR_MIN_SAMPLES = 30  # minimum signal log entries for reliable correlation
+_DYNAMIC_CORR_MIN_PAIRS = 20    # minimum non-HOLD pairs to trust agreement rate
+
+
+def _compute_agreement_rate(votes_a, votes_b):
+    """Compute agreement rate between two signal vote lists.
+
+    Only counts pairs where at least one signal voted non-HOLD.
+    Returns (agreement_rate, n_pairs) where n_pairs is the count of
+    non-HOLD pairs.
+    """
+    agree = 0
+    total = 0
+    for va, vb in zip(votes_a, votes_b):
+        if va == 0 and vb == 0:
+            continue  # both HOLD — skip
+        total += 1
+        if va == vb:
+            agree += 1
+    if total == 0:
+        return 0.0, 0
+    return agree / total, total
 
 
 def _compute_dynamic_correlation_groups() -> dict[str, frozenset[str]]:
     """Compute signal correlation groups from recent signal_log data.
 
-    Reads the last 30 days of signal votes and computes pairwise correlation
-    between signal outputs (BUY=1, SELL=-1, HOLD=0). Clusters signals with
-    correlation > _DYNAMIC_CORR_THRESHOLD into groups.
+    Uses agreement rate (not Pearson correlation) on non-HOLD vote pairs.
+    Signals that agree > 85% of the time on non-HOLD votes are clustered.
 
     Falls back to static CORRELATION_GROUPS if insufficient data.
     """
@@ -910,21 +935,22 @@ def _compute_dynamic_correlation_groups() -> dict[str, frozenset[str]]:
         if df.shape[1] < 3:
             return _STATIC_CORRELATION_GROUPS
 
-        corr = df.corr()
-
-        # Simple greedy clustering: for each signal pair with corr > threshold,
-        # merge into same group
+        # Compute pairwise agreement rate (non-HOLD pairs only)
         from collections import defaultdict
         signal_to_group: dict[str, int] = {}
         groups: dict[int, set] = defaultdict(set)
         next_group = 0
 
-        sig_list = list(corr.columns)
+        sig_list = list(df.columns)
         for i, s1 in enumerate(sig_list):
-            for j, s2 in enumerate(sig_list):
-                if j <= i:
+            for j in range(i + 1, len(sig_list)):
+                s2 = sig_list[j]
+                agree_rate, n_pairs = _compute_agreement_rate(
+                    df[s1].values, df[s2].values,
+                )
+                if n_pairs < _DYNAMIC_CORR_MIN_PAIRS:
                     continue
-                if corr.loc[s1, s2] > _DYNAMIC_CORR_THRESHOLD:
+                if agree_rate > _DYNAMIC_CORR_THRESHOLD:
                     g1 = signal_to_group.get(s1)
                     g2 = signal_to_group.get(s2)
                     if g1 is None and g2 is None:
@@ -983,9 +1009,14 @@ _STATIC_CORRELATION_GROUPS = {
         "ema", "trend", "heikin_ashi", "volume_flow", "macro_regime",
         "momentum_factors", "structure", "oscillators",
     }),
-    # 2026-04-14: Reduced after momentum_factors moved to trend_direction.
-    # Remaining members share macro/sentiment degradation patterns.
-    "macro_external": frozenset({"fear_greed", "sentiment", "news_event"}),
+    # 2026-04-18: Expanded from 3→6 members. Research (2026-04-17 after-hours)
+    # found calendar↔fear_greed 100% agreement (501 sam), funding↔fear_greed
+    # 100% (543 sam), news_event↔econ_calendar 100% (714 sam). These orphaned
+    # signals were voting with full weight despite being completely redundant.
+    "macro_external": frozenset({
+        "fear_greed", "sentiment", "news_event",
+        "calendar", "econ_calendar", "funding",
+    }),
     # 2026-04-04: BUG-162 — candlestick-fibonacci correlation 0.708 on BTC.
     "pattern_based": frozenset({"candlestick", "fibonacci"}),
     # 2026-04-08: rsi+bb agree 100%, bb+mean_reversion 100%, bb+momentum 98.8%.
@@ -1008,6 +1039,12 @@ _CLUSTER_CORRELATION_PENALTIES: dict[str, float] = {
     # effective weight = 1.0 + 7*0.12 = 1.84x. Previous 5-member at 0.2x gave
     # 1.0 + 4*0.2 = 1.8x. Similar total but spread across more correlated signals.
     "trend_direction": 0.12,
+    # 2026-04-18: macro_external expanded from 3→6 members. At 0.15x per follower:
+    # effective weight = 1.0 + 5*0.15 = 1.75x. Previously 3 members at 0.3x gave
+    # 1.0 + 2*0.3 = 1.6x. Slightly higher total accounts for 3 truly independent
+    # information sources (sentiment, calendar/econ timing, macro FG) being merged
+    # with their highly-correlated variants.
+    "macro_external": 0.15,
 }
 
 
