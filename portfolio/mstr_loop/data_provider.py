@@ -103,10 +103,20 @@ def _parse_vote_detail(vote_detail: str) -> dict[str, str]:
 def _compute_weighted_scores(votes: dict[str, str]) -> tuple[float, float]:
     """Compute weighted LONG and SHORT scores using MSTR_SIGNAL_WEIGHTS.
 
-    Scaled to [0,1]. A BUY vote contributes its weight to the LONG numerator;
-    a SELL vote contributes to SHORT. Both divide by the total weight of
-    non-zero-weight, non-HOLD voting signals so the scale is comparable
-    across asset classes.
+    Scaled to [0,1]: fraction of *active* (non-HOLD) voter weight that
+    aligns with direction. HOLDs are excluded from BOTH numerator and
+    denominator so the score measures conviction among voters who took a
+    side, not overall activation. Activation / minimum-voters is a
+    separate gate in the strategy layer (MIN_BUY_VOTERS etc.).
+
+    Rationale (2026-04-19 backtest audit): the previous implementation
+    counted HOLDs in the denominator, producing sub-0.35 scores across
+    30 days of historical MSTR signals even on days when live had 0.68+.
+    That live/historical mismatch was because live `_vote_detail` compacts
+    out HOLDs (no dilution), while signal_log keeps the full dict (massive
+    HOLD dilution). Excluding HOLDs everywhere makes the two paths
+    identical and threshold semantics consistent. Strategy tests that
+    feed only {"x": "BUY", "y": "BUY"} shapes still pass trivially.
 
     Returns (long_score, short_score). Both in [0,1], sum ≤ 1.
     """
@@ -120,9 +130,8 @@ def _compute_weighted_scores(votes: dict[str, str]) -> tuple[float, float]:
         w = weights.get(signal_name, default_w)
         if w <= 0:
             continue  # force-ignored signal
-        # Only BUY/SELL count — HOLD votes don't contribute to either side
-        # (but they DO count in the denominator, so the score dilutes
-        # correctly when most voters are on the fence).
+        if vote not in ("BUY", "SELL"):
+            continue  # HOLD or unknown — excluded from both sides
         denom += w
         if vote == "BUY":
             long_num += w

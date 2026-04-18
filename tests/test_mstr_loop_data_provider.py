@@ -102,14 +102,29 @@ def test_weighted_scores_zero_weight_ignored(monkeypatch):
     assert short_s == pytest.approx(0.0)
 
 
-def test_weighted_scores_hold_dilutes():
-    """HOLD votes count in denom but not numerator (dilute scores)."""
+def test_weighted_scores_ignores_holds_in_denominator():
+    """HOLDs excluded from BOTH numerator AND denominator (2026-04-19 fix).
+
+    Previously HOLDs were counted in denom as "dilution" but this caused
+    a live/historical mismatch — live data compacts out HOLDs while
+    historical signal_log keeps them. Excluding HOLDs everywhere makes
+    the two paths consistent. Activation gating lives separately in the
+    strategy (MIN_BUY_VOTERS).
+    """
     votes = {"a": "BUY", "b": "BUY", "c": "HOLD", "d": "HOLD"}
     long_s, short_s = _compute_weighted_scores(votes)
-    # 4 signals all weight 1.0 (default); 2 BUY + 2 HOLD
-    # long = 2/4 = 0.5; short = 0/4 = 0
-    assert long_s == pytest.approx(0.5)
+    # Only BUY+SELL count: 2 BUY / 2 total active = 1.0 long, 0 short.
+    assert long_s == pytest.approx(1.0)
     assert short_s == pytest.approx(0.0)
+
+
+def test_weighted_scores_buy_vs_sell_mix():
+    """With BUYs and SELLs (no HOLDs), scores reflect vote proportions."""
+    votes = {"a": "BUY", "b": "BUY", "c": "BUY", "d": "SELL"}
+    long_s, short_s = _compute_weighted_scores(votes)
+    # 3 BUY / 4 total = 0.75, 1 SELL / 4 = 0.25
+    assert long_s == pytest.approx(0.75)
+    assert short_s == pytest.approx(0.25)
 
 
 def test_weighted_scores_empty_votes():

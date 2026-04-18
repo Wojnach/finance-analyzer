@@ -150,6 +150,7 @@ def simulate(
     rsi_min: float,
     rsi_max: float,
     closes_by_date: dict[str, float] | None = None,
+    friction_pct: float = 0.0,
 ) -> dict[str, Any]:
     """Replay the momentum_rider entry/exit logic against historical entries."""
     trades: list[Trade] = []
@@ -208,10 +209,14 @@ def simulate(
             if pullback >= trail_distance_pct:
                 exit_reason = "trail"
         if exit_reason is not None:
+            # Subtract round-trip friction from realized pnl so reported
+            # numbers are net-of-cost. We model 0.6% total (0.5% cert
+            # bid-ask + 0.1% Avanza courtage). Overrideable via CLI.
+            net_pnl = pnl_pct - friction_pct
             trades.append(Trade(
                 entry_ts=open_entry_ts, exit_ts=str(e.get("_ts") or ""),
                 entry_price=open_entry_price, exit_price=price,
-                pnl_pct=pnl_pct, exit_reason=exit_reason,
+                pnl_pct=net_pnl, exit_reason=exit_reason,
             ))
             open_entry_ts = None
 
@@ -247,6 +252,12 @@ def simulate(
 
 
 def main() -> int:
+    # Windows cp1252 console chokes on non-ASCII (≥, →, etc). Reconfigure
+    # stdout to UTF-8 once so the summary lines print cleanly.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
     p = argparse.ArgumentParser()
     p.add_argument("--mode", choices=["logic-only", "full"], default="full")
     p.add_argument("--buy-threshold", nargs="+", type=float,
@@ -256,6 +267,10 @@ def main() -> int:
     p.add_argument("--trail-activation-pct", type=float, default=1.5)
     p.add_argument("--rsi-min", type=float, default=40)
     p.add_argument("--rsi-max", type=float, default=78)
+    p.add_argument("--friction-pct", type=float, default=0.6,
+                   help="Round-trip friction in UNDERLYING %. Default 0.6 models "
+                        "0.5%% cert bid-ask spread + 0.1%% Avanza commission. "
+                        "Subtracted from each trade's pnl_pct.")
     args = p.parse_args()
 
     entries = load_mstr_signal_entries()
@@ -279,6 +294,7 @@ def main() -> int:
                 hard_stop_pct=args.hard_stop_pct,
                 rsi_min=args.rsi_min, rsi_max=args.rsi_max,
                 closes_by_date=closes,
+                friction_pct=args.friction_pct,
             )
             results.append(r)
             print(f"buy≥{bt:.2f}  trail {tp:.1f}%:  "
