@@ -24,8 +24,14 @@ PHASE: Phase = os.environ.get("MSTR_LOOP_PHASE", "shadow")  # type: ignore[assig
 MSTR_UNDERLYING = "MSTR"  # ticker for signal lookup in agent_summary
 BULL_MSTR_OB_ID = "2257847"  # BULL MSTR X5 SG4, Nordic MTF cert, SEK
 BULL_MSTR_LEVERAGE = 5.0  # directional P&L sensitivity vs underlying
-# No BEAR cert in v1 (LONG-only). Post-v1 mean_reversion strategy resolves
-# BEAR via live `api_post("/_api/search/filtered-search")` at that time.
+
+# BEAR MSTR cert (v2 Tier 2 — SHORT support via mean_reversion strategy).
+# ob_id is None until resolved live; mean_reversion strategy refuses entries
+# when None (fail-safe). To resolve live, run:
+#     scripts/resolve_mstr_bear_cert.py
+# or set MSTR_LOOP_BEAR_OB_ID env var to override.
+BEAR_MSTR_OB_ID: str | None = os.environ.get("MSTR_LOOP_BEAR_OB_ID") or None
+BEAR_MSTR_LEVERAGE = 3.0
 
 # ---------------------------------------------------------------------------
 # MSTR-specific signal reliability weights (from system_lessons.json audit)
@@ -53,11 +59,10 @@ DEFAULT_SIGNAL_WEIGHT: float = 1.0
 # ---------------------------------------------------------------------------
 STRATEGY_TOGGLES: dict[str, bool] = {
     "momentum_rider": True,
-    # Future slots, wired in when implemented:
-    # "mean_reversion": False,
-    # "earnings_play": False,
-    # "premium_arb": False,
-    # "overnight_gap": False,
+    "mean_reversion": False,   # v2: SHORT strategy — enable when BEAR_MSTR_OB_ID is set
+    "earnings_play": False,    # v2 stub
+    "premium_arb": False,      # v2 stub
+    "overnight_gap": False,    # v2 stub
 }
 
 # ---------------------------------------------------------------------------
@@ -102,6 +107,79 @@ MOMENTUM_RIDER_COOLDOWN_MINUTES = 30     # between entries on this strategy
 MOMENTUM_RIDER_TRAIL_ACTIVATION_PCT = 1.5  # % underlying profit to start trailing
 MOMENTUM_RIDER_TRAIL_DISTANCE_PCT = 2.0    # % underlying pullback triggers exit
 MOMENTUM_RIDER_HARD_STOP_PCT = 2.0         # % underlying loss triggers exit
+
+# ---------------------------------------------------------------------------
+# mean_reversion (SHORT) strategy knobs — v2 Tier 2
+# ---------------------------------------------------------------------------
+MEAN_REVERSION_SELL_THRESHOLD = 0.55
+MEAN_REVERSION_MIN_CONFIDENCE = 0.50
+MEAN_REVERSION_RSI_MIN = 75                # SHORT only makes sense when overbought
+MEAN_REVERSION_COOLDOWN_MINUTES = 30
+MEAN_REVERSION_TRAIL_ACTIVATION_PCT = 1.5
+MEAN_REVERSION_TRAIL_DISTANCE_PCT = 2.0
+MEAN_REVERSION_HARD_STOP_PCT = 2.0
+
+# ---------------------------------------------------------------------------
+# Drawdown circuit breaker (v2 Tier 1)
+# ---------------------------------------------------------------------------
+DRAWDOWN_DAILY_HALT_PCT = -3.0             # halt entries if today P&L <= -3% of peak
+DRAWDOWN_WEEKLY_HALT_PCT = -8.0            # halt all strategies for 7d if week <= -8%
+DRAWDOWN_CHECK_ENABLED = True
+
+# ---------------------------------------------------------------------------
+# BTC-regime gate (v2 Tier 2)
+# ---------------------------------------------------------------------------
+BTC_REGIME_GATE_ENABLED = True
+BTC_REGIME_DOWN_TAGS = frozenset({"trending-down"})
+BTC_REGIME_UP_TAGS = frozenset({"trending-up"})
+
+# ---------------------------------------------------------------------------
+# Earnings blackout (v2 Tier 2)
+# ---------------------------------------------------------------------------
+EARNINGS_BLACKOUT_ENABLED = True
+EARNINGS_BLACKOUT_DAYS_BEFORE = 2
+EARNINGS_BLACKOUT_DAYS_AFTER = 1
+
+# ---------------------------------------------------------------------------
+# Partial-exit ladder (v2 Tier 2)
+# ---------------------------------------------------------------------------
+PARTIAL_EXIT_LADDER_ENABLED = True
+# Sequence of (profit_pct, fraction_of_original_units) tranches.
+# Final third rides the trail stop (no explicit tranche).
+PARTIAL_EXIT_TRANCHES: list[tuple[float, float]] = [
+    (2.0, 1 / 3),
+    (4.0, 1 / 3),
+]
+
+# ---------------------------------------------------------------------------
+# ATR-adaptive trail (v2 Tier 3)
+# ---------------------------------------------------------------------------
+ATR_ADAPTIVE_TRAIL_ENABLED = True
+ATR_ADAPTIVE_MULT = 1.5
+ATR_ADAPTIVE_TRAIL_MIN_PCT = 1.5
+ATR_ADAPTIVE_TRAIL_MAX_PCT = 4.0
+
+# ---------------------------------------------------------------------------
+# Dynamic signal re-weighting (v2 Tier 3 — disabled by default)
+# ---------------------------------------------------------------------------
+DYNAMIC_WEIGHTS_ENABLED = False
+DYNAMIC_WEIGHTS_REFRESH_EVERY_CYCLES = 60
+DYNAMIC_WEIGHTS_MIN_SAMPLES = 30
+DYNAMIC_WEIGHTS_SYSTEM_LESSONS_FILE = "data/system_lessons.json"
+
+# ---------------------------------------------------------------------------
+# Telegram (v2 Tier 1)
+# ---------------------------------------------------------------------------
+TELEGRAM_ENABLED = True
+TELEGRAM_HOURLY_REPORT_MINUTES = 60        # cadence for status reports
+TELEGRAM_PER_TRADE_ALERTS = True
+TELEGRAM_STATE_FILE = "data/mstr_loop_telegram_state.json"
+
+# ---------------------------------------------------------------------------
+# Auto-scorecard (v2 Tier 1) — writes after every closed trade
+# ---------------------------------------------------------------------------
+SCORECARD_FILE = "data/mstr_loop_scorecard.json"
+SCORECARD_UPDATE_ENABLED = True
 
 # ---------------------------------------------------------------------------
 # File paths (all atomic-write via portfolio.file_utils)

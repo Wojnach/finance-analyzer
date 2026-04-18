@@ -50,6 +50,15 @@ class MomentumRider:
     # Entry
     # -----------------------------------------------------------------
     def _evaluate_entry(self, bundle: MstrBundle, state: BotState) -> Decision | None:
+        # Cross-cutting risk gates first — drawdown halts, earnings blackout,
+        # BTC regime. Centralised in portfolio.mstr_loop.risk so every
+        # strategy gets the same macro/portfolio-level refusals for free.
+        from portfolio.mstr_loop import risk as risk_mod
+        halted, reason = risk_mod.any_entry_halt_active(state, bundle, direction="LONG")
+        if halted:
+            logger.debug("momentum_rider: entry halted — %s", reason)
+            return None
+
         # Cooldown after last exit
         if not state.cooldown_elapsed(self.key, config.MOMENTUM_RIDER_COOLDOWN_MINUTES):
             return None

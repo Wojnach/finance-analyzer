@@ -63,12 +63,28 @@ def _approx_cert_price_from_underlying(
 
 
 def _compute_shadow_cert_price(bundle: MstrBundle, direction: str) -> float:
-    """Baseline cert price for Phase B (no live cert quote available).
+    """Cert price used in shadow/paper modes.
 
-    We don't have a live Avanza quote in shadow mode — use a placeholder
-    price of 100 SEK for P&L math. The scorecard works in underlying %
-    terms anyway, so this placeholder doesn't affect win-rate metrics.
+    Preference order (v2 Tier 1):
+      1. Try live Avanza quote — gives shadow P&L the same scale as Phase D
+         would see. Avoids the shadow→paper P&L discontinuity that would
+         otherwise fire on phase transitions.
+      2. Fall back to synthetic 100.0 SEK if Avanza session unavailable
+         (tests, offline env, or pre-auth cold start).
     """
+    try:
+        ob_id = (
+            config.BULL_MSTR_OB_ID if direction == "LONG" else config.BEAR_MSTR_OB_ID
+        )
+        if ob_id:
+            from portfolio.avanza_session import get_quote
+            q = get_quote(ob_id)
+            # Prefer ask ("sell" at Avanza) for a BUY simulation
+            ask = float(q.get("sell") or 0) if q else 0.0
+            if ask > 0:
+                return ask
+    except Exception:
+        logger.debug("execution: live quote unavailable, using synthetic", exc_info=True)
     return 100.0
 
 
@@ -162,6 +178,7 @@ def _handle_buy(decision: Decision, bundle: MstrBundle, state: BotState) -> bool
         entry_underlying_price=bundle.price_usd,
         entry_cert_price=cert_ask,
         units=units,
+        entry_units=units,           # immutable baseline for partial-exit tranche math
         entry_ts=_now_iso(),
         trail_active=False,
         peak_underlying_price=bundle.price_usd,
@@ -169,6 +186,18 @@ def _handle_buy(decision: Decision, bundle: MstrBundle, state: BotState) -> bool
         rationale=decision.rationale,
     )
     state.add_position(pos)
+
+    # Per-trade Telegram alert (fire-and-forget, non-fatal).
+    try:
+        from portfolio.mstr_loop import telegram_report
+        telegram_report.send_trade_alert(
+            "BUY",
+            decision,
+            {"underlying_price": bundle.price_usd, "units": units,
+             "cert_price": cert_ask},
+        )
+    except Exception:
+        logger.debug("execution: telegram BUY alert failed", exc_info=True)
     return True
 
 
@@ -183,24 +212,27 @@ def _handle_sell(decision: Decision, bundle: MstrBundle, state: BotState) -> boo
         return False
 
     cert_bid = _estimate_cert_bid(bundle, pos)
-    proceeds = pos.units * cert_bid
-    pnl_sek = proceeds - (pos.units * pos.entry_cert_price)
+    # Sell ALL remaining units for full exits. Partial-exit tranches use
+    # _handle_partial_sell below.
+    sell_units = pos.units
+    proceeds = sell_units * cert_bid
+    pnl_sek = proceeds - (sell_units * pos.entry_cert_price)
 
     if config.PHASE == "shadow":
-        _record_shadow("SHADOW_SELL", decision, bundle, cert_bid, pos.units, proceeds,
+        _record_shadow("SHADOW_SELL", decision, bundle, cert_bid, sell_units, proceeds,
                        extra={"pnl_sek": pnl_sek, "exit_reason": decision.exit_reason,
                               "entry_cert_price": pos.entry_cert_price,
                               "entry_underlying_price": pos.entry_underlying_price})
     elif config.PHASE == "paper":
         state.cash_sek += proceeds
-        _record_trade("SELL", decision, bundle, cert_bid, pos.units, proceeds,
+        _record_trade("SELL", decision, bundle, cert_bid, sell_units, proceeds,
                       extra={"pnl_sek": pnl_sek})
     elif config.PHASE == "live":
-        ok = _live_place_sell(decision, cert_bid, pos.units)
+        ok = _live_place_sell(decision, cert_bid, sell_units)
         if not ok:
             return False
         state.cash_sek += proceeds
-        _record_trade("SELL", decision, bundle, cert_bid, pos.units, proceeds,
+        _record_trade("SELL", decision, bundle, cert_bid, sell_units, proceeds,
                       extra={"pnl_sek": pnl_sek})
     else:
         logger.error("execution: unknown PHASE %r", config.PHASE)
@@ -215,7 +247,105 @@ def _handle_sell(decision: Decision, bundle: MstrBundle, state: BotState) -> boo
         state.losses += 1
     state.last_exit_ts[decision.strategy_key] = _now_iso()
     state.remove_position(decision.strategy_key)
+
+    # Fire-and-forget Telegram + auto-scorecard + trade alert.
+    try:
+        from portfolio.mstr_loop import telegram_report
+        telegram_report.send_trade_alert(
+            "SELL", pos,
+            {"underlying_price": bundle.price_usd, "pnl_sek": pnl_sek,
+             "exit_reason": decision.exit_reason},
+        )
+    except Exception:
+        logger.debug("execution: telegram SELL alert failed", exc_info=True)
+    try:
+        if config.SCORECARD_UPDATE_ENABLED:
+            _update_scorecard_file()
+    except Exception:
+        logger.debug("execution: scorecard update failed", exc_info=True)
     return True
+
+
+def _handle_partial_sell(
+    pos: Position,
+    units_to_sell: int,
+    tranche_pct: float,
+    bundle: MstrBundle,
+    state: BotState,
+) -> bool:
+    """Sell a fraction of an open position (tranche exit, keep position open).
+
+    Caller (v2 partial-exit ladder in update_trail_state) computes which
+    tranche tripped and how many units to sell. This helper keeps the
+    position on-book but decrements units + accumulates units_sold.
+    """
+    if units_to_sell <= 0 or units_to_sell > pos.units:
+        return False
+    cert_bid = _estimate_cert_bid(bundle, pos)
+    proceeds = units_to_sell * cert_bid
+    pnl_sek = proceeds - (units_to_sell * pos.entry_cert_price)
+
+    # Fake a Decision object for logging; partial exits don't originate
+    # from a strategy.step() return but we want a consistent journal.
+    from portfolio.mstr_loop.strategies.base import Decision
+    d = Decision(
+        strategy_key=pos.strategy_key, action="SELL", direction=pos.direction,
+        cert_ob_id=pos.cert_ob_id,
+        rationale=f"partial_exit_tranche_at_+{tranche_pct:.1f}%",
+        exit_reason=f"tranche_{tranche_pct:.1f}",
+    )
+
+    if config.PHASE == "shadow":
+        _record_shadow("SHADOW_PARTIAL_SELL", d, bundle, cert_bid, units_to_sell, proceeds,
+                       extra={"pnl_sek": pnl_sek, "tranche_pct": tranche_pct,
+                              "entry_cert_price": pos.entry_cert_price,
+                              "entry_underlying_price": pos.entry_underlying_price})
+    elif config.PHASE == "paper":
+        state.cash_sek += proceeds
+        _record_trade("PARTIAL_SELL", d, bundle, cert_bid, units_to_sell, proceeds,
+                      extra={"pnl_sek": pnl_sek, "tranche_pct": tranche_pct})
+    elif config.PHASE == "live":
+        ok = _live_place_sell(d, cert_bid, units_to_sell)
+        if not ok:
+            return False
+        state.cash_sek += proceeds
+        _record_trade("PARTIAL_SELL", d, bundle, cert_bid, units_to_sell, proceeds,
+                      extra={"pnl_sek": pnl_sek, "tranche_pct": tranche_pct})
+
+    pos.units -= units_to_sell
+    pos.units_sold += units_to_sell
+    pos.tranches_hit.append(tranche_pct)
+    state.total_pnl_sek += pnl_sek  # partials count toward running P&L
+    return True
+
+
+def _update_scorecard_file() -> None:
+    """Recompute scorecard JSON from the shadow/trades logs and persist.
+
+    Kept lightweight — reads the jsonl files we already write and calls
+    into the scorecard module as a library. Non-fatal on any failure so a
+    trade is never blocked by a scorecard write.
+    """
+    import sys
+    import pathlib
+    # Dynamically import the scorecard script as a module (no package).
+    # The script was written self-contained on purpose.
+    script_path = pathlib.Path(__file__).resolve().parent.parent.parent / "scripts" / "mstr_loop_scorecard.py"
+    if not script_path.exists():
+        return
+    # Use importlib to avoid stomping sys.modules with a script name.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_mstr_loop_scorecard_helper", script_path)
+    if spec is None or spec.loader is None:
+        return
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    try:
+        mod.main()  # writes data/mstr_loop_scorecard.json as side-effect
+    except SystemExit:
+        pass  # scorecard main() calls sys.exit, swallow
+    except Exception:
+        logger.debug("execution: scorecard module run failed", exc_info=True)
 
 
 # ----------------------------------------------------------------------
@@ -223,27 +353,59 @@ def _handle_sell(decision: Decision, bundle: MstrBundle, state: BotState) -> boo
 # so the trailing-stop math in strategies has up-to-date peak data.
 # ----------------------------------------------------------------------
 def update_trail_state(state: BotState, bundle: MstrBundle) -> None:
-    """Refresh trail_active and peak_underlying_price for all open positions."""
-    for pos in state.positions.values():
+    """Refresh trail_active + peak_underlying_price + partial-exit tranches.
+
+    Called once per cycle by loop.py BEFORE strategy.step() so strategies
+    see up-to-date peak data and partial tranches have already executed.
+
+    v2 additions:
+    - Partial-exit ladder: if config.PARTIAL_EXIT_LADDER_ENABLED, fire each
+      (profit_pct, fraction) tranche the first time price crosses it. The
+      tranche fraction is applied to `entry_units` (immutable baseline) so
+      prior partial exits don't re-trigger on the next threshold.
+    - ATR-adaptive trail: the trail distance exposed to strategies depends
+      on current ATR% when ATR_ADAPTIVE_TRAIL_ENABLED is True. The strategy
+      still owns the comparison; this function just tracks peak/activation.
+    """
+    positions_snapshot = list(state.positions.values())  # iterate a copy — _handle_partial_sell may not remove, but defensive
+    for pos in positions_snapshot:
         if bundle.price_usd <= 0:
             continue
-        # Update peak
+        # Update peak (direction-aware)
         if pos.direction == "LONG":
             if bundle.price_usd > pos.peak_underlying_price:
                 pos.peak_underlying_price = bundle.price_usd
         else:  # SHORT
-            # For SHORT, peak = most favourable = lowest underlying
             if (
                 pos.peak_underlying_price == 0
                 or bundle.price_usd < pos.peak_underlying_price
             ):
                 pos.peak_underlying_price = bundle.price_usd
 
-        # Activate trail once profit threshold reached
+        pnl_pct = pos.unrealized_underlying_pct(bundle.price_usd)
+
+        # Trail activation — uses same threshold for both strategies (config
+        # knobs for momentum_rider and mean_reversion happen to match).
         if not pos.trail_active:
-            pnl_pct = pos.unrealized_underlying_pct(bundle.price_usd)
             if pnl_pct >= config.MOMENTUM_RIDER_TRAIL_ACTIVATION_PCT:
                 pos.trail_active = True
+
+        # Partial-exit ladder — sell tranches as price crosses thresholds.
+        if config.PARTIAL_EXIT_LADDER_ENABLED and pos.entry_units > 0:
+            for tranche_pct, fraction in config.PARTIAL_EXIT_TRANCHES:
+                if tranche_pct in pos.tranches_hit:
+                    continue
+                if pnl_pct < tranche_pct:
+                    continue
+                # Compute how many units to sell for this tranche.
+                units_to_sell = int(pos.entry_units * fraction)
+                if units_to_sell <= 0 or units_to_sell > pos.units:
+                    # Either the fraction rounds to zero or we've somehow
+                    # already sold too much — mark tranche as hit to avoid
+                    # re-processing and move on.
+                    pos.tranches_hit.append(tranche_pct)
+                    continue
+                _handle_partial_sell(pos, units_to_sell, tranche_pct, bundle, state)
 
 
 # ----------------------------------------------------------------------
@@ -257,14 +419,33 @@ def _estimate_cert_ask(bundle: MstrBundle, direction: str) -> float:
 
 
 def _estimate_cert_bid(bundle: MstrBundle, pos: Position) -> float:
+    """Estimate the bid we could sell at for an open position.
+
+    Phase D: live Avanza quote. Phase B/C: try live quote first (fidelity),
+    fall back to leverage-derived synthetic. Uses the position's actual
+    leverage (5x for BULL, 3x for BEAR) rather than a global constant.
+    """
     if config.PHASE == "live":
         return _live_fetch_cert_bid(pos.cert_ob_id)
-    # shadow + paper: derive from underlying move
+    # Try live quote for fidelity in shadow/paper modes too.
+    try:
+        from portfolio.avanza_session import get_quote
+        q = get_quote(pos.cert_ob_id)
+        bid = float(q.get("buy") or 0) if q else 0.0
+        if bid > 0:
+            return bid
+    except Exception:
+        logger.debug("execution: live bid unavailable, using synthetic", exc_info=True)
+    # Synthetic fallback — per-direction leverage
+    lev = (
+        config.BULL_MSTR_LEVERAGE if pos.direction == "LONG"
+        else config.BEAR_MSTR_LEVERAGE
+    )
     return _approx_cert_price_from_underlying(
         entry_cert_price=pos.entry_cert_price,
         entry_underlying_price=pos.entry_underlying_price,
         current_underlying_price=bundle.price_usd,
-        leverage=config.BULL_MSTR_LEVERAGE,
+        leverage=lev,
         direction=pos.direction,
     )
 
