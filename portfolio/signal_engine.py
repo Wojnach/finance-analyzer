@@ -223,6 +223,19 @@ _IC_ZERO_PENALTY = 0.85   # phantom performers (|IC|<0.01, 500+ samples) get 0.8
 _IC_ZERO_MIN_SAMPLES = 500  # sample floor for zero-IC penalty
 _IC_DATA_TTL = 3600     # IC cache TTL (matches ic_computation.py)
 
+# Disabled signal per-ticker rescue (2026-04-18): signals in DISABLED_SIGNALS
+# that have proven accuracy on specific tickers. These are re-enabled for
+# compute+consensus on the listed ticker only. The standard accuracy gate
+# (47%) still protects against degradation.
+# Format: {(signal_name, ticker)} — if (sig, ticker) is in this set, the
+# signal is computed and votes for that ticker despite being globally disabled.
+# Evidence: data/disabled_signal_rescue_2026-04-18.json
+_DISABLED_SIGNAL_OVERRIDES: frozenset[tuple[str, str]] = frozenset({
+    # ml on ETH-USD: 55.1% at 3h (1206 samples). Globally disabled at 41.7%
+    # because BTC-USD pulls it down to 26.4%. ETH-USD has genuine edge.
+    ("ml", "ETH-USD"),
+})
+
 # Per-ticker consensus gate: BUG-164.  Suppress all non-HOLD consensus for
 # tickers where the system's overall consensus is historically harmful.
 # AMD 24.8%, GOOGL 31.3%, META 34.2% — actively wrong.
@@ -802,7 +815,7 @@ def _compute_applicable_count(ticker: str, skip_gpu: bool = False) -> int:
     is_stock = ticker in STOCK_SYMBOLS
     count = 0
     for sig in SIGNAL_NAMES:
-        if sig in DISABLED_SIGNALS:
+        if sig in DISABLED_SIGNALS and (sig, ticker) not in _DISABLED_SIGNAL_OVERRIDES:
             continue
         # crypto-only signals (futures_flow, funding, crypto_macro)
         if sig in _CRYPTO_ONLY_SIGNALS and not is_crypto:
@@ -2474,7 +2487,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             # restores the documented behavior. Other DISABLED_SIGNALS-aware
             # call sites: count_active_signals():468, dynamic correlation:558,
             # accuracy_stats.py, ticker_accuracy.py, backtester.py, reporting.py.
-            if sig_name in DISABLED_SIGNALS:
+            if sig_name in DISABLED_SIGNALS and (sig_name, ticker) not in _DISABLED_SIGNAL_OVERRIDES:
                 votes[sig_name] = "HOLD"
                 continue
             if sig_name in _TICKER_DISABLED_SIGNALS.get(ticker, ()):
