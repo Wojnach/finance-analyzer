@@ -31,12 +31,16 @@ class Position:
     cert_ob_id: str             # which Avanza instrument
     entry_underlying_price: float   # MSTR spot at entry
     entry_cert_price: float     # cert ask price at fill
-    units: int                  # cert units held
+    units: int                  # cert units held (CURRENT — decrements on partial exits)
     entry_ts: str               # ISO-8601 UTC
     trail_active: bool = False  # switched on at +trail_activation_pct
     peak_underlying_price: float = 0.0  # highest underlying since entry
     stop_price_cert: float | None = None  # broker-side stop price (Phase D)
     rationale: str = ""         # why we entered (audit trail)
+    # Partial-exit ladder (v2 Tier 2)
+    entry_units: int = 0                  # original units at entry (for tranche math)
+    units_sold: int = 0                   # cumulative units exited via tranches
+    tranches_hit: list[float] = dataclasses.field(default_factory=list)  # profit_pct values already fired
 
     def unrealized_underlying_pct(self, current_underlying_price: float) -> float:
         """Underlying price change % since entry (direction-aware)."""
@@ -61,6 +65,14 @@ class BotState:
     # Bot-level audit
     session_started_ts: str = ""
     last_cycle_ts: str = ""
+    # Drawdown circuit breaker (v2 Tier 1)
+    peak_equity_sek: float = 0.0          # highest equity observed across history
+    session_start_equity_sek: float = 0.0  # equity at the start of the current US session (for daily %)
+    week_start_equity_sek: float = 0.0     # equity at start of rolling 7d window
+    session_start_ts: str = ""             # resets daily at session-open
+    week_start_ts: str = ""                # resets weekly
+    daily_halted_until: str = ""           # ISO timestamp when daily halt lifts
+    weekly_halted_until: str = ""          # ISO timestamp when weekly halt lifts
 
     def has_position(self, strategy_key: str) -> bool:
         return strategy_key in self.positions
@@ -124,6 +136,13 @@ def _state_to_dict(state: BotState) -> dict[str, Any]:
         "losses": state.losses,
         "session_started_ts": state.session_started_ts,
         "last_cycle_ts": state.last_cycle_ts,
+        "peak_equity_sek": state.peak_equity_sek,
+        "session_start_equity_sek": state.session_start_equity_sek,
+        "week_start_equity_sek": state.week_start_equity_sek,
+        "session_start_ts": state.session_start_ts,
+        "week_start_ts": state.week_start_ts,
+        "daily_halted_until": state.daily_halted_until,
+        "weekly_halted_until": state.weekly_halted_until,
     }
 
 
@@ -145,6 +164,13 @@ def _state_from_dict(d: dict[str, Any]) -> BotState:
         losses=int(d.get("losses") or 0),
         session_started_ts=str(d.get("session_started_ts") or ""),
         last_cycle_ts=str(d.get("last_cycle_ts") or ""),
+        peak_equity_sek=float(d.get("peak_equity_sek") or 0.0),
+        session_start_equity_sek=float(d.get("session_start_equity_sek") or 0.0),
+        week_start_equity_sek=float(d.get("week_start_equity_sek") or 0.0),
+        session_start_ts=str(d.get("session_start_ts") or ""),
+        week_start_ts=str(d.get("week_start_ts") or ""),
+        daily_halted_until=str(d.get("daily_halted_until") or ""),
+        weekly_halted_until=str(d.get("weekly_halted_until") or ""),
     )
 
 

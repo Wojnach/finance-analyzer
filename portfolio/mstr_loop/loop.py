@@ -17,7 +17,7 @@ from typing import Any
 
 from portfolio.file_utils import atomic_append_jsonl
 
-from portfolio.mstr_loop import config, execution, session, state
+from portfolio.mstr_loop import config, execution, risk, session, state, telegram_report
 from portfolio.mstr_loop.data_provider import build_bundle
 from portfolio.mstr_loop.strategies import load_enabled_strategies
 
@@ -96,8 +96,20 @@ def run_cycle(bot_state: state.BotState, strategies: list, cycle_count: int) -> 
     # accurate peak_underlying_price.
     execution.update_trail_state(bot_state, bundle)
 
+    # Drawdown bookkeeping — must run every cycle so daily/weekly baselines
+    # roll at calendar boundaries. Gate checks happen inside risk.any_*.
+    if config.DRAWDOWN_CHECK_ENABLED:
+        try:
+            risk.update_drawdown_peaks(bot_state)
+        except Exception:
+            logger.exception("loop: drawdown peak update failed")
+
     _log_poll(bundle, "ok", cycle_count)
 
+    # Cash budget across strategies — each strategy sees state.cash_sek at
+    # start of cycle; _handle_buy mutates it atomically via execution.py.
+    # Multi-strategy cash contention (one strategy over-allocating) is
+    # prevented by the natural iteration order + the 95% cap in sizing.
     for strat in strategies:
         try:
             decision = strat.step(bundle, bot_state)
@@ -110,6 +122,12 @@ def run_cycle(bot_state: state.BotState, strategies: list, cycle_count: int) -> 
             execution.execute(decision, bundle, bot_state)
         except Exception:
             logger.exception("loop: execute() raised for %s", strat.key)
+
+    # Hourly Telegram status report (throttled inside telegram_report).
+    try:
+        telegram_report.maybe_send_hourly(bot_state)
+    except Exception:
+        logger.debug("loop: telegram hourly send failed", exc_info=True)
 
     state.save_state(bot_state)
 

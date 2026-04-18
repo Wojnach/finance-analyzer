@@ -53,6 +53,13 @@ class MstrBundle:
     # Derived by this module using MSTR_SIGNAL_WEIGHTS
     weighted_score_long: float     # 0-1 scale, higher = stronger LONG case
     weighted_score_short: float    # 0-1 scale, higher = stronger SHORT case
+    # BTC regime (2026-04-18) — MSTR is 1.5-2.5x BTC beta; if BTC is in a
+    # confirmed down-trend, MSTR LONG is structurally wrong regardless of
+    # MSTR's own technicals. Values: "trending-up" | "trending-down" |
+    # "ranging" | "high-vol" | "unknown" (when BTC block is absent).
+    btc_regime: str = "unknown"
+    btc_price: float = 0.0         # spot for cross-asset awareness
+    btc_rsi: float = 50.0
 
     def is_usable(self) -> bool:
         """True if the bundle looks fresh/valid enough to trade on."""
@@ -171,6 +178,13 @@ def build_bundle(
     except OSError:
         source_stale_seconds = 9999.0
 
+    # BTC cross-asset block — read the precomputed regime from the main
+    # loop's signal engine. Fall back to "unknown" if BTC block missing.
+    btc_sig = summary.get("signals", {}).get("BTC-USD", {}) or {}
+    btc_regime = str(btc_sig.get("regime") or "unknown")
+    btc_price = float(btc_sig.get("price_usd") or 0)
+    btc_rsi = float(btc_sig.get("rsi") or 50)
+
     return MstrBundle(
         ts=datetime.datetime.now(datetime.UTC).isoformat(),
         source_stale_seconds=source_stale_seconds,
@@ -193,4 +207,7 @@ def build_bundle(
         stale=bool(sig.get("stale", False)),
         weighted_score_long=long_score,
         weighted_score_short=short_score,
+        btc_regime=btc_regime,
+        btc_price=btc_price,
+        btc_rsi=btc_rsi,
     )

@@ -169,8 +169,14 @@ def test_exit_on_signal_flip():
     assert d.exit_reason == "signal_flip"
 
 
-def test_exit_on_trail_after_activation():
-    """Trail is active (peak captured), price pulls back > trail_distance → SELL."""
+def test_exit_on_trail_after_activation(monkeypatch):
+    """Trail is active (peak captured), price pulls back > trail_distance → SELL.
+
+    Pin ATR_ADAPTIVE_TRAIL_ENABLED=False so this test covers the fixed-%
+    path. The ATR-adaptive helper is tested separately in test_mstr_loop_risk.
+    """
+    from portfolio.mstr_loop import config as _cfg
+    monkeypatch.setattr(_cfg, "ATR_ADAPTIVE_TRAIL_ENABLED", False)
     pos = _open_position(entry_price=160.0)
     pos.trail_active = True
     pos.peak_underlying_price = 165.0  # +3.1%
