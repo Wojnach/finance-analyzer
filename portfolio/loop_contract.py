@@ -11,7 +11,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -256,27 +256,31 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     # skipped_offhours           — market closed, intentional non-run ✓
     # skipped_gate               — perception gate decided not to invoke ✓
     # skipped_stack_overflow     — pre-flight guard before spawning ✓
-    # skipped_busy               — EXCLUDED. Codex P1 2026-04-18: main.py
-    #   logs skipped_busy whenever invoke_agent() returns False, which
-    #   includes real failure paths ("couldn't kill old agent", "no agent
-    #   binary"). Suppressing those would mask silent failures.
+    # skipped_test               — test-mode guard (CI / unit tests) ✓
+    # skipped_busy               — EXCLUDED. main.py logs skipped_busy
+    #   whenever invoke_agent() returns False, including real failure
+    #   paths ("couldn't kill old agent", "no agent binary"). Suppressing
+    #   those would mask silent failures (Codex P1 2026-04-18).
     #
     # Only suppress for skip-statuses newer than the trigger that would
-    # otherwise fire the violation. A stale skipped entry from hours ago
-    # doesn't tell us anything about the current trigger's state.
-    _LEGITIMATE_SKIP_STATUSES = (
-        "skipped_offhours", "skipped_gate", "skipped_stack_overflow",
-    )
-    if latest_l2_inv:
-        skip_status = str(latest_l2_inv.get("status", ""))
-        if skip_status in _LEGITIMATE_SKIP_STATUSES:
-            inv_ts = _parse_iso(
-                latest_l2_inv.get("timestamp") or latest_l2_inv.get("ts")
-            )
-            # Skip only if the invocation was logged AFTER the trigger —
-            # that means the loop saw the trigger and chose to skip it.
-            if inv_ts is not None and inv_ts >= last_trigger:
-                return []
+    # otherwise fire the violation. Uses a 2s tolerance on the comparison:
+    # _log_trigger() and update_health() both call datetime.now()
+    # independently, so the invocation ts is typically 25-40ms before
+    # last_trigger_time. A strict ``inv_ts >= last_trigger`` would always
+    # lose that race. 2s covers it by 50× while still rejecting stale
+    # skips from prior cycles (those are ≥60s old).
+    _LEGITIMATE_SKIP_STATUSES = frozenset({
+        "skipped_offhours",
+        "skipped_gate",
+        "skipped_stack_overflow",
+        "skipped_test",
+    })
+    if latest_l2_inv and latest_l2_inv.get("status") in _LEGITIMATE_SKIP_STATUSES:
+        inv_ts = _parse_iso(
+            latest_l2_inv.get("timestamp") or latest_l2_inv.get("ts")
+        )
+        if inv_ts is not None and inv_ts >= last_trigger - timedelta(seconds=2):
+            return []
 
     # For violation context only (non-blocking): read the global claude
     # log to surface last_invocation_caller in the alert message. This is
