@@ -174,6 +174,26 @@ def earnings_blackout_active(
 # Combined gate
 # ---------------------------------------------------------------------------
 
+def effective_trail_distance_pct(bundle: MstrBundle, fallback_pct: float) -> float:
+    """Return the trail distance to use this cycle.
+
+    When ATR_ADAPTIVE_TRAIL_ENABLED, scales trail distance by realized vol:
+        trail = clamp(MIN, MAX, ATR_MULT × atr_pct)
+    In quiet sessions atr_pct is small → tighter trail. In wild sessions
+    atr_pct is large → wider trail (stops whipsaw).
+
+    Fallback when disabled or atr_pct unavailable: caller's configured
+    fixed trail distance.
+    """
+    if not config.ATR_ADAPTIVE_TRAIL_ENABLED:
+        return fallback_pct
+    if bundle.atr_pct <= 0:
+        return fallback_pct
+    raw = config.ATR_ADAPTIVE_MULT * bundle.atr_pct
+    return max(config.ATR_ADAPTIVE_TRAIL_MIN_PCT,
+               min(config.ATR_ADAPTIVE_TRAIL_MAX_PCT, raw))
+
+
 def any_entry_halt_active(state: BotState, bundle: MstrBundle, direction: str = "LONG") -> tuple[bool, str]:
     """Single composed gate called before each strategy entry.
 

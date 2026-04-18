@@ -252,3 +252,51 @@ def test_combined_gate_clean_pass():
     halted, reason = risk.any_entry_halt_active(s, b, direction="LONG")
     assert halted is False
     assert reason == ""
+
+
+# ---------------------------------------------------------------------------
+# ATR-adaptive trail distance
+# ---------------------------------------------------------------------------
+
+
+def test_atr_trail_disabled_returns_fallback(monkeypatch):
+    monkeypatch.setattr(config, "ATR_ADAPTIVE_TRAIL_ENABLED", False)
+    b = _mk_bundle(atr_pct=2.0)
+    assert risk.effective_trail_distance_pct(b, 2.5) == 2.5
+
+
+def test_atr_trail_scales_with_atr(monkeypatch):
+    monkeypatch.setattr(config, "ATR_ADAPTIVE_TRAIL_ENABLED", True)
+    monkeypatch.setattr(config, "ATR_ADAPTIVE_MULT", 1.5)
+    monkeypatch.setattr(config, "ATR_ADAPTIVE_TRAIL_MIN_PCT", 1.0)
+    monkeypatch.setattr(config, "ATR_ADAPTIVE_TRAIL_MAX_PCT", 5.0)
+    b = _mk_bundle(atr_pct=2.0)
+    # 1.5 × 2.0 = 3.0, within [1.0, 5.0]
+    assert risk.effective_trail_distance_pct(b, 999.0) == pytest.approx(3.0)
+
+
+def test_atr_trail_clamps_to_min(monkeypatch):
+    monkeypatch.setattr(config, "ATR_ADAPTIVE_TRAIL_ENABLED", True)
+    monkeypatch.setattr(config, "ATR_ADAPTIVE_MULT", 1.5)
+    monkeypatch.setattr(config, "ATR_ADAPTIVE_TRAIL_MIN_PCT", 1.5)
+    monkeypatch.setattr(config, "ATR_ADAPTIVE_TRAIL_MAX_PCT", 5.0)
+    b = _mk_bundle(atr_pct=0.5)
+    # 1.5 × 0.5 = 0.75 → clamped up to MIN=1.5
+    assert risk.effective_trail_distance_pct(b, 999.0) == pytest.approx(1.5)
+
+
+def test_atr_trail_clamps_to_max(monkeypatch):
+    monkeypatch.setattr(config, "ATR_ADAPTIVE_TRAIL_ENABLED", True)
+    monkeypatch.setattr(config, "ATR_ADAPTIVE_MULT", 1.5)
+    monkeypatch.setattr(config, "ATR_ADAPTIVE_TRAIL_MIN_PCT", 1.0)
+    monkeypatch.setattr(config, "ATR_ADAPTIVE_TRAIL_MAX_PCT", 4.0)
+    b = _mk_bundle(atr_pct=5.0)
+    # 1.5 × 5.0 = 7.5 → clamped down to MAX=4.0
+    assert risk.effective_trail_distance_pct(b, 999.0) == pytest.approx(4.0)
+
+
+def test_atr_trail_zero_atr_returns_fallback(monkeypatch):
+    """atr_pct=0 means no data; fall back to the caller's fixed pct."""
+    monkeypatch.setattr(config, "ATR_ADAPTIVE_TRAIL_ENABLED", True)
+    b = _mk_bundle(atr_pct=0.0)
+    assert risk.effective_trail_distance_pct(b, 2.0) == 2.0

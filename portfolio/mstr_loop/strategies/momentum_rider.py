@@ -123,18 +123,21 @@ class MomentumRider:
         # Trailing stop: once execution.update_trail_state has flipped
         # trail_active on (after pnl hit TRAIL_ACTIVATION_PCT in some prior
         # cycle), fire on pullbacks >= TRAIL_DISTANCE_PCT from the peak.
-        # Do NOT re-gate on current pnl_pct — the whole point of a trail is
-        # to ride gains back down somewhat; current pnl may be BELOW the
-        # activation threshold at the moment the trail fires.
+        # Distance is ATR-adaptive when enabled so quiet sessions use a
+        # tighter trail and wild sessions a wider one.
         if pos.trail_active and pos.peak_underlying_price > 0:
+            from portfolio.mstr_loop import risk as risk_mod
+            trail_dist = risk_mod.effective_trail_distance_pct(
+                bundle, config.MOMENTUM_RIDER_TRAIL_DISTANCE_PCT,
+            )
             pullback_pct = (
                 (pos.peak_underlying_price - bundle.price_usd) /
                 pos.peak_underlying_price * 100
             )
-            if pullback_pct >= config.MOMENTUM_RIDER_TRAIL_DISTANCE_PCT:
+            if pullback_pct >= trail_dist:
                 return self._exit_decision(
                     pos, "trail",
-                    f"pullback={pullback_pct:.2f}% from peak "
+                    f"pullback={pullback_pct:.2f}% ≥ {trail_dist:.2f}% from peak "
                     f"${pos.peak_underlying_price:.2f}"
                 )
 

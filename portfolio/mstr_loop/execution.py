@@ -391,14 +391,19 @@ def update_trail_state(state: BotState, bundle: MstrBundle) -> None:
                 pos.trail_active = True
 
         # Partial-exit ladder — sell tranches as price crosses thresholds.
+        # Round pnl to 4 decimals so float-precision noise (e.g. 1.99999...)
+        # doesn't under-trigger a +2% threshold.
+        pnl_for_tranche = round(pnl_pct, 4)
         if config.PARTIAL_EXIT_LADDER_ENABLED and pos.entry_units > 0:
             for tranche_pct, fraction in config.PARTIAL_EXIT_TRANCHES:
                 if tranche_pct in pos.tranches_hit:
                     continue
-                if pnl_pct < tranche_pct:
+                if pnl_for_tranche < tranche_pct:
                     continue
-                # Compute how many units to sell for this tranche.
-                units_to_sell = int(pos.entry_units * fraction)
+                # Compute how many units to sell for this tranche. Use
+                # round() not int() — float precision on e.g. 9×(1/3) can
+                # land at 2.9999... which int() would truncate to 2.
+                units_to_sell = round(pos.entry_units * fraction)
                 if units_to_sell <= 0 or units_to_sell > pos.units:
                     # Either the fraction rounds to zero or we've somehow
                     # already sold too much — mark tranche as hit to avoid

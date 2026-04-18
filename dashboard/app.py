@@ -743,6 +743,53 @@ def api_portfolio_bold():
     return jsonify(data)
 
 
+@app.route("/api/mstr_loop")
+@require_auth
+def api_mstr_loop():
+    """Live snapshot of the MSTR Loop bot (v2 Tier 3).
+
+    Returns state + scorecard + latest poll in one JSON:
+        {
+          "state": {cash, positions, total_pnl, ...},
+          "scorecard": {win_rate, expectancy, trades_by_strategy, ...},
+          "last_poll": {last cycle snapshot from mstr_loop_poll.jsonl},
+          "last_trade": {last closed trade from mstr_loop_trades.jsonl},
+        }
+    """
+    out = {
+        "state": _read_json(DATA_DIR / "mstr_loop_state.json") or {},
+        "scorecard": _read_json(DATA_DIR / "mstr_loop_scorecard.json") or {},
+        "last_poll": None,
+        "last_trade": None,
+    }
+    import json as _json
+    poll_path = DATA_DIR / "mstr_loop_poll.jsonl"
+    if poll_path.exists():
+        try:
+            with open(poll_path, encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        try:
+                            out["last_poll"] = _json.loads(line)
+                        except _json.JSONDecodeError:
+                            pass
+        except OSError:
+            pass
+    trades_path = DATA_DIR / "mstr_loop_trades.jsonl"
+    if trades_path.exists():
+        try:
+            with open(trades_path, encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        try:
+                            out["last_trade"] = _json.loads(line)
+                        except _json.JSONDecodeError:
+                            pass
+        except OSError:
+            pass
+    return jsonify(out)
+
+
 @app.route("/api/invocations")
 @require_auth
 def api_invocations():
