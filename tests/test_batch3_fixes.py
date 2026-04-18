@@ -79,7 +79,8 @@ class TestBug90ConfidenceClamping:
             config={"confidence_penalties": {"enabled": True}},
         )
         assert conf <= 0.80
-        assert conf == pytest.approx(0.80 * 0.75, abs=0.01)
+        # Stage 1: 0.8 * 0.75 = 0.60; Stage 7 compression: 0.55 + (0.60 - 0.55) * 0.3 = 0.565
+        assert conf == pytest.approx(0.565, abs=0.01)
 
     def test_all_stages_never_exceed_1(self):
         """Full cascade with all bonuses applied never exceeds 1.0."""
