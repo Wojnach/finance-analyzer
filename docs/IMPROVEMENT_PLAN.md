@@ -1,109 +1,150 @@
-# Improvement Plan — Auto Session 2026-04-18
+# Improvement Plan — Auto Session 2026-04-19
 
-Based on deep exploration of signal_engine.py (3000+ lines), accuracy_stats.py,
-ic_computation.py, and research data from the 2026-04-17 after-hours session.
+Based on deep exploration of the full codebase by 4 parallel agents covering:
+- Signal system (signal_engine.py, accuracy_stats.py, 33 signal modules)
+- Core loop (main.py, trigger.py, agent_invocation.py, data_collector.py, health.py)
+- Portfolio & risk (portfolio_mgr.py, risk_management.py, trade_guards.py, equity_curve.py)
+- Infrastructure (file_utils.py, shared_state.py, claude_gate.py, dashboard, telegram)
+
+## Assessment
+
+**Overall**: Production-grade system with excellent atomic I/O, thread safety, and error
+handling. All previously identified bugs (BUG-XXX series) have targeted fixes. The main
+improvement opportunities are in test reliability and minor resilience gaps.
+
+**Infrastructure**: 4-5 star quality across all modules. No unresolved bugs.
+**Signal system**: Well-designed weighted consensus with multiple gating layers.
+**Portfolio/Risk**: Solid atomic state management, correct metrics calculations.
+**Core loop**: Good crash recovery, but minor resilience gaps.
+
+---
 
 ## Priority Order
 
-### Batch 1: IC-Based Weight Multiplier (HIGHEST IMPACT)
+### Batch 1: xdist Test Hygiene — Module State Reset Fixtures (HIGHEST IMPACT)
 
-**Problem:** Current weighting uses directional accuracy as primary signal weight.
-This misses return magnitude prediction. Phantom performers (calendar 58.9% acc,
-IC=0.000; econ_calendar 62.6% acc, IC=0.000) get high weight despite zero
-predictive power for move size. Genuinely good signals (ministral IC=0.094,
-momentum IC=0.063) are underweighted relative to their true value.
+**Problem:** `pytest -n auto` produces 5-10 different failures per run. Root cause is
+module-level mutable state that leaks across xdist workers. This is the #1 item in
+`docs/IMPROVEMENT_BACKLOG.md` (TEST-HYGIENE-1) and affects every CI/merge-verification run.
 
-**Files:** `portfolio/signal_engine.py` (insert after line 1519 in `_weighted_consensus()`)
+**Files to create/modify:**
+- `tests/conftest.py` — Add autouse fixtures for the most-affected modules
+- Individual test files that need per-test state resets
+
+**Modules with mutable global state (catalogued during exploration):**
+
+| Module | Mutable State | Leak Risk |
+|--------|--------------|-----------|
+| `agent_invocation` | `_agent_proc`, `_agent_log`, `_agent_start`, `_agent_start_wall`, `_agent_timeout`, `_agent_tier`, `_agent_reasons`, `_journal_ts_before`, `_telegram_ts_before`, `_agent_log_start_offset`, `_consecutive_stack_overflows` | HIGH |
+| `signal_engine` | `_adx_cache`, `_last_signal_per_ticker`, `_phase_log_per_ticker`, `_prev_sentiment`, `_prev_sentiment_loaded`, `_sentiment_dirty` | HIGH |
+| `shared_state` | `_tool_cache`, `_run_cycle_id`, `_regime_cache`, `_regime_cache_cycle`, `_full_llm_cycle_count`, `_current_market_state`, `_newsapi_daily_count` | HIGH |
+| `forecast (signal)` | `_FORECAST_MODELS_DISABLED`, `_KRONOS_ENABLED`, `_kronos_tripped_until`, `_chronos_tripped_until`, `_predictions_dedup_cache` | MEDIUM |
+| `accuracy_stats` | `_accuracy_cache` (module-level TTL cache) | MEDIUM |
+| `llama_server` | `_local_proc`, `_local_model` | MEDIUM |
+| `logging_config` | `_configured` | LOW |
+| `api_utils` | `_config_cache`, `_config_mtime` | LOW |
+| `trigger` | `_startup_grace_active` | LOW |
 
 **Changes:**
-1. Add `_get_ic_data(horizon)` — lazy-cached IC loader using existing `ic_computation.py`
-2. Add `_compute_ic_mult(ic, icir, samples)` — clamps to [0.6, 1.5]
-3. Apply IC multiplier after accuracy weight, before regime mult
-4. Add zero-IC penalty: signals with |IC| < 0.01 and samples > 500 get 0.85x
-5. Pass `horizon` and `ticker` to IC lookup for per-ticker IC (Phase 2 data available)
+1. Create `tests/_state_reset.py` with helper functions to reset each module's state
+2. Add autouse session-scoped fixture in `conftest.py` that resets HIGH-risk modules
+3. For MEDIUM-risk modules, add per-test resets in affected test files
+4. Verify: run `pytest -n auto -q` 3x, confirm 0 new failures each run
 
-**Impact:**
-- ministral IC=0.094 → 1.19x boost
-- momentum IC=0.063 → 1.13x boost  
-- calendar IC=0.000 → 0.85x penalty (zero-IC)
-- econ_calendar IC=0.000 → 0.85x penalty
-
-**Risk:** LOW — IC cache already exists (1h TTL), multiplicative factor won't break
-existing consensus logic.
-
-**Tests:** `tests/test_ic_weighting.py` — tests for ic_mult math, stability filter,
-integration with `_weighted_consensus()`.
+**Impact:** Eliminates 5-10 random test failures per CI run. Makes test results trustworthy.
+**Risk:** LOW — only adds reset fixtures, no production code changes.
 
 ---
 
-### Batch 2: Fix Dynamic Correlation + Add Orphaned Signals (HIGH IMPACT)
+### Batch 2: Crash Recovery Resilience (MEDIUM IMPACT)
 
-**Problem 1:** Dynamic correlation is dead code. Pearson correlation on vote encoding
-(BUY=1, HOLD=0, SELL=-1) is diluted by 70-90% HOLD dominance. Max observed Pearson
-r=0.538 (ema↔trend), but these signals agree 100% on non-HOLD votes. The 0.7
-threshold is unreachable → always falls back to static groups.
+**Problem 1:** Crash counter (`_consecutive_crashes` in main.py) resets to 0 on process
+restart. If a wrapper script immediately restarts the loop after a crash, the counter resets
+and alerts re-fire from 1. Pattern already solved in agent_invocation.py (stack_overflow_counter).
 
-**Problem 2:** 10 signal pairs have 90-100% agreement but aren't in any static group:
-- fear_greed↔calendar (100%, 501 sam)
-- fear_greed↔funding (100%, 543 sam)
-- news_event↔econ_calendar (100%, 714 sam)
-- funding↔calendar (100%, 104 sam)
-- fear_greed↔claude_fundamental (92.7%, 1241 sam)
+**Problem 2:** Backoff delay is exponential but not jittered. Two simultaneously crashing
+loops (main + metals) retry in lockstep, causing synchronized load spikes.
 
-**Files:** `portfolio/signal_engine.py`
+**Problem 3:** After 5 consecutive crashes, Telegram alerts are fully suppressed with no
+periodic summary — operators lose visibility into ongoing failures.
+
+**Files:** `portfolio/main.py` (lines 929-976)
 
 **Changes:**
-1. Replace Pearson correlation in `_compute_dynamic_correlation_groups()` with
-   agreement rate (only counting non-HOLD pairs)
-2. Change threshold from 0.7 (Pearson) to 0.85 (agreement rate)
-3. Add orphaned signals to static groups:
-   - Expand `macro_external` → `{"fear_greed", "sentiment", "news_event", "calendar",
-     "econ_calendar", "funding"}` (6 members)
-   - Set penalty to 0.15x (like momentum_cluster) since 6 members is large
+1. Persist crash counter to `data/crash_counter.json` (like stack_overflow_counter pattern)
+2. Add jitter: `delay = delay * (0.5 + random.random())`
+3. After suppression threshold, send one summary alert every 100 crashes
 
-**Risk:** MEDIUM — changing correlation groups affects vote weights for all signals.
-Static group changes are safe (additive). Dynamic correlation fix needs careful testing.
+**Impact:** More robust crash recovery, no alert blindness during extended outages.
+**Risk:** LOW — crash recovery path only, doesn't affect normal operation.
 
 ---
 
-### Batch 3: Disabled Signal Rescue (MEDIUM IMPACT)
+### Batch 3: JSONL Prune Per-File Failure Isolation (MEDIUM IMPACT)
 
-**Problem:** Global `DISABLED_SIGNALS` hides per-ticker value.
-ML on ETH-USD: 55.1% at 3h (1206 samples) — genuine edge hidden by BTC's 26.4%.
+**Problem:** `_run_post_cycle()` prunes 3 JSONL files in a single try/except. If any file
+is locked (e.g., by antivirus), ALL pruning fails silently. Over time, unpruned files can
+grow to hundreds of MB.
 
-**Files:** `portfolio/signal_engine.py`
+**File:** `portfolio/main.py` (lines 346-354)
 
 **Changes:**
-1. Add `_DISABLED_SIGNAL_OVERRIDES` set with (signal, ticker) tuples
-2. In `_weighted_consensus()`, check overrides before applying DISABLED_SIGNALS gate
-3. Override: `("ml", "ETH-USD")` — 55.1% at 3h with 1206 samples
+1. Move to per-file try/except with individual error logging
+2. Log which specific file(s) failed
 
-**Risk:** LOW — signals already computed, just unblocked. Accuracy gate auto-protects.
+**Impact:** Prevents unbounded file growth when a single file is locked.
+**Risk:** VERY LOW — error handling path only.
 
 ---
 
-### Batch 4: Confidence Calibration Compression (MEDIUM IMPACT)
+### Batch 4: Dead Code Cleanup (LOW IMPACT)
 
-**Problem:** Confidence is massively overconfident above 60%:
-- 60-69% conf → 49% actual (16pp gap)
-- 80-89% conf → 53% actual (32pp gap)
+**Problem 1:** `trigger.py` persists `started_ts` (wall-clock) in sustained flip state but
+never reads it back. The `_mono_start` field is used for duration checks. The wall-clock
+field is dead code that confuses readers.
 
-**Files:** `portfolio/signal_engine.py` (in `apply_confidence_penalties`)
+**Problem 2:** `health.py` `check_agent_silence()` reads `last_invocation_ts` from fallback
+(parsing invocations.jsonl) but never writes it back to the cache. This means the cache
+stays stale forever for concurrent readers.
+
+**Files:** `portfolio/trigger.py`, `portfolio/health.py`
 
 **Changes:**
-1. Add Stage 7: Confidence Compression after Stage 6
-2. Compress: `conf = 0.55 + (conf - 0.55) * 0.3` for conf > 0.55
-3. Maps: 60% → 56.5%, 70% → 59.5%, 80% → 62.5%
+1. Remove `started_ts` persistence from trigger.py sustained state (keep `_mono_start` only)
+2. In health.py, write back `last_invocation_ts` to health_state after fallback read
 
-**Risk:** LOW — only reduces confidence, never increases.
+**Impact:** Cleaner code, correct health cache.
+**Risk:** VERY LOW — dead code removal and cache consistency fix.
+
+---
+
+### Batch 5: Test Coverage for New Improvements (LOW IMPACT)
+
+**Files:** New test files for batch 2-4 changes
+
+**Changes:**
+1. Test crash counter persistence (load/save/reset across restarts)
+2. Test jitter is within expected range
+3. Test per-file JSONL prune failure isolation
+4. Test health cache write-back
+
+**Risk:** NONE — test-only changes.
+
+---
 
 ## Dependency Order
 
-Batch 1 → Batch 2 → Batch 3 → Batch 4 (sequential, each committed separately)
+Batch 1 (xdist hygiene) → Batch 2 (crash recovery) → Batch 3 (prune isolation) →
+Batch 4 (dead code) → Batch 5 (tests for 2-4)
 
-## Deferred
+Batches 2-4 are independent and could run in parallel, but sequential is safer for
+commit clarity.
 
-- Contrarian signal inversion (ml IC=-0.321): needs backtesting
-- Regime-conditioned per-signal weights: regime detection has lag
-- credit_spread_risk re-enable: investigate why disabled first
-- Per-ticker IC weighting: Phase 2, needs more validation
+## What NOT to Implement (Deferred)
+
+- **Metals loop split (7634→3 files):** Too large for this session. Risk of breaking live system.
+- **reporting.py split (1188 lines):** Cosmetic, doesn't affect correctness.
+- **Thread pool→Process pool:** Python limitation, can't forcibly kill threads. Accepted design.
+- **Signal module NaN handling standardization:** Low impact, all modules already handle NaN safely.
+- **Auth failure detection hardening:** Already has 3-layer validation, low marginal value.
+- **Cross-process Claude lock:** Currently single-process, not needed yet.
