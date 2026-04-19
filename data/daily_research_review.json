@@ -1,118 +1,116 @@
 {
-  "date": "2026-04-17",
-  "generated_at": "2026-04-17T21:33:20.915008+00:00",
-  "system_health": {
-    "status": "healthy",
-    "cycle_count": 21,
-    "error_count": 0,
-    "uptime_seconds": 12340,
-    "all_signals_ok": true,
-    "last_module_failures": [
-      "monte_carlo",
-      "price_targets",
-      "equity_curve"
-    ],
-    "module_failure_time": "2026-04-17T14:14:12Z"
-  },
-  "trades_today": [
-    "No new trades executed. Both strategies held positions.",
-    "Patient: HOLD ETH-USD (entry $2,331, current $2,430, +4.2%)",
-    "Bold: HOLD BTC-USD (entry $74,556, current $77,328, +3.7%) + ETH-USD (entry $2,319, current $2,430, +4.7%)"
+  "date": "2026-04-19",
+  "day_of_week": "Sunday",
+  "trades_today": [],
+  "layer2_decisions": [
+    {
+      "ts": "2026-04-19T09:16:12Z",
+      "trigger": "BTC-USD BUY->HOLD, ETH-USD BUY->HOLD (sustained)",
+      "patient": "HOLD - ETH near entry (-0.6%), ATR stop not breached. BUY->HOLD flip is noise in ranging",
+      "bold": "HOLD - BTC +0.9%, ETH flat. Both above ATR stops. Low vol ranging"
+    },
+    {
+      "ts": "2026-04-19T09:43:30Z",
+      "trigger": "BTC-USD consensus BUY (52%)",
+      "patient": "HOLD - ETH -0.9%, RSI 35.9 oversold. Selling into F&G 27 contradicts contrarian thesis",
+      "bold": "HOLD - BTC +0.7%, ETH -0.3%. 3B/3S split = no edge"
+    },
+    {
+      "ts": "2026-04-19T10:08:17Z",
+      "trigger": "ETH-USD BUY (38%), XAG-USD BUY (74%)",
+      "patient": "HOLD - ETH -1% from entry, RSI 33 oversold. Thesis intact",
+      "bold": "HOLD - BTC +0.5%, ETH -0.5%. Contrarian thesis still valid"
+    },
+    {
+      "ts": "2026-04-19T10:26:34Z",
+      "trigger": "XAU-USD consensus BUY (30%)",
+      "patient": "HOLD - ETH -0.94%, 2xATR stop technically breached but Sunday ATR compression noise",
+      "bold": "HOLD - BTC +0.65%, ETH -0.41%. Both above ATR stops. Contrarian fear-entry thesis intact"
+    }
   ],
-  "metals_trades_today": "No metals trades since March 5. System dormant on metals execution.",
-  "prices_at_close": {
-    "BTC-USD": 77328.0,
-    "ETH-USD": 2429.5,
-    "MSTR": 166.46,
-    "XAG-USD": 81.44,
-    "XAU-USD": 4854.72,
-    "fx_usd_sek": 9.1574
+  "current_positions": {
+    "patient": {
+      "ETH-USD": "Long, entered Apr 14-16 during F&G 21-23, near flat (-0.6% to -1%)"
+    },
+    "bold": {
+      "BTC-USD": "Long, +0.5-0.9% from entry at $74,556",
+      "ETH-USD": "Long, -0.3% to -0.5% from entry at $2,319"
+    }
   },
-  "regime": "ranging",
-  "fear_greed_index": 21,
-  "layer2_invocations": "15+ invocations today, all resulted in HOLD decisions",
+  "closing_prices": {
+    "BTC-USD": 75043,
+    "ETH-USD": 2310,
+    "XAG-USD": 80.62,
+    "XAU-USD": 4819,
+    "MSTR": 166.6
+  },
   "signals_that_were_right": [
-    "Contrarian fear thesis (F&G 21) \u2014 BTC +2.8%, ETH +2.7% recovery validated",
-    "BTC negative funding (-0.013) \u2014 short squeeze potential confirmed by price recovery",
-    "Fibonacci recent accuracy surge to 68.2% at 1d \u2014 regime shift captured",
-    "Ministral recent accuracy 68.0% at 1d, 62.6% at 3h \u2014 LLM signals outperforming",
-    "Mean reversion 65.4% recent at 1d \u2014 correct signal for ranging market"
+    "XAG-USD BUY consensus 74-80% persistent - silver holding above $80, thesis intact",
+    "Calendar signal maintaining 62.8% recent accuracy at 1d - consistent edge",
+    "Qwen3 holding 61.8% at 3h recently (2,483 samples) - reliable",
+    "Ministral 62.6% at 3h recently (684 samples) - strong LLM signal",
+    "News_event surging to 70.0% at 3h recently (1,762 samples) - massive recent improvement",
+    "Trend signal 61.6% at 3h recently - was 40.3% all-time, regime shift favoring trend-following"
   ],
   "signals_that_were_wrong": [
-    "Fear & Greed 1d recent: crashed to 25.9% (from 58.6% all-time) \u2014 contrarian logic failing in sustained fear",
-    "Macro regime 1d recent: 30.3% \u2014 macro signals broken in ranging",
-    "News event 1d recent: 29.5% \u2014 headline analysis not predicting well at 1d",
-    "Forecast 1d recent: 36.1% \u2014 time-series models failing",
-    "Structure 1d recent: 36.1% \u2014 structural breakout signals unreliable",
-    "Trend 1d recent: 40.7% \u2014 trend signals wrong in ranging (but 3h recent 61.6%!)"
+    "Sentiment collapsed to 33.8% at 3h recently (3,629 samples) - was 45.1% all-time",
+    "Fear & Greed dropped to 25.9% at 1d recently (170 samples) - was 58.6% all-time",
+    "Forecast dropped to 38.3% at 3h recently and 36.1% at 1d recently",
+    "BB dropped to 41.7% at 3h recently (626 sam) and 60.8% at 1d recent (293 sam) - mixed",
+    "Fibonacci at 38.3% at 3h recently (243 sam) - persistently bad",
+    "RSI dropped to 47.2% at 3h recently (3,572 sam) - was 55.3% all-time"
   ],
   "accuracy_changes": {
-    "biggest_improvements_recent": {
-      "fibonacci_1d": {
-        "all_time": 42.5,
-        "recent": 68.2,
-        "delta": "+25.7pp"
+    "regime_shift_detected": true,
+    "regime_description": "Transition from ranging to trending - trend-following signals surging, mean-reversion collapsing",
+    "3h_recent_vs_alltime": {
+      "biggest_improvements": {
+        "trend": {"recent": 61.6, "alltime": 40.3, "delta": 21.3},
+        "news_event": {"recent": 70.0, "alltime": 50.1, "delta": 19.9},
+        "smart_money": {"recent": 63.2, "alltime": 46.3, "delta": 16.9},
+        "ema": {"recent": 62.9, "alltime": 52.4, "delta": 10.5},
+        "ministral": {"recent": 62.6, "alltime": 52.3, "delta": 10.3}
       },
-      "trend_3h": {
-        "all_time": 40.3,
-        "recent": 61.6,
-        "delta": "+21.3pp"
-      },
-      "ministral_1d": {
-        "all_time": 58.6,
-        "recent": 68.0,
-        "delta": "+9.4pp"
-      },
-      "news_event_3h": {
-        "all_time": 58.5,
-        "recent": 70.0,
-        "delta": "+11.5pp"
-      },
-      "ema_3h": {
-        "all_time": 52.4,
-        "recent": 62.9,
-        "delta": "+10.5pp"
+      "biggest_declines": {
+        "sentiment": {"recent": 33.8, "alltime": 45.1, "delta": -11.3},
+        "bb": {"recent": 41.7, "alltime": 52.6, "delta": -10.9},
+        "forecast": {"recent": 38.3, "alltime": 47.5, "delta": -9.2},
+        "rsi": {"recent": 47.2, "alltime": 55.3, "delta": -8.1},
+        "mean_reversion": {"recent": 45.5, "alltime": 52.5, "delta": -7.0}
       }
     },
-    "biggest_declines_recent": {
-      "fear_greed_1d": {
-        "all_time": 58.6,
-        "recent": 25.9,
-        "delta": "-32.7pp"
+    "1d_recent_vs_alltime": {
+      "biggest_improvements": {
+        "macd": {"recent": 58.7, "alltime": 43.9, "delta": 14.8},
+        "ministral": {"recent": 68.0, "alltime": 58.6, "delta": 9.4},
+        "fibonacci": {"recent": 68.2, "alltime": 42.8, "delta": 25.4},
+        "mean_reversion": {"recent": 65.4, "alltime": 52.5, "delta": 12.9},
+        "bb": {"recent": 60.8, "alltime": 54.1, "delta": 6.7}
       },
-      "macro_regime_1d": {
-        "all_time": 46.6,
-        "recent": 30.3,
-        "delta": "-16.3pp"
-      },
-      "news_event_1d": {
-        "all_time": 50.0,
-        "recent": 29.5,
-        "delta": "-20.5pp"
-      },
-      "sentiment_3h": {
-        "all_time": 45.1,
-        "recent": 33.8,
-        "delta": "-11.3pp"
-      },
-      "forecast_3h": {
-        "all_time": 47.2,
-        "recent": 38.3,
-        "delta": "-8.9pp"
+      "biggest_declines": {
+        "fear_greed": {"recent": 25.9, "alltime": 58.6, "delta": -32.7},
+        "news_event": {"recent": 29.5, "alltime": 50.1, "delta": -20.6},
+        "macro_regime": {"recent": 30.3, "alltime": 46.6, "delta": -16.3},
+        "volatility_sig": {"recent": 35.0, "alltime": 46.6, "delta": -11.6},
+        "structure": {"recent": 36.1, "alltime": 50.2, "delta": -14.1}
       }
     }
   },
   "system_errors": [
-    "Critical error (resolved): Layer 2 journal lag for XAU-USD BUY trigger \u2014 agent completed but journal write delayed",
-    "Module failures: monte_carlo, price_targets, equity_curve (at 14:14 UTC, non-recurring)"
+    "monte_carlo module failure (2026-04-17T22:06) - persisting from prior day",
+    "price_targets module failure (2026-04-17T22:06) - persisting",
+    "equity_curve module failure (2026-04-17T22:06) - persisting",
+    "No metals trades since March 5 - metals trading inactive",
+    "Patient ETH-USD 2xATR stop technically breached on Sunday but attributed to ATR compression"
   ],
   "key_observations": [
-    "REGIME SHIFT: Dramatic accuracy divergence between all-time and recent 7d \u2014 ranging market rewards mean-reversion/pattern signals, punishes macro/sentiment",
-    "LLM SIGNALS OUTPERFORMING: Ministral (68% 1d, 62.6% 3h) and Qwen3 (59.8% 1d, 61.8% 3h) are consistently top-tier recent performers",
-    "FEAR & GREED PARADOX: F&G signal crashed to 25.9% 1d recent despite extreme fear (21) being a contrarian bullish signal \u2014 the signal fires too early/too often in sustained fear",
-    "MSTR OVEREXTENDED: +29% 7d, multi-TF SELL consensus. Not held but noteworthy divergence from BTC",
-    "PROPHECY TRACKING: Silver $81.44 (4/5 checkpoints hit, $120 target). BTC $77.3K (1/4 checkpoints hit, approaching $85K). ETH $2,430 (0/3 checkpoints hit, approaching $2,500)",
-    "PORTFOLIO HEALTH: Both strategies profitable. Patient +4.2% on ETH. Bold +3.7% BTC, +4.7% ETH. All above ATR stops.",
-    "NO NEW SIGNALS FOR 0% ACCURACY SIGNALS: cot_positioning, futures_basis, hurst_regime, shannon_entropy, vix_term_structure, gold_real_yield_paradox, cross_asset_tsmom, copper_gold_ratio \u2014 these have 0 samples at 1d, likely not generating BUY/SELL votes or too new"
+    "CRITICAL: Regime shift detected - trend-following signals surging (trend +21.3%, EMA +10.5%), mean-reversion collapsing (BB -10.9%, mean_rev -7.0%). System needs adaptive weighting.",
+    "Sunday low-volume session: all 4 Layer 2 invocations resulted in HOLD. Appropriate for weekend.",
+    "XAG-USD consistently strongest BUY consensus (74-80%) across multiple sessions. Silver prophecy on track at $80.62.",
+    "Patient ETH position dangerously close to 2xATR stop ($2,317 vs $2,318 price). Monday volume normalization could trigger.",
+    "Fear & Greed at 27 (fear) - was the basis for contrarian entries Apr 14-16, but F&G accuracy collapsed to 25.9% recently.",
+    "Fibonacci signal shows extreme divergence: 68.2% at 1d recent vs 38.3% at 3h recent - timeframe matters enormously.",
+    "Seven new signals (hurst_regime, shannon_entropy, vix_term_structure, gold_real_yield_paradox, cross_asset_tsmom, copper_gold_ratio, futures_basis) have 0 accuracy samples at 1d. Need time to accumulate.",
+    "DXY cross-asset at 100% accuracy but only 5 samples - too small to be meaningful."
   ]
 }

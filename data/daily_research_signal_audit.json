@@ -1,244 +1,125 @@
 {
-  "date": "2026-04-17",
-  "generated_at": "2026-04-17T21:38:48.169831+00:00",
+  "date": "2026-04-19",
   "top_signals": {
-    "at_1d_alltime": [
-      {
-        "signal": "econ_calendar",
-        "accuracy": 62.6,
-        "samples": 4617
-      },
-      {
-        "signal": "claude_fundamental",
-        "accuracy": 61.9,
-        "samples": 9608,
-        "note": "BUY=65.5%, SELL gated at 33.6%"
-      },
-      {
-        "signal": "qwen3",
-        "accuracy": 59.8,
-        "samples": 3639,
-        "note": "BUY gated at 30.3%, SELL=74.3%"
-      },
-      {
-        "signal": "calendar",
-        "accuracy": 58.9,
-        "samples": 7174
-      },
-      {
-        "signal": "fear_greed",
-        "accuracy": 58.6,
-        "samples": 10232,
-        "note": "RECENT crashed to 25.9%"
-      },
-      {
-        "signal": "ministral",
-        "accuracy": 58.6,
-        "samples": 5850
-      }
+    "3h_alltime": [
+      {"signal": "funding", "accuracy": 74.2, "samples": 535, "note": "Crypto-only, horizon-gated to 3h/4h"},
+      {"signal": "qwen3", "accuracy": 59.4, "samples": 3385, "note": "Local LLM, consistent performer"},
+      {"signal": "rsi", "accuracy": 55.3, "samples": 23381, "note": "Massive sample, reliable"},
+      {"signal": "fear_greed", "accuracy": 53.9, "samples": 7205, "note": "But COLLAPSED to 25.9% recently at 1d"},
+      {"signal": "ema", "accuracy": 52.4, "samples": 13955, "note": "Simple but stable"}
     ],
-    "at_3h_alltime": [
-      {
-        "signal": "funding",
-        "accuracy": 74.2,
-        "samples": 535
-      },
-      {
-        "signal": "calendar",
-        "accuracy": 67.9,
-        "samples": 4928
-      },
-      {
-        "signal": "econ_calendar",
-        "accuracy": 59.9,
-        "samples": 2402
-      },
-      {
-        "signal": "qwen3",
-        "accuracy": 59.4,
-        "samples": 3385
-      }
+    "3h_recent_7d": [
+      {"signal": "news_event", "accuracy": 70.0, "samples": 1762, "note": "SURGING from 50.1% alltime - regime shift"},
+      {"signal": "smart_money", "accuracy": 63.2, "samples": 133, "note": "Small sample but strong recent"},
+      {"signal": "ema", "accuracy": 62.9, "samples": 2248, "note": "Trending regime favors EMAs"},
+      {"signal": "ministral", "accuracy": 62.6, "samples": 684, "note": "Local LLM excelling"},
+      {"signal": "qwen3", "accuracy": 61.8, "samples": 2483, "note": "Consistent across regimes"},
+      {"signal": "trend", "accuracy": 61.6, "samples": 2283, "note": "WAS 40.3% alltime - massive improvement"}
     ],
-    "recent_7d_3h": [
-      {
-        "signal": "news_event",
-        "accuracy": 70.0,
-        "samples": 1762
-      },
-      {
-        "signal": "smart_money",
-        "accuracy": 63.2,
-        "samples": 133
-      },
-      {
-        "signal": "ema",
-        "accuracy": 62.9,
-        "samples": 2248
-      },
-      {
-        "signal": "ministral",
-        "accuracy": 62.6,
-        "samples": 684
-      },
-      {
-        "signal": "qwen3",
-        "accuracy": 61.8,
-        "samples": 2483
-      },
-      {
-        "signal": "trend",
-        "accuracy": 61.6,
-        "samples": 2283,
-        "note": "UP from 40.3% alltime"
-      }
+    "1d_alltime": [
+      {"signal": "econ_calendar", "accuracy": 62.6, "samples": 4617, "note": "SELL-only signal, consistent"},
+      {"signal": "claude_fundamental", "accuracy": 61.6, "samples": 9960, "note": "BUY-biased but strong"},
+      {"signal": "qwen3", "accuracy": 60.0, "samples": 3651, "note": "Best balanced LLM signal"},
+      {"signal": "fear_greed", "accuracy": 58.6, "samples": 10232, "note": "BUY-only contrarian"},
+      {"signal": "ministral", "accuracy": 58.6, "samples": 5858, "note": "SELL side 59.7% drives accuracy"}
     ]
   },
   "worst_signals": {
-    "at_1d": [
-      "futures_flow 35.4%",
-      "funding 33.5% (OK at 3h)",
-      "fibonacci 42.5%",
-      "macd 43.8%"
+    "3h_alltime_below_gate": [
+      {"signal": "trend", "accuracy": 40.3, "samples": 11125, "note": "BUT surged to 61.6% recently - lagged by alltime"},
+      {"signal": "oscillators", "accuracy": 43.0, "samples": 1366, "note": "Consistently bad"},
+      {"signal": "fibonacci", "accuracy": 43.3, "samples": 8811, "note": "Large sample, consistently bad"},
+      {"signal": "macd", "accuracy": 43.7, "samples": 4952, "note": "Surged to 50.7% recently"},
+      {"signal": "sentiment", "accuracy": 45.1, "samples": 31590, "note": "Collapsed to 33.8% recently"}
     ],
-    "recent_1d": [
-      "fear_greed 25.9%",
-      "news_event 29.5%",
-      "macro_regime 30.3%",
-      "volatility_sig 35.0%",
-      "forecast 36.1%"
-    ],
-    "zero_sample_1d": [
-      "cot_positioning",
-      "futures_basis",
-      "hurst_regime",
-      "shannon_entropy",
-      "vix_term_structure",
-      "gold_real_yield_paradox",
-      "cross_asset_tsmom",
-      "copper_gold_ratio"
+    "1d_alltime_below_gate": [
+      {"signal": "funding", "accuracy": 31.3, "samples": 610, "note": "Horizon-gated correctly - great at 3h, terrible at 1d"},
+      {"signal": "futures_flow", "accuracy": 36.4, "samples": 1576, "note": "Poor across all horizons"},
+      {"signal": "ml", "accuracy": 41.7, "samples": 1714, "note": "Disabled already"},
+      {"signal": "fibonacci", "accuracy": 42.8, "samples": 15589, "note": "Persistently bad"},
+      {"signal": "macd", "accuracy": 43.9, "samples": 5882, "note": "BUT 58.7% at 1d recently"}
     ]
-  },
-  "directional_asymmetry": {
-    "gate_threshold": 0.4,
-    "gate_min_samples": 30,
-    "extreme_cases": [
-      {
-        "signal": "qwen3",
-        "buy": 30.3,
-        "sell": 74.3,
-        "delta": 44.0,
-        "gated": "BUY"
-      },
-      {
-        "signal": "claude_fundamental",
-        "buy": 65.5,
-        "sell": 33.6,
-        "delta": 31.9,
-        "gated": "SELL"
-      },
-      {
-        "signal": "credit_spread_risk",
-        "buy": 70.3,
-        "sell": 37.5,
-        "delta": 32.8,
-        "gated": "SELL"
-      },
-      {
-        "signal": "momentum",
-        "buy": 62.5,
-        "sell": 45.0,
-        "delta": 17.5,
-        "gated": "NONE (45% > 40% threshold)"
-      }
-    ],
-    "recommendation": "Raise directional gate from 40% to 45%"
   },
   "correlation_clusters": [
     {
-      "name": "Macro-Structural BUY Block",
-      "signals": [
-        "calendar",
-        "macro_regime",
-        "momentum_factors",
-        "structure"
-      ],
-      "co_occurrence": "85-92%",
-      "impact": "4 signals acting as 1, inflating BUY consensus",
-      "fix": "Cluster-adjusted weighting or group vote"
+      "name": "trend_direction (EXISTING)",
+      "members": ["ema", "macd", "trend", "heikin_ashi", "volume_flow", "macro_regime", "momentum_factors", "structure", "oscillators"],
+      "measured_agreement": "91-100% across BTC/ETH/XAU/XAG",
+      "issue": "9 members is excessive. Even with 0.3x penalty, cluster gets 1.0 + 8*0.3 = 3.4x effective weight",
+      "recommendation": "Tighten penalty to 0.15x for this mega-cluster, or split into sub-groups"
+    },
+    {
+      "name": "momentum_cluster (EXISTING)",
+      "members": ["mean_reversion", "rsi", "bb", "momentum"],
+      "measured_agreement": "100% in metals (bb/mean_reversion/rsi/momentum all vote identically)",
+      "issue": "Effective weight 1.0 + 3*0.3 = 1.9x when they're 100% redundant",
+      "recommendation": "Consider 0.15x for this cluster too"
+    },
+    {
+      "name": "ORPHANED: credit_spread_risk",
+      "measured_agreement": "100% with macro_regime in ETH/XAU, 100% with news_event in BTC",
+      "issue": "Getting full 1.0x weight despite being completely redundant with trend_direction group",
+      "recommendation": "Add credit_spread_risk to trend_direction group"
+    },
+    {
+      "name": "ORPHANED: futures_flow",
+      "measured_agreement": "100% with credit_spread_risk + macro_regime in ETH",
+      "issue": "Getting full 1.0x weight, 36.4% accuracy at 1d",
+      "recommendation": "Add to trend_direction group; may get gated by accuracy anyway"
     }
   ],
-  "per_ticker_consensus": {
-    "BTC-USD": {
-      "1d": 53.0,
-      "3h": 50.7,
-      "verdict": "Barely above coin flip"
+  "regime_performance": {
+    "current_regime": "ranging (transitioning to trending)",
+    "evidence": {
+      "trend_following_surge": "trend 40.3%->61.6%, ema 52.4%->62.9%, momentum_factors 47.6%->60.1%",
+      "mean_reversion_collapse": "bb 52.6%->41.7%, mean_reversion 52.5%->45.5%, sentiment 45.1%->33.8%",
+      "interpretation": "Market transitioning from range-bound to directional. Trend signals now have edge, MR signals losing edge."
     },
-    "ETH-USD": {
-      "1d": 49.6,
-      "3h": 47.7,
-      "verdict": "BELOW coin flip - losing"
-    },
-    "MSTR": {
-      "1d": 47.2,
-      "3h": 45.9,
-      "verdict": "BELOW coin flip - losing"
-    },
-    "XAU-USD": {
-      "1d": 49.8,
-      "3h": 54.4,
-      "verdict": "3h slight edge only"
-    },
+    "crisis_mode_status": "Likely active (fear_greed 25.9%, macro_regime 30.3%, news_event 29.5% at 1d recent)",
+    "problem": "Crisis mode penalizes trend signals, but trend is WINNING (61.6%). Crisis mode logic may be counterproductive in current regime."
+  },
+  "voter_participation": {
     "XAG-USD": {
-      "1d": 50.6,
-      "3h": 54.3,
-      "verdict": "3h slight edge only"
+      "always_hold_count": 21,
+      "active_count": 15,
+      "most_active": ["volume_flow(98%)", "heikin_ashi(96%)", "trend(92%)", "momentum_factors(90%)", "mean_reversion(86%)"]
+    },
+    "BTC-USD": {
+      "always_hold_count": 8,
+      "active_count": 16,
+      "most_active": ["credit_spread_risk", "macro_regime", "structure", "trend", "heikin_ashi"]
     }
   },
-  "regime_performance": {
-    "current": "ranging",
-    "winners": [
-      "mean_reversion",
-      "fibonacci",
-      "ministral",
-      "ema"
-    ],
-    "losers": [
-      "fear_greed",
-      "macro_regime",
-      "trend (1d)",
-      "forecast"
-    ]
-  },
+  "new_signals_needing_data": [
+    "hurst_regime (3905 calls, 0 accuracy samples)",
+    "shannon_entropy (3776 calls, 0 accuracy)",
+    "vix_term_structure (2860 calls, 0 accuracy)",
+    "gold_real_yield_paradox (2387 calls, 0 accuracy)",
+    "cross_asset_tsmom (1912 calls, 0 accuracy)",
+    "copper_gold_ratio (938 calls, 0 accuracy)",
+    "futures_basis (4611 calls, 0 accuracy)"
+  ],
   "recommendations": [
     {
       "priority": 1,
-      "title": "Correlation-adjusted consensus weighting",
-      "impact": "high",
-      "effort": "medium"
+      "title": "Add credit_spread_risk and futures_flow to correlation groups",
+      "description": "Both are 100% correlated with existing trend_direction members but getting full 1.0x weight.",
+      "effort": "15 minutes",
+      "files": ["portfolio/signal_engine.py"]
     },
     {
       "priority": 2,
-      "title": "Raise directional gate 40% -> 45%",
-      "impact": "medium",
-      "effort": "easy"
+      "title": "Review crisis mode logic for current regime",
+      "description": "Crisis mode penalizes trend signals which are currently winning. May need to separate macro-signal-crisis from market-trend-crisis.",
+      "effort": "1 hour",
+      "files": ["portfolio/signal_engine.py"]
     },
     {
       "priority": 3,
-      "title": "Per-ticker consensus minimum gate at 52%",
-      "impact": "high",
-      "effort": "easy"
-    },
-    {
-      "priority": 4,
-      "title": "Regime-adaptive signal reweighting",
-      "impact": "high",
-      "effort": "medium"
-    },
-    {
-      "priority": 5,
-      "title": "Audit 0-sample signals at 1d",
-      "impact": "low",
-      "effort": "easy"
+      "title": "Tighten correlation penalty for mega-clusters",
+      "description": "trend_direction 9 members = 3.4x effective weight. Consider tightening penalty.",
+      "effort": "30 minutes",
+      "files": ["portfolio/signal_engine.py"]
     }
   ]
 }
