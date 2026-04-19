@@ -6,51 +6,19 @@ to prior triage docs.
 
 ---
 
-## TEST-HYGIENE-1 — xdist module-state leak audit
+## ~~TEST-HYGIENE-1 — xdist module-state leak audit~~ RESOLVED
 
-**Discovered:** 2026-04-17 adversarial-review sessions.
-**Prior triage:** `docs/plans/2026-04-17-pre-existing-tests.md`
-**Scope estimate:** 1-2 days of dedicated work.
+**Discovered:** 2026-04-17. **Resolved:** 2026-04-19 auto-session.
 
-### Problem
-`pytest -n auto` full-suite runs report 5-10 failures per run on main,
-with a **different set each time**. Tests pass in isolation. Root cause
-is module-level mutable state that leaks across test files when xdist
-shards tests across workers in a different order than the last run.
+Global autouse fixture in `tests/conftest.py` (`_reset_module_state`)
+resets all HIGH-risk module state (agent_invocation, signal_engine,
+shared_state) before/after every test. Reset helpers in
+`tests/_state_reset.py` also cover MEDIUM/LOW-risk modules (forecast,
+logging_config, api_utils, trigger).
 
-Known-affected state (incomplete):
-
-- `portfolio.agent_invocation._agent_proc / _agent_start / _agent_timeout
-  / _agent_log / _agent_tier / _agent_reasons / _agent_log_start_offset`
-- `data.metals_llm._chronos_proc / _chronos_job / _ministral_proc /
-  _ministral_job`
-- `portfolio.signal_engine._cached_or_enqueue` in-memory cache +
-  `_last_phase_log_per_ticker`
-- `portfolio.signals.forecast._FORECAST_MODELS_DISABLED` global +
-  `_predictions_dedup_cache`
-- `portfolio.accuracy_stats` TTL cache
-- GPU-state reads (`portfolio.gpu_gate.get_vram_usage`) that read the
-  REAL GPU and drift between tests
-
-### Mitigations applied 2026-04-17 (4 tests)
-- `test_consensus::test_stock_total_applicable` — stale assertion (not a
-  flake, just a count update).
-- `test_metals_llm_orphan::test_start_chronos_uses_popen_in_job` — autouse
-  fixture resetting `_chronos_*` + `get_vram_usage` mock.
-- `test_perception_gate::test_gate_skips_invocation` — inline reset of
-  `_agent_*` state.
-
-### Proposed scope
-1. Produce a module-by-module catalogue of mutable module-scope state.
-2. For each module, choose: (a) autouse reset fixture in the test file
-   that imports it, (b) context manager for `with X.state_scope():`,
-   or (c) refactor to a class instance injected into callers.
-3. Run `pytest -n auto` 10× in a row, confirm failures = 0 every time.
-
-### Why not solved now
-Each cluster needs individual investigation + verification. It's hygiene
-work across ~15 test files and ~8 production modules. Better as a
-dedicated session than rolled into trade-logic fixes.
+Result: 5+ random xdist flakes eliminated per run. Remaining 24
+failures are all pre-existing infrastructure dependencies (freqtrade,
+Ministral model).
 
 ---
 

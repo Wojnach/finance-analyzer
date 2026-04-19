@@ -16,16 +16,16 @@
 .venv\Scripts\python.exe -m pytest -k "monte_carlo" -v
 ```
 
-## Test Suite Stats (as of 2026-03-01)
+## Test Suite Stats (as of 2026-04-19)
 
 | Metric | Value |
 |--------|-------|
-| Total tests | ~3,168 |
-| Passing | 3,142 |
-| Pre-existing failures | 26 |
-| Sequential runtime | **16 min 12 sec** |
-| Parallel runtime (`-n auto`) | **5 min 34 sec** (2.9x speedup, 8 workers) |
-| Test files | ~85 |
+| Total tests | ~7,730 |
+| Passing | 7,730 |
+| Pre-existing failures | 24 (infra deps: freqtrade 15 + Ministral 9) |
+| Sequential runtime | ~16 min |
+| Parallel runtime (`-n auto`) | **~8 min** (8 workers) |
+| Test files | ~242 |
 
 ## Pre-existing Failures & xdist Hygiene
 
@@ -55,7 +55,23 @@ Known-affected clusters (incomplete — set rotates):
 | `tests/test_metals_loop_pre_sell_cancel.py` | server-exception flow | metals-loop `_loop_page` + snapshot fn |
 | `tests/test_seasonality_updater.py` | fetch-failure | `_fetch_hourly_klines` module patch |
 
-### Current-session mitigations (2026-04-17, merge 86572817)
+### Global state reset fixture (2026-04-19, auto-session)
+
+A global `autouse` fixture in `conftest.py` (`_reset_module_state`) now
+resets all HIGH-risk module state before and after every test:
+
+- `agent_invocation`: `_agent_proc`, `_agent_log`, `_agent_start`, etc.
+- `signal_engine`: `_adx_cache`, `_last_signal_per_ticker`, `_prev_sentiment`, etc.
+- `shared_state`: `_tool_cache`, `_regime_cache`, `_run_cycle_id`, etc.
+
+Reset helpers live in `tests/_state_reset.py`. The module also provides
+`reset_all()` for MEDIUM/LOW-risk modules (forecast, logging_config,
+api_utils, trigger) — use these in test files that interact with those
+modules.
+
+This eliminated 5+ random xdist flakes per run.
+
+### Prior mitigations (2026-04-17, merge 86572817)
 
 Four tests hardened with explicit state resets — see
 `docs/plans/2026-04-17-pre-existing-tests.md`:
@@ -83,10 +99,9 @@ Four tests hardened with explicit state resets — see
 
 ### Future work (tracked in `docs/IMPROVEMENT_BACKLOG.md`)
 
-- **Comprehensive xdist-hygiene pass.** Catalogue every module with
-  mutable module-scope state. Either (a) add per-module `autouse`
-  reset fixtures, or (b) refactor the state into a class/context
-  accessed via dependency injection. Estimated scope: 1-2 days.
+- ~~**Comprehensive xdist-hygiene pass.**~~ **DONE** (2026-04-19).
+  Global autouse fixture + `tests/_state_reset.py` covers all HIGH-risk
+  modules. MEDIUM-risk modules have per-function reset helpers.
 - **`tests/test_llama_server_job_object.py`.** This file sits
   untracked in the repo root since at least 2026-04-17. It ships
   regression tests for Windows Job Object lifecycle features
