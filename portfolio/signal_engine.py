@@ -1041,6 +1041,13 @@ _STATIC_CORRELATION_GROUPS = {
     # 2026-04-13: claude_fundamental + crypto_macro agree 92-100%.
     # structure removed (now in trend_direction where correlations are stronger).
     "fundamental_cluster": frozenset({"claude_fundamental", "crypto_macro"}),
+    # 2026-04-19: Measured correlation (50 snapshots): credit_spread_risk
+    # agrees 100% with macro_regime in ETH/XAU, 100% with news_event in BTC.
+    # futures_flow agrees 100% with credit_spread_risk + macro_regime in ETH.
+    # Both were orphaned and getting full 1.0x weight despite redundancy.
+    # Grouped together rather than in trend_direction to avoid inflating that
+    # mega-cluster further (already 9 members at 0.12x).
+    "cross_asset_flow": frozenset({"credit_spread_risk", "futures_flow"}),
 }
 # Public alias for backward compatibility (used by tests and reporting)
 CORRELATION_GROUPS = _STATIC_CORRELATION_GROUPS
@@ -1562,6 +1569,12 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # Crisis mode detection: when multiple macro-external signals have degraded
     # accuracy, the market is in an abnormal regime (war, systemic crisis) where
     # trend-following breaks and mean-reversion becomes more reliable.
+    #
+    # 2026-04-19: Made crisis response conditional on trend signal performance.
+    # When macro signals are broken but trend signals have >55% accuracy, the
+    # crisis is in the macro indicators, not in the trend — penalizing trend
+    # signals that are winning is actively harmful (observed: trend 61.6%,
+    # EMA 62.9% being penalized 0.6x while crisis mode was active).
     _MACRO_CRISIS_SIGNALS = {"fear_greed", "macro_regime", "structure", "news_event", "sentiment"}
     broken_count = sum(
         1 for s in _MACRO_CRISIS_SIGNALS
@@ -1569,12 +1582,36 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         and accuracy_data.get(s, {}).get("accuracy", 0.5) < _CRISIS_THRESHOLD
     )
     crisis_mode = broken_count >= _CRISIS_MIN_BROKEN
-    if crisis_mode:
-        logger.info("Crisis mode detected: %d/%d macro signals below %.0f%% accuracy",
-                     broken_count, len(_MACRO_CRISIS_SIGNALS), _CRISIS_THRESHOLD * 100)
 
     _TREND_SIGNALS = {"ema", "trend", "heikin_ashi", "volume_flow"}
     _MR_SIGNALS = {"mean_reversion", "calendar"}
+
+    # Check if trend signals are actually underperforming before penalizing.
+    # If avg trend accuracy > 55%, trend is capturing edge despite macro chaos.
+    _CRISIS_TREND_ACCURACY_FLOOR = 0.55
+    crisis_penalize_trend = False
+    if crisis_mode:
+        trend_accs = [
+            accuracy_data.get(s, {}).get("accuracy", 0.5)
+            for s in _TREND_SIGNALS
+            if accuracy_data.get(s, {}).get("total", 0) >= ACCURACY_GATE_MIN_SAMPLES
+        ]
+        avg_trend_acc = sum(trend_accs) / len(trend_accs) if trend_accs else 0.5
+        crisis_penalize_trend = avg_trend_acc < _CRISIS_TREND_ACCURACY_FLOOR
+        if crisis_penalize_trend:
+            logger.info(
+                "Crisis mode active (full): %d/%d macro signals broken, "
+                "trend avg %.1f%% < %.0f%% floor — penalizing trend, boosting MR",
+                broken_count, len(_MACRO_CRISIS_SIGNALS),
+                avg_trend_acc * 100, _CRISIS_TREND_ACCURACY_FLOOR * 100,
+            )
+        else:
+            logger.info(
+                "Crisis mode active (partial): %d/%d macro signals broken, but "
+                "trend avg %.1f%% >= %.0f%% floor — NOT penalizing trend signals",
+                broken_count, len(_MACRO_CRISIS_SIGNALS),
+                avg_trend_acc * 100, _CRISIS_TREND_ACCURACY_FLOOR * 100,
+            )
 
     # Voter-count circuit breaker (Batch 2 of 2026-04-16 accuracy gating reconfig).
     # Only the overall accuracy gate is relaxable — directional and correlation
@@ -1672,9 +1709,10 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         # Horizon-specific weight adjustment
         if signal_name in horizon_mults:
             weight *= horizon_mults[signal_name]
-        # Crisis mode adjustments: penalize trend signals, boost mean-reversion
+        # Crisis mode adjustments: penalize trend signals (only if they're
+        # underperforming), boost mean-reversion. See 2026-04-19 fix above.
         if crisis_mode:
-            if signal_name in _TREND_SIGNALS:
+            if signal_name in _TREND_SIGNALS and crisis_penalize_trend:
                 weight *= _CRISIS_TREND_PENALTY
             elif signal_name in _MR_SIGNALS:
                 weight *= _CRISIS_MR_BOOST
