@@ -928,3 +928,73 @@ class TestCorrelationPenaltyMultiGroup:
         }
         action, conf = _weighted_consensus(votes, accuracy, "unknown")
         assert action == "BUY"
+
+
+class TestCrossAssetFlowGroup:
+    """credit_spread_risk and futures_flow should be in cross_asset_flow group."""
+
+    def test_cross_asset_flow_group_exists(self):
+        from portfolio.signal_engine import CORRELATION_GROUPS
+        assert "cross_asset_flow" in CORRELATION_GROUPS
+
+    def test_credit_spread_risk_in_cross_asset_flow(self):
+        from portfolio.signal_engine import CORRELATION_GROUPS
+        assert "credit_spread_risk" in CORRELATION_GROUPS["cross_asset_flow"]
+
+    def test_futures_flow_in_cross_asset_flow(self):
+        from portfolio.signal_engine import CORRELATION_GROUPS
+        assert "futures_flow" in CORRELATION_GROUPS["cross_asset_flow"]
+
+
+class TestCrisisModeConditionalTrendPenalty:
+    """Crisis mode should NOT penalize trend signals when they're accurate."""
+
+    def test_crisis_no_trend_penalty_when_trend_accurate(self):
+        """When macro signals are broken but trend signals have >55% accuracy,
+        crisis mode should NOT penalize trend signals."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        # Trend signal voting BUY with high accuracy
+        votes = {"ema": "BUY", "trend": "BUY", "rsi": "BUY"}
+        # Macro signals broken (below 35%), but trend signals strong
+        accuracy = {
+            "fear_greed": {"accuracy": 0.25, "total": 100},
+            "macro_regime": {"accuracy": 0.30, "total": 100},
+            "news_event": {"accuracy": 0.29, "total": 100},
+            "structure": {"accuracy": 0.40, "total": 100},
+            "sentiment": {"accuracy": 0.46, "total": 100},
+            # Trend signals are strong
+            "ema": {"accuracy": 0.63, "total": 100},
+            "trend": {"accuracy": 0.62, "total": 100},
+            "heikin_ashi": {"accuracy": 0.55, "total": 100},
+            "volume_flow": {"accuracy": 0.56, "total": 100},
+            "rsi": {"accuracy": 0.55, "total": 100},
+        }
+        action, conf_no_crisis = _weighted_consensus(votes, accuracy, "unknown")
+        # Should still get full BUY — trend not penalized
+        assert action == "BUY"
+        # The confidence should be relatively high since trend signals are accurate
+        assert conf_no_crisis > 0.5
+
+    def test_crisis_penalizes_trend_when_trend_weak(self):
+        """When both macro AND trend signals are broken, crisis penalty applies."""
+        from portfolio.signal_engine import _weighted_consensus
+
+        votes = {"ema": "BUY", "mean_reversion": "SELL", "rsi": "SELL"}
+        accuracy = {
+            # Macro broken
+            "fear_greed": {"accuracy": 0.25, "total": 100},
+            "macro_regime": {"accuracy": 0.30, "total": 100},
+            "news_event": {"accuracy": 0.29, "total": 100},
+            # Trend signals also weak (below 55% floor)
+            "ema": {"accuracy": 0.48, "total": 100},
+            "trend": {"accuracy": 0.42, "total": 100},
+            "heikin_ashi": {"accuracy": 0.45, "total": 100},
+            "volume_flow": {"accuracy": 0.44, "total": 100},
+            # MR signals
+            "mean_reversion": {"accuracy": 0.60, "total": 100},
+            "rsi": {"accuracy": 0.55, "total": 100},
+        }
+        action, conf = _weighted_consensus(votes, accuracy, "unknown")
+        # MR should win since trend is penalized and MR is boosted
+        assert action == "SELL"
