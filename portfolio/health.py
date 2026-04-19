@@ -96,6 +96,12 @@ def check_agent_silence(max_market_seconds: int = 7200,
         last_ts = last_jsonl_entry(invocations_file, field="ts")
         if last_ts is None:
             return {"silent": True, "age_seconds": float("inf"), "threshold": max_market_seconds, "market_open": False}
+        # Write back to health state so subsequent calls hit the cache
+        # instead of re-parsing the JSONL file every time.
+        with _health_lock:
+            wb_state = load_health()
+            wb_state["last_invocation_ts"] = last_ts
+            atomic_write_json(HEALTH_FILE, wb_state)
 
     if not last_ts:
         return {"silent": True, "age_seconds": float("inf"), "threshold": max_market_seconds, "market_open": False}

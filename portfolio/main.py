@@ -21,13 +21,14 @@ This is the orchestrator module. All logic has been extracted to:
 import atexit
 import logging
 import os
+import random
 import sys
 import time
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
-from portfolio.file_utils import load_json
+from portfolio.file_utils import atomic_write_json, load_json
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
@@ -343,17 +344,18 @@ def _run_post_cycle(config, report=None):
         _track("oil_precompute", maybe_precompute_oil, config)
     except Exception as e_oil:
         logger.warning("Oil precompute import failed: %s", e_oil)
-    # Prune unbounded JSONL files to prevent disk exhaustion (BUG-59)
-    try:
-        from portfolio.file_utils import prune_jsonl
-        for name in ("invocations.jsonl", "layer2_journal.jsonl", "telegram_messages.jsonl"):
+    # Prune unbounded JSONL files to prevent disk exhaustion (BUG-59).
+    # Per-file isolation: a locked file doesn't block the others.
+    from portfolio.file_utils import prune_jsonl
+    _prune_failures = []
+    for name in ("invocations.jsonl", "layer2_journal.jsonl", "telegram_messages.jsonl"):
+        try:
             prune_jsonl(DATA_DIR / name, max_entries=5000)
-        if report is not None:
-            report.post_cycle_results["jsonl_prune"] = True
-    except Exception as e_prune:
-        logger.warning("JSONL prune failed: %s", e_prune)
-        if report is not None:
-            report.post_cycle_results["jsonl_prune"] = False
+        except Exception as e_prune:
+            _prune_failures.append(name)
+            logger.warning("JSONL prune failed for %s: %s", name, e_prune)
+    if report is not None:
+        report.post_cycle_results["jsonl_prune"] = len(_prune_failures) == 0
     # Fin command self-improvement: backfill outcomes + evolve lessons (daily)
     try:
         from portfolio.fin_evolve import maybe_evolve
@@ -926,26 +928,61 @@ def run(force_report=False, active_symbols=None):
     return report
 
 
-_consecutive_crashes = 0
 _MAX_CRASH_ALERTS = 5  # stop sending alerts after this many consecutive crashes
 _MAX_CRASH_BACKOFF = 300  # max sleep between crashes (5 min)
+_CRASH_SUMMARY_INTERVAL = 100  # send a summary every N crashes after suppression
+_CRASH_COUNTER_FILE = DATA_DIR / "crash_counter.json"
+
+
+def _load_crash_counter() -> int:
+    """Load persisted crash counter. Returns 0 if missing/corrupt."""
+    data = load_json(_CRASH_COUNTER_FILE)
+    if data and isinstance(data.get("count"), int):
+        return data["count"]
+    return 0
+
+
+def _save_crash_counter(count: int) -> None:
+    """Persist crash counter to survive process restarts."""
+    atomic_write_json(_CRASH_COUNTER_FILE, {
+        "count": count,
+        "updated": datetime.now(UTC).isoformat(),
+    })
+
+
+_consecutive_crashes = _load_crash_counter()
 
 
 def _crash_alert(error_msg):
     """Save crash alert to message log with crash-loop protection.
 
     After _MAX_CRASH_ALERTS consecutive crashes, stops sending alerts
-    to prevent Telegram spam.  Sleep backoff is handled by the caller.
+    to prevent Telegram spam — except for periodic summaries every
+    _CRASH_SUMMARY_INTERVAL crashes so operators retain visibility.
+    Sleep backoff is handled by the caller.
     """
     global _consecutive_crashes
     _consecutive_crashes += 1
+    _save_crash_counter(_consecutive_crashes)
 
     if _consecutive_crashes > _MAX_CRASH_ALERTS:
-        # Silently log — don't spam Telegram
         logger.error(
             "Crash #%d (alerts suppressed after %d): %s",
             _consecutive_crashes, _MAX_CRASH_ALERTS, error_msg[:200],
         )
+        # Periodic summary so operators don't lose visibility
+        if _consecutive_crashes % _CRASH_SUMMARY_INTERVAL == 0:
+            try:
+                config_path = Path(__file__).resolve().parent.parent / "config.json"
+                config = load_json(config_path, default={})
+                text = (
+                    f"CRASH LOOP SUMMARY: {_consecutive_crashes} consecutive crashes\n\n"
+                    f"Latest: {error_msg[:2000]}"
+                )
+                from portfolio.message_store import send_or_store
+                send_or_store(text, config, category="error")
+            except Exception as e:
+                logger.debug("Crash summary send failed: %s", e)
         return
 
     try:
@@ -961,9 +998,14 @@ def _crash_alert(error_msg):
 
 
 def _crash_sleep():
-    """Exponential backoff sleep for consecutive crashes."""
-    delay = min(10 * (2 ** (_consecutive_crashes - 1)), _MAX_CRASH_BACKOFF)
-    logger.info("Crash backoff: sleeping %ds (crash #%d)", delay, _consecutive_crashes)
+    """Exponential backoff sleep with jitter for consecutive crashes.
+
+    Jitter prevents synchronized retry storms when multiple loops
+    (main + metals) crash simultaneously.
+    """
+    base_delay = min(10 * (2 ** (_consecutive_crashes - 1)), _MAX_CRASH_BACKOFF)
+    delay = base_delay * (0.5 + random.random())  # jitter: 50-150% of base
+    logger.info("Crash backoff: sleeping %.0fs (crash #%d)", delay, _consecutive_crashes)
     time.sleep(delay)
 
 
@@ -973,6 +1015,7 @@ def _reset_crash_counter():
     if _consecutive_crashes > 0:
         logger.info("Recovered after %d consecutive crashes", _consecutive_crashes)
         _consecutive_crashes = 0
+        _save_crash_counter(0)
 
 
 def _sleep_for_next_cycle(previous_cycle_started, interval_s):
