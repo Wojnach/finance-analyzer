@@ -14,6 +14,23 @@ def pytest_configure(config):
 
 
 @pytest.fixture(autouse=True)
+def _reset_module_state():
+    """Reset HIGH-risk module-level state before/after each test (xdist hygiene).
+
+    Module-level mutable globals (caches, process handles, counters) persist
+    across test files sharded to the same xdist worker.  Without this fixture,
+    test A can mutate ``signal_engine._adx_cache`` and test B — which expects
+    an empty cache — fails when co-sharded but passes in isolation.
+
+    See: docs/IMPROVEMENT_BACKLOG.md TEST-HYGIENE-1
+    """
+    from _state_reset import reset_all_high_risk
+    reset_all_high_risk()
+    yield
+    reset_all_high_risk()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_signal_utility_cache():
     """Clear the signal_utility in-memory cache around each test.
 
