@@ -191,6 +191,11 @@ def _register_defaults():
     # Source: Shu, Yu, Mulvey 2024 (12 citations). Persistence penalty prevents whiplash.
     register_enhanced("statistical_jump_regime", "portfolio.signals.statistical_jump_regime",
                       "compute_statistical_jump_regime_signal")
+    # Network momentum — cross-asset momentum spillover (all assets); capped at 0.7
+    # 2026-04-19: Pu et al. 2023 (arXiv:2308.11294). Sharpe 1.511 across 64 futures.
+    # Simplified: correlation-weighted peer momentum divergence instead of GNN.
+    register_enhanced("network_momentum", "portfolio.signals.network_momentum",
+                      "compute_network_momentum_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
