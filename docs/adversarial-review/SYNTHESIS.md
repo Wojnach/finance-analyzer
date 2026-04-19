@@ -1,49 +1,29 @@
 # Adversarial Review Synthesis — Finance Analyzer
 
-**Date**: 2026-04-10
-**Methodology**: Dual review — independent manual analysis + 8 parallel agent reviews
-**Scope**: Full codebase (135 files, ~60,377 lines) across 8 subsystems
-**Commit baseline**: 9804a55 (main)
+**Date**: 2026-04-19 (supersedes 2026-04-10 review)
+**Methodology**: Dual review — independent Opus analysis + 8 parallel code-reviewer agents
+**Scope**: Full codebase (142+ files, ~82,000 lines) across 8 subsystems
+**Commit baseline**: 5e7d8e5 (main)
 
 ---
 
-## Executive Summary
+## Executive Summary — 2026-04-19 Review
 
-This adversarial review examined the entire finance-analyzer codebase across 8 subsystems:
-signals-core (5.6K lines), orchestration (6.4K), portfolio-risk (4.3K), metals-core (19K),
-avanza-api (2.3K), signals-modules (10.9K), data-external (6.1K), infrastructure (5.7K).
+Second full adversarial review. The codebase has grown to 82K lines across 142+ modules.
+Many P0 findings from the Apr 10 review have been fixed (Playwright thread safety via RLock,
+TOTP account whitelist, JSONL append sidecar locking). New findings focus on:
 
-**Overall assessment**: The codebase shows strong defensive engineering — 28 thread locks,
-atomic I/O patterns, fail-closed accuracy gating, circuit breakers for APIs, and thorough
-crash recovery. The system has been significantly hardened through iterative bug fixes (BUG-85
-through BUG-181). The main areas of concern are:
+1. **[P1] Hardware trailing stop never placed** — tuple/dict mismatch in metals_loop (100% confidence)
+2. **[P1] Drawdown circuit breaker never called** for Patient/Bold portfolios
+3. **[P1] Trade guards permanently bypassed** — record_trade() still never called
+4. **[P1] Telegram CONFIRM uses wrong import** — bypasses order lock + BankID session
+5. **[P1] IC computation relative Path** — silently disables IC weighting
+6. **[P1] news_event "cut" keyword** — sends negative headlines to positive bucket
+7. **[P1] ticker_accuracy missing neutral filter** — per-ticker accuracy inflated
+8. **[P1] Directional accuracy not blended** — stale all-time overrides recent degradation
 
-1. **[P0] Playwright context thread-unsafe** — Concurrent API calls corrupt trade responses [NEW from avanza-api agent]
-2. **[P0] TOTP path has no account whitelist** — Pension account 2674244 can receive orders [NEW from avanza-api agent]
-3. **[P1] Directional accuracy gate silently disabled** — Per-ticker accuracy override drops buy/sell fields [from signals-core agent]
-4. **[P1] Subprocess governance** — 3 modules bypass the centralized claude_gate
-5. **[P1] Stop-loss safety** — Hardware trailing stop failure has no automatic fallback
-6. **[P1] Portfolio drawdown blind spot** — Fallback to stale prices masks real drawdowns
-7. **[P2] Timezone consistency** — 8 naive datetime.now() calls in metals_loop
-8. **[P2] Windows-specific atomicity** — JSONL append lacks true atomicity on NTFS
-
-**FINAL: 16 P0 findings identified across 5 subsystems (ALL 8 AGENTS COMPLETE):**
-- **metals-core** (6 P0): usdsek=1.0 (all SEK P&L wrong by 10x), HARD_STOP=5% (fires on noise),
-  ORB window 1h wrong during CEST, entry_ts=now() disabling hold-time risk flag, 2x raw open()
-- **portfolio-risk** (3 P0): Trade guards dead (record_trade never called), drawdown peak blind
-  after 33h, portfolio_validator raw json.load
-- **infrastructure** (3 P0): Log rotation data loss, zombie Claude on timeout, no concurrency lock
-- **avanza-api** (2 P0): Playwright thread-safety, TOTP pension account trades
-- **signals-modules** (2 P0): Gap-fill inverted BUY during crashes, GARCH missing from schema
-
-The trade guards finding (A-PR-1) is arguably the most impactful of the entire review:
-the system has ZERO overtrading protection because `record_trade()` exists but is never
-called from any production code path.
-
-**ALL 8 AGENT REVIEWS COMPLETE.** Final total: **148 findings** across the full codebase.
-(16 P0, 52 P1, 56 P2, 24 P3). The metals-core agent (19K lines, 430s review) found the
-most financially impactful bugs: usdsek=1.0 and HARD_STOP_CERT_PCT=0.05 are actively
-causing money loss RIGHT NOW.
+**Total**: ~80 unique findings (15 P1, 24 P2, 22 P3, 4 P4).
+5 findings independently discovered by both the Opus review and agent reviews.
 
 ---
 
