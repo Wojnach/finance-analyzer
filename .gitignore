@@ -95,6 +95,7 @@ data/backups/
 
 # Scratch/debug scripts
 _*.py
+!tests/_state_reset.py
 _*.ps1
 send_telegram.py
 /test_digest.py

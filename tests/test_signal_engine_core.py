@@ -113,8 +113,9 @@ class TestWeightedConsensusBasic:
         assert conf == 1.0
 
     def test_simple_buy_majority(self):
-        # Use neutral regime to avoid regime weight interference
-        votes = {"rsi": "BUY", "macd": "BUY", "ema": "SELL"}
+        # Use signals from DIFFERENT correlation groups to avoid penalty:
+        # rsi (momentum_cluster), ema (trend_direction), smart_money (ungrouped)
+        votes = {"rsi": "BUY", "ema": "BUY", "smart_money": "SELL"}
         action, conf = _weighted_consensus(votes, {}, "breakout")
         assert action == "BUY"
         # No accuracy data => all get weight=0.5; neutral regime => mult=1.0
@@ -123,8 +124,10 @@ class TestWeightedConsensusBasic:
         assert conf == pytest.approx(2 / 3, abs=0.01)
 
     def test_simple_sell_majority(self):
-        # Use signals in different correlation groups to avoid penalty
-        votes = {"rsi": "SELL", "macd": "SELL", "ema": "SELL", "smart_money": "BUY"}
+        # Use signals from DIFFERENT correlation groups to avoid penalty:
+        # rsi (momentum_cluster), ema (trend_direction), forecast (ungrouped),
+        # smart_money (ungrouped)
+        votes = {"rsi": "SELL", "ema": "SELL", "forecast": "SELL", "smart_money": "BUY"}
         action, conf = _weighted_consensus(votes, {}, "breakout")
         assert action == "SELL"
         # Neutral regime, no accuracy => all weight=0.5
