@@ -223,6 +223,70 @@ _IC_ZERO_PENALTY = 0.85   # phantom performers (|IC|<0.01, 500+ samples) get 0.8
 _IC_ZERO_MIN_SAMPLES = 500  # sample floor for zero-IC penalty
 _IC_DATA_TTL = 3600     # IC cache TTL (matches ic_computation.py)
 
+# Signal persistence filter (2026-04-20): require signals to maintain their
+# vote for MIN_PERSISTENCE_CYCLES consecutive cycles before counting in
+# consensus. Eliminates documented "single-check MACD/RSI/volume improvements
+# are noise" pattern. Raw votes are still recorded for accuracy tracking —
+# only the consensus input is filtered.
+#
+# Design: in-memory dict tracks {ticker: {signal: {"vote": X, "cycles": N}}}.
+# When a signal's vote matches its previous non-HOLD vote, cycles increments.
+# When it flips direction or goes HOLD→non-HOLD for the first time, cycles=1.
+# Only signals with cycles >= _PERSISTENCE_MIN_CYCLES get their vote passed
+# to consensus; others are treated as HOLD for consensus purposes only.
+_PERSISTENCE_MIN_CYCLES = 2        # require 2+ consecutive same-direction votes
+_PERSISTENCE_ENABLED = True        # toggle for easy disable
+_persistence_state: dict[str, dict[str, dict]] = {}  # {ticker: {signal: {"vote": str, "cycles": int}}}
+_persistence_lock = threading.Lock()
+
+
+def _apply_persistence_filter(votes: dict[str, str], ticker: str | None) -> dict[str, str]:
+    """Filter votes to only include signals that persisted for MIN_PERSISTENCE_CYCLES.
+
+    Returns a new dict with non-persistent signals forced to HOLD.
+    The original votes dict is not modified (needed for accuracy tracking).
+
+    Cold-start: on the first cycle for a ticker (no prior state), all signals
+    pass through unfiltered. Filtering only activates once we have history.
+    """
+    if not _PERSISTENCE_ENABLED or not ticker:
+        return votes
+
+    with _persistence_lock:
+        # Cold start: if we have NO history for this ticker, seed state and
+        # pass all votes through. The filter only applies from cycle 2 onward.
+        if ticker not in _persistence_state:
+            _persistence_state[ticker] = {
+                sig: {"vote": vote, "cycles": _PERSISTENCE_MIN_CYCLES if vote != "HOLD" else 0}
+                for sig, vote in votes.items()
+            }
+            return votes  # first cycle — trust all signals
+
+        ticker_state = _persistence_state[ticker]
+        filtered = {}
+        for sig, vote in votes.items():
+            prev = ticker_state.get(sig)
+
+            if vote == "HOLD":
+                # Signal went quiet — reset persistence
+                ticker_state[sig] = {"vote": "HOLD", "cycles": 0}
+                filtered[sig] = "HOLD"
+            elif prev is None or prev["vote"] != vote:
+                # New direction or first appearance — start counting
+                ticker_state[sig] = {"vote": vote, "cycles": 1}
+                # Not yet persistent — force HOLD for consensus
+                filtered[sig] = "HOLD"
+            else:
+                # Same direction as previous cycle — increment
+                prev["cycles"] += 1
+                if prev["cycles"] >= _PERSISTENCE_MIN_CYCLES:
+                    filtered[sig] = vote  # persistent — let it vote
+                else:
+                    filtered[sig] = "HOLD"  # still provisional
+
+        return filtered
+
+
 # Disabled signal per-ticker rescue (2026-04-18): signals in DISABLED_SIGNALS
 # that have proven accuracy on specific tickers. These are re-enabled for
 # compute+consensus on the listed ticker only. The standard accuracy gate
@@ -2895,8 +2959,21 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             logger.debug("Best-horizon accuracy unavailable", exc_info=True)
     accuracy_gate = sig_cfg.get("accuracy_gate_threshold", ACCURACY_GATE_THRESHOLD)
     max_signals = sig_cfg.get("max_active_signals")
+
+    # Signal persistence filter: only let signals that maintained their vote
+    # for 2+ consecutive cycles participate in consensus. Raw votes are kept
+    # intact for accuracy tracking (signal_log records unfiltered votes).
+    consensus_votes = _apply_persistence_filter(votes, ticker)
+    # Track how many signals were filtered for debugging
+    _filtered_count = sum(
+        1 for s in votes
+        if votes[s] != "HOLD" and consensus_votes.get(s) == "HOLD"
+    )
+    if _filtered_count > 0:
+        extra_info["_persistence_filtered"] = _filtered_count
+
     weighted_action, weighted_conf = _weighted_consensus(
-        votes, accuracy_data, regime, activation_rates,
+        consensus_votes, accuracy_data, regime, activation_rates,
         accuracy_gate=accuracy_gate,
         max_signals=max_signals,
         horizon=horizon,

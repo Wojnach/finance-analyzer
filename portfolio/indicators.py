@@ -66,16 +66,41 @@ def compute_indicators(df, horizon=None):
     bb_upper = bb_mid + 2 * bb_std
     bb_lower = bb_mid - 2 * bb_std
 
-    # ATR(14)
+    # ATR(14) and ADX(14) — shared True Range calculation
+    high = df["high"]
+    low = df["low"]
+    prev_close = close.shift(1)
     tr = pd.concat(
         [
-            df["high"] - df["low"],
-            (df["high"] - close.shift(1)).abs(),
-            (df["low"] - close.shift(1)).abs(),
+            high - low,
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
         ],
         axis=1,
     ).max(axis=1)
     atr14 = tr.ewm(span=14, adjust=False).mean().iloc[-1]
+
+    # ADX(14): Average Directional Index for regime detection
+    # +DM/-DM → smoothed → +DI/-DI → DX → ADX
+    prev_high = high.shift(1)
+    prev_low = low.shift(1)
+    plus_dm = (high - prev_high).clip(lower=0)
+    minus_dm = (prev_low - low).clip(lower=0)
+    # Only keep the larger of +DM/-DM (the other becomes 0)
+    plus_dm = plus_dm.where(plus_dm > minus_dm, 0.0)
+    minus_dm = minus_dm.where(minus_dm > plus_dm, 0.0)
+    # Smooth with EWM (Wilder's smoothing ≈ EWM with alpha=1/14)
+    smoothed_tr = tr.ewm(span=14, adjust=False).mean()
+    smoothed_plus_dm = plus_dm.ewm(span=14, adjust=False).mean()
+    smoothed_minus_dm = minus_dm.ewm(span=14, adjust=False).mean()
+    # Directional indicators
+    eps = np.finfo(float).eps
+    plus_di = 100 * smoothed_plus_dm / (smoothed_tr + eps)
+    minus_di = 100 * smoothed_minus_dm / (smoothed_tr + eps)
+    # DX and ADX
+    di_sum = plus_di + minus_di + eps
+    dx = 100 * (plus_di - minus_di).abs() / di_sum
+    adx14 = dx.ewm(span=14, adjust=False).mean()
 
     # RSI rolling percentiles for adaptive thresholds
     rsi_series = rsi
@@ -114,6 +139,7 @@ def compute_indicators(df, horizon=None):
         ),
         "atr": _safe(atr14),
         "atr_pct": _safe(atr14 / close.iloc[-1] * 100) if close_val != 0 else 0.0,
+        "adx": _safe(adx14.iloc[-1], 0.0),
         "rsi_p20": _safe(rsi_p20, 30.0),
         "rsi_p80": _safe(rsi_p80, 70.0),
     }
@@ -128,6 +154,7 @@ def detect_regime(indicators, is_crypto=True):
         round(indicators.get("ema9", 0), 4),
         round(indicators.get("ema21", 0), 4),
         round(indicators.get("rsi", 50), 4),
+        round(indicators.get("adx", 0), 4),
         is_crypto,
     )
     with _ss._regime_lock:
@@ -142,11 +169,15 @@ def detect_regime(indicators, is_crypto=True):
     ema9 = indicators.get("ema9", 0)
     ema21 = indicators.get("ema21", 0)
     rsi = indicators.get("rsi", 50)
+    adx = indicators.get("adx", 0)
 
     close = indicators.get("close", 0)
     high_vol_threshold = 4.0 if is_crypto else 3.0
     if atr_pct > high_vol_threshold:
         result = "high-vol"
+    elif adx < 20:
+        # ADX < 20: no meaningful trend regardless of EMA gap
+        result = "ranging"
     elif ema21 != 0 and abs(ema9 - ema21) / ema21 * 100 >= 0.5:
         if ema9 > ema21 and rsi > 45:
             result = "trending-up"
