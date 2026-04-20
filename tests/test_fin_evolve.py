@@ -628,6 +628,73 @@ class TestBackfillJournalOutcomes:
         outcomes = _read_jsonl(fin_evolve._JOURNAL_OUTCOMES_FILE)
         assert len(outcomes) == 2
 
+    def test_zombie_entries_get_rescored(self, tmp_path):
+        """Pre-existing unscored rows in journal_outcomes.jsonl (from before the
+        API fallback existed) should be re-processed, not treated as scored.
+        """
+        now = datetime.now(UTC)
+        entry_ts = now - timedelta(hours=30)
+        journal_entry = _make_journal_entry(ts_offset_hours=-30)
+        # Pre-seed journal_outcomes.jsonl with a zombie row (no outcome fields).
+        zombie = {
+            "journal_ts": journal_entry["ts"],
+            "ticker": "BTC-USD",
+            "source": "layer2",
+            "outlook": "bullish",
+            "conviction": 0.5,
+            "price_at_verdict": 67000.0,
+            "regime": "range-bound",
+            "scored_at": "2026-04-01T00:00:00+00:00",
+            # notably NO outcome_1d_pct or outcome_3d_pct
+        }
+        _write_jsonl(fin_evolve._JOURNAL_OUTCOMES_FILE, [zombie])
+
+        snap = _make_price_snap(entry_ts + timedelta(days=1),
+                                {"BTC-USD": 68000.0, "XAG-USD": 87.0})
+        _write_jsonl(fin_evolve._JOURNAL_FILE, [journal_entry])
+        _write_jsonl(fin_evolve._PRICE_FILE, [snap])
+
+        n = fin_evolve.backfill_journal_outcomes()
+        assert n >= 1  # at least BTC-USD gets re-scored
+        outcomes = _read_jsonl(fin_evolve._JOURNAL_OUTCOMES_FILE)
+        btc_rows = [o for o in outcomes if o["ticker"] == "BTC-USD"]
+        # The zombie was dropped; only the freshly-scored row remains.
+        assert len(btc_rows) == 1
+        assert "outcome_1d_pct" in btc_rows[0]
+        assert btc_rows[0]["correct_1d"] is True
+
+    def test_truly_scored_existing_rows_preserved(self, tmp_path):
+        """Existing rows with outcome_3d_pct must NOT be re-processed or
+        duplicated — they're already done.
+        """
+        now = datetime.now(UTC)
+        journal_entry = _make_journal_entry(ts_offset_hours=-30)
+        # Already-scored row (has outcome_1d_pct)
+        scored = {
+            "journal_ts": journal_entry["ts"],
+            "ticker": "BTC-USD",
+            "source": "layer2",
+            "outlook": "bullish",
+            "conviction": 0.5,
+            "price_at_verdict": 67000.0,
+            "regime": "range-bound",
+            "outcome_1d_pct": 1.49,
+            "correct_1d": True,
+            "scored_at": "2026-04-01T00:00:00+00:00",
+        }
+        _write_jsonl(fin_evolve._JOURNAL_OUTCOMES_FILE, [scored])
+        _write_jsonl(fin_evolve._JOURNAL_FILE, [journal_entry])
+        _write_jsonl(fin_evolve._PRICE_FILE, [
+            _make_price_snap(now - timedelta(hours=6),
+                             {"BTC-USD": 99999.0, "XAG-USD": 99999.0}),
+        ])
+        fin_evolve.backfill_journal_outcomes()
+        outcomes = _read_jsonl(fin_evolve._JOURNAL_OUTCOMES_FILE)
+        btc_rows = [o for o in outcomes if o["ticker"] == "BTC-USD"]
+        # Still exactly one row — same price, not re-scored
+        assert len(btc_rows) == 1
+        assert btc_rows[0]["outcome_1d_pct"] == 1.49
+
     def test_scores_3d_when_old_enough(self, tmp_path):
         now = datetime.now(UTC)
         entry_ts = now - timedelta(hours=80)

@@ -327,10 +327,21 @@ def backfill_journal_outcomes():
         logger.debug("No price history available for journal backfill")
         return 0
 
-    # Load existing outcomes to avoid re-scoring
+    # Load existing outcomes and split into truly-scored vs queued-but-unscored.
+    # 2026-04-20: entries from before the API-fallback fix are queued without
+    # outcome_*_pct fields. The previous scored_keys treated them as already
+    # scored and the records stayed zombie forever. Strict definition now:
+    # only entries that actually carry outcome_3d_pct or outcome_1d_pct count
+    # as scored; unscored rows are dropped from the existing snapshot so the
+    # journal walk below re-processes them with the live-price fallback.
     existing = load_jsonl(_JOURNAL_OUTCOMES_FILE)
-    scored_keys = {(e["journal_ts"], e["ticker"]) for e in existing
+    scored_existing = [
+        e for e in existing
+        if "outcome_3d_pct" in e or "outcome_1d_pct" in e
+    ]
+    scored_keys = {(e["journal_ts"], e["ticker"]) for e in scored_existing
                    if "journal_ts" in e and "ticker" in e}
+    dropped_zombie_count = len(existing) - len(scored_existing)
 
     new_outcomes = []
     now = datetime.now(UTC)
@@ -400,7 +411,17 @@ def backfill_journal_outcomes():
             new_outcomes.append(record)
             scored_keys.add(key)
 
-    if new_outcomes:
+    # Atomic rewrite when we dropped zombies OR appended new outcomes. Rewrite
+    # keeps the truly-scored existing rows and adds the freshly-scored ones.
+    # When dropped_zombie_count == 0 and new_outcomes is empty, no-op.
+    if dropped_zombie_count > 0:
+        atomic_write_jsonl(_JOURNAL_OUTCOMES_FILE, scored_existing + new_outcomes)
+        logger.info(
+            "Rewrote journal_outcomes.jsonl: dropped %d zombie entries, "
+            "appended %d new scored outcomes",
+            dropped_zombie_count, len(new_outcomes),
+        )
+    elif new_outcomes:
         _atomic_append_jsonl(_JOURNAL_OUTCOMES_FILE, new_outcomes)
         logger.info(
             "Scored %d journal outcomes -> journal_outcomes.jsonl",
