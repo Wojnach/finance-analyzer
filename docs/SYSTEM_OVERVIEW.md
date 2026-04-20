@@ -384,3 +384,6 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-203 (P3): `agent_invocation.py` elapsed timing uses `time.time()` — **fixed 2026-04-16** (`time.monotonic()` for elapsed)
 - BUG-204 (P3): `qwen3_signal.py` silent GPU-reaper exception — **fixed 2026-04-16** (logger.debug)
 - BUG-205 (P3): `dashboard/app.py` silent market_health exception — **fixed 2026-04-16** (logger.debug)
+- BUG-206 (P2): `risk_management.py` `check_regime_mismatch()` treats missing volume_ratio as confirmed low volume — **fixed 2026-04-20** (skip flag when None)
+- BUG-207 (P3): `signal_engine.py` 5 bare `except Exception: pass` in enhancement stages — **fixed 2026-04-20** (logger.debug)
+- BUG-208 (P2): `loop_contract.py` local `_read_json()`/`_last_jsonl_entry()` bypass file_utils — **fixed 2026-04-20** (replaced with file_utils.load_json/last_jsonl_entry, O(1) JSONL tail read)
