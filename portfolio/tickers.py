@@ -76,6 +76,7 @@ DISABLED_SIGNALS = {
     "copper_gold_ratio",  # pending live validation (added 2026-04-17)
     "statistical_jump_regime",  # pending live validation (added 2026-04-18)
     "network_momentum",  # pending live validation (added 2026-04-19)
+    "ovx_metals_spillover",  # pending live validation (added 2026-04-20)
     "orderbook_flow",   # 2026-04-11: 51.1% accuracy (360 sam), 93.3% activation rate,
                         # no recent data. Pure noise in every consensus decision.
                         # Re-evaluate after 2 weeks of accuracy data collection.
@@ -149,4 +150,5 @@ SIGNAL_NAMES = [
     "copper_gold_ratio",
     "statistical_jump_regime",
     "network_momentum",
+    "ovx_metals_spillover",
 ]

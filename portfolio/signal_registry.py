@@ -196,6 +196,12 @@ def _register_defaults():
     # Simplified: correlation-weighted peer momentum divergence instead of GNN.
     register_enhanced("network_momentum", "portfolio.signals.network_momentum",
                       "compute_network_momentum_signal", requires_context=True, max_confidence=0.7)
+    # OVX metals spillover — oil implied volatility as metals predictor; capped at 0.7
+    # 2026-04-20: OVX at extreme quantiles predicts precious metals returns via
+    # contagion/inflation/dollar channels. Distinct from metals_cross_asset (oil PRICE).
+    # Source: ScienceDirect OVX cross-asset quantile predictability papers.
+    register_enhanced("ovx_metals_spillover", "portfolio.signals.ovx_metals_spillover",
+                      "compute_ovx_metals_spillover_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
