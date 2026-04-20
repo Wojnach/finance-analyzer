@@ -90,19 +90,27 @@ def _load_price_history():
     return entries
 
 
-def _find_price_at(price_history, ticker, target_ts):
+def _find_price_at(price_history, ticker, target_ts, allow_api_fallback=False):
     """Find the price closest to *target_ts* for the given ticker.
 
     Only accepts a match within _MAX_PRICE_WINDOW_HOURS hours of target.
     Returns the price (float) or None.
+
+    Default is snapshot-only (``allow_api_fallback=False``) to preserve
+    fast/pure lookups. Backfill callers opt in to the API fallback — stock
+    tickers like MSTR only have snapshots during US market hours (~42%
+    coverage), so the fallback is required to score MSTR/fin-crypto entries
+    whose +1d/+3d timestamps land off-hours.
     """
-    if not price_history or not target_ts:
+    if not price_history and not allow_api_fallback:
+        return None
+    if not target_ts:
         return None
 
     best = None
     best_diff = float("inf")
 
-    for entry in price_history:
+    for entry in price_history or ():
         entry_ts = entry.get("_parsed_ts")
         if entry_ts is None:
             continue
@@ -120,7 +128,40 @@ def _find_price_at(price_history, ticker, target_ts):
 
     if best_diff < _MAX_PRICE_WINDOW_HOURS * 3600:
         return best
+
+    if allow_api_fallback:
+        return _api_fallback_price(ticker, target_ts)
     return None
+
+
+def _api_fallback_price(ticker, target_ts):
+    """Fetch a historical price via live API as a last-resort fallback.
+
+    Used when hourly snapshots don't cover the target timestamp. Wraps
+    ``outcome_tracker._fetch_historical_price`` in a broad try/except so a
+    network hiccup or missing-ticker response can't break the whole
+    backfill. Returns float or None.
+    """
+    try:
+        from portfolio.outcome_tracker import _fetch_historical_price
+    except ImportError:
+        return None
+
+    tgt = target_ts
+    if tgt.tzinfo is None:
+        tgt = tgt.replace(tzinfo=UTC)
+
+    try:
+        price = _fetch_historical_price(ticker, tgt.timestamp())
+    except Exception as exc:  # network, rate-limit, ticker not mapped, etc.
+        logger.debug(
+            "API fallback price fetch failed for %s @ %s: %s",
+            ticker, tgt.isoformat(), exc,
+        )
+        return None
+    if price is None or price <= 0:
+        return None
+    return float(price)
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +224,9 @@ def backfill_outcomes():
 
         # Backfill 1d outcome after 24h
         if age_hours >= 24 and "outcome_1d_pct" not in entry:
-            price_1d = _find_price_at(prices, ticker, ts + timedelta(days=1))
+            price_1d = _find_price_at(
+                prices, ticker, ts + timedelta(days=1), allow_api_fallback=True
+            )
             if price_1d:
                 entry["outcome_1d_pct"] = round((price_1d / price_then - 1) * 100, 3)
                 entry["verdict_correct_1d"] = _check_verdict(
@@ -193,7 +236,9 @@ def backfill_outcomes():
 
         # Backfill 3d outcome after 72h
         if age_hours >= 72 and "outcome_3d_pct" not in entry:
-            price_3d = _find_price_at(prices, ticker, ts + timedelta(days=3))
+            price_3d = _find_price_at(
+                prices, ticker, ts + timedelta(days=3), allow_api_fallback=True
+            )
             if price_3d:
                 entry["outcome_3d_pct"] = round((price_3d / price_then - 1) * 100, 3)
                 entry["verdict_correct_3d"] = _check_verdict(
@@ -203,7 +248,9 @@ def backfill_outcomes():
 
         # Backfill 7d outcome after 168h
         if age_hours >= 168 and "outcome_7d_pct" not in entry:
-            price_7d = _find_price_at(prices, ticker, ts + timedelta(days=7))
+            price_7d = _find_price_at(
+                prices, ticker, ts + timedelta(days=7), allow_api_fallback=True
+            )
             if price_7d:
                 entry["outcome_7d_pct"] = round((price_7d / price_then - 1) * 100, 3)
                 entry["verdict_correct_7d"] = _check_verdict(
@@ -288,9 +335,11 @@ def backfill_journal_outcomes():
                 "trigger": entry.get("trigger", ""),
             }
 
-            # Score 1d
+            # Score 1d (snapshots first, live API fallback for off-hours gaps)
             if age_hours >= 24:
-                p1d = _find_price_at(prices, ticker, ts + timedelta(days=1))
+                p1d = _find_price_at(
+                    prices, ticker, ts + timedelta(days=1), allow_api_fallback=True
+                )
                 if p1d:
                     pct = round((p1d / price_then - 1) * 100, 3)
                     record["outcome_1d_pct"] = pct
@@ -298,7 +347,9 @@ def backfill_journal_outcomes():
 
             # Score 3d
             if age_hours >= 72:
-                p3d = _find_price_at(prices, ticker, ts + timedelta(days=3))
+                p3d = _find_price_at(
+                    prices, ticker, ts + timedelta(days=3), allow_api_fallback=True
+                )
                 if p3d:
                     pct = round((p3d / price_then - 1) * 100, 3)
                     record["outcome_3d_pct"] = pct

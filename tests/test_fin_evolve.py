@@ -243,6 +243,85 @@ class TestFindPriceAt:
         result = fin_evolve._find_price_at(history, "XAG-USD", ts)
         assert result == 85.0
 
+    def test_api_fallback_used_when_snapshot_missing(self, monkeypatch):
+        """Empty history + allow_api_fallback=True -> calls API and returns price."""
+        from portfolio import outcome_tracker
+        captured = {}
+
+        def fake_fetch(ticker, target_ts):
+            captured["ticker"] = ticker
+            captured["ts"] = target_ts
+            return 167.42
+
+        monkeypatch.setattr(outcome_tracker, "_fetch_historical_price", fake_fetch)
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+        result = fin_evolve._find_price_at(
+            [], "MSTR", ts, allow_api_fallback=True
+        )
+        assert result == 167.42
+        assert captured["ticker"] == "MSTR"
+        # Timestamp passed to fetch should be epoch seconds
+        assert captured["ts"] == ts.timestamp()
+
+    def test_api_fallback_not_used_by_default(self, monkeypatch):
+        """Without opt-in, no API call is made even if snapshots are missing."""
+        from portfolio import outcome_tracker
+        called = {"n": 0}
+
+        def fake_fetch(ticker, target_ts):
+            called["n"] += 1
+            return 999.0
+
+        monkeypatch.setattr(outcome_tracker, "_fetch_historical_price", fake_fetch)
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+        assert fin_evolve._find_price_at([], "MSTR", ts) is None
+        assert called["n"] == 0
+
+    def test_api_fallback_swallows_exceptions(self, monkeypatch):
+        """Network/parse errors must not propagate — backfill should continue."""
+        from portfolio import outcome_tracker
+
+        def fake_fetch(ticker, target_ts):
+            raise ConnectionError("rate limited")
+
+        monkeypatch.setattr(outcome_tracker, "_fetch_historical_price", fake_fetch)
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+        assert fin_evolve._find_price_at(
+            [], "MSTR", ts, allow_api_fallback=True
+        ) is None
+
+    def test_api_fallback_rejects_non_positive_price(self, monkeypatch):
+        """Guard against upstream returning 0 / negative — treat as missing."""
+        from portfolio import outcome_tracker
+        monkeypatch.setattr(
+            outcome_tracker, "_fetch_historical_price", lambda t, ts: 0.0
+        )
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+        assert fin_evolve._find_price_at(
+            [], "MSTR", ts, allow_api_fallback=True
+        ) is None
+
+    def test_snapshot_hit_does_not_call_api(self, monkeypatch):
+        """When snapshot matches, API must not be invoked even with fallback on."""
+        from portfolio import outcome_tracker
+        called = {"n": 0}
+
+        def fake_fetch(ticker, target_ts):
+            called["n"] += 1
+            return 999.0
+
+        monkeypatch.setattr(outcome_tracker, "_fetch_historical_price", fake_fetch)
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+        history = [
+            {"_parsed_ts": datetime(2026, 3, 10, 11, 30, tzinfo=UTC),
+             "prices": {"MSTR": 165.0}},
+        ]
+        result = fin_evolve._find_price_at(
+            history, "MSTR", ts, allow_api_fallback=True
+        )
+        assert result == 165.0
+        assert called["n"] == 0
+
 
 # ---------------------------------------------------------------------------
 # Tests: backfill_outcomes (fin_command_log)
