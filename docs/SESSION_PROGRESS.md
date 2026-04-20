@@ -1,4 +1,29 @@
-# Session Progress — Auto-Improve Session (2026-04-20)
+# Session Progress — Outcome-Tracking Repair (2026-04-20 afternoon)
+
+**Session focus:** User reported MSTR signal accuracy wasn't tracked. Audit
+revealed 3 broken paths in fin_evolve.py. Fixed, reviewed, merged, backfilled.
+
+**Status:** SHIPPED to main (commit 486a631f). `system_lessons.json` regenerated
+on live data — MSTR now in `by_ticker` (n_total=74, acc=1.0 on n_evaluable=5),
+fin-crypto in `by_command` (42 entries), total scored verdicts 705 → 937.
+
+**What changed:**
+- `portfolio/fin_evolve.py`: dynamic by_command, API fallback in `_find_price_at`,
+  multi-ticker fin-crypto backfill path, WARNING-level error logging
+- `tests/test_fin_evolve.py`: +94 new tests (0 → 94 total, all green)
+- `docs/CHANGELOG.md`: 2026-04-20 entry
+
+**Followups (not blocking):**
+- PF-DataLoop still has old fin_evolve loaded in memory — will pick up new
+  code on next natural restart
+- 28 MSTR journal entries remain queued without outcomes (all <72h old; will
+  score automatically on next backfill cycle)
+- Codex adversarial review skipped (ChatGPT 403) — Claude pr-review-toolkit
+  agents (code-reviewer + silent-failure-hunter) both cleared the branch
+
+---
+
+# Previous: Auto-Improve Session (2026-04-20 morning)
 
 **Session start:** 2026-04-20 ~08:00 UTC
 **Status:** Implementation complete, verification pending
@@ -54,3 +79,30 @@ Wrote `docs/IMPROVEMENT_PLAN.md` with 2 new batches targeting 3 newly discovered
 ## What's next
 - Merge worktree into main, push, restart loops
 - Future sessions: IC-based signal weighting, per-ticker filtering, Bayesian Beta posterior
+
+### 2026-04-20 14:44 UTC | main
+8971d197 docs(plan): outcome tracking fix plan for MSTR + fin-crypto
+docs/PLAN.md
+
+### 2026-04-20 14:45 UTC | fix/outcome-tracking-20260420
+9d29925a fix(fin_evolve): dynamic by_command covers all /fin-* commands
+portfolio/fin_evolve.py
+tests/test_fin_evolve.py
+
+### 2026-04-20 14:47 UTC | fix/outcome-tracking-20260420
+d9f9137e fix(fin_evolve): live-price API fallback in _find_price_at
+portfolio/fin_evolve.py
+tests/test_fin_evolve.py
+
+### 2026-04-20 14:50 UTC | fix/outcome-tracking-20260420
+b7c9619a fix(fin_evolve): score multi-ticker fin-crypto entries
+portfolio/fin_evolve.py
+tests/test_fin_evolve.py
+
+### 2026-04-20 14:54 UTC | fix/outcome-tracking-20260420
+8842453d fix(fin_evolve): promote api-fallback fetch failure log to WARNING
+portfolio/fin_evolve.py
+
+### 2026-04-20 15:02 UTC | main
+486a631f docs(changelog): 2026-04-20 outcome-tracking repair
+docs/CHANGELOG.md
