@@ -90,19 +90,27 @@ def _load_price_history():
     return entries
 
 
-def _find_price_at(price_history, ticker, target_ts):
+def _find_price_at(price_history, ticker, target_ts, allow_api_fallback=False):
     """Find the price closest to *target_ts* for the given ticker.
 
     Only accepts a match within _MAX_PRICE_WINDOW_HOURS hours of target.
     Returns the price (float) or None.
+
+    Default is snapshot-only (``allow_api_fallback=False``) to preserve
+    fast/pure lookups. Backfill callers opt in to the API fallback — stock
+    tickers like MSTR only have snapshots during US market hours (~42%
+    coverage), so the fallback is required to score MSTR/fin-crypto entries
+    whose +1d/+3d timestamps land off-hours.
     """
-    if not price_history or not target_ts:
+    if not price_history and not allow_api_fallback:
+        return None
+    if not target_ts:
         return None
 
     best = None
     best_diff = float("inf")
 
-    for entry in price_history:
+    for entry in price_history or ():
         entry_ts = entry.get("_parsed_ts")
         if entry_ts is None:
             continue
@@ -120,7 +128,46 @@ def _find_price_at(price_history, ticker, target_ts):
 
     if best_diff < _MAX_PRICE_WINDOW_HOURS * 3600:
         return best
+
+    if allow_api_fallback:
+        return _api_fallback_price(ticker, target_ts)
     return None
+
+
+def _api_fallback_price(ticker, target_ts):
+    """Fetch a historical price via live API as a last-resort fallback.
+
+    Used when hourly snapshots don't cover the target timestamp. Wraps
+    ``outcome_tracker._fetch_historical_price`` in a broad try/except so a
+    network hiccup or missing-ticker response can't break the whole
+    backfill. Returns float or None.
+    """
+    try:
+        from portfolio.outcome_tracker import _fetch_historical_price
+    except ImportError:
+        return None
+
+    tgt = target_ts
+    if tgt.tzinfo is None:
+        tgt = tgt.replace(tzinfo=UTC)
+
+    try:
+        price = _fetch_historical_price(ticker, tgt.timestamp())
+    except Exception as exc:  # network, rate-limit, ticker not mapped, etc.
+        # 2026-04-20: intentionally catch broad Exception because backfill
+        # robustness matters more than surfacing every transient network
+        # blip. Logged at WARNING (not DEBUG) so a sustained upstream
+        # outage — analogous to the 3-week silent Layer 2 auth outage of
+        # March-April 2026 — is visible in production logs rather than
+        # requiring someone to notice lessons stopped advancing.
+        logger.warning(
+            "fin_evolve API fallback fetch failed for %s @ %s: %s",
+            ticker, tgt.isoformat(), exc,
+        )
+        return None
+    if price is None or price <= 0:
+        return None
+    return float(price)
 
 
 # ---------------------------------------------------------------------------
@@ -175,47 +222,88 @@ def backfill_outcomes():
             ts = ts.replace(tzinfo=UTC)
 
         age_hours = (now - ts).total_seconds() / 3600
+
+        # Single-ticker command (fin-silver, fin-gold, fin-mstr, fin-btc, fin-eth):
+        # verdict fields live at the top level alongside `ticker` + `price_usd`.
         ticker = entry.get("ticker")
         price_then = entry.get("price_usd")
-
-        if not ticker or not price_then:
+        if ticker and price_then:
+            updated_count += _score_block(entry, ticker, price_then, ts, age_hours, prices)
             continue
 
-        # Backfill 1d outcome after 24h
-        if age_hours >= 24 and "outcome_1d_pct" not in entry:
-            price_1d = _find_price_at(prices, ticker, ts + timedelta(days=1))
-            if price_1d:
-                entry["outcome_1d_pct"] = round((price_1d / price_then - 1) * 100, 3)
-                entry["verdict_correct_1d"] = _check_verdict(
-                    entry.get("verdict_1_3d"), entry["outcome_1d_pct"]
+        # Multi-ticker command (fin-crypto): tickers list + per-ticker nested blocks
+        # keyed by lowercase prefix (e.g., "BTC-USD" -> entry["btc"]).
+        tickers = entry.get("tickers")
+        if isinstance(tickers, list) and tickers:
+            for t in tickers:
+                key = _ticker_block_key(t)
+                block = entry.get(key)
+                if not isinstance(block, dict):
+                    continue
+                block_price = block.get("price_usd")
+                if not block_price:
+                    continue
+                updated_count += _score_block(
+                    block, t, block_price, ts, age_hours, prices
                 )
-                updated_count += 1
-
-        # Backfill 3d outcome after 72h
-        if age_hours >= 72 and "outcome_3d_pct" not in entry:
-            price_3d = _find_price_at(prices, ticker, ts + timedelta(days=3))
-            if price_3d:
-                entry["outcome_3d_pct"] = round((price_3d / price_then - 1) * 100, 3)
-                entry["verdict_correct_3d"] = _check_verdict(
-                    entry.get("verdict_1_3d"), entry["outcome_3d_pct"]
-                )
-                updated_count += 1
-
-        # Backfill 7d outcome after 168h
-        if age_hours >= 168 and "outcome_7d_pct" not in entry:
-            price_7d = _find_price_at(prices, ticker, ts + timedelta(days=7))
-            if price_7d:
-                entry["outcome_7d_pct"] = round((price_7d / price_then - 1) * 100, 3)
-                entry["verdict_correct_7d"] = _check_verdict(
-                    entry.get("verdict_1_4w"), entry["outcome_7d_pct"]
-                )
-                updated_count += 1
 
     if updated_count > 0:
         atomic_write_jsonl(_LOG_FILE, entries)
         logger.info("Backfilled %d outcome fields in fin_command_log.jsonl", updated_count)
 
     return updated_count
+
+
+# Map a ticker symbol to the lowercase nested-block key used by /fin-crypto.
+# Examples: "BTC-USD" -> "btc", "MSTR" -> "mstr", "XAU-USD" -> "xau".
+def _ticker_block_key(ticker):
+    if not ticker:
+        return ""
+    return ticker.split("-", 1)[0].lower()
+
+
+def _score_block(target, ticker, price_then, ts, age_hours, prices):
+    """Score 1d/3d/7d outcomes into *target* dict and return count of fields added.
+
+    Skips horizons already scored (idempotent). Uses the API fallback so
+    off-hours/weekend gaps in the hourly snapshots don't block scoring.
+    """
+    updated = 0
+
+    if age_hours >= 24 and "outcome_1d_pct" not in target:
+        p1d = _find_price_at(
+            prices, ticker, ts + timedelta(days=1), allow_api_fallback=True
+        )
+        if p1d:
+            target["outcome_1d_pct"] = round((p1d / price_then - 1) * 100, 3)
+            target["verdict_correct_1d"] = _check_verdict(
+                target.get("verdict_1_3d"), target["outcome_1d_pct"]
+            )
+            updated += 1
+
+    if age_hours >= 72 and "outcome_3d_pct" not in target:
+        p3d = _find_price_at(
+            prices, ticker, ts + timedelta(days=3), allow_api_fallback=True
+        )
+        if p3d:
+            target["outcome_3d_pct"] = round((p3d / price_then - 1) * 100, 3)
+            target["verdict_correct_3d"] = _check_verdict(
+                target.get("verdict_1_3d"), target["outcome_3d_pct"]
+            )
+            updated += 1
+
+    if age_hours >= 168 and "outcome_7d_pct" not in target:
+        p7d = _find_price_at(
+            prices, ticker, ts + timedelta(days=7), allow_api_fallback=True
+        )
+        if p7d:
+            target["outcome_7d_pct"] = round((p7d / price_then - 1) * 100, 3)
+            target["verdict_correct_7d"] = _check_verdict(
+                target.get("verdict_1_4w"), target["outcome_7d_pct"]
+            )
+            updated += 1
+
+    return updated
 
 
 # ---------------------------------------------------------------------------
@@ -288,9 +376,11 @@ def backfill_journal_outcomes():
                 "trigger": entry.get("trigger", ""),
             }
 
-            # Score 1d
+            # Score 1d (snapshots first, live API fallback for off-hours gaps)
             if age_hours >= 24:
-                p1d = _find_price_at(prices, ticker, ts + timedelta(days=1))
+                p1d = _find_price_at(
+                    prices, ticker, ts + timedelta(days=1), allow_api_fallback=True
+                )
                 if p1d:
                     pct = round((p1d / price_then - 1) * 100, 3)
                     record["outcome_1d_pct"] = pct
@@ -298,7 +388,9 @@ def backfill_journal_outcomes():
 
             # Score 3d
             if age_hours >= 72:
-                p3d = _find_price_at(prices, ticker, ts + timedelta(days=3))
+                p3d = _find_price_at(
+                    prices, ticker, ts + timedelta(days=3), allow_api_fallback=True
+                )
                 if p3d:
                     pct = round((p3d / price_then - 1) * 100, 3)
                     record["outcome_3d_pct"] = pct
@@ -691,6 +783,49 @@ def _compute_cross_asset(scored):
 # Unified scored entries — normalize both sources
 # ---------------------------------------------------------------------------
 
+def _collect_scored_fin_entries(fin_entries):
+    """Return scored fin-command entries as a flat list.
+
+    Single-ticker commands (fin-silver, fin-gold, fin-mstr, fin-btc, fin-eth)
+    pass through when they carry an `outcome_3d_pct` at the top level.
+
+    Multi-ticker commands (fin-crypto) get expanded: each per-ticker block
+    with its own `outcome_3d_pct` becomes a virtual entry combining top-level
+    metadata (ts, command, dxy, fomc_days, ...) with the per-ticker fields
+    (price_usd, verdict_1_3d, verdict_correct_3d, rsi, regime, ...). This
+    lets the downstream lesson generator treat fin-crypto exactly like a
+    single-ticker /fin-mstr or /fin-btc row.
+    """
+    result = []
+    for entry in fin_entries:
+        if "outcome_3d_pct" in entry and entry.get("ticker"):
+            result.append(entry)
+            continue
+        tickers = entry.get("tickers")
+        if not isinstance(tickers, list) or not tickers:
+            continue
+        block_keys_in_use = {_ticker_block_key(t) for t in tickers if t}
+        for t in tickers:
+            if not t:
+                continue
+            key = _ticker_block_key(t)
+            block = entry.get(key)
+            if not isinstance(block, dict):
+                continue
+            if "outcome_3d_pct" not in block:
+                continue
+            # Top-level wins for shared metadata, per-ticker block overrides for
+            # anything ticker-specific (price, verdict, rsi, regime, outcome_*).
+            virtual = {
+                k: v for k, v in entry.items()
+                if k not in block_keys_in_use and k != "tickers"
+            }
+            virtual.update(block)
+            virtual["ticker"] = t
+            result.append(virtual)
+    return result
+
+
 def _normalize_scored(fin_scored, journal_scored):
     """Normalize both prediction sources into a common format for analysis.
 
@@ -747,7 +882,7 @@ def evolve():
     """
     # --- Source 1: fin_command entries ---
     fin_entries = load_jsonl(_LOG_FILE)
-    fin_scored = [e for e in fin_entries if "outcome_3d_pct" in e]
+    fin_scored = _collect_scored_fin_entries(fin_entries)
 
     # --- Source 2: journal outcomes ---
     journal_outcomes = load_jsonl(_JOURNAL_OUTCOMES_FILE)
@@ -791,9 +926,12 @@ def evolve():
                 "n_total": len(entries),
             }
 
-    # 2. Backwards-compatible: by_command (fin-silver, fin-gold only)
+    # 2. Accuracy by command — dynamic across all commands present in scored data
+    # (previously hardcoded to fin-silver/fin-gold; this left fin-crypto,
+    # fin-mstr, fin-btc, fin-eth unscored in lessons even after backfill.)
     lessons["by_command"] = {}
-    for cmd in ("fin-silver", "fin-gold"):
+    commands_found = sorted({e.get("command") for e in fin_scored if e.get("command")})
+    for cmd in commands_found:
         cmd_entries = [e for e in fin_scored if e.get("command") == cmd]
         if cmd_entries:
             correct_3d = [

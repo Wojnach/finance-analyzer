@@ -243,6 +243,85 @@ class TestFindPriceAt:
         result = fin_evolve._find_price_at(history, "XAG-USD", ts)
         assert result == 85.0
 
+    def test_api_fallback_used_when_snapshot_missing(self, monkeypatch):
+        """Empty history + allow_api_fallback=True -> calls API and returns price."""
+        from portfolio import outcome_tracker
+        captured = {}
+
+        def fake_fetch(ticker, target_ts):
+            captured["ticker"] = ticker
+            captured["ts"] = target_ts
+            return 167.42
+
+        monkeypatch.setattr(outcome_tracker, "_fetch_historical_price", fake_fetch)
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+        result = fin_evolve._find_price_at(
+            [], "MSTR", ts, allow_api_fallback=True
+        )
+        assert result == 167.42
+        assert captured["ticker"] == "MSTR"
+        # Timestamp passed to fetch should be epoch seconds
+        assert captured["ts"] == ts.timestamp()
+
+    def test_api_fallback_not_used_by_default(self, monkeypatch):
+        """Without opt-in, no API call is made even if snapshots are missing."""
+        from portfolio import outcome_tracker
+        called = {"n": 0}
+
+        def fake_fetch(ticker, target_ts):
+            called["n"] += 1
+            return 999.0
+
+        monkeypatch.setattr(outcome_tracker, "_fetch_historical_price", fake_fetch)
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+        assert fin_evolve._find_price_at([], "MSTR", ts) is None
+        assert called["n"] == 0
+
+    def test_api_fallback_swallows_exceptions(self, monkeypatch):
+        """Network/parse errors must not propagate — backfill should continue."""
+        from portfolio import outcome_tracker
+
+        def fake_fetch(ticker, target_ts):
+            raise ConnectionError("rate limited")
+
+        monkeypatch.setattr(outcome_tracker, "_fetch_historical_price", fake_fetch)
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+        assert fin_evolve._find_price_at(
+            [], "MSTR", ts, allow_api_fallback=True
+        ) is None
+
+    def test_api_fallback_rejects_non_positive_price(self, monkeypatch):
+        """Guard against upstream returning 0 / negative — treat as missing."""
+        from portfolio import outcome_tracker
+        monkeypatch.setattr(
+            outcome_tracker, "_fetch_historical_price", lambda t, ts: 0.0
+        )
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+        assert fin_evolve._find_price_at(
+            [], "MSTR", ts, allow_api_fallback=True
+        ) is None
+
+    def test_snapshot_hit_does_not_call_api(self, monkeypatch):
+        """When snapshot matches, API must not be invoked even with fallback on."""
+        from portfolio import outcome_tracker
+        called = {"n": 0}
+
+        def fake_fetch(ticker, target_ts):
+            called["n"] += 1
+            return 999.0
+
+        monkeypatch.setattr(outcome_tracker, "_fetch_historical_price", fake_fetch)
+        ts = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+        history = [
+            {"_parsed_ts": datetime(2026, 3, 10, 11, 30, tzinfo=UTC),
+             "prices": {"MSTR": 165.0}},
+        ]
+        result = fin_evolve._find_price_at(
+            history, "MSTR", ts, allow_api_fallback=True
+        )
+        assert result == 165.0
+        assert called["n"] == 0
+
 
 # ---------------------------------------------------------------------------
 # Tests: backfill_outcomes (fin_command_log)
@@ -324,6 +403,176 @@ class TestBackfillOutcomes:
         fin_evolve.backfill_outcomes()
         entries = _read_jsonl(fin_evolve._LOG_FILE)
         assert entries[0]["verdict_correct_1d"] is True
+
+    def test_backfill_multi_ticker_fin_crypto(self, tmp_path):
+        """fin-crypto entries have `tickers` list + nested per-ticker blocks.
+        Each block must be scored independently with its own price+verdict.
+        """
+        now = datetime.now(UTC)
+        entry_ts = now - timedelta(hours=80)
+        entry = {
+            "ts": entry_ts.isoformat(),
+            "command": "fin-crypto",
+            "tickers": ["BTC-USD", "ETH-USD", "MSTR"],
+            "dxy": 99.0,
+            "btc": {
+                "price_usd": 75000.0,
+                "verdict_1_3d": "bullish",
+                "verdict_1_3d_conf": 0.6,
+                "regime": "ranging",
+                "rsi": 55.0,
+            },
+            "eth": {
+                "price_usd": 2300.0,
+                "verdict_1_3d": "bearish",
+                "verdict_1_3d_conf": 0.4,
+                "regime": "ranging",
+                "rsi": 52.0,
+            },
+            "mstr": {
+                "price_usd": 160.0,
+                "verdict_1_3d": "bullish",
+                "verdict_1_3d_conf": 0.55,
+                "regime": "ranging",
+                "rsi": 48.0,
+            },
+        }
+        snaps = [
+            _make_price_snap(entry_ts + timedelta(days=1),
+                             {"BTC-USD": 76500.0, "ETH-USD": 2250.0, "MSTR": 164.0}),
+            _make_price_snap(entry_ts + timedelta(days=3),
+                             {"BTC-USD": 77000.0, "ETH-USD": 2200.0, "MSTR": 170.0}),
+        ]
+        _write_jsonl(fin_evolve._LOG_FILE, [entry])
+        _write_jsonl(fin_evolve._PRICE_FILE, snaps)
+        n = fin_evolve.backfill_outcomes()
+        assert n >= 6  # 3 tickers * (1d + 3d)
+        out = _read_jsonl(fin_evolve._LOG_FILE)[0]
+        # Per-ticker blocks should carry their own outcomes
+        assert out["btc"]["outcome_1d_pct"] == pytest.approx(2.0, abs=0.01)
+        assert out["btc"]["verdict_correct_1d"] is True  # bullish + up = correct
+        assert out["eth"]["outcome_1d_pct"] == pytest.approx(-2.174, abs=0.01)
+        assert out["eth"]["verdict_correct_1d"] is True  # bearish + down = correct
+        assert out["mstr"]["outcome_1d_pct"] == pytest.approx(2.5, abs=0.01)
+        assert out["mstr"]["verdict_correct_1d"] is True
+        # 3d also scored
+        assert out["btc"]["outcome_3d_pct"] == pytest.approx(2.667, abs=0.01)
+        assert out["mstr"]["outcome_3d_pct"] == pytest.approx(6.25, abs=0.01)
+
+    def test_backfill_multi_ticker_skips_missing_block(self, tmp_path):
+        """If per-ticker block is absent or missing price, it's silently skipped
+        while other tickers still get scored.
+        """
+        now = datetime.now(UTC)
+        entry_ts = now - timedelta(hours=30)
+        entry = {
+            "ts": entry_ts.isoformat(),
+            "command": "fin-crypto",
+            "tickers": ["BTC-USD", "ETH-USD", "MSTR"],
+            "btc": {"price_usd": 75000.0, "verdict_1_3d": "bullish"},
+            # eth block deliberately missing
+            "mstr": {"verdict_1_3d": "bullish"},  # no price_usd
+        }
+        snap = _make_price_snap(entry_ts + timedelta(days=1),
+                                {"BTC-USD": 76000.0, "ETH-USD": 2400.0, "MSTR": 165.0})
+        _write_jsonl(fin_evolve._LOG_FILE, [entry])
+        _write_jsonl(fin_evolve._PRICE_FILE, [snap])
+        n = fin_evolve.backfill_outcomes()
+        assert n == 1  # only btc scored
+        out = _read_jsonl(fin_evolve._LOG_FILE)[0]
+        assert "outcome_1d_pct" in out["btc"]
+        assert "eth" not in out  # unchanged
+        assert "outcome_1d_pct" not in out["mstr"]
+
+    def test_ticker_block_key_mapping(self):
+        assert fin_evolve._ticker_block_key("BTC-USD") == "btc"
+        assert fin_evolve._ticker_block_key("ETH-USD") == "eth"
+        assert fin_evolve._ticker_block_key("MSTR") == "mstr"
+        assert fin_evolve._ticker_block_key("XAU-USD") == "xau"
+        assert fin_evolve._ticker_block_key("XAG-USD") == "xag"
+        assert fin_evolve._ticker_block_key("") == ""
+        assert fin_evolve._ticker_block_key(None) == ""
+
+
+class TestCollectScoredFinEntries:
+    def test_expands_fin_crypto_into_per_ticker_entries(self):
+        entries = [
+            {
+                "ts": "2026-03-10T12:00:00+00:00",
+                "command": "fin-crypto",
+                "tickers": ["BTC-USD", "MSTR"],
+                "dxy": 98.0,
+                "btc": {
+                    "price_usd": 75000.0,
+                    "verdict_1_3d": "bullish",
+                    "outcome_3d_pct": 2.0,
+                    "verdict_correct_3d": True,
+                    "regime": "ranging",
+                },
+                "mstr": {
+                    "price_usd": 160.0,
+                    "verdict_1_3d": "bearish",
+                    "outcome_3d_pct": -1.5,
+                    "verdict_correct_3d": True,
+                    "regime": "ranging",
+                },
+            },
+        ]
+        result = fin_evolve._collect_scored_fin_entries(entries)
+        assert len(result) == 2
+        tickers = {r["ticker"] for r in result}
+        assert tickers == {"BTC-USD", "MSTR"}
+        # Shared top-level metadata preserved
+        assert all(r["command"] == "fin-crypto" and r["dxy"] == 98.0 for r in result)
+        # Per-ticker fields win
+        btc = next(r for r in result if r["ticker"] == "BTC-USD")
+        assert btc["verdict_1_3d"] == "bullish"
+        assert btc["outcome_3d_pct"] == 2.0
+        mstr = next(r for r in result if r["ticker"] == "MSTR")
+        assert mstr["verdict_1_3d"] == "bearish"
+        # Nested block keys removed from virtual entry
+        assert "btc" not in btc
+        assert "mstr" not in btc
+
+    def test_passes_through_single_ticker_entries(self):
+        entry = {
+            "ts": "2026-03-10T12:00:00+00:00",
+            "command": "fin-silver",
+            "ticker": "XAG-USD",
+            "price_usd": 85.0,
+            "verdict_1_3d": "bullish",
+            "outcome_3d_pct": 2.0,
+            "verdict_correct_3d": True,
+        }
+        result = fin_evolve._collect_scored_fin_entries([entry])
+        assert result == [entry]
+
+    def test_skips_unscored_blocks(self):
+        """Multi-ticker entries where a block lacks outcome_3d_pct are excluded."""
+        entries = [
+            {
+                "ts": "2026-03-10T12:00:00+00:00",
+                "command": "fin-crypto",
+                "tickers": ["BTC-USD", "MSTR"],
+                "btc": {
+                    "price_usd": 75000.0,
+                    "verdict_1_3d": "bullish",
+                    "outcome_3d_pct": 2.0,
+                    "verdict_correct_3d": True,
+                },
+                "mstr": {  # no outcome_3d_pct
+                    "price_usd": 160.0,
+                    "verdict_1_3d": "bearish",
+                },
+            },
+        ]
+        result = fin_evolve._collect_scored_fin_entries(entries)
+        assert len(result) == 1
+        assert result[0]["ticker"] == "BTC-USD"
+
+    def test_skips_unscored_single_ticker_entries(self):
+        entry = {"ts": "...", "command": "fin-silver", "ticker": "XAG-USD"}
+        assert fin_evolve._collect_scored_fin_entries([entry]) == []
 
 
 # ---------------------------------------------------------------------------
@@ -830,6 +1079,34 @@ class TestEvolve:
         result = fin_evolve.evolve()
         assert result["by_command"]["fin-silver"]["accuracy_3d"] == 1.0
         assert result["by_command"]["fin-gold"]["accuracy_3d"] == 0.0
+
+    def test_evolve_by_command_includes_all_commands(self, tmp_path):
+        """Regression: by_command was hardcoded to (fin-silver, fin-gold)
+        and ignored fin-crypto, fin-mstr, fin-btc, fin-eth. Ensure all
+        commands present in scored data appear in the lesson output.
+        """
+        scored = []
+        for cmd, ticker in [
+            ("fin-mstr", "MSTR"),
+            ("fin-btc", "BTC-USD"),
+            ("fin-eth", "ETH-USD"),
+        ]:
+            for i in range(3):
+                v = _make_verdict(
+                    ts_offset_hours=-(100 + i * 24),
+                    command=cmd,
+                    ticker=ticker,
+                )
+                v["outcome_3d_pct"] = 2.0
+                v["verdict_correct_3d"] = True
+                scored.append(v)
+        _write_jsonl(fin_evolve._LOG_FILE, scored)
+        result = fin_evolve.evolve()
+        assert "fin-mstr" in result["by_command"]
+        assert "fin-btc" in result["by_command"]
+        assert "fin-eth" in result["by_command"]
+        assert result["by_command"]["fin-mstr"]["accuracy_3d"] == 1.0
+        assert result["by_command"]["fin-mstr"]["n_total"] == 3
 
     def test_evolve_execution_stats(self, tmp_path):
         scored = []
