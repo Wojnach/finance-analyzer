@@ -1,150 +1,125 @@
-# Improvement Plan — Auto Session 2026-04-19
+# Improvement Plan — Auto Session 2026-04-20
 
-Based on deep exploration of the full codebase by 4 parallel agents covering:
-- Signal system (signal_engine.py, accuracy_stats.py, 33 signal modules)
-- Core loop (main.py, trigger.py, agent_invocation.py, data_collector.py, health.py)
-- Portfolio & risk (portfolio_mgr.py, risk_management.py, trade_guards.py, equity_curve.py)
-- Infrastructure (file_utils.py, shared_state.py, claude_gate.py, dashboard, telegram)
+Based on deep exploration by 5 parallel agents covering: signal system (signal_engine.py,
+accuracy_stats.py, 36 signal modules), core loop (main.py, trigger.py, agent_invocation.py,
+data_collector.py, health.py), portfolio & risk (portfolio_mgr.py, risk_management.py,
+trade_guards.py, equity_curve.py), infrastructure (file_utils.py, shared_state.py,
+loop_contract.py, dashboard, telegram), and test suite (242 test files, ~5994 tests).
 
-## Assessment
+## Prior Plan Status (2026-04-19)
 
-**Overall**: Production-grade system with excellent atomic I/O, thread safety, and error
-handling. All previously identified bugs (BUG-XXX series) have targeted fixes. The main
-improvement opportunities are in test reliability and minor resilience gaps.
+All 5 batches from the prior plan are **COMPLETED** (implemented between sessions):
+- Batch 1 (xdist hygiene) — autouse fixtures in conftest.py ✓
+- Batch 2 (crash recovery) — persisted counter, jitter, periodic summary ✓
+- Batch 3 (JSONL prune isolation) — per-file try/except ✓
+- Batch 4 (dead code) — trigger.py started_ts removed, health.py write-back added ✓
+- Batch 5 (tests) — covered ✓
 
-**Infrastructure**: 4-5 star quality across all modules. No unresolved bugs.
-**Signal system**: Well-designed weighted consensus with multiple gating layers.
-**Portfolio/Risk**: Solid atomic state management, correct metrics calculations.
-**Core loop**: Good crash recovery, but minor resilience gaps.
+## New Findings — Assessment
 
----
-
-## Priority Order
-
-### Batch 1: xdist Test Hygiene — Module State Reset Fixtures (HIGHEST IMPACT)
-
-**Problem:** `pytest -n auto` produces 5-10 different failures per run. Root cause is
-module-level mutable state that leaks across xdist workers. This is the #1 item in
-`docs/IMPROVEMENT_BACKLOG.md` (TEST-HYGIENE-1) and affects every CI/merge-verification run.
-
-**Files to create/modify:**
-- `tests/conftest.py` — Add autouse fixtures for the most-affected modules
-- Individual test files that need per-test state resets
-
-**Modules with mutable global state (catalogued during exploration):**
-
-| Module | Mutable State | Leak Risk |
-|--------|--------------|-----------|
-| `agent_invocation` | `_agent_proc`, `_agent_log`, `_agent_start`, `_agent_start_wall`, `_agent_timeout`, `_agent_tier`, `_agent_reasons`, `_journal_ts_before`, `_telegram_ts_before`, `_agent_log_start_offset`, `_consecutive_stack_overflows` | HIGH |
-| `signal_engine` | `_adx_cache`, `_last_signal_per_ticker`, `_phase_log_per_ticker`, `_prev_sentiment`, `_prev_sentiment_loaded`, `_sentiment_dirty` | HIGH |
-| `shared_state` | `_tool_cache`, `_run_cycle_id`, `_regime_cache`, `_regime_cache_cycle`, `_full_llm_cycle_count`, `_current_market_state`, `_newsapi_daily_count` | HIGH |
-| `forecast (signal)` | `_FORECAST_MODELS_DISABLED`, `_KRONOS_ENABLED`, `_kronos_tripped_until`, `_chronos_tripped_until`, `_predictions_dedup_cache` | MEDIUM |
-| `accuracy_stats` | `_accuracy_cache` (module-level TTL cache) | MEDIUM |
-| `llama_server` | `_local_proc`, `_local_model` | MEDIUM |
-| `logging_config` | `_configured` | LOW |
-| `api_utils` | `_config_cache`, `_config_mtime` | LOW |
-| `trigger` | `_startup_grace_active` | LOW |
-
-**Changes:**
-1. Create `tests/_state_reset.py` with helper functions to reset each module's state
-2. Add autouse session-scoped fixture in `conftest.py` that resets HIGH-risk modules
-3. For MEDIUM-risk modules, add per-test resets in affected test files
-4. Verify: run `pytest -n auto -q` 3x, confirm 0 new failures each run
-
-**Impact:** Eliminates 5-10 random test failures per CI run. Makes test results trustworthy.
-**Risk:** LOW — only adds reset fixtures, no production code changes.
+**Overall**: Production-grade system. All previously documented bugs (BUG-15 through BUG-186)
+have targeted fixes or mitigations. The main improvement opportunities are: 3 real bugs
+found during exploration, plus I/O modernization in loop_contract.py.
 
 ---
 
-### Batch 2: Crash Recovery Resilience (MEDIUM IMPACT)
+## Batch 1: Bug Fixes (HIGHEST PRIORITY)
 
-**Problem 1:** Crash counter (`_consecutive_crashes` in main.py) resets to 0 on process
-restart. If a wrapper script immediately restarts the loop after a crash, the counter resets
-and alerts re-fire from 1. Pattern already solved in agent_invocation.py (stack_overflow_counter).
+### 1.1 risk_management.py — False positive regime mismatch on missing volume
 
-**Problem 2:** Backoff delay is exponential but not jittered. Two simultaneously crashing
-loops (main + metals) retry in lockstep, causing synchronized load spikes.
+**File:** `portfolio/risk_management.py` (lines 670-679)
 
-**Problem 3:** After 5 consecutive crashes, Telegram alerts are fully suppressed with no
-periodic summary — operators lose visibility into ongoing failures.
+**Problem:** `check_regime_mismatch()` treats `volume_ratio is None` as a failing condition.
+When volume data is unavailable (e.g., off-hours, API timeout), the function flags a regime
+mismatch even though there's no evidence of one. The `None` case should be "unknown, don't
+flag" rather than "confirmed mismatch".
 
-**Files:** `portfolio/main.py` (lines 929-976)
+**Fix:** Add explicit `volume_ratio is not None` guard before the comparison. When volume
+data is missing, skip the regime mismatch flag (fail-open for missing data, fail-closed only
+for confirmed low-volume counter-trend trades).
 
-**Changes:**
-1. Persist crash counter to `data/crash_counter.json` (like stack_overflow_counter pattern)
-2. Add jitter: `delay = delay * (0.5 + random.random())`
-3. After suppression threshold, send one summary alert every 100 crashes
+**Impact:** Eliminates false positive risk flags during data gaps. These flags could cause
+Layer 2 to avoid valid trades or reduce confidence unnecessarily.
 
-**Impact:** More robust crash recovery, no alert blindness during extended outages.
-**Risk:** LOW — crash recovery path only, doesn't affect normal operation.
+**Risk:** LOW — only affects the regime mismatch advisory flag, not trade execution.
+
+### 1.2 signal_engine.py — Silent exception handlers need debug logging
+
+**File:** `portfolio/signal_engine.py` (lines 2527, 2972, 2987, 3019, 3052)
+
+**Problem:** 4 bare `except Exception: pass` handlers silently swallow ALL exceptions,
+including unexpected bugs (import errors, type errors, data corruption). These are labeled
+"graceful degradation" but provide zero diagnostic information when something goes wrong.
+The graceful-degradation intent is correct — these are optional enhancement stages — but
+they should log at debug level so failures are diagnosable from logs.
+
+**Fix:** Replace `pass` with `logger.debug("...", exc_info=True)` in all 4+1 handlers.
+Preserves graceful degradation (no crash, no visible noise) while making failures
+diagnosable.
+
+**Impact:** Faster debugging when optional components fail silently.
+
+**Risk:** VERY LOW — debug-level logging only, no behavior change.
+
+### 1.3 loop_contract.py — I/O functions bypass file_utils
+
+**File:** `portfolio/loop_contract.py` (lines 145-181)
+
+**Problem:** Two local I/O functions duplicate existing file_utils functionality:
+- `_read_json()` uses raw `json.load()` instead of `file_utils.load_json()`
+- `_last_jsonl_entry()` reads ENTIRE file O(N) instead of `file_utils.last_jsonl_entry()`
+  which reads only the last 4KB O(1)
+
+The module already imports from file_utils in `ViolationTracker._save()` (line 898) and
+`_log_violations()` (line 951), so the "self-contained" design argument doesn't hold.
+
+**Fix:** Replace `_read_json()` calls with `file_utils.load_json()` and `_last_jsonl_entry()`
+calls with `file_utils.last_jsonl_entry()`. Remove the two local helper functions.
+
+**Impact:** Consistent I/O (atomic reads, better error handling), O(1) JSONL tail reads
+instead of O(N) full-file scans. As journal files grow, the O(N) scan will become
+increasingly expensive since it runs every 60s cycle.
+
+**Risk:** LOW — file_utils functions are battle-tested and used everywhere else.
 
 ---
 
-### Batch 3: JSONL Prune Per-File Failure Isolation (MEDIUM IMPACT)
+## Batch 2: Tests for Batch 1
 
-**Problem:** `_run_post_cycle()` prunes 3 JSONL files in a single try/except. If any file
-is locked (e.g., by antivirus), ALL pruning fails silently. Over time, unpruned files can
-grow to hundreds of MB.
+**Files:** New/modified test files
 
-**File:** `portfolio/main.py` (lines 346-354)
+### 2.1 test_risk_management.py — regime mismatch with None volume_ratio
 
-**Changes:**
-1. Move to per-file try/except with individual error logging
-2. Log which specific file(s) failed
+Test that `check_regime_mismatch()` returns None (no flag) when volume_ratio is missing
+from agent_summary, for both BUY-in-downtrend and SELL-in-uptrend scenarios.
 
-**Impact:** Prevents unbounded file growth when a single file is locked.
-**Risk:** VERY LOW — error handling path only.
+### 2.2 test_signal_engine.py — graceful degradation logging
 
----
+Test that the signal_engine's optional stages (seasonality, market health, earnings gate,
+linear factor, per-ticker consensus) still produce valid results when their imports fail,
+and that failures are logged at debug level.
 
-### Batch 4: Dead Code Cleanup (LOW IMPACT)
+### 2.3 test_loop_contract.py — file_utils integration
 
-**Problem 1:** `trigger.py` persists `started_ts` (wall-clock) in sustained flip state but
-never reads it back. The `_mono_start` field is used for duration checks. The wall-clock
-field is dead code that confuses readers.
-
-**Problem 2:** `health.py` `check_agent_silence()` reads `last_invocation_ts` from fallback
-(parsing invocations.jsonl) but never writes it back to the cache. This means the cache
-stays stale forever for concurrent readers.
-
-**Files:** `portfolio/trigger.py`, `portfolio/health.py`
-
-**Changes:**
-1. Remove `started_ts` persistence from trigger.py sustained state (keep `_mono_start` only)
-2. In health.py, write back `last_invocation_ts` to health_state after fallback read
-
-**Impact:** Cleaner code, correct health cache.
-**Risk:** VERY LOW — dead code removal and cache consistency fix.
-
----
-
-### Batch 5: Test Coverage for New Improvements (LOW IMPACT)
-
-**Files:** New test files for batch 2-4 changes
-
-**Changes:**
-1. Test crash counter persistence (load/save/reset across restarts)
-2. Test jitter is within expected range
-3. Test per-file JSONL prune failure isolation
-4. Test health cache write-back
-
-**Risk:** NONE — test-only changes.
+Test that contract checks produce correct results using the file_utils implementations.
+Verify behavior for JSONL files.
 
 ---
 
 ## Dependency Order
 
-Batch 1 (xdist hygiene) → Batch 2 (crash recovery) → Batch 3 (prune isolation) →
-Batch 4 (dead code) → Batch 5 (tests for 2-4)
+Batch 1 (bug fixes) → Batch 2 (tests)
 
-Batches 2-4 are independent and could run in parallel, but sequential is safer for
-commit clarity.
+Batch 1 items are independent of each other and could be implemented in parallel.
 
 ## What NOT to Implement (Deferred)
 
-- **Metals loop split (7634→3 files):** Too large for this session. Risk of breaking live system.
-- **reporting.py split (1188 lines):** Cosmetic, doesn't affect correctness.
-- **Thread pool→Process pool:** Python limitation, can't forcibly kill threads. Accepted design.
-- **Signal module NaN handling standardization:** Low impact, all modules already handle NaN safely.
-- **Auth failure detection hardening:** Already has 3-layer validation, low marginal value.
-- **Cross-process Claude lock:** Currently single-process, not needed yet.
+- **BUG-186 (accuracy_stats.py:802):** `correct = int(round(blended * total))` rounding
+  inconsistency. Cosmetic — no downstream code recomputes accuracy from `correct/total`
+  after blending. The `accuracy` field is authoritative.
+- **Disabled signal registry cleanup:** 12 signals registered but force-HOLD'd in dispatch.
+  Registry consumers all respect DISABLED_SIGNALS. No real risk.
+- **Dynamic correlation groups performance:** O(n²) pairwise computation on 2h TTL cache.
+  Acceptable for current signal count (~36).
+- **Metals loop split (7634 lines):** Too large for auto-improvement. Manual session needed.
+- **Per-ticker signal filtering:** Research priority, not a bug fix.

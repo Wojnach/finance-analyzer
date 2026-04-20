@@ -7,12 +7,18 @@ trigger a self-healing Claude Code session.
 Supports: main loop, metals loop, GoldDigger, Elongir.
 """
 
-import json
 import logging
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+from portfolio.file_utils import (
+    atomic_append_jsonl,
+    atomic_write_json,
+    last_jsonl_entry,
+    load_json,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -142,42 +148,12 @@ class Violation:
     details: dict = field(default_factory=dict)
 
 
-def _read_json(path: Path) -> dict | None:
-    """Best-effort JSON read. Returns None on any error — contract checks
-    must never fail noisily or block the loop."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return None
-
-
 def _parse_iso(ts: str | None) -> datetime | None:
     if not ts:
         return None
     try:
         return datetime.fromisoformat(ts)
     except (ValueError, TypeError):
-        return None
-
-
-def _last_jsonl_entry(path: Path) -> dict | None:
-    """Return the last parseable JSON line from a JSONL file, or None.
-    Reads the whole file — acceptable because these journals are small
-    (hundreds of KB at most) and the check runs at cycle cadence (60s)."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            last = None
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    last = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-            return last
-    except OSError:
         return None
 
 
@@ -196,12 +172,12 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     now = now or datetime.now(UTC)
 
     # Precondition 1: Layer 2 must be enabled.
-    cfg = _read_json(CONFIG_FILE) or {}
+    cfg = load_json(CONFIG_FILE, default={}) or {}
     if not cfg.get("layer2", {}).get("enabled", True):
         return []
 
     # Precondition 2: a trigger must have fired recently.
-    health = _read_json(HEALTH_STATE_FILE)
+    health = load_json(HEALTH_STATE_FILE)
     if not health:
         return []
     last_trigger = _parse_iso(health.get("last_trigger_time"))
@@ -238,7 +214,7 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     # unrelated callers (claude_fundamental, bigbet, iskbets, self-heal)
     # whose "invoked" entries would wrongly suppress the L2 journal alert
     # and mask genuine Layer 2 silent failures.
-    latest_l2_inv = _last_jsonl_entry(LAYER2_INVOCATIONS_FILE)
+    latest_l2_inv = last_jsonl_entry(LAYER2_INVOCATIONS_FILE)
     if latest_l2_inv and latest_l2_inv.get("status") == "invoked":
         inv_ts = _parse_iso(
             latest_l2_inv.get("timestamp") or latest_l2_inv.get("ts")
@@ -285,10 +261,10 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     # For violation context only (non-blocking): read the global claude
     # log to surface last_invocation_caller in the alert message. This is
     # informational — it does NOT gate the alert.
-    latest_inv = _last_jsonl_entry(CLAUDE_INVOCATIONS_FILE)
+    latest_inv = last_jsonl_entry(CLAUDE_INVOCATIONS_FILE)
 
     # Check: journal entry since the trigger?
-    latest_journal_entry = _last_jsonl_entry(LAYER2_JOURNAL_FILE)
+    latest_journal_entry = last_jsonl_entry(LAYER2_JOURNAL_FILE)
     journal_ts = None
     if latest_journal_entry:
         journal_ts = _parse_iso(
@@ -307,7 +283,7 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     # NEW violation when the trigger itself is new or when a journal entry
     # has been written since the last violation (which would reset the
     # dedup state implicitly next cycle via the earlier journal check).
-    contract_state = _read_json(CONTRACT_STATE_FILE) or {}
+    contract_state = load_json(CONTRACT_STATE_FILE, default={}) or {}
     last_fired_trigger_ts = contract_state.get("layer2_last_violation_trigger_ts")
     current_trigger_iso = health.get("last_trigger_time")
     if last_fired_trigger_ts and current_trigger_iso == last_fired_trigger_ts:
@@ -374,9 +350,8 @@ def check_layer2_journal_activity(now: datetime | None = None) -> list[Violation
     # Wrapped in best-effort: a failed state write reverts to today's
     # per-cycle firing (harmless noise), but won't break the contract.
     try:
-        from portfolio.file_utils import atomic_write_json as _atomic_write_json
         contract_state["layer2_last_violation_trigger_ts"] = current_trigger_iso
-        _atomic_write_json(CONTRACT_STATE_FILE, contract_state)
+        atomic_write_json(CONTRACT_STATE_FILE, contract_state)
     except Exception as e:
         logger.warning("contract dedup state write failed: %s", e)
 
@@ -818,7 +793,6 @@ class ViolationTracker:
     """
 
     def __init__(self, state_file: Path = CONTRACT_STATE_FILE):
-        from portfolio.file_utils import load_json
         self._state_file = state_file
         state = load_json(state_file, default={})
         self._consecutive: dict[str, int] = state.get("consecutive", {})
@@ -895,7 +869,6 @@ class ViolationTracker:
         # Preserve unknown keys so other writers to CONTRACT_STATE_FILE can
         # coexist (e.g. check_layer2_journal_activity writes
         # layer2_last_violation_trigger_ts here — Codex P1 2026-04-18).
-        from portfolio.file_utils import atomic_write_json, load_json
         existing = load_json(self._state_file, default={}) or {}
         existing["consecutive"] = self._consecutive
         existing["last_heal_time"] = self._last_heal_time
@@ -948,7 +921,6 @@ def _build_heal_prompt(violations: list[Violation], loop_name: str = "main") -> 
 
 def _log_violations(violations: list[Violation], cycle_id: int):
     """Append violations to the JSONL log."""
-    from portfolio.file_utils import atomic_append_jsonl
     ts = datetime.now(UTC).isoformat()
     for v in violations:
         atomic_append_jsonl(CONTRACT_LOG_FILE, {

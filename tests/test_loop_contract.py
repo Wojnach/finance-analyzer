@@ -808,3 +808,50 @@ class TestVerifyAndActGeneric:
         )
         assert "golddigger" in prompt
         assert "golddigger/runner.py" in prompt
+
+
+# ---------------------------------------------------------------------------
+# file_utils I/O integration — verify that top-level imports from
+# file_utils work correctly and replace the old local helpers.
+# ---------------------------------------------------------------------------
+
+class TestFileUtilsIntegration:
+    """Verify loop_contract uses file_utils for all I/O."""
+
+    def test_module_imports_from_file_utils(self):
+        """Top-level imports of load_json and last_jsonl_entry must work."""
+        import portfolio.loop_contract as lc
+        from portfolio.file_utils import last_jsonl_entry, load_json
+        # Verify the module references the same functions (not local copies)
+        assert lc.load_json is load_json
+        assert lc.last_jsonl_entry is last_jsonl_entry
+
+    def test_load_json_returns_none_for_missing_file(self, tmp_path):
+        """load_json returns None for missing file (same as old _read_json)."""
+        from portfolio.file_utils import load_json
+        result = load_json(tmp_path / "nonexistent.json")
+        assert result is None
+
+    def test_last_jsonl_entry_returns_none_for_missing_file(self, tmp_path):
+        """last_jsonl_entry returns None for missing file."""
+        from portfolio.file_utils import last_jsonl_entry
+        result = last_jsonl_entry(tmp_path / "nonexistent.jsonl")
+        assert result is None
+
+    def test_last_jsonl_entry_returns_last_line(self, tmp_path):
+        """last_jsonl_entry returns the last valid JSON line."""
+        from portfolio.file_utils import last_jsonl_entry
+        path = tmp_path / "test.jsonl"
+        path.write_text(
+            '{"a": 1}\n{"a": 2}\n{"a": 3}\n', encoding="utf-8"
+        )
+        result = last_jsonl_entry(path)
+        assert result == {"a": 3}
+
+    def test_no_json_module_used_directly(self):
+        """loop_contract should not use json.load/json.loads directly for file I/O."""
+        import inspect
+        import portfolio.loop_contract as lc
+        source = inspect.getsource(lc.check_layer2_journal_activity)
+        assert "json.load(" not in source
+        assert "json.loads(" not in source

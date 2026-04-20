@@ -668,15 +668,15 @@ def check_regime_mismatch(ticker, action, agent_summary):
     reason = ""
 
     if action == "BUY" and regime == "trending-down":
-        # BUY against downtrend — only OK with strong volume (breakout reversal)
-        if volume_ratio is None or volume_ratio < 1.5:
+        # BUY against downtrend — only flag with confirmed low volume.
+        # Missing volume data (None) = unknown, not a mismatch.
+        if volume_ratio is not None and volume_ratio < 1.5:
             mismatch = True
-            vol_str = f"RVOL={volume_ratio:.1f}" if volume_ratio else "no volume data"
-            reason = f"BUY in trending-down regime ({vol_str}, need >1.5x for reversal)"
-    elif action == "SELL" and regime == "trending-up" and (volume_ratio is None or volume_ratio < 1.5):
-        mismatch = True
-        vol_str = f"RVOL={volume_ratio:.1f}" if volume_ratio else "no volume data"
-        reason = f"SELL in trending-up regime ({vol_str}, need >1.5x for reversal)"
+            reason = f"BUY in trending-down regime (RVOL={volume_ratio:.1f}, need >1.5x for reversal)"
+    elif action == "SELL" and regime == "trending-up":
+        if volume_ratio is not None and volume_ratio < 1.5:
+            mismatch = True
+            reason = f"SELL in trending-up regime (RVOL={volume_ratio:.1f}, need >1.5x for reversal)"
 
     if mismatch:
         return {

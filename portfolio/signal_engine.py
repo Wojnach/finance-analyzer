@@ -2524,7 +2524,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 from portfolio.seasonality import get_profile
                 seasonality_profile = get_profile(ticker)
             except Exception:
-                pass
+                logger.debug("Seasonality profile load failed for %s", ticker, exc_info=True)
 
         # Build context data once for signals that need it
         # BUG-144: Include regime so enhanced signals (forecast.py) can apply
@@ -2969,7 +2969,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                  "score": mh.get("score") if mh else None, "mult": mh_mult}
             )
     except Exception:
-        pass  # graceful degradation — no market health = no penalty
+        logger.debug("Market health penalty failed", exc_info=True)
 
     # --- Earnings proximity gate (stocks only) ---
     # Force HOLD if ticker has earnings within 2 calendar days.
@@ -2984,7 +2984,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 action = "HOLD"
                 conf = 0.0
         except Exception:
-            pass  # graceful degradation
+            logger.debug("Earnings gate failed for %s", ticker, exc_info=True)
 
     # --- Linear factor model score (supplementary, not overriding) ---
     # Provides a continuous predicted-return score from ridge regression
@@ -3016,7 +3016,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                     {"stage": "linear_factor", "effect": "disagree_dampen",
                      "lf_action": lf_action, "lf_score": round(lf_score, 6)})
     except Exception:
-        pass  # graceful degradation — no trained model = no adjustment
+        logger.debug("Linear factor model failed", exc_info=True)
 
     if ticker:
         _record_phase(ticker, "linear_factor", _phase_start)
@@ -3049,7 +3049,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                     action = "HOLD"
                     conf = 0.0
         except Exception:
-            pass  # graceful degradation
+            logger.debug("Per-ticker consensus gate failed for %s", ticker, exc_info=True)
 
     # Global confidence cap — calibration data shows >80% confidence is
     # anti-correlated with accuracy at every horizon (70-80% bucket is the

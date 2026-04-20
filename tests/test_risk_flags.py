@@ -124,13 +124,31 @@ class TestRegimeMismatch:
         result = check_regime_mismatch("BTC-USD", "BUY", summary)
         assert result is None
 
-    def test_no_volume_data_flags(self):
+    def test_no_volume_data_no_flag(self):
+        """Missing volume data = unknown, not a confirmed mismatch."""
         summary = _make_agent_summary({"BTC-USD": {
             "regime": "trending-down",
             "extra": {},
         }})
         result = check_regime_mismatch("BTC-USD", "BUY", summary)
-        assert result is not None
+        assert result is None
+
+    def test_sell_in_uptrend_no_volume_no_flag(self):
+        """SELL in uptrend with missing volume should not flag."""
+        summary = _make_agent_summary({"BTC-USD": {
+            "regime": "trending-up",
+            "extra": {},
+        }})
+        result = check_regime_mismatch("BTC-USD", "SELL", summary)
+        assert result is None
+
+    def test_no_extra_dict_no_flag(self):
+        """No extra dict at all = no volume_ratio = no flag."""
+        summary = _make_agent_summary({"BTC-USD": {
+            "regime": "trending-down",
+        }})
+        result = check_regime_mismatch("BTC-USD", "BUY", summary)
+        assert result is None
 
 
 # --- Correlation risk ---
