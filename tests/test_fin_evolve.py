@@ -831,6 +831,34 @@ class TestEvolve:
         assert result["by_command"]["fin-silver"]["accuracy_3d"] == 1.0
         assert result["by_command"]["fin-gold"]["accuracy_3d"] == 0.0
 
+    def test_evolve_by_command_includes_all_commands(self, tmp_path):
+        """Regression: by_command was hardcoded to (fin-silver, fin-gold)
+        and ignored fin-crypto, fin-mstr, fin-btc, fin-eth. Ensure all
+        commands present in scored data appear in the lesson output.
+        """
+        scored = []
+        for cmd, ticker in [
+            ("fin-mstr", "MSTR"),
+            ("fin-btc", "BTC-USD"),
+            ("fin-eth", "ETH-USD"),
+        ]:
+            for i in range(3):
+                v = _make_verdict(
+                    ts_offset_hours=-(100 + i * 24),
+                    command=cmd,
+                    ticker=ticker,
+                )
+                v["outcome_3d_pct"] = 2.0
+                v["verdict_correct_3d"] = True
+                scored.append(v)
+        _write_jsonl(fin_evolve._LOG_FILE, scored)
+        result = fin_evolve.evolve()
+        assert "fin-mstr" in result["by_command"]
+        assert "fin-btc" in result["by_command"]
+        assert "fin-eth" in result["by_command"]
+        assert result["by_command"]["fin-mstr"]["accuracy_3d"] == 1.0
+        assert result["by_command"]["fin-mstr"]["n_total"] == 3
+
     def test_evolve_execution_stats(self, tmp_path):
         scored = []
         for i in range(5):

@@ -791,9 +791,12 @@ def evolve():
                 "n_total": len(entries),
             }
 
-    # 2. Backwards-compatible: by_command (fin-silver, fin-gold only)
+    # 2. Accuracy by command — dynamic across all commands present in scored data
+    # (previously hardcoded to fin-silver/fin-gold; this left fin-crypto,
+    # fin-mstr, fin-btc, fin-eth unscored in lessons even after backfill.)
     lessons["by_command"] = {}
-    for cmd in ("fin-silver", "fin-gold"):
+    commands_found = sorted({e.get("command") for e in fin_scored if e.get("command")})
+    for cmd in commands_found:
         cmd_entries = [e for e in fin_scored if e.get("command") == cmd]
         if cmd_entries:
             correct_3d = [
