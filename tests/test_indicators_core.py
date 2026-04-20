@@ -121,14 +121,14 @@ class TestComputeIndicatorsOutputTypes:
         expected = {
             "close", "rsi", "macd_hist", "macd_hist_prev",
             "ema9", "ema21", "bb_upper", "bb_lower", "bb_mid",
-            "price_vs_bb", "atr", "atr_pct", "rsi_p20", "rsi_p80",
+            "price_vs_bb", "atr", "atr_pct", "adx", "rsi_p20", "rsi_p80",
         }
         assert expected == set(self.ind.keys())
 
     def test_numeric_fields_are_float(self):
         for key in ("close", "rsi", "macd_hist", "macd_hist_prev",
                      "ema9", "ema21", "bb_upper", "bb_lower", "bb_mid",
-                     "atr", "atr_pct", "rsi_p20", "rsi_p80"):
+                     "atr", "atr_pct", "adx", "rsi_p20", "rsi_p80"):
             assert isinstance(self.ind[key], float), f"{key} should be float"
 
     def test_price_vs_bb_is_str(self):
@@ -308,7 +308,7 @@ class TestDetectRegime:
 
     def test_not_high_vol_crypto_at_threshold(self):
         """ATR% = 4.0 exactly (not >) should NOT trigger high-vol for crypto."""
-        ind = {"atr_pct": 4.0, "ema9": 110, "ema21": 100, "rsi": 60, "close": 100}
+        ind = {"atr_pct": 4.0, "ema9": 110, "ema21": 100, "rsi": 60, "close": 100, "adx": 30}
         result = detect_regime(ind, is_crypto=True)
         assert result != "high-vol"
 
@@ -319,14 +319,14 @@ class TestDetectRegime:
         assert result != "high-vol"
 
     def test_trending_up(self):
-        """EMA9 > EMA21 by >= 0.5% and RSI > 45 => trending-up."""
+        """EMA9 > EMA21 by >= 0.5% and RSI > 45 and ADX > 20 => trending-up."""
         # ema gap = (105 - 100) / 100 * 100 = 5% > 0.5%
-        ind = {"atr_pct": 1.0, "ema9": 105, "ema21": 100, "rsi": 60, "close": 105}
+        ind = {"atr_pct": 1.0, "ema9": 105, "ema21": 100, "rsi": 60, "close": 105, "adx": 30}
         assert detect_regime(ind, is_crypto=True) == "trending-up"
 
     def test_trending_down(self):
-        """EMA9 < EMA21 by >= 0.5% and RSI < 55 => trending-down."""
-        ind = {"atr_pct": 1.0, "ema9": 95, "ema21": 100, "rsi": 40, "close": 95}
+        """EMA9 < EMA21 by >= 0.5% and RSI < 55 and ADX > 20 => trending-down."""
+        ind = {"atr_pct": 1.0, "ema9": 95, "ema21": 100, "rsi": 40, "close": 95, "adx": 30}
         assert detect_regime(ind, is_crypto=True) == "trending-down"
 
     def test_ranging_small_ema_gap(self):
@@ -337,12 +337,12 @@ class TestDetectRegime:
 
     def test_ranging_ema_cross_rsi_mismatch_up(self):
         """EMA9 > EMA21 but RSI <= 45 => ranging (not trending-up)."""
-        ind = {"atr_pct": 1.0, "ema9": 105, "ema21": 100, "rsi": 44, "close": 105}
+        ind = {"atr_pct": 1.0, "ema9": 105, "ema21": 100, "rsi": 44, "close": 105, "adx": 30}
         assert detect_regime(ind, is_crypto=True) == "ranging"
 
     def test_ranging_ema_cross_rsi_mismatch_down(self):
         """EMA9 < EMA21 but RSI >= 55 => ranging (not trending-down)."""
-        ind = {"atr_pct": 1.0, "ema9": 95, "ema21": 100, "rsi": 56, "close": 95}
+        ind = {"atr_pct": 1.0, "ema9": 95, "ema21": 100, "rsi": 56, "close": 95, "adx": 30}
         assert detect_regime(ind, is_crypto=True) == "ranging"
 
     def test_ranging_ema21_zero(self):
@@ -355,24 +355,34 @@ class TestDetectRegime:
         override trending-down to ranging. MSTR/PLTR had 3-9% accuracy
         because EMA crossover lagged behind price recovery."""
         # ema9=95 < ema21=100 => would be trending-down, but close=110 > ema21
-        ind = {"atr_pct": 1.0, "ema9": 95, "ema21": 100, "rsi": 40, "close": 110}
+        ind = {"atr_pct": 1.0, "ema9": 95, "ema21": 100, "rsi": 40, "close": 110, "adx": 30}
         assert detect_regime(ind, is_crypto=False) == "ranging"
 
     def test_trending_up_override_when_close_below_ema21(self):
         """Symmetric: if close < ema21 but ema9 > ema21, override to ranging."""
         # ema9=105 > ema21=100 => would be trending-up, but close=90 < ema21
-        ind = {"atr_pct": 1.0, "ema9": 105, "ema21": 100, "rsi": 60, "close": 90}
+        ind = {"atr_pct": 1.0, "ema9": 105, "ema21": 100, "rsi": 60, "close": 90, "adx": 30}
         assert detect_regime(ind, is_crypto=False) == "ranging"
 
     def test_trending_down_stays_when_close_below_ema21(self):
         """Normal case: close < ema21 and ema9 < ema21 => trending-down holds."""
-        ind = {"atr_pct": 1.0, "ema9": 95, "ema21": 100, "rsi": 40, "close": 93}
+        ind = {"atr_pct": 1.0, "ema9": 95, "ema21": 100, "rsi": 40, "close": 93, "adx": 30}
         assert detect_regime(ind, is_crypto=True) == "trending-down"
 
     def test_trending_up_stays_when_close_above_ema21(self):
         """Normal case: close > ema21 and ema9 > ema21 => trending-up holds."""
-        ind = {"atr_pct": 1.0, "ema9": 105, "ema21": 100, "rsi": 60, "close": 107}
+        ind = {"atr_pct": 1.0, "ema9": 105, "ema21": 100, "rsi": 60, "close": 107, "adx": 30}
         assert detect_regime(ind, is_crypto=True) == "trending-up"
+
+    def test_adx_below_20_forces_ranging(self):
+        """ADX < 20 means no meaningful trend, force ranging regardless of EMA gap."""
+        ind = {"atr_pct": 1.0, "ema9": 105, "ema21": 100, "rsi": 60, "close": 105, "adx": 15}
+        assert detect_regime(ind, is_crypto=True) == "ranging"
+
+    def test_adx_missing_defaults_to_ranging(self):
+        """When ADX not in indicators dict (old callers), defaults to 0 => ranging."""
+        ind = {"atr_pct": 1.0, "ema9": 105, "ema21": 100, "rsi": 60, "close": 105}
+        assert detect_regime(ind, is_crypto=True) == "ranging"
 
 
 class TestDetectRegimeCache:
