@@ -1,89 +1,59 @@
-# Plan — Fix MSTR & Multi-Ticker Outcome Tracking (2026-04-20)
+# Plan — Warrant-side take-profit exit (2026-04-20 evening)
 
 ## Problem
 
-Outcome tracking is broken for several /fin-* commands and for Layer 2 journal entries on MSTR/BTC/ETH. Specifically:
+Live incident: MINI L SILVER AVA 331 bought 10:33 at 14.62 SEK.
+- Warrant peaked at **15.48 (+5.9%)** around 16:00
+- Underlying silver peaked at only **+1.26%** — below the 3% `TAKE_PROFIT_UNDERLYING_PCT` threshold
+- System held through two rejection peaks (15.48, 15.35) because exit rules are all underlying-indexed
+- Now back at 15.11 (+2.0%), gave back ~120 SEK of peak profit
 
-### Confirmed broken paths
-1. **`system_lessons.json.by_command` only tracks fin-silver and fin-gold.** `fin_evolve.py:796` is a hardcoded list: `for cmd in ("fin-silver", "fin-gold"):`. Commands fin-crypto, fin-mstr, fin-btc, fin-eth are logged to `fin_command_log.jsonl` but never aggregated into lessons.
+Root cause: market makers can mark the warrant up 5-6% on a 1-2% underlying move (spread widening, liquidity, momentum premium). The exit logic only watches underlying %.
 
-2. **`_find_price_at()` only reads `price_snapshots_hourly.jsonl`.** When snapshots don't cover the target timestamp (common for stocks after-hours, weekends, or when MSTR coverage is 42% of hourly slots), the function returns None and the backfill silently skips the entry. Result:
-   - `journal_outcomes.jsonl`: 130 MSTR entries queued, 0 scored with outcome fields
-   - `fin_command_log.jsonl`: 88 MSTR entries, 0 scored
+## Fix — Add warrant-side take-profit and trailing
 
-3. **`backfill_outcomes()` processes single-ticker rows only.** `fin-crypto` entries have `tickers: ["BTC-USD", "ETH-USD", "MSTR"]` as a list plus nested `btc`/`eth`/`mstr` blocks with prices, but the backfill iterates `entry.get("ticker")` and skips multi-ticker rows entirely.
+New config knobs in `data/metals_swing_config.py`:
+- `WARRANT_TAKE_PROFIT_PCT = 5.0` — exit when warrant bid ≥ entry × 1.05
+- `WARRANT_TRAILING_START_PCT = 3.0` — activate warrant-side trailing at +3%
+- `WARRANT_TRAILING_DISTANCE_PCT = 1.5` — 1.5% retrace from warrant peak = exit
 
-### Confirmed NOT broken (ruled out during exploration)
-- `ticker_signal_accuracy_cache.json` — schema is `{horizon: {ticker: {signal: {...}}}, "time": ...}`. Top-level horizon keys are correct; MSTR/BTC-USD/ETH-USD are nested under `1d`. A prior agent mis-diagnosed this.
-- `layer2_decision_outcomes.jsonl` — works (10 MSTR entries scored via `decision_outcome_tracker.py` which calls `_fetch_historical_price()` directly).
-- `price_snapshots_hourly.jsonl` — MSTR is captured when US market is open (~42% of hourly slots). The gaps are handled by the fallback in Batch 2.
+New exit-rule block in `_check_exits()` at `data/metals_swing_trader.py:2720` (parallel to existing take-profit / trailing rules). Runs ONLY if the existing underlying-side rules haven't already fired. Tracks `peak_warrant_bid` on the position dict.
 
-## Why this matters
+Additive only — underlying-side rules stay intact.
 
-- **MSTR has 130 journal verdicts over 2 months with zero outcome scoring.** We can't calibrate MSTR signal accuracy.
-- **fin-crypto and fin-mstr commands never get scored.** When the user asks "how accurate was your last MSTR call?" we literally have no data.
-- **`system_lessons.json.by_ticker` for MSTR is missing** because both paths above are blocked.
+## Why these thresholds
 
-## Batches
+Warrant at 5x leverage: 3% underlying ≈ 15% warrant. Today's incident showed warrant +5.9% at underlying +1.26% = **4.7x actual leverage seen on warrant bid** (extra from MM spread dynamics). So:
+- 5% warrant take-profit ≈ 1.0% underlying equivalent — conservative, captures the MM-spike pattern
+- 3% warrant trail-start ≈ same as 0.6% underlying — earlier activation than the 1.5% underlying trail
+- 1.5% warrant trail-distance ≈ snugger than 1% underlying trail
 
-### Batch 1 — Dynamic `by_command` in `fin_evolve.py`
-**Risk:** Low. No data path changes, just lesson generation.
-**Files:**
-- `portfolio/fin_evolve.py` (replace hardcoded list at line 796)
-- `tests/test_fin_evolve.py` (add test — create if missing)
-
-**Change:** Replace `for cmd in ("fin-silver", "fin-gold"):` with dynamic detection from the scored entries.
-
-**Verification:** `system_lessons.json.by_command` contains all commands present in scored data. Existing fin-silver/fin-gold entries unchanged.
-
-### Batch 2 — Live-price fallback in `_find_price_at()`
-**Risk:** Medium. Adds network dependency to the backfill cycle.
-**Files:**
-- `portfolio/fin_evolve.py` (`_find_price_at` fallback to `outcome_tracker._fetch_historical_price`)
-- `tests/test_fin_evolve.py` (mock-based test)
-
-**Change:** When snapshot lookup returns None, call the live API fallback (existing, used by decision_outcome_tracker). Wrap in try/except; limit retries to 1; bail if ticker/timestamp out of supported range.
-
-**Verification:** Unit test with mocked API. Integration: running backfill on 130 MSTR queued entries scores them.
-
-### Batch 3 — Multi-ticker fin-crypto backfill
-**Risk:** Medium. Changes how fin_command_log backfill iterates entries.
-**Files:**
-- `portfolio/fin_evolve.py` (`backfill_outcomes()` — handle `tickers` list with per-ticker nested blocks)
-- `tests/test_fin_evolve.py` (test for multi-ticker entries)
-
-**Change:** When `entry.get("ticker")` is None and `entry.get("tickers")` is a list, iterate per-ticker blocks (`entry["btc"]`, `entry["eth"]`, `entry["mstr"]`) to score each. Write outcomes back as `entry["btc"]["outcome_1d_pct"]` etc.
-
-**Verification:** fin-crypto entries in `fin_command_log.jsonl` get scored. Test with sample multi-ticker entry.
-
-### Batch 4 — Run backfill and verify
-**Risk:** Low. One-shot data fixup.
-**Steps:**
-1. Run `.venv/Scripts/python.exe portfolio/fin_evolve.py` standalone
-2. Verify `journal_outcomes.jsonl` MSTR entries have `outcome_1d_pct` / `outcome_3d_pct`
-3. Verify `system_lessons.json.by_command` contains fin-crypto, fin-mstr
-4. Verify `system_lessons.json.by_ticker` contains MSTR with >0 scored verdicts
-
-### Batch 5 — Adversarial review
-- Spawn `pr-review-toolkit:code-reviewer` + `pr-review-toolkit:silent-failure-hunter` agents in parallel on the diff
-- Run codex adversarial review on branch SHA
-- Address P1/P2 findings, document P3 decisions
-
-### Batch 6 — Tests + ship
-- `.venv/Scripts/python.exe -m pytest tests/ -n auto --timeout=60`
-- Fix regressions
-- Merge to main, push via `cmd.exe /c "cd /d Q:\finance-analyzer && git push"`
+If we're too eager: lose late-rally upside (can rebuy).
+If we're too slow: repeat today's miss (can't get back).
 
 ## What could break
 
-- **Rate limits** if many entries hit the live API. Mitigate: reuse `_yfinance_limiter`, skip entries older than 30 days, cap retries to 1.
-- **Double-scoring from fin-crypto + single-ticker commands.** Mitigate: treat fin-crypto as supplemental — only score if that (ticker, timestamp) pair isn't already scored from a single-ticker entry.
-- **Mass write on first backfill** of 218 entries. Mitigate: acceptable — one-shot cost; subsequent runs are idempotent.
+- **Double-fire:** warrant take-profit and trailing trigger same cycle — fine, they produce the same exit, first match wins via `if not exit_reason`.
+- **Peak-warrant tracking on corrupt state:** new field missing on legacy positions. Guard with `pos.setdefault("peak_warrant_bid", current_bid)` on each eval.
+- **MM bid = 0 during session outages:** guarded by existing `current_bid = warrant_data.get("bid", 0)` — skip eval when bid ≤ 0.
+- **Tests:** 4 new tests in `tests/test_metals_swing_trader.py` (take-profit fires, trailing arms+fires, bid=0 no-op, peak tracking persists).
 
-## Order of execution
-1. Batch 1 (trivial)
-2. Batch 2 (enables Batch 3)
-3. Batch 3 (multi-ticker)
-4. Batch 4 (run + verify data)
-5. Batch 5 (adversarial review)
-6. Batch 6 (tests + ship)
+## Batches
+
+### Batch 1 — Config + exit rule + tests
+- `data/metals_swing_config.py`: add 3 constants
+- `data/metals_swing_trader.py`: add warrant-side TP/trailing in `_check_exits`, track `peak_warrant_bid`
+- `tests/test_metals_swing_trader.py`: 4 new tests
+
+### Batch 2 — Adversarial review
+- `pr-review-toolkit:code-reviewer` + `silent-failure-hunter` on diff
+- Codex if auth back (else skip, document)
+
+### Batch 3 — Tests + ship
+- Full pytest suite
+- Merge + push + restart `PF-MetalsLoop`
+
+## Order
+1. Batch 1 (implement + unit tests)
+2. Batch 2 (review)
+3. Batch 3 (full suite + merge + push + restart loop)
