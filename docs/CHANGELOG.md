@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-04-20 (outcome-tracking repair)
+
+- **Fix: fin_evolve.by_command dynamically enumerates all /fin-* commands
+  (portfolio/fin_evolve.py)**: Replaced hardcoded `for cmd in ("fin-silver",
+  "fin-gold"):` with enumeration of commands present in scored data.
+  fin-crypto, fin-mstr, fin-btc, fin-eth were previously logged to
+  `fin_command_log.jsonl` but invisible in `system_lessons.by_command`.
+- **Fix: live-price API fallback in _find_price_at (portfolio/fin_evolve.py)**:
+  MSTR hourly snapshots only cover ~42% of slots (US-market-only), which
+  silently blocked outcome scoring when +1d/+3d landed off-hours. Added
+  opt-in fallback to `outcome_tracker._fetch_historical_price` (Binance
+  for crypto, yfinance for stocks). Exception-safe, logs at WARNING so a
+  sustained upstream outage surfaces in production logs.
+- **Fix: multi-ticker fin-crypto backfill (portfolio/fin_evolve.py)**:
+  `backfill_outcomes()` now detects the `tickers` list + per-ticker nested
+  blocks (entry["btc"], entry["eth"], entry["mstr"]) and scores each block
+  independently. `_collect_scored_fin_entries()` expands fin-crypto entries
+  into per-ticker virtual records for the lesson aggregator.
+- **Impact**: After the first backfill run, total scored verdicts jumped
+  705 → 937 (+232). MSTR appears in `system_lessons.by_ticker` for the
+  first time (n_total=74, n_evaluable=5, accuracy_3d=1.0). fin-crypto now
+  visible in `by_command` with 42 scored entries. 94 new tests added to
+  `tests/test_fin_evolve.py`.
+
 ## 2026-04-17 (momentum-entries session)
 
 - **Feature: entry-side upside-momentum detector (metals_loop.py)**:
