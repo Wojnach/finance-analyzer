@@ -1,6 +1,6 @@
-# Dual Adversarial Review Plan — 2026-04-18
+# Dual Adversarial Review Plan — 2026-04-20
 
-## Methodology
+## Methodology (updated 2026-04-20)
 Two independent reviewers examine each subsystem:
 1. **Reviewer A (Claude agents)** — 8 parallel subagents, each doing deep adversarial analysis
 2. **Reviewer B (Codex CLI)** — OpenAI Codex `review` command with adversarial prompts
