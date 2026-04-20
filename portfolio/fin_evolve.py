@@ -154,8 +154,14 @@ def _api_fallback_price(ticker, target_ts):
     try:
         price = _fetch_historical_price(ticker, tgt.timestamp())
     except Exception as exc:  # network, rate-limit, ticker not mapped, etc.
-        logger.debug(
-            "API fallback price fetch failed for %s @ %s: %s",
+        # 2026-04-20: intentionally catch broad Exception because backfill
+        # robustness matters more than surfacing every transient network
+        # blip. Logged at WARNING (not DEBUG) so a sustained upstream
+        # outage — analogous to the 3-week silent Layer 2 auth outage of
+        # March-April 2026 — is visible in production logs rather than
+        # requiring someone to notice lessons stopped advancing.
+        logger.warning(
+            "fin_evolve API fallback fetch failed for %s @ %s: %s",
             ticker, tgt.isoformat(), exc,
         )
         return None
