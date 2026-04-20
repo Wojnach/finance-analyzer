@@ -381,6 +381,118 @@ class TestExitLogic:
         trader._check_exits({}, {"XAG-USD": make_signal()})
         assert trader.state["consecutive_losses"] == 1
 
+    def test_warrant_take_profit_fires(self):
+        """Warrant-side take-profit fires when bid >= entry * 1.05 even if
+        underlying hasn't moved enough for the underlying TP (the MINI L
+        SILVER AVA 331 2026-04-20 miss pattern).
+        """
+        # Mock bid = 15.0, entry_price = 14.0 => warrant +7.14% (>= 5%).
+        # Underlying stays at entry (87.0), so underlying rules don't fire.
+        pos = self._make_position(und_entry=87.0, entry_price=14.0)
+        trader = make_trader(cash=5000, positions={"pos_1": pos})
+        trader._check_exits({}, {"XAG-USD": make_signal()})
+        assert len(trader.state["positions"]) == 0
+
+    def test_warrant_trailing_fires_in_arm_band(self):
+        """Trailing path fires when warrant_change_pct is in the +3% to +5%
+        band (TP can't trigger) and retrace from peak exceeds distance.
+
+        Entry 14.5, mock bid 15.0 (+3.45% — above START, below TP).
+        Seed peak_warrant_bid=15.35 (+5.86%) and warrant_trailing_active=True
+        → from-peak = (15.0/15.35 − 1) ≈ −2.28% ≤ −1.5% → EXIT.
+        This path is otherwise unreachable in a single-cycle test because
+        the mock bid is fixed, so pre-seed the armed flag.
+        """
+        pos = self._make_position(und_entry=87.0, entry_price=14.5)
+        pos["peak_warrant_bid"] = 15.35
+        pos["warrant_trailing_active"] = True
+        trader = make_trader(cash=5000, positions={"pos_1": pos})
+        trader._check_exits({}, {"XAG-USD": make_signal()})
+        assert len(trader.state["positions"]) == 0
+
+    def test_warrant_trailing_sticky_after_retrace_below_start(self):
+        """HIGH-bug regression: once armed (+3%), trailing stays armed even
+        if warrant retraces below +3%. The v1 elif-structure would have
+        skipped the trailing check entirely below +3%.
+
+        Entry 15.0, mock bid 15.0 (+0.0% — below START). Seed
+        peak_warrant_bid=15.75 (+5%) and warrant_trailing_active=True to
+        simulate the sequence: arm at +5%, retrace all the way back to
+        +0% with peak still at 15.75. from-peak = −4.76% ≤ −1.5% → EXIT.
+        """
+        pos = self._make_position(und_entry=87.0, entry_price=15.0)
+        pos["peak_warrant_bid"] = 15.75
+        pos["warrant_trailing_active"] = True
+        trader = make_trader(cash=5000, positions={"pos_1": pos})
+        trader._check_exits({}, {"XAG-USD": make_signal()})
+        assert len(trader.state["positions"]) == 0
+
+    def test_warrant_trailing_not_armed_no_exit_below_start(self, monkeypatch):
+        """Negative: below +3% warrant gain with armed flag NOT set → no
+        trailing exit, even if peak is above current. Prevents false exit
+        on a position that never reached +3% (only TP+trailing apply to
+        gains above +3%; below uses underlying-side rules).
+
+        Mocks _cet_hour to 15:00 CET so the EOD_EXIT rule doesn't fire
+        regardless of wall-clock time the test runs at.
+        """
+        import metals_swing_trader as mst
+        monkeypatch.setattr(mst, "_cet_hour", lambda: 15.0)
+        pos = self._make_position(und_entry=87.0, entry_price=15.0)
+        pos["peak_warrant_bid"] = 15.20
+        # warrant_trailing_active deliberately absent → defaults to False
+        trader = make_trader(cash=5000, positions={"pos_1": pos})
+        trader._check_exits({}, {"XAG-USD": make_signal()})
+        assert len(trader.state["positions"]) == 1
+
+    def test_warrant_peak_updates_without_exit(self, monkeypatch):
+        """peak_warrant_bid tracks upward on each cycle. Use entry_price equal
+        to mock bid (15.0) so warrant_change_pct = 0 and no exit fires —
+        leaves the position in place so we can assert the peak bumped.
+
+        Mocks _cet_hour to 15:00 CET so EOD_EXIT doesn't preempt."""
+        import metals_swing_trader as mst
+        monkeypatch.setattr(mst, "_cet_hour", lambda: 15.0)
+        pos = self._make_position(und_entry=87.0, entry_price=15.0)
+        pos["peak_warrant_bid"] = 14.8  # below current mock bid 15.0
+        trader = make_trader(cash=5000, positions={"pos_1": pos})
+        trader._check_exits({}, {"XAG-USD": make_signal()})
+        # Position should still be held (no exit condition met).
+        assert len(trader.state["positions"]) == 1
+        # Peak should have been bumped up to current bid.
+        assert trader.state["positions"]["pos_1"]["peak_warrant_bid"] == 15.0
+
+    def test_warrant_short_direction_skipped(self, monkeypatch):
+        """SHORT positions skip the entire warrant-side block silently —
+        BEAR cert bids invert. The TODO(short-reenable) grep anchor in the
+        trader documents that this needs re-evaluation when SHORT unlocks.
+
+        Mocks _cet_hour to 15:00 CET to avoid EOD_EXIT firing first."""
+        import metals_swing_trader as mst
+        monkeypatch.setattr(mst, "_cet_hour", lambda: 15.0)
+        pos = self._make_position(und_entry=87.0, entry_price=14.0)
+        pos["direction"] = "SHORT"
+        pos["trough_underlying"] = 87.0
+        trader = make_trader(cash=5000, positions={"pos_1": pos})
+        trader._check_exits({}, {"XAG-USD": make_signal()})
+        # Should NOT have set warrant_trailing_active or peak_warrant_bid
+        # even though the mock bid (15.0) is well above entry (14.0).
+        state_pos = trader.state["positions"].get("pos_1")
+        if state_pos is not None:
+            assert "warrant_trailing_active" not in state_pos
+            assert "peak_warrant_bid" not in state_pos
+
+    def test_warrant_rules_noop_when_bid_zero(self):
+        """If bid fetch fails (returns 0), warrant rules must not fire."""
+        # Use a fresh ob_id the mock doesn't know — bid comes back 0.
+        pos = self._make_position(und_entry=87.0, entry_price=14.0)
+        pos["ob_id"] = "9999999"
+        trader = make_trader(cash=5000, positions={"pos_1": pos})
+        trader._check_exits({}, {"XAG-USD": make_signal()})
+        # No exit (underlying stayed at entry, warrant bid is 0 -> skip).
+        # Note: _check_exits also evaluates "current_bid <= 0 continue" early,
+        # which means the warrant-trailing block never runs.
+        assert len(trader.state["positions"]) == 1
 
 # ---------------------------------------------------------------------------
 # Warrant selection tests
