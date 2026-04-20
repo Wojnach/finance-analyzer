@@ -158,6 +158,20 @@ TRAILING_DISTANCE_PCT = 1.0        # trail 1% behind underlying peak
 HARD_STOP_UNDERLYING_PCT = 2.0     # -2% underlying = hard exit
 SIGNAL_REVERSAL_EXIT = True        # exit on SELL consensus with >= MIN_BUY_VOTERS
 
+# 2026-04-20: warrant-side exit rules. Added after MINI L SILVER AVA 331
+# peaked at 15.48 (+5.9% from 14.62 entry) around 16:00 CET while silver
+# underlying only moved +1.26% — below the 3% underlying TP threshold, so
+# the existing rules never fired. Market makers can mark the warrant up
+# independently of the underlying (spread widening, momentum premium),
+# which the old underlying-only logic ignored.
+#
+# These rules fire IN PARALLEL with the underlying-side rules; whichever
+# trips first wins via the `if not exit_reason` chain. Track
+# ``peak_warrant_bid`` per position on every eval.
+WARRANT_TAKE_PROFIT_PCT = 5.0        # exit when warrant bid >= entry * 1.05
+WARRANT_TRAILING_START_PCT = 3.0     # activate warrant trailing at +3% from entry
+WARRANT_TRAILING_DISTANCE_PCT = 1.5  # exit on 1.5% retrace from warrant peak
+
 # 2026-04-17 momentum-exit tuning pass. Background: MINI L SILVER AVA 331
 # bought 13:33 CET (6B/1S, conf 0.603) and sold 55 seconds later as
 # "MOMENTUM_EXIT: 3 declining checks (-0.64%)". Silver rallied +5.4% off

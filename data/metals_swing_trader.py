@@ -115,6 +115,9 @@ from metals_swing_config import (
     TRADES_LOG,
     TRAILING_DISTANCE_PCT,
     TRAILING_START_PCT,
+    WARRANT_TAKE_PROFIT_PCT,
+    WARRANT_TRAILING_DISTANCE_PCT,
+    WARRANT_TRAILING_START_PCT,
 )
 from metals_swing_config import (
     WARRANT_CATALOG as STATIC_WARRANT_CATALOG,
@@ -2726,6 +2729,39 @@ class SwingTrader:
                 pos["trailing_active"] = True
                 if from_peak_pct <= -TRAILING_DISTANCE_PCT:
                     exit_reason = f"TRAILING_STOP: {from_peak_pct:.2f}% from peak (trail={TRAILING_DISTANCE_PCT}%)"
+
+            # 2b. Warrant-side take-profit + trailing (2026-04-20). Exits off
+            # the warrant bid itself, not the underlying. Catches market-maker
+            # spikes where warrant moves 4-6% on a 1-2% underlying move — the
+            # exact pattern that killed the MINI L SILVER AVA 331 peak at
+            # 15.48 (+5.9%) while silver was only +1.26%. LONG-only for now:
+            # SHORT cert bids move inversely to the underlying so the same
+            # rules would fire on a LOSS — revisit when SHORT is re-enabled.
+            entry_warrant = pos.get("entry_price", 0)
+            if direction == "LONG" and current_bid > 0 and entry_warrant > 0:
+                warrant_change_pct = (current_bid / entry_warrant - 1) * 100
+                peak_bid = pos.get("peak_warrant_bid", entry_warrant)
+                if current_bid > peak_bid:
+                    pos["peak_warrant_bid"] = current_bid
+                    peak_bid = current_bid
+                from_peak_warrant_pct = (
+                    (current_bid / peak_bid - 1) * 100 if peak_bid > 0 else 0
+                )
+
+                if (not exit_reason
+                        and warrant_change_pct >= WARRANT_TAKE_PROFIT_PCT):
+                    exit_reason = (
+                        f"WARRANT_TAKE_PROFIT: warrant +{warrant_change_pct:.2f}% "
+                        f">= +{WARRANT_TAKE_PROFIT_PCT}%"
+                    )
+                elif (not exit_reason
+                        and warrant_change_pct >= WARRANT_TRAILING_START_PCT):
+                    pos["warrant_trailing_active"] = True
+                    if from_peak_warrant_pct <= -WARRANT_TRAILING_DISTANCE_PCT:
+                        exit_reason = (
+                            f"WARRANT_TRAILING_STOP: {from_peak_warrant_pct:.2f}% "
+                            f"from warrant peak (trail={WARRANT_TRAILING_DISTANCE_PCT}%)"
+                        )
 
             # 3. Hard stop
             if not exit_reason and und_change_pct <= -HARD_STOP_UNDERLYING_PCT:
