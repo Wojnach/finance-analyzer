@@ -2731,12 +2731,22 @@ class SwingTrader:
                     exit_reason = f"TRAILING_STOP: {from_peak_pct:.2f}% from peak (trail={TRAILING_DISTANCE_PCT}%)"
 
             # 2b. Warrant-side take-profit + trailing (2026-04-20). Exits off
-            # the warrant bid itself, not the underlying. Catches market-maker
-            # spikes where warrant moves 4-6% on a 1-2% underlying move — the
-            # exact pattern that killed the MINI L SILVER AVA 331 peak at
-            # 15.48 (+5.9%) while silver was only +1.26%. LONG-only for now:
-            # SHORT cert bids move inversely to the underlying so the same
-            # rules would fire on a LOSS — revisit when SHORT is re-enabled.
+            # the warrant bid, not the underlying. Catches market-maker spikes
+            # where warrant moves 4-6% on a 1-2% underlying move — the exact
+            # pattern that missed the MINI L SILVER AVA 331 peak at 15.48
+            # (+5.9%) while silver was only +1.26%.
+            #
+            # TODO(short-reenable): LONG-only today. When SHORT is un-gated
+            # (mean_reversion / BEAR cert), port this block with sign flip
+            # (BEAR bid rises when underlying falls, so peak tracking inverts).
+            # Grep for this TODO when re-enabling SHORT.
+            #
+            # Trailing is STICKY — once armed at +3% warrant gain, stays armed
+            # even if warrant retraces below +3%, so a peak-then-retrace
+            # sequence still fires. The v1 of this block used an elif that
+            # de-armed on retrace, which would have reproduced today's miss
+            # if the warrant had peaked at +5% and retreated to +2.5% before
+            # TP triggered.
             entry_warrant = pos.get("entry_price", 0)
             if direction == "LONG" and current_bid > 0 and entry_warrant > 0:
                 warrant_change_pct = (current_bid / entry_warrant - 1) * 100
@@ -2748,20 +2758,27 @@ class SwingTrader:
                     (current_bid / peak_bid - 1) * 100 if peak_bid > 0 else 0
                 )
 
+                # Arm trailing unconditionally on reach — sticky.
+                if warrant_change_pct >= WARRANT_TRAILING_START_PCT:
+                    pos["warrant_trailing_active"] = True
+
+                # Take-profit dominates trailing when both would fire.
                 if (not exit_reason
                         and warrant_change_pct >= WARRANT_TAKE_PROFIT_PCT):
                     exit_reason = (
                         f"WARRANT_TAKE_PROFIT: warrant +{warrant_change_pct:.2f}% "
                         f">= +{WARRANT_TAKE_PROFIT_PCT}%"
                     )
+                # Trailing fires from the armed flag, not from the current %
+                # change — so a peak +5% that retraces to +2% still exits when
+                # from_peak_warrant_pct breaches the distance threshold.
                 elif (not exit_reason
-                        and warrant_change_pct >= WARRANT_TRAILING_START_PCT):
-                    pos["warrant_trailing_active"] = True
-                    if from_peak_warrant_pct <= -WARRANT_TRAILING_DISTANCE_PCT:
-                        exit_reason = (
-                            f"WARRANT_TRAILING_STOP: {from_peak_warrant_pct:.2f}% "
-                            f"from warrant peak (trail={WARRANT_TRAILING_DISTANCE_PCT}%)"
-                        )
+                        and pos.get("warrant_trailing_active")
+                        and from_peak_warrant_pct <= -WARRANT_TRAILING_DISTANCE_PCT):
+                    exit_reason = (
+                        f"WARRANT_TRAILING_STOP: {from_peak_warrant_pct:.2f}% "
+                        f"from warrant peak (trail={WARRANT_TRAILING_DISTANCE_PCT}%)"
+                    )
 
             # 3. Hard stop
             if not exit_reason and und_change_pct <= -HARD_STOP_UNDERLYING_PCT:
