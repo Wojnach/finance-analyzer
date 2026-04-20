@@ -216,53 +216,88 @@ def backfill_outcomes():
             ts = ts.replace(tzinfo=UTC)
 
         age_hours = (now - ts).total_seconds() / 3600
+
+        # Single-ticker command (fin-silver, fin-gold, fin-mstr, fin-btc, fin-eth):
+        # verdict fields live at the top level alongside `ticker` + `price_usd`.
         ticker = entry.get("ticker")
         price_then = entry.get("price_usd")
-
-        if not ticker or not price_then:
+        if ticker and price_then:
+            updated_count += _score_block(entry, ticker, price_then, ts, age_hours, prices)
             continue
 
-        # Backfill 1d outcome after 24h
-        if age_hours >= 24 and "outcome_1d_pct" not in entry:
-            price_1d = _find_price_at(
-                prices, ticker, ts + timedelta(days=1), allow_api_fallback=True
-            )
-            if price_1d:
-                entry["outcome_1d_pct"] = round((price_1d / price_then - 1) * 100, 3)
-                entry["verdict_correct_1d"] = _check_verdict(
-                    entry.get("verdict_1_3d"), entry["outcome_1d_pct"]
+        # Multi-ticker command (fin-crypto): tickers list + per-ticker nested blocks
+        # keyed by lowercase prefix (e.g., "BTC-USD" -> entry["btc"]).
+        tickers = entry.get("tickers")
+        if isinstance(tickers, list) and tickers:
+            for t in tickers:
+                key = _ticker_block_key(t)
+                block = entry.get(key)
+                if not isinstance(block, dict):
+                    continue
+                block_price = block.get("price_usd")
+                if not block_price:
+                    continue
+                updated_count += _score_block(
+                    block, t, block_price, ts, age_hours, prices
                 )
-                updated_count += 1
-
-        # Backfill 3d outcome after 72h
-        if age_hours >= 72 and "outcome_3d_pct" not in entry:
-            price_3d = _find_price_at(
-                prices, ticker, ts + timedelta(days=3), allow_api_fallback=True
-            )
-            if price_3d:
-                entry["outcome_3d_pct"] = round((price_3d / price_then - 1) * 100, 3)
-                entry["verdict_correct_3d"] = _check_verdict(
-                    entry.get("verdict_1_3d"), entry["outcome_3d_pct"]
-                )
-                updated_count += 1
-
-        # Backfill 7d outcome after 168h
-        if age_hours >= 168 and "outcome_7d_pct" not in entry:
-            price_7d = _find_price_at(
-                prices, ticker, ts + timedelta(days=7), allow_api_fallback=True
-            )
-            if price_7d:
-                entry["outcome_7d_pct"] = round((price_7d / price_then - 1) * 100, 3)
-                entry["verdict_correct_7d"] = _check_verdict(
-                    entry.get("verdict_1_4w"), entry["outcome_7d_pct"]
-                )
-                updated_count += 1
 
     if updated_count > 0:
         atomic_write_jsonl(_LOG_FILE, entries)
         logger.info("Backfilled %d outcome fields in fin_command_log.jsonl", updated_count)
 
     return updated_count
+
+
+# Map a ticker symbol to the lowercase nested-block key used by /fin-crypto.
+# Examples: "BTC-USD" -> "btc", "MSTR" -> "mstr", "XAU-USD" -> "xau".
+def _ticker_block_key(ticker):
+    if not ticker:
+        return ""
+    return ticker.split("-", 1)[0].lower()
+
+
+def _score_block(target, ticker, price_then, ts, age_hours, prices):
+    """Score 1d/3d/7d outcomes into *target* dict and return count of fields added.
+
+    Skips horizons already scored (idempotent). Uses the API fallback so
+    off-hours/weekend gaps in the hourly snapshots don't block scoring.
+    """
+    updated = 0
+
+    if age_hours >= 24 and "outcome_1d_pct" not in target:
+        p1d = _find_price_at(
+            prices, ticker, ts + timedelta(days=1), allow_api_fallback=True
+        )
+        if p1d:
+            target["outcome_1d_pct"] = round((p1d / price_then - 1) * 100, 3)
+            target["verdict_correct_1d"] = _check_verdict(
+                target.get("verdict_1_3d"), target["outcome_1d_pct"]
+            )
+            updated += 1
+
+    if age_hours >= 72 and "outcome_3d_pct" not in target:
+        p3d = _find_price_at(
+            prices, ticker, ts + timedelta(days=3), allow_api_fallback=True
+        )
+        if p3d:
+            target["outcome_3d_pct"] = round((p3d / price_then - 1) * 100, 3)
+            target["verdict_correct_3d"] = _check_verdict(
+                target.get("verdict_1_3d"), target["outcome_3d_pct"]
+            )
+            updated += 1
+
+    if age_hours >= 168 and "outcome_7d_pct" not in target:
+        p7d = _find_price_at(
+            prices, ticker, ts + timedelta(days=7), allow_api_fallback=True
+        )
+        if p7d:
+            target["outcome_7d_pct"] = round((p7d / price_then - 1) * 100, 3)
+            target["verdict_correct_7d"] = _check_verdict(
+                target.get("verdict_1_4w"), target["outcome_7d_pct"]
+            )
+            updated += 1
+
+    return updated
 
 
 # ---------------------------------------------------------------------------
@@ -742,6 +777,49 @@ def _compute_cross_asset(scored):
 # Unified scored entries — normalize both sources
 # ---------------------------------------------------------------------------
 
+def _collect_scored_fin_entries(fin_entries):
+    """Return scored fin-command entries as a flat list.
+
+    Single-ticker commands (fin-silver, fin-gold, fin-mstr, fin-btc, fin-eth)
+    pass through when they carry an `outcome_3d_pct` at the top level.
+
+    Multi-ticker commands (fin-crypto) get expanded: each per-ticker block
+    with its own `outcome_3d_pct` becomes a virtual entry combining top-level
+    metadata (ts, command, dxy, fomc_days, ...) with the per-ticker fields
+    (price_usd, verdict_1_3d, verdict_correct_3d, rsi, regime, ...). This
+    lets the downstream lesson generator treat fin-crypto exactly like a
+    single-ticker /fin-mstr or /fin-btc row.
+    """
+    result = []
+    for entry in fin_entries:
+        if "outcome_3d_pct" in entry and entry.get("ticker"):
+            result.append(entry)
+            continue
+        tickers = entry.get("tickers")
+        if not isinstance(tickers, list) or not tickers:
+            continue
+        block_keys_in_use = {_ticker_block_key(t) for t in tickers if t}
+        for t in tickers:
+            if not t:
+                continue
+            key = _ticker_block_key(t)
+            block = entry.get(key)
+            if not isinstance(block, dict):
+                continue
+            if "outcome_3d_pct" not in block:
+                continue
+            # Top-level wins for shared metadata, per-ticker block overrides for
+            # anything ticker-specific (price, verdict, rsi, regime, outcome_*).
+            virtual = {
+                k: v for k, v in entry.items()
+                if k not in block_keys_in_use and k != "tickers"
+            }
+            virtual.update(block)
+            virtual["ticker"] = t
+            result.append(virtual)
+    return result
+
+
 def _normalize_scored(fin_scored, journal_scored):
     """Normalize both prediction sources into a common format for analysis.
 
@@ -798,7 +876,7 @@ def evolve():
     """
     # --- Source 1: fin_command entries ---
     fin_entries = load_jsonl(_LOG_FILE)
-    fin_scored = [e for e in fin_entries if "outcome_3d_pct" in e]
+    fin_scored = _collect_scored_fin_entries(fin_entries)
 
     # --- Source 2: journal outcomes ---
     journal_outcomes = load_jsonl(_JOURNAL_OUTCOMES_FILE)
