@@ -1,45 +1,89 @@
-# PLAN — Adversarial Review (2026-04-19)
+# Plan — Fix MSTR & Multi-Ticker Outcome Tracking (2026-04-20)
 
-## Current Active Plan
+## Problem
 
-Full dual adversarial review of the finance-analyzer codebase.
-Partition into 8 subsystems, run independent reviews in parallel,
-then cross-critique and synthesize findings.
+Outcome tracking is broken for several /fin-* commands and for Layer 2 journal entries on MSTR/BTC/ETH. Specifically:
 
-### 8 Subsystems
+### Confirmed broken paths
+1. **`system_lessons.json.by_command` only tracks fin-silver and fin-gold.** `fin_evolve.py:796` is a hardcoded list: `for cmd in ("fin-silver", "fin-gold"):`. Commands fin-crypto, fin-mstr, fin-btc, fin-eth are logged to `fin_command_log.jsonl` but never aggregated into lessons.
 
-| # | Subsystem | Key Files | Focus |
-|---|-----------|-----------|-------|
-| 1 | signals-core | signal_engine.py, signal_registry.py, accuracy_stats.py, outcome_tracker.py, signal_utils.py, signal_weights.py, ic_computation.py | Consensus logic, gating, weighting, accuracy tracking |
-| 2 | orchestration | main.py, agent_invocation.py, trigger.py, market_timing.py, autonomous.py, process_lock.py | Loop lifecycle, agent subprocess, trigger detection |
-| 3 | portfolio-risk | portfolio_mgr.py, trade_guards.py, risk_management.py, equity_curve.py, monte_carlo.py, monte_carlo_risk.py, circuit_breaker.py | State management, drawdown, position sizing, guards |
-| 4 | metals-core | data/metals_loop.py, exit_optimizer.py, price_targets.py, orb_predictor.py, iskbets.py, fin_snipe.py, fin_snipe_manager.py | Metals trading loop, exit optimization, warrant logic |
-| 5 | avanza-api | avanza_session.py, avanza_orders.py, avanza_client.py, avanza_control.py, avanza_order_lock.py, avanza_resilient_page.py, avanza_tracker.py | Session auth, order placement, Playwright integration |
-| 6 | signals-modules | portfolio/signals/*.py (34 modules) | Individual signal implementations, edge cases |
-| 7 | data-external | data_collector.py, fear_greed.py, sentiment.py, alpha_vantage.py, futures_data.py, onchain_data.py, fx_rates.py, crypto_macro_data.py | Data fetching, API integration, error handling |
-| 8 | infrastructure | file_utils.py, http_retry.py, health.py, shared_state.py, claude_gate.py, gpu_gate.py, telegram_notifications.py, message_store.py, journal.py, dashboard/app.py | I/O, caching, notifications, health monitoring |
+2. **`_find_price_at()` only reads `price_snapshots_hourly.jsonl`.** When snapshots don't cover the target timestamp (common for stocks after-hours, weekends, or when MSTR coverage is 42% of hourly slots), the function returns None and the backfill silently skips the entry. Result:
+   - `journal_outcomes.jsonl`: 130 MSTR entries queued, 0 scored with outcome fields
+   - `fin_command_log.jsonl`: 88 MSTR entries, 0 scored
 
-### Execution Order
+3. **`backfill_outcomes()` processes single-ticker rows only.** `fin-crypto` entries have `tickers: ["BTC-USD", "ETH-USD", "MSTR"]` as a list plus nested `btc`/`eth`/`mstr` blocks with prices, but the backfill iterates `entry.get("ticker")` and skips multi-ticker rows entirely.
 
-1. Launch 8 adversarial review agents in parallel (one per subsystem)
-2. Write independent adversarial review (my own analysis)
-3. Collect all 8 agent results
-4. Cross-critique: compare agent findings vs my findings, both directions
-5. Write synthesis document with severity-ranked findings
-6. Commit all docs, merge to main, push, clean up worktree
+### Confirmed NOT broken (ruled out during exploration)
+- `ticker_signal_accuracy_cache.json` — schema is `{horizon: {ticker: {signal: {...}}}, "time": ...}`. Top-level horizon keys are correct; MSTR/BTC-USD/ETH-USD are nested under `1d`. A prior agent mis-diagnosed this.
+- `layer2_decision_outcomes.jsonl` — works (10 MSTR entries scored via `decision_outcome_tracker.py` which calls `_fetch_historical_price()` directly).
+- `price_snapshots_hourly.jsonl` — MSTR is captured when US market is open (~42% of hourly slots). The gaps are handled by the fallback in Batch 2.
 
-### Review Criteria
+## Why this matters
 
-Each review evaluates:
-- **P1 (Critical)**: Bugs causing data loss, incorrect trades, financial harm
-- **P2 (High)**: Race conditions, silent failures, security issues, data corruption
-- **P3 (Medium)**: Dead code, inefficiencies, maintainability concerns
-- **P4 (Low)**: Style, naming, minor improvements
+- **MSTR has 130 journal verdicts over 2 months with zero outcome scoring.** We can't calibrate MSTR signal accuracy.
+- **fin-crypto and fin-mstr commands never get scored.** When the user asks "how accurate was your last MSTR call?" we literally have no data.
+- **`system_lessons.json.by_ticker` for MSTR is missing** because both paths above are blocked.
 
----
+## Batches
 
-## Previous plans (archived)
+### Batch 1 — Dynamic `by_command` in `fin_evolve.py`
+**Risk:** Low. No data path changes, just lesson generation.
+**Files:**
+- `portfolio/fin_evolve.py` (replace hardcoded list at line 796)
+- `tests/test_fin_evolve.py` (add test — create if missing)
 
-- `docs/plans/2026-04-16-gemma4-loop-plan.md` — Gemma 4 E4B integration
-- `docs/plans/2026-04-16-accuracy-gating-plan.md` — accuracy gating
-  reconfiguration shipped in merge `a739a56`
+**Change:** Replace `for cmd in ("fin-silver", "fin-gold"):` with dynamic detection from the scored entries.
+
+**Verification:** `system_lessons.json.by_command` contains all commands present in scored data. Existing fin-silver/fin-gold entries unchanged.
+
+### Batch 2 — Live-price fallback in `_find_price_at()`
+**Risk:** Medium. Adds network dependency to the backfill cycle.
+**Files:**
+- `portfolio/fin_evolve.py` (`_find_price_at` fallback to `outcome_tracker._fetch_historical_price`)
+- `tests/test_fin_evolve.py` (mock-based test)
+
+**Change:** When snapshot lookup returns None, call the live API fallback (existing, used by decision_outcome_tracker). Wrap in try/except; limit retries to 1; bail if ticker/timestamp out of supported range.
+
+**Verification:** Unit test with mocked API. Integration: running backfill on 130 MSTR queued entries scores them.
+
+### Batch 3 — Multi-ticker fin-crypto backfill
+**Risk:** Medium. Changes how fin_command_log backfill iterates entries.
+**Files:**
+- `portfolio/fin_evolve.py` (`backfill_outcomes()` — handle `tickers` list with per-ticker nested blocks)
+- `tests/test_fin_evolve.py` (test for multi-ticker entries)
+
+**Change:** When `entry.get("ticker")` is None and `entry.get("tickers")` is a list, iterate per-ticker blocks (`entry["btc"]`, `entry["eth"]`, `entry["mstr"]`) to score each. Write outcomes back as `entry["btc"]["outcome_1d_pct"]` etc.
+
+**Verification:** fin-crypto entries in `fin_command_log.jsonl` get scored. Test with sample multi-ticker entry.
+
+### Batch 4 — Run backfill and verify
+**Risk:** Low. One-shot data fixup.
+**Steps:**
+1. Run `.venv/Scripts/python.exe portfolio/fin_evolve.py` standalone
+2. Verify `journal_outcomes.jsonl` MSTR entries have `outcome_1d_pct` / `outcome_3d_pct`
+3. Verify `system_lessons.json.by_command` contains fin-crypto, fin-mstr
+4. Verify `system_lessons.json.by_ticker` contains MSTR with >0 scored verdicts
+
+### Batch 5 — Adversarial review
+- Spawn `pr-review-toolkit:code-reviewer` + `pr-review-toolkit:silent-failure-hunter` agents in parallel on the diff
+- Run codex adversarial review on branch SHA
+- Address P1/P2 findings, document P3 decisions
+
+### Batch 6 — Tests + ship
+- `.venv/Scripts/python.exe -m pytest tests/ -n auto --timeout=60`
+- Fix regressions
+- Merge to main, push via `cmd.exe /c "cd /d Q:\finance-analyzer && git push"`
+
+## What could break
+
+- **Rate limits** if many entries hit the live API. Mitigate: reuse `_yfinance_limiter`, skip entries older than 30 days, cap retries to 1.
+- **Double-scoring from fin-crypto + single-ticker commands.** Mitigate: treat fin-crypto as supplemental — only score if that (ticker, timestamp) pair isn't already scored from a single-ticker entry.
+- **Mass write on first backfill** of 218 entries. Mitigate: acceptable — one-shot cost; subsequent runs are idempotent.
+
+## Order of execution
+1. Batch 1 (trivial)
+2. Batch 2 (enables Batch 3)
+3. Batch 3 (multi-ticker)
+4. Batch 4 (run + verify data)
+5. Batch 5 (adversarial review)
+6. Batch 6 (tests + ship)
