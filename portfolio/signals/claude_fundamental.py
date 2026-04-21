@@ -634,16 +634,14 @@ def _parse_opus_response(text):
 def _journal_refresh(tier: str, results: dict) -> None:
     """Persist tier refresh results for accuracy tracking and debugging.
 
-    2026-04-21: skip empty-reasoning HOLD-0.0 abstention rows. The Haiku prompt
-    instructs the model to emit `{action: "HOLD", confidence: 0.0}` with empty
-    reasoning when it has no strong fundamental view on a ticker (see
-    _build_haiku_prompt). These rows were ~53 % of the Haiku log volume — pure
-    noise that inflated log size, obscured real signals in grep, and made
-    investigators question whether the cascade was silently failing. The
-    in-memory cache keeps the abstention so `_get_best_result` still falls
-    through to the next tier; we just don't persist it to disk. Genuine
-    empty-API-response cases already skip this function entirely because
-    `_extract_json("")` returns {} → results={} → empty loop.
+    2026-04-21 v2: LOG EVERYTHING. An earlier v1 of this function silently
+    skipped rows that looked like abstentions (Haiku HOLD-0.0-empty-reason).
+    That was the wrong call — those rows are load-bearing evidence of how
+    often each tier declines to make a call, and the abstention rate itself
+    is a health signal. The revised approach is to ALWAYS write the row but
+    tag intentional abstentions with `is_abstention: true` so downstream
+    analysis can filter at read-time without losing the data. See the
+    `feedback_log_everything.md` memory for the full rationale.
     """
     import datetime as _dt
 
@@ -654,9 +652,9 @@ def _journal_refresh(tier: str, results: dict) -> None:
         action = result.get("action", "HOLD")
         confidence = result.get("confidence", 0.0)
         reasoning = result.get("indicators", {}).get("reasoning", "")
-        # Skip intentional abstentions (Haiku's "no view" response shape).
-        if action == "HOLD" and confidence == 0.0 and not reasoning:
-            continue
+        is_abstention = (
+            action == "HOLD" and confidence == 0.0 and not reasoning
+        )
         entry = {
             "ts": ts,
             "tier": tier,
@@ -666,6 +664,7 @@ def _journal_refresh(tier: str, results: dict) -> None:
             "sub_signals": result.get("sub_signals", {}),
             "reasoning": reasoning,
             "contrarian_flag": result.get("indicators", {}).get("contrarian_flag", False),
+            "is_abstention": is_abstention,
         }
         try:
             atomic_append_jsonl(_CF_LOG, entry)
