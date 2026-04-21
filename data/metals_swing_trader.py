@@ -79,6 +79,7 @@ from metals_swing_config import (
     MACD_IMPROVING_CHECKS,
     MAX_CONCURRENT,
     MAX_HOLD_HOURS,
+    MAX_SIGNAL_AGE_SEC,
     MIN_ACCEPTABLE_LEVERAGE,
     MIN_BARRIER_DISTANCE_PCT,
     MIN_BUY_CONFIDENCE,
@@ -1557,23 +1558,85 @@ class SwingTrader:
                 f"`Order didn't fill within {FILL_VERIFY_MAX_AGE_S}s`"
             )
 
+    def _is_new_signal_revision(self, signal_data, ticker: str) -> bool:
+        """Return True if signal_data represents a newer Layer-1 revision than
+        what we last recorded for this ticker.
+
+        2026-04-21 — Layer B. The _update_*_history helpers run once per
+        swing tick (~60s), but Layer 1 writes agent_summary at most every
+        60s and the metals_loop only re-reads every 4th cycle (~128s). Without
+        this check, a single Layer-1 snapshot gets replayed into history 2-3
+        times and fakes multi-cycle persistence — which is how Gate A,
+        MACD-improving, RSI-slope, and regime-confirm all passed on the
+        2026-04-21 08:01 UTC stale-BUY. Skipping duplicate-revision writes
+        forces those gates to wait for a GENUINE new Layer-1 publish before
+        accumulating evidence.
+
+        Also fail-closed on stale data itself: if signal_age_sec is beyond
+        MAX_SIGNAL_AGE_SEC the revision is ignored entirely (don't let a
+        4.5h-old snapshot contaminate history either). When the Layer 1
+        writer hasn't been upgraded to emit signal_ts yet, we treat every
+        call as a new revision — preserves the pre-upgrade behavior.
+        """
+        ts = getattr(self, "_current_signal_ts", None)
+        age = getattr(self, "_current_signal_age_sec", None)
+        if age is not None and age > MAX_SIGNAL_AGE_SEC:
+            return False
+        if ts is None:
+            # Writer not upgraded — fall back to "always new" to avoid
+            # silently starving gates in a partial deploy.
+            return True
+        last_seen = self.state.setdefault("last_signal_ts", {}).get(ticker)
+        return last_seen != ts
+
+    def _mark_signal_revision_seen(self, ticker: str) -> None:
+        ts = getattr(self, "_current_signal_ts", None)
+        if ts is None:
+            return
+        self.state.setdefault("last_signal_ts", {})[ticker] = ts
+
     def _update_regime_history(self, signal_data):
-        """Append (action, regime) snapshot per ticker, capped at last 10 entries."""
+        """Append (ts, action, regime) snapshot per ticker, capped at last 10 entries.
+
+        2026-04-21 — only append on a genuine new Layer-1 revision
+        (see _is_new_signal_revision) AND stamp the revision's ts on each
+        entry. _regime_confirmed then requires N DISTINCT ts values, which
+        closes the replay-amplification bug where reading the same stale
+        agent_summary 2-3 times in a row fake-confirmed the regime.
+
+        Legacy 2-tuple entries (pre-2026-04-21) are kept as-is and treated
+        as one-distinct-ts-per-entry for backwards compat during rollout.
+        """
         if not signal_data:
             return
         for ticker in ("XAG-USD", "XAU-USD"):
             sig = signal_data.get(ticker)
             if not sig:
                 continue
-            entry = (sig.get("action", "HOLD"), sig.get("regime", "unknown"))
+            if not self._is_new_signal_revision(signal_data, ticker):
+                continue
+            ts = getattr(self, "_current_signal_ts", None)
+            entry = (ts, sig.get("action", "HOLD"), sig.get("regime", "unknown"))
             hist = self.regime_history.setdefault(ticker, [])
             hist.append(entry)
             # Keep last 10 to bound memory
             if len(hist) > 10:
                 self.regime_history[ticker] = hist[-10:]
+        # Revision seen marker is updated once at end-of-tick in
+        # _update_rsi_history (the last of the four updaters). Updating
+        # mid-loop would starve the later updaters of their first-append
+        # opportunity on a genuinely new revision.
 
     def _regime_confirmed(self, ticker: str, action: str, regime: str) -> bool:
-        """Return True if the (action, regime) pair held for REGIME_CONFIRM_CHECKS in a row.
+        """Return True if the (action, regime) pair held for REGIME_CONFIRM_CHECKS
+        distinct Layer-1 revisions in a row.
+
+        2026-04-21 — entries are now 3-tuples (ts, action, regime). Require
+        N DISTINCT ts values, not just N entries — otherwise reading the
+        same stale agent_summary 2-3 times produces fake confirmation.
+        Legacy 2-tuples (a, r) are tolerated during rollout and treated
+        as one-distinct-ts-per-entry (preserves old behavior until the
+        buffer fully rotates).
 
         Rejects single-check flips like trending-down → ranging BUY in one tick.
         """
@@ -1581,7 +1644,24 @@ class SwingTrader:
         if len(hist) < REGIME_CONFIRM_CHECKS:
             return False
         recent = hist[-REGIME_CONFIRM_CHECKS:]
-        return all(a == action and r == regime for a, r in recent)
+
+        def _unpack(e):
+            if isinstance(e, tuple) and len(e) == 3:
+                return e  # (ts, action, regime)
+            if isinstance(e, tuple) and len(e) == 2:
+                a, r = e
+                return (None, a, r)  # legacy, ts unknown
+            return (None, None, None)
+
+        unpacked = [_unpack(e) for e in recent]
+        if not all(a == action and r == regime for (_t, a, r) in unpacked):
+            return False
+        distinct_ts = {t for (t, _a, _r) in unpacked if t is not None}
+        if distinct_ts and len(distinct_ts) < REGIME_CONFIRM_CHECKS:
+            # All entries came from < REGIME_CONFIRM_CHECKS distinct Layer-1
+            # revisions — replayed reads of the same stale snapshot.
+            return False
+        return True
 
     # -------------------------------------------------------------------
     # Momentum-entry integration (2026-04-17)
@@ -1681,6 +1761,12 @@ class SwingTrader:
         if not signal_data:
             _log("_check_entries: no signal_data — skipping (one-cycle stale expected)")
             return
+
+        # 2026-04-21 — cache Layer-1 freshness metadata for Gate Z and for the
+        # revision-keyed history updaters. signal_age_sec is None when the
+        # agent_summary writer hasn't been upgraded to emit "timestamp".
+        self._current_signal_age_sec = signal_data.get("signal_age_sec")
+        self._current_signal_ts = signal_data.get("signal_ts")
 
         # 2026-04-10 adversarial review L3: just-in-time cash sync before
         # sizing. The 30-min periodic sync is fine as a heartbeat, but when
@@ -2060,6 +2146,25 @@ class SwingTrader:
         action = sig.get("action", "HOLD")
         confidence = float(sig.get("confidence", 0) or 0)
 
+        # Gate Z — stale-signal rejection (2026-04-21 incident postmortem).
+        # Runs BEFORE direction and BEFORE the momentum override at :2080 so
+        # both the standard-gate path AND the relaxed momentum path fail-close
+        # on stale data. Source is the INTERNAL signal_age_sec plumbed by
+        # read_signal_data() from agent_summary.json's "timestamp" field —
+        # we avoid os.path.getmtime because atomic rename refreshes mtime
+        # even when the content inside was recovered from a stuck cycle
+        # (XAG-USD was frozen 16255s in utility_overlay on 2026-04-21 while
+        # the file itself was eventually rewritten with that stale content).
+        # signal_age_sec is None only if agent_summary lacks a "timestamp"
+        # field — treat as unknown and allow through, to avoid a deploy-order
+        # race where the writer hasn't been upgraded yet.
+        signal_age_sec = getattr(self, "_current_signal_age_sec", None)
+        if signal_age_sec is not None and signal_age_sec > MAX_SIGNAL_AGE_SEC:
+            return False, (
+                f"signal stale: age={signal_age_sec:.0f}s > {MAX_SIGNAL_AGE_SEC}s "
+                f"(Gate Z — Layer 1 write-time check)"
+            )
+
         # Direction check — LONG needs BUY, SHORT needs SELL + SHORT_ENABLED.
         if action == "BUY":
             majority = buy_count
@@ -2154,12 +2259,15 @@ class SwingTrader:
             # prior cycle's action was the same — a SELL@0.65 followed by
             # BUY@0.70 is a flip, not persistence, and must be rejected.
             conf_hist = self.state.get("confidence_history", {}).get(ticker, [])
-            # Append current (action, confidence) BEFORE the check so the
+            # Append current (action, confidence, ts) BEFORE the check so the
             # window includes this cycle. The state is saved after
             # _evaluate_entry regardless of result; ring is capped at
             # CONFIDENCE_HISTORY_MAX by _update_confidence_history().
             recent_pairs = conf_hist[-(SIGNAL_PERSISTENCE_CHECKS - 1):] if SIGNAL_PERSISTENCE_CHECKS > 1 else []
-            window = recent_pairs + [{"action": action, "confidence": confidence}]
+            current_ts = getattr(self, "_current_signal_ts", None)
+            window = recent_pairs + [
+                {"ts": current_ts, "action": action, "confidence": confidence}
+            ]
             if len(window) >= SIGNAL_PERSISTENCE_CHECKS:
                 def _entry_action_and_conf(entry):
                     # Tolerate legacy float-only entries (pre-2026-04-18
@@ -2191,6 +2299,36 @@ class SwingTrader:
                         f"passed but prior {SIGNAL_PERSISTENCE_CHECKS - 1} cycle(s) "
                         f"weren't persistent (window={summary})"
                     )
+                # 2026-04-21 — require the window to span N DISTINCT Layer-1
+                # revisions. Before this check, reading the same stale
+                # agent_summary twice produced a window of [BUY@T1, BUY@T1]
+                # which passed Gate A without any new signal event. The
+                # 08:01 UTC MINI L SILVER buy on 2026-04-21 rode exactly
+                # that replay — snapshot had been frozen 4.5h, then got
+                # written once, then the swing trader's NEXT tick on the
+                # unchanged file passed Gate A because the prior tick had
+                # already deposited an entry.
+                #
+                # Only enforced when current_ts is non-None (Layer 1 writer
+                # upgraded) AND at least one legacy entry isn't in the window
+                # (we allow the 1-cycle rollout window to drain without
+                # rejecting every trade). Entries written by _update_
+                # confidence_history from 2026-04-21+ always carry "ts".
+                if current_ts is not None:
+                    ts_in_window = {
+                        e.get("ts") for e in window
+                        if isinstance(e, dict) and e.get("ts") is not None
+                    }
+                    legacy_entries = sum(
+                        1 for e in window
+                        if not isinstance(e, dict) or e.get("ts") is None
+                    )
+                    if legacy_entries == 0 and len(ts_in_window) < SIGNAL_PERSISTENCE_CHECKS:
+                        return False, (
+                            f"signal persistence: window spans only "
+                            f"{len(ts_in_window)} distinct Layer-1 revision(s), "
+                            f"need {SIGNAL_PERSISTENCE_CHECKS} (replay-amplification guard)"
+                        )
             # If we don't have enough history yet (first cycle after restart),
             # allow the trade — the 2-cycle cost can't be paid on cold start.
 
@@ -3065,7 +3203,11 @@ class SwingTrader:
         return 0
 
     def _update_macd_history(self, signal_data):
-        """Track MACD histogram values across checks."""
+        """Track MACD histogram values across checks.
+
+        2026-04-21 — skip appends on duplicate signal_ts so a stale
+        agent_summary read twice doesn't fake MACD progression.
+        """
         if not signal_data:
             return
 
@@ -3081,6 +3223,9 @@ class SwingTrader:
             if macd_hist is None:
                 continue
 
+            if not self._is_new_signal_revision(signal_data, ticker):
+                continue
+
             history = self.state["macd_history"].setdefault(ticker, [])
             history.append(macd_hist)
             if len(history) > 20:
@@ -3089,11 +3234,18 @@ class SwingTrader:
         _save_state(self.state)
 
     def _update_confidence_history(self, signal_data):
-        """Track (action, confidence) pairs across checks for Gate A.
+        """Track (action, confidence, ts) triples across checks for Gate A.
 
         2026-04-18 Codex follow-up: the persistence gate needs to see the
         SAME action across cycles — a SELL@0.65 followed by BUY@0.70 is a
         flip, not persistence. Store both fields per cycle.
+
+        2026-04-21 — entries now carry the Layer-1 write ts so Gate A can
+        require N DISTINCT revisions. Replay of the same stale snapshot
+        (which passed Gate A on 2026-04-21 08:01 UTC despite identical
+        content) is rejected at the gate. Skip the append itself on
+        duplicate revision so the history doesn't bloat with identical
+        entries on every cycle.
         """
         if not signal_data:
             return
@@ -3107,14 +3259,24 @@ class SwingTrader:
             action = sig.get("action")
             if conf is None or action is None:
                 continue
+            if not self._is_new_signal_revision(signal_data, ticker):
+                continue
+            ts = getattr(self, "_current_signal_ts", None)
             history = self.state["confidence_history"].setdefault(ticker, [])
-            history.append({"action": action, "confidence": float(conf)})
+            history.append({"ts": ts, "action": action, "confidence": float(conf)})
             if len(history) > CONFIDENCE_HISTORY_MAX:
                 history.pop(0)
         _save_state(self.state)
 
     def _update_rsi_history(self, signal_data):
-        """Track RSI values across checks (Gate C, 2026-04-18)."""
+        """Track RSI values across checks (Gate C, 2026-04-18).
+
+        2026-04-21 — revision-keyed like the other _update_*_history
+        helpers. This is the LAST updater in evaluate_and_execute, so we
+        also mark the per-ticker last_signal_ts here to seal the cycle —
+        placing it earlier would starve later updaters of their
+        first-append on a genuinely new Layer-1 revision.
+        """
         if not signal_data:
             return
         if "rsi_history" not in self.state:
@@ -3126,10 +3288,17 @@ class SwingTrader:
             rsi = sig.get("rsi")
             if rsi is None:
                 continue
+            if not self._is_new_signal_revision(signal_data, ticker):
+                continue
             history = self.state["rsi_history"].setdefault(ticker, [])
             history.append(float(rsi))
             if len(history) > RSI_HISTORY_MAX:
                 history.pop(0)
+            # Seal the cycle — mark per-ticker last_signal_ts now that the
+            # final of the four _update_*_history updaters has processed
+            # this ticker's new revision. Next cycle's _is_new_signal_revision
+            # will skip if the writer hasn't published a newer ts.
+            self._mark_signal_revision_seen(ticker)
         _save_state(self.state)
 
     def _send_summary(self, signal_data):

@@ -145,6 +145,25 @@ RSI_DIP_BELOW_LEVEL = 55             # must have touched <= 55 recently OR be ri
 CONFIDENCE_HISTORY_MAX = 20
 RSI_HISTORY_MAX = 30                 # covers both lookbacks comfortably
 
+# Gate Z — stale-signal rejection (2026-04-21 incident: bought MINI L SILVER
+# at 08:01 UTC on an agent_summary whose internal timestamp was ~4.5h old
+# because Layer 1's signal_engine had been stuck 16255s in utility_overlay
+# for XAG-USD). This gate runs at the TOP of _evaluate_entry, before the
+# direction check and before the momentum override — so both the standard
+# path and the relaxed momentum path fail-close on stale data. The source
+# is the "timestamp" field INSIDE agent_summary.json (Layer 1's own write
+# clock); we deliberately do not rely on os.path.getmtime because atomic
+# rename refreshes mtime even when content is stale from a recovered stuck
+# cycle.
+#
+# Tuning: Layer 1 nominal cadence is 60s but real observed inter-write gaps
+# range 90-220s typical, 10+ min during LLM-batch or ticker-heavy cycles.
+# 900s (15 min) tolerates normal degraded cadence while still catching any
+# outage > ~2 cycles. Anything < 5 min would cause frequent false rejects
+# during routine slow cycles; anything > 30 min would miss meaningful
+# outages. Review this if Layer 1's cadence structurally changes.
+MAX_SIGNAL_AGE_SEC = 900
+
 # ---------------------------------------------------------------------------
 # Exit rules
 # ---------------------------------------------------------------------------

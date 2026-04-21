@@ -836,5 +836,206 @@ class TestReliabilityFixes:
             "LONG TAKE_PROFIT regression — should still fire"
 
 
+class TestStaleSignalGuards:
+    """Gate Z (freshness) + Gate A distinct-ts replay guard, added 2026-04-21
+    after bought MINI L SILVER AVA 330 at an intraday top on a 4.5h-stale
+    agent_summary snapshot."""
+
+    def _seed_valid_entry_context(self, trader):
+        """Populate the state with conditions that should otherwise pass
+        all gates — so the only variable under test is staleness/replay."""
+        # MACD improving, plenty of headroom to pass decay gate.
+        trader.state["macd_history"] = {"XAG-USD": [0.10, 0.20, 0.30]}
+        # RSI history 30 values rising then pulling back — satisfies slope
+        # OR dip condition in Gate C.
+        trader.state["rsi_history"] = {"XAG-USD": [40.0] * 5 + [50.0] * 5}
+        # Confidence history: 2 prior BUY@0.70 entries from DIFFERENT ts,
+        # so Gate A's distinct-ts check would pass by default.
+        trader.state["confidence_history"] = {"XAG-USD": [
+            {"ts": "2026-04-21T10:00:00+00:00", "action": "BUY", "confidence": 0.70},
+        ]}
+
+    def test_gate_z_rejects_stale_signal(self):
+        """Gate Z must fail-close when signal age exceeds MAX_SIGNAL_AGE_SEC.
+
+        Scenario: Layer 1 has been stuck for hours; the swing trader reads
+        the old agent_summary and _current_signal_age_sec exceeds the gate.
+        The 2026-04-21 08:01 buy would have been rejected here.
+        """
+        trader = make_trader(cash=10000)
+        self._seed_valid_entry_context(trader)
+        # Simulate signal_data arriving with 4.5h-stale timestamp.
+        stale_age = cfg.MAX_SIGNAL_AGE_SEC + 60  # just past threshold
+        sig = make_signal(
+            action="BUY", buy_count=5, rsi=50, confidence=0.70,
+            timeframes={"Now": "BUY", "12h": "BUY", "2d": "BUY",
+                        "7d": "BUY", "1mo": "HOLD", "3mo": "HOLD", "6mo": "HOLD"},
+        )
+        signal_data = {
+            "XAG-USD": sig,
+            "signal_ts": "2026-04-21T03:30:00+00:00",
+            "signal_age_sec": stale_age,
+        }
+        trader._check_entries({}, signal_data)
+        assert len(trader.state["positions"]) == 0, \
+            "Gate Z should block entry on stale signal data"
+
+    def test_gate_z_allows_fresh_signal(self):
+        """Gate Z must pass when signal is fresh — sanity for the happy path."""
+        trader = make_trader(cash=10000)
+        self._seed_valid_entry_context(trader)
+        sig = make_signal(
+            action="BUY", buy_count=5, rsi=50, confidence=0.70,
+            timeframes={"Now": "BUY", "12h": "BUY", "2d": "BUY",
+                        "7d": "BUY", "1mo": "HOLD", "3mo": "HOLD", "6mo": "HOLD"},
+        )
+        signal_data = {
+            "XAG-USD": sig,
+            "signal_ts": "2026-04-21T12:00:00+00:00",
+            "signal_age_sec": 30.0,  # well within fresh
+        }
+        # _current_signal_age_sec drives Gate Z decision — None path is
+        # exercised by other entry tests; here we just verify Gate Z
+        # itself is a no-op on fresh data. The trade may still fail
+        # for other reasons (MACD decay / regime / warrant selection);
+        # we only assert Gate Z itself doesn't reject.
+        trader._check_entries({}, signal_data)
+        # Gate Z rejection would be logged as "signal stale" in decisions.
+        # Load decision log and assert no "signal stale" rejection.
+        import os
+        if os.path.exists(cfg.DECISIONS_LOG):
+            with open(cfg.DECISIONS_LOG, encoding="utf-8") as f:
+                contents = f.read()
+            assert "signal stale" not in contents, \
+                "Gate Z falsely rejected a fresh signal"
+
+    def test_gate_a_rejects_replay_same_revision(self):
+        """Gate A distinct-ts check must reject when the window spans
+        only one Layer-1 revision — i.e., the swing trader read the same
+        stale snapshot twice. This was the direct amplification mechanism
+        on 2026-04-21 08:01 UTC.
+        """
+        trader = make_trader(cash=10000)
+        self._seed_valid_entry_context(trader)
+        # Replace the conf_history so the last entry shares ts with the
+        # current cycle — this is exactly the replay scenario.
+        SAME_TS = "2026-04-21T12:00:00+00:00"
+        trader.state["confidence_history"] = {"XAG-USD": [
+            {"ts": SAME_TS, "action": "BUY", "confidence": 0.70},
+        ]}
+        sig = make_signal(
+            action="BUY", buy_count=5, rsi=50, confidence=0.70,
+            timeframes={"Now": "BUY", "12h": "BUY", "2d": "BUY",
+                        "7d": "BUY", "1mo": "HOLD", "3mo": "HOLD", "6mo": "HOLD"},
+        )
+        signal_data = {
+            "XAG-USD": sig,
+            "signal_ts": SAME_TS,  # same as the prior history entry
+            "signal_age_sec": 30.0,  # fresh, so Gate Z passes
+        }
+        trader._check_entries({}, signal_data)
+        assert len(trader.state["positions"]) == 0, \
+            "Gate A distinct-ts check should block replay of same Layer-1 revision"
+
+    def test_gate_a_allows_two_distinct_revisions(self):
+        """Gate A must pass when the window spans N distinct revisions."""
+        trader = make_trader(cash=10000)
+        self._seed_valid_entry_context(trader)
+        trader.state["confidence_history"] = {"XAG-USD": [
+            {"ts": "2026-04-21T11:59:00+00:00", "action": "BUY", "confidence": 0.70},
+        ]}
+        sig = make_signal(
+            action="BUY", buy_count=5, rsi=50, confidence=0.70,
+            timeframes={"Now": "BUY", "12h": "BUY", "2d": "BUY",
+                        "7d": "BUY", "1mo": "HOLD", "3mo": "HOLD", "6mo": "HOLD"},
+        )
+        signal_data = {
+            "XAG-USD": sig,
+            "signal_ts": "2026-04-21T12:00:00+00:00",  # different from history
+            "signal_age_sec": 30.0,
+        }
+        trader._check_entries({}, signal_data)
+        # Distinct-ts check itself should not reject. Whether the trade
+        # actually happens depends on warrant selection etc. — we only
+        # assert no "only N distinct Layer-1 revision" log line.
+        import os
+        if os.path.exists(cfg.DECISIONS_LOG):
+            with open(cfg.DECISIONS_LOG, encoding="utf-8") as f:
+                contents = f.read()
+            assert "distinct Layer-1 revision" not in contents, \
+                "Gate A distinct-ts falsely rejected a 2-revision window"
+
+    def test_revision_history_skip_append_on_duplicate_ts(self):
+        """_is_new_signal_revision + _update_confidence_history must NOT
+        append a second entry when ts is unchanged — otherwise history
+        bloats with duplicates and the distinct-ts check is defeated.
+        """
+        trader = make_trader(cash=10000)
+        trader.state["last_signal_ts"] = {"XAG-USD": "2026-04-21T12:00:00+00:00"}
+        trader._current_signal_ts = "2026-04-21T12:00:00+00:00"
+        trader._current_signal_age_sec = 30.0
+        sig = make_signal(action="BUY", buy_count=5, rsi=50, confidence=0.70)
+        trader._update_confidence_history({"XAG-USD": sig})
+        hist = trader.state.get("confidence_history", {}).get("XAG-USD", [])
+        assert len(hist) == 0, \
+            f"Duplicate-ts append leaked into history: {hist}"
+
+    def test_revision_history_append_on_new_ts(self):
+        """Counter-test: history DOES append when ts is new."""
+        trader = make_trader(cash=10000)
+        trader.state["last_signal_ts"] = {"XAG-USD": "2026-04-21T11:59:00+00:00"}
+        trader._current_signal_ts = "2026-04-21T12:00:00+00:00"
+        trader._current_signal_age_sec = 30.0
+        sig = make_signal(action="BUY", buy_count=5, rsi=50, confidence=0.70)
+        trader._update_confidence_history({"XAG-USD": sig})
+        hist = trader.state.get("confidence_history", {}).get("XAG-USD", [])
+        assert len(hist) == 1 and hist[0]["ts"] == "2026-04-21T12:00:00+00:00", \
+            f"New-ts should have appended: {hist}"
+
+    def test_gate_z_covers_momentum_override(self):
+        """Critical: Gate Z must run BEFORE the momentum override at :2182
+        so that a stale-signal BUY doesn't bypass Gates A/B/C via a fresh
+        momentum candidate. All three reviewers flagged this path.
+        """
+        trader = make_trader(cash=10000)
+        self._seed_valid_entry_context(trader)
+        # Force-seed a fresh momentum candidate so the relaxed path would
+        # otherwise be taken. We don't need MOMENTUM_STATE_FILE to exist —
+        # the test stubs _check_momentum_candidate to always return a
+        # fake candidate (fresh, LONG, unconsumed).
+        trader._check_momentum_candidate = lambda ticker: {
+            "direction": "LONG",
+            "triggered_at": datetime.datetime.now(datetime.UTC).isoformat(),
+            "consumed_at": None,
+        }
+        stale_age = cfg.MAX_SIGNAL_AGE_SEC + 60
+        sig = make_signal(
+            action="BUY", buy_count=5, rsi=50, confidence=0.70,
+            timeframes={"Now": "BUY", "12h": "BUY", "2d": "BUY",
+                        "7d": "BUY", "1mo": "HOLD", "3mo": "HOLD", "6mo": "HOLD"},
+        )
+        signal_data = {
+            "XAG-USD": sig,
+            "signal_ts": "2026-04-21T03:30:00+00:00",
+            "signal_age_sec": stale_age,
+        }
+        trader._check_entries({}, signal_data)
+        assert len(trader.state["positions"]) == 0, \
+            "Gate Z must block stale-signal entries even when momentum candidate is fresh"
+
+    def test_revision_history_rejects_stale_append(self):
+        """_is_new_signal_revision returns False when signal_age > MAX_SIGNAL_AGE_SEC
+        so _update_confidence_history doesn't pollute history with stale data."""
+        trader = make_trader(cash=10000)
+        trader.state["last_signal_ts"] = {"XAG-USD": "2026-04-21T11:59:00+00:00"}
+        trader._current_signal_ts = "2026-04-21T12:00:00+00:00"
+        trader._current_signal_age_sec = cfg.MAX_SIGNAL_AGE_SEC + 60
+        sig = make_signal(action="BUY", buy_count=5, rsi=50, confidence=0.70)
+        trader._update_confidence_history({"XAG-USD": sig})
+        hist = trader.state.get("confidence_history", {}).get("XAG-USD", [])
+        assert len(hist) == 0, \
+            f"Stale signal should not pollute conf history: {hist}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

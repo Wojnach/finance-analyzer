@@ -1563,7 +1563,16 @@ def is_avanza_open():
     return is_market_hours()
 
 def read_signal_data():
-    """Read XAG/XAU signal data from the main loop's agent_summary.json."""
+    """Read XAG/XAU signal data from the main loop's agent_summary.json.
+
+    2026-04-21 — exposes signal_ts (ISO string from Layer 1's write clock,
+    inside agent_summary) and signal_age_sec (now - that ts). Callers can
+    reject stale data without relying on os.path.getmtime (which atomic
+    rename refreshes even when the content inside was computed on a
+    cycle that got stuck 4.5h in utility_overlay — the XAG-USD incident
+    on 2026-04-21 08:01 UTC). Mtime remains exposed as age_min for
+    backwards compatibility with existing startup logs.
+    """
     try:
         path = "data/agent_summary.json"
         if not os.path.exists(path):
@@ -1578,7 +1587,31 @@ def read_signal_data():
         if not data:
             return {}
 
-        result = {"age_min": round(age_min, 1)}
+        # Parse the INTERNAL timestamp that Layer 1 stamps in write_agent_summary.
+        # This is the write-time clock; if it is materially older than now we
+        # know the content is stale regardless of what os.path.getmtime claims.
+        internal_ts_iso = data.get("timestamp")
+        signal_age_sec = None
+        if internal_ts_iso:
+            try:
+                ts_dt = datetime.datetime.fromisoformat(internal_ts_iso)
+                if ts_dt.tzinfo is None:
+                    ts_dt = ts_dt.replace(tzinfo=datetime.UTC)
+                signal_age_sec = (
+                    datetime.datetime.now(datetime.UTC) - ts_dt
+                ).total_seconds()
+            except (ValueError, TypeError):
+                # Malformed timestamp — leave as None; downstream Gate Z in
+                # metals_swing_trader treats None as "unknown, don't gate"
+                # which preserves the pre-2026-04-21 behavior for paths that
+                # haven't been upgraded yet.
+                signal_age_sec = None
+
+        result = {
+            "age_min": round(age_min, 1),
+            "signal_ts": internal_ts_iso,
+            "signal_age_sec": signal_age_sec,
+        }
         for key in ["forecast_signals", "cumulative_gains"]:
             if key in data:
                 result[key] = data[key]
