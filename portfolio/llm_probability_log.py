@@ -174,3 +174,83 @@ def llm_signals() -> frozenset[str]:
     """Public snapshot of the LLM signal set. Returned frozenset is immutable
     so callers cannot mutate state."""
     return _LLM_SIGNALS
+
+
+def _clamp_confidence(conf: float) -> float:
+    """Clamp confidence to [0, 1]."""
+    if conf < 0.0:
+        return 0.0
+    if conf > 1.0:
+        return 1.0
+    return conf
+
+
+def derive_probs_from_result(
+    signal_name: str,
+    action: str,
+    confidence: float,
+    indicators: dict | None = None,
+) -> dict[str, float] | None:
+    """Derive a {BUY, HOLD, SELL} probability distribution from a signal's
+    native output shape.
+
+    Preference order:
+
+    1. **Rich shape** — if `indicators["avg_scores"]` exists with
+       positive/negative/neutral keys (sentiment family), map directly:
+       BUY := positive, SELL := negative, HOLD := neutral. Preserves the
+       model's calibrated distribution.
+    2. **Confidence-split fallback** — assign `confidence` to the chosen
+       action and split `(1 - confidence) / 2` equally between the other
+       two. Not perfectly calibrated but gives a coherent log for signals
+       that emit only `{action, confidence}`.
+
+    Returns None when input is malformed (non-LLM signal, bad action,
+    confidence out of range). Never raises — callers can invoke
+    unconditionally and skip logging when None is returned.
+
+    Does NOT call log_vote() itself; callers compose the two steps so the
+    log site owns timing and metadata.
+    """
+    if signal_name not in _LLM_SIGNALS:
+        return None
+    if action not in _VALID_ACTIONS:
+        return None
+
+    try:
+        conf = _clamp_confidence(float(confidence))
+    except (TypeError, ValueError):
+        return None
+
+    indicators = indicators or {}
+    avg_scores = indicators.get("avg_scores")
+    if isinstance(avg_scores, dict):
+        pos = avg_scores.get("positive")
+        neg = avg_scores.get("negative")
+        neu = avg_scores.get("neutral")
+        if all(isinstance(x, (int, float)) for x in (pos, neg, neu)):
+            total = float(pos) + float(neg) + float(neu)
+            if total > 0:
+                return {
+                    "BUY": float(pos) / total,
+                    "SELL": float(neg) / total,
+                    "HOLD": float(neu) / total,
+                }
+
+    # Confidence-split fallback. Floor at 1/3 — if the model ACTIVELY chose
+    # an action, its probability for that action must be at least the random
+    # baseline, otherwise the distribution contradicts the argmax.
+    conf = max(conf, 1.0 / 3.0)
+    if conf >= 1.0:
+        probs = {"BUY": 0.0, "HOLD": 0.0, "SELL": 0.0}
+        probs[action] = 1.0
+    else:
+        remainder = (1.0 - conf) / 2.0
+        probs = {"BUY": remainder, "HOLD": remainder, "SELL": remainder}
+        probs[action] = conf
+
+    total = sum(probs.values())
+    if abs(total - 1.0) > 1e-9:
+        # Numerical drift from rounding — normalise.
+        probs = {k: v / total for k, v in probs.items()}
+    return probs
