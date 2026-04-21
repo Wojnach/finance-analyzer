@@ -2729,9 +2729,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             tier = None
             if sig_name == "claude_fundamental" and indicators:
                 tier = indicators.get("tier")
+            # Default horizon to "1d" when caller passes None so the log is
+            # queryable by horizon without null-handling at every join site.
             log_vote(
                 sig_name, ticker or "", probs,
-                horizon=horizon, chosen=action, confidence=conf, tier=tier,
+                horizon=horizon or "1d", chosen=action, confidence=conf, tier=tier,
             )
     except Exception:
         logger.debug("llm probability logging failed", exc_info=True)
