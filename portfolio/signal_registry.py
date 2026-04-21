@@ -202,6 +202,11 @@ def _register_defaults():
     # Source: ScienceDirect OVX cross-asset quantile predictability papers.
     register_enhanced("ovx_metals_spillover", "portfolio.signals.ovx_metals_spillover",
                       "compute_ovx_metals_spillover_signal", requires_context=True, max_confidence=0.7)
+    # Cross-asset equity trend spillover — SPY/QQQ TA predicts all assets; capped at 0.7
+    # 2026-04-21: Fieberg et al. 2025, robust across 1.3M research designs.
+    # Inverts for safe havens (XAU, XAG): bullish equities = risk-on = SELL metals.
+    register_enhanced("xtrend_equity_spillover", "portfolio.signals.xtrend_equity_spillover",
+                      "compute_xtrend_equity_spillover_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
