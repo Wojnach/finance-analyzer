@@ -147,6 +147,20 @@ def _build_recommendations(report):
             "Either accumulate promotion evidence or retire."
         )
 
+    # Sentiment shadow promotion check — surface any shadow model that has
+    # crossed the 60 % / 200-sample promotion gate from portfolio/sentiment.py.
+    sent_acc = report.get("sentiment_shadow_accuracy", {}).get("1d", {})
+    for model, stats in sent_acc.items():
+        if stats.get("kind") != "shadow":
+            continue
+        acc = stats.get("accuracy")
+        samples = stats.get("samples", 0)
+        if acc is not None and samples >= 200 and acc >= 0.60:
+            recommendations.append(
+                f"Shadow sentiment model `{model}` cleared promotion gate "
+                f"({acc*100:.1f}% on {samples} samples at 1d). Consider promoting."
+            )
+
     return recommendations
 
 
@@ -297,6 +311,20 @@ def build_local_llm_report(days=DEFAULT_REPORT_DAYS, config=None, predictions_fi
     except Exception as e:
         logger.debug("shadow registry load failed: %s", e)
         report["shadow_registry"] = {"shadows": {}, "stale": []}
+
+    # Per-shadow-model sentiment accuracy from the A/B log backfill.
+    # This is what closes the FinGPT / FinBERT accuracy tracking gap —
+    # without it we'd know shadow verdicts but not shadow correctness.
+    # Populated by scripts/backfill_sentiment_shadow.py on a schedule.
+    try:
+        from portfolio.sentiment_shadow_backfill import compute_model_accuracy
+        report["sentiment_shadow_accuracy"] = {
+            h: compute_model_accuracy(horizon=h, days=days)
+            for h in ("1d", "3d")
+        }
+    except Exception as e:
+        logger.debug("sentiment shadow accuracy load failed: %s", e)
+        report["sentiment_shadow_accuracy"] = {}
 
     report["recommendations"] = _build_recommendations(report)
     return report
