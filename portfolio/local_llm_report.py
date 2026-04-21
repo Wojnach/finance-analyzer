@@ -264,20 +264,17 @@ def build_local_llm_report(days=DEFAULT_REPORT_DAYS, config=None, predictions_fi
         "gating_counts": _count_forecast_gating(entries),
     }
     # 2026-04-21: include calibration metrics (Brier, log-loss) per LLM signal
-    # from the probability log. Until the outcome-backfill job lands, most
-    # rows will report under `missing_outcome` — that's honest surfacing, not
-    # silent failure. See portfolio.llm_calibration for the math.
+    # from the probability log. Outcomes come from the backfill companion file
+    # `data/llm_probability_outcomes.jsonl` — populate via
+    # `python scripts/backfill_llm_outcomes.py` on a schedule. Rows whose
+    # horizons haven't elapsed yet are tallied under `missing_outcome` so the
+    # report honestly surfaces "N rows pending backfill" instead of suppressing.
     try:
         from portfolio.llm_calibration import compute_metrics
-        # No-op outcome lookup for now (follow-up PR adds the real backfill).
-        # The report still shows per-signal sample counts and the
-        # missing_outcome tally so we can see the log is actually flowing.
-        calibration = compute_metrics(
-            lambda ts, tkr, h: None,
-            days=days,
-        )
+        from portfolio.llm_outcome_backfill import outcome_lookup
+        lookup = outcome_lookup()
+        calibration = compute_metrics(lookup, days=days)
         report["calibration"] = calibration
-        # Summarise row counts for the recommendations builder.
         report["_calibration_pending_backfill"] = sum(
             s.get("missing_outcome", 0) for s in calibration.values()
         )
