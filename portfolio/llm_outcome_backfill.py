@@ -137,7 +137,11 @@ def backfill(
             stats["skipped_already_present"] += 1
             continue
 
-        horizon = row.get("horizon", "1d")
+        # `row.get("horizon", "1d")` doesn't cover rows where horizon exists
+        # but is explicitly null. Early production rows (pre-horizon-default
+        # fix ed13e608) had `"horizon": null` — still backfill-eligible at
+        # the argmax-accuracy 1d default.
+        horizon = row.get("horizon") or "1d"
         hours = _HORIZON_HOURS.get(horizon)
         if hours is None:
             stats["skipped_bad_row"] += 1
