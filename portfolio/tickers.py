@@ -77,6 +77,10 @@ DISABLED_SIGNALS = {
     "statistical_jump_regime",  # pending live validation (added 2026-04-18)
     "network_momentum",  # pending live validation (added 2026-04-19)
     "ovx_metals_spillover",  # pending live validation (added 2026-04-20)
+    "econ_calendar",    # BUG-218: structurally SELL-only — all 4 sub-signals can only produce
+                        # SELL or HOLD, never BUY. Permanent SELL-biased voter in consensus.
+                        # Force-HOLD until BUY capability is added (needs research into
+                        # which economic events are bullish).
     "orderbook_flow",   # 2026-04-11: 51.1% accuracy (360 sam), 93.3% activation rate,
                         # no recent data. Pure noise in every consensus decision.
                         # Re-evaluate after 2 weeks of accuracy data collection.

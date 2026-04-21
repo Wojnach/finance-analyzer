@@ -2836,8 +2836,16 @@ class SwingTrader:
                         exit_reason = f"MOMENTUM_EXIT: 3 rising checks ({move_rate:+.2f}%)"
 
             if exit_reason:
-                self._execute_sell(pos_id, pos, current_bid, underlying_price, exit_reason)
-                to_remove.append(pos_id)
+                try:
+                    self._execute_sell(pos_id, pos, current_bid, underlying_price, exit_reason)
+                    to_remove.append(pos_id)
+                except Exception as e:
+                    # BUG-217: Don't let one failed sell abort the entire exit loop.
+                    # Mark the position as failed so it gets cooldown treatment next cycle.
+                    _log(f"SELL EXCEPTION for {pos.get('warrant_name', pos_id)}: {e}")
+                    pos["sell_failed_at"] = _now_utc().isoformat()
+                    pos["sell_failed_reason"] = str(e)[:200]
+                    _save_state(self.state)
 
         # Update underlying price history for momentum tracking
         if signal_data:
