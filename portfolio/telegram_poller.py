@@ -201,6 +201,16 @@ class TelegramPoller:
         except (FileNotFoundError, json.JSONDecodeError):
             cfg = {}
 
+        # BUG-210: Guard against writing suspiciously small config.
+        # If config.json was momentarily unreadable (symlink, AV lock, fs
+        # glitch), cfg={} and the write below would destroy all API keys.
+        if len(cfg) < 5:
+            logger.error(
+                "Refusing to write config — loaded config has only %d keys "
+                "(expected 5+, possible transient read failure)", len(cfg)
+            )
+            return "Error: config file appears corrupt or unreadable. Try again."
+
         if "notification" not in cfg:
             cfg["notification"] = {}
         cfg["notification"]["mode"] = mode_arg

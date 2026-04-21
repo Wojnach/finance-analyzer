@@ -94,6 +94,7 @@ def _cached(key, ttl, func, *args):
         with _cache_lock:
             _tool_cache[key] = {"data": data, "time": now, "ttl": ttl}
             _loading_keys.discard(key)
+            _loading_timestamps.pop(key, None)  # BUG-213: clean up on success path
         return data
     except KeyboardInterrupt:
         with _cache_lock:
@@ -253,12 +254,18 @@ class _RateLimiter:
         self._lock = threading.Lock()
 
     def wait(self):
+        # BUG-212: Sleep OUTSIDE the lock to avoid blocking all 8 worker
+        # threads. Calculate sleep duration under the lock, release it,
+        # sleep, then re-acquire to update last_call.
+        wait_time = 0.0
         with self._lock:
             now = time.time()
             elapsed = now - self.last_call
             if elapsed < self.interval:
                 wait_time = self.interval - elapsed
-                time.sleep(wait_time)
+        if wait_time > 0:
+            time.sleep(wait_time)
+        with self._lock:
             self.last_call = time.time()
 
 

@@ -1,6 +1,7 @@
 """Portfolio Intelligence Dashboard — lightweight Flask API + frontend."""
 
 import functools
+import hmac
 import logging
 import math
 import threading
@@ -670,16 +671,16 @@ def require_auth(f):
             # No token configured — allow unauthenticated access
             return f(*args, **kwargs)
 
-        # Check query param
+        # Check query param — timing-safe comparison prevents brute-force
         token = request.args.get("token")
-        if token and token == expected:
+        if token and hmac.compare_digest(token, expected):
             return f(*args, **kwargs)
 
         # Check Authorization header
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             bearer_token = auth_header[7:].strip()
-            if bearer_token == expected:
+            if hmac.compare_digest(bearer_token, expected):
                 return f(*args, **kwargs)
 
         return jsonify({"error": "Unauthorized", "message": "Invalid or missing token"}), 401

@@ -39,6 +39,13 @@ def compute_indicators(df, horizon=None):
         df = df.copy()
         df["close"] = close
 
+    # BUG-209: Guard against zero/negative prices (Binance maintenance, API glitches).
+    # A single zero-price candle produces RSI=50, MACD=0, ATR=0 — poisoning consensus.
+    bad_prices = (close <= 0).sum()
+    if bad_prices > 0:
+        logger.warning("compute_indicators: %d zero/negative close values detected, returning None", bad_prices)
+        return None
+
     # RSI(rsi_period)
     delta = close.diff()
     gain = delta.where(delta > 0, 0.0)

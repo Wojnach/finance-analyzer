@@ -591,6 +591,15 @@ def _place_order(
     if order_total < 1000.0:
         raise ValueError(f"Order total {order_total:.2f} SEK below minimum 1000 SEK")
 
+    # BUG-211: maximum order size guard — prevents full-account exposure from
+    # a single malformed call (LLM hallucination, unit error, runaway loop).
+    # 50K SEK is ~25% of a 200K ISK account; adjust via config if needed.
+    MAX_ORDER_TOTAL_SEK = 50_000.0
+    if order_total > MAX_ORDER_TOTAL_SEK:
+        raise ValueError(
+            f"Order total {order_total:.2f} SEK exceeds maximum {MAX_ORDER_TOTAL_SEK:.0f} SEK"
+        )
+
     payload = {
         "accountId": effective_account_id,
         "orderbookId": str(orderbook_id),

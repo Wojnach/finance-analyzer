@@ -277,14 +277,28 @@ class TestComputeIndicatorsATR:
 
 
 class TestComputeIndicatorsZeroClose:
-    """BUG-8 fix: when close is 0.0, atr_pct must not raise ZeroDivisionError."""
+    """BUG-209: zero/negative prices must be rejected, not passed through.
 
-    def test_zero_close_returns_zero_atr_pct(self):
+    Supersedes BUG-8 (ZeroDivisionError guard) — zero-price candles now
+    cause an early return of None because they produce RSI=50, MACD=0,
+    ATR=0 which poisons all downstream signals.
+    """
+
+    def test_zero_close_returns_none(self):
         df = _make_df(60, base=50.0)
-        # Force the last close to 0.0
         df.loc[df.index[-1], "close"] = 0.0
+        assert compute_indicators(df) is None
+
+    def test_negative_close_returns_none(self):
+        df = _make_df(60, base=50.0)
+        df.loc[df.index[-1], "close"] = -1.0
+        assert compute_indicators(df) is None
+
+    def test_all_positive_close_passes(self):
+        df = _make_df(60, base=50.0)
         ind = compute_indicators(df)
-        assert ind["atr_pct"] == 0.0
+        assert ind is not None
+        assert ind["atr_pct"] >= 0.0
 
 
 # ---------------------------------------------------------------------------
