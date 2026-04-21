@@ -1,108 +1,63 @@
-# Session Progress — Outcome-Tracking Repair (2026-04-20 afternoon)
+# Session Progress — Auto-Improve Safety Fixes (2026-04-21)
 
-**Session focus:** User reported MSTR signal accuracy wasn't tracked. Audit
-revealed 3 broken paths in fin_evolve.py. Fixed, reviewed, merged, backfilled.
-
-**Status:** SHIPPED to main (commit 486a631f). `system_lessons.json` regenerated
-on live data — MSTR now in `by_ticker` (n_total=74, acc=1.0 on n_evaluable=5),
-fin-crypto in `by_command` (42 entries), total scored verdicts 705 → 937.
-
-**What changed:**
-- `portfolio/fin_evolve.py`: dynamic by_command, API fallback in `_find_price_at`,
-  multi-ticker fin-crypto backfill path, WARNING-level error logging
-- `tests/test_fin_evolve.py`: +94 new tests (0 → 94 total, all green)
-- `docs/CHANGELOG.md`: 2026-04-20 entry
-
-**Followups (not blocking):**
-- PF-DataLoop still has old fin_evolve loaded in memory — will pick up new
-  code on next natural restart
-- 28 MSTR journal entries remain queued without outcomes (all <72h old; will
-  score automatically on next backfill cycle)
-- Codex adversarial review skipped (ChatGPT 403) — Claude pr-review-toolkit
-  agents (code-reviewer + silent-failure-hunter) both cleared the branch
-
----
-
-# Previous: Auto-Improve Session (2026-04-20 morning)
-
-**Session start:** 2026-04-20 ~08:00 UTC
-**Status:** Implementation complete, verification pending
+**Session start:** 2026-04-21 ~08:00 UTC
+**Status:** Implementation complete, verification in progress
 
 ## What was done
 
 ### Phase 1: Deep Exploration
-5 parallel agents explored the entire codebase:
-- Signal system (signal_engine.py, accuracy_stats.py, 36 modules)
-- Core loop (main.py, trigger.py, agent_invocation.py, data_collector.py)
-- Portfolio & risk (portfolio_mgr.py, risk_management.py, trade_guards.py)
-- Infrastructure (file_utils.py, shared_state.py, loop_contract.py)
-- Test suite (242 test files, ~5994 tests)
-
-**Key finding:** All 5 batches from the prior improvement plan (2026-04-19) were
-already implemented between sessions — xdist hygiene, crash recovery persistence,
-JSONL prune isolation, dead code cleanup, and tests.
+4 parallel agents explored: signal system, metals subsystem, infrastructure, test suite.
+Combined with the 2026-04-20 adversarial review synthesis (118 findings, 27 P1).
 
 ### Phase 2: Plan
-Wrote `docs/IMPROVEMENT_PLAN.md` with 2 new batches targeting 3 newly discovered bugs.
+Wrote `docs/IMPROVEMENT_PLAN.md` with 4 batches targeting 10 confirmed bugs from 3
+consecutive adversarial reviews.
 
-### Phase 3: Implementation (1 commit)
+### Phase 3: Implementation (4 commits)
 
-**fix: regime mismatch false positive, silent exceptions, contract I/O** (71d81d00)
+**Batch 1: Safety-Critical Core** (b7bbeb25)
+- BUG-209: OHLCV zero/negative price validation in `indicators.py`
+- BUG-210: Config wipe guard in `telegram_poller.py`
+- BUG-211: Max order size limit (50K SEK) in `avanza_session.py`
+- BUG-212: Rate limiter sleep-outside-lock in `shared_state.py`
+- BUG-213: `_loading_timestamps` cleanup on success path
+- Dashboard `hmac.compare_digest()` timing-safe token comparison
 
-1. **risk_management.py** — `check_regime_mismatch()` treated `volume_ratio=None`
-   as confirmed low volume, causing false positive risk flags during data gaps.
-   Fixed: skip flag when volume data is missing (fail-open for unknowns).
+**Batch 2: Drawdown Circuit Breaker + I/O** (9b31afb8)
+- BUG-214: `check_drawdown()` wired into `invoke_agent()` — first automated risk gate
+- BUG-215: Thread-safe FX cache with `threading.Lock`
+- BUG-216: Monte Carlo `seed=42` → `seed=None` (system entropy)
+- Journal `write_text()` → `atomic_write_text()`
+- Added `file_utils.atomic_write_text()` utility
 
-2. **signal_engine.py** — 5 bare `except Exception: pass` handlers in optional
-   enhancement stages (seasonality, market health, earnings gate, linear factor,
-   per-ticker consensus) replaced with `logger.debug()` for diagnosability.
+**Batch 3: Signal + Metals** (7cba829b)
+- BUG-217: `_execute_sell()` exception safety (per-position try/except)
+- BUG-218: `econ_calendar` force-HOLD (structural SELL-only bias)
 
-3. **loop_contract.py** — Replaced local `_read_json()` and `_last_jsonl_entry()`
-   with `file_utils.load_json()` and `file_utils.last_jsonl_entry()`. Eliminates
-   O(N) full-file JSONL scans (now O(1) tail read), removes raw `json.load()`,
-   promoted all file_utils imports to module level, cleaned up 4 redundant lazy
-   imports.
-
-4. **Tests** — Updated `test_risk_flags.py` (3 new tests for None volume behavior),
-   added `TestFileUtilsIntegration` class (5 new tests) in `test_loop_contract.py`.
-
-### Phase 4: Documentation
-- Updated `docs/SYSTEM_OVERVIEW.md` with BUG-206, BUG-207, BUG-208
-- Updated `docs/IMPROVEMENT_PLAN.md` with new session findings
-- Updated this file
+**Batch 4: Tests** (eccdc2ee)
+- 21 new tests in `tests/test_safety_guards.py`
 
 ## Test Results
-- 270 tests pass across affected files (loop_contract, risk_management, risk_flags, signal_engine, layer2_journal_contract, loop_contract_grace)
-- Signal engine: 79/79 pass
-- Full suite verification pending
+- 285 tests pass across affected files (indicators, shared_state, avanza_session, dashboard, risk_management, monte_carlo, journal, file_utils)
+- 21 new tests all pass
+- Full suite verification in progress
+- 3 pre-existing failures in metals_swing_trader tests (not caused by this session)
+
+## Key Decisions
+- Drawdown circuit breaker: advisory at 20%, hard-block at 50% (per user's risk tolerance)
+- Max order size: 50K SEK (~25% of 200K ISK account)
+- econ_calendar: force-HOLD rather than rewriting (needs research for BUY capability)
+- Persistence filter cold-start: NOT a bug — analyzed and confirmed correct behavior
 
 ## What's next
 - Merge worktree into main, push, restart loops
-- Future sessions: IC-based signal weighting, per-ticker filtering, Bayesian Beta posterior
+- Adversarial review priority fixes still pending: claude_gate routing, browser idempotency, per-ticker accuracy filtering, DST hardcoding
 
-### 2026-04-20 14:44 UTC | main
-8971d197 docs(plan): outcome tracking fix plan for MSTR + fin-crypto
-docs/PLAN.md
+---
 
-### 2026-04-20 14:45 UTC | fix/outcome-tracking-20260420
-9d29925a fix(fin_evolve): dynamic by_command covers all /fin-* commands
-portfolio/fin_evolve.py
-tests/test_fin_evolve.py
+# Previous: Outcome-Tracking Repair (2026-04-20 afternoon)
 
-### 2026-04-20 14:47 UTC | fix/outcome-tracking-20260420
-d9f9137e fix(fin_evolve): live-price API fallback in _find_price_at
-portfolio/fin_evolve.py
-tests/test_fin_evolve.py
+**Session focus:** User reported MSTR signal accuracy wasn't tracked. Audit
+revealed 3 broken paths in fin_evolve.py. Fixed, reviewed, merged, backfilled.
 
-### 2026-04-20 14:50 UTC | fix/outcome-tracking-20260420
-b7c9619a fix(fin_evolve): score multi-ticker fin-crypto entries
-portfolio/fin_evolve.py
-tests/test_fin_evolve.py
-
-### 2026-04-20 14:54 UTC | fix/outcome-tracking-20260420
-8842453d fix(fin_evolve): promote api-fallback fetch failure log to WARNING
-portfolio/fin_evolve.py
-
-### 2026-04-20 15:02 UTC | main
-486a631f docs(changelog): 2026-04-20 outcome-tracking repair
-docs/CHANGELOG.md
+**Status:** SHIPPED to main (commit 486a631f).

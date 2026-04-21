@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-04-21 (auto-improve: safety-critical fixes)
+
+10 bug fixes addressing findings from 3 consecutive adversarial reviews.
+
+- **BUG-209: OHLCV zero/negative price validation (portfolio/indicators.py)**: `compute_indicators()` now rejects zero/negative close prices (returns None). Previously these produced RSI=50, MACD=0, ATR=0 — poisoning all 33 downstream signals during Binance maintenance windows.
+- **BUG-210: Config wipe guard (portfolio/telegram_poller.py)**: Refuse to overwrite config.json when loaded config has <5 keys. Prevents catastrophic API key destruction from transient file access issues.
+- **BUG-211: Max order size limit (portfolio/avanza_session.py)**: Added MAX_ORDER_TOTAL_SEK = 50,000 guard in `_place_order()`. Prevents total account exposure from a single malformed LLM call.
+- **BUG-212: Rate limiter sleep-outside-lock (portfolio/shared_state.py)**: `_RateLimiter.wait()` now sleeps outside the lock, preventing priority inversion across 8 worker threads.
+- **BUG-213: _loading_timestamps cleanup (portfolio/shared_state.py)**: `_cached()` success path now cleans up `_loading_timestamps` (previously leaked until 120s eviction).
+- **BUG-214: Drawdown circuit breaker wired in (portfolio/agent_invocation.py)**: `check_drawdown()` now called before every Layer 2 invocation — first-ever automated risk gate on the primary trading path. Advisory at >20%, hard-block at >50%.
+- **BUG-215: Thread-safe FX cache (portfolio/fx_rates.py)**: Added `threading.Lock` to `_fx_cache` dict accessed from 8-worker ThreadPoolExecutor.
+- **BUG-216: Monte Carlo random seeds (3 files)**: `seed=42` → `seed=None` in monte_carlo.py, monte_carlo_risk.py, and data/metals_risk.py. Production risk metrics now use system entropy.
+- **BUG-217: Metals sell exception safety (data/metals_swing_trader.py)**: `_execute_sell()` exceptions now caught per-position with `sell_failed_at` marking, preventing one failed sell from aborting the entire exit loop.
+- **BUG-218: econ_calendar disabled (portfolio/tickers.py)**: Force-HOLD — all 4 sub-signals were structurally SELL-only, never BUY. Removes systematic SELL bias from consensus.
+- **Dashboard timing attack fix (dashboard/app.py)**: Token comparison switched from `==` to `hmac.compare_digest()`.
+- **Journal atomic write (portfolio/journal.py)**: `CONTEXT_FILE.write_text()` replaced with `atomic_write_text()`.
+- **file_utils: added `atomic_write_text()` utility**.
+- **21 new tests** in `tests/test_safety_guards.py` covering all fixes.
+- Theme: Safety Debt Paydown, Risk Enforcement, Thread Safety.
+
 ## 2026-04-20 (outcome-tracking repair)
 
 - **Fix: fin_evolve.by_command dynamically enumerates all /fin-* commands
