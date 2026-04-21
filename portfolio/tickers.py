@@ -84,9 +84,19 @@ DISABLED_SIGNALS = {
     "orderbook_flow",   # 2026-04-11: 51.1% accuracy (360 sam), 93.3% activation rate,
                         # no recent data. Pure noise in every consensus decision.
                         # Re-evaluate after 2 weeks of accuracy data collection.
-    "forecast",         # 2026-04-12: 36.1% recent 1d (183 sam), 38.3% recent 3h (368 sam),
-                        # 39.0% in ranging (310 sam). Chronos/Kronos degraded below usefulness
-                        # at ALL horizons and ALL regimes. Wastes GPU compute.
+    # "forecast" RE-ENABLED 2026-04-21. The 36-39% accuracy measured on 2026-04-12
+    # was polluted by Kronos voting 100% HOLD in shadow mode — Kronos occupied 3 of 6
+    # slots in _health_weighted_vote whenever its subprocess succeeded, dragging every
+    # composite vote toward HOLD regardless of Chronos's verdict. With Kronos retired
+    # in portfolio/signals/forecast.py (same PR), the composite is now Chronos-only.
+    # Chronos effective accuracy: 1h=45.4%, 24h=52.4% (4d ago). The 47% tiered
+    # accuracy gate will force-HOLD 1h while letting 24h contribute. Forecast stayed
+    # in this set for 10 days, which ALSO silenced forecast_predictions.jsonl and
+    # forecast_health.jsonl because signal_engine.py skips disabled signals before
+    # invocation — so we lost all shadow/health visibility while the signal was off.
+    # Re-enabling restores both the signal and the logging. If accuracy degrades
+    # again post-Kronos-retire, move into REGIME_GATED_SIGNALS (24h-only) rather
+    # than re-disabling blindly.
     "oscillators",      # 2026-04-14: below 45% on ALL tickers at 1d (BTC 35.8%, ETH 36.3%,
                         # XAG 34.9%, XAU 40.2%, MSTR 42.6%; 5065 total sam). Also weak at
                         # 3h (34-45% per ticker). Regime-gated in ranging but noise everywhere.
