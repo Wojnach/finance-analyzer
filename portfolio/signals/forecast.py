@@ -49,27 +49,33 @@ _KRONOS_TIMEOUT = 30
 # Circuit breakers remain as secondary protection — auto-trip on failure, 5min TTL.
 _FORECAST_MODELS_DISABLED = False
 
-# Kronos inference script — runs via subprocess calling Q:/models/kronos_infer.py
-# Enable via config.json → forecast.kronos_enabled = true | "shadow"
-# "shadow" = run inference + log predictions, but force HOLD in composite vote
+# Kronos inference — RETIRED 2026-04-21.
+# Why: subprocess success rate collapsed to 59.2% (3250 ok / 2241 fail out of
+# 5491 attempts over 30d) due to VRAM contention with Chronos/Ministral/Qwen3
+# sharing gpu_gate, plus stdout contamination from HuggingFace loading that
+# _extract_json_from_stdout can only partially scrub. Separately, the shadow
+# mode (config value "shadow") forced every successful prediction to HOLD at
+# lines ~811/820, so over 3668 logged predictions not one contributed a raw
+# BUY/SELL vote to the composite. Net effect: Kronos was HOLD-diluting the
+# Chronos-only useful signal (3 of 6 slots in _health_weighted_vote when
+# kronos_ok was True).
+# Decision: permanently disable at runtime. Subprocess code (_run_kronos,
+# _run_kronos_inner) kept in place so existing tests continue to run, and so
+# a future session can re-evaluate if the model is retrained or moved to a
+# dedicated venv. Config flag is now ignored — override via direct monkey-
+# patch of _KRONOS_ENABLED in tests only.
 _KRONOS_ENABLED = False
 _KRONOS_SHADOW = False
 
+
 def _init_kronos_enabled():
-    """Read kronos_enabled from config.json at import time."""
+    """No-op since 2026-04-21 Kronos retire. Kept as a named function so tests
+    can still call it without error; the only effect is to reassert the
+    disabled state."""
     global _KRONOS_ENABLED, _KRONOS_SHADOW
-    try:
-        from portfolio.file_utils import load_json as _load_json
-        _cfg = _load_json(str(Path(__file__).resolve().parent.parent.parent / "config.json"), {})
-        val = _cfg.get("forecast", {}).get("kronos_enabled", False)
-        if val == "shadow":
-            _KRONOS_ENABLED = True
-            _KRONOS_SHADOW = True
-        else:
-            _KRONOS_ENABLED = bool(val)
-            _KRONOS_SHADOW = False
-    except Exception as e:
-        logger.debug("Kronos init from config: %s", e)
+    _KRONOS_ENABLED = False
+    _KRONOS_SHADOW = False
+
 
 _init_kronos_enabled()
 
