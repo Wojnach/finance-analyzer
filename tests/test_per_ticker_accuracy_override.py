@@ -259,6 +259,81 @@ class TestPerTickerRegimeGatingExemption:
 
 
 # ---------------------------------------------------------------------------
+# Tests for RES-2026-04-21: recent-accuracy override for regime gating
+# ---------------------------------------------------------------------------
+
+class TestRecentAccuracyRegimeOverride:
+    """RES-2026-04-21: signals with high recent accuracy exempt from regime gating."""
+
+    def test_high_recent_accuracy_exempts_from_regime_gate(self):
+        """smart_money with 58% recent accuracy should bypass ranging regime gate."""
+        from portfolio import signal_engine as se
+
+        # smart_money is normally gated in ranging at 1d
+        regime_gated = se._get_regime_gated("ranging", "1d")
+        assert "smart_money" in regime_gated  # Sanity check: in gated set
+
+        # Simulate the recent-accuracy override logic
+        recent_acc_data = {
+            "smart_money": {"accuracy": 0.58, "total": 80, "correct": 46, "pct": 58.0}
+        }
+        ticker_acc = {}  # No per-ticker exemption
+        regime_gated_effective = set(regime_gated)
+
+        _RECENT_EXEMPT_ACC = 0.55
+        _RECENT_EXEMPT_MIN_SAMPLES = 50
+        _TICKER_EXEMPT_ACC = 0.60
+        _TICKER_EXEMPT_MIN_SAMPLES = 50
+
+        for sig_name in list(regime_gated_effective):
+            # Per-ticker exemption (BUG-158) — not triggered here
+            t_stats = ticker_acc.get(sig_name, {})
+            if t_stats.get("total", 0) >= _TICKER_EXEMPT_MIN_SAMPLES and t_stats.get("accuracy", 0) >= _TICKER_EXEMPT_ACC:
+                regime_gated_effective.discard(sig_name)
+                continue
+            # Recent-accuracy override
+            r_stats = recent_acc_data.get(sig_name, {})
+            if r_stats.get("total", 0) >= _RECENT_EXEMPT_MIN_SAMPLES and r_stats.get("accuracy", 0) >= _RECENT_EXEMPT_ACC:
+                regime_gated_effective.discard(sig_name)
+
+        assert "smart_money" not in regime_gated_effective
+
+    def test_low_recent_accuracy_stays_gated(self):
+        """trend at 40.3% recent should remain gated."""
+        from portfolio import signal_engine as se
+
+        recent_acc_data = {
+            "trend": {"accuracy": 0.403, "total": 200, "correct": 80, "pct": 40.3}
+        }
+        regime_gated = set(se._get_regime_gated("ranging", "1d"))
+
+        for sig_name in list(regime_gated):
+            r_stats = recent_acc_data.get(sig_name, {})
+            if r_stats.get("total", 0) >= 50 and r_stats.get("accuracy", 0) >= 0.55:
+                regime_gated.discard(sig_name)
+
+        # trend at 40.3% < 55% threshold → should stay gated
+        assert "trend" in regime_gated
+
+    def test_insufficient_recent_samples_stays_gated(self):
+        """Signal with high recent accuracy but too few samples stays gated."""
+        from portfolio import signal_engine as se
+
+        recent_acc_data = {
+            "smart_money": {"accuracy": 0.90, "total": 10, "correct": 9, "pct": 90.0}
+        }
+        regime_gated = set(se._get_regime_gated("ranging", "1d"))
+
+        for sig_name in list(regime_gated):
+            r_stats = recent_acc_data.get(sig_name, {})
+            if r_stats.get("total", 0) >= 50 and r_stats.get("accuracy", 0) >= 0.55:
+                regime_gated.discard(sig_name)
+
+        # 10 samples < 50 threshold -> stays gated
+        assert "smart_money" in regime_gated
+
+
+# ---------------------------------------------------------------------------
 # Tests for per-ticker accuracy override in weighted consensus
 # ---------------------------------------------------------------------------
 

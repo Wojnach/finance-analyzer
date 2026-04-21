@@ -2773,8 +2773,26 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         logger.debug("Per-ticker accuracy unavailable for regime gating exemption", exc_info=True)
     _TICKER_EXEMPT_ACC = 0.60
     _TICKER_EXEMPT_MIN_SAMPLES = 50
+    # RES-2026-04-21: Recent-accuracy override for regime gating. When a signal's
+    # 7d recent accuracy is significantly above the gate threshold (>55%, 50+ samples),
+    # exempt it from regime gating even if all-time data is bad. Prevents stale regime
+    # gates from suppressing signals that have recovered in a new market regime.
+    # Example: fibonacci went from 43% all-time to 68.2% recent — should not be gated.
+    _RECENT_EXEMPT_ACC = 0.55
+    _RECENT_EXEMPT_MIN_SAMPLES = 50
+    _recent_acc_data = {}
+    try:
+        from portfolio.accuracy_stats import get_or_compute_recent_accuracy
+        recent_horizon = "3h_recent" if horizon in ("3h", "4h") else "1d_recent"
+        # get_or_compute_recent_accuracy expects the base horizon, not the cache key
+        base_hz = "3h" if horizon in ("3h", "4h") else "1d"
+        _recent_acc_data = get_or_compute_recent_accuracy(base_hz) or {}
+    except Exception:
+        logger.debug("Recent accuracy unavailable for regime gating override", exc_info=True)
+
     regime_gated_effective = set(regime_gated)
     for sig_name in list(regime_gated_effective):
+        # Per-ticker exemption (BUG-158)
         t_stats = _ticker_acc_data.get(sig_name, {})
         t_acc = t_stats.get("accuracy", 0)
         t_samples = t_stats.get("total", 0)
@@ -2783,6 +2801,18 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             logger.debug(
                 "BUG-158: %s exempt from %s regime gating for %s (%.1f%%, %d samples)",
                 sig_name, regime, ticker, t_acc * 100, t_samples,
+            )
+            continue
+        # Recent-accuracy override (RES-2026-04-21)
+        r_stats = _recent_acc_data.get(sig_name, {})
+        r_acc = r_stats.get("accuracy", 0)
+        r_samples = r_stats.get("total", 0)
+        if r_samples >= _RECENT_EXEMPT_MIN_SAMPLES and r_acc >= _RECENT_EXEMPT_ACC:
+            regime_gated_effective.discard(sig_name)
+            logger.debug(
+                "RES-2026-04-21: %s exempt from %s regime gating — recent 7d "
+                "accuracy %.1f%% (%d sam) overrides stale gate",
+                sig_name, regime, r_acc * 100, r_samples,
             )
     for sig_name in regime_gated_effective:
         if sig_name in votes and votes[sig_name] != "HOLD":
