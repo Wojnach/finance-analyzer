@@ -105,104 +105,242 @@ models on evidence rather than vibes.
 
 ---
 
-## Subagent strategy
+## Subagent investigation — RESULTS (2026-04-21 13:45)
 
-The four investigation questions are independent and read-only.
-Run them in parallel via `Explore` subagents (thoroughness: medium) so
-implementation can start once they return. Each returns a finding + a
-concrete fix proposal.
+Four `Explore` subagents ran in parallel. Findings condensed:
 
-| ID | Question | Files in scope |
-|----|----------|----------------|
-| **A1** | Why did `forecast_predictions.jsonl` stop writing on 2026-04-11? Circuit breaker latched? Dedup bug? Is `_log_prediction` being called but silently short-circuiting? Trace the full write path. | `portfolio/signals/forecast.py`, `portfolio/forecast_accuracy.py`, `portfolio/file_utils.py` |
-| **A2** | When a `claude_fundamental_log.jsonl` row has `reasoning=""`, `confidence=0.0`, is that an intentional abstention or a swallowed error? What path writes it? Is it polluting accuracy? | `portfolio/signals/claude_fundamental.py`, `portfolio/accuracy_stats.py` |
-| **A3** | Is `Q:/models/kronos_infer.py` salvageable? Run it once manually with a small candle sample. Classify failure modes in the health log. Decide: retire-from-shadow, fix-subprocess, or keep-as-is. | `Q:/models/kronos_infer.py`, `portfolio/signals/forecast.py:283-360` |
-| **A4** | Is `portfolio/mstr_loop/` running? Which phase? Where does Phase A → Phase B transition live? Why is `data/mstr_loop_shadow.jsonl` absent? | `portfolio/mstr_loop/*.py`, scheduled-task config |
+### A1 — Forecast logging stopped 10 d ago ✅ ROOT CAUSE IDENTIFIED
+
+**Not a logging bug. Not a circuit breaker. A config change.**
+
+Commit `70603577` on 2026-04-12 23:46 added `"forecast"` to the
+`DISABLED_SIGNALS` set at `portfolio/tickers.py:29-35`. The reason given
+in the commit was "36-39% accuracy" (below the force-HOLD floor).
+
+The `signal_engine.py` dispatcher skips any signal in `DISABLED_SIGNALS`
+*before invocation* — so `compute_forecast_signal()` is never called,
+`_run_chronos` / `_run_kronos` are never called, `atomic_append_jsonl`
+is never called. Both `forecast_predictions.jsonl` and `forecast_health.jsonl`
+go silent as a side-effect.
+
+The 2026-04-17 rows in the logs are artifacts of test runs / manual invocations,
+not production cycles.
+
+**Fix** (Batch 2): one-line change. Either:
+- Remove `"forecast"` from `DISABLED_SIGNALS` (accepts the accuracy gate will
+  force-HOLD most calls, but at least we restore logging + health tracking).
+- Or move it into `REGIME_GATED_SIGNALS` so it only runs at horizons / regimes
+  where historical accuracy clears 47%.
+
+Before flipping the switch we need a fresh look at whether 1h/24h Chronos
+accuracy has recovered — last measurement was pre-disable.
+
+### A2 — Claude Fundamental empty rows ✅ NOT A BUG (mostly)
+
+**Root cause classification: intentional abstention from Haiku tier.**
+
+The 2,349 confidence-0.0 rows in the last 30 days are all from the Haiku
+tier. The Haiku prompt explicitly instructs the model to emit
+`{action: "HOLD", confidence: 0.0}` when it has no strong fundamental
+view on a ticker. Sonnet and Opus never produce empty rows.
+
+**The 61.6% @ 1d accuracy number is real.** Verified by reconciling:
+- 5,718 cascade refresh rows in 30 d (half abstentions).
+- 10,008 per-ticker cycle samples — cached refresh values replayed every
+  main-loop cycle, HOLD votes dropped from accuracy denominator at
+  `portfolio/accuracy_stats.py:150`.
+- BUY 2,217 / SELL 633 / HOLD 2,868 in cascade log; these produce
+  6164 / 10008 = 61.6 % at 1 d after the cache-replay expansion.
+
+So accuracy is clean — but:
+- Haiku's **53 % abstention rate** means Haiku is the tier contributing
+  most noise / least signal. Keep it for macro context, don't escalate.
+- The log file is noisy (2,349 unused rows per 30 d). Worth suppressing
+  the write, not the decision.
+- The Haiku tier also has no error-surfacing path (`_refresh_tier`
+  swallows empty API responses without a `record_critical_error` call).
+  That is a latent bug — if the Claude CLI stops responding cleanly
+  we'd see the same empty rows and never know.
+
+**Fix** (Batch 3): suppress empty-row writes at
+`portfolio/signals/claude_fundamental.py:642` *and* add explicit
+error-surface at `_refresh_tier` for genuine empty-API-response cases.
+Accuracy tracker needs no change.
+
+### A3 — Kronos shadow ✅ VERDICT: RETIRE
+
+**Not salvageable.** The 59 % subprocess success rate has two
+structurally unfixable root causes:
+
+1. **Custom KronosPredictor API + shared venv** → VRAM contention with
+   Chronos / Ministral / Qwen3 that rotate through `gpu_gate`. No async
+   queue, blocking subprocess design. Windows has no way to pre-reserve
+   VRAM before `subprocess.Popen` forks, so collisions are unavoidable.
+2. **100 % HOLD output in shadow mode** (3,668 / 3,668). Even when
+   inference succeeds, `_KRONOS_SHADOW = True` forces HOLD at
+   `forecast.py:811,820`. Only 6 predictions ever contributed a raw vote.
+   The shadow has accumulated zero statistical signal.
+
+Fix attempts already in the code (stdout-scrub `_extract_json_from_stdout`,
+circuit breaker) hit diminishing returns. Retire is the right call.
+
+**Fix** (Batch 4): delete `_run_kronos`, `_run_kronos_inner`, `_trip_kronos`,
+`_kronos_circuit_open`, module-globals `_kronos_tripped_until` /
+`_KRONOS_ENABLED` / `_KRONOS_SHADOW`. Remove the call block in `forecast()`.
+Drop `kronos_1h` / `kronos_24h` from sub-signals. Update tests.
+Net diff ~ −150 lines + test update. Frees the GPU gate for Chronos /
+Ministral rotations.
+
+### A4 — MSTR loop Phase B ✅ WORKING AS DESIGNED
+
+**Not a bug.** The MSTR loop runs in Phase B (shadow mode, `PHASE = "shadow"`
+default in `portfolio/mstr_loop/config.py:19`). `mstr_loop_shadow.jsonl`
+doesn't exist simply because the loop is **outside its NASDAQ session
+window** (15:30 – 22:00 CET) and exits early with
+`outside_session_window` at `portfolio/mstr_loop/loop.py:83-87`.
+
+Last cycle logged: 2026-04-18 20:55 UTC. Next session: today 15:30 CET.
+The shadow file will appear on the first BUY / SELL / PARTIAL_SELL
+decision within the session window. Nothing to fix.
+
+**Action** (Batch 6, demoted): document this behavior in
+`docs/SESSION_PROGRESS.md` so future-Claude doesn't repeat the
+investigation. No code change.
 
 ---
 
-## Implementation batches
+## Implementation batches (revised post-investigation)
 
-All work on worktree branch `fix/llm-health-20260421`.
+Worktree: `Q:/finance-analyzer-llm-health`, branch `fix/llm-health-20260421`
+(already created).
+
 After each batch: run touched-file tests, commit with conventional message,
 update `docs/SESSION_PROGRESS.md`.
 
-### Batch 1 — Probability / calibration journaling infra (additive, highest value)
+### Batch 2 — Forecast re-enable (TRIVIAL, do first)
+
+**Root cause:** `"forecast"` in `DISABLED_SIGNALS` since 2026-04-12.
+**File (1):**
+- `portfolio/tickers.py` — remove `"forecast"` from `DISABLED_SIGNALS`
+  (or move to `REGIME_GATED_SIGNALS` if current accuracy data still
+  shows sub-47 %). Verify against live `accuracy_cache.json` first.
+
+**Plus regression protection:**
+- `portfolio/health.py` (or equivalent stale-file checker) — add a
+  `forecast_predictions_stale_hours` gauge. Log a `critical_error` if
+  no new row in >6 h during market hours. Prevents a future silent
+  disable from going unnoticed for 10 days.
+- `tests/test_signals_forecast.py` — add a test that asserts forecast
+  is NOT in `DISABLED_SIGNALS` unless explicitly intended (scan the set
+  and compare to a canonical "expected disabled" allowlist).
+
+**Risk:** re-enabling a signal that was rightly disabled for poor
+accuracy. Mitigation: accuracy gate (47 %) still fires; the signal will
+just return HOLD most of the time, same as a disabled signal, but now
+we see the health + prediction data.
+
+### Batch 4 — Kronos retire (CONTAINED, ~150-line delete)
+
+**Files (~3):**
+- `portfolio/signals/forecast.py` — delete `_run_kronos*` wrappers,
+  circuit-breaker globals, config-reading init, and the Kronos block
+  in `forecast()`. Keep the `kronos_1h` / `kronos_24h` keys in the
+  `sub_signals` / `raw_sub_signals` dicts set permanently to `"HOLD"`
+  **for one release** so downstream consumers (dashboard, accuracy
+  tracker) don't `KeyError`. Next release can drop the keys.
+- `portfolio/forecast_accuracy.py` — stop trying to backfill `kronos_*`
+  outcomes. Filter them out of the accuracy aggregation.
+- `tests/test_signals_forecast.py` — update assertions. Any test that
+  mocked `_run_kronos` can be deleted.
+- Note in `docs/CHANGELOG.md` explaining the retire. Memory entry so
+  future-Claude knows we decided, not forgot.
+
+**Config:** set `forecast.kronos_enabled = false` in `config.example.json`.
+Leave `config.json` alone (outside-repo symlink, API keys) — user
+overrides.
+
+### Batch 1 — Probability / calibration journaling infra (highest value)
 
 **Files (~5):**
-- `portfolio/llm_probability_log.py` (new) — append-only JSONL logger writing
-  `{ts, signal, ticker, horizon, probs{BUY,SELL,HOLD}, chosen, confidence}`.
-- `portfolio/signal_engine.py` — call logger whenever an LLM-family signal
-  produces a vote (ministral, qwen3, sentiment, news_event, forecast, claude_fundamental).
+- `portfolio/llm_probability_log.py` (new) — append-only JSONL logger
+  writing `{ts, signal, ticker, horizon, probs{BUY,SELL,HOLD}, chosen,
+  confidence, tier?}`.
+- `portfolio/signal_engine.py` — call logger whenever an LLM-family
+  signal produces a vote (ministral, qwen3, sentiment, news_event,
+  forecast, claude_fundamental). Keyed by signal name so we can
+  selectively skip non-probabilistic signals.
 - `portfolio/accuracy_stats.py` — add `brier_score_by_signal()` and
-  `log_loss_by_signal()` helpers reading the new log.
-- `portfolio/local_llm_report.py` — include Brier + log-loss + calibration
-  bucket histograms (predicted bucket vs empirical hit rate).
-- `tests/test_llm_probability_log.py` (new) — round-trip test.
+  `log_loss_by_signal()` helpers reading the new log + backfilled
+  outcomes.
+- `portfolio/local_llm_report.py` — include Brier + log-loss +
+  calibration-bucket histogram (predicted bucket vs empirical hit rate)
+  in the daily export.
+- `tests/test_llm_probability_log.py` (new) — round-trip write/read,
+  schema stability, Brier-score arithmetic sanity check.
 
-**Why first:** every subsequent fix needs this to measure its effect.
+**Shape of the log row:**
+```json
+{"ts":"...","signal":"ministral","ticker":"BTC-USD","horizon":"1d",
+ "probs":{"BUY":0.12,"HOLD":0.55,"SELL":0.33},"chosen":"HOLD",
+ "confidence":0.55,"tier":null}
+```
+Tier present for `claude_fundamental` (haiku/sonnet/opus), null for
+single-model signals.
 
-### Batch 2 — Forecast logging regression fix (based on A1)
+**Why this matters:** today we know Ministral is 13 % on BTC. We don't
+know whether it was *confidently wrong* or *uncertainly wrong*.
+Brier + calibration tells us which.
 
-**Files (~3-5):** depend on subagent root-cause. Candidates:
-- `portfolio/signals/forecast.py` — fix the silent early-return / circuit
-  breaker latch / dedup cache bug.
-- `portfolio/health.py` — add `forecast_predictions_stale_hours` gauge that
-  trips a critical error if >6 h since last write during market hours.
-- `tests/test_signals_forecast.py` — regression test for the specific
-  short-circuit path that dropped writes.
-
-### Batch 3 — Claude Fundamental empty-row triage (based on A2)
-
-**Files (~2-3):**
-- `portfolio/signals/claude_fundamental.py` — either suppress empty-row
-  emission (abstention path) or fix the upstream error that produced them.
-- `portfolio/accuracy_stats.py` — exclude empty-reasoning rows from
-  accuracy computation regardless of cause (never let them inflate stats).
-- Add a gauge: `claude_fundamental_empty_row_rate_24h`. Critical-error if >20 %.
-
-### Batch 4 — Kronos decision gate (based on A3)
-
-Two possible paths; subagent picks.
-- **Retire path**: remove Kronos sub-signal from `forecast.py` majority
-  vote, keep it as a pure logging stub only if `kronos_enabled != false`.
-  Update `portfolio/forecast_accuracy.py` to drop Kronos backfill.
-  Delete `Q:/models/kronos_infer.py` invocation wiring if fully retired.
-- **Fix path**: add a VRAM pre-check + retry-on-OOM wrapper, widen timeout
-  budgets, normalise stdout parsing. Only if A3 finds the bugs are small.
-
-### Batch 5 — Ministral per-ticker gate verification (mostly read + tests)
+### Batch 3 — Claude Fundamental empty-row suppression + error surface
 
 **Files (~2):**
-- `tests/test_ministral_gate_live.py` (new) — assert that with the current
-  `accuracy_cache.json`, Ministral returns HOLD for BTC/ETH/XAG at 1 d and
-  BUY/SELL only for tickers above 50 %.
-- Small doc note in `portfolio/ministral_signal.py` explaining the gate
-  path if it isn't already there.
+- `portfolio/signals/claude_fundamental.py`
+  - In `_journal_refresh()` (~line 642): skip `atomic_append_jsonl`
+    when `action == "HOLD" and confidence == 0.0 and reasoning == ""`.
+    Keeps the cache update; just doesn't bloat the log.
+  - In `_refresh_tier()` (~line 691): when the Claude CLI returns an
+    empty response *after* making the API call, call
+    `record_critical_error("claude_empty_response", "claude_fundamental_<tier>", ...)`.
+    Distinguishes abstention-by-choice from API-went-dark.
+- No accuracy-stats change — A2 confirmed it already filters HOLDs.
 
-No production config change — if the gate is already working the tests
-lock behavior in. If a bug is found, fix in place.
-
-### Batch 6 — MSTR loop phase audit + shadow-log guard (based on A4)
+### Batch 5 — Ministral per-ticker gate verification
 
 **Files (~2):**
-- `portfolio/mstr_loop/__main__.py` — add a startup log line declaring
-  which phase the loop booted into. Fail loud if `SHADOW_LOG` configured
-  but directory not writable.
-- `docs/SESSION_PROGRESS.md` — document the MSTR loop's current phase.
+- `tests/test_ministral_gate_live.py` (new) — snapshot test that with
+  the current `data/accuracy_cache.json`, Ministral returns HOLD for
+  BTC / ETH / XAG at 1 d (below 50 %) and BUY/SELL only for tickers
+  above 50 %. Keeps drift from sneaking back in.
+- Small doc note in `portfolio/ministral_signal.py` pointing to where
+  the per-ticker gate lives, if not already documented.
+
+### Batch 6 — MSTR loop documentation (demoted, no code change)
+
+- Append a short "MSTR Loop behavior" section to
+  `docs/SESSION_PROGRESS.md`: Phase B (shadow), session window
+  15:30 – 22:00 CET, file writes first row on first in-session decision.
+- Optionally extend `portfolio/mstr_loop/__main__.py` to log one
+  startup line declaring `PHASE=<value>` so future investigators see
+  it immediately.
 
 ### Batch 7 — Shadow-signal registry & auto-retire (additive)
 
 **Files (~3):**
-- `portfolio/shadow_registry.py` (new) — tuple of
+- `portfolio/shadow_registry.py` (new) — structure of
   `(signal_name, entered_shadow_ts, promotion_criteria, last_reviewed_ts)`
   backed by `data/shadow_registry.json`.
-- `portfolio/local_llm_report.py` — include shadow-registry status in the
-  daily report.
-- `scripts/review_shadow_signals.py` (new) — CLI that flags signals in
-  shadow >30 d without hitting promotion criteria.
-- Seed registry with current shadows: Kronos, FinGPT, FinBERT, CreditSpread,
-  CryptoMacro.
+- `portfolio/local_llm_report.py` — include shadow-registry status
+  + days-in-shadow in the daily export.
+- `scripts/review_shadow_signals.py` (new) — CLI that flags signals
+  in shadow > 30 d without hitting promotion criteria.
+- Seed with: FinGPT (promotion gate 60 % @ 200 samples, current 61.5 %
+  agreement @ 574 — close; needs accuracy not agreement), FinBERT
+  (no promotion path — archival only), CreditSpread (disabled pending
+  validation), CryptoMacro (disabled pending validation), Qwen3
+  (in shadow rotation — 54.7 % is the watermark to beat).
+
+**Note on Kronos:** after Batch 4, Kronos is retired — not in shadow.
+Don't seed it.
 
 ---
 
@@ -240,12 +378,44 @@ lock behavior in. If a bug is found, fix in place.
 
 ---
 
-## Execution order
+## Execution order (post-investigation revision)
 
-1. Spawn A1/A2/A3/A4 investigation subagents in parallel (1 message, 4 Agent calls).
-2. Commit this plan on `main`.
-3. Create worktree `Q:/finance-analyzer-llm-health` on branch `fix/llm-health-20260421`.
-4. In the worktree, start Batch 1 (probability logger) while A1-A4 run.
-5. As each subagent finishes, queue the follow-on batch (2/3/4/6).
-6. Batch 5 and 7 after Batch 1 (infra) is in.
-7. Test, Codex review, merge, push, restart loops.
+Revised order reflects A1-A4 findings. Trivial / highest-impact first.
+
+1. ✅ Spawn A1/A2/A3/A4 investigation subagents (done 13:45).
+2. ✅ Commit the v1 plan on `main` (done: `68793cc9`).
+3. ✅ Create worktree `Q:/finance-analyzer-llm-health` on branch
+   `fix/llm-health-20260421` (done).
+4. Commit this expanded plan on `main` (v2).
+5. In the worktree, execute in this order:
+   - **Batch 2** (forecast re-enable) — immediate, trivial, restores
+     signal + logging. Highest impact per diff.
+   - **Batch 4** (Kronos retire) — contained ~150-line delete.
+     Mechanical.
+   - **Batch 1** (probability / calibration infra) — bigger; needs new
+     file + integration points.
+   - **Batch 3** (Claude Fundamental empty-row suppression).
+   - **Batch 5** (Ministral gate test lock-in).
+   - **Batch 7** (shadow registry + auto-retire script).
+   - **Batch 6** (MSTR loop docs).
+6. After each batch: `pytest tests/<touched>` + commit.
+7. After all batches: full `pytest -n auto`.
+8. Codex adversarial review:
+   `codex review --commit <branch-tip-SHA>` (or `/codex:adversarial-review`
+   per `/fgl`).
+9. Merge into `main`, push via Windows git, restart `PF-DataLoop` +
+   `PF-MetalsLoop` (Batch 2 changes signal invocation — loop restart
+   mandatory).
+10. Clean up worktree + branch.
+11. Send Telegram summary of the LLM-health audit + fixes landed.
+
+## What this plan does NOT fix (explicit non-goals)
+
+- Does not replace FinGPT with a newer model (backlog).
+- Does not expand Chronos to 3 h / 3 d horizons (backlog — low value
+  while 1 h / 24 h accuracy is near 50 %; answers user's question).
+- Does not touch live production `config.json` (outside repo).
+- Does not retrain Ministral / Qwen3 (separate project,
+  `training/unsloth/`).
+- Does not re-enable SHORT-side metals trading (pre-existing
+  `TODO(short-reenable)` anchor).
