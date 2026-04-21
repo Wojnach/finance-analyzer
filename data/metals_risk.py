@@ -182,7 +182,7 @@ def simulate_warrant_risk(
         "direction_prob": direction_prob,
     }
 
-    rng = np.random.default_rng(seed=42)
+    rng = np.random.default_rng()  # BUG-216: system entropy, not fixed seed
 
     for hours in horizons_hours:
         # Convert hours to annual fraction

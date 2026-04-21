@@ -6,6 +6,7 @@ and ConnectionError semantics. These would be lost with _cached().
 """
 
 import logging
+import threading
 import time
 
 from portfolio.api_utils import load_config as _load_config
@@ -13,14 +14,19 @@ from portfolio.http_retry import fetch_with_retry
 
 logger = logging.getLogger("portfolio.fx_rates")
 
+# BUG-215: Thread-safe FX cache. Accessed from 8-worker ThreadPoolExecutor.
+_fx_lock = threading.Lock()
 _fx_cache = {"rate": None, "time": 0}
 _FX_STALE_THRESHOLD = 7200  # 2 hours — warn if FX rate hasn't been refreshed
 
 
 def fetch_usd_sek():
     now = time.time()
-    if _fx_cache["rate"] and now - _fx_cache["time"] < 900:  # 15 min cache
-        return _fx_cache["rate"]
+    with _fx_lock:
+        cached_rate = _fx_cache["rate"]
+        cached_time = _fx_cache["time"]
+    if cached_rate and now - cached_time < 900:  # 15 min cache
+        return cached_rate
     try:
         r = fetch_with_retry(
             "https://api.frankfurter.app/latest",
@@ -36,17 +42,22 @@ def fetch_usd_sek():
         if not (7.0 <= rate <= 15.0):
             logger.error("FX rate %.4f SEK/USD outside sane bounds (7-15) — ignoring", rate)
         else:
-            _fx_cache["rate"] = rate
-            _fx_cache["time"] = now
+            with _fx_lock:
+                _fx_cache["rate"] = rate
+                _fx_cache["time"] = now
             return rate
     except Exception as e:
         logger.warning("FX rate fetch failed: %s", e)
-    if _fx_cache["rate"]:
-        age_secs = now - _fx_cache["time"]
+    # Fallback to stale cached value
+    with _fx_lock:
+        cached_rate = _fx_cache["rate"]
+        cached_time = _fx_cache["time"]
+    if cached_rate:
+        age_secs = now - cached_time
         if age_secs > _FX_STALE_THRESHOLD:
             logger.warning("Using stale FX rate (%.1fh old)", age_secs / 3600)
             _fx_alert_telegram(age_secs)
-        return _fx_cache["rate"]
+        return cached_rate
     # Last resort: hardcoded fallback
     # BUG-117: Use ERROR level — hardcoded rate may be severely stale.
     # Portfolio valuations using this rate could be off by 10-15% if SEK has moved.
@@ -57,8 +68,8 @@ def fetch_usd_sek():
 
 def _fx_alert_telegram(age_secs):
     """Send a one-shot Telegram alert about FX rate issues. Fires at most once per 4h."""
-    global _fx_cache
-    last_alert = _fx_cache.get("_last_fx_alert", 0)
+    with _fx_lock:
+        last_alert = _fx_cache.get("_last_fx_alert", 0)
     now = time.time()
     if now - last_alert < 14400:  # 4h cooldown between alerts
         return
@@ -72,6 +83,7 @@ def _fx_alert_telegram(age_secs):
         # Previously used "fx_alert" which was save-only — user never saw FX warnings.
         from portfolio.message_store import send_or_store
         send_or_store(msg, config, category="error")
-        _fx_cache["_last_fx_alert"] = now
+        with _fx_lock:
+            _fx_cache["_last_fx_alert"] = now
     except Exception as e:
         logger.debug("FX Telegram alert failed: %s", e)

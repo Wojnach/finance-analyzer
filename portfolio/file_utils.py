@@ -21,6 +21,27 @@ except ImportError:  # pragma: no cover - Windows
 logger = logging.getLogger("portfolio.file_utils")
 
 
+def atomic_write_text(path, text, encoding="utf-8"):
+    """Atomically write text to a file using tempfile + os.replace.
+
+    Same safety guarantees as atomic_write_json: fsync before replace,
+    no partial writes on crash.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, str(path))
+    except BaseException:
+        with suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
 def atomic_write_json(path, data, indent=2, ensure_ascii=True):
     """Atomically write JSON data to a file using tempfile + os.replace.
 

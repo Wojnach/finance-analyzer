@@ -7,7 +7,7 @@ from pathlib import Path
 
 logger = logging.getLogger("portfolio.journal")
 
-from portfolio.file_utils import load_json
+from portfolio.file_utils import atomic_write_text, load_json
 from portfolio.tickers import ALL_TICKERS
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -565,7 +565,7 @@ def write_context():
                     md = build_context(entries, portfolio_data=portfolio_data)
                     md = _append_reflection_section(md, config)
                     md = _append_vector_memory_section(md, config, market_state, entries)
-                    CONTEXT_FILE.write_text(md, encoding="utf-8")
+                    atomic_write_text(CONTEXT_FILE, md)
                     return len(entries)
         except Exception as e:
             import logging as _logging
@@ -577,5 +577,5 @@ def write_context():
     md = build_context(entries, portfolio_data=portfolio_data)
     md = _append_reflection_section(md, config)
     md = _append_vector_memory_section(md, config, None, entries)
-    CONTEXT_FILE.write_text(md, encoding="utf-8")
+    atomic_write_text(CONTEXT_FILE, md)
     return len(entries)

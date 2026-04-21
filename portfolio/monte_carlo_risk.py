@@ -404,7 +404,7 @@ def compute_portfolio_var(
     agent_summary: dict,
     n_paths: int = DEFAULT_N_PATHS,
     historical_returns: dict[str, np.ndarray] | None = None,
-    seed: int = 42,
+    seed: int | None = None,
 ) -> dict:
     """Compute portfolio VaR from portfolio state and agent summary.
 

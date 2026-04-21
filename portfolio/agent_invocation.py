@@ -23,6 +23,14 @@ DATA_DIR = BASE_DIR / "data"
 INVOCATIONS_FILE = DATA_DIR / "invocations.jsonl"
 JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
 TELEGRAM_FILE = DATA_DIR / "telegram_messages.jsonl"
+PATIENT_PORTFOLIO = DATA_DIR / "portfolio_state.json"
+BOLD_PORTFOLIO = DATA_DIR / "portfolio_state_bold.json"
+
+# BUG-214: Drawdown circuit breaker thresholds.
+# Advisory at WARN level, hard-block at BLOCK level.
+# User accepts 10-20% knockout risk; only de-risk at 50%+.
+_DRAWDOWN_WARN_PCT = 20.0
+_DRAWDOWN_BLOCK_PCT = 50.0
 
 _agent_proc = None
 _agent_log = None
@@ -359,6 +367,35 @@ def invoke_agent(reasons, tier=3):
     except Exception as e:
         logger.warning("perception gate error (passing through): %s", e)
 
+    # BUG-214: Drawdown circuit breaker — first-ever automated risk gate on
+    # the primary trading path. Advisory below _DRAWDOWN_BLOCK_PCT, hard-block
+    # above it. Respects user's high risk tolerance (memory/feedback_risk_tolerance.md).
+    _drawdown_context = ""
+    try:
+        from portfolio.risk_management import check_drawdown
+        for label, pf_path in [("Patient", PATIENT_PORTFOLIO), ("Bold", BOLD_PORTFOLIO)]:
+            if not pf_path.exists():
+                continue
+            dd = check_drawdown(str(pf_path), max_drawdown_pct=_DRAWDOWN_WARN_PCT)
+            if dd["current_drawdown_pct"] > _DRAWDOWN_BLOCK_PCT:
+                logger.error(
+                    "DRAWDOWN BLOCK: %s portfolio at %.1f%% drawdown (>%.0f%%) — skipping invocation",
+                    label, dd["current_drawdown_pct"], _DRAWDOWN_BLOCK_PCT,
+                )
+                _log_trigger(reasons, f"blocked_drawdown_{label.lower()}", tier=tier)
+                return False
+            if dd["current_drawdown_pct"] > _DRAWDOWN_WARN_PCT:
+                logger.warning(
+                    "DRAWDOWN WARNING: %s portfolio at %.1f%% drawdown (peak %.0f, current %.0f SEK)",
+                    label, dd["current_drawdown_pct"], dd["peak_value"], dd["current_value"],
+                )
+            _drawdown_context += (
+                f"\n[DRAWDOWN {label}] {dd['current_drawdown_pct']:.1f}% from peak "
+                f"(peak={dd['peak_value']:.0f}, current={dd['current_value']:.0f} SEK)"
+            )
+    except Exception as e:
+        logger.warning("drawdown check failed (proceeding): %s", e)
+
     # Multi-agent mode: parallel specialists + synthesis (Coordinator Mode pattern)
     # Enabled via config.layer2.multi_agent = true, only for T2/T3
     try:
@@ -397,6 +434,10 @@ def invoke_agent(reasons, tier=3):
             prompt = _build_tier_prompt(tier, reasons)
     else:
         prompt = _build_tier_prompt(tier, reasons)
+
+    # BUG-214: Append drawdown context so Layer 2 sees current risk levels.
+    if _drawdown_context:
+        prompt += "\n\n[RISK DATA]" + _drawdown_context
 
     max_turns = tier_cfg["max_turns"]
 

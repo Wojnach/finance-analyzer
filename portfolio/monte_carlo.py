@@ -355,7 +355,7 @@ def _get_directional_probability(ticker: str, ticker_data: dict,
 # ---------------------------------------------------------------------------
 
 def simulate_all(agent_summary: dict, tickers: list[str] | None = None,
-                 n_paths: int = DEFAULT_N_PATHS, seed: int = 42) -> dict:
+                 n_paths: int = DEFAULT_N_PATHS, seed: int | None = None) -> dict:
     """Run MC simulation for multiple tickers.
 
     Args:
