@@ -149,3 +149,88 @@ def test_never_raises_on_io_failure(tmp_log, monkeypatch):
     monkeypatch.setattr(mod, "atomic_append_jsonl", _boom)
     ok = mod.log_vote("ministral", "BTC-USD", _valid_probs(), log_path=tmp_log)
     assert ok is False
+
+
+# --- derive_probs_from_result -----------------------------------------------
+
+
+def test_derive_probs_confidence_split_fallback():
+    probs = mod.derive_probs_from_result("ministral", "BUY", 0.6)
+    assert probs is not None
+    assert abs(sum(probs.values()) - 1.0) < 1e-9
+    assert probs["BUY"] == pytest.approx(0.6)
+    assert probs["HOLD"] == pytest.approx(0.2)
+    assert probs["SELL"] == pytest.approx(0.2)
+
+
+def test_derive_probs_from_avg_scores_sentiment():
+    """Sentiment indicator carries avg_scores — must map directly."""
+    indicators = {
+        "avg_scores": {"positive": 0.7, "negative": 0.1, "neutral": 0.2},
+    }
+    probs = mod.derive_probs_from_result(
+        "sentiment", "BUY", 0.7, indicators=indicators,
+    )
+    assert probs is not None
+    assert probs["BUY"] == pytest.approx(0.7)
+    assert probs["SELL"] == pytest.approx(0.1)
+    assert probs["HOLD"] == pytest.approx(0.2)
+
+
+def test_derive_probs_normalises_unnormalised_avg_scores():
+    indicators = {
+        "avg_scores": {"positive": 1.4, "negative": 0.2, "neutral": 0.4},
+    }
+    probs = mod.derive_probs_from_result(
+        "sentiment", "BUY", 0.7, indicators=indicators,
+    )
+    assert probs is not None
+    assert abs(sum(probs.values()) - 1.0) < 1e-9
+    assert probs["BUY"] == pytest.approx(1.4 / 2.0)
+
+
+def test_derive_probs_hold_action():
+    probs = mod.derive_probs_from_result("qwen3", "HOLD", 0.55)
+    assert probs is not None
+    assert probs["HOLD"] == pytest.approx(0.55)
+    assert probs["BUY"] == pytest.approx(0.225)
+    assert probs["SELL"] == pytest.approx(0.225)
+
+
+def test_derive_probs_sell_action():
+    probs = mod.derive_probs_from_result("news_event", "SELL", 0.8)
+    assert probs is not None
+    assert probs["SELL"] == pytest.approx(0.8)
+
+
+def test_derive_probs_rejects_non_llm_signal():
+    assert mod.derive_probs_from_result("rsi", "BUY", 0.7) is None
+    assert mod.derive_probs_from_result("macd", "BUY", 0.7) is None
+
+
+def test_derive_probs_rejects_bad_action():
+    assert mod.derive_probs_from_result("ministral", "MAYBE", 0.5) is None
+
+
+def test_derive_probs_confidence_clamped():
+    """Out-of-range confidence gets clamped, not rejected."""
+    probs = mod.derive_probs_from_result("ministral", "BUY", 1.5)
+    assert probs is not None
+    assert probs["BUY"] == pytest.approx(1.0)
+    probs2 = mod.derive_probs_from_result("ministral", "BUY", -0.2)
+    assert probs2 is not None
+    assert probs2["BUY"] == pytest.approx(1.0 / 3.0)
+
+
+def test_derive_probs_rejects_non_numeric_confidence():
+    assert mod.derive_probs_from_result("ministral", "BUY", "high") is None
+
+
+def test_derive_probs_empty_avg_scores_falls_back():
+    """Avg scores summing to zero must fall back to confidence-split."""
+    indicators = {"avg_scores": {"positive": 0.0, "negative": 0.0, "neutral": 0.0}}
+    probs = mod.derive_probs_from_result(
+        "sentiment", "HOLD", 0.5, indicators=indicators,
+    )
+    assert probs is not None
+    assert probs["HOLD"] == pytest.approx(0.5)

@@ -1,0 +1,57 @@
+{
+  "shadows": {
+    "fingpt": {
+      "entered_shadow_ts": "2026-04-09T00:00:00+00:00",
+      "promotion_criteria": {
+        "min_samples": 200,
+        "min_accuracy": 0.6,
+        "max_missing_outcome_rate": 0.2
+      },
+      "notes": "Parser fix shipped 2026-04-09 (fde9cf8+28aa5d0). Accuracy vs outcomes not yet measured \u2014 awaiting outcome backfill for sentiment_ab_log.",
+      "last_reviewed_ts": "2026-04-21T12:33:13.159579+00:00",
+      "status": "shadow"
+    },
+    "finbert": {
+      "entered_shadow_ts": "2026-04-09T00:00:00+00:00",
+      "promotion_criteria": {
+        "min_samples": 200,
+        "min_accuracy": 0.6,
+        "max_missing_outcome_rate": 0.2
+      },
+      "notes": "CPU-cheap shadow alongside CryptoBERT/Trading-Hero-LLM. 86% neutral output, 87.9% primary-agreement \u2014 likely collapsed to safe-label. Keep for observation only.",
+      "last_reviewed_ts": "2026-04-21T12:33:13.159579+00:00",
+      "status": "shadow"
+    },
+    "kronos": {
+      "entered_shadow_ts": "2026-03-27T15:10:00+00:00",
+      "promotion_criteria": {
+        "min_samples": 500,
+        "min_accuracy": 0.55,
+        "min_subprocess_success_rate": 0.9
+      },
+      "notes": "Un-retired 2026-04-21 afternoon with proper vote-pool isolation (shadow sub-signal excluded from _health_weighted_vote). Subprocess reliability still 59% \u2014 fix is a separate work stream.",
+      "last_reviewed_ts": "2026-04-21T12:33:13.159579+00:00",
+      "status": "shadow"
+    },
+    "credit_spread_risk": {
+      "entered_shadow_ts": "2026-04-11T00:00:00+00:00",
+      "promotion_criteria": {
+        "min_samples": 200,
+        "min_accuracy": 0.55
+      },
+      "notes": "Registered but force-HOLD via DISABLED_SIGNALS pending live validation.",
+      "last_reviewed_ts": "2026-04-21T12:33:13.159579+00:00",
+      "status": "shadow"
+    },
+    "crypto_macro": {
+      "entered_shadow_ts": "2026-04-11T00:00:00+00:00",
+      "promotion_criteria": {
+        "min_samples": 200,
+        "min_accuracy": 0.55
+      },
+      "notes": "Registered but force-HOLD via DISABLED_SIGNALS pending live validation.",
+      "last_reviewed_ts": "2026-04-21T12:33:13.159579+00:00",
+      "status": "shadow"
+    }
+  }
+}

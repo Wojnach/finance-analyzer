@@ -49,32 +49,56 @@ _KRONOS_TIMEOUT = 30
 # Circuit breakers remain as secondary protection — auto-trip on failure, 5min TTL.
 _FORECAST_MODELS_DISABLED = False
 
-# Kronos inference — RETIRED 2026-04-21.
-# Why: subprocess success rate collapsed to 59.2% (3250 ok / 2241 fail out of
-# 5491 attempts over 30d) due to VRAM contention with Chronos/Ministral/Qwen3
-# sharing gpu_gate, plus stdout contamination from HuggingFace loading that
-# _extract_json_from_stdout can only partially scrub. Separately, the shadow
-# mode (config value "shadow") forced every successful prediction to HOLD at
-# lines ~811/820, so over 3668 logged predictions not one contributed a raw
-# BUY/SELL vote to the composite. Net effect: Kronos was HOLD-diluting the
-# Chronos-only useful signal (3 of 6 slots in _health_weighted_vote when
-# kronos_ok was True).
-# Decision: permanently disable at runtime. Subprocess code (_run_kronos,
-# _run_kronos_inner) kept in place so existing tests continue to run, and so
-# a future session can re-evaluate if the model is retrained or moved to a
-# dedicated venv. Config flag is now ignored — override via direct monkey-
-# patch of _KRONOS_ENABLED in tests only.
+# Kronos inference — UN-RETIRED 2026-04-21 afternoon. The morning's retire
+# was premature. The real problem was not Kronos per se but the shadow-mode
+# implementation: when _KRONOS_SHADOW=True, forecast.py forced Kronos's
+# composite-vote sub-signal to HOLD (see lines ~811/820) while still counting
+# those HOLD votes inside _health_weighted_vote's majority tally — so when
+# Chronos voted BUY/BUY/BUY and Kronos (silently HOLD) also "voted" H/H/H,
+# the result was a 3-3 tie that broke to HOLD and polluted Chronos's verdict.
+#
+# The correct structure (this session):
+#   - Kronos subprocess runs normally, real prediction captured in
+#     raw_sub_signals["kronos_*"] for accuracy backfill.
+#   - In shadow mode the Kronos sub-signal is EXCLUDED FROM THE COMPOSITE
+#     VOTE POOL entirely (see _health_weighted_vote below) — it does not
+#     contribute HOLD weights, does not dilute Chronos.
+#   - Subprocess reliability (59 % success → 90 % target) remains a separate
+#     work stream. The shadow-logging path tolerates failure gracefully;
+#     un-retirement does not require the reliability fix to land first.
+#
+# Config re-read here so operators can flip kronos_enabled=true|"shadow"|false
+# without a code edit, matching the pre-retire behavior.
 _KRONOS_ENABLED = False
 _KRONOS_SHADOW = False
 
 
 def _init_kronos_enabled():
-    """No-op since 2026-04-21 Kronos retire. Kept as a named function so tests
-    can still call it without error; the only effect is to reassert the
-    disabled state."""
+    """Read kronos_enabled from config.json at import time.
+
+    Values:
+      - `true`  → active voter (raw prediction contributes to composite vote)
+      - `"shadow"` → inference runs, raw prediction is logged, but the
+        sub-signal is EXCLUDED from the composite vote pool (see
+        _health_weighted_vote). Zero composite pollution.
+      - `false` (default) → subprocess skipped entirely.
+    """
     global _KRONOS_ENABLED, _KRONOS_SHADOW
-    _KRONOS_ENABLED = False
-    _KRONOS_SHADOW = False
+    try:
+        from portfolio.file_utils import load_json as _load_json
+        _cfg = _load_json(
+            str(Path(__file__).resolve().parent.parent.parent / "config.json"),
+            {},
+        )
+        val = _cfg.get("forecast", {}).get("kronos_enabled", False)
+        if val == "shadow":
+            _KRONOS_ENABLED = True
+            _KRONOS_SHADOW = True
+        else:
+            _KRONOS_ENABLED = bool(val)
+            _KRONOS_SHADOW = False
+    except Exception as e:
+        logger.debug("Kronos init from config: %s", e)
 
 
 _init_kronos_enabled()
@@ -416,15 +440,26 @@ def _run_chronos_inner(prices, horizons, _ticker, timeout):
 def _health_weighted_vote(sub_signals, kronos_ok, chronos_ok):
     """Vote only using sub-signals from healthy (working) models.
 
-    When Kronos is dead (99.5% failure rate), its 2 permanent HOLD votes
+    When Kronos is dead (high failure rate), its 2 permanent HOLD votes
     dilute the 4-vote majority and make the signal always return HOLD.
     This function excludes dead models from the vote.
+
+    **Shadow exclusion (2026-04-21)**: when `_KRONOS_SHADOW` is True, Kronos's
+    sub-signal is EXCLUDED from the vote pool regardless of `kronos_ok`. The
+    shadow mode is for logging + accuracy backfill only — adding HOLD weights
+    to the composite would tie against Chronos's verdicts (observed 3668
+    times in the previous shadow-mode run, all forced to HOLD). The raw
+    Kronos prediction is still captured in `raw_sub_signals["kronos_*"]` for
+    downstream accuracy tracking.
 
     1h horizon gets 2x weight (counted twice) because short-term predictions
     are more actionable and Chronos 24h predictions are less reliable.
     """
     alive_votes = []
-    if kronos_ok:
+    # Shadow mode: Kronos runs, logs its raw prediction, but does NOT
+    # contribute to the composite vote. Only vote when the model is both
+    # healthy AND live (not shadow).
+    if kronos_ok and not _KRONOS_SHADOW:
         # 1h gets double weight
         alive_votes.append(sub_signals.get("kronos_1h", "HOLD"))
         alive_votes.append(sub_signals.get("kronos_1h", "HOLD"))
@@ -813,8 +848,15 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
 
         if "1h" in kr:
             k1h_action = _direction_to_action(kr["1h"].get("direction", "neutral"))
-            # Shadow mode: log the real prediction but vote HOLD
-            result["sub_signals"]["kronos_1h"] = "HOLD" if _KRONOS_SHADOW else k1h_action
+            # 2026-04-21 shadow fix: always record the REAL prediction in
+            # sub_signals. The vote-pool filter in _health_weighted_vote
+            # excludes the sub-signal when _KRONOS_SHADOW is True, so the
+            # composite is never polluted. This change means the
+            # forecast_predictions.jsonl log captures Kronos's true verdict
+            # (not a forced HOLD), which unblocks meaningful accuracy
+            # backfill. Pre-fix: `"HOLD" if _KRONOS_SHADOW else k1h_action`
+            # — left zero statistical signal in 3668 logged predictions.
+            result["sub_signals"]["kronos_1h"] = k1h_action
             result["indicators"]["kronos_1h_raw"] = k1h_action
             result["indicators"]["kronos_1h_pct"] = kr["1h"].get("pct_move", 0)
             result["indicators"]["kronos_1h_conf"] = kr["1h"].get("confidence", 0)
@@ -823,7 +865,7 @@ def compute_forecast_signal(df: pd.DataFrame, context: dict = None) -> dict:
 
         if "24h" in kr:
             k24h_action = _direction_to_action(kr["24h"].get("direction", "neutral"))
-            result["sub_signals"]["kronos_24h"] = "HOLD" if _KRONOS_SHADOW else k24h_action
+            result["sub_signals"]["kronos_24h"] = k24h_action
             result["indicators"]["kronos_24h_raw"] = k24h_action
             result["indicators"]["kronos_24h_pct"] = kr["24h"].get("pct_move", 0)
             result["indicators"]["kronos_24h_conf"] = kr["24h"].get("confidence", 0)

@@ -148,35 +148,36 @@ def test_journal_logs_smart_retrieval_failure(tmp_path, monkeypatch, caplog):
                for r in caplog.records), f"Expected smart retrieval log, got: {[r.message for r in caplog.records]}"
 
 
-# --- BUG-67 (adapted 2026-04-21): forecast.py Kronos init ---
+# --- BUG-67: forecast.py Kronos init (restored 2026-04-21 afternoon) ---
 
-def test_forecast_kronos_init_is_hardcoded_disabled():
-    """Kronos retired 2026-04-21. `_init_kronos_enabled()` is now a no-op that
-    always asserts the disabled state regardless of any config the caller
-    might try to pass in. The original BUG-67 test validated that config-load
-    failures were not silently swallowed — that concern is obsolete because
-    there is no config-load path to fail. Keep a guardrail so a future
-    re-enable cannot slip in a config path without updating this test.
+def test_forecast_logs_kronos_init_failure(monkeypatch, caplog):
+    """forecast.py — Kronos init should log on config load failure instead of
+    silently swallowing. Restored 2026-04-21 afternoon after un-retire;
+    `_init_kronos_enabled()` now reads config.json again (shadow isolation
+    moved into the vote-pool filter in `_health_weighted_vote`, not into the
+    init function).
     """
     import portfolio.signals.forecast as fmod
 
     orig_enabled = fmod._KRONOS_ENABLED
     orig_shadow = fmod._KRONOS_SHADOW
 
-    # Try to turn it on manually, then call the init — the init must force
-    # it back off even if config.json says "shadow" or true.
-    fmod._KRONOS_ENABLED = True
-    fmod._KRONOS_SHADOW = True
-    fmod._init_kronos_enabled()
+    # Force the load_json inside _init_kronos_enabled to raise.
+    with patch(
+        "portfolio.file_utils.load_json",
+        side_effect=RuntimeError("config corrupt"),
+    ):
+        with caplog.at_level(logging.DEBUG, logger="portfolio.signals.forecast"):
+            fmod._init_kronos_enabled()
 
-    assert fmod._KRONOS_ENABLED is False, (
-        "Kronos is retired — _init_kronos_enabled() must hardcode to False"
-    )
-    assert fmod._KRONOS_SHADOW is False
-
-    # Restore (tests that set these directly continue to work)
+    # Restore state so subsequent tests see whatever the real config produced.
     fmod._KRONOS_ENABLED = orig_enabled
     fmod._KRONOS_SHADOW = orig_shadow
+
+    assert any(
+        "kronos" in r.message.lower() or "config" in r.message.lower()
+        for r in caplog.records
+    ), f"Expected Kronos init log, got: {[r.message for r in caplog.records]}"
 
 
 # --- BUG-67: forecast.py health logging ---

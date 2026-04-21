@@ -2338,6 +2338,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
                 extra_info["sentiment_model"] = sent.get("model", "unknown")
                 if sent.get("sources"):
                     extra_info["sentiment_sources"] = sent["sources"]
+                # 2026-04-21: carry avg_scores forward for the LLM probability
+                # logger so it can write a rich P(positive)/P(negative)/P(neutral)
+                # distribution instead of a confidence-split fallback.
+                if sent.get("avg_scores"):
+                    extra_info["sentiment_avg_scores"] = sent["avg_scores"]
 
                 prev_sent_dir = _get_prev_sentiment(ticker)
                 current_dir = sent["overall_sentiment"]
@@ -2691,6 +2696,45 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # can log per-phase duration. See module-level _phase_log_per_ticker and
     # main.py's slow-cycle diagnostic for how this log is consumed.
     _phase_start = time.monotonic()
+
+    # 2026-04-21: Log per-vote probability distribution for every LLM-family
+    # signal. Central hook before any gating logic rewrites votes. The
+    # probability log is how we distinguish "confidently wrong" from
+    # "uncertainly wrong" for calibration analysis — argmax accuracy alone
+    # can't tell shadow models apart. Fire-and-forget: failures never abort
+    # the signal cycle.
+    try:
+        from portfolio.llm_probability_log import (
+            derive_probs_from_result,
+            llm_signals,
+            log_vote,
+        )
+        for sig_name in llm_signals():
+            action = votes.get(sig_name)
+            if not action or action not in ("BUY", "HOLD", "SELL"):
+                continue
+            if sig_name == "sentiment":
+                conf = extra_info.get("sentiment_conf", 0.0)
+                indicators = {
+                    "avg_scores": extra_info.get("sentiment_avg_scores"),
+                } if extra_info.get("sentiment_avg_scores") else None
+            else:
+                conf = extra_info.get(f"{sig_name}_confidence", 0.0)
+                indicators = extra_info.get(f"{sig_name}_indicators")
+            probs = derive_probs_from_result(
+                sig_name, action, conf, indicators=indicators,
+            )
+            if probs is None:
+                continue
+            tier = None
+            if sig_name == "claude_fundamental" and indicators:
+                tier = indicators.get("tier")
+            log_vote(
+                sig_name, ticker or "", probs,
+                horizon=horizon, chosen=action, confidence=conf, tier=tier,
+            )
+    except Exception:
+        logger.debug("llm probability logging failed", exc_info=True)
 
     # C10: Capture raw pre-gate votes BEFORE any gating rewrites them to HOLD.
     # This allows accuracy tracking for regime-gated signals, breaking the

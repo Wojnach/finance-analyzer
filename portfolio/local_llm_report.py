@@ -126,6 +126,27 @@ def _build_recommendations(report):
             "Ministral is above the current hold threshold; keep it ticker-gated and benchmark a newer Mistral small model in shadow mode."
         )
 
+    # Calibration backfill prompt.
+    pending = report.get("_calibration_pending_backfill", 0)
+    if pending > 0:
+        recommendations.append(
+            f"Backfill outcomes for `llm_probability_log.jsonl` ({pending} rows "
+            "awaiting outcome join). Without outcomes, Brier/log-loss are "
+            "uncomputable."
+        )
+
+    # Stale shadow alert.
+    stale_shadows_list = report.get("shadow_registry", {}).get("stale", [])
+    if stale_shadows_list:
+        stale_names = ", ".join(
+            f"{s['signal']} ({s['days_in_shadow']:.0f}d)"
+            for s in stale_shadows_list[:5]
+        )
+        recommendations.append(
+            f"Shadow signals older than 30 days without resolution: {stale_names}. "
+            "Either accumulate promotion evidence or retire."
+        )
+
     return recommendations
 
 
@@ -242,6 +263,41 @@ def build_local_llm_report(days=DEFAULT_REPORT_DAYS, config=None, predictions_fi
         },
         "gating_counts": _count_forecast_gating(entries),
     }
+    # 2026-04-21: include calibration metrics (Brier, log-loss) per LLM signal
+    # from the probability log. Outcomes come from the backfill companion file
+    # `data/llm_probability_outcomes.jsonl` — populate via
+    # `python scripts/backfill_llm_outcomes.py` on a schedule. Rows whose
+    # horizons haven't elapsed yet are tallied under `missing_outcome` so the
+    # report honestly surfaces "N rows pending backfill" instead of suppressing.
+    try:
+        from portfolio.llm_calibration import compute_metrics
+        from portfolio.llm_outcome_backfill import outcome_lookup
+        lookup = outcome_lookup()
+        calibration = compute_metrics(lookup, days=days)
+        report["calibration"] = calibration
+        report["_calibration_pending_backfill"] = sum(
+            s.get("missing_outcome", 0) for s in calibration.values()
+        )
+    except Exception as e:
+        logger.debug("calibration metrics failed: %s", e)
+        report["calibration"] = {}
+        report["_calibration_pending_backfill"] = 0
+
+    # Shadow-registry status — which signals are in shadow, how long.
+    try:
+        from portfolio.shadow_registry import load_registry, stale_shadows
+        reg = load_registry()
+        report["shadow_registry"] = {
+            "shadows": reg.get("shadows", {}),
+            "stale": [
+                {"signal": s["signal"], "days_in_shadow": s["days_in_shadow"]}
+                for s in stale_shadows()
+            ],
+        }
+    except Exception as e:
+        logger.debug("shadow registry load failed: %s", e)
+        report["shadow_registry"] = {"shadows": {}, "stale": []}
+
     report["recommendations"] = _build_recommendations(report)
     return report
 
