@@ -319,13 +319,13 @@ class TestStockSignalVoteCounts:
         # 2026-04-18: copper_gold_ratio is metals-only → stock count stays
         # effectively at 26 (the prior 27 assertion was off by one from the
         # 2026-04-17 round).
-        assert extra["_total_applicable"] == 26
+        assert extra["_total_applicable"] == 25
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_crypto_total_applicable(self, _mock):
         ind = make_indicators(close=69000.0)
         _, _, extra = generate_signal(ind, ticker="BTC-USD")
-        assert extra["_total_applicable"] == 32  # crypto: 36 registered minus gpu+disabled+metals-only exclusions
+        assert extra["_total_applicable"] == 31  # crypto: econ_calendar disabled 2026-04-21
 
     @mock.patch("portfolio.signal_engine._cached", side_effect=_null_cached)
     def test_stock_max_technical_voters(self, _mock):
