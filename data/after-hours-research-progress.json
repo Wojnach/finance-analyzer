@@ -1,14 +1,21 @@
 {
-  "session_started": "2026-04-17T21:30:02Z",
-  "current_phase": "PHASE 2: QUANT RESEARCH COMPLETE",
-  "phase_started": "2026-04-17T21:39:01.612787+00:00",
-  "last_update": "2026-04-17T22:15:00.000000+00:00",
-  "status": "running",
-  "notes": "Phase 0+1+2+3 complete. Phase 2 quant research: 8 topics, 12 findings, 6 prioritized improvements. Top recs: (1) IC-based signal weighting, (2) regime-conditioned weights, (3) mRMR correlation pruning, (4) ATR vol-targeting. Ticker deep dives: XAG G/S ratio mean-reversion opportunity, BTC on-chain accumulation signals (MVRV 1.2, SOPR<1).",
+  "session_started": "2026-04-20T21:30:02Z",
+  "current_phase": "COMPLETE",
+  "phase_started": "2026-04-20T22:00:45.484454+00:00",
+  "last_update": "2026-04-20T22:00:45.484454+00:00",
+  "status": "complete",
+  "notes": "All phases done. Shipped: persistence filter + ADX regime detection. 310 tests pass. Merged, pushed, Telegram sent.",
   "phases_completed": [
     "Phase 0: Daily Review",
     "Phase 1: Market Research",
-    "Phase 2: Quant Research (8 topics, ticker deep dives XAG+BTC)",
-    "Phase 3: Signal Audit"
+    "Phase 2: Quant Research",
+    "Phase 2b: Ticker Deep Dive",
+    "Phase 3: Signal Audit",
+    "Phase 4: Morning Briefing",
+    "Phase 5: Implementation Plan",
+    "Phase 6a: Signal Persistence Filter",
+    "Phase 6b: ADX Regime Detection",
+    "Phase 7: Test + Merge + Push",
+    "Phase 8: Telegram Notification"
   ]
 }

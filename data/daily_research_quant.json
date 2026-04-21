@@ -1,255 +1,112 @@
 {
-  "date": "2026-04-19",
+  "date": "2026-04-20",
   "research_topics": [
-    "Adaptive Signal Weighting (Walk-Forward, IC, Bayesian Online Updating, Regime-Conditional)",
-    "Regime Detection Improvements (HMM, Hurst, Volatility Clustering, Regime-Conditional Signal Switching)",
-    "Signal Combination Methods (Stacking, Blending, Bayesian, Copula, Rank-Based)",
-    "Risk Management (Volatility-Targeting, Kelly with Uncertainty, Max Diversification, Drawdown Control)",
-    "Machine Learning for Trading (Transformers, Feature Importance, Walk-Forward CV, Overfitting)",
-    "Multi-Agent Trading Systems (TradingAgents, LLM Alpha Discovery, Debate-Based Decisions)"
+    "Regime-adaptive signal weighting (HMM + ML)",
+    "Information Coefficient (IC) based signal ranking",
+    "Multi-agent LLM debate for trading decisions",
+    "Hybrid AI systems (XGBoost + FinBERT + regime)",
+    "Kalman-enhanced Deep RL for noise resilience",
+    "Dynamic role assignment in multi-agent systems",
+    "Cross-asset momentum with volatility targeting"
   ],
   "findings": [
     {
-      "topic": "Adaptive Signal Weighting",
-      "finding": "Walk-forward optimization with rolling IC re-ranking: recent 2026 implementations show that re-computing IC per signal per ticker over rolling 30-day windows and re-ranking signals each cycle outperforms static IC snapshots. A 2025-2026 BTCUSD case study found that optimal EMA fast-period shifted from 14-16 to 6 in recent windows, indicating markets are rewarding faster momentum signals. WFO continuously re-optimizes strategy parameters using a rolling-window approach — instead of a single optimization-validation split, WFO cycles through multiple periods, progressively incorporating new data while testing on unseen market conditions.",
-      "relevance_to_us": "We already have signal_weight_optimizer.py with walk-forward infrastructure (30d train, 7d test, ridge regression). The missing piece is connecting this to signal_engine.py's consensus computation — currently IC multipliers are computed from a single snapshot, not rolling windows. The WFO module outputs recommended_weights but they aren't consumed by the engine. Wiring walk_forward_optimize() output into _compute_ic_mult() would make IC-weighting adaptive rather than static.",
+      "topic": "Hybrid AI Trading Systems (ComSIA 2026)",
+      "finding": "XGBoost + FinBERT sentiment + regime filtering achieved 67% accuracy vs 54% baseline. Key: dynamically adjusting market exposure based on volatility and return filtering eliminates false signals in non-trending regimes.",
+      "relevance_to_us": "Direct application. Our system has 29 signals but no dynamic exposure adjustment. We could apply regime-conditioned signal gating: in ranging markets, disable trend/momentum signals with <45% accuracy.",
       "implementation_difficulty": "medium",
       "expected_impact": "high",
-      "source": "https://blog.quantinsti.com/walk-forward-optimization-introduction/"
+      "source": "https://arxiv.org/html/2601.19504v1"
     },
     {
-      "topic": "Adaptive Signal Weighting",
-      "finding": "Dynamic Reinforced Ensemble using Bayesian Optimization (ACM ICAIF 2024): proposes dynamic time-varying ensemble weights computed from recent historical data while employing Bayesian optimization (Tree-Structured Parzen Estimator via Optuna) for hyperparameter tuning. The ensemble automatically adjusts which sub-models receive more weight based on their recent out-of-sample performance. For cryptocurrency markets (Jan-Sep 2025 study), TPE-based Bayesian optimization outperformed evolutionary approaches on multi-modal parameter surfaces.",
-      "relevance_to_us": "Our 33 signals can be viewed as an ensemble where each signal is a sub-model. Instead of hand-tuning IC_ALPHA, IC_MULT_FLOOR, IC_MULT_CAP constants in signal_engine.py, use Optuna TPE to find optimal hyperparameters via walk-forward optimization. This would replace the current hardcoded _IC_ALPHA=2.0 with a learned, validated parameter. Optuna is pip-installable and integrates trivially with our existing WFO infrastructure.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "medium",
-      "source": "https://dl.acm.org/doi/10.1145/3677052.3698595"
-    },
-    {
-      "topic": "Adaptive Signal Weighting",
-      "finding": "Bayesian online updating for signal weights: Bayesian approaches update beliefs from one sample at a time, making them ideal for real-time trading systems. As new price data arrives, parameters are incrementally updated using conjugate priors, providing closed-form solutions without expensive retraining. Key advantage over batch methods: captures non-stationarity naturally because the posterior from yesterday becomes today's prior. Combined with fractional Kelly, Bayesian posterior uncertainty directly informs position sizing — high posterior variance = smaller positions.",
-      "relevance_to_us": "Our system currently recomputes signal weights periodically (weekly ML retrain via PF-MLRetrain). Bayesian online updating would make weight adaptation continuous — every 60s cycle could update signal priors based on the most recent outcome. This is particularly relevant for the 'regime shift detected' critical finding: Bayesian updating would naturally downweight mean-reversion signals as their posterior performance deteriorates, without needing explicit regime detection. Implementation: maintain a Beta(alpha, beta) prior per signal, update alpha/beta on each resolved outcome.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://www.interactivebrokers.com/campus/ibkr-quant-news/bayesian-statistics-in-finance-a-traders-guide-to-smarter-decisions/"
-    },
-    {
-      "topic": "Adaptive Signal Weighting",
-      "finding": "Regime-conditional factor allocation (arXiv 2410.14841): integrates factor-specific regime inferences into portfolio construction models. Applies sparse jump models to identify bull/bear regimes for individual factors using risk/return features. Key insight: each signal/factor can be in its OWN regime independently — trend signals might be in a 'bull' regime while mean-reversion signals are simultaneously in a 'bear' regime. This per-signal regime detection is more granular than a single market-wide regime label.",
-      "relevance_to_us": "CRITICAL. Our current regime detection assigns ONE label to the entire market (trending/ranging/volatile). But the critical finding — 'trend-following surging while mean-reversion collapsing' — is exactly per-signal regime divergence. Implementing per-signal regime states would let us say 'RSI is in a mean-reversion-favorable regime for BTC but not for XAG' rather than applying blanket regime gates. Files: signal_engine.py (per-signal regime multipliers), hurst_regime.py (per-signal Hurst computation).",
+      "topic": "AlphaGen Adaptive Ecosystem (SSRN)",
+      "finding": "Multi-model Signal Fabric with regime classification + stability-constrained Meta-Learner Spine. Continuous adjustment of signal relevance as volatility clustering and correlation dynamics evolve.",
+      "relevance_to_us": "We have meta-learner models. Missing piece: regime-conditioned weight adjustment. Current weights are static. AlphaGen shows stability constraints prevent overfitting during regime transitions.",
       "implementation_difficulty": "hard",
       "expected_impact": "high",
-      "source": "https://arxiv.org/abs/2410.14841"
+      "source": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5734328"
     },
     {
-      "topic": "Regime Detection Improvements",
-      "finding": "4-state HMM with transition matrix persistence: latest 2026 implementations use 4-state HMMs (bull-low-vol, bull-high-vol, bear-low-vol, bear-high-vol) with diagonal-dominant transition matrices that penalize rapid regime flips. A 3-component HMM implementation for top-10 market-cap stocks achieved Sharpe 1.9 by quickly identifying regime shifts while avoiding false transitions. Hidden semi-Markov extensions relax the geometric sojourn assumption, allowing more flexible state duration distributions for better capturing real-world regime persistence.",
-      "relevance_to_us": "Our detect_regime() in indicators.py is a simple EMA9/EMA21 gap + RSI check that produced 4 regime flips in 2 hours for BTC. The HMM's transition matrix naturally makes rapid flipping expensive — this is the #1 improvement from yesterday's research (priority 1). The 4-state model (separating volatility from direction) is more useful than 3-state because our regime gates for volatility (0.80x) and ranging (0.75x) would map to specific HMM states. hmmlearn is pip-installable, training takes <1s on our data volume.",
+      "topic": "IC-Based Signal Evaluation",
+      "finding": "Test signals using Information Coefficient (IC) - rank correlation between signal and future returns. Only use signals with stable, positive IC. Rolling IC windows detect signal decay.",
+      "relevance_to_us": "Critical. We use accuracy (binary hit rate) but IC is more informative. A signal can be 50% accurate but have positive IC if correct calls have larger moves. Should supplement accuracy gating with IC.",
       "implementation_difficulty": "medium",
       "expected_impact": "high",
-      "source": "https://medium.com/@pta.forwork/market-regime-detection-using-hidden-markov-models-in-quantitative-trading-part-1-214e6c77bc2e"
+      "source": "https://medium.com/@setupalpha.capital/my-scientific-workflow-for-generating-alpha-in-quantitative-trading-in-2026"
     },
     {
-      "topic": "Regime Detection Improvements",
-      "finding": "Hurst exponent as a regime filter for strategy selection: a March 2026 study demonstrates using the Hurst exponent as a regime filter that activates momentum strategies only when H > 0.55 (trending) and mean-reversion only when H < 0.45. Key refinement: multi-scale Hurst (computing H at different lag windows) reveals that a series can be mean-reverting at short lags but trending at longer lags — resolving the apparent paradox of conflicting timeframe signals. The whittlehurst package (2026) provides statistically more efficient estimation than traditional R/S analysis.",
-      "relevance_to_us": "We have hurst_regime.py using R/S analysis with SUB_WINDOWS=(8,16,32,64,128) but compute a single aggregate H. The multi-scale approach is directly actionable: compute short-lag H (8-32 bars, capturing intraday dynamics) and long-lag H (64-128 bars, capturing multi-day trends) separately. When short-H < 0.45 but long-H > 0.55, it means 'pullback within a trend' — our trend signal currently fires false SELL signals in this exact scenario (40.3% accuracy). Switching to whittlehurst for better efficiency on our small samples is a quick win.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "https://pyquantlab.medium.com/enhancing-trading-strategies-with-a-hurst-based-regime-filter-ac6639be43cf"
-    },
-    {
-      "topic": "Regime Detection Improvements",
-      "finding": "Volatility regime clustering with Gaussian Mixture Models: UMAP dimensionality reduction + GMM clustering on macro, sentiment, and volatility indicators identifies distinct market phases without pre-specifying the number of regimes. A 2025 Bitcoin study combined K-Means clustering with HMM to segment data into bullish, bearish, and sideways regimes. More advanced: Bayesian GMM for soft regime weights produces probabilistic regime memberships rather than hard labels, enabling smooth transitions in signal weights during regime changes.",
-      "relevance_to_us": "Our regime detection produces a hard label (trending/ranging/volatile) which causes discontinuous jumps in signal weights at regime boundaries. Soft regime probabilities from Bayesian GMM would produce smooth weight transitions — e.g., 70% trending / 30% ranging means trend signals get 0.7x boost + ranging signals get 0.3x boost, not a binary switch. This directly addresses the regime-boundary whiplash problem. Implementation: run GMM on rolling 200-bar features (returns, volatility, Hurst), output regime probabilities, multiply into signal_engine.py weights.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://blog.harbourfronts.com/2025/10/13/identifying-and-characterizing-market-regimes-across-asset-classes/"
-    },
-    {
-      "topic": "Regime Detection Improvements",
-      "finding": "Early warning of regime switching via heteroskedastic network models (PMC 2025): combines HMM with network analysis of cross-asset spillover effects to detect regime switches BEFORE they fully manifest. The volatility spillover network structure changes measurably 2-5 days before a regime switch completes. For multi-asset systems, monitoring cross-asset correlation breakdowns provides regime transition alerts.",
-      "relevance_to_us": "Our system trades 5 correlated instruments (BTC-ETH ~0.7, XAU-XAG ~0.85). Cross-asset correlation breakdown is a leading indicator of regime change — when BTC-ETH correlation drops from 0.7 to 0.3, it signals a structural shift before price-based indicators catch it. We could add a correlation-breakdown detector to shared_state.py that triggers 'regime_uncertain' mode, reducing positions to 0.25x until the new regime stabilizes. This builds on the PELT changepoint recommendation from yesterday.",
+      "topic": "HMM + Random Forest Regime Detection",
+      "finding": "Hidden Markov Models identify market states (trending/ranging/volatile), then Random Forest selects optimal signal subset per regime.",
+      "relevance_to_us": "Direct fit. We detect regimes but dont use it to filter signals. HMM is more sophisticated than ADX-based detection. Could train on signal_log.db.",
       "implementation_difficulty": "medium",
       "expected_impact": "medium",
-      "source": "https://pmc.ncbi.nlm.nih.gov/articles/PMC12507299/"
+      "source": "https://blog.quantinsti.com/regime-adaptive-trading-python/"
     },
     {
-      "topic": "Signal Combination Methods",
-      "finding": "Hybrid ensemble: Voting + Stacking + Blending (2025): recent research integrates ensemble models (AdaBoost, XGBoost, LightGBM, Random Forest) with fusion models (Voting, Stacking, Blending) using 67 factors constructed from finance, statistics, and econometric models. XGBoost and LightGBM with incremental learning for rolling predictions achieved the best combination results. Key finding: stacking (using a meta-model to combine base model predictions) outperforms both simple voting and single-model approaches, with AdaBoost achieving 87.0% accuracy as the best base classifier.",
-      "relevance_to_us": "We already have meta_learner.py (LightGBM meta-learner) that replaces hand-tuned voting with a trained model. However, it's currently at 43-49% OOS accuracy (post-audit with proper purge gap). The research suggests adding stacking: use the meta-learner's probability output alongside the weighted vote as features for a SECOND meta-model. More immediately: our 33 raw signal votes are noisy inputs — preprocessing them into rolling z-scores or rank-normalizing before feeding to meta_learner would likely improve OOS performance significantly.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "medium",
-      "source": "https://pmc.ncbi.nlm.nih.gov/articles/PMC12839965/"
-    },
-    {
-      "topic": "Signal Combination Methods",
-      "finding": "Rank-based signal combination: instead of using raw signal values (BUY=1, SELL=-1, HOLD=0), rank signals by their rolling IC or recent accuracy, then weight by rank position (1/rank or exponential decay). This is more robust than raw weighting because ranks are invariant to scale differences and outliers. Combined with the 11-step combination engine concept: (1) compute IC, (2) check correlation, (3) cluster correlated signals, (4) select cluster representatives, (5) rank by IC, (6) assign weights, (7) check stability, (8) apply regime filter, (9) combine, (10) calibrate, (11) output.",
-      "relevance_to_us": "Our current weighting is: accuracy_weight * ic_mult * regime_mult * normalized_weight * horizon_mult * activity_cap. This is multiplicative and can produce extreme weights when multiple factors align. Rank-based combination would be more stable: rank signals by IC, assign weights proportional to 1/sqrt(rank), then combine. The 11-step pipeline maps well to our existing infrastructure — we have steps 1, 5, 8, 9 but are missing 2-4 (correlation clustering/pruning), 7 (stability check), 10-11 (calibration).",
-      "implementation_difficulty": "medium",
-      "expected_impact": "medium",
-      "source": "https://medium.com/coding-nexus/mastering-the-information-coefficient-your-key-to-smarter-factor-investing-244531e45538"
-    },
-    {
-      "topic": "Signal Combination Methods",
-      "finding": "Bayesian Model Averaging (BMA) for signal combination: produces an unbiased posterior probability distribution of model weights by treating each signal as a 'model' and computing posterior probabilities based on evidence (observed accuracy). Signals with consistent accuracy get high posterior weight; inconsistent signals get low weight regardless of their average accuracy. Key advantage: BMA naturally handles model uncertainty — the posterior width tells you whether the combined signal is well-supported or ambiguous.",
-      "relevance_to_us": "Our accuracy-based weighting uses point estimates (55% accuracy = 1.1x weight). BMA would replace this with posterior distributions: a signal with 55% accuracy from 500 samples gets much higher weight than one with 55% from 30 samples (tighter posterior). This directly addresses the 'small sample illusion' problem noted in memory (Chronos XAG was 76% on 34 samples, crashed to 54% on 55 samples). Implementation: maintain Beta(successes, failures) per signal, use posterior mean as weight, posterior width as confidence discount.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "high",
-      "source": "https://blog.quantinsti.com/introduction-to-bayesian-statistics-in-finance/"
-    },
-    {
-      "topic": "Risk Management",
-      "finding": "VIX-Rank conditioned Kelly criterion (arXiv 2508.16598): a dynamic Kelly extension that adjusts the investment fraction based on VIX-Rank (percentile of current VIX in trailing 1-year distribution). During low VIX-Rank periods, allocate larger Kelly fraction (up to 0.5x); during high VIX-Rank periods, reduce to 0.15-0.25x Kelly. This directly addresses Kelly's known weakness: parameter sensitivity. The VIX-Rank conditioning reduces maximum drawdown by 30-40% versus static half-Kelly while preserving 85% of the return.",
-      "relevance_to_us": "We don't currently use Kelly for position sizing (fixed budget). Implementing VIX-conditioned Kelly would give us: (1) data-driven position sizing instead of fixed amounts, (2) automatic volatility scaling, (3) drawdown protection during high-vol regimes. For our system: use ATR percentile as a VIX proxy for crypto/metals (we don't have VIX directly). Files: risk_management.py (new kelly_position_size function), portfolio_mgr.py (consume the output). Combines with yesterday's recommendation #4 (ATR-volatility targeting).",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://arxiv.org/pdf/2508.16598"
-    },
-    {
-      "topic": "Risk Management",
-      "finding": "Drawdown-controlled strategies with automatic exposure reduction: professional approaches define a personal max-drawdown threshold (10-15%) and automatically cut exposure by 25-30% when breached. ATR-based stop-losses combined with 1% equity-per-trade limits keep individual losses bounded. Correlation matrix enforcement: keep pairwise correlation under 0.5 for true diversification — we have BTC-ETH at ~0.7 and XAU-XAG at ~0.85, violating this threshold. Multi-asset Kelly with covariance matrix naturally handles this by reducing combined exposure to correlated pairs.",
-      "relevance_to_us": "Our risk_management.py has a drawdown circuit breaker but the current implementation may not aggressively enough reduce exposure during drawdowns. The correlation constraint (keep pairwise < 0.5) is a practical check we should add: when BTC-ETH correlation exceeds 0.5, treat them as effectively one position for sizing purposes (total BTC+ETH exposure <= what a single uncorrelated position would get). This would halve our effective crypto exposure during high-correlation periods — which is exactly when diversification benefit disappears.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "high",
-      "source": "https://www.alphaexcapital.com/stocks/stock-portfolio-management/risk-management-for-stock-investors/maximum-drawdown-management"
-    },
-    {
-      "topic": "Risk Management",
-      "finding": "Fractional Kelly with regime conditioning and correlation awareness: compute separate Kelly fractions per regime (trending: use momentum returns, ranging: use mean-reversion returns). During regime uncertainty (HMM state probability < 0.7 for any state), reduce to minimum Kelly (0.15x). For correlated assets, use multi-asset Kelly: w* = 0.5 * Sigma_inv * mu where Sigma is the covariance matrix. Most professionals use 0.25-0.5x Kelly to account for parameter estimation error.",
-      "relevance_to_us": "This synthesizes several threads: (1) regime-conditioned sizing from yesterday's recommendation, (2) VIX-conditioned Kelly from today's finding, (3) multi-asset Kelly with covariance from yesterday. The practical implementation order: first add basic half-Kelly sizing (easy, 1 day), then add ATR-percentile conditioning (medium, 1 day), then add covariance matrix adjustment for correlated pairs (medium, 2 days). Each step adds value independently.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://astuteinvestorscalculus.com/kelly-criterion-position-sizing/"
-    },
-    {
-      "topic": "Machine Learning for Trading",
-      "finding": "Transformer architectures for financial time series (2025-2026 state of art): an integrated Node Transformer + BERT sentiment model achieved MAPE of 0.80% for one-day-ahead stock predictions vs 1.20% ARIMA and 1.00% LSTM. Galformer (Nature Scientific Reports) uses generative decoding with hybrid loss for multi-step index prediction. Key finding from OpenReview: transformers struggle with distribution shift and low signal-to-noise ratios common in financial data — they excel at capturing long-range dependencies but can overfit to spurious patterns. Hybrid LSTM-Transformer models combining recurrence with attention mechanisms show the best robustness.",
-      "relevance_to_us": "Our forecast signal uses Chronos-2 (foundation model for time series). The research suggests Chronos-2 is already state-of-art for zero-shot time series forecasting. The main opportunity is a hybrid approach: use Chronos-2 for the base forecast, then apply a lightweight transformer attention layer to re-weight the forecast based on current regime/sentiment features. This is more practical than training a full transformer from scratch. However, given Chronos-2's regressed accuracy (XAG 24h: 54.5%, BTC 3h: 64%), the bigger win is probably improving input features rather than model architecture.",
+      "topic": "TradingAgents v0.2.0 (Multi-Agent LLM Framework)",
+      "finding": "Bull/bear debate architecture. Specialized agents argue positions. Now supports Claude 4.x. Fundamental analyst, sentiment expert, technical analyst, trader, risk manager collaborate.",
+      "relevance_to_us": "Our Layer 2 is single Claude call. Bull/bear debate could improve decision quality. Deferred - would increase CLI usage significantly.",
       "implementation_difficulty": "hard",
       "expected_impact": "medium",
-      "source": "https://arxiv.org/abs/2603.05917"
-    },
-    {
-      "topic": "Machine Learning for Trading",
-      "finding": "Combinatorial Purged Cross-Validation (CPCV) from Marcos Lopez de Prado's 'Advances in Financial Machine Learning': the standard approach for preventing overfitting in financial ML. Key principles: (1) purge gap between train/test to prevent leakage from autocorrelation, (2) embargo period after test set, (3) combinatorial approach generates many train/test splits from same data, computing distribution of performance rather than point estimates. SHAP-based feature importance provides interpretable rankings of which signals actually contribute to predictions.",
-      "relevance_to_us": "Our meta_learner.py already implements purge gap (_PURGE_DAYS=2, _TEST_DAYS=14), which was added after the overfitting audit (train 76% vs test 47%). But we don't use CPCV — we use a single train/test split. Implementing CPCV would give us a DISTRIBUTION of meta-learner accuracy rather than a single point estimate, enabling better go/no-go decisions on whether to use the meta-learner for a given horizon. Adding SHAP analysis would reveal which of our 33 signals actually contribute predictive value vs noise.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "medium",
-      "source": "https://www.oreilly.com/library/view/advances-in-financial/9781119482086/c07.xhtml"
-    },
-    {
-      "topic": "Machine Learning for Trading",
-      "finding": "Feature importance via SHAP in financial ML (2025-2026): SHAP-enhanced ensemble methods provide interpretable feature importance rankings. For multi-factor quantitative models, SHAP values reveal which factors contribute positively vs negatively at different market conditions. A 2025 Ethereum study used XGBoost + SHAP with rolling IC validation (30-day windows) to dynamically validate factor stability across bull, bear, and range-bound markets.",
-      "relevance_to_us": "We could add SHAP analysis to meta_learner.py to answer the critical question: 'which of our 33 signals are actually adding predictive value?' The SHAP values would directly inform signal pruning — signals with consistently near-zero SHAP importance across multiple horizons should be candidates for removal. This provides a rigorous, data-driven alternative to the correlation clustering approach recommended yesterday. Implementation: pip install shap, add 20 lines to meta_learner.py's training loop.",
-      "implementation_difficulty": "easy",
-      "expected_impact": "medium",
-      "source": "https://dl.acm.org/doi/10.1145/3766918.3766922"
-    },
-    {
-      "topic": "Multi-Agent Trading Systems",
-      "finding": "TradingAgents v0.2.2 (March 2026): now features a professional five-tier rating framework (Buy/Overweight/Hold/Underweight/Sell) with a portfolio manager as final decision agent. Supports Claude 4.x. Architecture: 7 specialized LLM agents (Fundamental Analyst, Sentiment Analyst, News Analyst, Technical Analyst, Bull Researcher, Bear Researcher, Risk Manager) communicate via LangGraph. Bull and Bear researchers conduct structured debates. Performance: notable improvements in Sharpe ratio and max drawdown vs single-agent baselines.",
-      "relevance_to_us": "Our Layer 2 is a single Claude agent. The TradingAgents debate pattern (Bull + Bear researchers → synthesis) maps directly to our agent_invocation.py. Implementation option: instead of spawning the full TradingAgents framework (heavy dependency), adopt the debate pattern only — two Claude calls with opposing mandates, then a synthesis call. This was yesterday's recommendation #6. New insight from TradingAgents v0.2.2: the five-tier rating (Buy/Overweight/Hold/Underweight/Sell) is more granular than our binary BUY/SELL/HOLD, enabling partial position changes.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
       "source": "https://github.com/TauricResearch/TradingAgents"
     },
     {
-      "topic": "Multi-Agent Trading Systems",
-      "finding": "LLM-based alpha discovery with hybrid RL optimization (2025-2026): hybrid methods achieve 75% improvement in information coefficient over baseline RL frameworks, with cumulative excess returns more than double the baseline. PPO-based adaptive alpha weighting dynamically optimizes weights of multiple LLM-generated alphas under varying market conditions. Key challenge identified: LLM agents struggle to distinguish attention-grabbing but non-decisive news from genuinely influential events — acting on superficial correlations leads to overreaction.",
-      "relevance_to_us": "Our Claude Fundamental signal (Haiku/Sonnet/Opus cascade) is essentially an LLM-generated alpha. The challenge identified — LLM overreaction to noisy news — matches our observation that claude_fundamental sometimes generates strong signals on non-events. Mitigation: add a 'news significance filter' that requires multiple independent news sources to corroborate before letting claude_fundamental's signal pass through. This would be a lightweight addition to portfolio/signals/claude_fundamental.py.",
+      "topic": "Volume-Conditional Signal Fusion",
+      "finding": "Momentum-specific indicator fusion dynamically weights VWAP, MACD, RSI based on volume confirmation and ML probability scores.",
+      "relevance_to_us": "We have volume as separate signal. Fusion approach weights other signals higher WHEN volume confirms. More nuanced than binary RVOL gate.",
       "implementation_difficulty": "easy",
       "expected_impact": "medium",
-      "source": "https://arxiv.org/html/2505.07078v5"
+      "source": "https://anjikeesari.com/resources/publications/algo-trading/"
     },
     {
-      "topic": "Multi-Agent Trading Systems",
-      "finding": "LiveTradeBench (arXiv 2511.03628): first rigorous live trading benchmark for LLM agents, testing 21 models over 50 trading days (Aug-Oct 2025). Key finding confirmed: LLM agents significantly underperform systematic strategies on execution timing and position sizing, but outperform on regime recognition and narrative interpretation. Best hybrid: LLM for macro thesis + systematic for execution. The benchmark reveals that most LLM trading agents fail to beat buy-and-hold when accounting for transaction costs and slippage.",
-      "relevance_to_us": "Validates our architecture: Layer 1 (systematic signals + 60s loop) handles timing/sizing, Layer 2 (Claude) handles thesis generation and decision synthesis. The research reinforces: do NOT let Layer 2 override systematic position sizing or timing. Our current Layer 2 can specify position sizes in its decisions — we should constrain this to the ATR-based sizer output and only let Layer 2 choose BUY/SELL/HOLD direction + conviction level. Files: docs/TRADING_PLAYBOOK.md (constrain Layer 2 sizing authority), agent_invocation.py (enforce size limits).",
-      "implementation_difficulty": "easy",
+      "topic": "Kalman-Enhanced Signal Smoothing",
+      "finding": "Kalman filter applied to noisy signals reduces whipsaw. Filtered signal has smoother transitions, fewer false crossovers.",
+      "relevance_to_us": "Could apply to MACD, EMA crossovers that flip rapidly. Adds persistence without arbitrary lookback. Addresses known issue of single-cycle noise.",
+      "implementation_difficulty": "medium",
       "expected_impact": "medium",
-      "source": "https://arxiv.org/html/2511.03628v1"
+      "source": "https://thesai.org/Downloads/Volume16No11/Paper_81-Kalman_Enhanced_Deep_RL.pdf"
     }
   ],
   "recommended_improvements": [
     {
-      "title": "Bayesian Signal Weighting with Beta Posteriors",
-      "description": "Replace accuracy-based point-estimate weighting with Bayesian posterior weights. Maintain a Beta(successes, failures) distribution per signal per ticker. Weight each signal by posterior mean (alpha/(alpha+beta)) with a confidence discount based on posterior width. This naturally handles the small-sample illusion (Chronos XAG was '76%' on 34 samples) because narrow posteriors from many samples dominate wide posteriors from few. Update posteriors incrementally on each resolved outcome — no batch retraining needed. Directly addresses the regime shift: mean-reversion signals' posteriors will naturally degrade as failures accumulate in the current trending regime.",
+      "title": "Regime-Conditioned Signal Gating",
+      "description": "In ranging regimes, force-HOLD signals with <45% accuracy in that regime. Trend at 40.3% (3h) should be gated. Per-regime thresholds.",
       "priority": 1,
-      "effort_days": 2,
-      "files_affected": ["portfolio/signal_engine.py", "portfolio/accuracy_stats.py", "portfolio/outcome_tracker.py"]
+      "effort_days": 1,
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/accuracy_stats.py"
+      ]
     },
     {
-      "title": "Wire Walk-Forward Optimizer Output into Signal Engine",
-      "description": "signal_weight_optimizer.py already computes walk-forward optimal weights but they aren't consumed by signal_engine.py. Wire the recommended_weights output from walk_forward_optimize() into the consensus computation, replacing hardcoded _IC_ALPHA/_IC_MULT_FLOOR/_IC_MULT_CAP with learned parameters. Run WFO weekly (via PF-MLRetrain) and persist results to data/models/walkforward_results.json. The engine reads these at startup and applies them as base signal weights.",
+      "title": "IC-Based Signal Weighting",
+      "description": "Calculate rolling 7-day IC per signal. Weight by IC magnitude. Negative IC = force-HOLD. More informative than binary accuracy.",
       "priority": 2,
-      "effort_days": 1,
-      "files_affected": ["portfolio/signal_engine.py", "portfolio/signal_weight_optimizer.py", "portfolio/main.py"]
+      "effort_days": 3,
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/accuracy_stats.py",
+        "portfolio/outcome_tracker.py"
+      ]
     },
     {
-      "title": "4-State HMM Regime Detection (Replace EMA Rule)",
-      "description": "Replace detect_regime() in indicators.py with a 4-state HMM (bull-low-vol, bull-high-vol, bear-low-vol, bear-high-vol) using hmmlearn. Train on rolling 500-bar returns + volatility. Output regime PROBABILITIES (not hard labels) so downstream signal weights transition smoothly. The diagonal-dominant transition matrix naturally prevents rapid regime flipping (our #1 problem — BTC flipped 4x in 2 hours). Keep existing EMA detector as warmup fallback for first 500 bars. Uses Bayesian GMM soft weights for smooth weight transitions at regime boundaries.",
+      "title": "Volume-Conditional Confidence Boost",
+      "description": "RVOL > 1.5x: boost confirming signals 1.2x. RVOL < 0.5x: reduce all confidence 0.6x. Graduated, not binary.",
       "priority": 3,
-      "effort_days": 3,
-      "files_affected": ["portfolio/indicators.py", "portfolio/signal_engine.py", "portfolio/signals/hurst_regime.py", "requirements.txt"]
+      "effort_days": 1,
+      "files_affected": [
+        "portfolio/signal_engine.py"
+      ]
     },
     {
-      "title": "Multi-Scale Hurst Regime Filter",
-      "description": "Compute separate short-lag H (8-32 bars) and long-lag H (64-128 bars) from existing hurst_regime.py. When short-H < 0.45 but long-H > 0.55, label 'pullback within trend' — suppress mean-reversion SELL signals and boost trend-following BUY. This directly fixes trend signal's 40.3% accuracy (false SELL during pullbacks within uptrends). Switch from R/S analysis to whittlehurst package for better statistical efficiency on small samples.",
+      "title": "Signal Persistence Filter",
+      "description": "Require 2+ consecutive cycles for a signal to count as vote. Eliminates single-cycle noise flips.",
       "priority": 4,
-      "effort_days": 1,
-      "files_affected": ["portfolio/signals/hurst_regime.py", "portfolio/signal_engine.py", "requirements.txt"]
-    },
-    {
-      "title": "SHAP Feature Importance for Signal Pruning",
-      "description": "Add SHAP analysis to meta_learner.py training loop to identify which signals contribute predictive value vs noise. Signals with consistently near-zero SHAP importance across all horizons are pruning candidates. This provides a rigorous, data-driven complement to the correlation-clustering approach from yesterday. Implementation: pip install shap, add ~20 lines after model training, persist SHAP rankings to data/models/shap_importance.json. Review monthly to inform signal retirement decisions.",
-      "priority": 5,
-      "effort_days": 1,
-      "files_affected": ["portfolio/meta_learner.py", "data/models/shap_importance.json"]
-    },
-    {
-      "title": "Correlation-Based Exposure Limiter for Correlated Pairs",
-      "description": "Add a correlation gate to risk_management.py: when rolling 30d pairwise correlation between two held positions exceeds 0.5, treat them as effectively one position for sizing purposes. Specifically: total BTC+ETH exposure <= single-position budget when corr > 0.5; total XAU+XAG exposure similarly capped. This prevents the false diversification problem where holding both BTC and ETH at full size provides only ~1.3x diversification benefit instead of the assumed 2x.",
-      "priority": 6,
-      "effort_days": 1,
-      "files_affected": ["portfolio/risk_management.py", "portfolio/portfolio_mgr.py"]
-    },
-    {
-      "title": "ATR-Percentile Conditioned Kelly Position Sizing",
-      "description": "Implement position sizing as: size = half_kelly * portfolio_value * (target_vol / effective_ATR) * atr_rank_adjustment. ATR-rank adjustment: low ATR-percentile (calm market) → up to 0.5x Kelly; high ATR-percentile (volatile) → 0.15-0.25x Kelly. For leveraged warrants, effective_ATR = ATR * leverage. This replaces fixed budget sizing, automatically reduces silver warrant positions (3% ATR * 5x = 15% effective), and integrates VIX-style conditioning via ATR percentile.",
-      "priority": 7,
       "effort_days": 2,
-      "files_affected": ["portfolio/risk_management.py", "portfolio/portfolio_mgr.py", "docs/TRADING_PLAYBOOK.md"]
-    },
-    {
-      "title": "Bull/Bear Debate Pattern for Layer 2 with 5-Tier Rating",
-      "description": "Modify agent_invocation.py to run two parallel Claude invocations (bull mandate + bear mandate), then a synthesis call. Adopt TradingAgents' five-tier rating (Buy/Overweight/Hold/Underweight/Sell) for more granular position decisions than binary BUY/SELL/HOLD. The 5-tier scale enables partial position changes (Overweight = add to existing, Underweight = trim but don't exit). Cost: 3x Claude token usage per trigger, mitigated by parallel bull/bear calls.",
-      "priority": 8,
-      "effort_days": 3,
-      "files_affected": ["portfolio/agent_invocation.py", "portfolio/multi_agent_layer2.py", "docs/TRADING_PLAYBOOK.md"]
-    },
-    {
-      "title": "Constrain Layer 2 Sizing Authority",
-      "description": "Based on LiveTradeBench finding that LLM agents underperform on position sizing: constrain Layer 2 to only choose direction + conviction level. Position size is determined by the systematic ATR-Kelly sizer. Layer 2 outputs a 1-5 conviction score which maps to Kelly fraction multiplier (1=0.1x, 3=0.3x, 5=0.5x Kelly). This prevents the 'LLM overrides systematic sizing with gut feel' failure mode.",
-      "priority": 9,
-      "effort_days": 1,
-      "files_affected": ["portfolio/agent_invocation.py", "docs/TRADING_PLAYBOOK.md", "portfolio/risk_management.py"]
-    },
-    {
-      "title": "LLM News Significance Filter for Claude Fundamental Signal",
-      "description": "Add a corroboration check to claude_fundamental.py: require that headline-driven signal changes are supported by at least 2 independent news sources before passing through. LLM agents' known weakness is overreacting to attention-grabbing but non-decisive news. Implementation: cross-reference news_event signal's source count before allowing claude_fundamental to deviate from HOLD.",
-      "priority": 10,
-      "effort_days": 1,
-      "files_affected": ["portfolio/signals/claude_fundamental.py", "portfolio/signals/news_event.py"]
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/trigger.py"
+      ]
     }
-  ],
-  "meta": {
-    "sources_consulted": 24,
-    "key_theme": "The regime shift finding (trend-following surging, mean-reversion collapsing) is best addressed by Bayesian posterior weighting (#1) + 4-state HMM (#3) + multi-scale Hurst (#4) working together. Bayesian posteriors naturally downweight failing signals without explicit regime detection. HMM provides probabilistic regime labels for signal selection. Multi-scale Hurst disambiguates pullbacks-within-trends from true reversals.",
-    "delta_from_yesterday": "Yesterday's research identified the problems (signal correlation, regime flipping, fixed sizing). Today's research adds: (1) Bayesian Beta posteriors as a more elegant solution than IC-only weighting, (2) 4-state HMM with soft probabilities instead of 3-state with hard labels, (3) VIX-conditioned Kelly as practical position sizing, (4) SHAP analysis as a data-driven pruning method, (5) LiveTradeBench evidence to constrain Layer 2 sizing authority, (6) per-signal regime states from Dynamic Factor Allocation paper.",
-    "top_3_actionable": [
-      "Bayesian Beta posterior weighting (2 days, high impact, addresses regime shift finding directly)",
-      "Wire existing WFO output into signal engine (1 day, high impact, infrastructure already exists)",
-      "SHAP analysis for signal pruning (1 day, medium impact, answers 'which signals are noise?')"
-    ]
-  }
+  ]
 }

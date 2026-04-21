@@ -1,12 +1,17 @@
 {
   "horizon": "1d",
-  "train_samples": 1861,
-  "test_samples": 242,
-  "train_accuracy": 0.72,
-  "test_accuracy": 0.5331,
-  "test_auc": 0.589,
-  "test_logloss": 0.7229,
-  "class_balance": 0.495,
-  "features": 44,
-  "trained_at": "2026-04-10T18:00:16.539443+00:00"
+  "train_samples": 1983,
+  "test_samples": 239,
+  "purge_days": 2,
+  "train_accuracy": 0.5194,
+  "test_accuracy": 0.4728,
+  "test_auc": 0.5037,
+  "test_logloss": 0.6958,
+  "overfit_gap": 0.0466,
+  "calibrated_threshold": 0.35,
+  "calibrated_accuracy": 0.5481,
+  "class_balance": 0.4942,
+  "features": 54,
+  "early_stopped_at": 2,
+  "trained_at": "2026-04-20T18:00:23.114785+00:00"
 }

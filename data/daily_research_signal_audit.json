@@ -1,125 +1,264 @@
 {
-  "date": "2026-04-19",
-  "top_signals": {
-    "3h_alltime": [
-      {"signal": "funding", "accuracy": 74.2, "samples": 535, "note": "Crypto-only, horizon-gated to 3h/4h"},
-      {"signal": "qwen3", "accuracy": 59.4, "samples": 3385, "note": "Local LLM, consistent performer"},
-      {"signal": "rsi", "accuracy": 55.3, "samples": 23381, "note": "Massive sample, reliable"},
-      {"signal": "fear_greed", "accuracy": 53.9, "samples": 7205, "note": "But COLLAPSED to 25.9% recently at 1d"},
-      {"signal": "ema", "accuracy": 52.4, "samples": 13955, "note": "Simple but stable"}
-    ],
-    "3h_recent_7d": [
-      {"signal": "news_event", "accuracy": 70.0, "samples": 1762, "note": "SURGING from 50.1% alltime - regime shift"},
-      {"signal": "smart_money", "accuracy": 63.2, "samples": 133, "note": "Small sample but strong recent"},
-      {"signal": "ema", "accuracy": 62.9, "samples": 2248, "note": "Trending regime favors EMAs"},
-      {"signal": "ministral", "accuracy": 62.6, "samples": 684, "note": "Local LLM excelling"},
-      {"signal": "qwen3", "accuracy": 61.8, "samples": 2483, "note": "Consistent across regimes"},
-      {"signal": "trend", "accuracy": 61.6, "samples": 2283, "note": "WAS 40.3% alltime - massive improvement"}
-    ],
-    "1d_alltime": [
-      {"signal": "econ_calendar", "accuracy": 62.6, "samples": 4617, "note": "SELL-only signal, consistent"},
-      {"signal": "claude_fundamental", "accuracy": 61.6, "samples": 9960, "note": "BUY-biased but strong"},
-      {"signal": "qwen3", "accuracy": 60.0, "samples": 3651, "note": "Best balanced LLM signal"},
-      {"signal": "fear_greed", "accuracy": 58.6, "samples": 10232, "note": "BUY-only contrarian"},
-      {"signal": "ministral", "accuracy": 58.6, "samples": 5858, "note": "SELL side 59.7% drives accuracy"}
-    ]
-  },
-  "worst_signals": {
-    "3h_alltime_below_gate": [
-      {"signal": "trend", "accuracy": 40.3, "samples": 11125, "note": "BUT surged to 61.6% recently - lagged by alltime"},
-      {"signal": "oscillators", "accuracy": 43.0, "samples": 1366, "note": "Consistently bad"},
-      {"signal": "fibonacci", "accuracy": 43.3, "samples": 8811, "note": "Large sample, consistently bad"},
-      {"signal": "macd", "accuracy": 43.7, "samples": 4952, "note": "Surged to 50.7% recently"},
-      {"signal": "sentiment", "accuracy": 45.1, "samples": 31590, "note": "Collapsed to 33.8% recently"}
-    ],
-    "1d_alltime_below_gate": [
-      {"signal": "funding", "accuracy": 31.3, "samples": 610, "note": "Horizon-gated correctly - great at 3h, terrible at 1d"},
-      {"signal": "futures_flow", "accuracy": 36.4, "samples": 1576, "note": "Poor across all horizons"},
-      {"signal": "ml", "accuracy": 41.7, "samples": 1714, "note": "Disabled already"},
-      {"signal": "fibonacci", "accuracy": 42.8, "samples": 15589, "note": "Persistently bad"},
-      {"signal": "macd", "accuracy": 43.9, "samples": 5882, "note": "BUT 58.7% at 1d recently"}
-    ]
-  },
+  "date": "2026-04-20",
+  "top_signals": [
+    {
+      "signal": "funding",
+      "accuracy_3h": 74.2,
+      "samples_3h": 535,
+      "note": "Best 3h signal but only active for crypto"
+    },
+    {
+      "signal": "calendar",
+      "accuracy_3h": 67.9,
+      "accuracy_1d": 58.5,
+      "samples": 4928,
+      "note": "Time-based patterns working. BUT IC=0.000 \u2014 phantom performer (accuracy from drift not prediction)"
+    },
+    {
+      "signal": "econ_calendar",
+      "accuracy_1d": 62.6,
+      "samples": 4617,
+      "note": "SELL-only signal, strong when events occur"
+    },
+    {
+      "signal": "claude_fundamental",
+      "accuracy_1d": 61.6,
+      "samples": 9960,
+      "note": "LLM cascade. BUT IC=-0.020 \u2014 phantom performer (correct on small moves, wrong on big ones)"
+    },
+    {
+      "signal": "qwen3",
+      "accuracy_3h": 59.4,
+      "accuracy_1d": 60.0,
+      "samples": 3651,
+      "note": "Local LLM, consistent across horizons"
+    },
+    {
+      "signal": "ministral",
+      "accuracy_3h": 52.3,
+      "accuracy_1d_recent": 68.0,
+      "samples": 5859,
+      "note": "Strong recently at 1d (68%), moderate at 3h"
+    },
+    {
+      "signal": "news_event",
+      "accuracy_3h": 58.5,
+      "samples_3h": 4904,
+      "note": "Pure short-term signal (1d=50.2%). Gets 1.4x boost at 3h"
+    },
+    {
+      "signal": "credit_spread_risk",
+      "accuracy_1d": 58.4,
+      "ic": 0.201,
+      "icir": 0.521,
+      "samples": 1066,
+      "note": "HIGHEST positive IC. Unique signal. Most stable edge."
+    },
+    {
+      "signal": "fear_greed",
+      "accuracy_1d": 58.6,
+      "accuracy_3h": 53.9,
+      "samples": 10232,
+      "note": "Contrarian indicator. Strong at 1d, weaker at 3h."
+    },
+    {
+      "signal": "mean_reversion",
+      "accuracy_1d_recent": 65.4,
+      "accuracy_3h": 53.1,
+      "samples": 22601,
+      "note": "Excellent in current ranging regime"
+    }
+  ],
+  "worst_signals": [
+    {
+      "signal": "funding",
+      "accuracy_1d": 29.1,
+      "samples": 657,
+      "note": "Best at 3h (74.2%) but WORST at 1d (29.1%!) \u2014 extreme horizon dependency"
+    },
+    {
+      "signal": "futures_flow",
+      "accuracy_1d": 38.4,
+      "samples": 1631,
+      "note": "Both directions bad (buy=42%, sell=37%). In cross_asset_flow cluster."
+    },
+    {
+      "signal": "trend",
+      "accuracy_3h_alltime": 40.3,
+      "accuracy_3h_recent": 61.6,
+      "samples": 11125,
+      "note": "Terrible all-time at 3h but RECOVERING recently (61.6%!). Regime-dependent."
+    },
+    {
+      "signal": "fibonacci",
+      "accuracy_1d": 42.9,
+      "accuracy_3h": 43.3,
+      "accuracy_1d_recent": 68.2,
+      "note": "ALL-TIME bad but RECENT 1d is 68.2%! Wild variance by regime."
+    },
+    {
+      "signal": "macd",
+      "accuracy_1d": 43.9,
+      "accuracy_1d_recent": 58.7,
+      "note": "All-time gated but recent is 58.7% \u2014 ranging crossovers working"
+    },
+    {
+      "signal": "ml",
+      "accuracy_1d": 41.7,
+      "note": "Globally disabled. ETH-specific rescue at 55.1%."
+    },
+    {
+      "signal": "sentiment",
+      "accuracy_1d": 45.9,
+      "accuracy_3h": 45.1,
+      "samples": 39087,
+      "note": "Massive sample, persistently marginal. In macro_external cluster at 0.15x."
+    },
+    {
+      "signal": "forecast",
+      "accuracy_1d_recent": 36.1,
+      "accuracy_3h": 47.2,
+      "note": "Time-series models failing badly at 1d recently (36.1%). Chronos/Kronos degraded."
+    }
+  ],
   "correlation_clusters": [
     {
-      "name": "trend_direction (EXISTING)",
-      "members": ["ema", "macd", "trend", "heikin_ashi", "volume_flow", "macro_regime", "momentum_factors", "structure", "oscillators"],
-      "measured_agreement": "91-100% across BTC/ETH/XAU/XAG",
-      "issue": "9 members is excessive. Even with 0.3x penalty, cluster gets 1.0 + 8*0.3 = 3.4x effective weight",
-      "recommendation": "Tighten penalty to 0.15x for this mega-cluster, or split into sub-groups"
+      "name": "trend_direction",
+      "members": [
+        "ema",
+        "macd",
+        "trend",
+        "heikin_ashi",
+        "volume_flow",
+        "macro_regime",
+        "momentum_factors",
+        "structure",
+        "oscillators"
+      ],
+      "penalty": 0.12,
+      "effective_weight": 1.96,
+      "note": "9-member mega-cluster. 100% agreement when co-active. Leader gets 1.0x, 8 followers get 0.12x each."
     },
     {
-      "name": "momentum_cluster (EXISTING)",
-      "members": ["mean_reversion", "rsi", "bb", "momentum"],
-      "measured_agreement": "100% in metals (bb/mean_reversion/rsi/momentum all vote identically)",
-      "issue": "Effective weight 1.0 + 3*0.3 = 1.9x when they're 100% redundant",
-      "recommendation": "Consider 0.15x for this cluster too"
+      "name": "macro_external",
+      "members": [
+        "fear_greed",
+        "sentiment",
+        "news_event",
+        "calendar",
+        "econ_calendar",
+        "funding"
+      ],
+      "penalty": 0.15,
+      "effective_weight": 1.75,
+      "note": "6-member cluster of macro/sentiment signals. 100% agreement observed."
     },
     {
-      "name": "ORPHANED: credit_spread_risk",
-      "measured_agreement": "100% with macro_regime in ETH/XAU, 100% with news_event in BTC",
-      "issue": "Getting full 1.0x weight despite being completely redundant with trend_direction group",
-      "recommendation": "Add credit_spread_risk to trend_direction group"
+      "name": "momentum_cluster",
+      "members": [
+        "mean_reversion",
+        "rsi",
+        "bb",
+        "momentum"
+      ],
+      "penalty": 0.15,
+      "effective_weight": 1.45,
+      "note": "Mean-reversion family. 88-100% agreement."
     },
     {
-      "name": "ORPHANED: futures_flow",
-      "measured_agreement": "100% with credit_spread_risk + macro_regime in ETH",
-      "issue": "Getting full 1.0x weight, 36.4% accuracy at 1d",
-      "recommendation": "Add to trend_direction group; may get gated by accuracy anyway"
+      "name": "fundamental_cluster",
+      "members": [
+        "claude_fundamental",
+        "crypto_macro"
+      ],
+      "penalty": 0.3,
+      "effective_weight": 1.3,
+      "note": "LLM + macro fundamentals. 100% agreement (92 co-occurrences)."
+    },
+    {
+      "name": "cross_asset_flow",
+      "members": [
+        "credit_spread_risk",
+        "futures_flow"
+      ],
+      "penalty": 0.3,
+      "effective_weight": 1.3,
+      "note": "Flow-based cross-asset signals."
+    },
+    {
+      "name": "pattern_based",
+      "members": [
+        "candlestick",
+        "fibonacci"
+      ],
+      "penalty": 0.3,
+      "effective_weight": 1.3,
+      "note": "Price pattern recognition. r=0.708 on BTC."
     }
   ],
   "regime_performance": {
-    "current_regime": "ranging (transitioning to trending)",
-    "evidence": {
-      "trend_following_surge": "trend 40.3%->61.6%, ema 52.4%->62.9%, momentum_factors 47.6%->60.1%",
-      "mean_reversion_collapse": "bb 52.6%->41.7%, mean_reversion 52.5%->45.5%, sentiment 45.1%->33.8%",
-      "interpretation": "Market transitioning from range-bound to directional. Trend signals now have edge, MR signals losing edge."
-    },
-    "crisis_mode_status": "Likely active (fear_greed 25.9%, macro_regime 30.3%, news_event 29.5% at 1d recent)",
-    "problem": "Crisis mode penalizes trend signals, but trend is WINNING (61.6%). Crisis mode logic may be counterproductive in current regime."
+    "current_regime": "ranging (all instruments)",
+    "ranging_top_signals_1d_recent": [
+      "fibonacci 68.2%",
+      "ministral 68.0%",
+      "mean_reversion 65.4%",
+      "calendar 62.8%",
+      "bb 60.8%",
+      "macd 58.7%"
+    ],
+    "ranging_worst_signals_1d_recent": [
+      "volatility_sig 35.0%",
+      "structure 36.1%",
+      "forecast 36.1%",
+      "smart_money 39.6%",
+      "trend 40.7%",
+      "momentum_factors 41.4%"
+    ],
+    "ranging_3h_recent_stars": [
+      "news_event 70.0%",
+      "smart_money 63.2%",
+      "ema 62.9%",
+      "ministral 62.6%",
+      "qwen3 61.8%",
+      "trend 61.6%"
+    ],
+    "note": "Massive divergence between 1d and 3h accuracy. Many signals that fail at 1d excel at 3h in ranging markets. System correctly boosts 3h performers via HORIZON_SIGNAL_WEIGHTS."
   },
-  "voter_participation": {
-    "XAG-USD": {
-      "always_hold_count": 21,
-      "active_count": 15,
-      "most_active": ["volume_flow(98%)", "heikin_ashi(96%)", "trend(92%)", "momentum_factors(90%)", "mean_reversion(86%)"]
-    },
-    "BTC-USD": {
-      "always_hold_count": 8,
-      "active_count": 16,
-      "most_active": ["credit_spread_risk", "macro_regime", "structure", "trend", "heikin_ashi"]
-    }
-  },
-  "new_signals_needing_data": [
-    "hurst_regime (3905 calls, 0 accuracy samples)",
-    "shannon_entropy (3776 calls, 0 accuracy)",
-    "vix_term_structure (2860 calls, 0 accuracy)",
-    "gold_real_yield_paradox (2387 calls, 0 accuracy)",
-    "cross_asset_tsmom (1912 calls, 0 accuracy)",
-    "copper_gold_ratio (938 calls, 0 accuracy)",
-    "futures_basis (4611 calls, 0 accuracy)"
-  ],
   "recommendations": [
     {
       "priority": 1,
-      "title": "Add credit_spread_risk and futures_flow to correlation groups",
-      "description": "Both are 100% correlated with existing trend_direction members but getting full 1.0x weight.",
-      "effort": "15 minutes",
-      "files": ["portfolio/signal_engine.py"]
+      "title": "Signal persistence filter",
+      "description": "Require signals to maintain their vote for 2+ consecutive cycles before counting. Eliminates single-cycle noise flips. Addresses documented pattern: 'single-check MACD/RSI improvements are noise'.",
+      "impact": "medium-high",
+      "effort": "medium (new state file, signal_engine modification)"
     },
     {
       "priority": 2,
-      "title": "Review crisis mode logic for current regime",
-      "description": "Crisis mode penalizes trend signals which are currently winning. May need to separate macro-signal-crisis from market-trend-crisis.",
-      "effort": "1 hour",
-      "files": ["portfolio/signal_engine.py"]
+      "title": "Update trend_direction cluster penalty math",
+      "description": "Comment says 7 followers at 0.12x=1.84x but there are 8 followers (macd added). Actual effective=1.96x. Could tighten to 0.10x for 1.80x target.",
+      "impact": "low (cosmetic \u2014 0.12pp difference)",
+      "effort": "trivial"
     },
     {
       "priority": 3,
-      "title": "Tighten correlation penalty for mega-clusters",
-      "description": "trend_direction 9 members = 3.4x effective weight. Consider tightening penalty.",
-      "effort": "30 minutes",
-      "files": ["portfolio/signal_engine.py"]
+      "title": "Improve regime detection coverage",
+      "description": "Current regime detector uses simple EMA9/EMA21 gap + RSI. Adding ADX > 25 for trending confirmation and Bollinger Band width for volatility detection would improve classification accuracy.",
+      "impact": "high (regime-specific weighting only helps when regime is correctly identified)",
+      "effort": "medium"
+    },
+    {
+      "priority": 4,
+      "title": "Per-ticker IC weights activation",
+      "description": "Infrastructure exists (compute_signal_ic_per_ticker) but not applied in consensus. Would catch ticker-specific phantom performers.",
+      "impact": "medium",
+      "effort": "medium"
+    },
+    {
+      "priority": 5,
+      "title": "Metals forecast model review",
+      "description": "LLM XAG 3h at 42%, Chronos XAG 3h at 42.8-43.3%. These are actively harmful and should be gated. Verify they are being caught by accuracy gate.",
+      "impact": "medium (affects XAG predictions)",
+      "effort": "low (verify existing gate catches them)"
     }
   ]
 }

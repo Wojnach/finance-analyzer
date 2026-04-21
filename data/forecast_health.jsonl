@@ -20902,3 +20902,88 @@
 {"ts": "2026-04-11T13:23:48.747914+00:00", "model": "chronos", "ticker": "XAU-USD", "ok": true, "ms": 480}
 {"ts": "2026-04-11T13:23:49.226219+00:00", "model": "chronos", "ticker": "ETH-USD", "ok": true, "ms": 365}
 {"ts": "2026-04-11T13:23:49.529542+00:00", "model": "chronos", "ticker": "BTC-USD", "ok": true, "ms": 184}
+{"ts": "2026-04-17T13:20:10.932690+00:00", "model": "kronos", "ticker": "BTC-USD", "ok": true, "ms": 100}
+{"ts": "2026-04-17T13:20:46.276678+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 2, "error": "CUDA error"}
+{"ts": "2026-04-17T13:20:46.283690+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 2, "error": "timed out"}
+{"ts": "2026-04-17T13:20:46.296685+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "empty_results"}
+{"ts": "2026-04-17T13:20:46.309579+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 2, "error": "timed out"}
+{"ts": "2026-04-17T13:20:46.322506+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 2}
+{"ts": "2026-04-17T13:20:46.470156+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 12, "error": "CUDA error"}
+{"ts": "2026-04-17T13:21:28.677850+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 1014, "error": "timeout_1s"}
+{"ts": "2026-04-17T13:21:32.813849+00:00", "model": "chronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-04-17T13:21:33.172231+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 217, "error": "timeout_0.2s"}
+{"ts": "2026-04-17T13:21:56.911940+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-04-17T13:21:56.930033+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-04-17T13:21:56.941527+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "json_extract_failed: 'CUDA error: out of memory\\nSegfault'"}
+{"ts": "2026-04-17T13:21:56.953739+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-04-17T13:21:56.961669+00:00", "model": "kronos", "ticker": "BTC-USD", "ok": false, "ms": 1, "error": "json_extract_failed: 'just garbage output with no json whatsoever'"}
+{"ts": "2026-04-17T13:21:56.970712+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "json_extract_failed: 'Loading model...\\nDone.\\n'"}
+{"ts": "2026-04-17T13:21:56.978650+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "empty_results"}
+{"ts": "2026-04-17T13:26:14.016042+00:00", "model": "kronos", "ticker": "BTC-USD", "ok": true, "ms": 100}
+{"ts": "2026-04-17T13:26:25.919050+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 1006, "error": "timeout_1s"}
+{"ts": "2026-04-17T13:26:30.036072+00:00", "model": "chronos", "ticker": "", "ok": true, "ms": 0}
+{"ts": "2026-04-17T13:26:30.339178+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 209, "error": "timeout_0.2s"}
+{"ts": "2026-04-17T13:26:49.245750+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 2, "error": "CUDA error"}
+{"ts": "2026-04-17T13:26:49.250838+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "timed out"}
+{"ts": "2026-04-17T13:26:49.257968+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 2, "error": "empty_results"}
+{"ts": "2026-04-17T13:26:49.263439+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "timed out"}
+{"ts": "2026-04-17T13:26:49.268686+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-04-17T13:26:49.359489+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 0, "error": "CUDA error"}
+{"ts": "2026-04-17T13:27:59.760135+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-04-17T13:27:59.766554+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 2}
+{"ts": "2026-04-17T13:27:59.772491+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "json_extract_failed: 'CUDA error: out of memory\\nSegfault'"}
+{"ts": "2026-04-17T13:27:59.778518+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-04-17T13:27:59.786517+00:00", "model": "kronos", "ticker": "BTC-USD", "ok": false, "ms": 1, "error": "json_extract_failed: 'just garbage output with no json whatsoever'"}
+{"ts": "2026-04-17T13:27:59.793657+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 2, "error": "json_extract_failed: 'Loading model...\\nDone.\\n'"}
+{"ts": "2026-04-17T13:27:59.798173+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "empty_results"}
+{"ts": "2026-04-17T14:07:51.570109+00:00", "model": "kronos", "ticker": "BTC-USD", "ok": true, "ms": 100}
+{"ts": "2026-04-17T14:08:02.737357+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 1015, "error": "timeout_1s"}
+{"ts": "2026-04-17T14:08:06.833389+00:00", "model": "chronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-04-17T14:08:07.136710+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 207, "error": "timeout_0.2s"}
+{"ts": "2026-04-17T14:08:26.859735+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 3, "error": "CUDA error"}
+{"ts": "2026-04-17T14:08:26.868463+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 2, "error": "timed out"}
+{"ts": "2026-04-17T14:08:26.878793+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 2, "error": "empty_results"}
+{"ts": "2026-04-17T14:08:26.885640+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "timed out"}
+{"ts": "2026-04-17T14:08:26.893433+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-04-17T14:08:26.996612+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 1, "error": "CUDA error"}
+{"ts": "2026-04-17T14:11:09.762433+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 3}
+{"ts": "2026-04-17T14:11:09.768471+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-04-17T14:11:09.774984+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "json_extract_failed: 'CUDA error: out of memory\\nSegfault'"}
+{"ts": "2026-04-17T14:11:09.781558+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-04-17T14:11:09.790820+00:00", "model": "kronos", "ticker": "BTC-USD", "ok": false, "ms": 1, "error": "json_extract_failed: 'just garbage output with no json whatsoever'"}
+{"ts": "2026-04-17T14:11:09.799108+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 2, "error": "json_extract_failed: 'Loading model...\\nDone.\\n'"}
+{"ts": "2026-04-17T14:11:09.806789+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 3, "error": "empty_results"}
+{"ts": "2026-04-17T14:12:15.803326+00:00", "model": "kronos", "ticker": "BTC-USD", "ok": true, "ms": 100}
+{"ts": "2026-04-17T14:12:54.025549+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 1012, "error": "timeout_1s"}
+{"ts": "2026-04-17T14:12:58.138529+00:00", "model": "chronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-04-17T14:12:58.467774+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 208, "error": "timeout_0.2s"}
+{"ts": "2026-04-17T14:13:17.248297+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 2, "error": "CUDA error"}
+{"ts": "2026-04-17T14:13:17.254385+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "timed out"}
+{"ts": "2026-04-17T14:13:17.259690+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "empty_results"}
+{"ts": "2026-04-17T14:13:17.265481+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "timed out"}
+{"ts": "2026-04-17T14:13:17.272772+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 3}
+{"ts": "2026-04-17T14:13:17.365585+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 1, "error": "CUDA error"}
+{"ts": "2026-04-17T14:14:48.336724+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-04-17T14:14:48.347513+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 0}
+{"ts": "2026-04-17T14:14:48.358489+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "json_extract_failed: 'CUDA error: out of memory\\nSegfault'"}
+{"ts": "2026-04-17T14:14:48.366019+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-04-17T14:14:48.372435+00:00", "model": "kronos", "ticker": "BTC-USD", "ok": false, "ms": 0, "error": "json_extract_failed: 'just garbage output with no json whatsoever'"}
+{"ts": "2026-04-17T14:14:48.379475+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 0, "error": "json_extract_failed: 'Loading model...\\nDone.\\n'"}
+{"ts": "2026-04-17T14:14:48.383566+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 1, "error": "empty_results"}
+{"ts": "2026-04-17T22:03:11.807563+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 3, "error": "CUDA error"}
+{"ts": "2026-04-17T22:03:11.831390+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 6, "error": "timed out"}
+{"ts": "2026-04-17T22:03:11.856219+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 4, "error": "empty_results"}
+{"ts": "2026-04-17T22:03:11.880554+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 2, "error": "timed out"}
+{"ts": "2026-04-17T22:03:11.903518+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 3}
+{"ts": "2026-04-17T22:03:12.115275+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 24, "error": "CUDA error"}
+{"ts": "2026-04-17T22:03:19.411587+00:00", "model": "kronos", "ticker": "BTC-USD", "ok": true, "ms": 100}
+{"ts": "2026-04-17T22:04:20.369639+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 2}
+{"ts": "2026-04-17T22:04:20.413863+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 8}
+{"ts": "2026-04-17T22:04:20.455354+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 2, "error": "json_extract_failed: 'CUDA error: out of memory\\nSegfault'"}
+{"ts": "2026-04-17T22:04:20.469605+00:00", "model": "kronos", "ticker": "", "ok": true, "ms": 2}
+{"ts": "2026-04-17T22:04:20.482410+00:00", "model": "kronos", "ticker": "BTC-USD", "ok": false, "ms": 1, "error": "json_extract_failed: 'just garbage output with no json whatsoever'"}
+{"ts": "2026-04-17T22:04:20.501674+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 11, "error": "json_extract_failed: 'Loading model...\\nDone.\\n'"}
+{"ts": "2026-04-17T22:04:20.532217+00:00", "model": "kronos", "ticker": "", "ok": false, "ms": 13, "error": "empty_results"}
+{"ts": "2026-04-17T22:07:13.196642+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 1002, "error": "timeout_1s"}
+{"ts": "2026-04-17T22:07:17.319954+00:00", "model": "chronos", "ticker": "", "ok": true, "ms": 1}
+{"ts": "2026-04-17T22:07:17.636096+00:00", "model": "chronos", "ticker": "", "ok": false, "ms": 204, "error": "timeout_0.2s"}

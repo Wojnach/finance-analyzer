@@ -1,116 +1,78 @@
 {
-  "date": "2026-04-19",
-  "day_of_week": "Sunday",
+  "date": "2026-04-20",
+  "system_health": {
+    "status": "healthy",
+    "cycle_count": 271,
+    "error_count": 0,
+    "uptime_hours": 57.7,
+    "all_signals_operational": true,
+    "last_module_failures": {
+      "ts": "2026-04-17T22:06:47",
+      "modules": [
+        "monte_carlo",
+        "price_targets",
+        "equity_curve"
+      ]
+    }
+  },
   "trades_today": [],
-  "layer2_decisions": [
-    {
-      "ts": "2026-04-19T09:16:12Z",
-      "trigger": "BTC-USD BUY->HOLD, ETH-USD BUY->HOLD (sustained)",
-      "patient": "HOLD - ETH near entry (-0.6%), ATR stop not breached. BUY->HOLD flip is noise in ranging",
-      "bold": "HOLD - BTC +0.9%, ETH flat. Both above ATR stops. Low vol ranging"
-    },
-    {
-      "ts": "2026-04-19T09:43:30Z",
-      "trigger": "BTC-USD consensus BUY (52%)",
-      "patient": "HOLD - ETH -0.9%, RSI 35.9 oversold. Selling into F&G 27 contradicts contrarian thesis",
-      "bold": "HOLD - BTC +0.7%, ETH -0.3%. 3B/3S split = no edge"
-    },
-    {
-      "ts": "2026-04-19T10:08:17Z",
-      "trigger": "ETH-USD BUY (38%), XAG-USD BUY (74%)",
-      "patient": "HOLD - ETH -1% from entry, RSI 33 oversold. Thesis intact",
-      "bold": "HOLD - BTC +0.5%, ETH -0.5%. Contrarian thesis still valid"
-    },
-    {
-      "ts": "2026-04-19T10:26:34Z",
-      "trigger": "XAU-USD consensus BUY (30%)",
-      "patient": "HOLD - ETH -0.94%, 2xATR stop technically breached but Sunday ATR compression noise",
-      "bold": "HOLD - BTC +0.65%, ETH -0.41%. Both above ATR stops. Contrarian fear-entry thesis intact"
-    }
-  ],
-  "current_positions": {
-    "patient": {
-      "ETH-USD": "Long, entered Apr 14-16 during F&G 21-23, near flat (-0.6% to -1%)"
-    },
-    "bold": {
-      "BTC-USD": "Long, +0.5-0.9% from entry at $74,556",
-      "ETH-USD": "Long, -0.3% to -0.5% from entry at $2,319"
-    }
+  "layer2_decisions_today": {
+    "total_sessions": 20,
+    "all_hold": true,
+    "trigger_types": [
+      "XAU-USD consensus/flip (6x)",
+      "ETH-USD consensus/flip (7x)",
+      "BTC-USD consensus/flip (4x)",
+      "XAG-USD consensus (2x)",
+      "MSTR consensus (4x)"
+    ]
   },
-  "closing_prices": {
-    "BTC-USD": 75043,
-    "ETH-USD": 2310,
-    "XAG-USD": 80.62,
-    "XAU-USD": 4819,
-    "MSTR": 166.6
+  "prices_eod": {
+    "BTC-USD": 75901.43,
+    "ETH-USD": 2319.5,
+    "XAG-USD": 79.84,
+    "XAU-USD": 4819.49,
+    "MSTR": 164.24
   },
+  "regime": "ranging (all instruments)",
   "signals_that_were_right": [
-    "XAG-USD BUY consensus 74-80% persistent - silver holding above $80, thesis intact",
-    "Calendar signal maintaining 62.8% recent accuracy at 1d - consistent edge",
-    "Qwen3 holding 61.8% at 3h recently (2,483 samples) - reliable",
-    "Ministral 62.6% at 3h recently (684 samples) - strong LLM signal",
-    "News_event surging to 70.0% at 3h recently (1,762 samples) - massive recent improvement",
-    "Trend signal 61.6% at 3h recently - was 40.3% all-time, regime shift favoring trend-following"
+    "Fear & Greed 58.6% (1d) - contrarian approach working",
+    "RSI 55.3% (3h) - momentum detection at shorter horizons",
+    "Momentum_factors 54.5% (1d) / 53.9% (3h) - consistent edge",
+    "Mean_reversion 52.4% (1d) / 53.1% (3h) - ranging markets reward this",
+    "Smart_money 52.2% (1d) / 53.1% (3h) - flow-based signals stable",
+    "Volume 52.1% (1d) / 52.5% (3h) - reliable confirmer",
+    "BB 54.0% (1d) - Bollinger bands working in ranges"
   ],
   "signals_that_were_wrong": [
-    "Sentiment collapsed to 33.8% at 3h recently (3,629 samples) - was 45.1% all-time",
-    "Fear & Greed dropped to 25.9% at 1d recently (170 samples) - was 58.6% all-time",
-    "Forecast dropped to 38.3% at 3h recently and 36.1% at 1d recently",
-    "BB dropped to 41.7% at 3h recently (626 sam) and 60.8% at 1d recent (293 sam) - mixed",
-    "Fibonacci at 38.3% at 3h recently (243 sam) - persistently bad",
-    "RSI dropped to 47.2% at 3h recently (3,572 sam) - was 55.3% all-time"
+    "Trend 40.3% (3h!) - BELOW 45% gate, should be force-HOLD at 3h",
+    "Fibonacci 42.9% (1d) / 43.3% (3h) - consistently below gate",
+    "MACD 43.9% (1d) - below gate, inversely predictive",
+    "Sentiment 45.9% (1d) / 45.1% (3h) - at/below gate threshold",
+    "Macro_regime 46.8% (1d) / 45.1% (3h) - at gate edge",
+    "Heikin_ashi 49.8% (1d) / 48.3% (3h) - barely above coin-flip",
+    "LLM XAG 3h: 42.0% - forecast model failing on silver",
+    "Chronos XAG 3h: 42.8-43.3% - time-series model also failing"
   ],
   "accuracy_changes": {
-    "regime_shift_detected": true,
-    "regime_description": "Transition from ranging to trending - trend-following signals surging, mean-reversion collapsing",
-    "3h_recent_vs_alltime": {
-      "biggest_improvements": {
-        "trend": {"recent": 61.6, "alltime": 40.3, "delta": 21.3},
-        "news_event": {"recent": 70.0, "alltime": 50.1, "delta": 19.9},
-        "smart_money": {"recent": 63.2, "alltime": 46.3, "delta": 16.9},
-        "ema": {"recent": 62.9, "alltime": 52.4, "delta": 10.5},
-        "ministral": {"recent": 62.6, "alltime": 52.3, "delta": 10.3}
-      },
-      "biggest_declines": {
-        "sentiment": {"recent": 33.8, "alltime": 45.1, "delta": -11.3},
-        "bb": {"recent": 41.7, "alltime": 52.6, "delta": -10.9},
-        "forecast": {"recent": 38.3, "alltime": 47.5, "delta": -9.2},
-        "rsi": {"recent": 47.2, "alltime": 55.3, "delta": -8.1},
-        "mean_reversion": {"recent": 45.5, "alltime": 52.5, "delta": -7.0}
-      }
-    },
-    "1d_recent_vs_alltime": {
-      "biggest_improvements": {
-        "macd": {"recent": 58.7, "alltime": 43.9, "delta": 14.8},
-        "ministral": {"recent": 68.0, "alltime": 58.6, "delta": 9.4},
-        "fibonacci": {"recent": 68.2, "alltime": 42.8, "delta": 25.4},
-        "mean_reversion": {"recent": 65.4, "alltime": 52.5, "delta": 12.9},
-        "bb": {"recent": 60.8, "alltime": 54.1, "delta": 6.7}
-      },
-      "biggest_declines": {
-        "fear_greed": {"recent": 25.9, "alltime": 58.6, "delta": -32.7},
-        "news_event": {"recent": 29.5, "alltime": 50.1, "delta": -20.6},
-        "macro_regime": {"recent": 30.3, "alltime": 46.6, "delta": -16.3},
-        "volatility_sig": {"recent": 35.0, "alltime": 46.6, "delta": -11.6},
-        "structure": {"recent": 36.1, "alltime": 50.2, "delta": -14.1}
-      }
-    }
+    "metals_forecast_degraded": "XAG LLM 3h dropped to 42%, Chronos 3h at 43%",
+    "trend_signal_critical": "Trend 40.3% at 3h is worst performer (11K samples)",
+    "main_XAG_1h_holding": "Main signal 56.5% at 1h (1387 sam) - decent",
+    "main_BTC_1h_stable": "BTC 1h at 54.3% (11K sam) - reliable"
   },
   "system_errors": [
-    "monte_carlo module failure (2026-04-17T22:06) - persisting from prior day",
-    "price_targets module failure (2026-04-17T22:06) - persisting",
-    "equity_curve module failure (2026-04-17T22:06) - persisting",
-    "No metals trades since March 5 - metals trading inactive",
-    "Patient ETH-USD 2xATR stop technically breached on Sunday but attributed to ATR compression"
+    "monte_carlo, price_targets, equity_curve module failures on Apr 17 (3 days ago, non-critical)"
   ],
   "key_observations": [
-    "CRITICAL: Regime shift detected - trend-following signals surging (trend +21.3%, EMA +10.5%), mean-reversion collapsing (BB -10.9%, mean_rev -7.0%). System needs adaptive weighting.",
-    "Sunday low-volume session: all 4 Layer 2 invocations resulted in HOLD. Appropriate for weekend.",
-    "XAG-USD consistently strongest BUY consensus (74-80%) across multiple sessions. Silver prophecy on track at $80.62.",
-    "Patient ETH position dangerously close to 2xATR stop ($2,317 vs $2,318 price). Monday volume normalization could trigger.",
-    "Fear & Greed at 27 (fear) - was the basis for contrarian entries Apr 14-16, but F&G accuracy collapsed to 25.9% recently.",
-    "Fibonacci signal shows extreme divergence: 68.2% at 1d recent vs 38.3% at 3h recent - timeframe matters enormously.",
-    "Seven new signals (hurst_regime, shannon_entropy, vix_term_structure, gold_real_yield_paradox, cross_asset_tsmom, copper_gold_ratio, futures_basis) have 0 accuracy samples at 1d. Need time to accumulate.",
-    "DXY cross-asset at 100% accuracy but only 5 samples - too small to be meaningful."
+    "All instruments in ranging regime - system correctly HOLDing",
+    "XAG dropped from 3.55 to 9.84 (-4.4%) - failed breakout",
+    "BTC at 5.9K - above 5K prophecy checkpoint, below 5K next target",
+    "ETH at ,319 - still below ,500 first checkpoint",
+    "XAU at ,819 - strong, all-time-highs territory",
+    "20 Layer 2 sessions all HOLD - appropriate market discipline",
+    "ETH sell at ,286 this morning was premature (bounced to ,314)",
+    "Trend signal at 40.3% (3h) is actively harmful - needs investigation",
+    "Many signals voting HOLD (>80% of signal array is HOLD) - low conviction environment",
+    "New signals (statistical_jump_regime, network_momentum) have only 2 calls - need validation"
   ]
 }

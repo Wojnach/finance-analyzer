@@ -1,69 +1,320 @@
 {
-  "cash_sek": 2369.31,
-  "positions": {},
+  "cash_sek": 1765.19,
+  "positions": {
+    "pos_1776758488": {
+      "warrant_key": "MINI_L_SILVER_AVA_330",
+      "warrant_name": "MINI L SILVER AVA 330",
+      "ob_id": "2379778",
+      "api_type": "warrant",
+      "underlying": "XAG-USD",
+      "direction": "LONG",
+      "units": 214,
+      "entry_price": 15.1,
+      "entry_underlying": 78.97,
+      "entry_ts": "2026-04-21T08:01:29.185978+00:00",
+      "peak_underlying": 79.02,
+      "trough_underlying": 78.97,
+      "trailing_active": false,
+      "stop_order_id": "A2^1776317962417^220044",
+      "leverage": 4.83,
+      "fill_verified": true,
+      "buy_order_id": "873809168",
+      "_exit_plan": {
+        "recommended": "limit",
+        "rec_price": 79.8471,
+        "rec_ev": 46.11,
+        "rec_fill_prob": 0.35,
+        "stop_hit_prob": 0.0,
+        "risk_flags": [],
+        "market_exit_pnl": -12.22
+      },
+      "peak_warrant_bid": 15.11
+    }
+  },
   "consecutive_losses": 0,
-  "last_buy_ts": "2026-04-10T07:18:14.839379+00:00",
-  "total_trades": 3,
-  "total_pnl_sek": 21.419999999999845,
-  "session_trades": 3,
+  "last_buy_ts": "2026-04-21T08:01:29.185978+00:00",
+  "total_trades": 1,
+  "total_pnl_sek": 0,
+  "session_trades": 1,
   "macd_history": {
     "XAG-USD": [
-      -0.00376,
-      -0.00376,
-      -0.00376,
-      -0.00376,
-      -0.00376,
-      -0.00376,
-      -0.00376,
-      -0.00376,
-      -0.00376,
-      -0.00376,
-      -0.00376,
-      -0.00823,
-      -0.00823,
-      -0.00823,
-      -0.00823,
-      -0.00823,
-      -0.00823,
-      -0.00823,
-      -0.00823,
-      -0.01333
+      0.01306,
+      0.01306,
+      0.01306,
+      0.01306,
+      0.01306,
+      0.01306,
+      0.01306,
+      0.01787,
+      0.01787,
+      0.01787,
+      0.01787,
+      0.01787,
+      0.01787,
+      0.01787,
+      0.01787,
+      0.01787,
+      0.01787,
+      0.01787,
+      0.01787,
+      0.02615
     ],
     "XAU-USD": [
-      -0.20469,
-      -0.20469,
-      -0.20469,
-      -0.20469,
-      -0.20469,
-      -0.20469,
-      -0.20469,
-      -0.20469,
-      -0.20469,
-      -0.20469,
-      -0.20469,
-      -0.34636,
-      -0.34636,
-      -0.34636,
-      -0.34636,
-      -0.34636,
-      -0.34636,
-      -0.34636,
-      -0.34636,
-      -0.49745
+      0.2626,
+      0.2626,
+      0.2626,
+      0.2626,
+      0.2626,
+      0.2626,
+      0.2626,
+      0.7422,
+      0.7422,
+      0.7422,
+      0.7422,
+      0.7422,
+      0.7422,
+      0.7422,
+      0.7422,
+      0.7422,
+      0.7422,
+      0.7422,
+      0.7422,
+      1.1322
+    ]
+  },
+  "confidence_history": {
+    "XAG-USD": [
+      {
+        "action": "BUY",
+        "confidence": 0.705
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.705
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.705
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.705
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.705
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.705
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.705
+      },
+      {
+        "action": "SELL",
+        "confidence": 0.586
+      },
+      {
+        "action": "SELL",
+        "confidence": 0.586
+      },
+      {
+        "action": "SELL",
+        "confidence": 0.586
+      },
+      {
+        "action": "SELL",
+        "confidence": 0.586
+      },
+      {
+        "action": "SELL",
+        "confidence": 0.586
+      },
+      {
+        "action": "SELL",
+        "confidence": 0.586
+      },
+      {
+        "action": "SELL",
+        "confidence": 0.586
+      },
+      {
+        "action": "SELL",
+        "confidence": 0.586
+      },
+      {
+        "action": "SELL",
+        "confidence": 0.586
+      },
+      {
+        "action": "SELL",
+        "confidence": 0.586
+      },
+      {
+        "action": "SELL",
+        "confidence": 0.586
+      },
+      {
+        "action": "SELL",
+        "confidence": 0.586
+      },
+      {
+        "action": "SELL",
+        "confidence": 0.233
+      }
+    ],
+    "XAU-USD": [
+      {
+        "action": "BUY",
+        "confidence": 0.574
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.574
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.574
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.574
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.574
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.574
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.574
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.16
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.16
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.16
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.16
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.16
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.16
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.16
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.16
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.16
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.16
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.16
+      },
+      {
+        "action": "BUY",
+        "confidence": 0.16
+      },
+      {
+        "action": "SELL",
+        "confidence": 0.397
+      }
+    ]
+  },
+  "rsi_history": {
+    "XAG-USD": [
+      44.8,
+      44.8,
+      44.8,
+      44.8,
+      44.8,
+      35.5,
+      35.5,
+      35.5,
+      35.5,
+      35.5,
+      35.5,
+      35.5,
+      35.5,
+      35.5,
+      35.5,
+      35.5,
+      35.5,
+      45.2,
+      45.2,
+      45.2,
+      45.2,
+      45.2,
+      45.2,
+      45.2,
+      45.2,
+      45.2,
+      45.2,
+      45.2,
+      45.2,
+      46.9
+    ],
+    "XAU-USD": [
+      40.6,
+      40.6,
+      40.6,
+      40.6,
+      40.6,
+      32.9,
+      32.9,
+      32.9,
+      32.9,
+      32.9,
+      32.9,
+      32.9,
+      32.9,
+      32.9,
+      32.9,
+      32.9,
+      32.9,
+      45.0,
+      45.0,
+      45.0,
+      45.0,
+      45.0,
+      45.0,
+      45.0,
+      45.0,
+      45.0,
+      45.0,
+      45.0,
+      45.0,
+      46.3
     ]
   },
   "_und_history": {
-    "XAG-USD": [
-      74.2,
-      74.23,
-      74.17,
-      74.29,
-      74.25,
-      74.24,
-      74.2,
-      74.2,
-      74.14,
-      74.12
-    ]
+    "XAG-USD": []
   }
 }

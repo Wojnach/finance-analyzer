@@ -1,94 +1,88 @@
 {
-  "date": "2026-04-17",
-  "generated_at": "2026-04-17T21:51:42.730520+00:00",
-  "market_outlook": "bullish",
-  "confidence": 0.65,
-  "rationale": "Risk-on momentum from Hormuz reopening. S&P 500 new ATH 7,126. DXY weakening (97.70). Gold holding near $4,878 despite risk-on (structural bid). Whale BTC accumulation massive (270K in 30 days). ETH ETF inflows rotating in. BUT: ceasefire expires Monday April 21 \u2014 binary event that could reverse everything.",
+  "date": "2026-04-21",
+  "generated_at": "2026-04-20T21:43:50.025722+00:00",
+  "market_outlook": "neutral-bullish",
+  "confidence": 0.55,
+  "summary": "Ranging markets with strong undercurrents. Gold at ATH ($4,819), silver consolidating after failed $83 breakout ($79.84). BTC healthy on-chain (MVRV 1.37, SOPR 1.00) but needs $77.5K breakout. ETH facing DeFi contagion from $292M KelpDAO exploit. Oil binary risk from fragile US-Iran ceasefire. Easter Monday thin liquidity. System correctly holding \u2014 no high-conviction entries identified.",
   "key_levels": {
-    "BTC-USD": {
-      "support": 73990,
-      "resistance": 85000,
-      "current": 77328,
-      "note": "Whale accumulation, neg funding. $85K next checkpoint. Watch $76.7K ATR stop (Bold)."
-    },
-    "ETH-USD": {
-      "support": 2297,
-      "resistance": 2500,
-      "current": 2430,
-      "note": "Approaching $2,500 prophecy checkpoint. ETF inflows strong. Below-coinflip consensus (47.7%) \u2014 confidence penalty now active."
-    },
-    "MSTR": {
-      "support": 148,
-      "resistance": 180,
-      "current": 166.46,
-      "note": "+29% in 7d, overextended. Multi-TF SELL. 780K BTC holdings, avg cost $75.6K. Below-coinflip consensus (45.9%)."
+    "XAG-USD": {
+      "support": 77.5,
+      "resistance": 83.0,
+      "pivot": 79.8
     },
     "XAU-USD": {
-      "support": 4750,
-      "resistance": 4950,
-      "current": 4855,
-      "note": "Holding near ATH despite risk-on = very bullish. Central banks 1,200+ tonnes pace. GLD 920t."
+      "support": 4760.0,
+      "resistance": 4880.0,
+      "pivot": 4820.0
     },
-    "XAG-USD": {
-      "support": 78,
-      "resistance": 85,
-      "current": 81.44,
-      "note": "Broke $80. 6th supply deficit year. Fresnillo cut -9%. China strategic classification. Prophecy $120, 0.8 conviction."
+    "BTC-USD": {
+      "support": 73180.0,
+      "resistance": 77500.0,
+      "pivot": 75900.0
+    },
+    "ETH-USD": {
+      "support": 2180.0,
+      "resistance": 2500.0,
+      "pivot": 2320.0
+    },
+    "MSTR": {
+      "support": 153.77,
+      "resistance": 173.15,
+      "pivot": 164.0
     }
   },
   "trade_ideas": [
     {
-      "instrument": "BTC-USD",
-      "direction": "LONG (hold)",
-      "rationale": "Whale accumulation 270K BTC in 30 days. Exchange reserves 7yr low. Neg funding = squeeze potential. F&G extreme fear = contrarian bullish. Hold above ATR stops.",
-      "entry_zone": "Already in (Bold: $74,556)",
-      "target": "$85,000 (checkpoint)",
-      "stop": "$73,990 (2x ATR)",
-      "confidence": 0.65
-    },
-    {
-      "instrument": "ETH-USD",
-      "direction": "LONG (hold)",
-      "rationale": "ETF inflows $187M/week rotating from BTC. Morgan Stanley ETH trust filing. On-chain +41% WoW. Approaching $2,500 prophecy checkpoint. BUT: consensus accuracy 47.7% \u2014 new penalty applied.",
-      "entry_zone": "Already in (Patient: $2,331, Bold: $2,319)",
-      "target": "$2,500 (prophecy checkpoint)",
-      "stop": "$2,297-$2,309 (ATR)",
-      "confidence": 0.55
-    },
-    {
       "instrument": "XAG-USD",
-      "direction": "LONG (watch)",
-      "rationale": "Supply deficit deepening. Broke $80. Mexico moratorium + China strategic + Fresnillo cut. If ceasefire fails Monday, metals spike. No position \u2014 wait for high-confidence entry.",
-      "entry_zone": "$78-79 pullback or $83 breakout confirmation",
-      "target": "$89 (short-term), $120 (prophecy)",
-      "stop": "$76",
-      "confidence": 0.6
+      "direction": "LONG",
+      "rationale": "Silver at $79.84, above key support ($77.50). 5th consecutive supply deficit. G/S ratio compression thesis intact. Algorithmic models forecast $88.92 by Apr 23. Wait for retest of $83 breakout level with volume.",
+      "entry_zone": "Breakout above $83.00 with RVOL > 1.5x",
+      "target": "$88-90 (first), $100+ (extended)",
+      "stop": "Below $77.50 (pivot support)",
+      "confidence": 0.55,
+      "timeframe": "swing (1-5 days)"
+    },
+    {
+      "instrument": "XAU-USD",
+      "direction": "LONG",
+      "rationale": "ATH territory, 9B/0S consensus (strongest signal today). JPM target $5,055 Q4. Central bank buying unabated. COT increasingly bullish. Safe-haven bid from Iran crisis.",
+      "entry_zone": "Pullback to $4,760-4,800 support zone",
+      "target": "$4,880 (immediate), $5,000+ (Q4)",
+      "stop": "Below $4,700",
+      "confidence": 0.65,
+      "timeframe": "swing (3-10 days)"
+    },
+    {
+      "instrument": "BTC-USD",
+      "direction": "LONG (conditional)",
+      "rationale": "On-chain healthy (MVRV 1.37, NUPL 0.65 belief). ETF inflows $18.7B YTD. MSTR accumulating aggressively. Fear at 29 (contrarian bullish). Post-halving cycle says Q2 is breakout window. BUT: needs $77.5K confirmation.",
+      "entry_zone": "Break and close above $77,500",
+      "target": "$85,000 (next prophecy checkpoint)",
+      "stop": "Below $73,180 (200DMA zone)",
+      "confidence": 0.5,
+      "timeframe": "position (weeks)"
     }
   ],
-  "system_improvements_implemented": [
-    "Per-ticker consensus accuracy penalty (Stage 6): ETH-USD gets 0.608x confidence, MSTR 0.536x. Prevents acting on below-coinflip consensus.",
-    "7 new tests added for the penalty cascade."
+  "system_improvements_shipped": [
+    "Signal persistence filter: signals must persist 2+ consecutive cycles before vote counts (reduces noise flips)",
+    "ADX(14) regime detection: ADX < 20 forces 'ranging' — principled trend confirmation replaces pure EMA gap"
   ],
-  "system_improvements_proposed": [
-    "IC-based signal weighting (priority 1, 3 days) \u2014 replace binary accuracy gating with continuous IC",
-    "Regime-conditioned per-signal weights (priority 2, 5 days) \u2014 learn per-signal regime performance",
-    "mRMR signal correlation pruning (priority 3, 2 days) \u2014 identify truly independent signals",
-    "ATR volatility position sizing (priority 4, 2 days) \u2014 scale positions inversely with vol"
+  "system_improvements_deferred": [
+    "trend_direction cluster penalty adjustment (0.12x -> 0.10x) — low priority, existing penalty adequate",
+    "BBW volatility expansion — future session"
   ],
   "risk_warnings": [
-    "CRITICAL: US-Iran ceasefire expires Monday April 21. Binary event. If fails: oil $100+, BTC back to $70K, risk-off.",
-    "MSTR overextended +29% in 7 days \u2014 multi-TF SELL consensus. Not held, but proxy risk for BTC longs.",
-    "ETH/MSTR consensus accuracy below coinflip \u2014 system is net-negative on these tickers. New penalty mitigates but doesnt solve.",
-    "Earnings week: GOOGL + TSLA Apr 22, MSFT Apr 28, AMZN + META Apr 29, AAPL Apr 30.",
-    "F&G at 21 may be stale \u2014 crypto market recovered from 8 to 56 by Apr 16. Verify live reading Monday."
+    "CRITICAL: US-Iran ceasefire collapsing (Apr 20 ships seized). Oil spike risk = all-asset volatility.",
+    "KelpDAO $292M exploit (Apr 19-20): DeFi TVL -$6.4B. AAVE frozen. Further ETH contagion possible.",
+    "Easter Monday: thin liquidity in European metals. Amplified moves possible.",
+    "ETH ETF outflows: 5th consecutive month. Structural selling pressure on ETH.",
+    "System has been HOLD for 20 consecutive sessions \u2014 appropriate for ranging/low-conviction."
   ],
   "research_highlights": [
-    "Signal accuracy regime shift: fear_greed crashed 58.6% to 25.9% at 1d, fibonacci surged 42.5% to 68.2%. Ranging market rewards pattern/mean-reversion, punishes macro.",
-    "Correlation cluster already handled: calendar/macro_regime/structure/momentum_factors at 0.12x penalty. Architecture is correct.",
-    "Gold NOT selling on peace news = structural bid from central banks. Very bullish signal.",
-    "BTC whale wallets accumulated 270K BTC in 30 days (largest since 2013). Exchange reserves at 7-year low.",
-    "Silver supply: 6th consecutive deficit year. Fresnillo cut guidance 9%. Mexico moratorium. China classified silver as strategic.",
-    "Per-ticker deep dives: XAG G/S ratio mean-reversion has Sharpe 0.68-0.73. BTC MVRV Z-Score at 1.2 = accumulation zone.",
-    "LLM signals (Ministral 62-68%, Qwen3 60-62%) consistently outperforming traditional technical indicators."
+    "Hybrid AI trading systems (XGBoost+FinBERT+regime) achieving 67% vs 54% baseline (ComSIA 2026)",
+    "IC-based weighting identifies phantom performers (calendar 58% acc but IC=0.000)",
+    "TradingAgents v0.2.0: multi-agent bull/bear debate now supports Claude 4.x",
+    "Signal correlation audit: system already handles via 6 cluster groups with 0.10-0.30x penalties",
+    "Trend signal paradox: 40.3% all-time 3h but 61.6% RECENT 3h \u2014 regime-dependent recovery"
   ]
 }
