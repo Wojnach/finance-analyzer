@@ -1077,7 +1077,9 @@ _STATIC_CORRELATION_GROUPS = {
     # volatility_sig only weakly correlates with volume (r=0.38). Oscillators
     # moved to trend_direction (0.463 with heikin_ashi, 83.4% agreement).
     # Structure moved to trend_direction (0.608 with trend, 96.5% with macro_regime).
-    "volatility_cluster": frozenset({"volatility_sig", "volume"}),
+    # RES-2026-04-21: REMOVED volatility_cluster. r=0.38 is too weak for a
+    # correlation group. volume (52.1% acc) was unfairly penalized by
+    # volatility_sig (46.8% acc). Let both vote independently.
     # 2026-04-14: Mega trend cluster. Measured correlations: trend+macro_regime
     # r=0.730 (99.7% agree), trend+structure r=0.608 (90.7%), trend+momentum_factors
     # r=0.593 (90.4%), trend+heikin_ashi r=0.587 (85.4%), oscillators+heikin_ashi
@@ -2117,16 +2119,19 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
     # RES-2026-04-17: The consensus system has below-coinflip accuracy for some
     # tickers (ETH-USD 47.7% at 3h, MSTR 45.9%). When this happens, the ensemble
     # is net-negative — acting on its signals loses money. Apply a confidence
-    # penalty proportional to how far below 50% the consensus accuracy is.
+    # penalty proportional to how far below 52% the consensus accuracy is.
     # Don't force HOLD (too aggressive) — just reduce confidence.
+    # RES-2026-04-21: Raised threshold 0.50→0.52 to catch coin-flip tickers
+    # (XAG-USD 50.0%, XAU-USD 49.6% were getting zero penalty). Steepened
+    # the curve and lowered floor (0.3→0.2) for truly broken instruments.
     _PTC_MIN_SAMPLES = 500
-    _PTC_PENALTY_THRESHOLD = 0.50
+    _PTC_PENALTY_THRESHOLD = 0.52
     if action != "HOLD":
         ptc_acc = extra_info.get("_ptc_accuracy")
         ptc_samples = extra_info.get("_ptc_samples", 0)
         if ptc_acc is not None and ptc_samples >= _PTC_MIN_SAMPLES and ptc_acc < _PTC_PENALTY_THRESHOLD:
-            # Scale penalty: 50% acc → 0.7x, 45% acc → 0.5x, 40% acc → 0.3x
-            ptc_mult = max(0.3, 0.7 + (ptc_acc - _PTC_PENALTY_THRESHOLD) * 4.0)
+            # Scale penalty: 52% acc → 0.6x, 50% acc → 0.52x, 48% acc → 0.44x, 40% acc → 0.2x
+            ptc_mult = max(0.2, 0.6 + (ptc_acc - _PTC_PENALTY_THRESHOLD) * 4.0)
             conf *= ptc_mult
             penalty_log.append({
                 "stage": "per_ticker_consensus",

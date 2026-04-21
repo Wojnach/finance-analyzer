@@ -38,19 +38,16 @@ class TestCorrelationGroups:
         assert "bb" in mc_group
         assert "momentum" in mc_group
 
-    def test_volatility_cluster_exists(self):
-        """volatility_cluster contains volatility_sig and volume.
+    def test_volatility_cluster_removed(self):
+        """volatility_cluster was dissolved (RES-2026-04-21).
 
-        2026-04-14: oscillators and structure moved to trend_direction based
-        on measured correlations (oscillators+heikin_ashi r=0.463, 83.4% agree;
-        structure+trend r=0.608, 96.5% agree with macro_regime).
+        volatility_sig and volume had only r=0.38 correlation — too weak
+        for a group. volume (52.1% acc) was unfairly penalized by
+        volatility_sig (46.8% acc). Both now vote independently.
         """
         from portfolio.signal_engine import CORRELATION_GROUPS
 
-        assert "volatility_cluster" in CORRELATION_GROUPS
-        vc_group = CORRELATION_GROUPS["volatility_cluster"]
-        assert "volatility_sig" in vc_group
-        assert "volume" in vc_group
+        assert "volatility_cluster" not in CORRELATION_GROUPS
 
     def test_trend_direction_expanded_members(self):
         """trend_direction should include momentum_factors, structure, oscillators.

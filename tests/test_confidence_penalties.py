@@ -743,7 +743,7 @@ class TestFullCascade:
 class TestPerTickerConsensusPenalty:
     """Tests for Stage 6: per-ticker consensus accuracy penalty."""
 
-    def test_penalty_applied_when_ptc_below_50pct(self):
+    def test_penalty_applied_when_ptc_below_52pct(self):
         """ETH-USD at 47.7% consensus accuracy should get penalized."""
         extra = _base_extra(voters=6, buy_count=4, sell_count=2,
                             _ptc_accuracy=0.477, _ptc_samples=3000)
@@ -754,10 +754,22 @@ class TestPerTickerConsensusPenalty:
         ptc_entries = [p for p in log if p["stage"] == "per_ticker_consensus"]
         assert len(ptc_entries) == 1
         assert ptc_entries[0]["ptc_accuracy"] == 0.477
-        # 0.7 + (0.477 - 0.50) * 4.0 = 0.7 - 0.092 = 0.608
-        assert abs(ptc_entries[0]["mult"] - 0.608) < 0.01
+        # 0.6 + (0.477 - 0.52) * 4.0 = 0.6 - 0.172 = 0.428
+        assert abs(ptc_entries[0]["mult"] - 0.428) < 0.01
 
-    def test_no_penalty_when_ptc_above_50pct(self):
+    def test_penalty_at_coin_flip_50pct(self):
+        """XAG-USD at exactly 50.0% should get penalized (raised threshold)."""
+        extra = _base_extra(voters=6, buy_count=4, sell_count=2,
+                            _ptc_accuracy=0.500, _ptc_samples=2000)
+        action, conf, log = apply_confidence_penalties(
+            "BUY", 0.8, "trending-up", {}, extra, "XAG-USD", None, {}
+        )
+        ptc_entries = [p for p in log if p["stage"] == "per_ticker_consensus"]
+        assert len(ptc_entries) == 1
+        # 0.6 + (0.500 - 0.52) * 4.0 = 0.6 - 0.08 = 0.52
+        assert abs(ptc_entries[0]["mult"] - 0.52) < 0.01
+
+    def test_no_penalty_when_ptc_above_52pct(self):
         """XAG-USD at 54.3% should NOT get penalized."""
         extra = _base_extra(voters=6, buy_count=4, sell_count=2,
                             _ptc_accuracy=0.543, _ptc_samples=2000)
@@ -786,8 +798,8 @@ class TestPerTickerConsensusPenalty:
         ptc_entries = [p for p in log if p["stage"] == "per_ticker_consensus"]
         assert len(ptc_entries) == 0
 
-    def test_penalty_floors_at_03(self):
-        """Very bad consensus (40%) should floor at 0.3x, not go lower."""
+    def test_penalty_floors_at_02(self):
+        """Very bad consensus (35%) should floor at 0.2x, not go lower."""
         extra = _base_extra(voters=6, buy_count=4, sell_count=2,
                             _ptc_accuracy=0.35, _ptc_samples=1000)
         action, conf, log = apply_confidence_penalties(
@@ -795,7 +807,7 @@ class TestPerTickerConsensusPenalty:
         )
         ptc_entries = [p for p in log if p["stage"] == "per_ticker_consensus"]
         assert len(ptc_entries) == 1
-        assert ptc_entries[0]["mult"] == 0.3
+        assert ptc_entries[0]["mult"] == 0.2
 
     def test_hold_skips_ptc_penalty(self):
         """HOLD action should bypass per-ticker penalty."""
@@ -816,5 +828,5 @@ class TestPerTickerConsensusPenalty:
         )
         ptc_entries = [p for p in log if p["stage"] == "per_ticker_consensus"]
         assert len(ptc_entries) == 1
-        # 0.7 + (0.459 - 0.50) * 4.0 = 0.7 - 0.164 = 0.536
-        assert abs(ptc_entries[0]["mult"] - 0.536) < 0.01
+        # 0.6 + (0.459 - 0.52) * 4.0 = 0.6 - 0.244 = 0.356
+        assert abs(ptc_entries[0]["mult"] - 0.356) < 0.01
