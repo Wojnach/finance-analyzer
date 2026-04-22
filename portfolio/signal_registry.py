@@ -207,6 +207,11 @@ def _register_defaults():
     # Inverts for safe havens (XAU, XAG): bullish equities = risk-on = SELL metals.
     register_enhanced("xtrend_equity_spillover", "portfolio.signals.xtrend_equity_spillover",
                       "compute_xtrend_equity_spillover_signal", requires_context=True, max_confidence=0.7)
+    # Complexity gap regime — RMT-based market structure/synchronization detector; capped at 0.7
+    # 2026-04-22: Mukhia et al. 2026, arXiv:2604.19107. Complexity gap = norm_max_eigenvalue -
+    # avg_pairwise_corr. Gap collapse = crisis synchronization. Inverts for safe havens.
+    register_enhanced("complexity_gap_regime", "portfolio.signals.complexity_gap_regime",
+                      "compute_complexity_gap_regime_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
