@@ -23,6 +23,7 @@ import logging
 import time
 from typing import Any
 
+from portfolio.file_utils import load_json
 from portfolio.signal_utils import majority_vote
 
 logger = logging.getLogger("portfolio.signals.credit_spread")
@@ -281,9 +282,7 @@ def compute_credit_spread_signal(
     # Also try loading from config.json directly as fallback
     if not fred_key:
         try:
-            import json
-            with open("config.json", encoding="utf-8") as f:
-                cfg = json.load(f)
+            cfg = load_json("config.json", default={}) or {}
             fred_key = cfg.get("golddigger", {}).get("fred_api_key", "") or ""
         except Exception:
             pass

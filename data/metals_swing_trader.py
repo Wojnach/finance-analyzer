@@ -593,11 +593,10 @@ def _send_telegram(msg):
     global _tg_config
     if _tg_config is None:
         try:
-            with open("config.json", encoding="utf-8") as f:
-                cfg = json.load(f)
+            cfg = load_json("config.json", default={}) or {}
             _tg_config = {
-                "token": cfg["telegram"]["token"],
-                "chat_id": cfg["telegram"]["chat_id"],
+                "token": cfg.get("telegram", {}).get("token", ""),
+                "chat_id": cfg.get("telegram", {}).get("chat_id", ""),
             }
         except Exception:
             logger.warning("[SWING] _send_telegram: config.json telegram block read failed, telegram disabled for this process", exc_info=True)
@@ -607,10 +606,9 @@ def _send_telegram(msg):
         _log("Telegram not configured")
         return
 
-    # Check mute_all from config
+    # Check mute_all from config (re-read each call to pick up runtime changes)
     try:
-        with open("config.json", encoding="utf-8") as f:
-            _mute = json.load(f).get("telegram", {}).get("mute_all", False)
+        _mute = (load_json("config.json", default={}) or {}).get("telegram", {}).get("mute_all", False)
         if _mute:
             _log(f"[TG muted] {msg[:80]}")
             return
