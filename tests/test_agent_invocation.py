@@ -963,3 +963,89 @@ class TestFishingContextFallback:
         # Should not raise
         ai._write_fishing_context({"tickers": {"BTC-USD": {}}})
         assert ai.INVOCATIONS_FILE.parent == ai.DATA_DIR
+
+
+# ---------------------------------------------------------------------------
+# BUG-219: _record_new_trades() — overtrading prevention wiring
+# ---------------------------------------------------------------------------
+
+class TestRecordNewTrades:
+    """Tests for _record_new_trades() which wires trade_guards.record_trade()
+    into the agent completion path (BUG-219 / PR-R4-4)."""
+
+    def _make_state(self, transactions):
+        """Helper: build a portfolio state dict with the given transactions."""
+        return {"cash": 500000, "transactions": transactions}
+
+    def test_records_new_buy_sell_transactions(self):
+        """New BUY/SELL transactions after invoke should call record_trade()."""
+        before_txns = [{"ticker": "BTC-USD", "action": "BUY", "price": 60000}]
+        after_txns = before_txns + [
+            {"ticker": "ETH-USD", "action": "SELL", "price": 3000},
+            {"ticker": "XAG-USD", "action": "BUY", "price": 30},
+        ]
+
+        ai._patient_txn_count_before = len(before_txns)
+        ai._bold_txn_count_before = 0  # bold has no new trades
+
+        with patch("portfolio.file_utils.load_json") as mock_load, \
+             patch("portfolio.trade_guards.record_trade") as mock_record:
+            mock_load.side_effect = lambda path, **kw: (
+                self._make_state(after_txns) if "portfolio_state.json" in str(path)
+                else self._make_state([])
+            )
+            ai._record_new_trades()
+
+        assert mock_record.call_count == 2
+        mock_record.assert_any_call("ETH-USD", "SELL", "patient")
+        mock_record.assert_any_call("XAG-USD", "BUY", "patient")
+
+    def test_skips_hold_and_malformed_transactions(self):
+        """Transactions without ticker or with non-BUY/SELL action are skipped."""
+        txns = [
+            {"ticker": "BTC-USD", "action": "HOLD"},
+            {"action": "BUY", "price": 100},  # missing ticker
+            {"ticker": "ETH-USD"},  # missing action
+        ]
+        ai._patient_txn_count_before = 0
+        ai._bold_txn_count_before = 0
+
+        with patch("portfolio.file_utils.load_json") as mock_load, \
+             patch("portfolio.trade_guards.record_trade") as mock_record:
+            mock_load.return_value = self._make_state(txns)
+            ai._record_new_trades()
+
+        mock_record.assert_not_called()
+
+    def test_no_new_transactions_is_noop(self):
+        """When transaction count hasn't changed, record_trade is not called."""
+        txns = [{"ticker": "BTC-USD", "action": "BUY", "price": 60000}]
+        ai._patient_txn_count_before = 1
+        ai._bold_txn_count_before = 1
+
+        with patch("portfolio.file_utils.load_json") as mock_load, \
+             patch("portfolio.trade_guards.record_trade") as mock_record:
+            mock_load.return_value = self._make_state(txns)
+            ai._record_new_trades()
+
+        mock_record.assert_not_called()
+
+    def test_exception_safety(self):
+        """record_trade() failure must not propagate — completion path stays safe."""
+        txns = [{"ticker": "BTC-USD", "action": "BUY", "price": 60000}]
+        ai._patient_txn_count_before = 0
+        ai._bold_txn_count_before = 0
+
+        with patch("portfolio.file_utils.load_json") as mock_load, \
+             patch("portfolio.trade_guards.record_trade", side_effect=RuntimeError("boom")):
+            mock_load.return_value = self._make_state(txns)
+            # Must not raise
+            ai._record_new_trades()
+
+    def test_load_json_failure_is_safe(self):
+        """If load_json itself fails, _record_new_trades swallows the error."""
+        ai._patient_txn_count_before = 0
+        ai._bold_txn_count_before = 0
+
+        with patch("portfolio.file_utils.load_json", side_effect=OSError("disk")):
+            ai._record_new_trades()  # must not raise

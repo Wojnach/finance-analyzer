@@ -49,6 +49,12 @@ _agent_reasons = None  # trigger reasons for the current invocation
 _journal_ts_before = None  # last journal timestamp before agent started
 _telegram_ts_before = None  # last telegram timestamp before agent started
 
+# BUG-219: Transaction counts at invoke time — used by check_agent_completion()
+# to detect new trades and call record_trade() for overtrading prevention.
+# PR-R4-4: record_trade() was never called from production code; this wires it.
+_patient_txn_count_before = 0
+_bold_txn_count_before = 0
+
 # Stack overflow detection — exit code 3221225794 = Windows STATUS_STACK_OVERFLOW (0xC00000FD)
 _STACK_OVERFLOW_EXIT_CODE = 3221225794
 _MAX_STACK_OVERFLOWS = 5  # auto-disable after this many consecutive stack overflow crashes
@@ -505,6 +511,20 @@ def invoke_agent(reasons, tier=3):
         _agent_reasons = list(reasons)
         _journal_ts_before = _safe_last_jsonl_ts(JOURNAL_FILE, "journal")
         _telegram_ts_before = _safe_last_jsonl_ts(TELEGRAM_FILE, "telegram")
+        # BUG-219: Snapshot transaction counts so check_agent_completion()
+        # can detect new trades and call record_trade().
+        global _patient_txn_count_before, _bold_txn_count_before
+        try:
+            from portfolio.file_utils import load_json
+            _patient_txn_count_before = len(
+                (load_json(PATIENT_PORTFOLIO, default={}) or {}).get("transactions", [])
+            )
+            _bold_txn_count_before = len(
+                (load_json(BOLD_PORTFOLIO, default={}) or {}).get("transactions", [])
+            )
+        except Exception:
+            _patient_txn_count_before = 0
+            _bold_txn_count_before = 0
         # 2026-04-17: Publish the tier into health_state so loop_contract
         # can pick the right per-tier grace window for the journal-activity
         # check. Without this, the contract defaults to T3 grace (20m),
@@ -671,6 +691,41 @@ def _write_fishing_context(journal_entry):
             pass  # last resort: can't even write neutral
 
 
+def _record_new_trades():
+    """BUG-219 / PR-R4-4: Check for new transactions since invoke_agent()
+    and call record_trade() for each, activating overtrading prevention.
+
+    Never raises — all errors are logged and swallowed so the completion
+    path is never broken by guard bookkeeping failures.
+    """
+    try:
+        from portfolio.file_utils import load_json
+        from portfolio.trade_guards import record_trade
+
+        for strategy, pf_path, count_before in [
+            ("patient", PATIENT_PORTFOLIO, _patient_txn_count_before),
+            ("bold", BOLD_PORTFOLIO, _bold_txn_count_before),
+        ]:
+            state = load_json(pf_path, default={}) or {}
+            txns = state.get("transactions", [])
+            if len(txns) <= count_before:
+                continue
+            # New transactions appeared — record each for guard tracking
+            new_txns = txns[count_before:]
+            for txn in new_txns:
+                ticker = txn.get("ticker")
+                direction = txn.get("action")
+                if not ticker or direction not in ("BUY", "SELL"):
+                    continue
+                record_trade(ticker, direction, strategy)
+                logger.info(
+                    "BUG-219: recorded %s %s %s for overtrading guards",
+                    strategy, direction, ticker,
+                )
+    except Exception as e:
+        logger.warning("BUG-219: record_trade wiring failed: %s", e)
+
+
 def check_agent_completion():
     """Check if a running agent has completed and log completion info.
 
@@ -830,6 +885,12 @@ def check_agent_completion():
             if new_journal_entry:
                 _write_fishing_context(new_journal_entry)
 
+    # BUG-219 / PR-R4-4: Wire record_trade() into production.
+    # After a successful agent run, check if new transactions appeared in
+    # either portfolio and record them for overtrading prevention guards
+    # (cooldowns, loss escalation, position rate limits).
+    _record_new_trades()
+
     logger.info(
         "Agent completed: status=%s exit=%d duration=%.1fs tier=%s journal=%s telegram=%s",
         status, exit_code, duration_s, _agent_tier, journal_written, telegram_sent,
@@ -893,6 +954,8 @@ def check_agent_completion():
     _agent_reasons = None
     _journal_ts_before = None
     _telegram_ts_before = None
+    _patient_txn_count_before = 0
+    _bold_txn_count_before = 0
 
     return result
 

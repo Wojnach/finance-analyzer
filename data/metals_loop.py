@@ -6729,7 +6729,7 @@ def invoke_claude(trigger_reasons, tier=2):
         cmd.extend(["--model", tier_cfg["model"]])
 
     try:
-        log_fh = open("data/metals_agent.log", "a", encoding="utf-8")
+        log_fh = open(DATA_DIR / "metals_agent.log", "a", encoding="utf-8")
         log_fh.write(f"\n{'='*60}\n")
         log_fh.write(f"Invocation #{invoke_count + 1} | T{tier} ({tier_label}) | "
                       f"{datetime.datetime.now().isoformat()}\n")
