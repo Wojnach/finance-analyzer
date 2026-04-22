@@ -348,6 +348,14 @@ class TestVoteCorrect:
         assert _vote_correct("BUY", 0.05) is True
         assert _vote_correct("BUY", 0.049) is None
 
+    def test_none_change_pct_is_neutral(self):
+        """Regression: 2026-04-22 — missing outcome backfill at 4h+ horizons
+        stored change_pct=None; abs(None) crashed --accuracy mid-report."""
+        from portfolio.accuracy_stats import _vote_correct
+        assert _vote_correct("BUY", None) is None
+        assert _vote_correct("SELL", None) is None
+        assert _vote_correct("BUY", None, min_change_pct=0.5) is None
+
 
 # ---------------------------------------------------------------------------
 # Core function: signal_accuracy

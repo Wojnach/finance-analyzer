@@ -380,6 +380,28 @@ class TestEdgeCases:
         result = simulate_all({"signals": {}, "fx_rate": 10.0}, n_paths=100)
         assert result == {}
 
+    def test_simulate_all_with_seed_none(self):
+        """Regression: 2026-04-22 — reporting.py calls simulate_all() without
+        a seed; `seed + i` was crashing every cycle and silently disabling MC
+        risk sim for all tickers."""
+        from portfolio.monte_carlo import simulate_all
+        summary = {
+            "signals": {
+                "BTC-USD": {
+                    "price_usd": 86000.0,
+                    "extra": {"atr_pct": 3.5, "_votes": {}},
+                    "regime": "ranging",
+                    "action": "BUY",
+                },
+            },
+            "fx_rate": 10.5,
+            "focus_tickers": ["BTC-USD"],
+        }
+        # seed omitted — must not raise TypeError
+        result = simulate_all(summary, n_paths=200)
+        assert "BTC-USD" in result
+        assert "price_bands_1d" in result["BTC-USD"]
+
     def test_focus_probabilities_used_for_drift(self):
         """When focus_probabilities present, they should drive drift."""
         from portfolio.monte_carlo import simulate_ticker

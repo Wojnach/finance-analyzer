@@ -370,3 +370,36 @@ class TestShouldBlockTrade:
 
     def test_missing_warnings_key_returns_false(self):
         assert should_block_trade({"summary": "All clear"}) is False
+
+
+# --- C4: Empty-state warning scoped to "wiring broken" case ---
+
+class TestC4Warning:
+    """Regression: 2026-04-22 — C4 fired every cycle on empty state even when
+    no trades had happened yet (portfolios untouched). Now only warns when
+    portfolios DO have transactions but guard state is still empty."""
+
+    def test_no_warning_when_no_transactions_and_no_state(
+        self, clean_state, caplog, tmp_path, monkeypatch,
+    ):
+        import logging
+        monkeypatch.setattr("portfolio.trade_guards.DATA_DIR", tmp_path)
+        with patch("portfolio.trade_guards.STATE_FILE", clean_state):
+            with caplog.at_level(logging.WARNING, logger="portfolio.trade_guards"):
+                get_all_guard_warnings({}, {}, {}, config={})
+        assert "NON-FUNCTIONAL" not in caplog.text
+
+    def test_warning_when_transactions_exist_but_state_empty(
+        self, clean_state, caplog, tmp_path, monkeypatch,
+    ):
+        import logging
+        monkeypatch.setattr("portfolio.trade_guards.DATA_DIR", tmp_path)
+        (tmp_path / "portfolio_state.json").write_text(
+            json.dumps({"transactions": [{"ticker": "BTC-USD", "action": "BUY"}]}),
+            encoding="utf-8",
+        )
+        with patch("portfolio.trade_guards.STATE_FILE", clean_state):
+            with caplog.at_level(logging.WARNING, logger="portfolio.trade_guards"):
+                get_all_guard_warnings({}, {}, {}, config={})
+        assert "NON-FUNCTIONAL" in caplog.text
+        assert "wiring appears broken" in caplog.text

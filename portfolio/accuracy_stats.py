@@ -106,8 +106,12 @@ def _vote_correct(vote, change_pct, min_change_pct=None):
     for or against the signal's accuracy.
     """
     threshold = min_change_pct if min_change_pct is not None else _MIN_CHANGE_PCT
-    if abs(change_pct) < threshold:
-        return None  # neutral — price didn't move enough to judge
+    # 2026-04-22: some outcome entries have change_pct=None (missing backfill
+    # data for 4h+ horizons). Treat as neutral instead of TypeErroring — was
+    # killing --accuracy report mid-horizon. Matches the None-guard pattern
+    # at accuracy_stats.py:1617 and in ic_computation / train_signal_weights.
+    if change_pct is None or abs(change_pct) < threshold:
+        return None  # neutral — price didn't move enough to judge (or unknown)
     if vote == "BUY" and change_pct > 0:
         return True
     return bool(vote == "SELL" and change_pct < 0)

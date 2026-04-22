@@ -42,6 +42,20 @@ def _save_state(state):
     atomic_write_json(STATE_FILE, state)
 
 
+def _portfolios_have_transactions():
+    """Return True if any portfolio file has at least one recorded transaction.
+
+    Used by the C4 sanity check to distinguish "no trades happened yet"
+    (quiet startup state) from "trades happened but weren't recorded"
+    (broken wiring — real bug).
+    """
+    for pf_name in ("portfolio_state.json", "portfolio_state_bold.json"):
+        pf = load_json(str(DATA_DIR / pf_name), default={})
+        if pf and pf.get("transactions"):
+            return True
+    return False
+
+
 def _get_cooldown_multiplier(consecutive_losses):
     """Get cooldown multiplier based on consecutive loss count."""
     if consecutive_losses >= 4:
@@ -275,15 +289,20 @@ def get_all_guard_warnings(signals, patient_pf, bold_pf, config=None):
         for guard, warns in by_guard.items():
             summary_parts.append(f"{guard}: {len(warns)} warning(s)")
 
-    # C4: Warn if guard state is empty — means record_trade() was never called.
-    # This indicates the entire guard system is non-functional.
+    # C4: Detect broken record_trade() wiring.
+    # 2026-04-22: original check fired every cycle whenever state was empty,
+    # even when no trades had happened yet (portfolios untouched) — noisy and
+    # misleading post-BUG-219/PR-R4-4 which wired _record_new_trades().
+    # Now only warn when portfolios DO have transactions but guard state is
+    # still empty — that's the real signal the wiring is broken.
     state = _load_state()
     if not state.get("ticker_trades") and all_warnings == []:
-        logger.warning(
-            "C4: trade_guard_state.json has no recorded trades — "
-            "record_trade() has likely never been called. "
-            "Overtrading guards are NON-FUNCTIONAL."
-        )
+        if _portfolios_have_transactions():
+            logger.warning(
+                "C4: portfolios have transactions but trade_guard_state.json "
+                "has no recorded trades — record_trade() wiring appears broken. "
+                "Overtrading guards are NON-FUNCTIONAL."
+            )
 
     return {
         "warnings": all_warnings,

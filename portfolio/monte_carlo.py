@@ -373,8 +373,12 @@ def simulate_all(agent_summary: dict, tickers: list[str] | None = None,
     results = {}
     for i, ticker in enumerate(tickers):
         try:
+            # 2026-04-22: guard seed=None. reporting.py calls simulate_all
+            # without a seed; `seed + i` was crashing every cycle with
+            # TypeError and silently disabling MC risk sim for all tickers.
+            ticker_seed = None if seed is None else seed + i
             result = simulate_ticker(ticker, agent_summary,
-                                     n_paths=n_paths, seed=seed + i)
+                                     n_paths=n_paths, seed=ticker_seed)
             if result:
                 results[ticker] = result
         except Exception:
