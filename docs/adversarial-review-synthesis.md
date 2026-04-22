@@ -4,15 +4,16 @@
 
 ## Executive Summary
 
-Two independent review passes across 8 subsystems found **52 confirmed P1/P2 findings** and
-**15 P3 quality issues**. The system is broadly well-engineered with extensive defensive coding,
+Two independent review passes across 8 subsystems found **59 confirmed P1/P2 findings** and
+**17 P3 quality issues**. The system is broadly well-engineered with extensive defensive coding,
 but several classes of bug recur across subsystems:
 
-1. **Silent data staleness** — Multiple paths fall back to stale data without logging (fx_rate=1.0, avg_cost_usd, stale VWAP, hardcoded econ dates)
-2. **Concurrency gaps** — Thread-safe caching is excellent in shared_state.py but several modules (trade_guards, health, reporting) lack locks on read-modify-write cycles
-3. **Gate/threshold inconsistency** — Constants that should be in sync aren't (ATR cap, fx_rate defaults, drawdown thresholds)
-4. **Signal computation errors** — Fibonacci extensions 10x too small, VWAP cumulative instead of session-based, volatility annualization wrong for equities
-5. **Avanza order safety** — CONFIRM flow lacks order-ID verification, account whitelist not enforced uniformly
+1. **Silent failures hidden by bare except** — The most severe finding: hardware trailing stops have NEVER been placed because `place_stop_loss()` returns a tuple but caller does `.get("status")` expecting a dict, caught by bare `except Exception`. Every buy since feature enabled has zero broker-level stop protection.
+2. **Silent data staleness** — Multiple paths fall back to stale data without logging (fx_rate=1.0, avg_cost_usd, stale VWAP, hardcoded econ dates)
+3. **Concurrency gaps** — Thread-safe caching is excellent in shared_state.py but several modules (trade_guards, health, reporting) lack locks on read-modify-write cycles
+4. **Gate/threshold inconsistency** — Constants that should be in sync aren't (ATR cap, fx_rate defaults, drawdown thresholds)
+5. **Signal computation errors** — Fibonacci extensions 10x too small, VWAP cumulative instead of session-based, volatility annualization wrong for equities
+6. **Avanza order safety** — CONFIRM flow lacks order-ID verification, account whitelist not enforced uniformly, emergency mode overfill
 
 ---
 
@@ -28,6 +29,10 @@ but several classes of bug recur across subsystems:
 | Alpha Vantage "Information" rate-limit body not detected | data-external | Didn't read AV response handling |
 | news_event "cut" keyword maps positive for "job cut" etc. | signals-modules | Didn't read keyword classification logic |
 | `log_rotation.py` no fsync before replace | infrastructure | Didn't read log rotation implementation |
+| **Hardware trailing stop NEVER placed** (tuple vs dict return) | metals-core | Didn't read metals_loop hardware trailing path |
+| Emergency mode places sell+stop for full volume simultaneously | metals-core | Didn't read fin_snipe_manager emergency logic |
+| Fish engine uses `now.hour` instead of CET-aware hour | metals-core | Didn't read fish engine tick path |
+| Exit optimizer defaults to 20% vol for 80-120% vol warrants | metals-core | Didn't read exit_optimizer defaults |
 | `cancel_order` missing account whitelist check | avanza-api | Didn't read cancel_order path |
 | `metals_avanza_helpers.place_order` no account whitelist | avanza-api | Didn't know about this file |
 | Layer 2 unconditionally skipped on weekends for crypto | orchestration | Knew about market timing but didn't trace the gate |
@@ -114,6 +119,18 @@ but several classes of bug recur across subsystems:
 **File:** `portfolio/log_rotation.py:242-249`
 **Impact:** Signal history JSONL (weeks of data) can be truncated/zeroed on crash during rotation.
 
+### P1-12: Hardware trailing stop NEVER placed — tuple/dict return type mismatch silently swallowed
+**Source:** Agent (metals-core)
+**File:** `data/metals_loop.py:4773-4802`
+**Impact:** `place_stop_loss()` returns `(bool, str)` tuple. Caller does `result.get("status")` expecting a dict. `AttributeError` caught by bare `except Exception`. **Every buy fill since HARDWARE_TRAILING_ENABLED was turned on has zero broker-level stop protection.** Additionally, `place_stop_loss` doesn't accept the `trigger_type`/`value_type` kwargs the caller passes — `TypeError` also caught silently.
+**Fix:** Use tuple unpacking `ok, stop_id = place_stop_loss(...)` and extend the helper signature or use a separate trailing-stop API call.
+
+### P1-13: Emergency mode places sell + stop simultaneously for full position volume — guaranteed Avanza rejection
+**Source:** Agent (metals-core)
+**File:** `portfolio/fin_snipe_manager.py:1149-1174`
+**Impact:** When both `sell_naked=True` and `stop_naked=True` (first cycle after buy fill), both legs bypass staging and are placed for `position_volume`. Total encumbered = 2x position → Avanza rejects with `short.sell.not.allowed`.
+**Fix:** Only allow one leg to bypass staging per cycle. Emergency sell takes precedence; emit stop one cycle later.
+
 ---
 
 ## Consolidated P2 Findings (Important)
@@ -152,13 +169,17 @@ but several classes of bug recur across subsystems:
 
 ## Priority Remediation Plan
 
+### Tier 0 — Fix TODAY (actively losing money / unprotected positions)
+1. **P1-12** Hardware trailing stop never placed (tuple/dict mismatch) — **POSITIONS HAVE NO STOPS**
+2. **P1-13** Emergency mode overfill — sell + stop both for full volume simultaneously
+
 ### Tier 1 — Fix this week (P1 with direct trading impact)
-1. **P1-01** Fibonacci extensions (one-line fix, high impact)
-2. **P1-02** Wire pnl_pct to record_trade (one-line fix, enables loss escalation)
-3. **P1-08** Route Avanza CONFIRM through session path with safety guards
-4. **P1-09** Add account whitelist to metals_avanza_helpers
-5. **P1-06** Guard fear_greed empty response
-6. **P1-07** Add raise_for_status to Alpha Vantage
+3. **P1-01** Fibonacci extensions (one-line fix, high impact)
+4. **P1-02** Wire pnl_pct to record_trade (one-line fix, enables loss escalation)
+5. **P1-08** Route Avanza CONFIRM through session path with safety guards
+6. **P1-09** Add account whitelist to metals_avanza_helpers
+7. **P1-06** Guard fear_greed empty response
+8. **P1-07** Add raise_for_status to Alpha Vantage
 
 ### Tier 2 — Fix within 2 weeks (P1 infrastructure + P2 high-impact)
 7. **P1-10** Fix health.py invocation timestamp source
@@ -182,11 +203,12 @@ but several classes of bug recur across subsystems:
 | Agent: signals-core | 5 | 5 | 3 | 13 |
 | Agent: orchestration | 1 | 7 | 5 | 13 |
 | Agent: portfolio-risk | 3 | 7 | 3 | 13 |
+| Agent: metals-core | 2 | 5 | 2 | 9 |
 | Agent: avanza-api | 3 | 5 | 0 | 8 |
 | Agent: signals-modules | 3 | 8 | 4 | 15 |
 | Agent: data-external | 5 | 6 | 3 | 14 |
 | Agent: infrastructure | 3 | 6 | 2 | 11 |
-| **Deduplicated total** | **11** | **27** | **15** | **53** |
+| **Deduplicated total** | **13** | **32** | **17** | **62** |
 
 ---
 
