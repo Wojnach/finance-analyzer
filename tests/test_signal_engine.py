@@ -995,3 +995,53 @@ class TestCrisisModeConditionalTrendPenalty:
         action, conf = _weighted_consensus(votes, accuracy, "unknown")
         # MR should win since trend is penalized and MR is boosted
         assert action == "SELL"
+
+
+# ---------------------------------------------------------------------------
+# _persistence_state bounds (memory leak fix)
+# ---------------------------------------------------------------------------
+
+class TestPersistenceStateBounds:
+    """Verify _persistence_state dict is bounded by _PERSISTENCE_MAX_TICKERS."""
+
+    def test_dict_bounded_at_cap(self):
+        from portfolio.signal_engine import (
+            _apply_persistence_filter,
+            _PERSISTENCE_MAX_TICKERS,
+            _persistence_state,
+            _persistence_lock,
+        )
+        # Clear state and fill to cap with unique tickers
+        with _persistence_lock:
+            _persistence_state.clear()
+
+        votes = {"ema": "BUY", "rsi": "SELL"}
+        for i in range(_PERSISTENCE_MAX_TICKERS + 10):
+            _apply_persistence_filter(votes, f"TICKER-{i}")
+
+        with _persistence_lock:
+            assert len(_persistence_state) <= _PERSISTENCE_MAX_TICKERS
+            _persistence_state.clear()
+
+    def test_eviction_preserves_recent_tickers(self):
+        from portfolio.signal_engine import (
+            _apply_persistence_filter,
+            _PERSISTENCE_MAX_TICKERS,
+            _persistence_state,
+            _persistence_lock,
+        )
+        with _persistence_lock:
+            _persistence_state.clear()
+
+        votes = {"ema": "BUY"}
+        # Fill exactly to cap
+        for i in range(_PERSISTENCE_MAX_TICKERS):
+            _apply_persistence_filter(votes, f"T-{i}")
+        # Add one more — should trigger eviction
+        _apply_persistence_filter(votes, "T-NEWEST")
+
+        with _persistence_lock:
+            assert "T-NEWEST" in _persistence_state
+            # Oldest half should be evicted
+            assert "T-0" not in _persistence_state
+            _persistence_state.clear()
