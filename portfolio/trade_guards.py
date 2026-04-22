@@ -48,8 +48,16 @@ def _portfolios_have_transactions():
     Used by the C4 sanity check to distinguish "no trades happened yet"
     (quiet startup state) from "trades happened but weren't recorded"
     (broken wiring — real bug).
+
+    2026-04-22 follow-up: include warrants portfolio — CLAUDE.md lists it as
+    an independent strategy state file, and warrants-only activity would
+    have left C4 silent forever.
     """
-    for pf_name in ("portfolio_state.json", "portfolio_state_bold.json"):
+    for pf_name in (
+        "portfolio_state.json",
+        "portfolio_state_bold.json",
+        "portfolio_state_warrants.json",
+    ):
         pf = load_json(str(DATA_DIR / pf_name), default={})
         if pf and pf.get("transactions"):
             return True
@@ -188,6 +196,9 @@ def check_overtrading_guards(ticker, action, strategy, portfolio, config=None):
     return warnings
 
 
+_wiring_confirmed = False  # process-scoped flag — positive proof for C4
+
+
 def record_trade(ticker, direction, strategy, pnl_pct=None, config=None):
     """Record a completed trade for guard tracking.
 
@@ -200,6 +211,21 @@ def record_trade(ticker, direction, strategy, pnl_pct=None, config=None):
         pnl_pct: Realized P&L percentage (for SELL trades). None for BUY.
         config: Optional config dict.
     """
+    # 2026-04-22 follow-up: positive-proof wiring check. The previous C4
+    # warning was *reactive* — it could only tell you after a trade had
+    # already slipped through unguarded. Log INFO once per process the first
+    # time this function fires, so operators get explicit confirmation the
+    # BUG-219/PR-R4-4 wiring is alive rather than having to infer it from
+    # absence-of-warnings.
+    global _wiring_confirmed
+    if not _wiring_confirmed:
+        logger.info(
+            "C4: record_trade() wiring confirmed — first call this process "
+            "(ticker=%s direction=%s strategy=%s)",
+            ticker, direction, strategy,
+        )
+        _wiring_confirmed = True
+
     state = _load_state()
     now = datetime.now(UTC)
     now_str = now.isoformat()

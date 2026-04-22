@@ -22,6 +22,49 @@ COMPACT_SUMMARY_FILE = DATA_DIR / "agent_summary_compact.json"
 TIER1_FILE = DATA_DIR / "agent_context_t1.json"
 TIER2_FILE = DATA_DIR / "agent_context_t2.json"
 
+# 2026-04-22: escalate persistent silent failures to critical_errors.jsonl.
+# The MC seed=None bug survived weeks undetected because reporting.py's bare
+# `except Exception → logger.warning` suppressed it below the radar. Track
+# consecutive failures per module and escalate once when the streak crosses
+# _FAILURE_STREAK_THRESHOLD, so the CLAUDE.md startup check surfaces the
+# pattern instead of operators needing to grep log tails.
+_module_failure_streaks: dict[str, int] = {}
+_module_escalated: set[str] = set()
+_FAILURE_STREAK_THRESHOLD = 10  # ~10 minutes at 60s cycles
+
+
+def _track_module_outcome(name: str, ok: bool, exc: BaseException | None = None) -> None:
+    """Track consecutive failures for a reporting submodule. Escalate once
+    per streak when the threshold is crossed. Resets on success."""
+    if ok:
+        _module_failure_streaks.pop(name, None)
+        _module_escalated.discard(name)
+        return
+    streak = _module_failure_streaks.get(name, 0) + 1
+    _module_failure_streaks[name] = streak
+    if streak >= _FAILURE_STREAK_THRESHOLD and name not in _module_escalated:
+        _module_escalated.add(name)
+        try:
+            from portfolio.claude_gate import record_critical_error
+            record_critical_error(
+                category="reporting_module_failure_streak",
+                caller=f"reporting.{name}",
+                message=(
+                    f"reporting.{name} has failed {streak} consecutive cycles. "
+                    "This module's bare-except was silently suppressing errors "
+                    "below the radar — investigate and append a resolution."
+                ),
+                context={
+                    "module": name,
+                    "streak": streak,
+                    "threshold": _FAILURE_STREAK_THRESHOLD,
+                    "last_exception_type": type(exc).__name__ if exc else None,
+                    "last_exception_str": str(exc)[:500] if exc else None,
+                },
+            )
+        except Exception as e:
+            logger.error("Failed to escalate %s failure streak: %s", name, e)
+
 # Extra keys to preserve per-ticker in compact/tiered summaries.
 # Defined once to prevent drift between _write_compact_summary and _write_tier2_summary.
 _KEEP_EXTRA_FULL = frozenset({
@@ -436,9 +479,11 @@ def write_agent_summary(
                         mc_var[label] = var_result
             if mc_var:
                 summary["portfolio_var"] = mc_var
-    except Exception:
+        _track_module_outcome("monte_carlo", ok=True)
+    except Exception as e:
         logger.warning("[reporting] monte_carlo failed", exc_info=True)
         _module_warnings.append("monte_carlo")
+        _track_module_outcome("monte_carlo", ok=False, exc=e)
 
     # Price targets for held positions and BUY-consensus tickers
     try:

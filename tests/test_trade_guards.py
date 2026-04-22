@@ -403,3 +403,48 @@ class TestC4Warning:
                 get_all_guard_warnings({}, {}, {}, config={})
         assert "NON-FUNCTIONAL" in caplog.text
         assert "wiring appears broken" in caplog.text
+
+    def test_warning_fires_when_only_warrants_has_transactions(
+        self, clean_state, caplog, tmp_path, monkeypatch,
+    ):
+        """Regression: 2026-04-22 follow-up — review flagged that warrants
+        portfolio was excluded, leaving C4 silent if warrants was the only
+        trading strategy."""
+        import logging
+        monkeypatch.setattr("portfolio.trade_guards.DATA_DIR", tmp_path)
+        (tmp_path / "portfolio_state_warrants.json").write_text(
+            json.dumps({"transactions": [{"ticker": "XBT-TRACKER", "action": "BUY"}]}),
+            encoding="utf-8",
+        )
+        with patch("portfolio.trade_guards.STATE_FILE", clean_state):
+            with caplog.at_level(logging.WARNING, logger="portfolio.trade_guards"):
+                get_all_guard_warnings({}, {}, {}, config={})
+        assert "NON-FUNCTIONAL" in caplog.text
+
+
+# --- C4: Positive-proof wiring heartbeat ---
+
+class TestRecordTradeWiringHeartbeat:
+    """Regression: 2026-04-22 follow-up — on first record_trade() call in a
+    process, log INFO confirming the wiring is alive. Gives operators
+    positive proof instead of absence-of-warning inference."""
+
+    def test_first_call_logs_wiring_confirmed(self, clean_state, caplog):
+        import logging
+        import portfolio.trade_guards as tg
+        tg._wiring_confirmed = False  # reset module flag for test
+        with patch("portfolio.trade_guards.STATE_FILE", clean_state):
+            with caplog.at_level(logging.INFO, logger="portfolio.trade_guards"):
+                record_trade("BTC-USD", "BUY", "patient")
+        assert "wiring confirmed" in caplog.text
+
+    def test_subsequent_calls_dont_relog(self, clean_state, caplog):
+        import logging
+        import portfolio.trade_guards as tg
+        tg._wiring_confirmed = False
+        with patch("portfolio.trade_guards.STATE_FILE", clean_state):
+            record_trade("BTC-USD", "BUY", "patient")  # triggers the one-shot log
+            caplog.clear()
+            with caplog.at_level(logging.INFO, logger="portfolio.trade_guards"):
+                record_trade("ETH-USD", "BUY", "bold")
+        assert "wiring confirmed" not in caplog.text

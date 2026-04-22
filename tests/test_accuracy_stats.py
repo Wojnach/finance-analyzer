@@ -356,6 +356,22 @@ class TestVoteCorrect:
         assert _vote_correct("SELL", None) is None
         assert _vote_correct("BUY", None, min_change_pct=0.5) is None
 
+    def test_signal_accuracy_logs_null_skip_count(self, caplog):
+        """Regression: 2026-04-22 follow-up — silently dropping NULL outcomes
+        would let an outcome_tracker data-quality regression go unnoticed.
+        When any NULLs are encountered, log the count so drift is visible."""
+        import logging
+        from portfolio.accuracy_stats import signal_accuracy
+        entries = [
+            _make_entry("BTC-USD", "rsi", "BUY", 2.5),
+            _make_entry("ETH-USD", "rsi", "BUY", None),
+            _make_entry("XAU-USD", "rsi", "SELL", None),
+        ]
+        with caplog.at_level(logging.INFO, logger="portfolio.accuracy_stats"):
+            signal_accuracy(horizon="1d", entries=entries)
+        assert "change_pct=None" in caplog.text
+        assert "skipped 2/3" in caplog.text
+
 
 # ---------------------------------------------------------------------------
 # Core function: signal_accuracy

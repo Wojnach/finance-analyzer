@@ -134,6 +134,12 @@ def signal_accuracy(horizon="1d", since=None, entries=None):
     stats = {s: {"correct": 0, "total": 0,
                  "correct_buy": 0, "total_buy": 0,
                  "correct_sell": 0, "total_sell": 0} for s in SIGNAL_NAMES}
+    # 2026-04-22 follow-up: count outcomes we skip because change_pct is None.
+    # Previously these crashed the report; now they're silently dropped, which
+    # would let a data-quality regression (e.g. outcome_tracker writing nulls)
+    # go unnoticed. Surface the count so operators see drift.
+    null_change_pct_skipped = 0
+    total_outcomes_seen = 0
 
     for entry in entries:
         if since and entry.get("ts", "") < since:
@@ -145,8 +151,11 @@ def signal_accuracy(horizon="1d", since=None, entries=None):
             outcome = outcomes.get(ticker, {}).get(horizon)
             if not outcome:
                 continue
+            total_outcomes_seen += 1
 
             change_pct = outcome.get("change_pct", 0)
+            if change_pct is None:
+                null_change_pct_skipped += 1
             signals = tdata.get("signals", {})
 
             for sig_name in SIGNAL_NAMES:
@@ -167,6 +176,14 @@ def signal_accuracy(horizon="1d", since=None, entries=None):
                         stats[sig_name]["correct_sell"] += 1
                 if result_val:
                     stats[sig_name]["correct"] += 1
+
+    if null_change_pct_skipped > 0:
+        pct = 100.0 * null_change_pct_skipped / total_outcomes_seen
+        logger.info(
+            "signal_accuracy[%s]: skipped %d/%d outcomes (%.2f%%) with "
+            "change_pct=None — check outcome_tracker / signal_db backfill",
+            horizon, null_change_pct_skipped, total_outcomes_seen, pct,
+        )
 
     result = {}
     for sig_name in SIGNAL_NAMES:

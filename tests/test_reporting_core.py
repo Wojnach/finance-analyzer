@@ -1234,3 +1234,55 @@ class TestGetHeldTickers:
             ss._run_cycle_id = old_cycle
 
         assert "BTC-USD" not in result
+
+
+# ---------------------------------------------------------------------------
+# Failure-streak escalation (2026-04-22 follow-up)
+# ---------------------------------------------------------------------------
+
+class TestModuleFailureStreak:
+    """Regression: 2026-04-22 follow-up — reporting.py's bare-except pattern
+    suppressed the MC seed=None bug for weeks. Now track streaks and escalate
+    to critical_errors.jsonl after N consecutive failures."""
+
+    def _reset(self):
+        import portfolio.reporting as rp
+        rp._module_failure_streaks.clear()
+        rp._module_escalated.clear()
+
+    def test_success_resets_streak(self):
+        from portfolio.reporting import _module_failure_streaks, _track_module_outcome
+        self._reset()
+        _track_module_outcome("monte_carlo", ok=False, exc=ValueError("x"))
+        _track_module_outcome("monte_carlo", ok=False, exc=ValueError("x"))
+        assert _module_failure_streaks.get("monte_carlo") == 2
+        _track_module_outcome("monte_carlo", ok=True)
+        assert "monte_carlo" not in _module_failure_streaks
+
+    def test_escalates_once_at_threshold(self):
+        from portfolio.reporting import _FAILURE_STREAK_THRESHOLD, _track_module_outcome
+        self._reset()
+        calls = []
+        with patch("portfolio.claude_gate.record_critical_error",
+                   side_effect=lambda **kw: calls.append(kw)):
+            for _ in range(_FAILURE_STREAK_THRESHOLD + 3):
+                _track_module_outcome("monte_carlo", ok=False, exc=TypeError("None + int"))
+        assert len(calls) == 1
+        assert calls[0]["category"] == "reporting_module_failure_streak"
+        assert calls[0]["caller"] == "reporting.monte_carlo"
+        assert calls[0]["context"]["last_exception_type"] == "TypeError"
+
+    def test_re_escalates_after_recovery_then_fail(self):
+        """Once the module recovers, a fresh streak should be able to
+        escalate again if it re-breaks."""
+        from portfolio.reporting import _FAILURE_STREAK_THRESHOLD, _track_module_outcome
+        self._reset()
+        calls = []
+        with patch("portfolio.claude_gate.record_critical_error",
+                   side_effect=lambda **kw: calls.append(kw)):
+            for _ in range(_FAILURE_STREAK_THRESHOLD):
+                _track_module_outcome("monte_carlo", ok=False, exc=ValueError("x"))
+            _track_module_outcome("monte_carlo", ok=True)
+            for _ in range(_FAILURE_STREAK_THRESHOLD):
+                _track_module_outcome("monte_carlo", ok=False, exc=ValueError("y"))
+        assert len(calls) == 2
