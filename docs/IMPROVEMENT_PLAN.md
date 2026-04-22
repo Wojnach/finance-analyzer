@@ -1,151 +1,131 @@
-# Improvement Plan — Auto Session 2026-04-21
+# Improvement Plan — Auto Session 2026-04-22
 
-Based on deep exploration by 4 parallel agents (signals, metals, infrastructure, tests) plus
-the 2026-04-20 dual adversarial review (118 findings, 27 P1).
+Based on exploration by 4 parallel agents (signals, portfolio/trading, infrastructure, metals/tests)
+plus synthesis of findings from 4 consecutive adversarial reviews (Rounds 1-4).
 
 ## Exploration Summary
 
-- **Signal system**: Persistence filter cold-start bug (cycles=2 instead of 1), duplicate ADX implementations
-- **Metals subsystem**: `_execute_sell` exception can orphan Avanza positions, warrant trailing never disarms
-- **Infrastructure**: `_RateLimiter.wait()` sleeps inside lock (thread bottleneck), `_fx_cache` no thread lock, `_loading_timestamps` leak on success path, `journal.py` non-atomic write
-- **Tests**: Persistence filter UNTESTED, ADX has only 2 regime tests
-- **Adversarial review (3rd consecutive)**: Drawdown circuit breaker still dead code, no OHLCV price validation, dashboard timing attack, telegram poller config wipe, no max order size
+### Signal Engine (3,225 LOC)
+- Operator precedence in `accuracy_stats.py:344` — correct by Python rules but needs explicit parens
+- `_persistence_state` dict unbounded — memory leak for test/removed tickers
+- 15/48 signals disabled pending validation (39% unvalidated code)
+
+### Portfolio/Trading
+- **CRITICAL (5th consecutive review)**: `record_trade()` in trade_guards.py has ZERO production callers
+  - Overtrading prevention (cooldowns, loss escalation, rate limits) disconnected
+  - Guards read state that is never populated — entire subsystem is paper-only
+- Most prior review bugs (BUG-209 through BUG-218) confirmed fixed
+
+### Infrastructure
+- Rate limiter lacks jitter — synchronized wake under sustained load
+- health_lock held during disk write — can block on antivirus
+- yfinance_lock acquired at wrong level in data_collector.py
+
+### Metals/Raw I/O
+- Raw `open()` violations persist in 4 files (5th consecutive review):
+  - `data/metals_swing_trader.py:596,612` — config.json read
+  - `data/metals_loop.py:6732` — log file append
+  - `portfolio/signals/credit_spread.py:285` — config.json read
 
 ---
 
-## Batch 1: Safety-Critical Core (5 files, ~60 lines)
+## Batch 1: Overtrading Prevention Wiring (CRITICAL — 3 files, ~40 lines)
 
-### 1.1 indicators.py — OHLCV zero/negative price validation (P1, 3rd review)
-**File:** `portfolio/indicators.py`, after line 37
-**Problem:** NaN was fixed (BUG-87) but zero and negative prices propagate unchecked through all 33 signals. A single zero-price candle produces RSI=50, MACD=0, ATR=0 — poisoning consensus.
-**Fix:** After the NaN guards (line 37), add: if any close values are ≤0, log WARNING and return None.
-**Impact:** Prevents signal poisoning during Binance maintenance or API glitches.
-**Risk:** LOW — rejects bad data early, same pattern as existing NaN guard.
+### 1.1 Wire `record_trade()` into journal parsing path
 
-### 1.2 dashboard/app.py — Timing-safe token comparison (P1, 3rd review)
-**File:** `dashboard/app.py`, lines 675 and 682
-**Problem:** `token == expected` is vulnerable to timing attacks. Combined with wildcard CORS, token is brute-forceable from LAN.
-**Fix:** Replace `==` with `hmac.compare_digest()` (2 lines).
-**Impact:** Prevents timing-based token extraction.
-**Risk:** VERY LOW — drop-in replacement, same semantics.
+**Files:** `portfolio/agent_invocation.py`
+**Problem:** `trade_guards.record_trade()` is never called from production code. The entire
+overtrading prevention system (ticker cooldowns, consecutive-loss escalation, position rate
+limits) is dead. This has been flagged in 5 consecutive adversarial reviews (C6, PR-R4-4).
 
-### 1.3 telegram_poller.py — Config wipe guard (P1)
-**File:** `portfolio/telegram_poller.py`, lines 198-208
-**Problem:** If config.json is momentarily unreadable, `cfg = {}`, then `atomic_write_json` overwrites with nearly-empty config. All API keys destroyed.
-**Fix:** After loading cfg, guard: `if len(cfg) < 5: logger.error(...); return`. Refuse to write suspiciously small configs.
-**Impact:** Prevents catastrophic config loss from transient file access issues.
-**Risk:** VERY LOW — only affects the write path, adds a guard.
+**Fix:** In `check_agent_completion()`, after successfully parsing a journal entry that contains
+a BUY or SELL decision, call `record_trade()` with the relevant ticker, direction, strategy,
+and P&L data. The journal entry already contains all needed fields.
 
-### 1.4 avanza_session.py — Maximum order size limit (P1)
-**File:** `portfolio/avanza_session.py`, line 592 (after minimum check)
-**Problem:** Minimum 1000 SEK enforced, no maximum. A malformed call could commit entire account in one trade.
-**Fix:** Add `MAX_ORDER_TOTAL_SEK = 50_000` constant and guard: `if order_total > MAX_ORDER_TOTAL_SEK: raise ValueError(...)`. 50K is ~25% of a 200K ISK account, generous enough for metals warrants but prevents full-account bets.
-**Impact:** Prevents total account exposure from single bug.
-**Risk:** LOW — only affects order placement. May need adjustment if user wants larger single trades.
+**Impact:** Activates the entire overtrading prevention subsystem for the first time.
+**Risk:** MEDIUM — adds a new call on the completion path. If record_trade() raises, it must
+be wrapped in try/except to avoid breaking the completion flow.
 
-### 1.5 shared_state.py — Rate limiter sleep-outside-lock + _loading_timestamps leak (P2)
-**File:** `portfolio/shared_state.py`
-**Problem A (line 255-262):** `_RateLimiter.wait()` sleeps while holding `self._lock`. With 8-worker ThreadPoolExecutor, all threads serialize on the same rate limiter.
-**Fix:** Calculate wait time inside lock, release lock, sleep, re-acquire to update `last_call`.
-**Problem B (line 96):** `_cached()` success path pops `_loading_keys` but not `_loading_timestamps`. Keys leak until 120s eviction.
-**Fix:** Add `_loading_timestamps.pop(key, None)` on success path.
-**Impact:** (A) Reduces thread contention; (B) Prevents memory leak of timestamps.
-**Risk:** LOW — (A) changes timing slightly but preserves rate-limiting semantics; (B) cleanup only.
+### 1.2 Add guard warnings to agent prompt context
+
+**File:** `portfolio/agent_invocation.py`
+**Problem:** Even with record_trade() wired in, Layer 2 never sees guard warnings because
+`get_all_guard_warnings()` isn't called in the prompt-building path.
+
+**Fix:** Call `get_all_guard_warnings()` in the T2/T3 prompt builder and include any blocking
+warnings in the agent context.
+
+**Impact:** Layer 2 makes informed decisions about cooldowns and rate limits.
+**Risk:** LOW — additive only, doesn't change trading logic.
 
 ---
 
-## Batch 2: Drawdown Circuit Breaker + I/O Safety (5 files, ~50 lines)
+## Batch 2: Raw I/O Safety (4 files, ~25 lines)
 
-### 2.1 agent_invocation.py — Wire check_drawdown() into production (P1, 3rd review)
-**File:** `portfolio/agent_invocation.py`, in `invoke_agent()` before prompt building
-**Problem:** `check_drawdown()` has 16 passing tests but zero production callers. No automated risk enforcement on the primary trading path.
-**Fix:** Call `check_drawdown()` for both Patient and Bold portfolios before invoking Layer 2. Include drawdown data in the agent prompt. Hard-block new trade invocations only when drawdown > 50% (respecting user's high risk tolerance per `memory/feedback_risk_tolerance.md`). Log WARNING at >20%.
-**Impact:** Adds first-ever automated drawdown awareness to the trading path.
-**Risk:** MEDIUM — adds a gate to the invocation path. Advisory-only below 50%, so normal trading unaffected. Hard-block at 50% is consistent with user's stated risk preferences.
+### 2.1 metals_swing_trader.py — Replace raw open("config.json")
 
-### 2.2 fx_rates.py — Thread-safe cache (P2)
-**File:** `portfolio/fx_rates.py`, line 16
-**Problem:** `_fx_cache` is a plain dict accessed from 8-worker ThreadPoolExecutor with no lock. Concurrent reads/writes can produce inconsistent state.
-**Fix:** Add `threading.Lock` and wrap cache reads/writes.
-**Impact:** Prevents inconsistent FX rate reads.
-**Risk:** LOW — adds synchronization to existing code.
+**File:** `data/metals_swing_trader.py`, lines 596 and 612
+**Problem:** Two raw `open("config.json")` calls for Telegram config. Violates Rule 4.
 
-### 2.3 journal.py — Atomic file write (P2)
-**File:** `portfolio/journal.py`, lines 568 and 580
-**Problem:** `CONTEXT_FILE.write_text()` is truncate-then-write. If process crashes mid-write, Layer 2 reads a partial context file.
-**Fix:** Replace with `file_utils.atomic_write_text()` or write-to-temp-then-rename pattern.
-**Impact:** Prevents corrupted context file.
-**Risk:** LOW — same content, safer write path.
+**Fix:** Replace with `load_json()` from file_utils.
 
-### 2.4 monte_carlo.py, monte_carlo_risk.py, data/metals_risk.py — Remove seed=42 (P2)
-**Files:** 3 files
-**Problem:** `seed=42` produces identical simulation paths every run. Risk metrics (VaR, CVaR) never change regardless of market conditions. Risk metrics are theater.
-**Fix:** Use `seed=None` (system entropy) for production runs. Keep `seed=42` only in tests.
-**Impact:** Risk simulations actually reflect current conditions.
-**Risk:** LOW — Monte Carlo results change per run (correct behavior). Downstream consumers only use these as informational data in agent summaries.
+### 2.2 metals_loop.py — Replace raw open() for agent log
+
+**File:** `data/metals_loop.py`, line 6732
+**Problem:** `open("data/metals_agent.log", "a")` — raw append with relative path.
+
+**Fix:** Use absolute path + proper error handling with context manager.
+
+### 2.3 credit_spread.py — Replace raw open("config.json")
+
+**File:** `portfolio/signals/credit_spread.py`, line 285
+**Problem:** Raw `open("config.json")` for FRED API key.
+
+**Fix:** Replace with `load_json()`.
 
 ---
 
-## Batch 3: Signal + Metals Fixes (3 files, ~30 lines)
+## Batch 3: Signal Engine Hardening (2 files, ~20 lines)
 
-### 3.1 signal_engine.py — Persistence filter cold-start fix
-**File:** `portfolio/signal_engine.py`, line 260
-**Problem:** On cold-start, non-HOLD votes initialize with `cycles=_PERSISTENCE_MIN_CYCLES` (2). This means the signal passes through on cycle 2 without actually being persistent. Should initialize at 1 so the signal needs 1 more cycle to qualify.
-**Fix:** Change `cycles=_PERSISTENCE_MIN_CYCLES` to `cycles=1` for cold-start initialization.
-**Impact:** Prevents noisy first-cycle signals from bypassing the persistence filter.
-**Risk:** LOW — cold-start only, makes the filter stricter (correct behavior).
+### 3.1 Bound _persistence_state dict
 
-### 3.2 metals_swing_trader.py — _execute_sell exception safety
-**File:** `data/metals_swing_trader.py`, around line 2839
-**Problem:** If `_execute_sell()` raises before setting `sell_failed_at`, the position is added to `to_remove` and deleted from state — but the position may still exist on Avanza. Orphaned holding.
-**Fix:** Wrap `_execute_sell()` call in try/except. On exception, set `pos["sell_failed_at"]` and log WARNING. Don't add to `to_remove`.
-**Impact:** Prevents orphaned Avanza positions.
-**Risk:** MEDIUM — changes exit flow, but the fix is strictly additive (adds safety net).
+**File:** `portfolio/signal_engine.py`, around line 260
+**Problem:** `_persistence_state` grows unbounded. Each unique ticker adds an entry
+that is never cleaned up.
 
-### 3.3 econ_calendar.py — Force-HOLD (compromise fix for SELL-only bias)
-**File:** `portfolio/signals/econ_calendar.py`
-**Problem:** All 4 sub-signals can only produce SELL or HOLD, never BUY. Permanent SELL-biased voter.
-**Fix:** Add `econ_calendar` to `DISABLED_SIGNALS` in signal config (force-HOLD). A proper fix (adding BUY capability) requires research into what economic events are bullish. Force-HOLD is the safe compromise.
-**Impact:** Removes systematic SELL bias from consensus.
-**Risk:** LOW — disabling a biased signal is safer than leaving it active.
+**Fix:** Add size cap (32 tickers) with LRU eviction, matching `_phase_log_per_ticker` pattern.
+
+### 3.2 Add explicit parentheses to cost-adjusted accuracy
+
+**File:** `portfolio/accuracy_stats.py`, line 344
+**Problem:** Missing explicit grouping. Correct by precedence but confusing.
+
+**Fix:** Add parentheses for clarity.
 
 ---
 
-## Batch 4: Tests (test files only)
+## Batch 4: Tests (~40 lines)
 
-### 4.1 test_persistence_filter.py — New test file
-- Cold-start: first cycle should NOT pass persistence filter
-- Normal operation: signal must persist 2+ cycles
-- Direction flip: resets counter
-- HOLD transitions: HOLD votes pass through
-- Thread safety: concurrent calls don't corrupt state
+### 4.1 Test record_trade() wiring
+- Verify record_trade() called after journal parse with BUY/SELL
+- Verify exception safety (record_trade failure doesn't break completion)
+- Verify guard state populated after completion
 
-### 4.2 test_safety_guards.py — New test file
-- OHLCV zero/negative price rejection
-- Dashboard hmac comparison
-- Config wipe guard (small config rejection)
-- Max order size limit enforcement
-- Drawdown check integration (advisory at 20%, block at 50%)
-
-### 4.3 Update existing tests
-- `test_risk_management.py` — test drawdown block threshold
-- `test_shared_state.py` — rate limiter concurrency, _loading_timestamps cleanup
+### 4.2 Test persistence state bounds
+- Verify dict doesn't grow beyond cap
+- Verify LRU eviction preserves production tickers
 
 ---
 
 ## Dependency Order
 
-Batch 1 (safety-critical) → Batch 2 (drawdown + I/O) → Batch 3 (signal + metals) → Batch 4 (tests)
-
-Batches 1-3 items are internally independent (can be committed together).
-Batch 4 depends on all implementation batches.
+Batch 1 → Batch 2 → Batch 3 → Batch 4
 
 ## What NOT to Implement (Deferred)
 
-- **Agent invocation through claude_gate**: Too complex — requires refactoring subprocess lifecycle. Manual review needed.
-- **Browser recovery idempotency**: Requires Avanza API research for idempotency keys. Skip with TODO.
-- **Per-ticker accuracy filtering in ticker_accuracy.py/SignalDB**: Research priority, affects accuracy display, not trading.
-- **funding_rate threshold symmetry**: Needs statistical analysis of optimal thresholds.
-- **Metals loop split (7634 lines)**: Too large for auto-improvement.
-- **DST hardcoding fixes**: Requires testing across DST transitions. Skip with TODO.
-- **calendar_seasonal/network_momentum signal bias**: Needs research.
+- **VWAP session reset (H17):** Low impact, one sub-signal in 5-signal composite
+- **Metals POSITIONS lock (H31):** 7,667 line file, too risky for autonomous change
+- **DST fallback fix (IC-R4-3):** Needs DST transition testing
+- **Signal registry centralization:** Large refactor, not a bug fix
+- **data/*.py → portfolio/data/ package:** Correct but too large for this session
+- **exit_optimizer / microstructure integration:** Dead code, needs design decision first
