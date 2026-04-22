@@ -236,6 +236,7 @@ _IC_DATA_TTL = 3600     # IC cache TTL (matches ic_computation.py)
 # to consensus; others are treated as HOLD for consensus purposes only.
 _PERSISTENCE_MIN_CYCLES = 2        # require 2+ consecutive same-direction votes
 _PERSISTENCE_ENABLED = True        # toggle for easy disable
+_PERSISTENCE_MAX_TICKERS = 32      # bound on tracked tickers (prod=5, cap guards tests/probes)
 _persistence_state: dict[str, dict[str, dict]] = {}  # {ticker: {signal: {"vote": str, "cycles": int}}}
 _persistence_lock = threading.Lock()
 
@@ -256,6 +257,10 @@ def _apply_persistence_filter(votes: dict[str, str], ticker: str | None) -> dict
         # Cold start: if we have NO history for this ticker, seed state and
         # pass all votes through. The filter only applies from cycle 2 onward.
         if ticker not in _persistence_state:
+            if len(_persistence_state) >= _PERSISTENCE_MAX_TICKERS:
+                evict_count = len(_persistence_state) // 2
+                for old_key in list(_persistence_state)[:evict_count]:
+                    del _persistence_state[old_key]
             _persistence_state[ticker] = {
                 sig: {"vote": vote, "cycles": _PERSISTENCE_MIN_CYCLES if vote != "HOLD" else 0}
                 for sig, vote in votes.items()
