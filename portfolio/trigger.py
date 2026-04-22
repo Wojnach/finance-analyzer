@@ -47,6 +47,13 @@ FG_THRESHOLDS = (20, 80)  # extreme fear / extreme greed boundaries
 SUSTAINED_CHECKS = 3
 SUSTAINED_DURATION_S = 120
 
+# Ranging regime dampening (2026-04-22): when a ticker's regime is "ranging",
+# require a minimum consensus confidence before triggering Layer 2. In ranging
+# markets, consensus oscillates between HOLD and weak BUY/SELL, producing 20+
+# Layer 2 invocations per day that all return HOLD — wasting compute and token
+# budget. Setting this to 0.0 disables dampening without code change.
+RANGING_CONSENSUS_MIN_CONFIDENCE = 0.35
+
 # Startup grace period — after a restart, the first loop iteration updates the
 # baseline without triggering Layer 2. This prevents spurious T3 full reviews
 # every time the loop is restarted for a code update.
@@ -197,13 +204,33 @@ def check_triggers(signals, prices_usd, fear_greeds, sentiments):
     #    from HOLD. BUY↔SELL direction flips are handled by the sustained flip
     #    trigger (#2). Uses persistent triggered_consensus that is NOT wiped
     #    when unrelated triggers (sentiment, etc.) fire.
+    #
+    #    Ranging regime dampening (2026-04-22): in ranging regime, low-confidence
+    #    consensus crossings are noise — require RANGING_CONSENSUS_MIN_CONFIDENCE
+    #    to actually fire the trigger. Prevents 20+ HOLD invocations per day.
     triggered_consensus = state.get("triggered_consensus", {})
     for ticker, sig in signals.items():
         action = sig["action"]
         last_tc = triggered_consensus.get(ticker, "HOLD")
         if action in ("BUY", "SELL") and last_tc == "HOLD":
-            # New consensus from HOLD — trigger immediately
             conf = sig.get("confidence", 0)
+            # Ranging regime dampening: skip low-confidence consensus triggers
+            ticker_regime = (sig.get("extra") or {}).get("_regime", "unknown")
+            if (
+                ticker_regime == "ranging"
+                and RANGING_CONSENSUS_MIN_CONFIDENCE > 0
+                and conf < RANGING_CONSENSUS_MIN_CONFIDENCE
+            ):
+                logger.info(
+                    "Ranging dampening: %s consensus %s (%.0f%%) suppressed "
+                    "(min %.0f%%)",
+                    ticker, action, conf * 100,
+                    RANGING_CONSENSUS_MIN_CONFIDENCE * 100,
+                )
+                # Still update baseline so we don't re-trigger next cycle
+                triggered_consensus[ticker] = action
+                continue
+            # New consensus from HOLD — trigger
             reasons.append(f"{ticker} consensus {action} ({conf:.0%})")
             triggered_consensus[ticker] = action
         elif action == "HOLD" and last_tc != "HOLD":
