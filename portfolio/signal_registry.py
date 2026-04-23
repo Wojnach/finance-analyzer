@@ -212,6 +212,11 @@ def _register_defaults():
     # avg_pairwise_corr. Gap collapse = crisis synchronization. Inverts for safe havens.
     register_enhanced("complexity_gap_regime", "portfolio.signals.complexity_gap_regime",
                       "compute_complexity_gap_regime_signal", requires_context=True, max_confidence=0.7)
+    # Realized skewness — 3rd moment directional signal (all assets)
+    # 2026-04-23: Fernandez-Perez et al. 2018. Sharpe 0.79, 8.01% annual on
+    # 27 commodity futures. Z-scored skewness + kurtosis confirmation.
+    register_enhanced("realized_skewness", "portfolio.signals.realized_skewness",
+                      "compute_realized_skewness_signal")
 
 
 _register_defaults()
