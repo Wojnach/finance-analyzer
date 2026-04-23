@@ -53,6 +53,43 @@ class TestCachedFreshData:
         fn.assert_called_once_with("a", "b")
 
 
+class TestCachedNoneNotCached:
+    """_cached() should NOT cache None results (transient API failure)."""
+
+    def test_none_result_not_stored_in_cache(self):
+        """func() returning None should not write to cache."""
+        result = _cached("k_none", 60, lambda: None)
+        assert result is None
+        assert "k_none" not in shared_state._tool_cache
+
+    def test_none_result_retried_next_call(self):
+        """After func() returns None, the next call should retry func()."""
+        call_count = 0
+
+        def flaky():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return None  # first call fails
+            return "recovered"
+
+        result1 = _cached("k_flaky", 60, flaky)
+        assert result1 is None
+        result2 = _cached("k_flaky", 60, flaky)
+        assert result2 == "recovered"
+        assert call_count == 2
+
+    def test_stale_data_preserved_when_func_returns_none(self):
+        """If stale data exists and func() returns None, stale data should
+        be preserved (not overwritten) so it can still be served."""
+        _cached("k_stale", 60, lambda: "original")
+        # Force TTL expiry by manipulating cache time
+        shared_state._tool_cache["k_stale"]["time"] = 0.0
+        # Now func returns None — stale data should survive
+        _cached("k_stale", 60, lambda: None)
+        assert shared_state._tool_cache["k_stale"]["data"] == "original"
+
+
 class TestCachedWithinTTL:
     """_cached() returns cached data when within TTL, without calling func again."""
 
@@ -450,15 +487,15 @@ class TestRateLimiterNoSleep:
 
 
 class TestRateLimiterUpdatesLastCall:
-    """_RateLimiter.wait() updates last_call to current time after waiting."""
+    """_RateLimiter.wait() updates last_call for the next caller."""
 
     @patch("portfolio.shared_state.time")
-    def test_updates_last_call(self, mock_time):
+    def test_updates_last_call_no_wait(self, mock_time):
         limiter = _RateLimiter(60, name="test")
         limiter.last_call = 0.0
 
-        # time.time() is called twice: once for elapsed calc, once after sleep for last_call
-        mock_time.time.side_effect = [5.0, 5.0]
+        # No wait needed (5.0 - 0.0 = 5.0 > 1.0 interval), last_call = now
+        mock_time.time.return_value = 5.0
         mock_time.sleep = MagicMock()
 
         limiter.wait()
@@ -466,17 +503,66 @@ class TestRateLimiterUpdatesLastCall:
         assert limiter.last_call == 5.0
 
     @patch("portfolio.shared_state.time")
-    def test_updates_last_call_after_sleep(self, mock_time):
+    def test_updates_last_call_with_reservation(self, mock_time):
         limiter = _RateLimiter(60, name="test")  # interval = 1.0s
         limiter.last_call = 10.0
 
-        # First time.time() = 10.3 (triggers sleep), second time.time() = 11.0 (after sleep)
-        mock_time.time.side_effect = [10.3, 11.0]
+        # t=10.3: needs sleep. Slot reserved at 10.0+1.0=11.0
+        mock_time.time.return_value = 10.3
+        mock_time.sleep = MagicMock()
+
+        limiter.wait()
+
+        # last_call is the reserved slot, not time.time() after sleep
+        assert limiter.last_call == 11.0
+
+
+class TestRateLimiterSlotReservation:
+    """Rate limiter must reserve the next slot atomically before sleeping,
+    so parallel threads don't calculate the same wait_time and stampede."""
+
+    @patch("portfolio.shared_state.time")
+    def test_last_call_reserved_before_sleep(self, mock_time):
+        """After wait() calculates sleep > 0, last_call must be updated
+        BEFORE sleeping so the next thread sees the reserved slot."""
+        limiter = _RateLimiter(60, name="test")  # interval = 1.0s
+        limiter.last_call = 10.0
+
+        # Thread calls at 10.3s → needs to sleep 0.7s
+        # After fix: last_call should be set to 10.0 + 1.0 = 11.0 before sleep
+        mock_time.time.side_effect = [10.3]
+        mock_time.sleep = MagicMock()
+
+        limiter.wait()
+
+        # last_call should be set to the reserved slot, not time.time() after sleep
+        assert limiter.last_call == 11.0
+        mock_time.sleep.assert_called_once_with(pytest.approx(0.7, abs=0.01))
+
+    @patch("portfolio.shared_state.time")
+    def test_second_thread_sees_reserved_slot(self, mock_time):
+        """Two threads calling wait() at the same moment should get
+        different sleep durations because the first reserves last_call."""
+        limiter = _RateLimiter(60, name="test")  # interval = 1.0s
+        limiter.last_call = 10.0
+
+        # Thread 1 at t=10.3: sleep 0.7s, reserves slot at 11.0
+        mock_time.time.return_value = 10.3
         mock_time.sleep = MagicMock()
 
         limiter.wait()
 
         assert limiter.last_call == 11.0
+
+        # Thread 2 also at t=10.3: should see last_call=11.0,
+        # so it sleeps 1.0 - (10.3 - 11.0) = 1.7s, reserves slot at 12.0
+        limiter.wait()
+
+        assert limiter.last_call == 12.0
+        calls = mock_time.sleep.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[0] == pytest.approx(0.7, abs=0.01)
+        assert calls[1].args[0] == pytest.approx(1.7, abs=0.01)
 
 
 class TestRateLimiterInterval:

@@ -717,10 +717,11 @@ def _record_new_trades():
                 direction = txn.get("action")
                 if not ticker or direction not in ("BUY", "SELL"):
                     continue
-                record_trade(ticker, direction, strategy)
+                pnl_pct = txn.get("pnl_pct")
+                record_trade(ticker, direction, strategy, pnl_pct=pnl_pct)
                 logger.info(
-                    "BUG-219: recorded %s %s %s for overtrading guards",
-                    strategy, direction, ticker,
+                    "BUG-219: recorded %s %s %s pnl=%.2f%% for overtrading guards",
+                    strategy, direction, ticker, pnl_pct or 0.0,
                 )
     except Exception as e:
         logger.warning("BUG-219: record_trade wiring failed: %s", e)

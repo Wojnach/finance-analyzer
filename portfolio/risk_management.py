@@ -154,6 +154,24 @@ def check_drawdown(portfolio_path: str, max_drawdown_pct: float = 20.0,
     if current_value > peak_value:
         peak_value = current_value
 
+    # Guard against NaN/Inf in peak_value or current_value — corrupted
+    # history or failed computation. NaN silently passes all comparison
+    # checks (NaN > 50.0 is False), bypassing the circuit breaker.
+    import math
+    if not math.isfinite(peak_value) or not math.isfinite(current_value):
+        logger.critical(
+            "check_drawdown: non-finite value detected (peak=%.2f, current=%.2f) "
+            "— treating as 100%% drawdown (fail-safe).",
+            peak_value, current_value,
+        )
+        return {
+            "breached": True,
+            "current_drawdown_pct": 100.0,
+            "peak_value": round(peak_value, 2) if math.isfinite(peak_value) else 0.0,
+            "current_value": round(current_value, 2) if math.isfinite(current_value) else 0.0,
+            "initial_value": initial_value,
+        }
+
     # Calculate drawdown
     if peak_value > 0:
         current_drawdown_pct = ((peak_value - current_value) / peak_value) * 100
