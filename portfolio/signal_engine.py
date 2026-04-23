@@ -305,6 +305,23 @@ _DISABLED_SIGNAL_OVERRIDES: frozenset[tuple[str, str]] = frozenset({
     ("ml", "ETH-USD"),
 })
 
+# Shadow-safe signals: disabled signals that are pure math (no network I/O)
+# and safe to compute every cycle without impacting cycle time. Their votes
+# are stored in _shadow_votes (not consensus votes) so outcome_tracker can
+# track accuracy while they remain force-HOLD in consensus.
+# Network-heavy disabled signals (futures_basis, vix_term_structure,
+# gold_real_yield_paradox, cross_asset_tsmom, copper_gold_ratio,
+# network_momentum, ovx_metals_spillover, xtrend_equity_spillover,
+# complexity_gap_regime, orderbook_flow) are NOT shadow-safe — they do
+# yfinance/FRED/Binance calls that would blow the 60s cycle budget.
+_SHADOW_SAFE_SIGNALS = frozenset({
+    "hurst_regime",
+    "shannon_entropy",
+    "statistical_jump_regime",
+    "realized_skewness",
+    "oscillators",
+})
+
 # Per-ticker consensus gate: BUG-164.  Suppress all non-HOLD consensus for
 # tickers where the system's overall consensus is historically harmful.
 # AMD 24.8%, GOOGL 31.3%, META 34.2% — actively wrong.
@@ -2186,6 +2203,7 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         )
 
     votes = {}
+    shadow_votes = {}  # disabled signals computed for accuracy tracking only
     extra_info = {}
 
     # BUG-178 diagnostic phase marker (added 2026-04-10, diag/bug178-end-of-cycle-snapshot).
@@ -2628,6 +2646,32 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
             # call sites: count_active_signals():468, dynamic correlation:558,
             # accuracy_stats.py, ticker_accuracy.py, backtester.py, reporting.py.
             if sig_name in DISABLED_SIGNALS and (sig_name, ticker) not in _DISABLED_SIGNAL_OVERRIDES:
+                # Shadow-safe signals: compute but don't let them vote.
+                # Their predictions go into _shadow_votes for accuracy tracking.
+                if sig_name in _SHADOW_SAFE_SIGNALS:
+                    try:
+                        _sig_t0 = time.monotonic()
+                        compute_fn = load_signal_func(entry)
+                        if compute_fn is not None:
+                            if ticker:
+                                _set_last_signal(ticker, f"shadow:{sig_name}")
+                            if entry.get("requires_context"):
+                                result = compute_fn(df, context=context_data)
+                            elif entry.get("requires_macro"):
+                                result = compute_fn(df, macro=macro_data or None)
+                            else:
+                                result = compute_fn(df)
+                            _sig_dt = time.monotonic() - _sig_t0
+                            if _sig_dt > 1.0:
+                                logger.info("[SLOW-SHADOW] %s/%s: %.1fs", ticker, sig_name, _sig_dt)
+                            max_conf = entry.get("max_confidence", 1.0)
+                            validated = _validate_signal_result(result, sig_name=sig_name, max_confidence=max_conf)
+                            extra_info[f"{sig_name}_action"] = validated["action"]
+                            extra_info[f"{sig_name}_confidence"] = validated["confidence"]
+                            extra_info[f"shadow_{sig_name}"] = True
+                            shadow_votes[sig_name] = validated["action"]
+                    except Exception as e:
+                        logger.debug("Shadow signal %s failed: %s", sig_name, e)
                 votes[sig_name] = "HOLD"
                 continue
             if sig_name in _TICKER_DISABLED_SIGNALS.get(ticker, ()):
@@ -2752,6 +2796,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # This allows accuracy tracking for regime-gated signals, breaking the
     # dead-signal trap where gated signals can never accumulate accuracy data.
     raw_votes = dict(votes)
+    # Merge shadow votes so outcome_tracker can track accuracy for disabled
+    # signals that were shadow-computed (math-only, no network I/O).
+    raw_votes.update(shadow_votes)
+    if shadow_votes:
+        extra_info["_shadow_votes"] = shadow_votes
 
     # 3h horizon: gate slow signals that are noise at short timeframes
     if horizon in ("3h", "4h"):
