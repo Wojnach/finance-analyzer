@@ -1,10 +1,14 @@
-"""Economic calendar signal — event proximity and sector risk-off.
+"""Economic calendar signal — event proximity, risk-off, and post-event relief.
 
-Combines four sub-indicators into a majority-vote composite:
-  1. event_proximity  — hours until next event; <4h risk-off, <24h cautious
-  2. event_type       — classify event for informational purposes
-  3. pre_event_risk   — binary risk-off within 4h of high-impact event
-  4. sector_exposure  — is this ticker's sector affected by the upcoming event?
+Combines five sub-indicators into a majority-vote composite:
+  1. event_proximity    — hours until next event; <4h risk-off, <24h cautious
+  2. event_type         — classify event for informational purposes
+  3. pre_event_risk     — binary risk-off within 4h of high-impact event
+  4. sector_exposure    — is this ticker's sector affected by the upcoming event?
+  5. post_event_relief  — BUY after high-impact event passes (uncertainty premium removed)
+
+BUG-218 fix: added post_event_relief sub-signal so the composite can emit BUY,
+not just SELL/HOLD. Previously structurally SELL-only.
 
 The ``context`` parameter is a dict with keys: ticker, config, macro.
 Uses economic calendar dates from econ_dates.py and FOMC dates from fomc_dates.py.
@@ -17,7 +21,12 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
-from portfolio.econ_dates import EVENT_SECTOR_MAP, events_within_hours, next_event
+from portfolio.econ_dates import (
+    EVENT_SECTOR_MAP,
+    events_within_hours,
+    next_event,
+    recent_high_impact_events,
+)
 from portfolio.news_keywords import TICKER_SECTORS
 from portfolio.signal_utils import majority_vote
 
@@ -102,6 +111,42 @@ def _pre_event_risk(ref_date) -> tuple[str, dict]:
     return "HOLD", indicators
 
 
+def _post_event_relief(ref_date) -> tuple[str, dict]:
+    """Post-event relief BUY signal.
+
+    After a high-impact event has just passed (4-24h ago), the uncertainty
+    premium dissipates and markets tend to rally. Also, when the next event
+    is >72h away, reduced macro uncertainty is mildly bullish.
+
+    BUG-218: This sub-signal adds BUY capability that was previously missing,
+    making the econ_calendar signal structurally balanced (not SELL-only).
+    """
+    indicators = {"post_event_relief": False, "event_free_window": False}
+
+    # Check for recently passed high-impact events (4-24h ago = relief window)
+    recent = recent_high_impact_events(24)
+    relief_events = [e for e in recent if e.get("hours_since", 0) >= 4]
+
+    if relief_events:
+        indicators["post_event_relief"] = True
+        indicators["relief_event"] = (
+            f"{relief_events[0]['type']} passed {relief_events[0]['hours_since']:.0f}h ago"
+        )
+        # Check that no new event is imminent (would negate the relief)
+        evt = next_event(ref_date.date() if isinstance(ref_date, datetime) else ref_date)
+        if evt is None or evt["hours_until"] > 24:
+            return "BUY", indicators
+
+    # Event-free calm window: next event >72h away
+    evt = next_event(ref_date.date() if isinstance(ref_date, datetime) else ref_date)
+    if evt is not None and evt["hours_until"] > 72:
+        indicators["event_free_window"] = True
+        indicators["next_event_hours"] = evt["hours_until"]
+        return "BUY", indicators
+
+    return "HOLD", indicators
+
+
 def _sector_exposure(ref_date, ticker: str) -> tuple[str, dict]:
     """Check if this ticker's sector is affected by upcoming events.
 
@@ -151,6 +196,7 @@ def compute_econ_calendar_signal(df: pd.DataFrame, context: dict = None) -> dict
             "event_type": "HOLD",
             "pre_event_risk": "HOLD",
             "sector_exposure": "HOLD",
+            "post_event_relief": "HOLD",
         },
         "indicators": {},
     }
@@ -189,19 +235,27 @@ def compute_econ_calendar_signal(df: pd.DataFrame, context: dict = None) -> dict
         logger.exception("sector_exposure sub-signal failed")
         sec_action, sec_ind = "HOLD", {}
 
+    try:
+        relief_action, relief_ind = _post_event_relief(ref_date)
+    except Exception:
+        logger.exception("post_event_relief sub-signal failed")
+        relief_action, relief_ind = "HOLD", {}
+
     # Populate result
     result["sub_signals"]["event_proximity"] = prox_action
     result["sub_signals"]["event_type"] = type_action
     result["sub_signals"]["pre_event_risk"] = risk_action
     result["sub_signals"]["sector_exposure"] = sec_action
+    result["sub_signals"]["post_event_relief"] = relief_action
 
     result["indicators"].update({f"proximity_{k}": v for k, v in prox_ind.items()})
     result["indicators"].update({f"type_{k}": v for k, v in type_ind.items()})
     result["indicators"].update({f"risk_{k}": v for k, v in risk_ind.items()})
     result["indicators"].update({f"exposure_{k}": v for k, v in sec_ind.items()})
+    result["indicators"].update({f"relief_{k}": v for k, v in relief_ind.items()})
 
-    # Majority vote
-    votes = [prox_action, type_action, risk_action, sec_action]
+    # Majority vote (5 sub-signals: 3 SELL-capable + 1 BUY-capable + 1 either)
+    votes = [prox_action, type_action, risk_action, sec_action, relief_action]
     result["action"], result["confidence"] = majority_vote(votes)
 
     # Cap confidence

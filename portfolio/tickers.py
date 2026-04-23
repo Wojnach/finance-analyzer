@@ -80,10 +80,12 @@ DISABLED_SIGNALS = {
     "xtrend_equity_spillover",  # pending live validation (added 2026-04-21)
     "complexity_gap_regime",  # pending live validation (added 2026-04-22)
     "realized_skewness",  # pending live validation (added 2026-04-23)
-    "econ_calendar",    # BUG-218: structurally SELL-only — all 4 sub-signals can only produce
-                        # SELL or HOLD, never BUY. Permanent SELL-biased voter in consensus.
-                        # Force-HOLD until BUY capability is added (needs research into
-                        # which economic events are bullish).
+    # "econ_calendar" RE-ENABLED 2026-04-23. BUG-218 fixed: added post_event_relief
+    # sub-signal that emits BUY after high-impact events pass (4-24h relief window)
+    # and during event-free calm windows (>72h to next event). The composite is now
+    # 5 sub-signals (3 SELL + 1 BUY + 1 neutral) instead of 4 SELL-only.
+    # 62.6% accuracy before disabling. Accuracy gate will auto-gate if BUY
+    # signals degrade the composite.
     "orderbook_flow",   # 2026-04-11: 51.1% accuracy (360 sam), 93.3% activation rate,
                         # no recent data. Pure noise in every consensus decision.
                         # Re-evaluate after 2 weeks of accuracy data collection.
