@@ -92,7 +92,12 @@ def _cached(key, ttl, func, *args):
     try:
         data = func(*args)
         with _cache_lock:
-            _tool_cache[key] = {"data": data, "time": now, "ttl": ttl}
+            # Don't cache None results — they typically indicate transient
+            # API failures that returned None instead of raising. Caching
+            # None hides the failure for the entire TTL duration, preventing
+            # retry. Stale data (if any) is preserved for fallback.
+            if data is not None:
+                _tool_cache[key] = {"data": data, "time": now, "ttl": ttl}
             _loading_keys.discard(key)
             _loading_timestamps.pop(key, None)  # BUG-213: clean up on success path
         return data
