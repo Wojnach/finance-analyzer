@@ -79,6 +79,7 @@ DISABLED_SIGNALS = {
     "ovx_metals_spillover",  # pending live validation (added 2026-04-20)
     "xtrend_equity_spillover",  # pending live validation (added 2026-04-21)
     "complexity_gap_regime",  # pending live validation (added 2026-04-22)
+    "realized_skewness",  # pending live validation (added 2026-04-23)
     "econ_calendar",    # BUG-218: structurally SELL-only — all 4 sub-signals can only produce
                         # SELL or HOLD, never BUY. Permanent SELL-biased voter in consensus.
                         # Force-HOLD until BUY capability is added (needs research into
@@ -169,4 +170,5 @@ SIGNAL_NAMES = [
     "ovx_metals_spillover",
     "xtrend_equity_spillover",
     "complexity_gap_regime",
+    "realized_skewness",
 ]
