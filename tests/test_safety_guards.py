@@ -275,12 +275,12 @@ class TestMonteCarloDeterminism:
 # BUG-218: econ_calendar disabled
 # ---------------------------------------------------------------------------
 
-class TestEconCalendarDisabled:
-    """econ_calendar must be in DISABLED_SIGNALS."""
+class TestEconCalendarEnabled:
+    """econ_calendar re-enabled 2026-04-23 after BUG-218 fix (added BUY capability)."""
 
-    def test_econ_calendar_disabled(self):
+    def test_econ_calendar_not_disabled(self):
         from portfolio.tickers import DISABLED_SIGNALS
-        assert "econ_calendar" in DISABLED_SIGNALS
+        assert "econ_calendar" not in DISABLED_SIGNALS
 
 
 # ---------------------------------------------------------------------------
