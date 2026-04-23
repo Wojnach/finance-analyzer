@@ -307,6 +307,67 @@ class TestCheckDrawdown:
 
 
 # ===================================================================
+# NaN/Inf guard in check_drawdown
+# ===================================================================
+
+class TestCheckDrawdownNaNGuard:
+    """NaN or Inf values in peak_value or current_value must not silently
+    bypass the drawdown circuit breaker (NaN > 50.0 is False)."""
+
+    def test_nan_peak_produces_finite_drawdown(self, tmp_path, monkeypatch):
+        """If _streaming_max somehow returns NaN, drawdown must still be finite."""
+        import math
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        monkeypatch.setattr(
+            "portfolio.risk_management._streaming_max",
+            lambda *a, **kw: float("nan"),
+        )
+
+        pf_path = tmp_path / "portfolio_state.json"
+        _write_json(pf_path, _make_portfolio(cash=480_000))
+
+        result = check_drawdown(str(pf_path),
+                                agent_summary_path=str(tmp_path / "nonexistent.json"))
+        assert math.isfinite(result["current_drawdown_pct"]), \
+            f"Drawdown is {result['current_drawdown_pct']}, not finite — NaN bypass"
+        # NaN peak should be treated as fail-safe (breached)
+        assert result["breached"] is True
+
+    def test_inf_peak_produces_finite_drawdown(self, tmp_path, monkeypatch):
+        """If _streaming_max returns Inf, drawdown must still be finite."""
+        import math
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+        monkeypatch.setattr(
+            "portfolio.risk_management._streaming_max",
+            lambda *a, **kw: float("inf"),
+        )
+
+        pf_path = tmp_path / "portfolio_state.json"
+        _write_json(pf_path, _make_portfolio(cash=480_000))
+
+        result = check_drawdown(str(pf_path),
+                                agent_summary_path=str(tmp_path / "nonexistent.json"))
+        assert math.isfinite(result["current_drawdown_pct"]), \
+            f"Drawdown is {result['current_drawdown_pct']}, not finite — Inf bypass"
+        assert result["breached"] is True
+
+    def test_nan_current_value_produces_finite_drawdown(self, tmp_path, monkeypatch):
+        """NaN current_value must not silently pass the breached check."""
+        import math
+        monkeypatch.setattr("portfolio.risk_management.DATA_DIR", tmp_path)
+
+        pf_path = tmp_path / "portfolio_state.json"
+        # Write portfolio with NaN cash (corrupted file scenario)
+        _write_json(pf_path, {"cash_sek": float("nan"), "initial_value_sek": 500_000})
+
+        result = check_drawdown(str(pf_path),
+                                agent_summary_path=str(tmp_path / "nonexistent.json"))
+        assert math.isfinite(result["current_drawdown_pct"]), \
+            f"Drawdown is {result['current_drawdown_pct']}, not finite — NaN bypass"
+        assert result["breached"] is True
+
+
+# ===================================================================
 # compute_stop_levels
 # ===================================================================
 

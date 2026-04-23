@@ -256,17 +256,21 @@ class _RateLimiter:
     def wait(self):
         # BUG-212: Sleep OUTSIDE the lock to avoid blocking all 8 worker
         # threads. Calculate sleep duration under the lock, release it,
-        # sleep, then re-acquire to update last_call.
+        # then sleep.
+        # Fix: Reserve the next slot (last_call = last_call + interval)
+        # BEFORE releasing the lock, so parallel threads see the reserved
+        # time and calculate a longer wait instead of stampeding.
         wait_time = 0.0
         with self._lock:
             now = time.time()
             elapsed = now - self.last_call
             if elapsed < self.interval:
                 wait_time = self.interval - elapsed
+            # Reserve the next slot atomically — even if we haven't slept yet,
+            # the next thread to enter will see this and wait longer.
+            self.last_call = self.last_call + self.interval if wait_time > 0 else now
         if wait_time > 0:
             time.sleep(wait_time)
-        with self._lock:
-            self.last_call = time.time()
 
 
 # H11/DC-R3-4: yfinance is not thread-safe. This lock is shared across all
