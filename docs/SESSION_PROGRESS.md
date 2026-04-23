@@ -1,7 +1,71 @@
-# Session Progress — Auto-Improve Safety Fixes (2026-04-21)
+# Session Progress — Auto-Improve BUG-219 + P1/P2 Fixes (2026-04-23)
+
+**Session start:** 2026-04-23
+**Status:** Implementation complete, merge pending
+
+## What was done
+
+### Phase 1: Deep Exploration
+4 parallel agents explored: signal engine, portfolio/risk, infrastructure, test coverage.
+Manual verification of all P0/P1 findings against actual code. 10+ false positives rejected
+(Sortino formula, config wipe guard, dashboard auth, stack overflow counter).
+
+### Phase 2: Plan
+Wrote `docs/IMPROVEMENT_PLAN.md` with 4 batches targeting 5 confirmed bugs.
+
+### Phase 3: Implementation (4 commits)
+
+**Batch 1: BUG-219 Loss Escalation Fix** (CRITICAL — 23a2d152)
+- `agent_invocation.py:720`: `_record_new_trades()` now extracts `pnl_pct` from
+  transaction dicts and passes it to `record_trade()`. The consecutive-loss
+  escalation system (1x→2x→4x→8x cooldown multiplier) was completely dead in
+  production because `pnl_pct` was always None.
+- 4 new tests for pnl_pct forwarding (loss, win, missing, backward compat).
+
+**Batch 2: Rate Limiter + Drawdown NaN Guard** (4d76691d)
+- `shared_state.py:256-269`: Rate limiter now reserves the next slot
+  (`last_call = last_call + interval`) BEFORE releasing the lock and sleeping.
+  Parallel threads see the reserved slot and calculate longer waits, preventing
+  stampede.
+- `risk_management.py:159`: NaN/Inf guard on drawdown calculation. Non-finite
+  peak_value or current_value now returns fail-safe breached=True with 100%
+  drawdown instead of silently passing all comparisons.
+- 5 new tests (2 rate limiter slot reservation, 3 NaN/Inf guard).
+
+**Batch 3: Cache None + Orphan Process Logging** (a8ce444c)
+- `shared_state.py:94-95`: `_cached()` no longer stores None results. Transient
+  API failures that return None instead of raising were cached for the full TTL,
+  hiding the failure from retry logic.
+- `subprocess_utils.py:132-133`: `contextlib.suppress(Exception)` replaced with
+  try/except + logger.warning for Job Object assignment failures.
+- 3 new tests for None-caching prevention.
+
+## Test Results
+- 325 tests pass across all affected files
+- 12 new tests, all pass
+- Zero regressions in existing test suites
+
+## Key Decisions
+- BUG-219 was the highest priority: safety-critical feature (loss escalation) was
+  completely broken since the function was first wired.
+- Rate limiter fix: chose slot reservation approach (deterministic) over
+  post-sleep time.time() approach (non-deterministic with threads).
+- NaN guard: fail-safe to breached=True (100% drawdown) rather than ignoring.
+  Better to halt trading on corrupted data than to continue blind.
+- Cache None: signals that legitimately have no data should return a HOLD dict,
+  not None. None always indicates a failure path.
+
+## What's next
+- Merge worktree into main, push, restart loops
+- Late-arriving findings not yet implemented: trigger.py:138 trade detection
+  init, outcome_tracker.py:364 base_price handling
+
+---
+
+# Previous: Auto-Improve Safety Fixes (2026-04-21)
 
 **Session start:** 2026-04-21 ~08:00 UTC
-**Status:** Implementation complete, verification in progress
+**Status:** Implementation complete, merged
 
 ## What was done
 
