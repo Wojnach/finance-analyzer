@@ -981,7 +981,7 @@ class TestRecordNewTrades:
         """New BUY/SELL transactions after invoke should call record_trade()."""
         before_txns = [{"ticker": "BTC-USD", "action": "BUY", "price": 60000}]
         after_txns = before_txns + [
-            {"ticker": "ETH-USD", "action": "SELL", "price": 3000},
+            {"ticker": "ETH-USD", "action": "SELL", "price": 3000, "pnl_pct": -2.5},
             {"ticker": "XAG-USD", "action": "BUY", "price": 30},
         ]
 
@@ -997,8 +997,49 @@ class TestRecordNewTrades:
             ai._record_new_trades()
 
         assert mock_record.call_count == 2
-        mock_record.assert_any_call("ETH-USD", "SELL", "patient")
-        mock_record.assert_any_call("XAG-USD", "BUY", "patient")
+        # BUG-219: SELL must forward pnl_pct from the transaction dict
+        mock_record.assert_any_call("ETH-USD", "SELL", "patient", pnl_pct=-2.5)
+        # BUY has no pnl_pct in txn → defaults to None
+        mock_record.assert_any_call("XAG-USD", "BUY", "patient", pnl_pct=None)
+
+    def test_pnl_pct_forwarded_for_sell_with_loss(self):
+        """SELL with negative pnl_pct should forward it to record_trade()."""
+        txns = [{"ticker": "BTC-USD", "action": "SELL", "price": 58000, "pnl_pct": -3.2}]
+        ai._patient_txn_count_before = 0
+        ai._bold_txn_count_before = 0
+
+        with patch("portfolio.file_utils.load_json") as mock_load, \
+             patch("portfolio.trade_guards.record_trade") as mock_record:
+            mock_load.return_value = self._make_state(txns)
+            ai._record_new_trades()
+
+        mock_record.assert_any_call("BTC-USD", "SELL", "patient", pnl_pct=-3.2)
+
+    def test_pnl_pct_forwarded_for_sell_with_win(self):
+        """SELL with positive pnl_pct should forward it (resets loss streak)."""
+        txns = [{"ticker": "ETH-USD", "action": "SELL", "price": 3500, "pnl_pct": 5.1}]
+        ai._patient_txn_count_before = 0
+        ai._bold_txn_count_before = 0
+
+        with patch("portfolio.file_utils.load_json") as mock_load, \
+             patch("portfolio.trade_guards.record_trade") as mock_record:
+            mock_load.return_value = self._make_state(txns)
+            ai._record_new_trades()
+
+        mock_record.assert_any_call("ETH-USD", "SELL", "patient", pnl_pct=5.1)
+
+    def test_missing_pnl_pct_defaults_to_none(self):
+        """Transaction without pnl_pct field should pass None (backward compat)."""
+        txns = [{"ticker": "BTC-USD", "action": "SELL", "price": 60000}]
+        ai._patient_txn_count_before = 0
+        ai._bold_txn_count_before = 0
+
+        with patch("portfolio.file_utils.load_json") as mock_load, \
+             patch("portfolio.trade_guards.record_trade") as mock_record:
+            mock_load.return_value = self._make_state(txns)
+            ai._record_new_trades()
+
+        mock_record.assert_any_call("BTC-USD", "SELL", "patient", pnl_pct=None)
 
     def test_skips_hold_and_malformed_transactions(self):
         """Transactions without ticker or with non-BUY/SELL action are skipped."""
