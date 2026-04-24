@@ -217,6 +217,11 @@ def _register_defaults():
     # 27 commodity futures. Z-scored skewness + kurtosis confirmation.
     register_enhanced("realized_skewness", "portfolio.signals.realized_skewness",
                       "compute_realized_skewness_signal")
+    # Mahalanobis turbulence — cross-asset regime detection via Mahalanobis distance
+    # 2026-04-24: Kritzman & Li (2010). Sharpe 2.20 vs 1.0 B&H, max DD 6% vs 32%.
+    # Measures statistical unusualness of multi-asset returns. Includes absorption ratio.
+    register_enhanced("mahalanobis_turbulence", "portfolio.signals.mahalanobis_turbulence",
+                      "compute_mahalanobis_turbulence_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
