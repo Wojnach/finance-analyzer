@@ -1,11 +1,11 @@
 # System Overview
 
-Updated: 2026-04-12
-Branch: improve/auto-session-2026-04-12
+Updated: 2026-04-24
+Branch: improve/auto-session-2026-04-24
 
 ## 1) Architecture Summary
 
-Two-layer autonomous trading system with 36 signals (32 active, 4 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
+Two-layer autonomous trading system with 50 signals (34 active, 16 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
 
 - **Layer 1** (`portfolio/main.py`): Continuous 60s loop — data collection, signal generation, trigger detection, summary writing.
 - **Layer 2** (`portfolio/agent_invocation.py`): Claude subprocess — reads summaries, makes trade decisions, writes journals, sends Telegram.
@@ -32,8 +32,8 @@ Two-layer autonomous trading system with 36 signals (32 active, 4 disabled), 5 T
 - `market_timing.py` (141 lines): DST-aware US market hours, agent invocation window, market state (open/closed/weekend)
 - `config_validator.py`: Startup config validation
 
-### Signal System (36 signals: 12 core + 24 enhanced, 32 active + 4 disabled)
-- `signal_engine.py` (~1,988 lines): 36-signal voting, weighted consensus, accuracy gating, 5-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + ADX cache
+### Signal System (50 signals: 12 core + 38 enhanced, 34 active + 16 disabled)
+- `signal_engine.py` (~2,700 lines): 50-signal voting, weighted consensus, accuracy gating, 5-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + ADX cache
 - `signal_registry.py` (135 lines): Plugin-based signal discovery via importlib, lazy loading
 - `signal_utils.py` (130 lines): Shared helpers — SMA, EMA, RSI, majority_vote
 - `signals/*.py` (24 modules): Enhanced composite signals, each with 4-8 sub-indicators
@@ -137,13 +137,12 @@ main.loop()
 4. Dynamic MIN_VOTERS: trending=3, high-vol=4, ranging=5
 5. Unanimity penalty: 90%+ agreement → 0.6x, 80-90% → 0.75x (high unanimity = already priced in)
 
-### Signal Inventory (36 total: 32 active, 4 disabled)
+### Signal Inventory (50 total: 34 active, 16 disabled)
 - **Core active (10)**: RSI, MACD, EMA, BB, Fear&Greed, Sentiment, Ministral-8B, Qwen3-8B, Volume, Funding Rate (3h-only, 74.2%)
 - **Core active BTC-only (1)**: On-Chain BTC (MVRV, SOPR, NUPL, Netflow)
-- **Core disabled (1)**: ML Classifier (28.2%)
-- **Enhanced composite (21 active)**: Trend, Momentum, Volume Flow, Volatility, Candlestick, Structure, Fibonacci, Smart Money, Oscillators, Heikin-Ashi, Mean Reversion, Calendar, Macro Regime, Momentum Factors, News Event, Econ Calendar, Forecast, Claude Fundamental, Futures Flow, Orderbook Flow, Metals Cross-Asset
-- **Enhanced disabled (3)**: Crypto Macro, COT Positioning, Credit Spread Risk (all pending live validation)
-- **Applicable per asset**: crypto=31, metals=28, stocks=26
+- **Core disabled (1)**: ML Classifier (41.7%)
+- **Enhanced active (22)**: Trend, Momentum, Volume Flow, Volatility, Candlestick, Structure, Fibonacci, Smart Money, Heikin-Ashi, Mean Reversion, Calendar, Macro Regime, Momentum Factors, News Event, Econ Calendar, Forecast, Claude Fundamental, Futures Flow, Metals Cross-Asset, DXY Cross-Asset, COT Positioning, Credit Spread Risk
+- **Enhanced disabled (16)**: ML, Oscillators (below 45%), Orderbook Flow (51.1%), Futures Basis, Hurst Regime, Shannon Entropy, VIX Term Structure, Gold Real Yield Paradox, Cross-Asset TSMOM, Copper/Gold Ratio, Statistical Jump Regime, Network Momentum, OVX Metals Spillover, XTrend Equity Spillover, Complexity Gap Regime, Realized Skewness (all pending live validation, added Apr 2026)
 
 ## 6) Configuration
 
@@ -397,3 +396,6 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-216 (P2): Monte Carlo seed=42 in production — risk metrics are theater — **fixed 2026-04-21** (seed=None)
 - BUG-217 (P1): `metals_swing_trader._execute_sell()` exception aborts entire exit loop — **fixed 2026-04-21** (per-position try/except)
 - BUG-218 (P1): `econ_calendar` SELL-only (never BUY), permanent consensus bias — **fixed 2026-04-21** (force-HOLD via DISABLED_SIGNALS)
+- BUG-219 (P0): `_record_new_trades()` missing `pnl_pct` arg → consecutive-loss escalation dead — **fixed 2026-04-23**
+- BUG-220 (P2): `outcome_tracker` stores 0% change_pct when `base_price` is None — **fixed 2026-04-24** (skip ticker when base_price missing)
+- BUG-221 (P2): `daily_digest` crashes on invalid timezone config string — **fixed 2026-04-24** (fallback to UTC)

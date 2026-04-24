@@ -119,6 +119,32 @@ consecutive adversarial reviews.
 
 ---
 
+# Auto-Improve Session: 2026-04-24
+
+**Session focus:** Autonomous improvement — deep exploration (6 agents), bug fixes, doc updates.
+
+## Changes (3 commits)
+1. **BUG-220 fix** (9ad8b9ca): `outcome_tracker.py` — skip outcomes when `base_price` is None
+   instead of storing phantom 0% change_pct entries that pollute accuracy stats. +4 tests.
+2. **BUG-221 fix** (94b3d416): `daily_digest.py` — catch invalid timezone config strings
+   (ValueError, KeyError, ZoneInfoNotFoundError), fall back to UTC. +2 tests.
+3. **Doc updates**: Signal counts corrected across CLAUDE.md, SYSTEM_OVERVIEW.md (was 36/33,
+   actual 50/34). Bug log updated with BUG-219/220/221.
+
+## Verified Non-Bugs (5 false positives from agents)
+- max_confidence caps correctly enforced (signal_engine.py:2706-2707)
+- EWMA neutral weight correctly applied (signal_engine.py:280-287)
+- trigger.py:138 first-run default is correct behavior
+- metals_loop check_session_alive is properly imported
+- fin_snipe_manager _critical_alert_last: single-threaded, no race condition
+- BUG-222 (fin_snipe alert logging): already has logger.warning in except block
+
+## What's next
+- Merge worktree into main, push, restart loops
+- Backlog: outcome_tracker JSONL→SQLite migration, test_llama_server cleanup
+
+---
+
 # Previous: Outcome-Tracking Repair (2026-04-20 afternoon)
 
 **Session focus:** User reported MSTR signal accuracy wasn't tracked. Audit

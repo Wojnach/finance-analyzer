@@ -68,7 +68,7 @@ Remove the file to re-enable. See
 ## Overview
 
 Autonomous two-layer trading system. Layer 1 (Python, 60s loop) collects market data, computes
-33 active signals (36 modules registered, 3 force-HOLD) across 7 timeframes for 5 Tier-1
+34 active signals (50 modules registered, 16 force-HOLD) across 7 timeframes for 5 Tier-1
 instruments, and detects meaningful triggers. Layer 2 (Claude CLI subprocess) is invoked on
 triggers to make trade decisions for two simulated portfolios (Patient & Bold, each starting
 500K SEK). A separate metals subsystem trades Avanza warrants independently.
@@ -80,7 +80,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 ## Architecture
 
 ### Layer 1: Data Loop (`portfolio/main.py`)
-- 60s cycle: fetch OHLCV → compute indicators → run 33 active signals → detect triggers → write summaries
+- 60s cycle: fetch OHLCV → compute indicators → run 34 active signals → detect triggers → write summaries
 - Parallel ticker processing (ThreadPoolExecutor, 8 workers)
 - Crash recovery: exponential backoff (10s→5min), Telegram alerts (first 5 only)
 - Entry: `.venv/Scripts/python.exe -u portfolio/main.py --loop` (via `scripts/win/pf-loop.bat`)
@@ -110,7 +110,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 - **GoldDigger** (`portfolio/golddigger/`): Gold certificate trading (dry-run/live via Avanza)
 - **Elongir** (`portfolio/elongir/`): Equity trading bot (separate signal system)
 
-## Signal System (36 Modules · 33 Active)
+## Signal System (50 Modules · 34 Active)
 
 ### Core Active (10)
 1. RSI(14) — Oversold <30 BUY, overbought >70 SELL
@@ -130,7 +130,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 ### Core Active (BTC-only) (1)
 12. On-Chain BTC — MVRV Z-Score, SOPR, NUPL, Exchange Netflow. Sub-metric majority vote. BTC-only, 12h cache.
 
-### Enhanced Active (21 modules in `portfolio/signals/`)
+### Enhanced Active (22 modules in `portfolio/signals/`)
 13. Trend — Golden/Death Cross, Supertrend, Ichimoku, ADX
 14. Momentum — Stochastic, StochRSI, CCI, Williams %R, ROC, PPO
 15. Volume Flow — OBV, VWAP, A/D, CMF, MFI
@@ -139,26 +139,30 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 18. Structure — High/Low Breakout, Donchian 55, RSI/MACD centerline
 19. Fibonacci — Retracement, Golden Pocket, Extensions, Pivots
 20. Smart Money — BOS, CHoCH, FVG, Liquidity Sweeps, Supply/Demand
-21. Oscillators — Awesome, Aroon, Vortex, KST, Schaff, TRIX, Coppock
-22. Heikin-Ashi — HA Trend, Hull MA, Alligator, Elder Impulse, TTM Squeeze
-23. Mean Reversion — RSI(2/3), IBS, Gap Fade, BB %B
-24. Calendar — Day-of-Week, Turnaround Tue, FOMC Drift, Month-End
-25. Macro Regime — 200-SMA, DXY vs Risk, Yield Curve, FOMC proximity
-26. Momentum Factors — Time-Series Mom, ROC-20, 52W High/Low
-27. News Event — Headline velocity, keyword severity, source credibility
-28. Econ Calendar — FOMC/CPI/NFP proximity risk-off (hardcoded 2026-2027)
-29. Forecast — Kronos + Chronos time-series foundation models
-30. Claude Fundamental — Haiku/Sonnet/Opus cascade (quality, valuation, catalysts)
-31. Futures Flow — Binance FAPI (crypto only): OI, LS Ratio, Funding Trend
-32. Orderbook Flow — Depth imbalance, trade flow, VPIN, OFI, spread health (metals+crypto)
-33. Metals Cross-Asset — Copper, GVZ, Gold/Silver ratio velocity, SPY, Oil (metals only)
+21. Heikin-Ashi — HA Trend, Hull MA, Alligator, Elder Impulse, TTM Squeeze
+22. Mean Reversion — RSI(2/3), IBS, Gap Fade, BB %B
+23. Calendar — Day-of-Week, Turnaround Tue, FOMC Drift, Month-End
+24. Macro Regime — 200-SMA, DXY vs Risk, Yield Curve, FOMC proximity
+25. Momentum Factors — Time-Series Mom, ROC-20, 52W High/Low
+26. News Event — Headline velocity, keyword severity, source credibility
+27. Econ Calendar — FOMC/CPI/NFP proximity risk-off + post_event_relief BUY
+28. Forecast — Chronos time-series foundation model (Kronos retired)
+29. Claude Fundamental — Haiku/Sonnet/Opus cascade (quality, valuation, catalysts)
+30. Futures Flow — Binance FAPI (crypto only): OI, LS Ratio, Funding Trend
+31. Metals Cross-Asset — Copper, GVZ, Gold/Silver ratio velocity, SPY, Oil (metals only)
+32. DXY Cross-Asset — Intraday USD index inverse correlation (metals only)
+33. COT Positioning — CFTC speculative/commercial positioning, contrarian (metals only)
+34. Credit Spread Risk — HY OAS from FRED as cross-asset risk appetite gauge
 
-### Enhanced Active (1 additional)
-34. COT Positioning — CFTC speculative/commercial positioning, contrarian (metals only). Re-enabled 2026-04-13 for shadow validation; weekly cadence (CFTC Friday release).
-
-### Enhanced Disabled (2)
-35. Crypto Macro — Options max pain, gold-BTC rotation, exchange reserves (crypto only) — registered but force-HOLD via DISABLED_SIGNALS
-36. Credit Spread Risk — Credit spread monitoring — registered but force-HOLD pending live validation
+### Enhanced Disabled (16 — force-HOLD via DISABLED_SIGNALS)
+- ML Classifier — 41.7% accuracy, worse than coin flip
+- Oscillators — below 45% on all tickers at 1d
+- Orderbook Flow — 51.1% accuracy, 93.3% activation, no recent data
+- Futures Basis, Hurst Regime, Shannon Entropy, VIX Term Structure,
+  Gold Real Yield Paradox, Cross-Asset TSMOM, Copper/Gold Ratio,
+  Statistical Jump Regime, Network Momentum, OVX Metals Spillover,
+  XTrend Equity Spillover, Complexity Gap Regime, Realized Skewness
+  — all pending live validation (added Apr 2026)
 
 ### Signal Mechanics
 - **MIN_VOTERS = 3** (all asset classes). Consensus = active voters (BUY+SELL), not total.
@@ -170,7 +174,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 
 ## Instruments
 
-### Tier 1: Full signals (32 active × 7 timeframes)
+### Tier 1: Full signals (34 active × 7 timeframes)
 | Asset Class | Tickers | Source |
 |-------------|---------|--------|
 | Crypto 24/7 | BTC-USD, ETH-USD | Binance spot |
@@ -193,8 +197,8 @@ XBT-TRACKER (→BTC), ETH-TRACKER (→ETH), MINI-SILVER (→XAG 5x)
 `trigger.py` (change detection), `market_timing.py` (DST-aware hours)
 
 ### Signal Pipeline
-`signal_engine.py` (36-signal voting, 32 active), `signal_registry.py` (plugin discovery),
-`signals/*.py` (24 enhanced modules), `accuracy_stats.py` (hit rates),
+`signal_engine.py` (50-signal voting, 34 active), `signal_registry.py` (plugin discovery),
+`signals/*.py` (38 enhanced modules), `accuracy_stats.py` (hit rates),
 `outcome_tracker.py` (backfill), `forecast_accuracy.py` (model health)
 
 ### Data & External
