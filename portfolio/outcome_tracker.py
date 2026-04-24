@@ -362,6 +362,8 @@ def backfill_outcomes(max_entries=2000):
                 outcomes[ticker] = {h: None for h in HORIZONS}
 
             base_price = tickers[ticker].get("price_usd")
+            if not base_price or base_price <= 0:
+                continue  # BUG-220: skip — no base price to compute change_pct
             for h_key, h_seconds in HORIZONS.items():
                 if outcomes[ticker].get(h_key) is not None:
                     continue
@@ -382,11 +384,9 @@ def backfill_outcomes(max_entries=2000):
                 if hist_price is None:
                     continue
 
-                change_pct = 0.0
-                if base_price and base_price > 0:
-                    change_pct = round(
-                        ((hist_price - base_price) / base_price) * 100, 2
-                    )
+                change_pct = round(
+                    ((hist_price - base_price) / base_price) * 100, 2
+                )
 
                 outcome_ts_str = datetime.fromtimestamp(
                     target_ts, tz=UTC

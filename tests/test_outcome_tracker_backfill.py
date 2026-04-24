@@ -209,3 +209,96 @@ class TestBackfillStreamingOptimization:
 
         result = _read_signal_log(self.log_file)
         assert len(result) == 3
+
+
+class TestBug220BasePriceNone:
+    """BUG-220: base_price=None must skip outcomes, not store 0% change_pct."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path):
+        self.log_file = tmp_path / "signal_log.jsonl"
+
+    def test_none_base_price_skips_outcome(self):
+        """Entry with price_usd=None should NOT get an outcome with 0% change."""
+        entry = _make_entry(hours_ago=48, tickers={
+            "BTC-USD": {"price_usd": None, "consensus": "BUY"},
+        })
+        _write_signal_log(self.log_file, [entry])
+
+        with patch("portfolio.outcome_tracker.SIGNAL_LOG", self.log_file), \
+             patch("portfolio.outcome_tracker._fetch_historical_price", return_value=68000.0):
+            from portfolio.outcome_tracker import backfill_outcomes
+            backfill_outcomes()
+
+        result = _read_signal_log(self.log_file)
+        assert len(result) == 1
+        # No outcomes should be stored — base_price was None
+        outcomes = result[0].get("outcomes", {})
+        btc_outcomes = outcomes.get("BTC-USD", {})
+        for h_key in ("3h", "4h", "12h", "1d", "3d", "5d", "10d"):
+            assert btc_outcomes.get(h_key) is None, \
+                f"horizon {h_key} should be None, got {btc_outcomes.get(h_key)}"
+
+    def test_zero_base_price_skips_outcome(self):
+        """Entry with price_usd=0 should NOT get an outcome (division by zero)."""
+        entry = _make_entry(hours_ago=48, tickers={
+            "BTC-USD": {"price_usd": 0, "consensus": "BUY"},
+        })
+        _write_signal_log(self.log_file, [entry])
+
+        with patch("portfolio.outcome_tracker.SIGNAL_LOG", self.log_file), \
+             patch("portfolio.outcome_tracker._fetch_historical_price", return_value=68000.0):
+            from portfolio.outcome_tracker import backfill_outcomes
+            backfill_outcomes()
+
+        result = _read_signal_log(self.log_file)
+        outcomes = result[0].get("outcomes", {})
+        btc_outcomes = outcomes.get("BTC-USD", {})
+        for h_key in ("3h", "4h", "12h", "1d", "3d", "5d", "10d"):
+            assert btc_outcomes.get(h_key) is None, \
+                f"horizon {h_key} should be None with zero base_price"
+
+    def test_valid_base_price_still_stores_outcome(self):
+        """Regression: entries with valid base_price must still work."""
+        entry = _make_entry(hours_ago=48, tickers={
+            "BTC-USD": {"price_usd": 67000.0, "consensus": "BUY"},
+        })
+        _write_signal_log(self.log_file, [entry])
+
+        with patch("portfolio.outcome_tracker.SIGNAL_LOG", self.log_file), \
+             patch("portfolio.outcome_tracker._fetch_historical_price", return_value=68000.0):
+            from portfolio.outcome_tracker import backfill_outcomes
+            backfill_outcomes()
+
+        result = _read_signal_log(self.log_file)
+        outcomes = result[0].get("outcomes", {})
+        btc_outcomes = outcomes.get("BTC-USD", {})
+        # At least some horizons should be filled (those old enough)
+        filled = [h for h in ("3h", "4h", "12h", "1d", "3d") if btc_outcomes.get(h) is not None]
+        assert len(filled) > 0, "Valid base_price entries should get outcomes"
+        for h in filled:
+            assert btc_outcomes[h]["change_pct"] == pytest.approx(1.49, abs=0.01)
+
+    def test_mixed_tickers_valid_and_none(self):
+        """One ticker with valid price, another with None — only valid gets outcomes."""
+        entry = _make_entry(hours_ago=48, tickers={
+            "BTC-USD": {"price_usd": 67000.0, "consensus": "BUY"},
+            "ETH-USD": {"price_usd": None, "consensus": "SELL"},
+        })
+        _write_signal_log(self.log_file, [entry])
+
+        with patch("portfolio.outcome_tracker.SIGNAL_LOG", self.log_file), \
+             patch("portfolio.outcome_tracker._fetch_historical_price", return_value=68000.0):
+            from portfolio.outcome_tracker import backfill_outcomes
+            backfill_outcomes()
+
+        result = _read_signal_log(self.log_file)
+        outcomes = result[0].get("outcomes", {})
+        # BTC should have outcomes
+        btc = outcomes.get("BTC-USD", {})
+        btc_filled = [h for h in ("3h", "4h", "12h", "1d") if btc.get(h) is not None]
+        assert len(btc_filled) > 0, "BTC with valid price should get outcomes"
+        # ETH should NOT have outcomes
+        eth = outcomes.get("ETH-USD", {})
+        eth_filled = [h for h in ("3h", "4h", "12h", "1d") if eth.get(h) is not None]
+        assert len(eth_filled) == 0, "ETH with None price should get no outcomes"
