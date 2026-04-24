@@ -53,6 +53,35 @@ class TestShouldSendDailyDigest:
         config = {"notification": {"daily_digest_hour_utc": 8}}
         assert should_send_daily_digest(config) is True
 
+    @patch("portfolio.daily_digest._get_last_daily_digest_time")
+    def test_bad_timezone_falls_back_to_utc(self, mock_last):
+        """BUG-221: Invalid timezone string must not crash — falls back to UTC."""
+        from portfolio.daily_digest import should_send_daily_digest
+        mock_last.return_value = 0
+        config = {
+            "notification": {
+                "daily_digest_hour_local": 9,
+                "daily_digest_tz": "Invalid/Nonexistent_TZ",
+            }
+        }
+        # Should not raise — falls back to UTC internally
+        result = should_send_daily_digest(config)
+        assert isinstance(result, bool)
+
+    @patch("portfolio.daily_digest._get_last_daily_digest_time")
+    def test_empty_timezone_falls_back_to_utc(self, mock_last):
+        """BUG-221: Empty timezone string must not crash."""
+        from portfolio.daily_digest import should_send_daily_digest
+        mock_last.return_value = 0
+        config = {
+            "notification": {
+                "daily_digest_hour_local": 9,
+                "daily_digest_tz": "",
+            }
+        }
+        result = should_send_daily_digest(config)
+        assert isinstance(result, bool)
+
 
 class TestBuildDailyDigest:
     """Tests for build_daily_digest()."""

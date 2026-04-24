@@ -65,7 +65,12 @@ def should_send_daily_digest(config):
     local_hour = notification.get("daily_digest_hour_local")
     if local_hour is not None:
         tz_name = notification.get("daily_digest_tz", "Europe/Stockholm")
-        now_local = datetime.now(zoneinfo.ZoneInfo(tz_name))
+        try:
+            tz = zoneinfo.ZoneInfo(tz_name)
+        except (KeyError, ValueError, zoneinfo.ZoneInfoNotFoundError):
+            logger.warning("Unknown timezone %r, falling back to UTC", tz_name)
+            tz = UTC
+        now_local = datetime.now(tz)
         if now_local.hour != local_hour:
             return False
     else:
