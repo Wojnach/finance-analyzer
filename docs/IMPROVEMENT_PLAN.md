@@ -1,172 +1,142 @@
-# Improvement Plan — Auto Session 2026-04-23
+# Improvement Plan — Auto Session 2026-04-24
 
-Based on deep exploration by 4 parallel agents (signal engine, portfolio/risk, infrastructure,
-test coverage) plus manual verification of all P0/P1 findings.
+Based on deep exploration by 6 parallel agents (orchestration, signal engine, data/portfolio,
+metals/Avanza, reporting/infra, tests/docs) plus manual verification of all P0/P1 findings.
+
+Previous session (2026-04-23) fixed: BUG-219 pnl_pct pass-through (P0), rate limiter slot
+reservation (P1), drawdown NaN guard (P1), cache None prevention (P2), orphan subprocess
+logging (P2).
 
 ## Exploration Summary
 
-### Confirmed Critical Bugs
-- **BUG-219 REGRESSION**: `_record_new_trades()` calls `record_trade(ticker, direction, strategy)`
-  WITHOUT `pnl_pct`. The consecutive-loss escalation code at `trade_guards.py:240` checks
-  `if direction == "SELL" and pnl_pct is not None` — since pnl_pct is always None from the
-  production path, loss escalation NEVER fires. Cooldowns work (ticker+timestamp), but
-  the 1x→2x→4x→8x multiplier on consecutive losses is completely dead.
-  - **Severity**: P0 — safety feature broken for all production trades
-  - **Evidence**: Lines 720 vs 240. Confirmed by manual reading.
+### Confirmed Bugs
 
-### Confirmed P1 Bugs
-- **Rate limiter wake synchronization**: `shared_state.py:256-269` — `last_call` updated AFTER
-  sleep, so parallel threads that calculate wait_time simultaneously wake at the same time
-  and stampede. Not a bypass (they all wait the same duration), but reduces effective spacing.
-- **Drawdown NaN propagation**: `risk_management.py:159` — no guard against NaN/Inf in
-  peak_value or current_value propagating through division.
-- **Stack overflow counter never resets on non-consecutive failures**: 
-  `agent_invocation.py:936-941` — counter resets to 0 on ANY non-stack-overflow exit, 
-  including "failed" or "auth_error". This is actually correct behavior (breaks the 
-  consecutive chain). VERIFIED NOT A BUG.
+- **BUG-220: outcome_tracker base_price=None → phantom 0% changes**
+  `outcome_tracker.py:364-389` — When `base_price = tickers[ticker].get("price_usd")`
+  returns None (ticker present in signal_log but not in current price feed), `change_pct`
+  stays at its default `0.0` and the outcome is stored with `"change_pct": 0.0`. This
+  pollutes accuracy stats with phantom zero-change entries that count as correct outcomes
+  (BUY with 0% change = miss, but HOLD with 0% = hit — biasing HOLD accuracy upward).
+  - **Severity**: P2 — accuracy data pollution, not loop-crashing
+  - **Fix**: Skip the entry when `base_price is None or base_price <= 0` (continue to
+    next horizon). Already has `hist_price is None` guard at line 382; this mirrors it
+    for base_price.
 
-### Confirmed P2 Issues
-- **cached() stores None results**: `shared_state.py:94-95` — when `func()` returns None
-  (e.g., API failure that returns None instead of raising), it's cached as valid data for
-  TTL duration, hiding the failure from retry logic.
-- **subprocess_utils Job Object suppressed**: `subprocess_utils.py:132-133` — 
-  `contextlib.suppress(Exception)` hides job assignment failures, allowing orphan processes.
-- **ATR stop cap silent**: `risk_management.py:225` — 15% ATR cap applied without logging.
+- **BUG-221: daily_digest timezone exception uncaught**
+  `daily_digest.py:68` — `zoneinfo.ZoneInfo(tz_name)` where `tz_name` comes from
+  `config["notification"]["daily_digest_tz"]`. A bad config value (typo, empty string)
+  raises `ZoneInfoNotFoundError` which propagates uncaught, crashing the digest check
+  and potentially disrupting the main loop's post-cycle tasks.
+  - **Severity**: P2 — config-driven crash, `tzdata` is installed so normal values work
+  - **Fix**: Wrap in try/except, fall back to UTC on failure, log warning.
 
-### Verified Non-Bugs (agent false positives)
-- **Sortino ratio formula**: Uses `sum(squared_devs) / len(daily_rets_dec)` — this IS the
-  standard semi-deviation formula. Dividing by N_total (not N_downside) is correct per
-  Investopedia, scipy, and the original Sortino & Price (1994) paper. The H19 comment is
-  accurate. NOT A BUG.
-- **Config wipe guard (BUG-210)**: `telegram_poller.py:207` — `len(cfg) < 5` guard is
-  adequate because config.json always has 10+ top-level keys in production. The guard
-  correctly blocks on empty/corrupt reads. Agent concern about "only 4 keys" is theoretical.
-- **Dashboard auth**: The token is loaded from config and when set, all API routes require it.
-  The concern about `dashboard_token = None` is valid but this is the documented optional-auth
-  design. Adding forced auth would break local-only usage.
+- **BUG-222: fin_snipe_manager _notify_critical swallows all send failures**
+  `fin_snipe_manager.py:98-102` — The `try/except` around `send_or_store` catches all
+  exceptions silently (only has a `pass` in the original pattern). If Telegram delivery
+  fails for critical alerts (session_expired, naked_position), the failure is invisible.
+  - **Severity**: P3 — single-threaded context reduces impact, but critical alerts must
+    not silently fail
+  - **Fix**: Add `logger.warning()` in the except block.
 
----
+### Architecture Improvements
 
-## Batch 1: BUG-219 Loss Escalation Fix (CRITICAL — 1 file, ~5 lines)
+- **ARCH-1: outcome_tracker uses raw signal_log.jsonl parsing**
+  `outcome_tracker.py` loads the full JSONL file on every run (can be 50K+ lines).
+  The SignalDB SQLite backend exists and is populated in parallel, but outcome_tracker
+  still reads raw JSONL as primary source.
+  - **Impact**: P3 — performance, not correctness. Defer to backlog.
 
-### 1.1 Pass pnl_pct from transaction data to record_trade()
+- **ARCH-2: Signal count documentation drift**
+  `CLAUDE.md` says "33 active signals (36 modules registered, 3 force-HOLD)" but actual
+  state in `tickers.py` is 45 signal names, 16 in DISABLED_SIGNALS, giving 29 active.
+  `SYSTEM_OVERVIEW.md` similarly outdated.
+  - **Impact**: P2 — documentation accuracy affects Layer 2 decisions
+  - **Fix**: Update docs in Phase 4.
 
-**File:** `portfolio/agent_invocation.py`
-**Problem:** `_record_new_trades()` at line 720 calls `record_trade(ticker, direction, strategy)`
-without the `pnl_pct` parameter. The transaction dict from portfolio state contains a `pnl_pct`
-field for SELL trades (populated by Layer 2 when it records a sale). Without this, the
-consecutive-loss escalation system (1x→2x→4x→8x cooldown multiplier) is completely dead.
+### Verified Non-Bugs (False Positives from Agents)
 
-**Fix:** Extract `pnl_pct` from the transaction dict and pass it to `record_trade()`.
-
-**Impact:** Activates consecutive-loss escalation for the first time in production.
-**Risk:** LOW — additive parameter, function already accepts it. If pnl_pct is missing from
-the transaction, it defaults to None (existing behavior).
-
----
-
-## Batch 2: Rate Limiter Fix + Drawdown NaN Guard (2 files, ~15 lines)
-
-### 2.1 Fix rate limiter wake synchronization
-
-**File:** `portfolio/shared_state.py`, lines 256-269
-**Problem:** `last_call` is updated AFTER the sleep, allowing parallel threads to calculate
-the same wait_time and wake simultaneously.
-
-**Fix:** Update `last_call` to `now + wait_time` BEFORE releasing the lock and sleeping.
-This reserves the next slot atomically. Threads arriving during the sleep see the updated
-`last_call` and calculate a longer wait.
-
-**Impact:** Proper spacing of API calls under concurrent load.
-**Risk:** LOW — timing behavior only, no functional change.
-
-### 2.2 Guard drawdown against NaN/Inf
-
-**File:** `portfolio/risk_management.py`, around line 159
-**Problem:** If `peak_value` or `current_value` is NaN/Inf (from corrupted history file or
-failed computation), the drawdown percentage becomes NaN, which silently passes all comparison
-checks (`NaN > 50.0` is False), bypassing the circuit breaker.
-
-**Fix:** After computing `current_drawdown_pct`, check `math.isfinite()`. If not finite,
-log a critical error and return a fail-safe response (treat as 100% drawdown or raise).
-
-**Impact:** Prevents NaN from silently bypassing the drawdown circuit breaker.
-**Risk:** LOW — defensive guard only.
+- **max_confidence caps**: Agent reported caps not enforced. VERIFIED: `signal_engine.py:2706-2707`
+  correctly reads `entry.get("max_confidence", 1.0)` and passes to `_validate_signal_result()`.
+- **EWMA neutral weight**: Agent reported neutral weight never applied. VERIFIED: lines 280-287
+  correctly use `ewma_weight` in the fallback path.
+- **trigger.py:138 first-run default**: `prev_count = last_checked_tx.get(label, current_count)`
+  defaults to current count on first run. This is CORRECT — avoids false trigger on startup.
+- **metals_loop check_session_alive**: Agent reported undefined. VERIFIED: imported at line 342
+  from `portfolio.avanza_control`.
+- **fin_snipe_manager race condition**: Agent reported P1 dict race on `_critical_alert_last`.
+  VERIFIED: module is single-threaded (no threading imports, not imported by metals_loop).
+  Downgraded to P3.
 
 ---
 
-## Batch 3: Cache None Prevention + Orphan Process Logging (2 files, ~10 lines)
+## Implementation Batches
 
-### 3.1 Don't cache None results in _cached()
+### Batch 1: BUG-220 outcome_tracker base_price guard (2 files, ~10 lines)
 
-**File:** `portfolio/shared_state.py`, line 94-95
-**Problem:** When `func()` returns `None` (API failure returning None instead of raising),
-the result is cached as `{"data": None, "time": now}`. For the full TTL duration, all
-subsequent calls return None without retrying. This hides transient failures.
+**Files**: `portfolio/outcome_tracker.py`, `tests/test_outcome_tracker.py`
 
-**Fix:** After `data = func(*args)`, check `if data is not None` before writing to cache.
-If None, still clear the loading key but don't update the cache entry. Stale data (if any)
-will continue to be served, and the next cycle will retry.
+1. In `outcome_tracker.py:364-389`, add guard after line 364:
+   ```python
+   base_price = tickers[ticker].get("price_usd")
+   if base_price is None or base_price <= 0:
+       continue  # skip — no base price to compute change_pct
+   ```
+   Move `base_price` fetch inside the horizon loop so each ticker is checked once,
+   and skip ALL horizons for that ticker when base_price is missing.
 
-**Impact:** Transient API failures no longer poison the cache for TTL duration.
-**Risk:** MEDIUM — signals that legitimately return None will retry every cycle instead of
-being cached. This is acceptable because signal functions that have no data should return
-a HOLD dict, not None.
+2. Write test: `test_outcome_backfill_skips_none_base_price` — mock tickers dict with
+   `{"price_usd": None}` entry, verify outcome is NOT stored with 0% change.
 
-### 3.2 Log subprocess Job Object assignment failures
+### Batch 2: BUG-221 daily_digest tz guard + BUG-222 fin_snipe alert logging (3 files, ~15 lines)
 
-**File:** `portfolio/subprocess_utils.py`, lines 132-133
-**Problem:** `contextlib.suppress(Exception)` silently hides Job Object assignment failures.
-If assignment fails, the child process won't be killed when the parent exits, leading to
-orphan processes.
+**Files**: `portfolio/daily_digest.py`, `portfolio/fin_snipe_manager.py`,
+`tests/test_daily_digest.py`
 
-**Fix:** Replace `suppress(Exception)` with `try/except Exception as e: logger.warning(...)`.
+1. In `daily_digest.py:67-68`, wrap `ZoneInfo(tz_name)` in try/except:
+   ```python
+   try:
+       tz = zoneinfo.ZoneInfo(tz_name)
+   except (KeyError, zoneinfo.ZoneInfoNotFoundError):
+       logger.warning("Unknown timezone %r, falling back to UTC", tz_name)
+       tz = UTC
+   now_local = datetime.now(tz)
+   ```
 
-**Impact:** Orphan process creation becomes visible in logs.
-**Risk:** VERY LOW — logging only.
+2. In `fin_snipe_manager.py`, add logging in the `_notify_critical` except block
+   (around line 103) so failed critical alerts are visible.
 
----
+3. Write test: `test_daily_digest_bad_timezone_fallback` — verify bad tz string
+   doesn't crash, falls back to UTC behavior.
 
-## Batch 4: Tests (~50 lines)
+### Batch 3: Documentation updates (3 files, ~50 lines)
 
-### 4.1 Test pnl_pct wiring in _record_new_trades()
-- SELL transaction with negative pnl_pct increments consecutive_losses
-- SELL transaction with positive pnl_pct resets consecutive_losses
-- BUY transaction doesn't affect consecutive_losses
-- Missing pnl_pct field in transaction falls back gracefully
+**Files**: `CLAUDE.md`, `docs/SYSTEM_OVERVIEW.md`, `docs/IMPROVEMENT_PLAN.md`
 
-### 4.2 Test rate limiter spacing
-- Two threads calling wait() simultaneously should not wake at the same time
-- Effective spacing should be >= interval
+1. Update signal counts in `CLAUDE.md`:
+   - "36 modules registered, 3 force-HOLD" → "45 modules registered, 16 force-HOLD"
+   - "33 active signals" → "29 active signals"
+   - Update the signal list sections to reflect actual state
 
-### 4.3 Test drawdown NaN guard
-- NaN peak_value returns fail-safe result
-- Inf current_value returns fail-safe result
-- Normal values compute correctly (regression test)
+2. Update `docs/SYSTEM_OVERVIEW.md` signal inventory section.
 
-### 4.4 Test _cached() with None return
-- func() returning None should not cache the result
-- Stale data should still be served when func() returns None
-- Subsequent calls should retry func()
+3. This plan document itself gets committed.
 
 ---
 
-## Dependency Order
+## Backlog (deferred — not this session)
 
-Batch 1 → Batch 2 → Batch 3 → Batch 4
+- **ARCH-1**: Migrate outcome_tracker from JSONL to SignalDB SQLite queries
+- **TEST-HYGIENE-2**: `test_llama_server_job_object.py` tests unimplemented feature
+- **fin_snipe_manager**: Consider adding threading.Lock if module ever gets called
+  from threaded context
+- **outcome_tracker**: JSONL open-then-parse is O(n) on every run; cap at last N entries
+  or use seek-from-end
+- **Loop contract**: `_check_l2_journal_activity` grace period could be configurable
+  per-tier instead of hardcoded
 
-Batch 1 is the highest priority (safety-critical). Each batch is independently committable
-and testable. Total: ~80 lines of changes across 4 files + ~50 lines of tests.
+## Dependency Ordering
 
-## What NOT to Implement (Deferred)
+Batch 1 → Batch 2 → Batch 3
 
-- **FIFO round-trip race condition**: equity_curve.py is read-only in production (only called
-  from reporting), so the theoretical concurrency issue has no practical impact.
-- **Lockfile creation TOCTOU**: The sidecar lockfile in file_utils.py works correctly in
-  practice because only same-process threads contend (not cross-process). The TOCTOU window
-  is microseconds and the system has been stable for weeks.
-- **Dashboard forced auth**: Optional-auth is the documented design for local-only deployment.
-- **Data collector timeout isolation**: The ThreadPoolExecutor timeout handling works
-  correctly; stuck futures are cleaned up by Python's GC.
-- **Config wipe guard strengthening**: BUG-210 guard is adequate for production config.
-- **T-copula numerical stability**: Extreme tail values are rare and don't affect P50/P95 VaR.
+No cross-dependencies between batches, but sequential ordering keeps commits clean
+and makes bisection straightforward. Each batch gets its own test run and commit.
