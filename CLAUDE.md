@@ -68,7 +68,7 @@ Remove the file to re-enable. See
 ## Overview
 
 Autonomous two-layer trading system. Layer 1 (Python, 60s loop) collects market data, computes
-34 active signals (50 modules registered, 16 force-HOLD) across 7 timeframes for 5 Tier-1
+33 active signals (50 modules registered, 17 force-HOLD) across 7 timeframes for 5 Tier-1
 instruments, and detects meaningful triggers. Layer 2 (Claude CLI subprocess) is invoked on
 triggers to make trade decisions for two simulated portfolios (Patient & Bold, each starting
 500K SEK). A separate metals subsystem trades Avanza warrants independently.
@@ -80,7 +80,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 ## Architecture
 
 ### Layer 1: Data Loop (`portfolio/main.py`)
-- 60s cycle: fetch OHLCV → compute indicators → run 34 active signals → detect triggers → write summaries
+- 60s cycle: fetch OHLCV → compute indicators → run 33 active signals → detect triggers → write summaries
 - Parallel ticker processing (ThreadPoolExecutor, 8 workers)
 - Crash recovery: exponential backoff (10s→5min), Telegram alerts (first 5 only)
 - Entry: `.venv/Scripts/python.exe -u portfolio/main.py --loop` (via `scripts/win/pf-loop.bat`)
@@ -174,7 +174,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 
 ## Instruments
 
-### Tier 1: Full signals (34 active × 7 timeframes)
+### Tier 1: Full signals (33 active × 7 timeframes)
 | Asset Class | Tickers | Source |
 |-------------|---------|--------|
 | Crypto 24/7 | BTC-USD, ETH-USD | Binance spot |
@@ -197,7 +197,7 @@ XBT-TRACKER (→BTC), ETH-TRACKER (→ETH), MINI-SILVER (→XAG 5x)
 `trigger.py` (change detection), `market_timing.py` (DST-aware hours)
 
 ### Signal Pipeline
-`signal_engine.py` (50-signal voting, 34 active), `signal_registry.py` (plugin discovery),
+`signal_engine.py` (50-signal voting, 33 active), `signal_registry.py` (plugin discovery),
 `signals/*.py` (38 enhanced modules), `accuracy_stats.py` (hit rates),
 `outcome_tracker.py` (backfill), `forecast_accuracy.py` (model health)
 

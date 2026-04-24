@@ -374,11 +374,25 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
     "_default": {
         # 2026-04-15 audit: per-ticker 3h accuracy gating, retained pending
         # per-horizon audit of 1d/3d/5d behaviors.
-        "ETH-USD": frozenset({"news_event", "qwen3", "smart_money"}),
-        "BTC-USD": frozenset({"smart_money", "heikin_ashi"}),
+        # 2026-04-24 after-hours audit: added structure (metals), credit_spread_risk
+        # and macro_regime (XAU), ema (crypto/metals), futures_flow (crypto).
+        "ETH-USD": frozenset({"news_event", "qwen3", "smart_money",
+                              "ema",           # 17.6% 1d (51 sam)
+                              "futures_flow",  # 32.6% 1d (675 sam)
+                              }),
+        "BTC-USD": frozenset({"smart_money", "heikin_ashi",
+                              "futures_flow",  # 39.7% 1d (511 sam)
+                              }),
         "XAG-USD": frozenset({"ministral", "credit_spread_risk",
-                              "metals_cross_asset", "smart_money"}),
-        "XAU-USD": frozenset({"ministral", "metals_cross_asset"}),
+                              "metals_cross_asset", "smart_money",
+                              "structure",     # 29.9% 1d (723 sam)
+                              "ema",           # 14.7% 1d (34 sam)
+                              }),
+        "XAU-USD": frozenset({"ministral", "metals_cross_asset",
+                              "structure",           # 30.4% 1d (827 sam)
+                              "credit_spread_risk",  # 35.4% 1d (413 sam), 38.8% 3h — bad everywhere
+                              "macro_regime",        # 34.3% 1d (484 sam)
+                              }),
         # 2026-04-16: trimmed from 7 to 2 (Batch 1). Full history in commit
         # fd504d4. Kept: bad at both 3h (33.2%) and 1d (47.8%).
         "MSTR": frozenset({"claude_fundamental", "credit_spread_risk"}),
@@ -399,15 +413,26 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
     "3h": {
         "BTC-USD": frozenset({"volatility_sig", "bb"}),
         "ETH-USD": frozenset({"credit_spread_risk"}),
-        "XAU-USD": frozenset({"credit_spread_risk"}),
+        # credit_spread_risk promoted to _default (2026-04-24)
+        "XAU-USD": frozenset(),
         "XAG-USD": frozenset({"forecast", "qwen3"}),
         "MSTR": frozenset({"volume", "volatility_sig"}),
     },
     "4h": {},
     "12h": {},
     "1d": {
-        "BTC-USD": frozenset({"news_event", "forecast"}),
+        # 2026-04-24 audit: added econ_calendar (1.8% BTC/ETH), ema (BTC),
+        # funding (ETH 12.5%), econ_calendar (XAG 29.5%).
+        "BTC-USD": frozenset({"news_event", "forecast",
+                              "econ_calendar",  # 1.8% 1d (113 sam)
+                              "ema",            # 23.8% 1d (42 sam)
+                              }),
+        "ETH-USD": frozenset({"econ_calendar",  # 1.8% 1d (113 sam)
+                              "funding",        # 12.5% 1d (64 sam)
+                              }),
         "XAU-USD": frozenset({"candlestick"}),
+        "XAG-USD": frozenset({"econ_calendar",  # 29.5% 1d (112 sam)
+                              }),
         "MSTR": frozenset({"ema", "bb"}),
     },
     "3d": {},
@@ -902,6 +927,9 @@ def _compute_applicable_count(ticker: str, skip_gpu: bool = False) -> int:
     count = 0
     for sig in SIGNAL_NAMES:
         if sig in DISABLED_SIGNALS and (sig, ticker) not in _DISABLED_SIGNAL_OVERRIDES:
+            continue
+        # Per-ticker blacklist: check _default horizon for signals bad at all horizons
+        if sig in _TICKER_DISABLED_SIGNALS.get(ticker, ()):
             continue
         # crypto-only signals (futures_flow, funding, crypto_macro)
         if sig in _CRYPTO_ONLY_SIGNALS and not is_crypto:

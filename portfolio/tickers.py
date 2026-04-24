@@ -106,6 +106,9 @@ DISABLED_SIGNALS = {
     "oscillators",      # 2026-04-14: below 45% on ALL tickers at 1d (BTC 35.8%, ETH 36.3%,
                         # XAG 34.9%, XAU 40.2%, MSTR 42.6%; 5065 total sam). Also weak at
                         # 3h (34-45% per ticker). Regime-gated in ranging but noise everywhere.
+    "smart_money",      # 2026-04-24: below 40% on ALL Tier 1 tickers at 1d — BTC 39.8% (123),
+                        # ETH 34.9% (146), MSTR 33.3% (264), XAU N/A. Not salvageable.
+                        # Cross-ticker consistent failure. 51.6% aggregate masks per-ticker disaster.
 }
 # 2026-04-11 research session changes:
 # - orderbook_flow DISABLED: 93.3% active, 51.1% accuracy, 0 recent data. Noise.
