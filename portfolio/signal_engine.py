@@ -1144,8 +1144,11 @@ _STATIC_CORRELATION_GROUPS = {
     # 85.3% with sentiment. MACD is mathematically derived from the same EMAs that
     # drive the ema signal, so near-perfect correlation is expected. Was orphaned
     # and getting full 1.0x weight despite being redundant.
+    # 2026-04-25: Added bb — 87.8% agreement with macd (197 sam), 85%+ with ema.
+    # Previously in momentum_cluster where it could be leader (1.0x weight) while
+    # ema/macd followers here got 0.12x — cross-cluster redundancy was unpenalized.
     "trend_direction": frozenset({
-        "ema", "macd", "trend", "heikin_ashi", "volume_flow", "macro_regime",
+        "ema", "macd", "bb", "trend", "heikin_ashi", "volume_flow", "macro_regime",
         "momentum_factors", "structure", "oscillators",
     }),
     # 2026-04-18: Expanded from 3→6 members. Research (2026-04-17 after-hours)
@@ -1159,7 +1162,12 @@ _STATIC_CORRELATION_GROUPS = {
     # 2026-04-04: BUG-162 — candlestick-fibonacci correlation 0.708 on BTC.
     "pattern_based": frozenset({"candlestick", "fibonacci"}),
     # 2026-04-08: rsi+bb agree 100%, bb+mean_reversion 100%, bb+momentum 98.8%.
-    "momentum_cluster": frozenset({"mean_reversion", "rsi", "bb", "momentum"}),
+    # 2026-04-25: Moved bb to trend_direction. BB also agrees 87.8% with MACD
+    # and 85%+ with EMA (audit of 500 entries, Apr 21-24). Cross-cluster
+    # redundancy between momentum_cluster(bb) and trend_direction(ema,macd)
+    # was unpenalized — bb could vote at full 1.0x as momentum leader while
+    # ema/macd voted at 0.12x, inflating effective weight for the same signal.
+    "momentum_cluster": frozenset({"mean_reversion", "rsi", "momentum"}),
     # 2026-04-13: claude_fundamental + crypto_macro agree 92-100%.
     # structure removed (now in trend_direction where correlations are stronger).
     "fundamental_cluster": frozenset({"claude_fundamental", "crypto_macro"}),
@@ -1175,15 +1183,15 @@ _STATIC_CORRELATION_GROUPS = {
 CORRELATION_GROUPS = _STATIC_CORRELATION_GROUPS
 _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal weight
 # Per-cluster overrides: momentum_cluster signals agree 88-100% of the time.
-# With 4 signals at 0.3x, the cluster gets 1.0 + 3*0.3 = 1.9x effective weight.
-# Tightening to 0.15x gives 1.0 + 3*0.15 = 1.45x — still rewards cluster but
-# reduces redundancy inflation. Other clusters keep the default 0.3x.
+# 2026-04-25: momentum_cluster now 3 members (bb moved to trend_direction).
+# At 0.15x: 1.0 + 2*0.15 = 1.30x effective weight (was 1.45x with 4 members).
 _CLUSTER_CORRELATION_PENALTIES: dict[str, float] = {
     "momentum_cluster": 0.15,
     # 2026-04-14: volatility_cluster reduced to 2 members — default 0.3x is fine.
-    # 2026-04-14: trend_direction now 8 members (was 5). At 0.12x per follower:
-    # effective weight = 1.0 + 7*0.12 = 1.84x. Previous 5-member at 0.2x gave
-    # 1.0 + 4*0.2 = 1.8x. Similar total but spread across more correlated signals.
+    # 2026-04-25: trend_direction now 10 members (was 9). At 0.12x per follower:
+    # effective weight = 1.0 + 9*0.12 = 2.08x. Previous 9-member gave
+    # 1.0 + 8*0.12 = 1.96x. bb moved from momentum_cluster to fix cross-cluster
+    # redundancy with ema/macd (85-88% agreement).
     "trend_direction": 0.12,
     # 2026-04-18: macro_external expanded from 3→6 members. At 0.15x per follower:
     # effective weight = 1.0 + 5*0.15 = 1.75x. Previously 3 members at 0.3x gave

@@ -24,10 +24,10 @@ class TestCorrelationGroups:
             assert len(members) >= 2, f"Group {name} should have at least 2 members"
 
     def test_momentum_cluster_exists(self):
-        """momentum_cluster should contain rsi, bb, mean_reversion, momentum.
+        """momentum_cluster should contain rsi, mean_reversion, momentum.
 
-        Empirical: rsi-bb 100%, bb-mean_reversion 100%, bb-momentum 98.8%.
-        Renamed from rsi_based (2026-04-08).
+        2026-04-25: bb moved to trend_direction (87.8% agreement with macd,
+        85%+ with ema — cross-cluster redundancy fix).
         """
         from portfolio.signal_engine import CORRELATION_GROUPS
 
@@ -35,8 +35,8 @@ class TestCorrelationGroups:
         mc_group = CORRELATION_GROUPS["momentum_cluster"]
         assert "mean_reversion" in mc_group
         assert "rsi" in mc_group
-        assert "bb" in mc_group
         assert "momentum" in mc_group
+        assert "bb" not in mc_group  # moved to trend_direction 2026-04-25
 
     def test_volatility_cluster_removed(self):
         """volatility_cluster was dissolved (RES-2026-04-21).
