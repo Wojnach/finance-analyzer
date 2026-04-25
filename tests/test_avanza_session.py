@@ -429,6 +429,29 @@ class TestPlaceStopLoss:
         assert payload["stopLossTrigger"]["valueType"] == "PERCENTAGE"
         assert payload["stopLossTrigger"]["value"] == 5.0
 
+    @patch("portfolio.avanza_session.api_post")
+    def test_stop_loss_rejects_zero_sell_price_monetary(self, mock_post, session_file):
+        """BUG-223: Non-trailing MONETARY stop with sell_price=0 must raise."""
+        from portfolio.avanza_session import place_stop_loss
+
+        with pytest.raises(ValueError, match="sell_price > 0"):
+            place_stop_loss("856394", trigger_price=23.0, sell_price=0, volume=100)
+        mock_post.assert_not_called()
+
+    @patch("portfolio.avanza_session.api_post")
+    def test_stop_loss_allows_zero_sell_price_trailing(self, mock_post, session_file):
+        """BUG-223: Trailing stop (FOLLOW_DOWNWARDS) with sell_price=0 is valid."""
+        from portfolio.avanza_session import place_stop_loss
+
+        mock_post.return_value = {"status": "SUCCESS", "stoplossOrderId": "SL-T0"}
+
+        result = place_stop_loss(
+            "856394", trigger_price=5.0, sell_price=0, volume=50,
+            trigger_type="FOLLOW_DOWNWARDS", value_type="MONETARY",
+        )
+        assert result["status"] == "SUCCESS"
+        mock_post.assert_called_once()
+
 
 class TestPlaceTrailingStop:
     @patch("portfolio.avanza_session.api_post")

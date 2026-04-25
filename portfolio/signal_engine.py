@@ -3135,6 +3135,13 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     if _filtered_count > 0:
         extra_info["_persistence_filtered"] = _filtered_count
 
+    # BUG-224: compute post-persistence voter count so downstream consumers
+    # (accuracy tracking, Layer 2) see the actual participating voter count,
+    # not the inflated pre-filter number.
+    post_persistence_voters = sum(
+        1 for v in consensus_votes.values() if v in ("BUY", "SELL")
+    )
+
     weighted_action, weighted_conf = _weighted_consensus(
         consensus_votes, accuracy_data, regime, activation_rates,
         accuracy_gate=accuracy_gate,
@@ -3164,7 +3171,8 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     # Store raw consensus in extra for debugging, then use weighted as primary
     extra_info["_raw_action"] = action
     extra_info["_raw_confidence"] = conf
-    extra_info["_voters"] = active_voters
+    extra_info["_voters"] = active_voters  # pre-filter (compatibility)
+    extra_info["_voters_post_filter"] = post_persistence_voters
     extra_info["_total_applicable"] = total_applicable
     extra_info["_buy_count"] = buy
     extra_info["_sell_count"] = sell

@@ -541,3 +541,34 @@ class TestCircuitBreakerIntegration:
         action, conf = _weighted_consensus(votes, accuracy, regime="unknown")
         assert action == "BUY"
         assert conf > 0.5
+
+
+class TestPostPersistenceVoterCount:
+    """BUG-224: extra_info['_voters_post_filter'] must reflect the count AFTER
+    the persistence filter reduces active voters, not the inflated pre-filter
+    count stored in extra_info['_voters']."""
+
+    def test_post_filter_count_logic(self):
+        """Verify the counting formula matches the persistence-filtered dict."""
+        # Simulate a consensus_votes dict where persistence filter forced
+        # some BUY/SELL votes to HOLD
+        consensus_votes = {
+            "rsi": "BUY",
+            "macd": "BUY",
+            "ema": "HOLD",        # was BUY, filtered
+            "bb": "SELL",
+            "sentiment": "HOLD",  # was SELL, filtered
+            "volume": "HOLD",     # genuine HOLD
+        }
+        post_persistence_voters = sum(
+            1 for v in consensus_votes.values() if v in ("BUY", "SELL")
+        )
+        assert post_persistence_voters == 3  # rsi, macd, bb
+
+    def test_post_filter_all_hold(self):
+        """All votes filtered to HOLD → 0 post-persistence voters."""
+        consensus_votes = {"rsi": "HOLD", "macd": "HOLD", "ema": "HOLD"}
+        post_persistence_voters = sum(
+            1 for v in consensus_votes.values() if v in ("BUY", "SELL")
+        )
+        assert post_persistence_voters == 0

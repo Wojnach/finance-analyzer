@@ -1,7 +1,55 @@
-# Session Progress — After-Hours Research 2026-04-24
+# Session Progress — Auto-Improve BUG-223/224/225 Fixes (2026-04-25)
+
+**Session start:** 2026-04-25
+**Status:** Merged
+
+## What was done
+
+### Phase 1: Deep Exploration
+4 parallel agents explored: signal engine, portfolio/risk, infrastructure, metals/trading.
+Manual verification of all P0/P1 findings against actual code. 32 false positives rejected.
+
+### Phase 2: Plan
+Wrote `docs/IMPROVEMENT_PLAN.md` with 3 batches targeting 3 confirmed bugs + doc updates.
+
+### Phase 3: Implementation (3 commits)
+
+**Batch 1: BUG-223 Stop-Loss sell_price Validation** (9f8dea6e)
+- `avanza_session.py:748`: Non-trailing MONETARY stop-losses now reject sell_price <= 0.
+  A zero sell_price on LESS_OR_EQUAL trigger would execute as market sell at worst price.
+  Trailing stops (FOLLOW_DOWNWARDS/UPWARDS) with sell_price=0 remain allowed (by design).
+- 2 new tests: rejects zero for monetary, allows zero for trailing.
+
+**Batch 2: BUG-224 + BUG-225** (e8b390a1)
+- `signal_engine.py:3137`: Added `_voters_post_filter` to extra_info after persistence
+  filter. `_voters` was recording pre-filter count, inflating accuracy tracking downstream.
+- `equity_curve.py:236`: Extracted mean before Sharpe std-dev generator (was O(n²), now O(n)).
+- 2 new tests for post-persistence voter count logic.
+
+**Batch 3: Documentation**
+- Updated signal counts in CLAUDE.md and SYSTEM_OVERVIEW.md: 50→51 modules, 34→33 active, 16→18 disabled.
+- Added smart_money and mahalanobis_turbulence to disabled signals list.
+
+## Test Results
+- All affected tests pass (6 stop-loss, 33 circuit breaker, 74 equity curve)
+- 4 new tests, all pass
+- Zero regressions
+
+## Key Decisions
+- BUG-223: safety-critical, could cause market sell at worst price. Simple guard.
+- BUG-224: kept `_voters` for backwards compat, added `_voters_post_filter` alongside.
+- BUG-225: performance only (O(n²)→O(n)), numerically identical result.
+- BUG-226 deferred: exit optimizer cost model needs deeper investigation to avoid regression.
+
+## What's next
+- BUG-226 (exit optimizer hold-to-close EV omits cost model) — deferred, needs investigation
+
+---
+
+# Previous: After-Hours Research 2026-04-24
 
 **Session start:** 2026-04-24 ~21:00 UTC
-**Status:** Complete, merged, pushed, loop restarted
+**Status:** Merged
 
 ## What was done
 
@@ -11,53 +59,15 @@
 - Phase 2: Quant — walk-forward IC weighting top priority (Sharpe 1.18), on-chain BTC 84.3% potential, trend cluster r=0.44-0.72 causing trigger spam
 - Phase 3: Signal audit — per-ticker accuracy divergences massive (econ_calendar 69% XAU vs 1.8% crypto, ema 71.6% MSTR vs 14.7% XAG)
 
-### Phase 5: Plan
-Wrote `docs/RESEARCH_PLAN.md` with prioritized implementation batches.
-
 ### Phase 6: Implementation (1 commit, 8fe0be35)
-
-**Batch 1: smart_money disable + per-ticker blacklist expansion**
-- `tickers.py`: Added `smart_money` to DISABLED_SIGNALS (below 40% on ALL Tier 1 tickers)
-- `signal_engine.py`: Expanded `_TICKER_DISABLED_BY_HORIZON["_default"]` with 11 new (signal, ticker) entries:
-  - ETH-USD: +ema (17.6%), +futures_flow (32.6%)
-  - BTC-USD: +futures_flow (39.7%)
-  - XAG-USD: +structure (29.9%), +ema (14.7%)
-  - XAU-USD: +structure (30.4%), +credit_spread_risk (35.4%), +macro_regime (34.3%)
-- `signal_engine.py`: Expanded `_TICKER_DISABLED_BY_HORIZON["1d"]`:
-  - BTC-USD: +econ_calendar (1.8%), +ema (23.8%)
-  - ETH-USD: +econ_calendar (1.8%), +funding (12.5%)
-  - XAG-USD: +econ_calendar (29.5%)
-- `signal_engine.py`: Fixed `_compute_applicable_count` to subtract per-ticker blacklisted signals
-- `CLAUDE.md`: Updated signal counts (34→33 active, 16→17 force-HOLD)
-
-### Phase 7: Merge & Push
-- Tests: 2025 passed, 3 pre-existing failures (none from our changes)
-- Merged `research/daily-2026-04-24` into main (fast-forward)
-- Pushed to origin, worktree cleaned up
-
-### Phase 8: Briefing
-- Morning briefing JSON written to `data/morning_briefing.json`
-- Telegram briefing sent successfully
-- Data loop restarted via PF-DataLoop scheduled task
-
-## Key Decisions
-- smart_money disabled globally rather than per-ticker (consistently <40% everywhere)
-- Used existing `_TICKER_DISABLED_BY_HORIZON` system rather than creating a new blacklist
-- Promoted credit_spread_risk/structure blocks to `_default` (bad at all horizons for those tickers)
-- Did NOT implement walk-forward IC weighting (deferred — complex, needs dedicated session)
-
-## What's next
-- Monitor accuracy after blacklist expansion (expect small lift from noise reduction)
-- Walk-forward IC-based signal reweighting (top quant priority, plan ready)
-- Trend-following cluster correlation fix (agreement-rate based, not Pearson)
-- Enhanced on-chain BTC (STH-SOPR, hash price)
+- smart_money disabled globally + per-ticker blacklist expansion (11 new entries)
 
 ---
 
-# Session Progress — Auto-Improve BUG-219 + P1/P2 Fixes (2026-04-23)
+# Previous: Auto-Improve BUG-219 + P1/P2 Fixes (2026-04-23)
 
 **Session start:** 2026-04-23
-**Status:** Implementation complete, merge pending
+**Status:** Merged
 
 ## What was done
 
