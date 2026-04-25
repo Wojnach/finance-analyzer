@@ -68,7 +68,7 @@ Remove the file to re-enable. See
 ## Overview
 
 Autonomous two-layer trading system. Layer 1 (Python, 60s loop) collects market data, computes
-33 active signals (50 modules registered, 17 force-HOLD) across 7 timeframes for 5 Tier-1
+33 active signals (51 modules registered, 18 force-HOLD) across 7 timeframes for 5 Tier-1
 instruments, and detects meaningful triggers. Layer 2 (Claude CLI subprocess) is invoked on
 triggers to make trade decisions for two simulated portfolios (Patient & Bold, each starting
 500K SEK). A separate metals subsystem trades Avanza warrants independently.
@@ -80,7 +80,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 ## Architecture
 
 ### Layer 1: Data Loop (`portfolio/main.py`)
-- 60s cycle: fetch OHLCV → compute indicators → run 33 active signals → detect triggers → write summaries
+- 60s cycle: fetch OHLCV → compute indicators → run 33 active signals (51 modules) → detect triggers → write summaries
 - Parallel ticker processing (ThreadPoolExecutor, 8 workers)
 - Crash recovery: exponential backoff (10s→5min), Telegram alerts (first 5 only)
 - Entry: `.venv/Scripts/python.exe -u portfolio/main.py --loop` (via `scripts/win/pf-loop.bat`)
@@ -110,7 +110,7 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 - **GoldDigger** (`portfolio/golddigger/`): Gold certificate trading (dry-run/live via Avanza)
 - **Elongir** (`portfolio/elongir/`): Equity trading bot (separate signal system)
 
-## Signal System (50 Modules · 34 Active)
+## Signal System (51 Modules · 33 Active · 18 Disabled)
 
 ### Core Active (10)
 1. RSI(14) — Oversold <30 BUY, overbought >70 SELL
@@ -154,10 +154,12 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 33. COT Positioning — CFTC speculative/commercial positioning, contrarian (metals only)
 34. Credit Spread Risk — HY OAS from FRED as cross-asset risk appetite gauge
 
-### Enhanced Disabled (16 — force-HOLD via DISABLED_SIGNALS)
+### Enhanced Disabled (18 — force-HOLD via DISABLED_SIGNALS)
 - ML Classifier — 41.7% accuracy, worse than coin flip
 - Oscillators — below 45% on all tickers at 1d
 - Orderbook Flow — 51.1% accuracy, 93.3% activation, no recent data
+- Smart Money — disabled globally 2026-04-24 (per-ticker blacklist)
+- Mahalanobis Turbulence — disabled, pending live validation (added 2026-04-24)
 - Futures Basis, Hurst Regime, Shannon Entropy, VIX Term Structure,
   Gold Real Yield Paradox, Cross-Asset TSMOM, Copper/Gold Ratio,
   Statistical Jump Regime, Network Momentum, OVX Metals Spillover,
@@ -197,7 +199,7 @@ XBT-TRACKER (→BTC), ETH-TRACKER (→ETH), MINI-SILVER (→XAG 5x)
 `trigger.py` (change detection), `market_timing.py` (DST-aware hours)
 
 ### Signal Pipeline
-`signal_engine.py` (50-signal voting, 33 active), `signal_registry.py` (plugin discovery),
+`signal_engine.py` (51-signal voting, 33 active), `signal_registry.py` (plugin discovery),
 `signals/*.py` (38 enhanced modules), `accuracy_stats.py` (hit rates),
 `outcome_tracker.py` (backfill), `forecast_accuracy.py` (model health)
 

@@ -1,7 +1,56 @@
-# Session Progress — Auto-Improve BUG-219 + P1/P2 Fixes (2026-04-23)
+# Session Progress — Auto-Improve BUG-223/224/225 Fixes (2026-04-25)
+
+**Session start:** 2026-04-25
+**Status:** Implementation complete, merge pending
+
+## What was done
+
+### Phase 1: Deep Exploration
+4 parallel agents explored: signal engine, portfolio/risk, infrastructure, metals/trading.
+Manual verification of all P0/P1 findings against actual code. 32 false positives rejected.
+
+### Phase 2: Plan
+Wrote `docs/IMPROVEMENT_PLAN.md` with 3 batches targeting 3 confirmed bugs + doc updates.
+
+### Phase 3: Implementation (3 commits)
+
+**Batch 1: BUG-223 Stop-Loss sell_price Validation** (9f8dea6e)
+- `avanza_session.py:748`: Non-trailing MONETARY stop-losses now reject sell_price <= 0.
+  A zero sell_price on LESS_OR_EQUAL trigger would execute as market sell at worst price.
+  Trailing stops (FOLLOW_DOWNWARDS/UPWARDS) with sell_price=0 remain allowed (by design).
+- 2 new tests: rejects zero for monetary, allows zero for trailing.
+
+**Batch 2: BUG-224 + BUG-225** (e8b390a1)
+- `signal_engine.py:3137`: Added `_voters_post_filter` to extra_info after persistence
+  filter. `_voters` was recording pre-filter count, inflating accuracy tracking downstream.
+- `equity_curve.py:236`: Extracted mean before Sharpe std-dev generator (was O(n²), now O(n)).
+- 2 new tests for post-persistence voter count logic.
+
+**Batch 3: Documentation**
+- Updated signal counts in CLAUDE.md and SYSTEM_OVERVIEW.md: 50→51 modules, 34→33 active, 16→18 disabled.
+- Added smart_money and mahalanobis_turbulence to disabled signals list.
+
+## Test Results
+- All affected tests pass (6 stop-loss, 33 circuit breaker, 74 equity curve)
+- 4 new tests, all pass
+- Zero regressions
+
+## Key Decisions
+- BUG-223: safety-critical, could cause market sell at worst price. Simple guard.
+- BUG-224: kept `_voters` for backwards compat, added `_voters_post_filter` alongside.
+- BUG-225: performance only (O(n²)→O(n)), numerically identical result.
+- BUG-226 deferred: exit optimizer cost model needs deeper investigation to avoid regression.
+
+## What's next
+- Merge worktree into main, push, restart loops
+- BUG-226 (exit optimizer hold-to-close EV omits cost model) — deferred, needs investigation
+
+---
+
+# Previous: Auto-Improve BUG-219 + P1/P2 Fixes (2026-04-23)
 
 **Session start:** 2026-04-23
-**Status:** Implementation complete, merge pending
+**Status:** Merged
 
 ## What was done
 
