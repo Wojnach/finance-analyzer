@@ -232,8 +232,10 @@ def compute_metrics(curve: list[dict], strategy: str) -> dict:
             mean_excess = sum(r - daily_rf for r in daily_rets_dec) / len(daily_rets_dec)
             if daily_vol > 0:
                 # Annualize Sharpe: mean_excess / daily_std * sqrt(252)
+                # BUG-225: extract mean to avoid O(n^2) recomputation inside generator
+                mean_dec = sum(daily_rets_dec) / len(daily_rets_dec)
                 daily_std_dec = math.sqrt(
-                    sum((r - sum(daily_rets_dec) / len(daily_rets_dec)) ** 2
+                    sum((r - mean_dec) ** 2
                         for r in daily_rets_dec) / (len(daily_rets_dec) - 1)
                 )
                 if daily_std_dec > 0:
