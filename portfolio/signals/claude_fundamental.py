@@ -717,14 +717,71 @@ def _refresh_tier(tier, context):
     _journal_refresh(tier, results)
 
 
+def _is_tier_biased(tier: str) -> bool:
+    """Detect BUY or SELL bias from recent journal entries.
+
+    If a tier has >75% of its recent non-abstention votes in one direction,
+    it's structurally biased and should be downweighted in the cascade.
+    Uses the last 30 journal entries for the tier.
+
+    2026-04-25: Added to fix Sonnet (83% BUY) and Opus (78% BUY) bias that
+    collapsed claude_fundamental from 59.4% to 37.9% recent accuracy.
+    """
+    _BIAS_THRESHOLD = 0.75
+    _BIAS_MIN_SAMPLES = 10
+
+    try:
+        from portfolio.file_utils import load_jsonl_tail
+        entries = load_jsonl_tail(_CF_LOG, max_entries=200)
+    except Exception:
+        return False
+
+    tier_votes = [
+        e.get("action", "HOLD")
+        for e in entries
+        if e.get("tier") == tier and not e.get("is_abstention", False)
+    ]
+    # Only check most recent entries
+    tier_votes = tier_votes[-30:] if len(tier_votes) > 30 else tier_votes
+
+    non_hold = [v for v in tier_votes if v != "HOLD"]
+    if len(non_hold) < _BIAS_MIN_SAMPLES:
+        return False
+
+    from collections import Counter
+    counts = Counter(non_hold)
+    most_common_count = counts.most_common(1)[0][1]
+    bias_rate = most_common_count / len(non_hold)
+
+    if bias_rate > _BIAS_THRESHOLD:
+        logger.info(
+            "Claude fundamental %s tier biased: %.0f%% %s (%d non-HOLD votes)",
+            tier, bias_rate * 100, counts.most_common(1)[0][0], len(non_hold),
+        )
+        return True
+    return False
+
+
 def _get_best_result(ticker):
-    """Cascade: Opus > Sonnet > Haiku. Return best available result for ticker."""
-    # Prefer higher tier with a non-HOLD vote
+    """Cascade: Opus > Sonnet > Haiku. Return best available result for ticker.
+
+    2026-04-25: Added bias detection. When a higher tier has >75% BUY (or SELL)
+    bias, its non-HOLD vote is treated as HOLD for cascade purposes. This lets
+    Haiku's prudent HOLD win over Sonnet/Opus's structural optimism in ranging
+    markets. The bias detector uses a rolling 30-entry window from the journal.
+    """
+    # Prefer higher tier with a non-HOLD vote, unless that tier is biased
     for tier in ("opus", "sonnet", "haiku"):
         result = _cache[tier]["results"].get(ticker)
         if result and result.get("action") != "HOLD":
-            return result
-    # All tiers say HOLD — return highest-tier available
+            if not _is_tier_biased(tier):
+                return result
+            # Tier is biased — skip its non-HOLD vote, treat as HOLD
+            logger.debug(
+                "Skipping biased %s tier vote (%s) for %s",
+                tier, result.get("action"), ticker,
+            )
+    # All tiers say HOLD (or biased tiers skipped) — return highest-tier available
     for tier in ("opus", "sonnet", "haiku"):
         result = _cache[tier]["results"].get(ticker)
         if result:

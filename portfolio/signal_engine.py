@@ -687,8 +687,14 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
         # funding 74.2% at 3h (535 sam) — NOT gated here.
         # 2026-04-11: sentiment added — 33.8% at 3h_recent (3629 sam). The 0.5x
         # horizon weight is insufficient; this signal actively harms 3h consensus.
-        "3h": frozenset({"fear_greed", "macro_regime", "sentiment"}),
-        "4h": frozenset({"fear_greed", "macro_regime", "sentiment"}),
+        # 2026-04-25: claude_fundamental added — 0 accuracy samples at 3h so
+        # the accuracy gate defaults to 0.5 and passes the 47% gate. At 1d the
+        # fast-blended accuracy is ~40% (correctly gated), but at 3h it escapes.
+        # Fundamentals operate on hours/days timescale, not 3h. Sonnet/Opus have
+        # 78-83% BUY bias (500-entry audit), so the ungateed BUY vote at 3h is
+        # pure noise. Gate at 3h/4h in ranging; let it vote at 12h/1d/3d/5d.
+        "3h": frozenset({"fear_greed", "macro_regime", "sentiment", "claude_fundamental"}),
+        "4h": frozenset({"fear_greed", "macro_regime", "sentiment", "claude_fundamental"}),
     },
     "trending-up": {
         # BUG-152: SELL-biased signals have 0-11% accuracy in trending-up.
