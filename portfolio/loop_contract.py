@@ -41,7 +41,11 @@ CLAUDE_INVOCATIONS_FILE = DATA_DIR / "claude_invocations.jsonl"
 LAYER2_INVOCATIONS_FILE = DATA_DIR / "invocations.jsonl"
 
 # Thresholds
-MAX_CYCLE_DURATION_S = 180
+# 2026-04-09: cadence bumped to 600s, _TICKER_POOL_TIMEOUT bumped to 360s.
+# Contract limit updated from 180s (60s-cadence era) to match the pool timeout
+# so normal 200–265s cycles don't false-positive. Any cycle exceeding 360s
+# means the pool hit its timeout — that's the genuine-hang threshold.
+MAX_CYCLE_DURATION_S = 360
 MIN_SUCCESS_RATE = 0.5
 SIGNAL_DROP_THRESHOLD = 0.3  # >30% drop in voter count = warning
 ESCALATION_THRESHOLD = 3     # consecutive warnings → CRITICAL

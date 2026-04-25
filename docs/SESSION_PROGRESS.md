@@ -1,3 +1,59 @@
+# Session Progress — After-Hours Research 2026-04-24
+
+**Session start:** 2026-04-24 ~21:00 UTC
+**Status:** Complete, merged, pushed, loop restarted
+
+## What was done
+
+### Phases 0-3: Research
+- Phase 0: Daily review — system health OK, 33→34 active signals, 2025/2028 tests passing
+- Phase 1: Macro — BTC approaching 80K resistance (post-halving window), gold 4750 (central banks 27t/mo), silver 76 (China export restrictions), oil +17% weekly (Iran)
+- Phase 2: Quant — walk-forward IC weighting top priority (Sharpe 1.18), on-chain BTC 84.3% potential, trend cluster r=0.44-0.72 causing trigger spam
+- Phase 3: Signal audit — per-ticker accuracy divergences massive (econ_calendar 69% XAU vs 1.8% crypto, ema 71.6% MSTR vs 14.7% XAG)
+
+### Phase 5: Plan
+Wrote `docs/RESEARCH_PLAN.md` with prioritized implementation batches.
+
+### Phase 6: Implementation (1 commit, 8fe0be35)
+
+**Batch 1: smart_money disable + per-ticker blacklist expansion**
+- `tickers.py`: Added `smart_money` to DISABLED_SIGNALS (below 40% on ALL Tier 1 tickers)
+- `signal_engine.py`: Expanded `_TICKER_DISABLED_BY_HORIZON["_default"]` with 11 new (signal, ticker) entries:
+  - ETH-USD: +ema (17.6%), +futures_flow (32.6%)
+  - BTC-USD: +futures_flow (39.7%)
+  - XAG-USD: +structure (29.9%), +ema (14.7%)
+  - XAU-USD: +structure (30.4%), +credit_spread_risk (35.4%), +macro_regime (34.3%)
+- `signal_engine.py`: Expanded `_TICKER_DISABLED_BY_HORIZON["1d"]`:
+  - BTC-USD: +econ_calendar (1.8%), +ema (23.8%)
+  - ETH-USD: +econ_calendar (1.8%), +funding (12.5%)
+  - XAG-USD: +econ_calendar (29.5%)
+- `signal_engine.py`: Fixed `_compute_applicable_count` to subtract per-ticker blacklisted signals
+- `CLAUDE.md`: Updated signal counts (34→33 active, 16→17 force-HOLD)
+
+### Phase 7: Merge & Push
+- Tests: 2025 passed, 3 pre-existing failures (none from our changes)
+- Merged `research/daily-2026-04-24` into main (fast-forward)
+- Pushed to origin, worktree cleaned up
+
+### Phase 8: Briefing
+- Morning briefing JSON written to `data/morning_briefing.json`
+- Telegram briefing sent successfully
+- Data loop restarted via PF-DataLoop scheduled task
+
+## Key Decisions
+- smart_money disabled globally rather than per-ticker (consistently <40% everywhere)
+- Used existing `_TICKER_DISABLED_BY_HORIZON` system rather than creating a new blacklist
+- Promoted credit_spread_risk/structure blocks to `_default` (bad at all horizons for those tickers)
+- Did NOT implement walk-forward IC weighting (deferred — complex, needs dedicated session)
+
+## What's next
+- Monitor accuracy after blacklist expansion (expect small lift from noise reduction)
+- Walk-forward IC-based signal reweighting (top quant priority, plan ready)
+- Trend-following cluster correlation fix (agreement-rate based, not Pearson)
+- Enhanced on-chain BTC (STH-SOPR, hash price)
+
+---
+
 # Session Progress — Auto-Improve BUG-219 + P1/P2 Fixes (2026-04-23)
 
 **Session start:** 2026-04-23

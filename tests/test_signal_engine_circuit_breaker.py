@@ -40,6 +40,20 @@ class TestCircuitBreakerConstants:
         ratio = _GATE_RELAXATION_MAX / _GATE_RELAXATION_STEP
         assert ratio == pytest.approx(round(ratio), abs=1e-9)
 
+    def test_high_sample_min_at_10000(self):
+        """2026-04-16 review (Reviewer 3 P1-1): pin the tiered-gate sample
+        threshold. Was raised 5000 -> 10000 during the gating reconfig so
+        signals with 5-10K samples aren't caught by the tighter 0.50 gate
+        during regime transitions. Regression test against a silent revert.
+        """
+        from portfolio.signal_engine import _ACCURACY_GATE_HIGH_SAMPLE_MIN
+        assert _ACCURACY_GATE_HIGH_SAMPLE_MIN == 10000
+
+    def test_high_sample_threshold_at_050(self):
+        """Companion pin: the tiered gate at the high-sample tier stays 0.50."""
+        from portfolio.signal_engine import _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD
+        assert _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD == pytest.approx(0.50)
+
 
 class TestCountActiveVotersAtGate:
     """Helper correctness: counts active voters at a given relaxation level."""
@@ -423,6 +437,77 @@ class TestComputeGateRelaxation:
             votes, accuracy, excluded=None, group_gated=None, base_gate=0.47,
         )
         assert rel == 0.0  # 6 signals all pass; no relaxation needed
+
+    def test_intermediate_step_relaxation(self):
+        """2026-04-16 review (Reviewer 3 P2-5): explicit test for the 0.04
+        intermediate step. Previous tests only checked step 0 (no-op), step 1
+        (0.02), and max (0.06). A loop off-by-one that made step 2 land at
+        0.06 would slip through. 4 passing + 3 borderline at 0.44 requires
+        exactly 0.04 relaxation.
+        """
+        # 4 signals that pass any gate + 3 at 0.44 (below 0.45 relaxed gate
+        # but above 0.43). Floor of 5 requires 1 of the 0.44 signals.
+        votes = {f"s{i}": "BUY" for i in range(7)}
+        accuracy = {f"s{i}": self._make_stats(0.60) for i in range(4)}
+        accuracy.update({f"s{i}": self._make_stats(0.44) for i in range(4, 7)})
+        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
+        # Effective gate after relaxation = 0.47 - rel. Need 0.44 > 0.47 - rel,
+        # i.e. rel > 0.03. Smallest step meeting this: 0.04.
+        assert rel == pytest.approx(0.04)
+
+
+class TestCircuitBreakerHighSampleInteraction:
+    """2026-04-16 review (Reviewer 3 P1-2): verify the tiered high-sample gate
+    (>=10000 samples -> 0.50 floor) correctly subtracts relaxation, not just
+    the standard gate (0.47 floor). Without this test, a logic bug that
+    forgets to apply relaxation to the high-sample tier would go unnoticed."""
+
+    def _make_stats(self, acc, total=200):
+        return {
+            "accuracy": acc, "total": total,
+            "buy_accuracy": acc, "sell_accuracy": acc,
+            "total_buy": total // 2, "total_sell": total // 2,
+        }
+
+    def test_high_sample_tier_relaxed_uniformly(self):
+        """A 10K-sample signal at 0.48 should be gated at the 0.50 high-sample
+        floor without relaxation, but pass once the gate is relaxed by 0.02
+        (effective high-sample gate becomes 0.48)."""
+        from portfolio.signal_engine import _count_active_voters_at_gate
+        votes = {"big": "BUY"}
+        accuracy = {"big": self._make_stats(0.48, total=10000)}
+        # No relaxation: effective gate max(0.47, 0.50) = 0.50 > 0.48 -> gated.
+        assert _count_active_voters_at_gate(
+            votes, accuracy, set(), set(), 0.47, 0.0,
+        ) == 0
+        # 0.02 relaxation: effective gate max(0.45, 0.48) = 0.48, NOT < 0.48 -> passes.
+        assert _count_active_voters_at_gate(
+            votes, accuracy, set(), set(), 0.47, 0.02,
+        ) == 1
+
+    def test_high_sample_and_low_sample_mixed_scenario(self):
+        """Mixed population: 3 low-sample signals at 0.45 (pass base 0.47-0.02)
+        and 3 high-sample at 0.49 (pass high 0.50-0.02). Floor of 5 requires
+        relaxation exactly 0.02 so all 6 pass."""
+        from portfolio.signal_engine import _count_active_voters_at_gate
+        votes = {f"s{i}": "BUY" for i in range(6)}
+        accuracy = {}
+        for i in range(3):
+            accuracy[f"s{i}"] = self._make_stats(0.45, total=200)
+        for i in range(3, 6):
+            accuracy[f"s{i}"] = self._make_stats(0.49, total=10000)
+        # Base: low-sample fail (0.45 < 0.47), high-sample fail (0.49 < 0.50) -> 0 active.
+        assert _count_active_voters_at_gate(
+            votes, accuracy, set(), set(), 0.47, 0.0,
+        ) == 0
+        # 0.02 relax: low-sample (0.45 < 0.45 False, passes), high-sample
+        # (0.49 < 0.48 False, passes) -> all 6 active.
+        assert _count_active_voters_at_gate(
+            votes, accuracy, set(), set(), 0.47, 0.02,
+        ) == 6
+        # _compute_gate_relaxation should pick exactly 0.02 (smallest that meets floor 5).
+        rel = _compute_gate_relaxation(votes, accuracy, set(), set(), 0.47)
+        assert rel == pytest.approx(0.02)
 
 
 class TestCircuitBreakerIntegration:
