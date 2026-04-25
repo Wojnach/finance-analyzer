@@ -1,264 +1,1214 @@
 {
-  "date": "2026-04-20",
+  "generated_at": "2026-04-25T21:39:11.291626+00:00",
+  "analysis_window": "last 500 signal_log entries",
   "top_signals": [
     {
-      "signal": "funding",
-      "accuracy_3h": 74.2,
-      "samples_3h": 535,
-      "note": "Best 3h signal but only active for crypto"
-    },
-    {
-      "signal": "calendar",
-      "accuracy_3h": 67.9,
-      "accuracy_1d": 58.5,
-      "samples": 4928,
-      "note": "Time-based patterns working. BUT IC=0.000 \u2014 phantom performer (accuracy from drift not prediction)"
-    },
-    {
       "signal": "econ_calendar",
-      "accuracy_1d": 62.6,
-      "samples": 4617,
-      "note": "SELL-only signal, strong when events occur"
-    },
-    {
-      "signal": "claude_fundamental",
-      "accuracy_1d": 61.6,
-      "samples": 9960,
-      "note": "LLM cascade. BUT IC=-0.020 \u2014 phantom performer (correct on small moves, wrong on big ones)"
+      "accuracy_1d_pct": 62.6,
+      "samples_1d": 4617,
+      "accuracy_3h_pct": 59.9,
+      "samples_3h": 2402,
+      "disabled": false,
+      "accuracy_1d_recent_pct": 0.0
     },
     {
       "signal": "qwen3",
-      "accuracy_3h": 59.4,
-      "accuracy_1d": 60.0,
-      "samples": 3651,
-      "note": "Local LLM, consistent across horizons"
+      "accuracy_1d_pct": 60.0,
+      "samples_1d": 3654,
+      "accuracy_3h_pct": 59.4,
+      "samples_3h": 3385,
+      "disabled": false,
+      "accuracy_1d_recent_pct": 100.0
     },
     {
-      "signal": "ministral",
-      "accuracy_3h": 52.3,
-      "accuracy_1d_recent": 68.0,
-      "samples": 5859,
-      "note": "Strong recently at 1d (68%), moderate at 3h"
+      "signal": "onchain",
+      "accuracy_1d_pct": 60.0,
+      "samples_1d": 45,
+      "accuracy_3h_pct": 0,
+      "samples_3h": 0,
+      "disabled": false,
+      "accuracy_1d_recent_pct": 0.0
     },
     {
-      "signal": "news_event",
-      "accuracy_3h": 58.5,
-      "samples_3h": 4904,
-      "note": "Pure short-term signal (1d=50.2%). Gets 1.4x boost at 3h"
+      "signal": "claude_fundamental",
+      "accuracy_1d_pct": 59.4,
+      "samples_1d": 11012,
+      "accuracy_3h_pct": 0.0,
+      "samples_3h": 0,
+      "disabled": false,
+      "accuracy_1d_recent_pct": 37.9
     },
     {
-      "signal": "credit_spread_risk",
-      "accuracy_1d": 58.4,
-      "ic": 0.201,
-      "icir": 0.521,
-      "samples": 1066,
-      "note": "HIGHEST positive IC. Unique signal. Most stable edge."
+      "signal": "calendar",
+      "accuracy_1d_pct": 58.7,
+      "samples_1d": 7772,
+      "accuracy_3h_pct": 67.9,
+      "samples_3h": 4928,
+      "disabled": false,
+      "accuracy_1d_recent_pct": 63.6
     },
     {
       "signal": "fear_greed",
-      "accuracy_1d": 58.6,
-      "accuracy_3h": 53.9,
-      "samples": 10232,
-      "note": "Contrarian indicator. Strong at 1d, weaker at 3h."
+      "accuracy_1d_pct": 58.6,
+      "samples_1d": 10232,
+      "accuracy_3h_pct": 53.9,
+      "samples_3h": 7205,
+      "disabled": false,
+      "accuracy_1d_recent_pct": 0.0
     },
     {
-      "signal": "mean_reversion",
-      "accuracy_1d_recent": 65.4,
-      "accuracy_3h": 53.1,
-      "samples": 22601,
-      "note": "Excellent in current ranging regime"
+      "signal": "ministral",
+      "accuracy_1d_pct": 58.4,
+      "samples_1d": 5900,
+      "accuracy_3h_pct": 52.3,
+      "samples_3h": 4733,
+      "disabled": false,
+      "accuracy_1d_recent_pct": 38.1
     }
   ],
   "worst_signals": [
     {
-      "signal": "funding",
-      "accuracy_1d": 29.1,
-      "samples": 657,
-      "note": "Best at 3h (74.2%) but WORST at 1d (29.1%!) \u2014 extreme horizon dependency"
+      "signal": "volatility_sig",
+      "accuracy_1d_pct": 46.6,
+      "samples_1d": 6135,
+      "accuracy_3h_pct": 47.2,
+      "samples_3h": 2072,
+      "disabled": false,
+      "accuracy_1d_recent_pct": 45.4
     },
     {
-      "signal": "futures_flow",
-      "accuracy_1d": 38.4,
-      "samples": 1631,
-      "note": "Both directions bad (buy=42%, sell=37%). In cross_asset_flow cluster."
-    },
-    {
-      "signal": "trend",
-      "accuracy_3h_alltime": 40.3,
-      "accuracy_3h_recent": 61.6,
-      "samples": 11125,
-      "note": "Terrible all-time at 3h but RECOVERING recently (61.6%!). Regime-dependent."
-    },
-    {
-      "signal": "fibonacci",
-      "accuracy_1d": 42.9,
-      "accuracy_3h": 43.3,
-      "accuracy_1d_recent": 68.2,
-      "note": "ALL-TIME bad but RECENT 1d is 68.2%! Wild variance by regime."
-    },
-    {
-      "signal": "macd",
-      "accuracy_1d": 43.9,
-      "accuracy_1d_recent": 58.7,
-      "note": "All-time gated but recent is 58.7% \u2014 ranging crossovers working"
-    },
-    {
-      "signal": "ml",
-      "accuracy_1d": 41.7,
-      "note": "Globally disabled. ETH-specific rescue at 55.1%."
+      "signal": "macro_regime",
+      "accuracy_1d_pct": 46.4,
+      "samples_1d": 27781,
+      "accuracy_3h_pct": 45.1,
+      "samples_3h": 20305,
+      "disabled": false,
+      "accuracy_1d_recent_pct": 40.8
     },
     {
       "signal": "sentiment",
-      "accuracy_1d": 45.9,
-      "accuracy_3h": 45.1,
-      "samples": 39087,
-      "note": "Massive sample, persistently marginal. In macro_external cluster at 0.15x."
+      "accuracy_1d_pct": 45.9,
+      "samples_1d": 39326,
+      "accuracy_3h_pct": 45.1,
+      "samples_3h": 31590,
+      "disabled": false,
+      "accuracy_1d_recent_pct": 45.2
     },
     {
-      "signal": "forecast",
-      "accuracy_1d_recent": 36.1,
-      "accuracy_3h": 47.2,
-      "note": "Time-series models failing badly at 1d recently (36.1%). Chronos/Kronos degraded."
+      "signal": "oscillators",
+      "accuracy_1d_pct": 45.6,
+      "samples_1d": 5345,
+      "accuracy_3h_pct": 43.0,
+      "samples_3h": 1366,
+      "disabled": false,
+      "accuracy_1d_recent_pct": 0.0
+    },
+    {
+      "signal": "trend",
+      "accuracy_1d_pct": 45.5,
+      "samples_1d": 16049,
+      "accuracy_3h_pct": 40.3,
+      "samples_3h": 11125,
+      "disabled": false,
+      "accuracy_1d_recent_pct": 41.0
+    },
+    {
+      "signal": "macd",
+      "accuracy_1d_pct": 44.1,
+      "samples_1d": 6009,
+      "accuracy_3h_pct": 43.7,
+      "samples_3h": 4952,
+      "disabled": false,
+      "accuracy_1d_recent_pct": 52.5
+    },
+    {
+      "signal": "fibonacci",
+      "accuracy_1d_pct": 43.2,
+      "samples_1d": 16607,
+      "accuracy_3h_pct": 43.3,
+      "samples_3h": 8811,
+      "disabled": false,
+      "accuracy_1d_recent_pct": 50.3
+    },
+    {
+      "signal": "ml",
+      "accuracy_1d_pct": 41.7,
+      "samples_1d": 1714,
+      "accuracy_3h_pct": 52.3,
+      "samples_3h": 1705,
+      "disabled": true,
+      "accuracy_1d_recent_pct": 0.0
+    },
+    {
+      "signal": "futures_flow",
+      "accuracy_1d_pct": 37.2,
+      "samples_1d": 2029,
+      "accuracy_3h_pct": 50.0,
+      "samples_3h": 8,
+      "disabled": false,
+      "accuracy_1d_recent_pct": 37.3
+    },
+    {
+      "signal": "funding",
+      "accuracy_1d_pct": 30.7,
+      "samples_1d": 694,
+      "accuracy_3h_pct": 74.2,
+      "samples_3h": 535,
+      "disabled": false,
+      "accuracy_1d_recent_pct": 30.6
     }
   ],
-  "correlation_clusters": [
-    {
-      "name": "trend_direction",
-      "members": [
-        "ema",
-        "macd",
-        "trend",
-        "heikin_ashi",
-        "volume_flow",
-        "macro_regime",
-        "momentum_factors",
-        "structure",
-        "oscillators"
-      ],
-      "penalty": 0.12,
-      "effective_weight": 1.96,
-      "note": "9-member mega-cluster. 100% agreement when co-active. Leader gets 1.0x, 8 followers get 0.12x each."
-    },
-    {
-      "name": "macro_external",
-      "members": [
-        "fear_greed",
-        "sentiment",
-        "news_event",
-        "calendar",
-        "econ_calendar",
-        "funding"
-      ],
-      "penalty": 0.15,
-      "effective_weight": 1.75,
-      "note": "6-member cluster of macro/sentiment signals. 100% agreement observed."
-    },
-    {
-      "name": "momentum_cluster",
-      "members": [
-        "mean_reversion",
-        "rsi",
+  "correlation_clusters": {
+    "BTC-USD": {
+      "active_signals": [
         "bb",
-        "momentum"
-      ],
-      "penalty": 0.15,
-      "effective_weight": 1.45,
-      "note": "Mean-reversion family. 88-100% agreement."
-    },
-    {
-      "name": "fundamental_cluster",
-      "members": [
-        "claude_fundamental",
-        "crypto_macro"
-      ],
-      "penalty": 0.3,
-      "effective_weight": 1.3,
-      "note": "LLM + macro fundamentals. 100% agreement (92 co-occurrences)."
-    },
-    {
-      "name": "cross_asset_flow",
-      "members": [
-        "credit_spread_risk",
-        "futures_flow"
-      ],
-      "penalty": 0.3,
-      "effective_weight": 1.3,
-      "note": "Flow-based cross-asset signals."
-    },
-    {
-      "name": "pattern_based",
-      "members": [
+        "calendar",
         "candlestick",
-        "fibonacci"
+        "claude_fundamental",
+        "credit_spread_risk",
+        "crypto_macro",
+        "fibonacci",
+        "forecast",
+        "funding",
+        "futures_flow",
+        "macd",
+        "macro_regime",
+        "mean_reversion",
+        "momentum",
+        "momentum_factors",
+        "news_event",
+        "rsi",
+        "structure",
+        "trend",
+        "volatility_sig",
+        "volume",
+        "volume_flow"
       ],
-      "penalty": 0.3,
-      "effective_weight": 1.3,
-      "note": "Price pattern recognition. r=0.708 on BTC."
+      "high_agreement_pairs": [
+        {
+          "signal_1": "bb",
+          "signal_2": "macd",
+          "agreement_pct": 85.0
+        },
+        {
+          "signal_1": "funding",
+          "signal_2": "macd",
+          "agreement_pct": 84.0
+        },
+        {
+          "signal_1": "bb",
+          "signal_2": "funding",
+          "agreement_pct": 83.0
+        }
+      ],
+      "high_directional_pairs": [
+        {
+          "signal_1": "claude_fundamental",
+          "signal_2": "crypto_macro",
+          "agreement_pct": 79.4
+        },
+        {
+          "signal_1": "crypto_macro",
+          "signal_2": "structure",
+          "agreement_pct": 74.5
+        },
+        {
+          "signal_1": "momentum_factors",
+          "signal_2": "trend",
+          "agreement_pct": 73.8
+        },
+        {
+          "signal_1": "claude_fundamental",
+          "signal_2": "structure",
+          "agreement_pct": 69.3
+        },
+        {
+          "signal_1": "momentum_factors",
+          "signal_2": "structure",
+          "agreement_pct": 68.4
+        },
+        {
+          "signal_1": "structure",
+          "signal_2": "trend",
+          "agreement_pct": 66.8
+        },
+        {
+          "signal_1": "trend",
+          "signal_2": "volume_flow",
+          "agreement_pct": 66.7
+        },
+        {
+          "signal_1": "macro_regime",
+          "signal_2": "trend",
+          "agreement_pct": 66.0
+        },
+        {
+          "signal_1": "macro_regime",
+          "signal_2": "momentum_factors",
+          "agreement_pct": 63.8
+        },
+        {
+          "signal_1": "momentum_factors",
+          "signal_2": "volume_flow",
+          "agreement_pct": 63.0
+        },
+        {
+          "signal_1": "structure",
+          "signal_2": "volume_flow",
+          "agreement_pct": 59.3
+        },
+        {
+          "signal_1": "macro_regime",
+          "signal_2": "structure",
+          "agreement_pct": 56.3
+        },
+        {
+          "signal_1": "crypto_macro",
+          "signal_2": "momentum_factors",
+          "agreement_pct": 55.3
+        },
+        {
+          "signal_1": "macro_regime",
+          "signal_2": "volume_flow",
+          "agreement_pct": 53.5
+        },
+        {
+          "signal_1": "crypto_macro",
+          "signal_2": "volume_flow",
+          "agreement_pct": 52.6
+        },
+        {
+          "signal_1": "claude_fundamental",
+          "signal_2": "momentum_factors",
+          "agreement_pct": 52.0
+        },
+        {
+          "signal_1": "crypto_macro",
+          "signal_2": "trend",
+          "agreement_pct": 48.8
+        },
+        {
+          "signal_1": "claude_fundamental",
+          "signal_2": "volume_flow",
+          "agreement_pct": 45.9
+        },
+        {
+          "signal_1": "claude_fundamental",
+          "signal_2": "trend",
+          "agreement_pct": 45.3
+        },
+        {
+          "signal_1": "mean_reversion",
+          "signal_2": "rsi",
+          "agreement_pct": 45.3
+        },
+        {
+          "signal_1": "claude_fundamental",
+          "signal_2": "futures_flow",
+          "agreement_pct": 43.0
+        },
+        {
+          "signal_1": "mean_reversion",
+          "signal_2": "momentum",
+          "agreement_pct": 41.8
+        },
+        {
+          "signal_1": "volatility_sig",
+          "signal_2": "volume_flow",
+          "agreement_pct": 41.0
+        },
+        {
+          "signal_1": "crypto_macro",
+          "signal_2": "macro_regime",
+          "agreement_pct": 40.5
+        },
+        {
+          "signal_1": "claude_fundamental",
+          "signal_2": "macro_regime",
+          "agreement_pct": 40.4
+        }
+      ],
+      "clusters": [
+        [
+          "bb",
+          "funding",
+          "macd"
+        ]
+      ]
+    },
+    "ETH-USD": {
+      "active_signals": [
+        "bb",
+        "calendar",
+        "candlestick",
+        "claude_fundamental",
+        "credit_spread_risk",
+        "crypto_macro",
+        "ema",
+        "fibonacci",
+        "forecast",
+        "funding",
+        "futures_flow",
+        "heikin_ashi",
+        "macd",
+        "macro_regime",
+        "mean_reversion",
+        "momentum",
+        "momentum_factors",
+        "rsi",
+        "structure",
+        "trend",
+        "volatility_sig",
+        "volume",
+        "volume_flow"
+      ],
+      "high_agreement_pairs": [
+        {
+          "signal_1": "ema",
+          "signal_2": "macd",
+          "agreement_pct": 87.2
+        },
+        {
+          "signal_1": "bb",
+          "signal_2": "ema",
+          "agreement_pct": 86.6
+        },
+        {
+          "signal_1": "bb",
+          "signal_2": "macd",
+          "agreement_pct": 85.8
+        },
+        {
+          "signal_1": "bb",
+          "signal_2": "forecast",
+          "agreement_pct": 81.4
+        },
+        {
+          "signal_1": "ema",
+          "signal_2": "forecast",
+          "agreement_pct": 81.2
+        },
+        {
+          "signal_1": "candlestick",
+          "signal_2": "ema",
+          "agreement_pct": 81.0
+        },
+        {
+          "signal_1": "forecast",
+          "signal_2": "macd",
+          "agreement_pct": 81.0
+        },
+        {
+          "signal_1": "candlestick",
+          "signal_2": "macd",
+          "agreement_pct": 80.8
+        }
+      ],
+      "high_directional_pairs": [
+        {
+          "signal_1": "claude_fundamental",
+          "signal_2": "crypto_macro",
+          "agreement_pct": 79.1
+        },
+        {
+          "signal_1": "momentum_factors",
+          "signal_2": "trend",
+          "agreement_pct": 70.7
+        },
+        {
+          "signal_1": "macro_regime",
+          "signal_2": "trend",
+          "agreement_pct": 68.9
+        },
+        {
+          "signal_1": "momentum_factors",
+          "signal_2": "structure",
+          "agreement_pct": 68.2
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "volume_flow",
+          "agreement_pct": 67.8
+        },
+        {
+          "signal_1": "structure",
+          "signal_2": "volume_flow",
+          "agreement_pct": 67.7
+        },
+        {
+          "signal_1": "momentum_factors",
+          "signal_2": "volume_flow",
+          "agreement_pct": 66.7
+        },
+        {
+          "signal_1": "structure",
+          "signal_2": "trend",
+          "agreement_pct": 66.3
+        },
+        {
+          "signal_1": "crypto_macro",
+          "signal_2": "structure",
+          "agreement_pct": 64.4
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "momentum_factors",
+          "agreement_pct": 63.9
+        },
+        {
+          "signal_1": "trend",
+          "signal_2": "volume_flow",
+          "agreement_pct": 63.0
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "trend",
+          "agreement_pct": 62.1
+        },
+        {
+          "signal_1": "macro_regime",
+          "signal_2": "momentum_factors",
+          "agreement_pct": 61.5
+        },
+        {
+          "signal_1": "claude_fundamental",
+          "signal_2": "structure",
+          "agreement_pct": 60.4
+        },
+        {
+          "signal_1": "macro_regime",
+          "signal_2": "structure",
+          "agreement_pct": 59.6
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "structure",
+          "agreement_pct": 59.6
+        },
+        {
+          "signal_1": "macro_regime",
+          "signal_2": "volume_flow",
+          "agreement_pct": 55.3
+        },
+        {
+          "signal_1": "crypto_macro",
+          "signal_2": "momentum_factors",
+          "agreement_pct": 54.7
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "macro_regime",
+          "agreement_pct": 53.3
+        },
+        {
+          "signal_1": "crypto_macro",
+          "signal_2": "volume_flow",
+          "agreement_pct": 51.6
+        },
+        {
+          "signal_1": "claude_fundamental",
+          "signal_2": "momentum_factors",
+          "agreement_pct": 49.9
+        },
+        {
+          "signal_1": "futures_flow",
+          "signal_2": "trend",
+          "agreement_pct": 48.7
+        },
+        {
+          "signal_1": "crypto_macro",
+          "signal_2": "heikin_ashi",
+          "agreement_pct": 47.8
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "volatility_sig",
+          "agreement_pct": 46.8
+        },
+        {
+          "signal_1": "claude_fundamental",
+          "signal_2": "volume_flow",
+          "agreement_pct": 45.4
+        }
+      ],
+      "clusters": [
+        [
+          "bb",
+          "candlestick",
+          "ema",
+          "forecast",
+          "macd"
+        ]
+      ]
+    },
+    "XAG-USD": {
+      "active_signals": [
+        "bb",
+        "calendar",
+        "candlestick",
+        "claude_fundamental",
+        "ema",
+        "fibonacci",
+        "forecast",
+        "heikin_ashi",
+        "macd",
+        "macro_regime",
+        "mean_reversion",
+        "momentum",
+        "momentum_factors",
+        "news_event",
+        "rsi",
+        "sentiment",
+        "structure",
+        "trend",
+        "volatility_sig",
+        "volume",
+        "volume_flow"
+      ],
+      "high_agreement_pairs": [
+        {
+          "signal_1": "bb",
+          "signal_2": "ema",
+          "agreement_pct": 88.7
+        },
+        {
+          "signal_1": "ema",
+          "signal_2": "sentiment",
+          "agreement_pct": 88.5
+        },
+        {
+          "signal_1": "bb",
+          "signal_2": "sentiment",
+          "agreement_pct": 86.6
+        },
+        {
+          "signal_1": "ema",
+          "signal_2": "macd",
+          "agreement_pct": 86.6
+        },
+        {
+          "signal_1": "macd",
+          "signal_2": "sentiment",
+          "agreement_pct": 84.8
+        },
+        {
+          "signal_1": "bb",
+          "signal_2": "macd",
+          "agreement_pct": 84.4
+        },
+        {
+          "signal_1": "candlestick",
+          "signal_2": "sentiment",
+          "agreement_pct": 81.2
+        },
+        {
+          "signal_1": "candlestick",
+          "signal_2": "ema",
+          "agreement_pct": 80.6
+        }
+      ],
+      "high_directional_pairs": [
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "volume_flow",
+          "agreement_pct": 66.5
+        },
+        {
+          "signal_1": "trend",
+          "signal_2": "volume_flow",
+          "agreement_pct": 64.0
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "trend",
+          "agreement_pct": 62.3
+        },
+        {
+          "signal_1": "momentum_factors",
+          "signal_2": "trend",
+          "agreement_pct": 61.2
+        },
+        {
+          "signal_1": "macro_regime",
+          "signal_2": "trend",
+          "agreement_pct": 58.8
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "momentum_factors",
+          "agreement_pct": 58.6
+        },
+        {
+          "signal_1": "momentum_factors",
+          "signal_2": "volume_flow",
+          "agreement_pct": 57.5
+        },
+        {
+          "signal_1": "structure",
+          "signal_2": "trend",
+          "agreement_pct": 51.8
+        },
+        {
+          "signal_1": "structure",
+          "signal_2": "volume_flow",
+          "agreement_pct": 48.9
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "macro_regime",
+          "agreement_pct": 48.6
+        },
+        {
+          "signal_1": "momentum_factors",
+          "signal_2": "structure",
+          "agreement_pct": 48.5
+        },
+        {
+          "signal_1": "macro_regime",
+          "signal_2": "momentum_factors",
+          "agreement_pct": 47.3
+        },
+        {
+          "signal_1": "claude_fundamental",
+          "signal_2": "structure",
+          "agreement_pct": 45.9
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "volatility_sig",
+          "agreement_pct": 45.8
+        },
+        {
+          "signal_1": "macro_regime",
+          "signal_2": "volume_flow",
+          "agreement_pct": 45.1
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "structure",
+          "agreement_pct": 44.4
+        },
+        {
+          "signal_1": "mean_reversion",
+          "signal_2": "rsi",
+          "agreement_pct": 41.6
+        },
+        {
+          "signal_1": "mean_reversion",
+          "signal_2": "momentum",
+          "agreement_pct": 40.6
+        },
+        {
+          "signal_1": "fibonacci",
+          "signal_2": "heikin_ashi",
+          "agreement_pct": 40.2
+        },
+        {
+          "signal_1": "volatility_sig",
+          "signal_2": "volume_flow",
+          "agreement_pct": 40.0
+        },
+        {
+          "signal_1": "claude_fundamental",
+          "signal_2": "momentum_factors",
+          "agreement_pct": 39.0
+        },
+        {
+          "signal_1": "trend",
+          "signal_2": "volatility_sig",
+          "agreement_pct": 37.3
+        },
+        {
+          "signal_1": "fibonacci",
+          "signal_2": "trend",
+          "agreement_pct": 36.2
+        },
+        {
+          "signal_1": "calendar",
+          "signal_2": "claude_fundamental",
+          "agreement_pct": 35.8
+        },
+        {
+          "signal_1": "claude_fundamental",
+          "signal_2": "volume_flow",
+          "agreement_pct": 35.2
+        }
+      ],
+      "clusters": [
+        [
+          "bb",
+          "candlestick",
+          "ema",
+          "macd",
+          "sentiment"
+        ]
+      ]
+    },
+    "XAU-USD": {
+      "active_signals": [
+        "bb",
+        "calendar",
+        "candlestick",
+        "claude_fundamental",
+        "credit_spread_risk",
+        "fibonacci",
+        "forecast",
+        "heikin_ashi",
+        "macd",
+        "macro_regime",
+        "mean_reversion",
+        "momentum",
+        "momentum_factors",
+        "news_event",
+        "rsi",
+        "sentiment",
+        "smart_money",
+        "structure",
+        "trend",
+        "volatility_sig",
+        "volume",
+        "volume_flow"
+      ],
+      "high_agreement_pairs": [
+        {
+          "signal_1": "macd",
+          "signal_2": "sentiment",
+          "agreement_pct": 86.6
+        },
+        {
+          "signal_1": "bb",
+          "signal_2": "sentiment",
+          "agreement_pct": 86.0
+        },
+        {
+          "signal_1": "forecast",
+          "signal_2": "sentiment",
+          "agreement_pct": 86.0
+        },
+        {
+          "signal_1": "forecast",
+          "signal_2": "macd",
+          "agreement_pct": 84.6
+        },
+        {
+          "signal_1": "bb",
+          "signal_2": "forecast",
+          "agreement_pct": 82.8
+        },
+        {
+          "signal_1": "bb",
+          "signal_2": "macd",
+          "agreement_pct": 82.4
+        },
+        {
+          "signal_1": "candlestick",
+          "signal_2": "sentiment",
+          "agreement_pct": 82.4
+        },
+        {
+          "signal_1": "candlestick",
+          "signal_2": "macd",
+          "agreement_pct": 81.4
+        }
+      ],
+      "high_directional_pairs": [
+        {
+          "signal_1": "trend",
+          "signal_2": "volume_flow",
+          "agreement_pct": 66.5
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "volume_flow",
+          "agreement_pct": 66.0
+        },
+        {
+          "signal_1": "claude_fundamental",
+          "signal_2": "structure",
+          "agreement_pct": 65.5
+        },
+        {
+          "signal_1": "momentum_factors",
+          "signal_2": "trend",
+          "agreement_pct": 64.9
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "trend",
+          "agreement_pct": 62.7
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "momentum_factors",
+          "agreement_pct": 60.6
+        },
+        {
+          "signal_1": "momentum_factors",
+          "signal_2": "volume_flow",
+          "agreement_pct": 57.1
+        },
+        {
+          "signal_1": "macro_regime",
+          "signal_2": "trend",
+          "agreement_pct": 55.0
+        },
+        {
+          "signal_1": "macro_regime",
+          "signal_2": "momentum_factors",
+          "agreement_pct": 51.1
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "macro_regime",
+          "agreement_pct": 50.9
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "volatility_sig",
+          "agreement_pct": 49.5
+        },
+        {
+          "signal_1": "macro_regime",
+          "signal_2": "volume_flow",
+          "agreement_pct": 49.1
+        },
+        {
+          "signal_1": "structure",
+          "signal_2": "trend",
+          "agreement_pct": 45.7
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "structure",
+          "agreement_pct": 45.7
+        },
+        {
+          "signal_1": "smart_money",
+          "signal_2": "trend",
+          "agreement_pct": 45.5
+        },
+        {
+          "signal_1": "volatility_sig",
+          "signal_2": "volume_flow",
+          "agreement_pct": 44.5
+        },
+        {
+          "signal_1": "momentum_factors",
+          "signal_2": "structure",
+          "agreement_pct": 43.7
+        },
+        {
+          "signal_1": "mean_reversion",
+          "signal_2": "momentum",
+          "agreement_pct": 43.2
+        },
+        {
+          "signal_1": "structure",
+          "signal_2": "volume_flow",
+          "agreement_pct": 42.7
+        },
+        {
+          "signal_1": "trend",
+          "signal_2": "volatility_sig",
+          "agreement_pct": 41.9
+        },
+        {
+          "signal_1": "smart_money",
+          "signal_2": "volume_flow",
+          "agreement_pct": 41.3
+        },
+        {
+          "signal_1": "heikin_ashi",
+          "signal_2": "smart_money",
+          "agreement_pct": 40.9
+        },
+        {
+          "signal_1": "momentum_factors",
+          "signal_2": "smart_money",
+          "agreement_pct": 40.1
+        },
+        {
+          "signal_1": "macro_regime",
+          "signal_2": "volatility_sig",
+          "agreement_pct": 40.0
+        },
+        {
+          "signal_1": "mean_reversion",
+          "signal_2": "rsi",
+          "agreement_pct": 39.9
+        }
+      ],
+      "clusters": [
+        [
+          "bb",
+          "candlestick",
+          "forecast",
+          "macd",
+          "sentiment"
+        ]
+      ]
     }
-  ],
-  "regime_performance": {
-    "current_regime": "ranging (all instruments)",
-    "ranging_top_signals_1d_recent": [
-      "fibonacci 68.2%",
-      "ministral 68.0%",
-      "mean_reversion 65.4%",
-      "calendar 62.8%",
-      "bb 60.8%",
-      "macd 58.7%"
-    ],
-    "ranging_worst_signals_1d_recent": [
-      "volatility_sig 35.0%",
-      "structure 36.1%",
-      "forecast 36.1%",
-      "smart_money 39.6%",
-      "trend 40.7%",
-      "momentum_factors 41.4%"
-    ],
-    "ranging_3h_recent_stars": [
-      "news_event 70.0%",
-      "smart_money 63.2%",
-      "ema 62.9%",
-      "ministral 62.6%",
-      "qwen3 61.8%",
-      "trend 61.6%"
-    ],
-    "note": "Massive divergence between 1d and 3h accuracy. Many signals that fail at 1d excel at 3h in ranging markets. System correctly boosts 3h performers via HORIZON_SIGNAL_WEIGHTS."
+  },
+  "hold_dilution_stats": {
+    "BTC-USD": {
+      "total_signals": 48,
+      "permanent_hold_count": 21,
+      "disabled_hold_signals": [
+        "cross_asset_tsmom",
+        "futures_basis",
+        "gold_real_yield_paradox",
+        "hurst_regime",
+        "ml",
+        "orderbook_flow",
+        "shannon_entropy",
+        "smart_money",
+        "vix_term_structure"
+      ],
+      "accuracy_gated_hold_signals": [
+        "cot_positioning",
+        "dxy_cross_asset",
+        "econ_calendar",
+        "ema",
+        "fear_greed",
+        "heikin_ashi",
+        "metals_cross_asset",
+        "ministral",
+        "onchain",
+        "oscillators",
+        "qwen3",
+        "sentiment"
+      ],
+      "active_voter_count": 27,
+      "active_voter_names": [
+        "bb",
+        "calendar",
+        "candlestick",
+        "claude_fundamental",
+        "copper_gold_ratio",
+        "credit_spread_risk",
+        "crypto_macro",
+        "fibonacci",
+        "forecast",
+        "funding",
+        "futures_flow",
+        "macd",
+        "macro_regime",
+        "mean_reversion",
+        "momentum",
+        "momentum_factors",
+        "network_momentum",
+        "news_event",
+        "ovx_metals_spillover",
+        "rsi",
+        "statistical_jump_regime",
+        "structure",
+        "trend",
+        "volatility_sig",
+        "volume",
+        "volume_flow",
+        "xtrend_equity_spillover"
+      ],
+      "avg_hold_pct": 74.9
+    },
+    "ETH-USD": {
+      "total_signals": 48,
+      "permanent_hold_count": 20,
+      "disabled_hold_signals": [
+        "cross_asset_tsmom",
+        "futures_basis",
+        "gold_real_yield_paradox",
+        "hurst_regime",
+        "ml",
+        "orderbook_flow",
+        "shannon_entropy",
+        "smart_money",
+        "vix_term_structure"
+      ],
+      "accuracy_gated_hold_signals": [
+        "cot_positioning",
+        "dxy_cross_asset",
+        "econ_calendar",
+        "fear_greed",
+        "metals_cross_asset",
+        "ministral",
+        "news_event",
+        "onchain",
+        "oscillators",
+        "qwen3",
+        "sentiment"
+      ],
+      "active_voter_count": 28,
+      "active_voter_names": [
+        "bb",
+        "calendar",
+        "candlestick",
+        "claude_fundamental",
+        "copper_gold_ratio",
+        "credit_spread_risk",
+        "crypto_macro",
+        "ema",
+        "fibonacci",
+        "forecast",
+        "funding",
+        "futures_flow",
+        "heikin_ashi",
+        "macd",
+        "macro_regime",
+        "mean_reversion",
+        "momentum",
+        "momentum_factors",
+        "network_momentum",
+        "ovx_metals_spillover",
+        "rsi",
+        "statistical_jump_regime",
+        "structure",
+        "trend",
+        "volatility_sig",
+        "volume",
+        "volume_flow",
+        "xtrend_equity_spillover"
+      ],
+      "avg_hold_pct": 72.9
+    },
+    "XAG-USD": {
+      "total_signals": 48,
+      "permanent_hold_count": 22,
+      "disabled_hold_signals": [
+        "cross_asset_tsmom",
+        "futures_basis",
+        "gold_real_yield_paradox",
+        "hurst_regime",
+        "ml",
+        "orderbook_flow",
+        "shannon_entropy",
+        "smart_money",
+        "vix_term_structure"
+      ],
+      "accuracy_gated_hold_signals": [
+        "cot_positioning",
+        "credit_spread_risk",
+        "crypto_macro",
+        "dxy_cross_asset",
+        "econ_calendar",
+        "fear_greed",
+        "funding",
+        "futures_flow",
+        "metals_cross_asset",
+        "ministral",
+        "onchain",
+        "oscillators",
+        "qwen3"
+      ],
+      "active_voter_count": 26,
+      "active_voter_names": [
+        "bb",
+        "calendar",
+        "candlestick",
+        "claude_fundamental",
+        "copper_gold_ratio",
+        "ema",
+        "fibonacci",
+        "forecast",
+        "heikin_ashi",
+        "macd",
+        "macro_regime",
+        "mean_reversion",
+        "momentum",
+        "momentum_factors",
+        "network_momentum",
+        "news_event",
+        "ovx_metals_spillover",
+        "rsi",
+        "sentiment",
+        "statistical_jump_regime",
+        "structure",
+        "trend",
+        "volatility_sig",
+        "volume",
+        "volume_flow",
+        "xtrend_equity_spillover"
+      ],
+      "avg_hold_pct": 77.5
+    },
+    "XAU-USD": {
+      "total_signals": 48,
+      "permanent_hold_count": 21,
+      "disabled_hold_signals": [
+        "cross_asset_tsmom",
+        "futures_basis",
+        "gold_real_yield_paradox",
+        "hurst_regime",
+        "ml",
+        "orderbook_flow",
+        "shannon_entropy",
+        "vix_term_structure"
+      ],
+      "accuracy_gated_hold_signals": [
+        "cot_positioning",
+        "crypto_macro",
+        "dxy_cross_asset",
+        "econ_calendar",
+        "ema",
+        "fear_greed",
+        "funding",
+        "futures_flow",
+        "metals_cross_asset",
+        "ministral",
+        "onchain",
+        "oscillators",
+        "qwen3"
+      ],
+      "active_voter_count": 27,
+      "active_voter_names": [
+        "bb",
+        "calendar",
+        "candlestick",
+        "claude_fundamental",
+        "copper_gold_ratio",
+        "credit_spread_risk",
+        "fibonacci",
+        "forecast",
+        "heikin_ashi",
+        "macd",
+        "macro_regime",
+        "mean_reversion",
+        "momentum",
+        "momentum_factors",
+        "network_momentum",
+        "news_event",
+        "ovx_metals_spillover",
+        "rsi",
+        "sentiment",
+        "smart_money",
+        "statistical_jump_regime",
+        "structure",
+        "trend",
+        "volatility_sig",
+        "volume",
+        "volume_flow",
+        "xtrend_equity_spillover"
+      ],
+      "avg_hold_pct": 75.7
+    }
   },
   "recommendations": [
-    {
-      "priority": 1,
-      "title": "Signal persistence filter",
-      "description": "Require signals to maintain their vote for 2+ consecutive cycles before counting. Eliminates single-cycle noise flips. Addresses documented pattern: 'single-check MACD/RSI improvements are noise'.",
-      "impact": "medium-high",
-      "effort": "medium (new state file, signal_engine modification)"
-    },
-    {
-      "priority": 2,
-      "title": "Update trend_direction cluster penalty math",
-      "description": "Comment says 7 followers at 0.12x=1.84x but there are 8 followers (macd added). Actual effective=1.96x. Could tighten to 0.10x for 1.80x target.",
-      "impact": "low (cosmetic \u2014 0.12pp difference)",
-      "effort": "trivial"
-    },
-    {
-      "priority": 3,
-      "title": "Improve regime detection coverage",
-      "description": "Current regime detector uses simple EMA9/EMA21 gap + RSI. Adding ADX > 25 for trending confirmation and Bollinger Band width for volatility detection would improve classification accuracy.",
-      "impact": "high (regime-specific weighting only helps when regime is correctly identified)",
-      "effort": "medium"
-    },
-    {
-      "priority": 4,
-      "title": "Per-ticker IC weights activation",
-      "description": "Infrastructure exists (compute_signal_ic_per_ticker) but not applied in consensus. Would catch ticker-specific phantom performers.",
-      "impact": "medium",
-      "effort": "medium"
-    },
-    {
-      "priority": 5,
-      "title": "Metals forecast model review",
-      "description": "LLM XAG 3h at 42%, Chronos XAG 3h at 42.8-43.3%. These are actively harmful and should be gated. Verify they are being caught by accuracy gate.",
-      "impact": "medium (affects XAG predictions)",
-      "effort": "low (verify existing gate catches them)"
-    }
+    "CRITICAL: BTC-USD has 75% HOLD dilution - 21 of 48 signals are permanent HOLD. Only 27 signals actively vote. Exclude permanently-disabled signals from voter count.",
+    "CRITICAL: ETH-USD has 73% HOLD dilution - 20 of 48 signals are permanent HOLD. Only 28 signals actively vote. Exclude permanently-disabled signals from voter count.",
+    "CRITICAL: XAG-USD has 78% HOLD dilution - 22 of 48 signals are permanent HOLD. Only 26 signals actively vote. Exclude permanently-disabled signals from voter count.",
+    "CRITICAL: XAU-USD has 76% HOLD dilution - 21 of 48 signals are permanent HOLD. Only 27 signals actively vote. Exclude permanently-disabled signals from voter count.",
+    "REDUNDANCY: BTC-USD cluster ['bb', 'funding', 'macd'] - 3 signals agree >80%. Consider composite or weight-sharing to reduce redundant votes.",
+    "REDUNDANCY: ETH-USD cluster ['bb', 'candlestick', 'ema', 'forecast', 'macd'] - 5 signals agree >80%. Consider composite or weight-sharing to reduce redundant votes.",
+    "REDUNDANCY: XAG-USD cluster ['bb', 'candlestick', 'ema', 'macd', 'sentiment'] - 5 signals agree >80%. Consider composite or weight-sharing to reduce redundant votes.",
+    "REDUNDANCY: XAU-USD cluster ['bb', 'candlestick', 'forecast', 'macd', 'sentiment'] - 5 signals agree >80%. Consider composite or weight-sharing to reduce redundant votes.",
+    "ACCURACY: volatility_sig at 46.6% (1d, 6135 sam) - below accuracy gate, should be force-HOLD or disabled.",
+    "ACCURACY: macro_regime at 46.4% (1d, 27781 sam) - below accuracy gate, should be force-HOLD or disabled.",
+    "ACCURACY: sentiment at 45.9% (1d, 39326 sam) - below accuracy gate, should be force-HOLD or disabled.",
+    "ACCURACY: oscillators at 45.6% (1d, 5345 sam) - below accuracy gate, should be force-HOLD or disabled.",
+    "ACCURACY: trend at 45.5% (1d, 16049 sam) - below accuracy gate, should be force-HOLD or disabled.",
+    "ACCURACY: macd at 44.1% (1d, 6009 sam) - below accuracy gate, should be force-HOLD or disabled.",
+    "ACCURACY: fibonacci at 43.2% (1d, 16607 sam) - below accuracy gate, should be force-HOLD or disabled.",
+    "ACCURACY: futures_flow at 37.2% (1d, 2029 sam) - below accuracy gate, should be force-HOLD or disabled.",
+    "ACCURACY: funding at 30.7% (1d, 694 sam) - below accuracy gate, should be force-HOLD or disabled.",
+    "DEAD WEIGHT: 12 signals have 0 accuracy samples and are permanent HOLD: ['copper_gold_ratio', 'cot_positioning', 'cross_asset_tsmom', 'futures_basis', 'gold_real_yield_paradox', 'hurst_regime', 'network_momentum', 'ovx_metals_spillover', 'shannon_entropy', 'statistical_jump_regime', 'vix_term_structure', 'xtrend_equity_spillover']. Remove from voter denominator."
   ]
 }

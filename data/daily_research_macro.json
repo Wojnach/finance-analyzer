@@ -1,29 +1,31 @@
 {
-  "date": "2026-04-20",
-  "market_summary": "Highly volatile week dominated by US-Iran ceasefire fragility (Strait of Hormuz crisis since Feb 28), KelpDAO $292M DeFi exploit (largest of 2026), and gold reaching all-time highs near $4,820. Oil swung wildly between $84-128/bbl. BTC consolidated at $75-76K with healthy on-chain metrics (MVRV 1.37, SOPR 1.00). Silver failed $83 breakout, pulled back to $79.84.",
-  "key_events_tomorrow": [
-    "US-Iran ceasefire tensions \u2014 ships seized Apr 20, renewed violence. Oil likely volatile at open.",
-    "KelpDAO exploit aftermath \u2014 watch for further DeFi contagion, AAVE frozen markets, ETH selling pressure",
-    "No major US economic releases scheduled for April 21 (Easter Monday for some markets)",
-    "European markets may be closed (Easter Monday) \u2014 thin liquidity in metals",
-    "MSTR momentum \u2014 up 33% in 3 weeks, watch for continuation or profit-taking",
-    "Gold near ATH $4,820 \u2014 JPM Q4 target $5,055. Watch for breakout above $4,880"
+  "date": "2026-04-25",
+  "market_summary": "S&P 500 +0.8% to 7,165 (record close). Nasdaq +1.63% to 24,837 (record). Dow -0.16% to 49,231. Risk-on driven by US-Iran peace talks (FM Araghchi heading to Pakistan) and Intel AI earnings momentum. Semiconductor rally: NVDA crossed $5T again, AMD +13%, QCOM +10%. BUT: Consumer sentiment at record low (49.8). Oil surged 13-16% weekly (Strait of Hormuz crisis since Feb 28). Gold above $4,800. Crypto steady: BTC $78K, ETH $2,312.",
+  "key_events_next_week": [
+    {"date": "2026-04-28", "event": "Consumer Confidence (10:00 ET)", "impact": "medium", "instruments_affected": ["all"]},
+    {"date": "2026-04-28", "event": "Richmond Fed Manufacturing Survey (10:00 ET)", "impact": "low", "instruments_affected": ["stocks"]},
+    {"date": "2026-04-28-29", "event": "FOMC MEETING", "impact": "HIGH", "instruments_affected": ["all"], "note": "Rate decision + statement Wed afternoon. Critical for all positions."},
+    {"date": "2026-04-30", "event": "GDP 1st Release Q1 2026 (08:30 ET)", "impact": "HIGH", "instruments_affected": ["all"]},
+    {"date": "2026-04-30", "event": "PCE Deflator (08:30 ET)", "impact": "HIGH", "instruments_affected": ["all"], "note": "Fed's preferred inflation gauge"},
+    {"date": "2026-04-30", "event": "Employment Cost Index (08:30 ET)", "impact": "HIGH", "instruments_affected": ["all"]},
+    {"date": "2026-04-30", "event": "Initial Claims (08:30 ET)", "impact": "medium", "instruments_affected": ["stocks"]}
   ],
   "overnight_risks": [
-    "Strait of Hormuz: ceasefire on brink of collapse (CNBC Apr 20). Oil could spike 10%+ on resumption",
-    "KelpDAO: $292M exploit still unwinding. ETH DeFi TVL dropped $6.4B. Further liquidation cascades possible.",
-    "ETH ETF outflows: 5th consecutive month. Structural selling pressure.",
-    "Thin Easter Monday liquidity could amplify moves in gold/silver.",
-    "Iran declared Hormuz open on Apr 17 (oil -12%), but Apr 20 showed renewed attacks. Binary outcome risk."
+    "US-Iran negotiations in Pakistan — ceasefire or escalation could move oil 5-10% either way",
+    "Strait of Hormuz still largely blocked since Feb 28. Largest oil supply disruption in history (-10.1 mb/d in March)",
+    "Asia-Pacific open: watching for reaction to US record closes and oil volatility",
+    "FOMC meeting Tue-Wed: market positioning ahead of rate decision could trigger pre-meeting volatility",
+    "Weekend weekend risk: geopolitical headlines could gap markets at Sunday crypto open"
   ],
   "instrument_news": {
-    "XAG-USD": "Failed $83 breakout, back to $79.84. 5th consecutive annual supply deficit (95M oz). Forecast $88.92 by Apr 23 (algorithmic). COT: speculators net long 23,562 contracts (moderate). Gold/silver ratio compression thesis intact.",
-    "XAU-USD": "ATH territory at $4,819. JPM targets $5,055 by Q4 2026. SSGA base case $4,750-5,500. COT: speculators added 4,641 longs, cut 1,580 shorts (increasingly bullish). Central bank buying continues.",
-    "BTC-USD": "Consolidating at $75.9K. On-chain healthy: MVRV 1.37 (mid-cycle), SOPR 1.00, NUPL 0.65 (belief territory). ETF inflows $18.7B YTD. Technical mixed: 13 bullish vs 15 bearish indicators. Key resistance $76,950-$77,500.",
-    "ETH-USD": "At $2,319, still -10.22% below forecasts. KelpDAO exploit (Apr 19-20) causing DeFi contagion. AAVE -30%. ETH Foundation staking 69,500 ETH (reducing sell pressure). US-Iran peace talks briefly lifted sentiment. Fear index 29.",
-    "MSTR": "At $164-168. Holdings now 780,897 BTC ($59B). TD Cowen PT $385. Up 33% in 3 weeks on $1B BTC purchase. Behaves as leveraged BTC play."
+    "XAG-USD": "Silver at $75.7, consolidating after $80+ test. Broke 13-year $50-54 resistance zone earlier in 2026. JPM gold target $6,300 supports silver rally thesis. Gold-silver ratio compressed from 90 to ~62. Structural bull intact but short-term extended.",
+    "XAU-USD": "Gold surpassed $4,805 on Apr 20, consolidating around $4,710. JPMorgan raised target to $6,300/oz by end 2026. Central banks buying 585 tonnes/quarter. FOMC decision this week is key — hawkish hold could pressure metals short-term.",
+    "BTC-USD": "BTC at $78K, up 5.81% in 5 days. Range-bound $76K-$80K. Bitcoin dominance near 59%. Institutional flows steady. FOMC and macro data this week will determine if breakout above $80K happens.",
+    "ETH-USD": "ETH at $2,312, up 2.73% in 5 days. Grayscale/Bitmine staked nearly $500M in ETH on Apr 25. US spot ETH ETFs saw $23.4M net inflows, reversing outflow trend. Still underperforming BTC.",
+    "MSTR": "MSTR at $171.02 (-0.8% from prev close $172.47). Now holds 815,061 BTC (surpassed BlackRock's Bitcoin Trust). Massive EPS miss last quarter (-$42.93 vs $2.97 forecast). Stock down 53.62% over 1 year. Heavily correlated to BTC — watch $80K BTC level."
   },
-  "metals_outlook": "Strongly bullish. Gold at ATH with central banks buying record pace, JPM/SSGA forecasts $5,000+. Silver supply deficit deepening (5th year), industrial demand from solar/EV/AI accelerating. Gold/silver ratio still elevated \u2014 compression to 50-60 would put silver at $80-96. COT shows speculators moderately positioned (not extreme). Easter Monday thin liquidity could create volatility. Watch for silver to retest $83 breakout level.",
-  "oil_outlook": "Extreme binary risk. Strait of Hormuz crisis (largest supply disruption in history per IEA) created $30+/bbl premium. Ceasefire announced but renewed tensions Apr 20. If ceasefire holds: oil back to $85-90. If collapses: could spike to $128+ again. Goldman Sachs flagged two-way risks. WTI $85-95, Brent $90-100 current range.",
-  "sentiment_shift": "Fear & Greed at 29 (Fear). Mixed signals: crypto recovering from tariff shock, DeFi exploit creating contagion anxiety, oil ceasefire relief offset by renewed tensions. Gold/silver as safe havens remain bid. Overall: cautiously bearish risk assets, strongly bullish precious metals."
+  "metals_outlook": "Structurally bullish. Gold near record $4,800+, central banks accumulating 585t/quarter. JPM target $6,300 EOY. Silver broke multi-decade resistance. BUT: FOMC this week could trigger short-term hawkish selloff if Fed signals higher-for-longer. Oil-driven inflation (Brent $105) complicates Fed narrative — bullish for gold as inflation hedge, but hawkish policy response could temporarily pressure all commodities.",
+  "oil_outlook": "Brent $105, WTI $94. Weekly gains 13-16%. Strait of Hormuz blockade since Feb 28 is the dominant driver — largest supply disruption in history. US-Iran peace talks in Pakistan could ease tensions. Dual risk: escalation → oil spikes to $120+; breakthrough → oil drops 15-20% rapidly. Oil volatility is the single biggest macro variable right now.",
+  "sentiment_shift": "Equities euphoric (record highs, semiconductor mania), consumer sentiment at record lows (49.8). Classic divergence — market optimism vs real economy pessimism. Oil-driven inflation squeezing consumers while tech AI narrative lifts stocks. This divergence historically resolves violently.",
+  "fomc_preview": "FOMC Apr 28-29 is THE event. Oil-driven CPI/PCE inflation argues against cuts. But consumer sentiment at record low and geopolitical risk argue for caution. Most likely: hawkish hold, no cut, acknowledge oil-driven inflation. Market reaction depends on language — any hint of cuts = metals/crypto rally, any hawkish surprise = sell-off across risk assets."
 }

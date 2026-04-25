@@ -1,112 +1,121 @@
 {
-  "date": "2026-04-20",
+  "date": "2026-04-25",
   "research_topics": [
-    "Regime-adaptive signal weighting (HMM + ML)",
-    "Information Coefficient (IC) based signal ranking",
-    "Multi-agent LLM debate for trading decisions",
-    "Hybrid AI systems (XGBoost + FinBERT + regime)",
-    "Kalman-enhanced Deep RL for noise resilience",
-    "Dynamic role assignment in multi-agent systems",
-    "Cross-asset momentum with volatility targeting"
+    "Claude Fundamental BUY bias root cause",
+    "Adaptive signal weighting (IC-based, regime-dependent)",
+    "Signal correlation pruning and ensemble methods",
+    "Multi-agent LLM trading architectures (TradingAgents)",
+    "Silver/ETH/BTC predictive features",
+    "Walk-forward optimization for parameter stability"
   ],
   "findings": [
     {
-      "topic": "Hybrid AI Trading Systems (ComSIA 2026)",
-      "finding": "XGBoost + FinBERT sentiment + regime filtering achieved 67% accuracy vs 54% baseline. Key: dynamically adjusting market exposure based on volatility and return filtering eliminates false signals in non-trending regimes.",
-      "relevance_to_us": "Direct application. Our system has 29 signals but no dynamic exposure adjustment. We could apply regime-conditioned signal gating: in ranging markets, disable trend/momentum signals with <45% accuracy.",
+      "topic": "Claude Fundamental BUY Bias (ROOT CAUSE FOUND)",
+      "finding": "Sonnet tier has 83% BUY rate, Opus tier has 78% BUY rate over last 500 entries (Apr 21-24). Haiku correctly abstains (96% HOLD). The cascade logic prefers highest-tier non-HOLD vote, so Sonnet/Opus's structural optimism overrides Haiku's prudent abstention. Result: signal outputs BUY ~33% with ZERO SELL for crypto/metals. In ranging market, this is consistently wrong (37.9% recent 1d accuracy, down from 59.4%).",
+      "relevance_to_us": "CRITICAL — claude_fundamental is our most expensive signal (CLI subprocess) and has collapsed from top-5 to bottom-5 accuracy",
+      "implementation_difficulty": "easy",
+      "expected_impact": "high",
+      "source": "Local analysis of data/claude_fundamental_log.jsonl"
+    },
+    {
+      "topic": "Regime-Aware Signal Weighting via HMM",
+      "finding": "Recent paper (MDPI Electronics 15/6/1334) shows regime-aware LightGBM with rolling Hidden Markov Model for regime detection outperforms non-regime-conditioned models on NASDAQ over 10 years. Key insight: aggregate statistics mask regime-dependent signal performance. Our accuracy_cache confirms this — some signals are 60%+ in trending but 40% in ranging.",
+      "relevance_to_us": "HIGH — all our tickers are currently 'ranging' and our worst-performing signals (structure 32.6%, smart_money 32.7%) are trend-following signals that fail in range-bound markets",
       "implementation_difficulty": "medium",
       "expected_impact": "high",
-      "source": "https://arxiv.org/html/2601.19504v1"
+      "source": "https://www.mdpi.com/2079-9292/15/6/1334"
     },
     {
-      "topic": "AlphaGen Adaptive Ecosystem (SSRN)",
-      "finding": "Multi-model Signal Fabric with regime classification + stability-constrained Meta-Learner Spine. Continuous adjustment of signal relevance as volatility clustering and correlation dynamics evolve.",
-      "relevance_to_us": "We have meta-learner models. Missing piece: regime-conditioned weight adjustment. Current weights are static. AlphaGen shows stability constraints prevent overfitting during regime transitions.",
-      "implementation_difficulty": "hard",
-      "expected_impact": "high",
-      "source": "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5734328"
-    },
-    {
-      "topic": "IC-Based Signal Evaluation",
-      "finding": "Test signals using Information Coefficient (IC) - rank correlation between signal and future returns. Only use signals with stable, positive IC. Rolling IC windows detect signal decay.",
-      "relevance_to_us": "Critical. We use accuracy (binary hit rate) but IC is more informative. A signal can be 50% accurate but have positive IC if correct calls have larger moves. Should supplement accuracy gating with IC.",
+      "topic": "IC-Based Signal Weighting",
+      "finding": "FactSet practical guide shows Max Information Ratio weighting outperforms equal weighting over 13 years. Formula: weight_i = IC_i / sigma_i (information coefficient divided by tracking error). LLM-enhanced alpha discovery achieves 75% improvement in IC over baseline RL (avg IC=0.0515). Key: use rolling IC, not static.",
+      "relevance_to_us": "HIGH — directly applicable. Our memory/quant_research_priorities.md already has IC-based weighting as #1 priority. Implementation plan exists.",
       "implementation_difficulty": "medium",
       "expected_impact": "high",
-      "source": "https://medium.com/@setupalpha.capital/my-scientific-workflow-for-generating-alpha-in-quantitative-trading-in-2026"
+      "source": "https://insight.factset.com/a-practical-approach-to-weighting-signals"
     },
     {
-      "topic": "HMM + Random Forest Regime Detection",
-      "finding": "Hidden Markov Models identify market states (trending/ranging/volatile), then Random Forest selects optimal signal subset per regime.",
-      "relevance_to_us": "Direct fit. We detect regimes but dont use it to filter signals. HMM is more sophisticated than ADX-based detection. Could train on signal_log.db.",
+      "topic": "Signal Correlation Pruning via PCA",
+      "finding": "Best practice: transform signals to mean-stationary, standardize, then compress with PCA to reduce redundancy. Coefficient of variation across walk-forward windows detects overfitting. Shannon entropy filtering improves signal quality by removing noise. Cross-correlation-based pruning identifies redundant signal pairs.",
+      "relevance_to_us": "MEDIUM — we have 51 signal modules but many are likely correlated (e.g., trend + heikin_ashi, momentum + momentum_factors). PCA-based pruning could reduce noise. But our disabled signals already output HOLD, so the main issue is HOLD dilution rather than correlated active signals.",
       "implementation_difficulty": "medium",
       "expected_impact": "medium",
-      "source": "https://blog.quantinsti.com/regime-adaptive-trading-python/"
+      "source": "https://arxiv.org/html/2501.10709v1"
     },
     {
-      "topic": "TradingAgents v0.2.0 (Multi-Agent LLM Framework)",
-      "finding": "Bull/bear debate architecture. Specialized agents argue positions. Now supports Claude 4.x. Fundamental analyst, sentiment expert, technical analyst, trader, risk manager collaborate.",
-      "relevance_to_us": "Our Layer 2 is single Claude call. Bull/bear debate could improve decision quality. Deferred - would increase CLI usage significantly.",
+      "topic": "TradingAgents Multi-Agent Framework v0.2.0",
+      "finding": "TauricResearch's TradingAgents v0.2.0 (Feb 2026) uses bull/bear researcher debate, risk management team, and trader synthesis. Supports multi-provider LLMs. Key architecture: structured debates between bullish/bearish agents surface blind spots. Reported improvements in Sharpe ratio and max drawdown vs single-agent.",
+      "relevance_to_us": "LOW-MEDIUM — our Layer 2 is single-agent. Adding bull/bear debate would be a significant architecture change. Could be tested in a separate branch. Main value: the debate mechanism could fix the claude_fundamental BUY bias by adding a bear counterargument.",
       "implementation_difficulty": "hard",
       "expected_impact": "medium",
-      "source": "https://github.com/TauricResearch/TradingAgents"
+      "source": "https://github.com/tauricresearch/tradingagents"
     },
     {
-      "topic": "Volume-Conditional Signal Fusion",
-      "finding": "Momentum-specific indicator fusion dynamically weights VWAP, MACD, RSI based on volume confirmation and ML probability scores.",
-      "relevance_to_us": "We have volume as separate signal. Fusion approach weights other signals higher WHEN volume confirms. More nuanced than binary RVOL gate.",
+      "topic": "Silver Price Prediction: ARIMA vs ML",
+      "finding": "Recent IJSR study (2000-2025 daily data) found ARIMA outperforms Random Forest and XGBoost for silver short-term forecasting. ML models lose accuracy during high-volatility periods. Key features: Fed policy, USD strength, industrial demand (solar/EV), inflation expectations, gold-silver ratio.",
+      "relevance_to_us": "MEDIUM — our Chronos forecast for XAG has regressed to ~50% accuracy. ARIMA might be a simpler, more robust alternative for short-term silver direction. But our main edge on XAG is at 3h (54.5%) not 1d (51.2%), so the short-term forecasting approach aligns.",
+      "implementation_difficulty": "easy",
+      "expected_impact": "low",
+      "source": "https://www.ijsr.net/getabstract.php?paperid=SR26404180625"
+    },
+    {
+      "topic": "Walk-Forward Optimization for Parameter Stability",
+      "finding": "Novel double out-of-sample WFO approach (arXiv 2602.10785) adds a second validation layer. Key insight: compute coefficient of variation for optimized parameters across walk-forward windows — high variation = overfitting. Stability penalty encourages consistent parameters.",
+      "relevance_to_us": "MEDIUM — applicable to our signal weight optimization. Currently we use static 70/30 recency weighting. Walk-forward would adaptively reweight signals based on recent performance while detecting when parameter drift indicates regime change.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "medium",
+      "source": "https://arxiv.org/html/2602.10785"
+    },
+    {
+      "topic": "Sentiment Signal Anti-Correlation",
+      "finding": "SAGE journal study shows sentiment indicators improve algo trading performance only when combined with technical signals, not standalone. Our sentiment signal at 33.8% recent 3h and 45.9% 1d confirms this — it's actively anti-correlated with correct direction. CryptoBERT and keyword-based sentiment may be capturing noise rather than signal.",
+      "relevance_to_us": "HIGH — sentiment is one of our highest-volume signals (39K+ samples) and consistently bad. Should be force-HOLD immediately rather than allowed to vote.",
       "implementation_difficulty": "easy",
       "expected_impact": "medium",
-      "source": "https://anjikeesari.com/resources/publications/algo-trading/"
-    },
-    {
-      "topic": "Kalman-Enhanced Signal Smoothing",
-      "finding": "Kalman filter applied to noisy signals reduces whipsaw. Filtered signal has smoother transitions, fewer false crossovers.",
-      "relevance_to_us": "Could apply to MACD, EMA crossovers that flip rapidly. Adds persistence without arbitrary lookback. Addresses known issue of single-cycle noise.",
-      "implementation_difficulty": "medium",
-      "expected_impact": "medium",
-      "source": "https://thesai.org/Downloads/Volume16No11/Paper_81-Kalman_Enhanced_Deep_RL.pdf"
+      "source": "https://journals.sagepub.com/doi/10.1177/21582440251369559"
     }
   ],
   "recommended_improvements": [
     {
-      "title": "Regime-Conditioned Signal Gating",
-      "description": "In ranging regimes, force-HOLD signals with <45% accuracy in that regime. Trend at 40.3% (3h) should be gated. Per-regime thresholds.",
+      "title": "Fix claude_fundamental BUY bias via regime-aware cascade",
+      "description": "In ranging regime, prefer Haiku (which correctly abstains 96% of the time) over Sonnet/Opus (which have 78-83% BUY bias). Add a tier_accuracy tracker that measures per-tier hit rate and disables tiers below 45%. Alternatively, require Sonnet/Opus to have majority BUY across sub_signals (not just any non-HOLD) before overriding Haiku.",
       "priority": 1,
-      "effort_days": 1,
-      "files_affected": [
-        "portfolio/signal_engine.py",
-        "portfolio/accuracy_stats.py"
-      ]
+      "effort_days": 0.5,
+      "files_affected": ["portfolio/signals/claude_fundamental.py"]
     },
     {
-      "title": "IC-Based Signal Weighting",
-      "description": "Calculate rolling 7-day IC per signal. Weight by IC magnitude. Negative IC = force-HOLD. More informative than binary accuracy.",
+      "title": "Force-HOLD sentiment signal",
+      "description": "Add 'sentiment' to DISABLED_SIGNALS in signal_engine.py. At 33.8% recent 3h and 45.9% 1d with 39K+ samples, it's proven anti-edge. The accuracy gate at 47% should already catch it, but verify it's actually being gated.",
       "priority": 2,
-      "effort_days": 3,
-      "files_affected": [
-        "portfolio/signal_engine.py",
-        "portfolio/accuracy_stats.py",
-        "portfolio/outcome_tracker.py"
-      ]
+      "effort_days": 0.1,
+      "files_affected": ["portfolio/signal_engine.py"]
     },
     {
-      "title": "Volume-Conditional Confidence Boost",
-      "description": "RVOL > 1.5x: boost confirming signals 1.2x. RVOL < 0.5x: reduce all confidence 0.6x. Graduated, not binary.",
+      "title": "Force-HOLD structure signal",
+      "description": "Structure signal collapsed to 32.6% recent 1d. Add to DISABLED_SIGNALS or verify accuracy gate is catching it.",
       "priority": 3,
-      "effort_days": 1,
-      "files_affected": [
-        "portfolio/signal_engine.py"
-      ]
+      "effort_days": 0.1,
+      "files_affected": ["portfolio/signal_engine.py"]
     },
     {
-      "title": "Signal Persistence Filter",
-      "description": "Require 2+ consecutive cycles for a signal to count as vote. Eliminates single-cycle noise flips.",
+      "title": "Implement rolling IC-based signal weighting",
+      "description": "Replace equal-weight voting with IC-weighted voting. Use 7-day rolling Information Coefficient per signal per ticker. Signals with negative IC get zero weight (not inverted). This is the #1 quant research priority from memory.",
       "priority": 4,
       "effort_days": 2,
-      "files_affected": [
-        "portfolio/signal_engine.py",
-        "portfolio/trigger.py"
-      ]
+      "files_affected": ["portfolio/signal_engine.py", "portfolio/accuracy_stats.py"]
+    },
+    {
+      "title": "Add regime-conditioned accuracy tracking",
+      "description": "Split accuracy_cache by regime (trending/ranging/high-vol). This enables regime-dependent signal selection — only activate signals that perform well in the current regime.",
+      "priority": 5,
+      "effort_days": 1.5,
+      "files_affected": ["portfolio/accuracy_stats.py", "portfolio/outcome_tracker.py"]
+    },
+    {
+      "title": "Reduce HOLD dilution from disabled signals",
+      "description": "18 disabled signals output HOLD and inflate total_voters. They should be excluded from voter count entirely, not counted as HOLD voters. This would increase consensus percentages and reduce noise.",
+      "priority": 6,
+      "effort_days": 0.5,
+      "files_affected": ["portfolio/signal_engine.py"]
     }
   ]
 }

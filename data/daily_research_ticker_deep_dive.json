@@ -1,108 +1,277 @@
 {
-  "date": "2026-04-20",
+  "date": "2026-04-25",
   "tickers_analyzed": [
-    "XAG-USD",
+    "ETH-USD",
+    "MSTR",
     "BTC-USD"
   ],
   "deep_dives": [
     {
-      "ticker": "XAG-USD",
-      "key_predictive_features": [
-        "Gold/silver ratio velocity (mean-reverts from extremes)",
-        "Copper price as leading indicator (75% silver is base metal by-product)",
-        "Real yield inverse correlation",
-        "COT speculative positioning (contrarian at extremes)",
-        "Industrial demand growth rate (solar, EV, AI proxies)",
-        "DXY inverse correlation",
-        "Physical ETF inflows/outflows",
-        "Mine supply disruption signals"
+      "ticker": "ETH-USD",
+      "current_accuracy": {
+        "1d": "48.5% -- BELOW coin flip, actively destroying value",
+        "3h": "47.7% -- BELOW coin flip",
+        "verdict": "System is net-negative on ETH. Signals worse than random."
+      },
+      "why_eth_is_hard_to_predict": [
+        "Layer 2 value leakage: 60%+ of tx volume now on L2s, base-layer fees down 62% YoY. ETH token value accrual is structurally broken vs BTC fixed-supply narrative",
+        "ETH/BTC ratio at 0.031, near 5-year lows (0.028 Feb 2026). Prolonged structural decline since 0.08 peak in 2021. Capital rotation away from ETH to BTC ETFs",
+        "Dual identity problem: ETH is simultaneously ultrasound money AND programmable infrastructure. Market cannot price both narratives consistently",
+        "New L2 launched every ~19 days. Liquidity fragmentation makes price discovery chaotic -- each L2 siphons activity and fees from mainnet",
+        "Staking yield compressed to 2.8-3.3% APR (from 5%+ in 2023) as 30% of supply now staked. Lower yield = less demand driver",
+        "Whale vs retail divergence: whales reducing OI and increasing shorts while retail buying -- creates erratic two-way flow that defeats momentum signals",
+        "Gas fee collapse post-Dencun: stablecoin transfer volume fell 42.6%, fees dropped 50%. More transactions but less economic weight -- volume signals unreliable",
+        "ETF flow volatility: Q3 2025 ETH ETF inflows outpaced BTC for first time ($9.6B), but flows are lumpy and regime-dependent"
       ],
-      "fundamental_drivers": [
-        "5th consecutive annual supply deficit (95M oz in 2025)",
-        "Supply inelastic - 75% is by-product mining",
-        "Industrial demand accelerating: solar, EV, AI data centers",
-        "Central bank gold buying creates pull (ratio compression)",
-        "Strait of Hormuz crisis raising commodity risk premium"
+      "key_predictive_features_for_eth": [
+        {
+          "feature": "ETH/BTC ratio momentum",
+          "rationale": "Ratio at 0.031 is a rotation signal. When ratio rebounds from extreme lows (0.028), ETH outperforms. When ratio breaks lower, ETH enters death spiral. More predictive than absolute price.",
+          "data_source": "Binance ETHBTC pair or derive from ETHUSDT/BTCUSDT",
+          "priority": "HIGH -- our system completely ignores this"
+        },
+        {
+          "feature": "ETH ETF daily net flows",
+          "rationale": "Institutional ETH flows are lumpy but directionally predictive. $187M weekly inflows correlate with outperformance. Outflows precede drops. Q3 2025 saw $9.6B quarterly.",
+          "data_source": "CoinGlass ETH ETF flow data, SoSoValue",
+          "priority": "HIGH -- strongest institutional signal for ETH specifically"
+        },
+        {
+          "feature": "DeFi TVL change rate (weekly delta)",
+          "rationale": "TVL rose from 25M to 31M ETH in 2025. TVL increases precede ETH rallies. TVL in ETH terms (not USD) removes BTC/USD correlation noise.",
+          "data_source": "DefiLlama API (free)",
+          "priority": "MEDIUM -- leading indicator for ETH network demand"
+        },
+        {
+          "feature": "Staking deposit/withdrawal queue",
+          "rationale": "Entry queue holding 1.3M ETH while exit queue nearly vanished (32 ETH in Dec 2025). Net staking demand is supply-reducing and bullish.",
+          "data_source": "beaconcha.in API",
+          "priority": "MEDIUM -- supply shock signal"
+        },
+        {
+          "feature": "ETH funding rate (separate from BTC)",
+          "rationale": "Our system has funding_rate signal at 74.2% on 3h for BTC. ETH funding rate behaves differently -- whale short positioning diverges from BTC. Need ETH-specific funding.",
+          "data_source": "Binance FAPI ETH perpetual",
+          "priority": "HIGH -- we already have the infra, just need ETH-specific tracking"
+        },
+        {
+          "feature": "L2 fee revenue ratio (L2 fees / L1 fees)",
+          "rationale": "When L2s capture increasing share of fee revenue, ETH mainnet value accrual weakens. Rising ratio = bearish for ETH price. Currently L1 revenue collapsed from $100M/mo to $15M/mo.",
+          "data_source": "L2Beat, DefiLlama",
+          "priority": "LOW -- slow-moving, more structural than tactical"
+        },
+        {
+          "feature": "Whale vs retail positioning delta",
+          "rationale": "Whales increased shorts in Apr 2026 while retail bought. Deeply negative whale-retail delta preceded drops. Track via exchange flows by wallet size.",
+          "data_source": "CryptoQuant, Glassnode",
+          "priority": "MEDIUM -- requires paid API"
+        }
+      ],
+      "on_chain_metrics_most_predictive": [
+        "ETH exchange netflow (outflow = bullish accumulation, inflow = distribution)",
+        "ETH staking rate change (accelerating staking = supply squeeze)",
+        "Large wallet (>10K ETH) accumulation/distribution",
+        "Smart contract gas consumption (proxy for real usage vs speculation)",
+        "ETH burned (EIP-1559) -- but declining post-Dencun, losing predictive power"
       ],
       "cross_asset_correlations": {
-        "gold": "Primary driver, 0.85+ correlation. Gold leads.",
-        "copper": "Leading indicator for industrial component.",
-        "DXY": "Strong inverse. Dollar weakness = metals strength.",
-        "real_yields": "Inverse. Lower real yields reduce opportunity cost.",
-        "oil": "Indirect via inflation expectations.",
-        "SPY": "Weak/mixed. Decouples in safe-haven rallies."
+        "BTC": "Strong positive (~0.8-0.9) but decoupling in 2026. ETH/BTC ratio declining means ETH underperforms even when BTC rallies.",
+        "DXY": "Moderate negative -- same as BTC but weaker signal for ETH specifically",
+        "SPX": "Moderate positive in risk-on. ETH is more risk-on than BTC.",
+        "DeFi_TVL": "Leading indicator. TVL rises precede ETH price rises by 1-2 weeks.",
+        "ETH_ETF_flows": "Strong directional signal. Weekly $187M+ inflows = bullish."
       },
-      "seasonal_patterns": [
-        "Strong Jan-Mar (jewelry, festivals)",
-        "Q2 consolidation before summer rally",
-        "Q3 industrial restocking",
-        "Q4 tax-loss selling opportunities"
-      ],
-      "papers_and_models": [
-        "G/S ratio mean reversion: >80 compresses to 50-60 in 12-18 months",
-        "Supply deficit model: cumulative deficit correlated with price (5yr lag)",
-        "BofA: silver tops between $135-$309 depending on scenario",
-        "CoinCodex algo: $88.92 by Apr 23 (short-term)"
-      ],
       "recommended_new_signals": [
-        "Silver ETF flow tracker (SLV/SIVR daily inflows)",
-        "G/S ratio velocity (rate of change, not level)",
-        "Copper-silver divergence signal",
-        "Mine supply disruption news",
-        "Solar/EV demand proxy (sector ETF momentum)"
+        "eth_btc_ratio_momentum -- ETH/BTC 20-period rate of change. Most important missing signal.",
+        "eth_etf_flows -- Daily net ETH ETF inflow/outflow from CoinGlass/SoSoValue",
+        "eth_defi_tvl_delta -- Weekly TVL change in ETH terms from DefiLlama",
+        "eth_staking_queue -- Net staking demand (entry - exit queue) from beaconcha.in",
+        "eth_whale_flow -- Large wallet (>10K ETH) net positioning"
       ],
-      "implementation_notes": "XAG main signal at 56.5% (1h, 1387 sam) is decent. Metals forecast models failing (42-43% at 3h). Cross-asset signals exist in metals_cross_assets.py but may be underweighted. Priority: verify per-ticker accuracy for metals_cross_asset on XAG."
+      "implementation_notes": "ETH at 48.5% 1d is destroying value. Root cause: system treats ETH like BTC but ETH has unique drivers (L2 leakage, staking dynamics, DeFi TVL). The ETH/BTC ratio is the single most important missing feature -- it captures relative rotation that our absolute-price signals miss entirely. ETH funding rate should be tracked separately from BTC (currently lumped together in futures_flow signal). Priority fix: add eth_btc_ratio_momentum signal, then eth_etf_flows."
+    },
+    {
+      "ticker": "MSTR",
+      "current_accuracy": {
+        "1d": "49.4% -- below coin flip",
+        "3h": "45.9% -- significantly below coin flip",
+        "verdict": "System is net-negative on MSTR. Using generic signals on a BTC-leveraged equity is fundamentally wrong."
+      },
+      "btc_mstr_correlation": {
+        "current_correlation": "0.58 (12-month daily), up from long-term average of 0.26",
+        "beta_profile_2026": {
+          "upside_beta": "~3x (44% MSTR gain vs 15% BTC gain, Feb-Mar 2026)",
+          "downside_beta": "~0.4x (compressed in 2026 downturn, absorbed <50% of BTC drops)",
+          "weekly_beta_peak": "5.2x -- highest in 90 days"
+        },
+        "lead_lag": "BTC leads, MSTR lags by minutes to hours in crypto sessions. But MSTR can gap at US equity open, creating apparent leads. During market hours MSTR amplifies BTC moves.",
+        "key_insight": "MSTR is NOT a simple BTC proxy. It has asymmetric beta -- 3x up, 0.4x down in current regime. This asymmetry shifts with mNAV premium level."
+      },
+      "additional_factors_beyond_btc": [
+        {
+          "factor": "mNAV premium/discount",
+          "current_value": "~1.23x (down from 2.6-2.8x peak late 2024)",
+          "predictive_power": "HIGH -- When mNAV < 1.0x, MSTR is cheap vs its BTC. Dec 2025 hit 0.92x = strong buy. When mNAV > 2.0x, equity dilution risk reprices.",
+          "how_to_get": "MSTR market cap / (BTC holdings * BTC price). Strategy.com publishes BTC count."
+        },
+        {
+          "factor": "BTC Yield (BTC per share growth)",
+          "current_value": "5.6% YTD through mid-April 2026",
+          "predictive_power": "MEDIUM -- Measures Saylor dilution efficiency. Positive BTC Yield means dilution is BTC-accretive. Turning negative = major sell signal.",
+          "how_to_get": "Quarterly disclosure or calculate from share count + BTC holdings"
+        },
+        {
+          "factor": "Equity/debt issuance events",
+          "current_value": "$25.3B raised in 2025 alone. 815,061 BTC held as of Apr 2026.",
+          "predictive_power": "HIGH -- ATM offerings cause short-term dilution pressure. Convertible note issuance at high mNAV = bearish signal. But BTC purchases announced = bullish.",
+          "how_to_get": "SEC filings, Strategy.com, earnings calls"
+        },
+        {
+          "factor": "Convertible debt maturity schedule",
+          "current_value": "~$8.2B in senior convertible notes, maturities 2028-2030",
+          "predictive_power": "LOW (short-term) -- Matters when BTC drops near conversion thresholds. At current BTC ~$75K, well above conversion prices.",
+          "how_to_get": "SEC 10-K filings"
+        },
+        {
+          "factor": "US equity market hours vs crypto 24/7",
+          "current_value": "MSTR only trades 09:30-16:00 ET",
+          "predictive_power": "MEDIUM -- BTC overnight moves create gap risk. Pre-market/after-hours indicate opening direction.",
+          "how_to_get": "Pre-market data from Alpaca/Yahoo"
+        }
+      ],
+      "should_we_use_btc_signals_for_mstr": {
+        "answer": "Partially yes, but with critical modifications",
+        "reasoning": [
+          "BTC direction is the dominant driver (~58% correlation). BTC signals should have 60-70% weight.",
+          "BUT: mNAV premium/discount is MSTR-specific and highly predictive. Must be added.",
+          "BUT: Equity dilution events (ATM offerings) cause MSTR-specific selloffs unrelated to BTC.",
+          "BUT: Asymmetric beta means BTC SELL signals should be weighted differently than BTC BUY signals for MSTR.",
+          "BUT: US market hours mean MSTR misses 16h/day of BTC price action. Gap analysis needed.",
+          "Recommendation: Use BTC signals as base, overlay mNAV premium signal, and adjust for asymmetric beta regime."
+        ]
+      },
+      "recommended_new_signals": [
+        "mstr_mnav_premium -- Market cap / (BTC_holdings * BTC_price). Buy < 1.0x, caution > 2.0x.",
+        "mstr_btc_gap -- Overnight BTC % change during MSTR non-trading hours. Predicts opening gap direction.",
+        "mstr_equity_issuance -- Binary flag for recent ATM offering / convertible issuance. Short-term bearish.",
+        "mstr_btc_beta_regime -- Rolling 30d upside/downside beta. Currently 3x up / 0.4x down.",
+        "btc_signals_weighted -- Use existing BTC signals but weight 60-70% (not 100%) for MSTR decisions"
+      ],
+      "implementation_notes": "MSTR at 49.4% 1d is almost exactly coin flip -- signals add zero value. Root cause: system applies generic stock signals (RSI, MACD, EMA on MSTR price) which are meaningless for a BTC-leveraged treasury company. MSTR price is ~60% BTC, ~20% mNAV sentiment, ~10% equity dilution, ~10% market beta. Fix: (1) Create mstr_mnav_premium signal using BTC price + MSTR market cap. (2) Weight BTC signals 60-70% for MSTR. (3) Add gap analysis for overnight BTC moves. The mNAV is THE key -- at 0.92x in Dec 2025 it was a screaming buy, at 2.8x in late 2024 it was a clear sell."
     },
     {
       "ticker": "BTC-USD",
-      "key_predictive_features": [
-        "MVRV Z-Score (1.37 - mid-cycle, room to expand)",
-        "SOPR (1.00 - recovery phase)",
-        "ETF net flows ($18.7B YTD)",
-        "Funding rate (negative = contrarian bullish)",
-        "Exchange netflow (negative = accumulation)",
-        "Halving cycle phase (24mo post = peak window)",
-        "Fear & Greed (29 = contrarian bullish)",
-        "Options max pain",
-        "Mining difficulty/hashrate"
-      ],
-      "fundamental_drivers": [
-        "Post-halving supply squeeze: 50% less new supply since Apr 2024",
-        "ETF inflows creating institutional demand floor",
-        "MSTR accumulating 780,897 BTC ($59B)",
-        "Potential Fed rate cuts in 2026",
-        "Digital gold narrative strengthened by geopolitical crisis",
-        "On-chain: NUPL 0.65 (belief, not euphoria)"
-      ],
-      "cross_asset_correlations": {
-        "gold": "Positive but weakening. Both safe-havens.",
-        "DXY": "Strong inverse.",
-        "NASDAQ": "Moderate positive (0.5-0.7).",
-        "ETH": "High positive (0.85+). BTC leads.",
-        "VIX": "Inverse. Low VIX = risk-on = BTC rally.",
-        "real_yields": "Inverse, strengthening."
+      "current_accuracy": {
+        "1d": "52.7% -- barely above coin flip",
+        "3h": "50.7% -- barely above coin flip",
+        "best_signal": "funding_rate at 74.2% (3h, 535 samples) -- our star signal",
+        "verdict": "BTC consensus is weak because good signals (funding 74.2%) are diluted by bad signals in voting. Not a feature problem -- a weighting problem."
       },
-      "seasonal_patterns": [
-        "Post-halving: peaks 12-18mo after (Apr 2024 -> Q2-Q4 2025/2026)",
-        "Q2 historically strong",
-        "Options expiry Fridays create vol",
-        "April tax selling creates temporary pressure"
-      ],
-      "papers_and_models": [
-        "MVRV 1.37: healthy, room to 3.5+ before peak",
-        "Halving model: 24mo post = acceleration phase",
-        "Technical: 13 bullish vs 15 bearish = consolidation",
-        "Support: $73.2K / $71-72K (200DMA) / $70K",
-        "Resistance: $76.95K / $77.5K / $85K (new ATH)"
-      ],
+      "on_chain_metrics_predictive_power": {
+        "MVRV_Z_Score": {
+          "accuracy_claim": "84.3% for macro cycle positioning (multi-signal framework)",
+          "how_it_works": "Market Value / Realized Value. Above 3.5 = every major cycle top in history. Current ~1.2 (accumulation zone). 7/7 positive 12-month returns when MVRV in 1.0-1.5 band since 2013.",
+          "timeframe": "Best for macro (weeks-months). Poor for 1d/3h.",
+          "our_status": "On-chain signal active, 60% accuracy with 45 samples. Needs STH-SOPR and hash price additions.",
+          "verdict": "Excellent macro signal but useless for our 3h/1d horizons. Should only activate on 5d+ timeframes."
+        },
+        "SOPR": {
+          "accuracy_claim": "STH-SOPR (Short-Term Holder) is the most actionable variant",
+          "how_it_works": "Spent Output Profit Ratio. Below 1.0 = loss-taking capitulation (often bottoms). Above 1.05+ = profit-taking (often tops).",
+          "timeframe": "1d-5d is sweet spot.",
+          "our_status": "NOT tracked separately. Lumped into on-chain signal.",
+          "verdict": "STH-SOPR should be a standalone signal. Currently 0.92-0.96 = loss selling = accumulation zone."
+        },
+        "Exchange_Flows": {
+          "accuracy_claim": "Exchange reserves at 7-year low (2.21M BTC). Sustained outflow = bullish.",
+          "how_it_works": "Net exchange inflow/outflow. Large inflows = potential sell pressure. Outflows = accumulation.",
+          "timeframe": "1d-5d. Intraday flows are noise.",
+          "our_status": "We track exchange netflow in on-chain signal but sample size tiny (45).",
+          "verdict": "Need to separate exchange flow rate-of-change as standalone signal. Weekly delta more predictive than absolute level."
+        },
+        "Hash_Price": {
+          "accuracy_claim": "Near ATL in 2026 -- historically marks accumulation zones",
+          "how_it_works": "Revenue per TH/s. When miners are barely profitable, weak miners capitulate = supply squeeze follows.",
+          "timeframe": "Macro (weeks-months). Not useful for 3h.",
+          "our_status": "NOT tracked.",
+          "verdict": "Add as macro-only signal (5d+ timeframe)."
+        }
+      },
+      "funding_rate_deep_dive": {
+        "our_accuracy": "74.2% at 3h (535 samples) -- best signal in entire system for BTC",
+        "why_it_works": "High positive funding = crowded longs paying premium = mean-reversion SHORT signal. High negative = crowded shorts = mean-reversion LONG. Our 3h horizon perfectly captures the funding-driven reversion.",
+        "limitations": [
+          "Funding alone is not a reliable directional predictor in trending markets -- can stay positive for weeks in bull runs",
+          "Most effective when combined with OI (open interest). High funding + high OI = crowded trade about to unwind",
+          "Professional delta-neutral strategies captured 19.26% annual returns in 2025 using funding arbitrage",
+          "Works best as contrarian signal at extremes, not for trend-following"
+        ],
+        "enhancement": "Combine funding rate with OI change rate. When funding is extreme AND OI is declining, the crowded trade is already unwinding = strongest signal.",
+        "our_status": "Active and excellent. Horizon-gated to 3h/4h only. Should remain gated -- funding reverts in hours, not days."
+      },
+      "options_market_signals": {
+        "put_call_ratio": {
+          "how_it_works": "Ratio of put OI to call OI. Below 0.4 = extremely bullish positioning (Dec 2025 was 0.38). Above 0.7 = bearish hedging.",
+          "predictive_power": "Contrarian at extremes. Extreme call skew (low P/C) preceded corrections. Extreme put skew preceded rallies.",
+          "data_source": "Deribit (dominant venue), The Block, CoinGlass",
+          "our_status": "NOT tracked. Recommended in yesterday research but not implemented."
+        },
+        "options_skew_25delta": {
+          "how_it_works": "25-delta call IV minus 25-delta put IV. Negative = traders paying more for downside protection.",
+          "predictive_power": "Leading indicator for directional moves. Negative skew in early 2026 preceded continued pressure.",
+          "data_source": "Deribit, The Block",
+          "our_status": "NOT tracked."
+        },
+        "max_pain_levels": {
+          "how_it_works": "Strike price where most options expire worthless. BTC gravitates toward max pain near expiry.",
+          "predictive_power": "Strong on expiry weeks (monthly/quarterly). Quarterly expiries move $2-5B in OI.",
+          "data_source": "Deribit, CoinGlass",
+          "our_status": "NOT tracked. Could combine with our calendar signal for expiry week warnings."
+        }
+      },
+      "cross_asset_correlations": {
+        "SPX": "Moderate positive in risk-on (0.4-0.6). Weakening in 2026.",
+        "XAU_USD": "Weak positive via safe-haven overlap. BTC increasingly treated as digital gold.",
+        "DXY": "Moderate negative (-0.3 to -0.5). Dollar strength = BTC weakness.",
+        "ETH": "Strong positive (0.8-0.9) but ETH/BTC ratio declining = ETH underperforming.",
+        "MSTR": "Very strong positive (0.58 daily, higher intraday). MSTR amplifies BTC."
+      },
       "recommended_new_signals": [
-        "MVRV regime signal (>3.5 SELL, <1.0 BUY)",
-        "ETF flow momentum (5d rolling net inflow)",
-        "Options skew signal (put/call + max pain)",
-        "Mining capitulation signal",
-        "Halving cycle phase signal"
+        "btc_sth_sopr -- Short-term holder SOPR as standalone. Below 1.0 = capitulation buy. Above 1.05 = take profit.",
+        "btc_exchange_flow_delta -- Weekly rate of change of exchange reserves. Outflow acceleration = bullish.",
+        "btc_options_skew -- 25-delta skew from Deribit. Contrarian at extremes.",
+        "btc_options_pcr -- Put/call ratio. Below 0.4 = contrarian bearish, above 0.7 = contrarian bullish.",
+        "btc_funding_x_oi -- Combine funding rate with OI change rate. Extreme funding + declining OI = strongest reversion signal.",
+        "btc_hash_price -- Miner revenue per TH/s. Near ATL = macro accumulation zone. 5d+ only.",
+        "btc_etf_flows -- Daily BTC ETF net inflow/outflow. $325M+ daily = directional."
       ],
-      "implementation_notes": "BTC main signal at 54.3% (1h, 11K samples) is reliable. On-chain exists but limited. Adding ETF flow tracking + options skew would provide alpha. System should be bullish-biased but waiting for $77.5K breakout confirmation."
+      "implementation_notes": "BTC at 52.7% 1d is weak but salvageable. The problem is NOT lack of good signals -- funding rate is 74.2% at 3h. The problem is signal DILUTION: 33 active signals vote equally, so funding 74.2% is diluted by 20+ signals at 50%. Fix priority: (1) IC-weighted voting (already in quant research plan) would let funding dominate. (2) Add btc_funding_x_oi to amplify our best signal. (3) Add options skew/PCR for medium-term direction. (4) Separate STH-SOPR from on-chain bundle. The multi-signal on-chain framework claims 84.3% macro accuracy -- but only on longer timeframes. Our 3h/1d horizons need funding + options + short-term flow signals, not macro on-chain."
     }
-  ]
+  ],
+  "cross_cutting_insights": {
+    "signal_dilution_is_the_core_problem": "All three tickers suffer from the same root cause: equal-weight voting across 33 signals dilutes the few good signals (funding 74.2%) with many coin-flip signals. IC-weighted voting would fix this systemically.",
+    "missing_asset_specific_signals": {
+      "ETH": "ETH/BTC ratio momentum, ETH ETF flows, DeFi TVL delta, staking queue",
+      "MSTR": "mNAV premium/discount, BTC gap analysis, equity dilution events, asymmetric beta regime",
+      "BTC": "STH-SOPR (standalone), options skew, put/call ratio, funding x OI composite, ETF flows"
+    },
+    "timeframe_mismatch": "On-chain metrics (MVRV, SOPR, exchange flows) are macro signals (5d+). Our system evaluates them at 3h/1d where they add noise. Need strict timeframe gating.",
+    "research_papers_consensus": [
+      "XGBoost and Random Forest consistently outperform for crypto direction prediction",
+      "Transformer models with technical indicators outperform LSTM",
+      "Multi-signal frameworks (84.3% accuracy) dramatically outperform single metrics (23% improvement)",
+      "Volume and technical indicators have 1-2 day impact; macro/sentiment has 1-2 week impact",
+      "SMOTE for class imbalance + feature normalization are critical preprocessing steps"
+    ],
+    "priority_actions": [
+      "1. Implement IC-weighted voting to stop signal dilution (biggest single improvement, already planned)",
+      "2. Add ETH/BTC ratio momentum signal (highest impact for ETH, trivial to implement)",
+      "3. Add mNAV premium signal for MSTR (highest impact for MSTR, needs market cap data)",
+      "4. Create btc_funding_x_oi composite signal (amplifies our best signal)",
+      "5. Add options skew/PCR from Deribit (new data source, medium effort)",
+      "6. Separate STH-SOPR as standalone signal (restructure existing on-chain)",
+      "7. Add ETF flow signals for both BTC and ETH (new data source)",
+      "8. Timeframe-gate on-chain metrics to 5d+ only"
+    ]
+  }
 }
