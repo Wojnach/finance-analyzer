@@ -746,6 +746,17 @@ def place_stop_loss(
         raise ValueError(f"Refusing to place stop-loss on non-whitelisted account {acct!r}")
     valid_until = (date.today() + timedelta(days=valid_days)).isoformat()
 
+    # BUG-223: trailing stops (FOLLOW_DOWNWARDS/UPWARDS) legitimately use
+    # sell_price=0 (market order on trigger). Non-trailing MONETARY stops
+    # must have sell_price > 0 — a zero sell_price would execute as a market
+    # sell at whatever price exists, potentially the worst available price.
+    _TRAILING_TYPES = {"FOLLOW_DOWNWARDS", "FOLLOW_UPWARDS"}
+    if trigger_type not in _TRAILING_TYPES and value_type == "MONETARY":
+        if sell_price <= 0:
+            raise ValueError(
+                f"Non-trailing stop-loss requires sell_price > 0, got {sell_price}"
+            )
+
     # 2026-04-17: stops below Avanza's 1000 SEK min-courtage threshold still
     # succeed at the API but carry outsized fees. Cascaded-stop callers
     # (metals_loop) can legitimately produce sub-1000 legs, so warn rather
