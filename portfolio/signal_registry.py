@@ -222,6 +222,12 @@ def _register_defaults():
     # Measures statistical unusualness of multi-asset returns. Includes absorption ratio.
     register_enhanced("mahalanobis_turbulence", "portfolio.signals.mahalanobis_turbulence",
                       "compute_mahalanobis_turbulence_signal", requires_context=True, max_confidence=0.7)
+    # Crypto eVRP — Expected Volatility Risk Premium (crypto only); capped at 0.7
+    # 2026-04-25: Zarattini, Mele & Aziz (2025). eVRP = DVOL(30d) - RV(10d).
+    # Options-derived signal uncorrelated with trend-following cluster.
+    # Deribit public API, no auth. BTC + ETH only.
+    register_enhanced("crypto_evrp", "portfolio.signals.crypto_evrp",
+                      "compute_crypto_evrp_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
