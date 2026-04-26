@@ -289,8 +289,9 @@ def compute_hash_ribbons_signal(
         action = "HOLD"
         confidence = 0.0
 
-    # If we're currently in capitulation (but no recovery yet), note it
-    if ribbon_ind.get("capitulating"):
+    # If we're currently in capitulation (but no recovery yet), note it.
+    # Only set if no other note already present (avoid overwriting recovery note).
+    if ribbon_ind.get("capitulating") and "note" not in indicators:
         indicators["note"] = "miner_capitulation_active"
 
     return {

@@ -255,6 +255,61 @@ class TestNeverSells:
         assert result["action"] != "SELL"
 
 
+class TestBuyGate:
+    """Price momentum alone must never trigger BUY — hash ribbon must fire first."""
+
+    @patch("portfolio.signals.hash_ribbons._fetch_hashrate")
+    def test_price_alone_cannot_buy(self, mock_fetch):
+        """Stable hashrate (no crossover, no recovery) + uptrending price = HOLD."""
+        mock_fetch.return_value = _make_hashrate_series(120, "stable")
+        # Strong uptrend to ensure price_momentum_filter emits BUY
+        df = _make_df(100)
+        df["close"] = np.linspace(90_000, 100_000, 100)
+        df["open"] = df["close"] - 50
+        df["high"] = df["close"] + 100
+        df["low"] = df["close"] - 100
+        ctx = {"ticker": "BTC-USD"}
+        result = compute_hash_ribbons_signal(df, context=ctx)
+        assert result["action"] == "HOLD", (
+            "Price momentum alone must not trigger BUY without hash ribbon"
+        )
+
+    @patch("portfolio.signals.hash_ribbons._fetch_hashrate")
+    def test_capitulation_with_uptrend_stays_hold(self, mock_fetch):
+        """Active miner capitulation + uptrending price = HOLD (not BUY)."""
+        mock_fetch.return_value = _make_hashrate_series(120, "capitulating")
+        df = _make_df(100)
+        df["close"] = np.linspace(90_000, 100_000, 100)
+        ctx = {"ticker": "BTC-USD"}
+        result = compute_hash_ribbons_signal(df, context=ctx)
+        assert result["action"] == "HOLD"
+        assert result["indicators"].get("note") == "miner_capitulation_active"
+
+
+class TestNoteOverwrite:
+    """Verify capitulation note doesn't overwrite recovery note."""
+
+    @patch("portfolio.signals.hash_ribbons._recovery_recency")
+    @patch("portfolio.signals.hash_ribbons._hash_ribbon_crossover")
+    @patch("portfolio.signals.hash_ribbons._fetch_hashrate")
+    def test_recovery_note_preserved_over_capitulation(self, mock_fetch, mock_ribbon, mock_recency):
+        """When hash fires but no price confirm and capitulating, recovery note wins."""
+        mock_fetch.return_value = _make_hashrate_series(120, "stable")
+        # Simulate: ribbon=HOLD but recency=BUY, and capitulating=True (whipsaw)
+        mock_ribbon.return_value = ("HOLD", {
+            "hash_sma30": 900.0, "hash_sma60": 950.0,
+            "capitulating": True, "recovery_crossover": False, "hash_ratio": 0.95,
+        })
+        mock_recency.return_value = ("BUY", {"days_since_recovery": 3})
+        df = _make_df(100)
+        # Downtrend so price_vote = HOLD
+        df["close"] = np.linspace(100_000, 90_000, 100)
+        ctx = {"ticker": "BTC-USD"}
+        result = compute_hash_ribbons_signal(df, context=ctx)
+        assert result["action"] == "HOLD"
+        assert result["indicators"]["note"] == "hash_recovery_without_price_confirmation"
+
+
 class TestHashrateFetchFailure:
     """Test graceful degradation when hashrate API fails."""
 
