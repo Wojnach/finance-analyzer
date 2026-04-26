@@ -273,13 +273,21 @@ def compute_hash_ribbons_signal(
     indicators.update(price_ind)
     indicators.update(recency_ind)
 
-    # Voting: require hash ribbon signal (crossover or recency) + price confirmation
-    votes = [ribbon_vote, price_vote, recency_vote]
-    action, confidence = majority_vote(votes, count_hold=False)
+    # Gate: hash ribbon must fire (crossover or recency) for any BUY.
+    # Price filter is confirmation only — it cannot trigger BUY by itself.
+    hash_fires = ribbon_vote == "BUY" or recency_vote == "BUY"
 
-    # This is a high-conviction but rare signal -- cap at 0.7
-    # (external data cap per existing pattern)
-    confidence = min(confidence, 0.7)
+    if hash_fires and price_vote == "BUY":
+        action = "BUY"
+        confidence = 0.7  # High conviction when all conditions align
+    elif hash_fires:
+        # Hash ribbon fires but no price confirmation — still note it
+        action = "HOLD"
+        confidence = 0.0
+        indicators["note"] = "hash_recovery_without_price_confirmation"
+    else:
+        action = "HOLD"
+        confidence = 0.0
 
     # If we're currently in capitulation (but no recovery yet), note it
     if ribbon_ind.get("capitulating"):
