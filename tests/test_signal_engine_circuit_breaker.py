@@ -572,3 +572,98 @@ class TestPostPersistenceVoterCount:
             1 for v in consensus_votes.values() if v in ("BUY", "SELL")
         )
         assert post_persistence_voters == 0
+
+
+class TestBug227PostFilterGates:
+    """BUG-227: The weighted consensus gate and dynamic_min_voters penalty must
+    use post-persistence voter count, not the pre-filter count. Without this,
+    weak consensus can pass the gate when the persistence filter has reduced
+    actual participating voters below the threshold."""
+
+    def test_confidence_penalty_reads_post_filter_voters(self):
+        """Stage 4 dynamic_min_voters should use _voters_post_filter."""
+        from portfolio.signal_engine import apply_confidence_penalties
+
+        import numpy as np
+        import pandas as pd
+        df = pd.DataFrame({"close": np.linspace(100, 105, 50)})
+
+        # Pre-filter: 6 voters (would pass min_voters=5 for ranging).
+        # Post-filter: 2 voters (should FAIL min_voters=5 for ranging).
+        extra_info = {
+            "_voters": 6,
+            "_voters_post_filter": 2,
+            "_buy_count": 4,
+            "_sell_count": 2,
+        }
+        action, conf, log = apply_confidence_penalties(
+            action="BUY",
+            conf=0.65,
+            regime="ranging",  # dynamic_min = 5
+            ind={},
+            extra_info=extra_info,
+            ticker="BTC-USD",
+            df=df,
+            config={"confidence_penalties": {"enabled": True}},
+        )
+        # With only 2 post-filter voters < 5 (ranging min), should force HOLD
+        assert action == "HOLD"
+        assert conf == 0.0
+
+    def test_confidence_penalty_passes_with_enough_post_filter_voters(self):
+        """When post-filter voters meet the threshold, action should survive."""
+        from portfolio.signal_engine import apply_confidence_penalties
+
+        import numpy as np
+        import pandas as pd
+        df = pd.DataFrame({"close": np.linspace(100, 105, 50)})
+
+        extra_info = {
+            "_voters": 8,
+            "_voters_post_filter": 6,
+            "_buy_count": 5,
+            "_sell_count": 3,
+        }
+        action, conf, log = apply_confidence_penalties(
+            action="BUY",
+            conf=0.65,
+            regime="ranging",  # dynamic_min = 5
+            ind={},
+            extra_info=extra_info,
+            ticker="BTC-USD",
+            df=df,
+            config={"confidence_penalties": {"enabled": True}},
+        )
+        # 6 post-filter voters >= 5 (ranging min) → should NOT force HOLD
+        assert action != "HOLD" or conf > 0.0  # at least one must be non-HOLD
+
+    def test_confidence_penalty_fallback_to_voters_key(self):
+        """Backward compat: if _voters_post_filter is missing, use _voters."""
+        from portfolio.signal_engine import apply_confidence_penalties
+
+        import numpy as np
+        import pandas as pd
+        df = pd.DataFrame({"close": np.linspace(100, 105, 50)})
+
+        # Only _voters (pre-filter), no post-filter key → use it as fallback
+        extra_info = {
+            "_voters": 6,
+            "_buy_count": 4,
+            "_sell_count": 2,
+        }
+        action, conf, log = apply_confidence_penalties(
+            action="BUY",
+            conf=0.65,
+            regime="ranging",  # dynamic_min = 5
+            ind={},
+            extra_info=extra_info,
+            ticker="BTC-USD",
+            df=df,
+            config={"confidence_penalties": {"enabled": True}},
+        )
+        # 6 voters >= 5 → should NOT force HOLD at Stage 4
+        # (may still be penalized by other stages, but not zero'd by Stage 4)
+        has_stage4_hold = any(
+            e.get("stage") == "dynamic_min_voters" for e in log
+        )
+        assert not has_stage4_hold
