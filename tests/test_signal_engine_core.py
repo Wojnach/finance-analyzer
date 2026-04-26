@@ -825,7 +825,8 @@ class TestRegimeWeightsConstant:
         rw = REGIME_WEIGHTS["ranging"]
         assert rw["mean_reversion"] == 1.7  # 2026-04-05: 65.4% recent, boosted from 1.5
         assert rw["fibonacci"] == 1.8  # 2026-04-05: 68.2% recent, boosted from 1.6
-        assert rw["ministral"] == 1.4  # 2026-04-05: 68.0% recent, newly added
+        # ministral ranging boost removed 2026-04-26 (collapsed to 41.5% recent)
+        assert "ministral" not in rw
         assert rw["macd"] == 1.3  # 2026-04-05: 58.7% recent, newly added
         assert rw["trend"] == 0.5
         assert rw["fear_greed"] == 0.3  # added 2026-03-31 (25.9% recent accuracy)
