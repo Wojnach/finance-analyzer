@@ -1,73 +1,35 @@
-# Dual Adversarial Review Plan — 2026-04-20
+# Adversarial Review #8 — Plan (2026-04-26)
 
-## Methodology (updated 2026-04-20)
-Two independent reviewers examine each subsystem:
-1. **Reviewer A (Claude agents)** — 8 parallel subagents, each doing deep adversarial analysis
-2. **Reviewer B (Codex CLI)** — OpenAI Codex `review` command with adversarial prompts
-
-After both complete, cross-critique in both directions:
-- Claude critiques Codex findings (false positives? missed issues?)
-- Codex critiques Claude findings (same)
-
-Final synthesis merges all validated findings.
+## Objective
+Full dual adversarial code review: 8 subsystems, parallel agent reviewers + independent manual review, cross-critique, synthesis.
 
 ## 8 Subsystems
 
-### 1. signals-core
-Signal engine, registry, voting, accuracy, weights, optimization.
-Files: `signal_engine.py`, `signal_registry.py`, `signal_utils.py`, `signal_weights.py`,
-`signal_weight_optimizer.py`, `signal_db.py`, `signal_history.py`, `signal_postmortem.py`,
-`accuracy_stats.py`, `accuracy_degradation.py`, `ticker_accuracy.py`, `outcome_tracker.py`,
-`train_signal_weights.py`
+| # | Subsystem | Key files | ~LOC |
+|---|-----------|-----------|------|
+| 1 | signals-core | signal_engine, signal_registry, accuracy_stats, outcome_tracker, signal_weights, ic_computation, ticker_accuracy | ~3K |
+| 2 | orchestration | main, agent_invocation, trigger, market_timing, autonomous, multi_agent_layer2, loop_contract | ~3K |
+| 3 | portfolio-risk | portfolio_mgr, trade_guards, risk_management, equity_curve, monte_carlo*, kelly_*, circuit_breaker | ~3K |
+| 4 | metals-core | metals_loop, exit_optimizer, price_targets, orb_predictor, iskbets, fin_snipe*, fin_fish, microstructure* | ~4K |
+| 5 | avanza-api | avanza_session, avanza_orders, avanza_client, avanza_control, avanza_resilient_page, avanza_tracker | ~2K |
+| 6 | signals-modules | portfolio/signals/*.py (40 modules) | ~6K |
+| 7 | data-external | data_collector, fear_greed, sentiment, alpha_vantage, futures_data, onchain_data, fx_rates, funding_rate | ~3K |
+| 8 | infrastructure | file_utils, http_retry, health, shared_state, telegram_*, journal, dashboard, golddigger, elongir | ~5K |
 
-### 2. orchestration
-Main loop, Layer 2 invocation, triggers, scheduling, process management.
-Files: `main.py`, `agent_invocation.py`, `trigger.py`, `market_timing.py`, `autonomous.py`,
-`multi_agent_layer2.py`, `process_lock.py`, `claude_gate.py`, `session_calendar.py`,
-`crypto_scheduler.py`
+## Review Criteria
+1. Bugs — logic errors, race conditions, off-by-one, dead code paths
+2. Security — credential leaks, injection, unsafe deserialization
+3. Reliability — silent failures, missing retries, crash paths
+4. Data integrity — non-atomic writes, stale reads, corruption
+5. Performance — unnecessary I/O, O(n²), memory leaks, thread contention
+6. Architecture — coupling, god functions, circular deps
+7. Correctness — signal math, wrong formulas, timezone bugs
 
-### 3. portfolio-risk
-Portfolio state, risk limits, trade guards, equity curve, Monte Carlo, circuit breakers.
-Files: `portfolio_mgr.py`, `portfolio_validator.py`, `risk_management.py`, `trade_guards.py`,
-`trade_risk_classifier.py`, `trade_validation.py`, `equity_curve.py`, `circuit_breaker.py`,
-`cost_model.py`, `monte_carlo.py`, `monte_carlo_risk.py`, `warrant_portfolio.py`, `exposure_coach.py`
-
-### 4. metals-core
-Metals loop, swing trader, execution engine, fish/snipe, ORB, exit optimizer.
-Files: `data/metals_loop.py`, `data/metals_swing_trader.py`, `data/metals_swing_config.py`,
-`data/metals_shared.py`, `data/metals_signal_tracker.py`, `data/metals_risk.py`,
-`data/metals_execution_engine.py`, `data/metals_avanza_helpers.py`, `data/metals_llm.py`,
-`data/metals_history_fetch.py`, `data/metals_warrant_refresh.py`,
-`portfolio/fin_fish.py`, `portfolio/fin_snipe.py`, `portfolio/fin_snipe_manager.py`,
-`portfolio/fish_instrument_finder.py`, `portfolio/fish_monitor_smart.py`,
-`portfolio/exit_optimizer.py`, `portfolio/price_targets.py`, `portfolio/orb_predictor.py`
-
-### 5. avanza-api
-Avanza client, auth, orders, session, tracking, control.
-Files: `portfolio/avanza/*.py`, `portfolio/avanza_client.py`, `portfolio/avanza_control.py`,
-`portfolio/avanza_orders.py`, `portfolio/avanza_order_lock.py`, `portfolio/avanza_resilient_page.py`,
-`portfolio/avanza_session.py`, `portfolio/avanza_tracker.py`
-
-### 6. signals-modules
-All 30+ signal plugin modules in `portfolio/signals/`, plus standalone signal providers.
-Files: `portfolio/signals/*.py`, `portfolio/forecast_signal.py`, `portfolio/funding_rate.py`,
-`portfolio/qwen3_signal.py`, `portfolio/bert_sentiment.py`, `portfolio/sentiment.py`,
-`portfolio/fear_greed.py`, `portfolio/onchain_data.py`, `portfolio/forecast_accuracy.py`
-
-### 7. data-external
-Data collection, external APIs, price sources.
-Files: `portfolio/data_collector.py`, `portfolio/data_refresh.py`, `portfolio/alpha_vantage.py`,
-`portfolio/crypto_macro_data.py`, `portfolio/futures_data.py`, `portfolio/fx_rates.py`,
-`portfolio/earnings_calendar.py`, `portfolio/econ_dates.py`, `portfolio/fomc_dates.py`,
-`portfolio/social_sentiment.py`, `portfolio/news_keywords.py`, `portfolio/price_source.py`,
-`portfolio/oil_precompute.py`, `portfolio/silver_precompute.py`
-
-### 8. infrastructure
-File I/O, HTTP, health, shared state, Telegram, reporting, journals, dashboard.
-Files: `portfolio/file_utils.py`, `portfolio/http_retry.py`, `portfolio/health.py`,
-`portfolio/shared_state.py`, `portfolio/gpu_gate.py`, `portfolio/telegram_notifications.py`,
-`portfolio/telegram_poller.py`, `portfolio/message_store.py`, `portfolio/reporting.py`,
-`portfolio/journal.py`, `portfolio/prophecy.py`, `portfolio/digest.py`, `portfolio/daily_digest.py`,
-`portfolio/weekly_digest.py`, `portfolio/config_validator.py`, `portfolio/api_utils.py`,
-`portfolio/subprocess_utils.py`, `portfolio/tickers.py`, `portfolio/notification_text.py`,
-`dashboard/app.py`
+## Execution
+1. ✅ Commit this plan
+2. Launch 8 parallel code-reviewer agents
+3. Simultaneously write independent manual review (read key files)
+4. Collect agent results → docs/adversarial-review/agent-{subsystem}.md
+5. Cross-critique both directions
+6. Write SYNTHESIS.md
+7. Commit all, merge main, push, clean up
