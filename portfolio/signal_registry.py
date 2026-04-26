@@ -228,6 +228,12 @@ def _register_defaults():
     # Deribit public API, no auth. BTC + ETH only.
     register_enhanced("crypto_evrp", "portfolio.signals.crypto_evrp",
                       "compute_crypto_evrp_signal", requires_context=True, max_confidence=0.7)
+    # Hash Ribbons BTC — miner capitulation detector (BTC-only); capped at 0.7
+    # 2026-04-26: Charles Edwards / Capriole Investments. 89% win rate on 9 signals.
+    # 30d/60d SMA hashrate crossover with price momentum confirmation.
+    # blockchain.info API (free, no auth). Fires ~1/year but extreme conviction.
+    register_enhanced("hash_ribbons", "portfolio.signals.hash_ribbons",
+                      "compute_hash_ribbons_signal", requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
