@@ -2152,7 +2152,10 @@ def apply_confidence_penalties(action, conf, regime, ind, extra_info, ticker, df
     # --- Stage 4: Dynamic MIN_VOTERS ---
     # P2-C (2026-04-17): delegate to shared helper to avoid drift with the
     # circuit breaker's recovery-floor logic. Same semantic as before.
-    active_voters = extra_info.get("_voters", 0)
+    # BUG-227: Use post-persistence voter count (not pre-filter) so the gate
+    # reflects the actual participating voters after debounce filtering.
+    active_voters = extra_info.get("_voters_post_filter",
+                                    extra_info.get("_voters", 0))
     dynamic_min = _dynamic_min_voters_for_regime(regime)
 
     if action != "HOLD" and active_voters < dynamic_min:
@@ -3169,8 +3172,10 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         _record_phase(ticker, "weighted_consensus", _phase_start)
         _phase_start = time.monotonic()
 
-    # Apply core gate AND MIN_VOTERS gate to weighted consensus too
-    if core_active == 0 or active_voters < min_voters:
+    # BUG-227: Apply core gate AND MIN_VOTERS gate to weighted consensus.
+    # Use post_persistence_voters (not pre-filter active_voters) because the
+    # persistence filter may have reduced voters below the threshold.
+    if core_active == 0 or post_persistence_voters < min_voters:
         weighted_action = "HOLD"
         weighted_conf = 0.0
 

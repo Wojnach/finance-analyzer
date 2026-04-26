@@ -5,7 +5,7 @@ Branch: improve/auto-session-2026-04-24
 
 ## 1) Architecture Summary
 
-Two-layer autonomous trading system with 50 signals (34 active, 16 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
+Two-layer autonomous trading system with 52 signals (33 active, 19 disabled), 5 Tier-1 instruments, and dual-strategy portfolio management.
 
 - **Layer 1** (`portfolio/main.py`): Continuous 60s loop — data collection, signal generation, trigger detection, summary writing.
 - **Layer 2** (`portfolio/agent_invocation.py`): Claude subprocess — reads summaries, makes trade decisions, writes journals, sends Telegram.
@@ -32,7 +32,7 @@ Two-layer autonomous trading system with 50 signals (34 active, 16 disabled), 5 
 - `market_timing.py` (141 lines): DST-aware US market hours, agent invocation window, market state (open/closed/weekend)
 - `config_validator.py`: Startup config validation
 
-### Signal System (51 signals: 12 core + 39 enhanced, 33 active + 18 disabled)
+### Signal System (52 signals: 12 core + 40 enhanced, 33 active + 19 disabled)
 - `signal_engine.py` (~2,700 lines): 51-signal voting, weighted consensus, accuracy gating, 5-stage confidence penalties, correlation groups, horizon-aware regime gating, dynamic horizon weights, thread-safe sentiment + ADX cache
 - `signal_registry.py` (135 lines): Plugin-based signal discovery via importlib, lazy loading
 - `signal_utils.py` (130 lines): Shared helpers — SMA, EMA, RSI, majority_vote
@@ -137,7 +137,7 @@ main.loop()
 4. Dynamic MIN_VOTERS: trending=3, high-vol=4, ranging=5
 5. Unanimity penalty: 90%+ agreement → 0.6x, 80-90% → 0.75x (high unanimity = already priced in)
 
-### Signal Inventory (50 total: 34 active, 16 disabled)
+### Signal Inventory (52 total: 33 active, 19 disabled)
 - **Core active (10)**: RSI, MACD, EMA, BB, Fear&Greed, Sentiment, Ministral-8B, Qwen3-8B, Volume, Funding Rate (3h-only, 74.2%)
 - **Core active BTC-only (1)**: On-Chain BTC (MVRV, SOPR, NUPL, Netflow)
 - **Core disabled (1)**: ML Classifier (41.7%)
