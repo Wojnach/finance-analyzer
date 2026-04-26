@@ -629,9 +629,9 @@ REGIME_WEIGHTS = {
         # Enhanced: boost mean-reversion and level-based signals
         # 2026-04-05 audit: fibonacci 68.2% recent — boost to 1.8 (was 1.6)
         # mean_reversion 65.4% recent — boost to 1.7 (was 1.5)
-        # ministral 68.0% recent — add 1.4 (was unweighted)
+        # ministral 68.0% recent (Apr 5) — was 1.4x boost but collapsed to 41.5%
+        # recent (Apr 26 audit, 41 sam). Removed boost, added to regime gate.
         "mean_reversion": 1.7, "fibonacci": 1.8, "calendar": 1.2,
-        "ministral": 1.4,
         # 2026-04-05 audit: momentum 58.9% in ranging (2196 samples) — untapped edge
         "momentum": 1.3,
         # 2026-04-04: BUG-161 — oscillators 34-39% per-ticker in ranging.
@@ -680,6 +680,11 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
             # is actively harmful in range-bound markets. 62.8% overall is inflated by
             # unknown-regime (86.8%, 2562 sam) and trending-up (25.9%) dominance.
             "econ_calendar",
+            # 2026-04-26: volume_flow collapsed to 40.8% recent (-10.0pp, 1310 sam).
+            # credit_spread_risk collapsed to 39.0% recent (-15.2pp, 249 sam).
+            # ministral collapsed to 41.5% recent (41 sam) from 58.4% all-time.
+            # All three are noise in the current 141h+ ranging regime.
+            "volume_flow", "credit_spread_risk", "ministral",
         }),
         # 3h: news_event 58.5%, smart_money 53.1% — decent at short horizons.
         # volatility_sig 47.2%, forecast 47.2% — marginal, let accuracy gate
@@ -1145,10 +1150,13 @@ _STATIC_CORRELATION_GROUPS = {
     # drive the ema signal, so near-perfect correlation is expected. Was orphaned
     # and getting full 1.0x weight despite being redundant.
     # 2026-04-25: Added bb — 87.8% agreement with macd (197 sam), 85%+ with ema.
-    # Previously in momentum_cluster where it could be leader (1.0x weight) while
-    # ema/macd followers here got 0.12x — cross-cluster redundancy was unpenalized.
+    # 2026-04-26: Moved bb OUT to standalone volatility_bounds cluster. BB is a
+    # volatility/reversion signal that thrives in ranging (+15.2pp to 69.5% recent).
+    # In ranging, ema/macd/trend are regime-gated (HOLD), so BB's correlation with
+    # them is moot. The 0.12x follower penalty was destroying BB's edge (effective
+    # weight 0.18x vs its regime boost of 1.5x). Now 9 members.
     "trend_direction": frozenset({
-        "ema", "macd", "bb", "trend", "heikin_ashi", "volume_flow", "macro_regime",
+        "ema", "macd", "trend", "heikin_ashi", "volume_flow", "macro_regime",
         "momentum_factors", "structure", "oscillators",
     }),
     # 2026-04-18: Expanded from 3→6 members. Research (2026-04-17 after-hours)
@@ -1161,12 +1169,14 @@ _STATIC_CORRELATION_GROUPS = {
     }),
     # 2026-04-04: BUG-162 — candlestick-fibonacci correlation 0.708 on BTC.
     "pattern_based": frozenset({"candlestick", "fibonacci"}),
+    # 2026-04-26: bb removed from all clusters — now unclustered (full 1.0x weight).
+    # BB thrives in ranging (+15.2pp to 69.5% recent) independently of ema/macd
+    # (which are regime-gated). Correlation with ema/macd is superficial (BB bands
+    # track MA) but BB's edge is overbought/oversold detection. Putting it in
+    # trend_direction (0.12x) destroyed its edge; standalone cluster is semantically
+    # wrong (1 member). Unclustered = full weight, which matches its value.
     # 2026-04-08: rsi+bb agree 100%, bb+mean_reversion 100%, bb+momentum 98.8%.
-    # 2026-04-25: Moved bb to trend_direction. BB also agrees 87.8% with MACD
-    # and 85%+ with EMA (audit of 500 entries, Apr 21-24). Cross-cluster
-    # redundancy between momentum_cluster(bb) and trend_direction(ema,macd)
-    # was unpenalized — bb could vote at full 1.0x as momentum leader while
-    # ema/macd voted at 0.12x, inflating effective weight for the same signal.
+    # 2026-04-25: Moved bb to trend_direction, 2026-04-26: removed from all clusters.
     "momentum_cluster": frozenset({"mean_reversion", "rsi", "momentum"}),
     # 2026-04-13: claude_fundamental + crypto_macro agree 92-100%.
     # structure removed (now in trend_direction where correlations are stronger).
@@ -1188,10 +1198,8 @@ _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal wei
 _CLUSTER_CORRELATION_PENALTIES: dict[str, float] = {
     "momentum_cluster": 0.15,
     # 2026-04-14: volatility_cluster reduced to 2 members — default 0.3x is fine.
-    # 2026-04-25: trend_direction now 10 members (was 9). At 0.12x per follower:
-    # effective weight = 1.0 + 9*0.12 = 2.08x. Previous 9-member gave
-    # 1.0 + 8*0.12 = 1.96x. bb moved from momentum_cluster to fix cross-cluster
-    # redundancy with ema/macd (85-88% agreement).
+    # 2026-04-26: trend_direction back to 9 members (bb moved to volatility_bounds).
+    # At 0.12x per follower: effective weight = 1.0 + 8*0.12 = 1.96x.
     "trend_direction": 0.12,
     # 2026-04-18: macro_external expanded from 3→6 members. At 0.15x per follower:
     # effective weight = 1.0 + 5*0.15 = 1.75x. Previously 3 members at 0.3x gave
