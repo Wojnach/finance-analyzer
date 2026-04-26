@@ -338,6 +338,14 @@ def _stage_replacements(
 
 
 def _estimate_entry_underlying(snapshot: dict, instrument_state: dict) -> float:
+    """Recover the underlying price at position entry.
+
+    Returns the saved value if available. Otherwise back-calculates from
+    the warrant return formula. Returns a *negative* sentinel when the
+    formula inputs are invalid so callers can distinguish a real estimate
+    from an unresolvable failure (BUG-228: previously returned
+    current_underlying, which was saved permanently and never retried).
+    """
     saved = float(instrument_state.get("entry_underlying") or 0.0)
     if saved > 0:
         return saved
@@ -347,13 +355,21 @@ def _estimate_entry_underlying(snapshot: dict, instrument_state: dict) -> float:
     entry_price = float(snapshot.get("position_average_price") or 0.0)
     leverage = float(snapshot.get("leverage") or 0.0)
     if current_underlying <= 0 or current_price <= 0 or entry_price <= 0 or leverage <= 0:
-        return current_underlying
+        logger.warning(
+            "BUG-228: cannot estimate entry_underlying — missing inputs "
+            "(underlying=%.2f, price=%.2f, entry=%.2f, lev=%.1f)",
+            current_underlying, current_price, entry_price, leverage,
+        )
+        return -1.0  # sentinel: caller should use current_underlying but not save
 
     instrument_return = (current_price / entry_price) - 1.0
     underlying_return = instrument_return / leverage
     base = 1.0 + underlying_return
     if base <= 0:
-        return current_underlying
+        logger.warning(
+            "BUG-228: entry_underlying formula degenerate (base=%.4f)", base,
+        )
+        return -1.0
     return current_underlying / base
 
 
@@ -442,12 +458,18 @@ def _compute_exit_target(snapshot: dict, instrument_state: dict) -> dict[str, An
         else:
             position_entry_ts = dt.datetime.now(dt.UTC)
             instrument_state["entry_ts"] = position_entry_ts.isoformat()
+        # BUG-228: If estimate returns -1.0 sentinel (invalid inputs),
+        # fall back to current_underlying for the exit plan (prevents
+        # ZeroDivisionError) but don't persist it.
+        _entry_und = _estimate_entry_underlying(snapshot, instrument_state)
+        if _entry_und <= 0:
+            _entry_und = current_underlying
         plan = compute_exit_plan(
             Position(
                 symbol=snapshot["ticker"],
                 qty=position_volume,
                 entry_price_sek=position_avg,
-                entry_underlying_usd=_estimate_entry_underlying(snapshot, instrument_state),
+                entry_underlying_usd=_entry_und,
                 entry_ts=position_entry_ts,
                 instrument_type="warrant",
                 leverage=leverage,
@@ -1215,7 +1237,13 @@ def plan_instrument(
     next_state = {
         "budget_sek": budget_sek if budget_sek is not None else instrument_state.get("budget_sek"),
         "entry_volume": entry_volume,
-        "entry_underlying": _estimate_entry_underlying(snapshot, instrument_state) if position_volume > 0 else instrument_state.get("entry_underlying"),
+        # BUG-228: Only save entry_underlying if estimate is valid (> 0).
+        # A -1.0 sentinel means the formula couldn't compute — don't persist
+        # so next cycle can retry with fresh API data.
+        "entry_underlying": (
+            _est if (_est := _estimate_entry_underlying(snapshot, instrument_state)) > 0
+            else instrument_state.get("entry_underlying")
+        ) if position_volume > 0 else instrument_state.get("entry_underlying"),
         "managed_order_ids": managed_order_ids,
         "managed_stop_ids": managed_stop_ids,
         "dead_order_ids": list(instrument_state.get("dead_order_ids") or []),
