@@ -1,357 +1,155 @@
-# Adversarial Review Synthesis — Finance Analyzer
+# Adversarial Review #8 -- SYNTHESIS (2026-04-26)
 
-**Date**: 2026-04-19 (supersedes 2026-04-10 review)
-**Methodology**: Dual review — independent Opus analysis + 8 parallel code-reviewer agents
-**Scope**: Full codebase (142+ files, ~82,000 lines) across 8 subsystems
-**Commit baseline**: 5e7d8e5 (main)
-
----
-
-## Executive Summary — 2026-04-19 Review
-
-Second full adversarial review. The codebase has grown to 82K lines across 142+ modules.
-Many P0 findings from the Apr 10 review have been fixed (Playwright thread safety via RLock,
-TOTP account whitelist, JSONL append sidecar locking). New findings focus on:
-
-1. **[P1] Hardware trailing stop never placed** — tuple/dict mismatch in metals_loop (100% confidence)
-2. **[P1] Drawdown circuit breaker never called** for Patient/Bold portfolios
-3. **[P1] Trade guards permanently bypassed** — record_trade() still never called
-4. **[P1] Telegram CONFIRM uses wrong import** — bypasses order lock + BankID session
-5. **[P1] IC computation relative Path** — silently disables IC weighting
-6. **[P1] news_event "cut" keyword** — sends negative headlines to positive bucket
-7. **[P1] ticker_accuracy missing neutral filter** — per-ticker accuracy inflated
-8. **[P1] Directional accuracy not blended** — stale all-time overrides recent degradation
-
-**Total**: ~80 unique findings (15 P1, 24 P2, 22 P3, 4 P4).
-5 findings independently discovered by both the Opus review and agent reviews.
+**Date**: 2026-04-26 (supersedes 2026-04-19 review)
+**Methodology**: Dual review -- 8 parallel code-reviewer agents + independent manual deep-read
+**Scope**: Full codebase (149+ portfolio files, 40 signal modules, 20+ support files)
+**Commit baseline**: b7610fb3 (main)
 
 ---
 
-## Subsystem Health Scorecard
+## Executive Summary
 
-| Subsystem | Lines | Findings | P1 | P2 | P3 | Health |
-|-----------|-------|----------|----|----|----|----|
-| signals-core | 5,640 | 17 | 4 | 9 | 4 | Fair — directional gate bypassed |
-| orchestration | 6,412 | 16 | 3 | 9 | 4 | Fair — TimeoutError bug, stale config |
-| portfolio-risk | 4,281 | 19 | 3+6 | 6 | 3 | **CRITICAL** — 3 P0: guards dead, peak blind |
-| metals-core | 19,014 | 27 | 6+9 | 7 | 4 | **CRITICAL** — 6 P0: usdsek=1, stop=5%, DST |
-| avanza-api | 2,298 | 16 | 2 | 10 | 4 | **CRITICAL** — 2 P0 findings |
-| signals-modules | 10,949 | 19 | 2+8 | 7 | 2 | **CRITICAL** — gap-fill inverted, FOMC conflict |
-| data-external | 6,062 | 12 | 5 | 7 | 0 | Fair — budget drain, yfinance compat |
-| infrastructure | 5,721 | 22 | 3+8 | 8 | 3 | **CRITICAL** — zombie Claude, no concurrency lock |
-| **Total** | **60,377** | **148** | **52** | **65** | **24** | |
+Third full adversarial review. Eight parallel code-reviewer agents examined the codebase
+partitioned into 8 subsystems, while an independent manual review read critical files
+directly. Cross-critique identified 11 findings confirmed by both reviewers, 37 unique
+to agents, and 12 unique to the manual review.
+
+**Key theme**: The two highest-risk subsystems (metals-core, avanza-api) both handle real
+money and have the most critical findings. Financial math bugs (fx_rate defaults, stop-loss
+distances, PnL calculations) are the primary risk vector.
 
 ---
 
-## Top Priority Findings (Recommended Fixes)
+## TOP 10 CRITICAL FINDINGS
 
-### EMERGENCY: Fix Playwright context thread safety [P0, avanza_session.py]
+### 1. [P0] risk_management.py:66 -- fx_rate defaults to 1.0 (CONFIRMED BOTH)
+When agent_summary is stale, portfolio value computed with fx_rate=1.0 instead of ~10.5.
+USD positions undervalued by 10.5x. Drawdown circuit breaker false-triggers, blocking ALL
+Layer 2 decisions. **Single most dangerous bug -- affects both strategies simultaneously.**
 
-**File**: `portfolio/avanza_session.py:183-291`
+### 2. [P0] fin_snipe_manager.py:64 -- MIN_STOP_DISTANCE_PCT=1.0 violates 3% rule (CONFIRMED BOTH)
+Documented rule says "NEVER place stop-loss within 3% of bid." Code enforces 1%. A stop
+1.5% below bid on a 5x warrant fills from normal spread movement. Replicates Mar 3 incident.
 
-**Problem**: `_pw_lock` is only held during Playwright context *creation*. All API calls
-(`api_get`, `api_post`, `api_delete`) use `ctx.request.*` WITHOUT holding the lock.
-Playwright's sync_api is NOT thread-safe. The metals loop's 10s fast-tick thread and
-the main loop's 8-worker ThreadPoolExecutor can make concurrent requests, corrupting
-internal HTTP state. A BUY confirmation could be consumed by a different request.
+### 3. [P0] avanza_orders.py:17 -- CONFIRM orders route through unguarded TOTP path (AGENT)
+place_buy/sell_order imported from avanza_control resolves to avanza_client (TOTP path)
+with NO 50K cap, NO order lock, NO account whitelist. Any Telegram CONFIRM bypasses safety.
 
-**Impact**: Corrupt trade responses. Order failures, double-executions, wrong-asset trades.
+### 4. [P0] ic_computation.py:19 -- Relative DATA_DIR path (AGENT)
+DATA_DIR = Path("data") is relative. In any non-CWD context (subprocess, scheduled task),
+IC cache silently misses. IC-based weight multipliers become 1.0x for everything.
 
-**Fix**: Wrap the entire body of each `api_get/api_post/api_delete` function with
-`with _pw_lock:`. This serializes all Playwright API calls.
+### 5. [P0] volatility.py:311 -- No null guard on active signal (AGENT)
+df.columns accessed without df is None check. Only active signal module missing this guard.
+AttributeError crashes the signal for all 5 tickers when df=None.
 
-**Effort**: 15 minutes. CRITICAL — must be done before next trading session.
+### 6. [P0] fin_snipe_manager.py:1590 -- Budget per-instrument, not split (AGENT)
+--budget 50000 --orderbook A --orderbook B gives 50K each, deploying 100K total.
+Double-spend of stated budget cap.
 
----
+### 7. [P0] onchain_data.py:101 -- _load_onchain_cache skips _coerce_epoch (AGENT)
+Fallback path when no API token crashes on ISO timestamp. Half-applied fix silently
+disables on-chain voter.
 
-### EMERGENCY: Add account whitelist to TOTP path [P0, avanza_client.py]
+### 8. [P1] avanza_session.py -- POST retry on browser-dead = double order (AGENT)
+_with_browser_recovery retries POST after TargetClosedError. If first POST succeeded
+but response read failed, retry places duplicate order. Real-money double-order risk.
 
-**File**: `portfolio/avanza_client.py:220-320`
+### 9. [P1] signal_engine.py:2864 -- Regime gating uses global not per-ticker accuracy (AGENT)
+Regime gating exemption uses global recent accuracy. A signal with 55% global but 25%
+on XAG-USD bypasses regime gating for XAG, allowing harmful signals to vote.
 
-**Problem**: `get_account_id()` discovers the ISK account by scanning for "ISK" in
-accountType. There is NO hardcoded allowlist against "1625505". If Avanza re-orders
-accounts in the API response, pension account 2674244 could receive real-money trades.
-The `avanza_session.py` path has `ALLOWED_ACCOUNT_IDS`, but the TOTP fallback path does not.
-
-**Impact**: Trades on pension account. Regulatory risk, tax implications, wrong risk profile.
-
-**Fix**: Add `assert account_id == "1625505"` in `get_account_id()` before caching.
-Also filter `get_positions()` and `get_portfolio_value()` to account "1625505" only.
-
-**Effort**: 15 minutes. CRITICAL — must be done before next trading session.
-
----
-
-### Priority 0a: Fix directional accuracy gate disabled by per-ticker override [P1]
-
-**File**: `portfolio/signal_engine.py:1840-1849`
-
-**Problem**: When per-ticker accuracy data overrides global accuracy, the constructed dict
-only includes `accuracy`, `total`, `correct`, `pct`. The keys `buy_accuracy`, `sell_accuracy`,
-`total_buy`, `total_sell` are DROPPED. The directional gate in `_weighted_consensus()` (lines
-829-837) uses `stats.get("buy_accuracy", acc)` which falls back to overall accuracy.
-
-**Impact**: Signals with extreme directional bias are NOT gated. Example: qwen3 has BUY=30%
-accuracy (should be gated below 35% threshold) but SELL=74%. With per-ticker data, `dir_acc`
-falls back to ~50% overall, so the 35% gate never fires. The signal votes BUY freely.
-
-**Fix**: Either:
-(a) Extend `accuracy_by_ticker_signal` in `accuracy_stats.py` to compute per-direction
-accuracy per-ticker, OR
-(b) In the override block at line 1844, preserve directional fields from the global data:
-```python
-global_stats = accuracy_data.get(sig_name, {})
-accuracy_data[sig_name] = {
-    "accuracy": t_stats["accuracy"],
-    "total": t_stats["total"],
-    "correct": t_stats.get("correct", 0),
-    "pct": t_stats.get("pct", ...),
-    # Preserve directional accuracy from global data
-    "buy_accuracy": global_stats.get("buy_accuracy", t_stats["accuracy"]),
-    "sell_accuracy": global_stats.get("sell_accuracy", t_stats["accuracy"]),
-    "total_buy": global_stats.get("total_buy", 0),
-    "total_sell": global_stats.get("total_sell", 0),
-}
-```
-
-**Effort**: 30 minutes. Low risk — additive fix.
+### 10. [P1] log_rotation.py:242 -- Missing fsync before os.replace (AGENT)
+rotate_jsonl writes temp file without flush+fsync before rename. Power loss can produce
+zero-length replacement file. Irrecoverable data loss for signal_log/journal.
 
 ---
 
-### Priority 1: Fix subprocess governance [P1, 3 files]
+## CONFIRMED FINDINGS (Both reviewers independently identified)
 
-**Files**: `portfolio/bigbet.py:170`, `portfolio/iskbets.py:318`, `portfolio/agent_invocation.py:302`
-
-**Problem**: Three modules call `subprocess.run/Popen(["claude", "-p", ...])` directly,
-bypassing `claude_gate.py`'s kill switch, rate limiter, invocation tracking, and env cleanup.
-
-**Impact**: Kill switch (`CLAUDE_ENABLED = False`) is ineffective for 3/5 Claude callers.
-During runaway invocations, only 2/5 paths can be stopped. The `CLAUDECODE` env var stripping
-is missing, risking "nested session" errors.
-
-**Fix**: Replace direct subprocess calls with `from portfolio.claude_gate import invoke_claude`.
-For agent_invocation.py's async Popen path, at minimum call `_clean_env()` and `_log_invocation()`.
-
-**Effort**: 1-2 hours. Low risk — mechanical replacement.
-
----
-
-### Priority 2: Hardware trailing stop failure needs fallback [P1, metals_loop.py]
-
-**File**: `data/metals_loop.py:4088-4134`
-
-**Problem**: When hardware trailing stop placement fails (API error, auth issue), the new
-position is created but has NO broker-level protection. A Telegram alert fires, but there's
-no automatic fallback to the legacy cascade stop-loss system.
-
-**Impact**: During Avanza API issues, new positions sit unprotected. A sharp price drop
-could cause knockout without any stop-loss to limit damage.
-
-**Fix**: On hardware trailing stop failure, automatically fall through to the legacy cascade
-stop-loss block (lines 4124-4134) as a safety net. Add: `if not hw_stop_placed: HARDWARE_TRAILING_ENABLED_temp = False; [run legacy block]`.
-
-**Effort**: 30 minutes. Medium risk — testing stop-loss behavior requires care.
+| # | Subsystem | Finding | Impact |
+|---|-----------|---------|--------|
+| 1 | portfolio-risk | fx_rate default 1.0 | False circuit breaker |
+| 2 | metals-core | Stop distance 1% vs 3% rule | Stop fills from spread |
+| 3 | portfolio-risk | trade_guards no lock | Lost updates |
+| 4 | portfolio-risk | kelly_sizing 500 vs 1000 SEK | Below Avanza minimum |
+| 5 | metals-core | ORB DST-blind morning window | Wrong ORB range in summer |
+| 6 | metals-core | metals_loop raw json.load | Position state corruption |
+| 7 | metals-core | Budget per-instrument not split | Double-spend |
+| 8 | orchestration | crypto_scheduler local timestamp | 1-2h offset in logs |
+| 9 | infrastructure | Dashboard CORS wildcard | Data exfiltration |
+| 10 | portfolio-risk | Equity curve fees excluded | Kelly overestimates edge |
+| 11 | orchestration | set in JSON-destined dict | Latent serialization crash |
 
 ---
 
-### Priority 3: Fix timezone consistency in metals_loop [P2, 8 instances]
+## SUBSYSTEM HEALTH SCORES
 
-**File**: `data/metals_loop.py` lines 889, 1883, 3119, 3564, 4183, 4583, 6430, 6575
-
-**Problem**: All 8 instances use `datetime.datetime.now().strftime(...)` (naive local time)
-instead of `datetime.datetime.now(datetime.UTC)`. This causes date-boundary issues near
-midnight CET, particularly for stop-loss deduplication ("already placed today" check).
-
-**Impact**: Duplicate stop-loss orders after midnight CET boundary, potentially exceeding
-position volume (sell + stop > units).
-
-**Fix**: Replace all 8 with `datetime.datetime.now(datetime.UTC).strftime(...)`.
-
-**Effort**: 30 minutes. Low risk — straightforward replacement.
+| Subsystem | P0 | P1 | P2 | Health |
+|-----------|----|----|----|----|
+| signals-core | 1 | 6 | 6 | 40/100 Poor |
+| orchestration | 2 | 4 | 3 | 45/100 Poor |
+| portfolio-risk | 2 | 4 | 4 | 45/100 Poor |
+| metals-core | 3 | 5 | 6 | 30/100 CRITICAL |
+| avanza-api | 2 | 4 | 4 | 35/100 CRITICAL |
+| signals-modules | 2 | 3 | 3 | 50/100 Fair |
+| data-external | 2 | 5 | 6 | 40/100 Poor |
+| infrastructure | 1 | 6 | 6 | 40/100 Poor |
 
 ---
 
-### Priority 4: Portfolio drawdown fallback masks real crashes [P1, risk_management.py]
+## PRIORITY FIX LIST
 
-**File**: `portfolio/risk_management.py:43-47`
+### Immediate (fix today -- real money at stake)
+1. risk_management.py:66 -- fx_rate default 1.0 -> 10.5
+2. fin_snipe_manager.py:64 -- MIN_STOP_DISTANCE_PCT 1.0 -> 3.0
+3. avanza_orders.py:17 -- Import from avanza_session, not avanza_control
+4. ic_computation.py:19 -- DATA_DIR to Path(__file__).resolve().parent.parent / "data"
+5. volatility.py:311 -- Add df is None guard
 
-**Problem**: When live prices are unavailable (API outage), `_compute_portfolio_value` falls
-back to `avg_cost_usd` from holdings. During a crash, true market price could be far below
-cost basis, but the drawdown circuit breaker sees 0% drawdown.
+### This week
+6. avanza_session.py -- No POST retry on browser-dead (double-order risk)
+7. trade_guards.py -- Add threading.Lock for read-modify-write
+8. kelly_sizing.py:290 -- Change 500 to 1000 SEK minimum
+9. orb_predictor.py:32-35 -- DST-aware morning window
+10. onchain_data.py:101 -- Apply _coerce_epoch
+11. fin_snipe_manager.py:1590 -- Divide budget by len(orderbook_filter)
+12. log_rotation.py:242 -- Add fsync before os.replace
+13. funding_rate.py -- Add _binance_limiter.wait()
+14. social_sentiment.py -- Replace print() with logger, use http_retry
 
-**Impact**: Circuit breaker doesn't trigger during the worst possible scenario — a crash
-combined with API outage. The system continues generating trade signals when it should be
-in emergency mode.
-
-**Fix**: When falling back to stale prices, apply a staleness penalty (assume -10%) or
-refuse to compute drawdown and default to `breached = True`. Conservative is correct here.
-
-**Effort**: 1 hour. Low risk — affects only the fallback path.
-
----
-
-### Priority 5: JSONL append atomicity on Windows [P1, file_utils.py]
-
-**File**: `portfolio/file_utils.py:155-167`
-
-**Problem**: `atomic_append_jsonl` opens in append mode and writes. On Windows/NTFS, there
-is no kernel guarantee that concurrent append-mode writes from different threads are atomic.
-Multiple ticker threads could interleave bytes, producing corrupt JSONL lines.
-
-**Impact**: Data loss in signal_log.jsonl, layer2_journal.jsonl, and other JSONL files.
-The system's parsers skip malformed lines, so the effect is silent data loss rather than
-crashes. The SQLite signal_db mitigates this for signal logging, but other JSONL files
-(journal, invocations, telegram_messages) have no SQLite backup.
-
-**Fix**: Add a per-file threading.Lock to `atomic_append_jsonl`. Use a module-level dict
-of `{path: Lock}` to serialize appends to the same file.
-
-**Effort**: 1 hour. Low risk — adds serialization without changing the API.
+### Next sprint
+15. signal_engine.py -- Refactor _weighted_consensus into sub-functions
+16. Centralize fx_rate default across all modules
+17. metals_loop.py -- Replace raw json.load with file_utils
+18. Dashboard CORS -- Restrict from * to localhost/LAN
+19. credit_spread.py -- Add threading.Lock on _oas_cache
+20. complexity_gap_regime.py + mahalanobis_turbulence.py -- Fix _cached arg order
 
 ---
 
-## Positive Patterns Found
+## METHODOLOGY NOTES
 
-The review also identified several excellent defensive patterns worth preserving:
-
-1. **Fail-closed accuracy gate** (`signal_engine.py:1807-1810`): When accuracy stats loading
-   fails, ALL signals are gated with 0% accuracy. Prevents trading on blind data.
-
-2. **28 thread locks**: Comprehensive locking across all shared state. No nested lock
-   patterns detected (no deadlock risk).
-
-3. **BUG tracking**: 181+ named bugs tracked inline with code comments, creating an audit
-   trail. Each fix references a specific bug number.
-
-4. **Dogpile prevention** (`shared_state.py:23-89`): Cache-through helper prevents
-   thundering herd on cache misses. Loading keys tracked with timeout eviction.
-
-5. **Kelly criterion guards** (`kelly_sizing.py:38-51`): All edge cases properly handled
-   (win_prob ≤0 or ≥1, avg_win/loss ≤0). Division by zero impossible.
-
-6. **Circuit breaker for APIs** (`circuit_breaker.py`): Thread-safe state machine with
-   CLOSED/OPEN/HALF_OPEN states. Prevents hammering failing APIs.
-
-7. **Regime-aware signal gating**: Signals that produce negative alpha in specific market
-   regimes are automatically silenced, with per-ticker exemptions for signals that work
-   despite the regime.
+- **Agent reviews**: 8 feature-dev:code-reviewer agents, each given complete file list
+  with specific review criteria (7 categories: bugs, security, reliability, data integrity,
+  performance, architecture, correctness). Total agent runtime: ~3-6 min each.
+- **Manual review**: Direct reading of 15+ critical files (~5K lines in detail).
+- **Cross-referencing**: Independent reviews conducted without knowledge of each other.
+  11 findings confirmed by both (highest confidence). 37 agent-only + 12 manual-only.
+- Prior reviews: Apr 12 (#1), Apr 17 (#6), Apr 19 (#7), Apr 24 (#7.5). This is #8.
 
 ---
 
-## Deferred Items (Not Urgent)
+## POSITIVE PATTERNS
 
-1. **metals_loop.py God file** (6,963 lines): Should be split into 4-5 modules. Large
-   refactor — defer to a dedicated session.
-
-2. **Signal result schema**: No TypedDict for signal results. Add `SignalResult` dataclass.
-   Low urgency — `_validate_signal_result` handles normalization.
-
-3. **Econ calendar date staleness**: Hardcoded FOMC/CPI/NFP dates expire after 2027.
-   Add a staleness warning check.
-
-4. **journal.py raw open()**: Uses `open()` instead of `file_utils.load_jsonl()`. Low
-   risk since it's read-only, but violates the project's own rules.
-
-5. **main.py re-exports**: 50+ re-exports for backward compatibility. Gradually deprecate.
+1. **Fail-closed accuracy gate**: When stats loading fails, ALL signals gated at 0%.
+2. **Account whitelist**: ALLOWED_ACCOUNT_IDS in avanza_session.py prevents pension trades.
+3. **Atomic I/O layer**: file_utils.py with fsync+replace is used in most critical paths.
+4. **Dogpile prevention**: shared_state._cached prevents thundering herd on cache misses.
+5. **Circuit breakers**: Per-API circuit breakers (Binance, Alpaca) with CLOSED/OPEN/HALF_OPEN.
+6. **BUG tracking**: 180+ named bugs tracked inline, creating strong audit trail.
 
 ---
 
-## Agent Review Summary
-
-*Eight parallel adversarial review agents were launched, one per subsystem. Their findings
-are being cross-referenced against the independent review above.*
-
-### Agent: review-signals-core — COMPLETE (10 findings: 4 P1, 4 P2, 2 P3)
-See `AGENT_REVIEW_SIGNALS_CORE.md` for full details. Key findings:
-- **A-SC-1 [P1]**: Per-ticker accuracy override strips `buy_accuracy`/`sell_accuracy` → directional gate disabled
-- **A-SC-2 [P1]**: Regime accuracy cache shared timestamp → cross-horizon contamination
-- **A-SC-3 [P1]**: Ministral applicable count says crypto-only but code runs for all tickers
-- **A-SC-5 [P2]**: `blend_accuracy_data` uses `max()` for sample count → inflated gate threshold
-- **A-SC-6 [P2]**: `signal_history.py` read-modify-write race under ThreadPoolExecutor
-
-### Agent: review-orchestration — COMPLETE (12 findings: 3 P1, 7 P2, 2 P3)
-See `AGENT_REVIEW_ORCHESTRATION.md` for full details. Key findings:
-- **A-OR-1 [P1]**: Wrong `TimeoutError` type caught — ticker hangs crash the loop on Python <3.11
-- **A-OR-2 [P1]**: classify_tier/update_tier_state TOCTOU — three independent reads of trigger_state.json
-- **A-OR-3 [P1]**: Multi-agent mode blocks main loop 30s synchronously
-- **A-OR-4 [P2]**: `_maybe_send_digest` not wrapped in `_track` — crash aborts all post-cycle tasks
-- **A-OR-5 [P2]**: Stale config in post-cycle — config changes require restart
-- **A-OR-7 [P2]**: BUY↔SELL flips poison trigger consensus — rapid crypto oscillations miss signals
-
-### Agent: review-portfolio-risk — COMPLETE (15 findings: 3 P0, 6 P1, 4 P2, 2 P3)
-See `AGENT_REVIEW_PORTFOLIO_RISK.md` for full details. **3 P0 CRITICAL findings:**
-- **A-PR-1 [P0]**: `record_trade()` never called in production — entire trade guard system dead
-- **A-PR-2 [P0]**: Drawdown peak scans only last 2000 entries (~33h) — misses true historical peak
-- **A-PR-3 [P0]**: portfolio_validator.py raw json.load() — TOCTOU race with concurrent save
-- **A-PR-6 [P1]**: Kelly P&L uses all-time average instead of FIFO — wrong win probability
-- **A-PR-7 [P1]**: Concentration limit warning never blocks trades
-- **A-PR-10 [P2]**: Monte Carlo ATR annualization wrong for hourly candles (5x understatement)
-
-### Agent: review-metals-core — COMPLETE (21 findings: 6 P0, 9 P1, 4 P2, 2 P3)
-See `AGENT_REVIEW_METALS_CORE.md` for full details. **MOST DANGEROUS SUBSYSTEM.**
-- **A-MC-1 [P0]**: HARD_STOP_CERT_PCT=0.05 → 5% cert stop = 1% underlying. Fires on normal noise.
-- **A-MC-2 [P0]**: usdsek=1.0 hardcoded → all exit optimizer SEK calculations wrong by 10x
-- **A-MC-3 [P0]**: ORB window hardcoded CET winter → 1 hour wrong during CEST (active NOW)
-- **A-MC-4 [P0]**: entry_ts=now() always → HOLD_TIME_EXTENDED permanently disabled
-- **A-MC-8 [P1]**: MIN_STOP_DISTANCE_PCT=1.0 violates 3% rule
-- **A-MC-13 [P1]**: iskbets gate defaults APPROVE on parse failure — no protection during errors
-
-### Agent: review-avanza-api — COMPLETE (13 findings: 2 P0, 7 P1, 3 P2, 1 P3)
-See `AGENT_REVIEW_AVANZA_API.md` for full details. **MOST CRITICAL SUBSYSTEM.**
-- **A-AV-1 [P0]**: Playwright context used outside lock — concurrent requests corrupt trades
-- **A-AV-2 [P0]**: TOTP path has no account whitelist — pension account can receive orders
-- **A-AV-3 [P1]**: get_positions/get_portfolio_value include pension account data
-- **A-AV-4 [P1]**: Single CONFIRM matches wrong (most-recent) order
-- **A-AV-5 [P1]**: Confirmed orders use TOTP path, not BankID session
-- **A-AV-6 [P1]**: get_quote() hardcodes "stock" type — wrong price for warrants
-- **A-AV-9 [P1]**: Pending orders TOCTOU race — potential double execution
-
-### Agent: review-signals-modules — COMPLETE (16 findings: 2 P0, 8 P1, 6 P2)
-See `AGENT_REVIEW_SIGNALS_MODULES.md` for full details. Key findings:
-- **A-SM-1 [P0]**: Gap-fill signal fires BUY on continuing gap-down — inverted logic
-- **A-SM-2 [P0]**: GARCH missing from _empty_result schema — inconsistent sub_signals
-- **A-SM-3 [P1]**: FOMC drift (BUY) vs FOMC proximity (SELL) — direct contradiction 32 days/year
-- **A-SM-4 [P1]**: sqrt(365) vs sqrt(252) annualization makes GARCH ratio meaningless
-- **A-SM-6 [P1]**: Donchian upper includes current bar — lookback bias (structure.py does it right)
-- **A-SM-7 [P1]**: "cut" keyword as positive — job/budget cuts score as BUY during stress
-
-### Agent: review-data-external — COMPLETE (10 findings: 5 P1, 5 P2)
-See `AGENT_REVIEW_DATA_EXTERNAL.md` for full details. Key findings:
-- **A-DE-1 [P1]**: Alpha Vantage earnings calls bypass the 25/day budget counter
-- **A-DE-4 [P1]**: fear_greed.py missing yfinance MultiIndex flatten — stock F&G signal silently dead
-- **A-DE-5 [P1]**: onchain_data.py cache seeding crashes on old-format cache (ISO string as epoch)
-- **A-DE-6 [P2]**: sentiment.py subprocess fallback uses wrong Python venv (.venv instead of .venv-llm)
-- **A-DE-8 [P2]**: llama_server.py lock PID check uses substring match — PID "123" matches "1234"
-
-### Agent: review-infrastructure — COMPLETE (14 findings: 3 P0, 6 P1, 5 P2)
-See `AGENT_REVIEW_INFRASTRUCTURE.md` for full details. Key findings:
-- **A-IN-1 [P0]**: Log rotation non-atomic archive write — data loss on crash mid-rotation
-- **A-IN-2 [P0]**: claude_gate zombie process on TimeoutExpired — process not killed
-- **A-IN-3 [P0]**: No concurrency lock in claude_gate — simultaneous invocations possible
-- **A-IN-4 [P1]**: health.check_staleness crashes on naive timestamps
-- **A-IN-7 [P1]**: message_throttle TOCTOU race bypasses cooldown
-- **A-IN-9 [P1]**: shared_state._cached suppresses KeyboardInterrupt — Ctrl+C doesn't stop loop
-
----
-
-## Methodology Notes
-
-- **Independent review**: Direct reading of all key files (signal_engine.py 2058 lines,
-  main.py 1148 lines, metals_loop.py 6963 lines, file_utils.py 276 lines,
-  risk_management.py 801 lines, avanza_orders/session/control/client.py 2298 lines,
-  plus targeted scans of all other subsystems). Total ~10K lines read in detail.
-
-- **Agent reviews**: 8 feature-dev:code-reviewer agents, each given the complete file list
-  for their subsystem with specific instructions on what to look for (financial logic errors,
-  thread safety, silent failures, data corruption, etc.).
-
-- **Cross-referencing**: Both independent and agent reviews were conducted without knowledge
-  of each other's findings. Agreement increases confidence; disagreement triggers investigation.
-
-- **Vulnerability scans**: Grep-based scans for `eval()`, `exec()`, `shell=True`,
-  `json.loads(open())`, bare `except: pass`, and `subprocess.run/Popen` bypasses.
-
----
-
-*Review complete. Recommended action: Fix Priority 1-5 in order. Commit fixes in batches
-of 3-5 files. Run full test suite after each batch.*
+Generated: 2026-04-26 by Claude Opus 4.6 (adversarial review #8)
+Prior reviews: ADVERSARIAL_REVIEW_2026_04_12.md, 2026-04-17.md, 2026-04-24.md
