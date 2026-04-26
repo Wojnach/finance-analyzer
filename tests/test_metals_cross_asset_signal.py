@@ -7,6 +7,9 @@
 `_using_intraday` flag that tells the signal which threshold band to use.
 Tests below set `_using_intraday: False` to preserve legacy daily-path
 coverage; new tests cover the intraday path with tighter thresholds.
+
+2026-04-26: Added tests for EPU and TIPS real yield sub-signals (#7-8).
+These sub-signals fetch from FRED API; tests mock `_fetch_fred_values`.
 """
 from __future__ import annotations
 
@@ -358,3 +361,234 @@ class TestGetCrossAssetContextHealth:
         mock_daily.assert_called_once()
         # gs_ratio_zscore still wired through the always-fetched daily source
         assert ctx["gs_ratio_zscore"] == 1.0
+
+
+class TestEPUSubSignal:
+    """Sub-signal #7: Economic Policy Uncertainty from FRED."""
+
+    @patch("portfolio.signals.metals_cross_asset._fetch_fred_values")
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_high_epu_buys_gold(self, mock_ctx, mock_fred):
+        """High EPU z-score → uncertainty → safe-haven BUY gold."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = _daily_ctx()
+        # Return high-EPU values: latest 250 >> mean of rest → z-score >> 1.5
+        mock_fred.side_effect = lambda series, key, cache: (
+            [250.0] + [100.0] * 251 if series == "USEPUINDXD"
+            else None
+        )
+        result = compute_metals_cross_asset_signal(
+            _make_df(),
+            context={"ticker": "XAU-USD", "config": {"golddigger": {"fred_api_key": "test"}}},
+        )
+        assert result["sub_signals"]["epu"] == "BUY"
+
+    @patch("portfolio.signals.metals_cross_asset._fetch_fred_values")
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_high_epu_buys_silver(self, mock_ctx, mock_fred):
+        """High EPU → BUY silver too (both metals are safe havens)."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = _daily_ctx()
+        mock_fred.side_effect = lambda series, key, cache: (
+            [250.0] + [100.0] * 251 if series == "USEPUINDXD"
+            else None
+        )
+        result = compute_metals_cross_asset_signal(
+            _make_df(),
+            context={"ticker": "XAG-USD", "config": {"golddigger": {"fred_api_key": "test"}}},
+        )
+        assert result["sub_signals"]["epu"] == "BUY"
+
+    @patch("portfolio.signals.metals_cross_asset._fetch_fred_values")
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_low_epu_sells(self, mock_ctx, mock_fred):
+        """Low EPU → complacency → SELL metals."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = _daily_ctx()
+        # Very low current EPU relative to history → z-score << -1.0
+        mock_fred.side_effect = lambda series, key, cache: (
+            [30.0] + [100.0] * 251 if series == "USEPUINDXD"
+            else None
+        )
+        result = compute_metals_cross_asset_signal(
+            _make_df(),
+            context={"ticker": "XAU-USD", "config": {"golddigger": {"fred_api_key": "test"}}},
+        )
+        assert result["sub_signals"]["epu"] == "SELL"
+
+    @patch("portfolio.signals.metals_cross_asset._fetch_fred_values")
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_neutral_epu_holds(self, mock_ctx, mock_fred):
+        """EPU near mean → HOLD."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = _daily_ctx()
+        mock_fred.side_effect = lambda series, key, cache: (
+            [100.0] * 252 if series == "USEPUINDXD"
+            else None
+        )
+        result = compute_metals_cross_asset_signal(
+            _make_df(),
+            context={"ticker": "XAU-USD", "config": {"golddigger": {"fred_api_key": "test"}}},
+        )
+        assert result["sub_signals"]["epu"] == "HOLD"
+
+    @patch("portfolio.signals.metals_cross_asset._fetch_fred_values")
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_no_fred_key_holds(self, mock_ctx, mock_fred):
+        """No FRED API key → fetch returns None → EPU votes HOLD."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = _daily_ctx()
+        mock_fred.return_value = None
+        result = compute_metals_cross_asset_signal(
+            _make_df(), ticker="XAU-USD", config={}, macro={}
+        )
+        assert result["sub_signals"]["epu"] == "HOLD"
+        assert result["indicators"]["epu_zscore"] == 0.0
+
+    @patch("portfolio.signals.metals_cross_asset._fetch_fred_values")
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_epu_zscore_in_indicators(self, mock_ctx, mock_fred):
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = _daily_ctx()
+        mock_fred.side_effect = lambda series, key, cache: (
+            [250.0] + [100.0] * 251 if series == "USEPUINDXD"
+            else None
+        )
+        result = compute_metals_cross_asset_signal(
+            _make_df(),
+            context={"ticker": "XAU-USD", "config": {"golddigger": {"fred_api_key": "test"}}},
+        )
+        assert "epu_zscore" in result["indicators"]
+        assert result["indicators"]["epu_zscore"] > 1.0
+
+
+class TestTIPSSubSignal:
+    """Sub-signal #8: TIPS Real Yield direction from FRED."""
+
+    @patch("portfolio.signals.metals_cross_asset._fetch_fred_values")
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_falling_real_yields_buys(self, mock_ctx, mock_fred):
+        """Falling real yields → lower opportunity cost → BUY metals."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = _daily_ctx()
+        # Recent 5 values lower than older 5 → falling yields
+        # recent avg = 1.5, older avg = 1.8 → change = -0.3 < -0.10 → BUY
+        mock_fred.side_effect = lambda series, key, cache: (
+            [1.5, 1.5, 1.5, 1.5, 1.5, 1.8, 1.8, 1.8, 1.8, 1.8] + [2.0] * 40
+            if series == "DFII10"
+            else None
+        )
+        result = compute_metals_cross_asset_signal(
+            _make_df(),
+            context={"ticker": "XAU-USD", "config": {"golddigger": {"fred_api_key": "test"}}},
+        )
+        assert result["sub_signals"]["tips_yield"] == "BUY"
+
+    @patch("portfolio.signals.metals_cross_asset._fetch_fred_values")
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_rising_real_yields_sells(self, mock_ctx, mock_fred):
+        """Rising real yields → higher opportunity cost → SELL metals."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = _daily_ctx()
+        # recent avg = 2.0, older avg = 1.5 → change = +0.5 > 0.10 → SELL
+        mock_fred.side_effect = lambda series, key, cache: (
+            [2.0, 2.0, 2.0, 2.0, 2.0, 1.5, 1.5, 1.5, 1.5, 1.5] + [1.5] * 40
+            if series == "DFII10"
+            else None
+        )
+        result = compute_metals_cross_asset_signal(
+            _make_df(),
+            context={"ticker": "XAG-USD", "config": {"golddigger": {"fred_api_key": "test"}}},
+        )
+        assert result["sub_signals"]["tips_yield"] == "SELL"
+
+    @patch("portfolio.signals.metals_cross_asset._fetch_fred_values")
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_stable_real_yields_holds(self, mock_ctx, mock_fred):
+        """Flat real yields → HOLD."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = _daily_ctx()
+        # recent avg = older avg → change ~0 → HOLD
+        mock_fred.side_effect = lambda series, key, cache: (
+            [1.8] * 50 if series == "DFII10"
+            else None
+        )
+        result = compute_metals_cross_asset_signal(
+            _make_df(),
+            context={"ticker": "XAU-USD", "config": {"golddigger": {"fred_api_key": "test"}}},
+        )
+        assert result["sub_signals"]["tips_yield"] == "HOLD"
+
+    @patch("portfolio.signals.metals_cross_asset._fetch_fred_values")
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_insufficient_tips_data_holds(self, mock_ctx, mock_fred):
+        """Fewer than 10 TIPS values → can't compute → HOLD."""
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = _daily_ctx()
+        mock_fred.side_effect = lambda series, key, cache: (
+            [1.8] * 5 if series == "DFII10"  # only 5 values, need 10
+            else None
+        )
+        result = compute_metals_cross_asset_signal(
+            _make_df(),
+            context={"ticker": "XAU-USD", "config": {"golddigger": {"fred_api_key": "test"}}},
+        )
+        assert result["sub_signals"]["tips_yield"] == "HOLD"
+        assert result["indicators"]["tips_change"] == 0.0
+
+    @patch("portfolio.signals.metals_cross_asset._fetch_fred_values")
+    @patch("portfolio.signals.metals_cross_asset._get_cross_asset_context")
+    def test_tips_change_in_indicators(self, mock_ctx, mock_fred):
+        from portfolio.signals.metals_cross_asset import compute_metals_cross_asset_signal
+        mock_ctx.return_value = _daily_ctx()
+        mock_fred.side_effect = lambda series, key, cache: (
+            [1.5, 1.5, 1.5, 1.5, 1.5, 1.8, 1.8, 1.8, 1.8, 1.8] + [2.0] * 40
+            if series == "DFII10"
+            else None
+        )
+        result = compute_metals_cross_asset_signal(
+            _make_df(),
+            context={"ticker": "XAU-USD", "config": {"golddigger": {"fred_api_key": "test"}}},
+        )
+        assert "tips_change" in result["indicators"]
+        assert result["indicators"]["tips_change"] == -0.3
+
+
+class TestComputeZscore:
+    """Unit tests for the _compute_zscore helper."""
+
+    def test_normal_zscore(self):
+        from portfolio.signals.metals_cross_asset import _compute_zscore
+        # Mean=100, std~0 except the outlier at position 0
+        values = [200.0] + [100.0] * 251
+        z = _compute_zscore(values)
+        assert z > 1.5  # 200 is well above mean of ~100
+
+    def test_insufficient_data_returns_zero(self):
+        from portfolio.signals.metals_cross_asset import _compute_zscore
+        z = _compute_zscore([100.0] * 10)  # < 20 minimum
+        assert z == 0.0
+
+    def test_zero_variance_returns_zero(self):
+        from portfolio.signals.metals_cross_asset import _compute_zscore
+        z = _compute_zscore([5.0] * 50)  # all identical
+        assert z == 0.0
+
+
+class TestGetFredKey:
+    """Unit tests for FRED API key extraction."""
+
+    def test_dict_config(self):
+        from portfolio.signals.metals_cross_asset import _get_fred_key
+        ctx = {"config": {"golddigger": {"fred_api_key": "abc123"}}}
+        assert _get_fred_key(ctx) == "abc123"
+
+    def test_no_config(self):
+        from portfolio.signals.metals_cross_asset import _get_fred_key
+        assert _get_fred_key({}) == ""
+        assert _get_fred_key(None) == ""
+
+    def test_empty_key(self):
+        from portfolio.signals.metals_cross_asset import _get_fred_key
+        ctx = {"config": {"golddigger": {"fred_api_key": ""}}}
+        assert _get_fred_key(ctx) == ""

@@ -1,12 +1,14 @@
 """Cross-asset signal for metals -- correlated market indicators.
 
-Signal #32.  Combines 6 cross-asset sub-indicators via majority vote:
+Signal #32.  Combines 8 cross-asset sub-indicators via majority vote:
     1. Copper Momentum: copper up -> industrial demand -> silver bullish
     2. GVZ (Gold VIX): high implied vol signals breakout/reversal
     3. Gold/Silver Ratio: mean-reversion signal (high = silver cheap)
     4. G/S Ratio Velocity: rate of change — falling = silver outperforming
     5. SPY Momentum: risk-on/risk-off gauge
     6. Oil Momentum: inflation expectations proxy
+    7. EPU (Economic Policy Uncertainty): high uncertainty -> safe haven BUY
+    8. TIPS Real Yield direction: falling real yields -> BUY metals
 
 Applicable to XAU-USD and XAG-USD only.
 Gold and silver interpret some signals differently (e.g. G/S ratio).
@@ -18,10 +20,18 @@ no intraday resolution. Fix: switch primary data to intraday (60m bars
 via `get_all_cross_asset_intraday`) and tighten thresholds proportionally.
 Daily data retained as fallback when intraday fetch fails (weekend,
 yfinance hiccup, etc.). GVZ stays daily — it's a daily-published index.
+
+2026-04-26: Added EPU + TIPS real yield from FRED API as sub-signals #7-8.
+EPU improves gold RMSE by ~18% (Baker/Bloom/Davis 2016). TIPS real yield
+direction captures opportunity-cost channel (metals pay no yield — when
+real yields fall, holding metals becomes relatively more attractive).
+Both are daily-cadence indicators like GVZ.
 """
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from typing import Any
 
 from portfolio.signal_utils import majority_vote
@@ -53,6 +63,118 @@ _GS_VELOCITY_DAILY_PCT = 2.0
 _GVZ_ZSCORE_HIGH = 1.5
 _GVZ_ZSCORE_LOW = -1.0
 _GS_RATIO_ZSCORE = 1.5
+
+# --- FRED-sourced macro indicators (daily, 4h cache) ---
+# EPU: Economic Policy Uncertainty (Baker/Bloom/Davis daily news index).
+# High uncertainty → flight to safety → BUY metals.
+_EPU_ZSCORE_HIGH = 1.5
+_EPU_ZSCORE_LOW = -1.0
+_EPU_FRED_SERIES = "USEPUINDXD"
+
+# TIPS real yield (10Y TIPS, FRED series DFII10).
+# Direction matters: falling real yields → lower opportunity cost → BUY metals.
+# Threshold: 10bp change in 5d-vs-5d moving avg is meaningful.
+_TIPS_CHANGE_THRESHOLD = 0.10
+_TIPS_FRED_SERIES = "DFII10"
+
+_FRED_TIMEOUT = 15
+_FRED_CACHE_TTL = 4 * 3600
+_FRED_HISTORY_LIMIT = 300
+
+# Module-level FRED caches (separate dict per series)
+_epu_cache: dict = {}
+_tips_cache: dict = {}
+_fred_cache_lock = threading.Lock()
+
+
+def _get_fred_key(context: dict | None) -> str:
+    """Extract FRED API key from context → config."""
+    if not context:
+        return ""
+    cfg = context.get("config")
+    if not cfg:
+        return ""
+    if isinstance(cfg, dict):
+        return cfg.get("golddigger", {}).get("fred_api_key", "") or ""
+    return getattr(cfg, "fred_api_key", "") or getattr(
+        getattr(cfg, "golddigger", None), "fred_api_key", ""
+    ) if hasattr(cfg, "fred_api_key") or hasattr(cfg, "golddigger") else ""
+
+
+def _fetch_fred_values(
+    series_id: str, fred_api_key: str, cache: dict,
+) -> list[float] | None:
+    """Fetch a FRED series.  Returns list of floats (newest first), cached 4h."""
+    now = time.time()
+    with _fred_cache_lock:
+        if (
+            cache.get("key") == fred_api_key
+            and cache.get("data")
+            and now - cache.get("time", 0) < _FRED_CACHE_TTL
+        ):
+            return cache["data"]
+
+    if not fred_api_key:
+        logger.debug("No FRED API key — cannot fetch %s", series_id)
+        return cache.get("data")
+
+    try:
+        from portfolio.http_retry import fetch_with_retry
+    except ImportError:
+        logger.debug("http_retry not available for FRED fetch")
+        return cache.get("data")
+
+    try:
+        resp = fetch_with_retry(
+            "https://api.stlouisfed.org/fred/series/observations",
+            params={
+                "series_id": series_id,
+                "api_key": fred_api_key,
+                "file_type": "json",
+                "sort_order": "desc",
+                "limit": _FRED_HISTORY_LIMIT,
+            },
+            timeout=_FRED_TIMEOUT,
+        )
+        data = resp.json() if hasattr(resp, "json") else __import__("json").loads(resp)
+        observations = data.get("observations", [])
+        values = []
+        for obs in observations:
+            val = obs.get("value", ".")
+            if val != ".":
+                try:
+                    values.append(float(val))
+                except (ValueError, TypeError):
+                    continue
+
+        if values:
+            with _fred_cache_lock:
+                cache["key"] = fred_api_key
+                cache["data"] = values
+                cache["time"] = now
+            logger.debug(
+                "FRED %s fetched: %d values, latest=%.2f",
+                series_id, len(values), values[0],
+            )
+            return values
+    except Exception:
+        logger.warning("FRED %s fetch failed", series_id, exc_info=True)
+
+    return cache.get("data")
+
+
+def _compute_zscore(values: list[float], lookback: int = 252) -> float:
+    """Z-score of most recent value vs lookback history."""
+    if len(values) < 20:
+        return 0.0
+    n = min(lookback, len(values))
+    history = values[:n]
+    mean = sum(history) / len(history)
+    variance = sum((v - mean) ** 2 for v in history) / len(history)
+    std = variance ** 0.5
+    if std < 1e-10:
+        return 0.0
+    return (values[0] - mean) / std
 
 
 def _get_cross_asset_context(ticker: str) -> dict | None:
@@ -279,6 +401,39 @@ def compute_metals_cross_asset_signal(
         sub_signals["oil"] = "HOLD"
     votes.append(sub_signals["oil"])
 
+    # Sub 7: EPU (Economic Policy Uncertainty) — daily FRED
+    # High uncertainty → safe-haven demand → BUY both gold and silver
+    # Low uncertainty → risk-on → less safe-haven premium → SELL
+    fred_key = _get_fred_key(context)
+    epu_values = _fetch_fred_values(_EPU_FRED_SERIES, fred_key, _epu_cache)
+    epu_zscore = _compute_zscore(epu_values) if epu_values else 0.0
+    if epu_zscore > _EPU_ZSCORE_HIGH:
+        sub_signals["epu"] = "BUY"
+    elif epu_zscore < _EPU_ZSCORE_LOW:
+        sub_signals["epu"] = "SELL"
+    else:
+        sub_signals["epu"] = "HOLD"
+    votes.append(sub_signals["epu"])
+
+    # Sub 8: TIPS Real Yield direction — daily FRED (DFII10)
+    # Falling real yields → lower opportunity cost of holding metals → BUY
+    # Rising real yields → higher opportunity cost → SELL
+    tips_values = _fetch_fred_values(_TIPS_FRED_SERIES, fred_key, _tips_cache)
+    if tips_values and len(tips_values) >= 10:
+        tips_recent = sum(tips_values[:5]) / 5
+        tips_older = sum(tips_values[5:10]) / 5
+        tips_change = tips_recent - tips_older
+    else:
+        tips_change = 0.0
+
+    if tips_change < -_TIPS_CHANGE_THRESHOLD:
+        sub_signals["tips_yield"] = "BUY"
+    elif tips_change > _TIPS_CHANGE_THRESHOLD:
+        sub_signals["tips_yield"] = "SELL"
+    else:
+        sub_signals["tips_yield"] = "HOLD"
+    votes.append(sub_signals["tips_yield"])
+
     action, confidence = majority_vote(votes)
 
     return {
@@ -292,6 +447,8 @@ def compute_metals_cross_asset_signal(
             "gs_velocity": round(gs_vel, 3),
             "spy_change": round(spy, 3),
             "oil_change": round(oil, 3),
+            "epu_zscore": round(epu_zscore, 2),
+            "tips_change": round(tips_change, 3),
             "using_intraday": using_intraday,
         },
     }
