@@ -576,13 +576,90 @@ def check_signal_accuracy_degradation_safe() -> list[Violation]:
     JSON entry), returning [] keeps the rest of the framework working
     while a separate WARNING gets logged so the next session sees what
     happened.
+
+    Side effect (2026-04-28): for any CRITICAL violation we get back, we
+    also write a deduplicated entry to critical_errors.jsonl so the
+    auto-fix-agent dispatcher (PF-FixAgentDispatcher, every 10 min) and
+    the CLAUDE.md startup check both see the alert. Without this wire
+    the only escalation path was Telegram, which is per-cycle noise; the
+    dispatcher never engaged on the 32-h MSTR-cluster streak. Dedup keyed
+    on (invariant, sha1(message)) so identical replays don't blow up the
+    journal. See tests/test_loop_contract_accuracy_dispatcher.py for the
+    pinned behavior.
     """
     try:
         from portfolio.accuracy_degradation import check_degradation
-        return check_degradation()
+        violations = check_degradation()
     except Exception as e:
         logger.warning("signal accuracy degradation check failed: %s", e)
         return []
+
+    _maybe_record_critical_errors_for_degradation(violations)
+    return violations
+
+
+def _maybe_record_critical_errors_for_degradation(
+    violations: list[Violation],
+) -> None:
+    """Append a deduplicated critical_errors.jsonl row per CRITICAL violation.
+
+    Dedup state lives in contract_state.json under ``critical_error_dispatch``
+    (separate from the Telegram cooldown table — those are independent
+    sinks with different retention policies). Keying on the same
+    (invariant, sha1(message)) tuple means an identical cached replay
+    doesn't append, but the moment a new degraded signal joins the alert
+    text the dispatcher gets a fresh row and the auto-fix-agent re-engages.
+
+    Best-effort: any I/O or import failure logs a warning and proceeds —
+    the contract pipeline is the priority and a missing critical_errors
+    write is recoverable on the next text-change.
+    """
+    critical = [v for v in violations if v.severity == "CRITICAL"]
+    if not critical:
+        return
+
+    try:
+        state = load_json(CONTRACT_STATE_FILE, default={}) or {}
+    except Exception as e:
+        logger.warning("critical_errors dispatch state read failed: %s", e)
+        state = {}
+    dispatch_state = state.get("critical_error_dispatch") or {}
+
+    state_updates: dict[str, dict] = {}
+    for v in critical:
+        msg_hash = _hash_violation_message(v.message)
+        prior = dispatch_state.get(v.invariant) or {}
+        if prior.get("last_message_hash") == msg_hash:
+            continue
+        try:
+            from portfolio.claude_gate import record_critical_error
+            record_critical_error(
+                category=v.invariant,
+                caller=v.invariant,
+                message=v.message,
+                context=dict(v.details or {}),
+            )
+        except Exception as e:
+            # Don't claim the dedup slot if the write didn't actually land.
+            logger.warning(
+                "record_critical_error failed for %s: %s", v.invariant, e,
+            )
+            continue
+        state_updates[v.invariant] = {
+            "last_message_hash": msg_hash,
+            "ts": time.time(),
+        }
+
+    if not state_updates:
+        return
+    try:
+        existing = load_json(CONTRACT_STATE_FILE, default={}) or {}
+        merged = existing.get("critical_error_dispatch") or {}
+        merged.update(state_updates)
+        existing["critical_error_dispatch"] = merged
+        atomic_write_json(CONTRACT_STATE_FILE, existing)
+    except Exception as e:
+        logger.warning("critical_errors dispatch state write failed: %s", e)
 
 
 # ---------------------------------------------------------------------------
