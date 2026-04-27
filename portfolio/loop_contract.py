@@ -44,6 +44,26 @@ LAYER2_JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
 # enough that a stuck regression still pages the user a few times per day
 # but long enough that the same-text replay is rate-limited 24x.
 DEFAULT_CONTRACT_ALERT_COOLDOWN_S = 4 * 3600
+
+# 2026-04-28 (Codex P2): TTL for the critical_errors.jsonl dedup. After
+# this many seconds, a same-text degradation replay re-emits a fresh
+# critical_errors row so the auto-fix-agent dispatcher
+# (PF-FixAgentDispatcher, 24 h lookback in scripts/fix_agent_dispatcher.py)
+# keeps seeing the incident as long as it persists. 6 h gives the
+# dispatcher 4 fresh entries per dispatcher-day, well inside its
+# lookback window, while still rate-limiting the same-issue noise 4x
+# vs the per-cycle pattern that prompted this fix.
+DEFAULT_CRITICAL_ERRORS_DEDUP_TTL_S = 6 * 3600
+
+# 2026-04-28 (Codex P2): invariants whose CRITICAL violations get routed
+# to critical_errors.jsonl after ViolationTracker has had a chance to
+# escalate. Kept as a set rather than a hard-coded "if accuracy_degradation"
+# branch so adding another auto-fix-agent-friendly invariant is a one-
+# liner. Note: ``layer2_journal_activity`` is intentionally NOT in this
+# set — it already calls record_critical_error inline on the original
+# (pre-tracker) violation; routing it again post-tracker would double-
+# write.
+CRITICAL_ERROR_DISPATCH_INVARIANTS = frozenset({"accuracy_degradation"})
 # Global Claude CLI log — written by claude_gate for ALL callers
 # (claude_fundamental, bigbet, iskbets, self-heal, etc.). Used here only
 # for *enriching* violation context with last_invocation_caller.
@@ -577,44 +597,54 @@ def check_signal_accuracy_degradation_safe() -> list[Violation]:
     while a separate WARNING gets logged so the next session sees what
     happened.
 
-    Side effect (2026-04-28): for any CRITICAL violation we get back, we
-    also write a deduplicated entry to critical_errors.jsonl so the
-    auto-fix-agent dispatcher (PF-FixAgentDispatcher, every 10 min) and
-    the CLAUDE.md startup check both see the alert. Without this wire
-    the only escalation path was Telegram, which is per-cycle noise; the
-    dispatcher never engaged on the 32-h MSTR-cluster streak. Dedup keyed
-    on (invariant, sha1(message)) so identical replays don't blow up the
-    journal. See tests/test_loop_contract_accuracy_dispatcher.py for the
-    pinned behavior.
+    The wire to critical_errors.jsonl lives in verify_and_act (post
+    ViolationTracker) so that warnings escalated to CRITICAL by the
+    tracker also reach the auto-fix-agent dispatcher (Codex P2
+    2026-04-28).
     """
     try:
         from portfolio.accuracy_degradation import check_degradation
-        violations = check_degradation()
+        return check_degradation()
     except Exception as e:
         logger.warning("signal accuracy degradation check failed: %s", e)
         return []
 
-    _maybe_record_critical_errors_for_degradation(violations)
-    return violations
 
-
-def _maybe_record_critical_errors_for_degradation(
+def _dispatch_critical_errors_for_degradation(
     violations: list[Violation],
+    *,
+    invariants: frozenset[str] = CRITICAL_ERROR_DISPATCH_INVARIANTS,
+    ttl_s: float = DEFAULT_CRITICAL_ERRORS_DEDUP_TTL_S,
 ) -> None:
-    """Append a deduplicated critical_errors.jsonl row per CRITICAL violation.
+    """Append a deduplicated critical_errors.jsonl row per CRITICAL violation
+    whose invariant is in ``invariants``.
 
-    Dedup state lives in contract_state.json under ``critical_error_dispatch``
-    (separate from the Telegram cooldown table — those are independent
-    sinks with different retention policies). Keying on the same
-    (invariant, sha1(message)) tuple means an identical cached replay
-    doesn't append, but the moment a new degraded signal joins the alert
-    text the dispatcher gets a fresh row and the auto-fix-agent re-engages.
+    Called from verify_and_act AFTER ViolationTracker.update, so that
+    WARNINGs escalated to CRITICAL by the tracker (3x consecutive) also
+    reach the auto-fix-agent dispatcher (Codex P2 2026-04-28). Without
+    this hook running post-tracker, a persistent low-cardinality drift
+    that escalates to CRITICAL paged Telegram + self-heal but never
+    reached PF-FixAgentDispatcher.
+
+    Dedup state lives in contract_state.json under
+    ``critical_error_dispatch``. Keys: (invariant, sha1(message)). On
+    same-hash replay we re-emit if the prior entry is older than
+    ``ttl_s`` seconds (Codex P2 2026-04-28) so the dispatcher's 24 h
+    lookback always sees a fresh row for an issue that is still active.
+
+    Layer 2 journal-activity intentionally bypasses this path because
+    check_layer2_journal_activity already records its own
+    critical_errors row inline on the pre-tracker violation. Routing
+    layer2 here too would double-write.
 
     Best-effort: any I/O or import failure logs a warning and proceeds —
     the contract pipeline is the priority and a missing critical_errors
-    write is recoverable on the next text-change.
+    write is recoverable on the next cycle.
     """
-    critical = [v for v in violations if v.severity == "CRITICAL"]
+    critical = [
+        v for v in violations
+        if v.severity == "CRITICAL" and v.invariant in invariants
+    ]
     if not critical:
         return
 
@@ -624,12 +654,20 @@ def _maybe_record_critical_errors_for_degradation(
         logger.warning("critical_errors dispatch state read failed: %s", e)
         state = {}
     dispatch_state = state.get("critical_error_dispatch") or {}
+    now = time.time()
 
     state_updates: dict[str, dict] = {}
     for v in critical:
         msg_hash = _hash_violation_message(v.message)
         prior = dispatch_state.get(v.invariant) or {}
-        if prior.get("last_message_hash") == msg_hash:
+        try:
+            prior_ts = float(prior.get("ts", 0) or 0)
+        except (TypeError, ValueError):
+            prior_ts = 0.0
+        same_hash = prior.get("last_message_hash") == msg_hash
+        ttl_elapsed = (now - prior_ts) > ttl_s
+        if same_hash and not ttl_elapsed:
+            # Truly identical replay, still inside the TTL window — skip.
             continue
         try:
             from portfolio.claude_gate import record_critical_error
@@ -647,7 +685,7 @@ def _maybe_record_critical_errors_for_degradation(
             continue
         state_updates[v.invariant] = {
             "last_message_hash": msg_hash,
-            "ts": time.time(),
+            "ts": now,
         }
 
     if not state_updates:
@@ -1218,6 +1256,14 @@ def verify_and_act(report, config: dict,
 
     # Track consecutive counts and escalate
     violations = tracker.update(violations, report)
+
+    # 2026-04-28 (Codex P2): wire dispatcher-tracked invariants into
+    # critical_errors.jsonl AFTER the tracker has had its chance to
+    # promote consecutive WARNINGs to CRITICAL. Doing it pre-tracker
+    # would miss exactly those promoted cases. Layer 2 still writes its
+    # own row inline because the layer2 check needs the trigger ts in
+    # the resolution context.
+    _dispatch_critical_errors_for_degradation(violations)
 
     # Log all violations
     _log_violations(violations, report.cycle_id)

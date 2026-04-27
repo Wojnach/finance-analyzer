@@ -101,6 +101,41 @@ class TestPollerOffsetPersistence:
         poller = TelegramPoller(fake_config, on_command=lambda *a: None)
         assert poller.offset == 1000
 
+    def test_first_update_at_persisted_boundary_bypasses_stale_filter(
+        self, poller_paths, fake_config,
+    ):
+        """Codex P1 follow-up: persisted offset uses next-offset semantics
+        (update_id + 1), so the first genuinely-new update after restart
+        has update_id == self._initial_offset, not strictly greater. The
+        bypass must accept ``>=``, otherwise a single command sent during
+        the restart window still trips the stale filter — defeating the
+        whole reason we persist."""
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, inbound_file = poller_paths
+        state_file.write_text(json.dumps({"offset": 1001, "updated_ts": "x"}))
+
+        called = {}
+
+        def on_command(cmd, args, _config):
+            called["cmd"] = cmd
+            return None
+
+        poller = TelegramPoller(fake_config, on_command=on_command)
+        # update_id == persisted_offset is the very first new update.
+        update = _build_update(
+            update_id=1001,
+            msg_date=int(time.time()) - 5 * 60,
+            text="bought MSTR 130 100000",
+        )
+        poller._handle_update(update)
+
+        assert called.get("cmd") == "bought"
+        rows = _read_jsonl(inbound_file)
+        assert len(rows) == 1
+        assert rows[0]["processed"] is True
+        assert rows[0]["drop_reason"] is None
+
     def test_post_restart_pending_update_bypasses_stale_filter(
         self, poller_paths, fake_config,
     ):

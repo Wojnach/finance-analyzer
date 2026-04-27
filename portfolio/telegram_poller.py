@@ -160,8 +160,15 @@ class TelegramPoller:
             # restart" from "Telegram re-delivering 2-week-old updates"
             # without that prior.
             msg_date = msg.get("date", 0)
+            # update_id can EQUAL self._initial_offset legitimately: the
+            # persisted value uses next-offset semantics (last_acked + 1)
+            # so the first genuinely-new update after restart has
+            # update_id == self._initial_offset, not strictly greater.
+            # `>=` covers the single-message-during-restart case that was
+            # the whole reason for adding persistence (Codex P1
+            # 2026-04-28).
             is_post_restart_pending = (
-                self._has_persisted_offset and update_id > self._initial_offset
+                self._has_persisted_offset and update_id >= self._initial_offset
             )
             if msg_date < self._startup_time - 60 and not is_post_restart_pending:
                 outcome["drop_reason"] = "stale_at_startup"
