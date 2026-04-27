@@ -62,6 +62,8 @@ data/portfolio.log
 data/portfolio_state.json
 data/portfolio_state_bold.json
 data/telegram_messages.jsonl
+data/telegram_inbound.jsonl
+data/telegram_poller_state.json
 data/agent_summary.json
 data/agent_summary_compact.json
 data/trigger_state.json
