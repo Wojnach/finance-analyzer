@@ -7,6 +7,7 @@ trigger a self-healing Claude Code session.
 Supports: main loop, metals loop, GoldDigger, Elongir.
 """
 
+import hashlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -29,6 +30,20 @@ CONTRACT_LOG_FILE = DATA_DIR / "contract_violations.jsonl"
 CONFIG_FILE = BASE_DIR / "config.json"
 HEALTH_STATE_FILE = DATA_DIR / "health_state.json"
 LAYER2_JOURNAL_FILE = DATA_DIR / "layer2_journal.jsonl"
+
+# 2026-04-28: Per-invariant Telegram alert cooldown. Background: the
+# accuracy_degradation invariant uses a throttled-replay design (replays
+# cached violations every cycle to keep ViolationTracker.consecutive
+# alive). Without per-alert dedup _alert_violations shipped one Telegram
+# per cycle for 192 cycles in a row before we noticed. The cooldown only
+# suppresses *exact* replays — same invariant + same message text within
+# the window. Any text change (a new degraded signal joining the alert
+# list, a different trigger reason on layer2_journal_activity) bypasses
+# the cooldown and re-fires immediately. Configurable via
+# notification.contract_alert_cooldown_s; defaults to 4 h, which is short
+# enough that a stuck regression still pages the user a few times per day
+# but long enough that the same-text replay is rate-limited 24x.
+DEFAULT_CONTRACT_ALERT_COOLDOWN_S = 4 * 3600
 # Global Claude CLI log — written by claude_gate for ALL callers
 # (claude_fundamental, bigbet, iskbets, self-heal, etc.). Used here only
 # for *enriching* violation context with last_invocation_caller.
@@ -937,21 +952,121 @@ def _log_violations(violations: list[Violation], cycle_id: int):
         })
 
 
+def _hash_violation_message(message: str) -> str:
+    """Stable identity for an alert text — used for both Telegram cooldown
+    dedup and critical_errors.jsonl dedup. SHA-1 is fine here: we're not
+    using it as a security primitive, just as a content fingerprint, and
+    the messages are short enough that collisions are negligible."""
+    return hashlib.sha1((message or "").encode("utf-8")).hexdigest()
+
+
+def _filter_critical_by_cooldown(critical: list[Violation], now: float,
+                                 cooldown_s: float):
+    """Split CRITICAL violations into (fresh, suppressed) using the per-
+    invariant cooldown stored in CONTRACT_STATE_FILE.
+
+    A violation is *fresh* when its (invariant, sha1(message)) is either
+    new to the cooldown table OR its prior entry is older than
+    ``cooldown_s``. Returns the fresh-list plus a state-update dict that
+    the caller should persist ONLY after a successful send — that way a
+    failed Telegram post doesn't claim the cooldown slot and silence the
+    next legitimate alert.
+    """
+    state = load_json(CONTRACT_STATE_FILE, default={}) or {}
+    cooldown_state = state.get("telegram_alert_state") or {}
+
+    fresh: list[Violation] = []
+    state_updates: dict[str, dict] = {}
+    for v in critical:
+        msg_hash = _hash_violation_message(v.message)
+        prior = cooldown_state.get(v.invariant) or {}
+        last_hash = prior.get("last_message_hash")
+        try:
+            last_sent = float(prior.get("last_sent_ts", 0) or 0)
+        except (TypeError, ValueError):
+            last_sent = 0.0
+        if last_hash == msg_hash and (now - last_sent) < cooldown_s:
+            # Identical replay within the cooldown window — drop silently.
+            continue
+        fresh.append(v)
+        state_updates[v.invariant] = {
+            "last_sent_ts": now,
+            "last_message_hash": msg_hash,
+        }
+    return fresh, state_updates
+
+
+def _persist_alert_cooldown(state_updates: dict[str, dict]) -> None:
+    """Merge state_updates into contract_state.json's telegram_alert_state.
+
+    Best-effort. A failure to persist means the next cycle re-fires the
+    same alert; harmless noise compared to crashing the contract pipeline.
+    Preserves all unrelated keys (consecutive, last_heal_time, etc.) so
+    other writers to CONTRACT_STATE_FILE can coexist — same pattern
+    ViolationTracker._save() and check_layer2_journal_activity follow.
+    """
+    if not state_updates:
+        return
+    try:
+        existing = load_json(CONTRACT_STATE_FILE, default={}) or {}
+        cooldown_state = existing.get("telegram_alert_state") or {}
+        cooldown_state.update(state_updates)
+        existing["telegram_alert_state"] = cooldown_state
+        atomic_write_json(CONTRACT_STATE_FILE, existing)
+    except Exception as e:
+        logger.warning("alert cooldown state write failed: %s", e)
+
+
 def _alert_violations(violations: list[Violation], config: dict,
                       loop_name: str = "main"):
-    """Send Telegram alert for critical violations."""
+    """Send Telegram alert for critical violations.
+
+    Per-invariant cooldown (2026-04-28): each (invariant, message_hash)
+    fires at most once per cooldown window. See
+    DEFAULT_CONTRACT_ALERT_COOLDOWN_S above for rationale. Cooldown logic
+    fails open — if it raises, we ship the alert anyway because Telegram
+    silence on a real CRITICAL is worse than duplicate noise.
+    """
     critical = [v for v in violations if v.severity == "CRITICAL"]
     if not critical:
         return
-    lines = [f"*LOOP CONTRACT ({loop_name})* — {len(critical)} critical violation(s)"]
-    for v in critical:
+
+    cooldown_s = float(
+        (config or {}).get("notification", {}).get(
+            "contract_alert_cooldown_s",
+            DEFAULT_CONTRACT_ALERT_COOLDOWN_S,
+        )
+    )
+    try:
+        fresh, state_updates = _filter_critical_by_cooldown(
+            critical, time.time(), cooldown_s,
+        )
+    except Exception as e:
+        # Fail-open. Emit the warning so the next operator sees what
+        # happened, but never let cooldown bookkeeping silence a real
+        # alert.
+        logger.warning("alert cooldown filter failed, fail-open: %s", e)
+        fresh = critical
+        state_updates = {}
+
+    if not fresh:
+        return
+
+    lines = [f"*LOOP CONTRACT ({loop_name})* — {len(fresh)} critical violation(s)"]
+    for v in fresh:
         lines.append(f"• {v.invariant}: {v.message}")
     msg = "\n".join(lines)
     try:
         from portfolio.message_store import send_or_store
         send_or_store(msg, config, category="error")
     except Exception as e:
+        # Send failed — return WITHOUT persisting the cooldown so the next
+        # cycle still tries (vs the alternative where Telegram is briefly
+        # down and we then go silent for the next 4 h).
         logger.warning("Failed to send contract violation alert: %s", e)
+        return
+
+    _persist_alert_cooldown(state_updates)
 
 
 def _trigger_self_heal(violations: list[Violation], tracker: ViolationTracker,
