@@ -732,12 +732,38 @@ class TestSentimentGatedAt3hRanging:
         gated_4h = REGIME_GATED_SIGNALS["ranging"]["4h"]
         assert "sentiment" in gated_4h
 
-    def test_sentiment_not_gated_at_default_ranging(self):
-        """sentiment at 1d (46.8%) is borderline — let the accuracy gate handle it
-        dynamically rather than hard-gating."""
+    def test_sentiment_gated_at_default_ranging(self):
+        """2026-04-27: sentiment 40.1% at 1d_recent (202 sam), 33.8% at 3h.
+        BUY-only bias actively harmful at longer horizons in ranging."""
         from portfolio.signal_engine import REGIME_GATED_SIGNALS
         gated_default = REGIME_GATED_SIGNALS["ranging"]["_default"]
-        assert "sentiment" not in gated_default
+        assert "sentiment" in gated_default
+
+    def test_sentiment_gated_at_default_trending_down(self):
+        """2026-04-27: sentiment BUY-only bias harmful in downtrends at longer horizons."""
+        from portfolio.signal_engine import REGIME_GATED_SIGNALS
+        gated_default = REGIME_GATED_SIGNALS["trending-down"]["_default"]
+        assert "sentiment" in gated_default
+
+
+class TestClaudeFundamentalGatedRangingDefault:
+    """2026-04-27: claude_fundamental 40.5% at 1d_recent (1178 sam), 78-83% BUY bias.
+    Was only gated at 3h/4h in ranging — now gated at _default too."""
+
+    def test_claude_fundamental_gated_at_default_ranging(self):
+        from portfolio.signal_engine import REGIME_GATED_SIGNALS
+        gated_default = REGIME_GATED_SIGNALS["ranging"]["_default"]
+        assert "claude_fundamental" in gated_default
+
+    def test_claude_fundamental_per_ticker_gated_xag_1d(self):
+        """Metals have no earnings/guidance — claude_fundamental is noise for XAG."""
+        from portfolio.signal_engine import _TICKER_DISABLED_BY_HORIZON
+        assert "claude_fundamental" in _TICKER_DISABLED_BY_HORIZON["1d"]["XAG-USD"]
+
+    def test_claude_fundamental_per_ticker_gated_xau_1d(self):
+        """Metals have no earnings/guidance — claude_fundamental is noise for XAU."""
+        from portfolio.signal_engine import _TICKER_DISABLED_BY_HORIZON
+        assert "claude_fundamental" in _TICKER_DISABLED_BY_HORIZON["1d"]["XAU-USD"]
 
 
 class TestPerClusterCorrelationPenalties:

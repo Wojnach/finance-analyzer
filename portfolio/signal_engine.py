@@ -430,8 +430,11 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
         "ETH-USD": frozenset({"econ_calendar",  # 1.8% 1d (113 sam)
                               "funding",        # 12.5% 1d (64 sam)
                               }),
-        "XAU-USD": frozenset({"candlestick"}),
+        "XAU-USD": frozenset({"candlestick",
+                              "claude_fundamental",  # 2026-04-27: metals have no earnings/guidance
+                              }),
         "XAG-USD": frozenset({"econ_calendar",  # 29.5% 1d (112 sam)
+                              "claude_fundamental",  # 2026-04-27: metals have no earnings/guidance
                               }),
         "MSTR": frozenset({"ema", "bb"}),
     },
@@ -685,6 +688,13 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
             # ministral collapsed to 41.5% recent (41 sam) from 58.4% all-time.
             # All three are noise in the current 141h+ ranging regime.
             "volume_flow", "credit_spread_risk", "ministral",
+            # 2026-04-27: claude_fundamental 40.5% at 1d_recent (1178 sam),
+            # 78-83% BUY bias. Was only gated at 3h/4h but also harms 12h/1d/3d/5d.
+            "claude_fundamental",
+            # 2026-04-27: sentiment 40.1% at 1d_recent (202 sam), 33.8% at 3h.
+            # BUY-only bias. Was gated at 3h/4h in all regimes but still active
+            # at _default in ranging where it pushes false BUY consensus.
+            "sentiment",
         }),
         # 3h: news_event 58.5%, smart_money 53.1% — decent at short horizons.
         # volatility_sig 47.2%, forecast 47.2% — marginal, let accuracy gate
@@ -733,6 +743,9 @@ REGIME_GATED_SIGNALS: dict[str, dict[str, frozenset[str]]] = {
             "volume_flow", "macro_regime", "ema", "trend", "heikin_ashi",
             "smart_money",  # BUG-165: 10.0% accuracy in trending-down
             "funding", "fear_greed",
+            # 2026-04-27: sentiment 40.1% at 1d_recent (202 sam), BUY-only bias.
+            # Was only gated at 3h/4h; actively harmful at longer horizons too.
+            "sentiment",
         }),
         # 3h: trend signals may still work short-term; keep mean_reversion gated
         # 2026-04-13: sentiment 33.8% at 3h (3629 sam) — destructive at 3h in ALL regimes
@@ -765,57 +778,70 @@ def _get_regime_gated(regime: str, horizon: str | None = None) -> frozenset[str]
 
 # Horizon-specific signal weight multipliers.
 # Signals with >15pp accuracy divergence between horizons get adjusted.
-# Updated: 2026-03-29 accuracy audit (3h_recent vs 1d_recent).
+# Updated: 2026-04-27 accuracy audit (3h_recent vs 1d_recent).
 HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
     "3h": {
-        "news_event": 1.4,      # 70.0% at 3h (vs 29.5% at 1d — pure short-term signal)
-        "smart_money": 1.2,     # 63.2% at 3h (vs 39.6% at 1d) — NEW 2026-03-29
-        "ema": 1.3,             # 62.9% at 3h (vs 40.8% at 1d)
-        "ministral": 1.2,       # 62.6% at 3h
-        "qwen3": 1.2,           # 61.8% at 3h — NEW 2026-03-29
-        "trend": 1.2,           # 61.6% at 3h (vs 40.7% at 1d) — NEW 2026-03-29
-        "volatility_sig": 1.2,  # 60.2% at 3h (vs 35.0% at 1d) — NEW 2026-03-29
-        "momentum_factors": 1.2, # 60.1% at 3h (vs 41.4% at 1d) — NEW 2026-03-29
-        "sentiment": 0.5,       # 33.8% at 3h — worst performer
-        "fibonacci": 0.6,       # 38.3% at 3h (but 68.2% at 1d)
-        "forecast": 0.5,        # 38.3% at 3h — tightened from 0.6
-        "oscillators": 0.7,     # 39.4% at 3h — NEW 2026-03-29
-        "bb": 0.6,              # 41.7% at 3h (but 60.8% at 1d) — NEW 2026-03-29
-        "mean_reversion": 0.7,  # 45.5% at 3h (but 65.4% at 1d) — NEW 2026-03-29
+        "news_event": 1.4,      # 70.0% at 3h_recent (1762 sam)
+        "smart_money": 1.3,     # 63.2% at 3h (vs 31.9% at 1d) — boosted from 1.2
+        "ema": 1.3,             # 62.9% at 3h (vs 48.6% at 1d)
+        "ministral": 1.3,       # 62.6% at 3h (vs 42.4% at 1d) — boosted from 1.2
+        "qwen3": 1.2,           # 61.8% at 3h
+        "trend": 1.2,           # 61.6% at 3h (vs 37.7% at 1d)
+        "volatility_sig": 1.2,  # 60.2% at 3h (304 sam)
+        "momentum_factors": 1.2, # 60.1% at 3h (vs 35.4% at 1d)
+        "momentum": 1.1,        # 56.1% at 3h (378 sam) — NEW 2026-04-27
+        "heikin_ashi": 1.1,     # 55.0% at 3h (vs 42.7% at 1d) — NEW 2026-04-27
+        "sentiment": 0.4,       # 33.8% at 3h — tightened from 0.5
+        "fibonacci": 0.6,       # 38.3% at 3h (but 50.6% at 1d)
+        "forecast": 0.5,        # 38.3% at 3h
+        "oscillators": 0.6,     # 39.4% at 3h — tightened from 0.7
+        "bb": 0.6,              # 41.7% at 3h (but 62.5% at 1d)
+        "mean_reversion": 0.7,  # 45.5% at 3h (but 51.8% at 1d)
+        "volume_flow": 0.7,     # 46.4% at 3h — NEW 2026-04-27
     },
     "4h": {
         "news_event": 1.4,
-        "smart_money": 1.2,
+        "smart_money": 1.3,
         "ema": 1.3,
-        "ministral": 1.2,
+        "ministral": 1.3,
         "qwen3": 1.2,
         "trend": 1.2,
         "volatility_sig": 1.2,
         "momentum_factors": 1.2,
-        "sentiment": 0.5,
+        "momentum": 1.1,
+        "heikin_ashi": 1.1,
+        "sentiment": 0.4,
         "fibonacci": 0.6,
         "forecast": 0.5,
-        "oscillators": 0.7,
+        "oscillators": 0.6,
         "bb": 0.6,
         "mean_reversion": 0.7,
+        "volume_flow": 0.7,
     },
     "1d": {
-        "fibonacci": 1.4,       # 68.2% at 1d
-        "ministral": 1.3,       # 68.0% at 1d — NEW 2026-03-29 (was only 3h boost)
-        "mean_reversion": 1.3,  # 65.4% at 1d
-        "calendar": 1.2,        # 62.8% at 1d
-        "bb": 1.2,              # 60.8% at 1d (vs 41.7% at 3h!) — NEW 2026-03-29
-        "macd": 1.2,            # 58.7% at 1d — NEW 2026-03-29
-        "news_event": 0.5,      # 29.5% at 1d (reversal of 3h edge)
-        "fear_greed": 0.4,      # 25.9% at 1d — collapsed, tightened from 0.5
-        "macro_regime": 0.5,    # 30.3% at 1d
-        "volatility_sig": 0.5,  # 35.0% at 1d — NEW 2026-03-29
-        "structure": 0.6,       # 36.1% at 1d
-        "forecast": 0.5,        # 36.1% at 1d — NEW 2026-03-29
-        "smart_money": 0.6,     # 39.6% at 1d (vs 63.2% at 3h) — NEW 2026-03-29
-        "ema": 0.6,             # 40.8% at 1d (vs 62.9% at 3h) — BUG-151
-        "trend": 0.6,           # 40.7% at 1d — NEW 2026-03-29
-        "heikin_ashi": 0.7,     # 42.0% at 1d — NEW 2026-03-29
+        "bb": 1.3,              # 62.5% at 1d_recent (120 sam) — boosted from 1.2
+        "rsi": 1.1,             # 56.2% at 1d_recent (569 sam) — NEW 2026-04-27
+        "credit_spread_risk": 1.1,  # 56.4% at 1d_recent (140 sam), SELL 77.9% — NEW 2026-04-27
+        "volume": 1.1,          # 54.7% at 1d_recent (265 sam) — NEW 2026-04-27
+        "macd": 1.1,            # 54.8% at 1d_recent (93 sam)
+        "calendar": 1.1,        # 54.0% at 1d_recent (385 sam) — reduced from 1.2
+        "fibonacci": 1.1,       # 50.6% at 1d_recent — reduced from 1.4 (was stale)
+        "mean_reversion": 1.1,  # 51.8% at 1d_recent — reduced from 1.3
+        "news_event": 1.4,      # 70.0% at 1d_recent (340 sam)! — was 0.5 (SELL-focused works now)
+        "claude_fundamental": 0.5,  # 40.5% at 1d_recent (1178 sam) — NEW 2026-04-27 penalty
+        "sentiment": 0.4,       # 40.1% at 1d_recent (202 sam) — NEW 2026-04-27
+        "fear_greed": 0.4,      # 25.9% at 1d — still terrible
+        "macro_regime": 0.5,    # 36.8% at 1d_recent
+        "volatility_sig": 0.5,  # 45.5% at 1d_recent
+        "structure": 0.5,       # 33.7% at 1d_recent — tightened from 0.6
+        "forecast": 0.5,        # 44.6% at 1d_recent
+        "smart_money": 0.5,     # 31.9% at 1d_recent — tightened from 0.6
+        "ema": 0.5,             # 48.6% at 1d_recent — tightened from 0.6
+        "trend": 0.5,           # 37.7% at 1d_recent — tightened from 0.6
+        "heikin_ashi": 0.6,     # 42.7% at 1d_recent — tightened from 0.7
+        "momentum_factors": 0.5, # 35.4% at 1d_recent — NEW 2026-04-27
+        "volume_flow": 0.5,     # 40.0% at 1d_recent — NEW 2026-04-27
+        "crypto_macro": 0.7,    # 46.9% at 1d_recent — NEW 2026-04-27
     },
 }
 
