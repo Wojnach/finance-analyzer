@@ -115,10 +115,20 @@ def write_agent_summary(
     initial = state.get("initial_value_sek", 500000)
     pnl_pct = ((total - initial) / initial) * 100 if initial else 0  # BUG-99: zero guard
 
+    # Macro-window status — surface in agent_summary so Layer 2 sees the
+    # regime context. Stayed orthogonal to the existing per-ticker
+    # `regime` field which is price-based (ranging/trending/high-vol).
+    try:
+        from portfolio.signal_engine import _is_macro_window_cached
+        _macro_active = bool(_is_macro_window_cached())
+    except Exception:
+        _macro_active = False
+
     summary = {
         "timestamp": datetime.now(UTC).isoformat(),
         "trigger_reasons": trigger_reasons or [],
         "fx_rate": round(fx_rate, 2),
+        "macro_window": {"active": _macro_active},
         "portfolio": {
             "total_sek": round(total),
             "pnl_pct": round(pnl_pct, 2),
@@ -1171,6 +1181,11 @@ def _write_tier2_summary(summary, triggered_tickers=None):
         "timestamp": summary.get("timestamp", ""),
         "trigger_reasons": summary.get("trigger_reasons", []),
         "fx_rate": summary.get("fx_rate", 0),
+        # Codex P2 (2026-04-28): macro_window must propagate to Tier 2 —
+        # signal-analysis agent reads agent_context_t2.json on triggered
+        # paths, where the regime context matters most. Without this,
+        # Tier 2 sees raw signals without knowing they're macro-suppressed.
+        "macro_window": summary.get("macro_window", {"active": False}),
         "signals": {},
         "timeframes": {},
     }

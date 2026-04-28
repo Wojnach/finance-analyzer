@@ -232,3 +232,51 @@ def recent_high_impact_events(hours: float, impact_filter=("high",),
                 "hours_since": round(delta_hrs, 1),
             })
     return results
+
+
+def is_macro_window(
+    now: datetime | None = None,
+    lookback_hours: float = 24.0,
+    lookahead_hours: float = 72.0,
+    impact_filter: tuple[str, ...] = ("high",),
+) -> bool:
+    """True iff a macro event matching ``impact_filter`` falls within
+    ``lookback_hours`` past or ``lookahead_hours`` future of ``now``.
+
+    Wider window than ``_is_econ_blackout`` (24h ± in accuracy_degradation)
+    — captures the full pre-event risk-off + post-event volatility-hangover
+    envelope where technical signals (sentiment, momentum_factors,
+    structure, claude_fundamental) systematically misvote because price
+    is being driven by news, not pattern continuity.
+
+    Self-contained iteration over ``ECON_EVENTS`` so callers can pass an
+    explicit ``now`` for testability without monkey-patching
+    ``datetime.now``. ``events_within_hours`` reads wall clock directly
+    and is harder to stub.
+
+    Args:
+        now: Optional reference time (UTC). Defaults to ``datetime.now(UTC)``.
+        lookback_hours: Past window. ``0`` disables the backward check.
+        lookahead_hours: Future window. ``0`` disables the forward check.
+        impact_filter: Impact levels that count. Default ``("high",)``
+            so only FOMC/CPI/NFP trigger; GDP (medium) does not.
+
+    Returns:
+        True if any qualifying event lies in the combined window.
+    """
+    if now is None:
+        now = datetime.now(UTC)
+    for evt in ECON_EVENTS:
+        if evt.get("impact") not in impact_filter:
+            continue
+        evt_dt = datetime.combine(
+            evt["date"], datetime.min.time().replace(hour=14), tzinfo=UTC,
+        )
+        delta_hrs = (evt_dt - now).total_seconds() / 3600
+        # Forward window: evt is in the future, within lookahead_hours.
+        if 0 <= delta_hrs <= lookahead_hours:
+            return True
+        # Backward window: evt is in the past, within lookback_hours.
+        if -lookback_hours <= delta_hrs < 0:
+            return True
+    return False
