@@ -122,7 +122,6 @@ def _compute_turbulence_series(closes: pd.DataFrame) -> pd.DataFrame | None:
     else:
         effective_window = _COV_WINDOW
 
-    n_assets = returns.shape[1]
     turbulence_vals = []
     ar_vals = []
     indices = []

@@ -58,7 +58,7 @@ class MockPage:
 
         # Price fetch
         if args and isinstance(args, list) and len(args) == 2:
-            ob_id, api_type = args[0], args[1]
+            ob_id, _api_type = args[0], args[1]
             # Check if this is a BUY/SELL order call (has dict as first arg)
             if isinstance(ob_id, dict):
                 return {"status": 200, "body": json.dumps({"orderRequestStatus": "SUCCESS", "orderId": "12345"})}

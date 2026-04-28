@@ -105,7 +105,6 @@ def _compute_complexity_gap_series(closes: pd.DataFrame) -> pd.DataFrame | None:
     if len(returns) < _CORR_WINDOW + 5:
         return None
 
-    n_assets = returns.shape[1]
     gaps = []
     avg_corrs = []
     max_eig_norms = []

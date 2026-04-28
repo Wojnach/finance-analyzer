@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import datetime
 import logging
-import os
-from typing import Any
 
 from portfolio.mstr_loop import config
 from portfolio.mstr_loop.data_provider import MstrBundle

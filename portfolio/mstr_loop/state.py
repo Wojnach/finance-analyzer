@@ -17,7 +17,6 @@ import os
 from typing import Any
 
 from portfolio.file_utils import atomic_write_json, load_json
-
 from portfolio.mstr_loop import config
 
 logger = logging.getLogger(__name__)

@@ -24,7 +24,6 @@ import logging
 from typing import Any
 
 from portfolio.file_utils import atomic_append_jsonl
-
 from portfolio.mstr_loop import config
 from portfolio.mstr_loop.data_provider import MstrBundle
 from portfolio.mstr_loop.state import BotState, Position
@@ -326,7 +325,6 @@ def _update_scorecard_file() -> None:
     into the scorecard module as a library. Non-fatal on any failure so a
     trade is never blocked by a scorecard write.
     """
-    import sys
     import pathlib
     # Dynamically import the scorecard script as a module (no package).
     # The script was written self-contained on purpose.

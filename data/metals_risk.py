@@ -832,8 +832,8 @@ def compute_intraday_assessment(positions, prices, price_history, range_stats):
             p90_drop = stats["open_to_low"]["p90"]
             p95_drop = stats["open_to_low"]["p95"]
 
-            median_gain = stats["open_to_high"]["p50"]
-            p90_gain = stats["open_to_high"]["p90"]
+            _median_gain = stats["open_to_high"]["p50"]  # noqa: F841
+            _p90_gain = stats["open_to_high"]["p90"]  # noqa: F841
 
             # EU session adjusted (40% of 24h)
             eu_typical_drop = median_drop * EU_SESSION_FACTOR * leverage
@@ -843,10 +843,10 @@ def compute_intraday_assessment(positions, prices, price_history, range_stats):
             remaining_warrant = remaining_range_pct * leverage
 
             # Stop safety: can a P90 bad day hit the stop?
-            p90_warrant_drop = p90_drop * leverage
+            _p90_warrant_drop = p90_drop * leverage  # noqa: F841
             stop_safe = dist_stop_pct > eu_bad_drop
             stop_warning = not stop_safe and dist_stop_pct > eu_typical_drop
-            stop_danger = dist_stop_pct <= eu_typical_drop
+            _stop_danger = dist_stop_pct <= eu_typical_drop  # noqa: F841
 
             warrant_impact[key] = {
                 "leverage": leverage,

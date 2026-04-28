@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 
 from portfolio.shared_state import _cached
-from portfolio.signal_utils import majority_vote, safe_float, sma, ema, rsi
+from portfolio.signal_utils import majority_vote, safe_float
 
 logger = logging.getLogger("portfolio.signals.xtrend_equity_spillover")
 

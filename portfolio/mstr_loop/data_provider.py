@@ -11,10 +11,8 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import logging
-from typing import Any
 
 from portfolio.file_utils import load_json
-
 from portfolio.mstr_loop import config
 
 logger = logging.getLogger(__name__)

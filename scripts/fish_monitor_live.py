@@ -18,6 +18,7 @@ FAPI = 'https://fapi.binance.com/fapi/v1/ticker/price'
 HB = 'data/fish_heartbeat.txt'
 LOG = 'data/fish_monitor_live.log'
 SESSION_END_H, SESSION_END_M = 21, 45
+CANCEL_HOUR, CANCEL_MIN = 21, 30  # BUG-233: straddle order cancel deadline
 SILVER_KEYWORDS = ['BULL SILVER', 'BEAR SILVER', 'TURBO L SILVER', 'TURBO S SILVER', 'MINI S SILVER', 'MINI L SILVER']
 
 def log_msg(msg):

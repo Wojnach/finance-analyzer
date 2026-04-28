@@ -18,7 +18,7 @@ import os
 from typing import Any
 
 from portfolio.mstr_loop import config
-from portfolio.mstr_loop.state import BotState, Position
+from portfolio.mstr_loop.state import BotState
 
 logger = logging.getLogger(__name__)
 
@@ -138,15 +138,15 @@ def send_trade_alert(action: str, pos_or_decision: Any, context: dict[str, Any])
 def _send(text: str, category: str = "analysis") -> None:
     """Backend send — routes through portfolio.message_store.send_or_store."""
     try:
-        from portfolio.message_store import send_or_store
         from portfolio.config import load_config
+        from portfolio.message_store import send_or_store
         cfg = load_config()
         send_or_store(text, cfg, category=category)
     except Exception:
         # Try fallback: raw send_telegram. Final fallback: log only.
         try:
-            from portfolio.telegram_notifications import send_telegram
             from portfolio.config import load_config
+            from portfolio.telegram_notifications import send_telegram
             cfg = load_config()
             send_telegram(text, cfg)
         except Exception:

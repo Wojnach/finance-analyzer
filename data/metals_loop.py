@@ -295,8 +295,8 @@ except ImportError as e:
     TRACKER_AVAILABLE = False
 
 try:
-    from metals_swing_trader import SwingTrader
     import metals_swing_trader as _swing_mod
+    from metals_swing_trader import SwingTrader
     SWING_TRADER_AVAILABLE = True
 except ImportError as e:
     print(f"[WARN] swing trader import failed: {e}", flush=True)
