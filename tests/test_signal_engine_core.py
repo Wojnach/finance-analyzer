@@ -828,7 +828,11 @@ class TestRegimeWeightsConstant:
         # ministral ranging boost removed 2026-04-26 (collapsed to 41.5% recent)
         assert "ministral" not in rw
         assert rw["macd"] == 1.3  # 2026-04-05: 58.7% recent, newly added
-        assert rw["trend"] == 0.5
+        # 2026-04-28: lowered from 0.5→0.3 (actual degradation 50-70%)
+        assert rw["trend"] == 0.3
+        assert rw["momentum_factors"] == 0.3
+        assert rw["heikin_ashi"] == 0.3
+        assert rw["structure"] == 0.4
         assert rw["fear_greed"] == 0.3  # added 2026-03-31 (25.9% recent accuracy)
 
     def test_trending_up_has_enhanced_weights(self):

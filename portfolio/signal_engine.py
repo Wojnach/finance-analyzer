@@ -683,8 +683,10 @@ REGIME_WEIGHTS = {
         # 2026-04-04: BUG-161 — oscillators 34-39% per-ticker in ranging.
         # Was 1.2x (boosted), now 0.3x (heavily penalized).
         "oscillators": 0.3,
-        "trend": 0.5, "momentum_factors": 0.6, "heikin_ashi": 0.6,
-        "structure": 0.7, "fear_greed": 0.3,
+        # 2026-04-28 research: actual degradation 50-70% (BUY acc 13-25%),
+        # previous 0.5-0.7x was insufficient. Lowered to 0.3x.
+        "trend": 0.3, "momentum_factors": 0.3, "heikin_ashi": 0.3,
+        "structure": 0.4, "fear_greed": 0.3,
     },
     "high-vol": {
         "bb": 1.5, "volume": 1.3, "ema": 0.5,
