@@ -69,10 +69,21 @@ def _load_signal_log(path: Path) -> list[dict]:
         return out
 
     try:
-        from portfolio.accuracy_stats import load_entries
+        from portfolio.accuracy_stats import SIGNAL_LOG, load_entries
     except Exception as e:
         raise FileNotFoundError(
             f"Signal log not found at {path} and load_entries() unavailable: {e}"
+        )
+    if path.resolve() != SIGNAL_LOG.resolve():
+        # Codex round 5 P2 2026-04-28: warn when an explicit non-default
+        # path falls back to repo-default load_entries(). Audit may end
+        # up combining alerts from one environment with accuracy history
+        # from another.
+        print(
+            f"WARNING: --data-dir {path.parent} signal_log absent; "
+            f"load_entries() falls back to repo default ({SIGNAL_LOG}). "
+            f"Audit may mix alerts from --data-dir with accuracy from this repo.",
+            file=sys.stderr,
         )
     fallback = load_entries()
     if not fallback:

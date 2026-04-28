@@ -100,14 +100,25 @@ def _load_signal_log_entries(path: Path) -> list[dict]:
         return entries
 
     # Fall back to whatever load_entries() finds — SQLite, then JSONL,
-    # then empty. This mirrors the live writer's lookup so backfilled
-    # snapshots match what a normal save_full_accuracy_snapshot() would
-    # produce on the same dataset.
+    # then empty. load_entries() ignores the path argument and uses the
+    # repo-default ``data/signal_log.*``, so emit a warning when the
+    # caller passed an explicit non-default path that doesn't exist
+    # (Codex round 5 P2 2026-04-28). Cross-environment runs that point
+    # at another deployment's data would otherwise silently load this
+    # repo's signal history.
     try:
-        from portfolio.accuracy_stats import load_entries
+        from portfolio.accuracy_stats import SIGNAL_LOG, load_entries
     except Exception as e:
         raise FileNotFoundError(
             f"Signal log not found at {path} and load_entries() unavailable: {e}"
+        )
+    if path.resolve() != SIGNAL_LOG.resolve():
+        print(
+            f"WARNING: --signal-log {path} not found, falling back to "
+            f"load_entries() which reads the repo default "
+            f"({SIGNAL_LOG}). The SQLite/JSONL hot path ignores the "
+            f"--signal-log argument; data-dir may be wrong.",
+            file=sys.stderr,
         )
     fallback = load_entries()
     if not fallback:
@@ -184,12 +195,19 @@ def build_historical_snapshot(
     Lifetime per_ticker is omitted — the detector's recent-window
     diff doesn't read it.
     """
-    # Shift cutoff back by one horizon so we only include outcomes that
-    # were knowable at target_dt. A signal logged at ts has its 1d outcome
-    # available at ts + 24h; including it in a target_dt snapshot means
-    # we'd be scoring the future.
+    # Shift the upper bound back by one horizon so we only include
+    # outcomes that were knowable at target_dt. A signal logged at ts
+    # has its 1d outcome available at ts + 24h; including it in a
+    # target_dt snapshot means we'd be scoring the future.
+    #
+    # Lower bound is anchored to target_dt - days, NOT cutoff - days
+    # (Codex round 5 P1 2026-04-28). The live writer uses
+    # ``ts >= now - 7d`` for recent_entries and lets signal_accuracy
+    # naturally skip the unresolved last 24h via missing outcomes.
+    # Shifting the lower bound too would push the recent window 24h
+    # older than the live equivalent.
     cutoff = target_dt - timedelta(hours=horizon_hours)
-    lower = cutoff - timedelta(days=days)
+    lower = target_dt - timedelta(days=days)
 
     historical_all = _filter_entries_by_cutoff(all_entries, cutoff)
     historical_recent = _filter_entries_window(all_entries, lower, cutoff)
