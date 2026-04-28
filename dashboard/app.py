@@ -865,7 +865,7 @@ def api_accuracy():
                     "per_ticker": ta,
                 }
         return jsonify(result)
-    except Exception as e:
+    except Exception:
         logger.exception("accuracy endpoint error")
         return jsonify({"error": "Internal server error"}), 500
 
@@ -1120,7 +1120,7 @@ def api_health():
     try:
         from portfolio.health import get_health_summary
         return jsonify(get_health_summary())
-    except Exception as e:
+    except Exception:
         logger.exception("health endpoint error")
         return jsonify({"error": "Internal server error"}), 500
 
@@ -1255,7 +1255,7 @@ def api_market_health():
                 result["earnings_proximity"] = summary["earnings_proximity"]
 
         return jsonify(result)
-    except Exception as e:
+    except Exception:
         logger.exception("mstr endpoint error")
         return jsonify({"error": "Internal server error"}), 500
 

@@ -1,7 +1,7 @@
 # System Overview
 
-Updated: 2026-04-24
-Branch: improve/auto-session-2026-04-24
+Updated: 2026-04-28
+Branch: improve/auto-session-2026-04-28
 
 ## 1) Architecture Summary
 
@@ -399,3 +399,9 @@ are empty — credentials not yet automated. Plan: add TOTP-based auto-renewal.
 - BUG-219 (P0): `_record_new_trades()` missing `pnl_pct` arg → consecutive-loss escalation dead — **fixed 2026-04-23**
 - BUG-220 (P2): `outcome_tracker` stores 0% change_pct when `base_price` is None — **fixed 2026-04-24** (skip ticker when base_price missing)
 - BUG-221 (P2): `daily_digest` crashes on invalid timezone config string — **fixed 2026-04-24** (fallback to UTC)
+- BUG-230 (P1): Dashboard CORS wildcard allows cross-origin data theft — **fixed 2026-04-28** (localhost whitelist)
+- BUG-231 (P2): `main.py` heartbeat uses non-atomic `.write_text()` — **fixed 2026-04-28** (atomic_write_text)
+- BUG-232 (P2): `portfolio_mgr.portfolio_value()` NaN fx_rate passes guard — **fixed 2026-04-28** (math.isfinite check)
+- BUG-233 (P3): `fish_monitor_live.py` CANCEL_HOUR/CANCEL_MIN undefined — **fixed 2026-04-28** (defined constants)
+- BUG-234 (P3): `signal_engine.py` unused variable `recent_horizon` — **fixed 2026-04-28** (removed)
+- BUG-235 (P3): Dashboard 500 errors expose internal exception messages — **fixed 2026-04-28** (generic error, server-side logging)

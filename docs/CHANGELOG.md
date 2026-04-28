@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-04-28 (auto-improve: security + lint cleanup)
+
+6 bug fixes, 78 lint violations resolved across portfolio/, data/, scripts/.
+
+- **BUG-230 (P1): Dashboard CORS wildcard** — `Access-Control-Allow-Origin: *` replaced
+  with localhost whitelist. Prevents cross-origin data theft via malicious websites.
+  Added `Access-Control-Allow-Credentials: false` header.
+- **BUG-231 (P2): Non-atomic heartbeat write** — `heartbeat.txt` now written via
+  `atomic_write_text()` (temp-file + rename) instead of raw `.write_text()`.
+- **BUG-232 (P2): NaN fx_rate guard** — `portfolio_value()` now checks
+  `math.isfinite(fx_rate)` alongside the existing `<= 0` guard.
+- **BUG-233 (P3): Undefined constants** — `CANCEL_HOUR`/`CANCEL_MIN` defined in
+  `fish_monitor_live.py` (was NameError if straddle mode entered).
+- **BUG-234 (P3): Dead variable** — removed unused `recent_horizon` in signal_engine.py.
+- **BUG-235 (P3): Dashboard error leak** — 500 responses now return generic error
+  message instead of `str(e)`. Full traceback logged server-side.
+- **Lint**: 22 F401/I001/UP045 auto-fixes in portfolio/, 43 auto-fixes in scripts/,
+  9 F841 unused variable fixes, 6 SIM102/103 simplifications, 12 E722 bare-except fixes.
+- **9 new tests**: 4 CORS + 5 NaN fx_rate edge cases.
+- Theme: Security Hardening, Lint Hygiene, Defensive Guards.
+
 ## 2026-04-21 (auto-improve: safety-critical fixes)
 
 10 bug fixes addressing findings from 3 consecutive adversarial reviews.
