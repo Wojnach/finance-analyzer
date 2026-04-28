@@ -323,6 +323,42 @@ class TestAlertCooldown:
         per_inv = (state.get("telegram_alert_state") or {}).get("accuracy_degradation")
         assert per_inv is not None and per_inv.get("last_sent_ts") > 0
 
+    def test_tracker_escalated_prefix_does_not_break_dedup(
+        self, cooldown_state_file,
+    ):
+        """Codex P1 round-3 follow-up: ViolationTracker rewrites promoted
+        WARNINGs as 'ESCALATED (Nx consecutive): ...', where N increments
+        every cycle. Hashing the rendered text gives a different hash
+        each cycle -> dedup never kicks in -> spam returns. The hash must
+        be computed on a stable incident key that survives the tracker
+        rename."""
+        from unittest.mock import patch
+
+        v_cycle1 = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="ESCALATED (3x consecutive): 2 signal(s) dropped...",
+        )
+        v_cycle2 = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="ESCALATED (4x consecutive): 2 signal(s) dropped...",
+        )
+        v_cycle3 = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="ESCALATED (5x consecutive): 2 signal(s) dropped...",
+        )
+        with patch("portfolio.message_store.send_or_store") as mock_send:
+            _alert_violations([v_cycle1], config={})
+            _alert_violations([v_cycle2], config={})
+            _alert_violations([v_cycle3], config={})
+        assert mock_send.call_count == 1, (
+            "Same underlying incident with rotating ESCALATED count fired "
+            "Telegram every cycle — the dedup key must strip the volatile "
+            "ESCALATED prefix"
+        )
+
     def test_text_flap_a_b_a_within_cooldown_does_not_re_fire_a(
         self, cooldown_state_file,
     ):

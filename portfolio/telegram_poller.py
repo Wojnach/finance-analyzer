@@ -55,8 +55,12 @@ class TelegramPoller:
     @staticmethod
     def _load_persisted_offset() -> int:
         """Read offset from POLLER_STATE_FILE. Returns 0 on any failure
-        (missing file, malformed JSON, non-int value) — fail-soft so a
-        corrupted state file never prevents the loop from polling."""
+        (missing file, malformed JSON, non-int value, or negative
+        integer) — fail-soft so a corrupted state file never prevents
+        the loop from polling. Negative values are explicitly rejected
+        because Telegram's getUpdates treats negative offsets as a
+        backward count from the latest update, not as cold-start
+        behavior (Codex P3 round-3 2026-04-28)."""
         try:
             state = load_json(POLLER_STATE_FILE, default=None)
         except Exception as e:
@@ -65,9 +69,16 @@ class TelegramPoller:
         if not isinstance(state, dict):
             return 0
         try:
-            return int(state.get("offset", 0) or 0)
+            offset = int(state.get("offset", 0) or 0)
         except (TypeError, ValueError):
             return 0
+        if offset < 0:
+            logger.warning(
+                "poller offset state had negative value %d; clamping to 0",
+                offset,
+            )
+            return 0
+        return offset
 
     def _save_offset(self) -> None:
         """Persist current offset atomically. Best-effort: a write failure

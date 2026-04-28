@@ -159,6 +159,44 @@ class TestAccuracyDegradationDispatcherWire:
         assert result == []
         assert _read_jsonl(crit_file) == []
 
+    def test_tracker_escalated_prefix_does_not_break_dispatch_dedup(
+        self, critical_errors_paths,
+    ):
+        """Codex P1 round-3 follow-up: same stable-hash requirement as the
+        Telegram cooldown — the critical_errors dispatcher must not append
+        a fresh row every cycle for a tracker-promoted incident whose
+        rendered message has a rotating 'ESCALATED (Nx consecutive)'
+        prefix."""
+        crit_file, _state_file = critical_errors_paths
+        v_cycle1 = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="ESCALATED (3x consecutive): 2 signal(s) dropped...",
+            details={"consecutive": 3},
+        )
+        v_cycle2 = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="ESCALATED (4x consecutive): 2 signal(s) dropped...",
+            details={"consecutive": 4},
+        )
+        v_cycle3 = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="ESCALATED (5x consecutive): 2 signal(s) dropped...",
+            details={"consecutive": 5},
+        )
+
+        _dispatch_critical_errors_for_degradation([v_cycle1])
+        _dispatch_critical_errors_for_degradation([v_cycle2])
+        _dispatch_critical_errors_for_degradation([v_cycle3])
+
+        rows = _read_jsonl(crit_file)
+        assert len(rows) == 1, (
+            f"Expected one critical_errors row, got {len(rows)} — "
+            "tracker-promoted ESCALATED prefix is leaking into the hash"
+        )
+
     def test_text_flap_a_b_a_within_ttl_does_not_re_append_a(
         self, critical_errors_paths,
     ):

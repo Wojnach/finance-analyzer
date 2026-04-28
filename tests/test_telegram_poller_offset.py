@@ -223,3 +223,19 @@ class TestPollerOffsetPersistence:
 
         poller = TelegramPoller(fake_config, on_command=lambda *a: None)
         assert poller.offset == 0
+
+    def test_negative_persisted_offset_clamps_to_zero(self, poller_paths, fake_config):
+        """Codex P3 round-3 follow-up: a manually-edited or numerically
+        corrupted state file with offset < 0 must NOT propagate to
+        Telegram getUpdates. Telegram treats negative offsets specially
+        (back-skip from latest) — definitely not the cold-start behavior
+        we want."""
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, _inbound = poller_paths
+        state_file.write_text(json.dumps({"offset": -1, "updated_ts": "x"}))
+
+        poller = TelegramPoller(fake_config, on_command=lambda *a: None)
+        assert poller.offset == 0
+        # The bypass flag should also be False — we don't have a real prior.
+        assert poller._has_persisted_offset is False

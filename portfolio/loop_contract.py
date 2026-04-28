@@ -9,6 +9,7 @@ Supports: main loop, metals loop, GoldDigger, Elongir.
 
 import hashlib
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -1101,12 +1102,29 @@ def _log_violations(violations: list[Violation], cycle_id: int):
         })
 
 
+# Codex P1 round-3 (2026-04-28): the ViolationTracker rewrites promoted
+# WARNINGs as "ESCALATED (Nx consecutive): <original>" where N
+# increments every cycle. Hashing the rendered text would give a
+# different hash each pass and the dedup would never engage on tracker-
+# promoted incidents. Strip the prefix so the hash represents the
+# underlying incident, not the cycle counter.
+_ESCALATED_PREFIX_RE = re.compile(r"^ESCALATED \(\d+x consecutive\): ")
+
+
 def _hash_violation_message(message: str) -> str:
     """Stable identity for an alert text — used for both Telegram cooldown
-    dedup and critical_errors.jsonl dedup. SHA-1 is fine here: we're not
-    using it as a security primitive, just as a content fingerprint, and
-    the messages are short enough that collisions are negligible."""
-    return hashlib.sha1((message or "").encode("utf-8")).hexdigest()
+    dedup and critical_errors.jsonl dedup.
+
+    The hash is computed on the message AFTER stripping the
+    ``ESCALATED (Nx consecutive):`` prefix that ViolationTracker adds to
+    promoted warnings, so the same underlying incident dedups across
+    consecutive cycles even as the escalation count climbs. SHA-1 is
+    fine here: we're not using it as a security primitive, just as a
+    content fingerprint, and the messages are short enough that
+    collisions are negligible.
+    """
+    stripped = _ESCALATED_PREFIX_RE.sub("", message or "", count=1)
+    return hashlib.sha1(stripped.encode("utf-8")).hexdigest()
 
 
 def _normalize_recent_hashes(prior: dict) -> list[dict]:
