@@ -1775,15 +1775,25 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     # Prefer dynamic groups (from signal_log correlations) over static.
     active_non_hold = {s for s, v in votes.items() if v != "HOLD"}
     _active_corr_groups = _get_correlation_groups() or _STATIC_CORRELATION_GROUPS
+
+    # Codex P2 (2026-04-28): apply the macro-window downweight to the
+    # leader-selection key BEFORE picking the leader. Otherwise sentiment
+    # (lifetime ~70% acc) stays leader of macro_external during a macro
+    # window — and the 0.15x follower penalty pushes healthier peers
+    # below sentiment's already-halved weight, making the overlay
+    # actively reinforce the wrong signal.
+    def _leader_accuracy_key(s: str) -> float:
+        base = accuracy_data.get(s, {}).get("accuracy", 0.5)
+        if macro_active and s in MACRO_WINDOW_DOWNWEIGHT_SIGNALS:
+            base *= MACRO_WINDOW_DOWNWEIGHT_MULTIPLIER
+        return base
+
     group_leaders = {}
     for group_name, group_sigs in _active_corr_groups.items():
         active_in_group = active_non_hold & group_sigs
         if len(active_in_group) <= 1:
             continue
-        best_sig = max(
-            active_in_group,
-            key=lambda s: accuracy_data.get(s, {}).get("accuracy", 0.5),
-        )
+        best_sig = max(active_in_group, key=_leader_accuracy_key)
         group_leaders[group_name] = best_sig
 
     # Correlation group leader gating: when the best signal in a group has
@@ -3281,6 +3291,21 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     )
     if _filtered_count > 0:
         extra_info["_persistence_filtered"] = _filtered_count
+
+    # Codex P1 (2026-04-28): apply macro-window force-HOLD here, BEFORE
+    # the voter quorum count below. _weighted_consensus also runs the
+    # same pre-pass as defense-in-depth, but if we deferred the
+    # mutation to inside _weighted_consensus, post_persistence_voters
+    # would still count claude_fundamental as a voter — and the
+    # MIN_VOTERS gate at line ~3308 would pass on inflated count
+    # during a macro window, emitting a non-HOLD action with one
+    # fewer real participant than required.
+    _macro_active_for_count = _is_macro_window_cached()
+    if _macro_active_for_count and MACRO_WINDOW_FORCE_HOLD_SIGNALS:
+        consensus_votes = {
+            k: ("HOLD" if k in MACRO_WINDOW_FORCE_HOLD_SIGNALS else v)
+            for k, v in consensus_votes.items()
+        }
 
     # BUG-224: compute post-persistence voter count so downstream consumers
     # (accuracy tracking, Layer 2) see the actual participating voter count,

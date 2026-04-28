@@ -1181,6 +1181,11 @@ def _write_tier2_summary(summary, triggered_tickers=None):
         "timestamp": summary.get("timestamp", ""),
         "trigger_reasons": summary.get("trigger_reasons", []),
         "fx_rate": summary.get("fx_rate", 0),
+        # Codex P2 (2026-04-28): macro_window must propagate to Tier 2 —
+        # signal-analysis agent reads agent_context_t2.json on triggered
+        # paths, where the regime context matters most. Without this,
+        # Tier 2 sees raw signals without knowing they're macro-suppressed.
+        "macro_window": summary.get("macro_window", {"active": False}),
         "signals": {},
         "timeframes": {},
     }
