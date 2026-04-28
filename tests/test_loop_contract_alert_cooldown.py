@@ -620,3 +620,176 @@ class TestAlertCooldown:
             "persisted — next 4 h of legitimate CRITICAL alerts would be "
             "silenced even though no Telegram was actually delivered"
         )
+
+
+class TestAccuracyDegradationStableHash:
+    """The accuracy_degradation invariant's identity hash must be stable
+    across percentage drift and unstable across signal-set changes.
+
+    Caught 2026-04-28 (round 2): the existing hash includes the rendered
+    message (which contains "33.7%→33.2%" style percentages). Each cycle
+    those percentages drift slightly, producing a fresh hash and bypassing
+    the multi-hash dedup. Result: hourly Telegram spam even though the
+    *same set of signals* is firing.
+
+    Fix: hash on the sorted set of (scope::key) pairs from
+    ``violation.details["alerts"]``. Same violating signals → same hash.
+    Different violating signals → different hash.
+    """
+
+    @staticmethod
+    def _make_violation(alerts: list[dict], message: str = "X signals dropped..."):
+        return Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message=message,
+            details={"alert_count": len(alerts), "alerts": alerts},
+        )
+
+    def test_same_signal_set_different_percentages_same_hash(self):
+        """Drift in percentages must not change the hash."""
+        from portfolio.loop_contract import _hash_violation_identity
+
+        v1 = self._make_violation(
+            alerts=[
+                {"key": "sentiment", "scope": "signal",
+                 "old_accuracy_pct": 75.3, "new_accuracy_pct": 43.3},
+                {"key": "momentum_factors", "scope": "signal",
+                 "old_accuracy_pct": 49.3, "new_accuracy_pct": 33.7},
+            ],
+            message="2 signal(s) dropped: sentiment 75.3%→43.3%, momentum_factors 49.3%→33.7%",
+        )
+        v2 = self._make_violation(
+            alerts=[
+                {"key": "sentiment", "scope": "signal",
+                 "old_accuracy_pct": 75.3, "new_accuracy_pct": 41.0},
+                {"key": "momentum_factors", "scope": "signal",
+                 "old_accuracy_pct": 49.3, "new_accuracy_pct": 32.5},
+            ],
+            message="2 signal(s) dropped: sentiment 75.3%→41.0%, momentum_factors 49.3%→32.5%",
+        )
+
+        assert _hash_violation_identity(v1) == _hash_violation_identity(v2), (
+            "same violating signals with drifting percentages should hash identical"
+        )
+
+    def test_different_signal_set_different_hash(self):
+        """A new signal joining the violation list MUST produce a fresh hash."""
+        from portfolio.loop_contract import _hash_violation_identity
+
+        v1 = self._make_violation(
+            alerts=[
+                {"key": "sentiment", "scope": "signal"},
+                {"key": "momentum_factors", "scope": "signal"},
+            ],
+        )
+        v2 = self._make_violation(
+            alerts=[
+                {"key": "sentiment", "scope": "signal"},
+                {"key": "momentum_factors", "scope": "signal"},
+                {"key": "structure", "scope": "signal"},
+            ],
+        )
+
+        assert _hash_violation_identity(v1) != _hash_violation_identity(v2)
+
+    def test_different_scope_same_key_different_hash(self):
+        """sentiment-aggregate vs MSTR::sentiment must NOT collide."""
+        from portfolio.loop_contract import _hash_violation_identity
+
+        v_aggregate = self._make_violation(
+            alerts=[{"key": "sentiment", "scope": "signal"}],
+        )
+        v_per_ticker = self._make_violation(
+            alerts=[{"key": "MSTR::sentiment", "scope": "per_ticker"}],
+        )
+
+        assert (
+            _hash_violation_identity(v_aggregate)
+            != _hash_violation_identity(v_per_ticker)
+        )
+
+    def test_alert_order_does_not_affect_hash(self):
+        """Sort order in ``details['alerts']`` shouldn't matter (sets are
+        unordered semantically — we sort before hashing to make this true)."""
+        from portfolio.loop_contract import _hash_violation_identity
+
+        order_a = self._make_violation(alerts=[
+            {"key": "alpha", "scope": "signal"},
+            {"key": "beta", "scope": "signal"},
+            {"key": "gamma", "scope": "signal"},
+        ])
+        order_b = self._make_violation(alerts=[
+            {"key": "gamma", "scope": "signal"},
+            {"key": "alpha", "scope": "signal"},
+            {"key": "beta", "scope": "signal"},
+        ])
+
+        assert _hash_violation_identity(order_a) == _hash_violation_identity(order_b)
+
+    def test_missing_alerts_falls_back_to_message_hash(self):
+        """If details['alerts'] is missing/malformed, fall back to the
+        message-only hash — keeps the helper safe for legacy callers."""
+        from portfolio.loop_contract import (
+            _hash_violation_identity,
+            _hash_violation_message,
+        )
+
+        v = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="raw message — no details",
+        )
+        # No details, no alerts → fallback
+        assert (
+            _hash_violation_identity(v)
+            == _hash_violation_message("raw message — no details")
+        )
+
+    def test_other_invariants_unchanged(self):
+        """The new branch must not alter hashing for unrelated invariants
+        — those still go through the message-only path with ESCALATED-strip."""
+        from portfolio.loop_contract import (
+            _hash_violation_identity,
+            _hash_violation_message,
+        )
+
+        v = Violation(
+            invariant="cycle_duration",
+            severity="WARNING",
+            message="cycle took 200s",
+            details={"alerts": [{"key": "foo"}]},  # ignored — different invariant
+        )
+        assert (
+            _hash_violation_identity(v)
+            == _hash_violation_message("cycle took 200s")
+        )
+
+    def test_escalated_prefix_stripped_before_hashing(self):
+        """ViolationTracker rewrites messages with an ESCALATED prefix on
+        promotion. The accuracy_degradation hash now ignores message text
+        entirely — but the ESCALATED behavior must remain compatible with
+        the message-only fallback path for legacy/empty-details cases."""
+        from portfolio.loop_contract import _hash_violation_identity
+
+        v_pre = Violation(
+            invariant="accuracy_degradation",
+            severity="WARNING",
+            message="2 signal(s) dropped...",
+            details={"alerts": [
+                {"key": "sentiment", "scope": "signal"},
+                {"key": "momentum_factors", "scope": "signal"},
+            ]},
+        )
+        v_promoted = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="ESCALATED (3x consecutive): 2 signal(s) dropped...",
+            details={"alerts": [
+                {"key": "sentiment", "scope": "signal"},
+                {"key": "momentum_factors", "scope": "signal"},
+            ]},
+        )
+
+        # Same alert set → same hash, regardless of ESCALATED prefix on message
+        assert _hash_violation_identity(v_pre) == _hash_violation_identity(v_promoted)

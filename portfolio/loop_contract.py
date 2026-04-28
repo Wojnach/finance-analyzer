@@ -1219,15 +1219,39 @@ def _hash_violation_identity(violation: "Violation") -> str:
 
     Strips the ``ESCALATED (Nx consecutive):`` prefix added by
     ViolationTracker, so a tracker-promoted alert dedups against the
-    pre-promotion form. For ``layer2_journal_activity`` the message text
-    only embeds rounded age + reason — two distinct triggers with the
-    same reason can render identically, so we additionally fold in
-    ``details['trigger_time']`` (Codex P2 round-4 2026-04-28). Other
-    invariants fall back to the message-only hash.
+    pre-promotion form.
+
+    Per-invariant identity overrides:
+    - ``layer2_journal_activity`` folds ``details['trigger_time']`` because
+      the message embeds only rounded age + reason (Codex P2 round-4
+      2026-04-28).
+    - ``accuracy_degradation`` (added 2026-04-28 round 2) hashes ONLY the
+      sorted set of ``(scope::key)`` pairs from ``details['alerts']``.
+      The rendered message contains percentages like "33.7%→33.2%" that
+      drift each cycle as samples shift; without this override every
+      cycle generates a fresh hash, and the multi-hash dedup can't trap
+      the duplicates. Falls back to the message-only hash if details are
+      missing or malformed.
+
+    Other invariants fall back to the message-only hash.
 
     SHA-1 is a content fingerprint here, not a security primitive.
     """
     msg = _ESCALATED_PREFIX_RE.sub("", violation.message or "", count=1)
+
+    if violation.invariant == "accuracy_degradation":
+        details = violation.details or {}
+        alerts = details.get("alerts") or []
+        keys = sorted(
+            f"{a.get('scope', '?')}::{a.get('key', '?')}"
+            for a in alerts
+            if isinstance(a, dict)
+        )
+        if keys:
+            payload = "accuracy_degradation:" + ",".join(keys)
+            return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+        # else fall through to message-only hash for legacy/empty-details
+
     parts = [msg]
     if violation.invariant == "layer2_journal_activity":
         details = violation.details or {}
