@@ -196,20 +196,31 @@ def main(argv: list[str] | None = None) -> int:
             life = consensus_accuracy("1d", entries=lifetime_entries)
             rec = consensus_accuracy("1d", entries=recent_entries)
         elif scope == "forecast":
-            # Codex P3 fix round 1 (2026-04-28): forecast alerts have
-            # keys like "chronos_24h" / "kronos_24h"; route through the
-            # cached_forecast_accuracy infra the live writer uses.
+            # Forecast alert keys have "forecast::" prefix in
+            # degradation_alert_state but cached_forecast_accuracy is
+            # keyed by bare model name (Codex round 2 P2). Strip prefix.
             #
-            # Codex round 2 P2 fix: degradation_alert_state.json stores
-            # forecast keys with a "forecast::" prefix (per the live
-            # check at accuracy_degradation.py:518), but
-            # cached_forecast_accuracy returns dicts keyed by the bare
-            # model name. Strip the prefix before lookup.
+            # Codex round 6 P2 (2026-04-28): cached_forecast_accuracy
+            # uses the importing module's DATA_DIR, NOT --data-dir. When
+            # auditing a non-default deployment, signal data comes from
+            # --data-dir but forecast verdicts come from this repo's
+            # data/forecast_predictions.jsonl. We monkey-patch the
+            # PREDICTIONS_FILE for the duration of this lookup so the
+            # forecast scope is faithful to the audited environment.
+            from portfolio import forecast_accuracy as _fa
             from portfolio.forecast_accuracy import cached_forecast_accuracy
             bare_key = key
             if bare_key.startswith("forecast::"):
                 bare_key = bare_key[len("forecast::"):]
+
+            saved_predictions_file = _fa.PREDICTIONS_FILE
+            target_predictions = repo_data / "forecast_predictions.jsonl"
             try:
+                _fa.PREDICTIONS_FILE = target_predictions
+                # cached_forecast_accuracy memoizes — clear cache to
+                # avoid serving the previous data dir's results.
+                if hasattr(cached_forecast_accuracy, "cache_clear"):
+                    cached_forecast_accuracy.cache_clear()
                 forecast_recent = cached_forecast_accuracy(
                     horizon="24h", days=7, use_raw_sub_signals=True,
                 )
@@ -220,6 +231,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  warn: forecast accuracy fetch failed: {e}",
                       file=sys.stderr)
                 forecast_recent, forecast_lifetime = {}, {}
+            finally:
+                _fa.PREDICTIONS_FILE = saved_predictions_file
+                if hasattr(cached_forecast_accuracy, "cache_clear"):
+                    cached_forecast_accuracy.cache_clear()
             life = forecast_lifetime.get(bare_key, {})
             rec = forecast_recent.get(bare_key, {})
         else:
