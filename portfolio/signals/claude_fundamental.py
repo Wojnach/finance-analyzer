@@ -717,8 +717,33 @@ def _refresh_tier(tier, context):
     _journal_refresh(tier, results)
 
 
+def _bias_rate_from_entries(entries: list, tier: str, ticker: str | None = None) -> tuple[float, int, str | None]:
+    """Compute (bias_rate, non_hold_n, biased_label) for a tier (optionally
+    scoped to one ticker) from a journal entry list.
+
+    Returns (0.0, 0, None) when there's not enough data; the caller decides
+    the threshold + min-samples to apply.
+    """
+    votes = [
+        e.get("action", "HOLD")
+        for e in entries
+        if e.get("tier") == tier
+        and not e.get("is_abstention", False)
+        and (ticker is None or e.get("ticker") == ticker)
+    ]
+    # Only check most recent 30 votes for the (tier, ticker?) slice
+    votes = votes[-30:]
+    non_hold = [v for v in votes if v != "HOLD"]
+    if not non_hold:
+        return 0.0, 0, None
+    from collections import Counter
+    counts = Counter(non_hold)
+    top_label, top_count = counts.most_common(1)[0]
+    return top_count / len(non_hold), len(non_hold), top_label
+
+
 def _is_tier_biased(tier: str) -> bool:
-    """Detect BUY or SELL bias from recent journal entries.
+    """Detect BUY or SELL bias from recent journal entries (global, all tickers).
 
     If a tier has >75% of its recent non-abstention votes in one direction,
     it's structurally biased and should be downweighted in the cascade.
@@ -736,27 +761,54 @@ def _is_tier_biased(tier: str) -> bool:
     except Exception:
         return False
 
-    tier_votes = [
-        e.get("action", "HOLD")
-        for e in entries
-        if e.get("tier") == tier and not e.get("is_abstention", False)
-    ]
-    # Only check most recent entries
-    tier_votes = tier_votes[-30:] if len(tier_votes) > 30 else tier_votes
-
-    non_hold = [v for v in tier_votes if v != "HOLD"]
-    if len(non_hold) < _BIAS_MIN_SAMPLES:
+    bias_rate, n, label = _bias_rate_from_entries(entries, tier)
+    if n < _BIAS_MIN_SAMPLES:
         return False
-
-    from collections import Counter
-    counts = Counter(non_hold)
-    most_common_count = counts.most_common(1)[0][1]
-    bias_rate = most_common_count / len(non_hold)
-
     if bias_rate > _BIAS_THRESHOLD:
         logger.info(
             "Claude fundamental %s tier biased: %.0f%% %s (%d non-HOLD votes)",
-            tier, bias_rate * 100, counts.most_common(1)[0][0], len(non_hold),
+            tier, bias_rate * 100, label, n,
+        )
+        return True
+    return False
+
+
+def _is_tier_biased_for_ticker(tier: str, ticker: str) -> bool:
+    """Per-ticker bias detection — catches one-sided per-ticker patterns
+    that the global _is_tier_biased misses.
+
+    2026-04-28: Added after the audit found that BTC-USD::claude_fundamental
+    dropped 25.7pp despite the global bias detector being active. Root cause:
+    Opus voted 100% BUY on BTC over its last 5 BTC predictions, while overall
+    Opus rate was only ~70% BUY (below the 75% global threshold). The
+    cascade kept picking Opus's per-ticker-biased BUY, which lost as BTC
+    stayed flat-to-down. Same pattern on XAG (-20.6pp).
+
+    Lower min-samples (5 vs 10) because per-ticker volume is much lower than
+    global; same 75% threshold so that a clearly one-sided per-ticker stance
+    triggers without over-firing on ordinary directional moves.
+
+    The journal scan needs more entries than the global check (max_entries=500
+    vs 200) because per-(tier, ticker) volume is roughly 1/Nth of the per-tier
+    volume across N tickers — too small a tail can leave a ticker with 0
+    non-HOLD samples even when the tier itself is active.
+    """
+    _PER_TICKER_BIAS_THRESHOLD = 0.75
+    _PER_TICKER_MIN_SAMPLES = 5
+
+    try:
+        from portfolio.file_utils import load_jsonl_tail
+        entries = load_jsonl_tail(_CF_LOG, max_entries=500)
+    except Exception:
+        return False
+
+    bias_rate, n, label = _bias_rate_from_entries(entries, tier, ticker=ticker)
+    if n < _PER_TICKER_MIN_SAMPLES:
+        return False
+    if bias_rate > _PER_TICKER_BIAS_THRESHOLD:
+        logger.info(
+            "Claude fundamental %s tier biased FOR %s: %.0f%% %s (%d non-HOLD votes)",
+            tier, ticker, bias_rate * 100, label, n,
         )
         return True
     return False
@@ -765,25 +817,56 @@ def _is_tier_biased(tier: str) -> bool:
 def _get_best_result(ticker):
     """Cascade: Opus > Sonnet > Haiku. Return best available result for ticker.
 
-    2026-04-25: Added bias detection. When a higher tier has >75% BUY (or SELL)
-    bias, its non-HOLD vote is treated as HOLD for cascade purposes. This lets
-    Haiku's prudent HOLD win over Sonnet/Opus's structural optimism in ranging
-    markets. The bias detector uses a rolling 30-entry window from the journal.
+    2026-04-25: Added global bias detection. When a higher tier has >75% BUY
+    (or SELL) bias across all tickers, its non-HOLD vote is treated as HOLD
+    for cascade purposes. This lets Haiku's prudent HOLD win over
+    Sonnet/Opus's structural optimism in ranging markets.
+
+    2026-04-28: Added per-ticker bias detection AND fixed a fallback bug
+    that the new tests surfaced. The previous implementation skipped biased
+    non-HOLD votes in the first loop but the second "any result available"
+    loop returned the biased non-HOLD result anyway — defeating the purpose
+    of the bias check. Now the bias-suppression is materialized: a biased
+    non-HOLD vote becomes a synthesized HOLD with `_bias_suppressed: True`
+    in indicators, then standard cascade (highest-tier non-HOLD wins;
+    otherwise highest-tier HOLD) runs over the suppressed verdicts.
     """
-    # Prefer higher tier with a non-HOLD vote, unless that tier is biased
+    # Build per-tier effective results, materializing bias suppression so
+    # both the prefer-non-HOLD pass AND the fall-back pass see the same data.
+    effective: dict[str, dict] = {}
     for tier in ("opus", "sonnet", "haiku"):
         result = _cache[tier]["results"].get(ticker)
-        if result and result.get("action") != "HOLD":
-            if not _is_tier_biased(tier):
-                return result
-            # Tier is biased — skip its non-HOLD vote, treat as HOLD
+        if not result:
+            continue
+        action = result.get("action")
+        if action != "HOLD" and (
+            _is_tier_biased(tier) or _is_tier_biased_for_ticker(tier, ticker)
+        ):
             logger.debug(
-                "Skipping biased %s tier vote (%s) for %s",
-                tier, result.get("action"), ticker,
+                "Suppressing biased %s tier vote (%s) for %s -> HOLD",
+                tier, action, ticker,
             )
-    # All tiers say HOLD (or biased tiers skipped) — return highest-tier available
+            effective[tier] = {
+                **result,
+                "action": "HOLD",
+                "confidence": 0.0,
+                "indicators": {
+                    **result.get("indicators", {}),
+                    "_bias_suppressed": True,
+                    "_original_action": action,
+                },
+            }
+        else:
+            effective[tier] = result
+
+    # Pass 1: highest-tier non-HOLD wins.
     for tier in ("opus", "sonnet", "haiku"):
-        result = _cache[tier]["results"].get(ticker)
+        result = effective.get(tier)
+        if result and result.get("action") != "HOLD":
+            return result
+    # Pass 2: fall back to highest-tier HOLD (suppressed or genuine).
+    for tier in ("opus", "sonnet", "haiku"):
+        result = effective.get(tier)
         if result:
             return result
     return None
