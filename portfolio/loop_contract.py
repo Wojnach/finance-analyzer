@@ -707,6 +707,7 @@ def _dispatch_critical_errors_for_degradation(
     *,
     invariants: frozenset[str] = CRITICAL_ERROR_DISPATCH_INVARIANTS,
     ttl_s: float = DEFAULT_CRITICAL_ERRORS_DEDUP_TTL_S,
+    state_file: Path | None = None,
 ) -> None:
     """Append a deduplicated critical_errors.jsonl row per CRITICAL violation
     whose invariant is in ``invariants``.
@@ -740,8 +741,10 @@ def _dispatch_critical_errors_for_degradation(
     if not critical:
         return
 
+    if state_file is None:
+        state_file = CONTRACT_STATE_FILE
     try:
-        state = load_json(CONTRACT_STATE_FILE, default={}) or {}
+        state = load_json(state_file, default={}) or {}
     except Exception as e:
         logger.warning("critical_errors dispatch state read failed: %s", e)
         state = {}
@@ -812,11 +815,11 @@ def _dispatch_critical_errors_for_degradation(
     if not state_updates:
         return
     try:
-        existing = load_json(CONTRACT_STATE_FILE, default={}) or {}
+        existing = load_json(state_file, default={}) or {}
         merged = existing.get("critical_error_dispatch") or {}
         merged.update(state_updates)
         existing["critical_error_dispatch"] = merged
-        atomic_write_json(CONTRACT_STATE_FILE, existing)
+        atomic_write_json(state_file, existing)
     except Exception as e:
         logger.warning("critical_errors dispatch state write failed: %s", e)
 
@@ -1276,7 +1279,14 @@ def _telegram_will_actually_deliver(config: dict | None,
     the same gates here lets the cooldown logic skip claiming a 4 h
     silence window for a message that was never delivered. Mirrors the
     logic in portfolio/message_store.py:170-219 — keep both in sync.
+
+    Codex P3 round-5 (2026-04-28): also honor the NO_TELEGRAM env var,
+    which message_store._do_send_telegram uses as a fast-path that
+    returns True without delivering. Set in tests + dev environments.
     """
+    import os
+    if os.environ.get("NO_TELEGRAM"):
+        return False
     tg_cfg = (config or {}).get("telegram", {}) or {}
     muted = set(tg_cfg.get("muted_categories", []) or [])
     if category in muted:
@@ -1289,9 +1299,10 @@ def _telegram_will_actually_deliver(config: dict | None,
 
 
 def _filter_critical_by_cooldown(critical: list[Violation], now: float,
-                                 cooldown_s: float):
+                                 cooldown_s: float,
+                                 state_file: Path | None = None):
     """Split CRITICAL violations into (fresh, suppressed) using the per-
-    invariant multi-hash cooldown stored in CONTRACT_STATE_FILE.
+    invariant multi-hash cooldown stored in ``state_file``.
 
     A violation is *fresh* when (invariant, sha1(message)) is not present
     in the recent-hashes list for that invariant within the cooldown
@@ -1303,8 +1314,20 @@ def _filter_critical_by_cooldown(critical: list[Violation], now: float,
     Returns the fresh-list plus a state-update dict that the caller
     should persist ONLY after a successful send — a failed Telegram post
     must not claim a dedup slot and silence the next legitimate alert.
+
+    Codex P2 round-5 (2026-04-28): the state file is parameterized so
+    each loop (main, metals, golddigger, elongir) keeps its cooldown in
+    its own contract state file. Otherwise concurrent emissions from
+    metals + main would race the same shared file and the last writer
+    would clobber the other loop's cooldown bookkeeping.
     """
-    state = load_json(CONTRACT_STATE_FILE, default={}) or {}
+    # Resolve the default at CALL time so monkeypatch.setattr on the
+    # module attribute in tests is honored (Python evaluates default
+    # parameter values at function-definition time, which would freeze
+    # them to the pre-patch value).
+    if state_file is None:
+        state_file = CONTRACT_STATE_FILE
+    state = load_json(state_file, default={}) or {}
     cooldown_state = state.get("telegram_alert_state") or {}
 
     fresh: list[Violation] = []
@@ -1340,29 +1363,38 @@ def _filter_critical_by_cooldown(critical: list[Violation], now: float,
     return fresh, state_updates
 
 
-def _persist_alert_cooldown(state_updates: dict[str, dict]) -> None:
-    """Merge state_updates into contract_state.json's telegram_alert_state.
+def _persist_alert_cooldown(
+    state_updates: dict[str, dict],
+    state_file: Path | None = None,
+) -> None:
+    """Merge state_updates into ``state_file``'s telegram_alert_state.
 
     Best-effort. A failure to persist means the next cycle re-fires the
     same alert; harmless noise compared to crashing the contract pipeline.
     Preserves all unrelated keys (consecutive, last_heal_time, etc.) so
-    other writers to CONTRACT_STATE_FILE can coexist — same pattern
+    other writers to the same state file can coexist — same pattern
     ViolationTracker._save() and check_layer2_journal_activity follow.
+
+    Codex P2 round-5 (2026-04-28): per-loop state file so concurrent
+    emissions don't race the main loop's contract_state.json.
     """
     if not state_updates:
         return
+    if state_file is None:
+        state_file = CONTRACT_STATE_FILE
     try:
-        existing = load_json(CONTRACT_STATE_FILE, default={}) or {}
+        existing = load_json(state_file, default={}) or {}
         cooldown_state = existing.get("telegram_alert_state") or {}
         cooldown_state.update(state_updates)
         existing["telegram_alert_state"] = cooldown_state
-        atomic_write_json(CONTRACT_STATE_FILE, existing)
+        atomic_write_json(state_file, existing)
     except Exception as e:
         logger.warning("alert cooldown state write failed: %s", e)
 
 
 def _alert_violations(violations: list[Violation], config: dict,
-                      loop_name: str = "main"):
+                      loop_name: str = "main",
+                      state_file: Path | None = None):
     """Send Telegram alert for critical violations.
 
     Per-invariant cooldown (2026-04-28): each (invariant, message_hash)
@@ -1370,20 +1402,29 @@ def _alert_violations(violations: list[Violation], config: dict,
     DEFAULT_CONTRACT_ALERT_COOLDOWN_S above for rationale. Cooldown logic
     fails open — if it raises, we ship the alert anyway because Telegram
     silence on a real CRITICAL is worse than duplicate noise.
+
+    Codex P2 round-5 (2026-04-28): ``state_file`` is the per-loop
+    contract state file so metals/golddigger/elongir alerts don't race
+    the main loop's contract_state.json.
     """
     critical = [v for v in violations if v.severity == "CRITICAL"]
     if not critical:
         return
 
-    cooldown_s = float(
-        (config or {}).get("notification", {}).get(
-            "contract_alert_cooldown_s",
-            DEFAULT_CONTRACT_ALERT_COOLDOWN_S,
-        )
-    )
     try:
+        # Codex P2 round-5 (2026-04-28): parsing the cooldown config
+        # belongs INSIDE the fail-open try. A non-numeric value in
+        # config (e.g. ``"4h"`` instead of seconds) used to raise
+        # before reaching send_or_store, so the CRITICAL alert was
+        # silently lost rather than fail-open delivered.
+        cooldown_s = float(
+            (config or {}).get("notification", {}).get(
+                "contract_alert_cooldown_s",
+                DEFAULT_CONTRACT_ALERT_COOLDOWN_S,
+            )
+        )
         fresh, state_updates = _filter_critical_by_cooldown(
-            critical, time.time(), cooldown_s,
+            critical, time.time(), cooldown_s, state_file=state_file,
         )
     except Exception as e:
         # Fail-open. Emit the warning so the next operator sees what
@@ -1438,7 +1479,7 @@ def _alert_violations(violations: list[Violation], config: dict,
         )
         return
 
-    _persist_alert_cooldown(state_updates)
+    _persist_alert_cooldown(state_updates, state_file=state_file)
 
 
 def _trigger_self_heal(violations: list[Violation], tracker: ViolationTracker,
@@ -1514,19 +1555,28 @@ def verify_and_act(report, config: dict,
     # Track consecutive counts and escalate
     violations = tracker.update(violations, report)
 
+    # Per-loop state file so metals/golddigger/elongir don't race the
+    # main loop's contract_state.json (Codex P2 round-5 2026-04-28).
+    tracker_state_file = getattr(tracker, "_state_file", CONTRACT_STATE_FILE)
+
     # 2026-04-28 (Codex P2): wire dispatcher-tracked invariants into
     # critical_errors.jsonl AFTER the tracker has had its chance to
     # promote consecutive WARNINGs to CRITICAL. Doing it pre-tracker
     # would miss exactly those promoted cases. Layer 2 still writes its
     # own row inline because the layer2 check needs the trigger ts in
     # the resolution context.
-    _dispatch_critical_errors_for_degradation(violations)
+    _dispatch_critical_errors_for_degradation(
+        violations, state_file=tracker_state_file,
+    )
 
     # Log all violations
     _log_violations(violations, report.cycle_id)
 
     # Alert critical violations via Telegram
-    _alert_violations(violations, config, loop_name=loop_name)
+    _alert_violations(
+        violations, config, loop_name=loop_name,
+        state_file=tracker_state_file,
+    )
 
     # Self-heal on critical violations
     critical = [v for v in violations if v.severity == "CRITICAL"]

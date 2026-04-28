@@ -210,6 +210,92 @@ class TestAlertCooldown:
             state = load_json(cooldown_state_file, default={}) or {}
             assert "telegram_alert_state" not in state
 
+    def test_no_telegram_env_skips_cooldown(self, cooldown_state_file, monkeypatch):
+        """Codex P3 round-5 follow-up: NO_TELEGRAM env var causes
+        message_store._do_send_telegram to return True without delivering.
+        The cooldown must respect that — claiming the 4 h window when
+        nobody was paged would silence the first real recurrence after
+        NO_TELEGRAM is cleared."""
+        from unittest.mock import patch
+
+        from portfolio.file_utils import load_json
+
+        monkeypatch.setenv("NO_TELEGRAM", "1")
+        v = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="12 signal(s) dropped >15pp...",
+        )
+        with patch("portfolio.message_store.send_or_store", return_value=True):
+            _alert_violations([v], config={})
+
+        state = load_json(cooldown_state_file, default={}) or {}
+        per_inv = (state.get("telegram_alert_state") or {}).get("accuracy_degradation")
+        assert per_inv is None or not per_inv.get("last_sent_ts"), (
+            "NO_TELEGRAM was set so nothing was delivered, but cooldown "
+            "claimed the 4 h window"
+        )
+
+    def test_non_numeric_cooldown_config_does_not_crash(self, cooldown_state_file):
+        """Codex P2 round-5 follow-up: a malformed config string like
+        ``contract_alert_cooldown_s: "4h"`` must not propagate as
+        ValueError from float() through to the caller. _alert_violations
+        is meant to fail-open — drop the cooldown and ship the alert,
+        not crash and silence everything."""
+        from unittest.mock import patch
+
+        v = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="12 signal(s) dropped >15pp...",
+        )
+        bad_config = {"notification": {"contract_alert_cooldown_s": "4h"}}
+        with patch("portfolio.message_store.send_or_store") as mock_send:
+            # Must not raise; must still deliver.
+            _alert_violations([v], config=bad_config)
+        assert mock_send.call_count == 1
+
+    def test_per_loop_state_file_isolation(self, tmp_path, monkeypatch):
+        """Codex P2 round-5 follow-up: metals/golddigger/elongir each
+        keep their own contract state files. _alert_violations must use
+        the loop's state file (not always main's contract_state.json)
+        so concurrent emissions across loops don't race the same file."""
+        from unittest.mock import patch
+
+        from portfolio.file_utils import load_json
+
+        main_state = tmp_path / "contract_state.json"
+        metals_state = tmp_path / "metals_contract_state.json"
+        # Default still points at "main". The loop_contract entrypoint
+        # should accept an explicit per-loop file.
+        monkeypatch.setattr(
+            "portfolio.loop_contract.CONTRACT_STATE_FILE", main_state,
+        )
+
+        v = Violation(
+            invariant="layer2_journal_activity",
+            severity="CRITICAL",
+            message="Layer 2 trigger fired 30m ago...",
+            details={"trigger_time": "2026-04-28T01:00:00+00:00"},
+        )
+        with patch("portfolio.message_store.send_or_store"):
+            _alert_violations(
+                [v], config={}, loop_name="metals",
+                state_file=metals_state,
+            )
+
+        # Cooldown landed in the metals file, not in the main file.
+        assert metals_state.exists()
+        m_state = load_json(metals_state, default={}) or {}
+        assert "telegram_alert_state" in m_state
+
+        if main_state.exists():
+            main_loaded = load_json(main_state, default={}) or {}
+            assert "telegram_alert_state" not in main_loaded, (
+                "Cooldown for the metals loop leaked into the main "
+                "loop's contract_state.json — concurrent loops will race"
+            )
+
     def test_send_failure_does_not_persist_cooldown(self, cooldown_state_file):
         """If send_or_store raises, we must NOT mark the alert as sent —
         otherwise a transient Telegram outage would suppress the next 4 h
