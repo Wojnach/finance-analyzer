@@ -271,6 +271,172 @@ class TestCascade:
         assert _get_best_result("UNKNOWN") is None
 
 
+# --- Bias detection (added 2026-04-25, extended per-ticker 2026-04-28) ---
+
+class TestPerTickerBiasDetection:
+    """The global _is_tier_biased misses per-ticker patterns. The audit on
+    2026-04-28 found Opus voting 100% BUY on BTC over 5 cycles while overall
+    Opus rate was 70% BUY (below the 75% global threshold). Per-ticker bias
+    detection catches that."""
+
+    def test_per_ticker_biased_buy_becomes_synthesized_hold(self, tmp_path):
+        """With Opus 100% BUY on BTC over recent journal entries, the cascade
+        should suppress Opus's BUY into a synthesized HOLD with
+        `_bias_suppressed: True` (rather than passing the biased BUY through)."""
+        from portfolio.signals import claude_fundamental as cf
+
+        # Journal: Opus 5x BUY on BTC, 5x SELL on ETH (overall balanced —
+        # global check would NOT flag Opus, but per-ticker BTC will).
+        log_path = tmp_path / "claude_fundamental_log.jsonl"
+        rows = []
+        for _ in range(5):
+            rows.append({"ts": "2026-04-28T10:00:00+00:00", "tier": "opus",
+                         "ticker": "BTC-USD", "action": "BUY",
+                         "is_abstention": False})
+        for _ in range(5):
+            rows.append({"ts": "2026-04-28T10:00:00+00:00", "tier": "opus",
+                         "ticker": "ETH-USD", "action": "SELL",
+                         "is_abstention": False})
+        log_path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+        with mock.patch.object(cf, "_CF_LOG", log_path):
+            with _lock:
+                _cache["opus"]["results"] = {
+                    "BTC-USD": {
+                        "action": "BUY", "confidence": 0.7,
+                        "sub_signals": {}, "indicators": {"_tier": "opus"},
+                    }
+                }
+                _cache["opus"]["ts"] = time.time()
+                _cache["sonnet"]["results"] = {
+                    "BTC-USD": {
+                        "action": "HOLD", "confidence": 0.0,
+                        "sub_signals": {}, "indicators": {"_tier": "sonnet"},
+                    }
+                }
+                _cache["sonnet"]["ts"] = time.time()
+
+            assert cf._is_tier_biased("opus") is False
+            assert cf._is_tier_biased_for_ticker("opus", "BTC-USD") is True
+
+            result = _get_best_result("BTC-USD")
+            # Opus's biased BUY suppressed -> HOLD; Opus is highest tier with
+            # any result so cascade fallback returns Opus's synthesized HOLD.
+            assert result["action"] == "HOLD"
+            assert result["confidence"] == 0.0
+            assert result["indicators"].get("_bias_suppressed") is True
+            assert result["indicators"].get("_original_action") == "BUY"
+            assert result["indicators"]["_tier"] == "opus"
+
+    def test_per_ticker_biased_buy_lets_lower_tier_non_hold_win(self, tmp_path):
+        """When Opus is per-ticker-biased on BTC (BUY) but Sonnet has a
+        non-biased SELL, the cascade should pick Sonnet's SELL — not Opus's
+        suppressed HOLD."""
+        from portfolio.signals import claude_fundamental as cf
+
+        log_path = tmp_path / "claude_fundamental_log.jsonl"
+        rows = []
+        # Opus per-ticker biased on BTC (5/5 BUY)
+        for _ in range(5):
+            rows.append({"ts": "2026-04-28T10:00:00+00:00", "tier": "opus",
+                         "ticker": "BTC-USD", "action": "BUY",
+                         "is_abstention": False})
+        # Sonnet on BTC: 3 BUY + 3 SELL (balanced, not biased)
+        for _ in range(3):
+            rows.append({"ts": "2026-04-28T10:00:00+00:00", "tier": "sonnet",
+                         "ticker": "BTC-USD", "action": "BUY",
+                         "is_abstention": False})
+        for _ in range(3):
+            rows.append({"ts": "2026-04-28T10:00:00+00:00", "tier": "sonnet",
+                         "ticker": "BTC-USD", "action": "SELL",
+                         "is_abstention": False})
+        log_path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+        with mock.patch.object(cf, "_CF_LOG", log_path):
+            with _lock:
+                _cache["opus"]["results"] = {
+                    "BTC-USD": {
+                        "action": "BUY", "confidence": 0.7,
+                        "sub_signals": {}, "indicators": {"_tier": "opus"},
+                    }
+                }
+                _cache["opus"]["ts"] = time.time()
+                _cache["sonnet"]["results"] = {
+                    "BTC-USD": {
+                        "action": "SELL", "confidence": 0.5,
+                        "sub_signals": {}, "indicators": {"_tier": "sonnet"},
+                    }
+                }
+                _cache["sonnet"]["ts"] = time.time()
+
+            result = _get_best_result("BTC-USD")
+            # Opus BUY suppressed; Sonnet's non-biased SELL wins.
+            assert result["action"] == "SELL"
+            assert result["indicators"]["_tier"] == "sonnet"
+
+    def test_per_ticker_below_min_samples_not_biased(self, tmp_path):
+        """4 BUY votes on BTC is below the per-ticker min-samples floor (5);
+        bias should not fire."""
+        from portfolio.signals import claude_fundamental as cf
+
+        log_path = tmp_path / "claude_fundamental_log.jsonl"
+        rows = [
+            {"ts": "2026-04-28T10:00:00+00:00", "tier": "opus",
+             "ticker": "BTC-USD", "action": "BUY", "is_abstention": False}
+            for _ in range(4)
+        ]
+        log_path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+        with mock.patch.object(cf, "_CF_LOG", log_path):
+            assert cf._is_tier_biased_for_ticker("opus", "BTC-USD") is False
+
+    def test_per_ticker_balanced_not_biased(self, tmp_path):
+        """3 BUY + 3 SELL on BTC: balanced, should not fire."""
+        from portfolio.signals import claude_fundamental as cf
+
+        log_path = tmp_path / "claude_fundamental_log.jsonl"
+        rows = []
+        for _ in range(3):
+            rows.append({"ts": "2026-04-28T10:00:00+00:00", "tier": "opus",
+                         "ticker": "BTC-USD", "action": "BUY",
+                         "is_abstention": False})
+        for _ in range(3):
+            rows.append({"ts": "2026-04-28T10:00:00+00:00", "tier": "opus",
+                         "ticker": "BTC-USD", "action": "SELL",
+                         "is_abstention": False})
+        log_path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+        with mock.patch.object(cf, "_CF_LOG", log_path):
+            assert cf._is_tier_biased_for_ticker("opus", "BTC-USD") is False
+
+    def test_per_ticker_check_ignores_other_tickers(self, tmp_path):
+        """Opus is 100% BUY on ETH but balanced on BTC — bias check for BTC
+        should not fire."""
+        from portfolio.signals import claude_fundamental as cf
+
+        log_path = tmp_path / "claude_fundamental_log.jsonl"
+        rows = []
+        for _ in range(10):
+            rows.append({"ts": "2026-04-28T10:00:00+00:00", "tier": "opus",
+                         "ticker": "ETH-USD", "action": "BUY",
+                         "is_abstention": False})
+        for _ in range(3):
+            rows.append({"ts": "2026-04-28T10:00:00+00:00", "tier": "opus",
+                         "ticker": "BTC-USD", "action": "BUY",
+                         "is_abstention": False})
+        for _ in range(3):
+            rows.append({"ts": "2026-04-28T10:00:00+00:00", "tier": "opus",
+                         "ticker": "BTC-USD", "action": "SELL",
+                         "is_abstention": False})
+        log_path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+        with mock.patch.object(cf, "_CF_LOG", log_path):
+            # ETH is 100% biased
+            assert cf._is_tier_biased_for_ticker("opus", "ETH-USD") is True
+            # BTC is balanced
+            assert cf._is_tier_biased_for_ticker("opus", "BTC-USD") is False
+
+
 # --- Main compute function ---
 
 class TestComputeSignal:

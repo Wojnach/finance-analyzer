@@ -54,11 +54,24 @@ _HORIZON_HOURS = {
 
 
 def _row_key(row: dict) -> tuple[str, str, str, str]:
+    """Compute the dedup key for a probability/outcome row.
+
+    2026-04-28: horizon is normalized via `or "1d"` to match the write
+    path at line 144 (`horizon = row.get("horizon") or "1d"`). The earlier
+    implementation used dict.get(default), which only returns the default
+    when the key is ABSENT — not when its value is explicitly null. Early
+    pre-ed13e608 production rows had `horizon: null`, so on the read side
+    their key was (..., None) but the write side stored (..., "1d"). The
+    next backfill run never matched, re-wrote the same outcome, and we
+    accumulated 91 duplicates of every null-horizon row over 7 days.
+    Empty-string fallback for the other fields stays — `signal`, `ticker`,
+    `ts` cannot be null in any historical row (verified across 15k rows).
+    """
     return (
         row.get("ts", ""),
-        row.get("signal", ""),
-        row.get("ticker", ""),
-        row.get("horizon", ""),
+        row.get("signal") or "",
+        row.get("ticker") or "",
+        row.get("horizon") or "1d",
     )
 
 
