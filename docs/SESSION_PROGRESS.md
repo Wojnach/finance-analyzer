@@ -1,3 +1,66 @@
+# Session Progress — Macro-event regime gating (2026-04-28 evening)
+
+**Session start:** 2026-04-28 ~15:30 CET
+**Status:** COMPLETE — Merged + Pushed (a6b47fbd)
+
+## User's framing
+
+After this morning's audit confirmed 19 of 21 flagged signal degradations
+were statistically REAL — not detector noise — the user asked: *"sounds
+like we need to identify when these events happen and adapt the config
+to this timeline and then change back when events subside?"* (`yes` →
+ultraplan).
+
+Existing infra had partial macro awareness (econ_calendar signal,
+accuracy_degradation FOMC blackout) but signal *weights* didn't adapt —
+only the alert layer did.
+
+## What shipped (merge a6b47fbd)
+
+**Detection:** `econ_dates.is_macro_window(now=None, lookback_hours=24,
+lookahead_hours=72)` — True if any high-impact event (FOMC/CPI/NFP)
+within ±window. Self-contained iteration over ECON_EVENTS for testability.
+
+**Suppression:**
+- `claude_fundamental` → force-HOLD (worst case: 30-120min LLM lag +
+  >75% BUY bias)
+- `sentiment`, `momentum_factors`, `structure` → weight × 0.5
+
+**Wiring (signal_engine.py):**
+- Force-HOLD mutates `votes` upstream of buy/sell/core_active counting
+- Leader picker / Top-N gate use macro-adjusted accuracy (`_leader_accuracy_key`,
+  `_topn_accuracy_key`)
+- Downweight multiplier in weight loop after horizon_mults
+- 5-min TTL cache + state-transition logging
+
+**Observability:** `agent_summary.macro_window.active`,
+`agent_context_t2.macro_window`, INFO log on transitions.
+
+**Tests:** 22 new. 229 affected tests green. 50 pre-existing failures unchanged.
+
+## Codex review (2 rounds, all P1/P2 addressed)
+
+- R1 P1: macro force-HOLD too late → stale post_persistence_voters
+- R1 P2: macro_window not propagated to Tier 2 whitelist
+- R1 P2: correlation leader picked by raw accuracy → overlay neutralized
+- R2 P1: core_active/buy/sell from pre-mutation votes
+- R2 P2: Top-N gate ranked by raw accuracy → overlay neutralized
+- R3: codex daily quota hit (same as yesterday)
+
+## v1 limitation
+
+Calendar covers US events only (FOMC/CPI/NFP/GDP). Past week's macro
+density (ECB, BoE, Mag 7) is NOT in `econ_dates.py` — detector would
+have classified Apr 21-28 as a normal week. Documented; expansion in plan roadmap.
+
+## Deferred
+
+- Backtest harness replaying signal_log against the gate
+- ECB/BoE/BoJ calendar expansion
+- Per-sector gating via existing `EVENT_SECTOR_MAP`
+
+---
+
 # Session Progress — Accuracy degradation root-cause + statistical rigor (2026-04-28 afternoon)
 
 **Session start:** 2026-04-28 ~13:00 CET
@@ -241,3 +304,71 @@ tests/test_accuracy_degradation_writer_safety.py
 ### 2026-04-28 12:39 UTC | main
 378897e8 docs(session): accuracy degradation root-cause + statistical rigor session summary
 docs/SESSION_PROGRESS.md
+
+### 2026-04-28 13:03 UTC | main
+26657e2f docs(accuracy): audit artifact + post-commit log entry
+docs/SESSION_PROGRESS.md
+docs/accuracy_audit_20260428.md
+
+### 2026-04-28 13:16 UTC | fix/accuracy-pipeline-followups-20260428
+1728447d fix(accuracy): C1 atomic-I/O + I2 explicit conditional + I5 audit output path
+.gitignore
+portfolio/accuracy_stats.py
+scripts/audit_accuracy_drops.py
+
+### 2026-04-28 13:17 UTC | main
+e439a992 plan: macro-event regime gating (auto-adapt signal weights, 2026-04-28)
+docs/PLAN.md
+
+### 2026-04-28 13:21 UTC | feat/dashboard-ops-board
+e75ffd60 docs: dashboard ops board design + implementation plan
+docs/superpowers/plans/2026-04-28-dashboard-ops-board.md
+docs/superpowers/specs/2026-04-28-dashboard-ops-board-design.md
+
+### 2026-04-28 13:23 UTC | fix/macro-window-gating-20260428
+47a6e41a fix(signals): macro-event regime overlay (auto-down-weight + force-HOLD)
+portfolio/econ_dates.py
+portfolio/reporting.py
+portfolio/signal_engine.py
+tests/test_macro_window_gating.py
+
+### 2026-04-28 13:24 UTC | feat/dashboard-ops-board
+9b5217a1 feat(dashboard): add OPS_THRESHOLDS + _status_color helper
+dashboard/app.py
+tests/test_dashboard.py
+
+### 2026-04-28 13:30 UTC | feat/dashboard-ops-board
+0b66d23d fix(dashboard): tidy _status_color imports + boundary tests
+dashboard/app.py
+tests/test_dashboard.py
+
+### 2026-04-28 13:34 UTC | fix/llm-outcome-dedup-null-horizon
+87e2569b fix(accuracy): null-horizon dedup + per-ticker bias detection
+portfolio/llm_outcome_backfill.py
+portfolio/signals/claude_fundamental.py
+tests/test_llm_outcome_backfill.py
+tests/test_signals_claude_fundamental.py
+
+### 2026-04-28 13:34 UTC | fix/macro-window-gating-20260428
+f75434c8 fix(signals): codex round 1 — voter quorum, Tier 2 propagation, leader pick
+portfolio/reporting.py
+portfolio/signal_engine.py
+
+### 2026-04-28 13:35 UTC | feat/dashboard-ops-board
+c72127ad feat(dashboard): _compute_metals_loop_status helper
+dashboard/app.py
+tests/test_dashboard.py
+
+### 2026-04-28 13:41 UTC | feat/dashboard-ops-board
+b46405b3 fix(dashboard): isinstance guard for non-dict JSONL entries
+dashboard/app.py
+tests/test_dashboard.py
+
+### 2026-04-28 13:42 UTC | fix/macro-window-gating-20260428
+7d92ceaa fix(signals): codex round 2 — macro mutations consistent across pipeline
+portfolio/signal_engine.py
+
+### 2026-04-28 13:44 UTC | feat/dashboard-ops-board
+8fd4902f feat(dashboard): _compute_llm_health_summary helper
+dashboard/app.py
+tests/test_dashboard.py
