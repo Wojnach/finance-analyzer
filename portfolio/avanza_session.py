@@ -751,11 +751,10 @@ def place_stop_loss(
     # must have sell_price > 0 — a zero sell_price would execute as a market
     # sell at whatever price exists, potentially the worst available price.
     _TRAILING_TYPES = {"FOLLOW_DOWNWARDS", "FOLLOW_UPWARDS"}
-    if trigger_type not in _TRAILING_TYPES and value_type == "MONETARY":
-        if sell_price <= 0:
-            raise ValueError(
-                f"Non-trailing stop-loss requires sell_price > 0, got {sell_price}"
-            )
+    if trigger_type not in _TRAILING_TYPES and value_type == "MONETARY" and sell_price <= 0:
+        raise ValueError(
+            f"Non-trailing stop-loss requires sell_price > 0, got {sell_price}"
+        )
 
     # 2026-04-17: stops below Avanza's 1000 SEK min-courtage threshold still
     # succeed at the API but carry outsized fees. Cascaded-stop callers

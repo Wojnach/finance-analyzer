@@ -1,168 +1,134 @@
-# Improvement Plan — Auto Session 2026-04-26
+# Improvement Plan — Auto-Improve Session 2026-04-28
 
-Based on deep exploration by 5 parallel agents (signal engine, portfolio/risk,
-infrastructure, metals/trading, test coverage) plus manual verification of all
-findings against actual code.
+## Summary
 
-Previous sessions fixed: BUG-219 through BUG-225, IC weighting, dynamic
-correlation (agreement rate), per-ticker gating, regime accuracy overrides.
-
-## Exploration Summary
-
-### Agent Finding Triage (5 agents, ~25 raw findings)
-
-**False Positives Rejected (12):**
-- CancelledError in data_collector.py — `as_completed` only yields completed futures before
-  timeout; `_fetch_one_timeframe` catches all exceptions (line 312). No code path to hit.
-- BUG-226 exit optimizer cost model — hold-to-close path already calls `_compute_pnl_sek()`
-  with costs consistently (line 618). Original report was wrong.
-- Loss escalation BUY reset — correct by design: only SELLs update streak counter (line 240).
-  BUYs don't represent completed trades.
-- Dynamic correlation dead code — already replaced with agreement rate (line 1012-1029).
-  Memory file was stale.
-- IC weighting missing — already implemented at signal_engine.py:1821-1836.
-- Per-ticker gating missing — implemented at signal_engine.py:3056-3078.
-- HOLD dilution of voter denominator — disabled signals vote HOLD, `active_voters = buy + sell`
-  correctly excludes them. No dilution.
-- TOCTOU race in file_utils.py lock file init — `open("ab")` is atomic on NTFS; the exists()
-  pre-check is redundant but harmless.
-- Subprocess child cleanup — mitigated by orphan reaper in subprocess_utils.py.
-- Monte Carlo path count off-by-one — intentional (documented).
-- Transaction count baseline stale — baseline captured after spawn (correct).
-- Hold-to-close double-cost-counting — both paths use `_compute_pnl_sek` consistently.
-
-### Confirmed Bugs
-
-- **BUG-227: Post-persistence voter gates use pre-filter count**
-  `signal_engine.py:2957, 3173, 2155` — The `min_voters` gate and dynamic
-  min_voters penalty both use `active_voters` computed BEFORE the persistence
-  filter (line 2948). After `_apply_persistence_filter()` at line 3143 reduces
-  voters (flipping unstable BUY/SELL back to HOLD), the gates should use
-  `post_persistence_voters` (line 3155). Currently, weak consensus can pass
-  the gate when actual post-filter voters are below the threshold.
-  - **Severity**: P1 — consensus credibility inflated, affects trade decisions
-  - **Impact**: When persistence filter reduces e.g. 6 voters to 3, the gate
-    still sees 6, letting a weak 3-voter consensus through that should be HOLD.
-
-- **BUG-228: fin_snipe_manager entry underlying recovery not retriable**
-  `fin_snipe_manager.py:340-357` — When `position_average_price` is 0 or missing
-  from API, the formula returns `current_underlying` as fallback (line 350).
-  This gets saved permanently as `entry_underlying`, meaning the position's
-  entry is set to the current price (0% P&L). Subsequent cycles use the saved
-  bad value (line 341-343) and never retry.
-  - **Severity**: P2 — exit optimizer gets wrong entry_underlying_usd
-  - **Fix**: Return 0.0 instead of current_underlying on failure, so the caller
-    knows the estimate is unknown and can retry next cycle.
-
-### Test Coverage Gaps
-
-- **portfolio_mgr.py** (180 LOC) — zero tests. Handles safety-critical financial
-  state: atomic load/save, backup rotation, corruption recovery, concurrent writes.
-- **trigger.py** (475 LOC) — zero tests. Decision gate for Layer 2 invocation:
-  sustained-check debounce, price threshold, ranging dampening, startup grace.
-
-### Documentation
-
-- SYSTEM_OVERVIEW.md signal counts and module counts need updating.
-- Several memory files are stale (dynamic_corr_bug, quant_research_priorities).
+Findings from 4 parallel exploration agents + direct investigation. Focused on
+real bugs, security issues, and lint violations. Excluding style-only changes,
+deferred architecture work (ARCH-18+), and E402 violations (intentional lazy imports).
 
 ---
 
-## Implementation Batches
+## 1. Bugs & Problems Found
 
-### Batch 1: BUG-227 Post-Persistence Voter Gate (2 files)
+### BUG-230 (P1): Dashboard CORS wildcard allows cross-origin data theft
+- **File**: `dashboard/app.py:44-49`
+- **Issue**: `Access-Control-Allow-Origin: *` with optional auth means any website
+  can fetch portfolio data via XHR if user has dashboard open in browser.
+- **Fix**: Restrict CORS to localhost origins. Add `Access-Control-Allow-Credentials: false`.
+- **Impact**: Security-only. No functional change to dashboard behavior.
 
-**Files**: `portfolio/signal_engine.py`, `tests/test_signal_engine_circuit_breaker.py`
+### BUG-231 (P2): Heartbeat uses non-atomic `.write_text()`
+- **File**: `portfolio/main.py:1098, 1147`
+- **Issue**: If process crashes mid-write, `heartbeat.txt` is corrupt. Next restart
+  may fail parsing the truncated ISO timestamp.
+- **Fix**: Use `atomic_write_text()` from file_utils.
+- **Impact**: Startup reliability. Low risk — heartbeat is just a timestamp string.
 
-1. In `generate_signal()`, replace the second min_voters gate (line 3173) to use
-   `post_persistence_voters` instead of `active_voters`:
-   ```python
-   # Apply core gate AND MIN_VOTERS gate to weighted consensus too
-   if core_active == 0 or post_persistence_voters < min_voters:
-       weighted_action = "HOLD"
-       weighted_conf = 0.0
-   ```
+### BUG-232 (P2): NaN fx_rate passes guard in portfolio_value()
+- **File**: `portfolio/portfolio_mgr.py:162`
+- **Issue**: Guard is `fx_rate <= 0` — NaN fails this check (`NaN <= 0` is False),
+  so NaN propagates into portfolio value calculation, returning NaN.
+- **Fix**: Add `math.isnan` check alongside the existing guard.
+- **Impact**: Portfolio value becomes NaN instead of cash-only fallback. Affects
+  reporting, risk management downstream.
 
-2. The first min_voters gate (line 2957) stays as-is — it runs BEFORE the
-   persistence filter and correctly uses the pre-filter count for the initial
-   consensus. Only the post-filter gates need the post-filter count.
+### BUG-233 (P3): `CANCEL_HOUR`/`CANCEL_MIN` undefined in fish_monitor_live.py
+- **File**: `scripts/fish_monitor_live.py:809`
+- **Issue**: `NameError` at runtime if straddle mode is entered.
+- **Fix**: Define constants (likely 21, 55 based on Avanza warrant hours).
+- **Impact**: Script is deprecated (fish engine disabled 2026-04-17), but still crashes if run.
 
-3. In `apply_confidence_penalties()` (line 2155), read `_voters_post_filter`
-   instead of `_voters` for the dynamic min_voters check:
-   ```python
-   active_voters = extra_info.get("_voters_post_filter",
-                                   extra_info.get("_voters", 0))
-   ```
-   The fallback to `_voters` maintains backward compatibility with cached
-   extra_info from before BUG-224 was fixed.
+### BUG-234 (P3): Unused variable `recent_horizon` in signal_engine.py
+- **File**: `portfolio/signal_engine.py:2919`
+- **Issue**: Computed but never used (actual call uses `base_hz` on line 2922).
+- **Fix**: Remove the variable.
+- **Impact**: None — dead assignment.
 
-4. Write tests:
-   - `test_weighted_consensus_uses_post_filter_voters`: mock a scenario where
-     pre-filter voters = 5 but post-filter = 2. Verify weighted consensus is
-     forced to HOLD.
-   - `test_confidence_penalty_uses_post_filter_voters`: verify dynamic_min_voters
-     penalty reads post-filter count.
-
-### Batch 2: BUG-228 Entry Underlying Recovery (2 files)
-
-**Files**: `portfolio/fin_snipe_manager.py`, `tests/test_fin_snipe_manager.py`
-
-1. Change `_estimate_entry_underlying()` fallback from `current_underlying` to
-   `0.0` when formula inputs are invalid (line 350).
-2. Add a warning log when falling back to 0.0.
-3. In the caller that saves the result, skip saving if `entry_underlying == 0.0`.
-4. Write tests:
-   - `test_entry_underlying_returns_zero_on_bad_inputs`: verify 0.0 returned
-     when entry_price=0 or leverage=0.
-   - `test_entry_underlying_saved_value_used`: verify saved value takes priority.
-
-### Batch 3: Test Coverage — portfolio_mgr.py (1 new file)
-
-**Files**: `tests/test_portfolio_mgr.py` (new)
-
-Tests for the most critical paths:
-1. `test_load_state_returns_defaults_for_missing_file`
-2. `test_save_load_roundtrip`
-3. `test_backup_rotation_creates_backups`
-4. `test_corruption_recovery_from_backup`
-5. `test_update_state_atomic_read_modify_write`
-6. `test_validated_state_fills_missing_keys`
-
-### Batch 4: Test Coverage — trigger.py (1 new file)
-
-**Files**: `tests/test_trigger.py` (new)
-
-Tests for sustained-check debounce and gate logic:
-1. `test_update_sustained_increments_on_same_value`
-2. `test_update_sustained_resets_on_changed_value`
-3. `test_update_sustained_count_gate_fires_at_threshold`
-4. `test_update_sustained_duration_gate_fires_at_threshold`
-5. `test_ranging_dampening_blocks_low_confidence`
-
-### Batch 5: Documentation
-
-**Files**: `docs/SYSTEM_OVERVIEW.md`, `CLAUDE.md`
-
-1. Update signal counts to reflect current state (51 modules, 33 active,
-   18 disabled — verify against tickers.py before writing).
-2. Update module line counts where they've drifted.
+### BUG-235 (P3): Dashboard 500 errors expose internal exception messages
+- **File**: `dashboard/app.py` (multiple endpoints)
+- **Issue**: `return jsonify({"error": str(e)}), 500` leaks file paths and internals.
+- **Fix**: Log full traceback server-side, return generic error message to client.
+- **Impact**: Information disclosure. Low risk on LAN-only dashboard.
 
 ---
 
-## Backlog (deferred — not this session)
+## 2. Lint Violations (Ruff)
 
-- **Regime-conditioned per-signal weights**: Replace static REGIME_WEIGHTS dict
-  with data-driven multipliers from regime_accuracy. Requires validation study.
-- **Session expiry pre-check**: Add session time check before order POST.
-  Requires Avanza session architecture change.
-- **Buying power TOCTOU**: Buying power read unguarded by order lock. Requires
-  caller restructuring.
-- **Hold-to-close reporting**: pnl_sek uses median, ev_sek uses quintile mean.
-  Semantically defensible but confusing. Low priority.
-- **outcome_tracker JSONL→SQLite**: Performance optimization.
+### Batch A: Auto-fixable (22 violations)
+- 10 F401 unused imports (portfolio/)
+- 8 I001 unsorted imports (portfolio/)
+- 4 UP045 non-PEP604 Optional annotations (portfolio/)
 
-## Dependency Ordering
+### Batch B: Unused variables (9 violations)
+- `portfolio/signal_engine.py:2919` — `recent_horizon`
+- `portfolio/signals/complexity_gap_regime.py:108` — `n_assets`
+- `portfolio/signals/crypto_evrp.py:224` — `recent_rv`
+- `portfolio/signals/mahalanobis_turbulence.py:125` — `n_assets`
+- `data/metals_risk.py:835,836,846,849` — 4 computed-but-unused vars
+- `data/test_metals_swing_trader.py:61` — `api_type`
 
-Batch 1 → Batch 2 → Batch 3 → Batch 4 → Batch 5
+### Batch C: Unused imports in data/ and signals/ (12 violations)
+- `data/metals_swing_trader.py:13` — `json`
+- `portfolio/signals/hash_ribbons.py:31` — `majority_vote`
+- `portfolio/signals/xtrend_equity_spillover.py:30` — `sma`, `ema`, `rsi`
+- `portfolio/mstr_loop/*.py` — 6 unused imports across 4 files
 
-No cross-dependencies. Sequential ordering keeps commits clean.
+### Batch D: SIM simplifications (11 violations in portfolio/)
+- 4 SIM102 collapsible-if
+- 2 SIM103 needless-bool
+- 5 SIM115 context-manager for file open
+
+### Batch E: Scripts cleanup (key items only)
+- 12 E722 bare-except → `except Exception:`
+- 3 F821 undefined names (CANCEL_HOUR/CANCEL_MIN in fish_monitor_live.py)
+- 9 F401 unused imports
+- 5 F541 f-strings without placeholders
+
+---
+
+## 3. Architecture Improvements
+
+None proposed this session. Previous sessions addressed the major items (ARCH-10
+through ARCH-27). Remaining ARCH items (18: metals monolith, 19: CI/CD, 20: mypy,
+21: autonomous.py decomposition, 22: agent_invocation class) are all deferred and
+require larger scope than a single auto-improve session.
+
+---
+
+## 4. Refactoring TODOs
+
+### REF-50: Remove dead fish_engine references in metals_loop.py
+- Lines 703-704 reference `_fish_engine` and `_reconcile_fish_engine_position`
+- Engine permanently deprecated 2026-04-17. Safe to remove.
+- **Deferred**: Touching metals_loop.py (7667 lines) is high-risk in an auto session.
+
+---
+
+## 5. Implementation Batches
+
+### Batch 1: Security & Safety Fixes (3 files)
+1. `dashboard/app.py` — CORS restriction (BUG-230), error message sanitization (BUG-235)
+2. `portfolio/main.py` — Atomic heartbeat writes (BUG-231)
+3. `portfolio/portfolio_mgr.py` — NaN fx_rate guard (BUG-232)
+
+### Batch 2: Ruff auto-fix + unused variables (portfolio/, data/)
+1. Run `ruff check --fix` for F401, I001, UP045 across portfolio/
+2. Manually fix F841 unused variables (9 files)
+3. Fix BUG-233 in scripts/fish_monitor_live.py
+
+### Batch 3: Scripts & SIM cleanup
+1. Bare-except fixes (E722) in scripts/
+2. Auto-fix F401, F541, I001 in scripts/
+3. SIM simplifications in portfolio/ (collapsible-if, needless-bool)
+
+---
+
+## 6. Risk Assessment
+
+- **Batch 1**: Low risk. Heartbeat and NaN guard are defensive additions. CORS
+  change is tightening, not loosening.
+- **Batch 2**: Very low risk. Removing dead code/imports. No behavioral changes.
+- **Batch 3**: Low risk. Style fixes in scripts (not production loop code).
+
+All batches are additive/tightening. No behavioral changes to trading logic,
+signal computation, or order execution.

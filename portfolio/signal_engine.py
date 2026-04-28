@@ -2916,7 +2916,6 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     _recent_acc_data = {}
     try:
         from portfolio.accuracy_stats import get_or_compute_recent_accuracy
-        recent_horizon = "3h_recent" if horizon in ("3h", "4h") else "1d_recent"
         # get_or_compute_recent_accuracy expects the base horizon, not the cache key
         base_hz = "3h" if horizon in ("3h", "4h") else "1d"
         _recent_acc_data = get_or_compute_recent_accuracy(base_hz) or {}

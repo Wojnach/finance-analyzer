@@ -11,10 +11,8 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import logging
-from typing import Any
 
 from portfolio.file_utils import load_json
-
 from portfolio.mstr_loop import config
 
 logger = logging.getLogger(__name__)
@@ -69,9 +67,7 @@ class MstrBundle:
             return False
         # Staler than 5 minutes means the loop or signal engine is lagging —
         # better to skip a cycle than act on potentially wrong data.
-        if self.source_stale_seconds > 300:
-            return False
-        return True
+        return self.source_stale_seconds <= 300
 
 
 def _parse_vote_detail(vote_detail: str) -> dict[str, str]:

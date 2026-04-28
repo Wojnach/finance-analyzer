@@ -16,7 +16,6 @@ the loop orchestrator.
 
 from __future__ import annotations
 
-import datetime
 import logging
 
 from portfolio.mstr_loop import config

@@ -24,7 +24,6 @@ import logging
 from typing import Any
 
 from portfolio.file_utils import atomic_append_jsonl
-
 from portfolio.mstr_loop import config
 from portfolio.mstr_loop.data_provider import MstrBundle
 from portfolio.mstr_loop.state import BotState, Position
@@ -326,7 +325,6 @@ def _update_scorecard_file() -> None:
     into the scorecard module as a library. Non-fatal on any failure so a
     trade is never blocked by a scorecard write.
     """
-    import sys
     import pathlib
     # Dynamically import the scorecard script as a module (no package).
     # The script was written self-contained on purpose.
@@ -386,9 +384,8 @@ def update_trail_state(state: BotState, bundle: MstrBundle) -> None:
 
         # Trail activation — uses same threshold for both strategies (config
         # knobs for momentum_rider and mean_reversion happen to match).
-        if not pos.trail_active:
-            if pnl_pct >= config.MOMENTUM_RIDER_TRAIL_ACTIVATION_PCT:
-                pos.trail_active = True
+        if not pos.trail_active and pnl_pct >= config.MOMENTUM_RIDER_TRAIL_ACTIVATION_PCT:
+            pos.trail_active = True
 
         # Partial-exit ladder — sell tranches as price crosses thresholds.
         # Round pnl to 4 decimals so float-precision noise (e.g. 1.99999...)

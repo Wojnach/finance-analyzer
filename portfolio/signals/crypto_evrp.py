@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -63,7 +62,7 @@ _TICKER_TO_CURRENCY = {
 }
 
 
-def _fetch_dvol_latest(currency: str = "BTC") -> Optional[float]:
+def _fetch_dvol_latest(currency: str = "BTC") -> float | None:
     """Fetch latest DVOL value from Deribit public API.
 
     Returns DVOL as annualized implied vol percentage, or None on failure.
@@ -113,7 +112,7 @@ def _fetch_dvol_latest(currency: str = "BTC") -> Optional[float]:
         return None
 
 
-def _fetch_dvol_history(currency: str = "BTC", days: int = 120) -> Optional[pd.Series]:
+def _fetch_dvol_history(currency: str = "BTC", days: int = 120) -> pd.Series | None:
     """Fetch DVOL history for percentile/momentum computation.
 
     Returns pd.Series indexed by date with DVOL values, or None on failure.
@@ -202,7 +201,7 @@ def _evrp_level_signal(evrp: float) -> str:
     return "HOLD"
 
 
-def _evrp_percentile_signal(dvol_history: Optional[pd.Series],
+def _evrp_percentile_signal(dvol_history: pd.Series | None,
                              current_evrp: float,
                              rv_series: pd.Series) -> tuple[str, float]:
     """Sub-signal 2: eVRP percentile rank in recent history.
@@ -221,7 +220,6 @@ def _evrp_percentile_signal(dvol_history: Optional[pd.Series],
         return "HOLD", 50.0
 
     # Use the last PCTILE_WINDOW RV values to compute historical eVRP
-    recent_rv = rv_hist.iloc[-PCTILE_WINDOW:]
     recent_dvol = dvol_history.iloc[-PCTILE_WINDOW:] if len(dvol_history) >= PCTILE_WINDOW else dvol_history
 
     # If lengths don't align, use simple percentile of current eVRP vs recent DVOL-RV
@@ -244,7 +242,7 @@ def _evrp_percentile_signal(dvol_history: Optional[pd.Series],
     return "HOLD", pctile
 
 
-def _evrp_momentum_signal(dvol_history: Optional[pd.Series]) -> tuple[str, float]:
+def _evrp_momentum_signal(dvol_history: pd.Series | None) -> tuple[str, float]:
     """Sub-signal 3: eVRP 5-day momentum (direction of DVOL change).
 
     Rising DVOL = market pricing in more risk = bearish.

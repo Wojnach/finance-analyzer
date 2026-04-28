@@ -16,7 +16,6 @@ import time
 from typing import Any
 
 from portfolio.file_utils import atomic_append_jsonl
-
 from portfolio.mstr_loop import config, execution, risk, session, state, telegram_report
 from portfolio.mstr_loop.data_provider import build_bundle
 from portfolio.mstr_loop.strategies import load_enabled_strategies

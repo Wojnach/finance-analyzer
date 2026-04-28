@@ -10,7 +10,6 @@ Usage from metals_loop.py:
 """
 
 import datetime
-import json
 import logging
 import os
 import time
@@ -70,12 +69,15 @@ def _has_ancestor_emitter(lg: logging.Logger, target_level: int) -> bool:
 from metals_swing_config import (
     ACCOUNT_ID,
     BUY_COOLDOWN_MINUTES,
+    CONFIDENCE_HISTORY_MAX,
     DECISIONS_LOG,
     DRY_RUN,
     EOD_EXIT_MINUTES_BEFORE,
     HARD_STOP_UNDERLYING_PCT,
     INITIAL_BUDGET_SEK,
     LOSS_ESCALATION,
+    MACD_DECAY_MIN_RATIO,
+    MACD_DECAY_PEAK_LOOKBACK,
     MACD_IMPROVING_CHECKS,
     MAX_CONCURRENT,
     MAX_HOLD_HOURS,
@@ -87,9 +89,6 @@ from metals_swing_config import (
     MIN_BUY_VOTERS,
     MIN_SPREAD_PCT,
     MIN_TRADE_SEK,
-    CONFIDENCE_HISTORY_MAX,
-    MACD_DECAY_MIN_RATIO,
-    MACD_DECAY_PEAK_LOOKBACK,
     MOMENTUM_CANDIDATE_TTL_SEC,
     MOMENTUM_ENTRY_ENABLED,
     MOMENTUM_EXIT_MIN_HOLD_SECONDS,
@@ -97,15 +96,15 @@ from metals_swing_config import (
     MOMENTUM_MIN_BUY_CONFIDENCE,
     MOMENTUM_MIN_BUY_VOTERS,
     MOMENTUM_STATE_FILE,
+    POSITION_SIZE_PCT,
+    REGIME_CONFIRM_CHECKS,
     RSI_DIP_BELOW_LEVEL,
     RSI_DIP_LOOKBACK_CHECKS,
+    RSI_ENTRY_HIGH,
+    RSI_ENTRY_LOW,
     RSI_HISTORY_MAX,
     RSI_SLOPE_LOOKBACK_CHECKS,
     SIGNAL_PERSISTENCE_CHECKS,
-    POSITION_SIZE_PCT,
-    REGIME_CONFIRM_CHECKS,
-    RSI_ENTRY_HIGH,
-    RSI_ENTRY_LOW,
     SIGNAL_REVERSAL_EXIT,
     STATE_FILE,
     STOP_LOSS_UNDERLYING_PCT,
@@ -1655,11 +1654,9 @@ class SwingTrader:
         if not all(a == action and r == regime for (_t, a, r) in unpacked):
             return False
         distinct_ts = {t for (t, _a, _r) in unpacked if t is not None}
-        if distinct_ts and len(distinct_ts) < REGIME_CONFIRM_CHECKS:
-            # All entries came from < REGIME_CONFIRM_CHECKS distinct Layer-1
-            # revisions — replayed reads of the same stale snapshot.
-            return False
-        return True
+        # All entries came from < REGIME_CONFIRM_CHECKS distinct Layer-1
+        # revisions — replayed reads of the same stale snapshot.
+        return not (distinct_ts and len(distinct_ts) < REGIME_CONFIRM_CHECKS)
 
     # -------------------------------------------------------------------
     # Momentum-entry integration (2026-04-17)

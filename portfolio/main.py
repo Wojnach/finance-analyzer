@@ -28,7 +28,7 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
-from portfolio.file_utils import atomic_write_json, load_json
+from portfolio.file_utils import atomic_write_json, atomic_write_text, load_json
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
@@ -1095,7 +1095,7 @@ def loop(interval=None):
         _run_post_cycle(config, report=initial_report)
         _reset_crash_counter()
         try:
-            (DATA_DIR / "heartbeat.txt").write_text(datetime.now(UTC).isoformat())
+            atomic_write_text(DATA_DIR / "heartbeat.txt", datetime.now(UTC).isoformat())
             if initial_report is not None:
                 initial_report.heartbeat_updated = True
         except Exception as e:
@@ -1144,7 +1144,7 @@ def loop(interval=None):
             report = None
         last_cycle_started = cycle_started
         try:
-            (DATA_DIR / "heartbeat.txt").write_text(datetime.now(UTC).isoformat())
+            atomic_write_text(DATA_DIR / "heartbeat.txt", datetime.now(UTC).isoformat())
             if report is not None:
                 report.heartbeat_updated = True
         except Exception as e:

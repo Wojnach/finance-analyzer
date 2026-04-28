@@ -16,7 +16,13 @@ Usage:
 Start via Windows for autonomous operation:
   powershell Start-Process python -ArgumentList '-u','scripts/fish_straddle.py' -WindowStyle Hidden
 """
-import time, json, requests, datetime, sys, os, traceback
+import datetime
+import os
+import sys
+import time
+import traceback
+
+import requests
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -40,33 +46,33 @@ def log_msg(msg):
     line = f'[{ts}] {msg}'
     try:
         print(line, flush=True)
-    except:
+    except Exception:
         pass
     try:
         with open(LOG, 'a') as f:
             f.write(line + '\n')
-    except:
+    except Exception:
         pass
 
 
 def fetch_price():
     try:
         return float(requests.get(f'{FAPI}?symbol=XAGUSDT', timeout=5).json()['price'])
-    except:
+    except Exception:
         return None
 
 
 def get_sma20():
     """Get SMA20 from 15-min bars as mean reversion target."""
     try:
-        import yfinance as yf
         import numpy as np
+        import yfinance as yf
         si = yf.download('SI=F', period='3d', interval='15m', progress=False)
         if si.empty:
             return None
         close = si['Close'].values.flatten()
         return float(np.mean(close[-20:]))
-    except:
+    except Exception:
         return None
 
 
@@ -106,7 +112,7 @@ def check_order_filled(order_id):
             return True  # not in open orders = filled or cancelled
         # If orders is a string/error, check positions instead
         return None
-    except:
+    except Exception:
         return None
 
 
@@ -121,7 +127,7 @@ def check_position(ob_id):
                     'value': p.get('value', 0),
                     'profit': p.get('profit', 0),
                 }
-    except:
+    except Exception:
         pass
     return None
 
@@ -129,7 +135,7 @@ def check_position(ob_id):
 def sell_position(ob_id, volume, reason):
     """Sell a position at market bid."""
     try:
-        from portfolio.avanza_session import place_sell_order, get_quote
+        from portfolio.avanza_session import get_quote, place_sell_order
         q = get_quote(ob_id)
         bid = float(q.get('buy', 0))
         if bid > 0:
@@ -161,7 +167,7 @@ def main():
     floor_price = price * (1 - floor_pct / 100)
     ceil_price = price * (1 + ceil_pct / 100)
 
-    log_msg(f'=== STRADDLE FISHING ===')
+    log_msg('=== STRADDLE FISHING ===')
     log_msg(f'Silver: ${price:.2f}')
     log_msg(f'FLOOR: ${floor_price:.2f} (-{floor_pct}%) -> buy BULL X5')
     log_msg(f'CEIL:  ${ceil_price:.2f} (+{ceil_pct}%) -> buy BEAR X5')
@@ -170,7 +176,7 @@ def main():
 
     # Get cert prices and compute volumes
     try:
-        from portfolio.avanza_session import get_quote, get_buying_power
+        from portfolio.avanza_session import get_buying_power, get_quote
         # 2026-04-09: get_buying_power() now returns dict|None after Fleet v2
         # Agent A's multi-shape fix (commit 6a20c7d). Was always dict before.
         # Fail loud on None instead of silently crashing in the except below —
@@ -212,7 +218,7 @@ def main():
     # But this is imprecise. Better approach: just monitor price and buy at market
     # when underlying hits our level.
 
-    log_msg(f'Monitoring for level hits (market buy when triggered)...')
+    log_msg('Monitoring for level hits (market buy when triggered)...')
 
     bull_filled = False
     bear_filled = False
@@ -294,7 +300,8 @@ def main():
                     # FLOOR HIT — buy BULL at market
                     log_msg(f'!!! FLOOR HIT ${p:.2f} <= ${floor_price:.2f} — buying BULL')
                     try:
-                        from portfolio.avanza_session import place_buy_order, get_quote as gq
+                        from portfolio.avanza_session import get_quote as gq
+                        from portfolio.avanza_session import place_buy_order
                         q = gq(BULL_OB)
                         ask = float(q.get('sell', 0))
                         if ask > 0:
@@ -309,7 +316,8 @@ def main():
                     # CEILING HIT — buy BEAR at market
                     log_msg(f'!!! CEILING HIT ${p:.2f} >= ${ceil_price:.2f} — buying BEAR')
                     try:
-                        from portfolio.avanza_session import place_buy_order, get_quote as gq
+                        from portfolio.avanza_session import get_quote as gq
+                        from portfolio.avanza_session import place_buy_order
                         q = gq(BEAR_OB)
                         ask = float(q.get('sell', 0))
                         if ask > 0:
