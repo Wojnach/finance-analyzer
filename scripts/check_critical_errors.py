@@ -96,6 +96,14 @@ def format_entry(entry: dict) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Force UTF-8 stdout: violation messages contain `→` (U+2192) which Windows'
+    # default cp1252 codec can't encode. Without this, the script crashes mid-print
+    # and the user sees only the count line, not the entries — meaning unresolved
+    # accuracy_degradation rows were silently invisible to the STARTUP CHECK
+    # documented in CLAUDE.md (caught 2026-04-28 during contract-alert diagnosis).
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--journal", type=Path, default=DEFAULT_JOURNAL,
                         help="Path to critical_errors.jsonl")
