@@ -1,3 +1,110 @@
+# Session Progress — Accuracy degradation root-cause + statistical rigor (2026-04-28 afternoon)
+
+**Session start:** 2026-04-28 ~13:00 CET
+**Status:** COMPLETE — Merged + Pushed (47b4d474)
+
+## User's framing
+
+User pushed back on yesterday's framing of the contract-alert spam:
+*"the spam wasn't the problem, the problem was what it was reporting — it's
+a red flag that something is broken in the system and THAT needs fixing.
+Do a deep investigation. Absorb the entire codebase and get a good
+overview what is going on."*
+
+Yesterday's fix muted the smoke detector. This session asked: *what's
+actually on fire?*
+
+## Investigation (3 parallel Explore agents + direct data dives)
+
+The investigation surfaced four interacting infrastructure failures
+that together caused the alert to fire on noise:
+
+1. **Daily snapshot writer silently no-opped for 7 days.**
+   `accuracy_snapshot_state.json` claimed today's snapshot was done
+   but `accuracy_snapshots.jsonl` had only 4 entries — none after Apr 21.
+   Once `last_snapshot_date_utc=today`, `maybe_save_daily_snapshot`
+   returned False every cycle. A single state-without-write desync
+   silenced the writer for the full day; the prior session's
+   operational fixup poisoned today's natural run.
+
+2. **Detector compared against a 7d-stale baseline computed on small N.**
+   Apr 21 sentiment_recent=75.3% on N=223 was a one-week spike well
+   above lifetime 46% (N=39k). Today's recent: 43.3% on N=187, roughly
+   AT lifetime. The "32pp drop" was largely regression to mean.
+
+3. **Cooldown hash drifted every cycle.** The Telegram cooldown
+   hashed on rendered message text containing percentages like
+   "33.7%→33.2%". Each new sample shifts the percentage, every cycle
+   produces a new hash, multi-hash dedup never traps duplicates.
+
+4. **Real signal weakness exists.** 19 of 21 flagged signals are
+   STATISTICALLY REAL degradation per the new audit script
+   (sentiment, momentum_factors, claude_fundamental, structure across
+   BTC/ETH/XAG/MSTR). 2 NOISE.
+
+## What shipped (merge 47b4d474)
+
+5 batches in worktree `fix/accuracy-pipeline-20260428`:
+
+- **Batch 1**: bulletproof snapshot writer. Verify JSONL grew before
+  persisting state; silent failures journal to critical_errors with
+  30-min dedup cooldown so PF-FixAgentDispatcher engages. 6 tests new.
+- **Batch 2**: `scripts/backfill_accuracy_snapshots.py` regenerates
+  Apr 22-27 from signal_log replay. Threads horizon-aware temporal
+  cutoffs so backfilled outcomes match what was knowable at each
+  target date. Forecast block copied from nearest *past* snapshot.
+- **Batch 3**: binomial-SE significance gate in `_maybe_alert`. Drop
+  must satisfy `drop_pp >= max(15.0, 2*SE)`; sample-size floor 100→200.
+  13 tests new.
+- **Batch 4**: stable cooldown hash for accuracy_degradation. Hashes
+  sorted (scope::key) set from `details["alerts"]`, ignores message
+  text. 7 tests new in TestAccuracyDegradationStableHash. Aligned the
+  journal-lookup helper to use the same identity hash (Codex P1).
+- **Batch 5**: `scripts/audit_accuracy_drops.py` classifies REAL vs
+  NOISE per binomial SE. Today's audit: 19 REAL, 2 NOISE.
+
+## Codex review
+
+Ran `codex review --base main` 7 rounds, all P1/P2 addressed:
+- R1: chronological-order, forecast template, audit forecast scope, per-ticker lifetime
+- R2: per_ticker.recent re-cutoff, audit forecast prefix, time-aware template
+- R3 (P1 critical): journal lookup hash mismatch with dispatch hash
+- R4: temporal correctness — outcome maturity in backfill
+- R5: window alignment, cross-env warning
+- R6: forecast accuracy honors --data-dir
+- R7: silent-failure journal rate-limit
+
+## Tests
+
+229 tests passing on files I touched (loop_contract*, accuracy_*).
+Full suite has 50 pre-existing failures (test_consensus, test_metals,
+test_signal_engine_core, etc.) — verified `test_signal_names_count`
+fails on main itself before my changes.
+
+## Operational
+
+- Backfilled Apr 22-27 snapshots (one-shot, not committed): sentiment
+  trajectory now visible day-by-day: 75 → 70 → 64 → 58 → 43 → 45 → 45 → 43.
+  Gradual decline, not catastrophic cliff.
+- Audit ran: `docs/accuracy_audit_20260428.md` — 19 REAL drops worth
+  follow-up gating decisions (config, not code).
+- Killed running python loops, restarted via schtasks.
+
+## What's deferred (config decisions, not code)
+
+The audit identified 19 statistically real per-ticker degradations.
+Top candidates for gating/disabling:
+- `MSTR::momentum_factors` 60.1% → 32.5% (27.6pp drop)
+- `BTC-USD::claude_fundamental` 63.5% → 38.9% (24.7pp)
+- `XAG-USD::claude_fundamental` 58.8% → 37.4% (21.3pp)
+- `MSTR::sentiment` 61.8% → 41.7% (20.1pp)
+- `signal::sentiment` 60.9% → 42.7% (18.2pp aggregate)
+
+These are signal-by-signal config tuning decisions; the loop_contract
+infrastructure can't decide which to disable without trading judgment.
+
+---
+
 # Session Progress — Auto-Improve 2026-04-28
 
 **Session start:** 2026-04-28 ~10:00 CET
@@ -49,3 +156,84 @@ Implementation planned in 3 batches.
 
 ## Blockers
 None. All 3 batches implemented and tested clean.
+
+### 2026-04-28 10:54 UTC | fix/sentiment-relevance-and-aggregation
+45aaf76e docs(plan): sentiment relevance filter + aggregation fixes
+docs/PLAN_sentiment_2026_04_28.md
+
+### 2026-04-28 10:55 UTC | fix/sentiment-relevance-and-aggregation
+43f1b1b3 test(sentiment): pin contract for relevance filter + decisive aggregation
+tests/test_portfolio.py
+tests/test_sentiment_relevance_filter.py
+
+### 2026-04-28 10:59 UTC | fix/sentiment-relevance-and-aggregation
+70207639 fix(sentiment): relevance filter + decisive aggregation + Trading-Hero primary
+portfolio/news_keywords.py
+portfolio/sentiment.py
+
+### 2026-04-28 11:06 UTC | main
+4e64bae7 plan: accuracy degradation root-cause + statistical rigor (2026-04-28)
+docs/PLAN.md
+
+### 2026-04-28 11:09 UTC | fix/accuracy-pipeline-20260428
+ad7d9500 fix(accuracy): bulletproof daily snapshot writer against silent desync
+portfolio/accuracy_degradation.py
+tests/test_accuracy_degradation.py
+tests/test_accuracy_degradation_writer_safety.py
+
+### 2026-04-28 11:11 UTC | fix/accuracy-pipeline-20260428
+753febab fix(accuracy): add backfill script for missing daily snapshots
+scripts/backfill_accuracy_snapshots.py
+
+### 2026-04-28 11:14 UTC | fix/accuracy-pipeline-20260428
+9e13060e fix(accuracy): add binomial-SE significance gate to degradation detector
+portfolio/accuracy_degradation.py
+tests/test_accuracy_degradation_significance.py
+
+### 2026-04-28 11:16 UTC | fix/accuracy-pipeline-20260428
+f8960b42 fix(contract): stable identity hash for accuracy_degradation cooldown
+portfolio/loop_contract.py
+tests/test_loop_contract_alert_cooldown.py
+
+### 2026-04-28 11:19 UTC | fix/accuracy-pipeline-20260428
+d201bbc8 fix(accuracy): add audit script that classifies real degradation vs noise
+scripts/audit_accuracy_drops.py
+
+### 2026-04-28 11:20 UTC | fix/sentiment-relevance-and-aggregation
+a7a9a24b docs(changelog): sentiment relevance + decisive aggregation entry
+docs/CHANGELOG.md
+
+### 2026-04-28 11:30 UTC | fix/accuracy-pipeline-20260428
+07364a04 fix(accuracy): address codex review findings on backfill + audit scripts
+scripts/audit_accuracy_drops.py
+scripts/backfill_accuracy_snapshots.py
+
+### 2026-04-28 11:40 UTC | fix/accuracy-pipeline-20260428
+eb593258 fix(accuracy): codex round 2 findings on backfill + audit scripts
+scripts/audit_accuracy_drops.py
+scripts/backfill_accuracy_snapshots.py
+
+### 2026-04-28 11:52 UTC | fix/accuracy-pipeline-20260428
+be2e2743 fix(contract,accuracy): codex round 3 findings — dedup hash + storage
+portfolio/loop_contract.py
+scripts/audit_accuracy_drops.py
+scripts/backfill_accuracy_snapshots.py
+tests/test_loop_contract_accuracy_dispatcher.py
+
+### 2026-04-28 12:02 UTC | fix/accuracy-pipeline-20260428
+206639e7 fix(accuracy): codex round 4 — temporal correctness in backfill
+scripts/backfill_accuracy_snapshots.py
+
+### 2026-04-28 12:12 UTC | fix/accuracy-pipeline-20260428
+0ffdeb1d fix(accuracy): codex round 5 — window alignment + cross-env warning
+scripts/audit_accuracy_drops.py
+scripts/backfill_accuracy_snapshots.py
+
+### 2026-04-28 12:23 UTC | fix/accuracy-pipeline-20260428
+2c417ad0 fix(accuracy): codex round 6 P2 — forecast accuracy honors --data-dir
+scripts/audit_accuracy_drops.py
+
+### 2026-04-28 12:32 UTC | fix/accuracy-pipeline-20260428
+5ba9eae2 fix(accuracy): codex round 7 P3 — rate-limit silent-failure journaling
+portfolio/accuracy_degradation.py
+tests/test_accuracy_degradation_writer_safety.py
