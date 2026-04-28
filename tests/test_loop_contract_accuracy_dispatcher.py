@@ -421,3 +421,87 @@ class TestVerifyAndActDispatchAfterTracker:
             f"never sees the promoted alert. Got: {rows}"
         )
         assert rows[0]["category"] == "accuracy_degradation"
+
+    def test_alert_set_dedup_with_drifting_percentages(self, critical_errors_paths):
+        """Codex round 3 P1 (2026-04-28): when ``details['alerts']`` is
+        populated (the normal accuracy_degradation case), the dispatch
+        hash uses the sorted alert-key set instead of message text. The
+        journal-lookup helper must use the SAME hash basis or it'll
+        never match an existing row — state dedup hits, journal lookup
+        misses, AND-gate falls through, fresh row every cycle.
+        """
+        crit_file, _state_file = critical_errors_paths
+
+        # Two cycles, identical alert sets, drifting percentages in the
+        # rendered message text.
+        v_cycle1 = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message=("2 signal(s) dropped >15pp vs 7d baseline AND below "
+                     "50% absolute: sentiment 75.3%→43.3%, "
+                     "momentum_factors 49.3%→33.7%"),
+            details={"alert_count": 2, "alerts": [
+                {"key": "sentiment", "scope": "signal",
+                 "old_accuracy_pct": 75.3, "new_accuracy_pct": 43.3},
+                {"key": "momentum_factors", "scope": "signal",
+                 "old_accuracy_pct": 49.3, "new_accuracy_pct": 33.7},
+            ]},
+        )
+        v_cycle2 = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message=("2 signal(s) dropped >15pp vs 7d baseline AND below "
+                     "50% absolute: sentiment 75.3%→41.0%, "
+                     "momentum_factors 49.3%→32.5%"),
+            details={"alert_count": 2, "alerts": [
+                {"key": "sentiment", "scope": "signal",
+                 "old_accuracy_pct": 75.3, "new_accuracy_pct": 41.0},
+                {"key": "momentum_factors", "scope": "signal",
+                 "old_accuracy_pct": 49.3, "new_accuracy_pct": 32.5},
+            ]},
+        )
+
+        _dispatch_critical_errors_for_degradation([v_cycle1])
+        _dispatch_critical_errors_for_degradation([v_cycle2])
+
+        rows = _read_jsonl(crit_file)
+        assert len(rows) == 1, (
+            f"Expected exactly 1 row across 2 cycles with identical alert "
+            f"sets but drifting percentages; got {len(rows)} — journal "
+            f"lookup hash is mis-aligned with dispatch hash, AND-gate "
+            f"silently falls through."
+        )
+
+    def test_alert_set_change_appends_new_row(self, critical_errors_paths):
+        """Inverse of the above: a new signal joining the alert set must
+        produce a fresh row, because the alert-key set genuinely changed."""
+        crit_file, _state_file = critical_errors_paths
+
+        v_smaller = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="2 signal(s) dropped",
+            details={"alerts": [
+                {"key": "sentiment", "scope": "signal"},
+                {"key": "momentum_factors", "scope": "signal"},
+            ]},
+        )
+        v_larger = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="3 signal(s) dropped",
+            details={"alerts": [
+                {"key": "sentiment", "scope": "signal"},
+                {"key": "momentum_factors", "scope": "signal"},
+                {"key": "structure", "scope": "signal"},
+            ]},
+        )
+
+        _dispatch_critical_errors_for_degradation([v_smaller])
+        _dispatch_critical_errors_for_degradation([v_larger])
+
+        rows = _read_jsonl(crit_file)
+        assert len(rows) == 2, (
+            f"Expected 2 rows when the alert set changes (new signal joins); "
+            f"got {len(rows)}"
+        )
