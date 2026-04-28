@@ -322,13 +322,12 @@ def get_all_guard_warnings(signals, patient_pf, bold_pf, config=None):
     # Now only warn when portfolios DO have transactions but guard state is
     # still empty — that's the real signal the wiring is broken.
     state = _load_state()
-    if not state.get("ticker_trades") and all_warnings == []:
-        if _portfolios_have_transactions():
-            logger.warning(
-                "C4: portfolios have transactions but trade_guard_state.json "
-                "has no recorded trades — record_trade() wiring appears broken. "
-                "Overtrading guards are NON-FUNCTIONAL."
-            )
+    if not state.get("ticker_trades") and all_warnings == [] and _portfolios_have_transactions():
+        logger.warning(
+            "C4: portfolios have transactions but trade_guard_state.json "
+            "has no recorded trades — record_trade() wiring appears broken. "
+            "Overtrading guards are NON-FUNCTIONAL."
+        )
 
     return {
         "warnings": all_warnings,

@@ -1654,11 +1654,9 @@ class SwingTrader:
         if not all(a == action and r == regime for (_t, a, r) in unpacked):
             return False
         distinct_ts = {t for (t, _a, _r) in unpacked if t is not None}
-        if distinct_ts and len(distinct_ts) < REGIME_CONFIRM_CHECKS:
-            # All entries came from < REGIME_CONFIRM_CHECKS distinct Layer-1
-            # revisions — replayed reads of the same stale snapshot.
-            return False
-        return True
+        # All entries came from < REGIME_CONFIRM_CHECKS distinct Layer-1
+        # revisions — replayed reads of the same stale snapshot.
+        return not (distinct_ts and len(distinct_ts) < REGIME_CONFIRM_CHECKS)
 
     # -------------------------------------------------------------------
     # Momentum-entry integration (2026-04-17)

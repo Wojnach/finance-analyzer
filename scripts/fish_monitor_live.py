@@ -8,7 +8,14 @@ Start:  powershell Start-Process python -ArgumentList '-u','scripts/fish_monitor
 Check:  tail data/fish_monitor_live.log
 Kill:   powershell "Get-Process python* | ? {(Get-CimInstance Win32_Process -Filter 'ProcessId=$($_.Id)').CommandLine -match 'fish_monitor_live'} | Stop-Process -Force"
 """
-import time, json, requests, datetime, sys, os, traceback
+import datetime
+import json
+import os
+import sys
+import time
+import traceback
+
+import requests
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -26,32 +33,32 @@ def log_msg(msg):
     line = f'[{ts}] {msg}'
     try:
         print(line, flush=True)
-    except:
+    except Exception:
         pass
     try:
         with open(LOG, 'a') as f:
             f.write(line + '\n')
-    except:
+    except Exception:
         pass
 
 def heartbeat():
     try:
         with open(HB, 'w') as f:
             f.write(str(time.time()))
-    except:
+    except Exception:
         pass
 
 def fetch_price():
     try:
         return float(requests.get(f'{FAPI}?symbol=XAGUSDT', timeout=5).json()['price'])
-    except:
+    except Exception:
         return None
 
 
 def fetch_gold_price():
     try:
         return float(requests.get(f'{FAPI}?symbol=XAUUSDT', timeout=5).json()['price'])
-    except:
+    except Exception:
         return None
 
 
@@ -178,8 +185,8 @@ def compute_vol_scalar():
     - Low vol → larger positions (1.5-2.0)
     """
     try:
-        import yfinance as yf
         import numpy as np
+        import yfinance as yf
         si = yf.download('SI=F', period='6mo', interval='1d', progress=False)
         if si.empty or len(si) < 30:
             return 1.0
@@ -274,7 +281,7 @@ def load_signals():
                 lines = f.readlines()
             if lines:
                 ma = json.loads(lines[-1]).get('signals', {}).get('XAG-USD', {}).get('action', '?')
-        except:
+        except Exception:
             pass
         f1d_data = focus.get('1d', {})
         f1d_dir = f1d_data.get('direction', '?')
@@ -361,7 +368,7 @@ def detect_position():
 def sell_position(active, reason):
     """Sell the active position. Returns P&L."""
     try:
-        from portfolio.avanza_session import place_sell_order, get_quote
+        from portfolio.avanza_session import get_quote, place_sell_order
         q = get_quote(active['ob'])
         bid = float(q.get('buy', 0))
         if bid > 0:
@@ -413,7 +420,7 @@ def _log_trade(action, instrument, units, price, amount, tactic=''):
 def buy_position(direction, price, size_scalar=1.0, tactic=''):
     """Enter a new position. Enforces all 9 trading rules."""
     try:
-        from portfolio.avanza_session import place_buy_order, get_quote, get_buying_power
+        from portfolio.avanza_session import get_buying_power, get_quote, place_buy_order
         ob = LONG_OB if direction == 'LONG' else SHORT_OB
         q = get_quote(ob)
         ask = float(q.get('sell', 0))
@@ -481,7 +488,6 @@ def detect_mode():
     """
     try:
         import yfinance as yf
-        import numpy as np
 
         # 1. Was yesterday a crash? (>3% drop)
         daily = yf.download('SI=F', period='5d', interval='1d', progress=False)
@@ -574,7 +580,7 @@ def main():
     log_msg(f'Vol scalar: {vol_scalar:.2f}x (1.0=normal, <1=high vol, >1=low vol)')
     # Try to load ORB range from orb_predictor
     try:
-        from portfolio.orb_predictor import fetch_klines, calculate_morning_range
+        from portfolio.orb_predictor import calculate_morning_range, fetch_klines
         klines = fetch_klines(num_batches=1, interval="15m", limit=100)
         if klines:
             from portfolio.orb_predictor import _group_by_day
@@ -756,7 +762,7 @@ def main():
                             momentum_losses = 0
                         # Auto-switch to straddle after 3 consecutive losses
                         if mode == 'momentum' and momentum_losses >= 3:
-                            log_msg(f'!! 3 consecutive losses — switching to STRADDLE mode')
+                            log_msg('!! 3 consecutive losses — switching to STRADDLE mode')
                             mode = 'straddle'
                             _, straddle_cfg = _compute_straddle_levels()
                             straddle_floor = straddle_cfg.get('floor', 0)

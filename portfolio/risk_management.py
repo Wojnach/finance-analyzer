@@ -691,10 +691,9 @@ def check_regime_mismatch(ticker, action, agent_summary):
         if volume_ratio is not None and volume_ratio < 1.5:
             mismatch = True
             reason = f"BUY in trending-down regime (RVOL={volume_ratio:.1f}, need >1.5x for reversal)"
-    elif action == "SELL" and regime == "trending-up":
-        if volume_ratio is not None and volume_ratio < 1.5:
-            mismatch = True
-            reason = f"SELL in trending-up regime (RVOL={volume_ratio:.1f}, need >1.5x for reversal)"
+    elif action == "SELL" and regime == "trending-up" and volume_ratio is not None and volume_ratio < 1.5:
+        mismatch = True
+        reason = f"SELL in trending-up regime (RVOL={volume_ratio:.1f}, need >1.5x for reversal)"
 
     if mismatch:
         return {

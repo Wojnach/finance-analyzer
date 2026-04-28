@@ -153,12 +153,10 @@ def _is_real_auth_marker_line(line: str, marker: str) -> bool:
         return False
     # The marker must appear at the very start (after any leading wrapper
     # check above has already passed — i.e. no leading whitespace).
-    if not line.startswith(marker):
-        return False
     # Defense in depth: even if startswith matches, reject if any wrapper
     # char appears in the slice BEFORE the marker (handles bullet lists
     # like `- Not logged in` that tests pre-empt by checking line[0]).
-    return True
+    return line.startswith(marker)
 
 
 def record_critical_error(
