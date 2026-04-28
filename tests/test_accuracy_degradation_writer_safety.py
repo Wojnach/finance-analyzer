@@ -74,8 +74,20 @@ class TestWriterBulletproofing:
         wrote = deg.maybe_save_daily_snapshot(config={}, now=_now_after_target_hour())
 
         assert wrote is False, "writer must report failure on silent no-op"
-        assert not isolated_state["snap_state"].exists(), \
-            "state must NOT be persisted when JSONL didn't grow"
+        # last_snapshot_date_utc must NOT be set to today (else writer
+        # skips for the rest of the day). The state file MAY exist
+        # with a last_silent_failure_ts field for journal-write rate
+        # limiting, plus _load_snapshot_state's default empty
+        # last_snapshot_date_utc — both are fine; what matters is we
+        # still retry next cycle.
+        if isolated_state["snap_state"].exists():
+            saved = json.loads(
+                isolated_state["snap_state"].read_text(encoding="utf-8"),
+            )
+            assert saved.get("last_snapshot_date_utc", "") != "2026-04-28", (
+                "last_snapshot_date_utc must NOT be set to today on silent "
+                "failure or the writer skips retries for the rest of the day"
+            )
 
         # critical_errors row landed
         assert isolated_state["critical_errors"].exists(), \
@@ -182,6 +194,41 @@ class TestWriterBulletproofing:
         # surfaces it.
         assert not isolated_state["critical_errors"].exists() or \
                isolated_state["critical_errors"].read_text(encoding="utf-8").strip() == ""
+
+    def test_silent_failure_journal_rate_limit(self, isolated_state, monkeypatch):
+        """Codex round 7 P3 (2026-04-28): on a recurring silent failure,
+        the writer is called every cycle and would otherwise append a
+        fresh critical_errors row every minute (~1440/day). We
+        rate-limit journal writes to one per 30 minutes via a
+        last_silent_failure_ts field in the snapshot state."""
+        # Pre-create the JSONL so size check has a defined "before"
+        isolated_state["snapshots_jsonl"].write_text("", encoding="utf-8")
+
+        monkeypatch.setattr(
+            deg, "save_full_accuracy_snapshot",
+            lambda **_: {"ts": datetime.now(UTC).isoformat()},
+        )
+
+        first_call = datetime(2026, 4, 28, 10, 0, 0, tzinfo=UTC)
+        cycle_5min = datetime(2026, 4, 28, 10, 5, 0, tzinfo=UTC)
+        cycle_31min = datetime(2026, 4, 28, 10, 31, 0, tzinfo=UTC)
+
+        deg.maybe_save_daily_snapshot(config={}, now=first_call)
+        deg.maybe_save_daily_snapshot(config={}, now=cycle_5min)
+        deg.maybe_save_daily_snapshot(config={}, now=cycle_31min)
+
+        rows = [
+            json.loads(line)
+            for line in isolated_state["critical_errors"].read_text(
+                encoding="utf-8"
+            ).splitlines()
+            if line.strip()
+        ]
+        assert len(rows) == 2, (
+            f"Expected 2 journal rows: 1 for first failure, 1 after the "
+            f"30-min cooldown (the 5-min replay should be deduped). "
+            f"Got {len(rows)}."
+        )
 
     def test_jsonl_missing_treated_as_zero(self, isolated_state, monkeypatch):
         """If the JSONL file doesn't exist yet at the start, treat it as 0

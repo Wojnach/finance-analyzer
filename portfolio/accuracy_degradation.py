@@ -756,6 +756,9 @@ def maybe_save_daily_snapshot(config: dict | None = None,
     return True
 
 
+SILENT_FAILURE_JOURNAL_COOLDOWN_S = 30 * 60  # 30 min
+
+
 def _record_snapshot_writer_silent_failure(
     now: datetime, size_before: int, size_after: int,
 ) -> None:
@@ -765,10 +768,32 @@ def _record_snapshot_writer_silent_failure(
     returns without raising but doesn't append to the JSONL (stub
     bypass, downstream swallow, partial atomic write). The natural
     daily writer would otherwise mark today as done and skip retries.
+
+    Codex round 7 P3 (2026-04-28): the gate at the top of
+    ``maybe_save_daily_snapshot`` only short-circuits *after* state
+    flips to today. On a recurring silent failure, state stays
+    unchanged → writer runs every cycle → a fresh critical_errors row
+    appends every cycle → check_critical_errors and the fix-agent get
+    flooded. Rate-limit journal writes to one row per
+    ``SILENT_FAILURE_JOURNAL_COOLDOWN_S`` (30 min) using a
+    ``last_silent_failure_ts`` field in the snapshot state. The actual
+    failure is still logged at WARNING every cycle so the loop_log
+    surfaces the recurrence cadence.
     """
+    state = _load_snapshot_state()
+    last_ts = float(state.get("last_silent_failure_ts", 0.0) or 0.0)
+    now_ts = now.timestamp()
+    if last_ts and (now_ts - last_ts) < SILENT_FAILURE_JOURNAL_COOLDOWN_S:
+        logger.warning(
+            "Snapshot writer silent failure recurring (%.0fs since last journal "
+            "row); skipping critical_errors append for dedup",
+            now_ts - last_ts,
+        )
+        return
+
     try:
         from portfolio.claude_gate import record_critical_error
-        record_critical_error(
+        wrote = record_critical_error(
             category="snapshot_writer_silent_failure",
             caller="maybe_save_daily_snapshot",
             message=(
@@ -784,6 +809,11 @@ def _record_snapshot_writer_silent_failure(
         )
     except Exception as e:
         logger.exception("Failed to record snapshot writer silent failure: %s", e)
+        return
+
+    if wrote:
+        state["last_silent_failure_ts"] = now_ts
+        _save_snapshot_state(state)
 
 
 def maybe_send_degradation_summary(config: dict | None = None,
