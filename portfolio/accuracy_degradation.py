@@ -58,9 +58,14 @@ DROP_THRESHOLD_PP = 15.0
 ABSOLUTE_FLOOR_PCT = 50.0
 RISE_THRESHOLD_PP = 10.0  # symmetric for the daily summary "improved" list
 
-# Anti-noise gates
-MIN_SAMPLES_HISTORICAL = 100
-MIN_SAMPLES_CURRENT = 100
+# Anti-noise gates. Bumped 100 → 200 (2026-04-28) after the Apr 21 baseline
+# of sentiment 75.3% on N=223 was found to be a small-sample one-week spike
+# above lifetime 46% (N=39k). At N=100 the binomial SE on a 50/50 process
+# is ±5pp; differencing two such samples gives ±7pp 1-σ — so 15pp drops
+# happen on noise alone roughly 1 in 33 cycles. The combined SE-gate +
+# raised floor pushes the noise floor down to roughly 1 in 1000.
+MIN_SAMPLES_HISTORICAL = 200
+MIN_SAMPLES_CURRENT = 200
 MIN_SNAPSHOT_AGE_DAYS = 6.0   # don't alert without a real baseline
 BASELINE_TARGET_DAYS = 7.0    # find snapshot near now-7d
 BASELINE_MAX_DELTA_HOURS = 36.0  # tolerance when picking the baseline snapshot
@@ -550,10 +555,36 @@ def _diff_against_baseline(*, baseline: dict, now: datetime,
     return alerts
 
 
+def _binomial_diff_se_pp(p1: float, n1: int, p2: float, n2: int) -> float:
+    """Standard error of the difference of two independent binomial proportions, in pp.
+
+    SE = sqrt( p1*(1-p1)/n1 + p2*(1-p2)/n2 ) * 100
+
+    Returns 0.0 when either sample is empty (the caller already gates on
+    min_samples — this is a safety belt for the formula itself).
+    """
+    import math
+
+    if n1 < 1 or n2 < 1:
+        return 0.0
+    var = p1 * (1.0 - p1) / n1 + p2 * (1.0 - p2) / n2
+    if var <= 0.0:
+        return 0.0
+    return math.sqrt(var) * 100.0
+
+
 def _maybe_alert(*, key: str, scope: str, old, new,
                  drop_threshold_pp: float, absolute_floor_pct: float,
                  min_samples_historical: int, min_samples_current: int) -> dict | None:
-    """Apply the dual gate (drop AND absolute floor) to one (key, scope)."""
+    """Apply the dual gate (drop AND absolute floor) plus an SE
+    significance gate to one (key, scope).
+
+    The SE gate (added 2026-04-28) requires that the observed drop is at
+    least 2 standard errors of the difference of two binomial proportions.
+    Without it, a flat 15pp threshold produces ~1-in-33 false positives at
+    N=100 against stable signals — the failure mode that produced the
+    sentiment 75.3%→43.3% "cliff" alert from regression-to-mean noise.
+    """
     if not old or not new:
         return None
     try:
@@ -571,6 +602,9 @@ def _maybe_alert(*, key: str, scope: str, old, new,
         return None
     if new_pct >= absolute_floor_pct:
         return None
+    se_pp = _binomial_diff_se_pp(old_acc, old_total, new_acc, new_total)
+    if drop_pp < 2.0 * se_pp:
+        return None
     return {
         "key": key,
         "scope": scope,
@@ -579,6 +613,7 @@ def _maybe_alert(*, key: str, scope: str, old, new,
         "drop_pp": round(drop_pp, 1),
         "old_samples": old_total,
         "new_samples": new_total,
+        "se_pp": round(se_pp, 2),
     }
 
 
