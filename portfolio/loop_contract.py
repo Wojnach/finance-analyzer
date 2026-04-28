@@ -631,10 +631,11 @@ def _has_unresolved_critical_entry(
     message_hash: str,
     ttl_s: float,
     now: float,
+    invariant: str | None = None,
 ) -> bool:
     """Return True iff critical_errors.jsonl has an unresolved row in the
-    last ``ttl_s`` seconds whose category matches and whose message
-    identity hash matches.
+    last ``ttl_s`` seconds whose category matches and whose identity
+    hash matches.
 
     Used to gate the dispatch-time dedup so a resolved-then-recurring
     incident still produces a fresh row. Resolution semantics mirror
@@ -642,10 +643,21 @@ def _has_unresolved_critical_entry(
     (a) its own ``resolution`` field is non-null, or (b) a later entry
     has ``resolves_ts`` pointing at its ``ts``.
 
+    The identity hash is reconstructed per-row using the same per-invariant
+    rules as ``_hash_violation_identity`` (Codex round 3 P1 2026-04-28).
+    Without this, a refactor that adds a new identity branch (e.g.,
+    accuracy_degradation hashing on alert keys instead of message text)
+    silently breaks the journal match: state dedup hits but journal
+    lookup misses, the AND-gated skip falls through, and a fresh row
+    appends every cycle inside the TTL. ``invariant`` lets callers
+    request the per-invariant identity rules (defaults to ``category``
+    since the writer copies category=invariant).
+
     Best-effort: any I/O or parse failure returns False so the dispatch
     path falls through to a (safer) re-write rather than silencing on
     a transient read error.
     """
+    target_invariant = invariant or category
     try:
         from portfolio.claude_gate import CRITICAL_ERRORS_LOG
     except Exception:
@@ -691,12 +703,20 @@ def _has_unresolved_critical_entry(
     for entry in candidates:
         if entry.get("ts") in resolved_ts:
             continue
-        # Re-derive identity from the stored message + invariant fields.
-        # We approximate the identity by comparing messages; the trigger
-        # ts disambiguator only matters for layer2_journal_activity which
-        # already has a separate inline write path, so message-text
-        # match is sufficient here.
-        stored_hash = _hash_violation_message(entry.get("message", ""))
+        # Re-derive identity using the same per-invariant rules as the
+        # dispatch path (Codex round 3 P1 2026-04-28). For invariants
+        # that override identity (accuracy_degradation hashes on the
+        # set of alert keys, layer2_journal_activity folds trigger_time),
+        # synthesize a Violation-like proxy from the journal entry's
+        # message + context so the lookup uses the SAME hash basis as
+        # the dispatch.
+        synthetic = Violation(
+            invariant=target_invariant,
+            severity=entry.get("level", "CRITICAL").upper(),
+            message=entry.get("message", ""),
+            details=entry.get("context") or {},
+        )
+        stored_hash = _hash_violation_identity(synthetic)
         if stored_hash == message_hash:
             return True
     return False
@@ -776,6 +796,7 @@ def _dispatch_critical_errors_for_degradation(
                     message_hash=msg_hash,
                     ttl_s=ttl_s,
                     now=now,
+                    invariant=v.invariant,
                 )):
             continue
         try:

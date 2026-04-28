@@ -48,19 +48,38 @@ def _se_diff_pp(p1: float, n1: int, p2: float, n2: int) -> float:
 
 
 def _load_signal_log(path: Path) -> list[dict]:
-    if not path.exists():
-        raise FileNotFoundError(path)
-    out: list[dict] = []
-    with path.open(encoding="utf-8", errors="replace") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                out.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return out
+    """Load signal_log entries — JSONL if present, else SQLite via
+    ``load_entries()``.
+
+    Codex round 3 P2 (2026-04-28): live storage may be SQLite-only,
+    so requiring JSONL would break the audit in the environments where
+    operators would run it during an incident.
+    """
+    if path.exists() and path.stat().st_size > 0:
+        out: list[dict] = []
+        with path.open(encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    out.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return out
+
+    try:
+        from portfolio.accuracy_stats import load_entries
+    except Exception as e:
+        raise FileNotFoundError(
+            f"Signal log not found at {path} and load_entries() unavailable: {e}"
+        )
+    fallback = load_entries()
+    if not fallback:
+        raise FileNotFoundError(
+            f"Signal log not found at {path} and load_entries() returned empty"
+        )
+    return fallback
 
 
 def _filter_window(entries: list[dict], lower: datetime, upper: datetime):

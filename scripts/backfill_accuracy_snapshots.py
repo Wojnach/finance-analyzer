@@ -79,20 +79,42 @@ def _per_ticker_from_window(entries: list[dict], horizon: str = "1d") -> dict:
 
 
 def _load_signal_log_entries(path: Path) -> list[dict]:
-    """Load signal_log entries from JSONL — returns list[dict]."""
-    if not path.exists():
-        raise FileNotFoundError(f"Signal log not found: {path}")
-    entries: list[dict] = []
-    with path.open(encoding="utf-8", errors="replace") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return entries
+    """Load signal_log entries — JSONL if present, else SQLite via the
+    same ``load_entries()`` path that production uses.
+
+    Codex round 3 P1 (2026-04-28): live storage may be SQLite-only
+    (signal_log.db), so a hard requirement on JSONL would make the
+    backfill unrunnable in the very environment where it's needed.
+    """
+    if path.exists() and path.stat().st_size > 0:
+        entries: list[dict] = []
+        with path.open(encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return entries
+
+    # Fall back to whatever load_entries() finds — SQLite, then JSONL,
+    # then empty. This mirrors the live writer's lookup so backfilled
+    # snapshots match what a normal save_full_accuracy_snapshot() would
+    # produce on the same dataset.
+    try:
+        from portfolio.accuracy_stats import load_entries
+    except Exception as e:
+        raise FileNotFoundError(
+            f"Signal log not found at {path} and load_entries() unavailable: {e}"
+        )
+    fallback = load_entries()
+    if not fallback:
+        raise FileNotFoundError(
+            f"Signal log not found at {path} and load_entries() returned empty"
+        )
+    return fallback
 
 
 def _filter_entries_by_cutoff(
