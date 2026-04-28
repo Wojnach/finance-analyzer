@@ -12,12 +12,32 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from portfolio.file_utils import atomic_append_jsonl
+from portfolio.file_utils import atomic_append_jsonl, atomic_write_json, load_json
 from portfolio.http_retry import fetch_with_retry
 
 logger = logging.getLogger("portfolio.telegram_poller")
 
 INBOUND_LOG = Path(__file__).resolve().parent.parent / "data" / "telegram_inbound.jsonl"
+# 2026-04-28: persisted offset across loop restarts. Without this, every
+# `schtasks /run PF-DataLoop` resets self.offset to 0, re-fetches every
+# pending getUpdates, and then the stale filter (msg_date < startup-60s)
+# silently drops anything the user sent during the restart window. With
+# the file present, init reloads the last-acknowledged update_id, and
+# _handle_update bypasses the stale filter for post-restart pending
+# updates (those the user expects to execute, e.g. a ``bought MSTR …``
+# confirmation sent while the loop was bouncing) UP TO a bounded age:
+# see RESTART_BYPASS_MAX_AGE_S below.
+POLLER_STATE_FILE = Path(__file__).resolve().parent.parent / "data" / "telegram_poller_state.json"
+
+# Codex P1 round-4 (2026-04-28): cap the post-restart bypass to 1 hour.
+# A bot that was down for days could otherwise execute every queued
+# 'bought MSTR …' confirmation on next start, even though the user has
+# since traded manually. 1 h is generous enough to cover any realistic
+# restart window (schtasks rerun + loop boot < 5 min in practice) while
+# still rejecting commands that are old enough that the user almost
+# certainly resolved them out-of-band. Beyond this window the original
+# 60 s stale filter applies.
+RESTART_BYPASS_MAX_AGE_S = 60 * 60
 
 
 class TelegramPoller:
@@ -30,9 +50,61 @@ class TelegramPoller:
         self.chat_id = str(config["telegram"]["chat_id"])
         self.config = config
         self.on_command = on_command
-        self.offset = 0
+        # Restore offset from disk so updates acknowledged in a previous
+        # process don't get re-fetched (and re-stale-filtered) on restart.
+        # ``_initial_offset`` is the value we loaded from disk — the stale
+        # filter uses it to recognize "this update arrived during downtime,
+        # process don't drop". A fresh install with no state file yields 0,
+        # which preserves the original cold-start behavior.
+        self._initial_offset = self._load_persisted_offset()
+        self.offset = self._initial_offset
+        self._has_persisted_offset = self._initial_offset > 0
         self._startup_time = time.time()
         self._thread = None
+
+    @staticmethod
+    def _load_persisted_offset() -> int:
+        """Read offset from POLLER_STATE_FILE. Returns 0 on any failure
+        (missing file, malformed JSON, non-int value, or negative
+        integer) — fail-soft so a corrupted state file never prevents
+        the loop from polling. Negative values are explicitly rejected
+        because Telegram's getUpdates treats negative offsets as a
+        backward count from the latest update, not as cold-start
+        behavior (Codex P3 round-3 2026-04-28)."""
+        try:
+            state = load_json(POLLER_STATE_FILE, default=None)
+        except Exception as e:
+            logger.warning("poller offset load failed: %s", e)
+            return 0
+        if not isinstance(state, dict):
+            return 0
+        try:
+            offset = int(state.get("offset", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+        if offset < 0:
+            logger.warning(
+                "poller offset state had negative value %d; clamping to 0",
+                offset,
+            )
+            return 0
+        return offset
+
+    def _save_offset(self) -> None:
+        """Persist current offset atomically. Best-effort: a write failure
+        means the next restart re-fetches updates we already acked, but
+        that's recoverable (Telegram dedups via the same update_id) so we
+        don't crash the poll loop on disk errors."""
+        try:
+            atomic_write_json(
+                POLLER_STATE_FILE,
+                {
+                    "offset": int(self.offset),
+                    "updated_ts": datetime.now(UTC).isoformat(),
+                },
+            )
+        except Exception as e:
+            logger.warning("poller offset persist failed: %s", e)
 
     def start(self):
         """Start the poller in a daemon thread."""
@@ -69,30 +141,87 @@ class TelegramPoller:
 
         return data.get("result", [])
 
+    # Drop reasons that represent a *settled* outcome — the message was
+    # examined and intentionally not acted on (stale, empty, unrecognized,
+    # or no message body / wrong chat). Re-fetching these on a restart
+    # would just settle them the same way, so we ack the offset.
+    # Excluded: ``raised:*`` outcomes — those represent a transient
+    # dispatch failure where the user's command is genuinely at risk of
+    # being lost if we ack the offset before it succeeds (Codex P1
+    # round-7 2026-04-28).
+    _SETTLED_DROP_REASONS = frozenset({
+        "stale_at_startup",
+        "empty_text",
+        "unrecognized",
+    })
+
     def _handle_update(self, update):
         """Process a single update."""
         update_id = update.get("update_id", 0)
+        prev_offset = self.offset
         self.offset = max(self.offset, update_id + 1)
+        # In-memory offset advances unconditionally so a single poison
+        # update doesn't loop the in-process poll, but persistence is
+        # delayed until we know the message is settled — successful
+        # dispatch, intentional drop, or non-message frame. If the
+        # handler raises, we leave the persisted offset where it was so
+        # restart re-fetches and retries (Codex P1 round-7 2026-04-28).
+        offset_settled = False
 
         msg = update.get("message")
         if not msg:
-            return
+            offset_settled = True
 
         # Only process messages from our chat_id. Drop others without logging —
         # no point persisting spam from strangers who can't affect state.
-        chat = msg.get("chat", {})
-        if str(chat.get("id")) != self.chat_id:
+        # We DO still ack the offset on chat-mismatch so the bot's
+        # getUpdates queue doesn't accumulate stranger spam over time.
+        if msg is not None:
+            chat = msg.get("chat", {})
+            if str(chat.get("id")) != self.chat_id:
+                offset_settled = True
+                msg = None  # short-circuit out of the rest of the body
+
+        if msg is None:
+            if offset_settled and self.offset > prev_offset:
+                self._save_offset()
             return
 
         # Accumulate log outcome; single append in finally so we log every
         # inbound message exactly once, even if parse/dispatch raises.
         outcome = {"cmd": None, "processed": False, "drop_reason": None}
         try:
-            # Stale filter: ignore messages older than 60s at startup so we don't
-            # re-execute commands after a loop restart. Still log them — useful
-            # for reconstructing what the user sent during downtime.
+            # Stale filter: ignore messages older than 60s at startup so we
+            # don't re-execute commands after a loop restart. Still log them
+            # — useful for reconstructing what the user sent during downtime.
+            #
+            # Bypass when (a) we have a persisted offset and (b) this
+            # update_id is past it. Those are post-restart pending updates
+            # — by definition arrived during downtime, the user expects
+            # them to execute, and the persisted offset proves we're not
+            # accidentally re-running a stale getUpdates queue from a long
+            # outage. Cold-start (no persisted offset) keeps the original
+            # protection because we can't distinguish "user sent during
+            # restart" from "Telegram re-delivering 2-week-old updates"
+            # without that prior.
             msg_date = msg.get("date", 0)
-            if msg_date < self._startup_time - 60:
+            # update_id can EQUAL self._initial_offset legitimately: the
+            # persisted value uses next-offset semantics (last_acked + 1)
+            # so the first genuinely-new update after restart has
+            # update_id == self._initial_offset, not strictly greater.
+            # `>=` covers the single-message-during-restart case that was
+            # the whole reason for adding persistence (Codex P1
+            # 2026-04-28).
+            #
+            # Codex P1 round-4 (2026-04-28): bound the bypass to
+            # RESTART_BYPASS_MAX_AGE_S so a multi-day outage doesn't
+            # execute every queued command on next start.
+            is_post_restart_pending = (
+                self._has_persisted_offset
+                and update_id >= self._initial_offset
+                and msg_date >= self._startup_time - RESTART_BYPASS_MAX_AGE_S
+            )
+            if msg_date < self._startup_time - 60 and not is_post_restart_pending:
                 outcome["drop_reason"] = "stale_at_startup"
                 return
 
@@ -125,6 +254,16 @@ class TelegramPoller:
                 raise
         finally:
             self._log_inbound(update, msg, **outcome)
+            # Persist offset only when the message has *settled* —
+            # successful dispatch or an intentional drop. A raised
+            # dispatch leaves persistence un-claimed so a restart can
+            # retry; otherwise a transient handler crash silently
+            # consumes the user's command (Codex P1 round-7 2026-04-28).
+            should_persist = outcome["processed"] or (
+                outcome["drop_reason"] in self._SETTLED_DROP_REASONS
+            )
+            if should_persist and self.offset > prev_offset:
+                self._save_offset()
 
     def _log_inbound(self, update, msg, cmd, processed, drop_reason):
         """Persist one inbound message to data/telegram_inbound.jsonl.

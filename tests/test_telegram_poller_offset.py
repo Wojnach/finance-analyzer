@@ -1,0 +1,357 @@
+"""Tests for Telegram poller offset persistence.
+
+Background (2026-04-28): TelegramPoller.offset is in-memory only. After every
+loop restart it resets to 0 and re-fetches all pending updates, then drops
+anything older than `startup_time - 60s` via the stale filter. Combined,
+that means real user commands sent during a restart window are silently
+dropped.
+
+This test pins the expected behavior:
+  - On instantiation, the poller loads the persisted offset from disk.
+  - After processing an update, it persists the new offset atomically.
+  - The stale filter is bypassed for messages whose update_id is greater
+    than the persisted offset (those are post-restart pending updates that
+    arrived during downtime, and the user expects them to execute).
+"""
+
+import json
+import time
+
+import pytest
+
+
+@pytest.fixture()
+def poller_paths(tmp_path, monkeypatch):
+    """Redirect the poller's state and inbound log files to tmp."""
+    state_file = tmp_path / "telegram_poller_state.json"
+    inbound_file = tmp_path / "telegram_inbound.jsonl"
+    monkeypatch.setattr(
+        "portfolio.telegram_poller.POLLER_STATE_FILE", state_file,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "portfolio.telegram_poller.INBOUND_LOG", inbound_file,
+    )
+    return state_file, inbound_file
+
+
+@pytest.fixture()
+def fake_config():
+    return {"telegram": {"token": "fake-token", "chat_id": "12345"}}
+
+
+def _build_update(update_id, msg_date, text="bought MSTR 130 100000",
+                  chat_id=12345, from_id=999, message_id=1001):
+    return {
+        "update_id": update_id,
+        "message": {
+            "message_id": message_id,
+            "date": msg_date,
+            "chat": {"id": chat_id},
+            "from": {"id": from_id, "username": "trader"},
+            "text": text,
+        },
+    }
+
+
+def _read_jsonl(path):
+    if not path.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in path.read_text().splitlines()
+        if line.strip()
+    ]
+
+
+class TestPollerOffsetPersistence:
+    """Offset survives across TelegramPoller instances."""
+
+    def test_fresh_install_starts_at_zero(self, poller_paths, fake_config):
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, _ = poller_paths
+        assert not state_file.exists()
+        poller = TelegramPoller(fake_config, on_command=lambda *a: None)
+        assert poller.offset == 0
+
+    def test_offset_advance_persists_to_disk(self, poller_paths, fake_config):
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, _inbound = poller_paths
+        poller = TelegramPoller(fake_config, on_command=lambda *a: None)
+
+        # Process an update — offset advances to update_id + 1.
+        update = _build_update(update_id=42, msg_date=int(time.time()))
+        poller._handle_update(update)
+
+        assert poller.offset == 43
+        # And it landed on disk.
+        assert state_file.exists()
+        on_disk = json.loads(state_file.read_text())
+        assert on_disk["offset"] == 43
+
+    def test_new_instance_loads_offset_from_disk(self, poller_paths, fake_config):
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, _inbound = poller_paths
+        # Pre-seed disk with an offset from a previous "session".
+        state_file.write_text(json.dumps({"offset": 1000, "updated_ts": "x"}))
+
+        poller = TelegramPoller(fake_config, on_command=lambda *a: None)
+        assert poller.offset == 1000
+
+    def test_first_update_at_persisted_boundary_bypasses_stale_filter(
+        self, poller_paths, fake_config,
+    ):
+        """Codex P1 follow-up: persisted offset uses next-offset semantics
+        (update_id + 1), so the first genuinely-new update after restart
+        has update_id == self._initial_offset, not strictly greater. The
+        bypass must accept ``>=``, otherwise a single command sent during
+        the restart window still trips the stale filter — defeating the
+        whole reason we persist."""
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, inbound_file = poller_paths
+        state_file.write_text(json.dumps({"offset": 1001, "updated_ts": "x"}))
+
+        called = {}
+
+        def on_command(cmd, args, _config):
+            called["cmd"] = cmd
+            return None
+
+        poller = TelegramPoller(fake_config, on_command=on_command)
+        # update_id == persisted_offset is the very first new update.
+        update = _build_update(
+            update_id=1001,
+            msg_date=int(time.time()) - 5 * 60,
+            text="bought MSTR 130 100000",
+        )
+        poller._handle_update(update)
+
+        assert called.get("cmd") == "bought"
+        rows = _read_jsonl(inbound_file)
+        assert len(rows) == 1
+        assert rows[0]["processed"] is True
+        assert rows[0]["drop_reason"] is None
+
+    def test_post_restart_pending_update_bypasses_stale_filter(
+        self, poller_paths, fake_config,
+    ):
+        """Update arriving with id > persisted_offset should be processed
+        even if msg_date < startup - 60. That's the "user sent a command
+        while we were restarting" case the persistence is meant to fix."""
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, inbound_file = poller_paths
+        # User had previously processed updates up to id=1000.
+        state_file.write_text(json.dumps({"offset": 1001, "updated_ts": "x"}))
+
+        called = {}
+
+        def on_command(cmd, args, _config):
+            called["cmd"] = cmd
+            called["args"] = args
+            return None
+
+        poller = TelegramPoller(fake_config, on_command=on_command)
+        # An update sent 5 minutes before the poller started — that's older
+        # than the 60s stale filter window, but it has update_id 1500, which
+        # is past the persisted offset, so it must be processed not dropped.
+        update = _build_update(
+            update_id=1500,
+            msg_date=int(time.time()) - 5 * 60,
+            text="bought MSTR 130 100000",
+        )
+        poller._handle_update(update)
+
+        assert called.get("cmd") == "bought"
+        rows = _read_jsonl(inbound_file)
+        assert len(rows) == 1
+        assert rows[0]["processed"] is True
+        assert rows[0]["drop_reason"] is None
+
+    def test_cold_start_still_drops_truly_old_messages(self, poller_paths, fake_config):
+        """When there's no persisted offset (fresh install or wiped state),
+        the stale filter must still drop ancient messages — that's the
+        original protection against re-running stale commands after a long
+        outage."""
+        from portfolio.telegram_poller import TelegramPoller
+
+        _state_file, inbound_file = poller_paths
+        poller = TelegramPoller(fake_config, on_command=lambda *a: None)
+
+        # update_id is small (< default offset 0 is N/A) AND msg_date is ancient.
+        # Without a persisted offset the poller can't know if this is a replay
+        # from a 2-week-old getUpdates queue, so the stale filter still trips.
+        update = _build_update(
+            update_id=1,
+            msg_date=int(time.time()) - 7 * 24 * 3600,
+        )
+        poller._handle_update(update)
+
+        rows = _read_jsonl(inbound_file)
+        assert len(rows) == 1
+        assert rows[0]["drop_reason"] == "stale_at_startup"
+        assert rows[0]["processed"] is False
+
+    def test_persisted_offset_does_not_decrease(self, poller_paths, fake_config):
+        """If a stale getUpdates returns an older update_id (Telegram does
+        not guarantee ordering across reconnects), the persisted offset
+        must not regress."""
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, _inbound = poller_paths
+        state_file.write_text(json.dumps({"offset": 1500, "updated_ts": "x"}))
+
+        poller = TelegramPoller(fake_config, on_command=lambda *a: None)
+        poller._handle_update(_build_update(update_id=200, msg_date=int(time.time())))
+
+        # Offset is unchanged — the in-memory and on-disk both stay at 1500
+        # (or higher), never below it.
+        assert poller.offset >= 1500
+        on_disk = json.loads(state_file.read_text())
+        assert on_disk["offset"] >= 1500
+
+    def test_corrupt_state_file_falls_back_to_zero(self, poller_paths, fake_config):
+        """A garbled state file must not crash the poller at startup."""
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, _inbound = poller_paths
+        state_file.write_text("not-json{")
+
+        poller = TelegramPoller(fake_config, on_command=lambda *a: None)
+        assert poller.offset == 0
+
+    def test_dispatch_failure_does_not_persist_offset(
+        self, poller_paths, fake_config,
+    ):
+        """Codex P1 round-6 follow-up: if on_command raises, don't claim
+        the offset slot. Otherwise a transient handler crash (e.g.
+        Avanza session expired mid-dispatch) silently consumes the user's
+        command — restart can't retry because the offset already moved.
+        We accept the trade of possibly re-running a poison message on
+        restart; persistent crashes are rare and the alternative loses
+        legitimate commands."""
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, _inbound = poller_paths
+
+        def crashing_handler(cmd, args, config):
+            raise RuntimeError("simulated Avanza session expired")
+
+        poller = TelegramPoller(fake_config, on_command=crashing_handler)
+        update = _build_update(update_id=42, msg_date=int(time.time()))
+        try:
+            poller._handle_update(update)
+        except RuntimeError:
+            # poller propagates the dispatch exception by design
+            pass
+
+        # Offset must NOT have been persisted to disk.
+        assert not state_file.exists() or json.loads(state_file.read_text()).get("offset", 0) == 0, (
+            "offset was persisted before dispatch settled; restart "
+            "would never re-fetch this update and the user's command "
+            "would be silently lost"
+        )
+
+    def test_settled_drops_still_persist_offset(self, poller_paths, fake_config):
+        """A stale-at-startup drop is intentional and safe to ack —
+        re-fetching it across restart would just stale-drop again,
+        and we'd never make progress against the inbound queue.
+        Distinct from dispatch-raises (which we DO want to retry)."""
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, inbound_file = poller_paths
+        poller = TelegramPoller(fake_config, on_command=lambda *a: None)
+
+        # update_id is 1 — small. msg_date is one day ago. No persisted
+        # offset, so this trips the cold-start stale filter.
+        update = _build_update(
+            update_id=1,
+            msg_date=int(time.time()) - 24 * 3600,
+        )
+        poller._handle_update(update)
+
+        rows = _read_jsonl(inbound_file)
+        assert len(rows) == 1
+        assert rows[0]["drop_reason"] == "stale_at_startup"
+
+        # Even though we dropped, we DID persist the offset — otherwise
+        # we'd re-fetch and re-stale-drop forever.
+        assert state_file.exists()
+        assert json.loads(state_file.read_text())["offset"] >= 2
+
+    def test_chat_mismatch_persists_offset(self, poller_paths, fake_config):
+        """A stranger's update isn't our user's command, but we still
+        need to ack it — otherwise the bot's getUpdates queue fills up
+        with spam over time."""
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, _inbound = poller_paths
+        poller = TelegramPoller(fake_config, on_command=lambda *a: None)
+        update = _build_update(
+            update_id=99,
+            msg_date=int(time.time()),
+            chat_id=999999,  # not our chat_id
+        )
+        poller._handle_update(update)
+
+        assert state_file.exists()
+        assert json.loads(state_file.read_text())["offset"] >= 100
+
+    def test_long_outage_does_not_execute_days_old_commands(
+        self, poller_paths, fake_config,
+    ):
+        """Codex P1 round-4 follow-up: the post-restart bypass must be
+        bounded. A bot down for several days could otherwise execute every
+        queued 'bought MSTR …' confirmation on next start, even though the
+        user has since traded manually. The 60 s stale filter was the
+        original protection — the bypass should extend it to a reasonable
+        recovery window (an hour or so), not lift it entirely."""
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, inbound_file = poller_paths
+        state_file.write_text(json.dumps({"offset": 1001, "updated_ts": "x"}))
+
+        called = {}
+
+        def on_command(cmd, args, _config):
+            called["cmd"] = cmd
+            return None
+
+        poller = TelegramPoller(fake_config, on_command=on_command)
+        # update_id is past persisted offset BUT msg_date is 3 days ago.
+        # Even with offset alignment the command must be considered stale.
+        update = _build_update(
+            update_id=1500,
+            msg_date=int(time.time()) - 3 * 24 * 3600,
+            text="bought MSTR 130 100000",
+        )
+        poller._handle_update(update)
+
+        assert called.get("cmd") is None, (
+            "Days-old command was processed because update_id was past the "
+            "persisted offset. The bypass needs an upper bound on age."
+        )
+        rows = _read_jsonl(inbound_file)
+        assert len(rows) == 1
+        assert rows[0]["drop_reason"] == "stale_at_startup"
+        assert rows[0]["processed"] is False
+
+    def test_negative_persisted_offset_clamps_to_zero(self, poller_paths, fake_config):
+        """Codex P3 round-3 follow-up: a manually-edited or numerically
+        corrupted state file with offset < 0 must NOT propagate to
+        Telegram getUpdates. Telegram treats negative offsets specially
+        (back-skip from latest) — definitely not the cold-start behavior
+        we want."""
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, _inbound = poller_paths
+        state_file.write_text(json.dumps({"offset": -1, "updated_ts": "x"}))
+
+        poller = TelegramPoller(fake_config, on_command=lambda *a: None)
+        assert poller.offset == 0
+        # The bypass flag should also be False — we don't have a real prior.
+        assert poller._has_persisted_offset is False
