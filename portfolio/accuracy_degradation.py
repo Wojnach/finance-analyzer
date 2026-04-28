@@ -682,10 +682,32 @@ def maybe_save_daily_snapshot(config: dict | None = None,
     if state.get("last_snapshot_date_utc") == today_str:
         return False
 
+    # Defense in depth (2026-04-28): verify accuracy_snapshots.jsonl
+    # actually grew before persisting state. Caught after 7 days of
+    # silent failure where state said today was done but the JSONL had
+    # no entry. Once last_snapshot_date_utc=today, every subsequent
+    # call returns False — so a single state-without-write desync
+    # silences the writer for the rest of the day.
+    from portfolio.accuracy_stats import ACCURACY_SNAPSHOTS_FILE
+    size_before = (
+        ACCURACY_SNAPSHOTS_FILE.stat().st_size
+        if ACCURACY_SNAPSHOTS_FILE.exists()
+        else 0
+    )
+
     try:
         save_full_accuracy_snapshot()
     except Exception as e:
         logger.warning("Daily accuracy snapshot failed: %s", e)
+        return False
+
+    size_after = (
+        ACCURACY_SNAPSHOTS_FILE.stat().st_size
+        if ACCURACY_SNAPSHOTS_FILE.exists()
+        else 0
+    )
+    if size_after <= size_before:
+        _record_snapshot_writer_silent_failure(now, size_before, size_after)
         return False
 
     state["last_snapshot_date_utc"] = today_str
@@ -697,6 +719,36 @@ def maybe_save_daily_snapshot(config: dict | None = None,
     alert_state["last_full_check_violations"] = []
     _save_alert_state(alert_state)
     return True
+
+
+def _record_snapshot_writer_silent_failure(
+    now: datetime, size_before: int, size_after: int,
+) -> None:
+    """Surface a silent writer failure to ``critical_errors.jsonl``.
+
+    The "silent" failure mode is when ``save_full_accuracy_snapshot``
+    returns without raising but doesn't append to the JSONL (stub
+    bypass, downstream swallow, partial atomic write). The natural
+    daily writer would otherwise mark today as done and skip retries.
+    """
+    try:
+        from portfolio.claude_gate import record_critical_error
+        record_critical_error(
+            category="snapshot_writer_silent_failure",
+            caller="maybe_save_daily_snapshot",
+            message=(
+                "save_full_accuracy_snapshot returned but accuracy_snapshots.jsonl "
+                f"didn't grow (before={size_before}B, after={size_after}B). "
+                "State NOT updated; will retry next cycle."
+            ),
+            context={
+                "now": now.isoformat(),
+                "size_before": size_before,
+                "size_after": size_after,
+            },
+        )
+    except Exception as e:
+        logger.exception("Failed to record snapshot writer silent failure: %s", e)
 
 
 def maybe_send_degradation_summary(config: dict | None = None,

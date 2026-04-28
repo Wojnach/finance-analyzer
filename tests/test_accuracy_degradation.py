@@ -650,11 +650,20 @@ class TestPostReviewFixes:
             "last_summary_send_time": 0.0,
         })
 
-        # Stub save_full_accuracy_snapshot to succeed without touching disk
-        monkeypatch.setattr(
-            deg, "save_full_accuracy_snapshot",
-            lambda **_: {"ts": datetime.now(UTC).isoformat()},
-        )
+        # Stub save_full_accuracy_snapshot to grow the JSONL like a real
+        # write would. As of 2026-04-28 the writer verifies the JSONL
+        # actually grew before persisting state — a stub that returns
+        # but doesn't append is now treated as a silent failure.
+        from portfolio import accuracy_stats
+        from portfolio.file_utils import atomic_append_jsonl
+        snaps_path = tmp_path / "accuracy_snapshots.jsonl"
+        monkeypatch.setattr(accuracy_stats, "ACCURACY_SNAPSHOTS_FILE", snaps_path)
+
+        def _fake_save(**_):
+            atomic_append_jsonl(snaps_path, {"ts": datetime.now(UTC).isoformat()})
+            return {"ts": datetime.now(UTC).isoformat()}
+
+        monkeypatch.setattr(deg, "save_full_accuracy_snapshot", _fake_save)
 
         now = datetime.now(UTC).replace(hour=10)
         wrote = deg.maybe_save_daily_snapshot(config={}, now=now)
