@@ -349,12 +349,16 @@ def _stash_ab_context(
     results arrive in flush_ab_log(). Called from get_sentiment().
 
     Thread-safe — multiple ThreadPoolExecutor workers call this concurrently.
+
+    2026-04-28: cryptobert_shadow slot added; CryptoBERT was demoted from
+    crypto primary to shadow. See get_sentiment docstring for rationale.
     """
     with _pending_ab_lock:
         _pending_ab_entries[ab_key] = {
             "ticker": ticker,
             "primary_result": primary_result,
             "finbert_shadow": None,  # filled in below by get_sentiment
+            "cryptobert_shadow": None,  # filled in below for crypto tickers (2026-04-28)
             "all_articles": all_articles,
             "diss_mult": diss_mult,
             "fingpt_headlines_raw": None,  # filled in by Phase 3
@@ -368,6 +372,18 @@ def _stash_finbert_shadow(ab_key: str, finbert_shadow: dict | None) -> None:
         entry = _pending_ab_entries.get(ab_key)
         if entry is not None:
             entry["finbert_shadow"] = finbert_shadow
+
+
+def _stash_cryptobert_shadow(ab_key: str, cryptobert_shadow: dict | None) -> None:
+    """Attach the inline CryptoBERT shadow result to a pending A/B entry.
+
+    Added 2026-04-28 when CryptoBERT was demoted from crypto primary to
+    shadow. Symmetric with _stash_finbert_shadow.
+    """
+    with _pending_ab_lock:
+        entry = _pending_ab_entries.get(ab_key)
+        if entry is not None:
+            entry["cryptobert_shadow"] = cryptobert_shadow
 
 
 def _stash_fingpt_result(ab_key: str, sub_key: str, result) -> None:
@@ -457,6 +473,13 @@ def flush_ab_log() -> None:
             finbert = entry.get("finbert_shadow")
             if finbert is not None:
                 shadow.append(finbert)
+
+            # CryptoBERT shadow (added 2026-04-28 — was the primary; demoted
+            # to shadow due to 99.1% neutral output on press-wire input).
+            # Crypto tickers only; entry stays None for stocks.
+            cryptobert = entry.get("cryptobert_shadow")
+            if cryptobert is not None:
+                shadow.append(cryptobert)
 
             if shadow:
                 _log_ab_result(entry["ticker"], entry["primary_result"], shadow)
@@ -552,16 +575,20 @@ _SIGNIFICANT_KEYWORDS = {
 # Aggregation
 # ---------------------------------------------------------------------------
 
-def _aggregate_sentiments(sentiments, headlines=None, dissemination_mult=1.0):
-    """Aggregate sentiment scores, weighted by headline keywords and dissemination.
+# Decisiveness margins added 2026-04-28. See docs/PLAN_sentiment_2026_04_28.md
+# for the full rationale; tl;dr: the old aggregator returned the top label by
+# 0.001 vs second, so a 0.34/0.33/0.33 split labeled "positive". Now we require
+# a real margin before committing to a non-neutral verdict, and we default to
+# label-majority over score-averaging so a few decisive headlines are not
+# drowned by many tepid-neutral peers.
+_DECISIVE_MARGIN_AVG = 0.05      # avg-mode: top-vs-second margin in prob units
+_DECISIVE_MARGIN_PER_HEADLINE = 0.10  # majority-mode: per-headline label margin
+_DECISIVE_MARGIN_MAJORITY = 1e-9  # majority-mode: top-vs-second weight margin
+                                  # (zero-tolerance — exact ties go neutral)
 
-    When headlines are provided, each sentiment score is multiplied by the
-    keyword weight from news_keywords.score_headline(). High-impact keywords
-    (tariff, war, crash) get 2-3x amplification.
 
-    dissemination_mult applies the FinGPT dissemination-aware multiplier
-    to all weights (wider news spread = stronger signal).
-    """
+def _compute_weights(sentiments, headlines, dissemination_mult):
+    """Return per-sentiment weights from keyword scoring + dissemination."""
     if headlines and len(headlines) == len(sentiments):
         from portfolio.news_keywords import score_headline
         weights = []
@@ -571,16 +598,129 @@ def _aggregate_sentiments(sentiments, headlines=None, dissemination_mult=1.0):
             weights.append(w * dissemination_mult)
     else:
         weights = [dissemination_mult] * len(sentiments)
+    return weights
+
+
+def _aggregate_sentiments(sentiments, headlines=None, dissemination_mult=1.0,
+                           *, mode="majority"):
+    """Aggregate sentiment scores into a single (label, avg_dict) verdict.
+
+    mode="majority" (default, 2026-04-28): label-majority vote.
+        Each headline gets its own decisive label (top score must beat second
+        by >=_DECISIVE_MARGIN_PER_HEADLINE, else "neutral"), then a weighted
+        majority over those labels picks the verdict. Exact ties resolve to
+        neutral. The returned avg_dict is still the score-weighted-average
+        (kept identical for backward-compat with consumers that read
+        avg_scores like sentiment_avg_scores in signal_engine.py:2452).
+
+    mode="average": legacy probability-averaging. Returns the top-scored
+        label IF its margin over the second exceeds _DECISIVE_MARGIN_AVG;
+        otherwise downgrades to "neutral". The pure-max-without-margin
+        behavior was the source of the W16-W17 sentiment regression and is
+        no longer reachable.
+
+    When headlines are provided, score weights from news_keywords.score_headline()
+    amplify high-impact keywords (tariff/war/crash 3x). dissemination_mult
+    multiplies all weights when news is widely cross-referenced.
+    """
+    if not sentiments:
+        return "neutral", {"positive": 0.33, "negative": 0.33, "neutral": 0.34}
+
+    weights = _compute_weights(sentiments, headlines, dissemination_mult)
+    total_w = sum(weights)
+    if total_w == 0:
+        return "neutral", {"positive": 0.33, "negative": 0.33, "neutral": 0.34}
 
     pos_sum = sum(s["scores"]["positive"] * w for s, w in zip(sentiments, weights))
     neg_sum = sum(s["scores"]["negative"] * w for s, w in zip(sentiments, weights))
     neu_sum = sum(s["scores"]["neutral"] * w for s, w in zip(sentiments, weights))
-    total_w = sum(weights)
-    if total_w == 0:
-        return "neutral", {"positive": 0.33, "negative": 0.33, "neutral": 0.34}
-    avg = {"positive": pos_sum / total_w, "negative": neg_sum / total_w, "neutral": neu_sum / total_w}
+    avg = {
+        "positive": pos_sum / total_w,
+        "negative": neg_sum / total_w,
+        "neutral":  neu_sum / total_w,
+    }
+
+    if mode == "majority":
+        verdict = _majority_label(sentiments, weights)
+        return verdict, avg
+
+    # mode == "average" — legacy threshold-augmented score-averaging
     overall = max(avg, key=avg.get)
+    sorted_scores = sorted(avg.values(), reverse=True)
+    margin = sorted_scores[0] - sorted_scores[1]
+    if margin < _DECISIVE_MARGIN_AVG and overall != "neutral":
+        return "neutral", avg
     return overall, avg
+
+
+def _majority_label(sentiments, weights):
+    """Per-headline decisive label, then weighted majority vote.
+
+    Each headline classified as positive/negative/neutral with its own per-
+    headline margin gate. Weights are summed per label; winner returned only
+    if it beats the second by more than _DECISIVE_MARGIN_MAJORITY.
+    """
+    bucket = {"positive": 0.0, "negative": 0.0, "neutral": 0.0}
+    for s, w in zip(sentiments, weights):
+        scores = s["scores"]
+        # decisive per-headline label: top must beat second by margin
+        ordered = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+        top_label, top_score = ordered[0]
+        second_score = ordered[1][1]
+        if (top_score - second_score) < _DECISIVE_MARGIN_PER_HEADLINE:
+            top_label = "neutral"
+        bucket[top_label] += w
+
+    ordered_buckets = sorted(bucket.items(), key=lambda kv: kv[1], reverse=True)
+    winner_label, winner_w = ordered_buckets[0]
+    runner_w = ordered_buckets[1][1]
+    if (winner_w - runner_w) <= _DECISIVE_MARGIN_MAJORITY:
+        return "neutral"
+    return winner_label
+
+
+def _filter_relevant_headlines(articles, ticker, *, fallback_n=3):
+    """Drop wire-noise headlines before model inference.
+
+    Uses news_keywords.is_relevant_headline (keyword OR ticker-synonym match)
+    plus a credible-source-with-long-title escape hatch (Reuters/Bloomberg/
+    etc. + title >= 25 chars covers in-depth coverage that doesn't happen to
+    mention the ticker by name).
+
+    Falls back to most-recent `fallback_n` if the filter would drop
+    everything — better to have noisy signal than silent signal on slow
+    news days.
+    """
+    if not articles:
+        return []
+
+    from portfolio.news_keywords import is_credible_source, is_relevant_headline
+
+    kept = []
+    for a in articles:
+        title = a.get("title", "") if isinstance(a, dict) else str(a)
+        if is_relevant_headline(title, ticker):
+            kept.append(a)
+            continue
+        # Credible-source escape hatch: long titles from credible outlets are
+        # almost always real coverage worth scoring.
+        source = a.get("source", "") if isinstance(a, dict) else ""
+        if is_credible_source(source) and len(title.strip()) >= 25:
+            kept.append(a)
+
+    if kept:
+        return kept
+
+    # All-irrelevant fallback: keep the most-recent N articles. Sort by the
+    # `published` field (ISO timestamp string sorts chronologically), most
+    # recent first. Articles without `published` sort last via empty-string
+    # default.
+    sorted_articles = sorted(
+        articles,
+        key=lambda a: a.get("published", "") if isinstance(a, dict) else "",
+        reverse=True,
+    )
+    return sorted_articles[:fallback_n]
 
 
 def _log_ab_result(ticker, primary_result, shadow_results):
@@ -609,8 +749,21 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
                    *, cryptocompare_api_key=None) -> dict:
     """Get sentiment for a ticker using primary model + shadow A/B models.
 
-    Primary model (votes): CryptoBERT (crypto) or Trading-Hero-LLM (stocks)
-    Shadow models (logged only): FinGPT, FinBERT
+    2026-04-28 (fix/sentiment-relevance-and-aggregation): two changes here.
+      1. Crypto primary model swapped CryptoBERT -> Trading-Hero-LLM.
+         CryptoBERT was 99.1% neutral on 2,817 wire-feed samples (it was
+         trained on crypto-twitter slang, not press-wire headlines).
+         CryptoBERT now runs as a shadow for continuity of the 30d accuracy
+         baseline. Trading-Hero is permabull on financial news but at least
+         produces variance; the 47% directional accuracy gate still acts as
+         a circuit breaker if it underperforms.
+      2. Headlines pass through _filter_relevant_headlines() before model
+         inference. Bare price-tickers ("Bitcoin: $67,123") and generic
+         market-update boilerplate are dropped. Fallback keeps the most-
+         recent N when the filter would drop everything.
+
+    Primary model (votes):  Trading-Hero-LLM (both crypto and stocks)
+    Shadow models (logged): CryptoBERT (crypto only), FinGPT, FinBERT
 
     Returns the primary model's result. Shadow results are logged to
     data/sentiment_ab_log.jsonl for accuracy tracking.
@@ -622,21 +775,21 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
         articles = _fetch_crypto_headlines(
             short, cryptocompare_api_key=cryptocompare_api_key,
         )
-        model_script = CRYPTOBERT_SCRIPT
-        model_name = "CryptoBERT"
     else:
         articles = _fetch_stock_headlines(short, newsapi_key=newsapi_key)
-        model_script = TRADING_HERO_SCRIPT
-        model_name = "Trading-Hero-LLM"
+    # 2026-04-28: Trading-Hero-LLM is the primary across all asset classes.
+    # See module/function docstring for the CryptoBERT demotion rationale.
+    model_script = TRADING_HERO_SCRIPT
+    model_name = "Trading-Hero-LLM"
 
     social = social_posts or []
-    all_articles = articles + social
+    raw_all = articles + social
     sources = {
         "news": len(articles),
         "reddit": sum(1 for p in social if "reddit" in p.get("source", "")),
     }
 
-    if not all_articles:
+    if not raw_all:
         return {
             "overall_sentiment": "unknown",
             "confidence": 0.0,
@@ -646,6 +799,9 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
             "details": [],
         }
 
+    # Drop wire-noise before inference. The filter has a most-recent-N
+    # fallback so we never go silent on slow-news days.
+    all_articles = _filter_relevant_headlines(raw_all, short)
     titles = [a["title"] for a in all_articles]
 
     # Compute dissemination score for weight amplification
@@ -751,6 +907,27 @@ def get_sentiment(ticker="BTC", newsapi_key=None, social_posts=None,
             })
     except Exception as e:
         logger.debug("FinBERT shadow failed: %s", e)
+
+    # Shadow: CryptoBERT — demoted from primary 2026-04-28. Kept as shadow
+    # for crypto tickers only so we (a) preserve the 30d accuracy baseline
+    # for comparison and (b) still notice if the model ever recovers from
+    # its 99.1% neutral-output collapse. Stashed into the pending A/B
+    # buffer; picked up by flush_ab_log alongside FinGPT and FinBERT.
+    if is_crypto:
+        try:
+            crypto_results = _run_model(CRYPTOBERT_SCRIPT, titles)
+            if crypto_results:
+                cb_overall, cb_avg = _aggregate_sentiments(
+                    crypto_results, headlines=all_articles, dissemination_mult=diss_mult,
+                )
+                _stash_cryptobert_shadow(ab_key, {
+                    "model": "CryptoBERT",
+                    "sentiment": cb_overall,
+                    "confidence": round(cb_avg[cb_overall], 4),
+                    "avg_scores": {k: round(v, 4) for k, v in cb_avg.items()},
+                })
+        except Exception as e:
+            logger.debug("CryptoBERT shadow failed: %s", e)
 
     return primary_result
 

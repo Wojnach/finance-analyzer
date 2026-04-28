@@ -260,3 +260,94 @@ def get_sector_impact(keyword: str, ticker: str) -> str | None:
         if sector in ticker_secs:
             return direction
     return None
+
+
+# ---------------------------------------------------------------------------
+# Headline relevance (added 2026-04-28 for sentiment regression fix)
+# ---------------------------------------------------------------------------
+#
+# Background: shadow LLM accuracy investigation found that the sentiment
+# pipeline was scoring every wire-feed headline returned by Yahoo/CryptoCompare,
+# including bare price-tickers like "Bitcoin: $67,123" and generic
+# "Markets mixed in afternoon trade" boilerplate. Models correctly labeled
+# these neutral, but the neutral mass drowned out the few decisive headlines
+# in the average. Sentiment regressed from 75.3% -> ~42% over W16-W17.
+#
+# A headline is "relevant" to a ticker if:
+#   1. It triggers a keyword from score_headline (weight > 1.0), OR
+#   2. It mentions the ticker symbol or a known synonym (Bitcoin/BTC,
+#      Ethereum/ETH, gold/XAU, silver/XAG, or the stock symbol)
+# Source-credibility lives in the wrapper in portfolio/sentiment.py, not here.
+
+_TICKER_SYNONYMS: dict[str, list[str]] = {
+    "BTC": ["btc", "bitcoin", "bitcoins"],
+    "ETH": ["eth", "ethereum", "ether"],
+    "XAU": ["xau", "gold", "bullion"],
+    "XAG": ["xag", "silver"],
+    "MSTR": ["mstr", "microstrategy"],
+    "NVDA": ["nvda", "nvidia"],
+    "AMD": ["amd"],
+    "GOOGL": ["googl", "google", "alphabet"],
+    "AMZN": ["amzn", "amazon"],
+    "AAPL": ["aapl", "apple"],
+    "META": ["meta", "facebook", "instagram"],
+    "AVGO": ["avgo", "broadcom"],
+    "TSM": ["tsm", "tsmc"],
+    "MU": ["mu", "micron"],
+    "PLTR": ["pltr", "palantir"],
+    "SMCI": ["smci"],
+    "TTWO": ["ttwo", "rockstar"],
+    "VRT": ["vrt", "vertiv"],
+    "LMT": ["lmt", "lockheed"],
+    "SOUN": ["soun", "soundhound"],
+}
+
+
+def _ticker_synonym_pattern(ticker: str) -> re.Pattern | None:
+    short = ticker.upper().replace("-USD", "")
+    syns = _TICKER_SYNONYMS.get(short)
+    if not syns:
+        if not short or not short.isalnum():
+            return None
+        return re.compile(r"\b" + re.escape(short) + r"\b", re.IGNORECASE)
+    pattern = "|".join(re.escape(s) for s in syns)
+    return re.compile(r"\b(" + pattern + r")\b", re.IGNORECASE)
+
+
+# Memoize per-ticker patterns; tickers are a fixed small set so the cache
+# never grows large. None values are cached too (use sentinel-via-membership).
+_PATTERN_CACHE: dict[str, re.Pattern | None] = {}
+
+
+def is_relevant_headline(title: str, ticker: str) -> bool:
+    """Return True if the headline is plausibly relevant to the ticker.
+
+    Used by the sentiment pipeline to filter wire-noise before model inference.
+    See the module-level comment block above for background.
+
+    Minimum content gate: even when a ticker synonym matches, the headline
+    must have at least 3 word tokens AFTER stripping the synonym itself.
+    This drops bare price-tickers like "Bitcoin: $67,123" (1 token after
+    removing "Bitcoin") while keeping "Bitcoin treasury firm adds 500 BTC"
+    (5 tokens after removing the synonyms).
+    """
+    if not title or not title.strip():
+        return False
+
+    weight, _ = score_headline(title)
+    if weight > 1.0:
+        return True
+
+    short = ticker.upper().replace("-USD", "")
+    if short not in _PATTERN_CACHE:
+        _PATTERN_CACHE[short] = _ticker_synonym_pattern(short)
+    pat = _PATTERN_CACHE[short]
+    if pat is None or not pat.search(title):
+        return False
+
+    # Synonym matched — guard against bare price-ticker noise. Strip the
+    # synonym occurrences and count the remaining word tokens; need >=3 to
+    # be considered real content.
+    stripped = pat.sub(" ", title)
+    tokens = [t for t in re.findall(r"\b[A-Za-z]{2,}\b", stripped) if t.lower() not in {"the", "and", "for", "from"}]
+    return len(tokens) >= 3
