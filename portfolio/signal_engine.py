@@ -1758,12 +1758,22 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             for k, v in votes.items()
         }
 
-    # Top-N gate: only let the top max_signals (by accuracy) participate
+    # Top-N gate: only let the top max_signals (by accuracy) participate.
+    # Codex round 2 P2 (2026-04-28): rank with macro-adjusted accuracy so
+    # downweighted signals lose Top-N slots to healthier peers during a
+    # macro window. Without this, sentiment can keep its slot at full
+    # raw accuracy and exclude a peer that would have voted more reliably.
+    def _topn_accuracy_key(s: str) -> float:
+        base = accuracy_data.get(s, {}).get("accuracy", 0.5)
+        if macro_active and s in MACRO_WINDOW_DOWNWEIGHT_SIGNALS:
+            base *= MACRO_WINDOW_DOWNWEIGHT_MULTIPLIER
+        return base
+
     active_votes = {k: v for k, v in votes.items() if v != "HOLD"}
     if max_signals and len(active_votes) > max_signals:
         ranked = sorted(
             active_votes.keys(),
-            key=lambda s: accuracy_data.get(s, {}).get("accuracy", 0.5),
+            key=_topn_accuracy_key,
             reverse=True,
         )
         excluded = set(ranked[max_signals:])
@@ -3070,6 +3080,19 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         if sig_name in votes and votes[sig_name] != "HOLD":
             votes[sig_name] = "HOLD"
 
+    # Codex round 2 P1 (2026-04-28): macro-window force-HOLD must mutate
+    # `votes` BEFORE buy/sell/core_active are computed below — otherwise
+    # those counts come from the pre-mutation state and the gate at
+    # line ~3333 ("core_active == 0 ...") sees a stale 1 even when the
+    # only core voter (e.g. claude_fundamental) was suppressed by macro.
+    # Mirrors the existing regime_gate / horizon_disabled mutation
+    # pattern above.
+    macro_active_effective = _is_macro_window_cached()
+    if macro_active_effective and MACRO_WINDOW_FORCE_HOLD_SIGNALS:
+        for sig_name in MACRO_WINDOW_FORCE_HOLD_SIGNALS:
+            if sig_name in votes and votes[sig_name] != "HOLD":
+                votes[sig_name] = "HOLD"
+
     if ticker:
         _record_phase(ticker, "regime_gate", _phase_start)
         _phase_start = time.monotonic()
@@ -3292,20 +3315,11 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
     if _filtered_count > 0:
         extra_info["_persistence_filtered"] = _filtered_count
 
-    # Codex P1 (2026-04-28): apply macro-window force-HOLD here, BEFORE
-    # the voter quorum count below. _weighted_consensus also runs the
-    # same pre-pass as defense-in-depth, but if we deferred the
-    # mutation to inside _weighted_consensus, post_persistence_voters
-    # would still count claude_fundamental as a voter — and the
-    # MIN_VOTERS gate at line ~3308 would pass on inflated count
-    # during a macro window, emitting a non-HOLD action with one
-    # fewer real participant than required.
-    _macro_active_for_count = _is_macro_window_cached()
-    if _macro_active_for_count and MACRO_WINDOW_FORCE_HOLD_SIGNALS:
-        consensus_votes = {
-            k: ("HOLD" if k in MACRO_WINDOW_FORCE_HOLD_SIGNALS else v)
-            for k, v in consensus_votes.items()
-        }
+    # Macro-window force-HOLD has already been applied to `votes` above
+    # (before buy/sell/core_active counting), so `consensus_votes` —
+    # which derives from `votes` via persistence filter — already
+    # carries the suppression. No additional mutation needed here.
+    # `_weighted_consensus` runs its own pre-pass as defense-in-depth.
 
     # BUG-224: compute post-persistence voter count so downstream consumers
     # (accuracy tracking, Layer 2) see the actual participating voter count,
