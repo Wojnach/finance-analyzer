@@ -83,6 +83,7 @@ DISABLED_SIGNALS = {
     "mahalanobis_turbulence",  # pending live validation (added 2026-04-24)
     "crypto_evrp",  # pending live validation (added 2026-04-25)
     "hash_ribbons",  # pending live validation (added 2026-04-26)
+    "drift_regime_gate",  # pending live validation (added 2026-04-28)
     # "econ_calendar" RE-ENABLED 2026-04-23. BUG-218 fixed: added post_event_relief
     # sub-signal that emits BUY after high-impact events pass (4-24h relief window)
     # and during event-free calm windows (>72h to next event). The composite is now
@@ -182,4 +183,5 @@ SIGNAL_NAMES = [
     "mahalanobis_turbulence",
     "crypto_evrp",
     "hash_ribbons",
+    "drift_regime_gate",
 ]

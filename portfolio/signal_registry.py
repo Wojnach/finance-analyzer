@@ -234,6 +234,12 @@ def _register_defaults():
     # blockchain.info API (free, no auth). Fires ~1/year but extreme conviction.
     register_enhanced("hash_ribbons", "portfolio.signals.hash_ribbons",
                       "compute_hash_ribbons_signal", requires_context=True, max_confidence=0.7)
+    # Drift Regime Gate — positive-day fraction regime detector; capped at 0.7
+    # 2026-04-28: arxiv:2511.12490 (2025). OOS Sharpe >13 on 20yr walk-forward.
+    # Fraction of positive close-to-close days in 63-bar window detects drift regime.
+    # Pure OHLCV, all 5 tickers. Directional via SMA distance.
+    register_enhanced("drift_regime_gate", "portfolio.signals.drift_regime_gate",
+                      "compute_drift_regime_gate_signal", max_confidence=0.7)
 
 
 _register_defaults()
