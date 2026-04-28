@@ -1238,6 +1238,26 @@ def _write_tier2_summary(summary, triggered_tickers=None):
                 "price_usd": sig.get("price_usd", 0),
             }
 
+    # Signal density: how many signals are actively voting vs total applicable.
+    # Layer 2 needs this to judge consensus quality — 3/33 voters is thin.
+    density = {}
+    for ticker, sig in signals.items():
+        extra = sig.get("extra", {})
+        total_app = extra.get("_total_applicable", 0) or 0
+        buy_c = extra.get("_buy_count", 0) or 0
+        sell_c = extra.get("_sell_count", 0) or 0
+        active = buy_c + sell_c
+        if total_app > 0:
+            density[ticker] = {
+                "active_voters": active,
+                "total_applicable": total_app,
+                "density": round(active / total_app, 2),
+                "buy": buy_c,
+                "sell": sell_c,
+            }
+    if density:
+        t2["signal_density"] = density
+
     # Include macro, accuracy, portfolio, and market health sections from full summary
     for key in ("macro", "signal_accuracy_1d", "signal_reliability", "onchain",
                 "cross_asset_leads", "avanza_instruments", "portfolio",
