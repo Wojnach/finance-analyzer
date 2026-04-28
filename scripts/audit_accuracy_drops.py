@@ -31,6 +31,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from portfolio.accuracy_stats import (  # noqa: E402
+    accuracy_by_ticker_signal_cached,
     consensus_accuracy,
     signal_accuracy,
 )
@@ -116,6 +117,24 @@ def main(argv: list[str] | None = None) -> int:
     lifetime_signals = signal_accuracy("1d", entries=lifetime_entries)
     recent_signals = signal_accuracy("1d", entries=recent_entries)
     recent_per_ticker = _per_ticker_recent("1d", days=7, entries=recent_entries)
+    # Codex P3 fix (2026-04-28): per_ticker lifetime so MSTR::sentiment
+    # compares against MSTR's own lifetime sentiment, not the global one.
+    # Mixing populations (per-ticker recent vs global lifetime) inflates
+    # or deflates the verdict for ticker-specific drops.
+    # We compute lifetime per-ticker from ``lifetime_entries`` directly
+    # (same dataset as signal_accuracy) so both arms are commensurable.
+    # accuracy_by_ticker_signal_cached uses the default backend which is
+    # often empty for one-shot script runs.
+    try:
+        lifetime_per_ticker = _per_ticker_recent(
+            "1d", days=10_000, entries=lifetime_entries,
+        )
+    except Exception as e:
+        print(f"  warn: per-ticker lifetime fetch failed: {e}", file=sys.stderr)
+        try:
+            lifetime_per_ticker = accuracy_by_ticker_signal_cached("1d")
+        except Exception:
+            lifetime_per_ticker = {}
 
     flagged = _alert_keys_from_state(alert_state)
     if not flagged:
@@ -136,15 +155,34 @@ def main(argv: list[str] | None = None) -> int:
             life = lifetime_signals.get(key, {})
             rec = recent_signals.get(key, {})
         elif scope == "per_ticker":
-            # key = "TICKER::signal_name"
+            # key = "TICKER::signal_name". Codex P3 fix: lifetime must be
+            # the per-ticker lifetime, not the global signal lifetime.
             ticker, _, signal_name = key.partition("::")
-            life = (
-                lifetime_signals.get(signal_name, {})
+            life = (lifetime_per_ticker.get(ticker, {}) or {}).get(
+                signal_name, {},
             )
             rec = (recent_per_ticker.get(ticker, {}) or {}).get(signal_name, {})
         elif scope == "consensus":
             life = consensus_accuracy("1d", entries=lifetime_entries)
             rec = consensus_accuracy("1d", entries=recent_entries)
+        elif scope == "forecast":
+            # Codex P3 fix (2026-04-28): forecast alerts have keys like
+            # "chronos_24h" / "kronos_24h"; route through the same
+            # cached_forecast_accuracy infra the live writer uses.
+            from portfolio.forecast_accuracy import cached_forecast_accuracy
+            try:
+                forecast_recent = cached_forecast_accuracy(
+                    horizon="24h", days=7, use_raw_sub_signals=True,
+                )
+                forecast_lifetime = cached_forecast_accuracy(
+                    horizon="24h", days=365, use_raw_sub_signals=True,
+                )
+            except Exception as e:
+                print(f"  warn: forecast accuracy fetch failed: {e}",
+                      file=sys.stderr)
+                forecast_recent, forecast_lifetime = {}, {}
+            life = forecast_lifetime.get(key, {})
+            rec = forecast_recent.get(key, {})
         else:
             life, rec = {}, {}
 

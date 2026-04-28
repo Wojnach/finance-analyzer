@@ -103,13 +103,25 @@ def _compact_per_ticker(per_ticker: dict) -> dict:
 
 def build_historical_snapshot(
     *, all_entries: list[dict], target_dt: datetime, days: int = 7,
+    forecast_recent_template: dict | None = None,
 ) -> dict:
     """Build a partial snapshot dict matching the live writer's shape.
 
     Includes signals (lifetime as of target_dt), signals_recent,
-    consensus, consensus_recent, per_ticker_recent. Skips per_ticker
-    lifetime + forecast — those are not used by the recent-window
-    diff that drives the degradation alert.
+    consensus, consensus_recent, per_ticker_recent.
+
+    ``forecast_recent`` is filled from ``forecast_recent_template`` (a
+    snapshot block from the nearest live snapshot) when provided. This
+    is a Codex P2 fix (round 1 2026-04-28): without forecast_recent on
+    backfilled days, the detector silently skips forecast comparisons
+    when one of those days becomes the 7-day baseline. Copying the
+    nearest live forecast_recent value avoids the blind spot — at the
+    cost of treating forecast as flat across the backfill window. New
+    forecast degradation in that 6-day window is unrecoverable from
+    JSONL alone.
+
+    Lifetime per_ticker is omitted — the detector's recent-window
+    diff doesn't read it.
     """
     cutoff = target_dt
     lower = cutoff - timedelta(days=days)
@@ -172,6 +184,9 @@ def build_historical_snapshot(
     except Exception as e:
         print(f"  warn: consensus_recent failed: {e}", file=sys.stderr)
 
+    if forecast_recent_template:
+        snapshot["forecast_recent"] = dict(forecast_recent_template)
+
     return snapshot
 
 
@@ -193,6 +208,61 @@ def _existing_dates(jsonl_path: Path) -> set[date]:
             except (ValueError, TypeError, json.JSONDecodeError):
                 continue
     return dates
+
+
+def _load_existing_snapshots(jsonl_path: Path) -> list[dict]:
+    """Load all existing snapshot dicts from JSONL (preserves file order)."""
+    if not jsonl_path.exists():
+        return []
+    out: list[dict] = []
+    with jsonl_path.open(encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return out
+
+
+def _newest_forecast_recent(snapshots: list[dict]) -> dict | None:
+    """Return the most recent non-empty forecast_recent block.
+
+    Used as a placeholder for backfilled days that lack forecast data —
+    keeps the detector's forecast scope from going blind on those days.
+    """
+    for snap in reversed(snapshots):
+        fr = snap.get("forecast_recent")
+        if isinstance(fr, dict) and fr:
+            return fr
+    return None
+
+
+def _sort_jsonl_chronologically(jsonl_path: Path) -> int:
+    """Re-write ``jsonl_path`` with all entries sorted by ts (oldest first).
+
+    Codex P2 fix (round 1 2026-04-28): atomic_append_jsonl writes new
+    entries at the end regardless of timestamp. If the file already
+    contains a newer row (e.g. today's manual snapshot), append-only
+    backfill leaves the older snapshots after the newer one; the daily
+    summary path uses ``snapshots[-1]`` as "latest" and reads stale
+    data. Sorting once at the end of backfill keeps file order
+    monotonic in time.
+
+    Returns the number of entries written.
+    """
+    snaps = _load_existing_snapshots(jsonl_path)
+
+    def _key(snap: dict) -> str:
+        return snap.get("ts", "")
+
+    snaps.sort(key=_key)
+
+    from portfolio.file_utils import atomic_write_jsonl
+    atomic_write_jsonl(jsonl_path, snaps)
+    return len(snaps)
 
 
 def _daterange(start: date, end: date):
@@ -222,9 +292,16 @@ def main(argv: list[str] | None = None) -> int:
     entries = _load_signal_log_entries(args.signal_log)
     print(f"  loaded {len(entries):,} entries", file=sys.stderr)
 
+    existing_snaps = _load_existing_snapshots(args.output_jsonl)
     existing = _existing_dates(args.output_jsonl)
     print(f"Existing snapshot dates in {args.output_jsonl}: "
           f"{sorted(existing)[-5:]}", file=sys.stderr)
+    forecast_template = _newest_forecast_recent(existing_snaps)
+    if forecast_template:
+        print(
+            f"  forecast_recent template: {len(forecast_template)} model(s) "
+            f"(copied from nearest live snapshot)", file=sys.stderr,
+        )
 
     from portfolio.file_utils import atomic_append_jsonl
 
@@ -242,6 +319,7 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         snap = build_historical_snapshot(
             all_entries=entries, target_dt=target_dt,
+            forecast_recent_template=forecast_template,
         )
 
         n_signals = len(snap.get("signals_recent", {}))
@@ -267,6 +345,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"Wrote {written} new snapshots to {args.output_jsonl}",
               file=sys.stderr)
+        if written > 0:
+            total = _sort_jsonl_chronologically(args.output_jsonl)
+            print(f"Sorted {total} entries chronologically", file=sys.stderr)
     return 0
 
 
