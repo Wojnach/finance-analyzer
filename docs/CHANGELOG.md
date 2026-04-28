@@ -1,5 +1,47 @@
 # Changelog
 
+## 2026-04-28 (sentiment relevance + decisive aggregation fix)
+
+Targeted fix for the 75.3% -> ~42% sentiment accuracy collapse flagged in
+`data/critical_errors.jsonl` 2026-04-28 (6 unresolved entries citing
+`sentiment` as the lead drop). Four changes that compose:
+
+- **Headline relevance filter** — `is_relevant_headline()` in
+  `portfolio/news_keywords.py` plus `_filter_relevant_headlines()` wrapper
+  in `portfolio/sentiment.py`. Drops wire-noise (bare price-tickers like
+  "Bitcoin: $67,123", generic "Markets mixed in afternoon trade"
+  boilerplate) BEFORE model inference. Keeps headlines with a
+  CRITICAL/HIGH/MODERATE keyword OR a ticker-synonym mention with >=3
+  content tokens. Credible-source-with-long-title escape hatch covers
+  Reuters/Bloomberg in-depth coverage that doesn't happen to mention the
+  ticker by name. Most-recent-N fallback so we never go silent on
+  slow-news days.
+- **Decisiveness threshold** in `_aggregate_sentiments(mode='average')`.
+  A 0.34/0.33/0.33 split used to commit to the 0.34 label; now requires
+  >=0.05 margin between top and second to commit to a non-neutral verdict.
+- **Label-majority aggregation** is the new default (`mode='majority'`).
+  Per-headline decisive labels with their own >=0.10 margin gate, then
+  weighted-majority vote with exact-tie -> neutral. Matches how the shadow
+  evaluator scores rows. Old probability-averaging mode preserved as
+  `mode='average'`.
+- **CryptoBERT demoted from crypto primary to crypto shadow.** 2,817
+  samples showed 99.1% neutral output — the model was trained on
+  crypto-twitter slang and cannot engage with press-wire headlines.
+  Trading-Hero-LLM is now primary across all tickers; CryptoBERT keeps
+  running as shadow so the 30d accuracy baseline stays continuous and
+  we'd notice if it ever recovers. The 47% directional accuracy gate
+  still acts as a circuit breaker if Trading-Hero underperforms on
+  crypto.
+
+Files: `portfolio/news_keywords.py`, `portfolio/sentiment.py`,
+`tests/test_sentiment_relevance_filter.py` (new, 19 cases),
+`tests/test_portfolio.py` (12 new aggregation cases).
+
+79 sentiment-domain tests pass. Same 9 failures appear on main and on
+branch when running broader test clusters — all pre-existing per
+docs/TESTING.md (xdist isolation flakes + signal-count tests asserting
+stale counts). No new failures introduced.
+
 ## 2026-04-28 (auto-improve: security + lint cleanup)
 
 6 bug fixes, 78 lint violations resolved across portfolio/, data/, scripts/.

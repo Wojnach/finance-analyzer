@@ -243,6 +243,134 @@ class TestSentimentAggregation:
         assert overall == "neutral"
 
 
+class TestSentimentDecisiveness:
+    """Margin-based decisiveness threshold added 2026-04-28.
+
+    A 0.34/0.33/0.33 split used to win as the 0.34 label (neutral or
+    whichever) by 0.001 — essentially random. Now requires a margin of
+    >=0.05 between top and second to commit to a non-neutral label.
+    """
+
+    def test_clear_winner_kept(self):
+        # margin 0.50 - 0.30 = 0.20, well above threshold
+        sentiments = [
+            {"scores": {"positive": 0.50, "negative": 0.30, "neutral": 0.20}},
+        ]
+        overall, _ = _aggregate_sentiments(sentiments, mode="average")
+        assert overall == "positive"
+
+    def test_thin_margin_demoted_to_neutral(self):
+        # 0.34 / 0.33 / 0.33 — margin 0.01 < 0.05; should be neutral
+        sentiments = [
+            {"scores": {"positive": 0.34, "negative": 0.33, "neutral": 0.33}},
+        ]
+        overall, _ = _aggregate_sentiments(sentiments, mode="average")
+        assert overall == "neutral"
+
+    def test_thin_negative_margin_demoted(self):
+        sentiments = [
+            {"scores": {"positive": 0.32, "negative": 0.36, "neutral": 0.32}},
+        ]
+        overall, _ = _aggregate_sentiments(sentiments, mode="average")
+        # margin 0.04 < 0.05
+        assert overall == "neutral"
+
+    def test_neutral_top_with_thin_margin_stays_neutral(self):
+        sentiments = [
+            {"scores": {"positive": 0.30, "negative": 0.30, "neutral": 0.40}},
+        ]
+        overall, _ = _aggregate_sentiments(sentiments, mode="average")
+        # neutral wins by 0.10, no demotion needed
+        assert overall == "neutral"
+
+    def test_threshold_at_exactly_005_margin_kept(self):
+        # 0.40 vs 0.35 = margin 0.05, at threshold (>= 0.05 keeps it)
+        sentiments = [
+            {"scores": {"positive": 0.40, "negative": 0.35, "neutral": 0.25}},
+        ]
+        overall, _ = _aggregate_sentiments(sentiments, mode="average")
+        assert overall == "positive"
+
+
+class TestSentimentMajority:
+    """Label-majority aggregation introduced 2026-04-28.
+
+    Per-headline label classification (with its own per-headline margin
+    threshold) followed by weighted majority vote. Replaces score-averaging
+    as the default mode so a few decisive headlines aren't drowned by many
+    permaneutral peers.
+    """
+
+    def test_majority_positive(self):
+        # 3 decisive positive + 1 neutral → positive
+        sentiments = [
+            {"scores": {"positive": 0.80, "negative": 0.10, "neutral": 0.10}},
+            {"scores": {"positive": 0.75, "negative": 0.15, "neutral": 0.10}},
+            {"scores": {"positive": 0.85, "negative": 0.05, "neutral": 0.10}},
+            {"scores": {"positive": 0.20, "negative": 0.20, "neutral": 0.60}},
+        ]
+        overall, _ = _aggregate_sentiments(sentiments, mode="majority")
+        assert overall == "positive"
+
+    def test_three_neutral_one_weak_positive_returns_neutral(self):
+        # The exact problem we're fixing: tepid headlines outvote a single
+        # weak-positive. Per-headline threshold (0.10) means weak ones are
+        # also classified neutral, so all 4 are neutral → result neutral.
+        sentiments = [
+            {"scores": {"positive": 0.30, "negative": 0.30, "neutral": 0.40}},
+            {"scores": {"positive": 0.30, "negative": 0.30, "neutral": 0.40}},
+            {"scores": {"positive": 0.30, "negative": 0.30, "neutral": 0.40}},
+            {"scores": {"positive": 0.40, "negative": 0.30, "neutral": 0.30}},  # margin 0.10 — borderline
+        ]
+        overall, _ = _aggregate_sentiments(sentiments, mode="majority")
+        assert overall == "neutral"
+
+    def test_tied_majority_returns_neutral(self):
+        # 2 positive vs 2 negative — no winner
+        sentiments = [
+            {"scores": {"positive": 0.80, "negative": 0.10, "neutral": 0.10}},
+            {"scores": {"positive": 0.85, "negative": 0.05, "neutral": 0.10}},
+            {"scores": {"positive": 0.10, "negative": 0.80, "neutral": 0.10}},
+            {"scores": {"positive": 0.05, "negative": 0.85, "neutral": 0.10}},
+        ]
+        overall, _ = _aggregate_sentiments(sentiments, mode="majority")
+        assert overall == "neutral"
+
+    def test_keyword_weighted_majority_overrides_count(self):
+        # 1 critical-keyword headline (weight 3.0) outvotes 2 normal neutrals
+        # CRITICAL_KEYWORDS: tariff = 3.0
+        sentiments = [
+            {"scores": {"positive": 0.10, "negative": 0.85, "neutral": 0.05}},  # decisive negative
+            {"scores": {"positive": 0.30, "negative": 0.30, "neutral": 0.40}},  # neutral
+            {"scores": {"positive": 0.30, "negative": 0.30, "neutral": 0.40}},  # neutral
+        ]
+        headlines = [
+            {"title": "China tariff escalation hits semis"},
+            {"title": "Stocks mixed in afternoon trade"},
+            {"title": "Yields ease slightly"},
+        ]
+        overall, _ = _aggregate_sentiments(sentiments, mode="majority", headlines=headlines)
+        # critical-keyword weight 3.0 vs 1.0+1.0 = 2.0 for neutral
+        assert overall == "negative"
+
+    def test_majority_default_mode(self):
+        # Calling without mode= should use majority (the new default)
+        sentiments = [
+            {"scores": {"positive": 0.80, "negative": 0.10, "neutral": 0.10}},
+            {"scores": {"positive": 0.75, "negative": 0.15, "neutral": 0.10}},
+        ]
+        overall, _ = _aggregate_sentiments(sentiments)
+        assert overall == "positive"
+
+    def test_average_mode_still_supported(self):
+        # Old behavior preserved when mode="average" explicitly
+        sentiments = [
+            {"scores": {"positive": 0.50, "negative": 0.30, "neutral": 0.20}},
+        ]
+        overall, _ = _aggregate_sentiments(sentiments, mode="average")
+        assert overall == "positive"
+
+
 # --- sentiment API edge case ---
 
 
