@@ -156,6 +156,7 @@ def _compact_per_ticker(per_ticker: dict) -> dict:
 def build_historical_snapshot(
     *, all_entries: list[dict], target_dt: datetime, days: int = 7,
     forecast_recent_template: dict | None = None,
+    horizon_hours: int = 24,
 ) -> dict:
     """Build a partial snapshot dict matching the live writer's shape.
 
@@ -172,10 +173,22 @@ def build_historical_snapshot(
     forecast degradation in that 6-day window is unrecoverable from
     JSONL alone.
 
+    ``horizon_hours`` (default 24, matching the 1d snapshot horizon)
+    shifts the cutoff for entry inclusion back by one full horizon
+    window — predictions made at ``target_dt - horizon`` had their 1d
+    outcome resolved exactly at ``target_dt``. Including entries newer
+    than that means scoring outcomes that weren't knowable when the
+    live snapshot would have run, leaking future data into the
+    baseline (Codex round 4 P1 2026-04-28).
+
     Lifetime per_ticker is omitted — the detector's recent-window
     diff doesn't read it.
     """
-    cutoff = target_dt
+    # Shift cutoff back by one horizon so we only include outcomes that
+    # were knowable at target_dt. A signal logged at ts has its 1d outcome
+    # available at ts + 24h; including it in a target_dt snapshot means
+    # we'd be scoring the future.
+    cutoff = target_dt - timedelta(hours=horizon_hours)
     lower = cutoff - timedelta(days=days)
 
     historical_all = _filter_entries_by_cutoff(all_entries, cutoff)
@@ -281,18 +294,22 @@ def _load_existing_snapshots(jsonl_path: Path) -> list[dict]:
 def _nearest_forecast_recent(
     snapshots: list[dict], target_dt: datetime,
 ) -> dict | None:
-    """Return forecast_recent from the snapshot whose ts is closest to target_dt.
+    """Return forecast_recent from the most recent snapshot at or before
+    target_dt (preferred), falling back to the closest later snapshot
+    only if no earlier one exists.
 
-    Codex round 2 P2 fix (2026-04-28): the original implementation took
-    the *newest* forecast_recent globally. When backfilling Apr-22 with
-    an Apr-28 snapshot already on file, that placed Apr-28's forecast
-    metrics into Apr-22's baseline — so the detector compared current
-    forecast against forecast metrics measured on a *future* date, hiding
-    or fabricating regressions. Picking the snapshot nearest in time
-    (typically Apr-21 for an Apr-22 backfill) preserves the temporal
-    semantics of the comparison.
+    Codex round 2 P2 fix: the very first version took the newest
+    forecast_recent globally → leaked future metrics.
+
+    Codex round 4 P2 fix (2026-04-28): the second version used
+    ``abs(ts - target_dt)`` which is symmetric — for Apr 26/27 with a
+    live Apr 21 + Apr 28 on disk, abs would still pick Apr 28
+    (1-2 days forward) over Apr 21 (5-6 days back), reintroducing
+    the future leak. Fix: prefer past snapshots strictly. Use a
+    future snapshot only if no past forecast_recent exists at all.
     """
-    best: tuple[float, dict] | None = None
+    past: tuple[float, dict] | None = None  # (delta, fr) where ts <= target_dt
+    future: tuple[float, dict] | None = None  # ts > target_dt
     for snap in snapshots:
         fr = snap.get("forecast_recent")
         if not isinstance(fr, dict) or not fr:
@@ -302,10 +319,16 @@ def _nearest_forecast_recent(
             ts = datetime.fromisoformat(ts_str)
         except (ValueError, TypeError):
             continue
-        delta = abs((ts - target_dt).total_seconds())
-        if best is None or delta < best[0]:
-            best = (delta, fr)
-    return best[1] if best else None
+        delta = (target_dt - ts).total_seconds()  # positive when ts <= target_dt
+        if delta >= 0:
+            if past is None or delta < past[0]:
+                past = (delta, fr)
+        else:
+            if future is None or -delta < future[0]:
+                future = (-delta, fr)
+    if past is not None:
+        return past[1]
+    return future[1] if future else None
 
 
 def _sort_jsonl_chronologically(jsonl_path: Path) -> int:
