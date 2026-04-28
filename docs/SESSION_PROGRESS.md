@@ -237,3 +237,7 @@ scripts/audit_accuracy_drops.py
 5ba9eae2 fix(accuracy): codex round 7 P3 — rate-limit silent-failure journaling
 portfolio/accuracy_degradation.py
 tests/test_accuracy_degradation_writer_safety.py
+
+### 2026-04-28 12:39 UTC | main
+378897e8 docs(session): accuracy degradation root-cause + statistical rigor session summary
+docs/SESSION_PROGRESS.md
