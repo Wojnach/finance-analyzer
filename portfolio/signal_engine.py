@@ -486,6 +486,39 @@ def _get_horizon_disabled_signals(ticker: str | None, horizon: str | None) -> fr
 # Existing callers reference this name; keep it as a view of _default.
 _TICKER_DISABLED_SIGNALS = _TICKER_DISABLED_BY_HORIZON["_default"]
 
+
+# --- Macro-window regime overlay (2026-04-28) ---
+#
+# When a high-impact macro event (FOMC/CPI/NFP) is within ~24h past or
+# ~72h future, technical/sentiment signals trained on price-pattern
+# continuity systematically misvote because price is being driven by
+# news. The 2026-04-28 audit found 19 of 21 flagged per-ticker
+# degradations real (sentiment 60.9%→42.7%, momentum_factors 44.5%→30.4%,
+# structure 41.7%→30.0%, claude_fundamental 63.5%→38.9%) — coincident
+# with the densest macro week of 2026.
+#
+# This overlay reduces the influence of those signals during the
+# macro window, then auto-reverts when the window passes. It composes
+# multiplicatively with the existing regime/horizon weight chain.
+MACRO_WINDOW_DOWNWEIGHT_SIGNALS = frozenset({
+    "sentiment", "momentum_factors", "structure",
+})
+MACRO_WINDOW_DOWNWEIGHT_MULTIPLIER = 0.5
+
+# claude_fundamental has a known >75% BUY bias caught by its own
+# tier-bias gate. During macro windows the bias dominates because the
+# 30-120min LLM cascade (Haiku/Sonnet/Opus) lags real-time regime
+# shifts. Force-HOLD instead of down-weighting (stricter than the
+# others — its accuracy collapses the most).
+MACRO_WINDOW_FORCE_HOLD_SIGNALS = frozenset({"claude_fundamental"})
+
+# 5-minute cache. econ_dates is hardcoded so the underlying data
+# doesn't change between cycles, but we still pay an iteration over
+# ECON_EVENTS each call. Caching avoids that hit per signal per ticker
+# per cycle.
+_MACRO_WINDOW_CACHE_TTL_S = 300
+
+
 # --- Signal (full 32-signal for "Now" timeframe) ---
 
 MIN_VOTERS_CRYPTO = 3  # crypto has 30 signals (8 core + 22 enhanced; ml disabled) — need 3
@@ -1536,6 +1569,50 @@ def _get_ic_data(horizon: str) -> dict | None:
     return None
 
 
+_macro_window_cache: dict = {"value": False, "ts": 0.0}
+_macro_window_cache_lock = threading.Lock()
+_macro_window_last_state: dict = {"active": None}  # transition logger
+
+
+def _is_macro_window_cached(now_ts: float | None = None) -> bool:
+    """Return whether we're inside a macro event window, with TTL caching.
+
+    The underlying ``portfolio.econ_dates.is_macro_window`` iterates
+    ``ECON_EVENTS`` linearly. That's cheap, but called per signal per
+    ticker per cycle becomes wasteful. Cache the result for
+    ``_MACRO_WINDOW_CACHE_TTL_S`` (5 minutes by default) — events have
+    hourly cadence at fastest, so 5min staleness is acceptable.
+
+    Logs once per state transition so the operational log shows when
+    we entered/exited a macro window without spamming every cycle.
+    """
+    import time as _time
+    if now_ts is None:
+        now_ts = _time.time()
+    with _macro_window_cache_lock:
+        if now_ts - _macro_window_cache["ts"] < _MACRO_WINDOW_CACHE_TTL_S:
+            return _macro_window_cache["value"]
+        try:
+            from portfolio.econ_dates import is_macro_window
+            active = bool(is_macro_window())
+        except Exception as e:
+            logger.warning("macro window detection failed (treating as inactive): %s", e)
+            active = False
+        _macro_window_cache["value"] = active
+        _macro_window_cache["ts"] = now_ts
+        last = _macro_window_last_state["active"]
+        if last is None:
+            _macro_window_last_state["active"] = active
+        elif last != active:
+            logger.info(
+                "macro_window state transition: %s -> %s",
+                "ACTIVE" if last else "inactive",
+                "ACTIVE" if active else "inactive",
+            )
+            _macro_window_last_state["active"] = active
+        return active
+
+
 def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
                         accuracy_gate=None, max_signals=None, horizon=None,
                         regime_gated_override=None, ticker=None):
@@ -1668,6 +1745,18 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
     horizon_disabled = _get_horizon_disabled_signals(ticker, horizon)
     if horizon_disabled:
         votes = {k: ("HOLD" if k in horizon_disabled else v) for k, v in votes.items()}
+
+    # Macro-window force-HOLD pre-pass (2026-04-28). When a high-impact
+    # event is within ~24h past or ~72h future, force-HOLD the signals
+    # whose lag/bias makes them dominantly wrong in news-driven regimes.
+    # The downweight branch for the other macro-fragile signals lives in
+    # the weight loop below so it composes with regime/horizon multipliers.
+    macro_active = _is_macro_window_cached()
+    if macro_active and MACRO_WINDOW_FORCE_HOLD_SIGNALS:
+        votes = {
+            k: ("HOLD" if k in MACRO_WINDOW_FORCE_HOLD_SIGNALS else v)
+            for k, v in votes.items()
+        }
 
     # Top-N gate: only let the top max_signals (by accuracy) participate
     active_votes = {k: v for k, v in votes.items() if v != "HOLD"}
@@ -1873,6 +1962,14 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
         # Horizon-specific weight adjustment
         if signal_name in horizon_mults:
             weight *= horizon_mults[signal_name]
+        # Macro-window downweight (2026-04-28). Composes with regime/
+        # horizon multipliers — e.g., during a macro window in ranging
+        # regime, sentiment hits 0.5 (macro) × 0.X (regime) × Y (horizon).
+        # Only applies to MACRO_WINDOW_DOWNWEIGHT_SIGNALS — the
+        # FORCE_HOLD signals were already mutated to HOLD above and won't
+        # reach this branch.
+        if macro_active and signal_name in MACRO_WINDOW_DOWNWEIGHT_SIGNALS:
+            weight *= MACRO_WINDOW_DOWNWEIGHT_MULTIPLIER
         # Crisis mode adjustments: penalize trend signals (only if they're
         # underperforming), boost mean-reversion. See 2026-04-19 fix above.
         if crisis_mode:

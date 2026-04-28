@@ -115,10 +115,20 @@ def write_agent_summary(
     initial = state.get("initial_value_sek", 500000)
     pnl_pct = ((total - initial) / initial) * 100 if initial else 0  # BUG-99: zero guard
 
+    # Macro-window status — surface in agent_summary so Layer 2 sees the
+    # regime context. Stayed orthogonal to the existing per-ticker
+    # `regime` field which is price-based (ranging/trending/high-vol).
+    try:
+        from portfolio.signal_engine import _is_macro_window_cached
+        _macro_active = bool(_is_macro_window_cached())
+    except Exception:
+        _macro_active = False
+
     summary = {
         "timestamp": datetime.now(UTC).isoformat(),
         "trigger_reasons": trigger_reasons or [],
         "fx_rate": round(fx_rate, 2),
+        "macro_window": {"active": _macro_active},
         "portfolio": {
             "total_sek": round(total),
             "pnl_pct": round(pnl_pct, 2),
