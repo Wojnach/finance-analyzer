@@ -159,6 +159,56 @@ class TestAccuracyDegradationDispatcherWire:
         assert result == []
         assert _read_jsonl(crit_file) == []
 
+    def test_resolved_then_recurring_within_ttl_writes_fresh_row(
+        self, critical_errors_paths,
+    ):
+        """Codex P2 round-4 follow-up: dispatch dedup looks at hash state
+        only, but the auto-fix-agent dispatcher only sees UNRESOLVED rows.
+        If an incident is resolved (resolution line appended) and the
+        same message recurs inside the TTL, our state-only dedup skips
+        the new row — and the dispatcher sees no unresolved entry to act
+        on for hours.
+
+        The dispatcher must consult the journal: only suppress if the
+        latest matching row is still unresolved within the TTL."""
+        from datetime import UTC, datetime
+
+        from portfolio.file_utils import atomic_append_jsonl
+
+        crit_file, _state_file = critical_errors_paths
+        v = _make_critical_violation()
+
+        # First fire — writes a row.
+        _dispatch_critical_errors_for_degradation([v])
+        rows1 = _read_jsonl(crit_file)
+        assert len(rows1) == 1
+        original_ts = rows1[0]["ts"]
+
+        # Append a resolution line so the dispatcher considers the
+        # original row resolved.
+        atomic_append_jsonl(crit_file, {
+            "ts": datetime.now(UTC).isoformat(),
+            "level": "info",
+            "category": "resolution",
+            "caller": "manual",
+            "resolution": "Manual fix applied during incident drill",
+            "resolves_ts": original_ts,
+            "message": "Resolved by manual intervention",
+            "context": {},
+        })
+
+        # Same message hash recurs inside the TTL window. The dispatcher
+        # must write a fresh row because the prior incident was resolved.
+        _dispatch_critical_errors_for_degradation([v])
+
+        rows3 = _read_jsonl(crit_file)
+        critical_only = [r for r in rows3 if r.get("level") == "critical"]
+        assert len(critical_only) == 2, (
+            "Same incident recurred after resolution but the dispatcher "
+            "skipped writing a new row — auto-fix-agent dispatcher will "
+            "see no unresolved entries for hours"
+        )
+
     def test_tracker_escalated_prefix_does_not_break_dispatch_dedup(
         self, critical_errors_paths,
     ):

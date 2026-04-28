@@ -224,6 +224,45 @@ class TestPollerOffsetPersistence:
         poller = TelegramPoller(fake_config, on_command=lambda *a: None)
         assert poller.offset == 0
 
+    def test_long_outage_does_not_execute_days_old_commands(
+        self, poller_paths, fake_config,
+    ):
+        """Codex P1 round-4 follow-up: the post-restart bypass must be
+        bounded. A bot down for several days could otherwise execute every
+        queued 'bought MSTR …' confirmation on next start, even though the
+        user has since traded manually. The 60 s stale filter was the
+        original protection — the bypass should extend it to a reasonable
+        recovery window (an hour or so), not lift it entirely."""
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, inbound_file = poller_paths
+        state_file.write_text(json.dumps({"offset": 1001, "updated_ts": "x"}))
+
+        called = {}
+
+        def on_command(cmd, args, _config):
+            called["cmd"] = cmd
+            return None
+
+        poller = TelegramPoller(fake_config, on_command=on_command)
+        # update_id is past persisted offset BUT msg_date is 3 days ago.
+        # Even with offset alignment the command must be considered stale.
+        update = _build_update(
+            update_id=1500,
+            msg_date=int(time.time()) - 3 * 24 * 3600,
+            text="bought MSTR 130 100000",
+        )
+        poller._handle_update(update)
+
+        assert called.get("cmd") is None, (
+            "Days-old command was processed because update_id was past the "
+            "persisted offset. The bypass needs an upper bound on age."
+        )
+        rows = _read_jsonl(inbound_file)
+        assert len(rows) == 1
+        assert rows[0]["drop_reason"] == "stale_at_startup"
+        assert rows[0]["processed"] is False
+
     def test_negative_persisted_offset_clamps_to_zero(self, poller_paths, fake_config):
         """Codex P3 round-3 follow-up: a manually-edited or numerically
         corrupted state file with offset < 0 must NOT propagate to

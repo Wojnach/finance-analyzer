@@ -23,11 +23,21 @@ INBOUND_LOG = Path(__file__).resolve().parent.parent / "data" / "telegram_inboun
 # pending getUpdates, and then the stale filter (msg_date < startup-60s)
 # silently drops anything the user sent during the restart window. With
 # the file present, init reloads the last-acknowledged update_id, and
-# _handle_update bypasses the stale filter for ``update_id >
-# persisted_offset`` — those are by definition post-restart pending
-# updates the user expects to execute (e.g. a ``bought MSTR …``
-# confirmation sent while the loop was bouncing).
+# _handle_update bypasses the stale filter for post-restart pending
+# updates (those the user expects to execute, e.g. a ``bought MSTR …``
+# confirmation sent while the loop was bouncing) UP TO a bounded age:
+# see RESTART_BYPASS_MAX_AGE_S below.
 POLLER_STATE_FILE = Path(__file__).resolve().parent.parent / "data" / "telegram_poller_state.json"
+
+# Codex P1 round-4 (2026-04-28): cap the post-restart bypass to 1 hour.
+# A bot that was down for days could otherwise execute every queued
+# 'bought MSTR …' confirmation on next start, even though the user has
+# since traded manually. 1 h is generous enough to cover any realistic
+# restart window (schtasks rerun + loop boot < 5 min in practice) while
+# still rejecting commands that are old enough that the user almost
+# certainly resolved them out-of-band. Beyond this window the original
+# 60 s stale filter applies.
+RESTART_BYPASS_MAX_AGE_S = 60 * 60
 
 
 class TelegramPoller:
@@ -178,8 +188,14 @@ class TelegramPoller:
             # `>=` covers the single-message-during-restart case that was
             # the whole reason for adding persistence (Codex P1
             # 2026-04-28).
+            #
+            # Codex P1 round-4 (2026-04-28): bound the bypass to
+            # RESTART_BYPASS_MAX_AGE_S so a multi-day outage doesn't
+            # execute every queued command on next start.
             is_post_restart_pending = (
-                self._has_persisted_offset and update_id >= self._initial_offset
+                self._has_persisted_offset
+                and update_id >= self._initial_offset
+                and msg_date >= self._startup_time - RESTART_BYPASS_MAX_AGE_S
             )
             if msg_date < self._startup_time - 60 and not is_post_restart_pending:
                 outcome["drop_reason"] = "stale_at_startup"

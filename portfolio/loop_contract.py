@@ -625,6 +625,83 @@ def check_signal_accuracy_degradation_safe() -> list[Violation]:
         return []
 
 
+def _has_unresolved_critical_entry(
+    *,
+    category: str,
+    message_hash: str,
+    ttl_s: float,
+    now: float,
+) -> bool:
+    """Return True iff critical_errors.jsonl has an unresolved row in the
+    last ``ttl_s`` seconds whose category matches and whose message
+    identity hash matches.
+
+    Used to gate the dispatch-time dedup so a resolved-then-recurring
+    incident still produces a fresh row. Resolution semantics mirror
+    scripts/fix_agent_dispatcher._find_unresolved: a row is resolved if
+    (a) its own ``resolution`` field is non-null, or (b) a later entry
+    has ``resolves_ts`` pointing at its ``ts``.
+
+    Best-effort: any I/O or parse failure returns False so the dispatch
+    path falls through to a (safer) re-write rather than silencing on
+    a transient read error.
+    """
+    try:
+        from portfolio.claude_gate import CRITICAL_ERRORS_LOG
+    except Exception:
+        return False
+    if not CRITICAL_ERRORS_LOG.exists():
+        return False
+    cutoff_dt = datetime.fromtimestamp(now - ttl_s, tz=UTC)
+    cutoff_iso = cutoff_dt.isoformat()
+
+    resolved_ts: set[str] = set()
+    candidates: list[dict] = []
+    try:
+        import json
+        with open(CRITICAL_ERRORS_LOG, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                rts = entry.get("resolves_ts")
+                if rts:
+                    resolved_ts.add(rts)
+                if entry.get("category") != category:
+                    continue
+                ts = entry.get("ts")
+                if not ts or ts < cutoff_iso:
+                    continue
+                if entry.get("resolution") is not None:
+                    continue
+                if entry.get("level") != "critical":
+                    continue
+                candidates.append(entry)
+    except Exception as e:
+        logger.debug(
+            "could not scan critical_errors.jsonl for resolved-row "
+            "check (%s); falling through to re-write", e,
+        )
+        return False
+
+    for entry in candidates:
+        if entry.get("ts") in resolved_ts:
+            continue
+        # Re-derive identity from the stored message + invariant fields.
+        # We approximate the identity by comparing messages; the trigger
+        # ts disambiguator only matters for layer2_journal_activity which
+        # already has a separate inline write path, so message-text
+        # match is sufficient here.
+        stored_hash = _hash_violation_message(entry.get("message", ""))
+        if stored_hash == message_hash:
+            return True
+    return False
+
+
 def _dispatch_critical_errors_for_degradation(
     violations: list[Violation],
     *,
@@ -674,7 +751,7 @@ def _dispatch_critical_errors_for_degradation(
     state_updates: dict[str, dict] = {}
     pending_recent: dict[str, list[dict]] = {}
     for v in critical:
-        msg_hash = _hash_violation_message(v.message)
+        msg_hash = _hash_violation_identity(v)
         prior = dispatch_state.get(v.invariant) or {}
         recent = pending_recent.get(v.invariant)
         if recent is None:
@@ -684,10 +761,19 @@ def _dispatch_critical_errors_for_degradation(
                 if (now - float(r.get("ts", 0) or 0)) < ttl_s
             ]
             pending_recent[v.invariant] = recent
-        if any(r.get("hash") == msg_hash for r in recent):
-            # Same message-hash seen inside the TTL window — already in
-            # the dispatcher's lookback, so don't re-append (Codex P2-3
-            # 2026-04-28).
+        # Codex P2 round-4 (2026-04-28): the auto-fix-agent dispatcher
+        # only acts on UNRESOLVED critical_errors rows. State-only
+        # dedup will skip a same-hash recurrence inside the TTL window
+        # even when the prior row was resolved — leaving the dispatcher
+        # with no fresh unresolved entry. Consult the journal for an
+        # unresolved match before claiming dedup.
+        if (any(r.get("hash") == msg_hash for r in recent)
+                and _has_unresolved_critical_entry(
+                    category=v.invariant,
+                    message_hash=msg_hash,
+                    ttl_s=ttl_s,
+                    now=now,
+                )):
             continue
         try:
             from portfolio.claude_gate import record_critical_error
@@ -1112,19 +1198,40 @@ _ESCALATED_PREFIX_RE = re.compile(r"^ESCALATED \(\d+x consecutive\): ")
 
 
 def _hash_violation_message(message: str) -> str:
-    """Stable identity for an alert text — used for both Telegram cooldown
-    dedup and critical_errors.jsonl dedup.
+    """Compatibility shim: hash a bare message string.
 
-    The hash is computed on the message AFTER stripping the
-    ``ESCALATED (Nx consecutive):`` prefix that ViolationTracker adds to
-    promoted warnings, so the same underlying incident dedups across
-    consecutive cycles even as the escalation count climbs. SHA-1 is
-    fine here: we're not using it as a security primitive, just as a
-    content fingerprint, and the messages are short enough that
-    collisions are negligible.
+    Prefer ``_hash_violation_identity(violation)`` for new code; that
+    helper consults per-invariant identity fields (e.g. trigger_time
+    for layer2_journal_activity) so two distinct incidents with
+    identical rendered text don't collide. This shim is kept for the
+    handful of call sites that genuinely have only the message.
     """
     stripped = _ESCALATED_PREFIX_RE.sub("", message or "", count=1)
     return hashlib.sha1(stripped.encode("utf-8")).hexdigest()
+
+
+def _hash_violation_identity(violation: "Violation") -> str:
+    """Stable per-incident identity used for both Telegram cooldown dedup
+    and critical_errors.jsonl dedup.
+
+    Strips the ``ESCALATED (Nx consecutive):`` prefix added by
+    ViolationTracker, so a tracker-promoted alert dedups against the
+    pre-promotion form. For ``layer2_journal_activity`` the message text
+    only embeds rounded age + reason — two distinct triggers with the
+    same reason can render identically, so we additionally fold in
+    ``details['trigger_time']`` (Codex P2 round-4 2026-04-28). Other
+    invariants fall back to the message-only hash.
+
+    SHA-1 is a content fingerprint here, not a security primitive.
+    """
+    msg = _ESCALATED_PREFIX_RE.sub("", violation.message or "", count=1)
+    parts = [msg]
+    if violation.invariant == "layer2_journal_activity":
+        details = violation.details or {}
+        trigger = details.get("trigger_time")
+        if trigger:
+            parts.append(f"trigger_time={trigger}")
+    return hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()
 
 
 def _normalize_recent_hashes(prior: dict) -> list[dict]:
@@ -1206,7 +1313,7 @@ def _filter_critical_by_cooldown(critical: list[Violation], now: float,
     # each other's tentative additions.
     pending_recent: dict[str, list[dict]] = {}
     for v in critical:
-        msg_hash = _hash_violation_message(v.message)
+        msg_hash = _hash_violation_identity(v)
         prior = cooldown_state.get(v.invariant) or {}
         recent = pending_recent.get(v.invariant)
         if recent is None:
@@ -1217,7 +1324,7 @@ def _filter_critical_by_cooldown(critical: list[Violation], now: float,
             ]
             pending_recent[v.invariant] = recent
         if any(r.get("hash") == msg_hash for r in recent):
-            # Same message text seen within the cooldown window — drop.
+            # Same incident identity seen within the cooldown window — drop.
             continue
         recent.append({"hash": msg_hash, "ts": now})
         # Cap memory; oldest entries fall off first.

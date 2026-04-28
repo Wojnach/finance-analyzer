@@ -323,6 +323,48 @@ class TestAlertCooldown:
         per_inv = (state.get("telegram_alert_state") or {}).get("accuracy_degradation")
         assert per_inv is not None and per_inv.get("last_sent_ts") > 0
 
+    def test_layer2_alerts_with_different_triggers_each_fire(
+        self, cooldown_state_file,
+    ):
+        """Codex P2 round-4 follow-up: the layer2_journal_activity message
+        only embeds rounded age + reason. Two distinct triggers with the
+        same reason can render the same message text, so a pure-text hash
+        collides and the second alert is silenced even though it's a
+        genuine new incident.
+
+        Including details['trigger_time'] in the hash key disambiguates
+        them — the trigger ts is what
+        check_layer2_journal_activity() uses internally as the
+        per-violation identity."""
+        from unittest.mock import patch
+
+        v_first = Violation(
+            invariant="layer2_journal_activity",
+            severity="CRITICAL",
+            message="Layer 2 trigger fired 30m ago (XAG-USD consensus BUY (80%)) but no journal entry has been written since.",
+            details={
+                "trigger_time": "2026-04-28T01:00:00+00:00",
+                "trigger_reason": "XAG-USD consensus BUY (80%)",
+            },
+        )
+        v_second = Violation(
+            invariant="layer2_journal_activity",
+            severity="CRITICAL",
+            message="Layer 2 trigger fired 30m ago (XAG-USD consensus BUY (80%)) but no journal entry has been written since.",
+            details={
+                "trigger_time": "2026-04-28T03:00:00+00:00",  # different trigger
+                "trigger_reason": "XAG-USD consensus BUY (80%)",
+            },
+        )
+        with patch("portfolio.message_store.send_or_store") as mock_send:
+            _alert_violations([v_first], config={})
+            _alert_violations([v_second], config={})
+        assert mock_send.call_count == 2, (
+            "Two distinct layer2 triggers with identical message text "
+            "collapsed to one — the cooldown key must include the "
+            "trigger_time detail for layer2_journal_activity"
+        )
+
     def test_tracker_escalated_prefix_does_not_break_dedup(
         self, cooldown_state_file,
     ):
