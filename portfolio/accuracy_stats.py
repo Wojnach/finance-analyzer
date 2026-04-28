@@ -10,7 +10,7 @@ logger = logging.getLogger("portfolio.accuracy_stats")
 from datetime import UTC
 
 from portfolio.file_utils import atomic_write_json as _atomic_write_json
-from portfolio.file_utils import load_json, load_jsonl_tail
+from portfolio.file_utils import load_json, load_jsonl, load_jsonl_tail
 from portfolio.tickers import DISABLED_SIGNALS, SIGNAL_NAMES
 
 # C2: Protect all read-modify-write cache operations from concurrent ticker threads
@@ -1181,19 +1181,18 @@ def save_accuracy_snapshot(extras=None):
 
 
 def _load_accuracy_snapshots():
-    """Load all accuracy snapshots from JSONL file."""
-    if not ACCURACY_SNAPSHOTS_FILE.exists():
-        return []
-    entries = []
-    for line in ACCURACY_SNAPSHOTS_FILE.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entries.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return entries
+    """Load all accuracy snapshots from JSONL file.
+
+    2026-04-28 (audit C1): switched from raw read_text().splitlines() to
+    file_utils.load_jsonl per CLAUDE.md rule 4 (atomic I/O). The previous
+    implementation read the whole file at once via read_text(), which
+    races against the live atomic_append_jsonl writer in maybe_save_daily_snapshot
+    -> save_full_accuracy_snapshot — a torn last line silently produced an
+    empty/missing snapshot, sending check_degradation() to a no-alert quiet
+    state instead of erroring. load_jsonl streams line-by-line and logs
+    malformed lines at debug level, so torn writes leave a footprint.
+    """
+    return load_jsonl(ACCURACY_SNAPSHOTS_FILE)
 
 
 def _find_snapshot_near(snapshots, target_ts, max_delta_hours=36):
