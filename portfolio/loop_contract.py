@@ -64,6 +64,20 @@ DEFAULT_CRITICAL_ERRORS_DEDUP_TTL_S = 6 * 3600
 # (pre-tracker) violation; routing it again post-tracker would double-
 # write.
 CRITICAL_ERROR_DISPATCH_INVARIANTS = frozenset({"accuracy_degradation"})
+
+# 2026-04-28 (Codex P2): how many recent message-hashes to remember per
+# invariant in both the Telegram cooldown and critical_errors dedup
+# tables. The earlier one-hash-per-invariant design lost the original
+# A on an A -> B -> A flap inside the dedup window, re-firing what was
+# really the same incident as a fresh alert. 8 entries bounds storage
+# while covering essentially every plausible flap pattern (a single
+# alert text rarely oscillates more than ~3 ways inside 6 h).
+MAX_RECENT_HASHES_PER_INVARIANT = 8
+
+# 2026-04-28 (Codex P2): the contract Telegram alert category. Kept as a
+# constant so _alert_violations and the mute-check helper agree. Don't
+# change this without updating message_store.SEND_CATEGORIES too.
+CONTRACT_ALERT_CATEGORY = "error"
 # Global Claude CLI log — written by claude_gate for ALL callers
 # (claude_fundamental, bigbet, iskbets, self-heal, etc.). Used here only
 # for *enriching* violation context with last_invocation_caller.
@@ -657,33 +671,53 @@ def _dispatch_critical_errors_for_degradation(
     now = time.time()
 
     state_updates: dict[str, dict] = {}
+    pending_recent: dict[str, list[dict]] = {}
     for v in critical:
         msg_hash = _hash_violation_message(v.message)
         prior = dispatch_state.get(v.invariant) or {}
-        try:
-            prior_ts = float(prior.get("ts", 0) or 0)
-        except (TypeError, ValueError):
-            prior_ts = 0.0
-        same_hash = prior.get("last_message_hash") == msg_hash
-        ttl_elapsed = (now - prior_ts) > ttl_s
-        if same_hash and not ttl_elapsed:
-            # Truly identical replay, still inside the TTL window — skip.
+        recent = pending_recent.get(v.invariant)
+        if recent is None:
+            # Trim expired entries up front so we work with a live window.
+            recent = [
+                r for r in _normalize_recent_hashes(prior)
+                if (now - float(r.get("ts", 0) or 0)) < ttl_s
+            ]
+            pending_recent[v.invariant] = recent
+        if any(r.get("hash") == msg_hash for r in recent):
+            # Same message-hash seen inside the TTL window — already in
+            # the dispatcher's lookback, so don't re-append (Codex P2-3
+            # 2026-04-28).
             continue
         try:
             from portfolio.claude_gate import record_critical_error
-            record_critical_error(
+            # record_critical_error swallows IO errors internally and
+            # returns False — Codex P2 2026-04-28. We must check the
+            # boolean: claiming the dedup slot when the row didn't land
+            # would silence 6 h of an unrecorded incident.
+            wrote = record_critical_error(
                 category=v.invariant,
                 caller=v.invariant,
                 message=v.message,
                 context=dict(v.details or {}),
             )
         except Exception as e:
-            # Don't claim the dedup slot if the write didn't actually land.
             logger.warning(
-                "record_critical_error failed for %s: %s", v.invariant, e,
+                "record_critical_error raised for %s: %s", v.invariant, e,
             )
             continue
+        if not wrote:
+            logger.warning(
+                "record_critical_error reported failure for %s; "
+                "skipping dedup-slot claim so next cycle retries",
+                v.invariant,
+            )
+            continue
+        recent.append({"hash": msg_hash, "ts": now})
+        if len(recent) > MAX_RECENT_HASHES_PER_INVARIANT:
+            del recent[: len(recent) - MAX_RECENT_HASHES_PER_INVARIANT]
         state_updates[v.invariant] = {
+            "recent_hashes": list(recent),
+            # Convenience mirrors for human inspection.
             "last_message_hash": msg_hash,
             "ts": now,
         }
@@ -1075,36 +1109,106 @@ def _hash_violation_message(message: str) -> str:
     return hashlib.sha1((message or "").encode("utf-8")).hexdigest()
 
 
+def _normalize_recent_hashes(prior: dict) -> list[dict]:
+    """Return prior['recent_hashes'] as a list of {'hash', 'ts'} dicts.
+
+    Backward-compat: older state dicts stored only ``last_message_hash``
+    + ``last_sent_ts``. We synthesize a one-element history from those so
+    the migration is invisible to live state files written before this
+    patch shipped (Codex P2-3 2026-04-28).
+    """
+    raw = prior.get("recent_hashes")
+    if isinstance(raw, list) and raw:
+        out: list[dict] = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            h = entry.get("hash")
+            try:
+                ts = float(entry.get("ts", 0) or 0)
+            except (TypeError, ValueError):
+                ts = 0.0
+            if isinstance(h, str):
+                out.append({"hash": h, "ts": ts})
+        return out
+    legacy_hash = prior.get("last_message_hash")
+    if isinstance(legacy_hash, str):
+        try:
+            legacy_ts = float(prior.get("last_sent_ts", 0) or 0)
+        except (TypeError, ValueError):
+            legacy_ts = 0.0
+        return [{"hash": legacy_hash, "ts": legacy_ts}]
+    return []
+
+
+def _telegram_will_actually_deliver(config: dict | None,
+                                    category: str = CONTRACT_ALERT_CATEGORY) -> bool:
+    """Mirror message_store.send_or_store's mute gating to predict whether
+    Telegram will actually receive the alert.
+
+    Codex P2 2026-04-28: send_or_store returns True on muted/stored paths
+    too, so the cooldown can't trust its return value alone. Peeking at
+    the same gates here lets the cooldown logic skip claiming a 4 h
+    silence window for a message that was never delivered. Mirrors the
+    logic in portfolio/message_store.py:170-219 — keep both in sync.
+    """
+    tg_cfg = (config or {}).get("telegram", {}) or {}
+    muted = set(tg_cfg.get("muted_categories", []) or [])
+    if category in muted:
+        return False
+    if tg_cfg.get("mute_all", False):
+        unmuted = set(tg_cfg.get("unmuted_categories", []) or [])
+        if category not in unmuted:
+            return False
+    return True
+
+
 def _filter_critical_by_cooldown(critical: list[Violation], now: float,
                                  cooldown_s: float):
     """Split CRITICAL violations into (fresh, suppressed) using the per-
-    invariant cooldown stored in CONTRACT_STATE_FILE.
+    invariant multi-hash cooldown stored in CONTRACT_STATE_FILE.
 
-    A violation is *fresh* when its (invariant, sha1(message)) is either
-    new to the cooldown table OR its prior entry is older than
-    ``cooldown_s``. Returns the fresh-list plus a state-update dict that
-    the caller should persist ONLY after a successful send — that way a
-    failed Telegram post doesn't claim the cooldown slot and silence the
-    next legitimate alert.
+    A violation is *fresh* when (invariant, sha1(message)) is not present
+    in the recent-hashes list for that invariant within the cooldown
+    window. The recent-hashes list keeps up to
+    ``MAX_RECENT_HASHES_PER_INVARIANT`` entries so an A -> B -> A flap
+    inside the window dedups the second A against the original A row,
+    not against the "last seen" B (Codex P2-3 2026-04-28).
+
+    Returns the fresh-list plus a state-update dict that the caller
+    should persist ONLY after a successful send — a failed Telegram post
+    must not claim a dedup slot and silence the next legitimate alert.
     """
     state = load_json(CONTRACT_STATE_FILE, default={}) or {}
     cooldown_state = state.get("telegram_alert_state") or {}
 
     fresh: list[Violation] = []
     state_updates: dict[str, dict] = {}
+    # Per-call cache so multiple violations of the same invariant see
+    # each other's tentative additions.
+    pending_recent: dict[str, list[dict]] = {}
     for v in critical:
         msg_hash = _hash_violation_message(v.message)
         prior = cooldown_state.get(v.invariant) or {}
-        last_hash = prior.get("last_message_hash")
-        try:
-            last_sent = float(prior.get("last_sent_ts", 0) or 0)
-        except (TypeError, ValueError):
-            last_sent = 0.0
-        if last_hash == msg_hash and (now - last_sent) < cooldown_s:
-            # Identical replay within the cooldown window — drop silently.
+        recent = pending_recent.get(v.invariant)
+        if recent is None:
+            # Hydrate the recent-hashes list and trim expired entries up front.
+            recent = [
+                r for r in _normalize_recent_hashes(prior)
+                if (now - float(r.get("ts", 0) or 0)) < cooldown_s
+            ]
+            pending_recent[v.invariant] = recent
+        if any(r.get("hash") == msg_hash for r in recent):
+            # Same message text seen within the cooldown window — drop.
             continue
+        recent.append({"hash": msg_hash, "ts": now})
+        # Cap memory; oldest entries fall off first.
+        if len(recent) > MAX_RECENT_HASHES_PER_INVARIANT:
+            del recent[: len(recent) - MAX_RECENT_HASHES_PER_INVARIANT]
         fresh.append(v)
         state_updates[v.invariant] = {
+            "recent_hashes": list(recent),
+            # Convenience mirrors for human inspection / debugging tools.
             "last_sent_ts": now,
             "last_message_hash": msg_hash,
         }
@@ -1171,14 +1275,42 @@ def _alert_violations(violations: list[Violation], config: dict,
     for v in fresh:
         lines.append(f"• {v.invariant}: {v.message}")
     msg = "\n".join(lines)
+    # Pre-compute whether send_or_store WILL actually deliver, before we
+    # call it. The mute gates (muted_categories, mute_all without unmute)
+    # cause send_or_store to return True after only storing the message
+    # locally — claiming the cooldown for those would silence 4 h of
+    # legitimate alerts at the moment the user unmutes (Codex P2-2
+    # 2026-04-28).
+    will_deliver = _telegram_will_actually_deliver(
+        config, category=CONTRACT_ALERT_CATEGORY,
+    )
+
     try:
         from portfolio.message_store import send_or_store
-        send_or_store(msg, config, category="error")
+        # Codex P1 2026-04-28: send_or_store returns True on success
+        # (sent or intentionally stored) and False on actual delivery
+        # failure (missing token/chat_id, non-OK sendMessage response).
+        # Honor the boolean — claiming the cooldown after a False return
+        # would silence 4 h of legitimate alerts that no operator was
+        # paged for.
+        sent_ok = send_or_store(msg, config, category=CONTRACT_ALERT_CATEGORY)
     except Exception as e:
-        # Send failed — return WITHOUT persisting the cooldown so the next
-        # cycle still tries (vs the alternative where Telegram is briefly
-        # down and we then go silent for the next 4 h).
         logger.warning("Failed to send contract violation alert: %s", e)
+        return
+
+    if not sent_ok:
+        logger.warning(
+            "send_or_store returned falsy for contract alert; skipping "
+            "cooldown persist so next cycle retries (Codex P1 2026-04-28)",
+        )
+        return
+
+    if not will_deliver:
+        logger.debug(
+            "Contract alert was muted (category=%s); not persisting "
+            "cooldown so next cycle retries after an unmute "
+            "(Codex P2-2 2026-04-28)", CONTRACT_ALERT_CATEGORY,
+        )
         return
 
     _persist_alert_cooldown(state_updates)

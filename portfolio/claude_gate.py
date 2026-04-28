@@ -166,7 +166,7 @@ def record_critical_error(
     caller: str,
     message: str,
     context: dict | None = None,
-) -> None:
+) -> bool:
     """Append a critical error to ``data/critical_errors.jsonl``.
 
     The journal is the single source of truth consulted by
@@ -175,6 +175,14 @@ def record_critical_error(
     future Claude session until it's resolved with a follow-up entry.
 
     Never raises — logging failures here must not cascade into the caller.
+
+    Returns ``True`` when the append landed, ``False`` when it failed.
+    The boolean lets dedup-aware callers (e.g. loop_contract's
+    ``_dispatch_critical_errors_for_degradation``) avoid claiming a
+    dedup slot for a row that never made it to disk — otherwise a
+    transient IO problem would silence 6+ h of unrecorded incidents
+    (Codex P2 2026-04-28). Callers that don't need the signal can
+    safely ignore the return.
     """
     try:
         entry = {
@@ -187,8 +195,10 @@ def record_critical_error(
             "context": context or {},
         }
         atomic_append_jsonl(CRITICAL_ERRORS_LOG, entry)
+        return True
     except Exception as e:
         logger.error("Failed to write critical_errors.jsonl: %s", e)
+        return False
 
 
 def detect_auth_failure(output: str, caller: str, context: dict | None = None) -> bool:

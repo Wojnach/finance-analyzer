@@ -159,6 +159,61 @@ class TestAccuracyDegradationDispatcherWire:
         assert result == []
         assert _read_jsonl(crit_file) == []
 
+    def test_text_flap_a_b_a_within_ttl_does_not_re_append_a(
+        self, critical_errors_paths,
+    ):
+        """Codex P2 follow-up: critical_errors dedup must remember every
+        recent hash per invariant within the TTL window, not just the
+        latest one. Otherwise an A -> B -> A flap inside the 6 h TTL
+        spawns three rows for the same incident and PF-FixAgentDispatcher
+        re-engages on what is effectively a repaint of the prior alert."""
+        crit_file, _state_file = critical_errors_paths
+        v_a = _make_critical_violation("12 signal(s) dropped...")
+        v_b = _make_critical_violation("13 signal(s) dropped...")
+
+        _dispatch_critical_errors_for_degradation([v_a])  # A — appended
+        _dispatch_critical_errors_for_degradation([v_b])  # B — text change, appended
+        _dispatch_critical_errors_for_degradation([v_a])  # A again — same as 1st
+
+        rows = _read_jsonl(crit_file)
+        assert len(rows) == 2, (
+            f"Expected 2 rows (A then B), got {len(rows)}. "
+            "Same-A-after-B replay within TTL must dedup against the "
+            "earlier A row, not against the 'last seen' B row."
+        )
+
+    def test_record_critical_error_failure_does_not_claim_dedup_slot(
+        self, critical_errors_paths,
+    ):
+        """Codex P2 follow-up: record_critical_error swallows IO errors
+        internally and returns. The dispatcher must NOT claim the dedup
+        slot when the underlying append failed — otherwise a transient IO
+        problem leaves PF-FixAgentDispatcher with no fresh row for 6 h on
+        an issue that never actually got recorded."""
+        from unittest.mock import patch
+
+        from portfolio.file_utils import load_json
+
+        crit_file, state_file = critical_errors_paths
+        v = _make_critical_violation()
+
+        # Simulate record_critical_error failing to append (return False
+        # contract added in the same patch). The dispatcher should NOT
+        # update critical_error_dispatch state — next cycle should retry.
+        with patch(
+            "portfolio.claude_gate.record_critical_error",
+            return_value=False,
+        ):
+            _dispatch_critical_errors_for_degradation([v])
+
+        # No state update.
+        state = load_json(state_file, default={}) or {}
+        per_inv = (state.get("critical_error_dispatch") or {}).get("accuracy_degradation")
+        assert per_inv is None or not per_inv.get("last_message_hash"), (
+            "record_critical_error returned False but dedup slot was claimed; "
+            "next 6 h of an unrecorded incident silenced"
+        )
+
     def test_dedup_state_persists_in_contract_state_file(self, critical_errors_paths):
         """The dedup marker for critical_errors lives in contract_state.json
         (not in degradation_alert_state, to keep accuracy_degradation a leaf
@@ -193,11 +248,15 @@ class TestAccuracyDegradationDispatcherWire:
         rows1 = _read_jsonl(crit_file)
         assert len(rows1) == 1
 
-        # Forge the dedup ts to be older than the TTL (any window > 6 h
-        # must trigger a re-emit per the contract pinned here).
+        # Forge every dedup ts to be older than the TTL (>6h). Multi-
+        # hash dedup reads recent_hashes[*].ts; the per-invariant
+        # ts/last_message_hash are legacy mirrors.
         state = load_json(state_file, default={}) or {}
         per_inv = state["critical_error_dispatch"]["accuracy_degradation"]
-        per_inv["ts"] = _time.time() - 24 * 3600  # one full day ago
+        forged = _time.time() - 24 * 3600
+        per_inv["ts"] = forged
+        for r in per_inv.get("recent_hashes", []) or []:
+            r["ts"] = forged
         atomic_write_json(state_file, state)
 
         # Second fire with identical text — TTL elapsed, so a fresh row.

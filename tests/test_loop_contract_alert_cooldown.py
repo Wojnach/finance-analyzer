@@ -98,12 +98,16 @@ class TestAlertCooldown:
         )
         with patch("portfolio.message_store.send_or_store") as mock_send:
             _alert_violations([v], config={})
-            # Rewind the persisted state by more than the default cooldown.
+            # Rewind every persisted ts by more than the default cooldown.
+            # The cooldown reads recent_hashes[*].ts now (multi-hash dedup);
+            # last_sent_ts is a legacy mirror for human inspection.
             from portfolio.file_utils import load_json, atomic_write_json
             state = load_json(cooldown_state_file, default={}) or {}
-            for invariant, entry in (state.get("telegram_alert_state") or {}).items():
-                # Forge an old timestamp: 5 hours ago > the 4 h default cooldown.
-                entry["last_sent_ts"] = time.time() - 5 * 3600
+            forged_ts = time.time() - 5 * 3600  # 5 h ago > 4 h default
+            for entry in (state.get("telegram_alert_state") or {}).values():
+                entry["last_sent_ts"] = forged_ts
+                for r in entry.get("recent_hashes", []) or []:
+                    r["ts"] = forged_ts
             atomic_write_json(cooldown_state_file, state)
 
             _alert_violations([v], config={})
@@ -228,3 +232,154 @@ class TestAlertCooldown:
         per_invariant = (state.get("telegram_alert_state") or {}).get("accuracy_degradation")
         # Either the key is absent, or last_sent_ts is 0 — both signal "didn't ship".
         assert per_invariant is None or not per_invariant.get("last_sent_ts")
+
+    def test_muted_categories_do_not_persist_cooldown(self, cooldown_state_file):
+        """Codex P2-2 follow-up: when telegram.muted_categories includes
+        'error', send_or_store stores the message and returns True without
+        attempting a Telegram send. The cooldown must not claim its 4 h
+        window in that case — otherwise unmuting within the window
+        suppresses the first real recurrence even though no operator was
+        ever paged."""
+        from unittest.mock import patch
+
+        from portfolio.file_utils import load_json
+
+        v = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="12 signal(s) dropped >15pp...",
+        )
+        config = {"telegram": {"muted_categories": ["error"]}}
+        with patch(
+            "portfolio.message_store.send_or_store",
+            return_value=True,  # "stored, didn't actually send" — same as muted
+        ) as mock_send:
+            _alert_violations([v], config=config)
+        assert mock_send.call_count == 1
+
+        state = load_json(cooldown_state_file, default={}) or {}
+        per_inv = (state.get("telegram_alert_state") or {}).get("accuracy_degradation")
+        assert per_inv is None or not per_inv.get("last_sent_ts"), (
+            "muted_categories suppressed the actual delivery but cooldown "
+            "was claimed; first real recurrence after unmute will be silenced"
+        )
+
+    def test_mute_all_with_unmuted_whitelist_skips_cooldown(self, cooldown_state_file):
+        """Same as above for the global mute_all gate: unless the category
+        is in the unmuted whitelist, no Telegram is sent and the cooldown
+        must stay clear."""
+        from unittest.mock import patch
+
+        from portfolio.file_utils import load_json
+
+        v = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="12 signal(s) dropped >15pp...",
+        )
+        config = {
+            "telegram": {
+                "mute_all": True,
+                "unmuted_categories": ["other_category"],  # 'error' is muted
+            },
+        }
+        with patch(
+            "portfolio.message_store.send_or_store",
+            return_value=True,
+        ):
+            _alert_violations([v], config=config)
+
+        state = load_json(cooldown_state_file, default={}) or {}
+        per_inv = (state.get("telegram_alert_state") or {}).get("accuracy_degradation")
+        assert per_inv is None or not per_inv.get("last_sent_ts")
+
+    def test_mute_all_with_error_in_unmuted_whitelist_persists_cooldown(
+        self, cooldown_state_file,
+    ):
+        """Sanity: when 'error' IS in the unmute whitelist under mute_all,
+        the alert really does ship and the cooldown should engage."""
+        from unittest.mock import patch
+
+        from portfolio.file_utils import load_json
+
+        v = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="12 signal(s) dropped >15pp...",
+        )
+        config = {
+            "telegram": {
+                "mute_all": True,
+                "unmuted_categories": ["error"],
+            },
+        }
+        with patch(
+            "portfolio.message_store.send_or_store",
+            return_value=True,
+        ):
+            _alert_violations([v], config=config)
+
+        state = load_json(cooldown_state_file, default={}) or {}
+        per_inv = (state.get("telegram_alert_state") or {}).get("accuracy_degradation")
+        assert per_inv is not None and per_inv.get("last_sent_ts") > 0
+
+    def test_text_flap_a_b_a_within_cooldown_does_not_re_fire_a(
+        self, cooldown_state_file,
+    ):
+        """Codex P2-3: dedup must remember every recent hash per invariant,
+        not just the most recent one. If the alert flaps A -> B -> A
+        within the cooldown window (e.g. degraded-signal list grows by
+        one and shrinks back), the second A must be suppressed because
+        it's the same incident as the first A. Otherwise the user sees
+        the same alert again at hour T+0, T+x, T+2x, ..."""
+        from unittest.mock import patch
+
+        v_a = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="12 signal(s) dropped...",
+        )
+        v_b = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="13 signal(s) dropped...",
+        )
+        with patch("portfolio.message_store.send_or_store") as mock_send:
+            _alert_violations([v_a], config={})  # A — fires
+            _alert_violations([v_b], config={})  # B (text change) — fires
+            _alert_violations([v_a], config={})  # A again — should be suppressed
+
+        assert mock_send.call_count == 2, (
+            "Text flap A -> B -> A within cooldown window re-fired A. "
+            "Per-invariant dedup must remember every recent hash, not "
+            "just the most recent one."
+        )
+
+    def test_send_returning_false_does_not_persist_cooldown(self, cooldown_state_file):
+        """Codex P1 follow-up: send_or_store reports normal delivery failures
+        by returning False (missing token, non-OK sendMessage response, etc.)
+        rather than raising. The cooldown must respect that boolean — silencing
+        4 h of CRITICAL alerts after a transient Telegram outage that no
+        operator was paged for would be exactly the kind of silent failure
+        the contract framework exists to prevent."""
+        from unittest.mock import patch
+
+        v = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="12 signal(s) dropped >15pp...",
+        )
+        with patch(
+            "portfolio.message_store.send_or_store",
+            return_value=False,
+        ):
+            _alert_violations([v], config={})
+
+        from portfolio.file_utils import load_json
+        state = load_json(cooldown_state_file, default={}) or {}
+        per_invariant = (state.get("telegram_alert_state") or {}).get("accuracy_degradation")
+        assert per_invariant is None or not per_invariant.get("last_sent_ts"), (
+            "send_or_store returned False (delivery failed) but cooldown was "
+            "persisted — next 4 h of legitimate CRITICAL alerts would be "
+            "silenced even though no Telegram was actually delivered"
+        )
