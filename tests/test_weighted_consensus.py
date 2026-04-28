@@ -903,3 +903,120 @@ class TestDirectionalWeightScaling:
         # good SELL: sell_accuracy=0.55 → weight=0.55
         assert action == "SELL"
         assert conf == 1.0
+
+
+# ===========================================================================
+# Category: Directional Rescue (2026-04-28)
+# ===========================================================================
+
+class TestDirectionalRescue:
+    """Signals that fail the overall accuracy gate but have strong directional
+    accuracy can be rescued at reduced weight."""
+
+    def test_sell_rescued_when_overall_gated(self):
+        """heikin_ashi scenario: overall=42.6% (gated at 47%), SELL=55.7% (>=55%).
+        Should be rescued and contribute a SELL vote, not silently gated."""
+        # Without rescue, heikin_ashi would be gated and only "good" votes.
+        # With rescue, both participate.
+        votes = {"heikin_ashi": "SELL", "good": "SELL"}
+        acc = {
+            "heikin_ashi": {"accuracy": 0.426, "total": 800,
+                            "buy_accuracy": 0.254, "total_buy": 421,
+                            "sell_accuracy": 0.557, "total_sell": 377},
+            "good": {"accuracy": 0.60, "total": 100,
+                     "sell_accuracy": 0.60, "total_sell": 50,
+                     "buy_accuracy": 0.60, "total_buy": 50},
+        }
+        action, conf = _weighted_consensus(votes, acc, "trending-down")
+        # Both vote SELL. heikin_ashi rescued: SELL weight = 0.557 * 0.70 = 0.3899
+        # good: SELL weight = 0.60. Total SELL = ~0.99, BUY = 0.
+        assert action == "SELL"
+        assert conf == 1.0  # unanimous SELL
+
+    def test_rescued_signal_affects_confidence(self):
+        """Rescued signal dissents vs a normal signal → confidence < 1.0.
+        Without rescue, the gated signal wouldn't participate, giving conf=1.0."""
+        votes = {"rescued_sig": "SELL", "strong": "BUY"}
+        acc = {
+            "rescued_sig": {"accuracy": 0.42, "total": 500,
+                            "buy_accuracy": 0.25, "total_buy": 300,
+                            "sell_accuracy": 0.60, "total_sell": 200},
+            "strong": {"accuracy": 0.55, "total": 100,
+                       "buy_accuracy": 0.55, "total_buy": 50,
+                       "sell_accuracy": 0.55, "total_sell": 50},
+        }
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        # rescued_sig SELL: 0.60 * 0.70 = 0.42
+        # strong BUY: 0.55
+        # BUY wins (0.55 > 0.42), conf = 0.55/0.97 ≈ 0.567
+        assert action == "BUY"
+        assert conf < 1.0  # proves rescued_sig participated (not gated)
+        assert conf > 0.5  # BUY still won
+
+    def test_rescue_not_triggered_when_dir_acc_below_threshold(self):
+        """momentum_factors scenario: overall=34.9% (gated), SELL=45.1% (<55%).
+        Should remain gated — SELL accuracy not strong enough for rescue."""
+        votes = {"momentum_factors": "SELL"}
+        acc = {
+            "momentum_factors": {"accuracy": 0.349, "total": 1000,
+                                 "buy_accuracy": 0.180, "total_buy": 671,
+                                 "sell_accuracy": 0.451, "total_sell": 329},
+        }
+        action, conf = _weighted_consensus(votes, acc, "ranging")
+        assert action == "HOLD"
+        assert conf == 0.0
+
+    def test_rescue_not_triggered_when_insufficient_samples(self):
+        """Direction accuracy is good but only 20 samples — below 30 minimum."""
+        votes = {"new_sig": "SELL"}
+        acc = {
+            "new_sig": {"accuracy": 0.40, "total": 50,
+                        "buy_accuracy": 0.30, "total_buy": 30,
+                        "sell_accuracy": 0.60, "total_sell": 20},
+        }
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        assert action == "HOLD"
+        assert conf == 0.0
+
+    def test_buy_rescue_possible(self):
+        """BUY direction can also be rescued if BUY accuracy is strong."""
+        votes = {"contrarian": "BUY"}
+        acc = {
+            "contrarian": {"accuracy": 0.44, "total": 200,
+                           "buy_accuracy": 0.58, "total_buy": 80,
+                           "sell_accuracy": 0.33, "total_sell": 120},
+        }
+        action, conf = _weighted_consensus(votes, acc, "trending-up")
+        # BUY accuracy 58% >= 55% with 80 samples >= 30 → rescued
+        assert action == "BUY"
+        assert conf == 1.0  # sole voter
+
+    def test_rescue_weight_penalty_applied(self):
+        """Rescued signal gets 0.7x penalty vs a normal signal."""
+        votes = {"rescued": "SELL", "normal": "SELL"}
+        acc = {
+            "rescued": {"accuracy": 0.42, "total": 500,
+                        "buy_accuracy": 0.25, "total_buy": 300,
+                        "sell_accuracy": 0.65, "total_sell": 200},
+            "normal": {"accuracy": 0.65, "total": 200,
+                       "sell_accuracy": 0.65, "total_sell": 100,
+                       "buy_accuracy": 0.65, "total_buy": 100},
+        }
+        action, conf = _weighted_consensus(votes, acc, "trending-down")
+        assert action == "SELL"
+        # Both vote SELL so conf=1.0, but weights differ.
+        # rescued: 0.65 (sell_acc) * 0.70 (rescue) = 0.455
+        # normal: 0.65 (sell_acc) = 0.65
+        assert conf == 1.0
+
+    def test_rescue_at_exact_threshold(self):
+        """Direction accuracy exactly at 55% with exactly 30 samples → rescued."""
+        votes = {"edge": "SELL"}
+        acc = {
+            "edge": {"accuracy": 0.40, "total": 100,
+                     "buy_accuracy": 0.30, "total_buy": 70,
+                     "sell_accuracy": 0.55, "total_sell": 30},
+        }
+        action, conf = _weighted_consensus(votes, acc, "ranging")
+        assert action == "SELL"
+        assert conf == 1.0

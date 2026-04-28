@@ -176,6 +176,16 @@ _ACCURACY_GATE_HIGH_SAMPLE_MIN = 10000
 _DIRECTIONAL_GATE_THRESHOLD = 0.40
 _DIRECTIONAL_GATE_MIN_SAMPLES = 30
 
+# Directional rescue (2026-04-28): when a signal fails the overall accuracy
+# gate but its vote direction has strong accuracy, rescue it at reduced weight.
+# E.g., heikin_ashi overall=42.6% (gated) but SELL=55.7% → rescue SELL vote.
+# Only triggers when direction accuracy >= 55% with >= 30 samples, giving
+# a 5pp safety margin above coin-flip.  Rescued signals get a 0.7x weight
+# penalty so they contribute less than fully-passing signals.
+_DIRECTIONAL_RESCUE_THRESHOLD = 0.55
+_DIRECTIONAL_RESCUE_MIN_SAMPLES = 30
+_DIRECTIONAL_RESCUE_WEIGHT_PENALTY = 0.70
+
 # Adaptive recency blend: when recent accuracy diverges from all-time by more
 # than this threshold, increase recent weight for faster regime adaptation.
 # Normal: 70% recent + 30% all-time. Fast: 90% recent + 10% all-time.
@@ -1935,8 +1945,30 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
                 _ACCURACY_GATE_HIGH_SAMPLE_THRESHOLD - relaxation,
             )
         if samples >= ACCURACY_GATE_MIN_SAMPLES and acc < effective_gate:
-            gated_signals.append(signal_name)
-            continue
+            # Directional rescue: before gating, check if the vote direction
+            # has strong enough accuracy to justify a reduced-weight vote.
+            if vote == "BUY":
+                rescue_acc = stats.get("buy_accuracy", 0.0)
+                rescue_n = stats.get("total_buy", 0)
+            else:
+                rescue_acc = stats.get("sell_accuracy", 0.0)
+                rescue_n = stats.get("total_sell", 0)
+            if (rescue_n >= _DIRECTIONAL_RESCUE_MIN_SAMPLES
+                    and rescue_acc >= _DIRECTIONAL_RESCUE_THRESHOLD):
+                logger.debug(
+                    "Directional rescue: %s overall=%.1f%% (gated) but "
+                    "%s=%.1f%% (%d sam) — rescued at %.0f%% weight",
+                    signal_name, acc * 100, vote,
+                    rescue_acc * 100, rescue_n,
+                    _DIRECTIONAL_RESCUE_WEIGHT_PENALTY * 100,
+                )
+                # Fall through to weighting with rescue penalty applied later
+                _rescued = True
+            else:
+                gated_signals.append(signal_name)
+                continue
+        else:
+            _rescued = False
         # Directional accuracy gate: gate individual BUY/SELL direction when
         # direction-specific accuracy is very poor, even if overall accuracy passes.
         # E.g., qwen3 overall=59.8% passes, but BUY=30.0% → gate BUY only.
@@ -1961,6 +1993,10 @@ def _weighted_consensus(votes, accuracy_data, regime, activation_rates=None,
             weight = acc
         else:
             weight = 0.5
+        # Apply directional rescue penalty: rescued signals contribute at
+        # reduced weight since their overall accuracy failed the gate.
+        if _rescued:
+            weight *= _DIRECTIONAL_RESCUE_WEIGHT_PENALTY
         # IC-based weight adjustment: boost signals with high return-magnitude
         # predictive power, penalize phantom performers with zero IC.
         if ic_global:
