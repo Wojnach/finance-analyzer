@@ -224,6 +224,83 @@ class TestPollerOffsetPersistence:
         poller = TelegramPoller(fake_config, on_command=lambda *a: None)
         assert poller.offset == 0
 
+    def test_dispatch_failure_does_not_persist_offset(
+        self, poller_paths, fake_config,
+    ):
+        """Codex P1 round-6 follow-up: if on_command raises, don't claim
+        the offset slot. Otherwise a transient handler crash (e.g.
+        Avanza session expired mid-dispatch) silently consumes the user's
+        command — restart can't retry because the offset already moved.
+        We accept the trade of possibly re-running a poison message on
+        restart; persistent crashes are rare and the alternative loses
+        legitimate commands."""
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, _inbound = poller_paths
+
+        def crashing_handler(cmd, args, config):
+            raise RuntimeError("simulated Avanza session expired")
+
+        poller = TelegramPoller(fake_config, on_command=crashing_handler)
+        update = _build_update(update_id=42, msg_date=int(time.time()))
+        try:
+            poller._handle_update(update)
+        except RuntimeError:
+            # poller propagates the dispatch exception by design
+            pass
+
+        # Offset must NOT have been persisted to disk.
+        assert not state_file.exists() or json.loads(state_file.read_text()).get("offset", 0) == 0, (
+            "offset was persisted before dispatch settled; restart "
+            "would never re-fetch this update and the user's command "
+            "would be silently lost"
+        )
+
+    def test_settled_drops_still_persist_offset(self, poller_paths, fake_config):
+        """A stale-at-startup drop is intentional and safe to ack —
+        re-fetching it across restart would just stale-drop again,
+        and we'd never make progress against the inbound queue.
+        Distinct from dispatch-raises (which we DO want to retry)."""
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, inbound_file = poller_paths
+        poller = TelegramPoller(fake_config, on_command=lambda *a: None)
+
+        # update_id is 1 — small. msg_date is one day ago. No persisted
+        # offset, so this trips the cold-start stale filter.
+        update = _build_update(
+            update_id=1,
+            msg_date=int(time.time()) - 24 * 3600,
+        )
+        poller._handle_update(update)
+
+        rows = _read_jsonl(inbound_file)
+        assert len(rows) == 1
+        assert rows[0]["drop_reason"] == "stale_at_startup"
+
+        # Even though we dropped, we DID persist the offset — otherwise
+        # we'd re-fetch and re-stale-drop forever.
+        assert state_file.exists()
+        assert json.loads(state_file.read_text())["offset"] >= 2
+
+    def test_chat_mismatch_persists_offset(self, poller_paths, fake_config):
+        """A stranger's update isn't our user's command, but we still
+        need to ack it — otherwise the bot's getUpdates queue fills up
+        with spam over time."""
+        from portfolio.telegram_poller import TelegramPoller
+
+        state_file, _inbound = poller_paths
+        poller = TelegramPoller(fake_config, on_command=lambda *a: None)
+        update = _build_update(
+            update_id=99,
+            msg_date=int(time.time()),
+            chat_id=999999,  # not our chat_id
+        )
+        poller._handle_update(update)
+
+        assert state_file.exists()
+        assert json.loads(state_file.read_text())["offset"] >= 100
+
     def test_long_outage_does_not_execute_days_old_commands(
         self, poller_paths, fake_config,
     ):

@@ -141,26 +141,50 @@ class TelegramPoller:
 
         return data.get("result", [])
 
+    # Drop reasons that represent a *settled* outcome — the message was
+    # examined and intentionally not acted on (stale, empty, unrecognized,
+    # or no message body / wrong chat). Re-fetching these on a restart
+    # would just settle them the same way, so we ack the offset.
+    # Excluded: ``raised:*`` outcomes — those represent a transient
+    # dispatch failure where the user's command is genuinely at risk of
+    # being lost if we ack the offset before it succeeds (Codex P1
+    # round-7 2026-04-28).
+    _SETTLED_DROP_REASONS = frozenset({
+        "stale_at_startup",
+        "empty_text",
+        "unrecognized",
+    })
+
     def _handle_update(self, update):
         """Process a single update."""
         update_id = update.get("update_id", 0)
         prev_offset = self.offset
         self.offset = max(self.offset, update_id + 1)
-        if self.offset > prev_offset:
-            # Persist whenever the high-water mark moves so a restart
-            # doesn't re-fetch updates we've already acknowledged. We do
-            # this *before* parse/dispatch so a crashed callback doesn't
-            # cause endless redelivery of the same poison message.
-            self._save_offset()
+        # In-memory offset advances unconditionally so a single poison
+        # update doesn't loop the in-process poll, but persistence is
+        # delayed until we know the message is settled — successful
+        # dispatch, intentional drop, or non-message frame. If the
+        # handler raises, we leave the persisted offset where it was so
+        # restart re-fetches and retries (Codex P1 round-7 2026-04-28).
+        offset_settled = False
 
         msg = update.get("message")
         if not msg:
-            return
+            offset_settled = True
 
         # Only process messages from our chat_id. Drop others without logging —
         # no point persisting spam from strangers who can't affect state.
-        chat = msg.get("chat", {})
-        if str(chat.get("id")) != self.chat_id:
+        # We DO still ack the offset on chat-mismatch so the bot's
+        # getUpdates queue doesn't accumulate stranger spam over time.
+        if msg is not None:
+            chat = msg.get("chat", {})
+            if str(chat.get("id")) != self.chat_id:
+                offset_settled = True
+                msg = None  # short-circuit out of the rest of the body
+
+        if msg is None:
+            if offset_settled and self.offset > prev_offset:
+                self._save_offset()
             return
 
         # Accumulate log outcome; single append in finally so we log every
@@ -230,6 +254,16 @@ class TelegramPoller:
                 raise
         finally:
             self._log_inbound(update, msg, **outcome)
+            # Persist offset only when the message has *settled* —
+            # successful dispatch or an intentional drop. A raised
+            # dispatch leaves persistence un-claimed so a restart can
+            # retry; otherwise a transient handler crash silently
+            # consumes the user's command (Codex P1 round-7 2026-04-28).
+            should_persist = outcome["processed"] or (
+                outcome["drop_reason"] in self._SETTLED_DROP_REASONS
+            )
+            if should_persist and self.offset > prev_offset:
+                self._save_offset()
 
     def _log_inbound(self, update, msg, cmd, processed, drop_reason):
         """Persist one inbound message to data/telegram_inbound.jsonl.
