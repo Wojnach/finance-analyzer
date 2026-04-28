@@ -1363,6 +1363,45 @@ def _filter_critical_by_cooldown(critical: list[Violation], now: float,
     return fresh, state_updates
 
 
+def _clear_alert_state_for_passed_invariants(
+    passed_invariants: set[str],
+    state_file: Path | None = None,
+) -> None:
+    """Drop telegram_alert_state and critical_error_dispatch entries for
+    invariants that just had a clean cycle.
+
+    Codex P1 round-7 (2026-04-28): without this, an invariant that
+    fires, recovers for one cycle, and then recurs with the same
+    message text gets suppressed by the per-text cooldown — exactly
+    the intermittent-failure case the operator most needs to hear.
+    Clearing on a clean cycle mirrors what ViolationTracker does for
+    its consecutive-fire counters; the two state buckets stay in sync.
+    """
+    if not passed_invariants:
+        return
+    if state_file is None:
+        state_file = CONTRACT_STATE_FILE
+    try:
+        existing = load_json(state_file, default={}) or {}
+    except Exception as e:
+        logger.warning("alert state read for clear failed: %s", e)
+        return
+    changed = False
+    for bucket in ("telegram_alert_state", "critical_error_dispatch"):
+        section = existing.get(bucket)
+        if not isinstance(section, dict):
+            continue
+        for inv in passed_invariants:
+            if section.pop(inv, None) is not None:
+                changed = True
+    if not changed:
+        return
+    try:
+        atomic_write_json(state_file, existing)
+    except Exception as e:
+        logger.warning("alert state write for clear failed: %s", e)
+
+
 def _persist_alert_cooldown(
     state_updates: dict[str, dict],
     state_file: Path | None = None,
@@ -1547,17 +1586,52 @@ def verify_and_act(report, config: dict,
             previous_signal_counts=tracker.previous_signal_counts,
         )
 
+    # Per-loop state file so metals/golddigger/elongir don't race the
+    # main loop's contract_state.json (Codex P2 round-5 2026-04-28).
+    tracker_state_file = getattr(tracker, "_state_file", CONTRACT_STATE_FILE)
+
+    # Codex P1 round-7 (2026-04-28): snapshot the invariants that had
+    # cooldown bookkeeping BEFORE we mutate state, so the post-tracker
+    # clear step can drop entries for invariants that just had a clean
+    # cycle. Otherwise an intermittent failure (fire -> recover -> fire
+    # again with the same text) gets suppressed as a duplicate.
+    try:
+        _state_pre = load_json(tracker_state_file, default={}) or {}
+        _previously_active_invariants = set(
+            (_state_pre.get("telegram_alert_state") or {}).keys()
+        ) | set(
+            (_state_pre.get("critical_error_dispatch") or {}).keys()
+        )
+    except Exception:
+        _previously_active_invariants = set()
+
     if not violations:
-        # All good — still update tracker to clear consecutive counts and save
+        # All good — clear tracker counters AND any stale alert state
+        # so a recurrence after this clean cycle is treated as new.
         tracker.update([], report)
+        if _previously_active_invariants:
+            _clear_alert_state_for_passed_invariants(
+                _previously_active_invariants,
+                state_file=tracker_state_file,
+            )
         return
 
     # Track consecutive counts and escalate
     violations = tracker.update(violations, report)
 
-    # Per-loop state file so metals/golddigger/elongir don't race the
-    # main loop's contract_state.json (Codex P2 round-5 2026-04-28).
-    tracker_state_file = getattr(tracker, "_state_file", CONTRACT_STATE_FILE)
+    # Drop alert state for invariants that *did* show up earlier and
+    # are NOT in the current critical violation set. This is the
+    # mid-stream clear: the tracker may have other warnings, but if
+    # the previously-cooled-down invariant didn't fire CRITICAL this
+    # cycle we want a fresh alert when it returns.
+    currently_critical = {
+        v.invariant for v in violations if v.severity == "CRITICAL"
+    }
+    cleared = _previously_active_invariants - currently_critical
+    if cleared:
+        _clear_alert_state_for_passed_invariants(
+            cleared, state_file=tracker_state_file,
+        )
 
     # 2026-04-28 (Codex P2): wire dispatcher-tracked invariants into
     # critical_errors.jsonl AFTER the tracker has had its chance to

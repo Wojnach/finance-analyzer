@@ -487,6 +487,79 @@ class TestAlertCooldown:
             "ESCALATED prefix"
         )
 
+    def test_clean_cycle_clears_cooldown_so_recurrence_re_fires(
+        self, cooldown_state_file,
+    ):
+        """Codex P1 round-7 follow-up: when a CRITICAL invariant
+        disappears for a clean cycle and then comes back with the same
+        rendered message inside the 4 h window, the operator needs to
+        be paged again — that's exactly the intermittent-failure case
+        that matters most. The cooldown for an invariant must be
+        cleared as soon as it stops firing, not retained for the full
+        4 h."""
+        from unittest.mock import patch
+
+        from portfolio.loop_contract import (
+            CycleReport,
+            ViolationTracker,
+            verify_and_act,
+        )
+
+        v = Violation(
+            invariant="accuracy_degradation",
+            severity="CRITICAL",
+            message="12 signal(s) dropped >15pp...",
+            details={"alert_count": 12},
+        )
+
+        # Healthy report — used for cycles where we want NO violations.
+        def make_clean_report(cycle_id):
+            r = CycleReport(cycle_id=cycle_id, active_tickers={"BTC-USD"})
+            r.signals_ok = 1
+            r.signals_failed = 0
+            r.signals = {"BTC-USD": {
+                "action": "HOLD", "confidence": 0.5,
+                "extra": {"active_voters": 5},
+            }}
+            r.cycle_start = 1.0
+            r.cycle_end = 50.0
+            r.llm_batch_flushed = True
+            r.health_updated = True
+            r.heartbeat_updated = True
+            r.summary_written = True
+            return r
+
+        tracker = ViolationTracker(cooldown_state_file)
+        with patch(
+            "portfolio.message_store.send_or_store",
+            return_value=True,
+        ) as mock_send, patch("portfolio.loop_contract._trigger_self_heal"):
+            # Cycle 1 — alert fires; cooldown engaged.
+            with patch(
+                "portfolio.accuracy_degradation.check_degradation",
+                return_value=[v],
+            ):
+                verify_and_act(make_clean_report(1), {}, tracker=tracker)
+            # Cycle 2 — invariant clears (no violations from accuracy).
+            with patch(
+                "portfolio.accuracy_degradation.check_degradation",
+                return_value=[],
+            ):
+                verify_and_act(make_clean_report(2), {}, tracker=tracker)
+            # Cycle 3 — same alert recurs (same message text).
+            with patch(
+                "portfolio.accuracy_degradation.check_degradation",
+                return_value=[v],
+            ):
+                verify_and_act(make_clean_report(3), {}, tracker=tracker)
+
+        # Cycle 1 fired, cycle 3 must also fire (recurrence after clear).
+        assert mock_send.call_count == 2, (
+            f"Cooldown wasn't cleared on cycle-2 clean run; recurrence "
+            f"on cycle 3 was suppressed. send_or_store calls: "
+            f"{mock_send.call_count}"
+        )
+
     def test_text_flap_a_b_a_within_cooldown_does_not_re_fire_a(
         self, cooldown_state_file,
     ):
