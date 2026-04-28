@@ -128,6 +128,39 @@ class TestAuth:
             assert resp.status_code == 401
 
 
+class TestCORS:
+    """BUG-230: CORS must not use wildcard origin."""
+
+    def test_allowed_origin_reflected(self, client, tmp_data):
+        with patch("dashboard.app._get_dashboard_token", return_value=None):
+            resp = client.get(
+                "/api/invocations",
+                headers={"Origin": "http://localhost:5055"},
+            )
+            assert resp.headers.get("Access-Control-Allow-Origin") == "http://localhost:5055"
+
+    def test_disallowed_origin_not_reflected(self, client, tmp_data):
+        with patch("dashboard.app._get_dashboard_token", return_value=None):
+            resp = client.get(
+                "/api/invocations",
+                headers={"Origin": "http://evil.example.com"},
+            )
+            assert "Access-Control-Allow-Origin" not in resp.headers
+
+    def test_no_origin_no_cors_header(self, client, tmp_data):
+        with patch("dashboard.app._get_dashboard_token", return_value=None):
+            resp = client.get("/api/invocations")
+            assert "Access-Control-Allow-Origin" not in resp.headers
+
+    def test_credentials_header_set_false(self, client, tmp_data):
+        with patch("dashboard.app._get_dashboard_token", return_value=None):
+            resp = client.get(
+                "/api/invocations",
+                headers={"Origin": "http://localhost:5055"},
+            )
+            assert resp.headers.get("Access-Control-Allow-Credentials") == "false"
+
+
 # ---------------------------------------------------------------------------
 # Static route
 # ---------------------------------------------------------------------------

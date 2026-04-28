@@ -40,12 +40,23 @@ app = Flask(__name__, static_folder="static")
 app.json = SafeJSONProvider(app)
 
 
+_ALLOWED_ORIGINS = {
+    "http://localhost:5055",
+    "http://127.0.0.1:5055",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+}
+
+
 @app.after_request
 def add_cors_headers(response):
-    """Allow same-network browser access (e.g. phone on LAN)."""
-    response.headers["Access-Control-Allow-Origin"] = "*"
+    """Allow same-network browser access from known origins only (BUG-230)."""
+    origin = request.headers.get("Origin", "")
+    if origin in _ALLOWED_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
     response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Credentials"] = "false"
     return response
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -855,7 +866,8 @@ def api_accuracy():
                 }
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.exception("accuracy endpoint error")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @app.route("/api/iskbets")
@@ -1109,7 +1121,8 @@ def api_health():
         from portfolio.health import get_health_summary
         return jsonify(get_health_summary())
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.exception("health endpoint error")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -1243,7 +1256,8 @@ def api_market_health():
 
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.exception("mstr endpoint error")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 if __name__ == "__main__":

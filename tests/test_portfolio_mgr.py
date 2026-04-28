@@ -16,6 +16,7 @@ from portfolio.portfolio_mgr import (
     _validated_state,
     _load_state_from,
     _save_state_to,
+    portfolio_value,
     update_state,
 )
 
@@ -200,3 +201,33 @@ class TestUpdateState:
         with patch("portfolio.portfolio_mgr.STATE_FILE", state_file):
             result = update_state(lambda s: s.__setitem__("cash_sek", 77777))
         assert result["cash_sek"] == 77777
+
+
+class TestPortfolioValue:
+    """portfolio_value handles edge cases in fx_rate and prices."""
+
+    def test_nan_fx_rate_returns_cash_only(self):
+        """BUG-232: NaN fx_rate should not propagate into portfolio value."""
+        state = {"cash_sek": 100000, "holdings": {"BTC-USD": {"shares": 1}}}
+        result = portfolio_value(state, {"BTC-USD": 50000}, float("nan"))
+        assert result == 100000
+
+    def test_inf_fx_rate_returns_cash_only(self):
+        state = {"cash_sek": 100000, "holdings": {"BTC-USD": {"shares": 1}}}
+        result = portfolio_value(state, {"BTC-USD": 50000}, float("inf"))
+        assert result == 100000
+
+    def test_negative_inf_fx_rate_returns_cash_only(self):
+        state = {"cash_sek": 100000, "holdings": {"BTC-USD": {"shares": 1}}}
+        result = portfolio_value(state, {"BTC-USD": 50000}, float("-inf"))
+        assert result == 100000
+
+    def test_zero_fx_rate_returns_cash_only(self):
+        state = {"cash_sek": 100000, "holdings": {"BTC-USD": {"shares": 1}}}
+        result = portfolio_value(state, {"BTC-USD": 50000}, 0)
+        assert result == 100000
+
+    def test_valid_fx_rate_computes_value(self):
+        state = {"cash_sek": 100000, "holdings": {"BTC-USD": {"shares": 0.1}}}
+        result = portfolio_value(state, {"BTC-USD": 50000}, 10.0)
+        assert result == 100000 + 0.1 * 50000 * 10.0

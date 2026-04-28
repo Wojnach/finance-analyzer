@@ -1,6 +1,7 @@
 """Portfolio state management — load, save, atomic writes, value calculation."""
 
 import logging
+import math
 import shutil
 import threading
 from datetime import UTC, datetime
@@ -159,7 +160,7 @@ def update_state(mutate_fn, bold=False):
 
 
 def portfolio_value(state, prices_usd, fx_rate):
-    if not isinstance(fx_rate, (int, float)) or fx_rate <= 0:
+    if not isinstance(fx_rate, (int, float)) or not math.isfinite(fx_rate) or fx_rate <= 0:
         logger.warning("portfolio_value: invalid fx_rate=%r, returning cash only", fx_rate)
         return state.get("cash_sek", 0)
     total = state.get("cash_sek", 0)
