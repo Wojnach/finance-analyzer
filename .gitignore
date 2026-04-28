@@ -119,6 +119,9 @@ htmlcov/
 # ML model artifacts
 models/*.joblib
 
+# Daily audit reports written by scripts/audit_accuracy_drops.py
+data/accuracy_audit_*.md
+
 # LoRA training artifacts
 training/lora/output/
 training/lora/training_data.jsonl
