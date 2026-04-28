@@ -1,132 +1,236 @@
-# PLAN — Contract Alert Spam + Telegram Poller Hygiene (2026-04-28)
+# Plan — Accuracy degradation alert: root-cause + statistical rigor (2026-04-28)
 
 ## Context
 
-Two diagnostic threads pulled tonight, both rooted in observability/state plumbing rather than core trading logic:
+Yesterday we shipped a Telegram-cooldown fix for the `accuracy_degradation`
+contract alert (merge `7d507748`). Today's diagnostic confirmed the cooldown
+is working but surfaced that **the alert itself is firing on a system that's
+not in a healthy state to evaluate degradation**: the daily accuracy
+snapshot writer has been silently failing for a week, the detector is
+comparing against an anomalously high baseline computed on a small window
+(N=223), and the cooldown hash drifts every hour because percentages drift
+between snapshots.
 
-1. **`accuracy_degradation` Telegram spam** — at ~01:15 UTC on 2026-04-28 the contract had fired
-   192 consecutive cycles (~32 h, ≈10 min cadence) of an identical CRITICAL alert listing 12
-   degraded signals, 5 of which are MSTR signals collapsing in lockstep (sentiment 90→39,
-   volume_flow 82→34, fibonacci 78→35, heikin_ashi 79→35, momentum_factors 89→30 — orthogonal
-   signal families, can't all decay at once unless the **outcome labels** moved). The
-   detector is doing its job; the *replay-on-throttle* design path
-   (`accuracy_degradation.py:348`) keeps `ViolationTracker.consecutive` alive across cycles
-   by re-emitting the cached Violation list, and `loop_contract._alert_violations` ships
-   a Telegram message for every CRITICAL violation it sees — so cached replays alert just
-   like fresh detections. The 2026-04-16 memory entry already named this risk class
-   (regime-transition baselines firing phantom drops); we now have it landing on MSTR.
+The user said: *"the spam wasn't the problem, the problem was what it was
+reporting — it's a red flag that something is broken in the system and
+THAT needs fixing."* They're right. The spam was the symptom; the *thing
+the smoke detector keeps reporting* is what we need to fix.
 
-2. **Telegram inbound poller staleness** — `data/telegram_inbound.jsonl` has 5 entries, all
-   from 2026-04-17, all `update_id: 1, message_id: null, from: {id: null, username: null}`.
-   The metadata pattern (literally never produced by real Telegram updates) confirms these
-   are synthetic test-harness injections, not real DMs. Real status: poller is alive
-   (heartbeat fresh), but (a) zero real user traffic since Apr 17, and (b) the `offset`
-   field is in-memory only — on every loop restart it resets to 0, fetches all pending
-   updates, then drops messages older than `startup_time - 60s` via the stale filter.
-   Survivable today because nobody DMs the bot, but it's the kind of latent bug that
-   bites the moment you actually rely on inbound commands.
+## What's broken (confirmed via investigation)
 
-## Goal
+### 1. The snapshot writer hasn't actually written for 7 days
 
-Stop the Telegram spam without losing detection signal, and harden the
-inbound poller so a future restart doesn't silently drop legitimate commands.
-**Do not change signal weights, gating thresholds, or anything that affects
-trading decisions.** This is a plumbing/observability change.
+`data/accuracy_snapshots.jsonl` had only 4 entries before today's manual
+trigger:
 
-## Non-goals
-
-* Fixing the underlying MSTR accuracy reading. The 2026-04-16 memory entry
-  already prescribes the structural fix (per-ticker per-horizon blacklist,
-  fresher baseline). That's a config change requiring user judgment on each
-  un-blacklist; out of scope for this autonomous session.
-* Migrating off the Telegram Bot API to a user-account stack (`tdl`/telethon).
-  Today's "we use Telegram heavily" is bot-only by design.
-* Deeper investigation of the `sentiment` aggregate 75→40 drop. Worth a separate
-  research session — sentiment_in_process landed Apr 09, FinGPT shadow accuracy
-  backfill landed Apr 22 (`ab616e18`) — possible regression window but we'd need
-  a ground-truth re-tagging run to confirm, and that crosses into trading-logic
-  territory.
-
-## Changes
-
-### 1. Per-invariant Telegram cooldown (`portfolio/loop_contract.py`)
-
-Add a deduplicated alert state in `contract_state.json`:
-
-```json
-"telegram_alert_state": {
-  "<invariant_name>": {
-    "last_sent_ts": <epoch>,
-    "last_message_hash": "<sha1-of-message-text>"
-  }
-}
+```
+2026-02-20  signals_recent={}   (pre-feature)
+2026-04-19  sentiment_recent=83.4% / 217 samples
+2026-04-20  sentiment_recent=76.7% / 236 samples
+2026-04-21  sentiment_recent=75.3% / 223 samples
+[no entries Apr 22..27]
 ```
 
-In `_alert_violations`, before constructing/sending the Telegram message, drop any
-CRITICAL violation whose `(invariant, sha1(message))` matches a recent alert (default
-cooldown: **4 h**, configurable via `notification.contract_alert_cooldown_s`). Re-fire
-immediately if the message text changes (so the moment a *new* signal joins the alert
-list, it goes out — we suppress only "exactly the same complaint, again").
+But `data/accuracy_snapshot_state.json` says
+`last_snapshot_date_utc: 2026-04-28`. The state file's mtime is
+`06:10 UTC` (matches yesterday's operational fixup) — so something updated
+the state-as-if-the-snapshot-was-written without actually appending to the
+JSONL. This is a silent-failure mode: in `maybe_save_daily_snapshot`
+(`portfolio/accuracy_degradation.py:658`), the gating only checks
+`state["last_snapshot_date_utc"] == today_str`. Once that's set, the
+function returns False and never tries again — even when the JSONL is
+empty for today.
 
-Failure mode: if the cooldown logic raises, fail-open (alert anyway). Telegram noise is
-worse than a missed alert here.
+The natural daily writer should fire after `06:00 UTC` each day. Either it
+hasn't been firing (loop down at the wrong hour repeatedly) or the
+operational fixup yesterday wrote the state without writing the JSONL,
+poisoning today's natural run.
 
-### 2. Wire `accuracy_degradation` CRITICAL violations into `critical_errors.jsonl`
+### 2. The "baseline" is statistical noise
 
-Add a `record_critical_error` call in `loop_contract.check_signal_accuracy_degradation_safe`
-for any CRITICAL violation produced by the accuracy stack — same pattern
-`check_layer2_journal_activity` uses today (loop_contract.py:341–351). Keys on
-`(invariant, message_hash)` so we don't append the identical row every cycle. This
-makes the auto-fix-agent dispatcher see degradation alerts (CLAUDE.md startup check
-already reads this file).
+The Apr 21 snapshot has `sentiment_recent: 75.3% / 223 samples`. But
+`signals.sentiment` (lifetime over 39k samples) is **46%**. The 75% reading
+was a 7-day window where sentiment happened to be on a hot streak — a
+small-sample anomaly, not the signal's true performance.
 
-### 3. Persist Telegram poller offset (`portfolio/telegram_poller.py`)
+Today's recent: `sentiment_recent: 43.3% / 187 samples`. That's roughly
+*at* lifetime (46%). So the "32pp drop" the alert reports is largely
+**regression to the mean from an anomalously good week**.
 
-Add `data/telegram_poller_state.json` with `{"offset": <int>, "updated_ts": "..."}`.
-Load on `__init__`, save inside `_handle_update` after the offset advances.
-Atomic via `file_utils.atomic_write_json`.
+The detector at `accuracy_degradation.py:556-582` requires:
+- Drop ≥ 15pp
+- New accuracy < 50%
+- Both old and new sample sizes ≥ 100
 
-Stop-gap: when the persisted offset is loaded, we skip the stale-at-startup filter
-for messages whose `update_id > persisted_offset` — those are by definition
-post-restart pending updates that arrived during downtime, and the user expects
-them to execute (e.g. a `bought MSTR …` confirmation sent while the loop was
-restarting).
+`MIN_SAMPLES = 100` on a 7-day window with binomial-noise SE of
+`±√(0.25/100) ≈ 5%` produces frequent spurious 15pp drops when comparing
+two random 7-day samples of the same underlying signal.
 
-### 4. Operational fix-up (one-shot, not committed)
+### 3. The cooldown hash drifts every cycle
 
-After merging, run:
-* `save_full_accuracy_snapshot()` — fresh baseline so age delta is full 7 d
-* Clear `last_full_check_time` / `last_full_check_violations` in `data/degradation_alert_state.json`
-* Remove `accuracy_degradation` key from `consecutive` in `data/contract_state.json`
+The current hash includes percentage strings like `33.7%`, `33.2%` from
+the violation message. These drift each cycle as new samples land,
+producing a fresh hash on every hour-ish interval and bypassing the
+multi-hash dedup. Result: hourly Telegram spam.
 
-Then restart `PF-DataLoop` + `PF-MetalsLoop` so the new cooldown logic loads.
+This is the same pattern we already fixed for `layer2_journal_activity`
+(folded `details["trigger_time"]` into a stable identity hash). For
+`accuracy_degradation` the stable identity is the **set of violating
+signal keys**, not the rendered percentages.
 
-## Risk
+### 4. Real signal weakness exists but is mixed in with noise
 
-* **False quiet on the alert path.** A 4 h cooldown on identical messages means
-  if the same 12 signals stay degraded for 4 h, we emit one alert per 4 h instead
-  of one per 10 min. That's the goal, but a regression that genuinely needs more
-  attention could be ignored. Mitigation: text-hash sensitivity — any new signal
-  joining the alert list immediately re-fires the alert.
-* **`record_critical_error` noise.** If we wrote per-cycle, the 192-fire streak
-  would have written 192 critical_errors entries. We keep this in check via the
-  same `(invariant, message_hash)` dedup as the Telegram cooldown — write once
-  per text change.
-* **Poller offset persistence + stale filter interaction.** The stale filter
-  was added defensively to prevent re-execution on restart. We loosen it only
-  when a persisted offset exists AND `update_id > offset` (i.e. truly new), so
-  the original protection still kicks in for the cold-start case.
+Looking at lifetime accuracy:
+- `sentiment` lifetime 46%, recent 43% — **at lifetime, no real drop**
+- `momentum_factors` lifetime 54%, recent 31% — **real 23pp gap, worth investigating**
+- `BTC-USD::structure`, `BTC-USD::futures_flow`, `XAG-USD::trend`, etc. —
+  per-ticker drops on smaller windows, mix of noise and real
 
-## Execution
+The MSTR cluster's "90% → 41%" is on N=156 baseline → fundamentally a
+small-sample artifact. `MSTR::sentiment` was re-enabled Apr 16
+(commit `fd504d44`) — three weeks of signals, then a small hot streak
+got recorded as the "baseline".
 
-1. Commit this plan on `main`.
-2. `git worktree add .worktrees/fix-contract-spam-20260428 -b fix/contract-spam-20260428`.
-3. **Batch 1** — failing tests (pytest RED), commit.
-4. **Batch 2** — per-invariant Telegram cooldown impl, tests pass, commit.
-5. **Batch 3** — accuracy_degradation → critical_errors.jsonl wire, tests pass, commit.
-6. **Batch 4** — poller offset persistence, tests pass, commit.
-7. Full test suite (`pytest -n auto --timeout=60`); fix non-pre-existing reds.
-8. Codex adversarial review on the branch; address P1/P2.
-9. Merge to main, push via `cmd.exe /c "cd /d Q:\finance-analyzer && git push"`.
-10. Operational fix-up on main repo, restart loops, verify quiet.
-11. Clean up worktree + branch, append `docs/SESSION_PROGRESS.md`, send Telegram summary.
+## Goals
+
+Fix the infrastructure so the alert is *meaningful* when it fires:
+
+1. **Snapshot writer**: bulletproof against state-without-write desync.
+   Verify JSONL append before persisting state.
+2. **Snapshot backfill**: regenerate snapshots for Apr 22-27 from
+   historical signal log, so the detector has a real 7-day baseline.
+3. **Detector statistical rigor**: raise minimum sample sizes; require
+   the drop to be statistically significant (e.g., binomial-test p < 0.01
+   or absolute drop > 2 standard errors) instead of a flat 15pp.
+4. **Stable cooldown hash**: hash on sorted violating signal keys, not
+   on rendered message text. Mirror the `layer2_journal_activity` fix.
+5. **Verify the real degradation that remains** after noise-filtering.
+   For any signal that *still* fires post-fix, check whether it's
+   regime-shift, outcome-pollution, or a code bug.
+
+## Non-goals (deferred)
+
+- Per-signal disable decisions (`MSTR::sentiment` etc.) — that's a config
+  tuning session, not a code fix. Surface candidates in the journal.
+- Outcome backfill bug investigation — recent signal_log entries having
+  empty outcomes is normal backfill timing (need 24h elapsed for 1d
+  horizon).
+- Rebuilding the accuracy pipeline from scratch.
+
+## Implementation batches
+
+### Batch 1 — Snapshot writer bulletproofing
+
+**Files:** `portfolio/accuracy_degradation.py`,
+`tests/test_accuracy_degradation_snapshot.py` (new)
+
+- In `maybe_save_daily_snapshot` (line 658), record `accuracy_snapshots.jsonl`
+  size before calling `save_full_accuracy_snapshot()`. After the call,
+  verify the file grew by at least 1 line. If it didn't grow, log
+  `critical_errors.jsonl` entry and refuse to update state.
+- Add an end-to-end test: stub `save_accuracy_snapshot` to a no-op and
+  verify state is NOT updated.
+- Add a test for the legitimate path: real append → state updated.
+
+**Acceptance:** if the JSONL doesn't grow, the state isn't updated, and a
+critical_errors entry is written so the dispatcher can engage.
+
+### Batch 2 — Backfill missing snapshots
+
+**Files:** `scripts/backfill_accuracy_snapshots.py` (new), one-shot.
+
+- Iterate dates Apr 22 through Apr 28.
+- For each date, replay `save_full_accuracy_snapshot(at=date)` using
+  signal_log entries with `ts <= date`.
+- Existing infra (`save_full_accuracy_snapshot`) doesn't take a "now"
+  parameter; need to thread one through, or use a dated cutoff filter.
+- Append to `data/accuracy_snapshots.jsonl` in chronological order.
+
+**Acceptance:** `data/accuracy_snapshots.jsonl` has entries for every
+date Apr 22-28; each entry's `signals_recent.sentiment.total` is in a
+plausible range (~150-250).
+
+### Batch 3 — Detector statistical rigor
+
+**Files:** `portfolio/accuracy_degradation.py`,
+`tests/test_accuracy_degradation_significance.py`
+
+- Raise `MIN_SAMPLES_HISTORICAL` and `MIN_SAMPLES_CURRENT` from 100 → 300
+  for the recent-window check. (Lifetime checks unchanged.)
+- Add a significance gate: instead of just `drop_pp >= 15.0`, require
+  `drop_pp >= max(15.0, 2 * SE)` where
+  `SE = sqrt(p_old*(1-p_old)/N_old + p_new*(1-p_new)/N_new) * 100`.
+- Tests: synthesize known-noise samples (N=200 each, true p=0.5, two
+  draws) — assert detector does NOT fire 95% of runs. Synthesize a
+  real degradation (N=500 each, p=0.55 → p=0.30) — assert detector DOES
+  fire.
+
+**Acceptance:** synthetic noise stops firing; synthetic real degradation
+still fires.
+
+### Batch 4 — Stable cooldown hash
+
+**Files:** `portfolio/loop_contract.py`,
+`tests/test_loop_contract_alert_cooldown.py`
+
+- Extend `_hash_violation_identity` (already exists for
+  `layer2_journal_activity`) to handle `accuracy_degradation`: hash on
+  sorted `details["alerts"][*]["key"]` (the signal+scope identifiers),
+  ignoring percentages.
+- Test: same set of violating signals with drifting percentages → same
+  hash, dedup works. Different set of violating signals → different
+  hash, fresh send.
+
+**Acceptance:** a 4-hour run with hourly accuracy_degradation re-fires on
+the same signal set produces 1 Telegram, not 4.
+
+### Batch 5 — Verify what's left after noise-filtering
+
+**One-shot script** in `scripts/audit_accuracy_drops.py`:
+
+- For each signal/scope flagged today, compute:
+  - Lifetime accuracy
+  - Each of the last 7 weekly-window accuracies
+  - Whether current is > 2 SE below lifetime (real)
+  - Whether the change vs 7d ago is > 2 SE (real)
+- Output a markdown table to `docs/accuracy_audit_20260428.md`.
+
+**Acceptance:** a list of signals that are *still* statistically below
+their lifetime expectation, separated from regression-to-mean noise.
+This output informs follow-up gating decisions (config, not code).
+
+## Verification (system-wide, after all batches)
+
+1. `pytest tests/ -n auto` — full suite green; no new flakes.
+2. Manual: trigger `maybe_save_daily_snapshot()` after deleting
+   accuracy_snapshot_state.json — confirm JSONL grew by 1 line and state
+   was updated.
+3. Manual: run with mocked save_accuracy_snapshot raising — confirm state
+   NOT updated and critical_errors row appears.
+4. Manual: with the post-fix detector, the next contract cycle should
+   either (a) not fire (most signals are noise) or (b) fire on a smaller,
+   higher-confidence set of real degraders.
+5. Restart loops via `schtasks /run /tn "\PF-DataLoop"` and
+   `\PF-MetalsLoop`.
+6. Watch `data/portfolio.log` for the next 30 min — expect at most 1
+   accuracy_degradation Telegram even if the signal set drifts.
+
+## Risks
+
+- **Backfill produces wrong numbers** if outcomes were polluted before
+  BUG-220 was fixed (Apr 24). Mitigation: log per-snapshot sample sizes
+  and skip if anomalous.
+- **Significance gate suppresses real signal regime shifts** in the
+  short term until enough data accumulates. Acceptable trade — we'd
+  rather miss a 1-week regime shift than spam every cycle.
+- **Hash change rolls existing cooldown state**. Old hashes on disk
+  don't match the new identity. First post-fix cycle will fire once,
+  then cool down. Acceptable.
+
+## Out of scope
+
+- Restarting loops mid-batch. Restart only after all batches merged.
+- Changes to ViolationTracker / contract framework architecture.
+- Layer 2 trading logic.
+- Any signal *implementation* changes (we're auditing, not editing
+  signals).
