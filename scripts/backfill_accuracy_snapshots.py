@@ -42,10 +42,40 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from portfolio.accuracy_stats import (  # noqa: E402
+    accuracy_by_signal_ticker,
     consensus_accuracy,
     signal_accuracy,
 )
-from portfolio.accuracy_degradation import _per_ticker_recent  # noqa: E402
+from portfolio.tickers import SIGNAL_NAMES  # noqa: E402
+
+
+def _per_ticker_from_window(entries: list[dict], horizon: str = "1d") -> dict:
+    """Per-ticker per-signal accuracy from already-filtered entries.
+
+    Mirrors :func:`portfolio.accuracy_degradation._per_ticker_recent`
+    but explicitly passes ``days=None`` to ``accuracy_by_signal_ticker``
+    so the inner function does NOT re-apply a ``datetime.now()``-based
+    cutoff. Callers (this script) have already filtered ``entries`` to
+    the desired historical window. Without this, a backfill for Apr-22
+    run on Apr-28 would still get filtered down to "Apr-21..Apr-28
+    intersect Apr-15..Apr-22" = ~1-2 days of data per ticker — producing
+    truncated baselines that quietly miss real degradation. (Codex
+    round 2 P1 2026-04-28.)
+    """
+    result: dict[str, dict[str, dict]] = {}
+    for sig_name in SIGNAL_NAMES:
+        per_ticker = accuracy_by_signal_ticker(
+            sig_name, horizon=horizon, days=None, entries=entries,
+        )
+        for ticker, stats in per_ticker.items():
+            samples = stats.get("samples", stats.get("total", 0))
+            if samples <= 0:
+                continue
+            result.setdefault(ticker, {})[sig_name] = {
+                "accuracy": stats.get("accuracy", 0.0),
+                "total": samples,
+            }
+    return result
 
 
 def _load_signal_log_entries(path: Path) -> list[dict]:
@@ -159,11 +189,10 @@ def build_historical_snapshot(
         print(f"  warn: signals_recent failed: {e}", file=sys.stderr)
         snapshot["signals_recent"] = {}
 
-    # Per-ticker recent
+    # Per-ticker recent — use the local helper that does NOT re-apply
+    # datetime.now() cutoff (Codex round 2 P1).
     try:
-        per_ticker_recent = _per_ticker_recent(
-            "1d", days=days, entries=historical_recent,
-        )
+        per_ticker_recent = _per_ticker_from_window(historical_recent, "1d")
         snapshot["per_ticker_recent"] = _compact_per_ticker(per_ticker_recent)
     except Exception as e:
         print(f"  warn: per_ticker_recent failed: {e}", file=sys.stderr)
@@ -227,17 +256,34 @@ def _load_existing_snapshots(jsonl_path: Path) -> list[dict]:
     return out
 
 
-def _newest_forecast_recent(snapshots: list[dict]) -> dict | None:
-    """Return the most recent non-empty forecast_recent block.
+def _nearest_forecast_recent(
+    snapshots: list[dict], target_dt: datetime,
+) -> dict | None:
+    """Return forecast_recent from the snapshot whose ts is closest to target_dt.
 
-    Used as a placeholder for backfilled days that lack forecast data —
-    keeps the detector's forecast scope from going blind on those days.
+    Codex round 2 P2 fix (2026-04-28): the original implementation took
+    the *newest* forecast_recent globally. When backfilling Apr-22 with
+    an Apr-28 snapshot already on file, that placed Apr-28's forecast
+    metrics into Apr-22's baseline — so the detector compared current
+    forecast against forecast metrics measured on a *future* date, hiding
+    or fabricating regressions. Picking the snapshot nearest in time
+    (typically Apr-21 for an Apr-22 backfill) preserves the temporal
+    semantics of the comparison.
     """
-    for snap in reversed(snapshots):
+    best: tuple[float, dict] | None = None
+    for snap in snapshots:
         fr = snap.get("forecast_recent")
-        if isinstance(fr, dict) and fr:
-            return fr
-    return None
+        if not isinstance(fr, dict) or not fr:
+            continue
+        ts_str = snap.get("ts", "")
+        try:
+            ts = datetime.fromisoformat(ts_str)
+        except (ValueError, TypeError):
+            continue
+        delta = abs((ts - target_dt).total_seconds())
+        if best is None or delta < best[0]:
+            best = (delta, fr)
+    return best[1] if best else None
 
 
 def _sort_jsonl_chronologically(jsonl_path: Path) -> int:
@@ -296,12 +342,6 @@ def main(argv: list[str] | None = None) -> int:
     existing = _existing_dates(args.output_jsonl)
     print(f"Existing snapshot dates in {args.output_jsonl}: "
           f"{sorted(existing)[-5:]}", file=sys.stderr)
-    forecast_template = _newest_forecast_recent(existing_snaps)
-    if forecast_template:
-        print(
-            f"  forecast_recent template: {len(forecast_template)} model(s) "
-            f"(copied from nearest live snapshot)", file=sys.stderr,
-        )
 
     from portfolio.file_utils import atomic_append_jsonl
 
@@ -315,8 +355,16 @@ def main(argv: list[str] | None = None) -> int:
         target_dt = datetime.combine(
             d, time(hour=args.hour_utc), tzinfo=UTC,
         )
+        # Pick forecast template per-target_dt so each backfilled day
+        # uses the nearest-in-time existing snapshot (Codex round 2 P2).
+        forecast_template = _nearest_forecast_recent(existing_snaps, target_dt)
         print(f"  building snapshot for {target_dt.isoformat()}",
               file=sys.stderr)
+        if forecast_template:
+            print(
+                f"    forecast_recent template: {len(forecast_template)} "
+                f"model(s) (nearest in time)", file=sys.stderr,
+            )
         snap = build_historical_snapshot(
             all_entries=entries, target_dt=target_dt,
             forecast_recent_template=forecast_template,

@@ -166,10 +166,19 @@ def main(argv: list[str] | None = None) -> int:
             life = consensus_accuracy("1d", entries=lifetime_entries)
             rec = consensus_accuracy("1d", entries=recent_entries)
         elif scope == "forecast":
-            # Codex P3 fix (2026-04-28): forecast alerts have keys like
-            # "chronos_24h" / "kronos_24h"; route through the same
+            # Codex P3 fix round 1 (2026-04-28): forecast alerts have
+            # keys like "chronos_24h" / "kronos_24h"; route through the
             # cached_forecast_accuracy infra the live writer uses.
+            #
+            # Codex round 2 P2 fix: degradation_alert_state.json stores
+            # forecast keys with a "forecast::" prefix (per the live
+            # check at accuracy_degradation.py:518), but
+            # cached_forecast_accuracy returns dicts keyed by the bare
+            # model name. Strip the prefix before lookup.
             from portfolio.forecast_accuracy import cached_forecast_accuracy
+            bare_key = key
+            if bare_key.startswith("forecast::"):
+                bare_key = bare_key[len("forecast::"):]
             try:
                 forecast_recent = cached_forecast_accuracy(
                     horizon="24h", days=7, use_raw_sub_signals=True,
@@ -181,8 +190,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  warn: forecast accuracy fetch failed: {e}",
                       file=sys.stderr)
                 forecast_recent, forecast_lifetime = {}, {}
-            life = forecast_lifetime.get(key, {})
-            rec = forecast_recent.get(key, {})
+            life = forecast_lifetime.get(bare_key, {})
+            rec = forecast_recent.get(bare_key, {})
         else:
             life, rec = {}, {}
 
