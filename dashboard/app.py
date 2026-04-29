@@ -1197,6 +1197,126 @@ def api_metals():
 
 
 # ---------------------------------------------------------------------------
+# Crypto + MSTR swing-trader endpoints (mirror /api/metals shape)
+# ---------------------------------------------------------------------------
+
+def _crypto_per_instrument(state: dict, ticker: str) -> dict:
+    """Slice the unified crypto_swing_state.json by ticker."""
+    positions = state.get("positions", {}) if state else {}
+    matches = {pid: p for pid, p in positions.items() if p.get("ticker") == ticker}
+    return {
+        "n_positions": len(matches),
+        "positions": matches,
+        "last_buy_ts": (state.get("last_buy_ts", {}) or {}).get(ticker)
+                       if state else None,
+    }
+
+
+def _crypto_decisions_for(decisions: list, ticker: str) -> list:
+    out = []
+    for d in decisions or []:
+        pos = d.get("pos") or {}
+        if pos.get("ticker") == ticker:
+            out.append(d)
+        elif d.get("ticker") == ticker:
+            out.append(d)
+    return out
+
+
+@app.route("/api/crypto")
+@require_auth
+def api_crypto():
+    """Combined BTC + ETH swing-trader state (mirror of /api/metals).
+
+    Reads:
+      - data/crypto_swing_state.json (positions, cash, cycle counter)
+      - data/crypto_deep_context.json (Fear & Greed, funding, on-chain)
+      - data/crypto_swing_decisions.jsonl (last 50)
+      - data/crypto_swing_trades.jsonl (last 50)
+      - data/crypto_warrant_catalog.json (live warrant universe)
+      - data/crypto_risk.json (per-position barrier checks, drawdown)
+    """
+    state = _read_json(DATA_DIR / "crypto_swing_state.json") or {}
+    context = _read_json(DATA_DIR / "crypto_deep_context.json") or {}
+    catalog = _read_json(DATA_DIR / "crypto_warrant_catalog.json") or {}
+    risk = _read_json(DATA_DIR / "crypto_risk.json") or {}
+    decisions = list(_iter_latest_dict_entries(
+        DATA_DIR / "crypto_swing_decisions.jsonl", read_limit=50))
+    trades = list(_iter_latest_dict_entries(
+        DATA_DIR / "crypto_swing_trades.jsonl", read_limit=50))
+    return jsonify({
+        "state": state,
+        "context": context,
+        "warrant_catalog": catalog,
+        "risk": risk,
+        "decisions": decisions,
+        "trades": trades,
+    })
+
+
+@app.route("/api/btc")
+@require_auth
+def api_btc():
+    """BTC-specific slice of the crypto swing-trader state."""
+    state = _read_json(DATA_DIR / "crypto_swing_state.json") or {}
+    context = _read_json(DATA_DIR / "crypto_deep_context.json") or {}
+    decisions = list(_iter_latest_dict_entries(
+        DATA_DIR / "crypto_swing_decisions.jsonl", read_limit=50))
+    trades = list(_iter_latest_dict_entries(
+        DATA_DIR / "crypto_swing_trades.jsonl", read_limit=50))
+    return jsonify({
+        "ticker": "BTC-USD",
+        "instrument": _crypto_per_instrument(state, "BTC-USD"),
+        "deep_context": (context or {}).get("btc"),
+        "shared_context": (context or {}).get("shared"),
+        "decisions": _crypto_decisions_for(decisions, "BTC-USD"),
+        "trades": _crypto_decisions_for(trades, "BTC-USD"),
+    })
+
+
+@app.route("/api/eth")
+@require_auth
+def api_eth():
+    """ETH-specific slice of the crypto swing-trader state."""
+    state = _read_json(DATA_DIR / "crypto_swing_state.json") or {}
+    context = _read_json(DATA_DIR / "crypto_deep_context.json") or {}
+    decisions = list(_iter_latest_dict_entries(
+        DATA_DIR / "crypto_swing_decisions.jsonl", read_limit=50))
+    trades = list(_iter_latest_dict_entries(
+        DATA_DIR / "crypto_swing_trades.jsonl", read_limit=50))
+    return jsonify({
+        "ticker": "ETH-USD",
+        "instrument": _crypto_per_instrument(state, "ETH-USD"),
+        "deep_context": (context or {}).get("eth"),
+        "shared_context": (context or {}).get("shared"),
+        "decisions": _crypto_decisions_for(decisions, "ETH-USD"),
+        "trades": _crypto_decisions_for(trades, "ETH-USD"),
+    })
+
+
+@app.route("/api/mstr")
+@require_auth
+def api_mstr():
+    """MSTR deep-context endpoint.
+
+    The pre-existing `/api/mstr_loop` returns the strategy-loop state
+    (positions, scorecard, last poll). This new endpoint returns the deep
+    context (NAV premium, BTC correlation, options skew, analyst consensus)
+    written by `portfolio/mstr_precompute.py`. Together they parallel
+    `/api/metals` (decisions+context) for the metals subsystem.
+    """
+    deep = _read_json(DATA_DIR / "mstr_deep_context.json") or {}
+    loop_state = _read_json(DATA_DIR / "mstr_loop_state.json") or {}
+    scorecard = _read_json(DATA_DIR / "mstr_loop_scorecard.json") or {}
+    return jsonify({
+        "ticker": "MSTR",
+        "deep_context": deep,
+        "loop_state": loop_state,
+        "scorecard": scorecard,
+    })
+
+
+# ---------------------------------------------------------------------------
 # New: GoldDigger monitoring
 # ---------------------------------------------------------------------------
 

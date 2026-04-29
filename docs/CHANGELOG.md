@@ -1,5 +1,57 @@
 # Changelog
 
+## 2026-04-30 (crypto + MSTR swing subsystem — mirrors metals)
+
+Build BTC/ETH autonomous swing-trading subsystem mirroring the existing
+metals subsystem, plus MSTR deep-context precompute and dashboard endpoints.
+Gold (XAU) was already covered by the metals subsystem (64 XAU warrants in
+`data/metals_warrant_catalog.json`) — no new gold work needed.
+
+**Crypto (BTC + ETH) — full subsystem:**
+- `data/crypto_swing_config.py` — thresholds (DRY_RUN=True default), sizing,
+  exit cascade, momentum override, stale-signal rejection, all hardened gates
+  inherited from metals' incident response (2026-04-17/18/20/21 fixes).
+- `data/crypto_warrant_catalog.json` + `data/crypto_warrant_refresh.py` —
+  Avanza warrant discovery for XBT/ETH trackers, BULL/BEAR certs, MINI L/S
+  leveraged products. 16 search queries, barrier safety filter, spread filter.
+- `data/crypto_swing_trader.py` — `CryptoSwingTrader` with full entry-gate
+  cascade (persistence/MACD-decay/RSI-slope/regime-confirm), exit-gate cascade
+  (hard stop/TP/warrant TP/trailing/signal reversal/max hold), cooldown with
+  loss escalation. DRY_RUN-aware throughout.
+- `data/crypto_loop.py` — 60s autonomous loop with embedded 10s fast-tick
+  monitor (sharp-dip alerts at -3%, velocity-flush alerts at +2%/3min).
+  Singleton-lock pattern. CLI: `--loop` / `--once` / `--report` / `--debug`.
+- `portfolio/crypto_precompute.py` → `data/crypto_deep_context.json` —
+  4h precompute of Fear & Greed, BTC dominance, funding rates, OI, on-chain,
+  DXY/SPY/gold cross-asset.
+- `portfolio/signals/crypto_cross_asset.py` — 5-sub-indicator voter
+  (ETH/BTC ratio, Fear & Greed, DXY, SPY, gold/BTC), capped at 0.7 confidence.
+
+**MSTR — fill the precompute gap:**
+- `portfolio/mstr_precompute.py` → `data/mstr_deep_context.json` — NAV
+  premium math (market cap vs. BTC holdings × BTC price − debt), 30d BTC
+  correlation, options IV skew, short interest, analyst consensus.
+
+**Dashboard endpoints (mirror /api/metals):**
+- `/api/crypto` — combined BTC + ETH state (positions, deep context, warrant
+  catalog, risk, decisions, trades).
+- `/api/btc`, `/api/eth` — per-instrument slices.
+- `/api/mstr` — MSTR deep context (complements existing `/api/mstr_loop`).
+
+**Tests:** 73 new tests across 6 files
+(`test_crypto_swing_config`, `test_crypto_swing_trader`,
+`test_crypto_precompute`, `test_mstr_precompute`,
+`test_crypto_cross_asset_signal`, `test_dashboard_crypto_endpoints`).
+xdist-safe; all redirect state files via monkeypatch on cfg attributes.
+None touch live network or Avanza.
+
+**Risk:** zero live trading exposure. `DRY_RUN=True` ships in
+`crypto_swing_config.py`; the loop is not yet wired into a scheduled task.
+First steps to flip live: (1) run `crypto_warrant_refresh` against a live
+Playwright session to populate the catalog, (2) verify discovery shows
+expected XBT/ETH trackers, (3) flip `DRY_RUN=False` in config, (4) run
+the loop manually with `--once` for one cycle, (5) wire to scheduled task.
+
 ## 2026-04-28 (sentiment relevance + decisive aggregation fix)
 
 Targeted fix for the 75.3% -> ~42% sentiment accuracy collapse flagged in
