@@ -1,121 +1,122 @@
 {
-  "date": "2026-04-25",
+  "date": "2026-04-29",
+  "generated_at": "2026-04-29T21:38:15.266249+00:00",
   "research_topics": [
-    "Claude Fundamental BUY bias root cause",
-    "Adaptive signal weighting (IC-based, regime-dependent)",
-    "Signal correlation pruning and ensemble methods",
-    "Multi-agent LLM trading architectures (TradingAgents)",
-    "Silver/ETH/BTC predictive features",
-    "Walk-forward optimization for parameter stability"
+    "Adaptive signal weighting (walk-forward, IC-based)",
+    "Regime detection (HMM, volatility clustering)",
+    "Multi-agent LLM trading (TradingAgents bull/bear debate)",
+    "Feature importance for signal selection (XGBoost SHAP)",
+    "ATR-based volatility-targeting position sizing",
+    "Kelly criterion for optimal bet sizing"
   ],
   "findings": [
     {
-      "topic": "Claude Fundamental BUY Bias (ROOT CAUSE FOUND)",
-      "finding": "Sonnet tier has 83% BUY rate, Opus tier has 78% BUY rate over last 500 entries (Apr 21-24). Haiku correctly abstains (96% HOLD). The cascade logic prefers highest-tier non-HOLD vote, so Sonnet/Opus's structural optimism overrides Haiku's prudent abstention. Result: signal outputs BUY ~33% with ZERO SELL for crypto/metals. In ranging market, this is consistently wrong (37.9% recent 1d accuracy, down from 59.4%).",
-      "relevance_to_us": "CRITICAL — claude_fundamental is our most expensive signal (CLI subprocess) and has collapsed from top-5 to bottom-5 accuracy",
-      "implementation_difficulty": "easy",
-      "expected_impact": "high",
-      "source": "Local analysis of data/claude_fundamental_log.jsonl"
-    },
-    {
-      "topic": "Regime-Aware Signal Weighting via HMM",
-      "finding": "Recent paper (MDPI Electronics 15/6/1334) shows regime-aware LightGBM with rolling Hidden Markov Model for regime detection outperforms non-regime-conditioned models on NASDAQ over 10 years. Key insight: aggregate statistics mask regime-dependent signal performance. Our accuracy_cache confirms this — some signals are 60%+ in trending but 40% in ranging.",
-      "relevance_to_us": "HIGH — all our tickers are currently 'ranging' and our worst-performing signals (structure 32.6%, smart_money 32.7%) are trend-following signals that fail in range-bound markets",
-      "implementation_difficulty": "medium",
-      "expected_impact": "high",
-      "source": "https://www.mdpi.com/2079-9292/15/6/1334"
-    },
-    {
       "topic": "IC-Based Signal Weighting",
-      "finding": "FactSet practical guide shows Max Information Ratio weighting outperforms equal weighting over 13 years. Formula: weight_i = IC_i / sigma_i (information coefficient divided by tracking error). LLM-enhanced alpha discovery achieves 75% improvement in IC over baseline RL (avg IC=0.0515). Key: use rolling IC, not static.",
-      "relevance_to_us": "HIGH — directly applicable. Our memory/quant_research_priorities.md already has IC-based weighting as #1 priority. Implementation plan exists.",
+      "finding": "Information Coefficient (IC) measures correlation between signal prediction and actual returns. Grinold rule: Alpha = Volatility * IC * Score. Most equity factors have IC 0.05-0.15. Multi-factor IC typically 0.12-0.18. Alpha decays - most factors lose power by 9 months. Current system uses equal weighting with accuracy gate - IC-based weighting would weight signals by predictive power per horizon.",
+      "relevance_to_us": "HIGH. Our signals range from 31% to 75% accuracy. Equal weighting (with accuracy gate) means a 74% signal (funding@3h) gets same vote as a 52% signal (volume). IC-based weighting would dramatically improve ensemble quality by upweighting proven signals.",
       "implementation_difficulty": "medium",
       "expected_impact": "high",
-      "source": "https://insight.factset.com/a-practical-approach-to-weighting-signals"
+      "source": "Grinold 1994, MSCI Barra alpha conversion framework"
     },
     {
-      "topic": "Signal Correlation Pruning via PCA",
-      "finding": "Best practice: transform signals to mean-stationary, standardize, then compress with PCA to reduce redundancy. Coefficient of variation across walk-forward windows detects overfitting. Shannon entropy filtering improves signal quality by removing noise. Cross-correlation-based pruning identifies redundant signal pairs.",
-      "relevance_to_us": "MEDIUM — we have 51 signal modules but many are likely correlated (e.g., trend + heikin_ashi, momentum + momentum_factors). PCA-based pruning could reduce noise. But our disabled signals already output HOLD, so the main issue is HOLD dilution rather than correlated active signals.",
+      "topic": "Walk-Forward Optimization",
+      "finding": "WFO trains on rolling window, validates on next period, walks forward. Prevents overfitting vs static backtest. Recent paper (arxiv 2602.10785) shows double out-of-sample WFO on crypto. QuantConnect has production WFO API. Key: retrain periodically but not too frequently - weekly or bi-weekly sweet spot.",
+      "relevance_to_us": "HIGH. Our signal weights are static. Walk-forward reweighting on 7-day rolling accuracy would adapt to changing market regimes. Already have accuracy_cache infrastructure to support this.",
+      "implementation_difficulty": "medium",
+      "expected_impact": "high",
+      "source": "arxiv.org 2602.10785, QuantConnect WFO docs"
+    },
+    {
+      "topic": "HMM Regime Detection",
+      "finding": "Hidden Markov Models detect latent market regimes (trending/ranging/volatile). Typical 2-3 state model using returns + volatility. 1-3 day lag for regime shifts. Crypto-specific HMM paper shows BTC regime detection 2024-2026. Regime-switching factor investing improves risk-adjusted returns.",
+      "relevance_to_us": "MEDIUM. We already have regime detection (ranging vs trending via ADX/volatility) but it is rule-based. HMM would be probabilistic, smoother transitions, and can condition signal weights on regime. Trend signal is 40.3% at 3h in current (ranging) regime - HMM could disable it dynamically.",
       "implementation_difficulty": "medium",
       "expected_impact": "medium",
-      "source": "https://arxiv.org/html/2501.10709v1"
+      "source": "QuantStart, preprints.org 202603.0831"
     },
     {
-      "topic": "TradingAgents Multi-Agent Framework v0.2.0",
-      "finding": "TauricResearch's TradingAgents v0.2.0 (Feb 2026) uses bull/bear researcher debate, risk management team, and trader synthesis. Supports multi-provider LLMs. Key architecture: structured debates between bullish/bearish agents surface blind spots. Reported improvements in Sharpe ratio and max drawdown vs single-agent.",
-      "relevance_to_us": "LOW-MEDIUM — our Layer 2 is single-agent. Adding bull/bear debate would be a significant architecture change. Could be tested in a separate branch. Main value: the debate mechanism could fix the claude_fundamental BUY bias by adding a bear counterargument.",
+      "topic": "Multi-Agent Bull/Bear Debate (TradingAgents)",
+      "finding": "TradingAgents v0.2.4 (released 2026-04-25): LangGraph-based framework with ~12 agents simulating a trading firm. Key innovation: bull vs bear researchers debate with multiple rounds, then risk management team adjudicates. Backtested 23-27% cumulative return on AAPL/GOOGL/AMZN.",
+      "relevance_to_us": "LOW-MEDIUM. Our Layer 2 is single-agent Claude. Adding a structured debate would improve decision quality but significantly increase latency and cost. Could be implemented as a prompt engineering approach rather than separate agents.",
       "implementation_difficulty": "hard",
       "expected_impact": "medium",
-      "source": "https://github.com/tauricresearch/tradingagents"
+      "source": "arxiv.org 2412.20138, github.com/TauricResearch/TradingAgents"
     },
     {
-      "topic": "Silver Price Prediction: ARIMA vs ML",
-      "finding": "Recent IJSR study (2000-2025 daily data) found ARIMA outperforms Random Forest and XGBoost for silver short-term forecasting. ML models lose accuracy during high-volatility periods. Key features: Fed policy, USD strength, industrial demand (solar/EV), inflation expectations, gold-silver ratio.",
-      "relevance_to_us": "MEDIUM — our Chronos forecast for XAG has regressed to ~50% accuracy. ARIMA might be a simpler, more robust alternative for short-term silver direction. But our main edge on XAG is at 3h (54.5%) not 1d (51.2%), so the short-term forecasting approach aligns.",
+      "topic": "ATR-Based Position Sizing + Kelly Criterion",
+      "finding": "ATR-based sizing: Stop = ATR * multiplier (typically 2-3), Size = Risk_Budget / (ATR * Multiplier). Ensures constant dollar risk regardless of volatility. Kelly fraction = (win_prob * payoff - loss_prob) / payoff. Practitioners use half-Kelly (12.5%) or quarter-Kelly (6.25%) to reduce drawdowns.",
+      "relevance_to_us": "HIGH. Current system uses fixed budget per trade. ATR-based sizing would automatically reduce size in volatile periods and increase in calm periods. Kelly criterion can be computed from our per-ticker accuracy data.",
       "implementation_difficulty": "easy",
-      "expected_impact": "low",
-      "source": "https://www.ijsr.net/getabstract.php?paperid=SR26404180625"
+      "expected_impact": "high",
+      "source": "quantstrategy.io, medium.com/ildiveliu"
     },
     {
-      "topic": "Walk-Forward Optimization for Parameter Stability",
-      "finding": "Novel double out-of-sample WFO approach (arXiv 2602.10785) adds a second validation layer. Key insight: compute coefficient of variation for optimized parameters across walk-forward windows — high variation = overfitting. Stability penalty encourages consistent parameters.",
-      "relevance_to_us": "MEDIUM — applicable to our signal weight optimization. Currently we use static 70/30 recency weighting. Walk-forward would adaptively reweight signals based on recent performance while detecting when parameter drift indicates regime change.",
+      "topic": "Feature Importance for Signal Selection (SHAP/XGBoost)",
+      "finding": "XGBoost + SHAP feature importance analysis reveals which features actually predict returns. Key finding: primary price-based features consistently outperform technical indicators in high-frequency contexts. Feature importance methods disagree - built-in vs SHAP can rank differently.",
+      "relevance_to_us": "MEDIUM. Could use XGBoost to learn which of our 33 active signals actually predict returns. However, requires careful cross-validation to avoid overfitting with 33 features on limited samples.",
       "implementation_difficulty": "medium",
       "expected_impact": "medium",
-      "source": "https://arxiv.org/html/2602.10785"
+      "source": "PLOS ONE, arxiv 2412.15448v1"
     },
     {
-      "topic": "Sentiment Signal Anti-Correlation",
-      "finding": "SAGE journal study shows sentiment indicators improve algo trading performance only when combined with technical signals, not standalone. Our sentiment signal at 33.8% recent 3h and 45.9% 1d confirms this — it's actively anti-correlated with correct direction. CryptoBERT and keyword-based sentiment may be capturing noise rather than signal.",
-      "relevance_to_us": "HIGH — sentiment is one of our highest-volume signals (39K+ samples) and consistently bad. Should be force-HOLD immediately rather than allowed to vote.",
-      "implementation_difficulty": "easy",
+      "topic": "PPO-Based Adaptive Alpha Weighting",
+      "finding": "Springer paper (2026): PPO reinforcement learning to dynamically optimize weights of multiple LLM-generated alphas. Achieves higher Sharpe ratios and smaller max drawdowns vs static weighting, though not always highest cumulative returns.",
+      "relevance_to_us": "LOW. Interesting but too complex for our infrastructure. Simpler IC/accuracy-based weighting gets 80% of the benefit with 20% of the complexity.",
+      "implementation_difficulty": "hard",
       "expected_impact": "medium",
-      "source": "https://journals.sagepub.com/doi/10.1177/21582440251369559"
+      "source": "Springer s41060-026-01072-2"
     }
   ],
   "recommended_improvements": [
     {
-      "title": "Fix claude_fundamental BUY bias via regime-aware cascade",
-      "description": "In ranging regime, prefer Haiku (which correctly abstains 96% of the time) over Sonnet/Opus (which have 78-83% BUY bias). Add a tier_accuracy tracker that measures per-tier hit rate and disables tiers below 45%. Alternatively, require Sonnet/Opus to have majority BUY across sub_signals (not just any non-HOLD) before overriding Haiku.",
+      "title": "IC-Based Signal Weighting",
+      "description": "Replace equal voting with accuracy-proportional weighting. Weight each signal by its rolling 7-day IC at the relevant horizon. Signals with IC < 0.05 get zero weight.",
       "priority": 1,
-      "effort_days": 0.5,
-      "files_affected": ["portfolio/signals/claude_fundamental.py"]
-    },
-    {
-      "title": "Force-HOLD sentiment signal",
-      "description": "Add 'sentiment' to DISABLED_SIGNALS in signal_engine.py. At 33.8% recent 3h and 45.9% 1d with 39K+ samples, it's proven anti-edge. The accuracy gate at 47% should already catch it, but verify it's actually being gated.",
-      "priority": 2,
-      "effort_days": 0.1,
-      "files_affected": ["portfolio/signal_engine.py"]
-    },
-    {
-      "title": "Force-HOLD structure signal",
-      "description": "Structure signal collapsed to 32.6% recent 1d. Add to DISABLED_SIGNALS or verify accuracy gate is catching it.",
-      "priority": 3,
-      "effort_days": 0.1,
-      "files_affected": ["portfolio/signal_engine.py"]
-    },
-    {
-      "title": "Implement rolling IC-based signal weighting",
-      "description": "Replace equal-weight voting with IC-weighted voting. Use 7-day rolling Information Coefficient per signal per ticker. Signals with negative IC get zero weight (not inverted). This is the #1 quant research priority from memory.",
-      "priority": 4,
       "effort_days": 2,
-      "files_affected": ["portfolio/signal_engine.py", "portfolio/accuracy_stats.py"]
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/accuracy_stats.py"
+      ]
     },
     {
-      "title": "Add regime-conditioned accuracy tracking",
-      "description": "Split accuracy_cache by regime (trending/ranging/high-vol). This enables regime-dependent signal selection — only activate signals that perform well in the current regime.",
-      "priority": 5,
-      "effort_days": 1.5,
-      "files_affected": ["portfolio/accuracy_stats.py", "portfolio/outcome_tracker.py"]
+      "title": "ATR-Based Position Sizing",
+      "description": "Replace fixed budget per trade with ATR-scaled position sizing. Size = RiskBudget / (ATR * 2.5). For leveraged certificates, use underlying ATR * leverage. Apply half-Kelly ceiling.",
+      "priority": 2,
+      "effort_days": 1,
+      "files_affected": [
+        "portfolio/risk_management.py",
+        "portfolio/trade_guards.py"
+      ]
     },
     {
-      "title": "Reduce HOLD dilution from disabled signals",
-      "description": "18 disabled signals output HOLD and inflate total_voters. They should be excluded from voter count entirely, not counted as HOLD voters. This would increase consensus percentages and reduce noise.",
-      "priority": 6,
+      "title": "Horizon-Gated Signal Activation",
+      "description": "Gate each signal to its best-performing horizon. Funding rate: only active at 3h (74.2%) not 1d (31.3%). Calendar: emphasize 3h (67.9%).",
+      "priority": 3,
+      "effort_days": 1,
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/signal_registry.py"
+      ]
+    },
+    {
+      "title": "Disable Fibonacci Signal",
+      "description": "Fibonacci is 43.6% at 1d and 43.3% at 3h with 17K+ samples. Consistently below coin flip. Should be disabled.",
+      "priority": 4,
       "effort_days": 0.5,
-      "files_affected": ["portfolio/signal_engine.py"]
+      "files_affected": [
+        "portfolio/signal_engine.py"
+      ]
+    },
+    {
+      "title": "Walk-Forward Signal Reweighting",
+      "description": "Weekly automated recalculation of signal weights based on trailing 7-day accuracy. Use existing accuracy_cache infrastructure.",
+      "priority": 5,
+      "effort_days": 3,
+      "files_affected": [
+        "portfolio/signal_engine.py",
+        "portfolio/accuracy_stats.py",
+        "portfolio/main.py"
+      ]
     }
   ]
 }

@@ -33,6 +33,27 @@ echo  %HOSTNAME% -^> %LOCAL_SERVICE%
 echo ==========================================
 echo.
 
+REM --- Safety gate: refuse to run if dashboard_token is empty ---
+REM Added 2026-04-28: empty token = public dashboard exposes portfolio JSON,
+REM trades, decisions to anyone with the URL. Force a token before tunneling.
+REM History: dashboard auth is opt-in (backwards-compat), see dashboard/app.py
+REM _get_dashboard_token + check_token. Empty token returns 200 to all callers.
+set REPO_ROOT=%~dp0..
+pushd "%REPO_ROOT%"
+"%REPO_ROOT%\.venv\Scripts\python.exe" -c "import json,sys; cfg=json.load(open('config.json',encoding='utf-8')); t=cfg.get('dashboard_token') or ''; sys.exit(0 if len(t)>=16 else 1)"
+if %ERRORLEVEL% neq 0 (
+    echo ERROR: dashboard_token in config.json is empty or too short.
+    echo        Refusing to expose dashboard publicly without auth.
+    echo.
+    echo        Generate one with:
+    echo          .venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(32))"
+    echo        Then set it in config.json under "dashboard_token".
+    popd
+    goto :error
+)
+popd
+echo [0/6] dashboard_token present — auth gate satisfied.
+
 REM --- Step 1: Check/Install cloudflared ---
 where cloudflared >nul 2>&1
 if %ERRORLEVEL% neq 0 (

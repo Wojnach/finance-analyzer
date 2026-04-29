@@ -1,90 +1,85 @@
-# After-Hours Research Plan — 2026-04-25
+# Research Session Plan — 2026-04-29
+
+## Context
+
+After-hours research session. Markets closed. FOMC held rates at 3.5-3.75% with
+historic 8-4 dissent. Oil at $118 Brent (Iran blockade). GDP/PCE tomorrow.
+
+## Key Findings
+
+1. **Signal engine is already sophisticated** — IC-based weighting, correlation dedup,
+   directional rescue, macro-window gating, crisis mode, persistence filter all implemented.
+   Previous plan's "IC-based weighting" improvement is already shipped.
+
+2. **Tier 1 consensus accuracy is coin-flip**: BTC 52.5%, ETH 49.8%, XAG 49.4%, XAU 49.4%,
+   MSTR 47.8% at 1d. Slightly better at 3h: XAU 54.3%, XAG 53.5%, BTC 50.7%.
+
+3. **Fibonacci consistently bad** — 43.6% at 1d (17K samples), 43.3% at 3h. Already
+   accuracy-gated but still computed every cycle. Should be formally disabled.
+
+4. **Pending validation signals**: 17 signals pending. Only 5 shadow-tracked (hurst,
+   shannon_entropy, statistical_jump, realized_skewness, oscillators). The other 12
+   have zero accuracy data because they're not shadow-safe.
+
+5. **Realized skewness should be killed** — 33.3% at 1d with 90 samples. Definitively bad.
+
+6. **MSTR is a BTC proxy** — 0.58 correlation. Our signals treat it as a stock, ignoring
+   that BTC price is the primary driver. Cross-asset BTC signal for MSTR would help.
+
+7. **Statistical jump regime is marginal** — 52.7% at 1d with 110 samples. Above gate
+   threshold but small sample. Worth enabling for further validation.
 
 ## Bugs & Problems Found
 
-1. **claude_fundamental BUY bias escapes accuracy gate at 3h**
-   - ROOT CAUSE: Sonnet has 83% BUY rate, Opus has 78% BUY rate (last 500 entries)
-   - Cascade picks highest-tier non-HOLD vote → always BUY for crypto/metals
-   - At 1d horizon: blended accuracy ~40.1% (fast blend), correctly gated by 50% high-sample gate
-   - At 3h horizon: 0 samples, accuracy defaults to 0.5, PASSES the 47% gate
-   - BUG: claude_fundamental is a fundamentals signal (hours/days timescale) but votes at 3h
-   - FIX: Add claude_fundamental to 3h regime gating, OR use 1d accuracy as cross-horizon fallback
-   - File: `portfolio/signal_engine.py` lines ~660-690 (REGIME_GATED_SIGNALS)
+1. **Fibonacci computed but always gated** — wastes CPU on every 60s cycle for a signal
+   that can never pass the 47% gate with 17K samples. Formal disable saves ~50ms/cycle.
 
-2. **Signal correlation clusters waste voter diversity**
-   - BB, EMA, MACD vote the same way ~85% of the time across all tickers
-   - Sentiment and candlestick cluster with them on metals (85-89% agreement)
-   - 3 correlated votes carry ~1 signal's worth of information
-   - File: `portfolio/signal_engine.py` (correlation group gating exists but may not cover these)
+2. **12 pending signals have no shadow tracking** — can never be evaluated. Need to add
+   non-network-heavy signals to _SHADOW_SAFE_SIGNALS.
 
-3. **HOLD dilution from disabled signals**
-   - 73-78% of all signal votes are HOLD across tickers
-   - 18 disabled signals + accuracy-gated signals inflate voter denominator
-   - Consensus percentages are artificially suppressed
+3. **MSTR treated as generic stock** — accuracy at 47.8% because signal system ignores
+   the BTC treasury dependency. Cross-asset signal needed.
 
-4. **ETH-USD consensus below coin flip (47.7% 3h, 48.5% 1d)**
-   - Missing ETH-specific signals: ETH/BTC ratio momentum, ETF flows, staking dynamics
-   - System treats ETH like BTC but ETH has unique L2 value leakage and structural drivers
+## Improvements Prioritized
 
-5. **MSTR consensus below coin flip (45.9% 3h, 49.4% 1d)**
-   - Generic stock signals (RSI/MACD on MSTR price) inappropriate for BTC-leveraged treasury
-   - Missing: mNAV premium/discount signal, BTC signal inheritance
+### Batch 1: Signal Cleanup (low risk, saves CPU, enables evaluation)
+- **Files**: `portfolio/tickers.py`, `portfolio/signal_engine.py`
+- **Changes**:
+  1. Add `fibonacci` to DISABLED_SIGNALS (43.6% at 1d, 17K+ sam)
+  2. Add non-network signals to `_SHADOW_SAFE_SIGNALS` to accumulate accuracy data:
+     `complexity_gap_regime`, `mahalanobis_turbulence`, `crypto_evrp`, `hash_ribbons`
+  3. Enable `statistical_jump_regime` (52.7% at 110 sam — above gate, worth live validation)
+  4. Update `realized_skewness` comment to "killed" (33.3% at 90 sam, below gate anyway)
+  5. Remove `fibonacci` from HORIZON_SIGNAL_WEIGHTS (no longer needed if disabled)
 
-## Improvements Prioritized (impact x ease)
+### Batch 2: MSTR Cross-Asset BTC Signal (medium risk, targets worst ticker)
+- **Files**: `portfolio/signal_engine.py`
+- **Changes**: When computing consensus for MSTR, also include the most recent BTC-USD
+  consensus action as a synthetic signal with weight proportional to BTC's per-ticker
+  consensus accuracy. Implementation: in the vote-building section, if ticker==MSTR and
+  BTC consensus is cached, inject a `btc_proxy` vote.
 
-### Tier 1: Implement NOW (high impact, easy/medium)
-1. **Fix claude_fundamental 3h gate escape** — Add to 3h/4h regime gating in ranging
-   - Impact: HIGH (removes ~33% phantom BUY votes from 3h consensus)
-   - Effort: 1 line change in REGIME_GATED_SIGNALS
-   - Risk: LOW (only gates in ranging regime at 3h/4h)
-   
-2. **Add claude_fundamental bias detector** — When Sonnet/Opus BUY rate >75% over last 30 samples, prefer Haiku's HOLD
-   - Impact: HIGH (fixes structural BUY bias at source)
-   - Effort: ~20 lines in claude_fundamental.py
-   - Risk: LOW (only triggers when bias is extreme)
+### Batch 3: Prophecy Review (no code risk)
+- **Files**: `data/prophecy.json`
+- **Changes**: Review and update macro beliefs with today's data:
+  - Silver at $72.81 (checkpoints through $80 triggered, $120 pending)
+  - BTC at $77.5K ($75K triggered, $85K pending)
+  - ETH at $2,330 (all checkpoints pending, $2.5K next)
 
-3. **Verify structure and fibonacci gating** — Both have terrible recent accuracy
-   - structure: 32.6% recent 1d → blended ~37% → should be gated
-   - fibonacci: 43.2% all-time → below 47% gate
-   - Verify these are actually being gated at all horizons
+## What to Defer
 
-### Tier 2: Implement NOW (medium impact, easy)
-4. **Add BB+EMA+MACD to correlation group** — They vote identically 85% of the time
-   - Only let the highest-accuracy of the three vote, gate the other two
-   - File: `portfolio/signal_engine.py` correlation groups section
+- Sentiment model calibration (CryptoBERT bullish bias) → needs separate session
+- Walk-forward optimization → already partially handled by dynamic horizon weights
+- Multi-agent bull/bear debate (TradingAgents) → too complex, low ROI
+- XGBoost feature importance for signal selection → needs backtesting infrastructure
 
-### Tier 3: Defer (high impact, hard)
-5. **IC-weighted signal voting** — Replace equal-weight with rolling IC per signal per ticker
-   - Already in memory/quant_research_priorities.md as #1 priority
-   - Defer: requires accuracy_stats changes + extensive testing
-   
-6. **ETH/BTC ratio momentum signal** — New signal for ETH-specific driver
-   - High impact for ETH accuracy
-   - Defer: new signal module requires full validation pipeline
+## Execution Order
 
-7. **mNAV premium signal for MSTR** — Track MSTR market cap / BTC holdings value
-   - High impact for MSTR accuracy
-   - Defer: requires new data source integration
-
-## Execution Plan
-
-### Batch 1: Claude Fundamental Fix + Signal Gating (3 files)
-1. `portfolio/signal_engine.py` — Add claude_fundamental to 3h/4h ranging regime gate
-2. `portfolio/signals/claude_fundamental.py` — Add tier BUY-bias detector to cascade
-3. Tests: Run test_claude_fundamental.py + test_signal_engine.py
-
-### Batch 2: Correlation Group Update (1 file)
-1. `portfolio/signal_engine.py` — Add BB+EMA+MACD correlation group
-2. Tests: Run test_signal_engine.py
-
-### Batch 3: Commit plan + deliverables
-1. Commit plan, all research deliverables, and code changes
-2. Merge to main, push
-
-## What to Defer (→ docs/IMPROVEMENT_BACKLOG.md)
-- IC-weighted signal voting (needs architectural change)
-- ETH/BTC ratio momentum signal (needs new signal module)
-- mNAV premium signal for MSTR (needs data source)
-- Bull/bear debate architecture for claude_fundamental (TradingAgents pattern)
-- Walk-forward parameter optimization
-- Per-regime accuracy tracking split
+1. Create worktree `research/daily-2026-04-29`
+2. Batch 1: Signal cleanup + tests
+3. Batch 2: MSTR BTC cross-asset + tests
+4. Batch 3: Prophecy review
+5. Run full test suite
+6. Write signal audit deliverable
+7. Merge, push, restart loops
+8. Morning briefing + Telegram

@@ -1,31 +1,30 @@
 {
-  "date": "2026-04-25",
-  "market_summary": "S&P 500 +0.8% to 7,165 (record close). Nasdaq +1.63% to 24,837 (record). Dow -0.16% to 49,231. Risk-on driven by US-Iran peace talks (FM Araghchi heading to Pakistan) and Intel AI earnings momentum. Semiconductor rally: NVDA crossed $5T again, AMD +13%, QCOM +10%. BUT: Consumer sentiment at record low (49.8). Oil surged 13-16% weekly (Strait of Hormuz crisis since Feb 28). Gold above $4,800. Crypto steady: BTC $78K, ETH $2,312.",
-  "key_events_next_week": [
-    {"date": "2026-04-28", "event": "Consumer Confidence (10:00 ET)", "impact": "medium", "instruments_affected": ["all"]},
-    {"date": "2026-04-28", "event": "Richmond Fed Manufacturing Survey (10:00 ET)", "impact": "low", "instruments_affected": ["stocks"]},
-    {"date": "2026-04-28-29", "event": "FOMC MEETING", "impact": "HIGH", "instruments_affected": ["all"], "note": "Rate decision + statement Wed afternoon. Critical for all positions."},
-    {"date": "2026-04-30", "event": "GDP 1st Release Q1 2026 (08:30 ET)", "impact": "HIGH", "instruments_affected": ["all"]},
-    {"date": "2026-04-30", "event": "PCE Deflator (08:30 ET)", "impact": "HIGH", "instruments_affected": ["all"], "note": "Fed's preferred inflation gauge"},
-    {"date": "2026-04-30", "event": "Employment Cost Index (08:30 ET)", "impact": "HIGH", "instruments_affected": ["all"]},
-    {"date": "2026-04-30", "event": "Initial Claims (08:30 ET)", "impact": "medium", "instruments_affected": ["stocks"]}
+  "date": "2026-04-29",
+  "generated_at": "2026-04-29T21:34:45.888753+00:00",
+  "market_summary": "FOMC day: Fed held rates at 3.5-3.75% with historic 8-4 dissent (last 4-dissent was Oct 1992). Powell announced he will stay on Board of Governors indefinitely. Oil surged 6%+ as Trump announced extended Iran blockade \u2014 Brent at $118, WTI at $107. Dow fell 280pts (-0.57%) for 5th straight decline. S&P and Nasdaq flat. Big Tech (GOOGL, MSFT, AMZN, META) reporting after bell. Gold at $4,520, silver at $72.81. BTC holding $77.5K, ETH at $2,330. MSTR at $161-172, Strategy now holds 818K BTC.",
+  "key_events_tomorrow": [
+    "Q1 2026 GDP Advance Estimate \u2014 GDPNow 1.2% vs market expectation 2.5-3.0%. MAJOR potential shock if negative.",
+    "March PCE Price Index (Fed preferred inflation gauge) \u2014 last core PCE at 2.7%, above 2% target. Simultaneous with GDP at 8:30 ET.",
+    "Big Tech earnings reactions \u2014 GOOGL, MSFT, AMZN, META all reported after hours tonight. Market moves depend on results.",
+    "Weekly jobless claims at 8:30 ET.",
+    "Pershing Square IPO day 2 \u2014 $5B raised, priced at low end. Watch for secondary market reaction."
   ],
   "overnight_risks": [
-    "US-Iran negotiations in Pakistan — ceasefire or escalation could move oil 5-10% either way",
-    "Strait of Hormuz still largely blocked since Feb 28. Largest oil supply disruption in history (-10.1 mb/d in March)",
-    "Asia-Pacific open: watching for reaction to US record closes and oil volatility",
-    "FOMC meeting Tue-Wed: market positioning ahead of rate decision could trigger pre-meeting volatility",
-    "Weekend weekend risk: geopolitical headlines could gap markets at Sunday crypto open"
+    "Iran blockade escalation \u2014 oil at $118 Brent. Any military escalation or failed negotiations could spike to $130+.",
+    "GDP shock risk \u2014 GDPNow at 1.2% while market expects 2.5-3.0%. If actual comes in below 1%, recession fears spike.",
+    "Big Tech earnings miss \u2014 any disappointment from GOOGL/MSFT/AMZN/META could trigger tech selloff.",
+    "Fed dissent aftermath \u2014 4-way dissent creates policy uncertainty. Markets may reprice rate path.",
+    "Powell staying creates ambiguity about Warsh confirmation and Fed leadership transition.",
+    "PCE inflation above expectations would cement higher-for-longer rates narrative."
   ],
   "instrument_news": {
-    "XAG-USD": "Silver at $75.7, consolidating after $80+ test. Broke 13-year $50-54 resistance zone earlier in 2026. JPM gold target $6,300 supports silver rally thesis. Gold-silver ratio compressed from 90 to ~62. Structural bull intact but short-term extended.",
-    "XAU-USD": "Gold surpassed $4,805 on Apr 20, consolidating around $4,710. JPMorgan raised target to $6,300/oz by end 2026. Central banks buying 585 tonnes/quarter. FOMC decision this week is key — hawkish hold could pressure metals short-term.",
-    "BTC-USD": "BTC at $78K, up 5.81% in 5 days. Range-bound $76K-$80K. Bitcoin dominance near 59%. Institutional flows steady. FOMC and macro data this week will determine if breakout above $80K happens.",
-    "ETH-USD": "ETH at $2,312, up 2.73% in 5 days. Grayscale/Bitmine staked nearly $500M in ETH on Apr 25. US spot ETH ETFs saw $23.4M net inflows, reversing outflow trend. Still underperforming BTC.",
-    "MSTR": "MSTR at $171.02 (-0.8% from prev close $172.47). Now holds 815,061 BTC (surpassed BlackRock's Bitcoin Trust). Massive EPS miss last quarter (-$42.93 vs $2.97 forecast). Stock down 53.62% over 1 year. Heavily correlated to BTC — watch $80K BTC level."
+    "BTC-USD": "Holding $77.5K, up from $76.3K open. Strategy (MSTR) bought 3,273 BTC ($255M) this week, now holds 818K BTC (4% circulating supply). Total raised $61.8B at avg $75,537/coin. 9.6% BTC yield YTD. BTC resilient despite oil shock \u2014 potential safe haven narrative strengthening.",
+    "ETH-USD": "At $2,330, holding above $2,300 support. Values falling earlier this week ahead of Fed. No catalyst for breakout yet \u2014 ETH/BTC ratio continues structural decline. Pectra upgrade still a potential catalyst but not imminent.",
+    "XAG-USD": "Silver at $72.81, down 0.31% after -3% previous session. Up 123% YoY. Stalled Iran talks and Hormuz closure fueling inflation fears that may keep rates elevated, weighing on non-yielding metals. Goldman targets $85-100 avg, Citi targets $110 H2 2026.",
+    "XAU-USD": "Gold at $4,520. JP Morgan forecasts $5,055 Q4 2026, $5,400 by end 2027. Central banks buying 25-30% of global production for 3-4 years running. Gold ETFs saw record $19B inflows in Jan 2026. BNP targets $6,000 by year-end.",
+    "MSTR": "At $161-172. Strategy holds 818,334 BTC. Filed for dual $21B ATM programs ($42B total capacity). Stock up 12.55% YTD. Analysts project $176-228 for 2026. Key risk: BTC correlation \u2014 MSTR trades as leveraged BTC play."
   },
-  "metals_outlook": "Structurally bullish. Gold near record $4,800+, central banks accumulating 585t/quarter. JPM target $6,300 EOY. Silver broke multi-decade resistance. BUT: FOMC this week could trigger short-term hawkish selloff if Fed signals higher-for-longer. Oil-driven inflation (Brent $105) complicates Fed narrative — bullish for gold as inflation hedge, but hawkish policy response could temporarily pressure all commodities.",
-  "oil_outlook": "Brent $105, WTI $94. Weekly gains 13-16%. Strait of Hormuz blockade since Feb 28 is the dominant driver — largest supply disruption in history. US-Iran peace talks in Pakistan could ease tensions. Dual risk: escalation → oil spikes to $120+; breakthrough → oil drops 15-20% rapidly. Oil volatility is the single biggest macro variable right now.",
-  "sentiment_shift": "Equities euphoric (record highs, semiconductor mania), consumer sentiment at record lows (49.8). Classic divergence — market optimism vs real economy pessimism. Oil-driven inflation squeezing consumers while tech AI narrative lifts stocks. This divergence historically resolves violently.",
-  "fomc_preview": "FOMC Apr 28-29 is THE event. Oil-driven CPI/PCE inflation argues against cuts. But consumer sentiment at record low and geopolitical risk argue for caution. Most likely: hawkish hold, no cut, acknowledge oil-driven inflation. Market reaction depends on language — any hint of cuts = metals/crypto rally, any hawkish surprise = sell-off across risk assets."
+  "metals_outlook": "Structural bull intact. Central bank demand continues at 25-30% of global production. Gold ETF inflows at record levels. Silver COT positioning still constructive. However, near-term headwind from elevated oil/inflation keeping rates higher-for-longer. Gold-silver ratio compressing but not as fast as silver bulls hoped. JP Morgan $5K gold Q4 2026, Citi $110 silver H2 2026. Key catalyst: any Fed pivot or rate cut signal would accelerate metals rally.",
+  "oil_outlook": "Severe supply shock from Strait of Hormuz dual blockade (US and Iran). Brent at $118 (+6%), WTI at $107. IEA calls it largest supply shock on record \u2014 Hormuz handles 20% of global oil trade. Trump maintaining blockade until Iran nuclear deal. Extended disruption creates stagflation risk: high oil = inflation + growth drag. Watch for: 1) Any military escalation, 2) Iran peace talk resumption, 3) SPR release announcements, 4) OPEC+ response.",
+  "sentiment_shift": "Risk-off intensifying. 5 straight Dow losses. Oil shock creating stagflation narrative. FOMC dissent adds uncertainty. However, F&G at 26 (fear zone) is historically contrarian bullish. Big Tech earnings tonight are the binary catalyst \u2014 strong results could reverse sentiment, weak results could accelerate selloff. Gold as safe haven thesis strengthening. Crypto showing resilience despite traditional market weakness."
 }

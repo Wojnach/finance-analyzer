@@ -1,14 +1,25 @@
 """Smoke tests for the new /api/btc /api/eth /api/mstr /api/crypto endpoints."""
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 
 @pytest.fixture
 def client():
+    """Flask test client. Bypasses dashboard auth via token=None stub.
+
+    Matches the pattern in tests/test_dashboard.py — when a token is
+    configured (config.json present in CI / dev machines) the routes return
+    401 unless we explicitly tell `_get_dashboard_token` to act as if no
+    token is configured for this test.
+    """
     from dashboard.app import app
     app.config["TESTING"] = True
-    return app.test_client()
+    with patch("dashboard.app._get_dashboard_token", return_value=None):
+        with app.test_client() as c:
+            yield c
 
 
 class TestCryptoEndpoint:

@@ -82,7 +82,7 @@
         "geopolitical",
         "industrial"
       ],
-      "notes": "Core conviction. User holds MINI-SILVER 5x warrant. Silver is the trade."
+      "notes": "Core conviction. User holds MINI-SILVER 5x warrant. Silver is the trade. 2026-04-29 review: XAG at $71.46, all checkpoints through $80 triggered. $120 target pending. Oil at $118 Brent (Iran blockade) is bullish for metals — war premium intact. Gold-silver ratio compression thesis playing out. FOMC held 3.5-3.75% with historic 8-4 dissent suggesting future cuts — dovish for metals."
     },
     {
       "id": "btc_q2_breakout_2026",
@@ -155,7 +155,7 @@
         "macro",
         "halving-cycle"
       ],
-      "notes": "User expects BTC to explode up in Q2 2026. Hold and wait \u2014 do not trade range noise. Watch for $75K breakout as confirmation."
+      "notes": "User expects BTC to explode up in Q2 2026. Hold and wait \u2014 do not trade range noise. Watch for $75K breakout as confirmation. 2026-04-29 review: BTC at $76.6K, $75K checkpoint triggered. $85K next. MSTR at $161.57 with 818K BTC treasury (strong proxy). FOMC hold with 8-4 dissent is mildly bullish — rate cuts delayed but dissent signals eventual pivot. Oil crisis adds uncertainty but BTC historically uncorrelated to oil shocks."
     },
     {
       "id": "eth_q2_breakout_2026",
@@ -217,11 +217,11 @@
         "crypto",
         "halving-cycle"
       ],
-      "notes": "User expects ETH to explode alongside BTC in Q2 2026. Lower conviction than BTC due to structural underperformance, but higher upside if it catches up."
+      "notes": "User expects ETH to explode alongside BTC in Q2 2026. Lower conviction than BTC due to structural underperformance, but higher upside if it catches up. 2026-04-29 review: ETH at $2,296, all checkpoints pending ($2.5K next). ETH/BTC ratio still compressed — coiled spring thesis intact. BTC already through $75K but ETH hasn't broken $2.5K yet. Divergence supports lower conviction (0.6). Will reassess if ETH/BTC ratio starts expanding."
     }
   ],
   "metadata": {
     "version": 1,
-    "last_review": "2026-03-19T13:38:40.672036+00:00"
+    "last_review": "2026-04-29T22:00:00+02:00"
   }
 }

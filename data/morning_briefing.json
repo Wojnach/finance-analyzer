@@ -1,88 +1,68 @@
 {
-  "date": "2026-04-21",
-  "generated_at": "2026-04-20T21:43:50.025722+00:00",
-  "market_outlook": "neutral-bullish",
-  "confidence": 0.55,
-  "summary": "Ranging markets with strong undercurrents. Gold at ATH ($4,819), silver consolidating after failed $83 breakout ($79.84). BTC healthy on-chain (MVRV 1.37, SOPR 1.00) but needs $77.5K breakout. ETH facing DeFi contagion from $292M KelpDAO exploit. Oil binary risk from fragile US-Iran ceasefire. Easter Monday thin liquidity. System correctly holding \u2014 no high-conviction entries identified.",
-  "key_levels": {
-    "XAG-USD": {
-      "support": 77.5,
-      "resistance": 83.0,
-      "pivot": 79.8
-    },
-    "XAU-USD": {
-      "support": 4760.0,
-      "resistance": 4880.0,
-      "pivot": 4820.0
-    },
-    "BTC-USD": {
-      "support": 73180.0,
-      "resistance": 77500.0,
-      "pivot": 75900.0
-    },
-    "ETH-USD": {
-      "support": 2180.0,
-      "resistance": 2500.0,
-      "pivot": 2320.0
-    },
-    "MSTR": {
-      "support": 153.77,
-      "resistance": 173.15,
-      "pivot": 164.0
+  "date": "2026-04-30",
+  "generated_at": "2026-04-29T21:59:59.743767+00:00",
+  "research_session": "2026-04-29 after-hours",
+  "market_regime": "ranging (all 5 tickers)",
+  "key_events_today": [
+    "GDP advance estimate (08:30 ET) \u2014 consensus 0.4%, Atlanta Fed GDPNow -2.7%",
+    "Core PCE March (08:30 ET) \u2014 consensus 0.1% MoM (lowest since 2020)",
+    "ECI Q1 (08:30 ET) \u2014 labor cost pressure gauge",
+    "Chicago PMI (09:45 ET)",
+    "Pending Home Sales (10:00 ET)"
+  ],
+  "overnight_context": {
+    "fomc": "Held 3.5-3.75%, historic 8-4 dissent (Waller, Cook, Jefferson, Kugler wanted cut). Powell staying.",
+    "oil": "Brent $118 (Strait of Hormuz blockade). War premium in metals.",
+    "metals": "XAG $71.46 (all checkpoints through $80 triggered). XAU strong.",
+    "crypto": "BTC $76.6K (post-$75K breakout), ETH $2,296 (lagging, $2.5K next checkpoint).",
+    "mstr": "$161.57 \u2014 BTC treasury proxy. New btc_proxy signal added this session."
+  },
+  "research_changes_shipped": {
+    "batch_1_signal_cleanup": [
+      "Fibonacci DISABLED (43.6% at 1d, 17K+ samples \u2014 definitively bad)",
+      "Statistical jump regime RE-ENABLED (52.7% at 1d, 110 samples \u2014 above gate)",
+      "Shadow-safe expanded: +complexity_gap_regime, +mahalanobis_turbulence, +crypto_evrp, +hash_ribbons, +fibonacci",
+      "Realized skewness marked KILLED (33.3% at 1d, 90 samples)",
+      "pattern_based correlation group dissolved (fibonacci was only member with candlestick)"
+    ],
+    "batch_2_mstr_btc_proxy": [
+      "MSTR now gets synthetic btc_proxy vote from BTC-USD consensus",
+      "Targets MSTR worst-in-class 47.8% consensus accuracy",
+      "Thread-safe cross-ticker cache, at most 1 cycle stale",
+      "Goes through all normal gates (accuracy, regime, persistence)"
+    ],
+    "batch_3_prophecy": [
+      "All 3 prophecies reviewed with current prices and FOMC context",
+      "Silver: $120 target, 0.8 conviction \u2014 war premium intact, FOMC dovish dissent bullish",
+      "BTC: $100K target, 0.7 conviction \u2014 $75K checkpoint triggered",
+      "ETH: $4K target, 0.6 conviction \u2014 still below $2.5K, coiled spring thesis"
+    ]
+  },
+  "signal_system_status": {
+    "active_signals": 33,
+    "disabled_signals": 19,
+    "total_modules": 52,
+    "new_shadow_tracked": [
+      "complexity_gap_regime",
+      "mahalanobis_turbulence",
+      "crypto_evrp",
+      "hash_ribbons",
+      "fibonacci"
+    ],
+    "tests_passing": 91,
+    "consensus_accuracy_1d": {
+      "BTC-USD": "52.5%",
+      "ETH-USD": "49.8%",
+      "XAG-USD": "49.4%",
+      "XAU-USD": "49.4%",
+      "MSTR": "47.8% (btc_proxy added to improve)"
     }
   },
-  "trade_ideas": [
-    {
-      "instrument": "XAG-USD",
-      "direction": "LONG",
-      "rationale": "Silver at $79.84, above key support ($77.50). 5th consecutive supply deficit. G/S ratio compression thesis intact. Algorithmic models forecast $88.92 by Apr 23. Wait for retest of $83 breakout level with volume.",
-      "entry_zone": "Breakout above $83.00 with RVOL > 1.5x",
-      "target": "$88-90 (first), $100+ (extended)",
-      "stop": "Below $77.50 (pivot support)",
-      "confidence": 0.55,
-      "timeframe": "swing (1-5 days)"
-    },
-    {
-      "instrument": "XAU-USD",
-      "direction": "LONG",
-      "rationale": "ATH territory, 9B/0S consensus (strongest signal today). JPM target $5,055 Q4. Central bank buying unabated. COT increasingly bullish. Safe-haven bid from Iran crisis.",
-      "entry_zone": "Pullback to $4,760-4,800 support zone",
-      "target": "$4,880 (immediate), $5,000+ (Q4)",
-      "stop": "Below $4,700",
-      "confidence": 0.65,
-      "timeframe": "swing (3-10 days)"
-    },
-    {
-      "instrument": "BTC-USD",
-      "direction": "LONG (conditional)",
-      "rationale": "On-chain healthy (MVRV 1.37, NUPL 0.65 belief). ETF inflows $18.7B YTD. MSTR accumulating aggressively. Fear at 29 (contrarian bullish). Post-halving cycle says Q2 is breakout window. BUT: needs $77.5K confirmation.",
-      "entry_zone": "Break and close above $77,500",
-      "target": "$85,000 (next prophecy checkpoint)",
-      "stop": "Below $73,180 (200DMA zone)",
-      "confidence": 0.5,
-      "timeframe": "position (weeks)"
-    }
-  ],
-  "system_improvements_shipped": [
-    "Signal persistence filter: signals must persist 2+ consecutive cycles before vote counts (reduces noise flips)",
-    "ADX(14) regime detection: ADX < 20 forces 'ranging' — principled trend confirmation replaces pure EMA gap"
-  ],
-  "system_improvements_deferred": [
-    "trend_direction cluster penalty adjustment (0.12x -> 0.10x) — low priority, existing penalty adequate",
-    "BBW volatility expansion — future session"
-  ],
-  "risk_warnings": [
-    "CRITICAL: US-Iran ceasefire collapsing (Apr 20 ships seized). Oil spike risk = all-asset volatility.",
-    "KelpDAO $292M exploit (Apr 19-20): DeFi TVL -$6.4B. AAVE frozen. Further ETH contagion possible.",
-    "Easter Monday: thin liquidity in European metals. Amplified moves possible.",
-    "ETH ETF outflows: 5th consecutive month. Structural selling pressure on ETH.",
-    "System has been HOLD for 20 consecutive sessions \u2014 appropriate for ranging/low-conviction."
-  ],
-  "research_highlights": [
-    "Hybrid AI trading systems (XGBoost+FinBERT+regime) achieving 67% vs 54% baseline (ComSIA 2026)",
-    "IC-based weighting identifies phantom performers (calendar 58% acc but IC=0.000)",
-    "TradingAgents v0.2.0: multi-agent bull/bear debate now supports Claude 4.x",
-    "Signal correlation audit: system already handles via 6 cluster groups with 0.10-0.30x penalties",
-    "Trend signal paradox: 40.3% all-time 3h but 61.6% RECENT 3h \u2014 regime-dependent recovery"
+  "portfolio_action": "HOLD all. GDP/PCE data today \u2014 high macro volatility. Let data settle before trading.",
+  "risk_flags": [
+    "GDP miss risk: Atlanta GDPNow -2.7% vs consensus +0.4% \u2014 could shock markets",
+    "Oil $118 \u2014 supply disruption risk to global growth",
+    "Consensus accuracy near coin-flip on all tickers \u2014 system has no directional edge at 1d",
+    "FOMC 8-4 dissent signals split Fed \u2014 uncertainty premium elevated"
   ]
 }
