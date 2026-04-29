@@ -322,14 +322,21 @@ _DISABLED_SIGNAL_OVERRIDES: frozenset[tuple[str, str]] = frozenset({
 # Network-heavy disabled signals (futures_basis, vix_term_structure,
 # gold_real_yield_paradox, cross_asset_tsmom, copper_gold_ratio,
 # network_momentum, ovx_metals_spillover, xtrend_equity_spillover,
-# complexity_gap_regime, orderbook_flow) are NOT shadow-safe — they do
+# orderbook_flow) are NOT shadow-safe — they do
 # yfinance/FRED/Binance calls that would blow the 60s cycle budget.
 _SHADOW_SAFE_SIGNALS = frozenset({
     "hurst_regime",
     "shannon_entropy",
-    "statistical_jump_regime",
+    # "statistical_jump_regime" — RE-ENABLED 2026-04-29 (52.7% at 110 sam)
     "realized_skewness",
     "oscillators",
+    # 2026-04-29: Added compute-only signals to accumulate accuracy data.
+    # These use local OHLCV data only — no network calls.
+    "complexity_gap_regime",
+    "mahalanobis_turbulence",
+    "crypto_evrp",
+    "hash_ribbons",
+    "fibonacci",  # newly disabled, shadow-track to confirm continued poor accuracy
 })
 
 # Per-ticker consensus gate: BUG-164.  Suppress all non-HOLD consensus for
@@ -659,14 +666,14 @@ REGIME_WEIGHTS = {
         # Enhanced: boost trend-following, dampen mean-reversion
         "trend": 1.4, "momentum_factors": 1.3, "heikin_ashi": 1.2,
         "structure": 1.2, "smart_money": 1.1,
-        "mean_reversion": 0.6, "fibonacci": 0.7,
+        "mean_reversion": 0.6,  # fibonacci removed — disabled 2026-04-29
     },
     "trending-down": {
         "ema": 1.5, "macd": 1.3, "rsi": 0.7, "bb": 0.7,
         # Enhanced: same as trending-up (trend signals work both ways)
         "trend": 1.4, "momentum_factors": 1.3, "heikin_ashi": 1.2,
         "structure": 1.2, "smart_money": 1.1,
-        "mean_reversion": 0.6, "fibonacci": 0.7,
+        "mean_reversion": 0.6,  # fibonacci removed — disabled 2026-04-29
     },
     "ranging": {
         "rsi": 1.5, "bb": 1.5, "ema": 0.5,
@@ -677,7 +684,7 @@ REGIME_WEIGHTS = {
         # mean_reversion 65.4% recent — boost to 1.7 (was 1.5)
         # ministral 68.0% recent (Apr 5) — was 1.4x boost but collapsed to 41.5%
         # recent (Apr 26 audit, 41 sam). Removed boost, added to regime gate.
-        "mean_reversion": 1.7, "fibonacci": 1.8, "calendar": 1.2,
+        "mean_reversion": 1.7, "calendar": 1.2,  # fibonacci removed — disabled 2026-04-29
         # 2026-04-05 audit: momentum 58.9% in ranging (2196 samples) — untapped edge
         "momentum": 1.3,
         # 2026-04-04: BUG-161 — oscillators 34-39% per-ticker in ranging.
@@ -837,7 +844,7 @@ HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
         "momentum": 1.1,        # 56.1% at 3h (378 sam) — NEW 2026-04-27
         "heikin_ashi": 1.1,     # 55.0% at 3h (vs 42.7% at 1d) — NEW 2026-04-27
         "sentiment": 0.4,       # 33.8% at 3h — tightened from 0.5
-        "fibonacci": 0.6,       # 38.3% at 3h (but 50.6% at 1d)
+        # "fibonacci" removed 2026-04-29 — signal formally disabled
         "forecast": 0.5,        # 38.3% at 3h
         "oscillators": 0.6,     # 39.4% at 3h — tightened from 0.7
         "bb": 0.6,              # 41.7% at 3h (but 62.5% at 1d)
@@ -856,7 +863,7 @@ HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
         "momentum": 1.1,
         "heikin_ashi": 1.1,
         "sentiment": 0.4,
-        "fibonacci": 0.6,
+        # "fibonacci" removed 2026-04-29 — signal formally disabled
         "forecast": 0.5,
         "oscillators": 0.6,
         "bb": 0.6,
@@ -870,7 +877,7 @@ HORIZON_SIGNAL_WEIGHTS: dict[str, dict[str, float]] = {
         "volume": 1.1,          # 54.7% at 1d_recent (265 sam) — NEW 2026-04-27
         "macd": 1.1,            # 54.8% at 1d_recent (93 sam)
         "calendar": 1.1,        # 54.0% at 1d_recent (385 sam) — reduced from 1.2
-        "fibonacci": 1.1,       # 50.6% at 1d_recent — reduced from 1.4 (was stale)
+        # "fibonacci" removed 2026-04-29 — signal formally disabled
         "mean_reversion": 1.1,  # 51.8% at 1d_recent — reduced from 1.3
         "news_event": 1.4,      # 70.0% at 1d_recent (340 sam)! — was 0.5 (SELL-focused works now)
         "claude_fundamental": 0.5,  # 40.5% at 1d_recent (1178 sam) — NEW 2026-04-27 penalty
@@ -1239,7 +1246,9 @@ _STATIC_CORRELATION_GROUPS = {
         "calendar", "econ_calendar", "funding",
     }),
     # 2026-04-04: BUG-162 — candlestick-fibonacci correlation 0.708 on BTC.
-    "pattern_based": frozenset({"candlestick", "fibonacci"}),
+    # fibonacci disabled 2026-04-29 (43.6%, 17K sam). Cluster remains for
+    # candlestick alone — effectively a no-op (single-member groups are skipped).
+    "pattern_based": frozenset({"candlestick"}),
     # 2026-04-26: bb removed from all clusters — now unclustered (full 1.0x weight).
     # BB thrives in ranging (+15.2pp to 69.5% recent) independently of ema/macd
     # (which are regime-gated). Correlation with ema/macd is superficial (BB bands

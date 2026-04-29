@@ -60,6 +60,10 @@ YF_MAP = {t: t for t in STOCK_SYMBOLS}
 # Kept in SIGNAL_NAMES for historical tracking but excluded from active reports.
 DISABLED_SIGNALS = {
     "ml",               # 41.7% accuracy (1714 sam) — worse than coin flip
+    "fibonacci",        # 2026-04-29: 43.6% at 1d (17024 sam), 43.3% at 3h (8811 sam).
+                        # Consistently below coin flip across ALL horizons and tickers
+                        # with massive sample size. Was accuracy-gated but still computed
+                        # every cycle (~50ms wasted). Formal disable saves CPU.
     # "cot_positioning" re-enabled 2026-04-13 for shadow validation (was
     # force-HOLD pending live validation, 0 samples). COT is a weekly signal
     # (CFTC Friday release) — expected to contribute mostly at 3d/5d horizons
@@ -74,12 +78,14 @@ DISABLED_SIGNALS = {
     "gold_real_yield_paradox",  # pending live validation (added 2026-04-14)
     "cross_asset_tsmom",  # pending live validation (added 2026-04-15)
     "copper_gold_ratio",  # pending live validation (added 2026-04-17)
-    "statistical_jump_regime",  # pending live validation (added 2026-04-18)
+    # "statistical_jump_regime" RE-ENABLED 2026-04-29: 52.7% accuracy (110 sam)
+    # at 1d — above 47% gate, marginal but worth live validation. Shadow-safe
+    # since 2026-04-18. If it degrades below 47% the accuracy gate auto-disables.
     "network_momentum",  # pending live validation (added 2026-04-19)
     "ovx_metals_spillover",  # pending live validation (added 2026-04-20)
     "xtrend_equity_spillover",  # pending live validation (added 2026-04-21)
     "complexity_gap_regime",  # pending live validation (added 2026-04-22)
-    "realized_skewness",  # pending live validation (added 2026-04-23)
+    "realized_skewness",  # KILLED 2026-04-29: 33.3% at 1d (90 sam). Below coin flip.
     "mahalanobis_turbulence",  # pending live validation (added 2026-04-24)
     "crypto_evrp",  # pending live validation (added 2026-04-25)
     "hash_ribbons",  # pending live validation (added 2026-04-26)
