@@ -240,6 +240,12 @@ def _register_defaults():
     # Pure OHLCV, all 5 tickers. Directional via SMA distance.
     register_enhanced("drift_regime_gate", "portfolio.signals.drift_regime_gate",
                       "compute_drift_regime_gate_signal", max_confidence=0.7)
+    # Vol ratio regime — GK/CC volatility ratio + VR test + ER as regime detector
+    # 2026-04-29: Garman & Klass (1980), Lo & MacKinlay (1988), Kaufman ER.
+    # Three orthogonal regime measures: GK/CC ratio, variance ratio, efficiency ratio.
+    # Directional: mean-reversion in ranging, momentum in trending. All OHLCV, all assets.
+    register_enhanced("vol_ratio_regime", "portfolio.signals.vol_ratio_regime",
+                      "compute_vol_ratio_regime_signal", max_confidence=0.7)
 
 
 _register_defaults()
