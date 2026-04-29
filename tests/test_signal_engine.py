@@ -17,7 +17,9 @@ class TestCorrelationGroups:
         # low_activity_timing removed 2026-04-12: calendar (BUY-only) and
         # econ_calendar (SELL-only) have opposite directions and divergent
         # regime profiles — not a valid correlation cluster.
-        assert "pattern_based" in CORRELATION_GROUPS
+        # pattern_based dissolved 2026-04-29: fibonacci disabled (43.6%, 17K sam),
+        # candlestick now unclustered.
+        assert "pattern_based" not in CORRELATION_GROUPS
         # Values should be frozensets
         for name, members in CORRELATION_GROUPS.items():
             assert isinstance(members, frozenset), f"Group {name} should be frozenset"

@@ -1246,9 +1246,9 @@ _STATIC_CORRELATION_GROUPS = {
         "calendar", "econ_calendar", "funding",
     }),
     # 2026-04-04: BUG-162 — candlestick-fibonacci correlation 0.708 on BTC.
-    # fibonacci disabled 2026-04-29 (43.6%, 17K sam). Cluster remains for
-    # candlestick alone — effectively a no-op (single-member groups are skipped).
-    "pattern_based": frozenset({"candlestick"}),
+    # fibonacci disabled 2026-04-29 (43.6%, 17K sam). Group dissolved —
+    # candlestick now votes unclustered at full weight.
+    # "pattern_based" removed: single-member groups are invalid.
     # 2026-04-26: bb removed from all clusters — now unclustered (full 1.0x weight).
     # BB thrives in ranging (+15.2pp to 69.5% recent) independently of ema/macd
     # (which are regime-gated). Correlation with ema/macd is superficial (BB bands
