@@ -1073,3 +1073,93 @@ class TestPersistenceStateBounds:
             # Oldest half should be evicted
             assert "T-0" not in _persistence_state
             _persistence_state.clear()
+
+
+class TestMSTRBTCProxy:
+    """MSTR BTC cross-asset proxy signal (2026-04-29).
+
+    MSTR is a BTC treasury company (818K BTC, 0.58 correlation). When BTC-USD
+    consensus is cached, MSTR should get a synthetic btc_proxy vote injected.
+    """
+
+    def test_btc_proxy_injected_when_cache_populated(self):
+        """btc_proxy should appear in MSTR votes when BTC-USD consensus is cached."""
+        from portfolio.signal_engine import _cross_ticker_consensus
+        _cross_ticker_consensus["BTC-USD"] = {"action": "BUY", "confidence": 0.65}
+        try:
+            from portfolio.signal_engine import generate_signal
+            ind = _make_neutral_indicators()
+            _, _, extra = generate_signal(ind, ticker="MSTR")
+            assert extra.get("btc_proxy_action") == "BUY"
+            assert extra.get("btc_proxy_source") == "cross_ticker_cache"
+            assert "btc_proxy" in extra.get("_votes", {})
+        finally:
+            _cross_ticker_consensus.pop("BTC-USD", None)
+
+    def test_btc_proxy_not_injected_for_btc(self):
+        """btc_proxy should NOT appear for BTC-USD itself."""
+        from portfolio.signal_engine import _cross_ticker_consensus
+        _cross_ticker_consensus["BTC-USD"] = {"action": "BUY", "confidence": 0.65}
+        try:
+            from portfolio.signal_engine import generate_signal
+            ind = _make_neutral_indicators()
+            _, _, extra = generate_signal(ind, ticker="BTC-USD")
+            assert "btc_proxy_action" not in extra
+            assert "btc_proxy" not in extra.get("_votes", {})
+        finally:
+            _cross_ticker_consensus.pop("BTC-USD", None)
+
+    def test_btc_proxy_not_injected_when_cache_empty(self):
+        """btc_proxy should NOT appear when BTC-USD consensus is not cached."""
+        from portfolio.signal_engine import _cross_ticker_consensus
+        _cross_ticker_consensus.pop("BTC-USD", None)
+        from portfolio.signal_engine import generate_signal
+        ind = _make_neutral_indicators()
+        _, _, extra = generate_signal(ind, ticker="MSTR")
+        assert "btc_proxy_action" not in extra
+
+    def test_btc_proxy_sell_propagates(self):
+        """SELL consensus from BTC should propagate as btc_proxy=SELL."""
+        from portfolio.signal_engine import _cross_ticker_consensus
+        _cross_ticker_consensus["BTC-USD"] = {"action": "SELL", "confidence": 0.70}
+        try:
+            from portfolio.signal_engine import generate_signal
+            ind = _make_neutral_indicators()
+            _, _, extra = generate_signal(ind, ticker="MSTR")
+            assert extra.get("btc_proxy_action") == "SELL"
+        finally:
+            _cross_ticker_consensus.pop("BTC-USD", None)
+
+    def test_btc_proxy_hold_propagates(self):
+        """HOLD consensus from BTC should still inject (neutral vote)."""
+        from portfolio.signal_engine import _cross_ticker_consensus
+        _cross_ticker_consensus["BTC-USD"] = {"action": "HOLD", "confidence": 0.0}
+        try:
+            from portfolio.signal_engine import generate_signal
+            ind = _make_neutral_indicators()
+            _, _, extra = generate_signal(ind, ticker="MSTR")
+            assert extra.get("btc_proxy_action") == "HOLD"
+        finally:
+            _cross_ticker_consensus.pop("BTC-USD", None)
+
+    def test_consensus_cache_updated_after_generate(self):
+        """generate_signal should update _cross_ticker_consensus for the ticker."""
+        from portfolio.signal_engine import _cross_ticker_consensus, generate_signal
+        _cross_ticker_consensus.pop("ETH-USD", None)
+        ind = _make_neutral_indicators()
+        action, conf, _ = generate_signal(ind, ticker="ETH-USD")
+        assert "ETH-USD" in _cross_ticker_consensus
+        assert _cross_ticker_consensus["ETH-USD"]["action"] == action
+        assert _cross_ticker_consensus["ETH-USD"]["confidence"] == conf
+
+
+def _make_neutral_indicators():
+    """Return a minimal indicators dict where all core signals vote HOLD."""
+    return {
+        "rsi": 50, "rsi_p20": 30, "rsi_p80": 70,
+        "macd_hist": 0.01, "macd_hist_prev": 0.02,  # no crossover
+        "ema9": 100, "ema21": 100,  # no gap
+        "price_vs_bb": "within",
+        "close": 100, "volume": 1000, "avg_volume": 1000,
+        "atr": 1.0, "adx": 20, "rvol": 1.0,
+    }

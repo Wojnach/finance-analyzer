@@ -250,6 +250,13 @@ _PERSISTENCE_MAX_TICKERS = 32      # bound on tracked tickers (prod=5, cap guard
 _persistence_state: dict[str, dict[str, dict]] = {}  # {ticker: {signal: {"vote": str, "cycles": int}}}
 _persistence_lock = threading.Lock()
 
+# Cross-ticker consensus cache: stores the most recent consensus action per
+# ticker so synthetic cross-asset signals can reference other tickers' results.
+# Thread-safe: GIL protects dict assignment; stale reads (MSTR processing
+# before BTC in the same cycle) are acceptable — the 60s loop ensures data
+# is at most one cycle old.
+_cross_ticker_consensus: dict[str, dict] = {}  # {ticker: {"action": str, "confidence": float}}
+
 
 def _apply_persistence_filter(votes: dict[str, str], ticker: str | None) -> dict[str, str]:
     """Filter votes to only include signals that persisted for MIN_PERSISTENCE_CYCLES.
@@ -2980,6 +2987,20 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
         for sig_name in _enhanced_entries:
             votes[sig_name] = "HOLD"
 
+    # MSTR BTC cross-asset proxy (2026-04-29): MSTR is a BTC treasury company
+    # (818K BTC, 0.58 price correlation). Its per-ticker consensus accuracy is
+    # 47.8% — worst of all Tier 1. Injecting BTC-USD's consensus as a synthetic
+    # signal provides cross-asset information the signal system otherwise ignores.
+    # The vote goes through all normal gates (accuracy, regime, persistence).
+    if ticker == "MSTR" and "BTC-USD" in _cross_ticker_consensus:
+        btc_cons = _cross_ticker_consensus["BTC-USD"]
+        btc_action = btc_cons.get("action", "HOLD")
+        if btc_action in ("BUY", "SELL", "HOLD"):
+            votes["btc_proxy"] = btc_action
+            extra_info["btc_proxy_action"] = btc_action
+            extra_info["btc_proxy_confidence"] = btc_cons.get("confidence", 0.0)
+            extra_info["btc_proxy_source"] = "cross_ticker_cache"
+
     # BUG-178 diagnostic phase marker (added 2026-04-10, see docstring above
     # at the __pre_dispatch__ writer). We made it through the enhanced-signal
     # dispatch loop; any remaining slow code is in the post-dispatch accuracy /
@@ -3546,5 +3567,9 @@ def generate_signal(ind, ticker=None, config=None, timeframes=None, df=None, hor
 
     if ticker:
         _record_phase(ticker, "consensus_gate", _phase_start)
+
+    # Update cross-ticker consensus cache for synthetic cross-asset signals
+    if ticker:
+        _cross_ticker_consensus[ticker] = {"action": action, "confidence": conf}
 
     return action, conf, extra_info
