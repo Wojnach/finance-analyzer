@@ -372,3 +372,49 @@ portfolio/signal_engine.py
 8fd4902f feat(dashboard): _compute_llm_health_summary helper
 dashboard/app.py
 tests/test_dashboard.py
+
+# Session Progress — Crypto + MSTR swing subsystem (2026-04-30)
+
+**Session start:** 2026-04-30 ~01:00 CET
+**Status:** COMPLETE — merging now
+**Branch:** feat/crypto-mstr-swing
+
+## Goal
+
+Build a "metals-equivalent" autonomous trading subsystem for BTC, ETH, MSTR.
+Gold (XAU) was confirmed already covered by the metals subsystem (64 XAU
+warrants in `data/metals_warrant_catalog.json`); no gold work needed.
+
+## What shipped
+
+- **Crypto config + catalog + cross-asset signal**: `data/crypto_swing_config.py`,
+  `data/crypto_warrant_catalog.json`, `data/crypto_warrant_refresh.py`,
+  `portfolio/signals/crypto_cross_asset.py`.
+- **Crypto + MSTR precompute**: `portfolio/crypto_precompute.py` →
+  `data/crypto_deep_context.json`; `portfolio/mstr_precompute.py` →
+  `data/mstr_deep_context.json` (with NAV premium math).
+- **Crypto swing trader + loop**: `data/crypto_swing_trader.py` (full
+  entry/exit gate cascade mirroring metals' incident-hardened defaults),
+  `data/crypto_loop.py` (60s cycle, embedded 10s fast-tick monitor,
+  singleton lock, CLI: --loop / --once / --report).
+- **Dashboard endpoints**: `/api/btc`, `/api/eth`, `/api/mstr`, `/api/crypto`
+  in `dashboard/app.py`.
+- **73 new tests** across 6 files. xdist-safe via monkeypatch on cfg.
+
+## Risk
+
+DRY_RUN=True default in crypto_swing_config — the loop ships inert. Wire
+into a scheduled task only after live warrant discovery has run.
+
+## What's next
+
+- Run live warrant discovery once Avanza session is open: import
+  `data.crypto_warrant_refresh.load_catalog_or_fetch(page)` from a Playwright
+  context to populate `data/crypto_warrant_catalog.json`.
+- After verifying the catalog has expected XBT/ETH trackers + leveraged
+  variants, flip `DRY_RUN=False` in `crypto_swing_config.py`.
+- Consider wiring `maybe_precompute_crypto()` and `maybe_precompute_mstr()`
+  into `portfolio/main.py` `_run_post_cycle()` next to existing
+  `maybe_precompute_metals()` so deep context auto-refreshes every 4h.
+- Optional: add `crypto_fish.py` / `mstr_fish.py` planners using the
+  generic `portfolio/price_targets.py` + `portfolio/exit_optimizer.py`.
