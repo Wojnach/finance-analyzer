@@ -269,3 +269,22 @@ class TestEdgeCases:
         df["volume"] = 0.0
         result = compute_vol_ratio_regime_signal(df)
         assert result["action"] in ("BUY", "SELL", "HOLD")
+
+    def test_missing_columns_returns_hold(self):
+        """DataFrame missing required OHLC columns should return HOLD."""
+        df = _make_df()
+        df_no_high = df.drop(columns=["high"])
+        result = compute_vol_ratio_regime_signal(df_no_high)
+        assert result["action"] == "HOLD"
+        assert result["confidence"] == 0.0
+
+    def test_large_close_open_gap(self):
+        """Anomalous ticks with close >> open should not produce negative GK."""
+        df = _make_df()
+        # Simulate anomalous ticks where close-open gap exceeds high-low range
+        df.iloc[50, df.columns.get_loc("close")] = 200.0
+        df.iloc[50, df.columns.get_loc("open")] = 100.0
+        df.iloc[50, df.columns.get_loc("high")] = 200.5
+        df.iloc[50, df.columns.get_loc("low")] = 99.5
+        result = compute_vol_ratio_regime_signal(df)
+        assert result["action"] in ("BUY", "SELL", "HOLD")

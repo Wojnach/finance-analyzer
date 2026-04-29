@@ -48,7 +48,8 @@ def _garman_klass_cc_ratio(df: pd.DataFrame, window: int = 20) -> pd.Series:
     log_hl = np.log(df["high"] / df["low"])
     log_co = np.log(df["close"] / df["open"])
 
-    gk_var = 0.5 * log_hl ** 2 - (2 * np.log(2) - 1) * log_co ** 2
+    # Clamp to >= 0: anomalous ticks can produce negative GK variance
+    gk_var = np.maximum(0.5 * log_hl ** 2 - (2 * np.log(2) - 1) * log_co ** 2, 0.0)
     cc_var = np.log(df["close"] / df["close"].shift(1)) ** 2
 
     gk_sma = gk_var.rolling(window=window, min_periods=window).mean()
@@ -134,13 +135,12 @@ def compute_vol_ratio_regime_signal(df: pd.DataFrame, context: dict = None) -> d
     Returns:
         dict with keys: action, confidence, sub_signals, indicators
     """
+    _HOLD = {"action": "HOLD", "confidence": 0.0, "sub_signals": {}, "indicators": {}}
     if df is None or len(df) < MIN_ROWS:
-        return {
-            "action": "HOLD",
-            "confidence": 0.0,
-            "sub_signals": {},
-            "indicators": {},
-        }
+        return _HOLD
+    required = {"open", "high", "low", "close"}
+    if not required.issubset(df.columns):
+        return _HOLD
 
     close = df["close"].astype(float)
 
@@ -156,11 +156,13 @@ def compute_vol_ratio_regime_signal(df: pd.DataFrame, context: dict = None) -> d
     # Z-score the GK/CC ratio for normalized reporting
     gk_cc_mean = gk_cc_series.rolling(60, min_periods=20).mean()
     gk_cc_std = gk_cc_series.rolling(60, min_periods=20).std()
-    gk_cc_z = safe_float(
-        (gk_cc_series.iloc[-1] - gk_cc_mean.iloc[-1]) / gk_cc_std.iloc[-1]
-        if gk_cc_std.iloc[-1] and gk_cc_std.iloc[-1] > 0
-        else 0.0
-    )
+    std_val = gk_cc_std.iloc[-1]
+    if std_val is not None and np.isfinite(std_val) and std_val > 0:
+        gk_cc_z = safe_float(
+            (gk_cc_series.iloc[-1] - gk_cc_mean.iloc[-1]) / std_val
+        )
+    else:
+        gk_cc_z = 0.0
 
     # Classify regime
     regime = _classify_regime(gk_cc, vr, er)
