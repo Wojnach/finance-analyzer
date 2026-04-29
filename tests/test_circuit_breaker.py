@@ -371,3 +371,99 @@ class TestProbeLifecycle:
         assert cb.state == State.CLOSED
         assert cb._failure_count == 0
         assert cb.allow_request() is True  # normal traffic resumes
+
+
+class TestExponentialBackoff:
+    """BUG-245: Recovery timeout should increase on repeated failed probes."""
+
+    def test_timeout_doubles_on_failed_recovery(self):
+        cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=60)
+        cb.record_failure()
+        assert cb.recovery_timeout == 60
+
+        # First failed recovery: 60 → 120
+        with patch("portfolio.circuit_breaker.time.monotonic",
+                   return_value=cb._last_failure_time + 61):
+            cb.allow_request()  # probe
+        cb.record_failure()  # probe fails
+        assert cb.recovery_timeout == 120
+
+        # Second failed recovery: 120 → 240
+        with patch("portfolio.circuit_breaker.time.monotonic",
+                   return_value=cb._last_failure_time + 121):
+            cb.allow_request()
+        cb.record_failure()
+        assert cb.recovery_timeout == 240
+
+    def test_timeout_capped_at_max(self):
+        cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=60,
+                            max_recovery_timeout=300)
+        cb.record_failure()
+
+        # Exhaust backoff: 60 → 120 → 240 → 300 (capped)
+        for expected in [120, 240, 300]:
+            with patch("portfolio.circuit_breaker.time.monotonic",
+                       return_value=cb._last_failure_time + cb.recovery_timeout + 1):
+                cb.allow_request()
+            cb.record_failure()
+            assert cb.recovery_timeout == expected
+
+        # One more — still capped at 300
+        with patch("portfolio.circuit_breaker.time.monotonic",
+                   return_value=cb._last_failure_time + 301):
+            cb.allow_request()
+        cb.record_failure()
+        assert cb.recovery_timeout == 300
+
+    def test_timeout_resets_on_successful_recovery(self):
+        cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=60)
+        cb.record_failure()
+
+        # Failed recovery: 60 → 120
+        with patch("portfolio.circuit_breaker.time.monotonic",
+                   return_value=cb._last_failure_time + 61):
+            cb.allow_request()
+        cb.record_failure()
+        assert cb.recovery_timeout == 120
+
+        # Successful recovery: 120 → 60 (reset)
+        with patch("portfolio.circuit_breaker.time.monotonic",
+                   return_value=cb._last_failure_time + 121):
+            cb.allow_request()
+        cb.record_success()
+        assert cb.recovery_timeout == 60
+        assert cb.state == State.CLOSED
+
+    def test_custom_max_recovery_timeout(self):
+        cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=10,
+                            max_recovery_timeout=40)
+        cb.record_failure()
+
+        # 10 → 20 → 40 (capped)
+        for expected in [20, 40]:
+            with patch("portfolio.circuit_breaker.time.monotonic",
+                       return_value=cb._last_failure_time + cb.recovery_timeout + 1):
+                cb.allow_request()
+            cb.record_failure()
+            assert cb.recovery_timeout == expected
+
+    def test_default_max_recovery_timeout(self):
+        """Default max_recovery_timeout is 300s."""
+        cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=60)
+        assert cb._max_recovery_timeout == 300
+
+    def test_backoff_does_not_affect_initial_open_to_half_open(self):
+        """First probe still uses the original timeout (no premature backoff)."""
+        cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=60)
+        cb.record_failure()
+
+        # At t=59 should still be OPEN
+        with patch("portfolio.circuit_breaker.time.monotonic",
+                   return_value=cb._last_failure_time + 59):
+            assert cb.allow_request() is False
+
+        # At t=60 should transition
+        with patch("portfolio.circuit_breaker.time.monotonic",
+                   return_value=cb._last_failure_time + 60):
+            assert cb.allow_request() is True
+            assert cb.state == State.HALF_OPEN

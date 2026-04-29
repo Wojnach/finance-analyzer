@@ -1,134 +1,67 @@
-# Improvement Plan — Auto-Improve Session 2026-04-28
+# Improvement Plan — Auto-Improve Session 2026-04-29
 
 ## Summary
 
-Findings from 4 parallel exploration agents + direct investigation. Focused on
-real bugs, security issues, and lint violations. Excluding style-only changes,
-deferred architecture work (ARCH-18+), and E402 violations (intentional lazy imports).
+Continuation of auto-improve. Prior session (2026-04-28) fixed BUG-230 (CORS),
+BUG-231 (heartbeat atomicity), BUG-232 (NaN fx_rate). This session addresses
+circuit breaker reliability, risk management performance, and log rotation coverage.
 
 ---
 
-## 1. Bugs & Problems Found
+## 1. Bugs & Improvements Found
 
-### BUG-230 (P1): Dashboard CORS wildcard allows cross-origin data theft
-- **File**: `dashboard/app.py:44-49`
-- **Issue**: `Access-Control-Allow-Origin: *` with optional auth means any website
-  can fetch portfolio data via XHR if user has dashboard open in browser.
-- **Fix**: Restrict CORS to localhost origins. Add `Access-Control-Allow-Credentials: false`.
-- **Impact**: Security-only. No functional change to dashboard behavior.
+### BUG-245 (P2): Circuit breaker uses fixed recovery timeout — no backoff
+- **File**: `portfolio/circuit_breaker.py`
+- **Issue**: `recovery_timeout` is fixed (default 60s). During extended API outages
+  (e.g., Binance maintenance), the breaker cycles OPEN→HALF_OPEN→OPEN every 60s
+  indefinitely, generating probe requests and log noise.
+- **Fix**: Add exponential backoff on failed recovery. Double timeout on each
+  HALF_OPEN→OPEN transition, cap at 5 minutes. Reset on successful recovery.
+- **Impact**: Reduces retry pressure during extended outages. No behavioral change
+  during normal operation (first recovery attempt still at original timeout).
 
-### BUG-231 (P2): Heartbeat uses non-atomic `.write_text()`
-- **File**: `portfolio/main.py:1098, 1147`
-- **Issue**: If process crashes mid-write, `heartbeat.txt` is corrupt. Next restart
-  may fail parsing the truncated ISO timestamp.
-- **Fix**: Use `atomic_write_text()` from file_utils.
-- **Impact**: Startup reliability. Low risk — heartbeat is just a timestamp string.
+### FEAT-3 (P3): `_streaming_max` scans entire JSONL every call
+- **File**: `portfolio/risk_management.py:21-51`
+- **Issue**: `_streaming_max()` reads the full portfolio history file line-by-line
+  on every invocation. At 60s cycle cadence, after 30 days that's ~43K lines per
+  call. The peak value can only increase (append-only file), so re-scanning old
+  entries is redundant.
+- **Fix**: Cache peak value + byte offset. On subsequent calls, seek to last offset
+  and only scan new entries. Invalidate cache if file shrinks (rotation).
+- **Impact**: O(new_entries) instead of O(all_entries) per call. ~43K→~1 line
+  in steady state.
 
-### BUG-232 (P2): NaN fx_rate passes guard in portfolio_value()
-- **File**: `portfolio/portfolio_mgr.py:162`
-- **Issue**: Guard is `fx_rate <= 0` — NaN fails this check (`NaN <= 0` is False),
-  so NaN propagates into portfolio value calculation, returning NaN.
-- **Fix**: Add `math.isnan` check alongside the existing guard.
-- **Impact**: Portfolio value becomes NaN instead of cash-only fallback. Affects
-  reporting, risk management downstream.
-
-### BUG-233 (P3): `CANCEL_HOUR`/`CANCEL_MIN` undefined in fish_monitor_live.py
-- **File**: `scripts/fish_monitor_live.py:809`
-- **Issue**: `NameError` at runtime if straddle mode is entered.
-- **Fix**: Define constants (likely 21, 55 based on Avanza warrant hours).
-- **Impact**: Script is deprecated (fish engine disabled 2026-04-17), but still crashes if run.
-
-### BUG-234 (P3): Unused variable `recent_horizon` in signal_engine.py
-- **File**: `portfolio/signal_engine.py:2919`
-- **Issue**: Computed but never used (actual call uses `base_hz` on line 2922).
-- **Fix**: Remove the variable.
-- **Impact**: None — dead assignment.
-
-### BUG-235 (P3): Dashboard 500 errors expose internal exception messages
-- **File**: `dashboard/app.py` (multiple endpoints)
-- **Issue**: `return jsonify({"error": str(e)}), 500` leaks file paths and internals.
-- **Fix**: Log full traceback server-side, return generic error message to client.
-- **Impact**: Information disclosure. Low risk on LAN-only dashboard.
+### FEAT-5 (P3): Log rotation coverage gap
+- **File**: `portfolio/log_rotation.py`
+- **Issue**: 59 JSONL files in data/, but `ROTATION_POLICIES` covers only 8.
+  Most others are self-managed by modules, but several high-growth files are
+  uncovered: `accuracy_snapshots.jsonl`, `contract_violations.jsonl`,
+  `sentiment_ab_log.jsonl`, `forecast_health.jsonl`.
+- **Fix**: Add rotation policies for uncovered high-growth files.
+- **Impact**: Prevents unbounded disk growth from files not covered by
+  module-level pruning.
 
 ---
 
-## 2. Lint Violations (Ruff)
+## 2. Implementation Batches
 
-### Batch A: Auto-fixable (22 violations)
-- 10 F401 unused imports (portfolio/)
-- 8 I001 unsorted imports (portfolio/)
-- 4 UP045 non-PEP604 Optional annotations (portfolio/)
+### Batch 1: Circuit breaker backoff + peak cache (2 files)
+1. `portfolio/circuit_breaker.py` — exponential backoff on recovery timeout
+2. `portfolio/risk_management.py` — cached peak value with byte-offset seek
 
-### Batch B: Unused variables (9 violations)
-- `portfolio/signal_engine.py:2919` — `recent_horizon`
-- `portfolio/signals/complexity_gap_regime.py:108` — `n_assets`
-- `portfolio/signals/crypto_evrp.py:224` — `recent_rv`
-- `portfolio/signals/mahalanobis_turbulence.py:125` — `n_assets`
-- `data/metals_risk.py:835,836,846,849` — 4 computed-but-unused vars
-- `data/test_metals_swing_trader.py:61` — `api_type`
-
-### Batch C: Unused imports in data/ and signals/ (12 violations)
-- `data/metals_swing_trader.py:13` — `json`
-- `portfolio/signals/hash_ribbons.py:31` — `majority_vote`
-- `portfolio/signals/xtrend_equity_spillover.py:30` — `sma`, `ema`, `rsi`
-- `portfolio/mstr_loop/*.py` — 6 unused imports across 4 files
-
-### Batch D: SIM simplifications (11 violations in portfolio/)
-- 4 SIM102 collapsible-if
-- 2 SIM103 needless-bool
-- 5 SIM115 context-manager for file open
-
-### Batch E: Scripts cleanup (key items only)
-- 12 E722 bare-except → `except Exception:`
-- 3 F821 undefined names (CANCEL_HOUR/CANCEL_MIN in fish_monitor_live.py)
-- 9 F401 unused imports
-- 5 F541 f-strings without placeholders
+### Batch 2: Log rotation + tests (2 files)
+1. `portfolio/log_rotation.py` — add missing JSONL rotation policies
+2. `tests/test_circuit_breaker.py` — backoff behavior tests
+3. `tests/test_risk_management.py` — peak cache tests
 
 ---
 
-## 3. Architecture Improvements
+## 3. Risk Assessment
 
-None proposed this session. Previous sessions addressed the major items (ARCH-10
-through ARCH-27). Remaining ARCH items (18: metals monolith, 19: CI/CD, 20: mypy,
-21: autonomous.py decomposition, 22: agent_invocation class) are all deferred and
-require larger scope than a single auto-improve session.
-
----
-
-## 4. Refactoring TODOs
-
-### REF-50: Remove dead fish_engine references in metals_loop.py
-- Lines 703-704 reference `_fish_engine` and `_reconcile_fish_engine_position`
-- Engine permanently deprecated 2026-04-17. Safe to remove.
-- **Deferred**: Touching metals_loop.py (7667 lines) is high-risk in an auto session.
-
----
-
-## 5. Implementation Batches
-
-### Batch 1: Security & Safety Fixes (3 files)
-1. `dashboard/app.py` — CORS restriction (BUG-230), error message sanitization (BUG-235)
-2. `portfolio/main.py` — Atomic heartbeat writes (BUG-231)
-3. `portfolio/portfolio_mgr.py` — NaN fx_rate guard (BUG-232)
-
-### Batch 2: Ruff auto-fix + unused variables (portfolio/, data/)
-1. Run `ruff check --fix` for F401, I001, UP045 across portfolio/
-2. Manually fix F841 unused variables (9 files)
-3. Fix BUG-233 in scripts/fish_monitor_live.py
-
-### Batch 3: Scripts & SIM cleanup
-1. Bare-except fixes (E722) in scripts/
-2. Auto-fix F401, F541, I001 in scripts/
-3. SIM simplifications in portfolio/ (collapsible-if, needless-bool)
-
----
-
-## 6. Risk Assessment
-
-- **Batch 1**: Low risk. Heartbeat and NaN guard are defensive additions. CORS
-  change is tightening, not loosening.
-- **Batch 2**: Very low risk. Removing dead code/imports. No behavioral changes.
-- **Batch 3**: Low risk. Style fixes in scripts (not production loop code).
-
-All batches are additive/tightening. No behavioral changes to trading logic,
-signal computation, or order execution.
+- **Circuit breaker backoff**: Low risk. Only changes retry cadence during
+  extended failures. First probe is at the original timeout. Adds no new
+  failure modes. Fully backward-compatible constructor API.
+- **Peak cache**: Low risk. Cache invalidation on file-shrink handles rotation.
+  Falls back to full scan if seek fails. No change to peak value computation.
+- **Log rotation**: Very low risk. Adding policies for files that currently
+  have none. No change to existing policies.

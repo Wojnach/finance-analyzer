@@ -826,3 +826,112 @@ class TestComputeStopLevelsAtrEdgeCases:
         # ATR capped at 15%: stop = 2000 * (1 - 2*15/100) = 2000 * 0.70 = 1400.0
         assert r["stop_price_usd"] == 1400.0
         assert r["triggered"] is False  # 2100 > 1400
+
+
+# ===================================================================
+# FEAT-3: _streaming_max peak caching
+# ===================================================================
+
+class TestStreamingMaxPeakCache:
+    """FEAT-3: _streaming_max should cache peak value + byte offset
+    to avoid re-scanning the full file on every call."""
+
+    def setup_method(self):
+        """Clear the peak cache between tests."""
+        import portfolio.risk_management as rm
+        rm._peak_cache.clear()
+
+    def test_returns_floor_for_missing_file(self, tmp_path):
+        from portfolio.risk_management import _streaming_max
+        result = _streaming_max(tmp_path / "nonexistent.jsonl", "value", 500_000)
+        assert result == 500_000
+
+    def test_finds_peak_in_full_scan(self, tmp_path):
+        from portfolio.risk_management import _streaming_max
+        history = tmp_path / "history.jsonl"
+        entries = [{"value": v} for v in [100, 500, 300, 200]]
+        _write_jsonl(history, entries)
+
+        result = _streaming_max(history, "value", 0)
+        assert result == 500
+
+    def test_incremental_scan_finds_new_peak(self, tmp_path):
+        """After initial scan, appending higher value should be found."""
+        from portfolio.risk_management import _streaming_max
+        history = tmp_path / "history.jsonl"
+        _write_jsonl(history, [{"value": 100}, {"value": 500}])
+
+        # Initial scan
+        result = _streaming_max(history, "value", 0)
+        assert result == 500
+
+        # Append a new peak
+        with open(history, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"value": 900}) + "\n")
+
+        # Incremental scan — should find 900 without re-reading old entries
+        result = _streaming_max(history, "value", 0)
+        assert result == 900
+
+    def test_incremental_scan_no_new_peak(self, tmp_path):
+        """Appending a lower value should keep the old peak."""
+        from portfolio.risk_management import _streaming_max
+        history = tmp_path / "history.jsonl"
+        _write_jsonl(history, [{"value": 1000}])
+
+        result = _streaming_max(history, "value", 0)
+        assert result == 1000
+
+        with open(history, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"value": 800}) + "\n")
+
+        result = _streaming_max(history, "value", 0)
+        assert result == 1000
+
+    def test_cache_invalidated_on_file_shrink(self, tmp_path):
+        """If file shrinks (rotation), cache should reset and do full scan."""
+        from portfolio.risk_management import _streaming_max
+        history = tmp_path / "history.jsonl"
+        _write_jsonl(history, [{"value": 100}, {"value": 1000}, {"value": 500}])
+
+        result = _streaming_max(history, "value", 0)
+        assert result == 1000
+
+        # Simulate rotation — rewrite with fewer entries, no old peak
+        _write_jsonl(history, [{"value": 600}])
+
+        result = _streaming_max(history, "value", 0)
+        assert result == 600
+
+    def test_separate_keys_cached_independently(self, tmp_path):
+        """Different value_keys should have independent caches."""
+        from portfolio.risk_management import _streaming_max
+        history = tmp_path / "history.jsonl"
+        _write_jsonl(history, [
+            {"patient_value_sek": 500, "bold_value_sek": 700},
+            {"patient_value_sek": 800, "bold_value_sek": 600},
+        ])
+
+        patient = _streaming_max(history, "patient_value_sek", 0)
+        bold = _streaming_max(history, "bold_value_sek", 0)
+        assert patient == 800
+        assert bold == 700
+
+    def test_floor_used_when_file_empty(self, tmp_path):
+        from portfolio.risk_management import _streaming_max
+        history = tmp_path / "history.jsonl"
+        history.write_text("", encoding="utf-8")
+
+        result = _streaming_max(history, "value", 500_000)
+        assert result == 500_000
+
+    def test_malformed_lines_skipped(self, tmp_path):
+        from portfolio.risk_management import _streaming_max
+        history = tmp_path / "history.jsonl"
+        with open(history, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"value": 100}) + "\n")
+            f.write("not valid json\n")
+            f.write(json.dumps({"value": 300}) + "\n")
+
+        result = _streaming_max(history, "value", 0)
+        assert result == 300

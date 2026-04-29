@@ -18,23 +18,50 @@ from portfolio.file_utils import atomic_append_jsonl, load_json
 logger = logging.getLogger(__name__)
 
 
+# FEAT-3: Cache peak values per (path, key) to avoid re-scanning the full
+# JSONL on every 60s cycle. The file is append-only, so the peak can only
+# increase. Cache stores: peak value + byte offset of last read position.
+# Invalidated when the file shrinks (log rotation).
+_peak_cache: dict[tuple, dict] = {}
+
+
 def _streaming_max(history_path: pathlib.Path, value_key: str, floor: float) -> float:
-    """A-PR-2 (2026-04-11): Walk an ENTIRE JSONL file line-by-line and
-    return the maximum value at `value_key`. Replaces the prior approach
-    of `load_jsonl_tail(max_entries=2000)` which only saw the last ~33h
-    of history (2000 entries × ~60s cycle = ~33h). After 33h the true
-    historical peak fell off the back and drawdown silently collapsed
-    to the recent local peak — meaning a real drawdown after a 2-day
-    rally was invisible to the circuit breaker.
+    """A-PR-2 (2026-04-11): Find the maximum value at `value_key` in a JSONL file.
+
+    FEAT-3 (2026-04-29): Uses a byte-offset cache so subsequent calls only
+    scan new entries appended since the last call. Falls back to a full scan
+    if the file shrinks (rotation) or on any seek error.
 
     Streams line-by-line so memory stays O(1) regardless of file size.
     Returns `floor` (typically initial_value) if file missing/empty.
     """
     if not history_path.exists():
         return floor
+
+    cache_key = (str(history_path), value_key)
+    cached = _peak_cache.get(cache_key)
+
+    try:
+        file_size = history_path.stat().st_size
+    except OSError:
+        file_size = 0
+
+    # Determine where to start reading
+    start_offset = 0
     peak = floor
+    if cached is not None:
+        if file_size >= cached["offset"]:
+            # File grew or stayed the same — resume from last position
+            start_offset = cached["offset"]
+            peak = cached["peak"]
+        else:
+            # File shrank (rotation) — full re-scan
+            start_offset = 0
+
     try:
         with open(history_path, encoding="utf-8") as f:
+            if start_offset > 0:
+                f.seek(start_offset)
             for line in f:
                 line = line.strip()
                 if not line:
@@ -46,8 +73,14 @@ def _streaming_max(history_path: pathlib.Path, value_key: str, floor: float) -> 
                 val = entry.get(value_key, 0)
                 if val > peak:
                     peak = val
+            end_offset = f.tell()
     except OSError as e:
         logger.warning("Could not stream history file %s: %s", history_path.name, e)
+        if cached is not None:
+            return cached["peak"]
+        return peak
+
+    _peak_cache[cache_key] = {"peak": peak, "offset": end_offset}
     return peak
 
 DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"

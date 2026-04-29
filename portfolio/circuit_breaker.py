@@ -23,10 +23,13 @@ class State(enum.Enum):
 class CircuitBreaker:
     """Thread-safe circuit breaker for a single data source."""
 
-    def __init__(self, name: str, failure_threshold: int = 5, recovery_timeout: int = 60):
+    def __init__(self, name: str, failure_threshold: int = 5, recovery_timeout: int = 60,
+                 max_recovery_timeout: int = 300):
         self.name = name
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
+        self._base_recovery_timeout = recovery_timeout
+        self._max_recovery_timeout = max_recovery_timeout
         self._state = State.CLOSED
         self._failure_count = 0
         self._last_failure_time: float | None = None
@@ -44,6 +47,8 @@ class CircuitBreaker:
                 logger.info("Circuit breaker '%s': HALF_OPEN -> CLOSED (recovery confirmed)", self.name)
                 self._state = State.CLOSED
                 self._half_open_probe_sent = False  # BUG-93: Reset probe flag
+                # BUG-245: Reset backoff on successful recovery
+                self.recovery_timeout = self._base_recovery_timeout
             self._failure_count = 0
 
     def record_failure(self) -> None:
@@ -53,9 +58,17 @@ class CircuitBreaker:
             self._last_failure_time = time.monotonic()
 
             if self._state == State.HALF_OPEN:
+                # BUG-245: Exponential backoff — double timeout on each failed
+                # recovery probe, capped at max. Reduces retry pressure during
+                # extended outages (e.g., Binance maintenance windows).
+                prev_timeout = self.recovery_timeout
+                self.recovery_timeout = min(
+                    self.recovery_timeout * 2, self._max_recovery_timeout
+                )
                 logger.warning(
-                    "Circuit breaker '%s': HALF_OPEN -> OPEN (recovery failed, %d failures)",
-                    self.name, self._failure_count,
+                    "Circuit breaker '%s': HALF_OPEN -> OPEN (recovery failed, %d failures, "
+                    "next probe in %ds, was %ds)",
+                    self.name, self._failure_count, self.recovery_timeout, prev_timeout,
                 )
                 self._state = State.OPEN
                 self._half_open_probe_sent = False  # BUG-93: Reset probe flag
