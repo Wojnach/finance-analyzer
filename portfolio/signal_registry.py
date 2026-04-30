@@ -246,6 +246,14 @@ def _register_defaults():
     # Directional: mean-reversion in ranging, momentum in trending. All OHLCV, all assets.
     register_enhanced("vol_ratio_regime", "portfolio.signals.vol_ratio_regime",
                       "compute_vol_ratio_regime_signal", max_confidence=0.7)
+    # Residual pair reversion — cointegration-based pairs trading (all assets)
+    # 2026-04-30: Leung & Nguyen (2018), Amberdata crypto pairs (Sharpe 0.93).
+    # Regime-neutral mean reversion on OLS residual: ETH~BTC, XAG~XAU, MSTR~BTC.
+    # Specifically targets ETH-USD (weakest ticker) and XAG-USD (user focus).
+    register_enhanced("residual_pair_reversion",
+                      "portfolio.signals.residual_pair_reversion",
+                      "compute_residual_pair_reversion_signal",
+                      requires_context=True, max_confidence=0.7)
 
 
 _register_defaults()
