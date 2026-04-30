@@ -194,3 +194,63 @@ def test_maybe_export_local_llm_report_writes_daily_snapshot_once(tmp_path, monk
     assert second is None
     assert len(history_entries) == 1
     assert json.loads(latest_file.read_text(encoding="utf-8"))["date"] == "2026-03-09"
+
+
+def test_export_entry_includes_calibration_and_shadow_fields(tmp_path, monkeypatch):
+    """Regression for the 2026-05-01 'calibration silently stripped' bug.
+
+    The export entry written to local_llm_report_latest.json used to drop
+    calibration / shadow_registry / sentiment_shadow_accuracy from the
+    report — they were computed daily but never exposed to the dashboard.
+    Particularly important after the 2026-04-30 probability-log scale fix
+    finally made qwen3+ministral calibration data usable.
+    """
+    latest_file = tmp_path / "local_llm_report_latest.json"
+    history_file = tmp_path / "local_llm_report_history.jsonl"
+    state_file = tmp_path / "local_llm_report_export_state.json"
+
+    fake_calibration = {
+        "qwen3": {"brier": 0.6667, "log_loss": 1.0986, "samples": 100, "missing_outcome": 5},
+        "ministral": {"brier": 0.6651, "log_loss": 1.0950, "samples": 80, "missing_outcome": 3},
+    }
+    fake_shadow = {
+        "shadows": {"fingpt": {"status": "shadow", "entered_shadow_ts": "2026-04-09T00:00:00Z"}},
+        "stale": [{"signal": "fingpt", "days_in_shadow": 22}],
+    }
+    fake_sentiment_shadow = {
+        "1d": {"FinBERT": {"accuracy": 0.428, "samples": 1337}},
+    }
+
+    monkeypatch.setattr(
+        "portfolio.local_llm_report.build_local_llm_report",
+        lambda days=30, config=None, predictions_file=None, health_file=None: {
+            "days": days,
+            "config": {"forecast": {}, "local_models": {}, "local_llm_report": {}},
+            "health": {"chronos": {"success_rate": 1.0, "ok": 1, "total": 1}},
+            "ministral": {"overall": {"accuracy": 0.6, "correct": 6, "samples": 10}, "by_ticker": {}},
+            "forecast": {"raw": {}, "effective": {}},
+            "gating_counts": {"forecast": {}, "subsignals": {}},
+            "calibration": fake_calibration,
+            "_calibration_pending_backfill": 8,
+            "shadow_registry": fake_shadow,
+            "sentiment_shadow_accuracy": fake_sentiment_shadow,
+            "recommendations": [],
+        },
+    )
+
+    config = {"local_llm_report": {"daily_export_enabled": True, "report_days": 30}}
+    now = datetime(2026, 5, 1, 12, 0, tzinfo=UTC)
+
+    maybe_export_local_llm_report(
+        config=config,
+        now=now,
+        latest_file=latest_file,
+        history_file=history_file,
+        state_file=state_file,
+    )
+
+    written = json.loads(latest_file.read_text(encoding="utf-8"))
+    assert written["calibration"] == fake_calibration
+    assert written["calibration_pending_backfill"] == 8
+    assert written["shadow_registry"] == fake_shadow
+    assert written["sentiment_shadow_accuracy"] == fake_sentiment_shadow

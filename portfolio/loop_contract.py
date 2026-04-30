@@ -95,7 +95,23 @@ LAYER2_INVOCATIONS_FILE = DATA_DIR / "invocations.jsonl"
 # Contract limit updated from 180s (60s-cadence era) to match the pool timeout
 # so normal 200–265s cycles don't false-positive. Any cycle exceeding 360s
 # means the pool hit its timeout — that's the genuine-hang threshold.
-MAX_CYCLE_DURATION_S = 360
+#
+# 2026-05-01: bumped 360 -> 480 after a 4-week audit found 9 cycles in the
+# 360-475s range firing as violations. They were normal slow workload
+# (heavy LLM batch + busy news_event + Avanza session re-auth) — not hangs.
+# 480s gives the slow-but-healthy regime room without hiding genuine hangs;
+# anything above 480s is still strongly anomalous.
+MAX_CYCLE_DURATION_S = 480
+
+# 2026-05-01: classify multi-hour "hangs" that are actually OS-suspend events.
+# WSL2 / Windows laptop sleeps cause the cycle's wall-clock to advance by
+# the sleep duration, generating spurious 4-15h "hang" violations. Recent
+# audit: 3 of 11 cycle_duration violations in last 10d were OS-sleep
+# (4.6h overnight, 4.5h overnight, 9h daytime accidental hibernation).
+# Anything > 30 minutes is far outside even pathological loop behavior;
+# treat it as suspend rather than a runtime hang. The original
+# `cycle_duration` violation still fires for genuine 480s-30min hangs.
+OS_SUSPEND_THRESHOLD_S = 30 * 60
 MIN_SUCCESS_RATE = 0.5
 SIGNAL_DROP_THRESHOLD = 0.3  # >30% drop in voter count = warning
 ESCALATION_THRESHOLD = 3     # consecutive warnings → CRITICAL
@@ -465,9 +481,28 @@ def verify_contract(report: CycleReport, previous_signal_counts: dict | None = N
                 },
             ))
 
-    # 3. Cycle duration
+    # 3. Cycle duration — see MAX_CYCLE_DURATION_S + OS_SUSPEND_THRESHOLD_S
+    # rationale at module top.
     duration = report.cycle_duration_s
-    if duration > MAX_CYCLE_DURATION_S:
+    if duration > OS_SUSPEND_THRESHOLD_S:
+        # Wall-clock advance > 30 min = OS sleep / hibernation, not a hang.
+        # Emits a softer INFO-severity classification so downstream
+        # alerting can suppress these without ignoring real hangs.
+        violations.append(Violation(
+            invariant="os_suspend_likely",
+            severity="INFO",
+            message=(
+                f"Cycle wall-clock advanced {duration / 60:.1f} min "
+                f"(threshold {OS_SUSPEND_THRESHOLD_S / 60:.0f} min). "
+                f"Almost certainly an OS suspend/hibernate, not a runtime hang. "
+                f"Loop will resume normally on next cycle."
+            ),
+            details={
+                "duration_s": duration,
+                "suspend_threshold_s": OS_SUSPEND_THRESHOLD_S,
+            },
+        ))
+    elif duration > MAX_CYCLE_DURATION_S:
         violations.append(Violation(
             invariant="cycle_duration",
             severity="WARNING",
