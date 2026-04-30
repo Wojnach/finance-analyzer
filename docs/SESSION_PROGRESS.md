@@ -1,3 +1,50 @@
+# Session Progress — Auto-Improve (2026-04-30)
+
+**Session start:** 2026-04-30 ~08:00 CET
+**Status:** COMPLETE — 4 batches, merged + pushed
+**Branch:** improve/auto-session-2026-04-30
+
+## What was done
+
+### Batch 1: Crypto subsystem bug fixes (4 files)
+- BUG-236: `crypto_swing_trader.py:675` TypeError on naive datetime — Z-suffix normalization + TypeError catch
+- BUG-237: `accuracy_stats.py` unused `import json` — removed
+- BUG-238: `crypto_swing_trader.py:454,471` fragile timezone in exit/cooldown — Z-suffix normalization
+- BUG-239: `crypto_loop.py` singleton lock TOCTOU race — replaced with O_CREAT|O_EXCL atomic create
+- BUG-240: `crypto_swing_trader.py` ruff I001+UP035 — sorted imports, collections.abc.Callable
+- BUG-241: `crypto_cross_asset.py` unsorted import — ruff fix
+- BUG-242: `crypto_loop.py` 4x try-except-pass → contextlib.suppress
+
+### Batch 2: Trade guard decay (1 file + tests)
+- REF-54: Loss escalation multiplier (8x) stays indefinitely → geometric halving every 24h
+- New `last_loss_ts` per strategy in state file, bit-shift decay in `_get_cooldown_multiplier()`
+- Guard 2 message shows decay info (base vs effective multiplier)
+- 12 new tests covering decay math, persistence, and integration (51/51 passing)
+
+### Batch 3: Test lint cleanup (89 files)
+- REF-55: 179 auto-fixable ruff violations across 89 test files
+- F401 (unused imports), I001 (unsorted), SIM117 (nested with), UP017 (UTC), SIM300 (yoda)
+- Zero semantic changes, 260/260 spot-check tests passing
+
+### Batch 4: Documentation
+- Updated SYSTEM_OVERVIEW.md with BUG-236 through REF-55
+- This SESSION_PROGRESS entry
+
+## Investigations (no changes needed)
+- REF-53: Forecast dedup cache — already bounded (5 entries max, one per ticker). No fix needed.
+
+## Test results
+- 51/51 trade_guards tests passing (including 12 new decay tests)
+- 260/260 spot-check passing across 5 key test files
+- Full suite run in PHASE 5
+
+## What's next
+- Monitor trade guard decay behavior in production (first real test when consecutive losses > 1)
+- BUG-236 is currently inert (DRY_RUN=True) but will be critical once crypto goes live
+- 221 non-auto-fixable ruff violations remain in tests/ (F841, E741, E712, SIM115, B007 etc.)
+
+---
+
 # Session Progress — After-Hours Research (2026-04-29)
 
 **Session start:** 2026-04-29 ~22:00 CET
