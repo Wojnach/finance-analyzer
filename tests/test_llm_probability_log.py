@@ -217,9 +217,90 @@ def test_derive_probs_confidence_clamped():
     probs = mod.derive_probs_from_result("ministral", "BUY", 1.5)
     assert probs is not None
     assert probs["BUY"] == pytest.approx(1.0)
+    # 2026-04-30: confidence <= 0 now produces "soft preference" (action=0.5,
+    # others=0.25) rather than uniform [1/3, 1/3, 1/3]. The old behavior
+    # contradicted the argmax (action probability == others' probability).
     probs2 = mod.derive_probs_from_result("ministral", "BUY", -0.2)
     assert probs2 is not None
-    assert probs2["BUY"] == pytest.approx(1.0 / 3.0)
+    assert probs2["BUY"] == pytest.approx(0.5)
+    assert probs2["HOLD"] == pytest.approx(0.25)
+    assert probs2["SELL"] == pytest.approx(0.25)
+
+
+def test_derive_probs_zero_confidence_with_buy_action():
+    """Regression for the 2026-04-21..30 qwen3/ministral all-uniform bug.
+
+    When confidence is 0 (model returned argmax without quantifying), the
+    distribution must reflect the argmax — action gets the largest share,
+    not the same share as the alternatives.
+    """
+    probs = mod.derive_probs_from_result("qwen3", "BUY", 0.0)
+    assert probs is not None
+    assert max(probs, key=probs.get) == "BUY", (
+        "argmax of returned probs must match the chosen action"
+    )
+    assert probs["BUY"] > probs["HOLD"]
+    assert probs["BUY"] > probs["SELL"]
+    assert sum(probs.values()) == pytest.approx(1.0)
+
+
+def test_derive_probs_zero_confidence_with_hold_action():
+    """Same regression but for HOLD action — HOLD must dominate."""
+    probs = mod.derive_probs_from_result("ministral", "HOLD", 0.0)
+    assert probs is not None
+    assert max(probs, key=probs.get) == "HOLD"
+    assert probs["HOLD"] > probs["BUY"]
+    assert probs["HOLD"] > probs["SELL"]
+
+
+def test_derive_probs_very_low_confidence_floors_above_random():
+    """Tiny confidence (e.g. 0.05) used to leave action below others (0.475 each).
+    Now it gets floored just above 1/3 so the argmax invariant holds."""
+    probs = mod.derive_probs_from_result("qwen3", "SELL", 0.05)
+    assert probs is not None
+    assert max(probs, key=probs.get) == "SELL", (
+        "even with tiny confidence, argmax must match chosen action"
+    )
+    assert sum(probs.values()) == pytest.approx(1.0)
+
+
+# --- Confidence-scale fix (qwen3/ministral 0-100 -> 0-1, 2026-04-30) ---
+
+def test_qwen3_trader_normalizes_confidence_0_to_100():
+    """qwen3_trader._parse_response must return confidence in [0, 1] —
+    the prompt asks for 0-100 but downstream callers (log_vote validator)
+    require the canonical 0-1 form. The pre-fix parser kept confidence as
+    int 0-100, causing log_vote to reject every qwen3 row silently."""
+    from portfolio.qwen3_trader import _parse_response
+    text = '{"action":"BUY","confidence":75,"reasoning":"strong setup"}'
+    decision, _, conf = _parse_response(text)
+    assert decision == "BUY"
+    assert conf == pytest.approx(0.75), f"expected 0.75, got {conf}"
+
+
+def test_qwen3_trader_accepts_fractional_confidence():
+    """Defensive: if a future prompt revision asks for 0-1 fractions, parser
+    should pass them through unchanged."""
+    from portfolio.qwen3_trader import _parse_response
+    text = '{"action":"SELL","confidence":0.6,"reasoning":"bearish"}'
+    _, _, conf = _parse_response(text)
+    assert conf == pytest.approx(0.6)
+
+
+def test_ministral_trader_normalizes_confidence_0_to_100():
+    """Same fix as qwen3 — ministral_trader must return 0-1."""
+    from portfolio.ministral_trader import _parse_response
+    text = '{"action":"HOLD","confidence":40,"reasoning":"mixed"}'
+    decision, _, conf = _parse_response(text)
+    assert decision == "HOLD"
+    assert conf == pytest.approx(0.4)
+
+
+def test_ministral_trader_accepts_fractional_confidence():
+    from portfolio.ministral_trader import _parse_response
+    text = '{"action":"BUY","confidence":0.85,"reasoning":"x"}'
+    _, _, conf = _parse_response(text)
+    assert conf == pytest.approx(0.85)
 
 
 def test_derive_probs_rejects_non_numeric_confidence():
