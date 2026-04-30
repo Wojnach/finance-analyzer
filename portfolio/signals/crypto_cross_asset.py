@@ -20,11 +20,10 @@ This module covers cross-asset rotation signals without overlap.
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from typing import Any
 
 import pandas as pd
-
-from collections import Counter
 
 from portfolio.signal_utils import majority_vote
 
