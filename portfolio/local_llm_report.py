@@ -331,6 +331,12 @@ def build_local_llm_report(days=DEFAULT_REPORT_DAYS, config=None, predictions_fi
 
 
 def _build_export_entry(report, exported_at):
+    # 2026-05-01: include calibration + shadow_registry + sentiment_shadow_accuracy
+    # in the export entry. These were computed daily by build_report() but
+    # silently dropped here, so the daily JSON consumed by the dashboard never
+    # exposed Brier / log-loss / shadow-promotion-status. Now they're surfaced.
+    # Particularly important after the 2026-04-30 probability-log scale fix
+    # made qwen3 + ministral calibration data USABLE for the first time.
     return {
         "date": exported_at[:10],
         "exported_at": exported_at,
@@ -340,6 +346,10 @@ def _build_export_entry(report, exported_at):
         "ministral": report["ministral"],
         "forecast": report["forecast"],
         "gating_counts": report["gating_counts"],
+        "calibration": report.get("calibration", {}),
+        "calibration_pending_backfill": report.get("_calibration_pending_backfill", 0),
+        "shadow_registry": report.get("shadow_registry", {"shadows": {}, "stale": []}),
+        "sentiment_shadow_accuracy": report.get("sentiment_shadow_accuracy", {}),
         "recommendations": report["recommendations"],
     }
 

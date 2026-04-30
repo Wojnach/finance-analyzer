@@ -179,6 +179,33 @@ class TestVerifyContract:
         violations = verify_contract(good_report)
         assert not any(v.invariant == "cycle_duration" for v in violations)
 
+    def test_os_suspend_classified_separately(self, good_report):
+        """A 4h+ wall-clock advance is OS sleep, not a runtime hang.
+        Should fire `os_suspend_likely` (INFO), not `cycle_duration` (WARNING).
+        Added 2026-05-01 after audit found 3/11 recent cycle_duration
+        violations were laptop suspends."""
+        from portfolio.loop_contract import OS_SUSPEND_THRESHOLD_S
+        good_report.cycle_start = 1000.0
+        good_report.cycle_end = 1000.0 + OS_SUSPEND_THRESHOLD_S + 60
+        violations = verify_contract(good_report)
+        suspend_v = [v for v in violations if v.invariant == "os_suspend_likely"]
+        assert len(suspend_v) == 1, f"expected 1 os_suspend, got {[v.invariant for v in violations]}"
+        assert suspend_v[0].severity == "INFO"
+        # And the WARNING cycle_duration must NOT also fire — these are exclusive
+        assert not any(v.invariant == "cycle_duration" for v in violations)
+
+    def test_cycle_just_over_max_still_fires_hang_warning(self, good_report):
+        """A 481s cycle is over MAX (480) but well under suspend threshold.
+        Must still fire cycle_duration WARNING, not os_suspend."""
+        good_report.cycle_start = 1000.0
+        good_report.cycle_end = 1000.0 + MAX_CYCLE_DURATION_S + 1
+        violations = verify_contract(good_report)
+        warn = [v for v in violations if v.invariant == "cycle_duration"]
+        assert len(warn) == 1
+        assert warn[0].severity == "WARNING"
+        # And os_suspend must NOT fire on a sub-30-min cycle
+        assert not any(v.invariant == "os_suspend_likely" for v in violations)
+
     # 4. llm_batch_flushed
     def test_llm_not_flushed_detected(self, good_report):
         good_report.llm_batch_flushed = False
