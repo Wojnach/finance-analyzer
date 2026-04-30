@@ -156,8 +156,19 @@ def _parse_response(text):
             reasoning = str(payload["reasoning"])[:200]
         if payload.get("confidence") is not None:
             try:
-                confidence = int(float(payload["confidence"]))
-                confidence = max(0, min(100, confidence))
+                # 2026-04-30: Return confidence on the 0-1 scale so downstream
+                # callers (signal_engine, llm_probability_log) don't have to
+                # know about the prompt's 0-100 convention. The probability log
+                # validator silently rejected 0-100 values for 9+ days because
+                # they failed the [0, 1] range check, manufacturing a fully-
+                # uniform probability distribution for every qwen3 vote and
+                # invalidating Brier-score calibration analysis.
+                # Defensively accept 0-1 too in case a future prompt revision
+                # asks for fractions.
+                raw = float(payload["confidence"])
+                if raw > 1.0:
+                    raw = raw / 100.0
+                confidence = max(0.0, min(1.0, raw))
             except (ValueError, TypeError):
                 pass
     if decision is None:

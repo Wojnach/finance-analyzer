@@ -165,8 +165,15 @@ def _parse_response(text):
             reasoning = str(payload["reasoning"])[:200]
         if payload.get("confidence") is not None:
             try:
-                confidence = int(float(payload["confidence"]))
-                confidence = max(0, min(100, confidence))
+                # 2026-04-30: Return confidence on the 0-1 scale (was 0-100
+                # int previously). The downstream probability log validator
+                # silently rejected 0-100 values, leaving the log uniform.
+                # See qwen3_trader._parse_response for the same fix and the
+                # full incident write-up. Defensively accept 0-1 too.
+                raw = float(payload["confidence"])
+                if raw > 1.0:
+                    raw = raw / 100.0
+                confidence = max(0.0, min(1.0, raw))
             except (ValueError, TypeError):
                 pass
     if decision is None:

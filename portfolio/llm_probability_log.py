@@ -237,17 +237,41 @@ def derive_probs_from_result(
                     "HOLD": float(neu) / total,
                 }
 
-    # Confidence-split fallback. Floor at 1/3 — if the model ACTIVELY chose
-    # an action, its probability for that action must be at least the random
-    # baseline, otherwise the distribution contradicts the argmax.
-    conf = max(conf, 1.0 / 3.0)
+    # Confidence-split fallback. Three regimes:
+    #   - conf >= 1.0: model fully certain
+    #   - 0 < conf < 1.0: standard split, action gets conf, others split (1-conf)/2
+    #   - conf <= 0:    "soft preference" — model committed to argmax but
+    #                   didn't quantify confidence (or quantification was lost).
+    #                   Use {action=0.5, others=0.25} to honor the argmax
+    #                   without overstating certainty.
+    #
+    # 2026-04-30 (incident: qwen3+ministral all-uniform probabilities):
+    # The pre-fix `max(conf, 1/3)` floor was wrong. With conf=0:
+    #   conf = max(0, 1/3) = 1/3
+    #   remainder = (1 - 1/3) / 2 = 1/3
+    #   probs[action] = 1/3, others = 1/3 — UNIFORM, contradicts argmax.
+    # qwen3 + ministral logged 100% uniform for 9+ days because of this,
+    # invalidating Brier-score calibration analysis (probability_log entries
+    # had `chosen=BUY` but `probs=[1/3, 1/3, 1/3]` — the cardinal sin of
+    # calibration data: distribution disagrees with the argmax).
     if conf >= 1.0:
         probs = {"BUY": 0.0, "HOLD": 0.0, "SELL": 0.0}
         probs[action] = 1.0
-    else:
-        remainder = (1.0 - conf) / 2.0
-        probs = {"BUY": remainder, "HOLD": remainder, "SELL": remainder}
-        probs[action] = conf
+        return probs
+
+    if conf <= 0.0:
+        probs = {"BUY": 0.25, "HOLD": 0.25, "SELL": 0.25}
+        probs[action] = 0.5
+        return probs
+
+    # Standard split. If conf is very small (e.g. 0.05) the action would
+    # still be below the others (0.475 each), contradicting the argmax.
+    # Floor the action just above 1/3 in that regime so the argmax holds.
+    if conf < 1.0 / 3.0 + 0.05:
+        conf = 1.0 / 3.0 + 0.05
+    remainder = (1.0 - conf) / 2.0
+    probs = {"BUY": remainder, "HOLD": remainder, "SELL": remainder}
+    probs[action] = conf
 
     total = sum(probs.values())
     if abs(total - 1.0) > 1e-9:
