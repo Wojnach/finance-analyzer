@@ -1,5 +1,85 @@
 # Changelog
 
+## 2026-05-01 (oil swing subsystem + crypto/MSTR scheduled-task plumbing)
+
+Completes the multi-asset swing-trader rollout started 2026-04-30 (merge
+ae4f8705). Brings oil to parity with the crypto+MSTR pattern (paper-mode
+WTI swing trader) and ships the operational plumbing (install scripts,
+heartbeats, exit-code-11) so crypto, MSTR, and oil loops can run
+unattended in DRY_RUN/shadow mode without flipping any live-trading
+switches.
+
+**Oil — full subsystem (mirrors crypto+MSTR):**
+- `data/oil_swing_config.py` — DRY_RUN=True default, WTI-only universe in
+  v1 (Brent deferred). Defaults adopt metals/crypto verbatim with
+  oil-specific tweaks: 12% barrier buffer, -2.5% hard stop, 3% TP
+  underlying, MAX_CONCURRENT=1 for commodities single-event risk.
+- `data/oil_warrant_catalog.json` — empty scaffold; refresh fills it.
+- `data/oil_warrant_refresh.py` — Avanza filtered-search across Swedish
+  ("BULL OLJA", "MINI L OLJA", "BEAR OLJA") and English ("BULL CRUDE",
+  "BULL BRENT", "BULL WTI") prefixes. Same TTL/merge logic as
+  crypto_warrant_refresh.
+- `data/oil_swing_trader.py` — `OilSwingTrader` mirroring
+  `CryptoSwingTrader` structure. Asset-agnostic logic via cfg
+  parameterization. WARRANT_CATALOG_FALLBACK seeded with 5 OLJA
+  instruments scraped from `data/avanza_instruments_live.json`
+  (2026-04-30): MINI L 624/479, MINI S 699/701, BEAR OLJAB X3 AVA 2.
+- `data/oil_loop.py` — 60s autonomous loop with 10s fast-tick monitor.
+  KEY DIVERGENCE FROM CRYPTO: `fetch_live_prices()` routes through
+  `portfolio.price_source.fetch_klines` (CL=F → Binance FAPI real-time
+  with yfinance fallback). Oil's CL=F is NOT a Binance spot symbol;
+  using crypto's HTTP path would have returned empty prices every cycle.
+
+**Loop hardening (crypto_loop.py + oil_loop.py):**
+- `run_loop` now returns int status code: `EXIT_LOCK_CONFLICT` (11) on
+  duplicate instance. Previously returned None → bat wrapper saw 0 and
+  respawned forever, fork-bombing into the live instance.
+- `write_heartbeat()` persists JSON to `data/{crypto,oil}_loop.heartbeat`
+  each successful cycle for an external watchdog (TBD).
+- `main(--loop)` wires telegram notify when config has telegram.token;
+  falls back to no-op silently when config absent.
+
+**Scheduled-task plumbing:**
+- `scripts/win/crypto-loop.bat`, `scripts/win/oil-loop.bat` — bat
+  wrappers mirroring metals-loop.bat (auto-restart with 30s delay,
+  abort on exit code 11).
+- `scripts/win/install-crypto-loop-task.ps1` — registers PF-CryptoLoop
+  (7-day weekly trigger, crypto trades 24/7).
+- `scripts/win/install-mstr-loop-task.ps1` — registers PF-MstrLoop with
+  MSTR_LOOP_PHASE=shadow injected via cmd /c (per docs/MSTR_LOOP_NOTES).
+- `scripts/win/install-oil-loop-task.ps1` — registers PF-OilLoop (Sun-Fri
+  trigger, oil futures trade nearly 24/7 except Sat).
+- All install scripts register but DO NOT auto-start. User runs
+  Start-ScheduledTask explicitly when ready.
+
+**Dashboard:**
+- `/api/oil` — new endpoint mirroring `/api/crypto`. Returns swing state
+  + deep context + warrant catalog + risk + decisions + trades +
+  heartbeat.
+
+**Observability:**
+- `scripts/mstr_loop_scorecard.py` — added `compute_phase_a_window()`
+  reporting days_observed / days_remaining / min_days. Phase-A
+  graduation gates now check ALL of: ≥25 trades, ≥90 days, ≥55% win
+  rate, positive expectancy. Output explicitly lists failing gates.
+- `scripts/oil_loop_scorecard.py` — new file mirroring MSTR scorecard
+  for oil. Live-flip readiness gates: ≥30 days, ≥15 trades, ≥55% win
+  rate, positive expectancy.
+
+**Documentation:**
+- `docs/OIL_LOOP_NOTES.md` — operator runbook mirroring MSTR_LOOP_NOTES.
+
+**Tests:** 113 new tests passing. 0 regressions in existing crypto/metals
+suites.
+
+**Out of scope (deferred):**
+- Fishtrader greenfield system (`docs/plans/2026-04-30-fishtrader.md`)
+  remains awaiting user input on 6 design questions.
+- New oil signals (oil_cross_asset, oil_supply_demand, oil_term_structure)
+  not added — `oil_precompute.py` already produces the deep context.
+- Live-flip of any DRY_RUN/shadow flag — that remains user decision in
+  separate commits after paper-mode validation.
+
 ## 2026-04-30 (crypto + MSTR swing subsystem — mirrors metals)
 
 Build BTC/ETH autonomous swing-trading subsystem mirroring the existing

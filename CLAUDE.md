@@ -104,7 +104,20 @@ Telegram. A Flask dashboard serves real-time data on port 5055.
 ### Dashboard (`dashboard/app.py`)
 - Flask REST API on port 5055 (optional token auth)
 - Key endpoints: `/api/portfolio`, `/api/summary`, `/api/accuracy`, `/api/trades`,
-  `/api/decisions`, `/api/health`, `/api/metals`, `/api/forecast`, `/api/prophecy`
+  `/api/decisions`, `/api/health`, `/api/metals`, `/api/crypto`, `/api/btc`,
+  `/api/eth`, `/api/mstr`, `/api/oil`, `/api/forecast`, `/api/prophecy`
+
+### Multi-asset swing loops (paper-mode by default)
+- **Crypto loop** (`data/crypto_loop.py`): BTC + ETH 60s cycle, DRY_RUN=True.
+  Install: `scripts/win/install-crypto-loop-task.ps1` → `PF-CryptoLoop`.
+- **MSTR loop** (`portfolio/mstr_loop/`): shadow phase. Install:
+  `scripts/win/install-mstr-loop-task.ps1` → `PF-MstrLoop`. Phase A
+  (live) requires 90 days shadow + manual approval per
+  `docs/MSTR_LOOP_NOTES.md`.
+- **Oil loop** (`data/oil_loop.py`): WTI 60s cycle, DRY_RUN=True. Install:
+  `scripts/win/install-oil-loop-task.ps1` → `PF-OilLoop`. Notes:
+  `docs/OIL_LOOP_NOTES.md`. Routes prices via `portfolio.price_source`
+  (CL=F → Binance FAPI real-time with yfinance fallback).
 
 ### Trading Bots
 - **GoldDigger** (`portfolio/golddigger/`): Gold certificate trading (dry-run/live via Avanza)
