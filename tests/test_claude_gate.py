@@ -17,7 +17,6 @@ import pytest
 
 from portfolio import claude_gate
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -199,7 +198,6 @@ class TestInvokeLockSerialization:
     Claude processes."""
 
     def test_invoke_lock_exists_and_is_a_lock(self):
-        import threading
         # Should be a Lock or RLock object
         assert hasattr(claude_gate, "_invoke_lock")
         # It should support context-manager protocol

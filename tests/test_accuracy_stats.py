@@ -361,6 +361,7 @@ class TestVoteCorrect:
         would let an outcome_tracker data-quality regression go unnoticed.
         When any NULLs are encountered, log the count so drift is visible."""
         import logging
+
         from portfolio.accuracy_stats import signal_accuracy
         entries = [
             _make_entry("BTC-USD", "rsi", "BUY", 2.5),

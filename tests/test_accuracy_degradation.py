@@ -11,7 +11,6 @@ from datetime import UTC, datetime, timedelta
 import portfolio.accuracy_degradation as deg
 import portfolio.accuracy_stats as acc_mod
 
-
 # ---------------------------------------------------------------------------
 # Test infrastructure
 # ---------------------------------------------------------------------------

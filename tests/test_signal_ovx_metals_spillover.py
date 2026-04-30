@@ -1,16 +1,16 @@
 """Tests for ovx_metals_spillover signal module."""
-import numpy as np
-import pandas as pd
-import pytest
 from unittest.mock import patch
 
+import numpy as np
+import pandas as pd
+
 from portfolio.signals.ovx_metals_spillover import (
-    compute_ovx_metals_spillover_signal,
-    _percentile_rank,
     _ovx_level_signal,
     _ovx_momentum_signal,
-    _ovx_zscore_signal,
     _ovx_reversion_signal,
+    _ovx_zscore_signal,
+    _percentile_rank,
+    compute_ovx_metals_spillover_signal,
 )
 
 

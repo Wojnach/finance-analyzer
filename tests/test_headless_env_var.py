@@ -6,7 +6,7 @@ bigbet._eval_with_claude, iskbets._gate_with_claude, analyze (via _clean_env).
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import portfolio.agent_invocation as ai
 import portfolio.analyze as analyze_mod

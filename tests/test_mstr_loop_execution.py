@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from portfolio.mstr_loop import config, execution
 from portfolio.mstr_loop.data_provider import MstrBundle
-from portfolio.mstr_loop.state import BotState, Position
+from portfolio.mstr_loop.state import BotState
 from portfolio.mstr_loop.strategies.base import Decision
 
 

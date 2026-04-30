@@ -15,18 +15,17 @@ This module pins the contract for:
 """
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
-from unittest.mock import patch
+from datetime import UTC, date, datetime
 
 import pytest
 
 from portfolio import econ_dates
 from portfolio.econ_dates import is_macro_window
 from portfolio.signal_engine import (
+    _MACRO_WINDOW_CACHE_TTL_S,
     MACRO_WINDOW_DOWNWEIGHT_MULTIPLIER,
     MACRO_WINDOW_DOWNWEIGHT_SIGNALS,
     MACRO_WINDOW_FORCE_HOLD_SIGNALS,
-    _MACRO_WINDOW_CACHE_TTL_S,
     _weighted_consensus,
 )
 

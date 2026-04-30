@@ -1,6 +1,7 @@
 """Tests for BGeometrics on-chain data integration."""
 
 import time
+from datetime import UTC
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -324,17 +325,19 @@ class TestCoerceEpoch:
         assert _coerce_epoch("1712345678") == 1712345678.0
 
     def test_iso_string_parsed_to_epoch(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         from portfolio.onchain_data import _coerce_epoch
         ts = "2026-04-09T12:00:00+00:00"
-        expected = datetime(2026, 4, 9, 12, 0, 0, tzinfo=timezone.utc).timestamp()
+        expected = datetime(2026, 4, 9, 12, 0, 0, tzinfo=UTC).timestamp()
         assert _coerce_epoch(ts) == pytest.approx(expected)
 
     def test_iso_z_suffix_parsed(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         from portfolio.onchain_data import _coerce_epoch
         ts = "2026-04-09T12:00:00Z"
-        expected = datetime(2026, 4, 9, 12, 0, 0, tzinfo=timezone.utc).timestamp()
+        expected = datetime(2026, 4, 9, 12, 0, 0, tzinfo=UTC).timestamp()
         assert _coerce_epoch(ts) == pytest.approx(expected)
 
     def test_garbage_returns_zero(self):

@@ -9,7 +9,6 @@ Asserts:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import portfolio.accuracy_degradation as deg
@@ -102,7 +101,6 @@ class TestInvariantWiring:
         monkeypatch.setattr(deg, "SNAPSHOT_STATE_FILE", tmp_path / "snap.json")
 
         # Empty snapshots file -> first call returns []
-        from portfolio.accuracy_stats import ACCURACY_SNAPSHOTS_FILE
         monkeypatch.setattr(
             "portfolio.accuracy_stats.ACCURACY_SNAPSHOTS_FILE",
             tmp_path / "snap.jsonl",

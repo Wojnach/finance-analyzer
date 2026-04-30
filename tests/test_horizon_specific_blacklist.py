@@ -7,7 +7,6 @@ were 66-81% accurate. Batch 4 adds the per-horizon mechanism (entries empty
 by default — populated by future audits).
 """
 
-import pytest
 
 from portfolio.signal_engine import (
     _TICKER_DISABLED_BY_HORIZON,

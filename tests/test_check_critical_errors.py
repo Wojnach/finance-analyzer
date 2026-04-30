@@ -7,8 +7,6 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import check_critical_errors as cce  # noqa: E402
 

@@ -1,6 +1,5 @@
 """Tests for per-ticker disabled signal rescue overrides."""
 
-import pytest
 
 from portfolio.signal_engine import (
     _DISABLED_SIGNAL_OVERRIDES,

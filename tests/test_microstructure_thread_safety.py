@@ -1,7 +1,6 @@
 """Tests for thread-safe buffer access in microstructure_state.py."""
 
 import threading
-
 from unittest.mock import patch
 
 from portfolio import microstructure_state as ms

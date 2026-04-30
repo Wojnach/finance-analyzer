@@ -1,7 +1,6 @@
 """Tests for complexity_gap_regime signal module."""
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.complexity_gap_regime import (
     _compute_complexity_gap_series,

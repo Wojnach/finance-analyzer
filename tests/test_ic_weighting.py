@@ -10,13 +10,11 @@ Covers:
   7. Per-ticker IC override when available
 """
 
-import pytest
 
 from portfolio.signal_engine import (
     _compute_ic_mult,
     _weighted_consensus,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

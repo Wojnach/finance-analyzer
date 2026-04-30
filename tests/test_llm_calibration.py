@@ -8,7 +8,6 @@ import pytest
 
 from portfolio import llm_calibration as mod
 
-
 # --- outcome_from_return ----------------------------------------------------
 
 

@@ -22,7 +22,6 @@ from unittest.mock import MagicMock, patch
 
 from portfolio import claude_gate
 
-
 _FAKE_SIGNALS = {
     "BTC-USD": {
         "indicators": {"rsi": 18.0, "macd_hist": -5.0, "price_vs_bb": "below_lower", "atr_pct": 3.2},

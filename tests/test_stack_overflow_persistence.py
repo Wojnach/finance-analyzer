@@ -1,7 +1,6 @@
 """Tests for stack overflow counter persistence in agent_invocation.py."""
 
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 from portfolio.agent_invocation import (

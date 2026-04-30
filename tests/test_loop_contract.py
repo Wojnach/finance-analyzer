@@ -851,6 +851,7 @@ class TestFileUtilsIntegration:
     def test_no_json_module_used_directly(self):
         """loop_contract should not use json.load/json.loads directly for file I/O."""
         import inspect
+
         import portfolio.loop_contract as lc
         source = inspect.getsource(lc.check_layer2_journal_activity)
         assert "json.load(" not in source

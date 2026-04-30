@@ -3,8 +3,8 @@
 Verifies the non-blocking shutdown pattern used in main.py ticker processing.
 """
 
-import time
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 

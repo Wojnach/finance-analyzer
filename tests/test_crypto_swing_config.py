@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import importlib
 
-import pytest
-
 from data import crypto_swing_config as cfg
 
 

@@ -14,14 +14,12 @@ Covers:
 """
 
 import json
-import pathlib
 import threading
 import time
 
 import numpy as np
 import pandas as pd
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # BUG-209: OHLCV zero/negative price validation
@@ -98,6 +96,7 @@ class TestConfigWipeGuard:
     def test_guard_threshold_is_five(self):
         """Verify the guard constant by reading the source."""
         import inspect
+
         from portfolio import telegram_poller
         src = inspect.getsource(telegram_poller.TelegramPoller._handle_mode_command)
         assert "len(cfg) < 5" in src
@@ -260,12 +259,14 @@ class TestMonteCarloDeterminism:
 
     def test_simulate_all_default_seed_is_none(self):
         import inspect
+
         from portfolio.monte_carlo import simulate_all
         sig = inspect.signature(simulate_all)
         assert sig.parameters["seed"].default is None
 
     def test_portfolio_var_default_seed_is_none(self):
         import inspect
+
         from portfolio.monte_carlo_risk import compute_portfolio_var
         sig = inspect.signature(compute_portfolio_var)
         assert sig.parameters["seed"].default is None
@@ -294,7 +295,6 @@ class TestDashboardHmac:
         """Verify dashboard imports hmac module."""
         import importlib
         dashboard_app = importlib.import_module("dashboard.app")
-        import hmac as hmac_mod
         # The dashboard module should have hmac imported
         assert hasattr(dashboard_app, "hmac") or "hmac" in dir(dashboard_app)
 

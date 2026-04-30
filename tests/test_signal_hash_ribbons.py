@@ -1,16 +1,14 @@
 """Tests for hash_ribbons BTC miner capitulation signal module."""
-import numpy as np
-import pandas as pd
-import pytest
 from unittest.mock import patch
 
+import numpy as np
+import pandas as pd
+
 from portfolio.signals.hash_ribbons import (
-    compute_hash_ribbons_signal,
     _hash_ribbon_crossover,
     _price_momentum_filter,
     _recovery_recency,
-    HASH_FAST,
-    HASH_SLOW,
+    compute_hash_ribbons_signal,
 )
 
 

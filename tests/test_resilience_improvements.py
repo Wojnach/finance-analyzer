@@ -13,9 +13,6 @@ import threading
 from datetime import UTC, datetime
 from unittest import mock
 
-import pytest
-
-
 # ===========================================================================
 # Batch 2: Crash counter persistence
 # ===========================================================================

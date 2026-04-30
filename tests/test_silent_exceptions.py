@@ -166,9 +166,8 @@ def test_forecast_logs_kronos_init_failure(monkeypatch, caplog):
     with patch(
         "portfolio.file_utils.load_json",
         side_effect=RuntimeError("config corrupt"),
-    ):
-        with caplog.at_level(logging.DEBUG, logger="portfolio.signals.forecast"):
-            fmod._init_kronos_enabled()
+    ), caplog.at_level(logging.DEBUG, logger="portfolio.signals.forecast"):
+        fmod._init_kronos_enabled()
 
     # Restore state so subsequent tests see whatever the real config produced.
     fmod._KRONOS_ENABLED = orig_enabled

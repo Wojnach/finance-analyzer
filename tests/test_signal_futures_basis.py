@@ -5,11 +5,8 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.futures_basis import (
-    _MIN_KLINES,
-    _SUSTAINED_WINDOW,
     _VELOCITY_WINDOW,
     _basis_acceleration,
     _basis_velocity,

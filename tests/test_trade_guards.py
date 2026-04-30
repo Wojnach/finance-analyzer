@@ -431,6 +431,7 @@ class TestRecordTradeWiringHeartbeat:
 
     def test_first_call_logs_wiring_confirmed(self, clean_state, caplog):
         import logging
+
         import portfolio.trade_guards as tg
         tg._wiring_confirmed = False  # reset module flag for test
         with patch("portfolio.trade_guards.STATE_FILE", clean_state):
@@ -440,6 +441,7 @@ class TestRecordTradeWiringHeartbeat:
 
     def test_subsequent_calls_dont_relog(self, clean_state, caplog):
         import logging
+
         import portfolio.trade_guards as tg
         tg._wiring_confirmed = False
         with patch("portfolio.trade_guards.STATE_FILE", clean_state):

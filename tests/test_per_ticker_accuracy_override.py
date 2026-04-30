@@ -403,7 +403,7 @@ class TestRegimeGatedOverride:
 
     def test_override_preserves_exempted_signal(self):
         """When regime_gated_override omits fear_greed, it should keep its vote."""
-        from portfolio.signal_engine import _weighted_consensus, _get_regime_gated
+        from portfolio.signal_engine import _get_regime_gated, _weighted_consensus
 
         votes = {
             "fear_greed": "BUY",

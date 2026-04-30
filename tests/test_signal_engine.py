@@ -391,8 +391,6 @@ class TestOnchainSignal:
         Returns (vote, extra_info) without calling generate_signal
         (which needs dozens of indicator keys).
         """
-        from portfolio.tickers import CRYPTO_SYMBOLS
-        from portfolio.shared_state import ONCHAIN_TTL
 
         votes = {"onchain": "HOLD"}
         extra_info = {}
@@ -590,8 +588,8 @@ class TestGenerateSignalPhaseMarkers:
         dispatch loop bailed early). In no case should it still be
         __pre_dispatch__ on a successful completion.
         """
-        import pandas as pd
         import numpy as np
+        import pandas as pd
 
         from portfolio.signal_engine import generate_signal, get_last_signal
 
@@ -631,8 +629,8 @@ class TestGenerateSignalPhaseMarkers:
         and legacy callers), the tracker must not record anything under an
         empty-string key — that would pollute the dict for all future lookups.
         """
-        import pandas as pd
         import numpy as np
+        import pandas as pd
 
         from portfolio import signal_engine
 
@@ -1034,10 +1032,10 @@ class TestPersistenceStateBounds:
 
     def test_dict_bounded_at_cap(self):
         from portfolio.signal_engine import (
-            _apply_persistence_filter,
             _PERSISTENCE_MAX_TICKERS,
-            _persistence_state,
+            _apply_persistence_filter,
             _persistence_lock,
+            _persistence_state,
         )
         # Clear state and fill to cap with unique tickers
         with _persistence_lock:
@@ -1053,10 +1051,10 @@ class TestPersistenceStateBounds:
 
     def test_eviction_preserves_recent_tickers(self):
         from portfolio.signal_engine import (
-            _apply_persistence_filter,
             _PERSISTENCE_MAX_TICKERS,
-            _persistence_state,
+            _apply_persistence_filter,
             _persistence_lock,
+            _persistence_state,
         )
         with _persistence_lock:
             _persistence_state.clear()

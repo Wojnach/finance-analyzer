@@ -1,14 +1,14 @@
 """Tests for crypto_evrp signal module."""
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
-import pytest
-from unittest.mock import patch, MagicMock
 
 from portfolio.signals.crypto_evrp import (
-    compute_crypto_evrp_signal,
     _compute_realized_vol,
     _evrp_level_signal,
     _evrp_momentum_signal,
+    compute_crypto_evrp_signal,
 )
 
 

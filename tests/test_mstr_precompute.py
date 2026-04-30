@@ -4,8 +4,6 @@ from __future__ import annotations
 import json
 import time
 
-import pytest
-
 from portfolio import mstr_precompute as mp
 
 

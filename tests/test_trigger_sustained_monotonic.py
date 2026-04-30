@@ -1,6 +1,5 @@
 """Tests for monotonic clock usage in trigger._update_sustained()."""
 
-import time
 from unittest.mock import patch
 
 from portfolio.trigger import SUSTAINED_CHECKS, SUSTAINED_DURATION_S, _update_sustained

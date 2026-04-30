@@ -18,15 +18,12 @@ import datetime
 import os
 import sys
 
-import pytest
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "data"))
 
 import metals_swing_config as cfg
 import metals_swing_trader as mst
 
-
-UTC = datetime.timezone.utc
+UTC = datetime.UTC
 
 
 def _make_trader():

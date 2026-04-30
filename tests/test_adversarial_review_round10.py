@@ -14,9 +14,6 @@ and identified three issues the first round of fixes missed:
 from __future__ import annotations
 
 import json
-import math
-
-import pytest
 
 from portfolio.accuracy_stats import blend_accuracy_data
 from portfolio.signal_engine import _weighted_consensus

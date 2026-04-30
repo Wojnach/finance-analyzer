@@ -275,7 +275,7 @@ def test_enqueue_fingpt_dedup():
     """Duplicate (ab_key, sub_key) enqueues are deduped — prevents the same
     ticker from piling up multiple fingpt requests if get_sentiment is
     called twice in the same cycle (cache race)."""
-    from portfolio.llm_batch import enqueue_fingpt, _fingpt_queue, _lock
+    from portfolio.llm_batch import _fingpt_queue, _lock, enqueue_fingpt
 
     with _lock:
         _fingpt_queue.clear()
@@ -457,7 +457,7 @@ class TestFlushAdvancesCounter:
     """
 
     def test_empty_flush_does_not_advance_counter(self, reset_rotation_counter):
-        from portfolio.llm_batch import flush_llm_batch, _ministral_queue, _qwen3_queue, _fingpt_queue, _lock
+        from portfolio.llm_batch import _fingpt_queue, _lock, _ministral_queue, _qwen3_queue, flush_llm_batch
         with _lock:
             _ministral_queue.clear()
             _qwen3_queue.clear()
@@ -471,8 +471,12 @@ class TestFlushAdvancesCounter:
     ):
         """A flush that processes at least one phase must bump counter by 1."""
         from portfolio.llm_batch import (
-            enqueue_fingpt, flush_llm_batch,
-            _ministral_queue, _qwen3_queue, _fingpt_queue, _lock,
+            _fingpt_queue,
+            _lock,
+            _ministral_queue,
+            _qwen3_queue,
+            enqueue_fingpt,
+            flush_llm_batch,
         )
         # Code-review finding N2: clear ALL three queues defensively so any
         # leftover ministral/qwen3 item from another test doesn't trip the

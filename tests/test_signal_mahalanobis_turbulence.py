@@ -3,7 +3,6 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.mahalanobis_turbulence import (
     _absorption_ratio_vote,

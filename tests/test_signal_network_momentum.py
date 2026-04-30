@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from portfolio.signals.network_momentum import (
     _compute_correlation_regime,
