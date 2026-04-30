@@ -26,6 +26,7 @@ DEFAULT_BOLD_POSITION_WINDOW_H = 4    # hours
 DEFAULT_PATIENT_POSITION_LIMIT = 1
 DEFAULT_PATIENT_POSITION_WINDOW_H = 8
 LOSS_ESCALATION = {0: 1, 1: 1, 2: 2, 3: 4, 4: 8}  # consecutive_losses -> cooldown multiplier
+LOSS_DECAY_HOURS = 24  # halve escalation multiplier every N hours without a trade
 
 
 def _load_state():
@@ -33,6 +34,7 @@ def _load_state():
     return load_json(str(STATE_FILE), default={
         "ticker_trades": {},
         "consecutive_losses": {"patient": 0, "bold": 0},
+        "last_loss_ts": {"patient": None, "bold": None},
         "new_position_timestamps": {"patient": [], "bold": []},
     })
 
@@ -64,11 +66,35 @@ def _portfolios_have_transactions():
     return False
 
 
-def _get_cooldown_multiplier(consecutive_losses):
-    """Get cooldown multiplier based on consecutive loss count."""
+def _get_cooldown_multiplier(consecutive_losses, last_loss_ts_str=None):
+    """Get cooldown multiplier based on consecutive loss count with time decay.
+
+    After LOSS_DECAY_HOURS without a new trade, the multiplier halves
+    repeatedly (geometric decay). E.g. 8x → 4x after 24h → 2x after 48h → 1x.
+    """
     if consecutive_losses >= 4:
-        return LOSS_ESCALATION[4]
-    return LOSS_ESCALATION.get(consecutive_losses, 1)
+        base = LOSS_ESCALATION[4]
+    else:
+        base = LOSS_ESCALATION.get(consecutive_losses, 1)
+
+    if base <= 1 or not last_loss_ts_str:
+        return base
+
+    # Apply time-based decay
+    try:
+        last_loss = datetime.fromisoformat(
+            last_loss_ts_str.replace("Z", "+00:00")
+        )
+        if last_loss.tzinfo is None:
+            last_loss = last_loss.replace(tzinfo=UTC)
+        elapsed_hours = (datetime.now(UTC) - last_loss).total_seconds() / 3600
+        if elapsed_hours > LOSS_DECAY_HOURS:
+            halvings = int(elapsed_hours // LOSS_DECAY_HOURS)
+            base = max(1, base >> halvings)  # bit-shift right = halve
+    except (ValueError, TypeError, OverflowError):
+        pass
+
+    return base
 
 
 def check_overtrading_guards(ticker, action, strategy, portfolio, config=None):
@@ -100,7 +126,8 @@ def check_overtrading_guards(ticker, action, strategy, portfolio, config=None):
     # --- Guard 1: Per-ticker cooldown ---
     base_cooldown = cfg.get("ticker_cooldown_minutes", DEFAULT_TICKER_COOLDOWN_MINUTES)
     consecutive = state.get("consecutive_losses", {}).get(strategy, 0)
-    multiplier = _get_cooldown_multiplier(consecutive)
+    last_loss_ts = state.get("last_loss_ts", {}).get(strategy)
+    multiplier = _get_cooldown_multiplier(consecutive, last_loss_ts)
     effective_cooldown = base_cooldown * multiplier
 
     key = f"{strategy}:{ticker}"
@@ -137,17 +164,21 @@ def check_overtrading_guards(ticker, action, strategy, portfolio, config=None):
 
     # --- Guard 2: Consecutive-loss escalation (informational) ---
     if consecutive >= 2:
+        base_mult = _get_cooldown_multiplier(consecutive, None)
         warnings.append({
             "guard": "consecutive_losses",
             "severity": "warning",
             "message": (
                 f"{strategy}: {consecutive} consecutive losses. "
-                f"Cooldown multiplier: {multiplier}x."
+                f"Cooldown multiplier: {multiplier}x"
+                f"{f' (decayed from {base_mult}x)' if multiplier < base_mult else ''}."
             ),
             "details": {
                 "strategy": strategy,
                 "consecutive_losses": consecutive,
                 "multiplier": multiplier,
+                "base_multiplier": base_mult,
+                "decayed": multiplier < base_mult,
             },
         })
 
@@ -240,12 +271,16 @@ def record_trade(ticker, direction, strategy, pnl_pct=None, config=None):
     if direction == "SELL" and pnl_pct is not None:
         if "consecutive_losses" not in state:
             state["consecutive_losses"] = {"patient": 0, "bold": 0}
+        if "last_loss_ts" not in state:
+            state["last_loss_ts"] = {"patient": None, "bold": None}
         if pnl_pct < 0:
             state["consecutive_losses"][strategy] = (
                 state["consecutive_losses"].get(strategy, 0) + 1
             )
+            state["last_loss_ts"][strategy] = now_str
         else:
             state["consecutive_losses"][strategy] = 0
+            state["last_loss_ts"][strategy] = None
 
     # Track new position timestamps (BUY only)
     if direction == "BUY":

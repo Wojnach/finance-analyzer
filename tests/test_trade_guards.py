@@ -448,3 +448,108 @@ class TestRecordTradeWiringHeartbeat:
             with caplog.at_level(logging.INFO, logger="portfolio.trade_guards"):
                 record_trade("ETH-USD", "BUY", "bold")
         assert "wiring confirmed" not in caplog.text
+
+
+# --- REF-54: Time-based loss escalation decay ---
+
+class TestLossEscalationDecay:
+    """REF-54: After LOSS_DECAY_HOURS without a trade, the escalation
+    multiplier halves. Prevents indefinite 8x penalty after a loss streak."""
+
+    def test_no_decay_without_timestamp(self):
+        assert _get_cooldown_multiplier(4, None) == 8
+
+    def test_no_decay_within_window(self):
+        recent = (datetime.now(UTC) - timedelta(hours=12)).isoformat()
+        assert _get_cooldown_multiplier(4, recent) == 8
+
+    def test_one_halving_after_24h(self):
+        old = (datetime.now(UTC) - timedelta(hours=25)).isoformat()
+        assert _get_cooldown_multiplier(4, old) == 4
+
+    def test_two_halvings_after_48h(self):
+        old = (datetime.now(UTC) - timedelta(hours=49)).isoformat()
+        assert _get_cooldown_multiplier(4, old) == 2
+
+    def test_floors_at_1x(self):
+        ancient = (datetime.now(UTC) - timedelta(hours=200)).isoformat()
+        assert _get_cooldown_multiplier(4, ancient) == 1
+
+    def test_decay_from_2x_after_24h(self):
+        old = (datetime.now(UTC) - timedelta(hours=25)).isoformat()
+        assert _get_cooldown_multiplier(2, old) == 1
+
+    def test_1x_never_decays_further(self):
+        old = (datetime.now(UTC) - timedelta(hours=100)).isoformat()
+        assert _get_cooldown_multiplier(1, old) == 1
+
+    def test_decay_with_z_suffix_timestamp(self):
+        old = (datetime.now(UTC) - timedelta(hours=25)).strftime(
+            "%Y-%m-%dT%H:%M:%S.%fZ"
+        )
+        assert _get_cooldown_multiplier(4, old) == 4
+
+    def test_record_trade_persists_last_loss_ts(self, clean_state):
+        with patch("portfolio.trade_guards.STATE_FILE", clean_state):
+            record_trade("BTC-USD", "SELL", "bold", pnl_pct=-3.0)
+            state = json.loads(clean_state.read_text(encoding="utf-8"))
+            assert state["last_loss_ts"]["bold"] is not None
+
+    def test_win_clears_last_loss_ts(self, clean_state):
+        state = {
+            "ticker_trades": {},
+            "consecutive_losses": {"patient": 0, "bold": 3},
+            "last_loss_ts": {"patient": None, "bold": "2026-04-01T12:00:00+00:00"},
+            "new_position_timestamps": {"patient": [], "bold": []},
+        }
+        clean_state.write_text(json.dumps(state), encoding="utf-8")
+
+        with patch("portfolio.trade_guards.STATE_FILE", clean_state):
+            record_trade("BTC-USD", "SELL", "bold", pnl_pct=5.0)
+            state = json.loads(clean_state.read_text(encoding="utf-8"))
+            assert state["consecutive_losses"]["bold"] == 0
+            assert state["last_loss_ts"]["bold"] is None
+
+    def test_decayed_cooldown_in_guard_check(self, clean_state):
+        """Integration: 4 losses 50h ago → 8x decayed to 2x → cooldown 60m."""
+        now = datetime.now(UTC)
+        state = {
+            "ticker_trades": {"bold:BTC-USD": (now - timedelta(minutes=50)).isoformat()},
+            "consecutive_losses": {"patient": 0, "bold": 4},
+            "last_loss_ts": {
+                "patient": None,
+                "bold": (now - timedelta(hours=50)).isoformat(),
+            },
+            "new_position_timestamps": {"patient": [], "bold": []},
+        }
+        clean_state.write_text(json.dumps(state), encoding="utf-8")
+
+        with patch("portfolio.trade_guards.STATE_FILE", clean_state):
+            warnings = check_overtrading_guards("BTC-USD", "BUY", "bold", {})
+            cooldown_warns = [w for w in warnings if w["guard"] == "ticker_cooldown"]
+            assert len(cooldown_warns) == 1
+            # 8x >> 2 halvings = 2x. 30m base * 2 = 60m. 50m elapsed < 60m → blocked
+            assert cooldown_warns[0]["details"]["multiplier"] == 2
+            assert cooldown_warns[0]["details"]["cooldown_min"] == 60
+
+    def test_guard2_message_shows_decay(self, clean_state):
+        """Guard 2 informational message reflects decayed vs base multiplier."""
+        now = datetime.now(UTC)
+        state = {
+            "ticker_trades": {},
+            "consecutive_losses": {"patient": 0, "bold": 4},
+            "last_loss_ts": {
+                "patient": None,
+                "bold": (now - timedelta(hours=25)).isoformat(),
+            },
+            "new_position_timestamps": {"patient": [], "bold": []},
+        }
+        clean_state.write_text(json.dumps(state), encoding="utf-8")
+
+        with patch("portfolio.trade_guards.STATE_FILE", clean_state):
+            warnings = check_overtrading_guards("BTC-USD", "BUY", "bold", {})
+            loss_warns = [w for w in warnings if w["guard"] == "consecutive_losses"]
+            assert len(loss_warns) == 1
+            assert loss_warns[0]["details"]["decayed"] is True
+            assert loss_warns[0]["details"]["base_multiplier"] == 8
+            assert loss_warns[0]["details"]["multiplier"] == 4
