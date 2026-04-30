@@ -784,17 +784,21 @@ def _is_tier_biased_for_ticker(tier: str, ticker: str) -> bool:
     cascade kept picking Opus's per-ticker-biased BUY, which lost as BTC
     stayed flat-to-down. Same pattern on XAG (-20.6pp).
 
-    Lower min-samples (5 vs 10) because per-ticker volume is much lower than
-    global; same 75% threshold so that a clearly one-sided per-ticker stance
-    triggers without over-firing on ordinary directional moves.
+    2026-04-30: Tuned thresholds 75%/5 -> 80%/10 after observing the v1
+    detector firing on every active ticker (BTC/ETH/MSTR/XAG/XAU all
+    suppressed to ~0% BUY post-merge), effectively deactivating the signal.
+    The new thresholds require both stronger one-sidedness (>80%) AND more
+    evidence (>=10 non-HOLD votes) before suppressing. Still catches the
+    extreme structural bias the v1 was built for, but tolerates ordinary
+    directional conviction during real trends.
 
     The journal scan needs more entries than the global check (max_entries=500
     vs 200) because per-(tier, ticker) volume is roughly 1/Nth of the per-tier
     volume across N tickers — too small a tail can leave a ticker with 0
     non-HOLD samples even when the tier itself is active.
     """
-    _PER_TICKER_BIAS_THRESHOLD = 0.75
-    _PER_TICKER_MIN_SAMPLES = 5
+    _PER_TICKER_BIAS_THRESHOLD = 0.80
+    _PER_TICKER_MIN_SAMPLES = 10
 
     try:
         from portfolio.file_utils import load_jsonl_tail
