@@ -1181,6 +1181,17 @@ if __name__ == "__main__":
             print(f"Updated {dec_updated} decision outcome entries")
         except Exception as e:
             print(f"Decision outcome backfill failed: {e}")
+        # Signal decay detection
+        print("\n=== Signal Decay Check ===")
+        try:
+            from portfolio.signal_decay_alert import run_decay_check
+            decay_alerts = run_decay_check()
+            if decay_alerts:
+                print(f"Found {len(decay_alerts)} decaying signals")
+            else:
+                print("No signal decay detected")
+        except Exception as e:
+            print(f"Signal decay check failed: {e}")
     elif "--accuracy" in args:
         from portfolio.accuracy_stats import print_accuracy_report
         print_accuracy_report()
