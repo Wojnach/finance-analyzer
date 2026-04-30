@@ -435,32 +435,79 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
     #     XAU candlestick 43.3%/656;
     #     MSTR ema 41.4%/1405, bb 44.5%/245.
     "3h": {
-        "BTC-USD": frozenset({"volatility_sig", "bb"}),
-        "ETH-USD": frozenset({"credit_spread_risk"}),
+        # 2026-04-30 audit: added sentiment (33.8% 3h_recent, 3629 sam, 94.9% BUY).
+        # Also added bb for more tickers, forecast for BTC (38.3% 3h_recent).
+        "BTC-USD": frozenset({"volatility_sig", "bb",
+                              "sentiment",  # 33.8% 3h_recent (3629 sam), 94.9% BUY-only
+                              }),
+        "ETH-USD": frozenset({"credit_spread_risk",
+                              "sentiment",  # 33.8% 3h_recent (3629 sam), 94.9% BUY-only
+                              }),
         # credit_spread_risk promoted to _default (2026-04-24)
-        "XAU-USD": frozenset(),
-        "XAG-USD": frozenset({"forecast", "qwen3"}),
-        "MSTR": frozenset({"volume", "volatility_sig"}),
+        "XAU-USD": frozenset({"sentiment",  # 33.8% 3h_recent (3629 sam)
+                              }),
+        "XAG-USD": frozenset({"forecast", "qwen3",
+                              "sentiment",  # 33.8% 3h_recent (3629 sam)
+                              }),
+        "MSTR": frozenset({"volume", "volatility_sig",
+                           "sentiment",  # 33.8% 3h_recent (3629 sam)
+                           }),
     },
     "4h": {},
     "12h": {},
     "1d": {
         # 2026-04-24 audit: added econ_calendar (1.8% BTC/ETH), ema (BTC),
         # funding (ETH 12.5%), econ_calendar (XAG 29.5%).
+        # 2026-04-30 audit: added signals with <40% 1d_recent accuracy (50+ sam).
+        # Key finding: systemic BUY bias — calendar (100% BUY, 30.8%),
+        # claude_fundamental (99.3% BUY, 34.2%), momentum_factors (32.7%),
+        # volume_flow (35.8%), heikin_ashi (38.2%), crypto_macro (33.8%).
+        # These signals are already auto-gated by the blended accuracy gate,
+        # but per-horizon blacklists provide defense-in-depth.
         "BTC-USD": frozenset({"news_event", "forecast",
-                              "econ_calendar",  # 1.8% 1d (113 sam)
-                              "ema",            # 23.8% 1d (42 sam)
+                              "econ_calendar",       # 1.8% 1d (113 sam)
+                              "ema",                 # 23.8% 1d (42 sam)
+                              "claude_fundamental",  # 34.2% 1d_recent (730 sam), 99.3% BUY-only
+                              "calendar",            # 30.8% 1d_recent (712 sam), 100% BUY-only
+                              "momentum_factors",    # 32.7% 1d_recent (910 sam), 60.1% at 3h — horizon divergence
+                              "volume_flow",         # 35.8% 1d_recent (924 sam)
+                              "heikin_ashi",         # 38.2% 1d_recent (709 sam)
+                              "crypto_macro",        # 33.8% 1d_recent (476 sam)
+                              "structure",           # 33.1% 1d_recent (758 sam)
                               }),
-        "ETH-USD": frozenset({"econ_calendar",  # 1.8% 1d (113 sam)
-                              "funding",        # 12.5% 1d (64 sam)
+        "ETH-USD": frozenset({"econ_calendar",       # 1.8% 1d (113 sam)
+                              "funding",             # 12.5% 1d (64 sam)
+                              "claude_fundamental",  # 34.2% 1d_recent (730 sam), 99.3% BUY-only
+                              "calendar",            # 30.8% 1d_recent (712 sam), 100% BUY-only
+                              "momentum_factors",    # 32.7% 1d_recent (910 sam)
+                              "volume_flow",         # 35.8% 1d_recent (924 sam)
+                              "heikin_ashi",         # 38.2% 1d_recent (709 sam)
+                              "crypto_macro",        # 33.8% 1d_recent (476 sam)
+                              "structure",           # 33.1% 1d_recent (758 sam)
                               }),
         "XAU-USD": frozenset({"candlestick",
                               "claude_fundamental",  # 2026-04-27: metals have no earnings/guidance
+                              "calendar",            # 30.8% 1d_recent (712 sam), 100% BUY-only
+                              "momentum_factors",    # 32.7% 1d_recent (910 sam)
+                              "volume_flow",         # 35.8% 1d_recent (924 sam)
+                              "heikin_ashi",         # 38.2% 1d_recent (709 sam)
+                              "smart_money",         # 34.2% 1d_recent (155 sam)
                               }),
-        "XAG-USD": frozenset({"econ_calendar",  # 29.5% 1d (112 sam)
+        "XAG-USD": frozenset({"econ_calendar",       # 29.5% 1d (112 sam)
                               "claude_fundamental",  # 2026-04-27: metals have no earnings/guidance
+                              "calendar",            # 30.8% 1d_recent (712 sam), 100% BUY-only
+                              "momentum_factors",    # 32.7% 1d_recent (910 sam)
+                              "volume_flow",         # 35.8% 1d_recent (924 sam)
+                              "heikin_ashi",         # 38.2% 1d_recent (709 sam)
                               }),
-        "MSTR": frozenset({"ema", "bb"}),
+        "MSTR": frozenset({"ema", "bb",
+                           "calendar",            # 30.8% 1d_recent (712 sam), 100% BUY-only
+                           "momentum_factors",    # 32.7% 1d_recent (910 sam)
+                           "volume_flow",         # 35.8% 1d_recent (924 sam)
+                           "heikin_ashi",         # 38.2% 1d_recent (709 sam)
+                           "smart_money",         # 34.2% 1d_recent (155 sam)
+                           "structure",           # 33.1% 1d_recent (758 sam)
+                           }),
     },
     "3d": {},
     "5d": {},
@@ -1226,24 +1273,20 @@ _STATIC_CORRELATION_GROUPS = {
     # RES-2026-04-21: REMOVED volatility_cluster. r=0.38 is too weak for a
     # correlation group. volume (52.1% acc) was unfairly penalized by
     # volatility_sig (46.8% acc). Let both vote independently.
-    # 2026-04-14: Mega trend cluster. Measured correlations: trend+macro_regime
-    # r=0.730 (99.7% agree), trend+structure r=0.608 (90.7%), trend+momentum_factors
-    # r=0.593 (90.4%), trend+heikin_ashi r=0.587 (85.4%), oscillators+heikin_ashi
-    # r=0.463 (83.4%). All 8 signals measure trend direction via different methods.
-    # 2026-04-18: Added macd — 91.9% agreement with ema (197 sam), 87.8% with bb,
-    # 85.3% with sentiment. MACD is mathematically derived from the same EMAs that
-    # drive the ema signal, so near-perfect correlation is expected. Was orphaned
-    # and getting full 1.0x weight despite being redundant.
-    # 2026-04-25: Added bb — 87.8% agreement with macd (197 sam), 85%+ with ema.
-    # 2026-04-26: Moved bb OUT to standalone volatility_bounds cluster. BB is a
-    # volatility/reversion signal that thrives in ranging (+15.2pp to 69.5% recent).
-    # In ranging, ema/macd/trend are regime-gated (HOLD), so BB's correlation with
-    # them is moot. The 0.12x follower penalty was destroying BB's edge (effective
-    # weight 0.18x vs its regime boost of 1.5x). Now 9 members.
-    "trend_direction": frozenset({
-        "ema", "macd", "trend", "heikin_ashi", "volume_flow", "macro_regime",
-        "momentum_factors", "structure", "oscillators",
-    }),
+    # 2026-04-30: SPLIT trend_direction mega-cluster (was 9 members, 1.96x weight).
+    # At 0.12x per follower, one directional signal family dominated consensus.
+    # Split into 3 semantically distinct sub-clusters:
+    #   pure_trend (MA-based): trend/ema/heikin_ashi — 85-90% agreement
+    #   oscillator_trend: macd/momentum_factors/oscillators — oscillation methods
+    #   structural_flow: volume_flow/macro_regime/structure — market structure
+    # Each sub-cluster gets independent leader selection, preventing a single
+    # broken trend signal from poisoning all 9 members' direction.
+    # Previous: 1.0 + 8*0.12 = 1.96x total. Now: 3 * (1.0 + 2*0.20) = 4.20x
+    # total, but with 3 independent leaders — better captures disagreement
+    # between trend, momentum, and structural signals.
+    "pure_trend": frozenset({"ema", "trend", "heikin_ashi"}),
+    "oscillator_trend": frozenset({"macd", "momentum_factors", "oscillators"}),
+    "structural_flow": frozenset({"volume_flow", "macro_regime", "structure"}),
     # 2026-04-18: Expanded from 3→6 members. Research (2026-04-17 after-hours)
     # found calendar↔fear_greed 100% agreement (501 sam), funding↔fear_greed
     # 100% (543 sam), news_event↔econ_calendar 100% (714 sam). These orphaned
@@ -1284,10 +1327,13 @@ _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal wei
 # At 0.15x: 1.0 + 2*0.15 = 1.30x effective weight (was 1.45x with 4 members).
 _CLUSTER_CORRELATION_PENALTIES: dict[str, float] = {
     "momentum_cluster": 0.15,
-    # 2026-04-14: volatility_cluster reduced to 2 members — default 0.3x is fine.
-    # 2026-04-26: trend_direction back to 9 members (bb moved to volatility_bounds).
-    # At 0.12x per follower: effective weight = 1.0 + 8*0.12 = 1.96x.
-    "trend_direction": 0.12,
+    # 2026-04-30: split trend_direction (9 members, 0.12x) into 3 sub-clusters.
+    # Each has 3 members at 0.20x: effective weight per cluster = 1.0 + 2*0.20 = 1.40x.
+    # Previous total: 1.96x from 1 cluster. New total: 3 * 1.40x = 4.20x BUT with
+    # 3 independent leaders — momentum/structural can disagree with pure trend.
+    "pure_trend": 0.20,
+    "oscillator_trend": 0.20,
+    "structural_flow": 0.20,
     # 2026-04-18: macro_external expanded from 3→6 members. At 0.15x per follower:
     # effective weight = 1.0 + 5*0.15 = 1.75x. Previously 3 members at 0.3x gave
     # 1.0 + 2*0.3 = 1.6x. Slightly higher total accounts for 3 truly independent
