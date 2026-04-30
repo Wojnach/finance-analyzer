@@ -114,7 +114,7 @@ class TestWeightedConsensusBasic:
 
     def test_simple_buy_majority(self):
         # Use signals from DIFFERENT correlation groups to avoid penalty:
-        # rsi (momentum_cluster), ema (trend_direction), smart_money (ungrouped)
+        # rsi (momentum_cluster), ema (pure_trend), smart_money (ungrouped)
         votes = {"rsi": "BUY", "ema": "BUY", "smart_money": "SELL"}
         action, conf = _weighted_consensus(votes, {}, "breakout")
         assert action == "BUY"
@@ -125,7 +125,7 @@ class TestWeightedConsensusBasic:
 
     def test_simple_sell_majority(self):
         # Use signals from DIFFERENT correlation groups to avoid penalty:
-        # rsi (momentum_cluster), ema (trend_direction), forecast (ungrouped),
+        # rsi (momentum_cluster), ema (pure_trend), forecast (ungrouped),
         # smart_money (ungrouped)
         votes = {"rsi": "SELL", "ema": "SELL", "forecast": "SELL", "smart_money": "BUY"}
         action, conf = _weighted_consensus(votes, {}, "breakout")
@@ -1133,13 +1133,13 @@ class TestActivityRateCap:
 # ===========================================================================
 
 class TestExpandedCorrelationGroups:
-    """Test new correlation groups: trend_direction, high_volume_sell."""
+    """Test correlation sub-clusters (split from trend_direction mega-cluster 2026-04-30)."""
 
-    def test_trend_direction_group_penalizes_secondary(self):
-        """In trend_direction group {ema, trend, heikin_ashi}, only leader gets full weight."""
+    def test_pure_trend_group_penalizes_secondary(self):
+        """In pure_trend group {ema, trend, heikin_ashi}, only leader gets full weight."""
         from portfolio.signal_engine import CORRELATION_GROUPS
-        assert "trend_direction" in CORRELATION_GROUPS
-        assert "ema" in CORRELATION_GROUPS["trend_direction"]
+        assert "pure_trend" in CORRELATION_GROUPS
+        assert "ema" in CORRELATION_GROUPS["pure_trend"]
 
         votes = {"ema": "SELL", "trend": "SELL", "heikin_ashi": "SELL", "rsi": "BUY"}
         accuracy = {
@@ -1149,30 +1149,24 @@ class TestExpandedCorrelationGroups:
             "rsi": {"accuracy": 0.53, "total": 24000},
         }
         action, conf = _weighted_consensus(votes, accuracy, "high-vol")
-        # ema is leader (0.63), trend (0.45) and heikin_ashi (0.48) get 0.3x
-        # Without penalty, 3 SELL vs 1 BUY would heavily favor SELL
-        # With penalty, effective SELL weight is much lower
+        # ema is leader (0.63), trend (0.45) and heikin_ashi (0.48) get 0.20x
         # The correlation group prevents 3 correlated signals from inflating SELL
 
-    def test_macro_regime_in_trend_direction_group(self):
-        """Verify macro_regime moved to trend_direction group (corr +0.520 with trend).
+    def test_macro_regime_in_structural_flow_group(self):
+        """Verify macro_regime in structural_flow sub-cluster.
 
-        2026-04-07: Moved from macro_external — better correlation fit with
-        trend (both follow 200-SMA direction) than with fear_greed.
+        2026-04-30: Split from trend_direction mega-cluster. macro_regime
+        correlates with structure (96.5% agreement) and volume_flow.
         """
         from portfolio.signal_engine import CORRELATION_GROUPS
-        assert "macro_regime" in CORRELATION_GROUPS["trend_direction"]
+        assert "macro_regime" in CORRELATION_GROUPS["structural_flow"]
         assert "fear_greed" in CORRELATION_GROUPS["macro_external"]
-        # 2026-04-14 (bf6f03c): structure moved from volatility_cluster to
-        # trend_direction after correlation audit (r=0.608 with trend, 96.5%
-        # with macro_regime). Test assertion updated 2026-04-16 alongside the
-        # accuracy-gating fix batch (was pre-existing stale assertion).
-        assert "structure" in CORRELATION_GROUPS["trend_direction"]
+        assert "structure" in CORRELATION_GROUPS["structural_flow"]
 
-    def test_volume_flow_in_trend_direction_group(self):
-        """Verify volume_flow merged into trend_direction group (corr +0.511 with heikin_ashi)."""
+    def test_volume_flow_in_structural_flow_group(self):
+        """Verify volume_flow in structural_flow sub-cluster."""
         from portfolio.signal_engine import CORRELATION_GROUPS
-        assert "volume_flow" in CORRELATION_GROUPS["trend_direction"]
+        assert "volume_flow" in CORRELATION_GROUPS["structural_flow"]
 
 
 # ===========================================================================

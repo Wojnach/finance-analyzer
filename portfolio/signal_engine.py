@@ -1273,24 +1273,20 @@ _STATIC_CORRELATION_GROUPS = {
     # RES-2026-04-21: REMOVED volatility_cluster. r=0.38 is too weak for a
     # correlation group. volume (52.1% acc) was unfairly penalized by
     # volatility_sig (46.8% acc). Let both vote independently.
-    # 2026-04-14: Mega trend cluster. Measured correlations: trend+macro_regime
-    # r=0.730 (99.7% agree), trend+structure r=0.608 (90.7%), trend+momentum_factors
-    # r=0.593 (90.4%), trend+heikin_ashi r=0.587 (85.4%), oscillators+heikin_ashi
-    # r=0.463 (83.4%). All 8 signals measure trend direction via different methods.
-    # 2026-04-18: Added macd — 91.9% agreement with ema (197 sam), 87.8% with bb,
-    # 85.3% with sentiment. MACD is mathematically derived from the same EMAs that
-    # drive the ema signal, so near-perfect correlation is expected. Was orphaned
-    # and getting full 1.0x weight despite being redundant.
-    # 2026-04-25: Added bb — 87.8% agreement with macd (197 sam), 85%+ with ema.
-    # 2026-04-26: Moved bb OUT to standalone volatility_bounds cluster. BB is a
-    # volatility/reversion signal that thrives in ranging (+15.2pp to 69.5% recent).
-    # In ranging, ema/macd/trend are regime-gated (HOLD), so BB's correlation with
-    # them is moot. The 0.12x follower penalty was destroying BB's edge (effective
-    # weight 0.18x vs its regime boost of 1.5x). Now 9 members.
-    "trend_direction": frozenset({
-        "ema", "macd", "trend", "heikin_ashi", "volume_flow", "macro_regime",
-        "momentum_factors", "structure", "oscillators",
-    }),
+    # 2026-04-30: SPLIT trend_direction mega-cluster (was 9 members, 1.96x weight).
+    # At 0.12x per follower, one directional signal family dominated consensus.
+    # Split into 3 semantically distinct sub-clusters:
+    #   pure_trend (MA-based): trend/ema/heikin_ashi — 85-90% agreement
+    #   oscillator_trend: macd/momentum_factors/oscillators — oscillation methods
+    #   structural_flow: volume_flow/macro_regime/structure — market structure
+    # Each sub-cluster gets independent leader selection, preventing a single
+    # broken trend signal from poisoning all 9 members' direction.
+    # Previous: 1.0 + 8*0.12 = 1.96x total. Now: 3 * (1.0 + 2*0.20) = 4.20x
+    # total, but with 3 independent leaders — better captures disagreement
+    # between trend, momentum, and structural signals.
+    "pure_trend": frozenset({"ema", "trend", "heikin_ashi"}),
+    "oscillator_trend": frozenset({"macd", "momentum_factors", "oscillators"}),
+    "structural_flow": frozenset({"volume_flow", "macro_regime", "structure"}),
     # 2026-04-18: Expanded from 3→6 members. Research (2026-04-17 after-hours)
     # found calendar↔fear_greed 100% agreement (501 sam), funding↔fear_greed
     # 100% (543 sam), news_event↔econ_calendar 100% (714 sam). These orphaned
@@ -1331,10 +1327,13 @@ _CORRELATION_PENALTY = 0.3  # secondary signals in a group get 30% of normal wei
 # At 0.15x: 1.0 + 2*0.15 = 1.30x effective weight (was 1.45x with 4 members).
 _CLUSTER_CORRELATION_PENALTIES: dict[str, float] = {
     "momentum_cluster": 0.15,
-    # 2026-04-14: volatility_cluster reduced to 2 members — default 0.3x is fine.
-    # 2026-04-26: trend_direction back to 9 members (bb moved to volatility_bounds).
-    # At 0.12x per follower: effective weight = 1.0 + 8*0.12 = 1.96x.
-    "trend_direction": 0.12,
+    # 2026-04-30: split trend_direction (9 members, 0.12x) into 3 sub-clusters.
+    # Each has 3 members at 0.20x: effective weight per cluster = 1.0 + 2*0.20 = 1.40x.
+    # Previous total: 1.96x from 1 cluster. New total: 3 * 1.40x = 4.20x BUT with
+    # 3 independent leaders — momentum/structural can disagree with pure trend.
+    "pure_trend": 0.20,
+    "oscillator_trend": 0.20,
+    "structural_flow": 0.20,
     # 2026-04-18: macro_external expanded from 3→6 members. At 0.15x per follower:
     # effective weight = 1.0 + 5*0.15 = 1.75x. Previously 3 members at 0.3x gave
     # 1.0 + 2*0.3 = 1.6x. Slightly higher total accounts for 3 truly independent

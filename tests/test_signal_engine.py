@@ -51,39 +51,39 @@ class TestCorrelationGroups:
 
         assert "volatility_cluster" not in CORRELATION_GROUPS
 
-    def test_trend_direction_expanded_members(self):
-        """trend_direction should include momentum_factors, structure, oscillators.
+    def test_trend_direction_split_into_subclusters(self):
+        """2026-04-30: trend_direction mega-cluster (9 members) split into 3 sub-clusters.
 
-        2026-04-14: Measured correlations show these belong in trend cluster:
-        momentum_factors+macro_regime r=0.621 (91.5% agree),
-        structure+trend r=0.608 (90.7% agree),
-        oscillators+heikin_ashi r=0.463 (83.4% agree).
+        pure_trend: ema, trend, heikin_ashi (MA-based methods)
+        oscillator_trend: macd, momentum_factors, oscillators
+        structural_flow: volume_flow, macro_regime, structure
         """
         from portfolio.signal_engine import CORRELATION_GROUPS
 
-        td_group = CORRELATION_GROUPS["trend_direction"]
-        assert "momentum_factors" in td_group
-        assert "structure" in td_group
-        assert "oscillators" in td_group
+        assert "trend_direction" not in CORRELATION_GROUPS, "mega-cluster should be removed"
+        assert "pure_trend" in CORRELATION_GROUPS
+        assert "oscillator_trend" in CORRELATION_GROUPS
+        assert "structural_flow" in CORRELATION_GROUPS
 
-    def test_macd_in_trend_direction(self):
-        """macd should be in trend_direction group (91.9% agreement with ema)."""
+        assert CORRELATION_GROUPS["pure_trend"] == frozenset({"ema", "trend", "heikin_ashi"})
+        assert CORRELATION_GROUPS["oscillator_trend"] == frozenset({"macd", "momentum_factors", "oscillators"})
+        assert CORRELATION_GROUPS["structural_flow"] == frozenset({"volume_flow", "macro_regime", "structure"})
+
+    def test_macd_in_oscillator_trend(self):
+        """macd should be in oscillator_trend sub-cluster (91.9% agreement with ema)."""
         from portfolio.signal_engine import CORRELATION_GROUPS
 
-        td_group = CORRELATION_GROUPS["trend_direction"]
-        assert "macd" in td_group, "MACD is derived from EMAs; 91.9% agreement with ema"
+        assert "macd" in CORRELATION_GROUPS["oscillator_trend"]
 
-    def test_macro_regime_in_trend_direction(self):
-        """macro_regime should be in trend_direction group (r=0.520 with trend)."""
+    def test_macro_regime_in_structural_flow(self):
+        """macro_regime should be in structural_flow sub-cluster."""
         from portfolio.signal_engine import CORRELATION_GROUPS
 
-        assert "trend_direction" in CORRELATION_GROUPS
-        td_group = CORRELATION_GROUPS["trend_direction"]
-        assert "macro_regime" in td_group
-        assert "trend" in td_group
+        assert "macro_regime" in CORRELATION_GROUPS["structural_flow"]
+        assert "structure" in CORRELATION_GROUPS["structural_flow"]
 
     def test_macro_regime_not_in_macro_external(self):
-        """macro_regime was moved out of macro_external into trend_direction."""
+        """macro_regime was moved out of macro_external into structural_flow."""
         from portfolio.signal_engine import CORRELATION_GROUPS
 
         me_group = CORRELATION_GROUPS["macro_external"]
