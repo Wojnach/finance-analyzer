@@ -432,6 +432,62 @@ class TestLookupPriceAtTime:
         result = _lookup_price_at_time("BTC-USD", now, snapshot_file=path)
         assert result == 67000.0
 
+    def test_tolerance_hours_widened_recovers_loop_downtime_gap(self, tmp_path):
+        """8h tolerance covers loop-downtime gaps for 24/7 markets.
+
+        Real-world case (2026-04-25 BTC-USD): 14.8h gap from
+        2026-04-25T00:43 to 2026-04-25T15:32. A row whose target_time falls
+        in the middle of that gap can't find a price within 2h, but with
+        an 8h tolerance the nearest snap is recoverable.
+        """
+        path = tmp_path / "snaps.jsonl"
+        now = datetime.now(UTC)
+        # Snapshot 5 hours before target — outside default 2h, inside 8h.
+        snap_time = now - timedelta(hours=5)
+        snap = {"ts": snap_time.isoformat(), "prices": {"BTC-USD": 68000.0}}
+        _write_jsonl(path, [snap])
+        # Default tolerance: still rejects.
+        assert _lookup_price_at_time("BTC-USD", now, snapshot_file=path) is None
+        # Widened tolerance: accepts.
+        result = _lookup_price_at_time(
+            "BTC-USD", now, snapshot_file=path, tolerance_hours=8.0
+        )
+        assert result == 68000.0
+
+    def test_tolerance_hours_24_recovers_overnight_stock(self, tmp_path):
+        """24h tolerance covers MSTR's overnight gap.
+
+        MSTR has no Alpaca quote after-hours. A 1d-ahead prediction
+        entered at 22:00 UTC has a target at 22:00 UTC the next night,
+        ~2.5h after the previous trading-day close. That close (~19:30
+        UTC) is the right comparison price for a "1d ahead" prediction
+        on a stock — but the default 2h tolerance excludes it.
+        """
+        path = tmp_path / "snaps.jsonl"
+        target = datetime(2026, 4, 22, 22, 0, 0, tzinfo=UTC)
+        # Snapshot 16h before target (mimics MSTR median).
+        snap_time = target - timedelta(hours=16)
+        snap = {"ts": snap_time.isoformat(), "prices": {"MSTR": 280.50}}
+        _write_jsonl(path, [snap])
+        assert _lookup_price_at_time("MSTR", target, snapshot_file=path) is None
+        result = _lookup_price_at_time(
+            "MSTR", target, snapshot_file=path, tolerance_hours=24.0
+        )
+        assert result == 280.50
+
+    def test_tolerance_hours_default_unchanged(self, tmp_path):
+        """Verify no behavioral change at default tolerance — this is the
+        regression guard for forecast_accuracy.compute_forecast_accuracy
+        and any other consumer that hasn't opted in to a wider tolerance.
+        """
+        path = tmp_path / "snaps.jsonl"
+        now = datetime.now(UTC)
+        snap_time = now - timedelta(hours=3)
+        snap = {"ts": snap_time.isoformat(), "prices": {"BTC-USD": 68000.0}}
+        _write_jsonl(path, [snap])
+        # No tolerance arg -> default 2h -> None.
+        assert _lookup_price_at_time("BTC-USD", now, snapshot_file=path) is None
+
 
 # ---------------------------------------------------------------------------
 # _write_predictions
