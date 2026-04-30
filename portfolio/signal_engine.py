@@ -435,32 +435,79 @@ _TICKER_DISABLED_BY_HORIZON: dict[str, dict[str, frozenset]] = {
     #     XAU candlestick 43.3%/656;
     #     MSTR ema 41.4%/1405, bb 44.5%/245.
     "3h": {
-        "BTC-USD": frozenset({"volatility_sig", "bb"}),
-        "ETH-USD": frozenset({"credit_spread_risk"}),
+        # 2026-04-30 audit: added sentiment (33.8% 3h_recent, 3629 sam, 94.9% BUY).
+        # Also added bb for more tickers, forecast for BTC (38.3% 3h_recent).
+        "BTC-USD": frozenset({"volatility_sig", "bb",
+                              "sentiment",  # 33.8% 3h_recent (3629 sam), 94.9% BUY-only
+                              }),
+        "ETH-USD": frozenset({"credit_spread_risk",
+                              "sentiment",  # 33.8% 3h_recent (3629 sam), 94.9% BUY-only
+                              }),
         # credit_spread_risk promoted to _default (2026-04-24)
-        "XAU-USD": frozenset(),
-        "XAG-USD": frozenset({"forecast", "qwen3"}),
-        "MSTR": frozenset({"volume", "volatility_sig"}),
+        "XAU-USD": frozenset({"sentiment",  # 33.8% 3h_recent (3629 sam)
+                              }),
+        "XAG-USD": frozenset({"forecast", "qwen3",
+                              "sentiment",  # 33.8% 3h_recent (3629 sam)
+                              }),
+        "MSTR": frozenset({"volume", "volatility_sig",
+                           "sentiment",  # 33.8% 3h_recent (3629 sam)
+                           }),
     },
     "4h": {},
     "12h": {},
     "1d": {
         # 2026-04-24 audit: added econ_calendar (1.8% BTC/ETH), ema (BTC),
         # funding (ETH 12.5%), econ_calendar (XAG 29.5%).
+        # 2026-04-30 audit: added signals with <40% 1d_recent accuracy (50+ sam).
+        # Key finding: systemic BUY bias — calendar (100% BUY, 30.8%),
+        # claude_fundamental (99.3% BUY, 34.2%), momentum_factors (32.7%),
+        # volume_flow (35.8%), heikin_ashi (38.2%), crypto_macro (33.8%).
+        # These signals are already auto-gated by the blended accuracy gate,
+        # but per-horizon blacklists provide defense-in-depth.
         "BTC-USD": frozenset({"news_event", "forecast",
-                              "econ_calendar",  # 1.8% 1d (113 sam)
-                              "ema",            # 23.8% 1d (42 sam)
+                              "econ_calendar",       # 1.8% 1d (113 sam)
+                              "ema",                 # 23.8% 1d (42 sam)
+                              "claude_fundamental",  # 34.2% 1d_recent (730 sam), 99.3% BUY-only
+                              "calendar",            # 30.8% 1d_recent (712 sam), 100% BUY-only
+                              "momentum_factors",    # 32.7% 1d_recent (910 sam), 60.1% at 3h — horizon divergence
+                              "volume_flow",         # 35.8% 1d_recent (924 sam)
+                              "heikin_ashi",         # 38.2% 1d_recent (709 sam)
+                              "crypto_macro",        # 33.8% 1d_recent (476 sam)
+                              "structure",           # 33.1% 1d_recent (758 sam)
                               }),
-        "ETH-USD": frozenset({"econ_calendar",  # 1.8% 1d (113 sam)
-                              "funding",        # 12.5% 1d (64 sam)
+        "ETH-USD": frozenset({"econ_calendar",       # 1.8% 1d (113 sam)
+                              "funding",             # 12.5% 1d (64 sam)
+                              "claude_fundamental",  # 34.2% 1d_recent (730 sam), 99.3% BUY-only
+                              "calendar",            # 30.8% 1d_recent (712 sam), 100% BUY-only
+                              "momentum_factors",    # 32.7% 1d_recent (910 sam)
+                              "volume_flow",         # 35.8% 1d_recent (924 sam)
+                              "heikin_ashi",         # 38.2% 1d_recent (709 sam)
+                              "crypto_macro",        # 33.8% 1d_recent (476 sam)
+                              "structure",           # 33.1% 1d_recent (758 sam)
                               }),
         "XAU-USD": frozenset({"candlestick",
                               "claude_fundamental",  # 2026-04-27: metals have no earnings/guidance
+                              "calendar",            # 30.8% 1d_recent (712 sam), 100% BUY-only
+                              "momentum_factors",    # 32.7% 1d_recent (910 sam)
+                              "volume_flow",         # 35.8% 1d_recent (924 sam)
+                              "heikin_ashi",         # 38.2% 1d_recent (709 sam)
+                              "smart_money",         # 34.2% 1d_recent (155 sam)
                               }),
-        "XAG-USD": frozenset({"econ_calendar",  # 29.5% 1d (112 sam)
+        "XAG-USD": frozenset({"econ_calendar",       # 29.5% 1d (112 sam)
                               "claude_fundamental",  # 2026-04-27: metals have no earnings/guidance
+                              "calendar",            # 30.8% 1d_recent (712 sam), 100% BUY-only
+                              "momentum_factors",    # 32.7% 1d_recent (910 sam)
+                              "volume_flow",         # 35.8% 1d_recent (924 sam)
+                              "heikin_ashi",         # 38.2% 1d_recent (709 sam)
                               }),
-        "MSTR": frozenset({"ema", "bb"}),
+        "MSTR": frozenset({"ema", "bb",
+                           "calendar",            # 30.8% 1d_recent (712 sam), 100% BUY-only
+                           "momentum_factors",    # 32.7% 1d_recent (910 sam)
+                           "volume_flow",         # 35.8% 1d_recent (924 sam)
+                           "heikin_ashi",         # 38.2% 1d_recent (709 sam)
+                           "smart_money",         # 34.2% 1d_recent (155 sam)
+                           "structure",           # 33.1% 1d_recent (758 sam)
+                           }),
     },
     "3d": {},
     "5d": {},
