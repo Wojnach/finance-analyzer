@@ -1,152 +1,138 @@
-# Plan — Macro-event regime gating (auto-adapt signal weights during event-heavy windows)
+# PLAN — Multi-Asset Subsystem Completion (midfinance)
 
-## Context
+**Date:** 2026-05-01
+**Branch:** `feat/midfinance-2026-05-01`
+**Goal:** Bring oil to parity with crypto+MSTR (paper-mode swing subsystem) and complete the operational plumbing (scheduled tasks, heartbeats, install scripts) for crypto and MSTR loops so they can run unattended in DRY_RUN/shadow without flipping any live trading switches.
 
-The accuracy audit shipped 2026-04-28 PM (merge `47b4d474`) confirmed that 19
-of 21 flagged per-ticker signals are statistically REAL degradation —
-sentiment, momentum_factors, structure, and claude_fundamental dropping
-hardest across BTC/ETH/XAG/MSTR. Investigation traced the root cause to
-the past 7 days being the densest macro-event window of 2026 (FOMC, CPI,
-NFP, four central banks, Mag 7 earnings). Technical/sentiment signals
-trained on price-pattern continuity get systematically wrong when macro
-news drives prices.
+---
 
-User asked: *"sounds like we need to identify when these events happen
-and adapt the config to this timeline and then change back when events
-subside"*. Confirmed (`yes`). This plan scopes that work.
+## Context (where we landed)
 
-The system has partial infra: `econ_dates.recent_high_impact_events()`
-exists; `accuracy_degradation` already short-circuits during a 24h ±
-FOMC/CPI/NFP window. **The gap is that signal *weights* don't adapt — only
-the alert layer does.** During a macro week we keep voting with the same
-technical signals that the news is overriding, then go quiet about how
-badly they're doing.
+| Asset | Status as of 2026-05-01 |
+|---|---|
+| **Gold (XAU)** | Already production-traded by `data/metals_loop.py` + 64 XAU warrants in `data/metals_warrant_catalog.json`. **No work needed.** |
+| **BTC + ETH** | Subsystem code shipped in merge `ae4f8705` (`feat/crypto-mstr-swing`). `data/crypto_loop.py` is autonomous + has CLI args (`--loop`/`--once`/`--report`). DRY_RUN=True default. **Missing**: scheduled-task wrapper (`scripts/win/crypto-loop.bat`), install script, exit-code-11 on lock conflict, heartbeat, telegram notify wiring. |
+| **MSTR** | `portfolio/mstr_loop/` package complete, runs in shadow phase. `scripts/win/mstr-loop.bat` exists. **Missing**: install script (`install-mstr-loop-task.ps1`), scorecard time-to-90-days metric. |
+| **Oil** | `portfolio/oil_precompute.py` (1085 lines, runs every 2h, comprehensive WTI+Brent context). 5 OLJA warrants found in `data/avanza_instruments_live.json` (MINI L/S OLJA + BEAR OLJAB X3) but missing barriers + stale prices. **No swing trader / no loop / no warrant catalog / no dashboard endpoint.** |
 
-## Goal
+---
 
-When high-impact macro events are within 24h past or 72h future:
-1. **Auto-detect** the macro window from existing `econ_dates` data
-2. **Down-weight or force-HOLD** the four signals known to fail in news-driven regimes
-3. **Auto-revert** when the window passes (no manual config flip)
-4. **Stay observable** — log enter/exit transitions; surface in journal so we can backtest the gate's value
+## What this PR does
 
-## Non-goals (explicitly out of scope)
+### Oil — net new (mirrors crypto+MSTR pattern, NOT fishtrader greenfield)
 
-- **Expanding the macro calendar.** `econ_dates.py` only tracks FOMC, CPI,
-  NFP, GDP. International central banks (ECB, BoE, BoJ) and earnings
-  weeks are NOT in the calendar today. The plan ships against the
-  current calendar; expanding it is a separate work item documented in
-  "Roadmap" below.
-- **Per-sector gating.** Existing `EVENT_SECTOR_MAP` could differentiate
-  metals vs crypto, but for v1 we apply uniformly across all tickers.
-- **Replacing the failing signals.** This is a temporary down-weight, not
-  a signal redesign. The signals are regime-inappropriate, not broken.
-- **Backtest harness.** Validation will be live-monitored over the next
-  macro window; no synthetic backtest in v1.
+The fishtrader plan (`docs/plans/2026-04-30-fishtrader.md`) is awaiting user input on 6 design questions. We don't gate on that. Instead we ship oil parity with the proven crypto+MSTR pattern:
 
-## Approach
+| File | Purpose |
+|---|---|
+| `data/oil_swing_config.py` | Tunables, DRY_RUN=True default, mirrors `crypto_swing_config.py` shape. WTI-only universe in v1 (Brent deferred). |
+| `data/oil_warrant_catalog.json` | Empty scaffold `{"refreshed_ts": null, "ttl_hours": 6, "warrants": {}}` — populated on first refresh. |
+| `data/oil_warrant_refresh.py` | Avanza search for "BULL OLJA"/"BEAR OLJA"/"MINI L OLJA"/"MINI S OLJA"/"OIL TRACKER"/"BRENT" prefixes. Mirrors `crypto_warrant_refresh.py` API verbatim. |
+| `data/oil_swing_trader.py` | Paper-mode trader. Reuses generic logic by parameterizing `CryptoSwingTrader` if practical, or copy-edit if structurally divergent. |
+| `data/oil_loop.py` | 60s loop with embedded fast-tick monitor. Mirrors `crypto_loop.py` CLI exactly. Singleton lock at `data/oil_loop.lock`. Returns exit code 11 on lock conflict. |
 
-### 1. Add `is_macro_window()` to `portfolio/econ_dates.py`
+### Crypto + MSTR — operational plumbing
 
-```python
-def is_macro_window(
-    now=None,
-    lookback_hours: float = 24.0,
-    lookahead_hours: float = 72.0,
-    impact_filter: tuple[str, ...] = ("high",),
-) -> bool:
-    """True iff a high-impact event is within ``lookback_hours`` past
-    OR ``lookahead_hours`` future."""
-```
+| File | Purpose |
+|---|---|
+| `scripts/win/crypto-loop.bat` | Wrapper mirroring `metals-loop.bat`: cd, redirect logs to `data/crypto_loop_out.txt`, restart on crash, abort on exit code 11. |
+| `scripts/win/oil-loop.bat` | Same pattern for oil. |
+| `scripts/win/install-crypto-loop-task.ps1` | Registers `PF-CryptoLoop` scheduled task. **Does not start it** — user runs `Start-ScheduledTask` when ready. |
+| `scripts/win/install-mstr-loop-task.ps1` | Registers `PF-MstrLoop` scheduled task (shadow phase by default — sets `MSTR_LOOP_PHASE=shadow` env var). |
+| `scripts/win/install-oil-loop-task.ps1` | Registers `PF-OilLoop` scheduled task. |
 
-Reuses existing `events_within_hours()` (forward) and
-`recent_high_impact_events()` (backward). No new data sources.
+### Loop hardening (touches existing crypto_loop.py)
 
-### 2. Add macro-window weight overlay to `portfolio/signal_engine.py`
+- Return exit code 11 from `main()` on singleton lock conflict (mirrors metals).
+- Write `data/crypto_loop.heartbeat` JSON on each successful cycle.
+- Wire telegram `notify=` callback in `run_loop()` (loads `portfolio.telegram_notifications.send_telegram` with config). Falls back to no-op if config unavailable so unit tests stay isolated.
+- Same hardening to oil_loop.py from day one.
 
-```python
-MACRO_WINDOW_DOWNWEIGHT_SIGNALS = frozenset({
-    "sentiment", "momentum_factors", "structure",
-})
-MACRO_WINDOW_DOWNWEIGHT_MULTIPLIER = 0.5
-MACRO_WINDOW_FORCE_HOLD_SIGNALS = frozenset({"claude_fundamental"})
-_MACRO_WINDOW_CACHE_TTL_S = 300
-```
-
-### 3. Wire into `_weighted_consensus`
-
-- Force-HOLD pre-pass after `_get_horizon_disabled_signals` (mutates votes
-  dict to set MACRO_WINDOW_FORCE_HOLD_SIGNALS to "HOLD").
-- Multiplier branch inside the weight loop, after `ic_mult`, applies
-  `MACRO_WINDOW_DOWNWEIGHT_MULTIPLIER` for downweight signals.
-
-Composes cleanly with existing regime/horizon multipliers.
-
-### 4. Observability
-
-- Log macro-window state changes (entered/exited) at INFO once per transition.
-- Mark journal entries with `regime_macro_window: True`.
-- Optional: include `macro_window` block in `agent_summary` (`reporting.py`).
-
-### 5. Tests — `tests/test_macro_window_gating.py`
-
-- TestIsMacroWindow: empty calendar, future-12h, future-60h (in window),
-  future-96h (out), past-12h (in 24h lookback), past-36h (out),
-  medium-impact filtered, lookback=0.
-- TestSignalEngineMacroWindowOverlay: macro=False unchanged,
-  claude_fundamental forced HOLD, downweight signals × 0.5,
-  multiplier compounds with regime, other signals untouched, cache TTL.
-
-## Files to modify
+### Dashboard
 
 | File | Change |
 |---|---|
-| `portfolio/econ_dates.py` | Add `is_macro_window()` |
-| `portfolio/signal_engine.py` | Constants + cache helper + force-HOLD pre-pass + multiplier in `_weighted_consensus` |
-| `portfolio/reporting.py` | Add `macro_window` block to `agent_summary` |
-| `tests/test_macro_window_gating.py` | New |
-| `docs/CHANGELOG.md` | New entry |
-| `docs/SESSION_PROGRESS.md` | Append session summary |
+| `dashboard/app.py` | Add `/api/oil` endpoint mirroring `/api/crypto`. Returns oil_swing_state + oil_value_history + oil_deep_context. |
 
-## Existing functions to reuse
+### Observability
 
-- `portfolio/econ_dates.events_within_hours(hours, ref_date)` — forward
-- `portfolio/econ_dates.recent_high_impact_events(hours, impact_filter, ref_time)` — backward
-- `portfolio/signal_engine._get_horizon_disabled_signals(ticker, horizon)` — pre-pass pattern
+| File | Change |
+|---|---|
+| `scripts/mstr_loop_scorecard.py` | Add `time_to_phase_a` field: days of shadow data so far, days remaining to 90-day threshold. |
+| `scripts/oil_loop_scorecard.py` | New: same shape as MSTR scorecard, for oil swing decisions. |
+
+### Tests
+
+| File | Coverage |
+|---|---|
+| `tests/test_oil_swing_config.py` | Constants exist, types correct, DRY_RUN=True. |
+| `tests/test_oil_warrant_refresh.py` | Catalog round-trip, fallback to scaffold, TTL handling. |
+| `tests/test_oil_swing_trader.py` | Entry gates, exit gates, position state. |
+| `tests/test_oil_loop.py` | Singleton lock, exit code 11, run_one_cycle with mocked prices/signals. |
+| `tests/test_crypto_loop_hardening.py` | Exit code 11, heartbeat written, notify called. |
+| `tests/test_dashboard_oil.py` | `/api/oil` endpoint shape. |
+
+### Documentation
+
+| File | Change |
+|---|---|
+| `docs/OIL_LOOP_NOTES.md` | New: operator runbook mirroring `MSTR_LOOP_NOTES.md`. |
+| `docs/CHANGELOG.md` | Entry for this multi-asset completion. |
+| `docs/SESSION_PROGRESS.md` | Session record for next-session pickup. |
+| `CLAUDE.md` | Add `/api/oil` to dashboard endpoint list, note the three new install scripts. |
+
+---
+
+## What this PR does NOT do
+
+- **Does not flip DRY_RUN to False anywhere.** All new and existing loops stay in paper/shadow.
+- **Does not auto-register scheduled tasks.** Provides `install-*.ps1` scripts that the user runs.
+- **Does not start any new loops.** User runs `Start-ScheduledTask` when ready.
+- **Does not modify signal weights or thresholds in production config.**
+- **Does not touch live metals_loop or main.py loop behavior.** Oil is a separate process.
+- **Does not implement the fishtrader greenfield system** — that plan stays awaiting user input.
+- **Does not add new oil signals** (oil_cross_asset, oil_supply_demand, oil_term_structure). The existing `oil_precompute.py` already produces the deep context. Adding new signal modules is feature creep — out of scope for parity.
+
+---
 
 ## Risks
 
-- **False positives:** detector triggers in normal week — survivable
-  (downweight is reduction, not suppression). Force-HOLD on
-  claude_fundamental loses 1 voter for ~96h per FOMC; consensus ≥3
-  voters still reachable.
-- **False negatives:** events not in `econ_dates.py` (international CBs,
-  earnings) don't trigger. Roadmap addresses.
-- **Compounding multipliers:** macro 0.5× × ranging 0.75× × horizon 1.3×
-  = 0.49× — strong reduction. Fine for v1.
-- **Cache TTL 5min** — acceptable; events have hourly cadence at fastest.
-- **No backtest in v1** — journal flag enables post-hoc A/B comparison.
+1. **Avanza session contention.** Three loops (metals, crypto, oil) plus mstr_loop could compete for BankID auth. Mitigation: each loop holds its own singleton lock; auth is shared via `portfolio/avanza_session.py` (thread-safe singleton). DRY_RUN=True for crypto/oil means no actual order placement during the Avanza session window.
 
-## Roadmap (not v1)
+2. **Empty oil warrant catalog at startup.** On first `oil_loop --once` without a Playwright session, the catalog will be `{}` and the trader will skip all entries. This is the documented behavior of crypto_loop's first run. Mitigation: oil_loop logs an explicit "no warrants — skipping entries" line each cycle.
 
-1. Expand calendar with ECB, BoE, BoJ, earnings windows.
-2. Per-sector gating via `EVENT_SECTOR_MAP`.
-3. Severity scoring (FOMC > CPI > NFP > GDP).
-4. Backtest harness replaying signal_log against the gate.
+3. **DRY_RUN doesn't completely sandbox external state.** The trader writes to `data/oil_swing_decisions.jsonl`, `data/oil_swing_trades.jsonl`, etc. — those are paper-mode logs, no Avanza orders. Mitigation: tests assert `DRY_RUN=True` causes zero `place_order` calls.
 
-## Verification
+4. **Scheduled-task install scripts run as user, not SYSTEM.** Same as PF-MetalsLoop and PF-DataLoop. Documented in install script comments.
 
-1. Force `is_macro_window=True` via stub OR wait for next high-impact event.
-2. Journal entries inside window have `regime_macro_window: True`.
-3. `claude_fundamental` votes are HOLD.
-4. sentiment/momentum_factors/structure weights halved (visible in
-   agent_summary debug).
-5. Window closes 24h post-event; auto-revert verified.
-6. Re-run `scripts/audit_accuracy_drops.py` after window passes — expect
-   fewer flagged signals.
+5. **Heartbeat staleness detection not yet wired.** Adding heartbeat writes is necessary but not sufficient — a separate watchdog reads them. Out of scope for this PR; the install script comments document the future watchdog.
 
-## Effort
+---
 
-- ~80 LOC across 3 files; ~250 LOC tests
-- 1 batch (single worktree commit)
-- Codex review: 1-2 rounds expected
+## Execution order
+
+| Batch | Files | LOC | Tests | Commit message prefix |
+|---|---|---|---|---|
+| **A** | `oil_swing_config.py` + `oil_warrant_catalog.json` + `oil_warrant_refresh.py` + 2 test files | ~700 | yes | `feat(oil): swing config + warrant scaffold (Batch A)` |
+| **B** | `oil_swing_trader.py` + `oil_loop.py` + 2 test files | ~1300 | yes | `feat(oil): swing trader + 60s loop (Batch B)` |
+| **C** | `crypto-loop.bat` + `oil-loop.bat` + 3 install-*.ps1 + crypto_loop hardening (exit 11, heartbeat, notify) + test_crypto_loop_hardening | ~400 | yes | `feat(loops): scheduled-task plumbing + crypto hardening (Batch C)` |
+| **D** | dashboard `/api/oil` + scorecard updates + test_dashboard_oil | ~250 | yes | `feat(dashboard,obs): /api/oil + scorecard time-to-phase (Batch D)` |
+| **E** | `OIL_LOOP_NOTES.md` + CHANGELOG + SESSION_PROGRESS + CLAUDE.md edit | docs | n/a | `docs: oil loop notes + changelog (Batch E)` |
+
+After Batch E:
+1. **Codex adversarial review** on the worktree branch SHA.
+2. Address P1/P2 findings; document P3 deferrals.
+3. **Full pytest** with `-n auto`.
+4. **Merge** to main.
+5. **Push** via Windows git: `cmd.exe /c "cd /d Q:\finance-analyzer && git push"`.
+6. **Clean up** worktree + branch.
+
+---
+
+## Why this design
+
+1. **Mirror the proven pattern.** Crypto+MSTR shipped 2026-04-30 using exactly this paper-mode pattern. Oil gets parity with zero new architecture.
+2. **No live-trading switch flips.** All flips remain user decisions, made in separate commits after paper-mode validation.
+3. **Install scripts, not auto-registration.** The user controls when each loop starts. Same pattern as `install-metals-loop-task.ps1`.
+4. **Operational plumbing first, observability second, documentation third.** Dashboard endpoint and scorecard land in Batch D so they reflect real running behavior.
+5. **Codex review before merge.** Catches edge cases the unit tests miss (race conditions, error paths, config drift).
