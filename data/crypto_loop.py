@@ -47,6 +47,11 @@ logger = logging.getLogger("crypto_loop")
 CYCLE_SECONDS = 60
 SIGNAL_SUMMARY_FILE = "data/agent_summary_compact.json"
 SINGLETON_LOCK_FILE = "data/crypto_loop.lock"
+HEARTBEAT_FILE = "data/crypto_loop.heartbeat"
+EXIT_LOCK_CONFLICT = 11        # Mirrors metals-loop.bat exit-code-11 contract.
+                                # The .bat wrapper sees 11 and stops the
+                                # restart loop instead of fork-bombing into
+                                # the live instance.
 
 # Binance public endpoints (no auth needed for prices)
 _BINANCE_24HR = "https://api.binance.com/api/v3/ticker/24hr"
@@ -241,18 +246,41 @@ def run_one_cycle(trader: CryptoSwingTrader,
             "n_positions": len(trader.state.get("positions", {}))}
 
 
-def run_loop(notify: Any = None) -> None:
-    """Forever loop. Catches SIGINT/SIGTERM for graceful shutdown."""
+def write_heartbeat(extra: dict | None = None) -> None:
+    """Write a JSON heartbeat file each successful cycle.
+
+    Used by an external watchdog (TBD) to detect a hung loop. Format
+    mirrors the metals_loop pattern used elsewhere in the system.
+    """
+    try:
+        from portfolio.file_utils import atomic_write_json
+        payload = {"ts": _now_iso(), "status": "ok"}
+        if extra:
+            payload.update(extra)
+        atomic_write_json(HEARTBEAT_FILE, payload)
+    except Exception as exc:  # noqa: BLE001
+        # Heartbeat write failure must never crash the loop — log and continue.
+        logger.debug("heartbeat write failed: %s", exc)
+
+
+def run_loop(notify: Any = None) -> int:
+    """Forever loop. Returns an int status code so main() can propagate it.
+
+    Returns:
+        0  on graceful shutdown (SIGINT/SIGTERM)
+        EXIT_LOCK_CONFLICT (11) if another instance holds the singleton lock
+    """
     lock = acquire_singleton_lock()
     if lock is None:
         logger.error("crypto_loop: another instance is running. exiting.")
-        return
+        return EXIT_LOCK_CONFLICT
 
     stop = {"flag": False}
 
     def _sigterm(_signum, _frame):
         stop["flag"] = True
 
+    cycle_count = 0
     try:
         signal.signal(signal.SIGINT, _sigterm)
         with contextlib.suppress(AttributeError, ValueError):
@@ -261,15 +289,27 @@ def run_loop(notify: Any = None) -> None:
         trader = CryptoSwingTrader(page=None, executor=None)
         logger.info("crypto_loop start. DRY_RUN=%s instruments=%s",
                     cfg.DRY_RUN, cfg.INSTRUMENTS)
+        if notify:
+            with contextlib.suppress(Exception):
+                notify(f"crypto_loop start — DRY_RUN={cfg.DRY_RUN} "
+                       f"instruments={','.join(cfg.INSTRUMENTS)}")
 
         fast_tick_refs: dict[str, dict[str, float]] = {}
 
         while not stop["flag"]:
+            cycle_count += 1
             cycle_started = time.time()
             try:
                 result = run_one_cycle(trader, notify=notify)
                 logger.info("cycle ok=%s n_pos=%s", result.get("ok"),
                             result.get("n_positions"))
+                # Heartbeat after successful cycle — even on ok=False
+                # (no prices) we want to indicate the loop is alive.
+                write_heartbeat({
+                    "cycle": cycle_count,
+                    "ok": bool(result.get("ok")),
+                    "n_positions": result.get("n_positions") or 0,
+                })
             except Exception as exc:  # noqa: BLE001
                 logger.exception("cycle error: %s", exc)
 
@@ -347,8 +387,20 @@ def main() -> int:
         return 0 if result.get("ok") else 1
 
     if args.loop:
-        run_loop()
-        return 0
+        # Wire telegram notify if config + module both available; otherwise
+        # run silently. Loop must never crash on missing config.
+        notify = None
+        try:
+            from portfolio.file_utils import load_json
+            from portfolio.telegram_notifications import send_telegram
+            tg_cfg = load_json("config.json") or {}
+            if tg_cfg.get("telegram", {}).get("token"):
+                def notify(msg, _cfg=tg_cfg):  # noqa: E306
+                    with contextlib.suppress(Exception):
+                        send_telegram(msg, _cfg)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("telegram notify wiring skipped: %s", exc)
+        return run_loop(notify=notify)
 
     print("Specify --loop, --once, or --report", file=sys.stderr)
     return 2
