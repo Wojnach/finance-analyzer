@@ -64,7 +64,17 @@ DEFAULT_CRITICAL_ERRORS_DEDUP_TTL_S = 6 * 3600
 # set — it already calls record_critical_error inline on the original
 # (pre-tracker) violation; routing it again post-tracker would double-
 # write.
-CRITICAL_ERROR_DISPATCH_INVARIANTS = frozenset({"accuracy_degradation"})
+# 2026-05-01: snapshot_freshness added after the 04-21 → 04-28 detection
+# blackout. The degradation invariant cascades to [] when no baseline is
+# within 36h of D-7; that's a correct-by-design quiet path, but it means a
+# silently-no-op'ing daily writer leaves the detector dark for 7+ days
+# before anyone notices. snapshot_freshness independently surfaces the
+# accuracy_snapshots.jsonl staleness so a wedged writer triggers the same
+# auto-fix-agent path as a real degradation alert.
+CRITICAL_ERROR_DISPATCH_INVARIANTS = frozenset({
+    "accuracy_degradation",
+    "snapshot_freshness",
+})
 
 # 2026-04-28 (Codex P2): how many recent message-hashes to remember per
 # invariant in both the Telegram cooldown and critical_errors dedup
@@ -116,6 +126,18 @@ MIN_SUCCESS_RATE = 0.5
 SIGNAL_DROP_THRESHOLD = 0.3  # >30% drop in voter count = warning
 ESCALATION_THRESHOLD = 3     # consecutive warnings → CRITICAL
 SELF_HEAL_COOLDOWN_S = 1800  # 30 minutes between sessions
+
+# 2026-05-01: accuracy_snapshots.jsonl staleness thresholds. The daily
+# writer runs at 06:00 UTC; 36h tolerance covers one full miss + the
+# morning before the next attempt. 48h means we've gone two cycles —
+# the degradation detector's BASELINE_MAX_DELTA_HOURS=36 lookup is now
+# definitely outside tolerance, so the gate is dark. Surfaced via the
+# snapshot_freshness invariant independently of
+# maybe_save_daily_snapshot's own size-check (which only fires when
+# that function actually runs — a wedged loop never reaches it).
+SNAPSHOT_FRESHNESS_INVARIANT = "snapshot_freshness"
+SNAPSHOT_STALE_WARN_HOURS = 36.0
+SNAPSHOT_STALE_CRITICAL_HOURS = 48.0
 
 # Layer 2 journal-activity contract (2026-04-13). Motivated by the 3-week
 # silent outage 2026-03-27 → 2026-04-13 where --bare broke OAuth auth and
@@ -635,6 +657,16 @@ def verify_contract(report: CycleReport, previous_signal_counts: dict | None = N
     # take down the entire main loop's contract framework.
     violations.extend(check_signal_accuracy_degradation_safe())
 
+    # 13. Snapshot freshness (2026-05-01, detection-blackout follow-up).
+    # accuracy_snapshots.jsonl drives invariant #12. If the writer goes
+    # silent (state-without-write desync, wedged loop, never-called),
+    # the JSONL stops growing and #12 quietly returns [] from the
+    # baseline-not-in-window branch. This independent freshness check
+    # catches the dark-detector case via mtime — surfaced through the
+    # same auto-fix-agent dispatcher as #12 (see
+    # CRITICAL_ERROR_DISPATCH_INVARIANTS).
+    violations.extend(check_snapshot_freshness_safe())
+
     return violations
 
 
@@ -658,6 +690,88 @@ def check_signal_accuracy_degradation_safe() -> list[Violation]:
     except Exception as e:
         logger.warning("signal accuracy degradation check failed: %s", e)
         return []
+
+
+def check_snapshot_freshness_safe() -> list[Violation]:
+    """Wrapped accuracy_snapshots.jsonl freshness check that never raises.
+
+    The 2026-04-21 → 04-28 detection blackout
+    (docs/PLAN_detection_blackout_20260501.md) showed that
+    accuracy_degradation cascades to [] in three independent gates
+    (no-baseline / too-young / blackout) — each correct-by-design but
+    collectively invisible from outside the contract framework. When the
+    daily snapshot writer silently no-op'd for a week, the detector went
+    dark and the only signal was the 7-day gap in
+    data/accuracy_snapshots.jsonl that nobody was watching.
+
+    This check independently flags the JSONL going stale via mtime:
+    - Missing file → WARNING ("no snapshot file"). Day-1 deployments
+      legitimately lack one; don't auto-engage fix-agent on a virgin
+      install.
+    - mtime ≥36h ago → WARNING. The daily writer should have run by
+      06:00 UTC; missing one cycle is recoverable.
+    - mtime ≥48h ago → CRITICAL. The detector's BASELINE_MAX_DELTA_HOURS
+      gate is now definitely outside tolerance; routed to fix-agent via
+      CRITICAL_ERROR_DISPATCH_INVARIANTS.
+
+    Try/except wrapped so a stat() failure (rare; OS-level I/O error)
+    can't take down the rest of the contract framework.
+    """
+    try:
+        return _check_snapshot_freshness()
+    except Exception as e:
+        logger.warning("snapshot freshness check failed: %s", e)
+        return []
+
+
+def _check_snapshot_freshness() -> list[Violation]:
+    """Inner implementation. Lazy-imports ACCURACY_SNAPSHOTS_FILE so test
+    harnesses can monkeypatch the location and the loop contract module
+    doesn't have a hard import cycle on accuracy_stats."""
+    from portfolio.accuracy_stats import ACCURACY_SNAPSHOTS_FILE
+
+    if not ACCURACY_SNAPSHOTS_FILE.exists():
+        return [Violation(
+            invariant=SNAPSHOT_FRESHNESS_INVARIANT,
+            severity="WARNING",
+            message=(
+                "no snapshot file present at "
+                f"{ACCURACY_SNAPSHOTS_FILE.name}. Day-1 deployment is "
+                "expected; persistent absence means the daily writer is "
+                "not running."
+            ),
+            details={"path": str(ACCURACY_SNAPSHOTS_FILE)},
+        )]
+
+    age_seconds = time.time() - ACCURACY_SNAPSHOTS_FILE.stat().st_mtime
+    age_hours = age_seconds / 3600.0
+
+    if age_hours < SNAPSHOT_STALE_WARN_HOURS:
+        return []
+
+    severity = (
+        "CRITICAL" if age_hours >= SNAPSHOT_STALE_CRITICAL_HOURS
+        else "WARNING"
+    )
+    return [Violation(
+        invariant=SNAPSHOT_FRESHNESS_INVARIANT,
+        severity=severity,
+        message=(
+            f"accuracy_snapshots.jsonl is stale: last write "
+            f"{age_hours:.1f}h ago "
+            f"(WARN ≥{SNAPSHOT_STALE_WARN_HOURS:.0f}h, "
+            f"CRITICAL ≥{SNAPSHOT_STALE_CRITICAL_HOURS:.0f}h). "
+            f"Degradation detector's BASELINE_MAX_DELTA_HOURS=36 "
+            f"baseline lookup is at risk; the detector may be silently "
+            f"dark."
+        ),
+        details={
+            "path": str(ACCURACY_SNAPSHOTS_FILE),
+            "age_hours": round(age_hours, 1),
+            "warn_threshold_hours": SNAPSHOT_STALE_WARN_HOURS,
+            "critical_threshold_hours": SNAPSHOT_STALE_CRITICAL_HOURS,
+        },
+    )]
 
 
 def _has_unresolved_critical_entry(
